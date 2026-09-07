@@ -12,6 +12,7 @@ import { CopyLinkControl } from './CopyLinkControl.js';
 import type { CopyLinkActionData } from './copy-link-model.js';
 import { compositeFocusIndex, enabledMenuItems } from './menu-focus.js';
 import { ReviewIcon, type ReviewIconName } from './ReviewIcon.js';
+import { ReviewTooltipButton } from './ReviewTooltipButton.js';
 
 export const ROW_ACTION_CONTAINER_NAME = 'row-actions';
 export const ROW_ACTION_DIRECT_BREAKPOINT_PX = 272;
@@ -26,7 +27,7 @@ interface RowActionBase {
 export interface RowCommandAction extends RowActionBase {
   readonly kind: 'command';
   readonly icon: ReviewIconName;
-  readonly onInvoke: () => void;
+  readonly onInvoke: (trigger: HTMLButtonElement) => void;
 }
 
 export interface RowCopyLinkAction extends RowActionBase {
@@ -62,17 +63,17 @@ function DirectAction({ action }: { readonly action: RowAction }) {
     );
   }
   return (
-    <button
+    <ReviewTooltipButton
       type="button"
       className="row-action-group__action"
       data-row-action={action.id}
       data-workspace-focus-token={action.focusToken}
-      aria-label={action.label}
-      title={action.title}
-      onClick={action.onInvoke}
+      label={action.label}
+      tooltip={action.title}
+      onClick={(event) => action.onInvoke(event.currentTarget)}
     >
-      <ReviewIcon name={action.icon} size={15} />
-    </button>
+      <ReviewIcon name={action.icon} size={16} />
+    </ReviewTooltipButton>
   );
 }
 
@@ -135,20 +136,20 @@ export function RowActionGroup({ actions, rowLabel }: RowActionGroupProps) {
         {actions.map((action) => <DirectAction key={action.id} action={action} />)}
       </div>
       <div className="row-action-group__secondary">
-        <button
+        <ReviewTooltipButton
           ref={triggerRef}
           type="button"
           className="row-action-group__trigger"
           data-row-secondary-actions
-          aria-label={`Secondary actions for ${rowLabel}`}
-          title={`More actions for ${rowLabel}`}
+          label={`Secondary actions for ${rowLabel}`}
+          tooltip={`More actions for ${rowLabel}`}
           aria-haspopup="menu"
           aria-expanded={open}
           aria-controls={menuId}
           onClick={() => setOpen((current) => !current)}
         >
           <ReviewIcon name="more-horizontal" />
-        </button>
+        </ReviewTooltipButton>
         {open ? (
           <div
             id={menuId}
@@ -177,12 +178,12 @@ export function RowActionGroup({ actions, rowLabel }: RowActionGroupProps) {
                 data-row-action={action.id}
                 data-workspace-focus-token={action.focusToken}
                 title={action.title}
-                onClick={() => {
-                  action.onInvoke();
+                onClick={(event) => {
+                  action.onInvoke(event.currentTarget);
                   closeAndRestore();
                 }}
               >
-                <ReviewIcon name={action.icon} size={15} />
+                <ReviewIcon name={action.icon} size={16} />
                 <span>{action.label}</span>
               </button>
             ))}

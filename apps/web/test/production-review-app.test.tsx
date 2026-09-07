@@ -17,6 +17,8 @@ import {
   forwardSyncTexRequestReady,
   ProductionReviewApp,
   referenceReturnForActiveTab,
+  viewerAssetUrlsEqual,
+  viewerResourcePoliciesEqual,
   visibleCodexContext,
 } from "../src/app/ProductionReviewApp.js";
 import { SaveDestinationDialog } from "../src/save/SaveDestinationDialog.js";
@@ -40,6 +42,114 @@ import {
 import { MemoryReviewLocationHistory } from "../src/review/review-location-history.js";
 
 describe("one production review tree", () => {
+  it('keeps equivalent runtime viewer authority stable across review-state snapshots', () => {
+    expect(viewerAssetUrlsEqual(
+      {
+        pdfiumWasm: '/assets/pdfium.wasm',
+        workerUrl: '/assets/pdfium-worker.js',
+        documentUrl: '/document.pdf',
+        requestHeaders: { authorization: 'Bearer test', 'x-scope': 'review' },
+      },
+      {
+        pdfiumWasm: '/assets/pdfium.wasm',
+        workerUrl: '/assets/pdfium-worker.js',
+        documentUrl: '/document.pdf',
+        requestHeaders: { 'x-scope': 'review', authorization: 'Bearer test' },
+      },
+    )).toBe(true);
+    expect(viewerAssetUrlsEqual(
+      { pdfiumWasm: '/assets/pdfium.wasm', documentUrl: '/document.pdf' },
+      { pdfiumWasm: '/assets/pdfium.wasm', documentUrl: '/next.pdf' },
+    )).toBe(false);
+    expect(viewerAssetUrlsEqual(
+      {
+        pdfiumWasm: '/assets/pdfium.wasm',
+        workerUrl: '/assets/pdfium-worker.js',
+        documentUrl: '/document.pdf',
+        requestHeaders: { authorization: 'Bearer first' },
+      },
+      {
+        pdfiumWasm: '/assets/pdfium.wasm',
+        workerUrl: '/assets/pdfium-worker.js',
+        documentUrl: '/document.pdf',
+        requestHeaders: { authorization: 'Bearer second' },
+      },
+    )).toBe(false);
+    expect(viewerAssetUrlsEqual(
+      {
+        pdfiumWasm: '/assets/pdfium.wasm',
+        workerUrl: '/assets/pdfium-worker.js',
+        documentUrl: '/document.pdf',
+      },
+      {
+        pdfiumWasm: '/assets/pdfium.wasm',
+        workerUrl: '/assets/next-worker.js',
+        documentUrl: '/document.pdf',
+      },
+    )).toBe(false);
+    expect(viewerResourcePoliciesEqual(
+      { host: 'browser', origin: 'http://127.0.0.1:4000' },
+      { host: 'browser', origin: 'http://127.0.0.1:4000' },
+    )).toBe(true);
+    expect(viewerResourcePoliciesEqual(
+      { host: 'vscode', issued: new Set(['/document.pdf', '/assets/pdfium.wasm']) },
+      { host: 'vscode', issued: new Set(['/assets/pdfium.wasm', '/document.pdf']) },
+    )).toBe(true);
+    expect(viewerResourcePoliciesEqual(
+      { host: 'browser', origin: 'http://127.0.0.1:4000' },
+      {
+        host: 'macos',
+        resources: {
+          document: '/document.pdf',
+          pdfiumWasm: '/assets/pdfium.wasm',
+          worker: '/assets/pdfium-worker.js',
+        },
+      },
+    )).toBe(false);
+    expect(viewerResourcePoliciesEqual(
+      {
+        host: 'chrome',
+        extensionOrigin: 'chrome-extension://placekeeper',
+        resources: {
+          document: '/document.pdf',
+          pdfiumWasm: '/assets/pdfium.wasm',
+          worker: '/assets/pdfium-worker.js',
+        },
+      },
+      {
+        host: 'chrome',
+        extensionOrigin: 'chrome-extension://placekeeper',
+        resources: {
+          document: '/next.pdf',
+          pdfiumWasm: '/assets/pdfium.wasm',
+          worker: '/assets/pdfium-worker.js',
+        },
+      },
+    )).toBe(false);
+    expect(viewerResourcePoliciesEqual(
+      {
+        host: 'macos',
+        resources: {
+          document: '/document.pdf',
+          pdfiumWasm: '/assets/pdfium.wasm',
+          worker: '/assets/pdfium-worker.js',
+        },
+      },
+      {
+        host: 'macos',
+        resources: {
+          document: '/document.pdf',
+          pdfiumWasm: '/assets/pdfium.wasm',
+          worker: '/assets/next-worker.js',
+        },
+      },
+    )).toBe(false);
+    expect(viewerResourcePoliciesEqual(
+      { host: 'vscode', issued: new Set(['/document.pdf', '/assets/pdfium.wasm']) },
+      { host: 'vscode', issued: new Set(['/assets/pdfium.wasm']) },
+    )).toBe(false);
+  });
+
   it('navigates a cross-page item once through its canonical first segment', () => {
     expect(reviewItemNavigationTarget({
       id: 'cross-page',
@@ -512,8 +622,10 @@ describe("one production review tree", () => {
     expect(html).toContain("Generation 8 viewer");
     expect(html).toContain('data-launch-surface="vscode"');
     expect(html).not.toContain('data-reconciliation-workspace');
-    expect(html).toContain('<h2>Annotations</h2>');
-    expect(html).toContain('Select text in the PDF to add an annotation.');
+    expect(html).toContain('aria-label="Annotations"');
+    expect(html).toContain('data-existing-annotations-state="loading"');
+    expect(html).toContain('data-annotation-status="loading"');
+    expect(html).not.toContain('Select text in the PDF to add an annotation.');
     expect(html).toContain('data-document-actions-trigger');
     expect(html).toContain('aria-haspopup="menu"');
     const titleTrigger = html.slice(
@@ -837,9 +949,11 @@ describe("one production review tree", () => {
     />);
     expect(html).toContain("Real shared PDF viewer");
     expect(html).not.toContain("aria-label=\"Actions\"");
-    expect(html).toContain('aria-label="Edit history"');
-    expect(html).toContain('aria-label="Document navigation, page unavailable"');
-    expect(html).toContain('aria-label="PDF zoom unavailable"');
+    expect(html).not.toContain('aria-label="Edit history"');
+    expect(html).toContain('aria-label="Document navigation"');
+    expect(html).toContain('aria-label="Current page unavailable"');
+    expect(html).toContain('aria-label="PDF zoom"');
+    expect(html).toContain('aria-label="Zoom unavailable"');
     expect(html).toContain("paper.pdf, not saved. Open automatic save options");
     expect(html).toContain('data-save-phase="not-saved"');
     expect(html).toContain("Not saved");
@@ -887,6 +1001,38 @@ describe("one production review tree", () => {
 
     expect(renderSurface("browser")).toContain('data-review-copy-link');
     expect(renderSurface("chrome")).not.toContain('data-review-copy-link');
+  });
+
+  it('shows actionable save failure only for an established local save destination', () => {
+    const state = createReviewState({
+      sessionId: '00000000-0000-4000-8000-000000000101',
+      source: { fileId: '00000000-0000-4000-8000-000000000102', digest: 'a'.repeat(64), byteLength: 12 },
+    });
+    const api = {
+      command: vi.fn(), saveStatus: vi.fn(), saveProposal: vi.fn(), chooseCopy: vi.fn(),
+      chooseFolder: vi.fn(), chooseOriginal: vi.fn(), retrySave: vi.fn(), locateSave: vi.fn(), scope: vi.fn(),
+    };
+    const renderFailure = (phase: 'clean' | 'saving' | 'not-saved', configured = true, exportOnly = false) =>
+      renderToStaticMarkup(<ProductionReviewApp
+        session={{ sessionId: state.sessionId }} initialState={state} api={api}
+        scope={{ documentTitle: 'paper.pdf', ...(exportOnly ? { persistenceMode: 'export-only' as const } : {}) }}
+        initialSaveStatus={{
+          destination: configured
+            ? { phase: 'active', generation: 1, kind: 'copy', targetPath: '/tmp/paper-annotated.pdf' }
+            : { phase: 'none', generation: 0 },
+          sync: { phase, desiredRevision: 1, savedRevision: 0 },
+        }}
+        viewer={<div>Viewer</div>}
+      />);
+    const failed = renderFailure('not-saved');
+    expect(failed).toContain('class="review-toast review-toast--error review-save-notice" role="alert"');
+    expect(failed).toContain('Couldn’t save your latest annotations.');
+    expect(failed).toContain('>Retry</button>');
+    expect(failed).toContain('>Save a copy…</button>');
+    expect(renderFailure('clean')).not.toContain('review-save-notice');
+    expect(renderFailure('saving')).not.toContain('review-save-notice');
+    expect(renderFailure('not-saved', false)).not.toContain('review-save-notice');
+    expect(renderFailure('not-saved', true, true)).not.toContain('review-save-notice');
   });
 
   it("shows passive status only for a trusted Codex launch scope", () => {
@@ -971,15 +1117,15 @@ describe("one production review tree", () => {
       onCancel={vi.fn()}
     />);
 
-    expect(html).toContain("Choose Where to Save Annotations");
+    expect(html).toContain("Choose where to save annotations");
     expect(html).toContain('class="save-destination-dialog compact-editorial-modal"');
     expect(html).toContain('compact-editorial-modal__header');
     expect(html).toContain('compact-editorial-modal__body');
     expect(html).toContain('compact-editorial-modal__footer');
     expect(html.indexOf("Modify the original PDF")).toBeLessThan(html.indexOf("Save to a new copy"));
     expect(html).toContain("Confirm");
-    expect(html).toContain('class="lucide lucide-x review-icon"');
-    expect(html).toContain('class="lucide lucide-check review-icon"');
+    expect(html).not.toContain('class="lucide lucide-x review-icon"');
+    expect(html).not.toContain('class="lucide lucide-check review-icon"');
     expect(html).toContain("You can change this later by clicking the filename.");
     expect(html).not.toContain("Keep annotations in the file you opened.");
     expect(html).not.toContain("Keep the original unchanged.");

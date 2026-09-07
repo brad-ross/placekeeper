@@ -20,30 +20,57 @@ final class CatastrophicFallbackViewController: NSViewController {
         retryButton = NSButton(title: CatastrophicAction.retry.rawValue, target: nil, action: nil)
         super.init(nibName: nil, bundle: nil)
         retryButton.isEnabled = retryEnabled
+        retryButton.bezelStyle = .rounded
+        retryButton.controlSize = .large
+        retryButton.keyEquivalent = "\r"
 
+        let content = NSView()
         let stack = NSStackView()
         stack.orientation = .vertical
-        stack.alignment = .centerX
-        stack.spacing = 14
-        stack.edgeInsets = NSEdgeInsets(top: 48, left: 48, bottom: 48, right: 48)
+        stack.alignment = .leading
+        stack.spacing = 12
+        stack.translatesAutoresizingMaskIntoConstraints = false
         let title = NSTextField(labelWithString: documentName)
-        title.font = .preferredFont(forTextStyle: .title1)
+        title.font = .systemFont(ofSize: 17, weight: .semibold)
+        title.lineBreakMode = .byTruncatingMiddle
         stack.addArrangedSubview(title)
         let explanation = NSTextField(labelWithString: "Placekeeper could not display this review.")
         explanation.textColor = .secondaryLabelColor
         stack.addArrangedSubview(explanation)
+        let actions = NSStackView()
+        actions.orientation = .horizontal
+        actions.alignment = .centerY
+        actions.spacing = 8
+        let actionSpacer = NSView()
+        actionSpacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        actions.addArrangedSubview(actionSpacer)
         for (button, action, identifier) in [
-            (retryButton, #selector(retry(_:)), CatastrophicAction.retry.rawValue.lowercased()),
-            (NSButton(), #selector(diagnostics(_:)), CatastrophicAction.diagnostics.rawValue.lowercased()),
             (NSButton(), #selector(closeWindow(_:)), CatastrophicAction.close.rawValue.lowercased()),
+            (NSButton(), #selector(diagnostics(_:)), CatastrophicAction.diagnostics.rawValue.lowercased()),
+            (retryButton, #selector(retry(_:)), CatastrophicAction.retry.rawValue.lowercased()),
         ] {
             if button !== retryButton { button.title = identifier.capitalized }
             button.target = self
             button.action = action
             button.identifier = NSUserInterfaceItemIdentifier(identifier)
-            stack.addArrangedSubview(button)
+            button.bezelStyle = .rounded
+            button.controlSize = .large
+            actions.addArrangedSubview(button)
         }
-        view = stack
+        stack.addArrangedSubview(actions)
+        content.addSubview(stack)
+        let readableWidth = stack.widthAnchor.constraint(equalTo: content.widthAnchor, constant: -56)
+        readableWidth.priority = .defaultHigh
+        NSLayoutConstraint.activate([
+            stack.centerXAnchor.constraint(equalTo: content.centerXAnchor),
+            stack.centerYAnchor.constraint(equalTo: content.centerYAnchor),
+            stack.widthAnchor.constraint(lessThanOrEqualToConstant: 480),
+            readableWidth,
+            title.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            explanation.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            actions.widthAnchor.constraint(equalTo: stack.widthAnchor),
+        ])
+        view = content
     }
 
     required init?(coder: NSCoder) { nil }

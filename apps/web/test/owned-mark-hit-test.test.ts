@@ -112,3 +112,19 @@ describe('owned mark page-space hit testing', () => {
     expect(gesture.pointerUp(2, 2, { x: 20, y: 20 }, groups)).toBeUndefined();
   });
 });
+
+
+describe('saved insertion caret hit area', () => {
+  it.each([0.2, 1, 2, 6])('includes the visible caret at zoom %s without moving its anchor', (scale) => {
+    const rect = { x: 100, y: 100, width: 2, height: 16 };
+    const source = { ...annotation('insert', [rect]), kind: 'insert' as const };
+    const groups = groupOwnedMarkGeometry([source]);
+    expect(groups[0]?.rects).toEqual([rect]);
+    const point = { x: 101 + 3 / scale, y: 116 + 3 / scale };
+    expect(hitTestOwnedMark(groups, point, scale)).toBe('insert');
+    const gesture = new OwnedMarkPointerGesture();
+    expect(gesture.pointerDown(1, 0, point, groups, scale)).toBe('insert');
+    expect(gesture.pointerUp(1, 0, point, groups, scale)).toBe('insert');
+    expect(hitTestOwnedMark(groups, { x: 101, y: 116 + 9 / scale }, scale)).toBeUndefined();
+  });
+});

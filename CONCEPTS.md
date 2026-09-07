@@ -151,9 +151,9 @@ Its presentation may change with available reading space, but disclosure changes
 In a generated-output review, unresolved prior-generation items appear first as focused tasks. Reviewed-PDF export, when blocked by those tasks, routes back to the Annotation Tray rather than duplicating resolution controls in the document menu.
 
 ### Full Annotation Reader
-The transient Annotation Tray detail state that reveals complete annotation-specific authored content only when that content is visually truncated in the annotation list.
+The transient detail surface that reveals complete annotation-specific authored content when its compact excerpt is visually truncated.
 
-Opening retains the annotation's normal PDF navigation, so the live PDF remains the source-context surface rather than being repeated in reader chrome. The reader resolves current Owned Annotation or Existing PDF Annotation identity, keeps Existing PDF Annotations read-only, and returns to the list when content no longer overflows or its document authority becomes stale.
+It preserves its entry context in the Annotation Tray or a PDF annotation popup. Detail disclosure itself preserves PDF position; explicit source return reveals the annotation in the live PDF. The reader resolves current Owned Annotation or Existing PDF Annotation identity, keeps Existing PDF Annotations read-only, and restores safe interaction context when content no longer overflows or its document authority becomes stale.
 
 ### Live PDF Context
 The task-scoped, prompt-refreshed view of the PDF, Review Items, Existing PDF Annotations, and Save Sync made available to the agent task bound to the document's review session.
@@ -225,29 +225,30 @@ For acceptance testing, transient gesture presentation is treated as non-authori
 ### Viewer Runway
 Temporary scroll extent added beyond viewer content so an overlaid review surface does not make covered document regions unreachable.
 
-Runway expands reachability without participating in page layout and is removed when the overlay closes or the viewer is disposed. While an animated overlay is logically open, runway commits the overlay's resting layout extent and ignores transformed intermediate frames.
+Runway expands reachability without participating in page layout and is removed when the overlay closes or the viewer is disposed. While an animated overlay is logically open, runway commits its resting occupied extent, including the surrounding backing, and ignores transformed intermediate frames. A temporary clamp after removal does not erase the reader's desired position when that position becomes reachable again.
 
 ### Framing Session
-The interval during which an open review surface may automatically reveal document content while tracking which movement belongs to the interface and which belongs to the user.
+The document-scoped coordination of overlay reachability, reading position, and explicit target navigation across workspace changes.
 
-Automatic movement is reversible per axis; deliberate user navigation takes ownership of the affected axis and supersedes stale automatic work. When a Reference Tab is promoted to Main during an open session, its verified destination becomes the new baseline before subsequent workspace reflow.
+Passive disclosure and reflow preserve reading position subject to available scroll limits; they do not reveal covered content or reverse a prior reveal on close. User motion supersedes stale layout work, while explicit navigation replaces remembered position so a later workspace change cannot restore an older destination.
 
 ## Visual language
 
-### Warm Neutral
-The review session's light-theme visual language: warm gray and ivory environmental surfaces, soft borders and generous radii, neutral high-contrast routine chrome, and color reserved for selection, focus, annotation meaning, success, warning, and danger.
+### Soft Neutral
+The review session's light-theme visual language: neutral gray and white environmental surfaces, soft borders and generous radii, high-contrast routine chrome, and color reserved for selection, focus, annotation meaning, success, warning, and danger.
+*Avoid:* Warm Neutral
 
-Warm Neutral changes presentation only; reading-first behavior and adaptive Annotation Tray framing remain governed by their product contracts.
+Soft Neutral changes presentation only; reading-first behavior and adaptive Annotation Tray framing remain governed by their product contracts.
 
 ### Compact Editorial
-The Warm Neutral grammar for focused task, settings, and recovery surfaces: a direct title, a task-specific body, a restrained action region, and compact controls.
+The Soft Neutral grammar for focused task, settings, and recovery surfaces: a direct title, a task-specific body, a restrained action region, and compact controls.
 
 Supporting copy appears only when it adds context. Creation comments use Save, edits use Apply, and optional-comment workflows distinguish cancelling from keeping an annotation without text. Compact Editorial governs presentation and action language; structurally distinct dialogs, nonmodal composers, recovery pages, and browser settings surfaces retain their own lifecycle, state, authority, and accessibility contracts.
 
 ### Contextual Annotation Composer
 The nonmodal Compact Editorial authoring surface for replacement, insertion, highlight comments, Page Notes, and mutable Review Item edits.
 
-At authoring start it freezes the original anchor and document authority and establishes a stable provisional Owned Annotation in the live PDF. Mutable text remains in the composer and, for generated output, its protected draft rather than continuously republishing unchanged PDF geometry. It temporarily takes over the Annotation Tray presentation without discarding the underlying tray state; a title-adjacent target action appears only when the anchor leaves the usable viewport and occupies reserved control geometry. Cancelling removes the projection without changing Review Items, while an accepted action commits through normal review state.
+At authoring start it freezes the original anchor and document authority and establishes a stable provisional Owned Annotation in the live PDF. Mutable text remains in the composer and, for generated output, its protected draft rather than continuously republishing unchanged PDF geometry. Its placement follows a visible part of the passage and retains a usable position when the passage leaves view, with explicit recovery to the original passage. Supporting workspaces remain mounted and inert without losing their state. Cancelling removes the projection without changing Review Items, while an accepted action commits through normal review state.
 
 Dedicated nonmodal task surfaces may adopt the same structural grammar without becoming literal modals. They retain their own behavior, lifecycle, and security contracts.
 

@@ -333,3 +333,39 @@ test("exhaustive profile rejects unsupported input, announces recovery, and rest
   await expect(page.getByRole("button", { name: "Upload PDF" })).toBeFocused();
   await expect(page.locator("[data-production-review]")).toHaveCount(0);
 });
+
+test('export menu fits its action and export-only chrome omits a save-status dot', async ({ page }) => {
+  await page.goto('./');
+  await page.locator('input[type=file]').setInputFiles(annotatedPdf);
+  await waitForStaticPdf(page);
+  await expect(page.locator('.review-chrome__save-dot')).toHaveCount(0);
+  await page.getByRole('button', { name: /Open document actions$/u }).click();
+  const menu = page.locator('.document-actions__menu');
+  await expect(menu).toBeVisible();
+  const bounds = (await menu.boundingBox())!;
+  expect(bounds.width).toBeLessThan(160);
+  await expect(page.getByRole('menuitem', { name: 'Export', exact: true })).toBeVisible();
+});
+
+test('URL opening uses an in-button spinner and reports failure in a corner toast', async ({ page }) => {
+  let finishRequest!: () => void;
+  const pending = new Promise<void>((resolve) => { finishRequest = resolve; });
+  await page.route('https://example.org/paper.pdf', async (route) => {
+    await pending;
+    await route.fulfill({ status: 404, headers: { 'access-control-allow-origin': '*' }, body: 'Not found' });
+  });
+  await page.goto('./');
+  const card = page.locator('.static-launcher__card');
+  const before = (await card.boundingBox())!;
+  await page.getByRole('textbox', { name: 'PDF URL' }).fill('https://example.org/paper.pdf');
+  await page.getByRole('button', { name: 'Open', exact: true }).click();
+  await expect(page.locator('.static-launcher__url button .static-launcher__spinner')).toBeVisible();
+  await expect(page.locator('.static-launcher__progress')).toHaveCount(0);
+  expect((await card.boundingBox())!.height).toBe(before.height);
+  finishRequest();
+  const toast = page.locator('.static-launcher__toasts [role="alert"]');
+  await expect(toast).toBeVisible();
+  expect((await toast.boundingBox())!.y).toBeLessThan(40);
+  await expect(card.locator('[role="alert"]')).toHaveCount(0);
+  await expect(page.locator('.static-launcher__spinner')).toHaveCount(0);
+});

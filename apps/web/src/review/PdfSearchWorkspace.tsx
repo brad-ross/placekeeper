@@ -16,6 +16,7 @@ import {
 import type { CopyLinkControlProps } from './CopyLinkControl.js';
 import { RowActionGroup, type RowAction } from './RowActionGroup.js';
 import { ReviewIcon } from './ReviewIcon.js';
+import { ReviewTooltipButton } from './ReviewTooltipButton.js';
 
 export interface PdfSearchWorkspaceProps {
   readonly state: PdfSearchState;
@@ -109,7 +110,9 @@ export function PdfSearchWorkspace({
     () => filterPdfSearchSymbolSuggestions(state.symbolCatalog, state.query),
     [state.query, state.symbolCatalog],
   );
-  const showSymbolSuggestions = symbolSuggestionsOpen && symbolSuggestions.length > 0;
+  const redundantSuggestion = symbolSuggestions.length === 1
+    && symbolSuggestions[0]?.query === state.query.trim();
+  const showSymbolSuggestions = symbolSuggestionsOpen && symbolSuggestions.length > 0 && !redundantSuggestion;
   const statusAnnouncement = indexing
     ? state.message || 'Searching this PDF.'
     : !hasEffectiveQuery
@@ -154,14 +157,14 @@ export function PdfSearchWorkspace({
         <ReviewIcon name="search" className="review-icon pdf-search__search-icon" />
         <input
           ref={queryInputRef}
-          className="review-chrome__page-input pdf-search__input"
+          className="pdf-search__input"
           type="search"
           role="searchbox"
           aria-label="Search this PDF"
           title="Search this PDF"
           aria-autocomplete="list"
           aria-controls="pdf-search-symbol-suggestions"
-          placeholder="Words, phrases, symbols, or formulas"
+          placeholder="Search this document"
           value={state.query}
           data-workspace-focus-token="search:query"
           onChange={updateQuery}
@@ -169,18 +172,21 @@ export function PdfSearchWorkspace({
           onClick={() => setSymbolSuggestionsOpen(true)}
           onKeyDown={handleQueryKeyDown}
         />
-        {hasEffectiveQuery ? (
-          <button
+        <span className="pdf-search__clear-slot" aria-hidden={!hasEffectiveQuery ? 'true' : undefined}>
+          <ReviewTooltipButton
+            label="Clear search"
             type="button"
             className="pdf-search__clear"
             aria-label="Clear search"
-            title="Clear search"
+            title={hasEffectiveQuery ? 'Clear search' : undefined}
+            tabIndex={hasEffectiveQuery ? 0 : -1}
+            disabled={!hasEffectiveQuery}
             onPointerDown={(event) => event.preventDefault()}
             onClick={clearQuery}
           >
-            <ReviewIcon name="close" size={13} />
-          </button>
-        ) : null}
+            <ReviewIcon name="close" />
+          </ReviewTooltipButton>
+        </span>
         {indexing ? <ReviewIcon name="loading" className="review-icon pdf-search__spinner" /> : null}
         {showSymbolSuggestions ? (
           <div
@@ -245,7 +251,7 @@ export function PdfSearchWorkspace({
 
       <div className="pdf-search__results" aria-label="PDF search results">
         {state.groups.map((group) => (
-          <section key={group.id} className="pdf-search__group" aria-labelledby={`pdf-search-group-${group.id}`}>
+          <section key={group.id} className="pdf-search__group" data-search-group={group.id} aria-labelledby={`pdf-search-group-${group.id}`}>
             <header>
               <strong id={`pdf-search-group-${group.id}`}>{group.label}</strong>
               <span>{group.results.length}</span>
@@ -279,25 +285,28 @@ export function PdfSearchWorkspace({
                   data-search-result={result.id}
                   data-active={state.selectedResultId === result.id ? 'true' : 'false'}
                 >
-                  <button
-                    type="button"
-                    className="annotation-item__content pdf-search__result"
-                    data-workspace-focus-token={`search:${result.id}`}
-                    aria-label={resultLabel(result)}
-                    title={`Go to result on page ${result.pageIndex + 1}`}
-                    onClick={() => onResultActivate(result)}
-                  >
+                  <div className="annotation-item__content pdf-search__result">
+                    <button
+                      type="button"
+                      className="annotation-item__navigation"
+                      data-workspace-focus-token={`search:${result.id}`}
+                      aria-label={resultLabel(result)}
+                      title={`Go to result on page ${pageNumber}`}
+                      onClick={() => onResultActivate(result)}
+                    />
+                    <div className="annotation-item__title-row pdf-search__result-heading">
+                      <ReviewIcon name="search" className="review-icon pdf-search__result-icon" />
+                      <RowActionGroup actions={actions} rowLabel={`Search result on page ${pageNumber}`} />
+                      <span className="pdf-search__result-page">{pageNumber}</span>
+                    </div>
                     <span className="annotation-item__excerpt pdf-search__excerpt">
-                      <span className="pdf-search__result-page">{result.pageIndex + 1}</span>
-                      <span className="pdf-search__result-separator">·</span>
                       <span className="pdf-search__result-context">
                         {excerptParts.before}
-                        <strong className="pdf-search__result-match">{excerptParts.match}</strong>
+                        <mark className="pdf-search__result-match">{excerptParts.match}</mark>
                         {excerptParts.after}
                       </span>
                     </span>
-                  </button>
-                  <RowActionGroup actions={actions} rowLabel={`Search result on page ${pageNumber}`} />
+                  </div>
                 </li>;
               })}
             </ol>

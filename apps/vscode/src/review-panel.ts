@@ -10,6 +10,19 @@ export interface SuccessfulLaunch {
 
 export type RecoveryDecision = "resume" | "discard" | "fork";
 
+export const RECOVERY_CHOICE_LABELS = Object.freeze([
+  "Resume draft",
+  "Discard draft",
+  "Start independent review",
+] as const);
+
+export function recoveryDecisionForLabel(label: string | undefined): RecoveryDecision | undefined {
+  if (label === RECOVERY_CHOICE_LABELS[0]) return "resume";
+  if (label === RECOVERY_CHOICE_LABELS[1]) return "discard";
+  if (label === RECOVERY_CHOICE_LABELS[2]) return "fork";
+  return undefined;
+}
+
 export interface RecoveryLaunch {
   readonly ok: true;
   readonly kind: "recovery-offered";
@@ -146,4 +159,32 @@ vscode.setState({
 const app = await import(${scriptUri});
 await app.startVscode({ panelId: ${panelId}, vscode${panelKey === undefined ? "" : `, panelKey: ${panelKey}`} });
 </script></body></html>`;
+}
+
+/** A self-contained, inert fallback for a serialized panel that cannot reconnect. */
+export function buildReviewPanelReattachmentHtml(): string {
+  return `<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline';">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Reconnect Placekeeper review</title>
+<style>
+:root{color-scheme:only light;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#333;background:#f7f7f7}
+*{box-sizing:border-box}
+html,body{min-width:0;min-height:100%;margin:0;background:#f7f7f7}
+body{display:grid;min-height:100vh;min-height:100dvh;place-items:center;padding:16px}
+main{display:grid;width:min(34rem,100%);min-width:0;gap:14px;padding:23px;border:0;border-radius:17px;background:#fff;box-shadow:0 12px 48px #00000018;font-size:13px;line-height:1.5}
+.identity{display:flex;min-width:0;align-items:center;gap:9px;color:#707070}
+.identity svg{display:block;flex:none;width:18px;height:18px}
+h1{margin:0;color:#333;font-size:15px;font-weight:500;line-height:1.4}
+p{margin:0;overflow-wrap:anywhere;color:#707070}
+.next-step{padding:10px 14px;border-radius:10px;color:#333;background:#f0f0f0}
+strong{font-weight:500}
+</style></head><body>
+<main aria-labelledby="reattach-title">
+<div class="identity" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg><span>Placekeeper</span></div>
+<h1 id="reattach-title">Reconnect this review</h1>
+<p>The saved PDF or its local review service is no longer available to this panel.</p>
+<p class="next-step">Run <strong>Placekeeper: View PDF</strong> from the Command Palette to reopen the PDF and reconnect its protected annotations.</p>
+</main></body></html>`;
 }

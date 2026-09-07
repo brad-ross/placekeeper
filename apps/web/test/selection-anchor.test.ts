@@ -275,6 +275,22 @@ describe('selection anchors', () => {
       });
   });
 
+  it('centers either adjacent glyph hit in the same inter-character gap', () => {
+    const hitPage = {
+      ...page(Rotation.Degree0), extractedText: 'ab',
+      textRects: [{ content: 'ab', rect: { origin: { x: 20, y: 30 }, size: { width: 22, height: 12 } } }],
+      glyphs: [
+        { textOffset: 0, rect: { origin: { x: 20, y: 30 }, size: { width: 9, height: 12 } } },
+        { textOffset: 1, rect: { origin: { x: 33, y: 30 }, size: { width: 9, height: 12 } } },
+      ],
+    };
+    for (const x of [27, 34]) {
+      expect(createCaretAnchorAtPoint({ page: hitPage, point: { x, y: 36 } })).toMatchObject({
+        ok: true, anchor: { position: { x: 31 }, leftContext: 'a', rightContext: 'b' },
+      });
+    }
+  });
+
   it('treats inline subscript geometry as part of the same visual line', () => {
     const hitPage = {
       ...page(Rotation.Degree0),

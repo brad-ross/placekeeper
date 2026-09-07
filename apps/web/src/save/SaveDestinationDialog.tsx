@@ -29,6 +29,7 @@ export function SaveDestinationDialog(props: SaveDestinationDialogProps) {
   const titleId = useId();
   const descriptionId = useId();
   const firstRef = useRef<HTMLInputElement>(null);
+  const dialogRef = useRef<HTMLElement>(null);
   const lastProposalFilename = useRef<string | undefined>(undefined);
   const remote = props.sourceDisposition === "remote-temporary";
   const proposalFilename = props.proposal?.sourceDisposition === "local"
@@ -41,7 +42,11 @@ export function SaveDestinationDialog(props: SaveDestinationDialogProps) {
     setChoice("copy");
     lastProposalFilename.current = proposalFilename;
     setFilename(proposalFilename ?? "");
-    requestAnimationFrame(() => firstRef.current?.focus());
+    requestAnimationFrame(() => {
+      const first = firstRef.current;
+      if (first && !first.disabled) first.focus();
+      else dialogRef.current?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus();
+    });
   }, [props.open]);
 
   useLayoutEffect(() => {
@@ -58,6 +63,7 @@ export function SaveDestinationDialog(props: SaveDestinationDialogProps) {
   return (
     <div className="save-destination-backdrop" data-save-destination-backdrop>
       <section
+        ref={dialogRef}
         className="save-destination-dialog compact-editorial-modal"
         role="dialog"
         aria-modal="true"
@@ -74,7 +80,7 @@ export function SaveDestinationDialog(props: SaveDestinationDialogProps) {
         }}
       >
         <header className="compact-editorial-modal__header">
-          <h2 id={titleId}>Choose Where to Save Annotations</h2>
+          <h2 id={titleId}>Choose where to save annotations</h2>
           <p id={descriptionId} className="compact-editorial-modal__description">
             {remote
               ? "Choose a new PDF name and location. The private browser source is never modified."
@@ -142,6 +148,7 @@ export function SaveDestinationDialog(props: SaveDestinationDialogProps) {
           <legend className="sr-only">Automatic save location</legend>
           {remote ? null : <label className="save-destination-choice" data-selected={choice === "original"}>
             <input
+              ref={restricted ? undefined : firstRef}
               type="radio"
               title="Modify the original PDF"
               name="save-destination"
@@ -149,11 +156,11 @@ export function SaveDestinationDialog(props: SaveDestinationDialogProps) {
               disabled={restricted}
               onChange={() => setChoice("original")}
             />
-            <strong>Modify the original PDF</strong>
+            <span className="save-destination-choice__label">Modify the original PDF</span>
           </label>}
           <label className="save-destination-choice" data-selected={choice === "copy"}>
             <input
-              ref={firstRef}
+              ref={remote || restricted ? firstRef : undefined}
               type="radio"
               title="Save to a new copy"
               name="save-destination"
@@ -161,35 +168,35 @@ export function SaveDestinationDialog(props: SaveDestinationDialogProps) {
               disabled={restricted}
               onChange={() => setChoice("copy")}
             />
-            <strong>Save to a new copy</strong>
+            <span className="save-destination-choice__label">Save to a new copy</span>
           </label>
           {choice === "copy" ? (
             <div className="save-destination-copy-details">
+              {props.onChooseLocation ? (
+                <button
+                  type="button"
+                  className="save-destination-location"
+                  aria-label={proposalFolder
+                    ? `Change save location. Current location: ${proposalFolder}`
+                    : "Choose save location"}
+                  title={proposalFolder ? "Change save location" : "Choose save location"}
+                  disabled={props.establishing || restricted || (!remote && props.proposal === undefined)}
+                  onClick={() => void props.onChooseLocation?.()}
+                >
+                  <span title={proposalFolder}>{proposalFolder ?? (remote ? "Choose a location…" : "Preparing location…")}</span>
+                </button>
+              ) : proposalFolder ? <p className="save-destination-location-path" title={proposalFolder}>{proposalFolder}</p> : null}
               <label className="save-destination-filename">
-                <span>{remote ? "PDF name" : "Copy name"}</span>
+                <span className="sr-only">{remote ? "PDF name" : "Copy name"}</span>
                 <input
                   value={filename}
+                  aria-label={remote ? "PDF name" : "Copy name"}
                   title="Enter a name for the PDF copy"
                   disabled={props.establishing || restricted || (!remote && props.proposal === undefined)}
                   onChange={(event) => setFilename(event.currentTarget.value)}
                   aria-invalid={props.error !== undefined}
                 />
               </label>
-              <div className="save-destination-location-row">
-                <small title={proposalFolder}>{proposalFolder ?? (remote ? "Choose a location…" : "Preparing location…")}</small>
-                {props.onChooseLocation ? (
-                  <button
-                    type="button"
-                    className="save-destination-location"
-                    title="Change save location"
-                    disabled={props.establishing || restricted || (!remote && props.proposal === undefined)}
-                    onClick={() => void props.onChooseLocation?.()}
-                  >
-                    <ReviewIcon name="locate" />
-                    <span>Change location…</span>
-                  </button>
-                ) : null}
-              </div>
             </div>
           ) : null}
           </fieldset>
@@ -206,7 +213,6 @@ export function SaveDestinationDialog(props: SaveDestinationDialogProps) {
             disabled={props.establishing}
             onClick={props.onCancel}
           >
-            <ReviewIcon name="close" />
             <span>Cancel</span>
           </button>
           <button
@@ -223,7 +229,7 @@ export function SaveDestinationDialog(props: SaveDestinationDialogProps) {
             }
             onClick={() => void props.onConfirm(choice, filename)}
           >
-            <ReviewIcon name={props.establishing ? "loading" : "check"} />
+            {props.establishing ? <ReviewIcon name="loading" /> : null}
             <span>{props.establishing ? "Setting up…" : "Confirm"}</span>
           </button>
         </footer>

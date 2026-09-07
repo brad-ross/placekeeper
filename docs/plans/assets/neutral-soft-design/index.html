@@ -1,0 +1,1894 @@
+<!doctype html>
+<html lang="en" data-visualize-standalone>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; style-src 'unsafe-inline' blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; img-src blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; font-src blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; media-src blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; worker-src blob:; connect-src blob: data:; frame-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<title>Review</title>
+<style>:root{color-scheme:light dark;background:light-dark(rgb(255 255 255), rgb(24 24 24))}html,body{margin:0}body{box-sizing:border-box;padding:1rem;background:inherit}iframe{display:block;width:100%;height:calc(100vh - 2rem);margin:0 auto;border:0}</style>
+</head>
+<body>
+<iframe sandbox="allow-scripts" referrerpolicy="no-referrer" title="Review" srcdoc="&lt;!doctype html&gt;
+&lt;html lang=&quot;en&quot; data-visualize-standalone&gt;
+&lt;head&gt;
+&lt;meta charset=&quot;utf-8&quot;&gt;
+&lt;meta name=&quot;viewport&quot; content=&quot;width=device-width, initial-scale=1&quot;&gt;
+&lt;meta name=&quot;referrer&quot; content=&quot;no-referrer&quot;&gt;
+&lt;meta http-equiv=&quot;Content-Security-Policy&quot; content=&quot;default-src &#x27;none&#x27;; script-src &#x27;unsafe-inline&#x27; &#x27;unsafe-eval&#x27; &#x27;wasm-unsafe-eval&#x27; blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; style-src &#x27;unsafe-inline&#x27; blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; img-src blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; font-src blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; media-src blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; worker-src blob:; connect-src blob: data:; frame-src &#x27;none&#x27;; object-src &#x27;none&#x27;; base-uri &#x27;none&#x27;; form-action &#x27;none&#x27;&quot;&gt;
+&lt;title&gt;Review&lt;/title&gt;
+&lt;style&gt;:root {
+  color-scheme: light dark;
+  background-color: var(
+    --background,
+    var(--color-background-primary, light-dark(rgb(255 255 255), rgb(24 24 24)))
+  ) !important;
+
+  /* Agent-facing contract; keep in sync with SKILL.md. */
+  --background: var(
+    --color-background-primary,
+    light-dark(rgb(255 255 255), rgb(24 24 24))
+  );
+  --foreground: var(
+    --color-text-primary,
+    light-dark(rgb(26 28 31), rgb(255 255 255))
+  );
+  --card: color-mix(in oklab, var(--foreground) 5%, var(--background));
+  --card-foreground: var(
+    --color-text-primary,
+    light-dark(rgb(26 28 31), rgb(255 255 255))
+  );
+  --popover: var(
+    --color-background-secondary,
+    light-dark(rgb(255 255 255), rgb(45 45 45))
+  );
+  --popover-foreground: var(
+    --color-text-primary,
+    light-dark(rgb(26 28 31), rgb(255 255 255))
+  );
+  --primary: var(
+    --color-text-info,
+    light-dark(rgb(51 156 255), rgb(131 195 255))
+  );
+  --primary-foreground: var(
+    --color-text-inverse,
+    light-dark(rgb(255 255 255), rgb(13 13 13))
+  );
+  --secondary: var(
+    --color-background-secondary,
+    light-dark(rgb(255 255 255 / 96%), rgb(54 54 54 / 96%))
+  );
+  --secondary-foreground: var(
+    --color-text-primary,
+    light-dark(rgb(26 28 31), rgb(255 255 255))
+  );
+  --muted: color-mix(in srgb, var(--foreground) 10%, transparent);
+  --muted-foreground: var(
+    --color-text-secondary,
+    light-dark(rgb(26 28 31 / 49.4%), rgb(255 255 255 / 49.8%))
+  );
+  --accent: var(
+    --color-background-info,
+    light-dark(rgb(229 242 255), rgb(13 39 63))
+  );
+  --accent-foreground: var(
+    --color-text-info,
+    light-dark(rgb(51 156 255), rgb(131 195 255))
+  );
+  --destructive: var(
+    --color-text-warning,
+    light-dark(rgb(226 85 7), rgb(255 133 73))
+  );
+  --border: var(
+    --color-border-secondary,
+    light-dark(rgb(26 28 31 / 8%), rgb(255 255 255 / 8.2%))
+  );
+  --input: var(
+    --color-border-primary,
+    light-dark(
+      rgb(26 28 31 / 11.8%),
+      color-mix(in oklab, rgb(0 0 0) 10%, transparent)
+    )
+  );
+  --ring: var(
+    --color-ring-primary,
+    light-dark(rgb(51 156 255), rgb(131 195 255 / 76%))
+  );
+  --font-size-base: var(--font-text-md-size, 14px);
+  --blue: light-dark(rgb(51 156 255), rgb(51 156 255));
+  --orange: light-dark(rgb(226 85 7), rgb(251 106 34));
+  --green: light-dark(rgb(0 162 64), rgb(64 201 119));
+  --red: light-dark(rgb(224 46 42), rgb(255 103 100));
+  --purple: light-dark(rgb(146 79 247), rgb(173 123 249));
+  --yellow: light-dark(rgb(255 195 0), rgb(255 210 64));
+  --viz-series-1: var(--primary);
+  --viz-series-2: light-dark(rgb(243 136 59), rgb(245 154 86));
+  --viz-series-3: light-dark(rgb(93 201 119), rgb(116 213 139));
+  --viz-series-4: light-dark(rgb(235 119 177), rgb(240 143 192));
+  --viz-series-5: light-dark(rgb(155 121 236), rgb(170 145 239));
+  --viz-series-6: light-dark(rgb(58 185 177), rgb(90 203 194));
+
+  /* Internal implementation variables; not part of the agent contract. */
+  --font-sans: -apple-system, system-ui, &quot;Segoe UI&quot;, sans-serif;
+  --font-mono:
+    ui-monospace, SFMono-Regular, &quot;SF Mono&quot;, Menlo, Consolas, &quot;Liberation Mono&quot;,
+    monospace;
+  --font-size-normal: max(11px, var(--font-size-base));
+  --font-size-tooltip: calc(var(--font-size-base) - 1px);
+  --font-size-small: max(11px, calc(var(--font-size-base) - 2px));
+  --font-size-h1: calc(var(--font-size-normal) * 1.7142857143);
+  --font-size-h2: calc(var(--font-size-normal) * 1.4285714286);
+  --font-size-h3: calc(var(--font-size-normal) * 1.2857142857);
+  --font-weight-normal: 430;
+  --font-weight-medium: 500;
+  --icon-size: 16px;
+  --line-height-normal: calc(var(--font-size-normal) * 1.5);
+  --line-height-tooltip: calc(var(--font-size-tooltip) * 1.4285714286);
+  --line-height-small: calc(var(--font-size-small) + 4px);
+  --corner-shape: round;
+  --radius: var(--border-radius-lg, 10px);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-2xl: calc(var(--radius) * 1.6);
+  --radius-full: 9999px;
+  --shadow-sm: 0 1px 2px -1px rgb(0 0 0 / 8%);
+  --checkmark-image: url(&quot;data:image/svg+xml,%3Csvg xmlns=&#x27;http://www.w3.org/2000/svg&#x27; viewBox=&#x27;0 0 17 17&#x27;%3E%3Cpath d=&#x27;M12.8961 3.64101C13.1297 3.41418 13.4984 3.37523 13.7779 3.56581C14.0571 3.75635 14.1554 4.11331 14.0299 4.41347L13.9615 4.53847L7.71151 13.7045C7.59411 13.8767 7.4063 13.9877 7.19881 14.0072C6.99136 14.0267 6.78564 13.9533 6.63826 13.806L2.88826 10.056L2.79842 9.9457C2.6192 9.67407 2.64927 9.30496 2.88826 9.06581C3.12738 8.82669 3.49647 8.79676 3.76815 8.97597L3.8785 9.06581L7.03084 12.2182L12.8053 3.74941L12.8961 3.64101Z&#x27;/%3E%3C/svg%3E&quot;);
+
+  /* Legacy aliases; not part of the current agent contract. */
+  --viz-bg: transparent;
+  --viz-panel: var(--card);
+  --viz-border: var(--border);
+  --viz-text: var(--foreground);
+  --viz-muted: var(--muted-foreground);
+  --viz-accent: var(--primary);
+  --viz-accent-text: var(--primary-foreground);
+  --viz-accent-bg: var(--accent);
+  --viz-font-size: var(--font-size-base);
+  --viz-warning: var(--destructive);
+}
+
+:root[data-theme=&quot;light&quot;] {
+  color-scheme: light;
+}
+
+:root[data-theme=&quot;dark&quot;] {
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html &gt; body {
+  /* Preserve MCP aliases for older inline renderers without creating :root cycles. */
+  --color-background-primary: var(
+    --background,
+    light-dark(rgb(255 255 255), rgb(24 24 24))
+  );
+  --color-text-primary: var(
+    --foreground,
+    light-dark(rgb(26 28 31), rgb(255 255 255))
+  );
+  --color-border-secondary: var(
+    --border,
+    light-dark(rgb(26 28 31 / 8%), rgb(255 255 255 / 8.2%))
+  );
+
+  margin: 0;
+  padding: var(--visualize-paint-gutter, 0px);
+  color: var(--foreground);
+  background: transparent !important;
+  font-family: var(--font-sans) !important;
+  font-size: var(--font-size-normal);
+  font-weight: var(--font-weight-normal);
+  line-height: var(--line-height-normal);
+}
+
+a {
+  color: color-mix(in srgb, var(--viz-accent) 80%, var(--viz-text) 20%);
+  cursor: pointer;
+  font-weight: var(--font-weight-medium, 500);
+  text-decoration: none;
+  text-underline-offset: 2px;
+}
+
+a:is(:hover, :focus-visible) {
+  text-decoration-line: underline;
+  text-decoration-style: dashed;
+  text-decoration-thickness: 0.5px;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6,
+p {
+  margin-block: 0;
+}
+
+h1 {
+  font-size: var(--font-size-h1);
+  font-weight: var(--font-weight-medium);
+  line-height: 1.25;
+}
+
+h2 {
+  font-size: var(--font-size-h2);
+  font-weight: var(--font-weight-medium);
+  line-height: 1.25;
+}
+
+h3,
+h4,
+h5,
+h6 {
+  font-size: var(--font-size-h3);
+  font-weight: var(--font-weight-medium);
+  line-height: 1.3;
+}
+
+b,
+strong,
+th {
+  font-weight: var(--font-weight-medium);
+}
+
+code:not(pre code) {
+  display: inline;
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  corner-shape: var(--corner-shape);
+  background: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+  overflow-wrap: anywhere;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+  word-break: break-word;
+}
+
+.table-responsive {
+  width: 100%;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  color: var(--foreground);
+  font: inherit;
+  text-align: start;
+}
+
+.table :is(th, td) {
+  padding-block: 10px;
+  padding-inline: 0 24px;
+  overflow-wrap: anywhere;
+  border-bottom: 1px solid var(--border);
+  text-align: start;
+  vertical-align: top;
+}
+
+.table-responsive &gt; .table :is(th, td) {
+  overflow-wrap: break-word;
+}
+
+.table :is(th, td):last-child {
+  padding-inline-end: 0;
+}
+
+.table :is(caption, thead th) {
+  font-weight: 600;
+}
+
+.table thead th {
+  padding-block: 8px;
+  border-bottom-color: color-mix(in srgb, var(--foreground) 16%, transparent);
+}
+
+.table tbody tr:last-child :is(th, td) {
+  border-bottom: 0;
+}
+
+.table.table-sm :is(th, td) {
+  padding-block: 6px;
+}
+
+.table.table-sm :is(th, td):not(:last-child) {
+  padding-inline-end: 16px;
+}
+
+.table :is(.text-end, [align=&quot;right&quot;]) {
+  text-align: end;
+  font-variant-numeric: tabular-nums;
+}
+
+.table :is(.text-center, [align=&quot;center&quot;]) {
+  text-align: center;
+}
+
+.table .text-nowrap {
+  white-space: nowrap;
+}
+
+#widget {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  padding: 0;
+  background: transparent !important;
+}
+
+.card {
+  min-width: 0;
+  padding: 12px;
+  overflow: hidden;
+  overflow-wrap: break-word;
+  border-radius: var(--radius-2xl);
+  corner-shape: var(--corner-shape);
+  color: var(--card-foreground);
+  background: var(--card);
+}
+
+#widget &gt; :not(.card, .progress) {
+  width: 100% !important;
+  max-width: none !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.tooltip {
+  position: fixed;
+  z-index: 50;
+  top: 0;
+  left: 0;
+  width: max-content;
+  max-width: min(
+    20rem,
+    var(--tooltip-available-width, calc(100vw - 10px)),
+    calc(100vw - 10px)
+  );
+  max-height: min(
+    var(--tooltip-available-height, calc(100vh - 10px)),
+    calc(100vh - 10px)
+  );
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  corner-shape: var(--corner-shape);
+  color: var(--popover-foreground);
+  background: var(--popover);
+  box-shadow: none;
+  font-size: var(--font-size-tooltip);
+  line-height: var(--line-height-tooltip);
+  overflow-wrap: break-word;
+  white-space: normal;
+  pointer-events: none;
+  user-select: none;
+}
+
+.viz-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(max(180px, 24%), 1fr));
+  gap: 10px;
+}
+
+.viz-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.viz-stat-value {
+  font-size: var(--font-size-h2);
+  font-weight: var(--font-weight-medium);
+  line-height: 1.25;
+}
+
+.viz-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+hr {
+  width: 100%;
+  height: 1px;
+  margin-block: 6px;
+  border: 0;
+  background: var(--border);
+}
+
+.nav {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 4px;
+}
+
+.progress {
+  display: flex;
+  height: 8px;
+  margin-block: calc((var(--line-height-normal, 1.5em) - 8px) / 2);
+  overflow: hidden;
+  border: 0;
+  border-radius: var(--radius-full);
+  background: var(--muted);
+}
+
+.progress-bar:only-child {
+  border-radius: var(--radius-full);
+}
+
+.progress-bar {
+  height: 100%;
+  flex-shrink: 0;
+  border: 0;
+  background: var(--viz-series-1);
+}
+
+.viz-badge {
+  padding: 3px 8px;
+  border-radius: var(--radius-full);
+  color: var(--accent-foreground);
+  background: var(--accent);
+  font-weight: var(--font-weight-medium);
+}
+
+small,
+.text-small,
+.viz-badge {
+  font-size: var(--font-size-small);
+  line-height: var(--line-height-small);
+}
+
+.text-muted {
+  color: var(--muted-foreground);
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.viz-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.viz-controls &gt; .form-label {
+  display: grid;
+  min-width: min(100%, 260px);
+  flex: 1 1 280px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 2px 12px;
+  margin-bottom: 0;
+}
+
+.viz-controls &gt; .form-label &gt; :is(.form-control, .form-range, .form-select) {
+  grid-column: 1 / -1;
+}
+
+.btn,
+.nav-link,
+.form-check-input,
+.form-control,
+.form-range,
+.form-select {
+  font: inherit;
+}
+
+.btn,
+.nav-link {
+  appearance: button;
+  display: inline-flex;
+  inline-size: fit-content;
+  max-inline-size: 100%;
+  min-height: 28px;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  margin: 0;
+  padding: 0 8px;
+  -webkit-app-region: no-drag;
+  border: 1px solid var(--input);
+  border-radius: var(--radius-lg);
+  corner-shape: var(--corner-shape);
+  color: var(--secondary-foreground);
+  background: var(--secondary);
+  cursor: var(--cursor-interaction, pointer);
+  text-align: center;
+  text-decoration: none;
+  white-space: nowrap;
+  user-select: none;
+  -webkit-font-smoothing: antialiased;
+}
+
+.btn:is(.btn-block, .viz-tile) {
+  inline-size: 100%;
+}
+
+.btn.viz-tile {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+a.btn {
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.btn:not(:disabled):hover,
+.nav-link:not(:disabled):not([aria-disabled=&quot;true&quot;]):hover {
+  background: color-mix(in srgb, var(--foreground) 6%, var(--secondary));
+}
+
+.btn-primary {
+  border-color: transparent;
+  color: var(--primary-foreground);
+  background: var(--foreground);
+  background-clip: padding-box;
+}
+
+.btn-primary .text-muted {
+  color: color-mix(in srgb, var(--primary-foreground) 50%, transparent);
+}
+
+.btn-primary:not(:disabled):hover {
+  background: color-mix(in srgb, var(--foreground) 80%, transparent);
+  background-clip: padding-box;
+}
+
+.btn-ghost {
+  border-color: transparent;
+  color: var(--muted-foreground);
+  background: transparent;
+}
+
+.btn-ghost:not(:disabled):hover {
+  color: var(--foreground);
+  background: color-mix(in srgb, var(--foreground) 6%, var(--secondary));
+}
+
+.nav-pills .nav-link {
+  min-width: 0;
+  border-color: transparent;
+  color: var(--muted-foreground);
+  background: transparent;
+}
+
+.nav-justified .nav-link {
+  flex: 1 1 0;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.nav-pills .nav-link.active {
+  color: var(--foreground);
+  background: var(--muted);
+}
+
+.btn:disabled,
+.nav-link:disabled,
+.nav-link[aria-disabled=&quot;true&quot;] {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+[data-lucide] {
+  stroke-width: 1.6;
+}
+
+.form-label {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--foreground);
+}
+
+.form-control {
+  display: block;
+  width: 100%;
+  min-height: 28px;
+  padding: 0 8px;
+  outline: none;
+  border: 1px solid var(--input);
+  border-radius: var(--radius-lg);
+  corner-shape: var(--corner-shape);
+  color: var(--foreground);
+  background: var(--secondary);
+}
+
+.form-control::placeholder {
+  color: var(--muted-foreground);
+}
+
+.form-control[type=&quot;file&quot;] {
+  padding: 0;
+  overflow: hidden;
+  cursor: var(--cursor-interaction, pointer);
+}
+
+.form-control[type=&quot;file&quot;]::file-selector-button {
+  min-height: 26px;
+  margin-right: 8px;
+  padding: 0 8px;
+  border: 0;
+  border-right: 1px solid var(--input);
+  color: var(--secondary-foreground);
+  background: var(--secondary);
+  cursor: inherit;
+  font: inherit;
+}
+
+.form-control[type=&quot;file&quot;]:not(:disabled):hover::file-selector-button {
+  background: color-mix(in srgb, var(--foreground) 6%, var(--secondary));
+}
+
+.form-control-color[type=&quot;color&quot;] {
+  width: 40px;
+  height: 28px;
+  padding: 3px;
+  cursor: var(--cursor-interaction, pointer);
+}
+
+.form-control-color[type=&quot;color&quot;]::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+
+.form-control-color[type=&quot;color&quot;]::-webkit-color-swatch {
+  border: 0;
+  border-radius: calc(var(--radius-lg) - 4px);
+  corner-shape: var(--corner-shape);
+}
+
+textarea.form-control {
+  height: auto;
+  min-height: 72px;
+  padding: 8px 10px;
+  resize: vertical;
+}
+
+.form-control:focus-visible {
+  border-color: var(--ring);
+  box-shadow: inset 0 0 0 1px var(--ring);
+}
+
+.form-control:disabled,
+.form-select:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.form-select {
+  appearance: none;
+  display: block;
+  width: 100%;
+  min-height: 28px;
+  margin: 0;
+  padding: 0 32px 0 8px;
+  outline: none;
+  border: 1px solid var(--input);
+  border-radius: var(--radius-lg);
+  corner-shape: var(--corner-shape);
+  color: var(--foreground);
+  background-color: var(--secondary);
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--muted-foreground) 50%),
+    linear-gradient(135deg, var(--muted-foreground) 50%, transparent 50%);
+  background-position:
+    calc(100% - 14px) 50%,
+    calc(100% - 10px) 50%;
+  background-repeat: no-repeat;
+  background-size: 4px 4px;
+  cursor: var(--cursor-interaction, default);
+}
+
+.form-select:not(:disabled):hover {
+  background-color: color-mix(in srgb, var(--foreground) 6%, var(--secondary));
+}
+
+.form-select:focus-visible {
+  border-color: var(--ring);
+  box-shadow: inset 0 0 0 1px var(--ring);
+}
+
+.form-check {
+  display: flex;
+  min-height: 20px;
+  align-items: center;
+  gap: 6px;
+}
+
+.form-check-input {
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  margin: 0;
+  border: 1px solid var(--input);
+  color: var(--primary-foreground);
+  background-color: transparent;
+  cursor: var(--cursor-interaction, default);
+  transition:
+    background-color 150ms,
+    border-color 150ms,
+    box-shadow 150ms;
+}
+
+.form-check:not(.form-switch) .form-check-input[type=&quot;checkbox&quot;] {
+  border-color: var(--input);
+  border-radius: var(--radius-sm);
+  corner-shape: var(--corner-shape);
+  background-color: var(--secondary);
+  box-shadow: var(--shadow-sm);
+}
+
+.form-check:not(.form-switch)
+  .form-check-input:not(:disabled):not(:checked):hover {
+  background-color: var(--card);
+}
+
+.form-check:not(.form-switch) .form-check-input[type=&quot;checkbox&quot;]:checked {
+  border-color: var(--primary);
+  background-color: var(--primary);
+}
+
+.form-check:not(.form-switch)
+  .form-check-input[type=&quot;checkbox&quot;]:checked::before {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: var(--primary-foreground);
+  content: &quot;&quot;;
+  mask: var(--checkmark-image) center / 12px 12px no-repeat;
+}
+
+.form-check-input[type=&quot;radio&quot;] {
+  width: 14px;
+  height: 14px;
+  border-radius: var(--radius-full);
+}
+
+.form-check-input[type=&quot;radio&quot;]:checked {
+  border: 2px solid var(--primary);
+  background:
+    radial-gradient(circle, var(--primary-foreground) 0 2.5px, transparent 3px),
+    var(--primary);
+}
+
+.form-check:not(.form-switch) .form-check-input:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+.form-check:not(.form-switch) .form-check-input:disabled {
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.form-check:not(.form-switch) .form-check-input:disabled + .form-check-label {
+  cursor: not-allowed;
+}
+
+.form-switch .form-check-input:disabled,
+.form-switch .form-check-input:disabled + .form-check-label {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.form-check-label {
+  color: var(--foreground);
+  cursor: var(--cursor-interaction, default);
+}
+
+.form-switch .form-check-input {
+  position: relative;
+  width: 32px;
+  height: 20px;
+  border: 0;
+  border-radius: var(--radius-full);
+  background: var(--muted);
+  box-shadow: none;
+  transition: background-color 200ms cubic-bezier(0, 0, 0.2, 1);
+}
+
+.form-switch .form-check-input::before {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 16px;
+  height: 16px;
+  box-sizing: border-box;
+  border: 1px solid light-dark(var(--primary-foreground), var(--foreground));
+  border-radius: var(--radius-full);
+  background: light-dark(var(--primary-foreground), var(--foreground));
+  box-shadow: var(--shadow-sm);
+  content: &quot;&quot;;
+  transform: translate(2px, -50%);
+  transition: transform 200ms cubic-bezier(0, 0, 0.2, 1);
+}
+
+.form-switch .form-check-input:checked {
+  background: var(--primary);
+}
+
+.form-switch .form-check-input:checked::before {
+  transform: translate(14px, -50%);
+}
+
+.form-switch .form-check-input:focus-visible {
+  box-shadow: 0 0 0 2px var(--ring);
+}
+
+.form-range {
+  appearance: none;
+  display: block;
+  width: 100%;
+  height: 28px;
+  flex: 1;
+  margin: 0;
+  padding: 0;
+  outline: none;
+  border: 0;
+  accent-color: var(--primary);
+  background: linear-gradient(
+      color-mix(in srgb, var(--foreground) 7%, transparent),
+      color-mix(in srgb, var(--foreground) 7%, transparent)
+    )
+    center / 100% 2px no-repeat;
+}
+
+.form-range::-webkit-slider-runnable-track {
+  height: 28px;
+  background: transparent;
+}
+
+.form-range::-webkit-slider-thumb {
+  appearance: none;
+  width: 20px;
+  height: 20px;
+  margin-top: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  background: light-dark(var(--primary-foreground), var(--foreground));
+}
+
+.form-range:focus-visible::-webkit-slider-thumb {
+  border-color: var(--ring);
+  box-shadow: inset 0 0 0 1px var(--ring);
+}
+
+.form-range::-moz-range-track {
+  height: 28px;
+  background: transparent;
+}
+
+.form-range::-moz-range-thumb {
+  width: 20px;
+  height: 20px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  background: light-dark(var(--primary-foreground), var(--foreground));
+}
+
+.form-range:focus-visible::-moz-range-thumb {
+  border-color: var(--ring);
+  box-shadow: inset 0 0 0 1px var(--ring);
+}
+
+.form-range:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.btn:not(.btn-primary, .viz-tile):is(
+  [aria-pressed=&quot;true&quot;],
+  [aria-selected=&quot;true&quot;],
+  .is-selected
+) {
+  border-color: var(--primary);
+  color: var(--primary-foreground);
+  background: var(--primary);
+}
+
+.btn.viz-tile:is([aria-pressed=&quot;true&quot;], [aria-selected=&quot;true&quot;], .is-selected) {
+  border-color: var(--primary);
+  box-shadow: inset 0 0 0 1px var(--primary);
+}
+
+.btn:focus-visible,
+.nav-link:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+@media (pointer: coarse) {
+  .btn,
+  .nav-link,
+  .form-control,
+  .form-select {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  /* Keep small-screen WebKit from zooming when a text field receives focus. */
+  .form-control,
+  .form-select {
+    font-size: max(16px, var(--font-size-normal));
+  }
+
+  .form-control[type=&quot;file&quot;]::file-selector-button {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  .form-control-color[type=&quot;color&quot;] {
+    width: 44px;
+    height: 44px;
+  }
+
+  .form-control:is(
+    [type=&quot;date&quot;],
+    [type=&quot;datetime-local&quot;],
+    [type=&quot;month&quot;],
+    [type=&quot;time&quot;],
+    [type=&quot;week&quot;]
+  ) {
+    min-width: 0;
+    max-width: 100%;
+    padding-block: 8px;
+  }
+
+  .form-check {
+    min-height: 44px;
+    padding-inline: 15px;
+  }
+
+  .form-check-input {
+    position: relative;
+  }
+
+  .form-check-input::after {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 44px;
+    height: 44px;
+    content: &quot;&quot;;
+    transform: translate(-50%, -50%);
+  }
+
+  .form-check-label {
+    display: inline-flex;
+    min-width: 44px;
+    min-height: 44px;
+    align-items: center;
+  }
+
+  .form-range {
+    height: 44px;
+    touch-action: pan-y;
+  }
+
+  .form-range::-webkit-slider-runnable-track {
+    height: 44px;
+  }
+
+  .form-range::-moz-range-track {
+    height: 44px;
+  }
+
+  .form-range::-webkit-slider-thumb {
+    margin-top: 12px;
+  }
+}
+
+svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+#widget &gt; svg {
+  width: 100%;
+}
+
+/* Model-authored chart rules can otherwise stretch icons after these styles load. */
+svg.lucide {
+  display: block;
+  width: var(--icon-size) !important;
+  height: var(--icon-size) !important;
+  flex: none;
+  margin: 0 !important;
+  stroke-width: 1.6;
+}
+
+.text-warning,
+.text-destructive {
+  color: var(--destructive);
+}
+
+html&gt;body{padding:0}&lt;/style&gt;
+&lt;/head&gt;
+&lt;body&gt;
+&lt;div id=&quot;pk-review-controls&quot; style=&quot;max-width:1024px;margin:0 auto 18px;display:flex;align-items:center;gap:18px;flex-wrap:wrap;font:13px/1.5 system-ui;color:#555;color-scheme:light&quot;&gt;
+  &lt;label&gt;Reference state &lt;select id=&quot;pk-review-scene&quot; style=&quot;font:inherit;margin-left:6px;padding:7px;border:1px solid #ddd;border-radius:8px;background:#fff;color:#333&quot;&gt;
+    &lt;option&gt;Reading&lt;/option&gt;&lt;option&gt;Annotations&lt;/option&gt;&lt;option&gt;Full annotation&lt;/option&gt;&lt;option&gt;Outline&lt;/option&gt;&lt;option&gt;Search&lt;/option&gt;&lt;option&gt;Text selection&lt;/option&gt;&lt;option&gt;Passage editor&lt;/option&gt;&lt;option&gt;Editor offscreen&lt;/option&gt;&lt;option&gt;Annotation peek&lt;/option&gt;&lt;option selected&gt;Split references&lt;/option&gt;&lt;option&gt;Reference link&lt;/option&gt;&lt;option&gt;Save setup&lt;/option&gt;&lt;option&gt;Save failure&lt;/option&gt;&lt;option&gt;Narrow editor&lt;/option&gt;
+  &lt;/select&gt;&lt;/label&gt;
+  &lt;label&gt;Preview width &lt;select id=&quot;pk-review-width&quot; style=&quot;font:inherit;margin-left:6px;padding:7px;border:1px solid #ddd;border-radius:8px;background:#fff;color:#333&quot;&gt;&lt;option value=&quot;1024&quot;&gt;1024&lt;/option&gt;&lt;option value=&quot;736&quot;&gt;736&lt;/option&gt;&lt;option value=&quot;360&quot;&gt;360&lt;/option&gt;&lt;option value=&quot;320&quot;&gt;320&lt;/option&gt;&lt;/select&gt;&lt;/label&gt;
+  &lt;span style=&quot;color:#707070&quot;&gt;Design reference · illustrative PDF · controls simulate local states&lt;/span&gt;
+&lt;/div&gt;
+&lt;div id=&quot;pk-review-surface&quot; style=&quot;width:1024px;max-width:100%;margin:auto&quot;&gt;&lt;div id=&quot;pk-canonical&quot; aria-label=&quot;Placekeeper canonical neutral design&quot;&gt;
+&lt;style&gt;
+#pk-canonical{--pk-font-ui:system-ui,-apple-system,BlinkMacSystemFont,&quot;Segoe UI&quot;,sans-serif;--pk-icon-stroke:2;--pk-canvas:#f7f7f7;--pk-tray:#f0f0f0;--pk-raised:#fff;--pk-text:#333;--pk-muted:#707070;--pk-line:#e5e5e5;--pk-hover:#e7e7e7;--pk-shadow:0 3px 10px #00000008,0 12px 30px #00000009;color-scheme:light;color:var(--pk-text);font:13px/1.5 var(--pk-font-ui);width:100%;container-type:inline-size;container-name:pk-reference}
+#pk-canonical *{box-sizing:border-box}#pk-canonical [hidden]{display:none!important}#pk-canonical button,#pk-canonical input,#pk-canonical textarea{font:inherit;color:inherit}#pk-canonical button{cursor:pointer}#pk-canonical button:disabled{opacity:.35;cursor:default}#pk-canonical svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:var(--pk-icon-stroke);stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}#pk-canonical button:focus-visible,#pk-canonical input:focus-visible,#pk-canonical textarea:focus-visible{outline:2px solid #496789;outline-offset:3px}
+#pk-canonical .pk-window{position:relative;background:var(--pk-canvas);border:1px solid var(--pk-line);border-radius:14px;margin:auto;width:100%}#pk-canonical[data-narrow=&quot;true&quot;] .pk-window{max-width:390px;container-type:inline-size;container-name:pk-phone}
+#pk-canonical .pk-toolbar{border-radius:14px 14px 0 0;min-height:54px;padding:9px 12px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;border-bottom:1px solid var(--pk-line);background:var(--pk-canvas)}#pk-canonical .pk-command{display:flex;align-items:center;gap:2px;flex-shrink:0}#pk-canonical .pk-btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;min-width:32px;min-height:32px;border:0;border-radius:10px;padding:6px 8px;background:transparent;text-decoration:none;white-space:nowrap}#pk-canonical .pk-btn:hover{background:var(--pk-hover)}#pk-canonical .pk-btn[aria-pressed=&quot;true&quot;]{background:var(--pk-raised);box-shadow:0 2px 7px #0000000a}#pk-canonical .pk-file{min-width:90px;flex:1;justify-content:flex-start;overflow:hidden}#pk-canonical .pk-file span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}#pk-canonical .pk-file .pk-dirty{width:5px;height:5px;border-radius:50%;background:#876a2e;flex-shrink:0}#pk-canonical .pk-number{width:32px;border:0;border-radius:7px;background:transparent;text-align:center;padding:5px 1px;font-variant-numeric:tabular-nums}#pk-canonical .pk-zoom-value{width:47px}#pk-canonical .pk-muted{color:var(--pk-muted)}#pk-canonical .pk-work{display:grid;grid-template-columns:minmax(0,1fr) 294px;align-items:stretch;min-height:674px}#pk-canonical[data-tray=&quot;false&quot;] .pk-work{grid-template-columns:minmax(0,1fr)}#pk-canonical .pk-stage{position:relative;padding:28px 42px 30px;min-width:0}#pk-canonical .pk-edge{position:absolute;right:3px;top:9px;z-index:3;background:var(--pk-tray);border-radius:10px 0 0 10px;min-width:27px;padding:6px 5px}#pk-canonical .pk-paper{position:relative;background:#fff;color:#292929;max-width:570px;margin:auto;padding:35px 42px 28px;min-height:606px;box-shadow:0 1px 4px #0000000b;font:15px/1.7 Georgia,&quot;Times New Roman&quot;,serif}#pk-canonical .pk-running{display:flex;justify-content:space-between;gap:16px;color:#747474;font:11px/1.4 Georgia,serif;margin-bottom:31px}#pk-canonical .pk-paper h2{font:22px/1.3 Georgia,serif;margin:0 0 22px;color:#292929}#pk-canonical .pk-paper p{margin:0 0 17px}#pk-canonical .pk-equation{text-align:center;margin:24px 0;font-style:italic}#pk-canonical .pk-paper .pk-footnote{font-size:12px;line-height:1.6;border-top:1px solid #e5e5e5;padding-top:12px;margin:26px 0 0}#pk-canonical .pk-link{font:inherit;background:transparent;color:#41658b;border:0;border-bottom:1px solid #bbc9d7;padding:0;cursor:pointer}#pk-canonical .pk-passage{font:inherit;line-height:inherit;border:0;padding:0;background:transparent;text-align:left;color:inherit;border-radius:1px;cursor:text}#pk-canonical .pk-passage.pk-selected{background:#dce8f5;box-shadow:inset 0 -1px #96afca}#pk-canonical .pk-passage.pk-marked{background:#f5edb7;box-shadow:inset 0 -1px #c7b65e;cursor:pointer}#pk-canonical .pk-page-bottom{text-align:center;font-size:12px;margin-top:29px}
+#pk-canonical .pk-aside{background:var(--pk-tray);min-width:0;border-left:1px solid var(--pk-line);padding:9px 9px 18px;border-radius:14px 0 0 0}#pk-canonical .pk-modebar{display:flex;align-items:center;gap:2px;padding:0 0 9px;min-height:43px}#pk-canonical .pk-modes{display:flex;align-items:center;gap:2px;flex:1;min-width:0}#pk-canonical .pk-mode{padding:7px;min-width:32px;gap:6px;color:var(--pk-muted)}#pk-canonical .pk-mode[aria-selected=&quot;true&quot;]{background:var(--pk-raised);box-shadow:0 2px 7px #00000008;color:var(--pk-text)}#pk-canonical .pk-pane{padding:0 2px}#pk-canonical .pk-meta{display:flex;align-items:center;justify-content:space-between;gap:10px;color:var(--pk-muted);font-size:11px}#pk-canonical .pk-meta span{display:inline-flex;align-items:center;gap:6px}#pk-canonical .pk-meta svg{width:13px;height:13px}#pk-canonical .pk-count{padding:10px 10px 8px;font-size:12px;color:var(--pk-muted)}#pk-canonical .pk-row{position:relative;margin:3px 0 7px;border-radius:12px;padding:3px}#pk-canonical .pk-row.pk-current{background:var(--pk-raised);box-shadow:0 2px 7px #00000006}#pk-canonical .pk-row.pk-current:before{content:&quot;&quot;;position:absolute;left:0;top:17px;width:3px;height:18px;border-radius:2px;background:#c0a648}#pk-canonical .pk-row-nav{display:block;width:100%;text-align:left;border:0;background:transparent;padding:10px;border-radius:9px}#pk-canonical .pk-row-nav:hover{background:#00000004}#pk-canonical .pk-row p{margin:9px 0 0;line-height:1.6}#pk-canonical .pk-quote{margin-top:9px;border-left:2px solid var(--pk-line);padding-left:9px;color:var(--pk-muted);font:13px/1.5 var(--pk-font-ui)}#pk-canonical .pk-row-actions{display:flex;justify-content:flex-end;padding:0 4px 3px;gap:1px}#pk-canonical .pk-row-actions .pk-btn{min-height:28px;min-width:28px;padding:5px}#pk-canonical .pk-row-actions svg{width:14px;height:14px}#pk-canonical .pk-provenance{font-size:11px;color:var(--pk-muted);padding:0 10px 10px}#pk-canonical .pk-searchbox{display:flex;align-items:center;gap:8px;border:1px solid #d9d9d9;border-radius:11px;background:#fff;padding:7px 9px;margin:5px 6px 6px}#pk-canonical .pk-searchbox input{width:100%;min-width:0;background:none;border:0;padding:2px}#pk-canonical .pk-result{display:block;width:100%;background:transparent;border:0;border-radius:11px;padding:13px 10px;text-align:left;margin:2px 0}#pk-canonical .pk-result.pk-current{background:#fff;box-shadow:0 2px 7px #00000006}#pk-canonical .pk-result p{margin:7px 0 0;line-height:1.6}#pk-canonical mark{background:#e6e6e6;color:inherit;padding:0 1px}#pk-canonical .pk-outline{display:flex;width:100%;justify-content:space-between;gap:12px;border:0;background:transparent;border-radius:10px;text-align:left;padding:12px 10px}#pk-canonical .pk-outline.pk-current{background:#fff;box-shadow:0 2px 7px #00000006}#pk-canonical .pk-outline.pk-child{padding-left:25px;color:var(--pk-muted)}
+#pk-canonical .pk-palette{position:absolute;z-index:5;display:flex;align-items:center;padding:5px;gap:2px;background:#fff;border:1px solid var(--pk-line);border-radius:12px;box-shadow:var(--pk-shadow);left:50px;top:244px}#pk-canonical .pk-editor{position:absolute;z-index:4;top:300px;right:45px;width:326px;max-width:calc(100% - 44px);background:#fff;border:1px solid #dedede;border-radius:16px;box-shadow:var(--pk-shadow);padding:15px;font:13px/1.5 var(--pk-font-ui);color:var(--pk-text)}#pk-canonical .pk-editor:before{content:&quot;&quot;;position:absolute;top:-13px;left:28px;width:1px;height:12px;background:#b7b7b7}#pk-canonical .pk-editor-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:11px;font-weight:500}#pk-canonical .pk-editor-head .pk-btn{min-width:28px;min-height:28px}#pk-canonical .pk-editor textarea{display:block;width:100%;min-height:108px;padding:11px 12px;border:1px solid #d7d7d7;border-radius:10px;background:#fafafa;resize:vertical;line-height:1.55}#pk-canonical .pk-actions{display:flex;justify-content:flex-end;gap:6px;margin-top:12px}#pk-canonical .pk-primary{background:#3c3c3c;color:#fff}#pk-canonical .pk-primary:hover{background:#252525}#pk-canonical .pk-editor .pk-hint{color:var(--pk-muted);font-size:11px;margin-top:7px}#pk-canonical .pk-peek{top:291px}#pk-canonical .pk-peek p{margin:8px 0 0;line-height:1.6}#pk-canonical .pk-peek .pk-editor-head{margin-bottom:6px}#pk-canonical .pk-peek .pk-actions{margin-top:7px}
+#pk-canonical .pk-refdock{background:var(--pk-tray);border-top:1px solid var(--pk-line);padding:9px 13px 14px;border-radius:14px 14px 0 0}#pk-canonical .pk-refdock .pk-modebar{max-width:100%;padding-bottom:7px}#pk-canonical .pk-ref-tabs{display:flex;align-items:center;gap:5px;min-width:0;flex:1;flex-wrap:wrap}#pk-canonical .pk-ref-tab{display:flex;align-items:center;gap:5px;min-width:0;padding:3px;border-radius:10px}#pk-canonical .pk-ref-tab.pk-current{background:#fff;box-shadow:0 2px 7px #00000006}#pk-canonical .pk-ref-title{max-width:155px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;justify-content:flex-start}#pk-canonical .pk-ref-tab .pk-btn{min-width:26px;min-height:28px;padding:4px 5px}#pk-canonical .pk-ref-tab svg{width:14px;height:14px}#pk-canonical .pk-ref-tab .pk-ref-title{padding-left:8px;font-size:12px}#pk-canonical .pk-ref-page{color:var(--pk-muted);padding:0 4px;font-size:11px}#pk-canonical .pk-ref-body{position:relative;padding:21px 26px;background:#fff;color:#292929;font:14px/1.65 Georgia,serif;min-height:226px;margin-top:7px}#pk-canonical .pk-ref-body h3{margin:0 0 12px;font:19px/1.4 Georgia,serif}#pk-canonical .pk-ref-body p{margin:0 0 13px}#pk-canonical .pk-ref-body .pk-palette{left:30px;top:108px}#pk-canonical .pk-refdock .pk-ref-body{max-width:760px;margin:7px auto 0;padding:23px 40px}#pk-canonical .pk-inline-ref .pk-ref-tabs{gap:3px}#pk-canonical .pk-inline-ref .pk-ref-tab{width:100%;justify-content:space-between}#pk-canonical .pk-inline-ref .pk-ref-title{flex:1}#pk-canonical .pk-inline-ref .pk-ref-body{padding:25px 18px;min-height:405px}#pk-canonical .pk-inline-ref .pk-ref-body .pk-palette{left:10px;top:175px}#pk-canonical .pk-ref-tools{display:flex;gap:3px;align-items:center}#pk-canonical .pk-notice{padding:10px 14px;display:flex;align-items:center;justify-content:space-between;gap:12px;border-bottom:1px solid #dec6c3;background:#faf0ee;color:#843b33;font-size:12px}#pk-canonical .pk-overlay{position:absolute;inset:0;z-index:10;background:#20202025;display:flex;align-items:flex-start;justify-content:center;padding:155px 20px 30px}#pk-canonical .pk-dialog{background:#fff;border:1px solid var(--pk-line);border-radius:17px;box-shadow:0 18px 65px #00000020;width:414px;max-width:100%;padding:22px}#pk-canonical .pk-dialog h3{font:500 16px/1.4 var(--pk-font-ui);margin:0 0 11px;color:var(--pk-text)}#pk-canonical .pk-dialog p{color:var(--pk-muted);margin:0 0 19px;font-size:13px}#pk-canonical .pk-choice{display:flex;align-items:flex-start;gap:10px;padding:11px 10px;border-radius:10px;margin:5px 0;cursor:pointer}#pk-canonical .pk-choice:has(input:checked){background:var(--pk-tray)}#pk-canonical .pk-choice input{margin-top:4px}#pk-canonical .pk-choice small{display:block;font-size:12px;color:var(--pk-muted);margin-top:3px}#pk-canonical .pk-field-label{display:block;margin-top:15px;font-size:12px}#pk-canonical .pk-field-label input{display:block;width:100%;padding:9px 11px;margin-top:6px;border:1px solid #d7d7d7;border-radius:9px;background:#fafafa}#pk-canonical .pk-empty{padding:24px 12px;color:var(--pk-muted);font-size:13px}#pk-canonical .pk-announcement{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
+
+@container pk-reference (max-width:850px){#pk-canonical .pk-toolbar{gap:6px}#pk-canonical .pk-file{flex-basis:100%;padding-bottom:0}#pk-canonical .pk-work{grid-template-columns:minmax(0,1fr) 275px}#pk-canonical .pk-stage{padding:20px 31px 25px 18px}#pk-canonical .pk-paper{padding:28px 25px}#pk-canonical .pk-paper h2{font-size:20px}#pk-canonical .pk-editor{right:36px;width:300px;top:340px}#pk-canonical .pk-palette{left:29px;top:278px}}
+@container pk-reference (max-width:620px){#pk-canonical .pk-work{display:block;min-height:0}#pk-canonical .pk-stage{padding:16px 34px 17px 14px}#pk-canonical .pk-paper{padding:25px 24px;min-height:0}#pk-canonical .pk-aside{border-left:0;border-top:1px solid var(--pk-line);border-radius:14px 14px 0 0;padding:10px 12px 18px}#pk-canonical .pk-later,#pk-canonical .pk-footnote,#pk-canonical .pk-page-bottom{display:none}#pk-canonical .pk-running{margin-bottom:22px}#pk-canonical .pk-editor{position:relative;top:auto!important;right:auto;width:auto;max-width:none;margin:18px -34px -17px -14px;border-radius:16px 16px 0 0;padding:16px 18px;box-shadow:0 -4px 16px #00000007}#pk-canonical .pk-editor:before{display:none}#pk-canonical .pk-palette{top:267px;left:25px}#pk-canonical .pk-overlay{padding:95px 12px 20px}#pk-canonical .pk-dialog{padding:18px}#pk-canonical .pk-refdock .pk-ref-body{padding:20px}#pk-canonical .pk-refdock .pk-modebar{flex-wrap:wrap}#pk-canonical .pk-modebar{gap:0}#pk-canonical .pk-mode{padding:7px 6px}#pk-canonical .pk-toolbar{gap:3px;padding:7px}#pk-canonical .pk-toolbar .pk-btn{padding:6px;min-width:30px}#pk-canonical .pk-toolbar .pk-file{padding:3px 6px}#pk-canonical .pk-command{gap:0}}
+#pk-canonical[data-narrow=&quot;true&quot;] .pk-work{display:block;min-height:0}#pk-canonical[data-narrow=&quot;true&quot;] .pk-stage{padding:16px 34px 17px 14px}#pk-canonical[data-narrow=&quot;true&quot;] .pk-paper{padding:25px 24px;min-height:0}#pk-canonical[data-narrow=&quot;true&quot;] .pk-aside{border-left:0;border-top:1px solid var(--pk-line);border-radius:14px 14px 0 0}#pk-canonical[data-narrow=&quot;true&quot;] .pk-later,#pk-canonical[data-narrow=&quot;true&quot;] .pk-footnote,#pk-canonical[data-narrow=&quot;true&quot;] .pk-page-bottom{display:none}#pk-canonical[data-narrow=&quot;true&quot;] .pk-editor{position:relative;top:auto;right:auto;width:auto;max-width:none;margin:18px -34px -17px -14px;border-radius:16px 16px 0 0;padding:16px 18px;box-shadow:0 -4px 16px #00000007}#pk-canonical[data-narrow=&quot;true&quot;] .pk-editor:before{display:none}#pk-canonical[data-narrow=&quot;true&quot;] .pk-toolbar{gap:3px;padding:7px}#pk-canonical[data-narrow=&quot;true&quot;] .pk-file{flex-basis:100%}#pk-canonical[data-narrow=&quot;true&quot;] .pk-toolbar .pk-btn{padding:6px;min-width:30px}#pk-canonical[data-narrow=&quot;true&quot;] .pk-command{gap:0}#pk-canonical[data-narrow=&quot;true&quot;] .pk-running{margin-bottom:22px}
+@media(pointer:coarse){#pk-canonical .pk-btn,#pk-canonical .pk-ref-tab .pk-btn,#pk-canonical .pk-row-actions .pk-btn{min-width:44px;min-height:44px}#pk-canonical input,#pk-canonical textarea{font-size:16px}#pk-canonical .pk-modes{flex-wrap:wrap}#pk-canonical .pk-modebar{flex-wrap:wrap}}
+/* Quiet, inset surfaces from the original neutral study. */
+#pk-canonical .pk-window{border-radius:18px}
+#pk-canonical .pk-toolbar{min-height:62px;padding:10px 18px;gap:12px;border:0;border-radius:18px 18px 0 0}
+#pk-canonical .pk-command:empty{display:none}
+#pk-canonical .pk-work{grid-template-columns:minmax(0,1fr) 286px;gap:8px;padding:0 12px 12px 0;min-height:620px}
+#pk-canonical .pk-stage{padding:12px 34px 10px 26px}
+#pk-canonical .pk-paper{min-height:582px;padding:38px 38px 26px;box-shadow:0 1px 2px #00000008,0 5px 20px #00000008}
+#pk-canonical .pk-aside{border:0;border-radius:16px;padding:10px 10px 16px}
+#pk-canonical .pk-modebar{padding:0 0 7px;min-height:42px}
+#pk-canonical .pk-mode{font-size:12px;min-height:34px;color:var(--pk-muted)}
+#pk-canonical .pk-mode[aria-selected=&quot;true&quot;]{box-shadow:0 1px 3px #00000009}
+#pk-canonical .pk-edge{right:0;top:10px;background:transparent;border-radius:9px;min-width:30px;min-height:32px;padding:7px;color:var(--pk-muted)}
+#pk-canonical .pk-edge:hover{background:#eaeaea;color:var(--pk-text)}
+#pk-canonical .pk-edge svg{width:15px;height:15px}
+#pk-canonical .pk-row{padding:5px;margin:5px 0 6px}
+#pk-canonical .pk-row.pk-current{box-shadow:0 2px 6px #00000005,0 8px 24px #00000004}
+#pk-canonical .pk-row.pk-current:before{top:21px;height:13px;width:2px;left:2px}
+#pk-canonical .pk-row-nav{padding:10px 9px 6px}
+#pk-canonical .pk-meta{min-height:22px}
+#pk-canonical .pk-row p{margin-top:7px}
+#pk-canonical .pk-quote{border:0;padding:0;margin-top:7px}
+#pk-canonical .pk-row-actions{padding:0 5px 2px;color:var(--pk-muted)}
+#pk-canonical .pk-row:not(.pk-current) .pk-row-actions{opacity:0;pointer-events:none}
+#pk-canonical .pk-row:hover .pk-row-actions,#pk-canonical .pk-row:focus-within .pk-row-actions{opacity:1;pointer-events:auto}
+#pk-canonical .pk-provenance{padding:2px 9px 0}
+#pk-canonical .pk-searchbox{border:0;box-shadow:0 1px 3px #00000008;padding:10px 11px;margin:5px 3px 7px}
+#pk-canonical .pk-count{padding:8px 10px;color:var(--pk-muted)}
+#pk-canonical .pk-refdock{margin:0 12px 12px;padding:10px 12px 14px;border:0;border-radius:16px;box-shadow:0 -2px 12px #00000003}
+#pk-canonical .pk-ref-header{display:flex;align-items:center;gap:12px;min-height:38px;margin-bottom:8px}
+#pk-canonical .pk-ref-header .pk-ref-tabs{flex:1}
+#pk-canonical .pk-ref-tools{color:var(--pk-muted)}
+#pk-canonical .pk-ref-tab.pk-current{box-shadow:0 1px 3px #00000008}
+#pk-canonical .pk-ref-tab .pk-btn{color:var(--pk-muted)}
+#pk-canonical .pk-ref-tab .pk-ref-title{color:var(--pk-text)}
+#pk-canonical .pk-ref-body{border-radius:10px;box-shadow:0 1px 3px #00000004}
+#pk-canonical .pk-refdock .pk-ref-body{margin:0 auto;max-width:760px}
+
+@container pk-reference (max-width:850px){#pk-canonical .pk-work{grid-template-columns:minmax(0,1fr) 275px}#pk-canonical .pk-toolbar{gap:7px}#pk-canonical .pk-toolbar .pk-file{flex-basis:auto}#pk-canonical .pk-stage{padding:12px 31px 10px 18px}#pk-canonical .pk-paper{padding:28px 25px}}
+@container pk-reference (max-width:620px){#pk-canonical .pk-toolbar{padding:9px 11px;gap:3px}#pk-canonical .pk-toolbar .pk-file{flex-basis:100%}#pk-canonical .pk-work{display:block;padding:0 10px 10px}#pk-canonical .pk-stage{padding:8px 30px 16px 0}#pk-canonical .pk-paper{min-height:0;padding:25px 24px}#pk-canonical .pk-aside{border:0;border-radius:16px;margin-top:10px}#pk-canonical .pk-editor{margin:18px -30px -16px 0;border-radius:16px}#pk-canonical .pk-refdock{margin:0 10px 10px}#pk-canonical .pk-ref-header{flex-wrap:wrap;gap:4px}#pk-canonical .pk-ref-header .pk-ref-tabs{min-width:180px}#pk-canonical .pk-ref-body{padding:20px}#pk-canonical .pk-edge{top:7px}}
+#pk-canonical[data-narrow=&quot;true&quot;] .pk-work{padding:0 10px 10px}
+#pk-canonical[data-narrow=&quot;true&quot;] .pk-stage{padding:8px 30px 16px 0}
+#pk-canonical[data-narrow=&quot;true&quot;] .pk-paper{min-height:0}
+#pk-canonical[data-narrow=&quot;true&quot;] .pk-editor{margin:18px -30px -16px 0;border-radius:16px}
+@media(pointer:coarse){#pk-canonical .pk-row:not(.pk-current) .pk-row-actions{opacity:1;pointer-events:auto}#pk-canonical .pk-edge{min-width:44px;min-height:44px}#pk-canonical .pk-stage{padding-right:45px}}
+#pk-canonical{position:relative}
+#pk-canonical .pk-zoom-wrap{position:relative;flex:none}
+#pk-canonical .pk-zoom-trigger{font-variant-numeric:tabular-nums;min-width:67px}
+#pk-canonical .pk-zoom-trigger svg{width:12px;height:12px}
+#pk-canonical .pk-zoom-popover{position:absolute;right:0;top:39px;z-index:8;display:flex;align-items:center;gap:3px;padding:7px;background:#fff;border:1px solid #e0e0e0;border-radius:12px;box-shadow:var(--pk-shadow);width:max-content}
+#pk-canonical .pk-navigation{gap:1px}
+#pk-canonical .pk-history-pair{display:flex;gap:0;margin-right:6px}
+#pk-canonical .pk-history-pair:empty{display:none}
+#pk-canonical .pk-edge,#pk-canonical .pk-bottom-toggle{min-width:28px;min-height:28px;padding:6px;border-radius:7px;background:transparent;color:#737373}
+#pk-canonical .pk-edge{right:-6px;top:7px}
+#pk-canonical .pk-edge svg,#pk-canonical .pk-bottom-toggle svg{width:14px;height:14px}
+#pk-canonical .pk-edge:hover,#pk-canonical .pk-bottom-toggle:hover{background:#e9e9e9;color:#333}
+#pk-canonical .pk-bottom-rail{height:28px;margin:-8px 12px 2px;display:flex;justify-content:flex-start;align-items:center}
+#pk-canonical .pk-refdock{display:grid;grid-template-columns:220px minmax(0,1fr);gap:12px;padding:10px;align-items:start}
+#pk-canonical .pk-ref-sidebar{min-width:0;display:flex;flex-direction:column;gap:9px}
+#pk-canonical .pk-refdock .pk-ref-tabs{display:flex;flex-direction:column;align-items:stretch;gap:5px}
+#pk-canonical .pk-refdock .pk-ref-tools{justify-content:flex-end;padding:0 4px}
+#pk-canonical .pk-refdock .pk-ref-body{width:100%;margin:0;max-width:none;min-height:260px;padding:24px 30px}
+#pk-canonical .pk-ref-tab{position:relative;display:grid;grid-template-columns:minmax(0,1fr);gap:0;padding:0;border-radius:10px;overflow:visible}
+#pk-canonical .pk-ref-tab:hover,#pk-canonical .pk-ref-tab:focus-within{background:#e6e6e6}
+#pk-canonical .pk-ref-tab.pk-current:hover,#pk-canonical .pk-ref-tab.pk-current:focus-within{background:#fafafa}
+#pk-canonical .pk-ref-tab .pk-ref-title{max-width:none;width:100%;min-height:36px;padding:8px 10px;display:flex;justify-content:space-between;gap:12px;font-size:12px;white-space:normal}
+#pk-canonical .pk-ref-title .pk-ref-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#pk-canonical .pk-ref-title .pk-ref-page{padding:0;flex:none}
+#pk-canonical .pk-ref-tab .pk-ref-title:hover{background:transparent}
+#pk-canonical .pk-ref-tab-actions{display:flex;gap:1px;justify-content:flex-end;padding:0 5px 5px}
+#pk-canonical .pk-ref-tab-actions .pk-btn{min-height:25px;min-width:25px}
+#pk-canonical .pk-row{padding:9px 12px 11px;margin:5px 0 6px;cursor:pointer}
+#pk-canonical .pk-row:hover,#pk-canonical .pk-row:focus-within{background:#e6e6e6}
+#pk-canonical .pk-row.pk-current:hover,#pk-canonical .pk-row.pk-current:focus-within{background:#fafafa}
+#pk-canonical .pk-row .pk-row-nav{padding:0;background:transparent!important;border-radius:0}
+#pk-canonical .pk-row-head{display:flex;align-items:center;gap:6px;min-height:27px;margin-bottom:4px}
+#pk-canonical .pk-kind{display:inline-flex;align-items:center;gap:6px;color:#737373;font-size:11px}
+#pk-canonical .pk-kind svg{width:13px;height:13px}
+#pk-canonical .pk-row-head .pk-page-label{order:3;font-size:11px;color:#737373;margin-left:6px;font-variant-numeric:tabular-nums}
+#pk-canonical .pk-row-head .pk-row-actions{order:2;display:flex;gap:0;padding:0;margin-left:auto}
+#pk-canonical .pk-row-head .pk-row-actions .pk-btn{min-width:25px;min-height:25px;padding:5px;border-radius:6px}
+#pk-canonical .pk-row p{margin:0;line-height:1.55}
+#pk-canonical .pk-row .pk-quote{margin-top:6px;font:13px/1.5 var(--pk-font-ui)}
+#pk-canonical .pk-row .pk-before{margin-bottom:5px;color:#777;font-size:12px}
+#pk-canonical .pk-provenance{padding:5px 0 0;font-size:11px}
+#pk-canonical .pk-tip{position:absolute;z-index:30;max-width:240px;padding:5px 8px;background:#fff;border:1px solid #d8d8d8;border-radius:5px;box-shadow:0 2px 5px #0000000b;font:11px/1.4 var(--pk-font-ui);color:#555;pointer-events:none}
+@container pk-reference (max-width:850px){#pk-canonical .pk-refdock{grid-template-columns:190px minmax(0,1fr)}#pk-canonical .pk-refdock .pk-ref-body{padding:22px 25px}}
+@container pk-reference (max-width:620px){#pk-canonical .pk-refdock{grid-template-columns:1fr}#pk-canonical .pk-refdock .pk-ref-tabs{flex-direction:column}#pk-canonical .pk-refdock .pk-ref-sidebar{gap:2px}#pk-canonical .pk-refdock .pk-ref-tools{position:static}#pk-canonical .pk-edge{right:-4px}#pk-canonical .pk-bottom-rail{margin-left:10px}#pk-canonical .pk-row-head{flex-wrap:wrap}#pk-canonical .pk-zoom-popover{right:0}}
+@media(pointer:coarse){#pk-canonical .pk-row-head .pk-row-actions .pk-btn,#pk-canonical .pk-ref-tab-actions .pk-btn,#pk-canonical .pk-edge,#pk-canonical .pk-bottom-toggle{min-width:44px;min-height:44px}#pk-canonical .pk-bottom-rail{height:44px}#pk-canonical .pk-row-head{flex-wrap:wrap}}
+
+/* Final control and overlay refinements. */
+#pk-canonical .pk-toolbar .pk-file{flex:0 1 auto;min-width:0;max-width:280px;width:max-content;flex-basis:auto}
+#pk-canonical .pk-toolbar-space{flex:1;min-width:0}
+#pk-canonical .pk-pagebox{display:flex;align-items:center;gap:1px;background:transparent;border-radius:8px;padding:0 7px 0 3px;white-space:nowrap;font-size:12px}
+#pk-canonical .pk-pagebox input{width:26px}
+#pk-canonical .pk-zoom-wrap{display:flex;align-items:center;border-radius:8px}
+#pk-canonical .pk-zoom-wrap:hover{background:transparent}
+#pk-canonical .pk-zoom-trigger{min-width:22px!important;padding:5px 4px!important}
+#pk-canonical .pk-zoom-value{width:42px;padding-right:0}
+#pk-canonical .pk-edge{right:0}
+#pk-canonical .pk-bottom-rail{position:relative;margin:0 12px 6px;gap:3px;height:28px}
+#pk-canonical .pk-refdock{position:relative;margin:0 12px 12px;height:282px;grid-template-columns:240px minmax(0,1fr);gap:10px;box-shadow:none;overflow:auto}
+#pk-canonical[data-dock=&quot;true&quot;] .pk-work{height:388px;min-height:0;grid-template-rows:minmax(0,1fr);padding-bottom:0}
+#pk-canonical[data-dock=&quot;true&quot;] .pk-stage{height:100%;min-height:0;overflow-y:auto;overflow-x:hidden;scrollbar-width:thin}
+#pk-canonical[data-dock=&quot;true&quot;] .pk-aside{height:100%;min-height:0;overflow-y:auto;overflow-x:hidden;scrollbar-width:thin}
+#pk-canonical .pk-ref-tab{display:flex;align-items:center;gap:0}
+#pk-canonical .pk-ref-tab .pk-ref-title{flex:1;min-width:0;width:auto;gap:7px;padding:8px}
+#pk-canonical .pk-ref-tab-actions{flex:none;padding:0 4px 0 0;gap:0}
+#pk-canonical .pk-tip{background:#3e3e3e;color:#fff;border:0;border-radius:7px;padding:6px 9px;box-shadow:0 2px 7px #00000014;font-size:12px;line-height:1.4}
+#pk-canonical .pk-peek{padding:0;overflow:visible}
+#pk-canonical .pk-peek .pk-row{margin:0;box-shadow:none;border-radius:16px}
+@container pk-reference (max-width:850px){#pk-canonical .pk-refdock{grid-template-columns:240px minmax(0,1fr)}#pk-canonical .pk-refdock .pk-ref-body{min-height:220px}#pk-canonical .pk-refdock .pk-ref-tabs{gap:3px}}
+@container pk-reference (max-width:620px){#pk-canonical .pk-toolbar-space{flex-basis:100%;height:0}#pk-canonical .pk-toolbar .pk-file{max-width:min(280px,100%)}#pk-canonical .pk-edge{right:0}}
+#pk-canonical[data-narrow=&quot;true&quot;] .pk-toolbar-space{flex-basis:100%;height:0}
+
+#pk-canonical .pk-work{gap:6px}
+/* Balanced controls and a single-surface passage editor. */
+#pk-canonical .pk-btn{align-items:center;justify-content:center;line-height:1.2;text-align:center}
+#pk-canonical .pk-btn svg{display:block;vertical-align:middle;margin:0;flex:none}
+#pk-canonical .pk-btn:not(:has(span)):has(svg){padding:0;width:32px;height:32px;min-width:32px;min-height:32px}
+#pk-canonical .pk-mode:not(:has(span)){width:34px;height:34px}
+#pk-canonical .pk-row-head .pk-row-actions .pk-btn,#pk-canonical .pk-ref-tab-actions .pk-btn{width:26px;height:26px;min-width:26px;min-height:26px;padding:0}
+#pk-canonical .pk-edge,#pk-canonical .pk-bottom-rail .pk-btn{width:28px!important;height:28px!important;min-width:28px!important;min-height:28px!important;padding:0!important}
+#pk-canonical .pk-zoom-trigger{width:24px!important;height:32px!important;min-width:24px!important;padding:0!important}
+#pk-canonical .pk-file{justify-content:flex-start;text-align:left}
+#pk-canonical .pk-number,#pk-canonical .pk-number:hover,#pk-canonical .pk-number:focus{background:transparent!important;box-shadow:none!important;outline:none!important;border:0}
+#pk-canonical .pk-editor:not(.pk-peek){padding:15px 17px 12px;border:0;border-radius:16px;box-shadow:0 2px 8px #00000007,0 12px 32px #0000000d}
+#pk-canonical .pk-editor:not(.pk-peek):before{display:none}
+#pk-canonical .pk-editor-kind{display:inline-flex;align-items:center;gap:7px;color:#777;font-size:12px;font-weight:400}
+#pk-canonical .pk-editor-head{margin-bottom:5px}
+#pk-canonical .pk-editor textarea{border:0;border-radius:0;background:transparent;padding:6px 0;min-height:94px;max-height:230px;resize:none;font-size:14px;line-height:1.65;box-shadow:none}
+#pk-canonical .pk-editor textarea:focus{outline:none;box-shadow:none}
+#pk-canonical .pk-editor textarea::placeholder{color:#888}
+#pk-canonical .pk-editor .pk-actions{margin-top:10px;gap:5px}
+#pk-canonical .pk-editor .pk-actions .pk-btn{min-height:30px;padding:7px 11px;font-size:12px;border-radius:9px}
+@container pk-reference (max-width:620px){#pk-canonical[data-dock=&quot;true&quot;] .pk-work{display:grid;grid-template-columns:minmax(0,1fr);grid-template-rows:235px 175px;height:420px;gap:10px}#pk-canonical[data-dock=&quot;true&quot;] .pk-aside{margin-top:0}#pk-canonical .pk-refdock{grid-template-columns:1fr;height:350px}#pk-canonical .pk-bottom-rail{margin-top:6px}}
+@media(pointer:coarse){#pk-canonical .pk-btn:not(:has(span)):has(svg),#pk-canonical .pk-row-head .pk-row-actions .pk-btn,#pk-canonical .pk-ref-tab-actions .pk-btn,#pk-canonical .pk-edge,#pk-canonical .pk-bottom-rail .pk-btn{width:44px!important;height:44px!important;min-width:44px!important;min-height:44px!important}#pk-canonical .pk-bottom-rail{height:44px}}
+
+/* Quiet editable fields; hover remains on the containing control. */
+#pk-canonical .pk-pagebox:hover,#pk-canonical .pk-zoom-wrap:hover{background:var(--pk-hover)}
+#pk-canonical .pk-zoom-wrap:hover .pk-zoom-trigger{background:transparent}
+#pk-canonical .pk-searchbox{height:36px;padding:2px 9px;margin-top:5px;gap:7px;box-shadow:none;border:0;border-radius:10px}
+#pk-canonical .pk-searchbox input{padding:0;line-height:1.4;outline:none!important;box-shadow:none!important;border:0;background:transparent}
+#pk-canonical .pk-searchbox .pk-btn{width:28px!important;height:28px!important;min-width:28px!important;min-height:28px!important}
+#pk-canonical .pk-dialog{border:0;padding:23px;border-radius:17px;box-shadow:0 12px 48px #00000018}
+#pk-canonical .pk-dialog h3{font-size:15px}
+#pk-canonical .pk-dialog .pk-field-label{color:#777;margin-top:14px}
+#pk-canonical .pk-dialog .pk-field-label input{border:0;outline:none!important;box-shadow:none!important;background:#f3f3f3;border-radius:10px;padding:9px 11px;color:#333}
+#pk-canonical .pk-dialog .pk-field-label input:hover{background:#ededed}
+#pk-canonical .pk-editor .pk-source-return{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:#777;margin:0 0 7px;padding:5px 7px 5px 0}
+#pk-canonical .pk-editor .pk-source-return svg{width:14px;height:14px}
+#pk-canonical .pk-editor .pk-source-return:hover{background:#f0f0f0}
+@media(pointer:coarse){#pk-canonical .pk-searchbox{height:44px}#pk-canonical .pk-searchbox .pk-btn{width:44px!important;height:44px!important;min-width:44px!important;min-height:44px!important}}
+
+/* Compact tray junction: controls belong to the reference tab column. */
+#pk-canonical .pk-refdock{margin-top:8px}
+#pk-canonical .pk-ref-dock-controls{display:flex;align-items:center;gap:2px;margin:0 0 3px;padding:0 1px;color:#737373}
+#pk-canonical .pk-ref-dock-controls .pk-btn{width:28px!important;height:28px!important;min-width:28px!important;min-height:28px!important;padding:0!important}
+#pk-canonical .pk-bottom-rail{position:absolute;left:12px;bottom:12px;margin:0;height:28px;z-index:6;background:var(--pk-canvas);border-radius:8px}
+#pk-canonical[data-dock=&quot;true&quot;][data-edge=&quot;Soft fade&quot;] .pk-window:after{content:&quot;&quot;;position:absolute;left:14px;right:var(--pk-main-right);top:calc(var(--pk-work-bottom) - 18px);height:18px;background:linear-gradient(transparent,var(--pk-canvas));pointer-events:none;z-index:3}
+#pk-canonical[data-dock=&quot;true&quot;][data-edge=&quot;Rounded viewport&quot;] .pk-stage{margin-left:12px;width:calc(100% - 12px);background:#ededed;border-radius:16px;padding-left:14px}
+#pk-canonical[data-dock=&quot;true&quot;][data-edge=&quot;Tray shadow&quot;] .pk-refdock{box-shadow:0 -5px 14px #0000000c;z-index:3}
+#pk-canonical .pk-inline-ref .pk-ref-tabs{display:flex;flex-direction:row;flex-wrap:nowrap;align-items:center;overflow-x:auto;overflow-y:hidden;gap:5px;padding:2px 0 7px;scrollbar-width:thin}
+#pk-canonical .pk-inline-ref .pk-ref-tab{width:auto;flex:0 0 auto;max-width:230px;min-width:0}
+#pk-canonical .pk-inline-ref .pk-ref-tab .pk-ref-title{width:auto;flex:0 1 auto;max-width:142px;min-height:32px;padding:7px 8px;gap:7px;white-space:nowrap}
+#pk-canonical .pk-inline-ref .pk-ref-tab:not(.pk-current) .pk-ref-title{max-width:170px}
+#pk-canonical .pk-inline-ref .pk-ref-body{margin-top:3px}
+@media(pointer:coarse){#pk-canonical .pk-ref-dock-controls .pk-btn{width:44px!important;height:44px!important;min-width:44px!important;min-height:44px!important}#pk-canonical .pk-bottom-rail{height:44px}}
+
+/* Shared margins, with chevrons supported by real control gutters. */
+#pk-canonical{--pk-gap:12px;--pk-control-gutter:40px}
+#pk-canonical .pk-work{height:620px;min-height:0;gap:var(--pk-gap);padding:0 12px 12px 0;grid-template-rows:minmax(0,1fr)}
+#pk-canonical .pk-stage,#pk-canonical[data-dock=&quot;true&quot;] .pk-stage{display:grid;grid-template-columns:minmax(0,1fr) var(--pk-control-gutter);grid-template-rows:minmax(0,1fr);height:100%;min-height:0;padding:0;overflow:visible}
+#pk-canonical .pk-scroll{grid-column:1;grid-row:1;min-width:0;min-height:0;overflow:auto;padding:12px 18px 10px 26px;scrollbar-width:thin}
+#pk-canonical .pk-paper{max-width:none;zoom:var(--pk-sample-zoom,1);margin:0 auto}
+#pk-canonical .pk-edge{right:6px!important;top:10px;z-index:6}
+#pk-canonical .pk-aside{height:100%;min-height:0;overflow:auto}
+#pk-canonical[data-dock=&quot;true&quot;] .pk-work{height:388px;padding-bottom:0}
+#pk-canonical .pk-refdock{margin:var(--pk-gap) var(--pk-gap) var(--pk-gap)}
+#pk-canonical[data-bottom-rail=&quot;true&quot;] .pk-stage{grid-template-rows:minmax(0,1fr) var(--pk-control-gutter)}
+#pk-canonical .pk-bottom-rail{position:relative;grid-column:1 / -1;grid-row:2;left:auto;bottom:auto;margin:0;height:var(--pk-control-gutter);padding:6px 12px;z-index:6;background:var(--pk-canvas);border-radius:0;align-items:center}
+#pk-canonical .pk-window:after{display:none!important}
+#pk-canonical[data-bottom-fade=&quot;true&quot;] .pk-window:after{display:block!important;content:&quot;&quot;;position:absolute;left:12px;right:var(--pk-main-right);top:calc(var(--pk-work-bottom) - 18px);height:18px;background:linear-gradient(transparent,var(--pk-canvas));pointer-events:none;z-index:3}
+#pk-canonical[data-right-fade=&quot;true&quot;] .pk-stage:after{content:&quot;&quot;;position:absolute;top:0;bottom:0;right:calc(var(--pk-control-gutter) + var(--pk-scrollbar-width,0px));width:18px;background:linear-gradient(to right,transparent,var(--pk-canvas));pointer-events:none;z-index:3}
+#pk-canonical[data-bottom-rail=&quot;true&quot;] .pk-stage:after{bottom:var(--pk-control-gutter)}
+@container pk-reference (max-width:620px){#pk-canonical .pk-work{display:block;height:auto;padding:0 12px 12px}#pk-canonical .pk-stage{height:490px}#pk-canonical .pk-scroll{padding:8px 12px 12px 0}#pk-canonical .pk-aside{height:auto;margin-top:12px}#pk-canonical[data-dock=&quot;true&quot;] .pk-work{display:grid;grid-template-rows:235px 175px;height:422px;gap:12px;padding-bottom:0}#pk-canonical[data-dock=&quot;true&quot;] .pk-stage{height:100%}#pk-canonical[data-dock=&quot;true&quot;] .pk-aside{height:100%;margin:0}#pk-canonical .pk-editor{margin:12px 0 0;grid-column:1 / -1}#pk-canonical .pk-floating{grid-column:1 / -1}#pk-canonical .pk-stage:has(.pk-editor){height:auto;grid-template-rows:auto auto}#pk-canonical .pk-stage:has(.pk-editor) .pk-scroll{max-height:560px}}
+#pk-canonical[data-narrow=&quot;true&quot;] .pk-work{height:auto;padding:0 12px 12px}
+#pk-canonical[data-narrow=&quot;true&quot;] .pk-stage{height:auto;grid-template-rows:auto auto;padding:0}
+#pk-canonical[data-narrow=&quot;true&quot;] .pk-scroll{max-height:560px;padding:8px 12px 12px 0}
+#pk-canonical[data-narrow=&quot;true&quot;] .pk-floating{grid-column:1 / -1}
+#pk-canonical[data-narrow=&quot;true&quot;] .pk-editor{margin:12px 0 0}
+@media(pointer:coarse){#pk-canonical{--pk-control-gutter:56px}#pk-canonical .pk-edge{right:6px!important}#pk-canonical .pk-bottom-rail{height:56px}}
+#pk-canonical .pk-page-wrap{position:relative;flex:none}
+#pk-canonical .pk-pagebox{padding:0 3px}
+#pk-canonical .pk-page-trigger{width:auto;gap:6px;padding:0 4px;min-height:32px;border-radius:0 8px 8px 0}
+#pk-canonical .pk-page-trigger svg{width:12px;height:12px}
+#pk-canonical .pk-pagebox:hover .pk-page-trigger{background:transparent}
+#pk-canonical .pk-page-popover{left:0;right:auto}
+@media(pointer:coarse){#pk-canonical .pk-page-trigger{min-height:44px}}
+#pk-canonical .pk-outline-tree ul{list-style:none;margin:0;padding:0}
+#pk-canonical .pk-outline-tree ul ul{padding-left:15px}
+#pk-canonical .pk-outline-row{display:flex;align-items:center;gap:0;border-radius:10px;margin:2px 0}
+#pk-canonical .pk-outline-row:hover,#pk-canonical .pk-outline-row:focus-within{background:var(--pk-hover)}
+#pk-canonical .pk-outline-row.pk-current{background:#fff;box-shadow:0 2px 7px #00000006}
+#pk-canonical .pk-outline-tree .pk-outline{min-width:0;flex:1;align-items:center;padding:10px 7px 10px 2px;line-height:1.5;gap:8px}
+#pk-canonical .pk-outline-tree .pk-outline span:first-child{min-width:0;overflow-wrap:anywhere}
+#pk-canonical .pk-outline-tree .pk-outline span:last-child{flex:none;font-size:11px}
+#pk-canonical .pk-outline-disclosure,#pk-canonical .pk-outline-spacer{width:26px;min-width:26px;height:32px;min-height:32px;flex:none}
+#pk-canonical .pk-outline-disclosure svg{width:13px;height:13px}
+@media(pointer:coarse){#pk-canonical .pk-outline-disclosure,#pk-canonical .pk-outline-spacer{width:44px;min-width:44px;height:44px;min-height:44px}}
+
+/* Full-window document with independent overlay trays. */
+#pk-canonical{--pk-workspace-width:286px;--pk-reference-height:282px;--pk-overlay-gap:12px}
+#pk-canonical .pk-work,#pk-canonical[data-dock=&quot;true&quot;] .pk-work,#pk-canonical[data-narrow=&quot;true&quot;] .pk-work{position:relative;display:block;height:700px;min-height:0;padding:0;gap:0}
+#pk-canonical .pk-stage,#pk-canonical[data-dock=&quot;true&quot;] .pk-stage,#pk-canonical[data-bottom-rail=&quot;true&quot;] .pk-stage,#pk-canonical[data-narrow=&quot;true&quot;] .pk-stage,#pk-canonical .pk-stage:has(.pk-editor){position:absolute;inset:0;display:block;width:100%;height:100%;min-height:0;margin:0;padding:0;overflow:visible}
+#pk-canonical .pk-scroll,#pk-canonical[data-narrow=&quot;true&quot;] .pk-scroll,#pk-canonical .pk-stage:has(.pk-editor) .pk-scroll{position:absolute;inset:0;max-height:none;display:block;padding:12px 24px 52px;overflow:auto;scrollbar-width:thin;scroll-padding:24px}
+#pk-canonical[data-tray=&quot;true&quot;] .pk-scroll{padding-right:calc(var(--pk-workspace-width) + 52px)}
+#pk-canonical[data-dock=&quot;true&quot;] .pk-scroll{padding-bottom:calc(var(--pk-reference-height) + 48px)}
+#pk-canonical .pk-paper{margin:0}
+#pk-canonical .pk-aside,#pk-canonical[data-dock=&quot;true&quot;] .pk-aside{position:absolute;z-index:4;top:0;right:12px;bottom:12px;width:var(--pk-workspace-width);height:auto;min-height:0;margin:0;padding:12px;display:flex;flex-direction:column;overflow:visible;border:0;border-radius:16px;background:var(--pk-tray)}
+#pk-canonical[data-dock=&quot;true&quot;] .pk-aside{bottom:calc(var(--pk-reference-height) + 24px)}
+#pk-canonical .pk-aside .pk-modebar{flex:none;min-height:34px;padding:0;margin:0 0 12px;gap:0}
+#pk-canonical .pk-aside .pk-pane{flex:1;min-height:0;overflow:auto;overscroll-behavior:contain;scrollbar-width:thin;padding:0;scroll-padding:8px}
+#pk-canonical .pk-edge{top:10px;right:12px!important;background:var(--pk-canvas);border-radius:8px}
+#pk-canonical[data-tray=&quot;true&quot;] .pk-edge{right:calc(var(--pk-workspace-width) + 16px)!important}
+#pk-canonical .pk-bottom-rail{position:absolute;display:flex;left:12px;bottom:12px;right:auto;width:max-content;height:28px;min-height:0;padding:0;margin:0;background:var(--pk-canvas);border-radius:8px}
+#pk-canonical .pk-refdock{position:absolute;z-index:4;left:12px;right:12px;bottom:12px;height:var(--pk-reference-height);margin:0;padding:12px;grid-template-columns:240px minmax(0,1fr);gap:12px;align-items:stretch;overflow:visible}
+#pk-canonical .pk-refdock .pk-ref-sidebar{min-height:0;display:flex;flex-direction:column}
+#pk-canonical .pk-refdock .pk-ref-tabs{min-height:0;overflow:auto;scrollbar-width:thin}
+#pk-canonical .pk-refdock .pk-ref-body{min-height:0;height:100%;overflow:auto;overscroll-behavior:contain;scrollbar-width:thin;margin:0;max-width:none}
+#pk-canonical .pk-aside:before{content:&quot;&quot;;position:absolute;left:-18px;top:0;bottom:0;width:18px;pointer-events:none;background:linear-gradient(to right,transparent,var(--pk-canvas));z-index:-1}
+#pk-canonical .pk-refdock:before{content:&quot;&quot;;position:absolute;left:0;right:0;top:-18px;height:18px;pointer-events:none;background:linear-gradient(transparent,var(--pk-canvas));z-index:-1}
+#pk-canonical[data-bottom-fade=&quot;true&quot;] .pk-window:after{right:12px;left:12px;top:auto;bottom:0}
+#pk-canonical[data-right-fade=&quot;true&quot;] .pk-stage:after{right:var(--pk-scrollbar-width,0px);bottom:0;top:0}
+#pk-canonical .pk-pagebox{padding:0;gap:0;position:relative}
+#pk-canonical .pk-page-trigger{position:static;padding:0 6px 0 2px;min-width:0}
+#pk-canonical .pk-page-trigger:before{content:&quot;&quot;;position:absolute;inset:0;border-radius:8px}
+#pk-canonical .pk-pagebox input{position:relative;z-index:1}
+#pk-canonical .pk-outline-tree .pk-outline-disclosure,#pk-canonical .pk-outline-tree .pk-outline-spacer{width:20px;min-width:20px;flex-basis:20px;height:32px;min-height:32px;padding:0}
+#pk-canonical .pk-outline-tree .pk-outline{padding-left:0}
+#pk-canonical .pk-outline-tree ul ul{padding-left:12px}
+#pk-canonical .pk-editor{right:auto;left:24px;width:min(340px,calc(100% - var(--pk-workspace-width) - 68px));max-width:calc(100% - 48px);z-index:7}
+#pk-canonical[data-tray=&quot;false&quot;] .pk-editor{width:340px}
+@container pk-reference (max-width:850px){#pk-canonical .pk-work{--pk-workspace-width:275px}#pk-canonical .pk-aside{padding:10px}#pk-canonical .pk-aside .pk-modebar{margin-bottom:10px}}
+@container pk-reference (max-width:620px){
+ #pk-canonical .pk-work{--pk-workspace-width:calc(100% - 24px);--pk-reference-height:300px}
+ #pk-canonical .pk-work,#pk-canonical[data-dock=&quot;true&quot;] .pk-work{height:820px}
+ #pk-canonical .pk-aside,#pk-canonical[data-dock=&quot;true&quot;] .pk-aside{top:auto;bottom:12px;height:290px;padding:12px}
+ #pk-canonical[data-dock=&quot;true&quot;] .pk-aside{bottom:calc(var(--pk-reference-height) + 24px);height:230px}
+ #pk-canonical .pk-aside .pk-modebar{margin-bottom:12px}
+ #pk-canonical .pk-edge,#pk-canonical[data-tray=&quot;true&quot;] .pk-edge{right:12px!important;top:10px}
+ #pk-canonical .pk-refdock{grid-template-columns:1fr;grid-template-rows:100px minmax(0,1fr)}
+ #pk-canonical .pk-refdock .pk-ref-tabs{display:flex;flex-direction:column;align-items:stretch}
+ #pk-canonical .pk-refdock .pk-ref-tabs .pk-ref-tab{flex:none}
+ #pk-canonical .pk-scroll,#pk-canonical[data-tray=&quot;true&quot;] .pk-scroll{padding:12px 24px 52px}
+ #pk-canonical[data-tray=&quot;true&quot;] .pk-scroll{padding-bottom:330px}
+ #pk-canonical[data-dock=&quot;true&quot;] .pk-scroll{padding-bottom:570px}
+ #pk-canonical .pk-editor,#pk-canonical[data-narrow=&quot;true&quot;] .pk-editor{position:absolute;top:auto!important;left:12px;right:12px;bottom:12px;width:auto;max-width:none;margin:0}
+ #pk-canonical .pk-aside:before{left:0;right:0;top:-18px;bottom:auto;width:auto;height:18px;background:linear-gradient(transparent,var(--pk-canvas))}
+}
+#pk-canonical[data-narrow=&quot;true&quot;] .pk-editor{position:absolute;top:auto!important;left:12px;right:12px;bottom:12px;width:auto;max-width:none;margin:0}
+@media(pointer:coarse){#pk-canonical .pk-bottom-rail{height:44px}#pk-canonical .pk-outline-tree .pk-outline-disclosure,#pk-canonical .pk-outline-tree .pk-outline-spacer{width:44px!important;min-width:44px!important;flex-basis:44px;height:44px;min-height:44px}}
+
+/* Reveal controls sit in soft-edged margins above the full-size PDF. */
+#pk-canonical{--pk-reveal-band:40px}
+#pk-canonical .pk-reveal-margin{position:absolute;z-index:3;pointer-events:none;background:var(--pk-canvas);display:none}
+#pk-canonical[data-tray=&quot;false&quot;] .pk-reveal-right{display:block;top:0;bottom:var(--pk-scrollbar-height,0px);right:var(--pk-scrollbar-width,0px);width:calc(var(--pk-reveal-band) - var(--pk-scrollbar-width,0px))}
+#pk-canonical .pk-reveal-right:before{content:&quot;&quot;;position:absolute;right:100%;top:0;bottom:0;width:18px;background:linear-gradient(to right,transparent,var(--pk-canvas))}
+#pk-canonical[data-bottom-rail=&quot;true&quot;] .pk-reveal-bottom{display:block;left:0;right:var(--pk-scrollbar-width,0px);bottom:var(--pk-scrollbar-height,0px);height:calc(var(--pk-reveal-band) - var(--pk-scrollbar-height,0px))}
+#pk-canonical .pk-reveal-bottom:before{content:&quot;&quot;;position:absolute;left:0;right:0;bottom:100%;height:18px;background:linear-gradient(transparent,var(--pk-canvas))}
+#pk-canonical[data-bottom-rail=&quot;true&quot;] .pk-window:after{display:none!important}
+#pk-canonical[data-tray=&quot;false&quot;] .pk-stage:after{display:none!important}
+#pk-canonical .pk-workspace-hide{flex:none;margin-right:3px}
+#pk-canonical .pk-modebar .pk-btn:not(:has(span)){width:28px!important;min-width:28px!important;height:32px!important;min-height:32px!important;padding:0!important}
+#pk-canonical .pk-modebar .pk-modes{gap:0}
+#pk-canonical .pk-modebar .pk-mode:has(span){padding-left:5px;padding-right:5px}
+@media(pointer:coarse){#pk-canonical{--pk-reveal-band:56px}#pk-canonical .pk-modebar{flex-wrap:wrap;row-gap:4px!important}#pk-canonical .pk-modebar .pk-btn:not(:has(span)){width:44px!important;min-width:44px!important;height:44px!important;min-height:44px!important}}
+
+/* Consistent header rhythm, numeric controls, and outline insets. */
+#pk-canonical .pk-work{--pk-workspace-width:304px}
+#pk-canonical .pk-toolbar{min-height:50px;padding-top:7px;padding-bottom:7px;align-items:center}
+#pk-canonical .pk-pagebox,#pk-canonical .pk-zoom-wrap{height:32px;font-size:13px;line-height:20px;font-weight:400;font-variant-numeric:tabular-nums;align-items:center}
+#pk-canonical .pk-toolbar .pk-number{height:32px;min-height:32px;margin:0;padding:6px 0;font-family:inherit;font-size:13px;line-height:20px;font-weight:400;vertical-align:middle}
+#pk-canonical .pk-pagebox .pk-number{width:28px}
+#pk-canonical .pk-zoom-wrap .pk-number{width:43px}
+#pk-canonical .pk-page-trigger{height:32px;min-height:32px;font-size:13px;line-height:20px;padding:0 6px 0 0}
+#pk-canonical .pk-page-trigger span{display:flex;align-items:center;height:32px;font-size:13px;line-height:20px}
+#pk-canonical .pk-aside .pk-modebar{gap:2px;align-items:center;min-height:34px}
+#pk-canonical .pk-modebar .pk-modes{flex:1;gap:2px}
+#pk-canonical .pk-modebar .pk-btn:not(:has(span)){width:32px!important;min-width:32px!important;height:34px!important;min-height:34px!important;padding:0!important;border-radius:9px}
+#pk-canonical .pk-modebar .pk-mode:has(span){height:34px;min-height:34px;padding:7px 8px;gap:6px}
+#pk-canonical .pk-workspace-hide{margin:0}
+#pk-canonical .pk-outline-tree .pk-outline-row{padding:0 4px}
+#pk-canonical .pk-outline-tree .pk-outline-disclosure,#pk-canonical .pk-outline-tree .pk-outline-spacer{width:28px;min-width:28px;flex-basis:28px;height:34px;min-height:34px}
+#pk-canonical .pk-outline-tree .pk-outline-disclosure svg{width:14px;height:14px}
+#pk-canonical .pk-outline-tree .pk-outline{padding:10px 6px 10px 4px;gap:10px}
+#pk-canonical .pk-outline-tree ul ul{padding-left:14px}
+#pk-canonical .pk-top-fade{display:none;position:absolute;left:0;right:var(--pk-scrollbar-width,0px);top:0;height:18px;z-index:3;pointer-events:none;background:linear-gradient(var(--pk-canvas),transparent)}
+#pk-canonical[data-top-fade=&quot;true&quot;] .pk-top-fade{display:block}
+@container pk-reference (max-width:620px){#pk-canonical .pk-work{--pk-workspace-width:calc(100% - 24px)}#pk-canonical .pk-toolbar{padding-top:6px;padding-bottom:6px}#pk-canonical .pk-modebar{flex-wrap:wrap;row-gap:4px!important}}
+@media(pointer:coarse){#pk-canonical .pk-modebar .pk-btn:not(:has(span)){width:44px!important;min-width:44px!important;height:44px!important;min-height:44px!important}#pk-canonical .pk-modebar .pk-mode:has(span){min-height:44px;height:44px}#pk-canonical .pk-toolbar .pk-number{font-size:16px}#pk-canonical .pk-page-trigger span{font-size:16px}#pk-canonical .pk-outline-tree .pk-outline-disclosure,#pk-canonical .pk-outline-tree .pk-outline-spacer{width:44px!important;min-width:44px!important;flex-basis:44px;height:44px;min-height:44px}}
+
+/* Fixed zoom unit and shared tray spacing. */
+#pk-canonical .pk-zoom-wrap{padding-left:5px;gap:0}
+#pk-canonical .pk-zoom-wrap .pk-number{width:3ch;text-align:right}
+#pk-canonical .pk-zoom-suffix{display:flex;align-items:center;height:32px;font-size:13px;line-height:20px;font-weight:400;user-select:none;margin:0;padding:0}
+#pk-canonical .pk-zoom-wrap .pk-zoom-trigger{width:20px!important;min-width:20px!important;margin:0;padding:0!important}
+#pk-canonical .pk-aside,#pk-canonical[data-dock=&quot;true&quot;] .pk-aside{top:12px;padding:12px}
+#pk-canonical .pk-aside .pk-modebar{padding:0;margin:0 0 12px}
+#pk-canonical .pk-pane&gt;:first-child{margin-top:0}
+#pk-canonical .pk-outline-tree&gt;ul&gt;li:first-child&gt;.pk-outline-row{margin-top:0}
+#pk-canonical .pk-refdock{padding:12px}
+#pk-canonical .pk-refdock .pk-ref-sidebar{gap:12px}
+#pk-canonical .pk-ref-dock-controls{padding:0;margin:0;min-height:34px;flex:none}
+@container pk-reference (max-width:620px){#pk-canonical .pk-aside,#pk-canonical[data-dock=&quot;true&quot;] .pk-aside{top:auto}}
+@media(pointer:coarse){#pk-canonical .pk-zoom-suffix{font-size:16px}#pk-canonical .pk-zoom-wrap .pk-zoom-trigger{width:44px!important;min-width:44px!important}#pk-canonical .pk-ref-dock-controls{min-height:44px}}
+
+/* Scrollbars are included in the margin budget, not added to it. */
+#pk-canonical .pk-window{padding:0}
+#pk-canonical .pk-aside,#pk-canonical[data-dock=&quot;true&quot;] .pk-aside{top:0;right:12px;padding:12px}
+#pk-canonical .pk-refdock{left:12px;right:12px;bottom:12px}
+#pk-canonical .pk-aside .pk-pane{margin-left:max(0px,calc(var(--pk-pane-scrollbar-width,0px) - 12px));margin-right:calc(-1 * min(12px,var(--pk-pane-scrollbar-width,0px)))}
+#pk-canonical .pk-scroll,#pk-canonical .pk-pane,#pk-canonical .pk-ref-body,#pk-canonical .pk-ref-tabs{scrollbar-color:#b8b8b8 transparent;scrollbar-width:thin}
+#pk-canonical .pk-scroll::-webkit-scrollbar,#pk-canonical .pk-pane::-webkit-scrollbar,#pk-canonical .pk-ref-body::-webkit-scrollbar,#pk-canonical .pk-ref-tabs::-webkit-scrollbar{width:8px;height:8px}
+#pk-canonical .pk-scroll::-webkit-scrollbar-track,#pk-canonical .pk-pane::-webkit-scrollbar-track,#pk-canonical .pk-ref-body::-webkit-scrollbar-track,#pk-canonical .pk-ref-tabs::-webkit-scrollbar-track{background:transparent}
+#pk-canonical .pk-scroll::-webkit-scrollbar-thumb,#pk-canonical .pk-pane::-webkit-scrollbar-thumb,#pk-canonical .pk-ref-body::-webkit-scrollbar-thumb,#pk-canonical .pk-ref-tabs::-webkit-scrollbar-thumb{background:#b8b8b8;border-radius:6px}
+@container pk-reference (max-width:620px){#pk-canonical .pk-aside,#pk-canonical[data-dock=&quot;true&quot;] .pk-aside{top:auto}}
+
+/* Empty clear actions retain their slot but leave focus and accessibility order. */
+#pk-canonical .pk-searchbox [data-action=&quot;clear-search&quot;]:disabled{visibility:hidden}
+#pk-canonical .pk-tip{overflow-wrap:anywhere;max-width:min(280px,calc(100% - 12px))}
+
+/* Balanced field controls and editor spacing. */
+#pk-canonical .pk-searchbox{height:36px;padding:4px 4px 4px 10px;gap:7px}
+#pk-canonical .pk-searchbox .pk-btn{flex:none;margin:0;width:28px!important;height:28px!important;min-width:28px!important;min-height:28px!important}
+#pk-canonical .pk-searchbox input::placeholder{color:var(--pk-muted);opacity:1}
+#pk-canonical .pk-dialog .pk-location-path{display:flex;justify-content:flex-start;text-align:left;max-width:100%;height:auto;min-height:28px;padding:4px 0;font-size:12px;line-height:20px;color:var(--pk-muted);white-space:normal}
+#pk-canonical .pk-location-path span{overflow-wrap:anywhere}
+#pk-canonical .pk-dialog .pk-location-path:hover{background:transparent;color:var(--pk-text);text-decoration:underline;text-underline-offset:3px}
+#pk-canonical .pk-dialog .pk-field-label input{margin-top:4px}
+#pk-canonical .pk-editor:not(.pk-peek){padding:12px}
+#pk-canonical .pk-editor:not(.pk-peek) .pk-editor-head{margin:0 0 12px;min-height:32px}
+#pk-canonical .pk-editor:not(.pk-peek) textarea{padding:0;margin:0}
+#pk-canonical .pk-editor:not(.pk-peek) .pk-actions{margin:12px 0 0;gap:6px}
+@media(pointer:coarse){#pk-canonical .pk-searchbox{height:52px;padding:4px 4px 4px 10px}#pk-canonical .pk-searchbox .pk-btn{width:44px!important;height:44px!important;min-width:44px!important;min-height:44px!important}#pk-canonical .pk-dialog .pk-location-path{min-height:44px}}
+/* Opaque backing covers tray corners and gutters; fades face the exposed PDF. */
+#pk-canonical .pk-tray-backing{position:absolute;z-index:3;pointer-events:none;background:var(--pk-canvas);right:var(--pk-scrollbar-width,0px);bottom:var(--pk-scrollbar-height,0px)}
+#pk-canonical .pk-tray-backing-right{top:0;left:var(--pk-backing-left)}
+#pk-canonical .pk-tray-backing-bottom{left:0;top:var(--pk-backing-top)}
+#pk-canonical .pk-tray-backing-right:before{content:&quot;&quot;;position:absolute;right:100%;top:0;bottom:0;width:18px;background:linear-gradient(to right,transparent,var(--pk-canvas))}
+#pk-canonical .pk-tray-backing-bottom:before{content:&quot;&quot;;position:absolute;left:0;right:0;bottom:100%;height:18px;background:linear-gradient(transparent,var(--pk-canvas))}
+#pk-canonical .pk-aside:before,#pk-canonical .pk-refdock:before{display:none}
+#pk-canonical[data-dock=&quot;true&quot;] .pk-window:after,#pk-canonical[data-side-backing=&quot;true&quot;] .pk-stage:after{display:none!important}
+/* Keep UI text on the shared system face even above illustrative PDF prose. */
+#pk-canonical .pk-editor,#pk-canonical .pk-dialog,#pk-canonical .pk-tip,#pk-canonical .pk-palette{font-family:var(--pk-font-ui)}
+#pk-canonical .pk-kind svg,#pk-canonical .pk-meta svg{width:14px;height:14px}
+#pk-canonical .pk-kind{color:var(--pk-muted);line-height:1;align-items:center}
+#pk-canonical .pk-kind svg{display:block;flex:none;width:14px;height:14px}
+/* Full annotation text is reached through its row, with no extra More action. */
+#pk-canonical .pk-long-excerpt{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;white-space:pre-line}
+#pk-canonical .pk-full-reader{display:flex;flex-direction:column;min-height:0;height:100%;font-family:var(--pk-font-ui);font-size:13px;line-height:1.6}
+#pk-canonical .pk-reader-head{display:flex;align-items:center;gap:7px;flex:none;padding:0 0 12px}
+#pk-canonical .pk-reader-meta{display:flex;align-items:center;gap:7px;flex:1;min-width:0;color:var(--pk-muted);font-size:12px}
+#pk-canonical .pk-reader-head .pk-btn{flex:none}
+#pk-canonical .pk-reader-body{min-height:0;overflow:auto;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:#b8b8b8 transparent;padding-right:0;margin-left:max(0px,calc(var(--pk-reader-scrollbar-width,0px) - 12px));margin-right:calc(-1 * min(12px,var(--pk-reader-scrollbar-width,0px)))}
+#pk-canonical .pk-reader-body p{margin:0 0 16px;white-space:pre-wrap;overflow-wrap:anywhere}
+#pk-canonical .pk-reader-body p:last-child{margin-bottom:0}
+#pk-canonical .pk-reader-status{white-space:nowrap;margin-left:3px}
+#pk-canonical .pk-pane:has(&gt;.pk-full-reader){overflow:hidden}
+#pk-canonical .pk-reader-popover{height:360px;max-height:calc(100% - 24px)}
+#pk-canonical .pk-ref-body .pk-reference-continuation{margin-top:32px}
+#pk-canonical .pk-pane.pk-inline-ref{display:flex;flex-direction:column;overflow:hidden}
+#pk-canonical .pk-inline-ref&gt;.pk-ref-tabs{flex:none}
+#pk-canonical .pk-inline-ref&gt;.pk-ref-body{flex:1;min-height:0;overflow:auto;overscroll-behavior:contain}
+&lt;/style&gt;
+&lt;div class=&quot;pk-window&quot;&gt;
+ &lt;header class=&quot;pk-toolbar&quot; aria-label=&quot;Document toolbar&quot;&gt;&lt;/header&gt;
+ &lt;div class=&quot;pk-notice&quot; role=&quot;alert&quot; hidden&gt;&lt;/div&gt;
+ &lt;div class=&quot;pk-work&quot;&gt;
+  &lt;main class=&quot;pk-stage&quot; aria-label=&quot;Main document&quot;&gt;
+   &lt;button class=&quot;pk-btn pk-edge&quot; data-action=&quot;toggle-tray&quot; aria-label=&quot;Show workspace&quot; data-pk-tip=&quot;Show workspace&quot;&gt;&lt;/button&gt;
+   &lt;div class=&quot;pk-scroll&quot;&gt;
+   &lt;article class=&quot;pk-paper&quot;&gt;
+    &lt;div class=&quot;pk-running&quot;&gt;&lt;span&gt;Information and choice&lt;/span&gt;&lt;span&gt;September 2026&lt;/span&gt;&lt;/div&gt;
+    &lt;h2&gt;2. Information and choice&lt;/h2&gt;
+    &lt;p&gt;Consumers choose among a set of differentiated products. Before making a choice, each consumer observes a signal about product quality.&lt;/p&gt;
+    &lt;p&gt;&lt;button class=&quot;pk-passage&quot; data-action=&quot;passage&quot; aria-label=&quot;Select passage: A more precise signal reduces uncertainty about the value of each alternative.&quot;&gt;A more precise signal reduces uncertainty about the value of each alternative.&lt;/button&gt; We allow the precision of this signal to vary across consumers.&lt;/p&gt;
+    &lt;div class=&quot;pk-later&quot;&gt;&lt;div class=&quot;pk-equation&quot;&gt;uᵢⱼ = δⱼ + μᵢⱼ + εᵢⱼ&lt;/div&gt;
+    &lt;p&gt;The specification separates mean utility from individual tastes. The assumptions in &lt;button class=&quot;pk-link&quot; data-action=&quot;link&quot; aria-label=&quot;Reference: Proposition 1, page 12&quot;&gt;Proposition 1&lt;/button&gt; imply that the choice probabilities are continuous in signal precision.&lt;/p&gt;
+    &lt;p&gt;We use this relationship to characterize how information changes demand. &lt;button class=&quot;pk-link&quot; data-action=&quot;link&quot;&gt;Appendix A&lt;/button&gt; gives the proof and discusses the boundary cases.&lt;/p&gt;&lt;/div&gt;
+    &lt;p class=&quot;pk-footnote&quot;&gt;The example holds prices fixed. The equilibrium response is considered in Section 4.&lt;/p&gt;
+    &lt;div class=&quot;pk-page-bottom&quot;&gt;4&lt;/div&gt;
+   &lt;/article&gt;
+   &lt;/div&gt;
+   &lt;div class=&quot;pk-tray-backing pk-tray-backing-right&quot; aria-hidden=&quot;true&quot; hidden&gt;&lt;/div&gt;
+   &lt;div class=&quot;pk-tray-backing pk-tray-backing-bottom&quot; aria-hidden=&quot;true&quot; hidden&gt;&lt;/div&gt;
+   &lt;div class=&quot;pk-top-fade&quot; aria-hidden=&quot;true&quot;&gt;&lt;/div&gt;
+   &lt;div class=&quot;pk-reveal-margin pk-reveal-right&quot; aria-hidden=&quot;true&quot;&gt;&lt;/div&gt;
+   &lt;div class=&quot;pk-reveal-margin pk-reveal-bottom&quot; aria-hidden=&quot;true&quot;&gt;&lt;/div&gt;
+   &lt;div class=&quot;pk-floating&quot;&gt;&lt;/div&gt;
+   &lt;div class=&quot;pk-bottom-rail&quot; hidden&gt;&lt;/div&gt;
+
+  &lt;/main&gt;
+  &lt;aside class=&quot;pk-aside&quot; id=&quot;pk-workspace-tray&quot; aria-label=&quot;Workspace&quot;&gt;&lt;div class=&quot;pk-modebar&quot;&gt;&lt;/div&gt;&lt;div class=&quot;pk-pane&quot; id=&quot;pk-canonical-panel&quot; role=&quot;tabpanel&quot;&gt;&lt;/div&gt;&lt;/aside&gt;
+ &lt;section class=&quot;pk-refdock&quot; id=&quot;pk-bottom-references&quot; aria-label=&quot;References below document and workspace&quot; hidden&gt;&lt;/section&gt;
+ &lt;/div&gt;
+ &lt;div class=&quot;pk-overlay&quot; hidden&gt;&lt;/div&gt;
+ &lt;div class=&quot;pk-announcement&quot; aria-live=&quot;polite&quot;&gt;&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class=&quot;pk-tip&quot; role=&quot;tooltip&quot; id=&quot;pk-control-tooltip&quot; hidden&gt;&lt;/div&gt;
+&lt;script&gt;
+(()=&gt;{
+const root=document.getElementById(&#x27;pk-canonical&#x27;);
+const icons={back:&#x27;chevron-left&#x27;,forward:&#x27;chevron-right&#x27;,up:&#x27;chevron-up&#x27;,down:&#x27;chevron-down&#x27;,undo:&#x27;undo-2&#x27;,redo:&#x27;redo-2&#x27;,minus:&#x27;minus&#x27;,plus:&#x27;plus&#x27;,fit:&#x27;move-horizontal&#x27;,link:&#x27;link&#x27;,outline:&#x27;list-tree&#x27;,search:&#x27;search&#x27;,annotations:&#x27;message-square&#x27;,references:&#x27;panels-top-left&#x27;,collapse:&#x27;panel-right-close&#x27;,expand:&#x27;panel-right-open&#x27;,close:&#x27;x&#x27;,dock:&#x27;panel-bottom&#x27;,side:&#x27;panel-right&#x27;,replace:&#x27;arrow-right-left&#x27;,delete:&#x27;minus&#x27;,highlight:&#x27;highlighter&#x27;,copy:&#x27;copy&#x27;,edit:&#x27;pencil&#x27;,trash:&#x27;trash-2&#x27;,more:&#x27;ellipsis&#x27;,anchor:&#x27;locate-fixed&#x27;,send:&#x27;square-arrow-out-up-right&#x27;,return:&#x27;corner-up-left&#x27;,save:&#x27;save&#x27;,file:&#x27;file-text&#x27;,check:&#x27;check&#x27;,external:&#x27;square-arrow-out-up-right&#x27;,insert:&#x27;text-cursor&#x27;,fold:&#x27;fold-vertical&#x27;,unfold:&#x27;unfold-vertical&#x27;};
+const icon=n=&gt;`&lt;i data-lucide=&quot;${icons[n]||&#x27;ellipsis&#x27;}&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;`;
+const esc=s=&gt;String(s).replace(/[&amp;&lt;&gt;&quot;&#x27;]/g,c=&gt;({&#x27;&amp;&#x27;:&#x27;&amp;amp;&#x27;,&#x27;&lt;&#x27;:&#x27;&amp;lt;&#x27;,&#x27;&gt;&#x27;:&#x27;&amp;gt;&#x27;,&#x27;&quot;&#x27;:&#x27;&amp;quot;&#x27;,&quot;&#x27;&quot;:&#x27;&amp;#39;&#x27;}[c]));
+const btn=(n,label,action,extra=&#x27;&#x27;)=&gt;`&lt;button class=&quot;pk-btn&quot; aria-label=&quot;${esc(label)}&quot; data-pk-tip=&quot;${esc(label)}&quot; data-action=&quot;${action}&quot; ${extra}&gt;${icon(n)}&lt;/button&gt;`;
+const scenes=[&#x27;Reading&#x27;,&#x27;Annotations&#x27;,&#x27;Full annotation&#x27;,&#x27;Outline&#x27;,&#x27;Search&#x27;,&#x27;Text selection&#x27;,&#x27;Passage editor&#x27;,&#x27;Editor offscreen&#x27;,&#x27;Annotation peek&#x27;,&#x27;Split references&#x27;,&#x27;Reference link&#x27;,&#x27;Save setup&#x27;,&#x27;Save failure&#x27;,&#x27;Narrow editor&#x27;];
+const review={scene:&#x27;Split references&#x27;,zoom:100};let paperBaseWidth=null;
+const state={mode:&#x27;annotations&#x27;,tray:true,page:4,zoom:100,selected:0,reader:null,readerReturn:&#x27;list&#x27;,readerScroll:0,readerTextScroll:0,readerPeek:&#x27;&#x27;,refScroll:{},floating:&#x27;&#x27;,offscreen:false,draft:&#x27;A more precise signal reduces uncertainty about the utility of each alternative.&#x27;,kind:&#x27;Replacement&#x27;,query:&#x27;&#x27;,dock:false,refVisible:true,zoomOpen:false,pageOpen:false,outlineExpanded:[&quot;information&quot;,&quot;signals&quot;,&quot;appendix&quot;],outlineRestore:null,refs:true,refIds:[0,1],ref:0,refPage:12,modal:false,failure:false,narrow:false,dirty:false,undoAvailable:false,redoAvailable:false,history:[],future:[],own:true,firstSave:false};
+const q=s=&gt;root.querySelector(s);
+const announce=s=&gt;q(&#x27;.pk-announcement&#x27;).textContent=s;
+function setScene(name){paperBaseWidth=null;annotationText=longComment;review.scene=name;const chosenZoom=review.zoom;state.draft=&#x27;A more precise signal reduces uncertainty about the utility of each alternative.&#x27;;state.query=&#x27;&#x27;;Object.assign(state,{mode:&#x27;annotations&#x27;,tray:true,page:4,zoom:100,selected:0,reader:null,readerReturn:&#x27;list&#x27;,readerScroll:0,readerTextScroll:0,readerPeek:&#x27;&#x27;,refScroll:{},floating:&#x27;&#x27;,offscreen:false,kind:&#x27;Replacement&#x27;,dock:false,refVisible:true,zoomOpen:false,pageOpen:false,outlineExpanded:[&quot;information&quot;,&quot;signals&quot;,&quot;appendix&quot;],outlineRestore:null,refs:true,refIds:[0,1],ref:0,refPage:12,modal:false,failure:false,narrow:false,dirty:false,undoAvailable:false,redoAvailable:false,history:[],future:[],own:true,firstSave:false});if(name===&#x27;Full annotation&#x27;){state.reader=0;state.selected=0;}if(name===&#x27;Reading&#x27;)state.tray=false;if(name===&#x27;Outline&#x27;)state.mode=&#x27;outline&#x27;;if(name===&#x27;Search&#x27;)state.mode=&#x27;search&#x27;;if(name===&#x27;Text selection&#x27;)state.floating=&#x27;selection&#x27;;if(name===&#x27;Passage editor&#x27;)state.floating=&#x27;editor&#x27;;if(name===&#x27;Editor offscreen&#x27;){state.floating=&#x27;editor&#x27;;state.offscreen=true;state.page=7;}if(name===&#x27;Annotation peek&#x27;){state.floating=&#x27;peek&#x27;;state.tray=false;}if(name===&#x27;Split references&#x27;){state.dock=true;state.mode=&#x27;search&#x27;;}if(name===&#x27;Reference link&#x27;){state.mode=&#x27;references&#x27;;state.refPage=13;state.floating=&#x27;ref-link&#x27;;}if(name===&#x27;Save setup&#x27;){state.floating=&#x27;editor&#x27;;state.modal=true;state.firstSave=true;}if(name===&#x27;Save failure&#x27;){state.failure=true;state.dirty=true;state.undoAvailable=true;}if(name===&#x27;Narrow editor&#x27;){state.tray=false;state.floating=&#x27;editor&#x27;;state.narrow=true;}state.zoom=chosenZoom;render();}
+function toolbar(){q(&#x27;.pk-toolbar&#x27;).innerHTML=btn(&#x27;file&#x27;,&#x27;Document actions and save destination, information-and-choice.pdf&#x27;,&#x27;save&#x27;).replace(&#x27;class=&quot;pk-btn&quot;&#x27;,&#x27;class=&quot;pk-btn pk-file&quot;&#x27;).replace(&#x27;&lt;/button&gt;&#x27;,`&lt;span&gt;information-and-choice.pdf&lt;/span&gt;${state.dirty?&#x27;&lt;i class=&quot;pk-dirty&quot; aria-label=&quot;Unsaved changes&quot;&gt;&lt;/i&gt;&#x27;:&#x27;&#x27;}&lt;/button&gt;`)+`&lt;span class=&quot;pk-toolbar-space&quot;&gt;&lt;/span&gt;&lt;div class=&quot;pk-command&quot; aria-label=&quot;Annotation history&quot;&gt;${state.undoAvailable?btn(&#x27;undo&#x27;,&#x27;Undo annotation&#x27;,&#x27;undo&#x27;):&#x27;&#x27;}${state.redoAvailable?btn(&#x27;redo&#x27;,&#x27;Redo annotation&#x27;,&#x27;redo&#x27;):&#x27;&#x27;}&lt;/div&gt;&lt;div class=&quot;pk-command pk-navigation&quot; role=&quot;group&quot; aria-label=&quot;Document navigation&quot;&gt;&lt;span class=&quot;pk-history-pair&quot;&gt;${state.history.length?btn(&#x27;back&#x27;,&#x27;Back in main document&#x27;,&#x27;back&#x27;):&#x27;&#x27;}${state.future.length?btn(&#x27;forward&#x27;,&#x27;Forward in main document&#x27;,&#x27;forward&#x27;):&#x27;&#x27;}&lt;/span&gt;&lt;div class=&quot;pk-page-wrap&quot;&gt;&lt;div class=&quot;pk-pagebox&quot;&gt;&lt;input class=&quot;pk-number&quot; data-field=&quot;page&quot; aria-label=&quot;Page number&quot; value=&quot;${state.page}&quot; inputmode=&quot;numeric&quot;&gt;&lt;button class=&quot;pk-btn pk-page-trigger&quot; data-action=&quot;page-menu&quot; aria-label=&quot;Page navigation&quot; aria-expanded=&quot;${state.pageOpen}&quot; aria-controls=&quot;pk-page-controls&quot; data-pk-tip=&quot;Pages&quot;&gt;&lt;span class=&quot;pk-muted&quot;&gt;/ 28&lt;/span&gt;&lt;/button&gt;&lt;/div&gt;${state.pageOpen?`&lt;div class=&quot;pk-zoom-popover pk-page-popover&quot; id=&quot;pk-page-controls&quot; role=&quot;group&quot; aria-label=&quot;Page navigation&quot;&gt;${state.page&gt;1?btn(&#x27;up&#x27;,&#x27;Previous page&#x27;,&#x27;previous&#x27;):&#x27;&#x27;}${state.page&lt;28?btn(&#x27;down&#x27;,&#x27;Next page&#x27;,&#x27;next&#x27;):&#x27;&#x27;}&lt;/div&gt;`:&#x27;&#x27;}&lt;/div&gt;&lt;/div&gt;&lt;div class=&quot;pk-zoom-wrap&quot;&gt;&lt;input class=&quot;pk-number pk-zoom-value&quot; data-field=&quot;zoom&quot; aria-label=&quot;Zoom percent&quot; inputmode=&quot;numeric&quot; value=&quot;${state.zoom}&quot;&gt;&lt;span class=&quot;pk-zoom-suffix&quot; aria-hidden=&quot;true&quot;&gt;%&lt;/span&gt;&lt;button class=&quot;pk-btn pk-zoom-trigger&quot; data-action=&quot;zoom-menu&quot; aria-label=&quot;Zoom controls, ${state.zoom} percent&quot; aria-expanded=&quot;${state.zoomOpen}&quot; aria-controls=&quot;pk-zoom-controls&quot; data-pk-tip=&quot;Zoom&quot;&gt;${icon(&#x27;down&#x27;)}&lt;/button&gt;${state.zoomOpen?`&lt;div class=&quot;pk-zoom-popover&quot; id=&quot;pk-zoom-controls&quot; role=&quot;group&quot; aria-label=&quot;Zoom controls&quot;&gt;${btn(&#x27;minus&#x27;,&#x27;Zoom out&#x27;,&#x27;minus&#x27;)}${btn(&#x27;plus&#x27;,&#x27;Zoom in&#x27;,&#x27;plus&#x27;)}${btn(&#x27;fit&#x27;,&#x27;Fit width&#x27;,&#x27;fit&#x27;)}&lt;/div&gt;`:&#x27;&#x27;}&lt;/div&gt;${btn(&#x27;link&#x27;,&#x27;Copy link to current location&#x27;,&#x27;copy&#x27;)}`;}
+function modes(){const items=[[&#x27;outline&#x27;,&#x27;Outline&#x27;],[&#x27;search&#x27;,&#x27;Search&#x27;],[&#x27;annotations&#x27;,&#x27;Annotations&#x27;],...(!state.dock&amp;&amp;state.refs?[[&#x27;references&#x27;,&#x27;References&#x27;]]:[])];q(&#x27;.pk-aside .pk-modebar&#x27;).innerHTML=btn(&#x27;forward&#x27;,&#x27;Hide workspace&#x27;,&#x27;toggle-tray&#x27;,&#x27;aria-expanded=&quot;true&quot; aria-controls=&quot;pk-workspace-tray&quot;&#x27;).replace(&#x27;pk-btn&#x27;,&#x27;pk-btn pk-workspace-hide&#x27;)+`&lt;div class=&quot;pk-modes&quot; role=&quot;tablist&quot; aria-label=&quot;Workspace modes&quot;&gt;${items.map(([id,label])=&gt;`&lt;button id=&quot;pk-mode-${id}&quot; class=&quot;pk-btn pk-mode&quot; role=&quot;tab&quot; aria-controls=&quot;pk-canonical-panel&quot; aria-selected=&quot;${state.mode===id}&quot; aria-label=&quot;${label}&quot; data-pk-tip=&quot;${label}&quot; data-action=&quot;mode-${id}&quot;&gt;${icon(id)}${state.mode===id?`&lt;span&gt;${label}&lt;/span&gt;`:&#x27;&#x27;}&lt;/button&gt;`).join(&#x27;&#x27;)}&lt;/div&gt;${state.mode===&#x27;outline&#x27;?btn(state.outlineRestore?&#x27;unfold&#x27;:&#x27;fold&#x27;,state.outlineRestore?&#x27;Restore previous outline expansion&#x27;:&#x27;Collapse all outline entries&#x27;,&#x27;outline-all&#x27;,`aria-pressed=&quot;${!!state.outlineRestore}&quot; ${!state.outlineRestore&amp;&amp;!state.outlineExpanded.length?&#x27;disabled&#x27;:&#x27;&#x27;}`):&#x27;&#x27;}${state.mode===&#x27;references&#x27;&amp;&amp;!state.dock&amp;&amp;state.refs?btn(&#x27;dock&#x27;,&#x27;Move References below the document&#x27;,&#x27;dock&#x27;):&#x27;&#x27;}`;q(&#x27;.pk-pane&#x27;).setAttribute(&#x27;aria-labelledby&#x27;,`pk-mode-${state.mode}`);}
+const longComment=&#x27;Clarify whether precision varies across consumers or across products. The distinction matters for interpreting the comparative static: a change in the information available to a consumer is not necessarily the same experiment as a change in the information available about one product.\n\nPlease state which objects are held fixed when precision changes, and whether the consumer observes the realized signal or only knows its distribution. The current description leaves open whether the information structure is common across alternatives.\n\nThe empirical section could make this concrete with one example. Describe how the observed variation changes posterior beliefs, which choice probabilities respond, and how the resulting moments distinguish information from preferences.\n\nIt would also help to connect this argument to the exclusion restriction below. If the source of variation can affect utility directly, explain which controls or restrictions separate that channel from the information effect. Keep the identifying assumption distinct from the interpretation of the estimated parameter.\n\nFinally, check that the terminology is consistent between the model, identification argument, and appendix. In particular, use precision for the property of the signal distribution and uncertainty for the consumer’s posterior assessment.&#x27;;
+const importedComment=&#x27;The exclusion restriction is sufficient under the maintained information structure, but the scope of that conclusion needs to be stated explicitly. The argument conditions on the distribution of preferences and the support of the observed covariates.\n\nPlease explain whether the same restriction remains sufficient when precision varies across both consumers and products. If not, identify the additional variation needed to distinguish those two sources of heterogeneity.\n\nThe appendix should also state the regularity conditions used to interchange limits and expectations. A short explanation of how these conditions apply to the empirical specification would make the connection between the theoretical result and its implementation easier to follow.&#x27;;
+let annotationText=longComment;
+function annotationReader(){const imported=state.reader===2,content=imported?importedComment:annotationText,page=imported?9:4;return `&lt;section class=&quot;pk-full-reader&quot; role=&quot;region&quot; aria-label=&quot;Full highlight annotation, Page ${page}&quot;&gt;&lt;div class=&quot;pk-reader-head&quot;&gt;${btn(&#x27;back&#x27;,state.readerReturn===&#x27;peek&#x27;?&#x27;Back to annotation&#x27;:&#x27;Back to annotations&#x27;,&#x27;reader-back&#x27;)}&lt;span class=&quot;pk-reader-meta&quot; aria-label=&quot;Highlight, Page ${page}&quot;&gt;&lt;span class=&quot;pk-kind&quot; data-pk-tip=&quot;Highlight&quot;&gt;${icon(&#x27;highlight&#x27;)}&lt;/span&gt;&lt;span&gt;${page}&lt;/span&gt;${imported?&#x27;&lt;span class=&quot;pk-reader-status&quot;&gt;Read only&lt;/span&gt;&#x27;:&#x27;&#x27;}&lt;/span&gt;${btn(&#x27;anchor&#x27;,&#x27;Back to annotation in PDF&#x27;,&#x27;reader-anchor&#x27;,&#x27;hidden disabled&#x27;)}${imported?&#x27;&#x27;:btn(&#x27;edit&#x27;,&#x27;Edit annotation&#x27;,&#x27;reader-edit&#x27;)}&lt;/div&gt;&lt;div class=&quot;pk-reader-body&quot;&gt;${content.split(&#x27;\n\n&#x27;).map(p=&gt;`&lt;p&gt;${esc(p)}&lt;/p&gt;`).join(&#x27;&#x27;)}&lt;/div&gt;&lt;/section&gt;`;}
+function annotations(){if(state.reader!==null&amp;&amp;state.readerReturn===&#x27;list&#x27;)return annotationReader();const head=(type,page,actions)=&gt;`&lt;div class=&quot;pk-row-head&quot;&gt;&lt;span class=&quot;pk-kind&quot; data-pk-tip=&quot;${type}&quot; aria-label=&quot;${type}&quot;&gt;${icon(type===&#x27;Replacement&#x27;?&#x27;replace&#x27;:type===&#x27;Deletion&#x27;?&#x27;delete&#x27;:&#x27;highlight&#x27;)}&lt;/span&gt;&lt;span class=&quot;pk-page-label&quot;&gt;${page}&lt;/span&gt;&lt;div class=&quot;pk-row-actions&quot;&gt;${actions}&lt;/div&gt;&lt;/div&gt;`;return `${state.own?`&lt;div class=&quot;pk-row ${state.selected===0?&#x27;pk-current&#x27;:&#x27;&#x27;}&quot; data-action=&quot;row-0&quot;&gt;${head(&#x27;Highlight&#x27;,4,btn(&#x27;edit&#x27;,&#x27;Edit annotation&#x27;,&#x27;edit&#x27;)+btn(&#x27;link&#x27;,&#x27;Copy annotation link&#x27;,&#x27;copy&#x27;)+btn(&#x27;trash&#x27;,&#x27;Remove annotation&#x27;,&#x27;remove&#x27;))}&lt;button class=&quot;pk-row-nav&quot; data-action=&quot;row-0&quot; aria-label=&quot;Highlight, Page 4. ${esc(annotationText.slice(0,180))}&quot;&gt;&lt;p class=&quot;pk-long-excerpt&quot; data-long-excerpt&gt;${esc(annotationText)}&lt;/p&gt;&lt;div class=&quot;pk-quote&quot;&gt;A more precise signal reduces uncertainty…&lt;/div&gt;&lt;/button&gt;&lt;/div&gt;`:&#x27;&#x27;}&lt;div class=&quot;pk-row ${state.selected===1?&#x27;pk-current&#x27;:&#x27;&#x27;}&quot; data-action=&quot;row-1&quot;&gt;${head(&#x27;Replacement&#x27;,6,btn(&#x27;edit&#x27;,&#x27;Edit replacement&#x27;,&#x27;edit-replacement&#x27;)+btn(&#x27;link&#x27;,&#x27;Copy annotation link&#x27;,&#x27;copy&#x27;)+btn(&#x27;trash&#x27;,&#x27;Remove replacement&#x27;,&#x27;remove&#x27;))}&lt;button class=&quot;pk-row-nav&quot; data-action=&quot;row-1&quot; aria-label=&quot;Replacement, Page 6. Replace estimate these parameters separately with estimate the parameters jointly.&quot;&gt;&lt;div class=&quot;pk-before&quot;&gt;&lt;s&gt;estimate these parameters separately&lt;/s&gt;&lt;/div&gt;&lt;p&gt;estimate the parameters jointly&lt;/p&gt;&lt;/button&gt;&lt;/div&gt;&lt;div class=&quot;pk-row ${state.selected===3?&#x27;pk-current&#x27;:&#x27;&#x27;}&quot; data-action=&quot;row-3&quot;&gt;${head(&#x27;Deletion&#x27;,8,btn(&#x27;link&#x27;,&#x27;Copy deletion link&#x27;,&#x27;copy&#x27;)+btn(&#x27;trash&#x27;,&#x27;Remove deletion&#x27;,&#x27;remove&#x27;))}&lt;button class=&quot;pk-row-nav&quot; data-action=&quot;row-3&quot; aria-label=&quot;Deletion, Page 8. Delete in a very straightforward manner.&quot;&gt;&lt;div class=&quot;pk-before&quot;&gt;&lt;s&gt;in a very straightforward manner&lt;/s&gt;&lt;/div&gt;&lt;/button&gt;&lt;/div&gt;&lt;div class=&quot;pk-row ${state.selected===2?&#x27;pk-current&#x27;:&#x27;&#x27;}&quot; data-action=&quot;row-2&quot;&gt;${head(&#x27;Highlight&#x27;,9,btn(&#x27;link&#x27;,&#x27;Copy annotation link&#x27;,&#x27;copy&#x27;))}&lt;button class=&quot;pk-row-nav&quot; data-action=&quot;row-2&quot; aria-label=&quot;Read-only highlight from this PDF, Page 9. The exclusion restriction is sufficient. Read full annotation.&quot;&gt;&lt;p class=&quot;pk-long-excerpt&quot; data-long-excerpt&gt;${esc(importedComment)}&lt;/p&gt;&lt;div class=&quot;pk-provenance&quot;&gt;From this PDF&lt;/div&gt;&lt;/button&gt;&lt;/div&gt;`;}
+function openAnnotationReader(id,fromPeek){state.readerTextScroll=0;state.reader=id;state.readerReturn=fromPeek?&#x27;peek&#x27;:&#x27;list&#x27;;state.readerScroll=q(&#x27;.pk-pane&#x27;).scrollTop;state.readerPeek=state.floating;state.floating=fromPeek?&#x27;reader&#x27;:&#x27;&#x27;;}
+function closeAnnotationReader(){const fromPeek=state.readerReturn===&#x27;peek&#x27;;state.reader=null;state.floating=fromPeek?state.readerPeek:&#x27;&#x27;;}
+function searchResults(){const term=state.query.trim().toLowerCase();if(!term)return &#x27;&#x27;;const rows=[[4,&#x27;Information and choice&#x27;,&#x27;A more precise signal reduces uncertainty about the value of each alternative.&#x27;],[7,&#x27;Identification&#x27;,&#x27;We observe the distribution of signal precision in each market.&#x27;],[16,&#x27;Appendix B&#x27;,&#x27;The signal is independent of the idiosyncratic taste shock.&#x27;]].filter(r=&gt;r[2].toLowerCase().includes(term));return `&lt;div class=&quot;pk-count&quot;&gt;${rows.length} ${rows.length===1?&#x27;result&#x27;:&#x27;results&#x27;}&lt;/div&gt;`+rows.map(([p,title,text])=&gt;{const at=text.toLowerCase().indexOf(term);return `&lt;button class=&quot;pk-result ${state.page===p?&#x27;pk-current&#x27;:&#x27;&#x27;}&quot; data-action=&quot;result-${p}&quot; aria-label=&quot;Search result, Page ${p}&quot;&gt;&lt;div class=&quot;pk-meta&quot;&gt;&lt;span&gt;${title}&lt;/span&gt;&lt;span&gt;${p}&lt;/span&gt;&lt;/div&gt;&lt;p&gt;${esc(text.slice(0,at))}&lt;mark&gt;${esc(text.slice(at,at+term.length))}&lt;/mark&gt;${esc(text.slice(at+term.length))}&lt;/p&gt;&lt;/button&gt;`;}).join(&#x27;&#x27;);}
+function search(){return `&lt;div class=&quot;pk-searchbox&quot;&gt;${icon(&#x27;search&#x27;)}&lt;input data-field=&quot;search&quot; aria-label=&quot;Search document&quot; placeholder=&quot;Search this document&quot; value=&quot;${esc(state.query)}&quot;&gt;${btn(&#x27;close&#x27;,&#x27;Clear search&#x27;,&#x27;clear-search&#x27;,state.query.length?&#x27;&#x27;:&#x27;disabled aria-hidden=&quot;true&quot;&#x27;)}&lt;/div&gt;&lt;div class=&quot;pk-search-results&quot; aria-live=&quot;polite&quot;&gt;${searchResults()}&lt;/div&gt;`;}
+const outlineItems=[{id:&#x27;intro&#x27;,title:&#x27;1. Introduction&#x27;,page:1},{id:&#x27;information&#x27;,title:&#x27;2. Information and choice&#x27;,page:4,children:[{id:&#x27;signals&#x27;,title:&#x27;2.1. Signals&#x27;,page:5,children:[{id:&#x27;precision&#x27;,title:&#x27;2.1.1. Precision&#x27;,page:6}]},{id:&#x27;preferences&#x27;,title:&#x27;2.2. Preferences&#x27;,page:6}]},{id:&#x27;identification&#x27;,title:&#x27;3. Identification&#x27;,page:7},{id:&#x27;equilibrium&#x27;,title:&#x27;4. Equilibrium&#x27;,page:10},{id:&#x27;appendix&#x27;,title:&#x27;Appendix A. Proofs&#x27;,page:12,children:[{id:&#x27;proof&#x27;,title:&#x27;A.1. Proposition 1&#x27;,page:12},{id:&#x27;lemma&#x27;,title:&#x27;A.2. Auxiliary result&#x27;,page:14}]},{id:&#x27;extensions&#x27;,title:&#x27;Appendix B. Extensions&#x27;,page:16}];
+function outline(){const items=(list)=&gt;`&lt;ul&gt;${list.map(item=&gt;{const expanded=state.outlineExpanded.includes(item.id);return `&lt;li&gt;&lt;div class=&quot;pk-outline-row ${state.page===item.page?&#x27;pk-current&#x27;:&#x27;&#x27;}&quot;&gt;${item.children?btn(expanded?&#x27;down&#x27;:&#x27;forward&#x27;,`${expanded?&#x27;Collapse&#x27;:&#x27;Expand&#x27;} ${item.title}`,&#x27;outline-branch-&#x27;+item.id,`aria-expanded=&quot;${expanded}&quot; aria-controls=&quot;pk-outline-${item.id}&quot;`).replace(&#x27;pk-btn&#x27;,&#x27;pk-btn pk-outline-disclosure&#x27;):&#x27;&lt;span class=&quot;pk-outline-spacer&quot; aria-hidden=&quot;true&quot;&gt;&lt;/span&gt;&#x27;}&lt;button class=&quot;pk-outline&quot; data-action=&quot;result-${item.page}&quot; aria-label=&quot;${item.title}, Page ${item.page}&quot; ${state.page===item.page?&#x27;aria-current=&quot;location&quot;&#x27;:&#x27;&#x27;}&gt;&lt;span&gt;${item.title}&lt;/span&gt;&lt;span class=&quot;pk-muted&quot;&gt;${item.page}&lt;/span&gt;&lt;/button&gt;&lt;/div&gt;${item.children?`&lt;div id=&quot;pk-outline-${item.id}&quot; ${expanded?&#x27;&#x27;:&#x27;hidden&#x27;}&gt;${items(item.children)}&lt;/div&gt;`:&#x27;&#x27;}&lt;/li&gt;`;}).join(&#x27;&#x27;)}&lt;/ul&gt;`;return `&lt;nav class=&quot;pk-outline-tree&quot; aria-label=&quot;Document outline&quot;&gt;${items(outlineItems)}&lt;/nav&gt;`;}
+
+function refContent(){if(!state.refs)return &#x27;&lt;div class=&quot;pk-empty&quot;&gt;Open a document link in References to keep your reading place.&lt;/div&gt;&#x27;;return `&lt;div class=&quot;pk-ref-tabs&quot; role=&quot;tablist&quot; aria-label=&quot;Open references&quot;&gt;${state.refIds.map(i=&gt;{const t=[&#x27;Proposition 1&#x27;,&#x27;Appendix A&#x27;,&#x27;Lemma A.2&#x27;][i];return `&lt;div class=&quot;pk-ref-tab ${state.ref===i?&#x27;pk-current&#x27;:&#x27;&#x27;}&quot;&gt;&lt;button class=&quot;pk-btn pk-ref-title&quot; role=&quot;tab&quot; aria-selected=&quot;${state.ref===i}&quot; aria-label=&quot;${t}, original destination Page ${[12,14,15][i]}&quot; data-pk-tip=&quot;${esc(t)}, original destination Page ${[12,14,15][i]}&quot; data-action=&quot;ref-${i}&quot;&gt;&lt;span class=&quot;pk-ref-name&quot;&gt;${t}&lt;/span&gt;&lt;span class=&quot;pk-ref-page&quot;&gt;${[12,14,15][i]}&lt;/span&gt;&lt;/button&gt;${state.ref===i?`&lt;div class=&quot;pk-ref-tab-actions&quot;&gt;${btn(&#x27;anchor&#x27;,&#x27;Return to reference&#x27;,&#x27;ref-return&#x27;,&#x27;hidden&#x27;)}${btn(&#x27;send&#x27;,&#x27;Open in main document&#x27;,&#x27;promote&#x27;)}${btn(&#x27;close&#x27;,&#x27;Close reference tab&#x27;,&#x27;close-ref&#x27;)}&lt;/div&gt;`:&#x27;&#x27;}&lt;/div&gt;`;}).join(&#x27;&#x27;)}&lt;/div&gt;&lt;div class=&quot;pk-ref-body&quot; data-ref-id=&quot;${state.ref}&quot; data-ref-page=&quot;${state.refPage}&quot;&gt;&lt;div class=&quot;pk-running&quot;&gt;&lt;span&gt;${[&#x27;Proposition 1&#x27;,&#x27;Appendix A&#x27;,&#x27;Lemma A.2&#x27;][state.ref]}&lt;/span&gt;&lt;span&gt;${state.refPage}&lt;/span&gt;&lt;/div&gt;&lt;h3 data-reference-anchor&gt;${state.refPage===13?&#x27;Corollary 1&#x27;:state.ref?&#x27;Proof of Proposition 1&#x27;:&#x27;Proposition 1&#x27;}&lt;/h3&gt;&lt;p&gt;Suppose that the signal satisfies the monotone likelihood ratio property. An increase in precision then shifts the distribution of posterior beliefs.&lt;/p&gt;&lt;p&gt;The result follows from &lt;button class=&quot;pk-link&quot; data-action=&quot;ref-link&quot;&gt;Lemma A.2&lt;/button&gt; and continuity of the choice probabilities.&lt;/p&gt;&lt;div class=&quot;pk-reference-continuation&quot;&gt;&lt;p&gt;To establish the result, hold the distribution of preferences fixed and compare posterior beliefs under the two information structures.&lt;/p&gt;&lt;p&gt;The ordering is preserved under integration over consumer types. The choice probabilities therefore inherit the same continuity property.&lt;/p&gt;&lt;p&gt;At the boundary, take the limit of the interior solution and apply the maintained regularity conditions. This completes the argument.&lt;/p&gt;&lt;p&gt;The same reasoning applies to each alternative separately. Summing the resulting expressions across alternatives preserves the adding-up condition on the choice probabilities.&lt;/p&gt;&lt;p&gt;These conclusions describe the response to information holding prices fixed. The equilibrium case additionally requires accounting for the price responses derived in the next section.&lt;/p&gt;&lt;/div&gt;${state.floating===&#x27;ref-link&#x27;?`&lt;div class=&quot;pk-palette&quot; aria-label=&quot;Reference link actions&quot;&gt;${btn(&#x27;references&#x27;,&#x27;Open in a new reference tab&#x27;,&#x27;new-ref&#x27;)}${btn(&#x27;forward&#x27;,&#x27;Follow in this reference tab&#x27;,&#x27;follow-ref&#x27;)}${btn(&#x27;send&#x27;,&#x27;Open in main document&#x27;,&#x27;open-main&#x27;)}${btn(&#x27;link&#x27;,&#x27;Copy link&#x27;,&#x27;copy&#x27;)}&lt;/div&gt;`:&#x27;&#x27;}&lt;/div&gt;`;}
+function floating(){let html=&#x27;&#x27;;if(state.floating===&#x27;selection&#x27;)html=`&lt;div class=&quot;pk-palette&quot; aria-label=&quot;Text selection actions&quot;&gt;${btn(&#x27;replace&#x27;,&#x27;Replace selected text&#x27;,&#x27;replace&#x27;)}${btn(&#x27;delete&#x27;,&#x27;Mark selected text for deletion&#x27;,&#x27;delete&#x27;)}${btn(&#x27;highlight&#x27;,&#x27;Highlight selected text&#x27;,&#x27;highlight&#x27;)}${btn(&#x27;copy&#x27;,&#x27;Copy selected text&#x27;,&#x27;copy&#x27;)}&lt;/div&gt;`;if(state.floating===&#x27;link&#x27;)html=`&lt;div class=&quot;pk-palette&quot; style=&quot;top:415px&quot; aria-label=&quot;Link actions&quot;&gt;${btn(&#x27;references&#x27;,&#x27;Open in References&#x27;,&#x27;open-ref&#x27;)}${btn(&#x27;forward&#x27;,&#x27;Open in main document&#x27;,&#x27;open-main&#x27;)}${btn(&#x27;link&#x27;,&#x27;Copy link&#x27;,&#x27;copy&#x27;)}&lt;/div&gt;`;if(state.floating===&#x27;editor&#x27;)html=`&lt;section class=&quot;pk-editor&quot; aria-label=&quot;${state.kind} editor&quot;&gt;&lt;div class=&quot;pk-editor-head&quot;&gt;&lt;span class=&quot;pk-editor-kind&quot;&gt;${icon(state.kind.includes(&#x27;Replacement&#x27;)?&#x27;replace&#x27;:&#x27;highlight&#x27;)}${state.kind}${state.offscreen?&#x27; · 4&#x27;:&#x27;&#x27;}&lt;/span&gt;${state.offscreen?&#x27;&#x27;:btn(&#x27;anchor&#x27;,&#x27;Return to anchored passage&#x27;,&#x27;anchor&#x27;)}&lt;/div&gt;${state.offscreen?`&lt;button class=&quot;pk-btn pk-source-return&quot; data-action=&quot;anchor&quot;&gt;${icon(&#x27;anchor&#x27;)}&lt;span&gt;Back to passage&lt;/span&gt;&lt;/button&gt;`:&#x27;&#x27;}&lt;textarea placeholder=&quot;Add a comment…&quot; aria-label=&quot;${state.kind===&#x27;Replacement&#x27;?&#x27;Replacement text&#x27;:&#x27;Comment&#x27;}&quot; data-field=&quot;draft&quot;&gt;${esc(state.draft)}&lt;/textarea&gt;&lt;div class=&quot;pk-actions&quot;&gt;&lt;button class=&quot;pk-btn&quot; data-action=&quot;cancel&quot;&gt;Cancel&lt;/button&gt;${state.kind===&#x27;Highlight Comment&#x27;?&#x27;&lt;button class=&quot;pk-btn&quot; data-action=&quot;keep&quot;&gt;Keep&lt;/button&gt;&#x27;:&#x27;&#x27;}&lt;button class=&quot;pk-btn pk-primary&quot; data-action=&quot;apply&quot; ${!state.draft.length?&#x27;disabled&#x27;:&#x27;&#x27;}&gt;${state.kind===&#x27;Highlight Comment&#x27;?&#x27;Save&#x27;:&#x27;Apply&#x27;}&lt;/button&gt;&lt;/div&gt;&lt;/section&gt;`;if(state.floating===&#x27;reader&#x27;)html=`&lt;section class=&quot;pk-editor pk-reader-popover&quot; aria-label=&quot;Full annotation details&quot;&gt;${annotationReader()}&lt;/section&gt;`;if([&#x27;peek&#x27;,&#x27;imported&#x27;].includes(state.floating)){const holder=document.createElement(&#x27;div&#x27;);holder.innerHTML=annotations();const row=holder.querySelector(`[data-action=&quot;row-${state.floating===&#x27;imported&#x27;?2:state.selected}&quot;]`);if(row){row.classList.add(&#x27;pk-current&#x27;);row.querySelector(&#x27;.pk-row-actions&#x27;).insertAdjacentHTML(&#x27;beforeend&#x27;,btn(&#x27;close&#x27;,&#x27;Close annotation details&#x27;,&#x27;dismiss&#x27;));html=`&lt;section class=&quot;pk-editor pk-peek&quot; aria-label=&quot;Annotation details&quot;&gt;${row.outerHTML}&lt;/section&gt;`;}};q(&#x27;.pk-floating&#x27;).innerHTML=html;}
+function modal(){q(&#x27;.pk-overlay&#x27;).hidden=!state.modal;q(&#x27;.pk-toolbar&#x27;).inert=state.modal;q(&#x27;.pk-work&#x27;).inert=state.modal;q(&#x27;.pk-refdock&#x27;).inert=state.modal;q(&#x27;.pk-overlay&#x27;).innerHTML=state.modal?`&lt;section class=&quot;pk-dialog&quot; role=&quot;dialog&quot; aria-modal=&quot;true&quot; aria-labelledby=&quot;pk-save-heading&quot;&gt;&lt;h3 id=&quot;pk-save-heading&quot;&gt;Choose where to save annotations&lt;/h3&gt;&lt;p&gt;You can change this later by clicking the filename.&lt;/p&gt;&lt;label class=&quot;pk-choice&quot;&gt;&lt;input type=&quot;radio&quot; name=&quot;pk-destination&quot; value=&quot;original&quot;&gt;&lt;span&gt;Modify the original PDF&lt;/span&gt;&lt;/label&gt;&lt;label class=&quot;pk-choice&quot;&gt;&lt;input type=&quot;radio&quot; name=&quot;pk-destination&quot; value=&quot;copy&quot; checked&gt;&lt;span&gt;Save to a new copy&lt;/span&gt;&lt;/label&gt;&lt;div class=&quot;pk-copy-details&quot;&gt;&lt;div class=&quot;pk-field-label&quot;&gt;&lt;button class=&quot;pk-btn pk-location-path&quot; data-action=&quot;choose-destination&quot; aria-label=&quot;Change save location, Documents / Reading&quot; data-pk-tip=&quot;Change location&quot;&gt;&lt;span&gt;Documents / Reading&lt;/span&gt;&lt;/button&gt;&lt;input value=&quot;information-and-choice-annotated.pdf&quot; aria-label=&quot;Annotated PDF copy name&quot;&gt;&lt;/div&gt;&lt;/div&gt;&lt;div class=&quot;pk-actions&quot;&gt;&lt;button class=&quot;pk-btn&quot; data-action=&quot;cancel-save&quot;&gt;Cancel&lt;/button&gt;&lt;button class=&quot;pk-btn pk-primary&quot; data-action=&quot;confirm-save&quot;&gt;Confirm&lt;/button&gt;&lt;/div&gt;&lt;/section&gt;`:&#x27;&#x27;;}
+function positionFloating(){const stage=q(&#x27;.pk-stage&#x27;),passage=q(&#x27;.pk-passage&#x27;),editor=q(&#x27;.pk-editor&#x27;),palette=q(&#x27;.pk-floating .pk-palette&#x27;);if(!editor&amp;&amp;!palette)return;const sb=stage.getBoundingClientRect(),pb=passage.getBoundingClientRect();if(editor&amp;&amp;getComputedStyle(editor).position===&#x27;absolute&#x27;){const below=pb.bottom-sb.top+18,above=pb.top-sb.top-editor.offsetHeight-18,limit=Math.max(12,stage.clientHeight-(state.dock&amp;&amp;state.refVisible&amp;&amp;state.refs?q(&#x27;.pk-refdock&#x27;).offsetHeight+24:12)-editor.offsetHeight);editor.style.top=(state.offscreen?Math.min(190,limit):below&lt;=limit?below:above&gt;=12?above:limit)+&#x27;px&#x27;;}if(palette){const top=state.floating===&#x27;link&#x27;?q(&#x27;.pk-paper .pk-link&#x27;).getBoundingClientRect().bottom-sb.top+10:pb.top-sb.top-45;palette.style.top=Math.max(15,top)+&#x27;px&#x27;;}}
+function dockedReferences(){const content=refContent();const start=content.indexOf(&#x27;&lt;div class=&quot;pk-ref-body&quot;&#x27;);const tabs=start&lt;0?&#x27;&#x27;:content.slice(0,start);const body=start&lt;0?content:content.slice(start);return `&lt;div class=&quot;pk-ref-sidebar&quot;&gt;&lt;div class=&quot;pk-ref-dock-controls&quot;&gt;${btn(&#x27;down&#x27;,&#x27;Hide References&#x27;,&#x27;hide-refs&#x27;,&#x27;aria-expanded=&quot;true&quot; aria-controls=&quot;pk-bottom-references&quot;&#x27;)}${btn(&#x27;side&#x27;,&#x27;Move References to the right workspace&#x27;,&#x27;dock&#x27;)}&lt;/div&gt;${tabs}&lt;/div&gt;${body}`;}
+function render(){hideTip();root.dataset.edge=&#x27;Soft fade&#x27;;review.zoom=state.zoom;root.style.setProperty(&#x27;--pk-sample-zoom&#x27;,state.zoom/100);root.dataset.bottomRail=String(state.dock&amp;&amp;state.refs&amp;&amp;!state.refVisible);root.dataset.dock=String(state.dock&amp;&amp;state.refVisible&amp;&amp;state.refs);root.dataset.tray=String(state.tray);root.dataset.narrow=String(state.narrow);toolbar();q(&#x27;.pk-aside&#x27;).hidden=!state.tray;modes();q(&#x27;.pk-pane&#x27;).className=&#x27;pk-pane&#x27;+(state.mode===&#x27;references&#x27;?&#x27; pk-inline-ref&#x27;:&#x27;&#x27;);q(&#x27;.pk-pane&#x27;).innerHTML=({annotations,outline,search,references:refContent}[state.mode])();q(&#x27;.pk-edge&#x27;).hidden=state.tray;q(&#x27;.pk-edge&#x27;).innerHTML=icon(&#x27;back&#x27;);q(&#x27;.pk-edge&#x27;).setAttribute(&#x27;aria-expanded&#x27;,String(state.tray));q(&#x27;.pk-edge&#x27;).setAttribute(&#x27;aria-controls&#x27;,&#x27;pk-workspace-tray&#x27;);q(&#x27;.pk-edge&#x27;).setAttribute(&#x27;aria-label&#x27;,state.tray?&#x27;Hide workspace&#x27;:&#x27;Show workspace&#x27;);q(&#x27;.pk-edge&#x27;).setAttribute(&#x27;data-pk-tip&#x27;,state.tray?&#x27;Hide workspace&#x27;:&#x27;Show workspace&#x27;);q(&#x27;.pk-passage&#x27;).textContent=state.offscreen?&#x27;Identification uses variation in the information available to consumers.&#x27;:&#x27;A more precise signal reduces uncertainty about the value of each alternative.&#x27;;q(&#x27;.pk-passage&#x27;).className=&#x27;pk-passage &#x27;+(state.offscreen?&#x27;&#x27;:([&#x27;selection&#x27;,&#x27;editor&#x27;].includes(state.floating)?&#x27;pk-selected&#x27;:state.own&amp;&amp;review.scene!==&#x27;Reading&#x27;?&#x27;pk-marked&#x27;:&#x27;&#x27;));q(&#x27;.pk-page-bottom&#x27;).textContent=state.page;q(&#x27;.pk-paper h2&#x27;).textContent=state.page===4?&#x27;2. Information and choice&#x27;:state.page===12?&#x27;Proposition 1&#x27;:state.page===13?&#x27;Corollary 1&#x27;:state.page===6?&#x27;2.1. Signals&#x27;:state.page===7?&#x27;3. Identification&#x27;:state.page===9?&#x27;3.2. Exclusion restriction&#x27;:state.page===16?&#x27;Appendix B. Extensions&#x27;:&#x27;Information and choice&#x27;;floating();q(&#x27;.pk-bottom-rail&#x27;).hidden=!(state.dock&amp;&amp;state.refs&amp;&amp;!state.refVisible);q(&#x27;.pk-bottom-rail&#x27;).innerHTML=state.dock?btn(state.refVisible?&#x27;down&#x27;:&#x27;up&#x27;,state.refVisible?&#x27;Hide References&#x27;:&#x27;Show References&#x27;,&#x27;hide-refs&#x27;,`aria-expanded=&quot;${state.refVisible}&quot; aria-controls=&quot;pk-bottom-references&quot;`).replace(&#x27;pk-btn&#x27;,&#x27;pk-btn pk-bottom-toggle&#x27;)+(state.refVisible?btn(&#x27;side&#x27;,&#x27;Move References to the right workspace&#x27;,&#x27;dock&#x27;):&#x27;&#x27;):&#x27;&#x27;;q(&#x27;.pk-refdock&#x27;).hidden=!(state.dock&amp;&amp;state.refVisible&amp;&amp;state.refs);q(&#x27;.pk-refdock&#x27;).innerHTML=state.dock?dockedReferences():&#x27;&#x27;;q(&#x27;.pk-notice&#x27;).hidden=!state.failure;q(&#x27;.pk-notice&#x27;).innerHTML=state.failure?`&lt;span&gt;Couldn’t save your latest annotations.&lt;/span&gt;&lt;div class=&quot;pk-command&quot;&gt;&lt;button class=&quot;pk-btn&quot; data-action=&quot;retry&quot;&gt;Retry&lt;/button&gt;&lt;button class=&quot;pk-btn&quot; data-action=&quot;save&quot;&gt;Save a copy…&lt;/button&gt;&lt;/div&gt;`:&#x27;&#x27;;modal();requestAnimationFrame(()=&gt;{const reader=q(&#x27;.pk-reader-body&#x27;);if(reader)reader.scrollTop=state.readerTextScroll||0;const body=q(&#x27;.pk-ref-body&#x27;);if(body)body.scrollTop=state.refScroll[`${body.dataset.refId}:${body.dataset.refPage}`]||0;syncReferenceReturn();positionFloating();positionEdge();});if(globalThis.lucide)lucide.createIcons({attrs:{width:16,height:16}});}
+function closeReference(){state.refIds=state.refIds.filter(i=&gt;i!==state.ref);state.refs=state.refIds.length&gt;0;state.ref=state.refIds[0]??0;state.refPage=[12,14,15][state.ref];if(!state.refs){state.refVisible=false;if(state.mode===&#x27;references&#x27;)state.mode=&#x27;annotations&#x27;;}}
+function go(p){state.history.push(state.page);state.future=[];state.page=p;}
+root.addEventListener(&#x27;click&#x27;,e=&gt;{const b=e.target.closest(&#x27;[data-action]&#x27;);if(!b||b.disabled)return;const a=b.dataset.action;hideTip();if(state.zoomOpen&amp;&amp;!b.closest(&#x27;.pk-zoom-wrap&#x27;))state.zoomOpen=false;if(state.pageOpen&amp;&amp;!b.closest(&#x27;.pk-page-wrap&#x27;))state.pageOpen=false;if(a===&#x27;outline-all&#x27;){if(state.outlineRestore){state.outlineExpanded=[...state.outlineRestore];state.outlineRestore=null;}else if(state.outlineExpanded.length){state.outlineRestore=[...state.outlineExpanded];state.outlineExpanded=[];}}else if(a.startsWith(&#x27;outline-branch-&#x27;)){const id=a.slice(15);state.outlineExpanded=state.outlineExpanded.includes(id)?state.outlineExpanded.filter(x=&gt;x!==id):[...state.outlineExpanded,id];}else if(a.startsWith(&#x27;mode-&#x27;)){state.mode=a.slice(5);state.tray=true;}else if(a.startsWith(&#x27;result-&#x27;))go(Number(a.slice(7)));else if(a.startsWith(&#x27;row-&#x27;)){state.selected=Number(a.slice(4));const row=b.closest(&#x27;.pk-row&#x27;),excerpt=row?.querySelector(&#x27;[data-long-excerpt]&#x27;),fromPeek=!!b.closest(&#x27;.pk-peek&#x27;);if(excerpt&amp;&amp;excerpt.scrollHeight&gt;excerpt.clientHeight+1)openAnnotationReader(state.selected,fromPeek);else{go([4,6,9,8][state.selected]);state.floating=&#x27;&#x27;;}}else if(/^ref-\d$/.test(a)){state.ref=Number(a.slice(4));state.refPage=[12,14,15][state.ref];state.floating=&#x27;&#x27;;}else switch(a){case&#x27;toggle-tray&#x27;:state.tray=!state.tray;if(state.tray&amp;&amp;[&#x27;peek&#x27;,&#x27;imported&#x27;].includes(state.floating)){state.mode=&#x27;annotations&#x27;;state.floating=&#x27;&#x27;;}break;case&#x27;dock&#x27;:state.dock=!state.dock;state.refVisible=true;state.tray=true;if(state.dock&amp;&amp;state.mode===&#x27;references&#x27;)state.mode=&#x27;annotations&#x27;;else if(!state.dock)state.mode=&#x27;references&#x27;;break;case&#x27;hide-refs&#x27;:state.refVisible=!state.refVisible;break;case&#x27;passage&#x27;:if(state.own){state.reader=null;state.selected=0;if(state.tray){state.mode=&#x27;annotations&#x27;;state.floating=&#x27;&#x27;;}else state.floating=&#x27;peek&#x27;;}else state.floating=&#x27;selection&#x27;;break;case&#x27;replace&#x27;:state.kind=&#x27;Replacement&#x27;;state.floating=&#x27;editor&#x27;;break;case&#x27;delete&#x27;:state.dirty=true;state.undoAvailable=true;state.redoAvailable=false;state.floating=&#x27;&#x27;;announce(&#x27;Deletion annotation added&#x27;);break;case&#x27;highlight&#x27;:state.kind=&#x27;Highlight Comment&#x27;;state.draft=&#x27;&#x27;;state.floating=&#x27;editor&#x27;;break;case&#x27;edit&#x27;:state.kind=&#x27;Edit Highlight&#x27;;state.draft=annotationText;state.floating=&#x27;editor&#x27;;break;case&#x27;edit-replacement&#x27;:state.kind=&#x27;Edit Replacement&#x27;;state.draft=&#x27;estimate the parameters jointly&#x27;;state.floating=&#x27;editor&#x27;;break;case&#x27;cancel&#x27;:case&#x27;dismiss&#x27;:state.floating=state.reader!==null&amp;&amp;state.readerReturn===&#x27;peek&#x27;?&#x27;reader&#x27;:&#x27;&#x27;;break;case&#x27;keep&#x27;:case&#x27;apply&#x27;:if(a===&#x27;apply&#x27;&amp;&amp;!state.draft.length)return;if(state.kind===&#x27;Edit Highlight&#x27;)annotationText=state.draft;state.dirty=true;state.undoAvailable=true;state.redoAvailable=false;state.floating=state.reader!==null&amp;&amp;state.readerReturn===&#x27;peek&#x27;?&#x27;reader&#x27;:&#x27;&#x27;;state.mode=&#x27;annotations&#x27;;state.own=true;announce(&#x27;Annotation applied in this mockup&#x27;);break;case&#x27;remove&#x27;:state.undoAvailable=true;state.redoAvailable=false;state.own=false;state.floating=&#x27;&#x27;;announce(&#x27;Annotation removed in this mockup&#x27;);break;case&#x27;reader-anchor&#x27;:{const page=state.reader===2?9:4;if(state.page!==page)go(page);state.offscreen=false;requestAnimationFrame(revealReaderAnchor);break;}case&#x27;reader-back&#x27;:closeAnnotationReader();break;case&#x27;reader-edit&#x27;:state.kind=&#x27;Edit Highlight&#x27;;state.draft=annotationText;state.floating=&#x27;editor&#x27;;break;case&#x27;link&#x27;:state.floating=&#x27;link&#x27;;break;case&#x27;open-ref&#x27;:state.refs=true;state.refVisible=true;if(!state.refIds.includes(0))state.refIds.push(0);state.ref=0;state.refPage=12;state.tray=true;state.mode=state.dock?state.mode:&#x27;references&#x27;;state.floating=&#x27;&#x27;;break;case&#x27;ref-link&#x27;:state.floating=&#x27;ref-link&#x27;;break;case&#x27;follow-ref&#x27;:state.refPage=13;state.floating=&#x27;&#x27;;break;case&#x27;new-ref&#x27;:if(!state.refIds.includes(2))state.refIds.push(2);state.ref=2;state.refPage=15;state.floating=&#x27;&#x27;;break;case&#x27;ref-return&#x27;:state.refPage=[12,14,15][state.ref];state.refScroll[`${state.ref}:${state.refPage}`]=0;state.floating=&#x27;&#x27;;break;case&#x27;promote&#x27;:go(state.refPage);closeReference();state.floating=&#x27;&#x27;;break;case&#x27;open-main&#x27;:go(state.mode===&#x27;references&#x27;?13:12);state.floating=&#x27;&#x27;;break;case&#x27;close-ref&#x27;:closeReference();break;case&#x27;back&#x27;:state.future.push(state.page);state.page=state.history.pop();break;case&#x27;forward&#x27;:state.history.push(state.page);state.page=state.future.pop();break;case&#x27;previous&#x27;:go(Math.max(1,state.page-1));break;case&#x27;next&#x27;:go(Math.min(28,state.page+1));break;case&#x27;page-menu&#x27;:state.pageOpen=!state.pageOpen;break;case&#x27;zoom-menu&#x27;:state.zoomOpen=!state.zoomOpen;break;case&#x27;minus&#x27;:state.zoom=Math.max(25,state.zoom-10);break;case&#x27;plus&#x27;:state.zoom=Math.min(300,state.zoom+10);break;case&#x27;fit&#x27;:state.zoom=100;announce(&#x27;Fit width selected&#x27;);break;case&#x27;copy&#x27;:announce(&#x27;Copy action preview; no clipboard write&#x27;);return;case&#x27;anchor&#x27;:state.offscreen=false;state.page=4;announce(&#x27;Anchored passage revealed&#x27;);break;case&#x27;clear-search&#x27;:state.query=&#x27;&#x27;;break;case&#x27;save&#x27;:state.modal=true;break;case&#x27;cancel-save&#x27;:state.modal=false;break;case&#x27;confirm-save&#x27;:state.modal=false;announce(&#x27;Save setup confirmed in this mockup; no file is written&#x27;);break;case&#x27;choose-destination&#x27;:announce(&#x27;The native file picker opens here. This mockup does not save files.&#x27;);return;case&#x27;retry&#x27;:state.failure=false;state.dirty=false;announce(&#x27;Save success appearance preview&#x27;);break;case&#x27;undo&#x27;:state.dirty=false;state.undoAvailable=false;state.redoAvailable=true;break;case&#x27;redo&#x27;:state.dirty=true;state.undoAvailable=true;state.redoAvailable=false;break;}render();if(a===&#x27;toggle-tray&#x27;)q(state.tray?&#x27;.pk-workspace-hide&#x27;:&#x27;.pk-edge&#x27;)?.focus();if(a===&#x27;outline-all&#x27;||a.startsWith(&#x27;outline-branch-&#x27;))q(`[data-action=&quot;${a}&quot;]`)?.focus();if([&#x27;apply&#x27;,&#x27;cancel&#x27;].includes(a)&amp;&amp;state.reader!==null)(q(&#x27;[data-action=&quot;reader-edit&quot;]&#x27;)||q(&#x27;[data-action=&quot;reader-back&quot;]&#x27;))?.focus();if(a===&#x27;reader-back&#x27;){q(&#x27;.pk-pane&#x27;).scrollTop=state.readerScroll;(q(`.pk-peek [data-action=&quot;row-${state.selected}&quot;]`)||q(`.pk-pane .pk-row-nav[data-action=&quot;row-${state.selected}&quot;]`))?.focus();}if(a.startsWith(&#x27;row-&#x27;)&amp;&amp;state.reader!==null)q(&#x27;[data-action=&quot;reader-back&quot;]&#x27;)?.focus();if(a===&#x27;ref-return&#x27;)q(`.pk-ref-title[data-action=&quot;ref-${state.ref}&quot;]`)?.focus();if([&#x27;replace&#x27;,&#x27;highlight&#x27;,&#x27;edit&#x27;,&#x27;edit-replacement&#x27;,&#x27;reader-edit&#x27;].includes(a))q(&#x27;textarea&#x27;)?.focus();if(a===&#x27;mode-search&#x27;||a===&#x27;clear-search&#x27;)q(&#x27;[data-field=&quot;search&quot;]&#x27;)?.focus();if([&#x27;minus&#x27;,&#x27;plus&#x27;,&#x27;fit&#x27;].includes(a))q(`[data-action=&quot;${a}&quot;]`)?.focus();if([&#x27;previous&#x27;,&#x27;next&#x27;].includes(a))(q(`[data-action=&quot;${a}&quot;]`)||q(&#x27;.pk-page-popover button&#x27;)||q(&#x27;.pk-page-trigger&#x27;))?.focus();if(a===&#x27;page-menu&#x27;){if(state.pageOpen&amp;&amp;e.detail===0)q(&#x27;.pk-page-popover button&#x27;)?.focus();else q(&#x27;.pk-page-trigger&#x27;)?.focus();}if(a===&#x27;zoom-menu&#x27;){if(state.zoomOpen&amp;&amp;e.detail===0)q(&#x27;[data-action=&quot;minus&quot;]&#x27;)?.focus();else q(&#x27;.pk-zoom-trigger&#x27;)?.focus();}});
+root.addEventListener(&#x27;input&#x27;,e=&gt;{if(e.target.dataset.field===&#x27;draft&#x27;){state.draft=e.target.value;const b=q(&#x27;[data-action=&quot;apply&quot;]&#x27;);if(b)b.disabled=!state.draft.length;}if(e.target.dataset.field===&#x27;search&#x27;){state.query=e.target.value;const clear=q(&#x27;[data-action=&quot;clear-search&quot;]&#x27;);clear.disabled=!state.query.length;if(clear.disabled){clear.setAttribute(&#x27;aria-hidden&#x27;,&#x27;true&#x27;);hideTip();}else clear.removeAttribute(&#x27;aria-hidden&#x27;);q(&#x27;.pk-search-results&#x27;).innerHTML=searchResults();}});
+function commitNumber(input){const field=input.dataset.field,raw=input.value.trim(),previous=state[field];const parsed=/^[+-]?\d+$/.test(raw)?Number(raw):NaN;const next=Number.isSafeInteger(parsed)?Math.max(field===&#x27;page&#x27;?1:25,Math.min(field===&#x27;page&#x27;?28:300,parsed)):previous;input.value=String(next);if(next===previous)return false;if(field===&#x27;page&#x27;)go(next);else state.zoom=next;return true;}
+function syncNumberUI(){review.zoom=state.zoom;root.style.setProperty(&#x27;--pk-sample-zoom&#x27;,state.zoom/100);q(&#x27;[data-field=&quot;page&quot;]&#x27;).value=String(state.page);q(&#x27;[data-field=&quot;zoom&quot;]&#x27;).value=String(state.zoom);q(&#x27;.pk-zoom-trigger&#x27;).setAttribute(&#x27;aria-label&#x27;,`Zoom controls, ${state.zoom} percent`);q(&#x27;.pk-page-bottom&#x27;).textContent=state.page;q(&#x27;.pk-paper h2&#x27;).textContent=state.page===4?&#x27;2. Information and choice&#x27;:state.page===12?&#x27;Proposition 1&#x27;:state.page===13?&#x27;Corollary 1&#x27;:state.page===6?&#x27;2.1. Signals&#x27;:state.page===7?&#x27;3. Identification&#x27;:state.page===9?&#x27;3.2. Exclusion restriction&#x27;:state.page===16?&#x27;Appendix B. Extensions&#x27;:&#x27;Information and choice&#x27;;const history=q(&#x27;.pk-history-pair&#x27;);if(!history.contains(document.activeElement)){history.innerHTML=(state.history.length?btn(&#x27;back&#x27;,&#x27;Back in main document&#x27;,&#x27;back&#x27;).replace(icon(&#x27;back&#x27;),q(&#x27;.pk-edge&#x27;).innerHTML):&#x27;&#x27;)+(state.future.length?btn(&#x27;forward&#x27;,&#x27;Forward in main document&#x27;,&#x27;forward&#x27;).replace(icon(&#x27;forward&#x27;),q(&#x27;.pk-workspace-hide&#x27;).innerHTML):&#x27;&#x27;);}positionFloating();positionEdge();}
+root.addEventListener(&#x27;focusout&#x27;,e=&gt;{if([&#x27;page&#x27;,&#x27;zoom&#x27;].includes(e.target.dataset.field)&amp;&amp;e.target.isConnected&amp;&amp;commitNumber(e.target))syncNumberUI();});
+root.addEventListener(&#x27;change&#x27;,e=&gt;{if(e.target.name===&#x27;pk-destination&#x27;){q(&#x27;.pk-copy-details&#x27;).hidden=e.target.value===&#x27;original&#x27;;}if([&#x27;page&#x27;,&#x27;zoom&#x27;].includes(e.target.dataset.field)&amp;&amp;commitNumber(e.target))syncNumberUI();});
+root.addEventListener(&#x27;keydown&#x27;,e=&gt;{if(e.isComposing)return;if([&#x27;page&#x27;,&#x27;zoom&#x27;].includes(e.target.dataset.field)&amp;&amp;e.key===&#x27;Escape&#x27;){e.preventDefault();e.target.value=String(state[e.target.dataset.field]);hideTip();return;}if(e.key===&#x27;Enter&#x27;&amp;&amp;[&#x27;page&#x27;,&#x27;zoom&#x27;].includes(e.target.dataset.field)){e.preventDefault();const field=e.target.dataset.field;if(commitNumber(e.target))render();q(`[data-field=&quot;${field}&quot;]`)?.focus();return;}if(e.key===&#x27;Escape&#x27;){e.preventDefault();const closingZoom=state.zoomOpen,closingPage=state.pageOpen;if(!state.modal&amp;&amp;!state.zoomOpen&amp;&amp;!state.pageOpen&amp;&amp;!state.floating&amp;&amp;!q(&#x27;.pk-tip&#x27;).hidden){hideTip();return;}if(state.modal)state.modal=false;else if(state.zoomOpen)state.zoomOpen=false;else if(state.pageOpen)state.pageOpen=false;else if(state.floating===&#x27;editor&#x27;)state.floating=state.reader!==null&amp;&amp;state.readerReturn===&#x27;peek&#x27;?&#x27;reader&#x27;:&#x27;&#x27;;else if(state.reader!==null){closeAnnotationReader();render();q(&#x27;.pk-pane&#x27;).scrollTop=state.readerScroll;(q(`.pk-peek .pk-row-nav[data-action=&quot;row-${state.selected}&quot;]`)||q(`.pk-pane .pk-row-nav[data-action=&quot;row-${state.selected}&quot;]`))?.focus();return;}else if(state.floating)state.floating=&#x27;&#x27;;else state.tray=false;render();if(closingZoom)q(&#x27;.pk-zoom-trigger&#x27;)?.focus();if(closingPage)q(&#x27;.pk-page-trigger&#x27;)?.focus();}if((e.metaKey||e.ctrlKey)&amp;&amp;e.key.toLowerCase()===&#x27;f&#x27;&amp;&amp;!state.modal&amp;&amp;state.floating!==&#x27;editor&#x27;){e.preventDefault();state.mode=&#x27;search&#x27;;state.tray=true;render();q(&#x27;[data-field=&quot;search&quot;]&#x27;).focus();}if((e.metaKey||e.ctrlKey)&amp;&amp;e.key===&#x27;Enter&#x27;&amp;&amp;state.floating===&#x27;editor&#x27;&amp;&amp;!state.modal&amp;&amp;!e.isComposing){e.preventDefault();q(&#x27;[data-action=&quot;apply&quot;]&#x27;).click();}});
+let tipTimer,tipOwner;function hideTip(){clearTimeout(tipTimer);tipOwner=null;const t=q(&#x27;.pk-tip&#x27;);if(t)t.hidden=true;}
+function showTip(el){if(!el.isConnected)return;tipOwner=el;const tip=q(&#x27;.pk-tip&#x27;);const raw=el.getAttribute(&#x27;data-pk-tip&#x27;);const brief={&#x27;Open in main document&#x27;:&#x27;Open in main document&#x27;,&#x27;Move References to the right workspace&#x27;:&#x27;Dock right&#x27;,&#x27;Move References below the document&#x27;:&#x27;Dock below&#x27;,&#x27;Copy link to current location&#x27;:&#x27;Copy location link&#x27;,&#x27;Document actions and save destination, information-and-choice.pdf&#x27;:&#x27;information-and-choice.pdf — Save options&#x27;,&#x27;Back in main document&#x27;:&#x27;Back&#x27;,&#x27;Forward in main document&#x27;:&#x27;Forward&#x27;};tip.textContent=brief[raw]||raw;tip.hidden=false;const r=root.getBoundingClientRect(),b=el.getBoundingClientRect(),t=tip.getBoundingClientRect();tip.style.left=Math.max(6,Math.min(b.left-r.left+(b.width-t.width)/2,r.width-t.width-6))+&#x27;px&#x27;;tip.style.top=(b.top-r.top&gt;=t.height+8?b.top-r.top-t.height-6:b.bottom-r.top+6)+&#x27;px&#x27;;}
+root.addEventListener(&#x27;pointerover&#x27;,e=&gt;{const el=e.target.closest(&#x27;[data-pk-tip]&#x27;);if(!el||el.contains(e.relatedTarget))return;hideTip();tipTimer=setTimeout(()=&gt;showTip(el),600);});
+root.addEventListener(&#x27;pointerout&#x27;,e=&gt;{const el=e.target.closest(&#x27;[data-pk-tip]&#x27;);if(el&amp;&amp;el===tipOwner&amp;&amp;!el.contains(e.relatedTarget)&amp;&amp;document.activeElement!==el)hideTip();});
+root.addEventListener(&#x27;focusin&#x27;,e=&gt;{const el=e.target.closest(&#x27;[data-pk-tip]&#x27;);if(el&amp;&amp;(el.matches(&#x27;:focus-visible&#x27;)||el.matches(&#x27;.pk-file,.pk-ref-title&#x27;)))showTip(el);});root.addEventListener(&#x27;focusout&#x27;,hideTip);
+root.addEventListener(&#x27;pointerdown&#x27;,e=&gt;{hideTip();if(state.pageOpen&amp;&amp;!e.target.closest(&#x27;.pk-page-wrap&#x27;)){state.pageOpen=false;q(&#x27;.pk-page-popover&#x27;)?.remove();q(&#x27;.pk-page-trigger&#x27;)?.setAttribute(&#x27;aria-expanded&#x27;,&#x27;false&#x27;);}if(state.zoomOpen&amp;&amp;!e.target.closest(&#x27;.pk-zoom-wrap&#x27;)){state.zoomOpen=false;const pop=q(&#x27;.pk-zoom-popover&#x27;);if(pop)pop.remove();q(&#x27;.pk-zoom-trigger&#x27;)?.setAttribute(&#x27;aria-expanded&#x27;,&#x27;false&#x27;);}});
+function syncReferenceReturn(){const body=q(&#x27;.pk-ref-body&#x27;),button=q(&#x27;[data-action=&quot;ref-return&quot;]&#x27;);if(!body||!button)return;const target=body.querySelector(&#x27;[data-reference-anchor]&#x27;),v=body.getBoundingClientRect(),r=target.getBoundingClientRect();const originalPage=[12,14,15][state.ref];const visible=state.refPage===originalPage&amp;&amp;r.bottom&gt;v.top&amp;&amp;r.top&lt;v.bottom;button.hidden=visible;button.disabled=visible;}
+root.addEventListener(&#x27;scroll&#x27;,e=&gt;{if(e.target.matches?.(&#x27;.pk-reader-body&#x27;))state.readerTextScroll=e.target.scrollTop;if(e.target.matches?.(&#x27;.pk-ref-body&#x27;)){state.refScroll[`${e.target.dataset.refId}:${e.target.dataset.refPage}`]=e.target.scrollTop;syncReferenceReturn();}},true);
+function readerSourceViewport(){const viewport=q(&#x27;.pk-scroll&#x27;),v=viewport.getBoundingClientRect(),work=q(&#x27;.pk-work&#x27;).getBoundingClientRect(),area={left:v.left+8,right:v.left+viewport.clientWidth-8,top:v.top+8,bottom:v.top+viewport.clientHeight-8};for(const el of [q(&#x27;.pk-aside&#x27;),q(&#x27;.pk-refdock&#x27;),q(&#x27;.pk-reader-popover&#x27;),q(&#x27;.pk-floating .pk-editor:not(.pk-reader-popover)&#x27;)]){if(!el||el.hidden)continue;const r=el.getBoundingClientRect();if(r.width===0||r.height===0)continue;if(el.matches(&#x27;.pk-aside&#x27;)&amp;&amp;r.top-work.top&lt;2)area.right=Math.min(area.right,r.left-12);else area.bottom=Math.min(area.bottom,r.top-12);}return area;}
+function syncReaderAnchor(){const button=q(&#x27;[data-action=&quot;reader-anchor&quot;]&#x27;);if(!button||state.reader===null)return;const area=readerSourceViewport(),rects=[...q(&#x27;.pk-passage&#x27;).getClientRects()],visible=state.page===(state.reader===2?9:4)&amp;&amp;!state.offscreen&amp;&amp;rects.some(r=&gt;r.bottom&gt;area.top&amp;&amp;r.top&lt;area.bottom&amp;&amp;r.right&gt;area.left&amp;&amp;r.left&lt;area.right);if(visible&amp;&amp;document.activeElement===button)q(&#x27;[data-action=&quot;reader-back&quot;]&#x27;)?.focus();button.hidden=visible;button.disabled=visible;}
+function revealReaderAnchor(){positionFloating();const viewport=q(&#x27;.pk-scroll&#x27;),area=readerSourceViewport(),r=q(&#x27;.pk-passage&#x27;).getClientRects()[0];if(r){viewport.scrollTop+=r.top-(area.top+Math.max(0,(area.bottom-area.top-r.height)/2));viewport.scrollLeft+=r.left-(area.left+Math.max(0,(area.right-area.left-Math.min(r.width,area.right-area.left))/2));}positionFloating();syncReaderAnchor();q(&#x27;[data-action=&quot;reader-back&quot;]&#x27;)?.focus();announce(&#x27;Annotation revealed in the main PDF&#x27;);}
+function positionEdge(){const readerBody=q(&#x27;.pk-reader-body&#x27;);root.style.setProperty(&#x27;--pk-reader-scrollbar-width&#x27;,(readerBody?Math.max(0,readerBody.offsetWidth-readerBody.clientWidth):0)+&#x27;px&#x27;);syncReferenceReturn();const box=q(&#x27;.pk-window&#x27;).getBoundingClientRect(),viewport=q(&#x27;.pk-scroll&#x27;),rect=viewport.getBoundingClientRect();if(paperBaseWidth===null){paperBaseWidth=Math.max(200,Math.min(570,viewport.clientWidth-(state.tray&amp;&amp;viewport.clientWidth&gt;620?q(&#x27;.pk-aside&#x27;).offsetWidth+76:48)));q(&#x27;.pk-paper&#x27;).style.width=paperBaseWidth+&#x27;px&#x27;;}const verticalBar=viewport.offsetWidth-viewport.clientWidth,horizontalBar=viewport.offsetHeight-viewport.clientHeight;root.style.setProperty(&#x27;--pk-work-bottom&#x27;,(rect.bottom-box.top-horizontalBar)+&#x27;px&#x27;);root.style.setProperty(&#x27;--pk-main-right&#x27;,(box.right-rect.right+verticalBar)+&#x27;px&#x27;);root.style.setProperty(&#x27;--pk-scrollbar-width&#x27;,verticalBar+&#x27;px&#x27;);root.style.setProperty(&#x27;--pk-scrollbar-height&#x27;,horizontalBar+&#x27;px&#x27;);const pane=q(&#x27;.pk-pane&#x27;);root.style.setProperty(&#x27;--pk-pane-scrollbar-width&#x27;,Math.max(0,pane.offsetWidth-pane.clientWidth)+&#x27;px&#x27;);const workRect=q(&#x27;.pk-work&#x27;).getBoundingClientRect(),aside=q(&#x27;.pk-aside&#x27;),asideRect=aside.getBoundingClientRect(),refs=q(&#x27;.pk-refdock&#x27;),refsRect=refs.getBoundingClientRect(),rightBacking=q(&#x27;.pk-tray-backing-right&#x27;),bottomBacking=q(&#x27;.pk-tray-backing-bottom&#x27;);const sideOpen=!aside.hidden&amp;&amp;asideRect.top-workRect.top&lt;2;rightBacking.hidden=!sideOpen;root.dataset.sideBacking=String(sideOpen);root.style.setProperty(&#x27;--pk-backing-left&#x27;,Math.max(0,asideRect.left-workRect.left-12)+&#x27;px&#x27;);const bottomEdges=[];if(!refs.hidden)bottomEdges.push(refsRect.top-workRect.top-12);if(!aside.hidden&amp;&amp;!sideOpen)bottomEdges.push(asideRect.top-workRect.top-12);bottomBacking.hidden=!bottomEdges.length;root.style.setProperty(&#x27;--pk-backing-top&#x27;,Math.max(0,Math.min(...bottomEdges,workRect.height))+&#x27;px&#x27;);root.dataset.topFade=String(viewport.scrollTop&gt;1);root.dataset.rightFade=String(viewport.scrollWidth&gt;viewport.clientWidth+1&amp;&amp;viewport.scrollLeft+viewport.clientWidth&lt;viewport.scrollWidth-1);root.dataset.bottomFade=String(viewport.scrollHeight&gt;viewport.clientHeight+1&amp;&amp;viewport.scrollTop+viewport.clientHeight&lt;viewport.scrollHeight-1);syncReaderAnchor();}
+new ResizeObserver(()=&gt;{positionFloating();positionEdge();}).observe(q(&#x27;.pk-work&#x27;));new ResizeObserver(()=&gt;{positionFloating();positionEdge();}).observe(q(&#x27;.pk-scroll&#x27;));q(&#x27;.pk-scroll&#x27;).addEventListener(&#x27;scroll&#x27;,()=&gt;{positionEdge();positionFloating();});new ResizeObserver(positionEdge).observe(q(&#x27;.pk-paper&#x27;));new ResizeObserver(positionEdge).observe(q(&#x27;.pk-pane&#x27;));root.setScene=setScene;root.getScene=()=&gt;review.scene;setScene(review.scene);
+if(globalThis.Tweak){const tweak=new Tweak({container:root,onChange:()=&gt;setScene(review.scene)});tweak.addSelect(review,&#x27;scene&#x27;,{label:&#x27;Reference state&#x27;,options:scenes.filter(scene=&gt;scene!==&#x27;Reference link&#x27;)});tweak.addSlider(review,&#x27;zoom&#x27;,{label:&#x27;Document zoom&#x27;,min:75,max:200,step:25,unit:&#x27;%&#x27;});}
+})();
+&lt;/script&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;script&gt;
+(() =&gt; {
+  const root = document.getElementById(&#x27;pk-canonical&#x27;);
+  const scene = document.getElementById(&#x27;pk-review-scene&#x27;);
+  const width = document.getElementById(&#x27;pk-review-width&#x27;);
+  const surface = document.getElementById(&#x27;pk-review-surface&#x27;);
+  scene.addEventListener(&#x27;change&#x27;, () =&gt; root.setScene(scene.value));
+  width.addEventListener(&#x27;change&#x27;, () =&gt; { surface.style.width = width.value + &#x27;px&#x27;; root.setScene(root.getScene()); });
+})();
+&lt;/script&gt;
+
+&lt;script src=&quot;https://unpkg.com/@floating-ui/core@1.7.3/dist/floating-ui.core.umd.min.js&quot;&gt;&lt;/script&gt;
+&lt;script src=&quot;https://unpkg.com/@floating-ui/dom@1.7.4/dist/floating-ui.dom.umd.min.js&quot;&gt;&lt;/script&gt;
+&lt;script&gt;
+(() =&gt; {
+  if (window.FloatingUIDOM == null) {
+    return;
+  }
+  const { autoUpdate, computePosition, flip, offset, shift, size } =
+    window.FloatingUIDOM;
+  const tooltipPlacements = new Set([&quot;top&quot;, &quot;right&quot;, &quot;bottom&quot;, &quot;left&quot;]);
+  const tooltipId = `codex-visualization-tooltip-${
+    window.crypto?.randomUUID?.() ?? Date.now().toString(36)
+  }`;
+  const tooltipGap = 5;
+  const hoverDelay = 700;
+  const skipDelay = 300;
+  let activeTrigger = null;
+  let pendingTrigger = null;
+  let tooltip = null;
+  let openTimeout = null;
+  let autoUpdateCleanup = null;
+  let positionRequest = 0;
+  let skipDelayUntil = 0;
+  let lastPointerWasTouch = false;
+  let pinnedByTouch = false;
+
+  const getTrigger = (target) =&gt;
+    target?.nodeType === Node.ELEMENT_NODE
+      ? target.closest(&quot;[data-tooltip]&quot;)
+      : null;
+  const containsTarget = (trigger, target) =&gt;
+    target?.nodeType != null &amp;&amp; trigger.contains(target);
+  const getContent = (trigger) =&gt;
+    trigger.getAttribute(&quot;data-tooltip&quot;)?.trim() ?? &quot;&quot;;
+  const getPlacement = (trigger) =&gt; {
+    const placement = trigger.getAttribute(&quot;data-tooltip-placement&quot;);
+    return tooltipPlacements.has(placement) ? placement : &quot;top&quot;;
+  };
+  const getTooltip = () =&gt; {
+    if (tooltip == null) {
+      tooltip = document.createElement(&quot;div&quot;);
+      tooltip.id = tooltipId;
+      tooltip.className = &quot;tooltip&quot;;
+      tooltip.setAttribute(&quot;role&quot;, &quot;tooltip&quot;);
+    }
+    return tooltip;
+  };
+  const setDescribedBy = (trigger, described) =&gt; {
+    const ids = new Set(
+      (trigger.getAttribute(&quot;aria-describedby&quot;) ?? &quot;&quot;)
+        .split(/\s+/)
+        .filter(Boolean),
+    );
+    if (described) {
+      ids.add(tooltipId);
+    } else {
+      ids.delete(tooltipId);
+    }
+    if (ids.size === 0) {
+      trigger.removeAttribute(&quot;aria-describedby&quot;);
+    } else {
+      trigger.setAttribute(&quot;aria-describedby&quot;, [...ids].join(&quot; &quot;));
+    }
+  };
+  const clearOpenTimeout = () =&gt; {
+    if (openTimeout != null) {
+      window.clearTimeout(openTimeout);
+      openTimeout = null;
+    }
+    pendingTrigger = null;
+  };
+  const closeTooltip = (activateSkipDelay = true) =&gt; {
+    clearOpenTimeout();
+    pinnedByTouch = false;
+    positionRequest += 1;
+    autoUpdateCleanup?.();
+    autoUpdateCleanup = null;
+    if (activeTrigger == null) {
+      return;
+    }
+    setDescribedBy(activeTrigger, false);
+    activeTrigger = null;
+    tooltip?.remove();
+    if (activateSkipDelay) {
+      skipDelayUntil = Date.now() + skipDelay;
+    }
+  };
+  const updatePosition = (trigger, floating) =&gt; {
+    const request = ++positionRequest;
+    void computePosition(trigger, floating, {
+      middleware: [
+        offset(tooltipGap),
+        flip({ padding: tooltipGap }),
+        shift({ padding: tooltipGap }),
+        size({
+          padding: tooltipGap,
+          apply({ availableHeight, availableWidth, elements }) {
+            elements.floating.style.setProperty(
+              &quot;--tooltip-available-width&quot;,
+              `${Math.max(0, availableWidth)}px`,
+            );
+            elements.floating.style.setProperty(
+              &quot;--tooltip-available-height&quot;,
+              `${Math.max(0, availableHeight)}px`,
+            );
+          },
+        }),
+      ],
+      placement: getPlacement(trigger),
+      strategy: &quot;fixed&quot;,
+    })
+      .then(({ x, y }) =&gt; {
+        if (activeTrigger !== trigger || request !== positionRequest) {
+          return;
+        }
+        const scale = window.devicePixelRatio || 1;
+        floating.style.transform = `translate(${Math.round(x * scale) / scale}px, ${Math.round(y * scale) / scale}px)`;
+        floating.style.visibility = &quot;visible&quot;;
+      })
+      .catch(() =&gt; {
+        if (activeTrigger === trigger &amp;&amp; request === positionRequest) {
+          closeTooltip(false);
+        }
+      });
+  };
+  const openTooltip = (trigger) =&gt; {
+    const content = getContent(trigger);
+    if (!trigger.isConnected || content.length === 0) {
+      return;
+    }
+    clearOpenTimeout();
+    if (activeTrigger === trigger) {
+      return;
+    }
+    closeTooltip();
+    const floating = getTooltip();
+    floating.textContent = content;
+    floating.style.visibility = &quot;hidden&quot;;
+    floating.style.transform = &quot;translate(0, 0)&quot;;
+    document.body.appendChild(floating);
+    activeTrigger = trigger;
+    setDescribedBy(trigger, true);
+    autoUpdateCleanup = autoUpdate(trigger, floating, () =&gt; {
+      updatePosition(trigger, floating);
+    });
+  };
+  const requestOpen = (trigger, immediate = false) =&gt; {
+    if (
+      getContent(trigger).length === 0 ||
+      activeTrigger === trigger ||
+      pendingTrigger === trigger
+    ) {
+      return;
+    }
+    clearOpenTimeout();
+    pendingTrigger = trigger;
+    const delay =
+      immediate || activeTrigger != null || Date.now() &lt; skipDelayUntil
+        ? 0
+        : hoverDelay;
+    if (delay === 0) {
+      openTooltip(trigger);
+      return;
+    }
+    openTimeout = window.setTimeout(() =&gt; {
+      openTimeout = null;
+      pendingTrigger = null;
+      openTooltip(trigger);
+    }, delay);
+  };
+  const handlePointerOpen = (event) =&gt; {
+    if (event.pointerType === &quot;touch&quot;) {
+      return;
+    }
+    const trigger = getTrigger(event.target);
+    if (trigger == null || containsTarget(trigger, event.relatedTarget)) {
+      return;
+    }
+    requestOpen(trigger);
+  };
+  const handlePointer = (event) =&gt; {
+    lastPointerWasTouch =
+      event.type === &quot;pointerdown&quot; &amp;&amp; event.pointerType === &quot;touch&quot;;
+  };
+  const handleTouchClick = (event) =&gt; {
+    const isTouch = event.pointerType === &quot;touch&quot; || lastPointerWasTouch;
+    lastPointerWasTouch = false;
+    if (!isTouch || event.detail === 0) {
+      return;
+    }
+    const trigger = getTrigger(event.target);
+    if (
+      trigger == null ||
+      !trigger.isConnected ||
+      getContent(trigger).length === 0 ||
+      (pinnedByTouch &amp;&amp; activeTrigger === trigger)
+    ) {
+      if (pinnedByTouch) {
+        closeTooltip();
+      }
+      return;
+    }
+    openTooltip(trigger);
+    pinnedByTouch = activeTrigger === trigger;
+    window.setTimeout(() =&gt; {
+      if (activeTrigger === trigger &amp;&amp; !trigger.isConnected) {
+        closeTooltip(false);
+      }
+    }, 0);
+  };
+  const handleLeave = (event) =&gt; {
+    if (pinnedByTouch) {
+      return;
+    }
+    const trigger = getTrigger(event.target);
+    if (trigger == null || containsTarget(trigger, event.relatedTarget)) {
+      return;
+    }
+    if (activeTrigger === trigger || pendingTrigger === trigger) {
+      closeTooltip();
+    }
+  };
+  const handleFocusIn = (event) =&gt; {
+    const trigger = getTrigger(event.target);
+    if (trigger?.matches(&quot;:focus-visible&quot;)) {
+      requestOpen(trigger, true);
+    }
+  };
+  const handleKeyDown = (event) =&gt; {
+    if (event.key === &quot;Escape&quot;) {
+      closeTooltip();
+    }
+  };
+  const handleContextMenu = (event) =&gt; {
+    lastPointerWasTouch = false;
+    const trigger = getTrigger(event.target);
+    if (activeTrigger === trigger || pendingTrigger === trigger) {
+      closeTooltip();
+    }
+  };
+  const destroy = () =&gt; {
+    closeTooltip(false);
+    lastPointerWasTouch = false;
+    document.removeEventListener(&quot;pointerover&quot;, handlePointerOpen);
+    document.removeEventListener(&quot;pointerdown&quot;, handlePointer);
+    document.removeEventListener(&quot;pointercancel&quot;, handlePointer);
+    document.removeEventListener(&quot;click&quot;, handleTouchClick);
+    document.removeEventListener(&quot;pointerout&quot;, handleLeave);
+    document.removeEventListener(&quot;focusin&quot;, handleFocusIn);
+    document.removeEventListener(&quot;focusout&quot;, handleLeave);
+    document.removeEventListener(&quot;keydown&quot;, handleKeyDown);
+    document.removeEventListener(&quot;contextmenu&quot;, handleContextMenu);
+    tooltip = null;
+  };
+
+  document.addEventListener(&quot;pointerover&quot;, handlePointerOpen);
+  document.addEventListener(&quot;pointerdown&quot;, handlePointer);
+  document.addEventListener(&quot;pointercancel&quot;, handlePointer);
+  document.addEventListener(&quot;click&quot;, handleTouchClick);
+  document.addEventListener(&quot;pointerout&quot;, handleLeave);
+  document.addEventListener(&quot;focusin&quot;, handleFocusIn);
+  document.addEventListener(&quot;focusout&quot;, handleLeave);
+  document.addEventListener(&quot;keydown&quot;, handleKeyDown);
+  document.addEventListener(&quot;contextmenu&quot;, handleContextMenu);
+  window.addEventListener(&quot;pagehide&quot;, destroy, { once: true });
+})();
+&lt;/script&gt;
+&lt;script id=&quot;codex-visualization-tabs&quot;&gt;
+(() =&gt; {
+  const selector = &#x27;.nav[role=&quot;tablist&quot;] [role=&quot;tab&quot;]&#x27;;
+  const disabled = &#x27;:disabled,[aria-disabled=&quot;true&quot;]&#x27;;
+  const selectTab = (selected) =&gt; {
+    const panelId = selected.getAttribute(&quot;aria-controls&quot;);
+    for (const tab of selected.closest(&#x27;[role=&quot;tablist&quot;]&#x27;).querySelectorAll(&#x27;[role=&quot;tab&quot;]&#x27;)) {
+      const active = tab === selected;
+      tab.classList.toggle(&quot;active&quot;, active);
+      tab.setAttribute(&quot;aria-selected&quot;, String(active));
+      const id = tab.getAttribute(&quot;aria-controls&quot;);
+      const panel = id &amp;&amp; document.getElementById(id);
+      if (panel != null) {
+        panel.hidden = id !== panelId;
+        if (!panel.hidden &amp;&amp; selected.id) {
+          panel.setAttribute(&quot;aria-labelledby&quot;, selected.id);
+        }
+      }
+    }
+  };
+  const interact = (event) =&gt; {
+    const tab = event.target?.closest?.(selector);
+    if (event.defaultPrevented || tab == null || tab.matches(disabled)) {
+      return;
+    }
+    if (event.type === &quot;click&quot;) {
+      selectTab(tab);
+      return;
+    }
+    const tabs = Array.from(
+      tab.closest(&#x27;[role=&quot;tablist&quot;]&#x27;).querySelectorAll(&#x27;[role=&quot;tab&quot;]&#x27;),
+    ).filter((candidate) =&gt; !candidate.matches(disabled));
+    const current = tabs.indexOf(tab);
+    let next;
+    if (event.key === &quot;ArrowRight&quot; || event.key === &quot;ArrowDown&quot;) {
+      next = (current + 1) % tabs.length;
+    } else if (event.key === &quot;ArrowLeft&quot; || event.key === &quot;ArrowUp&quot;) {
+      next = (current + tabs.length - 1) % tabs.length;
+    } else if (event.key === &quot;Home&quot;) {
+      next = 0;
+    } else if (event.key === &quot;End&quot;) {
+      next = tabs.length - 1;
+    } else {
+      return;
+    }
+    event.preventDefault();
+    tabs[next].focus();
+    selectTab(tabs[next]);
+  };
+
+  for (const list of document.querySelectorAll(&#x27;.nav[role=&quot;tablist&quot;]&#x27;)) {
+    const selected =
+      list.querySelector(&#x27;[role=&quot;tab&quot;][aria-selected=&quot;true&quot;]&#x27;) ??
+      list.querySelector(&#x27;[role=&quot;tab&quot;].active&#x27;) ??
+      list.querySelector(&#x27;[role=&quot;tab&quot;]&#x27;);
+    if (selected != null) {
+      selectTab(selected);
+    }
+  }
+  document.addEventListener(&quot;click&quot;, interact);
+  document.addEventListener(&quot;keydown&quot;, interact);
+  window.addEventListener(&quot;pagehide&quot;, () =&gt; {
+    document.removeEventListener(&quot;click&quot;, interact);
+    document.removeEventListener(&quot;keydown&quot;, interact);
+  }, { once: true });
+})();
+&lt;/script&gt;
+&lt;script id=&quot;codex-visualization-lucide&quot; async src=&quot;https://unpkg.com/lucide@1.17.0/dist/umd/lucide.js&quot;&gt;&lt;/script&gt;
+&lt;script&gt;
+(() =&gt; {
+  const initialize = () =&gt; {
+    globalThis.lucide?.createIcons({ attrs: { width: 16, height: 16 } });
+  };
+  if (globalThis.lucide != null) {
+    initialize();
+    return;
+  }
+  document
+    .getElementById(&quot;codex-visualization-lucide&quot;)
+    ?.addEventListener(&quot;load&quot;, initialize, { once: true });
+})();
+&lt;/script&gt;
+
+&lt;/body&gt;
+&lt;/html&gt;
+"></iframe>
+</body>
+</html>

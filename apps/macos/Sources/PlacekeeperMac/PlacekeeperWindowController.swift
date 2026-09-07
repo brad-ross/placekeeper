@@ -138,7 +138,7 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
         controller.view = contentView
         window.contentViewController = controller
         alignTrafficLights()
-        window.backgroundColor = NSColor(calibratedRed: 0.965, green: 0.949, blue: 0.918, alpha: 1)
+        window.backgroundColor = .windowBackgroundColor
         if let restoredFrame { window.setFrame(restoredFrame, display: false) }
     }
 
@@ -245,7 +245,10 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
         endGeometryTransition()
     }
 
-    func windowWillEnterFullScreen(_ notification: Notification) { beginGeometryTransition() }
+    func windowWillEnterFullScreen(_ notification: Notification) {
+        beginGeometryTransition()
+        window?.toolbar?.isVisible = false
+    }
 
     func windowDidEnterFullScreen(_ notification: Notification) {
         alignTrafficLights()
@@ -255,6 +258,7 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
     func windowWillExitFullScreen(_ notification: Notification) { beginGeometryTransition() }
 
     func windowDidExitFullScreen(_ notification: Notification) {
+        window?.toolbar?.isVisible = true
         alignTrafficLights()
         endGeometryTransition()
     }
@@ -513,6 +517,7 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
 
     private func trafficLightInset() -> Double {
         guard let window else { return 76 }
+        guard !window.styleMask.contains(.fullScreen) else { return Double(Self.toolbarHorizontalMargin) }
         let buttons = [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton]
             .compactMap(window.standardWindowButton)
         guard let rightmost = buttons.max(by: { $0.frame.maxX < $1.frame.maxX }),
@@ -526,7 +531,9 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
     }
 
     private func trafficLightBounds() -> [[String: Double]] {
-        guard let window else { return [] }
+        // AppKit retains the buttons while sliding the native title bar out of
+        // fullscreen. Those offscreen frames must not shrink the web toolbar.
+        guard let window, !window.styleMask.contains(.fullScreen) else { return [] }
         return [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton]
             .compactMap(window.standardWindowButton)
             .compactMap { button -> [String: Double]? in
@@ -765,12 +772,18 @@ private final class DraggableTitlebarView: NSView {
 
     override var mouseDownCanMoveWindow: Bool { true }
 
+    private func dismissWebTopBarMenus() {
+        webView?.evaluateJavaScript("globalThis.__PLACEKEEPER_MAC_DISMISS_TOP_BAR_MENUS__?.()")
+    }
+
     override func mouseDown(with event: NSEvent) {
         webView?.evaluateJavaScript("document.activeElement?.blur()")
+        dismissWebTopBarMenus()
         if event.clickCount == 2 {
             window?.performZoom(nil)
             return
         }
         window?.performDrag(with: event)
+        dismissWebTopBarMenus()
     }
 }

@@ -1,5 +1,7 @@
+import { useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
 import type { LiveContextBindingStatus } from '../../../../packages/core/src/live-context.js';
 import { ReviewIcon } from './ReviewIcon.js';
+import { placeLinkActionPopover, visibleReviewViewport } from './LinkActionPopover.js';
 
 export interface CodexContextStatusProps {
   readonly status: LiveContextBindingStatus;
@@ -7,6 +9,9 @@ export interface CodexContextStatusProps {
 
 /** Passive browser feedback for a task-scoped Codex launch. */
 export function CodexContextStatus({ status }: CodexContextStatusProps) {
+  const anchorRef = useRef<HTMLDivElement>(null);
+  const tooltipRef = useRef<HTMLSpanElement>(null);
+  const [placement, setPlacement] = useState<CSSProperties>({});
   const current = status.status === 'current';
   const connecting = status.status === 'pending' || status.status === 'refreshing';
   const visualStatus = current ? 'current' : connecting ? 'connecting' : 'unavailable';
@@ -28,15 +33,44 @@ export function CodexContextStatus({ status }: CodexContextStatusProps) {
     ? `${title} at review revision ${status.identity.reviewRevision}`
     : `${title}. ${detail}`;
 
+  const positionTooltip = () => {
+    const anchor = anchorRef.current;
+    const tooltip = tooltipRef.current;
+    if (!anchor || !tooltip) return;
+    const bounds = tooltip.getBoundingClientRect();
+    const next = placeLinkActionPopover({
+      anchor: anchor.getBoundingClientRect(),
+      menu: { width: bounds.width, height: bounds.height },
+      viewport: visibleReviewViewport(),
+      gap: 6,
+      margin: 6,
+    });
+    setPlacement((previous) => previous.left === next.left && previous.top === next.top
+      ? previous : { left: next.left, top: next.top });
+  };
+
+  useLayoutEffect(() => {
+    positionTooltip();
+    window.addEventListener('resize', positionTooltip);
+    window.visualViewport?.addEventListener('resize', positionTooltip);
+    return () => {
+      window.removeEventListener('resize', positionTooltip);
+      window.visualViewport?.removeEventListener('resize', positionTooltip);
+    };
+  }, [title, detail]);
+
   return (
     <div
+      ref={anchorRef}
       className={`codex-context-status codex-context-status--${visualStatus}`}
       data-codex-context={visualStatus}
       aria-label={accessibleLabel}
       tabIndex={0}
+      onPointerEnter={positionTooltip}
+      onFocus={positionTooltip}
     >
       <ReviewIcon name="agent" size={16} />
-      <span className="codex-context-status__tooltip" role="tooltip">
+      <span ref={tooltipRef} className="codex-context-status__tooltip" role="tooltip" style={placement}>
         <strong className="codex-context-status__tooltip-title">
           <span className="codex-context-status__tooltip-dot" aria-hidden="true" />
           {title}

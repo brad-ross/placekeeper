@@ -1,6 +1,7 @@
 import {
   useLayoutEffect,
   useRef,
+  type FocusEvent,
   type KeyboardEvent,
   type ReactNode,
   type Ref,
@@ -15,6 +16,8 @@ import { OutlineNavigator } from './OutlineNavigator.js';
 import type { WorkspaceMode } from './reference-navigation-state.js';
 import type { RightWorkspaceMode } from './reference-workspace-layout.js';
 import { WorkspaceModeStrip } from './WorkspaceModeStrip.js';
+import { ReviewIcon } from './ReviewIcon.js';
+import { ReviewTooltipButton } from './ReviewTooltipButton.js';
 
 export interface OutlineAnnotationsWorkspaceProps {
   readonly workspaceRef?: Ref<HTMLElement>;
@@ -30,6 +33,8 @@ export interface OutlineAnnotationsWorkspaceProps {
   readonly annotations: ReactNode;
   readonly search?: ReactNode;
   readonly headerAction?: ReactNode;
+  readonly onHide?: () => void;
+  readonly hideLabel?: string;
   readonly onModeChange: (mode: RightWorkspaceMode) => void;
   readonly onOutlineActivate: (item: PdfOutlineItem) => void;
   readonly onOutlineReference: (item: PdfOutlineItem) => void;
@@ -61,6 +66,8 @@ export function OutlineAnnotationsWorkspace({
   annotations,
   search,
   headerAction,
+  onHide,
+  hideLabel = 'Hide workspace',
   onModeChange,
   onOutlineActivate,
   onOutlineReference,
@@ -121,6 +128,17 @@ export function OutlineAnnotationsWorkspace({
     const token = target.dataset.workspaceFocusToken ?? target.dataset.ownedFocusId;
     if (token) onModeFocusTokenChange?.(targetMode, token);
   };
+  const forgetSearchQueryFocus = (event: FocusEvent<HTMLElement>) => {
+    if (event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)) return;
+    if (
+      event.relatedTarget instanceof Element
+      && event.relatedTarget.closest('[data-workspace-mode]') !== null
+    ) return;
+    const remembered = focusMemory.current.get('search');
+    if (remembered?.dataset.workspaceFocusToken !== 'search:query') return;
+    focusMemory.current.set('search', event.currentTarget);
+    onModeFocusTokenChange?.('search', 'search:panel');
+  };
 
   return (
     <aside
@@ -134,11 +152,19 @@ export function OutlineAnnotationsWorkspace({
       aria-label={outlineAvailable
         ? annotationsAvailable ? 'Outline, search, and annotations' : 'Outline and search'
         : annotationsAvailable ? 'Search and annotations' : 'Search'}
-      aria-hidden={!open || authoringTakeover}
+      aria-hidden={!open}
       inert={!open || authoringTakeover}
     >
       {headerVariant === 'tools' ? (
         <header className="review-workspace__header">
+          {onHide ? <ReviewTooltipButton
+            label={hideLabel}
+            type="button"
+            className="review-workspace__close"
+            aria-expanded="true"
+            aria-controls="review-tools-workspace"
+            onClick={onHide}
+          ><ReviewIcon name={presentation === 'bottom' ? 'chevron-down' : 'chevron-right'} /></ReviewTooltipButton> : null}
           <WorkspaceModeStrip
             modes={toolModes}
             selectedMode={effectiveToolMode}
@@ -163,9 +189,11 @@ export function OutlineAnnotationsWorkspace({
         role="tabpanel"
         aria-labelledby="workspace-mode-search"
         tabIndex={-1}
+        data-workspace-focus-token="search:panel"
         hidden={effectiveMode !== 'search'}
         inert={effectiveMode !== 'search'}
         onFocusCapture={(event) => rememberFocus('search', event.target)}
+        onBlurCapture={forgetSearchQueryFocus}
       >
         {search}
       </section>

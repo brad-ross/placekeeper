@@ -9,7 +9,7 @@ export type RightWorkspaceMode = Exclude<WorkspaceMode, 'references'>;
 export const RIGHT_WORKSPACE_RAIL_FOCUS_TOKEN = 'rail:right-workspace';
 export const BOTTOM_REFERENCES_RAIL_FOCUS_TOKEN = 'rail:bottom-references';
 
-export const DEFAULT_RIGHT_WORKSPACE_WIDTH = 24 * 16;
+export const DEFAULT_RIGHT_WORKSPACE_WIDTH = 19 * 16;
 export const DEFAULT_BOTTOM_REFERENCE_HEIGHT_RATIO = 0.43;
 export const MIN_RIGHT_REFERENCE_WIDTH = 18 * 16;
 export const MIN_BOTTOM_REFERENCE_HEIGHT = 12 * 16;

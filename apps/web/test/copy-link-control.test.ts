@@ -30,7 +30,7 @@ describe('Copy Link', () => {
     expect(markup).not.toContain('lucide-clipboard');
     expect(markup).toContain('width="16"');
     expect(markup).toContain('height="16"');
-    expect(markup).toContain('stroke-width="1.875"');
+    expect(markup).toContain('stroke-width="2"');
   });
 
   it('adapts presentation and semantics without a transient native tooltip', () => {

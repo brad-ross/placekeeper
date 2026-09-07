@@ -28,6 +28,11 @@ export interface ViewerControls {
   dispose(): void;
 }
 
+export interface InitializedViewerControls extends ViewerControls {
+  /** Converts an automatic zoom preset to its current numeric scale without changing numeric user/restored zoom. */
+  freezeCurrentZoom(): boolean;
+}
+
 export const VIEWER_ZOOM_MIN_PERCENT = 20;
 export const VIEWER_ZOOM_MAX_PERCENT = 6000;
 
@@ -49,7 +54,7 @@ export function unavailableViewerControls(): ViewerControlsSnapshot {
   };
 }
 
-export function createViewerControls(registry: PluginRegistry): ViewerControls {
+export function createViewerControls(registry: PluginRegistry): InitializedViewerControls {
   const core = registry.getStore().getState().core;
   const documentId = core.activeDocumentId;
   const scrollCapability = registry.getPlugin<ScrollPlugin>(ScrollPlugin.id)?.provides();
@@ -129,6 +134,19 @@ export function createViewerControls(registry: PluginRegistry): ViewerControls {
         || zoomPercent > VIEWER_ZOOM_MAX_PERCENT
       ) return;
       zoom.requestZoom(zoomPercent / 100);
+    },
+    freezeCurrentZoom: () => {
+      if (!zoom) return false;
+      try {
+        const zoomState = zoom.getState();
+        if (typeof zoomState.zoomLevel === 'number') return true;
+        const currentZoom = zoomState.currentZoomLevel;
+        if (!Number.isFinite(currentZoom) || currentZoom <= 0) return false;
+        zoom.requestZoom(currentZoom);
+        return true;
+      } catch {
+        return false;
+      }
     },
     subscribe(listener) {
       listeners.add(listener);

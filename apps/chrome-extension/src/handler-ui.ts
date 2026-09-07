@@ -15,6 +15,8 @@ const ICON_NODES: Readonly<Record<HandlerIconName, readonly HandlerIconNode[]>> 
     ["path", { d: "M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" }],
     ["path", { d: "M3 6h18" }],
     ["path", { d: "M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" }],
+    ["path", { d: "M10 10v8" }],
+    ["path", { d: "M14 10v8" }],
   ],
   "git-fork": [
     ["circle", { cx: "12", cy: "18", r: "3" }],
@@ -44,7 +46,7 @@ export function setHandlerButtonContent(
   icon.setAttribute("viewBox", "0 0 24 24");
   icon.setAttribute("fill", "none");
   icon.setAttribute("stroke", "currentColor");
-  icon.setAttribute("stroke-width", "1.875");
+  icon.setAttribute("stroke-width", "2");
   icon.setAttribute("stroke-linecap", "round");
   icon.setAttribute("stroke-linejoin", "round");
   for (const [tag, attributes] of ICON_NODES[iconName]) {

@@ -4,16 +4,34 @@ import {
   useLayoutEffect,
   useRef,
   useState,
+  type CSSProperties,
   type RefObject,
 } from 'react';
 
 import type { PdfTargetVisibility } from '../pdf/viewer-navigation.js';
 import { ReviewIcon } from './ReviewIcon.js';
+import { ReviewTooltipButton } from './ReviewTooltipButton.js';
+
+function composerIcon(title: string) {
+  const normalized = title.toLocaleLowerCase();
+  if (normalized.includes('replacement')) return 'replace' as const;
+  if (normalized.includes('deletion')) return 'delete' as const;
+  if (normalized.includes('insertion')) return 'insert' as const;
+  if (normalized.includes('highlight')) return 'highlight' as const;
+  if (normalized.includes('note')) return 'note' as const;
+  return 'annotations' as const;
+}
 
 export interface CommentComposerAnchorNavigation {
   readonly visibility: PdfTargetVisibility;
   readonly pending: boolean;
   readonly onReturn: () => void;
+  readonly pageNumber?: number;
+}
+
+export interface CommentComposerPlacement {
+  readonly kind: 'side' | 'above' | 'below' | 'bottom-sheet';
+  readonly style?: CSSProperties;
 }
 
 export interface CommentComposerProps {
@@ -26,6 +44,7 @@ export interface CommentComposerProps {
   anchorNavigation?: CommentComposerAnchorNavigation | undefined;
   editorRef?: RefObject<HTMLTextAreaElement | null>;
   surfaceRef?: (element: HTMLElement | null) => void;
+  placement?: CommentComposerPlacement;
   onValueChange?(value: string): void;
   onSave(value: string): void | Promise<void>;
   onSkip?: (() => void | Promise<void>) | undefined;
@@ -38,20 +57,29 @@ function AnchorReturn({ navigation }: {
   const visibility = navigation?.visibility ?? 'unavailable';
   const state = navigation?.pending === true ? 'pending' : visibility;
   if (state !== 'outside' && state !== 'pending') return null;
-  const label = state === 'pending' ? 'Returning to annotation' : 'Return to annotation';
+  const label = state === 'pending' ? 'Returning to passage' : 'Back to passage';
   return (
-    <button
+    <ReviewTooltipButton
       className="comment-composer__anchor review-button review-button--secondary"
       type="button"
-      title={label}
-      aria-label={label}
+      label={label}
       data-return-state={state}
       disabled={state === 'pending'}
       onClick={() => navigation?.onReturn()}
     >
-      <ReviewIcon name={state === 'pending' ? 'loading' : 'locate'} />
-    </button>
+      <ReviewIcon name={state === 'pending' ? 'loading' : 'locate'} size={16} />
+    </ReviewTooltipButton>
   );
+}
+
+export interface BoundedTextAreaHeightInput {
+  readonly scrollHeight: number;
+  readonly minHeight: number;
+  readonly maxHeight: number;
+}
+
+export function boundedTextAreaHeight(input: BoundedTextAreaHeightInput): number {
+  return Math.min(input.maxHeight, Math.max(input.minHeight, input.scrollHeight));
 }
 
 export function CommentComposer({
@@ -64,6 +92,7 @@ export function CommentComposer({
   anchorNavigation,
   editorRef,
   surfaceRef,
+  placement,
   onValueChange,
   onSave,
   onSkip,
@@ -73,6 +102,8 @@ export function CommentComposer({
   const ownInputRef = useRef<HTMLTextAreaElement>(null);
   const inputRef = editorRef ?? ownInputRef;
   const [value, setValue] = useState(initialValue);
+  const [submitting, setSubmitting] = useState(false);
+  const composingRef = useRef(false);
   const canSave = optional || (allowWhitespace ? value.length > 0 : value.trim().length > 0);
   const canSkip = optional && onSkip !== undefined;
 
@@ -144,8 +175,26 @@ export function CommentComposer({
     };
   }, [inputRef]);
 
-  const submit = () => {
-    if (canSave) void onSave(value);
+  useLayoutEffect(() => {
+    const editor = inputRef.current;
+    if (editor === null) return;
+    editor.style.height = 'auto';
+    const computed = getComputedStyle(editor);
+    const minHeight = Number.parseFloat(computed.minHeight) || 84;
+    const maxHeight = Number.parseFloat(computed.maxHeight) || 220;
+    const height = boundedTextAreaHeight({ scrollHeight: editor.scrollHeight, minHeight, maxHeight });
+    editor.style.height = `${height}px`;
+    editor.style.overflowY = editor.scrollHeight > height ? 'auto' : 'hidden';
+  }, [inputRef, value]);
+
+  const submit = async () => {
+    if (!canSave || submitting || composingRef.current) return;
+    setSubmitting(true);
+    try {
+      await onSave(value);
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -155,14 +204,23 @@ export function CommentComposer({
       aria-labelledby={titleId}
       className="comment-composer compact-editorial-modal"
       data-comment-composer
+      data-composer-placement={placement?.kind}
+      style={placement?.style}
       onSubmit={(event) => {
         event.preventDefault();
         submit();
       }}
     >
       <header className="comment-composer__header compact-editorial-modal__header">
-        <h2 id={titleId}>{title}</h2>
-        <AnchorReturn navigation={anchorNavigation} />
+        <h2 id={titleId}>
+          <ReviewIcon name={composerIcon(title)} size={16} />
+          <span>{title}{anchorNavigation?.visibility === 'outside' && anchorNavigation.pageNumber !== undefined
+            ? <span className="comment-composer__page-cue"> · {anchorNavigation.pageNumber}</span>
+            : null}</span>
+        </h2>
+        {anchorNavigation?.visibility === 'outside' || anchorNavigation?.pending
+          ? <AnchorReturn navigation={anchorNavigation} />
+          : null}
       </header>
       <div className="comment-composer__body compact-editorial-modal__body">
         <label className="comment-composer__field">
@@ -171,14 +229,17 @@ export function CommentComposer({
             className="comment-composer__input"
             ref={inputRef}
             title={fieldLabel}
+            placeholder="Add a comment…"
             value={value}
             onChange={(event) => {
               const next = event.currentTarget.value;
               setValue(next);
               onValueChange?.(next);
             }}
+            onCompositionStart={() => { composingRef.current = true; }}
+            onCompositionEnd={() => { composingRef.current = false; }}
             onKeyDown={(event) => {
-              if ((event.metaKey || event.ctrlKey) && event.key === 'Enter' && canSave) {
+              if ((event.metaKey || event.ctrlKey) && event.key === 'Enter' && canSave && !event.nativeEvent.isComposing) {
                 event.preventDefault();
                 submit();
               }
@@ -192,7 +253,6 @@ export function CommentComposer({
             title="Cancel"
             onClick={() => void onDismiss()}
           >
-            <ReviewIcon name="close" />
             <span>Cancel</span>
           </button>
           {canSkip ? (
@@ -202,7 +262,6 @@ export function CommentComposer({
               title="Keep highlight without comment"
               onClick={() => void onSkip()}
             >
-              <ReviewIcon name="arrow-right" />
               <span>Keep</span>
             </button>
           ) : null}
@@ -210,9 +269,11 @@ export function CommentComposer({
             className="review-button review-button--primary"
             type="submit"
             title={saveLabel}
-            disabled={!canSave}
+            disabled={!canSave || submitting}
+            aria-disabled={!canSave || submitting}
+            data-submitting={submitting ? 'true' : undefined}
           >
-            <ReviewIcon name="check" />
+            {submitting ? <ReviewIcon name="loading" /> : null}
             <span>{saveLabel}</span>
           </button>
         </div>

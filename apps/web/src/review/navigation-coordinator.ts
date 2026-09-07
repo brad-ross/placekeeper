@@ -608,7 +608,7 @@ export class NavigationCoordinator {
     this.dependencies.dispatch({ type: 'refresh-active-reference', settledLocation });
     this.dependencies.setReferenceReturnState(null);
     this.dependencies.setAnnouncement('Returned to reference.');
-    navigation.focusAtDestination(settledLocation.pageIndex);
+    navigation.focusAtDestination(currentTab.originalTarget.pageIndex);
     return true;
   }
 
@@ -786,6 +786,13 @@ export class NavigationCoordinator {
   }
 
   async openReferencesWorkspace(): Promise<boolean> {
+    // Docking or revealing the loading panel is presentation work. Starting a
+    // new navigation here would cancel the reference that is still opening.
+    if (this.pendingReference !== null) {
+      this.dependencies.dispatch({ type: 'select-workspace-mode', mode: 'references' });
+      this.dependencies.layout.revealReferences();
+      return true;
+    }
     const operation = this.begin();
     if (operation === null) return false;
     this.clearReferenceReturnState();
@@ -983,7 +990,8 @@ export class NavigationCoordinator {
     }
     const sameLocation = samePdfViewerLocation(currentLocation, destination);
     if (sameLocation && (kind !== 'search' || this.lastSearchTargetIdentity === target.identity)) {
-      if ((kind === 'direct' || kind === 'search') && options.preserveWorkspace !== true) {
+      this.dependencies.commitMainFramingPosition();
+      if (kind === 'direct' && options.preserveWorkspace !== true) {
         this.dependencies.layout.hideReferences();
         await this.dependencies.layout.settle();
       }
@@ -1015,7 +1023,8 @@ export class NavigationCoordinator {
     this.projectExplicitLocation({ kind: 'page', page: settledLocation.pageIndex + 1 }, null);
     if (kind === 'search') this.lastSearchTargetIdentity = target.identity;
     this.refreshCurrentOutline(settledLocation);
-    if ((kind === 'direct' || kind === 'search') && options.preserveWorkspace !== true) {
+    this.dependencies.commitMainFramingPosition();
+    if (kind === 'direct' && options.preserveWorkspace !== true) {
       this.dependencies.layout.hideReferences();
       await this.dependencies.layout.settle();
     }
@@ -1066,12 +1075,14 @@ export class NavigationCoordinator {
       input.viewport !== undefined
       && main.locationVisibility(destination, input.viewport) === 'visible'
     ) {
+      this.dependencies.commitMainFramingPosition();
       main.focusAtDestination(destination.pageIndex);
       this.dependencies.setAnnouncement('Annotation destination is already visible.');
       this.refreshCurrentOutline(currentLocation);
       return true;
     }
     if (samePdfViewerLocation(currentLocation, destination)) {
+      this.dependencies.commitMainFramingPosition();
       main.focusAtDestination(destination.pageIndex);
       this.dependencies.setAnnouncement(input.linkFallbackNotice === undefined
         ? 'Annotation destination is already current.'
@@ -1107,6 +1118,7 @@ export class NavigationCoordinator {
       input.viewport,
     );
     this.refreshCurrentOutline(settledLocation);
+    this.dependencies.commitMainFramingPosition();
     return true;
   }
 

@@ -606,6 +606,19 @@ function glyphCaretCandidates(
   point: Position,
 ): CaretCandidate[] {
   const candidates: CaretCandidate[] = [];
+  const byOffset = new Map(glyphs.map((glyph) => [glyph.textOffset, glyph]));
+  const boundaryX = (offset: number, fallback: number) => {
+    const before = byOffset.get(offset - 1)?.rect;
+    const after = byOffset.get(offset)?.rect;
+    if (!before || !after) return fallback;
+    const right = before.origin.x + before.size.width;
+    const gap = after.origin.x - right;
+    const verticalOverlap = Math.min(before.origin.y + before.size.height, after.origin.y + after.size.height)
+      - Math.max(before.origin.y, after.origin.y);
+    // Center in the actual inter-glyph gap, without bridging a line or column break.
+    return verticalOverlap > 0 && gap >= 0 && gap <= Math.max(before.size.height, after.size.height) / 2
+      ? right + gap / 2 : fallback;
+  };
   for (const glyph of glyphs) {
     const { rect } = glyph;
     const centerY = rect.origin.y + rect.size.height / 2;
@@ -618,7 +631,7 @@ function glyphCaretCandidates(
       candidates.push({
         textOffset: glyph.textOffset + (after ? 1 : 0),
         position: {
-          origin: { x: after ? right : left, y: rect.origin.y },
+          origin: { x: boundaryX(glyph.textOffset + (after ? 1 : 0), after ? right : left), y: rect.origin.y },
           size: { width: 2, height: rect.size.height },
         },
         distance: 0,
@@ -634,7 +647,7 @@ function glyphCaretCandidates(
         candidates.push({
           textOffset: edge.textOffset,
           position: {
-            origin: { x: edge.x, y: rect.origin.y },
+            origin: { x: boundaryX(edge.textOffset, edge.x), y: rect.origin.y },
             size: { width: 2, height: rect.size.height },
           },
           distance,

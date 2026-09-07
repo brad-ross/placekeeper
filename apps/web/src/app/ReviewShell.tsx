@@ -50,20 +50,15 @@ import type {
 import type { ViewerPdfLinkInvocation } from '../pdf/viewer-interaction-events.js';
 import type { PdfOutlineDiscovery, PdfOutlineItem } from '../pdf/pdf-outline.js';
 import { AnnotationList } from '../review/AnnotationList.js';
-import { AnnotationExcerpt } from '../review/AnnotationExcerpt.js';
 import { FullAnnotationReader } from '../review/FullAnnotationReader.js';
 import {
-  projectExistingAnnotationReader,
+  projectOwnedAnnotationReader,
   resolveAnnotationReader,
   type AnnotationReaderIdentity,
   type AnnotationReaderRecord,
 } from '../review/annotation-reader.js';
-import {
-  AnnotationMetadata,
-  annotationAccessibleLabel,
-  annotationKindLabel,
-} from '../review/AnnotationMetadata.js';
 import { AnnotationPeek } from '../review/AnnotationPeek.js';
+import { reviewItemNavigationTarget } from '../review/annotation-outline-context.js';
 import { CommentComposer } from '../review/CommentComposer.js';
 import {
   ContextActionPalette,
@@ -125,6 +120,8 @@ import {
   useWorkspaceFraming,
   type WorkspaceOpenRequest,
 } from '../review/use-annotation-tray-framing.js';
+import { useReviewOverlayGeometry } from '../review/use-review-overlay-geometry.js';
+import { usePassageEditorPlacement } from '../review/use-passage-editor-placement.js';
 import {
   INITIAL_REVIEW_SURFACE_STATE,
   reduceReviewSurface,
@@ -160,6 +157,7 @@ import {
 import type { GenerationRefreshStatus, LocationRestoreStatus } from '../generation-status.js';
 import { reviewItemIsResolvedForGeneration } from '../../../../packages/core/src/annotation-projection.js';
 import './review-layout.css';
+import './neutral-chrome.css';
 
 function ignoreReferenceViewportHost(_element: HTMLDivElement | null): void {}
 
@@ -172,9 +170,16 @@ export interface ReviewShellProps {
   savePendingDestination?: boolean;
   saveOptionsOpen?: boolean;
   onSaveOptions?(): void;
+  saveRecovery?: {
+    readonly pending: boolean;
+    readonly error?: string;
+    readonly onRetry: () => void | Promise<void>;
+    readonly onSaveCopy: () => void;
+  };
   generationRefreshStatus?: GenerationRefreshStatus;
   locationRestoreStatus?: LocationRestoreStatus;
   toolError?: string | null;
+  commandNotice?: string | null;
   onSelectionPageLimitExceeded?(): void;
   onCopySelection?(): void;
   onExportReviewedCopy?(confirmPossiblyStale?: true): Promise<ReviewExportResult | void>;
@@ -260,8 +265,11 @@ export interface ReviewShellProps {
   currentOutlineItemId?: string | null;
   linkActionRequest?: ViewerPdfLinkInvocation | null;
   navigationAnnouncement?: string;
+  documentActionsRequestToken?: number;
+  onDocumentActionsRequestHandled?: (token: number) => void;
   canNavigateBack?: boolean;
   canNavigateForward?: boolean;
+  documentNavigationPending?: boolean;
   onLinkActionChoose?(choice: LinkActionChoice, request: ViewerPdfLinkInvocation): void;
   onLinkActionDismiss?(request: ViewerPdfLinkInvocation, reason: LinkActionDismissReason): void;
   copyLinkForLinkAction?(request: ViewerPdfLinkInvocation): CopyLinkControlProps | undefined;
@@ -327,6 +335,7 @@ interface FullAnnotationReaderSession {
   readonly identity: AnnotationReaderIdentity;
   readonly authority: AuthoringAuthority;
   readonly annotationScrollTop: number;
+  readonly origin: 'list' | 'peek';
   readonly previousActiveItemId?: string;
   readonly entryFocus?: 'back' | 'edit';
 }
@@ -372,6 +381,10 @@ function initialAuthoringValue(session: AuthoringSession): string {
   return field === undefined ? '' : String(source.item.payload[field] ?? '');
 }
 
+function cssAttributeValue(value: string): string {
+  return value.replace(/\\/gu, '\\\\').replace(/"/gu, '\\"');
+}
+
 export function ReviewShell(props: ReviewShellProps) {
   const [localReferenceLayout, dispatchLocalReferenceLayout] = useReducer(
     reduceReferenceWorkspaceLayout,
@@ -410,6 +423,7 @@ export function ReviewShell(props: ReviewShellProps) {
   const saveOptionsWasOpenRef = useRef(props.saveOptionsOpen ?? false);
   const [authoringSurfaceElement, setAuthoringSurfaceElement] = useState<HTMLElement | null>(null);
   const [localActiveItemId, setLocalActiveItemId] = useState<string>();
+  const [activeExistingAnnotationKey, setActiveExistingAnnotationKey] = useState<string>();
   const activeItemId = props.activeItemId === undefined
     ? localActiveItemId
     : props.activeItemId ?? undefined;
@@ -419,16 +433,22 @@ export function ReviewShell(props: ReviewShellProps) {
   const [consumedSelectionGeneration, setConsumedSelectionGeneration] = useState<number>();
   const [listActivation, setListActivation] = useState<{ readonly id: string; readonly token: number }>();
   const [annotationReaderSession, setAnnotationReaderSession] = useState<FullAnnotationReaderSession | null>(null);
+  const [readerNavigationRevision, setReaderNavigationRevision] = useState(0);
+  const [readerNavigationPending, setReaderNavigationPending] = useState(false);
   const [reconciliationDetailOpen, setReconciliationDetailOpen] = useState(false);
   const [reconciliationFocusRequest, setReconciliationFocusRequest] = useState(0);
   const pendingReaderResumeRef = useRef<FullAnnotationReaderSession | null>(null);
+  const pendingMarkReaderRequestRef = useRef<{ readonly id: string; readonly token: number } | null>(null);
+  const ownedReaderOverflowRef = useRef(new Map<string, boolean>());
   const annotationRestorationTokenRef = useRef(0);
   const annotationRestorationFramesRef = useRef(new Set<number>());
   const [peekItemId, setPeekItemId] = useState<string>();
   const [searchFocusRequest, setSearchFocusRequest] = useState(0);
+  const handledSearchFocusRequestRef = useRef(0);
   const [commandFocusContext, setCommandFocusContext] = useState<ReviewCommandFocusContext>('review');
   const handledCommandInvocationRef = useRef(0);
   const peekHeldRef = useRef(false);
+  const dismissedPeekIdRef = useRef<string | undefined>(undefined);
   const peekTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const [announcement, setAnnouncement] = useState(`Review revision ${props.state.revision}.`);
   const [transitionAnnouncement, setTransitionAnnouncement] = useState('');
@@ -514,6 +534,7 @@ export function ReviewShell(props: ReviewShellProps) {
     token: 0,
   });
   const setActiveItem = (id: string | undefined) => {
+    if (id !== undefined) setActiveExistingAnnotationKey(undefined);
     if (props.activeItemId === undefined) setLocalActiveItemId(id);
     props.onActiveItemChange?.(id);
   };
@@ -538,6 +559,9 @@ export function ReviewShell(props: ReviewShellProps) {
   ), [navigation.documentGeneration, outlineDiscovery]);
   const outlineAbsent = visibleOutlineDiscovery.status === 'loaded-empty';
   const existingAnnotations = props.existingAnnotations ?? { status: 'loading', generation: 0 };
+  useEffect(() => {
+    setActiveExistingAnnotationKey(undefined);
+  }, [navigation.documentGeneration, existingAnnotations.generation]);
   const visibleOwnedItems = props.state.workflow.mode === 'generated-output'
     ? props.state.items.filter((item) => reviewItemIsResolvedForGeneration(
         item,
@@ -616,7 +640,7 @@ export function ReviewShell(props: ReviewShellProps) {
     requestedEffectiveWorkspaceMode,
   ) ? requestedEffectiveWorkspaceMode : rightWorkspaceMode;
   const anyWorkspaceOpen = workspaceOpen || referenceSurfaceOpen || toolsSurfaceOpen;
-  const annotationsVisible = anyWorkspaceOpen && effectiveWorkspaceMode === 'annotations';
+  const annotationsVisible = toolsSurfaceOpen && effectiveWorkspaceMode === 'annotations';
   const outlineExpansionToggleVisible = toolsSurfaceOpen && effectiveWorkspaceMode === 'outline';
   const annotationReaderRecord = annotationReaderSession === null
     || !authoringAuthorityMatches(annotationReaderSession.authority, currentAuthoringAuthority)
@@ -630,6 +654,35 @@ export function ReviewShell(props: ReviewShellProps) {
     ? annotationReaderRecord.identity.itemId
     : undefined;
   const annotationReaderOpen = annotationReaderRecord !== null;
+  const annotationReaderIdentity = annotationReaderRecord?.identity;
+  const annotationReaderTarget = annotationReaderIdentity === undefined
+    ? null
+    : annotationReaderIdentity.origin === 'owned'
+      ? (() => {
+          const item = props.state.items.find(
+            ({ id }) => id === annotationReaderIdentity.itemId,
+          );
+          return item === undefined ? null : reviewItemNavigationTarget(item);
+        })()
+      : existingAnnotations.status === 'ready'
+        ? (() => {
+            const annotation = existingAnnotations.items.find(
+              (candidate) => existingAnnotationKey(candidate)
+                === annotationReaderIdentity.annotationKey,
+            );
+            return annotation === undefined
+              ? null
+              : { pageIndex: annotation.pageIndex, point: { x: annotation.rect.x, y: annotation.rect.y } };
+          })()
+        : null;
+  void readerNavigationRevision;
+  const annotationReaderVisibility: PdfTargetVisibility = annotationReaderTarget === null
+    || props.viewerNavigation === undefined
+    ? 'unavailable'
+    : props.viewerNavigation.pointVisibility(
+        annotationReaderTarget.pageIndex,
+        annotationReaderTarget.point,
+      );
   const selectionAnchor = reliableSelection(props.selectionUpdate);
   const selectionActionsAvailable = (
     selectionAnchor !== null || props.selectionUpdate.kind === 'over-limit'
@@ -656,12 +709,57 @@ export function ReviewShell(props: ReviewShellProps) {
       referenceLayout.bottomReferenceHeight,
     ].join(':'),
   });
+  const overlaySurfaceRefs = useMemo(() => [
+    workspaceFraming.referenceSurfaceRef,
+    workspaceFraming.toolsSurfaceRef,
+  ], [workspaceFraming.referenceSurfaceRef, workspaceFraming.toolsSurfaceRef]);
+  const overlayLayoutGeneration = [
+    effectiveReferenceLayout.kind,
+    referenceSurfaceOpen,
+    toolsSurfaceOpen,
+    referenceLayout.referenceDock,
+    referenceLayout.rightReferenceWidth,
+    effectiveReferenceLayout.bottomHeight,
+    workspaceFraming.presentation,
+  ].join(':');
+  const overlayFrame = useReviewOverlayGeometry({
+    stageRef: workspaceFraming.stageRef,
+    surfaceRefs: overlaySurfaceRefs,
+    layoutGeneration: overlayLayoutGeneration,
+  });
+  const authoringTargetSelector = authoringSession === null
+    ? undefined
+    : `[data-owned-mark][data-review-id="${cssAttributeValue(
+      authoringSession.source.kind === 'edit'
+        ? authoringSession.source.item.id
+        : `authoring-preview:${authoringSession.token}`,
+    )}"]`;
+  const authoringFallbackTarget = authoringSession === null
+    ? null
+    : authoringSession.source.kind === 'replace' || authoringSession.source.kind === 'highlight'
+      ? props.selectionPlacement ?? null
+      : authoringSession.source.kind === 'insert'
+        ? props.caretPlacement ?? null
+        : authoringSession.source.kind === 'pageNote'
+          ? props.pageMenu?.placement ?? null
+          : null;
+  const authoringPlacement = usePassageEditorPlacement({
+    active: authoringSession !== null,
+    anchorKey: authoringSession === null ? null : String(authoringSession.token),
+    stageRef: workspaceFraming.stageRef,
+    surfaceRefs: overlaySurfaceRefs,
+    editorElement: authoringSurfaceElement,
+    ...(authoringTargetSelector === undefined ? {} : { targetSelector: authoringTargetSelector }),
+    fallbackTarget: authoringFallbackTarget,
+    layoutGeneration: overlayLayoutGeneration,
+  });
 
   const restoreAnnotationList = useCallback((
     session: FullAnnotationReaderSession,
     options?: {
       readonly activeItemId?: string;
       readonly preferRowTarget?: boolean;
+      readonly restoreRowFocus?: boolean;
     },
   ) => {
     const { identity } = session;
@@ -685,6 +783,22 @@ export function ReviewShell(props: ReviewShellProps) {
       });
       annotationRestorationFramesRef.current.add(frame);
     };
+    if (session.origin === 'peek') {
+      setAnnotationReaderSession(null);
+      if (staleAuthority || identity.origin !== 'owned') {
+        setPeekItemId(undefined);
+        setActiveItem(undefined);
+      } else {
+        setPeekItemId(identity.itemId);
+        setActiveItem(options?.activeItemId ?? identity.itemId);
+      }
+      scheduleRestoration(() => scheduleRestoration(() => {
+        shellRef.current
+          ?.querySelector<HTMLElement>('[data-annotation-peek] [data-read-full-annotation="true"]')
+          ?.focus({ preventScroll: true });
+      }));
+      return;
+    }
     setAnnotationReaderSession(null);
     if (staleAuthority) {
       setActiveItem(undefined);
@@ -718,15 +832,17 @@ export function ReviewShell(props: ReviewShellProps) {
       const restorableMore = !options?.preferRowTarget && isVisibleFocusTarget(openingMore)
         ? openingMore
         : null;
-      const focusTarget = restorableMore
-        ?? rowTarget
-        ?? workspaceFallback
-        ?? pdfFallback;
+      const focusTarget = options?.restoreRowFocus === false
+        ? workspaceFallback ?? pdfFallback
+        : restorableMore ?? rowTarget ?? workspaceFallback ?? pdfFallback;
       focusTarget?.focus({ preventScroll: true });
       if (!staleAuthority && viewport !== null) {
         viewport.scrollTop = session.annotationScrollTop;
         scheduleRestoration(() => {
           viewport.scrollTop = session.annotationScrollTop;
+          if (options?.preferRowTarget || document.activeElement !== rowTarget) return;
+          const settledMore = row?.querySelector<HTMLElement>('[data-read-full-annotation="true"]');
+          if (isVisibleFocusTarget(settledMore)) settledMore.focus({ preventScroll: true });
         });
       }
     }));
@@ -748,6 +864,39 @@ export function ReviewShell(props: ReviewShellProps) {
 
   useLayoutEffect(() => {
     if (annotationReaderSession === null || !annotationReaderOpen) return;
+    const stage = workspaceFraming.stageRef.current;
+    if (stage === null) return;
+    let frame = 0;
+    const schedule = () => {
+      if (frame !== 0) return;
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        setReaderNavigationRevision((revision) => revision + 1);
+      });
+    };
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(schedule);
+    observer?.observe(stage);
+    stage.addEventListener('scroll', schedule, true);
+    window.addEventListener('resize', schedule);
+    return () => {
+      cancelAnimationFrame(frame);
+      observer?.disconnect();
+      stage.removeEventListener('scroll', schedule, true);
+      window.removeEventListener('resize', schedule);
+    };
+  }, [annotationReaderOpen, annotationReaderSession, workspaceFraming.stageRef]);
+
+  useEffect(() => {
+    if (!readerNavigationPending || annotationReaderVisibility !== 'visible') return;
+    setReaderNavigationPending(false);
+  }, [annotationReaderVisibility, readerNavigationPending]);
+
+  useEffect(() => {
+    setReaderNavigationPending(false);
+  }, [annotationReaderSession?.identity]);
+
+  useLayoutEffect(() => {
+    if (annotationReaderSession === null || !annotationReaderOpen) return;
     const action = annotationReaderSession.entryFocus ?? 'back';
     shellRef.current
       ?.querySelector<HTMLElement>(`[data-full-annotation-action="${action}"]`)
@@ -756,7 +905,8 @@ export function ReviewShell(props: ReviewShellProps) {
 
   const openOwnedAnnotationReader = (
     record: AnnotationReaderRecord,
-    _trigger: HTMLButtonElement,
+    _trigger: HTMLButtonElement | null,
+    origin: FullAnnotationReaderSession['origin'] = 'list',
   ) => {
     if (authoringSessionRef.current !== null || record.identity.origin !== 'owned') return;
     cancelAnnotationRestoration();
@@ -768,13 +918,12 @@ export function ReviewShell(props: ReviewShellProps) {
       ?.querySelector<HTMLElement>('[data-annotation-scroll-viewport]')
       ?.scrollTop ?? 0;
     const previousActiveItemId = activeItemId;
-    workspaceFraming.markUserIntent();
     setActiveItem(item.id);
-    props.onNavigate?.(item);
     setAnnotationReaderSession({
       identity,
       authority: currentAuthoringAuthorityRef.current,
       annotationScrollTop,
+      origin,
       ...(previousActiveItemId === undefined ? {} : { previousActiveItemId }),
     });
   };
@@ -791,15 +940,73 @@ export function ReviewShell(props: ReviewShellProps) {
       ?.querySelector<HTMLElement>('[data-annotation-scroll-viewport]')
       ?.scrollTop ?? 0;
     const previousActiveItemId = activeItemId;
-    workspaceFraming.markUserIntent();
-    props.onNavigateExisting?.(annotation);
+    setActiveItem(undefined);
+    setActiveExistingAnnotationKey(existingAnnotationKey(annotation));
     setAnnotationReaderSession({
       identity: record.identity,
       authority: currentAuthoringAuthorityRef.current,
       annotationScrollTop,
+      origin: 'list',
       ...(previousActiveItemId === undefined ? {} : { previousActiveItemId }),
     });
   };
+
+  const closeAnnotationReader = (session: FullAnnotationReaderSession, restoreRowFocus = true) => {
+    if (session.origin === 'list') {
+      restoreAnnotationList(session, { restoreRowFocus });
+      return;
+    }
+    setAnnotationReaderSession(null);
+    requestAnimationFrame(() => {
+      shellRef.current
+        ?.querySelector<HTMLElement>('[data-annotation-peek] [data-read-full-annotation="true"]')
+        ?.focus({ preventScroll: true });
+    });
+  };
+
+  const returnReaderToAnnotation = () => {
+    if (
+      annotationReaderRecord === null
+      || annotationReaderTarget === null
+      || readerNavigationPending
+    ) return;
+    const identity = annotationReaderRecord.identity;
+    workspaceFraming.markUserIntent();
+    setReaderNavigationPending(true);
+    if (identity.origin === 'owned') {
+      const item = props.state.items.find(
+        ({ id }) => id === identity.itemId,
+      );
+      if (item === undefined) {
+        setReaderNavigationPending(false);
+        return;
+      }
+      setActiveItem(item.id);
+      props.onNavigate?.(item);
+    } else if (existingAnnotations.status === 'ready') {
+      const annotation = existingAnnotations.items.find(
+        (candidate) => existingAnnotationKey(candidate)
+          === identity.annotationKey,
+      );
+      if (annotation === undefined) {
+        setReaderNavigationPending(false);
+        return;
+      }
+      props.onNavigateExisting?.(annotation);
+    }
+    window.setTimeout(() => {
+      setReaderNavigationPending(false);
+      setReaderNavigationRevision((revision) => revision + 1);
+    }, 2000);
+  };
+
+  const annotationReaderSourceNavigation = annotationReaderRecord === null
+    ? undefined
+    : {
+        visibility: annotationReaderVisibility,
+        pending: readerNavigationPending,
+        onReturn: returnReaderToAnnotation,
+      };
 
   useEffect(() => {
     if (
@@ -827,6 +1034,29 @@ export function ReviewShell(props: ReviewShellProps) {
     }
     cancelAnnotationRestoration();
     setAnnotationReaderSession({ ...pending, entryFocus: 'edit' });
+  };
+
+  const settleOwnedReaderOverflow = (
+    record: AnnotationReaderRecord,
+    overflowing: boolean,
+  ) => {
+    settlePendingReaderResume(record, overflowing);
+    if (record.identity.origin === 'owned') {
+      ownedReaderOverflowRef.current.set(record.identity.itemId, overflowing);
+    }
+    const pending = pendingMarkReaderRequestRef.current;
+    if (
+      pending === null
+      || record.identity.origin !== 'owned'
+      || record.identity.itemId !== pending.id
+    ) return;
+    pendingMarkReaderRequestRef.current = null;
+    if (!overflowing) return;
+    openOwnedAnnotationReader(
+      record,
+      null,
+      anyWorkspaceOpen ? 'list' : 'peek',
+    );
   };
 
   useLayoutEffect(() => {
@@ -864,7 +1094,12 @@ export function ReviewShell(props: ReviewShellProps) {
   }, [props.workspaceOpen, surface.baseSurface, surface.transientSurface, workspaceMode]);
 
   useLayoutEffect(() => {
-    if (searchFocusRequest === 0 || !toolsSurfaceOpen || effectiveWorkspaceMode !== 'search') return;
+    if (
+      searchFocusRequest <= handledSearchFocusRequestRef.current
+      || !toolsSurfaceOpen
+      || effectiveWorkspaceMode !== 'search'
+    ) return;
+    handledSearchFocusRequestRef.current = searchFocusRequest;
     let cancelled = false;
     let frame = 0;
     let attempts = 0;
@@ -904,28 +1139,39 @@ export function ReviewShell(props: ReviewShellProps) {
   };
   useEffect(() => {
     clearPeekTimer();
-    if (anyWorkspaceOpen) {
+    if (annotationsVisible) {
       setPeekItemId(undefined);
       return;
     }
+    if (!anyWorkspaceOpen && activeItemId !== undefined) {
+      setPeekItemId(activeItemId);
+      return;
+    }
     const id = props.correspondingItemId;
+    if (id && id === dismissedPeekIdRef.current) return;
+    dismissedPeekIdRef.current = undefined;
     if (id) {
-      peekTimerRef.current = setTimeout(() => setPeekItemId(id), 320);
+      setPeekItemId(id);
     } else if (!peekHeldRef.current) {
       peekTimerRef.current = setTimeout(() => setPeekItemId(undefined), 180);
     }
     return clearPeekTimer;
-  }, [anyWorkspaceOpen, props.correspondingItemId]);
+  }, [annotationsVisible, anyWorkspaceOpen, props.correspondingItemId, activeItemId]);
 
   useEffect(() => {
     const request = props.activationRequest;
     if (!request || authoringSessionRef.current !== null) return;
-    workspaceFraming.prepareMarkReveal();
+    clearPeekTimer();
+    dismissedPeekIdRef.current = undefined;
     setActiveItem(request.id);
     setListActivation(request);
-    setPeekItemId(undefined);
     const item = props.state.items.find(({ id }) => id === request.id);
-    setWorkspaceRequest(item
+    const readerRecord = item === undefined ? null : projectOwnedAnnotationReader(item);
+    const knownOverflow = ownedReaderOverflowRef.current.get(request.id);
+    pendingMarkReaderRequestRef.current = item === undefined || knownOverflow !== undefined
+      ? null
+      : { id: request.id, token: request.token };
+    setWorkspaceRequest(item && anyWorkspaceOpen
       ? {
           kind: 'mark',
           reviewId: item.id,
@@ -934,18 +1180,33 @@ export function ReviewShell(props: ReviewShellProps) {
         }
       : { kind: 'reading', token: ++annotationRequestTokenRef.current });
     dismissPageNoteAuthority();
+    if (!anyWorkspaceOpen) {
+      if (readerRecord !== null && knownOverflow === true) {
+        openOwnedAnnotationReader(readerRecord, null, 'peek');
+        return;
+      }
+      setPeekItemId(item?.id);
+      return;
+    }
+    workspaceFraming.prepareMarkReveal();
+    setPeekItemId(undefined);
     dispatchSurface({ type: 'open-workspace', mode: 'annotations' });
     dispatchReferenceLayout({ type: 'show-right-workspace' });
     dispatchReferenceLayout({ type: 'focus-surface', surface: 'right' });
     props.onWorkspaceModeChange?.('annotations');
+    if (readerRecord !== null && knownOverflow === true) {
+      openOwnedAnnotationReader(readerRecord, null, 'list');
+    }
   }, [
     props.activationRequest?.id,
     props.activationRequest?.token,
+    anyWorkspaceOpen,
     workspaceFraming.prepareMarkReveal,
   ]);
 
   const selectWorkspaceMode = (mode: WorkspaceMode) => {
     if (authoringSessionRef.current !== null) return;
+    workspaceFraming.commitUserPosition(undefined, { stopAutomaticScroll: false });
     if (mode === 'annotations' && (!workspaceOpen || workspaceMode !== 'annotations')) {
       setWorkspaceRequest({ kind: 'reading', token: ++annotationRequestTokenRef.current });
     }
@@ -969,6 +1230,7 @@ export function ReviewShell(props: ReviewShellProps) {
   };
   const openAnnotationsFromDocumentActions = () => {
     if (authoringSessionRef.current !== null) {
+      authoringEditorRef.current?.focus({ preventScroll: true });
       requestAnimationFrame(() => authoringEditorRef.current?.focus({ preventScroll: true }));
       return;
     }
@@ -1183,10 +1445,13 @@ export function ReviewShell(props: ReviewShellProps) {
         ? null
         : [...shell.querySelectorAll<HTMLElement>('[data-review-item]')]
           .find((element) => element.dataset.reviewItem === current.workspace.activeItemId);
+      const restoredPeek = current.workspace.activeItemId === undefined ? null
+        : [...shell.querySelectorAll<HTMLElement>('[data-annotation-peek]')]
+          .find((element) => element.dataset.annotationPeek === current.workspace.activeItemId);
       const target = originTrigger?.isConnected === true
         ? originTrigger
         : current.origin.kind === 'tray-edit'
-          ? restoredItem?.querySelector<HTMLElement>('[data-annotation-action="edit"]')
+          ? (restoredPeek ?? restoredItem)?.querySelector<HTMLElement>('[data-row-action="edit"]')
           : current.origin.kind === 'reader-edit'
             ? restoredItem?.querySelector<HTMLElement>('.annotation-item__navigation')
           : null;
@@ -1291,6 +1556,7 @@ export function ReviewShell(props: ReviewShellProps) {
     const editable = isEditableTarget(event.target);
     if (
       (event.metaKey || event.ctrlKey)
+      && !(event.metaKey && event.ctrlKey)
       && !event.altKey
       && !event.shiftKey
       && event.key.toLowerCase() === 'f'
@@ -1320,6 +1586,8 @@ export function ReviewShell(props: ReviewShellProps) {
         event.preventDefault();
         clearPeekTimer();
         peekHeldRef.current = false;
+        dismissedPeekIdRef.current = peekItemId;
+        setActiveItem(undefined);
         setPeekItemId(undefined);
         return;
       }
@@ -1602,17 +1870,26 @@ export function ReviewShell(props: ReviewShellProps) {
     );
   };
 
+  const deleteOwnedAnnotation = async (item: ReviewItem) => {
+    const next = await submit((state) => removeReviewItem(state, item.id));
+    ownedReaderOverflowRef.current.delete(item.id);
+    if (activeItemId === item.id) setActiveItem(next.items[0]?.id);
+  };
+
   const canUndo = props.state.historyCursor > 0;
   const canRedo = props.state.historyCursor < props.state.history.length;
-  const fitWidthCommand = () => props.viewerNavigation
-    ?.fitToWidth(workspaceFraming.waitForSettledGeometry)
-    .then(() => undefined) ?? Promise.resolve();
+  const fitWidthCommand = () => {
+    workspaceFraming.markUserIntent(undefined, { captureSettledPosition: false });
+    return props.viewerNavigation
+      ?.fitToWidth(workspaceFraming.waitForSettledGeometry)
+      .then(() => undefined) ?? Promise.resolve();
+  };
   const commandSurface = createReviewCommandSurface({
     focusContext: commandFocusContext,
     canUndo: authoringSession === null && canUndo,
     canRedo: authoringSession === null && canRedo,
-    canNavigateBack: props.canNavigateBack ?? false,
-    canNavigateForward: props.canNavigateForward ?? false,
+    canNavigateBack: !props.documentNavigationPending && (props.canNavigateBack ?? false),
+    canNavigateForward: !props.documentNavigationPending && (props.canNavigateForward ?? false),
     canFind: surface.nestedLayer === 'none' && authoringSession === null,
     canOpenAnnotations: authoringSession === null,
     canOpenSaveOptions: props.onSaveOptions !== undefined,
@@ -1620,8 +1897,14 @@ export function ReviewShell(props: ReviewShellProps) {
     handlers: {
       undo: () => { void submit(undoReview); },
       redo: () => { void submit(redoReview); },
-      'navigate-back': () => props.onNavigateBack?.(),
-      'navigate-forward': () => props.onNavigateForward?.(),
+      'navigate-back': () => {
+        workspaceFraming.markUserIntent(undefined, { captureSettledPosition: false });
+        props.onNavigateBack?.();
+      },
+      'navigate-forward': () => {
+        workspaceFraming.markUserIntent(undefined, { captureSettledPosition: false });
+        props.onNavigateForward?.();
+      },
       find: openFindCommand,
       'open-annotations': openAnnotationsFromDocumentActions,
       'save-options': () => props.onSaveOptions?.(),
@@ -1663,6 +1946,7 @@ export function ReviewShell(props: ReviewShellProps) {
     return () => cancelAnimationFrame(frame);
   }, [props.accessibilityTransition?.token]);
   const closeWorkspace = () => {
+    workspaceFraming.commitUserPosition();
     cancelAnnotationRestoration();
     pendingReaderResumeRef.current = null;
     dismissPageNoteAuthority();
@@ -1685,12 +1969,14 @@ export function ReviewShell(props: ReviewShellProps) {
   const focusWorkspaceModeAfterLayout = (mode: WorkspaceMode) => {
     requestAnimationFrame(() => requestAnimationFrame(() => {
       const shell = shellRef.current;
+      const rememberedToken = surface.navigation.workspace.modes[mode].logicalFocusToken;
+      const remembered = rememberedToken === null ? null : [
+        ...shell?.querySelectorAll<HTMLElement>('[data-workspace-focus-token]') ?? [],
+      ].find((element) => element.dataset.workspaceFocusToken === rememberedToken);
       const target = mode === 'references'
         ? shell?.querySelector<HTMLElement>('[data-reference-tab][aria-selected="true"]')
           ?? shell?.querySelector<HTMLElement>('[data-reference-empty]')
-        : mode === 'search'
-          ? shell?.querySelector<HTMLElement>('[data-workspace-focus-token="search:query"]')
-        : shell?.querySelector<HTMLElement>(`#workspace-panel-${mode}`);
+        : remembered ?? shell?.querySelector<HTMLElement>(`#workspace-panel-${mode}`);
       target?.focus({ preventScroll: true });
     }));
   };
@@ -1758,8 +2044,17 @@ export function ReviewShell(props: ReviewShellProps) {
           : source.kind === 'edit' && source.item.kind === 'insert'
             ? 'Insertion'
             : undefined;
+    const authoringPageIndex = source.kind === 'edit'
+      ? source.item.pageIndex
+      : source.kind === 'pageNote'
+        ? source.pageIndex
+        : source.anchor.pageIndex;
     const anchorNavigation = props.authoringAnchorNavigation?.token === authoringSession.token
-      ? props.authoringAnchorNavigation
+      ? {
+        ...props.authoringAnchorNavigation,
+        pageNumber: authoringPageIndex + 1,
+        visibility: authoringPlacement?.targetVisibility ?? props.authoringAnchorNavigation.visibility,
+      }
       : undefined;
     return <CommentComposer
       title={authoringSession.semantics.title}
@@ -1770,6 +2065,7 @@ export function ReviewShell(props: ReviewShellProps) {
       initialValue={initialValue}
       editorRef={authoringEditorRef}
       surfaceRef={setAuthoringSurfaceElement}
+      {...(authoringPlacement === undefined ? {} : { placement: authoringPlacement })}
       anchorNavigation={anchorNavigation}
       onValueChange={(value) => {
         if (authoringSessionRef.current?.token !== authoringSession.token) return;
@@ -1837,11 +2133,14 @@ export function ReviewShell(props: ReviewShellProps) {
       onClickCapture={(event) => {
         if (
           authoringSessionRef.current === null
-          && activeItemId !== undefined
+          && (activeItemId !== undefined || activeExistingAnnotationKey !== undefined)
           && event.button === 0
           && event.target instanceof Element
-          && event.target.closest('[data-review-item], [data-owned-focus-id], [data-page-index]') === null
-        ) setActiveItem(undefined);
+          && event.target.closest('[data-review-item], [data-existing-annotation], [data-owned-focus-id], [data-page-index], .annotation-peek') === null
+        ) {
+          setActiveItem(undefined);
+          setActiveExistingAnnotationKey(undefined);
+        }
         if (props.linkActionRequest) return;
         if (event.target instanceof Element) {
           const markTrigger = event.target.closest<HTMLElement>('[data-owned-focus-id]');
@@ -1860,6 +2159,7 @@ export function ReviewShell(props: ReviewShellProps) {
         {transitionAnnouncement}
       </p>
       <ReviewChrome
+        showSaveStatusDot={!props.exportOnly}
         documentTitle={props.documentTitle ?? 'Local PDF'}
         {...(props.savedLabel === undefined ? {} : { savedLabel: props.savedLabel })}
         {...(props.savePhase === undefined ? {} : { savePhase: props.savePhase })}
@@ -1870,9 +2170,15 @@ export function ReviewShell(props: ReviewShellProps) {
         {...(documentActionsPresentation === undefined ? {} : {
           documentActions: {
             presentation: documentActionsPresentation,
+            ...(props.documentActionsRequestToken === undefined ? {} : {
+              requestToken: props.documentActionsRequestToken,
+            }),
+            ...(props.onDocumentActionsRequestHandled === undefined ? {} : {
+              onRequestHandled: props.onDocumentActionsRequestHandled,
+            }),
             onExport: props.onExportReviewedCopy
               ?? (() => Promise.reject(new Error('Reviewed export is unavailable.'))),
-            onOpenAnnotations: () => { commandSurface.invoke('open-annotations'); },
+            onOpenAnnotations: openAnnotationsFromDocumentActions,
           },
         })}
         {...(props.viewerControls === undefined ? {} : { controls: props.viewerControls })}
@@ -1881,6 +2187,7 @@ export function ReviewShell(props: ReviewShellProps) {
         {...(props.viewerNavigation === undefined ? {} : {
           beforeViewerAction: async () => {
             await props.viewerNavigation?.cancelPendingNavigation();
+            commitMainFramingPosition();
           },
         })}
         onFitWidth={fitWidthCommand}
@@ -1888,6 +2195,7 @@ export function ReviewShell(props: ReviewShellProps) {
         canRedo={authoringSession === null && canRedo}
         canNavigateBack={props.canNavigateBack ?? false}
         canNavigateForward={props.canNavigateForward ?? false}
+        documentNavigationPending={props.documentNavigationPending ?? false}
         {...(props.codexContext === undefined ? {} : { codexContext: props.codexContext })}
         {...(props.copyLink === undefined ? {} : { copyLink: props.copyLink })}
         onUndo={() => { commandSurface.invoke('undo'); }}
@@ -1902,7 +2210,21 @@ export function ReviewShell(props: ReviewShellProps) {
         data-reference-layout={effectiveReferenceLayout.kind}
         data-workspace-presentation={workspaceFraming.presentation}
         data-annotation-presentation={workspaceFraming.presentation}
+        data-right-surface-open={rightSurfaceOpen ? 'true' : 'false'}
+        data-bottom-surface-open={effectiveReferenceLayout.kind === 'wide-split'
+          && effectiveReferenceLayout.bottomReferencesOpen ? 'true' : 'false'}
+        data-right-rail-present={effectiveReferenceLayout.kind === 'narrow-unified' ? 'false' : 'true'}
+        data-bottom-rail-present={(
+          effectiveReferenceLayout.kind === 'narrow-unified'
+          || (referencesAvailable && effectiveReferenceLayout.referenceDock === 'bottom')
+        ) ? 'true' : 'false'}
+        data-right-overlay={overlayFrame.geometry.rightStart === null ? 'false' : 'true'}
+        data-bottom-overlay={overlayFrame.geometry.bottomStart === null ? 'false' : 'true'}
+        data-scroll-top-fade={overlayFrame.geometry.fadeTop ? 'true' : 'false'}
+        data-scroll-right-fade={overlayFrame.geometry.fadeRight ? 'true' : 'false'}
+        data-scroll-bottom-fade={overlayFrame.geometry.fadeBottom ? 'true' : 'false'}
         style={{
+          ...overlayFrame.style,
           '--workspace-side-width': `${workspaceFraming.sideWidth}px`,
           '--reference-right-width': `${effectiveReferenceLayout.kind === 'narrow-unified'
             ? referenceLayout.rightReferenceWidth : effectiveReferenceLayout.rightWidth}px`,
@@ -1915,15 +2237,28 @@ export function ReviewShell(props: ReviewShellProps) {
             ? effectiveReferenceLayout.bottomHeight : referenceLayout.bottomReferenceHeight}px`,
         } as CSSProperties}
       >
-        {props.toolError || generatedStatusMessages.length > 0 ? <div
+        {props.saveRecovery || props.toolError || props.commandNotice || generatedStatusMessages.length > 0 ? <div
           className="review-toast-stack"
           data-review-toast-stack
         >
+          {props.saveRecovery ? <aside className="review-toast review-toast--error review-save-notice" role="alert">
+            <ReviewIcon name="alert" />
+            <span>{props.saveRecovery.error ?? 'Couldn’t save your latest annotations.'}</span>
+            <div className="review-save-notice__actions">
+              <button type="button" title="Retry saving" disabled={props.saveRecovery.pending}
+                onClick={() => void props.saveRecovery?.onRetry()}>Retry</button>
+              <button type="button" title="Save a copy" disabled={props.saveRecovery.pending}
+                onClick={props.saveRecovery.onSaveCopy}>Save a copy…</button>
+            </div>
+          </aside> : null}
           {props.toolError ? <p
             className="review-toast review-toast--error"
             role="alert"
             data-viewer-status
           ><ReviewIcon name="alert" />{props.toolError}</p> : null}
+          {props.commandNotice ? <p className="review-toast review-toast--status"
+            role="status" aria-live="polite" data-host-command-status
+          ><ReviewIcon name="check" />{props.commandNotice}</p> : null}
           {generatedStatusMessages.length > 0 ? <p
             className="review-toast review-toast--status"
             data-generation-status={props.generationRefreshStatus ?? 'idle'}
@@ -1939,6 +2274,15 @@ export function ReviewShell(props: ReviewShellProps) {
           data-pdf-copy-owner={props.pdfCopyOwner ?? 'none'}
         >Copy source: {pdfCopyOwnerLabel}</p> : null}
         <div className="review-document">{props.children}</div>
+        <div className="review-overlay-frame" aria-hidden="true">
+          <span className="review-overlay-frame__right-backing" />
+          <span className="review-overlay-frame__right-fade" />
+          <span className="review-overlay-frame__bottom-backing" />
+          <span className="review-overlay-frame__bottom-fade" />
+          <span className="review-overlay-frame__top-fade" />
+          <span className="review-overlay-frame__outer-right-fade" />
+          <span className="review-overlay-frame__outer-bottom-fade" />
+        </div>
         <div
           className="review-contextual-host"
           data-review-contextual-host
@@ -1988,20 +2332,60 @@ export function ReviewShell(props: ReviewShellProps) {
               }}
             />
           ) : null}
-          {authoringSession === null && !workspaceOpen && peekItemId ? (() => {
+          {authoringSession === null
+            && !annotationsVisible
+            && annotationReaderSession?.origin === 'peek'
+            && annotationReaderRecord !== null ? (
+              <aside className="annotation-peek annotation-peek--reader">
+                <FullAnnotationReader
+                  record={annotationReaderRecord}
+                  onBack={(restoreRowFocus) => closeAnnotationReader(annotationReaderSession, restoreRowFocus)}
+                  {...(annotationReaderSourceNavigation === undefined
+                    ? {}
+                    : { sourceNavigation: annotationReaderSourceNavigation })}
+                  {...(annotationReaderOwnedItemId === undefined ? {} : {
+                    onEdit: (trigger: HTMLButtonElement) => {
+                      const item = props.state.items.find(({ id }) => id === annotationReaderOwnedItemId);
+                      if (item !== undefined) beginAuthoring({ kind: 'edit', item }, 'reader-edit', trigger);
+                    },
+                    onDelete: async () => {
+                      const item = props.state.items.find(({ id }) => id === annotationReaderOwnedItemId);
+                      if (item !== undefined) await deleteOwnedAnnotation(item);
+                    },
+                  })}
+                />
+              </aside>
+            ) : null}
+          {authoringSession === null
+            && !annotationsVisible
+            && annotationReaderSession?.origin !== 'peek'
+            && peekItemId ? (() => {
             const item = props.state.items.find(({ id }) => id === peekItemId);
             if (item === undefined) return null;
             const copyLink = copyLinkForItem(item);
             return (
               <AnnotationPeek
                 item={item}
+                selected={!anyWorkspaceOpen && activeItemId === item.id}
                 {...(copyLink === undefined ? {} : { copyLink })}
                 onHoldChange={(held) => {
                   peekHeldRef.current = held;
                   clearPeekTimer();
-                  if (!held && props.correspondingItemId === undefined) {
+                  if (!held && (anyWorkspaceOpen || activeItemId === undefined) && props.correspondingItemId === undefined) {
                     peekTimerRef.current = setTimeout(() => setPeekItemId(undefined), 180);
                   }
+                }}
+                onNavigate={() => {
+                  workspaceFraming.markUserIntent();
+                  setActiveItem(item.id);
+                  props.onNavigate?.(item);
+                }}
+                onReadFull={(record, trigger) => openOwnedAnnotationReader(record, trigger, 'peek')}
+                onReaderOverflowChange={settleOwnedReaderOverflow}
+                onEdit={(trigger) => beginAuthoring({ kind: 'edit', item }, 'tray-edit', trigger)}
+                onDelete={async () => {
+                  await deleteOwnedAnnotation(item);
+                  setPeekItemId(undefined);
                 }}
               />
             );
@@ -2015,40 +2399,48 @@ export function ReviewShell(props: ReviewShellProps) {
         >
           {authoringComposer}
           {authoringSession === null ? (effectiveReferenceLayout.kind === 'narrow-unified' ? (
-            <WorkspaceEdgeRail
+            !referenceSurfaceOpen ? <WorkspaceEdgeRail
               buttonRef={bottomWorkspaceRailRef}
               surface="bottom"
+              target="workspace"
               open={referenceSurfaceOpen}
               controls="review-workspace"
               onToggle={() => {
+                workspaceFraming.commitUserPosition();
                 dismissPageNoteAuthority();
                 const opening = !effectiveReferenceLayout.open;
                 dispatchReferenceLayout({ type: 'toggle-narrow-workspace' });
                 if (opening) focusWorkspaceModeAfterLayout(effectiveWorkspaceMode);
               }}
-            />
+            /> : null
           ) : (
             <>
-              <WorkspaceEdgeRail
+              {!rightSurfaceOpen ? <WorkspaceEdgeRail
                 buttonRef={rightWorkspaceRailRef}
                 surface="right"
+                target="workspace"
                 open={rightSurfaceOpen}
                 controls={effectiveReferenceLayout.referenceDock === 'right' && referencesAvailable
                   ? 'review-workspace review-tools-workspace'
                   : 'review-tools-workspace'}
                 onToggle={() => {
+                  workspaceFraming.commitUserPosition();
                   dismissPageNoteAuthority();
                   const opening = !rightSurfaceOpen;
                   dispatchReferenceLayout({ type: 'toggle-right-workspace' });
                   if (opening) focusWorkspaceModeAfterLayout(effectiveWorkspaceMode);
                 }}
-              />
-              {referencesAvailable && effectiveReferenceLayout.referenceDock === 'bottom' ? <WorkspaceEdgeRail
+              /> : null}
+              {referencesAvailable
+                && effectiveReferenceLayout.referenceDock === 'bottom'
+                && !effectiveReferenceLayout.bottomReferencesOpen ? <WorkspaceEdgeRail
                 buttonRef={bottomWorkspaceRailRef}
                 surface="bottom"
+                target="References"
                 open={effectiveReferenceLayout.bottomReferencesOpen}
                 controls="review-workspace"
                 onToggle={() => {
+                  workspaceFraming.commitUserPosition();
                   dismissPageNoteAuthority();
                   const opening = !effectiveReferenceLayout.bottomReferencesOpen;
                   dispatchReferenceLayout({ type: 'toggle-references' });
@@ -2092,6 +2484,22 @@ export function ReviewShell(props: ReviewShellProps) {
             {...(props.referenceReturn === undefined ? {} : { referenceReturn: props.referenceReturn })}
             announcement={props.navigationAnnouncement ?? announcement}
             onModeChange={selectWorkspaceMode}
+            onHide={() => {
+              workspaceFraming.commitUserPosition();
+              if (effectiveReferenceLayout.kind === 'narrow-unified') {
+                dispatchReferenceLayout({ type: 'toggle-narrow-workspace' });
+                requestAnimationFrame(() => bottomWorkspaceRailRef.current?.focus({ preventScroll: true }));
+              } else if (effectiveReferenceLayout.referenceDock === 'bottom') {
+                dispatchReferenceLayout({ type: 'hide-references' });
+                requestAnimationFrame(() => bottomWorkspaceRailRef.current?.focus({ preventScroll: true }));
+              } else {
+                dispatchReferenceLayout({ type: 'hide-right-workspace' });
+                requestAnimationFrame(() => rightWorkspaceRailRef.current?.focus({ preventScroll: true }));
+              }
+            }}
+            hideLabel={effectiveReferenceLayout.kind === 'narrow-unified'
+              ? 'Hide workspace'
+              : 'Hide References'}
             onReferenceTabActivate={(identity) => {
               if (authoringSessionRef.current === null) props.onReferenceTabActivate?.(identity);
             }}
@@ -2143,6 +2551,12 @@ export function ReviewShell(props: ReviewShellProps) {
               <OutlineExpansionToggleSlot visible={outlineExpansionToggleVisible} />
             )}
             onModeChange={selectWorkspaceMode}
+            onHide={() => {
+              workspaceFraming.commitUserPosition();
+              dispatchReferenceLayout({ type: 'hide-right-workspace' });
+              requestAnimationFrame(() => rightWorkspaceRailRef.current?.focus({ preventScroll: true }));
+            }}
+            hideLabel="Hide workspace"
             onOutlineActivate={(item) => {
               if (authoringSessionRef.current === null) props.onOutlineActivate?.(item);
             }}
@@ -2156,7 +2570,10 @@ export function ReviewShell(props: ReviewShellProps) {
             annotations={annotationReaderSession !== null && annotationReaderRecord !== null ? (
               <FullAnnotationReader
                 record={annotationReaderRecord}
-                onBack={() => restoreAnnotationList(annotationReaderSession)}
+                onBack={(restoreRowFocus) => closeAnnotationReader(annotationReaderSession, restoreRowFocus)}
+                {...(annotationReaderSourceNavigation === undefined
+                  ? {}
+                  : { sourceNavigation: annotationReaderSourceNavigation })}
                 {...(annotationReaderOwnedItemId === undefined ? {} : {
                   onEdit: (trigger: HTMLButtonElement) => {
                     if (authoringSessionRef.current !== null) return;
@@ -2166,6 +2583,10 @@ export function ReviewShell(props: ReviewShellProps) {
                       return;
                     }
                     beginAuthoring({ kind: 'edit', item }, 'reader-edit', trigger);
+                  },
+                  onDelete: async () => {
+                    const item = props.state.items.find(({ id }) => id === annotationReaderOwnedItemId);
+                    if (item !== undefined) await deleteOwnedAnnotation(item);
                   },
                 })}
               />
@@ -2183,7 +2604,12 @@ export function ReviewShell(props: ReviewShellProps) {
             {reconciliationDetailOpen ? null : <>
             <AnnotationList
               items={visibleOwnedItems}
+              existingAnnotations={existingAnnotations}
+              documentGeneration={navigation.documentGeneration}
               {...(presentedActiveItemId === undefined ? {} : { activeId: presentedActiveItemId })}
+              {...(presentedActiveItemId !== undefined || activeExistingAnnotationKey === undefined
+                ? {}
+                : { activeExistingAnnotationKey })}
               {...(!annotationsVisible || props.correspondingItemId === undefined
                 ? {}
                 : { correspondingId: props.correspondingItemId })}
@@ -2200,93 +2626,31 @@ export function ReviewShell(props: ReviewShellProps) {
                 setActiveItem(item.id);
                 props.onNavigate?.(item);
               }}
+              onNavigateExisting={(annotation) => {
+                if (authoringSessionRef.current !== null) return;
+                cancelAnnotationRestoration();
+                pendingReaderResumeRef.current = null;
+                markFramingUserIntent();
+                setActiveItem(undefined);
+                setActiveExistingAnnotationKey(existingAnnotationKey(annotation));
+                props.onNavigateExisting?.(annotation);
+              }}
               onReadFull={openOwnedAnnotationReader}
-              onReaderOverflowChange={settlePendingReaderResume}
+              onReadFullExisting={openExistingAnnotationReader}
+              onReaderOverflowChange={settleOwnedReaderOverflow}
+              onReaderOverflowChangeExisting={settlePendingReaderResume}
+              {...(props.onRetryExistingAnnotations === undefined
+                ? {}
+                : { onRetryExistingAnnotations: props.onRetryExistingAnnotations })}
               onEdit={(item, trigger) => {
                 if (authoringSessionRef.current !== null) return;
                 beginAuthoring({ kind: 'edit', item }, 'tray-edit', trigger);
               }}
               onDelete={async (item) => {
                 if (authoringSessionRef.current !== null) return;
-                const next = await submit((state) => removeReviewItem(state, item.id));
-                if (activeItemId === item.id) {
-                  const ordered = next.items;
-                  setActiveItem(ordered[0]?.id);
-                }
+                await deleteOwnedAnnotation(item);
               }}
             />
-            {existingAnnotations.status === 'empty' ? null : (
-              <section className="existing-annotations" data-existing-annotations-state={existingAnnotations.status} aria-label="From this PDF">
-              <header className="existing-annotations__header">
-                <h2>From this PDF</h2>
-              </header>
-              {existingAnnotations.status === 'loading' ? (
-                <p className="annotation-status" data-annotation-status="loading" role="status">
-                  <ReviewIcon name="loading" className="review-icon annotation-status__icon" />
-                  <span>Existing annotations are loading…</span>
-                </p>
-              ) : null}
-              {existingAnnotations.status === 'error' ? (
-                <div className="annotation-status annotation-status--error" data-annotation-status="error" role="alert">
-                  <ReviewIcon name="alert" className="review-icon annotation-status__icon" />
-                  <p><strong>Existing annotations unavailable.</strong><span>{existingAnnotations.message}</span></p>
-                  <button type="button" title="Retry loading existing annotations" onClick={props.onRetryExistingAnnotations}>Retry</button>
-                </div>
-              ) : null}
-              {existingAnnotations.status === 'ready' ? (
-                <ol className="existing-annotations__list">
-                  {existingAnnotations.items.map((annotation) => {
-                    const readerRecord = projectExistingAnnotationReader(annotation, {
-                      documentGeneration: navigation.documentGeneration,
-                      discoveryGeneration: existingAnnotations.generation,
-                    });
-                    return <li
-                      key={existingAnnotationKey(annotation)}
-                      data-existing-annotation={annotation.id}
-                      data-existing-annotation-key={existingAnnotationKey(annotation)}
-                      data-annotation-origin="source"
-                      data-annotation-kind={annotation.subtype}
-                      data-annotation-state="readonly"
-                      data-readonly="true"
-                    >
-                      <div className="annotation-item__content existing-annotation__content">
-                      <button className="annotation-item__navigation" type="button" aria-label={annotationAccessibleLabel({
-                        kind: annotation.subtype,
-                        pageNumber: annotation.pageIndex + 1,
-                        ...(annotation.contents ? { excerpt: annotation.contents } : {}),
-                      })} title={`Go to ${annotationKindLabel(annotation.subtype)} annotation on page ${annotation.pageIndex + 1}`} onClick={() => {
-                        if (authoringSessionRef.current !== null) return;
-                        cancelAnnotationRestoration();
-                        pendingReaderResumeRef.current = null;
-                        markFramingUserIntent();
-                        props.onNavigateExisting?.(annotation);
-                      }}>
-                      </button>
-                      <div className="annotation-item__title-row">
-                        <AnnotationMetadata
-                          kind={annotation.subtype}
-                          pageNumber={annotation.pageIndex + 1}
-                        />
-                      </div>
-                      <div className="annotation-item__body-row">
-                        {annotation.contents ? (
-                          <AnnotationExcerpt
-                            content={annotation.contents}
-                            readerRecord={readerRecord}
-                            onOverflowChange={settlePendingReaderResume}
-                            onReadFull={(record, trigger) => {
-                              openExistingAnnotationReader(annotation, record, trigger);
-                            }}
-                          />
-                        ) : <span />}
-                      </div>
-                      </div>
-                    </li>;
-                  })}
-                </ol>
-              ) : null}
-              </section>
-            )}
             </>}
             </div>}
             search={props.search ?? (

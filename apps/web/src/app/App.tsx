@@ -149,13 +149,15 @@ export function caretClientPlacement(input: {
   if (!Number.isFinite(scale) || scale <= 0) return null;
   const transformed = transformRect(input.page.size, {
     origin: { x: input.anchor.position.x, y: input.anchor.position.y },
-    size: { width: input.anchor.position.width, height: input.anchor.position.height },
+    // The anchor x is the insertion boundary, not the left edge of the painted line.
+    size: { width: 0, height: input.anchor.position.height },
   }, rotation, scale);
   const placement = {
     left: input.pageBounds.left + transformed.origin.x + transformed.size.width / 2,
     top: input.pageBounds.top + transformed.origin.y + transformed.size.height / 2,
-    width: Math.max(2, transformed.size.width),
-    height: Math.max(2, transformed.size.height),
+    width: rotation % 2 === 0 ? 1.25 : transformed.size.width,
+    height: rotation % 2 === 0 ? transformed.size.height : 1.25,
+    rotation,
   };
   return Object.values(placement).every(Number.isFinite) ? placement : null;
 }
@@ -353,7 +355,27 @@ export function App({
     ),
     [assets, onViewerError, resourcePolicy],
   );
-  const emit = useCallback((event: ViewerInteractionEvent) => onViewerInteraction?.(event), [onViewerInteraction]);
+  const emit = useCallback((event: ViewerInteractionEvent) => {
+    if (event.type === 'pdf-link' || event.type === 'pdf-link-unavailable') {
+      const registry = registryRef.current;
+      const selection = registry
+        ?.getPlugin<SelectionPlugin>(SelectionPlugin.id)
+        ?.provides();
+      let clearedPdfSelection = false;
+      if (registry && selection) {
+        for (const documentId of [MAIN_PDF_DOCUMENT_ID, REFERENCE_PDF_DOCUMENT_ID]) {
+          if (registry.getStore().getState().core.documents[documentId] === undefined) continue;
+          if (selection.getState(documentId).selection === null) continue;
+          selection.clear(documentId);
+          clearedPdfSelection = true;
+        }
+      }
+      if (clearedPdfSelection && typeof window !== 'undefined') {
+        window.getSelection()?.removeAllRanges();
+      }
+    }
+    onViewerInteraction?.(event);
+  }, [onViewerInteraction]);
   const publishInventory = useCallback((result: ExistingAnnotationsDiscovery) => {
     setInventoryState(result);
     if (result.status === 'ready') setSourceAnnotations(result.items);
@@ -512,12 +534,17 @@ export function App({
     const pageIndex = Math.max(0, (scroll?.getCurrentPage() ?? 1) - 1);
     const page = document?.pages[pageIndex];
     if (!page) return;
+    const previous = keyboardCursorRef.current;
+    // Layout and scroll notifications refresh authority without discarding
+    // keyboard movement already made on this page.
+    const position = previous?.documentId === documentId && previous.pageIndex === pageIndex
+      ? clampPageNotePoint(previous, page)
+      : { x: page.size.width / 2, y: page.size.height / 2 };
     publishKeyboardCursor({
       documentId,
       pageIndex,
       viewportGeneration: viewportGenerationRef.current,
-      x: page.size.width / 2,
-      y: page.size.height / 2,
+      ...position,
     });
   }, [publishKeyboardCursor]);
 
@@ -616,6 +643,7 @@ export function App({
       && first.top === second.top
       && first.width === second.width
       && first.height === second.height
+      && first.rotation === second.rotation
       && first.suggestTop === second.suggestTop
     );
     const refreshCaretPlacement = () => {
@@ -668,12 +696,14 @@ export function App({
         for (const page of document.pages) {
           const pointerId = page.index + 1;
           const pageGeometry = () => ownedGeometryByPageRef.current.get(page.index) ?? [];
+          const pageScale = () => registry.getStore().getState().core.documents[documentId]?.scale ?? 1;
           const setHoveredOwned = (id: string | undefined) => {
             if (hoveredOwnedId.current === id) return;
             if (hoveredOwnedId.current) {
               emit({ type: 'owned-mark', value: { id: hoveredOwnedId.current, phase: 'leave' } });
             }
             hoveredOwnedId.current = id;
+            workspaceElementRef.current?.setAttribute('data-owned-mark-hovered', id ? 'true' : 'false');
             if (id) emit({ type: 'owned-mark', value: { id, phase: 'enter' } });
           };
           const clearOwnedPointerInteraction = () => {
@@ -697,6 +727,7 @@ export function App({
                   button ?? -1,
                   position,
                   pageGeometry(),
+                  pageScale(),
                 );
               },
               onPointerMove: (position, event) => {
@@ -707,7 +738,7 @@ export function App({
                   event.clientY,
                 );
                 ownedPointerGesture.current.pointerMove(pointerId, point);
-                setHoveredOwned(hitTestOwnedMark(pageGeometry(), point));
+                setHoveredOwned(hitTestOwnedMark(pageGeometry(), point, pageScale()));
               },
               onPointerLeave: clearOwnedPointerInteraction,
               onPointerCancel: () => {
@@ -727,6 +758,7 @@ export function App({
                   button,
                   position,
                   pageGeometry(),
+                  pageScale(),
                 );
                 if (button !== 0) return;
                 if (ownedId) {
@@ -778,7 +810,7 @@ export function App({
                 });
               },
               onClick: (position) => {
-                if (hitTestOwnedMark(pageGeometry(), position) === undefined) {
+                if (hitTestOwnedMark(pageGeometry(), position, pageScale()) === undefined) {
                   emit({ type: 'owned-mark-clear' });
                 }
               },
@@ -998,7 +1030,10 @@ export function App({
         ? MAIN_PDF_DOCUMENT_ID
         : null;
       if (selectionPlugin && mainId) {
-        subscriptions.current.push(selectionPlugin.onMenuPlacement(mainId, (placement) => {
+        let currentMenuPlacement: Parameters<Parameters<typeof selectionPlugin.onMenuPlacement>[1]>[0] = null;
+        let placementFrame: number | undefined;
+        const refreshMenuPlacement = () => {
+          const placement = currentMenuPlacement;
           if (!placement?.isVisible) {
             emit({ type: 'selection-placement', value: null });
             return;
@@ -1032,7 +1067,31 @@ export function App({
               },
             },
           });
+        };
+        const scheduleMenuPlacement = () => {
+          if (placementFrame !== undefined) cancelAnimationFrame(placementFrame);
+          placementFrame = requestAnimationFrame(() => { placementFrame = undefined; refreshMenuPlacement(); });
+        };
+        subscriptions.current.push(selectionPlugin.onMenuPlacement(mainId, (placement) => {
+          // Zoom can transiently hide the plugin menu while its text selection
+          // remains valid. Retain the PDF anchor until the selection is cleared.
+          if (placement?.isVisible || !selection?.getState(mainId).selection) {
+            currentMenuPlacement = placement;
+          }
+          refreshMenuPlacement();
+          scheduleMenuPlacement();
         }));
+        const workspace = workspaceElementRef.current;
+        const observer = new MutationObserver(scheduleMenuPlacement);
+        if (workspace) observer.observe(workspace, { subtree: true, childList: true, attributes: true, attributeFilter: ['style', 'width', 'height'] });
+        workspace?.addEventListener('scroll', scheduleMenuPlacement, true);
+        window.addEventListener('resize', scheduleMenuPlacement);
+        subscriptions.current.push(() => {
+          observer.disconnect();
+          workspace?.removeEventListener('scroll', scheduleMenuPlacement, true);
+          window.removeEventListener('resize', scheduleMenuPlacement);
+          if (placementFrame !== undefined) cancelAnimationFrame(placementFrame);
+        });
       }
     }
 

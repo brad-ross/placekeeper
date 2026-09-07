@@ -15,6 +15,7 @@ import {
 } from './reference-navigation-state.js';
 import { compositeFocusIndex, horizontalTabFocusIndex } from './menu-focus.js';
 import { ReviewIcon } from './ReviewIcon.js';
+import { ReviewTooltipButton } from './ReviewTooltipButton.js';
 import { WorkspaceModeStrip, type WorkspaceDockAction } from './WorkspaceModeStrip.js';
 
 export { WORKSPACE_MODES } from './reference-navigation-state.js';
@@ -54,13 +55,13 @@ function ReferenceReturnButton({
   onReturn,
 }: ReferenceReturnButtonProps) {
   return (
-    <button
+    <ReviewTooltipButton
+      label="Return to reference"
       ref={buttonRef}
       type="button"
       className="reference-panel__return"
       data-reference-return={tabIdentity}
       aria-label="Return to reference"
-      title="Return to reference"
       aria-busy={pending || undefined}
       aria-disabled={pending || undefined}
       onClick={(event) => {
@@ -72,7 +73,7 @@ function ReferenceReturnButton({
       }}
     >
       <ReviewIcon name="locate" />
-    </button>
+    </ReviewTooltipButton>
   );
 }
 
@@ -109,6 +110,8 @@ export interface ReferenceWorkspaceProps {
   readonly modes?: readonly WorkspaceMode[];
   readonly headerVariant?: 'tabs' | 'references';
   readonly headerAction?: ReactNode;
+  readonly onHide?: () => void;
+  readonly hideLabel?: string;
   readonly onMoveReferencesRight?: () => void;
   readonly onMoveReferencesBottom?: () => void;
   readonly onReferenceViewportHost: (element: HTMLDivElement | null) => void;
@@ -171,6 +174,8 @@ export function ReferenceWorkspace({
   modes = WORKSPACE_MODES,
   headerVariant = 'tabs',
   headerAction,
+  onHide,
+  hideLabel = 'Hide References',
   onMoveReferencesRight,
   onMoveReferencesBottom,
   onReferenceViewportHost,
@@ -212,6 +217,7 @@ export function ReferenceWorkspace({
     ? presentation === 'right' && onMoveReferencesBottom
       ? {
           destination: 'bottom',
+          disabled: pendingReference?.status === 'loading',
           onClick: onMoveReferencesBottom,
           onFocus: onDockActionFocus,
           onBlur: onDockActionBlur,
@@ -219,6 +225,7 @@ export function ReferenceWorkspace({
       : presentation === 'bottom' && headerVariant === 'references' && onMoveReferencesRight
         ? {
             destination: 'right',
+            disabled: pendingReference?.status === 'loading',
             onClick: onMoveReferencesRight,
             onFocus: onDockActionFocus,
             onBlur: onDockActionBlur,
@@ -295,14 +302,18 @@ export function ReferenceWorkspace({
   useLayoutEffect(() => {
     if (referenceReturn?.pending || !restoreReferenceReturnFocus.current) return;
     restoreReferenceReturnFocus.current = false;
-    const active = referenceReturnRef.current?.ownerDocument.activeElement;
+    const tab = activeTabIdentity ? referenceTabRefs.current.get(activeTabIdentity) : null;
+    const active = (referenceReturnRef.current ?? tab)?.ownerDocument.activeElement;
     if (
       active instanceof HTMLElement
       && active !== active.ownerDocument.body
       && active.isConnected
     ) return;
-    focusWithoutScroll(referenceReturnRef.current);
-  }, [referenceReturn?.pending]);
+    focusWithoutScroll(
+      referenceReturnRef.current
+        ?? tab,
+    );
+  }, [activeTabIdentity, referenceReturn?.available, referenceReturn?.pending]);
 
   const moveModeFocus = (event: KeyboardEvent<HTMLButtonElement>) => {
     const currentIndex = modes.indexOf(event.currentTarget.dataset.workspaceMode as WorkspaceMode);
@@ -372,15 +383,24 @@ export function ReferenceWorkspace({
       data-review-workspace
       data-annotation-drawer
       data-workspace-presentation={presentation}
+      data-workspace-header-variant={headerVariant}
       data-annotation-presentation={presentation}
       data-workspace-open={open ? 'true' : 'false'}
       data-list-open={open ? 'true' : 'false'}
       data-authoring-takeover={authoringTakeover ? 'true' : undefined}
       aria-label={headerVariant === 'references' ? 'References' : 'Review workspace'}
-      aria-hidden={!open || authoringTakeover}
+      aria-hidden={!open}
       inert={!open || authoringTakeover}
     >
       {modes.length > 0 ? <header className="review-workspace__header">
+        {onHide ? <ReviewTooltipButton
+          label={hideLabel}
+          type="button"
+          className="review-workspace__close"
+          aria-expanded="true"
+          aria-controls="review-workspace"
+          onClick={onHide}
+        ><ReviewIcon name={presentation === 'bottom' ? 'chevron-down' : 'chevron-right'} /></ReviewTooltipButton> : null}
         <WorkspaceModeStrip
           modes={modes}
           selectedMode={mode}
@@ -441,7 +461,9 @@ export function ReferenceWorkspace({
                   data-reference-tab-segment={tab.identity}
                   role="presentation"
                 >
-                  <button
+                  <ReviewTooltipButton
+                    label={destinationLabel}
+                    tooltip={`Show ${destinationLabel}`}
                     ref={(element) => {
                       if (element) referenceTabRefs.current.set(tab.identity, element);
                       else referenceTabRefs.current.delete(tab.identity);
@@ -453,41 +475,52 @@ export function ReferenceWorkspace({
                     data-reference-tab={tab.identity}
                     data-workspace-focus-token={`reference:${tab.identity}`}
                     aria-label={destinationLabel}
-                    title={`Show ${destinationLabel}`}
                     aria-selected={selected}
                     aria-controls="active-reference-panel"
                     tabIndex={selected ? 0 : -1}
                     onKeyDown={moveReferenceFocus}
                     onClick={() => onReferenceTabActivate(tab.identity)}
                   >
-                    <span>{tab.label}</span>
-                    {tab.label === tab.pageContext ? null : <small>{tab.pageContext}</small>}
-                  </button>
+                    <span>{tab.label === tab.pageContext ? tab.pageContext.replace(/^Page\s+/u, '') : tab.label}</span>
+                    {tab.label === tab.pageContext ? null : <small>{tab.pageContext.replace(/^Page\s+/u, '')}</small>}
+                  </ReviewTooltipButton>
+                  {showActions && showReferenceReturn ? (
+                    <ReferenceReturnButton
+                      tabIdentity={tab.identity}
+                      pending={referenceReturn.pending}
+                      buttonRef={referenceReturnRef}
+                      onReturn={(identity) => {
+                        restoreReferenceReturnFocus.current = referenceReturnRef.current?.matches(':focus')
+                          ?? false;
+                        onReferenceReturn(identity);
+                      }}
+                    />
+                  ) : null}
                   {showActions ? (
-                    <button
+                    <ReviewTooltipButton
+                      label="Open in main document"
                       type="button"
                       className="reference-tab-segment__action"
                       data-reference-tab-action="send"
                       data-workspace-focus-token={`reference-send:${tab.identity}`}
-                      aria-label="Send to main document"
-                      title="Send to main document"
+                      aria-label="Open in main document"
                       onClick={() => onSendToMain(tab.identity)}
                     >
-                      <ReviewIcon name="main" />
-                    </button>
+                      <ReviewIcon name="open-main" />
+                    </ReviewTooltipButton>
                   ) : null}
                   {showActions ? (
-                    <button
+                    <ReviewTooltipButton
+                      label="Close active reference"
                       type="button"
                       className="reference-tab-segment__action"
                       data-reference-tab-action="close"
                       data-workspace-focus-token={`reference-close:${tab.identity}`}
                       aria-label="Close active reference"
-                      title="Close active reference"
                       onClick={() => onReferenceTabClose(tab.identity)}
                     >
                       <ReviewIcon name="close" />
-                    </button>
+                    </ReviewTooltipButton>
                   ) : null}
                 </span>
               );
@@ -536,19 +569,6 @@ export function ReferenceWorkspace({
               <strong>No references open.</strong>
               <span>An internal PDF link can open a reference here.</span>
             </div>
-          ) : null}
-
-          {showReferenceReturn ? (
-            <ReferenceReturnButton
-              tabIdentity={activeTab.identity}
-              pending={referenceReturn.pending}
-              buttonRef={referenceReturnRef}
-              onReturn={(identity) => {
-                restoreReferenceReturnFocus.current = referenceReturnRef.current?.matches(':focus')
-                  ?? false;
-                onReferenceReturn(identity);
-              }}
-            />
           ) : null}
 
           <div

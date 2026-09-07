@@ -1,24 +1,25 @@
 ---
-title: Full Annotation Reader preserves Annotation Tray context
-date: 2026-08-24
-category: design-patterns
-module: Full Annotation Reader
-problem_type: design_pattern
-component: frontend_stimulus
-severity: medium
+title: "Full Annotation Reader preserves Annotation Tray context"
+date: "2026-08-24"
+last_updated: "2026-09-06"
+category: "design-patterns"
+module: "Full Annotation Reader"
+problem_type: "design_pattern"
+component: "frontend_stimulus"
+severity: "medium"
 applies_when:
-  - "A compact annotation list clamps authored content and needs a detail disclosure only after rendered overflow is measured"
-  - "A detail surface must preserve live PDF source context and use the annotation's existing navigation path before opening"
-  - "Owned and imported annotations share a tray presentation but imported content must remain read-only"
-  - "A transient detail view inside a mounted tray must restore list selection, scroll position, and focus"
-  - "An edit or rapid transition can invalidate reader identity, overflow eligibility, or queued animation-frame restoration"
+  - "A compact annotation excerpt needs measured-overflow detail disclosure"
+  - "Detail can originate from a tray row or a PDF annotation peek"
+  - "Reading full annotation text should preserve current PDF position"
+  - "Imported annotation content must remain read-only"
+  - "Edits and rapid transitions may invalidate identity, eligibility, or queued restoration"
 related_components:
   - "Annotation Tray"
+  - "AnnotationPeek"
   - "ReviewShell"
   - "Owned Annotation"
   - "Existing PDF Annotation"
   - "Contextual Annotation Composer"
-  - "testing_framework"
 tags:
   - "full-annotation-reader"
   - "annotation-tray"
@@ -26,7 +27,7 @@ tags:
   - "transient-detail-state"
   - "authority-boundaries"
   - "tray-restoration"
-  - "animation-frame"
+  - "focus-restoration"
   - "read-only-annotations"
 ---
 
@@ -34,78 +35,64 @@ tags:
 
 ## Context
 
-Compact annotation cards must stay scannable, but visually clamping authored comments, replacement text, and insertion text can hide information a reviewer needs. The Full Annotation Reader introduced in [PR #61](https://github.com/brad-ross/placekeeper/pull/61) keeps the compact list as the browsing surface and reveals complete annotation-specific content without moving source context into a second document view. PR #61 merged into `main` on 2026-08-24.
+Compact annotation cards need to remain scannable without hiding long authored content. The Full Annotation Reader, introduced in [PR #61](https://github.com/brad-ross/placekeeper/pull/61), reveals the complete annotation while retaining the live PDF and surrounding review state.
 
-The implementation evolved from a general “read the truncated text” affordance into a coordinated list/detail state contract. Live review rejected controls that overlaid excerpt text, redundant source-text repetition, and reader chrome that consumed the metadata line; the settled design uses a true inline `More ›` cap, the live highlighted PDF as source context, and compact title actions (session history).
-
-Reader eligibility has two layers. First, project only meaningful authored content: owned Replace and Insert items use `proposedText`, commented Highlight and Page Note items use `comment`, and Delete has no reader content (`apps/web/src/review/annotation-reader.ts:58-101`). Imported PDF annotations project their `contents` into an immutable reader record and retain document and discovery generations in their identity (`apps/web/src/review/annotation-reader.ts:110-135`). Second, test rendered geometry rather than character count: visual overflow is the measured difference between scroll and client dimensions, with a one-pixel tolerance (`apps/web/src/review/AnnotationExcerpt.tsx:12-16`).
+The current contract separates reading detail from navigating to its source. Opening through an excerpt changes selection and reader state without moving the PDF. Explicit PDF mark activation may also open the reader while retaining its mark-reveal behavior (`apps/web/src/app/ReviewShell.tsx:1174`, `apps/web/src/app/ReviewShell.tsx:1191`). The reader can appear in the Annotations workspace or as a PDF-side popup with a `peek` origin. These supersede the earlier tray-only model and its mandatory navigation on entry (`apps/web/src/app/ReviewShell.tsx:906`, `apps/web/src/app/ReviewShell.tsx:2335`, `apps/web/src/app/ReviewShell.tsx:2570`).
 
 ## Guidance
 
-### Gate disclosure on meaning and rendered geometry
+### Separate content eligibility from rendered overflow
 
-Keep the compact row as the browsing surface and render `More ›` only when the annotation has reader-eligible content and the excerpt actually overflows. `AnnotationExcerpt` measures after layout, observes its own and parent dimensions, reacts to resize and font completion, and removes pending work and listeners during cleanup (`apps/web/src/review/AnnotationExcerpt.tsx:29-68`). A character threshold cannot stay truthful across tray widths, fonts, zoom, or responsive presentation.
+First project meaningful authored content. Owned replacement and insertion items use proposed text; commented highlights and Page Notes use comments; deletion has no full-reader content. Imported annotations use nonblank contents and remain immutable (`apps/web/src/review/annotation-reader.ts:60`, `apps/web/src/review/annotation-reader.ts:114`). This projection is a semantic decision, not a character-count threshold.
 
-The affordance must consume real line space. The control is rendered inside the excerpt, and its floated inline placement caps the final visible line instead of absolutely overlaying arbitrary text (`apps/web/src/review/AnnotationExcerpt.tsx:95-115`, `apps/web/src/app/review-layout-annotations.css:1604-1646`). Keep the row-navigation button as a separate target so `More ›` does not replace ordinary annotation selection (`apps/web/src/review/AnnotationList.tsx:166-183`).
+Then measure the rendered main excerpt. `AnnotationExcerpt` compares scroll and client dimensions with a one-pixel tolerance, observes relevant elements, remeasures after fonts and resize, and cancels pending work during cleanup (`apps/web/src/review/AnnotationExcerpt.tsx:14`, `apps/web/src/review/AnnotationExcerpt.tsx:29`). Source and authored text can participate in the main excerpt, while a separate quote is outside the measured main block (`apps/web/src/review/AnnotationExcerpt.tsx:109`).
 
-### Store identity, not copied reader content
+When eligible content overflows, the excerpt becomes the Read full annotation button. Its click stops propagation so detail disclosure does not also invoke row navigation (`apps/web/src/review/AnnotationExcerpt.tsx:124`). Do not restore the obsolete floated inline “More ›” cap: the current interactive excerpt supplies the disclosure target without overlaying a separate control on text.
 
-Reader state should contain a transient identity, current authority, and restoration snapshot. Resolve the visible record from live state on every render. `ReviewShell` rejects a reader whose authoring authority no longer matches, then resolves current owned items or imported annotations using the active document generation (`apps/web/src/app/ReviewShell.tsx:546-557`). Imported identities fail closed when their document generation, discovery status, or discovery generation changes (`apps/web/src/review/annotation-reader.ts:146-176`).
+### Store identity and origin, not copied content
 
-This makes edits and source replacement ordinary state changes rather than synchronization problems. If the identity no longer resolves, close the reader and restore a safe list/workspace state instead of displaying a frozen copy (`apps/web/src/app/ReviewShell.tsx:725-733`).
+Keep a transient session containing identity, authority, origin, prior selection, and scroll restoration state. Resolve its record against live review state rather than storing a copied body. Owned records resolve by item ID; imported identities include document and discovery generations and fail closed after replacement or rediscovery (`apps/web/src/review/annotation-reader.ts:150`). The shell additionally checks authoring authority before resolving a record (`apps/web/src/app/ReviewShell.tsx:645`).
 
-### Keep the PDF and Annotation Tray mounted
+Origin matters independently of identity. A list entry must return to list context; a popup entry returns to its peek surface. The same owned annotation can use either origin without becoming two domain objects. The shell renders a peek-origin reader outside the workspace when annotations are not visible, and otherwise supplies the reader to the mounted annotations slot (`apps/web/src/app/ReviewShell.tsx:2335`, `apps/web/src/app/ReviewShell.tsx:2570`). Imported readers receive no owned Edit/Delete callbacks.
 
-Swap the Annotations panel's list content for `FullAnnotationReader`; do not replace the PDF or create another source-context surface. `OutlineAnnotationsWorkspace` continues to own the mounted tray while its annotations slot renders either the list or reader (`apps/web/src/app/ReviewShell.tsx:1824-1861`).
+### Keep detail disclosure separate from explicit navigation
 
-Opening a reader must retain the annotation's established PDF-navigation behavior. Owned readers mark the Review Item active and invoke its navigation callback before installing reader state; imported readers invoke their existing-annotation navigation callback before opening (`apps/web/src/app/ReviewShell.tsx:678-723`). This keeps the highlighted PDF location authoritative and avoids duplicating “original text” in reader chrome.
+Both owned and imported open functions select the annotation and install reader state without invoking navigation callbacks (`apps/web/src/app/ReviewShell.tsx:906`, `apps/web/src/app/ReviewShell.tsx:931`). The live PDF remains source context, but detail opening does not assert that the reviewer wants to leave the current passage.
 
-Imported annotations remain read-only. The reader receives Edit only for an owned identity, while source provenance remains display metadata (`apps/web/src/review/FullAnnotationReader.tsx:63-96`, `apps/web/src/app/ReviewShell.tsx:1845-1859`). In list cards, keep compact Edit, Delete, and Copy Link actions in the title row while the excerpt retains its own body row (`apps/web/src/review/AnnotationList.tsx:184-222`).
+Back to annotation in PDF appears when the source target is outside or a return is pending. Its explicit action uses the established owned/imported navigation callback and marks navigation intent with framing authority (`apps/web/src/review/FullAnnotationReader.tsx:95`, `apps/web/src/app/ReviewShell.tsx:967`). Source text need not be duplicated into another document view merely to compensate for this separation.
 
-### Treat restoration as a cancellable transition
+When the locate action disappears, focus moves to Back only if that disappearing action held focus. Otherwise an unrelated keyboard or pointer interaction keeps its focus (`apps/web/src/review/FullAnnotationReader.tsx:30`, `apps/web/src/review/FullAnnotationReader.tsx:100`).
 
-Capture tray scroll and prior active selection on entry. On Back, restore only after the list has rendered, prefer the originating `More ›` control when it is still visible, and fall back through the row, workspace, and PDF targets (`apps/web/src/app/ReviewShell.tsx:620-652`, `apps/web/src/app/ReviewShell.tsx:688-700`). Validate a saved active Review Item against current state before restoring it (`apps/web/src/app/ReviewShell.tsx:610-619`).
+### Restore context as a cancellable transition
 
-Deferred focus and scroll work can outlive the interaction that scheduled it. Track queued animation frames, invalidate them with a restoration token when a newer reader or editor transition begins, and guard callbacks before applying old state (`apps/web/src/app/ReviewShell.tsx:599-607`). Without cancellation, a rapid Back-then-More sequence can let the first reader's restoration steal focus and scroll from the second.
+Capture the list scroll offset and prior active item on entry. On return, validate authority and the saved active item before applying them. Wait for list rendering, then restore scroll and choose a visible excerpt trigger, row navigation, workspace, or PDF fallback (`apps/web/src/app/ReviewShell.tsx:757`). Track restoration frames and a token so a newer reader or editor transition invalidates old callbacks. Without this fence, a rapid Back-then-open sequence lets the first reader steal the second reader's focus and scroll.
 
-### Re-evaluate eligibility after editing
+Back preserves input intent. Keyboard activation requests row-focus restoration; pointer activation returns to the workspace fallback rather than forcing the row's focus treatment (`apps/web/src/review/FullAnnotationReader.tsx:40`, `apps/web/src/app/ReviewShell.tsx:835`). Peek-origin close returns to the popup's excerpt control through its separate branch (`apps/web/src/app/ReviewShell.tsx:954`). Do not generalize the list's pointer-versus-keyboard policy to every origin.
 
-An accepted edit can change both content and geometry. Resolve the updated annotation first, leave reader mode temporarily, and wait for the restored excerpt to report current overflow. Resume the reader only when content still overflows; otherwise keep the row active and return focus to its navigation target (`apps/web/src/app/ReviewShell.tsx:735-751`, `apps/web/src/app/ReviewShell.tsx:1036-1065`).
+### Re-evaluate reader eligibility after edits
 
-### Test the transition matrix
+An edit can change semantic eligibility and rendered overflow. Resolve the updated item before deciding where to return. Accepted reader edits temporarily leave reader mode and retain a pending resume identity; a fresh excerpt overflow report resumes the reader with Edit focused only if it still overflows. Otherwise restore the row (`apps/web/src/app/ReviewShell.tsx:1409`, `apps/web/src/app/ReviewShell.tsx:1021`). Cancel preserves the reader context rather than constructing another reader session from stale copied text.
 
-The risky behavior lies between individually valid states. Browser coverage should exercise owned and imported entry, Back restoration, edit Cancel, accepted long and short edits, deletion, source replacement, imported discovery refresh, and rapid navigation while restoration frames are pending. The implementation's acceptance suite checks ordinary selection/scroll/focus restoration (`test/acceptance/review-workflow.spec.ts:751-795`), explicitly holds animation frames to catch stale Back restoration (`test/acceptance/review-workflow.spec.ts:860-916`), and verifies imported navigation remains read-only (`test/acceptance/review-workflow.spec.ts:918-932`).
-
-Keep behavioral and visual evidence independent. During development, the browser runner could not share the polish server and one live DOM helper was unavailable; stopping the preview before focused browser runs and retaining screenshot-plus-assertion coverage prevented those tooling constraints from becoming product blind spots (session history).
+If deletion, source replacement, or imported discovery refresh makes the record unresolvable, restore a safe origin/workspace state rather than displaying stale contents (`apps/web/src/app/ReviewShell.tsx:1011`). Restoration must validate authority too; validating only visible reader content leaves stale selection and focus work alive.
 
 ## Why This Matters
 
-Geometry-gated disclosure keeps the compact card honest as font metrics and available width change. An identity-keyed reader prevents stale copied content from surviving accepted edits, document replacement, or imported-annotation refresh. A mounted surface preserves the reader's place in both the PDF and tray instead of reconstructing either state after every transition.
+Four plausible shortcuts fail differently: character counts misclassify overflow after reflow; copied reader bodies survive edits incorrectly; navigation on excerpt disclosure moves the PDF unexpectedly; unguarded deferred restoration overwrites newer intent. Separating semantic projection, measured overflow, transient identity, explicit navigation, and cancellable restoration prevents those concerns from becoming one fragile click handler.
 
-Restoration is user-visible behavior, not incidental polish. Scroll, selection, and focus together define where the reviewer was; cancellation ensures that a newer intent owns those values. Treating these concerns as one state contract avoids a feature that reads correctly in a screenshot but fails under reflow, keyboard use, or rapid navigation.
+The old inline control and mandatory source jump are historical design choices, not requirements to preserve. What survives is the user's place: current PDF framing, origin surface, selection, scroll, and appropriate focus.
 
 ## When to Apply
 
-Apply this pattern when a compact, scrollable list is the primary navigation surface but one authored field can be too long to read reliably in place, especially when the original source remains visible elsewhere. It fits when:
+Use this pattern when a compact list or popup exposes long authored fields while source context remains available elsewhere. It fits live domain state that can change during reading or editing. Avoid full-reader disclosure for deletion or blank authored content, and avoid using this transient reader as durable document-navigation history.
 
-- full content can be derived from current domain state rather than copied into a durable UI record;
-- opening detail should retain an existing navigation or selection side effect;
-- the source or item may refresh while detail is open; or
-- returning to the list must preserve scroll position, selection, and keyboard context.
-
-Do not create a full reader for source-only content already represented by the live PDF. The owned projection intentionally returns `null` for Delete and for annotations without non-blank authored content (`apps/web/src/review/annotation-reader.ts:58-89`). Do not use this pattern for sequential document browsing, durable reader navigation history, or multiple simultaneous detail sessions.
+Verify transitions, not screenshots alone: unchanged PDF framing on entry and Back (`test/acceptance/review-workflow.spec.ts:1850`), long-to-short accepted edits (`test/acceptance/review-workflow.spec.ts:1934`), superseded restoration frames (`test/acceptance/review-workflow.spec.ts:1957`), imported read-only entry without navigation (`test/acceptance/review-workflow.spec.ts:2016`), and disappearing-locate focus ownership (`apps/web/test/annotation-components.test.tsx:97`).
 
 ## Examples
 
-- **Owned replacement:** `projectOwnedAnnotationReader` labels non-blank replacement content, assigns an owned identity, and marks it mutable; the reader can offer Edit without duplicating source text (`apps/web/src/review/annotation-reader.ts:63-101`). Projection tests verify the reader content excludes the original selection (`apps/web/test/annotation-reader.test.ts:39-79`).
-- **Imported highlight:** `projectExistingAnnotationReader` carries contents, optional author, and source generations while setting `mutable: false` (`apps/web/src/review/annotation-reader.ts:110-135`). The browser workflow asserts that opening uses existing PDF navigation and renders no Edit action (`test/acceptance/review-workflow.spec.ts:918-932`).
-- **Edit becomes short:** the accepted-edit path clears reader mode pending a fresh measurement; when overflow becomes false, it restores the active row and row-navigation focus (`apps/web/src/app/ReviewShell.tsx:735-751`, `apps/web/src/app/ReviewShell.tsx:1036-1065`; `test/acceptance/review-workflow.spec.ts:837-858`).
-- **Source becomes stale:** document and discovery generations make an imported identity unresolvable after source replacement or refresh, so the reader closes to the annotations workspace (`apps/web/src/review/annotation-reader.ts:146-176`; `test/acceptance/review-workflow.spec.ts:934-962`).
+An owned replacement overflows its compact excerpt. Clicking the excerpt opens complete proposed text and keeps the PDF where it is. Back to annotation explicitly navigates if source context is needed.
 
-## Related
+An edit shortens a Page Note enough to fit its card. The next measured overflow report returns to that row instead of reopening an unnecessary reader.
 
-- [Contextual Annotation Composer preserves document context during authoring](contextual-annotation-composer-preserves-document-context-during-authoring.md) owns the adjacent authoring takeover, frozen-authority, and displaced-surface restoration pattern.
-- [Adaptive annotation tray framing without resizing the PDF viewer](../architecture-patterns/adaptive-annotation-tray-framing.md) owns the mounted right-or-bottom tray and live-PDF framing boundary.
-- [Preserve document history for Annotation Tray navigation](../ui-bugs/preserve-document-history-for-annotation-tray-navigation.md) owns the canonical owned/imported annotation navigation path used before reader entry.
-- [Return-to-origin navigation for stateful PDF Reference Tabs](../architecture-patterns/reference-tab-return-to-origin-navigation.md) documents the related cancellation-generation pattern for stale deferred restoration.
-- [Exclude Navigation Links from Existing PDF Annotation Inventories](../integration-issues/exclude-navigation-links-from-existing-pdf-annotations.md) defines the reviewer-relevant imported-annotation boundary.
+An imported annotation refresh changes discovery generation. Its old identity becomes unresolvable; the reader and restoration paths reject stale authority instead of showing cached contents.
+
+Related: [Contextual Annotation Composer](contextual-annotation-composer-preserves-document-context-during-authoring.md) owns frozen edit authority; [adaptive overlay framing](../architecture-patterns/adaptive-annotation-tray-framing.md) owns passive reading-position preservation; [Reference return-to-origin](../architecture-patterns/reference-tab-return-to-origin-navigation.md) describes a related cancellation-generation boundary.

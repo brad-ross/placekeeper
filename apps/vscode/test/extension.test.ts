@@ -27,9 +27,12 @@ import {
   tabResourceUri,
 } from "../src/local-workspace.js";
 import {
+  RECOVERY_CHOICE_LABELS,
+  buildReviewPanelReattachmentHtml,
   buildReviewWebviewHtml,
   parseSharedAssetManifest,
   parseLaunchResponse,
+  recoveryDecisionForLabel,
   reviewPanelOptions,
 } from "../src/review-panel.js";
 import {
@@ -209,6 +212,19 @@ describe("VS Code local host adapter", () => {
       },
     });
     expect(manifest.description).toContain("Placekeeper");
+    const viewPdf = manifest.contributes.commands.find(({ command }) => command === "placekeeper.viewPdf");
+    expect(viewPdf?.icon).toEqual({
+      light: "assets/placekeeper-light.svg",
+      dark: "assets/placekeeper-dark.svg",
+    });
+    const [lightIcon, darkIcon] = await Promise.all([
+      readFile(resolve("apps/vscode/assets/placekeeper-light.svg"), "utf8"),
+      readFile(resolve("apps/vscode/assets/placekeeper-dark.svg"), "utf8"),
+    ]);
+    for (const icon of [lightIcon, darkIcon]) {
+      expect(icon).toContain('width="16" height="16" viewBox="0 0 16 16"');
+      expect(icon).not.toContain("<rect");
+    }
     expect(manifest.contributes.keybindings).toEqual([
       {
         command: "placekeeper.forwardSyncTex",
@@ -535,6 +551,33 @@ describe("VS Code local host adapter", () => {
     expect(parseLaunchResponse(JSON.stringify({ ok: true, kind: "recovery-offered", choices: ["resume", "discard", "fork"], recoverySessionId: "opaque-session", recoveryOffer }))).toMatchObject({ kind: "recovery-offered", recoveryOffer });
     expect(() => parseLaunchResponse(JSON.stringify({ ok: true, kind: "recovery-offered", choices: ["resume", "fork"], recoverySessionId: "opaque-session", recoveryOffer }))).toThrow(/invalid/u);
     expect(() => parseLaunchResponse(JSON.stringify({ ok: true, kind: "recovery-offered", choices: ["resume", "discard", "fork"], recoverySessionId: "opaque-session" }))).toThrow(/invalid/u);
+  });
+
+  it("presents recovery protocol decisions as readable VS Code choices", () => {
+    expect(RECOVERY_CHOICE_LABELS).toEqual([
+      "Resume draft",
+      "Discard draft",
+      "Start independent review",
+    ]);
+    expect(RECOVERY_CHOICE_LABELS.map(recoveryDecisionForLabel))
+      .toEqual(["resume", "discard", "fork"]);
+    expect(recoveryDecisionForLabel(undefined)).toBeUndefined();
+    expect(recoveryDecisionForLabel("resume")).toBeUndefined();
+  });
+
+  it("renders an inert neutral reattachment surface for a disconnected panel", () => {
+    const html = buildReviewPanelReattachmentHtml();
+
+    expect(html).toContain("Reconnect this review");
+    expect(html).toContain("Placekeeper: View PDF");
+    expect(html).toContain("protected annotations");
+    expect(html).toContain("border-radius:17px");
+    expect(html).toContain("background:#f7f7f7");
+    expect(html).toContain("default-src 'none'");
+    expect(html).not.toContain("<script");
+    expect(html).not.toContain("command:");
+    expect(html).not.toContain("http:");
+    expect(html).not.toContain("https:");
   });
 
   it("accepts the bounded shared upgrade-required error without weakening URL checks", () => {

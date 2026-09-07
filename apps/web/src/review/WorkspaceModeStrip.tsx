@@ -2,6 +2,7 @@ import type { FocusEvent, KeyboardEvent } from 'react';
 
 import type { WorkspaceMode } from './reference-navigation-state.js';
 import { ReviewIcon, type ReviewIconName } from './ReviewIcon.js';
+import { ReviewTooltipButton } from './ReviewTooltipButton.js';
 
 const MODE_PRESENTATION: Readonly<Record<WorkspaceMode, {
   readonly label: string;
@@ -15,6 +16,7 @@ const MODE_PRESENTATION: Readonly<Record<WorkspaceMode, {
 
 export interface WorkspaceDockAction {
   readonly destination: 'bottom' | 'right';
+  readonly disabled?: boolean;
   readonly onClick: () => void;
   readonly onFocus?: (event: FocusEvent<HTMLButtonElement>) => void;
   readonly onBlur?: (event: FocusEvent<HTMLButtonElement>) => void;
@@ -75,7 +77,8 @@ export function WorkspaceModeStrip<Mode extends WorkspaceMode>({
               data-workspace-mode-selected={selected ? 'true' : 'false'}
               role="presentation"
             >
-              <button
+              <ReviewTooltipButton
+                label={`Show ${presentation.label}`}
                 ref={(element) => onModeRef(mode, element)}
                 id={`workspace-mode-${mode}`}
                 className="review-workspace__mode-tab"
@@ -85,14 +88,13 @@ export function WorkspaceModeStrip<Mode extends WorkspaceMode>({
                 aria-label={presentation.label}
                 aria-selected={selected}
                 aria-controls={`workspace-panel-${mode}`}
-                title={`Show ${presentation.label}`}
                 tabIndex={selected ? 0 : -1}
                 onKeyDown={onModeKeyDown}
                 onFocus={(event) => onModeFocus?.(mode, event)}
                 onBlur={(event) => onModeBlur?.(mode, event)}
                 onClick={() => onModeChange(mode)}
               >
-                <ReviewIcon name={presentation.icon} size={15} />
+                <ReviewIcon name={presentation.icon} />
                 {selected ? (
                   <span
                     className="review-workspace__mode-label"
@@ -102,27 +104,28 @@ export function WorkspaceModeStrip<Mode extends WorkspaceMode>({
                     {presentation.label}
                   </span>
                 ) : null}
-              </button>
+              </ReviewTooltipButton>
             </span>
           );
         })}
       </div>
       {dockAttached ? (
-        <button
+        <ReviewTooltipButton
+          label={`Move References to ${dockAction.destination}`}
           type="button"
           className="review-workspace__move review-workspace__move--activity review-workspace__move--header-action"
           data-reference-move={dockAction.destination}
+          disabled={dockAction.disabled}
           aria-label={`Move References to ${dockAction.destination}`}
-          title={`Move References to ${dockAction.destination}`}
           onClick={dockAction.onClick}
           onFocus={dockAction.onFocus}
           onBlur={dockAction.onBlur}
         >
           <ReviewIcon
-            name={dockAction.destination === 'bottom' ? 'chevron-down' : 'chevron-right'}
-            size={14}
+            name={dockAction.destination === 'bottom' ? 'panel-bottom' : 'panel-right'}
+            size={16}
           />
-        </button>
+        </ReviewTooltipButton>
       ) : null}
     </div>
   );

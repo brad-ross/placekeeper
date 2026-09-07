@@ -119,7 +119,8 @@ function validIdentity(value: unknown): value is HostRuntimeIdentity {
 
 function validHostCommand(value: unknown): value is HostRuntimeCommand {
   if (!isObject(value) || typeof value.command !== "string") return false;
-  if (value.command === "reattach" || value.command === "reverse-synctex") {
+  if (value.command === "reattach" || value.command === "export-reviewed-pdf"
+    || value.command === "reverse-synctex") {
     return Object.keys(value).length === 1;
   }
   return value.command === "forward-synctex" && Object.keys(value).length === 4 &&

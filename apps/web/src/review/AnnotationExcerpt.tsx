@@ -39,7 +39,8 @@ function useAnnotationExcerptOverflow(
     const measure = () => {
       animationFrame = 0;
       if (disposed) return;
-      const nextOverflowing = annotationExcerptOverflows(excerpt);
+      const measuredExcerpt = excerpt.querySelector<HTMLElement>('.annotation-item__excerpt-main');
+      const nextOverflowing = measuredExcerpt !== null && annotationExcerptOverflows(measuredExcerpt);
       setOverflowing(nextOverflowing);
       onOverflowChangeRef.current?.(nextOverflowing);
     };
@@ -52,6 +53,8 @@ function useAnnotationExcerptOverflow(
       ? null
       : new ResizeObserver(scheduleMeasure);
     resizeObserver?.observe(excerpt);
+    const measuredExcerpt = excerpt.querySelector<HTMLElement>('.annotation-item__excerpt-main');
+    if (measuredExcerpt !== null) resizeObserver?.observe(measuredExcerpt);
     if (excerpt.parentElement !== null) resizeObserver?.observe(excerpt.parentElement);
     window.addEventListener('resize', scheduleMeasure);
     document.fonts?.addEventListener('loadingdone', scheduleMeasure);
@@ -72,6 +75,9 @@ function useAnnotationExcerptOverflow(
 
 export interface AnnotationExcerptProps {
   readonly content: string;
+  readonly sourceText?: string;
+  readonly sourceTreatment?: 'plain' | 'struck';
+  readonly quoteText?: string;
   readonly readerRecord: AnnotationReaderRecord | null;
   readonly onReadFull?: (record: AnnotationReaderRecord, trigger: HTMLButtonElement) => void;
   readonly onOverflowChange?: (record: AnnotationReaderRecord, overflowing: boolean) => void;
@@ -79,6 +85,9 @@ export interface AnnotationExcerptProps {
 
 export function AnnotationExcerpt({
   content,
+  sourceText,
+  sourceTreatment = 'plain',
+  quoteText,
   readerRecord,
   onReadFull,
   onOverflowChange,
@@ -90,36 +99,45 @@ export function AnnotationExcerpt({
       : `pages ${readerRecord.pageNumber}–${readerRecord.lastPageNumber}`;
   const enabled = readerRecord !== null && onReadFull !== undefined;
   const { excerptRef, overflowing } = useAnnotationExcerptOverflow(
-    content,
+    [sourceText, content].filter(Boolean).join(' '),
     enabled,
     readerRecord === null || onOverflowChange === undefined
       ? undefined
       : (nextOverflowing) => onOverflowChange(readerRecord, nextOverflowing),
   );
 
+  const contents = <>
+    <span className="annotation-item__excerpt-main">
+      {sourceText ? (
+        <span className="annotation-item__source" data-source-treatment={sourceTreatment}>
+          {sourceText}
+        </span>
+      ) : null}
+      {sourceText && content ? <span className="annotation-item__content-separator" aria-hidden="true" /> : null}
+      {content ? <span className="annotation-item__excerpt-text">{content}</span> : null}
+    </span>
+    {quoteText ? (
+      <span className="annotation-item__quote" data-quote-only={content ? 'false' : 'true'}>{quoteText}</span>
+    ) : null}
+  </>;
+
   return (
-    <span
-      ref={excerptRef}
-      className="annotation-item__excerpt"
-      data-full-annotation-eligible={enabled ? 'true' : 'false'}
-    >
-      {enabled ? (
+    <span ref={excerptRef} className="annotation-item__excerpt" data-full-annotation-eligible={enabled ? 'true' : 'false'}>
+      {enabled && overflowing ? (
         <button
           type="button"
-          className="annotation-item__more"
+          className="annotation-item__excerpt-trigger"
           data-read-full-annotation="true"
           aria-label={`Read full ${readerRecord.typeLabel} annotation on ${readerPageDescription}`}
           title="Read full annotation"
-          hidden={!overflowing}
           onClick={(event) => {
             event.stopPropagation();
             onReadFull(readerRecord, event.currentTarget);
           }}
         >
-          More ›
+          {contents}
         </button>
-      ) : null}
-      <span className="annotation-item__excerpt-text">{content}</span>
+      ) : contents}
     </span>
   );
 }
