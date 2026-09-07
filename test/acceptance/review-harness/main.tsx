@@ -625,152 +625,31 @@ function Harness() {
         },
       })}
       {...(responsiveFullChrome ? {
-        savePendingDestination: true,
         copyLink: {
           getLink: () => 'placekeeper:///tmp/Responsive%20Review.pdf#v=1&page=3',
           writeText: async () => undefined,
         },
-        codexContext: { status: 'unbound' as const },
+        codexContext: { status: 'unbound' as const }
       } : {})}
-      saveOptionsOpen={saveDestinationOpen}
-      onSaveOptions={() => setSaveDestinationOpen(true)}
       {...(visualScenario ? {
         ...(['reading', 'tray', 'outline'].includes(visualScenario.name) ? {
           copyLink: {
             getLink: () => 'placekeeper:///tmp/Visual%20Review.pdf#v=1&page=18',
             writeText: async () => undefined,
-          },
+          }
         } : {}),
         ...(visualScenario.name === 'tray' ? {
           copyItemLink: {
             getLink: (item) => `placekeeper:///tmp/Visual%20Review.pdf#v=1&page=${item.pageIndex + 1}&item=${item.id}`,
             writeText: async () => undefined,
-          },
-        } : {}),
-        ...(visualScenario.name === 'outline' ? {
-          copyLinkForOutlineItem: (item) => (
-            item.target === null ? undefined : ({
-              precision: 'exact' as const,
-              getLink: () => `placekeeper:///tmp/Visual%20Review.pdf#v=2&page=${item.target!.pageIndex + 1}&mode=fit-page`,
-              writeText: async () => undefined,
-            })
-          ),
-        } : {}),
+          }
+        } : {})
       } : {})}
       {...(visualScenario ? {
         documentTitle: visualScenario.documentTitle,
-        ...(previewParameters.get('search') === 'canonical' ? { search: <SearchPreview /> } : {}),
-        savedLabel: "Saved",
-        ...(visualScenario.name === 'save-failure' ? {
-          savePhase: 'not-saved' as const,
-          saveRecovery: {
-            pending: saveEstablishing,
-            onRetry: async () => undefined,
-            onSaveCopy: () => setSaveDestinationOpen(true),
-          },
-        } : {}),
-        listOpen: visualScenario.listOpen,
-        viewerState: visualScenario.viewerState,
-        existingAnnotations: visualScenario.existingAnnotations,
-        outlineDiscovery: visualScenario.outlineDiscovery,
-        currentOutlineItemId: visualScenario.currentOutlineItemId,
-        referenceTabs: visualScenario.referenceTabs,
-        onReferenceViewportHost: setVisualReferenceViewportHost,
-        referenceReturn: visualReferenceReturn,
-        ...(visualReferenceNavigation === undefined ? {} : {
-          navigationState: visualReferenceNavigation,
-          onWorkspaceModeChange: (mode) => setVisualReferenceNavigation((current) => (
-            current === undefined
-              ? current
-              : reduceReferenceNavigation(current, { type: 'select-workspace-mode', mode })
-          )),
-          onReferenceTabActivate: (identity) => setVisualReferenceNavigation((current) => (
-            current === undefined ? current : activateVisualReference(current, identity)
-          )),
-          onReferenceReturn: () => {
-            setVisualReferenceReturn((current) => (
-              current === null ? current : { ...current, pending: true }
-            ));
-            setTimeout(() => {
-              setVisualReferenceReturn((current) => (
-                current === null ? current : { ...current, pending: false }
-              ));
-            }, 50);
-          },
-        }),
+        existingAnnotations: visualScenario.existingAnnotations
       } : {})}
-      {...(visualScenario ? {} : {
-        navigationState: harnessReferenceNavigation,
-        onWorkspaceModeChange: (mode) => setHarnessReferenceNavigation((current) => (
-          reduceReferenceNavigation(current, { type: 'select-workspace-mode', mode })
-        )),
-      })}
-      {...(visualScenario ? {} : { viewerControls, viewerState, outlineDiscovery })}
-      viewerNavigation={viewerNavigationRef.current}
-      selectionUpdate={anchorKind === 'selection'
-        ? { kind: 'reliable', generation: selectionGeneration, anchor: selection }
-        : { kind: 'cleared', generation: selectionGeneration }}
-      caretAnchor={anchorKind === 'caret' ? caret : null}
-      selectionPlacement={anchorKind === 'selection' ? { left: 240, top: 120, suggestTop: false } : null}
-      caretPlacement={anchorKind === 'caret' ? { left: 240, top: 120, suggestTop: true } : null}
-      pageMenu={pageMenuOpen ? {
-        invocationId: 'harness-menu',
-        placement: { left: 300, top: 220 },
-        pageIndex: 0,
-        position: { x: 300, y: 220, width: 18, height: 18 },
-        nearbyText: 'nearby paragraph',
-      } : null}
-      placedPageNote={placedPageNote}
-      keyboardPageNoteActive={keyboardPageNoteActive}
-      onRequestKeyboardPageNote={() => setKeyboardPageNoteActive(true)}
-      onCancelKeyboardPageNote={() => setKeyboardPageNoteActive(false)}
-      onPageMenuDismiss={() => setPageMenuOpen(false)}
-      onPageMenuConsumed={() => setPageMenuOpen(false)}
-      onPlacedPageNoteConsumed={() => setPlacedPageNote(null)}
-      onSelectionConsumed={(generation) => {
-        if (anchorKindRef.current === 'selection' && selectionGenerationRef.current === generation) {
-          setAnchorKind('none');
-        }
-      }}
-      onCommand={accept}
       generationRefreshStatus={refreshPreview}
-      onExportReviewedCopy={async () => {
-        setExportCount((count) => count + 1);
-        if (exportPreview === 'delayed') {
-          await new Promise<void>((resolve) => setTimeout(resolve, 100));
-        }
-        if (failNextExportRef.current) {
-          failNextExportRef.current = false;
-          throw new Error('Harness export failure');
-        }
-        return { kind: 'reviewed-copy' };
-      }}
-      onAuthoringActiveChange={(active) => { authoringActiveRef.current = active; }}
-      onAuthoringPreviewChange={(preview) => {
-        rootElement.setAttribute(
-          'data-authoring-preview-updates',
-          String(Number(rootElement.getAttribute('data-authoring-preview-updates') ?? '0') + 1),
-        );
-        rootElement.querySelectorAll('[data-harness-authoring-preview]').forEach((element) => {
-          element.remove();
-        });
-        const layer = rootElement.querySelector('[data-owned-annotation-layer]');
-        const projectedPreview = previewParameters.get('placement') === 'targets'
-          ? preview ?? []
-          : [];
-        for (const annotation of projectedPreview) {
-          const rects = annotation.quadPoints ?? [annotation.rect];
-          rects.forEach((_rect, index) => {
-            const mark = document.createElement('span');
-            mark.dataset.harnessAuthoringPreview = '';
-            mark.dataset.ownedMark = annotation.kind;
-            mark.dataset.reviewId = annotation.reviewItemId ?? annotation.id;
-            mark.dataset.previewPage = String(annotation.pageIndex);
-            mark.dataset.previewSegment = String(index);
-            layer?.append(mark);
-          });
-        }
-      }}
       onNavigate={(item) => setNavigated(item.id)}
       {...(correspondingItemId === undefined ? {} : { correspondingItemId })}
       {...(activationRequest === undefined ? {} : { activationRequest })}
@@ -788,6 +667,155 @@ function Harness() {
         }]),
       }}
       onNavigateExisting={(item) => setNavigated(`source:${item.id}`)}
+      save={{
+        ...(responsiveFullChrome ? {
+          savePendingDestination: true
+        } : {}),
+        saveOptionsOpen: saveDestinationOpen,
+        onSaveOptions: () => setSaveDestinationOpen(true),
+        ...(visualScenario ? {
+          savedLabel: "Saved",
+          ...(visualScenario.name === 'save-failure' ? {
+            savePhase: 'not-saved' as const,
+            saveRecovery: {
+              pending: saveEstablishing,
+              onRetry: async () => undefined,
+              onSaveCopy: () => setSaveDestinationOpen(true),
+            }
+          } : {})
+        } : {}),
+        onExportReviewedCopy: async () => {
+          setExportCount((count) => count + 1);
+          if (exportPreview === 'delayed') {
+            await new Promise<void>((resolve) => setTimeout(resolve, 100));
+          }
+          if (failNextExportRef.current) {
+            failNextExportRef.current = false;
+            throw new Error('Harness export failure');
+          }
+          return { kind: 'reviewed-copy' };
+        },
+      }}
+      selection={{
+        selectionUpdate: anchorKind === 'selection'
+          ? { kind: 'reliable', generation: selectionGeneration, anchor: selection }
+          : { kind: 'cleared', generation: selectionGeneration },
+        caretAnchor: anchorKind === 'caret' ? caret : null,
+        selectionPlacement: anchorKind === 'selection' ? { left: 240, top: 120, suggestTop: false } : null,
+        caretPlacement: anchorKind === 'caret' ? { left: 240, top: 120, suggestTop: true } : null,
+        onSelectionConsumed: (generation) => {
+          if (anchorKindRef.current === 'selection' && selectionGenerationRef.current === generation) {
+            setAnchorKind('none');
+          }
+        },
+      }}
+      authoring={{
+        pageMenu: pageMenuOpen ? {
+          invocationId: 'harness-menu',
+          placement: { left: 300, top: 220 },
+          pageIndex: 0,
+          position: { x: 300, y: 220, width: 18, height: 18 },
+          nearbyText: 'nearby paragraph',
+        } : null,
+        placedPageNote,
+        keyboardPageNoteActive,
+        onRequestKeyboardPageNote: () => setKeyboardPageNoteActive(true),
+        onCancelKeyboardPageNote: () => setKeyboardPageNoteActive(false),
+        onPageMenuDismiss: () => setPageMenuOpen(false),
+        onPageMenuConsumed: () => setPageMenuOpen(false),
+        onPlacedPageNoteConsumed: () => setPlacedPageNote(null),
+        onCommand: accept,
+        onAuthoringActiveChange: (active) => { authoringActiveRef.current = active; },
+        onAuthoringPreviewChange: (preview) => {
+          rootElement.setAttribute(
+            'data-authoring-preview-updates',
+            String(Number(rootElement.getAttribute('data-authoring-preview-updates') ?? '0') + 1),
+          );
+          rootElement.querySelectorAll('[data-harness-authoring-preview]').forEach((element) => {
+            element.remove();
+          });
+          const layer = rootElement.querySelector('[data-owned-annotation-layer]');
+          const projectedPreview = previewParameters.get('placement') === 'targets'
+            ? preview ?? []
+            : [];
+          for (const annotation of projectedPreview) {
+            const rects = annotation.quadPoints ?? [annotation.rect];
+            rects.forEach((_rect, index) => {
+              const mark = document.createElement('span');
+              mark.dataset.harnessAuthoringPreview = '';
+              mark.dataset.ownedMark = annotation.kind;
+              mark.dataset.reviewId = annotation.reviewItemId ?? annotation.id;
+              mark.dataset.previewPage = String(annotation.pageIndex);
+              mark.dataset.previewSegment = String(index);
+              layer?.append(mark);
+            });
+          }
+        },
+      }}
+      viewer={{
+        ...(visualScenario ? {
+          viewerState: visualScenario.viewerState
+        } : {}),
+        ...(visualScenario ? {} : {
+          viewerControls,
+          viewerState
+        }),
+        viewerNavigation: viewerNavigationRef.current,
+      }}
+      workspace={{
+        ...(visualScenario ? {
+          ...(visualScenario.name === 'outline' ? {
+            copyLinkForOutlineItem: (item) => (
+              item.target === null ? undefined : ({
+                precision: 'exact' as const,
+                getLink: () => `placekeeper:///tmp/Visual%20Review.pdf#v=2&page=${item.target!.pageIndex + 1}&mode=fit-page`,
+                writeText: async () => undefined,
+              })
+            )
+          } : {})
+        } : {}),
+        ...(visualScenario ? {
+          ...(previewParameters.get('search') === 'canonical' ? {
+            search: <SearchPreview />
+          } : {}),
+          listOpen: visualScenario.listOpen,
+          outlineDiscovery: visualScenario.outlineDiscovery,
+          currentOutlineItemId: visualScenario.currentOutlineItemId,
+          referenceTabs: visualScenario.referenceTabs,
+          onReferenceViewportHost: setVisualReferenceViewportHost,
+          referenceReturn: visualReferenceReturn,
+          ...(visualReferenceNavigation === undefined ? {} : {
+            navigationState: visualReferenceNavigation,
+            onWorkspaceModeChange: (mode) => setVisualReferenceNavigation((current) => (
+              current === undefined
+                ? current
+                : reduceReferenceNavigation(current, { type: 'select-workspace-mode', mode })
+            )),
+            onReferenceTabActivate: (identity) => setVisualReferenceNavigation((current) => (
+              current === undefined ? current : activateVisualReference(current, identity)
+            )),
+            onReferenceReturn: () => {
+              setVisualReferenceReturn((current) => (
+                current === null ? current : { ...current, pending: true }
+              ));
+              setTimeout(() => {
+                setVisualReferenceReturn((current) => (
+                  current === null ? current : { ...current, pending: false }
+                ));
+              }, 50);
+            }
+          })
+        } : {}),
+        ...(visualScenario ? {} : {
+          navigationState: harnessReferenceNavigation,
+          onWorkspaceModeChange: (mode) => setHarnessReferenceNavigation((current) => (
+            reduceReferenceNavigation(current, { type: 'select-workspace-mode', mode })
+          )),
+        }),
+        ...(visualScenario ? {} : {
+          outlineDiscovery
+        }),
+      }}
     >
       {visualScenario ? (
         <VisualDocument items={state.items} onCorrespondenceChange={setCorrespondingItemId} />

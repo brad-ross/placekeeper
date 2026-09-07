@@ -23,6 +23,7 @@ import {
   type PdfSearchResult,
   type PdfSearchState,
 } from './pdf-search-model.js';
+import { insertSearchPageResults, orderSearchResults as ordered } from './pdf-search-results.js';
 import { relatedPhraseQueries } from './pdf-search-morphology.js';
 import {
   addDetectedSymbolRecordIds,
@@ -374,14 +375,6 @@ function findPageMatches(input: {
   return results;
 }
 
-function ordered(results: readonly PdfSearchResult[]): PdfSearchResult[] {
-  return [...results].sort((left, right) => (
-    left.pageIndex - right.pageIndex
-    || left.charIndex - right.charIndex
-    || left.matchedForm.localeCompare(right.matchedForm)
-  ));
-}
-
 function alternativesFor(
   query: string,
   detectedRecordIds: ReadonlySet<PdfSymbolRecordId>,
@@ -451,8 +444,8 @@ export function createPdfSearchController(
     readonly effectiveQueries: readonly string[];
     readonly matchKind: PdfSearchMatchKind;
     readonly formula: boolean;
-    readonly pageIndexes: Set<number>;
-    readonly results: Map<string, PdfSearchResult>;
+    processedPages: number;
+    results: readonly PdfSearchResult[];
   } | null = null;
   let disposed = false;
 
@@ -555,31 +548,30 @@ export function createPdfSearchController(
         effectiveQueries,
         matchKind,
         formula,
-        pageIndexes: new Set(),
-        results: new Map(),
+        processedPages: 0,
+        results: [],
       };
     }
-    for (const page of pages) {
-      if (progressiveExact.pageIndexes.has(page.pageIndex)) continue;
-      progressiveExact.pageIndexes.add(page.pageIndex);
-      for (const effectiveQuery of effectiveQueries) {
-        for (const result of findPageMatches({
-          page,
-          documentGeneration: options.documentGeneration,
-          query: effectiveQuery,
-          kind: matchKind,
-          formula,
-        })) {
-          progressiveExact.results.set(result.id, result);
-        }
-      }
+    // Pages append in completion order until indexing finishes. The final sort
+    // happens only after every appended page has already been processed.
+    while (progressiveExact.processedPages < pages.length) {
+      const page = pages[progressiveExact.processedPages]!;
+      progressiveExact.processedPages += 1;
+      const matches = effectiveQueries.flatMap((effectiveQuery) => findPageMatches({
+        page,
+        documentGeneration: options.documentGeneration,
+        query: effectiveQuery,
+        kind: matchKind,
+        formula,
+      }));
+      progressiveExact.results = insertSearchPageResults(progressiveExact.results, matches);
     }
-    const exact = ordered([...progressiveExact.results.values()]);
+    const exact = progressiveExact.results;
 
     const relatedQueries = complete && queryKind === 'prose' && !symbolAlias && !literalScalar
       ? relatedPhraseQueries(query, documentWords(pages))
       : [];
-    const exactIds = new Set(exact.map(({ id }) => id));
+    const exactIds = new Set(relatedQueries.length > 0 ? exact.map(({ id }) => id) : []);
     const relatedById = new Map<string, PdfSearchResult>();
     for (const result of relatedQueries.flatMap((variant) => pages.flatMap((page) => (
       findPageMatches({

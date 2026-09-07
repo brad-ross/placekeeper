@@ -1,6 +1,6 @@
 # Repository code-quality audit — 2026-09-07
 
-The highest-value follow-up work is defining terminal lifetimes for retained service records, reducing repeated recovery scans without weakening filesystem checks, and shrinking the orchestration interface of `ReviewShell`. Five local cleanups were applied. Larger changes below are recommendations, not verified fixes.
+The highest-value follow-up work is defining terminal lifetimes for retained service records, reducing repeated recovery scans without weakening filesystem checks, and shrinking the orchestration interface of `ReviewShell`. The initial audit applied five local cleanups. The follow-up implementation below addresses eight of the ten candidate groups; two proposed changes were rejected after checking their behavioral and performance costs.
 
 ## Scope and method
 
@@ -22,9 +22,9 @@ Already sound: strict TypeScript checks include unused locals and parameters; sa
 
 Applied counts: **reuse 1, quality 2, efficiency 2**. Two new test files are included in the explicit CI test configuration.
 
-## Deferred and rejected findings
+## Original deferred and rejected findings
 
-Ten candidate groups were not applied. Priority here indicates follow-up value, not a reproduced incident severity.
+The initial audit left these ten candidate groups unapplied. The follow-up disposition appears below. Priority here indicates follow-up value, not a reproduced incident severity.
 
 1. **High: operation-journal retention.** `apps/service/src/browser/chrome-runtime.ts:154` retains successful operation promises for the lifetime of the journal and writes persistent per-operation records. No terminal cleanup or size bound was found. These records prevent replaying side effects after a lost response or crash, so blindly adding TTL/LRU eviction would weaken a safety guarantee. Define terminal session ownership, durable tombstone/replay behavior, and a supported retry horizon first. Then test sustained operations, service restarts, lost responses, expired retries, and cleanup of both memory and disk.
 
@@ -55,4 +55,45 @@ Ten candidate groups were not applied. Priority here indicates follow-up value, 
 - Initial service integration failures were sandbox `listen EPERM` errors. They passed with local socket access. The initial packaging failure was missing generated Chrome shared assets; building the Chrome bundle resolved it.
 - `git diff --check` passed. Full Playwright, installed-host, visual, and native Swift suites were not run; no host-specific UI behavior or Swift code changed.
 
-Changes are local and uncommitted. Deferred retention and lifecycle findings remain open.
+The initial audit was checkpointed in local commit `c1088a8` before implementing the follow-ups.
+
+## Follow-up implementation
+
+| Group | Implemented behavior and evidence |
+| --- | --- |
+| 1 — Operation journals | Production journal files now belong to the broker's recovery-session directory and count toward existing retention storage accounting. Finish/discard removes them; protected shutdown retains replay evidence. Memory keeps at most 256 durable outcomes while evicted entries remain replayable from disk. In-flight/unpersisted outcomes are never discarded merely to meet the memory target. Cached retries avoid disk reads. |
+| 2 — Export caches | Copy and replacement operation caches are grouped by session and released when the broker ends the session. Late completions cannot repopulate a released cache. Active-session retries continue returning the original result. |
+| 3 — Canonical reviews | Terminal broker notifications clear canonical records, index entries, activated markers, provisional references, presentation leases, and journal memory. Detaching a presentation preserves recoverability. Canonical keys include the session ID, preventing old connections from addressing a later review of the same PDF. |
+| 4 — Recovery traversal | The broker reuses one startup enumeration and a bounded 256-entry store cache. Store cleanup reuse checks directory identity and modification time; permissions are still validated, active temporary files remain protected, and externally changed directories are rescanned. Draft contents are always read fresh. |
+| 5 — ReviewShell | Five explicit domain objects (save, selection, authoring, viewer, workspace) reduce the top-level interface from 100 to 29 members. Production and test callers were migrated together, retaining individual callback dependencies. |
+| 6 — Scope polling | Parsed JSON values are compared semantically, including unknown fields and array/object shape. Equivalent responses retain the current state reference. Lease, identity, currentness, reconnect promotion, polling cadence, and timeout behavior remain observable and unchanged. |
+| 7 — Progressive search | A processed-page cursor and ordered page-block insertion avoid rescanning all pages and resorting all matches on each publication. Result snapshots remain immutable; last-value deduplication, stable ties, aliases, out-of-order completion, selection, cancellation, and publication cadence are preserved. |
+| 8 — Retention scan | Independent file stats run in ordered batches of eight. Cleanup barriers, retention decisions, deletion order, and error order remain sequential. |
+| 9 — Launch overlap | Rejected: rewrite-assessment failure currently prevents recovery discovery and its filesystem side effects. A regression test pins that contract. Running both concurrently would change behavior, so no overlap was introduced. |
+| 10 — Blanket helper reuse | Rejected for the original reasons above. Runtime-specific digests and context-specific serializers/geometry helpers remain separate. The exact runtime serializer duplicate was already removed by the initial audit. |
+
+The journal retry horizon is the owning recovery session's lifetime. Old flat journal files are migrated lazily when an eligible retry addresses them: both completed and pending/unknown outcomes are persisted into the session before the legacy file is removed. Cold legacy files remain intact because assigning an old record to a session without evidence could permit duplicate side effects. New production records do not grow the flat directory.
+
+The memory bounds apply to reusable store objects and durably backed journal outcomes. Active export retries and live reviews remain retained until their sessions end; these changes do not introduce a TTL that would invalidate an eligible retry.
+
+### Performance measurements
+
+- Recovery retention workload (100 sessions, 20 files/session): alternating paired runs measured **57.53 ms → 44.00 ms**, about **24% less time**. Runner: `scripts/benchmarks/recovery-scan.ts`.
+- Progressive search (150 matches/page; median of three measured runs after warmup): **250 pages: 265.9 ms → 75.9 ms**; **1,000 pages: 5,803 ms → 473.2 ms**. Publication counts remain 252 and 1,002 respectively. Runner: `scripts/benchmarks/pdf-search-progressive.ts`.
+- These are local synthetic workload measurements, not guarantees of end-user latency.
+
+### Follow-up verification
+
+- The completed code-review receipt is `20260907-133651-followup` (`status: complete`), with eight collected review returns and one independent findings-validation batch. No actionable findings remain. A separate-provider CLI was unavailable; the local adversarial review ran instead.
+- Review found and fixed a cache-pressure replay defect: a just-loaded durable record could be immediately evicted while unrelated operations were pending. Replay now uses its local persisted evidence regardless of cache residency. Three completed/pending/conflicting retry cases failed before the repair and pass afterward.
+- Terminal-cleanup tests cover both snapshot-removal failure and earlier reconnect-revocation failure; both still notify listeners and release the store cache after the session is no longer active.
+- Final CI unit/conformance suite: **1,143 tests passed across 67 files**. An earlier concurrent run timed out in one symbol-catalog test; the complete rerun passed without changing its timeout or implementation.
+- Final project-wide typecheck/lint passed. Service and web production builds passed; the initial follow-up also built VS Code and Chrome assets. Existing bundler warnings are unchanged.
+- Chromium browser run: **127 passed, 26 failed** across production flow, review workflow, and workspace-row interactions. Of 20 production failures, 15 reproduced at the same assertion with the same error on isolated baseline `c1088a8`; toolbar-history also failed baseline at a later step. The remaining four passed on both baseline and an unchanged-current rerun. All six workflow failures also reproduced at identical assertion lines with identical error text. Overall, 21 failures reproduce exactly on baseline, one also fails baseline at a later step, and four passed on unchanged-current rerun; no new browser regression was evidenced. The browser suite itself is not fully green.
+- Structural UI verification found the entire `ReviewShell` implementation unchanged after reversing only domain-qualified property access. All 78 direct production expressions and 19 conditional spreads were preserved (one indentation-only difference).
+- `git diff --check` passed. Changes were committed locally without pushing.
+- Native Swift, WebKit, full visual, and installed-host suites were not run. Individual journal-persistence fault boundaries and over-cap inactive-store eviction do not each have dedicated fault-injection tests.
+
+### Operational validation
+
+For the next release, the maintainer should check a finish/discard cycle and a protected shutdown/recovery cycle during the first day of use: terminal backend/export cache counts return to zero, the ended recovery directory disappears, and a recovered eligible operation replays without repeating its side effect. Treat duplicate side effects, a recreated terminal directory, or a lost protected retry outcome as rollback triggers; preserve recovery directories when investigating. Search diagnostics for `operation-outcome-unknown`, `idempotency-conflict`, and `canonical-review-unavailable`, distinguishing expected rejected stale requests from failures on an active review.

@@ -251,6 +251,96 @@ describe('PDF search controller', () => {
     expect(final.groups[0]?.results).toHaveLength(2);
   });
 
+  it('orders out-of-order completions without mutating prior hits or losing selection', async () => {
+    const releases: Array<() => void> = [];
+    const gates = Array.from({ length: 3 }, (_, index) => new Promise<void>((resolve) => {
+      releases[index] = resolve;
+    }));
+    const source = reader(['x first x', 'x middle', 'x last']);
+    const controller = createPdfSearchController({
+      documentGeneration: 1,
+      maxConcurrentPageReads: 3,
+      reader: { ...source, async read(index, signal) {
+        await gates[index];
+        return source.read(index, signal);
+      } },
+    });
+    const pending = controller.search('x');
+    releases[2]!();
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    const earlier = controller.getState().groups[0]!.results;
+    controller.selectResult(earlier[0]!.id);
+    releases[0]!();
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    expect(controller.getState().groups[0]!.results.map(({ pageIndex }) => pageIndex)).toEqual([0, 0, 2]);
+    expect(controller.getState().selectedResultId).toBe(earlier[0]!.id);
+    expect(earlier.map(({ pageIndex }) => pageIndex)).toEqual([2]);
+    releases[1]!();
+    const final = await pending;
+    expect(final.groups[0]!.results.map(({ pageIndex }) => pageIndex)).toEqual([0, 0, 1, 2]);
+    expect(final.selectedResultId).toBe(earlier[0]!.id);
+    expect((await controller.search('middle')).groups[0]!.results[0]!.pageIndex).toBe(1);
+  });
+
+  it('rebuilds exact results when detected aliases replace prose and expand the effective query', async () => {
+    const releases: Array<() => void> = [];
+    const gates = Array.from({ length: 3 }, (_, index) => new Promise<void>((resolve) => {
+      releases[index] = resolve;
+    }));
+    const source = reader(['phi prose', 'φ value', 'ϕ value']);
+    const controller = createPdfSearchController({
+      documentGeneration: 1,
+      maxConcurrentPageReads: 3,
+      reader: { ...source, async read(index, signal) {
+        await gates[index];
+        return source.read(index, signal);
+      } },
+    });
+    const pending = controller.search('phi');
+    releases[0]!();
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    expect(controller.getState().groups[0]!.results.map(({ matchedForm }) => matchedForm)).toEqual(['phi']);
+    releases[2]!();
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    expect(controller.getState().groups[0]!.results.map(({ matchedForm }) => matchedForm)).toEqual(['ϕ']);
+    releases[1]!();
+    const final = await pending;
+    expect(final.groups[0]!.results.map(({ matchedForm }) => matchedForm)).toEqual(['φ', 'ϕ']);
+  });
+
+  it('rescans already indexed pages for a changed query and stops publishing after disposal', async () => {
+    const releases: Array<() => void> = [];
+    const gates = Array.from({ length: 3 }, (_, index) => new Promise<void>((resolve) => {
+      releases[index] = resolve;
+    }));
+    const source = reader(['x alpha', 'alpha x', 'alpha x']);
+    const controller = createPdfSearchController({
+      documentGeneration: 1,
+      maxConcurrentPageReads: 3,
+      reader: { ...source, async read(index, signal) {
+        await gates[index];
+        return source.read(index, signal);
+      } },
+    });
+    let publications = 0;
+    controller.subscribe(() => { publications += 1; });
+    const first = controller.search('x');
+    releases[0]!();
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    const second = controller.search('alpha');
+    releases[1]!();
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    expect(controller.getState().groups[0]!.results.map(({ matchedForm, pageIndex }) => [matchedForm, pageIndex]))
+      .toEqual([['alpha', 0], ['alpha', 1]]);
+    const published = publications;
+    const beforeDisposal = controller.getState();
+    controller.dispose();
+    releases[2]!();
+    await Promise.all([first, second]);
+    expect(publications).toBe(published);
+    expect(controller.getState()).toBe(beforeDisposal);
+  });
+
   it('offers detected symbol alternatives without promoting them to matches', async () => {
     const controller = createPdfSearchController({
       documentGeneration: 1,

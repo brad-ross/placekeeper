@@ -161,9 +161,7 @@ import './neutral-chrome.css';
 
 function ignoreReferenceViewportHost(_element: HTMLDivElement | null): void {}
 
-export interface ReviewShellProps {
-  state: ReviewState;
-  documentTitle?: string;
+export interface ReviewShellSaveModel {
   savedLabel?: string;
   savePhase?: 'clean' | 'saving' | 'not-saved';
   exportOnly?: boolean;
@@ -176,14 +174,12 @@ export interface ReviewShellProps {
     readonly onRetry: () => void | Promise<void>;
     readonly onSaveCopy: () => void;
   };
-  generationRefreshStatus?: GenerationRefreshStatus;
-  locationRestoreStatus?: LocationRestoreStatus;
-  toolError?: string | null;
-  commandNotice?: string | null;
+  onExportReviewedCopy?(confirmPossiblyStale?: true): Promise<ReviewExportResult | void>;
+}
+
+export interface ReviewShellSelectionModel {
   onSelectionPageLimitExceeded?(): void;
   onCopySelection?(): void;
-  onExportReviewedCopy?(confirmPossiblyStale?: true): Promise<ReviewExportResult | void>;
-  listOpen?: boolean;
   selectionUpdate: SelectionUpdate;
   pdfCopyOwner?: PdfCopyOwner;
   pdfCopySnapshots?: PdfCopySnapshots;
@@ -192,6 +188,10 @@ export interface ReviewShellProps {
   selectionPlacement?: ContextPlacement | null;
   caretAnchor?: CaretAnchor | null;
   caretPlacement?: ContextPlacement | null;
+  onSelectionConsumed?(generation: number): void;
+}
+
+export interface ReviewShellAuthoringModel {
   pageMenu?: {
     readonly invocationId: string;
     readonly placement: ContextPlacement;
@@ -210,10 +210,9 @@ export interface ReviewShellProps {
   onCancelKeyboardPageNote?(): void;
   onPageMenuDismiss?(invocationId: string): void;
   onPageMenuConsumed?(invocationId: string): void;
-  onGoToSource?(menu: NonNullable<ReviewShellProps['pageMenu']>): void;
+  onGoToSource?(menu: NonNullable<ReviewShellAuthoringModel['pageMenu']>): void;
   onPlacedPageNoteConsumed?(token: number): void;
   onPageNoteComposerComplete?(): void;
-  onSelectionConsumed?(generation: number): void;
   onCommand(
     command: ReviewCommand,
     authority?: AuthoringAuthority,
@@ -235,26 +234,19 @@ export interface ReviewShellProps {
   onAuthoringPreviewChange?(preview: readonly ReviewAnnotation[] | null): void;
   /** Publishes measured overlay geometry without changing viewer framing. */
   onAuthoringViewportChange?(viewport: PdfViewportQuery | null): void;
-  onNavigate?(item: ReviewItem): void;
-  onNavigateExisting?(item: ExistingAnnotation): void;
-  existingAnnotations?: ExistingAnnotationsDiscovery;
-  onRetryExistingAnnotations?(): void;
-  activeItemId?: string | null;
-  correspondingItemId?: string;
-  activationRequest?: { readonly id: string; readonly token: number };
-  onItemCorrespondenceChange?(id: string | undefined): void;
-  onActiveItemChange?(id: string | undefined): void;
+}
+
+export interface ReviewShellViewerModel {
   viewerControls?: ViewerControls;
   viewerState?: ViewerControlsSnapshot;
   viewerFraming?: ViewerFramingControls;
   viewerNavigation?: PdfViewerNavigation;
-  codexContext?: LiveContextBindingStatus;
-  copyLink?: CopyLinkControlProps;
-  copyItemLink?: {
-    readonly getLink: (item: ReviewItem) => string;
-    readonly disabled?: (item: ReviewItem) => boolean;
-    readonly writeText: (link: string) => Promise<void>;
-  };
+  viewerNavigationIntentToken?: number;
+  onCommitMainFramingPositionChange?(commit: (() => void) | null): void;
+}
+
+export interface ReviewShellWorkspaceModel {
+  listOpen?: boolean;
   /** The production shell may control workspace visibility and retained navigation state. */
   workspaceOpen?: boolean;
   navigationState?: ReferenceNavigationState;
@@ -265,8 +257,6 @@ export interface ReviewShellProps {
   currentOutlineItemId?: string | null;
   linkActionRequest?: ViewerPdfLinkInvocation | null;
   navigationAnnouncement?: string;
-  documentActionsRequestToken?: number;
-  onDocumentActionsRequestHandled?: (token: number) => void;
   canNavigateBack?: boolean;
   canNavigateForward?: boolean;
   documentNavigationPending?: boolean;
@@ -291,8 +281,38 @@ export interface ReviewShellProps {
   onReferenceLayoutAction?(action: ReferenceWorkspaceLayoutAction): void;
   rightWorkspaceMode?: RightWorkspaceMode;
   search?: ReactNode;
-  viewerNavigationIntentToken?: number;
-  onCommitMainFramingPositionChange?(commit: (() => void) | null): void;
+}
+
+export interface ReviewShellProps {
+  save: ReviewShellSaveModel;
+  selection: ReviewShellSelectionModel;
+  authoring: ReviewShellAuthoringModel;
+  viewer: ReviewShellViewerModel;
+  workspace: ReviewShellWorkspaceModel;
+  state: ReviewState;
+  documentTitle?: string;
+  generationRefreshStatus?: GenerationRefreshStatus;
+  locationRestoreStatus?: LocationRestoreStatus;
+  toolError?: string | null;
+  commandNotice?: string | null;
+  onNavigate?(item: ReviewItem): void;
+  onNavigateExisting?(item: ExistingAnnotation): void;
+  existingAnnotations?: ExistingAnnotationsDiscovery;
+  onRetryExistingAnnotations?(): void;
+  activeItemId?: string | null;
+  correspondingItemId?: string;
+  activationRequest?: { readonly id: string; readonly token: number };
+  onItemCorrespondenceChange?(id: string | undefined): void;
+  onActiveItemChange?(id: string | undefined): void;
+  codexContext?: LiveContextBindingStatus;
+  copyLink?: CopyLinkControlProps;
+  copyItemLink?: {
+    readonly getLink: (item: ReviewItem) => string;
+    readonly disabled?: (item: ReviewItem) => boolean;
+    readonly writeText: (link: string) => Promise<void>;
+  };
+  documentActionsRequestToken?: number;
+  onDocumentActionsRequestHandled?: (token: number) => void;
   onCommandSurfaceChange?(snapshot: ReviewCommandSurfaceSnapshot): void;
   commandInvocation?: ReviewCommandInvocation;
   accessibilityTransition?: AccessibilityTransitionEffect;
@@ -388,10 +408,10 @@ export function ReviewShell(props: ReviewShellProps) {
     undefined,
     () => {
       let initial = createReferenceWorkspaceLayout({ width: 1440, height: 900 });
-      if (props.workspaceOpen === true || props.listOpen === true) {
-        const initialMode = props.listOpen === true
+      if (props.workspace.workspaceOpen === true || props.workspace.listOpen === true) {
+        const initialMode = props.workspace.listOpen === true
           ? 'annotations'
-          : props.navigationState?.workspace.lastMode ?? 'outline';
+          : props.workspace.navigationState?.workspace.lastMode ?? 'outline';
         initial = reduceReferenceWorkspaceLayout(initial, initialMode === 'references'
           ? { type: 'show-references' }
           : { type: 'show-right-workspace' });
@@ -401,12 +421,12 @@ export function ReviewShell(props: ReviewShellProps) {
   );
   const [surface, dispatchSurface] = useReducer(
     reduceReviewSurface,
-    props.workspaceOpen === true
+    props.workspace.workspaceOpen === true
       ? reduceReviewSurface(INITIAL_REVIEW_SURFACE_STATE, {
           type: 'open-workspace',
-          mode: props.navigationState?.workspace.lastMode ?? 'outline',
+          mode: props.workspace.navigationState?.workspace.lastMode ?? 'outline',
         })
-      : props.listOpen === true
+      : props.workspace.listOpen === true
       ? reduceReviewSurface(INITIAL_REVIEW_SURFACE_STATE, {
           type: 'open-workspace',
           mode: 'annotations',
@@ -417,7 +437,7 @@ export function ReviewShell(props: ReviewShellProps) {
   const authoringSessionRef = useRef<AuthoringSession | null>(null);
   const authoringSessionTokenRef = useRef(0);
   const authoringEditorRef = useRef<HTMLTextAreaElement>(null);
-  const saveOptionsWasOpenRef = useRef(props.saveOptionsOpen ?? false);
+  const saveOptionsWasOpenRef = useRef(props.save.saveOptionsOpen ?? false);
   const [authoringSurfaceElement, setAuthoringSurfaceElement] = useState<HTMLElement | null>(null);
   const [localActiveItemId, setLocalActiveItemId] = useState<string>();
   const [activeExistingAnnotationKey, setActiveExistingAnnotationKey] = useState<string>();
@@ -461,35 +481,35 @@ export function ReviewShell(props: ReviewShellProps) {
   useEffect(() => cancelAnnotationRestoration, [cancelAnnotationRestoration]);
 
   useEffect(() => {
-    props.onAuthoringAnchorChange?.(
+    props.authoring.onAuthoringAnchorChange?.(
       authoringSession === null ? null : authoringAnchorSnapshot(authoringSession),
     );
-  }, [authoringSession, props.onAuthoringAnchorChange]);
+  }, [authoringSession, props.authoring.onAuthoringAnchorChange]);
   useEffect(() => {
-    props.onAuthoringPreviewChange?.(
+    props.authoring.onAuthoringPreviewChange?.(
       authoringSession === null
         ? null
         : authoringPreviewAnnotations(authoringSession, initialAuthoringValue(authoringSession)),
     );
-    return () => props.onAuthoringPreviewChange?.(null);
-  }, [authoringSession, props.onAuthoringPreviewChange]);
+    return () => props.authoring.onAuthoringPreviewChange?.(null);
+  }, [authoringSession, props.authoring.onAuthoringPreviewChange]);
   useEffect(() => {
     const wasOpen = saveOptionsWasOpenRef.current;
-    const isOpen = props.saveOptionsOpen ?? false;
+    const isOpen = props.save.saveOptionsOpen ?? false;
     saveOptionsWasOpenRef.current = isOpen;
     if (!wasOpen || isOpen || authoringSessionRef.current === null) return;
     requestAnimationFrame(() => authoringEditorRef.current?.focus({ preventScroll: true }));
-  }, [props.saveOptionsOpen]);
+  }, [props.save.saveOptionsOpen]);
   useLayoutEffect(() => {
     if (authoringSurfaceElement === null) {
-      props.onAuthoringViewportChange?.(null);
+      props.authoring.onAuthoringViewportChange?.(null);
       return;
     }
     let frame = 0;
     const publish = () => {
       frame = 0;
       const rect = authoringSurfaceElement.getBoundingClientRect();
-      props.onAuthoringViewportChange?.({
+      props.authoring.onAuthoringViewportChange?.({
         occlusion: {
           left: rect.left,
           top: rect.top,
@@ -514,9 +534,9 @@ export function ReviewShell(props: ReviewShellProps) {
       observer?.disconnect();
       window.removeEventListener('resize', schedulePublish);
       window.removeEventListener('scroll', schedulePublish, true);
-      props.onAuthoringViewportChange?.(null);
+      props.authoring.onAuthoringViewportChange?.(null);
     };
-  }, [authoringSurfaceElement, props.onAuthoringViewportChange]);
+  }, [authoringSurfaceElement, props.authoring.onAuthoringViewportChange]);
   const acknowledgedRef = useRef(props.state);
   const commandTailRef = useRef<Promise<ReviewState>>(Promise.resolve(props.state));
   const pageNoteTriggerRef = useRef<HTMLButtonElement>(null);
@@ -552,20 +572,20 @@ export function ReviewShell(props: ReviewShellProps) {
     if (props.activeItemId === undefined) setLocalActiveItemId(id);
     props.onActiveItemChange?.(id);
   };
-  const navigation = props.navigationState ?? surface.navigation;
+  const navigation = props.workspace.navigationState ?? surface.navigation;
   const currentAuthoringAuthority = authoringAuthorityFor(
     props.state,
     navigation.documentGeneration,
   );
   const currentAuthoringAuthorityRef = useRef(currentAuthoringAuthority);
   currentAuthoringAuthorityRef.current = currentAuthoringAuthority;
-  const referenceTabs = props.referenceTabs ?? navigation.tabs.map((tab) => ({
+  const referenceTabs = props.workspace.referenceTabs ?? navigation.tabs.map((tab) => ({
     identity: tab.identity,
     label: `Page ${tab.originalTarget.pageIndex + 1}`,
     pageContext: `Page ${tab.originalTarget.pageIndex + 1}`,
   }));
-  const referencesAvailable = referenceTabs.length > 0 || props.pendingReference != null;
-  const outlineDiscovery = props.outlineDiscovery;
+  const referencesAvailable = referenceTabs.length > 0 || props.workspace.pendingReference != null;
+  const outlineDiscovery = props.workspace.outlineDiscovery;
   const visibleOutlineDiscovery = useMemo<PdfOutlineDiscovery>(() => (
     outlineDiscovery?.documentGeneration === navigation.documentGeneration
       ? outlineDiscovery
@@ -596,7 +616,7 @@ export function ReviewShell(props: ReviewShellProps) {
         ? 'The prior reading position could not be restored; review remains available.'
         : '',
   ].filter(Boolean);
-  const workspaceOpen = props.workspaceOpen ?? surface.baseSurface === 'workspace';
+  const workspaceOpen = props.workspace.workspaceOpen ?? surface.baseSurface === 'workspace';
   const workspaceMode = navigation.workspace.lastMode;
   const visibleWorkspaceModes = WORKSPACE_MODES.filter((mode) => (
     (referencesAvailable || mode !== 'references')
@@ -606,14 +626,14 @@ export function ReviewShell(props: ReviewShellProps) {
     (mode): mode is RightWorkspaceMode => mode !== 'references',
   );
   const documentActionsPresentation = useMemo(() => (
-    props.state.workflow.mode === 'generated-output' || props.exportOnly === true
+    props.state.workflow.mode === 'generated-output' || props.save.exportOnly === true
       ? reviewExportPresentation({
           refreshStatus: props.generationRefreshStatus ?? 'idle',
           summary: createReviewStateSummary(props.state),
         })
       : undefined
-  ), [props.exportOnly, props.generationRefreshStatus, props.state]);
-  const requestedRightWorkspaceMode: RightWorkspaceMode = props.rightWorkspaceMode
+  ), [props.save.exportOnly, props.generationRefreshStatus, props.state]);
+  const requestedRightWorkspaceMode: RightWorkspaceMode = props.workspace.rightWorkspaceMode
     ?? (workspaceMode === 'references' ? 'outline' : workspaceMode);
   const rightWorkspaceMode: RightWorkspaceMode = visibleRightWorkspaceModes.includes(
     requestedRightWorkspaceMode,
@@ -621,16 +641,16 @@ export function ReviewShell(props: ReviewShellProps) {
   const visibleWorkspaceMode: WorkspaceMode = visibleWorkspaceModes.includes(workspaceMode)
     ? workspaceMode
     : rightWorkspaceMode;
-  const referenceLayout = props.referenceLayoutState ?? localReferenceLayout;
-  const referenceLayoutControlled = props.referenceLayoutState !== undefined;
+  const referenceLayout = props.workspace.referenceLayoutState ?? localReferenceLayout;
+  const referenceLayoutControlled = props.workspace.referenceLayoutState !== undefined;
   const effectiveReferenceLayout = deriveReferenceWorkspaceLayout(
     referenceLayout,
     rightWorkspaceMode,
     visibleWorkspaceMode,
   );
   const dispatchReferenceLayout = (action: ReferenceWorkspaceLayoutAction) => {
-    if (props.referenceLayoutState === undefined) dispatchLocalReferenceLayout(action);
-    props.onReferenceLayoutAction?.(action);
+    if (props.workspace.referenceLayoutState === undefined) dispatchLocalReferenceLayout(action);
+    props.workspace.onReferenceLayoutAction?.(action);
   };
   const referenceSurfaceOpen = effectiveReferenceLayout.kind === 'narrow-unified'
     ? effectiveReferenceLayout.open
@@ -690,27 +710,27 @@ export function ReviewShell(props: ReviewShellProps) {
         : null;
   void readerNavigationRevision;
   const annotationReaderVisibility: PdfTargetVisibility = annotationReaderTarget === null
-    || props.viewerNavigation === undefined
+    || props.viewer.viewerNavigation === undefined
     ? 'unavailable'
-    : props.viewerNavigation.pointVisibility(
+    : props.viewer.viewerNavigation.pointVisibility(
         annotationReaderTarget.pageIndex,
         annotationReaderTarget.point,
       );
-  const selectionAnchor = reliableSelection(props.selectionUpdate);
+  const selectionAnchor = reliableSelection(props.selection.selectionUpdate);
   const selectionActionsAvailable = (
-    selectionAnchor !== null || props.selectionUpdate.kind === 'over-limit'
-  ) && props.selectionUpdate.generation !== consumedSelectionGeneration;
-  const competingPdfSelections = props.pdfCopySnapshots?.main?.kind !== undefined
-    && props.pdfCopySnapshots.main.kind !== 'cleared'
-    && props.pdfCopySnapshots.reference?.kind !== undefined
-    && props.pdfCopySnapshots.reference.kind !== 'cleared';
-  const pdfCopyOwnerLabel = props.pdfCopyOwner === 'main'
+    selectionAnchor !== null || props.selection.selectionUpdate.kind === 'over-limit'
+  ) && props.selection.selectionUpdate.generation !== consumedSelectionGeneration;
+  const competingPdfSelections = props.selection.pdfCopySnapshots?.main?.kind !== undefined
+    && props.selection.pdfCopySnapshots.main.kind !== 'cleared'
+    && props.selection.pdfCopySnapshots.reference?.kind !== undefined
+    && props.selection.pdfCopySnapshots.reference.kind !== 'cleared';
+  const pdfCopyOwnerLabel = props.selection.pdfCopyOwner === 'main'
     ? 'Main PDF'
-    : props.pdfCopyOwner === 'reference' ? 'Reference PDF' : 'No PDF focused';
+    : props.selection.pdfCopyOwner === 'reference' ? 'Reference PDF' : 'No PDF focused';
   const lastPlacedPageNoteToken = useRef<number | undefined>(undefined);
   const workspaceFraming = useWorkspaceFraming({
     workspaceOpen: anyWorkspaceOpen,
-    ...(props.viewerFraming === undefined ? {} : { controls: props.viewerFraming }),
+    ...(props.viewer.viewerFraming === undefined ? {} : { controls: props.viewer.viewerFraming }),
     request: workspaceRequest,
     documentGeneration: navigation.documentGeneration,
     layoutGeneration: [
@@ -741,7 +761,7 @@ export function ReviewShell(props: ReviewShellProps) {
     if (!toolsSurfaceOpen || prior.narrow !== (effectiveReferenceLayout.kind === 'narrow-unified')
       || prior.dock !== referenceLayout.referenceDock) pendingOpeningFitRef.current = false;
     if (opening) pendingOpeningFitRef.current = true;
-    const navigation = props.viewerNavigation;
+    const navigation = props.viewer.viewerNavigation;
     if (!pendingOpeningFitRef.current || navigation === undefined) return;
     let current = true;
     // Opening is a one-shot Fit Width request. Later resizing, docking, and
@@ -763,7 +783,7 @@ export function ReviewShell(props: ReviewShellProps) {
     });
     return () => { current = false; };
   }, [toolsSurfaceOpen, effectiveReferenceLayout.kind, referenceLayout.referenceDock,
-    effectiveWorkspaceMode, props.viewerNavigation, workspaceFraming.markUserIntent, workspaceFraming.waitForSettledGeometry]);
+    effectiveWorkspaceMode, props.viewer.viewerNavigation, workspaceFraming.markUserIntent, workspaceFraming.waitForSettledGeometry]);
 
   const overlaySurfaceRefs = useMemo(() => [
     workspaceFraming.referenceSurfaceRef,
@@ -779,7 +799,7 @@ export function ReviewShell(props: ReviewShellProps) {
     workspaceFraming.presentation,
   ].join(':');
   const overlayFrame = useReviewOverlayGeometry({
-    isFitToWidth: () => props.viewerNavigation?.isFitToWidth?.() ?? false,
+    isFitToWidth: () => props.viewer.viewerNavigation?.isFitToWidth?.() ?? false,
     stageRef: workspaceFraming.stageRef,
     surfaceRefs: overlaySurfaceRefs,
     layoutGeneration: overlayLayoutGeneration,
@@ -794,11 +814,11 @@ export function ReviewShell(props: ReviewShellProps) {
   const authoringFallbackTarget = authoringSession === null
     ? null
     : authoringSession.source.kind === 'replace' || authoringSession.source.kind === 'highlight'
-      ? props.selectionPlacement ?? null
+      ? props.selection.selectionPlacement ?? null
       : authoringSession.source.kind === 'insert'
-        ? props.caretPlacement ?? null
+        ? props.selection.caretPlacement ?? null
         : authoringSession.source.kind === 'pageNote'
-          ? props.pageMenu?.placement ?? null
+          ? props.authoring.pageMenu?.placement ?? null
           : null;
   const authoringPlacement = usePassageEditorPlacement({
     active: authoringSession !== null,
@@ -1123,9 +1143,9 @@ export function ReviewShell(props: ReviewShellProps) {
       height: workspaceFraming.stageSize.height,
     };
     if (!referenceLayoutControlled) dispatchLocalReferenceLayout(action);
-    props.onReferenceLayoutAction?.(action);
+    props.workspace.onReferenceLayoutAction?.(action);
   }, [
-    props.onReferenceLayoutAction,
+    props.workspace.onReferenceLayoutAction,
     referenceLayoutControlled,
     workspaceFraming.stageSize.height,
     workspaceFraming.stageSize.width,
@@ -1139,16 +1159,16 @@ export function ReviewShell(props: ReviewShellProps) {
   }, [workspaceFraming.presentation]);
 
   useLayoutEffect(() => {
-    if (props.workspaceOpen === undefined) return;
+    if (props.workspace.workspaceOpen === undefined) return;
     if (authoringSessionRef.current !== null) return;
     const action = controlledWorkspaceSurfaceAction({
-      open: props.workspaceOpen,
+      open: props.workspace.workspaceOpen,
       baseSurface: surface.baseSurface,
       transientSurface: surface.transientSurface,
       mode: workspaceMode,
     });
     if (action !== null) dispatchSurface(action);
-  }, [props.workspaceOpen, surface.baseSurface, surface.transientSurface, workspaceMode]);
+  }, [props.workspace.workspaceOpen, surface.baseSurface, surface.transientSurface, workspaceMode]);
 
   useLayoutEffect(() => {
     if (
@@ -1183,12 +1203,12 @@ export function ReviewShell(props: ReviewShellProps) {
   }, [effectiveWorkspaceMode, searchFocusRequest, toolsSurfaceOpen]);
 
   useEffect(() => {
-    if (props.selectionUpdate.kind !== 'reliable') setConsumedSelectionGeneration(undefined);
-  }, [props.selectionUpdate.kind, props.selectionUpdate.generation]);
+    if (props.selection.selectionUpdate.kind !== 'reliable') setConsumedSelectionGeneration(undefined);
+  }, [props.selection.selectionUpdate.kind, props.selection.selectionUpdate.generation]);
 
   const dismissPageNoteAuthority = () => {
-    if (props.keyboardPageNoteActive) props.onCancelKeyboardPageNote?.();
-    if (props.pageMenu) props.onPageMenuDismiss?.(props.pageMenu.invocationId);
+    if (props.authoring.keyboardPageNoteActive) props.authoring.onCancelKeyboardPageNote?.();
+    if (props.authoring.pageMenu) props.authoring.onPageMenuDismiss?.(props.authoring.pageMenu.invocationId);
   };
   const clearPeekTimer = () => {
     if (peekTimerRef.current !== undefined) clearTimeout(peekTimerRef.current);
@@ -1250,7 +1270,7 @@ export function ReviewShell(props: ReviewShellProps) {
     dispatchSurface({ type: 'open-workspace', mode: 'annotations' });
     dispatchReferenceLayout({ type: 'show-right-workspace' });
     dispatchReferenceLayout({ type: 'focus-surface', surface: 'right' });
-    props.onWorkspaceModeChange?.('annotations');
+    props.workspace.onWorkspaceModeChange?.('annotations');
     if (readerRecord !== null && knownOverflow === true) {
       openOwnedAnnotationReader(readerRecord, null, 'list');
     }
@@ -1275,7 +1295,7 @@ export function ReviewShell(props: ReviewShellProps) {
       type: 'focus-surface',
       surface: mode === 'references' ? 'references' : 'right',
     });
-    props.onWorkspaceModeChange?.(mode);
+    props.workspace.onWorkspaceModeChange?.(mode);
   };
   const focusAnnotationsFallback = () => {
     requestAnimationFrame(() => {
@@ -1331,7 +1351,7 @@ export function ReviewShell(props: ReviewShellProps) {
         return acknowledgedRef.current;
       }
       const command = build(acknowledgedRef.current);
-      const result = await props.onCommand(command, options?.authority);
+      const result = await props.authoring.onCommand(command, options?.authority);
       if (
         options?.authority !== undefined
         && !authoringAuthorityMatches(options.authority, currentAuthoringAuthorityRef.current)
@@ -1352,7 +1372,7 @@ export function ReviewShell(props: ReviewShellProps) {
   };
   const consumeSelectionActions = (generation: number) => {
     setConsumedSelectionGeneration(generation);
-    props.onSelectionConsumed?.(generation);
+    props.selection.onSelectionConsumed?.(generation);
   };
 
   const snapshotAuthoringWorkspace = () => ({
@@ -1381,7 +1401,7 @@ export function ReviewShell(props: ReviewShellProps) {
       workspace: snapshotAuthoringWorkspace(),
     });
     authoringSessionRef.current = session;
-    props.onAuthoringActiveChange?.(true);
+    props.authoring.onAuthoringActiveChange?.(true);
     setAuthoringSession(session);
     dispatchSurface({ type: 'open-nested' });
     if (props.state.workflow.mode === 'generated-output') {
@@ -1395,8 +1415,8 @@ export function ReviewShell(props: ReviewShellProps) {
       inputControllerRef.current?.clearDraft();
       return;
     }
-    const selectionGeneration = props.selectionUpdate.kind === 'reliable'
-      ? props.selectionUpdate.generation
+    const selectionGeneration = props.selection.selectionUpdate.kind === 'reliable'
+      ? props.selection.selectionUpdate.generation
       : undefined;
     if (intent.kind === 'delete') {
       void submit(
@@ -1448,12 +1468,12 @@ export function ReviewShell(props: ReviewShellProps) {
       ? annotationReaderSession
       : null;
     authoringSessionRef.current = null;
-    props.onAuthoringActiveChange?.(false);
-    props.onAuthoringPreviewChange?.(null);
+    props.authoring.onAuthoringActiveChange?.(false);
+    props.authoring.onAuthoringPreviewChange?.(null);
     setAuthoringSession(null);
     inputController.clearDraft();
     dispatchSurface({ type: 'close-nested' });
-    if (current.source.kind === 'pageNote') props.onPageNoteComposerComplete?.();
+    if (current.source.kind === 'pageNote') props.authoring.onPageNoteComposerComplete?.();
     if (reason === 'source-replaced') {
       if (readerOrigin !== null) {
         if (!authoringAuthorityMatches(readerOrigin.authority, currentAuthoringAuthorityRef.current)) {
@@ -1524,9 +1544,9 @@ export function ReviewShell(props: ReviewShellProps) {
   };
   const dismissAuthoring = async (session: AuthoringSession) => {
     if (
-      props.authoringAnchorNavigation?.token === session.token
-      && props.authoringAnchorNavigation.pending
-    ) await props.authoringAnchorNavigation.onCancelReturn?.();
+      props.authoring.authoringAnchorNavigation?.token === session.token
+      && props.authoring.authoringAnchorNavigation.pending
+    ) await props.authoring.authoringAnchorNavigation.onCancelReturn?.();
     if (props.state.workflow.mode === 'generated-output') {
       await discardProtectedAuthoringDraft(session);
     }
@@ -1544,9 +1564,9 @@ export function ReviewShell(props: ReviewShellProps) {
       || authoringSessionIsCurrent(current, currentAuthoringAuthority)
     ) return;
     if (
-      props.authoringAnchorNavigation?.token === current.token
-      && props.authoringAnchorNavigation.pending
-    ) props.authoringAnchorNavigation.onCancelReturn?.();
+      props.authoring.authoringAnchorNavigation?.token === current.token
+      && props.authoring.authoringAnchorNavigation.pending
+    ) props.authoring.authoringAnchorNavigation.onCancelReturn?.();
     setAnnouncement('This draft belonged to the previous document and was not applied.');
     closeAuthoringSession(current.token, 'source-replaced');
   }, [currentAuthoringAuthority.documentGeneration, currentAuthoringAuthority.sourceIdentity]);
@@ -1561,7 +1581,7 @@ export function ReviewShell(props: ReviewShellProps) {
   }, [props.state.items]);
 
   useEffect(() => {
-    const resolution = props.authoringSessionResolution;
+    const resolution = props.authoring.authoringSessionResolution;
     const current = authoringSessionRef.current;
     if (resolution === undefined || current === null) return;
     if (resolution.outcome === 'accepted') {
@@ -1573,14 +1593,14 @@ export function ReviewShell(props: ReviewShellProps) {
     }
     setAnnouncement('This draft belonged to the previous document and was not applied.');
     closeAuthoringSession(current.token, 'source-replaced');
-  }, [props.authoringSessionResolution?.token]);
+  }, [props.authoring.authoringSessionResolution?.token]);
   useLayoutEffect(() => {
     inputController.focusChanged(isEditableTarget(document.activeElement));
     inputController.setContext({
-      caret: props.caretAnchor ?? null,
-      selectionUpdate: props.selectionUpdate,
+      caret: props.selection.caretAnchor ?? null,
+      selectionUpdate: props.selection.selectionUpdate,
     });
-  }, [inputController, props.caretAnchor, props.selectionUpdate]);
+  }, [inputController, props.selection.caretAnchor, props.selection.selectionUpdate]);
 
   const beforeInput = (event: FormEvent<HTMLDivElement>) => {
     if (
@@ -1605,7 +1625,7 @@ export function ReviewShell(props: ReviewShellProps) {
     if (
       event.target instanceof Element
       && (
-        (props.linkActionRequest && event.target.closest('[data-link-action-popover]') !== null)
+        (props.workspace.linkActionRequest && event.target.closest('[data-link-action-popover]') !== null)
         || event.target.closest('[data-row-actions-open="true"]') !== null
         || event.target.closest('[data-top-bar-menu], [data-document-actions-open="true"]') !== null
       )
@@ -1653,15 +1673,15 @@ export function ReviewShell(props: ReviewShellProps) {
         void closeNested();
         return;
       }
-      if (props.keyboardPageNoteActive) {
+      if (props.authoring.keyboardPageNoteActive) {
         event.preventDefault();
-        props.onCancelKeyboardPageNote?.();
+        props.authoring.onCancelKeyboardPageNote?.();
         dispatchSurface({ type: 'close-transient' });
         return;
       }
-      if (props.pageMenu) {
+      if (props.authoring.pageMenu) {
         event.preventDefault();
-        props.onPageMenuDismiss?.(props.pageMenu.invocationId);
+        props.authoring.onPageMenuDismiss?.(props.authoring.pageMenu.invocationId);
         dispatchSurface({ type: 'close-transient' });
         return;
       }
@@ -1691,7 +1711,7 @@ export function ReviewShell(props: ReviewShellProps) {
         if (tool === 'delete') deleteSelection();
         if (tool === 'highlight') startHighlight();
         if (tool === 'pageNote') {
-          props.onRequestKeyboardPageNote?.();
+          props.authoring.onRequestKeyboardPageNote?.();
           dispatchSurface({ type: 'open-transient', surface: 'page-note-cursor' });
         }
         return;
@@ -1723,13 +1743,13 @@ export function ReviewShell(props: ReviewShellProps) {
 
   const startHighlight = () => {
     if (authoringSessionRef.current !== null) return;
-    if (props.selectionUpdate.kind === 'over-limit') {
-      props.onSelectionPageLimitExceeded?.();
+    if (props.selection.selectionUpdate.kind === 'over-limit') {
+      props.selection.onSelectionPageLimitExceeded?.();
       return;
     }
     const anchor = selectionAnchor;
-    const selectionGeneration = props.selectionUpdate.kind === 'reliable'
-      ? props.selectionUpdate.generation
+    const selectionGeneration = props.selection.selectionUpdate.kind === 'reliable'
+      ? props.selection.selectionUpdate.generation
       : undefined;
     if (!anchor || selectionGeneration === undefined) {
       setAnnouncement('Select reliable text to add a highlight.');
@@ -1741,12 +1761,12 @@ export function ReviewShell(props: ReviewShellProps) {
 
   const startReplacement = () => {
     if (authoringSessionRef.current !== null) return;
-    if (props.selectionUpdate.kind === 'over-limit') {
-      props.onSelectionPageLimitExceeded?.();
+    if (props.selection.selectionUpdate.kind === 'over-limit') {
+      props.selection.onSelectionPageLimitExceeded?.();
       return;
     }
     const trigger = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    if (!selectionAnchor || props.selectionUpdate.kind !== 'reliable') {
+    if (!selectionAnchor || props.selection.selectionUpdate.kind !== 'reliable') {
       setAnnouncement('Select reliable text to suggest a replacement.');
       return;
     }
@@ -1754,17 +1774,17 @@ export function ReviewShell(props: ReviewShellProps) {
       kind: 'replace',
       anchor: selectionAnchor,
       initialValue: '',
-      selectionGeneration: props.selectionUpdate.generation,
+      selectionGeneration: props.selection.selectionUpdate.generation,
     }, 'selection', trigger);
   };
 
   const deleteSelection = () => {
-    if (props.selectionUpdate.kind === 'over-limit') {
-      props.onSelectionPageLimitExceeded?.();
+    if (props.selection.selectionUpdate.kind === 'over-limit') {
+      props.selection.onSelectionPageLimitExceeded?.();
       return;
     }
-    const selectionGeneration = props.selectionUpdate.kind === 'reliable'
-      ? props.selectionUpdate.generation
+    const selectionGeneration = props.selection.selectionUpdate.kind === 'reliable'
+      ? props.selection.selectionUpdate.generation
       : undefined;
     if (!selectionAnchor || selectionGeneration === undefined) {
       setAnnouncement('Select reliable text to suggest deletion.');
@@ -1788,12 +1808,12 @@ export function ReviewShell(props: ReviewShellProps) {
   };
 
   useEffect(() => {
-    const placed = props.placedPageNote;
+    const placed = props.authoring.placedPageNote;
     if (!placed || placed.token === lastPlacedPageNoteToken.current) return;
     lastPlacedPageNoteToken.current = placed.token;
     startPageNote(placed);
-    props.onPlacedPageNoteConsumed?.(placed.token);
-  }, [props.placedPageNote]);
+    props.authoring.onPlacedPageNoteConsumed?.(placed.token);
+  }, [props.authoring.placedPageNote]);
 
   const submitAuthoring = async (
     session: AuthoringSession,
@@ -1937,7 +1957,7 @@ export function ReviewShell(props: ReviewShellProps) {
   const canRedo = props.state.historyCursor < props.state.history.length;
   const fitWidthCommand = () => {
     workspaceFraming.markUserIntent(undefined, { captureSettledPosition: false });
-    return props.viewerNavigation
+    return props.viewer.viewerNavigation
       ?.fitToWidth(workspaceFraming.waitForSettledGeometry)
       .then(() => undefined) ?? Promise.resolve();
   };
@@ -1945,26 +1965,26 @@ export function ReviewShell(props: ReviewShellProps) {
     focusContext: commandFocusContext,
     canUndo: authoringSession === null && canUndo,
     canRedo: authoringSession === null && canRedo,
-    canNavigateBack: !props.documentNavigationPending && (props.canNavigateBack ?? false),
-    canNavigateForward: !props.documentNavigationPending && (props.canNavigateForward ?? false),
+    canNavigateBack: !props.workspace.documentNavigationPending && (props.workspace.canNavigateBack ?? false),
+    canNavigateForward: !props.workspace.documentNavigationPending && (props.workspace.canNavigateForward ?? false),
     canFind: surface.nestedLayer === 'none' && authoringSession === null,
     canOpenAnnotations: authoringSession === null,
-    canOpenSaveOptions: props.onSaveOptions !== undefined,
-    canFitWidth: props.viewerNavigation?.fitToWidthReady() ?? false,
+    canOpenSaveOptions: props.save.onSaveOptions !== undefined,
+    canFitWidth: props.viewer.viewerNavigation?.fitToWidthReady() ?? false,
     handlers: {
       undo: () => { void submit(undoReview); },
       redo: () => { void submit(redoReview); },
       'navigate-back': () => {
         workspaceFraming.markUserIntent(undefined, { captureSettledPosition: false });
-        props.onNavigateBack?.();
+        props.workspace.onNavigateBack?.();
       },
       'navigate-forward': () => {
         workspaceFraming.markUserIntent(undefined, { captureSettledPosition: false });
-        props.onNavigateForward?.();
+        props.workspace.onNavigateForward?.();
       },
       find: openFindCommand,
       'open-annotations': openAnnotationsFromDocumentActions,
-      'save-options': () => props.onSaveOptions?.(),
+      'save-options': () => props.save.onSaveOptions?.(),
       'fit-width': () => { void fitWidthCommand(); },
     },
   });
@@ -2019,7 +2039,7 @@ export function ReviewShell(props: ReviewShellProps) {
       : closingReferences
         ? { type: 'hide-references' }
         : { type: 'hide-right-workspace' });
-    if (closingReferences) props.onWorkspaceDismiss?.();
+    if (closingReferences) props.workspace.onWorkspaceDismiss?.();
     requestAnimationFrame(() => (bottomRail ? bottomWorkspaceRailRef : rightWorkspaceRailRef)
       .current?.focus({ preventScroll: true }));
   };
@@ -2038,7 +2058,7 @@ export function ReviewShell(props: ReviewShellProps) {
     }));
   };
   const rememberWorkspaceModeFocus = (mode: WorkspaceMode, token: string) => {
-    if (props.navigationState === undefined) {
+    if (props.workspace.navigationState === undefined) {
       dispatchSurface({
         type: 'reference-navigation',
         action: {
@@ -2049,21 +2069,21 @@ export function ReviewShell(props: ReviewShellProps) {
         },
       });
     }
-    props.onWorkspaceModeFocusTokenChange?.(mode, token);
+    props.workspace.onWorkspaceModeFocusTokenChange?.(mode, token);
   };
   const markFramingUserIntent = workspaceFraming.markUserIntent;
   const commitMainFramingPosition = useCallback(() => {
     markFramingUserIntent(undefined, { captureSettledPosition: false });
   }, [markFramingUserIntent]);
   useLayoutEffect(() => {
-    props.onCommitMainFramingPositionChange?.(commitMainFramingPosition);
-    return () => props.onCommitMainFramingPositionChange?.(null);
-  }, [commitMainFramingPosition, props.onCommitMainFramingPositionChange]);
+    props.viewer.onCommitMainFramingPositionChange?.(commitMainFramingPosition);
+    return () => props.viewer.onCommitMainFramingPositionChange?.(null);
+  }, [commitMainFramingPosition, props.viewer.onCommitMainFramingPositionChange]);
   useLayoutEffect(() => {
-    if ((props.viewerNavigationIntentToken ?? 0) > 0) {
+    if ((props.viewer.viewerNavigationIntentToken ?? 0) > 0) {
       commitMainFramingPosition();
     }
-  }, [commitMainFramingPosition, props.viewerNavigationIntentToken]);
+  }, [commitMainFramingPosition, props.viewer.viewerNavigationIntentToken]);
   const isWorkspaceOrChrome = (target: EventTarget | null) => (
     (target instanceof Node && (
       workspaceFraming.referenceSurfaceRef.current?.contains(target) === true
@@ -2082,11 +2102,11 @@ export function ReviewShell(props: ReviewShellProps) {
       disabled: props.copyItemLink.disabled?.(item) ?? false,
     };
   };
-  const activePdfLinkCopy = props.linkActionRequest === null
-    || props.linkActionRequest === undefined
-    || props.copyLinkForLinkAction === undefined
+  const activePdfLinkCopy = props.workspace.linkActionRequest === null
+    || props.workspace.linkActionRequest === undefined
+    || props.workspace.copyLinkForLinkAction === undefined
     ? undefined
-    : props.copyLinkForLinkAction(props.linkActionRequest);
+    : props.workspace.copyLinkForLinkAction(props.workspace.linkActionRequest);
   const authoringComposer = authoringSession === null ? null : (() => {
     const source = authoringSession.source;
     const editField = source.kind === 'edit' ? mutableField(source.item) : undefined;
@@ -2106,11 +2126,11 @@ export function ReviewShell(props: ReviewShellProps) {
       : source.kind === 'pageNote'
         ? source.pageIndex
         : source.anchor.pageIndex;
-    const anchorNavigation = props.authoringAnchorNavigation?.token === authoringSession.token
+    const anchorNavigation = props.authoring.authoringAnchorNavigation?.token === authoringSession.token
       ? {
-        ...props.authoringAnchorNavigation,
+        ...props.authoring.authoringAnchorNavigation,
         pageNumber: authoringPageIndex + 1,
-        visibility: authoringPlacement?.targetVisibility ?? props.authoringAnchorNavigation.visibility,
+        visibility: authoringPlacement?.targetVisibility ?? props.authoring.authoringAnchorNavigation.visibility,
       }
       : undefined;
     return <CommentComposer
@@ -2198,7 +2218,7 @@ export function ReviewShell(props: ReviewShellProps) {
           setActiveItem(undefined);
           setActiveExistingAnnotationKey(undefined);
         }
-        if (props.linkActionRequest) return;
+        if (props.workspace.linkActionRequest) return;
         if (event.target instanceof Element) {
           const markTrigger = event.target.closest<HTMLElement>('[data-owned-focus-id]');
           if (markTrigger) surfaceTriggersRef.current.set('workspace', markTrigger);
@@ -2216,14 +2236,14 @@ export function ReviewShell(props: ReviewShellProps) {
         {transitionAnnouncement}
       </p>
       <ReviewChrome
-        showSaveStatusDot={!props.exportOnly}
+        showSaveStatusDot={!props.save.exportOnly}
         documentTitle={props.documentTitle ?? 'Local PDF'}
-        {...(props.savedLabel === undefined ? {} : { savedLabel: props.savedLabel })}
-        {...(props.savePhase === undefined ? {} : { savePhase: props.savePhase })}
-        savePendingDestination={props.savePendingDestination ?? false}
-        saveOptionsOpen={props.saveOptionsOpen ?? false}
+        {...(props.save.savedLabel === undefined ? {} : { savedLabel: props.save.savedLabel })}
+        {...(props.save.savePhase === undefined ? {} : { savePhase: props.save.savePhase })}
+        savePendingDestination={props.save.savePendingDestination ?? false}
+        saveOptionsOpen={props.save.saveOptionsOpen ?? false}
         onSaveOptions={() => commandSurface.invoke('save-options')}
-        saveOptionsAvailable={props.onSaveOptions !== undefined}
+        saveOptionsAvailable={props.save.onSaveOptions !== undefined}
         {...(documentActionsPresentation === undefined ? {} : {
           documentActions: {
             presentation: documentActionsPresentation,
@@ -2233,30 +2253,30 @@ export function ReviewShell(props: ReviewShellProps) {
             ...(props.onDocumentActionsRequestHandled === undefined ? {} : {
               onRequestHandled: props.onDocumentActionsRequestHandled,
             }),
-            onExport: props.onExportReviewedCopy
+            onExport: props.save.onExportReviewedCopy
               ?? (() => Promise.reject(new Error('Reviewed export is unavailable.'))),
             onOpenAnnotations: openAnnotationsFromDocumentActions,
           },
         })}
-        {...(props.viewerControls === undefined ? {} : { controls: props.viewerControls })}
-        viewerState={props.viewerState ?? unavailableViewerControls()}
-        fitWidthReady={props.viewerNavigation?.fitToWidthReady() ?? false}
+        {...(props.viewer.viewerControls === undefined ? {} : { controls: props.viewer.viewerControls })}
+        viewerState={props.viewer.viewerState ?? unavailableViewerControls()}
+        fitWidthReady={props.viewer.viewerNavigation?.fitToWidthReady() ?? false}
         fitWidthCurrent={overlayFrame.fitWidthCurrent}
         horizontalScrollAvailable={overlayFrame.horizontalScrollAvailable}
         horizontalScrollLocked={horizontalScrollLocked}
         onToggleHorizontalScrollLock={() => setHorizontalScrollLocked((locked) => !locked)}
-        {...(props.viewerNavigation === undefined ? {} : {
+        {...(props.viewer.viewerNavigation === undefined ? {} : {
           beforeViewerAction: async () => {
-            await props.viewerNavigation?.cancelPendingNavigation();
+            await props.viewer.viewerNavigation?.cancelPendingNavigation();
             commitMainFramingPosition();
           },
         })}
         onFitWidth={fitWidthCommand}
         canUndo={authoringSession === null && canUndo}
         canRedo={authoringSession === null && canRedo}
-        canNavigateBack={props.canNavigateBack ?? false}
-        canNavigateForward={props.canNavigateForward ?? false}
-        documentNavigationPending={props.documentNavigationPending ?? false}
+        canNavigateBack={props.workspace.canNavigateBack ?? false}
+        canNavigateForward={props.workspace.canNavigateForward ?? false}
+        documentNavigationPending={props.workspace.documentNavigationPending ?? false}
         {...(props.codexContext === undefined ? {} : { codexContext: props.codexContext })}
         {...(props.copyLink === undefined ? {} : { copyLink: props.copyLink })}
         onUndo={() => { commandSurface.invoke('undo'); }}
@@ -2299,18 +2319,18 @@ export function ReviewShell(props: ReviewShellProps) {
             ? effectiveReferenceLayout.bottomHeight : referenceLayout.bottomReferenceHeight}px`,
         } as CSSProperties}
       >
-        {props.saveRecovery || props.toolError || props.commandNotice || generatedStatusMessages.length > 0 ? <div
+        {props.save.saveRecovery || props.toolError || props.commandNotice || generatedStatusMessages.length > 0 ? <div
           className="review-toast-stack"
           data-review-toast-stack
         >
-          {props.saveRecovery ? <aside className="review-toast review-toast--error review-save-notice" role="alert">
+          {props.save.saveRecovery ? <aside className="review-toast review-toast--error review-save-notice" role="alert">
             <ReviewIcon name="alert" />
-            <span>{props.saveRecovery.error ?? 'Couldn’t save your latest annotations.'}</span>
+            <span>{props.save.saveRecovery.error ?? 'Couldn’t save your latest annotations.'}</span>
             <div className="review-save-notice__actions">
-              <button type="button" title="Retry saving" disabled={props.saveRecovery.pending}
-                onClick={() => void props.saveRecovery?.onRetry()}>Retry</button>
-              <button type="button" title="Save a copy" disabled={props.saveRecovery.pending}
-                onClick={props.saveRecovery.onSaveCopy}>Save a copy…</button>
+              <button type="button" title="Retry saving" disabled={props.save.saveRecovery.pending}
+                onClick={() => void props.save.saveRecovery?.onRetry()}>Retry</button>
+              <button type="button" title="Save a copy" disabled={props.save.saveRecovery.pending}
+                onClick={props.save.saveRecovery.onSaveCopy}>Save a copy…</button>
             </div>
           </aside> : null}
           {props.toolError ? <p
@@ -2329,11 +2349,11 @@ export function ReviewShell(props: ReviewShellProps) {
             generatedStatusMessages.join(' ')
           }</p> : null}
         </div> : null}
-        {competingPdfSelections || props.pdfCopyOwnerIndicatorVisible ? <p
+        {competingPdfSelections || props.selection.pdfCopyOwnerIndicatorVisible ? <p
           className="pdf-copy-owner"
           role="status"
           aria-live="polite"
-          data-pdf-copy-owner={props.pdfCopyOwner ?? 'none'}
+          data-pdf-copy-owner={props.selection.pdfCopyOwner ?? 'none'}
         >Copy source: {pdfCopyOwnerLabel}</p> : null}
         <div className="review-document">{props.children}</div>
         <div className="review-overlay-frame" aria-hidden="true">
@@ -2348,48 +2368,48 @@ export function ReviewShell(props: ReviewShellProps) {
         <div
           className="review-contextual-host"
           data-review-contextual-host
-          data-selection-status={props.selectionUpdate.kind}
+          data-selection-status={props.selection.selectionUpdate.kind}
         >
-          {selectionActionsAvailable && props.selectionPlacement ? (
+          {selectionActionsAvailable && props.selection.selectionPlacement ? (
             <ContextActionPalette
-              placement={props.selectionPlacement}
+              placement={props.selection.selectionPlacement}
               hidden={surface.nestedLayer !== 'none'}
-              {...(props.onCopySelection === undefined ? {} : { onCopy: props.onCopySelection })}
+              {...(props.selection.onCopySelection === undefined ? {} : { onCopy: props.selection.onCopySelection })}
               onReplace={startReplacement}
               onDelete={deleteSelection}
               onHighlight={startHighlight}
             />
           ) : null}
-          {!selectionAnchor && props.caretAnchor && props.caretPlacement ? (
+          {!selectionAnchor && props.selection.caretAnchor && props.selection.caretPlacement ? (
             <InsertionCaret
-              key={`${props.caretAnchor.pageIndex}:${props.caretAnchor.position.x}:${props.caretAnchor.position.y}`}
-              placement={props.caretPlacement}
+              key={`${props.selection.caretAnchor.pageIndex}:${props.selection.caretAnchor.position.x}:${props.selection.caretAnchor.position.y}`}
+              placement={props.selection.caretPlacement}
               hidden={surface.nestedLayer !== 'none'}
             />
           ) : null}
-          {surface.baseSurface === 'reading' && surface.nestedLayer === 'none' && props.pageMenu ? (
+          {surface.baseSurface === 'reading' && surface.nestedLayer === 'none' && props.authoring.pageMenu ? (
             <PageActionMenu
-              placement={props.pageMenu.placement}
+              placement={props.authoring.pageMenu.placement}
               triggerRef={pageNoteTriggerRef}
-              {...(props.onGoToSource === undefined ? {} : {
+              {...(props.authoring.onGoToSource === undefined ? {} : {
                 onGoToSource: () => {
-                  const menu = props.pageMenu;
+                  const menu = props.authoring.pageMenu;
                   if (!menu) return;
-                  props.onPageMenuConsumed?.(menu.invocationId);
-                  props.onGoToSource?.(menu);
+                  props.authoring.onPageMenuConsumed?.(menu.invocationId);
+                  props.authoring.onGoToSource?.(menu);
                   dispatchSurface({ type: 'close-transient' });
                 },
               })}
               onAddPageNote={() => {
-                const menu = props.pageMenu;
+                const menu = props.authoring.pageMenu;
                 if (!menu) return;
-                props.onPageMenuConsumed?.(menu.invocationId);
+                props.authoring.onPageMenuConsumed?.(menu.invocationId);
                 startPageNote(menu);
               }}
               onDismiss={() => {
-                const menu = props.pageMenu;
+                const menu = props.authoring.pageMenu;
                 if (!menu) return;
-                props.onPageMenuDismiss?.(menu.invocationId);
+                props.authoring.onPageMenuDismiss?.(menu.invocationId);
                 dispatchSurface({ type: 'close-transient' });
               }}
             />
@@ -2456,8 +2476,8 @@ export function ReviewShell(props: ReviewShellProps) {
         <div
           className="review-drawer-host"
           data-review-drawer-host
-          inert={props.saveOptionsOpen ?? false}
-          aria-hidden={props.saveOptionsOpen === true ? 'true' : undefined}
+          inert={props.save.saveOptionsOpen ?? false}
+          aria-hidden={props.save.saveOptionsOpen === true ? 'true' : undefined}
         >
           {authoringComposer}
           {authoringSession === null ? (effectiveReferenceLayout.kind === 'narrow-unified' ? (
@@ -2542,9 +2562,9 @@ export function ReviewShell(props: ReviewShellProps) {
             }}
             tabs={referenceTabs}
             activeTabIdentity={navigation.activeTabIdentity}
-            {...(props.pendingReference === undefined ? {} : { pendingReference: props.pendingReference })}
-            {...(props.referenceReturn === undefined ? {} : { referenceReturn: props.referenceReturn })}
-            announcement={props.navigationAnnouncement ?? announcement}
+            {...(props.workspace.pendingReference === undefined ? {} : { pendingReference: props.workspace.pendingReference })}
+            {...(props.workspace.referenceReturn === undefined ? {} : { referenceReturn: props.workspace.referenceReturn })}
+            announcement={props.workspace.navigationAnnouncement ?? announcement}
             onModeChange={selectWorkspaceMode}
             onHide={() => {
               workspaceFraming.commitUserPosition();
@@ -2563,12 +2583,12 @@ export function ReviewShell(props: ReviewShellProps) {
               ? 'Hide workspace'
               : 'Hide References'}
             onReferenceTabActivate={(identity) => {
-              if (authoringSessionRef.current === null) props.onReferenceTabActivate?.(identity);
+              if (authoringSessionRef.current === null) props.workspace.onReferenceTabActivate?.(identity);
             }}
             onReferenceTabClose={(identity) => {
               if (authoringSessionRef.current !== null) return;
-              props.onReferenceTabClose?.(identity);
-              if (props.navigationState === undefined) {
+              props.workspace.onReferenceTabClose?.(identity);
+              if (props.workspace.navigationState === undefined) {
                 dispatchSurface({
                   type: 'reference-navigation',
                   action: {
@@ -2583,17 +2603,17 @@ export function ReviewShell(props: ReviewShellProps) {
               }
             }}
             onSendToMain={(identity) => {
-              if (authoringSessionRef.current === null) props.onReferenceSendToMain?.(identity);
+              if (authoringSessionRef.current === null) props.workspace.onReferenceSendToMain?.(identity);
             }}
             onRetryReference={() => {
-              if (authoringSessionRef.current === null) props.onReferenceRetry?.();
+              if (authoringSessionRef.current === null) props.workspace.onReferenceRetry?.();
             }}
-            {...(props.onReferenceReturn === undefined
+            {...(props.workspace.onReferenceReturn === undefined
               ? {}
               : { onReferenceReturn: (identity: string) => {
-                  if (authoringSessionRef.current === null) props.onReferenceReturn?.(identity);
+                  if (authoringSessionRef.current === null) props.workspace.onReferenceReturn?.(identity);
                 } })}
-            onReferenceViewportHost={props.onReferenceViewportHost ?? ignoreReferenceViewportHost}
+            onReferenceViewportHost={props.workspace.onReferenceViewportHost ?? ignoreReferenceViewportHost}
             onModeFocusTokenChange={rememberWorkspaceModeFocus}
             headerAction={sharedWorkspace ? (
               <OutlineExpansionToggleSlot visible={outlineExpansionToggleVisible} />
@@ -2608,7 +2628,7 @@ export function ReviewShell(props: ReviewShellProps) {
             presentation={effectiveReferenceLayout.kind === 'narrow-unified' ? 'bottom' : 'right'}
             headerVariant={sharedWorkspace ? 'shared' : 'tools'}
             outline={visibleOutlineDiscovery}
-            currentOutlineItemId={props.currentOutlineItemId ?? null}
+            currentOutlineItemId={props.workspace.currentOutlineItemId ?? null}
             headerAction={(
               <OutlineExpansionToggleSlot visible={outlineExpansionToggleVisible} />
             )}
@@ -2620,14 +2640,14 @@ export function ReviewShell(props: ReviewShellProps) {
             }}
             hideLabel="Hide workspace"
             onOutlineActivate={(item) => {
-              if (authoringSessionRef.current === null) props.onOutlineActivate?.(item);
+              if (authoringSessionRef.current === null) props.workspace.onOutlineActivate?.(item);
             }}
             onOutlineReference={(item) => {
-              if (authoringSessionRef.current === null) props.onOutlineReference?.(item);
+              if (authoringSessionRef.current === null) props.workspace.onOutlineReference?.(item);
             }}
-            {...(props.copyLinkForOutlineItem === undefined
+            {...(props.workspace.copyLinkForOutlineItem === undefined
               ? {}
-              : { copyLinkForOutlineItem: props.copyLinkForOutlineItem })}
+              : { copyLinkForOutlineItem: props.workspace.copyLinkForOutlineItem })}
             onModeFocusTokenChange={rememberWorkspaceModeFocus}
             annotations={annotationReaderSession !== null && annotationReaderRecord !== null ? (
               <FullAnnotationReader
@@ -2655,10 +2675,10 @@ export function ReviewShell(props: ReviewShellProps) {
             ) : <div id="review-annotation-list" aria-label="All annotations">
             {props.state.workflow.mode === 'generated-output' ? <ReconciliationWorkspace
               state={props.state}
-              selectionUpdate={props.selectionUpdate}
-              {...(props.caretAnchor === undefined ? {} : { caretAnchor: props.caretAnchor })}
+              selectionUpdate={props.selection.selectionUpdate}
+              {...(props.selection.caretAnchor === undefined ? {} : { caretAnchor: props.selection.caretAnchor })}
               refreshStatus={props.generationRefreshStatus ?? 'idle'}
-              onCommand={(command) => props.onCommand(command)}
+              onCommand={(command) => props.authoring.onCommand(command)}
               onDetailOpenChange={setReconciliationDetailOpen}
               focusRequestToken={reconciliationFocusRequest}
               onFocusFallback={focusAnnotationsFallback}
@@ -2715,7 +2735,7 @@ export function ReviewShell(props: ReviewShellProps) {
             />
             </>}
             </div>}
-            search={props.search ?? (
+            search={props.workspace.search ?? (
               <div className="workspace-state" data-workspace-focus-token="search:unavailable" tabIndex={-1}>
                 Search becomes available after the PDF loads.
               </div>
@@ -2749,20 +2769,20 @@ export function ReviewShell(props: ReviewShellProps) {
         </div>
       </div>
       <p className="sr-only" role="status" aria-live="polite" aria-atomic="true">
-        {props.pdfCopyAnnouncement ?? ''}
+        {props.selection.pdfCopyAnnouncement ?? ''}
       </p>
       <div
         className="review-nested-host"
         data-review-nested-host
-        hidden={props.saveOptionsOpen ?? false}
-        inert={props.saveOptionsOpen ?? false}
+        hidden={props.save.saveOptionsOpen ?? false}
+        inert={props.save.saveOptionsOpen ?? false}
       />
       <LinkActionPopover
-        request={props.linkActionRequest ?? null}
+        request={props.workspace.linkActionRequest ?? null}
         openInReferencesDisabled={authoringSession !== null}
         {...(activePdfLinkCopy === undefined ? {} : { copyLink: activePdfLinkCopy })}
-        onChoose={(choice, request) => props.onLinkActionChoose?.(choice, request)}
-        onDismiss={(request, reason) => props.onLinkActionDismiss?.(request, reason)}
+        onChoose={(choice, request) => props.workspace.onLinkActionChoose?.(choice, request)}
+        onDismiss={(request, reason) => props.workspace.onLinkActionDismiss?.(request, reason)}
         sourceFocusFallback={(source) => {
           const shell = shellRef.current;
           if (!shell) return null;
@@ -2776,7 +2796,7 @@ export function ReviewShell(props: ReviewShellProps) {
               ?? shell.querySelector<HTMLElement>('[data-reference-pdf-viewport] [data-page-index]');
           }
           return shell.querySelector<HTMLElement>(
-            `.pdf-workspace:not(.pdf-workspace--reference) [data-page-index="${props.linkActionRequest?.sourcePageIndex ?? 0}"]`,
+            `.pdf-workspace:not(.pdf-workspace--reference) [data-page-index="${props.workspace.linkActionRequest?.sourcePageIndex ?? 0}"]`,
           ) ?? shell.querySelector<HTMLElement>('.pdf-workspace:not(.pdf-workspace--reference) [data-page-index]');
         }}
       />
