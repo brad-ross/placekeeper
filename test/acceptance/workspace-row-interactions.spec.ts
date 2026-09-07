@@ -225,19 +225,29 @@ test('bottom resize handle sits inside the tray and follows its upper corners', 
   await expect.poll(async () => (await tray.boundingBox())!.height).toBeGreaterThan(trayBox.height + 30);
 });
 
-test('short reference tabs fit their titles and right resizing matches bottom styling', async ({ page }) => {
+test('vertical reference tabs fill their rail and horizontal tabs fit their titles', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 });
   await page.goto('/test/acceptance/review-harness/index.html?visual=reference-layout');
   await page.getByRole('button', { name: 'Show References', exact: true }).click();
   const tab = page.locator('.reference-tab-segment:visible').first();
   await expect(tab).toBeVisible();
   const title = tab.locator('.reference-tab-segment__selector span').first();
+  const verticalTabs = page.locator('.reference-tabs[data-reference-tabs-orientation="vertical"]:visible');
+  await expect(verticalTabs).toBeVisible();
+  await title.evaluate((element) => { element.textContent = 'A long reference title that should reach the maximum tab width'; });
+  expect((await tab.boundingBox())!.width).toBeCloseTo((await verticalTabs.boundingBox())!.width, 0);
+  await title.evaluate((element) => { element.textContent = 'Note'; });
+  expect((await tab.boundingBox())!.width).toBeCloseTo((await verticalTabs.boundingBox())!.width, 0);
+  const dockRight = page.getByRole('button', { name: 'Move References to right', exact: true });
+  await dockRight.focus();
+  await dockRight.press('Enter');
+  const horizontalTabs = page.locator('.reference-tabs[data-reference-tabs-orientation="horizontal"]:visible');
+  await expect(horizontalTabs).toBeVisible();
   await title.evaluate((element) => { element.textContent = 'A long reference title that should reach the maximum tab width'; });
   const longWidth = (await tab.boundingBox())!.width;
   await title.evaluate((element) => { element.textContent = 'Note'; });
   expect((await tab.boundingBox())!.width).toBeLessThan(longWidth);
   expect((await tab.boundingBox())!.width).toBeGreaterThanOrEqual(112);
-  await page.getByRole('button', { name: 'Move References to right', exact: true }).click({ force: true });
   const handle = page.locator('[data-reference-resize-handle="right"]');
   const tray = page.locator('.review-workspace[data-workspace-presentation="right"]');
   await expect(handle).toBeVisible();
@@ -249,4 +259,20 @@ test('short reference tabs fit their titles and right resizing matches bottom st
   expect(shape.radius).toBe('16px');
   expect(shape.gradient).toContain('to right');
   expect(shape.overflow).toBe('hidden');
+});
+
+test('horizontal reference tabs in a bottom workspace fit short titles', async ({ page }) => {
+  await page.setViewportSize({ width: 620, height: 900 });
+  await page.goto('/test/acceptance/review-harness/index.html?visual=reference-layout');
+  await page.getByRole('button', { name: 'Show workspace', exact: true }).click();
+  await page.getByRole('tab', { name: 'References', exact: true }).click();
+  const tabs = page.locator('.reference-tabs[data-reference-tabs-orientation="horizontal"]:visible');
+  await expect(tabs).toBeVisible();
+  const tab = tabs.locator('.reference-tab-segment').first();
+  const title = tab.locator('.reference-tab-segment__selector span').first();
+  await title.evaluate((element) => { element.textContent = 'A long reference title that should reach the maximum tab width'; });
+  const longWidth = (await tab.boundingBox())!.width;
+  await title.evaluate((element) => { element.textContent = 'Note'; });
+  expect((await tab.boundingBox())!.width).toBeLessThan(longWidth);
+  expect((await tab.boundingBox())!.width).toBeGreaterThanOrEqual(112);
 });

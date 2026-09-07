@@ -1894,14 +1894,9 @@ li[data-search-result] .pdf-search__result-heading > .pdf-search__result-page {
   transform: none;
 }
 
-/* Reference tabs fit short titles without losing their established width caps. */
-.reference-tabs .reference-tab-segment,
-.reference-tabs[data-reference-tabs-orientation="vertical"] .reference-tab-segment,
-.review-workspace[data-workspace-presentation="right"] .reference-tab-segment {
+/* Horizontal tabs fit short titles; vertical tabs retain the full rail width. */
+.reference-tabs[data-reference-tabs-orientation="horizontal"] .reference-tab-segment {
   width: max-content;
   min-width: min(112px, 100%);
   flex-basis: auto;
-}
-.reference-tabs[data-reference-tabs-orientation="vertical"] .reference-tab-segment {
-  max-width: 100%;
 }
