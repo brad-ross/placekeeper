@@ -1488,7 +1488,6 @@
 }
 
 .annotation-peek .annotation-item__content {
-  padding: 9px 12px 11px;
   border-radius: 16px;
 }
 
@@ -1791,16 +1790,11 @@
 
 :is(li[data-annotation-origin], li[data-search-result], .annotation-peek) .annotation-item__title-row > .row-action-group {
   position: absolute;
-  top: 50%;
+  top: 0;
   right: 0;
   margin-left: 0;
-  transform: translateY(-50%);
-  background: transparent;
-}
-
-:is(li[data-annotation-origin], li[data-search-result]) .annotation-item__title-row > .row-action-group {
-  top: 0;
   transform: none;
+  background: transparent;
 }
 
 :is(.outline-navigator__row, li[data-annotation-origin], li[data-search-result]) .row-action-group__direct {
@@ -1813,7 +1807,7 @@ li[data-search-result] .pdf-search__result-heading > .pdf-search__result-page {
   margin-left: auto;
 }
 
-:is(li[data-annotation-origin], li[data-search-result])
+:is(li[data-annotation-origin], li[data-search-result], .annotation-peek)
   :is(.annotation-item__page, .pdf-search__result-page) {
   display: grid;
   flex: none;
@@ -1835,7 +1829,7 @@ li[data-search-result] .pdf-search__result-heading > .pdf-search__result-page {
     width: 44px;
   }
 
-  :is(li[data-annotation-origin], li[data-search-result])
+  :is(li[data-annotation-origin], li[data-search-result], .annotation-peek)
     :is(.annotation-item__page, .pdf-search__result-page) {
     width: 44px;
     height: 44px;
@@ -1851,7 +1845,7 @@ li[data-search-result] .pdf-search__result-heading > .pdf-search__result-page {
     opacity: 0;
   }
 
-  :is(li[data-annotation-origin], li[data-search-result]) .annotation-item__title-row {
+  :is(li[data-annotation-origin], li[data-search-result], .annotation-peek) .annotation-item__title-row {
     min-height: 44px;
   }
 }
@@ -1936,7 +1930,7 @@ li[data-search-result] .pdf-search__result-heading > .pdf-search__result-page {
     min-width: 44px;
   }
 
-  :is(li[data-annotation-origin], li[data-search-result]) .annotation-item__title-row {
+  :is(li[data-annotation-origin], li[data-search-result], .annotation-peek) .annotation-item__title-row {
     min-height: 44px;
   }
 

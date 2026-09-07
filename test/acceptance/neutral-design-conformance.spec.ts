@@ -238,7 +238,8 @@ test('annotation peek uses the canonical container, row, and actions', async ({ 
     const peek = page.locator('[data-annotation-peek]');
     const approved = mock.frame.locator('.pk-peek');
     await match(peek, approved, [...surface, 'width']);
-    await match(peek.locator('.annotation-item__content'), approved.locator('.pk-row'), ['padding', 'borderRadius']);
+    await match(peek.locator('.annotation-item__content'), approved.locator('.pk-row'), ['borderRadius']);
+    await expect(peek.locator('.annotation-item__content')).toHaveCSS('padding', '8px 8px 8px 12px');
     await match(peek.locator('.annotation-item__title-row'), approved.locator('.pk-row-head'), ['gap', 'minHeight', 'marginBottom']);
     await match(peek.locator('.annotation-item__page'), approved.locator('.pk-page-label'), typography);
     await match(peek.locator('[data-row-action="edit"]'), approved.locator('[data-action="edit"]'), ['width', 'height', 'padding', 'borderRadius', 'color']);
