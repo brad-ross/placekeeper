@@ -29,7 +29,12 @@ export function OutlineNavigator({
   onFocusTokenChange,
 }: OutlineNavigatorProps) {
   if (discovery.status === 'loading') {
-    return <p className="workspace-empty" data-outline-state="loading">Outline is loading…</p>;
+    return <div className="outline-navigator">
+      <p className="workspace-empty outline-navigator__loading" data-outline-state="loading" role="status">
+        <span>Outline is loading</span>
+        <ReviewIcon name="loading" />
+      </p>
+    </div>;
   }
   if (discovery.status === 'loaded-empty') {
     return <p className="workspace-state" data-outline-state="empty">This PDF has no embedded outline.</p>;
@@ -38,6 +43,7 @@ export function OutlineNavigator({
     return <p className="workspace-state" data-outline-state="unavailable">Outline unavailable.</p>;
   }
 
+  const flat = discovery.items.every((item) => item.children.length === 0);
   const toggle = (id: string) => {
     const next = new Set(expandedItemIds);
     if (next.has(id)) next.delete(id);
@@ -98,7 +104,7 @@ export function OutlineNavigator({
                 >
                   <ReviewIcon name="chevron-right" />
                 </ReviewTooltipButton>
-              ) : <span className="outline-navigator__disclosure-spacer" aria-hidden="true" />}
+              ) : flat ? null : <span className="outline-navigator__disclosure-spacer" aria-hidden="true" />}
               <button
                 type="button"
                 className="outline-navigator__destination"
@@ -143,7 +149,7 @@ export function OutlineNavigator({
   );
 
   return (
-    <nav className="outline-navigator" aria-label="Document outline">
+    <nav className="outline-navigator" data-flat={flat ? 'true' : undefined} aria-label="Document outline">
       {renderItems(discovery.items)}
     </nav>
   );

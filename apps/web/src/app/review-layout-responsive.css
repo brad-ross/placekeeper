@@ -335,6 +335,7 @@
   .annotation-peek,
   .annotation-status__icon,
   .workspace-state .review-icon,
+  .outline-navigator__loading .review-icon,
   .compact-editorial-modal .lucide-loader-circle,
   .comment-composer__anchor[data-return-state="pending"] .review-icon,
   .pdf-workspace__loading .review-icon,

@@ -52,6 +52,7 @@ async function currentZoomText(page: Page): Promise<string> {
 }
 
 async function zoomInOnce(page: Page): Promise<void> {
+  await page.locator('[data-review-chrome]').hover({ position: { x: 2, y: 2 } });
   await page.getByRole('button', { name: 'Open zoom controls' }).click();
   const menu = page.getByRole('menu', { name: 'PDF zoom' });
   await menu.getByRole('menuitem', { name: 'Zoom in' }).click();
@@ -4126,6 +4127,113 @@ test('keeps the bottom workspace evenly inset across open and close', async ({ p
   await expect(tray).toHaveAttribute('data-tools-workspace-open', 'false');
 });
 
+test('shows zoom actions only when fitting or horizontal locking is useful', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await openFreshProductionFixture(page, referencePdf, 'Conditional zoom actions launch failed');
+  const menu = page.getByRole('menu', { name: 'PDF zoom', exact: true });
+  const fit = page.getByRole('menuitem', { name: 'Fit width', exact: true });
+  const lock = page.getByRole('menuitemcheckbox', { name: 'Horizontal lock' });
+  const openMenu = async () => {
+    await page.locator('[data-review-chrome]').hover({ position: { x: 2, y: 2 } });
+    await page.getByRole('button', { name: 'Open zoom controls' }).hover();
+    await expect(menu).toBeVisible();
+  };
+  const setZoom = async (value: string) => {
+    await page.locator('[data-review-chrome]').hover({ position: { x: 2, y: 2 } });
+    const zoom = page.getByRole('textbox', { name: /Current zoom \d+ percent/u });
+    await zoom.fill(value);
+    await zoom.press('Enter');
+    await openMenu();
+  };
+  await openMenu();
+  await expect(fit).toHaveCount(0);
+  await expect(lock).toHaveCount(0);
+  await setZoom('250');
+  await expect(fit).toBeVisible();
+  await expect(lock).toBeVisible();
+  await lock.click();
+  await expect(lock).toHaveAttribute('aria-checked', 'true');
+  await fit.click();
+  await expect(fit).toHaveCount(0);
+  await expect(lock).toHaveCount(0);
+  await setZoom('50');
+  await expect(fit).toBeVisible();
+  await expect(lock).toHaveCount(0);
+});
+
+test('locks horizontal PDF scrolling at the current offset without blocking vertical scrolling', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await openFreshProductionFixture(page, referencePdf, 'Horizontal lock launch failed');
+  const viewport = page.locator('.review-document [data-viewer-framing-viewport]');
+  const zoom = page.getByRole('textbox', { name: /Current zoom \d+ percent/u });
+  await expect(zoom).toBeVisible();
+  await page.locator('[data-review-chrome]').hover({ position: { x: 2, y: 2 } });
+  await zoom.fill('250');
+  await zoom.press('Enter');
+  await expect.poll(() => viewport.evaluate((element) => element.scrollWidth - element.clientWidth)).toBeGreaterThan(100);
+  const bounds = (await viewport.boundingBox())!;
+  const scroll = async (x: number, y: number) => {
+    await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
+    await page.mouse.wheel(x, y);
+  };
+  await viewport.evaluate((element) => { element.scrollLeft = 0; });
+  await scroll(200, 0);
+  await expect.poll(() => viewport.evaluate((element) => element.scrollLeft)).toBeGreaterThan(0);
+  const toggle = async () => {
+    await page.locator('[data-review-chrome]').hover({ position: { x: 2, y: 2 } });
+    await page.getByRole('button', { name: 'Open zoom controls' }).hover();
+    const lock = page.getByRole('menuitemcheckbox', { name: 'Horizontal lock' });
+    const fit = (await page.getByRole('menuitem', { name: 'Fit width' }).boundingBox())!;
+    const lockBounds = (await lock.boundingBox())!;
+    expect(lockBounds.x).toBeGreaterThanOrEqual(fit.x + fit.width);
+    await lock.click();
+    return lock;
+  };
+  await expect(await toggle()).toHaveAttribute('aria-checked', 'true');
+  await expect(viewport).toHaveCSS('overflow-x', 'hidden');
+  const locked = await viewport.evaluate((element) => ({ x: element.scrollLeft, y: element.scrollTop }));
+  await scroll(300, 250);
+  await expect.poll(() => viewport.evaluate((element) => element.scrollTop)).toBeGreaterThan(locked.y);
+  expect(await viewport.evaluate((element) => element.scrollLeft)).toBe(locked.x);
+  await expect(await toggle()).toHaveAttribute('aria-checked', 'false');
+  await scroll(-200, 0);
+  await expect.poll(() => viewport.evaluate((element) => element.scrollLeft)).toBeLessThan(locked.x);
+});
+
+test('keeps opaque PDF scrollbar tracks exposed beside bottom trays', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await openFreshProductionFixture(page, referencePdf, 'Scrollbar fixture launch failed');
+  const main = page.locator('.pdf-workspace:not(.pdf-workspace--reference)');
+  const viewport = main.locator('[data-viewer-framing-viewport]');
+  await openLinkInReferences(page, main.getByRole('button', { name: 'Open PDF link to Primary result, Page 2' }));
+  await expect(page.locator('[data-review-workspace]')).toHaveAttribute('data-workspace-presentation', 'bottom');
+  await page.locator('[data-review-chrome]').hover({ position: { x: 2, y: 2 } });
+  const zoom = page.getByRole('textbox', { name: /Current zoom \d+ percent\. Enter a zoom percentage/u });
+  await zoom.fill('250');
+  await zoom.press('Enter');
+  await expect.poll(() => viewport.evaluate((element) => element.scrollWidth - element.clientWidth)).toBeGreaterThan(0);
+  for (const width of [1280, 760]) {
+    await page.setViewportSize({ width, height: 900 });
+    if (width === 760) {
+      await expect(page.locator('[data-review-stage]')).toHaveAttribute('data-annotation-presentation', 'bottom');
+      await openAnnotationsWorkspace(page);
+    }
+    const geometry = await viewport.evaluate((element) => {
+      const frame = document.querySelector('.review-overlay-frame')!;
+      const viewportStyle = getComputedStyle(element);
+      return {
+        clip: getComputedStyle(frame).clipPath,
+        track: getComputedStyle(element, '::-webkit-scrollbar-track').backgroundColor,
+        canvas: viewportStyle.backgroundColor,
+        bottom: element.getBoundingClientRect().bottom,
+      };
+    });
+    expect(geometry.track).toBe(geometry.canvas);
+    expect(geometry.clip).toBe('inset(0px 12px 12px 0px)');
+    expect(geometry.bottom).toBe(900);
+  }
+});
+
 test('defaults a real PDF to fit width and refits bottom and resizable right reading widths', async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 1280, height: 900 });
   await openFreshProductionFixture(page, referencePdf, 'Fit Width production launch failed');
@@ -4143,19 +4251,27 @@ test('defaults a real PDF to fit width and refits bottom and resizable right rea
   const referenceWorkspace = page.locator('[data-review-workspace]');
   const fitWidth = page.getByRole('menuitem', { name: 'Fit width' });
   const fitAndWait = async () => {
-    if (!await fitWidth.isVisible()) {
-      await page.getByRole('button', { name: 'Open zoom controls' }).click();
+    const trigger = page.getByRole('button', { name: 'Open zoom controls' });
+    await trigger.focus();
+    if (await trigger.getAttribute('aria-expanded') === 'true') await trigger.press('Escape');
+    await expect(trigger).toHaveAttribute('aria-expanded', 'false');
+    await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+    await trigger.press('Enter');
+    await expect(page.getByRole('menu', { name: 'PDF zoom', exact: true })).toBeVisible();
+    if (await fitWidth.isVisible()) {
+      await fitWidth.focus();
+      await page.keyboard.press('Enter');
     }
-    await fitWidth.click();
-    await expect(fitWidth).toHaveAttribute('aria-busy', 'false');
+    await expect(fitWidth).toHaveCount(0);
   };
   const zoomValue = () => page.getByRole('textbox', {
     name: /Current zoom \d+ percent\. Enter a zoom percentage/u,
   });
   await expect(mainPage).toBeVisible();
   await waitForRenderedPageImage(mainPage);
+  await page.locator('[data-review-chrome]').hover({ position: { x: 2, y: 2 } });
   await page.getByRole('button', { name: 'Open zoom controls' }).click();
-  await expect(fitWidth).toBeEnabled();
+  await expect(fitWidth).toHaveCount(0);
   await expect(mainViewport).toHaveCSS('scrollbar-gutter', 'stable');
   await mainWorkspace.evaluate((element) => element.setAttribute('data-fit-width-main-mount', 'stable'));
   await expect(page.getByRole('textbox', { name: /Current page 1 of 4/u })).toHaveValue('1');
@@ -4211,7 +4327,10 @@ test('defaults a real PDF to fit width and refits bottom and resizable right rea
   const standardGap = 52;
   const closedGeometry = await expectFitted(standardGap);
   const expectScrollbarAtWindowEdge = async () => {
-    if (await fitWidth.isVisible()) await page.getByRole('button', { name: 'Open zoom controls' }).click();
+    if (await fitWidth.isVisible()) {
+      await page.keyboard.press('Escape');
+      await expect(fitWidth).toHaveCount(0);
+    }
     const stageBounds = (await page.locator('[data-review-stage]').boundingBox())!;
     await expect.poll(async () => {
       const bounds = (await mainViewport.boundingBox())!;
@@ -4653,6 +4772,7 @@ test('uses the same expanded review tree for a narrow VS Code embed launch', asy
   const zoomInput = page.getByRole('textbox', { name: /Current zoom \d+ percent/u });
   const zoomBefore = await currentZoomText(page);
   const zoomTrigger = page.getByRole('button', { name: 'Open zoom controls' });
+  await page.locator('[data-review-chrome]').hover({ position: { x: 2, y: 2 } });
   await zoomTrigger.click();
   await expect(navigationMenu).toHaveCount(0);
   const zoomMenu = page.getByRole('menu', { name: 'PDF zoom' });
@@ -4673,6 +4793,7 @@ test('uses the same expanded review tree for a narrow VS Code embed launch', asy
   for (let attempt = 0; attempt < 5; attempt += 1) {
     const scrollable = await scrollViewport.evaluate((element) => element.scrollHeight > element.clientHeight);
     if (scrollable) break;
+    await page.locator('[data-review-chrome]').hover({ position: { x: 2, y: 2 } });
     await zoomTrigger.click();
     await page.getByRole('menu', { name: 'PDF zoom' })
       .getByRole('menuitem', { name: 'Zoom in' }).click();

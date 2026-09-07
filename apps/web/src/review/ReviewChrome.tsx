@@ -1,4 +1,4 @@
-import { useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { useId, useLayoutEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react';
 
 import {
   VIEWER_ZOOM_MAX_PERCENT,
@@ -97,6 +97,10 @@ export interface ReviewChromeProps {
   readonly viewerState: ViewerControlsSnapshot;
   readonly fitWidthReady?: boolean;
   readonly onFitWidth?: () => void | Promise<void>;
+  readonly horizontalScrollLocked?: boolean;
+  readonly horizontalScrollAvailable?: boolean;
+  readonly fitWidthCurrent?: boolean;
+  readonly onToggleHorizontalScrollLock?: () => void;
   readonly beforeViewerAction?: () => Promise<void>;
   readonly canUndo: boolean;
   readonly canRedo: boolean;
@@ -125,6 +129,10 @@ export function ReviewChrome({
   viewerState,
   fitWidthReady = false,
   onFitWidth = () => undefined,
+  horizontalScrollLocked = false,
+  horizontalScrollAvailable = false,
+  fitWidthCurrent = false,
+  onToggleHorizontalScrollLock,
   beforeViewerAction,
   canUndo,
   canRedo,
@@ -143,6 +151,7 @@ export function ReviewChrome({
   const [presentation, setPresentation] = useState<ReviewChromePresentation>('navigationCompact');
   const [activeTopBarMenu, setActiveTopBarMenu] = useState<TopBarMenuId | null>(null);
   const topBarMenuKeyboardOpenRef = useRef(true);
+  const [topBarMenuHoverOpen, setTopBarMenuHoverOpen] = useState(false);
   const [documentMenuPending, setDocumentMenuPending] = useState(false);
   const [editingPage, setEditingPage] = useState(false);
   const [pageDraft, setPageDraft] = useState('');
@@ -172,6 +181,8 @@ export function ReviewChrome({
   const historyAnchorRef = useRef<HTMLElement | null>(null);
   const navigationAnchorRef = useRef<HTMLElement | null>(null);
   const zoomAnchorRef = useRef<HTMLElement | null>(null);
+  const navigationHoverRef = useRef<HTMLElement | null>(null);
+  const zoomHoverRef = useRef<HTMLElement | null>(null);
   const pendingTransitionFocusRef = useRef<TopBarMenuId | null>(null);
   const deferredTopBarFocusVersionRef = useRef(0);
   const navigationMenuId = `review-navigation-menu-${useId().replaceAll(':', '')}`;
@@ -211,6 +222,24 @@ export function ReviewChrome({
       requestedOpen,
       documentMenuPending,
     }));
+  };
+  const openHoverMenu = (menu: 'navigation' | 'zoom', pointerType: string) => {
+    if (pointerType !== 'mouse' || !matchMedia('(hover: hover) and (pointer: fine)').matches || (menu === 'navigation'
+      ? !viewerState.pageReady || viewerState.totalPages <= 1
+      : !viewerState.zoomReady)) return;
+    if (activeTopBarMenu === menu) return;
+    setTopBarMenuHoverOpen(true);
+    topBarMenuKeyboardOpenRef.current = false;
+    requestTopBarMenu(menu, true);
+  };
+  const activateMenu = (menu: 'navigation' | 'zoom', event: MouseEvent<HTMLButtonElement>) => {
+    const keyboard = event.detail === 0;
+    const pointerType = 'pointerType' in event.nativeEvent ? event.nativeEvent.pointerType : undefined;
+    const hover = matchMedia('(hover: hover) and (pointer: fine)').matches
+      && !keyboard && pointerType !== 'touch' && (topBarMenuHoverOpen || pointerType === 'mouse');
+    topBarMenuKeyboardOpenRef.current = keyboard;
+    setTopBarMenuHoverOpen(hover);
+    requestTopBarMenu(menu, hover || (keyboard && topBarMenuHoverOpen) || activeTopBarMenu !== menu);
   };
   const restoreTopBarTriggerFocus = (group: 'navigation' | 'zoom') => {
     const version = ++deferredTopBarFocusVersionRef.current;
@@ -451,7 +480,6 @@ export function ReviewChrome({
           type="text"
           inputMode="numeric"
           aria-label={`Current page ${viewerState.currentPage} of ${viewerState.totalPages}. Enter a page number`}
-          title="Current page"
           aria-invalid={pageInvalid}
           aria-describedby={pageInvalid ? pageErrorId : undefined}
           aria-errormessage={pageInvalid ? pageErrorId : undefined}
@@ -513,7 +541,6 @@ export function ReviewChrome({
           type="text"
           inputMode="numeric"
           aria-label={`Current zoom ${viewerState.zoomPercent} percent. Enter a zoom percentage`}
-          title="Zoom percentage"
           aria-invalid={zoomInvalid}
           aria-describedby={zoomInvalid ? zoomErrorId : undefined}
           aria-errormessage={zoomInvalid ? zoomErrorId : undefined}
@@ -604,13 +631,14 @@ export function ReviewChrome({
     role="group"
     aria-label="Document navigation"
   >
-    {primaryHistoryDirection === null ? null : mainHistoryControl(primaryHistoryDirection)}
-    {secondaryHistoryDirection === null ? null : mainHistoryControl(secondaryHistoryDirection)}
-    <span className="review-chrome__page-position" data-review-page-position>
+    <span className="review-chrome__page-position" data-review-page-position
+      ref={navigationHoverRef}
+      onPointerEnter={(event) => openHoverMenu('navigation', event.pointerType)}
+    >
       {pageValue()}
       <ReviewTooltipButton
         label={viewerState.pageReady ? `Page ${viewerState.currentPage} of ${viewerState.totalPages}. Open page navigation` : 'Page navigation unavailable'}
-        tooltip="Page navigation"
+        tooltip={false}
         ref={(element) => { navigationAnchorRef.current = element; }}
         type="button"
         className="review-chrome__page-disclosure review-chrome__stat"
@@ -619,13 +647,13 @@ export function ReviewChrome({
         aria-expanded={activeTopBarMenu === 'navigation'}
         aria-controls={navigationMenuId}
         disabled={!viewerState.pageReady || viewerState.totalPages <= 1}
-        onClick={(event) => {
-          topBarMenuKeyboardOpenRef.current = event.detail === 0;
-          requestTopBarMenu('navigation', activeTopBarMenu !== 'navigation');
-        }}
+        onClick={(event) => activateMenu('navigation', event)}
       ><span aria-hidden="true">/ {viewerState.pageReady ? viewerState.totalPages : '—'}</span></ReviewTooltipButton>
     </span>
-    <TopBarMenu open={activeTopBarMenu === 'navigation'} menuId={navigationMenuId} label="Page navigation" openerRef={navigationAnchorRef} focusOnOpen={topBarMenuKeyboardOpenRef.current} onDismiss={() => requestTopBarMenu('navigation', false)}>
+      {copyLink === undefined ? null : <div className="review-chrome__link" data-review-copy-link><CopyLinkControl {...copyLink} /></div>}
+    {primaryHistoryDirection === null ? null : mainHistoryControl(primaryHistoryDirection)}
+    {secondaryHistoryDirection === null ? null : mainHistoryControl(secondaryHistoryDirection)}
+    <TopBarMenu hoverOpen={topBarMenuHoverOpen} hoverRegionRef={navigationHoverRef} open={activeTopBarMenu === 'navigation'} menuId={navigationMenuId} label="Page navigation" openerRef={navigationAnchorRef} focusOnOpen={topBarMenuKeyboardOpenRef.current} onDismiss={() => requestTopBarMenu('navigation', false)}>
       <div className="review-chrome__control-cluster review-chrome__page-menu" role="group" aria-label="Page navigation controls">
         {viewerState.pageReady && viewerState.currentPage > 1 ? <ReviewTooltipButton label="Previous page" type="button" role="menuitem" className="review-chrome__icon-control" data-review-page-step="previous" onPointerDown={preparePageStep} onPointerUp={clearPageStepIntent} onPointerCancel={clearPageStepIntent} onClick={(event) => runPageStep(event.currentTarget, () => controls?.previousPage())}><ReviewIcon name="chevron-up" /></ReviewTooltipButton> : null}
         {viewerState.pageReady && viewerState.currentPage < viewerState.totalPages ? <ReviewTooltipButton label="Next page" type="button" role="menuitem" className="review-chrome__icon-control" data-review-page-step="next" onPointerDown={preparePageStep} onPointerUp={clearPageStepIntent} onPointerCancel={clearPageStepIntent} onClick={(event) => runPageStep(event.currentTarget, () => controls?.nextPage())}><ReviewIcon name="chevron-down" /></ReviewTooltipButton> : null}
@@ -634,6 +662,8 @@ export function ReviewChrome({
   </span>;
 
   const zoomControls = <span
+    ref={zoomHoverRef}
+    onPointerEnter={(event) => openHoverMenu('zoom', event.pointerType)}
     data-review-chrome-group="zoom"
     className="review-chrome__control-cluster review-chrome__zoom-cluster"
     role="group"
@@ -642,7 +672,7 @@ export function ReviewChrome({
     <span className="review-chrome__zoom-value">{zoomValue()}<span aria-hidden="true" className="review-chrome__zoom-suffix">%</span></span>
     <ReviewTooltipButton
       label="Open zoom controls"
-      tooltip="Zoom controls"
+      tooltip={false}
       ref={(element) => { zoomAnchorRef.current = element; }}
       type="button"
       className="review-chrome__icon-control review-chrome__zoom-disclosure"
@@ -651,25 +681,31 @@ export function ReviewChrome({
       aria-expanded={activeTopBarMenu === 'zoom'}
       aria-controls={zoomMenuId}
       disabled={!viewerState.zoomReady}
-      onClick={(event) => {
-        topBarMenuKeyboardOpenRef.current = event.detail === 0;
-        requestTopBarMenu('zoom', activeTopBarMenu !== 'zoom');
-      }}
+      onClick={(event) => activateMenu('zoom', event)}
     ><ReviewIcon name="chevron-down" size={16} /></ReviewTooltipButton>
-    <TopBarMenu open={activeTopBarMenu === 'zoom'} menuId={zoomMenuId} label="PDF zoom" openerRef={zoomAnchorRef} focusOnOpen={topBarMenuKeyboardOpenRef.current} onDismiss={() => requestTopBarMenu('zoom', false)}>
+    <TopBarMenu hoverOpen={topBarMenuHoverOpen} hoverRegionRef={zoomHoverRef} open={activeTopBarMenu === 'zoom'} menuId={zoomMenuId} label="PDF zoom" openerRef={zoomAnchorRef} focusOnOpen={topBarMenuKeyboardOpenRef.current} onDismiss={() => requestTopBarMenu('zoom', false)}>
       <div className="review-chrome__control-cluster" role="group" aria-label="Zoom controls">
         <ReviewTooltipButton label="Zoom out" type="button" role="menuitem" className="review-chrome__icon-control" data-review-zoom-action="out" aria-describedby={zoomUnavailable} disabled={!viewerState.zoomReady} onPointerDown={prepareZoomAction} onPointerUp={clearZoomActionIntent} onPointerCancel={clearZoomActionIntent} onClick={(event) => runZoomAction(event.currentTarget, () => controls?.zoomOut())}><ReviewIcon name="minus" /></ReviewTooltipButton>
         <ReviewTooltipButton label="Zoom in" type="button" role="menuitem" className="review-chrome__icon-control" data-review-zoom-action="in" aria-describedby={zoomUnavailable} disabled={!viewerState.zoomReady} onPointerDown={prepareZoomAction} onPointerUp={clearZoomActionIntent} onPointerCancel={clearZoomActionIntent} onClick={(event) => runZoomAction(event.currentTarget, () => controls?.zoomIn())}><ReviewIcon name="plus" /></ReviewTooltipButton>
-        <ReviewTooltipButton label="Fit width" type="button" role="menuitem" className="review-chrome__icon-control review-chrome__fit-width" data-review-zoom-action="fit-width" aria-busy={fitWidthPending ? 'true' : 'false'} aria-describedby={zoomUnavailable ?? (!fitWidthReady ? fitWidthUnavailableId : undefined)} disabled={!viewerState.zoomReady || !fitWidthReady} onPointerDown={prepareZoomAction} onPointerUp={clearZoomActionIntent} onPointerCancel={clearZoomActionIntent} onClick={(event) => runFitWidth(event.currentTarget)}><ReviewIcon name="fit-width" /></ReviewTooltipButton>
+        {!fitWidthCurrent ? <ReviewTooltipButton label="Fit width" type="button" role="menuitem" className="review-chrome__icon-control review-chrome__fit-width" data-review-zoom-action="fit-width" aria-busy={fitWidthPending ? 'true' : 'false'} aria-describedby={zoomUnavailable ?? (!fitWidthReady ? fitWidthUnavailableId : undefined)} disabled={!viewerState.zoomReady || !fitWidthReady} onPointerDown={prepareZoomAction} onPointerUp={clearZoomActionIntent} onPointerCancel={clearZoomActionIntent} onClick={(event) => runFitWidth(event.currentTarget)}><ReviewIcon name="fit-width" /></ReviewTooltipButton> : null}
+        {horizontalScrollAvailable ? <ReviewTooltipButton
+          label="Horizontal lock"
+          tooltip={horizontalScrollLocked ? 'Unlock horizontal scrolling' : 'Lock horizontal scrolling'}
+          type="button"
+          role="menuitemcheckbox"
+          aria-checked={horizontalScrollLocked}
+          className="review-chrome__icon-control"
+          data-review-horizontal-lock
+          disabled={!viewerState.zoomReady || onToggleHorizontalScrollLock === undefined}
+          onClick={onToggleHorizontalScrollLock}
+        ><ReviewIcon name={horizontalScrollLocked ? 'lock' : 'unlock'} /></ReviewTooltipButton> : null}
       </div>
     </TopBarMenu>
   </span>;
 
   const controlsForPresentation = (_candidate: ReviewChromePresentation): ReactNode => <>
     {historyControls}
-    {navigationControls}
     {zoomControls}
-    {copyLink === undefined ? null : <div className="review-chrome__link" data-review-copy-link><CopyLinkControl {...copyLink} /></div>}
   </>;
 
   const sizingCluster = (_candidate: ReviewChromePresentation): ReactNode => <div className="review-chrome__viewer-controls" style={{ display: 'inline-flex', gridColumn: 'auto', gridRow: 'auto', flexWrap: 'nowrap' }}>
@@ -717,7 +753,10 @@ export function ReviewChrome({
       </div>}
       {codexContext === undefined ? null : <div className="review-chrome__context" data-review-context-status><CodexContextStatus status={codexContext} /></div>}
     </div>
-    <div className="review-chrome__viewer-controls" role="group" aria-label="PDF editing, navigation, and zoom">
+    <div className="review-chrome__left-controls" role="group" aria-label="PDF navigation and links">
+      {navigationControls}
+    </div>
+    <div className="review-chrome__viewer-controls" role="group" aria-label="PDF editing and zoom">
       {controlsForPresentation(presentation)}
     </div>
     <div

@@ -59,6 +59,7 @@ export interface ViewerNavigationControls {
   applyLocation(location: PdfViewerLocation, viewport?: PdfViewportQuery): Promise<boolean>;
   fitToWidth(waitForSettledGeometry?: WaitForSettledViewerGeometry): Promise<boolean>;
   fitToWidthReady(): boolean;
+  isFitToWidth?(): boolean;
   replaceDocument(documentGeneration: number): void;
   focusAtDestination(pageIndex: number): boolean;
   dispose(): void;

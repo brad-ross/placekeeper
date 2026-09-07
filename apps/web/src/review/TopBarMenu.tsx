@@ -28,6 +28,8 @@ export interface TopBarMenuProps {
   readonly onDismiss: (reason: TopBarMenuDismissReason) => void;
   readonly focusFallback?: () => HTMLElement | null;
   readonly focusOnOpen?: boolean;
+  readonly hoverOpen?: boolean;
+  readonly hoverRegionRef?: RefObject<HTMLElement | null>;
   readonly children: ReactNode;
 }
 
@@ -39,6 +41,8 @@ export function TopBarMenu({
   onDismiss,
   focusFallback,
   focusOnOpen = true,
+  hoverOpen = false,
+  hoverRegionRef,
   children,
 }: TopBarMenuProps) {
   const surfaceRef = useRef<HTMLDivElement>(null);
@@ -105,8 +109,30 @@ export function TopBarMenu({
       // Fixed positioning remains usable when the Popover API is unavailable.
     }
     update();
-    if (focusOnOpen) (enabledMenuItems(surface)[0] ?? surface).focus({ preventScroll: true });
-    else opener.focus({ preventScroll: true });
+    if (!hoverOpen) {
+      if (focusOnOpen) (enabledMenuItems(surface)[0] ?? surface).focus({ preventScroll: true });
+      else opener.focus({ preventScroll: true });
+    }
+
+    let hoverDismissTimer: ReturnType<typeof setTimeout> | undefined;
+    const clearHoverDismiss = () => clearTimeout(hoverDismissTimer);
+    const hoverPointer = (event: PointerEvent) => {
+      if (!hoverOpen || event.pointerType !== 'mouse') return;
+      const target = event.target;
+      if (target instanceof Node && (surface.contains(target)
+        || (hoverRegionRef?.current ?? opener).contains(target))) {
+        clearHoverDismiss();
+        hoverDismissTimer = undefined;
+      } else if (hoverDismissTimer === undefined) {
+        // Allow crossing the small gap between the trigger and its portal.
+        hoverDismissTimer = setTimeout(() => dismiss('outside', false), 140);
+      }
+    };
+    const leaveDocument = (event: PointerEvent) => {
+      if (!hoverOpen || event.pointerType !== 'mouse' || event.relatedTarget !== null) return;
+      clearHoverDismiss();
+      hoverDismissTimer = setTimeout(() => dismiss('outside', false), 140);
+    };
 
     let updateFrame = 0;
     const scheduleUpdate = () => {
@@ -118,9 +144,10 @@ export function TopBarMenu({
         && openerRef.current?.contains(event.target) === true;
       if (event.target instanceof Node && surface.contains(event.target)) return;
       if (event.target instanceof Node && openerRef.current?.contains(event.target)) return;
+      if (event.target instanceof Node && hoverRegionRef?.current?.contains(event.target)) return;
       const switchingTopBarMenu = event.target instanceof Element
         && event.target.closest('[data-review-chrome-group], [data-document-actions-trigger]') !== null;
-      dismiss('outside', !switchingTopBarMenu);
+      dismiss('outside', !hoverOpen && !switchingTopBarMenu);
     };
     const openerKeyDown = (event: globalThis.KeyboardEvent) => {
       if (!(event.target instanceof Node) || !opener.contains(event.target) || event.isComposing) return;
@@ -154,21 +181,26 @@ export function TopBarMenu({
     boundsObserver?.observe(opener);
     if (chrome) boundsObserver?.observe(chrome);
     document.addEventListener('pointerdown', outsidePointer, true);
+    document.addEventListener('pointermove', hoverPointer, true);
+    document.addEventListener('pointerout', leaveDocument, true);
     document.addEventListener('keydown', openerKeyDown, true);
     window.addEventListener('resize', scheduleUpdate);
     globalThis.visualViewport?.addEventListener('resize', scheduleUpdate);
     globalThis.visualViewport?.addEventListener('scroll', scheduleUpdate);
     return () => {
       cancelAnimationFrame(updateFrame);
+      clearHoverDismiss();
       connectionObserver.disconnect();
       boundsObserver?.disconnect();
       document.removeEventListener('pointerdown', outsidePointer, true);
+      document.removeEventListener('pointermove', hoverPointer, true);
+      document.removeEventListener('pointerout', leaveDocument, true);
       document.removeEventListener('keydown', openerKeyDown, true);
       window.removeEventListener('resize', scheduleUpdate);
       globalThis.visualViewport?.removeEventListener('resize', scheduleUpdate);
       globalThis.visualViewport?.removeEventListener('scroll', scheduleUpdate);
     };
-  }, [dismiss, open, openerRef, focusOnOpen]);
+  }, [dismiss, open, openerRef, focusOnOpen, hoverOpen, hoverRegionRef]);
 
   if (!open || typeof document === 'undefined') return null;
 

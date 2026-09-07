@@ -1517,6 +1517,22 @@ export function createViewerNavigation(
     pointVisibility,
     applyLocation,
     fitToWidth,
+    isFitToWidth() {
+      const viewer = activeViewer();
+      if (!viewer) return false;
+      const visible = mostVisibleMountedPageIndex(viewer);
+      if (!visible) return false;
+      const geometry = pageGeometry(viewer, visible.pageIndex, visible);
+      if (!geometry) return false;
+      const pageWidth = transformSize(geometry.page.size, geometry.rotation, 1).width;
+      const margins = options.fitWidthMargins?.() ?? { left: viewer.viewportGap, right: viewer.viewportGap };
+      const zoom = fitViewerWidthZoom({
+        viewportWidth: geometry.viewportRect.width,
+        pageWidth,
+        viewportGap: (margins.left + margins.right) / 2,
+      });
+      return zoom !== null && Math.abs(viewer.zoom.getState().currentZoomLevel - zoom) * pageWidth <= 1;
+    },
     fitToWidthReady() {
       const viewer = activeViewer();
       return viewer !== null && hasUsablePageTree(viewer);
