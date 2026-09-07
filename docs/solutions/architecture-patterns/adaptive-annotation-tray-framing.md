@@ -1,7 +1,7 @@
 ---
 title: "Adaptive annotation tray framing without resizing the PDF viewer"
 date: "2026-08-08"
-last_updated: "2026-09-06"
+last_updated: "2026-09-07"
 category: "architecture-patterns"
 module: "PDF review annotation tray framing"
 problem_type: "architecture_pattern"
@@ -18,9 +18,9 @@ tags: ["pdf-review", "annotation-tray", "viewer-framing", "scroll-runway", "resp
 
 ## Context
 
-The workspace and References surfaces cover a stateful PDF reader. Their appearance changes the unobscured reading area, but ordinary disclosure is not a navigation command. The [accepted overlay layout contract](../../plans/2026-09-05-neutral-soft-design-contract.md#accepted-overlay-layout-and-zoom-behavior) requires tray toggles and docking to preserve the reading anchor and scale, while leaving covered content reachable. Explicit navigation may reveal a target; Fit width is a separate explicit command, not a mode that reruns whenever an overlay changes.
+The workspace and References surfaces cover a stateful PDF reader. The [accepted overlay layout contract](../../plans/2026-09-05-neutral-soft-design-contract.md#accepted-overlay-layout-and-zoom-behavior) keeps the viewport full-sized and covered content reachable. Initial placement, explicit Fit width, and opening the workspace fit the clear reading width up to the inner right fade edge. Opening bottom References alone does not refit the main document.
 
-This supersedes automatic-open reveal and close-time reversal. Passive overlay changes now preserve position subject to actual scroll limits (`apps/web/src/review/use-annotation-tray-framing.ts:452`). Installed-viewer coverage checks unchanged page position, width, and zoom on ordinary opening (`test/acceptance/production-flow.spec.ts:4354`).
+Workspace opening is a one-shot zoom request that waits for committed geometry and runway settlement. Closing, resizing, and docking remain passive changes that preserve scale and reading position subject to actual scroll limits. This September 7 policy supersedes the earlier no-fit-on-opening rule; it does not restore close-time zoom reversal or repeated fitting during resize.
 
 Changing scroll extent can provoke native anchoring or clamping. The implementation may therefore write the preserved offset back after layout; this correction does not reveal newly covered content.
 
@@ -32,13 +32,13 @@ Keep the viewer mounted at full stage size. Add runway with an invisible, pointe
 
 ### Commit resting occupancy, not animation frames
 
-Derive runway from each logically open surface's untransformed offset geometry. Current occupancy includes the outer backing and fade: the clear boundary is the surface's resting start minus the framing policy's backing and fade allowances, and the runway extends from that boundary to the stage edge. Combine same-edge surfaces by maximum extent, not sum (`apps/web/src/review/use-annotation-tray-framing.ts:47`). This is more precise than treating runway as the tray width alone, especially for inset overlays.
+Derive runway from each logically open surface's untransformed offset geometry. A present collapsed right rail also reserves its 40 px backing and 12 px fade. Share these constants with the painted overlay geometry so Fit width and the visible boundary agree. Current occupancy includes the outer backing and fade: the clear boundary is the surface's resting start minus the framing policy's backing and fade allowances, and the runway extends from that boundary to the stage edge. Combine same-edge surfaces by maximum extent, not sum (`apps/web/src/review/use-annotation-tray-framing.ts:47`). This is more precise than treating runway as the tray width alone, especially for inset overlays.
 
 Record the requested runway before awaiting its DOM settlement. Otherwise a superseding effect can encounter already-mutated DOM with an old committed-runway reference and begin another transition from a stale position. Retain a matching transition's original position across replacement effects (`apps/web/src/review/use-annotation-tray-framing.ts:423`, `apps/web/src/pdf/viewer-framing.ts:252`).
 
 ### Preserve user intent through temporary clamps
 
-`ViewerPositionAuthority` stores the desired user position per axis separately from a passive transition's sampled position. Its returned position clamps either the remembered user value or the transition baseline to the current measured maximum (`apps/web/src/pdf/viewer-framing.ts:166`, `apps/web/src/pdf/viewer-framing.ts:262`). Closing removes runway and may make a position temporarily impossible; reopening can make the remembered position reachable again. This is not restoration of an old automatic reveal.
+`ViewerPositionAuthority` stores the desired user position per axis separately from a passive transition's sampled position. Its returned position clamps either the remembered user value or the transition baseline to the current measured maximum (`apps/web/src/pdf/viewer-framing.ts:166`, `apps/web/src/pdf/viewer-framing.ts:262`). Shrinking runway may make a position temporarily impossible; growing it can make the remembered position reachable again, unless a new fit or navigation request supersedes that position. This is not restoration of an old automatic reveal.
 
 Native wheel inertia and keyboard scrolling can continue after the initiating event. Renew the quiet-frame capture on each scroll event; reject older capture tokens so an early sample cannot replace the final offset (`apps/web/src/review/use-annotation-tray-framing.ts:282`, `apps/web/src/review/use-annotation-tray-framing.ts:374`, `apps/web/src/pdf/viewer-framing.ts:202`). Identify automatic-scroll targets separately so their intermediate events do not become user-owned movement (`apps/web/src/review/use-annotation-tray-framing.ts:363`).
 
@@ -64,9 +64,9 @@ Use this pattern when an inspector overlays a stateful, zoomable document or can
 
 ## Examples
 
-An ordinary right tray opens over the current page. Even if it covers text previously visible, opening adds committed runway and leaves scroll, scale, and page placement unchanged. The reviewer can pan the covered text into view. No automatic 120 px reveal is implied by a 120 px overlap; that numeric example belonged to the superseded policy (`test/acceptance/production-flow.spec.ts:4354`).
+An ordinary right workspace opens over the current page. It adds committed runway and performs one Fit width to the clear boundary after settlement. A later manual zoom remains unchanged through tray resizing or closing. Reopening requests a new fit.
 
-A reviewer pans to horizontal offset 40 while runway is available. Closing reduces the natural maximum to zero, so the visible offset becomes zero while the desired offset remains 40. Reopening restores 40 if reachable. An intervening explicit navigation clears that memory and establishes the new destination instead (`apps/web/test/viewer-framing.test.ts:191`).
+A reviewer pans to horizontal offset 40 while runway is available. A passive layout change can reduce the natural maximum to zero, so the visible offset becomes zero while the desired offset remains 40. A later passive expansion restores 40 if reachable. A workspace-opening fit or explicit navigation clears that memory and establishes a new position instead.
 
 A mark target is explicitly revealed above a bottom sheet. A later height-only resize may cover it again, but it does not reissue the consumed mark request: the current reading offset is preserved. Another explicit target request may reveal again (`test/acceptance/production-flow.spec.ts:4499`).
 

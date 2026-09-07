@@ -1400,6 +1400,12 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
           ? true
           : await navigationCoordinator.restorePresentationLocation(presentation, generation)
         : await navigationCoordinator.restoreCurrentLocation();
+      if (restored && !cancelled && generation === documentGenerationRef.current
+        && viewerControlsRef.current?.usesAutomaticFitWidth()) {
+        // The plugin preset sees the full viewport; the shared fit clears the
+        // workspace rail and fade while retaining restored numeric zoom.
+        await mainNavigationRef.current?.fitToWidth();
+      }
       if (!cancelled && generation === documentGenerationRef.current) {
         if (restored) viewerControlsRef.current?.freezeCurrentZoom();
         restoredLocationGenerationRef.current = generation;
