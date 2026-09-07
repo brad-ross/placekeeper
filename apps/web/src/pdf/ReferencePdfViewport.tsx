@@ -5,7 +5,7 @@ import { RenderLayer } from '@embedpdf/plugin-render/react';
 import { Scroller } from '@embedpdf/plugin-scroll/react';
 import { SelectionLayer } from '@embedpdf/plugin-selection/react';
 import { Viewport } from '@embedpdf/plugin-viewport/react';
-import { ZoomGestureWrapper } from '@embedpdf/plugin-zoom/react';
+import { AnchoredZoomGestureWrapper as ZoomGestureWrapper } from './AnchoredZoomGestureWrapper.js';
 import { createPortal } from 'react-dom';
 
 import type { PdfSearchResult } from './pdf-search-model.js';

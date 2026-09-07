@@ -1543,7 +1543,9 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   const onViewerInitialized = useCallback(async (registry: PluginRegistry) => {
     viewerRegistry.current = registry;
     viewerControlsRef.current?.dispose();
-    const controls = createViewerControls(registry);
+    const controls = createViewerControls(registry, () => productionRootRef.current?.querySelector<HTMLElement>(
+      '.pdf-workspace:not(.pdf-workspace--reference) [data-viewer-framing-viewport]',
+    ) ?? null);
     viewerControlsRef.current = controls;
     viewerControlsGenerationRef.current = documentGenerationRef.current;
     setViewerState(controls.snapshot());

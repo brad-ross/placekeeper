@@ -2,6 +2,8 @@ import type { PluginRegistry } from '@embedpdf/core';
 import { ScrollPlugin } from '@embedpdf/plugin-scroll';
 import { ZoomMode, ZoomPlugin } from '@embedpdf/plugin-zoom';
 
+import { anchoredZoom } from './anchored-zoom.js';
+
 import type { ViewerInteractionEvent, ViewerInteractionListener } from './viewer-interaction-events.js';
 
 export interface ViewerControlsSnapshot {
@@ -56,7 +58,7 @@ export function unavailableViewerControls(): ViewerControlsSnapshot {
   };
 }
 
-export function createViewerControls(registry: PluginRegistry): InitializedViewerControls {
+export function createViewerControls(registry: PluginRegistry, viewport?: () => HTMLElement | null): InitializedViewerControls {
   const core = registry.getStore().getState().core;
   const documentId = core.activeDocumentId;
   const scrollCapability = registry.getPlugin<ScrollPlugin>(ScrollPlugin.id)?.provides();
@@ -126,8 +128,8 @@ export function createViewerControls(registry: PluginRegistry): InitializedViewe
       if (!scroll || !Number.isSafeInteger(pageNumber) || pageNumber < 1 || pageNumber > state.totalPages) return;
       scroll.scrollToPage({ pageNumber, behavior: 'smooth' });
     },
-    zoomOut: () => zoom?.zoomOut(),
-    zoomIn: () => zoom?.zoomIn(),
+    zoomOut: () => anchoredZoom(viewport?.() ?? null, () => zoom?.zoomOut(), undefined, true),
+    zoomIn: () => anchoredZoom(viewport?.() ?? null, () => zoom?.zoomIn(), undefined, true),
     zoomToPercent: (zoomPercent) => {
       if (
         !zoom
@@ -135,7 +137,7 @@ export function createViewerControls(registry: PluginRegistry): InitializedViewe
         || zoomPercent < VIEWER_ZOOM_MIN_PERCENT
         || zoomPercent > VIEWER_ZOOM_MAX_PERCENT
       ) return;
-      zoom.requestZoom(zoomPercent / 100);
+      anchoredZoom(viewport?.() ?? null, () => zoom.requestZoom(zoomPercent / 100), undefined, true);
     },
     usesAutomaticFitWidth: () => {
       try {
