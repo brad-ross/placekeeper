@@ -4123,6 +4123,7 @@ test('keeps the bottom workspace evenly inset across open and close', async ({ p
 });
 
 test('shows zoom actions only when fitting or horizontal locking is useful', async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
   await page.setViewportSize({ width: 1280, height: 900 });
   await openFreshProductionFixture(page, referencePdf, 'Conditional zoom actions launch failed');
   const menu = page.getByRole('menu', { name: 'PDF zoom', exact: true });
@@ -4143,17 +4144,40 @@ test('shows zoom actions only when fitting or horizontal locking is useful', asy
   await openMenu();
   await expect(fit).toHaveCount(0);
   await expect(lock).toHaveCount(0);
+  const zoomOutWithoutLockFlash = async () => {
+    const probe = await page.evaluateHandle(() => {
+      const state = { appeared: false, observer: new MutationObserver((records) => {
+        if (records.some((record) => [...record.addedNodes].some((node) => node instanceof Element
+          && (node.matches('[data-review-horizontal-lock]') || node.querySelector('[data-review-horizontal-lock]'))))) state.appeared = true;
+      }) };
+      state.observer.observe(document.body, { childList: true, subtree: true });
+      return state;
+    });
+    try {
+      await page.getByRole('menuitem', { name: 'Zoom out', exact: true }).click();
+      // Observe the entire 140ms animation, including intermediate DOM insertions.
+      await page.waitForTimeout(250);
+      expect(await probe.evaluate((state) => state.appeared)).toBe(false);
+      await expect(lock).toHaveCount(0);
+    } finally {
+      await probe.evaluate((state) => state.observer.disconnect());
+      await probe.dispose();
+    }
+  };
+  await zoomOutWithoutLockFlash();
   await setZoom('250');
   await expect(fit).toBeVisible();
   await expect(lock).toBeVisible();
   await lock.click();
   await expect(lock).toHaveAttribute('aria-checked', 'true');
+  await expect(page.locator('.review-document [data-viewer-framing-viewport]')).toHaveCSS('overflow-x', 'hidden');
   await fit.click();
   await expect(fit).toHaveCount(0);
   await expect(lock).toHaveCount(0);
   await setZoom('50');
   await expect(fit).toBeVisible();
   await expect(lock).toHaveCount(0);
+  await zoomOutWithoutLockFlash();
 });
 
 test('locks horizontal PDF scrolling at the current offset without blocking vertical scrolling', async ({ page }) => {

@@ -10,6 +10,37 @@ async function leaveRow(page: Page) {
   await page.locator('.review-chrome__page-input').focus();
 }
 
+for (const scrollbarWidth of [8, 17]) {
+  test(`workspace right inset includes its ${scrollbarWidth}px scrollbar`, async ({ page, browserName }) => {
+    test.skip(browserName !== 'chromium', 'Custom classic scrollbar sizes are a Chromium geometry fixture.');
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.goto('/test/acceptance/review-harness/index.html?visual=tray&search=canonical');
+    await page.addStyleTag({ content: `
+      #workspace-panel-annotations, #workspace-panel-outline, .pdf-search__results {
+        max-height: 150px; overflow-y: scroll; scrollbar-gutter: stable; scrollbar-width: auto; scrollbar-color: auto;
+      }
+      #workspace-panel-annotations::-webkit-scrollbar,
+      #workspace-panel-outline::-webkit-scrollbar,
+      .pdf-search__results::-webkit-scrollbar { width: ${scrollbarWidth}px; }
+    ` });
+    for (const mode of ['Outline', 'Annotations', 'Search']) {
+      await page.getByRole('tab', { name: mode, exact: true }).click();
+      if (mode === 'Search') await page.getByRole('searchbox').fill('signal');
+      const row = page.locator(mode === 'Outline' ? '.outline-navigator__row:visible'
+        : mode === 'Search' ? '[data-search-result]:visible' : 'li[data-annotation-origin]:visible').first();
+      await expect(row).toBeVisible();
+      const scroller = page.locator(mode === 'Search' ? '.pdf-search__results'
+        : `#workspace-panel-${mode.toLowerCase()}`);
+      await expect.poll(() => scroller.evaluate((element) => (element as HTMLElement).offsetWidth - element.clientWidth)).toBe(scrollbarWidth);
+      await expect.poll(async () => {
+        const scrollBounds = (await scroller.boundingBox())!;
+        const rowBounds = (await row.boundingBox())!;
+        return Math.round(scrollBounds.x + scrollBounds.width - rowBounds.x - rowBounds.width);
+      }).toBe(Math.max(12, scrollbarWidth));
+    }
+  });
+}
+
 for (const width of [1280, 620, 390]) {
   test(`workspace row intent and page/action endcaps match the outline at ${width}px`, async ({ page, browserName }) => {
     page.on('pageerror', (error) => { throw error; });
@@ -55,6 +86,11 @@ for (const width of [1280, 620, 390]) {
       const row = kind === 'Search'
         ? page.locator('[data-search-result]').first()
         : page.locator('[data-review-item="owned-replace"]');
+      await row.hover();
+      const cardBounds = (await row.locator('.annotation-item__content').boundingBox())!;
+      const lastActionBounds = (await row.locator('.row-action-group__direct > :last-child').boundingBox())!;
+      expect(Math.abs((lastActionBounds.y - cardBounds.y)
+        - (cardBounds.x + cardBounds.width - lastActionBounds.x - lastActionBounds.width))).toBeLessThan(1);
       const navigation = row.locator('.annotation-item__navigation');
       const actions = row.locator('.row-action-group__direct');
       const number = row.locator('.annotation-item__page, .pdf-search__result-page');

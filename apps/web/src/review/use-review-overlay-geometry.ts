@@ -7,6 +7,7 @@ import {
 } from 'react';
 
 import { LatestFrameRequest } from '../pdf/viewer-framing.js';
+import { isZoomAnimationActive } from '../pdf/anchored-zoom.js';
 
 export const REVIEW_OVERLAY_INSET = 12;
 export const REVIEW_OVERLAY_FADE_SIZE = 12;
@@ -159,11 +160,15 @@ export function useReviewOverlayGeometry(input: {
           })),
           scrollport,
         });
-        const fitWidthCurrent = fitQuery.current?.() ?? false;
-        const horizontalScrollAvailable = scrollport !== null && scrollport.scrollWidth - scrollport.clientWidth > 1;
-        setZoomActions((current) => current.fitWidthCurrent === fitWidthCurrent
-          && current.horizontalScrollAvailable === horizontalScrollAvailable
-          ? current : { fitWidthCurrent, horizontalScrollAvailable });
+        // The zoom transform can temporarily overflow an otherwise fitted page.
+        // Animation completion/cancellation schedules a settled measurement.
+        if (scrollport === null || !isZoomAnimationActive(scrollport)) {
+          const fitWidthCurrent = fitQuery.current?.() ?? false;
+          const horizontalScrollAvailable = scrollport !== null && scrollport.scrollWidth - scrollport.clientWidth > 1;
+          setZoomActions((current) => current.fitWidthCurrent === fitWidthCurrent
+            && current.horizontalScrollAvailable === horizontalScrollAvailable
+            ? current : { fitWidthCurrent, horizontalScrollAvailable });
+        }
         setGeometry((current) => sameGeometry(current, next) ? current : next);
         // Transforms move a sliding tray without resizing it or mutating its
         // style attribute. Keep the backing and fade attached to the moving

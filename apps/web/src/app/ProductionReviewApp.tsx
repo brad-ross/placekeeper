@@ -1733,7 +1733,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       {...(correspondingItemId === undefined ? {} : { correspondingOwnedAnnotationId: correspondingItemId })}
       onExistingAnnotationsDiscovery={onExistingAnnotationsDiscovery}
       inventoryRetryGeneration={inventoryRetryGeneration}
-      documentGeneration={navigationState.documentGeneration}
+      documentGeneration={state.workflow.documentGeneration}
       referenceViewportHost={referenceViewportHost}
       activeReferenceTabIdentity={navigationState.activeTabIdentity}
       onReferenceDocumentControls={onReferenceDocumentControls}

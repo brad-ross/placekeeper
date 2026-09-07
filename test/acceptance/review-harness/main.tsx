@@ -1132,10 +1132,14 @@ function DeferredHostHistoryPreview() {
     release: () => void;
   } | null>(null);
   if (fixture.current === null) {
-    const state = createReviewState({
+    const initialState = createReviewState({
       sessionId: '00000000-0000-4000-8000-000000000301',
       source: { fileId: '00000000-0000-4000-8000-000000000302', digest: 'a'.repeat(64), byteLength: 12 },
     });
+    const state = { ...initialState, workflow: {
+      ...initialState.workflow,
+      documentGeneration: previewParameters.has('host-resumed') ? 1 : 0,
+    } };
     const scope = { documentTitle: 'reference-navigation.pdf', launchSurface: 'macos' as const };
     const saveStatus = {
       destination: { phase: 'none' as const, generation: 0 as const },

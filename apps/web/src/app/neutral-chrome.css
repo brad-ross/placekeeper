@@ -955,7 +955,7 @@
 }
 
 .pdf-search__result {
-  padding: 8px 12px;
+  padding: 8px 8px 8px 12px;
   border-radius: 12px;
   font: 400 13px/1.55 var(--pk-font-ui);
 }
@@ -1287,6 +1287,11 @@
   box-shadow: none;
   font: 400 13px/1.5 var(--pk-font-ui);
 }
+.outline-navigator > .outline-navigator__loading,
+.annotation-drawer__owned > .annotation-empty {
+  padding-block: 8px;
+}
+
 .annotation-status--error {
   padding: 10px 12px;
   border-radius: 10px;
@@ -1334,6 +1339,13 @@
 .annotation-drawer__owned,
 .existing-annotations {
   padding: 0 12px 12px;
+}
+
+.outline-navigator,
+.annotation-drawer__owned,
+.existing-annotations,
+.pdf-search__results {
+  padding-right: max(0px, calc(12px - var(--review-workspace-scrollbar-width, 0px)));
 }
 
 .annotation-drawer__owned ol,
@@ -1403,7 +1415,7 @@
 .annotation-item__content:not(.pdf-search__result),
 .existing-annotation__content {
   min-height: 0;
-  padding: 8px 12px;
+  padding: 8px 8px 8px 12px;
   gap: 0;
   border-radius: 12px;
 }
@@ -1730,6 +1742,11 @@
   background: transparent;
 }
 
+:is(li[data-annotation-origin], li[data-search-result]) .annotation-item__title-row > .row-action-group {
+  top: 0;
+  transform: none;
+}
+
 :is(.outline-navigator__row, li[data-annotation-origin], li[data-search-result]) .row-action-group__direct {
   transition: none;
 }
@@ -1841,6 +1858,10 @@ li[data-search-result] .pdf-search__result-heading > .pdf-search__result-page {
   .row-action-group[data-row-action-count="1"] {
     width: 44px;
     min-width: 44px;
+  }
+
+  :is(li[data-annotation-origin], li[data-search-result]) .annotation-item__title-row {
+    min-height: 44px;
   }
 
   .row-action-group[data-row-action-count="2"] {

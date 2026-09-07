@@ -249,7 +249,7 @@ export function PdfSearchWorkspace({
         </p>
       ) : null}
 
-      <div className="pdf-search__results" aria-label="PDF search results">
+      <div className="pdf-search__results" data-workspace-scroll-viewport aria-label="PDF search results">
         {state.groups.map((group) => (
           <section key={group.id} className="pdf-search__group" data-search-group={group.id} aria-labelledby={`pdf-search-group-${group.id}`}>
             <header>
