@@ -1897,6 +1897,7 @@ li[data-search-result][data-active="true"] .row-action-group__direct {
   width: 100%;
 }
 
+.workspace-empty,
 .annotation-empty,
 .annotation-status {
   margin: 0;

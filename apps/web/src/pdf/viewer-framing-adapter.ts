@@ -57,6 +57,7 @@ export function createViewerFramingControls(
   const subscriptions: Array<() => void> = [];
   const nextFrame = options.nextFrame ?? defaultNextFrame;
   let disposed = false;
+  let committedRunway: ViewerRunway = { right: 0, bottom: 0 };
 
   const emit = (event: ViewerFramingEvent) => {
     if (disposed) return;
@@ -132,10 +133,13 @@ export function createViewerFramingControls(
         right: Math.max(0, runway.right),
         bottom: Math.max(0, runway.bottom),
       };
+      const shrinking = nextRunway.right < committedRunway.right
+        || nextRunway.bottom < committedRunway.bottom;
+      committedRunway = nextRunway;
       options.updateRunway(nextRunway);
       await nextFrame();
       await nextFrame();
-      if (nextRunway.right === 0 && nextRunway.bottom === 0) {
+      if (shrinking) {
         const viewportElement = options.root()
           ?.querySelector<HTMLElement>('[data-viewer-framing-viewport]') ?? null;
         if (viewportElement) {

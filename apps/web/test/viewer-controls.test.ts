@@ -168,6 +168,7 @@ describe('viewer controls adapter', () => {
     expect(zoom.requestZoom.mock.calls).toEqual([[0.2], [1.25], [60]]);
     expect(controls.snapshot()).toMatchObject({ zoomPercent: 110 });
 
+    expect(controls.usesAutomaticFitWidth()).toBe(true);
     expect(controls.freezeCurrentZoom()).toBe(true);
     expect(zoom.requestZoom).toHaveBeenLastCalledWith(1.1);
 
@@ -190,6 +191,7 @@ describe('viewer controls adapter', () => {
     controls.zoomOut();
     controls.zoomIn();
     controls.zoomToPercent(125);
+    expect(controls.usesAutomaticFitWidth()).toBe(false);
     expect(controls.freezeCurrentZoom()).toBe(false);
 
     expect(controls.snapshot()).toMatchObject({ ready: false, currentPage: 0, totalPages: 0 });
@@ -215,7 +217,9 @@ describe('viewer controls adapter', () => {
         : undefined,
     } as unknown as PluginRegistry;
 
-    expect(createViewerControls(registry).freezeCurrentZoom()).toBe(true);
+    const controls = createViewerControls(registry);
+    expect(controls.usesAutomaticFitWidth()).toBe(false);
+    expect(controls.freezeCurrentZoom()).toBe(true);
     expect(zoom.requestZoom).not.toHaveBeenCalled();
   });
 

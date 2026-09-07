@@ -1,6 +1,6 @@
 import type { PluginRegistry } from '@embedpdf/core';
 import { ScrollPlugin } from '@embedpdf/plugin-scroll';
-import { ZoomPlugin } from '@embedpdf/plugin-zoom';
+import { ZoomMode, ZoomPlugin } from '@embedpdf/plugin-zoom';
 
 import type { ViewerInteractionEvent, ViewerInteractionListener } from './viewer-interaction-events.js';
 
@@ -29,6 +29,8 @@ export interface ViewerControls {
 }
 
 export interface InitializedViewerControls extends ViewerControls {
+  /** True only while the untouched initial Fit Width preset still owns zoom. */
+  usesAutomaticFitWidth(): boolean;
   /** Converts an automatic zoom preset to its current numeric scale without changing numeric user/restored zoom. */
   freezeCurrentZoom(): boolean;
 }
@@ -134,6 +136,13 @@ export function createViewerControls(registry: PluginRegistry): InitializedViewe
         || zoomPercent > VIEWER_ZOOM_MAX_PERCENT
       ) return;
       zoom.requestZoom(zoomPercent / 100);
+    },
+    usesAutomaticFitWidth: () => {
+      try {
+        return zoom?.getState().zoomLevel === ZoomMode.FitWidth;
+      } catch {
+        return false;
+      }
     },
     freezeCurrentZoom: () => {
       if (!zoom) return false;

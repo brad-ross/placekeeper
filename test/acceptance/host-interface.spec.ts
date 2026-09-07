@@ -2,6 +2,38 @@ import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
 
+for (const source of ['main', 'reference']) {
+  test(`host bootstrap attaches history before opening a ${source} link in Main`, async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.goto('/test/acceptance/review-harness/?host-history=1');
+    await expect(page.locator('[data-runtime-loading-workspace]')).toBeVisible();
+    await page.getByRole('button', { name: 'Finish host bootstrap' }).click();
+    await expect(page.locator('[data-runtime-loading-workspace]')).toHaveCount(0);
+    const mainLink = page.getByRole('button', { name: 'Open PDF link to Primary result, Page 2' });
+    await mainLink.click();
+    if (source === 'reference') {
+      await page.getByRole('menuitem', { name: 'Open in References', exact: true }).click();
+      await expect(page.getByRole('tab', { name: /Primary result/u })).toHaveAttribute('aria-selected', 'true');
+      const link = page.locator('[data-reference-pdf-viewport]').getByRole('button', {
+        name: 'Open PDF link to Target-to-target detail link, Page 3',
+      });
+      await link.scrollIntoViewIfNeeded();
+      await link.click();
+    }
+    await page.getByRole('menuitem', { name: 'Open in main document', exact: true }).click();
+    const pageInput = page.getByRole('textbox', { name: /^Current page \d+ of \d+/u });
+    const destination = source === 'main' ? '2' : '3';
+    await expect(pageInput).toHaveValue(destination);
+    const back = page.getByRole('button', { name: 'Back in document history' });
+    await expect(back).toBeVisible();
+    await expect(back).toBeEnabled();
+    await back.click();
+    await expect(pageInput).toHaveValue('1');
+    await page.getByRole('button', { name: 'Forward in document history' }).click();
+    await expect(pageInput).toHaveValue(destination);
+  });
+}
+
 test('host reattachment with no unresolved annotations gives transient neutral feedback', async ({ page }) => {
   await page.goto('/test/acceptance/review-harness/?host-reattach=1');
   const notice = page.locator('[data-host-command-status]');

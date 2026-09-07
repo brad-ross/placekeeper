@@ -1,7 +1,7 @@
 ---
 title: "Reliable compact right-docked Reference Tabs"
 date: "2026-08-11"
-last_updated: "2026-09-06"
+last_updated: "2026-09-07"
 category: "ui-bugs"
 module: "reference_workspace"
 problem_type: "ui_bug"
@@ -36,7 +36,7 @@ tags:
 
 After two Reference Tabs were open and the workspace reflowed, selecting an inactive tab could focus its control without completing the switch. Separately, actions and tab widths lacked clear sizing ownership: selected tabs expanded around their controls, and Search actions stretched with multiline result cards.
 
-The historical fixes in [PR #4](https://github.com/brad-ross/placekeeper/pull/4) and [PR #69](https://github.com/brad-ross/placekeeper/pull/69) established semantic navigation fallback and explicit control sizing. Current neutral styling retains those principles while replacing the old universal 184 px tab width and 31 px action measurements with content-fitting tabs under width caps and 26 px desktop actions.
+The historical fixes in [PR #4](https://github.com/brad-ross/placekeeper/pull/4) and [PR #69](https://github.com/brad-ross/placekeeper/pull/69) established semantic navigation fallback and explicit control sizing. Current neutral styling retains those principles while replacing the old universal 184 px tab width and 31 px action measurements with content-fitting horizontal tabs under width caps, full-rail vertical tabs, and 26 px desktop actions.
 
 ## Symptoms
 
@@ -70,7 +70,7 @@ This fallback preserves the precise saved pan and zoom when possible without mak
 
 ### Let tabs fit content within the right cap
 
-The effective neutral rule uses `width: max-content`, `min-width: min(112px, 100%)`, and `flex-basis: auto`. The right-presentation `max-width: 11.5rem` remains the cap; vertical segments cap at their available width (`apps/web/src/app/neutral-chrome.css:1898`, `apps/web/src/app/review-layout-annotations.css:788`). Short titles need not occupy the same width as long ones.
+Horizontal tabs use `width: max-content`, `min-width: min(112px, 100%)`, and `flex-basis: auto`. The right-presentation `max-width: 11.5rem` remains the cap. Vertical tabs use `width: 100%` and fill their rail regardless of title length (`apps/web/src/app/neutral-chrome.css:1898`, `apps/web/src/app/review-layout-annotations.css:788`, `apps/web/src/app/review-layout-annotations.css:910`). Restrict the content-fitting override by tab orientation: both right-docked References and the unified bottom workspace use horizontal tabs, while dedicated bottom References uses a vertical list.
 
 Allow the selector to shrink with `min-width: 0`, and retain hidden overflow, ellipsis, and no wrapping on metadata (`apps/web/src/app/neutral-chrome.css:713`, `apps/web/src/app/review-layout-annotations.css:804`). This assigns bounded width to the segment and truncation to its text instead of expanding the tab around actions.
 
@@ -88,7 +88,7 @@ The sizing fix uses the same separation. Segments own bounded content width, tex
 
 ## Prevention
 
-Keep one-click switching assertions and the rejected-location fallback unit test. Measure the rendered active orientation, including selector shrinkage and compact/touch actions, after rebuilding installed assets. Current production coverage measures 26 px actions and successful switching (`test/acceptance/production-flow.spec.ts:2445`). Its two fixture tabs reach the 184 px cap (`test/acceptance/production-flow.spec.ts:2441`); that does not establish a universal equal-width requirement for short titles. A separate browser regression measures a bottom-presented tab shrinking when its title changes to “Note” while retaining the 112 px minimum (`test/acceptance/workspace-row-interactions.spec.ts:228`).
+Keep one-click switching assertions and the rejected-location fallback unit test. Measure the rendered active orientation, including selector shrinkage and compact/touch actions, after rebuilding installed assets. Current production coverage measures 26 px actions and successful switching (`test/acceptance/production-flow.spec.ts:2445`). Its two fixture tabs reach the 184 px cap (`test/acceptance/production-flow.spec.ts:2441`); that does not establish a universal equal-width requirement for short titles. The browser regression separately requires full-rail vertical rows and short-title shrinking with the 112 px minimum in both horizontal layouts (`test/acceptance/workspace-row-interactions.spec.ts:228`). The earlier test mistakenly encoded shrinking for the vertical layout; measuring the rail relationship prevents that regression.
 
 When changing sizing, inspect late neutral overrides and verify both direct and overflow action presentations. When changing navigation, guard each awaited operation and preserve both exact viewport state and the canonical target. Review intentional screenshots only after behavioral and geometry evidence is coherent.
 

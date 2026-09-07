@@ -498,6 +498,32 @@ test("uses PDF metadata for the tab title and the filename when metadata is abse
   await expect(page).toHaveTitle("plain-text.pdf");
 });
 
+test('records links opened from References in Main document history', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await openFreshProductionFixture(page, referencePdf, 'Reference link history launch failed');
+  const main = page.locator('.pdf-workspace:not(.pdf-workspace--reference)');
+  await openLinkInReferences(page, main.getByRole('button', {
+    name: 'Open PDF link to Primary result, Page 2',
+  }));
+  await expectReferenceReady(page, page.getByRole('tab', { name: /Primary result/u }));
+  const link = page.locator('[data-reference-pdf-viewport]').getByRole('button', {
+    name: 'Open PDF link to Target-to-target detail link, Page 3',
+  });
+  await link.evaluate((element) => element.scrollIntoView({ block: 'center' }));
+  await link.click();
+  await page.getByRole('menuitem', { name: 'Open in main document', exact: true }).click();
+  await expect.poll(() => currentPageText(page)).toBe('3 / 4');
+  const back = page.getByRole('button', { name: 'Back in document history' });
+  await expect(back).toBeVisible();
+  await expect(back).toBeEnabled();
+  await back.click();
+  await expect.poll(() => currentPageText(page)).toBe('1 / 4');
+  const forward = page.getByRole('button', { name: 'Forward in document history' });
+  await expect(forward).toBeEnabled();
+  await forward.click();
+  await expect.poll(() => currentPageText(page)).toBe('3 / 4');
+});
+
 test('keeps toolbar icons visible throughout document-history navigation', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 });
   await openFreshProductionFixture(page, referencePdf, 'Toolbar icon continuity launch failed');
@@ -4145,7 +4171,9 @@ test('defaults a real PDF to fit width and refits bottom and resizable right rea
     if (!viewportBounds || !pageBounds) throw new Error('Fit Width geometry is unavailable.');
     const intervalLeft = viewportBounds.x + clientBox.left;
     const clientRight = intervalLeft + clientBox.width;
-    const intervalRight = Math.min(rightEdge ?? clientRight, clientRight - runwayRight);
+    const fade = page.locator('.review-overlay-frame__right-fade:visible');
+    const fadeLeft = await fade.count() > 0 ? (await fade.boundingBox())?.x : undefined;
+    const intervalRight = Math.min(rightEdge ?? clientRight, clientRight - runwayRight, fadeLeft ?? clientRight);
     return {
       pageWidth: pageBounds.width,
       intervalWidth: intervalRight - intervalLeft,
@@ -4194,6 +4222,13 @@ test('defaults a real PDF to fit width and refits bottom and resizable right rea
   expect(bottomGeometry.pageWidth).toBeCloseTo(closedGeometry.pageWidth, 0);
   await expect(page.getByRole('textbox', { name: /Current page 1 of 4/u })).toHaveValue('1');
 
+  await page.setViewportSize({ width: 760, height: 900 });
+  await expect(page.locator('[data-review-stage]')).toHaveAttribute('data-annotation-presentation', 'bottom');
+  expect(await zoomValue().inputValue()).toBe(closedZoom);
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await expect(page.locator('[data-review-stage]')).toHaveAttribute('data-annotation-presentation', 'right');
+  expect(await zoomValue().inputValue()).toBe(closedZoom);
+
   await clickHoverRevealedReferenceDockAction(
     page.getByRole('button', { name: 'Move References to right' }),
   );
@@ -4204,13 +4239,9 @@ test('defaults a real PDF to fit width and refits bottom and resizable right rea
     .toBeGreaterThan(0);
   const rightWorkspaceBounds = await referenceWorkspace.boundingBox();
   if (!rightWorkspaceBounds) throw new Error('Right workspace has no bounds.');
-  const bottomFitZoom = await zoomValue().inputValue();
-  expect(await mainPage.boundingBox().then((bounds) => bounds?.width)).toBeCloseTo(
-    bottomGeometry.pageWidth,
-    0,
-  );
-  expect(await zoomValue().inputValue()).toBe(bottomFitZoom);
-
+  expect(await zoomValue().inputValue()).toBe(closedZoom);
+  expect(await mainPage.boundingBox().then((bounds) => bounds?.width))
+    .toBeCloseTo(bottomGeometry.pageWidth, 0);
   await fitAndWait();
   const initialRightGeometry = await expectFitted(standardGap, rightWorkspaceBounds.x);
   expect(initialRightGeometry.pageWidth).toBeLessThan(bottomGeometry.pageWidth);
@@ -4261,6 +4292,7 @@ test('defaults a real PDF to fit width and refits bottom and resizable right rea
     .toBe('none');
   const toolsBounds = await toolsWorkspace.boundingBox();
   if (!toolsBounds) throw new Error('Right annotation workspace has no bounds.');
+  await expectFitted(standardGap, toolsBounds.x);
 
   const zoomInput = zoomValue();
   await zoomInput.fill('100');
@@ -4302,7 +4334,7 @@ test('defaults a real PDF to fit width and refits bottom and resizable right rea
   await expect(zoomValue()).not.toHaveValue('100');
 });
 
-test('preserves PDF reading position while adaptive annotation surfaces add reachable runway', async ({ page }) => {
+test('fits opening workspaces and preserves manual reading through passive layout changes', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' });
   const launched = await host.open({
     pdfPath: await freshProductionPdf(pdf),
@@ -4340,96 +4372,50 @@ test('preserves PDF reading position while adaptive annotation surfaces add reac
     return Math.abs(element.scrollTop - before);
   })).toBeLessThan(0.5);
 
-  const widePageBefore = await pdfPage.boundingBox();
-  const wideScrollBefore = await viewport.evaluate((element) => ({
-    left: element.scrollLeft,
-    top: element.scrollTop,
-    width: element.scrollWidth,
-  }));
-  const zoomBefore = await currentZoomText(page);
-  const runwayBefore = await runway.boundingBox();
-  if (!widePageBefore) throw new Error('Wide PDF page has no bounds.');
-  if (!runwayBefore) throw new Error('Viewer runway has no bounds.');
-
+  const initialWidth = (await pdfPage.boundingBox())!.width;
   await openAnnotationsWorkspace(page);
-  await expect(stage).toHaveAttribute('data-annotation-presentation', 'right');
   await expect(drawer).toHaveAttribute('data-workspace-presentation', 'right');
+  const expectOpeningFit = async () => {
+    await expect.poll(() => drawer.evaluate((element) => getComputedStyle(element).transform))
+      .toBe('none');
+    await expect.poll(async () => {
+      const pageBounds = (await pdfPage.boundingBox())!;
+      const viewportBounds = (await viewport.boundingBox())!;
+      const client = await viewport.evaluate((element) => ({ left: element.clientLeft, width: element.clientWidth }));
+      const fade = page.locator('.review-overlay-frame__right-fade:visible');
+      const right = await fade.count() ? (await fade.boundingBox())!.x : viewportBounds.x + client.left + client.width;
+      return Math.max(Math.abs(pageBounds.x - viewportBounds.x - client.left - 10),
+        Math.abs(right - pageBounds.x - pageBounds.width - 10));
+    }).toBeLessThan(3);
+  };
+  await expectOpeningFit();
+  expect((await pdfPage.boundingBox())!.width).toBeLessThan(initialWidth);
+  const fittedZoom = await currentZoomText(page);
+  await toggleWorkspace(page);
+  await expect(drawer).toBeHidden();
+  expect(await currentZoomText(page)).toBe(fittedZoom);
+
+  await zoomInOnce(page);
+  const manualZoom = await currentZoomText(page);
+  await toggleWorkspace(page);
   await expect(drawer).toBeVisible();
-  const wideDrawer = await drawer.boundingBox();
-  const wideViewport = await viewport.boundingBox();
-  if (!wideDrawer || !wideViewport) throw new Error('Wide annotations geometry is unavailable.');
-  await expect.poll(async () => (await runway.boundingBox())?.width ?? 0)
-    .toBeGreaterThanOrEqual(runwayBefore.width + wideDrawer.width - 1);
-  await expect.poll(() => viewport.evaluate((element) => element.scrollLeft))
-    .toBeCloseTo(wideScrollBefore.left, 0);
-  const widePageAfter = await pdfPage.boundingBox();
-  if (!widePageAfter) throw new Error('Open-workspace PDF page has no bounds.');
-  expect(widePageAfter.x).toBeCloseTo(widePageBefore.x, 0);
-  expect(widePageAfter.y).toBeCloseTo(widePageBefore.y, 0);
-  expect(widePageAfter.width).toBeCloseTo(widePageBefore.width, 0);
-  expect(await currentZoomText(page)).toBe(zoomBefore);
-  expect(await viewport.evaluate((element) => element.scrollWidth)).toBeGreaterThanOrEqual(
-    wideScrollBefore.width + Math.floor(wideDrawer.width) - 1,
-  );
+  await expectOpeningFit();
+  expect(await currentZoomText(page)).not.toBe(manualZoom);
 
-  await toggleWorkspace(page);
-  await expect.poll(() => viewport.evaluate((element) => element.scrollLeft))
-    .toBeCloseTo(wideScrollBefore.left, 0);
-  const widePageRestored = await pdfPage.boundingBox();
-  expect(widePageRestored?.x).toBeCloseTo(widePageBefore.x, 0);
-
-  await toggleWorkspace(page);
-  await expect.poll(() => viewport.evaluate((element) => element.scrollLeft))
-    .toBeCloseTo(wideScrollBefore.left, 0);
-  const automaticLeft = await viewport.evaluate((element) => element.scrollLeft);
-  await viewport.hover();
-  await page.mouse.wheel(40, 0);
-  await expect.poll(() => viewport.evaluate((element) => element.scrollLeft))
-    .toBeGreaterThan(automaticLeft);
-  const deliberateLeft = await viewport.evaluate((element) => element.scrollLeft);
-  await toggleWorkspace(page);
-  await expect.poll(() => runway.evaluate((element) => {
-    const parent = element.parentElement;
-    if (!parent) return Number.NaN;
-    return element.getBoundingClientRect().width - parent.getBoundingClientRect().width;
-  })).toBeCloseTo(0, 0);
-  const naturalHorizontalMaximum = await viewport.evaluate((element) => (
-    Math.max(0, element.scrollWidth - element.clientWidth)
-  ));
-  await expect.poll(() => viewport.evaluate((element) => element.scrollLeft))
-    .toBeCloseTo(Math.min(deliberateLeft, naturalHorizontalMaximum), 0);
-
-  await toggleWorkspace(page);
-  await expect.poll(() => viewport.evaluate((element, desiredLeft) => {
-    const maximum = Math.max(0, element.scrollWidth - element.clientWidth);
-    return Math.abs(element.scrollLeft - Math.min(desiredLeft, maximum));
-  }, deliberateLeft)).toBeLessThan(1);
+  await zoomInOnce(page);
+  const zoomAfterManualAdjustment = await currentZoomText(page);
   await page.setViewportSize({ width: 1240, height: 900 });
   await expect(stage).toHaveAttribute('data-annotation-presentation', 'right');
+  expect(await currentZoomText(page)).toBe(zoomAfterManualAdjustment);
   await toggleWorkspace(page);
-  await expect.poll(() => viewport.evaluate((element, desiredLeft) => {
-    const maximum = Math.max(0, element.scrollWidth - element.clientWidth);
-    return Math.abs(element.scrollLeft - Math.min(desiredLeft, maximum));
-  }, deliberateLeft)).toBeLessThan(1);
-  await page.setViewportSize({ width: 1280, height: 900 });
-
+  await expect(drawer).toBeHidden();
+  expect(await currentZoomText(page)).toBe(zoomAfterManualAdjustment);
   await page.setViewportSize({ width: 760, height: 900 });
   await expect(stage).toHaveAttribute('data-annotation-presentation', 'bottom');
-  await expect.poll(() => viewport.evaluate((element, desiredLeft) => {
-    const maximum = Math.max(
-      0,
-      element.scrollWidth - Math.max(element.clientWidth, element.getBoundingClientRect().width),
-    );
-    return Math.abs(element.scrollLeft - Math.min(desiredLeft, maximum));
-  }, deliberateLeft)).toBeLessThan(1);
   await viewport.evaluate((element) => {
     element.scrollTop = Math.min(240, Math.max(0, element.scrollHeight - element.clientHeight));
   });
   await expect.poll(() => viewport.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
-  const narrowScrollBefore = await viewport.evaluate((element) => ({
-    left: element.scrollLeft,
-    top: element.scrollTop,
-  }));
   await toggleWorkspace(page);
   await expect(drawer).toHaveAttribute('data-workspace-presentation', 'bottom');
   const narrowStage = await stage.boundingBox();
@@ -4439,7 +4425,7 @@ test('preserves PDF reading position while adaptive annotation surfaces add reac
   expect(narrowStage.x + narrowStage.width - bottomDrawer.x - bottomDrawer.width).toBeCloseTo(12, 0);
   expect(narrowStage.y + narrowStage.height - bottomDrawer.y - bottomDrawer.height).toBeCloseTo(12, 0);
   expect(bottomDrawer.height).toBeCloseTo(narrowStage.height * 0.43, 0);
-  expect(await viewport.evaluate((element) => element.scrollTop)).toBeCloseTo(narrowScrollBefore.top, 0);
+  await expectOpeningFit();
   await toggleWorkspace(page);
 
   const pageBox = await pdfPage.boundingBox();
@@ -4487,6 +4473,7 @@ test('preserves PDF reading position while adaptive annotation surfaces add reac
   await expect(drawer).toBeVisible();
   await expect(drawer).toHaveAttribute('data-workspace-presentation', 'bottom');
   await expect(notePeek).toHaveCount(0);
+  await expectOpeningFit();
   const activeReviewId = await noteMark.getAttribute('data-review-id');
   if (!activeReviewId) throw new Error('Page Note mark has no canonical review id.');
   await expect(page.locator(`[data-review-item="${activeReviewId}"]`)).toHaveAttribute('data-active', 'true');
@@ -4495,7 +4482,14 @@ test('preserves PDF reading position while adaptive annotation surfaces add reac
     const sheet = await drawer.boundingBox();
     return mark && sheet ? sheet.y - (mark.y + mark.height) : Number.NEGATIVE_INFINITY;
   }).toBeGreaterThanOrEqual(9);
-  expect(await viewport.evaluate((element) => element.scrollTop)).toBeGreaterThan(markScrollBefore);
+  await expect.poll(() => viewport.evaluate(async (element) => {
+    const start = element.scrollTop;
+    for (let frame = 0; frame < 8; frame += 1) {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      if (Math.abs(element.scrollTop - start) > 0.5) return false;
+    }
+    return true;
+  })).toBe(true);
   const revealedScrollTop = await viewport.evaluate((element) => element.scrollTop);
 
   await page.setViewportSize({ width: 760, height: 820 });
@@ -4520,8 +4514,10 @@ test('preserves PDF reading position while adaptive annotation surfaces add reac
   if (!pageBeforeFinalClose) throw new Error('Final open-workspace PDF page has no bounds.');
   const scrollBeforeFinalClose = await viewport.evaluate((element) => element.scrollTop);
   await toggleWorkspace(page);
-  await expect.poll(() => viewport.evaluate((element) => element.scrollTop))
-    .toBeCloseTo(scrollBeforeFinalClose, 0);
+  await expect.poll(() => viewport.evaluate((element, previousTop) => {
+    const reachableTop = Math.min(previousTop, Math.max(0, element.scrollHeight - element.clientHeight));
+    return Math.abs(element.scrollTop - reachableTop);
+  }, scrollBeforeFinalClose)).toBeLessThan(0.5);
   await expect.poll(async () => {
     const pageAfterFinalClose = await pdfPage.boundingBox();
     return pageAfterFinalClose?.x ?? Number.NaN;

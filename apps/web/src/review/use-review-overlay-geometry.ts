@@ -7,8 +7,9 @@ import {
 
 import { LatestFrameRequest } from '../pdf/viewer-framing.js';
 
-const BASE_INSET = 12;
-const FADE_SIZE = 12;
+export const REVIEW_OVERLAY_INSET = 12;
+export const REVIEW_OVERLAY_FADE_SIZE = 12;
+export const REVIEW_COLLAPSED_RAIL_SIZE = 40;
 
 interface RectLike {
   readonly left: number;
@@ -56,17 +57,17 @@ export function measureReviewOverlayGeometry(input: {
   const scrollbarHeight = input.scrollport === null || input.scrollport === undefined
     ? 0
     : Math.max(0, input.scrollport.offsetHeight - input.scrollport.clientHeight);
-  const outsideInset = Math.max(BASE_INSET, scrollbarWidth, scrollbarHeight);
+  const outsideInset = Math.max(REVIEW_OVERLAY_INSET, scrollbarWidth, scrollbarHeight);
   let rightStart: number | null = null;
   let bottomStart: number | null = null;
 
   for (const surface of input.surfaces) {
     if (!surface.open || surface.bounds.width <= 0 || surface.bounds.height <= 0) continue;
     if (surface.presentation === 'right') {
-      const start = Math.max(0, surface.bounds.left - input.stage.left - BASE_INSET);
+      const start = Math.max(0, surface.bounds.left - input.stage.left - REVIEW_OVERLAY_INSET);
       rightStart = rightStart === null ? start : Math.min(rightStart, start);
     } else {
-      const start = Math.max(0, surface.bounds.top - input.stage.top - BASE_INSET);
+      const start = Math.max(0, surface.bounds.top - input.stage.top - REVIEW_OVERLAY_INSET);
       bottomStart = bottomStart === null ? start : Math.min(bottomStart, start);
     }
   }
@@ -94,7 +95,7 @@ export function measureReviewOverlayGeometry(input: {
 const EMPTY_GEOMETRY: ReviewOverlayGeometry = {
   rightStart: null,
   bottomStart: null,
-  outsideInset: BASE_INSET,
+  outsideInset: REVIEW_OVERLAY_INSET,
   scrollbarWidth: 0,
   scrollbarHeight: 0,
   fadeTop: false,
@@ -206,10 +207,11 @@ export function useReviewOverlayGeometry(input: {
   return {
     geometry,
     style: {
+      '--review-collapsed-rail-size': `${REVIEW_COLLAPSED_RAIL_SIZE}px`,
       '--review-overlay-inset': `${geometry.outsideInset}px`,
       '--review-main-scrollbar-width': `${geometry.scrollbarWidth}px`,
       '--review-main-scrollbar-height': `${geometry.scrollbarHeight}px`,
-      '--review-overlay-fade-size': `${FADE_SIZE}px`,
+      '--review-overlay-fade-size': `${REVIEW_OVERLAY_FADE_SIZE}px`,
       ...(geometry.rightStart === null
         ? {}
         : { '--review-overlay-right-start': `${geometry.rightStart}px` }),

@@ -610,7 +610,7 @@
   top: 0;
   right: var(--review-main-scrollbar-width);
   bottom: var(--review-main-scrollbar-height);
-  width: calc(40px - var(--review-main-scrollbar-width));
+  width: calc(var(--review-collapsed-rail-size, 40px) - var(--review-main-scrollbar-width));
   min-width: 0;
   background: var(--review-surface-canvas);
 }
@@ -619,7 +619,7 @@
   .review-overlay-frame__right-fade {
   display: block;
   top: 0;
-  right: calc(40px - var(--review-main-scrollbar-width));
+  right: calc(var(--review-collapsed-rail-size, 40px) - var(--review-main-scrollbar-width));
   bottom: var(--review-main-scrollbar-height);
   width: var(--review-overlay-fade-size);
   background: linear-gradient(to right, transparent, var(--review-surface-canvas));
@@ -631,7 +631,7 @@
   right: var(--review-main-scrollbar-width);
   bottom: var(--review-main-scrollbar-height);
   left: 0;
-  height: calc(40px - var(--review-main-scrollbar-height));
+  height: calc(var(--review-collapsed-rail-size, 40px) - var(--review-main-scrollbar-height));
   min-height: 0;
   background: var(--review-surface-canvas);
 }
@@ -640,7 +640,7 @@
   .review-overlay-frame__bottom-fade {
   display: block;
   right: var(--review-main-scrollbar-width);
-  bottom: calc(40px - var(--review-main-scrollbar-height));
+  bottom: calc(var(--review-collapsed-rail-size, 40px) - var(--review-main-scrollbar-height));
   left: 0;
   height: var(--review-overlay-fade-size);
   background: linear-gradient(transparent, var(--review-surface-canvas));

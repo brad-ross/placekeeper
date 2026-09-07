@@ -762,6 +762,8 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     };
     return new BrowserReviewLocationHistory(environment);
   }, [props.locationHistory, props.session.appLinkBase]);
+  const locationHistoryRef = useRef(locationHistory);
+  locationHistoryRef.current = locationHistory;
   const copyLinkBase = useMemo(() => {
     if (props.copyLinkBase !== undefined) return props.copyLinkBase ?? undefined;
     if (props.session.appLinkBase === undefined) return undefined;
@@ -1129,14 +1131,14 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       getOutlineDiscovery: () => outlineDiscoveryRef.current,
       setCurrentOutlineItemId,
       getPageCount: () => searchDocumentRef.current?.pages.length ?? 0,
-      ...(locationHistory === undefined ? {} : {
-        locationHistory,
-        resolvePortableItem: (itemId: string) => {
-          if (!portableItemIdsRef.current.has(itemId)) return null;
-          const item = stateRef.current.items.find(({ id }) => id === itemId);
-          return item === undefined ? null : reviewItemNavigationTarget(item);
-        },
-      }),
+      // Native loading shells mount before their host history is available.
+      // Keep the coordinator on the same history port the toolbar observes.
+      get locationHistory() { return locationHistoryRef.current; },
+      resolvePortableItem: (itemId: string) => {
+        if (!portableItemIdsRef.current.has(itemId)) return null;
+        const item = stateRef.current.items.find(({ id }) => id === itemId);
+        return item === undefined ? null : reviewItemNavigationTarget(item);
+      },
     });
   }
   const navigationCoordinator = coordinatorRef.current;
@@ -1398,6 +1400,12 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
           ? true
           : await navigationCoordinator.restorePresentationLocation(presentation, generation)
         : await navigationCoordinator.restoreCurrentLocation();
+      if (restored && !cancelled && generation === documentGenerationRef.current
+        && viewerControlsRef.current?.usesAutomaticFitWidth()) {
+        // The plugin preset sees the full viewport; the shared fit clears the
+        // workspace rail and fade while retaining restored numeric zoom.
+        await mainNavigationRef.current?.fitToWidth();
+      }
       if (!cancelled && generation === documentGenerationRef.current) {
         if (restored) viewerControlsRef.current?.freezeCurrentZoom();
         restoredLocationGenerationRef.current = generation;

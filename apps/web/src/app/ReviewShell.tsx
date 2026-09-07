@@ -709,6 +709,49 @@ export function ReviewShell(props: ReviewShellProps) {
       referenceLayout.bottomReferenceHeight,
     ].join(':'),
   });
+  const pendingOpeningFitRef = useRef(false);
+  const priorWorkspaceLayoutRef = useRef({
+    open: toolsSurfaceOpen,
+    narrow: effectiveReferenceLayout.kind === 'narrow-unified',
+    dock: referenceLayout.referenceDock,
+  });
+  useEffect(() => {
+    const prior = priorWorkspaceLayoutRef.current;
+    const opening = toolsSurfaceOpen && !prior.open
+      && prior.narrow === (effectiveReferenceLayout.kind === 'narrow-unified')
+      && prior.dock === referenceLayout.referenceDock;
+    priorWorkspaceLayoutRef.current = {
+      open: toolsSurfaceOpen,
+      narrow: effectiveReferenceLayout.kind === 'narrow-unified',
+      dock: referenceLayout.referenceDock,
+    };
+    if (!toolsSurfaceOpen || prior.narrow !== (effectiveReferenceLayout.kind === 'narrow-unified')
+      || prior.dock !== referenceLayout.referenceDock) pendingOpeningFitRef.current = false;
+    if (opening) pendingOpeningFitRef.current = true;
+    const navigation = props.viewerNavigation;
+    if (!pendingOpeningFitRef.current || navigation === undefined) return;
+    let current = true;
+    // Opening is a one-shot Fit Width request. Later resizing, docking, and
+    // closing preserve the resulting scale until another explicit fit.
+    workspaceFraming.markUserIntent(undefined, { captureSettledPosition: false });
+    void navigation.fitToWidth(async (signal) => {
+      const geometry = await workspaceFraming.waitForSettledGeometry(signal);
+      if (!current || geometry === null) return null;
+      return { revision: geometry.revision, isCurrent: () => current && geometry.isCurrent() };
+    }).then((fitted) => {
+      if (!current) return;
+      pendingOpeningFitRef.current = false;
+      if (!fitted) return;
+      // A selected mark must be revealed at the final scale, after Fit Width
+      // has finished positioning the page.
+      setWorkspaceRequest((request) => request.kind === 'mark'
+        ? { ...request, token: ++annotationRequestTokenRef.current }
+        : request);
+    });
+    return () => { current = false; };
+  }, [toolsSurfaceOpen, effectiveReferenceLayout.kind, referenceLayout.referenceDock,
+    effectiveWorkspaceMode, props.viewerNavigation, workspaceFraming.markUserIntent, workspaceFraming.waitForSettledGeometry]);
+
   const overlaySurfaceRefs = useMemo(() => [
     workspaceFraming.referenceSurfaceRef,
     workspaceFraming.toolsSurfaceRef,

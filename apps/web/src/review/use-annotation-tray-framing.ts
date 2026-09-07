@@ -19,11 +19,15 @@ import {
   type WaitForSettledViewerGeometry,
 } from '../pdf/viewer-framing.js';
 
+import {
+  REVIEW_COLLAPSED_RAIL_SIZE,
+  REVIEW_OVERLAY_INSET,
+  REVIEW_OVERLAY_FADE_SIZE,
+} from './use-review-overlay-geometry.js';
+
 const WORKSPACE_SIDE_MAX_PX = 24 * 16;
 const WORKSPACE_SIDE_EDGE_GAP_PX = 3 * 16;
 const ANNOTATION_MARK_GUTTER_PX = 10;
-const OVERLAY_BACKING_PX = 12;
-const OVERLAY_FADE_PX = 18;
 
 function waitForWorkspaceLayout(signal: AbortSignal): Promise<boolean> {
   return new Promise((resolve) => {
@@ -47,18 +51,22 @@ function workspaceSurfaceIsOpen(surface: HTMLElement): boolean {
 function committedWorkspaceRunway(
   stage: Pick<DOMRect, 'width' | 'height'>,
   surfaces: readonly HTMLElement[],
+  rightRailPresent: boolean,
 ): ViewerRunway {
   // Offset geometry describes the resting tray edge and remains stable while
   // its entrance transform animates. The runway also clears the opaque outer
   // backing and its fade, leaving the PDF reachable beside the overlay.
-  const runway: ViewerRunway = { right: 0, bottom: 0 };
+  const runway: ViewerRunway = {
+    right: rightRailPresent ? REVIEW_COLLAPSED_RAIL_SIZE + REVIEW_OVERLAY_FADE_SIZE : 0,
+    bottom: 0,
+  };
   for (const surface of surfaces) {
     if (!workspaceSurfaceIsOpen(surface)) continue;
     if (surface.dataset.workspacePresentation === 'bottom') {
-      const clearBoundary = Math.max(0, surface.offsetTop - OVERLAY_BACKING_PX - OVERLAY_FADE_PX);
+      const clearBoundary = Math.max(0, surface.offsetTop - REVIEW_OVERLAY_INSET - REVIEW_OVERLAY_FADE_SIZE);
       runway.bottom = Math.max(runway.bottom, Math.min(stage.height, stage.height - clearBoundary));
     } else {
-      const clearBoundary = Math.max(0, surface.offsetLeft - OVERLAY_BACKING_PX - OVERLAY_FADE_PX);
+      const clearBoundary = Math.max(0, surface.offsetLeft - REVIEW_OVERLAY_INSET - REVIEW_OVERLAY_FADE_SIZE);
       runway.right = Math.max(runway.right, Math.min(stage.width, stage.width - clearBoundary));
     }
   }
@@ -417,8 +425,8 @@ export function useWorkspaceFraming(input: {
       const stageBounds = stageRef.current?.getBoundingClientRect();
       const surfaces = [referenceSurfaceRef.current, toolsSurfaceRef.current]
         .filter((surface): surface is HTMLElement => surface !== null);
-      const runway = input.workspaceOpen && stageBounds
-        ? committedWorkspaceRunway(stageBounds, surfaces)
+      const runway = stageBounds
+        ? committedWorkspaceRunway(stageBounds, surfaces, stageRef.current?.dataset.rightRailPresent === 'true')
         : { right: 0, bottom: 0 };
       const precedingRunway = committedRunwayRef.current;
       const runwayChanged = runway.right !== precedingRunway.right
