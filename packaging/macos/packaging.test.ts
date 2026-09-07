@@ -31,7 +31,10 @@ import {
   NATIVE_ERROR_SCRIPT,
   OPEN_LOCATION_SCRIPT,
 } from "./launcher.mjs";
-import { validateDoctorEvidence } from "./smoke-installed.js";
+import {
+  rewriteSmokeProbeBundleIdentifier,
+  validateDoctorEvidence,
+} from "./smoke-installed.js";
 import {
   appBundlePath,
   compileMacIcon,
@@ -68,6 +71,31 @@ async function prepareChromeInstallFixture(app: string): Promise<void> {
 }
 
 describe("macOS distribution manifests", () => {
+  it("gives Launch Services smoke clones a unique bundle identity", () => {
+    const plist = [
+      "<dict>",
+      "<key>CFBundleIdentifier</key><string>local.placekeeper</string>",
+      "<key>CFBundleURLSchemes</key><array><string>placekeeper</string></array>",
+      "<key>LSMultipleInstancesProhibited</key><true/>",
+      "</dict>",
+    ].join("");
+
+    expect(rewriteSmokeProbeBundleIdentifier(
+      plist,
+      "run-abc123",
+    )).toBe([
+      "<dict>",
+      "<key>CFBundleIdentifier</key><string>local.placekeeper.gurl-smoke.run-abc123</string>",
+      "<key>CFBundleURLSchemes</key><array><string>placekeeper</string></array>",
+      "<key>LSMultipleInstancesProhibited</key><true/>",
+      "</dict>",
+    ].join(""));
+    expect(() => rewriteSmokeProbeBundleIdentifier(
+      "<dict></dict>",
+      "run-abc123",
+    )).toThrow("Smoke probe plist has no bundle identifier");
+  });
+
   it.runIf(process.platform === "darwin")(
     "uninstalls idempotently without deleting recovery, PDFs, or unrelated Chrome hosts",
     async () => {
