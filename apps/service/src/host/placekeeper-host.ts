@@ -223,6 +223,7 @@ export class PlacekeeperHost {
       recordSuccessfulExport: (sessionId) => broker.recordSuccessfulExport(sessionId),
       validateFrozenDelivery: (delivery) => broker.isFrozenDeliveryCurrent(delivery as FrozenReviewDelivery),
     });
+    broker.onSessionEnd((sessionId) => exporting.releaseSession(sessionId));
     const chromeTransferStore = await ChromeTransferStore.create({
       root: browserSources.root,
       validate: options.browserSourceInspector === undefined

@@ -259,6 +259,7 @@ async function readValid(path: string): Promise<RecoverableDraftV3 | undefined> 
 export class DraftSnapshotStore {
   readonly directory: string;
   readonly #hooks: SnapshotHooks;
+  #cleanedDirectoryIdentity: string | undefined;
 
   constructor(directory: string, hooks: SnapshotHooks = {}) {
     this.directory = directory;
@@ -274,18 +275,35 @@ export class DraftSnapshotStore {
   }
 
   async initialize(): Promise<void> {
-    await ensurePrivateDirectory(this.directory);
-    const entries = await readdir(this.directory, { withFileTypes: true });
-    await Promise.all(
-      entries
-        .filter(
-          (entry) =>
-            entry.isFile() &&
-            /^\.(?:draft|source|synctex)-.*\.tmp$/u.test(entry.name) &&
-            !isRecoveryTemporaryPathActive(join(this.directory, entry.name)),
-        )
-        .map((entry) => rm(join(this.directory, entry.name), { force: true })),
-    );
+    try {
+      // Permission validation runs on every access; only the temporary-file
+      // traversal is cached. Identity and mtime also detect replacement and
+      // externally created entries, without caching recovered draft contents.
+      await ensurePrivateDirectory(this.directory);
+      const info = await stat(this.directory, { bigint: true });
+      const identity = `${info.dev}:${info.ino}:${info.birthtimeNs}:${info.mtimeNs}`;
+      if (identity === this.#cleanedDirectoryIdentity) return;
+      this.#cleanedDirectoryIdentity = undefined;
+      const entries = await readdir(this.directory, { withFileTypes: true });
+      const temporary = entries.filter((entry) =>
+        entry.isFile() && /^\.(?:draft|source|synctex|runtime-operation)-.*\.tmp$/u.test(entry.name),
+      );
+      let hasActiveTemporary = false;
+      await Promise.all(temporary.map(async (entry) => {
+        const path = join(this.directory, entry.name);
+        if (isRecoveryTemporaryPathActive(path)) {
+          hasActiveTemporary = true;
+          return;
+        }
+        await rm(path, { force: true });
+      }));
+      // An active temporary can become abandoned without a directory change.
+      // Retain the pre-scan identity so concurrent changes force another scan.
+      if (!hasActiveTemporary) this.#cleanedDirectoryIdentity = identity;
+    } catch (error) {
+      this.#cleanedDirectoryIdentity = undefined;
+      throw error;
+    }
   }
 
   async persist(draft: RecoverableDraft, signal?: AbortSignal): Promise<void> {
@@ -322,6 +340,7 @@ export class DraftSnapshotStore {
         await directoryHandle.close();
       }
     } catch (error) {
+      this.#cleanedDirectoryIdentity = undefined;
       await rm(temporaryPath, { force: true });
       throw error;
     } finally {
@@ -334,23 +353,41 @@ export class DraftSnapshotStore {
     const candidates = await Promise.all([
       readValid(this.currentPath),
       readValid(this.previousPath),
-    ]);
+    ]).catch((error: unknown) => {
+      this.#cleanedDirectoryIdentity = undefined;
+      throw error;
+    });
     return candidates
       .filter((draft): draft is RecoverableDraftV3 => draft !== undefined)
       .sort((left, right) => right.state.revision - left.state.revision)[0];
   }
 
   async remove(): Promise<void> {
+    this.#cleanedDirectoryIdentity = undefined;
     await rm(this.directory, { recursive: true, force: true });
   }
 
   async allocatedBytes(): Promise<number> {
     await this.initialize();
     let total = 0;
-    const entries = await readdir(this.directory, { withFileTypes: true });
-    for (const entry of entries) {
-      if (!entry.isFile() || entry.name.endsWith(".tmp")) continue;
-      total += (await stat(join(this.directory, entry.name))).size;
+    const entries = await readdir(this.directory, { withFileTypes: true }).catch((error: unknown) => {
+      this.#cleanedDirectoryIdentity = undefined;
+      throw error;
+    });
+    const files = entries.filter((entry) => entry.isFile() && !entry.name.endsWith(".tmp"));
+    // Keep cleanup and session traversal sequential. Only independent read-only
+    // stats overlap, in small batches, with errors consumed in directory order.
+    for (let offset = 0; offset < files.length; offset += 8) {
+      const results = await Promise.allSettled(
+        files.slice(offset, offset + 8).map((entry) => stat(join(this.directory, entry.name))),
+      );
+      for (const result of results) {
+        if (result.status === "rejected") {
+          this.#cleanedDirectoryIdentity = undefined;
+          throw result.reason;
+        }
+        total += result.value.size;
+      }
     }
     return total;
   }

@@ -23,7 +23,7 @@ import {
 } from "./chrome-handoff.js";
 
 interface CanonicalRecord {
-  readonly canonicalKey: string;
+  readonly indexKey: string;
   readonly sessionId: string;
   generation: number;
   sha256: string;
@@ -56,6 +56,7 @@ export class ChromeServiceRuntimeBackend implements ChromeRuntimeBackend {
   readonly #provisionals = new Map<string, number>();
   readonly #activated = new Set<string>();
   readonly #runtimeHost: "chrome" | "macos";
+  readonly #journal: ChromeRuntimeOperationJournal;
 
   constructor(options: ChromeServiceRuntimeBackendOptions) {
     this.#broker = options.broker;
@@ -64,15 +65,52 @@ export class ChromeServiceRuntimeBackend implements ChromeRuntimeBackend {
     this.#saving = options.saving;
     this.#exporting = options.exporting;
     this.#runtimeHost = options.runtimeHost ?? "chrome";
+    this.#journal = new ChromeRuntimeOperationJournal({
+      root: join(this.#broker.recoveryRoot, `.${this.#runtimeHost}-operations`),
+      scope: (canonicalKey) => {
+        const record = this.#record(canonicalKey);
+        this.#refreshRecord(record);
+        if (this.#broker.canonicalLinkBase(record.sessionId) === undefined) throw new Error("canonical-review-unavailable");
+        return {
+          directory: join(this.#broker.recoveryRoot, record.sessionId),
+          prefix: this.#runtimeHost,
+          legacyCanonicalKey: record.indexKey,
+        };
+      },
+    });
+    this.#broker.onSessionEnd((sessionId) => {
+      for (const [canonicalKey, record] of this.#records) {
+        if (record.sessionId === sessionId) this.#forgetCanonical(canonicalKey, record);
+      }
+    });
   }
 
   authority(quota?: ChromeRuntimeAggregateQuota): ChromeRuntimeServiceAuthority {
     return new ChromeRuntimeServiceAuthority(this, {
       quota: quota ?? new ChromeRuntimeAggregateQuota(),
-      journal: new ChromeRuntimeOperationJournal({
-        root: join(this.#broker.recoveryRoot, `.${this.#runtimeHost}-operations`),
-      }),
+      journal: this.#journal,
     });
+  }
+
+  retentionStatus(): {
+    readonly records: number; readonly activated: number; readonly presentations: number;
+    readonly provisionals: number; readonly cachedOperations: number; readonly indexedReviews: number;
+  } {
+    return {
+      records: this.#records.size, activated: this.#activated.size,
+      indexedReviews: this.#index.size,
+      presentations: this.#presentations.size, provisionals: this.#provisionals.size,
+      cachedOperations: this.#journal.retentionStatus().cachedOperations,
+    };
+  }
+
+  #forgetCanonical(canonicalKey: string, record: CanonicalRecord): void {
+    this.#records.delete(canonicalKey);
+    this.#index.delete(record.indexKey);
+    this.#presentations.delete(canonicalKey);
+    this.#provisionals.delete(canonicalKey);
+    this.#activated.delete(canonicalKey);
+    this.#journal.releaseCanonical(canonicalKey);
   }
 
   async begin(request: ChromeRuntimeStageRequest): Promise<ChromeRuntimeSourceSink> {
@@ -109,6 +147,7 @@ export class ChromeServiceRuntimeBackend implements ChromeRuntimeBackend {
   async activate(canonicalKey: string, presentationLease: string): Promise<ChromeRuntimeProjection> {
     const record = this.#record(canonicalKey);
     const projection = await this.#projection(record);
+    this.#refreshRecord(this.#record(canonicalKey));
     const provisionalCount = Math.max(0, (this.#provisionals.get(canonicalKey) ?? 1) - 1);
     if (provisionalCount === 0) this.#provisionals.delete(canonicalKey);
     else this.#provisionals.set(canonicalKey, provisionalCount);
@@ -202,8 +241,7 @@ export class ChromeServiceRuntimeBackend implements ChromeRuntimeBackend {
     if (record?.discardIfUnactivated === true && !this.#activated.has(canonicalKey) && provisionalCount === 0 &&
       (this.#presentations.get(canonicalKey)?.size ?? 0) === 0) {
       await this.#broker.discard(record.sessionId).catch(() => undefined);
-      this.#records.delete(canonicalKey);
-      this.#index.delete(canonicalKey);
+      this.#forgetCanonical(canonicalKey, record);
     }
   }
 
@@ -307,21 +345,32 @@ export class ChromeServiceRuntimeBackend implements ChromeRuntimeBackend {
     if (credential === undefined || state === undefined) throw new Error("bootstrap-unavailable");
     this.#broker.revokePresentationCredential(launch.sessionId, credential);
     return {
-      canonicalKey: "pending", sessionId: launch.sessionId,
+      indexKey: "pending", sessionId: launch.sessionId,
       generation: state.workflow.documentGeneration, sha256: state.source.digest,
       byteLength: state.source.byteLength, discardIfUnactivated,
     };
   }
 
   async #stageRecord(
-    canonicalKey: string,
+    indexKey: string,
     record: CanonicalRecord,
   ): Promise<{ readonly canonicalKey: string; readonly projection: ChromeRuntimeProjection }> {
-    const staged = { ...record, canonicalKey };
+    // Source identity joins presentations only within one review lifetime.
+    // A later review of identical bytes must not accept the old connection's key.
+    const canonicalKey = `${indexKey}:${record.sessionId}`;
+    const staged = { ...record, indexKey };
+    try {
+      this.#refreshRecord(staged);
+    } catch (error) {
+      this.#index.delete(indexKey);
+      throw error;
+    }
     this.#records.set(canonicalKey, staged);
     this.#provisionals.set(canonicalKey, (this.#provisionals.get(canonicalKey) ?? 0) + 1);
     try {
-      return { canonicalKey, projection: await this.#projection(staged) };
+      const projection = await this.#projection(staged);
+      this.#refreshRecord(this.#record(canonicalKey));
+      return { canonicalKey, projection };
     } catch (error) {
       await this.release(canonicalKey);
       throw error;

@@ -127,6 +127,20 @@ function committedWarning(kind: PdfExportResult["kind"]): string {
     : "The original was replaced, but final durability bookkeeping was interrupted. Reopen the PDF to resume the retained recovery draft.";
 }
 
+interface ExportOperations {
+  readonly inFlight: Map<string, Promise<PdfExportResult>>;
+  readonly completed: Map<string, PdfExportResult>;
+}
+
+interface SessionExports {
+  readonly copy: ExportOperations;
+  readonly replacement: ExportOperations;
+}
+
+function exportOperations(): ExportOperations {
+  return { inFlight: new Map(), completed: new Map() };
+}
+
 export class ExportCoordinator {
   readonly #writer: PdfWriter;
   readonly #capabilities: FileCapabilityRegistry;
@@ -142,10 +156,7 @@ export class ExportCoordinator {
     | undefined;
   readonly #hooks: ExportCoordinatorHooks;
   readonly #validateFrozenDelivery: (delivery: FrozenPdfDelivery) => boolean | Promise<boolean>;
-  readonly #copyInFlight = new Map<string, Promise<PdfExportResult>>();
-  readonly #copyCompleted = new Map<string, PdfExportResult>();
-  readonly #replaceInFlight = new Map<string, Promise<PdfExportResult>>();
-  readonly #replaceCompleted = new Map<string, PdfExportResult>();
+  readonly #sessions = new Map<string, SessionExports>();
 
   constructor(options: ExportCoordinatorOptions) {
     this.#writer = options.writer;
@@ -163,19 +174,7 @@ export class ExportCoordinator {
 
   exportReviewedCopy(delivery: FrozenPdfDelivery): Promise<PdfExportResult> {
     this.#assertDeliverable(delivery);
-    const key = this.#deliveryKey(delivery);
-    const complete = this.#copyCompleted.get(key);
-    if (complete !== undefined) return Promise.resolve(complete);
-    const existing = this.#copyInFlight.get(key);
-    if (existing !== undefined) return existing;
-    const pending = this.#runCopy(delivery)
-      .then((result) => {
-        this.#copyCompleted.set(key, result);
-        return result;
-      })
-      .finally(() => this.#copyInFlight.delete(key));
-    this.#copyInFlight.set(key, pending);
-    return pending;
+    return this.#runOnce(delivery, "copy", () => this.#runCopy(delivery));
   }
 
   replaceOriginal(delivery: FrozenPdfDelivery): Promise<PdfExportResult> {
@@ -186,18 +185,53 @@ export class ExportCoordinator {
         "Replace Original is unavailable for generated output.",
       );
     }
+    return this.#runOnce(delivery, "replacement", () => this.#runReplacement(delivery));
+  }
+
+  /** Called after the broker revokes a session, never on presentation detach. */
+  releaseSession(sessionId: string): void {
+    this.#sessions.delete(sessionId);
+  }
+
+  retentionStatus(): { readonly sessions: number; readonly completed: number; readonly inFlight: number } {
+    let completed = 0;
+    let inFlight = 0;
+    for (const session of this.#sessions.values()) {
+      completed += session.copy.completed.size + session.replacement.completed.size;
+      inFlight += session.copy.inFlight.size + session.replacement.inFlight.size;
+    }
+    return { sessions: this.#sessions.size, completed, inFlight };
+  }
+
+  #runOnce(
+    delivery: FrozenPdfDelivery,
+    kind: keyof SessionExports,
+    run: () => Promise<PdfExportResult>,
+  ): Promise<PdfExportResult> {
+    const session = this.#sessions.get(delivery.sessionId) ?? {
+      copy: exportOperations(), replacement: exportOperations(),
+    };
+    this.#sessions.set(delivery.sessionId, session);
+    const operations = session[kind];
     const key = this.#deliveryKey(delivery);
-    const complete = this.#replaceCompleted.get(key);
+    const complete = operations.completed.get(key);
     if (complete !== undefined) return Promise.resolve(complete);
-    const existing = this.#replaceInFlight.get(key);
+    const existing = operations.inFlight.get(key);
     if (existing !== undefined) return existing;
-    const pending = this.#runReplacement(delivery)
-      .then((result) => {
-        this.#replaceCompleted.set(key, result);
-        return result;
-      })
-      .finally(() => this.#replaceInFlight.delete(key));
-    this.#replaceInFlight.set(key, pending);
+    const pending = run().then((result) => {
+      // A finishing write may settle after session revocation. It must not
+      // restore the discarded cache, even when the artifact already committed.
+      if (this.#sessions.get(delivery.sessionId) === session) operations.completed.set(key, result);
+      return result;
+    }).finally(() => {
+      operations.inFlight.delete(key);
+      if (
+        this.#sessions.get(delivery.sessionId) === session
+        && session.copy.inFlight.size + session.copy.completed.size
+          + session.replacement.inFlight.size + session.replacement.completed.size === 0
+      ) this.#sessions.delete(delivery.sessionId);
+    });
+    operations.inFlight.set(key, pending);
     return pending;
   }
 

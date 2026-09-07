@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type {
   PdfWriteResult,
@@ -107,6 +107,46 @@ async function exportFixture() {
 }
 
 describe("reviewed PDF export transaction", () => {
+  it("releases terminal-session export results without changing active retry semantics", async () => {
+    const fixture = await exportFixture();
+    const write = vi.fn(async () => fixture.result);
+    const coordinator = new ExportCoordinator({
+      writer: { write },
+      capabilities: fixture.capabilities,
+      verify: async () => ({ pageCount: 1, annotationIds: [fixture.item.id] }),
+    });
+    const delivery = fixture.delivery();
+    const first = await coordinator.exportReviewedCopy(delivery);
+    await expect(coordinator.exportReviewedCopy(delivery)).resolves.toBe(first);
+    expect(write).toHaveBeenCalledOnce();
+    expect(coordinator.retentionStatus()).toEqual({ sessions: 1, completed: 1, inFlight: 0 });
+
+    fixture.capabilities.revokeFile(delivery.source.fileId);
+    coordinator.releaseSession(delivery.sessionId);
+    expect(coordinator.retentionStatus()).toEqual({ sessions: 0, completed: 0, inFlight: 0 });
+    await expect(coordinator.exportReviewedCopy(delivery)).rejects.toMatchObject({ code: "SESSION_CAPABILITY_REVOKED" });
+    expect(coordinator.retentionStatus()).toEqual({ sessions: 0, completed: 0, inFlight: 0 });
+    expect(write).toHaveBeenCalledOnce();
+  });
+
+  it("does not repopulate a released session when an already committed export settles late", async () => {
+    const fixture = await exportFixture();
+    const entered = Promise.withResolvers<void>();
+    const resume = Promise.withResolvers<void>();
+    const coordinator = new ExportCoordinator({
+      writer: { write: async () => fixture.result },
+      capabilities: fixture.capabilities,
+      verify: async () => ({ pageCount: 1, annotationIds: [fixture.item.id] }),
+      recordSuccessfulExport: async () => { entered.resolve(); await resume.promise; },
+    });
+    const pending = coordinator.exportReviewedCopy(fixture.delivery());
+    await entered.promise;
+    coordinator.releaseSession(fixture.delivery().sessionId);
+    resume.resolve();
+    await expect(pending).resolves.toMatchObject({ kind: "reviewed-copy" });
+    expect(coordinator.retentionStatus()).toEqual({ sessions: 0, completed: 0, inFlight: 0 });
+  });
+
   it("fails closed for unresolved generated output and never allows Replace Original", async () => {
     const fixture = await exportFixture();
     const coordinator = new ExportCoordinator({
