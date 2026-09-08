@@ -260,7 +260,7 @@
   transform: translateY(102%);
 }
 
-.review-layout[data-reference-layout="wide-split"]
+.review-layout:is([data-reference-layout="wide-bottom"], [data-reference-layout="wide-split"])
   .review-tools-workspace[data-workspace-presentation="right"] {
   bottom: calc(var(--reference-bottom-height) + 24px);
 }

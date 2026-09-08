@@ -284,3 +284,41 @@ for (const width of [1280, 640]) {
     expect(samples.some((sample) => sample.y > first.y + 5 && sample.y < last.y - 5)).toBe(true);
   });
 }
+
+for (const referencesOpen of [false, true]) {
+  test(`workspace opening at low zoom commits its first fitted frame with References ${referencesOpen ? 'open' : 'closed'}`, async ({ page }) => {
+    await openAnimatedHostReview(page);
+    if (referencesOpen) {
+      await page.getByRole('button', { name: 'Open PDF link to Primary result, Page 2', exact: true }).click();
+      await page.getByRole('menuitem', { name: 'Open in References', exact: true }).click();
+      await expect(page.locator('.review-workspace')).toHaveAttribute('data-workspace-open', 'true');
+    }
+    const zoom = page.getByRole('textbox', { name: /Current zoom/ });
+    await zoom.fill('60');
+    await zoom.press('Enter');
+    await page.waitForTimeout(400);
+    const samples = await page.evaluate(() => new Promise<{ width: number; y: number; trayHeight: number; trayX: number }[]>((resolve) => {
+      const pdf = document.querySelector<HTMLElement>('[data-page-index="0"]')!;
+      const tray = document.querySelector<HTMLElement>('#review-tools-workspace')!;
+      const samples: { width: number; y: number; trayHeight: number; trayX: number }[] = [];
+      const start = performance.now();
+      const sample = () => {
+        const rect = pdf.getBoundingClientRect();
+        const trayRect = tray.getBoundingClientRect();
+        samples.push({ width: rect.width, y: rect.y, trayHeight: trayRect.height, trayX: trayRect.x });
+        if (performance.now() - start < 900) requestAnimationFrame(sample);
+        else resolve(samples);
+      };
+      sample();
+      document.querySelector<HTMLButtonElement>('button[aria-label="Show workspace"]')!.click();
+    }));
+    const first = samples[0]!;
+    const last = samples.at(-1)!;
+    expect(last.width).toBeGreaterThan(first.width + 100);
+    const fittedFrames = samples.filter((sample) => Math.abs(sample.width - last.width) < 2);
+    expect(fittedFrames.length).toBeGreaterThan(2);
+    for (const frame of fittedFrames) expect(Math.abs(frame.y - last.y)).toBeLessThan(2);
+    expect(samples.every((sample) => Math.abs(sample.trayHeight - first.trayHeight) < 1)).toBe(true);
+    expect(samples.some((sample) => sample.trayX < first.trayX - 5 && sample.trayX > last.trayX + 5)).toBe(true);
+  });
+}

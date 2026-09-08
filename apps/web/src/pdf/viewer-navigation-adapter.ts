@@ -1,3 +1,5 @@
+import { flushSync } from 'react-dom';
+
 import type { PluginRegistry } from '@embedpdf/core';
 import {
   PdfZoomMode,
@@ -1248,7 +1250,7 @@ export function createViewerNavigation(
           y: geometry.viewportRect.height * location.alignment.yPercent / 100,
         };
         operation.mutated = true;
-        zoomed = await waitForZoom(
+        const zoomRequest = flushSync(() => waitForZoom(
           viewer.zoom,
           requestedZoom,
           zoomTolerance,
@@ -1276,7 +1278,11 @@ export function createViewerNavigation(
               behavior: 'instant',
             });
           },
-        );
+        ));
+        // Commit the scale and its native scroll anchor before either can
+        // paint alone, including when fitting enlarges a zoomed-out page.
+        observerPositionedPage = positionFittedPage();
+        zoomed = await zoomRequest;
       }
       if (!zoomed || !operationIsCurrent(operation)) {
         if (!operation.signal.aborted && operation.mutated) await rollbackOperation(operation);
