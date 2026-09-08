@@ -2716,6 +2716,8 @@ test.describe('canonical review workflow', () => {
     await expect(peek).toBeVisible();
     await expect(peek).toHaveAttribute('aria-label', 'Highlight annotation preview');
     await expect(peek).not.toContainText('Page 1');
+    await markTarget.click();
+    await peek.hover();
     await expect(peek.getByRole('button', { name: 'Edit Highlight annotation on page 1' })).toBeVisible();
     await expect(peek.getByRole('button', { name: 'Remove Highlight annotation on page 1' })).toBeVisible();
     await canvas.click();

@@ -1597,7 +1597,10 @@
 }
 
 .annotation-item__quote {
-  display: block;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
   margin-top: 6px;
   color: var(--pk-muted);
   font: 400 13px/1.5 var(--pk-font-ui);
@@ -2006,10 +2009,12 @@ li[data-search-result] .pdf-search__result-heading > .pdf-search__result-page {
   pointer-events: none;
   transition: none;
 }
+.annotation-peek[data-source-return="true"] .row-action-group__direct,
 .annotation-peek[data-peek-selected="true"]:is(:hover, :has(:focus-visible)) .row-action-group__direct {
   opacity: 1;
   pointer-events: auto;
 }
+.annotation-peek[data-source-return="true"] .annotation-item__page,
 .annotation-peek[data-peek-selected="true"]:is(:hover, :has(:focus-visible)):has(.row-action-group) .annotation-item__page {
   opacity: 0;
 }
@@ -2034,4 +2039,15 @@ li[data-search-result] .pdf-search__result-heading > .pdf-search__result-page {
   width: max-content;
   min-width: min(112px, 100%);
   flex-basis: auto;
+}
+
+.full-annotation-reader__source,
+.full-annotation-reader__quote {
+  color: var(--pk-muted);
+}
+.full-annotation-reader__source[data-source-treatment="struck"] {
+  text-decoration: line-through;
+}
+.full-annotation-reader__body > .full-annotation-reader__source:not(:last-child) {
+  margin-bottom: 14px;
 }

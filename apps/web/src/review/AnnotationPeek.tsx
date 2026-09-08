@@ -10,6 +10,7 @@ export interface AnnotationPeekProps {
   onHoldChange(held: boolean): void;
   copyLink?: CopyLinkControlProps;
   onNavigate?(): void;
+  showSourceReturn?: boolean;
   onReadFull?(record: AnnotationReaderRecord, trigger: HTMLButtonElement): void;
   onReaderOverflowChange?(record: AnnotationReaderRecord, overflowing: boolean): void;
   onEdit?(trigger: HTMLButtonElement): void;
@@ -22,6 +23,7 @@ export function AnnotationPeek({
   onHoldChange,
   copyLink,
   onNavigate,
+  showSourceReturn = false,
   onReadFull,
   onReaderOverflowChange,
   onEdit,
@@ -36,12 +38,14 @@ export function AnnotationPeek({
       data-annotation-kind={item.kind}
       data-annotation-state={selected ? 'selected' : 'preview'}
       data-peek-selected={selected ? 'true' : 'false'}
+      data-source-return={showSourceReturn ? 'true' : undefined}
       aria-label={`${kindLabel} annotation preview`}
       onPointerEnter={() => onHoldChange(true)}
       onPointerLeave={() => onHoldChange(false)}
     >
       <AnnotationRowContent
         item={item}
+        showSourceReturn={showSourceReturn}
         {...(selected && copyLink ? { copyLink } : {})}
         {...(onNavigate ? { onNavigate } : {})}
         {...(onReadFull ? { onReadFull } : {})}

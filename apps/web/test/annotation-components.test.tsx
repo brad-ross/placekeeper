@@ -149,7 +149,7 @@ describe('annotation row and reader presentation', () => {
     const html = renderToStaticMarkup(<AnnotationRowContent item={highlightWithoutComment} />);
     expect(html).toContain('class="annotation-item__quote" data-quote-only="true"');
     expect(html).toContain('data-full-annotation-eligible="false"');
-    expect(projectOwnedAnnotationReader(highlightWithoutComment)).toBeNull();
+    expect(projectOwnedAnnotationReader(highlightWithoutComment)?.quoteText).toBe('Local variation identifies demand.');
   });
 
   it('uses a compact type/page header and complete body for owned records', () => {
@@ -210,4 +210,16 @@ describe('annotation row and reader presentation', () => {
     expect(row).toContain('lucide-trash-2');
     expect(renderToStaticMarkup(<ReviewIcon name="minus" />)).toContain('lucide-minus');
   });
+});
+
+it.each([
+  replacement,
+  highlightWithComment,
+  highlightWithoutComment,
+  { ...replacement, kind: 'delete' as const, payload: { quote: 'Deleted original passage.' } },
+])('full $kind reader retains the complete source passage', (item) => {
+  const record = projectOwnedAnnotationReader(item);
+  expect(record).not.toBeNull();
+  const html = renderToStaticMarkup(<FullAnnotationReader record={record!} onBack={vi.fn()} />);
+  expect(html).toContain(item.payload.quote);
 });

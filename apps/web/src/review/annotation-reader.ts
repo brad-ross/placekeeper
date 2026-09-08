@@ -5,6 +5,7 @@ import {
   type ExistingAnnotationsDiscovery,
 } from '../pdf/existing-annotations.js';
 import { annotationKindLabel } from './AnnotationMetadata.js';
+import { annotationContent, type AnnotationContent } from './annotation-content.js';
 import { reviewItemPageRange } from './annotation-projection.js';
 
 export type AnnotationReaderIdentity =
@@ -19,7 +20,7 @@ export type AnnotationReaderIdentity =
       readonly discoveryGeneration: number;
     };
 
-interface AnnotationReaderRecordBase {
+interface AnnotationReaderRecordBase extends AnnotationContent {
   readonly identity: AnnotationReaderIdentity;
   readonly origin: 'owned' | 'source';
   readonly kind: string;
@@ -28,6 +29,7 @@ interface AnnotationReaderRecordBase {
   readonly lastPageNumber?: number;
   readonly sectionLabel?: string;
   readonly contentLabel:
+    | 'Deleted text'
     | 'Replacement text'
     | 'Insertion text'
     | 'Comment'
@@ -57,29 +59,13 @@ function nonBlankString(value: unknown): string | null {
   return typeof value === 'string' && value.trim().length > 0 ? value : null;
 }
 
-function ownedAuthoredContent(item: ReviewItem): Pick<
-  OwnedAnnotationReaderRecord,
-  'content' | 'contentLabel'
-> | null {
-  switch (item.kind) {
-    case 'replace': {
-      const content = nonBlankString(item.payload.proposedText);
-      return content === null ? null : { content, contentLabel: 'Replacement text' };
-    }
-    case 'insert': {
-      const content = nonBlankString(item.payload.proposedText);
-      return content === null ? null : { content, contentLabel: 'Insertion text' };
-    }
-    case 'highlight': {
-      const content = nonBlankString(item.payload.comment);
-      return content === null ? null : { content, contentLabel: 'Comment' };
-    }
-    case 'pageNote': {
-      const content = nonBlankString(item.payload.comment);
-      return content === null ? null : { content, contentLabel: 'Page note' };
-    }
-    case 'delete':
-      return null;
+function ownedContentLabel(kind: ReviewItem['kind']): OwnedAnnotationReaderRecord['contentLabel'] {
+  switch (kind) {
+    case 'replace': return 'Replacement text';
+    case 'insert': return 'Insertion text';
+    case 'highlight': return 'Comment';
+    case 'pageNote': return 'Page note';
+    case 'delete': return 'Deleted text';
   }
 }
 
@@ -87,8 +73,8 @@ export function projectOwnedAnnotationReader(
   item: ReviewItem,
   sectionLabel?: string,
 ): OwnedAnnotationReaderRecord | null {
-  const authored = ownedAuthoredContent(item);
-  if (authored === null) return null;
+  const presentation = annotationContent(item);
+  if (![presentation.content, presentation.sourceText, presentation.quoteText].some(nonBlankString)) return null;
   const visibleSectionLabel = nonBlankString(sectionLabel);
   const { firstPageIndex, lastPageIndex } = reviewItemPageRange(item);
 
@@ -100,7 +86,8 @@ export function projectOwnedAnnotationReader(
     pageNumber: firstPageIndex + 1,
     ...(lastPageIndex === firstPageIndex ? {} : { lastPageNumber: lastPageIndex + 1 }),
     ...(visibleSectionLabel === null ? {} : { sectionLabel: visibleSectionLabel }),
-    ...authored,
+    contentLabel: ownedContentLabel(item.kind),
+    ...presentation,
     mutable: true,
   };
 }

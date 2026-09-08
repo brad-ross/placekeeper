@@ -689,12 +689,17 @@ export function ReviewShell(props: ReviewShellProps) {
     : undefined;
   const annotationReaderOpen = annotationReaderRecord !== null;
   const annotationReaderIdentity = annotationReaderRecord?.identity;
-  const annotationReaderTarget = annotationReaderIdentity === undefined
+  const annotationSourceIdentity = annotationReaderIdentity ?? (
+    !annotationsVisible && peekItemId !== undefined
+      ? { origin: 'owned' as const, itemId: peekItemId }
+      : undefined
+  );
+  const annotationReaderTarget = annotationSourceIdentity === undefined
     ? null
-    : annotationReaderIdentity.origin === 'owned'
+    : annotationSourceIdentity.origin === 'owned'
       ? (() => {
           const item = props.state.items.find(
-            ({ id }) => id === annotationReaderIdentity.itemId,
+            ({ id }) => id === annotationSourceIdentity.itemId,
           );
           return item === undefined ? null : reviewItemNavigationTarget(item);
         })()
@@ -702,7 +707,7 @@ export function ReviewShell(props: ReviewShellProps) {
         ? (() => {
             const annotation = existingAnnotations.items.find(
               (candidate) => existingAnnotationKey(candidate)
-                === annotationReaderIdentity.annotationKey,
+                === annotationSourceIdentity.annotationKey,
             );
             return annotation === undefined
               ? null
@@ -941,7 +946,7 @@ export function ReviewShell(props: ReviewShellProps) {
   }, [annotationReaderOpen, annotationReaderSession]);
 
   useLayoutEffect(() => {
-    if (annotationReaderSession === null || !annotationReaderOpen) return;
+    if (annotationReaderTarget === null) return;
     const stage = workspaceFraming.stageRef.current;
     if (stage === null) return;
     let frame = 0;
@@ -954,15 +959,19 @@ export function ReviewShell(props: ReviewShellProps) {
     };
     const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(schedule);
     observer?.observe(stage);
-    stage.addEventListener('scroll', schedule, true);
+    const schedulePdfScroll = (event: Event) => {
+      if (event.target instanceof Element && event.target.matches('[data-viewer-framing-viewport]')) schedule();
+    };
+    stage.addEventListener('scroll', schedulePdfScroll, true);
     window.addEventListener('resize', schedule);
     return () => {
       cancelAnimationFrame(frame);
       observer?.disconnect();
-      stage.removeEventListener('scroll', schedule, true);
+      stage.removeEventListener('scroll', schedulePdfScroll, true);
       window.removeEventListener('resize', schedule);
     };
-  }, [annotationReaderOpen, annotationReaderSession, workspaceFraming.stageRef]);
+  }, [annotationReaderTarget?.pageIndex, annotationReaderTarget?.point.x,
+    annotationReaderTarget?.point.y, props.viewer.viewerNavigation, workspaceFraming.stageRef]);
 
   useEffect(() => {
     if (!readerNavigationPending || annotationReaderVisibility !== 'visible') return;
@@ -1034,8 +1043,11 @@ export function ReviewShell(props: ReviewShellProps) {
       restoreAnnotationList(session, { restoreRowFocus });
       return;
     }
+    cancelAnnotationRestoration();
+    pendingReaderResumeRef.current = null;
+    pendingMarkReaderRequestRef.current = null;
     setAnnotationReaderSession(null);
-    requestAnimationFrame(() => {
+    if (restoreRowFocus) requestAnimationFrame(() => {
       shellRef.current
         ?.querySelector<HTMLElement>('[data-annotation-peek] [data-read-full-annotation="true"]')
         ?.focus({ preventScroll: true });
@@ -1215,6 +1227,28 @@ export function ReviewShell(props: ReviewShellProps) {
     if (peekTimerRef.current !== undefined) clearTimeout(peekTimerRef.current);
     peekTimerRef.current = undefined;
   };
+  const dismissAnnotationPeek = () => {
+    clearPeekTimer();
+    cancelAnnotationRestoration();
+    peekHeldRef.current = false;
+    dismissedPeekIdRef.current = peekItemId;
+    pendingReaderResumeRef.current = null;
+    pendingMarkReaderRequestRef.current = null;
+    if (annotationReaderSession?.origin === 'peek') setAnnotationReaderSession(null);
+    setActiveItem(undefined);
+    setPeekItemId(undefined);
+  };
+  useEffect(() => {
+    if (authoringSession !== null || annotationReaderSession?.origin !== 'peek') return;
+    if (annotationReaderOwnedItemId === activeItemId) return;
+    if (activeItemId === undefined) {
+      dismissAnnotationPeek();
+      return;
+    }
+    pendingReaderResumeRef.current = null;
+    setAnnotationReaderSession(null);
+  }, [activeItemId, annotationReaderOwnedItemId, annotationReaderSession, authoringSession]);
+
   useEffect(() => {
     clearPeekTimer();
     if (annotationsVisible) {
@@ -1241,12 +1275,15 @@ export function ReviewShell(props: ReviewShellProps) {
     if (!request || authoringSessionRef.current !== null) return;
     clearPeekTimer();
     dismissedPeekIdRef.current = undefined;
+    cancelAnnotationRestoration();
+    pendingReaderResumeRef.current = null;
+    setAnnotationReaderSession(null);
     setActiveItem(request.id);
     setListActivation(request);
     const item = props.state.items.find(({ id }) => id === request.id);
     const readerRecord = item === undefined ? null : projectOwnedAnnotationReader(item);
     const knownOverflow = ownedReaderOverflowRef.current.get(request.id);
-    pendingMarkReaderRequestRef.current = item === undefined || knownOverflow !== undefined
+    pendingMarkReaderRequestRef.current = !anyWorkspaceOpen || item === undefined || knownOverflow !== undefined
       ? null
       : { id: request.id, token: request.token };
     setWorkspaceRequest(item && anyWorkspaceOpen
@@ -1259,10 +1296,6 @@ export function ReviewShell(props: ReviewShellProps) {
       : { kind: 'reading', token: ++annotationRequestTokenRef.current });
     dismissPageNoteAuthority();
     if (!anyWorkspaceOpen) {
-      if (readerRecord !== null && knownOverflow === true) {
-        openOwnedAnnotationReader(readerRecord, null, 'peek');
-        return;
-      }
       setPeekItemId(item?.id);
       return;
     }
@@ -1660,13 +1693,9 @@ export function ReviewShell(props: ReviewShellProps) {
       ) {
         return;
       }
-      if (peekItemId !== undefined) {
+      if (peekItemId !== undefined || annotationReaderSession?.origin === 'peek') {
         event.preventDefault();
-        clearPeekTimer();
-        peekHeldRef.current = false;
-        dismissedPeekIdRef.current = peekItemId;
-        setActiveItem(undefined);
-        setPeekItemId(undefined);
+        dismissAnnotationPeek();
         return;
       }
       if (surface.nestedLayer !== 'none') {
@@ -2208,6 +2237,13 @@ export function ReviewShell(props: ReviewShellProps) {
       onClickCapture={(event) => {
         if (
           authoringSessionRef.current === null
+          && (peekItemId !== undefined || annotationReaderSession?.origin === 'peek')
+          && event.button === 0
+          && event.target instanceof Element
+          && event.target.closest('.annotation-peek, [data-owned-focus-id], [data-owned-mark], [data-page-index]') === null
+        ) dismissAnnotationPeek();
+        if (
+          authoringSessionRef.current === null
           && (activeItemId !== undefined || activeExistingAnnotationKey !== undefined)
           && event.button === 0
           && event.target instanceof Element
@@ -2447,6 +2483,7 @@ export function ReviewShell(props: ReviewShellProps) {
               <AnnotationPeek
                 item={item}
                 selected={!anyWorkspaceOpen && activeItemId === item.id}
+                showSourceReturn={annotationReaderVisibility === 'outside'}
                 {...(copyLink === undefined ? {} : { copyLink })}
                 onHoldChange={(held) => {
                   peekHeldRef.current = held;

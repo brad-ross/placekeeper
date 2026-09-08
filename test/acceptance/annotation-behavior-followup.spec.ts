@@ -5,7 +5,7 @@ import { basename, join, resolve } from 'node:path';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 
 import { PlacekeeperHost } from '../../apps/service/src/host/placekeeper-host.js';
-import { addHighlight, addPageNote } from '../../packages/core/src/review-commands.js';
+import { addDelete, addHighlight, addPageNote, addReplace } from '../../packages/core/src/review-commands.js';
 
 let temporaryRoot = '';
 let sourceRoot = '';
@@ -28,8 +28,9 @@ async function waitForRenderedPageImage(page: Page): Promise<Locator> {
 
 async function openLongAnnotationFixture(
   page: Page,
-  kind: 'pageNote' | 'highlight' = 'pageNote',
-): Promise<{ sessionId: string; itemId: string }> {
+  kind: 'pageNote' | 'highlight' | 'replace' | 'delete' = 'pageNote',
+  options: { content?: string; quote?: string; sibling?: boolean } = {},
+): Promise<{ sessionId: string; itemId: string; siblingId?: string }> {
   const directory = join(temporaryRoot, randomUUID());
   await mkdir(directory);
   const pdfPath = join(directory, basename(fixturePdf));
@@ -40,29 +41,37 @@ async function openLongAnnotationFixture(
   }
   const initial = host.broker.state(launched.sessionId);
   if (initial === undefined) throw new Error('Long-annotation review state is unavailable.');
-  const command = kind === 'pageNote'
-    ? addPageNote(
-        initial,
-        0,
-        { x: 84, y: 164, width: 18, height: 18 },
-        LONG_ANNOTATION,
-      )
-    : addHighlight(initial, {
-        pageIndex: 0,
-        quote: 'Body TOC: repeated, aliased, page-only, and distinct-coordinate links',
-        prefix: '',
-        suffix: '',
-        rect: { x: 72, y: 686, width: 344, height: 14 },
-        segmentRects: [{ x: 72, y: 686, width: 344, height: 14 }],
-        reliable: true,
-      }, LONG_ANNOTATION);
+  const anchor = {
+    pageIndex: 0,
+    quote: options.quote ?? 'Body TOC: repeated, aliased, page-only, and distinct-coordinate links',
+    prefix: '', suffix: '',
+    rect: { x: 72, y: 686, width: 344, height: 14 },
+    segmentRects: [{ x: 72, y: 686, width: 344, height: 14 }],
+    reliable: true as const,
+  };
+  const command = (() => {
+    switch (kind) {
+      case 'pageNote': return addPageNote(initial, 0, { x: 84, y: 164, width: 18, height: 18 }, options.content ?? LONG_ANNOTATION);
+      case 'replace': return addReplace(initial, anchor, options.content ?? LONG_ANNOTATION);
+      case 'delete': return addDelete(initial, anchor);
+      case 'highlight': return addHighlight(initial, anchor, options.content ?? LONG_ANNOTATION);
+    }
+  })();
   await host.broker.acceptMutation(launched.sessionId, command);
   const itemId = host.broker.state(launched.sessionId)?.items[0]?.id;
   if (itemId === undefined) throw new Error('Long annotation was not created.');
+  let siblingId: string | undefined;
+  if (options.sibling) {
+    const state = host.broker.state(launched.sessionId)!;
+    await host.broker.acceptMutation(launched.sessionId, addPageNote(
+      state, 0, { x: 200, y: 164, width: 18, height: 18 }, 'Second annotation.',
+    ));
+    siblingId = host.broker.state(launched.sessionId)!.items.find((item) => item.id !== itemId)!.id;
+  }
   await page.goto(launched.url);
   await expect(page.locator('[data-production-review]')).toBeVisible();
   await waitForRenderedPageImage(page);
-  return { sessionId: launched.sessionId, itemId };
+  return { sessionId: launched.sessionId, itemId, ...(siblingId === undefined ? {} : { siblingId }) };
 }
 
 async function chooseCopyDestination(page: Page): Promise<void> {
@@ -110,7 +119,7 @@ test.afterAll(async () => {
   if (temporaryRoot !== '') await rm(temporaryRoot, { recursive: true, force: true });
 });
 
-test('uses the new hover card and opens long PDF marks in a deletable full reader', async ({ page }) => {
+test('uses the hover card and explicitly expands long PDF annotations in a deletable full reader', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 });
   const { sessionId, itemId } = await openLongAnnotationFixture(page);
   await chooseCopyDestination(page);
@@ -130,6 +139,7 @@ test('uses the new hover card and opens long PDF marks in a deletable full reade
   await expect(peek).toHaveCount(0);
 
   await page.mouse.click(center.x, center.y);
+  await peek.locator('[data-read-full-annotation]').click();
   const reader = page.locator('[data-full-annotation-reader="true"]:visible');
   await expect(reader).toBeVisible();
   await expect(reader).toContainText(LONG_ANNOTATION.slice(0, 120));
@@ -335,3 +345,89 @@ test.describe('passage edit continuity', () => {
     },
   );
 });
+
+
+test('selected compact popup offers return when its PDF annotation leaves the frame', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  const { itemId } = await openLongAnnotationFixture(page, 'pageNote', { content: 'Short note.' });
+  const center = await markCenter(page, itemId);
+  await page.mouse.click(center.x, center.y);
+  const peek = page.locator(`[data-annotation-peek="${itemId}"]`);
+  await expect(peek).toBeVisible();
+  const locate = peek.getByRole('button', { name: 'Back to annotation in PDF', exact: true });
+  await expect(locate).toHaveCount(0);
+  await page.locator('[data-viewer-framing-viewport]').evaluate((element) => { element.scrollTop = 1500; });
+  await expect(locate).toBeVisible();
+  await locate.click();
+  await expect(locate).toHaveCount(0);
+  const returned = await markCenter(page, itemId);
+  expect(returned.y).toBeGreaterThan(50);
+  expect(returned.y).toBeLessThan(900);
+});
+
+async function expandPopup(page: Page, itemId: string) {
+  const center = await markCenter(page, itemId);
+  await page.mouse.click(center.x, center.y);
+  const reader = page.locator('.annotation-peek--reader');
+  await expect(reader).toHaveCount(0);
+  await page.locator(`[data-annotation-peek="${itemId}"] [data-read-full-annotation]`).click();
+  await expect(reader).toBeVisible();
+  return reader;
+}
+
+test('expanded popup yields to another PDF annotation and reopens as a compact card', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  const { itemId, siblingId } = await openLongAnnotationFixture(page, 'pageNote', { sibling: true });
+  const reader = await expandPopup(page, itemId);
+  const second = await markCenter(page, siblingId!);
+  await page.mouse.click(second.x, second.y);
+  await expect(reader).toHaveCount(0);
+  await expect(page.locator(`[data-annotation-peek="${siblingId}"]`)).toBeVisible();
+  const first = await markCenter(page, itemId);
+  await page.mouse.click(first.x, first.y);
+  await expect(page.locator(`[data-annotation-peek="${itemId}"]`)).toBeVisible();
+  await expect(reader).toHaveCount(0);
+});
+
+test('outside click and Escape dismiss an expanded popup without retaining full view', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  const { itemId } = await openLongAnnotationFixture(page);
+  const reader = await expandPopup(page, itemId);
+  const image = await waitForRenderedPageImage(page);
+  const bounds = (await image.boundingBox())!;
+  await page.mouse.click(bounds.x + 30, bounds.y + 300);
+  await expect(reader).toHaveCount(0);
+  await expect(page.locator('[data-annotation-peek]')).toHaveCount(0);
+  const center = await markCenter(page, itemId);
+  await page.mouse.click(center.x, center.y);
+  await expect(page.locator(`[data-annotation-peek="${itemId}"]`)).toBeVisible();
+  await expect(reader).toHaveCount(0);
+  await page.locator(`[data-annotation-peek="${itemId}"] [data-read-full-annotation]`).click();
+  await page.keyboard.press('Escape');
+  await expect(reader).toHaveCount(0);
+  await expect(page.locator('[data-annotation-peek]')).toHaveCount(0);
+});
+
+
+for (const [kind, content] of [['highlight', 'Short comment.'], ['highlight', ''], ['replace', 'Short replacement.'], ['delete', '']] as const) {
+  test(`full ${kind} popup retains overflowing source text with ${content || 'no authored text'}`, async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    const quote = 'This is the complete original passage whose text must remain readable. '.repeat(24) + 'SOURCE PASSAGE END.';
+    const { itemId } = await openLongAnnotationFixture(page, kind, { content, quote });
+    await page.locator(`[data-owned-mark][data-review-id="${itemId}"]`).first().scrollIntoViewIfNeeded();
+    const center = await markCenter(page, itemId);
+    await page.mouse.click(center.x, center.y);
+    const peek = page.locator(`[data-annotation-peek="${itemId}"]`);
+    const more = peek.locator('[data-read-full-annotation]');
+    await expect(more).toBeVisible();
+    expect((await peek.boundingBox())!.height).toBeLessThan(240);
+    await more.click();
+    const reader = page.locator('.annotation-peek--reader');
+    await expect(reader).toContainText(quote);
+    if (kind === 'delete') await expect(reader.getByRole('button', { name: 'Edit', exact: true })).toHaveCount(0);
+    if (content) await expect(reader).toContainText(content);
+    const body = reader.locator('.full-annotation-reader__body');
+    await body.evaluate((element) => { element.scrollTop = element.scrollHeight; });
+    await expect(reader.getByText(/SOURCE PASSAGE END/)).toBeVisible();
+  });
+}

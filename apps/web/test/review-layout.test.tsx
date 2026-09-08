@@ -71,6 +71,7 @@ const annotationStyles = readFileSync(
   new URL('../src/app/review-layout-annotations.css', import.meta.url),
   'utf8',
 );
+const designTokens = readFileSync(new URL('../src/app/review-design-tokens.css', import.meta.url), 'utf8');
 const foundationStyles = readFileSync(
   new URL('../src/app/review-layout-foundation.css', import.meta.url),
   'utf8',
@@ -790,8 +791,8 @@ describe('review shell layout and accessibility contract', () => {
   });
 
   it('keeps responsive review chrome in one fixed-height row', () => {
-    expect(foundationStyles).toMatch(/--review-chrome-height:\s*54px;/u);
-    expect(foundationStyles).toMatch(/--review-chrome-center-y:\s*27px;/u);
+    expect(designTokens).toMatch(/--review-chrome-height:\s*54px;/u);
+    expect(designTokens).toMatch(/--review-chrome-center-y:\s*27px;/u);
     expect(foundationStyles).toMatch(
       /\.review-chrome\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\) max-content;[^}]*height:\s*var\(--review-chrome-height\);[^}]*overflow:\s*visible;/u,
     );
@@ -808,7 +809,7 @@ describe('review shell layout and accessibility contract', () => {
     expect(foundationStyles).toMatch(
       /\.review-chrome__sizing-candidate \.review-chrome__filename\s*\{[^}]*width:\s*var\(--review-document-title-cap\);[^}]*min-width:\s*var\(--review-document-title-cap\);[^}]*max-width:\s*var\(--review-document-title-cap\);[^}]*flex:\s*none;/u,
     );
-    expect(foundationStyles).toMatch(/--review-document-title-cap:\s*9rem;/u);
+    expect(designTokens).toMatch(/--review-document-title-cap:\s*9rem;/u);
     expect(layoutStyles).toMatch(
       /\.review-chrome__filename\s*\{[^}]*min-width:\s*0;[^}]*max-width:\s*var\(--review-document-title-cap\);[^}]*flex:\s*0 1 auto;/u,
     );
