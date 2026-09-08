@@ -39,6 +39,8 @@ interface ReviewAnnotationBase {
   modifiedAt: string;
   textAnchorReliable?: boolean;
   custom?: unknown;
+  /** Present for a comment-only edit of an existing standard PDF annotation. */
+  nativeSubtype?: string;
 }
 
 export type ReviewAnnotation = ReviewAnnotationBase & {
@@ -50,6 +52,8 @@ export interface PdfWriteRequest {
   sourceSha256: string;
   revision: number;
   annotations: readonly ReviewAnnotation[];
+  /** The request contains the complete editable source-annotation inventory. */
+  manageNativeAnnotations?: boolean;
 }
 
 export interface PdfWrittenAnnotationEvidence {

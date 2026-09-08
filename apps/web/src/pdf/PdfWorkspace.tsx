@@ -1,3 +1,6 @@
+import { SourceAnnotationLayer, type SourceReaderMark } from './SourceAnnotationMark.js';
+import { existingAnnotationKey, type SourceNativeAnnotation } from './existing-annotations.js';
+import { ANNOTATION_CSS_VARIABLES } from '../../../../packages/core/src/annotation-appearance.js';
 import type { PluginRegistry } from '@embedpdf/core';
 import { EmbedPDF, type PluginBatchRegistrations } from '@embedpdf/core/react';
 import type { PdfEngine } from '@embedpdf/models';
@@ -23,7 +26,6 @@ import {
 } from '../review/annotation-projection.js';
 import {
   sourceAnnotationLinkRenderers,
-  sourceAnnotationVisualRenderers,
 } from './PdfLinkControl.js';
 import { ReferencePdfViewport } from './ReferencePdfViewport.js';
 import type { ViewerRunway } from './viewer-framing.js';
@@ -60,6 +62,7 @@ export interface PdfWorkspaceProps {
   documentLabel?: string;
   onInitialized?: (registry: PluginRegistry) => Promise<void>;
   ownedAnnotations?: readonly ReviewAnnotation[];
+  sourceNativeAnnotations?: readonly SourceNativeAnnotation[];
   authoringPreview?: readonly ReviewAnnotation[] | null;
   keyboardPageNoteCursor?: ViewerPagePoint | null;
   onKeyboardPageNoteKey?: (key: string) => void;
@@ -101,6 +104,7 @@ export function PdfWorkspace({
   documentLabel = 'PDF document',
   onInitialized,
   ownedAnnotations = [],
+  sourceNativeAnnotations = [],
   authoringPreview = null,
   keyboardPageNoteCursor = null,
   onKeyboardPageNoteKey,
@@ -127,6 +131,19 @@ export function PdfWorkspace({
     () => mergeAuthoringPreviewProjections(ownedAnnotations, authoringPreview),
     [authoringPreview, ownedAnnotations],
   );
+  const sourceRendering = useMemo(() => {
+    const byId = new Map(ownedAnnotations.map((annotation) => [annotation.id, annotation]));
+    const hidden = new Set(sourceNativeAnnotations.filter(({ id }) => !byId.has(id))
+      .map(({ pageIndex, sourceId }) => existingAnnotationKey({ pageIndex, id: sourceId })));
+    const marks = new Map<string, SourceReaderMark>();
+    for (const source of sourceNativeAnnotations) {
+      const annotation = byId.get(source.id);
+      if (annotation && source.readerStyle) marks.set(existingAnnotationKey({ pageIndex: source.pageIndex, id: source.sourceId }), {
+        style: source.readerStyle, contents: annotation.contents,
+      });
+    }
+    return { hidden, marks };
+  }, [ownedAnnotations, sourceNativeAnnotations]);
   const authoringPreviewIds = useMemo(
     () => new Set(authoringPreview?.map(({ id }) => id) ?? []),
     [authoringPreview],
@@ -151,7 +168,7 @@ export function PdfWorkspace({
       role="region"
       className="pdf-workspace"
       data-pdf-copy-surface="main"
-      style={fillContainer ? undefined : { height: '70vh', minHeight: 480 }}
+      style={{ ...ANNOTATION_CSS_VARIABLES, ...(fillContainer ? {} : { height: '70vh', minHeight: 480 }) }}
     >
       <EmbedPDF
         engine={engine}
@@ -434,7 +451,7 @@ export function PdfWorkspace({
                         {(annotationsByPage.get(layout.pageIndex) ?? [])
                           .flatMap((annotation) => {
                             const page = activePdf.pages[layout.pageIndex];
-                            if (!page) return [];
+                            if (!page || annotation.kind === 'pdfAnnotation') return [];
                             return (annotation.quadPoints ?? [annotation.rect]).map((rect, index) => {
                               const markStyle = ownedMarkStyle(
                                 page,
@@ -448,6 +465,7 @@ export function PdfWorkspace({
                                   textAnchored={['highlight', 'delete', 'replace'].includes(annotation.kind)}
                                   key={`${annotation.id}:${index}`}
                                   data-owned-mark={annotation.kind}
+                                  data-pdf-mark-style={annotation.kind}
                                   data-has-attached-text={annotation.contents.trim().length > 0 ? 'true' : 'false'}
                                   data-review-id={reviewItemIdForAnnotation(annotation)}
                                   data-authoring-preview={authoringPreviewIds.has(annotation.id) ? 'true' : undefined}
@@ -531,10 +549,9 @@ export function PdfWorkspace({
                         data-source-annotation-layer
                         style={{ pointerEvents: 'none' }}
                       >
-                        <AnnotationLayer
-                          documentId={MAIN_PDF_DOCUMENT_ID}
-                          pageIndex={layout.pageIndex}
-                          annotationRenderers={[...sourceAnnotationVisualRenderers()]}
+                        <SourceAnnotationLayer
+                          document={activePdf} engine={engine} pageIndex={layout.pageIndex}
+                          marks={sourceRendering.marks} hidden={sourceRendering.hidden}
                         />
                       </div>
                       <div data-source-link-layer>

@@ -71,7 +71,7 @@ The private local PDF source acquired from a browser navigation solely to back a
 Viewing a Temporary Browser Source does not establish a durable Save Destination, and the source is never eligible for Modify Original. It remains available while an active session or Protected Recovery depends on it; durable annotation begins only after the reader chooses a separate filename and location.
 
 ### Review Item
-A durable, user-authored proofread instruction associated with PDF geometry, such as a replacement, deletion, insertion, highlight, or page note.
+A durable review record associated with PDF geometry, representing an authored proofread instruction or the editable comment and deletion state of a Native PDF Annotation.
 
 Review Items are the canonical review state: viewer markings and delivery artifacts are projections of them rather than independent editable records.
 
@@ -102,10 +102,17 @@ One Owned Annotation can appear as several visual segments; interactions treat t
 ### PDF Annotation Catalog
 The complete structural inventory of annotations physically present in a source PDF, kept broad for inspection, navigation, preservation, and reviewer-facing projection.
 
-Catalog membership does not determine editability or reviewer meaning: portable validation identifies Owned Annotations, while Navigational PDF Annotations and owned records remain outside the Existing PDF Annotation population.
+Catalog membership does not determine editability or reviewer meaning: portable validation identifies app-authored records, while native import establishes Native PDF Annotations. Both managed populations and Navigational PDF Annotations remain outside the residual Existing PDF Annotation population.
+
+### Native PDF Annotation
+An imported annotation whose Review Item controls comment edits and deletion while the original PDF representation retains drawing, geometry, author, and other native properties.
+
+Native import must establish authority over the source inventory before missing items can mean deletion. Comment and deletion permissions remain distinct, and portable ownership is not inferred from an annotation being editable.
 
 ### Existing PDF Annotation
-A reviewer-relevant, display-only annotation discovered in the source PDF, kept separate from Review Items so source-document viewer state cannot become editable review state.
+A reviewer-relevant, display-only annotation remaining in the source PDF after managed annotations and navigation objects are excluded.
+
+This residual discovery record stays separate from Review Items; native editing requires the explicit Native PDF Annotation import contract.
 
 Navigational PDF Annotations remain part of the document but are excluded from this reviewer-facing population.
 
@@ -295,4 +302,4 @@ Activating its primary row creates a Meaningful Jump in the Main Reading Thread,
 
 ## Relationships
 
-A Native Window Attempt may activate a Presentation Lease for a Canonical Review, but the attempt remains disposable and never becomes the durable review identity. A Review Item projects to an Owned Annotation using Crop-relative Geometry and may carry Portable Annotation Identity in the saved PDF. The PDF Annotation Catalog retains every source annotation; reviewer-facing projections remove owned and Navigational PDF Annotations before forming the separate read-only Existing PDF Annotation population. The Annotation Tray presents Review Items and Existing PDF Annotations, while a Framing Session may use Viewer Runway to keep the relevant PDF content reachable. Protected Recovery covers accepted changes until Save Sync proves that the Save Destination has caught up.
+A Native Window Attempt may activate a Presentation Lease for a Canonical Review, but the attempt remains disposable and never becomes the durable review identity. A Review Item projects to an Owned Annotation using Crop-relative Geometry and may carry Portable Annotation Identity in the saved PDF. The PDF Annotation Catalog retains every source annotation; reviewer-facing projections remove managed app-authored and Native PDF Annotations plus Navigational PDF Annotations before forming the separate read-only Existing PDF Annotation population. The Annotation Tray presents Review Items and Existing PDF Annotations, while a Framing Session may use Viewer Runway to keep the relevant PDF content reachable. Protected Recovery covers accepted changes until Save Sync proves that the Save Destination has caught up.

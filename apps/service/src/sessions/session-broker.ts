@@ -65,7 +65,7 @@ import type { FrozenReviewDelivery } from "../export/export-coordinator.js";
 import {
   assessPdfRewriteEligibility,
   migrateLegacyReviewStateGeometry,
-  readPortableReviewItems,
+  readEditableReviewItems,
 } from "../../../../packages/pdf-backends/src/embedpdf-adapter.js";
 import { SessionControlRegistry } from "./control-socket.js";
 import { TaskBindingRegistry } from "../context/task-binding-registry.js";
@@ -449,7 +449,7 @@ export class SessionBroker {
       });
     this.#now = options.now ?? (() => new Date());
     this.#snapshotHooks = options.snapshotHooks ?? {};
-    this.#portableReader = options.portableReader ?? readPortableReviewItems;
+    this.#portableReader = options.portableReader ?? readEditableReviewItems;
     this.#rewriteAssessor = options.rewriteAssessor ??
       (options.portableReader === undefined
         ? assessPdfRewriteEligibility
@@ -477,15 +477,17 @@ export class SessionBroker {
             signal?.throwIfAborted();
             const rewriteEligibility = await abortable(this.#rewriteAssessor(bytes), signal);
             let importedItems: readonly ReviewItem[] = [];
+            let nativeAnnotationsImported = false;
             try {
               importedItems = await abortable(this.#portableReader(bytes), signal);
+              nativeAnnotationsImported = true;
             } catch (error) {
               signal?.throwIfAborted();
               if ((error as { readonly code?: unknown }).code === "invalid-portable-annotation") {
                 throw error;
               }
             }
-            return { rewriteEligibility, importedItems };
+            return { rewriteEligibility, importedItems, nativeAnnotationsImported };
           }
     );
   }
@@ -768,7 +770,7 @@ export class SessionBroker {
           });
         }
       }
-      const { rewriteEligibility, importedItems } = await this.#browserSourceInspector(
+      const { rewriteEligibility, importedItems, nativeAnnotationsImported } = await this.#browserSourceInspector(
         adopted.path,
         signal,
       );
@@ -778,9 +780,10 @@ export class SessionBroker {
         digest: adopted.sha256,
         byteLength: adopted.byteLength,
       };
-      const state = importedItems.length === 0
+      const initialState = importedItems.length === 0
         ? createReviewState({ sessionId, source })
         : createImportedReviewState({ sessionId, source, items: importedItems });
+      const state = { ...initialState, ...(nativeAnnotationsImported === true ? { nativeAnnotationImportDigest: source.digest } : {}) };
       const stateDigest = reviewStateDigest(state);
       const sourceOwnership: RecoverableSourceOwnership = {
         disposition: "remote-temporary",
@@ -1011,8 +1014,26 @@ export class SessionBroker {
         sourceSnapshotBytes,
         matchingDraft.state,
       );
+      // Older recovery records never imported standard marks. Add them once to
+      // the current state and every undo snapshot, so undo cannot delete them.
+      let nativeMigration: readonly ReviewItem[] = [];
+      let nativeImportSucceeded = migratedState.nativeAnnotationImportDigest === migratedState.source.digest;
+      if (!nativeImportSucceeded) {
+        try {
+          nativeMigration = (await this.#portableReader(sourceSnapshotBytes))
+            .filter((item) => item.kind === 'pdfAnnotation' && !migratedState.items.some(({ id }) => id === item.id));
+          nativeImportSucceeded = true;
+        } catch { /* Preserve all source annotations until an import can succeed. */ }
+      }
+      const mergeNative = (items: readonly ReviewItem[]) => [...items,
+        ...nativeMigration.filter((item) => !items.some(({ id }) => id === item.id))];
       const resumedState: ReviewState = {
         ...migratedState,
+        ...(nativeImportSucceeded ? { nativeAnnotationImportDigest: migratedState.source.digest } : {}),
+        items: mergeNative(migratedState.items),
+        history: migratedState.history.map((entry) => ({ ...entry,
+          beforeItems: mergeNative(entry.beforeItems), afterItems: mergeNative(entry.afterItems),
+        })),
         source: { ...migratedState.source, fileId: approvedFile.id },
         ...(approvedRoot === undefined ? {} : { sourceRootId: approvedRoot.id }),
       };
@@ -1027,6 +1048,10 @@ export class SessionBroker {
       let sync = matchingDraft.sync.phase === "saving"
         ? { ...matchingDraft.sync, phase: "not-saved" as const, failure: "write-failed" as const }
         : matchingDraft.sync;
+      if (nativeMigration.length > 0) {
+        const desiredDigest = reviewStateDigest(resumedState);
+        sync = { ...sync, desiredDigest, ...(sync.phase === 'clean' ? { savedDigest: desiredDigest } : {}) };
+      }
       if (geometryMigrated) {
         sync = {
           ...sync,
@@ -1163,10 +1188,12 @@ export class SessionBroker {
     };
     const initialOutputInfo = await stat(approvedFile.canonicalPath);
     let importedItems: readonly ReviewItem[] = [];
+    let nativeAnnotationsImported = false;
     try {
       importedItems = await this.#portableReader(
         new Uint8Array(await readFile(sourceSnapshot.path)),
       );
+      nativeAnnotationsImported = true;
     } catch (error) {
       if ((error as { readonly code?: unknown }).code === "invalid-portable-annotation") {
         throw error;
@@ -1188,7 +1215,7 @@ export class SessionBroker {
           pdfDigest: sourceSnapshot.digest,
         }).catch(() => undefined)
       : undefined;
-    const state = importedItems.length === 0
+    const initialState = importedItems.length === 0
       ? createReviewState({
           sessionId,
           source,
@@ -1202,6 +1229,7 @@ export class SessionBroker {
           items: importedItems,
           ...(request.workflowMode === undefined ? {} : { workflowMode: request.workflowMode }),
         });
+    const state = { ...initialState, ...(nativeAnnotationsImported ? { nativeAnnotationImportDigest: source.digest } : {}) };
     const digest = reviewStateDigest(state);
     const destination: DurableSaveDestination = state.workflow.mode === "generated-output" || importedItems.length === 0 || !rewriteEligibility.eligible
       ? { phase: "none", generation: 0 }
@@ -2885,6 +2913,7 @@ export class SessionBroker {
         revision: state.revision,
         sourceSnapshotPath: session.sourceSnapshotPath,
         annotations: projectReviewItems(state.items),
+        manageNativeAnnotations: state.nativeAnnotationImportDigest === state.source.digest,
         items: documentOrderedItems(state.items),
         workflowMode: state.workflow.mode,
         documentGeneration: state.workflow.documentGeneration,

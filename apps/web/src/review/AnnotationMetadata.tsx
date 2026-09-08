@@ -9,6 +9,11 @@ export interface AnnotationMetadataProps {
 }
 
 const ANNOTATION_KIND_LABELS: Readonly<Record<string, string>> = {
+  pdfAnnotation: 'PDF annotation',
+  text: 'Note', freeText: 'Text box', strikeOut: 'Strikeout', underline: 'Underline',
+  squiggly: 'Squiggly underline', stamp: 'Stamp', ink: 'Drawing', square: 'Rectangle',
+  circle: 'Ellipse', line: 'Line', polygon: 'Polygon', polyline: 'Polyline',
+  fileAttachment: 'Attachment', sound: 'Sound', caret: 'Caret', redact: 'Redaction', watermark: 'Watermark',
   delete: 'Delete',
   highlight: 'Highlight',
   insert: 'Insert',

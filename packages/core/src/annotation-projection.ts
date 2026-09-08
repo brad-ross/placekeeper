@@ -1,3 +1,4 @@
+import { nativePdfAnnotationSubtype } from './native-pdf-annotation.js';
 import type { ReviewAnnotation } from "./pdf-writer.js";
 import type { JsonValue, ReviewItem } from "./review-model.js";
 import {
@@ -48,6 +49,7 @@ export function projectReviewItem(
       ? { quadPoints: segmentRects }
       : {}),
   };
+  if (item.kind === 'pdfAnnotation') return annotation;
   return {
     ...annotation,
     custom: createPortableAnnotationCustom(item, annotation),
@@ -60,10 +62,11 @@ function annotationBase(item: ReviewItem, author: string) {
     contents: item.kind === "replace" || item.kind === "insert"
       ? text(item.payload, "proposedText")
       : text(item.payload, "comment"),
-    author,
+    author: item.kind === 'pdfAnnotation' ? String(item.payload.author ?? '') : author,
+    ...(item.kind === 'pdfAnnotation' ? { nativeSubtype: nativePdfAnnotationSubtype(item)! } : {}),
     createdAt: item.createdAt,
     modifiedAt: item.updatedAt,
-    ...(item.kind === "pageNote"
+    ...((item.kind === "pageNote" || item.kind === "pdfAnnotation")
       ? {}
       : { textAnchorReliable: item.payload.reliable === true }),
   };
@@ -98,6 +101,7 @@ function projectedAnnotation(input: {
       ? { quadPoints: input.quadPoints }
       : {}),
   };
+  if (item.kind === 'pdfAnnotation') return annotation;
   if (input.custom !== undefined) return { ...annotation, custom: input.custom };
   if (projectionCount > 1) return annotation;
   return {

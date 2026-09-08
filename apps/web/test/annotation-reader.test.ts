@@ -67,6 +67,14 @@ describe('annotation reader complete-content projection', () => {
     },
   );
 
+  it('keeps native comments and locks in the shared card and reader projection', () => {
+    const item = owned('pdfAnnotation', { comment: 'Native reviewer comment.', subtype: 'Highlight', contentsLocked: true });
+    expect(projectOwnedAnnotationReader(item)).toMatchObject({
+      content: 'Native reviewer comment.', contentLabel: 'Comment', typeLabel: 'Highlight', mutable: false,
+    });
+    expect(projectOwnedAnnotationReader(owned('pdfAnnotation', { comment: '', subtype: 'Highlight' }))).toBeNull();
+  });
+
   it.each([
     owned('delete', { quote: 'A long deleted source passage.' }),
     owned('highlight', { quote: 'A long highlighted source passage.' }),

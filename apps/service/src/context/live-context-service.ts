@@ -158,8 +158,9 @@ export async function inspectLivePdf(
     return Array.from({ length: projectionCount }, (_, projectionIndex) =>
       portableAnnotationProjectionId(item.id, projectionIndex, projectionCount));
   }));
+  for (const { annotationId } of inspected.nativeAnnotations ?? []) ownedIds.add(annotationId);
   const reviewerAnnotations = inspected.annotations.filter(
-    ({ id, subtype }) => !ownedIds.has(id) && !isNavigationalPdfAnnotationSubtype(subtype),
+    ({ id, subtype }) => !ownedIds.has(id) && !isNavigationalPdfAnnotationSubtype(subtype) && !["popup", "widget", "xfawidget"].includes(subtype.toLowerCase()),
   );
   const existingAnnotations = reviewerAnnotations
     .map((annotation): ExistingPdfAnnotation => {
@@ -498,7 +499,7 @@ export class LiveContextService {
 
   #sourceHintKey(snapshot: AtomicSessionProjection, item: ReviewItem): string {
     const geometry = item.payload[
-      item.kind === "insert" || item.kind === "pageNote" ? "position" : "rect"
+      item.kind === "insert" || item.kind === "pageNote" || item.kind === "pdfAnnotation" ? "position" : "rect"
     ];
     return JSON.stringify([
       snapshot.sessionId,

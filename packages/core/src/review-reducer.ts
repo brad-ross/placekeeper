@@ -1,3 +1,4 @@
+import { canEditPdfAnnotationComment, canDeletePdfAnnotation, isEditablePdfAnnotationSubtype } from './native-pdf-annotation.js';
 import {
   anchorEvidenceFromReviewItem,
   canonicalizeReviewItem,
@@ -71,7 +72,7 @@ export function assertReviewItem(
     throw new InvalidReviewCommandError("Review item pageIndex must be non-negative");
   }
   if (
-    !["replace", "delete", "insert", "highlight", "pageNote"].includes(
+    !["replace", "delete", "insert", "highlight", "pageNote", "pdfAnnotation"].includes(
       item.kind,
     )
   ) {
@@ -88,6 +89,7 @@ export function assertReviewItem(
     insert: ['position', 'leftContext', 'rightContext', 'reliable', 'proposedText'],
     highlight: ['quote', 'prefix', 'suffix', 'rect', 'segmentRects', 'pages', 'pageBoundaries', 'reliable', 'comment'],
     pageNote: ['position', 'comment', 'nearbyText'],
+    pdfAnnotation: ['position', 'comment', 'subtype', 'author', 'contentsLocked', 'deletionLocked'],
   };
   if (keys.some((key) => !allowedByKind[item.kind].includes(key))) {
     throw new InvalidReviewCommandError("Review item payload has unsupported fields");
@@ -116,6 +118,7 @@ export function assertReviewItem(
     });
 
   const valid =
+    (item.kind === 'pdfAnnotation' && ['contentsLocked', 'deletionLocked'].every((key) => item.payload[key] === undefined || item.payload[key] === true) && geometry('position') && text('comment') && text('author') && text('subtype') && isEditablePdfAnnotationSubtype(String(item.payload.subtype))) ||
     (item.kind === 'replace' && selection() && text('proposedText', false)) ||
     (item.kind === 'delete' && selection()) ||
     (item.kind === 'insert' && item.payload.reliable === true && geometry('position') && text('leftContext') && text('rightContext') && text('proposedText', false) && item.payload.quote === undefined) ||
@@ -265,7 +268,7 @@ export function assertReviewAnchorEvidence(anchor: ReviewAnchorEvidenceV1): void
 function assertAnchorMatchesReviewItem(item: ReviewItem, anchor: ReviewAnchorEvidenceV1): void {
   const expectedKind = item.kind === "insert"
     ? "caret"
-    : item.kind === "pageNote"
+    : (item.kind === "pageNote" || item.kind === "pdfAnnotation")
       ? "page"
       : "selection";
   if (anchor.kind !== expectedKind) {
@@ -501,6 +504,7 @@ export function reduceReview(
         const itemIndex = state.items.findIndex(({ id }) => id === draft.targetItemId);
         if (itemIndex < 0) throw new InvalidReviewCommandError("Edited Review Item no longer exists");
         const existing = state.items[itemIndex]!;
+        if (!canEditPdfAnnotationComment(existing)) throw new InvalidReviewCommandError("This PDF annotation comment is locked");
         if (existing.kind !== draft.kind || existing.kind === "delete") {
           throw new InvalidReviewCommandError("Pending review draft kind does not match its Review Item");
         }
@@ -591,9 +595,10 @@ export function reduceReview(
         throw new InvalidReviewCommandError("Review item does not exist");
       }
       const existing = state.items[index]!;
+      if (!canEditPdfAnnotationComment(existing)) throw new InvalidReviewCommandError('This PDF annotation comment is locked');
       const mutable = existing.kind === 'replace' || existing.kind === 'insert'
         ? ['proposedText']
-        : existing.kind === 'highlight' || existing.kind === 'pageNote'
+        : existing.kind === 'highlight' || existing.kind === 'pageNote' || existing.kind === 'pdfAnnotation'
           ? ['comment']
           : [];
       if (Object.keys(command.payload).length === 0 || Object.keys(command.payload).some((key) => !mutable.includes(key))) {
@@ -612,6 +617,8 @@ export function reduceReview(
       if (!state.items.some((item) => item.id === command.id)) {
         throw new InvalidReviewCommandError("Review item does not exist");
       }
+      const existing = state.items.find((item) => item.id === command.id)!;
+      if (!canDeletePdfAnnotation(existing)) throw new InvalidReviewCommandError('This PDF annotation is locked against deletion');
       items = state.items.filter((item) => item.id !== command.id);
       break;
     }

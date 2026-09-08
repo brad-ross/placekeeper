@@ -1,3 +1,6 @@
+import type { SourceAnnotationStyle, SourceAnnotationStyles } from './source-annotation-style.js';
+import { nativeAnnotationsFromPages } from '../../../../packages/pdf-backends/src/native-annotations.js';
+import { portableItemsFromAnnotationPages } from '../../../../packages/pdf-backends/src/embedpdf-annotation.js';
 import type { PdfSpaceRect } from './selection-anchor.js';
 import { isNavigationalPdfAnnotationSubtype } from '../../../../packages/core/src/pdf-annotation-classification.js';
 import {
@@ -10,6 +13,8 @@ import {
 /** Display-only data copied from the immutable source PDF. */
 export interface ExistingAnnotation {
   readonly id: string;
+  readonly sourceId?: string;
+  readonly readerStyle?: SourceAnnotationStyle;
   readonly subtype: string;
   readonly pageIndex: number;
   readonly rect: PdfSpaceRect;
@@ -20,8 +25,14 @@ export interface ExistingAnnotation {
   readonly supportedAppearance: boolean;
 }
 
+export type SourceNativeAnnotation = Pick<ExistingAnnotation, 'id' | 'pageIndex' | 'readerStyle'> & {
+  readonly sourceId: string;
+};
+
 export interface ExistingAnnotationSource {
   id: string;
+  sourceId?: string;
+  readerStyle?: SourceAnnotationStyle;
   subtype: string;
   pageIndex: number;
   rect: PdfSpaceRect;
@@ -47,9 +58,11 @@ export function inventoryExistingAnnotations(
   annotations: readonly ExistingAnnotationSource[],
 ): readonly ExistingAnnotation[] {
   return annotations
-    .filter(({ subtype }) => !isNavigationalPdfAnnotationSubtype(subtype))
+    .filter(({ subtype }) => !isNavigationalPdfAnnotationSubtype(subtype) && !['popup', 'widget', 'xfawidget'].includes(subtype.toLowerCase()))
     .map((annotation) => ({
       id: annotation.id,
+      ...(annotation.sourceId === undefined ? {} : { sourceId: annotation.sourceId }),
+      ...(annotation.readerStyle === undefined ? {} : { readerStyle: annotation.readerStyle }),
       subtype: annotation.subtype,
       pageIndex: annotation.pageIndex,
       rect: { ...annotation.rect },
@@ -155,13 +168,20 @@ function appearanceModeNames(bitmask = 0): string[] {
 export async function inventoryDocumentAnnotations(
   engine: PdfEngine,
   document: PdfDocumentObject,
+  styles?: SourceAnnotationStyles | Promise<SourceAnnotationStyles>,
 ): Promise<readonly ExistingAnnotation[]> {
-  const byPage = await engine.getAllAnnotations(document).toPromise();
+  const [byPage, sourceStyles] = await Promise.all([engine.getAllAnnotations(document).toPromise(), styles]);
+  const pages = document.pages.map((_, pageIndex) => byPage[pageIndex] ?? []);
+  const portable = portableItemsFromAnnotationPages(pages, { invalidMetadata: 'foreign' });
+  const nativeIds = new Map(nativeAnnotationsFromPages(pages, portable.owned)
+    .map(({ pageIndex, annotationIndex, item }) => [`${pageIndex}:${annotationIndex}`, item.id]));
   const sources = Object.entries(byPage).flatMap(([page, annotations]) =>
     annotations
-      .filter(({ type }) => type !== PdfAnnotationSubtype.LINK)
-      .map((annotation) => ({
-        id: annotation.id,
+      .map((annotation, annotationIndex) => ({
+        id: nativeIds.get(`${page}:${annotationIndex}`) ?? annotation.id,
+        ...(nativeIds.has(`${page}:${annotationIndex}`) ? { sourceId: annotation.id } : {}),
+        ...(sourceStyles?.pageAnnotationCounts[Number(page)] === annotations.length && sourceStyles.byIndex.has(`${page}:${annotationIndex}`)
+          ? { readerStyle: sourceStyles.byIndex.get(`${page}:${annotationIndex}`)! } : {}),
         subtype: PdfAnnotationSubtypeName[annotation.type] ?? `Unsupported ${annotation.type}`,
         pageIndex: Number(page),
         rect: {

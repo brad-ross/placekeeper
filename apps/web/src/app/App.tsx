@@ -1,3 +1,4 @@
+import { fetchSourceAnnotationStyles, type SourceAnnotationStyles } from '../pdf/source-annotation-style.js';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { PluginRegistry } from '@embedpdf/core';
 import { DocumentManagerPlugin } from '@embedpdf/plugin-document-manager';
@@ -17,12 +18,15 @@ import {
 import {
   ExistingAnnotationDiscoveryAuthority,
   inventoryDocumentAnnotations,
+  existingAnnotationKey,
   mergeExistingAnnotations,
   type ExistingAnnotation,
+  type SourceNativeAnnotation,
   type ExistingAnnotationsDiscovery,
 } from '../pdf/existing-annotations.js';
 import {
   createLocalPdfiumViewer,
+  buildViewerDocumentOptions,
   type ViewerAssetUrls,
   type ViewerResourcePolicy,
 } from '../pdf/embedpdf-viewer.js';
@@ -334,6 +338,8 @@ export function App({
   explicitAnnotationsRef.current = existingAnnotations;
   const ownedAnnotationsRef = useRef(ownedAnnotations);
   ownedAnnotationsRef.current = ownedAnnotations;
+  const [sourceNativeAnnotations, setSourceNativeAnnotations] = useState<readonly SourceNativeAnnotation[]>([]);
+  const sourceStyles = useRef(new WeakMap<object, Promise<SourceAnnotationStyles>>());
   const sourceOwnedAnnotations = useRef(new WeakMap<
     object,
     readonly Pick<ExistingAnnotation, 'id' | 'pageIndex'>[]
@@ -394,8 +400,15 @@ export function App({
       sourceOwnedAnnotations.current.set(document, owned);
     }
     const token = inventoryAuthority.current.begin(documentId);
+    setSourceNativeAnnotations((current) => current.length === 0 ? current : []);
     publishInventory({ status: 'loading', generation: token.generation });
-    void inventoryDocumentAnnotations(viewer.engine, document).then(
+    let styles = sourceStyles.current.get(document);
+    if (!styles) {
+      const options = buildViewerDocumentOptions(assets, resourcePolicy ?? window.location.origin);
+      styles = fetchSourceAnnotationStyles(options);
+      sourceStyles.current.set(document, styles);
+    }
+    void inventoryDocumentAnnotations(viewer.engine, document, styles).then(
       (discovered) => {
         const result = inventoryAuthority.current.ready(
           token,
@@ -403,14 +416,21 @@ export function App({
           explicitAnnotationsRef.current,
           owned,
         );
-        if (result) publishInventory(result);
+        if (result) {
+          const importedIds = new Set(owned.map(existingAnnotationKey));
+          setSourceNativeAnnotations(discovered.flatMap((annotation) =>
+            annotation.sourceId !== undefined && importedIds.has(existingAnnotationKey(annotation))
+              ? [{ id: annotation.id, pageIndex: annotation.pageIndex, sourceId: annotation.sourceId,
+                  ...(annotation.readerStyle === undefined ? {} : { readerStyle: annotation.readerStyle }) }] : []));
+          publishInventory(result);
+        }
       },
       (error: unknown) => {
         const result = inventoryAuthority.current.error(token, error);
         if (result) publishInventory(result);
       },
     );
-  }, [publishInventory, viewer.engine]);
+  }, [assets, resourcePolicy, publishInventory, viewer.engine]);
   const discoverOutline = useCallback((
     document: Parameters<typeof readPdfOutline>[0]['document'],
   ) => {
@@ -1207,6 +1227,7 @@ export function App({
       onInitialized={initializeViewer}
       searchResults={searchResults}
       ownedAnnotations={ownedAnnotations}
+      sourceNativeAnnotations={sourceNativeAnnotations}
       authoringPreview={authoringPreview}
       keyboardPageNoteCursor={keyboardCursor}
       onKeyboardPageNoteKey={keyboardCursorKey}

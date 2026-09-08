@@ -1,7 +1,7 @@
 ---
 title: Content-aware annotation workspace presentation
 date: 2026-08-11
-last_updated: 2026-09-07
+last_updated: 2026-09-08
 category: design-patterns
 module: PDF review workspace presentation
 problem_type: design_pattern
@@ -167,7 +167,7 @@ A current `loaded-tree` changing to current `loaded-empty` removes the Outline t
 
 ### External annotation context
 
-For a current `loaded-tree`, owned and reviewer-relevant external annotations may show their containing subsection. External rows remain read-only, and navigation-only PDF annotations stay out of the review list. For loading, unavailable, stale, or confirmed-empty outline state, omit subsection labels.
+For a current `loaded-tree`, owned and reviewer-relevant external annotations may show their containing subsection. Residual Existing PDF Annotation rows remain read-only; native annotations imported as Review Items use the managed item path. Navigation-only PDF annotations stay out of the review list (`apps/web/src/pdf/existing-annotations.ts:83`; `apps/web/src/review/AnnotationList.tsx:179`). For loading, unavailable, stale, or confirmed-empty outline state, omit subsection labels.
 
 ## Related
 

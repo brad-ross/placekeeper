@@ -57,6 +57,10 @@ function payload(item: ReviewItem): Record<string, JsonValue> {
       return typeof item.payload.comment === "string"
         ? { comment: item.payload.comment }
         : {};
+    case "pdfAnnotation":
+      return { comment: string(item, "comment"), subtype: string(item, "subtype"), author: string(item, "author"),
+        ...(item.payload.contentsLocked === true ? { contentsLocked: true } : {}),
+        ...(item.payload.deletionLocked === true ? { deletionLocked: true } : {}) };
     case "pageNote":
       return { comment: string(item, "comment") };
     case "delete":
@@ -87,7 +91,7 @@ export function projectStructuredReviewItem(
   };
   const anchor: StructuredReviewItem["anchor"] = item.kind === "insert"
     ? { kind: "caret", leftContext: string(item, "leftContext"), rightContext: string(item, "rightContext") }
-    : item.kind === "pageNote"
+    : (item.kind === "pageNote" || item.kind === "pdfAnnotation")
       ? { kind: "page", ...(typeof item.payload.nearbyText === "string" ? { nearbyText: item.payload.nearbyText } : {}) }
       : { kind: "selection", quote: string(item, "quote"), prefix: string(item, "prefix"), suffix: string(item, "suffix") };
   return {

@@ -1,7 +1,7 @@
 ---
 title: "Full Annotation Reader preserves Annotation Tray context"
 date: "2026-08-24"
-last_updated: "2026-09-07"
+last_updated: "2026-09-08"
 category: "design-patterns"
 module: "Full Annotation Reader"
 problem_type: "design_pattern"
@@ -11,7 +11,7 @@ applies_when:
   - "A compact annotation excerpt needs measured-overflow detail disclosure"
   - "Detail can originate from a tray row or a PDF annotation peek"
   - "Reading full annotation text should preserve current PDF position"
-  - "Imported annotation content must remain read-only"
+  - "Residual Existing PDF Annotation content must remain read-only"
   - "Edits and rapid transitions may invalidate identity, eligibility, or queued restoration"
 related_components:
   - "Annotation Tray"
@@ -43,7 +43,7 @@ The earlier authored-content-only contract omitted replacement source text, excl
 
 ### Separate complete content from measured disclosure
 
-Project the same semantic content for the compact card and full reader. Replacements retain proposed text and struck source; deletes retain struck source without authored content; highlights retain comments and a separate quote. Insertions and Page Notes use their existing content/fallback rules (`apps/web/src/review/annotation-content.ts:15`). A reader record is eligible when any projected content field is nonblank, not only when a comment or proposal exists (`apps/web/src/review/annotation-reader.ts:72`). Imported annotations still require nonblank contents and remain read-only (`apps/web/src/review/annotation-reader.ts:101`).
+Project the same semantic content for the compact card and full reader. Replacements retain proposed text and struck source; deletes retain struck source without authored content; highlights retain comments and a separate quote. Insertions and Page Notes use their existing content/fallback rules (`apps/web/src/review/annotation-content.ts:15`). A reader record is eligible when any projected content field is nonblank, not only when a comment or proposal exists (`apps/web/src/review/annotation-reader.ts:72`). Native Review Items project their comments through the same owned path. Residual Existing PDF Annotations still require nonblank contents and remain read-only (`apps/web/src/review/annotation-reader.ts:101`).
 
 Eligibility does not imply that a disclosure control should appear. Measure actual overflow of both the main excerpt and quote, with the one-pixel tolerance, and remeasure on content, fonts, and relevant size changes. The hook observes both blocks and includes quote text in its content dependency (`apps/web/src/review/AnnotationExcerpt.tsx:14`, `apps/web/src/review/AnnotationExcerpt.tsx:42`, `apps/web/src/review/AnnotationExcerpt.tsx:102`). The quote itself is clamped in the compact view (`apps/web/src/app/neutral-chrome.css:1599`). Character counts cannot substitute for these layout measurements.
 
@@ -51,9 +51,9 @@ When either block overflows, the excerpt becomes the Read full annotation button
 
 ### Store identity and origin, not copied content
 
-Resolve transient reader identity against current domain state. Owned records resolve by item ID; imported identities also carry document and discovery generations and fail closed when either changes (`apps/web/src/review/annotation-reader.ts:138`). The shell checks authoring authority before resolution (`apps/web/src/app/ReviewShell.tsx:678`). Do not retain copied text that can survive an edit or source replacement incorrectly.
+Resolve transient reader identity against current domain state. Owned records, including native Review Items, resolve by item ID; residual existing identities also carry document and discovery generations and fail closed when either changes (`apps/web/src/review/annotation-reader.ts:138`). The shell checks authoring authority before resolution (`apps/web/src/app/ReviewShell.tsx:678`). Do not retain copied text that can survive an edit or source replacement incorrectly.
 
-Origin determines restoration. A list-origin reader returns to list context; a peek-origin reader returns to the compact popup. The shell mounts the latter outside the workspace when annotations are not visible (`apps/web/src/app/ReviewShell.tsx:2442`). The annotation remains one domain object regardless of its presentation origin.
+Origin determines restoration. A list-origin reader returns to list context; a peek-origin reader returns to the compact popup. The shell mounts the latter outside the workspace when annotations are not visible (`apps/web/src/app/ReviewShell.tsx:2442`). The annotation remains one domain object regardless of its presentation origin. Residual existing readers receive no owned Edit/Delete callbacks. Native comment edits and deletion remain subject to independently enforced PDF locks (`packages/core/src/native-pdf-annotation.ts:33`).
 
 ### Separate selected popups, hover previews, and explicit reading
 

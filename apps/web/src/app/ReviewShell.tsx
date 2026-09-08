@@ -385,7 +385,7 @@ function isVisibleFocusTarget(element: HTMLElement | null | undefined): element 
 
 function mutableField(item: ReviewItem): 'proposedText' | 'comment' | undefined {
   if (item.kind === 'replace' || item.kind === 'insert') return 'proposedText';
-  if (item.kind === 'highlight' || item.kind === 'pageNote') return 'comment';
+  if (item.kind === 'highlight' || item.kind === 'pageNote' || item.kind === 'pdfAnnotation') return 'comment';
   return undefined;
 }
 

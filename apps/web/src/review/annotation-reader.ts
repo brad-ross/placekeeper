@@ -1,3 +1,4 @@
+import { nativePdfAnnotationSubtype, canEditPdfAnnotationComment } from '../../../../packages/core/src/native-pdf-annotation.js';
 import type { ReviewItem } from '../../../../packages/core/src/review-model.js';
 import {
   existingAnnotationKey,
@@ -41,7 +42,7 @@ interface AnnotationReaderRecordBase extends AnnotationContent {
 export interface OwnedAnnotationReaderRecord extends AnnotationReaderRecordBase {
   readonly identity: Extract<AnnotationReaderIdentity, { readonly origin: 'owned' }>;
   readonly origin: 'owned';
-  readonly mutable: true;
+  readonly mutable: boolean;
 }
 
 export interface ExistingAnnotationReaderRecord extends AnnotationReaderRecordBase {
@@ -63,7 +64,8 @@ function ownedContentLabel(kind: ReviewItem['kind']): OwnedAnnotationReaderRecor
   switch (kind) {
     case 'replace': return 'Replacement text';
     case 'insert': return 'Insertion text';
-    case 'highlight': return 'Comment';
+    case 'highlight':
+    case 'pdfAnnotation': return 'Comment';
     case 'pageNote': return 'Page note';
     case 'delete': return 'Deleted text';
   }
@@ -82,13 +84,13 @@ export function projectOwnedAnnotationReader(
     identity: { origin: 'owned', itemId: item.id },
     origin: 'owned',
     kind: item.kind,
-    typeLabel: annotationKindLabel(item.kind),
+    typeLabel: annotationKindLabel(nativePdfAnnotationSubtype(item) ?? item.kind),
     pageNumber: firstPageIndex + 1,
     ...(lastPageIndex === firstPageIndex ? {} : { lastPageNumber: lastPageIndex + 1 }),
     ...(visibleSectionLabel === null ? {} : { sectionLabel: visibleSectionLabel }),
     contentLabel: ownedContentLabel(item.kind),
     ...presentation,
-    mutable: true,
+    mutable: canEditPdfAnnotationComment(item),
   };
 }
 

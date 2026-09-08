@@ -528,6 +528,7 @@ export async function createStaticHostRuntime(
           sourcePdf: input.source.bytes,
           sourceSha256: digest,
           revision: exportState.revision,
+          manageNativeAnnotations: true,
           annotations: projectReviewItems(
             exportState.items,
             exportState.workflow.documentGeneration,

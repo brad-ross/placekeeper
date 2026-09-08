@@ -26,6 +26,7 @@ export function annotationContent(item: ReviewItem): AnnotationContent {
       ...(quote ? { quoteText: quote } : {}),
     };
     case 'insert': return { content: proposedText || quote };
+    case 'pdfAnnotation': return { content: comment };
     case 'pageNote': return { content: comment || quote };
   }
 }

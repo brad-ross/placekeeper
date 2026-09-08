@@ -1,3 +1,5 @@
+import { saveWithReaderAppearances } from './annotation-appearance.js';
+import { nativeAnnotationsFromPages, writeWithNativePdfAnnotations } from './native-annotations.js';
 import { createPdfiumEngine } from '@embedpdf/engines/pdfium-worker-engine';
 import {
   PdfPermissionFlag,
@@ -18,6 +20,7 @@ import {
 import { inspectPortableAnnotations, inspectProjectedPortableAnnotations } from '../../core/src/portable-annotation.js';
 import {
   embedPdfSubtypeName,
+  canonicalEmbedPdfValue,
   mapReviewAnnotationToEmbedPdf,
   pdfAnnotationIdentity,
   pdfRewriteMarkers,
@@ -224,12 +227,20 @@ export async function createBrowserEmbedPdfWriter(
         content: toArrayBuffer(bytes),
       }).toPromise();
       trackDocument(engine, document);
+      const pages = await annotationPages(engine, document);
       const catalog = portableItemsFromAnnotationPages(
-        await annotationPages(engine, document),
+        pages,
         { invalidMetadata: 'foreign' },
       );
+      const nativeAnnotations = nativeAnnotationsFromPages(pages, catalog.owned);
       return {
-        portableItems: catalog.items,
+        nativeAnnotations,
+        annotations: pages.flatMap((annotations, pageIndex) => annotations.map((annotation) => ({
+          id: annotation.id, pageIndex, subtype: embedPdfSubtypeName(annotation.type),
+          contents: annotation.contents ?? '', author: annotation.author ?? '', flags: annotation.flags ?? [],
+          hasNormalAppearance: ((annotation.appearanceModes ?? 0) & NORMAL_APPEARANCE) !== 0,
+        }))),
+        portableItems: [...catalog.items, ...nativeAnnotations.map(({ item }) => item)],
         ownedProjections: catalog.owned.map(({ pageIndex, annotation }) => ({
           pageIndex,
           annotationId: annotation.id,
@@ -277,30 +288,33 @@ export async function createBrowserEmbedPdfWriter(
       const sourceCatalog = portableItemsFromAnnotationPages(sourcePages, {
         invalidMetadata: 'foreign',
       });
-      for (const { pageIndex, annotation } of sourceCatalog.owned) {
-        const page = document.pages[pageIndex];
-        if (page === undefined || !(await engine.removePageAnnotation(document, page, annotation).toPromise())) {
-          throw new PdfWriterError(
-            'backend-error',
-            `Could not replace owned annotation ${annotation.id} on page ${pageIndex}.`,
-          );
-        }
-      }
       const requestedPortable = inspectProjectedPortableAnnotations(request.annotations);
       if (requestedPortable.status === 'invalid') {
-        throw new PdfWriterError(
-          'backend-error',
-          `The requested portable annotation set is incomplete or inconsistent (${requestedPortable.reason}).`,
-        );
+        throw new PdfWriterError('backend-error', `The requested portable annotation set is incomplete or inconsistent (${requestedPortable.reason}).`);
+      }
+      const requestedItems = new Map(requestedPortable.status === 'owned'
+        ? requestedPortable.items.map((item) => [item.id, JSON.stringify(canonicalEmbedPdfValue(item))]) : []);
+      const preserved = new Set<string>();
+      for (const { pageIndex, annotation, item } of sourceCatalog.owned) {
+        if (requestedItems.get(item.id) === JSON.stringify(canonicalEmbedPdfValue(item))) {
+          preserved.add(pdfAnnotationIdentity(pageIndex, annotation.id));
+          continue;
+        }
+        const page = document.pages[pageIndex];
+        if (page === undefined || !(await engine.removePageAnnotation(document, page, annotation).toPromise())) {
+          throw new PdfWriterError('backend-error', `Could not replace owned annotation ${annotation.id} on page ${pageIndex}.`);
+        }
       }
       for (const annotation of request.annotations) {
+        if (preserved.has(pdfAnnotationIdentity(annotation.pageIndex, annotation.id))) continue;
         await engine.createPageAnnotation(
           document,
           document.pages[annotation.pageIndex]!,
           mapReviewAnnotationToEmbedPdf(annotation),
         ).toPromise();
       }
-      const output = new Uint8Array(await engine.saveAsCopy(document).toPromise());
+      const output = await saveWithReaderAppearances(engine, document, request.annotations.filter(({ pageIndex, id }) =>
+      !preserved.has(pdfAnnotationIdentity(pageIndex, id))));
       await engine.closeDocument(document).toPromise();
       document = undefined;
       trackDocument(engine, undefined);
@@ -346,14 +360,14 @@ export async function createBrowserEmbedPdfWriter(
         custom: annotation.custom,
         visible: visibleEmbedPdfAnnotation(annotation, pageIndex),
       })));
-      const requestedItems = requestedPortable.status === 'owned' ? requestedPortable.items : [];
+      const requestedReopenedItems = requestedPortable.status === 'owned' ? requestedPortable.items : [];
       const reopenedItems = reopenedPortable.status === 'owned' ? reopenedPortable.items : [];
-      const canonicalItems = (items: typeof requestedItems) => items
+      const canonicalItems = (items: typeof requestedReopenedItems) => items
         .map((item) => `${item.id}:${JSON.stringify(item)}`)
         .toSorted();
       if (
         reopenedPortable.status === 'invalid'
-        || JSON.stringify(canonicalItems(reopenedItems)) !== JSON.stringify(canonicalItems(requestedItems))
+        || JSON.stringify(canonicalItems(reopenedItems)) !== JSON.stringify(canonicalItems(requestedReopenedItems))
       ) {
         throw new PdfWriterError(
           'backend-error',
@@ -393,7 +407,7 @@ export async function createBrowserEmbedPdfWriter(
   return {
     assess,
     inspect,
-    write,
+    write: (request) => writeWithNativePdfAnnotations(request, { inspect, write, assess, sha256 }),
     async dispose() {
       if (disposed) return;
       disposed = true;

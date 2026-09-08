@@ -1,3 +1,4 @@
+import { deletedNativePdfPopups } from '../../../../packages/pdf-backends/src/native-annotations.js';
 import { createHash } from "node:crypto";
 
 import type {
@@ -5,7 +6,7 @@ import type {
   ReviewAnnotation,
 } from "../../../../packages/core/src/pdf-writer.js";
 import {
-  inspectPortableAnnotations,
+  inspectPortableAnnotationsForImport,
   inspectProjectedPortableAnnotations,
 } from "../../../../packages/core/src/portable-annotation.js";
 import type { ReviewItem } from "../../../../packages/core/src/review-model.js";
@@ -21,6 +22,7 @@ export interface PdfVerificationInput {
   readonly candidatePdf: Uint8Array;
   readonly evidence: PdfStructuralEvidence;
   readonly annotations: readonly ReviewAnnotation[];
+  readonly manageNativeAnnotations?: boolean;
   readonly sourceInspection?: InspectedPdf;
   readonly candidateInspection?: InspectedPdf;
 }
@@ -55,7 +57,10 @@ function portableInventory(inspection: InspectedPdf): {
   readonly items: readonly ReviewItem[];
   readonly physicalIdentities: ReadonlySet<string>;
 } {
-  const result = inspectPortableAnnotations(inspection.annotations.map((annotation) => ({
+  const nativeIds = new Set((inspection.nativeAnnotations ?? []).map(({ item }) => item.id));
+  const nativePhysicalIds = new Set((inspection.nativeAnnotations ?? []).map(({ annotationId, pageIndex }) => pdfAnnotationIdentity(pageIndex, annotationId)));
+  const portableAnnotations = inspection.annotations.filter(({ id, pageIndex }) => !nativeIds.has(id) && !nativePhysicalIds.has(pdfAnnotationIdentity(pageIndex, id)));
+  const result = inspectPortableAnnotationsForImport(portableAnnotations.map((annotation) => ({
     custom: annotation.custom,
     visible: annotation,
   })));
@@ -67,7 +72,7 @@ function portableInventory(inspection: InspectedPdf): {
     items: result.items,
     physicalIdentities: new Set(result.ownedCandidates.map(
       ({ candidateIndex }) => {
-        const annotation = inspection.annotations[candidateIndex]!;
+        const annotation = portableAnnotations[candidateIndex]!;
         return pdfAnnotationIdentity(annotation.pageIndex, annotation.id);
       },
     )),
@@ -142,6 +147,7 @@ const subtypeByKind: Readonly<Record<ReviewAnnotation["kind"], string>> = {
   insert: "text",
   highlight: "highlight",
   pageNote: "text",
+  pdfAnnotation: "unknown",
 };
 
 export const verifyReviewedPdf: PdfExportVerifier = async ({
@@ -151,6 +157,7 @@ export const verifyReviewedPdf: PdfExportVerifier = async ({
   annotations,
   sourceInspection,
   candidateInspection,
+  manageNativeAnnotations = annotations.some(({ kind }) => kind === "pdfAnnotation"),
 }) => {
   if (evidence.coverage === "owned-output") {
     fail("Service export requires exhaustive preservation evidence; browser-only evidence is insufficient.");
@@ -165,10 +172,19 @@ export const verifyReviewedPdf: PdfExportVerifier = async ({
     fail("Writer structural evidence does not match the candidate PDF.");
   }
 
-  const [source, candidate] = await Promise.all([
+  const [sourceRaw, candidateRaw] = await Promise.all([
     sourceInspection ?? inspectPdfWithEmbedPdf(sourcePdf),
     candidateInspection ?? inspectPdfWithEmbedPdf(candidatePdf),
   ]);
+  const normalizeNative = (inspection: InspectedPdf): InspectedPdf => {
+    if (!manageNativeAnnotations) return inspection;
+    const ids = new Map((inspection.nativeAnnotations ?? []).filter(({ pageIndex, annotationId }) => !annotations.some((annotation) => annotation.kind !== "pdfAnnotation" && annotation.pageIndex === pageIndex && annotation.id === annotationId)).map(({ annotationId, pageIndex, item }) => [pdfAnnotationIdentity(pageIndex, annotationId), item.id]));
+    return { ...inspection, annotations: inspection.annotations.map((annotation) => ({ ...annotation,
+      id: ids.get(pdfAnnotationIdentity(annotation.pageIndex, annotation.id)) ?? annotation.id,
+    })) };
+  };
+  const source = normalizeNative(sourceRaw);
+  const candidate = normalizeNative(candidateRaw);
   const sourcePortable = portableInventory(source);
   const candidatePortable = portableInventory(candidate);
   const candidatePortableItems = candidatePortable.items;
@@ -184,7 +200,18 @@ export const verifyReviewedPdf: PdfExportVerifier = async ({
     fail("The frozen review contains duplicate page-local annotation identities.");
   }
   const sourceIdentities = new Set(source.annotations.map(annotationIdentity));
-  const sourceOwnedIdentities = sourcePortable.physicalIdentities;
+  const sourceOwnedIdentities = new Set(sourcePortable.physicalIdentities);
+  if (manageNativeAnnotations) for (const { item } of source.nativeAnnotations ?? []) {
+    sourceOwnedIdentities.add(pdfAnnotationIdentity(item.pageIndex, item.id));
+  }
+  if (manageNativeAnnotations) {
+    const popupRemovals = await deletedNativePdfPopups(sourcePdf, source.nativeAnnotations ?? [],
+      new Set(annotations.filter(({ kind }) => kind === 'pdfAnnotation').map(({ id }) => id)));
+    for (const { pageIndex, annotationIndex } of popupRemovals) {
+      const popup = source.annotations.filter((annotation) => annotation.pageIndex === pageIndex)[annotationIndex];
+      if (popup) sourceOwnedIdentities.add(annotationIdentity(popup));
+    }
+  }
   if ([...requestedIdentities].some((identity) =>
     sourceIdentities.has(identity) && !sourceOwnedIdentities.has(identity))) {
     fail("A review annotation ID collides with a pre-existing annotation.");
@@ -252,11 +279,10 @@ export const verifyReviewedPdf: PdfExportVerifier = async ({
       matches.length !== 1 ||
       written === undefined ||
       written.pageIndex !== requested.pageIndex ||
-      written.subtype !== subtypeByKind[requested.kind] ||
+      written.subtype !== (requested.nativeSubtype ?? subtypeByKind[requested.kind]) ||
       written.contents !== requested.contents ||
-      written.author !== requested.author ||
-      !written.flags.includes("print") ||
-      !written.hasNormalAppearance ||
+      (written.author ?? "") !== requested.author ||
+      (requested.kind !== "pdfAnnotation" && (!written.flags.includes("print") || !written.hasNormalAppearance)) ||
       !(requested.kind === "insert" || requested.kind === "pageNote"
         ? sameIconAnchor(written.rect, requested.rect)
         : sameRect(written.rect, requested.rect)) ||

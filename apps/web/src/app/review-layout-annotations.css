@@ -1969,24 +1969,24 @@ li[data-search-result] .row-action-group__secondary {
 
 /* The mark follows the text baseline, including rotated pages. Its original
    anchor bounds stay available for navigation and text selection. */
-[data-owned-mark] {
+[data-pdf-mark-style] {
   --pdf-mark-ink: var(--pdf-edit-ink);
-  --pdf-mark-line-width: calc(1.5px * var(--pdf-mark-scale, 1));
-  --pdf-underline-width: calc(1px * var(--pdf-mark-scale, 1));
+  --pdf-mark-line-width: calc(var(--pdf-mark-base-line-width, 1.5px) * var(--pdf-mark-scale, 1));
+  --pdf-underline-width: calc(var(--pdf-mark-base-underline-width, 1px) * var(--pdf-mark-scale, 1));
   box-sizing: border-box;
-  border-radius: 3px;
+  border-radius: var(--pdf-mark-radius, 3px);
   mix-blend-mode: multiply;
 }
 
-[data-owned-mark="highlight"] { --pdf-mark-ink: var(--pdf-note-ink); background: var(--pdf-note-fill); }
-[data-owned-mark="highlight"][data-has-attached-text="true"] {
+[data-pdf-mark-style="highlight"] { --pdf-mark-ink: var(--pdf-note-ink); background: var(--pdf-note-fill); }
+[data-pdf-mark-style="highlight"][data-has-attached-text="true"] {
   background: var(--pdf-comment-fill);
 }
 
-[data-owned-mark="highlight"], [data-owned-mark="replace"] { overflow: hidden; }
+[data-pdf-mark-style="highlight"], [data-pdf-mark-style="replace"] { overflow: hidden; }
 
 /* An underline consistently means that the annotation has attached text. */
-:is([data-owned-mark="highlight"], [data-owned-mark="replace"])[data-has-attached-text="true"]::after {
+:is([data-pdf-mark-style="highlight"], [data-pdf-mark-style="replace"])[data-has-attached-text="true"]::after {
   content: '';
   position: absolute;
   right: 0;
@@ -1995,11 +1995,11 @@ li[data-search-result] .row-action-group__secondary {
   height: var(--pdf-underline-width);
   background: var(--pdf-note-ink);
 }
-[data-owned-mark="replace"][data-has-attached-text="true"]::after {
+[data-pdf-mark-style="replace"][data-has-attached-text="true"]::after {
   background: var(--pdf-edit-ink);
 }
-[data-owned-mark="replace"] { background: var(--pdf-edit-fill); }
-:is([data-owned-mark="replace"], [data-owned-mark="delete"])::before {
+[data-pdf-mark-style="replace"] { background: var(--pdf-edit-fill); }
+:is([data-pdf-mark-style="replace"], [data-pdf-mark-style="delete"])::before {
   content: '';
   position: absolute;
   top: var(--pdf-strike-position, 50%);
@@ -2011,7 +2011,7 @@ li[data-search-result] .row-action-group__secondary {
 }
 
 /* Saved insertions retain a small, steady caret below the text. */
-[data-owned-mark="insert"]::after {
+[data-pdf-mark-style="insert"]::after {
   content: '';
   position: absolute;
   left: 50%;
@@ -2024,15 +2024,15 @@ li[data-search-result] .row-action-group__secondary {
   transform: translateX(-50%) rotate(45deg);
 }
 
-[data-owned-mark="pageNote"] {
+[data-pdf-mark-style="pageNote"] {
   --pdf-mark-ink: var(--pdf-note-ink);
   display: grid;
   place-items: center;
-  border-radius: 3px;
+  border-radius: var(--pdf-mark-radius, 3px);
   color: var(--pdf-note-ink);
   background: var(--pdf-note-fill);
 }
-[data-owned-mark="pageNote"] > .review-icon {
+[data-pdf-mark-style="pageNote"] > .review-icon {
   width: 70%;
   height: 70%;
   max-width: 18px;
@@ -2283,11 +2283,19 @@ li[data-search-result] .row-action-group__secondary {
   cursor: pointer !important;
 }
 
-:is([data-owned-mark="delete"], [data-owned-mark="replace"]) {
+:is([data-pdf-mark-style="delete"], [data-pdf-mark-style="replace"]) {
   --pdf-edit-fill: var(--pdf-correction-fill);
   --pdf-edit-ink: var(--pdf-correction-ink);
 }
 :is([data-owned-mark="delete"], [data-owned-mark="replace"])[data-corresponding="true"] {
   --pdf-edit-fill: rgb(218 78 78 / 30%);
   --pdf-edit-ink: #ac373f;
+}
+
+/* Native underlines share the reader's ink and line weight. */
+[data-pdf-mark-style="underline"]::after {
+  content: '';
+  position: absolute;
+  inset: auto 0 0;
+  border-bottom: var(--pdf-underline-width) solid var(--pdf-note-ink);
 }

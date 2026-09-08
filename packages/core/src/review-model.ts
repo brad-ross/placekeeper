@@ -6,7 +6,8 @@ export type ReviewItemKind =
   | "delete"
   | "insert"
   | "highlight"
-  | "pageNote";
+  | "pageNote"
+  | "pdfAnnotation";
 
 export interface ReviewItem {
   readonly id: string;
@@ -186,10 +187,11 @@ export function synchronizeReviewItemAnchor(
       proposedText,
     };
   } else {
-    if (item.kind !== "pageNote") throw new Error(`Review item ${item.kind} cannot use a page anchor`);
+    if (item.kind !== "pageNote" && item.kind !== "pdfAnnotation") throw new Error(`Review item ${item.kind} cannot use a page anchor`);
     const comment = item.payload.comment;
     if (typeof comment !== "string") throw new Error("Page note is missing its comment");
     payload = {
+      ...(item.kind === "pdfAnnotation" ? item.payload : {}),
       position: { ...anchor.rect },
       comment,
       ...(anchor.nearbyText === undefined ? {} : { nearbyText: anchor.nearbyText }),
@@ -272,6 +274,8 @@ export interface ReviewSourceIdentity {
 }
 
 export interface ReviewState {
+  /** Durable import boundary: absence identifies recovery state from before standard-PDF editing. */
+  readonly nativeAnnotationImportDigest?: string;
   /** v1 stored page geometry with an erroneous CropBox offset; v2 is crop-relative. */
   readonly schemaVersion: 1 | 2;
   readonly sessionId: string;
@@ -433,7 +437,7 @@ export function anchorEvidenceFromReviewItem(item: ReviewItem): ReviewAnchorEvid
       rect: rectEvidence(item.payload.position),
     };
   }
-  if (item.kind === "pageNote") {
+  if (item.kind === "pageNote" || item.kind === "pdfAnnotation") {
     return {
       kind: "page",
       pageIndex: item.pageIndex,

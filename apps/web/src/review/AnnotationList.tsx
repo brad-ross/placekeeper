@@ -1,3 +1,4 @@
+import { nativePdfAnnotationSubtype, canEditPdfAnnotationComment, canDeletePdfAnnotation } from '../../../../packages/core/src/native-pdf-annotation.js';
 import { annotationContent as annotationListContent, type AnnotationContent as AnnotationListContent } from './annotation-content.js';
 export { annotationContent as annotationListContent } from './annotation-content.js';
 export type { AnnotationContent as AnnotationListContent } from './annotation-content.js';
@@ -144,7 +145,7 @@ export function AnnotationRowContent({
       };
   const pageNumber = suppliedPageNumber ?? firstPageIndex + 1;
   const lastPageNumber = suppliedLastPageNumber ?? (suppliedPageNumber ?? lastPageIndex + 1);
-  const kind = suppliedKind ?? item.kind;
+  const kind = suppliedKind ?? (nativePdfAnnotationSubtype(item) ?? item.kind);
   const kindLabel = annotationKindLabel(kind);
   const pageDescription = pageNumber === lastPageNumber
     ? `page ${pageNumber}`
@@ -154,7 +155,7 @@ export function AnnotationRowContent({
     id: 'locate', kind: 'command', icon: 'locate',
     label: 'Back to annotation in PDF', title: 'Back to annotation in PDF', onInvoke: onNavigate,
   });
-  if (onEdit && item.kind !== 'delete') actions.push({
+  if (onEdit && item.kind !== 'delete' && canEditPdfAnnotationComment(item)) actions.push({
     id: 'edit', kind: 'command', icon: 'edit',
     label: `Edit ${kindLabel} annotation on ${pageDescription}`,
     title: 'Edit annotation', onInvoke: onEdit,
@@ -165,7 +166,7 @@ export function AnnotationRowContent({
     title: copyLink.disabled ? 'Save annotation before copying its link' : 'Copy annotation link',
     copyLink,
   });
-  if (onDelete) actions.push({
+  if (onDelete && canDeletePdfAnnotation(item)) actions.push({
     id: 'delete', kind: 'command', icon: 'remove',
     label: `Remove ${kindLabel} annotation on ${pageDescription}`,
     title: 'Delete annotation', onInvoke: onDelete,
