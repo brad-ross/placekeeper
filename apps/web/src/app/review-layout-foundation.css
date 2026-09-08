@@ -798,6 +798,12 @@
   overflow: clip;
 }
 
+/* The outer review layout already clips these surfaces. A second clip can
+   leave native WebKit workspace layers unpainted until the window resizes. */
+[data-launch-surface="macos"] .review-drawer-host {
+  overflow: visible;
+}
+
 .review-context-palette,
 .review-page-menu {
   position: fixed;

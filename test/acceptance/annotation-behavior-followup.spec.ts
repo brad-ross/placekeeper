@@ -449,3 +449,25 @@ for (const [kind, content] of [['highlight', 'Short comment.'], ['highlight', ''
     await expect(reader.getByText(/SOURCE PASSAGE END/)).toBeVisible();
   });
 }
+
+test('keeps the initial Mac workspace toggle above the PDF viewport', async ({ page }) => {
+  await page.setViewportSize({ width: 1200, height: 768 });
+  await openLongAnnotationFixture(page);
+  await page.locator('[data-launch-surface]').first().evaluate((element) => {
+    element.setAttribute('data-launch-surface', 'macos');
+  });
+  const rail = page.locator('[data-workspace-edge-rail="right"]');
+  await expect(rail).toBeVisible();
+  await expect(rail).toBeInViewport();
+  const ownsHitTarget = () => rail.evaluate((element) => {
+    const bounds = element.getBoundingClientRect();
+    const hit = document.elementFromPoint(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
+    return hit === element || (hit !== null && element.contains(hit));
+  });
+  expect(await ownsHitTarget()).toBe(true);
+  await rail.click();
+  await expect(page.getByRole('tab', { name: 'Outline', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Hide workspace', exact: true }).click();
+  await expect(rail).toBeVisible();
+  expect(await ownsHitTarget()).toBe(true);
+});
