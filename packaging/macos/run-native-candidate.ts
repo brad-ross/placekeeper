@@ -7,7 +7,7 @@ import { pathToFileURL } from "node:url";
 import { MANAGEMENT_PROTOCOL_VERSION } from "../../apps/service/src/host/launch-control.js";
 import { BUILD_IDENTITY_FILENAME, type PackagedBuildIdentity } from "./build-app.js";
 
-const DEFAULT_SMOKE_TIMEOUT_MS = 30_000;
+const DEFAULT_SMOKE_TIMEOUT_MS = 60_000;
 const PROCESS_STOP_TIMEOUT_MS = 5_000;
 const DIAGNOSTIC_LIMIT_BYTES = 256 * 1024;
 

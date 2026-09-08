@@ -176,11 +176,14 @@ function safeChromeLocation(value: unknown): unknown | undefined {
 function safeChromeState(value: unknown): unknown | undefined {
   if (!record(value) || !hasOnlyKeys(value, [
     "schemaVersion", "sessionId", "source", "sourceRootId", "revision", "lifecycle", "items",
-    "workflow", "pendingDrafts", "discardAudit", "history", "historyCursor",
+    "workflow", "pendingDrafts", "discardAudit", "history", "historyCursor", "nativeAnnotationImportDigest",
   ])) return undefined;
   const { sourceRootId: _sourceRootId, ...candidate } = value;
   if ((candidate.schemaVersion !== 1 && candidate.schemaVersion !== 2) ||
     !SESSION_ID.test(String(candidate.sessionId)) || !safeInteger(candidate.revision) ||
+    (candidate.nativeAnnotationImportDigest !== undefined &&
+      (typeof candidate.nativeAnnotationImportDigest !== "string" ||
+        !SHA256.test(candidate.nativeAnnotationImportDigest))) ||
     !safeInteger(candidate.historyCursor) || !record(candidate.source) || !record(candidate.workflow) ||
     !Array.isArray(candidate.items) || !Array.isArray(candidate.pendingDrafts) ||
     !Array.isArray(candidate.discardAudit) || !Array.isArray(candidate.history)) return undefined;

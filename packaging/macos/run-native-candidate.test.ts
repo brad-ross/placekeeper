@@ -32,6 +32,12 @@ describe("macOS native candidate runner", () => {
   });
 
   it("parses a bounded smoke request and defaults to the review fixture", () => {
+    expect(parseNativeCandidateRunnerArguments(["--", "--smoke"], "/repo"))
+      .toEqual({
+        pdfPath: "/repo/test/fixtures/pdfs/multi-page-text.pdf",
+        smoke: true,
+        timeoutMs: 60_000,
+      });
     expect(parseNativeCandidateRunnerArguments(["--", "--smoke", "--timeout-ms", "45000"], "/repo"))
       .toEqual({
         pdfPath: "/repo/test/fixtures/pdfs/multi-page-text.pdf",
