@@ -230,7 +230,7 @@ test('publishes aligned, control-safe macOS drag geometry across menus and fulls
   await context.close();
 });
 
-for (const width of [620, 360]) {
+for (const width of [620, 414, 360]) {
   test(`Mac recovery shares Placekeeper controls and sends one choice at ${width}px`, async ({ browser }) => {
     const context = await browser.newContext({ bypassCSP: true, viewport: { width, height: 380 } });
     const page = await context.newPage();
@@ -247,12 +247,22 @@ for (const width of [620, 360]) {
         await expect(page.getByRole('heading', { name: 'Existing review recovered' })).toBeVisible();
         const resume = page.getByRole('button', { name: 'Resume', exact: true });
         await expect(resume).toBeFocused();
-        await expect(resume).toHaveCSS('background-color', 'rgb(60, 60, 60)');
+        await expect(resume).toHaveCSS('outline-style', 'none');
+        const dialogBounds = (await page.getByRole('dialog').boundingBox())!;
+        expect(dialogBounds.x).toBe(0);
+        expect(dialogBounds.y).toBe(0);
+        expect(dialogBounds.width).toBe(width);
+        await expect.poll(() => page.evaluate(() => (
+          window as typeof window & { __recoveryChoices: Record<string, unknown>[] }
+        ).__recoveryChoices.filter((message) => 'height' in message).at(-1)?.height))
+          .toBe(Math.ceil(dialogBounds.height));
+        await expect(resume).toHaveCSS('background-color', 'rgb(37, 37, 37)');
         await expect(page.getByRole('dialog')).toHaveCSS('border-radius', '17px');
         const buttons = page.locator('[data-recovery-choice]');
         await expect(buttons).toHaveCount(3);
         for (const button of await buttons.all()) {
           const rect = (await button.boundingBox())!;
+          expect(rect.height).toBe(32);
           expect(rect.x).toBeGreaterThanOrEqual(0);
           expect(rect.x + rect.width).toBeLessThanOrEqual(width);
           await expect(button.locator('svg')).toBeVisible();
@@ -262,7 +272,7 @@ for (const width of [620, 360]) {
         else await page.locator(`[data-recovery-choice="${choice}"]`).click();
         await expect(page.getByRole('status')).toHaveText('Opening the protected review…');
         for (const button of await buttons.all()) await expect(button).toBeDisabled();
-        await expect.poll(() => page.evaluate(() => (window as typeof window & { __recoveryChoices: unknown[] }).__recoveryChoices))
+        await expect.poll(() => page.evaluate(() => (window as typeof window & { __recoveryChoices: Record<string, unknown>[] }).__recoveryChoices.filter((message) => !('height' in message))))
           .toEqual([{ ready: true }, { decision: choice }]);
       }
       await page.goto('/apps/web/recovery.html');
@@ -284,22 +294,24 @@ for (const width of [1280, 620, 360]) {
         return Object.fromEntries(properties.map((property) => [property, computed.getPropertyValue(property)]));
       };
       const text = ['font-family', 'font-size', 'font-weight', 'line-height', 'letter-spacing', 'color'];
-      const box = ['padding', 'border', 'border-radius', 'background-color', 'box-shadow'];
+      const box = ['padding', 'border', 'border-radius', 'background-color', 'box-shadow', 'outline'];
       return {
-        surface: styles(dialog, [...box, 'width']),
+        surface: styles(dialog, ['border', 'border-radius', 'background-color']),
         heading: styles(dialog.querySelector('h2')!, [...text, 'margin']),
         description: styles(dialog.querySelector('.compact-editorial-modal__description')!, [...text, 'margin']),
-        primary: styles(dialog.querySelector('.review-button--primary')!, [...box, ...text, 'min-height', 'gap']),
-        secondary: styles(dialog.querySelector('.review-button:not(.review-button--primary)')!, [...box, ...text, 'min-height', 'gap']),
+        primary: styles(dialog.querySelector('.review-button--primary')!, [...box, ...text, 'min-height', 'height', 'box-sizing', 'gap']),
+        secondary: styles(dialog.querySelector('.review-button:not(.review-button--primary)')!, [...box, ...text, 'min-height', 'height', 'box-sizing', 'gap']),
       };
     });
     try {
       await page.goto('/test/acceptance/review-harness/index.html?visual=save-destination');
       await expect(page.locator('.save-destination-dialog')).toBeVisible();
+      await page.locator('.review-button--primary').focus();
+      await expect(page.locator('.review-button--primary')).toHaveCSS('background-color', 'rgb(37, 37, 37)');
       const current = await appearance();
       await page.goto('/apps/web/recovery.html');
       await expect(page.getByRole('button', { name: 'Resume', exact: true })).toBeVisible();
-      expect(await appearance()).toEqual(current);
+      await expect.poll(appearance).toEqual(current);
     } finally { await context.close(); }
   });
 }

@@ -164,11 +164,13 @@
   background: transparent;
 }
 
-:is(#root[data-production-root="true"], .handler) .review-choice-dialog .compact-editorial-modal__footer .review-button:not(.review-button--primary):hover:not(:disabled) {
+:is(#root[data-production-root="true"], .handler) .review-choice-dialog .compact-editorial-modal__footer .review-button:not(.review-button--primary):hover:not(:disabled),
+:is(#root[data-production-root="true"], .handler) .compact-editorial-modal .review-button:focus-visible {
   background: var(--review-surface-interactive);
 }
 
-:is(#root[data-production-root="true"], .handler) .review-choice-dialog .compact-editorial-modal__footer .review-button--primary:hover:not(:disabled) {
+:is(#root[data-production-root="true"], .handler) .review-choice-dialog .compact-editorial-modal__footer .review-button--primary:hover:not(:disabled),
+:is(#root[data-production-root="true"], .handler) .compact-editorial-modal .review-button--primary:focus-visible {
   background: #252525;
 }
 
@@ -177,4 +179,14 @@
     max-height: calc(100dvh - 115px);
     padding: 18px;
   }
+}
+
+:is(#root[data-production-root="true"], .handler) .compact-editorial-modal .review-button:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+
+.handler .compact-editorial-modal .review-button:disabled {
+  cursor: default;
+  opacity: .35;
 }

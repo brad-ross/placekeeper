@@ -1,8 +1,28 @@
 import Foundation
+import AppKit
 import XCTest
 @testable import PlacekeeperMac
 
 final class MacPoliciesTests: XCTestCase {
+    @MainActor
+    func testRecoveryWindowIsTheDialogAndRetainsKeyboardAccess() {
+        _ = NSApplication.shared
+        let controller = RecoveryViewController(
+            windowID: "recovery-window-test", documentName: "fixture.pdf",
+            packagedRoot: URL(fileURLWithPath: "/missing-recovery-test-assets"),
+            onDecision: { _ in }, onClose: {}, onUnavailable: {}
+        )
+        let window = controller.window!
+        XCTAssertFalse(window.styleMask.contains(.titled))
+        XCTAssertFalse(window.isOpaque)
+        XCTAssertTrue(window.canBecomeKey)
+        XCTAssertEqual(window.frame.width, 414)
+        XCTAssertTrue(window.validateMenuItem(NSMenuItem(
+            title: "Close", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w"
+        )))
+        controller.resolve()
+    }
+
     func testRecoveryChoiceRequiresBundledMainFrameAndSettlesOnlyOnce() {
         let source = URL(fileURLWithPath: "/app/MacWeb/recovery.html")
         for decision in ["resume", "discard", "fork"] {

@@ -17,6 +17,19 @@ struct RecoveryDecisionGate {
 }
 
 @MainActor
+private final class RecoveryWindow: NSWindow {
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { true }
+    override func performClose(_ sender: Any?) { close() }
+    override func cancelOperation(_ sender: Any?) { close() }
+    override func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        // Borderless windows otherwise disable the standard Close command.
+        if menuItem.action == #selector(performClose(_:)) { return true }
+        return super.validateMenuItem(menuItem)
+    }
+}
+
+@MainActor
 final class RecoveryViewController: NSWindowController, NSWindowDelegate, WKScriptMessageHandler, WKNavigationDelegate {
     let windowID: String
     private let onDecision: (String) -> Void
@@ -43,16 +56,20 @@ final class RecoveryViewController: NSWindowController, NSWindowDelegate, WKScri
         configuration.websiteDataStore = .nonPersistent()
         configuration.setURLSchemeHandler(RecoverySchemeHandler(root: packagedRoot), forURLScheme: "placekeeper-recovery")
         webView = WKWebView(frame: .zero, configuration: configuration)
-        let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 620, height: 380),
-            styleMask: [.titled, .closable, .miniaturizable],
+        let window = RecoveryWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 414, height: 180),
+            styleMask: [.borderless],
             backing: .buffered,
             defer: false
         )
         window.title = documentName
         window.isReleasedWhenClosed = false
         window.appearance = NSAppearance(named: .aqua)
-        window.backgroundColor = NSColor(white: 0.97, alpha: 1)
+        window.backgroundColor = .clear
+        window.isOpaque = false
+        window.hasShadow = true
+        window.isMovableByWindowBackground = true
+        webView.setValue(false, forKey: "drawsBackground")
         super.init(window: window)
         window.delegate = self
         window.contentView = webView
@@ -100,6 +117,15 @@ final class RecoveryViewController: NSWindowController, NSWindowDelegate, WKScri
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
         guard message.name == "placekeeperRecovery", message.frameInfo.isMainFrame,
               message.frameInfo.request.url == recoveryURL, !resolved else { return }
+        if let body = message.body as? [String: Any], Set(body.keys) == ["height"],
+           let height = body["height"] as? Double, height.isFinite, (120...600).contains(height),
+           let window {
+            let oldFrame = window.frame
+            let size = NSSize(width: oldFrame.width, height: ceil(height))
+            window.setFrame(NSRect(x: oldFrame.minX, y: oldFrame.midY - size.height / 2,
+                                   width: size.width, height: size.height), display: true)
+            return
+        }
         if let body = message.body as? [String: Any], Set(body.keys) == ["ready"],
            body["ready"] as? Bool == true, !loaded {
             loaded = true

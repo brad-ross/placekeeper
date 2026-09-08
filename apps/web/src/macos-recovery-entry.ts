@@ -1,10 +1,11 @@
-// Use the Chrome recovery presentation itself so the two hosts stay in sync.
+// Share the current modal controls; only the Mac host omits the surrounding canvas.
 import '../../chrome-extension/src/extension.css';
+import './app/macos-recovery.css';
 import { createRecoveryButtons } from '../../chrome-extension/src/handler-ui.js';
 
 const target = window as typeof window & {
   webkit?: { messageHandlers?: { placekeeperRecovery?: {
-    postMessage(message: { decision: string } | { ready: true }): void;
+    postMessage(message: { decision: string } | { ready: true } | { height: number }): void;
   } } };
 };
 const bridge = target.webkit?.messageHandlers?.placekeeperRecovery;
@@ -39,4 +40,14 @@ for (const button of buttons) {
 }
 buttons.at(-1)!.focus({ preventScroll: true });
 
+const dialog = document.querySelector<HTMLElement>('.handler-dialog')!;
+let reportedHeight = 0;
+const reportSize = () => {
+  const height = Math.ceil(dialog.getBoundingClientRect().height);
+  if (height === reportedHeight) return;
+  reportedHeight = height;
+  try { bridge?.postMessage({ height }); } catch { fail(); }
+};
+new ResizeObserver(reportSize).observe(dialog);
+reportSize();
 try { bridge?.postMessage({ ready: true }); } catch { fail(); }
