@@ -1463,7 +1463,7 @@
   content: none;
 }
 
-.annotation-item__content:not(.pdf-search__result),
+.annotation-item__content,
 .existing-annotation__content {
   min-height: 0;
   padding: 8px 8px 8px 12px;
