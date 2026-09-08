@@ -29,4 +29,3 @@ export function annotationContent(item: ReviewItem): AnnotationContent {
     case 'pageNote': return { content: comment || quote };
   }
 }
-
