@@ -1,7 +1,7 @@
 ---
 title: "Prevent Send-to-Main viewport rebound during Reference workspace reflow"
 date: "2026-08-12"
-last_updated: "2026-09-06"
+last_updated: "2026-09-07"
 category: "ui-bugs"
 module: "PDF reference navigation and viewer framing"
 problem_type: "ui_bug"
@@ -83,7 +83,7 @@ Rollback remains possible until success. A failed apply neither consumes the sou
 
 Retain the unit assertions for exactly one Main apply, one framing handoff before post-Send recomposition, and physical close after the apply (`apps/web/test/navigation-coordinator.test.ts:1173`). Cover transient recapture failure and failed-apply rollback separately (`apps/web/test/navigation-coordinator.test.ts:1199`, `apps/web/test/navigation-coordinator.test.ts:1234`).
 
-Test the motion window honestly. The browser scenario records scroll events, waits beyond physical Reference removal for two animation frames plus 250 ms, and fails if its two-second fallback timer ended observation (`test/acceptance/production-flow.spec.ts:978`). Non-WebKit runs reject more than 8 px rebound from the running minimum on either axis. WebKit currently checks that the final sample is approximately equal to each axis's observed minimum; it does not enforce the same maximum transient-rebound bound (`test/acceptance/production-flow.spec.ts:1022`). Do not describe these distinct assertions as identical proof of zero rebound.
+Test the motion window honestly. The browser scenario records scroll events through physical Reference removal and two animation frames plus 250 ms, and fails if its two-second fallback timer ended observation (`test/acceptance/production-flow.spec.ts:1010`). Zoom and host padding can legitimately move either axis before arrival. The test finds the first sample within 8 px of the page-1 top, requires every later recorded sample to remain there, and then checks that both scroll offsets remain unchanged for another 250 ms and the current page is still 1 (`test/acceptance/production-flow.spec.ts:1048`). This proves arrival and subsequent stability; it does not require a monotonic horizontal approach or establish zero transient movement between recorded samples.
 
 For any navigation followed by teardown, keep one semantic owner, revoke obsolete framing memory before layout mutation, preserve rollback resources until success, and distinguish logical consumption from physical disposal.
 
