@@ -230,7 +230,7 @@ test('publishes aligned, control-safe macOS drag geometry across menus and fulls
   await context.close();
 });
 
-for (const width of [620, 414, 360]) {
+for (const width of [620, 462, 360]) {
   test(`Mac recovery shares Placekeeper controls and sends one choice at ${width}px`, async ({ browser }) => {
     const context = await browser.newContext({ bypassCSP: true, viewport: { width, height: 380 } });
     const page = await context.newPage();
@@ -249,13 +249,25 @@ for (const width of [620, 414, 360]) {
         await expect(resume).toBeFocused();
         await expect(resume).toHaveCSS('outline-style', 'none');
         const dialogBounds = (await page.getByRole('dialog').boundingBox())!;
-        expect(dialogBounds.x).toBe(0);
-        expect(dialogBounds.y).toBe(0);
-        expect(dialogBounds.width).toBe(width);
+        expect(dialogBounds.x).toBe(24);
+        expect(dialogBounds.y).toBe(24);
+        expect(dialogBounds.width).toBe(width - 48);
+        await expect(page.getByRole('dialog')).toHaveCSS('padding', '23px');
+        const contentInsets = await page.getByRole('dialog').evaluate((dialog) => {
+          const box = dialog.getBoundingClientRect();
+          const controls = dialog.querySelector('.recovery-window__controls')!.getBoundingClientRect();
+          const title = dialog.querySelector('h2')!.getBoundingClientRect();
+          const primary = dialog.querySelector('.review-button--primary')!.getBoundingClientRect();
+          return { top: controls.top - box.top, left: title.left - box.left,
+            right: box.right - primary.right, bottom: box.bottom - primary.bottom };
+        });
+        expect(contentInsets).toEqual({ top: 23, left: 23, right: 23, bottom: 23 });
+        await expect(page.getByRole('dialog')).toHaveCSS('border-width', '0px');
+        await expect(page.getByRole('dialog')).not.toHaveCSS('box-shadow', 'none');
         await expect.poll(() => page.evaluate(() => (
           window as typeof window & { __recoveryChoices: Record<string, unknown>[] }
         ).__recoveryChoices.filter((message) => 'height' in message).at(-1)?.height))
-          .toBe(Math.ceil(dialogBounds.height));
+          .toBe(Math.ceil(dialogBounds.height + 48));
         await expect(resume).toHaveCSS('background-color', 'rgb(37, 37, 37)');
         await expect(page.getByRole('dialog')).toHaveCSS('border-radius', '17px');
         const buttons = page.locator('[data-recovery-choice]');

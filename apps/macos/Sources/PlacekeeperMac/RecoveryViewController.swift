@@ -17,7 +17,43 @@ struct RecoveryDecisionGate {
 }
 
 @MainActor
+private final class RecoveryContentView: NSView {
+    override var isFlipped: Bool { true }
+}
+
+@MainActor
 private final class RecoveryWindow: NSWindow {
+    // Keep this transparent gutter in sync with macos-recovery.css.
+    static let shadowInset: CGFloat = 24
+    private var controls: [NSWindow.ButtonType: NSButton] = [:]
+
+    func installControls(in view: NSView) {
+        let types: [NSWindow.ButtonType] = [.closeButton, .miniaturizeButton, .zoomButton]
+        for (index, type) in types.enumerated() {
+            guard let button = NSWindow.standardWindowButton(type, for: [.titled, .closable, .miniaturizable]) else { continue }
+            let size = button.frame.size
+            button.target = self
+            switch type {
+            case .closeButton: button.action = #selector(performClose(_:))
+            case .miniaturizeButton: button.action = #selector(miniaturize(_:))
+            default: button.action = #selector(zoom(_:)); button.isEnabled = false
+            }
+            controls[type] = button
+            button.translatesAutoresizingMaskIntoConstraints = false
+            view.addSubview(button)
+            NSLayoutConstraint.activate([
+                button.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: Self.shadowInset + 23 + CGFloat(index) * 20),
+                button.centerYAnchor.constraint(equalTo: view.topAnchor, constant: Self.shadowInset + 30),
+                button.widthAnchor.constraint(equalToConstant: size.width),
+                button.heightAnchor.constraint(equalToConstant: size.height),
+            ])
+        }
+    }
+
+    override func standardWindowButton(_ type: NSWindow.ButtonType) -> NSButton? {
+        controls[type] ?? super.standardWindowButton(type)
+    }
+
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { true }
     override func performClose(_ sender: Any?) { close() }
@@ -57,8 +93,8 @@ final class RecoveryViewController: NSWindowController, NSWindowDelegate, WKScri
         configuration.setURLSchemeHandler(RecoverySchemeHandler(root: packagedRoot), forURLScheme: "placekeeper-recovery")
         webView = WKWebView(frame: .zero, configuration: configuration)
         let window = RecoveryWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 414, height: 180),
-            styleMask: [.borderless],
+            contentRect: NSRect(x: 0, y: 0, width: 414 + 2 * RecoveryWindow.shadowInset, height: 228),
+            styleMask: [.borderless, .miniaturizable],
             backing: .buffered,
             defer: false
         )
@@ -67,12 +103,17 @@ final class RecoveryViewController: NSWindowController, NSWindowDelegate, WKScri
         window.appearance = NSAppearance(named: .aqua)
         window.backgroundColor = .clear
         window.isOpaque = false
-        window.hasShadow = true
+        window.hasShadow = false
         window.isMovableByWindowBackground = true
         webView.setValue(false, forKey: "drawsBackground")
         super.init(window: window)
         window.delegate = self
-        window.contentView = webView
+        let content = RecoveryContentView(frame: window.contentLayoutRect)
+        webView.frame = content.bounds
+        webView.autoresizingMask = [.width, .height]
+        content.addSubview(webView)
+        window.contentView = content
+        window.installControls(in: content)
         window.center()
         webView.navigationDelegate = self
         configuration.userContentController.add(self, name: "placekeeperRecovery")

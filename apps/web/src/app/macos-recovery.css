@@ -1,7 +1,7 @@
 .handler.recovery-window {
   display: block;
   min-height: 0;
-  padding: 0;
+  padding: 24px;
   background: transparent;
 }
 
@@ -9,9 +9,11 @@
   width: 100%;
   max-height: none;
   padding: 23px;
-  box-shadow: none;
+  border: 0;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 12%);
 }
 
-@media (max-width: 380px) {
-  .recovery-window .handler-dialog { padding: 18px; }
+.recovery-window__controls {
+  height: 14px;
+  margin-bottom: 17px;
 }

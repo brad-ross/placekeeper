@@ -16,7 +16,11 @@ final class MacPoliciesTests: XCTestCase {
         XCTAssertFalse(window.styleMask.contains(.titled))
         XCTAssertFalse(window.isOpaque)
         XCTAssertTrue(window.canBecomeKey)
-        XCTAssertEqual(window.frame.width, 414)
+        XCTAssertEqual(window.frame.width, 462)
+        XCTAssertFalse(window.hasShadow)
+        for type in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
+            XCTAssertNotNil(window.standardWindowButton(type)?.superview)
+        }
         XCTAssertTrue(window.validateMenuItem(NSMenuItem(
             title: "Close", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w"
         )))

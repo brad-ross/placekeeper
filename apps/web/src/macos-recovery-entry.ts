@@ -43,7 +43,7 @@ buttons.at(-1)!.focus({ preventScroll: true });
 const dialog = document.querySelector<HTMLElement>('.handler-dialog')!;
 let reportedHeight = 0;
 const reportSize = () => {
-  const height = Math.ceil(dialog.getBoundingClientRect().height);
+  const height = Math.ceil(document.body.getBoundingClientRect().height);
   if (height === reportedHeight) return;
   reportedHeight = height;
   try { bridge?.postMessage({ height }); } catch { fail(); }
