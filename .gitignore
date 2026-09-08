@@ -3,7 +3,7 @@ node_modules/
 test-results/
 playwright-report/
 tmp/
-output/pdf/*.pdf
+output/
 test/fixtures/pdfs/*.pdf
 test/fixtures/pdfium/*.wasm
 test/fixtures/latex/*.aux
