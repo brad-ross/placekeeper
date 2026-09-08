@@ -96,11 +96,13 @@ async function openAnnotationsWorkspace(page: Page): Promise<void> {
     "data-workspace-presentation",
     presentation,
   );
-  const workspace = presentation === "bottom"
-    ? page.getByRole("button", { name: /^(?:Open|Close) References tray$/u })
-    : page.getByRole("button", { name: /^(?:Open|Close) right workspace$/u });
-  if (await workspace.getAttribute("aria-expanded") !== "true") await workspace.click();
-  await expect(workspace).toHaveAttribute("aria-expanded", "true");
+  const workspace = page.locator(presentation === "bottom" ? "#review-workspace" : "#review-tools-workspace");
+  const openAttribute = presentation === "bottom" ? "data-workspace-open" : "data-tools-workspace-open";
+  if (await workspace.getAttribute(openAttribute) !== "true") {
+    await page.getByRole("button", { name: "Show workspace", exact: true }).click();
+  }
+  await expect(workspace).toHaveAttribute(openAttribute, "true");
+  await expect(workspace).toBeVisible();
   const annotations = page.getByRole("tab", { name: "Annotations", exact: true });
   if (await annotations.getAttribute("aria-selected") !== "true") await annotations.click();
   await expect(annotations).toHaveAttribute("aria-selected", "true");
@@ -162,8 +164,8 @@ test("@critical @representative keeps the local keyboard journey private and rou
   const firstDownload = await exportReviewedPdf(page);
   const firstCatalog = await inspectPdfAnnotationCatalogWithEmbedPdf(new Uint8Array(await readFile(firstDownload)));
   expect(firstCatalog.annotations).toEqual(expect.arrayContaining([
-    expect.objectContaining({ id: "existing-highlight", contents: "Existing supported highlight" }),
-    expect.objectContaining({ id: "existing-stamp", contents: "Existing unsupported stamp" }),
+    expect.objectContaining({ subtype: "highlight", contents: "Existing supported highlight" }),
+    expect.objectContaining({ subtype: "stamp", contents: "Existing unsupported stamp" }),
     expect.objectContaining({ contents: "Static export proof.", hasNormalAppearance: true }),
   ]));
   expect(firstCatalog.portableItems).toEqual([
@@ -176,8 +178,8 @@ test("@critical @representative keeps the local keyboard journey private and rou
   await reopened.locator("input[type=file]").setInputFiles(firstDownload);
   await waitForStaticPdf(reopened);
   await expect(reopened.locator("[data-owned-mark='pageNote']")).toHaveCount(1);
-  await expect(reopened.locator("[data-existing-annotation='existing-highlight']")).toHaveCount(1);
-  await expect(reopened.locator("[data-existing-annotation='existing-stamp']")).toHaveCount(1);
+  await expect(reopened.locator("[data-review-item]", { hasText: "Existing supported highlight" })).toHaveCount(1);
+  await expect(reopened.locator("[data-review-item]", { hasText: "Existing unsupported stamp" })).toHaveCount(1);
   await expect(reopened.locator("[data-review-item]", { hasText: "Static export proof." })).toHaveCount(1);
   await expect(reopened.getByRole("button", { name: /Open document actions$/u })).toBeVisible();
   const secondDownload = await exportReviewedPdf(reopened);
@@ -186,7 +188,8 @@ test("@critical @representative keeps the local keyboard journey private and rou
   const portableId = secondCatalog.portableItems[0]?.id;
   expect(portableId).toBe(firstCatalog.portableItems[0]?.id);
   expect(secondCatalog.annotations.filter(({ id }) => id === portableId)).toHaveLength(1);
-  expect(secondCatalog.annotations.map(({ id }) => id)).toEqual(expect.arrayContaining(["existing-highlight", "existing-stamp"]));
+  expect(firstCatalog.nativeAnnotations).toHaveLength(2);
+  expect(secondCatalog.nativeAnnotations).toEqual(firstCatalog.nativeAnnotations);
   await assertNoDurableBrowserState(reopened);
   await reopened.close();
 
@@ -228,7 +231,10 @@ test("@representative creates a selection-derived highlight on a cropped PDF wit
   expect(item).toMatchObject({ kind: "highlight", payload: { comment: "Representative multi-segment highlight." } });
   if (item?.kind !== "highlight") throw new Error("Highlight did not reopen as an owned item.");
   expect(Array.isArray(item.payload.segmentRects) ? item.payload.segmentRects.length : 0).toBeGreaterThan(1);
-  expect(catalog.annotations.map(({ id }) => id)).toEqual(expect.arrayContaining(["existing-highlight", "existing-stamp"]));
+  expect(catalog.annotations).toEqual(expect.arrayContaining([
+    expect.objectContaining({ subtype: "highlight", contents: "Existing supported highlight" }),
+    expect.objectContaining({ subtype: "stamp", contents: "Existing unsupported stamp" }),
+  ]));
 
   const reopenedContext = await browser.newContext({ viewport: { width: 760, height: 900 } });
   const reopened = await reopenedContext.newPage();
@@ -238,15 +244,17 @@ test("@representative creates a selection-derived highlight on a cropped PDF wit
   await waitForStaticPdf(reopened);
   await expect(reopened.locator("[data-owned-mark='highlight']").first()).toBeVisible();
   await openAnnotationsWorkspace(reopened);
-  const editHighlight = reopened.getByRole("button", { name: "Edit Highlight annotation on page 1" });
+  const highlightRow = reopened.locator(`[data-review-item="${item.id}"]`);
+  await highlightRow.hover();
+  const editHighlight = highlightRow.getByRole("button", { name: "Edit Highlight annotation on page 1", exact: true });
   await expect(editHighlight).toBeVisible();
   await editHighlight.click();
   const editor = reopened.getByRole("region", { name: "Edit Highlight" });
   await expect(editor).toBeVisible();
   await editor.getByRole("button", { name: "Cancel" }).click();
   await expect(reopened.locator("[data-review-item]", { hasText: "Representative multi-segment highlight." })).toHaveCount(1);
-  await expect(reopened.locator("[data-existing-annotation='existing-highlight']")).toHaveCount(1);
-  await expect(reopened.locator("[data-existing-annotation='existing-stamp']")).toHaveCount(1);
+  await expect(reopened.locator("[data-review-item]", { hasText: "Existing supported highlight" })).toHaveCount(1);
+  await expect(reopened.locator("[data-review-item]", { hasText: "Existing unsupported stamp" })).toHaveCount(1);
   await reopenedContext.close();
 });
 
