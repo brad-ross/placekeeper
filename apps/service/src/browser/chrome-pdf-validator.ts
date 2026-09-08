@@ -3,7 +3,7 @@ import { open, readFile, realpath } from "node:fs/promises";
 import { isAbsolute } from "node:path";
 
 import { assessPdfRewriteEligibility } from "../../../../packages/pdf-backends/src/embedpdf-adapter.js";
-import { readPortableReviewItems } from "../../../../packages/pdf-backends/src/embedpdf-adapter.js";
+import { readEditableReviewItems } from "../../../../packages/pdf-backends/src/embedpdf-adapter.js";
 import type { PdfRewriteEligibility } from "../../../../packages/core/src/pdf-writer.js";
 import type { ReviewItem } from "../../../../packages/core/src/review-model.js";
 import { MAX_CHROME_PDF_BYTES } from "./chrome-pdf-limits.js";
@@ -24,6 +24,7 @@ export interface PdfValidationSubprocessOptions {
 }
 
 export interface ChromePdfInspection {
+  readonly nativeAnnotationsImported?: boolean;
   readonly rewriteEligibility: PdfRewriteEligibility;
   readonly importedItems: readonly ReviewItem[];
 }
@@ -68,15 +69,17 @@ export async function inspectPdfFile(path: string): Promise<ChromePdfInspection>
   const bytes = new Uint8Array(await readFile(canonical));
   const rewriteEligibility = await assessPdfRewriteEligibility(bytes);
   let importedItems: readonly ReviewItem[] = [];
+  let nativeAnnotationsImported = false;
   try {
-    importedItems = await readPortableReviewItems(bytes);
+    importedItems = await readEditableReviewItems(bytes);
+    nativeAnnotationsImported = true;
   } catch (error) {
     if ((error as { readonly code?: unknown }).code === "invalid-portable-annotation") {
       throw error;
     }
     importedItems = [];
   }
-  return { rewriteEligibility, importedItems };
+  return { rewriteEligibility, importedItems, nativeAnnotationsImported };
 }
 
 async function runPdfWorker(
@@ -199,6 +202,7 @@ export async function inspectPdfInSubprocess(
   return {
     rewriteEligibility: eligibility,
     importedItems: record.importedItems as readonly ReviewItem[],
+    nativeAnnotationsImported: record.nativeAnnotationsImported === true,
   };
 }
 

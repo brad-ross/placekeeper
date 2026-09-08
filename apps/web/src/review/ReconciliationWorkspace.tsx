@@ -155,6 +155,7 @@ const REATTACHMENT_TITLES: Readonly<Record<ReviewItemKind, string>> = {
   highlight: "Reattach highlight",
   insert: "Reattach insertion",
   pageNote: "Reattach page note",
+  pdfAnnotation: "Imported PDF annotation",
   replace: "Reattach replacement",
 };
 

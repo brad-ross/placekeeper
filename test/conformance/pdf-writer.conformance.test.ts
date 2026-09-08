@@ -2,6 +2,9 @@ import { createHash } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { PDFArray, PDFDict, PDFDocument, PDFName, PDFNumber, PDFRawStream, decodePDFRawStream } from 'pdf-lib';
+import { PdfiumNative } from '@embedpdf/engines/pdfium';
+import { init } from '@embedpdf/pdfium';
 
 import type { PdfWriteRequest, ReviewAnnotation } from '../../packages/core/src/pdf-writer.js';
 import { PdfWriterError } from '../../packages/core/src/pdf-writer.js';
@@ -109,6 +112,126 @@ async function requestFor(name: string, items = annotations): Promise<PdfWriteRe
 }
 
 describe('EmbedPDF writer gate', () => {
+  it('updates an app-drawn highlight when a comment is attached or removed', async () => {
+    let item: ReviewItem = {
+      id: '70000000-0000-4000-8000-000000000010', kind: 'highlight', pageIndex: 0,
+      createdAt: '2026-09-08T12:00:00.000Z', updatedAt: '2026-09-08T12:00:00.000Z',
+      payload: { rect: { x: 72, y: 120, width: 100, height: 16 }, segmentRects: [{ x: 72, y: 120, width: 100, height: 16 }], quote: 'test', prefix: '', suffix: '', reliable: true, comment: '' },
+    };
+    const writer = await createEmbedPdfWriter();
+    let result = await runPdfBackend(writer, await requestFor('text-native.pdf', [projectReviewItem(item)]));
+    expect(await readPortableReviewItems(result.pdfBytes)).toEqual([item]);
+    for (const [comment, opacity] of [['Attached comment', .25], ['', .36]] as const) {
+      item = { ...item, payload: { ...item.payload, comment }, updatedAt: comment ? '2026-09-08T12:01:00.000Z' : '2026-09-08T12:02:00.000Z' };
+      result = await runPdfBackend(writer, { sourcePdf: result.pdfBytes, sourceSha256: sha256(result.pdfBytes), revision: 2, annotations: [projectReviewItem(item)] });
+      expect(await readPortableReviewItems(result.pdfBytes)).toEqual([item]);
+      const pdf = await PDFDocument.load(result.pdfBytes);
+      const dictionary = pdf.getPage(0).node.lookup(PDFName.of('Annots'), PDFArray).lookup(0, PDFDict);
+      const stream = dictionary.lookup(PDFName.of('AP'), PDFDict).lookup(PDFName.of('N')) as PDFRawStream;
+      expect(stream.dict.lookup(PDFName.of('Resources'), PDFDict).lookup(PDFName.of('ExtGState'), PDFDict)
+        .lookup(PDFName.of('PKFill'), PDFDict).lookup(PDFName.of('ca'), PDFNumber).asNumber()).toBe(opacity);
+    }
+  });
+
+  it('renders correction lines, comment underlines, carets and note outlines without flattening them', async () => {
+    const source = await PDFDocument.create();
+    source.addPage([612, 792]);
+    const sourcePdf = await source.save();
+    const result = await runPdfBackend(await createEmbedPdfWriter(), {
+      sourcePdf, sourceSha256: sha256(sourcePdf), revision: 1, annotations,
+    });
+    const engine = new PdfiumNative(await init({}), { fontFallback: null });
+    const document = await engine.openDocumentBuffer({ id: 'appearance-shapes', content: result.pdfBytes.slice().buffer }).toPromise();
+    try {
+      const render = (withAnnotations: boolean) => engine.renderPageRaw(document, document.pages[0]!, {
+        scaleFactor: 2, dpr: 1, rotation: 0, withAnnotations, withForms: false, transparentBackground: false,
+      }).toPromise();
+      const image = await render(true);
+      const inkPixels = (x: number, y: number, width: number, height: number, matches: (r: number, g: number, b: number) => boolean) => {
+        let count = 0;
+        for (let row = y * 2; row < (y + height) * 2; row++) for (let column = x * 2; column < (x + width) * 2; column++) {
+          const i = (row * image.width + column) * 4;
+          if (matches(image.data[i]!, image.data[i + 1]!, image.data[i + 2]!)) count++;
+        }
+        return count;
+      };
+      const red = (r: number, g: number, b: number) => r > g + 60 && g < 170 && b < 170;
+      const gold = (r: number, g: number, b: number) => r > g && g > b + 50 && g < 170;
+      const slate = (r: number, g: number, b: number) => b > g && g > r && b < 180;
+      expect(inkPixels(72, 98, 150, 4, red)).toBeGreaterThan(300); // Replacement strike
+      expect(inkPixels(230, 98, 55, 4, red)).toBeGreaterThan(100); // Deletion strike
+      expect(inkPixels(72, 105, 150, 3, red)).toBeGreaterThan(100); // Replacement underline
+      expect(inkPixels(72, 133, 220, 4, gold)).toBeGreaterThan(150); // Comment underline
+      expect(inkPixels(292, 88, 20, 20, slate)).toBeGreaterThan(15); // Insertion caret
+      expect(inkPixels(500, 700, 24, 24, gold)).toBeGreaterThan(15); // Note outline
+      const hidden = await render(false);
+      expect(hidden.data.every((channel) => channel === 255)).toBe(true);
+    } finally {
+      await engine.closeDocument(document).toPromise();
+      await engine.destroy().toPromise();
+    }
+  });
+
+  it('exports reader-style appearances without flattening editable annotation dictionaries', async () => {
+    const result = await runPdfBackend(await createEmbedPdfWriter(), await requestFor('text-native.pdf'));
+    const pdf = await PDFDocument.load(result.pdfBytes);
+    const annots = pdf.getPage(0).node.lookup(PDFName.of('Annots'), PDFArray);
+    for (let index = 0; index < annotations.length; index++) {
+      const dictionary = annots.lookup(index, PDFDict);
+      const stream = dictionary.lookup(PDFName.of('AP'), PDFDict).lookup(PDFName.of('N')) as PDFRawStream;
+      const resources = stream.dict.lookup(PDFName.of('Resources'), PDFDict);
+      const states = resources.lookup(PDFName.of('ExtGState'), PDFDict);
+      expect(states.lookup(PDFName.of('PKInk'), PDFDict).lookup(PDFName.of('CA'), PDFNumber).asNumber()).toBe(1);
+      expect(new TextDecoder().decode(decodePDFRawStream(stream).decode())).toContain('/PKInk gs');
+      expect(dictionary.has(PDFName.of('Contents'))).toBe(true);
+      expect(dictionary.has(PDFName.of('NM'))).toBe(true);
+    }
+    const commented = annots.lookup(3, PDFDict).lookup(PDFName.of('AP'), PDFDict).lookup(PDFName.of('N')) as PDFRawStream;
+    const plain = annots.lookup(5, PDFDict).lookup(PDFName.of('AP'), PDFDict).lookup(PDFName.of('N')) as PDFRawStream;
+    const alpha = (stream: PDFRawStream) => stream.dict.lookup(PDFName.of('Resources'), PDFDict)
+      .lookup(PDFName.of('ExtGState'), PDFDict).lookup(PDFName.of('PKFill'), PDFDict)
+      .lookup(PDFName.of('ca'), PDFNumber).asNumber();
+    expect(alpha(commented)).toBe(.25);
+    expect(alpha(plain)).toBe(.36);
+    expect(annots.lookup(3, PDFDict).lookup(PDFName.of('CA'), PDFNumber).asNumber()).toBe(.25);
+    expect(annots.lookup(5, PDFDict).lookup(PDFName.of('CA'), PDFNumber).asNumber()).toBe(.36);
+
+    const engine = new PdfiumNative(await init({}), { fontFallback: null });
+    const document = await engine.openDocumentBuffer({ id: 'appearance-raster', content: result.pdfBytes.slice().buffer }).toPromise();
+    try {
+      const rendered = await engine.renderPageRaw(document, document.pages[0]!, {
+        scaleFactor: 1, dpr: 1, rotation: 0, withAnnotations: true, withForms: false, transparentBackground: false,
+      }).toPromise();
+      const pixel = (x: number, y: number) => Array.from(rendered.data.slice((y * rendered.width + x) * 4, (y * rendered.width + x) * 4 + 4));
+      // Blank portions of the two highlights: their wash must be translucent,
+      // with no double application of /CA and the appearance's fill alpha.
+      expect(pixel(80, 140)).toEqual([252, 240, 200, 255]);
+      expect(pixel(350, 130)).toEqual([251, 233, 176, 255]);
+    } finally {
+      await engine.closeDocument(document).toPromise();
+      await engine.destroy().toPromise();
+    }
+  });
+
+  it.each([0, 90, 180, 270])('keeps a narrow insertion editable with a readable caret on a %i-degree cropped page', async (rotation) => {
+    const item: ReviewItem = {
+      id: '70000000-0000-4000-8000-000000000009', kind: 'insert', pageIndex: 0,
+      createdAt: '2026-09-08T12:00:00.000Z', updatedAt: '2026-09-08T12:00:00.000Z',
+      payload: { position: { x: 150, y: 120, width: 2, height: 18 }, leftContext: 'before', rightContext: 'after', reliable: true, proposedText: 'new text' },
+    };
+    const result = await runPdfBackend(await createEmbedPdfWriter(), await requestFor(`rotation-${rotation}-crop.pdf`, [projectReviewItem(item)]));
+    expect(await readPortableReviewItems(result.pdfBytes)).toEqual([item]);
+    const pdf = await PDFDocument.load(result.pdfBytes);
+    const page = pdf.getPage(0);
+    const annots = page.node.lookup(PDFName.of('Annots'), PDFArray);
+    const dictionary = annots.lookup(annots.size() - 1, PDFDict);
+    const stream = dictionary.lookup(PDFName.of('AP'), PDFDict).lookup(PDFName.of('N')) as PDFRawStream;
+    expect(stream.dict.lookup(PDFName.of('BBox'), PDFArray).asArray().map((value) => (value as PDFNumber).asNumber())).toEqual([0, 0, 20, 20]);
+    const rect = dictionary.lookup(PDFName.of('Rect'), PDFArray).asArray().map((value) => (value as PDFNumber).asNumber());
+    expect(rect[2]! - rect[0]!).toBe(20);
+    expect(rect[3]! - rect[1]!).toBe(20);
+    expect(new TextDecoder().decode(decodePDFRawStream(stream).decode())).toContain('1.5 w');
+  });
   it('writes a three-page group with visible unique children and reopens one canonical item', async () => {
     const timestamp = '2026-09-03T12:00:00.000Z';
     const pages = [0, 1, 2].map((pageIndex) => ({
@@ -433,7 +556,7 @@ describe('EmbedPDF writer gate', () => {
     expect(reopened.annotationSubtypes).toEqual(
       expect.arrayContaining(['strikeOut', 'highlight', 'text', 'stamp']),
     );
-    const expectedSubtype: Record<ReviewAnnotation['kind'], string> = {
+    const expectedSubtype: Partial<Record<ReviewAnnotation['kind'], string>> = {
       replace: 'strikeOut',
       delete: 'strikeOut',
       insert: 'text',

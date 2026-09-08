@@ -7,6 +7,7 @@ import { PDFDocument } from "pdf-lib";
 
 import { PlacekeeperHost } from "../../apps/service/src/host/placekeeper-host.js";
 import { TaskBindingRegistry } from "../../apps/service/src/context/task-binding-registry.js";
+import { readEditableReviewItems } from "../../packages/pdf-backends/src/embedpdf-adapter.js";
 import { addPageNote } from "../../packages/core/src/review-commands.js";
 
 let root = "";
@@ -489,6 +490,37 @@ test.beforeAll(async () => {
 test.afterAll(async () => {
   await host?.close();
   if (root) await rm(root, { recursive: true, force: true });
+});
+
+test('imports standard annotations into the editable tray and saves comment edits and deletion', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  const { sessionId } = await openFreshProductionFixture(page, pdf, 'Standard annotation import failed');
+  const imported = host.broker.state(sessionId)!.items;
+  expect(imported).toHaveLength(2);
+  expect(imported.every(({ kind }) => kind === 'pdfAnnotation')).toBe(true);
+  const item = imported.find(({ payload }) => payload.subtype === 'highlight')!;
+  await openAnnotationsWorkspace(page);
+  await expect(page.locator('[data-existing-annotation]')).toHaveCount(0);
+  await expect(page.getByText('From the PDF', { exact: true })).toHaveCount(0);
+  const row = page.locator(`[data-review-item="${item.id}"]`);
+  await row.hover();
+  await row.getByRole('button', { name: 'Edit Highlight annotation on page 1' }).click();
+  const composer = page.getByRole('region', { name: 'Edit Comment' });
+  await expect(composer).toBeVisible();
+  await composer.getByRole('textbox').fill('An imported comment edited in Placekeeper.');
+  await composer.getByRole('button', { name: 'Apply', exact: true }).click();
+  await expect.poll(() => host.broker.state(sessionId)?.items.find(({ id }) => id === item.id)?.payload.comment)
+    .toBe('An imported comment edited in Placekeeper.');
+  await row.hover();
+  await row.getByRole('button', { name: 'Remove Highlight annotation on page 1' }).click();
+  await expect(row).toHaveCount(0);
+  await expect(page.locator('[data-existing-annotation]')).toHaveCount(0);
+  await expect.poll(() => host.broker.state(sessionId)?.items.length).toBe(1);
+  await expect.poll(() => host.broker.saveStatus(sessionId)?.sync.phase).toBe('clean');
+  const destination = host.broker.saveStatus(sessionId)?.destination;
+  if (destination?.phase !== 'active') throw new Error('Imported annotations have no save destination.');
+  expect((await readEditableReviewItems(new Uint8Array(await readFile(destination.targetPath)))).map(({ id }) => id))
+    .toEqual([imported.find(({ id }) => id !== item.id)!.id]);
 });
 
 test("uses PDF metadata for the tab title and the filename when metadata is absent", async ({ page }) => {

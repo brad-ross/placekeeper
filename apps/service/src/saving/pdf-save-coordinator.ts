@@ -334,6 +334,7 @@ export class PdfSaveCoordinator {
             sourceSha256: delivery.source.digest,
             revision: delivery.revision,
             annotations: delivery.annotations,
+            manageNativeAnnotations: delivery.manageNativeAnnotations ?? false,
           }, this.#backend);
           let inspections: {
             readonly sourceInspection?: InspectedPdf;
@@ -364,6 +365,7 @@ export class PdfSaveCoordinator {
             candidatePdf: written.pdfBytes,
             evidence: written.evidence,
             annotations: delivery.annotations,
+            manageNativeAnnotations: delivery.manageNativeAnnotations ?? false,
             ...inspections,
           });
 

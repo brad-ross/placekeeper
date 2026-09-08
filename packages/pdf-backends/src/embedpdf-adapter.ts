@@ -1,3 +1,5 @@
+import { saveWithReaderAppearances } from './annotation-appearance.js';
+import { nativeAnnotationsFromPages, writeWithNativePdfAnnotations, type NativePdfAnnotation } from './native-annotations.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { isAbsolute } from 'node:path';
 
@@ -61,12 +63,14 @@ export interface InspectedPdf {
   annotationSubtypes: string[];
   annotations: InspectedPdfAnnotation[];
   portableItems: ReviewItem[];
+  nativeAnnotations?: NativePdfAnnotation[];
 }
 
 export interface InspectedPdfAnnotationCatalog {
   pageCount: number;
   annotations: InspectedPdfAnnotation[];
   portableItems: ReviewItem[];
+  nativeAnnotations?: NativePdfAnnotation[];
 }
 
 function sha256(bytes: Uint8Array): string {
@@ -232,7 +236,7 @@ function migrateLegacyStateWithPages(
   };
 }
 
-export async function readPortableReviewItems(bytes: Uint8Array): Promise<ReviewItem[]> {
+export async function readPortableReviewItems(bytes: Uint8Array, options: { readonly includeNative?: boolean } = {}): Promise<ReviewItem[]> {
   const engine = await newEngine();
   try {
     const document = await engine
@@ -242,7 +246,8 @@ export async function readPortableReviewItems(bytes: Uint8Array): Promise<Review
       const pages = await Promise.all(
         document.pages.map((page) => engine.getPageAnnotations(document, page).toPromise()),
       );
-      return [...portableItemsFromAnnotationPages(pages).items];
+      const portable = portableItemsFromAnnotationPages(pages, { invalidMetadata: options.includeNative ? 'foreign' : 'reject' });
+      return [...portable.items, ...(options.includeNative ? nativeAnnotationsFromPages(pages, portable.owned).map(({ item }) => item) : [])];
     } finally {
       await engine.closeDocument(document).toPromise();
     }
@@ -254,6 +259,10 @@ export async function readPortableReviewItems(bytes: Uint8Array): Promise<Review
   } finally {
     await engine.destroy().toPromise();
   }
+}
+
+export function readEditableReviewItems(bytes: Uint8Array): Promise<ReviewItem[]> {
+  return readPortableReviewItems(bytes, { includeNative: true });
 }
 
 /** Upgrades recovery state written by the pre-v2 coordinate contract. */
@@ -320,12 +329,14 @@ async function inspectWithEngine(engine: PdfiumNative, bytes: Uint8Array): Promi
     const annotations = pages.flatMap((pageAnnotations, pageIndex) =>
       inspectAnnotations(pageAnnotations, pageIndex),
     );
-    const portableItems = [...portableItemsFromAnnotationPages(pages).items];
+    const portable = portableItemsFromAnnotationPages(pages, { invalidMetadata: 'foreign' });
+    const portableItems = [...portable.items];
     return {
       pageCount: document.pageCount,
       pageFingerprints,
       annotations,
       portableItems,
+      nativeAnnotations: nativeAnnotationsFromPages(pages, portable.owned),
       annotationSubtypes: annotations.map(({ subtype }) => subtype),
     };
   } finally {
@@ -362,11 +373,13 @@ export async function inspectPdfAnnotationCatalogWithEmbedPdf(
     const pages = await Promise.all(
       document.pages.map((page) => engine.getPageAnnotations(document!, page).toPromise()),
     );
+    const portable = portableItemsFromAnnotationPages(pages, { invalidMetadata: 'foreign' });
     return {
       pageCount: document.pageCount,
       annotations: pages.flatMap((annotations, pageIndex) =>
         inspectAnnotations(annotations, pageIndex)),
-      portableItems: [...portableItemsFromAnnotationPages(pages).items],
+      portableItems: [...portable.items],
+      nativeAnnotations: nativeAnnotationsFromPages(pages, portable.owned),
     };
   } catch (error) {
     if (error instanceof PdfWriterError) throw error;
@@ -442,7 +455,7 @@ function assertPreexistingPreserved(
   }
 }
 
-async function writeWithEmbedPdf(request: PdfWriteRequest): Promise<PdfWriteResult> {
+async function writeOwnedWithEmbedPdf(request: PdfWriteRequest): Promise<PdfWriteResult> {
   assertSemanticGeometry(request.annotations);
   const markers = pdfRewriteMarkers(request.sourcePdf);
   if (markers.encrypted) {
@@ -498,7 +511,7 @@ async function writeWithEmbedPdf(request: PdfWriteRequest): Promise<PdfWriteResu
     const preexisting = beforePages.flatMap((pageAnnotations, pageIndex) =>
       inspectAnnotations(pageAnnotations, pageIndex),
     );
-    const portable = portableItemsFromAnnotationPages(beforePages);
+    const portable = portableItemsFromAnnotationPages(beforePages, { invalidMetadata: 'foreign' });
     const ownedIdentities = new Set(portable.owned.map(({ pageIndex, annotation }) =>
       pdfAnnotationIdentity(pageIndex, annotation.id)));
     const foreignPreexisting = preexisting.filter(({ id, pageIndex }) =>
@@ -569,7 +582,8 @@ async function writeWithEmbedPdf(request: PdfWriteRequest): Promise<PdfWriteResu
       ).toPromise();
     }
 
-    const output = new Uint8Array(await engine.saveAsCopy(document).toPromise());
+    const output = await saveWithReaderAppearances(engine, document, request.annotations.filter(({ pageIndex, id }) =>
+      !preservedOwnedIdentities.has(pdfAnnotationIdentity(pageIndex, id))));
     await engine.closeDocument(document).toPromise();
     document = undefined;
 
@@ -638,5 +652,14 @@ async function writeWithEmbedPdf(request: PdfWriteRequest): Promise<PdfWriteResu
 }
 
 export async function createEmbedPdfWriter(): Promise<PdfWriter> {
-  return { write: writeWithEmbedPdf, assess: assessPdfRewriteEligibility };
+  return {
+    write: (request) => writeWithNativePdfAnnotations(request, {
+      write: writeOwnedWithEmbedPdf, assess: assessPdfRewriteEligibility, sha256,
+      inspect: async (bytes) => {
+        const inspected = await inspectPdfAnnotationCatalogWithEmbedPdf(bytes);
+        return { ...inspected, nativeAnnotations: inspected.nativeAnnotations ?? [] };
+      },
+    }),
+    assess: assessPdfRewriteEligibility,
+  };
 }

@@ -2,6 +2,7 @@ import {
   PdfAnnotationBorderStyle,
   PdfAnnotationSubtype,
   type PdfLinkAnnoObject,
+  type PdfAnnotationObject,
   type PdfLinkTarget,
 } from '@embedpdf/models';
 import {
@@ -184,8 +185,14 @@ const linkOnlyFallbackRenderer = createRenderer({
 });
 
 /** Render built-in non-link appearances under aria-hidden while suppressing their locked interactions. */
-export function sourceAnnotationVisualRenderers(): readonly BoxedAnnotationRenderer[] {
-  return [hiddenLinkRenderer];
+export function sourceAnnotationVisualRenderers(hidden: ReadonlySet<string> = new Set()): readonly BoxedAnnotationRenderer[] {
+  if (hidden.size === 0) return [hiddenLinkRenderer];
+  return [hiddenLinkRenderer, createRenderer({
+    id: 'placekeeper-deleted-source-annotation',
+    matches: (annotation): annotation is PdfAnnotationObject => hidden.has(`${annotation.pageIndex}:${annotation.id}`),
+    render: () => <span aria-hidden="true" />,
+    useAppearanceStream: false,
+  })];
 }
 
 /** Render only project-owned accessible links in the non-hidden interaction layer. */

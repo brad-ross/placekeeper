@@ -39,6 +39,7 @@ import {
 } from "./pdf-verifier.js";
 
 export interface FrozenReviewDelivery {
+  readonly manageNativeAnnotations?: boolean;
   readonly sessionId: string;
   readonly source: ReviewSourceIdentity;
   readonly originalDigest: string;
@@ -320,6 +321,7 @@ export class ExportCoordinator {
         sourceSha256: delivery.source.digest,
         revision: delivery.revision,
         annotations: delivery.annotations,
+        manageNativeAnnotations: delivery.manageNativeAnnotations ?? false,
       },
       { ...this.#backend, signal },
     );
@@ -343,6 +345,7 @@ export class ExportCoordinator {
         candidatePdf,
         evidence: written.evidence,
         annotations: delivery.annotations,
+        manageNativeAnnotations: delivery.manageNativeAnnotations ?? false,
       });
       signal.throwIfAborted();
       return { path, digest: written.evidence.outputSha256, verification };

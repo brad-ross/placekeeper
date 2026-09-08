@@ -1,3 +1,4 @@
+import { annotationAppearance } from '../../core/src/annotation-appearance.js';
 import {
   PdfAnnotationName,
   PdfAnnotationSubtype,
@@ -12,6 +13,7 @@ import {
 import { PdfWriterError, type ReviewAnnotation } from '../../core/src/pdf-writer.js';
 import {
   inspectPortableAnnotations,
+  inspectPortableAnnotationsForImport,
   type VisiblePortableAnnotation,
 } from '../../core/src/portable-annotation.js';
 import type { ReviewItem } from '../../core/src/review-model.js';
@@ -39,6 +41,8 @@ export function pdfAnnotationIdentity(pageIndex: number, annotationId: string): 
 
 export function embedPdfSubtypeName(type: PdfAnnotationSubtype): string {
   switch (type) {
+    case PdfAnnotationSubtype.THREED:
+      return '3D';
     case PdfAnnotationSubtype.STRIKEOUT:
       return 'strikeOut';
     case PdfAnnotationSubtype.FREETEXT:
@@ -76,7 +80,8 @@ export function portableItemsFromAnnotationPages(
   const flattened = annotationPages.flatMap((annotations, pageIndex) =>
     annotations.map((annotation) => ({ pageIndex, annotation })),
   );
-  const inspected = inspectPortableAnnotations(flattened.map(({ pageIndex, annotation }) => ({
+  const inspect = options.invalidMetadata === 'foreign' ? inspectPortableAnnotationsForImport : inspectPortableAnnotations;
+  const inspected = inspect(flattened.map(({ pageIndex, annotation }) => ({
     custom: annotation.custom,
     visible: visibleEmbedPdfAnnotation(annotation, pageIndex),
   })));
@@ -88,9 +93,12 @@ export function portableItemsFromAnnotationPages(
     );
   }
   if (inspected.status === 'foreign') return { items: [], owned: [] };
+  const protectedItems = new Set(options.invalidMetadata === 'foreign' ? inspected.ownedCandidates
+    .filter(({ candidateIndex }) => flattened[candidateIndex]!.annotation.flags?.some((flag) => ['readOnly', 'locked', 'lockedContents'].includes(flag)))
+    .map(({ item }) => item.id) : []);
   return {
-    items: [...inspected.items],
-    owned: inspected.ownedCandidates.map(({ candidateIndex, item }) => ({
+    items: inspected.items.filter(({ id }) => !protectedItems.has(id)),
+    owned: inspected.ownedCandidates.filter(({ item }) => !protectedItems.has(item.id)).map(({ candidateIndex, item }) => ({
       ...flattened[candidateIndex]!,
       item,
     })),
@@ -183,6 +191,8 @@ function common(annotation: ReviewAnnotation, type: PdfAnnotationSubtype) {
 export function mapReviewAnnotationToEmbedPdf(
   annotation: ReviewAnnotation,
 ): SupportedOutputAnnotation {
+  if (annotation.kind === 'pdfAnnotation') throw new PdfWriterError('backend-error', 'Imported annotations must be edited in their original PDF dictionaries.');
+  const style = annotationAppearance(annotation);
   const segmentRects = annotation.quadPoints?.map(toEmbedPdfRect)
     ?? [toEmbedPdfRect(annotation.rect)];
   switch (annotation.kind) {
@@ -191,7 +201,7 @@ export function mapReviewAnnotationToEmbedPdf(
       return {
         ...common(annotation, PdfAnnotationSubtype.STRIKEOUT),
         type: PdfAnnotationSubtype.STRIKEOUT,
-        strokeColor: '#d32f2f',
+        strokeColor: style.ink,
         opacity: 1,
         segmentRects,
       };
@@ -199,7 +209,7 @@ export function mapReviewAnnotationToEmbedPdf(
       return {
         ...common(annotation, PdfAnnotationSubtype.TEXT),
         type: PdfAnnotationSubtype.TEXT,
-        strokeColor: '#1565c0',
+        strokeColor: style.ink,
         opacity: 1,
         name: PdfAnnotationName.Insert,
       };
@@ -207,15 +217,15 @@ export function mapReviewAnnotationToEmbedPdf(
       return {
         ...common(annotation, PdfAnnotationSubtype.HIGHLIGHT),
         type: PdfAnnotationSubtype.HIGHLIGHT,
-        strokeColor: '#ffd54f',
-        opacity: 0.45,
+        strokeColor: style.fill,
+        opacity: style.opacity,
         segmentRects,
       };
     case 'pageNote':
       return {
         ...common(annotation, PdfAnnotationSubtype.TEXT),
         type: PdfAnnotationSubtype.TEXT,
-        strokeColor: '#ffc107',
+        strokeColor: style.ink,
         opacity: 1,
         name: PdfAnnotationName.Note,
       };

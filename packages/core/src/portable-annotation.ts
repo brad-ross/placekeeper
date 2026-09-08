@@ -184,6 +184,7 @@ function isReviewItem(value: unknown): value is ReviewItem {
 
 function subtypeFor(kind: ReviewItemKind): string {
   switch (kind) {
+    case "pdfAnnotation": return "unknown";
     case "replace":
     case "delete":
       return "strikeOut";
@@ -440,6 +441,7 @@ export function createPortableAnnotationCustom(
 }
 
 export function assertPortableAnnotationWritable(annotation: ReviewAnnotation): void {
+  if (annotation.kind === "pdfAnnotation") return;
   if (!hasSafePortableAnnotationShape(annotation.custom)) {
     throw new InvalidReviewCommandError(
       PORTABLE_ANNOTATION_UNSAFE_SHAPE_MESSAGE,
@@ -667,6 +669,33 @@ export function inspectProjectedPortableAnnotations(
         : { segmentRects: annotation.quadPoints.map(engineRect) }),
     },
   })));
+}
+
+/** Recover independent valid groups while leaving externally changed groups to the PDF importer. */
+export function inspectPortableAnnotationsForImport(
+  candidates: readonly PortableAnnotationCandidate[],
+): PortableAnnotationCollectionInspection {
+  const complete = inspectPortableAnnotations(candidates);
+  if (complete.status !== 'invalid') return complete;
+  const groups = new Map<string, number[]>();
+  candidates.forEach((candidate, index) => {
+    const envelope = isRecord(candidate.custom) ? candidate.custom.placekeeper : undefined;
+    const key = isRecord(envelope) && isGroupedEnvelopeCandidate(candidate.custom) && typeof envelope.itemId === 'string'
+      ? `group:${envelope.itemId}` : `single:${index}`;
+    const entries = groups.get(key) ?? [];
+    entries.push(index);
+    groups.set(key, entries);
+  });
+  const valid = new Set<number>();
+  for (const indices of groups.values()) {
+    const inspected = inspectPortableAnnotations(indices.map((index) => candidates[index]!));
+    if (inspected.status === 'owned') {
+      inspected.ownedIndexes.forEach((index) => valid.add(indices[index]!));
+    }
+  }
+  const recovered = inspectPortableAnnotations(candidates.map((candidate, index) =>
+    valid.has(index) ? candidate : { ...candidate, custom: undefined }));
+  return recovered.status === 'invalid' ? { status: 'foreign' } : recovered;
 }
 
 export function decodePortableAnnotationJson(raw: string): PortableAnnotationInspection {

@@ -1,3 +1,4 @@
+import { PDFArray, PDFDict, PDFDocument, PDFName, PDFNumber, PDFRawStream, PDFString, decodePDFRawStream, degrees } from 'pdf-lib';
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
@@ -258,6 +259,7 @@ test("exhaustive profile exports and reopens all five editable annotation kinds"
   await page.goto("./");
   await page.locator("input[type=file]").setInputFiles(annotatedPdf);
   await waitForStaticPdf(page);
+  await expect(page.locator("[data-review-item]")).toHaveCount(2);
   const pdfPage = page.locator("[data-page-index='0']").first();
   const actions = page.getByRole("toolbar", { name: "Selection review actions" });
 
@@ -279,7 +281,8 @@ test("exhaustive profile exports and reopens all five editable annotation kinds"
   await highlight.getByRole("textbox", { name: "Comment" }).fill("All-kinds highlight.");
   await highlight.getByRole("button", { name: "Save", exact: true }).click();
 
-  await placePdfInsertionCaret(page, pdfPage, { x: 150, y: 99 });
+  // Use unmarked text: clicking the imported highlight selects that annotation.
+  await placePdfInsertionCaret(page, pdfPage, { x: 235, y: 99 });
   await expect(page.locator("[data-review-insertion-caret]")).toBeVisible();
   await page.keyboard.type("I");
   const insertion = page.getByRole("region", { name: "Insertion" });
@@ -294,7 +297,7 @@ test("exhaustive profile exports and reopens all five editable annotation kinds"
   const pageNote = page.getByRole("region", { name: "Page Note" });
   await pageNote.getByRole("textbox", { name: "Comment" }).fill("All-kinds page note.");
   await pageNote.getByRole("button", { name: "Save", exact: true }).click();
-  await expect(page.locator("[data-review-item]")).toHaveCount(5);
+  await expect(page.locator("[data-review-item]")).toHaveCount(7);
 
   const path = await exportReviewedPdf(page);
   const catalog = await inspectPdfAnnotationCatalogWithEmbedPdf(new Uint8Array(await readFile(path)));
@@ -305,7 +308,10 @@ test("exhaustive profile exports and reopens all five editable annotation kinds"
     "pageNote",
     "replace",
   ]);
-  expect(catalog.annotations.map(({ id }) => id)).toEqual(expect.arrayContaining(["existing-highlight", "existing-stamp"]));
+  expect((catalog.nativeAnnotations ?? []).map(({ item }) => item.payload.comment).sort()).toEqual([
+    "Existing supported highlight",
+    "Existing unsupported stamp",
+  ]);
 
   const reopenedContext = await browser.newContext({ viewport: { width: 760, height: 900 } });
   const reopened = await reopenedContext.newPage();
@@ -313,12 +319,12 @@ test("exhaustive profile exports and reopens all five editable annotation kinds"
   await reopened.goto(page.url());
   await reopened.locator("input[type=file]").setInputFiles(path);
   await waitForStaticPdf(reopened);
-  await expect(reopened.locator("[data-review-item]")).toHaveCount(5);
+  await expect(reopened.locator("[data-review-item]")).toHaveCount(7);
   for (const kind of ["replace", "delete", "insert", "highlight", "pageNote"] as const) {
     await expect(reopened.locator(`[data-owned-mark='${kind}']`).first()).toBeVisible();
   }
-  await expect(reopened.locator("[data-existing-annotation='existing-highlight']")).toHaveCount(1);
-  await expect(reopened.locator("[data-existing-annotation='existing-stamp']")).toHaveCount(1);
+  await expect(reopened.locator("[data-review-item]").filter({ hasText: "Existing supported highlight" })).toHaveCount(1);
+  await expect(reopened.locator("[data-review-item]").filter({ hasText: "Existing unsupported stamp" })).toHaveCount(1);
   await reopenedContext.close();
 });
 
@@ -368,4 +374,66 @@ test('URL opening uses an in-button spinner and reports failure in a corner toas
   expect((await toast.boundingBox())!.y).toBeLessThan(40);
   await expect(card.locator('[role="alert"]')).toHaveCount(0);
   await expect(page.locator('.static-launcher__spinner')).toHaveCount(0);
+});
+
+
+for (const rotation of [0, 90]) test(`imported annotations use reader defaults and preserve explicit PDF styling (${rotation} degrees)`, async ({ page }) => {
+  const pdf = await PDFDocument.load(await readFile(resolve('test/fixtures/pdfs/text-native.pdf')));
+  const target = pdf.getPage(0);
+  target.setRotation(degrees(rotation));
+  if (rotation) target.setCropBox(20, 30, 560, 730);
+  const appearance = pdf.context.register(pdf.context.stream('0 0 1 rg 0 0 100 18 re f', {
+    Type: 'XObject', Subtype: 'Form', BBox: [0, 0, 100, 18], Resources: {},
+  }));
+  const entries = [
+    { Subtype: 'Highlight' },
+    { Subtype: 'StrikeOut' },
+    { Subtype: 'Underline' },
+    { Subtype: 'Squiggly' },
+    { Subtype: 'Caret' },
+    { Subtype: 'Text' },
+    { Subtype: 'Highlight', C: [0, 1, 0], CA: 0.65 },
+    { Subtype: 'Highlight', AP: { N: appearance }, C: [0, 0, 1], CA: 0.8 },
+  ];
+  target.node.set(PDFName.of('Annots'), pdf.context.obj(entries.map((entry, index) => {
+    const y = 650 - index * 30;
+    return pdf.context.register(pdf.context.obj({ Type: 'Annot', Rect: [72, y, 172, y + 18],
+      QuadPoints: [72, y + 18, 172, y + 18, 72, y, 172, y],
+      Contents: PDFString.of(`Source comment ${index}`), ...entry }));
+  })));
+  await page.goto('./');
+  await page.locator('input[type=file]').setInputFiles({ name: 'source-styles.pdf', mimeType: 'application/pdf', buffer: Buffer.from(await pdf.save()) });
+  await waitForStaticPdf(page);
+  await expect(page.locator('[data-review-item]')).toHaveCount(8);
+  await expect(page.locator('[data-source-reader-mark]')).toHaveCount(7);
+  for (const kind of ['highlight', 'delete', 'underline', 'squiggly', 'insert', 'pageNote']) {
+    await expect(page.locator(`[data-source-reader-mark="${kind}"]`).first()).toBeVisible();
+  }
+  const highlights = page.locator('[data-source-reader-mark="highlight"]');
+  const defaults = await highlights.first().evaluate((element) => ({
+    fill: getComputedStyle(element).getPropertyValue('--pdf-comment-fill').trim(),
+    ink: getComputedStyle(element).getPropertyValue('--pdf-note-ink').trim(),
+  }));
+  expect(defaults).toEqual({ fill: 'rgb(245 196 35 / 25%)', ink: '#b1840d' });
+  await expect(highlights.nth(1)).toHaveCSS('opacity', '0.65');
+  expect(await highlights.nth(1).evaluate((element) => getComputedStyle(element).getPropertyValue('--pdf-note-ink').trim().toLowerCase())).toBe('#00ff00');
+  await page.screenshot({ path: `tmp/source-annotation-styles-desktop-${rotation}.png`, fullPage: true });
+  await page.setViewportSize({ width: 760, height: 900 });
+  await expect(highlights.first()).toBeVisible();
+  await page.screenshot({ path: `tmp/source-annotation-styles-narrow-${rotation}.png`, fullPage: true });
+  const exportedPath = await exportReviewedPdf(page);
+  const exported = await PDFDocument.load(await readFile(exportedPath));
+  const reopened = exported.getPage(0).node.lookup(PDFName.of('Annots'), PDFArray);
+  expect(reopened.size()).toBe(8);
+  expect(reopened.lookup(0, PDFDict).has(PDFName.of('C'))).toBe(false);
+  expect(reopened.lookup(0, PDFDict).has(PDFName.of('CA'))).toBe(false);
+  expect(reopened.lookup(0, PDFDict).has(PDFName.of('AP'))).toBe(false);
+  expect(reopened.lookup(6, PDFDict).lookup(PDFName.of('C'), PDFArray).asArray().map((value) => (value as PDFNumber).asNumber())).toEqual([0, 1, 0]);
+  expect(reopened.lookup(6, PDFDict).lookup(PDFName.of('CA'), PDFNumber).asNumber()).toBeCloseTo(0.65, 6);
+  const stream = reopened.lookup(7, PDFDict).lookup(PDFName.of('AP'), PDFDict).lookup(PDFName.of('N')) as PDFRawStream;
+  expect(new TextDecoder().decode(decodePDFRawStream(stream).decode())).toBe('0 0 1 rg 0 0 100 18 re f');
+  await page.goto('./');
+  await page.locator('input[type=file]').setInputFiles(exportedPath);
+  await waitForStaticPdf(page);
+  await expect(page.locator('[data-source-reader-mark]')).toHaveCount(7);
 });

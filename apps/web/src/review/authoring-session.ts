@@ -253,7 +253,7 @@ function semanticsFor(source: AuthoringSource): AuthoringSemantics {
       allowWhitespace: false,
     });
   }
-  const itemLabel = source.item.kind === 'replace'
+  const itemLabel = source.item.kind === 'pdfAnnotation' ? 'Comment' : source.item.kind === 'replace'
     ? 'Replacement'
     : source.item.kind === 'insert'
       ? 'Insertion'
@@ -265,7 +265,7 @@ function semanticsFor(source: AuthoringSource): AuthoringSemantics {
   return Object.freeze({
     title: `Edit ${itemLabel}`,
     primaryLabel: 'Apply',
-    optional: source.item.kind === 'highlight',
+    optional: source.item.kind === 'highlight' || source.item.kind === 'pdfAnnotation',
     allowWhitespace: source.item.kind === 'replace' || source.item.kind === 'insert',
   });
 }
@@ -332,7 +332,7 @@ export function pendingDraftForAuthoring(input: {
 }
 
 function payloadPoint(item: ReviewItem): PdfNaturalPoint | null {
-  const value = item.payload[item.kind === 'insert' || item.kind === 'pageNote'
+  const value = item.payload[item.kind === 'insert' || item.kind === 'pageNote' || item.kind === 'pdfAnnotation'
     ? 'position'
     : 'rect'];
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return null;
@@ -385,7 +385,7 @@ function selectionPayload(
 
 function editableField(item: ReviewItem): 'proposedText' | 'comment' | null {
   if (item.kind === 'replace' || item.kind === 'insert') return 'proposedText';
-  if (item.kind === 'highlight' || item.kind === 'pageNote') return 'comment';
+  if (item.kind === 'highlight' || item.kind === 'pageNote' || item.kind === 'pdfAnnotation') return 'comment';
   return null;
 }
 

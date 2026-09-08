@@ -3,6 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { PDFArray, PDFDict, PDFDocument, PDFHexString, PDFName, PDFString } from 'pdf-lib';
 
 import type {
   PdfStructuralEvidence,
@@ -14,7 +15,7 @@ import {
 } from "../../packages/core/src/annotation-projection.js";
 import type { ReviewItem } from "../../packages/core/src/review-model.js";
 import { createSelectedPdfWriter } from "../../packages/pdf-backends/src/selected-writer.js";
-import { inspectPdfWithEmbedPdf } from "../../packages/pdf-backends/src/embedpdf-adapter.js";
+import { inspectPdfWithEmbedPdf, readEditableReviewItems } from "../../packages/pdf-backends/src/embedpdf-adapter.js";
 import { ExportCoordinator } from "../../apps/service/src/export/export-coordinator.js";
 import { verifyReviewedPdf } from "../../apps/service/src/export/pdf-verifier.js";
 import { FileCapabilityRegistry } from "../../apps/service/src/files/file-capabilities.js";
@@ -32,6 +33,113 @@ afterEach(async () => {
 });
 
 const timestamp = "2026-08-07T12:00:00.000Z";
+
+describe('standard annotation round trips', () => {
+  it('keeps absent native appearances absent and verifies the final saved bytes', async () => {
+    const pdf = await PDFDocument.load(await readFile(resolve('test/fixtures/pdfs/text-native.pdf')));
+    pdf.getPage(0).node.set(PDFName.of('Annots'), pdf.context.obj([pdf.context.register(pdf.context.obj({
+      Type: 'Annot', Subtype: 'Highlight', Rect: [72, 680, 200, 698],
+      QuadPoints: [72, 698, 200, 698, 72, 680, 200, 680],
+      Contents: PDFString.of('Native comment without a saved appearance'),
+    }))]));
+    const sourcePdf = await pdf.save();
+    const requests = (await readEditableReviewItems(sourcePdf)).map((item) => projectReviewItem(item));
+    const written = await (await createSelectedPdfWriter()).write({ sourcePdf, sourceSha256: sha256(sourcePdf),
+      revision: 1, annotations: requests, manageNativeAnnotations: true });
+    const saved = (await PDFDocument.load(written.pdfBytes)).getPage(0).node.lookup(PDFName.of('Annots'), PDFArray).lookup(0, PDFDict);
+    expect(saved.has(PDFName.of('AP'))).toBe(false);
+    expect(written.evidence.outputSha256).toBe(sha256(written.pdfBytes));
+    expect(written.inspection).toBeUndefined();
+    await expect(verifyReviewedPdf({ sourcePdf, candidatePdf: written.pdfBytes, evidence: written.evidence,
+      annotations: requests, manageNativeAnnotations: true })).resolves.toMatchObject({ pageCount: 1 });
+  });
+
+  it('retains PDF comment and deletion locks on imported annotations', async () => {
+    const pdf = await PDFDocument.create();
+    const page = pdf.addPage([612, 792]);
+    const note = pdf.context.register(pdf.context.obj({ Type: 'Annot', Subtype: 'Text',
+      Rect: [100, 600, 120, 620], Contents: PDFString.of('Locked comment'), F: 64 }));
+    page.node.set(PDFName.of('Annots'), pdf.context.obj([note]));
+    const sourcePdf = await pdf.save();
+    const [item] = await readEditableReviewItems(sourcePdf);
+    expect(item).toMatchObject({ kind: 'pdfAnnotation', payload: { contentsLocked: true, deletionLocked: true } });
+    const writer = await createSelectedPdfWriter();
+    const request = { sourcePdf, sourceSha256: sha256(sourcePdf), revision: 1, manageNativeAnnotations: true };
+    await expect(writer.write({ ...request, annotations: [projectReviewItem({ ...item!,
+      payload: { ...item!.payload, comment: 'Changed' } })] })).rejects.toMatchObject({ code: 'permission-denied' });
+    await expect(writer.write({ ...request, annotations: [] })).rejects.toMatchObject({ code: 'permission-denied' });
+  });
+
+  it('uses externally edited PDF fields even when Placekeeper metadata is stale', async () => {
+    const source = new Uint8Array(await readFile(resolve('test/fixtures/pdfs/text-native.pdf')));
+    const item: ReviewItem = {
+      id: '966775d4-6c98-4f75-a17e-e9206e9d79dd', kind: 'pageNote', pageIndex: 0,
+      createdAt: timestamp, updatedAt: timestamp,
+      payload: { position: { x: 100, y: 100, width: 20, height: 20 }, comment: 'Original note' },
+    };
+    const writer = await createSelectedPdfWriter();
+    const original = await writer.write({ sourcePdf: source, sourceSha256: sha256(source), revision: 0, annotations: [projectReviewItem(item)] });
+    const external = await PDFDocument.load(original.pdfBytes);
+    const mark = external.getPage(0).node.lookup(PDFName.of('Annots'), PDFArray).lookup(0, PDFDict);
+    mark.set(PDFName.of('Contents'), PDFHexString.fromText('Edited in another PDF app'));
+    mark.set(PDFName.of('T'), PDFString.of('External reviewer'));
+    const externalBytes = await external.save();
+    const imported = await readEditableReviewItems(externalBytes);
+    expect(imported).toHaveLength(1);
+    expect(imported[0]).toMatchObject({ kind: 'pdfAnnotation', payload: { comment: 'Edited in another PDF app', author: 'External reviewer' } });
+    const annotations = imported.map((item) => projectReviewItem({ ...item, payload: { ...item.payload, comment: 'Back in Placekeeper' } }));
+    const saved = await writer.write({ sourcePdf: externalBytes, sourceSha256: sha256(externalBytes), revision: 1, annotations, manageNativeAnnotations: true });
+    await expect(verifyReviewedPdf({ sourcePdf: externalBytes, candidatePdf: saved.pdfBytes, evidence: saved.evidence,
+      annotations, manageNativeAnnotations: true })).resolves.toMatchObject({ pageCount: 1 });
+    expect((await readEditableReviewItems(saved.pdfBytes))[0]?.payload.comment).toBe('Back in Placekeeper');
+  });
+
+  it('deletes an imported note and its auxiliary popup while preserving its replies', async () => {
+    const pdf = await PDFDocument.create();
+    const page = pdf.addPage([612, 792]);
+    const parent = pdf.context.obj({ Type: 'Annot', Subtype: 'Text', Rect: [100, 600, 120, 620], Contents: PDFString.of('Parent') });
+    const parentRef = pdf.context.register(parent);
+    const popupRef = pdf.context.register(pdf.context.obj({ Type: 'Annot', Subtype: 'Popup', Rect: [120, 500, 320, 620], Parent: parentRef }));
+    const replyRef = pdf.context.register(pdf.context.obj({ Type: 'Annot', Subtype: 'Text', Rect: [130, 600, 150, 620], Contents: PDFString.of('Reply'), IRT: parentRef, RT: 'R' }));
+    parent.set(PDFName.of('Popup'), popupRef);
+    page.node.set(PDFName.of('Annots'), pdf.context.obj([parentRef, popupRef, replyRef]));
+    const sourcePdf = await pdf.save();
+    const imported = await readEditableReviewItems(sourcePdf);
+    expect(imported).toHaveLength(2);
+    const annotations = imported.filter(({ payload }) => payload.comment === 'Reply').map((item) => projectReviewItem(item));
+    const written = await (await createSelectedPdfWriter()).write({ sourcePdf, sourceSha256: sha256(sourcePdf), revision: 1, annotations, manageNativeAnnotations: true });
+    await expect(verifyReviewedPdf({ sourcePdf, candidatePdf: written.pdfBytes, evidence: written.evidence,
+      annotations, manageNativeAnnotations: true })).resolves.toMatchObject({ pageCount: 1 });
+    const reopened = await PDFDocument.load(written.pdfBytes);
+    const surviving = reopened.getPage(0).node.lookup(PDFName.of('Annots'), PDFArray);
+    expect(surviving.size()).toBe(1);
+    expect(surviving.lookup(0, PDFDict).has(PDFName.of('IRT'))).toBe(false);
+  });
+
+  it('edits and deletes imported comments without duplicating the original marks', async () => {
+    const sourcePdf = new Uint8Array(await readFile(resolve('test/fixtures/pdfs/text-native-with-annotations.pdf')));
+    const imported = await readEditableReviewItems(sourcePdf);
+    expect(imported.map(({ kind }) => kind)).toEqual(['pdfAnnotation', 'pdfAnnotation']);
+    const edited = imported.map((item, index) => index === 0
+      ? { ...item, updatedAt: timestamp, payload: { ...item.payload, comment: 'Reviewed in Placekeeper — café' } }
+      : item);
+    const requests = edited.map((item) => projectReviewItem(item));
+    const writer = await createSelectedPdfWriter();
+    const written = await writer.write({ sourcePdf, sourceSha256: sha256(sourcePdf), revision: 1,
+      annotations: requests, manageNativeAnnotations: true });
+    await expect(verifyReviewedPdf({ sourcePdf, candidatePdf: written.pdfBytes, evidence: written.evidence,
+      annotations: requests, manageNativeAnnotations: true })).resolves.toMatchObject({ pageCount: 1 });
+    const reopened = await readEditableReviewItems(written.pdfBytes);
+    expect(reopened.map(({ id, payload }) => ({ id, payload })))
+      .toEqual(edited.map(({ id, payload }) => ({ id, payload })));
+    const remaining = reopened.slice(1).map((item) => projectReviewItem(item));
+    const deleted = await writer.write({ sourcePdf: written.pdfBytes, sourceSha256: sha256(written.pdfBytes),
+      revision: 2, annotations: remaining, manageNativeAnnotations: true });
+    await expect(verifyReviewedPdf({ sourcePdf: written.pdfBytes, candidatePdf: deleted.pdfBytes, evidence: deleted.evidence,
+      annotations: remaining, manageNativeAnnotations: true })).resolves.toMatchObject({ pageCount: 1 });
+    expect((await readEditableReviewItems(deleted.pdfBytes)).map(({ id }) => id)).toEqual([reopened[1]!.id]);
+  });
+});
 const annotations: readonly ReviewAnnotation[] = [
   {
     kind: "replace",
