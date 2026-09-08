@@ -1,7 +1,7 @@
 ---
 title: Exclude Navigation and Owned PDF Annotations from External Inventories
 date: 2026-08-14
-last_updated: 2026-08-26
+last_updated: 2026-09-08
 category: integration-issues
 module: pdf_annotation_inventory
 problem_type: integration_issue
@@ -58,7 +58,7 @@ Visible fields are also insufficient ownership evidence:
 - A visible annotation ID alone can collide across pages.
 - Missing private metadata is explicitly foreign, while malformed or mismatched metadata is invalid (packages/core/src/portable-annotation.ts:276-312).
 
-Therefore generic Preview or Acrobat annotations remain read-only Existing PDF Annotations. Making them editable requires a separate import-and-writeback contract rather than a looser ownership heuristic.
+Foreign origin does not itself imply read-only status. Supported native annotations now enter Review State through a separate import-and-writeback contract, with comment and deletion permissions and dictionary-preserving saves. Other reviewer-relevant records that can be inventoried remain read-only Existing PDF Annotations. This does not loosen portable ownership validation (`packages/pdf-backends/src/native-annotations.ts:131`; `packages/core/src/portable-annotation.ts:674`).
 
 Finally, recomputing ownership from the latest editable state on every asynchronous retry would be temporally wrong. Editing or deleting an imported Review Item does not retroactively remove its original visible annotation from the already-open source document. A retry that used later application state could reclassify that source-owned mark as foreign.
 
@@ -133,16 +133,17 @@ Local validation for PR #59 passed TypeScript typechecking, 244 Vitest tests, an
 
 ## Why This Works
 
-The fix preserves three distinct authorities:
+The classification preserves distinct authorities:
 
 ~~~text
 raw PDF catalog
   - navigation objects -> navigation and preservation only
   - validated portable identity -> editable Review Item / Owned Annotation
+  - supported native import -> editable native Review Item
   - remaining reviewer-relevant objects -> read-only Existing PDF Annotation
 ~~~
 
-Portable validation remains the sole authority for recognizing a source-PDF annotation as Placekeeper-owned and reconstructing it as editable Review State. It requires supported private metadata, a valid Review Item and projection, an unambiguous visible ID, and agreement with visible page and projection evidence (packages/core/src/portable-annotation.ts:276-312). The web layer does not attempt to rediscover ownership from author, subtype, appearance, or ID alone; it subtracts exact identities already established by portable import.
+Portable validation remains the sole authority for recognizing app-authored portable ownership; native editing authority is established separately. It requires supported private metadata, a valid Review Item and projection, an unambiguous visible ID, and agreement with visible page and projection evidence (packages/core/src/portable-annotation.ts:276-312). The web layer does not attempt to rediscover ownership from author, subtype, appearance, or ID alone; it subtracts exact managed identities established by portable or native import.
 
 The source annotation set stays intact for rendering, navigation, preservation, and serialized-artifact verification. Product semantics are applied only as records cross into reviewer-facing DTOs. Rechecking every aggregation input keeps the invariant independent of the source path.
 
@@ -152,12 +153,16 @@ The per-document snapshot makes asynchronous classification stable: it answers w
 
 - Treat low-level PDF catalogs as preservation-oriented structures, never presentation-ready reviewer inventories.
 - Keep portable-envelope validation as the sole authority for recognizing an annotation recovered from a source PDF as Placekeeper-owned. Do not infer ownership from author text, subtype, appearance, or ID alone.
-- Apply product semantics at every reviewer-facing projection: remove navigation-only annotations and exact owned (pageIndex, id) identities.
+- Apply product semantics at every reviewer-facing projection: remove navigation-only annotations and exact managed (pageIndex, id) identities.
 - Filter as early as practical, then enforce the invariant again for every aggregation input and for derived warnings or counts.
 - Bind asynchronous classification inputs to the document object being read. Retries reuse the source ownership snapshot; a new source establishes a new snapshot.
 - Test representation variance and identity scope: Link casing/whitespace, the same ID on different pages, and a foreign annotation claiming the Placekeeper author.
 - Retain an end-to-end reopen assertion in addition to focused inventory tests: a saved copy should reopen with one editable entry and no duplicate external entry.
-- Before making foreign annotations editable, define supported subtypes, canonical Review Item reconstruction, unsupported-field preservation, edit/delete writeback, and Preview/Acrobat round-trip behavior.
+- For each extension to native editing, retain explicit supported subtypes, canonical Review Item reconstruction, unsupported-field preservation, edit/delete writeback, and external-reader round-trip evidence.
+
+### Native imports extend the managed population
+
+Native source objects receive the same canonical item identities used by the editable tray, while `sourceId` preserves their engine identity for rendering (`apps/web/src/pdf/existing-annotations.ts:176`). The service also subtracts inspected native annotations from residual Live PDF Context records (`apps/service/src/context/live-context-service.ts:161`). Keep the raw catalog broad and both reviewer-facing populations disjoint. The [autosave learning](../architecture-patterns/recoverable-editable-pdf-annotation-autosave.md) describes the successful-source-import evidence required before a missing native item can authorize deletion.
 
 ## Related Issues
 
