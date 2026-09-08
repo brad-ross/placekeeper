@@ -17,6 +17,12 @@ struct RecoveryDecisionGate {
 }
 
 @MainActor
+private final class RecoveryDragRegion: NSView {
+    override var mouseDownCanMoveWindow: Bool { true }
+    override func mouseDown(with event: NSEvent) { window?.performDrag(with: event) }
+}
+
+@MainActor
 private final class RecoveryContentView: NSView {
     override var isFlipped: Bool { true }
 }
@@ -113,6 +119,12 @@ final class RecoveryViewController: NSWindowController, NSWindowDelegate, WKScri
         webView.autoresizingMask = [.width, .height]
         content.addSubview(webView)
         window.contentView = content
+        let dragRegion = RecoveryDragRegion(frame: NSRect(
+            x: RecoveryWindow.shadowInset, y: RecoveryWindow.shadowInset,
+            width: content.bounds.width - 2 * RecoveryWindow.shadowInset, height: 54
+        ))
+        dragRegion.autoresizingMask = [.width]
+        content.addSubview(dragRegion)
         window.installControls(in: content)
         window.center()
         webView.navigationDelegate = self

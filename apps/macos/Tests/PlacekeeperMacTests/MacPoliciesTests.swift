@@ -18,8 +18,18 @@ final class MacPoliciesTests: XCTestCase {
         XCTAssertTrue(window.canBecomeKey)
         XCTAssertEqual(window.frame.width, 462)
         XCTAssertFalse(window.hasShadow)
+        let content = window.contentView!
+        content.layoutSubtreeIfNeeded()
+        func hitTest(_ point: NSPoint) -> NSView? {
+            content.hitTest(content.convert(point, to: content.superview))
+        }
+        XCTAssertTrue(hitTest(NSPoint(x: 220, y: 54))?.mouseDownCanMoveWindow == true)
+        XCTAssertFalse(hitTest(NSPoint(x: 220, y: 120))?.mouseDownCanMoveWindow == true)
         for type in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
-            XCTAssertNotNil(window.standardWindowButton(type)?.superview)
+            let button = window.standardWindowButton(type)!
+            XCTAssertNotNil(button.superview)
+            let hit = hitTest(NSPoint(x: button.frame.midX, y: button.frame.midY))
+            XCTAssertTrue(hit === button || hit?.isDescendant(of: button) == true)
         }
         XCTAssertTrue(window.validateMenuItem(NSMenuItem(
             title: "Close", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w"
