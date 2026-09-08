@@ -285,9 +285,15 @@ for (const width of [1280, 640]) {
   });
 }
 
-for (const referencesOpen of [false, true]) {
-  test(`workspace opening at low zoom commits its first fitted frame with References ${referencesOpen ? 'open' : 'closed'}`, async ({ page }) => {
+for (const { referencesOpen, tall } of [
+  { referencesOpen: false, tall: false },
+  { referencesOpen: true, tall: false },
+  { referencesOpen: false, tall: true },
+  { referencesOpen: true, tall: true },
+]) {
+  test(`workspace opening at low zoom commits its first fitted frame with References ${referencesOpen ? 'open' : 'closed'} in a ${tall ? 'tall' : 'standard'} viewport`, async ({ page }) => {
     await openAnimatedHostReview(page);
+    if (tall) await page.setViewportSize({ width: 1006, height: 1481 });
     if (referencesOpen) {
       await page.getByRole('button', { name: 'Open PDF link to Primary result, Page 2', exact: true }).click();
       await page.getByRole('menuitem', { name: 'Open in References', exact: true }).click();
