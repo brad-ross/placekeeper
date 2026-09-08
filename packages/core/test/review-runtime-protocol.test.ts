@@ -102,18 +102,21 @@ describe("shared review runtime protocol", () => {
     expect(sanitizeChromeReviewRuntimeRequest("forwardSyncTex", {})).toBeUndefined();
   });
 
-  it("projects a Chrome bootstrap without task, bind, path, credential, or executable authority", () => {
+  it("projects native annotation import state without task, bind, path, credential, or executable authority", () => {
     const sessionId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
-    const state = createReviewState({
-      sessionId,
-      source: {
-        fileId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
-        digest: "a".repeat(64),
-        byteLength: 100,
-      },
-      sourceRootId: "must-not-cross",
-    });
-    const projected = sanitizeChromeReviewRuntimeResponse("bootstrap", {
+    const state = {
+      ...createReviewState({
+        sessionId,
+        source: {
+          fileId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+          digest: "a".repeat(64),
+          byteLength: 100,
+        },
+        sourceRootId: "must-not-cross",
+      }),
+      nativeAnnotationImportDigest: "a".repeat(64),
+    };
+    const bootstrap = {
       sessionId,
       generation: 1,
       revision: 0,
@@ -137,9 +140,11 @@ describe("shared review runtime protocol", () => {
       },
       canonicalLinkBase: "placekeeper:///Papers/Paper.pdf",
       location: { kind: "page", page: 4 },
-    });
+    };
+    const projected = sanitizeChromeReviewRuntimeResponse("bootstrap", bootstrap);
 
     expect(projected).toMatchObject({
+      state: { nativeAnnotationImportDigest: "a".repeat(64) },
       scope: { documentTitle: "Paper.pdf", launchSurface: "chrome" },
       canonicalLinkBase: "placekeeper:///Papers/Paper.pdf",
       location: { kind: "page", page: 4 },
@@ -147,6 +152,21 @@ describe("shared review runtime protocol", () => {
     const serialized = JSON.stringify(projected);
     for (const canary of ["must-not-cross", "/Users/reader/secret", "task-secret", "proof-secret"]) {
       expect(serialized).not.toContain(canary);
+    }
+    const macosProjected = sanitizeMacosReviewRuntimeResponse("bootstrap", {
+      ...bootstrap,
+      scope: { ...bootstrap.scope, launchSurface: "macos" },
+    });
+    expect(macosProjected).toMatchObject({
+      state: { nativeAnnotationImportDigest: "a".repeat(64) },
+      scope: { documentTitle: "Paper.pdf", launchSurface: "macos" },
+    });
+    expect(macosProjected).not.toHaveProperty("canonicalLinkBase");
+    for (const invalidDigest of [new String("a".repeat(64)), "A".repeat(64), "a".repeat(63)]) {
+      expect(sanitizeChromeReviewRuntimeResponse("command", {
+        ...state,
+        nativeAnnotationImportDigest: invalidDigest,
+      })).toBeUndefined();
     }
   });
 
