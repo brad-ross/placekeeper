@@ -8,7 +8,7 @@ import {
 } from 'react';
 
 import type { PdfOutlineDiscovery, PdfOutlineItem } from '../pdf/pdf-outline.js';
-import type { AnnotationPresentation } from '../pdf/viewer-framing.js';
+import { LatestFrameRequest, type AnnotationPresentation } from '../pdf/viewer-framing.js';
 import type { PdfDestinationCopyLink } from './copy-link-model.js';
 import { horizontalTabFocusIndex } from './menu-focus.js';
 import { useOutlineExpansionController } from './OutlineExpansionController.js';
@@ -88,6 +88,44 @@ export function OutlineAnnotationsWorkspace({
   const panelRefs = useRef(new Map<RightWorkspaceMode, HTMLElement>());
   const focusMemory = useRef(new Map<RightWorkspaceMode, HTMLElement>());
   const previous = useRef({ open: false, mode: effectiveMode });
+
+  useLayoutEffect(() => {
+    if (!open) return;
+    const panel = panelRefs.current.get(effectiveToolMode);
+    if (!panel) return;
+    let observed: HTMLElement | null = null;
+    let measuredWidth = -1;
+    const measure = () => {
+      const scroller = panel.querySelector<HTMLElement>('[data-workspace-scroll-viewport]') ?? panel;
+      if (scroller !== observed) {
+        if (observed) resizeObserver?.unobserve(observed);
+        observed = scroller;
+        resizeObserver?.observe(scroller);
+      }
+      const width = Math.max(0, scroller.offsetWidth - scroller.clientWidth);
+      if (width !== measuredWidth) {
+        measuredWidth = width;
+        panel.style.setProperty('--review-workspace-scrollbar-width', `${width}px`);
+      }
+    };
+    const scheduler = new LatestFrameRequest<number>({
+      schedule: (callback) => requestAnimationFrame(callback),
+      cancel: (handle) => cancelAnimationFrame(handle),
+      commit: measure,
+    });
+    let revision = 0;
+    const schedule = () => scheduler.publish(++revision);
+    const resizeObserver = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(schedule);
+    const mutationObserver = typeof MutationObserver === 'undefined' ? null : new MutationObserver(schedule);
+    mutationObserver?.observe(panel, { childList: true, subtree: true });
+    measure();
+    return () => {
+      scheduler.cancel();
+      resizeObserver?.disconnect();
+      mutationObserver?.disconnect();
+      panel.style.removeProperty('--review-workspace-scrollbar-width');
+    };
+  }, [effectiveToolMode, open, outlineAvailable, annotationsAvailable]);
 
   useLayoutEffect(() => {
     const was = previous.current;

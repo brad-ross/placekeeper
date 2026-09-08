@@ -39,8 +39,8 @@ function useAnnotationExcerptOverflow(
     const measure = () => {
       animationFrame = 0;
       if (disposed) return;
-      const measuredExcerpt = excerpt.querySelector<HTMLElement>('.annotation-item__excerpt-main');
-      const nextOverflowing = measuredExcerpt !== null && annotationExcerptOverflows(measuredExcerpt);
+      const nextOverflowing = [...excerpt.querySelectorAll<HTMLElement>('.annotation-item__excerpt-main, .annotation-item__quote')]
+        .some(annotationExcerptOverflows);
       setOverflowing(nextOverflowing);
       onOverflowChangeRef.current?.(nextOverflowing);
     };
@@ -53,8 +53,9 @@ function useAnnotationExcerptOverflow(
       ? null
       : new ResizeObserver(scheduleMeasure);
     resizeObserver?.observe(excerpt);
-    const measuredExcerpt = excerpt.querySelector<HTMLElement>('.annotation-item__excerpt-main');
-    if (measuredExcerpt !== null) resizeObserver?.observe(measuredExcerpt);
+    for (const measuredExcerpt of excerpt.querySelectorAll<HTMLElement>('.annotation-item__excerpt-main, .annotation-item__quote')) {
+      resizeObserver?.observe(measuredExcerpt);
+    }
     if (excerpt.parentElement !== null) resizeObserver?.observe(excerpt.parentElement);
     window.addEventListener('resize', scheduleMeasure);
     document.fonts?.addEventListener('loadingdone', scheduleMeasure);
@@ -99,7 +100,7 @@ export function AnnotationExcerpt({
       : `pages ${readerRecord.pageNumber}–${readerRecord.lastPageNumber}`;
   const enabled = readerRecord !== null && onReadFull !== undefined;
   const { excerptRef, overflowing } = useAnnotationExcerptOverflow(
-    [sourceText, content].filter(Boolean).join(' '),
+    [sourceText, content, quoteText].filter(Boolean).join(' '),
     enabled,
     readerRecord === null || onOverflowChange === undefined
       ? undefined

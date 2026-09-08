@@ -1,3 +1,6 @@
+@import '../../web/src/app/review-design-tokens.css';
+@import '../../web/src/app/review-modal-surface.css';
+
 :root {
   color-scheme: only light;
   font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -8,29 +11,11 @@ body {
 }
 
 .handler {
-  --review-ink-primary: #333;
-  --review-ink-muted: #707070;
-  --review-surface-canvas: #f7f7f7;
-  --review-surface-panel: #fff;
-  --review-surface-subtle: #f0f0f0;
-  --review-surface-interactive: #e7e7e7;
-  --review-border: #dedede;
-  --review-border-subtle: #e5e5e5;
-  --review-border-strong: #c7c7c7;
-  --review-focus: #496789;
-  --review-danger: #843b33;
-  --review-radius-control: 10px;
-  --review-radius-dialog: 17px;
-  --review-control-default: 32px;
-  --review-action-group-gap: 2px;
-  --review-shadow-float: 0 12px 48px #00000018;
-  --review-motion-fast: 120ms;
-
   display: grid;
   box-sizing: border-box;
   min-height: 100dvh;
   place-items: center;
-  padding: 1rem;
+  padding: 12px;
   color: var(--review-ink-primary);
   background: var(--review-surface-canvas);
   font-size: 13px;
@@ -55,49 +40,6 @@ body {
 
 .handler #launch-shell[hidden] {
   display: none;
-}
-
-.handler-dialog {
-  position: relative;
-  display: grid;
-  box-sizing: border-box;
-  width: min(32rem, 100%);
-  max-height: calc(100dvh - 2rem);
-  grid-template-rows: auto minmax(0, 1fr) auto;
-  overflow: hidden;
-  border: 0;
-  border-radius: var(--review-radius-dialog);
-  background: var(--review-surface-panel);
-  box-shadow: var(--review-shadow-float);
-}
-
-.handler-dialog__header {
-  padding: 23px 23px 11px;
-  border: 0;
-}
-
-.handler-dialog__header h1 {
-  margin: 0;
-  font-size: 15px;
-  font-weight: 500;
-  line-height: 1.4;
-  letter-spacing: 0;
-}
-
-.handler-dialog__header h1:focus {
-  outline: none;
-}
-
-.handler-dialog__body {
-  min-height: 0;
-  padding: 0 23px 18px;
-  overflow: auto;
-}
-
-.handler-dialog__footer {
-  padding: 0 23px 23px;
-  border: 0;
-  background: transparent;
 }
 
 .popup {
@@ -164,61 +106,8 @@ button:disabled {
   margin-left: auto;
 }
 
-.handler-button {
-  display: inline-flex;
-  min-height: var(--review-control-default);
-  align-items: center;
-  justify-content: center;
-  gap: 7px;
-  margin: 0;
-  padding: 6px 8px;
-  border: 0;
-  border-radius: var(--review-radius-control);
-  color: var(--review-ink-primary);
-  background: transparent;
-  font-size: 13px;
-  font-weight: 400;
-  line-height: 1.2;
-  text-align: center;
-  cursor: pointer;
-  transition: color var(--review-motion-fast) ease, border-color var(--review-motion-fast) ease, background-color var(--review-motion-fast) ease, box-shadow var(--review-motion-fast) ease;
-}
-
 .handler-actions[aria-label="Protected recovery choices"] > #bypass {
   margin-right: auto;
-}
-
-.handler-button:hover:not(:disabled) {
-  border-color: var(--review-border-strong);
-  background: var(--review-surface-interactive);
-}
-
-.handler-button:active:not(:disabled) {
-  box-shadow: none;
-}
-
-.handler-button--primary {
-  border-color: var(--review-ink-primary);
-  color: var(--review-surface-panel);
-  background: #3c3c3c;
-}
-
-.handler-button--primary:hover:not(:disabled) {
-  border-color: var(--review-ink-primary);
-  color: var(--review-surface-panel);
-  background: #252525;
-}
-
-.handler-button--destructive {
-  border-color: color-mix(in srgb, var(--review-danger) 58%, var(--review-border-strong));
-  color: var(--review-danger);
-  background: #faf0ee;
-  box-shadow: none;
-}
-
-.handler-button--destructive:hover:not(:disabled) {
-  border-color: var(--review-danger);
-  background: #f4e3e0;
 }
 
 .handler-icon {
@@ -309,13 +198,6 @@ button:disabled {
   display: none;
 }
 
-.handler .status {
-  margin: 0;
-  color: var(--review-ink-muted);
-  font-size: 13px;
-  line-height: 1.5;
-}
-
 @media (pointer: coarse) {
   .handler-button {
     min-height: 44px;
@@ -323,12 +205,6 @@ button:disabled {
 }
 
 @media (max-width: 34rem) {
-  .handler-button {
-    gap: 5px;
-    padding-inline: 7px;
-    font-size: 12px;
-  }
-
   .handler-actions,
   .handler-recovery-actions {
     flex-wrap: wrap;

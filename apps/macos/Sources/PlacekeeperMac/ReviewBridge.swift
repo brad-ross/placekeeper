@@ -56,7 +56,7 @@ struct MacPageRuntimeRequest {
 final class ReviewBridge {
     let runtimeID: String
     let attemptID: String
-    private let helper: SupervisedReviewHelper
+    private let helper: any ReviewHelperRequesting
     private let admission: MacReviewAdmission
     private(set) var projection: MacRuntimeProjection
     private var activated = false
@@ -64,7 +64,7 @@ final class ReviewBridge {
     private var activationWaiters: [(Bool) -> Void] = []
     private let diagnosticsEnabled = ProcessInfo.processInfo.environment["PLACEKEEPER_MAC_DIAGNOSTICS"] == "1"
 
-    init(runtimeID: String, attemptID: String, helper: SupervisedReviewHelper, admission: MacReviewAdmission) {
+    init(runtimeID: String, attemptID: String, helper: any ReviewHelperRequesting, admission: MacReviewAdmission) {
         self.runtimeID = runtimeID
         self.attemptID = attemptID
         self.helper = helper
@@ -93,8 +93,8 @@ final class ReviewBridge {
         }
         guard request.sessionID == projection.sessionID,
               request.generation == projection.generation,
-              request.revision == projection.revision else {
-            send(rejection(request, identity: projection))
+              request.revision! >= projection.revision else {
+            send(rejection(request, identity: request))
             return
         }
         if request.method == "presence" || request.method == "detach" {
@@ -102,12 +102,15 @@ final class ReviewBridge {
             return
         }
         guard activated else {
-            send(rejection(request, identity: projection))
+            send(rejection(request, identity: request))
             return
         }
         var fields: [String: Any] = [
             "generation": projection.generation,
-            "revision": projection.revision,
+            // A committed command can advance the page before the asynchronous
+            // native projection refresh arrives. The helper owns authoritative
+            // revision validation; forward the page's revision to it.
+            "revision": request.revision!,
             "method": request.method,
             "payload": request.payload,
         ]
@@ -166,7 +169,7 @@ final class ReviewBridge {
 
     private func refreshAfterMutation(method: String, send: @escaping ([String: Any]) -> Void) {
         guard Self.nonIdempotent.contains(method) else { return }
-        _ = helper.request(type: "refresh") { [weak self] reply in
+        _ = helper.request(type: "refresh", fields: [:]) { [weak self] reply in
             Task { @MainActor in
                 guard let self, case let .refreshed(next)? = reply else { return }
                 let previous = self.projection
@@ -232,16 +235,6 @@ final class ReviewBridge {
             "ok": true,
             "payload": payload,
         ]
-    }
-
-    private func rejection(_ request: MacPageRuntimeRequest, identity: MacRuntimeProjection) -> [String: Any] {
-        rejectionEnvelope(
-            requestID: request.requestID,
-            method: request.method,
-            sessionID: identity.sessionID,
-            generation: identity.generation,
-            revision: identity.revision
-        )
     }
 
     private func rejection(_ request: MacPageRuntimeRequest, identity: MacPageRuntimeRequest) -> [String: Any] {

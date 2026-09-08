@@ -151,7 +151,7 @@ Its presentation may change with available reading space, but disclosure changes
 In a generated-output review, unresolved prior-generation items appear first as focused tasks. Reviewed-PDF export, when blocked by those tasks, routes back to the Annotation Tray rather than duplicating resolution controls in the document menu.
 
 ### Full Annotation Reader
-The transient detail surface that reveals complete annotation-specific authored content when its compact excerpt is visually truncated.
+The transient detail surface that reveals complete annotation-specific content, including authored text and quoted or source text, when its compact excerpt is visually truncated.
 
 It preserves its entry context in the Annotation Tray or a PDF annotation popup. Detail disclosure itself preserves PDF position; explicit source return reveals the annotation in the live PDF. The reader resolves current Owned Annotation or Existing PDF Annotation identity, keeps Existing PDF Annotations read-only, and restores safe interaction context when content no longer overflows or its document authority becomes stale.
 

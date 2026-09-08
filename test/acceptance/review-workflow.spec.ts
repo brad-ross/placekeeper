@@ -727,7 +727,7 @@ test.describe('canonical review workflow', () => {
     const highlight = page.getByRole('button', { name: 'Highlight', exact: true });
     await highlight.click();
     await expect(page.getByRole('region', { name: 'Highlight Comment' })).toBeVisible();
-    await page.getByRole('button', { name: 'Keep', exact: true }).click();
+    await page.getByRole('button', { name: 'Save', exact: true }).click();
     await expect(highlight).toHaveCount(0);
     await page.getByRole('button', { name: 'Clear anchors' }).click();
     await page.getByRole('button', { name: 'Use selection' }).click();
@@ -775,7 +775,7 @@ test.describe('canonical review workflow', () => {
     await page.getByRole('button', { name: 'Clear anchors' }).click();
     await page.getByRole('button', { name: 'Use selection' }).click();
     await page.getByRole('button', { name: 'Highlight', exact: true }).click();
-    await page.getByRole('button', { name: 'Keep', exact: true }).click();
+    await page.getByRole('button', { name: 'Save', exact: true }).click();
     await expect(selectionActions).toHaveCount(0);
   });
 
@@ -1177,6 +1177,9 @@ test.describe('canonical review workflow', () => {
     await expect(rightControls).toHaveCSS('opacity', '0');
     for (const control of await bar.locator('[data-review-copy-link], [data-main-history]').all()) {
       await expect(control).toHaveCSS('opacity', '0');
+    }
+    for (const control of await bar.locator('[data-main-history]').all()) {
+      await expect(control).toHaveCSS('clip-path', 'inset(50%)');
     }
     await bar.hover({ position: { x: 2, y: 2 } });
     await expect(rightControls).toHaveCSS('opacity', '1');
@@ -2505,7 +2508,7 @@ test.describe('canonical review workflow', () => {
 
   test('keeps the annotations tray open while editing an owned annotation', async ({ page }) => {
     await page.getByRole('button', { name: 'Highlight', exact: true }).click();
-    await page.getByRole('button', { name: 'Keep', exact: true }).click();
+    await page.getByRole('button', { name: 'Save', exact: true }).click();
     const { annotations, workspace } = await openAnnotationsWorkspace(page);
 
     const edit = page.getByRole('button', { name: 'Edit Highlight annotation on page 1' });
@@ -2659,7 +2662,7 @@ test.describe('canonical review workflow', () => {
     await canvas.focus();
     await page.keyboard.press('Alt+Shift+H');
     await expect(page.getByRole('region', { name: 'Highlight Comment' })).toBeVisible();
-    await page.getByRole('button', { name: 'Keep', exact: true }).click();
+    await page.getByRole('button', { name: 'Save', exact: true }).click();
 
     await canvas.focus();
     await page.keyboard.press('Alt+Shift+N');
@@ -2695,9 +2698,35 @@ test.describe('canonical review workflow', () => {
     await expect(page.locator('[data-revision]')).toHaveAttribute('data-revision', '0');
   });
 
-  test('delays a hoverable mark peek and opens one selected owned row without shifting the document', async ({ page }) => {
+  for (const workspace of ['closed', 'outline'] as const) {
+    test(`shows and hides annotation hover previews without timers with workspace ${workspace}`, async ({ page }) => {
+      await page.getByRole('button', { name: 'Highlight', exact: true }).click();
+      await page.getByRole('button', { name: 'Save', exact: true }).click();
+      if (workspace === 'outline') {
+        await page.getByRole('button', { name: 'Show workspace' }).click();
+        await page.getByRole('tab', { name: 'Outline', exact: true }).click();
+      }
+      const mark = page.locator('[data-owned-focus-id]').first();
+      const peek = page.locator('[data-annotation-peek]');
+      await page.clock.install();
+      await page.clock.pauseAt(new Date());
+      await mark.dispatchEvent('pointerover', { pointerType: 'mouse' });
+      await expect(peek).toBeVisible();
+      await mark.dispatchEvent('pointerout', { pointerType: 'mouse' });
+      await expect(peek).toHaveCount(0);
+      await mark.dispatchEvent('pointerover', { pointerType: 'mouse' });
+      await expect(peek).toBeVisible();
+      await peek.dispatchEvent('pointerover', { pointerType: 'mouse' });
+      await mark.dispatchEvent('pointerout', { pointerType: 'mouse' });
+      await expect(peek).toBeVisible();
+      await peek.dispatchEvent('pointerout', { pointerType: 'mouse' });
+      await expect(peek).toHaveCount(0);
+    });
+  }
+
+  test('shows a hoverable mark peek and opens one selected owned row without shifting the document', async ({ page }) => {
     await page.getByRole('button', { name: 'Highlight', exact: true }).click();
-    await page.getByRole('button', { name: 'Keep', exact: true }).click();
+    await page.getByRole('button', { name: 'Save', exact: true }).click();
 
     const canvas = page.getByRole('application', { name: 'PDF review canvas' });
     const markTarget = page.locator('[data-owned-focus-id]').first();
@@ -2713,6 +2742,8 @@ test.describe('canonical review workflow', () => {
     await expect(peek).toBeVisible();
     await expect(peek).toHaveAttribute('aria-label', 'Highlight annotation preview');
     await expect(peek).not.toContainText('Page 1');
+    await markTarget.click();
+    await peek.hover();
     await expect(peek.getByRole('button', { name: 'Edit Highlight annotation on page 1' })).toBeVisible();
     await expect(peek.getByRole('button', { name: 'Remove Highlight annotation on page 1' })).toBeVisible();
     await canvas.click();
@@ -2746,7 +2777,7 @@ test.describe('canonical review workflow', () => {
         await page.getByRole('button', { name: 'Use selection' }).click();
       }
       await page.getByRole('button', { name: 'Highlight', exact: true }).click();
-      await page.getByRole('button', { name: 'Keep', exact: true }).click();
+      await page.getByRole('button', { name: 'Save', exact: true }).click();
     }
     await openAnnotationsWorkspace(page);
     const drawer = page.locator('[data-annotation-scroll-viewport]');

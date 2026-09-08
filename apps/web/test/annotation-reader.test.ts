@@ -36,7 +36,7 @@ const existing: ExistingAnnotation = {
   supportedAppearance: true,
 };
 
-describe('annotation reader authored-content projection', () => {
+describe('annotation reader complete-content projection', () => {
   it.each([
     ['replace', { proposedText: 'Use the precise replacement.', quote: 'Source passage.' }, 'Replacement text'],
     ['insert', { proposedText: 'Add this sentence.', quote: 'Source anchor.' }, 'Insertion text'],
@@ -68,14 +68,20 @@ describe('annotation reader authored-content projection', () => {
   );
 
   it.each([
-    owned('delete', { quote: 'A long source passage must remain navigation-only.' }),
+    owned('delete', { quote: 'A long deleted source passage.' }),
     owned('highlight', { quote: 'A long highlighted source passage.' }),
     owned('highlight', { comment: '   ', quote: 'A long highlighted source passage.' }),
     owned('replace', { quote: 'Original text without proposed text.' }),
     owned('insert', { proposedText: 42, quote: 'Source anchor.' }),
     owned('pageNote', { comment: null, quote: 'Nearby source.' }),
-  ])('rejects source-only or missing authored content for $kind', (item) => {
-    expect(projectOwnedAnnotationReader(item)).toBeNull();
+  ])('preserves source-only card content for $kind', (item) => {
+    const record = projectOwnedAnnotationReader(item);
+    expect(record).not.toBeNull();
+    expect([record?.content, record?.sourceText, record?.quoteText]).toContain(item.payload.quote);
+  });
+
+  it.each(['delete', 'highlight', 'replace', 'insert', 'pageNote'] as const)('rejects empty %s content', (kind) => {
+    expect(projectOwnedAnnotationReader(owned(kind, {}))).toBeNull();
   });
 
   it('projects imported contents and available author as read-only', () => {
@@ -144,7 +150,7 @@ describe('annotation reader authored-content projection', () => {
 describe('annotation reader identity resolution', () => {
   const ownedItem = owned('replace', {
     proposedText: 'Current replacement.',
-    quote: 'Never expose this source text.',
+    quote: 'Original source text.',
   }, 'owned-live');
 
   const sources = {
@@ -175,13 +181,13 @@ describe('annotation reader identity resolution', () => {
     })).toMatchObject({ content: 'Accepted replacement.' });
   });
 
-  it('fails closed when an owned item disappears or loses authored content', () => {
+  it('fails closed when an owned item disappears or loses all content', () => {
     const identity: AnnotationReaderIdentity = { origin: 'owned', itemId: 'owned-live' };
 
     expect(resolveAnnotationReader(identity, { ...sources, ownedItems: [] })).toBeNull();
     expect(resolveAnnotationReader(identity, {
       ...sources,
-      ownedItems: [{ ...ownedItem, payload: { quote: 'Source only.' } }],
+      ownedItems: [{ ...ownedItem, payload: {} }],
     })).toBeNull();
   });
 

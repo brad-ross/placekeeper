@@ -32,6 +32,7 @@ export interface ReferenceWorkspaceTab {
   readonly identity: string;
   readonly label: string;
   readonly pageContext: string;
+  readonly pageNumber?: number;
 }
 
 export interface ReferenceReturnControlState {
@@ -449,6 +450,11 @@ export function ReferenceWorkspace({
             {tabs.map((tab, index) => {
               const selected = tab.identity === activeTabIdentity;
               const showActions = selected && pendingReference === null;
+              const pageLabel = tab.pageNumber ?? tab.pageContext.replace(/^Page\s+/u, '');
+              const pageOnlyLabel = tab.label === tab.pageContext;
+              const pageTextClass = showActions
+                ? 'reference-tab-segment__page-placeholder'
+                : 'reference-tab-segment__page-label';
               const destinationLabel = tab.label === tab.pageContext
                 ? tab.label
                 : `${tab.label}, ${tab.pageContext}`;
@@ -459,8 +465,12 @@ export function ReferenceWorkspace({
                     showActions ? ' reference-tab-segment--compound' : ''
                   }`}
                   data-reference-tab-segment={tab.identity}
+                  data-reference-page-swap={showActions ? 'true' : undefined}
                   role="presentation"
                 >
+                  {showActions ? <small className="reference-tab-segment__page" aria-hidden="true">
+                    {pageLabel}
+                  </small> : null}
                   <ReviewTooltipButton
                     label={destinationLabel}
                     tooltip={`Show ${destinationLabel}`}
@@ -481,8 +491,14 @@ export function ReferenceWorkspace({
                     onKeyDown={moveReferenceFocus}
                     onClick={() => onReferenceTabActivate(tab.identity)}
                   >
-                    <span>{tab.label === tab.pageContext ? tab.pageContext.replace(/^Page\s+/u, '') : tab.label}</span>
-                    {tab.label === tab.pageContext ? null : <small>{tab.pageContext.replace(/^Page\s+/u, '')}</small>}
+                    <span
+                      className={pageOnlyLabel ? pageTextClass : undefined}
+                      aria-hidden={pageOnlyLabel && showActions ? true : undefined}
+                    >{pageOnlyLabel ? pageLabel : tab.label}</span>
+                    {pageOnlyLabel ? null : <small
+                      className={pageTextClass}
+                      aria-hidden={showActions ? true : undefined}
+                    >{pageLabel}</small>}
                   </ReviewTooltipButton>
                   {showActions && showReferenceReturn ? (
                     <ReferenceReturnButton

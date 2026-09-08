@@ -1,3 +1,6 @@
+import { annotationContent as annotationListContent, type AnnotationContent as AnnotationListContent } from './annotation-content.js';
+export { annotationContent as annotationListContent } from './annotation-content.js';
+export type { AnnotationContent as AnnotationListContent } from './annotation-content.js';
 import { useLayoutEffect, useRef } from 'react';
 import type { ReviewItem } from '../../../../packages/core/src/review-model.js';
 import {
@@ -88,35 +91,6 @@ export function combinedDocumentOrderedAnnotations(
   );
 }
 
-function payloadString(item: ReviewItem, field: string): string {
-  const value = item.payload[field];
-  return typeof value === 'string' ? value : '';
-}
-
-export interface AnnotationListContent {
-  readonly content: string;
-  readonly sourceText?: string;
-  readonly sourceTreatment?: 'plain' | 'struck';
-  readonly quoteText?: string;
-}
-
-export function annotationListContent(item: ReviewItem): AnnotationListContent {
-  const quote = payloadString(item, 'quote');
-  const proposedText = payloadString(item, 'proposedText');
-  const comment = payloadString(item, 'comment');
-  switch (item.kind) {
-    case 'replace':
-      return { content: proposedText, ...(quote ? { sourceText: quote, sourceTreatment: 'struck' as const } : {}) };
-    case 'delete':
-      return { content: '', ...(quote ? { sourceText: quote, sourceTreatment: 'struck' as const } : {}) };
-    case 'highlight': return {
-      content: comment,
-      ...(quote ? { quoteText: quote } : {}),
-    };
-    case 'insert': return { content: proposedText || quote };
-    case 'pageNote': return { content: comment || quote };
-  }
-}
 
 function annotationState(active: boolean, corresponding: boolean): string {
   if (active && corresponding) return 'active-corresponding';
@@ -135,6 +109,7 @@ export interface AnnotationRowContentProps {
   readonly readerRecord?: AnnotationReaderRecord | null;
   readonly navigationRef?: (node: HTMLButtonElement | null) => void;
   readonly onNavigate?: () => void;
+  readonly showSourceReturn?: boolean;
   readonly onReadFull?: (record: AnnotationReaderRecord, trigger: HTMLButtonElement) => void;
   readonly onReaderOverflowChange?: (record: AnnotationReaderRecord, overflowing: boolean) => void;
   readonly onEdit?: (trigger: HTMLButtonElement) => void;
@@ -152,6 +127,7 @@ export function AnnotationRowContent({
   readerRecord = projectOwnedAnnotationReader(item),
   navigationRef,
   onNavigate,
+  showSourceReturn = false,
   onReadFull,
   onReaderOverflowChange,
   onEdit,
@@ -174,6 +150,10 @@ export function AnnotationRowContent({
     ? `page ${pageNumber}`
     : `pages ${pageNumber}–${lastPageNumber}`;
   const actions: RowAction[] = [];
+  if (showSourceReturn && onNavigate) actions.push({
+    id: 'locate', kind: 'command', icon: 'locate',
+    label: 'Back to annotation in PDF', title: 'Back to annotation in PDF', onInvoke: onNavigate,
+  });
   if (onEdit && item.kind !== 'delete') actions.push({
     id: 'edit', kind: 'command', icon: 'edit',
     label: `Edit ${kindLabel} annotation on ${pageDescription}`,

@@ -1733,7 +1733,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       {...(correspondingItemId === undefined ? {} : { correspondingOwnedAnnotationId: correspondingItemId })}
       onExistingAnnotationsDiscovery={onExistingAnnotationsDiscovery}
       inventoryRetryGeneration={inventoryRetryGeneration}
-      documentGeneration={navigationState.documentGeneration}
+      documentGeneration={state.workflow.documentGeneration}
       referenceViewportHost={referenceViewportHost}
       activeReferenceTabIdentity={navigationState.activeTabIdentity}
       onReferenceDocumentControls={onReferenceDocumentControls}
@@ -2230,6 +2230,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
             identity: tab.identity,
             label: tab.label ?? `Page ${tab.originalTarget.pageIndex + 1}`,
             pageContext: tab.pageContext ?? `Page ${tab.originalTarget.pageIndex + 1}`,
+            pageNumber: tab.originalTarget.pageIndex + 1,
           })),
           pendingReference,
           referenceReturn: activeReferenceReturn,

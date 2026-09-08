@@ -269,6 +269,22 @@ test('clicked PDF popup persists and discloses actions over its page number only
   const actionBox = (await actions.boundingBox())!;
   const numberBox = (await number.boundingBox())!;
   expect(actionBox.x + actionBox.width).toBeCloseTo(numberBox.x + numberBox.width, 0);
+  const geometry = await peek.evaluate((element) => {
+    const card = element.getBoundingClientRect();
+    const range = document.createRange();
+    range.selectNodeContents(element.querySelector('.annotation-item__page')!);
+    const text = range.getBoundingClientRect();
+    const lastAction = element.querySelector('.row-action-group__direct > :last-child')!.getBoundingClientRect();
+    const icon = element.querySelector('.row-action-group__direct > :last-child .review-icon')!.getBoundingClientRect();
+    return { top: lastAction.top - card.top - element.clientTop,
+      right: card.right - lastAction.right - element.clientLeft,
+      dx: text.x + text.width / 2 - icon.x - icon.width / 2,
+      dy: text.y + text.height / 2 - icon.y - icon.height / 2 };
+  });
+  expect(geometry.top).toBeCloseTo(8, 1);
+  expect(geometry.right).toBeCloseTo(8, 1);
+  expect(Math.abs(geometry.dx)).toBeLessThan(.5);
+  expect(Math.abs(geometry.dy)).toBeLessThan(1);
   await page.mouse.move(0, 0);
   await expect(actions).toHaveCSS('opacity', '0');
   await expect(peek).toBeVisible();

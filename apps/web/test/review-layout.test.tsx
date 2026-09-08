@@ -31,7 +31,6 @@ import {
 import { ReviewIcon } from '../src/review/ReviewIcon.js';
 import {
   ROW_ACTION_CONTAINER_NAME,
-  ROW_ACTION_DIRECT_BREAKPOINT_PX,
 } from '../src/review/RowActionGroup.js';
 import {
   VIEWER_ZOOM_MAX_PERCENT,
@@ -72,6 +71,7 @@ const annotationStyles = readFileSync(
   new URL('../src/app/review-layout-annotations.css', import.meta.url),
   'utf8',
 );
+const designTokens = readFileSync(new URL('../src/app/review-design-tokens.css', import.meta.url), 'utf8');
 const foundationStyles = readFileSync(
   new URL('../src/app/review-layout-foundation.css', import.meta.url),
   'utf8',
@@ -446,19 +446,10 @@ describe('review shell layout and accessibility contract', () => {
     expect(html).not.toContain('>Delete<');
   });
 
-  it('switches row actions at one shared geometry-derived container boundary', () => {
-    const below = ROW_ACTION_DIRECT_BREAKPOINT_PX - 1;
-    const above = ROW_ACTION_DIRECT_BREAKPOINT_PX + 1;
-
-    expect(below).toBe(271);
-    expect(above).toBe(273);
+  it('keeps search actions direct even in narrow containers', () => {
     expect(annotationStyles).toContain(`container-name: ${ROW_ACTION_CONTAINER_NAME}`);
-    expect(annotationStyles).toContain(
-      `@container ${ROW_ACTION_CONTAINER_NAME} (max-width: ${ROW_ACTION_DIRECT_BREAKPOINT_PX}px)`,
-    );
-    expect(annotationStyles).toMatch(
-      /@container row-actions \(max-width: 272px\) \{[\s\S]*?\.row-action-group__direct\s*\{[^}]*display:\s*none;[\s\S]*?\.row-action-group__secondary\s*\{[^}]*display:\s*block;/u,
-    );
+    expect(annotationStyles).not.toContain('@container row-actions (max-width: 272px)');
+    expect(annotationStyles).toMatch(/li\[data-search-result\] \.row-action-group__direct\s*\{[^}]*display:\s*flex;/u);
     const coarsePointerRules = responsiveStyles.match(
       /@media \(hover: none\), \(pointer: coarse\) \{([\s\S]*)\n\}/u,
     )?.[1] ?? '';
@@ -800,8 +791,8 @@ describe('review shell layout and accessibility contract', () => {
   });
 
   it('keeps responsive review chrome in one fixed-height row', () => {
-    expect(foundationStyles).toMatch(/--review-chrome-height:\s*54px;/u);
-    expect(foundationStyles).toMatch(/--review-chrome-center-y:\s*27px;/u);
+    expect(designTokens).toMatch(/--review-chrome-height:\s*54px;/u);
+    expect(designTokens).toMatch(/--review-chrome-center-y:\s*27px;/u);
     expect(foundationStyles).toMatch(
       /\.review-chrome\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\) max-content;[^}]*height:\s*var\(--review-chrome-height\);[^}]*overflow:\s*visible;/u,
     );
@@ -818,7 +809,7 @@ describe('review shell layout and accessibility contract', () => {
     expect(foundationStyles).toMatch(
       /\.review-chrome__sizing-candidate \.review-chrome__filename\s*\{[^}]*width:\s*var\(--review-document-title-cap\);[^}]*min-width:\s*var\(--review-document-title-cap\);[^}]*max-width:\s*var\(--review-document-title-cap\);[^}]*flex:\s*none;/u,
     );
-    expect(foundationStyles).toMatch(/--review-document-title-cap:\s*9rem;/u);
+    expect(designTokens).toMatch(/--review-document-title-cap:\s*9rem;/u);
     expect(layoutStyles).toMatch(
       /\.review-chrome__filename\s*\{[^}]*min-width:\s*0;[^}]*max-width:\s*var\(--review-document-title-cap\);[^}]*flex:\s*0 1 auto;/u,
     );

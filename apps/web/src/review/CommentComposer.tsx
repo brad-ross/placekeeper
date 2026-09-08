@@ -47,7 +47,6 @@ export interface CommentComposerProps {
   placement?: CommentComposerPlacement;
   onValueChange?(value: string): void;
   onSave(value: string): void | Promise<void>;
-  onSkip?: (() => void | Promise<void>) | undefined;
   onDismiss(): void | Promise<void>;
 }
 
@@ -95,7 +94,6 @@ export function CommentComposer({
   placement,
   onValueChange,
   onSave,
-  onSkip,
   onDismiss,
 }: CommentComposerProps) {
   const titleId = useId();
@@ -105,7 +103,6 @@ export function CommentComposer({
   const [submitting, setSubmitting] = useState(false);
   const composingRef = useRef(false);
   const canSave = optional || (allowWhitespace ? value.length > 0 : value.trim().length > 0);
-  const canSkip = optional && onSkip !== undefined;
 
   useEffect(() => {
     const input = inputRef.current;
@@ -255,16 +252,6 @@ export function CommentComposer({
           >
             <span>Cancel</span>
           </button>
-          {canSkip ? (
-            <button
-              className="review-button review-button--secondary"
-              type="button"
-              title="Keep highlight without comment"
-              onClick={() => void onSkip()}
-            >
-              <span>Keep</span>
-            </button>
-          ) : null}
           <button
             className="review-button review-button--primary"
             type="submit"

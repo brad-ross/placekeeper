@@ -1,50 +1,4 @@
-:is(#root[data-production-root="true"], .terminal-recovery, .top-bar-menu__surface, .static-launcher) {
-  --review-font-ui: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  --review-ink-primary: #333;
-  --review-ink-muted: #707070;
-  --review-ink-quiet: #8a8a8a;
-  --review-surface-canvas: #f7f7f7;
-  --review-surface-panel: #fff;
-  --review-surface-subtle: #f0f0f0;
-  --review-surface-interactive: #e7e7e7;
-  --review-surface-tray: #f0f0f0;
-  --review-border: #dedede;
-  --review-border-subtle: #e5e5e5;
-  --review-border-strong: #c7c7c7;
-  --review-selection-bg: #fff;
-  --review-pdf-selection-bg: #cfdeea;
-  --review-selection-ink: #333;
-  --review-focus: #496789;
-  --review-success: #2d684d;
-  --review-danger: #9a3d34;
-  --review-warning: #d9ad2b;
-  --review-backdrop: rgb(24 26 23 / 42%);
-  --review-radius-control: 9px;
-  --review-radius-row: 11px;
-  --review-radius-float: 13px;
-  --review-radius-dialog: 16px;
-  --review-radius-round: 999px;
-  --review-control-compact: 31px;
-  --review-control-default: 34px;
-  --review-control-touch: 44px;
-  --review-control-group-gap: 2px;
-  --review-action-group-gap: 6px;
-  --review-chrome-height: 54px;
-  --review-chrome-center-y: 27px;
-  --review-document-title-cap: 9rem;
-  --review-workspace-header-height: 44px;
-  --review-metadata-separator-gap: .3rem;
-  --review-workspace-card-surface: var(--review-surface-panel);
-  --review-workspace-card-hover: var(--review-surface-subtle);
-  --review-shadow-float: 0 12px 48px rgb(0 0 0 / 9%), 0 2px 8px rgb(0 0 0 / 5%);
-  --review-shadow-page: 0 2px 4px rgb(0 0 0 / 6%), 0 18px 44px rgb(0 0 0 / 8%);
-  --review-shadow-side: 0 4px 18px rgb(0 0 0 / 5%);
-  --review-shadow-bottom: 0 4px 18px rgb(0 0 0 / 5%);
-  --review-motion-fast: 120ms;
-  --review-motion-surface: 160ms;
-  color-scheme: only light;
-  font-family: var(--review-font-ui);
-}
+@import './review-design-tokens.css';
 
 #root[data-production-root="true"],
 #root[data-production-root="true"] * {
@@ -584,24 +538,6 @@
     calc(var(--review-document-right-gap) + max(0px, var(--review-document-right-space) - var(--review-main-scrollbar-width, 0px))) !important;
 }
 
-/* Opaque native tracks keep zoomed PDF pages out of the outer gutters. */
-.review-document .pdf-workspace__viewport::-webkit-scrollbar {
-  width: 12px;
-  height: 12px;
-  background: var(--review-surface-canvas);
-}
-
-.review-document .pdf-workspace__viewport::-webkit-scrollbar-track,
-.review-document .pdf-workspace__viewport::-webkit-scrollbar-corner {
-  background: var(--review-surface-canvas);
-}
-
-.review-document .pdf-workspace__viewport::-webkit-scrollbar-thumb {
-  border: 3px solid var(--review-surface-canvas);
-  border-radius: 8px;
-  background: #aaa;
-}
-
 /* The zoom wrapper's synthetic margin assumes uniform library padding.
    Native content padding owns centering beside the workspace instead. */
 .review-document [data-viewer-framing-content] {
@@ -746,10 +682,9 @@
   background: var(--review-surface-canvas);
 }
 
-/* Clear the main page shadow, whose soft layer is offset downward.
-   Override the viewer library's inline, uniform 10px padding. */
+/* Use the same small shadow clearance at both ends of the document. */
 .review-document .pdf-workspace__viewport {
-  padding-block: 24px 48px !important;
+  padding-block: 12px !important;
 }
 
 .pdf-workspace__page {
@@ -861,6 +796,12 @@
   display: grid;
   grid-template: minmax(0, 1fr) / minmax(0, 1fr);
   overflow: clip;
+}
+
+/* The outer review layout already clips these surfaces. A second clip can
+   leave native WebKit workspace layers unpainted until the window resizes. */
+[data-launch-surface="macos"] .review-drawer-host {
+  overflow: visible;
 }
 
 .review-context-palette,

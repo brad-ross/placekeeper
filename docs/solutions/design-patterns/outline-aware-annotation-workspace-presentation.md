@@ -1,7 +1,7 @@
 ---
 title: Content-aware annotation workspace presentation
 date: 2026-08-11
-last_updated: 2026-08-28
+last_updated: 2026-09-07
 category: design-patterns
 module: PDF review workspace presentation
 problem_type: design_pattern
@@ -104,6 +104,14 @@ Do not derive capability from CSS position, mode count, or viewport. If a destin
 Mode availability and row metadata share the same rule: only current, authoritative document structure may affect presentation. Outline discovery distinguishes `loading`, `loaded-empty`, `loaded-tree`, and `unavailable` (`apps/web/src/pdf/pdf-outline.ts:22-30`). Discovery with no bookmarks produces `loaded-empty` (`apps/web/src/pdf/pdf-outline.ts:69-83`).
 
 Subsection labels are derived only from a matching-generation `loaded-tree` result (`apps/web/src/review/annotation-outline-context.ts:57-69`). Loading, confirmed absence, discovery failure, stale generations, unsafe targets, and invalid geometry omit the subsection rather than guess.
+
+Generation agreement must begin at discovery's producer, not only at the consumer guard. A restored native review remained at Loading even though session measurements showed outline parsing finishing in roughly 4–35 milliseconds. The callback had captured generation 0 from mirrored navigation state while canonical bootstrap had already supplied generation 1 and mounted its document assets. The parent correctly rejected the generation-0 result; faster parsing or repeated loading indicators could not repair the identity mismatch.
+
+Pass the canonical workflow generation alongside the document being mounted (`apps/web/src/app/ProductionReviewApp.tsx:1736`). Discovery deduplicates by engine and document generation, starts an authority token for that generation, and publishes loading, loaded, or unavailable only through that token (`apps/web/src/app/App.tsx:414`). Keep the parent's matching-generation guard intact (`apps/web/src/app/ProductionReviewApp.tsx:1560`). Removing it would make this symptom disappear by allowing stale document structure into the current review. The correction aligns producer and consumer identity; it does not weaken stale-result rejection or turn retries into a substitute for correct bootstrap wiring.
+
+The regression begins with deferred host bootstrap and a resumed generation of 1, then verifies that Overview, Page 2 appears, its click navigates to page 2, and the loading state disappears (`test/acceptance/host-interface.spec.ts:5`). The harness explicitly supplies generation 1 for `host-resumed` and uses it in the returned bootstrap (`test/acceptance/review-harness/main.tsx:1139`). This catches a race that a fresh generation-0 fixture would mask. It verifies the resumed host bootstrap path and usable outline navigation; the parsing timings are diagnostic session observations, not performance assertions in this test. The correction is part of [PR #87](https://github.com/brad-ross/placekeeper/pull/87), which remains open as of September 7, 2026.
+
+When a current document mounts asynchronously, test with a nonzero generation and ensure its assets, discovery callback, and result consumer receive the same canonical identity before investigating parsing speed or adding retries.
 
 Owned and reviewer-relevant external annotations remain peer sections in the tray. User-owned Review Items stay “Annotations”; PDF-sourced, non-editable marks are “External Annotations (read only).” Navigation-only PDF Links remain document navigation and do not enter this review population. This is presentation of existing domain concepts, not a new entity.
 

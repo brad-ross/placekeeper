@@ -5,6 +5,11 @@ export const FINISH_ZOOM_GESTURE = 'placekeeper:finish-zoom-gesture';
 const pendingFrames = new WeakMap<HTMLElement, number>();
 const animations = new WeakMap<HTMLElement, Animation>();
 
+export function isZoomAnimationActive(viewport: HTMLElement): boolean {
+  const animation = animations.get(viewport);
+  return animation !== undefined && (animation.pending || animation.playState === 'running');
+}
+
 export function cancelZoomAnimation(viewport: HTMLElement): void {
   animations.get(viewport)?.cancel();
   animations.delete(viewport);

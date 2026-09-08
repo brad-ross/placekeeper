@@ -35,11 +35,11 @@ describe("Chrome extension static contract", () => {
       readFile(resolve(extensionRoot, "handler.html"), "utf8"),
       readFile(resolve(extensionRoot, "popup.html"), "utf8"),
     ]);
-    expect(handler).toContain('class="handler-dialog"');
+    expect(handler).toContain('class="handler-dialog review-choice-dialog compact-editorial-modal"');
     expect(handler).toContain('role="dialog"');
-    expect(handler).toContain('class="handler-dialog__header"');
-    expect(handler).toContain('class="handler-dialog__body"');
-    expect(handler).toContain('class="handler-dialog__footer"');
+    expect(handler).toContain('class="handler-dialog__header compact-editorial-modal__header"');
+    expect(handler).toContain('class="handler-dialog__body compact-editorial-modal__body"');
+    expect(handler).toContain('class="handler-dialog__footer compact-editorial-modal__footer"');
     expect(handler).toContain('<button id="bypass" type="button">Default</button>');
     expect(handler).toContain('role="status"');
     expect(popup).toContain('<button id="automatic-open" class="switch" type="button" role="switch"');
@@ -94,9 +94,9 @@ describe("Chrome extension static contract", () => {
     expect(handlerEntry).toContain('handlerActions!.setAttribute("aria-label", "Protected recovery choices")');
     expect(handlerEntry).toContain('title!.textContent = "Existing review recovered"');
     expect(handlerEntry).toContain('setHandlerButtonContent(bypass, "chrome", "Default")');
-    expect(handlerEntry).toContain('["discard", "Discard", "delete", "destructive"]');
-    expect(handlerEntry).toContain('["fork", "Fork", "git-fork", "secondary"]');
-    expect(handlerEntry).toContain('["resume", "Resume", "redo", "primary"]');
+    expect(handlerUi).toContain('["discard", "Discard", "delete", "destructive"]');
+    expect(handlerUi).toContain('["fork", "Fork", "git-fork", "secondary"]');
+    expect(handlerUi).toContain('["resume", "Resume", "redo", "primary"]');
     expect(handlerEntry).toContain('recoveryActions.className = "handler-recovery-actions"');
     expect(handlerEntry).toContain('resume.focus({ preventScroll: true })');
     expect(handlerUi).toContain('button.className = `handler-button');
@@ -105,10 +105,9 @@ describe("Chrome extension static contract", () => {
     expect(handlerUi).toContain('["circle", { cx: "12", cy: "18", r: "3" }]');
     expect(handlerUi).toContain('fill: "currentColor"');
     expect(handlerUi).toContain('stroke: "none"');
-    expect(styles).toContain("min-height: var(--review-control-default)");
+    expect(styles).toContain("@import '../../web/src/app/review-modal-surface.css'");
     expect(styles).toContain("justify-content: flex-end");
-    expect(styles).toContain(".handler-button--primary");
-    expect(styles).toContain(".handler-button--destructive");
+    expect(handlerUi).toContain("review-button--");
     expect(styles).toContain("width: 14px");
     expect(styles).toContain('.handler-button[data-icon="chrome"] .handler-icon');
     expect(styles).toContain('.handler-button[data-icon="git-fork"] .handler-icon');

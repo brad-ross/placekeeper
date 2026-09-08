@@ -97,7 +97,7 @@ export function FullAnnotationReader({ record, onBack, onEdit, onDelete, sourceN
   const backRef = useRef<HTMLButtonElement>(null);
   const locateHeldFocus = useRef(false);
   const previousShowLocate = useRef(showLocate);
-  const paragraphs = record.content.split(/\n\s*\n/u);
+  const paragraphs = (text: string) => text.split(/\n\s*\n/u).map((paragraph, index) => <p key={index}>{paragraph}</p>);
   useLayoutEffect(() => {
     if (shouldRestoreFullAnnotationReaderFocus(
       previousShowLocate.current,
@@ -141,7 +141,7 @@ export function FullAnnotationReader({ record, onBack, onEdit, onDelete, sourceN
               sourceNavigation?.onReturn();
             }}
           ><ReviewIcon name={sourceNavigation?.pending ? 'loading' : 'locate'} size={16} /></ReviewTooltipButton> : null}
-          {onEdit === undefined ? null : <ReviewTooltipButton
+          {onEdit === undefined || record.kind === 'delete' ? null : <ReviewTooltipButton
             type="button"
             className="full-annotation-reader__edit"
             data-full-annotation-action="edit"
@@ -161,8 +161,18 @@ export function FullAnnotationReader({ record, onBack, onEdit, onDelete, sourceN
       </header>
 
       <div className="full-annotation-reader__body">
-        <h3 className="sr-only">{record.contentLabel}</h3>
-        {paragraphs.map((paragraph, index) => <p key={index}>{paragraph}</p>)}
+        {record.sourceText ? <div className="full-annotation-reader__source" data-source-treatment={record.sourceTreatment}>
+          <h3 className="sr-only">{record.kind === 'delete' ? 'Deleted text' : 'Original text'}</h3>
+          {paragraphs(record.sourceText)}
+        </div> : null}
+        {record.content ? <>
+          <h3 className="sr-only">{record.contentLabel}</h3>
+          {paragraphs(record.content)}
+        </> : null}
+        {record.quoteText ? <div className="full-annotation-reader__quote">
+          <h3 className="sr-only">Highlighted text</h3>
+          {paragraphs(record.quoteText)}
+        </div> : null}
       </div>
     </section>
   );
