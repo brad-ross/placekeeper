@@ -15,7 +15,6 @@ import { ReviewIcon, type ReviewIconName } from './ReviewIcon.js';
 import { ReviewTooltipButton } from './ReviewTooltipButton.js';
 
 export const ROW_ACTION_CONTAINER_NAME = 'row-actions';
-export const ROW_ACTION_DIRECT_BREAKPOINT_PX = 272;
 
 interface RowActionBase {
   readonly id: string;

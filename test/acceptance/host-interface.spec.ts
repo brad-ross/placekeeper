@@ -2,6 +2,20 @@ import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
 
+test('host bootstrap loads the outline for a resumed document generation', async ({ page }) => {
+  await page.goto('/test/acceptance/review-harness/?host-history=1&host-resumed=1');
+  await page.getByRole('button', { name: 'Finish host bootstrap' }).click();
+  await expect(page.getByRole('textbox', { name: /^Current page \d+ of 4/u })).toBeVisible();
+  const show = page.getByRole('button', { name: 'Show workspace', exact: true });
+  if (await show.isVisible()) await show.click();
+  await page.getByRole('tab', { name: 'Outline', exact: true }).click();
+  const destination = page.getByRole('button', { name: 'Overview, Page 2', exact: true });
+  await expect(destination).toBeVisible();
+  await destination.click();
+  await expect(page.getByRole('textbox', { name: /^Current page \d+ of 4/u })).toHaveValue('2');
+  await expect(page.locator('[data-outline-state="loading"]')).toHaveCount(0);
+});
+
 for (const source of ['main', 'reference']) {
   test(`host bootstrap attaches history before opening a ${source} link in Main`, async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 900 });
@@ -27,6 +41,7 @@ for (const source of ['main', 'reference']) {
     const back = page.getByRole('button', { name: 'Back in document history' });
     await expect(back).toBeVisible();
     await expect(back).toBeEnabled();
+    await page.locator('[data-review-chrome]').hover({ position: { x: 2, y: 2 } });
     await back.click();
     await expect(pageInput).toHaveValue('1');
     await page.getByRole('button', { name: 'Forward in document history' }).click();

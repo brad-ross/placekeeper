@@ -1,7 +1,7 @@
 ---
 title: "Contextual Annotation Composer preserves document context during authoring"
 date: "2026-08-22"
-last_updated: "2026-09-06"
+last_updated: "2026-09-07"
 category: "design-patterns"
 module: "PDF review annotation authoring"
 problem_type: "design_pattern"
@@ -75,7 +75,7 @@ Save Destination may temporarily inert the drawer host, including the still-moun
 
 When the passage is outside, show the original-page cue and Back to passage. While return is pending, disable its action; when visible or unavailable, omit it (`apps/web/src/review/CommentComposer.tsx:54`, `apps/web/src/review/CommentComposer.tsx:215`). Return routes through `NavigationCoordinator.navigateMainAnnotation` with session-token checks, preserving navigation cancellation and history rather than issuing an uncoordinated scroll (`apps/web/src/app/ProductionReviewApp.tsx:1195`). It changes the viewport, never the frozen source.
 
-Keep Cancel, optional Keep, and Save/Apply beside the input. The textarea grows within bounds and then scrolls internally; typing, focus, and draft state survive placement updates (`apps/web/src/review/CommentComposer.tsx:178`, `apps/web/src/review/CommentComposer.tsx:224`). Avoid permanent editor/reading modes or duplicated source cards when the live provisional mark already supplies context.
+Keep Cancel and Save/Apply beside the input. For an optional highlight comment, Save accepts an empty value and preserves the highlight; Cancel abandons it (`apps/web/src/review/CommentComposer.tsx:105`, `apps/web/src/review/CommentComposer.tsx:246`). The textarea grows within bounds and then scrolls internally; typing, focus, and draft state survive placement updates (`apps/web/src/review/CommentComposer.tsx:178`, `apps/web/src/review/CommentComposer.tsx:224`). Avoid permanent editor/reading modes or duplicated source cards when the live provisional mark already supplies context.
 
 ### Reconcile host invalidations with their originating command
 

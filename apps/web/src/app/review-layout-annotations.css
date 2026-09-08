@@ -621,7 +621,6 @@
   border-radius: var(--review-radius-control);
   background: var(--review-surface-panel);
   box-shadow: 0 8px 20px rgb(24 26 23 / 16%);
-  scrollbar-width: thin;
 }
 
 .pdf-search__symbol-suggestions button {
@@ -747,7 +746,6 @@
   padding: 8px 10px;
   overflow-x: auto;
   border-bottom: 1px solid var(--review-border-subtle);
-  scrollbar-width: thin;
 }
 
 .reference-tab-segment {
@@ -1303,15 +1301,13 @@ li[data-search-result][data-active="true"] .row-action-group__direct {
   overflow: visible;
 }
 
-/* Matches ROW_ACTION_DIRECT_BREAKPOINT_PX: stable label + outline lead + two actions + gaps. */
-@container row-actions (max-width: 272px) {
-  li[data-search-result] .row-action-group__direct {
-    display: none;
-  }
+/* Search results have at most two actions; keep them directly accessible. */
+li[data-search-result] .row-action-group__direct {
+  display: flex;
+}
 
-  li[data-search-result] .row-action-group__secondary {
-    display: block;
-  }
+li[data-search-result] .row-action-group__secondary {
+  display: none;
 }
 
 @container row-actions (max-width: 148px) {
@@ -1729,6 +1725,13 @@ li[data-search-result][data-active="true"] .row-action-group__direct {
 .full-annotation-reader__edit:hover,
 .full-annotation-reader__delete:hover,
 .full-annotation-reader__locate:hover {
+  border-color: var(--review-border-strong);
+  background: var(--review-workspace-card-hover);
+}
+
+.review-shell .full-annotation-reader__back:focus-visible {
+  outline: none;
+  box-shadow: none;
   border-color: var(--review-border-strong);
   background: var(--review-workspace-card-hover);
 }

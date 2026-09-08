@@ -64,7 +64,7 @@ export function SaveDestinationDialog(props: SaveDestinationDialogProps) {
     <div className="save-destination-backdrop" data-save-destination-backdrop>
       <section
         ref={dialogRef}
-        className="save-destination-dialog compact-editorial-modal"
+        className="save-destination-dialog review-choice-dialog compact-editorial-modal"
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
@@ -230,7 +230,7 @@ export function SaveDestinationDialog(props: SaveDestinationDialogProps) {
             onClick={() => void props.onConfirm(choice, filename)}
           >
             {props.establishing ? <ReviewIcon name="loading" /> : null}
-            <span>{props.establishing ? "Setting up…" : "Confirm"}</span>
+            <span>Confirm</span>
           </button>
         </footer>
       </section>

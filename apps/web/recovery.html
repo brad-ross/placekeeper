@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src placekeeper-recovery:; style-src placekeeper-recovery:; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'; connect-src 'none'">
+    <title>Placekeeper Recovery</title>
+  </head>
+  <body class="handler recovery-window">
+    <main class="handler-dialog review-choice-dialog compact-editorial-modal" role="dialog" aria-modal="true" aria-labelledby="title" aria-describedby="status">
+      <div class="recovery-window__controls" aria-hidden="true"></div>
+      <header class="handler-dialog__header compact-editorial-modal__header">
+        <h2 id="title" tabindex="-1">Existing review recovered</h2>
+      </header>
+      <section class="handler-dialog__body compact-editorial-modal__body">
+        <p id="status" class="status compact-editorial-modal__description" role="status" aria-live="polite">Choose how Placekeeper should reopen your unfinished review.</p>
+      </section>
+      <footer class="handler-dialog__footer compact-editorial-modal__footer">
+        <div id="handler-actions" class="handler-actions" role="group" aria-label="Protected recovery choices"></div>
+      </footer>
+    </main>
+    <script type="module" src="./src/macos-recovery-entry.ts"></script>
+  </body>
+</html>

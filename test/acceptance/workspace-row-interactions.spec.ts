@@ -10,7 +10,52 @@ async function leaveRow(page: Page) {
   await page.locator('.review-chrome__page-input').focus();
 }
 
-for (const width of [1280, 620]) {
+async function expectPageCenteredOnLastAction(row: Locator) {
+  const centers = await row.evaluate((element) => {
+    const number = element.querySelector('.outline-navigator__page, .annotation-item__page, .pdf-search__result-page')!;
+    const range = document.createRange();
+    range.selectNodeContents(number);
+    const text = range.getBoundingClientRect();
+    const icon = element.querySelector('.row-action-group__direct > :last-child .review-icon')!.getBoundingClientRect();
+    return { textX: text.x + text.width / 2, textY: text.y + text.height / 2,
+      iconX: icon.x + icon.width / 2, iconY: icon.y + icon.height / 2 };
+  });
+  expect(Math.abs(centers.textX - centers.iconX)).toBeLessThan(.5);
+  expect(Math.abs(centers.textY - centers.iconY)).toBeLessThan(1);
+}
+
+for (const scrollbarWidth of [8, 17]) {
+  test(`workspace right inset includes its ${scrollbarWidth}px scrollbar`, async ({ page, browserName }) => {
+    test.skip(browserName !== 'chromium', 'Custom classic scrollbar sizes are a Chromium geometry fixture.');
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.goto('/test/acceptance/review-harness/index.html?visual=tray&search=canonical');
+    await page.addStyleTag({ content: `
+      #workspace-panel-annotations, #workspace-panel-outline, .pdf-search__results {
+        max-height: 150px; overflow-y: scroll; scrollbar-gutter: stable; scrollbar-width: auto; scrollbar-color: auto;
+      }
+      #workspace-panel-annotations::-webkit-scrollbar,
+      #workspace-panel-outline::-webkit-scrollbar,
+      .pdf-search__results::-webkit-scrollbar { width: ${scrollbarWidth}px; }
+    ` });
+    for (const mode of ['Outline', 'Annotations', 'Search']) {
+      await page.getByRole('tab', { name: mode, exact: true }).click();
+      if (mode === 'Search') await page.getByRole('searchbox').fill('signal');
+      const row = page.locator(mode === 'Outline' ? '.outline-navigator__row:visible'
+        : mode === 'Search' ? '[data-search-result]:visible' : 'li[data-annotation-origin]:visible').first();
+      await expect(row).toBeVisible();
+      const scroller = page.locator(mode === 'Search' ? '.pdf-search__results'
+        : `#workspace-panel-${mode.toLowerCase()}`);
+      await expect.poll(() => scroller.evaluate((element) => (element as HTMLElement).offsetWidth - element.clientWidth)).toBe(scrollbarWidth);
+      await expect.poll(async () => {
+        const scrollBounds = (await scroller.boundingBox())!;
+        const rowBounds = (await row.boundingBox())!;
+        return Math.round(scrollBounds.x + scrollBounds.width - rowBounds.x - rowBounds.width);
+      }).toBe(Math.max(12, scrollbarWidth));
+    }
+  });
+}
+
+for (const width of [1280, 620, 390]) {
   test(`workspace row intent and page/action endcaps match the outline at ${width}px`, async ({ page, browserName }) => {
     page.on('pageerror', (error) => { throw error; });
     await page.setViewportSize({ width, height: 900 });
@@ -31,10 +76,14 @@ for (const width of [1280, 620]) {
 
     const outline = page.locator('.outline-navigator__row:visible:not([data-current="true"]):has(.row-action-group)').first();
     await outline.hover();
+    const outlineBounds = (await outline.boundingBox())!;
+    const outlineTitleBounds = (await outline.locator('.outline-navigator__title').boundingBox())!;
+    expect(outlineBounds.height - outlineTitleBounds.height).toBeCloseTo(20, 1);
     const outlineHover = await rowPaint(outline);
     expect(outlineHover.background).toBe('rgb(231, 231, 231)');
     await expect(outline.locator('.outline-navigator__page')).toHaveCSS('opacity', '0');
     await expect(outline.locator('.row-action-group__direct')).toHaveCSS('opacity', '1');
+    await expectPageCenteredOnLastAction(outline);
     await outline.locator('.outline-navigator__destination').click();
     const pointerFocusesOutline = await outline.locator('.outline-navigator__destination')
       .evaluate((element) => element === document.activeElement);
@@ -55,10 +104,18 @@ for (const width of [1280, 620]) {
       const row = kind === 'Search'
         ? page.locator('[data-search-result]').first()
         : page.locator('[data-review-item="owned-replace"]');
+      await row.hover();
+      await expectPageCenteredOnLastAction(row);
+      const cardBounds = (await row.locator('.annotation-item__content').boundingBox())!;
+      const lastActionBounds = (await row.locator('.row-action-group__direct > :last-child').boundingBox())!;
+      expect(Math.abs((lastActionBounds.y - cardBounds.y)
+        - (cardBounds.x + cardBounds.width - lastActionBounds.x - lastActionBounds.width))).toBeLessThan(1);
       const navigation = row.locator('.annotation-item__navigation');
       const actions = row.locator('.row-action-group__direct');
       const number = row.locator('.annotation-item__page, .pdf-search__result-page');
       await leaveRow(page);
+      await expect(actions).toHaveCSS('display', 'flex');
+      await expect(row.locator('.row-action-group__secondary')).toBeHidden();
       await expect(actions).toHaveCSS('opacity', '0');
       await expect(number).toHaveCSS('opacity', '1');
       const body = row.locator('.annotation-item__body-row, .pdf-search__excerpt');
@@ -275,4 +332,114 @@ test('horizontal reference tabs in a bottom workspace fit short titles', async (
   await title.evaluate((element) => { element.textContent = 'Note'; });
   expect((await tab.boundingBox())!.width).toBeLessThan(longWidth);
   expect((await tab.boundingBox())!.width).toBeGreaterThanOrEqual(112);
+});
+
+test('workspace scrollbars retain native appearance and scroll normally', async ({ page }) => {
+  await page.goto('/test/acceptance/review-harness/index.html?visual=tray&search=canonical');
+  await page.addStyleTag({ content: `
+    #workspace-panel-annotations, #workspace-panel-outline, .pdf-search__results {
+      max-height: 24px; min-height: 0; overflow-y: scroll;
+    }
+  ` });
+  for (const mode of ['Outline', 'Annotations', 'Search']) {
+    await page.getByRole('tab', { name: mode, exact: true }).click();
+    if (mode === 'Search') await page.getByRole('searchbox').fill('signal');
+    const scroller = page.locator(mode === 'Search' ? '.pdf-search__results'
+      : `#workspace-panel-${mode.toLowerCase()}`);
+    await expect(scroller).toHaveCSS('scrollbar-width', 'auto');
+    await expect(scroller).toHaveCSS('scrollbar-color', await page.evaluate(() =>
+      getComputedStyle(document.documentElement).getPropertyValue('scrollbar-color')));
+    expect(await scroller.evaluate((element) => getComputedStyle(element, '::-webkit-scrollbar').width)).toBe('auto');
+    await scroller.hover();
+    await page.mouse.wheel(0, 30);
+    await expect.poll(() => scroller.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+    await expect(scroller).not.toHaveAttribute('data-scrollbar-active');
+  }
+});
+
+
+async function openReferences(page: Page, width: number) {
+  await page.setViewportSize({ width, height: 900 });
+  await page.goto('/test/acceptance/review-harness/index.html?visual=reference-layout&referenceReturn=visible');
+  if (width >= 900) await page.getByRole('button', { name: 'Show References', exact: true }).click();
+  else {
+    await page.getByRole('button', { name: 'Show workspace', exact: true }).click();
+    await page.getByRole('tab', { name: 'References', exact: true }).click();
+  }
+  const tabs = page.locator('.reference-tabs:visible');
+  await expect(tabs).toBeVisible();
+  return tabs;
+}
+
+async function referenceTabGeometry(tab: Locator) {
+  return tab.evaluate((element) => {
+    const page = element.querySelector('.reference-tab-segment__page')!;
+    const textRange = document.createRange();
+    textRange.selectNodeContents(page);
+    const number = textRange.getBoundingClientRect();
+    const icon = element.querySelector('[data-reference-tab-action="close"] .review-icon')!.getBoundingClientRect();
+    return {
+      tab: element.getBoundingClientRect().toJSON(),
+      title: element.querySelector('.reference-tab-segment__selector')!.getBoundingClientRect().toJSON(),
+      numberX: number.x + number.width / 2,
+      numberY: number.y + number.height / 2,
+      iconX: icon.x + icon.width / 2,
+      iconY: icon.y + icon.height / 2,
+    };
+  });
+}
+
+for (const width of [1280, 620]) {
+  test(`reference pages swap with actions without moving ${width >= 900 ? 'vertical' : 'horizontal'} tabs`, async ({ page, browserName }) => {
+    const tabs = await openReferences(page, width);
+    const active = tabs.locator('.reference-tab-segment[data-reference-page-swap="true"]');
+    const number = active.locator('.reference-tab-segment__page');
+    const actions = active.locator('.reference-tab-segment__action, .reference-panel__return');
+    const selector = active.getByRole('tab');
+    await page.mouse.move(0, 0);
+    await page.locator('.review-chrome__page-input').focus();
+    // The title contains "Lemma 2"; page metadata correctly supplies 18.
+    await expect(number).toHaveText('18');
+    await expect(number).toHaveCSS('opacity', '1');
+    for (const action of await actions.all()) await expect(action).toHaveCSS('opacity', '0');
+    const before = await referenceTabGeometry(active);
+    expect(Math.abs(before.numberX - before.iconX)).toBeLessThan(.5);
+    expect(Math.abs(before.numberY - before.iconY)).toBeLessThan(1);
+    await active.hover();
+    await expect(number).toHaveCSS('opacity', '0');
+    for (const action of await actions.all()) await expect(action).toHaveCSS('opacity', '1');
+    expect(await referenceTabGeometry(active)).toEqual(before);
+    const inactive = tabs.locator('.reference-tab-segment:not([data-reference-page-swap])').first();
+    await inactive.hover();
+    await expect(inactive.locator('.reference-tab-segment__page-label')).toBeVisible();
+    await expect(inactive.locator('.reference-tab-segment__action')).toHaveCount(0);
+    await page.mouse.move(0, 0);
+    await selector.focus();
+    await page.keyboard.press(browserName === 'webkit' ? 'Alt+Tab' : 'Tab');
+    await expect(actions.first()).toBeFocused();
+    await expect(number).toHaveCSS('opacity', '0');
+    await expect(actions.first()).toHaveCSS('opacity', '1');
+    expect(await referenceTabGeometry(active)).toEqual(before);
+  });
+}
+
+test('touch reference tabs expose actions instead of page metadata only on the active tab', async ({ browser }) => {
+  const context = await browser.newContext({ hasTouch: true, viewport: { width: 620, height: 900 } });
+  const page = await context.newPage();
+  try {
+    const tabs = await openReferences(page, 620);
+    const active = tabs.locator('[data-reference-page-swap="true"]');
+    await expect(active.locator('.reference-tab-segment__page')).toHaveCSS('opacity', '0');
+    for (const action of await active.locator('.reference-tab-segment__action, .reference-panel__return').all()) {
+      await expect(action).toHaveCSS('opacity', '1');
+      await expect(action).toHaveCSS('height', '44px');
+    }
+    const measured = await referenceTabGeometry(active);
+    expect(Math.abs(measured.numberX - measured.iconX)).toBeLessThan(.5);
+    expect(Math.abs(measured.numberY - measured.iconY)).toBeLessThan(1);
+    await expect(tabs.locator('.reference-tab-segment:not([data-reference-page-swap])').first()
+      .locator('.reference-tab-segment__page-label')).toBeVisible();
+  } finally {
+    await context.close();
+  }
 });

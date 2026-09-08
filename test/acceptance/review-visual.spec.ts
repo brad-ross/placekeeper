@@ -1160,7 +1160,7 @@ test('Page Note composer', async ({ page }) => {
 for (const composer of [
   { name: 'replacement', title: 'Replacement', primary: 'Apply' },
   { name: 'insertion', title: 'Insertion', primary: 'Apply' },
-  { name: 'highlight', title: 'Highlight Comment', primary: 'Save', keep: true },
+  { name: 'highlight', title: 'Highlight Comment', primary: 'Save' },
   { name: 'page-note', title: 'Page Note', primary: 'Save' },
   { name: 'edit-highlight', title: 'Edit Highlight', primary: 'Apply' },
   { name: 'edit-page-note', title: 'Edit Page Note', primary: 'Apply' },
@@ -1178,7 +1178,7 @@ for (const composer of [
     await expect(surface.getByRole('button', { name: 'Cancel' })).toBeVisible();
     await expect(surface.getByRole('button', { name: composer.primary, exact: true })).toBeVisible();
     await expect(surface.getByRole('button', { name: 'Keep', exact: true }))
-      .toHaveCount(composer.keep === true ? 1 : 0);
+      .toHaveCount(0);
   });
 }
 

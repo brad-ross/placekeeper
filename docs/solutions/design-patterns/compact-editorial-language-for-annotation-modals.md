@@ -1,7 +1,7 @@
 ---
 title: "Compact Editorial language for review task and recovery surfaces"
 date: "2026-08-21"
-last_updated: "2026-09-06"
+last_updated: 2026-09-07
 category: "design-patterns"
 module: "PDF review task and recovery surface presentation"
 problem_type: "design_pattern"
@@ -36,7 +36,7 @@ tags:
 
 ## Context
 
-Placekeeper's annotation editor, Save Destination dialog, interrupted-session page, extension popup, and reconciliation tasks should look related while retaining distinct behavior. The durable abstraction is shared presentation and action language, not a stateful universal modal. Historical presentation work appears in [PR #46](https://github.com/brad-ross/placekeeper/pull/46) and [PR #48](https://github.com/brad-ross/placekeeper/pull/48).
+Placekeeper's annotation editor, Save Destination dialog, interrupted-session page, extension popup, and reconciliation tasks should look related while retaining distinct behavior. The durable abstraction is shared presentation and action language, not a stateful universal modal. Historical presentation work appears in [PR #46](https://github.com/brad-ross/placekeeper/pull/46) and [PR #48](https://github.com/brad-ross/placekeeper/pull/48). [PR #87](https://github.com/brad-ross/placekeeper/pull/87), open as of September 7, 2026, extends this presentation sharing to recovery; it is not yet a merged-release guarantee.
 
 Current presentation follows the [accepted neutral interface contract](../../plans/2026-09-05-neutral-soft-design-contract.md). References to the earlier Warm Neutral palette, left selection marker, or a universal bottom-on-narrow composer are historical. The current editor is passage-attached with a geometry-driven fallback; late neutral CSS also overrides earlier dialog and control styling. Those changes preserve the shared grammar without making appearance responsible for lifecycle.
 
@@ -48,7 +48,9 @@ Current presentation follows the [accepted neutral interface contract](../../pla
 
 Use direct titles, bounded bodies, and restrained actions. A true dialog may use a footer; a single-field composer keeps actions directly under its input. Historically named `compact-editorial-modal` classes remain presentation hooks, not proof that the component is modal. Save Destination explicitly declares dialog semantics and traps focus; the composer uses its own form and local keyboard handling (`apps/web/src/save/SaveDestinationDialog.tsx:64`, `apps/web/src/review/CommentComposer.tsx:215`).
 
-Read the effective stylesheet rather than copying older declarations. Current Save Destination uses a borderless raised neutral surface and selected choices use a tray-colored background with no selection-marker shadow (`apps/web/src/app/neutral-chrome.css:433`). Current production composer actions use their own compact dimensions, regular-weight text, and a dark primary action (`apps/web/src/app/neutral-chrome.css:405`). Do not impose one obsolete control token across every surface simply because they share a class name.
+Read the effective production cascade rather than copying older declarations. An earlier copied recovery stylesheet missed later production overrides, so sharing familiar class names still produced different controls. The current app imports shared design tokens and modal styling through `apps/web/src/app/review-layout-foundation.css:1` and `apps/web/src/app/review-layout-dialogs.css:1`; the extension imports those same files at `apps/chrome-extension/src/extension.css:1`. Mac recovery imports the extension presentation before its host-specific wrapper (`apps/web/src/macos-recovery-entry.ts:1`). The shared rules live in `apps/web/src/app/review-design-tokens.css:1` and `apps/web/src/app/review-modal-surface.css:1`.
+
+Compare computed styles against the actual current Save Destination scene, including focused actions and narrow widths. The parity test compares recovery with the styled Save Destination surface at 1280, 620, and 360 pixels (`test/acceptance/macos-interface.spec.ts:299`). The 360-pixel check exposed a 12-versus-16-pixel padding mismatch that wider scenes missed. That was a reason to remove copied declarations and share the effective styles, not add another isolated override. The test compares surface, heading, description, and primary/secondary control properties (`test/acceptance/macos-interface.spec.ts:303`); it does not claim that distinct content must have identical overall dimensions.
 
 Lifecycle remains specific. Save Destination resets proposed choices on open but preserves a filename the user has edited when a new proposal arrives (`apps/web/src/save/SaveDestinationDialog.tsx:40`). The authoring shell instead freezes the source, protects generated-output drafts, and restores the originating workspace or reader (`apps/web/src/app/ReviewShell.tsx:1310`, `apps/web/src/app/ReviewShell.tsx:1384`). Share typography, surfaces, spacing, and copy rules while keeping those transitions separate.
 
@@ -62,9 +64,9 @@ Tooltip presentation is separate from naming. Compact actions can use the shared
 
 ### Name the actual outcome
 
-Use Save for a new comment or Page Note, Apply for proposed replacement/insertion text and existing-item edits, Confirm for save settings, Keep for an uncommented highlight, and Cancel for abandonment (`apps/web/src/review/authoring-session.ts:225`, `apps/web/src/save/SaveDestinationDialog.tsx:221`, `apps/web/src/review/CommentComposer.tsx:249`).
+Use Save for a new comment or Page Note, Apply for proposed replacement/insertion text and existing-item edits, Confirm for save settings, and Cancel for abandonment. The composer exposes Cancel and its context-specific submit label (`apps/web/src/review/CommentComposer.tsx:246`). Keep the Confirm label stable while a spinner communicates establishment progress (`apps/web/src/save/SaveDestinationDialog.tsx:218`).
 
-The optional-highlight case is intentionally three-way. Keep preserves the highlight without a comment; Cancel abandons the pending annotation; Save commits text. An earlier planning constraint simultaneously required Cancel and prohibited changing the optional action set. That conflict demonstrated why visually compact actions cannot be merged when their outcomes differ.
+Optional highlight comments no longer require a separate Keep action. Save with an empty comment preserves the highlight, while Cancel abandons the pending annotation. Optional content is eligible for submission, and submission passes the current value to the save callback (`apps/web/src/review/CommentComposer.tsx:105`, `apps/web/src/review/CommentComposer.tsx:187`). Preserve that distinction in behavior and tests without preserving the obsolete three-button presentation.
 
 Specific recovery verbs remain specific. Retry, Return to annotations, and locating a PDF express different transitions; a shared grammar should not rename all recovery actions Confirm (`apps/web/src/save/SaveDestinationDialog.tsx:90`).
 
@@ -83,6 +85,12 @@ One explicit Reopen gesture sends a confirmed request. An opened/focused respons
 Task reattachment remains an independent authorization flow. Sharing a visual card never grants a stale route live task identity or permission to reconnect it. The [reloadable URL authority contract](../architecture-patterns/reloadable-local-review-url-authority-boundaries.md) owns source validation, confirmation, offers, idempotency, and two-sided task reattachment; this presentation convention must not widen them.
 
 Let content drive height. The recovery card is a bounded grid with an overflow-capable body, and empty action/status regions do not reserve space (`apps/web/src/app/review-layout.css:31`, `apps/web/src/app/review-layout.css:111`, `apps/web/src/app/review-layout.css:188`). Protected-work choices grow the same card instead of requiring separate magic heights. This keeps an ordinary reopen small while allowing actual decisions room.
+
+The Chrome handler and Mac recovery share the actual recovery-button construction, including distinct Discard, Fork, and Resume decisions (`apps/chrome-extension/src/handler-ui.ts:81`, `apps/web/src/macos-recovery-entry.ts:15`). Sharing these controls does not merge host lifecycle: the Mac bridge settles one decision locally and reports failure through its own status region (`apps/web/src/macos-recovery-entry.ts:21`). Native validation independently requires the expected main-frame URL and an allowed, one-time decision (`apps/macos/Sources/PlacekeeperMac/RecoveryViewController.swift:7`).
+
+On Mac, the native window is a transparent content host rather than a second visible card or titlebar around the web card. Its borderless shell disables the native shadow and leaves the web surface responsible for the visible card (`apps/macos/Sources/PlacekeeperMac/RecoveryViewController.swift:101`). Retain standard close and minimize controls, with zoom disabled (`apps/macos/Sources/PlacekeeperMac/RecoveryViewController.swift:36`). A native drag region sits above the WKWebView, and the standard controls are installed above that region so dragging does not consume their clicks (`apps/macos/Sources/PlacekeeperMac/RecoveryViewController.swift:120`). These are host behaviors; reproducing traffic lights in HTML would not provide them.
+
+Let the web content report its measured height as it changes (`apps/web/src/macos-recovery-entry.ts:43`). The native receiver validates the source frame/URL, exact message shape, finite height, and bounded range before resizing (`apps/macos/Sources/PlacekeeperMac/RecoveryViewController.swift:170`). This lets status and recovery choices fit the same card without assigning each state an unrelated fixed window height. Verify actual native close, minimize, drag, and content fitting separately from browser CSS parity.
 
 ### Keep short-lived popup hydration quiet
 
@@ -110,13 +118,13 @@ The presentation boundary allows one coherent interface without mixing authority
 
 Use this pattern for related tasks with different state machines, especially when titles already carry single-field context or conditional work should expand a bounded surface. Do not remove useful labels from multi-field forms, merge distinct outcomes, or treat a recovery page as an already-live application dialog.
 
-Validate semantic, workflow, and visual evidence independently. Component tests prove labels and transitions; installed flows prove real save/recovery behavior; styled visual scenes prove geometry. A raw unstyled harness route is not product CSS evidence. Rebuild installed assets and confirm the intended scene and stylesheet before diagnosing layout.
+Validate semantic, workflow, and visual evidence independently. Component tests prove labels and transitions; installed flows prove real save/recovery behavior; styled visual scenes prove geometry, and computed-style parity proves that shared controls track the current production cascade (`test/acceptance/macos-interface.spec.ts:299`). A raw unstyled harness route is not product CSS evidence. Rebuild installed assets and confirm the intended scene and stylesheet before diagnosing layout.
 
 Recovery coverage measures empty status/footer geometry and touch controls (`test/acceptance/reloadable-links.spec.ts:407`, `test/acceptance/reloadable-links.spec.ts:717`). Popup contracts verify concise structure and inert startup (`apps/chrome-extension/test/extension-contract.test.ts:34`). Export coverage follows Open Annotations into recovery (`test/acceptance/production-flow.spec.ts:4757`). Keep these lifecycle assertions alongside screenshots; a correct static card cannot prove recovery authority or draft preservation.
 
 ## Examples
 
-A replacement task shows one title, an accessibly named textarea, and Cancel/Apply. A highlight comment additionally offers Keep because omitting a comment differs from cancelling the highlight.
+A replacement task shows one title, an accessibly named textarea, and Cancel/Apply. A highlight comment shows Cancel/Save: saving an empty comment preserves the highlight, while cancelling abandons it (`apps/web/src/review/CommentComposer.tsx:105`, `apps/web/src/review/CommentComposer.tsx:246`).
 
 An ordinary interrupted session shows Reopen and fits its brief explanation. Only a returned recovery offer expands it into protected-draft decisions, each retaining its own retry identity.
 

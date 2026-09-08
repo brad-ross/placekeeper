@@ -135,6 +135,8 @@ enum MacReviewHelperReplyParser {
                   let projection = projection(rawProjection) else { return nil }
             return type == "active" ? .active(projection) : .refreshed(projection)
         case "recovery-offered":
+            let expiryFormatter = ISO8601DateFormatter()
+            expiryFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
             guard exact(value, base.union(["choices", "offer"])),
                   let choices = value["choices"] as? [String],
                   choices == ["resume", "discard", "fork"],
@@ -143,7 +145,8 @@ enum MacReviewHelperReplyParser {
                   let id = offer["id"] as? String,
                   id.range(of: "^[A-Za-z0-9_-]{16,128}$", options: .regularExpression) != nil,
                   let expiresAt = offer["expiresAt"] as? String,
-                  ISO8601DateFormatter().date(from: expiresAt) != nil else { return nil }
+                  (expiryFormatter.date(from: expiresAt)
+                    ?? ISO8601DateFormatter().date(from: expiresAt)) != nil else { return nil }
             return .recoveryOffered(id: id, expiresAt: expiresAt)
         case "invalidation":
             guard exact(value, base.union(["generation", "revision", "reason"])),
@@ -251,7 +254,11 @@ enum MacReviewHelperReplyParser {
     }
 }
 
-final class SupervisedReviewHelper: ReviewHelperProcess, @unchecked Sendable {
+protocol ReviewHelperRequesting {
+    func request(type: String, fields: [String: Any], completion: @escaping (MacReviewHelperReply?) -> Void) -> String?
+}
+
+final class SupervisedReviewHelper: ReviewHelperProcess, ReviewHelperRequesting, @unchecked Sendable {
     typealias Completion = (MacReviewHelperReply?) -> Void
 
     let windowID: String

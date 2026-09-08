@@ -776,10 +776,7 @@ test("keeps mounted Codex context through fresh-page re-entry, then fails closed
   }
 });
 
-test("searches extracted PDF text with variants, history, references, and retained responsive state", async ({
-  page,
-  browserName,
-}) => {
+test("searches extracted PDF text with variants, history, references, and retained responsive state", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 });
   const errors = collectBrowserErrors(page);
   await openFreshProductionFixture(page, searchPdf, "PDF search launch failed");
@@ -896,8 +893,9 @@ test("searches extracted PDF text with variants, history, references, and retain
   expect(directSearchActionBounds.height).toBeCloseTo(26, 1);
   await firstResultCard.evaluate((element) => { element.style.width = "250px"; });
   const compactSearchActions = firstResultCard.getByRole("button", {
-    name: "Secondary actions for Search result on page 1",
+    name: "Open result on page 1 in References",
   });
+  await expect(firstResultCard.locator('.row-action-group__secondary')).toBeHidden();
   await expect(compactSearchActions).toBeVisible();
   const [searchTabBounds, compactSearchActionBounds] = await Promise.all([
     page.getByRole("tab", { name: "Search", exact: true }).boundingBox(),
@@ -1078,23 +1076,20 @@ test("searches extracted PDF text with variants, history, references, and retain
   expect(await sendMotion.evaluate(({ state }) => state.timedOut)).toBe(false);
   const sendMotionSamples = await sendMotion.evaluate(({ state }) => state.samples);
   await sendMotion.dispose();
-  const maximumRebound = (axis: "left" | "top") => {
-    let minimum = sendMotionSamples[0]?.[axis] ?? 0;
-    let maximum = 0;
-    for (const sample of sendMotionSamples.slice(1)) {
-      minimum = Math.min(minimum, sample[axis]);
-      maximum = Math.max(maximum, sample[axis] - minimum);
-    }
-    return maximum;
-  };
-  if (browserName === 'webkit') {
-    const lastSample = sendMotionSamples.at(-1);
-    expect(lastSample?.left).toBeCloseTo(Math.min(...sendMotionSamples.map(({ left }) => left)), 0);
-    expect(lastSample?.top).toBeCloseTo(Math.min(...sendMotionSamples.map(({ top }) => top)), 0);
-  } else {
-    expect(maximumRebound("left")).toBeLessThanOrEqual(8);
-    expect(maximumRebound("top")).toBeLessThanOrEqual(8);
-  }
+  // Fitting the reference can legitimately change either scroll offset while
+  // zoom and CSS padding settle. Once page 1 is reached, it must stay there;
+  // requiring monotonically decreasing horizontal offsets rejects valid fits.
+  const arrival = sendMotionSamples.findIndex(({ top }) => top <= 8);
+  expect(arrival).toBeGreaterThanOrEqual(0);
+  expect(sendMotionSamples.slice(arrival).every(({ top }) => top <= 8)).toBe(true);
+  const settledPosition = await mainViewport.evaluate((element) => ({
+    left: element.scrollLeft, top: element.scrollTop,
+  }));
+  await page.waitForTimeout(250);
+  expect(await mainViewport.evaluate((element) => ({
+    left: element.scrollLeft, top: element.scrollTop,
+  }))).toEqual(settledPosition);
+  expect(await currentPageText(page)).toBe("1 / 3");
 
   const workspaceTabs = page.getByRole("tablist", { name: "Workspace modes" }).getByRole("tab");
   await expect(workspaceTabs).toHaveCount(2);
@@ -2212,6 +2207,90 @@ test("keeps main PDF link hit targets below an open References viewer", async ({
   expect(hitState).not.toEqual(expect.objectContaining({ topmost: "no-overlap" }));
   expect(hitState.topmost).not.toBe("main");
 });
+
+for (const width of [1280, 760]) {
+  for (const destination of ['outline', 'search', 'annotation'] as const) {
+    test(`keeps Back unpainted until toolbar interaction after ${destination} navigation at ${width}px`, async ({ page, browserName }) => {
+      await page.setViewportSize({ width, height: 900 });
+      await openFreshProductionFixture(
+        page,
+        destination === 'search' ? searchPdf : referencePdf,
+        'Document history visibility launch failed',
+        destination === 'annotation' ? async (sessionId) => {
+          const state = host.broker.state(sessionId);
+          if (!state) throw new Error('Annotation history state is missing');
+          await host.broker.acceptMutation(sessionId, addPageNote(
+            state, 2, { x: 80, y: 160, width: 18, height: 18 }, 'History visibility destination.',
+          ));
+        } : undefined,
+      );
+      await openAnnotationsWorkspace(page);
+      let destinationButton: Locator;
+      if (destination === 'outline') {
+        await page.getByRole('tab', { name: 'Outline', exact: true }).click();
+        destinationButton = page.getByRole('button', { name: 'Details, Page 3', exact: true });
+      } else if (destination === 'search') {
+        await page.getByRole('tab', { name: 'Search', exact: true }).click();
+        await page.getByRole('searchbox', { name: 'Search this PDF' }).fill('stable');
+        const results = page.locator('[data-search-group="exact"] [data-search-result]');
+        await expect(results).toHaveCount(2);
+        destinationButton = results.nth(1).locator('.annotation-item__navigation');
+      } else {
+        destinationButton = page.locator('#workspace-panel-annotations').getByRole('button', {
+          name: /^Page Note · Page 3 · .*History visibility destination\.$/u,
+        }).first();
+      }
+      const targetPage = destination === 'search' ? '2' : '3';
+      const [samples] = await Promise.all([
+        page.evaluate(async (target) => new Promise<Array<{ clipPath: string; revealed: boolean }>>((resolve) => {
+          const samples: Array<{ clipPath: string; revealed: boolean }> = [];
+          const deadline = performance.now() + 5_000;
+          let settledFrames = 0;
+          const capture = () => {
+            const bar = document.querySelector('[data-review-chrome]');
+            const back = bar?.querySelector('[data-main-history="back"]');
+            if (back) samples.push({
+              clipPath: getComputedStyle(back).clipPath,
+              revealed: bar!.matches(':hover, :has(:focus-visible)'),
+            });
+            const reached = document.querySelector<HTMLInputElement>('.review-chrome__page-input')?.value === target;
+            settledFrames = back && reached ? settledFrames + 1 : 0;
+            if (settledFrames >= 12 || performance.now() >= deadline) resolve(samples);
+            else requestAnimationFrame(capture);
+          };
+          requestAnimationFrame(capture);
+        }), targetPage),
+        destinationButton.click(),
+      ]);
+      expect(samples.length).toBeGreaterThan(0);
+      expect(samples.every(({ clipPath, revealed }) => clipPath === 'inset(50%)' && !revealed)).toBe(true);
+      const pageInput = page.locator('.review-chrome__page-input');
+      await expect(pageInput).toHaveValue(targetPage);
+      const bar = page.locator('[data-review-chrome]');
+      const back = bar.locator('[data-main-history="back"]');
+      await bar.hover({ position: { x: 2, y: 2 } });
+      await expect(back).toHaveCSS('clip-path', 'none');
+      await page.locator('.pdf-workspace:not(.pdf-workspace--reference)').hover({ position: { x: 30, y: 100 } });
+      await expect(back).toHaveCSS('clip-path', 'inset(50%)');
+      // Keyboard entry through the page control reveals history without
+      // removing its buttons from the normal tab order.
+      await pageInput.focus();
+      const tabKey = browserName === 'webkit' ? 'Alt+Tab' : 'Tab';
+      await page.keyboard.press(tabKey);
+      await expect(back).toHaveCSS('clip-path', 'none');
+      for (let steps = 0; steps < 5 && !await back.evaluate((element) => element === document.activeElement); steps += 1) {
+        await page.keyboard.press(tabKey);
+      }
+      await expect(back).toBeFocused();
+      await page.keyboard.press('Enter');
+      await expect(pageInput).toHaveValue('1');
+      await expect(bar.locator('[data-main-history="forward"]')).toHaveCSS('clip-path', 'inset(50%)');
+      await bar.hover({ position: { x: 2, y: 2 } });
+      await page.getByRole('button', { name: 'Forward in document history', exact: true }).click();
+      await expect(pageInput).toHaveValue(targetPage);
+    });
+  }
+}
 
 test("records annotation tray jumps in document history", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 });
@@ -3941,7 +4020,7 @@ test('keeps a first-page multiline highlight composer stable and reveals one ico
     expect(sample.scrollTop).toBe(0);
   }
 
-  for (const name of ['Cancel', 'Keep'] as const) {
+  for (const name of ['Cancel'] as const) {
     const action = composer.getByRole('button', { name, exact: true });
     await expect(action).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
     await action.hover();
@@ -4160,6 +4239,7 @@ test('keeps the bottom workspace evenly inset across open and close', async ({ p
 });
 
 test('shows zoom actions only when fitting or horizontal locking is useful', async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
   await page.setViewportSize({ width: 1280, height: 900 });
   await openFreshProductionFixture(page, referencePdf, 'Conditional zoom actions launch failed');
   const menu = page.getByRole('menu', { name: 'PDF zoom', exact: true });
@@ -4180,17 +4260,40 @@ test('shows zoom actions only when fitting or horizontal locking is useful', asy
   await openMenu();
   await expect(fit).toHaveCount(0);
   await expect(lock).toHaveCount(0);
+  const zoomOutWithoutLockFlash = async () => {
+    const probe = await page.evaluateHandle(() => {
+      const state = { appeared: false, observer: new MutationObserver((records) => {
+        if (records.some((record) => [...record.addedNodes].some((node) => node instanceof Element
+          && (node.matches('[data-review-horizontal-lock]') || node.querySelector('[data-review-horizontal-lock]'))))) state.appeared = true;
+      }) };
+      state.observer.observe(document.body, { childList: true, subtree: true });
+      return state;
+    });
+    try {
+      await page.getByRole('menuitem', { name: 'Zoom out', exact: true }).click();
+      // Observe the entire 140ms animation, including intermediate DOM insertions.
+      await page.waitForTimeout(250);
+      expect(await probe.evaluate((state) => state.appeared)).toBe(false);
+      await expect(lock).toHaveCount(0);
+    } finally {
+      await probe.evaluate((state) => state.observer.disconnect());
+      await probe.dispose();
+    }
+  };
+  await zoomOutWithoutLockFlash();
   await setZoom('250');
   await expect(fit).toBeVisible();
   await expect(lock).toBeVisible();
   await lock.click();
   await expect(lock).toHaveAttribute('aria-checked', 'true');
+  await expect(page.locator('.review-document [data-viewer-framing-viewport]')).toHaveCSS('overflow-x', 'hidden');
   await fit.click();
   await expect(fit).toHaveCount(0);
   await expect(lock).toHaveCount(0);
   await setZoom('50');
   await expect(fit).toBeVisible();
   await expect(lock).toHaveCount(0);
+  await zoomOutWithoutLockFlash();
 });
 
 test('locks horizontal PDF scrolling at the current offset without blocking vertical scrolling', async ({ page }) => {
@@ -4232,12 +4335,14 @@ test('locks horizontal PDF scrolling at the current offset without blocking vert
   await expect.poll(() => viewport.evaluate((element) => element.scrollLeft)).toBeLessThan(locked.x);
 });
 
-test('keeps opaque PDF scrollbar tracks exposed beside bottom trays', async ({ page }) => {
+test('keeps native PDF scrollbars exposed without shifting pages', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 });
   await openFreshProductionFixture(page, referencePdf, 'Scrollbar fixture launch failed');
   const main = page.locator('.pdf-workspace:not(.pdf-workspace--reference)');
   const viewport = main.locator('[data-viewer-framing-viewport]');
   await openLinkInReferences(page, main.getByRole('button', { name: 'Open PDF link to Primary result, Page 2' }));
+  const referencePanel = page.locator('.review-workspace__panel--references');
+  expect(await referencePanel.evaluate((element) => (element as HTMLElement).offsetWidth - element.clientWidth)).toBe(0);
   await expect(page.locator('[data-review-workspace]')).toHaveAttribute('data-workspace-presentation', 'bottom');
   await page.locator('[data-review-chrome]').hover({ position: { x: 2, y: 2 } });
   const zoom = page.getByRole('textbox', { name: /Current zoom \d+ percent\. Enter a zoom percentage/u });
@@ -4252,17 +4357,28 @@ test('keeps opaque PDF scrollbar tracks exposed beside bottom trays', async ({ p
     }
     const geometry = await viewport.evaluate((element) => {
       const frame = document.querySelector('.review-overlay-frame')!;
-      const viewportStyle = getComputedStyle(element);
       return {
         clip: getComputedStyle(frame).clipPath,
-        track: getComputedStyle(element, '::-webkit-scrollbar-track').backgroundColor,
-        canvas: viewportStyle.backgroundColor,
+        inset: Math.max(12, (element as HTMLElement).offsetWidth - element.clientWidth, (element as HTMLElement).offsetHeight - element.clientHeight),
         bottom: element.getBoundingClientRect().bottom,
       };
     });
-    expect(geometry.track).toBe(geometry.canvas);
-    expect(geometry.clip).toBe('inset(0px 12px 12px 0px)');
+    // Decorative overlays leave the native scrollbar edge unobstructed.
+    expect(geometry.clip).toBe(`inset(0px ${geometry.inset}px ${geometry.inset}px 0px)`);
     expect(geometry.bottom).toBe(900);
+    await expect(viewport).toHaveCSS('scrollbar-width', 'auto');
+    await expect(viewport).toHaveCSS('scrollbar-color', await page.evaluate(() =>
+      getComputedStyle(document.documentElement).getPropertyValue('scrollbar-color')));
+    expect(await viewport.evaluate((element) => getComputedStyle(element, '::-webkit-scrollbar').width)).toBe('auto');
+    const scrollGeometry = () => viewport.evaluate((element) => ({
+      clientWidth: element.clientWidth,
+      clientHeight: element.clientHeight,
+      pageLeft: element.querySelector('[data-page-index]')!.getBoundingClientRect().left,
+    }));
+    const beforeScroll = await scrollGeometry();
+    await viewport.evaluate((element) => { element.scrollTop += 25; });
+    expect(await scrollGeometry()).toEqual(beforeScroll);
+
   }
 });
 
@@ -5216,7 +5332,7 @@ for (const action of ['Replace', 'Delete', 'Highlight'] as const) {
     } else if (action === 'Highlight') {
       const composer = page.getByRole('region', { name: 'Highlight Comment' });
       await expect(composer).toBeVisible();
-      await composer.getByRole('button', { name: 'Keep', exact: true }).click();
+      await composer.getByRole('button', { name: 'Save', exact: true }).click();
     }
 
     await expect.poll(() => host.broker.state(launched.sessionId)?.revision).toBe(1);
@@ -5233,6 +5349,7 @@ for (const action of ['Replace', 'Delete', 'Highlight'] as const) {
     await expect(page.locator(`[data-review-id="${item!.id}"]`)).toHaveCount(2);
 
     const undo = page.getByRole('button', { name: 'Undo', exact: true });
+    await page.locator('[data-review-chrome]').hover();
     await undo.click();
     await expect.poll(() => host.broker.state(launched.sessionId)?.items.length).toBe(0);
     const redo = page.getByRole('button', { name: 'Redo', exact: true });
@@ -5967,7 +6084,7 @@ test("anchors highlight and delete annotations across inline and display equatio
   await expect(page.locator("[data-viewer-status]")).toHaveCount(0);
   await selectionActions.getByRole("button", { name: "Highlight", exact: true }).click();
   await expect(page.getByRole("region", { name: "Highlight Comment" })).toBeVisible();
-  await page.getByRole("button", { name: "Keep", exact: true }).click();
+  await page.getByRole("button", { name: "Save", exact: true }).click();
   await expect(page.getByRole("region", { name: "Highlight Comment" })).toHaveCount(0);
   await expect(page.locator("[data-owned-mark='highlight']")).toHaveCount(3);
 

@@ -116,6 +116,16 @@ interface NavigationOperation {
   mutated: boolean;
 }
 
+interface NativeHorizontalBoundary {
+  readonly scrollLeft: number;
+  readonly scrollWidth: number;
+  readonly clientWidth: number;
+}
+
+interface LocationPositioning {
+  readonly horizontalBoundary?: NativeHorizontalBoundary;
+}
+
 interface EffectiveViewportRect {
   readonly left: number;
   readonly top: number;
@@ -781,20 +791,21 @@ export function createViewerNavigation(
     }
   }
 
-  const locationMatchesView = (
+  const locationAxesMatch = (
     viewer: ActiveViewer,
     location: PdfViewerLocation,
     acceptScrollBoundary = false,
     viewport?: PdfViewportQuery,
-  ): boolean => {
+    horizontalBoundary?: NativeHorizontalBoundary,
+  ): { horizontal: boolean; vertical: boolean } => {
     const geometry = pageGeometry(viewer, location.pageIndex, undefined, viewport);
-    if (!geometry) return false;
+    if (!geometry) return { horizontal: false, vertical: false };
     const { viewportRect, pageRect, page } = geometry;
     if (
       location.anchor.x > page.size.width
       || location.anchor.y > page.size.height
       || Math.abs(viewer.zoom.getState().currentZoomLevel - location.zoom) > zoomTolerance
-    ) return false;
+    ) return { horizontal: false, vertical: false };
     const actual = clientPointForLocation(geometry, location);
     const expected = {
       x: viewportRect.left + viewportRect.width * location.alignment.xPercent / 100,
@@ -846,18 +857,28 @@ export function createViewerNavigation(
     // exact centering in that case turns a successful page jump into rollback.
     const horizontalAnchorVisible = actual.x >= viewportRect.left - coordinateTolerance
       && actual.x <= viewportRect.right + coordinateTolerance;
+    const reachedNativeHorizontalBoundary = acceptScrollBoundary
+      && horizontalBoundary !== undefined
+      && metrics.scrollWidth === horizontalBoundary.scrollWidth
+      && metrics.clientWidth === horizontalBoundary.clientWidth
+      && Math.abs(metrics.scrollLeft - horizontalBoundary.scrollLeft) <= coordinateTolerance
+      && actual.x > expected.x;
     const horizontalMatches = horizontalPageFullyVisible
+      || (horizontalAnchorVisible && reachedNativeHorizontalBoundary)
       || (currentRunway().right > coordinateTolerance && horizontalAnchorVisible)
-      || axisMatchesOrIsConstrained(
+      // The browser may clamp before the page edge fits the reading frame
+      // (which excludes the workspace). A visible anchor at the actual scroll
+      // limit is reached even when exact horizontal alignment is impossible.
+      || (horizontalAnchorVisible && axisMatchesOrIsConstrained(
       actual.x,
       expected.x,
       metrics.scrollLeft,
       metrics.scrollWidth,
       metrics.clientWidth,
-      pageRect.left >= viewportRect.left - coordinateTolerance,
-      pageRect.right <= viewportRect.right + coordinateTolerance,
       true,
-      );
+      true,
+      true,
+      ));
     const verticalMatches = verticalPageFullyVisible || axisMatchesOrIsConstrained(
       actual.y,
       expected.y,
@@ -874,9 +895,19 @@ export function createViewerNavigation(
       && actual.x <= viewportRect.right + coordinateTolerance
       && actual.y >= viewportRect.top - coordinateTolerance
       && actual.y <= viewportRect.bottom + coordinateTolerance;
-    return horizontalMatches
-      && verticalMatches
-      && (viewport?.occlusion === undefined || anchorIsUnobscured);
+    const unobscured = viewport?.occlusion === undefined || anchorIsUnobscured;
+    return { horizontal: horizontalMatches && unobscured, vertical: verticalMatches && unobscured };
+  };
+
+  const locationMatchesView = (
+    viewer: ActiveViewer,
+    location: PdfViewerLocation,
+    acceptScrollBoundary = false,
+    viewport?: PdfViewportQuery,
+    horizontalBoundary?: NativeHorizontalBoundary,
+  ): boolean => {
+    const matches = locationAxesMatch(viewer, location, acceptScrollBoundary, viewport, horizontalBoundary);
+    return matches.horizontal && matches.vertical;
   };
 
   const waitForFrames = async (operation: NavigationOperation, count: number, deadline: number) => {
@@ -1025,18 +1056,17 @@ export function createViewerNavigation(
     if (!await scrollAndWait(viewer, location, operation, deadline, viewport)) return false;
     if (!operationIsCurrent(operation)) return false;
     try {
-      const rightRunwayActive = currentRunway().right > coordinateTolerance;
-      const transientOcclusionActive = viewport?.occlusion !== undefined;
-      if (
-        (rightRunwayActive || transientOcclusionActive)
-        && !locationMatchesView(viewer, location, true, viewport)
-      ) {
-        if (!positionLocationInClientViewport(viewer, location, operation, true, viewport)) {
-          return false;
-        }
-        if (!await waitForFrames(operation, 2, deadline)) return false;
-      }
-      return locationMatchesView(viewer, location, true, viewport);
+      // The plugin computes offsets from its configured gap. The host's CSS
+      // padding and mounted page layout can differ, even without a workspace.
+      // Reconcile against actual geometry before declaring the jump a failure.
+      const matches = locationAxesMatch(viewer, location, true, viewport);
+      if (matches.horizontal && matches.vertical) return true;
+      const positioned = positionLocationInClientViewport(
+        viewer, location, operation, true, viewport, matches.horizontal,
+      );
+      if (positioned === null) return false;
+      if (!await waitForFrames(operation, 2, deadline)) return false;
+      return locationMatchesView(viewer, location, true, viewport, positioned.horizontalBoundary);
     } catch {
       return false;
     }
@@ -1067,16 +1097,17 @@ export function createViewerNavigation(
     operation: NavigationOperation,
     requireTargetScale = true,
     viewport?: PdfViewportQuery,
-  ): boolean {
-    if (!operationIsCurrent(operation)) return false;
+    preserveHorizontalPosition = false,
+  ): LocationPositioning | null {
+    if (!operationIsCurrent(operation)) return null;
     const geometry = pageGeometry(viewer, location.pageIndex, undefined, viewport);
-    if (geometry === null) return false;
+    if (geometry === null) return null;
     if (
       requireTargetScale
       && Math.abs(geometry.scale - location.zoom) > zoomTolerance
-    ) return false;
+    ) return null;
     const clientAnchor = clientPointForLocation(geometry, location);
-    const horizontalCorrection = clientAnchor.x
+    const horizontalCorrection = preserveHorizontalPosition ? 0 : clientAnchor.x
       - geometry.viewportRect.left
       - geometry.viewportRect.width * location.alignment.xPercent / 100;
     const verticalCorrection = clientAnchor.y
@@ -1100,8 +1131,18 @@ export function createViewerNavigation(
         ...correctedScroll,
         behavior: 'instant',
       });
+      // Stable scrollbar gutters can overstate scrollWidth - clientWidth.
+      // An instant native scroll provides the actual limit; retain it only
+      // for this position attempt and verify the anchor remains visible.
+      if (geometry.viewportElement.scrollLeft < correctedScroll.left - coordinateTolerance) {
+        return { horizontalBoundary: {
+          scrollLeft: geometry.viewportElement.scrollLeft,
+          scrollWidth: geometry.viewportElement.scrollWidth,
+          clientWidth: geometry.viewportElement.clientWidth,
+        } };
+      }
     }
-    return true;
+    return {};
   }
 
   const fitToWidth = async (
@@ -1167,7 +1208,7 @@ export function createViewerNavigation(
       };
       let observerPositionedPage = false;
       const positionFittedPage = (requireTargetScale = true): boolean => (
-        positionLocationInClientViewport(viewer, location, operation, requireTargetScale)
+        positionLocationInClientViewport(viewer, location, operation, requireTargetScale) !== null
       );
       const fitDeadline = Date.now() + timeoutMs;
       const pageElement = options.root()?.querySelector<HTMLElement>(pageSelector(visible.pageIndex));
@@ -1467,9 +1508,10 @@ export function createViewerNavigation(
         }
       }
       if (applied && finalLocation && policy === 'reference-fit-width') {
-        applied = positionLocationInClientViewport(viewer, finalLocation, operation)
+        const positioned = positionLocationInClientViewport(viewer, finalLocation, operation);
+        applied = positioned !== null
           && await waitForFrames(operation, 2, Date.now() + timeoutMs)
-          && locationMatchesView(viewer, finalLocation, true);
+          && locationMatchesView(viewer, finalLocation, true, undefined, positioned.horizontalBoundary);
         if (applied) {
           const currentGeometry = pageGeometry(viewer, finalLocation.pageIndex);
           const expectedWidth = currentGeometry === null

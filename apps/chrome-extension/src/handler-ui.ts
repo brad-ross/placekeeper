@@ -56,7 +56,7 @@ export function setHandlerButtonContent(
   }
   const text = button.ownerDocument.createElement("span");
   text.textContent = label;
-  button.className = `handler-button${tone === "secondary" ? "" : ` handler-button--${tone}`}`;
+  button.className = `handler-button review-button review-button--${tone === "primary" ? "primary" : "secondary"}${tone === "secondary" ? "" : ` handler-button--${tone}`}`;
   button.dataset.icon = iconName;
   button.replaceChildren(icon, text);
 }
@@ -76,4 +76,15 @@ export function createHandlerButton(
   if (options.choice !== undefined) button.dataset.recoveryChoice = options.choice;
   setHandlerButtonContent(button, options.icon, options.label, options.tone);
   return button;
+}
+
+/** Shared recovery choices for the Chrome handler and the Mac recovery window. */
+export function createRecoveryButtons(document: Document): HTMLButtonElement[] {
+  return ([
+    ["discard", "Discard", "delete", "destructive"],
+    ["fork", "Fork", "git-fork", "secondary"],
+    ["resume", "Resume", "redo", "primary"],
+  ] as const).map(([choice, label, icon, tone]) => createHandlerButton(document, {
+    choice, label, icon, tone,
+  }));
 }

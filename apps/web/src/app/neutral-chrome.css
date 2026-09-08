@@ -156,6 +156,16 @@
     opacity: 1;
     pointer-events: auto;
   }
+
+  /* Prevent hidden history controls from painting without removing them from
+     keyboard navigation or the accessibility tree. */
+  [data-review-chrome] [data-main-history] {
+    clip-path: inset(50%);
+  }
+
+  [data-review-chrome]:is(:hover, :has(:focus-visible)) [data-main-history] {
+    clip-path: none;
+  }
 }
 
 .review-chrome__control-cluster {
@@ -464,12 +474,6 @@
   font-weight: 400;
 }
 
-.save-destination-dialog {
-  border: 0;
-  background: var(--pk-raised);
-  box-shadow: 0 12px 48px #00000018;
-}
-
 .save-destination-choice {
   border: 0;
   background: transparent;
@@ -478,11 +482,6 @@
 .save-destination-choice[data-selected="true"] {
   background: var(--pk-tray);
   box-shadow: none;
-}
-
-.save-destination-dialog .compact-editorial-modal__footer {
-  border-color: var(--pk-border);
-  background: transparent;
 }
 
 .save-destination-copy-details {
@@ -648,8 +647,6 @@
 .review-workspace__panel {
   background: var(--pk-tray);
   overscroll-behavior: contain;
-  scrollbar-color: #aaa transparent;
-  scrollbar-width: auto;
 }
 
 .workspace-edge-rail {
@@ -715,6 +712,8 @@
 
 .reference-tab-segment,
 .reference-tab-segment--compound {
+  --reference-tab-action-size: 26px;
+  position: relative;
   gap: 0;
   padding: 0;
   border: 0;
@@ -725,6 +724,47 @@
 
 .reference-tab-segment--compound {
   padding-right: 3px;
+}
+
+.reference-tab-segment__page-placeholder {
+  /* Preserve the original title/page width in content-sized horizontal tabs. */
+  visibility: hidden;
+}
+
+.reference-tab-segment__page {
+  position: absolute;
+  top: 50%;
+  right: 3px;
+  width: var(--reference-tab-action-size);
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--pk-muted);
+  font: 400 11px/1.2 var(--pk-font-ui);
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.reference-tab-segment[data-reference-page-swap="true"] > .reference-tab-segment__page {
+  opacity: 0;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .reference-tab-segment[data-reference-page-swap="true"] > .reference-tab-segment__page {
+    opacity: 1;
+  }
+
+  .reference-tab-segment[data-reference-page-swap="true"]:is(:hover, :has(:focus-visible))
+    > .reference-tab-segment__page {
+    opacity: 0;
+  }
+}
+
+@media (hover: none), (pointer: coarse) {
+  .reference-tab-segment {
+    --reference-tab-action-size: 44px;
+  }
 }
 
 .reference-tab-segment:has(.reference-tab-segment__selector[aria-selected="true"]) {
@@ -934,8 +974,12 @@
 
 .pdf-search__results { padding: 0 12px 12px; }
 
+.pdf-search:has(> .pdf-search__summary) .pdf-search__query {
+  margin-bottom: 0;
+}
+
 .pdf-search__summary {
-  padding: 8px 10px;
+  padding: 4px 10px;
   line-height: 1.5;
 }
 
@@ -955,7 +999,7 @@
 }
 
 .pdf-search__result {
-  padding: 8px 12px;
+  padding: 8px 8px 8px 12px;
   border-radius: 12px;
   font: 400 13px/1.55 var(--pk-font-ui);
 }
@@ -1094,7 +1138,14 @@
   line-height: 1.5;
 }
 
-.outline-navigator__page { color: var(--pk-muted); font-size: 11px; }
+.outline-navigator__page {
+  display: grid;
+  width: var(--review-control-compact);
+  margin-right: -6px;
+  place-items: center;
+  color: var(--pk-muted);
+  font-size: 11px;
+}
 
 .outline-navigator[data-flat="true"] .outline-navigator__destination {
   grid-column: 1 / span 2;
@@ -1287,6 +1338,11 @@
   box-shadow: none;
   font: 400 13px/1.5 var(--pk-font-ui);
 }
+.outline-navigator > .outline-navigator__loading,
+.annotation-drawer__owned > .annotation-empty {
+  padding-block: 8px;
+}
+
 .annotation-status--error {
   padding: 10px 12px;
   border-radius: 10px;
@@ -1334,6 +1390,13 @@
 .annotation-drawer__owned,
 .existing-annotations {
   padding: 0 12px 12px;
+}
+
+.outline-navigator,
+.annotation-drawer__owned,
+.existing-annotations,
+.pdf-search__results {
+  padding-right: max(0px, calc(12px - var(--review-workspace-scrollbar-width, 0px)));
 }
 
 .annotation-drawer__owned ol,
@@ -1400,10 +1463,10 @@
   content: none;
 }
 
-.annotation-item__content:not(.pdf-search__result),
+.annotation-item__content,
 .existing-annotation__content {
   min-height: 0;
-  padding: 8px 12px;
+  padding: 8px 8px 8px 12px;
   gap: 0;
   border-radius: 12px;
 }
@@ -1418,7 +1481,6 @@
 }
 
 .annotation-peek .annotation-item__content {
-  padding: 9px 12px 11px;
   border-radius: 16px;
 }
 
@@ -1535,7 +1597,10 @@
 }
 
 .annotation-item__quote {
-  display: block;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
   margin-top: 6px;
   color: var(--pk-muted);
   font: 400 13px/1.5 var(--pk-font-ui);
@@ -1633,8 +1698,6 @@
   padding-top: 0;
   overflow: auto;
   overscroll-behavior: contain;
-  scrollbar-color: #b8b8b8 transparent;
-  scrollbar-width: thin;
 }
 
 .full-annotation-reader__body p {
@@ -1723,10 +1786,10 @@
 
 :is(li[data-annotation-origin], li[data-search-result], .annotation-peek) .annotation-item__title-row > .row-action-group {
   position: absolute;
-  top: 50%;
+  top: 0;
   right: 0;
   margin-left: 0;
-  transform: translateY(-50%);
+  transform: none;
   background: transparent;
 }
 
@@ -1740,6 +1803,16 @@ li[data-search-result] .pdf-search__result-heading > .pdf-search__result-page {
   margin-left: auto;
 }
 
+:is(li[data-annotation-origin], li[data-search-result], .annotation-peek)
+  :is(.annotation-item__page, .pdf-search__result-page) {
+  display: grid;
+  flex: none;
+  width: 26px;
+  height: 26px;
+  align-self: flex-start;
+  place-items: center;
+}
+
 @media (hover: hover) and (pointer: fine) {
   :is(.outline-navigator__row, li[data-annotation-origin], li[data-search-result]):has(.row-action-group):is(:hover, :focus-within, [data-corresponding="true"])
     :is(.outline-navigator__page, .annotation-item__page, .pdf-search__result-page) {
@@ -1748,6 +1821,16 @@ li[data-search-result] .pdf-search__result-heading > .pdf-search__result-page {
 }
 
 @media (pointer: coarse), (hover: none) {
+  .outline-navigator__page {
+    width: 44px;
+  }
+
+  :is(li[data-annotation-origin], li[data-search-result], .annotation-peek)
+    :is(.annotation-item__page, .pdf-search__result-page) {
+    width: 44px;
+    height: 44px;
+  }
+
   :is(.outline-navigator__row, li[data-annotation-origin], li[data-search-result]) .row-action-group__direct {
     opacity: 1;
     pointer-events: auto;
@@ -1758,7 +1841,7 @@ li[data-search-result] .pdf-search__result-heading > .pdf-search__result-page {
     opacity: 0;
   }
 
-  :is(li[data-annotation-origin], li[data-search-result]) .annotation-item__title-row {
+  :is(li[data-annotation-origin], li[data-search-result], .annotation-peek) .annotation-item__title-row {
     min-height: 44px;
   }
 }
@@ -1843,6 +1926,10 @@ li[data-search-result] .pdf-search__result-heading > .pdf-search__result-page {
     min-width: 44px;
   }
 
+  :is(li[data-annotation-origin], li[data-search-result], .annotation-peek) .annotation-item__title-row {
+    min-height: 44px;
+  }
+
   .row-action-group[data-row-action-count="2"] {
     width: calc(88px + var(--review-control-group-gap));
     min-width: calc(88px + var(--review-control-group-gap));
@@ -1922,10 +2009,12 @@ li[data-search-result] .pdf-search__result-heading > .pdf-search__result-page {
   pointer-events: none;
   transition: none;
 }
+.annotation-peek[data-source-return="true"] .row-action-group__direct,
 .annotation-peek[data-peek-selected="true"]:is(:hover, :has(:focus-visible)) .row-action-group__direct {
   opacity: 1;
   pointer-events: auto;
 }
+.annotation-peek[data-source-return="true"] .annotation-item__page,
 .annotation-peek[data-peek-selected="true"]:is(:hover, :has(:focus-visible)):has(.row-action-group) .annotation-item__page {
   opacity: 0;
 }
@@ -1950,4 +2039,15 @@ li[data-search-result] .pdf-search__result-heading > .pdf-search__result-page {
   width: max-content;
   min-width: min(112px, 100%);
   flex-basis: auto;
+}
+
+.full-annotation-reader__source,
+.full-annotation-reader__quote {
+  color: var(--pk-muted);
+}
+.full-annotation-reader__source[data-source-treatment="struck"] {
+  text-decoration: line-through;
+}
+.full-annotation-reader__body > .full-annotation-reader__source:not(:last-child) {
+  margin-bottom: 14px;
 }

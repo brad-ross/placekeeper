@@ -277,6 +277,10 @@ function navigationHarness(options: {
   omitZoomLayoutEvent?: boolean;
   resizeViewportAfterFirstZoom?: number;
   stickyScrollActivity?: boolean;
+  pluginVerticalOffset?: number;
+  horizontalScrollLimit?: number;
+  horizontalRangeOverstatement?: number;
+  readingViewportWidth?: number;
   staleViewportMetricsReads?: number;
   staleCurrentPageWithThirdVisible?: boolean;
   runway?: ViewerRunway;
@@ -344,7 +348,9 @@ function navigationHarness(options: {
     get scrollTop() { return viewportScrollTop; },
     scrollTo(position: ScrollToOptions) {
       if (options.throwViewportScroll) throw new Error('viewport command failed');
-      const nextLeft = position.left ?? viewportScrollLeft;
+      const requestedLeft = position.left ?? viewportScrollLeft;
+      const nextLeft = options.horizontalScrollLimit === undefined ? requestedLeft
+        : Math.max(0, Math.min(options.horizontalScrollLimit, requestedLeft));
       const nextTop = position.top ?? viewportScrollTop;
       const horizontalDelta = nextLeft - viewportScrollLeft;
       const verticalDelta = nextTop - viewportScrollTop;
@@ -357,8 +363,9 @@ function navigationHarness(options: {
       if (options.staleCurrentPageWithThirdVisible) currentPage = 3;
     },
     get scrollWidth() {
-      return options.artificialHorizontalRunway
-        ? 1_000
+      return options.horizontalScrollLimit !== undefined
+        ? viewportRect.width + options.horizontalScrollLimit + (options.horizontalRangeOverstatement ?? 0)
+        : options.artificialHorizontalRunway ? 1_000
         : options.constrainedHorizontal ? pageRect.width : 2_000;
     },
     get scrollHeight() { return 2_000; },
@@ -481,13 +488,18 @@ function navigationHarness(options: {
           : viewportRect.left
             + viewportElement.clientWidth * ((request.alignX ?? 0) / 100)
             - transformedAnchor.x;
+        if (options.horizontalScrollLimit !== undefined) {
+          viewportScrollLeft = Math.max(0, Math.min(options.horizontalScrollLimit,
+            transformedAnchor.x - viewportElement.clientWidth * ((request.alignX ?? 0) / 100)));
+          targetRect.left = viewportRect.left - viewportScrollLeft;
+        }
         targetRect.top = options.constrainedVertical === 'start'
           ? viewportRect.top
           : options.constrainedVertical === 'end'
             ? viewportRect.top + viewportRect.height - targetRect.height
             : viewportRect.top
               + viewportElement.clientHeight * ((request.alignY ?? 0) / 100)
-              - transformedAnchor.y;
+              - transformedAnchor.y + (options.pluginVerticalOffset ?? 0);
       }
       scrolling = options.stickyScrollActivity === true;
       for (const listener of activityListeners) {
@@ -524,13 +536,15 @@ function navigationHarness(options: {
     scrollTo: (position: { x: number; y: number }) => {
       log.push('viewport-scroll');
       if (options.throwViewportScroll) throw new Error('viewport command failed');
-      const horizontalDelta = position.x - viewportScrollLeft;
+      const nextLeft = options.horizontalScrollLimit === undefined ? position.x
+        : Math.max(0, Math.min(options.horizontalScrollLimit, position.x));
+      const horizontalDelta = nextLeft - viewportScrollLeft;
       const verticalDelta = position.y - viewportScrollTop;
       pageRect.left -= horizontalDelta;
       pageRect.top -= verticalDelta;
       thirdPageRect.left -= horizontalDelta;
       thirdPageRect.top -= verticalDelta;
-      viewportScrollLeft = position.x;
+      viewportScrollLeft = nextLeft;
       viewportScrollTop = position.y;
       if (options.staleCurrentPageWithThirdVisible) currentPage = 3;
     },
@@ -593,6 +607,11 @@ function navigationHarness(options: {
     root: () => root,
     documentId: 'doc',
     documentGeneration: 4,
+    ...(options.readingViewportWidth === undefined ? {} : {
+      readingViewport: () => ({ getBoundingClientRect: () => domRect({
+        ...viewportRect, width: options.readingViewportWidth!,
+      }) }) as HTMLElement,
+    }),
     runway: () => options.runway ?? { right: 0, bottom: 0 },
     timeoutMs: options.timeoutMs ?? 25,
     nextFrame: async () => {
@@ -797,6 +816,28 @@ describe('viewer navigation adapter', () => {
     expect(right.pageRect.left + right.pageRect.width).toBeCloseTo(390);
     expect(await bottom.navigation.fitToWidth()).toBe(true);
     expect(bottom.log).toContain(`zoom:${580 / 600}`);
+  });
+
+  it.each([[300, true, 0], [590, false, 0], [300, true, 12], [590, false, 12]] as const)(
+    'accepts a horizontally clamped search anchor only when visible (x=%s)', async (x, visible, horizontalRangeOverstatement) => {
+      const harness = navigationHarness({ horizontalScrollLimit: 100, readingViewportWidth: 400, horizontalRangeOverstatement });
+      expect(await harness.navigation.applyTarget(target(PdfZoomMode.XYZ, [x, 500, 1]))).toBe(visible);
+      if (visible) expect(harness.log.filter((entry) => entry === 'scroll')).toHaveLength(1);
+    },
+  );
+
+  it('corrects CSS padding differences instead of rolling a valid destination back', async () => {
+    const harness = navigationHarness({ pluginVerticalOffset: 14 });
+    expect(await harness.navigation.applyTarget(target(PdfZoomMode.XYZ, [20, 500, 1]))).toBe(true);
+    expect(harness.pageRect.top).toBeCloseTo(-300);
+    expect(harness.log.filter((entry) => entry === 'scroll')).toHaveLength(1);
+  });
+
+  it('preserves a fully visible page horizontally while correcting vertical padding', async () => {
+    const harness = navigationHarness({ constrainedHorizontal: true, pluginVerticalOffset: 14 });
+    expect(await harness.navigation.applyTarget(target(PdfZoomMode.XYZ, [20, 500, 1]))).toBe(true);
+    expect(harness.pageRect.left).toBeCloseTo(10);
+    expect(harness.pageRect.top).toBeCloseTo(-300);
   });
 
   it('atomically positions the fitted page in a right-runway viewport', async () => {
