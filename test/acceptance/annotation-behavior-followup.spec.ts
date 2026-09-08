@@ -119,6 +119,24 @@ test.afterAll(async () => {
   if (temporaryRoot !== '') await rm(temporaryRoot, { recursive: true, force: true });
 });
 
+test('uses neutral focus on Back after opening the full annotation text', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  const { itemId } = await openLongAnnotationFixture(page);
+  await chooseCopyDestination(page);
+  const center = await markCenter(page, itemId);
+  await page.mouse.click(center.x, center.y);
+  const peek = page.locator(`[data-annotation-peek="${itemId}"]`);
+  await peek.locator('[data-read-full-annotation]').click();
+  const reader = page.locator('[data-full-annotation-reader="true"]:visible');
+  const back = reader.getByRole('button', { name: 'Back', exact: true });
+  await expect(back).toBeFocused();
+  await expect(back).toHaveCSS('outline-style', 'none');
+  await expect(back).toHaveCSS('box-shadow', 'none');
+  await back.press('Enter');
+  await expect(reader).toHaveCount(0);
+  await expect(peek).toBeVisible();
+});
+
 test('uses the hover card and explicitly expands long PDF annotations in a deletable full reader', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 });
   const { sessionId, itemId } = await openLongAnnotationFixture(page);

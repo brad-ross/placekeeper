@@ -1729,6 +1729,13 @@ li[data-search-result] .row-action-group__secondary {
   background: var(--review-workspace-card-hover);
 }
 
+.review-shell .full-annotation-reader__back:focus-visible {
+  outline: none;
+  box-shadow: none;
+  border-color: var(--review-border-strong);
+  background: var(--review-workspace-card-hover);
+}
+
 .full-annotation-reader__metadata {
   flex: 1;
   min-width: 0;
