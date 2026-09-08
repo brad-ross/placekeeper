@@ -246,6 +246,17 @@ export function useWorkspaceFraming(input: {
       const geometry = await geometrySettlementRef.current.waitForSettled(
         signal,
         () => waitForWorkspaceLayout(signal),
+        // CSS transitions can already be pending before transitionrun is
+        // delivered. Inspect them before declaring two frames quiet.
+        () => [
+          referenceSurfaceRef.current,
+          toolsSurfaceRef.current,
+          stageRef.current?.querySelector<HTMLElement>('[data-viewer-framing-viewport]'),
+        ].some((surface) => (
+          surface?.getAnimations().some((animation) => (
+            animation.pending || animation.playState === 'running'
+          )) ?? false
+        )),
       );
       if (geometry === null) return null;
       const runwaySettlement = runwaySettlementRef.current;

@@ -316,8 +316,7 @@ export function deriveReferenceWorkspaceLayout(
 
   const bottomOpen = state.referenceDock === 'bottom' && state.bottomReferencesOpen;
   const rightOpen = state.rightWorkspaceOpen;
-  const referenceRightActive = state.referenceDock === 'right'
-    && rightOpen
+  const rightDockedReferences = state.referenceDock === 'right'
     && wideMode === 'references';
   const kind = rightOpen && bottomOpen
     ? 'wide-split'
@@ -331,12 +330,10 @@ export function deriveReferenceWorkspaceLayout(
     referenceDock: state.referenceDock,
     rightWorkspaceOpen: rightOpen,
     bottomReferencesOpen: bottomOpen,
-    rightWidth: referenceRightActive
+    rightWidth: rightDockedReferences
       ? clampRightReferenceWidth(state.rightReferenceWidth, state.stageWidth)
       : Math.min(DEFAULT_RIGHT_WORKSPACE_WIDTH, state.stageWidth),
-    bottomHeight: bottomOpen
-      ? clampBottomReferenceHeight(state.bottomReferenceHeight, state.stageHeight)
-      : 0,
-    referenceResizable: referenceRightActive || bottomOpen,
+    bottomHeight: clampBottomReferenceHeight(state.bottomReferenceHeight, state.stageHeight),
+    referenceResizable: (rightDockedReferences && rightOpen) || bottomOpen,
   };
 }

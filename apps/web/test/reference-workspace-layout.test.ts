@@ -109,6 +109,22 @@ describe('reference workspace layout state', () => {
       .toMatchObject({ rightWidth: DEFAULT_RIGHT_WORKSPACE_WIDTH });
   });
 
+  it('preserves mounted reference dimensions through closing without reserving open space', () => {
+    let state = createReferenceWorkspaceLayout({ width: 1440, height: 900 });
+    state = reduceReferenceWorkspaceLayout(state, { type: 'resize-bottom-references', size: 450 });
+    state = reduceReferenceWorkspaceLayout(state, { type: 'show-references' });
+    state = reduceReferenceWorkspaceLayout(state, { type: 'hide-references' });
+    expect(deriveReferenceWorkspaceLayout(state, 'outline')).toMatchObject({
+      kind: 'wide-closed', bottomReferencesOpen: false, bottomHeight: 450, referenceResizable: false,
+    });
+    state = reduceReferenceWorkspaceLayout(state, { type: 'move-references-right' });
+    state = reduceReferenceWorkspaceLayout(state, { type: 'resize-right-references', size: 480 });
+    state = reduceReferenceWorkspaceLayout(state, { type: 'hide-references' });
+    expect(deriveReferenceWorkspaceLayout(state, 'outline', 'references')).toMatchObject({
+      kind: 'wide-closed', rightWorkspaceOpen: false, rightWidth: 480, referenceResizable: false,
+    });
+  });
+
   it('projects wide state into narrow mode and restores the exact wide tuple', () => {
     let state = createReferenceWorkspaceLayout({ width: 1440, height: 900 });
     state = reduceReferenceWorkspaceLayout(state, { type: 'show-references' });

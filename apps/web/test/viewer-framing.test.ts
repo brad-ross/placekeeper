@@ -107,6 +107,27 @@ describe('viewer framing', () => {
     expect(settlement?.isCurrent()).toBe(true);
   });
 
+  it('waits for pending browser animations before transitionrun is delivered', async () => {
+    const authority = new ViewerGeometrySettlementAuthority();
+    const owner = {};
+    let frames = 0;
+    let pending = false;
+    const settlement = await authority.waitForSettled(
+      new AbortController().signal,
+      async () => {
+        frames += 1;
+        if (frames === 3) authority.beginTransition(owner, 'transform');
+        if (frames === 5) authority.settleTransition(owner, 'transform');
+        return true;
+      },
+      () => pending || frames < 5,
+    );
+    expect(frames).toBe(6);
+    expect(settlement?.isCurrent()).toBe(true);
+    pending = true;
+    expect(settlement?.isCurrent()).toBe(false);
+  });
+
   it('uses existing margin and moves only by the remaining overlap', () => {
     expect(revealDelta({ start: 100, end: 600 }, { start: 0, end: 700 })).toBe(0);
     expect(revealDelta({ start: 100, end: 820 }, { start: 0, end: 700 })).toBe(120);

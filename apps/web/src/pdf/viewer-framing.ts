@@ -56,11 +56,12 @@ export class ViewerGeometrySettlementAuthority {
   async waitForSettled(
     signal: AbortSignal,
     nextFrame: () => Promise<boolean>,
+    hasActiveAnimations: () => boolean = () => false,
   ): Promise<SettledViewerGeometry | null> {
     let quietRevision: number | null = null;
     while (!signal.aborted) {
       if (!await nextFrame() || signal.aborted) return null;
-      if (this.transitions.size > 0) {
+      if (this.transitions.size > 0 || hasActiveAnimations()) {
         quietRevision = null;
         continue;
       }
@@ -71,6 +72,7 @@ export class ViewerGeometrySettlementAuthority {
           isCurrent: () => (
             !signal.aborted
             && this.transitions.size === 0
+            && !hasActiveAnimations()
             && this.revision === settledRevision
           ),
         };
