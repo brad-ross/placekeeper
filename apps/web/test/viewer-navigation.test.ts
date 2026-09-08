@@ -283,6 +283,7 @@ function navigationHarness(options: {
   readingViewportWidth?: number;
   staleViewportMetricsReads?: number;
   staleCurrentPageWithThirdVisible?: boolean;
+  reportedPageAfterZoom?: number;
   runway?: ViewerRunway;
   viewportGap?: number;
   viewportClientWidth?: number;
@@ -419,6 +420,7 @@ function navigationHarness(options: {
     const oldPageRect = { ...pageRect };
     const oldThirdPageRect = { ...thirdPageRect };
     currentZoom = zoom;
+    if (options.reportedPageAfterZoom !== undefined) currentPage = options.reportedPageAfterZoom;
     if (options.updateGeometry !== false) {
       const ratio = zoom / oldZoom;
       const focus = {
@@ -556,7 +558,7 @@ function navigationHarness(options: {
     },
   };
   const document = {
-    pages: (options.farTargetInitiallyUnmounted || options.staleCurrentPageWithThirdVisible
+    pages: (options.farTargetInitiallyUnmounted || options.staleCurrentPageWithThirdVisible || options.reportedPageAfterZoom !== undefined
       ? [0, 1, 2]
       : [0]).map((index) => ({
       index,
@@ -850,6 +852,18 @@ describe('viewer navigation adapter', () => {
     expect(harness.log).not.toContain('scroll');
     expect(harness.pageRect.left).toBeCloseTo(10);
     expect(harness.pageRect.left + harness.pageRect.width).toBeCloseTo(390);
+  });
+
+  it('keeps a valid fit when the native current-page indicator changes after zoom', async () => {
+    const harness = navigationHarness({
+      viewportGap: 10,
+      runway: { right: 200, bottom: 180 },
+      reportedPageAfterZoom: 2,
+    });
+    expect(await harness.navigation.fitToWidth()).toBe(true);
+    expect(harness.log.filter((entry) => entry.startsWith('zoom:'))).toEqual([`zoom:${380 / 600}`]);
+    expect(harness.pageRect.left).toBeCloseTo(10);
+    expect(harness.navigation.captureLocation()?.pageIndex).toBe(0);
   });
 
   it('uses combined rotation and the most-visible mounted page for fit width', async () => {

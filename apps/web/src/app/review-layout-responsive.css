@@ -325,6 +325,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .review-document .pdf-workspace__viewport,
   .workspace-edge-rail,
   .review-workspace,
   .review-tools-workspace,

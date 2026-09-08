@@ -201,3 +201,130 @@ test('Chrome popup supports Tab and Space with a neutral keyboard focus ring', a
   await expect(control).toBeFocused();
   await page.screenshot({ path: test.info().outputPath('chrome-popup.png') });
 });
+
+async function openAnimatedHostReview(page: Page, width = 1280) {
+  await page.setViewportSize({ width, height: 900 });
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await page.goto('/test/acceptance/review-harness/?host-history=1');
+  // This host harness normally omits the production root's design tokens.
+  await page.locator('#root').evaluate((root) => { root.dataset.productionRoot = 'true'; });
+  await page.getByRole('button', { name: 'Finish host bootstrap' }).click();
+  await expect(page.locator('[data-page-index="0"]').first()).toBeVisible();
+  await page.waitForTimeout(500);
+}
+
+test('normal-motion workspace opening fits once after the tray settles', async ({ page }) => {
+  await openAnimatedHostReview(page);
+  const samples = await page.evaluate(() => new Promise<{ width: number; trayX: number }[]>((resolve) => {
+    const pdf = document.querySelector<HTMLElement>('[data-page-index="0"]')!;
+    const tray = document.querySelector<HTMLElement>('#review-tools-workspace')!;
+    const samples: { width: number; trayX: number }[] = [];
+    const start = performance.now();
+    const sample = () => {
+      samples.push({ width: pdf.getBoundingClientRect().width, trayX: tray.getBoundingClientRect().x });
+      if (performance.now() - start < 900) requestAnimationFrame(sample);
+      else resolve(samples);
+    };
+    sample();
+    document.querySelector<HTMLButtonElement>('button[aria-label="Show workspace"]')!.click();
+  }));
+  const first = samples[0]!;
+  const last = samples.at(-1)!;
+  expect(last.width).toBeLessThan(first.width - 100);
+  expect(samples.some((sample) => sample.trayX < first.trayX - 5 && sample.trayX > last.trayX + 5)).toBe(true);
+  for (let index = 1; index < samples.length; index += 1) {
+    expect(samples[index]!.width).toBeLessThanOrEqual(samples[index - 1]!.width + 2);
+  }
+  const closing = await page.evaluate(() => new Promise<{ width: number; x: number }[]>((resolve) => {
+    const pdf = document.querySelector<HTMLElement>('[data-page-index="0"]')!;
+    const samples: { width: number; x: number }[] = [];
+    const start = performance.now();
+    const sample = () => {
+      const rect = pdf.getBoundingClientRect();
+      samples.push({ width: rect.width, x: rect.x });
+      if (performance.now() - start < 400) requestAnimationFrame(sample);
+      else resolve(samples);
+    };
+    sample();
+    document.querySelector<HTMLButtonElement>('button[aria-label="Hide workspace"]')!.click();
+  }));
+  expect(closing.every((sample) => Math.abs(sample.width - last.width) < 2)).toBe(true);
+  expect(closing.at(-1)!.x).toBeGreaterThan(closing[0]!.x + 100);
+  expect(closing.some((sample) => sample.x > closing[0]!.x + 5 && sample.x < closing.at(-1)!.x - 5)).toBe(true);
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await expect(page.locator('[data-viewer-framing-viewport]')).toHaveCSS('transition-duration', '0s');
+});
+
+for (const width of [1280, 640]) {
+  test(`References retains its height throughout its animated exit at ${width}px`, async ({ page }) => {
+    await openAnimatedHostReview(page, width);
+    await page.getByRole('button', { name: 'Open PDF link to Primary result, Page 2', exact: true }).click();
+    await page.getByRole('menuitem', { name: 'Open in References', exact: true }).click();
+    const references = page.locator('.review-workspace');
+    await expect(references).toHaveAttribute('data-workspace-open', 'true');
+    await page.waitForTimeout(300);
+    const samples = await page.evaluate(() => new Promise<{ height: number; y: number }[]>((resolve) => {
+      const tray = document.querySelector<HTMLElement>('.review-workspace')!;
+      const samples: { height: number; y: number }[] = [];
+      const start = performance.now();
+      const sample = () => {
+        const rect = tray.getBoundingClientRect();
+        samples.push({ height: rect.height, y: rect.y });
+        if (performance.now() - start < 500) requestAnimationFrame(sample);
+        else resolve(samples);
+      };
+      sample();
+      tray.querySelector<HTMLButtonElement>('button[aria-label="Hide References"], button[aria-label="Hide workspace"]')!.click();
+    }));
+    const first = samples[0]!;
+    const last = samples.at(-1)!;
+    expect(first.height).toBeGreaterThan(100);
+    expect(samples.every((sample) => Math.abs(sample.height - first.height) < 1)).toBe(true);
+    expect(last.y).toBeGreaterThan(first.y + 100);
+    expect(samples.some((sample) => sample.y > first.y + 5 && sample.y < last.y - 5)).toBe(true);
+  });
+}
+
+for (const { referencesOpen, tall, zoomPercent } of [
+  { referencesOpen: false, tall: false, zoomPercent: 60 },
+  { referencesOpen: true, tall: false, zoomPercent: 60 },
+  { referencesOpen: false, tall: true, zoomPercent: 60 },
+  { referencesOpen: true, tall: true, zoomPercent: 60 },
+  { referencesOpen: false, tall: false, zoomPercent: 200 },
+  { referencesOpen: true, tall: false, zoomPercent: 200 },
+]) {
+  test(`workspace opening preserves ${zoomPercent}% manual zoom with References ${referencesOpen ? 'open' : 'closed'} in a ${tall ? 'tall' : 'standard'} viewport`, async ({ page }) => {
+    await openAnimatedHostReview(page);
+    if (tall) await page.setViewportSize({ width: 1006, height: 1481 });
+    if (referencesOpen) {
+      await page.getByRole('button', { name: 'Open PDF link to Primary result, Page 2', exact: true }).click();
+      await page.getByRole('menuitem', { name: 'Open in References', exact: true }).click();
+      await expect(page.locator('.review-workspace')).toHaveAttribute('data-workspace-open', 'true');
+    }
+    const zoom = page.getByRole('textbox', { name: /Current zoom/ });
+    await zoom.fill(String(zoomPercent));
+    await zoom.press('Enter');
+    await page.waitForTimeout(400);
+    const samples = await page.evaluate(() => new Promise<{ width: number; y: number; trayHeight: number; trayX: number }[]>((resolve) => {
+      const pdf = document.querySelector<HTMLElement>('[data-page-index="0"]')!;
+      const tray = document.querySelector<HTMLElement>('#review-tools-workspace')!;
+      const samples: { width: number; y: number; trayHeight: number; trayX: number }[] = [];
+      const start = performance.now();
+      const sample = () => {
+        const rect = pdf.getBoundingClientRect();
+        const trayRect = tray.getBoundingClientRect();
+        samples.push({ width: rect.width, y: rect.y, trayHeight: trayRect.height, trayX: trayRect.x });
+        if (performance.now() - start < 900) requestAnimationFrame(sample);
+        else resolve(samples);
+      };
+      sample();
+      document.querySelector<HTMLButtonElement>('button[aria-label="Show workspace"]')!.click();
+    }));
+    const first = samples[0]!;
+    const last = samples.at(-1)!;
+    for (const frame of samples) expect(Math.abs(frame.width - first.width)).toBeLessThan(2);
+    expect(await zoom.inputValue()).toBe(String(zoomPercent));
+    expect(samples.every((sample) => Math.abs(sample.trayHeight - first.trayHeight) < 1)).toBe(true);
+    expect(samples.some((sample) => sample.trayX < first.trayX - 5 && sample.trayX > last.trayX + 5)).toBe(true);
+  });
+}

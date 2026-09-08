@@ -4649,7 +4649,7 @@ test('defaults a real PDF to fit width and refits bottom and resizable right rea
   await expect(zoomValue()).not.toHaveValue('100');
 });
 
-test('fits opening workspaces and preserves manual reading through passive layout changes', async ({ page }) => {
+test('refits opening workspaces only from fit width and preserves manual reading', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' });
   const launched = await host.open({
     pdfPath: await freshProductionPdf(pdf),
@@ -4675,12 +4675,6 @@ test('fits opening workspaces and preserves manual reading through passive layou
   await expect.poll(() => currentZoomText(page)).toMatch(/\d+%/u);
   await workspace.evaluate((element) => { element.setAttribute('data-adaptive-mount-probe', 'stable'); });
 
-  for (let attempt = 0; attempt < 5; attempt += 1) {
-    const pageBounds = await pdfPage.boundingBox();
-    const stageBounds = await stage.boundingBox();
-    if (pageBounds && stageBounds && pageBounds.width > stageBounds.width - 384) break;
-    await zoomInOnce(page);
-  }
   await expect.poll(() => viewport.evaluate(async (element) => {
     const before = element.scrollTop;
     await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
@@ -4715,8 +4709,7 @@ test('fits opening workspaces and preserves manual reading through passive layou
   const manualZoom = await currentZoomText(page);
   await toggleWorkspace(page);
   await expect(drawer).toBeVisible();
-  await expectOpeningFit();
-  expect(await currentZoomText(page)).not.toBe(manualZoom);
+  expect(await currentZoomText(page)).toBe(manualZoom);
 
   await zoomInOnce(page);
   const zoomAfterManualAdjustment = await currentZoomText(page);
@@ -4737,11 +4730,11 @@ test('fits opening workspaces and preserves manual reading through passive layou
   const narrowStage = await stage.boundingBox();
   const bottomDrawer = await drawer.boundingBox();
   if (!narrowStage || !bottomDrawer) throw new Error('Bottom annotations geometry is unavailable.');
-  expect(bottomDrawer.x - narrowStage.x).toBeCloseTo(12, 0);
-  expect(narrowStage.x + narrowStage.width - bottomDrawer.x - bottomDrawer.width).toBeCloseTo(12, 0);
-  expect(narrowStage.y + narrowStage.height - bottomDrawer.y - bottomDrawer.height).toBeCloseTo(12, 0);
+  expect(bottomDrawer.x - narrowStage.x).toBeCloseTo(15, 0);
+  expect(narrowStage.x + narrowStage.width - bottomDrawer.x - bottomDrawer.width).toBeCloseTo(15, 0);
+  expect(narrowStage.y + narrowStage.height - bottomDrawer.y - bottomDrawer.height).toBeCloseTo(15, 0);
   expect(bottomDrawer.height).toBeCloseTo(narrowStage.height * 0.43, 0);
-  await expectOpeningFit();
+  expect(await currentZoomText(page)).toBe(zoomAfterManualAdjustment);
   await toggleWorkspace(page);
 
   const pageBox = await pdfPage.boundingBox();
@@ -4789,7 +4782,7 @@ test('fits opening workspaces and preserves manual reading through passive layou
   await expect(drawer).toBeVisible();
   await expect(drawer).toHaveAttribute('data-workspace-presentation', 'bottom');
   await expect(notePeek).toHaveCount(0);
-  await expectOpeningFit();
+  expect(await currentZoomText(page)).toBe(zoomAfterManualAdjustment);
   const activeReviewId = await noteMark.getAttribute('data-review-id');
   if (!activeReviewId) throw new Error('Page Note mark has no canonical review id.');
   await expect(page.locator(`[data-review-item="${activeReviewId}"]`)).toHaveAttribute('data-active', 'true');

@@ -237,7 +237,7 @@ Runway expands reachability without participating in page layout and is removed 
 ### Framing Session
 The document-scoped coordination of overlay reachability, reading position, and explicit target navigation across workspace changes.
 
-Passive disclosure and reflow preserve reading position subject to available scroll limits; they do not reveal covered content or reverse a prior reveal on close. User motion supersedes stale layout work, while explicit navigation replaces remembered position so a later workspace change cannot restore an older destination.
+Passive disclosure and reflow preserve reading position subject to available scroll limits; they do not reveal covered content or reverse a prior reveal on close. Opening a workspace adapts the scale only when the document was already fitted to the reading width; other zoom levels remain user-owned. User motion supersedes stale layout work, while explicit navigation replaces remembered position so a later workspace change cannot restore an older destination.
 
 ## Visual language
 

@@ -1,3 +1,5 @@
+import { flushSync } from 'react-dom';
+
 import type { PluginRegistry } from '@embedpdf/core';
 import {
   PdfZoomMode,
@@ -1248,7 +1250,7 @@ export function createViewerNavigation(
           y: geometry.viewportRect.height * location.alignment.yPercent / 100,
         };
         operation.mutated = true;
-        zoomed = await waitForZoom(
+        const zoomRequest = flushSync(() => waitForZoom(
           viewer.zoom,
           requestedZoom,
           zoomTolerance,
@@ -1276,7 +1278,11 @@ export function createViewerNavigation(
               behavior: 'instant',
             });
           },
-        );
+        ));
+        // Commit the scale and its native scroll anchor before either can
+        // paint alone, including when fitting enlarges a zoomed-out page.
+        observerPositionedPage = positionFittedPage();
+        zoomed = await zoomRequest;
       }
       if (!zoomed || !operationIsCurrent(operation)) {
         if (!operation.signal.aborted && operation.mutated) await rollbackOperation(operation);
@@ -1310,16 +1316,12 @@ export function createViewerNavigation(
           && settledGeometry.pageRect.right
             <= settledGeometry.viewportRect.right - fitMargins.right + coordinateTolerance
         ));
-      let currentPageMatches = false;
-      try {
-        currentPageMatches = viewer.scroll.getCurrentPage() - 1 === visible.pageIndex;
-      } catch {
-        currentPageMatches = false;
-      }
+      // The native current-page indicator includes content behind trays and
+      // can change after zooming in a tall viewport. Validate the fitted
+      // page's geometry and anchor directly instead of rolling that fit back.
       const applied = zoomed
         && widthMatches
         && edgesFit
-        && currentPageMatches
         && locationMatchesView(viewer, location, true);
       if (!applied && !operation.signal.aborted && operation.mutated) {
         await rollbackOperation(operation);
