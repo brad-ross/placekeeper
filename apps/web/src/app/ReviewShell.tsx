@@ -648,7 +648,20 @@ export function ReviewShell(props: ReviewShellProps) {
     rightWorkspaceMode,
     visibleWorkspaceMode,
   );
+  const openingWasFitToWidthRef = useRef(false);
   const dispatchReferenceLayout = (action: ReferenceWorkspaceLayoutAction) => {
+    const wasOpen = referenceLayout.regime === 'narrow'
+      ? referenceLayout.narrowOpen : referenceLayout.rightWorkspaceOpen;
+    if (!wasOpen) {
+      const nextLayout = reduceReferenceWorkspaceLayout(referenceLayout, action);
+      const willOpen = nextLayout.regime === 'narrow'
+        ? nextLayout.narrowOpen : nextLayout.rightWorkspaceOpen;
+      if (willOpen) {
+        // Read the closed reading frame before the disclosure changes its width.
+        openingWasFitToWidthRef.current = props.viewer.viewerNavigation?.isFitToWidth?.() ?? false;
+      }
+    }
+
     if (props.workspace.referenceLayoutState === undefined) dispatchLocalReferenceLayout(action);
     props.workspace.onReferenceLayoutAction?.(action);
   };
@@ -765,12 +778,13 @@ export function ReviewShell(props: ReviewShellProps) {
     };
     if (!toolsSurfaceOpen || prior.narrow !== (effectiveReferenceLayout.kind === 'narrow-unified')
       || prior.dock !== referenceLayout.referenceDock) pendingOpeningFitRef.current = false;
-    if (opening) pendingOpeningFitRef.current = true;
+    if (opening) pendingOpeningFitRef.current = openingWasFitToWidthRef.current;
+    if (toolsSurfaceOpen) openingWasFitToWidthRef.current = false;
     const navigation = props.viewer.viewerNavigation;
     if (!pendingOpeningFitRef.current || navigation === undefined) return;
     let current = true;
-    // Opening is a one-shot Fit Width request. Later resizing, docking, and
-    // closing preserve the resulting scale until another explicit fit.
+    // Only an already-fitted page follows the new width on opening.
+    // Manual zooms, resizing, docking, and closing preserve the current scale.
     workspaceFraming.markUserIntent(undefined, { captureSettledPosition: false });
     void navigation.fitToWidth(async (signal) => {
       const geometry = await workspaceFraming.waitForSettledGeometry(signal);
