@@ -2698,7 +2698,33 @@ test.describe('canonical review workflow', () => {
     await expect(page.locator('[data-revision]')).toHaveAttribute('data-revision', '0');
   });
 
-  test('delays a hoverable mark peek and opens one selected owned row without shifting the document', async ({ page }) => {
+  for (const workspace of ['closed', 'outline'] as const) {
+    test(`shows and hides annotation hover previews without timers with workspace ${workspace}`, async ({ page }) => {
+      await page.getByRole('button', { name: 'Highlight', exact: true }).click();
+      await page.getByRole('button', { name: 'Save', exact: true }).click();
+      if (workspace === 'outline') {
+        await page.getByRole('button', { name: 'Show workspace' }).click();
+        await page.getByRole('tab', { name: 'Outline', exact: true }).click();
+      }
+      const mark = page.locator('[data-owned-focus-id]').first();
+      const peek = page.locator('[data-annotation-peek]');
+      await page.clock.install();
+      await page.clock.pauseAt(new Date());
+      await mark.dispatchEvent('pointerover', { pointerType: 'mouse' });
+      await expect(peek).toBeVisible();
+      await mark.dispatchEvent('pointerout', { pointerType: 'mouse' });
+      await expect(peek).toHaveCount(0);
+      await mark.dispatchEvent('pointerover', { pointerType: 'mouse' });
+      await expect(peek).toBeVisible();
+      await peek.dispatchEvent('pointerover', { pointerType: 'mouse' });
+      await mark.dispatchEvent('pointerout', { pointerType: 'mouse' });
+      await expect(peek).toBeVisible();
+      await peek.dispatchEvent('pointerout', { pointerType: 'mouse' });
+      await expect(peek).toHaveCount(0);
+    });
+  }
+
+  test('shows a hoverable mark peek and opens one selected owned row without shifting the document', async ({ page }) => {
     await page.getByRole('button', { name: 'Highlight', exact: true }).click();
     await page.getByRole('button', { name: 'Save', exact: true }).click();
 

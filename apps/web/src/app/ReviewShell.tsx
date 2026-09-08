@@ -466,7 +466,6 @@ export function ReviewShell(props: ReviewShellProps) {
   const handledCommandInvocationRef = useRef(0);
   const peekHeldRef = useRef(false);
   const dismissedPeekIdRef = useRef<string | undefined>(undefined);
-  const peekTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const [announcement, setAnnouncement] = useState(`Review revision ${props.state.revision}.`);
   const [transitionAnnouncement, setTransitionAnnouncement] = useState('');
   const handledAccessibilityTransitionRef = useRef(0);
@@ -1223,12 +1222,7 @@ export function ReviewShell(props: ReviewShellProps) {
     if (props.authoring.keyboardPageNoteActive) props.authoring.onCancelKeyboardPageNote?.();
     if (props.authoring.pageMenu) props.authoring.onPageMenuDismiss?.(props.authoring.pageMenu.invocationId);
   };
-  const clearPeekTimer = () => {
-    if (peekTimerRef.current !== undefined) clearTimeout(peekTimerRef.current);
-    peekTimerRef.current = undefined;
-  };
   const dismissAnnotationPeek = () => {
-    clearPeekTimer();
     cancelAnnotationRestoration();
     peekHeldRef.current = false;
     dismissedPeekIdRef.current = peekItemId;
@@ -1250,7 +1244,6 @@ export function ReviewShell(props: ReviewShellProps) {
   }, [activeItemId, annotationReaderOwnedItemId, annotationReaderSession, authoringSession]);
 
   useEffect(() => {
-    clearPeekTimer();
     if (annotationsVisible) {
       setPeekItemId(undefined);
       return;
@@ -1265,15 +1258,13 @@ export function ReviewShell(props: ReviewShellProps) {
     if (id) {
       setPeekItemId(id);
     } else if (!peekHeldRef.current) {
-      peekTimerRef.current = setTimeout(() => setPeekItemId(undefined), 180);
+      setPeekItemId(undefined);
     }
-    return clearPeekTimer;
   }, [annotationsVisible, anyWorkspaceOpen, props.correspondingItemId, activeItemId]);
 
   useEffect(() => {
     const request = props.activationRequest;
     if (!request || authoringSessionRef.current !== null) return;
-    clearPeekTimer();
     dismissedPeekIdRef.current = undefined;
     cancelAnnotationRestoration();
     pendingReaderResumeRef.current = null;
@@ -2487,9 +2478,8 @@ export function ReviewShell(props: ReviewShellProps) {
                 {...(copyLink === undefined ? {} : { copyLink })}
                 onHoldChange={(held) => {
                   peekHeldRef.current = held;
-                  clearPeekTimer();
                   if (!held && (anyWorkspaceOpen || activeItemId === undefined) && props.correspondingItemId === undefined) {
-                    peekTimerRef.current = setTimeout(() => setPeekItemId(undefined), 180);
+                    setPeekItemId(undefined);
                   }
                 }}
                 onNavigate={() => {
