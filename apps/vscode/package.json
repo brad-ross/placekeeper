@@ -46,7 +46,8 @@
       },
       {
         "command": "placekeeper.forwardSyncTex",
-        "title": "Placekeeper: Forward SyncTeX"
+        "title": "Placekeeper: Forward SyncTeX",
+        "icon": "$(arrow-right)"
       },
       {
         "command": "placekeeper.goToSource",
