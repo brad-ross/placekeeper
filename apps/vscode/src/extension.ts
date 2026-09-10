@@ -42,7 +42,7 @@ import {
   classifyWorkspace,
   resolveLauncherPath,
   resolveExternalLauncherPath,
-  resolveSourceOutputBinding,
+  discoverSourceOutputBinding,
   selectedUriArguments,
   tabResourceUri,
   type LaunchErrorPresentation,
@@ -166,8 +166,10 @@ async function chooseBinding(commandArgs: readonly unknown[]): Promise<ReviewBin
   });
   let chosen: UriLike | undefined = "scheme" in direct ? direct : undefined;
   if (chosen === undefined && active?.scheme === "file" && isLatexSourcePath(active.fsPath)) {
-    const candidates = await vscode.workspace.findFiles("**/*.pdf", "**/{.git,node_modules}/**", 64);
-    const binding = resolveSourceOutputBinding({ activeSource: active, candidates });
+    const binding = await discoverSourceOutputBinding({
+      activeSource: active,
+      findCandidates: () => vscode.workspace.findFiles("**/*.pdf", "**/{.git,node_modules}/**", 64),
+    });
     if (binding.kind === "bound") chosen = binding.uri;
     if (binding.kind === "choose") {
       const labels = binding.candidates.map((candidate) => candidate.fsPath);

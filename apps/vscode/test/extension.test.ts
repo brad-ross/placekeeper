@@ -23,6 +23,7 @@ import {
   classifyWorkspace,
   localSourceRoot,
   resolveSourceOutputBinding,
+  discoverSourceOutputBinding,
   resolveExternalLauncherPath,
   resolveLauncherPath,
   selectedUriArguments,
@@ -615,6 +616,39 @@ describe("VS Code local host adapter", () => {
     expect(localSourceRoot(pdf, { scheme: "file", fsPath: "/tmp/project" })).toBe("/tmp/project");
     expect(localSourceRoot(pdf, undefined)).toBeUndefined();
     expect(localSourceRoot(pdf, { scheme: "vscode-vfs", fsPath: "/tmp/project" })).toBeUndefined();
+  });
+
+  it("finds the source sibling PDF before a truncated workspace search", async () => {
+    const directory = await mkdtemp(resolve(tmpdir(), "placekeeper-source-output-"));
+    try {
+      const source = { scheme: "file", fsPath: resolve(directory, "long_talk.tex") };
+      const pdf = { scheme: "file", fsPath: resolve(directory, "long_talk.pdf") };
+      await writeFile(source.fsPath, "source");
+      await writeFile(pdf.fsPath, "%PDF-1.7");
+      const findCandidates = vi.fn(async () => Array.from({ length: 64 }, (_, index) => (
+        { scheme: "file", fsPath: `/other/project-${index}/paper.pdf` }
+      )));
+      expect(await discoverSourceOutputBinding({ activeSource: source, findCandidates }))
+        .toEqual({ kind: "bound", uri: pdf });
+      expect(findCandidates).not.toHaveBeenCalled();
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it.each(["missing", "directory"])("falls back to PDF discovery when the sibling is %s", async (kind) => {
+    const directory = await mkdtemp(resolve(tmpdir(), "placekeeper-source-fallback-"));
+    try {
+      if (kind === "directory") await mkdir(resolve(directory, "paper.pdf"));
+      const candidates = [{ scheme: "file", fsPath: resolve(directory, "build/paper.pdf") }];
+      const findCandidates = vi.fn(async () => candidates);
+      expect(await discoverSourceOutputBinding({
+        activeSource: { scheme: "file", fsPath: resolve(directory, "paper.tex") }, findCandidates,
+      })).toEqual({ kind: "bound", uri: candidates[0] });
+      expect(findCandidates).toHaveBeenCalledOnce();
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 
   it("binds an explicit output, one conservative candidate, or asks the user to choose", () => {

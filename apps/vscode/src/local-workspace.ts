@@ -1,3 +1,4 @@
+import { stat } from "node:fs/promises";
 import { basename, dirname, extname, join } from "node:path";
 
 export interface LaunchErrorPresentation {
@@ -146,4 +147,18 @@ export function resolveSourceOutputBinding(input: {
     if (besideSource.length === 1) return { kind: "bound", uri: besideSource[0]! };
   }
   return { kind: "choose", candidates: localCandidates };
+}
+
+export async function discoverSourceOutputBinding(input: {
+  readonly activeSource: UriLike;
+  readonly findCandidates: () => PromiseLike<readonly UriLike[]>;
+}): Promise<SourceOutputBinding> {
+  if (input.activeSource.scheme === "file") {
+    const path = input.activeSource.fsPath;
+    const sibling = join(dirname(path), `${basename(path, extname(path))}.pdf`);
+    if (await stat(sibling).then((info) => info.isFile(), () => false)) {
+      return { kind: "bound", uri: { scheme: "file", fsPath: sibling } };
+    }
+  }
+  return resolveSourceOutputBinding({ activeSource: input.activeSource, candidates: await input.findCandidates() });
 }
