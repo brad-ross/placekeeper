@@ -4,10 +4,8 @@ import { PdfZoomMode } from '@embedpdf/models';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 
-import {
-  controlledWorkspaceSurfaceAction,
-  ReviewShell,
-} from '../src/app/ReviewShell.js';
+import { controlledWorkspaceSurfaceAction } from "../src/review/workspace-surface-policy.js";
+import { ReviewShell } from "../src/app/ReviewShell.js";
 import { AnnotationList } from '../src/review/AnnotationList.js';
 import { AnnotationPeek } from '../src/review/AnnotationPeek.js';
 import { projectOwnedAnnotationReader } from '../src/review/annotation-reader.js';

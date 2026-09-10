@@ -3,10 +3,42 @@ import type { PluginRegistry } from "@embedpdf/core";
 import type { PdfDocumentObject, PdfEngine } from '@embedpdf/models';
 import { SelectionPlugin } from "@embedpdf/plugin-selection";
 
-import type { ReviewCommand, ReviewItem, ReviewState } from "../../../../packages/core/src/review-model.js";
+import { initiallyPortableItemIds, saveStatusIsCleanCurrent } from "../save/portable-checkpoint.js";
+import {
+  referenceFocusRailSurface,
+  referencePdfIsVisible,
+  referenceReturnForActiveTab,
+} from "../review/reference-presentation.js";
+import {
+  REVERSE_SYNCTEX_GENERIC_ERROR,
+  forwardSyncTexRequestReady,
+  forwardSyncTexCompletionIsCurrent,
+  runHostForwardSyncTexRequest,
+  ReverseSyncTexRequestCoordinator,
+} from "../host/synctex-navigation.js";
+import { firstUnresolvedReviewItemId, canonicalStateSupersedes } from "../review/canonical-state.js";
+import {
+  pendingDestinationDisposition,
+  pendingDestinationIsCurrent,
+  pendingDestinationAttemptIsCurrent,
+  type PendingAuthoringCommand,
+} from "../save/destination-attempt.js";
+import {
+  viewerAssetUrlsEqual,
+  viewerResourcePoliciesEqual,
+} from "../host/viewer-resource-equivalence.js";
+import {
+  visibleCodexContext,
+  reviewStateRequestKey,
+  updateProductionScope,
+  updateCodexContext,
+} from "../host/context-projection.js";
+import type { ReviewItem, ReviewState } from "../../../../packages/core/src/review-model.js";
 import type { ReviewAnnotation } from '../../../../packages/core/src/pdf-writer.js';
 import type { SaveStatus } from "../../../../packages/core/src/save-status.js";
-import { sanitizeReviewRuntimeDisplayString } from "../../../../packages/core/src/review-runtime-protocol.js";
+import {
+  sanitizeReviewRuntimeDisplayString,
+} from "../../../../packages/core/src/review-runtime-protocol.js";
 import type { CaretAnchor } from "../pdf/selection-anchor.js";
 import type { ExistingAnnotation, ExistingAnnotationsDiscovery } from "../pdf/existing-annotations.js";
 import {
@@ -91,7 +123,6 @@ import {
   createReferenceNavigationState,
   reduceReferenceNavigation,
   type ReferenceNavigationAction,
-  type ReferenceNavigationState,
 } from "../review/reference-navigation-state.js";
 import type { PendingReferencePanel } from "../review/ReferenceWorkspace.js";
 import { PdfSearchWorkspace } from '../review/PdfSearchWorkspace.js';
@@ -115,7 +146,6 @@ import {
   deriveReferenceWorkspaceLayout,
   reduceReferenceWorkspaceLayout,
   type ReferenceWorkspaceLayoutAction,
-  type ReferenceWorkspaceLayoutState,
   type RightWorkspaceMode,
 } from "../review/reference-workspace-layout.js";
 import { SaveDestinationDialog } from "../save/SaveDestinationDialog.js";
@@ -126,7 +156,6 @@ import {
 import {
   authoringAuthorityFor,
   authoringAuthorityMatches,
-  type AuthoringAuthority,
   type AuthoringAnchorSnapshot,
 } from '../review/authoring-session.js';
 import type { ViewerAssetUrls, ViewerResourcePolicy } from '../pdf/embedpdf-viewer.js';
@@ -137,27 +166,6 @@ import type {
 } from '../review/review-command-surface.js';
 import type { AccessibilityTransitionEffect } from './accessibility-transitions.js';
 import { renderedPdfPageIsUsable } from './document-readiness.js';
-
-function referenceFocusRailSurface(
-  layout: ReferenceWorkspaceLayoutState,
-  hasRemainingReferences: boolean,
-): 'bottom' | 'right' {
-  if (layout.regime === 'narrow') return 'bottom';
-  return hasRemainingReferences && layout.referenceDock === 'bottom' ? 'bottom' : 'right';
-}
-
-function referencePdfIsVisible(
-  layout: ReferenceWorkspaceLayoutState,
-  navigation: ReferenceNavigationState,
-): boolean {
-  if (navigation.activeTabIdentity === null) return false;
-  if (layout.regime === 'narrow') {
-    return layout.narrowOpen && layout.narrowSurface === 'references';
-  }
-  return layout.referenceDock === 'bottom'
-    ? layout.bottomReferencesOpen
-    : layout.rightWorkspaceOpen && navigation.workspace.lastMode === 'references';
-}
 
 interface AuthoringAnchorNavigationState {
   readonly token: number;
@@ -200,250 +208,6 @@ export interface ProductionReviewAppProps {
   readonly accessibilityTransition?: AccessibilityTransitionEffect;
 }
 
-export function forwardSyncTexRequestReady(input: {
-  readonly requestGeneration: number;
-  readonly documentGeneration: number;
-  readonly navigationReadyGeneration: number | null;
-  readonly documentReadyGeneration: number | null;
-  readonly locationRestoreStatus: LocationRestoreStatus;
-}): boolean {
-  return input.requestGeneration === input.documentGeneration &&
-    input.navigationReadyGeneration === input.documentGeneration &&
-    input.documentReadyGeneration === input.documentGeneration &&
-    input.locationRestoreStatus !== 'restoring';
-}
-
-export function forwardSyncTexCompletionIsCurrent(input: {
-  readonly requestToken: number;
-  readonly latestRequestToken: number;
-  readonly requestGeneration: number;
-  readonly documentGeneration: number;
-  readonly navigationMatches: boolean;
-}): boolean {
-  return input.requestToken === input.latestRequestToken &&
-    input.requestGeneration === input.documentGeneration &&
-    input.navigationMatches;
-}
-
-export async function applyHostForwardSyncTex(
-  navigation: Pick<PdfViewerNavigation, 'captureLocation' | 'applyLocation' | 'focusAtDestination'>,
-  request: {
-    readonly pageIndex: number;
-    readonly point: { readonly x: number; readonly y: number };
-  },
-): Promise<boolean> {
-  if (!Number.isSafeInteger(request.pageIndex) || request.pageIndex < 0 ||
-    !Number.isFinite(request.point.x) || request.point.x < 0 ||
-    !Number.isFinite(request.point.y) || request.point.y < 0) return false;
-  const current = navigation.captureLocation();
-  if (current === null) return false;
-  const applied = await navigation.applyLocation({
-    ...current,
-    pageIndex: request.pageIndex,
-    anchor: request.point,
-    alignment: { xPercent: 50, yPercent: 50 },
-  });
-  if (applied) navigation.focusAtDestination(request.pageIndex);
-  return applied;
-}
-
-export async function runHostForwardSyncTexRequest(
-  navigation: Pick<PdfViewerNavigation, 'captureLocation' | 'applyLocation' | 'focusAtDestination'>,
-  request: { readonly pageIndex: number; readonly point: { readonly x: number; readonly y: number } },
-  isCurrent: () => boolean,
-  publishResult: (applied: boolean) => void,
-): Promise<void> {
-  let applied = false;
-  try {
-    applied = await applyHostForwardSyncTex(navigation, request);
-  } catch {
-    // A rejected viewer navigation is the same user-visible failure as a false result.
-  }
-  if (isCurrent()) publishResult(applied);
-}
-
-function reverseSyncTexSucceeded(value: unknown): boolean {
-  return typeof value === 'object' && value !== null &&
-    (value as { readonly status?: unknown }).status === 'ok';
-}
-
-const REVERSE_SYNCTEX_GENERIC_ERROR = 'Reverse SyncTeX could not find a LaTeX source location.';
-
-export function reverseSyncTexError(value: unknown): string | null {
-  if (typeof value !== 'object' || value === null) return REVERSE_SYNCTEX_GENERIC_ERROR;
-  const result = value as { readonly status?: unknown; readonly reason?: unknown };
-  if (result.status === 'ok') return null;
-  if (result.reason === 'workspace-untrusted') {
-    return 'Trust this workspace before using Reverse SyncTeX.';
-  }
-  switch (result.status) {
-    case 'missing':
-      return 'SyncTeX data is missing. Rebuild the PDF with SyncTeX enabled.';
-    case 'pending':
-      return 'SyncTeX data for this PDF is still being prepared. Try again shortly.';
-    case 'stale':
-      return 'SyncTeX data is stale. Rebuild the PDF before going to source.';
-    case 'ambiguous':
-      return 'SyncTeX found more than one LaTeX source location for this PDF point.';
-    case 'out-of-root':
-      return 'The SyncTeX source location is outside the approved workspace.';
-    case 'unavailable-tool':
-      return 'The SyncTeX tool is unavailable. Install or configure SyncTeX and retry.';
-    case 'timeout':
-      return 'The SyncTeX query timed out. Try again.';
-    case 'oversized':
-      return 'The SyncTeX result was too large to use safely.';
-    case 'malformed':
-      return 'The SyncTeX data was malformed. Rebuild the PDF and retry.';
-    default:
-      return REVERSE_SYNCTEX_GENERIC_ERROR;
-  }
-}
-
-export class ReverseSyncTexRequestCoordinator {
-  #latestRequest = 0;
-
-  async run(
-    reverseSyncTex: (input: ReverseSyncTexRequest) => Promise<unknown>,
-    request: ReverseSyncTexRequest,
-    publishError: (message: string | null) => void,
-  ): Promise<unknown> {
-    const requestId = ++this.#latestRequest;
-    publishError(null);
-    try {
-      const value = await reverseSyncTex(request);
-      if (requestId === this.#latestRequest) publishError(reverseSyncTexError(value));
-      return value;
-    } catch {
-      if (requestId === this.#latestRequest) publishError(REVERSE_SYNCTEX_GENERIC_ERROR);
-      return { status: 'failed' };
-    }
-  }
-}
-
-export async function reverseSyncTexAtCurrentLocation(
-  navigation: Pick<PdfViewerNavigation, 'captureLocation'>,
-  reverseSyncTex: (input: ReverseSyncTexRequest) => Promise<unknown>,
-): Promise<boolean> {
-  const location = navigation.captureLocation();
-  if (location === null) return false;
-  return reverseSyncTexSucceeded(await reverseSyncTex({
-    pageIndex: location.pageIndex,
-    point: location.anchor,
-  }));
-}
-
-export function firstUnresolvedReviewItemId(
-  items: readonly {
-    readonly id: string;
-    readonly reconciliation?: { readonly disposition: { readonly kind: string } };
-  }[],
-): string | undefined {
-  return items.find((item) =>
-    item.reconciliation !== undefined && item.reconciliation.disposition.kind !== "resolved"
-  )?.id;
-}
-
-export function canonicalStateSupersedes(
-  current: { readonly revision: number; readonly workflow: {
-    readonly documentGeneration: number;
-    readonly freshness: "current" | "possibly-stale";
-  } },
-  canonical: { readonly revision: number; readonly workflow: {
-    readonly documentGeneration: number;
-    readonly freshness: "current" | "possibly-stale";
-  } },
-): boolean {
-  return canonical.workflow.documentGeneration > current.workflow.documentGeneration ||
-    canonical.workflow.documentGeneration === current.workflow.documentGeneration && (
-      canonical.revision > current.revision ||
-      canonical.revision === current.revision &&
-        canonical.workflow.freshness === "possibly-stale" &&
-        current.workflow.freshness === "current"
-    );
-}
-
-export function referenceReturnForActiveTab(
-  scope: Pick<ReferenceNavigationState, 'activeTabIdentity' | 'documentGeneration'>,
-  presentation: ReferenceReturnPresentationState | null,
-): ReferenceReturnPresentationState | null {
-  return presentation !== null
-    && presentation.available
-    && presentation.tabIdentity === scope.activeTabIdentity
-    && presentation.documentGeneration === scope.documentGeneration
-    ? presentation
-    : null;
-}
-
-export function initiallyPortableItemIds(
-  state: ReviewState,
-  saveStatus: SaveStatus | undefined,
-): Set<string> {
-  return saveStatusIsCleanCurrent(state, saveStatus)
-    ? new Set(state.items.map(({ id }) => id))
-    : new Set();
-}
-
-export type PendingDestinationOutcome =
-  | 'cancelled'
-  | 'accepted'
-  | 'rejected'
-  | 'source-replaced';
-
-export function pendingDestinationDisposition(outcome: PendingDestinationOutcome): {
-  readonly closeDialog: boolean;
-  readonly notifyAuthoringShell: boolean;
-  readonly preserveDraft: boolean;
-} {
-  if (outcome === 'cancelled') {
-    return { closeDialog: true, notifyAuthoringShell: false, preserveDraft: true };
-  }
-  if (outcome === 'rejected') {
-    return { closeDialog: true, notifyAuthoringShell: false, preserveDraft: true };
-  }
-  return { closeDialog: true, notifyAuthoringShell: true, preserveDraft: false };
-}
-
-export function pendingDestinationIsCurrent(
-  pending: Pick<PendingAuthoringCommand, 'authority'>,
-  state: Pick<ReviewState, 'sessionId' | 'source'>,
-  documentGeneration: number,
-): boolean {
-  return authoringAuthorityMatches(
-    pending.authority,
-    authoringAuthorityFor(state, documentGeneration),
-  );
-}
-
-export function pendingDestinationAttemptIsCurrent(
-  attempt: number,
-  currentAttempt: number,
-  pending: Pick<PendingAuthoringCommand, 'authority'> | undefined,
-  state: Pick<ReviewState, 'sessionId' | 'source'>,
-  documentGeneration: number,
-): boolean {
-  return attempt === currentAttempt
-    && (pending === undefined || pendingDestinationIsCurrent(
-      pending,
-      state,
-      documentGeneration,
-    ));
-}
-
-interface PendingAuthoringCommand {
-  readonly command: ReviewCommand;
-  readonly authority: AuthoringAuthority;
-}
-
-function saveStatusIsCleanCurrent(
-  state: ReviewState,
-  saveStatus: SaveStatus | undefined,
-): boolean {
-  return saveStatus?.sync.phase === 'clean'
-    && saveStatus.sync.savedRevision === state.revision
-    && saveStatus.sync.desiredRevision === state.revision;
-}
-
 const UNAVAILABLE_CODEX_CONTEXT: LiveContextBindingStatus = {
   status: 'unavailable',
   reason: 'unavailable',
@@ -451,118 +215,6 @@ const UNAVAILABLE_CODEX_CONTEXT: LiveContextBindingStatus = {
 
 const CODEX_SCOPE_POLL_MS = 1_500;
 const CODEX_SCOPE_TIMEOUT_MS = 4_000;
-
-function contextMatchesReviewState(
-  status: Extract<LiveContextBindingStatus, { readonly status: "current" }>,
-  state: ReviewState,
-): boolean {
-  return status.identity.placekeeperSessionId === state.sessionId &&
-    status.identity.reviewRevision === state.revision &&
-    status.identity.source.fileId === state.source.fileId &&
-    status.identity.source.digest === state.source.digest;
-}
-
-export function visibleCodexContext(
-  status: LiveContextBindingStatus | undefined,
-  state: ReviewState,
-): LiveContextBindingStatus | undefined {
-  if (status?.status !== "current" || contextMatchesReviewState(status, state)) return status;
-  return {
-    status: "refreshing",
-    placekeeperSessionId: state.sessionId,
-    documentGeneration: status.identity.documentGeneration,
-    lastVerified: status.identity,
-  };
-}
-
-function reviewStateRequestKey(state: ReviewState): string {
-  return JSON.stringify([
-    state.sessionId,
-    state.source.fileId,
-    state.source.digest,
-    state.revision,
-    state.items,
-  ]);
-}
-
-function equalStringRecord(
-  first: Readonly<Record<string, string>> | undefined,
-  second: Readonly<Record<string, string>> | undefined,
-): boolean {
-  if (first === second) return true;
-  if (first === undefined || second === undefined) return false;
-  const firstEntries = Object.entries(first);
-  const secondKeys = Object.keys(second);
-  return firstEntries.length === secondKeys.length
-    && firstEntries.every(([key, value]) => second[key] === value);
-}
-
-export function viewerAssetUrlsEqual(
-  first: ViewerAssetUrls | undefined,
-  second: ViewerAssetUrls | undefined,
-): boolean {
-  return first === second || (
-    first !== undefined
-    && second !== undefined
-    && first.pdfiumWasm === second.pdfiumWasm
-    && first.workerUrl === second.workerUrl
-    && first.documentUrl === second.documentUrl
-    && equalStringRecord(first.requestHeaders, second.requestHeaders)
-  );
-}
-
-export function viewerResourcePoliciesEqual(
-  first: ViewerResourcePolicy | undefined,
-  second: ViewerResourcePolicy | undefined,
-): boolean {
-  if (first === second) return true;
-  if (first === undefined || second === undefined || first.host !== second.host) return false;
-  if (first.host === 'browser' && second.host === 'browser') return first.origin === second.origin;
-  if (first.host === 'vscode' && second.host === 'vscode') {
-    return first.issued.size === second.issued.size
-      && [...first.issued].every((url) => second.issued.has(url));
-  }
-  if (first.host === 'chrome' && second.host === 'chrome') {
-    return first.extensionOrigin === second.extensionOrigin
-      && first.resources.document === second.resources.document
-      && first.resources.pdfiumWasm === second.resources.pdfiumWasm
-      && first.resources.worker === second.resources.worker;
-  }
-  return first.host === 'macos' && second.host === 'macos'
-    && first.resources.document === second.resources.document
-    && first.resources.pdfiumWasm === second.resources.pdfiumWasm
-    && first.resources.worker === second.resources.worker;
-}
-
-// Scope responses are parsed JSON records. Compare all fields, including nested
-// observation identities and lease timestamps, without depending on key order.
-// An unknown/new response field conservatively triggers a publication as well.
-function jsonValuesEqual(current: unknown, next: unknown): boolean {
-  if (current === next) return true;
-  if (Array.isArray(current) !== Array.isArray(next)) return false;
-  if (typeof current !== 'object' || current === null
-    || typeof next !== 'object' || next === null) return false;
-  const currentRecord = current as Record<string, unknown>;
-  const nextRecord = next as Record<string, unknown>;
-  const keys = Object.keys(currentRecord);
-  return keys.length === Object.keys(nextRecord).length
-    && keys.every((key) => Object.hasOwn(nextRecord, key)
-      && jsonValuesEqual(currentRecord[key], nextRecord[key]));
-}
-
-export function updateProductionScope(
-  current: ProductionScope,
-  next: ProductionScope,
-): ProductionScope {
-  return jsonValuesEqual(current, next) ? current : next;
-}
-
-function updateCodexContext(
-  current: LiveContextBindingStatus | undefined,
-  next: LiveContextBindingStatus,
-): LiveContextBindingStatus {
-  return jsonValuesEqual(current, next) ? current ?? next : next;
-}
 
 export function ProductionReviewApp(props: ProductionReviewAppProps) {
   const [localState, setState] = useState(props.initialState);

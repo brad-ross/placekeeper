@@ -168,3 +168,16 @@ export function resolveAnnotationReader(
         ...(sectionLabel === undefined ? {} : { sectionLabel }),
       });
 }
+
+export function annotationReaderIdentityMatches(
+  left: AnnotationReaderIdentity,
+  right: AnnotationReaderIdentity,
+): boolean {
+  if (left.origin !== right.origin) return false;
+  if (left.origin === 'owned' && right.origin === 'owned') return left.itemId === right.itemId;
+  return left.origin === 'source'
+    && right.origin === 'source'
+    && left.documentGeneration === right.documentGeneration
+    && left.discoveryGeneration === right.discoveryGeneration
+    && left.annotationKey === right.annotationKey;
+}

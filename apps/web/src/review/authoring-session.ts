@@ -473,3 +473,17 @@ export function authoringPreviewAnnotations(
     ? []
     : projectReviewItemProjections(item, undefined, { includePortableMetadata: false });
 }
+
+export function mutableField(item: ReviewItem): 'proposedText' | 'comment' | undefined {
+  if (item.kind === 'replace' || item.kind === 'insert') return 'proposedText';
+  if (item.kind === 'highlight' || item.kind === 'pageNote' || item.kind === 'pdfAnnotation') return 'comment';
+  return undefined;
+}
+
+export function initialAuthoringValue(session: AuthoringSession): string {
+  const source = session.source;
+  if (source.kind === 'replace' || source.kind === 'insert') return source.initialValue;
+  if (source.kind !== 'edit') return '';
+  const field = mutableField(source.item);
+  return field === undefined ? '' : String(source.item.payload[field] ?? '');
+}

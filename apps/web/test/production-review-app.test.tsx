@@ -1,8 +1,8 @@
-import type { ProductionScope } from "../src/host/session-contracts.js";
 import { renderToStaticMarkup } from "react-dom/server";
 import { PdfZoomMode } from "@embedpdf/models";
 import { describe, expect, it, vi } from "vitest";
 
+import type { ProductionScope } from "../src/host/session-contracts.js";
 import { createReviewState } from "../../../packages/core/src/review-model.js";
 import { createReviewStateSummary } from "../../../packages/core/src/live-context.js";
 import {
@@ -11,18 +11,18 @@ import {
   reverseSyncTexError,
   reverseSyncTexAtCurrentLocation,
   runHostForwardSyncTexRequest,
-  initiallyPortableItemIds,
-  canonicalStateSupersedes,
-  firstUnresolvedReviewItemId,
   forwardSyncTexCompletionIsCurrent,
   forwardSyncTexRequestReady,
-  ProductionReviewApp,
-  referenceReturnForActiveTab,
+} from "../src/host/synctex-navigation.js";
+import { initiallyPortableItemIds } from "../src/save/portable-checkpoint.js";
+import { canonicalStateSupersedes, firstUnresolvedReviewItemId } from "../src/review/canonical-state.js";
+import { ProductionReviewApp } from "../src/app/ProductionReviewApp.js";
+import { referenceReturnForActiveTab } from "../src/review/reference-presentation.js";
+import {
   viewerAssetUrlsEqual,
   viewerResourcePoliciesEqual,
-  visibleCodexContext,
-  updateProductionScope,
-} from "../src/app/ProductionReviewApp.js";
+} from "../src/host/viewer-resource-equivalence.js";
+import { visibleCodexContext, updateProductionScope } from "../src/host/context-projection.js";
 import { SaveDestinationDialog } from "../src/save/SaveDestinationDialog.js";
 import {
   canDeriveAnnotationOutlineLabels,

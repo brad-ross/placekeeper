@@ -1,4 +1,3 @@
-import type { RejectedReviewCommand } from "../review/review-command-result.js";
 import {
   useCallback,
   useLayoutEffect,
@@ -13,6 +12,11 @@ import {
   type ReactNode,
   type CSSProperties,
 } from 'react';
+
+import { mutableField, initialAuthoringValue } from "../review/authoring-session.js";
+import { annotationReaderIdentityMatches } from "../review/annotation-reader.js";
+import { controlledWorkspaceSurfaceAction } from "../review/workspace-surface-policy.js";
+import type { RejectedReviewCommand } from "../review/review-command-result.js";
 
 import {
   addHighlight,
@@ -127,7 +131,6 @@ import {
   INITIAL_REVIEW_SURFACE_STATE,
   reduceReviewSurface,
   type ReviewBaseSurface,
-  type ReviewSurfaceAction,
 } from '../review/review-surface-state.js';
 import type {
   ReferenceNavigationState,
@@ -321,22 +324,6 @@ export interface ReviewShellProps {
 }
 
 
-export function controlledWorkspaceSurfaceAction(input: {
-  readonly open: boolean;
-  readonly baseSurface: ReviewBaseSurface;
-  readonly transientSurface: 'none' | 'selection-actions' | 'insert-action' | 'page-menu' | 'page-note-cursor';
-  readonly mode: WorkspaceMode;
-}): ReviewSurfaceAction | null {
-  if (input.open) {
-    return input.baseSurface !== 'workspace' || input.transientSurface !== 'none'
-      ? { type: 'open-workspace', mode: input.mode }
-      : null;
-  }
-  return input.baseSurface === 'workspace'
-    ? { type: 'hide-workspace', focusReturnToken: BOTTOM_REFERENCES_RAIL_FOCUS_TOKEN }
-    : null;
-}
-
 interface PointerScrollGesture {
   readonly id: number;
   readonly scroll: ViewerPosition | null;
@@ -351,19 +338,6 @@ interface FullAnnotationReaderSession {
   readonly entryFocus?: 'back' | 'edit';
 }
 
-function annotationReaderIdentityMatches(
-  left: AnnotationReaderIdentity,
-  right: AnnotationReaderIdentity,
-): boolean {
-  if (left.origin !== right.origin) return false;
-  if (left.origin === 'owned' && right.origin === 'owned') return left.itemId === right.itemId;
-  return left.origin === 'source'
-    && right.origin === 'source'
-    && left.documentGeneration === right.documentGeneration
-    && left.discoveryGeneration === right.discoveryGeneration
-    && left.annotationKey === right.annotationKey;
-}
-
 function isVisibleFocusTarget(element: HTMLElement | null | undefined): element is HTMLElement {
   if (
     element === null
@@ -376,20 +350,6 @@ function isVisibleFocusTarget(element: HTMLElement | null | undefined): element 
   return style.display !== 'none'
     && style.visibility !== 'hidden'
     && style.visibility !== 'collapse';
-}
-
-function mutableField(item: ReviewItem): 'proposedText' | 'comment' | undefined {
-  if (item.kind === 'replace' || item.kind === 'insert') return 'proposedText';
-  if (item.kind === 'highlight' || item.kind === 'pageNote' || item.kind === 'pdfAnnotation') return 'comment';
-  return undefined;
-}
-
-function initialAuthoringValue(session: AuthoringSession): string {
-  const source = session.source;
-  if (source.kind === 'replace' || source.kind === 'insert') return source.initialValue;
-  if (source.kind !== 'edit') return '';
-  const field = mutableField(source.item);
-  return field === undefined ? '' : String(source.item.payload[field] ?? '');
 }
 
 function cssAttributeValue(value: string): string {

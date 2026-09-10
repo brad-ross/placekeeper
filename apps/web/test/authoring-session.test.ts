@@ -16,7 +16,7 @@ import {
   pendingDestinationAttemptIsCurrent,
   pendingDestinationDisposition,
   pendingDestinationIsCurrent,
-} from '../src/app/ProductionReviewApp.js';
+} from "../src/save/destination-attempt.js";
 
 const state = createReviewState({
   sessionId: 'authoring-session',
