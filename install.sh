@@ -174,9 +174,15 @@ if ! "$built_app/Contents/MacOS/placekeeper" daemon coordinate-install \
   --candidate-app "$built_app" \
   --installed-app "$app_path" \
   --replace-helper "$repo_root/packaging/macos/install-built-app.sh"; then
-  printf '%s\n' "Installation was deferred; the installed app was not changed." >&2
+  printf '%s\n' "Installation did not finish. Review the diagnostic above before retrying." >&2
   exit 1
 fi
+
+# Run even when the installed app was already current, so a retry repairs an
+# independently stale extension. Keep this outside the replacement helper used
+# by isolated installed-smoke tests.
+"$app_path/Contents/Resources/node/bin/node" \
+  "$repo_root/packaging/macos/update-vscode.mjs" "$app_path"
 
 launch_services="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
 if [ -x "$launch_services" ]; then

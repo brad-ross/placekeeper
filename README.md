@@ -34,6 +34,8 @@ With the bundled Codex plugin installed, ask Codex to open one explicit local PD
 
 ### Review LaTeX in VS Code
 
+App updates also refresh an already-installed Placekeeper extension in standard VS Code installations; reload the VS Code window after updating. The installer reports extension update failures separately from a successful app replacement. For a custom VS Code location, run `node packaging/macos/update-vscode.mjs ~/Applications/Placekeeper.app /absolute/path/to/code`.
+
 Install the bundled extension from `~/Applications/Placekeeper.app/Contents/Resources/integrations/vscode`, open a local trusted LaTeX workspace, and run **Placekeeper: View PDF** or **Placekeeper: Forward SyncTeX**. The extension opens the shared Placekeeper client directly in one reusable VS Code panel. Its JavaScript, CSS, inline PDFium worker, and PDFium WASM are integrity-checked local extension assets; the working loop uses no iframe, external browser, or network fallback.
 
 Placekeeper observes successful LaTeX output replacement but does not build LaTeX or write the generated PDF. After a rebuild, the same panel refreshes atomically, preserves current or explicitly unresolved Review Items, and shows **possibly stale** when a saved source has no valid successor. **Placekeeper: Export Reviewed PDF** is the only reviewed-PDF write path and always targets a distinct file.

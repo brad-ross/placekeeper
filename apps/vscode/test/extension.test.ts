@@ -239,8 +239,10 @@ describe("VS Code local host adapter", () => {
         when: "activeWebviewPanelId == 'placekeeper.review'",
       },
     ]);
-    expect((manifest as unknown as { scripts: { build: string } }).scripts.build)
+    expect((manifest as unknown as { scripts: { "build:bundle": string } }).scripts["build:bundle"])
       .toContain("copy-web-assets.mjs");
+    expect((manifest as unknown as { scripts: { build: string } }).scripts.build)
+      .toBe("pnpm --dir ../.. build:web && pnpm build:bundle");
   });
 
   it("accepts only the shared production asset manifest", () => {

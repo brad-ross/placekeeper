@@ -27,7 +27,7 @@ describe('manual CI workflow', () => {
     };
 
     expect(packageManifest.scripts?.['test:ci:unit']).toBe(
-      'pnpm build:web && pnpm build:vscode && vitest run --config vitest.ci.config.ts',
+      'pnpm build:vscode && vitest run --config vitest.ci.config.ts',
     );
   });
 
