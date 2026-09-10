@@ -5,8 +5,6 @@ import { documentOrderedItems, projectReviewItems } from "../../../../packages/c
 import { createReviewStateSummary, reviewSemanticDigest } from "../../../../packages/core/src/live-context.js";
 import type { PdfRewriteEligibility } from "../../../../packages/core/src/pdf-writer.js";
 import {
-  encodePlacekeeperLinkFragment,
-  encodePlacekeeperReadableViewPathname,
   placekeeperLinkBase,
   type PlacekeeperLinkLocation,
 } from "../../../../packages/core/src/placekeeper-link.js";
@@ -83,16 +81,13 @@ import type {
   ActiveSession,
   BrowserLaunchScope,
   BrowserViewRecord,
-  PendingRestartReconnect,
   ReconnectBindingMetadata,
 } from "./session-internal-types.js";
+import { PresentationRecords } from "./presentation-records.js";
 
 export * from "./session-contracts.js";
 
 const BOOTSTRAP_TTL_MS = 60_000;
-// A prompt and the replacement browser bootstrap commonly arrive together;
-// keep the control request bounded while allowing their two-sided handshake.
-const RESTART_RECONNECT_WAIT_MS = 4_500;
 
 function latestSyncTexFingerprintBefore(
   lineage: readonly DurableGenerationRecordV1[],
@@ -147,17 +142,8 @@ export class SessionBroker {
   readonly #activeChromeBySource = new Map<string, string>();
   readonly #chromeSourceKeyBySession = new Map<string, string>();
   readonly #openingByOutputPath = new Map<string, Promise<void>>();
-  readonly #bootstrapScopes = new Map<string, BrowserLaunchScope>();
-  readonly #credentialScopes = new Map<string, BrowserLaunchScope>();
-  readonly #viewsById = new Map<string, BrowserViewRecord>();
+  readonly #presentations = new PresentationRecords();
   readonly #recovery: RecoveryDecisions;
-  readonly #reconnectByBindProofHash = new Map<
-    string,
-    Omit<ReconnectBindingMetadata, "taskSessionId"> & { readonly expiresAtMs: number }
-  >();
-  readonly #reconnectBindingsByCapabilityHash = new Map<string, ReconnectBindingMetadata>();
-  readonly #pendingRestartReconnects = new Map<string, PendingRestartReconnect>();
-  readonly #restartReconnectWaiters = new Map<string, Set<() => void>>();
   readonly #sessionEndListeners = new Set<(sessionId: string, reason: "ended" | "shutdown") => void>();
   readonly #snapshotStores = new Map<string, DraftSnapshotStore>();
   readonly #generationListeners = new Set<(event: DocumentGenerationEvent) => void>();
@@ -343,7 +329,7 @@ export class SessionBroker {
       expiresAtMs: this.#now().getTime() + BOOTSTRAP_TTL_MS,
       ...(reconnectBrowserToken === undefined ? {} : { reconnectBrowserToken }),
     };
-    this.#bootstrapScopes.set(digestSecretHex(capability), launchScope);
+    this.#presentations.recordBootstrap(digestSecretHex(capability), launchScope);
     const bindProof = surface === "codex"
       ? this.taskBindings.issueBindProof({
           reviewSessionId: session.id,
@@ -352,7 +338,7 @@ export class SessionBroker {
         })
       : undefined;
     if (bindProof !== undefined && reconnectBrowserToken !== undefined) {
-      this.#reconnectByBindProofHash.set(digestSecretHex(bindProof), {
+      this.#presentations.recordReconnectProof(digestSecretHex(bindProof), {
         browserToken: reconnectBrowserToken,
         reviewSessionId: session.id,
         documentGeneration: session.state.workflow.documentGeneration,
@@ -1096,14 +1082,14 @@ export class SessionBroker {
     this.#sweepBootstrapScopes();
     if (!this.#activeById.has(sessionId)) return undefined;
     const scopeKey = digestSecretHex(capability);
-    const scope = this.#bootstrapScopes.get(scopeKey);
+    const scope = this.#presentations.bootstrap(scopeKey);
     const credential = this.credentials.exchangeBootstrap(sessionId, capability);
     if (credential === undefined) return undefined;
     this.controls.noteAuthenticatedPage(sessionId);
-    this.#bootstrapScopes.delete(scopeKey);
+    this.#presentations.removeBootstrap(scopeKey);
     if (scope !== undefined && scope.sessionId === sessionId) {
-      this.#credentialScopes.set(digestSecretHex(credential), scope);
-      this.#notifyRestartReconnectExchange(scope.browserCapabilityHash);
+      this.#presentations.recordCredentialScope(digestSecretHex(credential), scope);
+      this.#presentations.notifyRestartReconnectExchange(scope.browserCapabilityHash);
       if (scope.surface === "codex") {
         this.taskBindings.activateBrowser({
           reviewSessionId: sessionId,
@@ -1123,33 +1109,12 @@ export class SessionBroker {
       session.ending ||
       session.state.workflow.documentGeneration !== scope.documentGeneration
     ) return undefined;
-    const id = randomUUID();
-    const cookie = randomBytes(32).toString("base64url");
-    const location = scope.requestedLocation ?? { kind: "page" as const, page: 1 };
-    const pathname = encodePlacekeeperReadableViewPathname({
-      viewId: id,
-      path: this.#readableSourcePath(session.sourceOwnership),
-    });
-    this.#viewsById.set(id, {
-      id,
-      cookieHash: digestSecretHex(cookie),
+    return this.#presentations.createView(
       sessionId,
-      documentGeneration: scope.documentGeneration,
+      this.#readableSourcePath(session.sourceOwnership),
       credential,
-      pathname,
-    });
-    return {
-      credential,
-      view: {
-        id,
-        cookie,
-        pathname,
-        locationFragment: encodePlacekeeperLinkFragment(location),
-        ...(scope.reconnectBrowserToken === undefined
-          ? {}
-          : { reconnectCookie: scope.reconnectBrowserToken }),
-      },
-    };
+      scope,
+    );
   }
 
   exchangeBootstrap(sessionId: string, capability: string): string | undefined {
@@ -1170,9 +1135,9 @@ export class SessionBroker {
     readonly documentGeneration: number;
   }): Promise<ReturnType<TaskBindingRegistry["claim"]>> {
     const proofHash = digestSecretHex(input.bindProof);
-    const metadata = this.#reconnectByBindProofHash.get(proofHash);
+    const metadata = this.#presentations.reconnectProof(proofHash);
     const result = this.taskBindings.claim(input);
-    this.#reconnectByBindProofHash.delete(proofHash);
+    this.#presentations.removeReconnectProof(proofHash);
     if (
       result.status === "denied" ||
       metadata === undefined ||
@@ -1184,7 +1149,7 @@ export class SessionBroker {
       ...reconnectMetadata,
       taskSessionId: input.taskSessionId,
     };
-    this.#reconnectBindingsByCapabilityHash.set(metadata.browserCapabilityHash, binding);
+    this.#presentations.recordReconnectBinding(metadata.browserCapabilityHash, binding);
     await this.restartReconnects.issue(binding);
     return result;
   }
@@ -1210,15 +1175,15 @@ export class SessionBroker {
     const capability = new URLSearchParams(input.launch.fragment.replace(/^#/u, "")).get("cap");
     if (capability === null) return false;
     const scopeKey = digestSecretHex(capability);
-    const scope = this.#bootstrapScopes.get(scopeKey);
+    const scope = this.#presentations.bootstrap(scopeKey);
     if (
       scope === undefined ||
       scope.sessionId !== session.id ||
       scope.documentGeneration !== session.state.workflow.documentGeneration ||
       scope.browserCapabilityHash !== scopeKey
     ) return false;
-    this.#bootstrapScopes.set(scopeKey, { ...scope, reconnectBrowserToken: input.browserToken });
-    this.#pendingRestartReconnects.set(scopeKey, {
+    this.#presentations.recordBootstrap(scopeKey, { ...scope, reconnectBrowserToken: input.browserToken });
+    this.#presentations.recordPendingReconnect(scopeKey, {
       ticket,
       browserToken: input.browserToken,
       reviewSessionId: session.id,
@@ -1234,18 +1199,20 @@ export class SessionBroker {
    * only when its private ticket and this exact task identity both match. */
   async prepareTaskContext(taskSessionId: string): Promise<void> {
     this.#sweepBootstrapScopes();
-    for (const [capabilityHash, pending] of this.#pendingRestartReconnects) {
+    for (const [capabilityHash, pending] of this.#presentations.pendingReconnects()) {
       if (!this.restartReconnects.matchesTask(pending.ticket, taskSessionId)) continue;
-      const authenticatedBrowser = await this.#waitForRestartReconnectExchange(capabilityHash, pending);
+      const authenticatedBrowser = await this.#presentations.waitForRestartReconnectExchange(
+        capabilityHash, pending,
+      );
       if (!authenticatedBrowser) continue;
       // Re-read and consume the persisted record before making the task
       // binding visible; staged copies are only advisory and may be revoked.
       const consumed = await this.restartReconnects.consumeForTask(pending.ticket, taskSessionId);
       if (!consumed) {
-        this.#clearPendingRestartReconnects(pending.ticket.ticketId);
+        this.#presentations.clearPendingRestartReconnects(pending.ticket.ticketId);
         continue;
       }
-      this.#clearPendingRestartReconnects(pending.ticket.ticketId);
+      this.#presentations.clearPendingRestartReconnects(pending.ticket.ticketId);
       const attached = this.taskBindings.attachReconnectedBrowser({
         taskSessionId,
         reviewSessionId: pending.reviewSessionId,
@@ -1253,19 +1220,7 @@ export class SessionBroker {
         browserCapabilityHash: capabilityHash,
       });
       if (attached.status === "denied") continue;
-      for (const [credentialHash, scope] of this.#credentialScopes) {
-        if (
-          scope.sessionId === pending.reviewSessionId &&
-          scope.documentGeneration === pending.documentGeneration &&
-          scope.browserCapabilityHash === capabilityHash
-        ) {
-          this.#credentialScopes.set(credentialHash, {
-            ...scope,
-            surface: "codex",
-            reconnectBrowserToken: pending.browserToken,
-          });
-        }
-      }
+      this.#presentations.promoteReconnect(capabilityHash, pending);
       const binding: ReconnectBindingMetadata = {
         taskSessionId,
         browserToken: pending.browserToken,
@@ -1275,11 +1230,11 @@ export class SessionBroker {
         canonicalSourcePath: pending.canonicalSourcePath,
         sourceDigest: pending.sourceDigest,
       };
-      this.#reconnectBindingsByCapabilityHash.set(capabilityHash, binding);
+      this.#presentations.recordReconnectBinding(capabilityHash, binding);
       await this.restartReconnects.issue(binding);
       return;
     }
-    for (const binding of this.#reconnectBindingsByCapabilityHash.values()) {
+    for (const binding of this.#presentations.reconnectBindings()) {
       if (binding.taskSessionId !== taskSessionId) continue;
       const active = this.taskBindings.bindingForTask(taskSessionId);
       if (
@@ -1292,56 +1247,13 @@ export class SessionBroker {
 
   async revokeTask(taskSessionId: string): Promise<void> {
     this.taskBindings.revokeTask(taskSessionId);
-    for (const [capabilityHash, binding] of this.#reconnectBindingsByCapabilityHash) {
-      if (binding.taskSessionId === taskSessionId) {
-        this.#reconnectBindingsByCapabilityHash.delete(capabilityHash);
-      }
-    }
-    for (const pending of this.#pendingRestartReconnects.values()) {
+    this.#presentations.removeTaskBindings(taskSessionId);
+    for (const [, pending] of this.#presentations.pendingReconnects()) {
       if (this.restartReconnects.matchesTask(pending.ticket, taskSessionId)) {
-        this.#clearPendingRestartReconnects(pending.ticket.ticketId);
+        this.#presentations.clearPendingRestartReconnects(pending.ticket.ticketId);
       }
     }
     await this.restartReconnects.revokeTask(taskSessionId);
-  }
-
-  #isAuthenticatedRestartReconnect(capabilityHash: string, pending: PendingRestartReconnect): boolean {
-    return [...this.#credentialScopes.values()].some((scope) =>
-      scope.sessionId === pending.reviewSessionId &&
-      scope.documentGeneration === pending.documentGeneration &&
-      scope.browserCapabilityHash === capabilityHash
-    );
-  }
-
-  #waitForRestartReconnectExchange(
-    capabilityHash: string,
-    pending: PendingRestartReconnect,
-  ): Promise<boolean> {
-    if (this.#isAuthenticatedRestartReconnect(capabilityHash, pending)) return Promise.resolve(true);
-    return new Promise((resolve) => {
-      const waiters = this.#restartReconnectWaiters.get(capabilityHash) ?? new Set<() => void>();
-      const finish = () => {
-        clearTimeout(timeout);
-        waiters.delete(finish);
-        if (waiters.size === 0) this.#restartReconnectWaiters.delete(capabilityHash);
-        resolve(this.#isAuthenticatedRestartReconnect(capabilityHash, pending));
-      };
-      const timeout = setTimeout(finish, RESTART_RECONNECT_WAIT_MS);
-      waiters.add(finish);
-      this.#restartReconnectWaiters.set(capabilityHash, waiters);
-    });
-  }
-
-  #notifyRestartReconnectExchange(capabilityHash: string): void {
-    for (const finish of this.#restartReconnectWaiters.get(capabilityHash) ?? []) finish();
-  }
-
-  #clearPendingRestartReconnects(ticketId: string): void {
-    for (const [capabilityHash, candidate] of this.#pendingRestartReconnects) {
-      if (candidate.ticket.ticketId !== ticketId) continue;
-      this.#notifyRestartReconnectExchange(capabilityHash);
-      this.#pendingRestartReconnects.delete(capabilityHash);
-    }
   }
 
   resumeView(
@@ -1364,28 +1276,23 @@ export class SessionBroker {
     pathname: string,
     cookieHash?: string,
   ): BrowserViewRecord | undefined {
-    const view = this.#viewsById.get(viewId);
-    if (
-      view === undefined ||
-      view.pathname !== pathname ||
-      (cookieHash !== undefined && view.cookieHash !== cookieHash)
-    ) return undefined;
+    const view = this.#presentations.matchingView(viewId, pathname, cookieHash);
+    if (view === undefined) return undefined;
     const session = this.#activeById.get(view.sessionId);
     const live =
       session !== undefined &&
       !session.ending &&
       session.state.workflow.documentGeneration === view.documentGeneration &&
       this.credentials.authenticate(view.sessionId, view.credential);
-    if (!live) this.#viewsById.delete(viewId);
+    if (!live) this.#presentations.removeView(viewId);
     return live ? view : undefined;
   }
 
   revokeView(viewId: string): void {
-    const view = this.#viewsById.get(viewId);
+    const view = this.#presentations.removeView(viewId);
     if (view === undefined) return;
-    this.#viewsById.delete(viewId);
     this.credentials.revoke(view.sessionId, view.credential);
-    this.#credentialScopes.delete(digestSecretHex(view.credential));
+    this.#presentations.removeCredentialScope(digestSecretHex(view.credential));
   }
 
   /** Chrome runtime presentations authenticate through their native, tab-scoped
@@ -1393,7 +1300,7 @@ export class SessionBroker {
    * launch capability and are revoked before any projection leaves service code. */
   revokePresentationCredential(sessionId: string, credential: string): void {
     this.credentials.revoke(sessionId, credential);
-    this.#credentialScopes.delete(digestSecretHex(credential));
+    this.#presentations.removeCredentialScope(digestSecretHex(credential));
   }
 
   authenticate(sessionId: string, credential: string): boolean {
@@ -1405,7 +1312,7 @@ export class SessionBroker {
 
   authenticateSurface(sessionId: string, credential: string, surface: LaunchSurface): boolean {
     if (!this.authenticate(sessionId, credential)) return false;
-    const scope = this.#credentialScopes.get(digestSecretHex(credential));
+    const scope = this.#presentations.credentialScope(digestSecretHex(credential));
     return scope?.sessionId === sessionId && scope.surface === surface;
   }
 
@@ -1437,34 +1344,20 @@ export class SessionBroker {
 
   #sweepBootstrapScopes(): void {
     const now = this.#now().getTime();
-    const expiredSessions = new Set<string>();
-    for (const [key, scope] of this.#bootstrapScopes) {
-      if (scope.expiresAtMs <= now) {
-        this.#bootstrapScopes.delete(key);
-        expiredSessions.add(scope.sessionId);
-      }
-    }
+    const expiredSessions = this.#presentations.expireBootstraps(now);
     // A browser handoff is committed only when its bootstrap is exchanged.
     // If Chrome falls back after the native success reply, expire the clean,
     // unclaimed remote session instead of retaining an invisible review.
     for (const sessionId of expiredSessions) {
       const session = this.#activeById.get(sessionId);
-      const stillScoped = [...this.#bootstrapScopes.values(), ...this.#credentialScopes.values()]
-        .some((scope) => scope.sessionId === sessionId);
-      const hasView = [...this.#viewsById.values()].some((view) => view.sessionId === sessionId);
+      const stillScoped = this.#presentations.hasScope(sessionId);
+      const hasView = this.#presentations.hasView(sessionId);
       if (
         session?.sourceOwnership.disposition === "remote-temporary" &&
         session.sync.phase === "clean" && !stillScoped && !hasView
       ) void this.#end(sessionId).catch(() => undefined);
     }
-    for (const [proofHash, metadata] of this.#reconnectByBindProofHash) {
-      if (metadata.expiresAtMs <= now) this.#reconnectByBindProofHash.delete(proofHash);
-    }
-    for (const [capabilityHash, pending] of this.#pendingRestartReconnects) {
-      if (pending.ticket.expiresAtMs <= now) {
-        this.#pendingRestartReconnects.delete(capabilityHash);
-      }
-    }
+    this.#presentations.expireReconnects(now);
     this.#recovery.sweep();
   }
 
@@ -1779,7 +1672,7 @@ export class SessionBroker {
       : this.capabilities.getRootPath(session.rootId);
     const launchScope = credential === undefined || !this.authenticate(sessionId, credential)
       ? undefined
-      : this.#credentialScopes.get(digestSecretHex(credential));
+      : this.#presentations.credentialScope(digestSecretHex(credential));
     const trustedLaunchScope = launchScope?.sessionId === sessionId
       ? launchScope
       : undefined;
@@ -1794,7 +1687,7 @@ export class SessionBroker {
         documentGeneration: session.state.workflow.documentGeneration,
         browserCapabilityHash: trustedCodexScope.browserCapabilityHash,
       });
-      const reconnectBinding = this.#reconnectBindingsByCapabilityHash.get(
+      const reconnectBinding = this.#presentations.reconnectBinding(
         trustedCodexScope.browserCapabilityHash,
       );
       if (
@@ -1816,7 +1709,7 @@ export class SessionBroker {
         ? {}
         : { launchSurface: trustedLaunchScope.surface }),
       ...(trustedLaunchScope?.surface === "browser" &&
-          this.#pendingRestartReconnects.has(trustedLaunchScope.browserCapabilityHash)
+          this.#presentations.hasPendingReconnect(trustedLaunchScope.browserCapabilityHash)
         ? { reconnectPending: true as const }
         : {}),
       ...(trustedLaunchScope?.requestedLocation === undefined
@@ -2160,18 +2053,8 @@ export class SessionBroker {
         delete session.syncTexOperationToken;
         this.#activate(session);
         this.credentials.revokePendingBootstraps(session.id);
-        for (const [key, scope] of this.#bootstrapScopes) {
-          if (scope.sessionId === session.id) this.#bootstrapScopes.delete(key);
-        }
-        for (const [proofHash, metadata] of this.#reconnectByBindProofHash) {
-          if (metadata.reviewSessionId === session.id) this.#reconnectByBindProofHash.delete(proofHash);
-        }
-        for (const scope of this.#credentialScopes.values()) {
-          if (scope.sessionId === session.id) scope.documentGeneration = successorGeneration;
-        }
-        for (const view of this.#viewsById.values()) {
-          if (view.sessionId === session.id) view.documentGeneration = successorGeneration;
-        }
+        this.#presentations.removeSessionBootstraps(session.id);
+        this.#presentations.migrateGeneration(session.id, successorGeneration);
         const migration = this.taskBindings.migrateGeneration({
           reviewSessionId: session.id,
           previousGeneration: expected.documentGeneration,
@@ -2795,15 +2678,7 @@ export class SessionBroker {
     this.#activeByOutputPath.clear();
     this.#activeChromeBySource.clear();
     this.#chromeSourceKeyBySession.clear();
-    this.#bootstrapScopes.clear();
-    this.#credentialScopes.clear();
-    this.#viewsById.clear();
-    this.#reconnectByBindProofHash.clear();
-    this.#reconnectBindingsByCapabilityHash.clear();
-    for (const capabilityHash of this.#restartReconnectWaiters.keys()) {
-      this.#notifyRestartReconnectExchange(capabilityHash);
-    }
-    this.#pendingRestartReconnects.clear();
+    this.#presentations.clear();
     this.#recovery.clear();
   }
 
@@ -2850,31 +2725,8 @@ export class SessionBroker {
       await this.restartReconnects.revokeSession(sessionId);
       await session.writeTail;
       this.credentials.revokeSession(sessionId);
-      for (const [key, scope] of this.#bootstrapScopes) {
-        if (scope.sessionId === sessionId) this.#bootstrapScopes.delete(key);
-      }
-      for (const [proofHash, metadata] of this.#reconnectByBindProofHash) {
-        if (metadata.reviewSessionId === sessionId) {
-          this.#reconnectByBindProofHash.delete(proofHash);
-        }
-      }
-      for (const [key, scope] of this.#credentialScopes) {
-        if (scope.sessionId === sessionId) this.#credentialScopes.delete(key);
-      }
-      for (const [viewId, view] of this.#viewsById) {
-        if (view.sessionId === sessionId) this.#viewsById.delete(viewId);
-      }
-      for (const [capabilityHash, binding] of this.#reconnectBindingsByCapabilityHash) {
-        if (binding.reviewSessionId === sessionId) {
-          this.#reconnectBindingsByCapabilityHash.delete(capabilityHash);
-        }
-      }
-      for (const [capabilityHash, pending] of this.#pendingRestartReconnects) {
-        if (pending.reviewSessionId === sessionId) {
-          this.#notifyRestartReconnectExchange(capabilityHash);
-          this.#pendingRestartReconnects.delete(capabilityHash);
-        }
-      }
+      this.#presentations.removeSessionBootstraps(sessionId);
+      this.#presentations.removeSessionPresentations(sessionId);
       this.capabilities.revokeFile(session.fileId);
       if (session.rootId !== undefined) this.capabilities.revokeRoot(session.rootId);
       await session.store.remove();
