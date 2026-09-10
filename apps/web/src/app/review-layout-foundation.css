@@ -727,7 +727,7 @@
 .pdf-workspace__status {
   position: absolute;
   z-index: 2;
-  top: .5rem;
+  top: 1rem;
   left: .5rem;
   max-width: min(24rem, calc(100% - 1rem));
   border: 1px solid color-mix(in srgb, var(--review-danger) 48%, var(--review-border));
@@ -737,7 +737,7 @@
 .review-toast-stack {
   position: absolute;
   z-index: 8;
-  top: .5rem;
+  top: 1rem;
   left: .5rem;
   display: grid;
   width: max-content;

@@ -235,7 +235,7 @@ describe('review shell layout and accessibility contract', () => {
     expect(html.indexOf('data-review-toast-stack')).toBeLessThan(html.indexOf('Document canvas'));
     expect(html).not.toContain('review-shell--generation-status');
     expect(foundationStyles).toMatch(
-      /\.review-toast-stack\s*\{[^}]*position:\s*absolute;[^}]*top:\s*\.5rem;[^}]*left:\s*\.5rem;/u,
+      /\.review-toast-stack\s*\{[^}]*position:\s*absolute;[^}]*top:\s*1rem;[^}]*left:\s*\.5rem;/u,
     );
     expect(foundationStyles).toMatch(
       /\.pdf-workspace__status\s*\{[^}]*left:\s*\.5rem;/u,
