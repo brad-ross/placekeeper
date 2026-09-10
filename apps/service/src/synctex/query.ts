@@ -407,7 +407,8 @@ export async function queryForwardSyncTex(input: {
     return navigationResult(binding, "stale", "operation-binding-is-no-longer-current");
   }
   const timeoutMs = Math.max(1, Math.min(input.timeoutMs ?? 2_000, 2_000));
-  const maxOutputBytes = 64 * 1024;
+  // Beamer overlays can emit hundreds of rectangles for a single source line.
+  const maxOutputBytes = 1024 * 1024;
   const result = await (input.run ?? runSyncTex)({
     executable: "synctex",
     argv: [
@@ -427,14 +428,11 @@ export async function queryForwardSyncTex(input: {
     forwardOutputMatches(binding.privatePdfPath, candidate.output)
   );
   if (candidates.length === 0) return navigationResult(binding, "malformed", "no-bound-forward-target");
-  if (new Set(candidates.map((candidate) => candidate.page)).size !== 1) {
-    return navigationResult(binding, "ambiguous", "multiple-forward-pages");
-  }
   if (input.isCurrent !== undefined && !await input.isCurrent(binding)) {
     return navigationResult(binding, "stale", "operation-binding-changed-before-forward-result");
   }
-  // SyncTeX commonly emits several rectangles for one source position. Its
-  // ordinary forward-view contract resolves that list to the final record.
+  // Resolve the ordered results to the final rectangle, including Beamer
+  // overlays where one source position legitimately spans several pages.
   const candidate = candidates.at(-1)!;
   return {
     ...navigationResult(binding, "ok"),

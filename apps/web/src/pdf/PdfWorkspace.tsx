@@ -177,6 +177,11 @@ export function PdfWorkspace({
       >
         {({ documents, pluginsReady }) => {
           const mainDocument = documents[MAIN_PDF_DOCUMENT_ID];
+          if (mainDocument?.status === 'error') {
+            return <div className="pdf-workspace__loading" role="alert">
+              This PDF could not be loaded. If it is being rebuilt, wait for the build to finish and reopen it.
+            </div>;
+          }
           if (!pluginsReady || !mainDocument?.document) {
             return <div className="pdf-workspace__loading" role="status"><ReviewIcon name="loading" />Loading local PDF…</div>;
           }

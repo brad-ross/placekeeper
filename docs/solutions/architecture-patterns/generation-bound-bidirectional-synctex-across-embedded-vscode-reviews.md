@@ -1,6 +1,7 @@
 ---
 title: Generation-bound bidirectional SyncTeX across embedded VS Code reviews
 date: 2026-09-02
+last_updated: 2026-09-10
 category: architecture-patterns
 module: Embedded LaTeX source navigation
 problem_type: architecture_pattern
@@ -74,6 +75,20 @@ Run SyncTeX without a shell, under controlled environment and bounded time/outpu
 
 Only `pending` and `stale` are retryable for forward navigation (`apps/vscode/src/webview-bridge.ts:74`). Bounded retries let a lagging sidecar catch up, and the saved intent remains available when a later sidecar event may succeed (`apps/vscode/src/extension.ts:271`, `apps/vscode/src/extension.ts:285`, `apps/vscode/src/rebuild-navigation.ts:85`). Terminal outcomes retire the intent (`apps/vscode/src/rebuild-navigation.ts:86`). Reverse navigation maps each status to an actionable message, and request coordination prevents an older completion from overwriting the newest result (`apps/web/src/app/ProductionReviewApp.tsx:280`, `apps/web/src/app/ProductionReviewApp.tsx:311`, `apps/web/src/app/ProductionReviewApp.tsx:323`).
 
+### Treat ordered forward results differently from reverse ambiguity
+
+PR #92 exposed a distinction the generation-bound SyncTeX design needs to preserve. Beamer can map one source position to several rectangles on one page or across overlay pages. Treating those forward results as ambiguous rejected valid presentation output. The forward query now filters records to the bound private PDF, checks that the binding is still current, and selects the last surviving record in tool-output order (`apps/service/src/synctex/query.ts:427`, `apps/service/src/synctex/query.ts:436`). “Last” means the final bound record returned by this query: it does not mean the highest page number, newest compilation, or a different generation.
+
+This is a presentation-choice policy within an already authorized PDF. It must not be copied to reverse navigation, where different source targets would change which file or position the editor opens. Reverse results continue to resolve contained source paths and deduplicate by path, line, and column before requiring a unique target (`apps/service/src/synctex/query.ts:482`, `apps/service/src/synctex/query.ts:502`). Multiple forward rectangles and multiple reverse source targets therefore require different policies despite looking superficially similar.
+
+The same real-world output invalidated the shared 64 KiB assumption: Beamer overlays can return hundreds of forward rectangles for a single line. Forward output now has a bounded 1 MiB allowance while retaining the two-second timeout (`apps/service/src/synctex/query.ts:409`). Reverse output retains its 64 KiB bound (`apps/service/src/synctex/query.ts:468`). Increasing the byte budget is not justification for relaxing generation checks, output-path filtering, or subprocess runtime limits.
+
+### Check an exact sibling before bounded workspace discovery
+
+A workspace-wide PDF search capped at 64 results can omit the obvious generated output next to the active source. The source-binding helper now checks the exact same-stem sibling directly before invoking that bounded fallback (`apps/vscode/src/local-workspace.ts:152`). This is a narrow filesystem heuristic, not LaTeX recipe, root-document, or compiler-output-directory inference. If fallback discovery yields unresolved alternatives, the user still chooses a PDF and the review tab keeps that binding (`apps/vscode/src/extension.ts:168`, `apps/vscode/src/extension.ts:174`).
+
+For future changes, use rich SyncTeX fixtures with repeated rectangles, overlay pages, and output above the old byte cap; a trivial one-page PDF cannot exercise these failure modes. Also exercise discovery in a workspace with enough PDFs to exceed its cap. Preserve the semantic distinction between deterministic selection inside one bound artifact and ambiguity over source authority. These cases are covered by the overlay, large-output, reverse-ambiguity, and sibling-discovery regressions (`apps/service/test/synctex.test.ts:253`, `apps/service/test/synctex.test.ts:282`, `apps/service/test/synctex.test.ts:299`, `apps/vscode/test/extension.test.ts:621`). The changes are locally verified in PR #92, pending merge as of September 10, 2026.
+
 ## Why This Matters
 
 SyncTeX combines mutable build artifacts, subprocess output, local paths, editor state, and asynchronous viewer work. Treating the result as a timeless line number can mix generations, expose an out-of-root file, duplicate the source editor beside the PDF, or apply a late cursor after another rebuild.
@@ -120,3 +135,7 @@ Tests cover left-group reuse, hidden-tab restoration, duplicate avoidance, exact
 - [Return-to-origin navigation for stateful PDF Reference Tabs](./reference-tab-return-to-origin-navigation.md)
 - [Reject stale viewer selection snapshots before creating annotation anchors](../ui-bugs/reject-stale-viewer-selection-snapshots.md)
 - [PR #68: Fully embedded VS Code LaTeX review](https://github.com/brad-ross/placekeeper/pull/68)
+
+- [PR #92: Current PDF reviews and predictable navigation](https://github.com/brad-ross/placekeeper/pull/92)
+- [Refresh independently installed VS Code payloads after app installation](../integration-issues/refresh-independent-vscode-payload-after-app-install.md)
+- [Revalidate restored PDF output before viewer bootstrap](../ui-bugs/revalidate-restored-pdf-before-bootstrap.md)

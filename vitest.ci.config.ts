@@ -66,6 +66,7 @@ export default defineConfig({
       'apps/vscode/test/rebuild-observer.test.ts',
       'apps/vscode/test/rebuild-navigation.test.ts',
       'packaging/macos/packaging.test.ts',
+      'packaging/macos/update-vscode.test.mjs',
     ],
   },
 });

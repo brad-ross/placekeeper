@@ -42,7 +42,7 @@ import {
   classifyWorkspace,
   resolveLauncherPath,
   resolveExternalLauncherPath,
-  resolveSourceOutputBinding,
+  discoverSourceOutputBinding,
   selectedUriArguments,
   tabResourceUri,
   type LaunchErrorPresentation,
@@ -166,8 +166,10 @@ async function chooseBinding(commandArgs: readonly unknown[]): Promise<ReviewBin
   });
   let chosen: UriLike | undefined = "scheme" in direct ? direct : undefined;
   if (chosen === undefined && active?.scheme === "file" && isLatexSourcePath(active.fsPath)) {
-    const candidates = await vscode.workspace.findFiles("**/*.pdf", "**/{.git,node_modules}/**", 64);
-    const binding = resolveSourceOutputBinding({ activeSource: active, candidates });
+    const binding = await discoverSourceOutputBinding({
+      activeSource: active,
+      findCandidates: () => vscode.workspace.findFiles("**/*.pdf", "**/{.git,node_modules}/**", 64),
+    });
     if (binding.kind === "bound") chosen = binding.uri;
     if (binding.kind === "choose") {
       const labels = binding.candidates.map((candidate) => candidate.fsPath);
@@ -468,6 +470,7 @@ export function activate(context: vscode.ExtensionContext): void {
     activePanel = panel;
     earlyDispose.dispose();
     panel.onDidDispose(() => {
+      panelDisposed = true;
       observer.dispose();
       bridge.dispose();
       if (runtime.flushTimer !== undefined) clearTimeout(runtime.flushTimer);
@@ -476,6 +479,11 @@ export function activate(context: vscode.ExtensionContext): void {
       if (activePanel === panel) activePanel = undefined;
       void rm(snapshotRoot, { recursive: true, force: true });
     });
+    // A restored panel can already be active before its focus listener exists.
+    // Validate the output before bootstrap so recovery cannot pin an old or
+    // empty snapshot until the next focus/watcher event.
+    await observer.revalidate("activation");
+    requireOpenPanel();
     await attachStage("webview", () => {
       panel.webview.html = buildReviewWebviewHtml({
         nonce: randomBytes(18).toString("base64url"),

@@ -602,13 +602,15 @@ export function ReviewShell(props: ReviewShellProps) {
         props.state.workflow.documentGeneration,
       ))
     : props.state.items;
+  const generatedStatusBusy = props.generationRefreshStatus !== 'failed'
+    && (props.generationRefreshStatus === 'reconciling' || props.locationRestoreStatus === 'restoring');
   const generatedStatusMessages = props.state.workflow.mode !== 'generated-output' ? [] : [
     props.generationRefreshStatus === 'reconciling'
       ? 'A rebuilt PDF is loading and Review Items are reconciling.'
       : props.generationRefreshStatus === 'failed'
         ? 'The rebuilt PDF could not be loaded safely. The last successful PDF remains reviewable.'
         : props.state.workflow.freshness === 'possibly-stale'
-          ? 'The last successful PDF may be stale.'
+          ? 'Source changed; waiting for an updated PDF.'
           : '',
     props.locationRestoreStatus === 'restoring'
       ? 'Restoring the prior reading position.'
@@ -2383,8 +2385,10 @@ export function ReviewShell(props: ReviewShellProps) {
           {generatedStatusMessages.length > 0 ? <p
             className="review-toast review-toast--status"
             data-generation-status={props.generationRefreshStatus ?? 'idle'}
+            data-generation-busy={generatedStatusBusy}
             role={props.generationRefreshStatus === 'failed' ? 'alert' : 'status'}
-          ><ReviewIcon name={props.generationRefreshStatus === 'failed' ? 'alert' : 'loading'} />{
+          ><ReviewIcon name={generatedStatusBusy ? 'loading'
+            : props.generationRefreshStatus === 'failed' || props.locationRestoreStatus === 'fallback' ? 'alert' : 'info'} />{
             generatedStatusMessages.join(' ')
           }</p> : null}
         </div> : null}

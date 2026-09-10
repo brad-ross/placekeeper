@@ -727,9 +727,9 @@
 .pdf-workspace__status {
   position: absolute;
   z-index: 2;
-  top: .5rem;
-  left: .5rem;
-  max-width: min(24rem, calc(100% - 1rem));
+  top: .75rem;
+  left: .75rem;
+  max-width: min(24rem, calc(100% - 1.5rem));
   border: 1px solid color-mix(in srgb, var(--review-danger) 48%, var(--review-border));
   color: var(--review-danger);
 }
@@ -737,11 +737,11 @@
 .review-toast-stack {
   position: absolute;
   z-index: 8;
-  top: .5rem;
-  left: .5rem;
+  top: .75rem;
+  left: .75rem;
   display: grid;
   width: max-content;
-  max-width: min(24rem, calc(100% - 1rem));
+  max-width: min(24rem, calc(100% - 1.5rem));
   gap: .4rem;
   pointer-events: none;
 }
@@ -773,7 +773,7 @@
   pointer-events: none;
 }
 
-.review-toast[data-generation-status="reconciling"] .review-icon {
+.review-toast[data-generation-busy="true"] .review-icon {
   animation: review-loader-spin 900ms linear infinite;
 }
 

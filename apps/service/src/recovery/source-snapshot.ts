@@ -51,8 +51,11 @@ export async function createSourceSnapshot(
   sourcePath: string,
   sessionDirectory: string,
 ): Promise<SourceSnapshot> {
-  await ensurePrivateDirectory(sessionDirectory);
   const bytes = await readFile(sourcePath);
+  if (bytes.byteLength === 0) {
+    throw new Error("The PDF is empty. Wait for the rebuild to finish, then reopen it in Placekeeper.");
+  }
+  await ensurePrivateDirectory(sessionDirectory);
   const digest = createHash("sha256").update(bytes).digest("hex");
   const finalPath = join(sessionDirectory, "source.pdf");
   const temporaryPath = join(sessionDirectory, `.source-${randomUUID()}.tmp`);

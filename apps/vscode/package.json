@@ -46,7 +46,8 @@
       },
       {
         "command": "placekeeper.forwardSyncTex",
-        "title": "Placekeeper: Forward SyncTeX"
+        "title": "Placekeeper: Forward SyncTeX",
+        "icon": "$(arrow-right)"
       },
       {
         "command": "placekeeper.goToSource",
@@ -131,7 +132,8 @@
     }
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json --noEmit && esbuild src/extension.ts --bundle --platform=node --format=cjs --target=node20 --external:vscode --outfile=dist/extension.cjs && node ./copy-web-assets.mjs"
+    "build": "pnpm --dir ../.. build:web && pnpm build:bundle",
+    "build:bundle": "tsc -p tsconfig.json --noEmit && esbuild src/extension.ts --bundle --platform=node --format=cjs --target=node20 --external:vscode --outfile=dist/extension.cjs && node ./copy-web-assets.mjs"
   },
   "dependencies": {
     "ws": "8.18.3"

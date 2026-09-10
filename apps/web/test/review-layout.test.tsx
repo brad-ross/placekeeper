@@ -235,15 +235,34 @@ describe('review shell layout and accessibility contract', () => {
     expect(html.indexOf('data-review-toast-stack')).toBeLessThan(html.indexOf('Document canvas'));
     expect(html).not.toContain('review-shell--generation-status');
     expect(foundationStyles).toMatch(
-      /\.review-toast-stack\s*\{[^}]*position:\s*absolute;[^}]*top:\s*\.5rem;[^}]*left:\s*\.5rem;/u,
+      /\.review-toast-stack\s*\{[^}]*position:\s*absolute;[^}]*top:\s*\.75rem;[^}]*left:\s*\.75rem;/u,
     );
     expect(foundationStyles).toMatch(
-      /\.pdf-workspace__status\s*\{[^}]*left:\s*\.5rem;/u,
+      /\.pdf-workspace__status\s*\{[^}]*left:\s*\.75rem;/u,
     );
     expect(foundationStyles).not.toMatch(/\.pdf-workspace__status\s*\{[^}]*right:/u);
     expect(responsiveStyles).toMatch(
-      /\.review-toast\[data-generation-status="reconciling"\] \.review-icon\s*\{[^}]*animation:\s*none;/u,
+      /\.review-toast\[data-generation-busy="true"\] \.review-icon\s*\{[^}]*animation:\s*none;/u,
     );
+  });
+
+  it.each([
+    { refresh: 'idle', restore: 'idle', stale: true, icon: 'info', busy: false },
+    { refresh: 'reconciling', restore: 'idle', stale: true, icon: 'loader-circle', busy: true },
+    { refresh: 'idle', restore: 'restoring', stale: false, icon: 'loader-circle', busy: true },
+    { refresh: 'idle', restore: 'fallback', stale: false, icon: 'circle-alert', busy: false },
+    { refresh: 'failed', restore: 'idle', stale: true, icon: 'circle-alert', busy: false },
+  ] as const)('uses a truthful generated status icon for $refresh / $restore', ({ refresh, restore, stale, icon, busy }) => {
+    const currentState = { ...generatedState, workflow: { ...generatedState.workflow,
+      freshness: stale ? 'possibly-stale' as const : 'current' as const } };
+    const html = renderToStaticMarkup(<ReviewShell state={currentState}
+      generationRefreshStatus={refresh} locationRestoreStatus={restore}
+      save={{}} selection={{ selectionUpdate: { kind: 'cleared', generation: 0 } }}
+      authoring={{ onCommand: async () => currentState }} viewer={{}} workspace={{}} />);
+    expect(html).toContain(`data-generation-busy="${busy}"`);
+    const notice = html.slice(html.indexOf('data-generation-status='), html.indexOf('</p>', html.indexOf('data-generation-status=')));
+    expect(notice).toContain(`lucide-${icon}`);
+    if (refresh === 'idle' && stale) expect(notice).toContain('Source changed; waiting for an updated PDF.');
   });
 
   it('persistently exposes the focused PDF copy owner when selections compete', () => {
