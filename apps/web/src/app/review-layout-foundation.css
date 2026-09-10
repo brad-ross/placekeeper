@@ -773,7 +773,7 @@
   pointer-events: none;
 }
 
-.review-toast[data-generation-status="reconciling"] .review-icon {
+.review-toast[data-generation-busy="true"] .review-icon {
   animation: review-loader-spin 900ms linear infinite;
 }
 

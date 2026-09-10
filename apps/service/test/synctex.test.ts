@@ -250,7 +250,7 @@ describe("generation-bound SyncTeX navigation", () => {
     });
   });
 
-  it("keeps forward targets on different PDF pages ambiguous", async () => {
+  it("selects the last forward target across Beamer overlay pages", async () => {
     const value = await generatedOutputFixture();
     const result = await value.broker.forwardSyncTex({
       sessionId: value.launch.sessionId,
@@ -273,10 +273,27 @@ describe("generation-bound SyncTeX navigation", () => {
       }),
     });
     expect(result).toMatchObject({
-      status: "ambiguous",
+      status: "ok",
       operationToken: "forward-conflicting-pages",
-      reason: "multiple-forward-pages",
+      target: { pageIndex: 2, x: 72, y: 144 },
     });
+  });
+
+  it("accepts a large bounded forward result from a Beamer frame", async () => {
+    const value = await generatedOutputFixture();
+    const result = await value.broker.forwardSyncTex({
+      sessionId: value.launch.sessionId,
+      operationToken: "forward-many-rectangles",
+      sourcePath: "paper.tex",
+      line: 3,
+      run: async (request) => {
+        const stdout = `Output:${request.argv.at(-1)}\nPage:3\nx:72\ny:144\n`.repeat(1600);
+        expect(Buffer.byteLength(stdout)).toBeGreaterThan(64 * 1024);
+        return { stdout, stderr: "", exitCode: 0,
+          oversized: Buffer.byteLength(stdout) > request.maxOutputBytes };
+      },
+    });
+    expect(result).toMatchObject({ status: "ok", target: { pageIndex: 2, x: 72, y: 144 } });
   });
 
   it("requires one unique contained reverse target", async () => {
@@ -299,7 +316,7 @@ describe("generation-bound SyncTeX navigation", () => {
   it.each([
     ["unavailable-tool", { stdout: "", stderr: "", exitCode: null, unavailableTool: true }],
     ["timeout", { stdout: "", stderr: "", exitCode: null, timedOut: true }],
-    ["oversized", { stdout: "x".repeat(70_000), stderr: "", exitCode: 0 }],
+    ["oversized", { stdout: "x".repeat(1024 * 1024 + 1), stderr: "", exitCode: 0 }],
     ["malformed", { stdout: "not synctex", stderr: "", exitCode: 0 }],
   ] as const)("reports %s without collapsing failure states", async (status, runResult) => {
     const value = await generatedOutputFixture();

@@ -545,7 +545,17 @@ test.describe('canonical review workflow', () => {
   });
 
   test('presents reconciling and failed refresh export states from the document title', async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: 'no-preference' });
+    await page.goto('/test/acceptance/review-harness/index.html?reconciliation=stale');
+    const status = page.locator('[data-generation-status]');
+    await expect(status).toContainText('Source changed; waiting for an updated PDF.');
+    await expect(status.locator('.lucide-info')).toBeVisible();
+    await expect(status.locator('.lucide-loader-circle')).toHaveCount(0);
     await page.goto('/test/acceptance/review-harness/index.html?reconciliation=ready&refresh=reconciling');
+    const spinner = status.locator('.lucide-loader-circle');
+    await expect(spinner).toHaveCSS('animation-name', 'review-loader-spin');
+    const initialTransform = await spinner.evaluate((element) => getComputedStyle(element).transform);
+    await expect.poll(() => spinner.evaluate((element) => getComputedStyle(element).transform)).not.toBe(initialTransform);
     await page.getByRole('button', { name: /Open document actions/u }).click();
     let menu = page.getByRole('menu', { name: /Actions for/u });
     await expect(menu).toHaveAttribute('data-export-eligibility', 'blocked');
