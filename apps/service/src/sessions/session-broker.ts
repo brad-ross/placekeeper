@@ -10,12 +10,11 @@ import {
 } from "../../../../packages/core/src/placekeeper-link.js";
 import { assertPortableAnnotationWritable, createImportedReviewState } from "../../../../packages/core/src/portable-annotation.js";
 import type { ReviewCommand, ReviewItem, ReviewState } from "../../../../packages/core/src/review-model.js";
-import { createReviewState, startReviewGeneration } from "../../../../packages/core/src/review-model.js";
+import { createReviewState } from "../../../../packages/core/src/review-model.js";
 import { reduceReview } from "../../../../packages/core/src/review-reducer.js";
 import { digestSecretHex, SessionCredentialStore } from "../../../../packages/core/src/session-security.js";
 import {
   assessPdfRewriteEligibility,
-  migrateLegacyReviewStateGeometry,
   readEditableReviewItems,
 } from "../../../../packages/pdf-backends/src/embedpdf-adapter.js";
 import { type BrowserSourceStore, type ChromeBrowserSourceOpenRequest } from "../browser/browser-source-store.js";
@@ -25,7 +24,7 @@ import { TaskBindingRegistry } from "../context/task-binding-registry.js";
 import type { FrozenReviewDelivery } from "../export/export-coordinator.js";
 import { FileCapabilityRegistry, hashFile } from "../files/file-capabilities.js";
 import { inspectPdfPageTexts } from "../pdf/inspect-pdf.js";
-import { reconcilePdfAnchorState, type PdfAnchorPage } from "../reconciliation/pdf-anchor-reconciler.js";
+import { type PdfAnchorPage } from "../reconciliation/pdf-anchor-reconciler.js";
 import {
   DraftSnapshotStore,
   reviewStateDigest,
@@ -41,7 +40,6 @@ import {
 import { assessGenerationRetention } from "../recovery/retention.js";
 import {
   commitGenerationSnapshot,
-  createSourceSnapshot,
   ensurePrivateDirectory,
   snapshotGenerationSyncTexSidecar,
   stageGenerationSnapshot,
@@ -87,6 +85,9 @@ import type {
   BrowserViewRecord,
   ReconnectBindingMetadata,
 } from "./session-internal-types.js";
+import { prepareApprovedOpen } from "./approved-open-preparation.js";
+import { prepareRecoveredReview } from "./recovered-review-preparation.js";
+import { inspectReplacementCandidate, prepareReplacementReview } from "./document-replacement-preparation.js";
 import { PresentationRecords } from "./presentation-records.js";
 
 export * from "./session-contracts.js";
@@ -659,49 +660,10 @@ export class SessionBroker {
 
     if (matchingDraft !== undefined && request.recoveryDecision === "resume") {
       const recoveredSnapshotPath = this.#draftSnapshotPath(matchingDraft);
-      const sourceSnapshotBytes = new Uint8Array(await readFile(recoveredSnapshotPath));
-      if (
-        (await hashFile(recoveredSnapshotPath)) !==
-          matchingDraft.state.source.digest ||
-        sourceSnapshotBytes.byteLength !== matchingDraft.state.source.byteLength
-      ) {
-        throw new Error("Recovery source snapshot failed integrity validation");
-      }
-      const geometryMigrated = matchingDraft.state.schemaVersion === 1;
-      const migratedState = await migrateLegacyReviewStateGeometry(
-        sourceSnapshotBytes,
-        matchingDraft.state,
-      );
-      // Older recovery records never imported standard marks. Add them once to
-      // the current state and every undo snapshot, so undo cannot delete them.
-      let nativeMigration: readonly ReviewItem[] = [];
-      let nativeImportSucceeded = migratedState.nativeAnnotationImportDigest === migratedState.source.digest;
-      if (!nativeImportSucceeded) {
-        try {
-          nativeMigration = (await this.#portableReader(sourceSnapshotBytes))
-            .filter((item) => item.kind === 'pdfAnnotation' && !migratedState.items.some(({ id }) => id === item.id));
-          nativeImportSucceeded = true;
-        } catch { /* Preserve all source annotations until an import can succeed. */ }
-      }
-      const mergeNative = (items: readonly ReviewItem[]) => [...items,
-        ...nativeMigration.filter((item) => !items.some(({ id }) => id === item.id))];
-      const resumedState: ReviewState = {
-        ...migratedState,
-        ...(nativeImportSucceeded ? { nativeAnnotationImportDigest: migratedState.source.digest } : {}),
-        items: mergeNative(migratedState.items),
-        history: migratedState.history.map((entry) => ({ ...entry,
-          beforeItems: mergeNative(entry.beforeItems), afterItems: mergeNative(entry.afterItems),
-        })),
-        source: { ...migratedState.source, fileId: approvedFile.id },
-        ...(approvedRoot === undefined ? {} : { sourceRootId: approvedRoot.id }),
-      };
-      if (
-        request.workflowMode !== undefined &&
-        resumedState.workflow.mode !== request.workflowMode
-      ) {
-        throw new Error("A review session workflow mode cannot be downgraded or changed");
-      }
-      if (approvedRoot === undefined) delete (resumedState as { sourceRootId?: string }).sourceRootId;
+      const { resumedState, geometryMigrated, nativeMigration } = await prepareRecoveredReview({
+        matchingDraft, recoveredSnapshotPath, approvedFile, approvedRoot, request,
+        portableReader: this.#portableReader,
+      });
       let destination = matchingDraft.destination;
       let sync = matchingDraft.sync.phase === "saving"
         ? { ...matchingDraft.sync, phase: "not-saved" as const, failure: "write-failed" as const }
@@ -835,77 +797,11 @@ export class SessionBroker {
 
     const sessionId = randomUUID();
     const sessionDirectory = join(this.recoveryRoot, sessionId);
-    const sourceSnapshot = await createSourceSnapshot(
-      approvedFile.canonicalPath,
-      sessionDirectory,
-    );
-    const source = {
-      fileId: approvedFile.id,
-      digest: sourceSnapshot.digest,
-      byteLength: sourceSnapshot.byteLength,
-    };
-    const initialOutputInfo = await stat(approvedFile.canonicalPath);
-    let importedItems: readonly ReviewItem[] = [];
-    let nativeAnnotationsImported = false;
-    try {
-      importedItems = await this.#portableReader(
-        new Uint8Array(await readFile(sourceSnapshot.path)),
-      );
-      nativeAnnotationsImported = true;
-    } catch (error) {
-      if ((error as { readonly code?: unknown }).code === "invalid-portable-annotation") {
-        throw error;
-      }
-      importedItems = [];
-    }
-    const initialOutputIdentity = {
-      canonicalPath: approvedFile.canonicalPath,
-      device: initialOutputInfo.dev,
-      inode: initialOutputInfo.ino,
-      byteLength: initialOutputInfo.size,
-      modifiedAtMs: initialOutputInfo.mtimeMs,
-    };
-    const initialSyncTex = request.workflowMode === "generated-output"
-      ? await snapshotGenerationSyncTexSidecar({
-          outputPath: approvedFile.canonicalPath,
-          privatePdfPath: sourceSnapshot.path,
-          outputIdentity: initialOutputIdentity,
-          pdfDigest: sourceSnapshot.digest,
-        }).catch(() => undefined)
-      : undefined;
-    const initialState = importedItems.length === 0
-      ? createReviewState({
-          sessionId,
-          source,
-          ...(approvedRoot === undefined ? {} : { sourceRootId: approvedRoot.id }),
-          ...(request.workflowMode === undefined ? {} : { workflowMode: request.workflowMode }),
-        })
-      : createImportedReviewState({
-          sessionId,
-          source,
-          ...(approvedRoot === undefined ? {} : { sourceRootId: approvedRoot.id }),
-          items: importedItems,
-          ...(request.workflowMode === undefined ? {} : { workflowMode: request.workflowMode }),
-        });
-    const state = { ...initialState, ...(nativeAnnotationsImported ? { nativeAnnotationImportDigest: source.digest } : {}) };
-    const digest = reviewStateDigest(state);
-    const destination: DurableSaveDestination = state.workflow.mode === "generated-output" || importedItems.length === 0 || !rewriteEligibility.eligible
-      ? { phase: "none", generation: 0 }
-      : {
-          phase: "active",
-          generation: 1,
-          kind: "original",
-          targetPath: approvedFile.canonicalPath,
-          capabilityId: approvedFile.id,
-          fingerprint: sourceSnapshot.digest,
-        };
-    const sync: DurableSaveSync = {
-      phase: "clean",
-      desiredRevision: state.revision,
-      desiredDigest: digest,
-      savedRevision: state.revision,
-      savedDigest: digest,
-    };
+    const { sourceSnapshot, initialOutputIdentity, initialSyncTex, state, destination, sync } =
+      await prepareApprovedOpen({
+        request, approvedFile, approvedRoot, sessionId, sessionDirectory,
+        rewriteEligibility, portableReader: this.#portableReader,
+      });
     const session: ActiveSession = {
       id: sessionId,
       canonicalSourcePath: approvedFile.canonicalPath,
@@ -1873,20 +1769,8 @@ export class SessionBroker {
     }
 
     let inspected: { readonly pageCount: number; readonly pages: readonly PdfAnchorPage[] };
-    let candidateBytes: Buffer;
     try {
-      candidateBytes = await readFile(staged.path);
-      if (
-        candidateBytes.byteLength !== staged.byteLength ||
-        createHash("sha256").update(candidateBytes).digest("hex") !== staged.digest
-      ) throw new Error("The private generation snapshot failed digest validation");
-      inspected = await this.#inspectGeneration(candidateBytes);
-      if (
-        !Number.isSafeInteger(inspected.pageCount) || inspected.pageCount <= 0 ||
-        inspected.pages.some(({ pageIndex }) =>
-          !Number.isSafeInteger(pageIndex) || pageIndex < 0 || pageIndex >= inspected.pageCount
-        )
-      ) throw new Error("The private generation snapshot failed structural PDF validation");
+      inspected = await inspectReplacementCandidate(staged, this.#inspectGeneration);
     } catch (error) {
       return markInvalid(error instanceof Error ? error.message : "candidate-validation-failed");
     }
@@ -1954,22 +1838,9 @@ export class SessionBroker {
           };
         }
 
-        let nextState = startReviewGeneration(session.state, {
-          documentGeneration: successorGeneration,
-        });
-        nextState = reconcilePdfAnchorState(nextState, {
-          generation: successorGeneration,
-          pages: inspected.pages,
-        });
-        nextState = {
-          ...nextState,
-          source: {
-            fileId: session.fileId,
-            digest: staged!.digest,
-            byteLength: staged!.byteLength,
-          },
-          workflow: { ...nextState.workflow, freshness: "current" },
-        };
+        const nextState = prepareReplacementReview(
+          session.state, successorGeneration, session.fileId, staged!, inspected.pages,
+        );
         const committedAt = this.#now().toISOString();
         const taskSessionId = this.taskBindings.taskForGeneration(
           session.id,
