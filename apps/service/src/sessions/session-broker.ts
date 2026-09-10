@@ -1,17 +1,8 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { open, readdir, readFile, realpath, rm, stat } from "node:fs/promises";
 import { basename, isAbsolute, join, relative } from "node:path";
-import {
-  documentOrderedItems,
-  projectReviewItems,
-} from "../../../../packages/core/src/annotation-projection.js";
-import type {
-  ReviewCommand,
-  ReviewItem,
-  ReviewState,
-  ReviewWorkflowMode,
-} from "../../../../packages/core/src/review-model.js";
-import { startReviewGeneration } from "../../../../packages/core/src/review-model.js";
+import { documentOrderedItems, projectReviewItems } from "../../../../packages/core/src/annotation-projection.js";
+import { createReviewStateSummary, reviewSemanticDigest } from "../../../../packages/core/src/live-context.js";
 import type { PdfRewriteEligibility } from "../../../../packages/core/src/pdf-writer.js";
 import {
   encodePlacekeeperLinkFragment,
@@ -19,38 +10,37 @@ import {
   placekeeperLinkBase,
   type PlacekeeperLinkLocation,
 } from "../../../../packages/core/src/placekeeper-link.js";
-import { createReviewState } from "../../../../packages/core/src/review-model.js";
-import {
-  assertPortableAnnotationWritable,
-  createImportedReviewState,
-} from "../../../../packages/core/src/portable-annotation.js";
+import { assertPortableAnnotationWritable, createImportedReviewState } from "../../../../packages/core/src/portable-annotation.js";
+import type { ReviewCommand, ReviewItem, ReviewState } from "../../../../packages/core/src/review-model.js";
+import { createReviewState, startReviewGeneration } from "../../../../packages/core/src/review-model.js";
 import { reduceReview } from "../../../../packages/core/src/review-reducer.js";
+import { digestSecretHex, SessionCredentialStore } from "../../../../packages/core/src/session-security.js";
 import {
-  createReviewStateSummary,
-  reviewSemanticDigest,
-} from "../../../../packages/core/src/live-context.js";
-import {
-  digestSecretHex,
-  SessionCredentialStore,
-} from "../../../../packages/core/src/session-security.js";
-import {
-  FileCapabilityRegistry,
-  hashFile,
-} from "../files/file-capabilities.js";
+  assessPdfRewriteEligibility,
+  migrateLegacyReviewStateGeometry,
+  readEditableReviewItems,
+} from "../../../../packages/pdf-backends/src/embedpdf-adapter.js";
+import { type BrowserSourceStore, type ChromeBrowserSourceOpenRequest } from "../browser/browser-source-store.js";
+import { inspectPdfInSubprocess, type ChromePdfInspection } from "../browser/chrome-pdf-validator.js";
+import { RestartReconnectStore } from "../context/restart-reconnect-store.js";
+import { TaskBindingRegistry } from "../context/task-binding-registry.js";
+import type { FrozenReviewDelivery } from "../export/export-coordinator.js";
+import { FileCapabilityRegistry, hashFile } from "../files/file-capabilities.js";
+import { inspectPdfPageTexts } from "../pdf/inspect-pdf.js";
+import { reconcilePdfAnchorState, type PdfAnchorPage } from "../reconciliation/pdf-anchor-reconciler.js";
 import {
   DraftSnapshotStore,
   reviewStateDigest,
+  type DurableGenerationRecordV1,
   type DurableSaveDestination,
   type DurableSaveSync,
   type RecoverableDraftV3,
   type RecoverableSourceOwnership,
   type SaveFailureReason,
-  type SourceDisposition,
   type SnapshotHooks,
-  type DurableGenerationRecordV1,
-  type DurableInterruptedSourceChangeV1,
-  type DurableSourceWorkInterruptionV1,
+  type SourceDisposition,
 } from "../recovery/draft-snapshot.js";
+import { assessGenerationRetention } from "../recovery/retention.js";
 import {
   commitGenerationSnapshot,
   createSourceSnapshot,
@@ -61,306 +51,48 @@ import {
   type StagedGenerationSnapshot,
   type SyncTexSidecarFingerprint,
 } from "../recovery/source-snapshot.js";
-import type { FrozenReviewDelivery } from "../export/export-coordinator.js";
-import {
-  assessPdfRewriteEligibility,
-  migrateLegacyReviewStateGeometry,
-  readEditableReviewItems,
-} from "../../../../packages/pdf-backends/src/embedpdf-adapter.js";
-import { SessionControlRegistry } from "./control-socket.js";
-import { TaskBindingRegistry } from "../context/task-binding-registry.js";
-import {
-  RestartReconnectStore,
-  type MatchedRestartReconnectTicket,
-} from "../context/restart-reconnect-store.js";
-import { inspectPdfPageTexts } from "../pdf/inspect-pdf.js";
-import {
-  reconcilePdfAnchorState,
-  type PdfAnchorPage,
-} from "../reconciliation/pdf-anchor-reconciler.js";
-import { assessGenerationRetention } from "../recovery/retention.js";
 import {
   queryForwardSyncTex,
   queryReverseSyncTex,
-  type ForwardSyncTexResult,
   type GenerationSyncTexBinding,
-  type ReverseSyncTexResult,
-  type SyncTexNavigationStatus,
   type SyncTexRunner,
 } from "../synctex/query.js";
+import { SessionControlRegistry } from "./control-socket.js";
+import { RECOVERY_ID, RecoveryDecisions } from "./recovery-decisions.js";
 import {
-  type BrowserSourceStore,
-  type ChromeBrowserSourceOpenRequest,
-} from "../browser/browser-source-store.js";
-import {
-  inspectPdfInSubprocess,
-  type ChromePdfInspection,
-} from "../browser/chrome-pdf-validator.js";
+  RECOVERY_DECISIONS,
+  ReviewGenerationConflictError,
+  type AtomicSessionProjection,
+  type BrokerForwardSyncTexResult,
+  type BrokerReverseSyncTexResult,
+  type DocumentGenerationEvent,
+  type HttpBootstrapExchange,
+  type LaunchSurface,
+  type LiveDocumentReplacementResult,
+  type OpenReviewRequest,
+  type OpenReviewResult,
+  type ResumedBrowserView,
+  type ReviewPresentationSurface,
+  type SessionBrokerOptions,
+  type SessionLaunch,
+  type SourceWorkInterruptionCollector,
+  type SyncTexUnavailableResult,
+  type VerifiedSourceSnapshot,
+} from "./session-contracts.js";
+import type {
+  ActiveSession,
+  BrowserLaunchScope,
+  BrowserViewRecord,
+  PendingRestartReconnect,
+  ReconnectBindingMetadata,
+} from "./session-internal-types.js";
 
-export const RECOVERY_DECISIONS = ["resume", "discard", "fork"] as const;
-export type RecoveryDecision = typeof RECOVERY_DECISIONS[number];
-export interface RecoveryOfferIdentity {
-  readonly id: string;
-  readonly expiresAt: string;
-}
-
-export class RecoveryOfferUnavailableError extends Error {
-  constructor(message = "Recovery choices are no longer current") {
-    super(message);
-    this.name = "RecoveryOfferUnavailableError";
-  }
-}
-
-export class ReviewGenerationConflictError extends Error {
-  constructor(
-    readonly expectedGeneration: number,
-    readonly currentGeneration: number,
-    readonly currentRevision: number,
-  ) {
-    super(`Review generation ${expectedGeneration} is stale; current generation is ${currentGeneration}`);
-    this.name = "ReviewGenerationConflictError";
-  }
-}
-export const LAUNCH_SURFACES = ["browser", "finder", "codex", "vscode", "chrome"] as const;
-export type LaunchSurface = typeof LAUNCH_SURFACES[number];
-export const REVIEW_PRESENTATION_SURFACES = [...LAUNCH_SURFACES, "macos"] as const;
-export type ReviewPresentationSurface = typeof REVIEW_PRESENTATION_SURFACES[number];
-
-export function isRecoveryDecision(value: unknown): value is RecoveryDecision {
-  return typeof value === "string" && RECOVERY_DECISIONS.includes(value as RecoveryDecision);
-}
-
-export function isLaunchSurface(value: unknown): value is LaunchSurface {
-  return typeof value === "string" && LAUNCH_SURFACES.includes(value as LaunchSurface);
-}
-
-export interface OpenReviewRequest {
-  readonly pdfPath: string;
-  readonly sourceRootPath?: string;
-  readonly recoveryDecision?: RecoveryDecision;
-  readonly recoveryOffer?: RecoveryOfferIdentity;
-  readonly recoveryOperationId?: string;
-  readonly surface?: ReviewPresentationSurface;
-  readonly requestedLocation?: PlacekeeperLinkLocation;
-  readonly workflowMode?: ReviewWorkflowMode;
-}
-
-export interface SessionLaunch {
-  readonly sessionId: string;
-  readonly fileId: string;
-  readonly rootId?: string;
-  readonly launchPath: string;
-  readonly fragment: string;
-  readonly surface: ReviewPresentationSurface;
-  readonly documentGeneration: number;
-  readonly bindProof?: string;
-}
-
-export type OpenReviewResult =
-  | { readonly kind: "opened" | "focused"; readonly launch: SessionLaunch }
-  | {
-      readonly kind: "recovery-offered";
-      readonly recoverySessionId: string;
-      readonly choices: readonly RecoveryDecision[];
-      readonly recoveryOffer: RecoveryOfferIdentity;
-    };
-
-interface RecoveryOfferRecord {
-  readonly expiresAt: string;
-  readonly recoverySessionId: string;
-  readonly recoveredSourceDigest: string;
-  readonly canonicalSourcePath: string;
-  readonly requestedSourceDigest: string;
-  readonly expiresAtMs: number;
-  claimedOperationId?: string;
-  claimedDecision?: RecoveryDecision;
-}
-
-interface RecoveryOperationRecord {
-  readonly fingerprint: string;
-  readonly result: Promise<OpenReviewResult>;
-  readonly offerId: string;
-  readonly recoverySessionId?: string;
-  readonly expiresAtMs: number;
-}
-
-interface ActiveSession {
-  readonly id: string;
-  canonicalSourcePath: string;
-  sourceSnapshotPath: string;
-  readonly store: DraftSnapshotStore;
-  readonly fileId: string;
-  rootId?: string;
-  state: ReviewState;
-  lastExportAt?: string;
-  currentOriginalDigest: string;
-  acceptedOriginalDigests: string[];
-  ending: boolean;
-  writeTail: Promise<void>;
-  destination: DurableSaveDestination;
-  sync: DurableSaveSync;
-  rewriteEligibility: PdfRewriteEligibility;
-  generationLineage: DurableGenerationRecordV1[];
-  latestObservationEpoch: number;
-  sourceWorkInterruptions: DurableSourceWorkInterruptionV1[];
-  syncTexOperationToken?: string;
-  readonly documentGeneration: number;
-  sourceOwnership: RecoverableSourceOwnership;
-  chromeProtected: boolean;
-}
-
-interface BrowserLaunchScope {
-  readonly sessionId: string;
-  documentGeneration: number;
-  readonly surface: ReviewPresentationSurface;
-  readonly browserCapabilityHash: string;
-  readonly requestedLocation?: PlacekeeperLinkLocation;
-  readonly expiresAtMs: number;
-  readonly reconnectBrowserToken?: string;
-}
-
-interface BrowserViewRecord {
-  readonly id: string;
-  readonly cookieHash: string;
-  readonly sessionId: string;
-  documentGeneration: number;
-  readonly credential: string;
-  readonly pathname: string;
-}
-
-export interface HttpBootstrapExchange {
-  readonly credential: string;
-  readonly view?: {
-    readonly id: string;
-    readonly cookie: string;
-    readonly pathname: string;
-    readonly locationFragment: string;
-    readonly reconnectCookie?: string;
-  };
-}
-
-interface ReconnectBindingMetadata {
-  readonly taskSessionId: string;
-  readonly browserToken: string;
-  readonly reviewSessionId: string;
-  readonly documentGeneration: number;
-  readonly browserCapabilityHash: string;
-  readonly canonicalSourcePath: string;
-  readonly sourceDigest: string;
-}
-
-interface PendingRestartReconnect {
-  readonly ticket: MatchedRestartReconnectTicket;
-  readonly browserToken: string;
-  readonly reviewSessionId: string;
-  readonly documentGeneration: number;
-  readonly browserCapabilityHash: string;
-  readonly canonicalSourcePath: string;
-  readonly sourceDigest: string;
-}
-
-export interface ResumedBrowserView {
-  readonly sessionId: string;
-  readonly credential: string;
-}
+export * from "./session-contracts.js";
 
 const BOOTSTRAP_TTL_MS = 60_000;
-const RECOVERY_OFFER_TTL_MS = 5 * 60_000;
-const RECOVERY_ID = /^[A-Za-z0-9_-]{16,128}$/u;
 // A prompt and the replacement browser bootstrap commonly arrive together;
 // keep the control request bounded while allowing their two-sided handshake.
 const RESTART_RECONNECT_WAIT_MS = 4_500;
-
-export interface SessionBrokerOptions {
-  readonly recoveryRoot: string;
-  readonly capabilities?: FileCapabilityRegistry;
-  readonly credentials?: SessionCredentialStore;
-  readonly controls?: SessionControlRegistry;
-  readonly now?: () => Date;
-  readonly snapshotHooks?: SnapshotHooks;
-  readonly portableReader?: (bytes: Uint8Array) => Promise<readonly ReviewItem[]>;
-  readonly rewriteAssessor?: (bytes: Uint8Array) => Promise<PdfRewriteEligibility>;
-  readonly browserSourceInspector?: (
-    path: string,
-    signal?: AbortSignal,
-  ) => Promise<ChromePdfInspection>;
-  readonly taskBindings?: TaskBindingRegistry;
-  readonly restartReconnectStore?: RestartReconnectStore;
-  readonly maxGenerationBytes?: number;
-  readonly maxGenerationCount?: number;
-  readonly inspectGeneration?: (
-    bytes: Uint8Array,
-  ) => Promise<{ readonly pageCount: number; readonly pages: readonly PdfAnchorPage[] }>;
-}
-
-export type LiveDocumentReplacementResult =
-  | {
-      readonly status: "committed";
-      readonly sessionId: string;
-      readonly previousGeneration: number;
-      readonly documentGeneration: number;
-      readonly digest: string;
-      readonly reviewRevision: number;
-      readonly migratedTaskSessionId?: string;
-    }
-  | {
-      readonly status: "same-digest" | "invalid" | "superseded" | "generation-conflict" |
-        "retention-rejected";
-      readonly sessionId: string;
-      readonly documentGeneration: number;
-      readonly reason: string;
-    };
-
-export interface DocumentGenerationEvent {
-  readonly sessionId: string;
-  readonly previousGeneration: number;
-  readonly documentGeneration: number;
-  readonly reviewRevision: number;
-  readonly migratedTaskSessionId?: string;
-}
-
-export interface SourceWorkInterruptionCollection {
-  readonly taskSessionId: string;
-  readonly previousGeneration: number;
-}
-
-export type SourceWorkInterruptionCollector = (
-  input: SourceWorkInterruptionCollection,
-) => Promise<readonly DurableInterruptedSourceChangeV1[]>;
-
-/**
- * Internal-only material used to build one atomic model-facing observation.
- * Paths and destination capabilities must be consumed inside the service and
- * never copied into a live-context response.
- */
-export interface AtomicSessionProjection {
-  readonly sessionId: string;
-  readonly documentGeneration: number;
-  readonly state: ReviewState;
-  readonly destination: DurableSaveDestination;
-  readonly sync: DurableSaveSync;
-  readonly sourceByteLength: number;
-  readonly sourceSnapshotPath: string;
-  readonly sourcePdfPath: string;
-  readonly sourceRootPath?: string;
-}
-
-export interface VerifiedSourceSnapshot {
-  readonly documentGeneration: number;
-  readonly sourceDigest: string;
-  readonly bytes: Buffer;
-}
-
-export interface SyncTexUnavailableResult {
-  readonly status: Exclude<SyncTexNavigationStatus, "ok">;
-  readonly operationToken: string;
-  readonly documentGeneration?: number;
-  readonly pdfDigest?: string;
-  readonly reason: string;
-}
-
-export type BrokerForwardSyncTexResult = ForwardSyncTexResult | SyncTexUnavailableResult;
-export type BrokerReverseSyncTexResult = ReverseSyncTexResult | SyncTexUnavailableResult;
 
 function latestSyncTexFingerprintBefore(
   lineage: readonly DurableGenerationRecordV1[],
@@ -418,8 +150,7 @@ export class SessionBroker {
   readonly #bootstrapScopes = new Map<string, BrowserLaunchScope>();
   readonly #credentialScopes = new Map<string, BrowserLaunchScope>();
   readonly #viewsById = new Map<string, BrowserViewRecord>();
-  readonly #recoveryOffers = new Map<string, RecoveryOfferRecord>();
-  readonly #recoveryOperations = new Map<string, RecoveryOperationRecord>();
+  readonly #recovery: RecoveryDecisions;
   readonly #reconnectByBindProofHash = new Map<
     string,
     Omit<ReconnectBindingMetadata, "taskSessionId"> & { readonly expiresAtMs: number }
@@ -448,6 +179,7 @@ export class SessionBroker {
         ...(options.now === undefined ? {} : { now: options.now }),
       });
     this.#now = options.now ?? (() => new Date());
+    this.#recovery = new RecoveryDecisions(this.#now);
     this.#snapshotHooks = options.snapshotHooks ?? {};
     this.#portableReader = options.portableReader ?? readEditableReviewItems;
     this.#rewriteAssessor = options.rewriteAssessor ??
@@ -644,7 +376,7 @@ export class SessionBroker {
 
   async openReview(request: OpenReviewRequest): Promise<OpenReviewResult> {
     await this.initialize();
-    this.#sweepRecoveryRecords();
+    this.#recovery.sweep();
     const approvedFile = await this.capabilities.approvePdf(request.pdfPath);
     const sourceDigest = await hashFile(approvedFile.canonicalPath);
     if (request.recoveryDecision === undefined) {
@@ -678,7 +410,7 @@ export class SessionBroker {
       approvedFile.canonicalPath,
       sourceDigest,
     ].join("\0");
-    const existing = this.#recoveryOperations.get(request.recoveryOperationId!);
+    const existing = this.#recovery.operation(request.recoveryOperationId!);
     if (existing !== undefined) {
       this.capabilities.revokeFile(approvedFile.id);
       if (existing.fingerprint !== fingerprint) {
@@ -686,24 +418,14 @@ export class SessionBroker {
       }
       return existing.result;
     }
-    const offered = this.#recoveryOffers.get(request.recoveryOffer!.id);
-    const result = this.#openApprovedReview(request, approvedFile, sourceDigest);
-    this.#recoveryOperations.set(request.recoveryOperationId!, {
-      fingerprint,
-      result,
-      offerId: request.recoveryOffer!.id,
-      ...(offered === undefined ? {} : { recoverySessionId: offered.recoverySessionId }),
-      expiresAtMs: offered?.expiresAtMs ?? this.#now().getTime() + RECOVERY_OFFER_TTL_MS,
-    });
+    const result = this.#recovery.startOperation(
+      request.recoveryOperationId!, request.recoveryOffer!.id, fingerprint,
+      () => this.#openApprovedReview(request, approvedFile, sourceDigest),
+    );
     try {
       return await result;
     } catch (error) {
-      this.#recoveryOperations.delete(request.recoveryOperationId!);
-      const offer = this.#recoveryOffers.get(request.recoveryOffer!.id);
-      if (offer?.claimedOperationId === request.recoveryOperationId) {
-        delete offer.claimedOperationId;
-        delete offer.claimedDecision;
-      }
+      this.#recovery.failOperation(request.recoveryOperationId!, request.recoveryOffer!.id);
       throw error;
     }
   }
@@ -915,29 +637,12 @@ export class SessionBroker {
 
     if (matchingDraft !== undefined && request.recoveryDecision === undefined) {
       this.capabilities.revokeFile(approvedFile.id);
-      const currentOffer = [...this.#recoveryOffers.entries()].find(([, offer]) =>
-        offer.expiresAtMs > this.#now().getTime() &&
-        offer.recoverySessionId === matchingDraft.state.sessionId &&
-        offer.recoveredSourceDigest === matchingDraft.state.source.digest &&
-        offer.canonicalSourcePath === approvedFile.canonicalPath &&
-        offer.requestedSourceDigest === sourceDigest
-      );
-      const recoveryOffer = currentOffer === undefined
-        ? {
-            id: randomBytes(24).toString("base64url"),
-            expiresAt: new Date(this.#now().getTime() + RECOVERY_OFFER_TTL_MS).toISOString(),
-          } satisfies RecoveryOfferIdentity
-        : { id: currentOffer[0], expiresAt: currentOffer[1].expiresAt };
-      if (currentOffer === undefined) {
-        this.#recoveryOffers.set(recoveryOffer.id, {
-          expiresAt: recoveryOffer.expiresAt,
-          recoverySessionId: matchingDraft.state.sessionId,
-          recoveredSourceDigest: matchingDraft.state.source.digest,
-          canonicalSourcePath: approvedFile.canonicalPath,
-          requestedSourceDigest: sourceDigest,
-          expiresAtMs: Date.parse(recoveryOffer.expiresAt),
-        });
-      }
+      const recoveryOffer = this.#recovery.offer({
+        recoverySessionId: matchingDraft.state.sessionId,
+        recoveredSourceDigest: matchingDraft.state.source.digest,
+        canonicalSourcePath: approvedFile.canonicalPath,
+        requestedSourceDigest: sourceDigest,
+      });
       return {
         kind: "recovery-offered",
         recoverySessionId: matchingDraft.state.sessionId,
@@ -951,41 +656,17 @@ export class SessionBroker {
         this.capabilities.revokeFile(approvedFile.id);
         throw new Error("Recovery offer requires an exact choice and operation identity");
       }
-      const offer = this.#recoveryOffers.get(request.recoveryOffer.id);
-      if (
-        offer === undefined ||
-        offer.expiresAt !== request.recoveryOffer.expiresAt ||
-        offer.expiresAtMs <= this.#now().getTime() ||
-        matchingDraft === undefined ||
-        offer.recoverySessionId !== matchingDraft.state.sessionId ||
-        offer.recoveredSourceDigest !== matchingDraft.state.source.digest ||
-        offer.canonicalSourcePath !== approvedFile.canonicalPath ||
-        offer.requestedSourceDigest !== sourceDigest
-      ) {
+      try {
+        this.#recovery.claim(request.recoveryOffer, request.recoveryOperationId, request.recoveryDecision,
+          matchingDraft === undefined ? undefined : {
+            recoverySessionId: matchingDraft.state.sessionId,
+            recoveredSourceDigest: matchingDraft.state.source.digest,
+            canonicalSourcePath: approvedFile.canonicalPath,
+            requestedSourceDigest: sourceDigest,
+          });
+      } catch (error) {
         this.capabilities.revokeFile(approvedFile.id);
-        throw new RecoveryOfferUnavailableError(
-          "Recovery offer is stale, expired, or does not match this protected draft",
-        );
-      }
-      if (
-        offer.claimedOperationId !== undefined &&
-        (offer.claimedOperationId !== request.recoveryOperationId ||
-          offer.claimedDecision !== request.recoveryDecision)
-      ) {
-        this.capabilities.revokeFile(approvedFile.id);
-        throw new RecoveryOfferUnavailableError(
-          "Recovery offer was already used by a different operation or choice",
-        );
-      }
-      offer.claimedOperationId = request.recoveryOperationId;
-      offer.claimedDecision = request.recoveryDecision;
-      for (const [siblingId, sibling] of this.#recoveryOffers) {
-        if (
-          siblingId !== request.recoveryOffer.id &&
-          sibling.recoverySessionId === offer.recoverySessionId
-        ) {
-          this.#deleteRecoveryOffer(siblingId);
-        }
+        throw error;
       }
     } else if (matchingDraft !== undefined) {
       this.capabilities.revokeFile(approvedFile.id);
@@ -1784,41 +1465,7 @@ export class SessionBroker {
         this.#pendingRestartReconnects.delete(capabilityHash);
       }
     }
-    this.#sweepRecoveryRecords();
-  }
-
-  #sweepRecoveryRecords(): void {
-    const now = this.#now().getTime();
-    for (const [offerId, offer] of this.#recoveryOffers) {
-      if (offer.expiresAtMs <= now) this.#deleteRecoveryOffer(offerId);
-    }
-    for (const [operationId, operation] of this.#recoveryOperations) {
-      if (operation.expiresAtMs <= now || !this.#recoveryOffers.has(operation.offerId)) {
-        this.#recoveryOperations.delete(operationId);
-      }
-    }
-  }
-
-  #deleteRecoveryOffer(offerId: string): void {
-    this.#recoveryOffers.delete(offerId);
-    for (const [operationId, operation] of this.#recoveryOperations) {
-      if (operation.offerId === offerId) this.#recoveryOperations.delete(operationId);
-    }
-  }
-
-  #clearRecoveryRecordsForSession(sessionId: string): void {
-    const removedOffers = new Set<string>();
-    for (const [offerId, offer] of this.#recoveryOffers) {
-      if (offer.recoverySessionId === sessionId) {
-        removedOffers.add(offerId);
-        this.#recoveryOffers.delete(offerId);
-      }
-    }
-    for (const [operationId, operation] of this.#recoveryOperations) {
-      if (operation.recoverySessionId === sessionId || removedOffers.has(operation.offerId)) {
-        this.#recoveryOperations.delete(operationId);
-      }
-    }
+    this.#recovery.sweep();
   }
 
   state(sessionId: string): ReviewState | undefined {
@@ -3157,8 +2804,7 @@ export class SessionBroker {
       this.#notifyRestartReconnectExchange(capabilityHash);
     }
     this.#pendingRestartReconnects.clear();
-    this.#recoveryOffers.clear();
-    this.#recoveryOperations.clear();
+    this.#recovery.clear();
   }
 
   async drainWrites(): Promise<void> {
@@ -3174,7 +2820,7 @@ export class SessionBroker {
     const session = this.#activeById.get(sessionId);
     if (session === undefined) return;
     session.ending = true;
-    this.#clearRecoveryRecordsForSession(sessionId);
+    this.#recovery.clearForSession(sessionId);
     this.#activeById.delete(sessionId);
     try {
       const chromeSourceKey = this.#chromeSourceKeyBySession.get(sessionId);

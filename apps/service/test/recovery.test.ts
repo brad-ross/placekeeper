@@ -27,7 +27,7 @@ import {
 import { assessGenerationRetention, enforceRetention } from "../src/recovery/retention.js";
 import { trackRecoveryTemporaryPath } from "../src/recovery/temporary-path-registry.js";
 import { createSourceSnapshot } from "../src/recovery/source-snapshot.js";
-import { SessionBroker } from "../src/sessions/session-broker.js";
+import { RecoveryOfferUnavailableError, SessionBroker } from "../src/sessions/session-broker.js";
 import { hashFile } from "../src/files/file-capabilities.js";
 
 const temporaryDirectories: string[] = [];
@@ -630,12 +630,14 @@ describe("broker acknowledgement and restart recovery", () => {
     const offered = await restarted.openReview({ pdfPath: pdf });
     if (offered.kind !== "recovery-offered") throw new Error("Expected recovery offer");
     now = new Date("2026-08-21T18:06:00.000Z");
-    await expect(restarted.openReview({
+    const expiredDecision = restarted.openReview({
       pdfPath: pdf,
       recoveryDecision: "discard",
       recoveryOffer: offered.recoveryOffer,
       recoveryOperationId: randomUUID(),
-    })).rejects.toThrow(/stale|expired/iu);
+    });
+    await expect(expiredDecision).rejects.toThrow(/stale|expired/iu);
+    await expect(expiredDecision).rejects.toBeInstanceOf(RecoveryOfferUnavailableError);
     await expect(new DraftSnapshotStore(
       join(recoveryRoot, opened.launch.sessionId),
     ).recover()).resolves.toMatchObject({ state: { revision: 1 } });
