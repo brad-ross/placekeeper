@@ -1,3 +1,4 @@
+import type { SaveStatus } from "../../../../packages/core/src/save-status.js";
 import type { ReviewCommand, ReviewState } from "../../../../packages/core/src/review-model.js";
 import type { PlacekeeperLinkLocation } from "../../../../packages/core/src/placekeeper-link.js";
 import {
@@ -13,11 +14,10 @@ import {
 } from "../../../../packages/core/src/review-runtime-protocol.js";
 import type {
   ProductionExportResult,
-  ProductionSaveStatus,
   ProductionScope,
   SaveCopyProposal,
-} from "../app/ProductionReviewApp.js";
-import type { RejectedReviewCommand } from "../app/ReviewShell.js";
+} from "./session-contracts.js";
+import type { RejectedReviewCommand } from "../review/review-command-result.js";
 import {
   type HostRuntime,
   type HostRuntimeBootstrap,
@@ -425,7 +425,7 @@ export function createRpcHostRuntime(
         session: { sessionId: value.sessionId },
         state: value.state as unknown as ReviewState,
         scope: value.scope as unknown as ProductionScope,
-        saveStatus: value.saveStatus as unknown as ProductionSaveStatus,
+        saveStatus: value.saveStatus as unknown as SaveStatus,
         viewerAssets: {
           documentUrl: documentResourceValue.url,
           pdfiumWasm: pdfium.url,
@@ -466,7 +466,7 @@ export function createRpcHostRuntime(
         releaseDeferredCommandInvalidation();
       }
     },
-    saveStatus: () => invoke<ProductionSaveStatus>("saveStatus"),
+    saveStatus: () => invoke<SaveStatus>("saveStatus"),
     saveProposal: () => invoke<SaveCopyProposal>("saveProposal"),
     chooseCopy: (filename, folderSelectionId) => invoke("chooseCopy", {
       ...(filename === undefined ? {} : { filename }),

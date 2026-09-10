@@ -1,5 +1,5 @@
+import type { SaveStatus } from "../../../../packages/core/src/save-status.js";
 import type { ReviewCommand, ReviewState } from "../../../../packages/core/src/review-model.js";
-import type { ProductionSaveStatus } from "../app/ProductionReviewApp.js";
 
 export type SaveGatedCommand =
   | { readonly kind: "submit"; readonly command: ReviewCommand }
@@ -8,7 +8,7 @@ export type SaveGatedCommand =
 
 export function gateReviewCommand(
   state: Pick<ReviewState, "workflow">,
-  status: ProductionSaveStatus,
+  status: SaveStatus,
   command: ReviewCommand,
   sourceDisposition: "local" | "remote-temporary" | "ephemeral" = "local",
 ): SaveGatedCommand {
@@ -32,8 +32,8 @@ function delay(ms: number, signal: AbortSignal): Promise<void> {
 }
 
 export async function pollSaveStatusUntilSettled(
-  fetchStatus: () => Promise<ProductionSaveStatus>,
-  publish: (status: ProductionSaveStatus) => void,
+  fetchStatus: () => Promise<SaveStatus>,
+  publish: (status: SaveStatus) => void,
   signal: AbortSignal,
   wait: (milliseconds: number, signal: AbortSignal) => Promise<void> = delay,
 ): Promise<void> {

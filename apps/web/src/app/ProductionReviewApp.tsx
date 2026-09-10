@@ -30,7 +30,15 @@ import { isEditableTarget } from '../review/input-controller.js';
 import type { LiveContextBindingStatus } from '../../../../packages/core/src/live-context.js';
 import { App } from "./App.js";
 import { ReferenceManualScrollObserver } from '../pdf/reference-manual-scroll.js';
-import { ReviewShell, type RejectedReviewCommand } from "./ReviewShell.js";
+import { ReviewShell } from "./ReviewShell.js";
+import type {
+  ProductionSession,
+  ProductionScope,
+  SaveCopyProposal,
+  ProductionSessionApi,
+  ReverseSyncTexRequest,
+  HostForwardSyncTexRequest,
+} from "../host/session-contracts.js";
 import { projectReviewItems } from "../../../../packages/core/src/annotation-projection.js";
 import {
   createViewerControls,
@@ -130,27 +138,6 @@ import type {
 import type { AccessibilityTransitionEffect } from './accessibility-transitions.js';
 import { renderedPdfPageIsUsable } from './document-readiness.js';
 
-export interface ProductionSession {
-  readonly sessionId: string;
-  /** Browser-only memory credential. VS Code keeps this in the extension host. */
-  readonly credential?: string;
-  /** Present for top-level readable views; embedded bootstrap sessions omit it. */
-  readonly appLinkBase?: string;
-}
-
-export interface ProductionScope {
-  readonly documentTitle: string;
-  readonly sourceDisposition?: 'local' | 'remote-temporary';
-  readonly sourceDisplayName?: string;
-  readonly sourceRootPath?: string;
-  readonly launchSurface?: 'browser' | 'finder' | 'codex' | 'vscode' | 'chrome' | 'macos' | 'static';
-  /** Static hosting keeps review state only in this tab and offers explicit PDF export. */
-  readonly persistenceMode?: 'export-only';
-  /** A restarted browser is awaiting task-scoped Codex reattachment. */
-  readonly reconnectPending?: true;
-  readonly codexContext?: LiveContextBindingStatus;
-}
-
 function referenceFocusRailSurface(
   layout: ReferenceWorkspaceLayoutState,
   hasRemainingReferences: boolean,
@@ -172,66 +159,16 @@ function referencePdfIsVisible(
     : layout.rightWorkspaceOpen && navigation.workspace.lastMode === 'references';
 }
 
-export type ProductionSaveStatus = SaveStatus;
-
-export type SaveCopyProposal =
-  | {
-      readonly sourceDisposition: 'local';
-      readonly filename: string;
-      readonly folder: string;
-    }
-  | {
-      readonly sourceDisposition: 'remote-temporary';
-      readonly folder?: string;
-    };
-
-export interface ProductionExportResult {
-  readonly kind: "reviewed-copy";
-  readonly path: string;
-  readonly revision: number;
-  readonly digest: string;
-  readonly warning?: string;
-}
-
 interface AuthoringAnchorNavigationState {
   readonly token: number;
   readonly visibility: PdfTargetVisibility;
   readonly pending: boolean;
 }
 
-export interface ProductionSessionApi {
-  presence?(): () => void;
-  command(command: ReviewCommand): Promise<ReviewState | RejectedReviewCommand>;
-  saveStatus(): Promise<ProductionSaveStatus>;
-  saveProposal(): Promise<SaveCopyProposal>;
-  chooseCopy(filename?: string, folderSelectionId?: string): Promise<ProductionSaveStatus>;
-  chooseFolder(): Promise<{ readonly cancelled: boolean; readonly selectionId?: string; readonly folder?: string }>;
-  chooseOriginal(): Promise<ProductionSaveStatus>;
-  retrySave(): Promise<ProductionSaveStatus>;
-  locateSave(): Promise<ProductionSaveStatus>;
-  exportReviewedCopy?(confirmPossiblyStale?: true): Promise<ProductionExportResult>;
-  scope(signal?: AbortSignal): Promise<ProductionScope>;
-}
-
-interface ReverseSyncTexRequest {
-  readonly pageIndex: number;
-  readonly point: { readonly x: number; readonly y: number };
-}
-
-export interface ForwardSyncTexRequest {
-  readonly documentGeneration: number;
-  readonly pageIndex: number;
-  readonly point: { readonly x: number; readonly y: number };
-}
-
-export type HostForwardSyncTexRequest = ForwardSyncTexRequest & {
-  readonly token: number;
-};
-
 export interface ProductionReviewAppProps {
   readonly session: ProductionSession;
   readonly initialState: ReviewState;
-  readonly initialSaveStatus?: ProductionSaveStatus;
+  readonly initialSaveStatus?: SaveStatus;
   readonly scope: ProductionScope;
   readonly api: ProductionSessionApi;
   readonly viewerAssets?: ViewerAssetUrls;
@@ -440,7 +377,7 @@ export function referenceReturnForActiveTab(
 
 export function initiallyPortableItemIds(
   state: ReviewState,
-  saveStatus: ProductionSaveStatus | undefined,
+  saveStatus: SaveStatus | undefined,
 ): Set<string> {
   return saveStatusIsCleanCurrent(state, saveStatus)
     ? new Set(state.items.map(({ id }) => id))
@@ -500,7 +437,7 @@ interface PendingAuthoringCommand {
 
 function saveStatusIsCleanCurrent(
   state: ReviewState,
-  saveStatus: ProductionSaveStatus | undefined,
+  saveStatus: SaveStatus | undefined,
 ): boolean {
   return saveStatus?.sync.phase === 'clean'
     && saveStatus.sync.savedRevision === state.revision
@@ -644,7 +581,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     props.initialState,
     props.initialSaveStatus,
   ));
-  const [saveStatus, setSaveStatus] = useState<ProductionSaveStatus>(
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>(
     props.initialSaveStatus ?? {
       destination: { phase: "none", generation: 0 },
       sync: {

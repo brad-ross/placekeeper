@@ -1,3 +1,4 @@
+import type { ProductionScope } from "../src/host/session-contracts.js";
 import { renderToStaticMarkup } from "react-dom/server";
 import { PdfZoomMode } from "@embedpdf/models";
 import { describe, expect, it, vi } from "vitest";
@@ -21,7 +22,6 @@ import {
   viewerResourcePoliciesEqual,
   visibleCodexContext,
   updateProductionScope,
-  type ProductionScope,
 } from "../src/app/ProductionReviewApp.js";
 import { SaveDestinationDialog } from "../src/save/SaveDestinationDialog.js";
 import {

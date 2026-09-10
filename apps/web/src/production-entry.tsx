@@ -15,11 +15,8 @@ import {
 } from "../../../packages/core/src/placekeeper-link.js";
 import { createReviewState } from "../../../packages/core/src/review-model.js";
 import { isReviewPanelKey } from "../../../packages/core/src/review-runtime-protocol.js";
-import {
-  ProductionReviewApp,
-  type HostForwardSyncTexRequest,
-  type ProductionSession,
-} from "./app/ProductionReviewApp.js";
+import { ProductionReviewApp } from "./app/ProductionReviewApp.js";
+import type { HostForwardSyncTexRequest, ProductionSession } from "./host/session-contracts.js";
 import {
   reopenProductionSession,
   resumeProductionSession,

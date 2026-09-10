@@ -1,3 +1,4 @@
+import type { RejectedReviewCommand } from "../review/review-command-result.js";
 import {
   useCallback,
   useLayoutEffect,
@@ -319,12 +320,6 @@ export interface ReviewShellProps {
   children?: ReactNode;
 }
 
-export interface RejectedReviewCommand {
-  readonly accepted: false;
-  readonly state: ReviewState;
-  readonly message: string;
-  readonly reason?: 'rejected' | 'save-destination' | 'stale-authoring' | 'generation-conflict';
-}
 
 export function controlledWorkspaceSurfaceAction(input: {
   readonly open: boolean;
