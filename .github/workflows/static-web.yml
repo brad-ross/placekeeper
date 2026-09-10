@@ -6,7 +6,6 @@ on:
       - ".github/workflows/static-web.yml"
       - ".github/workflows/deploy-pages.yml"
       - "apps/web/**"
-      - "apps/chrome-extension/scripts/embedpdf-worker-source.ts"
       - "packages/**"
       - "scripts/**"
       - "test/**"

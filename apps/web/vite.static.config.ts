@@ -1,13 +1,10 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { defineConfig, type Plugin } from "vite";
 
-import {
-  EMBEDPDF_ENGINE_VERSION,
-  extractPinnedPdfiumWorkerSource,
-} from "../chrome-extension/scripts/embedpdf-worker-source.js";
+import { EMBEDPDF_ENGINE_VERSION } from "../../scripts/build/pdfium-worker-source.js";
+import { emitPdfiumAssets, loadPinnedPdfiumWorkerSource } from "../../scripts/build/pdfium-assets.js";
 import {
   createStaticLegalAssets,
   STATIC_DEPENDENCY_INVENTORY_PATH,
@@ -44,27 +41,14 @@ function staticPdfiumAssets(): Plugin {
   return {
     name: "static-pdfium-assets",
     buildStart() {
-      const engineRoot = resolve("node_modules/@embedpdf/engines");
-      const packageMetadata = JSON.parse(readFileSync(resolve(engineRoot, "package.json"), "utf8")) as {
-        readonly version?: unknown;
-      };
-      if (packageMetadata.version !== EMBEDPDF_ENGINE_VERSION) {
-        throw new Error(`Static PDFium worker requires @embedpdf/engines ${EMBEDPDF_ENGINE_VERSION}`);
-      }
-      const workerSource = extractPinnedPdfiumWorkerSource(readFileSync(
-        resolve(engineRoot, "dist/lib/pdfium/web/worker-engine.js"),
-        "utf8",
-      ));
-      wasmReference = this.emitFile({
-        type: "asset",
-        name: "pdfium.wasm",
-        source: readFileSync(resolve("node_modules/@embedpdf/pdfium/dist/pdfium.wasm")),
-      });
-      workerReference = this.emitFile({
-        type: "asset",
-        name: "pdfium-worker.js",
-        source: workerSource,
-      });
+      const workerSource = loadPinnedPdfiumWorkerSource(
+        `Static PDFium worker requires @embedpdf/engines ${EMBEDPDF_ENGINE_VERSION}`,
+      );
+      ({ wasmReference, workerReference } = emitPdfiumAssets(this, {
+        wasm: { name: "pdfium.wasm" },
+        worker: { name: "pdfium-worker.js" },
+        workerSource,
+      }));
     },
     transform(source, id) {
       if (!id.endsWith("/apps/web/src/static-entry.tsx")) return undefined;
