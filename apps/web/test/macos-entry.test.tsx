@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readCssSource } from '../../../test/support/read-css-source.js';
 
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
@@ -92,7 +92,7 @@ describe("packaged macOS shell entry", () => {
       ]}
     />);
     expect(html).toContain("--macos-traffic-light-center-y:27px");
-    const layoutCss = readFileSync(new URL("../src/app/review-layout-foundation.css", import.meta.url), "utf8");
+    const layoutCss = readCssSource(new URL("../src/app/review-layout-foundation.css", import.meta.url));
     expect(layoutCss).toMatch(/\[data-launch-surface="macos"\] \.review-chrome\s*\{[^}]*--review-chrome-height:\s*calc\(var\(--macos-traffic-light-center-y, 25px\) \* 2\)/u);
   });
 

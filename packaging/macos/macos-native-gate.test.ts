@@ -1,3 +1,4 @@
+import { readCssSource } from '../../test/support/read-css-source.js';
 import { readFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { resolve } from "node:path";
@@ -21,7 +22,7 @@ describe("macOS native gate packaging policy", () => {
       readFile(resolve("apps/macos/Sources/PlacekeeperMac/PlacekeeperMac.swift"), "utf8"),
       readFile(resolve("apps/macos/Package.swift"), "utf8"),
       readFile(resolve("apps/web/macos.html"), "utf8"),
-      readFile(resolve("apps/web/src/app/review-layout.css"), "utf8"),
+      readCssSource(resolve("apps/web/src/app/review-layout.css")),
       readFile(resolve("apps/macos/Sources/PlacekeeperMac/LaunchCoordinator.swift"), "utf8"),
       readFile(resolve("apps/macos/Sources/PlacekeeperMac/DocumentWindowRegistry.swift"), "utf8"),
       readFile(resolve("apps/macos/Sources/PlacekeeperMac/AppLifecycleControlClient.swift"), "utf8"),

@@ -17,10 +17,8 @@ const readyViewer = {
   zoomPercent: 100,
 } as const;
 
-const neutralStyles = readFileSync(
-  new URL('../src/app/neutral-chrome.css', import.meta.url),
-  'utf8',
-);
+const neutralStyles = readCssSource(
+  new URL('../src/app/neutral-chrome.css', import.meta.url));
 
 function chrome(overrides: Partial<Parameters<typeof ReviewChrome>[0]> = {}) {
   return renderToStaticMarkup(<ReviewChrome
@@ -82,4 +80,4 @@ describe('neutral bottom References contract', () => {
     );
   });
 });
-import { readFileSync } from 'node:fs';
+import { readCssSource } from '../../../test/support/read-css-source.js';

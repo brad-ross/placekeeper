@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readCssSource } from '../../../test/support/read-css-source.js';
 
 import { PdfZoomMode } from '@embedpdf/models';
 import { renderToStaticMarkup } from 'react-dom/server';
@@ -61,27 +61,17 @@ const generatedState = createReviewState({
   documentGeneration: 4,
 });
 
-const responsiveStyles = readFileSync(
-  new URL('../src/app/review-layout-responsive.css', import.meta.url),
-  'utf8',
-);
-const annotationStyles = readFileSync(
-  new URL('../src/app/review-layout-annotations.css', import.meta.url),
-  'utf8',
-);
-const designTokens = readFileSync(new URL('../src/app/review-design-tokens.css', import.meta.url), 'utf8');
-const foundationStyles = readFileSync(
-  new URL('../src/app/review-layout-foundation.css', import.meta.url),
-  'utf8',
-);
-const layoutStyles = readFileSync(
-  new URL('../src/app/review-layout.css', import.meta.url),
-  'utf8',
-);
-const neutralStyles = readFileSync(
-  new URL('../src/app/neutral-chrome.css', import.meta.url),
-  'utf8',
-);
+const responsiveStyles = readCssSource(
+  new URL('../src/app/review-layout-responsive.css', import.meta.url));
+const annotationStyles = readCssSource(
+  new URL('../src/app/review-layout-annotations.css', import.meta.url));
+const designTokens = readCssSource(new URL('../src/app/review-design-tokens.css', import.meta.url));
+const foundationStyles = readCssSource(
+  new URL('../src/app/review-layout-foundation.css', import.meta.url));
+const layoutStyles = readCssSource(
+  new URL('../src/app/review-layout.css', import.meta.url));
+const neutralStyles = readCssSource(
+  new URL('../src/app/neutral-chrome.css', import.meta.url));
 
 const ownedAnnotation: ReviewItem = {
   id: 'owned-highlight',
