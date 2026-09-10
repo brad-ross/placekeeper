@@ -47,7 +47,6 @@ import {
   stageGenerationSnapshot,
   type GenerationSyncTexSnapshotResult,
   type StagedGenerationSnapshot,
-  type SyncTexSidecarFingerprint,
 } from "../recovery/source-snapshot.js";
 import {
   queryForwardSyncTex,
@@ -55,6 +54,11 @@ import {
   type GenerationSyncTexBinding,
   type SyncTexRunner,
 } from "../synctex/query.js";
+import {
+  latestSyncTexFingerprintBefore,
+  matchesGenerationSyncTexBinding,
+  prepareGenerationSyncTexBinding,
+} from "../synctex/generation-binding.js";
 import { SessionControlRegistry } from "./control-socket.js";
 import { RECOVERY_ID, RecoveryDecisions } from "./recovery-decisions.js";
 import {
@@ -88,19 +92,6 @@ import { PresentationRecords } from "./presentation-records.js";
 export * from "./session-contracts.js";
 
 const BOOTSTRAP_TTL_MS = 60_000;
-
-function latestSyncTexFingerprintBefore(
-  lineage: readonly DurableGenerationRecordV1[],
-  generation: number,
-): SyncTexSidecarFingerprint | undefined {
-  for (let index = lineage.length - 1; index >= 0; index -= 1) {
-    const record = lineage[index];
-    if (record !== undefined && record.generation < generation && record.syncTex !== undefined) {
-      return record.syncTex.fingerprint;
-    }
-  }
-  return undefined;
-}
 
 function activeKey(path: string, digest: string): string {
   return `${path}\0${digest}`;
@@ -2182,60 +2173,19 @@ export class SessionBroker {
         current.generation !== session.state.workflow.documentGeneration ||
         current.digest !== session.state.source.digest
       ) return { status: "stale", operationToken, reason: "generation-lineage-is-not-current" };
-      if (
-        operationToken.length === 0 || operationToken.length > 256 || operationToken.includes("\0")
-      ) {
-        return {
-          status: "malformed",
-          operationToken,
-          documentGeneration: current.generation,
-          pdfDigest: current.digest,
-          reason: "invalid-synctex-operation-token",
-        };
-      }
-      const sourceRoot = session.rootId === undefined
-        ? undefined
-        : this.capabilities.getRootPath(session.rootId);
-      if (sourceRoot === undefined) {
-        return {
-          status: "out-of-root",
-          operationToken,
-          documentGeneration: current.generation,
-          pdfDigest: current.digest,
-          reason: "no-approved-source-root",
-        };
-      }
-      let syncTex = current.syncTex;
-      if (syncTex === undefined) {
-        const previousFingerprint = latestSyncTexFingerprintBefore(
-          session.generationLineage,
-          current.generation,
-        );
-        let sidecar: GenerationSyncTexSnapshotResult;
-        try {
-          sidecar = await snapshotGenerationSyncTexSidecar({
-            outputPath: session.canonicalSourcePath,
-            privatePdfPath: current.snapshotPath,
-            outputIdentity: current.outputIdentity,
-            pdfDigest: current.digest,
-            ...(previousFingerprint === undefined ? {} : { previousFingerprint }),
-          });
-        } catch {
-          sidecar = { status: "stale", reason: "sidecar-private-copy-failed" };
-        }
-        if (sidecar.status !== "ready") {
-          return {
-            status: sidecar.status === "missing"
-              ? current.generation === 1 ? "missing" : "pending"
-              : sidecar.status,
-            operationToken,
-            documentGeneration: current.generation,
-            pdfDigest: current.digest,
-            reason: sidecar.reason,
-          };
-        }
-        const attachedSyncTex = sidecar.snapshot;
-        syncTex = attachedSyncTex;
+      const preparation = prepareGenerationSyncTexBinding({
+        current,
+        lineage: session.generationLineage,
+        outputPath: session.canonicalSourcePath,
+        operationToken,
+        getSourceRoot: () => session.rootId === undefined
+          ? undefined
+          : this.capabilities.getRootPath(session.rootId),
+      });
+      const prepared = preparation instanceof Promise ? await preparation : preparation;
+      if (!("binding" in prepared)) return prepared;
+      if (prepared.attachment !== undefined) {
+        const attachedSyncTex = prepared.attachment;
         const generationLineage = session.generationLineage.map((record) =>
           record.generation === current.generation ? { ...record, syncTex: attachedSyncTex } : record
         );
@@ -2243,15 +2193,7 @@ export class SessionBroker {
         session.generationLineage = generationLineage;
       }
       session.syncTexOperationToken = operationToken;
-      return {
-        outputIdentity: current.outputIdentity,
-        documentGeneration: current.generation,
-        pdfDigest: current.digest,
-        privatePdfPath: current.snapshotPath,
-        sidecar: syncTex,
-        sourceRoot,
-        operationToken,
-      };
+      return prepared.binding;
     });
   }
 
@@ -2265,18 +2207,7 @@ export class SessionBroker {
     const sourceRoot = session.rootId === undefined
       ? undefined
       : this.capabilities.getRootPath(session.rootId);
-    return current !== undefined && current.syncTex !== undefined &&
-      current.generation === binding.documentGeneration &&
-      current.digest === binding.pdfDigest &&
-      current.snapshotPath === binding.privatePdfPath &&
-      current.outputIdentity.canonicalPath === binding.outputIdentity.canonicalPath &&
-      current.outputIdentity.device === binding.outputIdentity.device &&
-      current.outputIdentity.inode === binding.outputIdentity.inode &&
-      current.outputIdentity.byteLength === binding.outputIdentity.byteLength &&
-      current.outputIdentity.modifiedAtMs === binding.outputIdentity.modifiedAtMs &&
-      current.syncTex.snapshotPath === binding.sidecar.snapshotPath &&
-      current.syncTex.fingerprint.digest === binding.sidecar.fingerprint.digest &&
-      sourceRoot === binding.sourceRoot;
+    return matchesGenerationSyncTexBinding(current, sourceRoot, binding);
   }
 
   async forwardSyncTex(input: {
