@@ -7,7 +7,6 @@ Shared domain vocabulary for this project — entities, named processes, and sta
 ### Placekeeper
 The focused everyday PDF reader and annotator that preserves a reader's place while annotations, search, and Reference Tabs support nonlinear reading.
 
-Placekeeper emphasizes preserving the Main Reading Thread while annotations, search, and Reference Tabs support nonlinear reading.
 
 ### Placekeeper Link
 The canonical, human-readable `placekeeper://` address for a local PDF, consisting of its absolute filesystem path and an optional safe fragment for a page, portable Review Item, or normalized author-encoded same-document PDF destination.
@@ -146,14 +145,14 @@ The durable comparison between the latest desired Review Items and the state las
 Save Sync is clean only when the saved revision and semantic digest match the desired state; an older successful write remains saving, while a failed current-generation write becomes not saved without discarding Protected Recovery.
 
 ### Protected Recovery
-Private local state that safeguards accepted annotation changes until the Save Destination contains the same current state.
+Private local review state retained to protect accepted changes, unfinished work, or an explicitly protected host session across interruption.
 
 Protected Recovery supports crash and write-failure recovery, but it is not the long-term source of portable annotation editability.
 
 ### Annotation Tray
 The nonmodal review surface that lists Review Items and Existing PDF Annotations while leaving the PDF available for reading and navigation.
 
-Its presentation may change with available reading space, but disclosure changes do not replace the underlying viewer or discard review state. Its navigation exposes only destinations supported by current document or session state—including informative loading, failure, and pending surfaces—while preserving Search as a safe fallback.
+Its presentation may change with available reading space, but disclosure changes do not replace the underlying viewer or discard review state. Its navigation exposes only destinations supported by current document or session state—including informative loading, failure, and pending surfaces—while preserving Search as a safe fallback and Annotations as a core destination with a usable empty state.
 
 In a generated-output review, unresolved prior-generation items appear first as focused tasks. Reviewed-PDF export, when blocked by those tasks, routes back to the Annotation Tray rather than duplicating resolution controls in the document menu.
 
@@ -267,16 +266,16 @@ The primary PDF view and its current reading location.
 In-body reference lookups do not move the Main Reading Thread; embedded-outline navigation, explicit promotion from a Reference Tab, and ordinary direct reading actions may move it.
 
 ### Reference Tab
-A temporary, independently scrollable and zoomable view of one author-encoded destination in the current PDF.
+A temporary, independently scrollable and zoomable view of one semantic destination in the current PDF.
 
 One live Reference Tab exists per target. Hiding the workspace preserves its tabs, while promotion to the Main Reading Thread consumes the promoted tab.
 
-A Reference Tab retains both its immutable author-encoded origin and its last settled view. Activation prefers the settled view, but may reconstruct the origin when changed viewer geometry makes that view unusable. Returning to the origin updates only the Reference Tab's settled view and does not move the Main Reading Thread.
+A Reference Tab retains both its immutable semantic origin and its last settled view. Activation prefers the settled view, but may reconstruct the origin when changed viewer geometry makes that view unusable. Returning to the origin updates only the Reference Tab's settled view and does not move the Main Reading Thread.
 
 ### Reference Fit Width
-The framing policy for an author-encoded Reference destination that scales its page to the usable Reference viewer width instead of fitting the whole page vertically.
+The framing policy for a Reference destination that scales its page to the usable Reference viewer width instead of fitting the whole page vertically.
 
-Reference Fit Width is used for a destination's initial opening and to reconstruct a Reference Tab when its saved settled view cannot survive a layout change. Author-provided vertical positioning is preserved only when it carries meaningful destination intent.
+Reference Fit Width is used for a destination's initial opening, explicit return to its origin, and to reconstruct a Reference Tab when its saved settled view cannot survive a layout change. Author-provided vertical positioning is preserved only when it carries meaningful destination intent.
 
 ### Meaningful Jump
 An explicit destination change in the Main Reading Thread that enters PDF Back and Forward history, such as activating an Annotation Tray row, embedded-outline navigation, or promotion from a Reference Tab.

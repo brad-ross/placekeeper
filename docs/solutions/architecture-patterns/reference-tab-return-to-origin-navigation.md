@@ -1,7 +1,7 @@
 ---
 title: Return-to-origin navigation for stateful PDF Reference Tabs
 date: 2026-08-18
-last_updated: 2026-08-22
+last_updated: 2026-09-10
 category: architecture-patterns
 module: PDF reference navigation and viewer framing
 problem_type: architecture_pattern
@@ -34,7 +34,7 @@ tags:
 
 ## Context
 
-A Reference Tab has two legitimate meanings of “where it belongs.” Its origin is the semantic PDF target that created the tab, while its settled view is the latest physical location at which the viewer successfully landed. The model keeps these meanings separate as immutable `originalTarget` and mutable `settledLocation` (`apps/web/src/review/reference-navigation-state.ts:33-40`). Opening a tab initializes both; later refreshes replace only `settledLocation` (`apps/web/src/review/reference-navigation-state.ts:319-341`).
+A Reference Tab has two legitimate meanings of “where it belongs.” Its origin is the semantic PDF target that created the tab, while its settled view is the latest physical location at which the viewer successfully landed. The model keeps these meanings separate as immutable `originalTarget` and mutable `settledLocation` (`apps/web/src/review/reference-navigation-state.ts`). Opening a tab initializes both; later refreshes replace only `settledLocation` (`apps/web/src/review/reference-navigation-state.ts`).
 
 That split supports a local return-to-origin affordance without introducing another navigation stack. The implementation merged in [PR #39](https://github.com/brad-ross/placekeeper/pull/39) on 2026-08-18. The durable lesson is broader: secondary-viewer recovery should restore a semantic destination through the application's navigation authority while keeping transient visibility, input intent, and focus state out of durable routing.
 
@@ -44,19 +44,19 @@ Cross-engine iteration showed that timing adjustments and synthetic viewport mov
 
 ### Keep the origin immutable and the restorable view mutable
 
-Treat the target that opened a Reference Tab as immutable for that tab's lifetime. Continue updating its settled snapshot after verified navigation. The reducer does this by copying the tab with a new `settledLocation`, leaving `originalTarget` and identity unchanged (`apps/web/src/review/reference-navigation-state.ts:219-230`).
+Treat the target that opened a Reference Tab as immutable for that tab's lifetime. Continue updating its settled snapshot after verified navigation. The reducer does this by copying the tab with a new `settledLocation`, leaving `originalTarget` and identity unchanged (`apps/web/src/review/reference-navigation-state.ts`).
 
-Do not store whether the return control is visible, pending, or retryable in `ReferenceTab`. Those are properties of the current mounted viewer. Keep them in transient presentation state keyed by tab identity and document generation (`apps/web/src/review/navigation-coordinator.ts:49-52`).
+Do not store whether the return control is visible, pending, or retryable in `ReferenceTab`. Those are properties of the current mounted viewer. Keep them in transient presentation state keyed by tab identity and document generation (`apps/web/src/review/navigation-coordinator.ts`).
 
 ### Route the return through the navigation transaction authority
 
-The return action is a guarded navigation transaction, not a React callback that changes `scrollTop`. `NavigationCoordinator` is the sole authority for current-document viewer navigation, reducer mutations, focus, visibility, and announcements (`apps/web/src/review/navigation-coordinator.ts:240-247`).
+The return action is a guarded navigation transaction, not a React callback that changes `scrollTop`. `NavigationCoordinator` is the sole authority for current-document viewer navigation, reducer mutations, focus, visibility, and announcements (`apps/web/src/review/navigation-coordinator.ts`).
 
-The transaction validates active tab identity, document generation, availability, and pending state; settles layout; reapplies `originalTarget` using `reference-fit-width`; captures the verified result; and dispatches one `refresh-active-reference` update (`apps/web/src/review/navigation-coordinator.ts:569-612`, `apps/web/src/review/navigation-coordinator.ts:1261-1275`). It does not invoke Main navigation or browser-location history, so the Main Reading Thread's page, zoom, scroll, URL, and Back/Forward entries remain unchanged.
+The transaction validates active tab identity, document generation, availability, and pending state; settles layout; reapplies `originalTarget` using `reference-fit-width`; captures the verified result; and dispatches one `refresh-active-reference` update (`apps/web/src/review/navigation-coordinator.ts`). It does not invoke Main navigation or browser-location history, so the Main Reading Thread's page, zoom, scroll, URL, and Back/Forward entries remain unchanged.
 
 ### Ask the viewer adapter whether the semantic target is visible
 
-React should not reconstruct PDF geometry from page elements. The viewer adapter already owns target resolution, rotation, crop coordinates, viewport geometry, runway, and virtualization, so it exposes a semantic `targetVisibility` query (`apps/web/src/pdf/viewer-navigation-adapter.ts:64-74`).
+React should not reconstruct PDF geometry from page elements. The viewer adapter already owns target resolution, rotation, crop coordinates, viewport geometry, runway, and virtualization, so it exposes a semantic `targetVisibility` query (`apps/web/src/pdf/viewer-navigation-adapter.ts`).
 
 Use three outcomes:
 
@@ -64,23 +64,23 @@ Use three outcomes:
 - `outside`: the target is valid but its page is unmounted or its anchor is offscreen.
 - `unavailable`: the target, page tree, or geometry cannot be trusted.
 
-The adapter resolves the author target before transforming its anchor into client space and applying the configured tolerance (`apps/web/src/pdf/viewer-navigation-adapter.ts:1341-1388`). An unmounted valid page is `outside`, not invalid, which is essential for virtualized PDFs.
+The adapter resolves the author target before transforming its anchor into client space and applying the configured tolerance (`apps/web/src/pdf/viewer-navigation-adapter.ts`). An unmounted valid page is `outside`, not invalid, which is essential for virtualized PDFs.
 
 ### Establish drift only from Reference-scoped manual intent
 
-A scroll notification does not prove the user scrolled. Opens, restores, zoom, layout reflow, and target application can all move the viewport. Arm a Reference-only observer from inputs capable of scrolling that portaled viewport, capture the baseline position, and consume the intent only when the Reference document emits its next scroll notification (`apps/web/src/pdf/reference-manual-scroll.ts:52-81`, `apps/web/src/pdf/reference-manual-scroll.ts:83-116`). Read the committed position on the next frame and publish only when it changed (`apps/web/src/pdf/reference-manual-scroll.ts:126-145`).
+A scroll notification does not prove the user scrolled. Opens, restores, zoom, layout reflow, and target application can all move the viewport. Arm a Reference-only observer from inputs capable of scrolling that portaled viewport, capture the baseline position, and consume the intent only when the Reference document emits its next scroll notification (`apps/web/src/pdf/reference-manual-scroll.ts`). Read the committed position on the next frame and publish only when it changed (`apps/web/src/pdf/reference-manual-scroll.ts`).
 
-Keep that observation channel separate from the generic viewer interaction stream. Generic `scroll` events refresh the Main location, while Reference manual scrolling calls the coordinator through a dedicated callback (`apps/web/src/app/ProductionReviewApp.tsx:720-731`, `apps/web/src/app/ProductionReviewApp.tsx:879-883`). Forwarding Reference scrolling through the Main channel would violate URL and history ownership.
+Keep that observation channel separate from the generic viewer interaction stream. Generic `scroll` events refresh the Main location, while Reference manual scrolling calls the coordinator through a dedicated callback (`apps/web/src/app/ProductionReviewApp.tsx`). Forwarding Reference scrolling through the Main channel would violate URL and history ownership.
 
-Programmatic Reference movement clears manual intent before and after target application (`apps/web/src/review/navigation-coordinator.ts:1139-1149`). `clear()` must also invalidate callbacks already scheduled for a later frame; the observer uses a separate cancellation generation so disposed-viewer observations cannot publish into a replacement lifecycle (`apps/web/src/pdf/reference-manual-scroll.ts:107-123`).
+Programmatic Reference movement clears manual intent before and after target application (`apps/web/src/review/navigation-coordinator.ts`). `clear()` must also invalidate callbacks already scheduled for a later frame; the observer uses a separate cancellation generation so disposed-viewer observations cannot publish into a replacement lifecycle (`apps/web/src/pdf/reference-manual-scroll.ts`).
 
 ### Guard asynchronous completion and define focus outcomes
 
-Operation token, document generation, tab identity, and adapter identity protect different race axes. The coordinator checks the exact adapter after the awaited apply because a viewer can be disposed and replaced without changing the active tab (`apps/web/src/review/navigation-coordinator.ts:525-546`). Do not collapse these checks into one generic “current” flag.
+Operation token, document generation, tab identity, and adapter identity protect different race axes. The coordinator checks the exact adapter after the awaited apply because a viewer can be disposed and replaced without changing the active tab (`apps/web/src/review/navigation-coordinator.ts`). Do not collapse these checks into one generic “current” flag.
 
-On success, commit the new settled view, remove the transient control, announce completion, and focus the returned page (`apps/web/src/review/navigation-coordinator.ts:604-612`). On failure, leave durable tab state unchanged, clear pending state, and keep the retry path available (`apps/web/src/review/navigation-coordinator.ts:1656-1670`).
+On success, commit the new settled view, remove the transient control, announce completion, and focus the returned page (`apps/web/src/review/navigation-coordinator.ts`). On failure, leave durable tab state unchanged, clear pending state, and keep the retry path available (`apps/web/src/review/navigation-coordinator.ts`).
 
-The viewer-local control can remain icon-only while retaining `Return to reference` as both its accessible name and native tooltip (`apps/web/src/review/ReferenceWorkspace.tsx:49-74`). Use `aria-disabled` rather than native `disabled` when pending work must preserve focus for a failed retry; guard repeat activation explicitly and restore focus only when it otherwise fell back to no connected target (`apps/web/src/review/ReferenceWorkspace.tsx:61-70`, `apps/web/src/review/ReferenceWorkspace.tsx:285-295`).
+The viewer-local control can remain icon-only while retaining `Return to reference` as its accessible name and the custom tooltip supplied by `ReviewTooltipButton` (`apps/web/src/review/ReferenceWorkspace.tsx`). Use `aria-disabled` rather than native `disabled` when pending work must preserve focus for a failed retry; guard repeat activation explicitly and restore focus only when it otherwise fell back to no connected target (`apps/web/src/review/ReferenceWorkspace.tsx`).
 
 ## Why This Matters
 
@@ -108,7 +108,7 @@ Use a physical scroll bookmark only when offsets themselves are the product cont
 2. Consume it only for a Reference-document scroll notification.
 3. On the next frame, require an actual position change and a still-current observation.
 4. Ask whether the immutable origin is `visible`, `outside`, or `unavailable`.
-5. Show the affordance only for `outside`; clear it whenever the origin becomes visible again (`apps/web/src/review/navigation-coordinator.ts:1618-1653`).
+5. Show the affordance only for `outside`; clear it whenever the origin becomes visible again (`apps/web/src/review/navigation-coordinator.ts`).
 
 ### Return transaction
 

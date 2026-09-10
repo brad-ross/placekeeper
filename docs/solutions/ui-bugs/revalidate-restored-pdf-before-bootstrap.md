@@ -1,6 +1,7 @@
 ---
 title: Revalidate restored PDF output before viewer bootstrap
 date: 2026-09-10
+last_updated: 2026-09-10
 category: ui-bugs
 module: Restored VS Code PDF review
 problem_type: ui_bug
@@ -30,17 +31,17 @@ A valid current PDF did not disprove a corrupt private recovery snapshot. The ol
 
 ## Solution
 
-Reject empty source bytes before creating the private snapshot (`apps/service/src/recovery/source-snapshot.ts:54`). At panel startup, explicitly await output revalidation before assigning the webview bootstrap HTML, rather than waiting for an activation event that may already have happened (`apps/vscode/src/extension.ts:482`). The observer tags validations with epochs and suppresses the local completion callback for superseded results (`apps/vscode/src/rebuild-observer.ts:71`, `apps/vscode/src/rebuild-observer.ts:97`).
+Reject empty source bytes before creating the private snapshot (`apps/service/src/recovery/source-snapshot.ts`). At panel startup, explicitly await output revalidation before assigning the webview bootstrap HTML, rather than waiting for an activation event that may already have happened (`apps/vscode/src/extension.ts`). The observer tags validations with epochs and suppresses the local completion callback for superseded results (`apps/vscode/src/rebuild-observer.ts`).
 
-The renderer now returns an alert for a document error before considering its ordinary loading branch (`apps/web/src/pdf/PdfWorkspace.tsx:180`). The shell separately represents waiting for an updated PDF and active generation reconciliation or location restoration; merely being possibly stale does not make its busy indicator true (`apps/web/src/app/ReviewShell.tsx:605`).
+The renderer now returns an alert for a document error before considering its ordinary loading branch (`apps/web/src/pdf/PdfWorkspace.tsx`). The shell separately represents waiting for an updated PDF and active generation reconciliation or location restoration; merely being possibly stale does not make its busy indicator true (`apps/web/src/app/ReviewShell.tsx`).
 
 ## Why This Works
 
 The guard prevents a transient empty build output from becoming a newly trusted private source. Explicit startup validation closes the missed-focus-edge case and gives existing restored sessions a chance to compare their recovery state with the current output before rendering. Error presentation makes a bad input actionable instead of suggesting indefinite useful work.
 
-Awaiting validation is not a global freeze of the broker. A later generation or freshness change can still occur around bootstrap. The bridge therefore reconciles canonical `/state` when the control socket connects, comparing generation, revision, and freshness before emitting an invalidation (`apps/vscode/src/webview-bridge.ts:512`, `apps/vscode/src/webview-bridge.ts:549`). Startup validation and eventual reconciliation solve different races; neither should be used as a reason to remove the other.
+Awaiting validation is not a global freeze of the broker. A later generation or freshness change can still occur around bootstrap. The bridge therefore reconciles canonical `/state` when the control socket connects, comparing generation, revision, and freshness before emitting an invalidation (`apps/vscode/src/webview-bridge.ts`). Startup validation and eventual reconciliation solve different races; neither should be used as a reason to remove the other.
 
-The fix is implemented and locally verified in PR #92, pending merge as of September 10, 2026. The restored-panel regression emits no focus event and checks that output validation precedes webview creation (`apps/vscode/test/extension.test.ts:66`).
+The fix from PR #92 is present in the current tree. The restored-panel regression emits no focus event and checks that output validation precedes webview creation (`apps/vscode/test/extension.test.ts`).
 
 ## Prevention
 

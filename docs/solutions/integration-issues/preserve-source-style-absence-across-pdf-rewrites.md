@@ -1,6 +1,7 @@
 ---
 title: "Preserve source style absence across PDF rewrites"
 date: "2026-09-08"
+last_updated: 2026-09-10
 category: "integration-issues"
 module: "PDF annotation persistence"
 problem_type: "integration_issue"
@@ -38,13 +39,13 @@ Initial-render checks missed the save/reopen failure: a generated appearance cau
 
 ## Solution
 
-Read optional style evidence from the original PDF dictionaries. The source-style inventory records explicit color presence and raw opacity separately; absence remains an empty style record rather than a normalized default (`apps/web/src/pdf/source-annotation-style.ts:3`, `apps/web/src/pdf/source-annotation-style.ts:33`). The renderer uses the engine-converted color only when raw source evidence establishes that `/C` exists (`apps/web/src/pdf/SourceAnnotationMark.tsx:30`). This preserves useful engine color conversion without granting engine defaults authority over the reader palette.
+Read optional style evidence from the original PDF dictionaries. The source-style inventory records explicit color presence and raw opacity separately; absence remains an empty style record rather than a normalized default (`apps/web/src/pdf/source-annotation-style.ts`). The renderer uses the engine-converted color only when raw source evidence establishes that `/C` exists (`apps/web/src/pdf/SourceAnnotationMark.tsx`). This preserves useful engine color conversion without granting engine defaults authority over the reader palette.
 
-Be conservative about custom appearance intent. An `/AP` dictionary does not reveal whether its author used a stock tool or drew manually. Preserve native rendering for embedded appearances, richer border/rotation instructions, custom icons, unsupported subtypes, and invalid explicit values (`apps/web/src/pdf/source-annotation-style.ts:12`, `apps/web/src/pdf/source-annotation-style.ts:28`). A failed optional style read returns no style overrides, allowing native discovery to continue (`apps/web/src/pdf/source-annotation-style.ts:48`). The raw dictionary index is only joined to engine enumeration when the page annotation counts match; a mismatch suppresses the reader-style override rather than guessing which annotation the evidence describes (`apps/web/src/pdf/existing-annotations.ts:178`).
+Be conservative about custom appearance intent. An `/AP` dictionary does not reveal whether its author used a stock tool or drew manually. Preserve native rendering for embedded appearances, richer border/rotation instructions, custom icons, unsupported subtypes, and invalid explicit values (`apps/web/src/pdf/source-annotation-style.ts`). A failed optional style read returns no style overrides, allowing native discovery to continue (`apps/web/src/pdf/source-annotation-style.ts`). The raw dictionary index is only joined to engine enumeration when the page annotation counts match; a mismatch suppresses the reader-style override rather than guessing which annotation the evidence describes (`apps/web/src/pdf/existing-annotations.ts`).
 
-Preserve source absence across the durable save boundary. During native preparation, record the page and stable `/NM` of each retained source annotation that had no `/AP` (`packages/pdf-backends/src/native-annotations.ts:246`). After PDFium writes the candidate, remove generated `/AP` only for those recorded page/name pairs (`packages/pdf-backends/src/native-annotations.ts:299`). Matching page plus persistent name avoids applying source array positions to an output inventory changed by deletion or addition. Do not remove all appearances or classify them by how they look: an appearance present in the source is outside this cleanup's authority.
+Preserve source absence across the durable save boundary. During native preparation, record the page and stable `/NM` of each retained source annotation that had no `/AP` (`packages/pdf-backends/src/native-annotations.ts`). After PDFium writes the candidate, remove generated `/AP` only for those recorded page/name pairs (`packages/pdf-backends/src/native-annotations.ts`). Matching page plus persistent name avoids applying source array positions to an output inventory changed by deletion or addition. Do not remove all appearances or classify them by how they look: an appearance present in the source is outside this cleanup's authority.
 
-Postprocessing changes the verified artifact. Reinspect the final candidate, recompute `outputSha256` from its bytes, and invalidate the earlier cached inspection when cleanup produced a new byte array (`packages/pdf-backends/src/native-annotations.ts:91`, `packages/pdf-backends/src/native-annotations.ts:114`). Otherwise verification could attest to the pre-cleanup PDF rather than the actual saved result.
+Postprocessing changes the verified artifact. Reinspect the final candidate, recompute `outputSha256` from its bytes, and invalidate the earlier cached inspection when cleanup produced a new byte array (`packages/pdf-backends/src/native-annotations.ts`). Otherwise verification could attest to the pre-cleanup PDF rather than the actual saved result.
 
 ## Why This Works
 
@@ -54,9 +55,9 @@ This is deliberately a display policy with a narrowly scoped preservation repair
 
 ## Prevention
 
-Test the lifecycle, not just the initial screen. `test/acceptance/static-web.spec.ts:380` creates supported default marks, an explicitly green translucent highlight, and a highlight with an embedded custom appearance. It checks default and explicit rendering, desktop and narrow layouts, and a rotated/cropped variant. After export it asserts missing `/C`, `/CA`, and `/AP` remain missing, explicit style values survive, and the original appearance content is unchanged; reopening the export must restore the same count of reader-styled marks.
+Test the lifecycle, not just the initial screen. `test/acceptance/static-web.spec.ts` creates supported default marks, an explicitly green translucent highlight, and a highlight with an embedded custom appearance. It checks default and explicit rendering, desktop and narrow layouts, and a rotated/cropped variant. After export it asserts missing `/C`, `/CA`, and `/AP` remain missing, explicit style values survive, and the original appearance content is unchanged; reopening the export must restore the same count of reader-styled marks.
 
-`test/conformance/reviewed-pdf.test.ts:38` exercises a source highlight without an appearance through the selected writer. It asserts `/AP` remains absent, the output digest matches the returned bytes, the stale inspection is unavailable, and final reviewed-PDF verification succeeds. `apps/web/test/source-annotation-style.test.ts` and `apps/web/test/existing-annotations.test.ts` provide the focused source inventory and engine-join coverage.
+`test/conformance/reviewed-pdf.test.ts` exercises a source highlight without an appearance through the selected writer. It asserts `/AP` remains absent, the output digest matches the returned bytes, the stale inspection is unavailable, and final reviewed-PDF verification succeeds. `apps/web/test/source-annotation-style.test.ts` and `apps/web/test/existing-annotations.test.ts` provide the focused source inventory and engine-join coverage.
 
 When adding another supported subtype or source style field, preserve three distinctions: absent versus explicit, source-defined versus engine-generated, and certain identity versus ambiguous inventory. A native fallback is the correct outcome when optional style evidence cannot support an override.
 

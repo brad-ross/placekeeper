@@ -1,6 +1,7 @@
 ---
 title: Wait for committed wheel zoom before pointer-selection assertions
 date: 2026-08-11
+last_updated: 2026-09-10
 category: test-failures
 module: PDF viewer acceptance harness
 problem_type: test_failure
@@ -30,7 +31,7 @@ tags:
 
 During the PR #5 CI investigation, the Playwright acceptance test for pointer selection after Control-wheel zoom sometimes began its second drag while EmbedPDF was still showing a gesture preview. The page already looked wider, but the viewer had not committed the new scale, so the later commit could change geometry and clear the selection before the assertion.
 
-The repository pins `@embedpdf/plugin-zoom` 2.14.4 (`package.json:53`). The installed implementation inspected during the investigation appeared to use two observable wheel-zoom phases: an immediate CSS transform preview followed by a debounced provider commit.
+The repository pins `@embedpdf/plugin-zoom` 2.14.4 (`package.json`). The installed implementation inspected during the investigation appeared to use two observable wheel-zoom phases: an immediate CSS transform preview followed by a debounced provider commit.
 
 ## Symptoms
 
@@ -46,7 +47,7 @@ Adding a fixed sleep would couple the test to an implementation-specific delay a
 
 ## Solution
 
-Expose the active document's committed zoom level through the acceptance harness. The probe reads the public `ZoomPlugin` scope for the active document and returns `currentZoomLevel` (`test/acceptance/viewer-harness/main.tsx:38`):
+Expose the active document's committed zoom level through the acceptance harness. The probe reads the public `ZoomPlugin` scope for the active document and returns `currentZoomLevel` (`test/acceptance/viewer-harness/main.tsx`):
 
 ```ts
 zoomLevel() {
@@ -61,7 +62,7 @@ zoomLevel() {
 }
 ```
 
-After dispatching the real Control-wheel gesture, wait first for that provider-owned state and then for the DOM to render the wider page (`test/acceptance/viewer.spec.ts:87`):
+After dispatching the real Control-wheel gesture, wait first for that provider-owned state and then for the DOM to render the wider page (`test/acceptance/viewer.spec.ts`):
 
 ```ts
 await page.keyboard.down('Control');
@@ -77,7 +78,7 @@ await expect.poll(async () =>
 ).toBeGreaterThan(box.width);
 ```
 
-Only after both conditions hold does the test compute the zoomed pointer coordinates and start the second drag (`test/acceptance/viewer.spec.ts:95`). The fix was delivered and verified in [PR #5](https://github.com/brad-ross/placekeeper/pull/5), which is merged.
+Only after both conditions hold does the test compute the zoomed pointer coordinates and start the second drag (`test/acceptance/viewer.spec.ts`). The fix was delivered and verified in [PR #5](https://github.com/brad-ross/placekeeper/pull/5), which is merged.
 
 ## Why This Works
 

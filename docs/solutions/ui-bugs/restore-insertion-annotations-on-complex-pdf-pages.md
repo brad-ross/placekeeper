@@ -1,7 +1,7 @@
 ---
 title: Restore insertion annotations on complex PDF pages
 date: 2026-08-23
-last_updated: 2026-08-23
+last_updated: 2026-09-10
 category: ui-bugs
 module: PDF caret anchor selection
 problem_type: ui_bug
@@ -37,7 +37,7 @@ Insertion annotations could not be created on otherwise valid prose in complex P
 
 The first correction, merged in [PR #53](https://github.com/brad-ross/placekeeper/pull/53), localized overlap, reading-order, unsupported-script, and malformed-glyph checks. It established the right click-specific invariant: after global page reliability passes, only geometry that can own or change the pointer's text edge participates in click-specific ambiguity checks. Later-page and baseline-shifted failures exposed two remaining violations of that invariant:
 
-1. Caret creation still required one unique sequential alignment for every text rectangle on the page before applying pointer-local checks. Repeated text or complex extraction elsewhere could make that global mapping absent or nonunique even when the clicked glyphs identified one exact occurrence (`apps/web/src/pdf/selection-anchor.ts:335-385`).
+1. Caret creation still required one unique sequential alignment for every text rectangle on the page before applying pointer-local checks. Repeated text or complex extraction elsewhere could make that global mapping absent or nonunique even when the clicked glyphs identified one exact occurrence (`apps/web/src/pdf/selection-anchor.ts`).
 2. Reading order used rectangle origins as a proxy for visual lines. Inline subscript or superscript runs may have shifted origins while their vertical spans still overlap, so origin ordering could reject ordinary same-line text.
 
 The follow-up correction merged in [PR #54](https://github.com/brad-ross/placekeeper/pull/54) on 2026-08-23.
@@ -47,7 +47,7 @@ The follow-up correction merged in [PR #54](https://github.com/brad-ross/placeke
 - In the reproduced 24-page PDF, a caret worked on some first-page prose but disappeared on later text pages, including ordinary prose.
 - Repeating the same sentence in more than one run could make content-only alignment ambiguous even though PDFium glyph offsets and geometry uniquely identified the run under the pointer.
 - Adjacent runs with different heights or baselines could return `caret-reading-order-unsupported` despite belonging to the same visible line.
-- A blanket relaxation would be unsafe: malformed local geometry, incomplete local glyph coverage, local overlap, unsupported local reading order, and tied candidates must still fail closed (`apps/web/test/selection-anchor.test.ts:372-400`, `apps/web/test/selection-anchor.test.ts:435-447`, `apps/web/test/selection-anchor.test.ts:498-529`).
+- A blanket relaxation would be unsafe: malformed local geometry, incomplete local glyph coverage, local overlap, unsupported local reading order, and tied candidates must still fail closed (`apps/web/test/selection-anchor.test.ts`).
 
 ## What Didn't Work
 
@@ -66,13 +66,13 @@ Increasing a fixed tolerance around `origin.y` was also the wrong abstraction. I
 
 The investigation reached these conclusions incrementally (session history). Relaxing one page-wide veto repeatedly exposed another: distant overlap was followed by unsupported reading order, then page-wide glyph-to-rectangle validation, then a zero-area trailing whitespace slot. The earlier real-document proof covered one first-page click, so calling the page-wide assumption fully resolved was premature; later-page and baseline-shifted probes were necessary to expose the residual failures.
 
-The fix must never invent a character boundary. If exact glyph alignment is unavailable, a multi-character rectangle remains atomic: its outer edges may be candidates, but an interior click is rejected instead of being proportionally divided into a guessed text offset (`apps/web/src/pdf/selection-anchor.ts:587-590`, `apps/web/src/pdf/selection-anchor.ts:631-677`).
+The fix must never invent a character boundary. If exact glyph alignment is unavailable, a multi-character rectangle remains atomic: its outer edges may be candidates, but an interior click is rejected instead of being proportionally divided into a guessed text offset (`apps/web/src/pdf/selection-anchor.ts`).
 
 ## Solution
 
 ### Align only pointer-relevant rectangles when glyph offsets exist
 
-Caret creation now selects a glyph-aware, pointer-local mapper when indexed glyphs are available and retains the page-wide solver only as the no-glyph fallback (`apps/web/src/pdf/selection-anchor.ts:607-610`):
+Caret creation now selects a glyph-aware, pointer-local mapper when indexed glyphs are available and retains the page-wide solver only as the no-glyph fallback (`apps/web/src/pdf/selection-anchor.ts`):
 
 ```ts
 const mapped = input.page.glyphs && input.page.glyphs.length > 0
@@ -80,13 +80,13 @@ const mapped = input.page.glyphs && input.page.glyphs.length > 0
   : alignTextRects(input.page);
 ```
 
-`alignPointerTextRectsWithGlyphs` limits the mapping set to nonempty text rectangles close enough to own the click and indexes only in-range glyph offsets with valid rectangles (`apps/web/src/pdf/selection-anchor.ts:388-415`). For each local rectangle, it finds all exact occurrences of its content in extracted text while retaining the trailing-control-unit fallback (`apps/web/src/pdf/selection-anchor.ts:417-428`).
+`alignPointerTextRectsWithGlyphs` limits the mapping set to nonempty text rectangles close enough to own the click and indexes only in-range glyph offsets with valid rectangles (`apps/web/src/pdf/selection-anchor.ts`). For each local rectangle, it finds all exact occurrences of its content in extracted text while retaining the trailing-control-unit fallback (`apps/web/src/pdf/selection-anchor.ts`).
 
-When content repeats, an occurrence survives only if every non-whitespace offset has glyph geometry overlapping the local text rectangle. Exactly one surviving occurrence is required; zero or multiple compatible occurrences still fail closed (`apps/web/src/pdf/selection-anchor.ts:429-440`). The repeated-text unit regression proves that offsets for the second `same` occurrence produce the context `same x sa|me`, instead of being rejected as globally nonunique (`apps/web/test/selection-anchor.test.ts:280-298`).
+When content repeats, an occurrence survives only if every non-whitespace offset has glyph geometry overlapping the local text rectangle. Exactly one surviving occurrence is required; zero or multiple compatible occurrences still fail closed (`apps/web/src/pdf/selection-anchor.ts`). The repeated-text unit regression proves that offsets for the second `same` occurrence produce the context `same x sa|me`, instead of being rejected as globally nonunique (`apps/web/test/selection-anchor.test.ts`).
 
 ### Classify visual lines from their spans
 
-Reading-order validation now compares vertical spans and centers for adjacent pointer-relevant rectangles. Runs count as the same visual line when the spans overlap or the centers are sufficiently close relative to their heights; horizontal reversal is rejected only within such a line. Genuine line transitions still enforce vertical order (`apps/web/src/pdf/selection-anchor.ts:464-484`).
+Reading-order validation now compares vertical spans and centers for adjacent pointer-relevant rectangles. Runs count as the same visual line when the spans overlap or the centers are sufficiently close relative to their heights; horizontal reversal is rejected only within such a line. Genuine line transitions still enforce vertical order (`apps/web/src/pdf/selection-anchor.ts`).
 
 ```ts
 const sameLine = verticalOverlap > 0
@@ -94,23 +94,23 @@ const sameLine = verticalOverlap > 0
      <= Math.min(6, Math.max(previous.size.height, current.size.height) / 2);
 ```
 
-The baseline-shifted unit regression places a short, lower-height `ij ` run beside a taller `minutes` run with different origins and requires exact left/right caret context (`apps/web/test/selection-anchor.test.ts:254-278`).
+The baseline-shifted unit regression places a short, lower-height `ij ` run beside a taller `minutes` run with different origins and requires exact left/right caret context (`apps/web/test/selection-anchor.test.ts`).
 
 ### Exercise real page transitions
 
-The acceptance harness now makes text-geometry readiness page-specific and records the emitted caret's page index and left context (`test/acceptance/viewer-harness/main.tsx:24-32`, `test/acceptance/viewer-harness/main.tsx:69-74`, `test/acceptance/viewer-harness/main.tsx:123-149`). Its generated two-page fixture repeats the same sentence twice on each page and adds page-specific prose (`test/fixtures/pdfs/generate.ts:117-129`). The browser regression clicks repeated text on page 1, navigates to page 2, waits for page-2 geometry, and verifies the correct page and semantic context after both clicks (`test/acceptance/viewer.spec.ts:240-260`).
+The acceptance harness now makes text-geometry readiness page-specific and records the emitted caret's page index and left context (`test/acceptance/viewer-harness/main.tsx`). Its generated two-page fixture repeats the same sentence twice on each page and adds page-specific prose (`test/fixtures/pdfs/generate.ts`). The browser regression clicks repeated text on page 1, navigates to page 2, waits for page-2 geometry, and verifies the correct page and semantic context after both clicks (`test/acceptance/viewer.spec.ts`).
 
 ## Why This Works
 
-An Insertion Caret Anchor couples one exact extracted-text boundary with left/right context and a thin crop-relative page position (`apps/web/src/pdf/selection-anchor.ts:264-280`). With indexed glyph geometry, content equality proposes possible occurrences, exact engine offsets identify characters, and rectangle overlap proves which occurrence belongs to the visible run near the pointer. A unique full-page parse is neither necessary nor more authoritative for one click.
+An Insertion Caret Anchor couples one exact extracted-text boundary with left/right context and a thin crop-relative page position (`apps/web/src/pdf/selection-anchor.ts`). With indexed glyph geometry, content equality proposes possible occurrences, exact engine offsets identify characters, and rectangle overlap proves which occurrence belongs to the visible run near the pointer. A unique full-page parse is neither necessary nor more authoritative for one click.
 
 The two corrections preserve the fail-closed boundary:
 
 - Distant or repeated page content cannot veto an exact local caret.
-- Local overlapping owners and unsupported local reading order still reject (`apps/web/src/pdf/selection-anchor.ts:611-629`).
-- Required non-whitespace offsets still need exact, valid local glyph coverage (`apps/web/src/pdf/selection-anchor.ts:494-540`).
-- Candidate ties with different text offsets still reject (`apps/web/src/pdf/selection-anchor.ts:674-687`).
-- Pages without usable extracted text or valid text rectangles still fail the global page-reliability check (`apps/web/src/pdf/text-reliability.ts:73-90`).
+- Local overlapping owners and unsupported local reading order still reject (`apps/web/src/pdf/selection-anchor.ts`).
+- Required non-whitespace offsets still need exact, valid local glyph coverage (`apps/web/src/pdf/selection-anchor.ts`).
+- Candidate ties with different text offsets still reject (`apps/web/src/pdf/selection-anchor.ts`).
+- Pages without usable extracted text or valid text rectangles still fail the global page-reliability check (`apps/web/src/pdf/text-reliability.ts`).
 
 The durable boundary is therefore two-tiered: validate globally that the page is a usable text source, then validate click-specific identity and ambiguity only where geometry can affect the pointer's text edge.
 

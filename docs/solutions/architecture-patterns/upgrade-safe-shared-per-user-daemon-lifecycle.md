@@ -1,7 +1,7 @@
 ---
 title: Upgrade-safe lifecycle for a shared per-user daemon
 date: 2026-08-12
-last_updated: 2026-08-21
+last_updated: 2026-09-10
 category: architecture-patterns
 module: Shared daemon lifecycle
 problem_type: architecture_pattern
@@ -44,15 +44,15 @@ The triggering failure was an installed launcher reaching an older daemon that s
 
 ### Classify the daemon before touching the bundle
 
-Expose a versioned management status containing stable daemon identity, lifecycle, readiness evidence, and privacy-safe aggregate counts (`apps/service/src/host/launch-control.ts:40-54`, `apps/service/src/host/launch-control.ts:126-136`). Parse it strictly and classify the listener as:
+Expose a versioned management status containing stable daemon identity, lifecycle, readiness evidence, and privacy-safe aggregate counts (`apps/service/src/host/launch-control.ts`). Parse it strictly and classify the listener as:
 
 - `exact` when its protocol and daemon identity match;
 - `incompatible` when management is valid but identity differs;
 - `uninspectable` for legacy, malformed, oversized, timed-out, or early-closed responses.
 
-Unknown does not mean idle. An uninspectable listener blocks automatic replacement (`apps/service/src/host/launch-control.ts:651-738`, `apps/service/src/host/upgrade-coordinator.ts:42-46`).
+Unknown does not mean idle. An uninspectable listener blocks automatic replacement (`apps/service/src/host/launch-control.ts`, `apps/service/src/host/upgrade-coordinator.ts`).
 
-Keep daemon compatibility identity separate from complete install-artifact identity. An exact daemon plus an identical complete artifact justifies a no-op; matching service identity alone does not prove that every bundled asset is identical (`apps/service/src/host/upgrade-coordinator.ts:34-66`).
+Keep daemon compatibility identity separate from complete install-artifact identity. An exact daemon plus an identical complete artifact justifies a no-op; matching service identity alone does not prove that every bundled asset is identical (`apps/service/src/host/upgrade-coordinator.ts`).
 
 ### Measure process-wide activity
 
@@ -60,13 +60,14 @@ The unit of safety is the shared process, not the PDF that initiated installatio
 
 - authenticated review presence plus bounded reconnect/bootstrap grace;
 - pending and active agent-task bindings;
+- Chrome connections, Mac review helpers, and registered Mac app instances, including a resident app with no open windows;
 - in-flight saves, broker writes, pickers, source workflows, launches, and HTTP/control routes.
 
-The broker combines browser presence and task activity; the host adds saving and transient work; the lifecycle coordinator includes active route leases (`apps/service/src/sessions/session-broker.ts:570-581`, `apps/service/src/host/placekeeper-host.ts:135-147`, `apps/service/src/host/daemon-lifecycle.ts:34-43`).
+The broker combines browser presence and task activity; the host adds Chrome/native presence, saving, and transient work; the lifecycle coordinator includes active route leases (`apps/service/src/sessions/session-broker.ts`, `apps/service/src/host/placekeeper-host.ts`, `apps/service/src/host/daemon-lifecycle.ts`).
 
-Presence must not depend on a retained session record or browser unload. Connected authenticated control sockets are authoritative while present, and a bounded grace prevents a short navigation or disconnect gap from making an active review appear idle (`apps/service/src/sessions/control-socket.ts:45-70`, `apps/service/src/sessions/control-socket.ts:137-176`).
+Presence must not depend on a retained session record or browser unload. Connected authenticated control sockets are authoritative while present, and a bounded grace prevents a short navigation or disconnect gap from making an active review appear idle (`apps/service/src/sessions/control-socket.ts`).
 
-Map aggregate blockers to actionable reasons: visible review presence first, agent tasks next, then transient work (`apps/service/src/host/upgrade-coordinator.ts:26-31`). Deferral is a correct safety result.
+Map aggregate blockers to actionable reasons: visible review presence first, agent tasks next, then transient work (`apps/service/src/host/upgrade-coordinator.ts`). Deferral is a correct safety result.
 
 ### Use a reversible compare-and-drain gate
 
@@ -79,21 +80,21 @@ accepting -> draining -> shutdown-committed
           accepting
 ```
 
-Refuse draining when non-drainable review, task, or route activity exists. Otherwise enter `draining`, await accepted saves and broker writes, then re-read all aggregate activity. Any activity entering during the drain cancels the attempt and restores accepting; only a stable empty recheck commits shutdown (`apps/service/src/host/daemon-lifecycle.ts:46-104`).
+Refuse draining when non-drainable review, task, or route activity exists. Otherwise enter `draining`, await accepted saves and broker writes, then re-read all aggregate activity. Any activity entering during the drain cancels the attempt and restores accepting; only a stable empty recheck commits shutdown (`apps/service/src/host/daemon-lifecycle.ts`).
 
-Route all meaningful work through the same activity authority. Work arriving during drain cancels retirement, while requests after commit are rejected (`apps/service/src/host/launch-control.ts:383-510`, `apps/service/src/server/http-server.ts:173-180`). This closes the race between “idle” inspection and exit.
+Route all meaningful work through the same activity authority. Work arriving during drain cancels retirement, while requests after commit are rejected (`apps/service/src/host/launch-control.ts`, `apps/service/src/server/http-server.ts`). This closes the race between “idle” inspection and exit.
 
 ### Flush acknowledgement before socket retirement
 
-When conditional shutdown succeeds, serialize and flush the accepted management response before closing the host, control server, and socket (`apps/service/src/host/launch-control.ts:520-598`). The installer then waits for socket disappearance before replacing the bundle (`apps/service/src/host/upgrade-coordinator.ts:62-65`).
+When conditional shutdown succeeds, serialize and flush the accepted management response before closing the host, control server, and socket (`apps/service/src/host/launch-control.ts`). The installer then waits for socket disappearance before replacing the bundle (`apps/service/src/host/upgrade-coordinator.ts`).
 
 Without response-first closure, a successful shutdown can look like an invalid or truncated protocol exchange—the same class of symptom that motivated the work.
 
 ### Linearize install, launch, and startup
 
-Use one per-user filesystem lifecycle lock across installer coordination, ordinary launch, daemon retirement, replacement, and candidate startup. The lock has a private owner record containing a PID and random token; a child may borrow only the exact inherited token already recorded on disk (`apps/service/src/host/lifecycle-lock.ts:125-170`).
+Use one per-user filesystem lifecycle lock across installer coordination, ordinary launch, daemon retirement, replacement, and candidate startup. The lock has a private owner record containing a PID and random token; a child may borrow only the exact inherited token already recorded on disk (`apps/service/src/host/lifecycle-lock.ts`).
 
-Reclaim stale locks conservatively. Never let an earlier reclaimer delete a newer owner's lock (`apps/service/src/host/lifecycle-lock.ts:89-119`). Launch and candidate startup share the inherited token, while installation holds the same transaction across inspection and readiness (`apps/service/src/host/service-daemon.ts:152-274`, `apps/service/src/cli/daemon-command.ts:184-252`).
+Reclaim stale locks conservatively. Never let an earlier reclaimer delete a newer owner's lock (`apps/service/src/host/lifecycle-lock.ts`). Launch and candidate startup share the inherited token, while installation holds the same transaction across inspection and readiness (`apps/service/src/host/service-daemon.ts`, `apps/service/src/cli/daemon-command.ts`).
 
 ### Make each installer outcome explicit
 
@@ -104,27 +105,27 @@ Four common coordinator paths are:
 3. idle inspectable daemon → cooperative drain, retirement, and replacement;
 4. uninspectable or malformed daemon → refuse automatic termination and require the operator to close active Placekeeper work before retrying.
 
-Transient work may receive a bounded opportunity to drain, but the bundle is never replaced while old code still owns unfinished work (`apps/service/src/host/upgrade-coordinator.ts:38-66`).
+Transient work may receive a bounded opportunity to drain, but the bundle is never replaced while old code still owns unfinished work (`apps/service/src/host/upgrade-coordinator.ts`).
 
-An uninspectable daemon cannot prove absence of work, so the installer leaves the bundle untouched and reports a close-and-retry recovery action (`apps/service/src/host/upgrade-coordinator.ts:38-46`, `apps/service/src/host/launch-control.ts:113-118`). There is no legacy-stop command or automatic signal fallback; process-wide kill commands are not an installer strategy.
+An uninspectable daemon cannot prove absence of work, so the installer leaves the bundle untouched and reports a close-and-retry recovery action (`apps/service/src/host/upgrade-coordinator.ts`, `apps/service/src/host/launch-control.ts`). There is no legacy-stop command or automatic signal fallback; process-wide kill commands are not an installer strategy.
 
 ### Prove candidate readiness before commit
 
-Stage replacement privately, retain the prior app, and do not finalize until the installed candidate starts its exact daemon and reports the expected identity, accepting lifecycle, and unique readiness token (`packaging/macos/install-built-app.sh:23-32`, `packaging/macos/install-built-app.sh:78-101`, `apps/service/src/host/service-daemon.ts:173-210`).
+Stage replacement privately, retain the prior app, and do not finalize until the installed candidate starts its exact daemon and reports the expected identity, accepting lifecycle, and unique readiness token (`packaging/macos/install-built-app.sh`, `apps/service/src/host/service-daemon.ts`).
 
-If readiness fails, retire the exact candidate before restoring the previous bundle. If retirement cannot be proven, preserve the transaction rather than restoring old files underneath a potentially live new process (`packaging/macos/install-built-app.sh:33-71`).
+If readiness fails, retire the exact candidate before restoring the previous bundle. If retirement cannot be proven, preserve the transaction rather than restoring old files underneath a potentially live new process (`packaging/macos/install-built-app.sh`).
 
-The packaged daemon's numeric-loopback port is part of readiness. Production always binds the fixed Placekeeper port; only the isolated installed smoke may inject another explicit port (`apps/service/src/server/http-server.ts:21-22`, `apps/service/src/host/service-daemon.ts:55-79`, `apps/service/src/host/service-daemon.ts:122-174`). A foreign listener therefore causes candidate startup and installation to fail explicitly. Never fall back to a random port or terminate an unknown process merely to make the candidate ready.
+The packaged daemon's numeric-loopback port is part of readiness. Production always binds the fixed Placekeeper port; the isolated installed smoke and an explicitly development-identified runtime may use a private root and port (`apps/service/src/server/http-server.ts`, `apps/service/src/host/service-daemon.ts`). A foreign listener therefore causes candidate startup and installation to fail explicitly. Never fall back to a random port or terminate an unknown process merely to make the candidate ready.
 
 ### Preserve reachability without migrating authority
 
-Reusing the fixed loopback origin lets a browser retry the same literal readable URL after replacement, but it does not make the successor daemon the old daemon's security principal. Browser-view records, scoped cookie digests, credentials, launch scopes, and task bindings remain process-local. When the successor receives a syntactically valid old route with no matching live view, it clears the stale cookie and serves inert recovery containing only a canonical Placekeeper Link (`apps/service/src/server/http-server.ts:393-425`, `apps/service/src/sessions/session-broker.ts:648-689`).
+Reusing the fixed loopback origin lets a browser retry the same literal readable URL after replacement, but it does not make the successor daemon the old daemon's security principal. Browser-view records, scoped cookie digests, credentials, launch scopes, and task bindings remain process-local. When the successor receives a syntactically valid old route with no matching live view, it clears the stale cookie and serves inert recovery containing only a canonical Placekeeper Link (`apps/service/src/server/http-server.ts`, `apps/service/src/sessions/session-broker.ts`).
 
 The user must explicitly follow that link through the normal file-confirmation and open flow. The resulting browser view and credential are fresh; they cannot inherit the old credential or infer a task binding from the path. A separately persisted, short-lived two-sided ticket may reattach the new view only when both a path-scoped browser token and the owning task's next prompt match. This remains document/location recovery plus a fresh proof of task ownership, not live-session migration. [Authority boundaries for reloadable local-review URLs](reloadable-local-review-url-authority-boundaries.md) defines that distinction in detail.
 
 ### Test the physical installed lifecycle
 
-Unit tests cannot prove cross-process bundle-path behavior. The installed smoke must run real packaged launchers and daemons, open multiple authenticated PDFs, retain an active agent context, attempt an incompatible upgrade, and verify that the installed identity and both sessions remain usable. Only after task revocation and browser-grace expiry should replacement succeed and launch another PDF (`packaging/macos/smoke-installed.ts:321-399`). The successful-replacement phase must also prove that the successor owns the same origin while an old readable route becomes inert recovery rather than a resumed session (`packaging/macos/smoke-installed.ts:560-597`).
+Unit tests cannot prove cross-process bundle-path behavior. The installed smoke must run real packaged launchers and daemons, open multiple authenticated PDFs, retain an active agent context, attempt an incompatible upgrade, and verify that the installed identity and both sessions remain usable. Only after task revocation and browser-grace expiry should replacement succeed and launch another PDF (`packaging/macos/smoke-installed.ts`). The successful-replacement phase must also prove that the successor owns the same origin while an old readable route becomes inert recovery rather than a resumed session (`packaging/macos/smoke-installed.ts`).
 
 The work progressed from focused lifecycle tests to this installed proof because unit-level checks alone did not validate the upgrade boundary (session history).
 
@@ -176,7 +177,7 @@ accepting + no non-drainable activity
 
 ### New work during drain
 
-If a launch or route enters while draining, its activity lease changes the attempt generation and restores accepting. The upgrade defers instead of racing the new work (`apps/service/src/host/daemon-lifecycle.ts:46-61`, `apps/service/src/host/daemon-lifecycle.ts:80-94`).
+If a launch or route enters while draining, its activity lease changes the attempt generation and restores accepting. The upgrade defers instead of racing the new work (`apps/service/src/host/daemon-lifecycle.ts`).
 
 ### Candidate failure
 

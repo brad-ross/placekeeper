@@ -1,6 +1,7 @@
 ---
 title: Stabilizing recoverable reference flows in WebKit acceptance tests
 date: 2026-08-11
+last_updated: 2026-09-10
 category: test-failures
 module: production-flow acceptance tests
 problem_type: test_failure
@@ -35,21 +36,21 @@ The fix landed in [PR #7](https://github.com/brad-ross/placekeeper/pull/7). It c
 
 ## Symptoms
 
-- The failing WebKit artifact showed the References tray with “Reference unavailable.” and a “Retry reference” control instead of the expected “Primary result” tab. Those are the intentional pending-reference error controls rendered by `ReferenceWorkspace` (`apps/web/src/review/ReferenceWorkspace.tsx:462-480`).
-- The central flow failed at its first selected-tab assertion. The current test now observes either the tab or retry button before proceeding (`test/acceptance/production-flow.spec.ts:304-317`).
-- A dedicated scenario already proved recovery: it aborts the second document request, verifies the error and focused Retry control, retries, and then requires the selected and focused target tab (`test/acceptance/production-flow.spec.ts:1494-1539`). This isolated the failure to the broad test's assumption rather than a missing recovery path.
+- The failing WebKit artifact showed the References tray with “Reference unavailable.” and a “Retry reference” control instead of the expected “Primary result” tab. Those are the intentional pending-reference error controls rendered by `ReferenceWorkspace` (`apps/web/src/review/ReferenceWorkspace.tsx`).
+- The central flow failed at its first selected-tab assertion. The current test now observes either the tab or retry button before proceeding (`test/acceptance/production-flow.spec.ts`).
+- A dedicated scenario already proved recovery: it aborts the second document request, verifies the error and focused Retry control, retries, and then requires the selected and focused target tab (`test/acceptance/production-flow.spec.ts`). This isolated the failure to the broad test's assumption rather than a missing recovery path.
 
 ## What Didn't Work
 
 ### Treating the retry state as a product failure
 
-Requiring the tab immediately conflated “completed on the first attempt” with “the user-visible flow works.” The coordinator retains the pending target before opening the reference controller and routes controller, navigation-adapter, or target-application failure through `failReference()` (`apps/web/src/review/navigation-coordinator.ts:360-429`). That method changes the pending panel to `error` while preserving its metadata (`apps/web/src/review/navigation-coordinator.ts:919-926`).
+Requiring the tab immediately conflated “completed on the first attempt” with “the user-visible flow works.” The coordinator retains the pending target before opening the reference controller and routes controller, navigation-adapter, or target-application failure through `failReference()` (`apps/web/src/review/navigation-coordinator.ts`). That method changes the pending panel to `error` while preserving its metadata (`apps/web/src/review/navigation-coordinator.ts`).
 
-The workspace makes this recovery path operable: an error pending state selects the Retry control as the focus target (`apps/web/src/review/ReferenceWorkspace.tsx:79-97`), and the layout effect moves focus there when the error becomes available (`apps/web/src/review/ReferenceWorkspace.tsx:171-180`). A test that rejects this state contradicts the supported UI.
+The workspace makes this recovery path operable: an error pending state selects the Retry control as the focus target (`apps/web/src/review/ReferenceWorkspace.tsx`), and the layout effect moves focus there when the error becomes available (`apps/web/src/review/ReferenceWorkspace.tsx`). A test that rejects this state contradicts the supported UI.
 
 ### Relying on a whole-test Playwright retry
 
-Rerunning the test from the beginning does not exercise the application's retry operation. `retryReference()` preserves the pending target, retries or reuses the controller according to its status, reapplies the target, opens the tab, clears the pending state, and focuses the result (`apps/web/src/review/navigation-coordinator.ts:432-471`). The broad flow needed to click Retry in the same browser state.
+Rerunning the test from the beginning does not exercise the application's retry operation. `retryReference()` preserves the pending target, retries or reuses the controller according to its status, reapplies the target, opens the tab, clears the pending state, and focuses the result (`apps/web/src/review/navigation-coordinator.ts`). The broad flow needed to click Retry in the same browser state.
 
 ### Using actionability-sensitive operations around a portal
 
@@ -79,16 +80,11 @@ After:
 
 ```ts
 const primaryTab = page.getByRole("tab", { name: /Primary result/u });
-const retryPrimaryReference = page.getByRole("button", { name: "Retry reference" });
-await expect.poll(async () => (
-  (await primaryTab.count()) + (await retryPrimaryReference.count())
-)).toBeGreaterThan(0);
-if (await retryPrimaryReference.isVisible()) await retryPrimaryReference.click();
-await expect(primaryTab).toHaveAttribute("aria-selected", "true");
+await expectReferenceReady(page, primaryTab);
 await expect(primaryTab).toBeFocused();
 ```
 
-This is the central-flow implementation at `test/acceptance/production-flow.spec.ts:310-317`. It permits either valid intermediate state but preserves one strong end state.
+`expectReferenceReady` owns readiness polling, one conditional Retry activation, and `REFERENCE_READY_TIMEOUT_MS`; the caller separately asserts focus. This is the central-flow implementation at `test/acceptance/production-flow.spec.ts`. It permits either valid intermediate state but preserves one strong end state.
 
 ### Activate portaled actions through actual page focus
 
@@ -102,28 +98,28 @@ await expect(action).toBeFocused({ timeout: 1_500 });
 await page.keyboard.press("Enter");
 ```
 
-The complete helper bounds the portal-settling retry to two attempts (`test/acceptance/production-flow.spec.ts:91-109`). Role locators still prove accessible identity and focus; native keyboard input performs the activation against the document's current focused element.
+The complete helper bounds the portal-settling retry to two attempts (`test/acceptance/production-flow.spec.ts`). Role locators still prove accessible identity and focus; native keyboard input performs the activation against the document's current focused element.
 
 ### Assert semantic visibility instead of exact centering
 
-The narrow test normalizes the distance between viewport center and page center by half the rendered page height and requires the result to be below one (`test/acceptance/production-flow.spec.ts:1054-1067`). This proves that the viewport center lies within the intended page's vertical bounds without requiring an unattainable pixel-perfect position.
+The narrow test normalizes the distance between viewport center and page center by half the rendered page height and requires the result to be below one (`test/acceptance/production-flow.spec.ts`). This proves that the viewport center lies within the intended page's vertical bounds without requiring an unattainable pixel-perfect position.
 
 ### Separate keyboard-order evidence from behavioral activation
 
-The test independently proves the focus sequence from the active tab to Send, then Close, then back to Send (`test/acceptance/production-flow.spec.ts:1069-1079`). It then clicks the currently resolved Send control and verifies main-document navigation and survivor selection (`test/acceptance/production-flow.spec.ts:1080-1089`). Final close uses a fresh role locator and keyboard activation without a redundant focus assertion (`test/acceptance/production-flow.spec.ts:1094-1099`).
+The test independently proves the focus sequence from the active tab to Send, then Close, then back to Send (`test/acceptance/production-flow.spec.ts`). It then clicks the currently resolved Send control and verifies main-document navigation and survivor selection (`test/acceptance/production-flow.spec.ts`). Final close uses a fresh role locator and keyboard activation without a redundant focus assertion (`test/acceptance/production-flow.spec.ts`).
 
 ## Why This Works
 
-The test now follows the product state machine. Opening a new reference publishes a pending state before attempting the controller, navigation adapter, and target application (`apps/web/src/review/navigation-coordinator.ts:360-429`). Failure keeps the request recoverable and exposes the Retry UI (`apps/web/src/review/navigation-coordinator.ts:919-926`, `apps/web/src/review/ReferenceWorkspace.tsx:462-480`). Retrying uses the retained target and metadata, then opens and focuses the tab on success (`apps/web/src/review/navigation-coordinator.ts:432-471`).
+The test now follows the product state machine. Opening a new reference publishes a pending state before attempting the controller, navigation adapter, and target application (`apps/web/src/review/navigation-coordinator.ts`). Failure keeps the request recoverable and exposes the Retry UI (`apps/web/src/review/navigation-coordinator.ts`, `apps/web/src/review/ReferenceWorkspace.tsx`). Retrying uses the retained target and metadata, then opens and focuses the tab on success (`apps/web/src/review/navigation-coordinator.ts`).
 
-The acceptance flow allows nondeterminism only at that documented recovery boundary. It does not accept an arbitrary timeout, skip navigation, or weaken the outcome: after at most one explicit retry, the target tab must be selected and focused (`test/acceptance/production-flow.spec.ts:310-317`). The companion changes remove assumptions about portal node lifetime and exact engine geometry while retaining explicit checks for keyboard order, main-document navigation, survivor selection, and final closure.
+The acceptance flow allows nondeterminism only at that documented recovery boundary. It does not accept an arbitrary timeout, skip navigation, or weaken the outcome: after at most one explicit retry, the target tab must be selected and focused (`test/acceptance/production-flow.spec.ts`). The companion changes remove assumptions about portal node lifetime and exact engine geometry while retaining explicit checks for keyboard order, main-document navigation, survivor selection, and final closure.
 
 Verification for PR #7 included the exact WebKit gate (43 tests), the full Chromium production acceptance set (57 tests), and 20 focused Chromium repetitions of the narrow reference flow. Lint, type checking, the web build, and diff hygiene also passed before GitHub CI completed successfully.
 
 ## Prevention
 
 1. **Model supported transient states in broad end-to-end flows.** When a product deliberately exposes loading, recoverable error, and success states, wait for the valid intermediate outcomes and converge on one required semantic postcondition.
-2. **Keep a dedicated failure-injection test.** The focused retry scenario remains the authoritative proof of error copy, focus placement, request retry, and recovery (`test/acceptance/production-flow.spec.ts:1494-1539`).
+2. **Keep a dedicated failure-injection test.** The focused retry scenario remains the authoritative proof of error copy, focus placement, request retry, and recovery (`test/acceptance/production-flow.spec.ts`).
 3. **Do not substitute framework retries for in-product recovery.** A Playwright retry restarts the scenario; clicking “Retry reference” exercises the retained request and recovery branch.
 4. **Use role locators for assertions and native input for portal activation races.** Verify focus ownership, then send the key to the document's current focused element. Bound any retry to the known portal-settling boundary.
 5. **Assert user-visible geometry semantics.** Containment or meaningful intersection is more durable across engines and constrained layouts than exact pixel centering.

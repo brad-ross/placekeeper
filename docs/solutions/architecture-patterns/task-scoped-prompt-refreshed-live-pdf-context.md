@@ -1,7 +1,7 @@
 ---
 title: Task-scoped, prompt-refreshed live PDF context
 date: 2026-08-12
-last_updated: 2026-08-21
+last_updated: 2026-09-10
 category: architecture-patterns
 module: Live PDF Context
 problem_type: architecture_pattern
@@ -41,63 +41,65 @@ Earlier approaches centered on autosave or a visible handoff action, but the nee
 
 Live PDF Context therefore works as a task-scoped synchronization protocol. A launch establishes correlation, every prompt requests a fresh atomic observation, delivery is acknowledged separately from computation, and deeper document evidence is exposed through a bounded capability.
 
+An authorized Document Generation transition may migrate the active task association while invalidating its prior freshness and evidence. `migrateGeneration` in `apps/service/src/context/task-binding-registry.ts` consumes pending proofs and clears `lastVerified`; old-generation evidence remains unusable. Browser polling and projection identity are owned by `apps/web/src/host/use-codex-context.ts` and `context-projection.ts`.
+
 ## Guidance
 
 ### Bind one review generation to one agent task
 
-Use a two-sided handshake instead of inferring ownership from the active application window. A launch creates a one-time proof scoped to the review session, document generation, and browser capability (`apps/service/src/context/task-binding-registry.ts:110-139`). The agent hook claims that proof for its task, producing a pending binding; the authenticated browser must then activate the same review generation with its matching capability (`apps/service/src/context/task-binding-registry.ts:141-247`).
+Use a two-sided handshake instead of inferring ownership from the active application window. A launch creates a one-time proof scoped to the review session, document generation, and browser capability (`apps/service/src/context/task-binding-registry.ts`). The agent hook claims that proof for its task, producing a pending binding; the authenticated browser must then activate the same review generation with its matching capability (`apps/service/src/context/task-binding-registry.ts`).
 
-Keep the association exclusive. Existing bindings are reusable only when task, review, and generation all match; competing claims are denied without disclosing the current owner. Each accepted repeat claim adds only that launch's browser-capability hash to the existing binding (`apps/service/src/context/task-binding-registry.ts:166-205`). Browser heartbeats and status reads must present a capability hash already owned by that binding, so another task's later projection cannot borrow the first projection's scope (`apps/service/src/context/task-binding-registry.ts:268-288`, `apps/service/src/context/task-binding-registry.ts:323-379`). The packaged hook recognizes only the documented successful launcher command rather than inspecting transcript text or browser state (`apps/service/src/cli/hook-command.ts:130-180`).
+Keep the association exclusive. Existing bindings are reusable only when task, review, and generation all match; competing claims are denied without disclosing the current owner. Each accepted repeat claim adds only that launch's browser-capability hash to the existing binding (`apps/service/src/context/task-binding-registry.ts`). Browser heartbeats and status reads must present a capability hash already owned by that binding, so another task's later projection cannot borrow the first projection's scope (`apps/service/src/context/task-binding-registry.ts`). The packaged hook recognizes only the documented successful launcher command rather than inspecting transcript text or browser state (`apps/service/src/cli/hook-command.ts`).
 
 This handshake was preceded by a compatibility gate proving that the packaged hook actually received the necessary launch and prompt events. That spike avoided building task correlation on assumed host behavior (session history).
 
 ### Resume the exact browser projection
 
-A hard browser refresh must resume the projection that completed the handshake, not reconstruct task ownership from the PDF path. The first authenticated bootstrap associates its credential with the original launch scope and creates a random readable view route. Reloading that route returns the same credential only when its view ID, pathname, scoped cookie, live session, document generation, and credential still match (`apps/service/src/sessions/session-broker.ts:581-681`). Scope polling then uses that credential's retained browser-capability discriminator, preserving the original task binding without exposing its task ID to the browser (`apps/service/src/sessions/session-broker.ts:969-1008`).
+A hard browser refresh must resume the projection that completed the handshake, not reconstruct task ownership from the PDF path. The first authenticated bootstrap associates its credential with the original launch scope and creates a random readable view route. Reloading that route returns the same credential only when its view ID, pathname, scoped cookie, live session, document generation, and credential still match (`apps/service/src/sessions/session-broker.ts`). Scope polling then uses that credential's retained browser-capability discriminator, preserving the original task binding without exposing its task ID to the browser (`apps/service/src/sessions/session-broker.ts`).
 
 The credential continuity is intentionally process-local. A copied route without its cookie, an ended view, or a route answered by a successor daemon cannot recreate the credential or infer Codex scope. Post-restart recovery opens a fresh browser credential. It may reattach automatically on the owning task's next prompt only through a separate two-sided ticket: a path-scoped opaque browser token must match the same canonical source path and digest, and `UserPromptSubmit` must independently supply the exact task session ID. The ticket stores only hashes, expires, is consumed and rotated after success, and rejects foreign tasks. [Authority boundaries for reloadable local-review URLs](reloadable-local-review-url-authority-boundaries.md) defines the full live-resume versus successor-reopen contract.
 
 ### Refresh at prompt consumption
 
-Do not try to create an unsolicited agent turn whenever the app changes. Register a prompt-submission hook and pull current state when the user next asks a question (`integrations/codex-plugin/hooks/hooks.json:18-29`, `apps/service/src/cli/hook-command.ts:407-417`). This closes the interval in which a Review Item can change after one turn but before the next.
+Do not try to create an unsolicited agent turn whenever the app changes. Register a prompt-submission hook and pull current state when the user next asks a question (`integrations/codex-plugin/hooks/hooks.json`, `apps/service/src/cli/hook-command.ts`). This closes the interval in which a Review Item can change after one turn but before the next.
 
-Publish one coherent observation. The service reads a session projection, inspects immutable PDF evidence, then verifies the session again and retries if its revision, source, save state, or generation changed during projection (`apps/service/src/context/live-context-service.ts:316-375`, `apps/service/src/context/live-context-service.ts:525-538`). The core observation requires the Review Item snapshot, observation identity, and evidence handle to agree on revision, state digest, and document generation (`packages/core/src/live-context.ts:511-545`). Failure returns explicit unavailability rather than cached content labeled current.
+Publish one coherent observation. The service reads a session projection, inspects immutable PDF evidence, then verifies the session again and retries if its revision, source, save state, or generation changed during projection (`apps/service/src/context/live-context-service.ts`). The core observation requires the Review Item snapshot, observation identity, and evidence handle to agree on revision, state digest, and document generation (`packages/core/src/live-context.ts`). Failure returns explicit unavailability rather than cached content labeled current.
 
 ### Acknowledge only delivered observations
 
-Separate refresh from delivery acknowledgement. Refresh retains its snapshot as a pending delivery but does not immediately replace the task's acknowledged baseline (`apps/service/src/context/live-context-service.ts:409-422`). The hook writes the context first and sends `ack-context` only afterward (`apps/service/src/cli/hook-command.ts:407-429`).
+Separate refresh from delivery acknowledgement. Refresh retains its snapshot as a pending delivery but does not immediately replace the task's acknowledged baseline (`apps/service/src/context/live-context-service.ts`). The hook writes the context first and sends `ack-context` only afterward (`apps/service/src/cli/hook-command.ts`).
 
-If prompt output or acknowledgement fails, leaving the prior baseline in place is correct. The next prompt replays every change since the last acknowledged baseline—or a full observation when no baseline was acknowledged—instead of silently skipping work. A caller-provided cursor is not authority: deltas are based on the server-owned acknowledged snapshot for the same review generation (`apps/service/src/context/live-context-service.ts:275-314`). An unknown cursor degrades to a full snapshot (`packages/core/src/live-context.ts:368-385`).
+If prompt output or acknowledgement fails, leaving the prior baseline in place is correct. The next prompt replays every change since the last acknowledged baseline—or a full observation when no baseline was acknowledged—instead of silently skipping work. An arbitrary caller-provided cursor cannot select the baseline: deltas use the server-owned acknowledged snapshot for the same review generation. A valid pending-delivery cursor may explicitly acknowledge that delivery on the next refresh (`apps/service/src/context/live-context-service.ts`). An unknown cursor cannot advance the acknowledged baseline; refresh remains based on the last acknowledged snapshot, or returns a full observation when none exists for this generation (`apps/service/src/context/live-context-service.ts`).
 
 ### Diff semantic records explicitly
 
-The synchronized object is the canonical structured Review Item, not viewer markup or timestamps. Its digest uses stable semantic fields in deterministic order (`packages/core/src/live-context.ts:322-365`). Between acknowledged snapshots, new IDs are additions, missing IDs are removals, and retained IDs with changed projections are edits (`packages/core/src/live-context.ts:388-410`).
+The synchronized object is the canonical structured Review Item, not viewer markup or timestamps. Its digest uses stable semantic fields in deterministic order (`packages/core/src/live-context.ts`). Between acknowledged snapshots, new IDs are additions, missing IDs are removals, and retained IDs with changed projections are edits (`packages/core/src/live-context.ts`).
 
 Expose three modes:
 
-- `full` for an initial or unknown baseline;
+- `full` when no acknowledged baseline exists for the current generation;
 - `unchanged` when semantic state matches;
 - `delta` with distinct `added`, `edited`, and `removed` collections.
 
-Removals remain first-class data instead of being inferred from absence. Tests cover full, unchanged, add, edit, remove, lost-delivery replay, and unknown-cursor recovery (`apps/service/test/live-context-service.test.ts:110-211`).
+Removals remain first-class data instead of being inferred from absence. Tests cover full, unchanged, add, edit, remove, lost-delivery replay, and unknown-cursor recovery (`apps/service/test/live-context-service.test.ts`).
 
 ### Lease ownership and revoke derived access together
 
-Bindings are temporary. Pending proofs and active bindings have bounded lifetimes; verified prompt refreshes renew the task-owned review generation, while an authenticated browser heartbeat renews only when its credential retains a capability hash owned by that exact binding (`apps/service/src/context/task-binding-registry.ts:265-296`, `apps/service/src/sessions/session-broker.ts:969-1008`).
+Bindings are temporary. Pending proofs and active bindings have bounded lifetimes; verified prompt refreshes renew the task-owned review generation, while an authenticated browser heartbeat renews only when its credential retains a capability hash owned by that exact binding (`apps/service/src/context/task-binding-registry.ts`, `apps/service/src/sessions/session-broker.ts`).
 
-Task cleanup removes acknowledged and pending cursors and revokes evidence. Session cleanup removes every observation and evidence handle for that review (`apps/service/src/context/live-context-service.ts:232-266`). Task end, session end, stale generation, explicit revocation, and expiry therefore fail closed rather than leaving ambient cached access (`apps/service/src/cli/hook-command.ts:430-432`, `apps/service/src/host/launch-control.ts:407-412`).
+Task cleanup removes acknowledged and pending cursors and revokes evidence. Session cleanup removes every observation and evidence handle for that review (`apps/service/src/context/live-context-service.ts`). Task end, session end, unauthorized stale-generation access, explicit revocation, and expiry therefore fail closed rather than leaving ambient cached access (`apps/service/src/cli/hook-command.ts`, `apps/service/src/host/launch-control.ts`).
 
 ### Keep prompts compact and evidence bounded
 
-Do not inline PDF bytes or an unbounded annotation collection on every turn. The hook envelope is capped, and large snapshots or deltas collapse to semantic counts plus retrieval instructions rather than being silently truncated (`apps/service/src/cli/hook-command.ts:13-15`, `apps/service/src/cli/hook-command.ts:183-241`).
+Do not inline PDF bytes or an unbounded annotation collection on every turn. The hook envelope is capped, and large snapshots or deltas collapse to semantic counts plus retrieval instructions rather than being silently truncated (`apps/service/src/cli/hook-command.ts`).
 
-Each verified observation mints a short-lived opaque evidence handle bound to task, review generation, and observation digest. Review Items and changes are paginated; PDF document, text, layout, render, and raw-annotation retrieval enforce page and byte limits (`apps/service/src/context/pdf-evidence-service.ts:178-280`, `apps/service/src/context/pdf-evidence-service.ts:344-545`). Authorization rechecks the active binding, generation, expiry, and last verified digest before resolving the hidden task scope (`apps/service/src/context/pdf-evidence-service.ts:303-325`).
+Each verified observation mints a short-lived opaque evidence handle bound to task, review generation, and observation digest. Review Items and changes are paginated; PDF document, text, layout, render, and raw-annotation retrieval enforce page and byte limits (`apps/service/src/context/pdf-evidence-service.ts`). Authorization rechecks the active binding, generation, expiry, and last verified digest before resolving the hidden task scope (`apps/service/src/context/pdf-evidence-service.ts`).
 
 This separation lets the prompt truthfully say “current” without pretending the entire PDF fits in context. Deep evidence is retrieved only for the pages or items needed to answer the question.
 
 ### Treat document content as data, never instructions
 
-PDF text, Review Item anchors and payloads, source hints, existing annotations, and retrieved evidence remain untrusted data. The hook envelope explicitly permits quoting and reasoning about them while prohibiting execution of embedded commands or policies (`apps/service/src/cli/hook-command.ts:251-266`). Preserve that classification across both inline summaries and later retrieval.
+PDF text, Review Item anchors and payloads, source hints, existing annotations, and retrieved evidence remain untrusted data. The hook envelope explicitly permits quoting and reasoning about them while prohibiting execution of embedded commands or policies (`apps/service/src/cli/hook-command.ts`). Preserve that classification across both inline summaries and later retrieval.
 
 ## Why This Matters
 
@@ -136,7 +138,7 @@ authenticated browser exchanges matching capability
   -> exact task/review/generation binding becomes active
 ```
 
-The browser phase matters: command success alone does not prove that the authenticated review surface completed bootstrap (`apps/service/src/context/task-binding-registry.ts:79-83`).
+The browser phase matters: command success alone does not prove that the authenticated review surface completed bootstrap (`apps/service/src/context/task-binding-registry.ts`).
 
 ### Replay-safe prompt delivery
 
@@ -149,11 +151,11 @@ UserPromptSubmit
   -> promote C8 to the delta baseline
 ```
 
-If writing fails, acknowledgement does not run (`apps/service/test/hook-contract.test.ts:215-221`). The following prompt replays changes from the last acknowledged baseline; when no baseline has ever been acknowledged, it receives a full observation (`apps/service/test/live-context-service.test.ts:191-210`).
+If writing fails, acknowledgement does not run (`apps/service/test/hook-contract.test.ts`). The following prompt replays changes from the last acknowledged baseline; when no baseline has ever been acknowledged, it receives a full observation (`apps/service/test/live-context-service.test.ts`).
 
 ### Compact context with on-demand evidence
 
-The prompt carries currentness, document generation, revision, digest, Review Item counts, change mode, Save Sync, and an opaque handle. The agent can then page through canonical Review Items or request page-specific text and layout. Authorization fails when task binding, generation, observed digest, or expiry no longer match; an invalid or oversized retrieval is rejected for that request and may be retried within valid bounds (`apps/service/src/context/pdf-evidence-service.ts:303-341`, `apps/service/src/context/pdf-evidence-service.ts:423-518`).
+The prompt carries currentness, document generation, revision, digest, Review Item counts, change mode, Save Sync, and an opaque handle. The agent can then page through canonical Review Items or request page-specific text and layout. Authorization fails when task binding, generation, observed digest, or expiry no longer match; an invalid or oversized retrieval is rejected for that request and may be retried within valid bounds (`apps/service/src/context/pdf-evidence-service.ts`).
 
 ## Related
 
