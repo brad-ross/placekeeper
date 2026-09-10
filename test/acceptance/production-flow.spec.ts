@@ -4260,6 +4260,8 @@ test('shows zoom actions only when fitting or horizontal locking is useful', asy
   await openMenu();
   await expect(fit).toHaveCount(0);
   await expect(lock).toHaveCount(0);
+  const trailingPositions = async () => Promise.all(['Zoom out', 'Zoom in'].map(async (name) => (await page.getByRole('menuitem', { name, exact: true }).boundingBox())!.x));
+  const originalPositions = await trailingPositions();
   const zoomOutWithoutLockFlash = async () => {
     const probe = await page.evaluateHandle(() => {
       const state = { appeared: false, observer: new MutationObserver((records) => {
@@ -4284,12 +4286,16 @@ test('shows zoom actions only when fitting or horizontal locking is useful', asy
   await setZoom('250');
   await expect(fit).toBeVisible();
   await expect(lock).toBeVisible();
+  await expect.poll(trailingPositions).toEqual(originalPositions);
+  const actionLabels = await menu.locator('[role=menuitem], [role=menuitemcheckbox]').evaluateAll((elements) => elements.map((element) => element.getAttribute('aria-label')));
+  expect(actionLabels).toEqual(['Horizontal lock', 'Fit width', 'Zoom out', 'Zoom in']);
   await lock.click();
   await expect(lock).toHaveAttribute('aria-checked', 'true');
   await expect(page.locator('.review-document [data-viewer-framing-viewport]')).toHaveCSS('overflow-x', 'hidden');
   await fit.click();
   await expect(fit).toHaveCount(0);
   await expect(lock).toHaveCount(0);
+  await expect.poll(trailingPositions).toEqual(originalPositions);
   await setZoom('50');
   await expect(fit).toBeVisible();
   await expect(lock).toHaveCount(0);

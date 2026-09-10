@@ -1218,9 +1218,9 @@ test.describe('canonical review workflow', () => {
     const zoomTrigger = page.getByRole('button', { name: 'Open zoom controls' });
     await zoomTrigger.focus();
     await zoomTrigger.press('Enter');
-    await expect(zoomMenu.getByRole('menuitem', { name: 'Zoom out' })).toBeFocused();
-    await page.keyboard.press('End');
     await expect(zoomMenu.getByRole('menuitem', { name: 'Fit width' })).toBeFocused();
+    await page.keyboard.press('End');
+    await expect(zoomMenu.getByRole('menuitem', { name: 'Zoom in' })).toBeFocused();
     await page.keyboard.press('Escape');
     await expect(zoomMenu).toHaveCount(0);
     await expect(zoomTrigger).toBeFocused();
