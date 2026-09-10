@@ -579,3 +579,12 @@ test('stops the PDF loading indicator animation under reduced motion', async ({ 
     await page.unrouteAll({ behavior: 'wait' });
   }
 });
+
+
+test('reports an unreadable PDF instead of leaving the local loading screen forever', async ({ page }) => {
+  await page.route('**/test/fixtures/pdfs/text-native-with-annotations.pdf', (route) =>
+    route.fulfill({ status: 200, contentType: 'application/pdf', body: '' }));
+  await page.goto('/test/acceptance/viewer-harness/index.html');
+  await expect(page.getByRole('alert').filter({ hasText: 'This PDF could not be loaded.' })).toBeVisible();
+  await expect(page.getByText('Loading local PDF…', { exact: true })).toHaveCount(0);
+});

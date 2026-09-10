@@ -468,6 +468,7 @@ export function activate(context: vscode.ExtensionContext): void {
     activePanel = panel;
     earlyDispose.dispose();
     panel.onDidDispose(() => {
+      panelDisposed = true;
       observer.dispose();
       bridge.dispose();
       if (runtime.flushTimer !== undefined) clearTimeout(runtime.flushTimer);
@@ -476,6 +477,11 @@ export function activate(context: vscode.ExtensionContext): void {
       if (activePanel === panel) activePanel = undefined;
       void rm(snapshotRoot, { recursive: true, force: true });
     });
+    // A restored panel can already be active before its focus listener exists.
+    // Validate the output before bootstrap so recovery cannot pin an old or
+    // empty snapshot until the next focus/watcher event.
+    await observer.revalidate("activation");
+    requireOpenPanel();
     await attachStage("webview", () => {
       panel.webview.html = buildReviewWebviewHtml({
         nonce: randomBytes(18).toString("base64url"),

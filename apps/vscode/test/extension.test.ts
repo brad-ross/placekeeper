@@ -1,8 +1,10 @@
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { runInNewContext } from "node:vm";
+import { createRequire } from "node:module";
+import { promisify } from "node:util";
 import { describe, expect, it, vi } from "vitest";
 import { PDFDocument } from "pdf-lib";
 import { createReviewState } from "../../../packages/core/src/review-model.js";
@@ -60,6 +62,96 @@ import {
 } from "../src/source-navigation.js";
 
 describe("VS Code local host adapter", () => {
+  it("validates a restored panel before its webview starts without needing another focus event", async () => {
+    const directory = await realpath(await mkdtemp(resolve(tmpdir(), "placekeeper-restored-panel-")));
+    const outputPath = resolve(directory, "paper.pdf");
+    await writeFile(outputPath, "%PDF-1.7\nfinished rebuild\n%%EOF");
+    const panelKey = "restored_panel_key_123456";
+    const sequence: string[] = [];
+    const disposeListeners = new Set<() => void>();
+    const disposable = () => ({ dispose() {} });
+    let deserialize: ((panel: unknown, state: unknown) => Promise<void>) | undefined;
+    const panel = {
+      active: true,
+      viewColumn: 1,
+      reveal() {},
+      onDidDispose(listener: () => void) {
+        disposeListeners.add(listener);
+        return { dispose: () => disposeListeners.delete(listener) };
+      },
+      onDidChangeViewState: vi.fn(disposable), // No focus event is emitted on restore.
+      webview: {
+        options: {},
+        cspSource: "https://*.vscode-cdn.net",
+        set html(_value: string) { sequence.push("webview"); },
+        asWebviewUri: (uri: { fsPath: string }) => ({ toString: () => `https://file.vscode-cdn.net${uri.fsPath}` }),
+        onDidReceiveMessage: disposable,
+        postMessage: async () => true,
+      },
+    };
+    const vscode = {
+      ThemeColor: class {},
+      RelativePattern: class {},
+      UIKind: { Desktop: 1 },
+      env: { uiKind: 1 },
+      Uri: { file: (fsPath: string) => ({ fsPath }) },
+      commands: { registerCommand: disposable },
+      workspace: {
+        isTrusted: true,
+        workspaceFolders: [],
+        getConfiguration: () => ({ get: () => undefined }),
+        onDidSaveTextDocument: disposable,
+        createFileSystemWatcher: () => ({ dispose() {}, onDidCreate: disposable, onDidChange: disposable, onDidDelete: disposable }),
+      },
+      window: {
+        createTextEditorDecorationType: disposable,
+        registerUriHandler: disposable,
+        registerWebviewPanelSerializer(_type: string, serializer: { deserializeWebviewPanel: typeof deserialize }) {
+          deserialize = serializer.deserializeWebviewPanel;
+          return disposable();
+        },
+      },
+    };
+    const subscriptions: Array<{ dispose(): unknown }> = [];
+    const context = {
+      subscriptions,
+      globalStorageUri: { fsPath: resolve(directory, "storage") },
+      globalState: { get: () => ({ [panelKey]: { outputPath } }), update: async () => undefined },
+      asAbsolutePath: (path: string) => resolve("apps/vscode", path),
+    };
+    const execFile = Object.assign(() => undefined, {
+      [promisify.custom]: async () => ({ stdout: JSON.stringify({
+        ok: true, kind: "focused",
+        url: "http://127.0.0.1:49152/s/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/bootstrap?embed=vscode#cap=test_capability",
+      }), stderr: "" }),
+    });
+    const require = createRequire(import.meta.url);
+    const module = { exports: {} as { activate(context: unknown): void } };
+    try {
+      runInNewContext(await readFile(resolve("apps/vscode/dist/extension.cjs"), "utf8"), {
+        module, exports: module.exports, Buffer, process, URL, URLSearchParams, AbortController,
+        setTimeout, clearTimeout, setInterval, clearInterval,
+        require: (id: string) => id === "vscode" ? vscode : id === "node:child_process" ? { execFile } : require(id),
+        fetch: async (input: string) => {
+          if (input.endsWith("/exchange")) return new Response(JSON.stringify({ credential: "c".repeat(43) }));
+          if (input.endsWith("/observe")) {
+            sequence.push("validated-output");
+            return new Response(JSON.stringify({ status: "committed" }));
+          }
+          throw new Error("Unexpected broker request");
+        },
+      });
+      module.exports.activate(context);
+      if (deserialize === undefined) throw new Error("Panel serializer was not registered");
+      await deserialize(panel, { panelKey });
+      expect(sequence).toEqual(["validated-output", "webview"]);
+    } finally {
+      for (const listener of [...disposeListeners]) listener();
+      for (const subscription of subscriptions) subscription.dispose();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it("reuses the editor group where the reverse SyncTeX source is already visible", () => {
     const sourceDocument = { uri: { toString: () => "file:///work/paper.tex" } };
     expect(preferredVisibleSourceEditor([

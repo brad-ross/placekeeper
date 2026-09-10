@@ -72,6 +72,23 @@ function addCommand(expectedRevision: number, comment = "remember this"): Review
 }
 
 describe("source snapshot creation", () => {
+  it("rejects an empty rebuild output before it can become a recoverable PDF", async () => {
+    const directory = await temporaryDirectory();
+    const source = join(directory, "paper.pdf");
+    const sessionDirectory = join(directory, "snapshot");
+    await writeFile(source, "");
+
+    await expect(createSourceSnapshot(source, sessionDirectory)).rejects.toThrow(/empty.*rebuild/i);
+    await expect(access(join(sessionDirectory, "source.pdf"))).rejects.toThrow();
+    const broker = new SessionBroker({ recoveryRoot: join(directory, "recovery") });
+    await expect(broker.openReview({ pdfPath: source, workflowMode: "generated-output" }))
+      .rejects.toThrow(/empty.*rebuild/i);
+
+    await writeFile(source, "%PDF-1.7\ncompleted rebuild\n%%EOF");
+    const opened = await broker.openReview({ pdfPath: source, workflowMode: "generated-output" });
+    expect(opened.kind).toBe("opened");
+  });
+
   it("uses collision-resistant temporary files for concurrent snapshots", async () => {
     const directory = await temporaryDirectory();
     const source = join(directory, "paper.pdf");
