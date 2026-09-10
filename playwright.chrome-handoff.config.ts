@@ -1,12 +1,11 @@
 import { defineConfig } from "@playwright/test";
+import { browserDefaults } from './scripts/testing/browser-config';
+import { browserTestFiles } from './scripts/testing/suites';
 
 export default defineConfig({
+  ...browserDefaults,
   testDir: "./test/acceptance",
-  testMatch: "chrome-pdf-handoff.spec.ts",
-  fullyParallel: false,
-  workers: 1,
-  retries: 0,
-  timeout: 30_000,
+  testMatch: browserTestFiles.chromeHandoff,
   outputDir: "test-results/chrome-pdf-handoff",
   reporter: [["list"]],
   use: {
