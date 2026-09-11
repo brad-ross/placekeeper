@@ -36,7 +36,9 @@
   "verification_results": {
     "passed": "TypeScript, focused command/protocol/transition tests, 9 Mac interface tests, 6 PDF viewer tests, 35 Mac web gate tests, Swift application build, recorded native candidate checks",
     "baseline_failures": "5 review acceptance failures reproduced on 190b844; 66 passed",
-    "blocked": "XCTest unavailable; full required native acceptance incomplete"
+    "blocked": "Physical input checks pending user",
+    "xctest": "Explicitly waived by user September 11",
+    "additional_native": "Reference scrolling/docking and main-viewer keyboard targeting at 125%; production recovery controller layout/action/failure/fresh retry at 80\u2013200% passed; see plan"
   },
   "verification_evidence": [
     {
@@ -117,8 +119,7 @@
   ],
   "plan_checkpoint": "190b844",
   "blockers": [
-    "Full Xcode/XCTest environment required for native test suite",
-    "Remaining physical-input, gesture, reference, and recovery acceptance checks"
+    "Physical keyboard/pinch verification pending user results"
   ],
   "recovery_path": "/Users/bross1/.codex/worktrees/a801/placekeeper",
   "settled_decision_conflicts": [],
