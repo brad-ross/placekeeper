@@ -1269,6 +1269,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
         locationRestoreStatus={locationRestoreStatus}
         toolError={pdfCopyError ?? commandError}
         commandNotice={commandNotice}
+        commandModalOpen={(!exportOnly && destinationDialog !== null) || annotationExport.request !== null}
         {...(props.onCommandSurfaceChange === undefined
           ? {}
           : { onCommandSurfaceChange: props.onCommandSurfaceChange })}

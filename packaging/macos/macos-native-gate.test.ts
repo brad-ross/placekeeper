@@ -108,7 +108,8 @@ describe("macOS native gate packaging policy", () => {
       windowSource.indexOf("private func trafficLightInset"),
       windowSource.indexOf("private func alignTrafficLights"),
     );
-    expect(buttonGeometry).toContain('guard !window.styleMask.contains(.fullScreen) else { return Double(Self.toolbarHorizontalMargin) }');
+    expect(buttonGeometry).toContain('guard !window.styleMask.contains(.fullScreen) else { return Double(Self.toolbarHorizontalMargin) / webView.pageZoom }');
+    expect(buttonGeometry).toContain('AppZoomGeometry.cssRect');
     expect(buttonGeometry).toContain('guard let window, !window.styleMask.contains(.fullScreen) else { return [] }');
     expect(windowSource).toContain('window?.toolbar?.isVisible = false');
     expect(windowSource).toContain('window?.toolbar?.isVisible = true');

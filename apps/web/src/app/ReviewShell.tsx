@@ -231,6 +231,8 @@ export interface ReviewShellProps {
   locationRestoreStatus?: LocationRestoreStatus;
   toolError?: string | null;
   commandNotice?: string | null;
+  /** A modal owned by the parent may be mounted outside this shell. */
+  commandModalOpen?: boolean;
   onNavigate?(item: ReviewItem): void;
   onNavigateExisting?(item: ExistingAnnotation): void;
   existingAnnotations?: ExistingAnnotationsDiscovery;
@@ -1136,7 +1138,7 @@ export function ReviewShell(props: ReviewShellProps) {
     props.viewer.viewerControls?.[direction]();
   };
   const commandSurface = createReviewCommandSurface({
-    focusContext: commandFocusContext,
+    focusContext: props.commandModalOpen ? 'dialog' : commandFocusContext,
     canUndo: authoringSession === null && canUndo,
     canRedo: authoringSession === null && canRedo,
     canNavigateBack: !props.workspace.documentNavigationPending && (props.workspace.canNavigateBack ?? false),

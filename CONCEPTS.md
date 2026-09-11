@@ -224,9 +224,12 @@ The measured arrangement of direct and compact PDF-review control groups that fi
 Presentations relocate complete control groups according to semantic priority without creating separate navigation, zoom, history, or review state; richer arrangements return only after enough width is available to avoid oscillation.
 
 ### Committed Zoom
-The provider-owned numeric PDF scale used to publish the viewer's zoom state.
+The provider-owned numeric PDF scale used to publish the viewer's zoom state. It remains independent of App Scale.
 
 For acceptance testing, transient gesture presentation is treated as non-authoritative; coordinate-based actions wait for Committed Zoom and its rendered layout before treating new geometry as settled.
+
+### App Scale
+The Mac app’s persisted interface scale, applied to each app web view. It scales the interface and its displayed PDF together without changing Committed Zoom or saved PDF geometry. PDF zoom commands continue to change only the main document’s logical zoom.
 
 ### Viewer Runway
 Temporary scroll extent added beyond viewer content so an overlaid review surface does not make covered document regions unreachable.
