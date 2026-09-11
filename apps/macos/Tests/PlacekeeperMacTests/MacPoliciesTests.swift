@@ -5,6 +5,34 @@ import XCTest
 @testable import PlacekeeperMac
 
 final class MacPoliciesTests: XCTestCase {
+    func testAppZoomGeometryUsesPageScaleNotDisplayDensity() {
+        let css = DragRect(x: 12, y: 19, width: 43, height: 17)
+        for scale in [0.8, 1.25, 2.0] {
+            for flipped in [true, false] {
+                let native = AppZoomGeometry.nativeRect(css, scale: scale, viewHeight: 700, flipped: flipped)
+                XCTAssertEqual(native.x, css.x * scale, accuracy: 0.0001)
+                XCTAssertEqual(native.y, flipped ? css.y * scale : 700 - (css.y + css.height) * scale, accuracy: 0.0001)
+                let roundTrip = AppZoomGeometry.cssRect(native, scale: scale, viewHeight: 700, flipped: flipped)
+                XCTAssertEqual(roundTrip.x, css.x, accuracy: 0.0001)
+                XCTAssertEqual(roundTrip.y, css.y, accuracy: 0.0001)
+                XCTAssertEqual(roundTrip.width, css.width, accuracy: 0.0001)
+                XCTAssertEqual(roundTrip.height, css.height, accuracy: 0.0001)
+            }
+        }
+    }
+
+    func testAppZoomCoalescesRequestsAndRejectsOldAcknowledgements() throws {
+        var transition = AppZoomTransition()
+        let first = try XCTUnwrap(transition.request(1.25, geometryIdentity: "geometry_first"))
+        XCTAssertNil(transition.request(2, geometryIdentity: "geometry_first"))
+        XCTAssertEqual(transition.finish(first), 2)
+        let second = try XCTUnwrap(transition.request(0.8, geometryIdentity: "geometry_second"))
+        XCTAssertNil(transition.finish(first))
+        XCTAssertTrue(transition.inProgress)
+        XCTAssertEqual(transition.finish(second), 0.8)
+        XCTAssertFalse(transition.inProgress)
+    }
+
     func testZoomShortcutsKeepPDFAndAppOwnersSeparate() {
         let routes: [(String, NSEvent.ModifierFlags, MacZoomShortcut)] = [
             ("=", [.command], .pdfIn), ("+", [.command, .numericPad], .pdfIn),

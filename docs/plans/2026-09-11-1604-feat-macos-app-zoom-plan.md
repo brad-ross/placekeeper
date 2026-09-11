@@ -251,3 +251,9 @@ Cold native rendering is a separate proof from browser WebKit testing: `docs/sol
 - Added native app Zoom submenu, exact modifier-aware PDF/app routes, and PDF zoom commands across both closed protocol vocabularies and main-viewer dispatch.
 - Root verification: 23 focused command/protocol/entry tests passed, TypeScript check passed. Worker observed three expected missing-command failures before implementation. Added native menu/shortcut tests remain unexecuted because XCTest is unavailable.
 - Actual AppKit input, reference focus, and editable-focus preservation remain U4 checks. The temporary WebKit snapshot probe failed to detect its painted marker and supplies no native coordinate evidence.
+
+### U3 — geometry and gesture transitions
+
+- Added scoped, coalesced presentation transitions; explicit gesture completion and deferred-anchor cancellation; CSS/native coordinate conversions; recovery control and drag geometry scaling.
+- Root verification: 24 focused transition/entry/protocol tests passed, TypeScript check passed, native Swift build passed without warnings. Worker production Swift geometry/coalescing assertions passed; initial web tests and standalone Swift compile failed for the missing behavior before implementation.
+- Added XCTest geometry/coalescing tests remain unexecuted. Native mapping, saved first paint, draft/focus, reading-context preservation, and actual input remain U4 verification gaps.

@@ -103,6 +103,13 @@ export interface MacosDocumentResource {
 export type MacosNativeMessage =
   | {
     readonly protocolVersion: 1;
+    readonly type: "presentation-transition";
+    readonly runtimeId: string;
+    readonly attemptId: string;
+    readonly geometryIdentity: string;
+  }
+  | {
+    readonly protocolVersion: 1;
     readonly type: "bootstrap";
     readonly document: {
       readonly displayName: string;
@@ -360,6 +367,11 @@ export function parseMacosResourceURL(value: unknown): {
 
 export function parseMacosNativeMessage(value: unknown): MacosNativeMessage | undefined {
   if (!record(value) || value.protocolVersion !== MACOS_SHELL_PROTOCOL_VERSION) return undefined;
+  if (value.type === "presentation-transition") {
+    return exact(value, ["protocolVersion", "type", "runtimeId", "attemptId", "geometryIdentity"])
+      && opaqueId(value.runtimeId) && opaqueId(value.attemptId) && opaqueId(value.geometryIdentity)
+      ? value as unknown as MacosNativeMessage : undefined;
+  }
   if (value.type === "commit-visible") {
     return exact(value, ["protocolVersion", "type", "geometryIdentity"])
       && opaqueId(value.geometryIdentity) ? value as unknown as MacosNativeMessage : undefined;

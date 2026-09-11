@@ -46,6 +46,50 @@ struct DragRect: Equatable, Sendable {
     }
 }
 
+// The bridge owns CSS pixels; AppKit owns points. Display backing scale is
+// deliberately absent: WebKit pageZoom is the conversion between these spaces.
+enum AppZoomGeometry {
+    static func nativeRect(_ css: DragRect, scale: Double, viewHeight: Double, flipped: Bool) -> DragRect {
+        DragRect(x: css.x * scale,
+                 y: flipped ? css.y * scale : viewHeight - (css.y + css.height) * scale,
+                 width: css.width * scale, height: css.height * scale)
+    }
+
+    static func cssRect(_ native: DragRect, scale: Double, viewHeight: Double, flipped: Bool) -> DragRect {
+        DragRect(x: native.x / scale,
+                 y: (flipped ? native.y : viewHeight - native.y - native.height) / scale,
+                 width: native.width / scale, height: native.height / scale)
+    }
+}
+
+struct AppZoomTransition {
+    struct Ticket: Equatable {
+        let serial: Int
+        let geometryIdentity: String
+    }
+    private var serial = 0
+    private var ticket: Ticket?
+    private var latestScale: Double?
+    var inProgress: Bool { ticket != nil }
+
+    mutating func request(_ scale: Double, geometryIdentity: String) -> Ticket? {
+        latestScale = scale
+        guard ticket == nil else { return nil }
+        serial += 1
+        let next = Ticket(serial: serial, geometryIdentity: geometryIdentity)
+        ticket = next
+        return next
+    }
+
+    mutating func finish(_ completed: Ticket) -> Double? {
+        guard ticket == completed else { return nil }
+        let scale = latestScale
+        ticket = nil
+        latestScale = nil
+        return scale
+    }
+}
+
 struct DragRegionSet: Equatable, Sendable {
     let revision: Int
     let geometryIdentity: String
