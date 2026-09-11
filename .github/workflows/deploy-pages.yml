@@ -1,6 +1,8 @@
 name: Package and deploy static web
 
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
 
 concurrency:
@@ -110,7 +112,7 @@ jobs:
                 ['Artifact name', process.env.ARTIFACT_NAME],
                 ['Artifact ID', process.env.ARTIFACT_ID],
                 ['content-manifest.json SHA-256', process.env.CONTENT_DIGEST],
-                ['Environment result', gate === 'enabled' ? 'pending protected-environment approval' : 'not requested'],
+                ['Environment result', gate === 'enabled' ? 'pending deployment environment' : 'not requested'],
                 ['Deployment result', gate === 'enabled' ? 'pending' : 'skipped (publication dormant)'],
                 ['page_url', 'not available before deployment'],
               ])
@@ -161,7 +163,10 @@ jobs:
             };
             const expectedArtifact = `placekeeper-pages-${context.runId}-${process.env.GITHUB_RUN_ATTEMPT}`;
             assert(process.env.PUBLICATION_GATE === 'enabled', 'Publication gate is not the exact literal enabled.');
-            assert(context.eventName === 'workflow_dispatch' && context.ref === 'refs/heads/main', 'Only a manual trusted-main dispatch can deploy.');
+            assert(
+              ['push', 'workflow_dispatch'].includes(context.eventName) && context.ref === 'refs/heads/main',
+              'Only main pushes or manual main dispatches can deploy.',
+            );
             assert(/^[0-9a-f]{40}$/.test(process.env.PACKAGED_SOURCE_SHA ?? ''), 'Packaged source identity is malformed.');
             assert(/^[0-9a-f]{64}$/.test(process.env.CONTENT_DIGEST ?? ''), 'Payload-manifest digest is malformed.');
             assert(/^[1-9][0-9]*$/.test(process.env.ARTIFACT_ID ?? ''), 'The official upload did not return a usable artifact ID.');
@@ -205,7 +210,7 @@ jobs:
                 ['Artifact name', process.env.ARTIFACT_NAME],
                 ['Artifact ID', process.env.ARTIFACT_ID],
                 ['content-manifest.json SHA-256', process.env.CONTENT_DIGEST],
-                ['Environment result', 'approved and entered'],
+                ['Environment result', 'entered'],
                 ['Deployment result', process.env.DEPLOYMENT_OUTCOME || 'unknown'],
                 ['page_url', process.env.PAGE_URL || 'not returned'],
               ])
