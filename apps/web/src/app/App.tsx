@@ -920,6 +920,7 @@ export function App({
         documentManager,
         assetUrls: assets,
         origin: globalThis.location.origin,
+        ...(resourcePolicy === undefined ? {} : { resourcePolicy }),
         documentGeneration,
       });
       referenceControllerRef.current = referenceController;
