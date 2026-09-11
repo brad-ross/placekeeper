@@ -1,6 +1,7 @@
 ---
 title: Contain main PDF link hit targets below the References viewer
 date: 2026-08-11
+last_updated: 2026-09-10
 category: ui-bugs
 module: pdf-viewer
 problem_type: ui_bug
@@ -39,15 +40,15 @@ The application keeps the main and reference PDF workspaces mounted as distinct 
 
 ### Reproducing at a narrow viewport
 
-The first regression attempt used a narrow layout and passed before the fix because the main link and Reference PDF viewer did not share a true hit-test area. The corrected test uses a wide `1367 x 1324` viewport, selects the bottom References presentation, and waits for its transform to settle before measuring the overlap (`test/acceptance/production-flow.spec.ts:843-861`). (session history)
+The first regression attempt used a narrow layout and passed before the fix because the main link and Reference PDF viewer did not share a true hit-test area. The corrected test uses a wide `1367 x 1324` viewport, selects the bottom References presentation, and waits for its transform to settle before measuring the overlap (`test/acceptance/production-flow.spec.ts`). (session history)
 
 ### Relying on source-level z-index assertions
 
-The CSS values suggested a layering problem, but source inspection alone could not establish which element the browser would choose after transforms, scrolling, portals, and PDF annotation rendering were combined. The regression had to compute rendered rectangles, prove that their intersection was non-empty, and call `document.elementFromPoint` inside that intersection (`test/acceptance/production-flow.spec.ts:881-905`).
+The CSS values suggested a layering problem, but source inspection alone could not establish which element the browser would choose after transforms, scrolling, portals, and PDF annotation rendering were combined. The regression had to compute rendered rectangles, prove that their intersection was non-empty, and call `document.elementFromPoint` inside that intersection (`test/acceptance/production-flow.spec.ts`).
 
 ### Retuning individual layer values
 
-Lowering the link renderer's `zIndex: 10` would undermine its intended role above the PDF render and selection layers (`apps/web/src/pdf/PdfLinkControl.tsx:150-160`). Raising each drawer or contextual layer would spread knowledge of viewer internals through unrelated outer layers. The durable boundary is between independently mounted workspaces, not between every descendant's numeric z-index.
+Lowering the link renderer's `zIndex: 10` would undermine its intended role above the PDF render and selection layers (`apps/web/src/pdf/PdfLinkControl.tsx`). Raising each drawer or contextual layer would spread knowledge of viewer internals through unrelated outer layers. The durable boundary is between independently mounted workspaces, not between every descendant's numeric z-index.
 
 ### Testing a stale production bundle
 
@@ -61,32 +62,30 @@ Make the Main Reading Thread's document container a stacking context by assignin
 .review-document {
   position: absolute;
   z-index: 0;
-  inset: 0;
-  overflow: hidden;
 }
 ```
 
-This rule lives at `apps/web/src/app/review-layout-foundation.css:353-360`. The outer drawer and contextual hosts remain at z-index 2 and 3 (`apps/web/src/app/review-layout-foundation.css:427-438`), while the project-owned PDF link renderer keeps its internal z-index 10 (`apps/web/src/pdf/PdfLinkControl.tsx:150-160`).
+This snippet shows only the stacking-context invariant. The complete rule reserves `var(--review-document-right-space)` and uses `overflow: visible` for the full-stage native scrollport. It lives at `apps/web/src/app/review-viewer-framing.css`. The outer drawer and contextual hosts remain at z-index 2 and 3 (`apps/web/src/app/review-viewer-framing.css`), while the project-owned PDF link renderer keeps its internal z-index 10 (`apps/web/src/pdf/PdfLinkControl.tsx`).
 
 The browser regression then reproduces the actual geometry:
 
-1. Open a real main-PDF link in a Reference Tab (`test/acceptance/production-flow.spec.ts:849-852`).
-2. Place References in the bottom presentation and wait for its transform to settle (`test/acceptance/production-flow.spec.ts:854-861`).
-3. Scroll a second main-PDF link beneath the reference viewport (`test/acceptance/production-flow.spec.ts:862-879`).
-4. Compute the intersection and assert both that overlap exists and that the main viewer is not the topmost hit target (`test/acceptance/production-flow.spec.ts:881-905`).
+1. Open a real main-PDF link in a Reference Tab (`test/acceptance/production-flow.spec.ts`).
+2. Place References in the bottom presentation and wait for its transform to settle (`test/acceptance/production-flow.spec.ts`).
+3. Scroll a second main-PDF link beneath the reference viewport (`test/acceptance/production-flow.spec.ts`).
+4. Compute the intersection and assert both that overlap exists and that the main viewer is not the topmost hit target (`test/acceptance/production-flow.spec.ts`).
 
 The fix and regression were merged in [PR #9](https://github.com/brad-ross/placekeeper/pull/9). During PR #9 verification, the focused regression was reported passing in Chromium and WebKit. The same verification session reported TypeScript and the Chromium acceptance suite passing locally after the then-current `main` was merged into the PR branch. (session history)
 
 ## Why This Works
 
-A positioned element with a non-auto z-index establishes a stacking context. Giving `.review-document` z-index 0 orders all descendants inside that context before the browser compares the document root with sibling workspace layers (`apps/web/src/app/review-layout-foundation.css:353-360`).
+A positioned element with a non-auto z-index establishes a stacking context. Giving `.review-document` z-index 0 orders all descendants inside that context before the browser compares the document root with sibling workspace layers (`apps/web/src/app/review-viewer-framing.css`).
 
-The link renderer's z-index 10 still places links above render and selection layers within the main PDF (`apps/web/src/pdf/PdfLinkControl.tsx:153-160`), but it can no longer outrank the outer References host at z-index 2 (`apps/web/src/app/review-layout-foundation.css:427-434`). This preserves both invariants:
+The link renderer's z-index 10 still places links above render and selection layers within the main PDF (`apps/web/src/pdf/PdfLinkControl.tsx`), but it can no longer outrank the outer References host at z-index 2 (`apps/web/src/app/review-viewer-framing.css`). This preserves both invariants:
 
 - Link annotations remain interactive above the main PDF's internal visual layers.
 - The Main Reading Thread remains below independently mounted References and contextual surfaces.
 
-The acceptance test validates the user-visible consequence rather than the implementation detail: at a proven overlap point, browser hit testing must not resolve to the main workspace (`test/acceptance/production-flow.spec.ts:892-905`).
+The acceptance test validates the user-visible consequence rather than the implementation detail: at a proven overlap point, browser hit testing must not resolve to the main workspace (`test/acceptance/production-flow.spec.ts`).
 
 ## Prevention
 

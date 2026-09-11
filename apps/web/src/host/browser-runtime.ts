@@ -1,12 +1,12 @@
+import type { SaveStatus } from "../../../../packages/core/src/save-status.js";
 import type { ReviewCommand, ReviewState } from "../../../../packages/core/src/review-model.js";
 import type {
   ProductionExportResult,
-  ProductionSaveStatus,
   ProductionScope,
   ProductionSession,
   SaveCopyProposal,
-} from "../app/ProductionReviewApp.js";
-import type { RejectedReviewCommand } from "../app/ReviewShell.js";
+} from "./session-contracts.js";
+import type { RejectedReviewCommand } from "../review/review-command-result.js";
 import { loadProductionSession } from "../app/session-api.js";
 import type { HostRuntime, HostRuntimeInvalidation } from "./runtime.js";
 
@@ -104,7 +104,7 @@ export function createBrowserHostRuntime(session: ProductionSession): HostRuntim
     async command(command: ReviewCommand): Promise<ReviewState | RejectedReviewCommand> {
       return (await ensureLoaded()).api.command(command);
     },
-    async saveStatus(): Promise<ProductionSaveStatus> { return (await ensureLoaded()).api.saveStatus(); },
+    async saveStatus(): Promise<SaveStatus> { return (await ensureLoaded()).api.saveStatus(); },
     async saveProposal(): Promise<SaveCopyProposal> { return (await ensureLoaded()).api.saveProposal(); },
     async chooseCopy(filename?: string, folderSelectionId?: string) {
       return (await ensureLoaded()).api.chooseCopy(filename, folderSelectionId);

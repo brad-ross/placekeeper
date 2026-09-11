@@ -1,4 +1,6 @@
 import { defineConfig } from "@playwright/test";
+import { browserDefaults, browserUseDefaults, serverDefaults } from './scripts/testing/browser-config';
+import { browserTestFiles } from './scripts/testing/suites';
 
 const SUPPORTED_ENGINES = ["chromium", "firefox", "webkit"] as const;
 const SUPPORTED_PROFILES = ["critical", "representative", "exhaustive"] as const;
@@ -46,11 +48,9 @@ const grep = profile === "critical"
 // `pnpm test:static:secondary-full` once before returning to the reduced gate.
 
 export default defineConfig({
+  ...browserDefaults,
   testDir: "./test/acceptance",
-  testMatch: ["static-web.spec.ts", "static-web-url.spec.ts"],
-  fullyParallel: false,
-  workers: 1,
-  retries: 0,
+  testMatch: browserTestFiles.static,
   timeout: 60_000,
   expect: { timeout: 10_000 },
   outputDir: `test-results/static-web/${engine}-${profile}`,
@@ -60,11 +60,9 @@ export default defineConfig({
   ],
   ...(grep === undefined ? {} : { grep }),
   use: {
+    ...browserUseDefaults,
     baseURL,
     browserName: engine,
-    headless: true,
-    trace: "retain-on-failure",
-    screenshot: "only-on-failure",
     video: "retain-on-failure",
     locale: "en-US",
     viewport: { width: 1280, height: 900 },
@@ -74,7 +72,6 @@ export default defineConfig({
     // every release engine exercises exactly the same bytes.
     command: `PLACEKEEPER_STATIC_BASE=/placekeeper/ pnpm exec vite preview --config apps/web/vite.static.config.ts --host 127.0.0.1 --port ${port} --strictPort`,
     url: baseURL,
-    reuseExistingServer: false,
-    timeout: 30_000,
-  },
+    ...serverDefaults,
+    },
 });

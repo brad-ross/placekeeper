@@ -1,12 +1,12 @@
+import type { SaveStatus } from "../../../../packages/core/src/save-status.js";
 import type { ReviewState } from "../../../../packages/core/src/review-model.js";
 import type {
   ForwardSyncTexRequest,
   ProductionExportResult,
-  ProductionSaveStatus,
   ProductionScope,
   ProductionSession,
   ProductionSessionApi,
-} from "../app/ProductionReviewApp.js";
+} from "./session-contracts.js";
 import type { ViewerAssetUrls, ViewerResourcePolicy } from "../pdf/embedpdf-viewer.js";
 import type { ReviewLocationHistoryPort } from "../review/review-location-history.js";
 
@@ -20,7 +20,7 @@ export interface HostRuntimeBootstrap extends HostRuntimeIdentity {
   readonly session: ProductionSession;
   readonly state: ReviewState;
   readonly scope: ProductionScope;
-  readonly saveStatus: ProductionSaveStatus;
+  readonly saveStatus: SaveStatus;
   readonly viewerAssets: ViewerAssetUrls;
   readonly resourcePolicy: ViewerResourcePolicy;
   readonly locationHistory?: ReviewLocationHistoryPort;

@@ -1,5 +1,7 @@
+import type { RejectedReviewCommand } from '../../../apps/web/src/review/review-command-result.js';
 import { createRoot } from 'react-dom/client';
-import { ProductionReviewApp, type ProductionSessionApi } from '../../../apps/web/src/app/ProductionReviewApp.js';
+import { ProductionReviewApp } from '../../../apps/web/src/app/ProductionReviewApp.js';
+import type { ProductionSessionApi } from '../../../apps/web/src/host/session-contracts.js';
 import { RuntimeProductionReviewApp } from '../../../apps/web/src/production-entry.js';
 import type { HostRuntime, HostRuntimeBootstrap } from '../../../apps/web/src/host/runtime.js';
 import { MemoryReviewLocationHistory } from '../../../apps/web/src/review/review-location-history.js';
@@ -9,7 +11,6 @@ import { PdfZoomMode } from '@embedpdf/models';
 
 import {
   ReviewShell,
-  type RejectedReviewCommand,
 } from '../../../apps/web/src/app/ReviewShell.js';
 import { SaveDestinationDialog } from '../../../apps/web/src/save/SaveDestinationDialog.js';
 import { CommentComposer } from '../../../apps/web/src/review/CommentComposer.js';

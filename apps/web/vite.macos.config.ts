@@ -1,36 +1,22 @@
-import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { defineConfig, type Plugin } from "vite";
 import {
   buildPackagedPdfiumWorkerSource,
   EMBEDPDF_ENGINE_VERSION,
-  extractPinnedPdfiumWorkerSource,
-} from "../chrome-extension/scripts/embedpdf-worker-source.js";
+} from "../../scripts/build/pdfium-worker-source.js";
+import { emitPdfiumAssets, loadPinnedPdfiumWorkerSource } from "../../scripts/build/pdfium-assets.js";
 
 function packagedMacPdfium(): Plugin {
-  const engineRoot = resolve("node_modules/@embedpdf/engines");
-  const metadata = JSON.parse(readFileSync(resolve(engineRoot, "package.json"), "utf8")) as {
-    readonly version?: unknown;
-  };
-  if (metadata.version !== EMBEDPDF_ENGINE_VERSION) {
-    throw new Error(`Mac PDFium worker requires @embedpdf/engines ${EMBEDPDF_ENGINE_VERSION}`);
-  }
-  const workerSource = extractPinnedPdfiumWorkerSource(readFileSync(
-    resolve(engineRoot, "dist/lib/pdfium/web/worker-engine.js"),
-    "utf8",
-  ));
+  const workerSource = loadPinnedPdfiumWorkerSource(
+    `Mac PDFium worker requires @embedpdf/engines ${EMBEDPDF_ENGINE_VERSION}`,
+  );
   return {
     name: "packaged-mac-pdfium",
     generateBundle() {
-      this.emitFile({
-        type: "asset",
-        fileName: "assets/pdfium.wasm",
-        source: readFileSync(resolve("node_modules/@embedpdf/pdfium/dist/pdfium.wasm")),
-      });
-      this.emitFile({
-        type: "asset",
-        fileName: "assets/pdfium-worker.js",
-        source: buildPackagedPdfiumWorkerSource(workerSource),
+      emitPdfiumAssets(this, {
+        wasm: { fileName: "assets/pdfium.wasm" },
+        worker: { fileName: "assets/pdfium-worker.js" },
+        workerSource: buildPackagedPdfiumWorkerSource(workerSource),
       });
     },
   };

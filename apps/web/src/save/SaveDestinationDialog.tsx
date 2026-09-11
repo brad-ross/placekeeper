@@ -1,7 +1,7 @@
 import { useId, useLayoutEffect, useRef, useState } from "react";
 
 import { trapDialogFocus } from "../app/dialog-focus.js";
-import type { SaveCopyProposal } from "../app/ProductionReviewApp.js";
+import type { SaveCopyProposal } from "../host/session-contracts.js";
 import { ReviewIcon } from "../review/ReviewIcon.js";
 import type { PdfRewriteEligibility } from "../../../../packages/core/src/pdf-writer.js";
 import type { SaveFailureReason } from "../../../../packages/core/src/save-status.js";

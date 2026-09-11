@@ -1,6 +1,7 @@
 ---
 title: Refresh independently installed VS Code payloads after app installation
 date: 2026-09-10
+last_updated: 2026-09-10
 category: integration-issues
 module: Application installation and VS Code integration
 problem_type: integration_issue
@@ -22,7 +23,7 @@ A current Placekeeper app did not imply a current VS Code interface. During the 
 
 ## Symptoms
 
-VS Code continued to show the old interface after the app had been updated. Comparing the app's bundled integration against VS Code's installed extension exposed the stale copy. This distinction matters because the extension packages its own shared-web assets: the copy stage reads the root production output and writes the extension's `dist/web` (`apps/vscode/copy-web-assets.mjs:5`, `apps/vscode/copy-web-assets.mjs:29`). Updating the app does not itself replace the copy registered with VS Code.
+VS Code continued to show the old interface after the app had been updated. Comparing the app's bundled integration against VS Code's installed extension exposed the stale copy. This distinction matters because the extension packages its own shared-web assets: the copy stage reads the root production output and writes the extension's `dist/web` (`apps/vscode/copy-web-assets.mjs`). Updating the app does not itself replace the copy registered with VS Code.
 
 ## What Didn't Work
 
@@ -30,17 +31,17 @@ Matching `0.1.1` version strings did not establish freshness. The installed payl
 
 ## Solution
 
-The source installer now runs an extension updater after successful app-install coordination (`install.sh:173`, `install.sh:184`). It executes even when coordination decides the app is already current, allowing an installer retry to repair an independently stale extension. The updater checks whether Placekeeper is already registered with VS Code, builds a temporary VSIX from the installed app's bundled integration, and uses the editor's CLI with `--install-extension ... --force` (`packaging/macos/update-vscode.mjs:20`, `packaging/macos/update-vscode.mjs:24`, `packaging/macos/update-vscode.mjs:31`, `packaging/macos/update-vscode.mjs:42`). It preserves opt-in by skipping an absent extension.
+The source installer now runs an extension updater after successful app-install coordination (`install.sh`, `install.sh`). It executes even when coordination decides the app is already current, allowing an installer retry to repair an independently stale extension. The updater checks whether Placekeeper is already registered with VS Code, builds a temporary VSIX from the installed app's bundled integration, and uses the editor's CLI with `--install-extension ... --force` (`packaging/macos/update-vscode.mjs`). It preserves opt-in by skipping an absent extension.
 
-The standalone extension build also rebuilds shared web output before bundling (`apps/vscode/package.json:135`). This closes the upstream case where copying a coherent but outdated root build would produce a newly built extension with yesterday's UI.
+The standalone extension build also rebuilds shared web output before bundling (`apps/vscode/package.json`). This closes the upstream case where copying a coherent but outdated root build would produce a newly built extension with yesterday's UI.
 
-The updater belongs outside the app replacement helper. That helper is also used by isolated installed-app smoke and rollback workflows; putting editor-profile mutation there would let an isolated app operation change the user's real VS Code installation (`install.sh:176`, `install.sh:181`).
+The updater belongs outside the app replacement helper. That helper is also used by isolated installed-app smoke and rollback workflows; putting editor-profile mutation there would let an isolated app operation change the user's real VS Code installation (`install.sh`, `install.sh`).
 
 ## Why This Works
 
-There are two freshness boundaries: producing the extension's assets and installing them into the editor's registered copy. Both must be crossed. `--force` handles equal-version source builds through VS Code's installer instead of direct directory replacement, preserving the editor's registration machinery (`packaging/macos/update-vscode.mjs:13`, `packaging/macos/update-vscode.mjs:41`). The session verified a same-version CLI installation and then compared the installed distribution against the intended payload; the repair was therefore checked beyond mocked command invocation. A VS Code window reload is still required to load the refreshed interface (`packaging/macos/update-vscode.mjs:55`).
+There are two freshness boundaries: producing the extension's assets and installing them into the editor's registered copy. Both must be crossed. `--force` handles equal-version source builds through VS Code's installer instead of direct directory replacement, preserving the editor's registration machinery (`packaging/macos/update-vscode.mjs`). The session verified a same-version CLI installation and then compared the installed distribution against the intended payload; the repair was therefore checked beyond mocked command invocation. A VS Code window reload is still required to load the refreshed interface (`packaging/macos/update-vscode.mjs`).
 
-This is verified source work in PR #92, pending merge as of September 10, 2026; it is not a claim that the fix has already shipped on the default branch.
+The PR #92 implementation is present in the current tree. Installed-consumer freshness still requires inspecting the actual registered extension payload.
 
 ## Prevention
 

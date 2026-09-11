@@ -1,13 +1,13 @@
+import type { SaveStatus } from "../../../../packages/core/src/save-status.js";
 import type { ReviewCommand, ReviewState } from "../../../../packages/core/src/review-model.js";
 import type {
   ProductionSession,
   ProductionSessionApi,
   ProductionScope,
-  ProductionSaveStatus,
   ProductionExportResult,
   SaveCopyProposal,
-} from "./ProductionReviewApp.js";
-import type { RejectedReviewCommand } from "./ReviewShell.js";
+} from "../host/session-contracts.js";
+import type { RejectedReviewCommand } from "../review/review-command-result.js";
 
 export type ReopenRecoveryChoice = "resume" | "discard" | "fork";
 
@@ -188,13 +188,13 @@ export async function loadProductionSession(session: ProductionSession): Promise
   readonly state: ReviewState;
   readonly scope: ProductionScope;
   readonly api: ProductionSessionApi;
-  readonly saveStatus: ProductionSaveStatus;
+  readonly saveStatus: SaveStatus;
 }> {
   const { request, post } = client(session);
   const [state, scope, saveStatus] = await Promise.all([
     request<ReviewState>("/state"),
     request<ProductionScope>("/scope"),
-    request<ProductionSaveStatus>("/save/status"),
+    request<SaveStatus>("/save/status"),
   ]);
   let commandGeneration = state.workflow.documentGeneration;
   return {
@@ -250,9 +250,9 @@ export async function loadProductionSession(session: ProductionSession): Promise
         commandGeneration = nextState.workflow.documentGeneration;
         return nextState;
       },
-      saveStatus: () => request<ProductionSaveStatus>("/save/status"),
+      saveStatus: () => request<SaveStatus>("/save/status"),
       saveProposal: () => request<SaveCopyProposal>("/save/proposal"),
-      chooseCopy: (filename, folderSelectionId) => post<ProductionSaveStatus>(
+      chooseCopy: (filename, folderSelectionId) => post<SaveStatus>(
         "/save/copy",
         {
           ...(filename === undefined ? {} : { filename }),
@@ -260,9 +260,9 @@ export async function loadProductionSession(session: ProductionSession): Promise
         },
       ),
       chooseFolder: () => post("/save/folder"),
-      chooseOriginal: () => post<ProductionSaveStatus>("/save/original"),
-      retrySave: () => post<ProductionSaveStatus>("/save/retry"),
-      locateSave: () => post<ProductionSaveStatus>("/save/locate"),
+      chooseOriginal: () => post<SaveStatus>("/save/original"),
+      retrySave: () => post<SaveStatus>("/save/retry"),
+      locateSave: () => post<SaveStatus>("/save/locate"),
       exportReviewedCopy: (confirmPossiblyStale) => post<ProductionExportResult>(
         "/export",
         confirmPossiblyStale === true ? { confirmPossiblyStale: true } : {},

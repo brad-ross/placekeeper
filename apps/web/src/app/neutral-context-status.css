@@ -1,0 +1,223 @@
+.review-context-palette,
+.review-page-menu,
+.link-action-popover {
+  gap: 2px;
+  padding: 5px;
+  border: 1px solid var(--pk-border);
+  border-radius: 12px;
+  background: var(--pk-raised);
+  box-shadow: var(--pk-shadow-raised);
+}
+
+.link-action-popover {
+  padding: 0;
+}
+
+.review-context-palette button,
+.review-page-menu button,
+.link-action-popover__surface [role="menuitem"] {
+  min-height: 32px;
+  border: 0;
+  border-radius: 10px;
+  color: var(--pk-ink);
+  background: transparent;
+  font: 400 13px/1.2 var(--pk-font-ui);
+}
+
+.review-context-palette .review-action-button--icon,
+.link-action-popover__surface [role="menuitem"] {
+  width: 32px;
+  min-width: 32px;
+  height: 32px;
+}
+
+.review-context-palette button:hover:not(:disabled),
+.review-page-menu button:hover:not(:disabled),
+.link-action-popover__surface [role="menuitem"]:hover,
+.link-action-popover__surface [role="menuitem"]:focus-visible {
+  border-color: transparent;
+  color: var(--pk-ink);
+  background: var(--pk-hover);
+  box-shadow: none;
+}
+
+.link-action-popover__surface [role="menuitem"] {
+  color: var(--pk-muted);
+}
+
+.link-action-popover__surface [role="menuitem"]:hover,
+.link-action-popover__surface [role="menuitem"]:focus-visible {
+  color: var(--pk-ink);
+  background: var(--pk-hover);
+}
+
+.link-action-popover__surface [role="menuitem"]:focus-visible {
+  outline: 2px solid var(--pk-focus);
+  outline-offset: 3px;
+}
+
+.codex-context-status {
+  width: 32px;
+  min-height: 32px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  box-shadow: none;
+}
+
+.codex-context-status:hover { background: var(--pk-hover); }
+.codex-context-status:focus-visible { box-shadow: none; }
+
+.codex-context-status__tooltip {
+  position: fixed;
+  right: auto;
+  min-width: 0;
+  max-width: min(280px, calc(100vw - 12px));
+  padding: 6px 9px;
+  border: 0;
+  border-radius: 7px;
+  color: #fff;
+  background: #3e3e3e;
+  box-shadow: 0 2px 7px #00000014;
+  font: 400 12px/1.4 var(--pk-font-ui);
+}
+
+.codex-context-status__tooltip::before { display: none; }
+.codex-context-status__tooltip-title { font: inherit; }
+.codex-context-status__tooltip-detail { color: inherit; }
+
+.codex-context-status:hover .codex-context-status__tooltip {
+  transition-delay: 600ms;
+}
+
+.codex-context-status:focus-visible .codex-context-status__tooltip {
+  transition-delay: 0ms;
+}
+
+.reconciliation-workspace {
+  color: var(--pk-ink);
+  font-family: var(--pk-font-ui);
+}
+
+.reconciliation-workspace__header h2,
+.reconciliation-workspace__detail-header h2 {
+  color: var(--pk-ink);
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.reconciliation-workspace__state-pill {
+  border: 0;
+  border-radius: 8px;
+  color: var(--pk-muted);
+  background: var(--pk-hover);
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.reconciliation-workspace--detail .reconciliation-workspace__intent {
+  gap: 4px;
+}
+
+.reconciliation-workspace--detail .reconciliation-workspace__kicker {
+  color: var(--pk-muted);
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.reconciliation-workspace--detail .reconciliation-workspace__annotation-text {
+  color: var(--pk-ink);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.45;
+}
+
+.reconciliation-workspace__prior-context {
+  gap: 4px;
+  padding: 10px 12px;
+  border-left: 2px solid var(--pk-muted);
+  border-radius: 0 9px 9px 0;
+  background: var(--pk-selected);
+}
+
+.reconciliation-workspace--detail .reconciliation-workspace__source-text {
+  color: var(--pk-muted);
+  font-family: var(--pk-font-ui);
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 400;
+  line-height: 1.5;
+}
+
+.reconciliation-workspace--detail .reconciliation-workspace__instruction {
+  color: var(--pk-muted);
+  font-size: 12px;
+  font-weight: 400;
+}
+
+/* Exceptional states extend the same surface system as the approved scenes. */
+.workspace-empty,
+.annotation-empty,
+.annotation-status {
+  padding: 24px 12px;
+  border: 0;
+  border-radius: 0;
+  color: var(--pk-muted);
+  background: transparent;
+  box-shadow: none;
+  font: 400 13px/1.5 var(--pk-font-ui);
+}
+.outline-navigator > .outline-navigator__loading,
+.annotation-drawer__owned > .annotation-empty {
+  padding-block: 8px;
+}
+
+.annotation-status--error {
+  padding: 10px 12px;
+  border-radius: 10px;
+  color: #843b33;
+  background: #faf0ee;
+}
+.annotation-status--error button {
+  min-height: 32px;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 10px;
+  color: inherit;
+  background: transparent;
+  font: 400 13px/1.2 var(--pk-font-ui);
+}
+.annotation-status--error button:hover { background: var(--pk-hover); }
+.pdf-search__message { background: transparent; }
+.row-action-group__menu,
+.pdf-search__symbol-suggestions {
+  padding: 5px;
+  border: 1px solid var(--pk-border);
+  border-radius: 12px;
+  background: var(--pk-raised);
+  box-shadow: var(--pk-shadow-raised);
+}
+.review-toast,
+.pdf-workspace__status {
+  gap: 7px;
+  padding: 10px 14px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--pk-raised);
+  box-shadow: var(--pk-shadow-raised);
+  font: 400 12px/1.5 var(--pk-font-ui);
+}
+.review-toast--error,
+.pdf-workspace__status { color: #843b33; background: #faf0ee; }
+@media (pointer: coarse) {
+  .annotation-status--error button,
+  .document-actions__menu > button,
+  .document-actions__confirmation > button { min-height: 44px; }
+}
+

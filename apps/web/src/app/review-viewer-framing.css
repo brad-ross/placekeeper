@@ -1,0 +1,392 @@
+.review-layout {
+  --review-document-right-space: 0px;
+  --review-document-left-gap: 10px;
+  --review-document-right-gap: 10px;
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.review-document {
+  position: absolute;
+  z-index: 0;
+  inset: 0 var(--review-document-right-space) 0 0;
+  min-width: 0;
+  min-height: 0;
+  overflow: visible;
+}
+
+.review-layout[data-right-surface-open="false"][data-right-rail-present="true"] {
+  --review-document-right-space: var(--review-collapsed-rail-size, 40px);
+  --review-document-left-gap: calc(var(--review-collapsed-rail-size, 40px) + var(--review-overlay-fade-size, 12px));
+  --review-document-right-gap: var(--review-overlay-fade-size, 12px);
+}
+
+.review-layout[data-right-surface-open="true"] {
+  --review-document-right-space: calc(var(--reference-right-width) + var(--review-overlay-inset, 12px));
+  --review-document-left-gap: 24px;
+  --review-document-right-gap: 24px;
+}
+
+/* One native scrollport reaches the window edge. Its content reserves the
+   workspace area, while .review-document remains the reading geometry. The
+   scrollbar's width is already included in that reserved area. */
+.review-document .pdf-workspace__viewport {
+  width: calc(100% + var(--review-document-right-space)) !important;
+  /* WebKit requires physical properties to animate the logical padding below. */
+  transition: padding-left var(--review-motion-surface) ease-out, padding-right var(--review-motion-surface) ease-out;
+  padding-inline: var(--review-document-left-gap)
+    calc(var(--review-document-right-gap) + max(0px, var(--review-document-right-space) - var(--review-main-scrollbar-width, 0px))) !important;
+}
+
+/* The zoom wrapper's synthetic margin assumes uniform library padding.
+   Native content padding owns centering beside the workspace instead. */
+.review-document [data-viewer-framing-content] {
+  margin-left: 0 !important;
+}
+
+.review-overlay-frame {
+  /* Decorative backing must never paint over the native PDF scrollbar. */
+  clip-path: inset(0 var(--review-overlay-inset, 12px) var(--review-overlay-inset, 12px) 0);
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.review-overlay-frame > span {
+  position: absolute;
+  display: none;
+  pointer-events: none;
+}
+
+.review-layout[data-right-overlay="true"] .review-overlay-frame__right-backing {
+  display: block;
+  inset: 0 0 0 var(--review-overlay-right-start);
+  background: var(--review-surface-canvas);
+}
+
+.review-layout[data-right-overlay="true"] .review-overlay-frame__right-fade {
+  display: block;
+  top: 0;
+  bottom: 0;
+  left: calc(var(--review-overlay-right-start) - var(--review-overlay-fade-size));
+  width: var(--review-overlay-fade-size);
+  background: linear-gradient(to right, transparent, var(--review-surface-canvas));
+}
+
+.review-layout[data-bottom-overlay="true"] .review-overlay-frame__bottom-backing {
+  display: block;
+  inset: var(--review-overlay-bottom-start) 0 0;
+  background: var(--review-surface-canvas);
+}
+
+.review-layout[data-bottom-overlay="true"] .review-overlay-frame__bottom-fade {
+  display: block;
+  right: 0;
+  left: 0;
+  top: calc(var(--review-overlay-bottom-start) - var(--review-overlay-fade-size));
+  height: var(--review-overlay-fade-size);
+  background: linear-gradient(transparent, var(--review-surface-canvas));
+}
+
+.review-layout[data-right-overlay="false"][data-right-rail-present="true"]
+  .review-overlay-frame__right-backing {
+  display: block;
+  top: 0;
+  right: var(--review-main-scrollbar-width);
+  bottom: var(--review-main-scrollbar-height);
+  width: calc(var(--review-collapsed-rail-size, 40px) - var(--review-main-scrollbar-width));
+  min-width: 0;
+  background: var(--review-surface-canvas);
+}
+
+.review-layout[data-right-overlay="false"][data-right-rail-present="true"]
+  .review-overlay-frame__right-fade {
+  display: block;
+  top: 0;
+  right: var(--review-collapsed-rail-size, 40px);
+  bottom: var(--review-main-scrollbar-height);
+  width: var(--review-overlay-fade-size);
+  background: linear-gradient(to right, transparent, var(--review-surface-canvas));
+}
+
+.review-layout[data-bottom-overlay="false"][data-bottom-rail-present="true"]
+  .review-overlay-frame__bottom-backing {
+  display: block;
+  right: var(--review-main-scrollbar-width);
+  bottom: var(--review-main-scrollbar-height);
+  left: 0;
+  height: calc(var(--review-collapsed-rail-size, 40px) - var(--review-main-scrollbar-height));
+  min-height: 0;
+  background: var(--review-surface-canvas);
+}
+
+.review-layout[data-bottom-overlay="false"][data-bottom-rail-present="true"]
+  .review-overlay-frame__bottom-fade {
+  display: block;
+  right: var(--review-main-scrollbar-width);
+  bottom: calc(var(--review-collapsed-rail-size, 40px) - var(--review-main-scrollbar-height));
+  left: 0;
+  height: var(--review-overlay-fade-size);
+  background: linear-gradient(transparent, var(--review-surface-canvas));
+}
+
+.review-layout[data-scroll-top-fade="true"] .review-overlay-frame__top-fade {
+  display: block;
+  z-index: 1;
+  top: 0;
+  right: var(--review-main-scrollbar-width);
+  left: 0;
+  height: var(--review-overlay-fade-size);
+  background: linear-gradient(var(--review-surface-canvas), transparent);
+}
+
+.review-layout[data-scroll-right-fade="true"][data-right-overlay="false"]
+  .review-overlay-frame__outer-right-fade {
+  display: block;
+  top: 0;
+  right: var(--review-main-scrollbar-width);
+  bottom: var(--review-main-scrollbar-height);
+  width: var(--review-overlay-fade-size);
+  background: linear-gradient(to right, transparent, var(--review-surface-canvas));
+}
+
+.review-layout[data-scroll-bottom-fade="true"][data-bottom-overlay="false"]
+  .review-overlay-frame__outer-bottom-fade {
+  display: block;
+  right: var(--review-main-scrollbar-width);
+  bottom: var(--review-main-scrollbar-height);
+  left: 0;
+  height: var(--review-overlay-fade-size);
+  background: linear-gradient(transparent, var(--review-surface-canvas));
+}
+
+.review-document > *,
+[data-viewer-shell],
+.pdf-workspace {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+}
+
+[data-viewer-shell] {
+  position: relative;
+}
+
+.pdf-workspace__viewport {
+  height: 100%;
+  overflow: auto;
+  scrollbar-gutter: stable;
+  background: var(--review-surface-canvas);
+}
+
+/* Use the same small shadow clearance at both ends of the document. */
+.review-document .pdf-workspace__viewport {
+  padding-block: 12px !important;
+}
+
+.pdf-workspace__page {
+  background: #fff;
+  outline: none;
+  box-shadow: inset 0 0 0 1px var(--review-border-subtle), var(--review-shadow-page);
+}
+
+.pdf-workspace__loading {
+  display: flex;
+  height: 100%;
+  align-items: center;
+  justify-content: center;
+  gap: .5rem;
+  color: var(--review-ink-muted);
+  font-size: 12px;
+}
+
+.pdf-workspace__loading .review-icon {
+  animation: review-loader-spin 900ms linear infinite;
+}
+
+.pdf-workspace__status,
+.review-toast {
+  display: flex;
+  align-items: center;
+  gap: .4rem;
+  margin: 0;
+  padding: .45rem .65rem;
+  border-radius: var(--review-radius-control);
+  background: var(--review-surface-panel);
+  box-shadow: 0 2px 7px rgb(24 27 23 / 8%);
+  font-size: 12px;
+  font-weight: 400;
+  pointer-events: none;
+}
+
+.pdf-workspace__status {
+  position: absolute;
+  z-index: 2;
+  top: .75rem;
+  left: .75rem;
+  max-width: min(24rem, calc(100% - 1.5rem));
+  border: 1px solid color-mix(in srgb, var(--review-danger) 48%, var(--review-border));
+  color: var(--review-danger);
+}
+
+.review-toast-stack {
+  position: absolute;
+  z-index: 8;
+  top: .75rem;
+  left: .75rem;
+  display: grid;
+  width: max-content;
+  max-width: min(24rem, calc(100% - 1.5rem));
+  gap: .4rem;
+  pointer-events: none;
+}
+
+.review-toast {
+  border: 1px solid color-mix(in srgb, var(--review-warning) 55%, var(--review-border));
+  color: var(--review-ink-primary);
+}
+
+.review-toast--error {
+  border-color: color-mix(in srgb, var(--review-danger) 48%, var(--review-border));
+  color: var(--review-danger);
+}
+
+.pdf-copy-owner {
+  position: absolute;
+  z-index: 8;
+  top: .5rem;
+  right: .5rem;
+  margin: 0;
+  padding: .3rem .55rem;
+  border: 1px solid var(--review-border);
+  border-radius: var(--review-radius-control);
+  background: color-mix(in srgb, var(--review-surface-panel) 94%, transparent);
+  box-shadow: 0 2px 7px rgb(24 27 23 / 8%);
+  color: var(--review-ink-muted);
+  font-size: 11px;
+  font-weight: 400;
+  pointer-events: none;
+}
+
+.review-toast[data-generation-busy="true"] .review-icon {
+  animation: review-loader-spin 900ms linear infinite;
+}
+
+@keyframes review-loader-spin {
+  to { transform: rotate(1turn); }
+}
+
+.review-contextual-host,
+.review-drawer-host {
+  position: absolute;
+  z-index: 2;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.review-contextual-host {
+  z-index: 3;
+}
+
+.review-drawer-host {
+  display: grid;
+  grid-template: minmax(0, 1fr) / minmax(0, 1fr);
+  overflow: clip;
+}
+
+/* The outer review layout already clips these surfaces. A second clip can
+   leave native WebKit workspace layers unpainted until the window resizes. */
+[data-launch-surface="macos"] .review-drawer-host {
+  overflow: visible;
+}
+
+.review-context-palette,
+.review-page-menu {
+  position: fixed;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: var(--review-control-group-gap);
+  padding: 5px;
+  border: 1px solid var(--review-border);
+  border-radius: var(--review-radius-float);
+  background: var(--review-surface-panel);
+  box-shadow: var(--review-shadow-float);
+  pointer-events: auto;
+}
+
+.review-context-palette[hidden],
+.review-page-menu[hidden] {
+  display: none;
+}
+
+.review-insertion-caret {
+  position: fixed;
+  z-index: 3;
+  width: 1.25px;
+  height: 1.15rem;
+  background: var(--pdf-active-ink);
+  border-radius: 1px;
+  box-shadow: none;
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+  animation: review-insertion-caret-blink 1.2s ease-in-out infinite;
+}
+
+@keyframes review-insertion-caret-blink {
+  0%, 40%, 100% { opacity: 1; }
+  60%, 80% { opacity: .2; }
+}
+
+.review-insertion-caret[hidden] { display: none; }
+
+.review-context-palette button,
+.review-page-menu button {
+  display: inline-flex;
+  min-height: var(--review-control-default);
+  align-items: center;
+  gap: 7px;
+  padding: 0 11px;
+  border: 1px solid transparent;
+  border-radius: var(--review-radius-control);
+  color: var(--review-ink-primary);
+  background: transparent;
+  font-size: 13px;
+  font-weight: 400;
+  transition: color var(--review-motion-fast) ease, border-color var(--review-motion-fast) ease, background-color var(--review-motion-fast) ease, box-shadow var(--review-motion-fast) ease;
+}
+
+.review-context-palette button:hover:not(:disabled),
+.review-page-menu button:hover:not(:disabled) {
+  border-color: var(--review-border-strong);
+  background: var(--review-surface-interactive);
+}
+
+.review-context-palette button:active:not(:disabled),
+.review-page-menu button:active:not(:disabled) {
+  border-color: var(--review-border-strong);
+  background: var(--review-surface-interactive);
+  box-shadow: inset 0 1px 2px rgb(24 26 23 / 16%);
+}
+
+.review-context-palette button .review-icon,
+.review-page-menu button .review-icon {
+  color: var(--review-ink-muted);
+}
+
+.review-context-palette .review-action-button--icon {
+  width: var(--review-control-default);
+  min-width: var(--review-control-default);
+  justify-content: center;
+  padding: 0;
+}
+
+.review-page-menu {
+  transform: translate(.35rem, .35rem);
+}

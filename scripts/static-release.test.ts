@@ -33,8 +33,8 @@ describe("static release workflows", () => {
     const source = await workflow("static-web.yml");
     const triggers = source.slice(0, source.indexOf("\nconcurrency:\n"));
     expect(triggers).toContain("pull_request:");
-    expect(triggers).toContain('- "apps/chrome-extension/scripts/embedpdf-worker-source.ts"');
-    expect(triggers).not.toContain("embedpdf-worker-source.js");
+    expect(triggers).toContain('- "scripts/**"');
+    expect(triggers).not.toContain("apps/chrome-extension/scripts/embedpdf-worker-source");
     expect(triggers).not.toMatch(/pull_request_target:|push:|schedule:/u);
     expect(source).toContain("cancel-in-progress: true");
     expect(source).toContain("permissions: {}\n");

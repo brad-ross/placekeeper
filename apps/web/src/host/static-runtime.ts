@@ -1,3 +1,4 @@
+import type { SaveStatus } from "../../../../packages/core/src/save-status.js";
 import { projectReviewItems } from "../../../../packages/core/src/annotation-projection.js";
 import type {
   PdfRewriteEligibility,
@@ -15,8 +16,7 @@ import {
 } from "../../../../packages/pdf-backends/src/browser-document-session.js";
 import type {
   ProductionExportResult,
-  ProductionSaveStatus,
-} from "../app/ProductionReviewApp.js";
+} from "./session-contracts.js";
 import type { ViewerAssetUrls } from "../pdf/embedpdf-viewer.js";
 import type { HostRuntime } from "./runtime.js";
 
@@ -143,7 +143,7 @@ function notSavedStatus(
   state: ReviewState,
   eligibility: PdfRewriteEligibility,
   lastExportedRevision: number,
-): ProductionSaveStatus {
+): SaveStatus {
   return {
     destination: { phase: "none", generation: 0 },
     sync: {

@@ -1,6 +1,7 @@
 ---
 title: "Avoid redundant clipping of native WebKit workspace layers on first paint"
 date: "2026-09-07"
+last_updated: 2026-09-10
 category: "ui-bugs"
 module: "PDF viewer framing and native document window"
 problem_type: "ui_bug"
@@ -42,11 +43,11 @@ A temporary `translateZ(0)` promotion made the rail paint but left the tray blan
 
 ## Solution
 
-Remove the redundant clipping boundary from the drawer host on the Mac launch surface. The general drawer host retains `overflow: clip`, while the Mac-specific override uses `overflow: visible`; see `apps/web/src/app/review-layout-foundation.css:795` and `apps/web/src/app/review-layout-foundation.css:803`. The outer `.review-layout` already has `overflow: hidden` in `apps/web/src/app/review-layout-foundation.css:501`, so the surrounding layout remains the clipping boundary.
+Remove the redundant clipping boundary from the drawer host on the Mac launch surface. The general drawer host retains `overflow: clip`, while the Mac-specific override uses `overflow: visible`; see `apps/web/src/app/review-viewer-framing.css` and `apps/web/src/app/review-viewer-framing.css`. The outer `.review-layout` already has `overflow: hidden` in `apps/web/src/app/review-viewer-framing.css`, so the surrounding layout remains the clipping boundary.
 
-Verification used the actual native picker workflow again. After opening the PDF in the installed Mac app, both the workspace rail and the opened tray painted before any resize. That native visual observation was the decisive evidence for this fix.
+Original September 7 verification used the actual native picker workflow again. After opening the PDF in the installed Mac app, both the workspace rail and the opened tray painted before any resize. That native visual observation was the decisive evidence for this fix.
 
-The browser regression at `test/acceptance/annotation-behavior-followup.spec.ts:453` provides complementary coverage. It sets the Mac launch-surface attribute, checks that the rail is visible and inside the viewport, checks center-point hit ownership, opens the workspace, and closes it again. These assertions protect layout and interaction, but they do not reproduce NSOpenPanel or prove native compositor painting.
+The browser regression at `test/acceptance/annotation-behavior-followup.spec.ts` provides complementary coverage. It sets the Mac launch-surface attribute, checks that the rail is visible and inside the viewport, checks center-point hit ownership, opens the workspace, and closes it again. These assertions protect layout and interaction, but they do not reproduce NSOpenPanel or prove native compositor painting.
 
 ## Why This Works
 

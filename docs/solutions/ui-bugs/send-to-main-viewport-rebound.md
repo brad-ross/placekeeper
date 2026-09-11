@@ -1,7 +1,7 @@
 ---
 title: "Prevent Send-to-Main viewport rebound during Reference workspace reflow"
 date: "2026-08-12"
-last_updated: "2026-09-07"
+last_updated: 2026-09-10
 category: "ui-bugs"
 module: "PDF reference navigation and viewer framing"
 problem_type: "ui_bug"
@@ -33,31 +33,31 @@ tags:
 
 Sending the final Reference Tab to Main could reach the correct destination, rebound toward the previous viewport during Reference teardown, and then settle again. The final semantic location was correct; the visible motion exposed competing navigation and framing authority. [PR #12](https://github.com/brad-ross/placekeeper/pull/12) records the earlier correction.
 
-Current framing preserves reading position through passive overlay changes rather than reversing an automatic open-time reveal. The durable Send-to-Main rule is still to hand off authority before consuming the source tab, but the handoff now clears remembered positions and stale capture authority. It does not install the destination as an old-style close-restoration baseline (`apps/web/src/app/ReviewShell.tsx:1997`, `apps/web/src/review/use-annotation-tray-framing.ts:302`).
+Current framing preserves reading position through passive overlay changes rather than reversing an automatic open-time reveal. The durable Send-to-Main rule is still to hand off authority before consuming the source tab, but the handoff now clears remembered positions and stale capture authority. It does not install the destination as an old-style close-restoration baseline (`apps/web/src/app/ReviewShell.tsx`, `apps/web/src/review/use-annotation-tray-framing.ts`).
 
 ## Symptoms
 
 The Main PDF visibly reversed motion on one or both scroll axes when the final Reference disappeared. Endpoint-only assertions passed because a later destination application repaired the final position. The interaction was particularly conspicuous when Search remained involved in workspace recomposition.
 
-The current regression observes both Main scroll axes through Reference viewport removal, not just the final page (`test/acceptance/production-flow.spec.ts:978`).
+The current regression observes both Main scroll axes through Reference viewport removal, not just the final page (`test/acceptance/production-flow.spec.ts`).
 
 ## What Didn't Work
 
 Applying the destination again after teardown masked stale ownership. Navigation first moved Main to the target, framing moved it toward an older position, and the second application moved it back. A correct endpoint did not make that sequence acceptable.
 
-Closing the physical Reference controller before Main applied was unsafe for a different reason: failed navigation would lose its rollback resource. Failure must leave the source tab and controller available, reveal the final Reference layout again, and avoid the framing handoff (`apps/web/src/review/navigation-coordinator.ts:915`, `apps/web/test/navigation-coordinator.test.ts:1234`).
+Closing the physical Reference controller before Main applied was unsafe for a different reason: failed navigation would lose its rollback resource. Failure must leave the source tab and controller available, reveal the final Reference layout again, and avoid the framing handoff (`apps/web/src/review/navigation-coordinator.ts`, `apps/web/test/navigation-coordinator.test.ts`).
 
-Requiring an immediate fresh capture after a verified apply could also reject an already-completed Send during transient layout unavailability. `applyLocation` success supplies verified destination authority; the coordinator can retain the applied Reference location if recapture is momentarily unavailable (`apps/web/src/review/navigation-coordinator.ts:910`). This fallback is not permission to treat an unsuccessful apply as navigation success.
+Requiring an immediate fresh capture after a verified apply could also reject an already-completed Send during transient layout unavailability. `applyLocation` success supplies verified destination authority; the coordinator can retain the applied Reference location if recapture is momentarily unavailable (`apps/web/src/review/navigation-coordinator.ts`). This fallback is not permission to treat an unsuccessful apply as navigation success.
 
 ## Solution
 
 ### Apply once and transfer authority before consumption
 
-Capture the live Reference location and current Main location, refresh Reference state, and start the Send transaction. For the final Reference, hide its layout and await settlement before applying Main's destination. Guard the operation after that wait (`apps/web/src/review/navigation-coordinator.ts:882`).
+Capture the live Reference location and current Main location, refresh Reference state, and start the Send transaction. For the final Reference, hide its layout and await settlement before applying Main's destination. Guard the operation after that wait (`apps/web/src/review/navigation-coordinator.ts`).
 
-Apply the captured Reference location to Main once. On success, use Main's new capture or the verified applied location. Invoke `commitMainFramingPosition` before dispatching successful logical consumption and post-Send recomposition (`apps/web/src/review/navigation-coordinator.ts:908`, `apps/web/src/review/navigation-coordinator.ts:931`).
+Apply the captured Reference location to Main once. On success, use Main's new capture or the verified applied location. Invoke `commitMainFramingPosition` before dispatching successful logical consumption and post-Send recomposition (`apps/web/src/review/navigation-coordinator.ts`).
 
-After success, a surviving Reference is restored through the normal tab path. With no survivor, layout settlement and physical controller close run together, then Main receives destination focus if the operation remains current. There is no second Main destination apply (`apps/web/src/review/navigation-coordinator.ts:949`). Thus the required ordering is apply → handoff → consume → final settlement/physical close; settlement and close are not strictly serial with each other.
+After success, a surviving Reference is restored through the normal tab path. With no survivor, layout settlement and physical controller close run together, then Main receives destination focus if the operation remains current. There is no second Main destination apply (`apps/web/src/review/navigation-coordinator.ts`). Thus the required ordering is apply → handoff → consume → final settlement/physical close; settlement and close are not strictly serial with each other.
 
 ### Clear superseded position memory synchronously
 
@@ -69,9 +69,9 @@ const commitMainFramingPosition = useCallback(() => {
 }, [markFramingUserIntent]);
 ```
 
-The production app retains that callback and invokes it through the coordinator dependency (`apps/web/src/app/ReviewShell.tsx:1997`, `apps/web/src/app/ProductionReviewApp.tsx:1058`, `apps/web/src/app/ProductionReviewApp.tsx:1893`). This keeps the handoff in the transaction rather than hoping a later passive effect runs before teardown.
+The production app retains that callback and invokes it through the coordinator dependency (`apps/web/src/app/ReviewShell.tsx`, `apps/web/src/app/ProductionReviewApp.tsx`). This keeps the handoff in the transaction rather than hoping a later passive effect runs before teardown.
 
-`markUserIntent` advances the user revision and, when ready, performs a same-position immediate write to cancel older automatic smooth scrolling. With `captureSettledPosition: false`, it then calls `supersedeWithExplicitNavigation`: desired positions, pending user axes, and transition memory are cleared, and the capture revision advances (`apps/web/src/review/use-annotation-tray-framing.ts:302`, `apps/web/src/review/use-annotation-tray-framing.ts:269`, `apps/web/src/pdf/viewer-framing.ts:231`). It does not schedule a new settled user-position capture in this branch. Later passive layout therefore cannot legitimately revive the pre-Send remembered pan.
+`markUserIntent` advances the user revision and, when ready, performs a same-position immediate write to cancel older automatic smooth scrolling. With `captureSettledPosition: false`, it then calls `supersedeWithExplicitNavigation`: desired positions, pending user axes, and transition memory are cleared, and the capture revision advances (`apps/web/src/review/use-annotation-tray-framing.ts`, `apps/web/src/pdf/viewer-framing.ts`). It does not schedule a new settled user-position capture in this branch. Later passive layout therefore cannot legitimately revive the pre-Send remembered pan.
 
 ## Why This Works
 
@@ -81,9 +81,9 @@ Rollback remains possible until success. A failed apply neither consumes the sou
 
 ## Prevention
 
-Retain the unit assertions for exactly one Main apply, one framing handoff before post-Send recomposition, and physical close after the apply (`apps/web/test/navigation-coordinator.test.ts:1173`). Cover transient recapture failure and failed-apply rollback separately (`apps/web/test/navigation-coordinator.test.ts:1199`, `apps/web/test/navigation-coordinator.test.ts:1234`).
+Retain the unit assertions for exactly one Main apply, one framing handoff before post-Send recomposition, and physical close after the apply (`apps/web/test/navigation-coordinator.test.ts`). Cover transient recapture failure and failed-apply rollback separately (`apps/web/test/navigation-coordinator.test.ts`).
 
-Test the motion window honestly. The browser scenario records scroll events through physical Reference removal and two animation frames plus 250 ms, and fails if its two-second fallback timer ended observation (`test/acceptance/production-flow.spec.ts:1010`). Zoom and host padding can legitimately move either axis before arrival. The test finds the first sample within 8 px of the page-1 top, requires every later recorded sample to remain there, and then checks that both scroll offsets remain unchanged for another 250 ms and the current page is still 1 (`test/acceptance/production-flow.spec.ts:1048`). This proves arrival and subsequent stability; it does not require a monotonic horizontal approach or establish zero transient movement between recorded samples.
+Test the motion window honestly. The browser scenario records scroll events through physical Reference removal and two animation frames plus 250 ms, and fails if its two-second fallback timer ended observation (`test/acceptance/production-flow.spec.ts`). Zoom and host padding can legitimately move either axis before arrival. The test finds the first sample within 8 px of the page-1 top, requires every later recorded sample to remain there, and then checks that both scroll offsets remain unchanged for another 250 ms and the current page is still 1 (`test/acceptance/production-flow.spec.ts`). This proves arrival and subsequent stability; it does not require a monotonic horizontal approach or establish zero transient movement between recorded samples.
 
 For any navigation followed by teardown, keep one semantic owner, revoke obsolete framing memory before layout mutation, preserve rollback resources until success, and distinguish logical consumption from physical disposal.
 

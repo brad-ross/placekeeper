@@ -45,3 +45,7 @@ LaTeX Workshop 10.18.x users may opt into **Placekeeper: Configure LaTeX Worksho
 ## Supported release scope
 
 The current personal release is source-first and Apple-silicon-only. Developer ID signing, notarization, Intel/x64, DMG/PKG packaging, auto-update, and release CI are optional future work, not installation requirements.
+
+## Development
+
+See [Contributing](CONTRIBUTING.md) for the repository map, build prerequisites, test aliases, and style ownership. The [documentation index](docs/README.md) separates operating instructions, current learnings, and historical plans.

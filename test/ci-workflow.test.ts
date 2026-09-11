@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises';
 
 import { describe, expect, it } from 'vitest';
+import { suites, suiteCommand, ciUnitFiles } from '../scripts/testing/suites';
 
 const fullSuiteSteps = [
   'Install Playwright browsers and system dependencies',
@@ -27,8 +28,11 @@ describe('manual CI workflow', () => {
     };
 
     expect(packageManifest.scripts?.['test:ci:unit']).toBe(
-      'pnpm build:vscode && vitest run --config vitest.ci.config.ts',
+      'node --import tsx scripts/testing/run-suite.ts test:ci:unit',
     );
+    expect(suites['test:ci:unit']?.[0]).toBe('pnpm build:vscode');
+    expect(suiteCommand('test:ci:unit')).toBe('pnpm build:vscode && vitest run --config vitest.ci.config.ts');
+    expect(ciUnitFiles).toContain('packaging/macos/update-vscode.test.mjs');
   });
 
   it('runs the full CI suite when dispatched manually', async () => {

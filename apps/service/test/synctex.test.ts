@@ -279,6 +279,26 @@ describe("generation-bound SyncTeX navigation", () => {
     });
   });
 
+  it("selects the final surviving bound forward record rather than the greatest page", async () => {
+    const value = await generatedOutputFixture();
+    const result = await value.broker.forwardSyncTex({
+      sessionId: value.launch.sessionId,
+      operationToken: "forward-tool-order",
+      sourcePath: "paper.tex",
+      line: 3,
+      run: async (request) => ({
+        stdout: [
+          `Output:${request.argv.at(-1)}`, "Page:9", "x:90", "y:90",
+          `Output:${request.argv.at(-1)}`, "Page:2", "x:20", "y:20",
+          "Output:/unbound/other.pdf", "Page:10", "x:100", "y:100",
+        ].join("\n"),
+        stderr: "",
+        exitCode: 0,
+      }),
+    });
+    expect(result).toMatchObject({ status: "ok", target: { pageIndex: 1, x: 20, y: 20 } });
+  });
+
   it("accepts a large bounded forward result from a Beamer frame", async () => {
     const value = await generatedOutputFixture();
     const result = await value.broker.forwardSyncTex({

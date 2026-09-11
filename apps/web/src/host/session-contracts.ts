@@ -1,0 +1,74 @@
+import type { ReviewCommand, ReviewState } from "../../../../packages/core/src/review-model.js";
+import type { SaveStatus } from "../../../../packages/core/src/save-status.js";
+import type { LiveContextBindingStatus } from "../../../../packages/core/src/live-context.js";
+import type { RejectedReviewCommand } from "../review/review-command-result.js";
+
+export interface ProductionSession {
+  readonly sessionId: string;
+  /** Browser-only memory credential. VS Code keeps this in the extension host. */
+  readonly credential?: string;
+  /** Present for top-level readable views; embedded bootstrap sessions omit it. */
+  readonly appLinkBase?: string;
+}
+
+export interface ProductionScope {
+  readonly documentTitle: string;
+  readonly sourceDisposition?: 'local' | 'remote-temporary';
+  readonly sourceDisplayName?: string;
+  readonly sourceRootPath?: string;
+  readonly launchSurface?: 'browser' | 'finder' | 'codex' | 'vscode' | 'chrome' | 'macos' | 'static';
+  /** Static hosting keeps review state only in this tab and offers explicit PDF export. */
+  readonly persistenceMode?: 'export-only';
+  /** A restarted browser is awaiting task-scoped Codex reattachment. */
+  readonly reconnectPending?: true;
+  readonly codexContext?: LiveContextBindingStatus;
+}
+
+export type SaveCopyProposal =
+  | {
+      readonly sourceDisposition: 'local';
+      readonly filename: string;
+      readonly folder: string;
+    }
+  | {
+      readonly sourceDisposition: 'remote-temporary';
+      readonly folder?: string;
+    };
+
+export interface ProductionExportResult {
+  readonly kind: "reviewed-copy";
+  readonly path: string;
+  readonly revision: number;
+  readonly digest: string;
+  readonly warning?: string;
+}
+
+export interface ProductionSessionApi {
+  presence?(): () => void;
+  command(command: ReviewCommand): Promise<ReviewState | RejectedReviewCommand>;
+  saveStatus(): Promise<SaveStatus>;
+  saveProposal(): Promise<SaveCopyProposal>;
+  chooseCopy(filename?: string, folderSelectionId?: string): Promise<SaveStatus>;
+  chooseFolder(): Promise<{ readonly cancelled: boolean; readonly selectionId?: string; readonly folder?: string }>;
+  chooseOriginal(): Promise<SaveStatus>;
+  retrySave(): Promise<SaveStatus>;
+  locateSave(): Promise<SaveStatus>;
+  exportReviewedCopy?(confirmPossiblyStale?: true): Promise<ProductionExportResult>;
+  scope(signal?: AbortSignal): Promise<ProductionScope>;
+}
+
+export interface ReverseSyncTexRequest {
+  readonly pageIndex: number;
+  readonly point: { readonly x: number; readonly y: number };
+}
+
+export interface ForwardSyncTexRequest {
+  readonly documentGeneration: number;
+  readonly pageIndex: number;
+  readonly point: { readonly x: number; readonly y: number };
+}
+
+export type HostForwardSyncTexRequest = ForwardSyncTexRequest & {
+  readonly token: number;
+};
+

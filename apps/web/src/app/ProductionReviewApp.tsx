@@ -3,10 +3,28 @@ import type { PluginRegistry } from "@embedpdf/core";
 import type { PdfDocumentObject, PdfEngine } from '@embedpdf/models';
 import { SelectionPlugin } from "@embedpdf/plugin-selection";
 
-import type { ReviewCommand, ReviewItem, ReviewState } from "../../../../packages/core/src/review-model.js";
+import { useSaveDestination } from '../save/use-save-destination.js';
+import { usePdfSearch } from '../pdf/use-pdf-search.js';
+import { useHostSyncTex } from '../host/use-host-synctex.js';
+import { useCodexContext, UNAVAILABLE_CODEX_CONTEXT } from '../host/use-codex-context.js';
+import { initiallyPortableItemIds, saveStatusIsCleanCurrent } from "../save/portable-checkpoint.js";
+import {
+  referenceFocusRailSurface,
+  referencePdfIsVisible,
+  referenceReturnForActiveTab,
+} from "../review/reference-presentation.js";
+import { firstUnresolvedReviewItemId, canonicalStateSupersedes } from "../review/canonical-state.js";
+import {
+  viewerAssetUrlsEqual,
+  viewerResourcePoliciesEqual,
+} from "../host/viewer-resource-equivalence.js";
+import { visibleCodexContext } from "../host/context-projection.js";
+import type { ReviewItem, ReviewState } from "../../../../packages/core/src/review-model.js";
 import type { ReviewAnnotation } from '../../../../packages/core/src/pdf-writer.js';
 import type { SaveStatus } from "../../../../packages/core/src/save-status.js";
-import { sanitizeReviewRuntimeDisplayString } from "../../../../packages/core/src/review-runtime-protocol.js";
+import {
+  sanitizeReviewRuntimeDisplayString,
+} from "../../../../packages/core/src/review-runtime-protocol.js";
 import type { CaretAnchor } from "../pdf/selection-anchor.js";
 import type { ExistingAnnotation, ExistingAnnotationsDiscovery } from "../pdf/existing-annotations.js";
 import {
@@ -27,10 +45,16 @@ import {
   nativeSelectionBelongsToPdfBridge,
 } from '../pdf/NativePdfSelectionBridge.js';
 import { isEditableTarget } from '../review/input-controller.js';
-import type { LiveContextBindingStatus } from '../../../../packages/core/src/live-context.js';
 import { App } from "./App.js";
 import { ReferenceManualScrollObserver } from '../pdf/reference-manual-scroll.js';
-import { ReviewShell, type RejectedReviewCommand } from "./ReviewShell.js";
+import { ReviewShell } from "./ReviewShell.js";
+import type {
+  ProductionSession,
+  ProductionScope,
+  ProductionSessionApi,
+  ReverseSyncTexRequest,
+  HostForwardSyncTexRequest,
+} from "../host/session-contracts.js";
 import { projectReviewItems } from "../../../../packages/core/src/annotation-projection.js";
 import {
   createViewerControls,
@@ -51,15 +75,7 @@ import {
 } from '../pdf/pdf-document-title.js';
 import type { ReferenceDocumentController } from "../pdf/reference-document.js";
 import type { PdfOutlineDiscovery } from "../pdf/pdf-outline.js";
-import {
-  createEnginePdfSearchPageReader,
-  createPdfSearchController,
-  type PdfSearchController,
-} from '../pdf/pdf-search-controller.js';
-import {
-  initialPdfSearchState,
-  type PdfSearchResult,
-} from '../pdf/pdf-search-model.js';
+import type { PdfSearchResult } from '../pdf/pdf-search-model.js';
 import { pdfSearchResultTarget } from '../pdf/pdf-search-navigation.js';
 import type {
   ViewerClientPlacement,
@@ -83,7 +99,6 @@ import {
   createReferenceNavigationState,
   reduceReferenceNavigation,
   type ReferenceNavigationAction,
-  type ReferenceNavigationState,
 } from "../review/reference-navigation-state.js";
 import type { PendingReferencePanel } from "../review/ReferenceWorkspace.js";
 import { PdfSearchWorkspace } from '../review/PdfSearchWorkspace.js';
@@ -107,7 +122,6 @@ import {
   deriveReferenceWorkspaceLayout,
   reduceReferenceWorkspaceLayout,
   type ReferenceWorkspaceLayoutAction,
-  type ReferenceWorkspaceLayoutState,
   type RightWorkspaceMode,
 } from "../review/reference-workspace-layout.js";
 import { SaveDestinationDialog } from "../save/SaveDestinationDialog.js";
@@ -118,7 +132,6 @@ import {
 import {
   authoringAuthorityFor,
   authoringAuthorityMatches,
-  type AuthoringAuthority,
   type AuthoringAnchorSnapshot,
 } from '../review/authoring-session.js';
 import type { ViewerAssetUrls, ViewerResourcePolicy } from '../pdf/embedpdf-viewer.js';
@@ -130,108 +143,16 @@ import type {
 import type { AccessibilityTransitionEffect } from './accessibility-transitions.js';
 import { renderedPdfPageIsUsable } from './document-readiness.js';
 
-export interface ProductionSession {
-  readonly sessionId: string;
-  /** Browser-only memory credential. VS Code keeps this in the extension host. */
-  readonly credential?: string;
-  /** Present for top-level readable views; embedded bootstrap sessions omit it. */
-  readonly appLinkBase?: string;
-}
-
-export interface ProductionScope {
-  readonly documentTitle: string;
-  readonly sourceDisposition?: 'local' | 'remote-temporary';
-  readonly sourceDisplayName?: string;
-  readonly sourceRootPath?: string;
-  readonly launchSurface?: 'browser' | 'finder' | 'codex' | 'vscode' | 'chrome' | 'macos' | 'static';
-  /** Static hosting keeps review state only in this tab and offers explicit PDF export. */
-  readonly persistenceMode?: 'export-only';
-  /** A restarted browser is awaiting task-scoped Codex reattachment. */
-  readonly reconnectPending?: true;
-  readonly codexContext?: LiveContextBindingStatus;
-}
-
-function referenceFocusRailSurface(
-  layout: ReferenceWorkspaceLayoutState,
-  hasRemainingReferences: boolean,
-): 'bottom' | 'right' {
-  if (layout.regime === 'narrow') return 'bottom';
-  return hasRemainingReferences && layout.referenceDock === 'bottom' ? 'bottom' : 'right';
-}
-
-function referencePdfIsVisible(
-  layout: ReferenceWorkspaceLayoutState,
-  navigation: ReferenceNavigationState,
-): boolean {
-  if (navigation.activeTabIdentity === null) return false;
-  if (layout.regime === 'narrow') {
-    return layout.narrowOpen && layout.narrowSurface === 'references';
-  }
-  return layout.referenceDock === 'bottom'
-    ? layout.bottomReferencesOpen
-    : layout.rightWorkspaceOpen && navigation.workspace.lastMode === 'references';
-}
-
-export type ProductionSaveStatus = SaveStatus;
-
-export type SaveCopyProposal =
-  | {
-      readonly sourceDisposition: 'local';
-      readonly filename: string;
-      readonly folder: string;
-    }
-  | {
-      readonly sourceDisposition: 'remote-temporary';
-      readonly folder?: string;
-    };
-
-export interface ProductionExportResult {
-  readonly kind: "reviewed-copy";
-  readonly path: string;
-  readonly revision: number;
-  readonly digest: string;
-  readonly warning?: string;
-}
-
 interface AuthoringAnchorNavigationState {
   readonly token: number;
   readonly visibility: PdfTargetVisibility;
   readonly pending: boolean;
 }
 
-export interface ProductionSessionApi {
-  presence?(): () => void;
-  command(command: ReviewCommand): Promise<ReviewState | RejectedReviewCommand>;
-  saveStatus(): Promise<ProductionSaveStatus>;
-  saveProposal(): Promise<SaveCopyProposal>;
-  chooseCopy(filename?: string, folderSelectionId?: string): Promise<ProductionSaveStatus>;
-  chooseFolder(): Promise<{ readonly cancelled: boolean; readonly selectionId?: string; readonly folder?: string }>;
-  chooseOriginal(): Promise<ProductionSaveStatus>;
-  retrySave(): Promise<ProductionSaveStatus>;
-  locateSave(): Promise<ProductionSaveStatus>;
-  exportReviewedCopy?(confirmPossiblyStale?: true): Promise<ProductionExportResult>;
-  scope(signal?: AbortSignal): Promise<ProductionScope>;
-}
-
-interface ReverseSyncTexRequest {
-  readonly pageIndex: number;
-  readonly point: { readonly x: number; readonly y: number };
-}
-
-export interface ForwardSyncTexRequest {
-  readonly documentGeneration: number;
-  readonly pageIndex: number;
-  readonly point: { readonly x: number; readonly y: number };
-}
-
-export type HostForwardSyncTexRequest = ForwardSyncTexRequest & {
-  readonly token: number;
-};
-
 export interface ProductionReviewAppProps {
   readonly session: ProductionSession;
   readonly initialState: ReviewState;
-  readonly initialSaveStatus?: ProductionSaveStatus;
+  readonly initialSaveStatus?: SaveStatus;
   readonly scope: ProductionScope;
   readonly api: ProductionSessionApi;
   readonly viewerAssets?: ViewerAssetUrls;
@@ -263,370 +184,6 @@ export interface ProductionReviewAppProps {
   readonly accessibilityTransition?: AccessibilityTransitionEffect;
 }
 
-export function forwardSyncTexRequestReady(input: {
-  readonly requestGeneration: number;
-  readonly documentGeneration: number;
-  readonly navigationReadyGeneration: number | null;
-  readonly documentReadyGeneration: number | null;
-  readonly locationRestoreStatus: LocationRestoreStatus;
-}): boolean {
-  return input.requestGeneration === input.documentGeneration &&
-    input.navigationReadyGeneration === input.documentGeneration &&
-    input.documentReadyGeneration === input.documentGeneration &&
-    input.locationRestoreStatus !== 'restoring';
-}
-
-export function forwardSyncTexCompletionIsCurrent(input: {
-  readonly requestToken: number;
-  readonly latestRequestToken: number;
-  readonly requestGeneration: number;
-  readonly documentGeneration: number;
-  readonly navigationMatches: boolean;
-}): boolean {
-  return input.requestToken === input.latestRequestToken &&
-    input.requestGeneration === input.documentGeneration &&
-    input.navigationMatches;
-}
-
-export async function applyHostForwardSyncTex(
-  navigation: Pick<PdfViewerNavigation, 'captureLocation' | 'applyLocation' | 'focusAtDestination'>,
-  request: {
-    readonly pageIndex: number;
-    readonly point: { readonly x: number; readonly y: number };
-  },
-): Promise<boolean> {
-  if (!Number.isSafeInteger(request.pageIndex) || request.pageIndex < 0 ||
-    !Number.isFinite(request.point.x) || request.point.x < 0 ||
-    !Number.isFinite(request.point.y) || request.point.y < 0) return false;
-  const current = navigation.captureLocation();
-  if (current === null) return false;
-  const applied = await navigation.applyLocation({
-    ...current,
-    pageIndex: request.pageIndex,
-    anchor: request.point,
-    alignment: { xPercent: 50, yPercent: 50 },
-  });
-  if (applied) navigation.focusAtDestination(request.pageIndex);
-  return applied;
-}
-
-export async function runHostForwardSyncTexRequest(
-  navigation: Pick<PdfViewerNavigation, 'captureLocation' | 'applyLocation' | 'focusAtDestination'>,
-  request: { readonly pageIndex: number; readonly point: { readonly x: number; readonly y: number } },
-  isCurrent: () => boolean,
-  publishResult: (applied: boolean) => void,
-): Promise<void> {
-  let applied = false;
-  try {
-    applied = await applyHostForwardSyncTex(navigation, request);
-  } catch {
-    // A rejected viewer navigation is the same user-visible failure as a false result.
-  }
-  if (isCurrent()) publishResult(applied);
-}
-
-function reverseSyncTexSucceeded(value: unknown): boolean {
-  return typeof value === 'object' && value !== null &&
-    (value as { readonly status?: unknown }).status === 'ok';
-}
-
-const REVERSE_SYNCTEX_GENERIC_ERROR = 'Reverse SyncTeX could not find a LaTeX source location.';
-
-export function reverseSyncTexError(value: unknown): string | null {
-  if (typeof value !== 'object' || value === null) return REVERSE_SYNCTEX_GENERIC_ERROR;
-  const result = value as { readonly status?: unknown; readonly reason?: unknown };
-  if (result.status === 'ok') return null;
-  if (result.reason === 'workspace-untrusted') {
-    return 'Trust this workspace before using Reverse SyncTeX.';
-  }
-  switch (result.status) {
-    case 'missing':
-      return 'SyncTeX data is missing. Rebuild the PDF with SyncTeX enabled.';
-    case 'pending':
-      return 'SyncTeX data for this PDF is still being prepared. Try again shortly.';
-    case 'stale':
-      return 'SyncTeX data is stale. Rebuild the PDF before going to source.';
-    case 'ambiguous':
-      return 'SyncTeX found more than one LaTeX source location for this PDF point.';
-    case 'out-of-root':
-      return 'The SyncTeX source location is outside the approved workspace.';
-    case 'unavailable-tool':
-      return 'The SyncTeX tool is unavailable. Install or configure SyncTeX and retry.';
-    case 'timeout':
-      return 'The SyncTeX query timed out. Try again.';
-    case 'oversized':
-      return 'The SyncTeX result was too large to use safely.';
-    case 'malformed':
-      return 'The SyncTeX data was malformed. Rebuild the PDF and retry.';
-    default:
-      return REVERSE_SYNCTEX_GENERIC_ERROR;
-  }
-}
-
-export class ReverseSyncTexRequestCoordinator {
-  #latestRequest = 0;
-
-  async run(
-    reverseSyncTex: (input: ReverseSyncTexRequest) => Promise<unknown>,
-    request: ReverseSyncTexRequest,
-    publishError: (message: string | null) => void,
-  ): Promise<unknown> {
-    const requestId = ++this.#latestRequest;
-    publishError(null);
-    try {
-      const value = await reverseSyncTex(request);
-      if (requestId === this.#latestRequest) publishError(reverseSyncTexError(value));
-      return value;
-    } catch {
-      if (requestId === this.#latestRequest) publishError(REVERSE_SYNCTEX_GENERIC_ERROR);
-      return { status: 'failed' };
-    }
-  }
-}
-
-export async function reverseSyncTexAtCurrentLocation(
-  navigation: Pick<PdfViewerNavigation, 'captureLocation'>,
-  reverseSyncTex: (input: ReverseSyncTexRequest) => Promise<unknown>,
-): Promise<boolean> {
-  const location = navigation.captureLocation();
-  if (location === null) return false;
-  return reverseSyncTexSucceeded(await reverseSyncTex({
-    pageIndex: location.pageIndex,
-    point: location.anchor,
-  }));
-}
-
-export function firstUnresolvedReviewItemId(
-  items: readonly {
-    readonly id: string;
-    readonly reconciliation?: { readonly disposition: { readonly kind: string } };
-  }[],
-): string | undefined {
-  return items.find((item) =>
-    item.reconciliation !== undefined && item.reconciliation.disposition.kind !== "resolved"
-  )?.id;
-}
-
-export function canonicalStateSupersedes(
-  current: { readonly revision: number; readonly workflow: {
-    readonly documentGeneration: number;
-    readonly freshness: "current" | "possibly-stale";
-  } },
-  canonical: { readonly revision: number; readonly workflow: {
-    readonly documentGeneration: number;
-    readonly freshness: "current" | "possibly-stale";
-  } },
-): boolean {
-  return canonical.workflow.documentGeneration > current.workflow.documentGeneration ||
-    canonical.workflow.documentGeneration === current.workflow.documentGeneration && (
-      canonical.revision > current.revision ||
-      canonical.revision === current.revision &&
-        canonical.workflow.freshness === "possibly-stale" &&
-        current.workflow.freshness === "current"
-    );
-}
-
-export function referenceReturnForActiveTab(
-  scope: Pick<ReferenceNavigationState, 'activeTabIdentity' | 'documentGeneration'>,
-  presentation: ReferenceReturnPresentationState | null,
-): ReferenceReturnPresentationState | null {
-  return presentation !== null
-    && presentation.available
-    && presentation.tabIdentity === scope.activeTabIdentity
-    && presentation.documentGeneration === scope.documentGeneration
-    ? presentation
-    : null;
-}
-
-export function initiallyPortableItemIds(
-  state: ReviewState,
-  saveStatus: ProductionSaveStatus | undefined,
-): Set<string> {
-  return saveStatusIsCleanCurrent(state, saveStatus)
-    ? new Set(state.items.map(({ id }) => id))
-    : new Set();
-}
-
-export type PendingDestinationOutcome =
-  | 'cancelled'
-  | 'accepted'
-  | 'rejected'
-  | 'source-replaced';
-
-export function pendingDestinationDisposition(outcome: PendingDestinationOutcome): {
-  readonly closeDialog: boolean;
-  readonly notifyAuthoringShell: boolean;
-  readonly preserveDraft: boolean;
-} {
-  if (outcome === 'cancelled') {
-    return { closeDialog: true, notifyAuthoringShell: false, preserveDraft: true };
-  }
-  if (outcome === 'rejected') {
-    return { closeDialog: true, notifyAuthoringShell: false, preserveDraft: true };
-  }
-  return { closeDialog: true, notifyAuthoringShell: true, preserveDraft: false };
-}
-
-export function pendingDestinationIsCurrent(
-  pending: Pick<PendingAuthoringCommand, 'authority'>,
-  state: Pick<ReviewState, 'sessionId' | 'source'>,
-  documentGeneration: number,
-): boolean {
-  return authoringAuthorityMatches(
-    pending.authority,
-    authoringAuthorityFor(state, documentGeneration),
-  );
-}
-
-export function pendingDestinationAttemptIsCurrent(
-  attempt: number,
-  currentAttempt: number,
-  pending: Pick<PendingAuthoringCommand, 'authority'> | undefined,
-  state: Pick<ReviewState, 'sessionId' | 'source'>,
-  documentGeneration: number,
-): boolean {
-  return attempt === currentAttempt
-    && (pending === undefined || pendingDestinationIsCurrent(
-      pending,
-      state,
-      documentGeneration,
-    ));
-}
-
-interface PendingAuthoringCommand {
-  readonly command: ReviewCommand;
-  readonly authority: AuthoringAuthority;
-}
-
-function saveStatusIsCleanCurrent(
-  state: ReviewState,
-  saveStatus: ProductionSaveStatus | undefined,
-): boolean {
-  return saveStatus?.sync.phase === 'clean'
-    && saveStatus.sync.savedRevision === state.revision
-    && saveStatus.sync.desiredRevision === state.revision;
-}
-
-const UNAVAILABLE_CODEX_CONTEXT: LiveContextBindingStatus = {
-  status: 'unavailable',
-  reason: 'unavailable',
-};
-
-const CODEX_SCOPE_POLL_MS = 1_500;
-const CODEX_SCOPE_TIMEOUT_MS = 4_000;
-
-function contextMatchesReviewState(
-  status: Extract<LiveContextBindingStatus, { readonly status: "current" }>,
-  state: ReviewState,
-): boolean {
-  return status.identity.placekeeperSessionId === state.sessionId &&
-    status.identity.reviewRevision === state.revision &&
-    status.identity.source.fileId === state.source.fileId &&
-    status.identity.source.digest === state.source.digest;
-}
-
-export function visibleCodexContext(
-  status: LiveContextBindingStatus | undefined,
-  state: ReviewState,
-): LiveContextBindingStatus | undefined {
-  if (status?.status !== "current" || contextMatchesReviewState(status, state)) return status;
-  return {
-    status: "refreshing",
-    placekeeperSessionId: state.sessionId,
-    documentGeneration: status.identity.documentGeneration,
-    lastVerified: status.identity,
-  };
-}
-
-function reviewStateRequestKey(state: ReviewState): string {
-  return JSON.stringify([
-    state.sessionId,
-    state.source.fileId,
-    state.source.digest,
-    state.revision,
-    state.items,
-  ]);
-}
-
-function equalStringRecord(
-  first: Readonly<Record<string, string>> | undefined,
-  second: Readonly<Record<string, string>> | undefined,
-): boolean {
-  if (first === second) return true;
-  if (first === undefined || second === undefined) return false;
-  const firstEntries = Object.entries(first);
-  const secondKeys = Object.keys(second);
-  return firstEntries.length === secondKeys.length
-    && firstEntries.every(([key, value]) => second[key] === value);
-}
-
-export function viewerAssetUrlsEqual(
-  first: ViewerAssetUrls | undefined,
-  second: ViewerAssetUrls | undefined,
-): boolean {
-  return first === second || (
-    first !== undefined
-    && second !== undefined
-    && first.pdfiumWasm === second.pdfiumWasm
-    && first.workerUrl === second.workerUrl
-    && first.documentUrl === second.documentUrl
-    && equalStringRecord(first.requestHeaders, second.requestHeaders)
-  );
-}
-
-export function viewerResourcePoliciesEqual(
-  first: ViewerResourcePolicy | undefined,
-  second: ViewerResourcePolicy | undefined,
-): boolean {
-  if (first === second) return true;
-  if (first === undefined || second === undefined || first.host !== second.host) return false;
-  if (first.host === 'browser' && second.host === 'browser') return first.origin === second.origin;
-  if (first.host === 'vscode' && second.host === 'vscode') {
-    return first.issued.size === second.issued.size
-      && [...first.issued].every((url) => second.issued.has(url));
-  }
-  if (first.host === 'chrome' && second.host === 'chrome') {
-    return first.extensionOrigin === second.extensionOrigin
-      && first.resources.document === second.resources.document
-      && first.resources.pdfiumWasm === second.resources.pdfiumWasm
-      && first.resources.worker === second.resources.worker;
-  }
-  return first.host === 'macos' && second.host === 'macos'
-    && first.resources.document === second.resources.document
-    && first.resources.pdfiumWasm === second.resources.pdfiumWasm
-    && first.resources.worker === second.resources.worker;
-}
-
-// Scope responses are parsed JSON records. Compare all fields, including nested
-// observation identities and lease timestamps, without depending on key order.
-// An unknown/new response field conservatively triggers a publication as well.
-function jsonValuesEqual(current: unknown, next: unknown): boolean {
-  if (current === next) return true;
-  if (Array.isArray(current) !== Array.isArray(next)) return false;
-  if (typeof current !== 'object' || current === null
-    || typeof next !== 'object' || next === null) return false;
-  const currentRecord = current as Record<string, unknown>;
-  const nextRecord = next as Record<string, unknown>;
-  const keys = Object.keys(currentRecord);
-  return keys.length === Object.keys(nextRecord).length
-    && keys.every((key) => Object.hasOwn(nextRecord, key)
-      && jsonValuesEqual(currentRecord[key], nextRecord[key]));
-}
-
-export function updateProductionScope(
-  current: ProductionScope,
-  next: ProductionScope,
-): ProductionScope {
-  return jsonValuesEqual(current, next) ? current : next;
-}
-
-function updateCodexContext(
-  current: LiveContextBindingStatus | undefined,
-  next: LiveContextBindingStatus,
-): LiveContextBindingStatus {
-  return jsonValuesEqual(current, next) ? current ?? next : next;
-}
-
 export function ProductionReviewApp(props: ProductionReviewAppProps) {
   const [localState, setState] = useState(props.initialState);
   // A runtime successor arrives as one state/assets render. Prefer that canonical
@@ -644,7 +201,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     props.initialState,
     props.initialSaveStatus,
   ));
-  const [saveStatus, setSaveStatus] = useState<ProductionSaveStatus>(
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>(
     props.initialSaveStatus ?? {
       destination: { phase: "none", generation: 0 },
       sync: {
@@ -654,20 +211,6 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       },
     },
   );
-  const [destinationDialog, setDestinationDialog] = useState<{
-    readonly reason: "first-annotation" | "menu";
-    readonly pending?: PendingAuthoringCommand;
-  } | null>(null);
-  const [copyProposal, setCopyProposal] = useState<SaveCopyProposal>();
-  const [folderSelectionId, setFolderSelectionId] = useState<string>();
-  const [destinationEstablishing, setDestinationEstablishing] = useState(false);
-  const [destinationError, setDestinationError] = useState<string>();
-  const destinationAttemptRef = useRef(0);
-  const authoringResolutionTokenRef = useRef(0);
-  const [authoringSessionResolution, setAuthoringSessionResolution] = useState<{
-    readonly token: number;
-    readonly outcome: 'accepted' | 'source-replaced';
-  }>();
   const authoringAnchorRef = useRef<AuthoringAnchorSnapshot | null>(null);
   const authoringActiveRef = useRef(false);
   const authoringViewportRef = useRef<PdfViewportQuery | null>(null);
@@ -688,7 +231,6 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   const [commandError, setCommandError] = useState<string | null>(null);
   const [commandNotice, setCommandNotice] = useState<string | null>(null);
   const [locationRestoreStatus, setLocationRestoreStatus] = useState<LocationRestoreStatus>('idle');
-  const [codexContext, setCodexContext] = useState(scope.codexContext);
   const stateRef = useRef(state);
   stateRef.current = state;
   const [selectionPlacement, setSelectionPlacement] = useState<ViewerClientPlacement | null>(null);
@@ -711,13 +253,8 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   const placementAuthority = useRef(new PageNotePlacementAuthority());
   const placedToken = useRef(0);
   const viewerRegistry = useRef<PluginRegistry | null>(null);
-  const searchControllerRef = useRef<PdfSearchController | null>(null);
-  const searchDocumentRef = useRef<PdfDocumentObject | null>(null);
-  const pendingSearchQueryRef = useRef('');
-  const submittedSearchQueryRef = useRef('');
-  const searchSubmitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const searchRequestedRef = useRef(false);
-  const [searchState, setSearchState] = useState(() => initialPdfSearchState());
+  const search = usePdfSearch();
+  const { searchState, submitSearchQuery } = search;
   const [searchNavigationIntentToken, setSearchNavigationIntentToken] = useState(0);
   const commitMainFramingPositionRef = useRef<() => void>(() => undefined);
   const viewerControlsRef = useRef<InitializedViewerControls | undefined>(undefined);
@@ -729,9 +266,6 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   const [mainDocumentReadyGeneration, setMainDocumentReadyGeneration] = useState<number | null>(null);
   const notifiedDocumentReadyGenerationRef = useRef<number | null>(null);
   const [mainNavigation, setMainNavigation] = useState<PdfViewerNavigation | null>(null);
-  const latestForwardSyncTexTokenRef = useRef(0);
-  const handledForwardSyncTexTokenRef = useRef(0);
-  const handledReverseSyncTexTokenRef = useRef(0);
   const referenceNavigationRef = useRef<PdfViewerNavigation | null>(null);
   const referenceControllerRef = useRef<ReferenceDocumentController | null>(null);
   const referenceManualScrollObserverRef = useRef(new ReferenceManualScrollObserver());
@@ -817,67 +351,13 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     setActivationRequest({ id, token: ++activationTokenRef.current });
   }, [props.hostReattachRequestToken]);
   const [viewerState, setViewerState] = useState<ViewerControlsSnapshot>(unavailableViewerControls);
-  const reverseSyncTexCoordinatorRef = useRef(new ReverseSyncTexRequestCoordinator());
-  const requestReverseSyncTex = useCallback((request: ReverseSyncTexRequest): Promise<unknown> => {
-    const reverseSyncTex = props.onReverseSyncTex;
-    if (reverseSyncTex === undefined) return Promise.resolve({ status: 'failed' });
-    return reverseSyncTexCoordinatorRef.current.run(reverseSyncTex, request, setCommandError);
-  }, [props.onReverseSyncTex]);
+  const requestReverseSyncTex = useHostSyncTex({
+    hostForwardSyncTexRequest: props.hostForwardSyncTexRequest,
+    hostReverseSyncTexRequestToken: props.hostReverseSyncTexRequestToken,
+    onReverseSyncTex: props.onReverseSyncTex,
+  }, state, stateRef, mainNavigation, mainNavigationRef, mainNavigationReadyGeneration,
+    mainDocumentReadyGeneration, locationRestoreStatus, setCommandError);
   const initialPresentationAppliedRef = useRef(false);
-  latestForwardSyncTexTokenRef.current = Math.max(
-    latestForwardSyncTexTokenRef.current,
-    props.hostForwardSyncTexRequest?.token ?? 0,
-  );
-  useEffect(() => {
-    const request = props.hostForwardSyncTexRequest;
-    if (request === undefined || mainNavigation === null ||
-      request.token <= handledForwardSyncTexTokenRef.current) return;
-    if (request.documentGeneration < state.workflow.documentGeneration) {
-      handledForwardSyncTexTokenRef.current = request.token;
-      return;
-    }
-    if (!forwardSyncTexRequestReady({
-      requestGeneration: request.documentGeneration,
-      documentGeneration: state.workflow.documentGeneration,
-      navigationReadyGeneration: mainNavigationReadyGeneration,
-      documentReadyGeneration: mainDocumentReadyGeneration,
-      locationRestoreStatus,
-    })) return;
-    handledForwardSyncTexTokenRef.current = request.token;
-    void runHostForwardSyncTexRequest(
-      mainNavigation,
-      request,
-      () => forwardSyncTexCompletionIsCurrent({
-        requestToken: request.token,
-        latestRequestToken: latestForwardSyncTexTokenRef.current,
-        requestGeneration: request.documentGeneration,
-        documentGeneration: stateRef.current.workflow.documentGeneration,
-        navigationMatches: mainNavigationRef.current === mainNavigation,
-      }),
-      (applied) => setCommandError(
-        applied ? null : 'Forward SyncTeX could not reveal this PDF location.',
-      ),
-    );
-  }, [
-    locationRestoreStatus,
-    mainDocumentReadyGeneration,
-    mainNavigation,
-    mainNavigationReadyGeneration,
-    props.hostForwardSyncTexRequest,
-    state.workflow.documentGeneration,
-  ]);
-  useEffect(() => {
-    const token = props.hostReverseSyncTexRequestToken;
-    if (token === undefined || token <= 0 || mainNavigation === null ||
-      token <= handledReverseSyncTexTokenRef.current || props.onReverseSyncTex === undefined) return;
-    handledReverseSyncTexTokenRef.current = token;
-    const location = mainNavigation.captureLocation();
-    if (location === null) {
-      setCommandError(REVERSE_SYNCTEX_GENERIC_ERROR);
-      return;
-    }
-    void requestReverseSyncTex({ pageIndex: location.pageIndex, point: location.anchor });
-  }, [mainNavigation, props.hostReverseSyncTexRequestToken, props.onReverseSyncTex, requestReverseSyncTex]);
   const providedViewerAssetsRef = useRef(props.viewerAssets);
   if (!viewerAssetUrlsEqual(providedViewerAssetsRef.current, props.viewerAssets)) {
     providedViewerAssetsRef.current = props.viewerAssets;
@@ -914,71 +394,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     ),
     [state.items, state.workflow.documentGeneration],
   );
-  useEffect(() => {
-    if (scope.launchSurface !== 'codex' && scope.reconnectPending !== true) return;
-    let stopped = false;
-    let timer: number | undefined;
-    let timeout: number | undefined;
-    let controller: AbortController | undefined;
-    const refreshCodexContext = async () => {
-      const requestedStateKey = reviewStateRequestKey(stateRef.current);
-      controller = new AbortController();
-      try {
-        const next = await Promise.race([
-          props.api.scope(controller.signal),
-          new Promise<never>((_resolve, reject) => {
-            timeout = window.setTimeout(() => {
-              controller?.abort();
-              reject(new Error("Codex scope refresh timed out"));
-            }, CODEX_SCOPE_TIMEOUT_MS);
-          }),
-        ]);
-        if (!stopped && requestedStateKey === reviewStateRequestKey(stateRef.current)) {
-          setScope((current) => updateProductionScope(current, next));
-          const nextContext = next.launchSurface === 'codex'
-            ? next.codexContext ?? UNAVAILABLE_CODEX_CONTEXT
-            : UNAVAILABLE_CODEX_CONTEXT;
-          const safeContext = visibleCodexContext(nextContext, stateRef.current) ?? UNAVAILABLE_CODEX_CONTEXT;
-          setCodexContext((current) => updateCodexContext(current, safeContext));
-        }
-      } catch {
-        if (!stopped && requestedStateKey === reviewStateRequestKey(stateRef.current)) {
-          setCodexContext((current) => updateCodexContext(current, UNAVAILABLE_CODEX_CONTEXT));
-        }
-      } finally {
-        if (timeout !== undefined) window.clearTimeout(timeout);
-        timeout = undefined;
-        controller = undefined;
-        if (!stopped) {
-          timer = window.setTimeout(() => { void refreshCodexContext(); }, CODEX_SCOPE_POLL_MS);
-        }
-      }
-    };
-    timer = window.setTimeout(() => { void refreshCodexContext(); }, CODEX_SCOPE_POLL_MS);
-    return () => {
-      stopped = true;
-      if (timer !== undefined) window.clearTimeout(timer);
-      if (timeout !== undefined) window.clearTimeout(timeout);
-      controller?.abort();
-    };
-  }, [props.api, scope.launchSurface, scope.reconnectPending]);
-  useEffect(() => {
-    if (codexContext?.status !== "current") return;
-    const expectedDigest = codexContext.identity.stateDigest;
-    const delay = Math.max(0, Date.parse(codexContext.leaseExpiresAt) - Date.now());
-    const timer = window.setTimeout(() => {
-      setCodexContext((current) => current?.status === "current" &&
-        current.identity.stateDigest === expectedDigest
-        ? {
-            status: "refreshing",
-            placekeeperSessionId: current.identity.placekeeperSessionId,
-            documentGeneration: current.identity.documentGeneration,
-            lastVerified: current.identity,
-          }
-        : current);
-    }, delay);
-    return () => window.clearTimeout(timer);
-  }, [codexContext]);
+  const codexContext = useCodexContext(props, scope, setScope, stateRef);
   const searchResults = useMemo(
     () => searchState.groups.flatMap((group) => group.results),
     [searchState.groups],
@@ -993,54 +409,10 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     );
     return () => controller.abort();
   }, [props.api, saveStatus.sync.phase, saveStatus.sync.desiredRevision, saveStatus.sync.savedRevision]);
-  useEffect(() => {
-    if (destinationDialog === null) return;
-    let cancelled = false;
-    setDestinationError(undefined);
-    setFolderSelectionId(undefined);
-    void props.api.saveProposal()
-      .then((proposal) => {
-        if (!cancelled) setCopyProposal((current) =>
-          current?.sourceDisposition === 'remote-temporary' && current.folder !== undefined
-            ? current
-            : proposal);
-      })
-      .catch(() => {
-        if (!cancelled) setDestinationError("Save options could not be prepared safely.");
-      });
-    return () => { cancelled = true; };
-  }, [destinationDialog, props.api]);
-
-  const publishAuthoringResolution = (outcome: 'accepted' | 'source-replaced') => {
-    const disposition = pendingDestinationDisposition(outcome);
-    if (!disposition.notifyAuthoringShell) return;
-    setAuthoringSessionResolution({
-      token: ++authoringResolutionTokenRef.current,
-      outcome,
-    });
-  };
-  const openCopyDialog = (
-    reason: "first-annotation" | "menu",
-    pending?: PendingAuthoringCommand,
-  ) => {
-    destinationAttemptRef.current += 1;
-    setDestinationError(undefined);
-    setCopyProposal(undefined);
-    setDestinationDialog({ reason, ...(pending === undefined ? {} : { pending }) });
-  };
-  const retrySave = async () => {
-    if (destinationEstablishing) return;
-    setDestinationEstablishing(true);
-    setDestinationError(undefined);
-    try {
-      setSaveStatus(await props.api.retrySave());
-      setDestinationDialog(null);
-    } catch {
-      setDestinationError('Saving could not be retried safely.');
-    } finally {
-      setDestinationEstablishing(false);
-    }
-  };
+  const destination = useSaveDestination(props, scope, state, stateRef, documentGenerationRef,
+    setState, setSaveStatus, setCommandError);
+  const { destinationDialog, copyProposal, destinationEstablishing, destinationError,
+    authoringSessionResolution, openCopyDialog, retrySave } = destination;
   const dispatchNavigation = (action: ReferenceNavigationAction) => {
     const next = reduceReferenceNavigation(navigationStateRef.current, action);
     navigationStateRef.current = next;
@@ -1153,7 +525,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       },
       getOutlineDiscovery: () => outlineDiscoveryRef.current,
       setCurrentOutlineItemId,
-      getPageCount: () => searchDocumentRef.current?.pages.length ?? 0,
+      getPageCount: () => search.getPageCount(),
       // Native loading shells mount before their host history is available.
       // Keep the coordinator on the same history port the toolbar observes.
       get locationHistory() { return locationHistoryRef.current; },
@@ -1278,8 +650,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     authoringAnchorRefresh.cancel();
     viewerControlsRef.current?.dispose();
     placementAuthority.current.clear();
-    if (searchSubmitTimerRef.current !== null) clearTimeout(searchSubmitTimerRef.current);
-    searchControllerRef.current?.dispose();
+    search.dispose();
   }, [authoringAnchorRefresh, mainLocationRefresh, navigationCoordinator]);
   useEffect(() => {
     refreshAuthoringAnchorNavigation();
@@ -1344,15 +715,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     setMainDocumentReadyGeneration(null);
     viewerControlsGenerationRef.current = null;
     navigationCoordinator.replaceDocument(nextGeneration, { preservePresentation: true });
-    searchControllerRef.current?.dispose();
-    searchControllerRef.current = null;
-    searchDocumentRef.current = null;
-    if (searchSubmitTimerRef.current !== null) clearTimeout(searchSubmitTimerRef.current);
-    searchSubmitTimerRef.current = null;
-    pendingSearchQueryRef.current = '';
-    submittedSearchQueryRef.current = '';
-    searchRequestedRef.current = false;
-    setSearchState(initialPdfSearchState());
+    search.reset();
     setSelectionUpdate((current) => ({ kind: 'cleared', generation: current.generation + 1 }));
     setMainCopySelection(null);
     setReferenceCopySelection(null);
@@ -1366,17 +729,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     setCorrespondingItemId(undefined);
   }, [mainLocationRefresh, navigationCoordinator, sourceIdentity, state.workflow.documentGeneration]);
   useEffect(() => {
-    const pending = destinationDialog?.pending;
-    if (
-      pending === undefined
-      || pendingDestinationIsCurrent(pending, state, documentGenerationRef.current)
-    ) return;
-    destinationAttemptRef.current += 1;
-    setDestinationEstablishing(false);
-    const disposition = pendingDestinationDisposition('source-replaced');
-    if (disposition.notifyAuthoringShell) publishAuthoringResolution('source-replaced');
-    if (disposition.closeDialog) setDestinationDialog(null);
-    setDestinationError(undefined);
+    destination.invalidatePendingDestination();
   }, [destinationDialog, sourceIdentity]);
   useEffect(() => {
     if (locationHistory === undefined) return;
@@ -1594,50 +947,22 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     });
   }, [props.onPresentationChange, viewerState]);
   const onMainDocumentReady = useCallback((engine: PdfEngine, document: PdfDocumentObject) => {
-    if (searchDocumentRef.current === document && searchControllerRef.current) return;
     const documentGeneration = documentGenerationRef.current;
     const documentSourceIdentity = sourceIdentity;
-    setMainDocumentReadyGeneration(documentGeneration);
-    searchControllerRef.current?.dispose();
-    searchDocumentRef.current = document;
-    void resolvePdfMetadataTitle(engine, document).then((title) => {
-      if (
-        documentGenerationRef.current === documentGeneration &&
-        searchDocumentRef.current === document
-      ) {
-        setMetadataPageTitle(title === undefined
-          ? null
-          : { sourceIdentity: documentSourceIdentity, title });
-      }
-    });
-    const search = createPdfSearchController({
-      documentGeneration,
-      reader: createEnginePdfSearchPageReader(engine, document),
-    });
-    searchControllerRef.current = search;
-    setSearchState(search.getState());
-    search.subscribe((next) => {
-      const pendingQuery = pendingSearchQueryRef.current;
-      if (pendingQuery === submittedSearchQueryRef.current) {
-        setSearchState(next);
-        return;
-      }
-      setSearchState({
-        ...next,
-        query: pendingQuery,
-        status: pendingQuery.trim().length > 0 ? 'indexing' : 'idle',
-        groups: [],
-        selectedResultId: null,
-        alternatives: [],
-        message: '',
+    search.initialize(engine, document, documentGeneration, () => {
+      setMainDocumentReadyGeneration(documentGeneration);
+    }, () => {
+      void resolvePdfMetadataTitle(engine, document).then((title) => {
+        if (
+          documentGenerationRef.current === documentGeneration &&
+          search.isCurrentDocument(document)
+        ) {
+          setMetadataPageTitle(title === undefined
+            ? null
+            : { sourceIdentity: documentSourceIdentity, title });
+        }
       });
     });
-    const pendingQuery = pendingSearchQueryRef.current;
-    if (pendingQuery.trim().length > 0) {
-      submittedSearchQueryRef.current = pendingQuery;
-      void search.search(pendingQuery);
-    }
-    else if (searchRequestedRef.current) void search.prepare();
   }, [sourceIdentity]);
   useEffect(() => {
     const generation = state.workflow.documentGeneration;
@@ -1752,7 +1077,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   const activateSearchResult = (result: PdfSearchResult) => {
     const target = pdfSearchResultTarget(result, navigationState.documentGeneration);
     if (target === null) return;
-    searchControllerRef.current?.selectResult(result.id);
+    search.selectResult(result.id);
     void navigationCoordinator.navigateMainTarget(target, 'search');
   };
   const openSearchResultReference = (result: PdfSearchResult) => {
@@ -1769,28 +1094,6 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
         pageContext: `Page ${result.pageIndex + 1}`,
       }, selectedTarget);
     }, 0);
-  };
-  const submitSearchQuery = (query: string, immediate = false) => {
-    pendingSearchQueryRef.current = query;
-    const search = searchControllerRef.current;
-    setSearchState((current) => ({
-      ...current,
-      query,
-      status: query.trim().length > 0 ? 'indexing' : 'idle',
-      groups: [],
-      selectedResultId: null,
-      alternatives: [],
-      message: '',
-    }));
-    if (!search) return;
-    if (searchSubmitTimerRef.current !== null) clearTimeout(searchSubmitTimerRef.current);
-    const run = () => {
-      searchSubmitTimerRef.current = null;
-      submittedSearchQueryRef.current = query;
-      void search.search(query);
-    };
-    if (immediate) run();
-    else searchSubmitTimerRef.current = setTimeout(run, 180);
   };
   const writePlacekeeperLink = async (link: string) => {
     if (navigator.clipboard?.writeText === undefined) {
@@ -2270,8 +1573,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
               return;
             }
             if (mode === 'search') {
-              searchRequestedRef.current = true;
-              void searchControllerRef.current?.prepare();
+              search.prepare();
             }
             setRightWorkspaceMode(mode);
             dispatchNavigation({ type: 'select-workspace-mode', mode });
@@ -2356,139 +1658,10 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
             }
           : {})}
         onRetry={retrySave}
-        onLocate={async () => {
-          if (destinationEstablishing) return;
-          setDestinationEstablishing(true);
-          setDestinationError(undefined);
-          try {
-            setSaveStatus(await props.api.locateSave());
-            setDestinationDialog(null);
-          } catch {
-            setDestinationError("The selected PDF did not match the saved file.");
-          } finally {
-            setDestinationEstablishing(false);
-          }
-        }}
-        onChooseLocation={async () => {
-          try {
-            const selected = await props.api.chooseFolder();
-            if (!selected.cancelled && selected.selectionId && selected.folder) {
-              setFolderSelectionId(selected.selectionId);
-              setCopyProposal((current) => scope.sourceDisposition === 'remote-temporary'
-                ? { sourceDisposition: 'remote-temporary', folder: selected.folder! }
-                : {
-                    sourceDisposition: 'local',
-                    filename: current?.sourceDisposition === 'local'
-                      ? current.filename
-                      : "annotated.pdf",
-                    folder: selected.folder!,
-                  });
-            }
-          } catch {
-            setDestinationError("A new location could not be authorized.");
-          }
-        }}
-        onCancel={() => {
-          if (destinationEstablishing) return;
-          destinationAttemptRef.current += 1;
-          const disposition = pendingDestinationDisposition('cancelled');
-          if (disposition.closeDialog) setDestinationDialog(null);
-          setDestinationError(undefined);
-        }}
-        onConfirm={async (choice, filename) => {
-          const dialog = destinationDialog;
-          if (dialog === null || destinationEstablishing) return;
-          if (
-            dialog.pending !== undefined
-            && !pendingDestinationIsCurrent(
-              dialog.pending,
-              stateRef.current,
-              documentGenerationRef.current,
-            )
-          ) {
-            const disposition = pendingDestinationDisposition('source-replaced');
-            if (disposition.notifyAuthoringShell) publishAuthoringResolution('source-replaced');
-            if (disposition.closeDialog) setDestinationDialog(null);
-            setDestinationError(undefined);
-            return;
-          }
-          const attempt = destinationAttemptRef.current;
-          setDestinationEstablishing(true);
-          setDestinationError(undefined);
-          try {
-            const established = choice === "copy"
-              ? await props.api.chooseCopy(filename, folderSelectionId)
-              : await props.api.chooseOriginal();
-            if (!pendingDestinationAttemptIsCurrent(
-              attempt,
-              destinationAttemptRef.current,
-              dialog.pending,
-              stateRef.current,
-              documentGenerationRef.current,
-            )) {
-              if (dialog.pending !== undefined && !pendingDestinationIsCurrent(
-                dialog.pending,
-                stateRef.current,
-                documentGenerationRef.current,
-              )) {
-                const disposition = pendingDestinationDisposition('source-replaced');
-                if (disposition.notifyAuthoringShell) publishAuthoringResolution('source-replaced');
-                if (disposition.closeDialog) setDestinationDialog(null);
-              }
-              return;
-            }
-            setSaveStatus(established);
-            if (dialog.pending !== undefined) {
-              const result = await props.api.command(dialog.pending.command);
-              if (!pendingDestinationAttemptIsCurrent(
-                attempt,
-                destinationAttemptRef.current,
-                dialog.pending,
-                stateRef.current,
-                documentGenerationRef.current,
-              )) {
-                if (!pendingDestinationIsCurrent(
-                  dialog.pending,
-                  stateRef.current,
-                  documentGenerationRef.current,
-                )) {
-                  const disposition = pendingDestinationDisposition('source-replaced');
-                  if (disposition.notifyAuthoringShell) publishAuthoringResolution('source-replaced');
-                  if (disposition.closeDialog) setDestinationDialog(null);
-                }
-                return;
-              }
-              const next = "accepted" in result ? result.state : result;
-              setState(next);
-              if ("accepted" in result) {
-                const disposition = pendingDestinationDisposition('rejected');
-                if (!disposition.preserveDraft) {
-                  throw new Error('Rejected annotation unexpectedly discarded its draft.');
-                }
-                setCommandError(result.message);
-                setDestinationError(undefined);
-                if (disposition.closeDialog) setDestinationDialog(null);
-                return;
-              }
-              setCommandError(null);
-              const disposition = pendingDestinationDisposition('accepted');
-              if (disposition.notifyAuthoringShell) publishAuthoringResolution('accepted');
-              setSaveStatus(await props.api.saveStatus());
-              if (destinationAttemptRef.current !== attempt) return;
-            }
-            if (pendingDestinationDisposition('accepted').closeDialog) {
-              setDestinationDialog(null);
-            }
-          } catch (error) {
-            setDestinationError(
-              error instanceof Error
-                ? error.message
-                : "That destination could not be established safely.",
-            );
-          } finally {
-            setDestinationEstablishing(false);
-          }
-        }}
+        onLocate={destination.onLocate}
+        onChooseLocation={destination.onChooseLocation}
+        onCancel={destination.onCancel}
+        onConfirm={destination.onConfirm}
       />}
     </main>
   );

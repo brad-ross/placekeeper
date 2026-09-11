@@ -1,0 +1,339 @@
+/* Row and tab actions keep their layout space so text never shifts. Fine
+   pointers disclose them on intent; keyboard focus discloses the same controls. */
+@media (hover: hover) and (pointer: fine) {
+  :is(li[data-annotation-origin], li[data-search-result]) .row-action-group__direct,
+  :is(li[data-annotation-origin], li[data-search-result])[data-active="true"]
+    .row-action-group__direct,
+  .reference-tab-segment :is(.reference-tab-segment__action, .reference-panel__return),
+  .review-workspace__header > .review-workspace__outline-toggle,
+  .review-workspace__activity-strip--compound > .review-workspace__move--activity {
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  :is(li[data-annotation-origin], li[data-search-result]):is(:hover, [data-corresponding="true"])
+    .row-action-group__direct,
+  :is(li[data-annotation-origin], li[data-search-result]):focus-within
+    .row-action-group__direct,
+  .reference-tab-segment:hover
+    :is(.reference-tab-segment__action, .reference-panel__return),
+  .reference-tab-segment:has(:focus-visible)
+    :is(.reference-tab-segment__action, .reference-panel__return),
+  .review-workspace__header:hover > .review-workspace__outline-toggle,
+  .review-workspace__header:has(:focus-visible) > .review-workspace__outline-toggle,
+  .review-workspace__activity-strip--compound:hover
+    > .review-workspace__move--activity,
+  .review-workspace__activity-strip--compound:has(:focus-visible)
+    > .review-workspace__move--activity {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+
+/* All workspace entries use the outline's intent and selection behavior.
+   The page and action endcaps occupy the same space without moving content. */
+.review-shell .review-layout :is(.review-workspace, .review-tools-workspace)
+  :is(.outline-navigator__row, li[data-annotation-origin], li[data-search-result]) {
+  --workspace-row-surface: transparent;
+  background: var(--workspace-row-surface);
+  box-shadow: none;
+  outline: 0;
+  transition: none;
+}
+
+.review-shell .review-layout :is(.review-workspace, .review-tools-workspace)
+  :is(.outline-navigator__row, li[data-annotation-origin], li[data-search-result]):is(:hover, :focus-within, :active, [data-corresponding="true"]) {
+  --workspace-row-surface: #e7e7e7;
+  background: var(--workspace-row-surface);
+  box-shadow: none;
+  outline: 0;
+}
+
+.review-shell .review-layout :is(.review-workspace, .review-tools-workspace)
+  :is(.outline-navigator__row, li[data-annotation-origin], li[data-search-result])
+  :is(.annotation-item__navigation, .outline-navigator__destination):is(:hover, :active) {
+  background: transparent;
+  box-shadow: none;
+}
+
+.review-shell .review-layout :is(.review-workspace, .review-tools-workspace)
+  :is(.outline-navigator__row, li[data-annotation-origin], li[data-search-result])
+  :is(.annotation-item__navigation, .outline-navigator__destination, .row-action-group__action, .copy-link-control__trigger--row, .row-action-group__trigger):focus-visible {
+  outline: 2px solid #496789;
+  outline-offset: 3px;
+}
+
+.review-shell .review-layout :is(.review-workspace, .review-tools-workspace)
+  :is(.outline-navigator__row, li[data-annotation-origin], li[data-search-result]):is([data-current="true"], [data-active="true"]) {
+  --workspace-row-surface: var(--pk-raised);
+  background: var(--workspace-row-surface);
+  box-shadow: 0 2px 7px rgb(0 0 0 / 2.4%);
+}
+
+:is(li[data-annotation-origin], li[data-search-result], .annotation-peek) .annotation-item__title-row > .row-action-group {
+  position: absolute;
+  top: 0;
+  right: 0;
+  margin-left: 0;
+  transform: none;
+  background: transparent;
+}
+
+:is(.outline-navigator__row, li[data-annotation-origin], li[data-search-result]) .row-action-group__direct {
+  transition: none;
+}
+
+:is(li[data-annotation-origin], .annotation-peek) .annotation-item__title-row
+  > .annotation-item__meta[data-annotation-metadata-layout="row-head"] > .annotation-item__page,
+li[data-search-result] .pdf-search__result-heading > .pdf-search__result-page {
+  margin-left: auto;
+}
+
+:is(li[data-annotation-origin], li[data-search-result], .annotation-peek)
+  :is(.annotation-item__page, .pdf-search__result-page) {
+  display: grid;
+  flex: none;
+  width: 26px;
+  height: 26px;
+  align-self: flex-start;
+  place-items: center;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  :is(.outline-navigator__row, li[data-annotation-origin], li[data-search-result]):has(.row-action-group):is(:hover, :focus-within, [data-corresponding="true"])
+    :is(.outline-navigator__page, .annotation-item__page, .pdf-search__result-page) {
+    opacity: 0;
+  }
+}
+
+@media (pointer: coarse), (hover: none) {
+  .outline-navigator__page {
+    width: 44px;
+  }
+
+  :is(li[data-annotation-origin], li[data-search-result], .annotation-peek)
+    :is(.annotation-item__page, .pdf-search__result-page) {
+    width: 44px;
+    height: 44px;
+  }
+
+  :is(.outline-navigator__row, li[data-annotation-origin], li[data-search-result]) .row-action-group__direct {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  :is(.outline-navigator__row, li[data-annotation-origin], li[data-search-result]):has(.row-action-group)
+    :is(.outline-navigator__page, .annotation-item__page, .pdf-search__result-page) {
+    opacity: 0;
+  }
+
+  :is(li[data-annotation-origin], li[data-search-result], .annotation-peek) .annotation-item__title-row {
+    min-height: 44px;
+  }
+}
+
+@media (pointer: coarse) {
+  #root[data-production-root="true"] .comment-composer .comment-composer__actions .review-button {
+    min-height: 44px;
+  }
+
+  .review-context-palette button,
+  .review-page-menu button,
+  .link-action-popover__surface [role="menuitem"] {
+    min-height: 44px;
+  }
+
+  .review-context-palette .review-action-button--icon,
+  .link-action-popover__surface [role="menuitem"] {
+    width: 44px;
+    min-width: 44px;
+    height: 44px;
+  }
+
+  .outline-navigator {
+    --outline-tree-control-size: 44px;
+    --outline-tree-leading-size: 52px;
+  }
+
+  .outline-navigator__row {
+    grid-template-columns: var(--outline-tree-leading-size) minmax(0, 1fr) 64px;
+  }
+
+  .outline-navigator__disclosure,
+  .outline-navigator__disclosure-spacer {
+    width: 44px;
+    min-width: 44px;
+    height: 44px;
+    min-height: 44px;
+  }
+
+  .outline-navigator .row-action-group[data-row-action-count] {
+    position: relative;
+    right: auto;
+    width: 64px;
+    min-width: 64px;
+  }
+
+  .reference-tab-segment--compound,
+  .reference-tabs[data-reference-tabs-orientation="vertical"] .reference-tab-segment--compound {
+    padding-right: 3px;
+  }
+
+  .reference-tabs .reference-tab-segment__selector,
+  .reference-tabs[data-reference-tabs-orientation="vertical"] .reference-tab-segment__selector {
+    min-height: 50px;
+  }
+
+  .reference-tabs .reference-tab-segment__action,
+  .reference-tabs .reference-panel__return {
+    flex-basis: 44px;
+  }
+
+  .review-chrome button,
+  .review-chrome__icon-control,
+  .review-workspace__mode-tab,
+  .review-workspace__move,
+  .review-workspace__close,
+  .workspace-edge-rail,
+  .reference-tabs .reference-tab-segment__action,
+  .reference-tabs .reference-panel__return,
+  .row-action-group__action,
+  .copy-link-control__trigger--row,
+  .row-action-group__trigger {
+    width: 44px;
+    min-width: 44px;
+    max-width: 44px;
+    height: 44px;
+    min-height: 44px !important;
+  }
+
+  .row-action-group[data-row-action-count="1"] {
+    width: 44px;
+    min-width: 44px;
+  }
+
+  :is(li[data-annotation-origin], li[data-search-result], .annotation-peek) .annotation-item__title-row {
+    min-height: 44px;
+  }
+
+  .row-action-group[data-row-action-count="2"] {
+    width: calc(88px + var(--review-control-group-gap));
+    min-width: calc(88px + var(--review-control-group-gap));
+  }
+
+  .row-action-group[data-row-action-count="3"] {
+    width: calc(132px + (2 * var(--review-control-group-gap)));
+    min-width: calc(132px + (2 * var(--review-control-group-gap)));
+  }
+
+  .row-action-group[data-row-action-count="4"] {
+    width: calc(176px + (3 * var(--review-control-group-gap)));
+    min-width: calc(176px + (3 * var(--review-control-group-gap)));
+  }
+
+  .review-chrome__page-input,
+  .review-chrome__zoom-input,
+  .pdf-search__query > .pdf-search__input { font-size: 16px; }
+
+  .pdf-search__query { height: 52px; }
+  .pdf-search__clear-slot { width: 44px; height: 44px; }
+  .pdf-search__clear {
+    width: 44px; min-width: 44px; max-width: 44px;
+    height: 44px; min-height: 44px; max-height: 44px;
+  }
+
+  li[data-annotation-origin] .annotation-item__title-row {
+    flex-wrap: wrap;
+  }
+
+  li[data-annotation-origin] .row-action-group__direct {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  li[data-search-result] .row-action-group__direct,
+  .reference-tab-segment :is(.reference-tab-segment__action, .reference-panel__return),
+  .review-workspace__header > .review-workspace__outline-toggle,
+  .review-workspace__activity-strip--compound > .review-workspace__move--activity {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  li[data-annotation-origin] :is(
+    .row-action-group__action,
+    .copy-link-control__trigger--row,
+    .row-action-group__trigger
+  ),
+  .full-annotation-reader :is(
+    .full-annotation-reader__back,
+    .full-annotation-reader__edit,
+    .full-annotation-reader__delete,
+    .full-annotation-reader__locate
+  ) {
+    width: 44px;
+    min-width: 44px;
+    max-width: 44px;
+    height: 44px;
+    min-height: 44px !important;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .review-chrome *,
+  .review-workspace *,
+  .review-tools-workspace * { transition-duration: .01ms !important; }
+}
+
+/* Action glyphs inherit the approved control color, including hover/focus. */
+.review-context-palette button .review-icon,
+.review-page-menu button .review-icon,
+.link-action-popover [role="menuitem"] .review-icon { color: inherit; }
+
+/* Selected PDF popups share the workspace card's page/action endcap. */
+.annotation-peek .row-action-group__direct {
+  opacity: 0;
+  pointer-events: none;
+  transition: none;
+}
+.annotation-peek[data-source-return="true"] .row-action-group__direct,
+.annotation-peek[data-peek-selected="true"]:is(:hover, :has(:focus-visible)) .row-action-group__direct {
+  opacity: 1;
+  pointer-events: auto;
+}
+.annotation-peek[data-source-return="true"] .annotation-item__page,
+.annotation-peek[data-peek-selected="true"]:is(:hover, :has(:focus-visible)):has(.row-action-group) .annotation-item__page {
+  opacity: 0;
+}
+@media (pointer: coarse), (hover: none) {
+  .annotation-peek[data-peek-selected="true"] .row-action-group__direct { opacity: 1; pointer-events: auto; }
+  .annotation-peek[data-peek-selected="true"]:has(.row-action-group) .annotation-item__page { opacity: 0; }
+}
+
+/* Keep annotation previews in the exposed PDF area beside open workspaces. */
+.review-layout:is([data-right-overlay="true"], [data-bottom-overlay="true"]) .annotation-peek {
+  top: auto;
+  right: max(12px, calc(100% - var(--review-overlay-right-start, 100%)));
+  bottom: max(12px, calc(100% - var(--review-overlay-bottom-start, 100%)));
+  width: min(340px, calc(var(--review-overlay-right-start, 100%) - 24px));
+  max-height: max(0px, calc(var(--review-overlay-bottom-start, 100%) - 24px));
+  overflow: auto;
+  transform: none;
+}
+
+/* Horizontal tabs fit short titles; vertical tabs retain the full rail width. */
+.reference-tabs[data-reference-tabs-orientation="horizontal"] .reference-tab-segment {
+  width: max-content;
+  min-width: min(112px, 100%);
+  flex-basis: auto;
+}
+
+.full-annotation-reader__source,
+.full-annotation-reader__quote {
+  color: var(--pk-muted);
+}
+.full-annotation-reader__source[data-source-treatment="struck"] {
+  text-decoration: line-through;
+}
+.full-annotation-reader__body > .full-annotation-reader__source:not(:last-child) {
+  margin-bottom: 14px;
+}

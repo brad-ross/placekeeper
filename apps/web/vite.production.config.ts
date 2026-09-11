@@ -1,37 +1,23 @@
-import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { resolve } from "node:path";
 import { defineConfig, type Plugin } from "vite";
 import {
   buildPackagedPdfiumWorkerSource,
   EMBEDPDF_ENGINE_VERSION,
-  extractPinnedPdfiumWorkerSource,
-} from "../chrome-extension/scripts/embedpdf-worker-source.js";
+} from "../../scripts/build/pdfium-worker-source.js";
+import { emitPdfiumAssets, loadPinnedPdfiumWorkerSource } from "../../scripts/build/pdfium-assets.js";
 
 export function offlinePdfium(): Plugin {
-  const engineRoot = resolve("node_modules/@embedpdf/engines");
-  const packageMetadata = JSON.parse(readFileSync(resolve(engineRoot, "package.json"), "utf8")) as {
-    readonly version?: unknown;
-  };
-  if (packageMetadata.version !== EMBEDPDF_ENGINE_VERSION) {
-    throw new Error(`Shared PDFium worker requires @embedpdf/engines ${EMBEDPDF_ENGINE_VERSION}`);
-  }
-  const workerSource = extractPinnedPdfiumWorkerSource(readFileSync(
-    resolve(engineRoot, "dist/lib/pdfium/web/worker-engine.js"),
-    "utf8",
-  ));
+  const workerSource = loadPinnedPdfiumWorkerSource(
+    `Shared PDFium worker requires @embedpdf/engines ${EMBEDPDF_ENGINE_VERSION}`,
+  );
   return {
     name: "offline-pdfium",
     generateBundle() {
-      this.emitFile({
-        type: "asset",
-        fileName: "pdfium.wasm",
-        source: readFileSync(resolve("node_modules/@embedpdf/pdfium/dist/pdfium.wasm")),
-      });
-      this.emitFile({
-        type: "asset",
-        fileName: "pdfium-worker.js",
-        source: buildPackagedPdfiumWorkerSource(workerSource),
+      emitPdfiumAssets(this, {
+        wasm: { fileName: "pdfium.wasm" },
+        worker: { fileName: "pdfium-worker.js" },
+        workerSource: buildPackagedPdfiumWorkerSource(workerSource),
       });
     },
   };
