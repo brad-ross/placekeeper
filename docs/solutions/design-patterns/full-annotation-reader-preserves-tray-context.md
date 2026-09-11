@@ -35,7 +35,7 @@ tags:
 
 ## Context
 
-Compact annotation cards must remain scannable while allowing every displayed passage to be read completely. The Full Annotation Reader, introduced in [PR #61](https://github.com/brad-ross/placekeeper/pull/61), keeps the PDF and surrounding review state available during detail reading. [PR #87](https://github.com/brad-ross/placekeeper/pull/87), open as of September 7, 2026, corrects content completeness and popup transitions; this document describes the current implementation, not a claim that that PR has merged.
+Compact annotation cards must remain scannable while allowing every displayed passage to be read completely. The Full Annotation Reader, introduced in [PR #61](https://github.com/brad-ross/placekeeper/pull/61), keeps the PDF and surrounding review state available during detail reading. [PR #87](https://github.com/brad-ross/placekeeper/pull/87) extended content completeness and corrected popup transitions.
 
 The earlier authored-content-only contract omitted replacement source text, excluded deletes and quote-only highlights, and measured only the main excerpt. A short highlight comment with a long supporting quote exposed the mismatch: the annotation's longest meaningful text could be outside both eligibility and overflow detection. Tests that asserted authored-only output preserved the mistake. The shared contract now includes authored content, original source, and highlighted quotation (`apps/web/src/review/annotation-content.ts`, `apps/web/src/review/annotation-reader.ts`).
 
@@ -57,9 +57,9 @@ Origin determines restoration. A list-origin reader returns to list context; a p
 
 ### Separate selected popups, hover previews, and explicit reading
 
-With the workspace closed, selected annotation state retains the compact popup independently of hover correspondence (`apps/web/src/review/use-annotation-reader.ts`). The popup distinguishes selected and preview state and exposes owned actions accordingly (`apps/web/src/review/AnnotationPeek.tsx`). Hovering is not equivalent to selecting or expanding.
+With the workspace closed, selected annotation state retains the compact popup independently of hover correspondence (`apps/web/src/app/ReviewShell.tsx`). The popup distinguishes selected and preview state and exposes owned actions accordingly (`apps/web/src/review/AnnotationPeek.tsx`). Hovering is not equivalent to selecting or expanding.
 
-A PDF mark activation cancels older restoration and reader-resume work, clears the current reader, and changes selection. When no workspace is open it returns a compact peek, even if the annotation previously overflowed; expansion requires the explicit Read full action. The workspace-open branch may still disclose a measured long annotation in the list (`apps/web/src/review/use-annotation-reader.ts`). This distinction prevents cached overflow knowledge from silently reopening the full popup after dismissal.
+A PDF mark activation cancels older restoration and reader-resume work, clears the current reader, and changes selection. When no workspace is open it returns a compact peek, even if the annotation previously overflowed; expansion requires the explicit Read full action. The workspace-open branch may still disclose a measured long annotation in the list (`apps/web/src/app/ReviewShell.tsx`). This distinction prevents cached overflow knowledge from silently reopening the full popup after dismissal.
 
 ### Keep detail disclosure separate from source navigation
 
@@ -71,11 +71,19 @@ The compact popup also needs source visibility. Its target falls back to the cur
 
 Capture prior selection and list scroll on entry. On list restoration, validate document/discovery authority and the saved item, wait for rendering, restore scroll, and choose an available disclosure control, row target, workspace, or PDF fallback (`apps/web/src/review/use-annotation-reader.ts`). Restoration tokens and tracked animation frames let newer transitions invalidate old callbacks (`apps/web/src/review/use-annotation-reader.ts`). Otherwise a rapid Back-then-open sequence can steal focus and scroll from the newer reader.
 
-Popup Back clears reader and pending resume/mark requests, returning to the compact card; keyboard activation can restore its disclosure focus (`apps/web/src/review/use-annotation-reader.ts`). Dismissal clears selected/peek state and pending reader work as well as cancelling restoration (`apps/web/src/review/use-annotation-reader.ts`). A selection change invalidates the old popup reader (`apps/web/src/review/use-annotation-reader.ts`). Escape invokes dismissal, and outside-click handling includes expanded peek readers rather than depending solely on compact-card state (`apps/web/src/review/use-annotation-reader.ts`). Reopening must start from the compact view instead of reviving a stale full-reader session.
+Popup Back clears reader and pending resume/mark requests, returning to the compact card; keyboard activation can restore its disclosure focus (`apps/web/src/review/use-annotation-reader.ts`). Dismissal clears selected/peek state and pending reader work as well as cancelling restoration (`apps/web/src/app/ReviewShell.tsx`). A selection change invalidates the old popup reader (`apps/web/src/app/ReviewShell.tsx`). Escape invokes dismissal, and outside-click handling includes expanded peek readers rather than depending solely on compact-card state (`apps/web/src/app/ReviewShell.tsx`). Reopening must start from the compact view instead of reviving a stale full-reader session.
 
 ### Re-evaluate eligibility after edits
 
 An accepted edit can change both semantic content and rendered overflow. Retain a pending resume identity, then let a fresh overflow report decide whether to resume the reader or return to the origin (`apps/web/src/review/use-annotation-reader.ts`). Cancellation preserves the reader's editing context. If deletion or source replacement makes its identity unresolvable, restore a safe origin state rather than displaying stale contents (`apps/web/src/review/use-annotation-reader.ts`). Authority validation must protect restoration as well as visible content.
+
+### Decide the return path before waiting for layout
+
+Keep the restoration decision synchronous even when its visual work is deferred. In `use-authoring-session.ts`, `closeAuthoringSession` checks `restoreReaderAfterAuthoring` before restoring the saved active item or scheduling generic focus and scroll restoration. A true return suppresses that fallback; it does not mean that the reader has finished painting or focusing (`apps/web/src/review/use-authoring-session.ts`, `apps/web/src/review/use-annotation-reader.ts`).
+
+A resolvable accepted reader edit stores a pending resume identity, cancels older restoration, hides the current reader, and returns true immediately. Fresh overflow measurement later decides whether to reopen the reader or restore its origin. Waiting for that measurement before deciding who handles the return would allow the generic authoring fallback to run in the meantime. Source replacement and an unresolvable reader record also suppress the generic fallback. A resolvable cancelled edit instead leaves the reader session intact and returns false, allowing ordinary authoring restoration. The return value therefore cannot be reduced to “this edit came from a reader.”
+
+`ReviewShell` supplies a callback wrapper to the authoring hook before the later reader hook supplies its implementation. Registering the wrapper does not call it; the current restoration call happens during interaction settlement or registered effects. During the September 2026 extraction review, moving this coordination into a new settlement effect was considered and rejected: it would change the immediate fallback decision unless fallback suppression were redesigned too. No render-time initialization defect was established. Preserve the command-time decision when changing hook boundaries, while retaining the reader's deferred measurement and cancellable focus work. If a hook is changed to invoke the callback during render, reassess the composition rather than relying on the present deferred-call assumption (`apps/web/src/app/ReviewShell.tsx`, `apps/web/src/review/use-authoring-session.ts`).
 
 ## Why This Matters
 
@@ -95,7 +103,7 @@ A replacement has a brief proposal and a long original passage. The original pas
 
 A highlight's comment fits the card but its quote does not. Measuring the quote exposes Read full, and the reader includes the highlighted passage. A delete uses the same principle for its source text without offering Edit (`apps/web/src/review/AnnotationExcerpt.tsx`, `apps/web/src/review/FullAnnotationReader.tsx`).
 
-With the workspace closed, a reviewer expands annotation A, selects B, dismisses B, and selects A again. New activation clears A's old reader session, so A reopens as a compact card (`apps/web/src/review/use-annotation-reader.ts`).
+With the workspace closed, a reviewer expands annotation A, selects B, dismisses B, and selects A again. New activation clears A's old reader session, so A reopens as a compact card (`apps/web/src/app/ReviewShell.tsx`).
 
 ## Related
 
