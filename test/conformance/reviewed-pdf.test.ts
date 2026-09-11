@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { PDFArray, PDFDict, PDFDocument, PDFHexString, PDFName, PDFString } from 'pdf-lib';
 
 import type {
@@ -25,6 +25,7 @@ const sha256 = (bytes: Uint8Array) =>
   createHash("sha256").update(bytes).digest("hex");
 
 afterEach(async () => {
+  vi.useRealTimers();
   await Promise.all(
     temporaryDirectories.splice(0).map((path) =>
       rm(path, { recursive: true, force: true }),
@@ -32,7 +33,28 @@ afterEach(async () => {
   );
 });
 
-const timestamp = "2026-08-07T12:00:00.000Z";
+const timestamp = "2026-08-07T10:00:00.000Z";
+const editedAt = "2026-08-07T10:05:00.000Z";
+const outputAt = "2026-08-07T10:20:00.000Z";
+const annotationName = "Brad Ross — café";
+
+async function serializedAnnotations(bytes: Uint8Array) {
+  const pdf = await PDFDocument.load(bytes);
+  return pdf.getPages().flatMap((page, pageIndex) => {
+    const annotations = page.node.lookupMaybe(PDFName.of('Annots'), PDFArray);
+    return Array.from({ length: annotations?.size() ?? 0 }, (_, index) => {
+      const dictionary = annotations!.lookup(index, PDFDict);
+      const field = (key: string) => {
+        const value = dictionary.lookup(PDFName.of(key));
+        return value instanceof PDFString || value instanceof PDFHexString ? value : undefined;
+      };
+      return { pageIndex, dictionary, id: field('NM')?.decodeText(),
+        author: field('T')?.decodeText(),
+        createdAt: field('CreationDate')?.decodeDate().toISOString(),
+        modifiedAt: field('M')?.decodeDate().toISOString() };
+    });
+  });
+}
 
 describe('standard annotation round trips', () => {
   it('keeps absent native appearances absent and verifies the final saved bytes', async () => {
@@ -148,9 +170,9 @@ const annotations: readonly ReviewAnnotation[] = [
     rect: { x: 72, y: 92, width: 130, height: 14 },
     quadPoints: [{ x: 72, y: 92, width: 130, height: 14 }],
     contents: "locally unique equilibrium",
-    author: "Placekeeper",
+    author: annotationName,
     createdAt: timestamp,
-    modifiedAt: timestamp,
+    modifiedAt: editedAt,
     textAnchorReliable: true,
   },
   {
@@ -160,9 +182,9 @@ const annotations: readonly ReviewAnnotation[] = [
     rect: { x: 210, y: 92, width: 45, height: 14 },
     quadPoints: [{ x: 210, y: 92, width: 45, height: 14 }],
     contents: "",
-    author: "Placekeeper",
+    author: annotationName,
     createdAt: timestamp,
-    modifiedAt: timestamp,
+    modifiedAt: editedAt,
     textAnchorReliable: true,
   },
   {
@@ -171,9 +193,9 @@ const annotations: readonly ReviewAnnotation[] = [
     pageIndex: 0,
     rect: { x: 265, y: 88, width: 14, height: 20 },
     contents: "however",
-    author: "Placekeeper",
+    author: annotationName,
     createdAt: timestamp,
-    modifiedAt: timestamp,
+    modifiedAt: editedAt,
     textAnchorReliable: true,
   },
   {
@@ -183,9 +205,9 @@ const annotations: readonly ReviewAnnotation[] = [
     rect: { x: 72, y: 120, width: 180, height: 16 },
     quadPoints: [{ x: 72, y: 120, width: 180, height: 16 }],
     contents: "Check this argument.",
-    author: "Placekeeper",
+    author: annotationName,
     createdAt: timestamp,
-    modifiedAt: timestamp,
+    modifiedAt: editedAt,
     textAnchorReliable: true,
   },
   {
@@ -194,9 +216,9 @@ const annotations: readonly ReviewAnnotation[] = [
     pageIndex: 0,
     rect: { x: 500, y: 700, width: 24, height: 24 },
     contents: "Page-level comment.",
-    author: "Placekeeper",
+    author: annotationName,
     createdAt: timestamp,
-    modifiedAt: timestamp,
+    modifiedAt: editedAt,
   },
 ];
 
@@ -254,6 +276,8 @@ describe("reviewed PDF conformance", () => {
   });
 
   it("exports and verifies one complete cross-page portable group", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(outputAt));
     const fixture = await deliveryForFixture("pdf-search.pdf");
     const pages = [0, 1, 2].map((pageIndex) => ({
       pageIndex,
@@ -268,7 +292,7 @@ describe("reviewed PDF conformance", () => {
       kind: "replace",
       pageIndex: 0,
       createdAt: timestamp,
-      updatedAt: timestamp,
+      updatedAt: editedAt,
       payload: {
         quote: pages.map(({ quote }) => quote).join("\n"),
         prefix: pages[0]!.prefix,
@@ -284,7 +308,7 @@ describe("reviewed PDF conformance", () => {
         proposedText: "Replacement across pages",
       },
     };
-    const projections = projectReviewItemProjections(item);
+    const projections = projectReviewItemProjections(item, annotationName);
     const coordinator = new ExportCoordinator({
       writer: await createSelectedPdfWriter(),
       capabilities: fixture.capabilities,
@@ -299,12 +323,41 @@ describe("reviewed PDF conformance", () => {
       new Uint8Array(await readFile(result.path)),
     );
 
-    expect(inspected.portableItems).toEqual([item]);
+    expect(inspected.portableItems).toEqual([{ ...item, importedAnnotationAuthor: annotationName }]);
+    const serialized = await serializedAnnotations(new Uint8Array(await readFile(result.path)));
+    for (const projection of projections) {
+      expect(serialized.find(({ id }) => id === projection.id)).toMatchObject({
+        pageIndex: projection.pageIndex, author: annotationName, createdAt: timestamp, modifiedAt: editedAt,
+      });
+    }
     expect(inspected.annotations.filter(({ id }) => id.startsWith(`${item.id}:projection:`)))
       .toHaveLength(3);
+    const writer = await createSelectedPdfWriter();
+    let bytes: Uint8Array = new Uint8Array(await readFile(result.path));
+    for (const name of ["Renamed reviewer", "Renamed reviewer"]) {
+      const [reopened] = await readEditableReviewItems(bytes);
+      expect(reopened).toBeDefined();
+      const renamed = projectReviewItemProjections(reopened!, name);
+      const saved = await writer.write({
+        sourcePdf: bytes, sourceSha256: sha256(bytes), revision: 6, annotations: renamed,
+      });
+      bytes = saved.pdfBytes;
+      expect(await readEditableReviewItems(bytes)).toEqual([{ ...item, importedAnnotationAuthor: name }]);
+      const savedAnnotations = await serializedAnnotations(bytes);
+      for (const projection of renamed) {
+        expect(savedAnnotations.find(({ id }) => id === projection.id)).toMatchObject({
+          pageIndex: projection.pageIndex, author: name, createdAt: timestamp, modifiedAt: editedAt,
+        });
+      }
+      expect((await inspectPdfWithEmbedPdf(bytes)).annotations
+        .filter(({ id }) => id.startsWith(`${item.id}:projection:`))
+        .every(({ hasNormalAppearance }) => hasNormalAppearance)).toBe(true);
+    }
   }, 60_000);
 
   it("exports every v1 type and preserves supported and unsupported source annotations", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(outputAt));
     const fixture = await deliveryForFixture("preservation-corpus.pdf");
     const coordinator = new ExportCoordinator({
       writer: await createSelectedPdfWriter(),
@@ -328,17 +381,23 @@ describe("reviewed PDF conformance", () => {
         ...annotations.map(({ id }) => id),
       ]),
     );
+    const serialized = await serializedAnnotations(new Uint8Array(await readFile(result.path)));
     for (const annotation of annotations) {
       const written = inspected.annotations.find(({ id }) => id === annotation.id);
       expect(written?.contents).toBe(annotation.contents);
       expect(written?.pageIndex).toBe(annotation.pageIndex);
       expect(written?.flags).toContain("print");
       expect(written?.hasNormalAppearance).toBe(true);
-      expect(written?.author).toBe("Placekeeper");
+      expect(written?.author).toBe(annotationName);
+      expect(serialized.find(({ id }) => id === annotation.id)).toMatchObject({
+          author: annotationName, createdAt: timestamp, modifiedAt: editedAt,
+        });
     }
   }, 60_000);
 
   it("round-trips Placekeeper annotations without rewriting untouched metadata", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(outputAt));
     const source = new Uint8Array(
       await readFile(resolve("test/fixtures/pdfs/text-native.pdf")),
     );
@@ -394,26 +453,28 @@ describe("reviewed PDF conformance", () => {
     });
     const edited: ReviewItem = {
       ...editedItem,
-      updatedAt: "2026-08-07T12:01:00.000Z",
+      updatedAt: editedAt,
       payload: { ...editedItem.payload, comment: "Edited after update" },
     };
     const roundTripped = await writer.write({
       sourcePdf: seeded.pdfBytes,
       sourceSha256: sha256(seeded.pdfBytes),
       revision: 2,
-      annotations: [projectReviewItem(edited), projectReviewItem(untouchedItem)],
+      annotations: [projectReviewItem(edited, annotationName), projectReviewItem(untouchedItem, annotationName)],
     });
     const inspected = await inspectPdfWithEmbedPdf(roundTripped.pdfBytes);
 
-    expect(inspected.portableItems).toEqual(expect.arrayContaining([edited, untouchedItem]));
+    expect(inspected.portableItems).toEqual(expect.arrayContaining(
+      [edited, untouchedItem].map((item) => ({ ...item, importedAnnotationAuthor: annotationName })),
+    ));
     expect(inspected.portableItems).toHaveLength(2);
     expect(inspected.annotations.find(({ id }) => id === edited.id)).toMatchObject({
-      author: "Placekeeper",
+      author: annotationName,
       hasNormalAppearance: true,
       custom: { placekeeper: { owner: "placekeeper", schemaVersion: 2, itemId: edited.id } },
     });
     expect(inspected.annotations.find(({ id }) => id === untouchedItem.id)).toMatchObject({
-      author: "Placekeeper",
+      author: annotationName,
       hasNormalAppearance: true,
       custom: { placekeeper: { owner: "placekeeper", schemaVersion: 2, itemId: untouchedItem.id } },
     });
@@ -421,6 +482,43 @@ describe("reviewed PDF conformance", () => {
       author: "Placekeeper Preview",
       contents: external.contents,
     });
+    let importedNativeDictionary: string | undefined;
+    let current = roundTripped;
+    for (const name of [annotationName, "Renamed reviewer", "Renamed reviewer"]) {
+      const reopened = await readEditableReviewItems(current.pdfBytes);
+      const owned = reopened.filter(({ kind }) => kind !== 'pdfAnnotation');
+      const native = reopened.filter(({ kind }) => kind === 'pdfAnnotation');
+      expect(owned.map(({ id }) => id).sort()).toEqual([edited.id, untouchedItem.id].sort());
+      expect(native).toHaveLength(1);
+      current = await writer.write({
+        sourcePdf: current.pdfBytes, sourceSha256: sha256(current.pdfBytes), revision: 3,
+        annotations: [...owned, ...native].map((item) => projectReviewItem(item, name)),
+        manageNativeAnnotations: true,
+      });
+      const serialized = await serializedAnnotations(current.pdfBytes);
+      for (const item of [edited, untouchedItem]) {
+        expect(serialized.find(({ id }) => id === item.id)).toMatchObject({
+          author: name, createdAt: item.createdAt, modifiedAt: item.updatedAt,
+        });
+      }
+      const nativeDictionary = serialized.find(({ author }) => author === external.author)!;
+      expect(nativeDictionary.author).toBe(external.author);
+      expect(nativeDictionary).toMatchObject({
+        createdAt: external.createdAt, modifiedAt: external.modifiedAt,
+      });
+      // First managed import assigns the native annotation its stable /NM.
+      // Subsequent name changes and repeat outputs preserve the whole dictionary.
+      if (importedNativeDictionary !== undefined) {
+        expect(nativeDictionary.dictionary.toString()).toBe(importedNativeDictionary);
+      }
+      importedNativeDictionary = nativeDictionary.dictionary.toString();
+      const editable = await readEditableReviewItems(current.pdfBytes);
+      expect(editable.filter(({ kind }) => kind !== 'pdfAnnotation')).toEqual(
+        expect.arrayContaining([edited, untouchedItem].map((item) => ({
+          ...item, importedAnnotationAuthor: name,
+        }))),
+      );
+    }
   }, 60_000);
 
   it("preserves generated links whose PDF dictionary has no persistent annotation ID", async () => {

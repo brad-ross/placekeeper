@@ -41,6 +41,7 @@ describe('annotationPreservationSignature', () => {
   });
 
   it.each([
+    ['author', { author: 'Different native reviewer' }],
     ['opacity', { opacity: 0.8 }],
     ['stroke color', { strokeColor: '#d32f2f' }],
     ['fill color', { fillColor: '#eeeeee' }],
