@@ -864,6 +864,24 @@ test.describe('canonical review workflow', () => {
     );
   });
 
+  test('backs the bottom tray gutter when the PDF has no horizontal overflow', async ({ page }) => {
+    await page.setViewportSize({ width: 760, height: 720 });
+    const viewport = await installRuntimeClassicScrollport(page);
+    await viewport.evaluate((element) => {
+      element.firstElementChild?.setAttribute('style', 'width: 100%; height: 1600px; background: white');
+    });
+    await page.getByRole('button', { name: 'Open harness reference' }).press('Enter');
+    await page.getByRole('button', { name: 'Show workspace' }).click();
+    await expect.poll(() => viewport.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+    const backing = page.locator('.review-overlay-frame');
+    await expect(backing).toHaveCSS('clip-path', 'inset(0px 20px 0px 0px)');
+    await viewport.evaluate((element) => {
+      (element.firstElementChild as HTMLElement).style.width = '2000px';
+      element.dispatchEvent(new Event('scroll'));
+    });
+    await expect(backing).toHaveCSS('clip-path', 'inset(0px 20px 20px 0px)');
+  });
+
   test('includes an actual wide classic scrollbar track in the common outside tray inset', async ({ page, browserName }) => {
     test.skip(browserName !== 'chromium', 'Chromium exposes deterministic custom classic scrollbar metrics in CI.');
     await page.setViewportSize({ width: 760, height: 720 });

@@ -3,8 +3,16 @@ import Foundation
 @preconcurrency import WebKit
 
 @MainActor
+private final class TitlebarSpacingView: NSView {
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+}
+
+@MainActor
 final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler {
     private static let toolbarHorizontalMargin: CGFloat = 16
+    private static let toolbarHeight: CGFloat = 52
+    private let titlebarSpacing = NSTitlebarAccessoryViewController()
+    private let nativeTitlebarHeight: CGFloat
     let windowID: String
     let canonicalReviewID: String
     let documentDigest: String
@@ -114,13 +122,12 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
         window.title = displayName
         window.titleVisibility = .hidden
         window.titlebarAppearsTransparent = true
-        let toolbar = NSToolbar(identifier: "PlacekeeperReviewToolbar")
-        toolbar.allowsUserCustomization = false
-        toolbar.autosavesConfiguration = false
-        toolbar.displayMode = .iconOnly
-        toolbar.showsBaselineSeparator = false
-        window.toolbar = toolbar
-        window.toolbarStyle = .unified
+        // The web toolbar owns its scaled height. A transparent accessory makes
+        // the native titlebar tall enough to center the system window controls.
+        nativeTitlebarHeight = window.frame.height - window.contentLayoutRect.height
+        titlebarSpacing.layoutAttribute = .bottom
+        titlebarSpacing.view = TitlebarSpacingView(frame: .zero)
+        window.addTitlebarAccessoryViewController(titlebarSpacing)
         window.tabbingMode = .disallowed
         window.isReleasedWhenClosed = false
         super.init(window: window)
@@ -189,6 +196,7 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
         guard hasWebContent, ticket.geometryIdentity == dragFence.geometryIdentity,
               let scale = appZoomTransition.finish(ticket) else { return }
         webView.pageZoom = scale
+        alignTrafficLights()
         publishGeometryIfSettled()
     }
 
@@ -612,18 +620,25 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
             .compactMap(window.standardWindowButton)
         guard let buttonSuperview = buttons.first?.superview,
               buttons.allSatisfy({ $0.superview === buttonSuperview }) else { return }
-        window.contentView?.layoutSubtreeIfNeeded()
-        let toolbarLeadingInWindow = webView.convert(
-            NSPoint(x: Self.toolbarHorizontalMargin, y: webView.bounds.midY),
+        let scale = webView.pageZoom
+        let height = Self.toolbarHeight * scale
+        // AppKit gives new accessory views a default height when attached;
+        // assign the desired height afterwards and again when scale changes.
+        let accessoryHeight = max(0, height - nativeTitlebarHeight)
+        if titlebarSpacing.view.frame.height != accessoryHeight {
+            titlebarSpacing.view.setFrameSize(NSSize(width: webView.bounds.width, height: accessoryHeight))
+        }
+        window.contentView?.superview?.layoutSubtreeIfNeeded()
+        let centerInWindow = webView.convert(
+            NSPoint(x: Self.toolbarHorizontalMargin * scale,
+                    y: webView.isFlipped ? height / 2 : webView.bounds.height - height / 2),
             to: nil
         )
-        let toolbarLeadingInButtonSuperview = buttonSuperview.convert(toolbarLeadingInWindow, from: nil)
-        guard let trafficLightLeft = buttons.map(\.frame.minX).min() else { return }
-        let horizontalOffset = toolbarLeadingInButtonSuperview.x - trafficLightLeft
-        for button in buttons {
+        let centerInSuperview = buttonSuperview.convert(centerInWindow, from: nil)
+        for (index, button) in buttons.enumerated() {
             button.setFrameOrigin(NSPoint(
-                x: button.frame.origin.x + horizontalOffset,
-                y: button.frame.origin.y
+                x: centerInSuperview.x + CGFloat(index) * 20 * scale,
+                y: centerInSuperview.y - button.frame.height / 2
             ))
         }
     }

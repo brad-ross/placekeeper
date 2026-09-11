@@ -38,7 +38,8 @@
     "baseline_failures": "5 review acceptance failures reproduced on 190b844; 66 passed",
     "blocked": "Physical input checks pending user",
     "xctest": "Explicitly waived by user September 11",
-    "additional_native": "Reference scrolling/docking and main-viewer keyboard targeting at 125%; production recovery controller layout/action/failure/fresh retry at 80\u2013200% passed; see plan"
+    "additional_native": "Reference scrolling/docking and main-viewer keyboard targeting at 125%; production recovery controller layout/action/failure/fresh retry at 80\u2013200% passed; see plan",
+    "layout_fixes": "Three user-reported layout defects corrected and checked in native candidate: scalable titlebar, selection popup clearance, opaque bottom tray backing without horizontal overflow. 59 focused tests and 13 browser tests passed. Swift build and direct TypeScript check passed after cleanup."
   },
   "verification_evidence": [
     {
@@ -124,5 +125,12 @@
   "recovery_path": "/Users/bross1/.codex/worktrees/a801/placekeeper",
   "settled_decision_conflicts": [],
   "behavior_change": true,
-  "standalone_shipping_skipped": true
+  "standalone_shipping_skipped": true,
+  "candidate": {
+    "path": "/tmp/placekeeper-zoom-layout-fixes/Placekeeper.app",
+    "bundle_id": "local.placekeeper.zoomtest",
+    "app_scale": "125%",
+    "runner_log": "/tmp/placekeeper-zoom-layout-native.log",
+    "purpose": "User physical keyboard and pinch verification"
+  }
 }

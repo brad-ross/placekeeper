@@ -1095,6 +1095,14 @@ export function App({
                 height: placement.rect.size.height,
               },
               placement: {
+                selectionBounds: {
+                  left: bounds.left + transformed.origin.x,
+                  top: bounds.top + transformed.origin.y,
+                  right: bounds.left + transformed.origin.x + transformed.size.width,
+                  bottom: bounds.top + transformed.origin.y + transformed.size.height,
+                  width: transformed.size.width,
+                  height: transformed.size.height,
+                },
                 left: bounds.left + transformed.origin.x + transformed.size.width / 2,
                 top: bounds.top + (placement.suggestTop
                   ? transformed.origin.y
