@@ -1186,6 +1186,16 @@ test.describe('canonical review workflow', () => {
   test('reveals right-side controls on bar hover and dismisses hover menus outside their trigger and popup', async ({ page }) => {
     const bar = page.locator('[data-review-chrome]');
     const rightControls = bar.locator(':scope > .review-chrome__viewer-controls');
+    const expectToolbarRevealed = async () => {
+      await expect(rightControls).toHaveCSS('opacity', '1');
+      for (const control of await bar.locator('[data-review-copy-link], [data-main-history]').all()) {
+        await expect(control).toHaveCSS('opacity', '1');
+        await expect(control).toHaveCSS('pointer-events', 'auto');
+      }
+      for (const control of await bar.locator('[data-main-history]').all()) {
+        await expect(control).toHaveCSS('clip-path', 'none');
+      }
+    };
     const canvas = page.getByRole('application', { name: 'PDF review canvas' });
     await canvas.hover();
     await expect(rightControls).toHaveCSS('opacity', '0');
@@ -1204,6 +1214,16 @@ test.describe('canonical review workflow', () => {
     const zoomMenu = page.getByRole('menu', { name: 'PDF zoom', exact: true });
     await expect(zoomMenu).toBeVisible();
     await expect(page.getByRole('button', { name: 'Open zoom controls' })).not.toBeFocused();
+    const zoomBox = bar.locator('.review-chrome__zoom-cluster');
+    const zoomHoverColor = await zoomBox.evaluate((element) => getComputedStyle(element).backgroundColor);
+    const zoomBoxBounds = (await zoomBox.boundingBox())!;
+    const zoomPopupBounds = (await zoomMenu.boundingBox())!;
+    await page.mouse.move(zoomBoxBounds.x + zoomBoxBounds.width / 2,
+      (zoomBoxBounds.y + zoomBoxBounds.height + zoomPopupBounds.y) / 2);
+    await page.waitForTimeout(1100);
+    await expect(zoomMenu).toBeVisible();
+    await expect(zoomBox).toHaveCSS('background-color', zoomHoverColor);
+    await expectToolbarRevealed();
     await page.waitForTimeout(700);
     await expect(page.getByRole('tooltip')).toHaveCount(0);
     await zoomMenu.getByRole('menuitem', { name: 'Zoom out', exact: true }).hover();
@@ -1216,6 +1236,7 @@ test.describe('canonical review workflow', () => {
 
     await zoomMenu.hover();
     await expect(zoomMenu).toBeVisible();
+    await expectToolbarRevealed();
     await expect(rightControls).toHaveCSS('opacity', '1');
     await canvas.hover();
     await expect(zoomMenu).toHaveCount(0);
@@ -1224,8 +1245,19 @@ test.describe('canonical review workflow', () => {
     await page.locator('[data-review-page-position]').hover();
     const pageMenu = page.getByRole('menu', { name: 'Page navigation', exact: true });
     await expect(pageMenu).toBeVisible();
+    const pageBox = page.locator('[data-review-page-position]');
+    const pageHoverColor = await pageBox.evaluate((element) => getComputedStyle(element).backgroundColor);
+    const pageBoxBounds = (await pageBox.boundingBox())!;
+    const pagePopupBounds = (await pageMenu.boundingBox())!;
+    await page.mouse.move(pageBoxBounds.x + pageBoxBounds.width / 2,
+      (pageBoxBounds.y + pageBoxBounds.height + pagePopupBounds.y) / 2);
+    await page.waitForTimeout(1100);
+    await expect(pageMenu).toBeVisible();
+    await expect(pageBox).toHaveCSS('background-color', pageHoverColor);
+    await expectToolbarRevealed();
     await pageMenu.getByRole('menuitem', { name: 'Next page' }).hover();
     await expect(pageMenu).toBeVisible();
+    await expectToolbarRevealed();
     await canvas.hover();
     await expect(pageMenu).toHaveCount(0);
 

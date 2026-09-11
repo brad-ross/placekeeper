@@ -191,6 +191,16 @@
   visibility: hidden;
 }
 
+.reference-tab-segment__selector .reference-tab-segment__page-label {
+  flex: 0 0 var(--reference-tab-action-size);
+  margin-left: auto;
+  /* Match the active page slot's 3px inset within the selector's 8px padding. */
+  margin-right: -5px;
+  text-align: center;
+  color: var(--pk-muted);
+  font: 400 11px/1.2 var(--pk-font-ui);
+}
+
 .reference-tab-segment__page {
   position: absolute;
   top: 50%;

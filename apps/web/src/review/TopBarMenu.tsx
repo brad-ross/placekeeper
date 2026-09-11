@@ -121,12 +121,21 @@ export function TopBarMenu({
     const hoverPointer = (event: PointerEvent) => {
       if (!hoverOpen || event.pointerType !== 'mouse') return;
       const target = event.target;
+      const hoverRegion = hoverRegionRef?.current ?? opener;
+      const anchorBounds = hoverRegion.getBoundingClientRect();
+      const menuBounds = surface.getBoundingClientRect();
+      // Keep the vertical bridge active for as long as the pointer rests
+      // there, including when viewport constraints place the menu above.
+      const inGap = event.clientX >= Math.min(anchorBounds.left, menuBounds.left)
+        && event.clientX <= Math.max(anchorBounds.right, menuBounds.right)
+        && ((event.clientY >= anchorBounds.bottom && event.clientY <= menuBounds.top)
+          || (event.clientY >= menuBounds.bottom && event.clientY <= anchorBounds.top));
       if (target instanceof Node && (surface.contains(target)
-        || (hoverRegionRef?.current ?? opener).contains(target))) {
+        || hoverRegion.contains(target) || inGap)) {
         clearHoverDismiss();
         hoverDismissTimer = undefined;
       } else if (hoverDismissTimer === undefined) {
-        // Allow crossing the small gap between the trigger and its portal.
+        // Tolerate brief excursions outside the trigger, bridge, and menu.
         hoverDismissTimer = setTimeout(() => dismiss('outside', false), 140);
       }
     };
