@@ -1,8 +1,12 @@
+import { hasSafePortableAnnotationShape } from "./portable-annotation-shape.js";
+import { projectReviewItems } from "./annotation-projection.js";
+import { assertPortableAnnotationWritable, PORTABLE_ANNOTATION_MAX_BYTES } from "./portable-annotation.js";
 import { canEditPdfAnnotationComment, canDeletePdfAnnotation, isEditablePdfAnnotationSubtype } from './native-pdf-annotation.js';
 import {
   anchorEvidenceFromReviewItem,
   canonicalizeReviewItem,
   normalizeReviewSelectionAnchor,
+  normalizeAnnotationName,
   PDF_SELECTION_PAGE_LIMIT,
   reviewSelectionPayload,
   synchronizeReviewItemAnchor,
@@ -298,6 +302,9 @@ export function assertReviewCommand(command: unknown): asserts command is Review
     throw new InvalidReviewCommandError("Review command is malformed");
   }
   switch (command.type) {
+    case "set-annotation-name":
+      if (typeof command.annotationName !== "string") throw new InvalidReviewCommandError("Annotation name must be text");
+      return;
     case "add":
       if (!isRecord(command.item) || !isRecord(command.item.payload)) {
         throw new InvalidReviewCommandError("Review command is malformed");
@@ -361,6 +368,18 @@ export function reduceReview(
 ): ReviewState {
   assertReviewCommand(command);
   assertMutable(state, command);
+
+  if (command.type === "set-annotation-name") {
+    const annotationName = normalizeAnnotationName(command.annotationName);
+    if (!hasSafePortableAnnotationShape(annotationName) || new TextEncoder().encode(JSON.stringify(annotationName)).byteLength > PORTABLE_ANNOTATION_MAX_BYTES) {
+      throw new InvalidReviewCommandError("Annotation name is too long");
+    }
+    for (const annotation of projectReviewItems(state.items, undefined, { annotationName })) {
+      assertPortableAnnotationWritable(annotation);
+    }
+    if (state.annotationName === annotationName) return state;
+    return { ...state, annotationName, revision: state.revision + 1 };
+  }
 
   const history = state.history;
   const historyCursor = state.historyCursor;

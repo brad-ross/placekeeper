@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   projectReviewItem,
+  projectReviewItems,
   projectReviewItemProjections,
 } from "../src/annotation-projection.js";
 import {
@@ -19,9 +20,11 @@ import {
 import {
   anchorEvidenceFromReviewItem,
   canonicalizeReviewItem,
+  createReviewState,
+  normalizeReviewState,
   type ReviewItem,
 } from "../src/review-model.js";
-import { MAX_REVIEW_SELECTION_SEGMENTS } from "../src/review-reducer.js";
+import { reduceReview, MAX_REVIEW_SELECTION_SEGMENTS } from "../src/review-reducer.js";
 
 const item: ReviewItem = {
   id: "11111111-1111-4111-8111-111111111111",
@@ -82,6 +85,60 @@ function crossPageItem(pageCount = 3): ReviewItem {
 }
 
 describe("portable annotation codec", () => {
+  it("normalizes revision-fenced document names without changing item timestamps", () => {
+    const state = { ...createReviewState({ sessionId: "test", source: { fileId: "test", digest: "test", byteLength: 1 } }), items: [item] };
+    const named = reduceReview(state, { type: "set-annotation-name", expectedRevision: 0, annotationName: "  Brad Ross  " });
+    expect(named.annotationName).toBe("Brad Ross");
+    expect(named.items).toBe(state.items);
+    expect(named.revision).toBe(1);
+    expect(reduceReview(named, { type: "set-annotation-name", expectedRevision: 1, annotationName: "Brad Ross" })).toBe(named);
+    expect(() => reduceReview(named, { type: "set-annotation-name", expectedRevision: 0, annotationName: "Other" })).toThrow(/revision/i);
+    const blank = reduceReview(named, { type: "set-annotation-name", expectedRevision: 1, annotationName: "  " });
+    expect(blank.annotationName).toBe("Placekeeper");
+    expect(normalizeReviewState({ ...state, annotationName: "  Brad  " }).annotationName).toBe("Brad");
+    expect(() => reduceReview(state, { type: "set-annotation-name", expectedRevision: 0, annotationName: "x".repeat(PORTABLE_ANNOTATION_MAX_BYTES) })).toThrow();
+  });
+
+  it("rejects names against final metadata byte and shape bounds before acknowledging", () => {
+    const state = createReviewState({ sessionId: "test", source: { fileId: "test", digest: "test", byteLength: 1 } });
+    const note: ReviewItem = { ...item, kind: "pageNote", payload: { position: { x: 1, y: 1, width: 10, height: 10 }, comment: "x".repeat(16_384) } };
+    expect(() => reduceReview({ ...state, items: [note] }, { type: "set-annotation-name", expectedRevision: 0, annotationName: "y".repeat(16_384) })).toThrow(/too much/i);
+    expect(() => reduceReview(state, { type: "set-annotation-name", expectedRevision: 0, annotationName: "x".repeat(16_385) })).toThrow(/too long/i);
+    expect(state.revision).toBe(0);
+    expect(state.annotationName).toBeUndefined();
+  });
+
+  it("preserves mixed validated authors until an explicit fallback is confirmed", () => {
+    const imported = inspectProjectedPortableAnnotations([
+      projectReviewItem(item, "Brad"),
+      projectReviewItem({ ...item, id: "22222222-2222-4222-8222-222222222222" }, "Alex"),
+    ]);
+    if (imported.status !== "owned") throw new Error("Expected owned");
+    const state = { ...createReviewState({ sessionId: "test", source: { fileId: "test", digest: "test", byteLength: 1 } }), items: imported.items };
+    expect(projectReviewItems(state.items).map(a => a.author)).toEqual(["Brad", "Alex"]);
+    const confirmed = reduceReview(state, { type: "set-annotation-name", expectedRevision: 0, annotationName: " " });
+    expect(confirmed.revision).toBe(1);
+    expect(projectReviewItems(confirmed.items, undefined, { annotationName: confirmed.annotationName! }).map(a => a.author)).toEqual(["Placekeeper", "Placekeeper"]);
+  });
+
+  it("round trips custom single and grouped authors and preserves imported evidence until overridden", () => {
+    for (const source of [item, crossPageItem()]) {
+      const projected = projectReviewItemProjections(source, "Brad Ross");
+      const inspected = inspectProjectedPortableAnnotations(projected);
+      expect(inspected.status).toBe("owned");
+      if (inspected.status !== "owned") throw new Error("Expected owned");
+      expect(inspected.items[0]?.importedAnnotationAuthor).toBe("Brad Ross");
+      expect(projectReviewItems(inspected.items).every(a => a.author === "Brad Ross")).toBe(true);
+      expect(projectReviewItems(inspected.items, undefined, { annotationName: "Placekeeper" }).every(a => a.author === "Placekeeper")).toBe(true);
+      expect(projected.every(a => a.createdAt === source.createdAt && a.modifiedAt === source.updatedAt)).toBe(true);
+      expect(inspectProjectedPortableAnnotations(projected.map(a => ({ ...a, author: "Forged" }))).status).not.toBe("owned");
+      expect(inspectProjectedPortableAnnotations(projected.map(a => ({
+        ...a,
+        custom: { placekeeper: { ...(a.custom as { placekeeper: object }).placekeeper, owner: "foreign" } },
+      }))).status).not.toBe("owned");
+    }
+  });
+
   it("regroups arbitrarily enumerated v3 children into one exact canonical item", () => {
     const crossPage = crossPageItem();
     const projected = projectReviewItemProjections(crossPage);
@@ -321,7 +378,7 @@ describe("portable annotation codec", () => {
     expect(inspectPortableAnnotation(custom, visible).status).toBe(status);
   });
 
-  it("accepts only the exact Placekeeper author after validating the owned envelope", () => {
+  it("accepts custom authors only after validating the owned envelope", () => {
     const annotation = projectReviewItem(item, "Placekeeper");
     expect(inspectPortableAnnotation(annotation.custom, visible)).toEqual({
       status: "owned",
@@ -332,7 +389,7 @@ describe("portable annotation codec", () => {
     expect(inspectPortableAnnotation(unrelated.custom, {
       ...visible,
       author: "Placekeeper Preview",
-    })).toMatchObject({ status: "invalid", reason: "unsupported-author" });
+    })).toMatchObject({ status: "owned", item: { importedAnnotationAuthor: "Placekeeper Preview" } });
     expect(inspectPortableAnnotation(undefined, {
       ...visible,
       author: "Placekeeper",

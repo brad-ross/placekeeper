@@ -142,3 +142,7 @@ export function undoReview(state: ReviewState): ReviewCommand {
 export function redoReview(state: ReviewState): ReviewCommand {
   return { type: 'redo', expectedRevision: state.revision };
 }
+
+export function setAnnotationName(state: ReviewState, annotationName: string): ReviewCommand {
+  return { type: 'set-annotation-name', expectedRevision: state.revision, annotationName };
+}

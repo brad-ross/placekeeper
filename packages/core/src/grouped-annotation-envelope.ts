@@ -33,7 +33,7 @@ export interface SerializedPortableAnnotationChild {
         readonly pageIndex: number;
         readonly subtype: 'strikeOut' | 'highlight';
         readonly contents: string;
-        readonly author: 'Placekeeper';
+        readonly author: string;
         readonly rect: ReviewSelectionPageEvidenceV1['rect'];
         readonly segmentRects: ReviewSelectionPageEvidenceV1['segmentRects'];
         readonly quote: string;
@@ -69,6 +69,7 @@ export function portableAnnotationProjectionId(
  */
 export function serializePortableAnnotationGroup(
   item: ReviewItem,
+  author = "Placekeeper",
 ): readonly SerializedPortableAnnotationChild[] {
   const anchor = anchorEvidenceFromReviewItem(item);
   if (anchor.kind !== 'selection') return [];
@@ -84,6 +85,7 @@ export function serializePortableAnnotationGroup(
   } = item.payload;
   const {
     reconciliation: _runtimeReconciliation,
+    importedAnnotationAuthor: _importedAuthor,
     ...portableItem
   } = item;
   const canonicalItem: ReviewItem = {
@@ -115,7 +117,7 @@ export function serializePortableAnnotationGroup(
           pageIndex: page.pageIndex,
           subtype: item.kind === 'highlight' ? 'highlight' as const : 'strikeOut' as const,
           contents,
-          author: 'Placekeeper' as const,
+          author,
           rect: page.rect,
           segmentRects: page.segmentRects,
           quote: page.quote,

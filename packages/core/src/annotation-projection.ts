@@ -4,6 +4,7 @@ import type { JsonValue, ReviewItem } from "./review-model.js";
 import {
   anchorEvidenceFromReviewItem,
   normalizeReviewSelectionAnchor,
+  normalizeAnnotationName,
 } from "./review-model.js";
 import {
   portableAnnotationProjectionId,
@@ -29,7 +30,7 @@ function text(payload: ReviewItem["payload"], field: string): string {
 
 export function projectReviewItem(
   item: ReviewItem,
-  author = PORTABLE_ANNOTATION_AUTHOR,
+  author = item.importedAnnotationAuthor ?? PORTABLE_ANNOTATION_AUTHOR,
 ): ReviewAnnotation {
   const anchor = anchorEvidenceFromReviewItem(item);
   const projectedRect = anchor.rect;
@@ -113,16 +114,15 @@ function projectedAnnotation(input: {
 /** Projects one logical item into deterministic page-local visual annotations. */
 export function projectReviewItemProjections(
   item: ReviewItem,
-  author = PORTABLE_ANNOTATION_AUTHOR,
+  author = item.importedAnnotationAuthor ?? PORTABLE_ANNOTATION_AUTHOR,
   options: { readonly includePortableMetadata?: boolean } = {},
 ): ReviewAnnotation[] {
   const anchor = anchorEvidenceFromReviewItem(item);
   if (anchor.kind === 'selection') {
     const pages = normalizeReviewSelectionAnchor(anchor).pages;
     const portableGroup = options.includePortableMetadata !== false
-      && author === PORTABLE_ANNOTATION_AUTHOR
       && pages.length > 1
-      ? serializePortableAnnotationGroup(item)
+      ? serializePortableAnnotationGroup(item, author)
       : [];
     return pages.map((page, projectionIndex) => {
       const portableChild = portableGroup[projectionIndex];
@@ -155,11 +155,11 @@ export function projectReviewItemProjections(
 export function projectReviewItems(
   items: readonly ReviewItem[],
   documentGeneration?: number,
-  options: { readonly includePortableMetadata?: boolean } = {},
+  options: { readonly includePortableMetadata?: boolean; readonly annotationName?: string } = {},
 ): ReviewAnnotation[] {
   return documentOrderedItems(items)
     .filter((item) => documentGeneration === undefined || reviewItemIsResolvedForGeneration(item, documentGeneration))
-    .flatMap((item) => projectReviewItemProjections(item, PORTABLE_ANNOTATION_AUTHOR, options));
+    .flatMap((item) => projectReviewItemProjections(item, options.annotationName === undefined ? undefined : normalizeAnnotationName(options.annotationName), options));
 }
 
 export function reviewItemPageRange(item: ReviewItem): {

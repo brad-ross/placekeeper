@@ -129,6 +129,7 @@ function hasOnlyKeys(value: Record<string, unknown>, keys: readonly string[]): b
 function safeChromeCommand(value: unknown): unknown | undefined {
   if (!record(value) || typeof value.type !== "string" || !safeInteger(value.expectedRevision)) return undefined;
   const keys: Readonly<Record<string, readonly string[]>> = {
+    "set-annotation-name": ["type", "expectedRevision", "annotationName"],
     add: ["type", "expectedRevision", "item", "authoring"],
     edit: ["type", "expectedRevision", "id", "updatedAt", "payload"],
     remove: ["type", "expectedRevision", "id"],
@@ -139,6 +140,7 @@ function safeChromeCommand(value: unknown): unknown | undefined {
     "apply-draft": ["type", "expectedRevision", "id", "expectedDraftRevision", "ownerViewId", "updatedAt"],
     "discard-reconciliation": ["type", "expectedRevision", "target", "id", "expectedTargetRevision", "ownerViewId", "reason", "discardedAt"],
   };
+  if (value.type === "set-annotation-name" && typeof value.annotationName !== "string") return undefined;
   const allowed = keys[value.type];
   if (allowed === undefined || !hasOnlyKeys(value, allowed)) return undefined;
   return closedJsonClone(value);
@@ -176,10 +178,11 @@ function safeChromeLocation(value: unknown): unknown | undefined {
 function safeChromeState(value: unknown): unknown | undefined {
   if (!record(value) || !hasOnlyKeys(value, [
     "schemaVersion", "sessionId", "source", "sourceRootId", "revision", "lifecycle", "items",
-    "workflow", "pendingDrafts", "discardAudit", "history", "historyCursor", "nativeAnnotationImportDigest",
+    "workflow", "pendingDrafts", "discardAudit", "history", "historyCursor", "nativeAnnotationImportDigest", "annotationName",
   ])) return undefined;
   const { sourceRootId: _sourceRootId, ...candidate } = value;
   if ((candidate.schemaVersion !== 1 && candidate.schemaVersion !== 2) ||
+    (candidate.annotationName !== undefined && typeof candidate.annotationName !== "string") ||
     !SESSION_ID.test(String(candidate.sessionId)) || !safeInteger(candidate.revision) ||
     (candidate.nativeAnnotationImportDigest !== undefined &&
       (typeof candidate.nativeAnnotationImportDigest !== "string" ||
