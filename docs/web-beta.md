@@ -26,7 +26,7 @@ The only planned first-release target is:
 - Project base: `/placekeeper/`
 - Expected page URL after clearance: `https://brad-ross.github.io/placekeeper/`
 
-That address is recorded here for operator verification, not as a live reader link. The deployment workflow is manual-only and must fail closed unless the repository variable `PLACEKEEPER_PAGES_PUBLICATION` has the exact literal value `enabled`. Keep the variable absent or set to a value other than `enabled` while publication is dormant. A disabled workflow prevents a new deployment; it does not retract a site that was already published.
+That address is recorded here for operator verification, not as a live reader link. The deployment workflow runs on every push to `main` and on manual dispatch, and must fail closed unless the repository variable `PLACEKEEPER_PAGES_PUBLICATION` has the exact literal value `enabled`. Keep the variable absent or set to a value other than `enabled` while publication is dormant. A disabled workflow prevents a new deployment; it does not retract a site that was already published.
 
 ## Prepublication checklist
 
@@ -36,19 +36,19 @@ Record evidence outside transient Actions artifacts so another operator can iden
 - [ ] Confirm the distribution posture introduces no first-party license grant and no new production dependency or license beyond the reviewed lockfile and generated inventory. Review `THIRD_PARTY_NOTICES.md`, the artifact's `third-party-notices.html`, `production-dependencies.json`, and the embedded PDFium revision.
 - [ ] Review and merge the static-browser implementation and workflows to trusted `main`. Record the immutable source SHA selected for release.
 - [ ] In repository **Settings → Pages**, select **GitHub Actions** as the publishing source. A workflow cannot safely substitute this one-time setting with the normal token.
-- [ ] Protect the `github-pages` environment: restrict deployments to `main`, require the designated reviewer, and confirm the environment URL is supplied only by the deployment job.
+- [ ] Protect the `github-pages` environment: restrict deployments to `main`, leave required reviewers and wait timers disabled for unattended deployment, and confirm the environment URL is supplied only by the deployment job.
 - [ ] Verify the configured Pages result is exactly the origin, base, and expected page URL above. An origin or base mismatch is a no-go, not a reason to weaken the check.
 - [ ] Keep `PLACEKEEPER_PAGES_PUBLICATION` dormant while recording the candidate tuple. For a later release, set it to exactly `enabled`; absent, mixed-case, whitespace-padded, or other values must remain disabled.
 - [ ] Record candidate provenance: triggering actor; gate state; source SHA; workflow run ID and attempt; artifact name and artifact ID; `content-manifest.json` SHA-256 digest; configured target origin/base; environment approval/result; deployment result; and reported `page_url`.
 - [ ] Preserve the candidate's `version.json`, `content-manifest.json`, dependency inventory, and payload-manifest digest as release evidence. Do not depend on GitHub retaining the uploaded Pages artifact for rollback.
 - [ ] Before first dispatch, write down either the last-known-good source SHA plus payload-manifest digest, or the first-release unpublish owner and procedure below.
-- [ ] Manually dispatch only from trusted `main`. If `main` moved after packaging, the freshness fence must classify the candidate as superseded and publish nothing.
+- [ ] Push releases to trusted `main`, or manually dispatch from `main`. If `main` moved after packaging, the freshness fence must classify the candidate as superseded and publish nothing.
 
-The release workflow builds the Pages artifact once, tests that same directory sequentially, verifies it was not mutated, and lets the environment-gated deploy job consume only the named same-run artifact. It does not run on each `main` push or on a schedule, and it ends after deployment without spending a hosted job on live-origin testing.
+The release workflow builds the Pages artifact once, tests that same directory sequentially, verifies it was not mutated, and lets the environment-gated deploy job consume only the named same-run artifact. It runs on every `main` push and on manual dispatch, but not on a schedule, and it ends after deployment without spending a hosted job on live-origin testing.
 
 The routine `.github/workflows/static-web.yml` gate is deliberately smaller. It runs only for pull requests whose static dependency surface changed, cancels an older run for the same pull request, and uses one read-only Ubuntu job with the Chromium critical profile. It never uses `pull_request_target`, receives no deploy or OIDC permission, and retains short-lived browser diagnostics only when the gate fails.
 
-The manual `.github/workflows/deploy-pages.yml` path has exactly two jobs. The unprotected `package` job has only `contents: read`; it checks out once without persisted credentials, installs once, builds once, runs static unit and PDF conformance checks followed by exhaustive Chromium and representative Firefox/WebKit coverage against that one directory, revalidates its unchanged bytes, and uploads one run-and-attempt-named Pages artifact. The `deploy` job is the only job attached to the protected `github-pages` environment and the only job with Pages/OIDC write permission. It performs no checkout, install, or repository-script execution. Immediately before the official deploy action it reads trusted `main` through the GitHub API, verifies the packaged source is still current, verifies the official upload returned a numeric artifact ID for the deterministic same-run name, and verifies the configured origin and `/placekeeper/` project base. Any mismatch stops publication.
+The `.github/workflows/deploy-pages.yml` release path has exactly two jobs. The unprotected `package` job has only `contents: read`; it checks out once without persisted credentials, installs once, builds once, runs static unit and PDF conformance checks followed by exhaustive Chromium and representative Firefox/WebKit coverage against that one directory, revalidates its unchanged bytes, and uploads one run-and-attempt-named Pages artifact. The `deploy` job is the only job attached to the protected `github-pages` environment and the only job with Pages/OIDC write permission. It performs no checkout, install, or repository-script execution. Immediately before the official deploy action it reads trusted `main` through the GitHub API, verifies the packaged source is still current, verifies the official upload returned a numeric artifact ID for the deterministic same-run name, and verifies the configured origin and `/placekeeper/` project base. Any mismatch stops publication.
 
 ## Live smoke and terminal classifications
 
@@ -83,7 +83,7 @@ For a regression when a last-known-good release exists:
 1. Disable further publication by removing `PLACEKEEPER_PAGES_PUBLICATION` or changing it away from exact `enabled` while selecting the rollback.
 2. Revert or restore the last-known-good source on `main` through normal reviewed history. The rollback commit is a new, truthful source identity; do not copy the old source SHA into its provenance.
 3. Confirm the newly built candidate's payload-manifest digest exactly matches the recorded last-known-good payload digest. If it does not, stop and investigate rather than calling it a rollback.
-4. Re-enable the exact variable, manually dispatch the new `main` rollback source, and record the new run, attempt, artifact name and ID, source SHA, payload digest, environment/deployment results, and `page_url`.
+4. Re-enable the exact variable and push the rollback to `main`, or manually dispatch if the rollback is already on `main`, and record the new run, attempt, artifact name and ID, source SHA, payload digest, environment/deployment results, and `page_url`.
 5. Run the complete local live smoke against the new source identity and known-good payload digest. Keep the README unlinked or remove its promoted link until the smoke passes.
 
 Do not rely on a retained Pages artifact: rollback is a new build and deployment whose content identity is compared with the separately retained last-known-good digest.

@@ -47,11 +47,13 @@ describe("static release workflows", () => {
     expectImmutableActionPins(source);
   });
 
-  it("keeps publication manual, two-job, single-build, and fail closed", async () => {
+  it("keeps main publication automatic, two-job, single-build, and fail closed", async () => {
     const source = await workflow("deploy-pages.yml");
     const triggers = source.slice(0, source.indexOf("\nconcurrency:\n"));
     expect(triggers).toContain("workflow_dispatch:");
-    expect(triggers).not.toMatch(/pull_request(?:_target)?:|push:|schedule:/u);
+    expect(triggers).toContain("push:\n    branches: [main]");
+    expect(triggers).not.toMatch(/pull_request(?:_target)?:|schedule:/u);
+    expect(source).toContain("['push', 'workflow_dispatch'].includes(context.eventName)");
     expect(jobNames(source)).toEqual(["package", "deploy"]);
     expect(source.match(/pnpm build:static:pages/gu)).toHaveLength(1);
     expect(source).toContain("vars.PLACEKEEPER_PAGES_PUBLICATION == 'enabled'");
