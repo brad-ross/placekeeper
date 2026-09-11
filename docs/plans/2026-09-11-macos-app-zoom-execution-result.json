@@ -1,0 +1,127 @@
+{
+  "status": "blocked",
+  "plan_path": "docs/plans/2026-09-11-1604-feat-macos-app-zoom-plan.md",
+  "changed_files": [
+    "CONCEPTS.md",
+    "apps/macos/Sources/PlacekeeperMac/AppZoomPolicy.swift",
+    "apps/macos/Sources/PlacekeeperMac/MacPolicies.swift",
+    "apps/macos/Sources/PlacekeeperMac/MenuCoordinator.swift",
+    "apps/macos/Sources/PlacekeeperMac/PlacekeeperMac.swift",
+    "apps/macos/Sources/PlacekeeperMac/PlacekeeperWindowController.swift",
+    "apps/macos/Sources/PlacekeeperMac/RecoveryViewController.swift",
+    "apps/macos/Tests/PlacekeeperMacTests/MacPoliciesTests.swift",
+    "apps/web/src/app/ProductionReviewApp.tsx",
+    "apps/web/src/app/ReviewShell.tsx",
+    "apps/web/src/macos-entry.tsx",
+    "apps/web/src/pdf/AnchoredZoomGestureWrapper.tsx",
+    "apps/web/src/pdf/anchored-zoom.ts",
+    "apps/web/src/review/review-command-surface.ts",
+    "apps/web/test/macos-app-zoom-transition.test.ts",
+    "apps/web/test/macos-entry.test.tsx",
+    "apps/web/test/review-command-surface.test.ts",
+    "docs/plans/2026-09-11-1604-feat-macos-app-zoom-plan.md",
+    "packages/core/src/macos-shell-protocol.ts",
+    "packages/core/test/macos-shell-protocol.test.ts",
+    "packaging/macos/macos-native-gate.test.ts",
+    "test/acceptance/macos-interface.spec.ts",
+    "test/acceptance/review-harness/main.tsx"
+  ],
+  "u_ids_attempted": [
+    "U1",
+    "U2",
+    "U3",
+    "U4"
+  ],
+  "u_ids_completed": [],
+  "verification_results": {
+    "passed": "TypeScript, focused command/protocol/transition tests, 9 Mac interface tests, 6 PDF viewer tests, 35 Mac web gate tests, Swift application build, recorded native candidate checks",
+    "baseline_failures": "5 review acceptance failures reproduced on 190b844; 66 passed",
+    "blocked": "XCTest unavailable; full required native acceptance incomplete"
+  },
+  "verification_evidence": [
+    {
+      "unit": "U1",
+      "behavior_changed": true,
+      "evidence": "docs/plans/2026-09-11-1604-feat-macos-app-zoom-plan.md \u2014 Execution Evidence / U1",
+      "exception": "Native XCTest unexecuted; U4 acceptance incomplete"
+    },
+    {
+      "unit": "U2",
+      "behavior_changed": true,
+      "evidence": "docs/plans/2026-09-11-1604-feat-macos-app-zoom-plan.md \u2014 Execution Evidence / U2",
+      "exception": "Native XCTest unexecuted; U4 acceptance incomplete"
+    },
+    {
+      "unit": "U3",
+      "behavior_changed": true,
+      "evidence": "docs/plans/2026-09-11-1604-feat-macos-app-zoom-plan.md \u2014 Execution Evidence / U3",
+      "exception": "Native XCTest unexecuted; U4 acceptance incomplete"
+    },
+    {
+      "unit": "U4",
+      "behavior_changed": true,
+      "evidence": "docs/plans/2026-09-11-1604-feat-macos-app-zoom-plan.md \u2014 Execution Evidence / U4",
+      "exception": "Native XCTest unexecuted; U4 acceptance incomplete"
+    }
+  ],
+  "implementation_engine_binding": null,
+  "requested_route": "native",
+  "actual_route": "native",
+  "requested_model": null,
+  "actual_model": "unverified",
+  "fallback_reason": null,
+  "run_id": null,
+  "source_kind": "plan",
+  "source_digest": "d71611c239df276f4601969ebfc8fa6f61bb6fb500a957a8eefef04e39eb2ad9",
+  "unit_receipts": [
+    {
+      "unit": "U1",
+      "route": "native subagent",
+      "model": "unverified",
+      "detached_process": null,
+      "integration": "committed",
+      "verification": "partial; see plan evidence",
+      "canonical_commit": "d022d16",
+      "cleanup": "temporary candidate processes closed"
+    },
+    {
+      "unit": "U2",
+      "route": "native subagent",
+      "model": "unverified",
+      "detached_process": null,
+      "integration": "committed",
+      "verification": "partial; see plan evidence",
+      "canonical_commit": "97c798c",
+      "cleanup": "temporary candidate processes closed"
+    },
+    {
+      "unit": "U3",
+      "route": "native subagent",
+      "model": "unverified",
+      "detached_process": null,
+      "integration": "committed",
+      "verification": "partial; see plan evidence",
+      "canonical_commit": "afa5c94",
+      "cleanup": "temporary candidate processes closed"
+    },
+    {
+      "unit": "U4",
+      "route": "native subagent",
+      "model": "unverified",
+      "detached_process": null,
+      "integration": "committed",
+      "verification": "partial; see plan evidence",
+      "canonical_commit": "4f274bd",
+      "cleanup": "temporary candidate processes closed"
+    }
+  ],
+  "plan_checkpoint": "190b844",
+  "blockers": [
+    "Full Xcode/XCTest environment required for native test suite",
+    "Remaining physical-input, gesture, reference, and recovery acceptance checks"
+  ],
+  "recovery_path": "/Users/bross1/.codex/worktrees/a801/placekeeper",
+  "settled_decision_conflicts": [],
+  "behavior_change": true,
+  "standalone_shipping_skipped": true
+}
