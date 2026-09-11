@@ -49,6 +49,7 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
         admission: MacReviewAdmission,
         packagedAssets: PackagedReviewAssets,
         restoredFrame: NSRect? = nil,
+        appZoom: Double = AppZoomPolicy.defaultScale,
         onBecameKey: @escaping (String) -> Void,
         onCommandSnapshot: @escaping (String) -> Void,
         onRetry: @escaping (String) -> Void,
@@ -98,6 +99,8 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
         configuration.setURLSchemeHandler(handler, forURLScheme: "placekeeper-app")
         configuration.setURLSchemeHandler(handler, forURLScheme: "placekeeper-resource")
         webView = WKWebView(frame: .zero, configuration: configuration)
+        webView.pageZoom = AppZoomPolicy.validatedScale(appZoom)
+        webView.allowsMagnification = false
         if diagnosticsEnabled, #available(macOS 13.3, *) { webView.isInspectable = true }
 
         let window = NSWindow(
@@ -143,6 +146,13 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
     }
 
     required init?(coder: NSCoder) { nil }
+
+    var hasWebContent: Bool { !closed && !failed }
+
+    func applyAppZoom(_ scale: Double) {
+        guard hasWebContent else { return }
+        webView.pageZoom = AppZoomPolicy.validatedScale(scale)
+    }
 
     func start() {
         let rules = """

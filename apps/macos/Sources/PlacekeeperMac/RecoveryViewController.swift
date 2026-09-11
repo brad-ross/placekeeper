@@ -81,12 +81,15 @@ final class RecoveryViewController: NSWindowController, NSWindowDelegate, WKScri
     private let recoveryURL: URL
     private var gate = RecoveryDecisionGate()
     private var resolved = false
+    private var closed = false
+    private var measuredCSSHeight: Double = 228
     private var failed = false
     private var loaded = false
     private var shouldShow = false
     private var loadTimeout: Task<Void, Never>?
 
     init(windowID: String, documentName: String, packagedRoot: URL,
+         appZoom: Double = AppZoomPolicy.defaultScale,
          onDecision: @escaping (String) -> Void, onClose: @escaping () -> Void,
          onUnavailable: @escaping () -> Void) {
         self.windowID = windowID
@@ -98,8 +101,10 @@ final class RecoveryViewController: NSWindowController, NSWindowDelegate, WKScri
         configuration.websiteDataStore = .nonPersistent()
         configuration.setURLSchemeHandler(RecoverySchemeHandler(root: packagedRoot), forURLScheme: "placekeeper-recovery")
         webView = WKWebView(frame: .zero, configuration: configuration)
+        webView.pageZoom = AppZoomPolicy.validatedScale(appZoom)
+        webView.allowsMagnification = false
         let window = RecoveryWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 414 + 2 * RecoveryWindow.shadowInset, height: 228),
+            contentRect: NSRect(x: 0, y: 0, width: (414 + 2 * RecoveryWindow.shadowInset) * webView.pageZoom, height: 228 * webView.pageZoom),
             styleMask: [.borderless, .miniaturizable],
             backing: .buffered,
             defer: false
@@ -139,6 +144,21 @@ final class RecoveryViewController: NSWindowController, NSWindowDelegate, WKScri
 
     required init?(coder: NSCoder) { nil }
 
+    func applyAppZoom(_ scale: Double) {
+        guard !closed, !resolved else { return }
+        webView.pageZoom = AppZoomPolicy.validatedScale(scale)
+        resizeToContent()
+    }
+
+    private func resizeToContent() {
+        guard let window else { return }
+        let oldFrame = window.frame
+        let width = (414 + 2 * RecoveryWindow.shadowInset) * webView.pageZoom
+        let height = ceil(measuredCSSHeight * webView.pageZoom)
+        window.setFrame(NSRect(x: oldFrame.midX - width / 2, y: oldFrame.midY - height / 2,
+                               width: width, height: height), display: true)
+    }
+
     func show() {
         shouldShow = true
         guard loaded, !resolved else { return }
@@ -160,6 +180,7 @@ final class RecoveryViewController: NSWindowController, NSWindowDelegate, WKScri
     }
 
     func windowWillClose(_ notification: Notification) {
+        closed = true
         gate.fail()
         loadTimeout?.cancel()
         webView.stopLoading()
@@ -171,12 +192,9 @@ final class RecoveryViewController: NSWindowController, NSWindowDelegate, WKScri
         guard message.name == "placekeeperRecovery", message.frameInfo.isMainFrame,
               message.frameInfo.request.url == recoveryURL, !resolved else { return }
         if let body = message.body as? [String: Any], Set(body.keys) == ["height"],
-           let height = body["height"] as? Double, height.isFinite, (120...600).contains(height),
-           let window {
-            let oldFrame = window.frame
-            let size = NSSize(width: oldFrame.width, height: ceil(height))
-            window.setFrame(NSRect(x: oldFrame.minX, y: oldFrame.midY - size.height / 2,
-                                   width: size.width, height: size.height), display: true)
+           let height = body["height"] as? Double, height.isFinite, (120...600).contains(height) {
+            measuredCSSHeight = height
+            resizeToContent()
             return
         }
         if let body = message.body as? [String: Any], Set(body.keys) == ["ready"],
