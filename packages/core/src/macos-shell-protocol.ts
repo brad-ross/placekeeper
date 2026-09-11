@@ -29,6 +29,8 @@ export const MACOS_REVIEW_COMMAND_IDS = [
   "open-annotations",
   "save-options",
   "fit-width",
+  "zoom-in",
+  "zoom-out",
 ] as const;
 
 export type MacosReviewCommandId = typeof MACOS_REVIEW_COMMAND_IDS[number];

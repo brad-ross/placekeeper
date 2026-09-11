@@ -154,17 +154,17 @@ describe("packaged macOS shell entry", () => {
     ])).toEqual([{ x: 80, y: 14, width: 140, height: 30 }]);
   });
 
-  it("drops native invocations captured from a stale command snapshot", () => {
+  it.each(["undo", "zoom-in", "zoom-out"] as const)("drops %s invocations captured from a stale command snapshot", (command) => {
     const invocation = {
       protocolVersion: 1 as const,
       type: "invoke-command" as const,
       runtimeId: "runtime_identifier_1234",
       attemptId: "attempt_identifier_1234",
-      command: "undo" as const,
+      command,
       snapshotRevision: 4,
       token: 9,
     };
-    expect(macosCommandInvocationForSnapshot(invocation, 4)).toEqual({ id: "undo", token: 9 });
+    expect(macosCommandInvocationForSnapshot(invocation, 4)).toEqual({ id: command, token: 9 });
     expect(macosCommandInvocationForSnapshot(invocation, 5)).toBeUndefined();
   });
 });

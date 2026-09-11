@@ -7,6 +7,8 @@ export const REVIEW_COMMAND_IDS = [
   "open-annotations",
   "save-options",
   "fit-width",
+  "zoom-in",
+  "zoom-out",
 ] as const;
 
 export type ReviewSemanticCommand = typeof REVIEW_COMMAND_IDS[number];
@@ -41,6 +43,7 @@ export function createReviewCommandSurface(input: {
   readonly canOpenAnnotations: boolean;
   readonly canOpenSaveOptions: boolean;
   readonly canFitWidth: boolean;
+  readonly canZoom: boolean;
   readonly handlers: ReviewCommandHandlers;
 }): {
   readonly snapshot: ReviewCommandSurfaceSnapshot;
@@ -55,6 +58,8 @@ export function createReviewCommandSurface(input: {
     { id: "find", label: "Find in PDF", enabled: input.canFind && input.focusContext !== "dialog", shortcut: "Meta+F" },
     { id: "open-annotations", label: "Show Review Items", enabled: input.canOpenAnnotations && input.focusContext !== "dialog" },
     { id: "save-options", label: "Save Options", enabled: input.canOpenSaveOptions && input.focusContext !== "dialog" },
+    { id: "zoom-in", label: "Zoom In PDF", enabled: input.canZoom && input.focusContext !== "dialog", shortcut: "Meta+=" },
+    { id: "zoom-out", label: "Zoom Out PDF", enabled: input.canZoom && input.focusContext !== "dialog", shortcut: "Meta+-" },
     { id: "fit-width", label: "Fit Width", enabled: input.canFitWidth && input.focusContext !== "dialog" },
   ];
   const snapshot = { focusContext: input.focusContext, commands } as const;

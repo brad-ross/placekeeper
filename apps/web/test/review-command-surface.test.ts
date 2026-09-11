@@ -15,6 +15,7 @@ describe("shared semantic review command surface", () => {
       canOpenAnnotations: true,
       canOpenSaveOptions: false,
       canFitWidth: true,
+      canZoom: true,
       handlers: { undo },
     });
     expect({ ...surface.snapshot, commands: surface.snapshot.commands.slice(0, 2) }).toMatchObject({
@@ -43,10 +44,33 @@ describe("shared semantic review command surface", () => {
       canOpenAnnotations: true,
       canOpenSaveOptions: true,
       canFitWidth: true,
+      canZoom: true,
       handlers: { undo },
     });
     expect(surface.snapshot.commands.find(({ id }) => id === "undo")?.enabled).toBe(false);
     expect(surface.invoke("undo")).toBe(false);
     expect(undo).not.toHaveBeenCalled();
   });
+});
+
+it.each(["review", "editable", "dialog"] as const)("gates PDF zoom with readiness and dialog policy in %s focus", (focusContext) => {
+  for (const ready of [false, true]) {
+    const zoomIn = vi.fn();
+    const zoomOut = vi.fn();
+    const surface = createReviewCommandSurface({
+      focusContext, canUndo: false, canRedo: false, canNavigateBack: false,
+      canNavigateForward: false, canFind: false, canOpenAnnotations: false,
+      canOpenSaveOptions: false, canFitWidth: ready, canZoom: ready,
+      handlers: { "zoom-in": zoomIn, "zoom-out": zoomOut },
+    });
+    const enabled = ready && focusContext !== "dialog";
+    expect(surface.snapshot.commands.filter(({ id }) => id.startsWith("zoom-"))).toEqual([
+      { id: "zoom-in", label: "Zoom In PDF", enabled, shortcut: "Meta+=" },
+      { id: "zoom-out", label: "Zoom Out PDF", enabled, shortcut: "Meta+-" },
+    ]);
+    expect(surface.invoke("zoom-in")).toBe(enabled);
+    expect(surface.invoke("zoom-out")).toBe(enabled);
+    expect(zoomIn).toHaveBeenCalledTimes(enabled ? 1 : 0);
+    expect(zoomOut).toHaveBeenCalledTimes(enabled ? 1 : 0);
+  }
 });

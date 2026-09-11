@@ -49,7 +49,10 @@ final class PlacekeeperAppDelegate: NSObject, NSApplicationDelegate {
     private lazy var menuCoordinator = MenuCoordinator(
         activeWindow: { [weak self] in self?.activeDocumentWindow },
         openDocument: { [weak self] in self?.showOpenPanel() },
-        openURL: { [weak self] url in self?.enqueueLaunchURLs([url]) }
+        openURL: { [weak self] url in self?.enqueueLaunchURLs([url]) },
+        appZoomScale: { [weak self] in self?.appZoomScale ?? 1 },
+        hasWebBackedWindows: { [weak self] in self?.hasWebBackedWindows ?? false },
+        setAppZoomScale: { [weak self] scale in self?.setAppZoomScale(scale) }
     )
 
     init(appZoomStore: AppZoomStore = AppZoomStore()) {

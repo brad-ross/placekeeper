@@ -235,3 +235,19 @@ Cold native rendering is a separate proof from browser WebKit testing: `docs/sol
 - U4: Native first-paint and interaction evidence covers the acceptance examples and the Verification Contract passes.
 - No PDF data, annotation coordinates, or document restoration field is repurposed to hold app zoom.
 - The final diff contains no abandoned experiments, temporary diagnostics, or unneeded zoom implementations.
+
+## Execution Evidence
+
+### U1 — saved application scale
+
+- Implemented in `d022d16`: independent validated preference, initial scale before navigation, live document/recovery fanout, recovery sizing, and closed-controller guards.
+- Production policy assertions passed for invalid values, supported-level persistence, clamped stepping, and reset. Native application sources compiled successfully; baseline Mac web build passed.
+- Added XCTest coverage for persistence, document-preference independence, and recovery initial/live/retry/close behavior. These tests remain **unexecuted**: both sandbox-adjusted and normal `swift test --package-path apps/macos` fail because the installed Command Line Tools lack the XCTest module; no full Xcode installation was found.
+- Test-first exception: no clean red baseline was captured after initial cache/sandbox failures and a cold-build source-change rejection. Coordinator fanout is source-inspected pending combined native verification in U4.
+- U1 does not establish U3 geometry safety or U4 acceptance; their verification remains outstanding.
+
+### U2 — separate native zoom commands
+
+- Added native app Zoom submenu, exact modifier-aware PDF/app routes, and PDF zoom commands across both closed protocol vocabularies and main-viewer dispatch.
+- Root verification: 23 focused command/protocol/entry tests passed, TypeScript check passed. Worker observed three expected missing-command failures before implementation. Added native menu/shortcut tests remain unexecuted because XCTest is unavailable.
+- Actual AppKit input, reference focus, and editable-focus preservation remain U4 checks. The temporary WebKit snapshot probe failed to detect its painted marker and supplies no native coordinate evidence.

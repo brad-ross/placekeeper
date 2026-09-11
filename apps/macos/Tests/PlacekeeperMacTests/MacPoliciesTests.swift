@@ -5,6 +5,53 @@ import XCTest
 @testable import PlacekeeperMac
 
 final class MacPoliciesTests: XCTestCase {
+    func testZoomShortcutsKeepPDFAndAppOwnersSeparate() {
+        let routes: [(String, NSEvent.ModifierFlags, MacZoomShortcut)] = [
+            ("=", [.command], .pdfIn), ("+", [.command, .numericPad], .pdfIn),
+            ("-", [.command], .pdfOut), ("0", [.command], .pdfFitWidth),
+            ("=", [.command, .shift], .appIn), ("+", [.command, .shift], .appIn),
+            ("-", [.command, .shift], .appOut), ("_", [.command, .shift], .appOut),
+            ("0", [.command, .option], .appActualSize),
+        ]
+        for (characters, flags, expected) in routes {
+            XCTAssertEqual(MacZoomShortcut.resolve(characters: characters, modifiers: flags), expected)
+            XCTAssertEqual(MacZoomShortcut.resolve(characters: characters, modifiers: flags.union([.capsLock, .numericPad])), expected)
+            XCTAssertNil(MacZoomShortcut.resolve(characters: characters, modifiers: flags.union(.control)))
+        }
+        XCTAssertNil(MacZoomShortcut.resolve(characters: "=", modifiers: [.command, .option]))
+        XCTAssertNil(MacZoomShortcut.resolve(characters: "0", modifiers: [.command, .shift]))
+        XCTAssertNil(MacZoomShortcut.resolve(characters: "_", modifiers: [.command]))
+        XCTAssertNil(MacZoomShortcut.resolve(characters: "é", modifiers: [.command]))
+    }
+
+    @MainActor
+    func testAppZoomMenuWorksWithoutReviewSnapshotAndRespectsBounds() throws {
+        _ = NSApplication.shared
+        var scale = 1.0
+        var hasWindow = true
+        let coordinator = MenuCoordinator(activeWindow: { nil }, openDocument: {}, openURL: { _ in },
+            appZoomScale: { scale }, hasWebBackedWindows: { hasWindow }, setAppZoomScale: { scale = $0 })
+        let previousMenu = NSApplication.shared.mainMenu
+        defer { NSApplication.shared.mainMenu = previousMenu }
+        coordinator.install()
+        let main = try XCTUnwrap(NSApplication.shared.mainMenu)
+        let view = try XCTUnwrap(main.items.first { $0.submenu?.title == "View" }?.submenu)
+        let zoom = try XCTUnwrap(view.items.first { $0.title == "Zoom" }?.submenu)
+        XCTAssertEqual(zoom.items.map(\.title), ["Zoom In", "Zoom Out", "Actual Size"])
+        XCTAssertTrue(coordinator.validateMenuItem(zoom.items[0]))
+        XCTAssertTrue(coordinator.validateMenuItem(zoom.items[1]))
+        XCTAssertFalse(coordinator.validateMenuItem(zoom.items[2]))
+        scale = 2
+        XCTAssertFalse(coordinator.validateMenuItem(zoom.items[0]))
+        XCTAssertTrue(coordinator.validateMenuItem(zoom.items[2]))
+        scale = 0.8
+        XCTAssertFalse(coordinator.validateMenuItem(zoom.items[1]))
+        hasWindow = false
+        XCTAssertTrue(zoom.items.allSatisfy { !coordinator.validateMenuItem($0) })
+        let window = try XCTUnwrap(main.items.first { $0.submenu?.title == "Window" }?.submenu)
+        XCTAssertEqual(window.items.first { $0.title == "Zoom" }?.action, #selector(NSWindow.performZoom(_:)))
+    }
+
     func testAppZoomRejectsInvalidPreferencesAndRestoresSupportedLevels() throws {
         let suite = "Placekeeper.AppZoomTests.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
@@ -571,6 +618,8 @@ final class MacPoliciesTests: XCTestCase {
         ]
         let snapshot = try XCTUnwrap(MacCommandSnapshot.parse(value))
         XCTAssertEqual(snapshot.revision, 4)
+        XCTAssertNotNil(snapshot.commands[.zoomIn])
+        XCTAssertNotNil(snapshot.commands[.zoomOut])
         XCTAssertTrue(snapshot.commands[.undo]?.enabled == true)
         XCTAssertTrue(snapshot.commands[.redo]?.enabled == false)
         XCTAssertNil(MacCommandSnapshot.parse(

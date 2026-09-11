@@ -1127,6 +1127,14 @@ export function ReviewShell(props: ReviewShellProps) {
       ?.fitToWidth(workspaceFraming.waitForSettledGeometry)
       .then(() => undefined) ?? Promise.resolve();
   };
+  const beforeViewerAction = async () => {
+    await props.viewer.viewerNavigation?.cancelPendingNavigation();
+    commitMainFramingPosition();
+  };
+  const zoomCommand = async (direction: 'zoomIn' | 'zoomOut') => {
+    await beforeViewerAction();
+    props.viewer.viewerControls?.[direction]();
+  };
   const commandSurface = createReviewCommandSurface({
     focusContext: commandFocusContext,
     canUndo: authoringSession === null && canUndo,
@@ -1137,6 +1145,7 @@ export function ReviewShell(props: ReviewShellProps) {
     canOpenAnnotations: authoringSession === null,
     canOpenSaveOptions: props.save.onSaveOptions !== undefined,
     canFitWidth: props.viewer.viewerNavigation?.fitToWidthReady() ?? false,
+    canZoom: props.viewer.viewerControls !== undefined && (props.viewer.viewerState?.zoomReady ?? false),
     handlers: {
       undo: () => { void submit(undoReview); },
       redo: () => { void submit(redoReview); },
@@ -1152,6 +1161,8 @@ export function ReviewShell(props: ReviewShellProps) {
       'open-annotations': openAnnotationsFromDocumentActions,
       'save-options': () => props.save.onSaveOptions?.(),
       'fit-width': () => { void fitWidthCommand(); },
+      'zoom-in': () => { void zoomCommand('zoomIn'); },
+      'zoom-out': () => { void zoomCommand('zoomOut'); },
     },
   });
   const commandSurfaceKey = JSON.stringify(commandSurface.snapshot);
@@ -1436,10 +1447,7 @@ export function ReviewShell(props: ReviewShellProps) {
         horizontalScrollLocked={horizontalScrollLocked}
         onToggleHorizontalScrollLock={() => setHorizontalScrollLocked((locked) => !locked)}
         {...(props.viewer.viewerNavigation === undefined ? {} : {
-          beforeViewerAction: async () => {
-            await props.viewer.viewerNavigation?.cancelPendingNavigation();
-            commitMainFramingPosition();
-          },
+          beforeViewerAction,
         })}
         onFitWidth={fitWidthCommand}
         canUndo={authoringSession === null && canUndo}

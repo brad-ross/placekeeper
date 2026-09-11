@@ -10,6 +10,8 @@ enum MacReviewCommand: String, CaseIterable {
     case openAnnotations = "open-annotations"
     case saveOptions = "save-options"
     case fitWidth = "fit-width"
+    case zoomIn = "zoom-in"
+    case zoomOut = "zoom-out"
 }
 
 struct MacCommandPresentation: Equatable {
@@ -62,25 +64,74 @@ struct MacCommandSnapshot: Equatable {
     }
 }
 
+enum MacZoomShortcut: Hashable {
+    case pdfIn, pdfOut, pdfFitWidth, appIn, appOut, appActualSize
+
+    static func resolve(characters: String?, modifiers: NSEvent.ModifierFlags) -> Self? {
+        let flags = modifiers.intersection(.deviceIndependentFlagsMask).subtracting([.capsLock, .numericPad])
+        guard let characters else { return nil }
+        switch (characters, flags) {
+        case ("=" , [.command]), ("+", [.command]): return .pdfIn
+        case ("-", [.command]): return .pdfOut
+        case ("0", [.command]): return .pdfFitWidth
+        case ("=", [.command, .shift]), ("+", [.command, .shift]): return .appIn
+        case ("-", [.command, .shift]), ("_", [.command, .shift]): return .appOut
+        case ("0", [.command, .option]): return .appActualSize
+        default: return nil
+        }
+    }
+}
+
+/// Own zoom equivalents before WebKit can also interpret the same event.
+@MainActor
+private final class ZoomRoutingMenu: NSMenu {
+    // AppKit installs and invokes menu callbacks on its main thread; the
+    // inherited key-equivalent entry point is not annotated in the SDK.
+    nonisolated(unsafe) var invokeZoom: (@MainActor @Sendable (MacZoomShortcut) -> Void)?
+
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if let command = MacZoomShortcut.resolve(characters: event.charactersIgnoringModifiers, modifiers: event.modifierFlags) {
+            let invoke = invokeZoom
+            MainActor.assumeIsolated { invoke?(command) }
+            return true
+        }
+        return super.performKeyEquivalent(with: event)
+    }
+}
+
 @MainActor
 final class MenuCoordinator: NSObject, NSMenuItemValidation, NSMenuDelegate {
     private let activeWindow: () -> PlacekeeperWindowController?
     private let openDocument: () -> Void
     private let openURL: (URL) -> Void
+    private let appZoomScale: () -> Double
+    private let hasWebBackedWindows: () -> Bool
+    private let setAppZoomScale: (Double) -> Void
+    private var zoomItems: [MacZoomShortcut: NSMenuItem] = [:]
     private let recentMenu = NSMenu(title: "Open Recent")
 
     init(
         activeWindow: @escaping () -> PlacekeeperWindowController?,
         openDocument: @escaping () -> Void,
-        openURL: @escaping (URL) -> Void
+        openURL: @escaping (URL) -> Void,
+        appZoomScale: @escaping () -> Double,
+        hasWebBackedWindows: @escaping () -> Bool,
+        setAppZoomScale: @escaping (Double) -> Void
     ) {
         self.activeWindow = activeWindow
         self.openDocument = openDocument
         self.openURL = openURL
+        self.appZoomScale = appZoomScale
+        self.hasWebBackedWindows = hasWebBackedWindows
+        self.setAppZoomScale = setAppZoomScale
     }
 
     func install() {
-        let main = NSMenu(title: "Main Menu")
+        let main = ZoomRoutingMenu(title: "Main Menu")
+        main.invokeZoom = { [weak self] command in
+            guard let self, let item = self.zoomItems[command], self.validateMenuItem(item), let action = item.action else { return }
+            _ = NSApplication.shared.sendAction(action, to: self, from: item)
+        }
         main.addItem(appMenu())
         main.addItem(fileMenu())
         main.addItem(editMenu())
@@ -95,6 +146,14 @@ final class MenuCoordinator: NSObject, NSMenuItemValidation, NSMenuDelegate {
     func refresh() { NSApplication.shared.mainMenu?.update() }
 
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        if menuItem.action == #selector(invokeAppZoom(_:)) {
+            guard hasWebBackedWindows() else { return false }
+            switch menuItem.tag {
+            case 1: return AppZoomPolicy.increased(appZoomScale()) != appZoomScale()
+            case -1: return AppZoomPolicy.decreased(appZoomScale()) != appZoomScale()
+            default: return appZoomScale() != AppZoomPolicy.defaultScale
+            }
+        }
         guard let raw = menuItem.representedObject as? String,
               let command = MacReviewCommand(rawValue: raw),
               let controller = activeWindow(), let snapshot = controller.commandSnapshot,
@@ -135,6 +194,15 @@ final class MenuCoordinator: NSObject, NSMenuItemValidation, NSMenuDelegate {
             return
         }
         _ = controller.invokeCommand(command)
+    }
+
+    @objc private func invokeAppZoom(_ sender: NSMenuItem) {
+        guard validateMenuItem(sender) else { return }
+        switch sender.tag {
+        case 1: setAppZoomScale(AppZoomPolicy.increased(appZoomScale()))
+        case -1: setAppZoomScale(AppZoomPolicy.decreased(appZoomScale()))
+        default: setAppZoomScale(AppZoomPolicy.defaultScale)
+        }
     }
 
     @objc private func chooseDocument(_ sender: Any?) { openDocument() }
@@ -199,7 +267,23 @@ final class MenuCoordinator: NSObject, NSMenuItemValidation, NSMenuDelegate {
         menu.addItem(commandItem(.navigateBack, key: "["))
         menu.addItem(commandItem(.navigateForward, key: "]"))
         menu.addItem(.separator())
-        menu.addItem(commandItem(.fitWidth, key: "0"))
+        for (command, key, route) in [(MacReviewCommand.zoomIn, "=", MacZoomShortcut.pdfIn), (.zoomOut, "-", .pdfOut), (.fitWidth, "0", .pdfFitWidth)] {
+            let item = commandItem(command, key: key)
+            zoomItems[route] = item
+            menu.addItem(item)
+        }
+        let zoomRoot = NSMenuItem(title: "Zoom", action: nil, keyEquivalent: "")
+        let zoom = NSMenu(title: "Zoom")
+        for (title, key, tag, route) in [("Zoom In", "=", 1, MacZoomShortcut.appIn), ("Zoom Out", "-", -1, .appOut), ("Actual Size", "0", 0, .appActualSize)] {
+            let item = NSMenuItem(title: title, action: #selector(invokeAppZoom(_:)), keyEquivalent: key)
+            item.target = self
+            item.tag = tag
+            item.keyEquivalentModifierMask = tag == 0 ? [.command, .option] : [.command, .shift]
+            zoomItems[route] = item
+            zoom.addItem(item)
+        }
+        zoomRoot.submenu = zoom
+        menu.addItem(zoomRoot)
         menu.addItem(commandItem(.openAnnotations, key: ""))
         menu.addItem(.separator())
         let fullScreen = NSMenuItem(title: "Enter Full Screen", action: #selector(NSWindow.toggleFullScreen(_:)), keyEquivalent: "f")
@@ -235,7 +319,8 @@ final class MenuCoordinator: NSObject, NSMenuItemValidation, NSMenuDelegate {
         key: String,
         modifiers: NSEvent.ModifierFlags = [.command]
     ) -> NSMenuItem {
-        let item = NSMenuItem(title: command.rawValue, action: #selector(invokeReviewCommand(_:)), keyEquivalent: key)
+        let title = command == .zoomIn ? "Zoom In PDF" : command == .zoomOut ? "Zoom Out PDF" : command.rawValue
+        let item = NSMenuItem(title: title, action: #selector(invokeReviewCommand(_:)), keyEquivalent: key)
         item.target = self
         item.representedObject = command.rawValue
         item.keyEquivalentModifierMask = modifiers
