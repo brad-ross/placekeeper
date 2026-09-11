@@ -428,7 +428,14 @@ describe('shared reference workspace', () => {
     expect(semanticTabs.every((tab) => !/<button/u.test(tab.slice(1)))).toBe(true);
     expect(lemmaActive).not.toContain('reference-panel__actions');
     expect(lemmaActive.match(/>Lemma A\.7</g)).toHaveLength(1);
-    expect(lemmaActive.match(/>18</g)).toHaveLength(1);
+    expect(lemmaActive.match(/class="reference-tab-segment__page" aria-hidden="true">18</g))
+      .toHaveLength(1);
+    expect(referenceSemanticTabs[0]).toContain(
+      '<small class="reference-tab-segment__page-placeholder" aria-hidden="true">18</small>',
+    );
+    expect(referenceSemanticTabs[1]).toContain(
+      '<small class="reference-tab-segment__page-label">31</small>',
+    );
 
     expect(proofActive).toMatch(
       /data-reference-tab-segment="proof"[\s\S]*aria-selected="true"[\s\S]*data-workspace-focus-token="reference-send:proof"[\s\S]*data-workspace-focus-token="reference-close:proof"/u,

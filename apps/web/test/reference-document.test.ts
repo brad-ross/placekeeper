@@ -21,6 +21,36 @@ function deferred<T>() {
 }
 
 describe('reference document scope', () => {
+  it.each([
+    'https://file.vscode-cdn.net/review/document.pdf',
+    'vscode-webview://review/document.pdf',
+    'blob:vscode-webview://review/12345678-1234-1234-1234-123456789abc',
+  ])('opens issued reference %s using the host policy and rejects unissued resources', async (documentUrl) => {
+    const openDocumentUrl = vi.fn((options: LoadDocumentUrlOptions) => resolvedTask({
+      documentId: options.documentId!, task: resolvedTask(undefined),
+    }));
+    const issued = new Set([documentUrl]);
+    const controller = createReferenceDocumentController({
+      documentManager: {
+        openDocumentUrl, retryDocument: vi.fn(), closeDocument: vi.fn(() => resolvedTask(undefined)),
+        getActiveDocumentId: () => MAIN_PDF_DOCUMENT_ID,
+        getDocumentState: () => null,
+      },
+      assetUrls: { pdfiumWasm: 'https://file.vscode-cdn.net/pdfium.wasm', documentUrl },
+      origin: 'vscode-webview://review',
+      resourcePolicy: { host: 'vscode', issued },
+      documentGeneration: 1,
+    });
+    expect(await controller.open()).toBe(true);
+    expect(openDocumentUrl).toHaveBeenCalledWith(expect.objectContaining({
+      url: documentUrl, documentId: REFERENCE_PDF_DOCUMENT_ID, autoActivate: false,
+    }));
+    await controller.close();
+    issued.clear();
+    expect(await controller.open()).toBe(false);
+    expect(openDocumentUrl).toHaveBeenCalledOnce();
+  });
+
   it('opens once with a fresh safe non-active clone and retries the stable failed id', async () => {
     let failed = false;
     const loadTask = resolvedTask({ id: REFERENCE_PDF_DOCUMENT_ID });

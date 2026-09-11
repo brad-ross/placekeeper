@@ -6,6 +6,7 @@ import type {
 import {
   buildViewerDocumentOptions,
   type ViewerAssetUrls,
+  type ViewerResourcePolicy,
 } from './embedpdf-viewer.js';
 import {
   MAIN_PDF_DOCUMENT_ID,
@@ -48,10 +49,10 @@ const DEFAULT_REFERENCE_OPEN_TIMEOUT_MS = 5_000;
 
 export function buildReferenceDocumentOptions(
   assetUrls: ViewerAssetUrls,
-  origin: string,
+  policyOrOrigin: ViewerResourcePolicy | string,
 ): LoadDocumentUrlOptions {
   return {
-    ...buildViewerDocumentOptions(assetUrls, origin),
+    ...buildViewerDocumentOptions(assetUrls, policyOrOrigin),
     documentId: REFERENCE_PDF_DOCUMENT_ID,
     autoActivate: false,
   };
@@ -89,6 +90,7 @@ export function createReferenceDocumentController(input: {
   readonly documentManager: ReferenceDocumentManager;
   readonly assetUrls: ViewerAssetUrls;
   readonly origin: string;
+  readonly resourcePolicy?: ViewerResourcePolicy;
   readonly documentGeneration: number;
   readonly timeoutMs?: number;
 }): ReferenceDocumentController {
@@ -148,7 +150,9 @@ export function createReferenceDocumentController(input: {
         }
         const task = kind === 'retry' && documentStatus === 'error'
           ? input.documentManager.retryDocument(REFERENCE_PDF_DOCUMENT_ID)
-          : input.documentManager.openDocumentUrl(buildReferenceDocumentOptions(input.assetUrls, input.origin));
+          : input.documentManager.openDocumentUrl(buildReferenceDocumentOptions(
+              input.assetUrls, input.resourcePolicy ?? input.origin,
+            ));
         await waitForOpen(task, timeoutMs);
         if (operation !== operationGeneration || startedGeneration !== documentGeneration) return false;
         if (input.documentManager.getActiveDocumentId() !== MAIN_PDF_DOCUMENT_ID) {
