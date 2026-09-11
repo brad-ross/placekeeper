@@ -475,7 +475,8 @@ test.describe('canonical review workflow', () => {
       (element as HTMLButtonElement).click();
       (element as HTMLButtonElement).click();
     });
-    await expect(page.getByText('Exporting reviewed PDF…')).toBeVisible();
+    await expect(page.getByRole('menuitem', { name: 'Exporting…', exact: true })).toBeVisible();
+    await expect(page.getByText('Exporting reviewed PDF…')).toHaveCount(0);
     await expect(page.locator('[data-export-count]')).toHaveAttribute('data-export-count', '1');
     await expect(page.getByText('Reviewed PDF exported.')).toBeVisible();
     await expect(exportAction).toBeFocused();
@@ -516,8 +517,11 @@ test.describe('canonical review workflow', () => {
 
     await page.goto('/test/acceptance/review-harness/index.html?reconciliation=ready&export=delayed&host-export=1');
     menu = page.getByRole('menu', { name: /Actions for/u });
-    await expect(menu.getByText('Exporting reviewed PDF…')).toBeVisible();
-    await page.getByRole('button', { name: 'Request host export' }).click();
+    await expect(menu.getByRole('menuitem', { name: 'Exporting…', exact: true })).toBeVisible();
+    await page.getByRole('button', { name: 'Request host export' }).evaluate((element) => {
+      (element as HTMLButtonElement).click();
+    });
+    await expect(menu.getByText('Exporting reviewed PDF…')).toHaveCount(0);
     await expect(page.locator('[data-export-count]')).toHaveAttribute('data-export-count', '1');
     await expect(menu.getByText('Reviewed PDF exported.')).toBeVisible();
     await page.getByRole('button', { name: 'Remount review shell' }).click();

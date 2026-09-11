@@ -92,7 +92,7 @@ function exportMessageFromResult(result: ReviewExportResult | void): string {
 
 const EXPORT_OUTCOME_MESSAGES: Readonly<Record<ExportOutcome, string>> = {
   idle: '',
-  pending: 'Exporting reviewed PDF…',
+  pending: '',
   success: 'Reviewed PDF exported.',
   failure: 'Export failed. Your review is still available; try again.',
 };
