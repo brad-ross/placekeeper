@@ -489,3 +489,27 @@ for (const rotation of [0, 90]) test(`imported annotations use reader defaults a
   await waitForStaticPdf(page);
   await expect(page.locator('[data-source-reader-mark]')).toHaveCount(7);
 });
+
+for (const width of [390, 1280]) test(`@critical landing showcase and PDF controls work at ${width}px`, async ({ page }) => {
+  await page.setViewportSize({ width, height: 900 });
+  await page.goto('./');
+  await expect(page.getByRole('heading', { name: 'Placekeeper:' })).toBeVisible();
+  const upload = page.getByRole('button', { name: 'Upload PDF', exact: true });
+  await expect(upload).toBeVisible();
+  if (width === 1280) expect((await upload.boundingBox())!.y).toBeLessThan(700);
+  await expect(page.getByLabel('PDF URL')).toBeVisible();
+  const showcase = page.getByRole('group', { name: 'Explore app surfaces' });
+  for (const name of ['Read with focus', 'Keep your thoughts', 'Follow a reference']) {
+    const surface = showcase.getByRole('button', { name, exact: true });
+    await surface.focus();
+    await page.keyboard.press('Enter');
+    await expect(surface).toHaveAttribute('aria-pressed', 'true');
+    await expect(showcase.locator('[aria-pressed="true"]')).toHaveCount(1);
+    await expect(page.getByRole('img', { name: /^Illustrative Placekeeper preview:/ })).toBeVisible();
+  }
+  await page.getByText('How do I save my work?', { exact: true }).click();
+  await expect(page.getByText('Export is the only way', { exact: false })).toBeVisible();
+  await page.getByRole('link', { name: 'Try Placekeeper', exact: false }).last().click();
+  await expect(upload).toBeInViewport();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
