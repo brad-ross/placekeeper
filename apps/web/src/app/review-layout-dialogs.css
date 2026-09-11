@@ -226,11 +226,11 @@
   display: flex;
   width: fit-content;
   max-width: 100%;
-  min-height: 28px;
+  min-height: 0;
   min-width: 0;
   align-items: center;
   justify-content: flex-start;
-  padding: 4px 0;
+  padding: 4px 0 0;
   border: 0;
   border-radius: 10px;
   color: var(--review-ink-muted);
