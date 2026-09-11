@@ -8,7 +8,7 @@ import { PDFDocument } from "pdf-lib";
 import { PlacekeeperHost } from "../../apps/service/src/host/placekeeper-host.js";
 import { TaskBindingRegistry } from "../../apps/service/src/context/task-binding-registry.js";
 import { readEditableReviewItems } from "../../packages/pdf-backends/src/embedpdf-adapter.js";
-import { addPageNote } from "../../packages/core/src/review-commands.js";
+import { addPageNote, setAnnotationName } from "../../packages/core/src/review-commands.js";
 
 let root = "";
 let host: PlacekeeperHost;
@@ -6695,4 +6695,45 @@ test('document annotation name advances only the pending first annotation revisi
   expect(commands).toHaveLength(2);
   expect(commands[0]).toMatchObject({ type: 'set-annotation-name', expectedRevision: 0 });
   expect(commands[1]?.expectedRevision).toBe(1);
+});
+
+
+test('document annotation name export rejects a concurrent rename and retries the retained choice', async ({ page }) => {
+  const launched = await host.open({
+    pdfPath: await freshProductionPdf(plainTextPdf), sourceRootPath: sourceRoot,
+    surface: 'browser', workflowMode: 'generated-output', fork: true,
+  });
+  if (!launched.ok || launched.kind === 'recovery-offered') throw new Error('Export race fixture failed');
+  const state = host.broker.state(launched.sessionId)!;
+  await host.broker.acceptMutation(launched.sessionId, addPageNote(
+    state, 0, { x: 80, y: 160, width: 18, height: 18 }, 'Chosen author survives export retry.',
+  ));
+  await page.goto(launched.url);
+  await waitForRenderedPageImage(page.locator("[data-page-index='0']").first());
+  let raced = false;
+  await page.route(`**/s/${launched.sessionId}/export`, async (route) => {
+    if (!raced) {
+      raced = true;
+      await host.broker.acceptMutation(launched.sessionId,
+        setAnnotationName(host.broker.state(launched.sessionId)!, 'Other Window'));
+    }
+    await route.continue();
+  });
+  await page.getByRole('button', { name: /Open document actions$/u }).click();
+  await page.getByRole('menuitem', { name: 'Export', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Export reviewed PDF', exact: true });
+  const name = dialog.getByRole('textbox', { name: 'Name on annotations', exact: true });
+  await name.fill('Alice');
+  const conflict = page.waitForResponse((response) => response.url().endsWith(`/s/${launched.sessionId}/export`));
+  await dialog.getByRole('button', { name: 'Export', exact: true }).click();
+  expect((await conflict).status()).toBe(409);
+  await expect(dialog.getByRole('alert')).toContainText(/changed/u);
+  await expect(name).toHaveValue('Alice');
+  const exported = page.waitForResponse((response) => response.url().endsWith(`/s/${launched.sessionId}/export`) && response.ok());
+  await dialog.getByRole('button', { name: 'Export', exact: true }).click();
+  const result = await (await exported).json();
+  await expect(dialog).toHaveCount(0);
+  const items = await readEditableReviewItems(new Uint8Array(await readFile(result.path)));
+  expect(items).toHaveLength(1);
+  expect(items[0]?.importedAnnotationAuthor).toBe('Alice');
 });

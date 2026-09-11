@@ -1,3 +1,4 @@
+import type { ReviewExportFence } from "../../../../packages/core/src/review-runtime-protocol.js";
 import type { ReviewCommand, ReviewState, SaveDestinationConfirmation } from "../../../../packages/core/src/review-model.js";
 import type { SaveStatus } from "../../../../packages/core/src/save-status.js";
 import type { LiveContextBindingStatus } from "../../../../packages/core/src/live-context.js";
@@ -57,7 +58,7 @@ export interface ProductionSessionApi {
   chooseOriginal(confirmation?: SaveDestinationConfirmation): Promise<SaveDestinationResult>;
   retrySave(): Promise<SaveStatus>;
   locateSave(): Promise<SaveStatus>;
-  exportReviewedCopy?(confirmPossiblyStale?: true): Promise<ProductionExportResult>;
+  exportReviewedCopy?(confirmPossiblyStale?: true, fence?: ReviewExportFence): Promise<ProductionExportResult>;
   scope(signal?: AbortSignal): Promise<ProductionScope>;
 }
 

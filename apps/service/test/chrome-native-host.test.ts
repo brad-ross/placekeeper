@@ -51,14 +51,14 @@ describe("Chrome native host entry", () => {
       input, output, store: await storeFixture(), runtimeBackend, maxDurationMs: 1,
     });
     input.end(encodeNativeMessage({
-      type: "hello", protocol: "placekeeper.chrome-runtime", protocolVersion: 2,
+      type: "hello", reviewRuntimeVersion: 2, protocol: "placekeeper.chrome-runtime", protocolVersion: 2,
       connectionId: "connection-runtime-1",
     }));
 
     await expect(run).resolves.toBe(0);
     expect(new NativeMessageDecoder().push(Buffer.concat(frames))).toEqual([
       expect.objectContaining({
-        type: "hello-ack", protocol: "placekeeper.chrome-runtime", protocolVersion: 2,
+        type: "hello-ack", reviewRuntimeVersion: 2, protocol: "placekeeper.chrome-runtime", protocolVersion: 2,
         connectionId: "connection-runtime-1",
       }),
     ]);
@@ -69,6 +69,7 @@ describe("Chrome native host entry", () => {
     const output = new PassThrough();
     const exchange = vi.fn(async (_portId: string, message: { readonly connectionId: string }) => [{
       type: "hello-ack" as const,
+      reviewRuntimeVersion: 2 as const,
       protocol: "placekeeper.chrome-runtime" as const,
       protocolVersion: 2 as const,
       connectionId: message.connectionId,
@@ -80,7 +81,7 @@ describe("Chrome native host entry", () => {
       runtimeDetach: detach, runtimeIdleLeaseMs: 25,
     });
     input.write(encodeNativeMessage({
-      type: "hello", protocol: "placekeeper.chrome-runtime", protocolVersion: 2,
+      type: "hello", reviewRuntimeVersion: 2, protocol: "placekeeper.chrome-runtime", protocolVersion: 2,
       connectionId: "connection-proxy-idle-1",
     }));
 
@@ -101,6 +102,7 @@ describe("Chrome native host entry", () => {
     let now = 0;
     const exchange = vi.fn(async (_portId: string, message: { readonly connectionId: string }) => [{
       type: "hello-ack" as const,
+      reviewRuntimeVersion: 2 as const,
       protocol: "placekeeper.chrome-runtime" as const,
       protocolVersion: 2 as const,
       connectionId: message.connectionId,
@@ -112,7 +114,7 @@ describe("Chrome native host entry", () => {
       runtimeDetach: detach, runtimeIdleLeaseMs: 25, now: () => now,
     });
     input.write(encodeNativeMessage({
-      type: "hello", protocol: "placekeeper.chrome-runtime", protocolVersion: 2,
+      type: "hello", reviewRuntimeVersion: 2, protocol: "placekeeper.chrome-runtime", protocolVersion: 2,
       connectionId: "connection-proxy-sleep-1",
     }));
     await firstFrame.promise;

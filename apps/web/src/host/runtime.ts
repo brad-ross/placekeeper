@@ -1,3 +1,4 @@
+import type { ReviewExportFence } from "../../../../packages/core/src/review-runtime-protocol.js";
 import type { SaveStatus } from "../../../../packages/core/src/save-status.js";
 import type { ReviewState } from "../../../../packages/core/src/review-model.js";
 import type {
@@ -43,7 +44,7 @@ export interface HostRuntime extends ProductionSessionApi {
   bootstrap(signal?: AbortSignal): Promise<HostRuntimeBootstrap>;
   subscribeInvalidations(listener: (event: HostRuntimeInvalidation) => void): () => void;
   subscribeHostCommands?(listener: (command: HostRuntimeCommand) => void): () => void;
-  exportReviewedCopy(confirmPossiblyStale?: true): Promise<ProductionExportResult>;
+  exportReviewedCopy(confirmPossiblyStale?: true, fence?: ReviewExportFence): Promise<ProductionExportResult>;
   forwardSyncTex(input: unknown): Promise<unknown>;
   reverseSyncTex(input: unknown): Promise<unknown>;
   dispose(): void;

@@ -1,3 +1,4 @@
+import type { ReviewExportFence } from "../../../../packages/core/src/review-runtime-protocol.js";
 import type { SaveStatus } from "../../../../packages/core/src/save-status.js";
 import type { ReviewCommand, ReviewState, SaveDestinationConfirmation } from "../../../../packages/core/src/review-model.js";
 import type {
@@ -113,10 +114,10 @@ export function createBrowserHostRuntime(session: ProductionSession): HostRuntim
     async chooseOriginal(confirmation?: SaveDestinationConfirmation) { return (await ensureLoaded()).api.chooseOriginal(confirmation); },
     async retrySave() { return (await ensureLoaded()).api.retrySave(); },
     async locateSave() { return (await ensureLoaded()).api.locateSave(); },
-    async exportReviewedCopy(confirmPossiblyStale?: true): Promise<ProductionExportResult> {
+    async exportReviewedCopy(confirmPossiblyStale?: true, fence?: ReviewExportFence): Promise<ProductionExportResult> {
       const method = (await ensureLoaded()).api.exportReviewedCopy;
       if (method === undefined) throw new Error("Reviewed export is unavailable.");
-      return method(confirmPossiblyStale);
+      return method(confirmPossiblyStale, fence);
     },
     async scope(signal?: AbortSignal): Promise<ProductionScope> {
       return (await ensureLoaded()).api.scope(signal);

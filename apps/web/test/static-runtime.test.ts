@@ -523,8 +523,20 @@ describe("static browser review runtime", () => {
     ));
     const added = "accepted" in firstState ? firstState.state : firstState;
     const named = await runtime.command(setAnnotationName(added, "Brad Ross"));
-    const exporting = runtime.exportReviewedCopy();
-    await runtime.command(setAnnotationName("accepted" in named ? named.state : named, "Later Name"));
+    const acknowledged = "accepted" in named ? named.state : named;
+    const fence = { expectedRevision: acknowledged.revision, documentGeneration: acknowledged.workflow.documentGeneration };
+    const other = await runtime.command(setAnnotationName(acknowledged, "Other Window"));
+    await expect(runtime.exportReviewedCopy(undefined, fence)).rejects.toThrow("Review changed");
+    expect(writer.write).not.toHaveBeenCalled();
+    const retry = await runtime.command(setAnnotationName("accepted" in other ? other.state : other, "Brad Ross"));
+    const retryState = "accepted" in retry ? retry.state : retry;
+    await expect(runtime.exportReviewedCopy(undefined, {
+      expectedRevision: retryState.revision, documentGeneration: retryState.workflow.documentGeneration + 1,
+    })).rejects.toThrow("Review changed");
+    const exporting = runtime.exportReviewedCopy(undefined, {
+      expectedRevision: retryState.revision, documentGeneration: retryState.workflow.documentGeneration,
+    });
+    await runtime.command(setAnnotationName(retryState, "Later Name"));
     pendingWrite.resolve({
       pdfBytes: sourceBytes,
       evidence: {
@@ -539,15 +551,15 @@ describe("static browser review runtime", () => {
       },
     });
     await expect(exporting).resolves.toMatchObject({
-      revision: 2,
+      revision: 4,
       warning: expect.stringMatching(/copy opens.*not comprehensively checked.*newer edits/i),
     });
     expect(writer.write).toHaveBeenCalledWith(expect.objectContaining({
-      revision: 2, annotations: [expect.objectContaining({ author: "Brad Ross" })],
+      revision: 4, annotations: [expect.objectContaining({ author: "Brad Ross" })],
     }));
     expect(download).toHaveBeenCalledOnce();
     await expect(runtime.saveStatus()).resolves.toMatchObject({
-      sync: { desiredRevision: 3, savedRevision: 2 },
+      sync: { desiredRevision: 5, savedRevision: 4 },
     });
     runtime.dispose();
   });

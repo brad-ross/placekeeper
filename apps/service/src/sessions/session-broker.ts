@@ -1,3 +1,4 @@
+import { ReviewExportConflictError, type ReviewExportFence } from "../../../../packages/core/src/review-runtime-protocol.js";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { open, readdir, readFile, realpath, rm, stat } from "node:fs/promises";
 import { basename, isAbsolute, join, relative } from "node:path";
@@ -2240,7 +2241,7 @@ export class SessionBroker {
     };
   }
 
-  async freezeDelivery(sessionId: string): Promise<FrozenReviewDelivery> {
+  async freezeDelivery(sessionId: string, fence?: ReviewExportFence): Promise<FrozenReviewDelivery> {
     const session = this.#activeById.get(sessionId);
     if (session === undefined || session.ending) {
       throw new Error("Review session is not active");
@@ -2251,6 +2252,9 @@ export class SessionBroker {
     await predecessor;
     try {
       if (session.ending) throw new Error("Review session is ending");
+      if (fence && (fence.expectedRevision !== session.state.revision || fence.documentGeneration !== session.state.workflow.documentGeneration)) {
+        throw new ReviewExportConflictError();
+      }
       const state = structuredClone(session.state);
       const sourceRootPath = session.rootId === undefined
         ? undefined

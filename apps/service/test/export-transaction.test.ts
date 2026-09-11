@@ -365,7 +365,15 @@ describe("reviewed PDF export transaction", () => {
     );
     await broker.acceptMutation(opened.launch.sessionId,
       setAnnotationName(broker.state(opened.launch.sessionId)!, "Brad Ross"));
-    const frozen = await broker.freezeDelivery(opened.launch.sessionId);
+    const acknowledged = broker.state(opened.launch.sessionId)!;
+    const fence = { expectedRevision: acknowledged.revision, documentGeneration: acknowledged.workflow.documentGeneration };
+    await broker.acceptMutation(opened.launch.sessionId, setAnnotationName(acknowledged, "Other Window"));
+    await expect(broker.freezeDelivery(opened.launch.sessionId, fence)).rejects.toThrow("Review changed");
+    await broker.acceptMutation(opened.launch.sessionId, setAnnotationName(broker.state(opened.launch.sessionId)!, "Brad Ross"));
+    const retry = broker.state(opened.launch.sessionId)!;
+    const frozen = await broker.freezeDelivery(opened.launch.sessionId, {
+      expectedRevision: retry.revision, documentGeneration: retry.workflow.documentGeneration,
+    });
     expect(frozen.annotations).toMatchObject([{
       author: "Brad Ross",
       custom: {
@@ -408,9 +416,9 @@ describe("reviewed PDF export transaction", () => {
     const recovered = await new DraftSnapshotStore(
       join(recoveryRoot, opened.launch.sessionId),
     ).recover();
-    expect(frozen).toMatchObject({ revision: 2, annotations: [{ kind: "highlight" }] });
+    expect(frozen).toMatchObject({ revision: 4, annotations: [{ kind: "highlight" }] });
     expect(recovered).toMatchObject({
-      state: { revision: 3, annotationName: "Later Name", items: [{ kind: "highlight" }] },
+      state: { revision: 5, annotationName: "Later Name", items: [{ kind: "highlight" }] },
     });
     expect(recovered?.lastExportAt).toBeDefined();
     expect(await readFile(originalPath)).toEqual(original);

@@ -1,4 +1,4 @@
-import { isSaveDestinationConfirmation } from "../../../../packages/core/src/review-runtime-protocol.js";
+import { ReviewExportConflictError, isReviewExportFence, isSaveDestinationConfirmation, type ReviewExportFence } from "../../../../packages/core/src/review-runtime-protocol.js";
 import { rejectedDestinationName } from "../saving/pdf-save-coordinator.js";
 import { createHash, randomBytes } from "node:crypto";
 import { readFile, realpath } from "node:fs/promises";
@@ -703,12 +703,13 @@ export async function startHttpServer(
           send(response, 503, "Export service is unavailable");
           return;
         }
-        const body = await readJson(request) as { confirmPossiblyStale?: unknown };
-        if (body.confirmPossiblyStale !== undefined && body.confirmPossiblyStale !== true) {
+        const body = await readJson(request) as { confirmPossiblyStale?: unknown; fence?: ReviewExportFence };
+        if ((body.confirmPossiblyStale !== undefined && body.confirmPossiblyStale !== true) ||
+          (body.fence !== undefined && !isReviewExportFence(body.fence))) {
           send(response, 400, "Invalid request");
           return;
         }
-        const frozen = await broker.freezeDelivery(exportMatch[1]!);
+        const frozen = await broker.freezeDelivery(exportMatch[1]!, body.fence);
         const result = await options.exporting.exportReviewedCopy({
           ...frozen,
           ...(body.confirmPossiblyStale === true ? { staleConfirmed: true as const } : {}),
@@ -844,7 +845,9 @@ export async function startHttpServer(
       }
       send(response, 404, "Not found");
     } catch (error) {
-      if (error instanceof ReviewGenerationConflictError) {
+      if (error instanceof ReviewExportConflictError) {
+        sendJson(response, 409, { ok: false, error: { kind: "export-conflict", message: error.message } });
+      } else if (error instanceof ReviewGenerationConflictError) {
         sendJson(response, 409, {
           ok: false,
           error: {

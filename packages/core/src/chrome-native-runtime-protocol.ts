@@ -1,4 +1,5 @@
 import {
+  REVIEW_RUNTIME_VERSION,
   isReviewRuntimeMethodForHost,
   sanitizeChromeReviewRuntimeRequest,
   sanitizeChromeReviewRuntimeResponse,
@@ -24,6 +25,7 @@ interface RuntimeEnvelope {
 
 export interface ChromeRuntimeHello extends RuntimeEnvelope {
   readonly type: "hello";
+  readonly reviewRuntimeVersion: typeof REVIEW_RUNTIME_VERSION;
   readonly protocol: typeof CHROME_RUNTIME_PROTOCOL;
 }
 
@@ -45,7 +47,7 @@ export type ChromeRuntimeExtensionMessage = ChromeRuntimeHello | (RuntimeEnvelop
 ));
 
 export type ChromeRuntimeHostMessage = RuntimeEnvelope & (
-  | { readonly type: "hello-ack"; readonly protocol: typeof CHROME_RUNTIME_PROTOCOL; readonly leaseMs: number }
+  | { readonly type: "hello-ack"; readonly reviewRuntimeVersion: typeof REVIEW_RUNTIME_VERSION; readonly protocol: typeof CHROME_RUNTIME_PROTOCOL; readonly leaseMs: number }
   | { readonly lane: ChromeRuntimeLane; readonly type: "ack"; readonly requestId: string; readonly sequence?: number }
   | { readonly lane: "lifecycle"; readonly type: "projection"; readonly requestId: string; readonly payload: unknown }
   | { readonly lane: "lifecycle"; readonly type: "active"; readonly requestId: string; readonly payload: unknown }
@@ -98,8 +100,8 @@ function safeFileSource(value: unknown): value is string {
 export function parseChromeRuntimeExtensionMessage(value: unknown): ChromeRuntimeExtensionMessage | undefined {
   if (!record(value) || !validEnvelope(value) || typeof value.type !== "string") return undefined;
   if (value.type === "hello") {
-    return exact(value, ["type", "protocol", "protocolVersion", "connectionId"]) &&
-      value.protocol === CHROME_RUNTIME_PROTOCOL ? value as unknown as ChromeRuntimeHello : undefined;
+    return exact(value, ["type", "protocol", "protocolVersion", "reviewRuntimeVersion", "connectionId"]) &&
+      value.reviewRuntimeVersion === REVIEW_RUNTIME_VERSION && value.protocol === CHROME_RUNTIME_PROTOCOL ? value as unknown as ChromeRuntimeHello : undefined;
   }
   if (typeof value.lane !== "string" || !safeId(value.requestId)) return undefined;
   const base = ["type", "lane", "protocolVersion", "connectionId", "requestId"];
@@ -209,8 +211,8 @@ export function sanitizeChromeRuntimeProjection(value: unknown): unknown | undef
 export function parseChromeRuntimeHostMessage(value: unknown): ChromeRuntimeHostMessage | undefined {
   if (!record(value) || !validEnvelope(value) || typeof value.type !== "string" || containsForbiddenKey(value)) return undefined;
   if (value.type === "hello-ack") {
-    return exact(value, ["type", "protocol", "protocolVersion", "connectionId", "leaseMs"]) &&
-      value.protocol === CHROME_RUNTIME_PROTOCOL && safeInteger(value.leaseMs) && (value.leaseMs as number) >= 1_000
+    return exact(value, ["type", "protocol", "protocolVersion", "reviewRuntimeVersion", "connectionId", "leaseMs"]) &&
+      value.reviewRuntimeVersion === REVIEW_RUNTIME_VERSION && value.protocol === CHROME_RUNTIME_PROTOCOL && safeInteger(value.leaseMs) && (value.leaseMs as number) >= 1_000
       ? value as unknown as ChromeRuntimeHostMessage : undefined;
   }
   if (typeof value.lane !== "string") return undefined;

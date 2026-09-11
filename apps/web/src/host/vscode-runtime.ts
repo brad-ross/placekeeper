@@ -232,10 +232,20 @@ export function createRpcHostRuntime(
 
   const unsubscribe = port.subscribe((message) => {
     if (!isObject(message) || message.protocol !== REVIEW_RUNTIME_PROTOCOL ||
-      message.version !== REVIEW_RUNTIME_VERSION ||
       (host === "chrome" || host === "macos"
         ? message.runtimeId !== runtimeId
         : message.panelId !== runtimeId)) return;
+    if (message.kind === "response" && typeof message.requestId === "string" &&
+      (message.version !== REVIEW_RUNTIME_VERSION || (isObject(message.error) && message.error.kind === "runtime-version-mismatch"))) {
+      const current = pending.get(message.requestId);
+      if (current) {
+        pending.delete(message.requestId);
+        current.abort?.();
+        current.reject(new Error("Update Placekeeper and its host extension, then close and reopen this review."));
+      }
+      return;
+    }
+    if (message.version !== REVIEW_RUNTIME_VERSION) return;
     if (message.kind === "event" && message.event === "host-command") {
       if (host !== "vscode" || !validHostCommand(message.payload)) return;
       if (hostCommands.size === 0) pendingHostCommand = message.payload;
@@ -293,7 +303,13 @@ export function createRpcHostRuntime(
           : message.payload;
       if (payload === undefined) current.reject(new Error("The trusted host returned an invalid response."));
       else current.resolve(payload);
-    } else current.reject(new Error("The trusted host rejected the review action."));
+    } else {
+      const conflict = (isObject(message.error) && message.error.kind === "export-conflict") ||
+        (isObject(message.payload) && message.payload.kind === "export-conflict");
+      current.reject(new Error(conflict
+        ? "Review changed. Confirm the annotation name again to export the latest review."
+        : "The trusted host rejected the review action."));
+    }
   });
 
   const invoke = <T>(method: ReviewRuntimeMethod, payload: unknown = {}, signal?: AbortSignal): Promise<T> => {
@@ -493,9 +509,10 @@ export function createRpcHostRuntime(
     chooseOriginal: (confirmation) => chooseDestination("chooseOriginal", confirmation === undefined ? {} : { confirmation }),
     retrySave: () => invoke("retrySave"),
     locateSave: () => invoke("locateSave"),
-    exportReviewedCopy: (confirmPossiblyStale) => invoke<ProductionExportResult>(
+    exportReviewedCopy: (confirmPossiblyStale, fence) => invoke<ProductionExportResult>(
       "exportReviewedCopy",
-      confirmPossiblyStale === true ? { confirmPossiblyStale: true } : {},
+      { ...(confirmPossiblyStale === true ? { confirmPossiblyStale: true } : {}),
+        ...(fence === undefined ? {} : { fence }) },
     ),
     scope: (signal) => invoke<ProductionScope>("scope", {}, signal),
     forwardSyncTex: (input) => invoke("forwardSyncTex", input),

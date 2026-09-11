@@ -87,13 +87,17 @@ export function useAnnotationExport(api: ProductionSessionApi, state: ReviewStat
         setState(named);
       }
       const currentEligibility = reviewExportPresentation({
-        refreshStatus: refreshStatusRef.current, summary: createReviewStateSummary(stateRef.current),
+        // The acknowledged name command itself invalidates the bootstrap. Its transient
+        // refresh must not block export; the host fence checks revision and generation.
+        refreshStatus: 'idle', summary: createReviewStateSummary(named),
       });
       if (!currentEligibility.canExport || (currentEligibility.requiresStaleConfirmation && !captured.confirmPossiblyStale)) {
         setError(currentEligibility.message);
         return;
       }
-      const result = await method(captured.confirmPossiblyStale);
+      const result = await method(captured.confirmPossiblyStale, {
+        expectedRevision: named.revision, documentGeneration: named.workflow.documentGeneration,
+      });
       if (isCurrent(captured)) finish(captured, result);
     } catch (cause) {
       if (isCurrent(captured)) setError(cause instanceof Error ? cause.message : 'Export failed. Your review is still available; try again.');

@@ -1,3 +1,4 @@
+import type { ReviewExportFence } from "../../../../packages/core/src/review-runtime-protocol.js";
 import type { SaveDestinationConfirmation } from "../../../../packages/core/src/review-model.js";
 import { rejectedDestinationName } from "../saving/pdf-save-coordinator.js";
 import type { ReviewCommand } from "../../../../packages/core/src/review-model.js";
@@ -219,8 +220,8 @@ export class ChromeServiceRuntimeBackend implements ChromeRuntimeBackend {
         break;
       case "scope": result = await this.#broker.sessionScope(record.sessionId); break;
       case "exportReviewedCopy": {
-        const value = payload as { readonly confirmPossiblyStale?: true };
-        const frozen = await this.#broker.freezeDelivery(record.sessionId);
+        const value = payload as { readonly confirmPossiblyStale?: true; readonly fence?: ReviewExportFence };
+        const frozen = await this.#broker.freezeDelivery(record.sessionId, value.fence);
         result = await this.#exporting.exportReviewedCopy({
           ...frozen,
           ...(value.confirmPossiblyStale === true ? { staleConfirmed: true as const } : {}),

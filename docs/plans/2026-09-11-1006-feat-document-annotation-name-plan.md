@@ -307,3 +307,24 @@ Use repository suite definitions in `scripts/testing/suites.ts` to avoid duplica
 - U3: Both destination choices and browser/VS Code export expose the exact label in the existing modal style.
 - U4: Serialized PDFs prove custom authors and original timestamps, with imported authors preserved.
 - Required verification passes, review findings are resolved, and abandoned experimental code is removed.
+
+
+## Final review and verification — 2026-09-11
+
+All four validated review findings were corrected: protocol compatibility negotiation, Chrome destination confirmation/replay coverage, export snapshot revision fencing, and the core validation import cycle. The browser race regression also exposed and fixed an export being blocked by the name command's own transient bootstrap refresh.
+
+- Type checking, production web, static web, and VS Code builds pass.
+- 218 affected host/protocol tests pass across 12 files.
+- Six production name/save browser checks pass, including 1280px, 620px, and 360px styling and invalid-input retry; the additional generated-output concurrent-rename/retry regression passes and verifies the PDF author is Alice.
+- Native Swift application compilation passes; Swift tests are unavailable on this host because XCTest is missing.
+
+### Integrated browser verification
+
+Driver: visible Codex in-app browser. Synthetic PDF only.
+
+| Route | Status | Evidence |
+| --- | --- | --- |
+| Static root and PDF export | Pass | PDF renders; exact name label and existing modal styling; Escape discards draft; export completes; zero console errors. |
+| Service review and save modal | Pass | Copy/name inputs share styling; switching to original retains name; confirmation reaches Saved; reopening retains Brad Ross; zero console errors. |
+
+Screenshots were inspected in the integrated browser. Installed Chrome, VS Code, and native macOS UI were not exercised by this browser check; their protocol paths were covered by the targeted tests.

@@ -145,7 +145,15 @@ function client(session: ProductionSession) {
         ...init.headers,
       },
     });
-    if (!response.ok) throw new Error(`The local review action failed safely (${response.status}).`);
+    if (!response.ok) {
+      if (path === "/export" && response.status === 409) {
+        const rejected = await response.json().catch(() => undefined) as { error?: { kind?: string } } | undefined;
+        if (rejected?.error?.kind === "export-conflict") {
+          throw new Error("Review changed. Confirm the annotation name again to export the latest review.");
+        }
+      }
+      throw new Error(`The local review action failed safely (${response.status}).`);
+    }
     return response.json() as Promise<T>;
   };
   const post = <T>(path: string, body: unknown = {}) => request<T>(path, {
@@ -265,9 +273,10 @@ export async function loadProductionSession(session: ProductionSession): Promise
       chooseOriginal: (confirmation) => post<SaveDestinationResult>("/save/original", confirmation === undefined ? {} : { confirmation }),
       retrySave: () => post<SaveStatus>("/save/retry"),
       locateSave: () => post<SaveStatus>("/save/locate"),
-      exportReviewedCopy: (confirmPossiblyStale) => post<ProductionExportResult>(
+      exportReviewedCopy: (confirmPossiblyStale, fence) => post<ProductionExportResult>(
         "/export",
-        confirmPossiblyStale === true ? { confirmPossiblyStale: true } : {},
+        { ...(confirmPossiblyStale === true ? { confirmPossiblyStale: true } : {}),
+        ...(fence === undefined ? {} : { fence }) },
       ),
       scope: (signal) => request<ProductionScope>(
         "/scope",

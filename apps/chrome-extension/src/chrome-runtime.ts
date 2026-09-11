@@ -115,6 +115,8 @@ function aborted(): Error {
 }
 
 function reasonError(reason: string): Error {
+  if (reason === "export-conflict") return new Error("Review changed. Confirm the annotation name again to export the latest review.");
+  if (reason === "protocol-mismatch" || reason === "update-required") return new Error("Update the Placekeeper Chrome extension and native service, then reopen this review (protocol-mismatch).");
   return new Error(`Chrome native runtime ${reason}.`);
 }
 
@@ -214,6 +216,7 @@ class NativeRuntimeChannel {
   async negotiate(signal?: AbortSignal): Promise<void> {
     const reply = await this.#requestInternal({
       type: "hello",
+      reviewRuntimeVersion: REVIEW_RUNTIME_VERSION,
       protocol: CHROME_RUNTIME_PROTOCOL,
       protocolVersion: CHROME_RUNTIME_PROTOCOL_VERSION,
       connectionId: this.connectionId,
@@ -253,8 +256,12 @@ class NativeRuntimeChannel {
     const message = parseRuntimeHostMessage(raw);
     if (message === undefined || message.connectionId !== this.connectionId) {
       const rawVersion = record(raw) ? raw.protocolVersion : undefined;
-      this.#failAll(reasonError(rawVersion !== CHROME_RUNTIME_PROTOCOL_VERSION
+      this.#failAll(reasonError((rawVersion !== CHROME_RUNTIME_PROTOCOL_VERSION || this.#hello !== undefined)
         ? "protocol-mismatch" : "invalid-host-message"));
+      return;
+    }
+    if (message.type === "failure" && this.#hello !== undefined) {
+      this.#failAll(reasonError("protocol-mismatch"));
       return;
     }
     if (message.type === "invalidation") {
@@ -815,8 +822,9 @@ export function createNativeEmbeddedReview(options: NativeEmbeddedReviewOptions)
                 bootstrap = { ...bootstrap, scope: safe };
               }
               emitRuntime(reviewResponse(raw, projection!, true, safe));
-            }, () => {
-              emitRuntime(reviewResponse(raw, projection!, false, {}));
+            }, (error: unknown) => {
+              emitRuntime(reviewResponse(raw, projection!, false,
+                error instanceof Error && error.message.startsWith("Review changed.") ? { kind: "export-conflict" } : {}));
             }).finally(() => {
               runtimeInvokes = Math.max(0, runtimeInvokes - 1);
               flushInvalidations();

@@ -18,6 +18,16 @@ import {
 import { createReviewState } from "../src/review-model.js";
 
 describe("shared review runtime protocol", () => {
+  it("preserves export fences and rejects malformed fences at host boundaries", () => {
+    const payload = { confirmPossiblyStale: true, fence: { expectedRevision: 3, documentGeneration: 1 } };
+    for (const sanitize of [sanitizeChromeReviewRuntimeRequest, sanitizeMacosReviewRuntimeRequest]) {
+      expect(sanitize("exportReviewedCopy", payload)).toEqual(payload);
+      for (const fence of [{ expectedRevision: -1, documentGeneration: 1 }, { expectedRevision: 3 },
+        { expectedRevision: 3, documentGeneration: 0 }, { ...payload.fence, path: "/private" }]) {
+        expect(sanitize("exportReviewedCopy", { fence })).toBeUndefined();
+      }
+    }
+  });
   it("transports only well-shaped document annotation name commands", () => {
     const command = { type: "set-annotation-name", expectedRevision: 2, annotationName: "Brad Ross" };
     expect(sanitizeChromeReviewRuntimeRequest("command", command)).toEqual(command);
@@ -46,7 +56,7 @@ describe("shared review runtime protocol", () => {
 
   it("defines the complete versioned method vocabulary for both hosts", () => {
     expect(REVIEW_RUNTIME_PROTOCOL).toBe("placekeeper.review-runtime");
-    expect(REVIEW_RUNTIME_VERSION).toBe(1);
+    expect(REVIEW_RUNTIME_VERSION).toBe(2);
     expect(REVIEW_RUNTIME_METHODS).toEqual([
       "bootstrap",
       "presence",

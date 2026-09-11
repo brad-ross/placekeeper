@@ -27,6 +27,20 @@ import { createMacosHostRuntime } from "../src/host/macos-runtime.js";
 afterEach(() => vi.unstubAllGlobals());
 
 describe("host-neutral review runtime", () => {
+  it("reports incompatible host versions during bootstrap", async () => {
+    let receive: (message: unknown) => void = () => undefined;
+    const panelId = "panel_identifier_1234";
+    const runtime = createRpcHostRuntime({ panelId,
+      subscribe(listener) { receive = listener; return () => undefined; },
+      postMessage(raw) {
+        const request = raw as { requestId: string };
+        queueMicrotask(() => receive({ protocol: REVIEW_RUNTIME_PROTOCOL, version: 1,
+          kind: "response", panelId, requestId: request.requestId, ok: true }));
+      },
+    });
+    await expect(runtime.bootstrap()).rejects.toThrow("Update Placekeeper and its host extension");
+    runtime.dispose();
+  });
   it("bootstraps the packaged Mac runtime through an attempt-fenced native bridge", async () => {
     const runtimeId = "runtime_identifier_1234";
     const attemptId = "attempt_identifier_1234";
@@ -227,7 +241,13 @@ describe("host-neutral review runtime", () => {
       body: JSON.stringify(setAnnotationName(state, "Brad Ross")),
       headers: expect.objectContaining({ "x-placekeeper-generation": "1" }),
     }));
-    await expect(runtime.exportReviewedCopy()).resolves.toMatchObject({ kind: "reviewed-copy" });
+    const fence = { expectedRevision: 1, documentGeneration: 1 };
+    await expect(runtime.exportReviewedCopy(true, fence)).resolves.toMatchObject({ kind: "reviewed-copy" });
+    expect(fetch).toHaveBeenCalledWith(`/s/${state.sessionId}/export`, expect.objectContaining({
+      body: JSON.stringify({ confirmPossiblyStale: true, fence }),
+    }));
+    fetch.mockResolvedValueOnce(Response.json({ error: { kind: "export-conflict" } }, { status: 409 }));
+    await expect(runtime.exportReviewedCopy(true, fence)).rejects.toThrow("Confirm the annotation name again");
     expect(FakeSocket.created[0]).toMatchObject({
       protocols: ["placekeeper", "placekeeper-auth.memory-only"],
     });

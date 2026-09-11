@@ -1,3 +1,4 @@
+import { ReviewExportConflictError, type ReviewExportFence } from "../../../../packages/core/src/review-runtime-protocol.js";
 import type { SaveStatus } from "../../../../packages/core/src/save-status.js";
 import { projectReviewItems } from "../../../../packages/core/src/annotation-projection.js";
 import type {
@@ -523,8 +524,11 @@ export async function createStaticHostRuntime(
     async locateSave() {
       return notSavedStatus(state, eligibility, lastExportedRevision);
     },
-    async exportReviewedCopy(): Promise<ProductionExportResult> {
+    async exportReviewedCopy(_confirmPossiblyStale?: true, fence?: ReviewExportFence): Promise<ProductionExportResult> {
       if (disposed) throw new Error("This review is closed.");
+      if (fence && (fence.expectedRevision !== state.revision || fence.documentGeneration !== state.workflow.documentGeneration)) {
+        throw new ReviewExportConflictError();
+      }
       const exportState = state;
       let output: PdfWriteResult;
       try {

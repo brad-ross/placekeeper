@@ -1,6 +1,6 @@
 import type { SaveDestinationConfirmation } from "./review-model.js";
 export const REVIEW_RUNTIME_PROTOCOL = "placekeeper.review-runtime" as const;
-export const REVIEW_RUNTIME_VERSION = 1 as const;
+export const REVIEW_RUNTIME_VERSION = 2 as const;
 
 export const REVIEW_RUNTIME_HOSTS = ["vscode", "chrome", "macos"] as const;
 export type ReviewRuntimeHost = typeof REVIEW_RUNTIME_HOSTS[number];
@@ -319,9 +319,11 @@ export function sanitizeChromeReviewRuntimeRequest(
     };
   }
   if (method === "exportReviewedCopy") {
-    return hasOnlyKeys(payload, ["confirmPossiblyStale"]) &&
+    return hasOnlyKeys(payload, ["confirmPossiblyStale", "fence"]) &&
+      (payload.fence === undefined || isReviewExportFence(payload.fence)) &&
       (payload.confirmPossiblyStale === undefined || payload.confirmPossiblyStale === true)
-      ? (payload.confirmPossiblyStale === true ? { confirmPossiblyStale: true } : {})
+      ? { ...(payload.confirmPossiblyStale === true ? { confirmPossiblyStale: true } : {}),
+        ...(payload.fence === undefined ? {} : { fence: closedJsonClone(payload.fence) }) }
       : undefined;
   }
   return undefined;
@@ -465,4 +467,23 @@ export function sanitizeMacosReviewRuntimeResponse(
     return { ...withoutLinkBase, scope };
   }
   return sanitizeChromeReviewRuntimeResponse(method, value);
+}
+
+/** The acknowledged review that the reader approved for export. */
+export interface ReviewExportFence {
+  readonly expectedRevision: number;
+  readonly documentGeneration: number;
+}
+
+export function isReviewExportFence(value: unknown): value is ReviewExportFence {
+  return record(value) && hasOnlyKeys(value, ["expectedRevision", "documentGeneration"])
+    && Number.isSafeInteger(value.expectedRevision) && (value.expectedRevision as number) >= 0
+    && Number.isSafeInteger(value.documentGeneration) && (value.documentGeneration as number) >= 1;
+}
+
+export class ReviewExportConflictError extends Error {
+  constructor() {
+    super("Review changed. Confirm the annotation name again to export the latest review.");
+    this.name = "ReviewExportConflictError";
+  }
 }
