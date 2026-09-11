@@ -115,7 +115,7 @@ test("exhaustive profile cancels a remote open without a late activation", async
   await input.fill("https://pdf.example.invalid/slow.pdf");
   await page.getByRole("button", { name: "Open" }).click();
   await expect(page.getByRole("status")).toContainText("Reading the PDF");
-  await page.getByRole("button", { name: "Cancel" }).click();
+  await page.getByRole("button", { name: "Open", exact: true }).and(page.getByTitle("Cancel opening")).click();
   releaseResponse?.();
   await expect(input).toBeFocused();
   await expect(page.locator("[data-production-review]")).toHaveCount(0);
