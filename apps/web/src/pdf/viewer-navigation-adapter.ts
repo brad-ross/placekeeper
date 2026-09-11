@@ -70,6 +70,8 @@ export interface ViewerNavigationAdapterOptions {
 }
 
 export interface PdfViewerNavigation extends ViewerNavigationControls {
+  /** Resolves the visual top of a page while retaining zoom and horizontal framing. */
+  resolvePageLocation(pageIndex: number): PdfViewerLocation | null;
   /** Resolves a semantic target without moving the viewer. */
   resolveTarget(target: PdfNavigationTarget): PdfViewerLocation | null;
   /** Reports whether a live semantic target occupies the usable viewport. */
@@ -1074,6 +1076,42 @@ export function createViewerNavigation(
     }
   };
 
+  // Every explicit jump shares this rule. Leave valid saved framing and
+  // zoomed-in panning alone; only repair clipping when the entire page fits.
+  async function revealFittingPage(
+    viewer: ActiveViewer,
+    pageIndex: number,
+    operation: NavigationOperation,
+    viewport?: PdfViewportQuery,
+  ): Promise<boolean> {
+    if (!operationIsCurrent(operation)) return false;
+    try {
+      const geometry = pageGeometry(viewer, pageIndex, undefined, viewport);
+      if (geometry === null) return false;
+      const { pageRect, viewportRect, viewportElement } = geometry;
+      if (pageRect.width > viewportRect.width + coordinateTolerance) return true;
+      const margins = options.fitWidthMargins?.() ?? { left: viewer.viewportGap, right: viewer.viewportGap };
+      const hasRoomForMargins = pageRect.width <= viewportRect.width - margins.left - margins.right + coordinateTolerance;
+      const readingLeft = viewportRect.left + (hasRoomForMargins ? margins.left : 0);
+      const readingRight = viewportRect.right - (hasRoomForMargins ? margins.right : 0);
+      if (pageRect.left >= readingLeft - coordinateTolerance
+        && pageRect.right <= readingRight + coordinateTolerance) return true;
+      const left = viewportElement.scrollLeft + pageRect.left - readingLeft
+        - (readingRight - readingLeft - pageRect.width) / 2;
+      const top = viewportElement.scrollTop;
+      operation.mutated = true;
+      viewer.viewport.scrollTo({ x: left, y: top, behavior: 'instant' });
+      viewportElement.scrollTo({ left, top, behavior: 'instant' });
+      if (!await waitForFrames(operation, 2, Date.now() + timeoutMs)) return false;
+      const settled = pageGeometry(viewer, pageIndex, undefined, viewport);
+      return settled !== null
+        && settled.pageRect.left >= settled.viewportRect.left - coordinateTolerance
+        && settled.pageRect.right <= settled.viewportRect.right + coordinateTolerance;
+    } catch {
+      return false;
+    }
+  }
+
   const applyLocation = async (
     location: PdfViewerLocation,
     viewport?: PdfViewportQuery,
@@ -1083,7 +1121,8 @@ export function createViewerNavigation(
     const operation = await beginOperation(viewer);
     if (operation === null) return false;
     try {
-      const applied = await applyResolvedLocation(viewer, location, operation, viewport);
+      let applied = await applyResolvedLocation(viewer, location, operation, viewport);
+      if (applied) applied = await revealFittingPage(viewer, location.pageIndex, operation, viewport);
       if (!applied && !operation.signal.aborted && operation.mutated) {
         await rollbackOperation(operation);
       }
@@ -1523,6 +1562,9 @@ export function createViewerNavigation(
             && Math.abs(currentGeometry.pageRect.width - expectedWidth) <= coordinateTolerance;
         }
       }
+      if (applied && finalLocation && policy === 'author') {
+        applied = await revealFittingPage(viewer, finalLocation.pageIndex, operation);
+      }
       if (!applied && !operation.signal.aborted && operation.mutated) {
         await rollbackOperation(operation);
       }
@@ -1551,6 +1593,27 @@ export function createViewerNavigation(
           bottom: page.boxes?.crop.bottom ?? 0,
         },
       })) ?? null;
+    },
+    resolvePageLocation(pageIndex) {
+      const viewer = activeViewer();
+      const current = captureLocation();
+      if (!viewer || !current || !Number.isSafeInteger(pageIndex) || pageIndex < 0) return null;
+      const page = viewer.pages[pageIndex];
+      const origin = viewer.pages[current.pageIndex];
+      if (!page || !origin) return null;
+      const rotation = combinePageRotation(page.rotation, viewer.documentRotation);
+      const originRotation = combinePageRotation(origin.rotation, viewer.documentRotation);
+      const visualAnchor = transformPosition(origin.size, current.anchor, originRotation, 1);
+      const rotatedSize = transformSize(page.size, rotation, 1);
+      const anchor = restorePosition(rotatedSize, {
+        x: clamp(visualAnchor.x, 0, rotatedSize.width), y: 0,
+      }, rotation, 1);
+      return {
+        pageIndex,
+        anchor,
+        alignment: { xPercent: current.alignment.xPercent, yPercent: 0 },
+        zoom: current.zoom,
+      };
     },
     resolveTarget(target) {
       const viewer = activeViewer();

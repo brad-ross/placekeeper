@@ -267,6 +267,7 @@ function navigationHarness(options: {
   constrainedHorizontal?: boolean;
   artificialHorizontalRunway?: boolean;
   constrainedVertical?: 'start' | 'end';
+  destinationPageWidth?: number;
   initiallyUnreadyPage?: boolean;
   farTargetInitiallyUnmounted?: boolean;
   initiallyUnready?: boolean;
@@ -562,7 +563,8 @@ function navigationHarness(options: {
       ? [0, 1, 2]
       : [0]).map((index) => ({
       index,
-      size: page,
+      size: index === 2 && options.destinationPageWidth !== undefined
+        ? { ...page, width: options.destinationPageWidth } : page,
       rotation: options.pageRotation ?? Rotation.Degree0,
       objectNumber: index + 1,
       boxes: {
@@ -854,6 +856,38 @@ describe('viewer navigation adapter', () => {
     expect(harness.pageRect.left + harness.pageRect.width).toBeCloseTo(390);
   });
 
+  it.each([20, 300, 580])('keeps a fitted page fully visible after navigating to a search anchor at x=%s', async (x) => {
+    const harness = navigationHarness({
+      viewportGap: 10,
+      runway: { right: 200, bottom: 0 },
+      artificialHorizontalRunway: true,
+    });
+    expect(await harness.navigation.fitToWidth()).toBe(true);
+    const fittedWidth = harness.pageRect.width;
+
+    expect(await harness.navigation.applyTarget(target(PdfZoomMode.XYZ, [x, 200, 0]))).toBe(true);
+    expect(harness.pageRect.width).toBeCloseTo(fittedWidth);
+    expect(harness.pageRect.left).toBeGreaterThanOrEqual(0);
+    expect(harness.pageRect.left + harness.pageRect.width).toBeLessThanOrEqual(400);
+  });
+
+  it.each([20, 580])('keeps fitted pages visible for annotation and saved-location jumps at x=%s', async (x) => {
+    const harness = navigationHarness({
+      viewportGap: 10,
+      runway: { right: 200, bottom: 0 },
+      artificialHorizontalRunway: true,
+    });
+    expect(await harness.navigation.fitToWidth()).toBe(true);
+    const zoom = harness.navigation.captureLocation()!.zoom;
+    expect(await harness.navigation.applyLocation({
+      pageIndex: 0, anchor: { x, y: 600 },
+      alignment: { xPercent: 50, yPercent: 35 }, zoom,
+    })).toBe(true);
+    expect(harness.pageRect.left).toBeGreaterThanOrEqual(0);
+    expect(harness.pageRect.left + harness.pageRect.width).toBeLessThanOrEqual(400);
+    expect(harness.pageRect.top + 600 * zoom).toBeCloseTo(140);
+  });
+
   it('keeps a valid fit when the native current-page indicator changes after zoom', async () => {
     const harness = navigationHarness({
       viewportGap: 10,
@@ -1091,12 +1125,51 @@ describe('viewer navigation adapter', () => {
     harness.setCurrentZoom(1.5);
 
     expect(await harness.navigation.applyLocation(captured!)).toBe(true);
-    expect(harness.log).toEqual(['zoom:1', 'scroll']);
-    expect(harness.navigation.captureLocation()).toEqual(captured);
+    expect(harness.log).toEqual(['zoom:1', 'scroll', 'viewport-scroll']);
+    expect(harness.pageRect.left).toBeCloseTo(0);
+    expect(harness.navigation.captureLocation()).toMatchObject({
+      pageIndex: captured!.pageIndex, zoom: captured!.zoom,
+      anchor: { y: captured!.anchor.y },
+    });
   });
 
-  it('does no work when the explicit semantic snapshot is already settled', async () => {
+  it.each([Rotation.Degree0, Rotation.Degree90, Rotation.Degree180, Rotation.Degree270])(
+    'resolves a page jump at its visual top at rotation %s', async (rotation) => {
+      const harness = navigationHarness({ pageRotation: rotation, viewportWidth: 400 });
+      const destination = harness.navigation.resolvePageLocation(0);
+      expect(destination).not.toBeNull();
+      const visual = transformPosition(page, destination!.anchor, rotation, 1);
+      expect(visual.y).toBeCloseTo(0);
+      expect(destination!.zoom).toBe(1);
+      expect(await harness.navigation.applyLocation(destination!)).toBe(true);
+      expect(harness.pageRect.top).toBeCloseTo(0);
+    },
+  );
+
+  it('clamps a page jump anchor when the destination page is narrower', () => {
+    const harness = navigationHarness({
+      farTargetInitiallyUnmounted: true, destinationPageWidth: 200, viewportWidth: 400,
+    });
+    harness.pageRect.left = -400;
+    const destination = harness.navigation.resolvePageLocation(2);
+    expect(destination).toMatchObject({ pageIndex: 2, anchor: { x: 200, y: 0 }, zoom: 1 });
+    expect(harness.navigation.resolvePageLocation(-1)).toBeNull();
+    expect(harness.navigation.resolvePageLocation(3)).toBeNull();
+  });
+
+  it('restores exact horizontal panning when the page is wider than the viewport', async () => {
+    const harness = navigationHarness({ viewportWidth: 400 });
+    const captured = harness.navigation.captureLocation();
+    harness.pageRect.left = -200;
+    harness.pageRect.top = -500;
+    expect(await harness.navigation.applyLocation(captured!)).toBe(true);
+    expect(harness.navigation.captureLocation()).toEqual(captured);
+    expect(harness.pageRect.left).toBeCloseTo(-100);
+  });
+
+  it('does no work when the explicit semantic snapshot is already settled and fully visible', async () => {
     const harness = navigationHarness();
+    harness.pageRect.left = 0;
     const captured = harness.navigation.captureLocation();
 
     expect(await harness.navigation.applyLocation(captured!)).toBe(true);
@@ -1104,7 +1177,7 @@ describe('viewer navigation adapter', () => {
   });
 
   it('captures and applies a fixed reference document while another document is globally active', async () => {
-    const harness = navigationHarness({ activeDocumentId: 'shell-doc' });
+    const harness = navigationHarness({ activeDocumentId: 'shell-doc', viewportWidth: 400 });
     const captured = harness.navigation.captureLocation();
     expect(captured).not.toBeNull();
     harness.pageRect.left = -300;
@@ -1127,7 +1200,7 @@ describe('viewer navigation adapter', () => {
     const harness = navigationHarness({ activeDocumentId: 'shell-doc', initiallyUnready: true });
 
     expect(await harness.navigation.applyTarget(target(PdfZoomMode.XYZ, [72, 640, 0]))).toBe(true);
-    expect(harness.log).toEqual(['scroll']);
+    expect(harness.log).toEqual(['scroll', 'viewport-scroll']);
     expect(harness.navigation.captureLocation()).not.toBeNull();
   });
 
@@ -1138,7 +1211,7 @@ describe('viewer navigation adapter', () => {
     });
 
     expect(await harness.navigation.applyTarget(target(PdfZoomMode.XYZ, [72, 640, 0]))).toBe(true);
-    expect(harness.log).toEqual(['scroll']);
+    expect(harness.log).toEqual(['scroll', 'viewport-scroll']);
     expect(harness.navigation.captureLocation()).not.toBeNull();
   });
 
@@ -1181,7 +1254,7 @@ describe('viewer navigation adapter', () => {
     expect(harness.log).toEqual(['scroll']);
   });
 
-  it('accepts an unobscured destination anchor when a right runway covers only the page edge', async () => {
+  it('reveals the whole fitted page when a right runway covers its edge', async () => {
     const harness = navigationHarness({
       artificialHorizontalRunway: true,
       constrainedHorizontal: true,
@@ -1189,7 +1262,9 @@ describe('viewer navigation adapter', () => {
     });
 
     expect(await harness.navigation.applyTarget(target(PdfZoomMode.FitPage))).toBe(true);
-    expect(harness.log).not.toContain('viewport-scroll');
+    expect(harness.log).toContain('viewport-scroll');
+    expect(harness.pageRect.left).toBeGreaterThanOrEqual(0);
+    expect(harness.pageRect.left + harness.pageRect.width).toBeLessThanOrEqual(420);
   });
 
   it('reapplies a reference fit once when the committed width changes during navigation', async () => {
@@ -1221,7 +1296,7 @@ describe('viewer navigation adapter', () => {
     const distantTarget = { ...target(PdfZoomMode.XYZ, [72, 640, 0]), pageIndex: 2 };
 
     expect(await harness.navigation.applyTarget(distantTarget)).toBe(true);
-    expect(harness.log).toEqual(['scroll', 'scroll']);
+    expect(harness.log).toEqual(['scroll', 'scroll', 'viewport-scroll']);
     expect(harness.navigation.captureLocation()?.pageIndex).toBe(2);
   });
 
@@ -1255,7 +1330,7 @@ describe('viewer navigation adapter', () => {
   });
 
   it('relocates at unchanged zoom without waiting for a zoom event', async () => {
-    const harness = navigationHarness({ manualZoom: true });
+    const harness = navigationHarness({ manualZoom: true, viewportWidth: 400 });
     expect(await harness.navigation.applyLocation({
       pageIndex: 0,
       anchor: { x: 10, y: 20 },

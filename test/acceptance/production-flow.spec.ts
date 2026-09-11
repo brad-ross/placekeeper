@@ -776,6 +776,84 @@ test("keeps mounted Codex context through fresh-page re-entry, then fails closed
   }
 });
 
+for (const viewportWidth of [1280, 760]) {
+  test(`keeps fitted pages visible across search, page controls, annotations, and history at width ${viewportWidth}`, async ({ page }) => {
+    await page.setViewportSize({ width: viewportWidth, height: 900 });
+    // A wider page leaves horizontal scroll range even while a narrow page fits.
+    const mixedWidthDocument = await PDFDocument.load(await readFile(searchPdf));
+    mixedWidthDocument.addPage([1000, 792]);
+    const mixedWidthPdf = join(root, 'mixed-width-search.pdf');
+    await writeFile(mixedWidthPdf, await mixedWidthDocument.save());
+    await openFreshProductionFixture(page, mixedWidthPdf, 'Search fit-width launch failed', async (sessionId) => {
+      const state = host.broker.state(sessionId)!;
+      await host.broker.acceptMutation(sessionId, addPageNote(
+        state, 1, { x: 570, y: 160, width: 18, height: 18 }, 'Fitted jump destination.',
+      ));
+    });
+    const main = page.locator('.pdf-workspace:not(.pdf-workspace--reference)');
+    await main.locator('[data-page-index="0"]').focus();
+    await page.keyboard.press(platformFindShortcut);
+    await expect(page.getByRole('searchbox', { name: 'Search this PDF' })).toBeVisible();
+    const results = page.locator('#workspace-panel-search [data-search-group="exact"] .annotation-item__navigation');
+    const zoom = page.getByRole('textbox', { name: /Current zoom \d+ percent/u });
+    await zoom.fill('100');
+    await zoom.press('Enter');
+    await expect(zoom).toHaveValue('100');
+    const viewportBounds = await main.locator('[data-viewer-framing-viewport]').boundingBox();
+    const rightFade = page.locator('.review-overlay-frame__right-fade:visible');
+    const fadeBounds = await rightFade.count() > 0 ? await rightFade.boundingBox() : null;
+    if (!viewportBounds) throw new Error('Reading viewport geometry unavailable');
+    const readingRight = fadeBounds?.x ?? viewportBounds.x + viewportBounds.width;
+    const fittedPercent = Math.floor((readingRight - viewportBounds.x - 24) / mixedWidthDocument.getPage(0).getWidth() * 100);
+    await zoom.fill(String(fittedPercent));
+    await zoom.press('Enter');
+    await expect(zoom).toHaveValue(String(fittedPercent));
+    const fittedZoom = await zoom.inputValue();
+    await page.getByRole('searchbox', { name: 'Search this PDF' }).fill('stable');
+    await expect(results).toHaveCount(2);
+    const expectFittedPage = async (index: number) => {
+      await expect(page.getByRole('textbox', { name: new RegExp(`Current page ${index + 1} of`) })).toHaveValue(String(index + 1));
+      await expect(zoom).toHaveValue(fittedZoom);
+      const pdfPage = main.locator(`[data-page-index="${index}"]`);
+      await expect.poll(async () => {
+        const viewport = await main.locator('[data-viewer-framing-viewport]').boundingBox();
+        const bounds = await pdfPage.boundingBox();
+        const fade = await rightFade.count() > 0 ? await rightFade.boundingBox() : null;
+        if (!viewport || !bounds) return Number.POSITIVE_INFINITY;
+        const right = fade?.x ?? viewport.x + viewport.width;
+        return Math.max(viewport.x - bounds.x, bounds.x + bounds.width - right);
+      }).toBeLessThan(2);
+    };
+    for (let index = 0; index < 2; index += 1) {
+      await results.nth(index).click();
+      await expectFittedPage(index);
+    }
+    const pageTrigger = page.getByRole('button', { name: /Open page navigation/ });
+    await pageTrigger.click();
+    await page.getByRole('menuitem', { name: 'Previous page', exact: true }).click();
+    await expectFittedPage(0);
+    await expect(page.getByRole('menu', { name: 'Page navigation' })).toBeVisible();
+    await page.getByRole('menuitem', { name: 'Next page', exact: true }).click();
+    await expectFittedPage(1);
+    await page.keyboard.press('Escape');
+    const pageInput = page.getByRole('textbox', { name: /^Current page/ });
+    await pageInput.fill('1');
+    await pageInput.press('Enter');
+    await expectFittedPage(0);
+    await openAnnotationsWorkspace(page);
+    await page.locator('#workspace-panel-annotations').getByRole('button', {
+      name: /^Page Note · Page 2 · .*Fitted jump destination\.$/u,
+    }).first().click();
+    await expectFittedPage(1);
+    await page.locator('[data-review-chrome]').hover({ position: { x: 2, y: 2 } });
+    await page.getByRole('button', { name: 'Back in document history', exact: true }).click();
+    await expectFittedPage(0);
+    await page.locator('[data-review-chrome]').hover({ position: { x: 2, y: 2 } });
+    await page.getByRole('button', { name: 'Forward in document history', exact: true }).click();
+    await expectFittedPage(1);
+  });
+}
+
 test("searches extracted PDF text with variants, history, references, and retained responsive state", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 });
   const errors = collectBrowserErrors(page);
