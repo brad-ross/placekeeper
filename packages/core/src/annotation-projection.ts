@@ -157,9 +157,12 @@ export function projectReviewItems(
   documentGeneration?: number,
   options: { readonly includePortableMetadata?: boolean; readonly annotationName?: string } = {},
 ): ReviewAnnotation[] {
+  const annotationName = options.annotationName === undefined
+    ? undefined
+    : normalizeAnnotationName(options.annotationName);
   return documentOrderedItems(items)
     .filter((item) => documentGeneration === undefined || reviewItemIsResolvedForGeneration(item, documentGeneration))
-    .flatMap((item) => projectReviewItemProjections(item, options.annotationName === undefined ? undefined : normalizeAnnotationName(options.annotationName), options));
+    .flatMap((item) => projectReviewItemProjections(item, annotationName, options));
 }
 
 export function reviewItemPageRange(item: ReviewItem): {

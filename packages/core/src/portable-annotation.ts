@@ -6,7 +6,7 @@ import type {
   ReviewState,
   ReviewWorkflowMode,
 } from "./review-model.js";
-import { canonicalizeReviewItem } from "./review-model.js";
+import { canonicalizeReviewItem, DEFAULT_ANNOTATION_NAME } from "./review-model.js";
 import {
   assertReviewItem,
   InvalidReviewCommandError,
@@ -27,7 +27,7 @@ import {
 } from './grouped-annotation-envelope.js';
 import { hasSafePortableAnnotationShape } from './portable-annotation-shape.js';
 
-export const PORTABLE_ANNOTATION_AUTHOR = "Placekeeper";
+export const PORTABLE_ANNOTATION_AUTHOR = DEFAULT_ANNOTATION_NAME;
 const PORTABLE_ANNOTATION_OWNER = "placekeeper";
 const KINDS = new Set<ReviewItemKind>([
   "replace",
@@ -423,10 +423,6 @@ function reconstructGroupedItem(
 function withImportedAuthor(item: ReviewItem, author: string): ReviewItem {
   const { importedAnnotationAuthor: _untrusted, ...clean } = item;
   return author === PORTABLE_ANNOTATION_AUTHOR ? clean : { ...clean, importedAnnotationAuthor: author };
-}
-
-export function isPortableAnnotationAuthor(author: string): boolean {
-  return author === PORTABLE_ANNOTATION_AUTHOR;
 }
 
 export function createPortableAnnotationCustom(

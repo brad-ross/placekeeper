@@ -1,4 +1,5 @@
 import {
+  DEFAULT_ANNOTATION_NAME,
   anchorEvidenceFromReviewItem,
   normalizeReviewSelectionAnchor,
   type ReviewItem,
@@ -69,7 +70,7 @@ export function portableAnnotationProjectionId(
  */
 export function serializePortableAnnotationGroup(
   item: ReviewItem,
-  author = "Placekeeper",
+  author = DEFAULT_ANNOTATION_NAME,
 ): readonly SerializedPortableAnnotationChild[] {
   const anchor = anchorEvidenceFromReviewItem(item);
   if (anchor.kind !== 'selection') return [];

@@ -1,6 +1,8 @@
 export type JsonPrimitive = boolean | number | string | null;
 export type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue };
 
+export const DEFAULT_ANNOTATION_NAME = "Placekeeper";
+
 export type ReviewItemKind =
   | "replace"
   | "delete"
@@ -522,7 +524,7 @@ export function createReviewState(input: {
 }
 
 export function normalizeAnnotationName(value: string): string {
-  return value.trim() || "Placekeeper";
+  return value.trim() || DEFAULT_ANNOTATION_NAME;
 }
 
 export function normalizeReviewState(state: ReviewState): ReviewState {
