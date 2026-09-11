@@ -279,6 +279,8 @@ function navigationHarness(options: {
   resizeViewportAfterFirstZoom?: number;
   stickyScrollActivity?: boolean;
   pluginVerticalOffset?: number;
+  pluginHorizontalOffset?: number;
+  modelPluginLayout?: boolean;
   horizontalScrollLimit?: number;
   horizontalRangeOverstatement?: number;
   readingViewportWidth?: number;
@@ -469,6 +471,15 @@ function navigationHarness(options: {
   };
   const scroll = {
     getCurrentPage: () => currentPage,
+    getRectPositionForPage: () => options.modelPluginLayout ? {
+      origin: {
+        x: pageRect.left - viewportRect.left + viewportScrollLeft
+          - (options.viewportGap ?? 0) - (options.pluginHorizontalOffset ?? 0),
+        y: pageRect.top - viewportRect.top + viewportScrollTop
+          - (options.viewportGap ?? 0) - (options.pluginVerticalOffset ?? 0),
+      },
+      size: { width: pageRect.width, height: pageRect.height },
+    } : null,
     scrollToPage: (request: ScrollToPageOptions) => {
       log.push('scroll');
       currentPage = request.pageNumber;
@@ -491,7 +502,7 @@ function navigationHarness(options: {
           ? viewportRect.left + (viewportRect.width - targetRect.width) / 2
           : viewportRect.left
             + viewportElement.clientWidth * ((request.alignX ?? 0) / 100)
-            - transformedAnchor.x;
+            - transformedAnchor.x + (options.pluginHorizontalOffset ?? 0);
         if (options.horizontalScrollLimit !== undefined) {
           viewportScrollLeft = Math.max(0, Math.min(options.horizontalScrollLimit,
             transformedAnchor.x - viewportElement.clientWidth * ((request.alignX ?? 0) / 100)));
@@ -1306,6 +1317,23 @@ describe('viewer navigation adapter', () => {
     expect(await harness.navigation.applyTarget(distantTarget)).toBe(true);
     expect(harness.log).toEqual(['scroll', 'scroll']);
     expect(harness.navigation.captureLocation()?.pageIndex).toBe(2);
+  });
+
+  it.each([Rotation.Degree0, Rotation.Degree90])('accounts for host padding before scrolling to an unmounted page at rotation %s', async (pageRotation) => {
+    const harness = navigationHarness({
+      farTargetInitiallyUnmounted: true,
+      modelPluginLayout: true,
+      viewportGap: 10,
+      pluginHorizontalOffset: 14,
+      pluginVerticalOffset: 2,
+      pageRotation,
+    });
+    expect(await harness.navigation.fitToWidth()).toBe(true);
+    harness.log.length = 0;
+    const distantTarget = { ...target(PdfZoomMode.XYZ, [300, 200, 0]), pageIndex: 2 };
+
+    expect(await harness.navigation.applyTarget(distantTarget)).toBe(true);
+    expect(harness.log).toEqual(['scroll', 'scroll']);
   });
 
   it('accepts settled instant navigation on an axis with no available scroll range', async () => {

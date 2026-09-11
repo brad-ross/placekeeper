@@ -595,6 +595,7 @@ export function createViewerNavigation(
   );
 
   const scrollAlignment = (
+    viewer: ActiveViewer,
     location: PdfViewerLocation,
     viewport?: PdfViewportQuery,
   ) => {
@@ -609,14 +610,37 @@ export function createViewerNavigation(
     const bounds = viewportElement.getBoundingClientRect();
     const scrollportLeft = bounds.left + viewportElement.clientLeft;
     const scrollportTop = bounds.top + viewportElement.clientTop;
+    let layoutOffsetX = 0;
+    let layoutOffsetY = 0;
+    // The plugin scrolls on the next frame using its uniform viewport gap.
+    // Measure the host's actual content origin from a mounted page first, so
+    // even an unmounted destination lands correctly on that initial scroll.
+    const mounted = mostVisibleMountedPageIndex(viewer);
+    const geometry = mounted === null ? null : pageGeometry(viewer, mounted.pageIndex, mounted);
+    if (mounted && geometry && Math.abs(geometry.scale - location.zoom) <= zoomTolerance) {
+      const virtualRect = viewer.scroll.getRectPositionForPage?.(
+        mounted.pageIndex,
+        { origin: { x: 0, y: 0 }, size: geometry.page.size },
+        location.zoom,
+        geometry.rotation,
+      );
+      if (virtualRect) {
+        layoutOffsetX = geometry.pageRect.left - scrollportLeft + viewportElement.scrollLeft
+          - virtualRect.origin.x - viewer.viewportGap;
+        layoutOffsetY = geometry.pageRect.top - scrollportTop + viewportElement.scrollTop
+          - virtualRect.origin.y - viewer.viewportGap;
+      }
+    }
     return {
       xPercent: (
         effectiveViewport.left - scrollportLeft
         + effectiveViewport.width * location.alignment.xPercent / 100
+        - layoutOffsetX
       ) / viewportElement.clientWidth * 100,
       yPercent: (
         effectiveViewport.top - scrollportTop
         + effectiveViewport.height * location.alignment.yPercent / 100
+        - layoutOffsetY
       ) / viewportElement.clientHeight * 100,
     };
   };
@@ -779,7 +803,7 @@ export function createViewerNavigation(
         }
       }
       if (!viewerStillOwnsDocument(viewer) || Date.now() >= deadline) return;
-      const alignment = scrollAlignment(origin);
+      const alignment = scrollAlignment(viewer, origin);
       if (alignment === null) return;
       viewer.scroll.scrollToPage({
         pageNumber: origin.pageIndex + 1,
@@ -966,7 +990,7 @@ export function createViewerNavigation(
         if (pageGeometry(viewer, location.pageIndex) === null) return false;
       }
       const scrollToLocation = () => {
-        const alignment = scrollAlignment(location, viewport);
+        const alignment = scrollAlignment(viewer, location, viewport);
         if (alignment === null) return false;
         flushSync(() => viewer.scroll.scrollToPage({
           pageNumber: location.pageIndex + 1,
