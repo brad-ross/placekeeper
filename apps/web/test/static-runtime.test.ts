@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
-import { addPageNote } from "../../../packages/core/src/review-commands.js";
+import { addPageNote, setAnnotationName } from "../../../packages/core/src/review-commands.js";
 import type { PdfWriter } from "../../../packages/core/src/pdf-writer.js";
 import type { ReviewItem } from "../../../packages/core/src/review-model.js";
 import { createBrowserDocumentSession } from "../../../packages/pdf-backends/src/browser-document-session.js";
@@ -22,6 +22,7 @@ describe("static browser review runtime", () => {
     const imported: ReviewItem = {
       id: "11111111-1111-4111-8111-111111111111",
       kind: "pageNote",
+      importedAnnotationAuthor: "Brad Ross",
       pageIndex: 0,
       createdAt: "2026-09-03T12:00:00.000Z",
       updatedAt: "2026-09-03T12:00:00.000Z",
@@ -64,6 +65,7 @@ describe("static browser review runtime", () => {
     const bootstrap = await runtime.bootstrap();
     expect(bootstrap.state).toMatchObject({
       revision: 0,
+      annotationName: "Brad Ross",
       history: [],
       historyCursor: 0,
       items: [imported],
@@ -73,6 +75,28 @@ describe("static browser review runtime", () => {
       savedRevision: 0,
     });
     expect(writer.inspect).toHaveBeenCalledWith(sourceBytes);
+    runtime.dispose();
+  });
+
+  it("rejects an annotation that exceeds metadata bounds with the confirmed name", async () => {
+    const runtime = await createStaticHostRuntime({
+      source: { name: "notes.pdf", bytes: sourceBytes },
+      viewerAssets: { pdfiumWasm: "https://placekeeper.example/pdfium.wasm" },
+    }, {
+      writer: { assess: async () => ({ eligible: true }), write: vi.fn() },
+      digest: async () => "a".repeat(64), createObjectURL: () => "blob:source",
+      revokeObjectURL: vi.fn(), download: vi.fn(),
+    });
+    const initial = (await runtime.bootstrap()).state;
+    await runtime.command(setAnnotationName(initial, "y".repeat(16_384)));
+    const named = (await runtime.bootstrap()).state;
+    await expect(runtime.command(addPageNote(named, 0,
+      { x: 40, y: 50, width: 18, height: 18 }, "x".repeat(16_384), {
+        createId: () => "22222222-2222-4222-8222-222222222222",
+        now: () => "2026-09-03T12:00:00.000Z",
+      }))).rejects.toThrow(/too much/i);
+    expect((await runtime.bootstrap()).state).toEqual(named);
+    await expect(runtime.command(setAnnotationName(initial, "Stale"))).rejects.toThrow(/revision/i);
     runtime.dispose();
   });
 
@@ -473,7 +497,7 @@ describe("static browser review runtime", () => {
     const pendingWrite = Promise.withResolvers<Awaited<ReturnType<PdfWriter["write"]>>>();
     const writer: PdfWriter = {
       assess: async () => ({ eligible: true }),
-      write: () => pendingWrite.promise,
+      write: vi.fn(() => pendingWrite.promise),
     };
     const download = vi.fn();
     const runtime = await createStaticHostRuntime({
@@ -497,17 +521,10 @@ describe("static browser review runtime", () => {
         now: () => "2026-09-03T12:00:00.000Z",
       },
     ));
+    const added = "accepted" in firstState ? firstState.state : firstState;
+    const named = await runtime.command(setAnnotationName(added, "Brad Ross"));
     const exporting = runtime.exportReviewedCopy();
-    await runtime.command(addPageNote(
-      "accepted" in firstState ? firstState.state : firstState,
-      0,
-      { x: 80, y: 90, width: 18, height: 18 },
-      "Later",
-      {
-        createId: () => "33333333-3333-4333-8333-333333333333",
-        now: () => "2026-09-03T12:01:00.000Z",
-      },
-    ));
+    await runtime.command(setAnnotationName("accepted" in named ? named.state : named, "Later Name"));
     pendingWrite.resolve({
       pdfBytes: sourceBytes,
       evidence: {
@@ -522,12 +539,15 @@ describe("static browser review runtime", () => {
       },
     });
     await expect(exporting).resolves.toMatchObject({
-      revision: 1,
+      revision: 2,
       warning: expect.stringMatching(/copy opens.*not comprehensively checked.*newer edits/i),
     });
+    expect(writer.write).toHaveBeenCalledWith(expect.objectContaining({
+      revision: 2, annotations: [expect.objectContaining({ author: "Brad Ross" })],
+    }));
     expect(download).toHaveBeenCalledOnce();
     await expect(runtime.saveStatus()).resolves.toMatchObject({
-      sync: { desiredRevision: 2, savedRevision: 1 },
+      sync: { desiredRevision: 3, savedRevision: 2 },
     });
     runtime.dispose();
   });

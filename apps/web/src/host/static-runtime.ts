@@ -4,7 +4,7 @@ import type {
   PdfRewriteEligibility,
   PdfWriteResult,
 } from "../../../../packages/core/src/pdf-writer.js";
-import { createImportedReviewState } from "../../../../packages/core/src/portable-annotation.js";
+import { assertPortableAnnotationWritable, createImportedReviewState } from "../../../../packages/core/src/portable-annotation.js";
 import type { ReviewState } from "../../../../packages/core/src/review-model.js";
 import { reduceReview } from "../../../../packages/core/src/review-reducer.js";
 import { createBrowserEmbedPdfWriter } from "../../../../packages/pdf-backends/src/browser-writer.js";
@@ -494,7 +494,11 @@ export async function createStaticHostRuntime(
     subscribeInvalidations: () => () => undefined,
     async command(command) {
       if (disposed) throw new Error("This review is closed.");
-      state = reduceReview(state, command);
+      const nextState = reduceReview(state, command);
+      projectReviewItems(nextState.items, undefined, {
+        ...(nextState.annotationName === undefined ? {} : { annotationName: nextState.annotationName }),
+      }).forEach(assertPortableAnnotationWritable);
+      state = nextState;
       updateUnloadGuard();
       return state;
     },
@@ -532,6 +536,7 @@ export async function createStaticHostRuntime(
           annotations: projectReviewItems(
             exportState.items,
             exportState.workflow.documentGeneration,
+            { ...(exportState.annotationName === undefined ? {} : { annotationName: exportState.annotationName }) },
           ),
         }, { timeoutMs: writerTimeoutMs });
       } catch (error) {

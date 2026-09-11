@@ -2244,7 +2244,9 @@ export class SessionBroker {
         originalDigest: session.currentOriginalDigest,
         revision: state.revision,
         sourceSnapshotPath: session.sourceSnapshotPath,
-        annotations: projectReviewItems(state.items),
+        annotations: projectReviewItems(state.items, undefined, {
+          ...(state.annotationName === undefined ? {} : { annotationName: state.annotationName }),
+        }),
         manageNativeAnnotations: state.nativeAnnotationImportDigest === state.source.digest,
         items: documentOrderedItems(state.items),
         workflowMode: state.workflow.mode,
@@ -2302,7 +2304,9 @@ export class SessionBroker {
         );
       }
       const nextState = reduceReview(session.state, command);
-      projectReviewItems(nextState.items).forEach(assertPortableAnnotationWritable);
+      projectReviewItems(nextState.items, undefined, {
+        ...(nextState.annotationName === undefined ? {} : { annotationName: nextState.annotationName }),
+      }).forEach(assertPortableAnnotationWritable);
       const desiredDigest = reviewStateDigest(nextState);
       const nextSync: DurableSaveSync = {
         phase: session.destination.phase === "active" ? "saving" : "not-saved",

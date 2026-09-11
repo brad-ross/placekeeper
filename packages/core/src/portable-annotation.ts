@@ -723,12 +723,19 @@ export function createImportedReviewState(input: {
   readonly workflowMode?: ReviewWorkflowMode;
   readonly documentGeneration?: number;
 }): ReviewState {
+  // Only validated owned imports carry author evidence. Native PDF annotations
+  // retain their own authors and cannot establish a document-wide name.
+  const ownedAuthors = new Set(input.items
+    .filter((item) => item.kind !== "pdfAnnotation")
+    .map((item) => item.importedAnnotationAuthor ?? PORTABLE_ANNOTATION_AUTHOR));
+  const annotationName = ownedAuthors.size === 1 ? [...ownedAuthors][0] : undefined;
   const mode = input.workflowMode ?? "standard";
   const documentGeneration = input.documentGeneration ?? 1;
   return {
     schemaVersion: 2,
     sessionId: input.sessionId,
     source: input.source,
+    ...(annotationName === undefined ? {} : { annotationName }),
     ...(input.sourceRootId === undefined ? {} : { sourceRootId: input.sourceRootId }),
     revision: 0,
     lifecycle: "active",

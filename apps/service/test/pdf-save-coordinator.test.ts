@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
+import { setAnnotationName } from "../../../packages/core/src/review-commands.js";
 import { PdfWriterError, type PdfWriter } from "../../../packages/core/src/pdf-writer.js";
 import { inspectProjectedPortableAnnotations } from "../../../packages/core/src/portable-annotation.js";
 import type { ReviewCommand, ReviewItem, ReviewState } from "../../../packages/core/src/review-model.js";
@@ -275,6 +276,27 @@ describe("coalescing PDF autosave", () => {
       codexTasks: 0,
       transientWork: 0,
     });
+  });
+
+  it("saves a name-only revision to the active destination without changing item dates", async () => {
+    const authors: string[][] = [];
+    const delegate = fakeWriter();
+    const writer: PdfWriter = { ...delegate, write: async (request) => {
+      authors.push(request.annotations.map(({ author }) => author));
+      return delegate.write(request);
+    } };
+    const { root, broker, coordinator, sessionId } = await setup(undefined, { writer });
+    await coordinator.chooseCopy(sessionId, join(root, "named.pdf"));
+    await broker.acceptMutation(sessionId, addCrossPage(0));
+    await coordinator.requestSave(sessionId);
+    const before = broker.state(sessionId)!;
+    await broker.acceptMutation(sessionId, setAnnotationName(before, "Brad Ross"));
+    expect(broker.saveStatus(sessionId)?.sync).toMatchObject({ desiredRevision: 2, savedRevision: 1 });
+    expect(broker.saveStatus(sessionId)?.sync.desiredDigest).not.toBe(broker.saveStatus(sessionId)?.sync.savedDigest);
+    await coordinator.requestSave(sessionId);
+    expect(authors.at(-1)).toEqual(["Brad Ross", "Brad Ross", "Brad Ross"]);
+    expect(broker.state(sessionId)?.items).toEqual(before.items);
+    expect(broker.saveStatus(sessionId)?.sync).toMatchObject({ phase: "clean", savedRevision: 2 });
   });
 
   it.each(["copy", "original"] as const)(

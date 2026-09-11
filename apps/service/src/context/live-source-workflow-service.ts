@@ -15,9 +15,6 @@ import {
 } from "../../../../packages/core/src/live-context.js";
 import type { ReviewItem } from "../../../../packages/core/src/review-model.js";
 import {
-  isPortableAnnotationAuthor,
-} from "../../../../packages/core/src/portable-annotation.js";
-import {
   inspectPdfWithEmbedPdf,
   type InspectedPdf,
 } from "../../../../packages/pdf-backends/src/embedpdf-adapter.js";
@@ -359,9 +356,7 @@ export class LiveSourceWorkflowService {
     const inheritedReview = inspected.portableItems.some(({ id }) => plan.baselineItemIds.has(id)) ||
       inspected.annotations.some((annotation) =>
         plan.baselineItemIds.has(annotation.id) ||
-        validatedOwnedIds.has(annotation.id) &&
-          annotation.author !== undefined &&
-          isPortableAnnotationAuthor(annotation.author),
+        validatedOwnedIds.has(annotation.id),
       );
     if (inheritedReview) throw new Error("The rebuilt PDF still contains review annotations");
     const verificationId = this.#id();

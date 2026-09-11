@@ -19,6 +19,9 @@ import {
   type ReviewCommand,
   type ReviewState,
 } from "../../../packages/core/src/review-model.js";
+import { createImportedReviewState } from "../../../packages/core/src/portable-annotation.js";
+import { projectReviewItems } from "../../../packages/core/src/annotation-projection.js";
+import { setAnnotationName } from "../../../packages/core/src/review-commands.js";
 import {
   DraftSnapshotStore,
   reviewStateDigest,
@@ -127,6 +130,34 @@ function draft(revision: number): RecoverableDraft {
 }
 
 describe("atomic recovery generations", () => {
+  it("infers only unanimous owned authors and preserves mixed names until confirmation", () => {
+    const command = addCommand(0);
+    if (command.type !== "add") throw new Error("Expected add");
+    const first = { ...command.item, importedAnnotationAuthor: "Brad Ross" };
+    const second = { ...command.item, id: randomUUID(), importedAnnotationAuthor: "Alex" };
+    const input = { sessionId: "new-document", source: draft(0).state.source };
+    expect(createImportedReviewState({ ...input, items: [first] }).annotationName).toBe("Brad Ross");
+    expect(createImportedReviewState({ ...input, items: [] }).annotationName).toBeUndefined();
+    expect(createImportedReviewState({ ...input, items: [{ ...first, kind: "pdfAnnotation" }] }).annotationName).toBeUndefined();
+    const mixed = createImportedReviewState({ ...input, items: [first, second] });
+    expect(mixed.annotationName).toBeUndefined();
+    expect(projectReviewItems(mixed.items).map(({ author }) => author).sort()).toEqual(["Alex", "Brad Ross"]);
+    expect(projectReviewItems(mixed.items, undefined, { annotationName: "Placekeeper" })
+      .map(({ author }) => author)).toEqual(["Placekeeper", "Placekeeper"]);
+  });
+
+  it("includes a confirmed name in the digest and recovers it without annotations", async () => {
+    const legacy = draft(0);
+    const named = { ...legacy, state: { ...legacy.state, annotationName: "Brad Ross", revision: 1 } };
+    expect(reviewStateDigest(named.state)).not.toBe(reviewStateDigest(legacy.state));
+    expect(reviewStateDigest({ ...legacy.state, annotationName: undefined } as unknown as ReviewState))
+      .toBe(reviewStateDigest(legacy.state));
+    const store = new DraftSnapshotStore(await temporaryDirectory());
+    await store.persist(named);
+    expect((await store.recover())?.state).toMatchObject({ annotationName: "Brad Ross", items: [] });
+    expect(draft(0).state.annotationName).toBeUndefined();
+  });
+
   it("rechecks an active temporary when its owner releases it without changing the directory", async () => {
     const directory = await temporaryDirectory();
     const store = new DraftSnapshotStore(directory);
@@ -518,6 +549,12 @@ describe("broker acknowledgement and restart recovery", () => {
       addCommand(0),
     );
     expect(acknowledged.revision).toBe(1);
+    await firstBroker.acceptMutation(opened.launch.sessionId, setAnnotationName(acknowledged, "Brad Ross"));
+    const otherPdf = join(directory, "other.pdf");
+    await writeFile(otherPdf, "%PDF-1.7\nunrelated document\n%%EOF");
+    const other = await firstBroker.openReview({ pdfPath: otherPdf });
+    if (other.kind !== "opened") throw new Error("Expected unrelated review");
+    expect(firstBroker.state(other.launch.sessionId)?.annotationName).toBeUndefined();
     expect(await readFile(pdf)).toEqual(original);
 
     const restarted = new SessionBroker({ recoveryRoot });
@@ -540,7 +577,8 @@ describe("broker acknowledgement and restart recovery", () => {
     });
     if (resumed.kind !== "opened") throw new Error("Expected resumed review");
     expect(restarted.state(resumed.launch.sessionId)).toMatchObject({
-      revision: 1,
+      revision: 2,
+      annotationName: "Brad Ross",
       items: [{ payload: { comment: "remember this" } }],
     });
     expect(await restarted.documentBytes(resumed.launch.sessionId)).toEqual(original);
@@ -734,6 +772,25 @@ describe("broker acknowledgement and restart recovery", () => {
     ).recover()).resolves.toBeDefined();
   });
 
+  it("rejects final metadata overflow before acknowledging an annotation under a chosen name", async () => {
+    const directory = await temporaryDirectory();
+    const pdf = join(directory, "paper.pdf");
+    await writeFile(pdf, "%PDF-1.7\noriginal\n%%EOF");
+    const broker = new SessionBroker({ recoveryRoot: join(directory, "recovery") });
+    const opened = await broker.openReview({ pdfPath: pdf });
+    if (opened.kind !== "opened") throw new Error("Expected opened review");
+    const initial = broker.state(opened.launch.sessionId)!;
+    const named = await broker.acceptMutation(opened.launch.sessionId,
+      setAnnotationName(initial, "y".repeat(16_384)));
+    await expect(broker.acceptMutation(opened.launch.sessionId, addCommand(1, "x".repeat(16_384))))
+      .rejects.toThrow(/too much/i);
+    expect(broker.state(opened.launch.sessionId)).toEqual(named);
+    await expect(broker.acceptMutation(opened.launch.sessionId, setAnnotationName(initial, "Stale")))
+      .rejects.toThrow(/revision/i);
+    expect((await new DraftSnapshotStore(join(directory, "recovery", opened.launch.sessionId)).recover())?.state)
+      .toEqual(named);
+  });
+
   it("never acknowledges a mutation whose atomic persistence fails", async () => {
     const directory = await temporaryDirectory();
     const pdf = join(directory, "paper.pdf");
@@ -751,7 +808,7 @@ describe("broker acknowledgement and restart recovery", () => {
     const opened = await broker.openReview({ pdfPath: pdf });
     if (opened.kind !== "opened") throw new Error("Expected a new review");
     await expect(
-      broker.acceptMutation(opened.launch.sessionId, addCommand(0)),
+      broker.acceptMutation(opened.launch.sessionId, setAnnotationName(broker.state(opened.launch.sessionId)!, "Brad Ross")),
     ).rejects.toThrow("disk full");
     expect(broker.state(opened.launch.sessionId)?.revision).toBe(0);
     const store = new DraftSnapshotStore(
