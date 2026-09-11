@@ -143,6 +143,6 @@ export function redoReview(state: ReviewState): ReviewCommand {
   return { type: 'redo', expectedRevision: state.revision };
 }
 
-export function setAnnotationName(state: ReviewState, annotationName: string): ReviewCommand {
+export function setAnnotationName(state: ReviewState, annotationName: string): Extract<ReviewCommand, { type: 'set-annotation-name' }> {
   return { type: 'set-annotation-name', expectedRevision: state.revision, annotationName };
 }

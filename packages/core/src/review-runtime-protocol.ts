@@ -1,3 +1,4 @@
+import type { SaveDestinationConfirmation } from "./review-model.js";
 export const REVIEW_RUNTIME_PROTOCOL = "placekeeper.review-runtime" as const;
 export const REVIEW_RUNTIME_VERSION = 1 as const;
 
@@ -283,6 +284,12 @@ function safeChromeSaveStatus(value: unknown): unknown | undefined {
   };
 }
 
+export function isSaveDestinationConfirmation(value: unknown): value is SaveDestinationConfirmation {
+  return record(value) && hasOnlyKeys(value, ["command", "expectedGeneration"]) &&
+    safeInteger(value.expectedGeneration) && record(value.command) &&
+    value.command.type === "set-annotation-name" && safeChromeCommand(value.command) !== undefined;
+}
+
 /** Returns a fresh, closed payload for the Chrome RPC boundary, or rejects it. */
 export function sanitizeChromeReviewRuntimeRequest(
   method: ReviewRuntimeMethod,
@@ -290,17 +297,24 @@ export function sanitizeChromeReviewRuntimeRequest(
 ): unknown | undefined {
   if (!isReviewRuntimeMethodForHost("chrome", method) || !record(payload)) return undefined;
   if (["bootstrap", "presence", "detach", "saveStatus", "saveProposal", "chooseFolder",
-    "chooseOriginal", "retrySave", "locateSave", "scope"].includes(method)) {
+    "retrySave", "locateSave", "scope"].includes(method)) {
     return Object.keys(payload).length === 0 ? {} : undefined;
   }
   if (method === "command") return safeChromeCommand(payload);
+  if (method === "chooseOriginal") {
+    if (!hasOnlyKeys(payload, ["confirmation"]) ||
+      (payload.confirmation !== undefined && !isSaveDestinationConfirmation(payload.confirmation))) return undefined;
+    return payload.confirmation === undefined ? {} : { confirmation: closedJsonClone(payload.confirmation) };
+  }
   if (method === "chooseCopy") {
-    if (!hasOnlyKeys(payload, ["filename", "folderSelectionId"]) ||
+    if (!hasOnlyKeys(payload, ["filename", "folderSelectionId", "confirmation"]) ||
+      (payload.confirmation !== undefined && !isSaveDestinationConfirmation(payload.confirmation)) ||
       (payload.filename !== undefined && sanitizeReviewRuntimeDisplayString(payload.filename) === undefined) ||
       (payload.folderSelectionId !== undefined &&
         (typeof payload.folderSelectionId !== "string" || !SAFE_RUNTIME_ID.test(payload.folderSelectionId)))) return undefined;
     return {
       ...(payload.filename === undefined ? {} : { filename: sanitizeReviewRuntimeDisplayString(payload.filename) }),
+      ...(payload.confirmation === undefined ? {} : { confirmation: closedJsonClone(payload.confirmation) }),
       ...(payload.folderSelectionId === undefined ? {} : { folderSelectionId: payload.folderSelectionId }),
     };
   }
@@ -364,7 +378,11 @@ export function sanitizeChromeReviewRuntimeResponse(
   }
   if (method === "scope") return safeChromeScope(value);
   if (["saveStatus", "chooseCopy", "chooseOriginal", "retrySave", "locateSave"].includes(method)) {
-    return safeChromeSaveStatus(value);
+    const status = safeChromeSaveStatus(value);
+    if (status === undefined || !record(value) || value.nameResult === undefined) return status;
+    if (method !== "chooseCopy" && method !== "chooseOriginal") return undefined;
+    const nameResult = sanitizeChromeReviewRuntimeResponse("command", value.nameResult);
+    return nameResult === undefined ? undefined : { ...status as object, nameResult };
   }
   if (method === "command") {
     if (record(value) && value.accepted === false) {

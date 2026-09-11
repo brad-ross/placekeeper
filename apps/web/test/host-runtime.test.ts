@@ -640,7 +640,7 @@ describe("host-neutral review runtime", () => {
     runtime.dispose();
   });
 
-  it("does not rehydrate the VS Code PDF for the revision returned by its own command", async () => {
+  it.each(["command", "chooseOriginal", "chooseCopy"] as const)("does not rehydrate the VS Code PDF for its own %s revision", async (method) => {
     const listeners = new Set<(message: unknown) => void>();
     const requests: Record<string, unknown>[] = [];
     const runtime = createRpcHostRuntime({
@@ -692,7 +692,11 @@ describe("host-neutral review runtime", () => {
     const invalidations: HostRuntimeInvalidation[] = [];
     runtime.subscribeInvalidations((event) => invalidations.push(event));
 
-    const command = runtime.command({ type: "undo", expectedRevision: 0 });
+    const confirmation = { command: setAnnotationName(state, "Brad Ross"), expectedGeneration: 1 };
+    const command = method === "command" ? runtime.command(confirmation.command)
+      : method === "chooseCopy" ? runtime.chooseCopy("named.pdf", undefined, confirmation)
+      : runtime.chooseOriginal(confirmation);
+    expect(requests.at(-1)).toMatchObject({ method, payload: method === "command" ? confirmation.command : { confirmation } });
     const commandRequest = requests.at(-1)!;
     const ownRevision = {
       protocol: REVIEW_RUNTIME_PROTOCOL,
@@ -705,8 +709,9 @@ describe("host-neutral review runtime", () => {
     listeners.forEach((listener) => listener(ownRevision));
 
     expect(invalidations).toEqual([]);
-    respond(commandRequest, 0, { ...state, revision: 1 });
-    await expect(command).resolves.toMatchObject({ revision: 1 });
+    const named = { ...state, revision: 1, annotationName: "Brad Ross" };
+    respond(commandRequest, 0, method === "command" ? named : { nameResult: named });
+    await expect(command).resolves.toMatchObject(method === "command" ? { revision: 1 } : { nameResult: { revision: 1 } });
     expect(invalidations).toEqual([]);
 
     listeners.forEach((listener) => listener({

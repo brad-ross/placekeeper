@@ -163,25 +163,26 @@ export function useSaveDestination(props: { api: ProductionSessionApi }, scope: 
     setDestinationError(undefined);
     setNameError(undefined);
     try {
+      const beforeName = stateRef.current;
+      const confirmation = { command: setAnnotationName(beforeName, annotationName),
+        expectedGeneration: beforeName.workflow.documentGeneration };
       const established = choice === "copy"
-        ? await props.api.chooseCopy(filename, folderSelectionId)
-        : await props.api.chooseOriginal();
+        ? await props.api.chooseCopy(filename, folderSelectionId, confirmation)
+        : await props.api.chooseOriginal(confirmation);
       if (!isCurrent()) return;
       setSaveStatus(established);
-      const beforeName = stateRef.current;
-      const named = await props.api.command(setAnnotationName(beforeName, annotationName));
-      if (!isCurrent()) return;
+      const named = established.nameResult;
+      if (named === undefined) throw new Error("The destination did not acknowledge the annotation name.");
+      const acceptedState = 'accepted' in named ? named.state : named;
+      if (!pendingDestinationIsCurrent(dialog, acceptedState, documentGenerationRef.current) ||
+        acceptedState.workflow.documentGeneration !== beforeName.workflow.documentGeneration) return;
+      if (acceptedState.revision >= stateRef.current.revision) {
+        stateRef.current = acceptedState;
+        setState(acceptedState);
+      }
       if ('accepted' in named) {
-        if (named.state.revision >= stateRef.current.revision) {
-          stateRef.current = named.state;
-          setState(named.state);
-        }
         setNameError(named.message);
         return;
-      }
-      if (named.revision >= stateRef.current.revision) {
-        stateRef.current = named;
-        setState(named);
       }
       if (dialog.pending !== undefined) {
         // Only account for our own name command. An already stale draft must

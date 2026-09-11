@@ -498,6 +498,12 @@ describe("VS Code local host adapter", () => {
       payload: {},
     };
     expect(parseWebviewRequest(request, expected, new Set())).toEqual(request);
+    const confirmation = { command: { type: "set-annotation-name", expectedRevision: 7, annotationName: "Brad Ross" }, expectedGeneration: 2 };
+    for (const method of ["chooseCopy", "chooseOriginal"]) {
+      const named = { ...request, method, payload: { confirmation } };
+      expect(parseWebviewRequest(named, expected, new Set())).toEqual(named);
+      expect(parseWebviewRequest({ ...named, payload: { confirmation: { ...confirmation, expectedGeneration: -1 } } }, expected, new Set())).toBeUndefined();
+    }
   });
 
   it("rehydrates through the real bridge with an identity-free successor bootstrap", async () => {

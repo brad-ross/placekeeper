@@ -608,3 +608,9 @@ export function startReviewGeneration(
     historyCursor: history.length,
   };
 }
+
+/** Revision- and generation-fenced name intent accepted with a destination. */
+export interface SaveDestinationConfirmation {
+  readonly command: Extract<ReviewCommand, { readonly type: 'set-annotation-name' }>;
+  readonly expectedGeneration: number;
+}

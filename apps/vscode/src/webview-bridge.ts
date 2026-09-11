@@ -1,3 +1,4 @@
+import { isSaveDestinationConfirmation } from "../../../packages/core/src/review-runtime-protocol.js";
 import { randomBytes } from "node:crypto";
 import WebSocket from "ws";
 import {
@@ -102,11 +103,16 @@ function validPayload(method: ReviewRuntimeMethod, payload: unknown): boolean {
   if (!isObject(payload) || containsCapabilityPrimitive(payload)) return false;
   const keys = Object.keys(payload);
   if (["bootstrap", "presence", "detach", "saveStatus", "saveProposal", "chooseFolder",
-    "chooseOriginal", "retrySave", "locateSave", "scope", "forwardSyncTex"].includes(method)) {
+    "retrySave", "locateSave", "scope", "forwardSyncTex"].includes(method)) {
     return keys.length === 0;
   }
+  if (method === "chooseOriginal") {
+    return keys.every((key) => key === "confirmation") &&
+      (payload.confirmation === undefined || isSaveDestinationConfirmation(payload.confirmation));
+  }
   if (method === "chooseCopy") {
-    return keys.every((key) => key === "filename" || key === "folderSelectionId") &&
+    return keys.every((key) => key === "filename" || key === "folderSelectionId" || key === "confirmation") &&
+      (payload.confirmation === undefined || isSaveDestinationConfirmation(payload.confirmation)) &&
       (payload.filename === undefined || (typeof payload.filename === "string" && payload.filename.length <= 255)) &&
       (payload.folderSelectionId === undefined || (typeof payload.folderSelectionId === "string" && SAFE_ID.test(payload.folderSelectionId)));
   }
@@ -290,7 +296,14 @@ function safeResult(method: ReviewRuntimeBrokerMethod, value: unknown): unknown 
       return safeScope(value);
     case "saveStatus":
     case "chooseCopy":
-    case "chooseOriginal":
+    case "chooseOriginal": {
+      const status = safeSaveStatus(value);
+      if (!isObject(value) || value.nameResult === undefined || !isObject(status)) return status;
+      const named = value.nameResult;
+      return { ...status, nameResult: isObject(named) && named.accepted === false
+        ? { ...named, state: safeState(named.state) } : safeState(named) };
+    }
+
     case "retrySave":
     case "locateSave":
       return safeSaveStatus(value);
@@ -486,8 +499,9 @@ export function createLoopbackRuntimeClient(options: LoopbackRuntimeClientOption
         const { path: _path, ...safeTarget } = target;
         return { ...value, target: safeTarget };
       }
-      if (method === "command" && isObject(value)) {
-        const state = value.accepted === false ? value.state : value;
+      if (["command", "chooseCopy", "chooseOriginal"].includes(method) && isObject(value)) {
+        const named = method === "command" ? value : value.nameResult;
+        const state = isObject(named) && named.accepted === false ? named.state : named;
         if (isObject(state) && isObject(state.workflow) &&
           Number.isSafeInteger(state.workflow.documentGeneration) &&
           Number.isSafeInteger(state.revision)) {

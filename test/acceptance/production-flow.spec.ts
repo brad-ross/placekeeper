@@ -6635,26 +6635,17 @@ for (const width of [1280, 620, 360]) {
 
 test('document annotation name preserves rejected save drafts for correction and retry', async ({ page }) => {
   const { sessionId } = await openFreshProductionFixture(page, plainTextPdf, 'Rejected name fixture failed');
-  let rejectName = true;
-  await page.route(`**/s/${sessionId}/commands`, async (route) => {
-    if (rejectName && route.request().postDataJSON().type === 'set-annotation-name') {
-      await route.fulfill({ status: 422, contentType: 'application/json', body: JSON.stringify({
-        ok: false, error: { kind: 'invalid-review-command', message: 'Annotation name is too long' },
-      }) });
-    } else await route.continue();
-  });
   await page.getByRole('button', { name: /Open automatic save options$/u }).click();
   const dialog = page.getByRole('dialog', { name: 'Choose where to save annotations', exact: true });
-  await dialog.getByRole('radio', { name: 'Modify the original PDF' }).check();
   const name = dialog.getByRole('textbox', { name: 'Name on annotations' });
-  await name.fill('Rejected draft');
+  await name.fill('x'.repeat(100_000));
   await dialog.getByRole('button', { name: 'Confirm', exact: true }).click();
-  await expect(dialog.getByRole('alert')).toHaveText('Annotation name is too long');
-  await expect(name).toHaveValue('Rejected draft');
+  await expect(dialog.getByRole('alert')).toContainText('Annotation name');
+  await expect(name).toHaveValue('x'.repeat(100_000));
   await expect(name).toHaveAttribute('aria-invalid', 'true');
-  await expect(name).toHaveAccessibleDescription('Annotation name is too long');
+  await expect(name).toHaveAccessibleDescription(/Annotation name/u);
   expect(host.broker.state(sessionId)?.annotationName).toBeUndefined();
-  rejectName = false;
+  expect(host.broker.saveStatus(sessionId)?.destination.phase).toBe("none");
   await name.fill('Corrected name');
   await dialog.getByRole('button', { name: 'Confirm', exact: true }).click();
   await expect(dialog).toHaveCount(0);
@@ -6684,6 +6675,7 @@ test('document annotation name advances only the pending first annotation revisi
   const commands: { type: string; expectedRevision: number }[] = [];
   page.on('request', (request) => {
     if (request.url().endsWith(`/s/${sessionId}/commands`)) commands.push(request.postDataJSON());
+    if (request.url().endsWith(`/s/${sessionId}/save/original`)) commands.push(request.postDataJSON().confirmation.command);
   });
   const canvas = page.locator("[data-page-index='0']").first();
   await waitForRenderedPageImage(canvas);

@@ -1,3 +1,4 @@
+import type { SaveDestinationResult } from "../host/session-contracts.js";
 import type { SaveStatus } from "../../../../packages/core/src/save-status.js";
 import type { ReviewCommand, ReviewState } from "../../../../packages/core/src/review-model.js";
 import type {
@@ -252,15 +253,16 @@ export async function loadProductionSession(session: ProductionSession): Promise
       },
       saveStatus: () => request<SaveStatus>("/save/status"),
       saveProposal: () => request<SaveCopyProposal>("/save/proposal"),
-      chooseCopy: (filename, folderSelectionId) => post<SaveStatus>(
+      chooseCopy: (filename, folderSelectionId, confirmation) => post<SaveDestinationResult>(
         "/save/copy",
         {
           ...(filename === undefined ? {} : { filename }),
           ...(folderSelectionId === undefined ? {} : { folderSelectionId }),
+          ...(confirmation === undefined ? {} : { confirmation }),
         },
       ),
       chooseFolder: () => post("/save/folder"),
-      chooseOriginal: () => post<SaveStatus>("/save/original"),
+      chooseOriginal: (confirmation) => post<SaveDestinationResult>("/save/original", confirmation === undefined ? {} : { confirmation }),
       retrySave: () => post<SaveStatus>("/save/retry"),
       locateSave: () => post<SaveStatus>("/save/locate"),
       exportReviewedCopy: (confirmPossiblyStale) => post<ProductionExportResult>(

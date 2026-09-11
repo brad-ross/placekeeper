@@ -25,6 +25,25 @@ describe("shared review runtime protocol", () => {
     expect(sanitizeChromeReviewRuntimeRequest("command", { ...command, preference: true })).toBeUndefined();
   });
 
+  it("transports destination name confirmation and sanitizes its canonical result", () => {
+    const confirmation = { command: { type: "set-annotation-name", expectedRevision: 2, annotationName: "Brad Ross" }, expectedGeneration: 1 };
+    const state = createReviewState({ sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      source: { fileId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", digest: "a".repeat(64), byteLength: 100 } });
+    const status = { destination: { phase: "none", generation: 0 }, sync: { phase: "clean", desiredRevision: 0, savedRevision: 0 } };
+    for (const method of ["chooseCopy", "chooseOriginal"] as const) {
+      expect(sanitizeChromeReviewRuntimeRequest(method, { confirmation })).toEqual({ confirmation });
+      expect(sanitizeChromeReviewRuntimeRequest(method, { confirmation: { ...confirmation, expectedGeneration: -1 } })).toBeUndefined();
+      expect(sanitizeChromeReviewRuntimeRequest(method, { confirmation: { ...confirmation, command: { type: "undo", expectedRevision: 2 } } })).toBeUndefined();
+      expect(sanitizeChromeReviewRuntimeRequest(method, { confirmation: { ...confirmation, preference: true } })).toBeUndefined();
+      expect(sanitizeChromeReviewRuntimeResponse(method, { ...status, nameResult: state }))
+        .toMatchObject({ nameResult: { sessionId: state.sessionId } });
+      const unsafe = sanitizeChromeReviewRuntimeResponse(method, { ...status, nameResult: { ...state, credential: "secret" } });
+      expect(unsafe === undefined || !JSON.stringify(unsafe).includes("secret")).toBe(true);
+      expect(sanitizeChromeReviewRuntimeResponse(method, { ...status, nameResult: { accepted: false, state, message: "Annotation name is too long" } }))
+        .toMatchObject({ nameResult: { accepted: false, message: "Annotation name is too long" } });
+    }
+  });
+
   it("defines the complete versioned method vocabulary for both hosts", () => {
     expect(REVIEW_RUNTIME_PROTOCOL).toBe("placekeeper.review-runtime");
     expect(REVIEW_RUNTIME_VERSION).toBe(1);

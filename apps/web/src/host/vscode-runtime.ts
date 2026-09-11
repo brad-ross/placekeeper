@@ -1,3 +1,4 @@
+import type { SaveDestinationResult } from "./session-contracts.js";
 import type { SaveStatus } from "../../../../packages/core/src/save-status.js";
 import type { ReviewCommand, ReviewState } from "../../../../packages/core/src/review-model.js";
 import type { PlacekeeperLinkLocation } from "../../../../packages/core/src/placekeeper-link.js";
@@ -222,7 +223,7 @@ export function createRpcHostRuntime(
   const releaseDeferredCommandInvalidation = () => {
     if (
       deferredCommandInvalidation === undefined
-      || [...pending.values()].some((request) => request.method === "command")
+      || [...pending.values()].some((request) => ["command", "chooseCopy", "chooseOriginal"].includes(request.method))
     ) return;
     const deferred = deferredCommandInvalidation;
     deferredCommandInvalidation = undefined;
@@ -259,7 +260,7 @@ export function createRpcHostRuntime(
       if (revisionAlreadyObserved(event)) return;
       if (
         event.reason === "revision"
-        && [...pending.values()].some((request) => request.method === "command")
+        && [...pending.values()].some((request) => ["command", "chooseCopy", "chooseOriginal"].includes(request.method))
       ) {
         if (
           deferredCommandInvalidation === undefined
@@ -366,6 +367,21 @@ export function createRpcHostRuntime(
     };
   };
 
+  const chooseDestination = async (method: "chooseCopy" | "chooseOriginal", payload: unknown): Promise<SaveDestinationResult> => {
+    try {
+      const value = await invoke<SaveDestinationResult>(method, payload);
+      const namedState = value.nameResult !== undefined && 'accepted' in value.nameResult
+        ? value.nameResult.state : value.nameResult;
+      if (namedState !== undefined && (identity === undefined ||
+        namedState.workflow.documentGeneration > identity.generation ||
+        (namedState.workflow.documentGeneration === identity.generation && namedState.revision >= identity.revision))) {
+        const conflictInvalidation = updateIdentityFromState(value.nameResult);
+        if (conflictInvalidation !== undefined) publishInvalidation(conflictInvalidation);
+      }
+      return value;
+    } finally { releaseDeferredCommandInvalidation(); }
+  };
+
   return {
     host,
     async bootstrap(signal?: AbortSignal): Promise<HostRuntimeBootstrap> {
@@ -468,12 +484,13 @@ export function createRpcHostRuntime(
     },
     saveStatus: () => invoke<SaveStatus>("saveStatus"),
     saveProposal: () => invoke<SaveCopyProposal>("saveProposal"),
-    chooseCopy: (filename, folderSelectionId) => invoke("chooseCopy", {
+    chooseCopy: (filename, folderSelectionId, confirmation) => chooseDestination("chooseCopy", {
       ...(filename === undefined ? {} : { filename }),
       ...(folderSelectionId === undefined ? {} : { folderSelectionId }),
+      ...(confirmation === undefined ? {} : { confirmation }),
     }),
     chooseFolder: () => invoke("chooseFolder"),
-    chooseOriginal: () => invoke("chooseOriginal"),
+    chooseOriginal: (confirmation) => chooseDestination("chooseOriginal", confirmation === undefined ? {} : { confirmation }),
     retrySave: () => invoke("retrySave"),
     locateSave: () => invoke("locateSave"),
     exportReviewedCopy: (confirmPossiblyStale) => invoke<ProductionExportResult>(

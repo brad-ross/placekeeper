@@ -1,4 +1,4 @@
-import type { ReviewCommand, ReviewState } from "../../../../packages/core/src/review-model.js";
+import type { ReviewCommand, ReviewState, SaveDestinationConfirmation } from "../../../../packages/core/src/review-model.js";
 import type { SaveStatus } from "../../../../packages/core/src/save-status.js";
 import type { LiveContextBindingStatus } from "../../../../packages/core/src/live-context.js";
 import type { RejectedReviewCommand } from "../review/review-command-result.js";
@@ -43,14 +43,18 @@ export interface ProductionExportResult {
   readonly warning?: string;
 }
 
+export type SaveDestinationResult = SaveStatus & {
+  readonly nameResult?: ReviewState | RejectedReviewCommand;
+};
+
 export interface ProductionSessionApi {
   presence?(): () => void;
   command(command: ReviewCommand): Promise<ReviewState | RejectedReviewCommand>;
   saveStatus(): Promise<SaveStatus>;
   saveProposal(): Promise<SaveCopyProposal>;
-  chooseCopy(filename?: string, folderSelectionId?: string): Promise<SaveStatus>;
+  chooseCopy(filename?: string, folderSelectionId?: string, confirmation?: SaveDestinationConfirmation): Promise<SaveDestinationResult>;
   chooseFolder(): Promise<{ readonly cancelled: boolean; readonly selectionId?: string; readonly folder?: string }>;
-  chooseOriginal(): Promise<SaveStatus>;
+  chooseOriginal(confirmation?: SaveDestinationConfirmation): Promise<SaveDestinationResult>;
   retrySave(): Promise<SaveStatus>;
   locateSave(): Promise<SaveStatus>;
   exportReviewedCopy?(confirmPossiblyStale?: true): Promise<ProductionExportResult>;

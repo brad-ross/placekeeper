@@ -2,7 +2,7 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { chmod, mkdir, mkdtemp, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { setAnnotationName } from "../../../packages/core/src/review-commands.js";
 import { PdfWriterError, type PdfWriter } from "../../../packages/core/src/pdf-writer.js";
@@ -19,6 +19,7 @@ const roots: string[] = [];
 const sha = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   await Promise.all(roots.splice(0).map((path) => rm(path, { recursive: true, force: true })));
 });
 
@@ -276,6 +277,105 @@ describe("coalescing PDF autosave", () => {
       codexTasks: 0,
       transientWork: 0,
     });
+  });
+
+  it("rejects an invalid destination name before creating a copy and permits the same folder retry", async () => {
+    let writes = 0;
+    const { root, broker, coordinator, sessionId } = await setup({
+      chooseFolder: async () => root,
+      locatePdf: async () => undefined,
+    }, { writer: fakeWriter(async () => { writes += 1; }) });
+    await broker.acceptMutation(sessionId, addCrossPage(0));
+    const before = broker.state(sessionId)!;
+    const folder = await coordinator.chooseFolder(sessionId);
+    if (folder.cancelled) throw new Error("expected folder");
+    const confirmation = {
+      command: setAnnotationName(before, "x".repeat(100_000)),
+      expectedGeneration: before.workflow.documentGeneration,
+    };
+    await expect(coordinator.chooseCopyFilename(sessionId, "named.pdf", folder.selectionId, confirmation))
+      .rejects.toThrow();
+    expect(writes).toBe(0);
+    expect(broker.state(sessionId)).toEqual(before);
+    expect(broker.saveStatus(sessionId)?.destination.phase).toBe("none");
+    await expect(stat(join(root, "named.pdf"))).rejects.toMatchObject({ code: "ENOENT" });
+    await coordinator.chooseCopyFilename(sessionId, "named.pdf", folder.selectionId, {
+      ...confirmation, command: setAnnotationName(before, "Brad Ross"),
+    });
+    expect(writes).toBe(1);
+    expect(broker.state(sessionId)?.annotationName).toBe("Brad Ross");
+  });
+
+  it.each(["copy", "original"] as const)("writes the confirmed name in the first %s snapshot", async (kind) => {
+    const authors: string[][] = [];
+    const delegate = fakeWriter();
+    const { root, broker, coordinator, sessionId } = await setup(undefined, { writer: {
+      ...delegate, write: async (request) => {
+        authors.push(request.annotations.map(({ author }) => author));
+        return delegate.write(request);
+      },
+    } });
+    await broker.acceptMutation(sessionId, addCrossPage(0));
+    const state = broker.state(sessionId)!;
+    const confirmation = { command: setAnnotationName(state, "Brad Ross"), expectedGeneration: state.workflow.documentGeneration };
+    if (kind === "copy") await coordinator.chooseCopy(sessionId, join(root, "named.pdf"), confirmation);
+    else await coordinator.chooseOriginal(sessionId, confirmation);
+    expect(authors).toEqual([["Brad Ross", "Brad Ross", "Brad Ross"]]);
+  });
+
+  it.each(["revision", "generation"] as const)("rejects stale %s destination confirmation without creating output", async (fence) => {
+    let writes = 0;
+    const { root, broker, coordinator, sessionId } = await setup(undefined, { writer: fakeWriter(async () => { writes += 1; }) });
+    const before = broker.state(sessionId)!;
+    const confirmation = { command: { ...setAnnotationName(before, "Brad Ross"), expectedRevision: fence === "revision" ? 9 : before.revision },
+      expectedGeneration: fence === "generation" ? 9 : before.workflow.documentGeneration };
+    await expect(coordinator.chooseCopy(sessionId, join(root, "stale.pdf"), confirmation)).rejects.toThrow();
+    expect(writes).toBe(0);
+    expect(broker.state(sessionId)).toEqual(before);
+    expect(broker.saveStatus(sessionId)?.destination.phase).toBe("none");
+    await expect(stat(join(root, "stale.pdf"))).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("does not commit a name when the copy destination already exists", async () => {
+    const { root, broker, coordinator, sessionId } = await setup();
+    const before = broker.state(sessionId)!;
+    const target = join(root, "existing.pdf");
+    await writeFile(target, "Existing content");
+    await expect(coordinator.chooseCopy(sessionId, target, { command: setAnnotationName(before, "Brad Ross"),
+      expectedGeneration: before.workflow.documentGeneration })).rejects.toThrow();
+    expect(broker.state(sessionId)).toEqual(before);
+    expect(broker.saveStatus(sessionId)?.destination.phase).toBe("none");
+    expect(await readFile(target, "utf8")).toBe("Existing content");
+  });
+
+  it("keeps both name and destination unchanged when recovery persistence fails, then retries", async () => {
+    let writes = 0;
+    const { root, broker, coordinator, sessionId } = await setup(undefined, { writer: fakeWriter(async () => { writes += 1; }) });
+    const before = broker.state(sessionId)!;
+    const confirmation = { command: setAnnotationName(before, "Brad Ross"), expectedGeneration: before.workflow.documentGeneration };
+    const persist = vi.spyOn(DraftSnapshotStore.prototype, "persist").mockRejectedValueOnce(new Error("disk unavailable"));
+    await expect(coordinator.chooseCopy(sessionId, join(root, "retry.pdf"), confirmation)).rejects.toThrow("disk unavailable");
+    expect(broker.state(sessionId)).toEqual(before);
+    expect(broker.saveStatus(sessionId)?.destination.phase).toBe("none");
+    expect(writes).toBe(0);
+    persist.mockRestore();
+    await coordinator.chooseCopy(sessionId, join(root, "retry.pdf"), confirmation);
+    expect(writes).toBe(1);
+    expect(broker.state(sessionId)?.annotationName).toBe("Brad Ross");
+  });
+
+  it("returns the accepted name revision even if another mutation arrives during output", async () => {
+    let mutate: (() => Promise<void>) | undefined;
+    const { root, broker, coordinator, sessionId } = await setup(undefined, { writer: fakeWriter(async (write) => {
+      if (write === 0) await mutate?.();
+    }) });
+    const before = broker.state(sessionId)!;
+    mutate = async () => { await broker.acceptMutation(sessionId, setAnnotationName(broker.state(sessionId)!, "Later name")); };
+    const accepted = await coordinator.chooseCopy(sessionId, join(root, "revision.pdf"), {
+      command: setAnnotationName(before, "Brad Ross"), expectedGeneration: before.workflow.documentGeneration,
+    });
+    expect(accepted).toMatchObject({ revision: 1, annotationName: "Brad Ross" });
+    expect(broker.state(sessionId)).toMatchObject({ revision: 2, annotationName: "Later name" });
   });
 
   it("saves a name-only revision to the active destination without changing item dates", async () => {

@@ -1,5 +1,5 @@
 import type { SaveStatus } from "../../../../packages/core/src/save-status.js";
-import type { ReviewCommand, ReviewState } from "../../../../packages/core/src/review-model.js";
+import type { ReviewCommand, ReviewState, SaveDestinationConfirmation } from "../../../../packages/core/src/review-model.js";
 import type {
   ProductionExportResult,
   ProductionScope,
@@ -106,11 +106,11 @@ export function createBrowserHostRuntime(session: ProductionSession): HostRuntim
     },
     async saveStatus(): Promise<SaveStatus> { return (await ensureLoaded()).api.saveStatus(); },
     async saveProposal(): Promise<SaveCopyProposal> { return (await ensureLoaded()).api.saveProposal(); },
-    async chooseCopy(filename?: string, folderSelectionId?: string) {
-      return (await ensureLoaded()).api.chooseCopy(filename, folderSelectionId);
+    async chooseCopy(filename?: string, folderSelectionId?: string, confirmation?: SaveDestinationConfirmation) {
+      return (await ensureLoaded()).api.chooseCopy(filename, folderSelectionId, confirmation);
     },
     async chooseFolder() { return (await ensureLoaded()).api.chooseFolder(); },
-    async chooseOriginal() { return (await ensureLoaded()).api.chooseOriginal(); },
+    async chooseOriginal(confirmation?: SaveDestinationConfirmation) { return (await ensureLoaded()).api.chooseOriginal(confirmation); },
     async retrySave() { return (await ensureLoaded()).api.retrySave(); },
     async locateSave() { return (await ensureLoaded()).api.locateSave(); },
     async exportReviewedCopy(confirmPossiblyStale?: true): Promise<ProductionExportResult> {
