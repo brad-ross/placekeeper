@@ -92,7 +92,7 @@ function exportMessageFromResult(result: ReviewExportResult | void): string {
 
 const EXPORT_OUTCOME_MESSAGES: Readonly<Record<ExportOutcome, string>> = {
   idle: '',
-  pending: 'Exporting reviewed PDF…',
+  pending: '',
   success: 'Reviewed PDF exported.',
   failure: 'Export failed. Your review is still available; try again.',
 };
@@ -189,8 +189,8 @@ export function DocumentActionsMenu({
     try {
       const result = await onExport(confirmPossiblyStale);
       setStaleConfirmation(false);
-      setExportDetail(exportMessageFromResult(result));
-      setOutcome('success');
+      setExportDetail(result?.kind === 'cancelled' ? '' : exportMessageFromResult(result));
+      setOutcome(result?.kind === 'cancelled' ? 'idle' : 'success');
     } catch {
       setStaleConfirmation(false);
       setOutcome('failure');

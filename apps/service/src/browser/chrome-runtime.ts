@@ -10,6 +10,8 @@ import {
   type ChromeRuntimeHostMessage,
 } from "../../../../packages/core/src/chrome-native-runtime-protocol.js";
 import {
+  REVIEW_RUNTIME_VERSION,
+  ReviewExportConflictError,
   sanitizeChromeReviewRuntimeResponse,
   type ReviewRuntimeBrokerMethod,
 } from "../../../../packages/core/src/review-runtime-protocol.js";
@@ -304,7 +306,8 @@ export class ChromeRuntimeConnection {
   async handle(raw: unknown): Promise<ChromeRuntimeHostMessage> {
     const rawRecord = typeof raw === "object" && raw !== null && !Array.isArray(raw)
       ? raw as Record<string, unknown> : undefined;
-    if (rawRecord?.protocolVersion !== CHROME_RUNTIME_PROTOCOL_VERSION) {
+    if (rawRecord?.protocolVersion !== CHROME_RUNTIME_PROTOCOL_VERSION ||
+      (rawRecord.type === "hello" && rawRecord.reviewRuntimeVersion !== REVIEW_RUNTIME_VERSION)) {
       return this.#versionFailure(typeof rawRecord?.requestId === "string" ? rawRecord.requestId : undefined);
     }
     const message = parseChromeRuntimeExtensionMessage(raw);
@@ -359,7 +362,7 @@ export class ChromeRuntimeConnection {
     this.#connectionId = message.connectionId;
     this.#phase = "acquiring";
     this.#armIdleDeadline();
-    return { type: "hello-ack", protocol: CHROME_RUNTIME_PROTOCOL, protocolVersion: 2, connectionId: message.connectionId, leaseMs: this.#idleLeaseMs };
+    return { type: "hello-ack", reviewRuntimeVersion: REVIEW_RUNTIME_VERSION, protocol: CHROME_RUNTIME_PROTOCOL, protocolVersion: 2, connectionId: message.connectionId, leaseMs: this.#idleLeaseMs };
   }
 
   async #acquisitionMessage(message: Extract<ChromeRuntimeExtensionMessage, { readonly lane: "acquisition" }>): Promise<ChromeRuntimeHostMessage> {
@@ -570,7 +573,7 @@ export class ChromeRuntimeConnection {
       if (payload === undefined) return this.#failure("runtime", "invalid-service-response", message.requestId);
       return { type: "result", lane: "runtime", protocolVersion: 2, connectionId: this.#connectionId!, requestId: message.requestId, method: message.method, payload };
     } catch (error) {
-      return this.#failure("runtime", error instanceof Error && error.message === "idempotency-conflict" ? "idempotency-conflict" : "operation-rejected", message.requestId);
+      return this.#failure("runtime", error instanceof ReviewExportConflictError ? "export-conflict" : error instanceof Error && error.message === "idempotency-conflict" ? "idempotency-conflict" : "operation-rejected", message.requestId);
     }
   }
 

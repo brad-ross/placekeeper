@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { setAnnotationName } from "../../../packages/core/src/review-commands.js";
 import { createReviewState } from "../../../packages/core/src/review-model.js";
 import {
   REVIEW_RUNTIME_PROTOCOL,
@@ -26,6 +27,20 @@ import { createMacosHostRuntime } from "../src/host/macos-runtime.js";
 afterEach(() => vi.unstubAllGlobals());
 
 describe("host-neutral review runtime", () => {
+  it("reports incompatible host versions during bootstrap", async () => {
+    let receive: (message: unknown) => void = () => undefined;
+    const panelId = "panel_identifier_1234";
+    const runtime = createRpcHostRuntime({ panelId,
+      subscribe(listener) { receive = listener; return () => undefined; },
+      postMessage(raw) {
+        const request = raw as { requestId: string };
+        queueMicrotask(() => receive({ protocol: REVIEW_RUNTIME_PROTOCOL, version: 1,
+          kind: "response", panelId, requestId: request.requestId, ok: true }));
+      },
+    });
+    await expect(runtime.bootstrap()).rejects.toThrow("Update Placekeeper and its host extension");
+    runtime.dispose();
+  });
   it("bootstraps the packaged Mac runtime through an attempt-fenced native bridge", async () => {
     const runtimeId = "runtime_identifier_1234";
     const attemptId = "attempt_identifier_1234";
@@ -196,6 +211,7 @@ describe("host-neutral review runtime", () => {
     const fetch = vi.fn(async (input: string | URL | Request) => {
       const path = String(input);
       if (path.endsWith("/state")) return Response.json(state);
+      if (path.endsWith("/commands")) return Response.json({ ...state, revision: 1, annotationName: "Brad Ross" });
       if (path.endsWith("/scope")) return Response.json({ documentTitle: "paper.pdf", launchSurface: "browser" });
       if (path.endsWith("/save/status")) return Response.json({ destination: { phase: "none", generation: 0 }, sync: { phase: "clean", desiredRevision: 0, desiredDigest: "b".repeat(64), savedRevision: 0, savedDigest: "b".repeat(64) } });
       if (path.endsWith("/export")) return Response.json({ kind: "reviewed-copy", path: "/tmp/reviewed.pdf", revision: 0, digest: "c".repeat(64) });
@@ -220,7 +236,18 @@ describe("host-neutral review runtime", () => {
       requestHeaders: { authorization: "Bearer memory-only" },
     });
     expect(bootstrap.resourcePolicy).toEqual({ host: "browser", origin: "http://127.0.0.1:43179" });
-    await expect(runtime.exportReviewedCopy()).resolves.toMatchObject({ kind: "reviewed-copy" });
+    await expect(runtime.command(setAnnotationName(state, "Brad Ross"))).resolves.toMatchObject({ annotationName: "Brad Ross", revision: 1 });
+    expect(fetch).toHaveBeenCalledWith(`/s/${state.sessionId}/commands`, expect.objectContaining({
+      body: JSON.stringify(setAnnotationName(state, "Brad Ross")),
+      headers: expect.objectContaining({ "x-placekeeper-generation": "1" }),
+    }));
+    const fence = { expectedRevision: 1, documentGeneration: 1 };
+    await expect(runtime.exportReviewedCopy(true, fence)).resolves.toMatchObject({ kind: "reviewed-copy" });
+    expect(fetch).toHaveBeenCalledWith(`/s/${state.sessionId}/export`, expect.objectContaining({
+      body: JSON.stringify({ confirmPossiblyStale: true, fence }),
+    }));
+    fetch.mockResolvedValueOnce(Response.json({ error: { kind: "export-conflict" } }, { status: 409 }));
+    await expect(runtime.exportReviewedCopy(true, fence)).rejects.toThrow("Confirm the annotation name again");
     expect(FakeSocket.created[0]).toMatchObject({
       protocols: ["placekeeper", "placekeeper-auth.memory-only"],
     });
@@ -617,8 +644,9 @@ describe("host-neutral review runtime", () => {
     const initial = runtime.bootstrap();
     respond(requests.at(-1)!, 0, bootstrapPayload(0));
     await initial;
-    const command = runtime.command({ type: "undo", expectedRevision: 0 });
+    const command = runtime.command(setAnnotationName(state, "Brad Ross"));
     const commandRequest = requests.at(-1)!;
+    expect(commandRequest).toMatchObject({ generation: 1, revision: 0, payload: setAnnotationName(state, "Brad Ross") });
     const refresh = runtime.bootstrap();
     const refreshRequest = requests.at(-1)!;
     expect(refreshRequest).not.toHaveProperty("sessionId");
@@ -626,13 +654,13 @@ describe("host-neutral review runtime", () => {
     expect(refreshRequest).not.toHaveProperty("revision");
     respond(refreshRequest, 1, bootstrapPayload(1));
     await refresh;
-    respond(commandRequest, 0, { ...state, revision: 1 });
+    respond(commandRequest, 0, { ...state, revision: 1, annotationName: "Brad Ross" });
 
-    await expect(command).resolves.toMatchObject({ revision: 1 });
+    await expect(command).resolves.toMatchObject({ revision: 1, annotationName: "Brad Ross" });
     runtime.dispose();
   });
 
-  it("does not rehydrate the VS Code PDF for the revision returned by its own command", async () => {
+  it.each(["command", "chooseOriginal", "chooseCopy"] as const)("does not rehydrate the VS Code PDF for its own %s revision", async (method) => {
     const listeners = new Set<(message: unknown) => void>();
     const requests: Record<string, unknown>[] = [];
     const runtime = createRpcHostRuntime({
@@ -684,7 +712,11 @@ describe("host-neutral review runtime", () => {
     const invalidations: HostRuntimeInvalidation[] = [];
     runtime.subscribeInvalidations((event) => invalidations.push(event));
 
-    const command = runtime.command({ type: "undo", expectedRevision: 0 });
+    const confirmation = { command: setAnnotationName(state, "Brad Ross"), expectedGeneration: 1 };
+    const command = method === "command" ? runtime.command(confirmation.command)
+      : method === "chooseCopy" ? runtime.chooseCopy("named.pdf", undefined, confirmation)
+      : runtime.chooseOriginal(confirmation);
+    expect(requests.at(-1)).toMatchObject({ method, payload: method === "command" ? confirmation.command : { confirmation } });
     const commandRequest = requests.at(-1)!;
     const ownRevision = {
       protocol: REVIEW_RUNTIME_PROTOCOL,
@@ -697,8 +729,9 @@ describe("host-neutral review runtime", () => {
     listeners.forEach((listener) => listener(ownRevision));
 
     expect(invalidations).toEqual([]);
-    respond(commandRequest, 0, { ...state, revision: 1 });
-    await expect(command).resolves.toMatchObject({ revision: 1 });
+    const named = { ...state, revision: 1, annotationName: "Brad Ross" };
+    respond(commandRequest, 0, method === "command" ? named : { nameResult: named });
+    await expect(command).resolves.toMatchObject(method === "command" ? { revision: 1 } : { nameResult: { revision: 1 } });
     expect(invalidations).toEqual([]);
 
     listeners.forEach((listener) => listener({

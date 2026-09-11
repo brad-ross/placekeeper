@@ -3,6 +3,8 @@ import type { PluginRegistry } from "@embedpdf/core";
 import type { PdfDocumentObject, PdfEngine } from '@embedpdf/models';
 import { SelectionPlugin } from "@embedpdf/plugin-selection";
 
+import { useAnnotationExport } from '../save/use-annotation-export.js';
+import { ExportAnnotationDialog } from '../save/ExportAnnotationDialog.js';
 import { useSaveDestination } from '../save/use-save-destination.js';
 import { usePdfSearch } from '../pdf/use-pdf-search.js';
 import { useHostSyncTex } from '../host/use-host-synctex.js';
@@ -409,6 +411,8 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     );
     return () => controller.abort();
   }, [props.api, saveStatus.sync.phase, saveStatus.sync.desiredRevision, saveStatus.sync.savedRevision]);
+  const annotationExport = useAnnotationExport(props.api, state, stateRef, documentGenerationRef,
+    setState, props.generationRefreshStatus ?? 'idle');
   const destination = useSaveDestination(props, scope, state, stateRef, documentGenerationRef,
     setState, setSaveStatus, setCommandError);
   const { destinationDialog, copyProposal, destinationEstablishing, destinationError,
@@ -730,7 +734,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   }, [mainLocationRefresh, navigationCoordinator, sourceIdentity, state.workflow.documentGeneration]);
   useEffect(() => {
     destination.invalidatePendingDestination();
-  }, [destinationDialog, sourceIdentity]);
+  }, [destinationDialog, sourceIdentity, state.sessionId, state.workflow.documentGeneration]);
   useEffect(() => {
     if (locationHistory === undefined) return;
     return locationHistory.subscribe(setLocationHistorySnapshot);
@@ -1360,11 +1364,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
           ...(state.workflow.mode === 'generated-output' || exportOnly
             ? {}
             : { onSaveOptions: () => openCopyDialog("menu") }),
-          onExportReviewedCopy: (confirmPossiblyStale) => {
-            const method = props.api.exportReviewedCopy;
-            if (method === undefined) return Promise.reject(new Error('Reviewed export is unavailable.'));
-            return method(confirmPossiblyStale);
-          },
+          onExportReviewedCopy: annotationExport.open,
         }}
         selection={{
           onSelectionPageLimitExceeded: () => setCommandError(PDF_SELECTION_PAGE_LIMIT_MESSAGE),
@@ -1635,8 +1635,17 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       >
         {viewer}
       </ReviewShell>
+      {annotationExport.request === null ? null : <ExportAnnotationDialog
+        annotationName={state.annotationName}
+        pending={annotationExport.pending}
+        error={annotationExport.error}
+        onConfirm={(name) => void annotationExport.confirm(name)}
+        onCancel={annotationExport.cancel}
+      />}
       {exportOnly ? null : <SaveDestinationDialog
         open={destinationDialog !== null}
+        {...(state.annotationName === undefined ? {} : { annotationName: state.annotationName })}
+        {...(destination.nameError === undefined ? {} : { nameError: destination.nameError })}
         sourceDisposition={scope.sourceDisposition === 'remote-temporary' ? 'remote-temporary' : 'local'}
         protectedRecovery={
           scope.sourceDisposition === 'remote-temporary'

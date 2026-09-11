@@ -1,4 +1,4 @@
-import { addPageNote } from "../../../packages/core/src/review-commands.js";
+import { addPageNote, setAnnotationName } from "../../../packages/core/src/review-commands.js";
 import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -53,6 +53,40 @@ async function runtimeFixture() {
 }
 
 describe("canonical review retention", () => {
+  it.each(["chooseCopy", "chooseOriginal"] as const)("returns accepted and rejected name confirmations through Chrome %s", async (method) => {
+    const data = await runtimeFixture();
+    const staged = await data.stage();
+    if ("choose" in staged) throw new Error("Expected initial review");
+    await data.authority.activate(staged.canonicalKey, "presentation");
+    const sessionId = staged.projection.sessionId;
+    const before = data.broker.state(sessionId)!;
+    // Serialization is covered by writer conformance; this fixture owns the
+    // real Chrome authority, destination transaction, and response path.
+    const save = vi.spyOn(data.saving, "requestSave").mockResolvedValue(undefined);
+    const folder = await data.saving.chooseFolder(sessionId);
+    if (folder.cancelled) throw new Error("Expected selected folder");
+    const destination = method === "chooseCopy"
+      ? { filename: "named.pdf", folderSelectionId: folder.selectionId } : {};
+    const invoke = (annotationName: string, operation: string) => data.authority.invoke(staged.canonicalKey, method, {
+      ...destination,
+      confirmation: { command: setAnnotationName(before, annotationName), expectedGeneration: before.workflow.documentGeneration },
+    }, { idempotencyKey: operation, payloadDigest: createHash("sha256").update(operation).digest("hex") });
+    const rejected = await invoke("x".repeat(100_000), "reject-name");
+    expect(rejected).toMatchObject({ destination: { phase: "none" }, nameResult: { accepted: false, state: before } });
+    expect(data.broker.state(sessionId)).toEqual(before);
+    expect(save).not.toHaveBeenCalled();
+    await expect(readFile(join(data.root, "named.pdf"))).rejects.toMatchObject({ code: "ENOENT" });
+    const accepted = await invoke("Brad Ross", "accept-name");
+    expect(accepted).toMatchObject({ destination: { phase: "active" }, nameResult: { revision: 1, annotationName: "Brad Ross" } });
+    expect(data.broker.state(sessionId)).toMatchObject({ revision: 1, annotationName: "Brad Ross" });
+    expect(save).toHaveBeenCalledExactlyOnceWith(sessionId);
+    // Durable operation replay must preserve the accepted response without
+    // consuming the folder capability or applying the confirmation twice.
+    await expect(invoke("Brad Ross", "accept-name")).resolves.toEqual(accepted);
+    expect(save).toHaveBeenCalledTimes(1);
+    save.mockRestore();
+  });
+
   it("starts automatic PDF saving after native commands without blocking the edit response", async () => {
     const data = await runtimeFixture();
     const staged = await data.stage();

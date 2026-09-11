@@ -1,10 +1,11 @@
+import { ReviewExportConflictError, type ReviewExportFence } from "../../../../packages/core/src/review-runtime-protocol.js";
 import type { SaveStatus } from "../../../../packages/core/src/save-status.js";
 import { projectReviewItems } from "../../../../packages/core/src/annotation-projection.js";
 import type {
   PdfRewriteEligibility,
   PdfWriteResult,
 } from "../../../../packages/core/src/pdf-writer.js";
-import { createImportedReviewState } from "../../../../packages/core/src/portable-annotation.js";
+import { assertPortableAnnotationWritable, createImportedReviewState } from "../../../../packages/core/src/portable-annotation.js";
 import type { ReviewState } from "../../../../packages/core/src/review-model.js";
 import { reduceReview } from "../../../../packages/core/src/review-reducer.js";
 import { createBrowserEmbedPdfWriter } from "../../../../packages/pdf-backends/src/browser-writer.js";
@@ -494,7 +495,11 @@ export async function createStaticHostRuntime(
     subscribeInvalidations: () => () => undefined,
     async command(command) {
       if (disposed) throw new Error("This review is closed.");
-      state = reduceReview(state, command);
+      const nextState = reduceReview(state, command);
+      projectReviewItems(nextState.items, undefined, {
+        ...(nextState.annotationName === undefined ? {} : { annotationName: nextState.annotationName }),
+      }).forEach(assertPortableAnnotationWritable);
+      state = nextState;
       updateUnloadGuard();
       return state;
     },
@@ -519,8 +524,11 @@ export async function createStaticHostRuntime(
     async locateSave() {
       return notSavedStatus(state, eligibility, lastExportedRevision);
     },
-    async exportReviewedCopy(): Promise<ProductionExportResult> {
+    async exportReviewedCopy(_confirmPossiblyStale?: true, fence?: ReviewExportFence): Promise<ProductionExportResult> {
       if (disposed) throw new Error("This review is closed.");
+      if (fence && (fence.expectedRevision !== state.revision || fence.documentGeneration !== state.workflow.documentGeneration)) {
+        throw new ReviewExportConflictError();
+      }
       const exportState = state;
       let output: PdfWriteResult;
       try {
@@ -532,6 +540,7 @@ export async function createStaticHostRuntime(
           annotations: projectReviewItems(
             exportState.items,
             exportState.workflow.documentGeneration,
+            { ...(exportState.annotationName === undefined ? {} : { annotationName: exportState.annotationName }) },
           ),
         }, { timeoutMs: writerTimeoutMs });
       } catch (error) {

@@ -149,11 +149,12 @@ function serialize(draft: RecoverableDraft): string {
 }
 
 export function reviewStateDigest(
-  state: Pick<ReviewState, "items"> & Partial<Pick<ReviewState, "workflow" | "pendingDrafts" | "discardAudit">>,
+  state: Pick<ReviewState, "items"> & Partial<Pick<ReviewState, "workflow" | "pendingDrafts" | "discardAudit" | "annotationName">>,
 ): string {
   const ordered = [...state.items].sort((left, right) => left.id.localeCompare(right.id));
   return canonicalSha256({
     items: ordered,
+    ...(state.annotationName === undefined ? {} : { annotationName: state.annotationName }),
     workflow: state.workflow,
     pendingDrafts: state.pendingDrafts ?? [],
     discardAudit: state.discardAudit ?? [],

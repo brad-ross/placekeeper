@@ -478,6 +478,23 @@ describe("VS Code local host adapter", () => {
     });
   });
 
+  it("rejects old webviews with update guidance before invoking the broker", async () => {
+    const bootstrap = vi.fn();
+    const invoke = vi.fn();
+    const post = vi.fn();
+    const panelId = "panel_identifier_1234";
+    const bridge = new VersionedWebviewBridge({
+      identity: { panelId, sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", generation: 1, revision: 0 },
+      bootstrap, invoke, dispose: vi.fn(),
+    }, post);
+    await bridge.receive({ protocol: REVIEW_RUNTIME_PROTOCOL, version: 1, kind: "request", panelId,
+      requestId: "request_identifier_1234", method: "bootstrap", payload: {} });
+    expect(post).toHaveBeenCalledWith(expect.objectContaining({ ok: false, error: { kind: "runtime-version-mismatch" } }));
+    expect(bootstrap).not.toHaveBeenCalled();
+    expect(invoke).not.toHaveBeenCalled();
+    bridge.dispose();
+  });
+
   it("validates the versioned webview RPC envelope before dispatch", () => {
     const expected = {
       panelId: "panel_identifier_1234",
@@ -498,6 +515,16 @@ describe("VS Code local host adapter", () => {
       payload: {},
     };
     expect(parseWebviewRequest(request, expected, new Set())).toEqual(request);
+    expect(parseWebviewRequest({ ...request, version: 1, method: "bootstrap" }, expected, new Set())).toBeUndefined();
+    const fenced = { ...request, method: "exportReviewedCopy", payload: { fence: { expectedRevision: 7, documentGeneration: 2 }, confirmPossiblyStale: true } };
+    expect(parseWebviewRequest(fenced, expected, new Set())).toEqual(fenced);
+    expect(parseWebviewRequest({ ...fenced, payload: { fence: { expectedRevision: 7 } } }, expected, new Set())).toBeUndefined();
+    const confirmation = { command: { type: "set-annotation-name", expectedRevision: 7, annotationName: "Brad Ross" }, expectedGeneration: 2 };
+    for (const method of ["chooseCopy", "chooseOriginal"]) {
+      const named = { ...request, method, payload: { confirmation } };
+      expect(parseWebviewRequest(named, expected, new Set())).toEqual(named);
+      expect(parseWebviewRequest({ ...named, payload: { confirmation: { ...confirmation, expectedGeneration: -1 } } }, expected, new Set())).toBeUndefined();
+    }
   });
 
   it("rehydrates through the real bridge with an identity-free successor bootstrap", async () => {

@@ -182,7 +182,7 @@
 
 .save-destination-copy-details {
   display: block;
-  margin: 14px 0 0;
+  margin: 5px 0;
   padding: 0;
   border: 0;
 }
@@ -192,6 +192,14 @@
   color: var(--review-ink-primary);
   font-size: 11px;
   font-weight: 500;
+}
+
+.save-destination-filename > span:not(.sr-only) {
+  display: block;
+  box-sizing: border-box;
+  min-height: 24px;
+  line-height: 16px;
+  padding: 4px 0;
 }
 
 .save-destination-filename input {
@@ -222,7 +230,7 @@
   display: flex;
   width: fit-content;
   max-width: 100%;
-  min-height: 28px;
+  min-height: 24px;
   min-width: 0;
   align-items: center;
   justify-content: flex-start;
@@ -233,7 +241,7 @@
   background: transparent;
   font-size: 12px;
   font-weight: 400;
-  line-height: 20px;
+  line-height: 16px;
   cursor: pointer;
   text-align: left;
 }

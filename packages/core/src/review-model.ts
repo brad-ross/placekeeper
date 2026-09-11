@@ -1,6 +1,8 @@
 export type JsonPrimitive = boolean | number | string | null;
 export type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue };
 
+export const DEFAULT_ANNOTATION_NAME = "Placekeeper";
+
 export type ReviewItemKind =
   | "replace"
   | "delete"
@@ -10,6 +12,8 @@ export type ReviewItemKind =
   | "pdfAnnotation";
 
 export interface ReviewItem {
+  /** Author recovered only after portable ownership and visible projection validation. */
+  readonly importedAnnotationAuthor?: string;
   readonly id: string;
   readonly kind: ReviewItemKind;
   readonly pageIndex: number;
@@ -274,6 +278,8 @@ export interface ReviewSourceIdentity {
 }
 
 export interface ReviewState {
+  /** Undefined preserves imported authors; a confirmed blank is explicitly Placekeeper. */
+  readonly annotationName?: string;
   /** Durable import boundary: absence identifies recovery state from before standard-PDF editing. */
   readonly nativeAnnotationImportDigest?: string;
   /** v1 stored page geometry with an erroneous CropBox offset; v2 is crop-relative. */
@@ -303,6 +309,7 @@ export interface ReviewHistoryEntry {
 }
 
 export type ReviewCommand =
+  | { readonly type: "set-annotation-name"; readonly expectedRevision: number; readonly annotationName: string }
   | {
       readonly type: "add";
       readonly expectedRevision: number;
@@ -516,6 +523,10 @@ export function createReviewState(input: {
   };
 }
 
+export function normalizeAnnotationName(value: string): string {
+  return value.trim() || DEFAULT_ANNOTATION_NAME;
+}
+
 export function normalizeReviewState(state: ReviewState): ReviewState {
   const workflow = state.workflow ?? {
     schemaVersion: 1 as const,
@@ -527,6 +538,7 @@ export function normalizeReviewState(state: ReviewState): ReviewState {
   };
   return {
     ...state,
+    ...(state.annotationName === undefined ? {} : { annotationName: normalizeAnnotationName(state.annotationName) }),
     workflow,
     items: workflow.mode === "generated-output"
       ? state.items.map((item) => canonicalizeReviewItem(item, {
@@ -595,4 +607,10 @@ export function startReviewGeneration(
     history,
     historyCursor: history.length,
   };
+}
+
+/** Revision- and generation-fenced name intent accepted with a destination. */
+export interface SaveDestinationConfirmation {
+  readonly command: Extract<ReviewCommand, { readonly type: 'set-annotation-name' }>;
+  readonly expectedGeneration: number;
 }

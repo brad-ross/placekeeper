@@ -1,3 +1,6 @@
+import { InvalidReviewCommandError, ReviewConflictError, ReviewDraftConflictError } from "../../../../packages/core/src/review-reducer.js";
+import { ReviewGenerationConflictError } from "../sessions/session-broker.js";
+import type { ReviewState, SaveDestinationConfirmation } from "../../../../packages/core/src/review-model.js";
 import { randomUUID } from "node:crypto";
 import { chmod, open, readFile, rename, rm, stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
@@ -21,6 +24,21 @@ import { reviewStateDigest, type SaveFailureReason } from "../recovery/draft-sna
 import type { SessionBroker } from "../sessions/session-broker.js";
 import { defaultAnnotatedFilename, proposedCopyPath } from "./save-destination.js";
 import type { DestinationPicker } from "../host/destination-picker.js";
+
+/** Only semantic name rejection is recoverable in the still-open confirmation dialog. */
+export function rejectedDestinationName(error: unknown, state: ReviewState | undefined) {
+  if (state === undefined) return undefined;
+  if (!(error instanceof InvalidReviewCommandError || error instanceof ReviewConflictError ||
+    error instanceof ReviewDraftConflictError || error instanceof ReviewGenerationConflictError)) return undefined;
+  return {
+    accepted: false as const, state,
+    message: error instanceof InvalidReviewCommandError ? error.message
+      : error instanceof ReviewGenerationConflictError
+        ? "The PDF was rebuilt before this name could be applied. Review the current generation and retry explicitly."
+        : "Another review window changed this draft. Review the current revision and retry explicitly.",
+    reason: error instanceof ReviewGenerationConflictError ? "generation-conflict" as const : "rejected" as const,
+  };
+}
 
 const targetTails = new Map<string, Promise<void>>();
 
@@ -131,7 +149,8 @@ export class PdfSaveCoordinator {
     sessionId: string,
     filename?: string,
     folderSelectionId?: string,
-  ): Promise<void> {
+    confirmation?: SaveDestinationConfirmation,
+  ): Promise<ReviewState | void> {
     const state = this.#broker.state(sessionId);
     if (state === undefined) throw new Error("Review session is not active");
     const remote = this.#broker.sourceDisposition(sessionId) === "remote-temporary";
@@ -160,7 +179,7 @@ export class PdfSaveCoordinator {
     // the dialog can preserve the user's location while they correct input.
     if (folderSelectionId !== undefined) this.#folderSelections.delete(folderSelectionId);
     try {
-      await this.chooseCopy(sessionId, target);
+      return await this.chooseCopy(sessionId, target, confirmation);
     } catch (error) {
       if (folderSelectionId !== undefined && selected !== undefined) {
         this.#folderSelections.set(folderSelectionId, selected);
@@ -232,26 +251,30 @@ export class PdfSaveCoordinator {
     await this.requestSave(sessionId);
   }
 
-  async chooseCopy(sessionId: string, targetPath: string): Promise<void> {
+  async chooseCopy(sessionId: string, targetPath: string, confirmation?: SaveDestinationConfirmation): Promise<ReviewState | void> {
     this.#assertRewriteEligible(sessionId);
     const capability = await this.#capabilities.preauthorizeDestination(targetPath);
+    let acceptedState: ReviewState;
     try {
       if (capability.existingTarget !== undefined) {
         throw new FileCapabilityError("TARGET_CHANGED", "A file already exists at that location");
       }
-      await this.#broker.establishSaveDestination(sessionId, {
+      const established = await this.#broker.establishSaveDestination(sessionId, {
         kind: "copy",
         targetPath: join(capability.parentPath, capability.filename),
         capabilityId: capability.id,
+        ...(confirmation === undefined ? {} : { confirmation }),
       });
+      acceptedState = established.state;
     } catch (error) {
       this.#capabilities.revokeDestination(capability.id);
       throw error;
     }
     await this.requestSave(sessionId);
+    return confirmation === undefined ? undefined : acceptedState;
   }
 
-  async chooseOriginal(sessionId: string): Promise<void> {
+  async chooseOriginal(sessionId: string, confirmation?: SaveDestinationConfirmation): Promise<ReviewState | void> {
     this.#assertRewriteEligible(sessionId);
     if (this.#broker.sourceDisposition(sessionId) === "remote-temporary") {
       throw new Error("A remote browser PDF cannot modify its private temporary source");
@@ -265,22 +288,24 @@ export class PdfSaveCoordinator {
       targetPath,
       capabilityId: state.source.fileId,
       fingerprint: state.source.digest,
+      ...(confirmation === undefined ? {} : { confirmation }),
     });
     if (
-      state.revision === 0 &&
-      state.items.length === 0 &&
+      status.state.revision === 0 &&
+      status.state.items.length === 0 &&
       status.destination.phase === "active"
     ) {
       await this.#broker.markSaveCommitted({
         sessionId,
         generation: status.destination.generation,
-        revision: state.revision,
+        revision: status.state.revision,
         stateDigest: status.sync.desiredDigest,
         targetDigest: state.source.digest,
       });
-      return;
+      return confirmation === undefined ? undefined : status.state;
     }
     await this.requestSave(sessionId);
+    return confirmation === undefined ? undefined : status.state;
   }
 
   requestSave(sessionId: string): Promise<void> {

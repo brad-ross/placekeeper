@@ -385,6 +385,8 @@ async function runLocalPdfJourney(browser: Browser, targetUrl: string, sourceSha
     await page.getByRole("button", { name: /Open document actions$/u }).click();
     const downloadPromise = page.waitForEvent("download");
     await page.getByRole("menuitem", { name: /^(?:Retry export|Export)$/u }).click();
+    await page.getByRole("dialog", { name: "Export reviewed PDF", exact: true })
+      .getByRole("button", { name: "Export", exact: true }).click();
     const download = await downloadPromise;
     const temporaryPath = await download.path();
     if (temporaryPath === null) throw new Error("The browser did not expose the exported PDF for independent reopen.");

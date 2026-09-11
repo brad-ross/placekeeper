@@ -1,3 +1,4 @@
+import { ReviewExportConflictError, type ReviewExportFence } from "../../../../packages/core/src/review-runtime-protocol.js";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { open, readdir, readFile, realpath, rm, stat } from "node:fs/promises";
 import { basename, isAbsolute, join, relative } from "node:path";
@@ -9,7 +10,7 @@ import {
   type PlacekeeperLinkLocation,
 } from "../../../../packages/core/src/placekeeper-link.js";
 import { assertPortableAnnotationWritable, createImportedReviewState } from "../../../../packages/core/src/portable-annotation.js";
-import type { ReviewCommand, ReviewItem, ReviewState } from "../../../../packages/core/src/review-model.js";
+import type { ReviewCommand, ReviewItem, ReviewState, SaveDestinationConfirmation } from "../../../../packages/core/src/review-model.js";
 import { createReviewState } from "../../../../packages/core/src/review-model.js";
 import { reduceReview } from "../../../../packages/core/src/review-reducer.js";
 import { digestSecretHex, SessionCredentialStore } from "../../../../packages/core/src/session-security.js";
@@ -1386,33 +1387,51 @@ export class SessionBroker {
       readonly targetPath: string;
       readonly capabilityId: string;
       readonly fingerprint?: string;
+      readonly confirmation?: SaveDestinationConfirmation;
     },
-  ): Promise<{ readonly destination: DurableSaveDestination; readonly sync: DurableSaveSync }> {
+  ): Promise<{ readonly destination: DurableSaveDestination; readonly sync: DurableSaveSync; readonly state: ReviewState }> {
     const session = this.#activeById.get(sessionId);
     if (session === undefined || session.ending) throw new Error("Review session is not active");
     return this.#withSessionTail(session, async () => {
       if (session.ending) throw new Error("Review session is ending");
       this.#assertSaveDestinationAllowed(session, input);
-      const generation = session.destination.generation + 1;
-      const destination: DurableSaveDestination = {
-        phase: "active",
-        generation,
-        kind: input.kind,
-        targetPath: input.targetPath,
-        capabilityId: input.capabilityId,
-        ...(input.fingerprint === undefined ? {} : { fingerprint: input.fingerprint }),
-      };
-      const sync: DurableSaveSync = {
-        phase: "saving",
-        desiredRevision: session.state.revision,
-        desiredDigest: session.sync.desiredDigest,
-        savedRevision: session.sync.savedRevision,
-        ...(session.sync.savedDigest === undefined ? {} : { savedDigest: session.sync.savedDigest }),
-      };
-      await session.store.persist({ ...this.#draft(session), destination, sync });
-      session.destination = destination;
-      session.sync = sync;
-      return { destination, sync };
+      const write = this.controls.beginWrite(sessionId);
+      try {
+        write.signal.throwIfAborted();
+        const confirmation = input.confirmation;
+        const nextState = confirmation === undefined ? session.state : this.#reduceMutation(
+          session, confirmation.command, confirmation.expectedGeneration,
+        );
+        const generation = session.destination.generation + 1;
+        const destination: DurableSaveDestination = {
+          phase: "active",
+          generation,
+          kind: input.kind,
+          targetPath: input.targetPath,
+          capabilityId: input.capabilityId,
+          ...(input.fingerprint === undefined ? {} : { fingerprint: input.fingerprint }),
+        };
+        const sync: DurableSaveSync = {
+          phase: "saving",
+          desiredRevision: nextState.revision,
+          desiredDigest: reviewStateDigest(nextState),
+          savedRevision: session.sync.savedRevision,
+          ...(session.sync.savedDigest === undefined ? {} : { savedDigest: session.sync.savedDigest }),
+        };
+        await session.store.persist({ ...this.#draft(session), state: nextState, destination, sync,
+          acknowledgedAt: this.#now().toISOString(),
+        }, write.signal);
+        write.signal.throwIfAborted();
+        session.state = nextState;
+        session.destination = destination;
+        session.sync = sync;
+        if (confirmation !== undefined) this.controls.publishStateInvalidation(sessionId, {
+          documentGeneration: nextState.workflow.documentGeneration,
+          reviewRevision: nextState.revision,
+          reason: "revision",
+        });
+        return { destination, sync, state: nextState };
+      } finally { write.complete(); }
     });
   }
 
@@ -2222,7 +2241,7 @@ export class SessionBroker {
     };
   }
 
-  async freezeDelivery(sessionId: string): Promise<FrozenReviewDelivery> {
+  async freezeDelivery(sessionId: string, fence?: ReviewExportFence): Promise<FrozenReviewDelivery> {
     const session = this.#activeById.get(sessionId);
     if (session === undefined || session.ending) {
       throw new Error("Review session is not active");
@@ -2233,6 +2252,9 @@ export class SessionBroker {
     await predecessor;
     try {
       if (session.ending) throw new Error("Review session is ending");
+      if (fence && (fence.expectedRevision !== session.state.revision || fence.documentGeneration !== session.state.workflow.documentGeneration)) {
+        throw new ReviewExportConflictError();
+      }
       const state = structuredClone(session.state);
       const sourceRootPath = session.rootId === undefined
         ? undefined
@@ -2244,7 +2266,9 @@ export class SessionBroker {
         originalDigest: session.currentOriginalDigest,
         revision: state.revision,
         sourceSnapshotPath: session.sourceSnapshotPath,
-        annotations: projectReviewItems(state.items),
+        annotations: projectReviewItems(state.items, undefined, {
+          ...(state.annotationName === undefined ? {} : { annotationName: state.annotationName }),
+        }),
         manageNativeAnnotations: state.nativeAnnotationImportDigest === state.source.digest,
         items: documentOrderedItems(state.items),
         workflowMode: state.workflow.mode,
@@ -2270,6 +2294,18 @@ export class SessionBroker {
       reviewStateDigest(session.state) === delivery.stateDigest;
   }
 
+  #reduceMutation(session: ActiveSession, command: ReviewCommand, expectedGeneration?: number): ReviewState {
+    if (expectedGeneration !== undefined && expectedGeneration !== session.state.workflow.documentGeneration) {
+      throw new ReviewGenerationConflictError(expectedGeneration,
+        session.state.workflow.documentGeneration, session.state.revision);
+    }
+    const nextState = reduceReview(session.state, command);
+    projectReviewItems(nextState.items, undefined, {
+      ...(nextState.annotationName === undefined ? {} : { annotationName: nextState.annotationName }),
+    }).forEach(assertPortableAnnotationWritable);
+    return nextState;
+  }
+
   async acceptMutation(
     sessionId: string,
     command: ReviewCommand,
@@ -2291,18 +2327,7 @@ export class SessionBroker {
     const write = this.controls.beginWrite(sessionId);
     try {
       write.signal.throwIfAborted();
-      if (
-        options.expectedGeneration !== undefined &&
-        options.expectedGeneration !== session.state.workflow.documentGeneration
-      ) {
-        throw new ReviewGenerationConflictError(
-          options.expectedGeneration,
-          session.state.workflow.documentGeneration,
-          session.state.revision,
-        );
-      }
-      const nextState = reduceReview(session.state, command);
-      projectReviewItems(nextState.items).forEach(assertPortableAnnotationWritable);
+      const nextState = this.#reduceMutation(session, command, options.expectedGeneration);
       const desiredDigest = reviewStateDigest(nextState);
       const nextSync: DurableSaveSync = {
         phase: session.destination.phase === "active" ? "saving" : "not-saved",

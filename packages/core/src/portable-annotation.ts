@@ -6,12 +6,12 @@ import type {
   ReviewState,
   ReviewWorkflowMode,
 } from "./review-model.js";
-import { canonicalizeReviewItem } from "./review-model.js";
+import { canonicalizeReviewItem, DEFAULT_ANNOTATION_NAME } from "./review-model.js";
 import {
   assertReviewItem,
   InvalidReviewCommandError,
   MAX_REVIEW_SELECTION_SEGMENTS,
-} from "./review-reducer.js";
+} from "./review-item-validation.js";
 export {
   assertPortableAnnotationGroupWritable,
   PORTABLE_ANNOTATION_MAX_BYTES,
@@ -27,9 +27,8 @@ import {
 } from './grouped-annotation-envelope.js';
 import { hasSafePortableAnnotationShape } from './portable-annotation-shape.js';
 
-export const PORTABLE_ANNOTATION_AUTHOR = "Placekeeper";
+export const PORTABLE_ANNOTATION_AUTHOR = DEFAULT_ANNOTATION_NAME;
 const PORTABLE_ANNOTATION_OWNER = "placekeeper";
-const MAX_PORTABLE_ARRAY_ENTRIES = MAX_REVIEW_SELECTION_SEGMENTS;
 const KINDS = new Set<ReviewItemKind>([
   "replace",
   "delete",
@@ -174,7 +173,7 @@ function isReviewItem(value: unknown): value is ReviewItem {
   if (!shallowlyValid) return false;
   try {
     assertReviewItem(value as unknown as ReviewItem, {
-      maxSelectionSegments: MAX_PORTABLE_ARRAY_ENTRIES,
+      maxSelectionSegments: MAX_REVIEW_SELECTION_SEGMENTS,
     });
     return true;
   } catch {
@@ -317,7 +316,7 @@ function isGroupedProjection(value: unknown): value is GroupedPortableProjection
     (value.pageIndex as number) >= 0 &&
     (value.subtype === "strikeOut" || value.subtype === "highlight") &&
     typeof value.contents === "string" &&
-    value.author === PORTABLE_ANNOTATION_AUTHOR &&
+    typeof value.author === "string" &&
     isPdfRect(value.rect) &&
     Array.isArray(value.segmentRects) &&
     value.segmentRects.length > 0 &&
@@ -414,27 +413,29 @@ function reconstructGroupedItem(
     },
   };
   try {
-    assertReviewItem(item, { maxSelectionSegments: MAX_PORTABLE_ARRAY_ENTRIES });
+    assertReviewItem(item, { maxSelectionSegments: MAX_REVIEW_SELECTION_SEGMENTS });
     return item;
   } catch {
     return undefined;
   }
 }
 
-export function isPortableAnnotationAuthor(author: string): boolean {
-  return author === PORTABLE_ANNOTATION_AUTHOR;
+function withImportedAuthor(item: ReviewItem, author: string): ReviewItem {
+  const { importedAnnotationAuthor: _untrusted, ...clean } = item;
+  return author === PORTABLE_ANNOTATION_AUTHOR ? clean : { ...clean, importedAnnotationAuthor: author };
 }
 
 export function createPortableAnnotationCustom(
   item: ReviewItem,
   annotation: ReviewAnnotation,
 ): PortableAnnotationCustom {
+  const { importedAnnotationAuthor: _importedAuthor, ...portableItem } = item;
   return {
     placekeeper: {
       schemaVersion: 2,
       owner: PORTABLE_ANNOTATION_OWNER,
       itemId: item.id,
-      item,
+      item: portableItem,
       projection: projectionFor(item, annotation),
     },
   };
@@ -487,12 +488,9 @@ export function inspectPortableAnnotation(
   ) {
     return { status: "invalid", reason: "projection-mismatch" };
   }
-  if (!isPortableAnnotationAuthor(envelope.projection.author)) {
-    return { status: "invalid", reason: "unsupported-author" };
-  }
   return {
     status: "owned",
-    item: envelope.item,
+    item: withImportedAuthor(envelope.item, envelope.projection.author),
   };
 }
 
@@ -613,7 +611,7 @@ export function inspectPortableAnnotations(
     if (item === undefined) {
       return { status: "invalid", reason: "invalid-group-item" };
     }
-    const expected = serializePortableAnnotationGroup(item);
+    const expected = serializePortableAnnotationGroup(item, children[0]!.projection.author);
     if (
       expected.length !== children.length ||
       expected.some((child, index) =>
@@ -621,7 +619,7 @@ export function inspectPortableAnnotations(
     ) {
       return { status: "invalid", reason: "group-evidence-mismatch" };
     }
-    groupedItems.set(itemId, item);
+    groupedItems.set(itemId, withImportedAuthor(item, children[0]!.projection.author));
   }
 
   const items = orderedEntries.map((entry) =>
@@ -721,12 +719,19 @@ export function createImportedReviewState(input: {
   readonly workflowMode?: ReviewWorkflowMode;
   readonly documentGeneration?: number;
 }): ReviewState {
+  // Only validated owned imports carry author evidence. Native PDF annotations
+  // retain their own authors and cannot establish a document-wide name.
+  const ownedAuthors = new Set(input.items
+    .filter((item) => item.kind !== "pdfAnnotation")
+    .map((item) => item.importedAnnotationAuthor ?? PORTABLE_ANNOTATION_AUTHOR));
+  const annotationName = ownedAuthors.size === 1 ? [...ownedAuthors][0] : undefined;
   const mode = input.workflowMode ?? "standard";
   const documentGeneration = input.documentGeneration ?? 1;
   return {
     schemaVersion: 2,
     sessionId: input.sessionId,
     source: input.source,
+    ...(annotationName === undefined ? {} : { annotationName }),
     ...(input.sourceRootId === undefined ? {} : { sourceRootId: input.sourceRootId }),
     revision: 0,
     lifecycle: "active",

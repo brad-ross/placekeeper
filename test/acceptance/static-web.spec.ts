@@ -10,16 +10,27 @@ import { addStaticKeyboardPageNote, waitForStaticPdf } from "../../scripts/stati
 const annotatedPdf = resolve("test/fixtures/pdfs/text-native-with-annotations.pdf");
 const representativePdf = resolve("test/fixtures/pdfs/rotation-0-crop.pdf");
 
-async function exportReviewedPdf(page: Page): Promise<string> {
-  await page.getByRole("button", { name: /Open document actions$/u }).click();
-  const failure = page.locator("[data-export-result='failure']");
+async function exportReviewedPdf(page: Page, options: {
+  readonly annotationName?: string;
+  readonly expectedName?: string;
+} = {}): Promise<string> {
+  if (!await page.getByRole("menuitem", { name: /^(?:Retry export|Export)$/u }).isVisible()) {
+    await page.getByRole("button", { name: /Open document actions$/u }).click();
+  }
+  await page.getByRole("menuitem", { name: /^(?:Retry export|Export)$/u }).click();
+  const dialog = page.getByRole('dialog', { name: 'Export reviewed PDF', exact: true });
+  const name = dialog.getByRole('textbox', { name: 'Name on annotations', exact: true });
+  await expect(name).toBeFocused();
+  if (options.expectedName !== undefined) await expect(name).toHaveValue(options.expectedName);
+  if (options.annotationName !== undefined) await name.fill(options.annotationName);
+  const failure = page.locator("[data-export-result='failure'], [data-export-annotation-backdrop] [role='alert']");
   const downloadPromise = Promise.race([
     page.waitForEvent("download"),
     failure.waitFor({ state: "visible" }).then(async () => {
       throw new Error((await failure.textContent()) ?? "PDF export failed.");
     }),
   ]);
-  await page.getByRole("menuitem", { name: /^(?:Retry export|Export)$/u }).click();
+  await dialog.getByRole("button", { name: "Export", exact: true }).click();
   const download = await downloadPromise;
   const path = await download.path();
   if (path === null) throw new Error("Browser download did not produce a file.");
@@ -149,7 +160,15 @@ test("@critical @representative keeps the local keyboard journey private and rou
   await expect(page.getByText("Annotations must be exported manually in this browser version")).toBeVisible();
   await focusByTab(page, page.getByRole("button", { name: "Upload PDF" }));
 
-  await page.locator("input[type=file]").setInputFiles(annotatedPdf);
+  const sourceDocument = await PDFDocument.load(await readFile(annotatedPdf));
+  const importedAnnotations = sourceDocument.getPage(0).node.lookup(PDFName.of('Annots'), PDFArray);
+  for (let index = 0; index < importedAnnotations.size(); index += 1) {
+    importedAnnotations.lookup(index, PDFDict).set(PDFName.of('T'), PDFString.of(`Original reviewer ${index + 1}`));
+  }
+  const sourceBytes = await sourceDocument.save();
+  await page.locator("input[type=file]").setInputFiles({
+    name: 'reviewer-authors.pdf', mimeType: 'application/pdf', buffer: Buffer.from(sourceBytes),
+  });
   await waitForStaticPdf(page);
   await addStaticKeyboardPageNote(page, "Static export proof.");
   await assertBasicAccessibility(page);
@@ -161,13 +180,37 @@ test("@critical @representative keeps the local keyboard journey private and rou
   await page.evaluate(() => globalThis.dispatchEvent(new PageTransitionEvent("pagehide", { persisted: true })));
   await expect(page.locator("[data-production-review]")).toBeVisible();
 
-  const firstDownload = await exportReviewedPdf(page);
+  let downloads = 0;
+  page.on('download', () => { downloads += 1; });
+  await page.getByRole('button', { name: /Open document actions$/u }).click();
+  await page.getByRole('menuitem', { name: 'Export', exact: true }).click();
+  const cancelledDialog = page.getByRole('dialog', { name: 'Export reviewed PDF', exact: true });
+  const draftName = cancelledDialog.getByRole('textbox', { name: 'Name on annotations', exact: true });
+  await expect(draftName).toHaveValue('Placekeeper');
+  await draftName.fill('Cancelled annotation name');
+  await draftName.press('Escape');
+  await expect(cancelledDialog).toHaveCount(0);
+  await expect(page.getByRole('menuitem', { name: 'Export', exact: true })).toHaveAttribute('aria-disabled', 'false');
+  await expect(page.locator("[data-export-result='success']")).toHaveCount(0);
+  expect(downloads).toBe(0);
+  await assertNoDurableBrowserState(page);
+
+  const sourceCatalog = await inspectPdfAnnotationCatalogWithEmbedPdf(sourceBytes);
+  expect(sourceCatalog.annotations.map(({ author }) => author)).toEqual([
+    'Original reviewer 1', 'Original reviewer 2',
+  ]);
+  const firstDownload = await exportReviewedPdf(page, { expectedName: 'Placekeeper', annotationName: '  Brad Ross  ' });
+  expect(downloads).toBe(1);
   const firstCatalog = await inspectPdfAnnotationCatalogWithEmbedPdf(new Uint8Array(await readFile(firstDownload)));
   expect(firstCatalog.annotations).toEqual(expect.arrayContaining([
     expect.objectContaining({ subtype: "highlight", contents: "Existing supported highlight" }),
     expect.objectContaining({ subtype: "stamp", contents: "Existing unsupported stamp" }),
-    expect.objectContaining({ contents: "Static export proof.", hasNormalAppearance: true }),
+    expect.objectContaining({ contents: "Static export proof.", author: "Brad Ross", hasNormalAppearance: true }),
   ]));
+  expect(firstCatalog.nativeAnnotations?.map(({ item }) => item)).toEqual(sourceCatalog.nativeAnnotations?.map(({ item }) => item));
+  for (const original of sourceCatalog.annotations) {
+    expect(firstCatalog.annotations.find(({ contents }) => contents === original.contents)?.author).toBe(original.author);
+  }
   expect(firstCatalog.portableItems).toEqual([
     expect.objectContaining({ kind: "pageNote", payload: expect.objectContaining({ comment: "Static export proof." }) }),
   ]);
@@ -182,9 +225,10 @@ test("@critical @representative keeps the local keyboard journey private and rou
   await expect(reopened.locator("[data-review-item]", { hasText: "Existing unsupported stamp" })).toHaveCount(1);
   await expect(reopened.locator("[data-review-item]", { hasText: "Static export proof." })).toHaveCount(1);
   await expect(reopened.getByRole("button", { name: /Open document actions$/u })).toBeVisible();
-  const secondDownload = await exportReviewedPdf(reopened);
+  const secondDownload = await exportReviewedPdf(reopened, { expectedName: 'Brad Ross' });
   const secondCatalog = await inspectPdfAnnotationCatalogWithEmbedPdf(new Uint8Array(await readFile(secondDownload)));
   expect(secondCatalog.portableItems).toHaveLength(1);
+  expect(secondCatalog.annotations.find(({ contents }) => contents === 'Static export proof.')?.author).toBe('Brad Ross');
   const portableId = secondCatalog.portableItems[0]?.id;
   expect(portableId).toBe(firstCatalog.portableItems[0]?.id);
   expect(secondCatalog.annotations.filter(({ id }) => id === portableId)).toHaveLength(1);

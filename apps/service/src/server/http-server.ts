@@ -1,3 +1,5 @@
+import { ReviewExportConflictError, isReviewExportFence, isSaveDestinationConfirmation, type ReviewExportFence } from "../../../../packages/core/src/review-runtime-protocol.js";
+import { rejectedDestinationName } from "../saving/pdf-save-coordinator.js";
 import { createHash, randomBytes } from "node:crypto";
 import { readFile, realpath } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
@@ -79,7 +81,7 @@ function sendJson(response: ServerResponse, status: number, value: unknown): voi
   send(response, status, JSON.stringify(value), "application/json; charset=utf-8");
 }
 
-function publicSaveStatus(status: ReturnType<SessionBroker["saveStatus"]>): unknown {
+function publicSaveStatus(status: ReturnType<SessionBroker["saveStatus"]>) {
   if (status === undefined) return undefined;
   const destination = status.destination.phase === "active"
     ? {
@@ -654,18 +656,33 @@ export async function startHttpServer(
           send(response, 405, "Method not allowed");
           return;
         }
-        const body = await readJson(request) as { filename?: unknown; folderSelectionId?: unknown };
-        if (action === "copy") {
-          await options.saving.chooseCopyFilename(
-            sessionId,
-            typeof body.filename === "string" ? body.filename : undefined,
-            typeof body.folderSelectionId === "string" ? body.folderSelectionId : undefined,
-          );
+        const body = await readJson(request) as { filename?: unknown; folderSelectionId?: unknown; confirmation?: unknown };
+        if (action === "copy" || action === "original") {
+          if (body.confirmation !== undefined && !isSaveDestinationConfirmation(body.confirmation)) {
+            send(response, 400, "Invalid destination confirmation");
+            return;
+          }
+          const confirmation = body.confirmation;
+          let nameResult;
+          try {
+            const state = action === "copy"
+              ? await options.saving.chooseCopyFilename(sessionId,
+                  typeof body.filename === "string" ? body.filename : undefined,
+                  typeof body.folderSelectionId === "string" ? body.folderSelectionId : undefined, confirmation)
+              : await options.saving.chooseOriginal(sessionId, confirmation);
+            if (confirmation !== undefined) nameResult = state;
+          } catch (error) {
+            if (confirmation === undefined) throw error;
+            nameResult = rejectedDestinationName(error, broker.state(sessionId));
+            if (nameResult === undefined) throw error;
+          }
+          sendJson(response, 200, { ...publicSaveStatus(broker.saveStatus(sessionId)),
+            ...(nameResult === undefined ? {} : { nameResult }),
+          });
+          return;
         } else if (action === "folder") {
           sendJson(response, 200, await options.saving.chooseFolder(sessionId));
           return;
-        } else if (action === "original") {
-          await options.saving.chooseOriginal(sessionId);
         } else if (action === "retry") {
           await options.saving.retry(sessionId);
         } else if (action === "locate") {
@@ -686,12 +703,13 @@ export async function startHttpServer(
           send(response, 503, "Export service is unavailable");
           return;
         }
-        const body = await readJson(request) as { confirmPossiblyStale?: unknown };
-        if (body.confirmPossiblyStale !== undefined && body.confirmPossiblyStale !== true) {
+        const body = await readJson(request) as { confirmPossiblyStale?: unknown; fence?: ReviewExportFence };
+        if ((body.confirmPossiblyStale !== undefined && body.confirmPossiblyStale !== true) ||
+          (body.fence !== undefined && !isReviewExportFence(body.fence))) {
           send(response, 400, "Invalid request");
           return;
         }
-        const frozen = await broker.freezeDelivery(exportMatch[1]!);
+        const frozen = await broker.freezeDelivery(exportMatch[1]!, body.fence);
         const result = await options.exporting.exportReviewedCopy({
           ...frozen,
           ...(body.confirmPossiblyStale === true ? { staleConfirmed: true as const } : {}),
@@ -827,7 +845,9 @@ export async function startHttpServer(
       }
       send(response, 404, "Not found");
     } catch (error) {
-      if (error instanceof ReviewGenerationConflictError) {
+      if (error instanceof ReviewExportConflictError) {
+        sendJson(response, 409, { ok: false, error: { kind: "export-conflict", message: error.message } });
+      } else if (error instanceof ReviewGenerationConflictError) {
         sendJson(response, 409, {
           ok: false,
           error: {

@@ -1,3 +1,4 @@
+import type { SaveDestinationResult } from "../host/session-contracts.js";
 import type { SaveStatus } from "../../../../packages/core/src/save-status.js";
 import type { ReviewCommand, ReviewState } from "../../../../packages/core/src/review-model.js";
 import type {
@@ -144,7 +145,15 @@ function client(session: ProductionSession) {
         ...init.headers,
       },
     });
-    if (!response.ok) throw new Error(`The local review action failed safely (${response.status}).`);
+    if (!response.ok) {
+      if (path === "/export" && response.status === 409) {
+        const rejected = await response.json().catch(() => undefined) as { error?: { kind?: string } } | undefined;
+        if (rejected?.error?.kind === "export-conflict") {
+          throw new Error("Review changed. Confirm the annotation name again to export the latest review.");
+        }
+      }
+      throw new Error(`The local review action failed safely (${response.status}).`);
+    }
     return response.json() as Promise<T>;
   };
   const post = <T>(path: string, body: unknown = {}) => request<T>(path, {
@@ -252,20 +261,22 @@ export async function loadProductionSession(session: ProductionSession): Promise
       },
       saveStatus: () => request<SaveStatus>("/save/status"),
       saveProposal: () => request<SaveCopyProposal>("/save/proposal"),
-      chooseCopy: (filename, folderSelectionId) => post<SaveStatus>(
+      chooseCopy: (filename, folderSelectionId, confirmation) => post<SaveDestinationResult>(
         "/save/copy",
         {
           ...(filename === undefined ? {} : { filename }),
           ...(folderSelectionId === undefined ? {} : { folderSelectionId }),
+          ...(confirmation === undefined ? {} : { confirmation }),
         },
       ),
       chooseFolder: () => post("/save/folder"),
-      chooseOriginal: () => post<SaveStatus>("/save/original"),
+      chooseOriginal: (confirmation) => post<SaveDestinationResult>("/save/original", confirmation === undefined ? {} : { confirmation }),
       retrySave: () => post<SaveStatus>("/save/retry"),
       locateSave: () => post<SaveStatus>("/save/locate"),
-      exportReviewedCopy: (confirmPossiblyStale) => post<ProductionExportResult>(
+      exportReviewedCopy: (confirmPossiblyStale, fence) => post<ProductionExportResult>(
         "/export",
-        confirmPossiblyStale === true ? { confirmPossiblyStale: true } : {},
+        { ...(confirmPossiblyStale === true ? { confirmPossiblyStale: true } : {}),
+        ...(fence === undefined ? {} : { fence }) },
       ),
       scope: (signal) => request<ProductionScope>(
         "/scope",

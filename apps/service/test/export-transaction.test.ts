@@ -9,7 +9,7 @@ import type {
   PdfWriter,
   ReviewAnnotation,
 } from "../../../packages/core/src/pdf-writer.js";
-import { addHighlight } from "../../../packages/core/src/review-commands.js";
+import { addHighlight, setAnnotationName } from "../../../packages/core/src/review-commands.js";
 import type { ReviewSourceIdentity } from "../../../packages/core/src/review-model.js";
 import { createReviewState } from "../../../packages/core/src/review-model.js";
 import { FileCapabilityRegistry } from "../src/files/file-capabilities.js";
@@ -363,17 +363,30 @@ describe("reviewed PDF export transaction", () => {
         reliable: true,
       }),
     );
-    const frozen = await broker.freezeDelivery(opened.launch.sessionId);
+    await broker.acceptMutation(opened.launch.sessionId,
+      setAnnotationName(broker.state(opened.launch.sessionId)!, "Brad Ross"));
+    const acknowledged = broker.state(opened.launch.sessionId)!;
+    const fence = { expectedRevision: acknowledged.revision, documentGeneration: acknowledged.workflow.documentGeneration };
+    await broker.acceptMutation(opened.launch.sessionId, setAnnotationName(acknowledged, "Other Window"));
+    await expect(broker.freezeDelivery(opened.launch.sessionId, fence)).rejects.toThrow("Review changed");
+    await broker.acceptMutation(opened.launch.sessionId, setAnnotationName(broker.state(opened.launch.sessionId)!, "Brad Ross"));
+    const retry = broker.state(opened.launch.sessionId)!;
+    const frozen = await broker.freezeDelivery(opened.launch.sessionId, {
+      expectedRevision: retry.revision, documentGeneration: retry.workflow.documentGeneration,
+    });
     expect(frozen.annotations).toMatchObject([{
-      author: "Placekeeper",
+      author: "Brad Ross",
       custom: {
         placekeeper: {
           owner: "placekeeper",
           schemaVersion: 2,
-          projection: { author: "Placekeeper" },
+          projection: { author: "Brad Ross" },
         },
       },
     }]);
+    await broker.acceptMutation(opened.launch.sessionId,
+      setAnnotationName(broker.state(opened.launch.sessionId)!, "Later Name"));
+    expect(frozen.stateDigest).not.toBe((await broker.freezeDelivery(opened.launch.sessionId)).stateDigest);
     const result: PdfWriteResult = {
       pdfBytes: reviewed,
       evidence: {
@@ -403,9 +416,9 @@ describe("reviewed PDF export transaction", () => {
     const recovered = await new DraftSnapshotStore(
       join(recoveryRoot, opened.launch.sessionId),
     ).recover();
-    expect(frozen).toMatchObject({ revision: 1, annotations: [{ kind: "highlight" }] });
+    expect(frozen).toMatchObject({ revision: 4, annotations: [{ kind: "highlight" }] });
     expect(recovered).toMatchObject({
-      state: { revision: 1, items: [{ kind: "highlight" }] },
+      state: { revision: 5, annotationName: "Later Name", items: [{ kind: "highlight" }] },
     });
     expect(recovered?.lastExportAt).toBeDefined();
     expect(await readFile(originalPath)).toEqual(original);

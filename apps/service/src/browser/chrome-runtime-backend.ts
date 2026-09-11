@@ -1,3 +1,6 @@
+import type { ReviewExportFence } from "../../../../packages/core/src/review-runtime-protocol.js";
+import type { SaveDestinationConfirmation } from "../../../../packages/core/src/review-model.js";
+import { rejectedDestinationName } from "../saving/pdf-save-coordinator.js";
 import type { ReviewCommand } from "../../../../packages/core/src/review-model.js";
 import { join } from "node:path";
 import type { ReviewRuntimeBrokerMethod } from "../../../../packages/core/src/review-runtime-protocol.js";
@@ -186,17 +189,27 @@ export class ChromeServiceRuntimeBackend implements ChromeRuntimeBackend {
         break;
       case "saveStatus": result = this.#broker.saveStatus(record.sessionId); break;
       case "saveProposal": result = this.#saving.proposal(record.sessionId); break;
-      case "chooseCopy": {
-        const value = payload as { readonly filename?: string; readonly folderSelectionId?: string };
-        await this.#saving.chooseCopyFilename(record.sessionId, value.filename, value.folderSelectionId);
-        result = this.#broker.saveStatus(record.sessionId);
+      case "chooseCopy":
+      case "chooseOriginal": {
+        const value = payload as { readonly filename?: string; readonly folderSelectionId?: string;
+          readonly confirmation?: SaveDestinationConfirmation };
+        let nameResult;
+        try {
+          const state = method === "chooseCopy"
+            ? await this.#saving.chooseCopyFilename(record.sessionId, value.filename, value.folderSelectionId, value.confirmation)
+            : await this.#saving.chooseOriginal(record.sessionId, value.confirmation);
+          if (value.confirmation !== undefined) nameResult = state;
+        } catch (error) {
+          if (value.confirmation === undefined) throw error;
+          nameResult = rejectedDestinationName(error, this.#broker.state(record.sessionId));
+          if (nameResult === undefined) throw error;
+        }
+        result = { ...this.#broker.saveStatus(record.sessionId),
+          ...(nameResult === undefined ? {} : { nameResult }),
+        };
         break;
       }
       case "chooseFolder": result = await this.#saving.chooseFolder(record.sessionId); break;
-      case "chooseOriginal":
-        await this.#saving.chooseOriginal(record.sessionId);
-        result = this.#broker.saveStatus(record.sessionId);
-        break;
       case "retrySave":
         await this.#saving.retry(record.sessionId);
         result = this.#broker.saveStatus(record.sessionId);
@@ -207,8 +220,8 @@ export class ChromeServiceRuntimeBackend implements ChromeRuntimeBackend {
         break;
       case "scope": result = await this.#broker.sessionScope(record.sessionId); break;
       case "exportReviewedCopy": {
-        const value = payload as { readonly confirmPossiblyStale?: true };
-        const frozen = await this.#broker.freezeDelivery(record.sessionId);
+        const value = payload as { readonly confirmPossiblyStale?: true; readonly fence?: ReviewExportFence };
+        const frozen = await this.#broker.freezeDelivery(record.sessionId, value.fence);
         result = await this.#exporting.exportReviewedCopy({
           ...frozen,
           ...(value.confirmPossiblyStale === true ? { staleConfirmed: true as const } : {}),

@@ -1,3 +1,4 @@
+import { ReviewExportConflictError, isReviewExportFence, isSaveDestinationConfirmation } from "../../../packages/core/src/review-runtime-protocol.js";
 import { randomBytes } from "node:crypto";
 import WebSocket from "ws";
 import {
@@ -102,16 +103,22 @@ function validPayload(method: ReviewRuntimeMethod, payload: unknown): boolean {
   if (!isObject(payload) || containsCapabilityPrimitive(payload)) return false;
   const keys = Object.keys(payload);
   if (["bootstrap", "presence", "detach", "saveStatus", "saveProposal", "chooseFolder",
-    "chooseOriginal", "retrySave", "locateSave", "scope", "forwardSyncTex"].includes(method)) {
+    "retrySave", "locateSave", "scope", "forwardSyncTex"].includes(method)) {
     return keys.length === 0;
   }
+  if (method === "chooseOriginal") {
+    return keys.every((key) => key === "confirmation") &&
+      (payload.confirmation === undefined || isSaveDestinationConfirmation(payload.confirmation));
+  }
   if (method === "chooseCopy") {
-    return keys.every((key) => key === "filename" || key === "folderSelectionId") &&
+    return keys.every((key) => key === "filename" || key === "folderSelectionId" || key === "confirmation") &&
+      (payload.confirmation === undefined || isSaveDestinationConfirmation(payload.confirmation)) &&
       (payload.filename === undefined || (typeof payload.filename === "string" && payload.filename.length <= 255)) &&
       (payload.folderSelectionId === undefined || (typeof payload.folderSelectionId === "string" && SAFE_ID.test(payload.folderSelectionId)));
   }
   if (method === "exportReviewedCopy") {
-    return keys.length <= 1 && keys.every((key) => key === "confirmPossiblyStale") &&
+    return keys.length <= 2 && keys.every((key) => key === "confirmPossiblyStale" || key === "fence") &&
+      (payload.fence === undefined || isReviewExportFence(payload.fence)) &&
       (payload.confirmPossiblyStale === undefined || payload.confirmPossiblyStale === true);
   }
   if (method === "reverseSyncTex") {
@@ -185,6 +192,15 @@ export class VersionedWebviewBridge {
 
   async receive(value: unknown): Promise<void> {
     if (this.#disposed) return;
+    if (isObject(value) && bounded(value) && value.protocol === REVIEW_RUNTIME_PROTOCOL &&
+      value.panelId === this.#client.identity.panelId && value.kind === "request" &&
+      Number.isSafeInteger(value.version) && value.version !== REVIEW_RUNTIME_VERSION &&
+      typeof value.requestId === "string" && SAFE_ID.test(value.requestId)) {
+      this.#postMessage({ protocol: REVIEW_RUNTIME_PROTOCOL, version: REVIEW_RUNTIME_VERSION,
+        kind: "response", panelId: this.#client.identity.panelId, requestId: value.requestId,
+        ok: false, error: { kind: "runtime-version-mismatch" } });
+      return;
+    }
     const cancelled = parseWebviewCancel(value, this.#client.identity.panelId);
     if (cancelled !== undefined) { this.#active.get(cancelled.requestId)?.abort(); return; }
     const request = parseWebviewRequest(value, this.#client.identity, this.#seen);
@@ -220,7 +236,7 @@ export class VersionedWebviewBridge {
       if (!controller.signal.aborted) this.#postMessage({
         protocol: REVIEW_RUNTIME_PROTOCOL, version: REVIEW_RUNTIME_VERSION, kind: "response",
         ...(requestIdentity ?? this.#client.identity), requestId: request.requestId, ok: false,
-        error: { kind: "rejected" },
+        error: { kind: error instanceof ReviewExportConflictError ? "export-conflict" : "rejected" },
       });
     } finally { this.#active.delete(request.requestId); }
   }
@@ -290,7 +306,14 @@ function safeResult(method: ReviewRuntimeBrokerMethod, value: unknown): unknown 
       return safeScope(value);
     case "saveStatus":
     case "chooseCopy":
-    case "chooseOriginal":
+    case "chooseOriginal": {
+      const status = safeSaveStatus(value);
+      if (!isObject(value) || value.nameResult === undefined || !isObject(status)) return status;
+      const named = value.nameResult;
+      return { ...status, nameResult: isObject(named) && named.accepted === false
+        ? { ...named, state: safeState(named.state) } : safeState(named) };
+    }
+
     case "retrySave":
     case "locateSave":
       return safeSaveStatus(value);
@@ -343,6 +366,10 @@ export function createLoopbackRuntimeClient(options: LoopbackRuntimeClientOption
       },
     });
     if (!response.ok && !acceptedStatuses.includes(response.status)) {
+      if (path === "/export" && response.status === 409) {
+        const rejected = await response.json().catch(() => undefined) as { error?: { kind?: string } } | undefined;
+        if (rejected?.error?.kind === "export-conflict") throw new ReviewExportConflictError();
+      }
       throw new Error(`Trusted broker request failed (${response.status})`);
     }
     return response;
@@ -486,8 +513,9 @@ export function createLoopbackRuntimeClient(options: LoopbackRuntimeClientOption
         const { path: _path, ...safeTarget } = target;
         return { ...value, target: safeTarget };
       }
-      if (method === "command" && isObject(value)) {
-        const state = value.accepted === false ? value.state : value;
+      if (["command", "chooseCopy", "chooseOriginal"].includes(method) && isObject(value)) {
+        const named = method === "command" ? value : value.nameResult;
+        const state = isObject(named) && named.accepted === false ? named.state : named;
         if (isObject(state) && isObject(state.workflow) &&
           Number.isSafeInteger(state.workflow.documentGeneration) &&
           Number.isSafeInteger(state.revision)) {

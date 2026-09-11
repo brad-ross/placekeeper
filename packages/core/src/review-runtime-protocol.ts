@@ -1,5 +1,6 @@
+import type { SaveDestinationConfirmation } from "./review-model.js";
 export const REVIEW_RUNTIME_PROTOCOL = "placekeeper.review-runtime" as const;
-export const REVIEW_RUNTIME_VERSION = 1 as const;
+export const REVIEW_RUNTIME_VERSION = 2 as const;
 
 export const REVIEW_RUNTIME_HOSTS = ["vscode", "chrome", "macos"] as const;
 export type ReviewRuntimeHost = typeof REVIEW_RUNTIME_HOSTS[number];
@@ -129,6 +130,7 @@ function hasOnlyKeys(value: Record<string, unknown>, keys: readonly string[]): b
 function safeChromeCommand(value: unknown): unknown | undefined {
   if (!record(value) || typeof value.type !== "string" || !safeInteger(value.expectedRevision)) return undefined;
   const keys: Readonly<Record<string, readonly string[]>> = {
+    "set-annotation-name": ["type", "expectedRevision", "annotationName"],
     add: ["type", "expectedRevision", "item", "authoring"],
     edit: ["type", "expectedRevision", "id", "updatedAt", "payload"],
     remove: ["type", "expectedRevision", "id"],
@@ -139,6 +141,7 @@ function safeChromeCommand(value: unknown): unknown | undefined {
     "apply-draft": ["type", "expectedRevision", "id", "expectedDraftRevision", "ownerViewId", "updatedAt"],
     "discard-reconciliation": ["type", "expectedRevision", "target", "id", "expectedTargetRevision", "ownerViewId", "reason", "discardedAt"],
   };
+  if (value.type === "set-annotation-name" && typeof value.annotationName !== "string") return undefined;
   const allowed = keys[value.type];
   if (allowed === undefined || !hasOnlyKeys(value, allowed)) return undefined;
   return closedJsonClone(value);
@@ -176,10 +179,11 @@ function safeChromeLocation(value: unknown): unknown | undefined {
 function safeChromeState(value: unknown): unknown | undefined {
   if (!record(value) || !hasOnlyKeys(value, [
     "schemaVersion", "sessionId", "source", "sourceRootId", "revision", "lifecycle", "items",
-    "workflow", "pendingDrafts", "discardAudit", "history", "historyCursor", "nativeAnnotationImportDigest",
+    "workflow", "pendingDrafts", "discardAudit", "history", "historyCursor", "nativeAnnotationImportDigest", "annotationName",
   ])) return undefined;
   const { sourceRootId: _sourceRootId, ...candidate } = value;
   if ((candidate.schemaVersion !== 1 && candidate.schemaVersion !== 2) ||
+    (candidate.annotationName !== undefined && typeof candidate.annotationName !== "string") ||
     !SESSION_ID.test(String(candidate.sessionId)) || !safeInteger(candidate.revision) ||
     (candidate.nativeAnnotationImportDigest !== undefined &&
       (typeof candidate.nativeAnnotationImportDigest !== "string" ||
@@ -280,6 +284,12 @@ function safeChromeSaveStatus(value: unknown): unknown | undefined {
   };
 }
 
+export function isSaveDestinationConfirmation(value: unknown): value is SaveDestinationConfirmation {
+  return record(value) && hasOnlyKeys(value, ["command", "expectedGeneration"]) &&
+    safeInteger(value.expectedGeneration) && record(value.command) &&
+    value.command.type === "set-annotation-name" && safeChromeCommand(value.command) !== undefined;
+}
+
 /** Returns a fresh, closed payload for the Chrome RPC boundary, or rejects it. */
 export function sanitizeChromeReviewRuntimeRequest(
   method: ReviewRuntimeMethod,
@@ -287,24 +297,33 @@ export function sanitizeChromeReviewRuntimeRequest(
 ): unknown | undefined {
   if (!isReviewRuntimeMethodForHost("chrome", method) || !record(payload)) return undefined;
   if (["bootstrap", "presence", "detach", "saveStatus", "saveProposal", "chooseFolder",
-    "chooseOriginal", "retrySave", "locateSave", "scope"].includes(method)) {
+    "retrySave", "locateSave", "scope"].includes(method)) {
     return Object.keys(payload).length === 0 ? {} : undefined;
   }
   if (method === "command") return safeChromeCommand(payload);
+  if (method === "chooseOriginal") {
+    if (!hasOnlyKeys(payload, ["confirmation"]) ||
+      (payload.confirmation !== undefined && !isSaveDestinationConfirmation(payload.confirmation))) return undefined;
+    return payload.confirmation === undefined ? {} : { confirmation: closedJsonClone(payload.confirmation) };
+  }
   if (method === "chooseCopy") {
-    if (!hasOnlyKeys(payload, ["filename", "folderSelectionId"]) ||
+    if (!hasOnlyKeys(payload, ["filename", "folderSelectionId", "confirmation"]) ||
+      (payload.confirmation !== undefined && !isSaveDestinationConfirmation(payload.confirmation)) ||
       (payload.filename !== undefined && sanitizeReviewRuntimeDisplayString(payload.filename) === undefined) ||
       (payload.folderSelectionId !== undefined &&
         (typeof payload.folderSelectionId !== "string" || !SAFE_RUNTIME_ID.test(payload.folderSelectionId)))) return undefined;
     return {
       ...(payload.filename === undefined ? {} : { filename: sanitizeReviewRuntimeDisplayString(payload.filename) }),
+      ...(payload.confirmation === undefined ? {} : { confirmation: closedJsonClone(payload.confirmation) }),
       ...(payload.folderSelectionId === undefined ? {} : { folderSelectionId: payload.folderSelectionId }),
     };
   }
   if (method === "exportReviewedCopy") {
-    return hasOnlyKeys(payload, ["confirmPossiblyStale"]) &&
+    return hasOnlyKeys(payload, ["confirmPossiblyStale", "fence"]) &&
+      (payload.fence === undefined || isReviewExportFence(payload.fence)) &&
       (payload.confirmPossiblyStale === undefined || payload.confirmPossiblyStale === true)
-      ? (payload.confirmPossiblyStale === true ? { confirmPossiblyStale: true } : {})
+      ? { ...(payload.confirmPossiblyStale === true ? { confirmPossiblyStale: true } : {}),
+        ...(payload.fence === undefined ? {} : { fence: closedJsonClone(payload.fence) }) }
       : undefined;
   }
   return undefined;
@@ -361,7 +380,11 @@ export function sanitizeChromeReviewRuntimeResponse(
   }
   if (method === "scope") return safeChromeScope(value);
   if (["saveStatus", "chooseCopy", "chooseOriginal", "retrySave", "locateSave"].includes(method)) {
-    return safeChromeSaveStatus(value);
+    const status = safeChromeSaveStatus(value);
+    if (status === undefined || !record(value) || value.nameResult === undefined) return status;
+    if (method !== "chooseCopy" && method !== "chooseOriginal") return undefined;
+    const nameResult = sanitizeChromeReviewRuntimeResponse("command", value.nameResult);
+    return nameResult === undefined ? undefined : { ...status as object, nameResult };
   }
   if (method === "command") {
     if (record(value) && value.accepted === false) {
@@ -444,4 +467,23 @@ export function sanitizeMacosReviewRuntimeResponse(
     return { ...withoutLinkBase, scope };
   }
   return sanitizeChromeReviewRuntimeResponse(method, value);
+}
+
+/** The acknowledged review that the reader approved for export. */
+export interface ReviewExportFence {
+  readonly expectedRevision: number;
+  readonly documentGeneration: number;
+}
+
+export function isReviewExportFence(value: unknown): value is ReviewExportFence {
+  return record(value) && hasOnlyKeys(value, ["expectedRevision", "documentGeneration"])
+    && Number.isSafeInteger(value.expectedRevision) && (value.expectedRevision as number) >= 0
+    && Number.isSafeInteger(value.documentGeneration) && (value.documentGeneration as number) >= 1;
+}
+
+export class ReviewExportConflictError extends Error {
+  constructor() {
+    super("Review changed. Confirm the annotation name again to export the latest review.");
+    this.name = "ReviewExportConflictError";
+  }
 }

@@ -18,6 +18,16 @@ const selection = {
 };
 
 describe('canonical annotation projection', () => {
+  it('renames owned annotations while preserving native authors and both dates', () => {
+    const owned = item('highlight', 'owned', 0, selection);
+    const native = item('pdfAnnotation', 'native', 0, {
+      position: selection.rect, comment: 'Native', subtype: 'text', author: 'Other reviewer',
+    });
+    const projected = projectReviewItems([owned, native], undefined, { annotationName: 'Brad Ross' });
+    expect(projected.find(a => a.id === 'owned')).toMatchObject({ author: 'Brad Ross', createdAt: timestamp, modifiedAt: timestamp });
+    expect(projected.find(a => a.id === 'native')).toMatchObject({ author: 'Other reviewer', createdAt: timestamp, modifiedAt: timestamp });
+  });
+
   it('projects every canonical page while retaining one logical item identity', () => {
     const projected = projectReviewItems([
       item('highlight', 'cross-page', 1, {

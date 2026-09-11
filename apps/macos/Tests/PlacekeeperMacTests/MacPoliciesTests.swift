@@ -291,7 +291,7 @@ final class MacPoliciesTests: XCTestCase {
     func testPageRuntimeRequestRequiresClosedCurrentIdentity() {
         let bootstrap: [String: Any] = [
             "protocol": "placekeeper.review-runtime",
-            "version": 1,
+            "version": 2,
             "kind": "request",
             "runtimeId": "runtime_12345678",
             "requestId": "request_12345678",
@@ -303,13 +303,17 @@ final class MacPoliciesTests: XCTestCase {
             "bootstrap"
         )
         XCTAssertNil(MacPageRuntimeRequest.parse(
+            bootstrap.merging(["version": 1]) { _, new in new },
+            runtimeID: "runtime_12345678"
+        ))
+        XCTAssertNil(MacPageRuntimeRequest.parse(
             bootstrap.merging(["sourcePath": "/private/paper.pdf"]) { _, new in new },
             runtimeID: "runtime_12345678"
         ))
 
         let scoped: [String: Any] = [
             "protocol": "placekeeper.review-runtime",
-            "version": 1,
+            "version": 2,
             "kind": "request",
             "runtimeId": "runtime_12345678",
             "requestId": "request_abcdefgh",
@@ -550,7 +554,7 @@ extension MacPoliciesTests {
         helper.requests.removeFirst().completion(.active(projection(0)))
         await Task.yield()
         func request(_ method: String, revision: Int) -> [String: Any] {
-            ["protocol": "placekeeper.review-runtime", "version": 1, "kind": "request",
+            ["protocol": "placekeeper.review-runtime", "version": 2, "kind": "request",
              "runtimeId": "runtime_test1234", "requestId": "request_" + method,
              "sessionId": projection(0).sessionID, "generation": 1, "revision": revision,
              "method": method, "payload": [String: Any]()]
