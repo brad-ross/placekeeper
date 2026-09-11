@@ -409,7 +409,7 @@ async function runLocalPdfJourney(browser: Browser, targetUrl: string, sourceSha
     if (await page.locator("[data-review-item]", { hasText: comment }).count() !== 1) {
       throw new Error("Independent reopen did not restore the exported item as editable exactly once.");
     }
-    if (await page.locator("[data-existing-annotation='smoke-foreign-highlight']").count() !== 1) {
+    if (await page.locator("[data-review-item]", { hasText: "Foreign smoke annotation" }).count() !== 1) {
       throw new Error("Independent reopen did not preserve the representative foreign annotation.");
     }
   } finally {
