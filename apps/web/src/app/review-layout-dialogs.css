@@ -182,7 +182,7 @@
 
 .save-destination-copy-details {
   display: block;
-  margin: 14px 0 5px;
+  margin: 5px 0 5px;
   padding: 0;
   border: 0;
 }
@@ -192,6 +192,10 @@
   color: var(--review-ink-primary);
   font-size: 11px;
   font-weight: 500;
+}
+
+.save-destination-filename > span:not(.sr-only) {
+  display: block;
 }
 
 .save-destination-filename input {
