@@ -80,6 +80,50 @@ describe('viewer controls adapter', () => {
     expect(unsubscribeZoom).toHaveBeenCalledOnce();
   });
 
+  it('routes page buttons and entry through the shared jump handler when available', async () => {
+    const scroll = {
+      getCurrentPage: () => 2, getTotalPages: () => 3,
+      scrollToPreviousPage: vi.fn(), scrollToNextPage: vi.fn(), scrollToPage: vi.fn(),
+      onScroll: () => () => undefined,
+    };
+    const registry = {
+      getStore: () => ({ getState: () => ({ core: { activeDocumentId: 'doc' } }) }),
+      getPlugin: (id: string) => id === ScrollPlugin.id ? { provides: () => ({
+        forDocument: () => scroll, onPageChange: () => () => undefined,
+      }) } : undefined,
+    } as unknown as PluginRegistry;
+    const jump = vi.fn<() => Promise<boolean> | false>(() => Promise.resolve(true));
+    const controls = createViewerControls(registry, { jumpToPage: jump });
+    controls.previousPage();
+    await Promise.resolve();
+    controls.nextPage();
+    await Promise.resolve();
+    controls.goToPage(1);
+    await Promise.resolve();
+    controls.goToPage(0);
+    controls.goToPage(4);
+    expect(jump.mock.calls).toEqual([[1], [3], [1]]);
+    expect(scroll.scrollToPage).not.toHaveBeenCalled();
+    expect(scroll.scrollToPreviousPage).not.toHaveBeenCalled();
+    expect(scroll.scrollToNextPage).not.toHaveBeenCalled();
+    const settle: Array<(applied: boolean) => void> = [];
+    jump.mockImplementation(() => new Promise<boolean>((resolve) => settle.push(resolve)));
+    jump.mockClear();
+    controls.goToPage(1);
+    controls.nextPage();
+    controls.nextPage();
+    expect(jump.mock.calls).toEqual([[1], [2], [3]]);
+    settle[0]!(false);
+    await Promise.resolve();
+    controls.nextPage();
+    expect(jump).toHaveBeenCalledTimes(3);
+    settle[2]!(true);
+    await Promise.resolve();
+    jump.mockReturnValue(false);
+    controls.goToPage(3);
+    expect(scroll.scrollToPage).toHaveBeenCalledWith({ pageNumber: 3, behavior: 'smooth' });
+  });
+
   it('forwards only current valid one-based destinations and keeps page state event-derived', () => {
     let onPage: ((event: { documentId: string; pageNumber: number; totalPages: number }) => void) | undefined;
     const scroll = {

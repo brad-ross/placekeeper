@@ -58,7 +58,15 @@ export function unavailableViewerControls(): ViewerControlsSnapshot {
   };
 }
 
-export function createViewerControls(registry: PluginRegistry, viewport?: () => HTMLElement | null): InitializedViewerControls {
+export function createViewerControls(
+  registry: PluginRegistry,
+  options: {
+    readonly viewport?: () => HTMLElement | null;
+    /** Return false only when navigation is not ready and native scrolling should handle the jump. */
+    readonly jumpToPage?: (pageNumber: number) => Promise<boolean> | false;
+  } = {},
+): InitializedViewerControls {
+  const { viewport, jumpToPage } = options;
   const core = registry.getStore().getState().core;
   const documentId = core.activeDocumentId;
   const scrollCapability = registry.getPlugin<ScrollPlugin>(ScrollPlugin.id)?.provides();
@@ -82,6 +90,20 @@ export function createViewerControls(registry: PluginRegistry, viewport?: () => 
     ...(pageReady ? {} : { pageUnavailableReason: PAGE_UNAVAILABLE }),
     ...(zoomReady ? {} : { zoomUnavailableReason: ZOOM_UNAVAILABLE }),
     ...(!pageReady || !zoomReady ? { unavailableReason: UNAVAILABLE } : {}),
+  };
+
+  let pendingPage: number | null = null;
+  let jumpGeneration = 0;
+  const requestPageJump = (pageNumber: number): boolean => {
+    const result = jumpToPage?.(pageNumber);
+    if (!result) return false;
+    const generation = ++jumpGeneration;
+    pendingPage = pageNumber;
+    const settled = () => {
+      if (generation === jumpGeneration) pendingPage = null;
+    };
+    void result.then(settled, settled);
+    return true;
   };
 
   const emit = (event: ViewerInteractionEvent) => {
@@ -122,11 +144,19 @@ export function createViewerControls(registry: PluginRegistry, viewport?: () => 
 
   return {
     snapshot: () => state,
-    previousPage: () => scroll?.scrollToPreviousPage('smooth'),
-    nextPage: () => scroll?.scrollToNextPage('smooth'),
+    previousPage: () => {
+      const currentPage = pendingPage ?? state.currentPage;
+      if (currentPage <= 1) return;
+      if (!requestPageJump(currentPage - 1)) scroll?.scrollToPreviousPage('smooth');
+    },
+    nextPage: () => {
+      const currentPage = pendingPage ?? state.currentPage;
+      if (currentPage >= state.totalPages) return;
+      if (!requestPageJump(currentPage + 1)) scroll?.scrollToNextPage('smooth');
+    },
     goToPage: (pageNumber) => {
       if (!scroll || !Number.isSafeInteger(pageNumber) || pageNumber < 1 || pageNumber > state.totalPages) return;
-      scroll.scrollToPage({ pageNumber, behavior: 'smooth' });
+      if (!requestPageJump(pageNumber)) scroll.scrollToPage({ pageNumber, behavior: 'smooth' });
     },
     zoomOut: () => anchoredZoom(viewport?.() ?? null, () => zoom?.zoomOut(), undefined, true),
     zoomIn: () => anchoredZoom(viewport?.() ?? null, () => zoom?.zoomIn(), undefined, true),
@@ -167,6 +197,8 @@ export function createViewerControls(registry: PluginRegistry, viewport?: () => 
       return () => listeners.delete(listener);
     },
     dispose() {
+      jumpGeneration += 1;
+      pendingPage = null;
       for (const unsubscribe of subscriptions.splice(0)) unsubscribe();
       listeners.clear();
     },
