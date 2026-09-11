@@ -11,7 +11,7 @@ import {
   assertReviewItem,
   InvalidReviewCommandError,
   MAX_REVIEW_SELECTION_SEGMENTS,
-} from "./review-reducer.js";
+} from "./review-item-validation.js";
 export {
   assertPortableAnnotationGroupWritable,
   PORTABLE_ANNOTATION_MAX_BYTES,
