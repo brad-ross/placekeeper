@@ -413,6 +413,25 @@ for (const width of [1280, 620]) {
     await inactive.hover();
     await expect(inactive.locator('.reference-tab-segment__page-label')).toBeVisible();
     await expect(inactive.locator('.reference-tab-segment__action')).toHaveCount(0);
+    const expectMatchingPagePosition = async () => {
+      const offset = await inactive.evaluate((element) => {
+        const label = element.querySelector('.reference-tab-segment__page-label')!;
+        const range = document.createRange();
+        range.selectNodeContents(label);
+        const text = range.getBoundingClientRect();
+        return element.getBoundingClientRect().right - (text.x + text.width / 2);
+      });
+      expect(offset).toBeCloseTo(before.tab.x + before.tab.width - before.numberX, 0);
+    };
+    await expectMatchingPagePosition();
+    // Exercise the single-child markup used when the destination is just a page.
+    await inactive.getByRole('tab').evaluate((element) => {
+      const number = document.createElement('span');
+      number.className = 'reference-tab-segment__page-label';
+      number.textContent = '27';
+      element.replaceChildren(number);
+    });
+    await expectMatchingPagePosition();
     await page.mouse.move(0, 0);
     await selector.focus();
     await page.keyboard.press(browserName === 'webkit' ? 'Alt+Tab' : 'Tab');
