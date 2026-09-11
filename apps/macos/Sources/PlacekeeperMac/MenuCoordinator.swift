@@ -8,6 +8,9 @@ enum MacReviewCommand: String, CaseIterable {
     case navigateForward = "navigate-forward"
     case find
     case openAnnotations = "open-annotations"
+    case openOutline = "open-outline"
+    case openReferences = "open-references"
+    case toggleHorizontalScrollLock = "toggle-horizontal-scroll-lock"
     case saveOptions = "save-options"
     case fitWidth = "fit-width"
     case zoomIn = "zoom-in"
@@ -73,7 +76,7 @@ enum MacZoomShortcut: Hashable {
         switch (characters, flags) {
         case ("=" , [.command]), ("+", [.command]): return .pdfIn
         case ("-", [.command]): return .pdfOut
-        case ("0", [.command]): return .pdfFitWidth
+        case ("0", [.command, .control]): return .pdfFitWidth
         case ("=", [.command, .shift]), ("+", [.command, .shift]): return .appIn
         case ("-", [.command, .shift]), ("_", [.command, .shift]): return .appOut
         case ("0", [.command, .option]): return .appActualSize
@@ -268,7 +271,7 @@ final class MenuCoordinator: NSObject, NSMenuItemValidation, NSMenuDelegate {
         menu.addItem(commandItem(.navigateForward, key: "]"))
         menu.addItem(.separator())
         for (command, key, route) in [(MacReviewCommand.zoomIn, "=", MacZoomShortcut.pdfIn), (.zoomOut, "-", .pdfOut), (.fitWidth, "0", .pdfFitWidth)] {
-            let item = commandItem(command, key: key)
+            let item = commandItem(command, key: key, modifiers: command == .fitWidth ? [.command, .control] : [.command])
             zoomItems[route] = item
             menu.addItem(item)
         }
@@ -284,7 +287,10 @@ final class MenuCoordinator: NSObject, NSMenuItemValidation, NSMenuDelegate {
         }
         zoomRoot.submenu = zoom
         menu.addItem(zoomRoot)
-        menu.addItem(commandItem(.openAnnotations, key: ""))
+        menu.addItem(commandItem(.toggleHorizontalScrollLock, key: "l", modifiers: [.command, .control]))
+        menu.addItem(commandItem(.openOutline, key: "o", modifiers: [.command, .control]))
+        menu.addItem(commandItem(.openAnnotations, key: "a", modifiers: [.command, .control]))
+        menu.addItem(commandItem(.openReferences, key: "r", modifiers: [.command, .control]))
         menu.addItem(.separator())
         let fullScreen = NSMenuItem(title: "Enter Full Screen", action: #selector(NSWindow.toggleFullScreen(_:)), keyEquivalent: "f")
         fullScreen.keyEquivalentModifierMask = [.command, .control]

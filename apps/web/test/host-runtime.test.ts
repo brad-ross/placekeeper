@@ -922,11 +922,24 @@ describe("host-neutral review runtime", () => {
       payload: { command: "reverse-synctex" },
     });
 
+    for (const id of ["fit-width", "toggle-horizontal-scroll-lock", "open-outline", "open-annotations", "open-references"]) {
+      publish({ protocol: REVIEW_RUNTIME_PROTOCOL, version: REVIEW_RUNTIME_VERSION,
+        kind: "event", event: "host-command", panelId: "panel_identifier_1234",
+        payload: { command: "review-command", id } });
+    }
+    for (const payload of [{ command: "review-command", id: "unknown" },
+      { command: "review-command", id: "fit-width", extra: true }]) {
+      publish({ protocol: REVIEW_RUNTIME_PROTOCOL, version: REVIEW_RUNTIME_VERSION,
+        kind: "event", event: "host-command", panelId: "panel_identifier_1234", payload });
+    }
+
     expect(commands).toEqual([
       { command: "reattach" },
       { command: "export-reviewed-pdf" },
       { command: "forward-synctex", documentGeneration: 4, pageIndex: 2, point: { x: 72, y: 144 } },
       { command: "reverse-synctex" },
+      ...["fit-width", "toggle-horizontal-scroll-lock", "open-outline", "open-annotations", "open-references"]
+        .map((id) => ({ command: "review-command", id })),
     ]);
     unsubscribe?.();
     runtime.dispose();

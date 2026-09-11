@@ -36,7 +36,7 @@ final class MacPoliciesTests: XCTestCase {
     func testZoomShortcutsKeepPDFAndAppOwnersSeparate() {
         let routes: [(String, NSEvent.ModifierFlags, MacZoomShortcut)] = [
             ("=", [.command], .pdfIn), ("+", [.command, .numericPad], .pdfIn),
-            ("-", [.command], .pdfOut), ("0", [.command], .pdfFitWidth),
+            ("-", [.command], .pdfOut), ("0", [.command, .control], .pdfFitWidth),
             ("=", [.command, .shift], .appIn), ("+", [.command, .shift], .appIn),
             ("-", [.command, .shift], .appOut), ("_", [.command, .shift], .appOut),
             ("0", [.command, .option], .appActualSize),
@@ -44,9 +44,10 @@ final class MacPoliciesTests: XCTestCase {
         for (characters, flags, expected) in routes {
             XCTAssertEqual(MacZoomShortcut.resolve(characters: characters, modifiers: flags), expected)
             XCTAssertEqual(MacZoomShortcut.resolve(characters: characters, modifiers: flags.union([.capsLock, .numericPad])), expected)
-            XCTAssertNil(MacZoomShortcut.resolve(characters: characters, modifiers: flags.union(.control)))
+            XCTAssertNil(MacZoomShortcut.resolve(characters: characters, modifiers: flags.union([.control, .option])))
         }
         XCTAssertNil(MacZoomShortcut.resolve(characters: "=", modifiers: [.command, .option]))
+        XCTAssertNil(MacZoomShortcut.resolve(characters: "0", modifiers: [.command]))
         XCTAssertNil(MacZoomShortcut.resolve(characters: "0", modifiers: [.command, .shift]))
         XCTAssertNil(MacZoomShortcut.resolve(characters: "_", modifiers: [.command]))
         XCTAssertNil(MacZoomShortcut.resolve(characters: "é", modifiers: [.command]))

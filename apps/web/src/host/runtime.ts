@@ -34,6 +34,7 @@ export interface HostRuntimeInvalidation extends HostRuntimeIdentity {
 }
 
 export type HostRuntimeCommand =
+  | { readonly command: "review-command"; readonly id: import("../review/review-command-surface.js").ReviewSemanticCommand }
   | { readonly command: "reattach" }
   | { readonly command: "export-reviewed-pdf" }
   | { readonly command: "reverse-synctex" }

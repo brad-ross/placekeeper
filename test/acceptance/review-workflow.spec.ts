@@ -864,6 +864,47 @@ test.describe('canonical review workflow', () => {
     );
   });
 
+  test('routes view shortcuts from reference focus while preserving editable input', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await installRuntimeClassicScrollport(page);
+    await page.getByRole('button', { name: 'Set outline tree' }).click();
+    await page.keyboard.press('Control+Meta+o');
+    await expect(page.getByRole('tab', { name: 'Outline', exact: true })).toHaveAttribute('aria-selected', 'true');
+    await page.keyboard.press('Control+Meta+a');
+    await expect(page.getByRole('tab', { name: 'Annotations', exact: true })).toHaveAttribute('aria-selected', 'true');
+    await page.getByRole('button', { name: 'Open harness reference' }).press('Enter');
+    await page.keyboard.press('Control+Meta+r');
+    await expect(page.locator('#workspace-panel-references')).toBeVisible();
+    await page.keyboard.press('Control+Meta+0');
+    await expect(page.getByRole('textbox', { name: 'Current zoom 88 percent. Enter a zoom percentage' })).toHaveValue('88');
+    await page.keyboard.press('Control+Meta+l');
+    await expect(page.locator('[data-review-stage]')).toHaveAttribute('data-horizontal-scroll-locked', 'true');
+    await page.keyboard.press('Control+Meta+l');
+    await expect(page.locator('[data-review-stage]')).not.toHaveAttribute('data-horizontal-scroll-locked', 'true');
+    const input = page.getByRole('textbox', { name: 'Native input', exact: true });
+    await input.fill('keep this text');
+    await input.press('Control+Meta+l');
+    await expect(input).toHaveValue('keep this text');
+    await expect(input).toBeFocused();
+    await expect(page.locator('[data-review-stage]')).not.toHaveAttribute('data-horizontal-scroll-locked', 'true');
+  });
+
+  test('keeps the gap above bottom References equal to the outside tray inset', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await installRuntimeClassicScrollport(page);
+    await page.getByRole('button', { name: 'Open harness reference' }).press('Enter');
+    await page.getByRole('button', { name: 'Show References' }).click();
+    await page.getByRole('button', { name: 'Show workspace' }).click();
+    const stage = page.locator('[data-review-stage]');
+    await expect(stage).toHaveAttribute('data-reference-layout', 'wide-split');
+    await expect.poll(async () => stage.evaluate((element) => {
+      const reference = element.querySelector('#review-workspace')!.getBoundingClientRect();
+      const tools = element.querySelector('#review-tools-workspace')!.getBoundingClientRect();
+      const inset = Number.parseFloat(getComputedStyle(element).getPropertyValue('--review-overlay-inset'));
+      return Math.abs(reference.top - tools.bottom - inset);
+    })).toBeLessThan(1);
+  });
+
   test('backs the bottom tray gutter when the PDF has no horizontal overflow', async ({ page }) => {
     await page.setViewportSize({ width: 760, height: 720 });
     const viewport = await installRuntimeClassicScrollport(page);
@@ -886,6 +927,7 @@ test.describe('canonical review workflow', () => {
     test.skip(browserName !== 'chromium', 'Chromium exposes deterministic custom classic scrollbar metrics in CI.');
     await page.setViewportSize({ width: 760, height: 720 });
     const canvas = page.getByRole('application', { name: 'PDF review canvas' });
+    await expect(page.locator('[data-review-stage]')).toHaveAttribute('data-workspace-presentation', 'bottom');
     const initialCanvas = await canvas.boundingBox();
     const viewport = await installRuntimeClassicScrollport(page);
     const tracks = await viewport.evaluate((element) => {
