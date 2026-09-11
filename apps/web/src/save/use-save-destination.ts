@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState, type Dispatch, type SetStateAction, type RefObject } from 'react';
+import { setAnnotationName } from '../../../../packages/core/src/review-commands.js';
+import { authoringAuthorityFor, type AuthoringAuthority } from '../review/authoring-session.js';
 import type { ReviewState } from '../../../../packages/core/src/review-model.js';
 import type { SaveStatus } from '../../../../packages/core/src/save-status.js';
 import type { SaveCopyProposal, ProductionScope, ProductionSessionApi } from '../host/session-contracts.js';
@@ -12,6 +14,7 @@ export function useSaveDestination(props: { api: ProductionSessionApi }, scope: 
   setState: Dispatch<SetStateAction<ReviewState>>, setSaveStatus: Dispatch<SetStateAction<SaveStatus>>,
   setCommandError: (error: string | null) => void) {
   const [destinationDialog, setDestinationDialog] = useState<{
+    readonly authority: AuthoringAuthority;
     readonly reason: "first-annotation" | "menu";
     readonly pending?: PendingAuthoringCommand;
   } | null>(null);
@@ -19,8 +22,10 @@ export function useSaveDestination(props: { api: ProductionSessionApi }, scope: 
   const [folderSelectionId, setFolderSelectionId] = useState<string>();
   const [destinationEstablishing, setDestinationEstablishing] = useState(false);
   const [destinationError, setDestinationError] = useState<string>();
+  const [nameError, setNameError] = useState<string>();
   const destinationAttemptRef = useRef(0);
   const authoringResolutionTokenRef = useRef(0);
+  useEffect(() => () => { destinationAttemptRef.current += 1; }, []);
   const [authoringSessionResolution, setAuthoringSessionResolution] = useState<{
     readonly token: number;
     readonly outcome: 'accepted' | 'source-replaced';
@@ -28,17 +33,19 @@ export function useSaveDestination(props: { api: ProductionSessionApi }, scope: 
   useEffect(() => {
     if (destinationDialog === null) return;
     let cancelled = false;
+    const attempt = destinationAttemptRef.current;
+    const isCurrent = () => !cancelled && pendingDestinationAttemptIsCurrent(attempt, destinationAttemptRef.current, destinationDialog, stateRef.current, documentGenerationRef.current);
     setDestinationError(undefined);
     setFolderSelectionId(undefined);
     void props.api.saveProposal()
       .then((proposal) => {
-        if (!cancelled) setCopyProposal((current) =>
+        if (isCurrent()) setCopyProposal((current) =>
           current?.sourceDisposition === 'remote-temporary' && current.folder !== undefined
             ? current
             : proposal);
       })
       .catch(() => {
-        if (!cancelled) setDestinationError("Save options could not be prepared safely.");
+        if (isCurrent()) setDestinationError("Save options could not be prepared safely.");
       });
     return () => { cancelled = true; };
   }, [destinationDialog, props.api]);
@@ -58,25 +65,33 @@ export function useSaveDestination(props: { api: ProductionSessionApi }, scope: 
     destinationAttemptRef.current += 1;
     setDestinationError(undefined);
     setCopyProposal(undefined);
-    setDestinationDialog({ reason, ...(pending === undefined ? {} : { pending }) });
+    setNameError(undefined);
+    setDestinationEstablishing(false);
+    setDestinationDialog({ authority: authoringAuthorityFor(stateRef.current, documentGenerationRef.current), reason, ...(pending === undefined ? {} : { pending }) });
   };
   const retrySave = async () => {
     if (destinationEstablishing) return;
     setDestinationEstablishing(true);
     setDestinationError(undefined);
+    const attempt = destinationAttemptRef.current;
+    const captured = destinationDialog ?? { authority: authoringAuthorityFor(stateRef.current, documentGenerationRef.current) };
+    const isCurrent = () => pendingDestinationAttemptIsCurrent(attempt, destinationAttemptRef.current, captured, stateRef.current, documentGenerationRef.current);
     try {
-      setSaveStatus(await props.api.retrySave());
+      const status = await props.api.retrySave();
+      if (!isCurrent()) return;
+      setSaveStatus(status);
       setDestinationDialog(null);
     } catch {
+      if (!isCurrent()) return;
       setDestinationError('Saving could not be retried safely.');
     } finally {
-      setDestinationEstablishing(false);
+      if (isCurrent()) setDestinationEstablishing(false);
     }
   };
   const invalidatePendingDestination = () => {
-    const pending = destinationDialog?.pending;
+    const pending = destinationDialog;
     if (
-      pending === undefined
+      pending === null
       || pendingDestinationIsCurrent(pending, state, documentGenerationRef.current)
     ) return;
     destinationAttemptRef.current += 1;
@@ -85,23 +100,34 @@ export function useSaveDestination(props: { api: ProductionSessionApi }, scope: 
     if (disposition.notifyAuthoringShell) publishAuthoringResolution('source-replaced');
     if (disposition.closeDialog) setDestinationDialog(null);
     setDestinationError(undefined);
+    setNameError(undefined);
   };
   const onLocate = async () => {
     if (destinationEstablishing) return;
     setDestinationEstablishing(true);
     setDestinationError(undefined);
+    const attempt = destinationAttemptRef.current;
+    const captured = destinationDialog ?? { authority: authoringAuthorityFor(stateRef.current, documentGenerationRef.current) };
+    const isCurrent = () => pendingDestinationAttemptIsCurrent(attempt, destinationAttemptRef.current, captured, stateRef.current, documentGenerationRef.current);
     try {
-      setSaveStatus(await props.api.locateSave());
+      const status = await props.api.locateSave();
+      if (!isCurrent()) return;
+      setSaveStatus(status);
       setDestinationDialog(null);
     } catch {
+      if (!isCurrent()) return;
       setDestinationError("The selected PDF did not match the saved file.");
     } finally {
-      setDestinationEstablishing(false);
+      if (isCurrent()) setDestinationEstablishing(false);
     }
   };
   const onChooseLocation = async () => {
+    const attempt = destinationAttemptRef.current;
+    const captured = destinationDialog ?? { authority: authoringAuthorityFor(stateRef.current, documentGenerationRef.current) };
+    const isCurrent = () => pendingDestinationAttemptIsCurrent(attempt, destinationAttemptRef.current, captured, stateRef.current, documentGenerationRef.current);
     try {
       const selected = await props.api.chooseFolder();
+      if (!isCurrent()) return;
       if (!selected.cancelled && selected.selectionId && selected.folder) {
         setFolderSelectionId(selected.selectionId);
         setCopyProposal((current) => scope.sourceDisposition === 'remote-temporary'
@@ -115,6 +141,7 @@ export function useSaveDestination(props: { api: ProductionSessionApi }, scope: 
             });
       }
     } catch {
+      if (!isCurrent()) return;
       setDestinationError("A new location could not be authorized.");
     }
   };
@@ -125,101 +152,70 @@ export function useSaveDestination(props: { api: ProductionSessionApi }, scope: 
     if (disposition.closeDialog) setDestinationDialog(null);
     setDestinationError(undefined);
   };
-  const onConfirm = async (choice: "copy" | "original", filename: string) => {
+  const onConfirm = async (choice: "copy" | "original", filename: string, annotationName: string) => {
     const dialog = destinationDialog;
     if (dialog === null || destinationEstablishing) return;
-    if (
-      dialog.pending !== undefined
-      && !pendingDestinationIsCurrent(
-        dialog.pending,
-        stateRef.current,
-        documentGenerationRef.current,
-      )
-    ) {
-      const disposition = pendingDestinationDisposition('source-replaced');
-      if (disposition.notifyAuthoringShell) publishAuthoringResolution('source-replaced');
-      if (disposition.closeDialog) setDestinationDialog(null);
-      setDestinationError(undefined);
-      return;
-    }
     const attempt = destinationAttemptRef.current;
+    const isCurrent = () => pendingDestinationAttemptIsCurrent(attempt,
+      destinationAttemptRef.current, dialog, stateRef.current, documentGenerationRef.current);
+    if (!isCurrent()) { invalidatePendingDestination(); return; }
     setDestinationEstablishing(true);
     setDestinationError(undefined);
+    setNameError(undefined);
     try {
       const established = choice === "copy"
         ? await props.api.chooseCopy(filename, folderSelectionId)
         : await props.api.chooseOriginal();
-      if (!pendingDestinationAttemptIsCurrent(
-        attempt,
-        destinationAttemptRef.current,
-        dialog.pending,
-        stateRef.current,
-        documentGenerationRef.current,
-      )) {
-        if (dialog.pending !== undefined && !pendingDestinationIsCurrent(
-          dialog.pending,
-          stateRef.current,
-          documentGenerationRef.current,
-        )) {
-          const disposition = pendingDestinationDisposition('source-replaced');
-          if (disposition.notifyAuthoringShell) publishAuthoringResolution('source-replaced');
-          if (disposition.closeDialog) setDestinationDialog(null);
+      if (!isCurrent()) return;
+      setSaveStatus(established);
+      const beforeName = stateRef.current;
+      const named = await props.api.command(setAnnotationName(beforeName, annotationName));
+      if (!isCurrent()) return;
+      if ('accepted' in named) {
+        if (named.state.revision >= stateRef.current.revision) {
+          stateRef.current = named.state;
+          setState(named.state);
         }
+        setNameError(named.message);
         return;
       }
-      setSaveStatus(established);
+      if (named.revision >= stateRef.current.revision) {
+        stateRef.current = named;
+        setState(named);
+      }
       if (dialog.pending !== undefined) {
-        const result = await props.api.command(dialog.pending.command);
-        if (!pendingDestinationAttemptIsCurrent(
-          attempt,
-          destinationAttemptRef.current,
-          dialog.pending,
-          stateRef.current,
-          documentGenerationRef.current,
-        )) {
-          if (!pendingDestinationIsCurrent(
-            dialog.pending,
-            stateRef.current,
-            documentGenerationRef.current,
-          )) {
-            const disposition = pendingDestinationDisposition('source-replaced');
-            if (disposition.notifyAuthoringShell) publishAuthoringResolution('source-replaced');
-            if (disposition.closeDialog) setDestinationDialog(null);
-          }
-          return;
-        }
+        // Only account for our own name command. An already stale draft must
+        // still reach the runtime with its stale revision and be rejected.
+        const pendingCommand = dialog.pending.command.expectedRevision === beforeName.revision
+          ? { ...dialog.pending.command, expectedRevision: named.revision }
+          : dialog.pending.command;
+        const result = await props.api.command(pendingCommand);
+        if (!isCurrent()) return;
         const next = "accepted" in result ? result.state : result;
-        setState(next);
+        if (next.revision >= stateRef.current.revision) {
+          stateRef.current = next;
+          setState(next);
+        }
         if ("accepted" in result) {
-          const disposition = pendingDestinationDisposition('rejected');
-          if (!disposition.preserveDraft) {
-            throw new Error('Rejected annotation unexpectedly discarded its draft.');
-          }
           setCommandError(result.message);
-          setDestinationError(undefined);
-          if (disposition.closeDialog) setDestinationDialog(null);
+          setDestinationDialog(null);
           return;
         }
         setCommandError(null);
-        const disposition = pendingDestinationDisposition('accepted');
-        if (disposition.notifyAuthoringShell) publishAuthoringResolution('accepted');
-        setSaveStatus(await props.api.saveStatus());
-        if (destinationAttemptRef.current !== attempt) return;
+        publishAuthoringResolution('accepted');
       }
-      if (pendingDestinationDisposition('accepted').closeDialog) {
-        setDestinationDialog(null);
-      }
+      const status = await props.api.saveStatus();
+      if (!isCurrent()) return;
+      setSaveStatus(status);
+      setDestinationDialog(null);
     } catch (error) {
-      setDestinationError(
-        error instanceof Error
-          ? error.message
-          : "That destination could not be established safely.",
-      );
+      if (isCurrent()) setDestinationError(error instanceof Error
+        ? error.message : "That destination could not be established safely.");
     } finally {
-      setDestinationEstablishing(false);
+      if (isCurrent()) setDestinationEstablishing(false);
     }
   };
-  return { destinationDialog, copyProposal, destinationEstablishing, destinationError,
+  return { destinationDialog, copyProposal, destinationEstablishing, destinationError, nameError,
     authoringSessionResolution, openCopyDialog, retrySave, invalidatePendingDestination,
     onLocate, onChooseLocation, onCancel, onConfirm };
 }

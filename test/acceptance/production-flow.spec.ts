@@ -6582,3 +6582,125 @@ test('settles an interrupted zoom before keyboard page navigation', async ({ pag
   await page.waitForTimeout(200);
   await expect(input).toHaveValue('3');
 });
+
+for (const width of [1280, 620, 360]) {
+  test(`document annotation name saves, cancels, and matches copy input at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 });
+    const { sessionId } = await openFreshProductionFixture(page, plainTextPdf, 'Annotation name fixture failed');
+    const open = async () => {
+      await page.getByRole('button', { name: /Open automatic save options$/u }).click();
+      const dialog = page.getByRole('dialog', { name: 'Choose where to save annotations', exact: true });
+      await expect(dialog).toBeVisible();
+      return dialog;
+    };
+    let dialog = await open();
+    const name = dialog.getByRole('textbox', { name: 'Name on annotations', exact: true });
+    await expect(name).toHaveValue('Placekeeper');
+    await name.fill('Brad Ross');
+    const styles = await dialog.evaluate((element) => {
+      const fields = element.querySelectorAll('.save-destination-filename input');
+      return [...fields].map((field) => {
+        const style = getComputedStyle(field);
+        return [style.font, style.padding, style.border, style.borderRadius, style.backgroundColor];
+      });
+    });
+    expect(styles).toHaveLength(2);
+    expect(styles[0]).toEqual(styles[1]);
+    await dialog.getByRole('radio', { name: 'Modify the original PDF' }).check();
+    await expect(name).toHaveValue('Brad Ross');
+    await expect(dialog.getByRole('textbox', { name: 'Copy name' })).toHaveCount(0);
+    await name.press('Escape');
+    await expect(dialog).toHaveCount(0);
+    expect(host.broker.state(sessionId)?.annotationName).toBeUndefined();
+    dialog = await open();
+    await expect(dialog.getByRole('textbox', { name: 'Name on annotations' })).toHaveValue('Placekeeper');
+    await dialog.getByRole('radio', { name: 'Modify the original PDF' }).check();
+    await dialog.getByRole('textbox', { name: 'Name on annotations' }).fill('  Brad Ross  ');
+    await dialog.getByRole('button', { name: 'Confirm', exact: true }).click();
+    await expect(dialog).toHaveCount(0);
+    await expect.poll(() => host.broker.state(sessionId)?.annotationName).toBe('Brad Ross');
+    expect(host.broker.state(sessionId)?.items).toHaveLength(0);
+    dialog = await open();
+    await dialog.getByRole('textbox', { name: 'Name on annotations' }).fill('Cancelled name');
+    await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
+    expect(host.broker.state(sessionId)?.annotationName).toBe('Brad Ross');
+    dialog = await open();
+    await dialog.getByRole('radio', { name: 'Modify the original PDF' }).check();
+    await dialog.getByRole('textbox', { name: 'Name on annotations' }).fill('   ');
+    await dialog.getByRole('button', { name: 'Confirm', exact: true }).click();
+    await expect(dialog).toHaveCount(0);
+    await expect.poll(() => host.broker.state(sessionId)?.annotationName).toBe('Placekeeper');
+  });
+}
+
+test('document annotation name preserves rejected save drafts for correction and retry', async ({ page }) => {
+  const { sessionId } = await openFreshProductionFixture(page, plainTextPdf, 'Rejected name fixture failed');
+  let rejectName = true;
+  await page.route(`**/s/${sessionId}/commands`, async (route) => {
+    if (rejectName && route.request().postDataJSON().type === 'set-annotation-name') {
+      await route.fulfill({ status: 422, contentType: 'application/json', body: JSON.stringify({
+        ok: false, error: { kind: 'invalid-review-command', message: 'Annotation name is too long' },
+      }) });
+    } else await route.continue();
+  });
+  await page.getByRole('button', { name: /Open automatic save options$/u }).click();
+  const dialog = page.getByRole('dialog', { name: 'Choose where to save annotations', exact: true });
+  await dialog.getByRole('radio', { name: 'Modify the original PDF' }).check();
+  const name = dialog.getByRole('textbox', { name: 'Name on annotations' });
+  await name.fill('Rejected draft');
+  await dialog.getByRole('button', { name: 'Confirm', exact: true }).click();
+  await expect(dialog.getByRole('alert')).toHaveText('Annotation name is too long');
+  await expect(name).toHaveValue('Rejected draft');
+  await expect(name).toHaveAttribute('aria-invalid', 'true');
+  await expect(name).toHaveAccessibleDescription('Annotation name is too long');
+  expect(host.broker.state(sessionId)?.annotationName).toBeUndefined();
+  rejectName = false;
+  await name.fill('Corrected name');
+  await dialog.getByRole('button', { name: 'Confirm', exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect.poll(() => host.broker.state(sessionId)?.annotationName).toBe('Corrected name');
+});
+
+test('document annotation name is unchanged when establishing the destination fails', async ({ page }) => {
+  const { sessionId } = await openFreshProductionFixture(page, plainTextPdf, 'Failed destination name fixture failed');
+  const commands: unknown[] = [];
+  page.on('request', (request) => {
+    if (request.url().endsWith(`/s/${sessionId}/commands`)) commands.push(request.postDataJSON());
+  });
+  await page.route(`**/s/${sessionId}/save/original`, (route) => route.fulfill({ status: 500, body: 'Failed destination' }));
+  await page.getByRole('button', { name: /Open automatic save options$/u }).click();
+  const dialog = page.getByRole('dialog', { name: 'Choose where to save annotations', exact: true });
+  await dialog.getByRole('radio', { name: 'Modify the original PDF' }).check();
+  await dialog.getByRole('textbox', { name: 'Name on annotations' }).fill('Unconfirmed name');
+  await dialog.getByRole('button', { name: 'Confirm', exact: true }).click();
+  await expect(dialog.getByRole('alert')).toBeVisible();
+  expect(commands).toEqual([]);
+  expect(host.broker.state(sessionId)?.annotationName).toBeUndefined();
+  await expect(dialog.getByRole('textbox', { name: 'Name on annotations' })).toHaveValue('Unconfirmed name');
+});
+
+test('document annotation name advances only the pending first annotation revision it owns', async ({ page }) => {
+  const { sessionId } = await openFreshProductionFixture(page, plainTextPdf, 'Pending annotation name fixture failed');
+  const commands: { type: string; expectedRevision: number }[] = [];
+  page.on('request', (request) => {
+    if (request.url().endsWith(`/s/${sessionId}/commands`)) commands.push(request.postDataJSON());
+  });
+  const canvas = page.locator("[data-page-index='0']").first();
+  await waitForRenderedPageImage(canvas);
+  await canvas.click({ button: 'right', position: { x: 320, y: 420 } });
+  await page.getByRole('menuitem', { name: 'Add Page Note' }).click();
+  const composer = page.locator('[data-comment-composer]');
+  await composer.locator('textarea').fill('First annotation with chosen name.');
+  await composer.getByRole('button', { name: 'Save', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Choose where to save annotations', exact: true });
+  await dialog.getByRole('radio', { name: 'Modify the original PDF' }).check();
+  await dialog.getByRole('textbox', { name: 'Name on annotations' }).fill('Brad Ross');
+  await dialog.getByRole('button', { name: 'Confirm', exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(composer).toHaveCount(0);
+  await expect.poll(() => host.broker.state(sessionId)?.items.length).toBe(1);
+  expect(host.broker.state(sessionId)).toMatchObject({ revision: 2, annotationName: 'Brad Ross' });
+  expect(commands).toHaveLength(2);
+  expect(commands[0]).toMatchObject({ type: 'set-annotation-name', expectedRevision: 0 });
+  expect(commands[1]?.expectedRevision).toBe(1);
+});

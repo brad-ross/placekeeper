@@ -189,8 +189,8 @@ export function DocumentActionsMenu({
     try {
       const result = await onExport(confirmPossiblyStale);
       setStaleConfirmation(false);
-      setExportDetail(exportMessageFromResult(result));
-      setOutcome('success');
+      setExportDetail(result?.kind === 'cancelled' ? '' : exportMessageFromResult(result));
+      setOutcome(result?.kind === 'cancelled' ? 'idle' : 'success');
     } catch {
       setStaleConfirmation(false);
       setOutcome('failure');

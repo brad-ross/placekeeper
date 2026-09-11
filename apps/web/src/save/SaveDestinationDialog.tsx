@@ -1,5 +1,8 @@
 import { useId, useLayoutEffect, useRef, useState } from "react";
 
+import { AnnotationNameField } from "./AnnotationNameField.js";
+import { DEFAULT_ANNOTATION_NAME } from "../../../../packages/core/src/review-model.js";
+
 import { trapDialogFocus } from "../app/dialog-focus.js";
 import type { SaveCopyProposal } from "../host/session-contracts.js";
 import { ReviewIcon } from "../review/ReviewIcon.js";
@@ -8,6 +11,8 @@ import type { SaveFailureReason } from "../../../../packages/core/src/save-statu
 
 export interface SaveDestinationDialogProps {
   readonly open: boolean;
+  readonly annotationName?: string;
+  readonly nameError?: string;
   readonly proposal?: SaveCopyProposal;
   readonly sourceDisposition?: "local" | "remote-temporary";
   readonly protectedRecovery?: boolean;
@@ -16,7 +21,7 @@ export interface SaveDestinationDialogProps {
   readonly rewriteEligibility?: PdfRewriteEligibility;
   readonly recoveryTarget?: string;
   readonly recoveryFailure?: SaveFailureReason;
-  readonly onConfirm: (choice: "copy" | "original", filename: string) => void | Promise<void>;
+  readonly onConfirm: (choice: "copy" | "original", filename: string, annotationName: string) => void | Promise<void>;
   readonly onCancel: () => void;
   readonly onChooseLocation?: () => void | Promise<void>;
   readonly onRetry?: () => void | Promise<void>;
@@ -26,6 +31,8 @@ export interface SaveDestinationDialogProps {
 export function SaveDestinationDialog(props: SaveDestinationDialogProps) {
   const [choice, setChoice] = useState<"copy" | "original">("copy");
   const [filename, setFilename] = useState("");
+  const [annotationName, setAnnotationName] = useState(props.annotationName ?? DEFAULT_ANNOTATION_NAME);
+  const nameErrorId = useId();
   const titleId = useId();
   const descriptionId = useId();
   const firstRef = useRef<HTMLInputElement>(null);
@@ -40,6 +47,7 @@ export function SaveDestinationDialog(props: SaveDestinationDialogProps) {
   useLayoutEffect(() => {
     if (!props.open) return;
     setChoice("copy");
+    setAnnotationName(props.annotationName ?? DEFAULT_ANNOTATION_NAME);
     lastProposalFilename.current = proposalFilename;
     setFilename(proposalFilename ?? "");
     requestAnimationFrame(() => {
@@ -200,6 +208,8 @@ export function SaveDestinationDialog(props: SaveDestinationDialogProps) {
             </div>
           ) : null}
           </fieldset>
+          <AnnotationNameField value={annotationName} onChange={setAnnotationName}
+            disabled={props.establishing || restricted} error={props.nameError} errorId={nameErrorId} />
           {restricted ? (
             <p className="save-destination-error" role="alert">{props.rewriteEligibility?.message}</p>
           ) : null}
@@ -227,7 +237,7 @@ export function SaveDestinationDialog(props: SaveDestinationDialogProps) {
                 (remote ? proposalFolder === undefined : props.proposal === undefined)
               ))
             }
-            onClick={() => void props.onConfirm(choice, filename)}
+            onClick={() => void props.onConfirm(choice, filename, annotationName)}
           >
             {props.establishing ? <ReviewIcon name="loading" /> : null}
             <span>Confirm</span>
