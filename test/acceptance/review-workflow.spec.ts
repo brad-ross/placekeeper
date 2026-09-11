@@ -905,7 +905,7 @@ test.describe('canonical review workflow', () => {
     })).toBeLessThan(1);
   });
 
-  test('backs the bottom tray gutter when the PDF has no horizontal overflow', async ({ page }) => {
+  test('backs tray margins while excluding only actual scrollbar tracks', async ({ page }) => {
     await page.setViewportSize({ width: 760, height: 720 });
     const viewport = await installRuntimeClassicScrollport(page);
     await viewport.evaluate((element) => {
@@ -915,12 +915,23 @@ test.describe('canonical review workflow', () => {
     await page.getByRole('button', { name: 'Show workspace' }).click();
     await expect.poll(() => viewport.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
     const backing = page.locator('.review-overlay-frame');
-    await expect(backing).toHaveCSS('clip-path', 'inset(0px 20px 0px 0px)');
+    const expectedClip = () => viewport.evaluate((element) => {
+      const width = element.offsetWidth - element.clientWidth;
+      const height = element.offsetHeight - element.clientHeight;
+      return `inset(0px ${width}px ${height}px 0px)`;
+    });
+    await expect(backing).toHaveCSS('clip-path', await expectedClip());
     await viewport.evaluate((element) => {
       (element.firstElementChild as HTMLElement).style.width = '2000px';
       element.dispatchEvent(new Event('scroll'));
     });
-    await expect(backing).toHaveCSS('clip-path', 'inset(0px 20px 20px 0px)');
+    await expect(backing).toHaveCSS('clip-path', await expectedClip());
+    await viewport.evaluate((element) => {
+      element.style.scrollbarWidth = 'none';
+      element.dispatchEvent(new Event('scroll'));
+    });
+    await expect.poll(expectedClip).toBe('inset(0px 0px 0px 0px)');
+    await expect(backing).toHaveCSS('clip-path', 'inset(0px)');
   });
 
   test('includes an actual wide classic scrollbar track in the common outside tray inset', async ({ page, browserName }) => {

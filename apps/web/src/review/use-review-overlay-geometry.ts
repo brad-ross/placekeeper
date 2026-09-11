@@ -227,7 +227,6 @@ export function useReviewOverlayGeometry(input: {
     style: {
       '--review-collapsed-rail-size': `${REVIEW_COLLAPSED_RAIL_SIZE}px`,
       '--review-overlay-inset': `${geometry.outsideInset}px`,
-      '--review-overlay-scrollbar-bottom-inset': `${zoomActions.horizontalScrollAvailable ? geometry.outsideInset : 0}px`,
       '--review-main-scrollbar-width': `${geometry.scrollbarWidth}px`,
       '--review-main-scrollbar-height': `${geometry.scrollbarHeight}px`,
       '--review-overlay-fade-size': `${REVIEW_OVERLAY_FADE_SIZE}px`,
