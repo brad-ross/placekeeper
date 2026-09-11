@@ -968,13 +968,23 @@ export function createViewerNavigation(
       const scrollToLocation = () => {
         const alignment = scrollAlignment(location, viewport);
         if (alignment === null) return false;
-        viewer.scroll.scrollToPage({
+        flushSync(() => viewer.scroll.scrollToPage({
           pageNumber: location.pageIndex + 1,
           pageCoordinates: location.anchor,
           behavior: 'instant',
           alignX: alignment.xPercent,
           alignY: alignment.yPercent,
-        });
+        }));
+        // Reconcile the plugin's gap with committed CSS geometry before a
+        // frame can expose the intermediate page position.
+        if (pageGeometry(viewer, location.pageIndex) !== null) {
+          const matches = locationAxesMatch(viewer, location, true, viewport);
+          if (!matches.horizontal || !matches.vertical) {
+            return positionLocationInClientViewport(
+              viewer, location, operation, true, viewport, matches.horizontal,
+            ) !== null;
+          }
+        }
         return true;
       };
       const targetWasMounted = pageGeometry(viewer, location.pageIndex) !== null;
@@ -1011,6 +1021,37 @@ export function createViewerNavigation(
     return waitForFrames(operation, 2, deadline);
   };
 
+  function frameFittingLocation(
+    viewer: ActiveViewer,
+    location: PdfViewerLocation,
+    viewport?: PdfViewportQuery,
+  ): PdfViewerLocation {
+    const element = options.root()?.querySelector<HTMLElement>('[data-viewer-framing-viewport]');
+    const bounds = element ? unobscuredViewportRect(element, viewport) : null;
+    const page = viewer.pages[location.pageIndex];
+    if (!bounds || !page) return location;
+    const rotation = combinePageRotation(page.rotation, viewer.documentRotation);
+    const width = transformSize(page.size, rotation, location.zoom).width;
+    if (width > bounds.width + coordinateTolerance) return location;
+    const margins = options.fitWidthMargins?.() ?? { left: viewer.viewportGap, right: viewer.viewportGap };
+    const hasRoom = width <= bounds.width - margins.left - margins.right + coordinateTolerance;
+    const left = hasRoom ? margins.left : 0;
+    const right = bounds.width - (hasRoom ? margins.right : 0);
+    const anchor = transformPosition(page.size, location.anchor, rotation, location.zoom);
+    const requestedLeft = bounds.width * location.alignment.xPercent / 100 - anchor.x;
+    if (requestedLeft >= left - coordinateTolerance
+      && requestedLeft + width <= right + coordinateTolerance) return location;
+    // Resolve fitting-page alignment before scrolling, so the anchor jump and
+    // horizontal framing are one movement rather than two painted positions.
+    return {
+      ...location,
+      alignment: {
+        ...location.alignment,
+        xPercent: (left + (right - left - width) / 2 + anchor.x) / bounds.width * 100,
+      },
+    };
+  }
+
   const applyResolvedLocation = async (
     viewer: ActiveViewer,
     location: PdfViewerLocation,
@@ -1028,6 +1069,7 @@ export function createViewerNavigation(
       || location.anchor.x > page.size.width
       || location.anchor.y > page.size.height
     ) return false;
+    location = frameFittingLocation(viewer, location, viewport);
     try {
       if (locationMatchesView(viewer, location, false, viewport)) {
         return operationIsCurrent(operation);
@@ -1057,6 +1099,7 @@ export function createViewerNavigation(
       })();
     if (!zoomed || !operationIsCurrent(operation)) return false;
     if (!await waitForFrames(operation, 2, deadline)) return false;
+    location = frameFittingLocation(viewer, location, viewport);
     if (!await scrollAndWait(viewer, location, operation, deadline, viewport)) return false;
     if (!operationIsCurrent(operation)) return false;
     try {

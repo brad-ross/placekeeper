@@ -824,10 +824,34 @@ for (const viewportWidth of [1280, 760]) {
         return Math.max(viewport.x - bounds.x, bounds.x + bounds.width - right);
       }).toBeLessThan(2);
     };
-    for (let index = 0; index < 2; index += 1) {
-      await results.nth(index).click();
-      await expectFittedPage(index);
-    }
+    await results.first().click();
+    await expectFittedPage(0);
+    await page.evaluate(() => {
+      const state = { running: true, overflow: [] as number[] };
+      (window as unknown as { jumpFrames: typeof state }).jumpFrames = state;
+      const sample = () => {
+        if (!state.running) return;
+        const main = document.querySelector('.pdf-workspace:not(.pdf-workspace--reference)');
+        const viewport = main?.querySelector('[data-viewer-framing-viewport]')?.getBoundingClientRect();
+        const bounds = main?.querySelector('[data-page-index="1"]')?.getBoundingClientRect();
+        const fade = Array.from(document.querySelectorAll('.review-overlay-frame__right-fade'))
+          .find((element) => element.getBoundingClientRect().width > 0)?.getBoundingClientRect();
+        if (viewport && bounds && bounds.top < viewport.bottom && bounds.bottom > viewport.top) {
+          state.overflow.push(Math.max(viewport.left - bounds.left, bounds.right - (fade?.left ?? viewport.right)));
+        }
+        requestAnimationFrame(sample);
+      };
+      requestAnimationFrame(sample);
+    });
+    await results.nth(1).click();
+    await expectFittedPage(1);
+    const paintedOverflow = await page.evaluate(() => {
+      const state = (window as unknown as { jumpFrames: { running: boolean; overflow: number[] } }).jumpFrames;
+      state.running = false;
+      return state.overflow;
+    });
+    expect(paintedOverflow.length).toBeGreaterThan(0);
+    expect(Math.max(...paintedOverflow)).toBeLessThan(2);
     const pageTrigger = page.getByRole('button', { name: /Open page navigation/ });
     await pageTrigger.click();
     await page.getByRole('menuitem', { name: 'Previous page', exact: true }).click();
@@ -837,7 +861,10 @@ for (const viewportWidth of [1280, 760]) {
     await expectFittedPage(1);
     await page.keyboard.press('Escape');
     const pageInput = page.getByRole('textbox', { name: /^Current page/ });
+    await pageInput.click();
+    await expect(pageInput).toBeFocused();
     await pageInput.fill('1');
+    await expect(pageInput).toHaveValue('1');
     await pageInput.press('Enter');
     await expectFittedPage(0);
     await openAnnotationsWorkspace(page);
