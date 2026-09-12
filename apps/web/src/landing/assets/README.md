@@ -25,4 +25,4 @@ Captured on September 12, 2026, without reconstructed window chrome. Web uses a 
 
 - `surface-chrome.png` (2880 × 1800): a temporary Chrome for Testing 153 profile with only the current Placekeeper extension. The original arXiv URL stays in the address bar, with Section 4.1 on page 14 and Appendix A on page 31 in the bottom References tray. The temporary profile has its own native-host registration.
 
-ChatGPT still uses the earlier illustration pending a real capture; Computer denied access to that app.
+- `surface-chatgpt.png` (2880 × 1800): user-provided window capture of a clean ChatGPT conversation explaining Theorem 1, with the theorem visible on page 15 in Placekeeper’s in-app reader.
