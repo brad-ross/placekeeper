@@ -156,8 +156,8 @@ test("@critical @representative keeps the local keyboard journey private and rou
   page.on("request", (request) => requests.push({ method: request.method(), url: request.url() }));
 
   await page.goto("./");
-  await expect(page.getByRole("heading", { name: "Placekeeper" })).toBeVisible();
-  await expect(page.getByText("Annotations must be exported manually in this browser version")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Placekeeper", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Try it with your own document", exact: true })).toBeVisible();
   await focusByTab(page, page.getByRole("button", { name: "Upload PDF" }));
 
   const sourceDocument = await PDFDocument.load(await readFile(annotatedPdf));
@@ -602,7 +602,8 @@ test('@critical landing demos support zoom, references, and isolated comments', 
     await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
     await Promise.all(document.getAnimations().map((animation) => animation.finished.catch(() => {})));
   });
-  await expect(demo.locator('[data-owned-mark]')).toHaveCount(3);
+  // Four seeded annotations paint five segments (the deletion spans two lines).
+  await expect(demo.locator('[data-owned-mark]')).toHaveCount(5);
   await demo.getByRole('button', { name: 'Edit Highlight annotation on page 14', exact: true }).click();
   const editor = demo.getByRole('textbox', { name: 'Comment (optional)', exact: true });
   await editor.fill('A comment in the landing demo.');
@@ -616,7 +617,7 @@ test('@critical landing demos support zoom, references, and isolated comments', 
   await feature('Make comments').click();
   await expect(demo.locator('[data-page-index="13"] > img').first()).toBeVisible();
   expect(await demo.locator('body').evaluate(() => performance.timeOrigin)).toBe(readerIdentity);
-  await expect(demo.locator('[data-owned-mark]')).toHaveCount(3);
+  await expect(demo.locator('[data-owned-mark]')).toHaveCount(5);
   await expect(demo.getByText('A comment in the landing demo.', { exact: true })).toBeVisible();
   await page.locator('input[type=file]').setInputFiles(representativePdf);
   await waitForStaticPdf(page);
@@ -632,7 +633,7 @@ test('@critical visitors can add demo annotations and hide them between modes', 
   await demo.locator('[data-initial-view-ready="true"]').waitFor({ state: 'attached' });
   await feature('Make comments').click();
   await page.locator('iframe').scrollIntoViewIfNeeded();
-  await expect(demo.locator('[data-owned-mark]')).toHaveCount(3);
+  await expect(demo.locator('[data-owned-mark]')).toHaveCount(5);
   await demo.locator('body').evaluate(async () => {
     await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
     await Promise.all(document.getAnimations().map((animation) => animation.finished.catch(() => {})));
@@ -646,14 +647,14 @@ test('@critical visitors can add demo annotations and hide them between modes', 
   await comment.fill('My own annotation.');
   await demo.getByRole('button', { name: 'Save', exact: true }).click();
   await expect(comment).toHaveCount(0);
-  await expect(demo.locator('[data-owned-mark]')).toHaveCount(4);
+  await expect(demo.locator('[data-owned-mark]')).toHaveCount(6);
   for (const name of ['Read with focus', 'Follow a reference']) {
     await feature(name).click();
     await expect(demo.locator('[data-owned-mark]')).toHaveCount(0);
     await expect(demo.locator('.annotation-peek')).toHaveCount(0);
   }
   await feature('Make comments').click();
-  await expect(demo.locator('[data-owned-mark]')).toHaveCount(4);
+  await expect(demo.locator('[data-owned-mark]')).toHaveCount(6);
   await expect(demo.getByText('My own annotation.', { exact: true })).toBeVisible();
 });
 
@@ -666,7 +667,7 @@ test('@critical selecting demo text opens annotation actions after switching mod
   const pdf = demo.locator('[data-page-index="13"] > img').first();
   await expect(pdf).toBeVisible();
   await page.getByRole('tab', { name: 'Make comments', exact: true }).click();
-  await expect(demo.locator('[data-owned-mark]')).toHaveCount(3);
+  await expect(demo.locator('[data-owned-mark]')).toHaveCount(5);
   await demo.locator('body').evaluate(async () => {
     await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
     await Promise.all(document.getAnimations().map((animation) => animation.finished.catch(() => {})));
@@ -696,7 +697,7 @@ test('@critical visitors can insert text in the comments demo', async ({ page })
   const pdf = demo.locator('[data-page-index="13"] > img').first();
   await expect(pdf).toBeVisible();
   await page.getByRole('tab', { name: 'Make comments', exact: true }).click();
-  await expect(demo.locator('[data-owned-mark]')).toHaveCount(3);
+  await expect(demo.locator('[data-owned-mark]')).toHaveCount(5);
   await demo.locator('body').evaluate(async () => {
     await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
     await Promise.all(document.getAnimations().map((animation) => animation.finished.catch(() => {})));
@@ -710,15 +711,23 @@ test('@critical visitors can insert text in the comments demo', async ({ page })
   await expect(caret).toBeHidden();
   await page.getByRole('tab', { name: 'Make comments', exact: true }).click();
   await expect(caret).toBeVisible();
-  await page.mouse.click(box.x + 160 * scale, box.y + 375 * scale);
+  // Reopening the tray refits the page. Do not click coordinates captured
+  // before the transition while its geometry is still changing.
+  await demo.locator('body').evaluate(async () => {
+    await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+    await Promise.all(document.getAnimations().filter((animation) => animation.effect?.getComputedTiming().iterations !== Infinity).map((animation) => animation.finished.catch(() => {})));
+  });
+  const reopenedBox = (await pdf.boundingBox())!;
+  const reopenedScale = reopenedBox.width / 612;
+  await page.mouse.click(reopenedBox.x + 160 * reopenedScale, reopenedBox.y + 375 * reopenedScale);
   await page.keyboard.type('New text');
   await expect(demo.getByRole('textbox', { name: 'Insertion', exact: true })).toHaveValue('New text');
   await demo.getByRole('button', { name: 'Apply', exact: true }).click();
-  await expect(demo.locator('[data-owned-mark]')).toHaveCount(4);
+  await expect(demo.locator('[data-owned-mark]')).toHaveCount(6);
   await page.getByRole('tab', { name: 'Read with focus', exact: true }).click();
   await expect(demo.locator('[data-owned-mark]')).toHaveCount(0);
   await page.getByRole('tab', { name: 'Make comments', exact: true }).click();
-  await expect(demo.locator('[data-owned-mark]')).toHaveCount(4);
+  await expect(demo.locator('[data-owned-mark]')).toHaveCount(6);
 });
 
 test('@critical real-paper demo keeps its metadata while bounding the main preview', async ({ page }) => {
@@ -782,7 +791,22 @@ test('@critical demo starts fitted and Fit Width keeps the requested scale', asy
       await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
       await Promise.all(document.getAnimations().map((animation) => animation.finished.catch(() => {})));
     });
-    if (mode === 'Make comments') await expect(zoom).toHaveValue('104');
+    // Fit width depends on the browser's scrollbar gutter. Check the actual
+    // reading width, then require the explicit fit to restore that same scale.
+    if (mode === 'Make comments') {
+      await expect(async () => {
+        const geometry = await readPage.evaluate((image) => {
+          const workspace = image.closest('.pdf-workspace')!;
+          const viewport = workspace.querySelector<HTMLElement>('[data-viewer-framing-viewport]')!;
+          const bounds = viewport.getBoundingClientRect();
+          const right = Math.min(bounds.left + viewport.clientLeft + viewport.clientWidth, workspace.getBoundingClientRect().right);
+          // The open tray leaves a 12px inset plus 12px fade on each side.
+          return { pageWidth: image.getBoundingClientRect().width, available: right - bounds.left - viewport.clientLeft - 48 };
+        });
+        expect(Math.abs(geometry.pageWidth - geometry.available)).toBeLessThan(1);
+      }).toPass();
+    }
+    const fitted = await zoom.inputValue();
     await zoom.fill('200');
     await zoom.press('Enter');
     await expect(zoom).toHaveValue('200');
@@ -803,7 +827,6 @@ test('@critical demo starts fitted and Fit Width keeps the requested scale', asy
     for (let i = 1; i < offsets.length; i++) expect(offsets[i]).toBeLessThanOrEqual(offsets[i - 1]! + 1);
     await demo.getByRole('button', { name: 'Open zoom controls', exact: true }).click();
     await demo.getByRole('menuitem', { name: 'Fit width', exact: true }).click();
-    const fitted = mode === 'Make comments' ? '104' : '146';
     await expect(zoom).toHaveValue(fitted);
     // Catch a transient successful fit followed by rollback during anchor settlement.
     await expect(zoom).toHaveJSProperty('value', fitted);
