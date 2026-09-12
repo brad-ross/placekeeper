@@ -1,4 +1,4 @@
-import { WorkspaceModeAvailability } from '../review/WorkspaceModeStrip.js';
+import { WorkspaceModeAvailability, WorkspacePresentation } from '../review/WorkspaceModeStrip.js';
 import {
   useCallback,
   useContext,
@@ -181,7 +181,9 @@ export interface ReviewShellViewerModel {
   viewerFraming?: ViewerFramingControls;
   viewerNavigation?: PdfViewerNavigation;
   viewerNavigationIntentToken?: number;
-  onFitWidthCommandChange?(command: (() => Promise<void>) | null): void;
+  /** Document generation awaiting its initial settled fit. */
+  initialFitRequest?: number;
+  onInitialFitComplete?(generation: number): void;
   onCommitMainFramingPositionChange?(commit: (() => void) | null): void;
 }
 
@@ -314,6 +316,7 @@ export function ReviewShell(props: ReviewShellProps) {
   const [reconciliationDetailOpen, setReconciliationDetailOpen] = useState(false);
   const [reconciliationFocusRequest, setReconciliationFocusRequest] = useState(0);
   const availableModes = useContext(WorkspaceModeAvailability);
+  const workspacePresentation = useContext(WorkspacePresentation);
   const annotationPeeksEnabled = availableModes === null || availableModes.includes('annotations');
   const [peekItemId, setPeekItemId] = useState<string>();
   const [searchFocusRequest, setSearchFocusRequest] = useState(0);
@@ -1148,10 +1151,22 @@ export function ReviewShell(props: ReviewShellProps) {
       ?.fitToWidth(workspaceFraming.waitForSettledGeometry)
       .then(() => undefined) ?? Promise.resolve();
   }, [props.viewer.viewerNavigation, workspaceFraming.markUserIntent, workspaceFraming.waitForSettledGeometry]);
-  useLayoutEffect(() => {
-    props.viewer.onFitWidthCommandChange?.(fitWidthCommand);
-    return () => props.viewer.onFitWidthCommandChange?.(null);
-  }, [fitWidthCommand, props.viewer.onFitWidthCommandChange]);
+  useEffect(() => {
+    const request = props.viewer.initialFitRequest;
+    if (request === undefined) return;
+    let current = true;
+    void fitWidthCommand().then(() => {
+      if (current) props.viewer.onInitialFitComplete?.(request);
+    });
+    return () => { current = false; };
+  }, [props.viewer.initialFitRequest, props.viewer.onInitialFitComplete, fitWidthCommand]);
+  useEffect(() => {
+    // Demo selectors control the layout from outside the shell. Capture the
+    // current fit before that layout changes, just as a workspace disclosure does.
+    if (!workspacePresentation?.open || !props.viewer.viewerNavigation?.isFitToWidth?.()) return;
+    const frame = requestAnimationFrame(() => { void fitWidthCommand(); });
+    return () => cancelAnimationFrame(frame);
+  }, [workspacePresentation?.mode, workspacePresentation?.open, workspacePresentation?.referenceDock, fitWidthCommand]);
   const beforeViewerAction = async () => {
     await props.viewer.viewerNavigation?.cancelPendingNavigation();
     commitMainFramingPosition();

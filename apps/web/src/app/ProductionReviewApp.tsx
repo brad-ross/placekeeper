@@ -456,8 +456,6 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   }, [workspacePresentation?.mode]);
   useEffect(() => {
     if (!workspacePresentation) return;
-    const refitOnOpen = workspacePresentation.open
-      && mainNavigationRef.current?.isFitToWidth?.();
     if (workspacePresentation.referenceDock) {
       dispatchLayout({ type: workspacePresentation.referenceDock === 'bottom' ? 'move-references-bottom' : 'move-references-right' });
     }
@@ -465,12 +463,6 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     dispatchLayout({ type: 'hide-right-workspace' });
     if (workspacePresentation.open) {
       dispatchLayout({ type: workspacePresentation.mode === 'references' ? 'show-references' : 'show-right-workspace' });
-    }
-    // Host demo selectors change the controlled layout directly. Use the same
-    // settled fit command as a workspace disclosure when the reader was fitted.
-    if (refitOnOpen) {
-      const frame = requestAnimationFrame(() => { void fitWidthCommandRef.current?.(); });
-      return () => cancelAnimationFrame(frame);
     }
   }, [workspacePresentation?.mode, workspacePresentation?.open, workspacePresentation?.referenceDock, dispatchLayout]);
 
@@ -590,7 +582,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     });
   }
   const navigationCoordinator = coordinatorRef.current;
-  const fitWidthCommandRef = useRef<(() => Promise<void>) | null>(null);
+  const [initialFitRequest, setInitialFitRequest] = useState<number>();
   const [initialViewReady, setInitialViewReady] = useState(false);
   const workspacePresentationRef = useRef(workspacePresentation);
   workspacePresentationRef.current = workspacePresentation;
@@ -858,17 +850,17 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
         const initialLocation = workspacePresentationRef.current?.initialLocation;
         const startingLocation = mainNavigationRef.current?.captureLocation();
         if (initialLocation && startingLocation) {
-          // Position the excerpt before invoking the toolbar's exact fit command,
-          // including its workspace geometry settlement and intent handling.
+          // Position the excerpt, then let the shell fit its settled reading frame.
           await mainNavigationRef.current?.applyLocation({
             ...startingLocation,
             pageIndex: initialLocation.pageIndex,
             anchor: { ...startingLocation.anchor, y: initialLocation.top },
             alignment: { ...startingLocation.alignment, yPercent: 0 },
           });
-          await fitWidthCommandRef.current?.();
+          if (!cancelled && generation === documentGenerationRef.current) setInitialFitRequest(generation);
+        } else {
+          setInitialViewReady(true);
         }
-        setInitialViewReady(true);
         restoredLocationGenerationRef.current = generation;
         pendingPresentationLocationRef.current = null;
         setLocationRestoreStatus(restored ? 'idle' : 'fallback');
@@ -1323,8 +1315,10 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   const anyTrayOpen = effectiveReferenceLayout.kind === 'narrow-unified'
     ? effectiveReferenceLayout.open
     : effectiveReferenceLayout.rightWorkspaceOpen || effectiveReferenceLayout.bottomReferencesOpen;
-  const onFitWidthCommandChange = useCallback((command: (() => Promise<void>) | null) => {
-    fitWidthCommandRef.current = command;
+  const onInitialFitComplete = useCallback((generation: number) => {
+    if (generation !== documentGenerationRef.current) return;
+    setInitialFitRequest(undefined);
+    setInitialViewReady(true);
   }, []);
   const onCommitMainFramingPositionChange = useCallback((commit: (() => void) | null) => {
     commitMainFramingPositionRef.current = commit ?? (() => undefined);
@@ -1621,7 +1615,8 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
           viewerState,
           viewerNavigationIntentToken: searchNavigationIntentToken,
           onCommitMainFramingPositionChange,
-          onFitWidthCommandChange,
+          ...(initialFitRequest === undefined ? {} : { initialFitRequest }),
+          onInitialFitComplete,
         }}
         workspace={{
           workspaceOpen: anyTrayOpen,
