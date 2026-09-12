@@ -561,7 +561,7 @@ describe('shared reference workspace', () => {
     expect(html).not.toContain('data-reference-return');
   });
 
-  it('does not expose selected-tab actions while a reference is pending', () => {
+  it('keeps selected-tab geometry stable with disabled actions while pending', () => {
     const html = renderToStaticMarkup(
       <ReferenceWorkspace
         open
@@ -582,7 +582,8 @@ describe('shared reference workspace', () => {
 
     expect(html).toContain('aria-busy="true"');
     expect(html).toContain('Opening reference…');
-    expect(html).not.toContain('data-reference-tab-action');
+    expect(html).toMatch(/data-reference-tab-action="send"[^>]*aria-disabled="true"/);
+    expect(html).toMatch(/data-reference-tab-action="close"[^>]*aria-disabled="true"/);
   });
 
   it('stacks reference tabs vertically beside the PDF only in the independent bottom tray', () => {
@@ -736,7 +737,8 @@ describe('shared reference workspace', () => {
     expect(empty).toContain('tabindex="-1"');
     expect(loading).toContain('aria-busy="true"');
     expect(loading).toContain('data-reference-panel-layout="split"');
-    expect(loading).not.toContain('aria-label="Open references"');
+    expect(loading).toContain('aria-label="Open references"');
+    expect(loading).toContain('aria-disabled="true"');
     expect(loading).toContain('Equation (4)');
     expect(failed).toContain('Reference unavailable.');
     expect(failed).toContain('data-reference-panel-layout="full"');

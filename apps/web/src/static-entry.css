@@ -574,3 +574,14 @@ body[data-landing-demo] :is(button, input, textarea, [contenteditable="true"]):n
   visibility: hidden;
   pointer-events: none;
 }
+
+/* Automatic focus in a demo must not disclose reference hover actions. */
+@media (hover: hover) and (pointer: fine) {
+  body[data-landing-demo] .reference-tab-segment:not(:hover) :is(.reference-tab-segment__action, .reference-panel__return) {
+    opacity: 0;
+    pointer-events: none;
+  }
+  body[data-landing-demo] .reference-tab-segment[data-reference-page-swap="true"]:not(:hover) > .reference-tab-segment__page {
+    opacity: 1;
+  }
+}

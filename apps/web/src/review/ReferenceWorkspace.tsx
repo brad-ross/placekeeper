@@ -280,8 +280,11 @@ export function ReferenceWorkspace({
       && mode === 'references'
       && pendingStatus === 'error'
       && was.pendingStatus !== 'error';
+    // Do not briefly focus the header while a reference is still loading.
+    // The arriving reference tab receives focus before its first paint.
+    if (mode === 'references' && pendingStatus === 'loading') return;
     if (!open || (was.open && was.mode === mode && !retryBecameAvailable)) return;
-    requestAnimationFrame(() => focusWithoutScroll(modeFallback(mode)));
+    focusWithoutScroll(modeFallback(mode));
   }, [open, mode, activeTabIdentity, pendingReference?.status]);
 
   useLayoutEffect(() => {
@@ -441,7 +444,7 @@ export function ReferenceWorkspace({
         inert={mode !== 'references'}
         onFocusCapture={(event) => rememberPanelFocus('references', event.target)}
       >
-        {showReferenceTabs ? (
+        {showReferenceTabs || pendingReference?.status === 'loading' ? (
           <div
             className="reference-tabs"
             role="tablist"
@@ -449,9 +452,18 @@ export function ReferenceWorkspace({
             aria-orientation={referenceTabOrientation}
             data-reference-tabs-orientation={referenceTabOrientation}
           >
+            {!showReferenceTabs && pendingReference?.status === 'loading' ? (
+              <span className="reference-tab-segment reference-tab-segment--compound" role="presentation">
+                <button className="reference-tab-segment__selector" type="button" role="tab"
+                  aria-selected="true" aria-disabled="true" aria-busy="true" tabIndex={-1}>
+                  <span>{pendingReference.label}</span>
+                  <small>{pendingReference.pageContext.replace(/^Page\s+/u, '')}</small>
+                </button>
+              </span>
+            ) : null}
             {tabs.map((tab, index) => {
               const selected = tab.identity === activeTabIdentity;
-              const showActions = selected && pendingReference === null;
+              const showActions = selected;
               const pageLabel = tab.pageNumber ?? tab.pageContext.replace(/^Page\s+/u, '');
               const pageOnlyLabel = tab.label === tab.pageContext;
               const pageTextClass = showActions
@@ -523,7 +535,8 @@ export function ReferenceWorkspace({
                       data-reference-tab-action="send"
                       data-workspace-focus-token={`reference-send:${tab.identity}`}
                       aria-label="Open in main document"
-                      onClick={() => onSendToMain(tab.identity)}
+                      aria-disabled={pendingReference !== null || undefined}
+                      onClick={() => { if (pendingReference === null) onSendToMain(tab.identity); }}
                     >
                       <ReviewIcon name="open-main" />
                     </ReviewTooltipButton>
@@ -536,7 +549,8 @@ export function ReferenceWorkspace({
                       data-reference-tab-action="close"
                       data-workspace-focus-token={`reference-close:${tab.identity}`}
                       aria-label="Close active reference"
-                      onClick={() => onReferenceTabClose(tab.identity)}
+                      aria-disabled={pendingReference !== null || undefined}
+                      onClick={() => { if (pendingReference === null) onReferenceTabClose(tab.identity); }}
                     >
                       <ReviewIcon name="close" />
                     </ReviewTooltipButton>

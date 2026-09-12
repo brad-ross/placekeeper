@@ -6,7 +6,7 @@
     .row-action-group__direct,
   .reference-tab-segment :is(.reference-tab-segment__action, .reference-panel__return),
   .review-workspace__header > .review-workspace__outline-toggle,
-  .review-workspace__activity-strip--compound > .review-workspace__move--activity {
+  .review-shell .review-workspace__activity-strip--compound > .review-workspace__move--activity {
     opacity: 0;
     pointer-events: none;
   }
@@ -21,9 +21,9 @@
     :is(.reference-tab-segment__action, .reference-panel__return),
   .review-workspace__header:hover > .review-workspace__outline-toggle,
   .review-workspace__header:has(:focus-visible) > .review-workspace__outline-toggle,
-  .review-workspace__activity-strip--compound:hover
+  .review-shell .review-workspace__activity-strip--compound:hover
     > .review-workspace__move--activity,
-  .review-workspace__activity-strip--compound:has(:focus-visible)
+  .review-shell .review-workspace__activity-strip--compound:has(:focus-visible)
     > .review-workspace__move--activity {
     opacity: 1;
     pointer-events: auto;
