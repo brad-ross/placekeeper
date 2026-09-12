@@ -130,7 +130,7 @@ describe("static browser review runtime", () => {
     expect(markup).not.toContain("Reset demo");
     expect(markup).not.toContain("Sample document ·");
     expect(markup).not.toContain("Annotations must be exported manually");
-    expect(markup).toContain("Or drop a document here");
+    expect(markup).toContain("or drop a PDF here");
     expect(markup).toContain("Horizontal scroll lock");
     expect(markup).not.toContain("64 MB maximum");
     expect(markup).not.toContain("CORS");

@@ -447,6 +447,7 @@ html, body, #root {
 .landing-surfaces__list strong { display: block; font-size: 18px; font-weight: 500; }
 .landing-surfaces__list button > span > span { display: block; margin-top: 5px; font-size: 16px; line-height: 1.65; color: var(--review-ink-muted); }
 .landing-host { margin: 0; border: 1px solid var(--review-border); border-radius: 13px; overflow: hidden; background: #f7f7f7; box-shadow: var(--review-shadow-page); }
+.landing-host__capture { display: block; width: 100%; height: auto; }
 .landing-host__title { display: flex; align-items: center; justify-content: center; position: relative; gap: 7px; height: 38px; background: #ededed; font-size: 11px; color: #666; }
 .landing-host__window-controls { position: absolute; left: 14px; display: flex; gap: 6px; }
 .landing-host__window-controls i { display: block; width: 8px; height: 8px; border-radius: 50%; background: #ccc; }

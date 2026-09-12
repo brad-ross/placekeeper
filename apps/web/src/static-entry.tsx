@@ -189,7 +189,7 @@ export function StaticLauncher(props: {
           <ReviewIcon name={pending && openingSource === "file" ? "loading" : "upload"} size={14} className={pending && openingSource === "file" ? "review-icon static-launcher__spinner" : "review-icon"} />
           Upload PDF
         </button>
-        <p className="landing-drop-hint">Or drop a document here</p>
+        <p className="landing-drop-hint">or drop a PDF here</p>
         <div className="static-launcher__separator"><span>or</span></div>
         <form className="static-launcher__url" onSubmit={(event) => {
           event.preventDefault();

@@ -528,7 +528,7 @@ for (const width of [390, 1280]) test(`@critical landing showcase and PDF contro
   await expect(demo.getByRole('tab', { name: 'Search', exact: true })).toBeDisabled();
   await expect(demo.getByRole('tab', { name: 'Annotations', exact: true })).toBeDisabled();
   await page.getByRole('button', { name: /^Chrome/ }).click();
-  await expect(page.getByRole('figure', { name: 'Chrome Extension illustration with the Placekeeper reader' })).toBeVisible();
+  await expect(page.getByRole('figure', { name: 'Chrome Extension window screenshot' })).toBeVisible();
   await page.getByRole('link', { name: 'Try it', exact: true }).click();
   await expect(upload).toBeInViewport();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
