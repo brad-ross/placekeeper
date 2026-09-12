@@ -916,8 +916,9 @@ test.describe('canonical review workflow', () => {
     await expect.poll(() => viewport.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
     const backing = page.locator('.review-overlay-frame');
     const expectedClip = () => viewport.evaluate((element) => {
-      const width = element.offsetWidth - element.clientWidth;
-      const height = element.offsetHeight - element.clientHeight;
+      const scrollport = element as HTMLElement;
+      const width = scrollport.offsetWidth - scrollport.clientWidth;
+      const height = scrollport.offsetHeight - scrollport.clientHeight;
       return `inset(0px ${width}px ${height}px 0px)`;
     });
     await expect(backing).toHaveCSS('clip-path', await expectedClip());
