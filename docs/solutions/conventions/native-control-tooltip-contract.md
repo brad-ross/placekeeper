@@ -69,7 +69,7 @@ Successful pointer activation of row/annotation Copy Link releases trigger focus
 
 Every literal `button`, `input`, `select`, and `textarea` in source TSX still declares an explicit `title` attribute. The AST test inspects syntax only: a conditional attribute resolving to `undefined` satisfies it (`apps/web/test/control-tooltips.test.ts`). The shared native button deliberately declares that conditional policy.
 
-The guard cannot prove runtime wording, enabled/disabled behavior, custom-component coverage, focus modality, viewport containment, or accessibility. Focused component and browser tests provide those checks. The narrowed CI include list names the Copy Link test, but does not name the AST guard or shared-tooltip test; do not claim this source-wide convention is necessarily enforced by that CI configuration (`scripts/testing/suites.ts`, consumed by `vitest.ci.config.ts`).
+The guard cannot prove runtime wording, enabled/disabled behavior, custom-component coverage, focus modality, viewport containment, or accessibility. Focused component and browser tests provide those checks. The narrowed CI include list names the Copy Link test, but does not name the AST guard or shared-tooltip test; do not claim this source-wide convention is necessarily enforced by that CI configuration (`scripts/testing/suites.ts`, consumed by `scripts/testing/config/vitest.ci.config.ts`).
 
 ## Why This Matters
 

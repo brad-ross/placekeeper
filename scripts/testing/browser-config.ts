@@ -1,3 +1,4 @@
+import { fileURLToPath } from "node:url";
 import type { PlaywrightTestConfig } from "@playwright/test";
 
 /** Shared scheduling and diagnostics only; each profile owns its host policy. */
@@ -6,8 +7,8 @@ export const browserDefaults = {
   workers: 1,
   retries: 0,
   timeout: 30_000,
-  outputDir: 'test-results',
-  reporter: [['list'], ['html', { outputFolder: 'playwright-report', open: 'never' }]],
+  outputDir: fileURLToPath(new URL('../../test-results', import.meta.url)),
+  reporter: [['list'], ['html', { outputFolder: fileURLToPath(new URL('../../playwright-report', import.meta.url)), open: 'never' }]],
 } satisfies PlaywrightTestConfig;
 
 export const browserUseDefaults = {
@@ -17,6 +18,7 @@ export const browserUseDefaults = {
 } satisfies PlaywrightTestConfig['use'];
 
 export const serverDefaults = {
+  cwd: fileURLToPath(new URL('../../', import.meta.url)),
   reuseExistingServer: false,
   timeout: 30_000,
 };

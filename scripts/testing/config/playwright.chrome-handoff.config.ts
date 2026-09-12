@@ -1,12 +1,12 @@
 import { defineConfig } from "@playwright/test";
-import { browserDefaults } from './scripts/testing/browser-config';
-import { browserTestFiles } from './scripts/testing/suites';
+import { browserDefaults } from '../browser-config';
+import { browserTestFiles } from '../suites';
 
 export default defineConfig({
   ...browserDefaults,
-  testDir: "./test/acceptance",
+  testDir: "../../../test/acceptance",
   testMatch: browserTestFiles.chromeHandoff,
-  outputDir: "test-results/chrome-pdf-handoff",
+  outputDir: "../../../test-results/chrome-pdf-handoff",
   reporter: [["list"]],
   use: {
     trace: "retain-on-failure",
