@@ -17,6 +17,27 @@ export function cancelZoomAnimation(viewport: HTMLElement): void {
   if (content) content.style.willChange = '';
 }
 
+/** Native menu chords bypass DOM key events. Settle previews against the old
+ * layout, then revoke the deferred anchor correction before pageZoom changes it. */
+export function finishZoomForPresentation(root: Document, geometryIdentity = 'true'): void {
+  for (const viewport of root.querySelectorAll<HTMLElement>('[data-viewer-framing-viewport]')) {
+    viewport.dataset.zoomPresentationTransition = geometryIdentity;
+    viewport.dispatchEvent(new Event(FINISH_ZOOM_GESTURE));
+    const pending = pendingFrames.get(viewport);
+    if (pending !== undefined) cancelAnimationFrame(pending);
+    pendingFrames.delete(viewport);
+    cancelZoomAnimation(viewport);
+  }
+}
+
+export function resumeZoomAfterPresentation(root: Document, geometryIdentity?: string): void {
+  for (const viewport of root.querySelectorAll<HTMLElement>('[data-viewer-framing-viewport]')) {
+    if (viewport.dataset.zoomPresentationTransition !== geometryIdentity) {
+      delete viewport.dataset.zoomPresentationTransition;
+    }
+  }
+}
+
 /** Keep a measured page point fixed even when custom viewport padding changes. */
 export function anchoredZoom(
   viewport: HTMLElement | null,

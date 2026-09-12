@@ -48,7 +48,7 @@
 
 .review-overlay-frame {
   /* Decorative backing must never paint over the native PDF scrollbar. */
-  clip-path: inset(0 var(--review-overlay-inset, 12px) var(--review-overlay-inset, 12px) 0);
+  clip-path: inset(0 var(--review-main-scrollbar-width, 0px) var(--review-main-scrollbar-height, 0px) 0);
   position: absolute;
   z-index: 1;
   inset: 0;

@@ -27,8 +27,13 @@ export const MACOS_REVIEW_COMMAND_IDS = [
   "navigate-forward",
   "find",
   "open-annotations",
+  "open-outline",
+  "open-references",
+  "toggle-horizontal-scroll-lock",
   "save-options",
   "fit-width",
+  "zoom-in",
+  "zoom-out",
 ] as const;
 
 export type MacosReviewCommandId = typeof MACOS_REVIEW_COMMAND_IDS[number];
@@ -99,6 +104,13 @@ export interface MacosDocumentResource {
 }
 
 export type MacosNativeMessage =
+  | {
+    readonly protocolVersion: 1;
+    readonly type: "presentation-transition";
+    readonly runtimeId: string;
+    readonly attemptId: string;
+    readonly geometryIdentity: string;
+  }
   | {
     readonly protocolVersion: 1;
     readonly type: "bootstrap";
@@ -358,6 +370,11 @@ export function parseMacosResourceURL(value: unknown): {
 
 export function parseMacosNativeMessage(value: unknown): MacosNativeMessage | undefined {
   if (!record(value) || value.protocolVersion !== MACOS_SHELL_PROTOCOL_VERSION) return undefined;
+  if (value.type === "presentation-transition") {
+    return exact(value, ["protocolVersion", "type", "runtimeId", "attemptId", "geometryIdentity"])
+      && opaqueId(value.runtimeId) && opaqueId(value.attemptId) && opaqueId(value.geometryIdentity)
+      ? value as unknown as MacosNativeMessage : undefined;
+  }
   if (value.type === "commit-visible") {
     return exact(value, ["protocolVersion", "type", "geometryIdentity"])
       && opaqueId(value.geometryIdentity) ? value as unknown as MacosNativeMessage : undefined;

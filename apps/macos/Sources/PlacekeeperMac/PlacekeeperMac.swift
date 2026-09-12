@@ -27,6 +27,7 @@ final class PlacekeeperAppDelegate: NSObject, NSApplicationDelegate {
     private var launchCoordinator = LaunchCoordinator()
     private var windowRegistry = DocumentWindowRegistry()
     private let restorationStore = WindowRestorationStore()
+    private let appZoomStore: AppZoomStore
     private var restoredFrames: [String: NSRect] = [:]
     private let helperSupervisor = ReviewHelperSupervisor()
     private var helperDetachLedger = HelperDetachLedger()
@@ -48,8 +49,28 @@ final class PlacekeeperAppDelegate: NSObject, NSApplicationDelegate {
     private lazy var menuCoordinator = MenuCoordinator(
         activeWindow: { [weak self] in self?.activeDocumentWindow },
         openDocument: { [weak self] in self?.showOpenPanel() },
-        openURL: { [weak self] url in self?.enqueueLaunchURLs([url]) }
+        openURL: { [weak self] url in self?.enqueueLaunchURLs([url]) },
+        appZoomScale: { [weak self] in self?.appZoomScale ?? 1 },
+        hasWebBackedWindows: { [weak self] in self?.hasWebBackedWindows ?? false },
+        setAppZoomScale: { [weak self] scale in self?.setAppZoomScale(scale) }
     )
+
+    init(appZoomStore: AppZoomStore = AppZoomStore()) {
+        self.appZoomStore = appZoomStore
+        super.init()
+    }
+
+    var appZoomScale: Double { appZoomStore.scale }
+
+    var hasWebBackedWindows: Bool {
+        controllers.contains { $0.hasWebContent } || !recoveryAttempts.isEmpty
+    }
+
+    func setAppZoomScale(_ scale: Double) {
+        appZoomStore.setScale(scale)
+        controllers.forEach { $0.applyAppZoom(appZoomStore.scale) }
+        recoveryAttempts.values.forEach { $0.controller.applyAppZoom(appZoomStore.scale) }
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         diagnostic("application-did-finish-launching")
@@ -311,6 +332,7 @@ final class PlacekeeperAppDelegate: NSObject, NSApplicationDelegate {
                 windowID: windowID,
                 documentName: source.lastPathComponent,
                 packagedRoot: packagedRoot,
+                appZoom: appZoomStore.scale,
                 onDecision: { [weak self] decision in self?.recover(windowID: windowID, decision: decision) },
                 onClose: { [weak self] in self?.closeRecovery(windowID: windowID) },
                 onUnavailable: { [weak self] in
@@ -408,6 +430,7 @@ final class PlacekeeperAppDelegate: NSObject, NSApplicationDelegate {
             admission: admission,
             packagedAssets: packagedAssets,
             restoredFrame: restoredFrames.removeValue(forKey: source.standardizedFileURL.path),
+            appZoom: appZoomStore.scale,
             onBecameKey: { [weak self] keyWindowID in self?.windowRegistry.noteKey(windowID: keyWindowID) },
             onCommandSnapshot: { [weak self] _ in self?.menuCoordinator.refresh() },
             onRetry: { [weak self] failedWindowID in self?.retryDocumentWindow(windowID: failedWindowID) },

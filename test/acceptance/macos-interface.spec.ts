@@ -230,6 +230,68 @@ test('publishes aligned, control-safe macOS drag geometry across menus and fulls
   await context.close();
 });
 
+// This exercises the packaged web entry's native protocol, not WKWebView pageZoom.
+test('loading shell acknowledges app presentation changes and rejects stale geometry', async ({ browser }) => {
+  const context = await browser.newContext({ bypassCSP: true, viewport: { width: 1200, height: 820 } });
+  const page = await context.newPage();
+  await page.addInitScript(() => {
+    const target = window as typeof window & { __macMessages: unknown[]; webkit?: unknown };
+    target.__macMessages = [];
+    target.webkit = { messageHandlers: { placekeeperShell: {
+      postMessage(message: unknown) { target.__macMessages.push(message); },
+    } } };
+  });
+  const runtimeId = 'runtime_zoom_12345678';
+  const attemptId = 'attempt_zoom_12345678';
+  const initialIdentity = 'geometry_zoom_initial';
+  const nextIdentity = 'geometry_zoom_next';
+  const receive = (message: unknown) => page.evaluate((value) => (
+    window as typeof window & { __PLACEKEEPER_MAC_RECEIVE__?: (message: unknown) => boolean | void }
+  ).__PLACEKEEPER_MAC_RECEIVE__?.(value), message);
+  const transition = (geometryIdentity: string) => ({
+    protocolVersion: 1, type: 'presentation-transition', runtimeId, attemptId, geometryIdentity,
+  });
+  try {
+    await page.goto('/apps/web/macos.html');
+    await receive({
+      protocolVersion: 1, type: 'bootstrap', runtimeId, attemptId,
+      document: {
+        displayName: 'Loading paper.pdf',
+        resource: {
+          url: 'placekeeper-resource://document/resource_12345678?generation=1&role=document',
+          generation: 1, mime: 'application/pdf', byteLength: 995, digest: 'a'.repeat(64),
+        },
+      },
+      geometry: {
+        identity: initialIdentity, trafficLightInset: 86, trailingInset: 16,
+        trafficLightBounds: [{ x: 16, y: 20, width: 14, height: 14 }],
+      },
+    });
+    await latestSettledDrag(page, initialIdentity);
+    // App presentation must not wait for a document viewer to become ready.
+    await expect(page.locator('[data-viewer-framing-viewport]')).toHaveCount(0);
+    expect(await receive(transition(initialIdentity))).toBe(true);
+    expect(await receive({ ...transition(initialIdentity), attemptId: 'attempt_obsolete_1234' })).toBe(false);
+    expect(await receive({ ...transition(initialIdentity), runtimeId: 'runtime_obsolete_1234' })).toBe(false);
+
+    await receive({
+      protocolVersion: 1, type: 'geometry-changed',
+      geometry: {
+        identity: nextIdentity, trafficLightInset: 64, trailingInset: 12,
+        trafficLightBounds: [{ x: 12, y: 15, width: 10.5, height: 10.5 }],
+      },
+    });
+    const drag = await latestSettledDrag(page, nextIdentity);
+    expect(drag.regions.length).toBeGreaterThan(0);
+    for (const region of drag.regions) {
+      expect(overlaps(region, { x: 12, y: 15, width: 10.5, height: 10.5 })).toBe(false);
+    }
+    expect(await receive(transition(initialIdentity))).toBe(false);
+    expect(await receive(transition(nextIdentity))).toBe(true);
+    await expect(page.locator('[data-macos-packaged-shell]')).toHaveCSS('--macos-titlebar-leading-inset', '64px');
+  } finally { await context.close(); }
+});
+
 for (const width of [620, 462, 360]) {
   test(`Mac recovery shares Placekeeper controls and sends one choice at ${width}px`, async ({ browser }) => {
     const context = await browser.newContext({ bypassCSP: true, viewport: { width, height: 380 } });
@@ -327,3 +389,32 @@ for (const width of [1280, 620, 360]) {
     } finally { await context.close(); }
   });
 }
+
+
+test('sibling save dialog blocks native PDF commands and restores them when closed', async ({ page }) => {
+  await page.goto('/test/acceptance/review-harness/index.html?native-commands=1');
+  const snapshot = () => page.locator('#root').evaluate((element) => JSON.parse(
+    (element as HTMLElement).dataset.nativeCommandSnapshot!,
+  ) as { focusContext: string; commands: { id: string; enabled: boolean }[] });
+  const pdfCommands = async () => (await snapshot()).commands
+    .filter(({ id }) => ['zoom-in', 'zoom-out', 'fit-width'].includes(id));
+  await expect.poll(async () => (await pdfCommands()).map(({ enabled }) => enabled)).toEqual([true, true, true]);
+  await page.getByRole('button', { name: 'Open sibling save dialog', exact: true }).click();
+  await expect(page.getByRole('dialog')).toBeVisible();
+  await expect.poll(async () => (await snapshot()).focusContext).toBe('dialog');
+  await expect.poll(async () => (await pdfCommands()).map(({ enabled }) => enabled)).toEqual([false, false, false]);
+  const requests = page.locator('[data-viewer-zoom-requests]');
+  const before = await requests.getAttribute('data-viewer-zoom-requests');
+  // Native dispatch bypasses modal DOM hit testing, as an app menu does.
+  for (const command of ['zoom-in', 'zoom-out', 'fit-width']) {
+    await page.getByRole('button', { name: `Native ${command}`, exact: true }).evaluate(
+      (element) => (element as HTMLButtonElement).click(),
+    );
+  }
+  await expect(requests).toHaveAttribute('data-viewer-zoom-requests', before!);
+  await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect.poll(async () => (await pdfCommands()).map(({ enabled }) => enabled)).toEqual([true, true, true]);
+  await page.getByRole('button', { name: 'Native zoom-out', exact: true }).click();
+  await expect(requests).not.toHaveAttribute('data-viewer-zoom-requests', before!);
+});

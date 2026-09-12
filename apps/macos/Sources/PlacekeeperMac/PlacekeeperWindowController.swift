@@ -3,8 +3,16 @@ import Foundation
 @preconcurrency import WebKit
 
 @MainActor
+private final class TitlebarSpacingView: NSView {
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+}
+
+@MainActor
 final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler {
     private static let toolbarHorizontalMargin: CGFloat = 16
+    private static let toolbarHeight: CGFloat = 52
+    private let titlebarSpacing = NSTitlebarAccessoryViewController()
+    private let nativeTitlebarHeight: CGFloat
     let windowID: String
     let canonicalReviewID: String
     let documentDigest: String
@@ -18,6 +26,8 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
     private let admission: MacReviewAdmission
     private let diagnosticsEnabled = ProcessInfo.processInfo.environment["PLACEKEEPER_MAC_DIAGNOSTICS"] == "1"
     private var readiness = ShellReadinessFence()
+    private var appZoomTransition = AppZoomTransition()
+    private var nativeGeometryTransitions = 0
     private var dragFence: DragRegionFence
     private var dragOverlays: [NSView] = []
     private var installedDragRegions: [DragRect] = []
@@ -49,6 +59,7 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
         admission: MacReviewAdmission,
         packagedAssets: PackagedReviewAssets,
         restoredFrame: NSRect? = nil,
+        appZoom: Double = AppZoomPolicy.defaultScale,
         onBecameKey: @escaping (String) -> Void,
         onCommandSnapshot: @escaping (String) -> Void,
         onRetry: @escaping (String) -> Void,
@@ -98,6 +109,8 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
         configuration.setURLSchemeHandler(handler, forURLScheme: "placekeeper-app")
         configuration.setURLSchemeHandler(handler, forURLScheme: "placekeeper-resource")
         webView = WKWebView(frame: .zero, configuration: configuration)
+        webView.pageZoom = AppZoomPolicy.validatedScale(appZoom)
+        webView.allowsMagnification = false
         if diagnosticsEnabled, #available(macOS 13.3, *) { webView.isInspectable = true }
 
         let window = NSWindow(
@@ -109,13 +122,12 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
         window.title = displayName
         window.titleVisibility = .hidden
         window.titlebarAppearsTransparent = true
-        let toolbar = NSToolbar(identifier: "PlacekeeperReviewToolbar")
-        toolbar.allowsUserCustomization = false
-        toolbar.autosavesConfiguration = false
-        toolbar.displayMode = .iconOnly
-        toolbar.showsBaselineSeparator = false
-        window.toolbar = toolbar
-        window.toolbarStyle = .unified
+        // The web toolbar owns its scaled height. A transparent accessory makes
+        // the native titlebar tall enough to center the system window controls.
+        nativeTitlebarHeight = window.frame.height - window.contentLayoutRect.height
+        titlebarSpacing.layoutAttribute = .bottom
+        titlebarSpacing.view = TitlebarSpacingView(frame: .zero)
+        window.addTitlebarAccessoryViewController(titlebarSpacing)
         window.tabbingMode = .disallowed
         window.isReleasedWhenClosed = false
         super.init(window: window)
@@ -143,6 +155,50 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
     }
 
     required init?(coder: NSCoder) { nil }
+
+    var hasWebContent: Bool { !closed && !failed }
+
+    func applyAppZoom(_ scale: Double) {
+        guard hasWebContent else { return }
+        let target = AppZoomPolicy.validatedScale(scale)
+        guard target != webView.pageZoom || appZoomTransition.inProgress else { return }
+        guard let ticket = appZoomTransition.request(target, geometryIdentity: dragFence.geometryIdentity) else { return }
+        dragFence.transitionInProgress = true
+        installDragOverlays([])
+        // Loading has no gesture owner to acknowledge. Bootstrap will carry the
+        // current scale's geometry when the page becomes available.
+        guard readiness.shellRevision != nil else {
+            completeAppZoom(ticket)
+            return
+        }
+        webView.callAsyncJavaScript(
+            "return globalThis.__PLACEKEEPER_MAC_RECEIVE__?.(message)",
+            arguments: ["message": [
+                "protocolVersion": 1, "type": "presentation-transition",
+                "runtimeId": runtimeID, "attemptId": attemptID,
+                "geometryIdentity": ticket.geometryIdentity,
+            ]], in: nil, in: .page
+        ) { [weak self] result in
+            guard let self, self.hasWebContent else { return }
+            // The JavaScript return is the acknowledgement: finishing gestures
+            // runs synchronously, before AppKit can change the CSS viewport.
+            if case let .success(value) = result, value as? Bool == true {
+                self.completeAppZoom(ticket)
+            } else {
+                _ = self.appZoomTransition.finish(ticket)
+                self.publishGeometryIfSettled()
+                self.diagnostic("app-zoom-presentation-rejected")
+            }
+        }
+    }
+
+    private func completeAppZoom(_ ticket: AppZoomTransition.Ticket) {
+        guard hasWebContent, ticket.geometryIdentity == dragFence.geometryIdentity,
+              let scale = appZoomTransition.finish(ticket) else { return }
+        webView.pageZoom = scale
+        alignTrafficLights()
+        publishGeometryIfSettled()
+    }
 
     func start() {
         let rules = """
@@ -356,6 +412,7 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
            let identity = body["geometryIdentity"] as? String,
            let transitioning = body["transitioning"] as? Bool,
            let rawRegions = body["regions"] as? [[String: Double]] {
+            guard identity == dragFence.geometryIdentity, !dragFence.transitionInProgress else { return }
             if transitioning {
                 installDragOverlays([])
                 diagnostic(.dragRegionsAccepted)
@@ -407,7 +464,7 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
                 "identity": dragFence.geometryIdentity,
                 "trafficLightInset": trafficLightInset(),
                 "trafficLightBounds": trafficLightBounds(),
-                "trailingInset": Double(Self.toolbarHorizontalMargin),
+                "trailingInset": Double(Self.toolbarHorizontalMargin) / webView.pageZoom,
             ] as [String: Any],
         ])
     }
@@ -480,13 +537,12 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
         installedDragWebHeight = webHeight
         dragOverlays.forEach { $0.removeFromSuperview() }
         dragOverlays.removeAll()
-        for region in regions {
-            let y = webView.isFlipped
-                ? region.y
-                : Double(webView.bounds.height) - region.y - region.height
+        for cssRegion in regions {
+            let region = AppZoomGeometry.nativeRect(cssRegion, scale: webView.pageZoom,
+                viewHeight: Double(webView.bounds.height), flipped: webView.isFlipped)
             let overlay = DraggableTitlebarView(frame: NSRect(
                 x: region.x,
-                y: y,
+                y: region.y,
                 width: region.width,
                 height: region.height
             ), webView: webView)
@@ -496,11 +552,18 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
     }
 
     private func beginGeometryTransition() {
+        nativeGeometryTransitions += 1
         dragFence.transitionInProgress = true
         installDragOverlays([])
     }
 
     private func endGeometryTransition() {
+        nativeGeometryTransitions = max(0, nativeGeometryTransitions - 1)
+        publishGeometryIfSettled()
+    }
+
+    private func publishGeometryIfSettled() {
+        guard nativeGeometryTransitions == 0, !appZoomTransition.inProgress else { return }
         let identity = "geometry_" + String(UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(16))
         dragFence.rolloverGeometryIdentity(to: identity)
         sendToPage([
@@ -510,24 +573,24 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
                 "identity": dragFence.geometryIdentity,
                 "trafficLightInset": trafficLightInset(),
                 "trafficLightBounds": trafficLightBounds(),
-                "trailingInset": Double(Self.toolbarHorizontalMargin),
+                "trailingInset": Double(Self.toolbarHorizontalMargin) / webView.pageZoom,
             ] as [String: Any],
         ])
     }
 
     private func trafficLightInset() -> Double {
-        guard let window else { return 76 }
-        guard !window.styleMask.contains(.fullScreen) else { return Double(Self.toolbarHorizontalMargin) }
+        guard let window else { return 76 / webView.pageZoom }
+        guard !window.styleMask.contains(.fullScreen) else { return Double(Self.toolbarHorizontalMargin) / webView.pageZoom }
         let buttons = [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton]
             .compactMap(window.standardWindowButton)
         guard let rightmost = buttons.max(by: { $0.frame.maxX < $1.frame.maxX }),
-              let buttonSuperview = rightmost.superview else { return 76 }
+              let buttonSuperview = rightmost.superview else { return 76 / webView.pageZoom }
         let rightEdgeInWindow = buttonSuperview.convert(
             NSPoint(x: rightmost.frame.maxX, y: rightmost.frame.midY),
             to: nil
         )
         let rightEdgeInWebView = webView.convert(rightEdgeInWindow, from: nil)
-        return Double(ceil(rightEdgeInWebView.x + Self.toolbarHorizontalMargin))
+        return Double(ceil(rightEdgeInWebView.x + Self.toolbarHorizontalMargin)) / webView.pageZoom
     }
 
     private func trafficLightBounds() -> [[String: Double]] {
@@ -544,12 +607,10 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
                 guard converted.minX.isFinite, y.isFinite,
                       converted.width.isFinite, converted.width > 0,
                       converted.height.isFinite, converted.height > 0 else { return nil }
-                return [
-                    "x": Double(max(0, converted.minX)),
-                    "y": Double(max(0, y)),
-                    "width": Double(converted.width),
-                    "height": Double(converted.height),
-                ]
+                let css = AppZoomGeometry.cssRect(DragRect(x: Double(converted.minX),
+                    y: Double(converted.minY), width: Double(converted.width), height: Double(converted.height)),
+                    scale: webView.pageZoom, viewHeight: Double(webView.bounds.height), flipped: webView.isFlipped)
+                return ["x": max(0, css.x), "y": max(0, css.y), "width": css.width, "height": css.height]
             }
     }
 
@@ -559,18 +620,25 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
             .compactMap(window.standardWindowButton)
         guard let buttonSuperview = buttons.first?.superview,
               buttons.allSatisfy({ $0.superview === buttonSuperview }) else { return }
-        window.contentView?.layoutSubtreeIfNeeded()
-        let toolbarLeadingInWindow = webView.convert(
-            NSPoint(x: Self.toolbarHorizontalMargin, y: webView.bounds.midY),
+        let scale = webView.pageZoom
+        let height = Self.toolbarHeight * scale
+        // AppKit gives new accessory views a default height when attached;
+        // assign the desired height afterwards and again when scale changes.
+        let accessoryHeight = max(0, height - nativeTitlebarHeight)
+        if titlebarSpacing.view.frame.height != accessoryHeight {
+            titlebarSpacing.view.setFrameSize(NSSize(width: webView.bounds.width, height: accessoryHeight))
+        }
+        window.contentView?.superview?.layoutSubtreeIfNeeded()
+        let centerInWindow = webView.convert(
+            NSPoint(x: Self.toolbarHorizontalMargin * scale,
+                    y: webView.isFlipped ? height / 2 : webView.bounds.height - height / 2),
             to: nil
         )
-        let toolbarLeadingInButtonSuperview = buttonSuperview.convert(toolbarLeadingInWindow, from: nil)
-        guard let trafficLightLeft = buttons.map(\.frame.minX).min() else { return }
-        let horizontalOffset = toolbarLeadingInButtonSuperview.x - trafficLightLeft
-        for button in buttons {
+        let centerInSuperview = buttonSuperview.convert(centerInWindow, from: nil)
+        for (index, button) in buttons.enumerated() {
             button.setFrameOrigin(NSPoint(
-                x: button.frame.origin.x + horizontalOffset,
-                y: button.frame.origin.y
+                x: centerInSuperview.x + CGFloat(index) * 20 * scale,
+                y: centerInSuperview.y - button.frame.height / 2
             ))
         }
     }

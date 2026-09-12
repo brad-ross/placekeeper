@@ -1,3 +1,4 @@
+import type { ReviewCommandInvocation } from '../../../apps/web/src/review/review-command-surface.js';
 import type { RejectedReviewCommand } from '../../../apps/web/src/review/review-command-result.js';
 import { createRoot } from 'react-dom/client';
 import { ProductionReviewApp } from '../../../apps/web/src/app/ProductionReviewApp.js';
@@ -49,6 +50,7 @@ const responsiveFullChrome = previewParameters.get('responsive') === 'full';
 const saveEstablishing = previewParameters.has('establishing');
 const reconciliationPreview = previewParameters.get('reconciliation');
 const exportPreview = previewParameters.get('export');
+const nativeCommandsPreview = previewParameters.has('native-commands');
 const hostExportPreview = previewParameters.has('host-export');
 const requestedRefreshPreview = previewParameters.get('refresh');
 const refreshPreview = requestedRefreshPreview === 'reconciling' || requestedRefreshPreview === 'failed'
@@ -569,6 +571,7 @@ function Harness() {
   const [activeItemId, setActiveItemId] = useState<string>();
   const [activationRequest, setActivationRequest] = useState<{ id: string; token: number }>();
   const authoringActiveRef = useRef(false);
+  const [nativeInvocation, setNativeInvocation] = useState<ReviewCommandInvocation>({ id: 'zoom-out', token: 0 });
   const [saveDestinationOpen, setSaveDestinationOpen] = useState(false);
   const [exportCount, setExportCount] = useState(0);
   const hostExportSequenceRef = useRef(hostExportPreview ? 1 : 0);
@@ -619,6 +622,13 @@ function Harness() {
   const shell = (
     <ReviewShell
       key={shellMount}
+      {...(nativeCommandsPreview ? {
+        commandModalOpen: saveDestinationOpen,
+        commandInvocation: nativeInvocation,
+        onCommandSurfaceChange: (snapshot) => {
+          rootElement.setAttribute('data-native-command-snapshot', JSON.stringify(snapshot));
+        },
+      } : {})}
       state={state}
       {...(hostExportRequestToken === undefined ? {} : {
         documentActionsRequestToken: hostExportRequestToken,
@@ -1044,6 +1054,13 @@ function Harness() {
 
   if (!visualScenario) return <>
     {shell}
+    {nativeCommandsPreview ? <div>
+      <button onClick={() => setSaveDestinationOpen(true)}>Open sibling save dialog</button>
+      {(['zoom-in', 'zoom-out', 'fit-width'] as const).map((id) => <button key={id}
+        onClick={() => setNativeInvocation((previous) => ({ id, token: previous.token + 1 }))}>
+        Native {id}
+      </button>)}
+    </div> : null}
     <SaveDestinationDialog
       open={saveDestinationOpen}
       proposal={{ sourceDisposition: 'local', filename: 'acceptance-annotated.pdf', folder: '/tmp' }}

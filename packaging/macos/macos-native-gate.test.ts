@@ -91,7 +91,7 @@ describe("macOS native gate packaging policy", () => {
     expect(draggableTitlebar).not.toContain("override func hitTest");
   });
 
-  it("publishes native button frames without moving their AppKit hit targets", async () => {
+  it("publishes scaled native button frames and aligns their AppKit hit targets", async () => {
     const windowSource = await readFile(
       resolve("apps/macos/Sources/PlacekeeperMac/PlacekeeperWindowController.swift"),
       "utf8",
@@ -100,15 +100,16 @@ describe("macOS native gate packaging policy", () => {
       windowSource.indexOf("private func alignTrafficLights"),
       windowSource.indexOf("private func diagnostic"),
     );
-    expect(windowSource).toContain("window.toolbar = toolbar");
+    expect(windowSource).toContain("window.addTitlebarAccessoryViewController(titlebarSpacing)");
     expect(windowSource).toContain('"trafficLightBounds": trafficLightBounds()');
-    expect(alignment).toContain("y: button.frame.origin.y");
-    expect(alignment).not.toContain("button.frame.height / 2");
+    expect(alignment).toContain("Self.toolbarHeight * scale");
+    expect(alignment).toContain("y: centerInSuperview.y - button.frame.height / 2");
     const buttonGeometry = windowSource.slice(
       windowSource.indexOf("private func trafficLightInset"),
       windowSource.indexOf("private func alignTrafficLights"),
     );
-    expect(buttonGeometry).toContain('guard !window.styleMask.contains(.fullScreen) else { return Double(Self.toolbarHorizontalMargin) }');
+    expect(buttonGeometry).toContain('guard !window.styleMask.contains(.fullScreen) else { return Double(Self.toolbarHorizontalMargin) / webView.pageZoom }');
+    expect(buttonGeometry).toContain('AppZoomGeometry.cssRect');
     expect(buttonGeometry).toContain('guard let window, !window.styleMask.contains(.fullScreen) else { return [] }');
     expect(windowSource).toContain('window?.toolbar?.isVisible = false');
     expect(windowSource).toContain('window?.toolbar?.isVisible = true');

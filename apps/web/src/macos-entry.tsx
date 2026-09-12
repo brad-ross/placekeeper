@@ -1,3 +1,4 @@
+import { finishZoomForPresentation, resumeZoomAfterPresentation } from "./pdf/anchored-zoom.js";
 import { useCallback, useLayoutEffect, useRef, type CSSProperties, type ReactElement } from "react";
 import { createRoot } from "react-dom/client";
 
@@ -20,7 +21,7 @@ import "./app/review-layout.css";
 declare global {
   interface Window {
     webkit?: { readonly messageHandlers?: { readonly placekeeperShell?: { postMessage(value: unknown): void } } };
-    __PLACEKEEPER_MAC_RECEIVE__?: (value: unknown) => void;
+    __PLACEKEEPER_MAC_RECEIVE__?: (value: unknown) => boolean | void;
     __PLACEKEEPER_MAC_DISMISS_TOP_BAR_MENUS__?: () => void;
   }
 }
@@ -272,6 +273,7 @@ export function MacosLoadingShell({
         transitioning,
       }));
       publishedLayoutRevision = revision.current;
+      if (!transitioning) resumeZoomAfterPresentation(document, geometryIdentity);
     };
     let signature = "";
     let cancelled = false;
@@ -350,6 +352,17 @@ export function MacosLoadingShell({
   );
 }
 
+export function prepareMacosPresentationTransition(
+  message: Extract<MacosNativeMessage, { readonly type: "presentation-transition" }>,
+  current: Extract<MacosNativeMessage, { readonly type: "bootstrap" }> | undefined,
+  root: Document,
+): boolean {
+  if (message.runtimeId !== current?.runtimeId || message.attemptId !== current.attemptId
+    || message.geometryIdentity !== current.geometry.identity) return false;
+  finishZoomForPresentation(root, message.geometryIdentity);
+  return true;
+}
+
 function start(): void {
   const rootElement = document.querySelector<HTMLElement>("#root");
   if (rootElement === null) throw new Error("Packaged macOS shell root is missing");
@@ -391,7 +404,9 @@ function start(): void {
   );
   window.__PLACEKEEPER_MAC_RECEIVE__ = (value) => {
     const message = parseMacosNativeMessage(value);
-    if (message?.type === "bootstrap") {
+    if (message?.type === "presentation-transition") {
+      return prepareMacosPresentationTransition(message, current, document);
+    } else if (message?.type === "bootstrap") {
       current = message;
       visibleAttempt = false;
       nativeCommandInvocation = undefined;

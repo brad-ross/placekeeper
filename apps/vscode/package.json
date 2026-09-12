@@ -68,6 +68,26 @@
       {
         "command": "placekeeper.restoreLatexWorkshop",
         "title": "Placekeeper: Restore LaTeX Workshop Settings"
+      },
+      {
+        "command": "placekeeper.fitWidth",
+        "title": "Placekeeper: Fit Width"
+      },
+      {
+        "command": "placekeeper.toggleHorizontalScrollLock",
+        "title": "Placekeeper: Toggle Horizontal Scroll Lock"
+      },
+      {
+        "command": "placekeeper.openOutline",
+        "title": "Placekeeper: Show Outline"
+      },
+      {
+        "command": "placekeeper.openAnnotations",
+        "title": "Placekeeper: Show Annotations"
+      },
+      {
+        "command": "placekeeper.openReferences",
+        "title": "Placekeeper: Show References"
       }
     ],
     "menus": {
@@ -115,6 +135,36 @@
         "key": "ctrl+alt+shift+j",
         "mac": "cmd+alt+shift+j",
         "when": "activeWebviewPanelId == 'placekeeper.review'"
+      },
+      {
+        "command": "placekeeper.fitWidth",
+        "key": "ctrl+alt+0",
+        "mac": "ctrl+cmd+0",
+        "when": "activeWebviewPanelId == 'placekeeper.review' && !inputFocus"
+      },
+      {
+        "command": "placekeeper.toggleHorizontalScrollLock",
+        "key": "ctrl+alt+l",
+        "mac": "ctrl+cmd+l",
+        "when": "activeWebviewPanelId == 'placekeeper.review' && !inputFocus"
+      },
+      {
+        "command": "placekeeper.openOutline",
+        "key": "ctrl+alt+o",
+        "mac": "ctrl+cmd+o",
+        "when": "activeWebviewPanelId == 'placekeeper.review' && !inputFocus"
+      },
+      {
+        "command": "placekeeper.openAnnotations",
+        "key": "ctrl+alt+a",
+        "mac": "ctrl+cmd+a",
+        "when": "activeWebviewPanelId == 'placekeeper.review' && !inputFocus"
+      },
+      {
+        "command": "placekeeper.openReferences",
+        "key": "ctrl+alt+r",
+        "mac": "ctrl+cmd+r",
+        "when": "activeWebviewPanelId == 'placekeeper.review' && !inputFocus"
       }
     ],
     "configuration": {

@@ -32,8 +32,9 @@ private final class RecoveryWindow: NSWindow {
     // Keep this transparent gutter in sync with macos-recovery.css.
     static let shadowInset: CGFloat = 24
     private var controls: [NSWindow.ButtonType: NSButton] = [:]
+    private var controlPositions: [(NSLayoutConstraint, NSLayoutConstraint)] = []
 
-    func installControls(in view: NSView) {
+    func installControls(in view: NSView, scale: Double) {
         let types: [NSWindow.ButtonType] = [.closeButton, .miniaturizeButton, .zoomButton]
         for (index, type) in types.enumerated() {
             guard let button = NSWindow.standardWindowButton(type, for: [.titled, .closable, .miniaturizable]) else { continue }
@@ -47,12 +48,23 @@ private final class RecoveryWindow: NSWindow {
             controls[type] = button
             button.translatesAutoresizingMaskIntoConstraints = false
             view.addSubview(button)
+            let leading = button.leadingAnchor.constraint(equalTo: view.leadingAnchor,
+                constant: (Self.shadowInset + 23) * scale + CGFloat(index) * 20)
+            let vertical = button.centerYAnchor.constraint(equalTo: view.topAnchor,
+                constant: (Self.shadowInset + 30) * scale)
+            controlPositions.append((leading, vertical))
             NSLayoutConstraint.activate([
-                button.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: Self.shadowInset + 23 + CGFloat(index) * 20),
-                button.centerYAnchor.constraint(equalTo: view.topAnchor, constant: Self.shadowInset + 30),
+                leading, vertical,
                 button.widthAnchor.constraint(equalToConstant: size.width),
                 button.heightAnchor.constraint(equalToConstant: size.height),
             ])
+        }
+    }
+
+    func updateControlScale(_ scale: Double) {
+        for (index, position) in controlPositions.enumerated() {
+            position.0.constant = (Self.shadowInset + 23) * scale + CGFloat(index) * 20
+            position.1.constant = (Self.shadowInset + 30) * scale
         }
     }
 
@@ -77,16 +89,20 @@ final class RecoveryViewController: NSWindowController, NSWindowDelegate, WKScri
     private let onDecision: (String) -> Void
     private let onClose: () -> Void
     private let onUnavailable: () -> Void
+    private let dragRegion = RecoveryDragRegion()
     private let webView: WKWebView
     private let recoveryURL: URL
     private var gate = RecoveryDecisionGate()
     private var resolved = false
+    private var closed = false
+    private var measuredCSSHeight: Double = 228
     private var failed = false
     private var loaded = false
     private var shouldShow = false
     private var loadTimeout: Task<Void, Never>?
 
     init(windowID: String, documentName: String, packagedRoot: URL,
+         appZoom: Double = AppZoomPolicy.defaultScale,
          onDecision: @escaping (String) -> Void, onClose: @escaping () -> Void,
          onUnavailable: @escaping () -> Void) {
         self.windowID = windowID
@@ -98,8 +114,10 @@ final class RecoveryViewController: NSWindowController, NSWindowDelegate, WKScri
         configuration.websiteDataStore = .nonPersistent()
         configuration.setURLSchemeHandler(RecoverySchemeHandler(root: packagedRoot), forURLScheme: "placekeeper-recovery")
         webView = WKWebView(frame: .zero, configuration: configuration)
+        webView.pageZoom = AppZoomPolicy.validatedScale(appZoom)
+        webView.allowsMagnification = false
         let window = RecoveryWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 414 + 2 * RecoveryWindow.shadowInset, height: 228),
+            contentRect: NSRect(x: 0, y: 0, width: (414 + 2 * RecoveryWindow.shadowInset) * webView.pageZoom, height: 228 * webView.pageZoom),
             styleMask: [.borderless, .miniaturizable],
             backing: .buffered,
             defer: false
@@ -119,13 +137,9 @@ final class RecoveryViewController: NSWindowController, NSWindowDelegate, WKScri
         webView.autoresizingMask = [.width, .height]
         content.addSubview(webView)
         window.contentView = content
-        let dragRegion = RecoveryDragRegion(frame: NSRect(
-            x: RecoveryWindow.shadowInset, y: RecoveryWindow.shadowInset,
-            width: content.bounds.width - 2 * RecoveryWindow.shadowInset, height: 54
-        ))
-        dragRegion.autoresizingMask = [.width]
         content.addSubview(dragRegion)
-        window.installControls(in: content)
+        window.installControls(in: content, scale: webView.pageZoom)
+        resizeToContent()
         window.center()
         webView.navigationDelegate = self
         configuration.userContentController.add(self, name: "placekeeperRecovery")
@@ -138,6 +152,25 @@ final class RecoveryViewController: NSWindowController, NSWindowDelegate, WKScri
     }
 
     required init?(coder: NSCoder) { nil }
+
+    func applyAppZoom(_ scale: Double) {
+        guard !closed, !resolved else { return }
+        webView.pageZoom = AppZoomPolicy.validatedScale(scale)
+        resizeToContent()
+    }
+
+    private func resizeToContent() {
+        guard let window else { return }
+        let oldFrame = window.frame
+        let width = (414 + 2 * RecoveryWindow.shadowInset) * webView.pageZoom
+        let height = ceil(measuredCSSHeight * webView.pageZoom)
+        window.setFrame(NSRect(x: oldFrame.midX - width / 2, y: oldFrame.midY - height / 2,
+                               width: width, height: height), display: true)
+        let scale = webView.pageZoom
+        dragRegion.frame = NSRect(x: RecoveryWindow.shadowInset * scale, y: RecoveryWindow.shadowInset * scale,
+            width: width - 2 * RecoveryWindow.shadowInset * scale, height: 54 * scale)
+        (window as? RecoveryWindow)?.updateControlScale(scale)
+    }
 
     func show() {
         shouldShow = true
@@ -160,6 +193,7 @@ final class RecoveryViewController: NSWindowController, NSWindowDelegate, WKScri
     }
 
     func windowWillClose(_ notification: Notification) {
+        closed = true
         gate.fail()
         loadTimeout?.cancel()
         webView.stopLoading()
@@ -171,12 +205,9 @@ final class RecoveryViewController: NSWindowController, NSWindowDelegate, WKScri
         guard message.name == "placekeeperRecovery", message.frameInfo.isMainFrame,
               message.frameInfo.request.url == recoveryURL, !resolved else { return }
         if let body = message.body as? [String: Any], Set(body.keys) == ["height"],
-           let height = body["height"] as? Double, height.isFinite, (120...600).contains(height),
-           let window {
-            let oldFrame = window.frame
-            let size = NSSize(width: oldFrame.width, height: ceil(height))
-            window.setFrame(NSRect(x: oldFrame.minX, y: oldFrame.midY - size.height / 2,
-                                   width: size.width, height: size.height), display: true)
+           let height = body["height"] as? Double, height.isFinite, (120...600).contains(height) {
+            measuredCSSHeight = height
+            resizeToContent()
             return
         }
         if let body = message.body as? [String: Any], Set(body.keys) == ["ready"],

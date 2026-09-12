@@ -556,6 +556,25 @@ export function activate(context: vscode.ExtensionContext): void {
     return openPanel(binding, true);
   };
 
+  for (const [name, id] of [
+    ["placekeeper.fitWidth", "fit-width"],
+    ["placekeeper.toggleHorizontalScrollLock", "toggle-horizontal-scroll-lock"],
+    ["placekeeper.openOutline", "open-outline"],
+    ["placekeeper.openAnnotations", "open-annotations"],
+    ["placekeeper.openReferences", "open-references"],
+
+  ] as const) {
+    context.subscriptions.push(vscode.commands.registerCommand(name, async () => {
+      if (activePanel?.active !== true) return;
+      const runtime = runtimes.get(activePanel);
+      if (runtime === undefined) return;
+      await activePanel.webview.postMessage({
+        protocol: REVIEW_RUNTIME_PROTOCOL, version: REVIEW_RUNTIME_VERSION,
+        kind: "event", event: "host-command", panelId: runtime.client.identity.panelId,
+        payload: { command: "review-command", id },
+      });
+    }));
+  }
   for (const command of VIEW_COMMANDS) context.subscriptions.push(vscode.commands.registerCommand(command, view));
   context.subscriptions.push(
     vscode.commands.registerCommand("placekeeper.forwardSyncTex", async (...args: unknown[]) => {

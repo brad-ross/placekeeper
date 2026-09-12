@@ -142,6 +142,15 @@ describe("macOS packaged-shell protocol", () => {
   });
 
   it("carries a complete primitive command projection and closed invocation", () => {
+    expect(MACOS_REVIEW_COMMAND_IDS).toEqual(expect.arrayContaining(["zoom-in", "zoom-out"]));
+    for (const command of ["zoom-in", "zoom-out", "unknown-zoom"]) {
+      const parsed = parseMacosNativeMessage({
+        protocolVersion: 1, type: "invoke-command", runtimeId: "runtime_identifier_1234",
+        attemptId: "attempt_identifier_1234", command, snapshotRevision: 3, token: 4,
+      });
+      if (command === "unknown-zoom") expect(parsed).toBeUndefined();
+      else expect(parsed).toMatchObject({ command });
+    }
     const commands = MACOS_REVIEW_COMMAND_IDS.map((id) => ({
       id,
       label: id === "undo" ? "Undo Review Change" : id,

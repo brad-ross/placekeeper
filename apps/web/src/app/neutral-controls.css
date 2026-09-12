@@ -263,8 +263,9 @@
   appearance: textfield;
 }
 
-.review-chrome__page-input { width: 28px; text-align: center; }
-.review-chrome__zoom-input { width: 3ch; text-align: right; }
+/* WebKit pageZoom scales ch widths twice; em tracks only the text size. */
+.review-chrome__page-input { width: 2em; text-align: center; }
+.review-chrome__zoom-input { width: 2em; text-align: right; }
 
 .review-chrome__page-disclosure {
   min-width: 0 !important;
@@ -385,4 +386,3 @@
   overflow-wrap: anywhere;
   pointer-events: none;
 }
-

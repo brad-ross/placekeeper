@@ -262,7 +262,7 @@
 
 .review-layout:is([data-reference-layout="wide-bottom"], [data-reference-layout="wide-split"])
   .review-tools-workspace[data-workspace-presentation="right"] {
-  bottom: calc(var(--reference-bottom-height) + 24px);
+  bottom: calc(var(--reference-bottom-height) + 2 * var(--review-overlay-inset, 12px));
 }
 
 .review-layout[data-reference-layout="narrow-unified"]
@@ -508,4 +508,3 @@
 .review-workspace__panel--search {
   overflow: hidden;
 }
-
