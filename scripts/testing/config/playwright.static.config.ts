@@ -1,6 +1,7 @@
+import { fileURLToPath } from "node:url";
 import { defineConfig } from "@playwright/test";
-import { browserDefaults, browserUseDefaults, serverDefaults } from './scripts/testing/browser-config';
-import { browserTestFiles } from './scripts/testing/suites';
+import { browserDefaults, browserUseDefaults, serverDefaults } from '../browser-config';
+import { browserTestFiles } from '../suites';
 
 const SUPPORTED_ENGINES = ["chromium", "firefox", "webkit"] as const;
 const SUPPORTED_PROFILES = ["critical", "representative", "exhaustive"] as const;
@@ -49,14 +50,14 @@ const grep = profile === "critical"
 
 export default defineConfig({
   ...browserDefaults,
-  testDir: "./test/acceptance",
+  testDir: "../../../test/acceptance",
   testMatch: browserTestFiles.static,
   timeout: 60_000,
   expect: { timeout: 10_000 },
-  outputDir: `test-results/static-web/${engine}-${profile}`,
+  outputDir: `../../../test-results/static-web/${engine}-${profile}`,
   reporter: [
     ["list"],
-    ["html", { outputFolder: `playwright-report/static-web/${engine}-${profile}`, open: "never" }],
+    ["html", { outputFolder: fileURLToPath(new URL(`../../../playwright-report/static-web/${engine}-${profile}`, import.meta.url)), open: "never" }],
   ],
   ...(grep === undefined ? {} : { grep }),
   use: {

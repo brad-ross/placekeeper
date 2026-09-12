@@ -50,7 +50,7 @@ paletteCopyOwnerRef.current = 'main';
 copied = document.execCommand('copy');
 ```
 
-The temporary owner identifies the selected PDF during the synthetic event. The global handler then calls the existing resolver and applies the result as `text/plain`; pending, unavailable, and over-limit states keep their existing behavior (`apps/web/src/app/ProductionReviewApp.tsx`, `apps/web/src/pdf/selection-state.ts`). After activation, restore Main PDF as the persistent [PDF Copy Authority](../../../CONCEPTS.md#pdf-copy-authority) so a subsequent keyboard shortcut still targets the same retained selection (`apps/web/src/app/ProductionReviewApp.tsx`).
+The temporary owner identifies the selected PDF during the synthetic event. The global handler then calls the existing resolver and applies the result as `text/plain`; pending, unavailable, and over-limit states keep their existing behavior (`apps/web/src/app/ProductionReviewApp.tsx`, `apps/web/src/pdf/selection-state.ts`). After activation, restore Main PDF as the persistent [PDF Copy Authority](../../concepts.md#pdf-copy-authority) so a subsequent keyboard shortcut still targets the same retained selection (`apps/web/src/app/ProductionReviewApp.tsx`).
 
 If the synchronous browser command returns false or throws, clear any prior success announcement and use the existing top-left error popup. Do not report success or mutate review state (`apps/web/src/app/ProductionReviewApp.tsx`).
 

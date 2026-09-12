@@ -21,10 +21,6 @@
     "packages/**/*.ts",
     "scripts/**/*.ts",
     "test/**/*.ts",
-    "test/**/*.tsx",
-    "playwright.config.ts",
-    "playwright.static.config.ts",
-    "playwright.chrome-handoff.config.ts",
-    "playwright.webkit.config.ts"
+    "test/**/*.tsx"
   ]
 }

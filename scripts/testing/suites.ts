@@ -45,7 +45,7 @@ export const suites: Record<string, TestStage[]> = {
     "pnpm fixtures:pdf",
     {
       "runner": "playwright",
-      "options": [],
+      "options": ["--config", "scripts/testing/config/playwright.config.ts"],
       "files": [
         "test/conformance/pdf-viewer.conformance.spec.ts",
         "test/conformance/pdf-appearance.conformance.spec.ts"
@@ -57,7 +57,7 @@ export const suites: Record<string, TestStage[]> = {
       "runner": "playwright",
       "options": [
         "--config",
-        "playwright.static.config.ts"
+        "scripts/testing/config/playwright.static.config.ts"
       ],
       "files": []
     }
@@ -165,7 +165,7 @@ export const suites: Record<string, TestStage[]> = {
       "runner": "playwright",
       "options": [
         "--config",
-        "playwright.chrome-handoff.config.ts"
+        "scripts/testing/config/playwright.chrome-handoff.config.ts"
       ],
       "files": []
     }
@@ -232,7 +232,7 @@ export const suites: Record<string, TestStage[]> = {
     },
     {
       "runner": "playwright",
-      "options": [],
+      "options": ["--config", "scripts/testing/config/playwright.config.ts"],
       "files": [
         "test/acceptance/viewer.spec.ts"
       ]
@@ -265,7 +265,7 @@ export const suites: Record<string, TestStage[]> = {
     },
     {
       "runner": "playwright",
-      "options": [],
+      "options": ["--config", "scripts/testing/config/playwright.config.ts"],
       "files": [
         "test/acceptance/review-workflow.spec.ts"
       ]
@@ -307,7 +307,7 @@ export const suites: Record<string, TestStage[]> = {
     "pnpm build:web",
     {
       "runner": "playwright",
-      "options": [],
+      "options": ["--config", "scripts/testing/config/playwright.config.ts"],
       "files": [
         "test/acceptance/launch-surfaces.spec.ts",
         "test/acceptance/viewer.spec.ts",
@@ -331,7 +331,7 @@ export const suites: Record<string, TestStage[]> = {
       "runner": "playwright",
       "options": [
         "--config",
-        "playwright.webkit.config.ts"
+        "scripts/testing/config/playwright.webkit.config.ts"
       ],
       "files": [
         "test/acceptance/launch-surfaces.spec.ts",
@@ -354,7 +354,7 @@ export const suites: Record<string, TestStage[]> = {
       "runner": "playwright",
       "options": [
         "--config",
-        "playwright.visual.config.ts"
+        "scripts/testing/config/playwright.visual.config.ts"
       ],
       "files": []
     }
@@ -375,7 +375,7 @@ export const suites: Record<string, TestStage[]> = {
     },
     {
       "runner": "playwright",
-      "options": [],
+      "options": ["--config", "scripts/testing/config/playwright.config.ts"],
       "files": [
         "test/acceptance/launch-surfaces.spec.ts"
       ]
@@ -410,7 +410,7 @@ export const suites: Record<string, TestStage[]> = {
     "pnpm build",
     {
       "runner": "playwright",
-      "options": [],
+      "options": ["--config", "scripts/testing/config/playwright.config.ts"],
       "files": [
         "test/acceptance/production-flow.spec.ts"
       ]
@@ -433,7 +433,7 @@ export const suites: Record<string, TestStage[]> = {
       "runner": "vitest",
       "options": [
         "--config",
-        "vitest.ci.config.ts"
+        "scripts/testing/config/vitest.ci.config.ts"
       ],
       "files": []
     }
@@ -441,7 +441,7 @@ export const suites: Record<string, TestStage[]> = {
   "test:ci:chromium": [
     {
       "runner": "playwright",
-      "options": [],
+      "options": ["--config", "scripts/testing/config/playwright.config.ts"],
       "files": [
         "test/conformance/pdf-viewer.conformance.spec.ts",
         "test/conformance/pdf-appearance.conformance.spec.ts",
@@ -466,7 +466,7 @@ export const suites: Record<string, TestStage[]> = {
       "runner": "playwright",
       "options": [
         "--config",
-        "playwright.webkit.config.ts"
+        "scripts/testing/config/playwright.webkit.config.ts"
       ],
       "files": [
         "test/conformance/pdf-viewer.conformance.spec.ts",
@@ -489,7 +489,7 @@ export const suites: Record<string, TestStage[]> = {
       "runner": "playwright",
       "options": [
         "--config",
-        "playwright.visual.config.ts"
+        "scripts/testing/config/playwright.visual.config.ts"
       ],
       "files": []
     }

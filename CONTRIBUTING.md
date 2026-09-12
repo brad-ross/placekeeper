@@ -1,6 +1,6 @@
 # Contributing
 
-Read [Concepts](CONCEPTS.md) for domain vocabulary and the [documentation index](docs/README.md) for operating instructions, decisions, and captured learnings. Installation and user workflows remain in the [README](README.md).
+Read [Concepts](docs/concepts.md) for domain vocabulary and the [documentation index](docs/README.md) for operating instructions, decisions, and captured learnings. Installation and user workflows remain in the [README](README.md).
 
 ## Repository map
 
