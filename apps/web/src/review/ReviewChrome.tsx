@@ -497,10 +497,12 @@ export function ReviewChrome({
           }}
           onFocus={() => { if (!editingPage) startPageEdit(); }}
           onChange={(event) => {
+            setEditingPage(true);
             setPageDraft(event.currentTarget.value);
             setPageInvalid(false);
           }}
           onBlur={(event) => {
+            if (!editingPage) return;
             const pageStep = event.relatedTarget instanceof Element
               ? event.relatedTarget.closest('[data-review-page-step]')
               : null;
@@ -558,10 +560,12 @@ export function ReviewChrome({
           }}
           onFocus={() => { if (!editingZoom) startZoomEdit(); }}
           onChange={(event) => {
+            setEditingZoom(true);
             setZoomDraft(event.currentTarget.value);
             setZoomInvalid(false);
           }}
           onBlur={(event) => {
+            if (!editingZoom) return;
             const zoomAction = event.relatedTarget instanceof Element
               ? event.relatedTarget.closest('[data-review-zoom-action]')
               : null;

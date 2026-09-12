@@ -1301,6 +1301,9 @@ export function createViewerNavigation(
         return false;
       }
 
+      // Native scroll anchoring can adjust the vertical offset after the resize
+      // observer runs. Align once more against the settled page before validation.
+      positionFittedPage();
       const settledGeometry = operationIsCurrent(operation)
         ? pageGeometry(viewer, visible.pageIndex)
         : null;
