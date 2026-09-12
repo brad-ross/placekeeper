@@ -456,6 +456,8 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   }, [workspacePresentation?.mode]);
   useEffect(() => {
     if (!workspacePresentation) return;
+    const refitOnOpen = workspacePresentation.open
+      && mainNavigationRef.current?.isFitToWidth?.();
     if (workspacePresentation.referenceDock) {
       dispatchLayout({ type: workspacePresentation.referenceDock === 'bottom' ? 'move-references-bottom' : 'move-references-right' });
     }
@@ -463,6 +465,12 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     dispatchLayout({ type: 'hide-right-workspace' });
     if (workspacePresentation.open) {
       dispatchLayout({ type: workspacePresentation.mode === 'references' ? 'show-references' : 'show-right-workspace' });
+    }
+    // Host demo selectors change the controlled layout directly. Use the same
+    // settled fit command as a workspace disclosure when the reader was fitted.
+    if (refitOnOpen) {
+      const frame = requestAnimationFrame(() => { void fitWidthCommandRef.current?.(); });
+      return () => cancelAnimationFrame(frame);
     }
   }, [workspacePresentation?.mode, workspacePresentation?.open, workspacePresentation?.referenceDock, dispatchLayout]);
 
@@ -582,17 +590,23 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     });
   }
   const navigationCoordinator = coordinatorRef.current;
+  const fitWidthCommandRef = useRef<(() => Promise<void>) | null>(null);
+  const [initialViewReady, setInitialViewReady] = useState(false);
+  const workspacePresentationRef = useRef(workspacePresentation);
+  workspacePresentationRef.current = workspacePresentation;
   const sampleReferenceOpened = useRef(false);
   useEffect(() => {
-    if (!workspacePresentation?.sampleReference || workspacePresentation.mode !== 'references' || sampleReferenceOpened.current) return;
-    const target = pdfNavigationTargetFromPlacekeeperLocation({ kind: 'page', page: 2 }, {
-      documentGeneration: state.workflow.documentGeneration, pageCount: 4,
+    if (!initialViewReady || !workspacePresentation?.sampleReference || workspacePresentation.mode !== 'references' || sampleReferenceOpened.current) return;
+    const target = pdfNavigationTargetFromPlacekeeperLocation(workspacePresentation.sampleReference.pdfY === undefined
+      ? { kind: 'page', page: workspacePresentation.sampleReference.page }
+      : { kind: 'destination', page: workspacePresentation.sampleReference.page, mode: 'xyz', params: [0, workspacePresentation.sampleReference.pdfY, 0] }, {
+      documentGeneration: state.workflow.documentGeneration, pageCount: viewerState.totalPages,
     });
-    if (target) void navigationCoordinator.openReference(target, { label: 'Table 1', pageContext: 'Page 2' }).then((opened) => {
+    if (target) void navigationCoordinator.openReference(target, { label: workspacePresentation.sampleReference.label, pageContext: `Page ${workspacePresentation.sampleReference.page}` }).then((opened) => {
       if (opened) sampleReferenceOpened.current = true;
     });
     return () => navigationCoordinator.cancelPendingNavigation();
-  }, [workspacePresentation?.mode, workspacePresentation?.sampleReference, navigationCoordinator]);
+  }, [initialViewReady, workspacePresentation?.mode, workspacePresentation?.sampleReference, viewerState.totalPages, navigationCoordinator]);
   const mainLocationRefresh = useMemo(
     () => createTrailingTaskScheduler(() => navigationCoordinator.refreshMainLocation()),
     [navigationCoordinator],
@@ -833,6 +847,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
           : await navigationCoordinator.restorePresentationLocation(presentation, generation)
         : await navigationCoordinator.restoreCurrentLocation();
       if (restored && !cancelled && generation === documentGenerationRef.current
+        && !workspacePresentationRef.current?.initialLocation
         && viewerControlsRef.current?.usesAutomaticFitWidth()) {
         // The plugin preset sees the full viewport; the shared fit clears the
         // workspace rail and fade while retaining restored numeric zoom.
@@ -840,6 +855,20 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       }
       if (!cancelled && generation === documentGenerationRef.current) {
         if (restored) viewerControlsRef.current?.freezeCurrentZoom();
+        const initialLocation = workspacePresentationRef.current?.initialLocation;
+        const startingLocation = mainNavigationRef.current?.captureLocation();
+        if (initialLocation && startingLocation) {
+          // Position the excerpt before invoking the toolbar's exact fit command,
+          // including its workspace geometry settlement and intent handling.
+          await mainNavigationRef.current?.applyLocation({
+            ...startingLocation,
+            pageIndex: initialLocation.pageIndex,
+            anchor: { ...startingLocation.anchor, y: initialLocation.top },
+            alignment: { ...startingLocation.alignment, yPercent: 0 },
+          });
+          await fitWidthCommandRef.current?.();
+        }
+        setInitialViewReady(true);
         restoredLocationGenerationRef.current = generation;
         pendingPresentationLocationRef.current = null;
         setLocationRestoreStatus(restored ? 'idle' : 'fallback');
@@ -1284,12 +1313,17 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   const anyTrayOpen = effectiveReferenceLayout.kind === 'narrow-unified'
     ? effectiveReferenceLayout.open
     : effectiveReferenceLayout.rightWorkspaceOpen || effectiveReferenceLayout.bottomReferencesOpen;
+  const onFitWidthCommandChange = useCallback((command: (() => Promise<void>) | null) => {
+    fitWidthCommandRef.current = command;
+  }, []);
   const onCommitMainFramingPositionChange = useCallback((commit: (() => void) | null) => {
     commitMainFramingPositionRef.current = commit ?? (() => undefined);
   }, []);
   return (
     <main
       data-production-review
+      data-initial-view-ready={initialViewReady}
+      inert={availableModes !== null && !initialViewReady}
       data-launch-surface={scope.launchSurface ?? 'browser'}
       ref={productionRootRef}
       onPointerDownCapture={(event) => {
@@ -1576,6 +1610,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
           viewerState,
           viewerNavigationIntentToken: searchNavigationIntentToken,
           onCommitMainFramingPositionChange,
+          onFitWidthCommandChange,
         }}
         workspace={{
           workspaceOpen: anyTrayOpen,

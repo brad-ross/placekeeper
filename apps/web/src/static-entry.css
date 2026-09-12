@@ -525,6 +525,7 @@ html, body, #root {
 .static-launcher :is(.static-launcher__button, .landing-download, .landing-invitations__download):active:not(:disabled) { background: #222; }
 .static-launcher input:focus { outline: 2px solid #999; outline-offset: 2px; box-shadow: none; }
 .static-launcher :is(a, button):focus-visible { outline: 2px solid #888; outline-offset: 3px; box-shadow: none; }
+body[data-landing-demo] [data-initial-view-ready="false"] { visibility: hidden; }
 body[data-landing-demo] { --review-focus: #888; --pk-focus: #888; }
 body[data-landing-demo] :is(button, input, textarea, [contenteditable="true"]):not(.review-chrome__page-input, .review-chrome__zoom-input, .reference-tab-segment__selector):focus-visible { outline: 2px solid #888 !important; outline-offset: 2px; box-shadow: none !important; }
 .static-launcher :is(.landing-github, .landing-invitations a:not(.landing-invitations__download), .review-workspace__mode-tab):active:not(:disabled) { background: #dedede; box-shadow: inset 0 1px 3px rgb(0 0 0 / 12%); }

@@ -6,8 +6,11 @@ import type { HostRuntime, HostRuntimeBootstrap } from '../host/runtime.js';
 import type { ViewerAssetUrls } from '../pdf/embedpdf-viewer.js';
 import { WorkspaceInitialReferenceDock, WorkspaceModeAvailability, WorkspacePresentation } from '../review/WorkspaceModeStrip.js';
 import { DocumentActionsEnabled } from '../review/DocumentActionsMenu.js';
+import { MainDocumentPreviewLimit } from '../pdf/MainDocumentPreviewBoundary.js';
 import { createDemoItems } from './create-demo-items.js';
 import { createDemoDocument } from './create-demo-document.js';
+
+const DEMO_PAGE_RANGE = { firstPage: 14, lastPage: 16 };
 
 export type DemoMode = 'read' | 'reference' | 'annotate';
 
@@ -28,13 +31,13 @@ function DemoApp({ runtime, initial, mode }: { runtime: HostRuntime; initial: Ho
     if (frame) observer.observe(frame, { attributes: true, attributeFilter: ['data-demo-mode'] });
     return () => observer.disconnect();
   }, []);
-  return <DocumentActionsEnabled value={false}><WorkspaceInitialReferenceDock value="right"><WorkspaceModeAvailability value={selectedMode === 'read' ? ['outline'] : selectedMode === 'reference' ? ['references'] : ['annotations']}>
-    <WorkspacePresentation value={ready ? { mode: selectedMode === 'read' ? 'outline' : selectedMode === 'reference' ? 'references' : 'annotations', open: selectedMode !== 'read', referenceDock: 'bottom', sampleReference: true, bottomHeight: 260 } : null}>
+  return <MainDocumentPreviewLimit value={DEMO_PAGE_RANGE}><DocumentActionsEnabled value={false}><WorkspaceInitialReferenceDock value="right"><WorkspaceModeAvailability value={selectedMode === 'read' ? ['outline'] : selectedMode === 'reference' ? ['references'] : ['annotations']}>
+    <WorkspacePresentation value={ready ? { mode: selectedMode === 'read' ? 'outline' : selectedMode === 'reference' ? 'references' : 'annotations', open: selectedMode !== 'read', referenceDock: 'bottom', sampleReference: { page: 31, label: 'Appendix A', pdfY: 175.702 }, bottomHeight: 260, initialLocation: { pageIndex: 13, top: 330 } } : null}>
     <RuntimeProductionReviewApp runtime={runtime} initial={initial}
       onDocumentReady={() => { document.body.dataset.demoReady = 'true'; setReady(true); }}
     />
     </WorkspacePresentation>
-  </WorkspaceModeAvailability></WorkspaceInitialReferenceDock></DocumentActionsEnabled>;
+  </WorkspaceModeAvailability></WorkspaceInitialReferenceDock></DocumentActionsEnabled></MainDocumentPreviewLimit>;
 }
 
 export async function mountLandingDemo(mode: DemoMode, viewerAssets: Pick<ViewerAssetUrls, 'pdfiumWasm' | 'workerUrl'>): Promise<void> {
@@ -43,7 +46,7 @@ export async function mountLandingDemo(mode: DemoMode, viewerAssets: Pick<Viewer
   const root = document.querySelector<HTMLElement>('#root');
   if (!root) return;
   document.body.dataset.landingDemo = mode;
-  const runtime = await createStaticHostRuntime({ source: { name: 'Urban trees and summer heat.pdf', bytes: await createDemoDocument() }, viewerAssets }, {
+  const runtime = await createStaticHostRuntime({ source: { name: 'Estimating Counterfactual Matrix Means.pdf', bytes: await createDemoDocument() }, viewerAssets }, {
     lifecycle: { addEventListener() {}, removeEventListener() {} },
   });
   for (const item of await createDemoItems()) {

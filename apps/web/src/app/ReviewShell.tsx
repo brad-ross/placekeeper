@@ -180,6 +180,7 @@ export interface ReviewShellViewerModel {
   viewerFraming?: ViewerFramingControls;
   viewerNavigation?: PdfViewerNavigation;
   viewerNavigationIntentToken?: number;
+  onFitWidthCommandChange?(command: (() => Promise<void>) | null): void;
   onCommitMainFramingPositionChange?(commit: (() => void) | null): void;
 }
 
@@ -600,7 +601,7 @@ export function ReviewShell(props: ReviewShellProps) {
         : request);
     });
     return () => { current = false; };
-  }, [toolsSurfaceOpen, effectiveReferenceLayout.kind, referenceLayout.referenceDock,
+  }, [availableModes, toolsSurfaceOpen, effectiveReferenceLayout.kind, referenceLayout.referenceDock,
     effectiveWorkspaceMode, props.viewer.viewerNavigation, workspaceFraming.markUserIntent, workspaceFraming.waitForSettledGeometry]);
 
   const overlaySurfaceRefs = useMemo(() => [
@@ -1129,12 +1130,16 @@ export function ReviewShell(props: ReviewShellProps) {
 
   const canUndo = props.state.historyCursor > 0;
   const canRedo = props.state.historyCursor < props.state.history.length;
-  const fitWidthCommand = () => {
+  const fitWidthCommand = useCallback(() => {
     workspaceFraming.markUserIntent(undefined, { captureSettledPosition: false });
     return props.viewer.viewerNavigation
       ?.fitToWidth(workspaceFraming.waitForSettledGeometry)
       .then(() => undefined) ?? Promise.resolve();
-  };
+  }, [props.viewer.viewerNavigation, workspaceFraming.markUserIntent, workspaceFraming.waitForSettledGeometry]);
+  useLayoutEffect(() => {
+    props.viewer.onFitWidthCommandChange?.(fitWidthCommand);
+    return () => props.viewer.onFitWidthCommandChange?.(null);
+  }, [fitWidthCommand, props.viewer.onFitWidthCommandChange]);
   const commandSurface = createReviewCommandSurface({
     focusContext: commandFocusContext,
     canUndo: authoringSession === null && canUndo,

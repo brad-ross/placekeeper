@@ -33,21 +33,21 @@ export function SurfaceShowcase() {
         <span className="landing-host__window-controls"><i /><i /><i /></span>
         {selected.icon ? <img className="landing-surface-icon" src={selected.icon} alt="" width="18" height="18" /> : <Globe className="landing-surface-icon" aria-hidden="true" size={18} />}<span>{selected.label}</span>
       </div>
-      {(selected.id === 'chrome' || selected.id === 'browser') && <div className="landing-host__address" aria-hidden="true">{selected.id === 'chrome' ? 'Urban trees and summer heat.pdf' : 'Placekeeper · Browser review'}</div>}
+      {(selected.id === 'chrome' || selected.id === 'browser') && <div className="landing-host__address" aria-hidden="true">{selected.id === 'chrome' ? 'Estimating Counterfactual Matrix Means.pdf' : 'Placekeeper · Browser review'}</div>}
       <div className="landing-host__body">
-        {selected.id === 'vscode' && <div className="landing-host__editor" aria-hidden="true"><span>paper.tex</span><pre>{String.raw`\section{Shade at street level}
+        {selected.id === 'vscode' && <div className="landing-host__editor" aria-hidden="true"><span>paper.tex</span><pre>{String.raw`\subsection{Factor Identification
+Given Cohort-Specific Factors}
 
-A shaded route can be more
-useful than an isolated
-patch of green.
+We introduce the Observed
+Outcome Overlap algorithm.
 
-See Table~\ref{tab:heat}.
+See Appendix~\ref{app:identification}.
 
-\begin{table}
-  \caption{Afternoon heat}
-  \label{tab:heat}
-\end{table}`}</pre></div>}
-        {selected.id === 'chatgpt' && <div className="landing-host__conversation" aria-hidden="true"><span>Review the paper</span><p>What else might explain the differences in Table 1?</p><p>Let’s look at the measurements and your comments together.</p><div>Ask about this document…</div></div>}
+\begin{theorem}
+  The column space is the
+  null space of the APM.
+\end{theorem}`}</pre></div>}
+        {selected.id === 'chatgpt' && <div className="landing-host__conversation" aria-hidden="true"><span>Review the paper</span><p>How does Appendix A prove the identification result?</p><p>Let’s look at the examples and your comments together.</p><div>Ask about this document…</div></div>}
         <img src={selected.image} alt="Placekeeper’s production document reader showing the sample document" loading="lazy" width="1000" height="700" />
       </div>
     </figure>

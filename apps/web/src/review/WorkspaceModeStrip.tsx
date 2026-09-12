@@ -8,7 +8,7 @@ import { ReviewTooltipButton } from './ReviewTooltipButton.js';
 export const WorkspaceModeAvailability = createContext<readonly WorkspaceMode[] | null>(null);
 export const WorkspaceInitialReferenceDock = createContext<'bottom' | 'right'>('bottom');
 /** Host-requested presentation changes use the reader's normal layout transitions. */
-export const WorkspacePresentation = createContext<{ mode: WorkspaceMode; open: boolean; referenceDock?: 'bottom' | 'right'; sampleReference?: boolean; bottomHeight?: number } | null>(null);
+export const WorkspacePresentation = createContext<{ mode: WorkspaceMode; open: boolean; referenceDock?: 'bottom' | 'right'; sampleReference?: { page: number; label: string; pdfY?: number }; bottomHeight?: number; initialLocation?: { pageIndex: number; top: number } } | null>(null);
 
 const MODE_PRESENTATION: Readonly<Record<WorkspaceMode, {
   readonly label: string;
@@ -86,7 +86,7 @@ export function WorkspaceModeStrip<Mode extends WorkspaceMode>({
               role="presentation"
             >
               <ReviewTooltipButton
-                label={`Show ${presentation.label}`}
+                label={presentation.label}
                 ref={(element) => onModeRef(mode, element)}
                 id={`workspace-mode-${mode}`}
                 className="review-workspace__mode-tab"

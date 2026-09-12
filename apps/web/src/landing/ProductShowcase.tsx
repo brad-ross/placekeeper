@@ -1,6 +1,5 @@
 import { useEffect, useId, useRef, useState, type CSSProperties } from 'react';
 import { ReviewIcon, type ReviewIconName } from '../review/ReviewIcon.js';
-import { ReviewTooltipButton } from '../review/ReviewTooltipButton.js';
 
 const features = [
   {
@@ -11,7 +10,7 @@ const features = [
   {
     id: 'reference', label: 'Follow a reference', icon: 'references',
     description: 'Look up a table or supporting appendix without leaving the page you’re reading. References have their own scrolling space.',
-    actions: ['Click Table 1 or Appendix A in the document.', 'Choose Open in References.', 'Scroll the reference, then follow another link.'],
+    actions: ['Click Appendix A on page 15.', 'Choose Open in References.', 'Scroll the reference, then follow another link.'],
   },
   {
     id: 'annotate', label: 'Make comments', icon: 'annotations',
@@ -40,8 +39,8 @@ export function ProductShowcase() {
     <div className="landing-demo-selector review-workspace__activity-strip">
       <div className="review-workspace__tabs" role="tablist" aria-label="Explore features" data-workspace-mode-count="3">
         {features.map((item, itemIndex) => <span key={item.id} className="review-workspace__mode-segment" data-workspace-mode-selected={index === itemIndex ? 'true' : 'false'} role="presentation">
-          <ReviewTooltipButton ref={(button) => { controls.current[itemIndex] = button; }}
-            label={item.label} role="tab" className="review-workspace__mode-tab"
+          <button type="button" ref={(button) => { controls.current[itemIndex] = button; }}
+            role="tab" className="review-workspace__mode-tab"
             id={`${id}-${item.id}`} aria-label={item.label} aria-selected={index === itemIndex}
             aria-controls={`${id}-panel`} tabIndex={index === itemIndex ? 0 : -1}
             onClick={() => setIndex(itemIndex)}
@@ -55,7 +54,7 @@ export function ProductShowcase() {
             }}>
             <ReviewIcon name={item.icon} />
             <span className="review-workspace__mode-label" aria-hidden="true">{item.label}</span>
-          </ReviewTooltipButton>
+          </button>
         </span>)}
       </div>
     </div>
