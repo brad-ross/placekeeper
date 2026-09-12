@@ -1553,7 +1553,7 @@ export function ReviewShell(props: ReviewShellProps) {
           {selectionActionsAvailable && props.selection.selectionPlacement ? (
             <ContextActionPalette
               placement={props.selection.selectionPlacement}
-              hidden={surface.nestedLayer !== 'none'}
+              hidden={!annotationPeeksEnabled || surface.nestedLayer !== 'none'}
               {...(props.selection.onCopySelection === undefined ? {} : { onCopy: props.selection.onCopySelection })}
               onReplace={startReplacement}
               onDelete={deleteSelection}
@@ -1564,7 +1564,7 @@ export function ReviewShell(props: ReviewShellProps) {
             <InsertionCaret
               key={`${props.selection.caretAnchor.pageIndex}:${props.selection.caretAnchor.position.x}:${props.selection.caretAnchor.position.y}`}
               placement={props.selection.caretPlacement}
-              hidden={surface.nestedLayer !== 'none'}
+              hidden={!annotationPeeksEnabled || surface.nestedLayer !== 'none'}
             />
           ) : null}
           {surface.baseSurface === 'reading' && surface.nestedLayer === 'none' && props.authoring.pageMenu ? (

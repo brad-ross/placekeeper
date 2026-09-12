@@ -194,6 +194,9 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   const initialReferenceDock = useContext(WorkspaceInitialReferenceDock);
   const authoringEnabled = availableModes === null || availableModes.includes('annotations');
   const referencesEnabled = availableModes === null || availableModes.includes('references');
+  // Viewer subscriptions outlive demo mode changes; read current permissions at delivery.
+  const interactionAvailability = useRef({ authoringEnabled, referencesEnabled });
+  interactionAvailability.current = { authoringEnabled, referencesEnabled };
   const [localState, setState] = useState(props.initialState);
   // A runtime successor arrives as one state/assets render. Prefer that canonical
   // generation immediately so the viewer URL and semantic authority never split.
@@ -676,8 +679,8 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   }, [navigationCoordinator]);
 
   const onSelectionUpdate = useCallback((update: SelectionUpdate) => {
-    if (authoringEnabled) setSelectionUpdate((current) => acceptSelectionUpdate(current, update));
-  }, [authoringEnabled]);
+    setSelectionUpdate((current) => acceptSelectionUpdate(current, update));
+  }, []);
   useEffect(() => {
     setReferenceCopySelection(null);
     setPdfCopyOwner((owner) => owner === 'reference' ? null : owner);
@@ -863,8 +866,8 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     portableItemIdsRef.current = new Set(state.items.map((item) => item.id));
   }, [navigationCoordinator, saveStatus, state]);
   const onViewerInteraction = useCallback((event: ViewerInteractionEvent) => {
-    if (!referencesEnabled && (event.type === 'pdf-link' || event.type === 'pdf-link-unavailable')) return;
-    if (!authoringEnabled && ['selection-placement', 'caret', 'page-menu', 'page-note-cursor', 'page-note-commit'].includes(event.type)) return;
+    if (!interactionAvailability.current.referencesEnabled && (event.type === 'pdf-link' || event.type === 'pdf-link-unavailable')) return;
+    if (!interactionAvailability.current.authoringEnabled && ['caret', 'page-menu', 'page-note-cursor', 'page-note-commit'].includes(event.type)) return;
     if (event.type === 'reverse-synctex') {
       requestReverseSyncTex(event.value);
       return;
@@ -932,7 +935,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       }
       publishCorrespondence();
     }
-  }, [authoringEnabled, referencesEnabled, authoringAnchorRefresh, mainLocationRefresh, navigationCoordinator, requestReverseSyncTex]);
+  }, [authoringAnchorRefresh, mainLocationRefresh, navigationCoordinator, requestReverseSyncTex]);
   const onReferenceDocumentControls = useCallback((controls: ReferenceDocumentController | null) => {
     referenceControllerRef.current = controls;
     if (controls === null) navigationCoordinator.referenceNavigationUnavailable();

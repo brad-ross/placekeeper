@@ -614,3 +614,97 @@ test('@critical landing demos support zoom, references, and isolated comments', 
   await expect(iframe).toHaveCount(0);
   await expect(page.locator('[data-owned-mark]')).toHaveCount(0);
 });
+
+
+test('@critical visitors can add demo annotations and hide them between modes', async ({ page }) => {
+  await page.goto('./');
+  const feature = (name: string) => page.getByRole('tablist', { name: 'Explore features' }).getByRole('tab', { name, exact: true });
+  const demo = page.frameLocator('iframe');
+  await feature('Make comments').click();
+  await page.locator('iframe').scrollIntoViewIfNeeded();
+  await expect(demo.locator('[data-owned-mark]')).toHaveCount(3);
+  await demo.locator('body').evaluate(async () => {
+    await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+    await Promise.all(document.getAnimations().map((animation) => animation.finished.catch(() => {})));
+  });
+  await demo.locator('[data-page-index="0"]').first().focus();
+  await page.keyboard.press('Alt+Shift+N');
+  const cursor = demo.getByRole('button', { name: /^Page Note placement cursor/ });
+  await cursor.focus();
+  await page.keyboard.press('Enter');
+  const comment = demo.getByRole('textbox', { name: 'Comment', exact: true });
+  await comment.fill('My own annotation.');
+  await demo.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(comment).toHaveCount(0);
+  await expect(demo.locator('[data-owned-mark]')).toHaveCount(4);
+  for (const name of ['Read with focus', 'Follow a reference']) {
+    await feature(name).click();
+    await expect(demo.locator('[data-owned-mark]')).toHaveCount(0);
+    await expect(demo.locator('.annotation-peek')).toHaveCount(0);
+  }
+  await feature('Make comments').click();
+  await expect(demo.locator('[data-owned-mark]')).toHaveCount(4);
+  await expect(demo.getByText('My own annotation.', { exact: true })).toBeVisible();
+});
+
+test('@critical selecting demo text opens annotation actions after switching modes', async ({ page }) => {
+  await page.setViewportSize({ width: 1324, height: 1100 });
+  await page.goto('./');
+  await page.locator('iframe').scrollIntoViewIfNeeded();
+  const demo = page.frameLocator('iframe');
+  const pdf = demo.locator('[data-page-index="0"] > img').first();
+  await expect(pdf).toBeVisible();
+  await page.getByRole('tab', { name: 'Make comments', exact: true }).click();
+  await expect(demo.locator('[data-owned-mark]')).toHaveCount(3);
+  await demo.locator('body').evaluate(async () => {
+    await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+    await Promise.all(document.getAnimations().map((animation) => animation.finished.catch(() => {})));
+  });
+  const box = (await pdf.boundingBox())!;
+  const scale = box.width / 612;
+  // Drag across the unannotated subtitle in the generated sample PDF.
+  await page.mouse.move(box.x + 58 * scale, box.y + 128 * scale);
+  await page.mouse.down();
+  await page.mouse.move(box.x + 300 * scale, box.y + 128 * scale, { steps: 20 });
+  await page.mouse.up();
+  await expect(demo.locator('[data-selection-status="reliable"]')).toBeAttached();
+  const highlight = demo.getByRole('button', { name: 'Highlight', exact: true });
+  await expect(highlight).toBeVisible();
+  await page.getByRole('tab', { name: 'Read with focus', exact: true }).click();
+  await expect(highlight).toBeHidden();
+  await page.getByRole('tab', { name: 'Make comments', exact: true }).click();
+  await expect(highlight).toBeVisible();
+});
+
+test('@critical visitors can insert text in the comments demo', async ({ page }) => {
+  await page.setViewportSize({ width: 1324, height: 1100 });
+  await page.goto('./');
+  await page.locator('iframe').scrollIntoViewIfNeeded();
+  const demo = page.frameLocator('iframe');
+  const pdf = demo.locator('[data-page-index="0"] > img').first();
+  await expect(pdf).toBeVisible();
+  await page.getByRole('tab', { name: 'Make comments', exact: true }).click();
+  await expect(demo.locator('[data-owned-mark]')).toHaveCount(3);
+  await demo.locator('body').evaluate(async () => {
+    await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+    await Promise.all(document.getAnimations().map((animation) => animation.finished.catch(() => {})));
+  });
+  const box = (await pdf.boundingBox())!;
+  const scale = box.width / 612;
+  await page.mouse.click(box.x + 160 * scale, box.y + 128 * scale);
+  const caret = demo.locator('[data-review-insertion-caret]');
+  await expect(caret).toBeVisible();
+  await page.getByRole('tab', { name: 'Read with focus', exact: true }).click();
+  await expect(caret).toBeHidden();
+  await page.getByRole('tab', { name: 'Make comments', exact: true }).click();
+  await expect(caret).toBeVisible();
+  await page.mouse.click(box.x + 160 * scale, box.y + 128 * scale);
+  await page.keyboard.type('New text');
+  await expect(demo.getByRole('textbox', { name: 'Insertion', exact: true })).toHaveValue('New text');
+  await demo.getByRole('button', { name: 'Apply', exact: true }).click();
+  await expect(demo.locator('[data-owned-mark]')).toHaveCount(4);
+  await page.getByRole('tab', { name: 'Read with focus', exact: true }).click();
+  await expect(demo.locator('[data-owned-mark]')).toHaveCount(0);
+  await page.getByRole('tab', { name: 'Make comments', exact: true }).click();
+  await expect(demo.locator('[data-owned-mark]')).toHaveCount(4);
+});
