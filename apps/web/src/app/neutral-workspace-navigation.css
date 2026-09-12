@@ -109,6 +109,11 @@
   overscroll-behavior: contain;
 }
 
+/* Keep scrolling workspace content clear of the rounded tray edge. */
+.review-tools-workspace .review-workspace__panel {
+  margin-bottom: 12px;
+}
+
 .workspace-edge-rail {
   width: 32px;
   min-width: 32px;
@@ -189,6 +194,16 @@
 .reference-tab-segment__page-placeholder {
   /* Preserve the original title/page width in content-sized horizontal tabs. */
   visibility: hidden;
+}
+
+.reference-tab-segment__selector .reference-tab-segment__page-label {
+  flex: 0 0 var(--reference-tab-action-size);
+  margin-left: auto;
+  /* Match the active page slot's 3px inset within the selector's 8px padding. */
+  margin-right: -5px;
+  text-align: center;
+  color: var(--pk-muted);
+  font: 400 11px/1.2 var(--pk-font-ui);
 }
 
 .reference-tab-segment__page {
@@ -435,13 +450,47 @@
 
 .pdf-search__results { padding: 0 12px 12px; }
 
-.pdf-search:has(> .pdf-search__summary) .pdf-search__query {
+.pdf-search:has(> .pdf-search__summary, > .pdf-search__indexing) .pdf-search__query {
   margin-bottom: 0;
 }
 
-.pdf-search__summary {
-  padding: 4px 10px;
+.pdf-search__summary,
+.pdf-search__indexing {
+  margin-block: 0;
+  padding: 8px 10px;
   line-height: 1.5;
+}
+
+.pdf-search__indexing {
+  align-items: center;
+  white-space: nowrap;
+}
+
+.pdf-search__indexing > progress {
+  flex: 1;
+  min-width: 0;
+  width: 0;
+  height: 6px;
+  overflow: hidden;
+  appearance: none;
+  border: 0;
+  border-radius: 3px;
+  background: var(--pk-raised);
+  accent-color: var(--pk-muted);
+}
+
+.pdf-search__indexing > progress::-webkit-progress-bar {
+  background: var(--pk-raised);
+}
+
+.pdf-search__indexing > progress::-webkit-progress-value {
+  background: var(--pk-muted);
+  border-radius: 3px;
+}
+
+.pdf-search__indexing > progress::-moz-progress-bar {
+  background: var(--pk-muted);
+  border-radius: 3px;
 }
 
 .pdf-search__group { padding: 0; }

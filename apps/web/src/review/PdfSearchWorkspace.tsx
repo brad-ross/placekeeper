@@ -214,7 +214,16 @@ export function PdfSearchWorkspace({
         ) : null}
       </div>
 
-      {state.message ? (
+      {indexing ? (
+        <div className="pdf-search__message pdf-search__indexing" role="status">
+          <span>Indexing</span>
+          <progress
+            aria-label="Indexing"
+            max={Math.max(1, state.coverage.totalPages)}
+            value={state.coverage.searchedPages + state.coverage.unsearchablePages.length + state.coverage.limitedPages.length}
+          />
+        </div>
+      ) : state.message ? (
         <div className="pdf-search__message" role="status">
           {state.status === 'partial' || state.status === 'unavailable'
             ? <ReviewIcon name="warning" /> : null}

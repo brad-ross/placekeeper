@@ -1,10 +1,10 @@
 import { defineConfig } from '@playwright/test';
-import { browserDefaults, browserUseDefaults, serverDefaults } from './scripts/testing/browser-config';
-import { browserTestFiles } from './scripts/testing/suites';
+import { browserDefaults, browserUseDefaults, serverDefaults } from '../browser-config';
+import { browserTestFiles } from '../suites';
 
 export default defineConfig({
   ...browserDefaults,
-  testDir: './test',
+  testDir: '../../../test',
   testMatch: browserTestFiles.default,
   use: {
     ...browserUseDefaults,

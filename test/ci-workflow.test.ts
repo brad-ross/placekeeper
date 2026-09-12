@@ -31,7 +31,7 @@ describe('manual CI workflow', () => {
       'node --import tsx scripts/testing/run-suite.ts test:ci:unit',
     );
     expect(suites['test:ci:unit']?.[0]).toBe('pnpm build:vscode');
-    expect(suiteCommand('test:ci:unit')).toBe('pnpm build:vscode && vitest run --config vitest.ci.config.ts');
+    expect(suiteCommand('test:ci:unit')).toBe('pnpm build:vscode && vitest run --config scripts/testing/config/vitest.ci.config.ts');
     expect(ciUnitFiles).toContain('packaging/macos/update-vscode.test.mjs');
   });
 

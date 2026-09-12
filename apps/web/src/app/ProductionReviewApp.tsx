@@ -1006,20 +1006,30 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   const onViewerInitialized = useCallback(async (registry: PluginRegistry) => {
     viewerRegistry.current = registry;
     viewerControlsRef.current?.dispose();
-    const controls = createViewerControls(registry, () => productionRootRef.current?.querySelector<HTMLElement>(
-      '.pdf-workspace:not(.pdf-workspace--reference) [data-viewer-framing-viewport]',
-    ) ?? null);
+    const controls = createViewerControls(registry, {
+      viewport: () => productionRootRef.current?.querySelector<HTMLElement>(
+        '.pdf-workspace:not(.pdf-workspace--reference) [data-viewer-framing-viewport]',
+      ) ?? null,
+      jumpToPage: (pageNumber) => {
+        // Startup applies page and zoom together through the native controls.
+        if (!initialPresentationAppliedRef.current) return false;
+        const navigation = mainNavigationRef.current;
+        const destination = navigation?.resolvePageLocation(pageNumber - 1);
+        if (!navigation || !destination) return false;
+        return navigation.applyLocation(destination);
+      },
+    });
     viewerControlsRef.current = controls;
     viewerControlsGenerationRef.current = documentGenerationRef.current;
     setViewerState(controls.snapshot());
     if (!initialPresentationAppliedRef.current) {
-      initialPresentationAppliedRef.current = true;
       if (props.initialPresentation?.pageIndex !== undefined) {
         controls.goToPage(props.initialPresentation.pageIndex + 1);
       }
       if (props.initialPresentation?.zoom !== undefined) {
         controls.zoomToPercent(props.initialPresentation.zoom * 100);
       }
+      initialPresentationAppliedRef.current = true;
     }
     controls.subscribe(() => {
       setViewerState(controls.snapshot());
@@ -1347,6 +1357,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
         locationRestoreStatus={locationRestoreStatus}
         toolError={pdfCopyError ?? commandError}
         commandNotice={commandNotice}
+        commandModalOpen={(!exportOnly && destinationDialog !== null) || annotationExport.request !== null}
         {...(props.onCommandSurfaceChange === undefined
           ? {}
           : { onCommandSurfaceChange: props.onCommandSurfaceChange })}

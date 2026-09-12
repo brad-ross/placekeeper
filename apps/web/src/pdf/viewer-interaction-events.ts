@@ -12,6 +12,7 @@ export const PDF_LINK_ACTION_MENU_ID = 'pdf-link-action-menu';
 export const PDF_LINK_INTERACTION_ATTRIBUTE = 'data-pdf-link-control';
 
 export interface ViewerClientPlacement {
+  readonly selectionBounds?: ViewerFixedClientRect;
   readonly left: number;
   readonly top: number;
   readonly width?: number;

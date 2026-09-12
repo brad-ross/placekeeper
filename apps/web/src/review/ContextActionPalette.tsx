@@ -1,5 +1,5 @@
 import { useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
-import type { Rotation } from '@embedpdf/models';
+import type { ViewerClientPlacement, ViewerFixedClientRect } from '../pdf/viewer-interaction-events.js';
 
 import { ReviewIcon } from './ReviewIcon.js';
 import { ReviewTooltipButton } from './ReviewTooltipButton.js';
@@ -40,14 +40,7 @@ function ContextActionButton({ kind, iconOnly = false, onAction }: ContextAction
   );
 }
 
-export interface ContextPlacement {
-  readonly left: number;
-  readonly top: number;
-  readonly width?: number;
-  readonly height?: number;
-  readonly suggestTop?: boolean;
-  readonly rotation?: Rotation;
-}
+export type ContextPlacement = ViewerClientPlacement;
 
 export interface ContextActionPaletteProps {
   readonly placement: ContextPlacement;
@@ -56,6 +49,29 @@ export interface ContextActionPaletteProps {
   onReplace?(): void;
   onDelete?(): void;
   onHighlight?(): void;
+}
+
+export function chooseContextActionPlacement(input: {
+  readonly selection: ViewerFixedClientRect;
+  readonly available: ViewerFixedClientRect;
+  readonly width: number;
+  readonly height: number;
+}): { left: number; top: number } {
+  const { selection, available, width, height } = input;
+  const gap = 7;
+  const left = Math.max(available.left, Math.min(
+    (selection.left + selection.right - width) / 2, available.right - width,
+  ));
+  const above = selection.top - gap - height;
+  const below = selection.bottom + gap;
+  if (above >= available.top) return { left, top: Math.min(above, available.bottom - height) };
+  if (below + height <= available.bottom) return { left, top: Math.max(available.top, below) };
+  const top = Math.max(available.top, Math.min(selection.top, available.bottom - height));
+  if (selection.right + gap + width <= available.right) return { left: selection.right + gap, top };
+  if (selection.left - gap - width >= available.left) return { left: selection.left - gap - width, top };
+  // A selection can fill the entire visible reading area. Keep its actions
+  // reachable at the edge when no non-overlapping placement exists.
+  return { left, top: available.top };
 }
 
 export function ContextActionPalette(props: ContextActionPaletteProps) {
@@ -88,9 +104,16 @@ export function ContextActionPalette(props: ContextActionPaletteProps) {
       const bottom = trayBottom - topEdge >= height ? Math.min(windowBottom, trayBottom) : windowBottom;
       const anchorX = props.placement.left - bounds.left;
       const anchorY = props.placement.top - bounds.top;
-      let top = props.placement.suggestTop ? anchorY - height - 7 : anchorY + 7;
-      if (top + height > bottom) top = anchorY - height - 7;
-      const next = { position: 'absolute' as const, left: Math.max(left, Math.min(anchorX - width / 2, right - width)), top: Math.max(topEdge, Math.min(top, bottom - height)), transform: 'none' };
+      const source = props.placement.selectionBounds;
+      const selection = source === undefined
+        ? { left: anchorX, right: anchorX, top: anchorY, bottom: anchorY, width: 0, height: 0 }
+        : { ...source, left: source.left - bounds.left, right: source.right - bounds.left,
+          top: source.top - bounds.top, bottom: source.bottom - bounds.top };
+      const position = chooseContextActionPlacement({
+        selection, available: { left, top: topEdge, right, bottom, width: right - left, height: bottom - topEdge },
+        width, height,
+      });
+      const next = { position: 'absolute' as const, ...position, transform: 'none' };
       setBoundedStyle((current) => current?.left === next.left && current?.top === next.top ? current : next);
     };
     place();

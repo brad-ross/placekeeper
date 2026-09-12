@@ -52,6 +52,10 @@ export function AnchoredZoomGestureWrapper(props: ComponentProps<typeof ZoomGest
       content.style.transform = `matrix(${next}, 0, 0, ${next}, ${gesture.x}, ${gesture.y})`;
     };
     const wheel = (event: WheelEvent) => {
+      if (viewport.dataset.zoomPresentationTransition !== undefined) {
+        if (event.ctrlKey || event.metaKey) event.preventDefault();
+        return;
+      }
       if (!event.ctrlKey && !event.metaKey) { commit(); return; }
       event.preventDefault();
       const delta = event.deltaY * (event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? viewport.clientHeight : 1);
@@ -61,6 +65,11 @@ export function AnchoredZoomGestureWrapper(props: ComponentProps<typeof ZoomGest
     };
     let distance: number | null = null;
     const touch = (event: TouchEvent) => {
+      if (viewport.dataset.zoomPresentationTransition !== undefined) {
+        distance = null;
+        if (event.touches.length === 2) event.preventDefault();
+        return;
+      }
       if (event.touches.length !== 2) { distance = null; commit(); return; }
       event.preventDefault();
       clearTimeout(timer);
@@ -80,7 +89,8 @@ export function AnchoredZoomGestureWrapper(props: ComponentProps<typeof ZoomGest
     viewport.addEventListener('touchmove', touch, { passive: false });
     viewport.addEventListener('touchend', touch);
     viewport.addEventListener('touchcancel', touch);
-    viewport.addEventListener(FINISH_ZOOM_GESTURE, commit);
+    const finish = () => { distance = null; commit(); };
+    viewport.addEventListener(FINISH_ZOOM_GESTURE, finish);
     document.addEventListener('pointerdown', pointer, true);
     document.addEventListener('keydown', key, true);
     window.addEventListener('blur', commit);
@@ -94,7 +104,7 @@ export function AnchoredZoomGestureWrapper(props: ComponentProps<typeof ZoomGest
       viewport.removeEventListener('touchmove', touch);
       viewport.removeEventListener('touchend', touch);
       viewport.removeEventListener('touchcancel', touch);
-      viewport.removeEventListener(FINISH_ZOOM_GESTURE, commit);
+      viewport.removeEventListener(FINISH_ZOOM_GESTURE, finish);
       document.removeEventListener('pointerdown', pointer, true);
       document.removeEventListener('keydown', key, true);
       window.removeEventListener('blur', commit);

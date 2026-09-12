@@ -31,6 +31,13 @@ describe("macOS native candidate runner", () => {
     expect(packageManifest.scripts["install:local"]).toBe("/bin/sh ./install.sh");
   });
 
+  it("opens the picker by default and only supplies an explicitly requested PDF", () => {
+    expect(parseNativeCandidateRunnerArguments([], "/repo"))
+      .toEqual({ smoke: false, timeoutMs: 60_000 });
+    expect(parseNativeCandidateRunnerArguments(["--pdf", "/tmp/paper.pdf"], "/repo"))
+      .toEqual({ pdfPath: "/tmp/paper.pdf", smoke: false, timeoutMs: 60_000 });
+  });
+
   it("parses a bounded smoke request and defaults to the review fixture", () => {
     expect(parseNativeCandidateRunnerArguments(["--", "--smoke"], "/repo"))
       .toEqual({

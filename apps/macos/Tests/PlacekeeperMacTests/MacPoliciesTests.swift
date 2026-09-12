@@ -1,9 +1,158 @@
 import Foundation
 import AppKit
+import WebKit
 import XCTest
 @testable import PlacekeeperMac
 
 final class MacPoliciesTests: XCTestCase {
+    func testAppZoomGeometryUsesPageScaleNotDisplayDensity() {
+        let css = DragRect(x: 12, y: 19, width: 43, height: 17)
+        for scale in [0.8, 1.25, 2.0] {
+            for flipped in [true, false] {
+                let native = AppZoomGeometry.nativeRect(css, scale: scale, viewHeight: 700, flipped: flipped)
+                XCTAssertEqual(native.x, css.x * scale, accuracy: 0.0001)
+                XCTAssertEqual(native.y, flipped ? css.y * scale : 700 - (css.y + css.height) * scale, accuracy: 0.0001)
+                let roundTrip = AppZoomGeometry.cssRect(native, scale: scale, viewHeight: 700, flipped: flipped)
+                XCTAssertEqual(roundTrip.x, css.x, accuracy: 0.0001)
+                XCTAssertEqual(roundTrip.y, css.y, accuracy: 0.0001)
+                XCTAssertEqual(roundTrip.width, css.width, accuracy: 0.0001)
+                XCTAssertEqual(roundTrip.height, css.height, accuracy: 0.0001)
+            }
+        }
+    }
+
+    func testAppZoomCoalescesRequestsAndRejectsOldAcknowledgements() throws {
+        var transition = AppZoomTransition()
+        let first = try XCTUnwrap(transition.request(1.25, geometryIdentity: "geometry_first"))
+        XCTAssertNil(transition.request(2, geometryIdentity: "geometry_first"))
+        XCTAssertEqual(transition.finish(first), 2)
+        let second = try XCTUnwrap(transition.request(0.8, geometryIdentity: "geometry_second"))
+        XCTAssertNil(transition.finish(first))
+        XCTAssertTrue(transition.inProgress)
+        XCTAssertEqual(transition.finish(second), 0.8)
+        XCTAssertFalse(transition.inProgress)
+    }
+
+    func testZoomShortcutsKeepPDFAndAppOwnersSeparate() {
+        let routes: [(String, NSEvent.ModifierFlags, MacZoomShortcut)] = [
+            ("=", [.command], .pdfIn), ("+", [.command, .numericPad], .pdfIn),
+            ("-", [.command], .pdfOut), ("0", [.command, .control], .pdfFitWidth),
+            ("=", [.command, .shift], .appIn), ("+", [.command, .shift], .appIn),
+            ("-", [.command, .shift], .appOut), ("_", [.command, .shift], .appOut),
+            ("0", [.command, .option], .appActualSize),
+        ]
+        for (characters, flags, expected) in routes {
+            XCTAssertEqual(MacZoomShortcut.resolve(characters: characters, modifiers: flags), expected)
+            XCTAssertEqual(MacZoomShortcut.resolve(characters: characters, modifiers: flags.union([.capsLock, .numericPad])), expected)
+            XCTAssertNil(MacZoomShortcut.resolve(characters: characters, modifiers: flags.union([.control, .option])))
+        }
+        XCTAssertNil(MacZoomShortcut.resolve(characters: "=", modifiers: [.command, .option]))
+        XCTAssertNil(MacZoomShortcut.resolve(characters: "0", modifiers: [.command]))
+        XCTAssertNil(MacZoomShortcut.resolve(characters: "0", modifiers: [.command, .shift]))
+        XCTAssertNil(MacZoomShortcut.resolve(characters: "_", modifiers: [.command]))
+        XCTAssertNil(MacZoomShortcut.resolve(characters: "é", modifiers: [.command]))
+    }
+
+    @MainActor
+    func testAppZoomMenuWorksWithoutReviewSnapshotAndRespectsBounds() throws {
+        _ = NSApplication.shared
+        var scale = 1.0
+        var hasWindow = true
+        let coordinator = MenuCoordinator(activeWindow: { nil }, openDocument: {}, openURL: { _ in },
+            appZoomScale: { scale }, hasWebBackedWindows: { hasWindow }, setAppZoomScale: { scale = $0 })
+        let previousMenu = NSApplication.shared.mainMenu
+        defer { NSApplication.shared.mainMenu = previousMenu }
+        coordinator.install()
+        let main = try XCTUnwrap(NSApplication.shared.mainMenu)
+        let view = try XCTUnwrap(main.items.first { $0.submenu?.title == "View" }?.submenu)
+        let zoom = try XCTUnwrap(view.items.first { $0.title == "Zoom" }?.submenu)
+        XCTAssertEqual(zoom.items.map(\.title), ["Zoom In", "Zoom Out", "Actual Size"])
+        XCTAssertTrue(coordinator.validateMenuItem(zoom.items[0]))
+        XCTAssertTrue(coordinator.validateMenuItem(zoom.items[1]))
+        XCTAssertFalse(coordinator.validateMenuItem(zoom.items[2]))
+        scale = 2
+        XCTAssertFalse(coordinator.validateMenuItem(zoom.items[0]))
+        XCTAssertTrue(coordinator.validateMenuItem(zoom.items[2]))
+        scale = 0.8
+        XCTAssertFalse(coordinator.validateMenuItem(zoom.items[1]))
+        hasWindow = false
+        XCTAssertTrue(zoom.items.allSatisfy { !coordinator.validateMenuItem($0) })
+        let window = try XCTUnwrap(main.items.first { $0.submenu?.title == "Window" }?.submenu)
+        XCTAssertEqual(window.items.first { $0.title == "Zoom" }?.action, #selector(NSWindow.performZoom(_:)))
+    }
+
+    func testAppZoomRejectsInvalidPreferencesAndRestoresSupportedLevels() throws {
+        let suite = "Placekeeper.AppZoomTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        XCTAssertEqual(AppZoomStore(defaults: defaults).scale, 1)
+        for invalid: Any in [true, "1.25", 0.7, 1.2, 2.1, Double.nan, Double.infinity, [1.25]] {
+            defaults.set(invalid, forKey: AppZoomStore.preferenceKey)
+            XCTAssertEqual(AppZoomStore(defaults: defaults).scale, 1)
+        }
+        for scale in AppZoomPolicy.levels {
+            let store = AppZoomStore(defaults: defaults)
+            store.setScale(scale)
+            XCTAssertEqual(AppZoomStore(defaults: defaults).scale, scale)
+        }
+    }
+
+    func testAppZoomStepsClampAndResetWithoutTouchingDocumentRestoration() throws {
+        let suite = "Placekeeper.AppZoomTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set(["document zoom"], forKey: "Placekeeper.RestorableDocumentWindows.v1")
+        let store = AppZoomStore(defaults: defaults)
+        for _ in 0..<20 { store.zoomOut() }
+        XCTAssertEqual(store.scale, 0.8)
+        for level in AppZoomPolicy.levels.dropFirst() {
+            store.zoomIn()
+            XCTAssertEqual(store.scale, level)
+        }
+        store.zoomIn()
+        XCTAssertEqual(store.scale, 2)
+        store.reset()
+        XCTAssertEqual(store.scale, 1)
+        store.setScale(.nan)
+        XCTAssertEqual(store.scale, 1)
+        XCTAssertEqual(defaults.stringArray(forKey: "Placekeeper.RestorableDocumentWindows.v1"), ["document zoom"])
+    }
+
+    @MainActor
+    func testAppZoomAppliesBeforeRecoveryNavigationAndStopsAtClose() throws {
+        _ = NSApplication.shared
+        func makeRecovery(_ scale: Double) -> RecoveryViewController {
+            RecoveryViewController(
+                windowID: UUID().uuidString, documentName: "fixture.pdf",
+                packagedRoot: URL(fileURLWithPath: "/missing-recovery-test-assets"), appZoom: scale,
+                onDecision: { _ in }, onClose: {}, onUnavailable: {}
+            )
+        }
+        let first = makeRecovery(1.5)
+        let second = makeRecovery(1.5)
+        let firstWeb = try XCTUnwrap(first.window?.contentView?.subviews.compactMap { $0 as? WKWebView }.first)
+        let secondWeb = try XCTUnwrap(second.window?.contentView?.subviews.compactMap { $0 as? WKWebView }.first)
+        XCTAssertEqual(firstWeb.pageZoom, 1.5)
+        XCTAssertFalse(firstWeb.allowsMagnification)
+        XCTAssertEqual(first.window?.frame.width, 462 * 1.5)
+        first.applyAppZoom(2)
+        second.applyAppZoom(2)
+        XCTAssertEqual(firstWeb.pageZoom, 2)
+        XCTAssertEqual(secondWeb.pageZoom, 2)
+        XCTAssertEqual(first.window?.frame.height, 228 * 2)
+        first.failDecision()
+        first.applyAppZoom(1.25)
+        XCTAssertEqual(firstWeb.pageZoom, 1.25)
+        first.resolve()
+        first.applyAppZoom(0.8)
+        XCTAssertEqual(firstWeb.pageZoom, 1.25)
+        second.resolve()
+        let retried = makeRecovery(2)
+        defer { retried.resolve() }
+        let retriedWeb = try XCTUnwrap(retried.window?.contentView?.subviews.compactMap { $0 as? WKWebView }.first)
+        XCTAssertEqual(retriedWeb.pageZoom, 2)
+    }
+
     @MainActor
     func testRecoveryWindowIsTheDialogAndRetainsKeyboardAccess() {
         _ = NSApplication.shared
@@ -498,6 +647,8 @@ final class MacPoliciesTests: XCTestCase {
         ]
         let snapshot = try XCTUnwrap(MacCommandSnapshot.parse(value))
         XCTAssertEqual(snapshot.revision, 4)
+        XCTAssertNotNil(snapshot.commands[.zoomIn])
+        XCTAssertNotNil(snapshot.commands[.zoomOut])
         XCTAssertTrue(snapshot.commands[.undo]?.enabled == true)
         XCTAssertTrue(snapshot.commands[.redo]?.enabled == false)
         XCTAssertNil(MacCommandSnapshot.parse(

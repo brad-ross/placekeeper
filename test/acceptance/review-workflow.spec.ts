@@ -864,10 +864,82 @@ test.describe('canonical review workflow', () => {
     );
   });
 
+  test('routes view shortcuts from reference focus while preserving editable input', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await installRuntimeClassicScrollport(page);
+    await page.getByRole('button', { name: 'Set outline tree' }).click();
+    await page.keyboard.press('Control+Meta+o');
+    await expect(page.getByRole('tab', { name: 'Outline', exact: true })).toHaveAttribute('aria-selected', 'true');
+    await page.keyboard.press('Control+Meta+a');
+    await expect(page.getByRole('tab', { name: 'Annotations', exact: true })).toHaveAttribute('aria-selected', 'true');
+    await page.getByRole('button', { name: 'Open harness reference' }).press('Enter');
+    await page.keyboard.press('Control+Meta+r');
+    await expect(page.locator('#workspace-panel-references')).toBeVisible();
+    await page.keyboard.press('Control+Meta+0');
+    await expect(page.getByRole('textbox', { name: 'Current zoom 88 percent. Enter a zoom percentage' })).toHaveValue('88');
+    await page.keyboard.press('Control+Meta+l');
+    await expect(page.locator('[data-review-stage]')).toHaveAttribute('data-horizontal-scroll-locked', 'true');
+    await page.keyboard.press('Control+Meta+l');
+    await expect(page.locator('[data-review-stage]')).not.toHaveAttribute('data-horizontal-scroll-locked', 'true');
+    const input = page.getByRole('textbox', { name: 'Native input', exact: true });
+    await input.fill('keep this text');
+    await input.press('Control+Meta+l');
+    await expect(input).toHaveValue('keep this text');
+    await expect(input).toBeFocused();
+    await expect(page.locator('[data-review-stage]')).not.toHaveAttribute('data-horizontal-scroll-locked', 'true');
+  });
+
+  test('keeps the gap above bottom References equal to the outside tray inset', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await installRuntimeClassicScrollport(page);
+    await page.getByRole('button', { name: 'Open harness reference' }).press('Enter');
+    await page.getByRole('button', { name: 'Show References' }).click();
+    await page.getByRole('button', { name: 'Show workspace' }).click();
+    const stage = page.locator('[data-review-stage]');
+    await expect(stage).toHaveAttribute('data-reference-layout', 'wide-split');
+    await expect.poll(async () => stage.evaluate((element) => {
+      const reference = element.querySelector('#review-workspace')!.getBoundingClientRect();
+      const tools = element.querySelector('#review-tools-workspace')!.getBoundingClientRect();
+      const inset = Number.parseFloat(getComputedStyle(element).getPropertyValue('--review-overlay-inset'));
+      return Math.abs(reference.top - tools.bottom - inset);
+    })).toBeLessThan(1);
+  });
+
+  test('backs tray margins while excluding only actual scrollbar tracks', async ({ page }) => {
+    await page.setViewportSize({ width: 760, height: 720 });
+    const viewport = await installRuntimeClassicScrollport(page);
+    await viewport.evaluate((element) => {
+      element.firstElementChild?.setAttribute('style', 'width: 100%; height: 1600px; background: white');
+    });
+    await page.getByRole('button', { name: 'Open harness reference' }).press('Enter');
+    await page.getByRole('button', { name: 'Show workspace' }).click();
+    await expect.poll(() => viewport.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+    const backing = page.locator('.review-overlay-frame');
+    const expectedClip = () => viewport.evaluate((element) => {
+      const scrollport = element as HTMLElement;
+      const width = scrollport.offsetWidth - scrollport.clientWidth;
+      const height = scrollport.offsetHeight - scrollport.clientHeight;
+      return `inset(0px ${width}px ${height}px 0px)`;
+    });
+    await expect(backing).toHaveCSS('clip-path', await expectedClip());
+    await viewport.evaluate((element) => {
+      (element.firstElementChild as HTMLElement).style.width = '2000px';
+      element.dispatchEvent(new Event('scroll'));
+    });
+    await expect(backing).toHaveCSS('clip-path', await expectedClip());
+    await viewport.evaluate((element) => {
+      element.style.scrollbarWidth = 'none';
+      element.dispatchEvent(new Event('scroll'));
+    });
+    await expect.poll(expectedClip).toBe('inset(0px 0px 0px 0px)');
+    await expect(backing).toHaveCSS('clip-path', 'inset(0px)');
+  });
+
   test('includes an actual wide classic scrollbar track in the common outside tray inset', async ({ page, browserName }) => {
     test.skip(browserName !== 'chromium', 'Chromium exposes deterministic custom classic scrollbar metrics in CI.');
     await page.setViewportSize({ width: 760, height: 720 });
     const canvas = page.getByRole('application', { name: 'PDF review canvas' });
+    await expect(page.locator('[data-review-stage]')).toHaveAttribute('data-workspace-presentation', 'bottom');
     const initialCanvas = await canvas.boundingBox();
     const viewport = await installRuntimeClassicScrollport(page);
     const tracks = await viewport.evaluate((element) => {
@@ -1186,6 +1258,16 @@ test.describe('canonical review workflow', () => {
   test('reveals right-side controls on bar hover and dismisses hover menus outside their trigger and popup', async ({ page }) => {
     const bar = page.locator('[data-review-chrome]');
     const rightControls = bar.locator(':scope > .review-chrome__viewer-controls');
+    const expectToolbarRevealed = async () => {
+      await expect(rightControls).toHaveCSS('opacity', '1');
+      for (const control of await bar.locator('[data-review-copy-link], [data-main-history]').all()) {
+        await expect(control).toHaveCSS('opacity', '1');
+        await expect(control).toHaveCSS('pointer-events', 'auto');
+      }
+      for (const control of await bar.locator('[data-main-history]').all()) {
+        await expect(control).toHaveCSS('clip-path', 'none');
+      }
+    };
     const canvas = page.getByRole('application', { name: 'PDF review canvas' });
     await canvas.hover();
     await expect(rightControls).toHaveCSS('opacity', '0');
@@ -1204,6 +1286,16 @@ test.describe('canonical review workflow', () => {
     const zoomMenu = page.getByRole('menu', { name: 'PDF zoom', exact: true });
     await expect(zoomMenu).toBeVisible();
     await expect(page.getByRole('button', { name: 'Open zoom controls' })).not.toBeFocused();
+    const zoomBox = bar.locator('.review-chrome__zoom-cluster');
+    const zoomHoverColor = await zoomBox.evaluate((element) => getComputedStyle(element).backgroundColor);
+    const zoomBoxBounds = (await zoomBox.boundingBox())!;
+    const zoomPopupBounds = (await zoomMenu.boundingBox())!;
+    await page.mouse.move(zoomBoxBounds.x + zoomBoxBounds.width / 2,
+      (zoomBoxBounds.y + zoomBoxBounds.height + zoomPopupBounds.y) / 2);
+    await page.waitForTimeout(1100);
+    await expect(zoomMenu).toBeVisible();
+    await expect(zoomBox).toHaveCSS('background-color', zoomHoverColor);
+    await expectToolbarRevealed();
     await page.waitForTimeout(700);
     await expect(page.getByRole('tooltip')).toHaveCount(0);
     await zoomMenu.getByRole('menuitem', { name: 'Zoom out', exact: true }).hover();
@@ -1216,6 +1308,7 @@ test.describe('canonical review workflow', () => {
 
     await zoomMenu.hover();
     await expect(zoomMenu).toBeVisible();
+    await expectToolbarRevealed();
     await expect(rightControls).toHaveCSS('opacity', '1');
     await canvas.hover();
     await expect(zoomMenu).toHaveCount(0);
@@ -1224,8 +1317,19 @@ test.describe('canonical review workflow', () => {
     await page.locator('[data-review-page-position]').hover();
     const pageMenu = page.getByRole('menu', { name: 'Page navigation', exact: true });
     await expect(pageMenu).toBeVisible();
+    const pageBox = page.locator('[data-review-page-position]');
+    const pageHoverColor = await pageBox.evaluate((element) => getComputedStyle(element).backgroundColor);
+    const pageBoxBounds = (await pageBox.boundingBox())!;
+    const pagePopupBounds = (await pageMenu.boundingBox())!;
+    await page.mouse.move(pageBoxBounds.x + pageBoxBounds.width / 2,
+      (pageBoxBounds.y + pageBoxBounds.height + pagePopupBounds.y) / 2);
+    await page.waitForTimeout(1100);
+    await expect(pageMenu).toBeVisible();
+    await expect(pageBox).toHaveCSS('background-color', pageHoverColor);
+    await expectToolbarRevealed();
     await pageMenu.getByRole('menuitem', { name: 'Next page' }).hover();
     await expect(pageMenu).toBeVisible();
+    await expectToolbarRevealed();
     await canvas.hover();
     await expect(pageMenu).toHaveCount(0);
 

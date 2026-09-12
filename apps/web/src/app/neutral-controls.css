@@ -124,8 +124,8 @@
   box-shadow: none;
 }
 
-.review-chrome__save-identity:hover,
-.review-chrome__identity .document-actions__trigger:hover {
+.review-chrome__save-identity:is(:hover, [aria-expanded="true"]),
+.review-chrome__identity .document-actions__trigger:is(:hover, [aria-expanded="true"]) {
   background: var(--pk-hover);
 }
 
@@ -149,9 +149,9 @@
     pointer-events: none;
   }
 
-  [data-review-chrome]:is(:hover, :has(:focus-visible), [data-top-bar-menu-open="zoom"])
+  [data-review-chrome]:is(:hover, :has(:focus-visible, [aria-expanded="true"]))
     > .review-chrome__viewer-controls,
-  [data-review-chrome]:is(:hover, :has(:focus-visible))
+  [data-review-chrome]:is(:hover, :has(:focus-visible, [aria-expanded="true"]))
     :is([data-review-copy-link], [data-main-history]) {
     opacity: 1;
     pointer-events: auto;
@@ -163,7 +163,7 @@
     clip-path: inset(50%);
   }
 
-  [data-review-chrome]:is(:hover, :has(:focus-visible)) [data-main-history] {
+  [data-review-chrome]:is(:hover, :has(:focus-visible, [aria-expanded="true"])) [data-main-history] {
     clip-path: none;
   }
 }
@@ -229,8 +229,8 @@
 .review-chrome__page-position,
 .review-chrome__zoom-cluster { gap: 0; }
 
-.review-chrome__page-position:hover,
-.review-chrome__zoom-cluster:hover {
+.review-chrome__page-position:is(:hover, :has([aria-expanded="true"])),
+.review-chrome__zoom-cluster:is(:hover, :has([aria-expanded="true"])) {
   background: var(--pk-hover);
 }
 
@@ -263,8 +263,9 @@
   appearance: textfield;
 }
 
-.review-chrome__page-input { width: 28px; text-align: center; }
-.review-chrome__zoom-input { width: 3ch; text-align: right; }
+/* WebKit pageZoom scales ch widths twice; em tracks only the text size. */
+.review-chrome__page-input { width: 2em; text-align: center; }
+.review-chrome__zoom-input { width: 2em; text-align: right; }
 
 .review-chrome__page-disclosure {
   min-width: 0 !important;
@@ -385,4 +386,3 @@
   overflow-wrap: anywhere;
   pointer-events: none;
 }
-

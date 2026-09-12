@@ -1,6 +1,6 @@
 # Documentation
 
-Start with [Contributing](../CONTRIBUTING.md) for code ownership, builds, and test aliases, or [Concepts](../CONCEPTS.md) for domain vocabulary.
+Start with [Contributing](../CONTRIBUTING.md) for code ownership, builds, and test aliases, or [Concepts](concepts.md) for domain vocabulary.
 
 ## Operating instructions
 

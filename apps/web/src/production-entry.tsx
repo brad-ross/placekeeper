@@ -507,6 +507,7 @@ export function RuntimeProductionReviewApp(props: {
   const [seed, setSeed] = useState(props.initial);
   const [loaded, setLoaded] = useState(props.initial);
   const [refreshStatus, setRefreshStatus] = useState<"idle" | "reconciling" | "failed">("idle");
+  const [hostReviewCommand, setHostReviewCommand] = useState<ReviewCommandInvocation>();
   const [hostReattachRequestToken, setHostReattachRequestToken] = useState(0);
   const hostExportSequenceRef = useRef(0);
   const [hostExportRequest, setHostExportRequest] = useState<{ readonly token: number }>();
@@ -545,6 +546,10 @@ export function RuntimeProductionReviewApp(props: {
     setRefreshStatus(snapshot.refreshStatus);
   }), [props.runtime, seed]);
   useEffect(() => props.runtime?.subscribeHostCommands?.((command) => {
+    if (command.command === "review-command") {
+      setHostReviewCommand((current) => ({ id: command.id, token: (current?.token ?? 0) + 1 }));
+      return;
+    }
     if (command.command === "reattach") {
       setHostReattachRequestToken((token) => token + 1);
       return;
@@ -639,9 +644,9 @@ export function RuntimeProductionReviewApp(props: {
     {...(props.onCommandSurfaceChange === undefined
       ? {}
       : { onCommandSurfaceChange: props.onCommandSurfaceChange })}
-    {...(props.commandInvocation === undefined
+    {...((props.commandInvocation ?? hostReviewCommand) === undefined
       ? {}
-      : { commandInvocation: props.commandInvocation })}
+      : { commandInvocation: (props.commandInvocation ?? hostReviewCommand)! })}
     {...(accessibilityTransition === undefined ? {} : { accessibilityTransition })}
   />;
 }

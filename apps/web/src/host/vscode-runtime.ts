@@ -1,3 +1,4 @@
+import { REVIEW_COMMAND_IDS } from "../review/review-command-surface.js";
 import type { SaveDestinationResult } from "./session-contracts.js";
 import type { SaveStatus } from "../../../../packages/core/src/save-status.js";
 import type { ReviewCommand, ReviewState } from "../../../../packages/core/src/review-model.js";
@@ -120,6 +121,10 @@ function validIdentity(value: unknown): value is HostRuntimeIdentity {
 
 function validHostCommand(value: unknown): value is HostRuntimeCommand {
   if (!isObject(value) || typeof value.command !== "string") return false;
+  if (value.command === "review-command") {
+    return Object.keys(value).length === 2 && typeof value.id === "string"
+      && (REVIEW_COMMAND_IDS as readonly string[]).includes(value.id);
+  }
   if (value.command === "reattach" || value.command === "export-reviewed-pdf"
     || value.command === "reverse-synctex") {
     return Object.keys(value).length === 1;

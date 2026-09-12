@@ -72,6 +72,7 @@ function navigation(initial = location(0)) {
     controls: {
       captureLocation: vi.fn<() => PdfViewerLocation | null>(() => current),
       captureDocumentOrderPages: vi.fn(() => []),
+      resolvePageLocation: vi.fn((pageIndex: number) => location(pageIndex)),
       resolveTarget: vi.fn((value: PdfNavigationTarget) => location(value.pageIndex)),
       targetVisibility: vi.fn<PdfViewerNavigation['targetVisibility']>(() => 'visible'),
       locationVisibility: vi.fn<PdfViewerNavigation['locationVisibility']>(() => 'visible'),

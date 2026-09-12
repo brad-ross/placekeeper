@@ -70,7 +70,7 @@ describe("explicit suite contracts", () => {
       expect(calls.map(call => call.command)).toEqual(["pnpm", "vitest", "playwright"]);
       expect(calls[0].args).toEqual(["fixtures:pdf"]);
       expect(calls[1].args).not.toContain("--grep");
-      expect(calls[2].args).toEqual(["test", "test/acceptance/viewer.spec.ts", ...args]);
+      expect(calls[2].args).toEqual(["test", "--config", "scripts/testing/config/playwright.config.ts", "test/acceptance/viewer.spec.ts", ...args]);
     });
   });
 

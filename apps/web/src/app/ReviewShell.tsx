@@ -109,6 +109,7 @@ import {
 import { reviewActionForKey } from '../review/review-actions.js';
 import {
   createReviewCommandSurface,
+  reviewCommandForShortcut,
   type ReviewCommandFocusContext,
   type ReviewCommandInvocation,
   type ReviewCommandSurfaceSnapshot,
@@ -234,6 +235,8 @@ export interface ReviewShellProps {
   locationRestoreStatus?: LocationRestoreStatus;
   toolError?: string | null;
   commandNotice?: string | null;
+  /** A modal owned by the parent may be mounted outside this shell. */
+  commandModalOpen?: boolean;
   onNavigate?(item: ReviewItem): void;
   onNavigateExisting?(item: ExistingAnnotation): void;
   existingAnnotations?: ExistingAnnotationsDiscovery;
@@ -942,6 +945,15 @@ export function ReviewShell(props: ReviewShellProps) {
       )
     ) return;
     const editable = isEditableTarget(event.target);
+    const shortcut = reviewCommandForShortcut({ ...event, isComposing: event.nativeEvent.isComposing });
+    if (shortcut !== undefined && !event.defaultPrevented && !editable
+      && surface.nestedLayer === 'none' && authoringSessionRef.current === null) {
+      if (commandSurface.invoke(shortcut)) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+      return;
+    }
     if (
       (event.metaKey || event.ctrlKey)
       && !(event.metaKey && event.ctrlKey)
@@ -1140,16 +1152,31 @@ export function ReviewShell(props: ReviewShellProps) {
     props.viewer.onFitWidthCommandChange?.(fitWidthCommand);
     return () => props.viewer.onFitWidthCommandChange?.(null);
   }, [fitWidthCommand, props.viewer.onFitWidthCommandChange]);
+  const beforeViewerAction = async () => {
+    await props.viewer.viewerNavigation?.cancelPendingNavigation();
+    commitMainFramingPosition();
+  };
+  const zoomCommand = async (direction: 'zoomIn' | 'zoomOut') => {
+    await beforeViewerAction();
+    props.viewer.viewerControls?.[direction]();
+  };
   const commandSurface = createReviewCommandSurface({
-    focusContext: commandFocusContext,
+    focusContext: props.commandModalOpen ? 'dialog' : commandFocusContext,
     canUndo: authoringSession === null && canUndo,
     canRedo: authoringSession === null && canRedo,
     canNavigateBack: !props.workspace.documentNavigationPending && (props.workspace.canNavigateBack ?? false),
     canNavigateForward: !props.workspace.documentNavigationPending && (props.workspace.canNavigateForward ?? false),
     canFind: surface.nestedLayer === 'none' && authoringSession === null,
-    canOpenAnnotations: authoringSession === null,
+    canOpenAnnotations: authoringSession === null && surface.nestedLayer === 'none',
+    canOpenOutline: !outlineAbsent && authoringSession === null && surface.nestedLayer === 'none',
+    canOpenReferences: referencesAvailable && authoringSession === null && surface.nestedLayer === 'none',
+    canToggleHorizontalScrollLock: authoringSession === null && surface.nestedLayer === 'none'
+      && (overlayFrame.horizontalScrollAvailable || horizontalScrollLocked),
+    horizontalScrollLocked,
     canOpenSaveOptions: props.save.onSaveOptions !== undefined,
-    canFitWidth: props.viewer.viewerNavigation?.fitToWidthReady() ?? false,
+    canFitWidth: authoringSession === null && surface.nestedLayer === 'none'
+      && (props.viewer.viewerNavigation?.fitToWidthReady() ?? false),
+    canZoom: props.viewer.viewerControls !== undefined && (props.viewer.viewerState?.zoomReady ?? false),
     handlers: {
       undo: () => { void submit(undoReview); },
       redo: () => { void submit(redoReview); },
@@ -1163,8 +1190,21 @@ export function ReviewShell(props: ReviewShellProps) {
       },
       find: openFindCommand,
       'open-annotations': openAnnotationsFromDocumentActions,
+      'open-outline': () => {
+        selectWorkspaceMode('outline');
+        dispatchReferenceLayout({ type: 'show-right-workspace' });
+        focusWorkspaceModeAfterLayout('outline');
+      },
+      'open-references': () => {
+        selectWorkspaceMode('references');
+        dispatchReferenceLayout({ type: 'show-references' });
+        focusWorkspaceModeAfterLayout('references');
+      },
+      'toggle-horizontal-scroll-lock': () => setHorizontalScrollLocked((locked) => !locked),
       'save-options': () => props.save.onSaveOptions?.(),
       'fit-width': () => { void fitWidthCommand(); },
+      'zoom-in': () => { void zoomCommand('zoomIn'); },
+      'zoom-out': () => { void zoomCommand('zoomOut'); },
     },
   });
   const commandSurfaceKey = JSON.stringify(commandSurface.snapshot);
@@ -1449,10 +1489,7 @@ export function ReviewShell(props: ReviewShellProps) {
         horizontalScrollLocked={horizontalScrollLocked}
         onToggleHorizontalScrollLock={() => setHorizontalScrollLocked((locked) => !locked)}
         {...(props.viewer.viewerNavigation === undefined ? {} : {
-          beforeViewerAction: async () => {
-            await props.viewer.viewerNavigation?.cancelPendingNavigation();
-            commitMainFramingPosition();
-          },
+          beforeViewerAction,
         })}
         onFitWidth={fitWidthCommand}
         canUndo={authoringSession === null && canUndo}

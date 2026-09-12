@@ -20,7 +20,7 @@ tags: [pdf-selection, equation-annotations, selection-snapshot, async-timing, cr
 
 ## Problem
 
-PDF text selection is exposed through separate viewer reads for formatted rectangles, selection state, selected text, and extracted page data (`apps/web/src/pdf/viewer-selection-adapter.ts`). Creating a Review Item from those values is safe only when they describe one [Selection Snapshot](../../../CONCEPTS.md#selection-snapshot). If the selection changes while asynchronous page or text work is pending, otherwise plausible text, offsets, and geometry can come from different selections.
+PDF text selection is exposed through separate viewer reads for formatted rectangles, selection state, selected text, and extracted page data (`apps/web/src/pdf/viewer-selection-adapter.ts`). Creating a Review Item from those values is safe only when they describe one [Selection Snapshot](../../concepts.md#selection-snapshot). If the selection changes while asynchronous page or text work is pending, otherwise plausible text, offsets, and geometry can come from different selections.
 
 Equations made both failure modes visible. Their superscripts, subscripts, and fractions produce legitimate nonmonotone segment rectangles, while a nearby selection change can produce a temporally inconsistent but superficially valid anchor.
 

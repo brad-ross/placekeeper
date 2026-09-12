@@ -776,6 +776,172 @@ test("keeps mounted Codex context through fresh-page re-entry, then fails closed
   }
 });
 
+test('keeps a distant search destination stationary from its first visible frame', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  const pdfDocument = await PDFDocument.load(await readFile(searchPdf));
+  for (let index = 0; index < 16; index += 1) pdfDocument.insertPage(1, [612, 792]);
+  pdfDocument.addPage([1000, 792]);
+  const distantSearchPdf = join(root, 'distant-search.pdf');
+  await writeFile(distantSearchPdf, await pdfDocument.save());
+  await openFreshProductionFixture(page, distantSearchPdf, 'Distant search launch failed');
+  const main = page.locator('.pdf-workspace:not(.pdf-workspace--reference)');
+  await main.locator('[data-page-index="0"]').focus();
+  await page.keyboard.press(platformFindShortcut);
+  const zoom = page.getByRole('textbox', { name: /Current zoom \d+ percent/u });
+  await zoom.fill('100');
+  await zoom.press('Enter');
+  const readingBounds = await page.locator('.review-document').boundingBox();
+  if (!readingBounds) throw new Error('Reading viewport unavailable');
+  const fittedPercent = Math.floor((readingBounds.width - 48) / pdfDocument.getPage(0).getWidth() * 100);
+  await zoom.fill(String(fittedPercent));
+  await zoom.press('Enter');
+  await expect(zoom).toHaveValue(String(fittedPercent));
+  await page.getByRole('searchbox', { name: 'Search this PDF' }).fill('stable');
+  const results = page.locator('#workspace-panel-search [data-search-group="exact"] .annotation-item__navigation');
+  await expect(results).toHaveCount(2);
+  await results.nth(1).click();
+  await expect(page.getByRole('textbox', { name: /^Current page/ })).toHaveValue('18');
+  await expect(main.locator('[data-page-index="0"]')).toHaveCount(0);
+  await page.evaluate(() => {
+    const state = { running: true, positions: [] as { x: number; y: number }[] };
+    (window as unknown as { distantJumpFrames: typeof state }).distantJumpFrames = state;
+    const sample = () => {
+      if (!state.running) return;
+      const main = document.querySelector('.pdf-workspace:not(.pdf-workspace--reference)');
+      const viewport = main?.querySelector('[data-viewer-framing-viewport]')?.getBoundingClientRect();
+      const bounds = main?.querySelector('[data-page-index="0"]')?.getBoundingClientRect();
+      if (viewport && bounds && bounds.top < viewport.bottom && bounds.bottom > viewport.top) {
+        state.positions.push({ x: bounds.x, y: bounds.y });
+      }
+      requestAnimationFrame(sample);
+    };
+    requestAnimationFrame(sample);
+  });
+  let positions: { x: number; y: number }[] = [];
+  try {
+    await results.first().click();
+    await expect(page.getByRole('textbox', { name: /^Current page/ })).toHaveValue('1');
+    await expect.poll(() => page.evaluate(() => (
+      (window as unknown as { distantJumpFrames: { positions: unknown[] } }).distantJumpFrames.positions.length
+    ))).toBeGreaterThan(8);
+  } finally {
+    positions = await page.evaluate(() => {
+      const state = (window as unknown as { distantJumpFrames: { running: boolean; positions: { x: number; y: number }[] } }).distantJumpFrames;
+      state.running = false;
+      return state.positions;
+    });
+  }
+  for (const axis of ['x', 'y'] as const) {
+    expect(Math.max(...positions.map((position) => position[axis]))
+      - Math.min(...positions.map((position) => position[axis]))).toBeLessThan(2);
+  }
+});
+
+for (const viewportWidth of [1280, 760]) {
+  test(`keeps fitted pages visible across search, page controls, annotations, and history at width ${viewportWidth}`, async ({ page }) => {
+    await page.setViewportSize({ width: viewportWidth, height: 900 });
+    // A wider page leaves horizontal scroll range even while a narrow page fits.
+    const mixedWidthDocument = await PDFDocument.load(await readFile(searchPdf));
+    mixedWidthDocument.addPage([1000, 792]);
+    const mixedWidthPdf = join(root, 'mixed-width-search.pdf');
+    await writeFile(mixedWidthPdf, await mixedWidthDocument.save());
+    await openFreshProductionFixture(page, mixedWidthPdf, 'Search fit-width launch failed', async (sessionId) => {
+      const state = host.broker.state(sessionId)!;
+      await host.broker.acceptMutation(sessionId, addPageNote(
+        state, 1, { x: 570, y: 160, width: 18, height: 18 }, 'Fitted jump destination.',
+      ));
+    });
+    const main = page.locator('.pdf-workspace:not(.pdf-workspace--reference)');
+    await main.locator('[data-page-index="0"]').focus();
+    await page.keyboard.press(platformFindShortcut);
+    await expect(page.getByRole('searchbox', { name: 'Search this PDF' })).toBeVisible();
+    const results = page.locator('#workspace-panel-search [data-search-group="exact"] .annotation-item__navigation');
+    const zoom = page.getByRole('textbox', { name: /Current zoom \d+ percent/u });
+    await zoom.fill('100');
+    await zoom.press('Enter');
+    await expect(zoom).toHaveValue('100');
+    const viewportBounds = await main.locator('[data-viewer-framing-viewport]').boundingBox();
+    const rightFade = page.locator('.review-overlay-frame__right-fade:visible');
+    const fadeBounds = await rightFade.count() > 0 ? await rightFade.boundingBox() : null;
+    if (!viewportBounds) throw new Error('Reading viewport geometry unavailable');
+    const readingRight = fadeBounds?.x ?? viewportBounds.x + viewportBounds.width;
+    const fittedPercent = Math.floor((readingRight - viewportBounds.x - 24) / mixedWidthDocument.getPage(0).getWidth() * 100);
+    await zoom.fill(String(fittedPercent));
+    await zoom.press('Enter');
+    await expect(zoom).toHaveValue(String(fittedPercent));
+    const fittedZoom = await zoom.inputValue();
+    await page.getByRole('searchbox', { name: 'Search this PDF' }).fill('stable');
+    await expect(results).toHaveCount(2);
+    const expectFittedPage = async (index: number) => {
+      await expect(page.getByRole('textbox', { name: new RegExp(`Current page ${index + 1} of`) })).toHaveValue(String(index + 1));
+      await expect(zoom).toHaveValue(fittedZoom);
+      const pdfPage = main.locator(`[data-page-index="${index}"]`);
+      await expect.poll(async () => {
+        const viewport = await main.locator('[data-viewer-framing-viewport]').boundingBox();
+        const bounds = await pdfPage.boundingBox();
+        const fade = await rightFade.count() > 0 ? await rightFade.boundingBox() : null;
+        if (!viewport || !bounds) return Number.POSITIVE_INFINITY;
+        const right = fade?.x ?? viewport.x + viewport.width;
+        return Math.max(viewport.x - bounds.x, bounds.x + bounds.width - right);
+      }).toBeLessThan(2);
+    };
+    await results.first().click();
+    await expectFittedPage(0);
+    await page.evaluate(() => {
+      const state = { running: true, overflow: [] as number[] };
+      (window as unknown as { jumpFrames: typeof state }).jumpFrames = state;
+      const sample = () => {
+        if (!state.running) return;
+        const main = document.querySelector('.pdf-workspace:not(.pdf-workspace--reference)');
+        const viewport = main?.querySelector('[data-viewer-framing-viewport]')?.getBoundingClientRect();
+        const bounds = main?.querySelector('[data-page-index="1"]')?.getBoundingClientRect();
+        const fade = Array.from(document.querySelectorAll('.review-overlay-frame__right-fade'))
+          .find((element) => element.getBoundingClientRect().width > 0)?.getBoundingClientRect();
+        if (viewport && bounds && bounds.top < viewport.bottom && bounds.bottom > viewport.top) {
+          state.overflow.push(Math.max(viewport.left - bounds.left, bounds.right - (fade?.left ?? viewport.right)));
+        }
+        requestAnimationFrame(sample);
+      };
+      requestAnimationFrame(sample);
+    });
+    await results.nth(1).click();
+    await expectFittedPage(1);
+    const paintedOverflow = await page.evaluate(() => {
+      const state = (window as unknown as { jumpFrames: { running: boolean; overflow: number[] } }).jumpFrames;
+      state.running = false;
+      return state.overflow;
+    });
+    expect(paintedOverflow.length).toBeGreaterThan(0);
+    expect(Math.max(...paintedOverflow)).toBeLessThan(2);
+    const pageTrigger = page.getByRole('button', { name: /Open page navigation/ });
+    await pageTrigger.click();
+    await page.getByRole('menuitem', { name: 'Previous page', exact: true }).click();
+    await expectFittedPage(0);
+    await expect(page.getByRole('menu', { name: 'Page navigation' })).toBeVisible();
+    await page.getByRole('menuitem', { name: 'Next page', exact: true }).click();
+    await expectFittedPage(1);
+    await page.keyboard.press('Escape');
+    const pageInput = page.getByRole('textbox', { name: /^Current page/ });
+    await pageInput.click();
+    await expect(pageInput).toBeFocused();
+    await pageInput.fill('1');
+    await expect(pageInput).toHaveValue('1');
+    await pageInput.press('Enter');
+    await expectFittedPage(0);
+    await openAnnotationsWorkspace(page);
+    await page.locator('#workspace-panel-annotations').getByRole('button', {
+      name: /^Page Note · Page 2 · .*Fitted jump destination\.$/u,
+    }).first().click();
+    await expectFittedPage(1);
+    await page.locator('[data-review-chrome]').hover({ position: { x: 2, y: 2 } });
+    await page.getByRole('button', { name: 'Back in document history', exact: true }).click();
+    await expectFittedPage(0);
+    await page.locator('[data-review-chrome]').hover({ position: { x: 2, y: 2 } });
+    await page.getByRole('button', { name: 'Forward in document history', exact: true }).click();
+    await expectFittedPage(1);
+  });
+}
+
 test("searches extracted PDF text with variants, history, references, and retained responsive state", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 });
   const errors = collectBrowserErrors(page);
