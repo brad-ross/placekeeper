@@ -109,6 +109,11 @@
   overscroll-behavior: contain;
 }
 
+/* Keep scrolling workspace content clear of the rounded tray edge. */
+.review-tools-workspace .review-workspace__panel {
+  margin-bottom: 12px;
+}
+
 .workspace-edge-rail {
   width: 32px;
   min-width: 32px;
