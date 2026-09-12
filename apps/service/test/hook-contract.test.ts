@@ -196,6 +196,19 @@ describe("Codex lifecycle hook", () => {
     expect(output).not.toMatch(/thr_codex|review-session|bindProof|paper with spaces|cap=|127\.0\.0\.1/u);
   });
 
+  it("reports a denied binding instead of silently leaving an open PDF without agent context", async () => {
+    const control = vi.fn(async (): Promise<PlacekeeperControlResponse> => ({
+      kind: "binding", result: { status: "denied" },
+    }));
+    const write = vi.fn();
+    await runHookCommand(["hook", "--event"], JSON.stringify(postToolUse()), control, write);
+    expect(write).toHaveBeenCalledOnce();
+    const output = write.mock.calls[0]![0] as string;
+    expect(output).toContain("could not associate");
+    expect(output).toContain("independent review");
+    expect(output).not.toMatch(/thr_codex|review-session|bindProof|paper with spaces|cap=|127\.0\.0\.1/u);
+  });
+
   it("refreshes on every prompt and emits explicit task-scoped unavailability", async () => {
     const control = vi.fn(async (): Promise<PlacekeeperControlResponse> => ({ kind: "context", result: unavailable }));
     const write = vi.fn();

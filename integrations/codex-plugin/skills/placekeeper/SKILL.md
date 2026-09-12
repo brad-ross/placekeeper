@@ -24,6 +24,7 @@ description: Open one explicitly referenced local PDF or canonical Placekeeper l
 5. Pass an opened or focused URL directly to the Codex desktop built-in browser. Do not print, summarize, save, or copy the capability URL elsewhere.
 6. For `ok: false`, present only the returned shared error and its one recovery action. Do not expose filesystem details that are absent from the error.
 7. The packaged lifecycle hook binds a recognized successful direct launch to this task and refreshes current Review Items before each later prompt. Opening the browser alone does not establish that binding. If the browser opens but context remains `unbound`, check that step 2 used the direct command and rerun it directly for the same PDF if needed; do not extract or replay a bind proof yourself. Never copy or repeat the returned bind proof, document generation, browser capability, or task identity.
+   - A `focused` launch can reuse a review owned by another task. If the hook reports that it could not associate the launch, do not keep reopening it or claim context is current. Explain the conflict and offer an independent review with `--fork` when the user wants to keep both tasks. Never take over another task's binding or read its context.
 
 ## Live context and PDF evidence
 
