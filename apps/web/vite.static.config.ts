@@ -79,38 +79,42 @@ function staticContentManifest(base: string): Plugin {
   return {
     name: "static-content-manifest",
     enforce: "post",
-    generateBundle(_options, bundle) {
-      const bytes = (output: (typeof bundle)[string]): Buffer => output.type === "chunk"
-        ? Buffer.from(output.code)
-        : Buffer.isBuffer(output.source) ? output.source : Buffer.from(output.source);
-      const entries = Object.values(bundle)
-        .filter((output) => output.fileName !== "content-manifest.json" && output.fileName !== "version.json")
-        .map((output) => {
-          const content = bytes(output);
-          return { path: output.fileName, bytes: content.byteLength, sha256: sha256(content) };
-        })
-        .sort((left, right) => left.path.localeCompare(right.path));
-      const manifest = `${JSON.stringify({ schemaVersion: 1, entries }, null, 2)}\n`;
-      this.emitFile({ type: "asset", fileName: "content-manifest.json", source: manifest });
-      const epoch = process.env.SOURCE_DATE_EPOCH === undefined
-        ? undefined
-        : Number.parseInt(process.env.SOURCE_DATE_EPOCH, 10);
-      const builtAt = epoch !== undefined && Number.isFinite(epoch)
-        ? new Date(epoch * 1_000)
-        : new Date();
-      this.emitFile({
-        type: "asset",
-        fileName: "version.json",
-        source: `${JSON.stringify({
-          schemaVersion: 1,
-          sourceSha: sourceSha(),
-          runId: process.env.GITHUB_RUN_ID ?? "local",
-          runAttempt: process.env.GITHUB_RUN_ATTEMPT ?? "1",
-          builtAt: builtAt.toISOString(),
-          base,
-          contentManifestSha256: sha256(manifest),
-        }, null, 2)}\n`,
-      });
+    generateBundle: {
+      // Hash the final chunks after Vite has rewritten dynamic-import preload dependencies.
+      order: "post",
+      handler(_options, bundle) {
+        const bytes = (output: (typeof bundle)[string]): Buffer => output.type === "chunk"
+          ? Buffer.from(output.code)
+          : Buffer.isBuffer(output.source) ? output.source : Buffer.from(output.source);
+        const entries = Object.values(bundle)
+          .filter((output) => output.fileName !== "content-manifest.json" && output.fileName !== "version.json")
+          .map((output) => {
+            const content = bytes(output);
+            return { path: output.fileName, bytes: content.byteLength, sha256: sha256(content) };
+          })
+          .sort((left, right) => left.path.localeCompare(right.path));
+        const manifest = `${JSON.stringify({ schemaVersion: 1, entries }, null, 2)}\n`;
+        this.emitFile({ type: "asset", fileName: "content-manifest.json", source: manifest });
+        const epoch = process.env.SOURCE_DATE_EPOCH === undefined
+          ? undefined
+          : Number.parseInt(process.env.SOURCE_DATE_EPOCH, 10);
+        const builtAt = epoch !== undefined && Number.isFinite(epoch)
+          ? new Date(epoch * 1_000)
+          : new Date();
+        this.emitFile({
+          type: "asset",
+          fileName: "version.json",
+          source: `${JSON.stringify({
+            schemaVersion: 1,
+            sourceSha: sourceSha(),
+            runId: process.env.GITHUB_RUN_ID ?? "local",
+            runAttempt: process.env.GITHUB_RUN_ATTEMPT ?? "1",
+            builtAt: builtAt.toISOString(),
+            base,
+            contentManifestSha256: sha256(manifest),
+          }, null, 2)}\n`,
+        });
+      },
     },
   };
 }

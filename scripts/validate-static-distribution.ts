@@ -11,7 +11,7 @@ import {
 } from "./generate-static-notices.js";
 
 export const STATIC_ARTIFACT_MAX_BYTES = 40 * 1024 * 1024;
-const HASHED_ASSET = /^assets\/[A-Za-z0-9._-]+-[A-Za-z0-9_-]{8,}\.(?:js|css|wasm)$/u;
+const HASHED_ASSET = /^assets\/[A-Za-z0-9._-]+-[A-Za-z0-9_-]{8,}\.(?:js|css|wasm|png)$/u;
 const FIXED_FILES = new Set([
   "index.html",
   STATIC_PRIVACY_PATH,
@@ -47,7 +47,7 @@ function assertSecurityPolicy(indexHtml: string): void {
   for (const directive of [
     "default-src 'none'", "script-src 'self' 'wasm-unsafe-eval' blob:",
     "worker-src 'self' blob:", "connect-src 'self' blob: https:",
-    "object-src 'none'", "frame-src 'none'", "base-uri 'none'", "form-action 'none'",
+    "object-src 'none'", "frame-src 'self'", "base-uri 'none'", "form-action 'none'",
   ]) {
     if (!policy.includes(directive)) throw new Error(`Static CSP is missing: ${directive}`);
   }
