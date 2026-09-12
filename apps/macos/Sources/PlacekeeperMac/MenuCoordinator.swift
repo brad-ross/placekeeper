@@ -163,7 +163,7 @@ final class MenuCoordinator: NSObject, NSMenuItemValidation, NSMenuDelegate {
               let presentation = snapshot.commands[command] else {
             return menuItem.action != #selector(invokeReviewCommand(_:))
         }
-        menuItem.title = pdfZoomTitle(command) ?? presentation.label
+        menuItem.title = command == .find ? "Find in Document" : pdfZoomTitle(command) ?? presentation.label
         if snapshot.focusContext == .editable, command == .undo || command == .redo {
             let selector = command == .undo ? Selector(("undo:")) : Selector(("redo:"))
             return NSApplication.shared.target(forAction: selector, to: nil, from: menuItem) != nil
@@ -267,8 +267,8 @@ final class MenuCoordinator: NSObject, NSMenuItemValidation, NSMenuDelegate {
     private func viewMenu() -> NSMenuItem {
         let root = NSMenuItem()
         let menu = NSMenu(title: "View")
-        let pdfZoomRoot = NSMenuItem(title: "PDF Zoom", action: nil, keyEquivalent: "")
-        let pdfZoom = NSMenu(title: "PDF Zoom")
+        let pdfZoomRoot = NSMenuItem(title: "Document Zoom", action: nil, keyEquivalent: "")
+        let pdfZoom = NSMenu(title: "Document Zoom")
         for (command, key, route) in [(MacReviewCommand.zoomIn, "=", MacZoomShortcut.pdfIn), (.zoomOut, "-", .pdfOut), (.fitWidth, "0", .pdfFitWidth)] {
             let item = commandItem(command, key: key, modifiers: command == .fitWidth ? [.command, .control] : [.command])
             zoomItems[route] = item
@@ -296,11 +296,11 @@ final class MenuCoordinator: NSObject, NSMenuItemValidation, NSMenuDelegate {
         menu.addItem(commandItem(.openAnnotations, key: "a", modifiers: [.command, .control]))
         menu.addItem(commandItem(.openReferences, key: "r", modifiers: [.command, .control]))
         menu.addItem(.separator())
+        menu.addItem(zoomRoot)
+        menu.addItem(.separator())
         let fullScreen = NSMenuItem(title: "Enter Full Screen", action: #selector(NSWindow.toggleFullScreen(_:)), keyEquivalent: "f")
         fullScreen.keyEquivalentModifierMask = [.command, .control]
         menu.addItem(fullScreen)
-        menu.addItem(.separator())
-        menu.addItem(zoomRoot)
         root.submenu = menu
         return root
     }
@@ -340,7 +340,7 @@ final class MenuCoordinator: NSObject, NSMenuItemValidation, NSMenuDelegate {
         key: String,
         modifiers: NSEvent.ModifierFlags = [.command]
     ) -> NSMenuItem {
-        let title = pdfZoomTitle(command) ?? command.rawValue
+        let title = command == .find ? "Find in Document" : pdfZoomTitle(command) ?? command.rawValue
         let item = NSMenuItem(title: title, action: #selector(invokeReviewCommand(_:)), keyEquivalent: key)
         item.target = self
         item.representedObject = command.rawValue
