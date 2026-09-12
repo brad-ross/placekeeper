@@ -288,7 +288,9 @@ export function ReferenceWorkspace({
     const changed = previousActiveReference.current !== activeTabIdentity;
     previousActiveReference.current = activeTabIdentity;
     if (!changed || !open || mode !== 'references' || activeTabIdentity === null) return;
-    requestAnimationFrame(() => focusWithoutScroll(referenceTabRefs.current.get(activeTabIdentity)));
+    // Apply focus before the new tab paints so its page/action endcap and
+    // keyboard focus styling do not flash through an unfocused first frame.
+    focusWithoutScroll(referenceTabRefs.current.get(activeTabIdentity));
   }, [activeTabIdentity, mode, open]);
 
   useLayoutEffect(() => {
@@ -474,6 +476,7 @@ export function ReferenceWorkspace({
                   <ReviewTooltipButton
                     label={destinationLabel}
                     tooltip={`Show ${destinationLabel}`}
+                    tooltipOnFocus={false}
                     ref={(element) => {
                       if (element) referenceTabRefs.current.set(tab.identity, element);
                       else referenceTabRefs.current.delete(tab.identity);

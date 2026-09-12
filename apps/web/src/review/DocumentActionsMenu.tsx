@@ -1,4 +1,6 @@
 import {
+  createContext,
+  useContext,
   useEffect,
   useId,
   useLayoutEffect,
@@ -97,6 +99,8 @@ const EXPORT_OUTCOME_MESSAGES: Readonly<Record<ExportOutcome, string>> = {
   failure: 'Export failed. Your review is still available; try again.',
 };
 
+export const DocumentActionsEnabled = createContext(true);
+
 export function DocumentActionsMenu({
   showSaveStatusDot = true,
   documentTitle,
@@ -111,8 +115,9 @@ export function DocumentActionsMenu({
   requestToken,
   onRequestHandled,
 }: DocumentActionsMenuProps) {
+  const enabled = useContext(DocumentActionsEnabled);
   const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
-  const open = controlledOpen ?? uncontrolledOpen;
+  const open = enabled && (controlledOpen ?? uncontrolledOpen);
   const [staleConfirmation, setStaleConfirmation] = useState(false);
   const [outcome, setOutcome] = useState<ExportOutcome>('idle');
   const [exportDetail, setExportDetail] = useState('');
@@ -271,17 +276,18 @@ export function DocumentActionsMenu({
     onBlur={onBlur}
   >
     <ReviewTooltipButton
-      label={`${documentTitle}, ${savedLabel}. Open document actions`}
-      tooltip={`${documentTitle} — Save options`}
+      label={enabled ? `${documentTitle}, ${savedLabel}. Open document actions` : documentTitle}
+      tooltip={enabled ? `${documentTitle} — Save options` : documentTitle}
       ref={triggerRef}
       type="button"
       className="review-chrome__save-identity document-actions__trigger"
       data-document-actions-trigger
-      aria-label={`${documentTitle}, ${savedLabel}. Open document actions`}
-      aria-haspopup="menu"
-      aria-expanded={open}
-      aria-controls={menuId}
+      aria-label={enabled ? `${documentTitle}, ${savedLabel}. Open document actions` : documentTitle}
+      aria-haspopup={enabled ? "menu" : undefined}
+      aria-expanded={enabled ? open : undefined}
+      aria-controls={enabled ? menuId : undefined}
       onClick={() => {
+        if (!enabled) return;
         if (open) closeAndRestore();
         else setOpen(true);
       }}

@@ -54,6 +54,7 @@ function observeTooltipInputModality(owner: Document): () => void {
 export interface ReviewTooltipButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   readonly label: string;
   readonly tooltip?: string | false;
+  readonly tooltipOnFocus?: boolean;
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -73,6 +74,7 @@ export const ReviewTooltipButton = forwardRef<HTMLButtonElement, ReviewTooltipBu
   function ReviewTooltipButton({
     label,
     tooltip = label,
+    tooltipOnFocus = true,
     onMouseEnter,
     onMouseLeave,
     onFocus,
@@ -173,7 +175,7 @@ export const ReviewTooltipButton = forwardRef<HTMLButtonElement, ReviewTooltipBu
           clearHoverTimer();
           const pointerFocus = pointerActivation.current
             || inputModalities.get(event.currentTarget.ownerDocument)?.pointer === true;
-          if (tooltip !== false && reviewTooltipFocusOpens(pointerFocus)
+          if (tooltipOnFocus && tooltip !== false && reviewTooltipFocusOpens(pointerFocus)
             && event.currentTarget.matches(':focus-visible')) setVisible(true);
         }}
         onBlur={(event: FocusEvent<HTMLButtonElement>) => {

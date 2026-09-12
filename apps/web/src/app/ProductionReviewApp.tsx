@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type ReactNode } from "react";
+import { pdfNavigationTargetFromPlacekeeperLocation } from '../pdf/pdf-navigation-target.js';
+import { useContext, useCallback, useEffect, useMemo, useReducer, useRef, useState, type ReactNode } from "react";
 import type { PluginRegistry } from "@embedpdf/core";
 import type { PdfDocumentObject, PdfEngine } from '@embedpdf/models';
 import { SelectionPlugin } from "@embedpdf/plugin-selection";
@@ -49,6 +50,7 @@ import {
 import { isEditableTarget } from '../review/input-controller.js';
 import { App } from "./App.js";
 import { ReferenceManualScrollObserver } from '../pdf/reference-manual-scroll.js';
+import { WorkspaceInitialReferenceDock, WorkspaceModeAvailability, WorkspacePresentation } from '../review/WorkspaceModeStrip.js';
 import { ReviewShell } from "./ReviewShell.js";
 import type {
   ProductionSession,
@@ -187,6 +189,11 @@ export interface ProductionReviewAppProps {
 }
 
 export function ProductionReviewApp(props: ProductionReviewAppProps) {
+  const availableModes = useContext(WorkspaceModeAvailability);
+  const workspacePresentation = useContext(WorkspacePresentation);
+  const initialReferenceDock = useContext(WorkspaceInitialReferenceDock);
+  const authoringEnabled = availableModes === null || availableModes.includes('annotations');
+  const referencesEnabled = availableModes === null || availableModes.includes('references');
   const [localState, setState] = useState(props.initialState);
   // A runtime successor arrives as one state/assets render. Prefer that canonical
   // generation immediately so the viewer URL and semantic authority never split.
@@ -291,7 +298,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   const [referenceLayoutState, dispatchReferenceLayout] = useReducer(
     reduceReferenceWorkspaceLayout,
     undefined,
-    () => createReferenceWorkspaceLayout({ width: 1440, height: 900 }),
+    () => ({ ...createReferenceWorkspaceLayout({ width: 1440, height: 900 }), referenceDock: initialReferenceDock }),
   );
   const referenceLayoutStateRef = useRef(referenceLayoutState);
   referenceLayoutStateRef.current = referenceLayoutState;
@@ -390,11 +397,11 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   useEffect(() => props.api.presence?.(), [props.api]);
   const ownedAnnotations = useMemo(
     () => projectReviewItems(
-      state.items,
+      authoringEnabled ? state.items : [],
       state.workflow.documentGeneration,
       { includePortableMetadata: false },
     ),
-    [state.items, state.workflow.documentGeneration],
+    [state.items, state.workflow.documentGeneration, authoringEnabled],
   );
   const codexContext = useCodexContext(props, scope, setScope, stateRef);
   const searchResults = useMemo(
@@ -430,6 +437,37 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     dispatchReferenceLayout(action);
   }, []);
   const coordinatorRef = useRef<NavigationCoordinator | null>(null);
+  useEffect(() => {
+    if (!workspacePresentation) return;
+    const { mode } = workspacePresentation;
+    if (mode !== 'annotations') {
+      setActiveItemId(undefined);
+      setActivationRequest(undefined);
+      setCorrespondingItemId(undefined);
+      markHoverRef.current = undefined;
+      markFocusRef.current = undefined;
+      rowCorrespondenceRef.current = undefined;
+    }
+    if (mode !== 'references') setRightWorkspaceMode(mode);
+    dispatchNavigation({ type: 'select-workspace-mode', mode });
+  }, [workspacePresentation?.mode]);
+  useEffect(() => {
+    if (!workspacePresentation) return;
+    if (workspacePresentation.referenceDock) {
+      dispatchLayout({ type: workspacePresentation.referenceDock === 'bottom' ? 'move-references-bottom' : 'move-references-right' });
+    }
+    dispatchLayout({ type: 'hide-references' });
+    dispatchLayout({ type: 'hide-right-workspace' });
+    if (workspacePresentation.open) {
+      dispatchLayout({ type: workspacePresentation.mode === 'references' ? 'show-references' : 'show-right-workspace' });
+    }
+  }, [workspacePresentation?.mode, workspacePresentation?.open, workspacePresentation?.referenceDock, dispatchLayout]);
+
+  useEffect(() => {
+    if (workspacePresentation?.bottomHeight !== undefined) {
+      dispatchLayout({ type: 'resize-bottom-references', size: workspacePresentation.bottomHeight });
+    }
+  }, [workspacePresentation?.bottomHeight, dispatchLayout]);
   if (coordinatorRef.current === null) {
     coordinatorRef.current = new NavigationCoordinator({
       getState: () => navigationStateRef.current,
@@ -541,6 +579,17 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     });
   }
   const navigationCoordinator = coordinatorRef.current;
+  const sampleReferenceOpened = useRef(false);
+  useEffect(() => {
+    if (!workspacePresentation?.sampleReference || workspacePresentation.mode !== 'references' || sampleReferenceOpened.current) return;
+    const target = pdfNavigationTargetFromPlacekeeperLocation({ kind: 'page', page: 2 }, {
+      documentGeneration: state.workflow.documentGeneration, pageCount: 4,
+    });
+    if (target) void navigationCoordinator.openReference(target, { label: 'Table 1', pageContext: 'Page 2' }).then((opened) => {
+      if (opened) sampleReferenceOpened.current = true;
+    });
+    return () => navigationCoordinator.cancelPendingNavigation();
+  }, [workspacePresentation?.mode, workspacePresentation?.sampleReference, navigationCoordinator]);
   const mainLocationRefresh = useMemo(
     () => createTrailingTaskScheduler(() => navigationCoordinator.refreshMainLocation()),
     [navigationCoordinator],
@@ -627,8 +676,8 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   }, [navigationCoordinator]);
 
   const onSelectionUpdate = useCallback((update: SelectionUpdate) => {
-    setSelectionUpdate((current) => acceptSelectionUpdate(current, update));
-  }, []);
+    if (authoringEnabled) setSelectionUpdate((current) => acceptSelectionUpdate(current, update));
+  }, [authoringEnabled]);
   useEffect(() => {
     setReferenceCopySelection(null);
     setPdfCopyOwner((owner) => owner === 'reference' ? null : owner);
@@ -814,6 +863,8 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     portableItemIdsRef.current = new Set(state.items.map((item) => item.id));
   }, [navigationCoordinator, saveStatus, state]);
   const onViewerInteraction = useCallback((event: ViewerInteractionEvent) => {
+    if (!referencesEnabled && (event.type === 'pdf-link' || event.type === 'pdf-link-unavailable')) return;
+    if (!authoringEnabled && ['selection-placement', 'caret', 'page-menu', 'page-note-cursor', 'page-note-commit'].includes(event.type)) return;
     if (event.type === 'reverse-synctex') {
       requestReverseSyncTex(event.value);
       return;
@@ -881,7 +932,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       }
       publishCorrespondence();
     }
-  }, [authoringAnchorRefresh, mainLocationRefresh, navigationCoordinator, requestReverseSyncTex]);
+  }, [authoringEnabled, referencesEnabled, authoringAnchorRefresh, mainLocationRefresh, navigationCoordinator, requestReverseSyncTex]);
   const onReferenceDocumentControls = useCallback((controls: ReferenceDocumentController | null) => {
     referenceControllerRef.current = controls;
     if (controls === null) navigationCoordinator.referenceNavigationUnavailable();
@@ -1407,6 +1458,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
           placedPageNote,
           keyboardPageNoteActive,
           onRequestKeyboardPageNote: () => {
+            if (!authoringEnabled) return;
             if (pageMenu) placementAuthority.current.dismissContext(pageMenu.invocationId);
             setPageMenu(null);
             placementAuthority.current.clearKeyboardCursor();
@@ -1568,6 +1620,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
             );
           },
           onWorkspaceModeChange: (mode) => {
+            if (availableModes !== null && !availableModes.includes(mode)) return;
             if (mode === 'references') {
               void navigationCoordinator.openReferencesWorkspace();
               return;
@@ -1610,6 +1663,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
             else void navigationCoordinator.navigateMainTarget(item.target, 'outline');
           },
           onOutlineReference: (item) => {
+            if (!referencesEnabled) return;
             if (item.target === null) return;
             void navigationCoordinator.openReference(item.target, {
               label: item.label,

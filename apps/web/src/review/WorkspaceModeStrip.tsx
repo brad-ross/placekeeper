@@ -1,8 +1,14 @@
-import type { FocusEvent, KeyboardEvent } from 'react';
+import { createContext, useContext, type FocusEvent, type KeyboardEvent } from 'react';
 
 import type { WorkspaceMode } from './reference-navigation-state.js';
 import { ReviewIcon, type ReviewIconName } from './ReviewIcon.js';
 import { ReviewTooltipButton } from './ReviewTooltipButton.js';
+
+/** Optional host restriction; unavailable modes retain the production tab appearance. */
+export const WorkspaceModeAvailability = createContext<readonly WorkspaceMode[] | null>(null);
+export const WorkspaceInitialReferenceDock = createContext<'bottom' | 'right'>('bottom');
+/** Host-requested presentation changes use the reader's normal layout transitions. */
+export const WorkspacePresentation = createContext<{ mode: WorkspaceMode; open: boolean; referenceDock?: 'bottom' | 'right'; sampleReference?: boolean; bottomHeight?: number } | null>(null);
 
 const MODE_PRESENTATION: Readonly<Record<WorkspaceMode, {
   readonly label: string;
@@ -51,6 +57,7 @@ export function WorkspaceModeStrip<Mode extends WorkspaceMode>({
   dockAction,
   quietSingleMode = false,
 }: WorkspaceModeStripProps<Mode>) {
+  const availableModes = useContext(WorkspaceModeAvailability);
   const dockAttached = selectedMode === 'references' && dockAction !== undefined;
 
   return (
@@ -66,6 +73,7 @@ export function WorkspaceModeStrip<Mode extends WorkspaceMode>({
       >
         {modes.map((mode) => {
           const selected = mode === selectedMode;
+          const unavailable = availableModes !== null && !availableModes.includes(mode);
           const presentation = MODE_PRESENTATION[mode];
           const compound = dockAttached && mode === 'references';
           return (
@@ -88,11 +96,24 @@ export function WorkspaceModeStrip<Mode extends WorkspaceMode>({
                 aria-label={presentation.label}
                 aria-selected={selected}
                 aria-controls={`workspace-panel-${mode}`}
+                aria-disabled={unavailable || undefined}
                 tabIndex={selected ? 0 : -1}
-                onKeyDown={onModeKeyDown}
+                onKeyDown={(event) => {
+                  if (availableModes === null) return onModeKeyDown(event);
+                  if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+                  event.preventDefault();
+                  const enabled = modes.filter((candidate) => availableModes.includes(candidate));
+                  const index = enabled.indexOf(mode);
+                  const next = event.key === 'Home' ? enabled[0]
+                    : event.key === 'End' ? enabled.at(-1)
+                      : enabled[(index + (event.key === 'ArrowRight' ? 1 : -1) + enabled.length) % enabled.length];
+                  if (next !== undefined) onModeChange(next);
+                }}
                 onFocus={(event) => onModeFocus?.(mode, event)}
                 onBlur={(event) => onModeBlur?.(mode, event)}
-                onClick={() => onModeChange(mode)}
+                onClick={() => {
+                  if (!unavailable) onModeChange(mode);
+                }}
               >
                 <ReviewIcon name={presentation.icon} />
                 {selected ? (

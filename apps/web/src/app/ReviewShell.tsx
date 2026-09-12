@@ -1,5 +1,7 @@
+import { WorkspaceModeAvailability } from '../review/WorkspaceModeStrip.js';
 import {
   useCallback,
+  useContext,
   useLayoutEffect,
   useEffect,
   useMemo,
@@ -307,6 +309,8 @@ export function ReviewShell(props: ReviewShellProps) {
   const [listActivation, setListActivation] = useState<{ readonly id: string; readonly token: number }>();
   const [reconciliationDetailOpen, setReconciliationDetailOpen] = useState(false);
   const [reconciliationFocusRequest, setReconciliationFocusRequest] = useState(0);
+  const availableModes = useContext(WorkspaceModeAvailability);
+  const annotationPeeksEnabled = availableModes === null || availableModes.includes('annotations');
   const [peekItemId, setPeekItemId] = useState<string>();
   const [searchFocusRequest, setSearchFocusRequest] = useState(0);
   const handledSearchFocusRequestRef = useRef(0);
@@ -741,6 +745,10 @@ export function ReviewShell(props: ReviewShellProps) {
   }, [activeItemId, annotationReaderOwnedItemId, annotationReaderSession, authoringSession]);
 
   useEffect(() => {
+    if (!annotationPeeksEnabled) {
+      dismissAnnotationPeek();
+      return;
+    }
     if (annotationsVisible) {
       setPeekItemId(undefined);
       return;
@@ -757,7 +765,7 @@ export function ReviewShell(props: ReviewShellProps) {
     } else if (!peekHeldRef.current) {
       setPeekItemId(undefined);
     }
-  }, [annotationsVisible, anyWorkspaceOpen, props.correspondingItemId, activeItemId]);
+  }, [annotationPeeksEnabled, annotationsVisible, anyWorkspaceOpen, props.correspondingItemId, activeItemId]);
 
   useEffect(() => {
     const request = props.activationRequest;
@@ -1588,7 +1596,7 @@ export function ReviewShell(props: ReviewShellProps) {
           ) : null}
           {authoringSession === null
             && !annotationsVisible
-            && annotationReaderSession?.origin === 'peek'
+            && annotationPeeksEnabled && annotationReaderSession?.origin === 'peek'
             && annotationReaderRecord !== null ? (
               <aside className="annotation-peek annotation-peek--reader">
                 <FullAnnotationReader
@@ -1612,7 +1620,7 @@ export function ReviewShell(props: ReviewShellProps) {
             ) : null}
           {authoringSession === null
             && !annotationsVisible
-            && annotationReaderSession?.origin !== 'peek'
+            && annotationPeeksEnabled && annotationReaderSession?.origin !== 'peek'
             && peekItemId ? (() => {
             const item = props.state.items.find(({ id }) => id === peekItemId);
             if (item === undefined) return null;
