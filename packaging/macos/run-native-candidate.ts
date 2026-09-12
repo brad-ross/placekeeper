@@ -29,7 +29,7 @@ export interface NativeCandidateRunnerEnvironment {
 
 interface RunnerArguments {
   readonly appPath?: string;
-  readonly pdfPath: string;
+  readonly pdfPath?: string;
   readonly smoke: boolean;
   readonly timeoutMs: number;
 }
@@ -64,7 +64,11 @@ export function parseNativeCandidateRunnerArguments(
   }
   return {
     ...(argument(args, "--app") === undefined ? {} : { appPath: resolve(argument(args, "--app")!) }),
-    pdfPath: resolve(argument(args, "--pdf") ?? resolve(repoRoot, "test/fixtures/pdfs/multi-page-text.pdf")),
+    ...(argument(args, "--pdf") !== undefined
+      ? { pdfPath: resolve(argument(args, "--pdf")!) }
+      : args.includes("--smoke")
+        ? { pdfPath: resolve(repoRoot, "test/fixtures/pdfs/multi-page-text.pdf") }
+        : {}),
     smoke: args.includes("--smoke"),
     timeoutMs,
   };
@@ -223,7 +227,7 @@ async function buildCandidate(repoRoot: string, outputRoot: string): Promise<str
   return resolve(outputRoot, "Placekeeper.app");
 }
 
-async function readAndValidateCandidate(paths: NativeCandidatePaths, pdfPath: string): Promise<PackagedBuildIdentity> {
+async function readAndValidateCandidate(paths: NativeCandidatePaths, pdfPath?: string): Promise<PackagedBuildIdentity> {
   await Promise.all([
     access(paths.executable),
     access(paths.nodeRuntime),
@@ -231,7 +235,7 @@ async function readAndValidateCandidate(paths: NativeCandidatePaths, pdfPath: st
     access(paths.webRoot),
     access(paths.macWebRoot),
     access(paths.pdfiumWasm),
-    access(pdfPath),
+    ...(pdfPath === undefined ? [] : [access(pdfPath)]),
   ]);
   const raw = JSON.parse(await readFile(paths.identityPath, "utf8")) as unknown;
   return parsePackagedBuildIdentity(raw);
@@ -291,7 +295,7 @@ export async function runNativeCandidate(args: readonly string[]): Promise<void>
 
     let appDiagnostics = "";
     let appSpawnError: Error | undefined;
-    application = spawn(paths.executable, [options.pdfPath], {
+    application = spawn(paths.executable, options.pdfPath === undefined ? [] : [options.pdfPath], {
       cwd: launchCwd,
       env: environment.application,
       stdio: ["ignore", "ignore", "pipe"],
@@ -303,7 +307,7 @@ export async function runNativeCandidate(args: readonly string[]): Promise<void>
       if (!options.smoke) process.stderr.write(chunk);
     });
     process.stdout.write(
-      `Native candidate: ${paths.appPath}\nPDF: ${options.pdfPath}\nPrivate state: ${privateHome}\n`,
+      `Native candidate: ${paths.appPath}\nPDF: ${options.pdfPath ?? "choose using the file picker"}\nPrivate state: ${privateHome}\n`,
     );
     if (!options.smoke) {
       process.stdout.write("The installed Placekeeper remains untouched. Quit the candidate app to clean up.\n");
