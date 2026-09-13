@@ -4578,10 +4578,9 @@ test('defaults a real PDF to fit width and refits bottom and resizable right rea
     await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
     await trigger.press('Enter');
     await expect(page.getByRole('menu', { name: 'PDF zoom', exact: true })).toBeVisible();
-    if (await fitWidth.isVisible()) {
-      await fitWidth.focus();
-      await page.keyboard.press('Enter');
-    }
+    await expect(fitWidth).toBeVisible();
+    await fitWidth.focus();
+    await page.keyboard.press('Enter');
     await expect(fitWidth).toHaveCount(0);
   };
   const zoomValue = () => page.getByRole('textbox', {
@@ -4699,7 +4698,6 @@ test('defaults a real PDF to fit width and refits bottom and resizable right rea
   });
 
   expect(await zoomValue().inputValue()).toBe(closedZoom);
-  await fitAndWait();
   const bottomGeometry = await expectFitted(standardGap);
   expect(bottomGeometry.pageWidth).toBeCloseTo(closedGeometry.pageWidth, 0);
   await expect(page.getByRole('textbox', { name: /Current page 1 of 4/u })).toHaveValue('1');
