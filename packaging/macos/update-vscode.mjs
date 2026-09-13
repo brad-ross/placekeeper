@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { copyFile, cp, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, copyFile, cp, mkdtemp, readFile, readdir, rm, utimes, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -28,7 +28,24 @@ export async function packageVscode({ appPath, outputPath, run = execute, consum
 </PackageManifest>`);
     await writeFile(resolve(staging, '[Content_Types].xml'), '<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="json" ContentType="application/json"/><Default Extension="vsixmanifest" ContentType="text/xml"/></Types>');
     const archive = resolve(staging, 'placekeeper.vsix');
-    await run('/usr/bin/zip', ['-q', '-r', archive, 'extension', 'extension.vsixmanifest', '[Content_Types].xml'], { cwd: staging });
+    // The VSIX participates in the app's exact artifact identity. Keep its
+    // metadata and entry order independent of build time and filesystem order.
+    const entries = [];
+    const epoch = new Date('2000-01-01T00:00:00Z');
+    async function collect(directory, prefix = '') {
+      const children = await readdir(directory, { withFileTypes: true });
+      for (const entry of children.sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0)) {
+        if (!entry.isDirectory() && !entry.isFile()) throw new Error('VSIX source contains an unsupported file type');
+        const path = resolve(directory, entry.name);
+        const name = `${prefix}${entry.name}`;
+        await chmod(path, entry.isDirectory() ? 0o755 : 0o644);
+        await utimes(path, epoch, epoch);
+        entries.push(entry.isDirectory() ? `${name}/` : name);
+        if (entry.isDirectory()) await collect(path, `${name}/`);
+      }
+    }
+    await collect(staging);
+    await run('/usr/bin/zip', ['-q', '-X', archive, ...entries], { cwd: staging, env: { ...process.env, TZ: 'UTC' } });
     if (outputPath) await copyFile(archive, outputPath);
     if (consume) return await consume(archive, manifest);
     return { path: outputPath, version: manifest.version };

@@ -387,6 +387,7 @@ export const suites: Record<string, TestStage[]> = {
       "runner": "vitest",
       "options": [],
       "files": [
+        "apps/service/test/macos-daemon-runtime.test.ts",
         "apps/service/test/open-command.test.ts",
         "apps/chrome-extension/test/native-protocol.test.ts",
         "apps/service/test/chrome-runtime.test.ts",
@@ -531,6 +532,7 @@ export const suites: Record<string, TestStage[]> = {
 
 /** Canonical CI is deliberately narrower than all repository tests; includes the updater's .mjs tests. */
 export const ciUnitFiles = [
+      'apps/service/test/macos-daemon-runtime.test.ts',
       'scripts/source-release.test.ts',
       'scripts/install-release.test.ts',
       'test/ci-workflow.test.ts',

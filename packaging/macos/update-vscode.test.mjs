@@ -98,6 +98,10 @@ test('packaging retains a valid manual VSIX after temporary staging is deleted',
   await writeFile(resolve(source, 'package.json'), JSON.stringify({ name: 'placekeeper-vscode', publisher: 'placekeeper-local', version: '0.1.1', engines: { vscode: '>=1.95.0' } }));
   try {
     await packageVscode({ appPath: root, outputPath });
+    const firstArchive = await readFile(outputPath);
+    await new Promise((done) => setTimeout(done, 2100));
+    await packageVscode({ appPath: root, outputPath });
+    assert.deepEqual(await readFile(outputPath), firstArchive, 'VSIX bytes must not change merely because packaging ran later');
     await rm(source, { recursive: true });
     const { stdout } = await exec('/usr/bin/unzip', ['-p', outputPath, 'extension/package.json']);
     assert.equal(JSON.parse(stdout).name, 'placekeeper-vscode');
