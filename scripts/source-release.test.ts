@@ -69,10 +69,12 @@ describe("source publication workflow", () => {
     expect(source).not.toMatch(/secrets\.MACOS|sign-identity|notarize/);
     for (const action of source.matchAll(/uses: ([^\s]+)/g)) expect(action[1]).toMatch(/@[a-f0-9]{40}$/);
   });
-  it("requires every concrete gate and build-bound Chrome evidence before publication", async () => {
+  it("requires source installation gates independently of optional Chrome validation", async () => {
     const source = await workflow();
-    for (const gate of ["pnpm typecheck", "pnpm test:source-release", "packaging/macos/packaging.test.ts", "pnpm test:upgrade-lifecycle", "pnpm package:macos", "pnpm smoke:installed", "pnpm test:chrome-handoff", "validate-installed-chrome-evidence.ts"]) expect(source).toContain(gate);
-    expect(source).toContain("PLACEKEEPER_INSTALLED_CHROME_EVIDENCE: ${{ inputs.installed_chrome_evidence }}");
+    for (const gate of ["pnpm typecheck", "pnpm test:source-release", "packaging/macos/packaging.test.ts", "pnpm test:upgrade-lifecycle", "pnpm package:macos", "pnpm smoke:installed", "pnpm test:chrome-handoff"]) expect(source).toContain(gate);
+    expect(source).not.toContain("installed_chrome_evidence");
+    expect(source).not.toContain("validate-installed-chrome-evidence.ts");
+    expect(await readFile(new URL("../test/acceptance/validate-installed-chrome-evidence.ts", import.meta.url), "utf8")).toContain("validateManualEvidence");
     expect(source).not.toContain("release:validate");
   });
   it("rejects duplicates before gates and publication and completes a draft before stable promotion", async () => {

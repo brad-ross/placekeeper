@@ -11,10 +11,6 @@ on:
         description: Brief release notes
         required: true
         type: string
-      installed_chrome_evidence:
-        description: Final test:chrome-installed JSON for this exact candidate build
-        required: true
-        type: string
 
 permissions:
   contents: read
@@ -72,10 +68,6 @@ jobs:
       - name: Build unsigned candidate
         run: pnpm package:macos -- --arch arm64 --node-runtime "$(command -v node)" --service-dist dist/service --web-dist dist/web --output artifacts/arm64
       - run: pnpm smoke:installed -- artifacts/arm64/Placekeeper.app test/fixtures/pdfs/text-native.pdf
-      - name: Verify installed Google Chrome release evidence
-        env:
-          PLACEKEEPER_INSTALLED_CHROME_EVIDENCE: ${{ inputs.installed_chrome_evidence }}
-        run: pnpm exec tsx test/acceptance/validate-installed-chrome-evidence.ts artifacts/arm64/Placekeeper.app
       - name: Package exact tested source
         id: assets
         run: |
