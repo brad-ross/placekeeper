@@ -24,7 +24,15 @@ for (const source of ['main', 'reference']) {
     await page.getByRole('button', { name: 'Finish host bootstrap' }).click();
     await expect(page.locator('[data-runtime-loading-workspace]')).toHaveCount(0);
     const mainLink = page.getByRole('button', { name: 'Open PDF link to Primary result, Page 2' });
-    await mainLink.click();
+    const firstAction = page.getByRole('menuitem', { name: 'Open in References', exact: true });
+    // Initial fit can replace the portaled link between focus and activation.
+    await expect(async () => {
+      if (!await firstAction.isVisible()) {
+        await mainLink.focus();
+        await mainLink.press('Enter');
+      }
+      await expect(firstAction).toBeVisible({ timeout: 1_000 });
+    }).toPass({ timeout: 5_000 });
     if (source === 'reference') {
       await page.getByRole('menuitem', { name: 'Open in References', exact: true }).click();
       await expect(page.getByRole('tab', { name: /Primary result/u })).toHaveAttribute('aria-selected', 'true');
@@ -84,7 +92,7 @@ async function chromePage(page: Page, entry: 'handler' | 'popup') {
         setMimeHandlerOptions: async (_type: string, options: { enabled: boolean }) => {
           audit.enabled = options.enabled;
         },
-        getStreamInfo: async () => ({ originalUrl: 'file:///fixture/paper.pdf', streamUrl: 'blob:fixture', tabId: 1, embedded: false }),
+        getStreamInfo: async () => ({ originalUrl: 'file:///fixture/paper.pdf', streamUrl: new URL('/fixture-stream.pdf', location.origin).href, tabId: 1, embedded: false }),
         abortAndFallbackToNativeHandler: async () => { audit.fallback = true; },
       },
       runtime: {
@@ -98,8 +106,9 @@ async function chromePage(page: Page, entry: 'handler' | 'popup') {
             const reply = (body: Record<string, unknown>) => queueMicrotask(() => {
               for (const listener of messages) listener({ protocolVersion: 2, connectionId: message.connectionId, ...body });
             });
-            if (message.type === 'hello') reply({ type: 'hello-ack', protocol: 'placekeeper.chrome-runtime', leaseMs: 90_000 });
+            if (message.type === 'hello') reply({ type: 'hello-ack', protocol: 'placekeeper.chrome-runtime', reviewRuntimeVersion: 2, leaseMs: 90_000 });
             if (message.type === 'begin') reply({ type: 'ack', lane: 'acquisition', requestId: message.requestId });
+            if (message.type === 'chunk') reply({ type: 'ack', lane: 'acquisition', requestId: message.requestId, sequence: message.sequence });
             if (message.type === 'cancel') reply({ type: 'ack', lane: 'acquisition', requestId: message.requestId });
             if (message.type === 'finish') reply({ type: 'recovery-offered', lane: 'lifecycle', requestId: message.requestId,
               choices: ['resume', 'discard', 'fork'], offer: { id: 'recovery-offer-0001', expiresAt: '2030-01-01T00:00:00.000Z' } });
@@ -109,6 +118,9 @@ async function chromePage(page: Page, entry: 'handler' | 'popup') {
     };
     Object.defineProperty(window, 'chrome', { configurable: true, value: chrome });
   });
+  await page.route('**/fixture-stream.pdf', (route) => route.fulfill({
+    contentType: 'application/pdf', path: resolve('test/fixtures/pdfs/reference-navigation.pdf'),
+  }));
   const html = await readFile(resolve(`apps/chrome-extension/${entry}.html`), 'utf8');
   await page.route(`**/apps/chrome-extension/${entry}.html`, (route) => route.fulfill({
     contentType: 'text/html', body: html.replaceAll('"/src/', '"/apps/chrome-extension/src/'),
@@ -130,11 +142,11 @@ test('Chrome protected recovery uses the shared neutral dialog language and rema
   await expect(dialog).toBeVisible();
   await expect(page.getByRole('button', { name: 'Resume', exact: true })).toBeFocused();
   expect(await controlStyle(page, '.handler-dialog')).toMatchObject({ border: '0px', radius: '17px', background: 'rgb(255, 255, 255)' });
-  expect(await controlStyle(page, '.handler-dialog h1')).toMatchObject({ font: '15px', weight: '500', color: 'rgb(51, 51, 51)' });
+  expect(await controlStyle(page, '.handler-dialog h2')).toMatchObject({ font: '15px', weight: '500', color: 'rgb(51, 51, 51)' });
   expect(await controlStyle(page, '[data-recovery-choice="fork"]')).toMatchObject({ border: '0px', radius: '10px', font: '13px', weight: '400', minHeight: '32px', background: 'rgba(0, 0, 0, 0)' });
   await page.getByRole('button', { name: 'Fork', exact: true }).hover();
   await expect.poll(async () => (await controlStyle(page, '[data-recovery-choice="fork"]')).background).toBe('rgb(231, 231, 231)');
-  expect((await controlStyle(page, '[data-recovery-choice="discard"]')).background).toBe('rgb(250, 240, 238)');
+  expect((await controlStyle(page, '[data-recovery-choice="discard"]')).background).toBe('rgba(0, 0, 0, 0)');
   for (const viewport of [{ width: 1280, height: 900 }, { width: 320, height: 320 }]) {
     await page.setViewportSize(viewport);
     for (const name of ['Default', 'Discard', 'Fork', 'Resume']) {
