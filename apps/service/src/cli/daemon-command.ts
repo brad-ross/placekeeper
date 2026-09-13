@@ -181,7 +181,7 @@ async function stopReadyCandidate(receiptPath: string, paths = defaultDaemonPath
   }
 }
 
-async function coordinateInstall(
+async function coordinateLifecycleMutation(
   args: readonly string[],
   paths = defaultDaemonPaths(),
   write: (text: string) => void = () => {},
@@ -299,7 +299,7 @@ export async function runDaemonCommand(
   }
   if (args[0] !== "coordinate-install" && args[0] !== "coordinate-host") throw new Error("Unsupported daemon command");
   try {
-    const status = await coordinateInstall(args, paths, write);
+    const status = await coordinateLifecycleMutation(args, paths, write);
     write(`${JSON.stringify({ ok: true, status })}\n`);
     return 0;
   } catch (error) {
