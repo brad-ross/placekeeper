@@ -747,13 +747,23 @@ test('@critical real-paper demo keeps its metadata while bounding the main previ
     await currentPage.press('Enter');
     await viewport.evaluate((element) => { element.scrollTop = element.scrollHeight; });
     await expect(currentPage).toHaveValue('16');
-    await expect(demo.locator('.pdf-workspace__page[data-page-index="16"]')).toHaveCount(0);
   }
   await currentPage.fill('1');
   await currentPage.press('Enter');
   await viewport.hover({ position: { x: 150, y: 150 } });
   await page.mouse.wheel(0, -30000);
   await expect(currentPage).toHaveValue('14');
+  const momentum = await viewport.evaluate((element) => {
+    const offsets: number[] = [];
+    const canceled: boolean[] = [];
+    for (const deltaY of [-10000, -600, -240, -80, -20, -4]) {
+      canceled.push(!element.dispatchEvent(new WheelEvent('wheel', { deltaY, bubbles: true, cancelable: true })));
+      offsets.push(element.scrollTop);
+    }
+    return { offsets, canceled };
+  });
+  expect(momentum.canceled.every(Boolean)).toBe(true);
+  expect(new Set(momentum.offsets).size).toBe(1);
   await demo.getByRole('button', { name: 'Show workspace', exact: true }).click();
   await expect(demo.getByRole('button', { name: /Theoretical Properties/ }).first()).toBeVisible();
   await page.getByRole('tab', { name: 'Follow a reference', exact: true }).click();

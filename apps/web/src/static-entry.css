@@ -414,8 +414,8 @@ html, body, #root {
 }
 @media (max-width: 900px) {
   .landing-demo-row { grid-template-columns: 1fr; gap: 40px; }
-  .landing-demo-explanation { max-width: 580px; }
-  .landing-demo-explanation ul { margin: 16px 0; }
+  .landing-demo-explanation { width: 100%; max-width: 580px; margin-inline: auto; text-align: center; }
+  .landing-demo-explanation ul { margin: 16px 0; padding-left: 0; list-style-position: inside; }
 
 }
 
@@ -605,3 +605,5 @@ body[data-landing-demo] :is(button, input, textarea, [contenteditable="true"]):n
 .install-dialog__footer [role=status] { flex: 1 1 170px; color: var(--review-ink-muted); font-size: 12px; line-height: 1.5; }
 .install-dialog :focus-visible { outline: 2px solid var(--review-ink-muted); outline-offset: 3px; }
 @media (max-width: 480px) { .install-dialog { padding: 18px; } }
+
+body[data-landing-demo] .pdf-workspace:not(.pdf-workspace--reference) [data-viewer-framing-viewport] { overscroll-behavior-y: none; }
