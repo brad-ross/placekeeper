@@ -4,7 +4,7 @@ Placekeeper is a focused, local-only PDF reader and annotator for Apple-silicon 
 
 ## Install a tested source release
 
-Requirements are an Apple-silicon Mac, macOS 13 or newer, internet access during installation, standard macOS tools (`curl`, `tar`, `shasum`, and `ditto`), and [Apple Command Line Tools](https://developer.apple.com/documentation/xcode/installing-the-command-line-tools) with a working Swift 6-or-newer compiler and macOS SDK. macOS 13 is the app runtime floor; installing a compatible source-build toolchain may require a newer macOS version. The installer checks the compiler and SDK before downloads.
+Requirements are an Apple-silicon Mac, macOS 13 or newer, internet access during installation, standard macOS tools (`curl`, `tar`, `shasum`, and `ditto`), and [Apple Command Line Tools](https://developer.apple.com/documentation/xcode/installing-the-command-line-tools) with a working Swift 6-or-newer compiler and macOS SDK. macOS 13 is the app runtime floor; installing a compatible source-build toolchain may require a newer macOS version. The installer checks the compiler and SDK before toolchain downloads.
 
 Use **Install** on the landing page to copy the complete command. It downloads the latest published stable release's bootstrap completely before running it. That bootstrap pins one version and commit, verifies its source archive's SHA-256, paths, and release descriptor, then runs that archive's installer. A newer release appearing during the run cannot change the selected source. GitHub and repository publication permissions are the trust root; the digest checks consistency, not independent publisher authentication.
 
