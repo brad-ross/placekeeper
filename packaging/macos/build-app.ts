@@ -331,11 +331,20 @@ export async function buildMacApp(options: BuildOptions): Promise<string> {
   await copyFile(serviceEntry, resolve(resources, "service/main.js"));
   await cp(options.webDist, resolve(resources, "web"), { recursive: true, errorOnExist: true });
   await cp(codexPlugin, resolve(resources, "integrations/codex-plugin"), { recursive: true, errorOnExist: true });
+  // Keep every optional setup dependency in the durable installed bundle.
+  const installer = resolve(resources, "installer");
+  await mkdir(installer, { recursive: true, mode: 0o755 });
+  for (const helper of ["setup-integrations.mjs", "setup-chrome.mjs", "update-vscode.mjs"]) {
+    await copyFile(resolve(repoRoot, "packaging/macos", helper), resolve(installer, helper));
+  }
+  await mkdir(resolve(resources, "integrations/.agents/plugins"), { recursive: true, mode: 0o755 });
+  await copyFile(resolve(repoRoot, "packaging/macos/codex-marketplace.json"), resolve(resources, "integrations/.agents/plugins/marketplace.json"));
   const vscodeInstall = resolve(resources, "integrations/vscode");
   await mkdir(vscodeInstall, { recursive: true, mode: 0o755 });
   await copyFile(resolve(vscodeExtension, "package.json"), resolve(vscodeInstall, "package.json"));
   await cp(vscodeDist, resolve(vscodeInstall, "dist"), { recursive: true, errorOnExist: true });
   await cp(resolve(vscodeExtension, "assets"), resolve(vscodeInstall, "assets"), { recursive: true, errorOnExist: true });
+  await run(nodePath, [resolve(installer, "update-vscode.mjs"), "--package", appPath, resolve(resources, "integrations/placekeeper.vsix")]);
   const sharedWebManifest = await validateSharedWebDistribution(options.webDist);
   const vscodeWebManifest = await validateSharedWebDistribution(resolve(vscodeDist, "web"));
   if (JSON.stringify(vscodeWebManifest) !== JSON.stringify(sharedWebManifest)) {

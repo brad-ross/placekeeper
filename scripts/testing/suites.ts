@@ -6,6 +6,7 @@ export type TestStage = string | {
 };
 
 export const suites: Record<string, TestStage[]> = {
+  "test:source-release": [{ runner: "vitest", options: [], files: ["scripts/source-release.test.ts", "scripts/install-release.test.ts"] }],
   "test:static:distribution": [
     {
       "runner": "vitest",
@@ -386,6 +387,7 @@ export const suites: Record<string, TestStage[]> = {
       "runner": "vitest",
       "options": [],
       "files": [
+        "apps/service/test/macos-daemon-runtime.test.ts",
         "apps/service/test/open-command.test.ts",
         "apps/chrome-extension/test/native-protocol.test.ts",
         "apps/service/test/chrome-runtime.test.ts",
@@ -530,6 +532,9 @@ export const suites: Record<string, TestStage[]> = {
 
 /** Canonical CI is deliberately narrower than all repository tests; includes the updater's .mjs tests. */
 export const ciUnitFiles = [
+      'apps/service/test/macos-daemon-runtime.test.ts',
+      'scripts/source-release.test.ts',
+      'scripts/install-release.test.ts',
       'test/ci-workflow.test.ts',
       'apps/chrome-extension/test/*.test.ts',
       'test/conformance/pdf-writer.conformance.test.ts',
@@ -594,6 +599,7 @@ export const ciUnitFiles = [
       'apps/vscode/test/rebuild-navigation.test.ts',
       'packaging/macos/packaging.test.ts',
       'packaging/macos/update-vscode.test.mjs',
+      'packaging/macos/setup-integrations.test.mjs',
     ];
 
 export const browserTestFiles = {

@@ -2,30 +2,27 @@
 
 Placekeeper is a focused, local-only PDF reader and annotator for Apple-silicon macOS, distributed from source. It does not require an Apple Developer account, Developer ID certificate, notarization profile, Homebrew, or a global Node installation.
 
-## Install from source
+## Install a tested source release
 
-Requirements are macOS 13 or newer, an Apple-silicon Mac, internet access during installation, the standard macOS command-line tools (`curl`, `tar`, `shasum`, and `ditto`), and Apple Command Line Tools with Swift and a macOS SDK (`xcode-select --install`). Download or clone the repository, open Terminal in the repository folder, and run:
+Requirements are an Apple-silicon Mac, macOS 13 or newer, internet access during installation, standard macOS tools (`curl`, `tar`, `shasum`, and `ditto`), and [Apple Command Line Tools](https://developer.apple.com/documentation/xcode/installing-the-command-line-tools) with a working Swift 6-or-newer compiler and macOS SDK. macOS 13 is the app runtime floor; installing a compatible source-build toolchain may require a newer macOS version. The installer checks the compiler and SDK before toolchain downloads.
+
+Use **Install** on the landing page to copy the complete command. It downloads the latest published stable release's bootstrap completely before running it. That bootstrap pins one version and commit, verifies its source archive's SHA-256, paths, and release descriptor, then runs that archive's installer. A newer release appearing during the run cannot change the selected source. GitHub and repository publication permissions are the trust root; the digest checks consistency, not independent publisher authentication.
+
+The first source release is absent until a maintainer publishes it. Until then, the command reports that a stable installer is unavailable; it never falls back to main. Connection errors, partial downloads, invalid archives, missing prerequisites, and build failures stop with an actionable error.
+
+For a development checkout, run `./install.sh` in the repository folder. Preview it without downloads or mutations with `./install.sh --dry-run`. The installer downloads checksum-pinned Node 24.14.0, installs pnpm 11.16.0 dependencies from the frozen lockfile, builds locally, and checks the packaged PDF writer offline before transactionally installing `~/Applications/Placekeeper.app`.
+
+After the Mac app is installed or confirmed current, Chrome, VS Code, and Codex setup are offered separately. Each can be skipped. Rerun the landing command to update or add skipped integrations; a current Mac app still offers host setup. With no terminal, optional setup is skipped and rerun guidance is printed. From a source checkout, explicit choices are available:
 
 ```sh
-./install.sh
+./install.sh --chrome=setup --vscode=skip --codex=ask
 ```
 
-The installer downloads the checksum-pinned Node 24.14.0 arm64 toolchain into the checkout, runs the exact pnpm 11.16.0 dependency graph from the lockfile, builds the app, and checks the packaged writer with networking disabled. It then transactionally installs `~/Applications/Placekeeper.app`, its exact-origin Chrome native-host registration, and the native Mac window. Placekeeper remains an alternate macOS PDF viewer. The installer does not modify the system Node installation, make Placekeeper the macOS default PDF handler, or enable Chrome interception.
+Each host accepts `setup`, `skip`, or `ask`. A host failure does not undo the Mac installation or prevent the remaining hosts from being offered. The summary distinguishes completed, skipped, pending manual actions, and failed setup. Exit 2 means the core install was deferred; exit 3 means the Mac succeeded but optional setup failed. Pending manual actions alone are not failures.
 
-Preview the actions without downloading or changing anything:
+Placekeeper checks its shared service before replacing the app or mutating a selected integration. Active reviews or bound Codex tasks defer the change without discarding work: close the indicated work, allow its lease to expire, and retry. Busy or unreadable service state also leaves the existing installation intact. A distinct candidate must report its exact build before replacement commits; failed readiness restores the previous app. Exact app reuse does not waive the independent host safety check.
 
-```sh
-./install.sh --dry-run
-```
-
-To update, pull or download newer source and run `./install.sh` again. Placekeeper uses one shared local service for every open PDF, so the installer checks that service before it changes the app:
-
-- If the installed bundle and running service are already exact, reinstall is a no-op.
-- If no review or Codex task is active, the service finishes accepted saves, exits cleanly, and the installer replaces it. The new service must start and report its exact build before installation commits; otherwise the previous app is restored.
-- If a Placekeeper tab/window or a bound Codex task is active, installation is deferred. The installed app and every live review remain unchanged. Close the indicated work, wait a few seconds for its lease to expire, and run `./install.sh` again.
-- If Placekeeper is briefly finishing a save or another lifecycle operation, wait a moment and retry. A timeout or unreadable response also leaves the previous app untouched.
-
-The installer replaces the app and Placekeeper's one Chrome native-host manifest as a unit; if candidate validation, registration, replacement, or readiness fails, it restores both previous endpoints. Unrelated native-host manifests, Chrome profiles, extension preferences, recovery data, and user-owned exports are left alone.
+Chrome preparation is a separate transaction after Mac success. Skipping it does not create or remove registration. Failed preparation restores previous Chrome artifacts and leaves the successful Mac installation in place. Chrome preferences, unrelated host registration, user settings, PDFs, exports, and Protected Recovery are preserved. A narrow legacy-ownership receipt may persist until an older managed Chrome folder can be safely adopted; it stores no integration choices or enablement state.
 
 The packaged service reuses one fixed numeric-loopback origin so a browser tab can reach the replacement service at the same literal URL. A still-live service resumes the exact in-memory review on refresh. In Codex, **Copy Link** uses that credential-free readable URL so it can be pasted back into the built-in browser without becoming a web search. A replacement service instead shows a compact **Reopen review** screen carrying only the PDF identity and page/saved-item location. That single explicit click is the confirmation boundary: an ordinary review reopens immediately in the same browser tab, while a protected draft offers **Resume draft**, **Discard draft**, and **Open separate copy** before anything is changed. The secondary **Copy Placekeeper link** action copies the canonical `placekeeper:///` link for opening in another Placekeeper or Codex context. A successor can reattach the original Codex task only through the scoped reconnect handshake; the stale URL itself never restores credentials or task authority. If Placekeeper is stopped, the tab may show the browser's connection error until the app is started and the tab is refreshed again.
 
@@ -35,7 +32,7 @@ After installation, select one local PDF in Finder and use **Open With -> Placek
 
 ## Open Chrome PDFs automatically
 
-Chrome 151 or newer is required. Installation intentionally leaves this feature paused.
+Chrome 151 or newer is required. Select Chrome setup in the installer first; only that stage prepares the persistent folder and native-host registration. New installations start paused; updates preserve the existing on/off choice. Prepared files and a healthy doctor report do not prove Chrome has loaded or enabled the extension. The installer reports these manual steps as pending.
 
 1. In Chrome, open `chrome://extensions`, turn on **Developer mode**, and choose **Load unpacked**.
 2. Select `~/Applications/Placekeeper Chrome Extension`. This ordinary folder is the transactionally installed copy intended for Chrome's folder picker; do not select the copy inside `Placekeeper.app`.
@@ -75,12 +72,11 @@ The runner validates the distributable extension and exact native-host registrat
 
 ## Optional integrations
 
-The app bundles two optional technical-user integrations:
+Select VS Code or Codex setup when the installer offers it, or rerun later. VS Code uses its supported CLI to install or refresh the bundled VSIX and checks the installed extension list; reload the editor afterward. If the CLI is unavailable, use **Extensions: Install from VSIX** with `~/Applications/Placekeeper.app/Contents/Resources/integrations/placekeeper.vsix`.
 
-- Codex plugin: `~/Applications/Placekeeper.app/Contents/Resources/integrations/codex-plugin`
-- VS Code extension: `~/Applications/Placekeeper.app/Contents/Resources/integrations/vscode`
+Codex uses supported marketplace/plugin commands when available. Otherwise, add the local marketplace rooted at `~/Applications/Placekeeper.app/Contents/Resources/integrations` through Codex's plugin workflow (`.agents/plugins/marketplace.json`, marketplace `placekeeper-installed`), then select `codex-plugin`. The bundled plugin lives in that directory's `codex-plugin` folder. These installed paths survive deletion of the downloaded source. Trust, enablement, and starting a new task remain explicit host steps and are reported pending until verifiable.
 
-Install either directory through that application's local extension/plugin workflow. These adapters open the same local service; they do not upload PDFs or submit Codex tasks automatically. The Codex plugin includes `PostToolUse`, `UserPromptSubmit`, and `SessionEnd` hooks that resolve the installed app executable at `~/Applications/Placekeeper.app/Contents/MacOS/placekeeper`. After Codex opens an explicit PDF and its in-app browser authenticates, the same task receives fresh annotation and PDF context on each prompt. If the plugin is disabled, untrusted, installed elsewhere, or its hook cannot run, context remains explicitly unavailable; reopen after restoring the installed plugin rather than copying a browser URL or guessing the active document.
+These adapters open the same local service; they do not upload PDFs or submit Codex tasks automatically. The Codex plugin includes `PostToolUse`, `UserPromptSubmit`, and `SessionEnd` hooks that resolve the installed app executable at `~/Applications/Placekeeper.app/Contents/MacOS/placekeeper`. After Codex opens an explicit PDF and its in-app browser authenticates, the same task receives fresh annotation and PDF context on each prompt. If the plugin is disabled, untrusted, installed elsewhere, or its hook cannot run, context remains explicitly unavailable; reopen after restoring the installed plugin rather than copying a browser URL or guessing the active document.
 
 The VS Code extension is desktop-local and refuses Remote SSH, containers, Codespaces, web, virtual, and non-file workspaces. In a trusted local LaTeX workspace, run **Placekeeper: View PDF** or **Placekeeper: Forward SyncTeX**. The embedded review uses only the extension's integrity-checked shared JavaScript, CSS, inline worker, and PDFium WASM. It does not use a review iframe, open an external browser, or ask LaTeX Workshop to build through a private API.
 
@@ -99,3 +95,13 @@ Quit Placekeeper, end any bound Codex tasks, and run:
 This idempotently removes only Placekeeper's Chrome native-host registration and moves the app to the Trash. It does not delete PDFs, exports, Chrome preferences, or Protected Recovery data. Remove **Placekeeper PDF Viewer** from `chrome://extensions` (or leave it unloaded), uninstall any optional Codex or VS Code integration, and optionally remove the source checkout's `.local/` toolchain cache. Reinstalling produces the same extension ID; load the packaged extension again if Chrome no longer tracks the prior path.
 
 Removing the app does not remove recoverable drafts under `~/Library/Application Support/Placekeeper` or user-owned reviewed and revised PDFs. See [Privacy and recovery](privacy-and-recovery.md) before deleting recovery data.
+
+## Publish a source release (maintainers)
+
+Publication is a separate action after merge; implementing the installer does not publish a release. The manually dispatched **Release source** workflow (`.github/workflows/release-source.yml`) accepts only trusted `main` in `brad-ross/placekeeper`. Select a stable numeric version equal to `packaging/macos/app-bundle.json` (`0.1.0` currently), without the `v` prefix, and brief release notes. Bump and merge the canonical version before subsequent releases. An existing tag or release, including a draft, blocks publication.
+
+Before dispatch, build the candidate from the exact merged revision with the workflow's Node 24.14.0 toolchain and run the real Chrome 151+ installed matrix above. Supply its final build-bound JSON as `installed_chrome_evidence`. The workflow rebuilds and validates that evidence against the exact candidate; stale identities, pending physical checks, and managed-Chromium skips cannot substitute for it. If the rebuilt identity differs, obtain matching evidence before retrying; do not weaken the validator.
+
+Read-only validation runs typechecking, source/bootstrap fixtures, packaging and host tests, upgrade lifecycle tests, Chrome handoff checks, an unsigned candidate build, and the offline installed smoke. Source packaging includes only the exact checked-out commit. Only the dependent publication job receives `contents: write`; it regenerates deterministic assets from that same commit, repeats the duplicate checks, creates a draft with notes, uploads the source archive and `install-placekeeper.sh`, verifies completeness, and then promotes it to stable/latest. Publication is serialized. It requires no Apple signing secrets; the separate signed macOS workflow remains available.
+
+Published assets are never replaced. If an upload fails, the incomplete draft stays unpublished and blocks reruns for that version; inspect it before any manual cleanup. For a published regression, merge a correction with a new higher canonical version and publish that corrected release. Do not overwrite the old bootstrap or archive. Existing installs preserve active work and require the same close-and-retry protections when updating.

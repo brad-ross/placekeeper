@@ -62,6 +62,7 @@ async function prepareChromeInstallFixture(app: string): Promise<void> {
   await mkdir(resolve(app, "Contents/Resources/node/bin"), { recursive: true });
   await writeFile(node, [
     "#!/bin/sh",
+    `case "$1" in */setup-chrome.mjs) exec "${process.execPath}" "$@" ;; esac`,
     "if [ \"${2:-}\" = \"validate-extension\" ]; then exit 0; fi",
     "while [ \"$#\" -gt 0 ]; do",
     "  if [ \"$1\" = \"--output\" ]; then shift; printf '%s\\n' '{\"name\":\"com.placekeeper.chrome\"}' > \"$1\"; exit 0; fi",
@@ -538,7 +539,7 @@ describe("macOS distribution manifests", () => {
     expect(installer).toContain("install --frozen-lockfile");
     expect(installer).not.toContain("xattr");
     expect(installer).not.toContain("spctl --master-disable");
-  });
+  }, 60_000);
 
   it.runIf(process.platform === "darwin")("rejects incomplete native bundles before replacing the installed app", async () => {
     const root = await mkdtemp(resolve(tmpdir(), "placekeeper-incomplete-native-"));
@@ -577,28 +578,15 @@ describe("macOS distribution manifests", () => {
         env: { ...process.env, PLACEKEEPER_USER_HOME: resolve(root, "home") },
       });
       expect(await readFile(resolve(app, "new-app"), "utf8")).toBe("new app");
-      expect(JSON.parse(await readFile(
-        resolve(root, "home/Applications/Placekeeper Chrome Extension/manifest.json"),
-        "utf8",
-      ))).toMatchObject({ manifest_version: 3 });
-      expect(await readFile(
-        resolve(root, "home/Applications/Placekeeper Chrome Extension/.placekeeper-managed-extension"),
-        "utf8",
-      )).toBe("com.placekeeper.chrome\n");
-      const chromeManifest = resolve(
-        root,
-        "home/Library/Application Support/Google/Chrome/NativeMessagingHosts/com.placekeeper.chrome.json",
-      );
-      expect(JSON.parse(await readFile(chromeManifest, "utf8"))).toMatchObject({
-        name: "com.placekeeper.chrome",
-      });
+      await expect(readFile(resolve(root, "home/Applications/Placekeeper Chrome Extension/manifest.json"))).rejects.toThrow();
+      await expect(readFile(resolve(root, "home/Library/Application Support/Google/Chrome/NativeMessagingHosts/com.placekeeper.chrome.json"))).rejects.toThrow();
     } finally {
       await rm(root, { recursive: true, force: true });
     }
   });
 
   it.runIf(process.platform === "darwin")(
-    "refuses to replace an unrelated Chrome extension directory",
+    "installs the Mac app independently of an unrelated Chrome extension directory",
     async () => {
       const root = await mkdtemp(resolve(tmpdir(), "placekeeper-extension-collision-"));
       const built = resolve(root, "built/Placekeeper.app");
@@ -613,51 +601,14 @@ describe("macOS distribution manifests", () => {
         await mkdir(extension, { recursive: true });
         await writeFile(resolve(extension, "user-data.txt"), "keep me");
 
-        await expect(execFileAsync("/bin/sh", [
+        await execFileAsync("/bin/sh", [
           resolve("packaging/macos/install-built-app.sh"), built, app,
-        ], { env: { ...process.env, PLACEKEEPER_USER_HOME: userHome } })).rejects.toThrow();
+        ], { env: { ...process.env, PLACEKEEPER_USER_HOME: userHome } });
 
         await expect(readFile(resolve(extension, "user-data.txt"), "utf8")).resolves.toBe("keep me");
-        await expect(readFile(resolve(app, "Contents/MacOS/placekeeper"), "utf8")).rejects.toThrow();
+        await expect(readFile(resolve(app, "Contents/MacOS/placekeeper"), "utf8")).resolves.toBe("launcher");
       } finally {
         await rm(root, { recursive: true, force: true });
-      }
-    },
-  );
-
-  it.runIf(process.platform === "darwin")(
-    "refuses writable or symbolic-link Chrome registration ancestors",
-    async () => {
-      for (const condition of ["writable", "symlink"] as const) {
-        const root = await mkdtemp(resolve(tmpdir(), `placekeeper-insecure-chrome-${condition}-`));
-        const built = resolve(root, "built/Placekeeper.app");
-        const userHome = resolve(root, "home");
-        const app = resolve(userHome, "Applications/Placekeeper.app");
-        try {
-          await mkdir(resolve(built, "Contents/MacOS"), { recursive: true });
-          await prepareChromeInstallFixture(built);
-          await writeFile(resolve(built, "Contents/MacOS/placekeeper"), "launcher", { mode: 0o755 });
-          await writeFile(resolve(built, "Contents/MacOS/PlacekeeperMac"), "bridge", { mode: 0o755 });
-          await mkdir(userHome, { mode: condition === "writable" ? 0o777 : 0o700 });
-          if (condition === "symlink") {
-            const outside = resolve(root, "outside-library");
-            await mkdir(outside, { mode: 0o700 });
-            await symlink(outside, resolve(userHome, "Library"));
-          } else {
-            await chmod(userHome, 0o777);
-          }
-
-          await expect(execFileAsync("/bin/sh", [resolve("packaging/macos/install-built-app.sh"), built, app], {
-            env: { ...process.env, PLACEKEEPER_USER_HOME: userHome },
-          })).rejects.toThrow();
-          await expect(readFile(app, "utf8")).rejects.toThrow();
-          await expect(readFile(
-            resolve(userHome, "Applications/Placekeeper Chrome Extension/manifest.json"),
-            "utf8",
-          )).rejects.toThrow();
-        } finally {
-          await rm(root, { recursive: true, force: true });
-        }
       }
     },
   );
@@ -709,46 +660,6 @@ describe("macOS distribution manifests", () => {
       await rm(root, { recursive: true, force: true });
     }
   }, 15_000);
-
-  it.runIf(process.platform === "darwin")(
-    "restores the previous Chrome extension when interrupted after its backup move",
-    async () => {
-      const root = await mkdtemp(resolve(tmpdir(), "placekeeper-extension-signal-"));
-      const built = resolve(root, "built/Placekeeper.app");
-      const userHome = resolve(root, "home");
-      const app = resolve(userHome, "Applications/Placekeeper.app");
-      const extension = resolve(userHome, "Applications/Placekeeper Chrome Extension");
-      try {
-        await mkdir(resolve(built, "Contents/MacOS"), { recursive: true });
-        await prepareChromeInstallFixture(built);
-        await writeFile(resolve(built, "Contents/MacOS/placekeeper"), "new launcher", { mode: 0o755 });
-        await writeFile(resolve(built, "Contents/MacOS/PlacekeeperMac"), "new bridge", { mode: 0o755 });
-        await mkdir(app, { recursive: true });
-        await writeFile(resolve(app, "previous-app"), "previous app");
-        await cp(resolve(built, "Contents/Resources/integrations/chrome-extension"), extension, {
-          recursive: true,
-        });
-        await writeFile(resolve(extension, ".placekeeper-managed-extension"), "com.placekeeper.chrome\n");
-        await writeFile(resolve(extension, "previous-extension"), "previous extension");
-
-        await expect(execFileAsync("/bin/sh", [
-          resolve("packaging/macos/install-built-app.sh"), built, app,
-        ], {
-          env: {
-            ...process.env,
-            PLACEKEEPER_USER_HOME: userHome,
-            PLACEKEEPER_TEST_INTERRUPT_AFTER_CHROME_EXTENSION_BACKUP: "1",
-          },
-        })).rejects.toThrow();
-
-        await expect(readFile(resolve(app, "previous-app"), "utf8")).resolves.toBe("previous app");
-        await expect(readFile(resolve(extension, "previous-extension"), "utf8"))
-          .resolves.toBe("previous extension");
-      } finally {
-        await rm(root, { recursive: true, force: true });
-      }
-    },
-  );
 
   it.each(["during-readiness", "at-readiness-exit"] as const)(
     "retires the exact candidate before rollback when interrupted %s",
@@ -810,7 +721,8 @@ describe("macOS distribution manifests", () => {
     expect(installer.indexOf("daemon coordinate-install")).toBeLessThan(installer.indexOf("install-built-app.sh"));
     expect(installer).not.toMatch(/(?:kill|pkill|killall).*daemon/u);
     const helper = await readFile(resolve("packaging/macos/install-built-app.sh"), "utf8");
-    expect(helper).toContain("A prior managed version may predate the candidate's extension schema");
+    expect(helper).toContain("--capture-legacy");
+    expect(helper).not.toContain("staged-chrome-extension");
     expect(helper.indexOf('"$readiness_executable" daemon ensure-ready --receipt')).toBeLessThan(helper.lastIndexOf("committed=1"));
     expect(helper.indexOf('"$readiness_executable" daemon stop-ready --receipt')).toBeLessThan(helper.indexOf('if [ "$app_touched" -eq 1 ]'));
     expect(helper.slice(0, helper.lastIndexOf("committed=1"))).not.toMatch(/\bopen\s+--json\b|autosave/u);
@@ -820,6 +732,16 @@ describe("macOS distribution manifests", () => {
     expect(installer.slice(launchServices)).not.toContain("install-built-app.sh");
     expect(installer.slice(launchServices)).toContain("Warning: macOS did not refresh Open With registration");
     expect(installer.slice(launchServices)).toContain("Placekeeper installed successfully");
+  });
+
+  it("bundles durable optional-host helpers, manual VSIX, and an independent Codex marketplace", async () => {
+    const build = await readFile(resolve("packaging/macos/build-app.ts"), "utf8");
+    for (const helper of ["setup-integrations.mjs", "setup-chrome.mjs", "update-vscode.mjs"]) expect(build).toContain(helper);
+    expect(build).toContain('"integrations/placekeeper.vsix"');
+    expect(build).toContain('"integrations/.agents/plugins"');
+    const marketplace = JSON.parse(await readFile(resolve("packaging/macos/codex-marketplace.json"), "utf8"));
+    expect(marketplace.name).toBe("placekeeper-installed");
+    expect(marketplace.plugins[0].source.path).toBe("./codex-plugin");
   });
 
   it("uses current notarytool submission followed by staple and validation", () => {
@@ -1162,5 +1084,35 @@ describe("macOS distribution manifests", () => {
     } finally {
       await rm(root, { recursive: true, force: true });
     }
+  });
+});
+
+describe("source prerequisite preflight", () => {
+  it.each(["cpu", "os", "clt", "old-swift", "missing-sdk", "broken-sdk"])("rejects %s before downloading or mutating", async (failure) => {
+    const root = await mkdtemp("/private/tmp/placekeeper-preflight-");
+    try {
+      const mock = join(root, "tool");
+      await writeFile(mock, [
+        "#!/bin/sh",
+        'case "$1" in',
+        `  -s) printf '%s\\n' Darwin ;;`,
+        `  -m) printf '%s\\n' '${failure === "cpu" ? "x86_64" : "arm64"}' ;;`,
+        `  -productVersion) printf '%s\\n' '${failure === "os" ? "12.7" : "15.0"}' ;;`,
+        `  swift) ${failure === "clt" ? "exit 1" : `printf '%s\\n' 'Apple Swift version ${failure === "old-swift" ? "5.10" : "6.0"}'`} ;;`,
+        `  --sdk) ${failure === "missing-sdk" ? "exit 1" : `printf '%s\\n' '${root}'`} ;;`,
+        `  swiftc) exit ${failure === "broken-sdk" ? "1" : "0"} ;;`,
+        '  *) exit 99 ;;',
+        "esac", "",
+      ].join("\n"), { mode: 0o755 });
+      const original = await readFile(resolve("install.sh"), "utf8");
+      const source = original.replaceAll("/usr/bin/uname", mock).replaceAll("/usr/bin/sw_vers", mock).replaceAll("/usr/bin/xcrun", mock);
+      const installer = join(root, "install.sh");
+      await writeFile(installer, source);
+      await expect(execFileAsync("/bin/sh", [installer, "--dry-run"], {
+        env: { ...process.env, PLACEKEEPER_USER_HOME: join(root, "untouched-home") },
+      })).rejects.toThrow("https://developer.apple.com/documentation/xcode/installing-the-command-line-tools");
+      expect(await readdir(root)).toEqual(expect.arrayContaining(["tool", "install.sh"]));
+      expect(await readdir(root)).toHaveLength(2);
+    } finally { await rm(root, { recursive: true, force: true }); }
   });
 });

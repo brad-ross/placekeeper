@@ -327,7 +327,7 @@ function parseAdditionalContext(serialized: string, expectedEvent: string): Reco
 export async function smokeInstalledHookLifecycle(appPath: string, fixturePath: string, repoRoot = process.cwd()): Promise<void> {
   // Darwin limits AF_UNIX paths to roughly 104 bytes. The system TMPDIR is
   // already long enough that the app-support suffix can cross that limit.
-  const smokeHome = await mkdtemp(join("/tmp", "pp-hook-smoke-"));
+  const smokeHome = await mkdtemp(join("/private/tmp", "pp-hook-smoke-"));
   const installedApp = join(smokeHome, "Applications/Placekeeper.app");
   const executable = join(installedApp, "Contents/MacOS/placekeeper");
   const supportRoot = join(smokeHome, "Library/Application Support/Placekeeper");
@@ -534,6 +534,21 @@ export async function smokeInstalledHookLifecycle(appPath: string, fixturePath: 
     if (deferred.code === 0 || (deferred.response.error as { kind?: unknown } | undefined)?.kind !== "upgrade-required") {
       throw new Error(`An active installed multi-PDF review did not defer replacement: ${JSON.stringify(deferred)}`);
     }
+    let hostDeferred = false;
+    try {
+      await execFileAsync(executable, [
+        "daemon", "coordinate-host", "--installed-app", installedApp,
+        "--host-helper", resolve(repoRoot, "packaging/macos/setup-chrome.mjs"),
+        INSTALLED_SMOKE_DAEMON_FLAG, INSTALLED_SMOKE_HTTP_PORT_FLAG, String(httpPort),
+        "--", installedApp,
+      ], { env: { ...environment, PLACEKEEPER_USER_HOME: smokeHome }, timeout: 30_000 });
+    } catch (error) {
+      const failure = error as { code?: number; stdout?: string };
+      hostDeferred = failure.code === 2 && failure.stdout?.includes("upgrade-required") === true;
+    }
+    if (!hostDeferred || await lstat(join(smokeHome, "Applications/Placekeeper Chrome Extension")).catch(() => undefined)) {
+      throw new Error("Active work did not defer current-app host preparation without mutation");
+    }
     const oldIdentity = parseObject(
       await readFile(join(resolve(appPath), `Contents/Resources/${BUILD_IDENTITY_FILENAME}`), "utf8"),
       "old installed identity",
@@ -605,6 +620,21 @@ export async function smokeInstalledHookLifecycle(appPath: string, fixturePath: 
     await assertInstalledIdentity(installedApp, smokeHome);
     if ((await readFile(supportRootSentinel, "utf8")) !== "support-root content must survive replacement\n") {
       throw new Error("Successful upgrade changed arbitrary support-root content");
+    }
+    // App replacement itself must leave optional Chrome endpoints absent.
+    const chromeExtension = join(smokeHome, "Applications/Placekeeper Chrome Extension");
+    if (await lstat(chromeExtension).catch(() => undefined)) {
+      throw new Error("App-only replacement unexpectedly prepared Chrome");
+    }
+    const chromeSetup = await executeInstalled(executable, [
+      "daemon", "coordinate-host", "--installed-app", installedApp,
+      "--host-helper", resolve(repoRoot, "packaging/macos/setup-chrome.mjs"),
+      INSTALLED_SMOKE_DAEMON_FLAG, INSTALLED_SMOKE_HTTP_PORT_FLAG, String(httpPort),
+      "--", installedApp,
+    ], { ...environment, PLACEKEEPER_USER_HOME: smokeHome });
+    if (!chromeSetup.includes('"status":"pending"') ||
+        !(await lstat(join(chromeExtension, ".placekeeper-managed-extension"))).isFile()) {
+      throw new Error("Explicit isolated Chrome preparation did not report pending host action");
     }
     const postUpgrade = parseObject(await executeInstalled(
       executable,

@@ -1,6 +1,6 @@
 # Source install and host acceptance evidence
 
-The required v1 distribution is a source-first Apple-silicon install for a personal/friends app. Developer ID signing, notarization, stapling, Intel/x64, DMG/PKG packaging, auto-update, and release CI are optional future distribution work rather than blockers.
+The required v1 distribution is a source-first Apple-silicon install for a personal/friends app. Developer ID signing, notarization, stapling, Intel/x64, DMG/PKG packaging, and auto-update are optional future distribution work rather than blockers.
 
 ## Required automated evidence
 
@@ -86,7 +86,7 @@ Playwright support for unpacked extensions does not guarantee that its managed C
 
 ### Installed embedded-review release gate
 
-Install the release-candidate app first, then run `pnpm test:chrome-installed`.
+Install the release-candidate app first and explicitly select Chrome setup to prepare its persistent folder and native-host registration, then run `pnpm test:chrome-installed`. Mac-only installation no longer prepares Chrome.
 The runner validates the distributable extension tree and exact user-level native
 host manifest before launching Google Chrome with a newly created disposable
 profile and remote-debugging endpoint. It never passes `--load-extension` and
@@ -199,3 +199,11 @@ Host status remains honest: the ordinary-browser installed-style production flow
 ## Optional future prebuilt release
 
 If the project later distributes a prebuilt download, reinstate Developer ID signing, notarization, stapling, quarantine/Gatekeeper testing, and a clean Apple-silicon download smoke before calling that artifact easy to install. Do not claim those properties from the source-first build.
+
+## Release install-flow verification (2026-09-13)
+
+Source publication remains a separate maintainer action; this implementation does not establish that a stable source release exists. The source workflow retains the exact-build Chrome evidence validator and all pending physical matrices above. Earlier checked source-install observations do not establish that this new candidate passed Finder, Chrome enablement, or desktop host UI checks.
+
+For the new flow, use disposable host profiles and a temporary installation root. Install Mac plus Chrome while skipping VS Code and Codex; confirm loading/enablement is pending until performed in Chrome. Rerun with the app current and select the skipped integrations. Confirm the supported VS Code installer recognizes the VSIX, reload the editor, and inspect its review. Confirm the local Codex marketplace resolves from the installed app after temporary source deletion; complete trust/enablement and start a new task. Preserve Chrome's previous on/off choice. Exercise one optional-host failure and confirm later hosts are offered and Mac success is retained. Finally, keep PDFs and a task binding active while requesting an update and selected host repair: both must defer without losing review or recovery state.
+
+These physical UI observations remain pending until recorded against the candidate. Fixture tests establish setup control flow and transaction safety; they cannot establish host approval, enablement, or Finder rendering.

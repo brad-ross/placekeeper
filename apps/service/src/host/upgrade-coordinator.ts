@@ -13,6 +13,7 @@ export interface PackagedBuildIdentity {
 export type UpgradeDaemonInspection = DaemonCompatibilityResult | { readonly kind: "absent" };
 
 export interface CoordinateUpgradeOptions {
+  readonly operation?: "app-install" | "host-setup";
   readonly candidate: PackagedBuildIdentity;
   readonly installed?: PackagedBuildIdentity;
   readonly inspect: () => Promise<UpgradeDaemonInspection>;
@@ -35,6 +36,7 @@ export function upgradeReason(activity: DaemonAggregateActivity):
 export async function coordinateUpgrade(
   options: CoordinateUpgradeOptions,
 ): Promise<{ readonly status: "noop" | "installed" }> {
+  const canSkipMutation = options.operation !== "host-setup";
   const artifactIsIdentical =
     options.installed !== undefined &&
     options.installed.installArtifactIdentity === options.candidate.installArtifactIdentity;
@@ -43,7 +45,7 @@ export async function coordinateUpgrade(
   if (inspected.kind === "uninspectable") {
     throw new DaemonUpgradeRequiredError(inspected.reason);
   }
-  if (inspected.kind === "exact" && artifactIsIdentical) return { status: "noop" };
+  if (canSkipMutation && inspected.kind === "exact" && artifactIsIdentical) return { status: "noop" };
   if (inspected.kind !== "absent") {
     const reason = upgradeReason(inspected.status.activity);
     if (reason !== undefined && reason !== "transient-busy") {
@@ -61,7 +63,7 @@ export async function coordinateUpgrade(
     }
     await options.waitForRetirement();
   }
-  if (artifactIsIdentical) return { status: "noop" };
+  if (canSkipMutation && artifactIsIdentical) return { status: "noop" };
   await options.replaceAndReady();
   return { status: "installed" };
 }

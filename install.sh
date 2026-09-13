@@ -1,5 +1,7 @@
 #!/bin/sh
 set -eu
+PLACEKEEPER_HOST_PATH=${PLACEKEEPER_HOST_PATH:-${PATH:-/usr/bin:/bin}}
+export PLACEKEEPER_HOST_PATH
 PATH=/usr/bin:/bin
 export PATH
 
@@ -16,30 +18,53 @@ chrome_extension_path="$install_root/Placekeeper Chrome Extension"
 node_root="$repo_root/.local/toolchains/node-v${NODE_VERSION}-darwin-arm64"
 node_bin="$node_root/bin/node"
 
-case "$#" in
-  0) install_mode=install ;;
-  1)
-    case "$1" in
-      --dry-run) install_mode=dry-run ;;
-      --uninstall) install_mode=uninstall ;;
-      *) printf 'Usage: %s [--dry-run|--uninstall]\n' "$0" >&2; exit 2 ;;
-    esac
-    ;;
-  *)
-    printf 'Usage: %s [--dry-run|--uninstall]\n' "$0" >&2
-    exit 2
-    ;;
-esac
-if [ "$(/usr/bin/uname -s)" != "Darwin" ] || [ "$(/usr/bin/uname -m)" != "arm64" ]; then
-  printf '%s\n' "Placekeeper currently supports source installation on Apple-silicon macOS only." >&2
-  exit 1
-fi
-for command in /usr/bin/curl /usr/bin/ditto /usr/bin/shasum /usr/bin/tar /usr/bin/mktemp /usr/bin/osacompile /usr/bin/codesign /usr/bin/swift; do
-  if [ ! -x "$command" ]; then
-    printf 'Required macOS tool is unavailable: %s\n' "$command" >&2
-    exit 1
-  fi
+install_mode=install
+chrome_choice=ask
+vscode_choice=ask
+codex_choice=ask
+for argument in "$@"; do
+  case "$argument" in
+    --dry-run|--uninstall)
+      if [ "$install_mode" != install ]; then printf 'Choose only one install mode.\n' >&2; exit 2; fi
+      install_mode=${argument#--} ;;
+    --chrome=setup|--chrome=skip|--chrome=ask) chrome_choice=${argument#*=} ;;
+    --vscode=setup|--vscode=skip|--vscode=ask) vscode_choice=${argument#*=} ;;
+    --codex=setup|--codex=skip|--codex=ask) codex_choice=${argument#*=} ;;
+    *) printf 'Usage: %s [--dry-run|--uninstall] [--chrome=setup|skip|ask] [--vscode=setup|skip|ask] [--codex=setup|skip|ask]\n' "$0" >&2; exit 2 ;;
+  esac
 done
+prerequisite_failure() {
+  printf '%s\n' "$1" "Install Apple Command Line Tools with a working Swift 6+ compiler and macOS SDK:" \
+    "https://developer.apple.com/documentation/xcode/installing-the-command-line-tools" >&2
+  exit 1
+}
+if [ "$(/usr/bin/uname -s)" != "Darwin" ] || [ "$(/usr/bin/uname -m)" != "arm64" ]; then
+  prerequisite_failure "Placekeeper currently supports source installation on Apple-silicon macOS only."
+fi
+os_major=$(/usr/bin/sw_vers -productVersion | /usr/bin/cut -d . -f 1)
+case "$os_major" in ''|*[!0-9]*) prerequisite_failure "Cannot determine the macOS version." ;; esac
+if [ "$os_major" -lt 13 ]; then prerequisite_failure "Placekeeper requires macOS 13 or newer."; fi
+for command in /usr/bin/curl /usr/bin/ditto /usr/bin/shasum /usr/bin/tar /usr/bin/mktemp /usr/bin/osacompile /usr/bin/codesign /usr/bin/xcrun; do
+  if [ ! -x "$command" ]; then prerequisite_failure "Required macOS tool is unavailable: $command"; fi
+done
+if [ "$install_mode" != "uninstall" ]; then
+  if ! swift_version=$(/usr/bin/xcrun swift --version 2>/dev/null); then
+    prerequisite_failure "The Apple Swift compiler is unavailable or does not run."
+  fi
+  swift_major=$(printf '%s\n' "$swift_version" | /usr/bin/sed -n 's/.*Swift version \([0-9][0-9]*\).*/\1/p' | /usr/bin/head -n 1)
+  case "$swift_major" in ''|*[!0-9]*) prerequisite_failure "Cannot verify the Apple Swift compiler version." ;; esac
+  if [ "$swift_major" -lt 6 ]; then prerequisite_failure "Source installation requires Swift 6 or newer."; fi
+  if ! sdk_path=$(/usr/bin/xcrun --sdk macosx --show-sdk-path 2>/dev/null) || [ ! -d "$sdk_path" ]; then
+    prerequisite_failure "A working macOS SDK is required for source installation."
+  fi
+  compiler_probe=$(/usr/bin/mktemp -d "${TMPDIR:-/tmp}/placekeeper-swift-check.XXXXXX")
+  trap '/bin/rm -rf "$compiler_probe"' EXIT
+  if ! printf 'import AppKit\n' | /usr/bin/xcrun swiftc -module-cache-path "$compiler_probe" -sdk "$sdk_path" -target arm64-apple-macos13 -typecheck - >/dev/null 2>&1; then
+    prerequisite_failure "The Swift compiler cannot typecheck against the macOS SDK. Update Apple Command Line Tools."
+  fi
+  /bin/rm -rf "$compiler_probe"
+  trap - EXIT
+fi
 
 if [ "$install_mode" = "dry-run" ]; then
   printf '%s\n' \
@@ -170,19 +195,19 @@ printf 'Checking the packaged writer offline before installation...\n'
 run_pnpm smoke:installed -- "$built_app" "$repo_root/test/fixtures/pdfs/text-native.pdf"
 
 printf 'Coordinating the shared Placekeeper service before replacement...\n'
-if ! "$built_app/Contents/MacOS/placekeeper" daemon coordinate-install \
+coordination_status=0
+coordination_output=$("$built_app/Contents/MacOS/placekeeper" daemon coordinate-install \
   --candidate-app "$built_app" \
   --installed-app "$app_path" \
-  --replace-helper "$repo_root/packaging/macos/install-built-app.sh"; then
-  printf '%s\n' "Installation did not finish. Review the diagnostic above before retrying." >&2
-  exit 1
+  --replace-helper "$repo_root/packaging/macos/install-built-app.sh") || coordination_status=$?
+printf '%s\n' "$coordination_output"
+if [ "$coordination_status" -ne 0 ]; then
+  printf '%s\n' "Installation did not finish. Close active reviews/tasks if requested above, then retry." >&2
+  exit "$coordination_status"
 fi
-
-# Run even when the installed app was already current, so a retry repairs an
-# independently stale extension. Keep this outside the replacement helper used
-# by isolated installed-smoke tests.
-"$app_path/Contents/Resources/node/bin/node" \
-  "$repo_root/packaging/macos/update-vscode.mjs" "$app_path"
+PLACEKEEPER_MAC_STATUS=installed
+case "$coordination_output" in *'"status":"noop"'*) PLACEKEEPER_MAC_STATUS=current ;; esac
+export PLACEKEEPER_MAC_STATUS
 
 launch_services="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
 if [ -x "$launch_services" ]; then
@@ -196,7 +221,13 @@ fi
 printf '\nPlacekeeper installed successfully.\n'
 printf 'App: %s\n' "$app_path"
 printf 'Finder: select one PDF, then use Open With -> Placekeeper.\n'
-printf 'Chrome extension: %s\n' "$chrome_extension_path"
-printf 'Chrome: load that folder as an unpacked extension, then explicitly turn on automatic PDF opening.\n'
 printf 'You can also open Placekeeper from Applications and choose a PDF.\n'
 printf 'If macOS warns on first launch, Control-click the app in Finder and choose Open.\n'
+
+# Optional failures have their own outcome; a committed Mac installation remains
+# successful. The installed helper also supports adding skipped hosts later.
+optional_status=0
+"$app_path/Contents/Resources/node/bin/node" \
+  "$app_path/Contents/Resources/installer/setup-integrations.mjs" "$app_path" \
+  "--chrome=$chrome_choice" "--vscode=$vscode_choice" "--codex=$codex_choice" || optional_status=$?
+exit "$optional_status"

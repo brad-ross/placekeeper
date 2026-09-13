@@ -5,7 +5,7 @@ import { resolve } from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { test } from 'vitest';
-import { updateVscode } from './update-vscode.mjs';
+import { packageVscode, updateVscode } from './update-vscode.mjs';
 const exec = promisify(execFile);
 
 test('app updates reinstall the bundled UI even when the extension version is unchanged', async () => {
@@ -29,7 +29,7 @@ test('app updates reinstall the bundled UI even when the extension version is un
       return { stdout: 'installed' };
     } });
     assert.equal(result.status, 'updated');
-    assert.equal(calls.length, 2);
+    assert.equal(calls.length, 3);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
@@ -45,13 +45,65 @@ test('reports CLI failures instead of claiming the extension is current', async 
   await assert.rejects(updateVscode({ appPath: '/unused', codePath: '/fake/code', run: async () => { throw new Error('CLI unavailable'); } }), /CLI unavailable/);
 });
 
-test('repairs VS Code after an already-current app install without involving rollback or smoke', async () => {
+test('explicit first installation is allowed and verified after supported CLI install', async () => {
+  const root = await mkdtemp(resolve(tmpdir(), 'placekeeper-vscode-first-test-'));
+  const source = resolve(root, 'Contents/Resources/integrations/vscode');
+  await mkdir(source, { recursive: true });
+  await writeFile(resolve(source, 'package.json'), JSON.stringify({ name: 'placekeeper-vscode', publisher: 'placekeeper-local', version: '0.1.1', engines: { vscode: '>=1.95.0' } }));
+  let installed = false;
+  try {
+    const result = await updateVscode({ appPath: root, codePath: '/fake/code', installIfMissing: true, run: async (command, args, options) => {
+      if (command !== '/fake/code') return exec(command, args, options);
+      if (args[0] === '--list-extensions') return { stdout: installed ? 'placekeeper-local.placekeeper-vscode@0.1.1' : '' };
+      installed = true;
+      return { stdout: 'installed' };
+    } });
+    assert.equal(result.status, 'installed');
+    assert.equal(result.version, '0.1.1');
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('repairs selected integrations after app coordination using durable installed helpers', async () => {
   const installer = await readFile('install.sh', 'utf8');
   const replacement = await readFile('packaging/macos/install-built-app.sh', 'utf8');
   const coordination = installer.indexOf(' daemon coordinate-install ');
-  const successBranch = installer.indexOf('\nfi\n', coordination);
-  const update = installer.indexOf('"$repo_root/packaging/macos/update-vscode.mjs" "$app_path"');
-  assert.ok(coordination >= 0 && successBranch > coordination && update > successBranch);
-  assert.ok(update < installer.indexOf('Placekeeper installed successfully.'));
+  const setup = installer.indexOf('/installer/setup-integrations.mjs');
+  assert.ok(coordination >= 0 && setup > coordination);
   assert.ok(!replacement.includes('update-vscode.mjs'));
+  assert.match(installer, /exit "\$coordination_status"/);
+});
+
+test('successful CLI exit without the installed version fails verification and removes staging', async () => {
+  const root = await mkdtemp(resolve(tmpdir(), 'placekeeper-vscode-verify-test-'));
+  const source = resolve(root, 'Contents/Resources/integrations/vscode');
+  await mkdir(source, { recursive: true });
+  await writeFile(resolve(source, 'package.json'), JSON.stringify({ name: 'placekeeper-vscode', publisher: 'placekeeper-local', version: '0.1.1', engines: { vscode: '>=1.95.0' } }));
+  let archive;
+  try {
+    await assert.rejects(updateVscode({ appPath: root, codePath: '/fake/code', installIfMissing: true, run: async (command, args, options) => {
+      if (command !== '/fake/code') return exec(command, args, options);
+      if (args[0] === '--list-extensions') return { stdout: '' };
+      archive = args[1];
+      return { stdout: 'installed' };
+    } }), /did not report/);
+    await assert.rejects(readFile(archive), /ENOENT/);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('packaging retains a valid manual VSIX after temporary staging is deleted', async () => {
+  const root = await mkdtemp(resolve(tmpdir(), 'placekeeper-vscode-manual-test-'));
+  const source = resolve(root, 'Contents/Resources/integrations/vscode');
+  const outputPath = resolve(root, 'Contents/Resources/integrations/placekeeper.vsix');
+  await mkdir(source, { recursive: true });
+  await writeFile(resolve(source, 'package.json'), JSON.stringify({ name: 'placekeeper-vscode', publisher: 'placekeeper-local', version: '0.1.1', engines: { vscode: '>=1.95.0' } }));
+  try {
+    await packageVscode({ appPath: root, outputPath });
+    const firstArchive = await readFile(outputPath);
+    await new Promise((done) => setTimeout(done, 2100));
+    await packageVscode({ appPath: root, outputPath });
+    assert.deepEqual(await readFile(outputPath), firstArchive, 'VSIX bytes must not change merely because packaging ran later');
+    await rm(source, { recursive: true });
+    const { stdout } = await exec('/usr/bin/unzip', ['-p', outputPath, 'extension/package.json']);
+    assert.equal(JSON.parse(stdout).name, 'placekeeper-vscode');
+  } finally { await rm(root, { recursive: true, force: true }); }
 });

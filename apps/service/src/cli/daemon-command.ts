@@ -181,13 +181,15 @@ async function stopReadyCandidate(receiptPath: string, paths = defaultDaemonPath
   }
 }
 
-async function coordinateInstall(
+async function coordinateLifecycleMutation(
   args: readonly string[],
   paths = defaultDaemonPaths(),
+  write: (text: string) => void = () => {},
 ): Promise<"noop" | "installed"> {
-  const candidateApp = takeFlag(args, "--candidate-app");
+  const hostSetup = args[0] === "coordinate-host";
   const installedApp = takeFlag(args, "--installed-app");
-  const replaceHelper = takeFlag(args, "--replace-helper");
+  const candidateApp = hostSetup ? installedApp : takeFlag(args, "--candidate-app");
+  const replaceHelper = takeFlag(args, hostSetup ? "--host-helper" : "--replace-helper");
   const candidate = await readIdentity(candidateApp);
   if (candidate === undefined) throw new Error("The candidate build identity is invalid");
   if (
@@ -202,7 +204,12 @@ async function coordinateInstall(
   );
   try {
     const installed = await readIdentity(installedApp);
+    if (hostSetup && (installed?.daemonIdentity !== candidate.daemonIdentity ||
+      installed?.installArtifactIdentity !== candidate.installArtifactIdentity)) {
+      throw new Error("The installed app changed before host setup; rerun the installer");
+    }
     const result = await coordinateUpgrade({
+      operation: hostSetup ? "host-setup" : "app-install",
       candidate,
       ...(installed === undefined ? {} : { installed }),
       inspect: async () => {
@@ -231,6 +238,26 @@ async function coordinateInstall(
       },
       waitForRetirement: () => waitForSocketRetirement(paths.socketPath),
       replaceAndReady: async () => {
+        if (hostSetup) {
+          const separator = args.indexOf("--");
+          const result = await execFileAsync(join(installedApp, "Contents/Resources/node/bin/node"), [
+            replaceHelper, ...(separator < 0 ? [] : args.slice(separator + 1)),
+          ], {
+            timeout: 300_000, maxBuffer: 1_048_576,
+            env: { ...process.env,
+              [LIFECYCLE_LOCK_TOKEN_ENV]: lifecycleLock.token,
+              [LIFECYCLE_LOCK_PATH_ENV]: paths.lifecycleLockPath ?? join(paths.appSupportRoot, "lifecycle.lock"),
+            },
+          }).catch((error: Error & { stdout?: string; stderr?: string }) => {
+            if (error.stdout) write(error.stdout);
+            if (error.stderr) process.stderr.write(error.stderr);
+            throw error;
+          });
+          write(result.stdout);
+          if (result.stderr) process.stderr.write(result.stderr);
+          await ensureServiceDaemonReady(paths, lifecycleLock.token);
+          return;
+        }
         await execFileAsync("/bin/sh", [
           replaceHelper,
           candidateApp,
@@ -270,9 +297,9 @@ export async function runDaemonCommand(
     write(`${JSON.stringify({ ok: true, status: "stopped" })}\n`);
     return 0;
   }
-  if (args[0] !== "coordinate-install") throw new Error("Unsupported daemon command");
+  if (args[0] !== "coordinate-install" && args[0] !== "coordinate-host") throw new Error("Unsupported daemon command");
   try {
-    const status = await coordinateInstall(args, paths);
+    const status = await coordinateLifecycleMutation(args, paths, write);
     write(`${JSON.stringify({ ok: true, status })}\n`);
     return 0;
   } catch (error) {

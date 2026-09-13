@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { cp, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, copyFile, cp, mkdtemp, readFile, readdir, rm, utimes, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -10,17 +10,8 @@ const execute = promisify(execFile);
 const extensionId = 'placekeeper-local.placekeeper-vscode';
 const xml = (value) => String(value).replace(/[<>&"']/gu, (character) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&apos;' })[character]);
 
-/** Use VS Code's installer, preserving its registration and extension enablement. */
-export async function updateVscode({ appPath, codePath, run = execute }) {
-  codePath ??= [
-    resolve(homedir(), 'Applications/Visual Studio Code.app/Contents/Resources/app/bin/code'),
-    '/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code',
-  ].find((candidate) => existsSync(candidate));
-  if (codePath === undefined) return { status: 'editor-unavailable' };
-  const { stdout } = await run(codePath, ['--list-extensions', '--show-versions']);
-  if (!stdout.split(/\r?\n/u).some((line) => line.trim().split('@')[0].toLowerCase() === extensionId)) {
-    return { status: 'not-installed' };
-  }
+/** Build a portable VSIX; the installed bundle retains one for manual setup. */
+export async function packageVscode({ appPath, outputPath, run = execute, consume }) {
   const source = resolve(appPath, 'Contents/Resources/integrations/vscode');
   const manifest = JSON.parse(await readFile(resolve(source, 'package.json'), 'utf8'));
   if (`${manifest.publisher}.${manifest.name}` !== extensionId || typeof manifest.version !== 'string') {
@@ -37,25 +28,64 @@ export async function updateVscode({ appPath, codePath, run = execute }) {
 </PackageManifest>`);
     await writeFile(resolve(staging, '[Content_Types].xml'), '<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="json" ContentType="application/json"/><Default Extension="vsixmanifest" ContentType="text/xml"/></Types>');
     const archive = resolve(staging, 'placekeeper.vsix');
-    await run('/usr/bin/zip', ['-q', '-r', archive, 'extension', 'extension.vsixmanifest', '[Content_Types].xml'], { cwd: staging });
-    // Source installs may change the payload without changing the version number.
-    await run(codePath, ['--install-extension', archive, '--force']);
-    return { status: 'updated', version: manifest.version };
+    // The VSIX participates in the app's exact artifact identity. Keep its
+    // metadata and entry order independent of build time and filesystem order.
+    const entries = [];
+    const epoch = new Date('2000-01-01T00:00:00Z');
+    async function collect(directory, prefix = '') {
+      const children = await readdir(directory, { withFileTypes: true });
+      for (const entry of children.sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0)) {
+        if (!entry.isDirectory() && !entry.isFile()) throw new Error('VSIX source contains an unsupported file type');
+        const path = resolve(directory, entry.name);
+        const name = `${prefix}${entry.name}`;
+        await chmod(path, entry.isDirectory() ? 0o755 : 0o644);
+        await utimes(path, epoch, epoch);
+        entries.push(entry.isDirectory() ? `${name}/` : name);
+        if (entry.isDirectory()) await collect(path, `${name}/`);
+      }
+    }
+    await collect(staging);
+    await run('/usr/bin/zip', ['-q', '-X', archive, ...entries], { cwd: staging, env: { ...process.env, TZ: 'UTC' } });
+    if (outputPath) await copyFile(archive, outputPath);
+    if (consume) return await consume(archive, manifest);
+    return { path: outputPath, version: manifest.version };
   } finally {
     await rm(staging, { recursive: true, force: true });
   }
 }
 
+/** Use VS Code's supported installer without changing enablement or settings. */
+export async function updateVscode({ appPath, codePath, installIfMissing = false, run = execute }) {
+  codePath ??= [
+    resolve(homedir(), 'Applications/Visual Studio Code.app/Contents/Resources/app/bin/code'),
+    '/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code',
+    ...(process.env.PLACEKEEPER_HOST_PATH ?? process.env.PATH ?? '').split(':').filter(Boolean).map((directory) => resolve(directory, 'code')),
+  ].find((candidate) => existsSync(candidate));
+  if (codePath === undefined) return { status: 'editor-unavailable', path: resolve(appPath, 'Contents/Resources/integrations/placekeeper.vsix') };
+  const { stdout } = await run(codePath, ['--list-extensions', '--show-versions']);
+  const installed = stdout.split(/\r?\n/u).some((line) => line.trim().split('@')[0].toLowerCase() === extensionId);
+  if (!installed && !installIfMissing) return { status: 'not-installed' };
+  return packageVscode({ appPath, run, consume: async (archive, manifest) => {
+    // Source reruns may change payload bytes without changing the version.
+    await run(codePath, ['--install-extension', archive, '--force']);
+    const verification = await run(codePath, ['--list-extensions', '--show-versions']);
+    if (!verification.stdout.split(/\r?\n/u).some((line) => line.trim().toLowerCase() === `${extensionId}@${manifest.version}`.toLowerCase())) {
+      throw new Error('VS Code did not report the bundled extension version after installation');
+    }
+    return { status: installed ? 'updated' : 'installed', version: manifest.version };
+  } });
+}
+
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
-  const appPath = process.argv[2];
-  if (!appPath) throw new Error('Usage: update-vscode.mjs <installed-app> [code-cli]');
   try {
-    const result = await updateVscode({ appPath, codePath: process.argv[3] });
-    console.log(result.status === 'updated'
-      ? `VS Code extension updated (${result.version}). Reload VS Code to load the current interface.`
-      : `VS Code extension update skipped: ${result.status}.`);
+    if (process.argv[2] === '--package' && process.argv.length === 5) {
+      console.log(JSON.stringify(await packageVscode({ appPath: process.argv[3], outputPath: process.argv[4] })));
+    } else {
+      if (!process.env.PLACEKEEPER_LIFECYCLE_LOCK_TOKEN) throw new Error('VS Code setup requires daemon coordinate-host');
+      if (!process.argv[2]) throw new Error('Usage: update-vscode.mjs <installed-app> [code-cli]');
+      console.log(JSON.stringify(await updateVscode({ appPath: process.argv[2], codePath: process.argv[3] })));
+    }
   } catch (error) {
-    console.error('The app is installed, but its VS Code extension update failed. Close VS Code and rerun the installer.');
     console.error(error.message);
     process.exitCode = 1;
   }

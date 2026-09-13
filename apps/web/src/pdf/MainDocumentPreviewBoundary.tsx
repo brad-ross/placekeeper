@@ -3,6 +3,8 @@ import { useScrollCapability, type LayoutChangePayload } from '@embedpdf/plugin-
 import { useZoom } from '@embedpdf/plugin-zoom/react';
 import { MAIN_PDF_DOCUMENT_ID } from './viewer-document-ids.js';
 
+const PREVIEW_PAGE_PEEK = 24;
+
 /** A host may bound the main preview without truncating PDF metadata or reference destinations. */
 export const MainDocumentPreviewLimit = createContext<{ firstPage: number; lastPage: number } | null>(null);
 
@@ -57,16 +59,21 @@ export function MainDocumentPreviewBoundary({ children }: { children: ReactNode 
     // Bound user input before it moves the viewport. A scroll-event correction
     // also catches the programmatic anchor writes used by Fit Width and can
     // invalidate that operation, rolling its zoom back.
-    const minimum = () => first.y * (zoomControls?.getState().currentZoomLevel ?? 1);
+    const minimum = () => Math.max(0, first.y * (zoomControls?.getState().currentZoomLevel ?? 1) - PREVIEW_PAGE_PEEK);
     const stopAtStart = (delta: number, event: Event) => {
       if (delta >= 0 || viewport.scrollTop + delta >= minimum()) return;
       event.preventDefault();
-      viewport.scrollTop = Math.min(viewport.scrollTop, minimum());
+      viewport.scrollTop = minimum();
     };
     const wheel = (event: WheelEvent) => {
       if (event.ctrlKey || event.metaKey) return;
       const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? viewport.clientHeight : 1;
-      stopAtStart(event.deltaY * unit, event);
+      // Own the whole wheel sequence, not just its final boundary-crossing
+      // event: native compositor momentum can otherwise continue past a clamp.
+      if (event.deltaY === 0) return;
+      event.preventDefault();
+      viewport.scrollTop = Math.max(minimum(), viewport.scrollTop + event.deltaY * unit);
+      viewport.scrollLeft += event.deltaX * unit;
     };
     const keydown = (event: KeyboardEvent) => {
       if ((event.target as HTMLElement).closest('input, textarea, [contenteditable="true"], button, [role="tab"]')) return;
@@ -125,7 +132,7 @@ export function MainDocumentPreviewBoundary({ children }: { children: ReactNode 
   // Clipping the real scroller also bounds native/programmatic scrolling, while the
   // engine retains the complete outline, page count, and independently scrolled references.
   return <div ref={boundary} data-main-preview-limit={`${limit.firstPage}-${limit.lastPage}`} style={{
-    height: last ? (last.y + last.height) * zoom.currentZoomLevel : 0,
+    height: last ? (last.y + last.height) * zoom.currentZoomLevel + PREVIEW_PAGE_PEEK : 0,
     width: layout ? layout.totalContentSize.width * zoom.currentZoomLevel : '100%',
     overflow: 'hidden', margin: '0 auto',
   }}>{children}</div>;

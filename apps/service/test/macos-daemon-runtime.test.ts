@@ -10,6 +10,7 @@ import {
   startLaunchControlServer,
   type LaunchControlServer,
 } from "../src/host/launch-control.js";
+import { coordinateUpgrade } from "../src/host/upgrade-coordinator.js";
 import { PlacekeeperHost } from "../src/host/placekeeper-host.js";
 import { macosRuntimeThroughDaemon } from "../src/host/service-daemon.js";
 
@@ -391,5 +392,37 @@ describe("macOS daemon runtime", () => {
         sourcePath,
       },
     } as never)).resolves.toEqual({ kind: "error", reason: "invalid-request" });
+  });
+});
+
+
+describe("independent host coordination", () => {
+  it.each(["reviewPresence", "codexTasks"] as const)("defers current-app host mutation with %s", async (blocker) => {
+    const identity = { daemonIdentity: "a".repeat(64), installArtifactIdentity: "b".repeat(64) };
+    const mutate = vi.fn();
+    await expect(coordinateUpgrade({
+      candidate: identity, installed: identity, operation: "host-setup",
+      inspect: async () => ({ kind: "exact", status: {
+        protocolVersion: 1, daemonIdentity: identity.daemonIdentity, lifecycle: "accepting",
+        activity: { reviewPresence: 0, codexTasks: 0, transientWork: 0, [blocker]: 1 },
+      } }),
+      shutdown: vi.fn(), waitForRetirement: vi.fn(), replaceAndReady: mutate,
+    })).rejects.toMatchObject({ reason: blocker === "reviewPresence" ? "review-presence" : "codex-task" });
+    expect(mutate).not.toHaveBeenCalled();
+  });
+  it("retires the exact idle daemon before mutating a current app's hosts", async () => {
+    const identity = { daemonIdentity: "a".repeat(64), installArtifactIdentity: "b".repeat(64) };
+    const order: string[] = [];
+    await coordinateUpgrade({
+      candidate: identity, installed: identity, operation: "host-setup",
+      inspect: async () => ({ kind: "exact", status: {
+        protocolVersion: 1, daemonIdentity: identity.daemonIdentity, lifecycle: "accepting",
+        activity: { reviewPresence: 0, codexTasks: 0, transientWork: 0 },
+      } }),
+      shutdown: async () => { order.push("shutdown"); return { status: "accepted" }; },
+      waitForRetirement: async () => { order.push("retired"); },
+      replaceAndReady: async () => { order.push("host-mutation"); },
+    });
+    expect(order).toEqual(["shutdown", "retired", "host-mutation"]);
   });
 });

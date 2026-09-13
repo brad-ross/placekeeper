@@ -4,7 +4,12 @@ const { createRoot } = vi.hoisted(() => ({ createRoot: vi.fn() }));
 
 vi.mock("react-dom/client", () => ({ createRoot }));
 
-import { mountStaticBrowserApp } from "../src/static-entry.js";
+import { renderToStaticMarkup } from "react-dom/server";
+import { createElement } from "react";
+import { SOURCE_INSTALL_COMMAND as RELEASE_INSTALL_COMMAND } from "../../../scripts/package-source-release.js";
+import { SOURCE_INSTALL_COMMAND } from "../src/landing/InstallDialog.js";
+
+import { StaticLauncher, mountStaticBrowserApp } from "../src/static-entry.js";
 
 class FakeHTMLElement {
   readonly attributes = new Map<string, string>();
@@ -120,5 +125,19 @@ describe("static browser startup guards", () => {
     expect(renderedText(root)).toContain(message);
     expect(renderedText(root)).not.toContain("Upload PDF");
     expect(createRoot).not.toHaveBeenCalled();
+  });
+});
+
+
+describe("landing installation contract", () => {
+  it("shows the short release command and concise instructions in one mounted dialog", () => {
+    expect(SOURCE_INSTALL_COMMAND).toBe(RELEASE_INSTALL_COMMAND);
+    const markup = renderToStaticMarkup(createElement(StaticLauncher, { onOpen: async () => {} }));
+    expect(markup.match(/<dialog\b/g)).toHaveLength(1);
+    expect(markup.match(/aria-haspopup="dialog"/g)).toHaveLength(2);
+    expect(markup).not.toContain("archive/refs/heads/main.zip");
+    expect(markup).toContain("Run the command below");
+    expect(markup).not.toContain("Close installation dialog");
+    expect(markup).not.toContain("Apple silicon");
   });
 });

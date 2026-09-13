@@ -290,3 +290,98 @@ describe("Chrome distribution integration", () => {
     }
   });
 });
+
+describe("independent Chrome preparation", () => {
+  async function fixture() {
+    const root = await mkdtemp("/private/tmp/placekeeper-chrome-stage-");
+    const app = await fixtureBundle(root);
+    const home = join(root, "home");
+    await mkdir(home, { mode: 0o700 });
+    const extension = chromeExtensionInstallPath(app);
+    const receipt = join(home, "Library/Application Support/Placekeeper/installer/chrome-legacy-ownership.json");
+    const manifest = join(home, "Library/Application Support/Google/Chrome/NativeMessagingHosts/com.placekeeper.chrome.json");
+    const run = async (_executable: string, args: string[]) => {
+      await validateChromeIntegrationBundle(app);
+      await writeFile(args.at(-1)!, JSON.stringify(renderChromeNativeHostManifest(app)), { flag: "wx", mode: 0o600 });
+    };
+    return { root, app, home, extension, receipt, manifest, run };
+  }
+
+  it("prepares exact-origin registration while leaving Chrome preferences unchanged", async () => {
+    const f = await fixture();
+    try {
+      const profile = join(f.home, "Library/Application Support/Google/Chrome/Default");
+      await mkdir(profile, { recursive: true, mode: 0o700 });
+      const preferences = JSON.stringify({ automaticOpening: false, unrelated: true });
+      await writeFile(join(profile, "Preferences"), preferences);
+      const { setupChrome } = await import("./setup-chrome.mjs");
+      await expect(setupChrome(f.app, { userHome: f.home, run: f.run })).resolves.toMatchObject({ status: "pending" });
+      expect(JSON.parse(await readFile(f.manifest, "utf8"))).toEqual(renderChromeNativeHostManifest(f.app));
+      expect(await readFile(join(profile, "Preferences"), "utf8")).toBe(preferences);
+      await setupChrome(f.app, { userHome: f.home, run: f.run });
+      expect(await readFile(join(profile, "Preferences"), "utf8")).toBe(preferences);
+    } finally { await rm(f.root, { recursive: true, force: true }); }
+  });
+
+  it.each(["extension-backed-up", "registration-backed-up", "registered"])("rolls back only Chrome endpoints on failure at %s", async (stage) => {
+    const f = await fixture();
+    try {
+      const { setupChrome } = await import("./setup-chrome.mjs");
+      await setupChrome(f.app, { userHome: f.home, run: f.run });
+      await writeFile(join(f.extension, "previous"), "previous extension");
+      await writeFile(f.manifest, '{"previous":true}\n');
+      await expect(setupChrome(f.app, { userHome: f.home, run: f.run,
+        checkpoint: async (at: string) => { if (at === stage) throw new Error("injected failure"); },
+      })).rejects.toThrow("injected failure");
+      expect(await readFile(join(f.extension, "previous"), "utf8")).toBe("previous extension");
+      expect(await readFile(f.manifest, "utf8")).toBe('{"previous":true}\n');
+      await expect(validateChromeIntegrationBundle(f.app)).resolves.toBeDefined();
+    } finally { await rm(f.root, { recursive: true, force: true }); }
+  });
+
+  it("retains legacy proof across skipped and failed stages, rejects a changed tree, and removes proof after adoption", async () => {
+    const f = await fixture();
+    try {
+      const { setupChrome, captureLegacyChromeOwnership } = await import("./setup-chrome.mjs");
+      await cp(join(f.app, "Contents/Resources/integrations/chrome-extension"), f.extension, { recursive: true });
+      await captureLegacyChromeOwnership(f.app, f.home);
+      const proof = await readFile(f.receipt, "utf8");
+      await writeFile(f.receipt, "invalid retained receipt");
+      await expect(captureLegacyChromeOwnership(f.app, f.home)).rejects.toThrow();
+      await writeFile(f.receipt, proof);
+      await writeFile(join(f.app, "Contents/Resources/integrations/chrome-extension/background.js"), "new release");
+      await expect(setupChrome(f.app, { userHome: f.home, run: f.run,
+        checkpoint: async (stage: string) => { if (stage === "registration-backed-up") throw new Error("registration failure"); },
+      })).rejects.toThrow("registration failure");
+      expect(await readFile(f.receipt, "utf8")).toBe(proof);
+      await writeFile(join(f.extension, "unowned"), "changed after skip");
+      await expect(setupChrome(f.app, { userHome: f.home, run: f.run })).rejects.toThrow("legacy Chrome tree changed");
+      expect(await readFile(f.receipt, "utf8")).toBe(proof);
+      await rm(join(f.extension, "unowned"));
+      await setupChrome(f.app, { userHome: f.home, run: f.run });
+      await expect(readFile(f.receipt)).rejects.toThrow();
+      expect(await readFile(join(f.extension, "background.js"), "utf8")).toBe("new release");
+    } finally { await rm(f.root, { recursive: true, force: true }); }
+  });
+
+  it.each(["unmanaged", "symlink", "writable", "registration-symlink"])("rejects %s endpoints without changing the Mac app", async (condition) => {
+    const f = await fixture();
+    try {
+      const { setupChrome } = await import("./setup-chrome.mjs");
+      if (condition === "unmanaged") {
+        await mkdir(f.extension); await writeFile(join(f.extension, "user-file"), "keep");
+      } else if (condition === "symlink") {
+        await symlink(join(f.app, "Contents/Resources/integrations/chrome-extension"), f.extension);
+      } else if (condition === "writable") {
+        await chmod(f.home, 0o777);
+      } else {
+        await mkdir(join(f.home, "Library"));
+        await symlink(f.root, join(f.home, "Library/Application Support"));
+      }
+      const before = await readFile(join(f.app, "Contents/Resources/integrations/chrome-extension/manifest.json"), "utf8");
+      await expect(setupChrome(f.app, { userHome: f.home, run: f.run })).rejects.toThrow(/Refusing/u);
+      expect(await readFile(join(f.app, "Contents/Resources/integrations/chrome-extension/manifest.json"), "utf8")).toBe(before);
+      if (condition === "unmanaged") expect(await readFile(join(f.extension, "user-file"), "utf8")).toBe("keep");
+    } finally { await rm(f.root, { recursive: true, force: true }); }
+  });
+});

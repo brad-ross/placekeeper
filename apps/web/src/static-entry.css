@@ -414,8 +414,8 @@ html, body, #root {
 }
 @media (max-width: 900px) {
   .landing-demo-row { grid-template-columns: 1fr; gap: 40px; }
-  .landing-demo-explanation { max-width: 580px; }
-  .landing-demo-explanation ul { margin: 16px 0; }
+  .landing-demo-explanation { width: 100%; max-width: 580px; margin-inline: auto; text-align: center; }
+  .landing-demo-explanation ul { margin: 16px 0; padding-left: 0; list-style-position: inside; }
 
 }
 
@@ -463,7 +463,7 @@ html, body, #root {
 .landing-invitations { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: clamp(24px, 3vw, 40px); padding: 50px 0 64px; border-top: 1px solid var(--review-border); }
 .landing-invitations h2 { font-size: clamp(22px, 2.6vw, 34px); font-weight: 600; line-height: 1.15; letter-spacing: -1px; }
 .static-launcher .landing-invitations p { margin: 15px 0 23px; max-width: 480px; font-size: 16px; color: var(--review-ink-muted); line-height: 1.8; }
-.landing-invitations a { display: inline-flex; align-items: center; gap: 12px; min-height: 44px; padding: 10px 17px; border: 1px solid var(--review-border-strong); border-radius: 9px; font-size: 12px; text-decoration: none; }
+.landing-invitations :is(a, button) { display: inline-flex; align-items: center; gap: 12px; min-height: 44px; padding: 10px 17px; border: 1px solid var(--review-border-strong); border-radius: 9px; font-size: 12px; text-decoration: none; }
 .landing-invitations .landing-invitations__download { background: var(--review-ink-primary); color: white; border-color: var(--review-ink-primary); }
 @media (max-width: 1000px) {
   .landing-surfaces { grid-template-columns: minmax(0, 1fr); gap: 36px; }
@@ -509,7 +509,7 @@ html, body, #root {
 
 /* Launcher controls retain the original reader's soft, borderless treatment. */
 .static-launcher .static-launcher__button { border-radius: 10px; font-size: 13px; font-weight: 400; }
-.static-launcher__separator { margin: 18px 0 14px; font-size: 11px; }
+.static-launcher__separator { margin: 18px 0; font-size: 11px; }
 .static-launcher__separator::before, .static-launcher__separator::after { background: var(--review-border); }
 .static-launcher__url > div { gap: 8px; }
 .static-launcher .static-launcher__url :is(input, button) { min-height: 40px; border: 0; border-radius: 10px; font-size: 13px; font-weight: 400; }
@@ -517,8 +517,8 @@ html, body, #root {
 .static-launcher__url button { padding-inline: 14px; gap: 6px; }
 .static-launcher__url input:hover { background: #e9e9e9; }
 .static-launcher .landing-hero__description { margin-top: 10px; }
-.static-launcher :is(.landing-download, .landing-github, .landing-invitations a) { min-height: 50px; padding: 12px 21px; font-size: 15px; gap: 10px; }
-.static-launcher :is(.landing-download, .landing-github, .landing-invitations a) svg { width: 19px; height: 19px; }
+.static-launcher :is(.landing-download, .landing-github, .landing-invitations a, .landing-invitations__download) { min-height: 50px; padding: 12px 21px; font-size: 15px; gap: 10px; }
+.static-launcher :is(.landing-download, .landing-github, .landing-invitations a, .landing-invitations__download) svg { width: 19px; height: 19px; }
 .static-launcher :is(a, button, input) { -webkit-tap-highlight-color: rgb(0 0 0 / 8%); }
 .static-launcher :is(.landing-github, .landing-invitations a:not(.landing-invitations__download), .review-workspace__mode-tab:not([aria-selected="true"])):hover:not(:disabled) { background: #eaeaea; }
 .static-launcher :is(.static-launcher__button, .landing-download, .landing-invitations__download):hover:not(:disabled) { background: #4a4a4a; }
@@ -587,3 +587,23 @@ body[data-landing-demo] :is(button, input, textarea, [contenteditable="true"]):n
     opacity: 1;
   }
 }
+
+.landing-download, .landing-invitations__download { cursor: pointer; font-family: inherit; }
+.install-dialog { width: min(600px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); box-sizing: border-box; padding: 24px; border: 1px solid var(--review-border); border-radius: 14px; color: var(--review-ink-primary); background: var(--review-surface-panel); box-shadow: var(--review-shadow-page); }
+.install-dialog::backdrop { background: rgb(0 0 0 / 32%); }
+.install-dialog__header { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.install-dialog__header h2 { margin: 0; font-size: 22px; font-weight: 600; letter-spacing: -.5px; }
+.install-dialog button { font-family: inherit; cursor: pointer; }
+.static-launcher .install-dialog p { margin: 16px 0; font-size: 14px; line-height: 1.6; }
+.install-dialog__command { display: flex; align-items: center; gap: 16px; width: 100%; text-align: left; color: var(--review-ink-primary); margin: 20px 0 0; padding: 14px; border: 1px solid var(--review-border-subtle); border-radius: 9px; background: var(--review-surface-canvas); white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; font-size: 12px; line-height: 1.6; }
+.install-dialog__command code { min-width: 0; user-select: text; font-size: 12px; line-height: 1.6; }
+.install-dialog__command svg { flex-shrink: 0; margin-left: auto; }
+.install-dialog__command:hover { background: var(--review-surface-subtle); }
+.install-dialog__command:active { opacity: .8; }
+.install-dialog__footer:has([role=status]:not(:empty)) { margin-top: 12px; }
+.install-dialog__footer { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.install-dialog__footer [role=status] { flex: 1 1 170px; color: var(--review-ink-muted); font-size: 12px; line-height: 1.5; }
+.install-dialog :focus-visible { outline: 2px solid var(--review-ink-muted); outline-offset: 3px; }
+@media (max-width: 480px) { .install-dialog { padding: 18px; } }
+
+body[data-landing-demo] .pdf-workspace:not(.pdf-workspace--reference) [data-viewer-framing-viewport] { overscroll-behavior-y: none; }

@@ -80,7 +80,9 @@
     "test:source-rebuild": "node --import tsx scripts/testing/run-suite.ts test:source-rebuild",
     "test:host-integration": "node --import tsx scripts/testing/run-suite.ts test:host-integration",
     "test:production-integration": "node --import tsx scripts/testing/run-suite.ts test:production-integration",
-    "test:full-validation": "node --import tsx scripts/testing/run-suite.ts test:full-validation"
+    "test:full-validation": "node --import tsx scripts/testing/run-suite.ts test:full-validation",
+    "package:source-release": "node --import tsx scripts/package-source-release.ts",
+    "test:source-release": "node --import tsx scripts/testing/run-suite.ts test:source-release"
   },
   "dependencies": {
     "@embedpdf/core": "2.14.4",
