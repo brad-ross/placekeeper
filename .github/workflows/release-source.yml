@@ -1,0 +1,133 @@
+name: Release source
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Stable version matching packaging/macos/app-bundle.json (without v)
+        required: true
+        type: string
+      notes:
+        description: Brief release notes
+        required: true
+        type: string
+      installed_chrome_evidence:
+        description: Final test:chrome-installed JSON for this exact candidate build
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: placekeeper-source-publication
+  cancel-in-progress: false
+
+env:
+  SOURCE_VERSION: ${{ inputs.version }}
+  SOURCE_NOTES: ${{ inputs.notes }}
+
+jobs:
+  validate:
+    if: github.ref == 'refs/heads/main' && github.repository == 'brad-ross/placekeeper'
+    runs-on: macos-15
+    outputs:
+      archive_sha256: ${{ steps.assets.outputs.archive_sha256 }}
+      bootstrap_sha256: ${{ steps.assets.outputs.bootstrap_sha256 }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Validate publication request
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd
+        with:
+          script: |
+            const fs = require('node:fs');
+            const version = process.env.SOURCE_VERSION;
+            if (context.ref !== 'refs/heads/main') throw new Error('Dispatch from trusted main only');
+            if (!/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(version)) throw new Error('Stable numeric version required');
+            if (JSON.parse(fs.readFileSync('packaging/macos/app-bundle.json')).bundleVersion !== version) throw new Error('Version differs from canonical app manifest');
+            if (!process.env.SOURCE_NOTES.trim() || process.env.SOURCE_NOTES.length > 10000) throw new Error('Brief release notes required');
+            const tag = `v${version}`;
+            try { await github.rest.git.getRef({ ...context.repo, ref: `tags/${tag}` }); throw new Error('Tag already exists'); }
+            catch (error) { if (error.status !== 404) throw error; }
+            const releases = await github.paginate(github.rest.repos.listReleases, { ...context.repo, per_page: 100 });
+            if (releases.some(release => release.tag_name === tag)) throw new Error('Release already exists, including drafts');
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320
+        with:
+          version: 11.16.0
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: 24.14.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm test:source-release
+      - run: pnpm exec vitest run packaging/macos/packaging.test.ts packaging/macos/chrome-integration.test.ts packaging/macos/setup-integrations.test.mjs packaging/macos/update-vscode.test.mjs
+      - run: pnpm test:upgrade-lifecycle
+      - run: pnpm fixtures:pdf
+      - run: pnpm exec playwright install chromium
+      - run: pnpm test:chrome-handoff
+      - name: Build unsigned candidate
+        run: pnpm package:macos -- --arch arm64 --node-runtime "$(command -v node)" --service-dist dist/service --web-dist dist/web --output artifacts/arm64
+      - run: pnpm smoke:installed -- artifacts/arm64/Placekeeper.app test/fixtures/pdfs/text-native.pdf
+      - name: Verify installed Google Chrome release evidence
+        env:
+          PLACEKEEPER_INSTALLED_CHROME_EVIDENCE: ${{ inputs.installed_chrome_evidence }}
+        run: pnpm exec tsx test/acceptance/validate-installed-chrome-evidence.ts artifacts/arm64/Placekeeper.app
+      - name: Package exact tested source
+        id: assets
+        run: |
+          pnpm exec tsx scripts/package-source-release.ts "$SOURCE_VERSION" "$GITHUB_SHA" artifacts/source
+          printf 'archive_sha256=%s\n' "$(shasum -a 256 "artifacts/source/placekeeper-source-v$SOURCE_VERSION.tar.gz" | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+          printf 'bootstrap_sha256=%s\n' "$(shasum -a 256 artifacts/source/install-placekeeper.sh | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+
+  publish:
+    needs: validate
+    if: github.ref == 'refs/heads/main' && github.repository == 'brad-ross/placekeeper'
+    runs-on: macos-15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: 24.14.0
+      # Regenerate deterministic assets from the same commit, never from workspace changes.
+      - run: node --experimental-strip-types scripts/package-source-release.ts "$SOURCE_VERSION" "$GITHUB_SHA" artifacts/source
+      - name: Publish complete source release
+        env:
+          EXPECTED_ARCHIVE_SHA256: ${{ needs.validate.outputs.archive_sha256 }}
+          EXPECTED_BOOTSTRAP_SHA256: ${{ needs.validate.outputs.bootstrap_sha256 }}
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd
+        with:
+          script: |
+            const fs = require('node:fs');
+            const version = process.env.SOURCE_VERSION;
+            const tag = `v${version}`;
+            if (context.ref !== 'refs/heads/main') throw new Error('Dispatch from trusted main only');
+            try { await github.rest.git.getRef({ ...context.repo, ref: `tags/${tag}` }); throw new Error('Tag already exists'); }
+            catch (error) { if (error.status !== 404) throw error; }
+            const releases = await github.paginate(github.rest.repos.listReleases, { ...context.repo, per_page: 100 });
+            if (releases.some(release => release.tag_name === tag)) throw new Error('Release already exists, including drafts');
+            const names = [`placekeeper-source-${tag}.tar.gz`, 'install-placekeeper.sh'];
+            const assets = names.map(name => ({ name, data: fs.readFileSync(`artifacts/source/${name}`) }));
+            if (assets.some(asset => asset.data.length === 0)) throw new Error('Incomplete source assets');
+            const expected = [process.env.EXPECTED_ARCHIVE_SHA256, process.env.EXPECTED_BOOTSTRAP_SHA256];
+            const crypto = require('node:crypto');
+            if (assets.some((asset, index) => crypto.createHash('sha256').update(asset.data).digest('hex') !== expected[index])) throw new Error('Assets differ from validated source');
+            const { data: release } = await github.rest.repos.createRelease({ ...context.repo,
+              tag_name: tag, target_commitish: context.sha, name: `Placekeeper ${version}`,
+              body: process.env.SOURCE_NOTES, draft: true, prerelease: false });
+            for (const asset of assets) {
+              await github.rest.repos.uploadReleaseAsset({ ...context.repo, release_id: release.id,
+                name: asset.name, data: asset.data });
+            }
+            const uploaded = await github.paginate(github.rest.repos.listReleaseAssets, { ...context.repo, release_id: release.id });
+            if (uploaded.length !== assets.length || assets.some(asset => !uploaded.some(remote => remote.name === asset.name && remote.size === asset.data.length))) throw new Error('Draft asset completeness check failed');
+            await github.rest.repos.updateRelease({ ...context.repo, release_id: release.id,
+              draft: false, prerelease: false, make_latest: 'true' });
