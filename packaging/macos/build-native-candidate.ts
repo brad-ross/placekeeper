@@ -303,6 +303,11 @@ export async function validateNativeCandidateBundle(
     resolve(resources, "MacWeb/assets/pdfium.wasm"),
     resolve(resources, "MacWeb/assets/pdfium-worker.js"),
     resolve(resources, BUILD_IDENTITY_FILENAME),
+    resolve(resources, "installer/setup-integrations.mjs"),
+    resolve(resources, "installer/setup-chrome.mjs"),
+    resolve(resources, "installer/update-vscode.mjs"),
+    resolve(resources, "integrations/placekeeper.vsix"),
+    resolve(resources, "integrations/.agents/plugins/marketplace.json"),
   ];
   for (const path of required) await access(path);
   const plist = await readFile(resolve(contents, "Info.plist"), "utf8");

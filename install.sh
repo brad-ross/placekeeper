@@ -1,5 +1,7 @@
 #!/bin/sh
 set -eu
+PLACEKEEPER_HOST_PATH=${PLACEKEEPER_HOST_PATH:-${PATH:-/usr/bin:/bin}}
+export PLACEKEEPER_HOST_PATH
 PATH=/usr/bin:/bin
 export PATH
 
@@ -16,20 +18,21 @@ chrome_extension_path="$install_root/Placekeeper Chrome Extension"
 node_root="$repo_root/.local/toolchains/node-v${NODE_VERSION}-darwin-arm64"
 node_bin="$node_root/bin/node"
 
-case "$#" in
-  0) install_mode=install ;;
-  1)
-    case "$1" in
-      --dry-run) install_mode=dry-run ;;
-      --uninstall) install_mode=uninstall ;;
-      *) printf 'Usage: %s [--dry-run|--uninstall]\n' "$0" >&2; exit 2 ;;
-    esac
-    ;;
-  *)
-    printf 'Usage: %s [--dry-run|--uninstall]\n' "$0" >&2
-    exit 2
-    ;;
-esac
+install_mode=install
+chrome_choice=ask
+vscode_choice=ask
+codex_choice=ask
+for argument in "$@"; do
+  case "$argument" in
+    --dry-run|--uninstall)
+      if [ "$install_mode" != install ]; then printf 'Choose only one install mode.\n' >&2; exit 2; fi
+      install_mode=${argument#--} ;;
+    --chrome=setup|--chrome=skip|--chrome=ask) chrome_choice=${argument#*=} ;;
+    --vscode=setup|--vscode=skip|--vscode=ask) vscode_choice=${argument#*=} ;;
+    --codex=setup|--codex=skip|--codex=ask) codex_choice=${argument#*=} ;;
+    *) printf 'Usage: %s [--dry-run|--uninstall] [--chrome=setup|skip|ask] [--vscode=setup|skip|ask] [--codex=setup|skip|ask]\n' "$0" >&2; exit 2 ;;
+  esac
+done
 prerequisite_failure() {
   printf '%s\n' "$1" "Install Apple Command Line Tools with a working Swift 6+ compiler and macOS SDK:" \
     "https://developer.apple.com/documentation/xcode/installing-the-command-line-tools" >&2
@@ -192,19 +195,19 @@ printf 'Checking the packaged writer offline before installation...\n'
 run_pnpm smoke:installed -- "$built_app" "$repo_root/test/fixtures/pdfs/text-native.pdf"
 
 printf 'Coordinating the shared Placekeeper service before replacement...\n'
-if ! "$built_app/Contents/MacOS/placekeeper" daemon coordinate-install \
+coordination_status=0
+coordination_output=$("$built_app/Contents/MacOS/placekeeper" daemon coordinate-install \
   --candidate-app "$built_app" \
   --installed-app "$app_path" \
-  --replace-helper "$repo_root/packaging/macos/install-built-app.sh"; then
-  printf '%s\n' "Installation did not finish. Review the diagnostic above before retrying." >&2
-  exit 1
+  --replace-helper "$repo_root/packaging/macos/install-built-app.sh") || coordination_status=$?
+printf '%s\n' "$coordination_output"
+if [ "$coordination_status" -ne 0 ]; then
+  printf '%s\n' "Installation did not finish. Close active reviews/tasks if requested above, then retry." >&2
+  exit "$coordination_status"
 fi
-
-# Run even when the installed app was already current, so a retry repairs an
-# independently stale extension. Keep this outside the replacement helper used
-# by isolated installed-smoke tests.
-"$app_path/Contents/Resources/node/bin/node" \
-  "$repo_root/packaging/macos/update-vscode.mjs" "$app_path"
+PLACEKEEPER_MAC_STATUS=installed
+case "$coordination_output" in *'"status":"noop"'*) PLACEKEEPER_MAC_STATUS=current ;; esac
+export PLACEKEEPER_MAC_STATUS
 
 launch_services="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
 if [ -x "$launch_services" ]; then
@@ -218,7 +221,13 @@ fi
 printf '\nPlacekeeper installed successfully.\n'
 printf 'App: %s\n' "$app_path"
 printf 'Finder: select one PDF, then use Open With -> Placekeeper.\n'
-printf 'Chrome extension: %s\n' "$chrome_extension_path"
-printf 'Chrome: load that folder as an unpacked extension, then explicitly turn on automatic PDF opening.\n'
 printf 'You can also open Placekeeper from Applications and choose a PDF.\n'
 printf 'If macOS warns on first launch, Control-click the app in Finder and choose Open.\n'
+
+# Optional failures have their own outcome; a committed Mac installation remains
+# successful. The installed helper also supports adding skipped hosts later.
+optional_status=0
+"$app_path/Contents/Resources/node/bin/node" \
+  "$app_path/Contents/Resources/installer/setup-integrations.mjs" "$app_path" \
+  "--chrome=$chrome_choice" "--vscode=$vscode_choice" "--codex=$codex_choice" || optional_status=$?
+exit "$optional_status"

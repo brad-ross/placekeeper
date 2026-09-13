@@ -597,6 +597,7 @@ export const ciUnitFiles = [
       'apps/vscode/test/rebuild-navigation.test.ts',
       'packaging/macos/packaging.test.ts',
       'packaging/macos/update-vscode.test.mjs',
+      'packaging/macos/setup-integrations.test.mjs',
     ];
 
 export const browserTestFiles = {

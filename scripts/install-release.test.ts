@@ -58,6 +58,12 @@ describe("release bootstrap", () => {
     expect(requests.trim().split("\n")).toHaveLength(1); expect(requests).toContain(identity.sourceUrl); expect(requests).not.toMatch(/latest|main/);
     expect(result.stdout).toContain(commit); expect(await readdir(test.temp)).toEqual([]);
   });
+  it("retains the caller host search path while using system download tools", async () => {
+    const test = await fixture({ installer: 'printf "%s" "$PLACEKEEPER_HOST_PATH" > "$TEST_MARKER"\n' });
+    Object.assign(test.env, { PATH: "/test/user/bin:/usr/bin:/bin" });
+    expect(test.run().status).toBe(0);
+    expect(await readFile(test.env.TEST_MARKER, "utf8")).toBe("/test/user/bin:/usr/bin:/bin");
+  });
   it("propagates source installer failure", async () => {
     const test = await fixture({ installer: "echo core-output; echo core-error >&2; exit 42\n" }); const result = test.run(); expect(result.status).toBe(42); expect(result.stdout).toContain("core-output"); expect(result.stderr).toContain("core-error"); expect(await readdir(test.temp)).toEqual([]);
   });

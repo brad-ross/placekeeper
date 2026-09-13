@@ -1,6 +1,8 @@
 #!/bin/sh
 # Generated into a release asset; placeholders are never resolved at installation time.
 set -eu
+PLACEKEEPER_HOST_PATH=${PLACEKEEPER_HOST_PATH:-${PATH:-/usr/bin:/bin}}
+export PLACEKEEPER_HOST_PATH
 PATH=/usr/bin:/bin
 export PATH
 LC_ALL=C

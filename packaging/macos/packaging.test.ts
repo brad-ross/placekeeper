@@ -734,6 +734,16 @@ describe("macOS distribution manifests", () => {
     expect(installer.slice(launchServices)).toContain("Placekeeper installed successfully");
   });
 
+  it("bundles durable optional-host helpers, manual VSIX, and an independent Codex marketplace", async () => {
+    const build = await readFile(resolve("packaging/macos/build-app.ts"), "utf8");
+    for (const helper of ["setup-integrations.mjs", "setup-chrome.mjs", "update-vscode.mjs"]) expect(build).toContain(helper);
+    expect(build).toContain('"integrations/placekeeper.vsix"');
+    expect(build).toContain('"integrations/.agents/plugins"');
+    const marketplace = JSON.parse(await readFile(resolve("packaging/macos/codex-marketplace.json"), "utf8"));
+    expect(marketplace.name).toBe("placekeeper-installed");
+    expect(marketplace.plugins[0].source.path).toBe("./codex-plugin");
+  });
+
   it("uses current notarytool submission followed by staple and validation", () => {
     expect(createNotarizationPlan("/tmp/Placekeeper-arm64.zip", "/tmp/Placekeeper.app", "PLACEKEEPER_NOTARY")).toEqual([
       { command: "xcrun", args: ["notarytool", "submit", "/tmp/Placekeeper-arm64.zip", "--keychain-profile", "PLACEKEEPER_NOTARY", "--wait", "--output-format", "json"] },
