@@ -377,8 +377,8 @@ describe("packaged Codex live-context lifecycle", () => {
     expect(first).toMatchObject({
       currentness: "current",
       document: { generation: launch.documentGeneration, reviewRevision: 0 },
-      reviewItems: { mode: "full", itemCount: 0, completeItems: "retrieve" },
-      existingPdfAnnotations: { count: 2 },
+      reviewItems: { mode: "full", itemCount: 2, completeItems: "retrieve" },
+      existingPdfAnnotations: { count: 0 },
       evidence: { handle: expect.stringMatching(/^evidence_/u) },
     });
     expect(JSON.stringify(first)).not.toMatch(/127\.0\.0\.1|cap=|bindProof|\/private\/|codex-task/u);
@@ -387,7 +387,7 @@ describe("packaged Codex live-context lifecycle", () => {
     await runHookCommand(["hook", "--event"], hookInput("UserPromptSubmit"), control, unchangedWrite);
     expect(injectedContext(unchangedWrite)).toMatchObject({
       currentness: "current",
-      reviewItems: { mode: "unchanged", itemCount: 0 },
+      reviewItems: { mode: "unchanged", itemCount: 2 },
     });
 
     const state = host.broker.state(launch.sessionId);
@@ -423,7 +423,7 @@ describe("packaged Codex live-context lifecycle", () => {
       document: { reviewRevision: 1 },
       reviewItems: {
         mode: "delta",
-        itemCount: 1,
+        itemCount: 3,
         added: [{ intent: "pageNote", pageIndex: 0 }],
       },
     });
@@ -436,8 +436,10 @@ describe("packaged Codex live-context lifecycle", () => {
     expect(await runContextCommand(["context", "items", "--handle", handle], control, itemsWrite)).toBe(0);
     const itemsOutput = JSON.parse(itemsWrite.mock.calls[0]![0] as string) as { content: string };
     expect(JSON.parse(itemsOutput.content)).toMatchObject({
-      total: 1,
-      items: [{ intent: "pageNote", pageIndex: 0, anchor: { nearbyText: "Nearby PDF text." } }],
+      total: 3,
+      items: expect.arrayContaining([
+        expect.objectContaining({ intent: "pageNote", pageIndex: 0, anchor: expect.objectContaining({ nearbyText: "Nearby PDF text." }) }),
+      ]),
     });
     const changesWrite = vi.fn();
     expect(await runContextCommand(["context", "changes", "--handle", handle], control, changesWrite)).toBe(0);

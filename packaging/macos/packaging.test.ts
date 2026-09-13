@@ -1089,7 +1089,7 @@ describe("macOS distribution manifests", () => {
 
 describe("source prerequisite preflight", () => {
   it.each(["cpu", "os", "clt", "old-swift", "missing-sdk", "broken-sdk"])("rejects %s before downloading or mutating", async (failure) => {
-    const root = await mkdtemp("/private/tmp/placekeeper-preflight-");
+    const root = await mkdtemp(join(tmpdir(), "placekeeper-preflight-"));
     try {
       const mock = join(root, "tool");
       await writeFile(mock, [
