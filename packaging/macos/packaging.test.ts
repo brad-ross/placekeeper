@@ -1145,10 +1145,20 @@ describe("macOS distribution manifests", () => {
       await expect(validateCodexPlugin(pluginRoot)).rejects.toThrow(/placekeeper.*required|required.*placekeeper/ui);
 
       await cp(resolve("integrations/codex-plugin"), pluginRoot, { recursive: true, force: true });
+      const sourcePath = join(pluginRoot, "skills/placekeeper/references/source-work.md");
+      const source = await readFile(sourcePath, "utf8");
+      await writeFile(sourcePath, source.replace("A failed refresh blocks completion.", "A failed refresh may be ignored."));
+      await expect(validateCodexPlugin(pluginRoot)).rejects.toThrow(/omitted required contract text/ui);
+
+      await cp(resolve("integrations/codex-plugin"), pluginRoot, { recursive: true, force: true });
+      await rm(join(pluginRoot, "skills/placekeeper/references/live-evidence.md"));
+      await expect(validateCodexPlugin(pluginRoot)).rejects.toThrow(/ENOENT/u);
+
+      await cp(resolve("integrations/codex-plugin"), pluginRoot, { recursive: true, force: true });
       const skillPath = join(pluginRoot, "skills/placekeeper/SKILL.md");
       const skill = await readFile(skillPath, "utf8");
-      await writeFile(skillPath, skill.replace("A failed refresh blocks completion.", "A failed refresh may be ignored."));
-      await expect(validateCodexPlugin(pluginRoot)).rejects.toThrow(/omitted required contract text/ui);
+      await writeFile(skillPath, skill.replace("](references/source-work.md)", "](references/missing.md)"));
+      await expect(validateCodexPlugin(pluginRoot)).rejects.toThrow(/must link references/u);
     } finally {
       await rm(root, { recursive: true, force: true });
     }

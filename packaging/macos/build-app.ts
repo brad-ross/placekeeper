@@ -293,6 +293,8 @@ export async function buildMacApp(options: BuildOptions): Promise<string> {
     resolve(codexPlugin, "assets/placekeeper.svg"),
     resolve(codexPlugin, "hooks/hooks.json"),
     resolve(codexPlugin, "skills/placekeeper/SKILL.md"),
+    resolve(codexPlugin, "skills/placekeeper/references/live-evidence.md"),
+    resolve(codexPlugin, "skills/placekeeper/references/source-work.md"),
     resolve(codexPlugin, "skills/placekeeper/assets/placekeeper.svg"),
     resolve(codexPlugin, "skills/placekeeper/agents/openai.yaml"),
     resolve(chromeExtension, "manifest.json"),
