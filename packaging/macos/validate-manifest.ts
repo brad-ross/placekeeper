@@ -767,7 +767,16 @@ function validateHookContract(hookManifest: Record<string, unknown>): void {
 
 async function validateSkillContract(pluginRoot: string): Promise<void> {
   const canonicalSkill = await requiredSkill(pluginRoot);
-  const canonicalContract = normalizeCodexSkillContract(canonicalSkill);
+  const entrypoint = normalizeCodexSkillContract(canonicalSkill);
+  const references = ["live-evidence.md", "source-work.md"];
+  const referenceContents = await Promise.all(references.map(async (name) => {
+    const path = `references/${name}`;
+    if (!entrypoint.includes(`](${path})`)) {
+      throw new Error(`The packaged Placekeeper skill must link ${path}`);
+    }
+    return readFile(resolve(pluginRoot, `skills/${CODEX_SKILL_NAME}/${path}`), "utf8");
+  }));
+  const canonicalContract = [entrypoint, ...referenceContents].join("\n");
   const requiredContractFragments = [
     `${CODEX_INSTALLED_LAUNCHER_COMMAND} open --json --surface codex --pdf <absolute-local-pdf-path>`,
     "recovery-offered",
