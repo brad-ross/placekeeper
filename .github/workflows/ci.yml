@@ -46,8 +46,8 @@ jobs:
         run: pnpm exec playwright install --with-deps chromium webkit
       - name: Generate PDF fixtures
         run: pnpm fixtures:pdf
-      - name: Build web distribution
-        run: pnpm build:web
+      - name: Build shared client distributions
+        run: pnpm build
       - name: Run canonical unit tests
         run: pnpm test:ci:unit
       - name: Run Chromium acceptance tests
