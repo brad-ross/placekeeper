@@ -72,6 +72,7 @@ test('document history keeps the other toolbar controls mounted and visible', as
     await page.getByRole('button', { name: 'Open PDF link to Primary result, Page 2', exact: true }).click();
     await page.getByRole('menuitem', { name: 'Open in main document', exact: true }).click();
     await expect(page.getByRole('textbox', { name: /^Current page/ })).toHaveValue('2');
+    await page.locator('[data-review-chrome]').hover({ position: { x: 2, y: 2 } });
     await page.evaluate(() => {
       const nodes = [...document.querySelectorAll<HTMLElement>(
         '[data-review-chrome] > .review-chrome__identity, [data-review-chrome] > .review-chrome__left-controls .review-chrome__page-position, [data-review-chrome] > .review-chrome__viewer-controls .review-chrome__zoom-cluster, [data-review-chrome] > .review-chrome__left-controls [data-review-copy-link]',

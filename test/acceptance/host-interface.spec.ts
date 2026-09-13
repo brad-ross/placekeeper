@@ -40,7 +40,14 @@ for (const source of ['main', 'reference']) {
         name: 'Open PDF link to Target-to-target detail link, Page 3',
       });
       await link.scrollIntoViewIfNeeded();
-      await link.click();
+      const mainAction = page.getByRole('menuitem', { name: 'Open in main document', exact: true });
+      await expect(async () => {
+        if (!await mainAction.isVisible()) {
+          await link.focus();
+          await link.press('Enter');
+        }
+        await expect(mainAction).toBeVisible({ timeout: 1_000 });
+      }).toPass({ timeout: 5_000 });
     }
     await page.getByRole('menuitem', { name: 'Open in main document', exact: true }).click();
     const pageInput = page.getByRole('textbox', { name: /^Current page \d+ of \d+/u });
