@@ -10,7 +10,7 @@ import { setupChrome } from './setup-chrome.mjs';
 
 const execute = promisify(execFile);
 const hosts = ['chrome', 'vscode', 'codex'];
-const labels = { chrome: 'Chrome', vscode: 'VS Code', codex: 'Codex' };
+const labels = { chrome: 'Chrome (experimental)', vscode: 'VS Code', codex: 'Codex' };
 const marketplaceName = 'placekeeper-installed';
 
 export function parseChoices(args) {

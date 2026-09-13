@@ -108,7 +108,7 @@ test('Codex rejects an unverifiable plugin install rather than claiming completi
 test('actual installed helper with no controlling terminal exits without prompting or host access', async () => {
   const { stdout } = await promisify(execFile)(process.execPath, [resolve('packaging/macos/setup-integrations.mjs'), appPath], { detached: true, timeout: 5_000 });
   assert.match(stdout, /No terminal was available/);
-  assert.match(stdout, /Chrome: skipped/);
+  assert.match(stdout, /Chrome \(experimental\): skipped/);
   assert.match(stdout, /VS Code: skipped/);
   assert.match(stdout, /Codex: skipped/);
 });

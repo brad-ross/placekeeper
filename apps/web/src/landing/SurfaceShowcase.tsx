@@ -15,7 +15,7 @@ const windowCaptures = {
 const surfaces = [
   { id: 'mac', label: 'Mac', icon: macIcon, description: 'Make Placekeeper your everyday document reader. Open local files with autosave and recovery.' },
   { id: 'chatgpt', label: 'ChatGPT', icon: chatgptIcon, description: 'Discuss the document and your comments in ChatGPT’s in-app browser.' },
-  { id: 'chrome', label: 'Chrome Extension', icon: chromeIcon, description: 'Open a document on the web and keep reading in its original tab, with Placekeeper’s tools at hand.' },
+  { id: 'chrome', label: 'Chrome Extension (experimental)', icon: chromeIcon, description: 'Open a document on the web and keep reading in its original tab, with Placekeeper’s tools at hand.' },
   { id: 'vscode', label: 'VS Code', icon: vscodeIcon, description: 'Review LaTeX output beside the source. Follow rebuilds and jump between the document and your editor.' },
   { id: 'browser', label: 'Web', icon: null, description: 'Open a local document or a public link without installing anything. Export a copy to keep your annotations.' },
 ] as const;
