@@ -4,7 +4,12 @@ const { createRoot } = vi.hoisted(() => ({ createRoot: vi.fn() }));
 
 vi.mock("react-dom/client", () => ({ createRoot }));
 
-import { mountStaticBrowserApp } from "../src/static-entry.js";
+import { renderToStaticMarkup } from "react-dom/server";
+import { createElement } from "react";
+import { SOURCE_INSTALL_COMMAND as RELEASE_INSTALL_COMMAND } from "../../../scripts/package-source-release.js";
+import { SOURCE_INSTALL_COMMAND } from "../src/landing/InstallDialog.js";
+
+import { StaticLauncher, mountStaticBrowserApp } from "../src/static-entry.js";
 
 class FakeHTMLElement {
   readonly attributes = new Map<string, string>();
@@ -120,5 +125,21 @@ describe("static browser startup guards", () => {
     expect(renderedText(root)).toContain(message);
     expect(renderedText(root)).not.toContain("Upload PDF");
     expect(createRoot).not.toHaveBeenCalled();
+  });
+});
+
+
+describe("landing installation contract", () => {
+  it("shows the exact release bootstrap command and qualified prerequisites in one mounted dialog", () => {
+    expect(SOURCE_INSTALL_COMMAND).toBe(RELEASE_INSTALL_COMMAND);
+    const markup = renderToStaticMarkup(createElement(StaticLauncher, { onOpen: async () => {} }));
+    expect(markup.match(/<dialog\b/g)).toHaveLength(1);
+    expect(markup.match(/aria-haspopup="dialog"/g)).toHaveLength(2);
+    expect(markup).not.toContain("archive/refs/heads/main.zip");
+    expect(markup).toContain("Apple silicon");
+    expect(markup).toContain("macOS 13+");
+    expect(markup).toContain("Swift 6+");
+    expect(markup).toContain("may require a newer macOS");
+    expect(markup).toContain("https://developer.apple.com/documentation/xcode/installing-the-command-line-tools");
   });
 });

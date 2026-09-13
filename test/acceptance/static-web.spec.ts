@@ -846,3 +846,92 @@ test('@critical demo starts fitted and Fit Width keeps the requested scale', asy
     }
   }
 });
+
+
+for (const width of [1440, 390]) test(`@critical installation dialog preserves the demo and equal divider spacing at ${width}px`, async ({ page }) => {
+  await page.setViewportSize({ width, height: 1000 });
+  await page.goto('./');
+  const demo = page.frameLocator('iframe[aria-hidden="false"]');
+  await demo.locator('[data-initial-view-ready="true"]').waitFor({ state: 'attached' });
+  await page.getByRole('tab', { name: 'Make comments', exact: true }).click();
+  await expect(demo.locator('[data-owned-mark]')).toHaveCount(5);
+  const identity = await demo.locator('body').evaluate(() => performance.timeOrigin);
+  const separator = page.locator('.static-launcher__separator');
+  const spacing = await separator.evaluate((element) => {
+    const bounds = element.getBoundingClientRect();
+    return {
+      above: bounds.top - element.previousElementSibling!.getBoundingClientRect().bottom,
+      below: element.nextElementSibling!.getBoundingClientRect().top - bounds.bottom,
+    };
+  });
+  expect(spacing.above).toBeGreaterThan(0);
+  expect(Math.abs(spacing.above - spacing.below)).toBeLessThan(1);
+  const triggers = page.getByRole('button', { name: 'Install', exact: true });
+  await expect(triggers).toHaveCount(2);
+  const dialog = page.getByRole('dialog', { name: 'Install Placekeeper', exact: true });
+  for (const index of [0, 1]) {
+    await triggers.nth(index).click();
+    await expect(dialog).toBeVisible();
+    await expect(page.locator('dialog')).toHaveCount(1);
+    const close = dialog.getByRole('button', { name: 'Close installation dialog' });
+    const copy = dialog.getByRole('button', { name: 'Copy command', exact: true });
+    await expect(close).toBeFocused();
+    await page.keyboard.press('Shift+Tab');
+    await expect(copy).toBeFocused();
+    await page.keyboard.press('Tab');
+    await expect(close).toBeFocused();
+    for (let step = 0; step < 6; step += 1) {
+      await page.keyboard.press('Tab');
+      expect(await dialog.evaluate((element) => element.contains(document.activeElement))).toBe(true);
+    }
+    expect(await dialog.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+    const bounds = (await dialog.boundingBox())!;
+    expect(bounds.x).toBeGreaterThanOrEqual(0);
+    expect(bounds.x + bounds.width).toBeLessThanOrEqual(width);
+    if (index === 0) await page.keyboard.press('Escape');
+    else await close.click();
+    await expect(dialog).toBeHidden();
+    await expect(triggers.nth(index)).toBeFocused();
+    expect(await demo.locator('body').evaluate(() => performance.timeOrigin)).toBe(identity);
+    await expect(page.getByRole('tab', { name: 'Make comments', exact: true })).toHaveAttribute('aria-selected', 'true');
+    await expect(demo.locator('[data-owned-mark]')).toHaveCount(5);
+  }
+  await triggers.first().click();
+  await page.mouse.click(2, 2);
+  await expect(dialog).toBeHidden();
+  await expect(triggers.first()).toBeFocused();
+});
+
+test('@critical installation command reports clipboard success and remains selectable on failure', async ({ page }) => {
+  await page.goto('./');
+  await page.evaluate(() => {
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: {
+      writeText: async (text: string) => { document.body.dataset.copiedInstallCommand = text; },
+    } });
+  });
+  await page.getByRole('button', { name: 'Install', exact: true }).first().click();
+  const dialog = page.getByRole('dialog', { name: 'Install Placekeeper', exact: true });
+  const command = dialog.getByLabel('Install command', { exact: true });
+  const text = await command.textContent();
+  await dialog.getByRole('button', { name: 'Copy command', exact: true }).click();
+  await expect(dialog.getByRole('status')).toHaveText('Command copied.');
+  await expect(page.locator('body')).toHaveAttribute('data-copied-install-command', text!);
+  await page.evaluate(() => {
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: {
+      writeText: async () => { throw new DOMException('Denied', 'NotAllowedError'); },
+    } });
+  });
+  await dialog.getByRole('button', { name: 'Copy command', exact: true }).click();
+  await expect(dialog.getByRole('status')).toHaveText('Couldn’t copy. Select the command and copy it manually.');
+  expect(await command.evaluate((element) => {
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    const selection = getSelection()!;
+    selection.removeAllRanges();
+    selection.addRange(range);
+    return selection.toString();
+  })).toBe(text);
+  await page.keyboard.press('Escape');
+  await page.getByRole('button', { name: 'Install', exact: true }).first().click();
+  await expect(dialog.getByRole('status')).toBeEmpty();
+});
