@@ -112,7 +112,7 @@ test('PDF text selection remains visibly colored when annotation actions appear'
   })));
   expect(colors.length).toBeGreaterThan(0);
   for (const color of colors) {
-    expect(color.background).toBe('rgb(219, 231, 255)');
+    expect(color.background).toBe('rgb(207, 222, 234)');
     expect(color.mix).toBe('multiply');
     expect(color.width).toBeGreaterThan(0);
     expect(color.height).toBeGreaterThan(0);
@@ -167,7 +167,7 @@ test('reference PDF selection uses the visible PDF color independently of tray s
   const rectangles = pdfPage.locator(':scope > div[style*="mix-blend-mode"] > div');
   await expect.poll(() => rectangles.count()).toBeGreaterThan(0);
   for (const color of await rectangles.evaluateAll((els) => els.map((el) => getComputedStyle(el).backgroundColor))) {
-    expect(color).toBe('rgb(219, 231, 255)');
+    expect(color).toBe('rgb(207, 222, 234)');
   }
   await page.screenshot({ animations: 'disabled', path: test.info().outputPath('visible-reference-selection.png') });
 });
