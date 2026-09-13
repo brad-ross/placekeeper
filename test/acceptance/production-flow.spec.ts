@@ -53,11 +53,16 @@ async function currentZoomText(page: Page): Promise<string> {
 }
 
 async function zoomInOnce(page: Page): Promise<void> {
+  await page.locator('[data-review-stage]').evaluate(async element => {
+    await Promise.all(element.getAnimations({ subtree: true }).map(animation => animation.finished.catch(() => undefined)));
+  });
   await page.locator('[data-review-chrome]').hover({ position: { x: 2, y: 2 } });
   await page.getByRole('button', { name: 'Open zoom controls' }).click();
   const menu = page.getByRole('menu', { name: 'PDF zoom' });
+  const previousZoom = Number.parseInt(await currentZoomText(page), 10);
   await menu.getByRole('menuitem', { name: 'Zoom in' }).click();
   await page.keyboard.press('Escape');
+  await expect.poll(async () => Number.parseInt(await currentZoomText(page), 10)).toBeGreaterThan(previousZoom);
 }
 
 async function installSelectionCaptureGate(page: Page): Promise<void> {
@@ -399,6 +404,7 @@ async function openFreshProductionFixture(
   await page.goto(launched.url);
   try {
     await expect(page.locator("[data-production-review]")).toBeVisible();
+    await expect(page.locator("[data-production-review]")).toHaveAttribute("data-initial-view-ready", "true");
     await expect(page.locator(".pdf-workspace:not(.pdf-workspace--reference) [data-page-index='0']"))
       .toBeVisible({ timeout: PRODUCTION_VIEWER_READY_TIMEOUT_MS });
   } catch (error) {
@@ -484,14 +490,20 @@ test.beforeAll(async () => {
   titledDocument.addPage([612, 792]);
   await writeFile(metadataTitlePdf, await titledDocument.save());
   await copyFile(resolve("test/fixtures/latex/paper.tex"), join(sourceRoot, "paper.tex"));
+});
+
+test.beforeEach(async () => {
   host = await PlacekeeperHost.start({
-    recoveryRoot: join(root, "recovery"),
+    recoveryRoot: join(root, `recovery-${randomUUID()}`),
     webAssets: { root: resolve("dist/web") },
   });
 });
 
-test.afterAll(async () => {
+test.afterEach(async () => {
   await host?.close();
+});
+
+test.afterAll(async () => {
   if (root) await rm(root, { recursive: true, force: true });
 });
 
@@ -557,6 +569,7 @@ test('records links opened from References in Main document history', async ({ p
   await expect.poll(() => currentPageText(page)).toBe('1 / 4');
   const forward = page.getByRole('button', { name: 'Forward in document history' });
   await expect(forward).toBeEnabled();
+  await page.locator('[data-review-chrome]').hover({ position: { x: 2, y: 2 } });
   await forward.click();
   await expect.poll(() => currentPageText(page)).toBe('3 / 4');
 });
@@ -570,6 +583,7 @@ test('keeps toolbar icons visible throughout document-history navigation', async
   await page.getByRole('menuitem', { name: 'Open in main document' }).click();
   await expect.poll(() => currentPageText(page)).toBe('2 / 4');
   const back = page.getByRole('button', { name: 'Back in document history' });
+  await page.locator('[data-review-chrome]').hover({ position: { x: 2, y: 2 } });
   await back.hover();
   const expectedHistoryBackground = await back.evaluate(() => {
     const probe = document.createElement('span');
@@ -590,7 +604,7 @@ test('keeps toolbar icons visible throughout document-history navigation', async
     const stableIcons = [...document.querySelectorAll<SVGElement>(stableIconSelector)];
     const navigation = document.querySelector<HTMLElement>('.review-chrome__navigation-cluster');
     const initialHistoryControl = document.querySelector<HTMLElement>(
-      '[data-review-chrome] > .review-chrome__viewer-controls [data-main-history="back"]',
+      '[data-review-chrome] > .review-chrome__left-controls [data-main-history="back"]',
     );
     if (!navigation || !initialHistoryControl || stableIcons.length === 0) {
       throw new Error('Toolbar continuity probe could not find its controls.');
@@ -615,7 +629,7 @@ test('keeps toolbar icons visible throughout document-history navigation', async
     let frames = 0;
     const inspect = () => {
       const historyControls = [...document.querySelectorAll<HTMLElement>(
-        '[data-review-chrome] > .review-chrome__viewer-controls [data-main-history]',
+        '[data-review-chrome] > .review-chrome__left-controls [data-main-history]',
       )];
       const painted = (node: Element) => {
         const bounds = node.getBoundingClientRect();
@@ -864,15 +878,20 @@ for (const viewportWidth of [1280, 760]) {
     await zoom.fill('100');
     await zoom.press('Enter');
     await expect(zoom).toHaveValue('100');
-    const viewportBounds = await main.locator('[data-viewer-framing-viewport]').boundingBox();
     const rightFade = page.locator('.review-overlay-frame__right-fade:visible');
-    const fadeBounds = await rightFade.count() > 0 ? await rightFade.boundingBox() : null;
-    if (!viewportBounds) throw new Error('Reading viewport geometry unavailable');
-    const readingRight = fadeBounds?.x ?? viewportBounds.x + viewportBounds.width;
-    const fittedPercent = Math.floor((readingRight - viewportBounds.x - 24) / mixedWidthDocument.getPage(0).getWidth() * 100);
-    await zoom.fill(String(fittedPercent));
+    const zoomTrigger = page.getByRole('button', { name: 'Open zoom controls' });
+    await zoomTrigger.focus();
+    if (await zoomTrigger.getAttribute('aria-expanded') === 'true') await zoomTrigger.press('Escape');
+    await expect(zoomTrigger).toHaveAttribute('aria-expanded', 'false');
+    await zoomTrigger.press('Enter');
+    await page.getByRole('menuitem', { name: 'Fit width', exact: true }).click();
+    await page.keyboard.press('Escape');
+    // Use the app's settled fit geometry, then preserve that scale as manual zoom.
+    await expect.poll(() => zoom.inputValue()).not.toBe('100');
+    const fittedPercent = await zoom.inputValue();
+    await zoom.fill(fittedPercent);
     await zoom.press('Enter');
-    await expect(zoom).toHaveValue(String(fittedPercent));
+    await expect(zoom).toHaveValue(fittedPercent);
     const fittedZoom = await zoom.inputValue();
     await page.getByRole('searchbox', { name: 'Search this PDF' }).fill('stable');
     await expect(results).toHaveCount(2);
@@ -1635,7 +1654,8 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
   });
   expect(bottomPanelGeometry).toEqual({ top: 12, right: 12, bottom: 12, left: 12 });
   await expect(page.locator('.reference-panel__actions')).toHaveCount(0);
-  await expect.poll(() => documentRequests.length).toBe(2);
+  // Main viewer, source-annotation style inventory, and the shared reference viewer.
+  await expect.poll(() => documentRequests.length).toBe(3);
   expect(new Set(documentRequests.map(({ url }) => url)).size).toBe(1);
   expect(documentRequests.every(({ authorization, cookie }) => (
     authorization?.startsWith("Bearer ") === true && cookie === undefined
@@ -1681,7 +1701,7 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
   if (!bottomSplitterBox || !initialBottomBounds) {
     throw new Error("Bottom References edge controls have no bounds.");
   }
-  expect(bottomSplitterBox.y + bottomSplitterBox.height / 2).toBeCloseTo(initialBottomBounds.y, 0);
+  expect(bottomSplitterBox.y).toBeCloseTo(initialBottomBounds.y, 0);
   expect(await bottomSplitter.evaluate((element) => getComputedStyle(element).cursor)).toBe("ns-resize");
   await page.mouse.move(
     bottomSplitterBox.x + bottomSplitterBox.width / 2,
@@ -1831,7 +1851,7 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
     workspace.boundingBox(),
   ]);
   if (!rightSplitterBox || !initialRightBounds) throw new Error("Right References edge has no bounds.");
-  expect(rightSplitterBox.x + rightSplitterBox.width / 2).toBeCloseTo(initialRightBounds.x, 0);
+  expect(rightSplitterBox.x).toBeCloseTo(initialRightBounds.x, 0);
   expect(await rightSplitter.evaluate((element) => getComputedStyle(element).cursor)).toBe("ew-resize");
   const initialRightValue = Number(await rightSplitter.getAttribute("aria-valuenow"));
   await page.mouse.move(
@@ -1982,7 +2002,16 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
   await expect(page.locator("[data-review-stage]")).toHaveAttribute("data-reference-layout", "wide-split");
   await expect(toolsWorkspace).toHaveAttribute("data-tools-workspace-open", "true");
   await expect(workspace).toHaveAttribute("data-workspace-presentation", "bottom");
-  await expect.poll(() => currentZoomText(page)).toBe(zoomBeforeDocking);
+  // The default fit-width scale refits when the tools tray occupies reading space.
+  await expect.poll(async () => Number.parseInt(await currentZoomText(page), 10))
+    .toBeLessThan(Number.parseInt(zoomBeforeDocking, 10));
+  await expect.poll(async () => {
+    const viewport = await mainViewport.boundingBox();
+    const paper = await mainPageOne.boundingBox();
+    const fade = await page.locator('.review-overlay-frame__right-fade:visible').boundingBox();
+    if (!viewport || !paper || !fade) return Number.POSITIVE_INFINITY;
+    return Math.max(viewport.x - paper.x, paper.x + paper.width - fade.x);
+  }).toBeLessThan(2);
   await expect.poll(async () => {
     const bounds = await primaryReferencePage.boundingBox();
     if (!bounds) return Number.POSITIVE_INFINITY;
@@ -2050,9 +2079,11 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
   const back = page.getByRole("button", { name: "Back in document history" });
   const forward = page.getByRole("button", { name: "Forward in document history" });
   await expect(back).toBeEnabled();
+  await page.locator('[data-review-chrome]').hover({ position: { x: 2, y: 2 } });
   await back.click();
   await expect.poll(() => currentPageText(page)).toBe("1 / 4");
   await expect(forward).toBeEnabled();
+  await page.locator('[data-review-chrome]').hover({ position: { x: 2, y: 2 } });
   await forward.click();
   await expect(page.locator(".review-workspace__status")).toHaveText(
     "Moved forward in document history.",
@@ -2507,10 +2538,12 @@ test("records annotation tray jumps in document history", async ({ page }) => {
   await expect.poll(() => currentPageText(page)).toBe("3 / 4");
   await expect(back).toBeEnabled();
 
+  await page.locator('[data-review-chrome]').hover({ position: { x: 2, y: 2 } });
   await back.click();
   await expect.poll(() => currentPageText(page)).toBe("1 / 4");
   await expect(forward).toBeEnabled();
 
+  await page.locator('[data-review-chrome]').hover({ position: { x: 2, y: 2 } });
   await forward.click();
   await expect.poll(() => currentPageText(page)).toBe("3 / 4");
 });
@@ -2547,11 +2580,15 @@ for (const seededAnnotation of [false, true]) {
       'true',
     );
 
+    await page.locator('[data-review-stage]').evaluate(async element => {
+      await Promise.all(element.getAnimations({ subtree: true }).map(animation => animation.finished.catch(() => undefined)));
+    });
     const viewport = page.locator('[data-viewer-framing-viewport]');
     await expect(viewport).toHaveCount(1);
-    await viewport.evaluate((element) => {
+    await expect.poll(async () => viewport.evaluate((element) => {
       element.scrollTop = Math.min(420, Math.max(0, element.scrollHeight - element.clientHeight));
-    });
+      return element.scrollTop;
+    })).toBeGreaterThan(0);
     const readingTop = await viewport.evaluate((element) => element.scrollTop);
     expect(readingTop).toBeGreaterThan(0);
 
@@ -2724,6 +2761,9 @@ test("switches and sends references from the right-docked workspace", async ({ p
   await expect(workspace).toHaveAttribute("data-workspace-presentation", "right");
   await expect.poll(() => workspace.evaluate((element) => getComputedStyle(element).transform))
     .toBe("none");
+  await workspace.evaluate(async element => {
+    await Promise.all(element.getAnimations({ subtree: true }).map(animation => animation.finished.catch(() => undefined)));
+  });
   const rightTabGeometry = await page.getByRole("tablist", { name: "Open references" })
     .evaluate((tablist) => [...tablist.querySelectorAll<HTMLElement>(
       '[data-reference-tab-segment]',
@@ -2746,8 +2786,9 @@ test("switches and sends references from the right-docked workspace", async ({ p
       };
     }));
   expect(rightTabGeometry).toHaveLength(2);
-  expect(rightTabGeometry[0]!.width).toBeCloseTo(184, 0);
-  expect(rightTabGeometry[1]!.width).toBeCloseTo(rightTabGeometry[0]!.width, 0);
+  // Horizontal tabs size to their labels, with the longer title capped at 184px.
+  expect(rightTabGeometry[0]!.width).toBeLessThan(rightTabGeometry[1]!.width);
+  expect(rightTabGeometry[1]!.width).toBeCloseTo(184, 0);
   expect(rightTabGeometry[1]!.selectorWidth).toBeLessThan(rightTabGeometry[1]!.width - 50);
   expect(rightTabGeometry[1]!.actionSizes).toHaveLength(2);
   for (const action of rightTabGeometry[1]!.actionSizes) {
@@ -3187,7 +3228,7 @@ test("keeps outline and rejected link metadata inert inside the installed local 
     };
   });
   expect(pageMetadataGeometry.gap).toBeGreaterThanOrEqual(10);
-  expect(pageMetadataGeometry.trailing).toBeCloseTo(0, 0);
+  expect(pageMetadataGeometry.trailing).toBeCloseTo(-6, 0);
 
   await page.keyboard.press(forwardTab);
   await expect(nestedReference).toBeFocused();
@@ -3311,7 +3352,7 @@ test("keeps outline and rejected link metadata inert inside the installed local 
   expect(nestedLongLabelGeometry.pageRight)
     .toBeLessThanOrEqual(nestedLongLabelGeometry.destinationRight);
   expect(nestedLongLabelGeometry.pageGap).toBeGreaterThanOrEqual(10);
-  expect(nestedLongLabelGeometry.pageTrailing).toBeCloseTo(0, 0);
+  expect(nestedLongLabelGeometry.pageTrailing).toBeCloseTo(-6, 0);
   expect(nestedLongLabelGeometry).toMatchObject({
     labelOverflow: "visible",
     labelTextOverflow: "clip",
@@ -3320,7 +3361,7 @@ test("keeps outline and rejected link metadata inert inside the installed local 
   await outline.evaluate((element) => { element.style.removeProperty("width"); });
 
   await page.getByRole("tab", { name: "Annotations", exact: true }).click();
-  const sourceRows = workspace.locator('[data-annotation-origin="source"]');
+  const sourceRows = workspace.locator('[data-annotation-origin="owned"]');
   const unsectionedPageOne = sourceRows.filter({
     has: page.locator('.annotation-item__page', { hasText: /^1$/u }),
   }).first();
@@ -3339,7 +3380,7 @@ test("keeps outline and rejected link metadata inert inside the installed local 
   await expect(nestedAnnotation.locator('.annotation-item__page')).toHaveText('3');
   await expect(nestedAnnotation.locator('.annotation-item__separator')).toHaveCount(0);
   await expect(nestedAnnotation.locator('.annotation-item__section')).toHaveCount(0);
-  await expect(nestedAnnotation.getByRole('button')).toHaveAccessibleName(
+  await expect(nestedAnnotation.locator('.annotation-item__navigation')).toHaveAccessibleName(
     /Page 3/u,
   );
   await page.getByRole("tab", { name: "Outline", exact: true }).click();
@@ -3475,6 +3516,7 @@ test("keeps outline and rejected link metadata inert inside the installed local 
 
   const back = page.getByRole("button", { name: "Back in document history" });
   const forward = page.getByRole("button", { name: "Forward in document history" });
+  await page.locator('[data-review-chrome]').hover({ position: { x: 2, y: 2 } });
   await back.click();
   await expect.poll(() => currentPageText(page)).toBe("1 / 4");
   await expect(back).toHaveCount(0);
@@ -3594,7 +3636,7 @@ test("retries one failed reference clone without exposing raw load details", asy
       ...(headers.authorization === undefined ? {} : { authorization: headers.authorization }),
       ...(headers.cookie === undefined ? {} : { cookie: headers.cookie }),
     });
-    if (documentRequestCount === 2) {
+    if (documentRequestCount === 3) {
       await route.abort("failed");
       return;
     }
@@ -3635,7 +3677,7 @@ test("retries one failed reference clone without exposing raw load details", asy
 test('creates an insertion from middle-of-line PDFium caret geometry', async ({ page }) => {
   await page.setViewportSize({ width: 760, height: 720 });
   const launched = await host.open({
-    pdfPath: await freshProductionPdf(pdf),
+    pdfPath: await freshProductionPdf(plainTextPdf),
     sourceRootPath: sourceRoot,
     fork: true,
   });
@@ -3644,11 +3686,12 @@ test('creates an insertion from middle-of-line PDFium caret geometry', async ({ 
   }
   await page.goto(launched.url);
   await chooseFreshCopyDestination(page);
+  const revisionBeforeInsertion = host.broker.state(launched.sessionId)!.revision;
 
   const pdfPage = page.locator("[data-page-index='0']").first();
   await expect(pdfPage).toBeVisible();
   await waitForRenderedPageImage(pdfPage);
-  await dragPdfPointer(page, pdfPage, { x: 150, y: 99 }, { x: 154, y: 99 });
+  await dragPdfPointer(page, pdfPage, { x: 150, y: 99 }, { x: 150, y: 99 });
 
   const insertionCaret = page.locator('[data-review-insertion-caret]');
   await expect(insertionCaret).toBeVisible();
@@ -3692,7 +3735,7 @@ test('creates an insertion from middle-of-line PDFium caret geometry', async ({ 
   await composer.getByRole('textbox', { name: 'Insertion' }).fill('Precisely ');
   await composer.getByRole('button', { name: 'Apply' }).click();
 
-  await expect.poll(() => host.broker.state(launched.sessionId)?.revision).toBe(1);
+  await expect.poll(() => host.broker.state(launched.sessionId)?.revision).toBe(revisionBeforeInsertion + 1);
   expect(host.broker.state(launched.sessionId)?.items).toEqual([
     expect.objectContaining({
       kind: 'insert',
@@ -3786,6 +3829,8 @@ test("one installed-style browser tree preserves review state across responsive 
   }
   const launchUrl = launched.url;
   const initialSessionId = launched.sessionId;
+  const initialItems = host.broker.state(initialSessionId)!.items;
+  const initialIds = new Set(initialItems.map(item => item.id));
   const assetResponses: string[] = [];
   const contactedOrigins = new Set<string>();
   page.on("request", (request) => contactedOrigins.add(new URL(request.url()).origin));
@@ -3806,6 +3851,8 @@ test("one installed-style browser tree preserves review state across responsive 
   await expect.poll(() => assetResponses.some((url) => url.endsWith("/pdfium.wasm"))).toBe(true);
 
   await expect(page.getByRole("button", { name: "Proofread mode" })).toHaveCount(0);
+  await chooseFreshCopyDestination(page);
+  const revisionBeforeReplacement = host.broker.state(initialSessionId)!.revision;
   const pageCanvas = page.locator("[data-page-index='0']").first();
   await expect(pageCanvas).toBeVisible();
   await expect.poll(() => currentPageText(page)).toBe('1 / 1');
@@ -3852,23 +3899,16 @@ test("one installed-style browser tree preserves review state across responsive 
   const originalDigest = await sha256(sourcePdfPath);
   await replacementComposer.getByRole("button", { name: "Apply" }).click();
   await expect(replacementComposer).toHaveCount(0);
-  const destinationDialog = page.getByRole("dialog", { name: "Choose Where to Save Annotations" });
-  await expect(destinationDialog).toBeVisible();
-  await expect(destinationDialog.getByRole("radio", { name: /Save to a new copy/u })).toBeChecked();
-  await expect(destinationDialog.getByRole("textbox", { name: "Copy name" })).toHaveValue(
-    "paper-annotated.pdf",
-  );
-  expect(host.broker.state(initialSessionId)?.revision).toBe(0);
-  await destinationDialog.getByRole("button", { name: "Confirm" }).click();
-  await expect(destinationDialog).toHaveCount(0);
   await expect(pageCanvas.locator(':scope > div[style*="mix-blend-mode"]')).toHaveCount(0);
   await expect(page.getByRole('toolbar', { name: 'Selection review actions' })).toHaveCount(0);
-  await expect(page.locator("[data-review-item]")).toHaveCount(1);
+  await expect(page.locator("[data-review-item]")).toHaveCount(initialItems.length + 1);
   await expect.poll(() => host.broker.saveStatus(initialSessionId)?.sync.phase).toBe("clean");
   const replacementState = host.broker.state(initialSessionId);
-  expect(replacementState?.revision).toBe(1);
-  expect(replacementState?.items).toHaveLength(1);
-  expect(replacementState?.items[0]).toMatchObject({
+  expect(replacementState?.revision).toBe(revisionBeforeReplacement + 1);
+  expect(replacementState?.items).toHaveLength(initialItems.length + 1);
+  const replacementItem = replacementState?.items.find(item => !initialIds.has(item.id));
+  expect(replacementState?.items.filter(item => initialIds.has(item.id))).toEqual(initialItems);
+  expect(replacementItem).toMatchObject({
     kind: "replace",
     pageIndex: 0,
     payload: {
@@ -3877,12 +3917,12 @@ test("one installed-style browser tree preserves review state across responsive 
       reliable: true,
     },
   });
-  const replacementSegments = replacementState?.items[0]?.payload.segmentRects;
+  const replacementSegments = replacementItem?.payload.segmentRects;
   expect(Array.isArray(replacementSegments)).toBe(true);
-  expect(replacementState?.items[0]?.payload.rect).toEqual(
+  expect(replacementItem?.payload.rect).toEqual(
     Array.isArray(replacementSegments) ? replacementSegments[0] : undefined,
   );
-  expect(replacementState?.items[0]?.payload.rect).toEqual({
+  expect(replacementItem?.payload.rect).toEqual({
     x: 72,
     y: 89,
     width: 338,
@@ -3920,6 +3960,7 @@ test('edits the current page and preserves real viewer state through responsive 
   const browserErrors = collectBrowserErrors(page);
   await page.goto(launched.url);
   await chooseFreshCopyDestination(page);
+  const navigationRevisionBaseline = host.broker.state(launched.sessionId)!.revision;
 
   const firstPage = page.locator("[data-page-index='0']").first();
   const secondPage = page.locator("[data-page-index='1']").first();
@@ -3941,7 +3982,7 @@ test('edits the current page and preserves real viewer state through responsive 
   const composer = page.getByRole('region', { name: 'Page Note' });
   await composer.getByRole('textbox', { name: 'Comment' }).fill('Keep this surrounding review state.');
   await composer.getByRole('button', { name: 'Save', exact: true }).click();
-  await expect.poll(() => host.broker.state(launched.sessionId)?.revision).toBe(1);
+  await expect.poll(() => host.broker.state(launched.sessionId)?.revision).toBe(navigationRevisionBaseline + 1);
   await expect.poll(() => host.broker.saveStatus(launched.sessionId)?.sync.phase).toBe('clean');
 
   const { annotations, workspace: workspaceRail } = await openAnnotationsWorkspace(page);
@@ -3979,7 +4020,7 @@ test('edits the current page and preserves real viewer state through responsive 
   await expect(workspaceRail).toHaveAttribute('aria-expanded', 'true');
   await expect(annotations).toHaveAttribute('aria-selected', 'true');
   await expect(noteRow).toBeVisible();
-  expect(host.broker.state(launched.sessionId)?.revision).toBe(1);
+  expect(host.broker.state(launched.sessionId)?.revision).toBe(navigationRevisionBaseline + 1);
   expect(host.broker.state(launched.sessionId)?.items).toHaveLength(1);
 
   await expect.poll(() => viewerViewport.evaluate(async (element) => {
@@ -4079,7 +4120,7 @@ test('edits the current page and preserves real viewer state through responsive 
   await draftComposer.getByRole('button', { name: 'Apply', exact: true }).click();
   await expect(draftComposer).toHaveCount(0);
   await expect.poll(() => host.broker.saveStatus(launched.sessionId)?.sync.phase).toBe('clean');
-  expect(host.broker.state(launched.sessionId)?.revision).toBe(2);
+  expect(host.broker.state(launched.sessionId)?.revision).toBe(navigationRevisionBaseline + 2);
   expect(host.broker.state(launched.sessionId)?.items[0]?.payload)
     .toEqual(expect.objectContaining({ comment: 'Keep this draft through top-bar recomposition.' }));
   expect(browserErrors).toEqual([]);
@@ -4092,6 +4133,7 @@ test('returns a live PDF annotation preview through document history without ret
     'Fresh authoring Return launch failed',
   );
   await chooseFreshCopyDestination(page);
+  const revisionBeforeDraft = host.broker.state(launched.sessionId)!.revision;
 
   const firstPage = page.locator("[data-page-index='0']").first();
   await waitForRenderedPageImage(firstPage);
@@ -4127,11 +4169,13 @@ test('returns a live PDF annotation preview through document history without ret
   const back = page.getByRole('button', { name: 'Back in document history' });
   const forward = page.getByRole('button', { name: 'Forward in document history' });
   await expect(back).toBeEnabled();
+  await page.locator('[data-review-chrome]').hover({ position: { x: 2, y: 2 } });
   await back.click();
   await expect.poll(() => currentPageText(page)).toBe('2 / 2');
   await expect(composer).toBeVisible();
   await expect(editor).toHaveValue('Draft remains on the original page.');
   await expect(forward).toBeEnabled();
+  await page.locator('[data-review-chrome]').hover({ position: { x: 2, y: 2 } });
   await forward.click();
   await expect.poll(() => new URL(page.url()).hash).toContain('page=1');
   await expect(composer.locator('.comment-composer__anchor')).toHaveCount(0);
@@ -4140,7 +4184,7 @@ test('returns a live PDF annotation preview through document history without ret
   await editor.focus();
   await expect(editor).toBeFocused();
   await composer.getByRole('button', { name: 'Cancel' }).click();
-  expect(host.broker.state(launched.sessionId)?.revision).toBe(0);
+  expect(host.broker.state(launched.sessionId)?.revision).toBe(revisionBeforeDraft);
 });
 
 test('keeps a first-page multiline highlight composer stable and reveals one icon only when fully offscreen', async ({ page }) => {
@@ -4311,6 +4355,8 @@ test('adds, reads, and edits a full annotation through the production PDF', asyn
     'Full annotation production launch failed',
   );
   await chooseFreshCopyDestination(page);
+  const annotationBaseline = host.broker.state(launched.sessionId)!;
+  const baselineIds = new Set(annotationBaseline.items.map(item => item.id));
   const pdfPage = page.locator("[data-page-index='0']").first();
   await waitForRenderedPageImage(pdfPage);
   const pageBox = await pdfPage.boundingBox();
@@ -4324,10 +4370,10 @@ test('adds, reads, and edits a full annotation through the production PDF', asyn
   const createComposer = page.getByRole('region', { name: 'Page Note' });
   await createComposer.getByRole('textbox', { name: 'Comment' }).fill(initialComment);
   await createComposer.getByRole('button', { name: 'Save', exact: true }).click();
-  await expect.poll(() => host.broker.state(launched.sessionId)?.revision).toBe(1);
+  await expect.poll(() => host.broker.state(launched.sessionId)?.revision).toBe(annotationBaseline.revision + 1);
   await expect.poll(() => host.broker.saveStatus(launched.sessionId)?.sync.phase).toBe('clean');
 
-  const item = host.broker.state(launched.sessionId)?.items[0];
+  const item = host.broker.state(launched.sessionId)?.items.find(item => !baselineIds.has(item.id));
   if (!item) throw new Error('Saved full annotation is unavailable.');
   const markFocus = page.locator(`[data-owned-focus-id="${item.id}"]`);
   await markFocus.evaluate((element) => {
@@ -4345,7 +4391,7 @@ test('adds, reads, and edits a full annotation through the production PDF', asyn
   const revisedComment = 'The edited production note remains long enough to stay in the full annotation reader. '.repeat(7);
   await editComposer.getByRole('textbox', { name: 'Comment' }).fill(revisedComment);
   await editComposer.getByRole('button', { name: 'Apply', exact: true }).click();
-  await expect.poll(() => host.broker.state(launched.sessionId)?.revision).toBe(2);
+  await expect.poll(() => host.broker.state(launched.sessionId)?.revision).toBe(annotationBaseline.revision + 2);
   await expect.poll(() => host.broker.saveStatus(launched.sessionId)?.sync.phase).toBe('clean');
   await expect(reader).toContainText(revisedComment);
   await reader.getByRole('button', { name: 'Back', exact: true }).click();
@@ -4358,7 +4404,7 @@ test('adds, reads, and edits a full annotation through the production PDF', asyn
   const persistedRow = page.locator(`[data-review-item="${item.id}"]`);
   await expect(persistedRow).toBeVisible();
   await expect(persistedRow).toContainText(revisedComment);
-  expect(host.broker.state(launched.sessionId)?.revision).toBe(2);
+  expect(host.broker.state(launched.sessionId)?.revision).toBe(annotationBaseline.revision + 2);
 });
 
 test('keeps the right workspace inset and PDF runway stable across open and close', async ({ page }) => {
@@ -4496,7 +4542,7 @@ test('locks horizontal PDF scrolling at the current offset without blocking vert
     const lock = page.getByRole('menuitemcheckbox', { name: 'Horizontal lock' });
     const fit = (await page.getByRole('menuitem', { name: 'Fit width' }).boundingBox())!;
     const lockBounds = (await lock.boundingBox())!;
-    expect(lockBounds.x).toBeGreaterThanOrEqual(fit.x + fit.width);
+    expect(lockBounds.x + lockBounds.width).toBeLessThanOrEqual(fit.x);
     await lock.click();
     return lock;
   };
@@ -4535,12 +4581,14 @@ test('keeps native PDF scrollbars exposed without shifting pages', async ({ page
       const frame = document.querySelector('.review-overlay-frame')!;
       return {
         clip: getComputedStyle(frame).clipPath,
-        inset: Math.max(12, (element as HTMLElement).offsetWidth - element.clientWidth, (element as HTMLElement).offsetHeight - element.clientHeight),
+        rightInset: (element as HTMLElement).offsetWidth - element.clientWidth,
+        bottomInset: (element as HTMLElement).offsetHeight - element.clientHeight,
         bottom: element.getBoundingClientRect().bottom,
       };
     });
     // Decorative overlays leave the native scrollbar edge unobstructed.
-    expect(geometry.clip).toBe(`inset(0px ${geometry.inset}px ${geometry.inset}px 0px)`);
+    expect(geometry.clip).toBe(geometry.rightInset === 0 && geometry.bottomInset === 0
+      ? 'inset(0px)' : `inset(0px ${geometry.rightInset}px ${geometry.bottomInset}px 0px)`);
     expect(geometry.bottom).toBe(900);
     await expect(viewport).toHaveCSS('scrollbar-width', 'auto');
     await expect(viewport).toHaveCSS('scrollbar-color', await page.evaluate(() =>
@@ -4551,6 +4599,9 @@ test('keeps native PDF scrollbars exposed without shifting pages', async ({ page
       clientHeight: element.clientHeight,
       pageLeft: element.querySelector('[data-page-index]')!.getBoundingClientRect().left,
     }));
+    await page.locator('[data-review-stage]').evaluate(async element => {
+      await Promise.all(element.getAnimations({ subtree: true }).map(animation => animation.finished.catch(() => undefined)));
+    });
     const beforeScroll = await scrollGeometry();
     await viewport.evaluate((element) => { element.scrollTop += 25; });
     expect(await scrollGeometry()).toEqual(beforeScroll);
@@ -4904,9 +4955,9 @@ test('refits opening workspaces only from fit width and preserves manual reading
   const narrowStage = await stage.boundingBox();
   const bottomDrawer = await drawer.boundingBox();
   if (!narrowStage || !bottomDrawer) throw new Error('Bottom annotations geometry is unavailable.');
-  expect(bottomDrawer.x - narrowStage.x).toBeCloseTo(15, 0);
-  expect(narrowStage.x + narrowStage.width - bottomDrawer.x - bottomDrawer.width).toBeCloseTo(15, 0);
-  expect(narrowStage.y + narrowStage.height - bottomDrawer.y - bottomDrawer.height).toBeCloseTo(15, 0);
+  expect(bottomDrawer.x - narrowStage.x).toBeCloseTo(12, 0);
+  expect(narrowStage.x + narrowStage.width - bottomDrawer.x - bottomDrawer.width).toBeCloseTo(12, 0);
+  expect(narrowStage.y + narrowStage.height - bottomDrawer.y - bottomDrawer.height).toBeCloseTo(12, 0);
   expect(bottomDrawer.height).toBeCloseTo(narrowStage.height * 0.43, 0);
   expect(await currentZoomText(page)).toBe(zoomAfterManualAdjustment);
   await toggleWorkspace(page);
@@ -5030,6 +5081,7 @@ test('uses the same expanded review tree for a narrow VS Code embed launch', asy
   await page.setViewportSize({ width: 320, height: 720 });
   await page.goto(launched.url);
   await chooseFreshCopyDestination(page);
+  const revisionBeforeHistory = host.broker.state(launched.sessionId)!.revision;
   await expect(page.locator('[data-production-review]')).toHaveCount(1);
   const chrome = page.locator('[data-review-chrome]');
   await expect(chrome).toHaveCount(1);
@@ -5056,9 +5108,11 @@ test('uses the same expanded review tree for a narrow VS Code embed launch', asy
 
   const undo = page.getByRole('button', { name: 'Undo' });
   await expect(undo).toBeEnabled();
+  await chrome.hover({ position: { x: 2, y: 2 } });
   await undo.click();
   const redo = page.getByRole('button', { name: 'Redo' });
   await expect(redo).toBeEnabled();
+  await chrome.hover({ position: { x: 2, y: 2 } });
   await redo.click();
 
   const pageInput = page.getByRole('textbox', {
@@ -5163,8 +5217,8 @@ test('uses the same expanded review tree for a narrow VS Code embed launch', asy
   await toggleWorkspace(page);
   await expect(workspaceControl).toHaveAttribute('aria-expanded', 'false');
   expect(await scrollViewport.evaluate((element) => element.scrollLeft)).toBeCloseTo(touchScrollLeft, 0);
-  expect(host.broker.state(launched.sessionId)?.revision).toBe(3);
-  expect(host.broker.state(launched.sessionId)?.items).toHaveLength(1);
+  expect(host.broker.state(launched.sessionId)?.revision).toBe(revisionBeforeHistory + 2);
+  expect(host.broker.state(launched.sessionId)?.items).toHaveLength(initialState.items.length + 1);
 });
 
 for (const surface of ['browser', 'vscode'] as const) {
@@ -5248,9 +5302,8 @@ for (const surface of ['browser', 'vscode'] as const) {
       name: 'Reattach previous Highlight annotation on page 1',
     });
     await expect(pendingDraft).toBeFocused();
-    await expect(page.getByRole('region', { name: 'Annotations', exact: true }))
-      .toHaveAttribute('data-existing-annotations-state', 'ready');
-    await expect(page.locator('[data-existing-annotation][data-readonly="true"]')).not.toHaveCount(0);
+    await expect(page.getByRole('region', { name: 'Annotations', exact: true })
+      .locator('[data-annotation-origin="owned"]')).not.toHaveCount(0);
     await expect(viewer).toHaveAttribute('data-shared-menu-mount-probe', 'stable');
     expect(await currentZoomText(page)).toBe(zoomBefore);
     const panelGeometry = await page.locator('#workspace-panel-annotations').evaluate((element) => ({
@@ -5458,6 +5511,7 @@ test('rejects every review action from a real 13-page selection without changing
     'Cross-page 13-page review action launch failed',
   );
   await chooseFreshCopyDestination(page);
+  const revisionBeforeSelection = host.broker.state(launched.sessionId)!.revision;
   const main = page.locator('[data-pdf-copy-surface="main"]');
   await dragAcrossProductionPdfPages(page, main, 0, 12);
   await expect.poll(() => page.locator('[data-review-contextual-host]')
@@ -5470,7 +5524,7 @@ test('rejects every review action from a real 13-page selection without changing
     const limitError = page.locator('.review-toast--error');
     await expect(limitError).toBeVisible();
     await expect(limitError).toContainText('12 pages');
-    expect(host.broker.state(launched.sessionId)?.revision).toBe(0);
+    expect(host.broker.state(launched.sessionId)?.revision).toBe(revisionBeforeSelection);
     expect(host.broker.state(launched.sessionId)?.items).toHaveLength(0);
   }
 
@@ -5487,6 +5541,7 @@ for (const action of ['Replace', 'Delete', 'Highlight'] as const) {
       `Cross-page ${action} launch failed`,
     );
     await chooseFreshCopyDestination(page);
+    const revisionBeforeAction = host.broker.state(launched.sessionId)!.revision;
     const main = page.locator('[data-pdf-copy-surface="main"]');
     await dragAcrossProductionPdfPages(page, main, 0, 1);
     const actions = page.getByRole('toolbar', { name: 'Selection review actions' });
@@ -5502,7 +5557,7 @@ for (const action of ['Replace', 'Delete', 'Highlight'] as const) {
       await composer.getByRole('button', { name: 'Save', exact: true }).click();
     }
 
-    await expect.poll(() => host.broker.state(launched.sessionId)?.revision).toBe(1);
+    await expect.poll(() => host.broker.state(launched.sessionId)?.revision).toBe(revisionBeforeAction + 1);
     await expect.poll(() => host.broker.saveStatus(launched.sessionId)?.sync.phase).toBe('clean');
     const item = host.broker.state(launched.sessionId)?.items[0];
     expect(host.broker.state(launched.sessionId)?.items).toHaveLength(1);
@@ -5538,6 +5593,7 @@ test('copies only the focused Main or Reference selection and preserves DOM prec
     referencePdf,
     'Focused PDF copy launch failed',
   );
+  const initialItems = host.broker.state(launched.sessionId)!.items;
   const main = page.locator('[data-pdf-copy-surface="main"]');
   const primaryLink = main.getByRole('button', {
     name: 'Open PDF link to Primary result, Page 2',
@@ -5633,7 +5689,7 @@ test('copies only the focused Main or Reference selection and preserves DOM prec
   await pasteTarget.fill('');
   expect(await pasteNativeClipboard(page, pasteTarget)).toBe('native editable text');
   expect(host.broker.state(launched.sessionId)?.revision).toBe(0);
-  expect(host.broker.state(launched.sessionId)?.items).toHaveLength(0);
+  expect(host.broker.state(launched.sessionId)?.items).toEqual(initialItems);
   await expect(main.locator(':scope [data-page-index] > div[style*="mix-blend-mode"]'))
     .not.toHaveCount(0);
   await expect(reference.locator(':scope [data-page-index] > div[style*="mix-blend-mode"]'))
@@ -5742,6 +5798,7 @@ test('revokes Reference copy authority across tab switch, Send to Main, and fina
     referencePdf,
     'Reference copy lifecycle launch failed',
   );
+  const initialItems = host.broker.state(launched.sessionId)!.items;
   const main = page.locator('[data-pdf-copy-surface="main"]');
   const primaryLink = main.getByRole('button', {
     name: 'Open PDF link to Primary result, Page 2',
@@ -5822,7 +5879,7 @@ test('revokes Reference copy authority across tab switch, Send to Main, and fina
     defaultPrevented: false,
     text: '',
   });
-  expect(host.broker.state(launched.sessionId)?.items).toHaveLength(0);
+  expect(host.broker.state(launched.sessionId)?.items).toEqual(initialItems);
 });
 
 test('keeps PDF drag selection available while the Annotation Tray is open', async ({ page }) => {
@@ -5881,11 +5938,13 @@ test('keeps PDF drag selection available while the Annotation Tray is open', asy
   })).toEqual({ insideInertWorkspace: true, focusBlocked: true });
 });
 
-test("cancels the pending first annotation without choosing or creating a destination", async ({ page }) => {
+test("cancels the pending first annotation without modifying the PDF or creating a copy", async ({ page }) => {
   const cancelPdf = join(root, `cancel-${randomUUID()}.pdf`);
   await copyFile(pdf, cancelPdf);
   const launched = await host.open({ pdfPath: cancelPdf, sourceRootPath: sourceRoot, fork: true });
   if (!launched.ok || launched.kind === "recovery-offered") throw new Error("Cancel launch failed");
+  const initialReview = host.broker.state(launched.sessionId)!;
+  const originalBytes = await readFile(cancelPdf);
   await page.goto(launched.url);
   const pageCanvas = page.locator("[data-page-index='0']").first();
   await expect(pageCanvas).toBeVisible();
@@ -5896,23 +5955,17 @@ test("cancels the pending first annotation without choosing or creating a destin
   await expect(page.getByRole("region", { name: "Page Note" })).toBeVisible();
   const comment = composer.locator('textarea');
   await comment.fill("Do not keep this note.");
-  await composer.getByRole("button", { name: "Save", exact: true }).click();
-  const destination = page.getByRole("dialog", { name: "Choose Where to Save Annotations" });
-  await expect(destination).toBeVisible();
-  await destination.getByRole("button", { name: "Cancel" }).click();
-  await expect(destination).toHaveCount(0);
-  await expect(composer).toBeVisible();
-  await expect(comment).toHaveValue("Do not keep this note.");
-  expect(host.broker.state(launched.sessionId)).toMatchObject({ revision: 0, items: [] });
-  expect(host.broker.saveStatus(launched.sessionId)?.destination).toMatchObject({ phase: "none" });
+  expect(host.broker.state(launched.sessionId)).toEqual(initialReview);
   await expect(access(cancelPdf.replace(/\.pdf$/u, "-annotated.pdf"))).rejects.toMatchObject({ code: "ENOENT" });
   await expect(page.locator(
     '[data-owned-mark="pageNote"][data-authoring-preview="true"]',
   )).toHaveCount(1);
-  await expect(page.locator("[data-owned-mark]")).toHaveCount(1);
+
   await composer.getByRole("button", { name: "Cancel" }).click();
   await expect(composer).toHaveCount(0);
-  await expect(page.locator("[data-owned-mark]")).toHaveCount(0);
+  await expect(page.locator('[data-authoring-preview="true"]')).toHaveCount(0);
+  expect(host.broker.state(launched.sessionId)).toEqual(initialReview);
+  expect(await readFile(cancelPdf)).toEqual(originalBytes);
 });
 
 test("selects Page Notes only until the next click outside annotations", async ({ page, browserName }) => {
@@ -5927,6 +5980,7 @@ test("selects Page Notes only until the next click outside annotations", async (
   const browserErrors = collectBrowserErrors(page);
   await page.goto(launched.url);
   await chooseFreshCopyDestination(page);
+  const initialReview = host.broker.state(launched.sessionId)!;
 
   const pageCanvas = page.locator("[data-page-index='0']").first();
   await expect(pageCanvas).toBeVisible();
@@ -5948,12 +6002,12 @@ test("selects Page Notes only until the next click outside annotations", async (
   await composer.getByRole("textbox", { name: "Comment" }).fill("Check the conclusion.");
   await composer.getByRole("button", { name: "Save", exact: true }).click();
 
-  await expect.poll(() => host.broker.state(launched.sessionId)?.revision).toBe(1);
+  await expect.poll(() => host.broker.state(launched.sessionId)?.revision).toBe(initialReview.revision + 1);
   await expect.poll(() => host.broker.saveStatus(launched.sessionId)?.sync.phase).toBe("clean");
   const state = host.broker.state(launched.sessionId);
-  expect(state?.revision).toBe(1);
-  expect(state?.items).toHaveLength(1);
-  const note = state?.items[0];
+  expect(state?.revision).toBe(initialReview.revision + 1);
+  expect(state?.items).toHaveLength(initialReview.items.length + 1);
+  const note = state?.items.find((item) => !initialReview.items.some((old) => old.id === item.id));
   expect(note).toMatchObject({
     kind: "pageNote",
     pageIndex: 0,
@@ -5978,7 +6032,7 @@ test("selects Page Notes only until the next click outside annotations", async (
     .getByRole("textbox", { name: "Comment" })
     .fill("Check the evidence.");
   await page.getByRole("button", { name: "Save", exact: true }).click();
-  await expect.poll(() => host.broker.state(launched.sessionId)?.revision).toBe(2);
+  await expect.poll(() => host.broker.state(launched.sessionId)?.revision).toBe(initialReview.revision + 2);
   const secondNote = host.broker.state(launched.sessionId)?.items
     .find((item) => item.payload.comment === "Check the evidence.");
   expect(secondNote?.id).toBeTruthy();
@@ -6118,7 +6172,7 @@ test("selects Page Notes only until the next click outside annotations", async (
   await expect(row).toHaveAttribute("data-active", "false");
   await expect(workspace).toHaveAttribute("aria-expanded", "false");
 
-  expect(host.broker.state(launched.sessionId)?.revision).toBe(2);
+  expect(host.broker.state(launched.sessionId)?.revision).toBe(initialReview.revision + 2);
   expect(browserErrors).toEqual([]);
 });
 
@@ -6134,6 +6188,7 @@ test("places a crop-relative Page Note through the real PDF keyboard cursor", as
   const browserErrors = collectBrowserErrors(page);
   await page.goto(launched.url);
   await chooseFreshCopyDestination(page);
+  const initialReview = host.broker.state(launched.sessionId)!;
 
   const pageCanvas = page.locator("[data-page-index='0']").first();
   await expect(pageCanvas).toBeVisible();
@@ -6153,12 +6208,12 @@ test("places a crop-relative Page Note through the real PDF keyboard cursor", as
   await composer.getByRole("textbox", { name: "Comment" }).fill("Keyboard-placed note.");
   await composer.getByRole("button", { name: "Save", exact: true }).click();
 
-  await expect.poll(() => host.broker.state(launched.sessionId)?.revision).toBe(1);
+  await expect.poll(() => host.broker.state(launched.sessionId)?.revision).toBe(initialReview.revision + 1);
   await expect.poll(() => host.broker.saveStatus(launched.sessionId)?.sync.phase).toBe("clean");
   const state = host.broker.state(launched.sessionId);
-  expect(state?.revision).toBe(1);
-  expect(state?.items).toHaveLength(1);
-  const note = state?.items[0];
+  expect(state?.revision).toBe(initialReview.revision + 1);
+  expect(state?.items).toHaveLength(initialReview.items.length + 1);
+  const note = state?.items.find((item) => !initialReview.items.some((old) => old.id === item.id));
   expect(note).toMatchObject({
     kind: "pageNote",
     pageIndex: 0,
@@ -6186,6 +6241,7 @@ test("normalizes a real context gesture on a rotated cropped PDF into crop-relat
   const browserErrors = collectBrowserErrors(page);
   await page.goto(launched.url);
   await chooseFreshCopyDestination(page);
+  const initialReview = host.broker.state(launched.sessionId)!;
 
   const pageCanvas = page.locator("[data-page-index='0']").first();
   await expect(pageCanvas).toBeVisible();
@@ -6204,11 +6260,11 @@ test("normalizes a real context gesture on a rotated cropped PDF into crop-relat
   await composer.getByRole("textbox", { name: "Comment" }).fill("Rotated geometry note.");
   await composer.getByRole("button", { name: "Save", exact: true }).click();
 
-  await expect.poll(() => host.broker.state(launched.sessionId)?.revision).toBe(1);
+  await expect.poll(() => host.broker.state(launched.sessionId)?.revision).toBe(initialReview.revision + 1);
   await expect.poll(() => host.broker.saveStatus(launched.sessionId)?.sync.phase).toBe("clean");
   const state = host.broker.state(launched.sessionId);
-  expect(state?.items).toHaveLength(1);
-  const note = state?.items[0];
+  expect(state?.items).toHaveLength(initialReview.items.length + 1);
+  const note = state?.items.find((item) => !initialReview.items.some((old) => old.id === item.id));
   expect(note).toMatchObject({
     kind: "pageNote",
     pageIndex: 0,
@@ -6313,6 +6369,7 @@ for (const key of ["Delete", "Backspace"] as const) {
     await installSelectionCaptureGate(page);
     await page.goto(launched.url);
     await chooseFreshCopyDestination(page);
+    const initialReview = host.broker.state(launched.sessionId)!;
 
     const pageCanvas = page.locator("[data-page-index='0']").first();
     await expect(pageCanvas).toBeVisible();
@@ -6325,14 +6382,15 @@ for (const key of ["Delete", "Backspace"] as const) {
     await page.keyboard.press(key);
     await releaseSelectionCapture(page);
 
-    await expect(page.locator("[data-review-item]")).toHaveCount(1);
+    await expect(page.locator("[data-review-item]")).toHaveCount(initialReview.items.length + 1);
     await expect(page.locator("[data-owned-mark='delete']")).toHaveCount(1);
     expect(page.url()).toBe(urlBeforeKey);
     const state = host.broker.state(launched.sessionId);
-    expect(state?.revision).toBe(1);
+    expect(state?.revision).toBe(initialReview.revision + 1);
     await expect.poll(() => host.broker.saveStatus(launched.sessionId)?.sync.phase).toBe("clean");
-    expect(state?.items).toHaveLength(1);
-    expect(state?.items[0]).toMatchObject({
+    expect(state?.items).toHaveLength(initialReview.items.length + 1);
+    const deletion = state?.items.find((item) => item.kind === "delete");
+    expect(deletion).toMatchObject({
       kind: "delete",
       pageIndex: 0,
       payload: {
@@ -6340,12 +6398,12 @@ for (const key of ["Delete", "Backspace"] as const) {
         reliable: true,
       },
     });
-    const segments = state?.items[0]?.payload.segmentRects;
+    const segments = deletion?.payload.segmentRects;
     expect(Array.isArray(segments)).toBe(true);
-    expect(state?.items[0]?.payload.rect).toEqual(
+    expect(deletion?.payload.rect).toEqual(
       Array.isArray(segments) ? segments[0] : undefined,
     );
-    expect(state?.items[0]?.payload.rect).toEqual({
+    expect(deletion?.payload.rect).toEqual({
       x: 252,
       y: 89,
       width: 158,
@@ -6367,6 +6425,7 @@ test("shows command conflicts until a retry succeeds", async ({ page }) => {
     "Fresh command-conflict production launch failed",
   );
   await chooseFreshCopyDestination(page);
+  const initialReview = host.broker.state(launched.sessionId)!;
 
   const pageCanvas = page.locator("[data-page-index='0']").first();
   await expect(pageCanvas).toBeVisible();
@@ -6395,16 +6454,23 @@ test("shows command conflicts until a retry succeeds", async ({ page }) => {
 
   await selectionActions.getByRole("button", { name: "Delete", exact: true }).click();
   await expect(page.locator("[data-viewer-status]")).toHaveCount(0);
-  await expect(page.locator("[data-review-item]")).toHaveCount(2);
-  expect(host.broker.state(launched.sessionId)?.revision).toBe(2);
+  await expect(page.locator("[data-review-item]")).toHaveCount(initialReview.items.length + 2);
+  expect(host.broker.state(launched.sessionId)?.revision).toBe(initialReview.revision + 2);
 });
 
 test('returns a first-annotation conflict to the preserved composer for retry', async ({ page }) => {
+  await page.routeWebSocket(/\/control$/u, (browserSocket) => {
+    const serverSocket = browserSocket.connectToServer();
+    browserSocket.onMessage((message) => serverSocket.send(message));
+    serverSocket.onMessage(() => undefined);
+  });
   const launched = await openFreshProductionFixture(
     page,
     pdf,
     'Fresh pending-destination conflict launch failed',
   );
+  await chooseFreshCopyDestination(page);
+  const initialReview = host.broker.state(launched.sessionId)!;
   const pageCanvas = page.locator("[data-page-index='0']").first();
   await waitForRenderedPageImage(pageCanvas);
   await dragPdfPointer(page, pageCanvas, { x: 253, y: 98 }, { x: 405, y: 98 });
@@ -6412,12 +6478,6 @@ test('returns a first-annotation conflict to the preserved composer for retry', 
   const composer = page.getByRole('region', { name: 'Replacement' });
   const editor = composer.getByRole('textbox', { name: 'Replacement' });
   await editor.fill('retry from authoritative state');
-  await composer.getByRole('button', { name: 'Apply' }).click();
-
-  const destination = page.getByRole('dialog', { name: 'Choose Where to Save Annotations' });
-  await expect(destination).toBeVisible();
-  await destination.getByRole('textbox', { name: 'Copy name' })
-    .fill(`pending-conflict-${randomUUID()}.pdf`);
   const externalState = host.broker.state(launched.sessionId);
   if (!externalState) throw new Error('Pending-destination conflict state is missing.');
   await host.broker.acceptMutation(
@@ -6429,16 +6489,15 @@ test('returns a first-annotation conflict to the preserved composer for retry', 
       'External conflict note.',
     ),
   );
-  await destination.getByRole('button', { name: 'Confirm' }).click();
-
-  await expect(destination).toHaveCount(0);
+  await composer.getByRole('button', { name: 'Apply' }).click();
+  await expect(page.locator('[data-viewer-status]')).toContainText('Another review window changed this draft');
   await expect(composer).toBeVisible();
   await expect(editor).toHaveValue('retry from authoritative state');
-  expect(host.broker.state(launched.sessionId)?.revision).toBe(1);
+  expect(host.broker.state(launched.sessionId)?.revision).toBe(initialReview.revision + 1);
   await composer.getByRole('button', { name: 'Apply' }).click();
   await expect(composer).toHaveCount(0);
-  await expect.poll(() => host.broker.state(launched.sessionId)?.revision).toBe(2);
-  expect(host.broker.state(launched.sessionId)?.items).toHaveLength(2);
+  await expect.poll(() => host.broker.state(launched.sessionId)?.revision).toBe(initialReview.revision + 2);
+  expect(host.broker.state(launched.sessionId)?.items).toHaveLength(initialReview.items.length + 2);
 });
 
 test("discards queued typing when a pending selection is cleared", async ({ page }) => {
@@ -6453,6 +6512,7 @@ test("discards queued typing when a pending selection is cleared", async ({ page
   await installSelectionCaptureGate(page);
   await page.goto(launched.url);
   await chooseFreshCopyDestination(page);
+  const initialReview = host.broker.state(launched.sessionId)!;
 
   const pageCanvas = page.locator("[data-page-index='0']").first();
   await expect(pageCanvas).toBeVisible();
@@ -6466,8 +6526,8 @@ test("discards queued typing when a pending selection is cleared", async ({ page
   await releaseSelectionCapture(page);
 
   await expect(page.getByRole("region", { name: "Replacement" })).toHaveCount(0);
-  await expect(page.locator("[data-review-item]")).toHaveCount(0);
-  expect(host.broker.state(launched.sessionId)?.revision).toBe(0);
+  await expect(page.locator("[data-review-item]")).toHaveCount(initialReview.items.length);
+  expect(host.broker.state(launched.sessionId)?.revision).toBe(initialReview.revision);
 });
 
 test("keeps only typing for the newest pending selection", async ({ page }) => {
@@ -6482,6 +6542,7 @@ test("keeps only typing for the newest pending selection", async ({ page }) => {
   await installSelectionCaptureGate(page);
   await page.goto(launched.url);
   await chooseFreshCopyDestination(page);
+  const initialReview = host.broker.state(launched.sessionId)!;
 
   const pageCanvas = page.locator("[data-page-index='0']").first();
   await expect(pageCanvas).toBeVisible();
@@ -6500,18 +6561,19 @@ test("keeps only typing for the newest pending selection", async ({ page }) => {
   await expect(replacementComposer.getByRole("textbox", { name: "Replacement" })).toHaveValue("current");
   await replacementComposer.getByRole("button", { name: "Apply" }).click();
   await expect(replacementComposer).toHaveCount(0);
-  await expect(page.locator("[data-review-item]")).toHaveCount(1);
+  await expect(page.locator("[data-review-item]")).toHaveCount(initialReview.items.length + 1);
   const state = host.broker.state(launched.sessionId);
-  expect(state?.revision).toBe(1);
+  expect(state?.revision).toBe(initialReview.revision + 1);
   await expect.poll(() => host.broker.saveStatus(launched.sessionId)?.sync.phase).toBe("clean");
-  expect(state?.items).toHaveLength(1);
-  expect(state?.items[0]).toMatchObject({
+  expect(state?.items).toHaveLength(initialReview.items.length + 1);
+  const replacement = state?.items.find((item) => item.kind === "replace");
+  expect(replacement).toMatchObject({
     kind: "replace",
     payload: {
       proposedText: "current",
     },
   });
-  expect(state?.items[0]?.payload.quote).not.toBe("");
+  expect(replacement?.payload.quote).not.toBe("");
 });
 
 for (const dock of ['closed', 'bottom', 'right'] as const) {
@@ -6528,6 +6590,9 @@ for (const dock of ['closed', 'bottom', 'right'] as const) {
       await expect(page.locator('[data-review-workspace]')).toHaveAttribute('data-workspace-presentation', dock);
       await expect.poll(() => page.locator('[data-review-workspace]').evaluate((element) => getComputedStyle(element).transform)).toBe('none');
     }
+    await page.locator('[data-review-stage]').evaluate(async (element) => {
+      await Promise.all(element.getAnimations({ subtree: true }).map((animation) => animation.finished.catch(() => undefined)));
+    });
     const rect = (await sheet.boundingBox())!;
     const reading = (await workspace.boundingBox())!;
     const pointer = { x: Math.round(reading.x + reading.width * 0.65), y: Math.round(rect.y + 200) };
