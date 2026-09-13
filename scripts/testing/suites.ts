@@ -6,6 +6,7 @@ export type TestStage = string | {
 };
 
 export const suites: Record<string, TestStage[]> = {
+  "test:source-release": [{ runner: "vitest", options: [], files: ["scripts/source-release.test.ts", "scripts/install-release.test.ts"] }],
   "test:static:distribution": [
     {
       "runner": "vitest",
@@ -530,6 +531,8 @@ export const suites: Record<string, TestStage[]> = {
 
 /** Canonical CI is deliberately narrower than all repository tests; includes the updater's .mjs tests. */
 export const ciUnitFiles = [
+      'scripts/source-release.test.ts',
+      'scripts/install-release.test.ts',
       'test/ci-workflow.test.ts',
       'apps/chrome-extension/test/*.test.ts',
       'test/conformance/pdf-writer.conformance.test.ts',
