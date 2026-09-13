@@ -293,6 +293,9 @@ async function expectReferenceReady(
   await expect(tab).toHaveAttribute("aria-selected", "true", {
     timeout: REFERENCE_READY_TIMEOUT_MS,
   });
+  await expect(page.locator('[data-reference-pending="loading"]')).toHaveCount(0, {
+    timeout: REFERENCE_READY_TIMEOUT_MS,
+  });
 }
 
 async function clickHoverRevealedReferenceTabAction(action: Locator): Promise<void> {
@@ -549,6 +552,7 @@ test('records links opened from References in Main document history', async ({ p
   const back = page.getByRole('button', { name: 'Back in document history' });
   await expect(back).toBeVisible();
   await expect(back).toBeEnabled();
+  await page.locator('[data-review-chrome]').hover({ position: { x: 2, y: 2 } });
   await back.click();
   await expect.poll(() => currentPageText(page)).toBe('1 / 4');
   const forward = page.getByRole('button', { name: 'Forward in document history' });

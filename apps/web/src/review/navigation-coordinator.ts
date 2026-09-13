@@ -402,7 +402,6 @@ export class NavigationCoordinator {
       && state.tabs.some((tab) => tab.identity === state.activeTabIdentity)
       ? state.activeTabIdentity
       : null;
-    this.supersede();
     if (
       !this.generationMatches(request.target.documentGeneration)
       || (request.sourceScope === 'reference' && sourceTabIdentity === null)
@@ -413,6 +412,9 @@ export class NavigationCoordinator {
       this.dependencies.setAnnouncement(LINK_UNAVAILABLE);
       return false;
     }
+    // A link exposed during reference mounting must not cancel that mount.
+    // Only an accepted invocation supersedes the current navigation.
+    this.supersede();
     this.pendingReference = null;
     this.dependencies.setPendingReference(null);
     this.linkRequest = request;

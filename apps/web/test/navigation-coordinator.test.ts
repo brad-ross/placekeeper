@@ -740,8 +740,9 @@ describe('document-scoped navigation coordinator', () => {
     expect(run.announcement()).toBe('This PDF link cannot be opened safely.');
 
     opened.resolve(true);
-    expect(await opening).toBe(false);
-    expect(run.state().tabs).toEqual([]);
+    expect(await opening).toBe(true);
+    expect(run.state().tabs.map(({ identity }) => identity)).toEqual([target(2).identity]);
+    expect(run.coordinator.requestLink(linkRequest(5))).toBe(true);
   });
 
   it('rejects a reference link while the shared viewer is opening another tab', async () => {
@@ -761,8 +762,9 @@ describe('document-scoped navigation coordinator', () => {
     expect(run.state().activeTabIdentity).toBe(target(2).identity);
 
     opened.resolve(true);
-    expect(await opening).toBe(false);
-    expect(run.state().tabs.map(({ identity }) => identity)).toEqual([target(2).identity]);
+    expect(await opening).toBe(true);
+    expect(run.state().tabs.map(({ identity }) => identity)).toEqual([target(2).identity, target(4).identity]);
+    expect(run.coordinator.requestLink(linkRequest(6))).toBe(true);
   });
 
   it('follows a reference link in the active tab without changing main state or tab identity', async () => {
