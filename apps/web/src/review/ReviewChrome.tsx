@@ -160,6 +160,7 @@ export function ReviewChrome({
   const pagePointerActivationRef = useRef(false);
   const restorePageTriggerFocus = useRef(false);
   const pageStepIntent = useRef(false);
+  const focusedPageStep = useRef<HTMLButtonElement | null>(null);
   const pageErrorId = useId();
   const [editingZoom, setEditingZoom] = useState(false);
   const [zoomDraft, setZoomDraft] = useState('');
@@ -402,14 +403,24 @@ export function ReviewChrome({
     button.focus({ preventScroll: true });
     if (editingPage) closePageEdit(false);
     runViewerAction(step);
-    requestAnimationFrame(() => {
-      if (button.isConnected) return;
-      const remaining = document
-        .getElementById(navigationMenuId)
-        ?.querySelector<HTMLButtonElement>('[data-review-page-step]');
-      (remaining ?? navigationAnchorRef.current)?.focus({ preventScroll: true });
-    });
+    focusedPageStep.current = button;
   };
+  useLayoutEffect(() => {
+    const button = focusedPageStep.current;
+    if (activeTopBarMenu !== 'navigation') {
+      focusedPageStep.current = null;
+      return;
+    }
+    if (button === null || button.isConnected) return;
+    focusedPageStep.current = null;
+    // Page navigation settles asynchronously; the old step can disappear well
+    // after the click's next frame. Restore focus when React removes it.
+    if (document.activeElement !== document.body) return;
+    const remaining = document.getElementById(navigationMenuId)
+      ?.querySelector<HTMLButtonElement>('[data-review-page-step]');
+    (remaining ?? navigationAnchorRef.current)?.focus({ preventScroll: true });
+  });
+
   const startZoomEdit = () => {
     setZoomDraft(String(viewerState.zoomPercent));
     setZoomInvalid(false);

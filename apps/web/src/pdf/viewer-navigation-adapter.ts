@@ -174,6 +174,7 @@ function validOcclusion(value: PdfViewportOcclusion): boolean {
 function subtractViewportOcclusion(
   viewport: EffectiveViewportRect,
   occlusion: PdfViewportOcclusion | null | undefined,
+  preserveHorizontalRange = false,
 ): EffectiveViewportRect | null {
   if (occlusion === null || occlusion === undefined) return viewport;
   if (!validOcclusion(occlusion)) return null;
@@ -189,7 +190,13 @@ function subtractViewportOcclusion(
     width: rect.right - rect.left,
     height: rect.bottom - rect.top,
   })).filter((rect) => validDimension(rect.width) && validDimension(rect.height));
-  return candidates.reduce<EffectiveViewportRect | null>((largest, candidate) => {
+  // A fitted page cannot pan into a strip beside a floating composer. Prefer
+  // space above or below it, where vertical scrolling can reveal the passage.
+  const fullWidthCandidates = preserveHorizontalRange
+    ? candidates.filter((rect) => rect.width === viewport.width)
+    : [];
+  const reachableCandidates = fullWidthCandidates.length > 0 ? fullWidthCandidates : candidates;
+  return reachableCandidates.reduce<EffectiveViewportRect | null>((largest, candidate) => {
     if (largest === null) return candidate;
     return candidate.width * candidate.height > largest.width * largest.height
       ? candidate
@@ -592,6 +599,7 @@ export function createViewerNavigation(
   ): EffectiveViewportRect | null => subtractViewportOcclusion(
     effectiveViewportRect(viewportElement),
     viewport?.occlusion,
+    viewportElement.scrollWidth <= viewportElement.clientWidth + coordinateTolerance,
   );
 
   const scrollAlignment = (
