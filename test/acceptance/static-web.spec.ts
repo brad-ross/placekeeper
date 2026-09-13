@@ -902,6 +902,33 @@ for (const width of [1440, 390]) test(`@critical installation dialog preserves t
   await expect(triggers.first()).toBeFocused();
 });
 
+test('@critical dismissing installation preserves a pending document open', async ({ page }) => {
+  let finishRequest!: () => void;
+  const pending = new Promise<void>((resolve) => { finishRequest = resolve; });
+  await page.route('https://example.org/paper.pdf', async (route) => {
+    await pending;
+    await route.fulfill({ status: 404, headers: { 'access-control-allow-origin': '*' }, body: 'Not found' });
+  });
+  try {
+    await page.goto('./');
+    await page.getByRole('textbox', { name: 'Document URL' }).fill('https://example.org/paper.pdf');
+    await page.getByRole('button', { name: 'Open', exact: true }).click();
+    const spinner = page.locator('.static-launcher__url button .static-launcher__spinner');
+    await expect(spinner).toBeVisible();
+    await page.getByRole('button', { name: 'Install', exact: true }).first().click();
+    const dialog = page.getByRole('dialog', { name: 'Install Placekeeper', exact: true });
+    await expect(dialog).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(dialog).toBeHidden();
+    await expect(spinner).toBeVisible();
+    finishRequest();
+    await expect(page.locator('.static-launcher__toasts [role="alert"]')).toContainText('404');
+    await expect(spinner).toHaveCount(0);
+  } finally {
+    finishRequest();
+  }
+});
+
 test('@critical installation command reports clipboard success and remains selectable on failure', async ({ page }) => {
   await page.goto('./');
   await page.evaluate(() => {

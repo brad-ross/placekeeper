@@ -16,6 +16,7 @@ export function InstallDialog({ dialogRef, onClose }: {
   };
   return <dialog ref={dialogRef} className="install-dialog" aria-labelledby="install-dialog-title"
     onKeyDown={(event) => {
+      if (event.key === "Escape") event.stopPropagation();
       if (event.key !== "Tab") return;
       const controls = event.currentTarget.querySelectorAll<HTMLElement>('button, a[href], [tabindex="0"]');
       const first = controls[0];
