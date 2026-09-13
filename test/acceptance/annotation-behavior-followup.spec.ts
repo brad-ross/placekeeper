@@ -37,7 +37,7 @@ async function openLongAnnotationFixture(
   await copyFile(fixturePdf, pdfPath);
   const launched = await host.open({ pdfPath, sourceRootPath: sourceRoot, fork: true });
   if (!launched.ok || launched.kind === 'recovery-offered') {
-    throw new Error('Long-annotation production launch failed.');
+    throw new Error(`Long-annotation production launch failed: ${JSON.stringify(launched)}`);
   }
   const initial = host.broker.state(launched.sessionId);
   if (initial === undefined) throw new Error('Long-annotation review state is unavailable.');
@@ -58,7 +58,8 @@ async function openLongAnnotationFixture(
     }
   })();
   await host.broker.acceptMutation(launched.sessionId, command);
-  const itemId = host.broker.state(launched.sessionId)?.items[0]?.id;
+  const initialIds = new Set(initial.items.map((item) => item.id));
+  const itemId = host.broker.state(launched.sessionId)?.items.find((item) => !initialIds.has(item.id))?.id;
   if (itemId === undefined) throw new Error('Long annotation was not created.');
   let siblingId: string | undefined;
   if (options.sibling) {
@@ -66,7 +67,7 @@ async function openLongAnnotationFixture(
     await host.broker.acceptMutation(launched.sessionId, addPageNote(
       state, 0, { x: 200, y: 164, width: 18, height: 18 }, 'Second annotation.',
     ));
-    siblingId = host.broker.state(launched.sessionId)!.items.find((item) => item.id !== itemId)!.id;
+    siblingId = host.broker.state(launched.sessionId)!.items.find((item) => item.id !== itemId && !initialIds.has(item.id))!.id;
   }
   await page.goto(launched.url);
   await expect(page.locator('[data-production-review]')).toBeVisible();
@@ -102,7 +103,7 @@ async function openPrimaryReference(page: Page): Promise<void> {
   await expect(page.getByRole('tab', { name: /Primary result/u })).toHaveAttribute('aria-selected', 'true');
 }
 
-test.beforeAll(async () => {
+test.beforeEach(async () => {
   temporaryRoot = await mkdtemp(join(tmpdir(), 'placekeeper-annotation-followup-'));
   sourceRoot = join(temporaryRoot, 'source');
   await mkdir(sourceRoot);
@@ -114,7 +115,7 @@ test.beforeAll(async () => {
   });
 });
 
-test.afterAll(async () => {
+test.afterEach(async () => {
   await host?.close();
   if (temporaryRoot !== '') await rm(temporaryRoot, { recursive: true, force: true });
 });
@@ -172,7 +173,7 @@ test('uses the hover card and explicitly expands long PDF annotations in a delet
   await remove.click();
   await expect(reader).toHaveCount(0);
   await expect(page.locator(`[data-review-id="${itemId}"]`)).toHaveCount(0);
-  await expect.poll(() => host.broker.state(sessionId)?.items.length).toBe(0);
+  await expect.poll(() => host.broker.state(sessionId)?.items.some((item) => item.id === itemId)).toBe(false);
 });
 
 const editContinuityLayouts = [
