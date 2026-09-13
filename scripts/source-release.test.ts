@@ -58,6 +58,13 @@ it("accepts the actual tracked source pathname alphabet", () => {
 });
 
 describe("source publication workflow", () => {
+  it("builds shared app and extension assets before packaging assertions consume them", async () => {
+    const source = await readFile(new URL("../.github/workflows/release-source.yml", import.meta.url), "utf8");
+    const build = source.indexOf("run: pnpm package:macos");
+    expect(build).toBeGreaterThan(0);
+    expect(build).toBeLessThan(source.indexOf("run: pnpm exec vitest run packaging/macos/packaging.test.ts"));
+    expect(source.indexOf("run: pnpm fixtures:pdf")).toBeLessThan(build);
+  });
   const workflow = () => readFile(new URL("../.github/workflows/release-source.yml", import.meta.url), "utf8");
   it("restricts dispatch to trusted main and isolates release write permission", async () => {
     const source = await workflow();

@@ -60,13 +60,13 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
       - run: pnpm test:source-release
-      - run: pnpm exec vitest run packaging/macos/packaging.test.ts packaging/macos/chrome-integration.test.ts packaging/macos/setup-integrations.test.mjs packaging/macos/update-vscode.test.mjs
-      - run: pnpm test:upgrade-lifecycle
       - run: pnpm fixtures:pdf
-      - run: pnpm exec playwright install chromium
-      - run: pnpm test:chrome-handoff
       - name: Build unsigned candidate
         run: pnpm package:macos -- --arch arm64 --node-runtime "$(command -v node)" --service-dist dist/service --web-dist dist/web --output artifacts/arm64
+      - run: pnpm exec vitest run packaging/macos/packaging.test.ts packaging/macos/chrome-integration.test.ts packaging/macos/setup-integrations.test.mjs packaging/macos/update-vscode.test.mjs
+      - run: pnpm test:upgrade-lifecycle
+      - run: pnpm exec playwright install chromium
+      - run: pnpm test:chrome-handoff
       - run: pnpm smoke:installed -- artifacts/arm64/Placekeeper.app test/fixtures/pdfs/text-native.pdf
       - name: Package exact tested source
         id: assets
