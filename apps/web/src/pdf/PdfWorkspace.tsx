@@ -1,3 +1,4 @@
+import { MainDocumentPreviewBoundary, MainDocumentPreviewLimit } from './MainDocumentPreviewBoundary.js';
 import { SourceAnnotationLayer, type SourceReaderMark } from './SourceAnnotationMark.js';
 import { existingAnnotationKey, type SourceNativeAnnotation } from './existing-annotations.js';
 import { ANNOTATION_CSS_VARIABLES } from '../../../../packages/core/src/annotation-appearance.js';
@@ -12,7 +13,7 @@ import { Scroller } from '@embedpdf/plugin-scroll/react';
 import { SelectionLayer } from '@embedpdf/plugin-selection/react';
 import { Viewport } from '@embedpdf/plugin-viewport/react';
 import { AnchoredZoomGestureWrapper as ZoomGestureWrapper } from './AnchoredZoomGestureWrapper.js';
-import { useMemo, useRef } from 'react';
+import { useContext, useMemo, useRef } from 'react';
 import type { ReviewAnnotation } from '../../../../packages/core/src/pdf-writer.js';
 import type { PdfSearchResult } from './pdf-search-model.js';
 import type { ReferenceScrollPosition } from './reference-manual-scroll.js';
@@ -123,6 +124,7 @@ export function PdfWorkspace({
   onReferenceScrollIntent,
   searchResults = [],
 }: PdfWorkspaceProps) {
+  const previewLimit = useContext(MainDocumentPreviewLimit);
   const pressedPrimaryPointers = useRef(new Map<number, HTMLDivElement>());
   const contextPointers = useRef(new Set<number>());
   const reverseSyncTexPointers = useRef(new ReverseSyncTexPointerGesture());
@@ -230,9 +232,10 @@ export function PdfWorkspace({
                 data-viewer-framing-content
                 style={{ minHeight: '100%', minWidth: '100%', position: 'relative' }}
               >
+                <MainDocumentPreviewBoundary>
                 <Scroller
                   documentId={MAIN_PDF_DOCUMENT_ID}
-                  renderPage={(layout) => (
+                  renderPage={(layout) => previewLimit !== null && (layout.pageNumber < previewLimit.firstPage || layout.pageNumber > previewLimit.lastPage) ? null : (
                     <PagePointerProvider
                       documentId={MAIN_PDF_DOCUMENT_ID}
                       pageIndex={layout.pageIndex}
@@ -569,6 +572,7 @@ export function PdfWorkspace({
                     </PagePointerProvider>
                   )}
                 />
+                </MainDocumentPreviewBoundary>
                 <div
                   aria-hidden="true"
                   data-viewer-runway
@@ -576,8 +580,8 @@ export function PdfWorkspace({
                     position: 'absolute',
                     left: 0,
                     top: 0,
-                    width: `calc(100% + ${runway.right}px)`,
-                    height: `calc(100% + ${runway.bottom}px)`,
+                    width: `calc(100% + ${(previewLimit === null ? runway.right : 0)}px)`,
+                    height: `calc(100% + ${(previewLimit === null ? runway.bottom : 0)}px)`,
                     pointerEvents: 'none',
                     visibility: 'hidden',
                   }}

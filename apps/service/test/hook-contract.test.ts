@@ -1,3 +1,5 @@
+import { readFile } from "node:fs/promises";
+
 import { describe, expect, it, vi } from "vitest";
 
 import type { LiveContextRefreshResult } from "../../../packages/core/src/live-context.js";
@@ -128,6 +130,17 @@ describe("Codex lifecycle hook", () => {
     });
   });
 
+  it("publishes a direct launch that binds without requiring an interpreter wrapper", async () => {
+    const skill = await readFile(new URL("../../../integrations/codex-plugin/skills/placekeeper/SKILL.md", import.meta.url), "utf8");
+    const launch = skill.match(/`("\$HOME[^`]+ open --json --surface codex --pdf <absolute-local-pdf-path>)`/u)?.[1];
+    expect(launch).toBeDefined();
+    expect(inspectHookEvent(postToolUse({
+      tool_input: { command: launch!.replace("<absolute-local-pdf-path>", "'/private/tmp/paper with spaces.pdf'") },
+    }))).toMatchObject({ kind: "claim" });
+    expect(skill).not.toContain("with an argument array");
+    expect(skill).toContain("Do not wrap the launcher in Python");
+  });
+
   it("accepts the canonical installed path and the bare Placekeeper launcher only", () => {
     const expected = expect.objectContaining({ kind: "claim", taskSessionId: "thr_codex_task_123" });
     expect(inspectHookEvent(postToolUse())).toEqual(expected);
@@ -150,6 +163,7 @@ describe("Codex lifecycle hook", () => {
   });
 
   it.each([
+    ["Python-wrapped launch", { tool_input: { command: `python3 -c 'import subprocess; subprocess.run(["${installedLauncherPath()}", "open", "--json", "--surface", "codex", "--pdf", "/private/tmp/paper.pdf"])'` } }],
     ["missing task", { session_id: undefined }],
     ["failed command", { tool_response: { exit_code: 2, output: "failure" } }],
     ["missing bind proof", { tool_response: JSON.stringify({ ok: true, kind: "opened", url: launchUrl, sessionId: "review-session", documentGeneration: 1 }) }],
@@ -179,6 +193,19 @@ describe("Codex lifecycle hook", () => {
       bindProof,
     });
     const output = write.mock.calls[0]![0] as string;
+    expect(output).not.toMatch(/thr_codex|review-session|bindProof|paper with spaces|cap=|127\.0\.0\.1/u);
+  });
+
+  it("reports a denied binding instead of silently leaving an open PDF without agent context", async () => {
+    const control = vi.fn(async (): Promise<PlacekeeperControlResponse> => ({
+      kind: "binding", result: { status: "denied" },
+    }));
+    const write = vi.fn();
+    await runHookCommand(["hook", "--event"], JSON.stringify(postToolUse()), control, write);
+    expect(write).toHaveBeenCalledOnce();
+    const output = write.mock.calls[0]![0] as string;
+    expect(output).toContain("could not associate");
+    expect(output).toContain("independent review");
     expect(output).not.toMatch(/thr_codex|review-session|bindProof|paper with spaces|cap=|127\.0\.0\.1/u);
   });
 

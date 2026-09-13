@@ -1,5 +1,7 @@
+import { WorkspaceModeAvailability, WorkspacePresentation } from '../review/WorkspaceModeStrip.js';
 import {
   useCallback,
+  useContext,
   useLayoutEffect,
   useEffect,
   useMemo,
@@ -179,6 +181,9 @@ export interface ReviewShellViewerModel {
   viewerFraming?: ViewerFramingControls;
   viewerNavigation?: PdfViewerNavigation;
   viewerNavigationIntentToken?: number;
+  /** Document generation awaiting its initial settled fit. */
+  initialFitRequest?: number;
+  onInitialFitComplete?(generation: number): void;
   onCommitMainFramingPositionChange?(commit: (() => void) | null): void;
 }
 
@@ -310,6 +315,9 @@ export function ReviewShell(props: ReviewShellProps) {
   const [listActivation, setListActivation] = useState<{ readonly id: string; readonly token: number }>();
   const [reconciliationDetailOpen, setReconciliationDetailOpen] = useState(false);
   const [reconciliationFocusRequest, setReconciliationFocusRequest] = useState(0);
+  const availableModes = useContext(WorkspaceModeAvailability);
+  const workspacePresentation = useContext(WorkspacePresentation);
+  const annotationPeeksEnabled = availableModes === null || availableModes.includes('annotations');
   const [peekItemId, setPeekItemId] = useState<string>();
   const [searchFocusRequest, setSearchFocusRequest] = useState(0);
   const handledSearchFocusRequestRef = useRef(0);
@@ -599,7 +607,7 @@ export function ReviewShell(props: ReviewShellProps) {
         : request);
     });
     return () => { current = false; };
-  }, [toolsSurfaceOpen, effectiveReferenceLayout.kind, referenceLayout.referenceDock,
+  }, [availableModes, toolsSurfaceOpen, effectiveReferenceLayout.kind, referenceLayout.referenceDock,
     effectiveWorkspaceMode, props.viewer.viewerNavigation, workspaceFraming.markUserIntent, workspaceFraming.waitForSettledGeometry]);
 
   const overlaySurfaceRefs = useMemo(() => [
@@ -744,6 +752,10 @@ export function ReviewShell(props: ReviewShellProps) {
   }, [activeItemId, annotationReaderOwnedItemId, annotationReaderSession, authoringSession]);
 
   useEffect(() => {
+    if (!annotationPeeksEnabled) {
+      dismissAnnotationPeek();
+      return;
+    }
     if (annotationsVisible) {
       setPeekItemId(undefined);
       return;
@@ -760,7 +772,7 @@ export function ReviewShell(props: ReviewShellProps) {
     } else if (!peekHeldRef.current) {
       setPeekItemId(undefined);
     }
-  }, [annotationsVisible, anyWorkspaceOpen, props.correspondingItemId, activeItemId]);
+  }, [annotationPeeksEnabled, annotationsVisible, anyWorkspaceOpen, props.correspondingItemId, activeItemId]);
 
   useEffect(() => {
     const request = props.activationRequest;
@@ -1133,12 +1145,28 @@ export function ReviewShell(props: ReviewShellProps) {
 
   const canUndo = props.state.historyCursor > 0;
   const canRedo = props.state.historyCursor < props.state.history.length;
-  const fitWidthCommand = () => {
+  const fitWidthCommand = useCallback(() => {
     workspaceFraming.markUserIntent(undefined, { captureSettledPosition: false });
     return props.viewer.viewerNavigation
       ?.fitToWidth(workspaceFraming.waitForSettledGeometry)
       .then(() => undefined) ?? Promise.resolve();
-  };
+  }, [props.viewer.viewerNavigation, workspaceFraming.markUserIntent, workspaceFraming.waitForSettledGeometry]);
+  useEffect(() => {
+    const request = props.viewer.initialFitRequest;
+    if (request === undefined) return;
+    let current = true;
+    void fitWidthCommand().then(() => {
+      if (current) props.viewer.onInitialFitComplete?.(request);
+    });
+    return () => { current = false; };
+  }, [props.viewer.initialFitRequest, props.viewer.onInitialFitComplete, fitWidthCommand]);
+  useEffect(() => {
+    // Demo selectors control the layout from outside the shell. Capture the
+    // current fit before that layout changes, just as a workspace disclosure does.
+    if (!workspacePresentation?.open || !props.viewer.viewerNavigation?.isFitToWidth?.()) return;
+    const frame = requestAnimationFrame(() => { void fitWidthCommand(); });
+    return () => cancelAnimationFrame(frame);
+  }, [workspacePresentation?.mode, workspacePresentation?.open, workspacePresentation?.referenceDock, fitWidthCommand]);
   const beforeViewerAction = async () => {
     await props.viewer.viewerNavigation?.cancelPendingNavigation();
     commitMainFramingPosition();
@@ -1582,7 +1610,7 @@ export function ReviewShell(props: ReviewShellProps) {
           {selectionActionsAvailable && props.selection.selectionPlacement ? (
             <ContextActionPalette
               placement={props.selection.selectionPlacement}
-              hidden={surface.nestedLayer !== 'none'}
+              hidden={!annotationPeeksEnabled || surface.nestedLayer !== 'none'}
               {...(props.selection.onCopySelection === undefined ? {} : { onCopy: props.selection.onCopySelection })}
               onReplace={startReplacement}
               onDelete={deleteSelection}
@@ -1593,7 +1621,7 @@ export function ReviewShell(props: ReviewShellProps) {
             <InsertionCaret
               key={`${props.selection.caretAnchor.pageIndex}:${props.selection.caretAnchor.position.x}:${props.selection.caretAnchor.position.y}`}
               placement={props.selection.caretPlacement}
-              hidden={surface.nestedLayer !== 'none'}
+              hidden={!annotationPeeksEnabled || surface.nestedLayer !== 'none'}
             />
           ) : null}
           {surface.baseSurface === 'reading' && surface.nestedLayer === 'none' && props.authoring.pageMenu ? (
@@ -1625,7 +1653,7 @@ export function ReviewShell(props: ReviewShellProps) {
           ) : null}
           {authoringSession === null
             && !annotationsVisible
-            && annotationReaderSession?.origin === 'peek'
+            && annotationPeeksEnabled && annotationReaderSession?.origin === 'peek'
             && annotationReaderRecord !== null ? (
               <aside className="annotation-peek annotation-peek--reader">
                 <FullAnnotationReader
@@ -1649,7 +1677,7 @@ export function ReviewShell(props: ReviewShellProps) {
             ) : null}
           {authoringSession === null
             && !annotationsVisible
-            && annotationReaderSession?.origin !== 'peek'
+            && annotationPeeksEnabled && annotationReaderSession?.origin !== 'peek'
             && peekItemId ? (() => {
             const item = props.state.items.find(({ id }) => id === peekItemId);
             if (item === undefined) return null;

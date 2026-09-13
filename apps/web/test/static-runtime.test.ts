@@ -100,34 +100,41 @@ describe("static browser review runtime", () => {
     runtime.dispose();
   });
 
-  it("keeps the launcher focused on opening a PDF and the manual-export boundary", () => {
+  it("showcases the reading surfaces while keeping PDF opening and manual export explicit", () => {
     const markup = renderToStaticMarkup(createElement(StaticLauncher, {
       onOpen: async () => undefined,
     }));
     expect(markup).toContain('<img class="static-launcher__mark"');
     expect(markup).toContain("Placekeeper.svg");
     expect(markup).toContain('alt=""');
-    expect(markup).toMatch(/<img class="static-launcher__mark"[^>]*width="42"[^>]*height="42"/);
+    expect(markup).toMatch(/<img class="static-launcher__mark"[^>]*width="96"[^>]*height="96"/);
     expect(markup).not.toContain('aria-hidden="true">P</div>');
     expect(markup).toContain("Upload PDF");
-    expect(markup).toContain('aria-label="PDF URL"');
-    expect(markup).not.toContain(">PDF URL<");
+    expect(markup).toContain('aria-label="Document URL"');
+    expect(markup).not.toContain(">Document URL<");
     expect(markup).toContain("lucide-upload");
     expect(markup).toContain("lucide-link");
     expect(markup).toContain(">Open</button>");
     expect(markup).not.toContain("Open URL");
-    expect(markup).toContain("Annotations must be exported manually in this browser version");
-    expect(markup).toContain("For autosave,");
-    expect(markup).toContain("download the local version");
-    expect(markup).toContain('class="compact-editorial-modal__header"');
-    expect(markup).toContain('class="static-launcher__description compact-editorial-modal__description"');
-    expect(markup).toContain('class="compact-editorial-modal__body"');
-    expect(markup.indexOf("Annotations must be exported manually")).toBeLessThan(markup.indexOf("Upload PDF"));
-    expect(markup).not.toContain("beta");
-    expect(markup).not.toContain("non-confidential");
+    expect(markup).toContain('id="try"');
+    expect(markup).toContain('aria-label="Explore features"');
+    expect(markup).toContain("Read with focus");
+    expect(markup).toContain("Make comments");
+    expect(markup).toContain("Follow a reference");
+    expect(markup).toContain('title="Read with focus interactive demo"');
+    expect(markup).toContain('sandbox="allow-scripts allow-same-origin allow-forms"');
+    expect(markup).toContain('aria-label="Placekeeper app surfaces"');
+    expect(markup).toContain('Install');
+    expect(markup).not.toContain('Follow the thought.');
+    expect(markup).toContain("Symbol search");
+    expect(markup).not.toContain("Reset demo");
+    expect(markup).not.toContain("Sample document ·");
+    expect(markup).not.toContain("Annotations must be exported manually");
+    expect(markup).toContain("or drop a PDF here");
+    expect(markup).toContain("Horizontal scroll lock");
     expect(markup).not.toContain("64 MB maximum");
     expect(markup).not.toContain("CORS");
-    expect(markup.indexOf("Upload PDF")).toBeLessThan(markup.indexOf('aria-label="PDF URL"'));
+    expect(markup.indexOf("Upload PDF")).toBeLessThan(markup.indexOf('aria-label="Document URL"'));
   });
 
   it("opens a user-selected PDF as an export-only in-memory review", async () => {
@@ -249,7 +256,7 @@ describe("static browser review runtime", () => {
     expect(oversized.arrayBuffer).not.toHaveBeenCalled();
   });
 
-  it("fetches only CORS-readable, bounded PDF URLs", async () => {
+  it("fetches only CORS-readable, bounded Document URLs", async () => {
     const fetchPdf = vi.fn(async () => new Response(sourceBytes, {
       status: 200,
       headers: { "content-type": "application/pdf" },

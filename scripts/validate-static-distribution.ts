@@ -11,7 +11,8 @@ import {
 } from "./generate-static-notices.js";
 
 export const STATIC_ARTIFACT_MAX_BYTES = 40 * 1024 * 1024;
-const HASHED_ASSET = /^assets\/[A-Za-z0-9._-]+-[A-Za-z0-9_-]{8,}\.(?:js|css|wasm)$/u;
+const HASHED_ASSET = /^assets\/[A-Za-z0-9._-]+-[A-Za-z0-9_-]{8,}\.(?:js|css|wasm|png)$/u;
+const DEMO_DOCUMENT = /^assets\/counterfactual-matrix-means-[A-Za-z0-9_-]{8,}\.pdf$/u;
 const FIXED_FILES = new Set([
   "index.html",
   STATIC_PRIVACY_PATH,
@@ -47,7 +48,7 @@ function assertSecurityPolicy(indexHtml: string): void {
   for (const directive of [
     "default-src 'none'", "script-src 'self' 'wasm-unsafe-eval' blob:",
     "worker-src 'self' blob:", "connect-src 'self' blob: https:",
-    "object-src 'none'", "frame-src 'none'", "base-uri 'none'", "form-action 'none'",
+    "object-src 'none'", "frame-src 'self'", "base-uri 'none'", "form-action 'none'",
   ]) {
     if (!policy.includes(directive)) throw new Error(`Static CSP is missing: ${directive}`);
   }
@@ -67,10 +68,10 @@ export async function validateStaticDistribution(directory = resolve("dist/stati
   const root = resolve(directory);
   const paths = await artifactPaths(root);
   for (const path of paths) {
-    if (!FIXED_FILES.has(path) && !HASHED_ASSET.test(path)) {
+    if (!FIXED_FILES.has(path) && !HASHED_ASSET.test(path) && !DEMO_DOCUMENT.test(path)) {
       throw new Error(`Artifact path is not allowed: ${path}`);
     }
-    if (/\.(?:map|pdf)$/iu.test(path) || /(?:^|\/)(?:\.env|\.git|test|fixtures?)(?:\/|$)/iu.test(path)) {
+    if ((!DEMO_DOCUMENT.test(path) && /\.(?:map|pdf)$/iu.test(path)) || /(?:^|\/)(?:\.env|\.git|test|fixtures?)(?:\/|$)/iu.test(path)) {
       throw new Error(`Development, environment, source-map, or fixture content is not allowed: ${path}`);
     }
   }

@@ -260,6 +260,7 @@
 }
 
 .reference-tabs .reference-tab-segment__selector {
+  outline: none !important;
   display: flex;
   min-width: 0;
   min-height: 32px;

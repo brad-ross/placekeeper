@@ -400,7 +400,13 @@ export async function runHookCommand(
         documentGeneration: event.documentGeneration,
         bindProof: event.bindProof,
       });
-      if (response.kind === "binding" && response.result.status !== "denied") {
+      if (response.kind === "binding" && response.result.status === "denied") {
+        await write(`${JSON.stringify(hookOutput(
+          "PostToolUse",
+          "Placekeeper could not associate this launch with the current task. The review may already belong to another task, or the launch proof may have expired. An open browser does not establish agent context. If another task owns the review, ask whether to open an independent review with --fork; otherwise rerun the exact installed launch command. Do not replay a bind proof or use another task's context.",
+          "Placekeeper could not connect agent context to this task.",
+        ))}\n`);
+      } else if (response.kind === "binding") {
         await write(`${JSON.stringify(hookOutput(
           "PostToolUse",
           "Placekeeper associated this launch with the current task. Live context will become current after the in-app browser completes its authenticated bootstrap.",

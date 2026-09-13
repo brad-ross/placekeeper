@@ -5,6 +5,42 @@ import XCTest
 @testable import PlacekeeperMac
 
 final class MacPoliciesTests: XCTestCase {
+    @MainActor
+    func testTrafficLightsStayCenteredAfterAppKitShowsAndResizesWindow() {
+        _ = NSApplication.shared
+        let window = PlacekeeperReviewWindow(contentRect: NSRect(x: 0, y: 0, width: 1200, height: 820),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
+            backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.titleVisibility = .hidden
+        let nativeHeight = window.frame.height - window.contentLayoutRect.height
+        let spacing = NSTitlebarAccessoryViewController()
+        spacing.layoutAttribute = .bottom
+        spacing.view = NSView(frame: .zero)
+        window.addTitlebarAccessoryViewController(spacing)
+        defer { window.didLayout = nil; window.orderOut(nil) }
+        for scale in [1.0, 0.8, 1.5, 2.0] {
+            let toolbarHeight = 52 * scale
+            spacing.view.setFrameSize(NSSize(width: 1200, height: toolbarHeight - nativeHeight))
+            window.didLayout = {
+                for type in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
+                    let button = window.standardWindowButton(type)!
+                    let center = button.superview!.convert(NSPoint(x: 16, y: window.frame.height - toolbarHeight / 2), from: nil)
+                    button.setFrameOrigin(NSPoint(x: button.frame.minX, y: center.y - button.frame.height / 2))
+                }
+            }
+            window.didLayout?()
+            window.makeKeyAndOrderFront(nil)
+            window.setContentSize(NSSize(width: 1000 * scale, height: 700 * scale))
+            RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+            for type in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
+                let button = window.standardWindowButton(type)!
+                let centerFromTop = window.frame.height - button.convert(button.bounds, to: nil).midY
+                XCTAssertEqual(centerFromTop, toolbarHeight / 2, accuracy: 0.5, "App zoom \(scale)")
+            }
+        }
+    }
+
     func testAppZoomGeometryUsesPageScaleNotDisplayDensity() {
         let css = DragRect(x: 12, y: 19, width: 43, height: 17)
         for scale in [0.8, 1.25, 2.0] {

@@ -11,16 +11,20 @@ description: Open one explicitly referenced local PDF or canonical Placekeeper l
    - For a canonical link, first run `"$HOME/Applications/Placekeeper.app/Contents/MacOS/placekeeper" open-link --json --preflight --link <placekeeper-link>`.
    - If preflight requires confirmation, show the returned path and ask the user to confirm opening it. Then run `"$HOME/Applications/Placekeeper.app/Contents/MacOS/placekeeper" open-link --json --surface codex --confirmed --link <placekeeper-link>`; otherwise omit `--confirmed`.
    - Handle `recovery-offered` with the same resume, discard, or fork choice described below. Preserve the returned `recoveryOffer.id` and `recoveryOffer.expiresAt`, generate one opaque 16-128 character operation ID, and rerun the same full installed-launcher command with `--recovery <choice> --recovery-offer-id <id> --recovery-offer-expires-at <expiresAt> --recovery-operation-id <operationId>`. Reuse that operation ID if the same choice is retried. Continue at step 3 with the successful response.
-2. Run the installed app-bundle launch client with an argument array, never a shell-built command or a guessed PATH entry:
+2. Run the installed app-bundle launch client directly as a single shell command through the shell execution tool:
 
    `"$HOME/Applications/Placekeeper.app/Contents/MacOS/placekeeper" open --json --surface codex --pdf <absolute-local-pdf-path>`
+
+   Quote each substituted argument as a literal shell argument (single quotes, escaping any embedded single quote). Keep the installed launcher as the command's first executable. Do not wrap the launcher in Python, Node, another shell, or a script; do not add pipes, redirects, command chaining, or output decoration. The binding hook recognizes only this direct command and its single JSON response. These rules apply to `open-link` and recovery retries too.
+   - If sandbox permissions block the launcher's local service files, retry this same direct command through the shell tool's normal approval mechanism. Do not change the command shape to work around the failure.
 
    Add `--source-root <absolute-local-directory>` only when the user explicitly identifies the associated source tree. Add `--fork` only when the user explicitly requests an independent review.
 3. Parse the single JSON response. Accept only `ok: true`, `kind: "opened"` or `"focused"`, and an `http://127.0.0.1:<port>/s/<session>/bootstrap#cap=<token>` URL.
 4. If the result is `kind: "recovery-offered"`, ask the user to choose exactly one returned option: resume, discard, or fork. Do not display the opaque recovery session ID or offer. Preserve the returned `recoveryOffer`, generate one opaque operation ID, and rerun with the full recovery identity flags described above; reuse the same operation ID for a retry of that choice. `--fork` remains an explicit alias only when the user asked for an independent review before any protected-draft offer was returned.
 5. Pass an opened or focused URL directly to the Codex desktop built-in browser. Do not print, summarize, save, or copy the capability URL elsewhere.
 6. For `ok: false`, present only the returned shared error and its one recovery action. Do not expose filesystem details that are absent from the error.
-7. The packaged lifecycle hook automatically binds the successful launch to this task and refreshes current Review Items before each later prompt. Never copy or repeat the returned bind proof, document generation, browser capability, or task identity.
+7. The packaged lifecycle hook binds a recognized successful direct launch to this task and refreshes current Review Items before each later prompt. Opening the browser alone does not establish that binding. If the browser opens but context remains `unbound`, check that step 2 used the direct command and rerun it directly for the same PDF if needed; do not extract or replay a bind proof yourself. Never copy or repeat the returned bind proof, document generation, browser capability, or task identity.
+   - A `focused` launch can reuse a review owned by another task. If the hook reports that it could not associate the launch, do not keep reopening it or claim context is current. Explain the conflict and offer an independent review with `--fork` when the user wants to keep both tasks. Never take over another task's binding or read its context.
 
 ## Live context and PDF evidence
 

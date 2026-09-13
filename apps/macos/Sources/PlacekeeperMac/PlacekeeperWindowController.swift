@@ -3,6 +3,18 @@ import Foundation
 @preconcurrency import WebKit
 
 @MainActor
+final class PlacekeeperReviewWindow: NSWindow {
+    var didLayout: (() -> Void)?
+
+    override func layoutIfNeeded() {
+        super.layoutIfNeeded()
+        // AppKit restores standard button frames during show and resize layout.
+        // Apply the web-toolbar alignment after that native layout completes.
+        didLayout?()
+    }
+}
+
+@MainActor
 private final class TitlebarSpacingView: NSView {
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 }
@@ -113,7 +125,7 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
         webView.allowsMagnification = false
         if diagnosticsEnabled, #available(macOS 13.3, *) { webView.isInspectable = true }
 
-        let window = NSWindow(
+        let window = PlacekeeperReviewWindow(
             contentRect: NSRect(x: 0, y: 0, width: 1200, height: 820),
             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
             backing: .buffered,
@@ -149,6 +161,7 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
         ])
         controller.view = contentView
         window.contentViewController = controller
+        window.didLayout = { [weak self] in self?.positionTrafficLights() }
         alignTrafficLights()
         window.backgroundColor = .windowBackgroundColor
         if let restoredFrame { window.setFrame(restoredFrame, display: false) }
@@ -616,10 +629,6 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
 
     private func alignTrafficLights() {
         guard let window, !window.styleMask.contains(.fullScreen) else { return }
-        let buttons = [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton]
-            .compactMap(window.standardWindowButton)
-        guard let buttonSuperview = buttons.first?.superview,
-              buttons.allSatisfy({ $0.superview === buttonSuperview }) else { return }
         let scale = webView.pageZoom
         let height = Self.toolbarHeight * scale
         // AppKit gives new accessory views a default height when attached;
@@ -629,6 +638,17 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
             titlebarSpacing.view.setFrameSize(NSSize(width: webView.bounds.width, height: accessoryHeight))
         }
         window.contentView?.superview?.layoutSubtreeIfNeeded()
+        positionTrafficLights()
+    }
+
+    private func positionTrafficLights() {
+        guard let window, !window.styleMask.contains(.fullScreen) else { return }
+        let buttons = [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton]
+            .compactMap(window.standardWindowButton)
+        guard let buttonSuperview = buttons.first?.superview,
+              buttons.allSatisfy({ $0.superview === buttonSuperview }) else { return }
+        let scale = webView.pageZoom
+        let height = Self.toolbarHeight * scale
         let centerInWindow = webView.convert(
             NSPoint(x: Self.toolbarHorizontalMargin * scale,
                     y: webView.isFlipped ? height / 2 : webView.bounds.height - height / 2),

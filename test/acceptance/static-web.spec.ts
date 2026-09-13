@@ -156,8 +156,8 @@ test("@critical @representative keeps the local keyboard journey private and rou
   page.on("request", (request) => requests.push({ method: request.method(), url: request.url() }));
 
   await page.goto("./");
-  await expect(page.getByRole("heading", { name: "Placekeeper" })).toBeVisible();
-  await expect(page.getByText("Annotations must be exported manually in this browser version")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Placekeeper", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Try it with your own document", exact: true })).toBeVisible();
   await focusByTab(page, page.getByRole("button", { name: "Upload PDF" }));
 
   const sourceDocument = await PDFDocument.load(await readFile(annotatedPdf));
@@ -415,7 +415,7 @@ test('URL opening uses an in-button spinner and reports failure in a corner toas
   await page.goto('./');
   const card = page.locator('.static-launcher__card');
   const before = (await card.boundingBox())!;
-  await page.getByRole('textbox', { name: 'PDF URL' }).fill('https://example.org/paper.pdf');
+  await page.getByRole('textbox', { name: 'Document URL' }).fill('https://example.org/paper.pdf');
   await page.getByRole('button', { name: 'Open', exact: true }).click();
   await expect(page.locator('.static-launcher__url button .static-launcher__spinner')).toBeVisible();
   await expect(page.locator('.static-launcher__progress')).toHaveCount(0);
@@ -488,4 +488,361 @@ for (const rotation of [0, 90]) test(`imported annotations use reader defaults a
   await page.locator('input[type=file]').setInputFiles(exportedPath);
   await waitForStaticPdf(page);
   await expect(page.locator('[data-source-reader-mark]')).toHaveCount(7);
+});
+
+for (const width of [390, 1280]) test(`@critical landing showcase and PDF controls work at ${width}px`, async ({ page }) => {
+  await page.setViewportSize({ width, height: 900 });
+  await page.goto('./');
+  await expect(page.getByRole('heading', { name: 'Placekeeper', exact: true })).toBeVisible();
+  const upload = page.getByRole('button', { name: 'Upload PDF', exact: true });
+  await expect(upload).toBeVisible();
+  if (width === 1280) expect((await upload.boundingBox())!.y).toBeLessThan(700);
+  await expect(page.getByLabel('Document URL')).toBeVisible();
+  const showcase = page.getByRole('tablist', { name: 'Explore features' });
+  await expect(showcase.getByRole('tab', { name: 'Read with focus', exact: true })).toHaveAttribute('aria-selected', 'true');
+  for (const label of ['Read with focus', 'Follow a reference', 'Make comments']) {
+    await expect(showcase.getByText(label, { exact: true })).toBeVisible();
+  }
+  for (const name of ['Follow a reference', 'Make comments', 'Read with focus']) {
+    const feature = showcase.getByRole('tab', { name, exact: true });
+    await feature.focus();
+    await page.keyboard.press('Enter');
+    await expect(feature).toHaveAttribute('aria-selected', 'true');
+    await expect(showcase.locator('[aria-selected="true"]')).toHaveCount(1);
+    await expect(page.getByRole('heading', { name, exact: true })).toBeVisible();
+    await expect(page.locator('iframe[aria-hidden="false"]')).toHaveAttribute('title', `${name} interactive demo`);
+  }
+  await page.locator('iframe[aria-hidden="false"]').scrollIntoViewIfNeeded();
+  const demo = page.frameLocator('iframe[aria-hidden="false"]');
+  await demo.locator('[data-initial-view-ready="true"]').waitFor({ state: 'attached' });
+  await expect(demo.locator('[data-page-index="13"] > img').first()).toBeVisible();
+  await expect(demo.locator('[data-owned-mark]')).toHaveCount(0);
+  await demo.getByRole('button', { name: 'Show workspace', exact: true }).click();
+  await expect(demo.getByRole('tab', { name: 'Outline', exact: true })).toBeEnabled();
+  if (width === 1280) {
+    expect(await demo.locator('body').evaluate(() => innerWidth)).toBe(1000);
+    const frameBox = (await page.locator('iframe[aria-hidden="false"]').boundingBox())!;
+    const tray = (await demo.getByRole('complementary', { name: 'Outline, search, and annotations', exact: true }).boundingBox())!;
+    expect(tray.x).toBeGreaterThan(frameBox.x + frameBox.width / 2);
+  }
+  await expect(demo.getByRole('tab', { name: 'Search', exact: true })).toBeDisabled();
+  await expect(demo.getByRole('tab', { name: 'Annotations', exact: true })).toBeDisabled();
+  await page.getByRole('button', { name: /^Chrome/ }).click();
+  await expect(page.getByRole('figure', { name: 'Chrome Extension window screenshot' })).toBeVisible();
+  await page.getByRole('link', { name: 'Try it', exact: true }).click();
+  await expect(upload).toBeInViewport();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
+
+test('@critical landing demos support zoom, references, and isolated comments', async ({ page }) => {
+  page.setDefaultTimeout(10_000);
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.goto('./');
+  const iframe = page.locator('iframe[aria-hidden="false"]');
+  const demo = page.frameLocator('iframe[aria-hidden="false"]');
+  await demo.locator('[data-initial-view-ready="true"]').waitFor({ state: 'attached' });
+  const feature = (name: string) => page.getByRole('tablist', { name: 'Explore features' }).getByRole('tab', { name, exact: true });
+  await iframe.scrollIntoViewIfNeeded();
+  await expect(demo.locator('[data-page-index="13"] > img').first()).toBeVisible();
+  const zoom = demo.getByRole('textbox', { name: /^Current zoom/ });
+  await zoom.focus();
+  await zoom.fill('200');
+  await zoom.press('Enter');
+  await expect(zoom).toHaveValue('200');
+  await demo.getByRole('button', { name: 'Open zoom controls', exact: true }).focus();
+  await page.keyboard.press('Enter');
+  const lock = demo.getByRole('menuitemcheckbox', { name: 'Horizontal lock', exact: true });
+  await expect(lock).toBeVisible();
+  const checked = await lock.getAttribute('aria-checked');
+  await lock.focus();
+  await page.keyboard.press('Enter');
+  await expect(lock).toHaveAttribute('aria-checked', checked === 'true' ? 'false' : 'true');
+  await page.keyboard.press('Escape');
+
+  await zoom.fill('100');
+  await zoom.press('Enter');
+  await feature('Follow a reference').click();
+  await iframe.scrollIntoViewIfNeeded();
+  await expect(demo.locator('[data-page-index="13"] > img').first()).toBeVisible();
+  // Let the tray's opening animation and focus handoff settle before driving
+  // the document directly with keyboard input.
+  await demo.locator('body').evaluate(async () => {
+    await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+    await Promise.all(document.getAnimations().map((animation) => animation.finished.catch(() => {})));
+  });
+  await expect(demo.locator('[data-reference-pdf-viewport] [data-page-index="30"] > img').first()).toBeVisible();
+  await expect(demo.getByRole('tab', { name: 'Appendix A, Page 31', exact: true })).toBeFocused();
+  await expect(zoom).toHaveValue('100');
+  await expect(demo.getByRole('textbox', { name: /^Current page/ })).toHaveValue('14');
+  const pageInput = demo.getByRole('textbox', { name: /^Current page/ });
+  await pageInput.fill('15');
+  await pageInput.press('Enter');
+  await expect(pageInput).toHaveValue('15');
+  await demo.locator('[data-pdf-copy-surface="main"] [data-page-index="14"]').getByRole('button', { name: 'Open PDF link to Page 31', exact: true }).first().click();
+  await demo.getByRole('menuitem', { name: 'Open in References', exact: true }).focus();
+  await page.keyboard.press('Enter');
+  await expect(demo.getByText('Reference opened: Page 31.', { exact: true })).toBeAttached();
+  const reference = demo.locator('[data-reference-pdf-viewport] [data-viewer-framing-viewport]');
+  await expect(reference.locator('[data-page-index="30"] > img').first()).toBeVisible();
+  const before = await reference.evaluate((element) => element.scrollTop);
+  await expect(async () => {
+    await reference.hover({ position: { x: 160, y: 100 } });
+    await page.mouse.wheel(0, 220);
+    expect(await reference.evaluate((element) => element.scrollTop)).not.toBe(before);
+  }).toPass({ timeout: 5_000 });
+  await expect(demo.getByRole('textbox', { name: /^Current page/ })).toHaveValue('15');
+  await pageInput.fill('14');
+  await pageInput.press('Enter');
+
+  await feature('Make comments').click();
+  await iframe.scrollIntoViewIfNeeded();
+  await expect(demo.locator('[data-page-index="13"] > img').first()).toBeVisible();
+  await expect(demo.getByRole('tab', { name: 'Annotations', exact: true })).toHaveAttribute('aria-selected', 'true');
+  await demo.locator('body').evaluate(async () => {
+    await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+    await Promise.all(document.getAnimations().map((animation) => animation.finished.catch(() => {})));
+  });
+  // Four seeded annotations paint five segments (the deletion spans two lines).
+  await expect(demo.locator('[data-owned-mark]')).toHaveCount(5);
+  await demo.getByRole('button', { name: 'Edit Highlight annotation on page 14', exact: true }).click();
+  const editor = demo.getByRole('textbox', { name: 'Comment (optional)', exact: true });
+  await editor.fill('A comment in the landing demo.');
+  await demo.getByRole('button', { name: 'Apply', exact: true }).click();
+  await expect(editor).toHaveCount(0);
+  await expect(demo.getByText('A comment in the landing demo.', { exact: true })).toBeVisible();
+  const readerIdentity = await demo.locator('body').evaluate(() => performance.timeOrigin);
+  await feature('Read with focus').click();
+  await expect(demo.locator('[data-owned-mark]')).toHaveCount(0);
+  await expect(demo.getByRole('textbox', { name: /^Current zoom/ })).toHaveValue('100');
+  await feature('Make comments').click();
+  await expect(demo.locator('[data-page-index="13"] > img').first()).toBeVisible();
+  expect(await demo.locator('body').evaluate(() => performance.timeOrigin)).toBe(readerIdentity);
+  await expect(demo.locator('[data-owned-mark]')).toHaveCount(5);
+  await expect(demo.getByText('A comment in the landing demo.', { exact: true })).toBeVisible();
+  await page.locator('input[type=file]').setInputFiles(representativePdf);
+  await waitForStaticPdf(page);
+  await expect(iframe).toHaveCount(0);
+  await expect(page.locator('[data-owned-mark]')).toHaveCount(0);
+});
+
+
+test('@critical visitors can add demo annotations and hide them between modes', async ({ page }) => {
+  await page.goto('./');
+  const feature = (name: string) => page.getByRole('tablist', { name: 'Explore features' }).getByRole('tab', { name, exact: true });
+  const demo = page.frameLocator('iframe');
+  await demo.locator('[data-initial-view-ready="true"]').waitFor({ state: 'attached' });
+  await feature('Make comments').click();
+  await page.locator('iframe').scrollIntoViewIfNeeded();
+  await expect(demo.locator('[data-owned-mark]')).toHaveCount(5);
+  await demo.locator('body').evaluate(async () => {
+    await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+    await Promise.all(document.getAnimations().map((animation) => animation.finished.catch(() => {})));
+  });
+  await demo.locator('[data-page-index="13"]').first().focus();
+  await page.keyboard.press('Alt+Shift+N');
+  const cursor = demo.getByRole('button', { name: /^Page Note placement cursor/ });
+  await cursor.focus();
+  await page.keyboard.press('Enter');
+  const comment = demo.getByRole('textbox', { name: 'Comment', exact: true });
+  await comment.fill('My own annotation.');
+  await demo.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(comment).toHaveCount(0);
+  await expect(demo.locator('[data-owned-mark]')).toHaveCount(6);
+  for (const name of ['Read with focus', 'Follow a reference']) {
+    await feature(name).click();
+    await expect(demo.locator('[data-owned-mark]')).toHaveCount(0);
+    await expect(demo.locator('.annotation-peek')).toHaveCount(0);
+  }
+  await feature('Make comments').click();
+  await expect(demo.locator('[data-owned-mark]')).toHaveCount(6);
+  await expect(demo.getByText('My own annotation.', { exact: true })).toBeVisible();
+});
+
+test('@critical selecting demo text opens annotation actions after switching modes', async ({ page }) => {
+  await page.setViewportSize({ width: 1324, height: 1100 });
+  await page.goto('./');
+  await page.locator('iframe').scrollIntoViewIfNeeded();
+  const demo = page.frameLocator('iframe');
+  await demo.locator('[data-initial-view-ready="true"]').waitFor({ state: 'attached' });
+  const pdf = demo.locator('[data-page-index="13"] > img').first();
+  await expect(pdf).toBeVisible();
+  await page.getByRole('tab', { name: 'Make comments', exact: true }).click();
+  await expect(demo.locator('[data-owned-mark]')).toHaveCount(5);
+  await demo.locator('body').evaluate(async () => {
+    await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+    await Promise.all(document.getAnimations().map((animation) => animation.finished.catch(() => {})));
+  });
+  const box = (await pdf.boundingBox())!;
+  const scale = box.width / 612;
+  // Drag across the unannotated first line of Section 4.1 in the real paper.
+  await page.mouse.move(box.x + 52 * scale, box.y + 375 * scale);
+  await page.mouse.down();
+  await page.mouse.move(box.x + 300 * scale, box.y + 375 * scale, { steps: 20 });
+  await page.mouse.up();
+  await expect(demo.locator('[data-selection-status="reliable"]')).toBeAttached();
+  const highlight = demo.getByRole('button', { name: 'Highlight', exact: true });
+  await expect(highlight).toBeVisible();
+  await page.getByRole('tab', { name: 'Read with focus', exact: true }).click();
+  await expect(highlight).toBeHidden();
+  await page.getByRole('tab', { name: 'Make comments', exact: true }).click();
+  await expect(highlight).toBeVisible();
+});
+
+test('@critical visitors can insert text in the comments demo', async ({ page }) => {
+  await page.setViewportSize({ width: 1324, height: 1100 });
+  await page.goto('./');
+  await page.locator('iframe').scrollIntoViewIfNeeded();
+  const demo = page.frameLocator('iframe');
+  await demo.locator('[data-initial-view-ready="true"]').waitFor({ state: 'attached' });
+  const pdf = demo.locator('[data-page-index="13"] > img').first();
+  await expect(pdf).toBeVisible();
+  await page.getByRole('tab', { name: 'Make comments', exact: true }).click();
+  await expect(demo.locator('[data-owned-mark]')).toHaveCount(5);
+  await demo.locator('body').evaluate(async () => {
+    await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+    await Promise.all(document.getAnimations().map((animation) => animation.finished.catch(() => {})));
+  });
+  const box = (await pdf.boundingBox())!;
+  const scale = box.width / 612;
+  await page.mouse.click(box.x + 160 * scale, box.y + 375 * scale);
+  const caret = demo.locator('[data-review-insertion-caret]');
+  await expect(caret).toBeVisible();
+  await page.getByRole('tab', { name: 'Read with focus', exact: true }).click();
+  await expect(caret).toBeHidden();
+  await page.getByRole('tab', { name: 'Make comments', exact: true }).click();
+  await expect(caret).toBeVisible();
+  // Reopening the tray refits the page. Do not click coordinates captured
+  // before the transition while its geometry is still changing.
+  await demo.locator('body').evaluate(async () => {
+    await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+    await Promise.all(document.getAnimations().filter((animation) => animation.effect?.getComputedTiming().iterations !== Infinity).map((animation) => animation.finished.catch(() => {})));
+  });
+  const reopenedBox = (await pdf.boundingBox())!;
+  const reopenedScale = reopenedBox.width / 612;
+  await page.mouse.click(reopenedBox.x + 160 * reopenedScale, reopenedBox.y + 375 * reopenedScale);
+  await page.keyboard.type('New text');
+  await expect(demo.getByRole('textbox', { name: 'Insertion', exact: true })).toHaveValue('New text');
+  await demo.getByRole('button', { name: 'Apply', exact: true }).click();
+  await expect(demo.locator('[data-owned-mark]')).toHaveCount(6);
+  await page.getByRole('tab', { name: 'Read with focus', exact: true }).click();
+  await expect(demo.locator('[data-owned-mark]')).toHaveCount(0);
+  await page.getByRole('tab', { name: 'Make comments', exact: true }).click();
+  await expect(demo.locator('[data-owned-mark]')).toHaveCount(6);
+});
+
+test('@critical real-paper demo keeps its metadata while bounding the main preview', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.goto('./');
+  const demo = page.frameLocator('iframe');
+  await demo.locator('[data-initial-view-ready="true"]').waitFor({ state: 'attached' });
+  const currentPage = demo.getByRole('textbox', { name: /^Current page/ });
+  await expect(currentPage).toBeVisible();
+  await expect(demo.locator('header.review-chrome')).toContainText('/ 100');
+  const viewport = demo.locator('.pdf-workspace:not(.pdf-workspace--reference) [data-viewer-framing-viewport]').first();
+  for (const zoomPercent of ['100', '150']) {
+    const zoom = demo.getByRole('textbox', { name: /^Current zoom/ });
+    await zoom.fill(zoomPercent);
+    await zoom.press('Enter');
+    await currentPage.fill('100');
+    await currentPage.press('Enter');
+    await viewport.evaluate((element) => { element.scrollTop = element.scrollHeight; });
+    await expect(currentPage).toHaveValue('16');
+    await expect(demo.locator('.pdf-workspace__page[data-page-index="16"]')).toHaveCount(0);
+  }
+  await currentPage.fill('1');
+  await currentPage.press('Enter');
+  await viewport.hover({ position: { x: 150, y: 150 } });
+  await page.mouse.wheel(0, -30000);
+  await expect(currentPage).toHaveValue('14');
+  await demo.getByRole('button', { name: 'Show workspace', exact: true }).click();
+  await expect(demo.getByRole('button', { name: /Theoretical Properties/ }).first()).toBeVisible();
+  await page.getByRole('tab', { name: 'Follow a reference', exact: true }).click();
+  await expect(demo.getByRole('tab', { name: 'Appendix A, Page 31', exact: true })).toBeVisible();
+  await expect(demo.locator('[data-reference-pdf-viewport] [data-page-index="30"] > img').first()).toBeVisible();
+  await expect(currentPage).toHaveValue('14');
+});
+
+test('@critical demo starts fitted and Fit Width keeps the requested scale', async ({ page }) => {
+  await page.addInitScript(() => {
+    const checkFirstPaint = () => {
+      const reader = document.querySelector<HTMLElement>('[data-initial-view-ready]');
+      if (reader?.dataset.initialViewReady === 'true') return;
+      if (reader && getComputedStyle(reader).visibility !== 'hidden') {
+        document.body.dataset.unfittedDemoPaint = 'true';
+      }
+      requestAnimationFrame(checkFirstPaint);
+    };
+    requestAnimationFrame(checkFirstPaint);
+  });
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.goto('./');
+  const demo = page.frameLocator('iframe');
+  await demo.locator('[data-initial-view-ready="true"]').waitFor({ state: 'attached' });
+  const zoom = demo.getByRole('textbox', { name: /^Current zoom/ });
+  await expect(zoom).toHaveValue('146');
+  await expect(demo.getByRole('textbox', { name: /^Current page/ })).toHaveValue('14');
+  const readPage = demo.locator('[data-pdf-copy-surface="main"] [data-page-index="13"] > img').first();
+  // Initial fitting must match the button's horizontal geometry, not just its percentage.
+  const initialBounds = (await readPage.boundingBox())!;
+  await expect(demo.locator('body')).not.toHaveAttribute('data-unfitted-demo-paint', 'true');
+  for (const mode of ['Read with focus', 'Follow a reference', 'Make comments']) {
+    await page.getByRole('tab', { name: mode, exact: true }).click();
+    await demo.locator('body').evaluate(async () => {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+      await Promise.all(document.getAnimations().map((animation) => animation.finished.catch(() => {})));
+    });
+    // Fit width depends on the browser's scrollbar gutter. Check the actual
+    // reading width, then require the explicit fit to restore that same scale.
+    if (mode === 'Make comments') {
+      await expect(async () => {
+        const geometry = await readPage.evaluate((image) => {
+          const workspace = image.closest('.pdf-workspace')!;
+          const viewport = workspace.querySelector<HTMLElement>('[data-viewer-framing-viewport]')!;
+          const bounds = viewport.getBoundingClientRect();
+          const right = Math.min(bounds.left + viewport.clientLeft + viewport.clientWidth, workspace.getBoundingClientRect().right);
+          // The open tray leaves a 12px inset plus 12px fade on each side.
+          return { pageWidth: image.getBoundingClientRect().width, available: right - bounds.left - viewport.clientLeft - 48 };
+        });
+        expect(Math.abs(geometry.pageWidth - geometry.available)).toBeLessThan(1);
+      }).toPass();
+    }
+    const fitted = await zoom.inputValue();
+    await zoom.fill('200');
+    await zoom.press('Enter');
+    await expect(zoom).toHaveValue('200');
+    const viewport = demo.locator('[data-pdf-copy-surface="main"] [data-viewer-framing-viewport]');
+    await viewport.hover({ position: { x: 150, y: 150 } });
+    await viewport.evaluate(async () => { for (let i = 0; i < 2; i++) await new Promise(requestAnimationFrame); });
+    const upwardScroll = viewport.evaluate(async (element) => {
+      const offsets: number[] = [];
+      const record = () => offsets.push(element.scrollTop);
+      element.addEventListener('scroll', record);
+      for (let i = 0; i < 20; i++) await new Promise(requestAnimationFrame);
+      element.removeEventListener('scroll', record);
+      return offsets;
+    });
+    await page.mouse.wheel(0, -30000);
+    const offsets = await upwardScroll;
+    // Upward scrolling must stop, never overshoot and then jump down to page 14.
+    for (let i = 1; i < offsets.length; i++) expect(offsets[i]).toBeLessThanOrEqual(offsets[i - 1]! + 1);
+    await demo.getByRole('button', { name: 'Open zoom controls', exact: true }).click();
+    await demo.getByRole('menuitem', { name: 'Fit width', exact: true }).click();
+    await expect(zoom).toHaveValue(fitted);
+    // Catch a transient successful fit followed by rollback during anchor settlement.
+    await expect(zoom).toHaveJSProperty('value', fitted);
+    const samples = await zoom.evaluate(async (input: HTMLInputElement) => {
+      const values: string[] = [];
+      for (let frame = 0; frame < 20; frame += 1) {
+        await new Promise(requestAnimationFrame);
+        values.push(input.value);
+      }
+      return values;
+    });
+    expect(new Set(samples)).toEqual(new Set([fitted]));
+    if (mode === 'Read with focus') {
+      const fittedBounds = (await readPage.boundingBox())!;
+      expect(Math.abs(fittedBounds.x - initialBounds.x)).toBeLessThan(1);
+      expect(Math.abs(fittedBounds.width - initialBounds.width)).toBeLessThan(1);
+    }
+  }
 });
