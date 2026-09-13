@@ -30,16 +30,38 @@ case "$#" in
     exit 2
     ;;
 esac
-if [ "$(/usr/bin/uname -s)" != "Darwin" ] || [ "$(/usr/bin/uname -m)" != "arm64" ]; then
-  printf '%s\n' "Placekeeper currently supports source installation on Apple-silicon macOS only." >&2
+prerequisite_failure() {
+  printf '%s\n' "$1" "Install Apple Command Line Tools with a working Swift 6+ compiler and macOS SDK:" \
+    "https://developer.apple.com/documentation/xcode/installing-the-command-line-tools" >&2
   exit 1
+}
+if [ "$(/usr/bin/uname -s)" != "Darwin" ] || [ "$(/usr/bin/uname -m)" != "arm64" ]; then
+  prerequisite_failure "Placekeeper currently supports source installation on Apple-silicon macOS only."
 fi
-for command in /usr/bin/curl /usr/bin/ditto /usr/bin/shasum /usr/bin/tar /usr/bin/mktemp /usr/bin/osacompile /usr/bin/codesign /usr/bin/swift; do
-  if [ ! -x "$command" ]; then
-    printf 'Required macOS tool is unavailable: %s\n' "$command" >&2
-    exit 1
-  fi
+os_major=$(/usr/bin/sw_vers -productVersion | /usr/bin/cut -d . -f 1)
+case "$os_major" in ''|*[!0-9]*) prerequisite_failure "Cannot determine the macOS version." ;; esac
+if [ "$os_major" -lt 13 ]; then prerequisite_failure "Placekeeper requires macOS 13 or newer."; fi
+for command in /usr/bin/curl /usr/bin/ditto /usr/bin/shasum /usr/bin/tar /usr/bin/mktemp /usr/bin/osacompile /usr/bin/codesign /usr/bin/xcrun; do
+  if [ ! -x "$command" ]; then prerequisite_failure "Required macOS tool is unavailable: $command"; fi
 done
+if [ "$install_mode" != "uninstall" ]; then
+  if ! swift_version=$(/usr/bin/xcrun swift --version 2>/dev/null); then
+    prerequisite_failure "The Apple Swift compiler is unavailable or does not run."
+  fi
+  swift_major=$(printf '%s\n' "$swift_version" | /usr/bin/sed -n 's/.*Swift version \([0-9][0-9]*\).*/\1/p' | /usr/bin/head -n 1)
+  case "$swift_major" in ''|*[!0-9]*) prerequisite_failure "Cannot verify the Apple Swift compiler version." ;; esac
+  if [ "$swift_major" -lt 6 ]; then prerequisite_failure "Source installation requires Swift 6 or newer."; fi
+  if ! sdk_path=$(/usr/bin/xcrun --sdk macosx --show-sdk-path 2>/dev/null) || [ ! -d "$sdk_path" ]; then
+    prerequisite_failure "A working macOS SDK is required for source installation."
+  fi
+  compiler_probe=$(/usr/bin/mktemp -d "${TMPDIR:-/tmp}/placekeeper-swift-check.XXXXXX")
+  trap '/bin/rm -rf "$compiler_probe"' EXIT
+  if ! printf 'import AppKit\n' | /usr/bin/xcrun swiftc -module-cache-path "$compiler_probe" -sdk "$sdk_path" -target arm64-apple-macos13 -typecheck - >/dev/null 2>&1; then
+    prerequisite_failure "The Swift compiler cannot typecheck against the macOS SDK. Update Apple Command Line Tools."
+  fi
+  /bin/rm -rf "$compiler_probe"
+  trap - EXIT
+fi
 
 if [ "$install_mode" = "dry-run" ]; then
   printf '%s\n' \
