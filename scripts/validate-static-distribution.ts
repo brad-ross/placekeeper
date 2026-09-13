@@ -15,6 +15,7 @@ const HASHED_ASSET = /^assets\/[A-Za-z0-9._-]+-[A-Za-z0-9_-]{8,}\.(?:js|css|wasm
 const DEMO_DOCUMENT = /^assets\/counterfactual-matrix-means-[A-Za-z0-9_-]{8,}\.pdf$/u;
 const FIXED_FILES = new Set([
   "index.html",
+  "install.sh",
   STATIC_PRIVACY_PATH,
   STATIC_NOTICE_PATH,
   STATIC_DEPENDENCY_INVENTORY_PATH,

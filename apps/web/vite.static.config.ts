@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { defineConfig, type Plugin } from "vite";
 
@@ -64,6 +65,7 @@ function staticLegalAssets(): Plugin {
     name: "static-legal-assets",
     async buildStart() {
       const legal = await createStaticLegalAssets();
+      this.emitFile({ type: "asset", fileName: "install.sh", source: readFileSync(resolve("scripts/install-latest.sh"), "utf8") });
       this.emitFile({ type: "asset", fileName: STATIC_NOTICE_PATH, source: legal.noticeHtml });
       this.emitFile({ type: "asset", fileName: STATIC_PRIVACY_PATH, source: legal.privacyHtml });
       this.emitFile({

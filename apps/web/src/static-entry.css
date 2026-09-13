@@ -594,13 +594,14 @@ body[data-landing-demo] :is(button, input, textarea, [contenteditable="true"]):n
 .install-dialog__header { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .install-dialog__header h2 { margin: 0; font-size: 22px; font-weight: 600; letter-spacing: -.5px; }
 .install-dialog button { font-family: inherit; cursor: pointer; }
-.install-dialog__header button { flex: none; width: 36px; height: 36px; border: 0; border-radius: 8px; background: var(--review-surface-subtle); color: inherit; font-size: 24px; }
 .static-launcher .install-dialog p { margin: 16px 0; font-size: 14px; line-height: 1.6; }
-.static-launcher .install-dialog__requirements { color: var(--review-ink-muted); font-size: 12px; }
-.install-dialog__requirements a { color: inherit; text-underline-offset: 3px; }
-.install-dialog__command { margin: 20px 0 16px; padding: 14px; border: 1px solid var(--review-border-subtle); border-radius: 9px; background: var(--review-surface-canvas); white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; font-size: 12px; line-height: 1.6; }
+.install-dialog__command { display: flex; align-items: center; gap: 16px; width: 100%; text-align: left; color: var(--review-ink-primary); margin: 20px 0 0; padding: 14px; border: 1px solid var(--review-border-subtle); border-radius: 9px; background: var(--review-surface-canvas); white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; font-size: 12px; line-height: 1.6; }
+.install-dialog__command code { min-width: 0; user-select: text; font-size: 12px; line-height: 1.6; }
+.install-dialog__command svg { flex-shrink: 0; margin-left: auto; }
+.install-dialog__command:hover { background: var(--review-surface-subtle); }
+.install-dialog__command:active { opacity: .8; }
+.install-dialog__footer:has([role=status]:not(:empty)) { margin-top: 12px; }
 .install-dialog__footer { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
-.install-dialog__copy { padding: 10px 14px; border: 0; border-radius: 8px; background: var(--review-ink-primary); color: var(--review-surface-panel); font-size: 12px; }
 .install-dialog__footer [role=status] { flex: 1 1 170px; color: var(--review-ink-muted); font-size: 12px; line-height: 1.5; }
 .install-dialog :focus-visible { outline: 2px solid var(--review-ink-muted); outline-offset: 3px; }
 @media (max-width: 480px) { .install-dialog { padding: 18px; } }

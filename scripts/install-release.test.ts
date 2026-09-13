@@ -7,6 +7,7 @@ import { gzipSync } from "node:zlib";
 import { spawnSync } from "node:child_process";
 import { releaseIdentity, renderBootstrap, SOURCE_INSTALL_COMMAND } from "./package-source-release.js";
 
+const loader = await readFile(new URL("./install-latest.sh", import.meta.url), "utf8");
 const commit = "a".repeat(40);
 const identity = releaseIdentity("1.2.3", commit);
 const temps: string[] = [];
@@ -83,9 +84,9 @@ describe("release bootstrap", () => {
   ])("rejects malicious archive $name ($type)", entry => expectRejected({ extra: [entry] }, "Unsafe"));
   it("latest asset absence or a partial executable never executes and has actionable output", async () => {
     const test = await fixture();
-    await writeFile(join(test.dir, "bin/curl"), '#!/bin/sh\nwhile [ "$#" -gt 0 ]; do if [ "$1" = -o ]; then shift; printf \'touch "$TEST_MARKER"\\n\' > "$1"; fi; shift; done\nexit 22\n', { mode: 0o755 });
-    const result = spawnSync("/bin/sh", ["-c", SOURCE_INSTALL_COMMAND], { env: { ...test.env, PATH: `${join(test.dir, "bin") }:/usr/bin:/bin` }, encoding: "utf8" });
-    expect(result.status).toBe(1); expect(result.stderr).toContain("stable Placekeeper installer is unavailable");
+    await writeFile(join(test.dir, "bin/curl"), '#!/bin/sh\nprintf \'touch "$TEST_MARKER"\\n\'\necho "curl: download failed" >&2\nexit 22\n', { mode: 0o755 });
+    const result = spawnSync("/bin/sh", ["-c", loader], { env: { ...test.env, PATH: `${join(test.dir, "bin") }:/usr/bin:/bin` }, encoding: "utf8" });
+    expect(result.status).toBe(1); expect(result.stderr).toContain("download failed");
     await expect(readFile(test.env.TEST_MARKER)).rejects.toThrow(); expect(await readdir(test.temp)).toEqual([]);
   });
 });
@@ -94,15 +95,24 @@ it("landing command resolves latest once then executes the fully downloaded pinn
   const test = await fixture();
   await writeFile(join(test.dir, "bin/curl"), `#!/bin/sh
 printf '%s\\n' "$*" >> "$TEST_REQUESTS"
+case "$*" in *github.io/placekeeper/install.sh*) cat "$TEST_LOADER"; exit 0;; esac
 source="$TEST_ARCHIVE"
 case "$*" in *releases/latest/download*) source="$TEST_BOOTSTRAP";; esac
 while [ "$#" -gt 0 ]; do if [ "$1" = -o ]; then shift; cp "$source" "$1"; fi; shift; done
 `, { mode: 0o755 });
-  const result = spawnSync("/bin/sh", ["-c", SOURCE_INSTALL_COMMAND], { env: { ...test.env, PATH: `${join(test.dir, "bin")}:/usr/bin:/bin`, TEST_BOOTSTRAP: join(test.dir, "bootstrap") }, encoding: "utf8" });
+  const result = spawnSync("/bin/sh", ["-c", SOURCE_INSTALL_COMMAND], { env: { ...test.env, PATH: `${join(test.dir, "bin")}:/usr/bin:/bin`, TEST_LOADER: new URL("./install-latest.sh", import.meta.url).pathname, TEST_BOOTSTRAP: join(test.dir, "bootstrap") }, encoding: "utf8" });
   expect(result.status, result.stderr).toBe(0);
   const requests = await readFile(test.env.TEST_REQUESTS, "utf8");
   expect(requests.match(/releases\/latest\/download/g)).toHaveLength(1);
-  expect(requests.trim().split("\n")).toHaveLength(2);
+  expect(requests.trim().split("\n")).toHaveLength(3);
   expect(requests).toContain(identity.sourceUrl);
+  expect(await readdir(test.temp)).toEqual([]);
+});
+
+it("does not execute an incomplete streamed loader", async () => {
+  const test = await fixture();
+  const result = spawnSync("/bin/sh", [], { input: loader.slice(0, loader.indexOf('  sh "$work/install.sh"')), env: test.env, encoding: "utf8" });
+  expect(result.status).not.toBe(0);
+  await expect(readFile(test.env.TEST_MARKER)).rejects.toThrow();
   expect(await readdir(test.temp)).toEqual([]);
 });

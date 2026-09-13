@@ -873,13 +873,12 @@ for (const width of [1440, 390]) test(`@critical installation dialog preserves t
     await triggers.nth(index).click();
     await expect(dialog).toBeVisible();
     await expect(page.locator('dialog')).toHaveCount(1);
-    const close = dialog.getByRole('button', { name: 'Close installation dialog' });
     const copy = dialog.getByRole('button', { name: 'Copy command', exact: true });
-    await expect(close).toBeFocused();
+    await expect(copy).toBeFocused();
     await page.keyboard.press('Shift+Tab');
     await expect(copy).toBeFocused();
     await page.keyboard.press('Tab');
-    await expect(close).toBeFocused();
+    await expect(copy).toBeFocused();
     for (let step = 0; step < 6; step += 1) {
       await page.keyboard.press('Tab');
       expect(await dialog.evaluate((element) => element.contains(document.activeElement))).toBe(true);
@@ -889,7 +888,7 @@ for (const width of [1440, 390]) test(`@critical installation dialog preserves t
     expect(bounds.x).toBeGreaterThanOrEqual(0);
     expect(bounds.x + bounds.width).toBeLessThanOrEqual(width);
     if (index === 0) await page.keyboard.press('Escape');
-    else await close.click();
+    else await page.mouse.click(2, 2);
     await expect(dialog).toBeHidden();
     await expect(triggers.nth(index)).toBeFocused();
     expect(await demo.locator('body').evaluate(() => performance.timeOrigin)).toBe(identity);

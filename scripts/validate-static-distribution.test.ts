@@ -23,6 +23,7 @@ async function fixture(overrides: Record<string, string> = {}): Promise<string> 
       <meta name="referrer" content="no-referrer">
       <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; connect-src 'self' blob: https:; img-src 'self' blob: data:; style-src 'self' 'unsafe-inline'; font-src 'self'; object-src 'none'; frame-src 'self'; base-uri 'none'; form-action 'none'">
       <script type="module" src="./assets/app-a1b2c3d4.js"></script><link rel="stylesheet" href="./assets/app-a1b2c3d4.css"></head><body></body></html>`,
+    "install.sh": "#!/bin/sh\n",
     "privacy.html": legal.privacyHtml,
     "third-party-notices.html": legal.noticeHtml,
     "production-dependencies.json": legal.dependencyInventory,
@@ -51,7 +52,7 @@ async function fixture(overrides: Record<string, string> = {}): Promise<string> 
 describe("static distribution validator", () => {
   it("accepts an exact hashed, self-describing artifact", async () => {
     const directory = await fixture();
-    await expect(validateStaticDistribution(directory)).resolves.toMatchObject({ fileCount: 10 });
+    await expect(validateStaticDistribution(directory)).resolves.toMatchObject({ fileCount: 11 });
   });
 
   it("rejects undeclared files and dangerous artifact content", async () => {

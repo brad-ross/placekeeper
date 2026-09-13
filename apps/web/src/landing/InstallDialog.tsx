@@ -1,7 +1,7 @@
 import { useRef, useState, type RefObject } from "react";
 
 // Keep this browser literal equal to scripts/package-source-release.ts (unit-tested).
-export const SOURCE_INSTALL_COMMAND = `( set -eu; d=$(mktemp -d "\${TMPDIR:-/tmp}/placekeeper-bootstrap.XXXXXX"); trap 'rm -rf "$d"' EXIT; trap 'exit 130' INT; trap 'exit 143' TERM; curl --fail --location --proto '=https' --proto-redir '=https' --connect-timeout 20 --max-time 180 --retry 2 https://github.com/brad-ross/placekeeper/releases/latest/download/install-placekeeper.sh -o "$d/install.sh" || { printf '%s\\n' 'A stable Placekeeper installer is unavailable. Check your connection and published releases, then retry.' >&2; exit 1; }; /bin/sh "$d/install.sh" )`;
+export const SOURCE_INSTALL_COMMAND = "curl -fsSL https://brad-ross.github.io/placekeeper/install.sh | sh";
 
 export function InstallDialog({ dialogRef, onClose }: {
   readonly dialogRef: RefObject<HTMLDialogElement | null>;
@@ -32,13 +32,10 @@ export function InstallDialog({ dialogRef, onClose }: {
     }}>
     <header className="install-dialog__header">
       <h2 id="install-dialog-title">Install Placekeeper</h2>
-      <button type="button" autoFocus aria-label="Close installation dialog" onClick={() => dialogRef.current?.close()}>×</button>
     </header>
-    <p>Get the Mac app, then choose your integrations. Run this command again to update or add integrations later.</p>
-    <p className="install-dialog__requirements">Apple silicon Mac · macOS 13+ runtime. Building requires working Swift 6+ and a macOS SDK from Apple’s <a href="https://developer.apple.com/documentation/xcode/installing-the-command-line-tools" target="_blank" rel="noreferrer noopener">Command Line Tools</a>; this may require a newer macOS.</p>
-    <pre className="install-dialog__command" tabIndex={0} aria-label="Install command"><code>{SOURCE_INSTALL_COMMAND}</code></pre>
-    <div className="install-dialog__footer">
-      <button type="button" className="install-dialog__copy" onClick={async () => {
+    <p>Run the command below to install the Mac app and optionally install integrations. You can run it again to install integrations and update the app later.</p>
+    <button type="button" className="install-dialog__command" autoFocus aria-label="Copy command" onClick={async () => {
+        if (window.getSelection()?.toString()) return;
         const current = generation.current;
         try {
           await navigator.clipboard.writeText(SOURCE_INSTALL_COMMAND);
@@ -46,7 +43,11 @@ export function InstallDialog({ dialogRef, onClose }: {
         } catch {
           if (current === generation.current) setStatus("Couldn’t copy. Select the command and copy it manually.");
         }
-      }}>Copy command</button>
+      }}>
+      <code aria-label="Install command">{SOURCE_INSTALL_COMMAND}</code>
+      <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V4H4v12h4" /></svg>
+    </button>
+    <div className="install-dialog__footer">
       <span role="status" aria-live="polite">{status}</span>
     </div>
   </dialog>;

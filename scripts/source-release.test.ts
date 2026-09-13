@@ -8,11 +8,9 @@ describe("source release identity", () => {
   it.each(["latest", "1.2.3-beta", "../1.2.3", "1.2", "01.2.3"])("rejects unsafe or unstable version %s", version => {
     expect(() => releaseIdentity(version, "a".repeat(40))).toThrow();
   });
-  it("rejects abbreviated revisions and downloads completely before execution", () => {
+  it("rejects abbreviated revisions and exposes the short installation command", () => {
     expect(() => releaseIdentity("1.2.3", "abc")).toThrow();
-    expect(SOURCE_INSTALL_COMMAND).toContain("releases/latest/download/install-placekeeper.sh");
-    expect(SOURCE_INSTALL_COMMAND).not.toContain("| sh");
-    expect(SOURCE_INSTALL_COMMAND.indexOf(' -o "$d/install.sh"')).toBeLessThan(SOURCE_INSTALL_COMMAND.indexOf('/bin/sh "$d/install.sh"'));
+    expect(SOURCE_INSTALL_COMMAND).toBe("curl -fsSL https://brad-ross.github.io/placekeeper/install.sh | sh");
   });
 });
 

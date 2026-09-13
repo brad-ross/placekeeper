@@ -130,16 +130,14 @@ describe("static browser startup guards", () => {
 
 
 describe("landing installation contract", () => {
-  it("shows the exact release bootstrap command and qualified prerequisites in one mounted dialog", () => {
+  it("shows the short release command and concise instructions in one mounted dialog", () => {
     expect(SOURCE_INSTALL_COMMAND).toBe(RELEASE_INSTALL_COMMAND);
     const markup = renderToStaticMarkup(createElement(StaticLauncher, { onOpen: async () => {} }));
     expect(markup.match(/<dialog\b/g)).toHaveLength(1);
     expect(markup.match(/aria-haspopup="dialog"/g)).toHaveLength(2);
     expect(markup).not.toContain("archive/refs/heads/main.zip");
-    expect(markup).toContain("Apple silicon");
-    expect(markup).toContain("macOS 13+");
-    expect(markup).toContain("Swift 6+");
-    expect(markup).toContain("may require a newer macOS");
-    expect(markup).toContain("https://developer.apple.com/documentation/xcode/installing-the-command-line-tools");
+    expect(markup).toContain("Run the command below");
+    expect(markup).not.toContain("Close installation dialog");
+    expect(markup).not.toContain("Apple silicon");
   });
 });

@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { resolve, join } from "node:path";
 import { pathToFileURL } from "node:url";
 
-export const SOURCE_INSTALL_COMMAND = `( set -eu; d=$(mktemp -d "\${TMPDIR:-/tmp}/placekeeper-bootstrap.XXXXXX"); trap 'rm -rf "$d"' EXIT; trap 'exit 130' INT; trap 'exit 143' TERM; curl --fail --location --proto '=https' --proto-redir '=https' --connect-timeout 20 --max-time 180 --retry 2 https://github.com/brad-ross/placekeeper/releases/latest/download/install-placekeeper.sh -o "$d/install.sh" || { printf '%s\\n' 'A stable Placekeeper installer is unavailable. Check your connection and published releases, then retry.' >&2; exit 1; }; /bin/sh "$d/install.sh" )`;
+export const SOURCE_INSTALL_COMMAND = "curl -fsSL https://brad-ross.github.io/placekeeper/install.sh | sh";
 
 export function releaseIdentity(version: string, commit: string) {
   if (!/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/u.test(version)) throw new Error("A stable numeric release version is required");
