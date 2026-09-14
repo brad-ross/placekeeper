@@ -831,6 +831,13 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
         }
         return;
       }
+      if (!workspacePresentationRef.current?.initialLocation
+        && viewerControlsRef.current?.usesAutomaticFitWidth()) {
+        // Establish default framing before restoring an explicit destination.
+        // A later fit would move its anchor and replace the exact URL with a page link.
+        await mainNavigationRef.current?.fitToWidth();
+        if (cancelled || generation !== documentGenerationRef.current) return;
+      }
       navigationCoordinator.startLocationHistory();
       const presentation = pendingPresentationLocationRef.current;
       const restored = locationHistory === undefined
@@ -838,13 +845,6 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
           ? true
           : await navigationCoordinator.restorePresentationLocation(presentation, generation)
         : await navigationCoordinator.restoreCurrentLocation();
-      if (restored && !cancelled && generation === documentGenerationRef.current
-        && !workspacePresentationRef.current?.initialLocation
-        && viewerControlsRef.current?.usesAutomaticFitWidth()) {
-        // The plugin preset sees the full viewport; the shared fit clears the
-        // workspace rail and fade while retaining restored numeric zoom.
-        await mainNavigationRef.current?.fitToWidth();
-      }
       if (!cancelled && generation === documentGenerationRef.current) {
         if (restored) viewerControlsRef.current?.freezeCurrentZoom();
         const initialLocation = workspacePresentationRef.current?.initialLocation;
