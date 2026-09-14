@@ -66,7 +66,13 @@ jobs:
           retention-days: 7
       - name: Run visual regression tests
         if: success() || failure()
-        run: pnpm test:ci:visual
+        run: pnpm test:ci:visual --update-snapshots
+      - name: Upload reviewed-scene candidates
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-visual-candidates
+          path: test/acceptance/review-visual.spec.ts-snapshots/*-linux.png
       - name: Validate distribution manifest
         if: success() || failure()
         run: pnpm validate:distribution
