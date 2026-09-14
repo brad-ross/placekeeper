@@ -545,6 +545,27 @@ for (const width of [390, 1280]) test(`@critical landing showcase and PDF contro
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
 
+test('@critical selecting the reference demo restores its sample only when references are empty', async ({ page }) => {
+  await page.goto('./');
+  const demo = page.frameLocator('iframe[aria-hidden="false"]');
+  await demo.locator('[data-initial-view-ready="true"]').waitFor({ state: 'attached' });
+  const features = page.getByRole('tablist', { name: 'Explore features' });
+  const reference = features.getByRole('tab', { name: 'Follow a reference', exact: true });
+  const appendix = demo.getByRole('tab', { name: 'Appendix A, Page 31', exact: true });
+  await reference.click();
+  await expect(appendix).toBeVisible();
+  await reference.click();
+  await expect(appendix).toHaveCount(1);
+  for (const switchAway of [false, true]) {
+    await demo.getByRole('button', { name: 'Close active reference', exact: true }).click();
+    await expect(appendix).toHaveCount(0);
+    if (switchAway) await features.getByRole('tab', { name: 'Read with focus', exact: true }).click();
+    await reference.click();
+    await expect(appendix).toBeVisible();
+    await expect(demo.locator('[data-reference-pdf-viewport] [data-page-index="30"] > img').first()).toBeVisible();
+  }
+});
+
 test('@critical landing demos support zoom, references, and isolated comments', async ({ page }) => {
   page.setDefaultTimeout(10_000);
   await page.setViewportSize({ width: 1440, height: 1000 });

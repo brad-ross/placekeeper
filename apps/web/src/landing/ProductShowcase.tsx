@@ -22,6 +22,11 @@ const features = [
 
 export function ProductShowcase() {
   const [index, setIndex] = useState(0);
+  const [activation, setActivation] = useState(0);
+  const selectFeature = (next: number) => {
+    setIndex(next);
+    setActivation((value) => value + 1);
+  };
   const [compactControls, setCompactControls] = useState(() => typeof window !== 'undefined' && window.matchMedia('(max-width: 760px)').matches);
   useEffect(() => {
     const query = window.matchMedia('(max-width: 760px)');
@@ -52,13 +57,13 @@ export function ProductShowcase() {
             role="tab" className="review-workspace__mode-tab"
             id={`${id}-${item.id}`} aria-label={item.label} aria-selected={index === itemIndex}
             aria-controls={`${id}-panel`} tabIndex={index === itemIndex ? 0 : -1}
-            onClick={() => setIndex(itemIndex)}
+            onClick={() => selectFeature(itemIndex)}
             onKeyDown={(event) => {
               if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
               event.preventDefault();
               const next = event.key === 'Home' ? 0 : event.key === 'End' ? features.length - 1
                 : (itemIndex + (event.key === 'ArrowRight' ? 1 : -1) + features.length) % features.length;
-              setIndex(next);
+              selectFeature(next);
               controls.current[next]?.focus();
             }}>
             <ReviewIcon name={item.icon} />
@@ -70,7 +75,7 @@ export function ProductShowcase() {
     <div className="landing-demo-row" id={`${id}-panel`} role="tabpanel" aria-labelledby={`${id}-${feature.id}`}>
       <div ref={viewport} className="landing-demo-viewport" style={{ '--demo-scale': scale } as CSSProperties}>
       <iframe className="landing-demo-frame" src="?demo=read"
-        data-demo-mode={feature.id} title={`${feature.label} interactive demo`} aria-hidden={false}
+        data-demo-mode={feature.id} data-demo-activation={activation} title={`${feature.label} interactive demo`} aria-hidden={false}
         sandbox="allow-scripts allow-same-origin allow-forms" />
       </div>
       <div className="landing-demo-explanation">
