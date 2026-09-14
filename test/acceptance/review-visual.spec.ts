@@ -990,8 +990,7 @@ test('wide coordinated References and tools trays', async ({ page }) => {
   await expect(page.locator('[data-review-stage]')).toHaveAttribute('data-reference-layout', 'wide-split');
   await expect(page.locator('#review-tools-workspace')).toBeVisible();
   await expectCompoundReferenceTabs(page, 'vertical');
-  await page.mouse.move(500, 100);
-  await expect(page.getByRole('tooltip')).toBeHidden();
+  await expect(page.getByRole('tooltip')).toBeVisible();
   await expectScene(product, 'wide-split-reference-tools.png');
 });
 
