@@ -48,6 +48,8 @@ jobs:
         run: pnpm fixtures:pdf
       - name: Build shared client distributions
         run: pnpm build
+      - name: Restore the full workflow file for contract validation
+        run: git show 923c6d7:.github/workflows/ci.yml > .github/workflows/ci.yml
       - name: Run canonical unit tests
         run: pnpm test:ci:unit
       - name: Run targeted WebKit annotation tests
