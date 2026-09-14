@@ -539,7 +539,9 @@ body[data-landing-demo] :is(button, input, textarea, [contenteditable="true"]):n
   .landing-demo-selector { padding: 6px; }
   .landing-demo-selector .review-workspace__tabs { width: 100%; }
   .landing-demo-selector .review-workspace__tabs .review-workspace__mode-tab { padding: 9px 4px; font-size: 14px; line-height: 1.25; gap: 6px; letter-spacing: -.1px; }
-  .landing-demo-selector .review-workspace__mode-tab > svg { width: 18px; height: 18px; }
+  .landing-demo-selector .review-workspace__mode-tab > svg { width: 20px; height: 20px; }
+  .landing-demo-selector .review-workspace__mode-label { display: none; }
+  .landing-demo-selector .review-workspace__tabs .review-workspace__mode-tab { min-height: 44px !important; flex-direction: row; justify-content: center; }
 }
 
 @media (min-width: 1100px) {
