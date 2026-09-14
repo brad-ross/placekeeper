@@ -688,7 +688,8 @@ test('wide Annotation Tray', async ({ page }) => {
   await expect(reader).toHaveAttribute('data-annotation-origin', 'owned');
   await expect(page.locator('[data-full-annotation-action="edit"]')).toBeVisible();
   await expect(reader).toContainText('complete reviewer-authored argument');
-  await expect(reader).not.toContainText('identifying variation is local to the comparison group');
+  await expect(reader.locator('.full-annotation-reader__body > p')).toContainText('complete reviewer-authored argument');
+  await expect(reader.locator('.full-annotation-reader__quote')).toHaveText('Highlighted textidentifying variation is local to the comparison group');
   await expectScene(product, 'wide-full-annotation-reader-owned.png');
 });
 
@@ -989,6 +990,8 @@ test('wide coordinated References and tools trays', async ({ page }) => {
   await expect(page.locator('[data-review-stage]')).toHaveAttribute('data-reference-layout', 'wide-split');
   await expect(page.locator('#review-tools-workspace')).toBeVisible();
   await expectCompoundReferenceTabs(page, 'vertical');
+  await page.mouse.move(500, 100);
+  await expect(page.getByRole('tooltip')).toBeHidden();
   await expectScene(product, 'wide-split-reference-tools.png');
 });
 

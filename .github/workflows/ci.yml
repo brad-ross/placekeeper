@@ -48,33 +48,15 @@ jobs:
         run: pnpm fixtures:pdf
       - name: Build shared client distributions
         run: pnpm build
-      - name: Restore the full workflow file for contract validation
-        run: git show 923c6d7:.github/workflows/ci.yml > .github/workflows/ci.yml
       - name: Run canonical unit tests
         run: pnpm test:ci:unit
-      - name: Run targeted WebKit annotation tests
-        run: >-
-          pnpm exec playwright test --config scripts/testing/config/playwright.webkit.config.ts
-          test/acceptance/production-flow.spec.ts test/acceptance/annotation-behavior-followup.spec.ts test/acceptance/review-workflow.spec.ts
-          --grep 'selected compact popup offers return|full delete popup retains|returns a live PDF annotation preview|creates one atomic cross-page Delete|shows and hides annotation hover previews without timers'
-          --repeat-each 3
-      - uses: actions/upload-artifact@v4
-        if: failure()
-        with:
-          name: annotation-diagnostic-artifacts
-          path: test-results/
-          retention-days: 7
+      - name: Run Chromium acceptance tests
+        run: pnpm test:ci:chromium
+      - name: Run WebKit acceptance tests
+        run: pnpm test:ci:webkit
       - name: Run visual regression tests
-        if: success() || failure()
-        run: pnpm test:ci:visual --update-snapshots
-      - name: Upload reviewed-scene candidates
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: linux-visual-candidates
-          path: test/acceptance/review-visual.spec.ts-snapshots/*-linux.png
+        run: pnpm test:ci:visual
       - name: Validate distribution manifest
-        if: success() || failure()
         run: pnpm validate:distribution
       - name: Upload Playwright failure artifacts
         if: failure()
