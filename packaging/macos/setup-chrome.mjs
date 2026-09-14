@@ -197,7 +197,16 @@ export async function setupChrome(app, { userHome = process.env.PLACEKEEPER_USER
   await rm(transaction, { recursive: true, force: true });
   await rm(registration, { recursive: true, force: true });
   return { status: "pending", path: paths.extension,
-    message: "Chrome prepared. Load this unpacked folder in chrome://extensions and explicitly enable automatic PDF opening. Reload an existing extension; older incompatible payloads remain disabled until repaired." };
+    message: `Chrome prepared. Finish setup in Chrome:
+  1. Open chrome://extensions and turn on Developer mode (top right).
+  2. Click Load unpacked and select this folder:
+     ${paths.extension}
+     In the folder picker, press Command-Shift-G to paste the path.
+     If Placekeeper is already listed from this folder, click its Reload button instead.
+  3. Open Chrome's Extensions menu (puzzle icon), then click Placekeeper.
+  4. Turn on "Open PDFs automatically" and accept any permission prompt if you want automatic opening.
+  5. Open a PDF link to check that it opens in Placekeeper.
+     Older incompatible extensions remain disabled until repaired.` };
 }
 
 if (process.argv[1] && realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))) {

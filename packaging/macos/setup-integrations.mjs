@@ -50,8 +50,22 @@ export async function promptFromTerminal(host) {
 
 export async function setupCodex({ appPath, codexPath, run = execute }) {
   const marketplace = resolve(appPath, 'Contents/Resources/integrations');
-  const guidance = `Local marketplace: ${marketplace}. In Codex, add this local marketplace and install codex-plugin@${marketplaceName}; review trust and enablement, then start a new task.`;
-  const pending = (message) => ({ status: 'pending', path: marketplace, message: `${message} ${guidance}` });
+  const guidance = (installed) => [
+    'Finish setup in Codex:',
+    '  1. Open Codex and go to its Plugins page.',
+    ...(installed ? [
+      '  2. Find the installed Placekeeper plugin (codex-plugin) from placekeeper-installed.',
+    ] : [
+      '  2. Add a local plugin marketplace using this folder:',
+      `     ${marketplace}`,
+      '     In a folder picker, press Command-Shift-G to paste the path.',
+      '  3. Find codex-plugin in placekeeper-installed and choose Install.',
+    ]),
+    `  ${installed ? 3 : 4}. Review any trust or permission prompt, then enable the plugin if you approve.`,
+    `  ${installed ? 4 : 5}. Start a new task and ask Codex to open a local PDF with Placekeeper.`,
+    '  If local marketplace controls are unavailable, update Codex and rerun the installer.',
+  ].join('\n');
+  const pending = (message, installed = false) => ({ status: 'pending', path: marketplace, message: `${message}\n${guidance(installed)}` });
   codexPath ??= [
     ...(process.env.PLACEKEEPER_HOST_PATH ?? process.env.PATH ?? '').split(':').filter(Boolean).map((directory) => resolve(directory, 'codex')),
     resolve(homedir(), 'Applications/ChatGPT.app/Contents/Resources/codex'),
@@ -78,7 +92,7 @@ export async function setupCodex({ appPath, codexPath, run = execute }) {
   if (!Array.isArray(before.installed)) throw new Error('Codex returned an unrecognized installed plugin list');
   const previous = before.installed.find((plugin) => plugin.pluginId === `codex-plugin@${marketplaceName}` && plugin.installed === true);
   if (previous && previous.enabled !== true) {
-    return pending('The existing Codex plugin is disabled or its enablement is unknown; its state was preserved. To refresh it, use Codex plugin management to update or reinstall this plugin and choose enablement explicitly.');
+    return pending('The existing Codex plugin is disabled or its enablement is unknown; its state was preserved. To refresh it, update or reinstall it in Codex and choose enablement explicitly.', true);
   }
   await run(codexPath, ['plugin', 'marketplace', 'add', marketplace, '--json']);
   await run(codexPath, ['plugin', 'add', `codex-plugin@${marketplaceName}`, '--json']);
@@ -86,7 +100,7 @@ export async function setupCodex({ appPath, codexPath, run = execute }) {
   if (!Array.isArray(plugins.installed) || !plugins.installed.some((plugin) => plugin.pluginId === `codex-plugin@${marketplaceName}` && plugin.installed === true)) {
     throw new Error('Codex did not confirm the plugin payload after installation');
   }
-  return pending('Codex plugin payload installed. Host trust, enablement, and a new task still require confirmation in Codex.');
+  return pending('Codex plugin payload installed. Finish trust and enablement in Codex.', true);
 }
 
 export async function setupHost({ appPath, host, run = execute }) {
