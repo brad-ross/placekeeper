@@ -2,6 +2,7 @@
 title: Release-backed installation from the landing page - Plan
 date: 2026-09-13
 deepened: 2026-09-13
+last_updated: 2026-09-14
 type: feat
 execution: code
 artifact_contract: ce-unified-plan/v1
@@ -20,7 +21,7 @@ product_contract_source: ce-brainstorm
 
 **Execution:** Implement and validate the plan, then open a PR under the user-authorized autonomous shipping flow. Release publication is a separate maintainer action after merge.
 
-**Open blockers:** None for implementation. A first published source release is required before the command can install; until then it must fail clearly.
+**Status update (2026-09-14):** The source installer has been published. The original plan separated implementation from publication; that historical scope remains below. PR #110 subsequently made Chrome experimental and removed its manual installed-host evidence from the source-publication gate. The current workflow accepts only `version` and `notes`; physical Chrome validation remains separate.
 
 **Product Contract preservation:** Product Contract unchanged; source-build toolchain qualifications below clarify the existing prerequisite requirement.
 
@@ -324,7 +325,7 @@ GitHub release permissions are executable-code publication authority. Use truste
 
 **Files:** Add `.github/workflows/release-source.yml`; update `scripts/source-release.test.ts`, `README.md`, `docs/installation.md`, and `test/acceptance/installed-hosts.md` where the new setup boundary changes its instructions.
 
-**Approach:** Apply KTD3. Gate publication with typechecking, source-release/bootstrap tests, packaging/lifecycle tests, unsigned candidate build, offline installed smoke, and Chrome protocol/handoff checks. Preserve the existing build-bound installed-Chrome evidence requirement for a stable release claiming that host is supported; expose evidence as an explicit publication input and validate it against the candidate. Document version selection, notes, draft completeness, stable promotion, first-release absence, and rollback by a newly published corrected version. No release is published as part of this PR.
+**Approach:** Apply KTD3. Gate publication with typechecking, source-release/bootstrap tests, packaging/lifecycle tests, unsigned candidate build, offline installed smoke, and Chrome protocol/handoff checks. Chrome is an optional experimental integration. Collect its build-bound installed-host evidence separately; do not require it as a source-publication input or treat its absence as a passing Chrome validation. The signed/prebuilt release workflow retains its stricter gate. Document version selection, notes, draft completeness, stable promotion, first-release absence, and rollback by a newly published corrected version. No release is published as part of this PR.
 
 **Test scenarios:**
 
@@ -350,7 +351,7 @@ Use the repository's suite runner and pinned package manager. Targeted new tests
 | `pnpm test:static:pr` | U4 | Both triggers, focus, copy fallback, demo preservation and responsive layout pass. |
 | `pnpm package:macos` plus `pnpm smoke:installed` | U2, U5 | Unsigned Apple-silicon candidate builds and packaged writer works offline in isolation. |
 | `pnpm test:chrome-handoff` | U2, U5 | Chrome protocol and authority boundaries remain intact. |
-| `pnpm test:chrome-installed` with build-bound evidence | Stable source publication | Real Chrome 151+ load/enablement and installed host matrix pass; no automated skip substitutes for this release evidence. |
+| `pnpm test:chrome-installed` with build-bound evidence | Separate experimental Chrome validation | Real Chrome 151+ load/enablement and installed host matrix pass; no automated skip substitutes for this evidence. Not a Mac source-publication gate. |
 
 Physical integration validation uses disposable host profiles and temporary installation roots. Confirm a real VSIX installs via the supported host, the local Codex marketplace resolves after source deletion, and active PDFs with a task binding survive deferred updates. If a physical host is unavailable, record the precise remaining check; deterministic tests do not establish manual enablement. Browser screenshots at desktop and the reported narrow layout complete U4's visual verification. There is no `release:validate` script in this repository; use the concrete gates above.
 
@@ -362,6 +363,6 @@ Physical integration validation uses disposable host profiles and temporary inst
 - Both Install buttons share an accessible compact dialog, the full command is recoverably copyable, and the divider spacing is symmetric.
 - A generated source release installs only its verified revision, and no failure path falls back to main or reports false success.
 - Optional host outcomes remain independent and rerunnable; active-review and Protected Recovery protections remain intact.
-- Required PR gates pass; unsupported local physical checks are explicitly recorded, and stable release publication retains its separate evidence gate.
+- Required PR gates pass; unsupported local physical checks are explicitly recorded, and source publication runs its automated gates while experimental Chrome physical validation remains separate.
 - The release workflow and user/maintainer documentation agree. The PR clearly states that no source release was published by this work.
 - Remove abandoned experimental code and temporary artifacts from the diff; open the reviewed implementation PR under the authorized shipping flow.
