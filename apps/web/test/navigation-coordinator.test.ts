@@ -1295,6 +1295,7 @@ describe('document-scoped navigation coordinator', () => {
     expect(run.dependencies.layout.hideReferences).not.toHaveBeenCalled();
     expect(run.controller.close).not.toHaveBeenCalled();
     expect(run.dependencies.focusReferenceTab).toHaveBeenLastCalledWith(target(2).identity);
+    expect(run.main.controls.focusAtDestination).not.toHaveBeenCalled();
   });
 
   it('preserves the live active reference when an ordinary hidden workspace reopens', async () => {

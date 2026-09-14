@@ -957,7 +957,8 @@ export class NavigationCoordinator {
           'Reference sent to the main document. Select the adjacent reference to retry it.',
         );
       }
-      main.focusAtDestination(settledLocation.pageIndex);
+      // The surviving reference owns keyboard focus; visiting Main first can
+      // interrupt an action already started in that reference while restoration settles.
       this.dependencies.focusReferenceTab(survivingIdentity);
       return true;
     }

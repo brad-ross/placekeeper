@@ -298,9 +298,12 @@ async function expectReferenceReady(
   tab: ReturnType<Page["locator"]>,
 ): Promise<void> {
   const retry = page.getByRole("button", { name: "Retry reference" });
-  await expect.poll(async () => (await tab.count()) + (await retry.count()), {
+  await expect.poll(async () => (
+    await retry.isVisible()
+    || (await tab.count() > 0 && await tab.getAttribute('aria-busy') !== 'true')
+  ), {
     timeout: REFERENCE_READY_TIMEOUT_MS,
-  }).toBeGreaterThan(0);
+  }).toBe(true);
   if (await retry.isVisible()) await retry.click();
   await expect(tab).toHaveAttribute("aria-selected", "true", {
     timeout: REFERENCE_READY_TIMEOUT_MS,
@@ -4771,7 +4774,7 @@ test('defaults a real PDF to fit width and refits bottom and resizable right rea
   await expect(referenceWorkspace).toHaveAttribute('data-workspace-open', 'true');
   await expect(referenceWorkspace).toHaveAttribute('data-workspace-presentation', 'bottom');
   const primaryTab = page.getByRole('tab', { name: /Primary result/u });
-  await expect(primaryTab).toHaveAttribute('aria-selected', 'true');
+  await expectReferenceReady(page, primaryTab);
   await referenceWorkspace.evaluate((element) => {
     element.setAttribute('data-fit-width-workspace-mount', 'stable');
   });

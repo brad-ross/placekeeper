@@ -560,7 +560,11 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
           if (layoutGeneration !== layoutGenerationRef.current
             || documentGeneration !== documentGenerationRef.current) return;
           const activeElement = productionRootRef.current?.ownerDocument.activeElement;
-          if (activeElement instanceof HTMLElement && activeElement.dataset.workspaceMode) return;
+          if (activeElement instanceof HTMLElement && (
+            activeElement.dataset.workspaceMode
+            || activeElement.closest<HTMLElement>('[data-reference-tab-segment]')
+              ?.dataset.referenceTabSegment === identity
+          )) return;
           const target = [...(productionRootRef.current?.querySelectorAll<HTMLElement>(
             '[data-reference-tab]',
           ) ?? [])].find((element) => element.dataset.referenceTab === identity);
