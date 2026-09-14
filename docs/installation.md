@@ -8,7 +8,7 @@ Requirements are an Apple-silicon Mac, macOS 13 or newer, internet access during
 
 Use **Install** on the landing page to copy the complete command. It downloads the latest published stable release's bootstrap completely before running it. That bootstrap pins one version and commit, verifies its source archive's SHA-256, paths, and release descriptor, then runs that archive's installer. A newer release appearing during the run cannot change the selected source. GitHub and repository publication permissions are the trust root; the digest checks consistency, not independent publisher authentication.
 
-The first source release is absent until a maintainer publishes it. Until then, the command reports that a stable installer is unavailable; it never falls back to main. Connection errors, partial downloads, invalid archives, missing prerequisites, and build failures stop with an actionable error.
+If no stable source release is available, the command fails rather than falling back to main. Connection errors, partial downloads, invalid archives, missing prerequisites, and build failures stop with an actionable error.
 
 For a development checkout, run `./install.sh` in the repository folder. Preview it without downloads or mutations with `./install.sh --dry-run`. The installer downloads checksum-pinned Node 24.14.0, installs pnpm 11.16.0 dependencies from the frozen lockfile, builds locally, and checks the packaged PDF writer offline before transactionally installing `~/Applications/Placekeeper.app`.
 
@@ -30,9 +30,9 @@ Because the source build is intentionally not Developer ID-signed or notarized (
 
 After installation, select one local PDF in Finder and use **Open With -> Placekeeper**. Alternatively, open Placekeeper from `~/Applications` and choose a PDF. The PDF opens in Placekeeper’s own Mac window. Opening a PDF through the Codex plugin continues to use the Codex in-app browser. No terminal is needed for ordinary use.
 
-## Open Chrome PDFs automatically
+## Open Chrome PDFs automatically (experimental)
 
-Chrome 151 or newer is required. Select Chrome setup in the installer first; only that stage prepares the persistent folder and native-host registration. New installations start paused; updates preserve the existing on/off choice. Prepared files and a healthy doctor report do not prove Chrome has loaded or enabled the extension. The installer reports these manual steps as pending.
+The Chrome integration is optional and experimental. Chrome 151 or newer is required. Select Chrome setup in the installer first; only that stage prepares the persistent folder and native-host registration. New installations start paused; updates preserve the existing on/off choice. Prepared files and a healthy doctor report do not prove Chrome has loaded or enabled the extension. The installer reports these manual steps as pending.
 
 1. In Chrome, open `chrome://extensions`, turn on **Developer mode**, and choose **Load unpacked**.
 2. Select `~/Applications/Placekeeper Chrome Extension`. This ordinary folder is the transactionally installed copy intended for Chrome's folder picker; do not select the copy inside `Placekeeper.app`.
@@ -62,13 +62,13 @@ pnpm test:chrome-handoff
 
 This uses a newly created temporary Chromium profile and an in-process loopback fixture. It covers authenticated suffixless PDFs, a redirect that preserves a one-use POST response, slow/chunked delivery, invalid content, interrupted delivery, the transfer limit, exact-once stream handling, paused/bypass and host-failure fallback, local-file identity, temporary-source cleanup and recovery, remote/local save policy, and the browser/Codex authority boundary. It never opens or modifies the everyday Chrome profile. If Playwright's managed Chromium cannot expose Chrome 151's public `mimeHandler` API, that one automation probe is reported as skipped with a reason; the protocol and lifecycle checks still run.
 
-That skip does not waive the release check. After installing the release-candidate app, run:
+That skip does not establish real Chrome compatibility. The installed Chrome matrix is a separate validation of the experimental integration, not a gate for publishing the Mac source installer. After installing the candidate app, run:
 
 ```sh
 pnpm test:chrome-installed
 ```
 
-The runner validates the distributable extension and exact native-host registration, launches a fresh Google Chrome 151+ profile, and displays the exact **Load unpacked** path. After you enable Developer Mode, load that directory, and turn on **Open PDFs automatically**, it verifies the initially paused state, loaded runtime identity, outer-tab metadata and filename titles, original URL retention, shared-client mount, browser Back, and the packaged PDFium worker's privilege boundary. It leaves the disposable window open for the remaining recovery, keyboard, lifecycle, and performance matrix in [`test/acceptance/installed-hosts.md`](../test/acceptance/installed-hosts.md), then erases the profile when you confirm completion. That exploratory run exits nonzero while its matrix is pending. Record the aggregate evidence described there—never a fixture URL, cookie, capability, task identifier, staging path, or PDF content—then rerun with `--manual-evidence <input.json>` to produce the build-bound release evidence. A pending, stale, partial, or over-budget record cannot pass or enter the release workflow.
+The runner validates the distributable extension and exact native-host registration, launches a fresh Google Chrome 151+ profile, and displays the exact **Load unpacked** path. After you enable Developer Mode, load that directory, and turn on **Open PDFs automatically**, it verifies the initially paused state, loaded runtime identity, outer-tab metadata and filename titles, original URL retention, shared-client mount, browser Back, and the packaged PDFium worker's privilege boundary. It leaves the disposable window open for the remaining recovery, keyboard, lifecycle, and performance matrix in [`test/acceptance/installed-hosts.md`](../test/acceptance/installed-hosts.md), then erases the profile when you confirm completion. That exploratory run exits nonzero while its matrix is pending. Record the aggregate evidence described there—never a fixture URL, cookie, capability, task identifier, staging path, or PDF content—then rerun with `--manual-evidence <input.json>` to produce build-bound Chrome evidence. A pending, stale, partial, or over-budget record cannot establish a passing Chrome validation. Source publication does not accept this report as an input; the separate signed/prebuilt release workflow retains its stricter evidence gate.
 
 ## Optional integrations
 
@@ -98,9 +98,9 @@ Removing the app does not remove recoverable drafts under `~/Library/Application
 
 ## Publish a source release (maintainers)
 
-Publication is a separate action after merge; implementing the installer does not publish a release. The manually dispatched **Release source** workflow (`.github/workflows/release-source.yml`) accepts only trusted `main` in `brad-ross/placekeeper`. Select a stable numeric version equal to `packaging/macos/app-bundle.json` (`0.1.0` currently), without the `v` prefix, and brief release notes. Bump and merge the canonical version before subsequent releases. An existing tag or release, including a draft, blocks publication.
+Publication is a separate action after merge; implementing the installer does not publish a release. The manually dispatched **Release source** workflow (`.github/workflows/release-source.yml`) accepts only trusted `main` in `brad-ross/placekeeper`. Select a stable numeric version equal to `packaging/macos/app-bundle.json`, without the `v` prefix, and brief release notes. Bump and merge the canonical version before subsequent releases. An existing tag or release, including a draft, blocks publication.
 
-Before dispatch, build the candidate from the exact merged revision with the workflow's Node 24.14.0 toolchain and run the real Chrome 151+ installed matrix above. Supply its final build-bound JSON as `installed_chrome_evidence`. The workflow rebuilds and validates that evidence against the exact candidate; stale identities, pending physical checks, and managed-Chromium skips cannot substitute for it. If the rebuilt identity differs, obtain matching evidence before retrying; do not weaken the validator.
+Dispatch with only `version` and `notes`. The optional Chrome integration is experimental; its installed-host matrix is collected separately and does not block source publication. Automated Chrome handoff checks remain required. A successful source release does not prove Chrome activation or Codex trust/enablement, and must not be presented as a completed physical-host validation.
 
 Read-only validation runs typechecking, source/bootstrap fixtures, packaging and host tests, upgrade lifecycle tests, Chrome handoff checks, an unsigned candidate build, and the offline installed smoke. Source packaging includes only the exact checked-out commit. Only the dependent publication job receives `contents: write`; it regenerates deterministic assets from that same commit, repeats the duplicate checks, creates a draft with notes, uploads the source archive and `install-placekeeper.sh`, verifies completeness, and then promotes it to stable/latest. Publication is serialized. It requires no Apple signing secrets; the separate signed macOS workflow remains available.
 
