@@ -2598,11 +2598,20 @@ for (const seededAnnotation of [false, true]) {
     });
     const viewport = page.locator('[data-viewer-framing-viewport]');
     await expect(viewport).toHaveCount(1);
-    await expect.poll(async () => viewport.evaluate((element) => {
-      element.scrollTop = Math.min(420, Math.max(0, element.scrollHeight - element.clientHeight));
-      return element.scrollTop;
-    })).toBeGreaterThan(0);
-    const readingTop = await viewport.evaluate((element) => element.scrollTop);
+    // Exercise user scrolling so the framing controller records the reading position.
+    await viewport.hover({ position: { x: 100, y: 100 } });
+    await page.mouse.wheel(0, 420);
+    await expect.poll(() => viewport.evaluate(element => element.scrollTop)).toBeGreaterThan(0);
+    const readingTop = await viewport.evaluate(async element => {
+      let previous = element.scrollTop;
+      let stableFrames = 0;
+      while (stableFrames < 3) {
+        await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+        stableFrames = element.scrollTop === previous ? stableFrames + 1 : 0;
+        previous = element.scrollTop;
+      }
+      return previous;
+    });
     expect(readingTop).toBeGreaterThan(0);
 
     await page.getByRole('tab', { name: 'Annotations', exact: true }).click();
@@ -6785,16 +6794,35 @@ test('animates toolbar zoom through intermediate sizes and respects reduced moti
   await waitForRenderedPageImage(sheet);
   await page.locator('[data-review-chrome]').hover({ position: { x: 2, y: 2 } });
   await page.getByRole('button', { name: 'Open zoom controls' }).hover();
-  const widths = sheet.evaluate(async (element) => {
-    const result: number[] = [];
-    for (let i = 0; i < 30; i += 1) {
-      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-      result.push(element.getBoundingClientRect().width);
-    }
-    return result;
+  const zoomContent = workspace.locator('[data-viewer-zoom-content]');
+  // Sample the real animation clock rather than depending on CI's rendering frame rate.
+  await zoomContent.evaluate(element => {
+    const originalAnimate = element.animate;
+    element.animate = function (...args) {
+      element.animate = originalAnimate;
+      const animation = originalAnimate.apply(this, args);
+      animation.pause();
+      animation.currentTime = 0;
+      return animation;
+    };
   });
   await page.getByRole('menuitem', { name: 'Zoom in', exact: true }).click();
-  const samples = await widths;
+  const samples = await zoomContent.evaluate(async element => {
+    const animation = element.getAnimations()[0];
+    if (!animation?.effect) throw new Error('Toolbar zoom did not start an animation');
+    const duration = Number(animation.effect.getTiming().duration);
+    if (!(duration > 0)) throw new Error('Toolbar zoom animation has no duration');
+    const sheet = element.querySelector('[data-page-index="0"]')!;
+    const result: number[] = [];
+    for (const progress of [0, 0.25, 0.5, 0.75, 1]) {
+      animation.currentTime = duration * progress;
+      await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+      result.push(sheet.getBoundingClientRect().width);
+    }
+    animation.play();
+    await animation.finished;
+    return result;
+  });
   expect(new Set(samples.map(Math.round)).size).toBeGreaterThan(3);
   expect(samples.at(-1)!).toBeGreaterThan(samples[0]!);
   for (let i = 1; i < samples.length; i += 1) expect(samples[i]!).toBeGreaterThanOrEqual(samples[i - 1]! - 1);

@@ -1277,9 +1277,17 @@ export function ReviewShell(props: ReviewShellProps) {
     requestAnimationFrame(() => (bottomRail ? bottomWorkspaceRailRef : rightWorkspaceRailRef)
       .current?.focus({ preventScroll: true }));
   };
+  const workspaceFocusRequest = useRef(0);
   const focusWorkspaceModeAfterLayout = (mode: WorkspaceMode) => {
+    const request = ++workspaceFocusRequest.current;
+    const initialFocus = document.activeElement;
     requestAnimationFrame(() => requestAnimationFrame(() => {
+      if (request !== workspaceFocusRequest.current) return;
       const shell = shellRef.current;
+      const active = document.activeElement;
+      // Opening the tray must not overwrite a newer focus choice made while it lays out.
+      if (active !== initialFocus && active instanceof HTMLElement
+        && active !== document.body && isVisibleFocusTarget(active)) return;
       const rememberedToken = surface.navigation.workspace.modes[mode].logicalFocusToken;
       const remembered = rememberedToken === null ? null : [
         ...shell?.querySelectorAll<HTMLElement>('[data-workspace-focus-token]') ?? [],
@@ -1288,7 +1296,7 @@ export function ReviewShell(props: ReviewShellProps) {
         ? shell?.querySelector<HTMLElement>('[data-reference-tab][aria-selected="true"]')
           ?? shell?.querySelector<HTMLElement>('[data-reference-empty]')
         : remembered ?? shell?.querySelector<HTMLElement>(`#workspace-panel-${mode}`);
-      target?.focus({ preventScroll: true });
+      if (target && isVisibleFocusTarget(target)) target.focus({ preventScroll: true });
     }));
   };
   const rememberWorkspaceModeFocus = (mode: WorkspaceMode, token: string) => {
