@@ -122,9 +122,14 @@ export function TopBarMenu({
     }
 
     let hoverDismissTimer: ReturnType<typeof setTimeout> | undefined;
+    let lastPointerPosition: { x: number; y: number } | undefined;
     const clearHoverDismiss = () => clearTimeout(hoverDismissTimer);
     const hoverPointer = (event: PointerEvent) => {
       if (!hoverOpen || event.pointerType !== 'mouse') return;
+      // WebKit can emit a stationary pointermove when an action removes itself.
+      // Wait for real pointer movement before dismissing the resized menu.
+      if (lastPointerPosition?.x === event.clientX && lastPointerPosition.y === event.clientY) return;
+      lastPointerPosition = { x: event.clientX, y: event.clientY };
       const target = event.target;
       const hoverRegion = hoverRegionRef?.current ?? opener;
       const anchorBounds = hoverRegion.getBoundingClientRect();
@@ -158,7 +163,12 @@ export function TopBarMenu({
     const outsidePointer = (event: PointerEvent) => {
       openerPointerRef.current = event.target instanceof Node
         && openerRef.current?.contains(event.target) === true;
-      if (event.target instanceof Node && surface.contains(event.target)) return;
+      if (event.target instanceof Node && surface.contains(event.target)) {
+        lastPointerPosition = { x: event.clientX, y: event.clientY };
+        clearHoverDismiss();
+        hoverDismissTimer = undefined;
+        return;
+      }
       if (event.target instanceof Node && openerRef.current?.contains(event.target)) return;
       if (event.target instanceof Node && hoverRegionRef?.current?.contains(event.target)) return;
       const switchingTopBarMenu = event.target instanceof Element
@@ -166,7 +176,16 @@ export function TopBarMenu({
       dismiss('outside', !hoverOpen && !switchingTopBarMenu);
     };
     const openerKeyDown = (event: globalThis.KeyboardEvent) => {
-      if (!(event.target instanceof Node) || !opener.contains(event.target) || event.isComposing) return;
+      if (event.isComposing) return;
+      if (event.key === 'Escape' && event.target instanceof Element
+        && event.target.closest('input, textarea, [contenteditable="true"]') !== null) return;
+      if (hoverOpen && event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();
+        dismiss('escape');
+        return;
+      }
+      if (!(event.target instanceof Node) || !opener.contains(event.target)) return;
       if (event.key === 'Escape') {
         event.preventDefault();
         event.stopPropagation();

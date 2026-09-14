@@ -985,14 +985,14 @@ export function ReviewShell(props: ReviewShellProps) {
       ) {
         return;
       }
-      if (peekItemId !== undefined || annotationReaderSession?.origin === 'peek') {
-        event.preventDefault();
-        dismissAnnotationPeek();
-        return;
-      }
       if (surface.nestedLayer !== 'none') {
         event.preventDefault();
         void closeNested();
+        return;
+      }
+      if (peekItemId !== undefined || annotationReaderSession?.origin === 'peek') {
+        event.preventDefault();
+        dismissAnnotationPeek();
         return;
       }
       if (props.authoring.keyboardPageNoteActive) {
@@ -1658,7 +1658,10 @@ export function ReviewShell(props: ReviewShellProps) {
               <aside className="annotation-peek annotation-peek--reader">
                 <FullAnnotationReader
                   record={annotationReaderRecord}
-                  onBack={(restoreRowFocus) => closeAnnotationReader(annotationReaderSession, restoreRowFocus)}
+                  onBack={(restoreRowFocus) => {
+                  props.onItemCorrespondenceChange?.(undefined);
+                  closeAnnotationReader(annotationReaderSession, restoreRowFocus);
+                }}
                   {...(annotationReaderSourceNavigation === undefined
                     ? {}
                     : { sourceNavigation: annotationReaderSourceNavigation })}
@@ -1889,7 +1892,10 @@ export function ReviewShell(props: ReviewShellProps) {
             annotations={annotationReaderSession !== null && annotationReaderRecord !== null ? (
               <FullAnnotationReader
                 record={annotationReaderRecord}
-                onBack={(restoreRowFocus) => closeAnnotationReader(annotationReaderSession, restoreRowFocus)}
+                onBack={(restoreRowFocus) => {
+                  props.onItemCorrespondenceChange?.(undefined);
+                  closeAnnotationReader(annotationReaderSession, restoreRowFocus);
+                }}
                 {...(annotationReaderSourceNavigation === undefined
                   ? {}
                   : { sourceNavigation: annotationReaderSourceNavigation })}
