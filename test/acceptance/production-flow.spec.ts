@@ -4201,6 +4201,7 @@ test('returns a live PDF annotation preview through document history without ret
 });
 
 test('keeps a first-page multiline highlight composer stable and reveals one icon only when fully offscreen', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
   await openFreshProductionFixture(
     page,
     plainTextPdf,
@@ -6161,11 +6162,6 @@ test("selects Page Notes only until the next click outside annotations", async (
   await expect(secondMark).toHaveAttribute("data-active", "false");
   await expect(secondRow).toHaveAttribute("data-active", "false");
   await expect(workspace).toHaveAttribute("aria-expanded", "false");
-  if (browserName === 'webkit') {
-    // The headless WebKit pointer remains over the preview after the semantic blank click,
-    // so release that harness-only hover through the preview's canonical dismiss action.
-    await page.getByRole('button', { name: 'Close annotation preview' }).dispatchEvent('click');
-  }
   await expect(page.locator('[data-annotation-peek]')).toHaveCount(0);
 
   await markFocus.evaluate((element) => {

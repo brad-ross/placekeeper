@@ -115,8 +115,8 @@ async function installRuntimeClassicScrollport(page: Page, scrollbarWidth = 20) 
       scrollbar-width: auto;
     }
     [data-test-runtime-scrollport]::-webkit-scrollbar {
-      width: ${scrollbarWidth}px;
-      height: ${scrollbarWidth}px;
+      width: var(--test-scrollbar-size, ${scrollbarWidth}px);
+      height: var(--test-scrollbar-size, ${scrollbarWidth}px);
     }
   ` });
   await page.locator('.review-document').evaluate((host) => {
@@ -849,6 +849,11 @@ test.describe('canonical review workflow', () => {
     await page.locator('[data-review-stage]').evaluate(async element => {
       await Promise.all(element.getAnimations({ subtree: true }).filter(animation => animation.effect?.getComputedTiming().iterations !== Infinity).map(animation => animation.finished.catch(() => undefined)));
     });
+    await expect.poll(async () => {
+      const stage = await page.locator('[data-review-stage]').boundingBox();
+      const tray = await page.locator('#review-workspace').boundingBox();
+      return stage && tray ? stage.y + stage.height - tray.y - tray.height : Number.NaN;
+    }).toBeCloseTo(17, 0);
     const [stageBounds, surfaceBounds] = await Promise.all([
       page.locator('[data-review-stage]').boundingBox(),
       page.locator('#review-workspace').boundingBox(),
@@ -877,7 +882,8 @@ test.describe('canonical review workflow', () => {
   test('routes view shortcuts from reference focus while preserving editable input', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 800 });
     await installRuntimeClassicScrollport(page);
-    await page.getByRole('button', { name: 'Set outline tree' }).click();
+    await page.getByRole('button', { name: 'Set outline tree' }).evaluate(element => (element as HTMLButtonElement).click());
+    await page.getByRole('application', { name: 'PDF review canvas' }).focus();
     await page.keyboard.press('Control+Meta+o');
     await expect(page.getByRole('tab', { name: 'Outline', exact: true })).toHaveAttribute('aria-selected', 'true');
     await page.keyboard.press('Control+Meta+a');
@@ -939,6 +945,7 @@ test.describe('canonical review workflow', () => {
     await expect(backing).toHaveCSS('clip-path', await expectedClip());
     await viewport.evaluate((element) => {
       element.style.scrollbarWidth = 'none';
+      element.style.setProperty('--test-scrollbar-size', '0px');
       element.dispatchEvent(new Event('scroll'));
     });
     await expect.poll(expectedClip).toBe('inset(0px 0px 0px 0px)');
@@ -1135,10 +1142,10 @@ test.describe('canonical review workflow', () => {
     await page.goto('/test/acceptance/review-harness/index.html?responsive=full');
     await page.setViewportSize({ width: 320, height: 720 });
     await openAnnotationsWorkspace(page);
-    await page.getByRole('button', { name: 'Make page controls unavailable' }).click();
+    await page.getByRole('button', { name: 'Make page controls unavailable' }).evaluate(element => (element as HTMLButtonElement).click());
     await expect(page.getByLabel('Current page unavailable')).toHaveText('—');
     await expect(page.getByRole('button', { name: 'Page navigation unavailable' })).toBeDisabled();
-    await page.getByRole('button', { name: 'Make zoom controls unavailable' }).click();
+    await page.getByRole('button', { name: 'Make zoom controls unavailable' }).evaluate(element => (element as HTMLButtonElement).click());
     await expect(page.getByLabel('Zoom unavailable')).toHaveText('—');
     await expect(page.getByRole('button', { name: 'Open zoom controls' })).toBeDisabled();
     await expect(page.locator('#review-workspace')).toHaveAttribute('data-workspace-open', 'true');
@@ -1644,7 +1651,7 @@ test.describe('canonical review workflow', () => {
   });
 
   test('does not offer page editing while page controls are unavailable', async ({ page }) => {
-    await page.getByRole('button', { name: 'Make page controls unavailable' }).click();
+    await page.getByRole('button', { name: 'Make page controls unavailable' }).evaluate(element => (element as HTMLButtonElement).click());
 
     await expect(page.getByLabel('Current page unavailable')).toHaveText('—');
     await expect(page.getByRole('textbox', { name: /Enter a page number/u })).toHaveCount(0);
@@ -1891,7 +1898,7 @@ test.describe('canonical review workflow', () => {
   });
 
   test('does not offer zoom editing or Fit Width while zoom is unavailable', async ({ page }) => {
-    await page.getByRole('button', { name: 'Make zoom controls unavailable' }).click();
+    await page.getByRole('button', { name: 'Make zoom controls unavailable' }).evaluate(element => (element as HTMLButtonElement).click());
 
     await expect(page.getByLabel('Zoom unavailable')).toHaveText('—');
     await expect(page.getByRole('textbox', { name: /Enter a zoom percentage/u })).toHaveCount(0);

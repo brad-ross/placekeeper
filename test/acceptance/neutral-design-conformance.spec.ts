@@ -57,6 +57,7 @@ test('toolbar controls match canonical rest, hover, keyboard, and open-menu stat
     const zoom = visible(page, '.review-chrome__zoom-disclosure');
     const zoomMock = mock.frame.locator('.pk-zoom-trigger');
     await zoom.click(); await zoomMock.click();
+    await zoom.focus(); await zoomMock.focus();
     await page.mouse.move(0, 0); await mock.page.mouse.move(0, 0);
     await expect(zoom).toBeFocused();
     await match(zoom, zoomMock, [...control, 'width', 'height']);

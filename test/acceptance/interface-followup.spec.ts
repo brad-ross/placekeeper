@@ -50,6 +50,7 @@ test('page and zoom menus align to the right edge of their numeric groups', asyn
 });
 
 test('workspace fade follows the opening tray without another pointer or scroll event', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
   await openPdf(page);
   await page.getByRole('button', { name: 'Show workspace', exact: true }).click();
   // Do not move the pointer after opening: the transition itself must publish geometry.
