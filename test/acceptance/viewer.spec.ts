@@ -15,6 +15,7 @@ declare global {
       selectionContract(): Promise<ViewerSelectionEvidence | null>;
       caretAnchorPageIndex(): number | null;
       caretAnchorLeftContext(): string;
+      setZoom(level: number): void;
       zoomLevel(): number;
       selectionAnchorStatus(): string;
       goToPage(pageNumber: number): void;
@@ -22,6 +23,17 @@ declare global {
       interactionCount(type: ViewerInteractionEvent['type']): number;
     };
   }
+}
+
+// These pointer fixtures express positions in PDF points. Keep their initial
+// scale explicit; production's fit-to-width default is covered separately.
+async function prepareCoordinateFixture(page: Page) {
+  await page.waitForFunction(() => window.viewerAcceptance?.ready === true);
+  await page.waitForFunction(() => window.viewerAcceptance.selectionGeometryReady(0));
+  await expect.poll(async () => {
+    await page.evaluate(() => window.viewerAcceptance.setZoom(1));
+    return page.locator('[data-page-index="0"]').evaluate(element => element.getBoundingClientRect().width);
+  }).toBe(612);
 }
 
 async function showSelectablePdfPage(page: Page, pageIndex: number) {
@@ -51,7 +63,7 @@ async function dragAcrossSelectionPages(
   direction: 'forward' | 'reverse',
 ): Promise<{ evidence: NonNullable<SelectionContract>; intermediateTextOffscreen: boolean }> {
   await page.goto('/test/acceptance/viewer-harness/index.html?fixture=cross-page-selection');
-  await page.waitForFunction(() => window.viewerAcceptance?.ready === true);
+  await prepareCoordinateFixture(page);
 
   const startPageIndex = direction === 'forward' ? 0 : lastPageIndex;
   const endPageIndex = direction === 'forward' ? lastPageIndex : 0;
@@ -115,7 +127,7 @@ async function selectAcrossPageLimit(page: Page): Promise<{
   overLimit: NonNullable<SelectionContract>;
 }> {
   await page.goto('/test/acceptance/viewer-harness/index.html?fixture=cross-page-selection');
-  await page.waitForFunction(() => window.viewerAcceptance?.ready === true);
+  await prepareCoordinateFixture(page);
 
   for (let pageIndex = 0; pageIndex <= PDF_SELECTION_PAGE_LIMIT; pageIndex += 1) {
     await page.evaluate(
@@ -172,7 +184,7 @@ test.describe('shared viewer foundation', () => {
     page.on('console', (message) => console.log(`[browser:${message.type()}] ${message.text()}`));
     page.on('pageerror', (error) => console.log(`[browser:pageerror] ${error.message}`));
     await page.goto('/test/acceptance/viewer-harness/index.html');
-    await page.waitForFunction(() => window.viewerAcceptance?.ready === true);
+    await prepareCoordinateFixture(page);
     await expect(page.locator('[data-page-index="0"]')).toBeVisible();
   });
 
@@ -381,7 +393,7 @@ test.describe('shared viewer foundation', () => {
     await page.goto(
       '/test/acceptance/viewer-harness/index.html?reverse-synctex=true&composer=replacement',
     );
-    await page.waitForFunction(() => window.viewerAcceptance?.ready === true);
+    await prepareCoordinateFixture(page);
     const pdfPage = page.locator('[data-page-index="0"]');
     await expect(pdfPage).toBeVisible();
     const box = await pdfPage.boundingBox();
@@ -512,7 +524,7 @@ test.describe('shared viewer foundation', () => {
 
   test('keeps Page Note and navigation available when page semantics are unavailable', async ({ page }) => {
     await page.goto('/test/acceptance/viewer-harness/index.html?fixture=mixed');
-    await page.waitForFunction(() => window.viewerAcceptance?.ready === true);
+    await prepareCoordinateFixture(page);
     await expect(page.locator('[data-page-index="0"]')).toBeVisible();
     await expect(page.locator('[data-semantic-tools-enabled]')).toHaveAttribute(
       'data-semantic-tools-enabled',
@@ -530,7 +542,7 @@ test.describe('shared viewer foundation', () => {
 
   test('publishes insertion carets on every text page', async ({ page }) => {
     await page.goto('/test/acceptance/viewer-harness/index.html?fixture=multi-text');
-    await page.waitForFunction(() => window.viewerAcceptance?.ready === true);
+    await prepareCoordinateFixture(page);
     const first = page.locator('[data-page-index="0"]');
     await expect(first).toBeVisible();
     await page.waitForFunction(() => window.viewerAcceptance.selectionGeometryReady(0));
@@ -553,7 +565,7 @@ test.describe('shared viewer foundation', () => {
 
   test('shows the shared recovery path for an unreliable selection', async ({ page }) => {
     await page.goto('/test/acceptance/viewer-harness/index.html?unreliable=selection');
-    await page.waitForFunction(() => window.viewerAcceptance?.ready === true);
+    await prepareCoordinateFixture(page);
     await expect(page.locator('[data-recovery-kind="selection"]')).toContainText(
       'Adjust the selection or use Page Note',
     );

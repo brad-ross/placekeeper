@@ -5640,6 +5640,9 @@ test('copies only the focused Main or Reference selection and preserves DOM prec
     .toBe('');
   await openReferences.click();
   await expect(primaryTab).toBeFocused();
+  await page.locator('[data-review-stage]').evaluate(async element => {
+    await Promise.all(element.getAnimations({ subtree: true }).filter(animation => animation.effect?.getTiming().iterations !== Infinity).map(animation => animation.finished.catch(() => undefined)));
+  });
 
   await pasteTarget.fill('');
   await main.locator('[data-page-index="0"]').focus();

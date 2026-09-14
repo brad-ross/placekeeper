@@ -662,6 +662,7 @@ test.describe('canonical review workflow', () => {
 
     await supplemental.click();
     await expect(supplemental).toHaveAttribute('aria-expanded', 'false');
+    await page.locator('.review-workspace__header').hover();
     await page.getByRole('button', { name: 'Collapse all outline entries' }).click();
     await expect(page.getByRole('button', {
       name: 'Restore previous outline expansion',
@@ -672,6 +673,7 @@ test.describe('canonical review workflow', () => {
 
     await supplemental.click();
     await expect(supplemental).toHaveAttribute('aria-expanded', 'true');
+    await page.locator('.review-workspace__header').hover();
     await page.getByRole('button', { name: 'Restore previous outline expansion' }).click();
     await expect(harness).toHaveAttribute('aria-expanded', 'true');
     await expect(nested).toHaveAttribute('aria-expanded', 'true');
@@ -685,6 +687,7 @@ test.describe('canonical review workflow', () => {
     await page.setViewportSize({ width: 1280, height: 900 });
     await page.getByRole('button', { name: 'Set outline tree' }).click();
     await page.getByRole('button', { name: 'Show workspace' }).click();
+    await page.locator('.review-workspace__header').hover();
     await page.getByRole('button', { name: 'Collapse all outline entries' }).click();
     await expect(page.getByRole('button', {
       name: 'Restore previous outline expansion',
@@ -814,11 +817,10 @@ test.describe('canonical review workflow', () => {
     await expect(selectionActions).toHaveCount(0);
   });
 
-  test('keeps the main viewport fixed and preserves its location while overlay trays reflow', async ({ page }) => {
+  test('preserves scroll position while the reading viewport narrows for trays', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 760 });
     const viewport = await installMainScrollport(page, 17);
-    const canvas = page.getByRole('application', { name: 'PDF review canvas' });
-    const initialCanvas = await canvas.boundingBox();
+    const initialViewport = await viewport.boundingBox();
     const initialLocation = await viewport.evaluate((element) => ({
       left: element.scrollLeft,
       top: element.scrollTop,
@@ -828,17 +830,23 @@ test.describe('canonical review workflow', () => {
     ))).toBe('17px');
 
     await openAnnotationsWorkspace(page);
-    expect(await canvas.boundingBox()).toEqual(initialCanvas);
+    const openViewport = (await viewport.boundingBox())!;
+    expect(openViewport.width).toBeLessThan(initialViewport!.width);
+    expect({ x: openViewport.x, y: openViewport.y, height: openViewport.height })
+      .toEqual({ x: initialViewport!.x, y: initialViewport!.y, height: initialViewport!.height });
     expect(await viewport.evaluate((element) => ({
       left: element.scrollLeft,
       top: element.scrollTop,
     }))).toEqual(initialLocation);
     await closeWorkspace(page);
-    expect(await canvas.boundingBox()).toEqual(initialCanvas);
+    expect(await viewport.boundingBox()).toEqual(initialViewport);
 
     await page.getByRole('button', { name: 'Open harness reference' }).click();
     await page.getByRole('button', { name: 'Show workspace' }).click();
     await page.setViewportSize({ width: 760, height: 720 });
+    await page.locator('[data-review-stage]').evaluate(async element => {
+      await Promise.all(element.getAnimations({ subtree: true }).filter(animation => animation.effect?.getComputedTiming().iterations !== Infinity).map(animation => animation.finished.catch(() => undefined)));
+    });
     const [stageBounds, surfaceBounds] = await Promise.all([
       page.locator('[data-review-stage]').boundingBox(),
       page.locator('#review-workspace').boundingBox(),
@@ -1220,7 +1228,7 @@ test.describe('canonical review workflow', () => {
     for (const gap of controlGaps) expect(gap).toBeCloseTo(8, 1);
     expect(Math.abs(geometry.file.x + geometry.file.width + 8 - geometry.context.x)).toBeLessThanOrEqual(.5);
     expect(Math.abs(geometry.file.y + geometry.file.height / 2 - geometry.context.y - geometry.context.height / 2)).toBeLessThanOrEqual(.5);
-    expect(geometry.pageNumber.width).toBe(28);
+    expect(geometry.pageNumber.width).toBe(26);
     expect(geometry.pageAlign).toBe('center');
     expect(Math.abs(geometry.pageNumber.x + geometry.pageNumber.width - geometry.pageButton.x)).toBeLessThanOrEqual(.5);
     expect(Math.abs(geometry.pageButton.width - geometry.pageText.width - 6)).toBeLessThanOrEqual(.5);
@@ -1238,7 +1246,9 @@ test.describe('canonical review workflow', () => {
     await expect(pagePosition).toHaveCSS('background-color', 'rgb(231, 231, 231)');
     await expect(pageDisclosure).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
     await pageDisclosure.click();
+    await page.mouse.move(0, 200);
     await expect(page.getByRole('menu', { name: 'Page navigation', exact: true })).toBeHidden();
+    await page.locator('[data-review-chrome]').hover({ position: { x: 2, y: 2 } });
     await zoomGroup.hover();
     await expect(zoomGroup).toHaveCSS('background-color', 'rgb(231, 231, 231)');
     await expect(zoomDisclosure).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
@@ -1246,6 +1256,7 @@ test.describe('canonical review workflow', () => {
     await expect(zoomGroup).toHaveCSS('background-color', 'rgb(231, 231, 231)');
     await expect(zoomDisclosure).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
     await zoomDisclosure.click();
+    await page.mouse.move(0, 200);
     await expect(page.getByRole('menu', { name: 'PDF zoom', exact: true })).toBeHidden();
 
     await expect(filenameControl.locator(':scope > .review-icon + .review-chrome__filename')).toHaveCount(1);
@@ -2544,8 +2555,10 @@ test.describe('canonical review workflow', () => {
     expect(inputBounds!.x).toBeGreaterThanOrEqual(0);
     expect(inputBounds!.x + inputBounds!.width).toBeLessThanOrEqual(320);
     await page.getByRole('button', { name: 'Apply' }).click();
+    await page.locator('[data-review-chrome]').hover({ position: { x: 2, y: 2 } });
     await page.getByRole('button', { name: 'Undo' }).click();
     await expect(page.locator('[data-owned-mark]')).toHaveCount(0);
+    await page.locator('[data-review-chrome]').hover({ position: { x: 2, y: 2 } });
     await page.getByRole('button', { name: 'Redo' }).click();
     await expect(page.locator('[data-owned-mark="replace"]')).toHaveCount(1);
 
