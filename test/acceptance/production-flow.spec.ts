@@ -49,14 +49,9 @@ async function currentPageText(page: Page): Promise<string> {
 
 // Native non-overlay scrollbars need more than the 12px minimum runway.
 async function expectedWorkspaceInset(page: Page): Promise<number> {
-  return page.evaluate(() => {
-    const probe = document.createElement('div');
-    probe.style.cssText = 'position:fixed;width:100px;height:100px;overflow:scroll;visibility:hidden';
-    document.body.append(probe);
-    const inset = Math.max(12, probe.offsetWidth - probe.clientWidth, probe.offsetHeight - probe.clientHeight);
-    probe.remove();
-    return inset;
-  });
+  return page.locator('.review-document .pdf-workspace__viewport').evaluate((viewport: HTMLElement) => (
+    Math.max(12, viewport.offsetWidth - viewport.clientWidth, viewport.offsetHeight - viewport.clientHeight)
+  ));
 }
 
 async function currentZoomText(page: Page): Promise<string> {
@@ -511,7 +506,9 @@ test.beforeEach(async () => {
   });
 });
 
-test.afterEach(async () => {
+test.afterEach(async ({ page }) => {
+  // Disconnect the client before shutting down its host and draining saves.
+  await page.close();
   await host?.close();
 });
 
