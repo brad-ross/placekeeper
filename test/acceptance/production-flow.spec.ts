@@ -47,6 +47,18 @@ async function currentPageText(page: Page): Promise<string> {
   return `${await input.inputValue()} / ${total}`;
 }
 
+// Native non-overlay scrollbars need more than the 12px minimum runway.
+async function expectedWorkspaceInset(page: Page): Promise<number> {
+  return page.evaluate(() => {
+    const probe = document.createElement('div');
+    probe.style.cssText = 'position:fixed;width:100px;height:100px;overflow:scroll;visibility:hidden';
+    document.body.append(probe);
+    const inset = Math.max(12, probe.offsetWidth - probe.clientWidth, probe.offsetHeight - probe.clientHeight);
+    probe.remove();
+    return inset;
+  });
+}
+
 async function currentZoomText(page: Page): Promise<string> {
   const input = page.getByRole('textbox', { name: /^Current zoom \d+ percent/u });
   return `${await input.inputValue()}%`;
@@ -737,6 +749,8 @@ test("keeps mounted Codex context through fresh-page re-entry, then fails closed
       .toBe("current");
 
     await page.clock.install({ time: clientNow });
+    // The host clock is fixed too; slow browser setup must not expire its lease.
+    await page.clock.setFixedTime(clientNow);
     await page.addInitScript(() => {
       const nativeFetch = window.fetch.bind(window);
       window.fetch = (input, init) => {
@@ -780,11 +794,13 @@ test("keeps mounted Codex context through fresh-page re-entry, then fails closed
       testWindow.__placekeeperHangScopePoll = true;
     });
 
+    await page.clock.setFixedTime(clientNow + 2_100);
     await page.clock.fastForward(2_100);
     await expect(status).toHaveAttribute("data-codex-context", "connecting");
     await expect(status.locator(".lucide-bot")).toBeVisible();
     await expect(status.locator("[role='tooltip']")).toContainText("Agent context updating");
 
+    await page.clock.setFixedTime(clientNow + 5_600);
     await page.clock.fastForward(3_500);
     await expect(status).toHaveAttribute("data-codex-context", "unavailable");
     await expect(status.locator(".lucide-bot")).toBeVisible();
@@ -1726,7 +1742,7 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
     workspace.boundingBox(),
   ]);
   if (!toolsBounds || !bottomBounds) throw new Error("Coordinated tray geometry is unavailable.");
-  expect(bottomBounds.y - (toolsBounds.y + toolsBounds.height)).toBeCloseTo(12, 0);
+  expect(bottomBounds.y - (toolsBounds.y + toolsBounds.height)).toBeCloseTo(await expectedWorkspaceInset(page), 0);
   await expect(toolsWorkspace.getByRole("button", { name: "Hide workspace" })).toBeVisible();
   await mainPageOne.click({ position: { x: 24, y: 24 } });
   await expect(toolsWorkspace).toHaveAttribute("data-tools-workspace-open", "true");
@@ -4424,8 +4440,8 @@ test('keeps the right workspace inset and PDF runway stable across open and clos
   const [stageBox, trayBox] = await Promise.all([stage.boundingBox(), tray.boundingBox()]);
   if (!stageBox || !trayBox) throw new Error('Right workspace geometry is unavailable.');
   expect(trayBox.y - stageBox.y).toBeCloseTo(0, 0);
-  expect(stageBox.x + stageBox.width - trayBox.x - trayBox.width).toBeCloseTo(12, 0);
-  expect(stageBox.y + stageBox.height - trayBox.y - trayBox.height).toBeCloseTo(12, 0);
+  expect(stageBox.x + stageBox.width - trayBox.x - trayBox.width).toBeCloseTo(await expectedWorkspaceInset(page), 0);
+  expect(stageBox.y + stageBox.height - trayBox.y - trayBox.height).toBeCloseTo(await expectedWorkspaceInset(page), 0);
   expect(await viewport.evaluate((element) => element.scrollWidth)).toBeGreaterThan(closedWidth);
   await expect(workspace).toHaveAttribute('data-workspace-geometry-probe', 'stable');
 
@@ -4446,9 +4462,9 @@ test('keeps the bottom workspace evenly inset across open and close', async ({ p
   await openAnnotationsWorkspace(page);
   const [stageBox, trayBox] = await Promise.all([stage.boundingBox(), tray.boundingBox()]);
   if (!stageBox || !trayBox) throw new Error('Bottom workspace geometry is unavailable.');
-  expect(trayBox.x - stageBox.x).toBeCloseTo(12, 0);
-  expect(stageBox.x + stageBox.width - trayBox.x - trayBox.width).toBeCloseTo(12, 0);
-  expect(stageBox.y + stageBox.height - trayBox.y - trayBox.height).toBeCloseTo(12, 0);
+  expect(trayBox.x - stageBox.x).toBeCloseTo(await expectedWorkspaceInset(page), 0);
+  expect(stageBox.x + stageBox.width - trayBox.x - trayBox.width).toBeCloseTo(await expectedWorkspaceInset(page), 0);
+  expect(stageBox.y + stageBox.height - trayBox.y - trayBox.height).toBeCloseTo(await expectedWorkspaceInset(page), 0);
 
   await toggleWorkspace(page);
   await expect(tray).toHaveAttribute('data-tools-workspace-open', 'false');
@@ -4955,9 +4971,9 @@ test('refits opening workspaces only from fit width and preserves manual reading
   const narrowStage = await stage.boundingBox();
   const bottomDrawer = await drawer.boundingBox();
   if (!narrowStage || !bottomDrawer) throw new Error('Bottom annotations geometry is unavailable.');
-  expect(bottomDrawer.x - narrowStage.x).toBeCloseTo(12, 0);
-  expect(narrowStage.x + narrowStage.width - bottomDrawer.x - bottomDrawer.width).toBeCloseTo(12, 0);
-  expect(narrowStage.y + narrowStage.height - bottomDrawer.y - bottomDrawer.height).toBeCloseTo(12, 0);
+  expect(bottomDrawer.x - narrowStage.x).toBeCloseTo(await expectedWorkspaceInset(page), 0);
+  expect(narrowStage.x + narrowStage.width - bottomDrawer.x - bottomDrawer.width).toBeCloseTo(await expectedWorkspaceInset(page), 0);
+  expect(narrowStage.y + narrowStage.height - bottomDrawer.y - bottomDrawer.height).toBeCloseTo(await expectedWorkspaceInset(page), 0);
   expect(bottomDrawer.height).toBeCloseTo(narrowStage.height * 0.43, 0);
   expect(await currentZoomText(page)).toBe(zoomAfterManualAdjustment);
   await toggleWorkspace(page);
@@ -5095,7 +5111,7 @@ test('uses the same expanded review tree for a narrow VS Code embed launch', asy
   await expect.poll(async () => {
     const box = await page.locator('#review-tools-workspace').boundingBox();
     return box === null ? Number.POSITIVE_INFINITY : Math.abs(box.x + box.width - 320);
-  }).toBeCloseTo(12, 0);
+  }).toBeCloseTo(await expectedWorkspaceInset(page), 0);
 
   const expectMenuInsideViewport = async (menu: ReturnType<Page['locator']>) => {
     const bounds = await menu.boundingBox();
