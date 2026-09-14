@@ -22,7 +22,7 @@ const features = [
 
 export function ProductShowcase() {
   const [index, setIndex] = useState(0);
-  const [compactControls, setCompactControls] = useState(() => window.matchMedia('(max-width: 760px)').matches);
+  const [compactControls, setCompactControls] = useState(() => typeof window !== 'undefined' && window.matchMedia('(max-width: 760px)').matches);
   useEffect(() => {
     const query = window.matchMedia('(max-width: 760px)');
     const update = () => setCompactControls(query.matches);
