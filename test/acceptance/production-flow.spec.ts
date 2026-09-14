@@ -37,6 +37,7 @@ const reportedMathSymbolInventory = [
 ] as const;
 
 const PRODUCTION_VIEWER_READY_TIMEOUT_MS = 15_000;
+const PRODUCTION_SAVE_TIMEOUT_MS = 15_000;
 const REFERENCE_READY_TIMEOUT_MS = 15_000;
 
 async function currentPageText(page: Page): Promise<string> {
@@ -439,9 +440,9 @@ async function chooseFreshCopyDestination(page: Page): Promise<void> {
   await expect(name).toHaveValue(filename);
   await dialog.getByRole("button", { name: "Confirm" }).click();
   try {
-    await expect(dialog).toHaveCount(0);
+    await expect(dialog).toHaveCount(0, { timeout: PRODUCTION_SAVE_TIMEOUT_MS });
   } catch (error) {
-    const message = await dialog.getByRole("alert").textContent().catch(() => null);
+    const message = (await dialog.getByRole("alert").allTextContents()).join(" ");
     throw new Error(`Copy destination ${filename} was not established: ${message ?? "no error was shown"}`, {
       cause: error,
     });
@@ -4203,6 +4204,7 @@ test('returns a live PDF annotation preview through document history without ret
   await page.locator('[data-review-chrome]').hover({ position: { x: 2, y: 2 } });
   await forward.click();
   await expect.poll(() => new URL(page.url()).hash).toContain('page=1');
+  await expect(back).toBeEnabled();
   await expect(composer.locator('.comment-composer__anchor')).toHaveCount(0);
   await expect(preview).toHaveAttribute('data-owned-mark', 'pageNote');
 

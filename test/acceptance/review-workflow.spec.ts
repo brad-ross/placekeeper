@@ -2852,8 +2852,8 @@ test.describe('canonical review workflow', () => {
       }
       const mark = page.locator('[data-owned-focus-id]').first();
       const peek = page.locator('[data-annotation-peek]');
-      await page.clock.install();
-      await page.clock.pauseAt(new Date());
+      await page.clock.install({ time: new Date('2026-01-01T11:59:00Z') });
+      await page.clock.pauseAt(new Date('2026-01-01T12:00:00Z'));
       await mark.dispatchEvent('pointerover', { pointerType: 'mouse' });
       await expect(peek).toBeVisible();
       await mark.dispatchEvent('pointerout', { pointerType: 'mouse' });

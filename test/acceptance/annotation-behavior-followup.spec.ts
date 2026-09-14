@@ -71,6 +71,7 @@ async function openLongAnnotationFixture(
   }
   await page.goto(launched.url);
   await expect(page.locator('[data-production-review]')).toBeVisible();
+  await expect(page.locator('[data-production-review]')).toHaveAttribute('data-initial-view-ready', 'true');
   await waitForRenderedPageImage(page);
   return { sessionId: launched.sessionId, itemId, ...(siblingId === undefined ? {} : { siblingId }) };
 }
@@ -377,7 +378,8 @@ test('selected compact popup offers return when its PDF annotation leaves the fr
   await expect(peek).toBeVisible();
   const locate = peek.getByRole('button', { name: 'Back to annotation in PDF', exact: true });
   await expect(locate).toHaveCount(0);
-  await page.locator('[data-viewer-framing-viewport]').evaluate((element) => { element.scrollTop = 1500; });
+  await page.locator('[data-viewer-framing-viewport]').hover({ position: { x: 100, y: 100 } });
+  await page.mouse.wheel(0, 1500);
   await expect(locate).toBeVisible();
   await locate.click();
   await expect(locate).toHaveCount(0);
