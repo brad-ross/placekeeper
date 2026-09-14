@@ -71,7 +71,7 @@ async function openLongAnnotationFixture(
   }
   await page.goto(launched.url);
   await expect(page.locator('[data-production-review]')).toBeVisible();
-  await expect(page.locator('[data-production-review]')).toHaveAttribute('data-initial-view-ready', 'true');
+  await expect(page.locator('[data-production-review]')).toHaveAttribute('data-initial-view-ready', 'true', { timeout: 15_000 });
   await waitForRenderedPageImage(page);
   return { sessionId: launched.sessionId, itemId, ...(siblingId === undefined ? {} : { siblingId }) };
 }

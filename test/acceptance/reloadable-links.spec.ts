@@ -248,6 +248,17 @@ test("a pending restarted browser is promoted to Codex without remounting", asyn
 
 test("copies canonical PDF destinations and reopens them without source UI state", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 });
+  const reloadAtFragment = async (fragment: string) => {
+    // Keep the synthetic URL edit and reload in one browser turn: live viewport
+    // updates can otherwise replace the test fragment between protocol calls.
+    await Promise.all([
+      page.waitForNavigation({ waitUntil: "load" }),
+      page.evaluate((value) => {
+        history.replaceState(history.state, "", value);
+        location.reload();
+      }, fragment),
+    ]);
+  };
   await page.addInitScript(() => {
     Object.defineProperty(navigator, "clipboard", {
       configurable: true,
@@ -361,32 +372,24 @@ test("copies canonical PDF destinations and reopens them without source UI state
   await expect(page).toHaveURL(/#v=2&page=2&mode=xyz&params=72,640,0$/u);
   await expectCurrentPage(page, "2 / 4");
 
-  await page.evaluate(() => history.replaceState(
-    history.state,
-    "",
-    "#v=2&page=3&mode=fit-rectangle&params=10,10,10,20",
-  ));
-  await page.reload();
+  await reloadAtFragment("#v=2&page=3&mode=fit-rectangle&params=10,10,10,20");
+  await expect(page.locator("[data-production-review]")).toHaveAttribute("data-initial-view-ready", "true", { timeout: 15_000 });
   await expect(page).toHaveURL(/#v=1&page=3$/u);
   await expectCurrentPage(page, "3 / 4");
   await expect(page.locator(".review-workspace__status")).toHaveText(
     "The exact destination is unavailable. Opened page 3 instead.",
   );
 
-  await page.evaluate(() => history.replaceState(
-    history.state,
-    "",
-    "#v=2&page=99&mode=fit-page",
-  ));
-  await page.reload();
+  await reloadAtFragment("#v=2&page=99&mode=fit-page");
+  await expect(page.locator("[data-production-review]")).toHaveAttribute("data-initial-view-ready", "true", { timeout: 15_000 });
   await expect(page).toHaveURL(/#v=1&page=1$/u);
   await expectCurrentPage(page, "1 / 4");
   await expect(page.locator(".review-workspace__status")).toHaveText(
     "The exact destination is unavailable. Opened page 1 instead.",
   );
 
-  await page.evaluate(() => history.replaceState(history.state, "", "#v=1&page=4"));
-  await page.reload();
+  await reloadAtFragment("#v=1&page=4");
+  await expect(page.locator("[data-production-review]")).toHaveAttribute("data-initial-view-ready", "true", { timeout: 15_000 });
   await expect(page).toHaveURL(/#v=1&page=4$/u);
   await expectCurrentPage(page, "4 / 4");
 });
