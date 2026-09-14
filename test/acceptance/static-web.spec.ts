@@ -501,7 +501,18 @@ for (const width of [390, 1280]) test(`@critical landing showcase and PDF contro
   const showcase = page.getByRole('tablist', { name: 'Explore features' });
   await expect(showcase.getByRole('tab', { name: 'Read with focus', exact: true })).toHaveAttribute('aria-selected', 'true');
   for (const label of ['Read with focus', 'Follow a reference', 'Make comments']) {
-    await expect(showcase.getByText(label, { exact: true })).toBeVisible();
+    const tab = showcase.getByRole('tab', { name: label, exact: true });
+    await expect(tab).toBeVisible();
+    await expect(tab.locator('svg')).toBeVisible();
+    if (width === 390) {
+      await expect(tab.getByText(label, { exact: true })).toBeHidden();
+      await tab.hover();
+      await expect(page.getByRole('tooltip', { name: label, exact: true })).toBeVisible();
+      await page.mouse.move(0, 0);
+      await expect(page.getByRole('tooltip')).toHaveCount(0);
+    } else {
+      await expect(tab.getByText(label, { exact: true })).toBeVisible();
+    }
   }
   for (const name of ['Follow a reference', 'Make comments', 'Read with focus']) {
     const feature = showcase.getByRole('tab', { name, exact: true });
