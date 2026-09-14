@@ -590,19 +590,16 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   const [initialViewReady, setInitialViewReady] = useState(false);
   const workspacePresentationRef = useRef(workspacePresentation);
   workspacePresentationRef.current = workspacePresentation;
-  const sampleReferenceOpened = useRef(false);
   useEffect(() => {
-    if (!initialViewReady || !workspacePresentation?.sampleReference || workspacePresentation.mode !== 'references' || sampleReferenceOpened.current) return;
+    if (!initialViewReady || !workspacePresentation?.sampleReference || workspacePresentation.mode !== 'references' || navigationStateRef.current.tabs.length > 0) return;
     const target = pdfNavigationTargetFromPlacekeeperLocation(workspacePresentation.sampleReference.pdfY === undefined
       ? { kind: 'page', page: workspacePresentation.sampleReference.page }
       : { kind: 'destination', page: workspacePresentation.sampleReference.page, mode: 'xyz', params: [0, workspacePresentation.sampleReference.pdfY, 0] }, {
       documentGeneration: state.workflow.documentGeneration, pageCount: viewerState.totalPages,
     });
-    if (target) void navigationCoordinator.openReference(target, { label: workspacePresentation.sampleReference.label, pageContext: `Page ${workspacePresentation.sampleReference.page}` }).then((opened) => {
-      if (opened) sampleReferenceOpened.current = true;
-    });
+    if (target) void navigationCoordinator.openReference(target, { label: workspacePresentation.sampleReference.label, pageContext: `Page ${workspacePresentation.sampleReference.page}` });
     return () => navigationCoordinator.cancelPendingNavigation();
-  }, [initialViewReady, workspacePresentation?.mode, workspacePresentation?.sampleReference, viewerState.totalPages, navigationCoordinator]);
+  }, [initialViewReady, workspacePresentation?.activation, workspacePresentation?.mode, workspacePresentation?.sampleReference, viewerState.totalPages, navigationCoordinator]);
   const mainLocationRefresh = useMemo(
     () => createTrailingTaskScheduler(() => navigationCoordinator.refreshMainLocation()),
     [navigationCoordinator],
