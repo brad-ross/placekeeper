@@ -45,6 +45,31 @@ jobs:
             await page.keyboard.press(`${modifier}+v`);
             console.log(JSON.stringify({ modifier, bridgePaste: await page.locator('#paste').inputValue() }));
           }
+          for (const scenario of ['visible', 'offscreen', 'focused', 'exec-command', 'empty-exec-command']) {
+            await page.setContent('<span id="bridge" tabindex="-1">semantic bridge control</span><textarea id="paste"></textarea>');
+            await page.evaluate(scenario => {
+              document.addEventListener('copy', event => {
+                console.log('COPY-PROBE', scenario, String(getSelection()));
+                if (scenario === 'empty-exec-command') { event.preventDefault(); event.clipboardData.setData('text/plain', 'pending handler control'); }
+              });
+              const bridge = document.querySelector('#bridge');
+              if (scenario !== 'visible') bridge.style.cssText = 'position:fixed;left:-10000px';
+              if (scenario === 'focused') bridge.focus({ preventScroll: true });
+              if (scenario !== 'empty-exec-command') {
+                const range = document.createRange(); range.selectNodeContents(bridge);
+                getSelection().removeAllRanges(); getSelection().addRange(range);
+              }
+              if (scenario.includes('exec-command')) document.addEventListener('keydown', event => {
+                if (event.ctrlKey && event.key === 'c') {
+                  event.preventDefault(); console.log('EXEC-COPY', document.execCommand('copy'));
+                }
+              });
+            }, scenario);
+            await page.keyboard.press('Control+c');
+            await page.locator('#paste').focus();
+            await page.keyboard.press('Control+v');
+            console.log(JSON.stringify({ scenario, pasted: await page.locator('#paste').inputValue() }));
+          }
           await browser.close();
           JS
       - run: pnpm fixtures:pdf && pnpm build
