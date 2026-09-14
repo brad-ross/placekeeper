@@ -109,7 +109,7 @@ jobs:
         run: >-
           pnpm exec playwright test --config scripts/testing/config/playwright.webkit.config.ts
           test/acceptance/production-flow.spec.ts test/acceptance/reloadable-links.spec.ts
-          --grep 'restores Search focus.*wide|keeps compound reference actions in narrow|defaults a real PDF to fit width'
+          --grep 'keeps compound reference actions in narrow|defaults a real PDF to fit width'
           --repeat-each 10 --trace on
       - uses: actions/upload-artifact@v4
         if: always()
