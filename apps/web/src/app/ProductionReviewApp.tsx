@@ -1275,19 +1275,25 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     }
   }, [mainCopySelection, referenceCopySelection]);
   useEffect(() => {
-    const handleCopy = (event: ClipboardEvent) => {
+    let copyEventRevision = 0;
+    const commandForTarget = (target: EventTarget | null) => {
       const nativeSelection = window.getSelection();
-      const activeOwner = paletteCopyOwnerRef.current ?? pdfCopyOwner;
-      const command = resolvePdfCopyCommand({
+      return resolvePdfCopyCommand({
         nativeCopyHasPrecedence: nativeCopyHasPrecedence({
-          editableTarget: isEditableTarget(event.target),
+          editableTarget: isEditableTarget(target),
           domSelectionCollapsed: nativeSelection?.isCollapsed ?? true,
           domSelectionText: nativeSelection?.toString() ?? '',
           domSelectionOwnedByPdf: nativeSelectionBelongsToPdfBridge(nativeSelection),
         }),
-        owner: activeOwner,
+        owner: paletteCopyOwnerRef.current ?? pdfCopyOwner,
         snapshots: pdfCopySnapshots,
       });
+    };
+    let shortcutCommand: ReturnType<typeof commandForTarget> | null = null;
+    const handleCopy = (event: ClipboardEvent) => {
+      copyEventRevision += 1;
+      const activeOwner = paletteCopyOwnerRef.current ?? pdfCopyOwner;
+      const command = shortcutCommand ?? commandForTarget(event.target);
       applyPdfCopyCommand(command, event, {
         onPending: () => setPdfCopyAnnouncement(
           'Selected text is still being read. Retry Copy when it is ready.',
@@ -1305,8 +1311,31 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
         );
       }
     };
+    const handleCopyShortcut = (event: globalThis.KeyboardEvent) => {
+      if (event.defaultPrevented || event.isComposing || event.altKey || event.shiftKey
+        || !(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 'c') return;
+      const command = commandForTarget(event.target);
+      if (command.kind === 'default' || isEditableTarget(event.target)) return;
+      // WebKit on Linux does not dispatch Copy for a non-editable DOM selection.
+      // Invoke the browser command within this user gesture; the same copy handler
+      // retains native clipboard access, selection limits, and pending/error feedback.
+      const revision = copyEventRevision;
+      // Chromium may target the last editable field when there is no bridge text
+      // (pending or rejected selection). Preserve the actual shortcut's target decision.
+      shortcutCommand = command;
+      try {
+        document.execCommand('copy');
+      } finally {
+        shortcutCommand = null;
+      }
+      if (copyEventRevision !== revision) event.preventDefault();
+    };
     window.addEventListener('copy', handleCopy);
-    return () => window.removeEventListener('copy', handleCopy);
+    window.addEventListener('keydown', handleCopyShortcut);
+    return () => {
+      window.removeEventListener('copy', handleCopy);
+      window.removeEventListener('keydown', handleCopyShortcut);
+    };
   }, [pdfCopyOwner, pdfCopySnapshots]);
   const activeReferenceReturn = referenceReturnForActiveTab(
     navigationState,
