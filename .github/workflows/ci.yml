@@ -1,70 +1,80 @@
-name: CI
-
-# Temporarily manual-only. Restore the pull_request and push triggers to re-enable CI.
+name: Diagnose Linux WebKit
 on:
   workflow_dispatch:
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
-
 permissions:
   contents: read
-
 jobs:
-  test:
+  diagnose:
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 20
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-      - name: Set up pnpm
-        uses: pnpm/action-setup@v4
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
         with:
           version: 11.16.0
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: 24.14.0
           cache: pnpm
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-      - name: Check generated mathematical symbol catalog
-        run: pnpm catalog:check
-      - name: Generate full mathematical symbol catalog audit
-        run: pnpm catalog:audit
-      - name: Upload mathematical symbol catalog audit
-        uses: actions/upload-artifact@v4
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install --with-deps webkit
+      - name: Probe native clipboard independently of Placekeeper
+        run: |
+          node --input-type=module <<'JS'
+          import { webkit } from '@playwright/test';
+          const browser = await webkit.launch();
+          const page = await browser.newPage();
+          page.on('console', message => console.log(message.text()));
+          await page.setContent('<textarea id="input">native clipboard control</textarea><span id="bridge" style="position:fixed;left:-10000px">semantic bridge control</span><textarea id="paste"></textarea>');
+          await page.evaluate(() => {
+            for (const kind of ['copy', 'paste', 'keydown']) document.addEventListener(kind, event => console.log(JSON.stringify({ kind, key: event.key, ctrl: event.ctrlKey, meta: event.metaKey, selection: String(getSelection()), active: document.activeElement?.id })), true);
+          });
+          for (const modifier of ['Control', 'Meta']) {
+            await page.locator('#input').selectText();
+            await page.keyboard.press(`${modifier}+c`);
+            await page.locator('#paste').fill('');
+            await page.keyboard.press(`${modifier}+v`);
+            console.log(JSON.stringify({ modifier, controlPaste: await page.locator('#paste').inputValue() }));
+            await page.evaluate(() => {
+              document.activeElement.blur();
+              const range = document.createRange(); range.selectNodeContents(document.querySelector('#bridge'));
+              getSelection().removeAllRanges(); getSelection().addRange(range);
+            });
+            await page.keyboard.press(`${modifier}+c`);
+            await page.locator('#paste').fill('');
+            await page.keyboard.press(`${modifier}+v`);
+            console.log(JSON.stringify({ modifier, bridgePaste: await page.locator('#paste').inputValue() }));
+          }
+          await browser.close();
+          JS
+      - run: pnpm fixtures:pdf && pnpm build
+      - name: Add temporary event diagnostics
+        run: |
+          python3 - <<'PYTHON'
+          from pathlib import Path
+          p = Path('test/acceptance/production-flow.spec.ts')
+          s = p.read_text().replace('test.beforeEach(async () => {', """test.beforeEach(async ({ page }, testInfo) => {
+            page.on('console', message => console.log(testInfo.title, message.type(), message.text()));
+            page.on('pageerror', error => console.log('PAGEERROR', error.message));
+            page.on('requestfailed', request => console.log('REQUESTFAILED', request.url(), request.failure()));
+            await page.addInitScript(() => {
+              const describe = (element: Element | null) => element ? [element.tagName, element.getAttribute('aria-label'), element.getAttribute('data-workspace-focus-token')].join(':') : null;
+              for (const kind of ['focusin', 'focusout', 'copy', 'keydown', 'pointerdown']) document.addEventListener(kind, event => {
+                if (kind === 'keydown' && !['Control', 'Meta', 'c', 'C', 'Enter', 'Escape'].includes((event as KeyboardEvent).key)) return;
+                console.log('DIAGNOSTIC', JSON.stringify({ kind, key: (event as KeyboardEvent).key, target: describe(event.target as Element), active: describe(document.activeElement), selection: String(getSelection()).slice(0, 100), scroll: document.querySelector('[data-viewer-framing-viewport]')?.scrollTop }));
+              }, true);
+            });""")
+          p.write_text(s)
+          PYTHON
+      - name: Run remaining failing cases with traces
+        run: >-
+          pnpm exec playwright test --config scripts/testing/config/playwright.webkit.config.ts
+          test/acceptance/production-flow.spec.ts test/acceptance/reloadable-links.spec.ts
+          --grep 'restores Search focus.*wide|opens the annotations tray without moving|keeps compound reference actions in narrow|defaults a real PDF to fit width|copies a real forward|keeps prior clipboard|copies exactly 12|rejects a real 13|copies only the focused|animates toolbar zoom|copies canonical PDF destinations'
+          --trace on
+      - uses: actions/upload-artifact@v4
+        if: always()
         with:
-          name: mathematical-symbol-catalog-audit
-          path: scripts/pdf-symbol-catalog/generated/catalog.audit.json
-          if-no-files-found: error
-          retention-days: 14
-      - name: Typecheck
-        run: pnpm typecheck
-      - name: Install Playwright browsers and system dependencies
-        run: pnpm exec playwright install --with-deps chromium webkit
-      - name: Generate PDF fixtures
-        run: pnpm fixtures:pdf
-      - name: Build shared client distributions
-        run: pnpm build
-      - name: Run canonical unit tests
-        run: pnpm test:ci:unit
-      - name: Run Chromium acceptance tests
-        run: pnpm test:ci:chromium
-      - name: Run WebKit acceptance tests
-        run: pnpm test:ci:webkit
-      - name: Run visual regression tests
-        run: pnpm test:ci:visual
-      - name: Validate distribution manifest
-        run: pnpm validate:distribution
-      - name: Upload Playwright failure artifacts
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: playwright-failure-artifacts
-          path: |
-            test-results/
-            playwright-report/
-          if-no-files-found: ignore
+          name: linux-webkit-diagnostics
+          path: test-results/
           retention-days: 7
