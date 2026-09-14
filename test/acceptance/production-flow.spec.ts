@@ -507,9 +507,9 @@ test.beforeEach(async () => {
 });
 
 test.afterEach(async ({ page }) => {
-  // Disconnect the client before shutting down its host and draining saves.
-  await page.close();
-  await host?.close();
+  // The context owns connections that can outlive its page.
+  await page.context().close();
+  await host.close();
 });
 
 test.afterAll(async () => {
@@ -4424,6 +4424,8 @@ test('keeps the right workspace inset and PDF runway stable across open and clos
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.setViewportSize({ width: 1280, height: 900 });
   await openFreshProductionFixture(page, pdf, 'Right workspace geometry launch failed');
+  // Manual zoom preserves page scale so opening the tray adds PDF runway.
+  await zoomInOnce(page);
 
   const stage = page.locator('[data-review-stage]');
   const viewport = page.locator('[data-viewer-framing-viewport]');
@@ -4647,8 +4649,7 @@ test('defaults a real PDF to fit width and refits bottom and resizable right rea
     await trigger.press('Enter');
     await expect(page.getByRole('menu', { name: 'PDF zoom', exact: true })).toBeVisible();
     await expect(fitWidth).toBeVisible();
-    await fitWidth.focus();
-    await page.keyboard.press('Enter');
+    await fitWidth.click();
     await expect(fitWidth).toHaveCount(0);
   };
   const zoomValue = () => page.getByRole('textbox', {

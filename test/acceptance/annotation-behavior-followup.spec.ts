@@ -116,8 +116,8 @@ test.beforeEach(async () => {
 });
 
 test.afterEach(async ({ page }) => {
-  // Disconnect the client before shutting down its host and draining saves.
-  await page.close();
+  // The context owns connections that can outlive its page.
+  await page.context().close();
   await host?.close();
   if (temporaryRoot !== '') await rm(temporaryRoot, { recursive: true, force: true });
 });
