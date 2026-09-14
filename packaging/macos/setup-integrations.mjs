@@ -1,9 +1,9 @@
 import { execFile } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, realpathSync } from 'node:fs';
 import { open } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { resolve } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { updateVscode } from './update-vscode.mjs';
 import { setupChrome } from './setup-chrome.mjs';
@@ -138,7 +138,7 @@ export async function setupIntegrations({ appPath, choices = {}, prompt = prompt
   return { mac: macStatus, outcomes, exitCode: outcomes.some((result) => result.status === 'failed') ? 3 : 0 };
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+if (process.argv[1] && realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))) {
   try {
     if (process.argv[2] === '--host') {
       if (!process.env.PLACEKEEPER_LIFECYCLE_LOCK_TOKEN) throw new Error('Host setup requires daemon coordinate-host');

@@ -14,7 +14,7 @@ let host: PlacekeeperHost;
 async function expectCurrentPage(page: Page, value: string): Promise<void> {
   const [currentPage, totalPages] = value.split(" / ");
   const position = page.locator(
-    '[data-review-chrome] > .review-chrome__viewer-controls [data-review-page-position]',
+    '[data-review-chrome] > .review-chrome__left-controls [data-review-page-position]',
   );
   await expect(position.locator('.review-chrome__page-input')).toHaveValue(currentPage!, {
     timeout: 15_000,
@@ -86,11 +86,37 @@ test("a live Codex review copies a browser-safe URL, survives refresh, and reope
     "button",
     { name: "Open PDF link to Footnote return to body TOC, Page 1" },
   );
+  await expect(page.locator("[data-production-review]")).toHaveAttribute("data-initial-view-ready", "true");
+  await page.locator("[data-review-stage]").evaluate(async element => {
+    await Promise.all(element.getAnimations({ subtree: true }).filter(animation => animation.effect?.getTiming().iterations !== Infinity).map(animation => animation.finished.catch(() => undefined)));
+  });
+  await returnLink.scrollIntoViewIfNeeded();
+  // Initial restoration can finish after the page number updates. A moving
+  // link correctly dismisses its menu, so begin this history check at rest.
+  await returnLink.evaluate(element => new Promise<void>((resolve, reject) => {
+    let previous = "";
+    let stableFrames = 0;
+    const deadline = performance.now() + 3000;
+    const sample = () => {
+      const rect = element.getBoundingClientRect();
+      const current = `${rect.x},${rect.y},${rect.width},${rect.height}`;
+      stableFrames = current === previous ? stableFrames + 1 : 0;
+      previous = current;
+      if (stableFrames >= 12) resolve();
+      else if (performance.now() > deadline) reject(new Error("Return link did not settle"));
+      else requestAnimationFrame(sample);
+    };
+    requestAnimationFrame(sample);
+  }));
   await returnLink.click();
   const returnMenu = page.getByRole("menu", {
     name: "Open Footnote return to body TOC, Page 1",
   });
-  await expect(returnMenu).toBeVisible();
+  await expect.poll(async () => {
+    if (await returnMenu.isVisible()) return true;
+    await returnLink.press("Enter");
+    return returnMenu.isVisible();
+  }).toBe(true);
   await returnMenu.getByRole("menuitem", { name: "Open in main document" }).click();
   await expectCurrentPage(page, "1 / 4");
   await expect(page).toHaveURL(/#v=1&page=1$/u);
@@ -99,10 +125,12 @@ test("a live Codex review copies a browser-safe URL, survives refresh, and reope
   const back = page.getByRole("button", { name: "Back in document history" });
   const forward = page.getByRole("button", { name: "Forward in document history" });
   await expect(back).toBeEnabled();
+  await page.locator("[data-review-chrome]").hover({ position: { x: 2, y: 2 } });
   await back.click();
   await expectCurrentPage(page, "3 / 4");
   await expect(page).toHaveURL(/#v=1&page=3$/u);
   await expect(forward).toBeEnabled();
+  await page.locator("[data-review-chrome]").hover({ position: { x: 2, y: 2 } });
   await forward.click();
   await expectCurrentPage(page, "1 / 4");
   await expect(page).toHaveURL(/#v=1&page=1$/u);
@@ -220,6 +248,17 @@ test("a pending restarted browser is promoted to Codex without remounting", asyn
 
 test("copies canonical PDF destinations and reopens them without source UI state", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 });
+  const reloadAtFragment = async (fragment: string) => {
+    // Keep the synthetic URL edit and reload in one browser turn: live viewport
+    // updates can otherwise replace the test fragment between protocol calls.
+    await Promise.all([
+      page.waitForNavigation({ waitUntil: "load" }),
+      page.evaluate((value) => {
+        history.replaceState(history.state, "", value);
+        location.reload();
+      }, fragment),
+    ]);
+  };
   await page.addInitScript(() => {
     Object.defineProperty(navigator, "clipboard", {
       configurable: true,
@@ -272,7 +311,7 @@ test("copies canonical PDF destinations and reopens them without source UI state
   await search.fill("Detail target");
   const result = page.locator("[data-search-result]").first();
   await expect(result).toBeVisible();
-  await expect(result.locator(".pdf-search__result-match").first()).toHaveCSS("font-weight", "500");
+  await expect(result.locator(".pdf-search__result-match").first()).toHaveCSS("font-weight", "400");
   await expect(result.locator(".pdf-search__result-context")).toHaveCSS("font-weight", "400");
   await result.getByRole("button").first().focus();
   const secondaryActions = result.locator("[data-row-secondary-actions]");
@@ -287,6 +326,9 @@ test("copies canonical PDF destinations and reopens them without source UI state
   await expect.poll(() => copiedPlacekeeperLink(page)).toMatch(/#v=1&page=3$/u);
 
   await page.getByRole("button", { name: "Hide workspace" }).click();
+  await page.locator("[data-review-stage]").evaluate(async element => {
+    await Promise.all(element.getAnimations({ subtree: true }).map(animation => animation.finished.catch(() => undefined)));
+  });
   const primaryLink = page.locator(".pdf-workspace:not(.pdf-workspace--reference)").getByRole(
     "button",
     { name: "Open PDF link to Primary result, Page 2" },
@@ -305,6 +347,10 @@ test("copies canonical PDF destinations and reopens them without source UI state
     throw new Error("Expected the copied exact destination to reopen");
   }
   await page.goto(reopened.url);
+  await expect(page.locator("[data-production-review]")).toHaveAttribute("data-initial-view-ready", "true");
+  await page.locator("[data-review-stage]").evaluate(async element => {
+    await Promise.all(element.getAnimations({ subtree: true }).filter(animation => animation.effect?.getComputedTiming().iterations !== Infinity).map(animation => animation.finished.catch(() => undefined)));
+  });
   await expect(page).toHaveURL(/#v=2&page=2&mode=xyz&params=72,640,0$/u);
   await expectCurrentPage(page, "2 / 4");
   await expect(page.locator("#review-tools-workspace")).toHaveAttribute(
@@ -326,32 +372,24 @@ test("copies canonical PDF destinations and reopens them without source UI state
   await expect(page).toHaveURL(/#v=2&page=2&mode=xyz&params=72,640,0$/u);
   await expectCurrentPage(page, "2 / 4");
 
-  await page.evaluate(() => history.replaceState(
-    history.state,
-    "",
-    "#v=2&page=3&mode=fit-rectangle&params=10,10,10,20",
-  ));
-  await page.reload();
+  await reloadAtFragment("#v=2&page=3&mode=fit-rectangle&params=10,10,10,20");
+  await expect(page.locator("[data-production-review]")).toHaveAttribute("data-initial-view-ready", "true", { timeout: 15_000 });
   await expect(page).toHaveURL(/#v=1&page=3$/u);
   await expectCurrentPage(page, "3 / 4");
   await expect(page.locator(".review-workspace__status")).toHaveText(
     "The exact destination is unavailable. Opened page 3 instead.",
   );
 
-  await page.evaluate(() => history.replaceState(
-    history.state,
-    "",
-    "#v=2&page=99&mode=fit-page",
-  ));
-  await page.reload();
+  await reloadAtFragment("#v=2&page=99&mode=fit-page");
+  await expect(page.locator("[data-production-review]")).toHaveAttribute("data-initial-view-ready", "true", { timeout: 15_000 });
   await expect(page).toHaveURL(/#v=1&page=1$/u);
   await expectCurrentPage(page, "1 / 4");
   await expect(page.locator(".review-workspace__status")).toHaveText(
     "The exact destination is unavailable. Opened page 1 instead.",
   );
 
-  await page.evaluate(() => history.replaceState(history.state, "", "#v=1&page=4"));
-  await page.reload();
+  await reloadAtFragment("#v=1&page=4");
+  await expect(page.locator("[data-production-review]")).toHaveAttribute("data-initial-view-ready", "true", { timeout: 15_000 });
   await expect(page).toHaveURL(/#v=1&page=4$/u);
   await expectCurrentPage(page, "4 / 4");
 });
@@ -387,11 +425,12 @@ test("a successor daemon keeps the old origin but serves a stale view as inert c
     expect(successor.server.origin).toBe(readableUrl.origin);
 
     const exactFragment = "#v=2&page=1&mode=fit-horizontal&params=640";
-    await page.evaluate((fragment) => { location.hash = fragment; }, exactFragment);
+    // Unload the predecessor before observing requests from the inert recovery view.
+    await page.goto("about:blank");
     const requests: string[] = [];
     const recordRequest = (request: { url(): string }) => requests.push(request.url());
     page.on("request", recordRequest);
-    await page.reload();
+    await page.goto(`${readableUrl.origin}${readableUrl.pathname}${exactFragment}`);
     await expect(page.locator("[data-terminal-recovery]")).toBeVisible();
     await expect(page.getByRole("heading", { name: "Reopen Successor Paper.pdf" })).toBeFocused();
     await expect(page.locator(".terminal-recovery__document")).toHaveCount(0);
@@ -670,7 +709,7 @@ test("a successor offers a real protected draft and preserves exact choices acro
     expect(resumedSessionId).toBeDefined();
     expect(successor.broker.state(resumedSessionId!)).toMatchObject({
       revision: 1,
-      items: [{ payload: { comment: "Keep this draft note" } }],
+      items: [...state.items, expect.objectContaining({ payload: expect.objectContaining({ comment: "Keep this draft note" }) })],
     });
   } finally {
     await first?.close();

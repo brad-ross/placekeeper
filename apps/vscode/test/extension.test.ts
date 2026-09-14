@@ -331,6 +331,36 @@ describe("VS Code local host adapter", () => {
         mac: "cmd+alt+shift+j",
         when: "activeWebviewPanelId == 'placekeeper.review'",
       },
+      {
+        command: "placekeeper.fitWidth",
+        key: "ctrl+alt+0",
+        mac: "ctrl+cmd+0",
+        when: "activeWebviewPanelId == 'placekeeper.review' && !inputFocus",
+      },
+      {
+        command: "placekeeper.toggleHorizontalScrollLock",
+        key: "ctrl+alt+l",
+        mac: "ctrl+cmd+l",
+        when: "activeWebviewPanelId == 'placekeeper.review' && !inputFocus",
+      },
+      {
+        command: "placekeeper.openOutline",
+        key: "ctrl+alt+o",
+        mac: "ctrl+cmd+o",
+        when: "activeWebviewPanelId == 'placekeeper.review' && !inputFocus",
+      },
+      {
+        command: "placekeeper.openAnnotations",
+        key: "ctrl+alt+a",
+        mac: "ctrl+cmd+a",
+        when: "activeWebviewPanelId == 'placekeeper.review' && !inputFocus",
+      },
+      {
+        command: "placekeeper.openReferences",
+        key: "ctrl+alt+r",
+        mac: "ctrl+cmd+r",
+        when: "activeWebviewPanelId == 'placekeeper.review' && !inputFocus",
+      },
     ]);
     expect((manifest as unknown as { scripts: { "build:bundle": string } }).scripts["build:bundle"])
       .toContain("copy-web-assets.mjs");

@@ -560,7 +560,11 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
           if (layoutGeneration !== layoutGenerationRef.current
             || documentGeneration !== documentGenerationRef.current) return;
           const activeElement = productionRootRef.current?.ownerDocument.activeElement;
-          if (activeElement instanceof HTMLElement && activeElement.dataset.workspaceMode) return;
+          if (activeElement instanceof HTMLElement && (
+            activeElement.dataset.workspaceMode
+            || activeElement.closest<HTMLElement>('[data-reference-tab-segment]')
+              ?.dataset.referenceTabSegment === identity
+          )) return;
           const target = [...(productionRootRef.current?.querySelectorAll<HTMLElement>(
             '[data-reference-tab]',
           ) ?? [])].find((element) => element.dataset.referenceTab === identity);
@@ -831,6 +835,13 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
         }
         return;
       }
+      if (!workspacePresentationRef.current?.initialLocation
+        && viewerControlsRef.current?.usesAutomaticFitWidth()) {
+        // Establish default framing before restoring an explicit destination.
+        // A later fit would move its anchor and replace the exact URL with a page link.
+        await mainNavigationRef.current?.fitToWidth();
+        if (cancelled || generation !== documentGenerationRef.current) return;
+      }
       navigationCoordinator.startLocationHistory();
       const presentation = pendingPresentationLocationRef.current;
       const restored = locationHistory === undefined
@@ -838,13 +849,6 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
           ? true
           : await navigationCoordinator.restorePresentationLocation(presentation, generation)
         : await navigationCoordinator.restoreCurrentLocation();
-      if (restored && !cancelled && generation === documentGenerationRef.current
-        && !workspacePresentationRef.current?.initialLocation
-        && viewerControlsRef.current?.usesAutomaticFitWidth()) {
-        // The plugin preset sees the full viewport; the shared fit clears the
-        // workspace rail and fade while retaining restored numeric zoom.
-        await mainNavigationRef.current?.fitToWidth();
-      }
       if (!cancelled && generation === documentGenerationRef.current) {
         if (restored) viewerControlsRef.current?.freezeCurrentZoom();
         const initialLocation = workspacePresentationRef.current?.initialLocation;
@@ -1275,19 +1279,25 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     }
   }, [mainCopySelection, referenceCopySelection]);
   useEffect(() => {
-    const handleCopy = (event: ClipboardEvent) => {
+    let copyEventRevision = 0;
+    const commandForTarget = (target: EventTarget | null) => {
       const nativeSelection = window.getSelection();
-      const activeOwner = paletteCopyOwnerRef.current ?? pdfCopyOwner;
-      const command = resolvePdfCopyCommand({
+      return resolvePdfCopyCommand({
         nativeCopyHasPrecedence: nativeCopyHasPrecedence({
-          editableTarget: isEditableTarget(event.target),
+          editableTarget: isEditableTarget(target),
           domSelectionCollapsed: nativeSelection?.isCollapsed ?? true,
           domSelectionText: nativeSelection?.toString() ?? '',
           domSelectionOwnedByPdf: nativeSelectionBelongsToPdfBridge(nativeSelection),
         }),
-        owner: activeOwner,
+        owner: paletteCopyOwnerRef.current ?? pdfCopyOwner,
         snapshots: pdfCopySnapshots,
       });
+    };
+    let shortcutCommand: ReturnType<typeof commandForTarget> | null = null;
+    const handleCopy = (event: ClipboardEvent) => {
+      copyEventRevision += 1;
+      const activeOwner = paletteCopyOwnerRef.current ?? pdfCopyOwner;
+      const command = shortcutCommand ?? commandForTarget(event.target);
       applyPdfCopyCommand(command, event, {
         onPending: () => setPdfCopyAnnouncement(
           'Selected text is still being read. Retry Copy when it is ready.',
@@ -1305,8 +1315,31 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
         );
       }
     };
+    const handleCopyShortcut = (event: globalThis.KeyboardEvent) => {
+      if (event.defaultPrevented || event.isComposing || event.altKey || event.shiftKey
+        || !(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 'c') return;
+      const command = commandForTarget(event.target);
+      if (command.kind === 'default' || isEditableTarget(event.target)) return;
+      // WebKit on Linux does not dispatch Copy for a non-editable DOM selection.
+      // Invoke the browser command within this user gesture; the same copy handler
+      // retains native clipboard access, selection limits, and pending/error feedback.
+      const revision = copyEventRevision;
+      // Chromium may target the last editable field when there is no bridge text
+      // (pending or rejected selection). Preserve the actual shortcut's target decision.
+      shortcutCommand = command;
+      try {
+        document.execCommand('copy');
+      } finally {
+        shortcutCommand = null;
+      }
+      if (copyEventRevision !== revision) event.preventDefault();
+    };
     window.addEventListener('copy', handleCopy);
-    return () => window.removeEventListener('copy', handleCopy);
+    window.addEventListener('keydown', handleCopyShortcut);
+    return () => {
+      window.removeEventListener('copy', handleCopy);
+      window.removeEventListener('keydown', handleCopyShortcut);
+    };
   }, [pdfCopyOwner, pdfCopySnapshots]);
   const activeReferenceReturn = referenceReturnForActiveTab(
     navigationState,

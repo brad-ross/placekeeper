@@ -51,6 +51,10 @@ globalThis.viewerAcceptance = {
     if (!selection) return null;
     return readViewerSelectionEvidence(documentId, selection).catch(() => null);
   },
+  setZoom(level: number) {
+    const documentId = registry?.getStore().getState().core.activeDocumentId;
+    if (documentId) registry?.getPlugin<ZoomPlugin>(ZoomPlugin.id)?.provides().forDocument(documentId).requestZoom(level);
+  },
   zoomLevel() {
     if (!registry) return 0;
     const documentId = registry.getStore().getState().core.activeDocumentId;
@@ -176,6 +180,7 @@ declare global {
     selectionGeometryReady(pageIndex?: number): boolean;
     selectionRectCount(): number;
     selectionContract(): Promise<ViewerSelectionEvidence | null>;
+    setZoom(level: number): void;
     zoomLevel(): number;
     selectionAnchorStatus(): string;
     goToPage(pageNumber: number): void;

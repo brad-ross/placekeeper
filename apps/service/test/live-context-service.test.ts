@@ -676,7 +676,7 @@ describe("atomic live-context service", () => {
     });
   });
 
-  it("discovers foreign source-PDF annotations server-side as a separate read-only population", async () => {
+  it("includes imported source-PDF annotations as review items without duplicating them as read-only context", async () => {
     const directory = await mkdtemp(join(tmpdir(), "placekeeper-existing-context-"));
     temporaryDirectories.push(directory);
     const pdfPath = join(directory, "annotated.pdf");
@@ -703,13 +703,11 @@ describe("atomic live-context service", () => {
     });
     expect(observation).toMatchObject({
       status: "current",
-      reviewItems: { mode: "full", itemCount: 0 },
-      existingPdfAnnotations: { count: 2 },
+      reviewItems: { mode: "full", itemCount: 2 },
+      existingPdfAnnotations: { count: 0 },
     });
     if (observation.status !== "current") throw new Error("Expected current context");
-    expect(observation.existingPdfAnnotations.items).toEqual(expect.arrayContaining([
-      expect.objectContaining({ id: "existing-highlight", subtype: "highlight", readOnly: true, origin: "source-pdf" }),
-      expect.objectContaining({ id: "existing-stamp", subtype: "stamp", readOnly: true, origin: "source-pdf" }),
-    ]));
+    expect(observation.existingPdfAnnotations.items).toEqual([]);
+    expect(broker.state(opened.launch.sessionId)?.items).toHaveLength(2);
   });
 });

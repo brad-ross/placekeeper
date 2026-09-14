@@ -402,7 +402,6 @@ export class NavigationCoordinator {
       && state.tabs.some((tab) => tab.identity === state.activeTabIdentity)
       ? state.activeTabIdentity
       : null;
-    this.supersede();
     if (
       !this.generationMatches(request.target.documentGeneration)
       || (request.sourceScope === 'reference' && sourceTabIdentity === null)
@@ -413,6 +412,9 @@ export class NavigationCoordinator {
       this.dependencies.setAnnouncement(LINK_UNAVAILABLE);
       return false;
     }
+    // A link exposed during reference mounting must not cancel that mount.
+    // Only an accepted invocation supersedes the current navigation.
+    this.supersede();
     this.pendingReference = null;
     this.dependencies.setPendingReference(null);
     this.linkRequest = request;
@@ -955,7 +957,8 @@ export class NavigationCoordinator {
           'Reference sent to the main document. Select the adjacent reference to retry it.',
         );
       }
-      main.focusAtDestination(settledLocation.pageIndex);
+      // The surviving reference owns keyboard focus; visiting Main first can
+      // interrupt an action already started in that reference while restoration settles.
       this.dependencies.focusReferenceTab(survivingIdentity);
       return true;
     }

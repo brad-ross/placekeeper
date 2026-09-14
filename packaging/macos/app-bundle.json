@@ -3,7 +3,7 @@
   "productName": "Placekeeper",
   "bundleName": "Placekeeper",
   "bundleIdentifier": "local.placekeeper",
-  "bundleVersion": "0.1.0",
+  "bundleVersion": "0.1.1",
   "minimumSystemVersion": "13.0",
   "architectures": ["arm64"],
   "nodeVersion": "24.14.0",

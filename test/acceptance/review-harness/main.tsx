@@ -580,6 +580,7 @@ function Harness() {
   );
   const [shellMount, setShellMount] = useState(0);
   const failNextExportRef = useRef(exportPreview === 'fail-once');
+  const finishExportRef = useRef<(() => void) | null>(null);
   const [outlineDiscovery, setOutlineDiscovery] = useState<PdfOutlineDiscovery>({
     status: 'loading',
     documentGeneration: 0,
@@ -699,7 +700,7 @@ function Harness() {
         onExportReviewedCopy: async () => {
           setExportCount((count) => count + 1);
           if (exportPreview === 'delayed') {
-            await new Promise<void>((resolve) => setTimeout(resolve, 100));
+            await new Promise<void>((resolve) => { finishExportRef.current = resolve; });
           }
           if (failNextExportRef.current) {
             failNextExportRef.current = false;
@@ -1039,6 +1040,10 @@ function Harness() {
         >
           Revision {state.revision}
         </output>
+        {exportPreview === 'delayed' ? <button type="button" onClick={() => {
+          finishExportRef.current?.();
+          finishExportRef.current = null;
+        }}>Finish harness export</button> : null}
         {hostExportPreview ? <div data-host-export-harness>
           <button
             type="button"

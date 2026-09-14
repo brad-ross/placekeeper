@@ -101,7 +101,7 @@ test('publishes aligned, control-safe macOS drag geometry across menus and fulls
   }, { identity: windowedIdentity });
 
   let drag = await latestSettledDrag(page, windowedIdentity);
-  const aligned = await page.evaluate(() => {
+  const readAligned = () => page.evaluate(() => {
     const chrome = document.querySelector<HTMLElement>('.review-chrome')!;
     const title = document.querySelector<HTMLElement>('.review-chrome__save-identity')!;
     const chromeBounds = chrome.getBoundingClientRect();
@@ -118,12 +118,18 @@ test('publishes aligned, control-safe macOS drag geometry across menus and fulls
         }).filter(({ width, height }) => width > 0 && height > 0),
     };
   });
+  const aligned = await readAligned();
   expect(aligned.chrome.height).toBe(54);
   expect(aligned.title.y - aligned.chrome.y + aligned.title.height / 2).toBe(27);
   expect(drag.regions.length).toBeGreaterThan(0);
-  for (const region of drag.regions) {
-    for (const control of aligned.controls) expect(overlaps(region, control)).toBe(false);
-  }
+  // PDF bootstrap can change numeric controls after the first shell-ready message.
+  await expect(async () => {
+    drag = await latestSettledDrag(page, windowedIdentity);
+    const current = await readAligned();
+    for (const region of drag.regions) {
+      for (const control of current.controls) expect(overlaps(region, control)).toBe(false);
+    }
+  }).toPass({ timeout: 5_000 });
 
   const settledBeforePopup = await settledDragCount(page, windowedIdentity);
   await page.evaluate(() => {

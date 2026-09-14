@@ -790,6 +790,23 @@ describe('viewer navigation adapter', () => {
     expect(bottomHarness.navigation.locationVisibility(bottomDestination, bottomViewport)).toBe('visible');
   });
 
+  it('returns a fitted-page anchor above a floating composer without horizontal panning', async () => {
+    const harness = navigationHarness({ constrainedHorizontal: true });
+    const destination: PdfViewerLocation = {
+      pageIndex: 0,
+      anchor: { x: 550, y: 500 },
+      alignment: { xPercent: 50, yPercent: 35 },
+      zoom: 1,
+    };
+    const viewport = {
+      occlusion: { left: 270, top: 150, right: 450, bottom: 280 },
+    } as const;
+
+    expect(harness.navigation.locationVisibility(destination, viewport)).toBe('outside');
+    expect(await harness.navigation.applyLocation(destination, viewport)).toBe(true);
+    expect(harness.navigation.locationVisibility(destination, viewport)).toBe('visible');
+  });
+
   it('fits the most-visible page to the viewport minus two standard gaps', async () => {
     const harness = navigationHarness({ viewportGap: 10 });
 

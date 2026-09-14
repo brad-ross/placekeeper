@@ -145,12 +145,13 @@ test('workspace rows use Outline selection, hover, focus, and resize treatments'
 
   const bottomTray = page.locator('.review-workspace');
   const bottomHandle = page.locator('[data-reference-resize-handle="bottom"]');
+  // Resize feedback follows the full rounded tray edge.
   const bottomCorners = await Promise.all([bottomTray.boundingBox(), bottomHandle.boundingBox()]);
   expect(bottomCorners[0]).not.toBeNull();
   expect(bottomCorners[1]).not.toBeNull();
-  expect(bottomCorners[1]!.x - bottomCorners[0]!.x).toBeCloseTo(16, 0);
+  expect(bottomCorners[1]!.x - bottomCorners[0]!.x).toBeCloseTo(0, 0);
   expect(bottomCorners[0]!.x + bottomCorners[0]!.width
-    - bottomCorners[1]!.x - bottomCorners[1]!.width).toBeCloseTo(16, 0);
+    - bottomCorners[1]!.x - bottomCorners[1]!.width).toBeCloseTo(0, 0);
 
   const moveRight = page.getByRole('button', { name: 'Move References to right', exact: true });
   await page.getByRole('tab', { name: 'References', exact: true }).focus();
@@ -162,9 +163,9 @@ test('workspace rows use Outline selection, hover, focus, and resize treatments'
   const rightCorners = await Promise.all([rightTray.boundingBox(), rightHandle.boundingBox()]);
   expect(rightCorners[0]).not.toBeNull();
   expect(rightCorners[1]).not.toBeNull();
-  expect(rightCorners[1]!.y - rightCorners[0]!.y).toBeCloseTo(16, 0);
+  expect(rightCorners[1]!.y - rightCorners[0]!.y).toBeCloseTo(0, 0);
   expect(rightCorners[0]!.y + rightCorners[0]!.height
-    - rightCorners[1]!.y - rightCorners[1]!.height).toBeCloseTo(16, 0);
+    - rightCorners[1]!.y - rightCorners[1]!.height).toBeCloseTo(0, 0);
 
   await page.getByRole('tab', { name: 'Search', exact: true }).click();
   const search = page.getByRole('searchbox', { name: 'Search this PDF' });
@@ -180,8 +181,7 @@ test('workspace rows use Outline selection, hover, focus, and resize treatments'
   await expect(second).toHaveCSS('background-color', 'rgb(231, 231, 231)');
   await firstNavigation.click();
   await page.mouse.move(0, 0);
-  await page.getByRole('button', { name: 'Show workspace', exact: true }).click();
-  await page.getByRole('tab', { name: 'Search', exact: true }).click();
+  await expect(page.getByRole('tab', { name: 'Search', exact: true })).toHaveAttribute('aria-selected', 'true');
   await expect(first).toBeVisible();
   await expect(first).toHaveCSS('background-color', 'rgb(255, 255, 255)');
   await expect(firstNavigation).not.toBeFocused();

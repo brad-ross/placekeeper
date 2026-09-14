@@ -1,3 +1,4 @@
+import { realpathSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
 import { chmod, cp, lstat, mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
@@ -199,7 +200,7 @@ export async function setupChrome(app, { userHome = process.env.PLACEKEEPER_USER
     message: "Chrome prepared. Load this unpacked folder in chrome://extensions and explicitly enable automatic PDF opening. Reload an existing extension; older incompatible payloads remain disabled until repaired." };
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (process.argv[1] && realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))) {
   try {
     if (process.argv[2] === "--capture-legacy" && process.argv.length === 4) {
       await captureLegacyChromeOwnership(process.argv[3]);

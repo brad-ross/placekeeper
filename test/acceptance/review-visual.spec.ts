@@ -259,7 +259,7 @@ async function expectAnnotationTitleEndcapGeometry(row: Locator): Promise<void> 
   expect(geometry.page.x + geometry.page.width)
     .toBeCloseTo(geometry.actions.x + geometry.actions.width, 0);
   expect(geometry.row).toEqual({ borderWidth: '0px', borderRadius: '12px' });
-  expect(geometry.contentPadding).toEqual(['8px', '12px', '8px', '12px']);
+  expect(geometry.contentPadding).toEqual(['8px', '8px', '8px', '12px']);
   expect(geometry.titleGap).toBe('6px');
   expect(geometry.titleMinHeight).toBe('27px');
   expect(geometry.titleMarginBottom).toBe('4px');
@@ -603,10 +603,10 @@ test('installed real PDF reading', async ({ page }) => {
     '[data-review-chrome] > .review-chrome__identity .review-chrome__save-identity',
   ).boundingBox();
   const copyLinkBox = await page.locator(
-    '[data-review-chrome] > .review-chrome__viewer-controls [data-review-copy-link]',
+    '[data-review-chrome] [data-review-chrome-group="navigation"] [data-review-copy-link]',
   ).boundingBox();
   const viewerControlsBox = await page.locator(
-    '[data-review-chrome] > .review-chrome__viewer-controls',
+    '[data-review-chrome] [data-review-chrome-group="navigation"]',
   ).boundingBox();
   if (!identityBox || !copyLinkBox || !viewerControlsBox) {
     throw new Error('Document chrome geometry is unavailable.');
@@ -688,7 +688,8 @@ test('wide Annotation Tray', async ({ page }) => {
   await expect(reader).toHaveAttribute('data-annotation-origin', 'owned');
   await expect(page.locator('[data-full-annotation-action="edit"]')).toBeVisible();
   await expect(reader).toContainText('complete reviewer-authored argument');
-  await expect(reader).not.toContainText('identifying variation is local to the comparison group');
+  await expect(reader.locator('.full-annotation-reader__body > p')).toContainText('complete reviewer-authored argument');
+  await expect(reader.locator('.full-annotation-reader__quote')).toHaveText('Highlighted textidentifying variation is local to the comparison group');
   await expectScene(product, 'wide-full-annotation-reader-owned.png');
 });
 
@@ -989,6 +990,7 @@ test('wide coordinated References and tools trays', async ({ page }) => {
   await expect(page.locator('[data-review-stage]')).toHaveAttribute('data-reference-layout', 'wide-split');
   await expect(page.locator('#review-tools-workspace')).toBeVisible();
   await expectCompoundReferenceTabs(page, 'vertical');
+  await expect(page.getByRole('tooltip')).toBeVisible();
   await expectScene(product, 'wide-split-reference-tools.png');
 });
 

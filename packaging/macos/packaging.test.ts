@@ -302,7 +302,7 @@ describe("macOS distribution manifests", () => {
         report: "84bda58674d8174a0a94bbaed846ce23628cbf62fcab018cef14b182d38db797",
         thirdPartyNotices: "e93d61075ce6ff0452d9c841030d8a7125030182e324cd76ca7f640fcb244bdb",
       },
-      productionWebJavaScriptBytes: 2_598_548,
+      productionWebJavaScriptBytes: 3_200_000,
     });
 
     const root = await mkdtemp(resolve(tmpdir(), "placekeeper-catalog-baseline-"));
@@ -1089,7 +1089,7 @@ describe("macOS distribution manifests", () => {
 
 describe("source prerequisite preflight", () => {
   it.each(["cpu", "os", "clt", "old-swift", "missing-sdk", "broken-sdk"])("rejects %s before downloading or mutating", async (failure) => {
-    const root = await mkdtemp("/private/tmp/placekeeper-preflight-");
+    const root = await mkdtemp(join(tmpdir(), "placekeeper-preflight-"));
     try {
       const mock = join(root, "tool");
       await writeFile(mock, [

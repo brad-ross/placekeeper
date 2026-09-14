@@ -35,10 +35,10 @@ test('page and zoom menus align to the right edge of their numeric groups', asyn
       ['.review-chrome__page-disclosure', '.review-chrome__page-position', 'Page navigation'],
       ['.review-chrome__zoom-disclosure', '.review-chrome__zoom-cluster', 'PDF zoom'],
     ] as const) {
-      await page.locator(`[data-review-chrome] > .review-chrome__viewer-controls ${openerSelector}`).click();
+      await page.locator(`[data-review-chrome] ${openerSelector}:visible`).click();
       const menu = page.getByRole('menu', { name: label, exact: true });
       await expect(menu).toBeVisible();
-      const group = page.locator(`[data-review-chrome] > .review-chrome__viewer-controls ${groupSelector}`);
+      const group = page.locator(`[data-review-chrome] ${groupSelector}:visible`);
       const a = (await group.boundingBox())!;
       const b = (await menu.boundingBox())!;
       expect(b.x + b.width).toBeCloseTo(a.x + a.width, 0);
@@ -50,6 +50,7 @@ test('page and zoom menus align to the right edge of their numeric groups', asyn
 });
 
 test('workspace fade follows the opening tray without another pointer or scroll event', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
   await openPdf(page);
   await page.getByRole('button', { name: 'Show workspace', exact: true }).click();
   // Do not move the pointer after opening: the transition itself must publish geometry.
@@ -61,7 +62,7 @@ test('workspace fade follows the opening tray without another pointer or scroll 
     return { gap: tray.left - bounds.right, width: bounds.width,
       display: getComputedStyle(fade).display, background: getComputedStyle(fade).backgroundImage };
   });
-  expect(geometry).toMatchObject({ gap: 12, width: 18, display: 'block' });
+  expect(geometry).toMatchObject({ gap: 12, width: 12, display: 'block' });
   expect(geometry.background).toContain('linear-gradient');
   await page.screenshot({ path: test.info().outputPath('opened-tray-fade.png') });
 });
@@ -72,9 +73,10 @@ test('document history keeps the other toolbar controls mounted and visible', as
     await page.getByRole('button', { name: 'Open PDF link to Primary result, Page 2', exact: true }).click();
     await page.getByRole('menuitem', { name: 'Open in main document', exact: true }).click();
     await expect(page.getByRole('textbox', { name: /^Current page/ })).toHaveValue('2');
+    await page.locator('[data-review-chrome]').hover({ position: { x: 2, y: 2 } });
     await page.evaluate(() => {
       const nodes = [...document.querySelectorAll<HTMLElement>(
-        '[data-review-chrome] > .review-chrome__identity, [data-review-chrome] > .review-chrome__viewer-controls .review-chrome__page-position, [data-review-chrome] > .review-chrome__viewer-controls .review-chrome__zoom-cluster, [data-review-chrome] > .review-chrome__viewer-controls [data-review-copy-link]',
+        '[data-review-chrome] > .review-chrome__identity, [data-review-chrome] > .review-chrome__left-controls .review-chrome__page-position, [data-review-chrome] > .review-chrome__viewer-controls .review-chrome__zoom-cluster, [data-review-chrome] > .review-chrome__left-controls [data-review-copy-link]',
       )];
       const audit = { missing: [] as string[], finished: false };
       (window as typeof window & { __chromeAudit?: typeof audit }).__chromeAudit = audit;
@@ -92,6 +94,7 @@ test('document history keeps the other toolbar controls mounted and visible', as
       };
       requestAnimationFrame(inspect);
     });
+    await page.locator('[data-review-chrome]').hover({ position: { x: 2, y: 2 } });
     await page.getByRole('button', { name: 'Back in document history', exact: true }).click();
     await expect(page.getByRole('textbox', { name: /^Current page/ })).toHaveValue('1');
     await expect.poll(() => page.evaluate(() =>

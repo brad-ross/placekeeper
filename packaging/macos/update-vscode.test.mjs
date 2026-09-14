@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, writeFile, rm, readFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, rm, readFile, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { execFile } from 'node:child_process';
@@ -7,6 +7,16 @@ import { promisify } from 'node:util';
 import { test } from 'vitest';
 import { packageVscode, updateVscode } from './update-vscode.mjs';
 const exec = promisify(execFile);
+
+test('packaging CLI runs through a symlinked parent directory', async () => {
+  const root = await mkdtemp(resolve(tmpdir(), 'placekeeper-cli-alias-'));
+  try {
+    await symlink(resolve('packaging/macos'), resolve(root, 'alias'), 'dir');
+    await assert.rejects(exec(process.execPath, [resolve(root, 'alias/update-vscode.mjs'), '--package', resolve(root, 'missing.app'), resolve(root, 'output.vsix')]), /ENOENT/);
+    await assert.rejects(exec(process.execPath, [resolve(root, 'alias/setup-integrations.mjs')]), /Usage: setup-integrations/);
+    await assert.rejects(exec(process.execPath, [resolve(root, 'alias/setup-chrome.mjs')]), /Usage: setup-chrome/);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
 
 test('app updates reinstall the bundled UI even when the extension version is unchanged', async () => {
   const root = await mkdtemp(resolve(tmpdir(), 'placekeeper-vscode-update-test-'));

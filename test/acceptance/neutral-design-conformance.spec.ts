@@ -10,6 +10,12 @@ async function canonical(browser: Browser, baseURL: string | undefined, scene: s
   const page = await browser.newPage({ viewport: { width: 1400, height: 1050 } });
   await page.goto(`${baseURL}/docs/plans/assets/neutral-soft-design/index.html`);
   const frame = page.frames().find((frame) => frame.url() === 'about:srcdoc')!;
+  // Follow-up row refinements landed after the original approved scene.
+  await frame.addStyleTag({ content: `
+    #pk-canonical .pk-row { padding: 8px 8px 8px 12px !important; }
+    #pk-canonical .pk-row.pk-current { box-shadow: 0 2px 7px rgb(0 0 0 / 2.4%) !important; }
+    #pk-canonical .pk-ref-title { min-height: 32px !important; padding: 7px 8px !important; }
+  ` });
   await frame.locator('#pk-review-scene').selectOption({ label: scene });
   await page.mouse.move(0, 0);
   return { page, frame };
@@ -51,19 +57,27 @@ test('toolbar controls match canonical rest, hover, keyboard, and open-menu stat
     const zoom = visible(page, '.review-chrome__zoom-disclosure');
     const zoomMock = mock.frame.locator('.pk-zoom-trigger');
     await zoom.click(); await zoomMock.click();
+    await zoom.focus(); await zoomMock.focus();
     await page.mouse.move(0, 0); await mock.page.mouse.move(0, 0);
     await expect(zoom).toBeFocused();
     await match(zoom, zoomMock, [...control, 'width', 'height']);
     await match(zoom.locator('svg'), zoomMock.locator('svg'), icon);
     await match(visible(page, '.top-bar-menu__surface'), mock.frame.locator('.pk-zoom-popover'), surface);
-    await zoom.press('ArrowDown');
+    // Finish the pointer-hover comparison before checking keyboard navigation.
+    // Hover menus close when the pointer leaves, independently of focus.
+    await zoom.press('Escape');
+    await zoom.press('Enter');
+    await expect(page.getByRole('menuitem', { name: 'Fit width' })).toBeFocused();
+    await page.keyboard.press('ArrowDown');
     await expect(page.getByRole('menuitem', { name: 'Zoom out' })).toBeFocused();
     await page.keyboard.press('Escape'); await expect(zoom).toBeFocused();
     await expect(page.getByRole('menu', { name: 'PDF zoom' })).toHaveCount(0);
     await zoom.press('Enter');
-    await expect(page.getByRole('menuitem', { name: 'Zoom out' })).toBeFocused();
+    await expect(page.getByRole('menuitem', { name: 'Fit width' })).toBeFocused();
     await page.keyboard.press('Escape');
     await zoom.click(); await zoom.click();
+    await expect(page.getByRole('menu', { name: 'PDF zoom' })).toBeVisible();
+    await page.mouse.move(0, 0);
     await expect(page.getByRole('menu', { name: 'PDF zoom' })).toHaveCount(0);
     await zoom.click(); await page.keyboard.press('Escape');
     await expect(page.getByRole('menu', { name: 'PDF zoom' })).toHaveCount(0);
@@ -79,7 +93,7 @@ test('save setup and save-failure surfaces match the approved scenes', async ({ 
     const mockChoice = mock.frame.locator('.pk-choice').first();
     await match(choice, mockChoice, [...surface, 'gap', 'margin']);
     await choice.hover(); await mockChoice.hover(); await match(choice, mockChoice, surface);
-    const input = page.locator('.save-destination-filename input');
+    const input = page.getByRole('textbox', { name: 'Copy name', exact: true });
     const mockInput = mock.frame.locator('.pk-field-label input');
     await match(input, mockInput, [...surface, ...typography]);
     await input.hover(); await mockInput.hover(); await match(input, mockInput, surface);
@@ -221,7 +235,7 @@ test('split References uses the canonical tab surfaces and controls', async ({ p
     await page.mouse.move(0, 0);
     await match(current, mock.frame.locator('.pk-ref-tab.pk-current'), ['borderRadius', 'backgroundColor', 'boxShadow']);
     await match(current.locator('.reference-tab-segment__selector'), mock.frame.locator('.pk-ref-title[aria-selected="true"]'), control);
-    await match(current.locator('.reference-tab-segment__selector small'), mock.frame.locator('.pk-ref-tab.pk-current .pk-ref-page'), typography);
+    await match(current.locator('.reference-tab-segment__page'), mock.frame.locator('.pk-ref-tab.pk-current .pk-ref-page'), typography);
     await match(current.locator('.reference-tab-segment__action').first(), visible(mock.frame, '.pk-ref-tab.pk-current .pk-ref-tab-actions button'), ['padding', 'width', 'height', 'borderRadius', 'color']);
     const panel = visible(page, '.reference-panel__viewport');
     await match(panel, mock.frame.locator('.pk-ref-body'), ['backgroundColor', 'borderRadius', 'borderTopWidth']);
@@ -236,10 +250,12 @@ test('annotation peek uses the canonical container, row, and actions', async ({ 
     await product(page, 'peek');
     await page.locator('[data-owned-focus-id="owned-highlight"]').focus();
     const peek = page.locator('[data-annotation-peek]');
+    await peek.locator('.annotation-item__content > button').click();
+    await expect(peek).toHaveAttribute('data-peek-selected', 'true');
     const approved = mock.frame.locator('.pk-peek');
     await match(peek, approved, [...surface, 'width']);
     await match(peek.locator('.annotation-item__content'), approved.locator('.pk-row'), ['borderRadius']);
-    await expect(peek.locator('.annotation-item__content')).toHaveCSS('padding', '8px 8px 8px 12px');
+    await expect(peek.locator('.annotation-item__content')).toHaveCSS('padding', '8px');
     await match(peek.locator('.annotation-item__title-row'), approved.locator('.pk-row-head'), ['gap', 'minHeight', 'marginBottom']);
     await match(peek.locator('.annotation-item__page'), approved.locator('.pk-page-label'), typography);
     await match(peek.locator('[data-row-action="edit"]'), approved.locator('[data-action="edit"]'), ['width', 'height', 'padding', 'borderRadius', 'color']);

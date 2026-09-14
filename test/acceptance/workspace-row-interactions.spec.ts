@@ -402,6 +402,9 @@ for (const width of [1280, 620]) {
     await expect(number).toHaveText('18');
     await expect(number).toHaveCSS('opacity', '1');
     for (const action of await actions.all()) await expect(action).toHaveCSS('opacity', '0');
+    await page.locator("[data-review-stage]").evaluate(async element => {
+      await Promise.all(element.getAnimations({ subtree: true }).filter(animation => animation.effect?.getTiming().iterations !== Infinity).map(animation => animation.finished.catch(() => undefined)));
+    });
     const before = await referenceTabGeometry(active);
     expect(Math.abs(before.numberX - before.iconX)).toBeLessThan(.5);
     expect(Math.abs(before.numberY - before.iconY)).toBeLessThan(1);
