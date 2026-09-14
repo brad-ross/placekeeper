@@ -72,6 +72,20 @@ jobs:
           }
           await browser.close();
           JS
+      - name: Add temporary reference navigation diagnostics
+        run: |
+          python3 - <<'PYTHON'
+          from pathlib import Path
+          p = Path('apps/web/src/review/navigation-coordinator.ts')
+          s = p.read_text().replace('if (!opened) return failPreservingMain();', "if (!opened) { console.log('REF-DIAG controller-open-failed'); return failPreservingMain(); }")
+          s = s.replace('if (!navigation) return failPreservingMain();', "if (!navigation) { console.log('REF-DIAG navigation-not-ready'); return failPreservingMain(); }")
+          s = s.replace('if (settledLocation === null) return failPreservingMain();', "if (settledLocation === null) { console.log('REF-DIAG target-not-settled'); return failPreservingMain(); }")
+          s = s.replace("const applied = await navigation.applyTarget(target, 'reference-fit-width');", "const applied = await navigation.applyTarget(target, 'reference-fit-width'); console.log('REF-DIAG target', applied, navigation.captureLocation());")
+          p.write_text(s)
+          p = Path('apps/web/src/pdf/reference-document.ts')
+          s = p.read_text().replace('} catch {', "} catch (error) { console.log('REF-DIAG document', error);")
+          p.write_text(s)
+          PYTHON
       - run: pnpm fixtures:pdf && pnpm build
       - name: Add temporary event diagnostics
         run: |
@@ -95,7 +109,7 @@ jobs:
         run: >-
           pnpm exec playwright test --config scripts/testing/config/playwright.webkit.config.ts
           test/acceptance/production-flow.spec.ts test/acceptance/reloadable-links.spec.ts
-          --grep 'restores Search focus.*wide|opens the annotations tray without moving|keeps compound reference actions in narrow|defaults a real PDF to fit width|copies a real forward|keeps prior clipboard|copies exactly 12|rejects a real 13|copies only the focused|animates toolbar zoom|copies canonical PDF destinations'
+          --grep 'restores Search focus.*wide|opens the annotations tray without moving|keeps compound reference actions in narrow|defaults a real PDF to fit width|copies a real .* Main PDF selection|keeps prior clipboard|copies exactly 12|rejects a real 13|copies only the focused|animates toolbar zoom|copies canonical PDF destinations'
           --trace on
       - uses: actions/upload-artifact@v4
         if: always()
