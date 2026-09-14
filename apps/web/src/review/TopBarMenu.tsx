@@ -48,6 +48,7 @@ export function TopBarMenu({
   const surfaceRef = useRef<HTMLDivElement>(null);
   const dismissingRef = useRef(false);
   const openerPointerRef = useRef(false);
+  const focusRestoreVersion = useRef(0);
   const onDismissRef = useRef(onDismiss);
   const focusFallbackRef = useRef(focusFallback);
   const [placement, setPlacement] = useState<LinkActionPopoverPlacement | null>(null);
@@ -55,7 +56,9 @@ export function TopBarMenu({
   focusFallbackRef.current = focusFallback;
 
   const restoreOpenerFocus = useCallback(() => {
+    const version = ++focusRestoreVersion.current;
     requestAnimationFrame(() => {
+      if (version !== focusRestoreVersion.current) return;
       const opener = openerRef.current;
       const target = opener?.isConnected ? opener : focusFallbackRef.current?.();
       target?.focus({ preventScroll: true });
@@ -97,6 +100,8 @@ export function TopBarMenu({
     openerPointerRef.current = false;
     setPlacement(null);
     if (!open) return;
+    // A previous dismissal must not steal focus from this newly opened menu.
+    focusRestoreVersion.current += 1;
     const surface = surfaceRef.current;
     const opener = openerRef.current;
     if (!surface || !opener?.isConnected) {

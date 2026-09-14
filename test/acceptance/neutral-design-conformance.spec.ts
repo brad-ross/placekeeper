@@ -62,8 +62,13 @@ test('toolbar controls match canonical rest, hover, keyboard, and open-menu stat
     await match(zoom, zoomMock, [...control, 'width', 'height']);
     await match(zoom.locator('svg'), zoomMock.locator('svg'), icon);
     await match(visible(page, '.top-bar-menu__surface'), mock.frame.locator('.pk-zoom-popover'), surface);
-    await zoom.press('ArrowDown');
+    // Finish the pointer-hover comparison before checking keyboard navigation.
+    // Hover menus close when the pointer leaves, independently of focus.
+    await zoom.press('Escape');
+    await zoom.press('Enter');
     await expect(page.getByRole('menuitem', { name: 'Fit width' })).toBeFocused();
+    await page.keyboard.press('ArrowDown');
+    await expect(page.getByRole('menuitem', { name: 'Zoom out' })).toBeFocused();
     await page.keyboard.press('Escape'); await expect(zoom).toBeFocused();
     await expect(page.getByRole('menu', { name: 'PDF zoom' })).toHaveCount(0);
     await zoom.press('Enter');
