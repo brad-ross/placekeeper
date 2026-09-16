@@ -207,7 +207,14 @@ test("@critical @representative keeps the local keyboard journey private and rou
     expect.objectContaining({ subtype: "stamp", contents: "Existing unsupported stamp" }),
     expect.objectContaining({ contents: "Static export proof.", author: "Brad Ross", hasNormalAppearance: true }),
   ]));
-  expect(firstCatalog.nativeAnnotations?.map(({ item }) => item)).toEqual(sourceCatalog.nativeAnnotations?.map(({ item }) => item));
+  const nativeSemantics = (catalog: typeof sourceCatalog) => catalog.nativeAnnotations?.map(({ item }) => {
+    const { id: _id, payload, ...semanticItem } = item;
+    const { identityProvenance: _identityProvenance, ...semanticPayload } = payload;
+    return { ...semanticItem, payload: semanticPayload };
+  });
+  expect(nativeSemantics(firstCatalog)).toEqual(nativeSemantics(sourceCatalog));
+  expect(firstCatalog.nativeAnnotations?.map(({ item }) => item.payload.identityProvenance))
+    .toEqual(['verified', 'verified']);
   for (const original of sourceCatalog.annotations) {
     expect(firstCatalog.annotations.find(({ contents }) => contents === original.contents)?.author).toBe(original.author);
   }
