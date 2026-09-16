@@ -16,7 +16,10 @@ import {
 } from "../src/host/synctex-navigation.js";
 import { initiallyPortableItemIds } from "../src/save/portable-checkpoint.js";
 import { canonicalStateSupersedes, firstUnresolvedReviewItemId } from "../src/review/canonical-state.js";
-import { ProductionReviewApp } from "../src/app/ProductionReviewApp.js";
+import {
+  initialWorkspaceLocationForGeneration,
+  ProductionReviewApp,
+} from "../src/app/ProductionReviewApp.js";
 import { referenceReturnForActiveTab } from "../src/review/reference-presentation.js";
 import {
   viewerAssetUrlsEqual,
@@ -152,6 +155,12 @@ describe('scope polling identity', () => {
 });
 
 describe("one production review tree", () => {
+  it('applies a deliberate initial workspace location only to the launch generation', () => {
+    const location = { pageIndex: 2, top: 180 };
+    expect(initialWorkspaceLocationForGeneration(4, 4, location)).toBe(location);
+    expect(initialWorkspaceLocationForGeneration(4, 5, location)).toBeUndefined();
+  });
+
   it('keeps equivalent runtime viewer authority stable across review-state snapshots', () => {
     expect(viewerAssetUrlsEqual(
       {

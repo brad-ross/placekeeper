@@ -1,4 +1,4 @@
-import type { SaveDestinationConfirmation } from "./review-model.js";
+import type { ReviewAnchorEvidenceV1, SaveDestinationConfirmation } from "./review-model.js";
 export const REVIEW_RUNTIME_PROTOCOL = "placekeeper.review-runtime" as const;
 export const REVIEW_RUNTIME_VERSION = 3 as const;
 
@@ -24,8 +24,65 @@ export const REVIEW_RUNTIME_METHODS = [
   "scope",
   "forwardSyncTex",
   "reverseSyncTex",
+  "resolveReadingLocation",
   "exportReviewedCopy",
 ] as const;
+
+export interface ReadingLocationResolutionRequestV1 {
+  readonly generation: number;
+  readonly anchor: Extract<ReviewAnchorEvidenceV1, { readonly kind: "caret" }>;
+}
+
+export type ReadingLocationResolutionV1 =
+  | {
+      readonly status: "resolved";
+      readonly generation: number;
+      readonly pageIndex: number;
+      readonly rect: { readonly x: number; readonly y: number; readonly width: number; readonly height: number };
+    }
+  | { readonly status: "fallback"; readonly generation: number; readonly pageCount: number }
+  | { readonly status: "stale"; readonly generation: number };
+
+export function isReadingLocationResolutionRequest(
+  value: unknown,
+): value is ReadingLocationResolutionRequestV1 {
+  if (!record(value) || !hasOnlyKeys(value, ["generation", "anchor"]) ||
+    !safeInteger(value.generation) || value.generation < 1 || !record(value.anchor)) return false;
+  const anchor = value.anchor;
+  if (!hasOnlyKeys(anchor, ["kind", "pageIndex", "leftContext", "rightContext", "rect"]) ||
+    anchor.kind !== "caret" || !safeInteger(anchor.pageIndex) ||
+    typeof anchor.leftContext !== "string" || typeof anchor.rightContext !== "string" ||
+    anchor.leftContext.length > 64 || anchor.rightContext.length > 64 ||
+    anchor.leftContext.length + anchor.rightContext.length < 1 || !record(anchor.rect)) return false;
+  const rect = anchor.rect;
+  if (!hasOnlyKeys(rect, ["x", "y", "width", "height"])) return false;
+  return ["x", "y", "width", "height"].every((key) =>
+    typeof rect[key] === "number" && Number.isFinite(rect[key])) &&
+    (rect.width as number) > 0 && (rect.height as number) > 0;
+}
+
+function safeReadingLocationResolution(value: unknown): ReadingLocationResolutionV1 | undefined {
+  if (!record(value) || !safeInteger(value.generation) || value.generation < 1) return undefined;
+  if (value.status === "stale" && hasOnlyKeys(value, ["status", "generation"])) {
+    return { status: "stale", generation: value.generation };
+  }
+  if (value.status === "fallback" && hasOnlyKeys(value, ["status", "generation", "pageCount"]) &&
+    safeInteger(value.pageCount) && value.pageCount > 0) {
+    return { status: "fallback", generation: value.generation, pageCount: value.pageCount };
+  }
+  if (value.status !== "resolved" || !hasOnlyKeys(value, ["status", "generation", "pageIndex", "rect"]) ||
+    !safeInteger(value.pageIndex) || !record(value.rect) ||
+    !hasOnlyKeys(value.rect, ["x", "y", "width", "height"])) return undefined;
+  const rect = value.rect;
+  if (!["x", "y", "width", "height"].every((key) =>
+    typeof rect[key] === "number" && Number.isFinite(rect[key])) ||
+    (rect.width as number) <= 0 || (rect.height as number) <= 0) return undefined;
+  return { status: "resolved", generation: value.generation, pageIndex: value.pageIndex,
+    rect: {
+      x: rect.x as number, y: rect.y as number,
+      width: rect.width as number, height: rect.height as number,
+    } };
+}
 
 export type ReviewRuntimeMethod = typeof REVIEW_RUNTIME_METHODS[number];
 export type ReviewRuntimeInvokeMethod = Exclude<ReviewRuntimeMethod, "bootstrap">;
@@ -305,6 +362,9 @@ export function sanitizeChromeReviewRuntimeRequest(
     return Object.keys(payload).length === 0 ? {} : undefined;
   }
   if (method === "command") return safeChromeCommand(payload);
+  if (method === "resolveReadingLocation") {
+    return isReadingLocationResolutionRequest(payload) ? closedJsonClone(payload) : undefined;
+  }
   if (method === "beginInteraction") {
     return hasOnlyKeys(payload, ["interactionToken", "order", "generation"]) &&
       typeof payload.interactionToken === "string" && SAFE_RUNTIME_ID.test(payload.interactionToken) &&
@@ -427,6 +487,7 @@ export function sanitizeChromeReviewRuntimeResponse(
     }
     return safeChromeState(value);
   }
+  if (method === "resolveReadingLocation") return safeReadingLocationResolution(value);
   if (["beginInteraction", "finalizeInteraction", "releaseInteraction", "acknowledgeInteraction"].includes(method)) {
     if (!record(value) || typeof value.status !== "string" ||
       !["accepted", "finalized", "released", "missing", "unauthorized", "out-of-order", "stale", "backpressure"]

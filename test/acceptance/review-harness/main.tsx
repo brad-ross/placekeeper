@@ -496,6 +496,7 @@ function createHarnessViewerNavigation(
 ): PdfViewerNavigation {
   return {
     captureLocation: () => null,
+    clampLocation: () => null,
     resolvePageLocation: () => null,
     applyLocation: async () => false,
     fitToWidth: async (waitForSettledGeometry) => {

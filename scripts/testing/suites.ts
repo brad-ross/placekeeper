@@ -227,6 +227,7 @@ export const suites: Record<string, TestStage[]> = {
       "files": [
         "apps/web/test/text-reliability.test.ts",
         "apps/web/test/selection-anchor.test.ts",
+        "apps/web/test/reading-location.test.ts",
         "apps/web/test/owned-overlay.test.ts",
         "apps/web/test/owned-mark-hit-test.test.ts",
         "apps/web/test/viewer-interaction-events.test.ts",
@@ -577,6 +578,7 @@ export const ciUnitFiles = [
       'apps/web/test/save-state-controller.test.ts',
       'apps/web/test/proofread-gestures.test.tsx',
       'apps/web/test/selection-anchor.test.ts',
+      'apps/web/test/reading-location.test.ts',
       'apps/web/test/selection-state.test.ts',
       'apps/web/test/review-surface-state.test.ts',
       'apps/web/test/viewer-controls.test.ts',

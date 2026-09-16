@@ -76,6 +76,7 @@ describe("shared review runtime protocol", () => {
       "scope",
       "forwardSyncTex",
       "reverseSyncTex",
+      "resolveReadingLocation",
       "exportReviewedCopy",
     ]);
   });
@@ -140,6 +141,40 @@ describe("shared review runtime protocol", () => {
       headers: { authorization: "secret" },
     })).toBeUndefined();
     expect(sanitizeChromeReviewRuntimeRequest("forwardSyncTex", {})).toBeUndefined();
+  });
+
+  it("bounds reading passage requests and closes their response shape", () => {
+    const request = {
+      generation: 2,
+      anchor: {
+        kind: "caret",
+        pageIndex: 1,
+        leftContext: "left passage",
+        rightContext: "right passage",
+        rect: { x: 10, y: 20, width: 1, height: 8 },
+      },
+    };
+    for (const sanitize of [sanitizeChromeReviewRuntimeRequest, sanitizeMacosReviewRuntimeRequest]) {
+      expect(sanitize("resolveReadingLocation", request)).toEqual(request);
+      expect(sanitize("resolveReadingLocation", {
+        ...request,
+        anchor: { ...request.anchor, leftContext: "x".repeat(65) },
+      })).toBeUndefined();
+      expect(sanitize("resolveReadingLocation", { ...request, sessionId: "foreign" })).toBeUndefined();
+      expect(sanitize("resolveReadingLocation", { ...request, generation: 0 })).toBeUndefined();
+    }
+    expect(sanitizeChromeReviewRuntimeResponse("resolveReadingLocation", {
+      status: "resolved", generation: 2, pageIndex: 3,
+      rect: { x: 20, y: 30, width: 1, height: 8 },
+    })).toEqual({
+      status: "resolved", generation: 2, pageIndex: 3,
+      rect: { x: 20, y: 30, width: 1, height: 8 },
+    });
+    expect(sanitizeChromeReviewRuntimeResponse("resolveReadingLocation", {
+      status: "resolved", generation: 2, pageIndex: 3,
+      rect: { x: 20, y: 30, width: 1, height: 8 },
+      sourcePath: "/private/paper.pdf",
+    })).toBeUndefined();
   });
 
   it("projects native annotation import state without task, bind, path, credential, or executable authority", () => {

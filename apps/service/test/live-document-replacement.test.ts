@@ -98,6 +98,66 @@ function selectionItem(id: string, quote: string, prefix = "", suffix = ""): Rev
 }
 
 describe("atomic live document replacement", () => {
+  it("resolves a bounded reading passage against one current-generation inspection", async () => {
+    const inspectGeneration = vi.fn(async () => ({
+      pageCount: 2,
+      pages: [{
+        pageIndex: 1,
+        text: "prefix retained reading passage suffix",
+        geometry: [{
+          charStart: 0,
+          glyphs: Array.from("prefix retained reading passage suffix", (_, index) => (
+            { x: index * 4, y: 40, width: 4, height: 8 }
+          )),
+        }],
+      }],
+    }));
+    const run = await fixture({ inspectGeneration });
+    const generation = run.broker.state(run.launch.sessionId)!.workflow.documentGeneration;
+    const request = {
+      generation,
+      anchor: {
+        kind: "caret" as const,
+        pageIndex: 0,
+        leftContext: "prefix retained ",
+        rightContext: "reading passage suffix",
+        rect: { x: 10, y: 20, width: 1, height: 8 },
+      },
+    };
+
+    await expect(run.broker.resolveReadingLocation(run.launch.sessionId, request)).resolves.toMatchObject({
+      status: "resolved", generation, pageIndex: 1,
+    });
+    await run.broker.resolveReadingLocation(run.launch.sessionId, request);
+    expect(inspectGeneration).toHaveBeenCalledOnce();
+    await expect(run.broker.resolveReadingLocation(run.launch.sessionId, {
+      ...request, generation: generation - 1,
+    })).resolves.toEqual({ status: "stale", generation });
+  });
+
+  it.each([
+    ["missing", [{ pageIndex: 0, text: "different passage", geometry: [] }]],
+    ["ambiguous", [0, 1].map((pageIndex) => ({
+      pageIndex,
+      text: "prefix retained reading passage suffix",
+      geometry: [],
+    }))],
+  ])("falls back when a reading passage is %s", async (_reason, pages) => {
+    const run = await fixture({
+      inspectGeneration: async () => ({ pageCount: pages.length, pages }),
+    });
+    const generation = run.broker.state(run.launch.sessionId)!.workflow.documentGeneration;
+    await expect(run.broker.resolveReadingLocation(run.launch.sessionId, {
+      generation,
+      anchor: {
+        kind: "caret",
+        pageIndex: 0,
+        leftContext: "prefix retained ",
+        rightContext: "reading passage suffix",
+        rect: { x: 10, y: 20, width: 1, height: 8 },
+      },
+    })).resolves.toEqual({ status: "fallback", generation, pageCount: pages.length });
+  });
   it("adopts verified successor native geometry while preserving authored comments and tombstones", () => {
     const native = (id: string, pageIndex: number, x: number, comment: string): ReviewItem => ({
       id,
@@ -596,6 +656,40 @@ describe("atomic live document replacement", () => {
     await expect(value.broker.documentBytes(value.launch.sessionId, 2)).resolves.toEqual(value.successor);
     await expect(value.broker.documentBytes(value.launch.sessionId, 3)).resolves.toBeUndefined();
     await expect(readFile(value.pdfPath)).resolves.toEqual(value.successor);
+  });
+
+  it("reuses the accepted successor inspection for reading resolution", async () => {
+    const text = "prefix retained reading passage suffix";
+    const inspectGeneration = vi.fn(async () => ({
+      pageCount: 1,
+      pages: [{
+        pageIndex: 0,
+        text,
+        geometry: [{
+          charStart: 0,
+          glyphs: Array.from(text, (_, index) => ({ x: index * 4, y: 40, width: 4, height: 8 })),
+        }],
+      }],
+    }));
+    const value = await fixture({ inspectGeneration });
+    await writeFile(value.pdfPath, value.successor);
+    await expect(value.broker.replaceLiveDocument({
+      sessionId: value.launch.sessionId,
+      outputPath: value.pdfPath,
+      observationEpoch: 1,
+    })).resolves.toMatchObject({ status: "committed", documentGeneration: 2 });
+
+    await expect(value.broker.resolveReadingLocation(value.launch.sessionId, {
+      generation: 2,
+      anchor: {
+        kind: "caret",
+        pageIndex: 0,
+        leftContext: "prefix retained ",
+        rightContext: "reading passage suffix",
+        rect: { x: 10, y: 20, width: 1, height: 8 },
+      },
+    })).resolves.toMatchObject({ status: "resolved", generation: 2, pageIndex: 0 });
+    expect(inspectGeneration).toHaveBeenCalledOnce();
   });
 
   it("advances an active copy destination without rebasing its independent fingerprint", async () => {

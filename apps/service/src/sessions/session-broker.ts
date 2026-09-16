@@ -1,4 +1,9 @@
-import { ReviewExportConflictError, type ReviewExportFence } from "../../../../packages/core/src/review-runtime-protocol.js";
+import {
+  ReviewExportConflictError,
+  type ReadingLocationResolutionRequestV1,
+  type ReadingLocationResolutionV1,
+  type ReviewExportFence,
+} from "../../../../packages/core/src/review-runtime-protocol.js";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { open, readdir, readFile, realpath, rm, stat } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
@@ -26,7 +31,7 @@ import { TaskBindingRegistry } from "../context/task-binding-registry.js";
 import type { FrozenReviewDelivery } from "../export/export-coordinator.js";
 import { FileCapabilityRegistry, hashFile } from "../files/file-capabilities.js";
 import { inspectPdfPageTexts } from "../pdf/inspect-pdf.js";
-import { type PdfAnchorPage } from "../reconciliation/pdf-anchor-reconciler.js";
+import { reconcilePdfAnchor, type PdfAnchorPage } from "../reconciliation/pdf-anchor-reconciler.js";
 import {
   DraftSnapshotStore,
   reviewStateDigest,
@@ -176,6 +181,10 @@ export class SessionBroker {
   readonly #maxGenerationBytes: number;
   readonly #maxGenerationCount: number;
   readonly #inspectGeneration: NonNullable<SessionBrokerOptions["inspectGeneration"]>;
+  readonly #readingInspections = new Map<string, {
+    readonly generation: number;
+    readonly inspection: Promise<{ readonly pageCount: number; readonly pages: readonly PdfAnchorPage[] }>;
+  }>();
   readonly #browserSourceInspector: (
     path: string,
     signal?: AbortSignal,
@@ -2517,6 +2526,10 @@ export class SessionBroker {
           session.sourceWorkInterruptions = sourceWorkInterruptions;
           session.nativeAnnotationLedger = nextNativeAnnotationLedger;
           session.rewriteEligibility = successorRewriteEligibility;
+          this.#readingInspections.set(session.id, {
+            generation: successorGeneration,
+            inspection: Promise.resolve(inspected),
+          });
           delete session.syncTexOperationToken;
           this.#activate(session);
           this.credentials.revokePendingBootstraps(session.id);
@@ -2927,6 +2940,36 @@ export class SessionBroker {
     return record === undefined ? undefined : readFile(record.snapshotPath).catch(() => undefined);
   }
 
+  async resolveReadingLocation(
+    sessionId: string,
+    request: ReadingLocationResolutionRequestV1,
+  ): Promise<ReadingLocationResolutionV1> {
+    const session = this.#activeById.get(sessionId);
+    if (session === undefined || session.ending) throw new Error("Review session is unavailable");
+    const generation = session.state.workflow.documentGeneration;
+    if (request.generation !== generation) return { status: "stale", generation };
+    let cached = this.#readingInspections.get(sessionId);
+    if (cached?.generation !== generation) {
+      const inspection = readFile(session.sourceSnapshotPath).then((bytes) => this.#inspectGeneration(bytes));
+      cached = { generation, inspection };
+      this.#readingInspections.set(sessionId, cached);
+      void inspection.catch(() => {
+        if (this.#readingInspections.get(sessionId) === cached) this.#readingInspections.delete(sessionId);
+      });
+    }
+    const inspected = await cached.inspection;
+    const current = this.#activeById.get(sessionId);
+    if (current === undefined || current.ending) throw new Error("Review session is unavailable");
+    const currentGeneration = current.state.workflow.documentGeneration;
+    if (currentGeneration !== generation) return { status: "stale", generation: currentGeneration };
+    const resolution = reconcilePdfAnchor(request.anchor, inspected.pages, generation);
+    if (resolution.disposition.kind !== "resolved") {
+      return { status: "fallback", generation, pageCount: inspected.pageCount };
+    }
+    const { pageIndex, rect } = resolution.anchor;
+    return { status: "resolved", generation, pageIndex, rect };
+  }
+
   async documentRange(
     sessionId: string,
     generation: number,
@@ -3302,6 +3345,7 @@ export class SessionBroker {
       for (const listener of this.#sessionEndListeners) listener(session.id, "shutdown");
     }
     this.#snapshotStores.clear();
+    this.#readingInspections.clear();
     this.#activeById.clear();
     this.#activeBySource.clear();
     this.#activeByOutputPath.clear();
@@ -3333,6 +3377,7 @@ export class SessionBroker {
     this.#localDocumentObserver.stop(sessionId);
     await this.#localDocumentObserver.settle();
     this.#recovery.clearForSession(sessionId);
+    this.#readingInspections.delete(sessionId);
     this.#activeById.delete(sessionId);
     try {
       const chromeSourceKey = this.#chromeSourceKeyBySession.get(sessionId);

@@ -1,4 +1,9 @@
-import { ReviewExportConflictError, isReviewExportFence, isSaveDestinationConfirmation } from "../../../packages/core/src/review-runtime-protocol.js";
+import {
+  ReviewExportConflictError,
+  isReadingLocationResolutionRequest,
+  isReviewExportFence,
+  isSaveDestinationConfirmation,
+} from "../../../packages/core/src/review-runtime-protocol.js";
 import { randomBytes } from "node:crypto";
 import WebSocket from "ws";
 import {
@@ -110,6 +115,7 @@ function validPayload(method: ReviewRuntimeMethod, payload: unknown): boolean {
     return keys.every((key) => key === "confirmation") &&
       (payload.confirmation === undefined || isSaveDestinationConfirmation(payload.confirmation));
   }
+  if (method === "resolveReadingLocation") return isReadingLocationResolutionRequest(payload);
   if (method === "beginInteraction") {
     return keys.length === 3 && typeof payload.interactionToken === "string" && SAFE_ID.test(payload.interactionToken) &&
       Number.isSafeInteger(payload.order) && (payload.order as number) > 0 &&
@@ -350,6 +356,7 @@ function safeResult(method: ReviewRuntimeBrokerMethod, value: unknown): unknown 
     case "acknowledgeInteraction":
     case "forwardSyncTex":
     case "reverseSyncTex":
+    case "resolveReadingLocation":
       return value;
     default:
       return method satisfies never;
@@ -422,6 +429,7 @@ export function createLoopbackRuntimeClient(options: LoopbackRuntimeClientOption
     locateSave: { method: "POST", path: "/save/locate" },
     forwardSyncTex: { method: "POST", path: "/synctex/forward" },
     reverseSyncTex: { method: "POST", path: "/synctex/reverse" },
+    resolveReadingLocation: { method: "POST", path: "/reading-location" },
     exportReviewedCopy: { method: "POST", path: "/export" },
   } satisfies Readonly<Record<ReviewRuntimeBrokerMethod, {
     readonly method: "GET" | "POST";

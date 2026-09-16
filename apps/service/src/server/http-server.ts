@@ -1,4 +1,10 @@
-import { ReviewExportConflictError, isReviewExportFence, isSaveDestinationConfirmation, type ReviewExportFence } from "../../../../packages/core/src/review-runtime-protocol.js";
+import {
+  ReviewExportConflictError,
+  isReadingLocationResolutionRequest,
+  isReviewExportFence,
+  isSaveDestinationConfirmation,
+  type ReviewExportFence,
+} from "../../../../packages/core/src/review-runtime-protocol.js";
 import { rejectedDestinationName } from "../saving/pdf-save-coordinator.js";
 import { createHash, randomBytes } from "node:crypto";
 import { readFile, realpath } from "node:fs/promises";
@@ -341,6 +347,7 @@ export async function startHttpServer(
         "u",
       ).exec(pathname);
       const exportMatch = new RegExp(`^/s/(${UUID})/export$`, "u").exec(pathname);
+      const readingLocationMatch = new RegExp(`^/s/(${UUID})/reading-location$`, "u").exec(pathname);
       const observeMatch = new RegExp(`^/s/(${UUID})/observe$`, "u").exec(pathname);
       const staleMatch = new RegExp(`^/s/(${UUID})/stale$`, "u").exec(pathname);
       const syncTexMatch = new RegExp(`^/s/(${UUID})/synctex/(forward|reverse)$`, "u").exec(pathname);
@@ -348,7 +355,7 @@ export async function startHttpServer(
       const mutates = exchangeMatch !== null || resumeMatch !== null || reopenMatch || commandMatch !== null ||
         exportMatch !== null || observeMatch !== null || staleMatch !== null || syncTexMatch !== null || interactionMatch !== null ||
         (saveMatch !== null && saveMatch[2] !== "status" && saveMatch[2] !== "proposal");
-      const expectsJson = mutates;
+      const expectsJson = mutates || readingLocationMatch !== null;
       const contentLength = Number(request.headers["content-length"] ?? 0);
       const bodyLimit = MAX_BODY_BYTES;
       const failure = validateRequestSecurity(
@@ -628,7 +635,7 @@ export async function startHttpServer(
       const documentMatch = new RegExp(`^/s/(${UUID})/document/(${UUID})$`, "u").exec(pathname);
       const authenticatedSessionId =
         stateMatch?.[1] ?? scopeMatch?.[1] ?? documentMatch?.[1] ?? commandMatch?.[1] ??
-        saveMatch?.[1] ?? exportMatch?.[1] ?? observeMatch?.[1] ?? staleMatch?.[1] ?? syncTexMatch?.[1] ?? interactionMatch?.[1];
+        saveMatch?.[1] ?? exportMatch?.[1] ?? readingLocationMatch?.[1] ?? observeMatch?.[1] ?? staleMatch?.[1] ?? syncTexMatch?.[1] ?? interactionMatch?.[1];
       if (authenticatedSessionId !== undefined) {
         const credential = bearerCredential(request);
         if (
@@ -650,6 +657,19 @@ export async function startHttpServer(
           200,
           await broker.sessionScope(scopeMatch[1]!, bearerCredential(request)),
         );
+        return;
+      }
+      if (readingLocationMatch !== null) {
+        if (request.method !== "POST") {
+          send(response, 405, "Method not allowed");
+          return;
+        }
+        const body: unknown = await readJson(request);
+        if (!isReadingLocationResolutionRequest(body)) {
+          send(response, 400, "Invalid reading location");
+          return;
+        }
+        sendJson(response, 200, await broker.resolveReadingLocation(readingLocationMatch[1]!, body));
         return;
       }
       if (saveMatch !== null) {

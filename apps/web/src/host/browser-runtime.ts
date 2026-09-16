@@ -162,6 +162,11 @@ export function createBrowserHostRuntime(session: ProductionSession): HostRuntim
     async chooseOriginal(confirmation?: SaveDestinationConfirmation) { return (await ensureLoaded()).api.chooseOriginal(confirmation); },
     async retrySave() { return (await ensureLoaded()).api.retrySave(); },
     async locateSave() { return (await ensureLoaded()).api.locateSave(); },
+    async resolveReadingLocation(input) {
+      const resolve = (await ensureLoaded()).api.resolveReadingLocation;
+      if (resolve === undefined) throw new Error("Reading location resolution is unavailable.");
+      return resolve(input);
+    },
     async exportReviewedCopy(confirmPossiblyStale?: true, fence?: ReviewExportFence): Promise<ProductionExportResult> {
       const method = (await ensureLoaded()).api.exportReviewedCopy;
       if (method === undefined) throw new Error("Reviewed export is unavailable.");

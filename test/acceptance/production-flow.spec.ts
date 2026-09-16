@@ -4258,6 +4258,203 @@ test('defers an ordinary external replacement through UI save and publishes it w
   ]);
 });
 
+test('follows a rendered reading passage through inserted pages without changing zoom or focus', async ({ page }) => {
+  let observedResolution: Awaited<ReturnType<typeof host.broker.resolveReadingLocation>> | undefined;
+  const resolveReadingLocation = host.broker.resolveReadingLocation.bind(host.broker);
+  host.broker.resolveReadingLocation = async (...input) => {
+    observedResolution = await resolveReadingLocation(...input);
+    return observedResolution;
+  };
+  const sourcePath = await freshProductionPdf(plainTextPdf);
+  const launched = await host.open({ pdfPath: sourcePath, sourceRootPath: sourceRoot, fork: true });
+  if (!launched.ok || launched.kind === 'recovery-offered') {
+    throw new Error('Reading continuity launch failed');
+  }
+  await page.goto(launched.url);
+  const predecessorPage = page.locator("[data-page-index='0']").first();
+  await waitForRenderedPageImage(predecessorPage);
+  await zoomInOnce(page);
+  const zoomBefore = await currentZoomText(page);
+  await page.evaluate(() => {
+    const probe = document.createElement('button');
+    probe.id = 'refresh-focus-probe';
+    probe.textContent = 'Reading focus probe';
+    probe.style.position = 'fixed';
+    probe.style.inset = '0 auto auto 0';
+    document.body.append(probe);
+  });
+  const focusProbe = page.locator('#refresh-focus-probe');
+  await page.evaluate(() => new Promise<void>((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+  }));
+  await focusProbe.focus();
+  await expect(focusProbe).toBeFocused();
+  const pageTopBefore = await predecessorPage.evaluate((element) => element.getBoundingClientRect().top);
+
+  const original = await PDFDocument.load(await readFile(sourcePath));
+  const replacement = await PDFDocument.create();
+  replacement.addPage([612, 792]);
+  const [retained] = await replacement.copyPages(original, [0]);
+  replacement.addPage(retained!);
+  await writeFile(sourcePath, await replacement.save({ useObjectStreams: false }));
+
+  await expect.poll(() => host.broker.state(launched.sessionId)?.workflow.documentGeneration).toBe(2);
+  await expect.poll(() => observedResolution, { timeout: PRODUCTION_VIEWER_READY_TIMEOUT_MS }).toBeDefined();
+  expect(observedResolution).toMatchObject({ status: 'resolved', generation: 2, pageIndex: 1 });
+  if (observedResolution?.status !== 'resolved') throw new Error('Reading passage did not resolve.');
+  const alignmentTolerance = observedResolution.rect.height * Number.parseFloat(zoomBefore) / 100;
+  await expect.poll(() => currentPageText(page), { timeout: PRODUCTION_VIEWER_READY_TIMEOUT_MS }).toBe('2 / 2');
+  const successorPage = page.locator("[data-page-index='1']").first();
+  await waitForRenderedPageImage(successorPage);
+  expect(await currentZoomText(page)).toBe(zoomBefore);
+  await expect(focusProbe).toBeFocused();
+  await expect.poll(async () => Math.abs(
+    await successorPage.evaluate((element) => element.getBoundingClientRect().top) - pageTopBefore,
+  ), { timeout: PRODUCTION_VIEWER_READY_TIMEOUT_MS }).toBeLessThan(alignmentTolerance);
+});
+
+test('settles on the bounded reading fallback when the shared resolver rejects', async ({ page }) => {
+  const attempted = Promise.withResolvers<void>();
+  host.broker.resolveReadingLocation = async () => {
+    attempted.resolve();
+    throw new Error('reading inspection unavailable');
+  };
+  const sourcePath = await freshProductionPdf(plainTextPdf);
+  const launched = await host.open({
+    pdfPath: sourcePath,
+    sourceRootPath: sourceRoot,
+    workflowMode: 'generated-output',
+    fork: true,
+  });
+  if (!launched.ok || launched.kind === 'recovery-offered') throw new Error('Reading fallback launch failed');
+  await page.goto(launched.url);
+  await waitForRenderedPageImage(page.locator("[data-page-index='0']").first());
+  await zoomInOnce(page);
+  const zoomBefore = await currentZoomText(page);
+
+  const original = await PDFDocument.load(await readFile(sourcePath));
+  const replacement = await PDFDocument.create();
+  replacement.addPage([612, 792]);
+  const [retained] = await replacement.copyPages(original, [0]);
+  replacement.addPage(retained!);
+  await writeFile(sourcePath, await replacement.save({ useObjectStreams: false }));
+
+  await attempted.promise;
+  await expect.poll(() => host.broker.state(launched.sessionId)?.workflow.documentGeneration).toBe(2);
+  await expect(page.locator('[data-production-review]')).toHaveAttribute('data-location-restore-status', 'idle');
+  await expect.poll(() => currentPageText(page)).toBe('1 / 2');
+  expect(await currentZoomText(page)).toBe(zoomBefore);
+});
+
+test('settles on the bounded fallback when rendered page text capture is unavailable', async ({ page }) => {
+  let resolverCalled = false;
+  const resolveReadingLocation = host.broker.resolveReadingLocation.bind(host.broker);
+  host.broker.resolveReadingLocation = async (...input) => {
+    resolverCalled = true;
+    return resolveReadingLocation(...input);
+  };
+  const predecessor = await PDFDocument.create();
+  predecessor.addPage([612, 792]);
+  const sourcePath = join(root, `image-only-reading-${randomUUID()}.pdf`);
+  await writeFile(sourcePath, await predecessor.save({ useObjectStreams: false }));
+  const launched = await host.open({
+    pdfPath: sourcePath,
+    sourceRootPath: sourceRoot,
+    workflowMode: 'generated-output',
+    fork: true,
+  });
+  if (!launched.ok || launched.kind === 'recovery-offered') throw new Error('Capture fallback launch failed');
+  await page.goto(launched.url);
+  await waitForRenderedPageImage(page.locator("[data-page-index='0']").first());
+  await zoomInOnce(page);
+  const zoomBefore = await currentZoomText(page);
+
+  const replacement = await PDFDocument.create();
+  replacement.addPage([612, 792]);
+  replacement.addPage([612, 792]);
+  await writeFile(sourcePath, await replacement.save({ useObjectStreams: false }));
+
+  await expect.poll(() => host.broker.state(launched.sessionId)?.workflow.documentGeneration).toBe(2);
+  await expect(page.locator('[data-production-review]')).toHaveAttribute('data-location-restore-status', 'idle');
+  await expect.poll(() => currentPageText(page)).toBe('1 / 2');
+  expect(await currentZoomText(page)).toBe(zoomBefore);
+  expect(resolverCalled).toBe(false);
+});
+
+test('same-page scrolling cancels a delayed reading passage restore', async ({ page }) => {
+  const started = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  const resolveReadingLocation = host.broker.resolveReadingLocation.bind(host.broker);
+  host.broker.resolveReadingLocation = async (...input) => {
+    const resolution = await resolveReadingLocation(...input);
+    started.resolve();
+    await release.promise;
+    return resolution;
+  };
+  const sourcePath = await freshProductionPdf(plainTextPdf);
+  const launched = await host.open({ pdfPath: sourcePath, sourceRootPath: sourceRoot, fork: true });
+  if (!launched.ok || launched.kind === 'recovery-offered') throw new Error('Delayed reading launch failed');
+  await page.goto(launched.url);
+  await waitForRenderedPageImage(page.locator("[data-page-index='0']").first());
+
+  const original = await PDFDocument.load(await readFile(sourcePath));
+  const replacement = await PDFDocument.create();
+  replacement.addPage([612, 792]);
+  const [retained] = await replacement.copyPages(original, [0]);
+  replacement.addPage(retained!);
+  await writeFile(sourcePath, await replacement.save({ useObjectStreams: false }));
+  await started.promise;
+
+  const viewport = page.locator('[data-viewer-framing-viewport]');
+  await viewport.hover();
+  await page.mouse.wheel(0, 80);
+  release.resolve();
+
+  await expect(page.locator('[data-production-review]')).toHaveAttribute('data-location-restore-status', 'fallback');
+  await expect.poll(() => currentPageText(page)).toBe('1 / 2');
+});
+
+test('a newer generation cancels a delayed predecessor reading restore', async ({ page }) => {
+  const started = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  const resolveReadingLocation = host.broker.resolveReadingLocation.bind(host.broker);
+  let calls = 0;
+  host.broker.resolveReadingLocation = async (...input) => {
+    calls += 1;
+    const resolution = await resolveReadingLocation(...input);
+    if (calls === 1) {
+      started.resolve();
+      await release.promise;
+    }
+    return resolution;
+  };
+  const sourcePath = await freshProductionPdf(plainTextPdf);
+  const launched = await host.open({ pdfPath: sourcePath, sourceRootPath: sourceRoot, fork: true });
+  if (!launched.ok || launched.kind === 'recovery-offered') throw new Error('Generation fence launch failed');
+  await page.goto(launched.url);
+  await waitForRenderedPageImage(page.locator("[data-page-index='0']").first());
+
+  const original = await PDFDocument.load(await readFile(sourcePath));
+  const first = await PDFDocument.create();
+  first.addPage([612, 792]);
+  const [firstRetained] = await first.copyPages(original, [0]);
+  first.addPage(firstRetained!);
+  await writeFile(sourcePath, await first.save({ useObjectStreams: false }));
+  await started.promise;
+
+  const second = await PDFDocument.create();
+  second.addPage([612, 792]);
+  second.addPage([612, 792]);
+  const [secondRetained] = await second.copyPages(original, [0]);
+  second.addPage(secondRetained!);
+  await writeFile(sourcePath, await second.save({ useObjectStreams: false }));
+  await expect.poll(() => host.broker.state(launched.sessionId)?.workflow.documentGeneration).toBe(3);
+  release.resolve();
+
+  await expect.poll(() => currentPageText(page), { timeout: PRODUCTION_VIEWER_READY_TIMEOUT_MS }).toBe('1 / 3');
+  await expect(page.locator('[data-production-review]')).not.toHaveAttribute('data-location-restore-status', 'restoring');
+});
+
 test('keeps a first-page multiline highlight composer stable and reveals one icon only when fully offscreen', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 });
   await openFreshProductionFixture(

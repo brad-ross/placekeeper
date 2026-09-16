@@ -9,6 +9,10 @@ import type {
   SaveCopyProposal,
 } from "../host/session-contracts.js";
 import type { RejectedReviewCommand } from "../review/review-command-result.js";
+import type {
+  ReadingLocationResolutionRequestV1,
+  ReadingLocationResolutionV1,
+} from "../../../../packages/core/src/review-runtime-protocol.js";
 
 export type ReopenRecoveryChoice = "resume" | "discard" | "fork";
 
@@ -273,6 +277,8 @@ export async function loadProductionSession(session: ProductionSession): Promise
       chooseOriginal: (confirmation) => post<SaveDestinationResult>("/save/original", confirmation === undefined ? {} : { confirmation }),
       retrySave: () => post<SaveStatus>("/save/retry"),
       locateSave: () => post<SaveStatus>("/save/locate"),
+      resolveReadingLocation: (input: ReadingLocationResolutionRequestV1) =>
+        post<ReadingLocationResolutionV1>("/reading-location", input),
       exportReviewedCopy: (confirmPossiblyStale, fence) => post<ProductionExportResult>(
         "/export",
         { ...(confirmPossiblyStale === true ? { confirmPossiblyStale: true } : {}),

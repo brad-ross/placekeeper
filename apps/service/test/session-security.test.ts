@@ -19,16 +19,25 @@ import {
   startHttpServer,
   type LocalHttpServer,
 } from "../src/server/http-server.js";
-import { SessionBroker } from "../src/sessions/session-broker.js";
+import { SessionBroker as RawSessionBroker } from "../src/sessions/session-broker.js";
 import type { LaunchSurface, SessionLaunch } from "../src/sessions/session-broker.js";
 import { SessionControlRegistry } from "../src/sessions/control-socket.js";
 
 const temporaryDirectories: string[] = [];
 const servers: LocalHttpServer[] = [];
+const activeBrokers = new Set<RawSessionBroker>();
+class SessionBroker extends RawSessionBroker {
+  constructor(options: ConstructorParameters<typeof RawSessionBroker>[0]) {
+    super(options);
+    activeBrokers.add(this);
+  }
+}
 
 afterEach(async () => {
   vi.restoreAllMocks();
   await Promise.all(servers.splice(0).map((server) => server.close()));
+  await Promise.allSettled([...activeBrokers].map((broker) => broker.quiesceForShutdown()));
+  activeBrokers.clear();
   await Promise.all(
     temporaryDirectories.splice(0).map((path) =>
       rm(path, { recursive: true, force: true }),
@@ -402,6 +411,50 @@ function postJson(
 }
 
 describe("loopback HTTP boundary", () => {
+  it("authenticates bounded read-only reading-location requests to one session", async () => {
+    const { broker, launch, directory, server } = await openBroker();
+    const exchange = await postJson(
+      `${server.origin}/s/${launch.sessionId}/exchange`,
+      { capability: launch.fragment.slice("#cap=".length) },
+    );
+    const { credential } = await exchange.json() as { credential: string };
+    const readingUrl = `${server.origin}/s/${launch.sessionId}/reading-location`;
+    const request = {
+      generation: 2,
+      anchor: {
+        kind: "caret",
+        pageIndex: 0,
+        leftContext: "left",
+        rightContext: "right",
+        rect: { x: 1, y: 2, width: 1, height: 8 },
+      },
+    };
+
+    expect((await postJson(readingUrl, request)).status).toBe(401);
+    expect((await postJson(readingUrl, {
+      ...request,
+      anchor: { ...request.anchor, leftContext: "x".repeat(65) },
+    }, { authorization: `Bearer ${credential}` })).status).toBe(400);
+    const stale = await postJson(readingUrl, request, {
+      authorization: `Bearer ${credential}`,
+    });
+    expect(stale.status).toBe(200);
+    await expect(stale.json()).resolves.toEqual({ status: "stale", generation: 1 });
+
+    const foreignPdf = join(directory, "foreign.pdf");
+    await writeFile(foreignPdf, "%PDF-1.7\nforeign document text\n%%EOF");
+    const foreign = await broker.openReview({ pdfPath: foreignPdf, surface: "browser" });
+    if (foreign.kind !== "opened") throw new Error("Expected a foreign review session");
+    const foreignExchange = await postJson(
+      `${server.origin}/s/${foreign.launch.sessionId}/exchange`,
+      { capability: foreign.launch.fragment.slice("#cap=".length) },
+    );
+    const foreignCredential = (await foreignExchange.json() as { credential: string }).credential;
+    expect((await postJson(readingUrl, request, {
+      authorization: `Bearer ${foreignCredential}`,
+    })).status).toBe(401);
+  });
+
   it("authenticates and orders the shared interaction lifecycle over HTTP", async () => {
     const { broker, launch, server } = await openBroker();
     const exchanged = await postJson(

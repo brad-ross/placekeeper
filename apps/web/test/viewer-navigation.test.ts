@@ -659,6 +659,25 @@ function navigationHarness(options: {
 }
 
 describe('viewer navigation adapter', () => {
+  it('clamps fallback pages and natural coordinates without changing zoom or alignment', () => {
+    const harness = navigationHarness({
+      farTargetInitiallyUnmounted: true,
+      destinationPageWidth: 320,
+    });
+
+    expect(harness.navigation.clampLocation({
+      pageIndex: 9,
+      anchor: { x: 900, y: 1_200 },
+      alignment: { xPercent: 45, yPercent: 55 },
+      zoom: 1.75,
+    })).toEqual({
+      pageIndex: 2,
+      anchor: { x: 320, y: 800 },
+      alignment: { xPercent: 45, yPercent: 55 },
+      zoom: 1.75,
+    });
+  });
+
   it.each([
     ['XYZ', target(PdfZoomMode.XYZ, [300, 400, 2])],
     ['fit-page', target(PdfZoomMode.FitPage)],

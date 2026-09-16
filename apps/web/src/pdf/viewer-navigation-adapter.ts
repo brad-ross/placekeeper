@@ -1661,6 +1661,21 @@ export function createViewerNavigation(
 
   return {
     captureLocation,
+    clampLocation(location) {
+      const viewer = activeViewer();
+      if (!viewer || !isPdfViewerLocation(location) || viewer.pages.length === 0) return null;
+      const pageIndex = clamp(location.pageIndex, 0, viewer.pages.length - 1);
+      const page = viewer.pages[pageIndex];
+      if (!page) return null;
+      return {
+        ...location,
+        pageIndex,
+        anchor: {
+          x: clamp(location.anchor.x, 0, page.size.width),
+          y: clamp(location.anchor.y, 0, page.size.height),
+        },
+      };
+    },
     captureDocumentOrderPages() {
       const viewer = activeViewer();
       return viewer?.pages.map((page) => ({

@@ -545,6 +545,7 @@ export function createRpcHostRuntime(
     chooseOriginal: (confirmation) => chooseDestination("chooseOriginal", confirmation === undefined ? {} : { confirmation }),
     retrySave: () => invoke("retrySave"),
     locateSave: () => invoke("locateSave"),
+    resolveReadingLocation: (input) => invoke("resolveReadingLocation", input),
     exportReviewedCopy: (confirmPossiblyStale, fence) => invoke<ProductionExportResult>(
       "exportReviewedCopy",
       { ...(confirmPossiblyStale === true ? { confirmPossiblyStale: true } : {}),

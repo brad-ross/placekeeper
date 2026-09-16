@@ -219,6 +219,9 @@ export class ChromeServiceRuntimeBackend implements ChromeRuntimeBackend {
         result = this.#broker.saveStatus(record.sessionId);
         break;
       case "scope": result = await this.#broker.sessionScope(record.sessionId); break;
+      case "resolveReadingLocation":
+        result = await this.#broker.resolveReadingLocation(record.sessionId, payload as import("../../../../packages/core/src/review-runtime-protocol.js").ReadingLocationResolutionRequestV1);
+        break;
       case "exportReviewedCopy": {
         const value = payload as { readonly confirmPossiblyStale?: true; readonly fence?: ReviewExportFence };
         const frozen = await this.#broker.freezeDelivery(record.sessionId, value.fence);
