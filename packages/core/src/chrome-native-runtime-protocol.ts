@@ -12,6 +12,7 @@ export const CHROME_RUNTIME_RESOURCE_CHUNK_BYTES = 192 * 1024;
 
 const ID = /^[A-Za-z0-9_-]{8,128}$/u;
 const OPERATION_KEY = /^[A-Za-z0-9_-]{16,128}$/u;
+const OWNER_SECRET = /^[A-Za-z0-9_-]{43}$/u;
 const SHA256 = /^[a-f0-9]{64}$/u;
 const BASE64 = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u;
 const FORBIDDEN_HOST_KEY = /(?:authorization|bindProof|capability|credential|headers|originalUrl|presentationId|sourceRoot|sourceUrl|syncTex|taskId)/iu;
@@ -27,6 +28,9 @@ export interface ChromeRuntimeHello extends RuntimeEnvelope {
   readonly type: "hello";
   readonly reviewRuntimeVersion: typeof REVIEW_RUNTIME_VERSION;
   readonly protocol: typeof CHROME_RUNTIME_PROTOCOL;
+  /** Optional for v2 compatibility. Upgraded handlers prove their tab-scoped
+   * recovery identity only across the authenticated native channel. */
+  readonly interactionOwnerSecret?: string;
 }
 
 export type ChromeRuntimeExtensionMessage = ChromeRuntimeHello | (RuntimeEnvelope & (
@@ -100,7 +104,12 @@ function safeFileSource(value: unknown): value is string {
 export function parseChromeRuntimeExtensionMessage(value: unknown): ChromeRuntimeExtensionMessage | undefined {
   if (!record(value) || !validEnvelope(value) || typeof value.type !== "string") return undefined;
   if (value.type === "hello") {
-    return exact(value, ["type", "protocol", "protocolVersion", "reviewRuntimeVersion", "connectionId"]) &&
+    const keys = value.interactionOwnerSecret === undefined
+      ? ["type", "protocol", "protocolVersion", "reviewRuntimeVersion", "connectionId"]
+      : ["type", "protocol", "protocolVersion", "reviewRuntimeVersion", "connectionId", "interactionOwnerSecret"];
+    return exact(value, keys) &&
+      (value.interactionOwnerSecret === undefined ||
+        (typeof value.interactionOwnerSecret === "string" && OWNER_SECRET.test(value.interactionOwnerSecret))) &&
       value.reviewRuntimeVersion === REVIEW_RUNTIME_VERSION && value.protocol === CHROME_RUNTIME_PROTOCOL ? value as unknown as ChromeRuntimeHello : undefined;
   }
   if (typeof value.lane !== "string" || !safeId(value.requestId)) return undefined;

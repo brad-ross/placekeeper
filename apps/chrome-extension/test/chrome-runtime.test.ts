@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  createChromeInteractionOwnerClaimStore,
   chromePdfDisplayName,
   createNativeEmbeddedReview,
   type NativeEmbeddedReviewSession,
@@ -229,6 +230,62 @@ function opener(port: NativePort, overrides: Partial<Parameters<typeof createNat
 }
 
 describe("embedded Chrome review runtime", () => {
+  it("keeps one 256-bit owner secret only for the same tab navigation entry", () => {
+    const storage = new Map<string, string>();
+    let historyState: unknown = null;
+    let navigationType = "navigate";
+    let next = 0;
+    const environment = (tabId: number) => ({
+      tabId,
+      navigationType: () => navigationType,
+      readHistoryState: () => historyState,
+      replaceHistoryState: (state: unknown) => { historyState = state; },
+      readSession: (key: string) => storage.get(key) ?? null,
+      writeSession: (key: string, value: string) => { storage.set(key, value); },
+      createSecret: () => `${String(++next).padStart(2, "0")}${"s".repeat(41)}`,
+      createClaimId: () => `claim_${String(++next).padStart(16, "0")}`,
+    });
+
+    const firstDocument = createChromeInteractionOwnerClaimStore(environment(41));
+    const first = firstDocument.ownerSecret();
+    expect(first).toMatch(/^[A-Za-z0-9_-]{43}$/u);
+    expect(firstDocument.ownerSecret()).toBe(first);
+
+    navigationType = "reload";
+    const reloaded = createChromeInteractionOwnerClaimStore(environment(41));
+    expect(reloaded.ownerSecret()).toBe(first);
+    navigationType = "back_forward";
+    expect(createChromeInteractionOwnerClaimStore(environment(41)).ownerSecret()).toBe(first);
+
+    const duplicatedHistory = historyState;
+    const duplicatedStorage = new Map(storage);
+    const duplicate = createChromeInteractionOwnerClaimStore({
+      ...environment(99),
+      readHistoryState: () => duplicatedHistory,
+      readSession: (key) => duplicatedStorage.get(key) ?? null,
+      writeSession: (key, value) => { duplicatedStorage.set(key, value); },
+    });
+    expect(duplicate.ownerSecret()).not.toBe(first);
+
+    navigationType = "navigate";
+    historyState = null;
+    expect(createChromeInteractionOwnerClaimStore(environment(41)).ownerSecret()).not.toBe(first);
+  });
+
+  it("proves the tab owner secret only inside the trusted native hello", async () => {
+    const port = runtimePort();
+    const ownerSecret = "o".repeat(43);
+    const session = await opener(port, { interactionOwnerSecret: () => ownerSecret })({
+      originalUrl: "https://papers.example.test/Review.pdf",
+      streamUrl: "blob:chrome-authorized-stream",
+    });
+
+    expect(port.sent[0]).toMatchObject({ type: "hello", interactionOwnerSecret: ownerSecret });
+    expect(JSON.stringify(port.sent.slice(1))).not.toContain(ownerSecret);
+    await session.release();
+    session.dispose();
+  });
+
   it("sanitizes the filename used while PDF metadata is still pending", () => {
     expect(chromePdfDisplayName("https://papers.example.test/Quarterly%20Results.pdf?token=secret"))
       .toBe("Quarterly Results.pdf");

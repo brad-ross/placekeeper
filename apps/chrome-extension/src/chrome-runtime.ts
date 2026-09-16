@@ -24,6 +24,9 @@ import {
 const MAX_DOCUMENT_BYTES = 64 * 1024 * 1024;
 const INTERACTIVE_REQUEST_TIMEOUT_MS = 5 * 60_000 + 5_000;
 const RELEASE_TIMEOUT_MS = 1_000;
+const OWNER_SECRET = /^[A-Za-z0-9_-]{43}$/u;
+const OWNER_CLAIM = /^[A-Za-z0-9_-]{16,128}$/u;
+const OWNER_HISTORY_KEY = "__placekeeperChromeOwnerClaim";
 const NON_IDEMPOTENT = new Set<ReviewRuntimeBrokerMethod>([
   "command",
   "chooseCopy",
@@ -74,6 +77,7 @@ export interface NativeEmbeddedReviewOptions {
   createObjectURL(blob: Blob): string;
   revokeObjectURL(url: string): void;
   getExtensionURL(path: string): string;
+  interactionOwnerSecret?(info: PdfStreamInfo): string | Promise<string>;
   chooseRecovery?(
     offer: { readonly choices: readonly ["resume", "discard", "fork"]; readonly offer: { readonly id: string; readonly expiresAt: string } },
     signal?: AbortSignal,
@@ -81,6 +85,65 @@ export interface NativeEmbeddedReviewOptions {
   timeoutMs?: number;
   maxDocumentBytes?: number;
   now?(): number;
+}
+
+interface ChromeInteractionOwnerClaimEnvironment {
+  readonly tabId: number;
+  navigationType(): string | undefined;
+  readHistoryState(): unknown;
+  replaceHistoryState(state: unknown): void;
+  readSession(key: string): string | null;
+  writeSession(key: string, value: string): void;
+  createSecret(): string;
+  createClaimId(): string;
+}
+
+function objectRecord(value: unknown): Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown> : {};
+}
+
+/** Binds recovery authority to one Chrome tab and one history entry. The
+ * history claim is public routing metadata; the 256-bit secret stays in
+ * sessionStorage and crosses only the extension/native channel. */
+export function createChromeInteractionOwnerClaimStore(
+  environment: ChromeInteractionOwnerClaimEnvironment,
+): { ownerSecret(): string } {
+  let claimed: string | undefined;
+  return {
+    ownerSecret() {
+      if (claimed !== undefined) return claimed;
+      const historyState = objectRecord(environment.readHistoryState());
+      const existing = objectRecord(historyState[OWNER_HISTORY_KEY]);
+      const recoverableNavigation = environment.navigationType() === "reload" ||
+        environment.navigationType() === "back_forward";
+      const existingClaim = existing.tabId === environment.tabId &&
+        typeof existing.claimId === "string" && OWNER_CLAIM.test(existing.claimId)
+        ? existing.claimId : undefined;
+      const recovered = recoverableNavigation && existingClaim !== undefined
+        ? environment.readSession(`placekeeper.chrome-interaction-owner.${environment.tabId}.${existingClaim}`)
+        : null;
+      if (recovered !== null && OWNER_SECRET.test(recovered)) {
+        claimed = recovered;
+        return claimed;
+      }
+      const claimId = environment.createClaimId();
+      const secret = environment.createSecret();
+      if (!OWNER_CLAIM.test(claimId) || !OWNER_SECRET.test(secret)) {
+        throw new Error("Invalid Chrome interaction owner identity.");
+      }
+      environment.replaceHistoryState({
+        ...historyState,
+        [OWNER_HISTORY_KEY]: { tabId: environment.tabId, claimId },
+      });
+      environment.writeSession(
+        `placekeeper.chrome-interaction-owner.${environment.tabId}.${claimId}`,
+        secret,
+      );
+      claimed = secret;
+      return secret;
+    },
+  };
 }
 
 interface PendingNativeRequest {
@@ -213,13 +276,14 @@ class NativeRuntimeChannel {
     return () => this.#disconnects.delete(listener);
   }
 
-  async negotiate(signal?: AbortSignal): Promise<void> {
+  async negotiate(interactionOwnerSecret?: string, signal?: AbortSignal): Promise<void> {
     const reply = await this.#requestInternal({
       type: "hello",
       reviewRuntimeVersion: REVIEW_RUNTIME_VERSION,
       protocol: CHROME_RUNTIME_PROTOCOL,
       protocolVersion: CHROME_RUNTIME_PROTOCOL_VERSION,
       connectionId: this.connectionId,
+      ...(interactionOwnerSecret === undefined ? {} : { interactionOwnerSecret }),
     }, (message) => message.type === "hello-ack", signal, true);
     if (reply.type !== "hello-ack") throw reasonError("protocol-mismatch");
     this.#leaseMs = reply.leaseMs;
@@ -522,7 +586,8 @@ export function createNativeEmbeddedReview(options: NativeEmbeddedReviewOptions)
     let documentUrl: string | undefined;
     let released = false;
     try {
-      await channel.negotiate(signal);
+      const interactionOwnerSecret = await options.interactionOwnerSecret?.(info);
+      await channel.negotiate(interactionOwnerSecret, signal);
       const local = new URL(info.originalUrl).protocol === "file:";
       if (!local) {
         try {

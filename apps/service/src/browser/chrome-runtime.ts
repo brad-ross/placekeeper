@@ -300,7 +300,8 @@ export class ChromeRuntimeConnection {
   readonly #onAsyncMessage: ((message: ChromeRuntimeHostMessage) => void) | undefined;
   readonly #onClosed: (() => void) | undefined;
   readonly #presentationLease = randomBytes(32).toString("base64url");
-  readonly #authenticatedOwnerKey: string;
+  readonly #legacyAuthenticatedOwnerKey: string;
+  #interactionOwnerSecret: string | undefined;
   #phase: ConnectionPhase = "negotiating";
   #connectionId: string | undefined;
   #acquisition: AcquisitionState | undefined;
@@ -314,7 +315,7 @@ export class ChromeRuntimeConnection {
   constructor(options: ChromeRuntimeConnectionOptions) {
     if (options.callerOrigin !== CHROME_EXTENSION_ORIGIN) throw new Error("unauthorized-origin");
     this.#backend = options.backend;
-    this.#authenticatedOwnerKey = options.authenticatedOwnerKey
+    this.#legacyAuthenticatedOwnerKey = options.authenticatedOwnerKey
       ?? `chrome:${randomBytes(24).toString("base64url")}`;
     this.#quota = options.quota ?? options.backend.quota ?? new ChromeRuntimeAggregateQuota();
     if (!this.#quota.acquirePort()) throw new Error("host-busy");
@@ -401,6 +402,7 @@ export class ChromeRuntimeConnection {
   #hello(message: Extract<ChromeRuntimeExtensionMessage, { readonly type: "hello" }>): ChromeRuntimeHostMessage {
     if (this.#phase !== "negotiating" || this.#connectionId !== undefined) return this.#versionFailure();
     this.#connectionId = message.connectionId;
+    this.#interactionOwnerSecret = message.interactionOwnerSecret;
     this.#phase = "acquiring";
     this.#armIdleDeadline();
     return { type: "hello-ack", reviewRuntimeVersion: REVIEW_RUNTIME_VERSION, protocol: CHROME_RUNTIME_PROTOCOL, protocolVersion: 2, connectionId: message.connectionId, leaseMs: this.#idleLeaseMs };
@@ -568,9 +570,17 @@ export class ChromeRuntimeConnection {
     try {
       const active = await this.#backend.activate(this.#staged.canonicalKey, this.#presentationLease);
       try {
+        const authenticatedOwnerKey = this.#interactionOwnerSecret === undefined
+          ? this.#legacyAuthenticatedOwnerKey
+          : `chrome-recovery:${createHash("sha256")
+              .update("placekeeper.chrome-owner\0")
+              .update(this.#staged.projection.sessionId)
+              .update("\0")
+              .update(this.#interactionOwnerSecret)
+              .digest("base64url")}`;
         this.#interactionAttachment = this.#backend.registerInteraction?.(
           this.#staged.canonicalKey,
-          this.#authenticatedOwnerKey,
+          authenticatedOwnerKey,
         );
       } catch (error) {
         if (!(error instanceof Error) || error.message !== "interaction-unavailable") throw error;

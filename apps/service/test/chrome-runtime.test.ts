@@ -14,6 +14,7 @@ import {
   type ChromeRuntimeBackend,
   type ChromeRuntimeProjection,
 } from "../src/browser/chrome-runtime.js";
+import { ReviewInteractions } from "../src/sessions/review-interactions.js";
 
 const origin = "chrome-extension://cgegjjjhbhnfgcoipeffhogoojfoekgg/";
 const connectionId = "connection-runtime-1";
@@ -79,6 +80,132 @@ async function acquire(connection: ChromeRuntimeConnection): Promise<void> {
 }
 
 describe("Chrome least-authority native runtime", () => {
+  it("rejects malformed interaction owner proofs before acquisition", async () => {
+    for (const interactionOwnerSecret of ["short", "x".repeat(42), "x".repeat(44), `${"x".repeat(42)}!`]) {
+      const connection = new ChromeRuntimeConnection({ callerOrigin: origin, backend: backend() });
+      await expect(connection.handle({
+        type: "hello", reviewRuntimeVersion: 3, protocol: "placekeeper.chrome-runtime",
+        protocolVersion: 2, connectionId, interactionOwnerSecret,
+      })).resolves.toMatchObject({ type: "failure", reason: "invalid-message" });
+      await connection.disconnect();
+    }
+  });
+
+  it("derives stable session-scoped owner authority without retaining the recovery secret", async () => {
+    const ownerKeys: string[] = [];
+    const commits = vi.fn(async () => 2);
+    const interactions = new ReviewInteractions({ currentGeneration: () => 1 });
+    let draftOwnerViewId: string | undefined;
+    const service = backend({
+      registerInteraction: vi.fn((_canonicalKey, ownerKey) => {
+        ownerKeys.push(ownerKey);
+        return interactions.register(projection().sessionId, ownerKey);
+      }),
+      disconnectInteraction: vi.fn((_canonicalKey, attachment) => {
+        interactions.disconnect(attachment.attachmentId, attachment.incarnationId);
+      }),
+      interaction: vi.fn(async (_canonicalKey, attachment, action, payload) => {
+        const input = payload as {
+          readonly interactionToken: string; readonly order: number; readonly generation?: number;
+          readonly outcome?: "applied" | "discarded";
+        };
+        if (action === "begin") {
+          const result = await interactions.begin({
+            ...attachment, interactionToken: input.interactionToken,
+            order: input.order, generation: input.generation!,
+          });
+          if (draftOwnerViewId === undefined && result.status === "accepted") {
+            draftOwnerViewId = attachment.attachmentId;
+          }
+          return result;
+        }
+        if (action === "finalize") {
+          if (attachment.attachmentId !== draftOwnerViewId) return { status: "unauthorized" };
+          return interactions.finalize({
+            ...attachment, interactionToken: input.interactionToken,
+            order: input.order, outcome: input.outcome!, commit: commits,
+          });
+        }
+        if (action === "acknowledge") {
+          return interactions.acknowledge({ ...attachment, interactionToken: input.interactionToken, order: input.order });
+        }
+        return interactions.release({ ...attachment, interactionToken: input.interactionToken, order: input.order });
+      }),
+    });
+    const activateOwner = async (id: string, secret: string) => {
+      const connection = new ChromeRuntimeConnection({ callerOrigin: origin, backend: service });
+      await connection.handle({
+        type: "hello", reviewRuntimeVersion: 3, protocol: "placekeeper.chrome-runtime",
+        protocolVersion: 2, connectionId: id, interactionOwnerSecret: secret,
+      });
+      for (const message of [
+        { type: "begin", lane: "acquisition", requestId: `acquire-${id}`, transferId: `transfer-${id}`, disposition: "remote-temporary", sourceUrl: "https://papers.example.test/paper.pdf" },
+        { type: "chunk", lane: "acquisition", requestId: `chunk-${id}`, transferId: `transfer-${id}`, sequence: 0, data: sourceBytes.toString("base64") },
+        { type: "finish", lane: "acquisition", requestId: `finish-${id}`, transferId: `transfer-${id}`, sequence: 1 },
+        { type: "activate", lane: "lifecycle", requestId: `activate-${id}`, documentValidated: true },
+      ] as const) {
+        await connection.handle({ ...message, protocolVersion: 2, connectionId: id });
+      }
+      return connection;
+    };
+    const invoke = (connection: ChromeRuntimeConnection, id: string, method: "beginInteraction" | "finalizeInteraction" | "acknowledgeInteraction", payload: Record<string, unknown>) =>
+      connection.handle({
+        type: "invoke", lane: "runtime", protocolVersion: 2,
+        connectionId: id, requestId: `request-${method}-${id}`,
+        generation: 1, revision: 0, method, payload,
+        idempotencyKey: `operation-${method}-${id}`,
+      });
+
+    const first = await activateOwner("owner-connection-1", "a".repeat(43));
+    await expect(invoke(first, "owner-connection-1", "beginInteraction", {
+      interactionToken: "interaction-owner-recovery", order: 1, generation: 1,
+    })).resolves.toMatchObject({ type: "result", payload: { status: "accepted" } });
+    await first.disconnect();
+    expect(interactions.held(projection().sessionId)).toBe(false);
+    expect(draftOwnerViewId).toMatch(/^attachment_/u);
+    const unrelated = await activateOwner("owner-connection-3", "b".repeat(43));
+    await invoke(unrelated, "owner-connection-3", "beginInteraction", {
+      interactionToken: "interaction-unrelated-owner", order: 1, generation: 1,
+    });
+    await expect(invoke(unrelated, "owner-connection-3", "finalizeInteraction", {
+      interactionToken: "interaction-unrelated-owner", order: 2, outcome: "applied",
+      draftId: "draft-owner-recovery", expectedDraftRevision: 0,
+    })).resolves.toMatchObject({ type: "result", payload: { status: "unauthorized" } });
+
+    const resumed = await activateOwner("owner-connection-2", "a".repeat(43));
+    await invoke(resumed, "owner-connection-2", "beginInteraction", {
+      interactionToken: "interaction-owner-recovery", order: 1, generation: 1,
+    });
+    expect(interactions.held(projection().sessionId)).toBe(true);
+    const finalized = await invoke(resumed, "owner-connection-2", "finalizeInteraction", {
+      interactionToken: "interaction-owner-recovery", order: 2, outcome: "applied",
+      draftId: "draft-owner-recovery", expectedDraftRevision: 0,
+    });
+    expect(finalized).toMatchObject({ type: "result", payload: { status: "finalized", reviewRevision: 2 } });
+    await expect(invoke(resumed, "owner-connection-2", "finalizeInteraction", {
+      interactionToken: "interaction-owner-recovery", order: 3, outcome: "applied",
+      draftId: "draft-owner-recovery", expectedDraftRevision: 0,
+    })).resolves.toMatchObject({
+      type: "result",
+      payload: { status: "finalized", outcome: "applied", reviewRevision: 2 },
+    });
+
+    expect(ownerKeys[2]).toBe(ownerKeys[0]);
+    expect(ownerKeys[1]).not.toBe(ownerKeys[0]);
+    const forkOwnerKey = `chrome-recovery:${createHash("sha256")
+      .update("placekeeper.chrome-owner\0")
+      .update("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+      .update("\0")
+      .update("a".repeat(43))
+      .digest("base64url")}`;
+    expect(ownerKeys[0]).not.toBe(forkOwnerKey);
+    expect(ownerKeys.every((key) => !key.includes("a".repeat(43)) && !key.includes("b".repeat(43)))).toBe(true);
+    expect(commits).toHaveBeenCalledOnce();
+    expect(service.begin).toHaveBeenCalledWith(expect.objectContaining({ disposition: "remote-temporary" }));
+    await resumed.disconnect();
+    await unrelated.disconnect();
+  });
+
   it("keeps protected recovery service-owned until one bound resume/discard/fork choice", async () => {
     const choose = vi.fn(async () => ({
       canonicalKey: `source-identity-1:${sourceDigest}:1`,

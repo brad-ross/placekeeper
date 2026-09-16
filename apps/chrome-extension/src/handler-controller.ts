@@ -1,6 +1,7 @@
 export interface PdfStreamInfo {
   readonly originalUrl: string;
   readonly streamUrl: string;
+  readonly tabId?: number;
 }
 
 export interface MimeHandlerContext extends PdfStreamInfo {
@@ -37,7 +38,7 @@ export type HandlerState =
 export interface HandlerPorts {
   isOptedIn(): Promise<boolean>;
   getStreamInfo(): Promise<unknown>;
-  openEmbedded(info: PdfStreamInfo, signal: AbortSignal): Promise<EmbeddedReviewSession>;
+  openEmbedded(info: MimeHandlerContext, signal: AbortSignal): Promise<EmbeddedReviewSession>;
   pendingTitle?(originalUrl: string): void;
   fallback(): void;
   status?(message: string): void;
