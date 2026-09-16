@@ -50,7 +50,7 @@ export function assertReviewItem(
     insert: ['position', 'leftContext', 'rightContext', 'reliable', 'proposedText'],
     highlight: ['quote', 'prefix', 'suffix', 'rect', 'segmentRects', 'pages', 'pageBoundaries', 'reliable', 'comment'],
     pageNote: ['position', 'comment', 'nearbyText'],
-    pdfAnnotation: ['position', 'comment', 'subtype', 'author', 'contentsLocked', 'deletionLocked'],
+    pdfAnnotation: ['position', 'comment', 'subtype', 'author', 'contentsLocked', 'deletionLocked', 'identityProvenance', 'sourceObjectPageIndex', 'sourceObjectAnnotationIndex'],
   };
   if (keys.some((key) => !allowedByKind[item.kind].includes(key))) {
     throw new InvalidReviewCommandError("Review item payload has unsupported fields");
@@ -79,7 +79,11 @@ export function assertReviewItem(
     });
 
   const valid =
-    (item.kind === 'pdfAnnotation' && ['contentsLocked', 'deletionLocked'].every((key) => item.payload[key] === undefined || item.payload[key] === true) && geometry('position') && text('comment') && text('author') && text('subtype') && isEditablePdfAnnotationSubtype(String(item.payload.subtype))) ||
+    (item.kind === 'pdfAnnotation' && ['contentsLocked', 'deletionLocked'].every((key) => item.payload[key] === undefined || item.payload[key] === true) &&
+      (item.payload.identityProvenance === undefined || item.payload.identityProvenance === 'verified' || item.payload.identityProvenance === 'generation-ordinal') &&
+      (item.payload.sourceObjectPageIndex === undefined || Number.isSafeInteger(item.payload.sourceObjectPageIndex)) &&
+      (item.payload.sourceObjectAnnotationIndex === undefined || Number.isSafeInteger(item.payload.sourceObjectAnnotationIndex)) &&
+      geometry('position') && text('comment') && text('author') && text('subtype') && isEditablePdfAnnotationSubtype(String(item.payload.subtype))) ||
     (item.kind === 'replace' && selection() && text('proposedText', false)) ||
     (item.kind === 'delete' && selection()) ||
     (item.kind === 'insert' && item.payload.reliable === true && geometry('position') && text('leftContext') && text('rightContext') && text('proposedText', false) && item.payload.quote === undefined) ||
@@ -225,4 +229,3 @@ export function assertReviewAnchorEvidence(anchor: ReviewAnchorEvidenceV1): void
       throw new InvalidReviewCommandError("Review anchor kind is not supported");
   }
 }
-

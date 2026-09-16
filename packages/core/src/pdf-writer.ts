@@ -41,6 +41,8 @@ interface ReviewAnnotationBase {
   custom?: unknown;
   /** Present for a comment-only edit of an existing standard PDF annotation. */
   nativeSubtype?: string;
+  nativeIdentityProvenance?: 'verified' | 'generation-ordinal';
+  nativeSourceObject?: { readonly pageIndex: number; readonly annotationIndex: number };
 }
 
 export type ReviewAnnotation = ReviewAnnotationBase & {

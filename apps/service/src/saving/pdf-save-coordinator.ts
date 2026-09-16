@@ -114,6 +114,14 @@ export class PdfSaveCoordinator {
     this.#backend = options.backend ?? {};
     this.#picker = options.picker;
     this.#reuseBackendInspection = options.verify === undefined;
+    this.#broker.onPhysicalSaveResume((sessionId) => {
+      if (
+        this.#queues.get(sessionId)?.running === undefined &&
+        this.#broker.saveStatus(sessionId)?.sync.phase !== "clean"
+      ) {
+        void this.requestSave(sessionId);
+      }
+    });
   }
 
   #assertRewriteEligible(sessionId: string): void {
@@ -347,6 +355,10 @@ export class PdfSaveCoordinator {
       queue.requested = false;
       const status = this.#broker.saveStatus(sessionId);
       if (status?.destination.phase !== "active") return;
+      if (
+        this.#broker.physicalSaveBarrierPending(sessionId) &&
+        !await this.#broker.settlePhysicalSaveBarrier(sessionId)
+      ) return;
       const destination = status.destination;
       const generation = destination.generation;
       try {
@@ -395,7 +407,16 @@ export class PdfSaveCoordinator {
           });
 
           const target = destination.targetPath;
-          const temporary = join(dirname(target), `.placekeeper-${randomUUID()}.tmp`);
+          const targetDirectory = dirname(target);
+          const privateDirectory = dirname(delivery.sourceSnapshotPath);
+          const [targetDirectoryInfo, privateDirectoryInfo] = await Promise.all([
+            stat(targetDirectory),
+            stat(privateDirectory),
+          ]);
+          const temporary = join(
+            targetDirectoryInfo.dev === privateDirectoryInfo.dev ? privateDirectory : targetDirectory,
+            `.placekeeper-${randomUUID()}.tmp`,
+          );
           const handle = await open(temporary, "wx", 0o600);
           try {
             await handle.writeFile(written.pdfBytes);
@@ -404,9 +425,19 @@ export class PdfSaveCoordinator {
             await handle.close();
           }
           try {
+            if (
+              this.#broker.physicalSaveBarrierPending(sessionId) &&
+              !await this.#broker.settlePhysicalSaveBarrier(sessionId)
+            ) {
+              await rm(temporary, { force: true });
+              queue.requested = true;
+              return;
+            }
             const committed = await this.#broker.commitSaveCandidate({
               sessionId,
               generation,
+              documentGeneration: delivery.documentGeneration,
+              sourceDigest: delivery.source.digest,
               revision: delivery.revision,
               stateDigest,
               commit: async () => {
@@ -443,6 +474,7 @@ export class PdfSaveCoordinator {
             });
             if (committed === "generation-stale") {
               await rm(temporary, { force: true });
+              queue.requested = true;
             } else if (committed === "committed-stale") {
               queue.requested = true;
             }

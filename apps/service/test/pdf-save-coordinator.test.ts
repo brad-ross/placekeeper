@@ -71,6 +71,10 @@ async function setup(
     >;
     readonly workflowMode?: "standard" | "generated-output";
     readonly verify?: PdfExportVerifier;
+    readonly inspectGeneration?: () => Promise<{
+      readonly pageCount: number;
+      readonly pages: readonly [];
+    }>;
   } = {},
 ) {
   const root = await mkdtemp(join(tmpdir(), "placekeeper-save-"));
@@ -82,6 +86,7 @@ async function setup(
     recoveryRoot: join(root, "recovery"),
     portableReader: async () => [],
     ...(options.rewriteAssessor === undefined ? {} : { rewriteAssessor: options.rewriteAssessor }),
+    ...(options.inspectGeneration === undefined ? {} : { inspectGeneration: options.inspectGeneration }),
   });
   const opened = await broker.openReview({
     pdfPath: source,
@@ -213,10 +218,12 @@ function addCrossPage(expectedRevision: number): ReviewCommand {
 }
 
 function withSegmentCount(item: ReviewItem, count: number): ReviewItem {
+  const { reconciliation: _runtimeReconciliation, ...legacyItem } = item;
+  const { pages: _runtimePages, ...legacyPayload } = item.payload;
   return {
-    ...item,
+    ...legacyItem,
     payload: {
-      ...item.payload,
+      ...legacyPayload,
       rect: { x: 1, y: 1, width: 2, height: count * 8 },
       segmentRects: Array.from({ length: count }, (_, index) => ({
         x: 1,
@@ -781,6 +788,76 @@ describe("coalescing PDF autosave", () => {
     expect(await readFile(copy, "utf8")).not.toContain(id);
     expect(broker.saveStatus(sessionId)?.destination).toMatchObject({ kind: "original" });
     expect(broker.saveStatus(sessionId)?.sync.phase).toBe("clean");
+  });
+
+  it("does not let a frozen predecessor save overwrite an observed successor", async () => {
+    const writerStarted = Promise.withResolvers<void>();
+    const releaseWriter = Promise.withResolvers<void>();
+    const inspectionStarted = Promise.withResolvers<void>();
+    const releaseInspection = Promise.withResolvers<void>();
+    const writer = fakeWriter(async (writeNumber) => {
+      if (writeNumber === 1) {
+        writerStarted.resolve();
+        await releaseWriter.promise;
+      }
+    });
+    const { root, source, broker, coordinator, sessionId } = await setup(undefined, {
+      writer,
+      inspectGeneration: async () => {
+        inspectionStarted.resolve();
+        await releaseInspection.promise;
+        return { pageCount: 1, pages: [] };
+      },
+    });
+    const copy = join(root, "paper-annotated.pdf");
+    await coordinator.chooseCopy(sessionId, copy);
+    const predecessorCopy = await readFile(copy);
+    await broker.acceptMutation(sessionId, add(0));
+    const save = coordinator.requestSave(sessionId);
+    await writerStarted.promise;
+
+    const successor = Buffer.from("%PDF-1.7\nsuccessor\n%%EOF");
+    await writeFile(source, successor);
+    const replacement = broker.replaceLiveDocument({
+      sessionId,
+      outputPath: source,
+      observationEpoch: 1,
+    });
+    await inspectionStarted.promise;
+    releaseWriter.resolve();
+    await save;
+    expect(await readFile(copy)).toEqual(predecessorCopy);
+    expect(await readFile(source)).toEqual(successor);
+
+    releaseInspection.resolve();
+    await expect(replacement).resolves.toMatchObject({ status: "committed", documentGeneration: 2 });
+    await coordinator.drain();
+    expect(broker.state(sessionId)?.workflow.documentGeneration).toBe(2);
+  });
+
+  it("suppresses only the exact current original self-save digest", async () => {
+    const { source, original, broker, coordinator, sessionId } = await setup(undefined, {
+      inspectGeneration: async () => ({ pageCount: 1, pages: [] }),
+    });
+    await coordinator.chooseOriginal(sessionId);
+    await broker.acceptMutation(sessionId, add(0));
+    await coordinator.requestSave(sessionId);
+    const selfSaved = await readFile(source);
+    expect(selfSaved).not.toEqual(Buffer.from(original));
+
+    await expect(broker.replaceLiveDocument({
+      sessionId,
+      outputPath: source,
+      observationEpoch: 1,
+    })).resolves.toMatchObject({ status: "same-digest", documentGeneration: 1 });
+
+    await writeFile(source, original);
+    await expect(broker.replaceLiveDocument({
+      sessionId,
+      outputPath: source,
+      observationEpoch: 2,
+    })).resolves.toMatchObject({ status: "committed", documentGeneration: 2 });
+    await coordinator.drain();
   });
 
   it("rewrites an empty later revision and preserves the original file mode", async () => {

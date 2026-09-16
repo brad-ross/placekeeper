@@ -31,6 +31,7 @@ import {
   DraftSnapshotStore,
   reviewStateDigest,
   type DurableGenerationRecordV1,
+  type DurableNativeAnnotationLedgerV1,
   type DurableSaveDestination,
   type DurableSaveSync,
   type RecoverableDraftV3,
@@ -118,6 +119,32 @@ function activeKey(path: string, digest: string): string {
   return `${path}\0${digest}`;
 }
 
+function nativeAnnotationLedger(
+  state: ReviewState,
+  previous?: DurableNativeAnnotationLedgerV1,
+): DurableNativeAnnotationLedgerV1 {
+  const managed = new Map((previous?.managed ?? []).map((entry) => [entry.id, entry]));
+  for (const item of state.items) {
+    if (item.kind !== "pdfAnnotation") continue;
+    const provenance = item.payload.identityProvenance;
+    if (provenance !== "verified" && provenance !== "generation-ordinal") continue;
+    managed.set(item.id, {
+      id: item.id,
+      provenance,
+      sourceDigest: state.source.digest,
+      documentGeneration: state.workflow.documentGeneration,
+    });
+  }
+  const present = new Set(state.items.filter(({ kind }) => kind === "pdfAnnotation").map(({ id }) => id));
+  return {
+    schemaVersion: 1,
+    managed: [...managed.values()],
+    deletedIds: [...managed.values()]
+      .filter(({ id, provenance }) => provenance === "verified" && !present.has(id))
+      .map(({ id }) => id),
+  };
+}
+
 function abortable<T>(operation: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
   if (signal === undefined) return operation;
   if (signal.aborted) return Promise.reject(signal.reason);
@@ -160,6 +187,7 @@ export class SessionBroker {
   readonly #snapshotStores = new Map<string, DraftSnapshotStore>();
   readonly #generationListeners = new Set<(event: DocumentGenerationEvent) => void>();
   readonly #localObservationListeners = new Set<(event: LocalDocumentObservationEvent) => void>();
+  readonly #physicalSaveResumeListeners = new Set<(sessionId: string) => void>();
   readonly #localDocumentObserver: LocalDocumentObserver<BrokerLocalDocumentInspection>;
   #sourceWorkInterruptionCollector: SourceWorkInterruptionCollector | undefined;
   readonly #privateSourceRoots = new Set<string>();
@@ -223,7 +251,31 @@ export class SessionBroker {
           }
     );
     this.#localDocumentObserver = new LocalDocumentObserver({
-      inspectCandidate: (candidate) => this.#inspectLocalDocumentCandidate(candidate),
+      admitCandidate: (candidate) => {
+        const session = this.#activeById.get(candidate.sessionId);
+        if (session === undefined || session.ending) return;
+        session.physicalSaveBarrierEpoch = Math.max(
+          session.physicalSaveBarrierEpoch ?? 0,
+          candidate.sequence,
+        );
+      },
+      settleUnchangedCandidate: (candidate) => {
+        const session = this.#activeById.get(candidate.sessionId);
+        if (session?.physicalSaveBarrierEpoch !== candidate.sequence) return;
+        delete session.physicalSaveBarrierEpoch;
+        this.#publishPhysicalSaveResume(session.id);
+      },
+      inspectCandidate: async (candidate) => {
+        const inspected = await this.#inspectLocalDocumentCandidate(candidate);
+        if (inspected.status === "current") {
+          const session = this.#activeById.get(candidate.sessionId);
+          if (session?.physicalSaveBarrierEpoch === candidate.sequence) {
+            delete session.physicalSaveBarrierEpoch;
+            this.#publishPhysicalSaveResume(session.id);
+          }
+        }
+        return inspected;
+      },
     });
   }
 
@@ -240,6 +292,34 @@ export class SessionBroker {
   onLocalDocumentObservation(listener: (event: LocalDocumentObservationEvent) => void): () => void {
     this.#localObservationListeners.add(listener);
     return () => this.#localObservationListeners.delete(listener);
+  }
+
+  onPhysicalSaveResume(listener: (sessionId: string) => void): () => void {
+    this.#physicalSaveResumeListeners.add(listener);
+    return () => this.#physicalSaveResumeListeners.delete(listener);
+  }
+
+  physicalSaveBarrierPending(sessionId: string): boolean {
+    return this.#activeById.get(sessionId)?.physicalSaveBarrierEpoch !== undefined;
+  }
+
+  async settlePhysicalSaveBarrier(sessionId: string): Promise<boolean> {
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      const before = this.#activeById.get(sessionId)?.physicalSaveBarrierEpoch;
+      if (before === undefined) return true;
+      await this.#localDocumentObserver.flush(sessionId);
+      await this.#localDocumentObserver.settle();
+      const after = this.#activeById.get(sessionId)?.physicalSaveBarrierEpoch;
+      if (after === undefined) return true;
+      if (after === before) return false;
+    }
+    return !this.physicalSaveBarrierPending(sessionId);
+  }
+
+  #publishPhysicalSaveResume(sessionId: string): void {
+    for (const listener of this.#physicalSaveResumeListeners) {
+      try { listener(sessionId); } catch { /* The coordinator rehydrates from durable save state. */ }
+    }
   }
 
   isLocalDocumentObservationCurrent(sessionId: string, sequence: number): boolean {
@@ -551,6 +631,7 @@ export class SessionBroker {
         generationLineage: [],
         latestObservationEpoch: 0,
         sourceWorkInterruptions: [],
+        nativeAnnotationLedger: nativeAnnotationLedger(state),
         documentGeneration: 1,
         sourceOwnership,
         chromeProtected: false,
@@ -704,6 +785,11 @@ export class SessionBroker {
       let sync = matchingDraft.sync.phase === "saving"
         ? { ...matchingDraft.sync, phase: "not-saved" as const, failure: "write-failed" as const }
         : matchingDraft.sync;
+      sync = {
+        ...sync,
+        desiredRevision: resumedState.revision,
+        desiredDigest: reviewStateDigest(resumedState),
+      };
       if (nativeMigration.length > 0) {
         const desiredDigest = reviewStateDigest(resumedState);
         sync = { ...sync, desiredDigest, ...(sync.phase === 'clean' ? { savedDigest: desiredDigest } : {}) };
@@ -812,6 +898,7 @@ export class SessionBroker {
         generationLineage,
         latestObservationEpoch: matchingDraft.latestObservationEpoch ?? 0,
         sourceWorkInterruptions: [...(matchingDraft.sourceWorkInterruptions ?? [])],
+        nativeAnnotationLedger: nativeAnnotationLedger(resumedState, matchingDraft.nativeAnnotationLedger),
         documentGeneration: 1,
         chromeProtected: matchingDraft.chromeProtected === true,
         sourceOwnership: matchingDraft.source.disposition === "local"
@@ -866,6 +953,7 @@ export class SessionBroker {
       }],
       latestObservationEpoch: 0,
       sourceWorkInterruptions: [],
+      nativeAnnotationLedger: nativeAnnotationLedger(state),
       documentGeneration: 1,
       chromeProtected: matchingDraft?.chromeProtected === true,
       sourceOwnership: matchingDraft?.source.disposition === "remote-temporary"
@@ -1013,6 +1101,7 @@ export class SessionBroker {
       latestObservationEpoch: session.latestObservationEpoch,
       sourceWorkInterruptions: [...session.sourceWorkInterruptions],
       ...(session.chromeProtected ? { chromeProtected: true as const } : {}),
+      nativeAnnotationLedger: session.nativeAnnotationLedger,
     };
   }
 
@@ -1580,6 +1669,8 @@ export class SessionBroker {
   async commitSaveCandidate(input: {
     readonly sessionId: string;
     readonly generation: number;
+    readonly documentGeneration: number;
+    readonly sourceDigest: string;
     readonly revision: number;
     readonly stateDigest: string;
     readonly commit: () => Promise<string>;
@@ -1589,7 +1680,10 @@ export class SessionBroker {
     return this.#withSessionTail(session, async () => {
       if (
         session.destination.phase !== "active" ||
-        session.destination.generation !== input.generation
+        session.destination.generation !== input.generation ||
+        session.state.workflow.documentGeneration !== input.documentGeneration ||
+        session.state.source.digest !== input.sourceDigest ||
+        session.physicalSaveBarrierEpoch !== undefined
       ) return "generation-stale";
       const targetDigest = await input.commit();
       const current = await this.#recordCommittedSave(session, {
@@ -1732,6 +1826,17 @@ export class SessionBroker {
         });
       }
     }
+    if (!Number.isSafeInteger(input.observationEpoch) || input.observationEpoch <= 0) {
+      throw new RangeError("observationEpoch must be a positive safe integer");
+    }
+    await this.#withSessionTail(session, async () => {
+      if (input.observationEpoch > session.latestObservationEpoch) {
+        session.physicalSaveBarrierEpoch = Math.max(
+          session.physicalSaveBarrierEpoch ?? 0,
+          input.observationEpoch,
+        );
+      }
+    });
     const canonicalOutputPath = await realpath(input.outputPath).catch(() => undefined);
     if (canonicalOutputPath === undefined) {
       const missingCanonicalPath = await realpath(dirname(input.outputPath))
@@ -1767,10 +1872,6 @@ export class SessionBroker {
       this.taskBindings.revokeSession(session.id);
       throw new Error("A rebuild candidate cannot retarget an output-path lineage");
     }
-    if (!Number.isSafeInteger(input.observationEpoch) || input.observationEpoch <= 0) {
-      throw new RangeError("observationEpoch must be a positive safe integer");
-    }
-
     const expected = await this.#withSessionTail(session, async () => {
       if (
         input.serviceSequenceReserved === true &&
@@ -1851,7 +1952,7 @@ export class SessionBroker {
     } catch (error) {
       return markInvalid(error instanceof Error ? error.message : "candidate-copy-failed");
     }
-    if (staged.digest === expected.sourceDigest) {
+    if (staged.digest === session.currentOriginalDigest) {
       await rm(staged.path, { force: true });
       let invalidation: { readonly documentGeneration: number; readonly reviewRevision: number } | undefined;
       const result = await this.#withSessionTail(session, async () => {
@@ -1869,7 +1970,8 @@ export class SessionBroker {
         }
         if (
           session.state.workflow.documentGeneration !== expected.documentGeneration ||
-          session.state.source.digest !== expected.sourceDigest
+          session.state.source.digest !== expected.sourceDigest ||
+          staged!.digest !== session.currentOriginalDigest
         ) {
           return {
             status: "generation-conflict" as const,
@@ -1879,6 +1981,10 @@ export class SessionBroker {
           };
         }
         await this.capabilities.refreshApprovedPdf(session.fileId, staged!.digest);
+        if (session.physicalSaveBarrierEpoch === input.observationEpoch) {
+          delete session.physicalSaveBarrierEpoch;
+          this.#publishPhysicalSaveResume(session.id);
+        }
         const generationLineage = session.generationLineage.map((record, index, records) =>
           index === records.length - 1
             ? {
@@ -1936,6 +2042,22 @@ export class SessionBroker {
     } catch (error) {
       return markInvalid(error instanceof Error ? error.message : "candidate-validation-failed");
     }
+    const stagedBytes = new Uint8Array(await readFile(staged.path));
+    let importedSuccessorItems: readonly ReviewItem[] = [];
+    let nativeInventoryReconciled = false;
+    try {
+      importedSuccessorItems = await this.#portableReader(stagedBytes);
+      nativeInventoryReconciled = true;
+    } catch (error) {
+      if ((error as { readonly code?: unknown }).code === "invalid-portable-annotation") {
+        return markInvalid("candidate-portable-annotation-inventory-is-invalid");
+      }
+    }
+    const successorRewriteEligibility = await this.#rewriteAssessor(stagedBytes).catch(() => ({
+      eligible: false as const,
+      code: "invalid-pdf" as const,
+      message: "This PDF cannot be rewritten safely.",
+    }));
 
     const retention = assessGenerationRetention(session.generationLineage, staged.byteLength, {
       maxBytes: this.#maxGenerationBytes,
@@ -2011,8 +2133,22 @@ export class SessionBroker {
         // generation record. A failure here leaves the predecessor authoritative.
         await this.capabilities.refreshApprovedPdf(session.fileId, staged!.digest);
 
-        const nextState = prepareReplacementReview(
+        let nextState = prepareReplacementReview(
           session.state, successorGeneration, session.fileId, staged!, inspected.pages,
+          importedSuccessorItems,
+          new Set(session.nativeAnnotationLedger.deletedIds),
+        );
+        if (session.state.items.some((item) =>
+          item.kind === "pdfAnnotation" && item.payload.identityProvenance !== "verified")) {
+          nativeInventoryReconciled = false;
+        }
+        const { nativeAnnotationImportDigest: _predecessorImportDigest, ...stateWithoutImportDigest } = nextState;
+        nextState = nativeInventoryReconciled
+          ? { ...stateWithoutImportDigest, nativeAnnotationImportDigest: staged!.digest }
+          : stateWithoutImportDigest;
+        const nextNativeAnnotationLedger = nativeAnnotationLedger(
+          nextState,
+          session.nativeAnnotationLedger,
         );
         const committedAt = this.#now().toISOString();
         const taskSessionId = this.taskBindings.taskForGeneration(
@@ -2056,13 +2192,26 @@ export class SessionBroker {
         const sourceWorkInterruptions = interruption === undefined
           ? session.sourceWorkInterruptions
           : [...session.sourceWorkInterruptions, interruption];
+        const nextDestination: DurableSaveDestination = session.destination.phase === "active"
+          ? {
+              ...session.destination,
+              generation: session.destination.generation + 1,
+              ...(session.destination.kind === "original"
+                ? { fingerprint: staged!.digest }
+                : {}),
+            }
+          : session.destination;
         const nextSync: DurableSaveSync = {
-          phase: "not-saved",
+          phase: nextDestination.phase === "active" && successorRewriteEligibility.eligible && nativeInventoryReconciled
+            ? "saving"
+            : "not-saved",
           desiredRevision: nextState.revision,
           desiredDigest: reviewStateDigest(nextState),
           savedRevision: session.sync.savedRevision,
           ...(session.sync.savedDigest === undefined ? {} : { savedDigest: session.sync.savedDigest }),
-          failure: "destination-unconfigured",
+          ...(nextDestination.phase === "active" && successorRewriteEligibility.eligible && nativeInventoryReconciled
+            ? {}
+            : { failure: "destination-unconfigured" as const }),
         };
         const nextSourceOwnership: RecoverableSourceOwnership =
           session.sourceOwnership.disposition === "local"
@@ -2072,10 +2221,12 @@ export class SessionBroker {
           ...this.#draft(session),
           source: nextSourceOwnership,
           state: nextState,
+          destination: nextDestination,
           sync: nextSync,
           generationLineage,
           latestObservationEpoch: input.observationEpoch,
           sourceWorkInterruptions,
+          nativeAnnotationLedger: nextNativeAnnotationLedger,
         };
         let successorApplied = false;
         let activatedEvent: DocumentGenerationEvent | undefined;
@@ -2088,10 +2239,17 @@ export class SessionBroker {
           session.sourceSnapshotPath = snapshotPath;
           session.sourceOwnership = nextSourceOwnership;
           session.state = nextState;
+          session.destination = nextDestination;
           session.sync = nextSync;
           session.currentOriginalDigest = staged!.digest;
+          if (session.physicalSaveBarrierEpoch === input.observationEpoch) {
+            delete session.physicalSaveBarrierEpoch;
+            this.#publishPhysicalSaveResume(session.id);
+          }
           session.generationLineage = generationLineage;
           session.sourceWorkInterruptions = sourceWorkInterruptions;
+          session.nativeAnnotationLedger = nextNativeAnnotationLedger;
+          session.rewriteEligibility = successorRewriteEligibility;
           delete session.syncTexOperationToken;
           this.#activate(session);
           this.credentials.revokePendingBootstraps(session.id);
@@ -2301,7 +2459,6 @@ export class SessionBroker {
           await this.capabilities.refreshApprovedPdf(session.fileId, candidateDigest);
         }
         session.latestObservationEpoch = Math.max(session.latestObservationEpoch, candidate.sequence);
-        await session.store.persist(this.#draft(session));
       });
       return { status: candidateDigest === undefined || changed ? "retry" : "current" };
     }
@@ -2687,6 +2844,10 @@ export class SessionBroker {
     try {
       write.signal.throwIfAborted();
       const nextState = this.#reduceMutation(session, command, options.expectedGeneration);
+      const nextNativeAnnotationLedger = nativeAnnotationLedger(
+        nextState,
+        session.nativeAnnotationLedger,
+      );
       const desiredDigest = reviewStateDigest(nextState);
       const nextSync: DurableSaveSync = {
         phase: session.destination.phase === "active" ? "saving" : "not-saved",
@@ -2704,12 +2865,14 @@ export class SessionBroker {
         ...this.#draft(session),
         state: nextState,
         sync: nextSync,
+        nativeAnnotationLedger: nextNativeAnnotationLedger,
         acknowledgedAt: this.#now().toISOString(),
       };
       await session.store.persist(nextDraft, write.signal);
       write.signal.throwIfAborted();
       session.state = nextState;
       session.sync = nextSync;
+      session.nativeAnnotationLedger = nextNativeAnnotationLedger;
       this.controls.publishStateInvalidation(sessionId, {
         documentGeneration: nextState.workflow.documentGeneration,
         reviewRevision: nextState.revision,
@@ -2895,7 +3058,9 @@ export class SessionBroker {
     const session = this.#activeById.get(sessionId);
     if (session === undefined) return;
     session.ending = true;
+    this.controls.cancel(sessionId);
     this.#localDocumentObserver.stop(sessionId);
+    await this.#localDocumentObserver.settle();
     this.#recovery.clearForSession(sessionId);
     this.#activeById.delete(sessionId);
     try {
@@ -2921,7 +3086,6 @@ export class SessionBroker {
           }
         }
       }
-      this.controls.cancel(sessionId);
       this.taskBindings.revokeSession(sessionId);
       await this.restartReconnects.revokeSession(sessionId);
       await session.writeTail;

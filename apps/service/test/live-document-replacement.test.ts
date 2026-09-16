@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -27,6 +27,7 @@ import {
   reconcilePdfAnchorState,
 } from "../src/reconciliation/pdf-anchor-reconciler.js";
 import { SessionControlRegistry } from "../src/sessions/control-socket.js";
+import { prepareReplacementReview } from "../src/sessions/document-replacement-preparation.js";
 
 const temporaryDirectories: string[] = [];
 const activeBrokers = new Set<RawSessionBroker>();
@@ -97,6 +98,75 @@ function selectionItem(id: string, quote: string, prefix = "", suffix = ""): Rev
 }
 
 describe("atomic live document replacement", () => {
+  it("adopts verified successor native geometry while preserving authored comments and tombstones", () => {
+    const native = (id: string, pageIndex: number, x: number, comment: string): ReviewItem => ({
+      id,
+      kind: "pdfAnnotation",
+      pageIndex,
+      createdAt: "2026-09-15T12:00:00.000Z",
+      updatedAt: "2026-09-15T12:05:00.000Z",
+      payload: {
+        position: { x, y: 20, width: 18, height: 18 },
+        comment,
+        author: "External reviewer",
+        subtype: "text",
+        identityProvenance: "verified",
+      },
+    });
+    const retainedId = "00000000-0000-4000-8000-000000000020";
+    const deletedId = "00000000-0000-4000-8000-000000000021";
+    const initial = createReviewState({
+      sessionId: "00000000-0000-4000-8000-000000000022",
+      source: { fileId: "00000000-0000-4000-8000-000000000023", digest: "a".repeat(64), byteLength: 10 },
+    });
+    const state = { ...initial, items: [
+      native(retainedId, 0, 10, "Authored in session"),
+      native(deletedId, 0, 30, "Deleted in session"),
+    ] };
+    const successor = prepareReplacementReview(
+      state,
+      2,
+      state.source.fileId,
+      { digest: "b".repeat(64), byteLength: 20 },
+      [],
+      [
+        native(retainedId, 1, 110, "External stale comment"),
+        native(deletedId, 1, 130, "Stale embedded deletion"),
+      ],
+      new Set([deletedId]),
+    );
+    expect(successor.items).toHaveLength(1);
+    expect(successor.items[0]).toMatchObject({
+      id: retainedId,
+      pageIndex: 1,
+      payload: { position: { x: 110 }, comment: "Authored in session" },
+    });
+  });
+
+  it("does not transfer edits or deletion between independently promoted ordinal objects", () => {
+    const predecessorId = "00000000-0000-4000-8000-000000000024";
+    const candidateId = "00000000-0000-4000-8000-000000000025";
+    const item = (id: string, comment: string): ReviewItem => ({
+      id, kind: "pdfAnnotation", pageIndex: 0,
+      createdAt: "2026-09-15T12:00:00.000Z", updatedAt: "2026-09-15T12:00:00.000Z",
+      payload: {
+        position: { x: 10, y: 20, width: 18, height: 18 }, comment,
+        author: "External reviewer", subtype: "text", identityProvenance: "verified",
+        sourceObjectPageIndex: 0, sourceObjectAnnotationIndex: 0,
+      },
+    });
+    const base = createReviewState({
+      sessionId: "00000000-0000-4000-8000-000000000026",
+      source: { fileId: "00000000-0000-4000-8000-000000000027", digest: "a".repeat(64), byteLength: 10 },
+    });
+    const successor = prepareReplacementReview(
+      { ...base, items: [item(predecessorId, "Prior authored edit")] },
+      2, base.source.fileId, { digest: "b".repeat(64), byteLength: 20 }, [],
+      [item(candidateId, "Independent candidate")], new Set([predecessorId]),
+    );
+    expect(successor.items).toEqual([item(candidateId, "Independent candidate")]);
+  });
+
   it("reconciles one full cross-page passage after repagination without matching synthetic separators", () => {
     const page = (pageIndex: number, text: string) => ({
       pageIndex,
@@ -526,6 +596,41 @@ describe("atomic live document replacement", () => {
     await expect(value.broker.documentBytes(value.launch.sessionId, 2)).resolves.toEqual(value.successor);
     await expect(value.broker.documentBytes(value.launch.sessionId, 3)).resolves.toBeUndefined();
     await expect(readFile(value.pdfPath)).resolves.toEqual(value.successor);
+  });
+
+  it("advances an active copy destination without rebasing its independent fingerprint", async () => {
+    const value = await fixture({}, "standard");
+    const copy = join(value.directory, "reviewed-copy.pdf");
+    await writeFile(copy, "%PDF-1.7\ncopy baseline\n%%EOF");
+    const copyDigest = createHash("sha256").update(await readFile(copy)).digest("hex");
+    const capability = await value.broker.capabilities.preauthorizeDestination(copy);
+    await value.broker.capabilities.refreshDestination(capability.id, copyDigest);
+    await value.broker.establishSaveDestination(value.launch.sessionId, {
+      kind: "copy",
+      targetPath: copy,
+      capabilityId: capability.id,
+      fingerprint: copyDigest,
+    });
+    const before = value.broker.saveStatus(value.launch.sessionId)!.destination;
+    if (before.phase !== "active") throw new Error("Expected active copy destination");
+
+    await writeFile(value.pdfPath, value.successor);
+    await expect(value.broker.replaceLiveDocument({
+      sessionId: value.launch.sessionId,
+      outputPath: value.pdfPath,
+      observationEpoch: 1,
+    })).resolves.toMatchObject({ status: "committed", documentGeneration: 2 });
+
+    expect(value.broker.saveStatus(value.launch.sessionId)).toMatchObject({
+      destination: {
+        phase: "active",
+        kind: "copy",
+        generation: before.generation + 1,
+        targetPath: copy,
+        fingerprint: copyDigest,
+      },
+      sync: { phase: "saving" },
+    });
   });
 
   it("reconciles every item without changing identity or silently retargeting uncertain anchors", async () => {
@@ -1017,6 +1122,8 @@ describe("atomic live document replacement", () => {
     await expect(value.broker.commitSaveCandidate({
       sessionId: value.launch.sessionId,
       generation: 0,
+      documentGeneration: 1,
+      sourceDigest: value.broker.state(value.launch.sessionId)!.source.digest,
       revision: 1,
       stateDigest: "a".repeat(64),
       commit: physicalSave,

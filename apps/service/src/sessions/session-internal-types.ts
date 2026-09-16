@@ -8,6 +8,7 @@ import type {
   DurableSaveDestination,
   DurableSaveSync,
   DurableSourceWorkInterruptionV1,
+  DurableNativeAnnotationLedgerV1,
   RecoverableSourceOwnership,
 } from "../recovery/draft-snapshot.js";
 import type { OpenReviewResult, RecoveryDecision, ReviewPresentationSurface } from "./session-contracts.js";
@@ -49,7 +50,11 @@ export interface ActiveSession {
   rewriteEligibility: PdfRewriteEligibility;
   generationLineage: DurableGenerationRecordV1[];
   latestObservationEpoch: number;
+  /** The newest source observation that must settle before predecessor bytes
+   * may be committed to either the original or an active copy destination. */
+  physicalSaveBarrierEpoch?: number;
   sourceWorkInterruptions: DurableSourceWorkInterruptionV1[];
+  nativeAnnotationLedger: DurableNativeAnnotationLedgerV1;
   syncTexOperationToken?: string;
   readonly documentGeneration: number;
   sourceOwnership: RecoverableSourceOwnership;

@@ -42,6 +42,8 @@ export interface LocalDocumentWatch {
 
 export interface LocalDocumentObserverOptions<Result extends LocalDocumentInspectionResult = LocalDocumentInspectionResult> {
   readonly inspectCandidate: (candidate: LocalDocumentCandidate) => Promise<Result>;
+  readonly admitCandidate?: (candidate: Omit<LocalDocumentCandidate, "identity">) => void;
+  readonly settleUnchangedCandidate?: (candidate: Omit<LocalDocumentCandidate, "identity">) => void;
   readonly watchDirectory?: (directory: string) => LocalDocumentWatch;
   readonly inspectIdentity?: (path: string) => Promise<Stats>;
   readonly coalesceMs?: number;
@@ -57,8 +59,9 @@ interface ObservedDocument<Result extends LocalDocumentInspectionResult> {
   readonly basename: string;
   lastIdentity?: LocalDocumentIdentity;
   latestSequence: number;
+  unvalidatedWatcherSequence?: number;
   retryMs: number;
-  pending?: { reason: LocalDocumentObservationReason };
+  pending?: { reason: LocalDocumentObservationReason; sequence: number };
   coalesceTimer?: ReturnType<typeof setTimeout>;
   retryTimer?: ReturnType<typeof setTimeout>;
   identityTimer: ReturnType<typeof setInterval>;
@@ -90,14 +93,17 @@ function identity(info: Stats): LocalDocumentIdentity | undefined {
 }
 
 function sameIdentity(left: LocalDocumentIdentity | undefined, right: LocalDocumentIdentity | undefined): boolean {
-  return left?.device === right?.device && left?.inode === right?.inode &&
-    left?.byteLength === right?.byteLength && left?.modifiedAtMs === right?.modifiedAtMs;
+  return left !== undefined && right !== undefined &&
+    left.device === right.device && left.inode === right.inode &&
+    left.byteLength === right.byteLength && left.modifiedAtMs === right.modifiedAtMs;
 }
 
 /** Service-owned wakeup and ordering authority for active local documents.
  * Filesystem notifications only schedule a safely revalidated candidate check. */
 export class LocalDocumentObserver<Result extends LocalDocumentInspectionResult = LocalDocumentInspectionResult> {
   readonly #inspectCandidate: LocalDocumentObserverOptions<Result>["inspectCandidate"];
+  readonly #admitCandidate: NonNullable<LocalDocumentObserverOptions<Result>["admitCandidate"]>;
+  readonly #settleUnchangedCandidate: NonNullable<LocalDocumentObserverOptions<Result>["settleUnchangedCandidate"]>;
   readonly #watchDirectory: NonNullable<LocalDocumentObserverOptions<Result>["watchDirectory"]>;
   readonly #inspectIdentity: NonNullable<LocalDocumentObserverOptions<Result>["inspectIdentity"]>;
   readonly #coalesceMs: number;
@@ -114,6 +120,8 @@ export class LocalDocumentObserver<Result extends LocalDocumentInspectionResult 
 
   constructor(options: LocalDocumentObserverOptions<Result>) {
     this.#inspectCandidate = options.inspectCandidate;
+    this.#admitCandidate = options.admitCandidate ?? (() => undefined);
+    this.#settleUnchangedCandidate = options.settleUnchangedCandidate ?? (() => undefined);
     this.#watchDirectory = options.watchDirectory ?? ((directory) => watch(directory, { persistent: false }));
     this.#inspectIdentity = options.inspectIdentity ?? lstat;
     this.#coalesceMs = options.coalesceMs ?? 250;
@@ -172,6 +180,7 @@ export class LocalDocumentObserver<Result extends LocalDocumentInspectionResult 
     if (record === undefined || this.#disposed) return undefined;
     const sequence = ++this.#nextSequence;
     record.latestSequence = sequence;
+    this.#admitCandidate({ sessionId, sourcePath: record.sourcePath, sequence, reason: "host-hint" });
     return sequence;
   }
 
@@ -190,7 +199,7 @@ export class LocalDocumentObserver<Result extends LocalDocumentInspectionResult 
     }
     const pending = record.pending;
     delete record.pending;
-    if (pending !== undefined) return this.#run(record, pending.reason);
+    if (pending !== undefined) return this.#run(record, pending.reason, undefined, pending.sequence);
     return record.completion;
   }
 
@@ -235,7 +244,8 @@ export class LocalDocumentObserver<Result extends LocalDocumentInspectionResult 
       watcher.on("change", (_eventType, filename) => {
         const name = filename === null || filename === undefined ? undefined : filename.toString();
         for (const record of directory.sessions.values()) {
-          if (name === undefined || name === record.basename) this.#request(record, "watcher");
+          if (name === record.basename) this.#request(record, "watcher");
+          else if (name === undefined) this.#request(record, "identity");
         }
       });
       watcher.on("error", () => {
@@ -261,13 +271,17 @@ export class LocalDocumentObserver<Result extends LocalDocumentInspectionResult 
 
   #request(record: ObservedDocument<Result>, reason: LocalDocumentObservationReason, immediate = false): void {
     if (this.#disposed || !this.#documents.has(record.sessionId)) return;
-    record.pending = { reason };
+    const sequence = ++this.#nextSequence;
+    record.latestSequence = sequence;
+    if (reason === "watcher") record.unvalidatedWatcherSequence = sequence;
+    record.pending = { reason, sequence };
+    this.#admitCandidate({ sessionId: record.sessionId, sourcePath: record.sourcePath, sequence, reason });
     if (record.coalesceTimer !== undefined) clearTimeout(record.coalesceTimer);
     record.coalesceTimer = setTimeout(() => {
       delete record.coalesceTimer;
       const pending = record.pending;
       delete record.pending;
-      if (pending !== undefined) void this.#run(record, pending.reason);
+      if (pending !== undefined) void this.#run(record, pending.reason, undefined, pending.sequence);
     }, immediate ? 0 : this.#coalesceMs);
     record.coalesceTimer.unref?.();
   }
@@ -276,8 +290,12 @@ export class LocalDocumentObserver<Result extends LocalDocumentInspectionResult 
     record: ObservedDocument<Result>,
     reason: LocalDocumentObservationReason,
     hostHintToken?: string,
+    reservedSequence?: number,
   ): Promise<Result | undefined> {
-    const sequence = ++this.#nextSequence;
+    const sequence = reservedSequence ?? ++this.#nextSequence;
+    if (reservedSequence !== undefined && sequence < record.latestSequence) {
+      return Promise.resolve(undefined);
+    }
     record.latestSequence = sequence;
     const orderedCandidate = {
       sessionId: record.sessionId,
@@ -286,6 +304,7 @@ export class LocalDocumentObserver<Result extends LocalDocumentInspectionResult 
       reason,
       ...(hostHintToken === undefined ? {} : { hostHintToken }),
     };
+    if (reservedSequence === undefined) this.#admitCandidate(orderedCandidate);
     const queued = this.#queuedInspections.get(record.sessionId);
     let completion: Promise<Result | undefined>;
     if (queued === undefined) {
@@ -341,7 +360,14 @@ export class LocalDocumentObserver<Result extends LocalDocumentInspectionResult 
     ) return undefined;
     const info = await this.#inspectIdentity(record.sourcePath).catch(() => undefined);
     const nextIdentity = info === undefined ? undefined : identity(info);
-    if (candidate.reason === "identity" && sameIdentity(record.lastIdentity, nextIdentity)) return undefined;
+    if (
+      candidate.reason === "identity" &&
+      record.unvalidatedWatcherSequence === undefined &&
+      sameIdentity(record.lastIdentity, nextIdentity)
+    ) {
+      this.#settleUnchangedCandidate(candidate);
+      return undefined;
+    }
     let result: Result;
     try {
       result = await this.#inspectCandidate({
@@ -354,6 +380,10 @@ export class LocalDocumentObserver<Result extends LocalDocumentInspectionResult 
     }
     if (this.#disposed || !this.isCurrent(record.sessionId, candidate.sequence)) return result;
     if (result.status === "current") {
+      if (
+        record.unvalidatedWatcherSequence !== undefined &&
+        candidate.sequence >= record.unvalidatedWatcherSequence
+      ) delete record.unvalidatedWatcherSequence;
       if (nextIdentity === undefined) delete record.lastIdentity;
       else record.lastIdentity = nextIdentity;
       record.retryMs = this.#coalesceMs;

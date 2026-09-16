@@ -64,7 +64,18 @@ function annotationBase(item: ReviewItem, author: string) {
       ? text(item.payload, "proposedText")
       : text(item.payload, "comment"),
     author: item.kind === 'pdfAnnotation' ? String(item.payload.author ?? '') : author,
-    ...(item.kind === 'pdfAnnotation' ? { nativeSubtype: nativePdfAnnotationSubtype(item)! } : {}),
+    ...(item.kind === 'pdfAnnotation' ? {
+      nativeSubtype: nativePdfAnnotationSubtype(item)!,
+      ...(item.payload.identityProvenance === 'verified' || item.payload.identityProvenance === 'generation-ordinal'
+        ? { nativeIdentityProvenance: item.payload.identityProvenance as 'verified' | 'generation-ordinal' }
+        : {}),
+      ...(Number.isSafeInteger(item.payload.sourceObjectPageIndex) && Number.isSafeInteger(item.payload.sourceObjectAnnotationIndex)
+        ? { nativeSourceObject: {
+            pageIndex: item.payload.sourceObjectPageIndex as number,
+            annotationIndex: item.payload.sourceObjectAnnotationIndex as number,
+          } }
+        : {}),
+    } : {}),
     createdAt: item.createdAt,
     modifiedAt: item.updatedAt,
     ...((item.kind === "pageNote" || item.kind === "pdfAnnotation")

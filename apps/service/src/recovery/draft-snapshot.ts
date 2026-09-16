@@ -61,6 +61,17 @@ export interface DurableSourceWorkInterruptionV1 {
   readonly appliedChanges?: readonly DurableInterruptedSourceChangeV1[];
 }
 
+export interface DurableNativeAnnotationLedgerV1 {
+  readonly schemaVersion: 1;
+  readonly managed: readonly {
+    readonly id: string;
+    readonly provenance: "verified" | "generation-ordinal";
+    readonly sourceDigest: string;
+    readonly documentGeneration: number;
+  }[];
+  readonly deletedIds: readonly string[];
+}
+
 export interface DurableInterruptedSourceChangeV1 {
   readonly schemaVersion: 1;
   readonly executionId: string;
@@ -83,6 +94,7 @@ export interface RecoverableDraftV2 {
   readonly generationLineage?: readonly DurableGenerationRecordV1[];
   readonly latestObservationEpoch?: number;
   readonly sourceWorkInterruptions?: readonly DurableSourceWorkInterruptionV1[];
+  readonly nativeAnnotationLedger?: DurableNativeAnnotationLedgerV1;
 }
 
 export type SourceDisposition = "local" | "remote-temporary";
@@ -122,6 +134,7 @@ export interface RecoverableDraftV3 {
   readonly generationLineage?: readonly DurableGenerationRecordV1[];
   readonly latestObservationEpoch?: number;
   readonly sourceWorkInterruptions?: readonly DurableSourceWorkInterruptionV1[];
+  readonly nativeAnnotationLedger?: DurableNativeAnnotationLedgerV1;
   /** A Chrome review that accepted a potentially durable side effect must
    * remain recoverable even when its save state is currently clean. */
   readonly chromeProtected?: true;
@@ -225,6 +238,25 @@ function validV3Source(source: RecoverableSourceOwnership): boolean {
     source.byteLength > 0;
 }
 
+function validNativeAnnotationLedger(value: unknown): boolean {
+  if (value === undefined) return true;
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
+  const ledger = value as Partial<DurableNativeAnnotationLedgerV1>;
+  if (ledger.schemaVersion !== 1 || !Array.isArray(ledger.managed) || !Array.isArray(ledger.deletedIds)) return false;
+  const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
+  const seen = new Set<string>();
+  for (const entry of ledger.managed) {
+    if (entry === null || typeof entry !== "object" ||
+      !uuid.test(entry.id) || seen.has(entry.id) ||
+      (entry.provenance !== "verified" && entry.provenance !== "generation-ordinal") ||
+      !/^[a-f0-9]{64}$/u.test(entry.sourceDigest) ||
+      !Number.isSafeInteger(entry.documentGeneration) || entry.documentGeneration < 1) return false;
+    seen.add(entry.id);
+  }
+  return ledger.deletedIds.every((id) => typeof id === "string" && uuid.test(id) && seen.has(id)) &&
+    new Set(ledger.deletedIds).size === ledger.deletedIds.length;
+}
+
 function parse(contents: string): RecoverableDraftV3 | undefined {
   try {
     const envelope = JSON.parse(contents) as SnapshotEnvelope;
@@ -235,6 +267,7 @@ function parse(contents: string): RecoverableDraftV3 | undefined {
       ![1, 2, 3].includes(envelope.payload.schemaVersion) ||
       (envelope.payload.schemaVersion === 3 && (
         !validV3Source(envelope.payload.source) ||
+        !validNativeAnnotationLedger(envelope.payload.nativeAnnotationLedger) ||
         (envelope.payload.chromeProtected !== undefined && envelope.payload.chromeProtected !== true) ||
         (envelope.payload.source.disposition === "remote-temporary" && (
           envelope.payload.source.digest !== envelope.payload.state.source.digest ||
