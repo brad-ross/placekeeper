@@ -883,6 +883,13 @@ test('keeps a distant search destination stationary from its first visible frame
 
 for (const viewportWidth of [1280, 760]) {
   test(`keeps fitted pages visible across search, page controls, annotations, and history at width ${viewportWidth}`, async ({ page }) => {
+    const waitForStageMotion = async () => {
+      await page.locator('[data-review-stage]').evaluate(async (element) => {
+        await Promise.all(element.getAnimations({ subtree: true })
+          .map((animation) => animation.finished.catch(() => undefined)));
+        await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+      });
+    };
     await page.setViewportSize({ width: viewportWidth, height: 900 });
     // A wider page leaves horizontal scroll range even while a narrow page fits.
     const mixedWidthDocument = await PDFDocument.load(await readFile(searchPdf));
@@ -911,6 +918,7 @@ for (const viewportWidth of [1280, 760]) {
     const zoom = page.getByRole('textbox', { name: /Current zoom \d+ percent/u });
     await zoom.fill('100');
     await zoom.press('Enter');
+    await waitForStageMotion();
     await expect(zoom).toHaveValue('100');
     const rightFade = page.locator('.review-overlay-frame__right-fade:visible');
     const zoomTrigger = page.getByRole('button', { name: 'Open zoom controls' });
@@ -918,7 +926,15 @@ for (const viewportWidth of [1280, 760]) {
     if (await zoomTrigger.getAttribute('aria-expanded') === 'true') await zoomTrigger.press('Escape');
     await expect(zoomTrigger).toHaveAttribute('aria-expanded', 'false');
     await zoomTrigger.press('Enter');
-    await page.getByRole('menuitem', { name: 'Fit width', exact: true }).click();
+    await expect(page.getByRole('menu', { name: 'PDF zoom', exact: true })).toBeVisible();
+    const fitWidth = page.getByRole('menuitem', { name: 'Fit width', exact: true });
+    await expect(fitWidth).toBeVisible();
+    await fitWidth.press('Enter');
+    await expect(fitWidth).toHaveAttribute('aria-busy', 'true');
+    await waitForStageMotion();
+    await expect(fitWidth).toHaveCount(0);
+    await waitForStageMotion();
+    await expect(fitWidth).toHaveCount(0);
     await page.keyboard.press('Escape');
     // Use the app's settled fit geometry, then preserve that scale as manual zoom.
     await expect.poll(() => zoom.inputValue()).not.toBe('100');
@@ -963,6 +979,7 @@ for (const viewportWidth of [1280, 760]) {
     });
     await results.nth(1).click();
     await expectFittedPage(1);
+    await waitForStageMotion();
     const paintedOverflow = await page.evaluate(() => {
       const state = (window as unknown as { jumpFrames: { running: boolean; overflow: number[] } }).jumpFrames;
       state.running = false;
@@ -4956,7 +4973,15 @@ test('defaults a real PDF to fit width and refits bottom and resizable right rea
   const mainPage = mainWorkspace.locator("[data-page-index='0']");
   const referenceWorkspace = page.locator('[data-review-workspace]');
   const fitWidth = page.getByRole('menuitem', { name: 'Fit width' });
+  const waitForStageMotion = async () => {
+    await page.locator('[data-review-stage]').evaluate(async (element) => {
+      await Promise.all(element.getAnimations({ subtree: true })
+        .map((animation) => animation.finished.catch(() => undefined)));
+      await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+    });
+  };
   const fitAndWait = async () => {
+    await waitForStageMotion();
     const trigger = page.getByRole('button', { name: 'Open zoom controls' });
     await trigger.focus();
     if (await trigger.getAttribute('aria-expanded') === 'true') await trigger.press('Escape');
@@ -4966,6 +4991,9 @@ test('defaults a real PDF to fit width and refits bottom and resizable right rea
     await expect(page.getByRole('menu', { name: 'PDF zoom', exact: true })).toBeVisible();
     await expect(fitWidth).toBeVisible();
     await fitWidth.click();
+    await waitForStageMotion();
+    await expect(fitWidth).toHaveCount(0);
+    await waitForStageMotion();
     await expect(fitWidth).toHaveCount(0);
   };
   const zoomValue = () => page.getByRole('textbox', {
