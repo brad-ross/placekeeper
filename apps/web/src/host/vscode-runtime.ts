@@ -565,7 +565,13 @@ export function createRpcHostRuntime(
     reverseSyncTex: (input) => invoke("reverseSyncTex", input),
     beginInteraction: (input) => invoke("beginInteraction", input),
     async finalizeInteraction(input) {
-      try { return await invoke("finalizeInteraction", input); }
+      try {
+        const receipt = await invoke("finalizeInteraction", input);
+        if (identity !== undefined && isObject(receipt) && Number.isSafeInteger(receipt.reviewRevision)) {
+          identity = { ...identity, revision: receipt.reviewRevision as number };
+        }
+        return receipt;
+      }
       finally { setTimeout(releaseDeferredCommandInvalidation, 0); }
     },
     releaseInteraction: (input) => invoke("releaseInteraction", input),

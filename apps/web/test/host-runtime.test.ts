@@ -1112,10 +1112,10 @@ describe("host-neutral review runtime", () => {
     const state = createReviewState({ sessionId, source: {
       fileId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", digest: "a".repeat(64), byteLength: 100,
     }, workflowMode: "generated-output", documentGeneration: 1 });
-    const respond = (request: Record<string, unknown>, payload: unknown, generation = 1) => {
+    const respond = (request: Record<string, unknown>, payload: unknown, generation = 1, revision = 0) => {
       listeners.forEach((listener) => listener({ protocol: REVIEW_RUNTIME_PROTOCOL,
         version: REVIEW_RUNTIME_VERSION, kind: "response", panelId: "panel_identifier_1234",
-        sessionId, generation, revision: 0, requestId: request.requestId, ok: true, payload }));
+        sessionId, generation, revision, requestId: request.requestId, ok: true, payload }));
     };
     const bootstrapping = runtime.bootstrap();
     respond(requests.at(-1)!, { sessionId, generation: 1, revision: 0, state,
@@ -1135,9 +1135,15 @@ describe("host-neutral review runtime", () => {
       panelId: "panel_identifier_1234", payload: { sessionId, generation: 2, revision: 1,
         previousGeneration: 1, reason: "generation" } }));
     expect(delivery).toEqual([]);
-    respond(request, { status: "finalized", outcome: "discarded", reviewRevision: 1 });
+    respond(request, { status: "finalized", interactionToken: "interaction_rpc_1234",
+      generation: 1, outcome: "discarded", reviewRevision: 1 });
     await completion;
     expect(delivery).toEqual(["receipt"]);
+    const acknowledgement = runtime.acknowledgeInteraction!({ interactionToken: "interaction_rpc_1234", order: 3 });
+    const acknowledgementRequest = requests.at(-1)!;
+    expect(acknowledgementRequest).toMatchObject({ method: "acknowledgeInteraction", revision: 1 });
+    respond(acknowledgementRequest, { status: "released" }, 1, 1);
+    await acknowledgement;
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(delivery).toEqual(["receipt", "invalidation"]);
     runtime.dispose();

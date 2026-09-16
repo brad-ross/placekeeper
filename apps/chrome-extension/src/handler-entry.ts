@@ -9,6 +9,7 @@ import {
   createNativeEmbeddedReview,
 } from "./chrome-runtime.js";
 import { readAutoOpenState } from "./opt-in.js";
+import { bytesToBase64 } from "./native-protocol.js";
 import {
   createRecoveryButtons,
   setHandlerButtonContent,
@@ -119,9 +120,7 @@ const ownerClaims = new Map<number, ReturnType<typeof createChromeInteractionOwn
 
 function randomBase64Url(bytes: number): string {
   const value = crypto.getRandomValues(new Uint8Array(bytes));
-  let binary = "";
-  for (const byte of value) binary += String.fromCharCode(byte);
-  return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/u, "");
+  return bytesToBase64(value).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/u, "");
 }
 
 function interactionOwnerSecret(tabId: number): string {

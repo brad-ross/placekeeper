@@ -52,9 +52,13 @@ describe("Chrome daemon handoff", () => {
     ) => {
       await exchange(host, portId, {
         type: "hello", reviewRuntimeVersion: 3, protocol: "placekeeper.chrome-runtime",
-        protocolVersion: 2, connectionId, interactionOwnerSecret,
+        protocolVersion: 2, connectionId,
       });
       const base = { protocolVersion: 2, connectionId };
+      await exchange(host, portId, {
+        ...base, type: "claim-owner", lane: "lifecycle", requestId: `claim-${connectionId}`,
+        interactionOwnerSecret,
+      });
       const transferId = `transfer-${connectionId}`;
       await exchange(host, portId, {
         ...base, type: "begin", lane: "acquisition", requestId: `begin-${connectionId}`,

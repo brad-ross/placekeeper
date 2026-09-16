@@ -7,6 +7,7 @@ export {
   CHROME_RUNTIME_PROTOCOL_VERSION,
   CHROME_RUNTIME_RESOURCE_CHUNK_BYTES,
   chromeRuntimeProjectionChangeReason,
+  isChromeInteractionOwnerSecret,
   parseChromeRuntimeExtensionMessage as validateRuntimeExtensionMessage,
   parseChromeRuntimeHostMessage as parseRuntimeHostMessage,
 } from "../../../packages/core/src/chrome-native-runtime-protocol.js";

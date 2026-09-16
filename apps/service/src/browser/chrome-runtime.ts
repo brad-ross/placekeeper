@@ -403,7 +403,6 @@ export class ChromeRuntimeConnection {
   #hello(message: Extract<ChromeRuntimeExtensionMessage, { readonly type: "hello" }>): ChromeRuntimeHostMessage {
     if (this.#phase !== "negotiating" || this.#connectionId !== undefined) return this.#versionFailure();
     this.#connectionId = message.connectionId;
-    this.#interactionOwnerSecret = message.interactionOwnerSecret;
     this.#phase = "acquiring";
     this.#armIdleDeadline();
     return { type: "hello-ack", reviewRuntimeVersion: REVIEW_RUNTIME_VERSION, protocol: CHROME_RUNTIME_PROTOCOL, protocolVersion: 2, connectionId: message.connectionId, leaseMs: this.#idleLeaseMs };
@@ -509,6 +508,13 @@ export class ChromeRuntimeConnection {
   }
 
   async #lifecycleMessage(message: Extract<ChromeRuntimeExtensionMessage, { readonly lane: "lifecycle" }>): Promise<ChromeRuntimeHostMessage> {
+    if (message.type === "claim-owner") {
+      if (this.#phase !== "acquiring" || this.#interactionOwnerSecret !== undefined) {
+        return this.#failure("lifecycle", "invalid-state", message.requestId);
+      }
+      this.#interactionOwnerSecret = message.interactionOwnerSecret;
+      return this.#ack("lifecycle", message.requestId);
+    }
     if (message.type === "recover") {
       if (this.#phase !== "recovery" || this.#recovery === undefined ||
         message.offer.id !== this.#recovery.offer.id ||

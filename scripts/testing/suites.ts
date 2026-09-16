@@ -136,6 +136,7 @@ export const suites: Record<string, TestStage[]> = {
         "apps/web/test/review-location-history.test.ts",
         "apps/web/test/copy-link-control.test.ts",
         "apps/chrome-extension/test/native-protocol.test.ts",
+        "apps/service/test/chrome-local-refresh.integration.test.ts",
         "apps/service/test/chrome-runtime.test.ts"
       ]
     }
@@ -150,6 +151,7 @@ export const suites: Record<string, TestStage[]> = {
         "apps/service/test/chrome-handoff.test.ts",
         "apps/service/test/chrome-native-host.test.ts",
         "apps/service/test/chrome-daemon-handoff.test.ts",
+        "apps/service/test/chrome-local-refresh.integration.test.ts",
         "apps/service/test/browser-source-store.test.ts",
         "apps/service/test/pdf-save-coordinator.test.ts",
         "apps/web/test/production-review-app.test.tsx",

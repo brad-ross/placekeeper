@@ -28,9 +28,6 @@ export interface ChromeRuntimeHello extends RuntimeEnvelope {
   readonly type: "hello";
   readonly reviewRuntimeVersion: typeof REVIEW_RUNTIME_VERSION;
   readonly protocol: typeof CHROME_RUNTIME_PROTOCOL;
-  /** Optional for v2 compatibility. Upgraded handlers prove their tab-scoped
-   * recovery identity only across the authenticated native channel. */
-  readonly interactionOwnerSecret?: string;
 }
 
 export type ChromeRuntimeExtensionMessage = ChromeRuntimeHello | (RuntimeEnvelope & (
@@ -44,6 +41,7 @@ export type ChromeRuntimeExtensionMessage = ChromeRuntimeHello | (RuntimeEnvelop
   | { readonly lane: "resource"; readonly type: "ack"; readonly requestId: string; readonly sequence: number }
   | { readonly lane: "resource"; readonly type: "cancel"; readonly requestId: string }
   | { readonly lane: "lifecycle"; readonly type: "activate"; readonly requestId: string; readonly documentValidated: true }
+  | { readonly lane: "lifecycle"; readonly type: "claim-owner"; readonly requestId: string; readonly interactionOwnerSecret: string }
   | { readonly lane: "lifecycle"; readonly type: "refresh"; readonly requestId: string }
   | { readonly lane: "lifecycle"; readonly type: "recover"; readonly requestId: string; readonly decision: "resume" | "discard" | "fork"; readonly offer: { readonly id: string; readonly expiresAt: string }; readonly idempotencyKey: string }
   | { readonly lane: "lifecycle"; readonly type: "keepalive"; readonly requestId: string }
@@ -64,6 +62,10 @@ export type ChromeRuntimeHostMessage = RuntimeEnvelope & (
 );
 
 export type ChromeRuntimeProjectionChangeReason = "generation" | "revision" | "save" | "recovery";
+
+export function isChromeInteractionOwnerSecret(value: unknown): value is string {
+  return typeof value === "string" && OWNER_SECRET.test(value);
+}
 
 function canonicalJson(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
@@ -143,12 +145,7 @@ function safeFileSource(value: unknown): value is string {
 export function parseChromeRuntimeExtensionMessage(value: unknown): ChromeRuntimeExtensionMessage | undefined {
   if (!record(value) || !validEnvelope(value) || typeof value.type !== "string") return undefined;
   if (value.type === "hello") {
-    const keys = value.interactionOwnerSecret === undefined
-      ? ["type", "protocol", "protocolVersion", "reviewRuntimeVersion", "connectionId"]
-      : ["type", "protocol", "protocolVersion", "reviewRuntimeVersion", "connectionId", "interactionOwnerSecret"];
-    return exact(value, keys) &&
-      (value.interactionOwnerSecret === undefined ||
-        (typeof value.interactionOwnerSecret === "string" && OWNER_SECRET.test(value.interactionOwnerSecret))) &&
+    return exact(value, ["type", "protocol", "protocolVersion", "reviewRuntimeVersion", "connectionId"]) &&
       value.reviewRuntimeVersion === REVIEW_RUNTIME_VERSION && value.protocol === CHROME_RUNTIME_PROTOCOL ? value as unknown as ChromeRuntimeHello : undefined;
   }
   if (typeof value.lane !== "string" || !safeId(value.requestId)) return undefined;
@@ -208,6 +205,11 @@ export function parseChromeRuntimeExtensionMessage(value: unknown): ChromeRuntim
   }
   if (value.lane === "lifecycle" && value.type === "activate") {
     return exact(value, [...base, "documentValidated"]) && value.documentValidated === true
+      ? value as unknown as ChromeRuntimeExtensionMessage : undefined;
+  }
+  if (value.lane === "lifecycle" && value.type === "claim-owner") {
+    return exact(value, [...base, "interactionOwnerSecret"]) &&
+      isChromeInteractionOwnerSecret(value.interactionOwnerSecret)
       ? value as unknown as ChromeRuntimeExtensionMessage : undefined;
   }
   if (value.lane === "lifecycle" && value.type === "recover") {

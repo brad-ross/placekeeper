@@ -83,12 +83,35 @@ describe("Chrome least-authority native runtime", () => {
   it("rejects malformed interaction owner proofs before acquisition", async () => {
     for (const interactionOwnerSecret of ["short", "x".repeat(42), "x".repeat(44), `${"x".repeat(42)}!`]) {
       const connection = new ChromeRuntimeConnection({ callerOrigin: origin, backend: backend() });
+      await negotiate(connection);
       await expect(connection.handle({
-        type: "hello", reviewRuntimeVersion: 3, protocol: "placekeeper.chrome-runtime",
+        type: "claim-owner", lane: "lifecycle", requestId: "request-claim-owner",
         protocolVersion: 2, connectionId, interactionOwnerSecret,
       })).resolves.toMatchObject({ type: "failure", reason: "invalid-message" });
       await connection.disconnect();
     }
+  });
+
+  it("accepts an old extension's field-free v2 hello without owner negotiation", async () => {
+    const registerInteraction = vi.fn(() => ({
+      sessionId: projection().sessionId,
+      attachmentId: "attachment_legacy_extension",
+      incarnationId: "incarnation_legacy_extension",
+      capability: "c".repeat(43),
+      protocolVersion: 1 as const,
+      capabilities: ["session-wide-holds"] as const,
+    }));
+    const connection = new ChromeRuntimeConnection({
+      callerOrigin: origin,
+      backend: backend({ registerInteraction }),
+      authenticatedOwnerKey: "legacy-extension-owner",
+    });
+    await negotiate(connection);
+    await acquire(connection);
+    await connection.handle({ type: "activate", lane: "lifecycle", protocolVersion: 2,
+      connectionId, requestId: "request-activate-legacy", documentValidated: true });
+    expect(registerInteraction).toHaveBeenCalledWith(expect.any(String), "legacy-extension-owner");
+    await connection.disconnect();
   });
 
   it("derives stable session-scoped owner authority without retaining the recovery secret", async () => {
@@ -136,6 +159,10 @@ describe("Chrome least-authority native runtime", () => {
       const connection = new ChromeRuntimeConnection({ callerOrigin: origin, backend: service });
       await connection.handle({
         type: "hello", reviewRuntimeVersion: 3, protocol: "placekeeper.chrome-runtime",
+        protocolVersion: 2, connectionId: id,
+      });
+      await connection.handle({
+        type: "claim-owner", lane: "lifecycle", requestId: `claim-${id}`,
         protocolVersion: 2, connectionId: id, interactionOwnerSecret: secret,
       });
       for (const message of [
