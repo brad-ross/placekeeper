@@ -548,6 +548,7 @@ test('imports standard annotations into the editable tray and saves comment edit
   await composer.getByRole('button', { name: 'Apply', exact: true }).click();
   await expect.poll(() => host.broker.state(sessionId)?.items.find(({ id }) => id === item.id)?.payload.comment)
     .toBe('An imported comment edited in Placekeeper.');
+  await expect.poll(() => host.broker.state(sessionId)?.pendingDrafts).toEqual([]);
   await row.hover();
   await row.getByRole('button', { name: 'Remove Highlight annotation on page 1' }).click();
   await expect(row).toHaveCount(0);

@@ -1927,6 +1927,9 @@ export function ReviewShell(props: ReviewShellProps) {
             ) : <div id="review-annotation-list" aria-label="All annotations">
             <ReconciliationWorkspace
               state={props.state}
+              {...(authoringSession === null
+                ? {}
+                : { activeAuthoringDraftId: authoringSession.draftId })}
               selectionUpdate={props.selection.selectionUpdate}
               {...(props.selection.caretAnchor === undefined ? {} : { caretAnchor: props.selection.caretAnchor })}
               refreshStatus={props.generationRefreshStatus ?? 'idle'}

@@ -198,6 +198,7 @@ function reattachmentInstruction(
 
 export interface ReconciliationWorkspaceProps {
   readonly state: ReviewState;
+  readonly activeAuthoringDraftId?: string;
   readonly selectionUpdate: SelectionUpdate;
   readonly caretAnchor?: CaretAnchor | null;
   readonly refreshStatus: GenerationRefreshStatus;
@@ -281,7 +282,11 @@ export function ReconciliationWorkspace(props: ReconciliationWorkspaceProps) {
         stateLabel: resolutionStateLabel(item),
       };
     }),
-    ...props.state.pendingDrafts.map((draft): ResolutionRecord => {
+    ...props.state.pendingDrafts.filter(
+      (draft) => draft.id !== props.activeAuthoringDraftId
+        || draft.status !== "protected"
+        || draft.disposition.kind !== "resolved",
+    ).map((draft): ResolutionRecord => {
       const text = authoredText(draft);
       return {
         key: `draft:${draft.id}`,
@@ -294,7 +299,7 @@ export function ReconciliationWorkspace(props: ReconciliationWorkspaceProps) {
         stateLabel: resolutionStateLabel(draft),
       };
     }),
-  ], [props.state.items, props.state.pendingDrafts]);
+  ], [props.activeAuthoringDraftId, props.state.items, props.state.pendingDrafts]);
   const recordsByKey = useMemo(
     () => new Map(records.map((record) => [record.key, record] as const)),
     [records],

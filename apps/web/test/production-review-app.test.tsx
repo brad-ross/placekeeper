@@ -782,6 +782,68 @@ describe("one production review tree", () => {
     }
   });
 
+  it("does not present the active protected authoring draft as recovery work", () => {
+    const base = createReviewState({
+      sessionId: "00000000-0000-4000-8000-000000000093",
+      source: { fileId: "00000000-0000-4000-8000-000000000094", digest: "e".repeat(64), byteLength: 1 },
+      documentGeneration: 2,
+    });
+    const draftId = "00000000-0000-4000-8000-000000000095";
+    const state = {
+      ...base,
+      pendingDrafts: [{
+        id: draftId,
+        ownerViewId: "view-1",
+        baseGeneration: 2,
+        revision: 1,
+        kind: "highlight" as const,
+        pageIndex: 0,
+        text: "Currently being edited",
+        anchor: {
+          kind: "selection" as const,
+          pageIndex: 0,
+          quote: "current passage",
+          prefix: "the ",
+          suffix: " remains",
+          rect: { x: 1, y: 2, width: 30, height: 8 },
+          segmentRects: [{ x: 1, y: 2, width: 30, height: 8 }],
+        },
+        disposition: { kind: "resolved" as const, generation: 2 },
+        status: "protected" as const,
+        createdAt: "2026-09-16T20:00:00.000Z",
+        updatedAt: "2026-09-16T20:01:00.000Z",
+      }],
+    };
+
+    const html = renderToStaticMarkup(<ReconciliationWorkspace
+      state={state}
+      activeAuthoringDraftId={draftId}
+      selectionUpdate={{ kind: "cleared", generation: 2 }}
+      refreshStatus="idle"
+      onCommand={vi.fn()}
+    />);
+
+    expect(html).not.toContain("Needs attention");
+    expect(html).not.toContain("Currently being edited");
+
+    const frozenHtml = renderToStaticMarkup(<ReconciliationWorkspace
+      state={{
+        ...state,
+        pendingDrafts: state.pendingDrafts.map((draft) => ({
+          ...draft,
+          status: "frozen" as const,
+          disposition: { kind: "missing" as const, reason: "source-replaced" },
+        })),
+      }}
+      activeAuthoringDraftId={draftId}
+      selectionUpdate={{ kind: "cleared", generation: 3 }}
+      refreshStatus="idle"
+      onCommand={vi.fn()}
+    />);
+    expect(frozenHtml).toContain("Needs attention");
+    expect(frozenHtml).toContain("Currently being edited");
+  });
+
   it("exposes Reference return state only for the current tab and document generation", () => {
     const presentation = {
       tabIdentity: "reference-a",

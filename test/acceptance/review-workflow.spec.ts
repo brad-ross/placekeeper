@@ -2651,6 +2651,7 @@ test.describe('canonical review workflow', () => {
   });
 
   test('keeps the annotations tray open while editing an owned annotation', async ({ page }) => {
+    await page.goto('/test/acceptance/review-harness/index.html?interaction-lifecycle=1');
     await page.getByRole('button', { name: 'Highlight', exact: true }).click();
     await page.getByRole('button', { name: 'Save', exact: true }).click();
     const { annotations, workspace } = await openAnnotationsWorkspace(page);
@@ -2676,6 +2677,7 @@ test.describe('canonical review workflow', () => {
     await edit.press('Enter');
     await expect(editor).toBeVisible();
     await editor.getByRole('textbox', { name: 'Comment (optional)' }).fill('Edited in the open tray.');
+    await expect(page.getByRole('region', { name: 'Needs attention' })).toHaveCount(0);
     await editor.getByRole('button', { name: 'Apply', exact: true }).click();
 
     await expect(editor).toHaveCount(0);
