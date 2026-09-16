@@ -6324,7 +6324,9 @@ test("selects Page Notes only until the next click outside annotations", async (
   const canvasBox = await pageCanvas.boundingBox();
   if (!canvasBox) throw new Error("Rendered PDF page has no bounds.");
   const scale = canvasBox.width / 612;
-  const point = { x: 610 * scale, y: 790 * scale };
+  // Stay far enough inside the rendered edge for WebKit hit testing while
+  // still exercising the same right-edge clamp to the 18pt Page Note bounds.
+  const point = { x: 605 * scale, y: 790 * scale };
 
   await pageCanvas.click({ button: "right", position: point });
   const addPageNote = page.getByRole("menuitem", { name: "Add Page Note" });
@@ -6458,12 +6460,16 @@ test("selects Page Notes only until the next click outside annotations", async (
   if (browserName === 'webkit') {
     // Headless WebKit does not deliver native pointer events after this test's
     // standard context-menu gesture, so exercise the same validated blank-PDF move and click
-    // through DOM events. The move clears any owned-mark hover retained at the menu point.
+    // through DOM events. A DOM-synthesized move and click do not make WebKit
+    // synthesize the pointer exit that releases the peek's hover hold, so that
+    // transition is completed below after the click state has settled.
     await pageCanvas.evaluate((element) => {
       (element as HTMLElement).focus({ preventScroll: true });
     });
     await pageCanvas.dispatchEvent('pointermove', {
       pointerId: 1,
+      pointerType: 'mouse',
+      isPrimary: true,
       button: 0,
       buttons: 0,
       clientX: blankPdfPoint.x,
@@ -6482,6 +6488,29 @@ test("selects Page Notes only until the next click outside annotations", async (
   await expect(secondMark).toHaveAttribute("data-active", "false");
   await expect(secondRow).toHaveAttribute("data-active", "false");
   await expect(workspace).toHaveAttribute("aria-expanded", "false");
+  if (browserName === 'webkit') {
+    await expect(secondMark).toHaveAttribute('data-corresponding', 'false');
+    await page.evaluate((point) => {
+      const retainedPeek = document.querySelector<HTMLElement>('[data-annotation-peek]');
+      if (!retainedPeek) return;
+      const pageTarget = document.querySelector<HTMLElement>('[data-page-index="0"]');
+      if (!pageTarget) throw new Error('Focused Page Note has no PDF page target.');
+      const init: PointerEventInit = {
+        bubbles: true,
+        composed: true,
+        pointerId: 1,
+        pointerType: 'mouse',
+        isPrimary: true,
+        button: 0,
+        buttons: 0,
+        clientX: point.x,
+        clientY: point.y,
+        relatedTarget: pageTarget,
+      };
+      retainedPeek.dispatchEvent(new PointerEvent('pointerout', init));
+      retainedPeek.dispatchEvent(new PointerEvent('pointerleave', { ...init, bubbles: false }));
+    }, blankPdfPoint);
+  }
   await expect(page.locator('[data-annotation-peek]')).toHaveCount(0);
 
   await markFocus.evaluate((element) => {
