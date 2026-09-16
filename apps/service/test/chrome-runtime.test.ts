@@ -145,6 +145,64 @@ describe("Chrome least-authority native runtime", () => {
     expect(JSON.stringify(connection.diagnostics())).not.toMatch(/credential|sourceUrl|presentation/i);
   });
 
+  it("binds interaction operations to the authenticated Chrome connection and revokes it on detach", async () => {
+    const attachment = {
+      sessionId: projection().sessionId,
+      attachmentId: "attachment_chrome_1234",
+      incarnationId: "incarnation_chrome_1234",
+      capability: "c".repeat(43),
+      protocolVersion: 1 as const,
+      capabilities: ["session-wide-holds", "durable-finalize-receipts", "connection-incarnations"] as const,
+    };
+    const registerInteraction = vi.fn(() => attachment);
+    const interaction = vi.fn(async () => ({ status: "accepted", generation: 1, ownerViewId: "chrome-view" }));
+    const disconnectInteraction = vi.fn();
+    const service = backend({ registerInteraction, interaction, disconnectInteraction });
+    const authority = new ChromeRuntimeServiceAuthority(service);
+    const connection = new ChromeRuntimeConnection({
+      callerOrigin: origin,
+      backend: authority,
+      authenticatedOwnerKey: "chrome:authenticated-port-1234",
+    });
+    await negotiate(connection);
+    await acquire(connection);
+    await connection.handle({
+      type: "activate", lane: "lifecycle", protocolVersion: 2, connectionId,
+      requestId: "request-activate-interaction", documentValidated: true,
+    });
+
+    const operations = [
+      ["beginInteraction", "begin", { interactionToken: "interaction_chrome_1234", order: 1, generation: 1 }],
+      ["finalizeInteraction", "finalize", { interactionToken: "interaction_chrome_1234", order: 2, outcome: "discarded", draftId: "draft_chrome_1234", expectedDraftRevision: 0 }],
+      ["releaseInteraction", "release", { interactionToken: "interaction_chrome_1234", order: 3 }],
+      ["acknowledgeInteraction", "acknowledge", { interactionToken: "interaction_chrome_1234", order: 4 }],
+    ] as const;
+    for (const [method, _action, payload] of operations) {
+      await expect(connection.handle({
+        type: "invoke", lane: "runtime", protocolVersion: 2, connectionId,
+        requestId: `request-${method}`, generation: 1, revision: 0, method, payload,
+        idempotencyKey: `operation-${method}`,
+      })).resolves.toMatchObject({ type: "result", method, payload: { status: "accepted" } });
+    }
+
+    expect(registerInteraction).toHaveBeenCalledExactlyOnceWith(
+      `source-identity-1:${sourceDigest}:1`,
+      "chrome:authenticated-port-1234",
+    );
+    expect(interaction.mock.calls.map((call) => call.slice(1, 3))).toEqual(
+      operations.map(([, action]) => [attachment, action]),
+    );
+    expect(service.invoke).not.toHaveBeenCalled();
+
+    await connection.disconnect();
+    expect(disconnectInteraction).toHaveBeenCalledExactlyOnceWith(
+      `source-identity-1:${sourceDigest}:1`,
+      attachment,
+    );
+    await connection.disconnect();
+    expect(disconnectInteraction).toHaveBeenCalledOnce();
+  });
+
   it("strips internal source authority before returning a service projection to Chrome", async () => {
     const release = vi.fn(async () => undefined);
     const unsafeProjection = {

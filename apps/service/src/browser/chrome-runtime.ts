@@ -282,6 +282,7 @@ type ConnectionPhase = "negotiating" | "acquiring" | "recovery" | "provisional" 
 export interface ChromeRuntimeConnectionOptions {
   readonly callerOrigin: string;
   readonly backend: ChromeRuntimeBackend;
+  readonly authenticatedOwnerKey?: string;
   readonly quota?: ChromeRuntimeAggregateQuota;
   readonly requestTimeoutMs?: number;
   readonly idleLeaseMs?: number;
@@ -299,6 +300,7 @@ export class ChromeRuntimeConnection {
   readonly #onAsyncMessage: ((message: ChromeRuntimeHostMessage) => void) | undefined;
   readonly #onClosed: (() => void) | undefined;
   readonly #presentationLease = randomBytes(32).toString("base64url");
+  readonly #authenticatedOwnerKey: string;
   #phase: ConnectionPhase = "negotiating";
   #connectionId: string | undefined;
   #acquisition: AcquisitionState | undefined;
@@ -306,11 +308,14 @@ export class ChromeRuntimeConnection {
   #staged: ChromeRuntimeStagedReview | undefined;
   #recovery: ChromeRuntimeRecovery | undefined;
   #idleTimer: ReturnType<typeof setTimeout> | undefined;
+  #interactionAttachment: ReviewInteractionAttachment | undefined;
   #portHeld = false;
 
   constructor(options: ChromeRuntimeConnectionOptions) {
     if (options.callerOrigin !== CHROME_EXTENSION_ORIGIN) throw new Error("unauthorized-origin");
     this.#backend = options.backend;
+    this.#authenticatedOwnerKey = options.authenticatedOwnerKey
+      ?? `chrome:${randomBytes(24).toString("base64url")}`;
     this.#quota = options.quota ?? options.backend.quota ?? new ChromeRuntimeAggregateQuota();
     if (!this.#quota.acquirePort()) throw new Error("host-busy");
     this.#portHeld = true;
@@ -367,6 +372,15 @@ export class ChromeRuntimeConnection {
     await this.#releaseAcquisition();
     this.#releaseResource();
     if (staged !== undefined) {
+      if (this.#interactionAttachment !== undefined) {
+        const interactionAttachment = this.#interactionAttachment;
+        this.#interactionAttachment = undefined;
+        try {
+          this.#backend.disconnectInteraction?.(staged.canonicalKey, interactionAttachment);
+        } catch {
+          // Presentation and quota cleanup must continue after best-effort hold revocation.
+        }
+      }
       if (wasActive) await this.#backend.detach(staged.canonicalKey, this.#presentationLease).catch(() => undefined);
       else await this.#backend.release(staged.canonicalKey).catch(() => undefined);
     }
@@ -553,6 +567,14 @@ export class ChromeRuntimeConnection {
     if (this.#phase !== "provisional" || this.#staged === undefined) return this.#failure("lifecycle", "invalid-state", message.requestId);
     try {
       const active = await this.#backend.activate(this.#staged.canonicalKey, this.#presentationLease);
+      try {
+        this.#interactionAttachment = this.#backend.registerInteraction?.(
+          this.#staged.canonicalKey,
+          this.#authenticatedOwnerKey,
+        );
+      } catch (error) {
+        if (!(error instanceof Error) || error.message !== "interaction-unavailable") throw error;
+      }
       this.#staged = { ...this.#staged, projection: active };
       this.#phase = "active";
       this.#armIdleDeadline();
@@ -587,15 +609,28 @@ export class ChromeRuntimeConnection {
       const payloadDigest = createHash("sha256")
         .update(canonicalJson({ method: message.method, payload: message.payload }))
         .digest("hex");
-      const result = await this.#backend.invoke(
-        this.#staged.canonicalKey,
-        message.method,
-        message.payload,
-        {
-          ...(message.idempotencyKey === undefined ? {} : { idempotencyKey: message.idempotencyKey }),
-          payloadDigest,
-        },
-      );
+      const interactionAction = message.method === "beginInteraction" ? "begin"
+        : message.method === "finalizeInteraction" ? "finalize"
+          : message.method === "releaseInteraction" ? "release"
+            : message.method === "acknowledgeInteraction" ? "acknowledge" : undefined;
+      const result = interactionAction === undefined
+        ? await this.#backend.invoke(
+          this.#staged.canonicalKey,
+          message.method,
+          message.payload,
+          {
+            ...(message.idempotencyKey === undefined ? {} : { idempotencyKey: message.idempotencyKey }),
+            payloadDigest,
+          },
+        )
+        : this.#interactionAttachment === undefined || this.#backend.interaction === undefined
+          ? { status: "unauthorized" }
+          : await this.#backend.interaction(
+            this.#staged.canonicalKey,
+            this.#interactionAttachment,
+            interactionAction,
+            message.payload,
+          );
       const payload = sanitizeChromeReviewRuntimeResponse(message.method, result);
       if (payload === undefined) return this.#failure("runtime", "invalid-service-response", message.requestId);
       return { type: "result", lane: "runtime", protocolVersion: 2, connectionId: this.#connectionId!, requestId: message.requestId, method: message.method, payload };
@@ -761,6 +796,7 @@ export class ChromeRuntimeManager {
         connection = new ChromeRuntimeConnection({
           callerOrigin: CHROME_EXTENSION_ORIGIN,
           backend: this.#backend,
+          authenticatedOwnerKey: `chrome:${portId}`,
           ...this.#connectionOptions,
           onAsyncMessage: (message) => {
             const events = this.#events.get(portId) ?? [];

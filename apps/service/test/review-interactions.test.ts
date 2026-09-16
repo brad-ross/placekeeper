@@ -51,6 +51,58 @@ describe("broker-owned review interactions", () => {
       .resolves.toMatchObject({ status: "unauthorized" });
   });
 
+  it("fences a delayed begin after authenticated cleanup reports the hold missing", async () => {
+    const interactions = new ReviewInteractions({
+      currentGeneration: () => 1,
+      maxTerminalFences: 1,
+    });
+    const attachment = interactions.register("review-a", "browser-view-a");
+
+    await expect(interactions.release({
+      ...attachment,
+      interactionToken: "interaction_missing_first_1",
+      order: 2,
+    })).resolves.toMatchObject({ status: "missing" });
+    await expect(interactions.release({
+      ...attachment,
+      interactionToken: "interaction_missing_second_1",
+      order: 3,
+    })).resolves.toMatchObject({ status: "missing" });
+
+    await expect(interactions.begin({
+      ...attachment,
+      generation: 1,
+      interactionToken: "interaction_missing_first_1",
+      order: 1,
+    })).resolves.toMatchObject({ status: "out-of-order" });
+    expect(interactions.held("review-a")).toBe(false);
+
+    await expect(interactions.begin({
+      ...attachment,
+      generation: 1,
+      interactionToken: "interaction_missing_first_1",
+      order: 4,
+    })).resolves.toMatchObject({ status: "accepted" });
+  });
+
+  it("does not let an unauthenticated cleanup fence a live incarnation", async () => {
+    const interactions = new ReviewInteractions({ currentGeneration: () => 1 });
+    const attachment = interactions.register("review-a", "browser-view-a");
+
+    await expect(interactions.release({
+      ...attachment,
+      capability: "forged_capability",
+      interactionToken: "interaction_untrusted_cleanup_1",
+      order: 2,
+    })).resolves.toMatchObject({ status: "unauthorized" });
+    await expect(interactions.begin({
+      ...attachment,
+      generation: 1,
+      interactionToken: "interaction_untrusted_cleanup_1",
+      order: 1,
+    })).resolves.toMatchObject({ status: "accepted" });
+  });
+
   it("persists a finalize receipt before releasing and replays it after reconnect", async () => {
     const persisted: unknown[] = [];
     const interactions = new ReviewInteractions({

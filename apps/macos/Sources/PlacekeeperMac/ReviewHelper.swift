@@ -2,6 +2,7 @@
 
 let macosHelperMaxFrameBytes = 256 * 1024
 let macosHelperResourceChunkBytes = 64 * 1024
+let macosHelperRequestTimeout: TimeInterval = 15
 
 enum HelperFrameError: Error, Equatable {
     case empty
@@ -267,14 +268,22 @@ protocol ReviewHelperRequesting {
 final class SupervisedReviewHelper: ReviewHelperProcess, ReviewHelperRequesting, @unchecked Sendable {
     typealias Completion = (MacReviewHelperReply?) -> Void
 
+    private struct PendingRequest {
+        let completion: Completion
+        let deadline: DispatchWorkItem
+    }
+
     let windowID: String
     let attemptID: String
     private let process: Process
     private let stdinPipe = Pipe()
     private let stdoutPipe = Pipe()
     private let lock = NSLock()
+    private let writeLock = NSLock()
+    private let requestTimeout: TimeInterval
+    private let deadlineQueue = DispatchQueue(label: "local.placekeeper.macos.helper-deadlines", qos: .utility)
     private var accumulator = HelperFrameAccumulator()
-    private var pending: [String: Completion] = [:]
+    private var pending: [String: PendingRequest] = [:]
     private var finished = false
 
     var isRunning: Bool { process.isRunning }
@@ -287,10 +296,12 @@ final class SupervisedReviewHelper: ReviewHelperProcess, ReviewHelperRequesting,
         executable: URL,
         argumentPrefix: [String] = [],
         baseEnvironment: [String: String],
+        requestTimeout: TimeInterval = macosHelperRequestTimeout,
         onExit: @escaping @Sendable (String) -> Void
     ) {
         self.windowID = windowID
         self.attemptID = attemptID
+        self.requestTimeout = requestTimeout
         process = Process()
         process.executableURL = executable
         process.arguments = argumentPrefix + ["macos-review-helper"]
@@ -339,16 +350,22 @@ final class SupervisedReviewHelper: ReviewHelperProcess, ReviewHelperRequesting,
         var length = UInt32(body.count).bigEndian
         var frame = withUnsafeBytes(of: &length) { Data($0) }
         frame.append(body)
+        let deadline = DispatchWorkItem { [weak self] in self?.expire(requestID: requestID) }
         lock.lock()
         guard !finished, process.isRunning else { lock.unlock(); return nil }
-        pending[requestID] = completion
+        pending[requestID] = PendingRequest(completion: completion, deadline: deadline)
+        lock.unlock()
+        deadlineQueue.asyncAfter(deadline: .now() + requestTimeout, execute: deadline)
+        writeLock.lock()
+        defer { writeLock.unlock() }
         do {
             try stdinPipe.fileHandleForWriting.write(contentsOf: frame)
-            lock.unlock()
             return requestID
         } catch {
-            pending.removeValue(forKey: requestID)
+            lock.lock()
+            let failed = pending.removeValue(forKey: requestID)
             lock.unlock()
+            failed?.deadline.cancel()
             finish()
             return nil
         }
@@ -379,12 +396,13 @@ final class SupervisedReviewHelper: ReviewHelperProcess, ReviewHelperRequesting,
         var deliveries: [(Completion, MacReviewHelperReply?)] = []
         for message in messages {
             guard let requestID = message["requestId"] as? String,
-                  let completion = pending.removeValue(forKey: requestID) else {
+                  let request = pending.removeValue(forKey: requestID) else {
                 lock.unlock()
                 terminate()
                 return
             }
-            deliveries.append((completion, MacReviewHelperReplyParser.parse(
+            request.deadline.cancel()
+            deliveries.append((request.completion, MacReviewHelperReplyParser.parse(
                 message, windowID: windowID, attemptID: attemptID, requestID: requestID
             )))
         }
@@ -392,15 +410,30 @@ final class SupervisedReviewHelper: ReviewHelperProcess, ReviewHelperRequesting,
         for (completion, reply) in deliveries { completion(reply) }
     }
 
+    private func expire(requestID: String) {
+        lock.lock()
+        guard !finished, pending[requestID] != nil else { lock.unlock(); return }
+        finished = true
+        let requests = Array(pending.values)
+        pending.removeAll()
+        lock.unlock()
+        for request in requests { request.deadline.cancel() }
+        stdoutPipe.fileHandleForReading.readabilityHandler = nil
+        try? stdinPipe.fileHandleForWriting.close()
+        if process.isRunning { process.terminate() }
+        for request in requests { request.completion(nil) }
+    }
+
     private func finish() {
         lock.lock()
         guard !finished else { lock.unlock(); return }
         finished = true
-        let callbacks = Array(pending.values)
+        let requests = Array(pending.values)
         pending.removeAll()
         lock.unlock()
+        for request in requests { request.deadline.cancel() }
         stdoutPipe.fileHandleForReading.readabilityHandler = nil
-        for callback in callbacks { callback(nil) }
+        for request in requests { request.completion(nil) }
     }
 
     deinit { terminate() }

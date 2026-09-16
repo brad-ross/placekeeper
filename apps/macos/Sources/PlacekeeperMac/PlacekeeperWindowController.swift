@@ -23,6 +23,39 @@ private final class TitlebarSpacingView: NSView {
 final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler {
     private static let toolbarHorizontalMargin: CGFloat = 16
     private static let toolbarHeight: CGFloat = 52
+    private static let blobTransferBeginScript = """
+        const transfers = globalThis.__PLACEKEEPER_MAC_BLOB_TRANSFERS__ ??= {};
+        transfers[role] = { id: transferId, parts: [] };
+        return true;
+        """
+    private static let blobTransferAppendScript = """
+        const transfer = globalThis.__PLACEKEEPER_MAC_BLOB_TRANSFERS__?.[role];
+        if (transfer?.id !== transferId || !Array.isArray(transfer.parts)) return false;
+        const binary = atob(base64);
+        const bytes = new Uint8Array(binary.length);
+        for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+        transfer.parts.push(bytes);
+        return bytes.length;
+        """
+    private static let blobTransferPublishScript = """
+        const transfer = globalThis.__PLACEKEEPER_MAC_BLOB_TRANSFERS__?.[role];
+        if (transfer?.id !== transferId || !Array.isArray(transfer.parts) || transfer.parts.length === 0) return false;
+        const url = URL.createObjectURL(new Blob(transfer.parts, { type: mime }));
+        delete globalThis.__PLACEKEEPER_MAC_BLOB_TRANSFERS__[role];
+        if (role === 'pdfium') globalThis.__PLACEKEEPER_MAC_PDFIUM_URL__ = url;
+        else if (role === 'worker') globalThis.__PLACEKEEPER_MAC_WORKER_URL__ = url;
+        else {
+          const resources = globalThis.__PLACEKEEPER_MAC_DOCUMENT_RESOURCES__ ??= {};
+          resources[source] = url;
+          globalThis.__PLACEKEEPER_MAC_DOCUMENT_RESOURCE__ = { source, url };
+        }
+        return url.startsWith('blob:');
+        """
+    private static let blobTransferDiscardScript = """
+        const transfers = globalThis.__PLACEKEEPER_MAC_BLOB_TRANSFERS__;
+        if (transfers?.[role]?.id === transferId) delete transfers[role];
+        return true;
+        """
     private let titlebarSpacing = NSTitlebarAccessoryViewController()
     private let nativeTitlebarHeight: CGFloat
     let windowID: String
@@ -826,7 +859,24 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
         source: String? = nil,
         completion: @escaping (Bool) -> Void
     ) {
-        installBlobChunk(role: role, mime: mime, data: data, source: source, offset: 0, completion: completion)
+        guard !closed, !failed, !data.isEmpty else { completion(false); return }
+        let transferID = UUID().uuidString
+        webView.callAsyncJavaScript(
+            Self.blobTransferBeginScript,
+            arguments: ["role": role, "transferId": transferID],
+            in: nil,
+            in: .page
+        ) { [weak self] result in
+            guard let self else { return }
+            guard case let .success(value) = result, value as? Bool == true else {
+                self.discardBlobTransfer(role: role, transferID: transferID, completion: completion)
+                return
+            }
+            self.installBlobChunk(
+                role: role, mime: mime, data: data, source: source,
+                transferID: transferID, offset: 0, completion: completion
+            )
+        }
     }
 
     private func installBlobChunk(
@@ -834,6 +884,7 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
         mime: String,
         data: Data,
         source: String?,
+        transferID: String,
         offset: Int,
         completion: @escaping (Bool) -> Void
     ) {
@@ -843,21 +894,14 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
             let end = min(data.count, offset + chunkSize)
             let encoded = data.subdata(in: offset..<end).base64EncodedString()
             webView.callAsyncJavaScript(
-                """
-                const binary = atob(base64);
-                const bytes = new Uint8Array(binary.length);
-                for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
-                const parts = globalThis.__PLACEKEEPER_MAC_BLOB_PARTS__ ??= {};
-                (parts[role] ??= []).push(bytes);
-                return bytes.length;
-                """,
-                arguments: ["base64": encoded, "role": role],
+                Self.blobTransferAppendScript,
+                arguments: ["base64": encoded, "role": role, "transferId": transferID],
                 in: nil,
                 in: .page
             ) { [weak self] result in
                 guard let self else { return }
                 guard case let .success(value) = result, (value as? NSNumber)?.intValue == end - offset else {
-                    completion(false)
+                    self.discardBlobTransfer(role: role, transferID: transferID, completion: completion)
                     return
                 }
                 self.installBlobChunk(
@@ -865,36 +909,41 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
                     mime: mime,
                     data: data,
                     source: source,
+                    transferID: transferID,
                     offset: end,
                     completion: completion
                 )
             }
             return
         }
-        var arguments: [String: Any] = ["role": role, "mime": mime]
+        var arguments: [String: Any] = ["role": role, "mime": mime, "transferId": transferID]
         if let source { arguments["source"] = source }
         webView.callAsyncJavaScript(
-            """
-            const parts = globalThis.__PLACEKEEPER_MAC_BLOB_PARTS__?.[role];
-            if (!Array.isArray(parts) || parts.length === 0) return false;
-            const url = URL.createObjectURL(new Blob(parts, { type: mime }));
-            delete globalThis.__PLACEKEEPER_MAC_BLOB_PARTS__[role];
-            if (role === 'pdfium') globalThis.__PLACEKEEPER_MAC_PDFIUM_URL__ = url;
-            else if (role === 'worker') globalThis.__PLACEKEEPER_MAC_WORKER_URL__ = url;
-            else {
-              const resources = globalThis.__PLACEKEEPER_MAC_DOCUMENT_RESOURCES__ ??= {};
-              resources[source] = url;
-              globalThis.__PLACEKEEPER_MAC_DOCUMENT_RESOURCE__ = { source, url };
-            }
-            return url.startsWith('blob:');
-            """,
+            Self.blobTransferPublishScript,
             arguments: arguments,
             in: nil,
             in: .page
-        ) { result in
-            guard case let .success(value) = result else { completion(false); return }
-            completion(value as? Bool == true)
+        ) { [weak self] result in
+            guard let self else { return }
+            guard case let .success(value) = result, value as? Bool == true else {
+                self.discardBlobTransfer(role: role, transferID: transferID, completion: completion)
+                return
+            }
+            completion(true)
         }
+    }
+
+    private func discardBlobTransfer(
+        role: String,
+        transferID: String,
+        completion: @escaping (Bool) -> Void
+    ) {
+        webView.callAsyncJavaScript(
+            Self.blobTransferDiscardScript,
+            arguments: ["role": role, "transferId": transferID],
+            in: nil,
+            in: .page
+        ) { _ in completion(false) }
     }
 
 }

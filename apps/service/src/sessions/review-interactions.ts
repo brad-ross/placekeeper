@@ -43,6 +43,7 @@ interface AttachmentRecord {
   readonly incarnationId: string;
   readonly capabilityHash: string;
   readonly holds: Map<string, { readonly generation: number; lastOrder: number }>;
+  readonly terminalFences: Map<string, number>;
   lastOrder: number;
   revoked: boolean;
 }
@@ -61,6 +62,7 @@ export interface ReviewInteractionsOptions {
   readonly persistReceipt?: (receipt: ReviewInteractionReceipt) => Promise<void>;
   readonly onLastRelease?: (sessionId: string) => void;
   readonly maxPendingReceipts?: number;
+  readonly maxTerminalFences?: number;
 }
 
 function opaque(prefix: string): string {
@@ -109,6 +111,7 @@ export class ReviewInteractions {
       incarnationId: opaque("incarnation"),
       capabilityHash: digestSecretHex(capability),
       holds: new Map(),
+      terminalFences: new Map(),
       lastOrder: 0,
       revoked: false,
     };
@@ -165,6 +168,13 @@ export class ReviewInteractions {
         ? { status: "accepted", generation: existing.generation, ownerViewId: record.attachmentId }
         : { status: "stale", generation: currentGeneration };
     }
+    const terminalOrder = record.terminalFences.get(input.interactionToken);
+    if (terminalOrder !== undefined) {
+      if (!Number.isSafeInteger(input.order) || input.order <= terminalOrder) {
+        return { status: "out-of-order" };
+      }
+      record.terminalFences.delete(input.interactionToken);
+    }
     if (!this.#acceptOrder(record, input.order)) return { status: "out-of-order" };
     record.holds.set(input.interactionToken, { generation: input.generation, lastOrder: input.order });
     return { status: "accepted", generation: input.generation, ownerViewId: record.attachmentId };
@@ -176,7 +186,11 @@ export class ReviewInteractions {
     const receipt = this.#receipt(input);
     if (receipt !== undefined) return receipt;
     const hold = record.holds.get(input.interactionToken);
-    if (hold === undefined) return { status: "missing" };
+    if (hold === undefined) {
+      if (!Number.isSafeInteger(input.order) || input.order <= 0) return { status: "out-of-order" };
+      this.#recordTerminalFence(record, input.interactionToken, input.order);
+      return { status: "missing" };
+    }
     if (!this.#acceptActiveTokenOrder(record, hold, input.order)) return { status: "out-of-order" };
     record.holds.delete(input.interactionToken);
     this.#notifyIfLast(record.sessionId);
@@ -294,6 +308,21 @@ export class ReviewInteractions {
     hold.lastOrder = order;
     record.lastOrder = Math.max(record.lastOrder, order);
     return true;
+  }
+
+  #recordTerminalFence(record: AttachmentRecord, interactionToken: string, order: number): void {
+    const previous = record.terminalFences.get(interactionToken);
+    if (previous === undefined || order > previous) {
+      record.terminalFences.delete(interactionToken);
+      record.terminalFences.set(interactionToken, order);
+    }
+    record.lastOrder = Math.max(record.lastOrder, order);
+    const maximum = Math.max(0, this.#options.maxTerminalFences ?? 256);
+    while (record.terminalFences.size > maximum) {
+      const oldest = record.terminalFences.keys().next().value as string | undefined;
+      if (oldest === undefined) break;
+      record.terminalFences.delete(oldest);
+    }
   }
 
   #releaseAll(record: AttachmentRecord): void {

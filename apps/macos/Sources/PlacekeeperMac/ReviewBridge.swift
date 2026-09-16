@@ -263,7 +263,7 @@ final class ReviewBridge {
         completion: @escaping (Bool) -> Void = { _ in }
     ) {
         guard next.sessionID == projection.sessionID else { completion(false); return }
-        guard Self.isNewer(next, than: projection) else {
+        guard Self.shouldPublish(next, over: projection) else {
             completion(true)
             return
         }
@@ -271,7 +271,7 @@ final class ReviewBridge {
         let token = installationToken
         let publish = { [weak self] in
             guard let self, token == self.installationToken,
-                  Self.isNewer(next, than: self.projection) else { return false }
+                  Self.shouldPublish(next, over: self.projection) else { return false }
             let previous = self.projection
             self.projection = next
             send(self.invalidation(previous: previous, next: next))
@@ -287,9 +287,16 @@ final class ReviewBridge {
     }
 
     private func invalidation(previous: MacRuntimeProjection, next: MacRuntimeProjection) -> [String: Any] {
+        let reason = if next.generation != previous.generation {
+            "generation"
+        } else if next.revision != previous.revision {
+            "revision"
+        } else {
+            "freshness"
+        }
         var payload: [String: Any] = [
             "sessionId": next.sessionID, "generation": next.generation, "revision": next.revision,
-            "reason": next.generation == previous.generation ? "revision" : "generation",
+            "reason": reason,
         ]
         if next.generation != previous.generation { payload["previousGeneration"] = previous.generation }
         return [
@@ -307,6 +314,27 @@ final class ReviewBridge {
     private static func isNewer(_ candidate: MacRuntimeProjection, than current: MacRuntimeProjection) -> Bool {
         candidate.generation > current.generation
             || (candidate.generation == current.generation && candidate.revision > current.revision)
+    }
+
+    private static func shouldPublish(_ candidate: MacRuntimeProjection, over current: MacRuntimeProjection) -> Bool {
+        if isNewer(candidate, than: current) { return true }
+        guard candidate.generation == current.generation,
+              candidate.revision == current.revision else { return false }
+        let candidateLifecycle: NSDictionary = [
+            "state": candidate.state,
+            "scope": candidate.scope,
+            "saveStatus": candidate.saveStatus,
+            "protected": candidate.protected,
+            "location": candidate.location ?? NSNull(),
+        ]
+        let currentLifecycle: NSDictionary = [
+            "state": current.state,
+            "scope": current.scope,
+            "saveStatus": current.saveStatus,
+            "protected": current.protected,
+            "location": current.location ?? NSNull(),
+        ]
+        return !candidateLifecycle.isEqual(currentLifecycle)
     }
 
     private func response(_ request: MacPageRuntimeRequest, identity: MacRuntimeProjection, payload: Any) -> [String: Any] {
