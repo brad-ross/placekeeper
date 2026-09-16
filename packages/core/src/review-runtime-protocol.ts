@@ -1,6 +1,6 @@
 import type { SaveDestinationConfirmation } from "./review-model.js";
 export const REVIEW_RUNTIME_PROTOCOL = "placekeeper.review-runtime" as const;
-export const REVIEW_RUNTIME_VERSION = 2 as const;
+export const REVIEW_RUNTIME_VERSION = 3 as const;
 
 export const REVIEW_RUNTIME_HOSTS = ["vscode", "chrome", "macos"] as const;
 export type ReviewRuntimeHost = typeof REVIEW_RUNTIME_HOSTS[number];
@@ -10,6 +10,10 @@ export const REVIEW_RUNTIME_METHODS = [
   "presence",
   "detach",
   "command",
+  "beginInteraction",
+  "finalizeInteraction",
+  "releaseInteraction",
+  "acknowledgeInteraction",
   "saveStatus",
   "saveProposal",
   "chooseCopy",
@@ -301,6 +305,29 @@ export function sanitizeChromeReviewRuntimeRequest(
     return Object.keys(payload).length === 0 ? {} : undefined;
   }
   if (method === "command") return safeChromeCommand(payload);
+  if (method === "beginInteraction") {
+    return hasOnlyKeys(payload, ["interactionToken", "order", "generation"]) &&
+      typeof payload.interactionToken === "string" && SAFE_RUNTIME_ID.test(payload.interactionToken) &&
+      safeInteger(payload.order) && (payload.order as number) > 0 &&
+      safeInteger(payload.generation) && (payload.generation as number) > 0
+      ? closedJsonClone(payload) : undefined;
+  }
+  if (method === "releaseInteraction" || method === "acknowledgeInteraction") {
+    return hasOnlyKeys(payload, ["interactionToken", "order"]) &&
+      typeof payload.interactionToken === "string" && SAFE_RUNTIME_ID.test(payload.interactionToken) &&
+      safeInteger(payload.order) && (payload.order as number) > 0
+      ? closedJsonClone(payload) : undefined;
+  }
+  if (method === "finalizeInteraction") {
+    if (!hasOnlyKeys(payload, ["interactionToken", "order", "outcome", "draftId", "expectedDraftRevision"]) ||
+      typeof payload.interactionToken !== "string" || !SAFE_RUNTIME_ID.test(payload.interactionToken) ||
+      !safeInteger(payload.order) || (payload.order as number) <= 0 ||
+      typeof payload.draftId !== "string" || !SAFE_RUNTIME_ID.test(payload.draftId) ||
+      !safeInteger(payload.expectedDraftRevision) || (payload.expectedDraftRevision as number) < 0 ||
+      (payload.outcome !== "applied" && payload.outcome !== "discarded")) return undefined;
+    return { interactionToken: payload.interactionToken, order: payload.order, outcome: payload.outcome,
+      draftId: payload.draftId, expectedDraftRevision: payload.expectedDraftRevision };
+  }
   if (method === "chooseOriginal") {
     if (!hasOnlyKeys(payload, ["confirmation"]) ||
       (payload.confirmation !== undefined && !isSaveDestinationConfirmation(payload.confirmation))) return undefined;
@@ -399,6 +426,12 @@ export function sanitizeChromeReviewRuntimeResponse(
       };
     }
     return safeChromeState(value);
+  }
+  if (["beginInteraction", "finalizeInteraction", "releaseInteraction", "acknowledgeInteraction"].includes(method)) {
+    if (!record(value) || typeof value.status !== "string" ||
+      !["accepted", "finalized", "released", "missing", "unauthorized", "out-of-order", "stale", "backpressure"]
+        .includes(value.status)) return undefined;
+    return closedJsonClone(value);
   }
   if (method === "saveProposal") {
     if (!record(value) || (value.sourceDisposition !== "local" && value.sourceDisposition !== "remote-temporary")) {

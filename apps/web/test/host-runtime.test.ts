@@ -208,10 +208,19 @@ describe("host-neutral review runtime", () => {
       sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
       source: { fileId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", digest: "a".repeat(64), byteLength: 100 },
     });
+    let socketMessage: ((event: { data: string }) => void) | undefined;
     const fetch = vi.fn(async (input: string | URL | Request) => {
       const path = String(input);
       if (path.endsWith("/state")) return Response.json(state);
       if (path.endsWith("/commands")) return Response.json({ ...state, revision: 1, annotationName: "Brad Ross" });
+      if (path.endsWith("/interactions/begin")) return Response.json({ status: "accepted", generation: 1 });
+      if (path.endsWith("/interactions/finalize")) {
+        socketMessage?.({ data: JSON.stringify({ kind: "document-successor", previousGeneration: 1,
+          documentGeneration: 2, reviewRevision: 1 }) });
+        return Response.json({ status: "finalized", outcome: "discarded", reviewRevision: 1 });
+      }
+      if (path.endsWith("/interactions/release")) return Response.json({ status: "released" });
+      if (path.endsWith("/interactions/acknowledge")) return Response.json({ status: "released" });
       if (path.endsWith("/scope")) return Response.json({ documentTitle: "paper.pdf", launchSurface: "browser" });
       if (path.endsWith("/save/status")) return Response.json({ destination: { phase: "none", generation: 0 }, sync: { phase: "clean", desiredRevision: 0, desiredDigest: "b".repeat(64), savedRevision: 0, savedDigest: "b".repeat(64) } });
       if (path.endsWith("/export")) return Response.json({ kind: "reviewed-copy", path: "/tmp/reviewed.pdf", revision: 0, digest: "c".repeat(64) });
@@ -220,7 +229,16 @@ describe("host-neutral review runtime", () => {
     class FakeSocket {
       static created: FakeSocket[] = [];
       constructor(readonly url: string, readonly protocols: readonly string[]) { FakeSocket.created.push(this); }
-      addEventListener() {}
+      addEventListener(kind: string, listener: (event: { data: string }) => void) {
+        if (kind === "message") {
+          socketMessage = listener;
+          listener({ data: JSON.stringify({ kind: "interaction-attachment", attachment: {
+            sessionId: state.sessionId, attachmentId: "attachment_browser_1234",
+            incarnationId: "incarnation_browser_1234", capability: "c".repeat(43),
+            protocolVersion: 1, capabilities: ["session-wide-holds"],
+          } }) });
+        }
+      }
       close() {}
     }
     vi.stubGlobal("location", new URL("http://127.0.0.1:43179/s/id/bootstrap"));
@@ -230,6 +248,7 @@ describe("host-neutral review runtime", () => {
     const runtime = createBrowserHostRuntime({ sessionId: state.sessionId, credential: "memory-only" });
 
     const bootstrap = await runtime.bootstrap();
+    expect(runtime.capabilities).toEqual({ localDocumentRefresh: true, interactionLifecycleVersion: 1 });
     expect(bootstrap.viewerAssets).toMatchObject({
       documentUrl: `/s/${state.sessionId}/document/${state.source.fileId}?generation=1`,
       workerUrl: `/s/${state.sessionId}/assets/pdfium-worker.js`,
@@ -237,6 +256,18 @@ describe("host-neutral review runtime", () => {
     });
     expect(bootstrap.resourcePolicy).toEqual({ host: "browser", origin: "http://127.0.0.1:43179" });
     await expect(runtime.command(setAnnotationName(state, "Brad Ross"))).resolves.toMatchObject({ annotationName: "Brad Ross", revision: 1 });
+    await expect(runtime.beginInteraction?.({ interactionToken: "interaction_browser_1234", order: 1, generation: 1 }))
+      .resolves.toMatchObject({ status: "accepted" });
+    const deliveryOrder: string[] = [];
+    runtime.subscribeInvalidations(() => deliveryOrder.push("invalidation"));
+    const finalized = runtime.finalizeInteraction?.({ interactionToken: "interaction_browser_1234", order: 2,
+      outcome: "discarded", draftId: "draft_browser_1234", expectedDraftRevision: 1 })
+      .then((value) => { deliveryOrder.push("receipt"); return value; });
+    await expect(finalized)
+      .resolves.toMatchObject({ status: "finalized" });
+    expect(deliveryOrder).toEqual(["receipt"]);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(deliveryOrder).toEqual(["receipt", "invalidation"]);
     expect(fetch).toHaveBeenCalledWith(`/s/${state.sessionId}/commands`, expect.objectContaining({
       body: JSON.stringify(setAnnotationName(state, "Brad Ross")),
       headers: expect.objectContaining({ "x-placekeeper-generation": "1" }),
@@ -249,7 +280,7 @@ describe("host-neutral review runtime", () => {
     fetch.mockResolvedValueOnce(Response.json({ error: { kind: "export-conflict" } }, { status: 409 }));
     await expect(runtime.exportReviewedCopy(true, fence)).rejects.toThrow("Confirm the annotation name again");
     expect(FakeSocket.created[0]).toMatchObject({
-      protocols: ["placekeeper", "placekeeper-auth.memory-only"],
+      protocols: ["placekeeper", "placekeeper-auth.memory-only", expect.stringMatching(/^placekeeper-view\./u)],
     });
     runtime.dispose();
   });
@@ -812,6 +843,49 @@ describe("host-neutral review runtime", () => {
     expect(invalidations).toEqual([
       { sessionId, generation: 1, revision: 1, reason: "revision" },
     ]);
+    runtime.dispose();
+  });
+
+  it("delivers an RPC finalization receipt before its deferred successor invalidation", async () => {
+    const listeners = new Set<(message: unknown) => void>();
+    const requests: Record<string, unknown>[] = [];
+    const runtime = createRpcHostRuntime({
+      panelId: "panel_identifier_1234",
+      postMessage(message) { requests.push(message as Record<string, unknown>); },
+      subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); },
+    });
+    const sessionId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const state = createReviewState({ sessionId, source: {
+      fileId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", digest: "a".repeat(64), byteLength: 100,
+    }, workflowMode: "generated-output", documentGeneration: 1 });
+    const respond = (request: Record<string, unknown>, payload: unknown, generation = 1) => {
+      listeners.forEach((listener) => listener({ protocol: REVIEW_RUNTIME_PROTOCOL,
+        version: REVIEW_RUNTIME_VERSION, kind: "response", panelId: "panel_identifier_1234",
+        sessionId, generation, revision: 0, requestId: request.requestId, ok: true, payload }));
+    };
+    const bootstrapping = runtime.bootstrap();
+    respond(requests.at(-1)!, { sessionId, generation: 1, revision: 0, state,
+      scope: { documentTitle: "paper.pdf" }, saveStatus: {}, resources: {
+        document: "vscode-webview://authority/snapshots/digest.pdf",
+        pdfiumWasm: "vscode-webview://authority/assets/pdfium.wasm",
+      } });
+    await bootstrapping;
+    const delivery: string[] = [];
+    runtime.subscribeInvalidations(() => delivery.push("invalidation"));
+    const completion = runtime.finalizeInteraction!({ interactionToken: "interaction_rpc_1234", order: 2,
+      outcome: "discarded", draftId: "draft_rpc_1234", expectedDraftRevision: 0 })
+      .then((value) => { delivery.push("receipt"); return value; });
+    const request = requests.at(-1)!;
+    listeners.forEach((listener) => listener({ protocol: REVIEW_RUNTIME_PROTOCOL,
+      version: REVIEW_RUNTIME_VERSION, kind: "event", event: "session-invalidated",
+      panelId: "panel_identifier_1234", payload: { sessionId, generation: 2, revision: 1,
+        previousGeneration: 1, reason: "generation" } }));
+    expect(delivery).toEqual([]);
+    respond(request, { status: "finalized", outcome: "discarded", reviewRevision: 1 });
+    await completion;
+    expect(delivery).toEqual(["receipt"]);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(delivery).toEqual(["receipt", "invalidation"]);
     runtime.dispose();
   });
 

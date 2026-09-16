@@ -135,6 +135,15 @@ export interface RecoverableDraftV3 {
   readonly latestObservationEpoch?: number;
   readonly sourceWorkInterruptions?: readonly DurableSourceWorkInterruptionV1[];
   readonly nativeAnnotationLedger?: DurableNativeAnnotationLedgerV1;
+  readonly interactionReceipts?: readonly {
+    readonly status: "finalized";
+    readonly sessionId: string;
+    readonly attachmentId: string;
+    readonly interactionToken: string;
+    readonly generation: number;
+    readonly outcome: "applied" | "discarded";
+    readonly reviewRevision: number;
+  }[];
   /** A Chrome review that accepted a potentially durable side effect must
    * remain recoverable even when its save state is currently clean. */
   readonly chromeProtected?: true;
@@ -257,6 +266,21 @@ function validNativeAnnotationLedger(value: unknown): boolean {
     new Set(ledger.deletedIds).size === ledger.deletedIds.length;
 }
 
+function validInteractionReceipts(value: unknown): boolean {
+  if (value === undefined) return true;
+  if (!Array.isArray(value) || value.length > 256) return false;
+  return value.every((entry) => entry !== null && typeof entry === "object" &&
+    (entry as { status?: unknown }).status === "finalized" &&
+    typeof (entry as { sessionId?: unknown }).sessionId === "string" &&
+    typeof (entry as { attachmentId?: unknown }).attachmentId === "string" &&
+    typeof (entry as { interactionToken?: unknown }).interactionToken === "string" &&
+    Number.isSafeInteger((entry as { generation?: unknown }).generation) &&
+    ((entry as { generation: number }).generation > 0) &&
+    ((entry as { outcome?: unknown }).outcome === "applied" || (entry as { outcome?: unknown }).outcome === "discarded") &&
+    Number.isSafeInteger((entry as { reviewRevision?: unknown }).reviewRevision) &&
+    ((entry as { reviewRevision: number }).reviewRevision >= 0));
+}
+
 function parse(contents: string): RecoverableDraftV3 | undefined {
   try {
     const envelope = JSON.parse(contents) as SnapshotEnvelope;
@@ -268,6 +292,7 @@ function parse(contents: string): RecoverableDraftV3 | undefined {
       (envelope.payload.schemaVersion === 3 && (
         !validV3Source(envelope.payload.source) ||
         !validNativeAnnotationLedger(envelope.payload.nativeAnnotationLedger) ||
+        !validInteractionReceipts(envelope.payload.interactionReceipts) ||
         (envelope.payload.chromeProtected !== undefined && envelope.payload.chromeProtected !== true) ||
         (envelope.payload.source.disposition === "remote-temporary" && (
           envelope.payload.source.digest !== envelope.payload.state.source.digest ||

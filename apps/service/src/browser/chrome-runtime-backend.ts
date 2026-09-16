@@ -234,6 +234,46 @@ export class ChromeServiceRuntimeBackend implements ChromeRuntimeBackend {
     return result;
   }
 
+  async interaction(
+    canonicalKey: string,
+    attachment: import("../sessions/review-interactions.js").ReviewInteractionAttachment,
+    action: "begin" | "finalize" | "release" | "acknowledge",
+    payload: unknown,
+  ): Promise<unknown> {
+    const record = this.#record(canonicalKey);
+    const value = payload as Record<string, unknown>;
+    const common = {
+      sessionId: record.sessionId,
+      attachment,
+      interactionToken: value.interactionToken as string,
+      order: value.order as number,
+    };
+    if (action === "begin") {
+      return this.#broker.beginReviewInteraction({ ...common, generation: value.generation as number });
+    }
+    if (action === "release") return this.#broker.releaseReviewInteraction(common);
+    if (action === "acknowledge") return this.#broker.acknowledgeReviewInteraction(common);
+    const result = await this.#broker.finalizeReviewInteraction({
+      ...common,
+      outcome: value.outcome as "applied" | "discarded",
+      draftId: value.draftId as string,
+      expectedDraftRevision: value.expectedDraftRevision as number,
+    });
+    if (value.outcome === "applied" && this.#broker.saveStatus(record.sessionId)?.destination.phase === "active") {
+      void this.#saving.requestSave(record.sessionId);
+    }
+    return result;
+  }
+
+  registerInteraction(canonicalKey: string, authenticatedOwnerKey: string) {
+    return this.#broker.replaceInteractionAttachment(this.#record(canonicalKey).sessionId, authenticatedOwnerKey);
+  }
+
+  disconnectInteraction(canonicalKey: string, attachment: import("../sessions/review-interactions.js").ReviewInteractionAttachment): void {
+    const record = this.#records.get(canonicalKey);
+    if (record !== undefined) this.#broker.interactions.disconnect(attachment.attachmentId, attachment.incarnationId);
+  }
+
   async readDocument(canonicalKey: string, generation: number, offset: number, length: number): Promise<Buffer> {
     const record = this.#record(canonicalKey);
     this.#refreshRecord(record);

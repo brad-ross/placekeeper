@@ -56,12 +56,16 @@ describe("shared review runtime protocol", () => {
 
   it("defines the complete versioned method vocabulary for both hosts", () => {
     expect(REVIEW_RUNTIME_PROTOCOL).toBe("placekeeper.review-runtime");
-    expect(REVIEW_RUNTIME_VERSION).toBe(2);
+    expect(REVIEW_RUNTIME_VERSION).toBe(3);
     expect(REVIEW_RUNTIME_METHODS).toEqual([
       "bootstrap",
       "presence",
       "detach",
       "command",
+      "beginInteraction",
+      "finalizeInteraction",
+      "releaseInteraction",
+      "acknowledgeInteraction",
       "saveStatus",
       "saveProposal",
       "chooseCopy",

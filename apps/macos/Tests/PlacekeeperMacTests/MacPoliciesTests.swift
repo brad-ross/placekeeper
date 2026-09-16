@@ -476,7 +476,7 @@ final class MacPoliciesTests: XCTestCase {
     func testPageRuntimeRequestRequiresClosedCurrentIdentity() {
         let bootstrap: [String: Any] = [
             "protocol": "placekeeper.review-runtime",
-            "version": 2,
+            "version": 3,
             "kind": "request",
             "runtimeId": "runtime_12345678",
             "requestId": "request_12345678",
@@ -498,7 +498,7 @@ final class MacPoliciesTests: XCTestCase {
 
         let scoped: [String: Any] = [
             "protocol": "placekeeper.review-runtime",
-            "version": 2,
+            "version": 3,
             "kind": "request",
             "runtimeId": "runtime_12345678",
             "requestId": "request_abcdefgh",
@@ -741,7 +741,7 @@ extension MacPoliciesTests {
         helper.requests.removeFirst().completion(.active(projection(0)))
         await Task.yield()
         func request(_ method: String, revision: Int) -> [String: Any] {
-            ["protocol": "placekeeper.review-runtime", "version": 2, "kind": "request",
+            ["protocol": "placekeeper.review-runtime", "version": 3, "kind": "request",
              "runtimeId": "runtime_test1234", "requestId": "request_" + method,
              "sessionId": projection(0).sessionID, "generation": 1, "revision": revision,
              "method": method, "payload": [String: Any]()]

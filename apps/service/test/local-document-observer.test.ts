@@ -1,5 +1,5 @@
 import { EventEmitter } from "node:events";
-import { mkdtemp, rename, rm, unlink, writeFile } from "node:fs/promises";
+import { lstat, mkdtemp, rename, rm, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 
@@ -37,6 +37,7 @@ async function fixture() {
   const watches: Array<EventEmitter & LocalDocumentWatch> = [];
   const candidates: LocalDocumentCandidate[] = [];
   const admitted: Array<Omit<LocalDocumentCandidate, "identity">> = [];
+  const settled: Array<Omit<LocalDocumentCandidate, "identity">> = [];
   const observer = new LocalDocumentObserver({
     watchDirectory: () => {
       const watch = Object.assign(new EventEmitter(), { close: vi.fn(), unref: vi.fn() });
@@ -44,12 +45,13 @@ async function fixture() {
       return watch;
     },
     admitCandidate: (candidate) => admitted.push(candidate),
+    settleUnchangedCandidate: (candidate) => settled.push(candidate),
     inspectCandidate: async (candidate) => {
       candidates.push(candidate);
       return { status: "current" };
     },
   });
-  return { observer, sourcePath, watches, candidates, admitted };
+  return { observer, sourcePath, watches, candidates, admitted, settled };
 }
 
 describe("local document observer", () => {
@@ -147,6 +149,76 @@ describe("local document observer", () => {
     expect(value.observer.isCurrent("generated", 3)).toBe(true);
     expect(value.candidates.map(({ reason }) => reason)).toEqual(["startup", "host-hint"]);
     expect(value.candidates.at(-1)).toMatchObject({ sequence: 3, hostHintToken: "newest" });
+  });
+
+  it("does not let a redundant watcher delivery supersede an explicitly reserved identity", async () => {
+    const value = await fixture();
+    value.observer.observe({ sessionId: "ordinary", sourcePath: value.sourcePath });
+    await value.observer.flush("ordinary");
+    const reserved = await value.observer.reserveExplicitHint("ordinary");
+    expect(reserved).toBe(2);
+
+    value.watches[0]!.emit("change", "rename", basename(value.sourcePath));
+    expect(value.admitted.at(-1)).toMatchObject({ reason: "watcher" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await value.observer.flush("ordinary");
+    expect(value.observer.isCurrent("ordinary", reserved!)).toBe(true);
+    expect(value.settled.at(-1)).toMatchObject({ reason: "watcher" });
+    expect(value.candidates.map(({ reason }) => reason)).toEqual(["startup"]);
+
+    value.observer.completeExplicitHint("ordinary", reserved!);
+    await writeFile(value.sourcePath, "%PDF-1.7\nnewer identity");
+    value.watches[0]!.emit("change", "rename", basename(value.sourcePath));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await value.observer.flush("ordinary");
+    expect(value.candidates.at(-1)?.reason).toBe("watcher");
+    expect(value.observer.isCurrent("ordinary", reserved!)).toBe(false);
+  });
+
+  it("settles flush after an explicit reservation covers a pending watcher", async () => {
+    const value = await fixture();
+    value.observer.observe({ sessionId: "ordinary", sourcePath: value.sourcePath });
+    await value.observer.flush("ordinary");
+    value.watches[0]!.emit("change", "rename", basename(value.sourcePath));
+    const reserved = await value.observer.reserveExplicitHint("ordinary");
+    await expect(value.observer.flush("ordinary")).resolves.toBeDefined();
+    expect(value.observer.isCurrent("ordinary", reserved!)).toBe(true);
+  });
+
+  it("admits the explicit save barrier before identity inspection completes", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "placekeeper-explicit-barrier-"));
+    temporaryDirectories.push(directory);
+    const sourcePath = join(directory, "paper.pdf");
+    await writeFile(sourcePath, "%PDF-1.7\noriginal");
+    const identityGate = Promise.withResolvers<void>();
+    let identityCalls = 0;
+    const admitted: Array<Omit<LocalDocumentCandidate, "identity">> = [];
+    let watch: (EventEmitter & LocalDocumentWatch) | undefined;
+    const observer = new LocalDocumentObserver({
+      watchDirectory: () => watch = Object.assign(new EventEmitter(), { close: vi.fn(), unref: vi.fn() }),
+      inspectIdentity: async (path) => {
+        identityCalls += 1;
+        if (identityCalls > 1) await identityGate.promise;
+        return lstat(path);
+      },
+      admitCandidate: (candidate) => admitted.push(candidate),
+      inspectCandidate: async () => ({ status: "current" as const }),
+    });
+    observer.observe({ sessionId: "ordinary", sourcePath });
+    await observer.flush("ordinary");
+    admitted.length = 0;
+    const reservation = observer.reserveExplicitHint("ordinary");
+    expect(admitted).toHaveLength(1);
+    expect(admitted[0]).toMatchObject({ reason: "host-hint" });
+    watch!.emit("change", "rename", basename(sourcePath));
+    expect(admitted).toHaveLength(2);
+    expect(admitted[1]).toMatchObject({ reason: "watcher" });
+    identityGate.resolve();
+    const sequence = await reservation;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await observer.flush("ordinary");
+    expect(observer.isCurrent("ordinary", sequence!)).toBe(true);
+    observer.dispose();
   });
 
   it("does not settle an identity shortcut while a watcher change remains unvalidated", async () => {

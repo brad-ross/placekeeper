@@ -7,6 +7,7 @@ import type { Socket } from "node:net";
 import { basename, extname, join } from "node:path";
 import {
   RESTRICTIVE_CSP,
+  digestSecretHex,
   validateRequestSecurity,
 } from "../../../../packages/core/src/session-security.js";
 import type { ReviewCommand } from "../../../../packages/core/src/review-model.js";
@@ -27,11 +28,26 @@ import type { PdfSaveCoordinator } from "../saving/pdf-save-coordinator.js";
 import type { DaemonLifecycleCoordinator } from "../host/daemon-lifecycle.js";
 import { ExportCoordinatorError, type ExportCoordinator } from "../export/export-coordinator.js";
 import { openPlacekeeperLink, parsePlacekeeperReadableViewRoute } from "../links/placekeeper-link.js";
+import type { ReviewInteractionAttachment } from "../sessions/review-interactions.js";
 
 const MAX_BODY_BYTES = 256 * 1024;
 const UUID = "[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}";
 const VIEW_UUID = "[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}";
 const RECOVERY_ID = /^[A-Za-z0-9_-]{16,128}$/u;
+const ATTACHMENT_ID = /^[A-Za-z0-9_-]{8,128}$/u;
+
+function interactionAttachment(value: unknown, sessionId: string): ReviewInteractionAttachment | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
+  const record = value as Record<string, unknown>;
+  if (Object.keys(record).some((key) => ![
+    "sessionId", "attachmentId", "incarnationId", "capability", "protocolVersion", "capabilities",
+  ].includes(key)) || record.sessionId !== sessionId || record.protocolVersion !== 1 ||
+    typeof record.attachmentId !== "string" || !ATTACHMENT_ID.test(record.attachmentId) ||
+    typeof record.incarnationId !== "string" || !ATTACHMENT_ID.test(record.incarnationId) ||
+    typeof record.capability !== "string" || !/^[A-Za-z0-9_-]{32,128}$/u.test(record.capability) ||
+    !Array.isArray(record.capabilities)) return undefined;
+  return record as unknown as ReviewInteractionAttachment;
+}
 
 function recoveryOfferIdentity(value: unknown): RecoveryOfferIdentity | undefined {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
@@ -328,8 +344,9 @@ export async function startHttpServer(
       const observeMatch = new RegExp(`^/s/(${UUID})/observe$`, "u").exec(pathname);
       const staleMatch = new RegExp(`^/s/(${UUID})/stale$`, "u").exec(pathname);
       const syncTexMatch = new RegExp(`^/s/(${UUID})/synctex/(forward|reverse)$`, "u").exec(pathname);
+      const interactionMatch = new RegExp(`^/s/(${UUID})/interactions/(begin|finalize|release|acknowledge)$`, "u").exec(pathname);
       const mutates = exchangeMatch !== null || resumeMatch !== null || reopenMatch || commandMatch !== null ||
-        exportMatch !== null || observeMatch !== null || staleMatch !== null || syncTexMatch !== null ||
+        exportMatch !== null || observeMatch !== null || staleMatch !== null || syncTexMatch !== null || interactionMatch !== null ||
         (saveMatch !== null && saveMatch[2] !== "status" && saveMatch[2] !== "proposal");
       const expectsJson = mutates;
       const contentLength = Number(request.headers["content-length"] ?? 0);
@@ -611,7 +628,7 @@ export async function startHttpServer(
       const documentMatch = new RegExp(`^/s/(${UUID})/document/(${UUID})$`, "u").exec(pathname);
       const authenticatedSessionId =
         stateMatch?.[1] ?? scopeMatch?.[1] ?? documentMatch?.[1] ?? commandMatch?.[1] ??
-        saveMatch?.[1] ?? exportMatch?.[1] ?? observeMatch?.[1] ?? staleMatch?.[1] ?? syncTexMatch?.[1];
+        saveMatch?.[1] ?? exportMatch?.[1] ?? observeMatch?.[1] ?? staleMatch?.[1] ?? syncTexMatch?.[1] ?? interactionMatch?.[1];
       if (authenticatedSessionId !== undefined) {
         const credential = bearerCredential(request);
         if (
@@ -805,6 +822,59 @@ export async function startHttpServer(
         }));
         return;
       }
+      if (interactionMatch !== null) {
+        if (request.method !== "POST") {
+          send(response, 405, "Method not allowed");
+          return;
+        }
+        const body = await readJson(request) as Record<string, unknown>;
+        const attachment = interactionAttachment(body.attachment, interactionMatch[1]!);
+        if (typeof body.interactionToken !== "string" || !RECOVERY_ID.test(body.interactionToken) ||
+          !Number.isSafeInteger(body.order) || (body.order as number) <= 0 || attachment === undefined) {
+          send(response, 400, "Invalid interaction lifecycle request");
+          return;
+        }
+        const common = {
+          sessionId: interactionMatch[1]!,
+          attachment,
+          interactionToken: body.interactionToken,
+          order: body.order as number,
+        };
+        const action = interactionMatch[2]!;
+        if (action === "begin") {
+          if (!Number.isSafeInteger(body.generation) || (body.generation as number) < 1) {
+            send(response, 400, "Invalid interaction generation");
+            return;
+          }
+          sendJson(response, 200, await broker.beginReviewInteraction({ ...common, generation: body.generation as number }));
+          return;
+        }
+        if (action === "release") {
+          sendJson(response, 200, await broker.releaseReviewInteraction(common));
+          return;
+        }
+        if (action === "acknowledge") {
+          sendJson(response, 200, await broker.acknowledgeReviewInteraction(common));
+          return;
+        }
+        if ((body.outcome !== "applied" && body.outcome !== "discarded") ||
+          typeof body.draftId !== "string" || !RECOVERY_ID.test(body.draftId) ||
+          !Number.isSafeInteger(body.expectedDraftRevision) || (body.expectedDraftRevision as number) < 0) {
+          send(response, 400, "Invalid interaction finalization");
+          return;
+        }
+        const finalized = await broker.finalizeReviewInteraction({
+          ...common,
+          outcome: body.outcome,
+          draftId: body.draftId,
+          expectedDraftRevision: body.expectedDraftRevision as number,
+        });
+        if (body.outcome === "applied" && broker.saveStatus(common.sessionId)?.destination.phase === "active") {
+          void options.saving?.requestSave(common.sessionId);
+        }
+        sendJson(response, 200, finalized);
+        return;
+      }
       if (documentMatch !== null && request.method === "GET") {
         const state = broker.state(documentMatch[1]!);
         if (state?.source.fileId !== documentMatch[2]) {
@@ -958,13 +1028,27 @@ export async function startHttpServer(
       }
       const key = request.headers["sec-websocket-key"];
       if (typeof key !== "string") return reject();
+      const clientIdentity = protocols
+        ?.find((value) => value.startsWith("placekeeper-view."))
+        ?.slice("placekeeper-view.".length);
+      const interactionOwnerKey = `${digestSecretHex(credential)}:${
+        clientIdentity !== undefined && ATTACHMENT_ID.test(clientIdentity)
+          ? clientIdentity
+          : randomBytes(18).toString("base64url")
+      }`;
+      const interactionAttachment = broker.replaceInteractionAttachment(match[1]!, interactionOwnerKey);
       const accept = createHash("sha1")
         .update(`${key}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`)
         .digest("base64");
       socket.write(
         `HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\nSec-WebSocket-Protocol: placekeeper\r\n\r\n`,
       );
-      broker.controls.registerSocket(match[1]!, socket, head);
+      broker.controls.registerSocket(match[1]!, socket, head, {
+        readyEvent: { kind: "interaction-attachment", attachment: interactionAttachment },
+        onDisconnect: () => broker.disconnectInteractionIncarnation(
+          match[1]!, interactionOwnerKey, interactionAttachment,
+        ),
+      });
       activity?.complete();
     } catch {
       reject();

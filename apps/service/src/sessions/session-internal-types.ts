@@ -12,6 +12,7 @@ import type {
   RecoverableSourceOwnership,
 } from "../recovery/draft-snapshot.js";
 import type { OpenReviewResult, RecoveryDecision, ReviewPresentationSurface } from "./session-contracts.js";
+import type { ReviewInteractionReceipt } from "./review-interactions.js";
 
 export interface RecoveryOfferRecord {
   readonly expiresAt: string;
@@ -59,6 +60,7 @@ export interface ActiveSession {
   readonly documentGeneration: number;
   sourceOwnership: RecoverableSourceOwnership;
   chromeProtected: boolean;
+  interactionReceipts: ReviewInteractionReceipt[];
   /** Blocks every serialized mutation/save/publication while a thrown recovery
    * persistence call has an unclassified authoritative winner. */
   replacementCommitBarrier?: {

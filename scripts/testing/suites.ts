@@ -183,6 +183,7 @@ export const suites: Record<string, TestStage[]> = {
         "packages/core/test/placekeeper-link.test.ts",
         "apps/service/test/placekeeper-link.test.ts",
         "apps/service/test/session-security.test.ts",
+        "apps/service/test/review-interactions.test.ts",
         "apps/service/test/recovery.test.ts",
         "apps/service/test/local-document-observer.test.ts",
         "apps/service/test/live-document-replacement.test.ts",
@@ -211,6 +212,7 @@ export const suites: Record<string, TestStage[]> = {
       "options": [],
       "files": [
         "apps/service/test/session-security.test.ts",
+        "apps/service/test/review-interactions.test.ts",
         "apps/service/test/recovery.test.ts",
         "apps/service/test/export-transaction.test.ts",
         "apps/service/test/replace-original.test.ts"
@@ -547,6 +549,7 @@ export const ciUnitFiles = [
       'apps/service/test/chrome-runtime.test.ts',
       'apps/service/test/macos-runtime.test.ts',
       'apps/service/test/session-security.test.ts',
+      'apps/service/test/review-interactions.test.ts',
       'apps/service/test/recovery.test.ts',
       'apps/service/test/pdf-save-coordinator.test.ts',
       'apps/service/test/export-transaction.test.ts',

@@ -42,11 +42,19 @@ export type HostRuntimeCommand =
 
 export interface HostRuntime extends ProductionSessionApi {
   readonly host: "browser" | "vscode" | "chrome" | "macos" | "static";
+  readonly capabilities?: {
+    readonly localDocumentRefresh: boolean;
+    readonly interactionLifecycleVersion?: 1;
+  };
   bootstrap(signal?: AbortSignal): Promise<HostRuntimeBootstrap>;
   subscribeInvalidations(listener: (event: HostRuntimeInvalidation) => void): () => void;
   subscribeHostCommands?(listener: (command: HostRuntimeCommand) => void): () => void;
   exportReviewedCopy(confirmPossiblyStale?: true, fence?: ReviewExportFence): Promise<ProductionExportResult>;
   forwardSyncTex(input: unknown): Promise<unknown>;
   reverseSyncTex(input: unknown): Promise<unknown>;
+  beginInteraction?(input: { readonly interactionToken: string; readonly order: number; readonly generation: number }): Promise<unknown>;
+  finalizeInteraction?(input: { readonly interactionToken: string; readonly order: number; readonly outcome: "applied" | "discarded"; readonly draftId: string; readonly expectedDraftRevision: number }): Promise<unknown>;
+  releaseInteraction?(input: { readonly interactionToken: string; readonly order: number }): Promise<unknown>;
+  acknowledgeInteraction?(input: { readonly interactionToken: string; readonly order: number }): Promise<unknown>;
   dispose(): void;
 }

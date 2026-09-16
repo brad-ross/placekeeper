@@ -110,6 +110,23 @@ function validPayload(method: ReviewRuntimeMethod, payload: unknown): boolean {
     return keys.every((key) => key === "confirmation") &&
       (payload.confirmation === undefined || isSaveDestinationConfirmation(payload.confirmation));
   }
+  if (method === "beginInteraction") {
+    return keys.length === 3 && typeof payload.interactionToken === "string" && SAFE_ID.test(payload.interactionToken) &&
+      Number.isSafeInteger(payload.order) && (payload.order as number) > 0 &&
+      Number.isSafeInteger(payload.generation) && (payload.generation as number) > 0;
+  }
+  if (method === "releaseInteraction" || method === "acknowledgeInteraction") {
+    return keys.length === 2 && typeof payload.interactionToken === "string" && SAFE_ID.test(payload.interactionToken) &&
+      Number.isSafeInteger(payload.order) && (payload.order as number) > 0;
+  }
+  if (method === "finalizeInteraction") {
+    return keys.length === 5 && keys.every((key) => ["interactionToken", "order", "outcome", "draftId", "expectedDraftRevision"].includes(key)) &&
+      typeof payload.interactionToken === "string" && SAFE_ID.test(payload.interactionToken) &&
+      Number.isSafeInteger(payload.order) && (payload.order as number) > 0 &&
+      typeof payload.draftId === "string" && SAFE_ID.test(payload.draftId) &&
+      Number.isSafeInteger(payload.expectedDraftRevision) && (payload.expectedDraftRevision as number) >= 0 &&
+      (payload.outcome === "applied" || payload.outcome === "discarded");
+  }
   if (method === "chooseCopy") {
     return keys.every((key) => key === "filename" || key === "folderSelectionId" || key === "confirmation") &&
       (payload.confirmation === undefined || isSaveDestinationConfirmation(payload.confirmation)) &&
@@ -327,6 +344,10 @@ function safeResult(method: ReviewRuntimeBrokerMethod, value: unknown): unknown 
     case "exportReviewedCopy":
       return isObject(value) ? { ...value, path: "Reviewed PDF" } : value;
     case "command":
+    case "beginInteraction":
+    case "finalizeInteraction":
+    case "releaseInteraction":
+    case "acknowledgeInteraction":
     case "forwardSyncTex":
     case "reverseSyncTex":
       return value;
@@ -348,6 +369,8 @@ export function createLoopbackRuntimeClient(options: LoopbackRuntimeClientOption
   let socketRetry: ReturnType<typeof setTimeout> | undefined;
   let socketRetryDelayMs = 1_000;
   let observedFreshness: string | undefined;
+  let interactionAttachment: unknown;
+  let attachmentReady = Promise.withResolvers<unknown>();
   let disposed = false;
   const request = async (
     path: string,
@@ -388,6 +411,10 @@ export function createLoopbackRuntimeClient(options: LoopbackRuntimeClientOption
     saveStatus: { method: "GET", path: "/save/status" },
     saveProposal: { method: "GET", path: "/save/proposal" },
     command: { method: "POST", path: "/commands" },
+    beginInteraction: { method: "POST", path: "/interactions/begin" },
+    finalizeInteraction: { method: "POST", path: "/interactions/finalize" },
+    releaseInteraction: { method: "POST", path: "/interactions/release" },
+    acknowledgeInteraction: { method: "POST", path: "/interactions/acknowledge" },
     chooseCopy: { method: "POST", path: "/save/copy" },
     chooseFolder: { method: "POST", path: "/save/folder" },
     chooseOriginal: { method: "POST", path: "/save/original" },
@@ -403,6 +430,7 @@ export function createLoopbackRuntimeClient(options: LoopbackRuntimeClientOption
   const client: TrustedRuntimeClient = {
     get identity() { return identity; },
     async bootstrap(signal) {
+      connectInvalidations();
       const [stateValue, scopeValue, saveStatus] = await Promise.all([
         json("/state", {}, signal), json("/scope", {}, signal), json("/save/status", {}, signal),
       ]);
@@ -437,13 +465,15 @@ export function createLoopbackRuntimeClient(options: LoopbackRuntimeClientOption
         state: safeState(stateValue),
         scope: safeScope(scopeValue),
         saveStatus: safeSaveStatus(saveStatus),
+        ...(isObject(interactionAttachment) && interactionAttachment.protocolVersion === 1
+          ? { capabilities: { localDocumentRefresh: true, interactionLifecycleVersion: 1 } }
+          : { capabilities: { localDocumentRefresh: true } }),
         resources: {
           document: documentUri,
           pdfiumWasm: options.assets.pdfiumWasm,
           ...(options.assets.worker === undefined ? {} : { worker: options.assets.worker }),
         },
       };
-      connectInvalidations();
       return bootstrap;
     },
     async invoke(method, payload, signal) {
@@ -498,7 +528,9 @@ export function createLoopbackRuntimeClient(options: LoopbackRuntimeClientOption
       } else {
         value = route.method === "GET"
           ? await json(route.path, {}, signal)
-          : await post(route.path, trustedPayload, signal);
+          : await post(route.path, ["beginInteraction", "finalizeInteraction", "releaseInteraction", "acknowledgeInteraction"].includes(method)
+            ? { ...(trustedPayload as object), attachment: interactionAttachment ?? await attachmentReady.promise }
+            : trustedPayload, signal);
       }
       if (method === "reverseSyncTex" && isObject(value) && value.status === "ok" &&
         isObject(value.target) && typeof value.target.path === "string" &&
@@ -573,6 +605,7 @@ export function createLoopbackRuntimeClient(options: LoopbackRuntimeClientOption
     socket = new WebSocket(controlUrl, [
       "placekeeper",
       `placekeeper-auth.${options.launch.credential}`,
+      `placekeeper-view.${options.panelId}`,
     ]);
     socket.addEventListener("open", () => {
       socketRetryDelayMs = 1_000;
@@ -582,6 +615,11 @@ export function createLoopbackRuntimeClient(options: LoopbackRuntimeClientOption
       try {
         const value: unknown = JSON.parse(String(event.data));
         if (!isObject(value)) return;
+        if (value.kind === "interaction-attachment" && isObject(value.attachment)) {
+          interactionAttachment = value.attachment;
+          attachmentReady.resolve(value.attachment);
+          return;
+        }
         const successor = value.kind === "document-successor" &&
           Number.isSafeInteger(value.previousGeneration) &&
           Number.isSafeInteger(value.documentGeneration) &&
@@ -608,6 +646,8 @@ export function createLoopbackRuntimeClient(options: LoopbackRuntimeClientOption
     });
     socket.addEventListener("close", () => {
       socket = undefined;
+      interactionAttachment = undefined;
+      attachmentReady = Promise.withResolvers<unknown>();
       if (!disposed) {
         socketRetry = setTimeout(connectInvalidations, socketRetryDelayMs);
         socketRetryDelayMs = Math.min(socketRetryDelayMs * 2, 30_000);

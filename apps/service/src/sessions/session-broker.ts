@@ -95,6 +95,11 @@ import { prepareRecoveredReview } from "./recovered-review-preparation.js";
 import { inspectReplacementCandidate, prepareReplacementReview } from "./document-replacement-preparation.js";
 import { PresentationRecords } from "./presentation-records.js";
 import {
+  ReviewInteractions,
+  type ReviewInteractionAttachment,
+  type ReviewInteractionOutcome,
+} from "./review-interactions.js";
+import {
   LocalDocumentObserver,
   type LocalDocumentCandidate,
   type LocalDocumentInspectionResult,
@@ -189,6 +194,8 @@ export class SessionBroker {
   readonly #localObservationListeners = new Set<(event: LocalDocumentObservationEvent) => void>();
   readonly #physicalSaveResumeListeners = new Set<(sessionId: string) => void>();
   readonly #localDocumentObserver: LocalDocumentObserver<BrokerLocalDocumentInspection>;
+  readonly interactions: ReviewInteractions;
+  readonly #interactionAttachments = new Map<string, ReviewInteractionAttachment>();
   #sourceWorkInterruptionCollector: SourceWorkInterruptionCollector | undefined;
   readonly #privateSourceRoots = new Set<string>();
   #canonicalRecoveryRoot: string;
@@ -276,6 +283,223 @@ export class SessionBroker {
         }
         return inspected;
       },
+    });
+    this.interactions = new ReviewInteractions({
+      currentGeneration: (sessionId) => this.#activeById.get(sessionId)?.state.workflow.documentGeneration,
+      onLastRelease: (sessionId) => {
+        void this.#localDocumentObserver.hint(sessionId, { token: "interaction-release" });
+      },
+    });
+  }
+
+  replaceInteractionAttachment(sessionId: string, authenticatedOwnerKey: string): ReviewInteractionAttachment {
+    const key = `${sessionId}\0${authenticatedOwnerKey}`;
+    const attachment = this.interactions.register(sessionId, authenticatedOwnerKey);
+    this.#interactionAttachments.set(key, attachment);
+    return attachment;
+  }
+
+  disconnectInteractionIncarnation(
+    sessionId: string,
+    authenticatedOwnerKey: string,
+    attachment: Pick<ReviewInteractionAttachment, "attachmentId" | "incarnationId">,
+  ): void {
+    const key = `${sessionId}\0${authenticatedOwnerKey}`;
+    const current = this.#interactionAttachments.get(key);
+    if (current?.incarnationId === attachment.incarnationId) this.#interactionAttachments.delete(key);
+    this.interactions.disconnect(attachment.attachmentId, attachment.incarnationId);
+  }
+
+  disconnectInteractionAttachment(sessionId: string, authenticatedOwnerKey: string): void {
+    const key = `${sessionId}\0${authenticatedOwnerKey}`;
+    const attachment = this.#interactionAttachments.get(key);
+    if (attachment === undefined) return;
+    this.#interactionAttachments.delete(key);
+    this.interactions.disconnect(attachment.attachmentId, attachment.incarnationId);
+  }
+
+  async beginReviewInteraction(input: {
+    readonly sessionId: string;
+    readonly attachment: ReviewInteractionAttachment;
+    readonly generation: number;
+    readonly interactionToken: string;
+    readonly order: number;
+  }): Promise<unknown> {
+    const session = this.#activeById.get(input.sessionId);
+    if (session === undefined || session.ending) return { status: "unauthorized" };
+    return this.#withSessionTail(session, async () => {
+      return this.interactions.begin({ ...input.attachment, sessionId: input.sessionId, generation: input.generation,
+        interactionToken: input.interactionToken, order: input.order });
+    });
+  }
+
+  async finalizeReviewInteraction(input: {
+    readonly sessionId: string;
+    readonly attachment: ReviewInteractionAttachment;
+    readonly interactionToken: string;
+    readonly order: number;
+    readonly outcome: ReviewInteractionOutcome;
+    readonly draftId: string;
+    readonly expectedDraftRevision: number;
+  }): Promise<unknown> {
+    const session = this.#activeById.get(input.sessionId);
+    if (session === undefined || session.ending) return { status: "unauthorized" };
+    const result = await this.#withSessionTail(session, async () => {
+      return this.interactions.finalize({
+        ...input.attachment,
+        sessionId: input.sessionId,
+        interactionToken: input.interactionToken,
+        order: input.order,
+        outcome: input.outcome,
+        commit: async () => {
+          const draft = session.state.pendingDrafts.find((candidate) => candidate.id === input.draftId);
+          if (draft === undefined || draft.revision !== input.expectedDraftRevision || draft.status !== "protected") {
+            throw new Error("The protected draft revision is no longer current");
+          }
+          if (draft.ownerViewId !== input.attachment.attachmentId) {
+            throw new Error("The protected draft belongs to another review attachment");
+          }
+          const command: ReviewCommand = input.outcome === "applied" ? {
+            type: "apply-draft", expectedRevision: session.state.revision, id: draft.id,
+            expectedDraftRevision: draft.revision, ownerViewId: draft.ownerViewId,
+            updatedAt: this.#now().toISOString(),
+          } : {
+            type: "discard-reconciliation", expectedRevision: session.state.revision,
+            target: "draft", id: draft.id, expectedTargetRevision: draft.revision,
+            ownerViewId: draft.ownerViewId, reason: "author-cancelled",
+            discardedAt: this.#now().toISOString(),
+          };
+          const nextState = this.#reduceMutation(session, command, session.state.workflow.documentGeneration);
+          const nextNativeAnnotationLedger = nativeAnnotationLedger(nextState, session.nativeAnnotationLedger);
+          const desiredDigest = reviewStateDigest(nextState);
+          const nextSync: DurableSaveSync = {
+            phase: session.destination.phase === "active" ? "saving" : "not-saved",
+            desiredRevision: nextState.revision,
+            desiredDigest,
+            savedRevision: session.sync.savedRevision,
+            ...(session.sync.savedDigest === undefined ? {} : { savedDigest: session.sync.savedDigest }),
+            ...(session.destination.phase === "active" ? {} : { failure: "destination-unconfigured" as const }),
+          };
+          return {
+            reviewRevision: nextState.revision,
+            persist: async (receipt) => {
+              const interactionReceipts = [...session.interactionReceipts, receipt];
+              const predecessor = await session.store.recover();
+              const durableSuccessor = { ...this.#draft(session), state: nextState, sync: nextSync,
+                nativeAnnotationLedger: nextNativeAnnotationLedger, interactionReceipts,
+                acknowledgedAt: this.#now().toISOString() };
+              const apply = () => {
+                session.state = nextState;
+                session.sync = nextSync;
+                session.nativeAnnotationLedger = nextNativeAnnotationLedger;
+                session.interactionReceipts = interactionReceipts;
+                this.interactions.recoverFinalized(receipt);
+              };
+              const barrier = {
+                resolve: async (): Promise<"successor" | "predecessor" | "uncertain"> => {
+                  const recovered = await session.store.recover().catch(() => undefined);
+                  if (recovered !== undefined && isDeepStrictEqual(recovered, durableSuccessor)) {
+                    if (session.replacementCommitBarrier === barrier) delete session.replacementCommitBarrier;
+                    apply();
+                    return "successor";
+                  }
+                  if (predecessor !== undefined && recovered !== undefined && isDeepStrictEqual(recovered, predecessor)) {
+                    if (session.replacementCommitBarrier === barrier) delete session.replacementCommitBarrier;
+                    return "predecessor";
+                  }
+                  return "uncertain";
+                },
+              };
+              try {
+                await session.store.persist(durableSuccessor);
+              } catch (error) {
+                session.replacementCommitBarrier = barrier;
+                const settled = await barrier.resolve();
+                if (settled === "successor") return;
+                if (settled === "predecessor") throw error;
+                throw new ReplacementCommitOutcomeUncertainError();
+              }
+              session.state = nextState;
+              session.sync = nextSync;
+              session.nativeAnnotationLedger = nextNativeAnnotationLedger;
+              session.interactionReceipts = interactionReceipts;
+            },
+          };
+        },
+      });
+    });
+    if ((result as { status?: unknown; outcome?: unknown }).status === "finalized" &&
+      (result as { outcome?: unknown }).outcome === "applied") {
+      this.controls.publishStateInvalidation(input.sessionId, {
+        documentGeneration: session.state.workflow.documentGeneration,
+        reviewRevision: session.state.revision,
+        reason: "revision",
+      });
+    }
+    return result;
+  }
+
+  async releaseReviewInteraction(input: {
+    readonly sessionId: string;
+    readonly attachment: ReviewInteractionAttachment;
+    readonly interactionToken: string;
+    readonly order: number;
+  }): Promise<unknown> {
+    const session = this.#activeById.get(input.sessionId);
+    if (session === undefined || session.ending) return { status: "unauthorized" };
+    return this.#withSessionTail(session, async () => {
+      return this.interactions.release({ ...input.attachment, sessionId: input.sessionId,
+        interactionToken: input.interactionToken, order: input.order });
+    });
+  }
+
+  async acknowledgeReviewInteraction(input: {
+    readonly sessionId: string;
+    readonly attachment: ReviewInteractionAttachment;
+    readonly interactionToken: string;
+    readonly order: number;
+  }): Promise<unknown> {
+    const session = this.#activeById.get(input.sessionId);
+    if (session === undefined || session.ending) return { status: "unauthorized" };
+    return this.#withSessionTail(session, async () => {
+      return this.interactions.acknowledge({
+        ...input.attachment,
+        sessionId: input.sessionId,
+        interactionToken: input.interactionToken,
+        order: input.order,
+        persist: async (receipt) => {
+          const interactionReceipts = session.interactionReceipts.filter((candidate) =>
+            candidate.attachmentId !== receipt.attachmentId ||
+            candidate.interactionToken !== receipt.interactionToken);
+          const predecessor = await session.store.recover();
+          const durableSuccessor = { ...this.#draft(session), interactionReceipts };
+          const barrier = {
+            resolve: async (): Promise<"successor" | "predecessor" | "uncertain"> => {
+              const recovered = await session.store.recover().catch(() => undefined);
+              if (recovered !== undefined && isDeepStrictEqual(recovered, durableSuccessor)) {
+                if (session.replacementCommitBarrier === barrier) delete session.replacementCommitBarrier;
+                session.interactionReceipts = interactionReceipts;
+                this.interactions.recoverAcknowledged(receipt.attachmentId, receipt.interactionToken);
+                return "successor";
+              }
+              if (predecessor !== undefined && recovered !== undefined && isDeepStrictEqual(recovered, predecessor)) {
+                if (session.replacementCommitBarrier === barrier) delete session.replacementCommitBarrier;
+                return "predecessor";
+              }
+              return "uncertain";
+            },
+          };
+          try { await session.store.persist(durableSuccessor); }
+          catch (error) {
+            session.replacementCommitBarrier = barrier;
+            const settled = await barrier.resolve();
+            if (settled === "successor") return;
+            if (settled === "predecessor") throw error;
+            throw new ReplacementCommitOutcomeUncertainError();
+          }
+          session.interactionReceipts = interactionReceipts;
+        },
+      });
     });
   }
 
@@ -567,7 +791,7 @@ export class SessionBroker {
       if (adopted.sourceIdentity !== undefined) {
         const drafts = await this.#recoverableDrafts();
         const matches = drafts.filter((draft) =>
-          (draft.sync.phase !== "clean" || draft.chromeProtected === true) &&
+          (draft.sync.phase !== "clean" || draft.chromeProtected === true || (draft.interactionReceipts?.length ?? 0) > 0) &&
           draft.source.disposition === "remote-temporary" &&
           draft.source.sourceIdentity === adopted.sourceIdentity &&
           draft.source.digest === adopted.sha256 &&
@@ -635,6 +859,7 @@ export class SessionBroker {
         documentGeneration: 1,
         sourceOwnership,
         chromeProtected: false,
+        interactionReceipts: [],
       };
       // Persisting the lease is the ownership acknowledgement. No second
       // snapshot is created: the adopted source.pdf is the recovery source.
@@ -704,7 +929,7 @@ export class SessionBroker {
     const drafts = await this.#recoverableDrafts();
     const identityMatches = drafts.filter(
       (draft) =>
-        (draft.sync.phase !== "clean" || draft.chromeProtected === true) &&
+        (draft.sync.phase !== "clean" || draft.chromeProtected === true || (draft.interactionReceipts?.length ?? 0) > 0) &&
         ((draft.state.workflow.mode === "generated-output" &&
           this.#draftCanonicalPath(draft) === approvedFile.canonicalPath) ||
           ((draft.source.disposition === "local" ||
@@ -901,6 +1126,7 @@ export class SessionBroker {
         nativeAnnotationLedger: nativeAnnotationLedger(resumedState, matchingDraft.nativeAnnotationLedger),
         documentGeneration: 1,
         chromeProtected: matchingDraft.chromeProtected === true,
+        interactionReceipts: [...(matchingDraft.interactionReceipts ?? [])],
         sourceOwnership: matchingDraft.source.disposition === "local"
           ? {
               ...matchingDraft.source,
@@ -910,6 +1136,7 @@ export class SessionBroker {
             }
           : matchingDraft.source,
       };
+      this.interactions.hydrate(session.interactionReceipts);
       await session.store.persist(this.#draft(session));
       this.#activate(session);
       return {
@@ -956,6 +1183,7 @@ export class SessionBroker {
       nativeAnnotationLedger: nativeAnnotationLedger(state),
       documentGeneration: 1,
       chromeProtected: matchingDraft?.chromeProtected === true,
+      interactionReceipts: [],
       sourceOwnership: matchingDraft?.source.disposition === "remote-temporary"
         ? {
             ...matchingDraft.source,
@@ -1102,6 +1330,9 @@ export class SessionBroker {
       sourceWorkInterruptions: [...session.sourceWorkInterruptions],
       ...(session.chromeProtected ? { chromeProtected: true as const } : {}),
       nativeAnnotationLedger: session.nativeAnnotationLedger,
+      ...(session.interactionReceipts.length === 0 ? {} : {
+        interactionReceipts: [...session.interactionReceipts],
+      }),
     };
   }
 
@@ -1381,7 +1612,7 @@ export class SessionBroker {
       const hasView = this.#presentations.hasView(sessionId);
       if (
         session?.sourceOwnership.disposition === "remote-temporary" &&
-        session.sync.phase === "clean" && !stillScoped && !hasView
+        session.sync.phase === "clean" && session.interactionReceipts.length === 0 && !stillScoped && !hasView
       ) void this.#end(sessionId).catch(() => undefined);
     }
     this.#presentations.expireReconnects(now);
@@ -1817,13 +2048,17 @@ export class SessionBroker {
     // unresolved: its final path may be the durable successor being retained.
     await this.#withSessionTail(session, async () => undefined);
     if (input.serviceSequenceReserved !== true) {
-      const serviceSequence = this.#localDocumentObserver.orderHint(session.id);
+      const serviceSequence = await this.#localDocumentObserver.reserveExplicitHint(session.id);
       if (serviceSequence !== undefined) {
-        return this.replaceLiveDocument({
-          ...input,
-          observationEpoch: serviceSequence,
-          serviceSequenceReserved: true,
-        });
+        try {
+          return await this.replaceLiveDocument({
+            ...input,
+            observationEpoch: serviceSequence,
+            serviceSequenceReserved: true,
+          });
+        } finally {
+          this.#localDocumentObserver.completeExplicitHint(session.id, serviceSequence);
+        }
       }
     }
     if (!Number.isSafeInteger(input.observationEpoch) || input.observationEpoch <= 0) {
@@ -1902,7 +2137,6 @@ export class SessionBroker {
     let stagedSyncTex: GenerationSyncTexSnapshotResult | undefined;
     const markInvalid = async (reason: string): Promise<LiveDocumentReplacementResult> => {
       if (staged !== undefined) await rm(staged.path, { force: true }).catch(() => undefined);
-      let superseded = false;
       await this.#withSessionTail(session, async () => {
         if (
           session.ending || session.latestObservationEpoch !== input.observationEpoch ||
@@ -1910,7 +2144,6 @@ export class SessionBroker {
             !this.#localDocumentObserver.isCurrent(session.id, input.observationEpoch)) ||
           session.state.workflow.documentGeneration !== expected.documentGeneration
         ) {
-          superseded = true;
           return;
         }
         if (session.state.workflow.freshness === "possibly-stale") {
@@ -1934,7 +2167,10 @@ export class SessionBroker {
         session.sync = sync;
       });
       return {
-        status: superseded ? "superseded" : "invalid",
+        // This staged candidate was inspected and proved invalid. A newer
+        // observation may own the next attempt, but it does not rewrite the
+        // outcome of this caller's verified candidate.
+        status: "invalid",
         sessionId: session.id,
         documentGeneration: session.state.workflow.documentGeneration,
         reason,
@@ -2094,6 +2330,25 @@ export class SessionBroker {
     let retainCommittedSnapshot = false;
     try {
       result = await this.#withSessionTail(session, async () => {
+        if (session.state.workflow.documentGeneration !== expected.documentGeneration) {
+          await rm(staged!.path, { force: true });
+          if (stagedSyncTex?.status === "ready") await rm(stagedSyncTex.snapshot.snapshotPath, { force: true });
+          return { status: "superseded" as const, sessionId: session.id,
+            documentGeneration: session.state.workflow.documentGeneration,
+            reason: "newer-observation-superseded-candidate" };
+        }
+        if (!await stagedGenerationSourceIsCurrent(session.canonicalSourcePath, staged!)) {
+          await rm(staged!.path, { force: true });
+          if (stagedSyncTex?.status === "ready") {
+            await rm(stagedSyncTex.snapshot.snapshotPath, { force: true });
+          }
+          return {
+            status: "invalid" as const,
+            sessionId: session.id,
+            documentGeneration: session.state.workflow.documentGeneration,
+            reason: "candidate-source-changed-during-inspection",
+          };
+        }
         if (
           session.latestObservationEpoch !== input.observationEpoch ||
           (input.serviceSequenceReserved === true &&
@@ -2123,6 +2378,18 @@ export class SessionBroker {
             sessionId: session.id,
             documentGeneration: session.state.workflow.documentGeneration,
             reason: "generation-or-source-digest-fence-changed",
+          };
+        }
+        if (this.interactions.held(session.id)) {
+          await rm(staged!.path, { force: true });
+          if (stagedSyncTex?.status === "ready") {
+            await rm(stagedSyncTex.snapshot.snapshotPath, { force: true });
+          }
+          return {
+            status: "deferred" as const,
+            sessionId: session.id,
+            documentGeneration: session.state.workflow.documentGeneration,
+            reason: "active-review-interaction",
           };
         }
 
@@ -2417,8 +2684,12 @@ export class SessionBroker {
     const session = this.#activeById.get(sessionId);
     if (session === undefined || session.ending) throw new Error("Review session is not active");
     void hostHintToken;
-    const sequence = this.#localDocumentObserver.orderHint(sessionId);
-    return this.markLiveDocumentPossiblyStale(sessionId, sequence, true);
+    const sequence = await this.#localDocumentObserver.reserveExplicitHint(sessionId);
+    try {
+      return await this.markLiveDocumentPossiblyStale(sessionId, sequence, true);
+    } finally {
+      if (sequence !== undefined) this.#localDocumentObserver.completeExplicitHint(sessionId, sequence);
+    }
   }
 
   async #inspectLocalDocumentCandidate(
@@ -2476,7 +2747,7 @@ export class SessionBroker {
         serviceSequenceReserved: true,
       });
       return {
-        status: result.status === "invalid" || result.status === "generation-conflict"
+        status: result.status === "invalid" || result.status === "generation-conflict" || result.status === "deferred"
           ? "retry"
           : "current",
         result,
@@ -2501,9 +2772,13 @@ export class SessionBroker {
       throw new Error("Freshness observation requires generated-output review mode");
     }
     if (!serviceSequenceReserved) {
-      const serviceSequence = this.#localDocumentObserver.orderHint(session.id);
+      const serviceSequence = await this.#localDocumentObserver.reserveExplicitHint(session.id);
       if (serviceSequence !== undefined) {
-        return this.markLiveDocumentPossiblyStale(sessionId, serviceSequence, true);
+        try {
+          return await this.markLiveDocumentPossiblyStale(sessionId, serviceSequence, true);
+        } finally {
+          this.#localDocumentObserver.completeExplicitHint(session.id, serviceSequence);
+        }
       }
     }
     if (observationEpoch !== undefined &&
@@ -3025,7 +3300,7 @@ export class SessionBroker {
       const clean = session.sync.phase === "clean" &&
         session.sync.savedRevision === session.sync.desiredRevision &&
         session.sync.savedDigest === session.sync.desiredDigest;
-      if (clean && !session.chromeProtected) await session.store.remove();
+      if (clean && !session.chromeProtected && session.interactionReceipts.length === 0) await session.store.remove();
     }));
     for (const session of sessions) {
       this.capabilities.revokeFile(session.fileId);
@@ -3033,6 +3308,7 @@ export class SessionBroker {
       this.credentials.revokeSession(session.id);
       this.taskBindings.revokeSession(session.id);
       this.controls.cancel(session.id);
+      this.interactions.revokeSession(session.id);
       for (const listener of this.#sessionEndListeners) listener(session.id, "shutdown");
     }
     this.#snapshotStores.clear();
@@ -3042,6 +3318,7 @@ export class SessionBroker {
     this.#activeChromeBySource.clear();
     this.#chromeSourceKeyBySession.clear();
     this.#presentations.clear();
+    this.#interactionAttachments.clear();
     this.#recovery.clear();
   }
 
@@ -3059,6 +3336,10 @@ export class SessionBroker {
     if (session === undefined) return;
     session.ending = true;
     this.controls.cancel(sessionId);
+    this.interactions.revokeSession(sessionId);
+    for (const key of this.#interactionAttachments.keys()) {
+      if (key.startsWith(`${sessionId}\0`)) this.#interactionAttachments.delete(key);
+    }
     this.#localDocumentObserver.stop(sessionId);
     await this.#localDocumentObserver.settle();
     this.#recovery.clearForSession(sessionId);

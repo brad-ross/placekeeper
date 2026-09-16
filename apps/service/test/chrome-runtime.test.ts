@@ -67,8 +67,8 @@ function backend(overrides: Partial<ChromeRuntimeBackend> = {}): ChromeRuntimeBa
 }
 
 async function negotiate(connection: ChromeRuntimeConnection): Promise<void> {
-  await expect(connection.handle({ type: "hello", reviewRuntimeVersion: 2, protocol: "placekeeper.chrome-runtime", protocolVersion: 2, connectionId }))
-    .resolves.toMatchObject({ type: "hello-ack", reviewRuntimeVersion: 2, protocolVersion: 2, connectionId });
+  await expect(connection.handle({ type: "hello", reviewRuntimeVersion: 3, protocol: "placekeeper.chrome-runtime", protocolVersion: 2, connectionId }))
+    .resolves.toMatchObject({ type: "hello-ack", reviewRuntimeVersion: 3, protocolVersion: 2, connectionId });
 }
 
 async function acquire(connection: ChromeRuntimeConnection): Promise<void> {
@@ -179,10 +179,10 @@ describe("Chrome least-authority native runtime", () => {
 
   it("fails closed on skew, mid-port version changes, v1 smuggling, and agent-only methods", async () => {
     const preflight = new ChromeRuntimeConnection({ callerOrigin: origin, backend: backend() });
-    await expect(preflight.handle({ type: "hello", reviewRuntimeVersion: 2, protocol: "placekeeper.chrome-runtime", protocolVersion: 1, connectionId }))
+    await expect(preflight.handle({ type: "hello", reviewRuntimeVersion: 3, protocol: "placekeeper.chrome-runtime", protocolVersion: 1, connectionId }))
       .resolves.toMatchObject({ type: "failure", reason: "protocol-mismatch" });
 
-    for (const reviewRuntimeVersion of [undefined, 1, 3]) {
+    for (const reviewRuntimeVersion of [undefined, 1, 2]) {
       const mixed = new ChromeRuntimeConnection({ callerOrigin: origin, backend: backend() });
       await expect(mixed.handle({ type: "hello", protocol: "placekeeper.chrome-runtime", protocolVersion: 2,
         connectionId, ...(reviewRuntimeVersion === undefined ? {} : { reviewRuntimeVersion }) }))
@@ -293,7 +293,7 @@ describe("Chrome least-authority native runtime", () => {
     const authority = new ChromeRuntimeServiceAuthority(delegate);
     const invokeThroughFreshConnection = async (id: string) => {
       const connection = new ChromeRuntimeConnection({ callerOrigin: origin, backend: authority });
-      await connection.handle({ type: "hello", reviewRuntimeVersion: 2, protocol: "placekeeper.chrome-runtime", protocolVersion: 2, connectionId: id });
+      await connection.handle({ type: "hello", reviewRuntimeVersion: 3, protocol: "placekeeper.chrome-runtime", protocolVersion: 2, connectionId: id });
       await connection.handle({ type: "begin", lane: "acquisition", protocolVersion: 2, connectionId: id, requestId: `request-acquire-${id}`, transferId: `transfer-${id}`, disposition: "remote-temporary", sourceUrl: "https://papers.example.test/paper.pdf" });
       await connection.handle({ type: "chunk", lane: "acquisition", protocolVersion: 2, connectionId: id, requestId: `request-chunk-${id}`, transferId: `transfer-${id}`, sequence: 0, data: sourceBytes.toString("base64") });
       await connection.handle({ type: "finish", lane: "acquisition", protocolVersion: 2, connectionId: id, requestId: `request-finish-${id}`, transferId: `transfer-${id}`, sequence: 1 });
@@ -537,7 +537,7 @@ describe("Chrome least-authority native runtime", () => {
     try {
       const manager = new ChromeRuntimeManager(new ChromeRuntimeServiceAuthority(backend()), { idleLeaseMs: 25 });
       await manager.handle("manager-port-id-0001", {
-        type: "hello", reviewRuntimeVersion: 2, protocol: "placekeeper.chrome-runtime", protocolVersion: 2,
+        type: "hello", reviewRuntimeVersion: 3, protocol: "placekeeper.chrome-runtime", protocolVersion: 2,
         connectionId: "manager-connection-1",
       });
       expect(manager.activity()).toEqual({ connections: 1, queuedEvents: 0 });
@@ -553,11 +553,11 @@ describe("Chrome least-authority native runtime", () => {
     const authority = new ChromeRuntimeServiceAuthority(backend(), { quota });
     const manager = new ChromeRuntimeManager(authority);
     await manager.handle("manager-port-id-0001", {
-      type: "hello", reviewRuntimeVersion: 2, protocol: "placekeeper.chrome-runtime", protocolVersion: 2,
+      type: "hello", reviewRuntimeVersion: 3, protocol: "placekeeper.chrome-runtime", protocolVersion: 2,
       connectionId: "manager-connection-1",
     });
     await expect(manager.handle("manager-port-id-0002", {
-      type: "hello", reviewRuntimeVersion: 2, protocol: "placekeeper.chrome-runtime", protocolVersion: 2,
+      type: "hello", reviewRuntimeVersion: 3, protocol: "placekeeper.chrome-runtime", protocolVersion: 2,
       connectionId: "manager-connection-2",
     })).resolves.toMatchObject([{ type: "failure", reason: "host-busy" }]);
     await manager.close();

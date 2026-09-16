@@ -133,7 +133,7 @@ export type LiveDocumentReplacementResult =
       readonly migratedTaskSessionId?: string;
     }
   | {
-      readonly status: "same-digest" | "invalid" | "superseded" | "generation-conflict" |
+      readonly status: "same-digest" | "invalid" | "superseded" | "generation-conflict" | "deferred" |
         "retention-rejected";
       readonly sessionId: string;
       readonly documentGeneration: number;

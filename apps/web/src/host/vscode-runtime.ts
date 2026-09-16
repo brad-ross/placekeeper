@@ -158,6 +158,7 @@ export function createRpcHostRuntime(
   const invalidations = new Set<(event: HostRuntimeInvalidation) => void>();
   const hostCommands = new Set<(command: HostRuntimeCommand) => void>();
   let identity: HostRuntimeIdentity | undefined;
+  let interactionLifecycleNegotiated = false;
   let pendingInvalidation: HostRuntimeInvalidation | undefined;
   let deferredCommandInvalidation: HostRuntimeInvalidation | undefined;
   let pendingHostCommand: HostRuntimeCommand | undefined;
@@ -228,7 +229,7 @@ export function createRpcHostRuntime(
   const releaseDeferredCommandInvalidation = () => {
     if (
       deferredCommandInvalidation === undefined
-      || [...pending.values()].some((request) => ["command", "chooseCopy", "chooseOriginal"].includes(request.method))
+      || [...pending.values()].some((request) => ["command", "chooseCopy", "chooseOriginal", "finalizeInteraction"].includes(request.method))
     ) return;
     const deferred = deferredCommandInvalidation;
     deferredCommandInvalidation = undefined;
@@ -274,8 +275,9 @@ export function createRpcHostRuntime(
       };
       if (revisionAlreadyObserved(event)) return;
       if (
-        event.reason === "revision"
-        && [...pending.values()].some((request) => ["command", "chooseCopy", "chooseOriginal"].includes(request.method))
+        [...pending.values()].some((request) => request.method === "finalizeInteraction") ||
+        (event.reason === "revision"
+        && [...pending.values()].some((request) => ["command", "chooseCopy", "chooseOriginal"].includes(request.method)))
       ) {
         if (
           deferredCommandInvalidation === undefined
@@ -405,6 +407,9 @@ export function createRpcHostRuntime(
 
   return {
     host,
+    get capabilities() { return interactionLifecycleNegotiated
+      ? { localDocumentRefresh: true as const, interactionLifecycleVersion: 1 as const }
+      : { localDocumentRefresh: true as const }; },
     async bootstrap(signal?: AbortSignal): Promise<HostRuntimeBootstrap> {
       const value = await invoke<Record<string, unknown>>("bootstrap", {}, signal);
       if (!validIdentity(value) || !isObject(value.state) || !isObject(value.scope) ||
@@ -418,6 +423,8 @@ export function createRpcHostRuntime(
         generation: value.generation,
         revision: value.revision,
       };
+      interactionLifecycleNegotiated = isObject(value.capabilities) &&
+        value.capabilities.interactionLifecycleVersion === 1;
       const [documentResourceValue, pdfium, worker] = await Promise.all([
         documentResource(value.resources.document),
         pdfiumResource(value.resources.pdfiumWasm),
@@ -522,6 +529,13 @@ export function createRpcHostRuntime(
     scope: (signal) => invoke<ProductionScope>("scope", {}, signal),
     forwardSyncTex: (input) => invoke("forwardSyncTex", input),
     reverseSyncTex: (input) => invoke("reverseSyncTex", input),
+    beginInteraction: (input) => invoke("beginInteraction", input),
+    async finalizeInteraction(input) {
+      try { return await invoke("finalizeInteraction", input); }
+      finally { setTimeout(releaseDeferredCommandInvalidation, 0); }
+    },
+    releaseInteraction: (input) => invoke("releaseInteraction", input),
+    acknowledgeInteraction: (input) => invoke("acknowledgeInteraction", input),
     subscribeInvalidations(listener) {
       invalidations.add(listener);
       if (pendingInvalidation !== undefined) {

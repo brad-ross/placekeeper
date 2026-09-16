@@ -35,7 +35,8 @@ export type MacosRuntimeTrustedProjection = ChromeRuntimeProjection;
 export type { MacosRuntimeProjection };
 
 const NON_IDEMPOTENT = new Set<ReviewRuntimeBrokerMethod>([
-  "command", "chooseCopy", "chooseFolder", "chooseOriginal", "retrySave", "locateSave", "exportReviewedCopy",
+  "command", "beginInteraction", "finalizeInteraction", "releaseInteraction", "acknowledgeInteraction",
+  "chooseCopy", "chooseFolder", "chooseOriginal", "retrySave", "locateSave", "exportReviewedCopy",
 ]);
 
 interface RuntimeRecordBase {
@@ -53,6 +54,7 @@ interface StagedRuntimeRecord extends RuntimeRecordBase {
   phase: "provisional" | "active";
   trustedProjection: ChromeRuntimeProjection;
   projection: MacosRuntimeProjection;
+  interactionAttachment?: import("../sessions/review-interactions.js").ReviewInteractionAttachment;
 }
 
 interface RecoveryRuntimeRecord extends RuntimeRecordBase {
@@ -344,6 +346,10 @@ export class MacosRuntimeManager {
       const projection = sanitizeMacosRuntimeProjection(trusted);
       if (projection === undefined) throw new Error("invalid-projection");
       record.phase = "active";
+      const interactionAttachment = this.#backend.registerInteraction?.(
+        record.canonicalKey, `macos:${record.helperId}:${record.attemptId}`,
+      );
+      if (interactionAttachment !== undefined) record.interactionAttachment = interactionAttachment;
       record.trustedProjection = trusted;
       record.projection = projection;
       return { ...this.#envelope(message), type: "active", projection };
@@ -435,10 +441,21 @@ export class MacosRuntimeManager {
       const payloadDigest = createHash("sha256")
         .update(canonicalJson({ method: message.method, payload: message.payload }))
         .digest("hex");
-      const result = await this.#backend.invoke(record.canonicalKey, message.method, message.payload, {
+      const interactionAction = message.method === "beginInteraction" ? "begin"
+        : message.method === "finalizeInteraction" ? "finalize"
+          : message.method === "releaseInteraction" ? "release"
+            : message.method === "acknowledgeInteraction" ? "acknowledge" : undefined;
+      const result = interactionAction === undefined
+        ? await this.#backend.invoke(record.canonicalKey, message.method, message.payload, {
         ...(message.idempotencyKey === undefined ? {} : { idempotencyKey: message.idempotencyKey }),
         payloadDigest,
-      }, signal);
+      }, signal)
+        : await this.#backend.interaction?.(
+            record.canonicalKey,
+            record.interactionAttachment!,
+            interactionAction,
+            message.payload,
+          ) ?? { status: "unauthorized" };
       throwIfAborted(signal);
       const payload = sanitizeMacosReviewRuntimeResponse(message.method, result);
       if (payload === undefined) return this.#failure(message, "unavailable");
@@ -523,6 +540,9 @@ export class MacosRuntimeManager {
     this.#activeResourcesByHelper.delete(helperId);
     if (record === undefined) return;
     if (record.phase === "active") {
+      if (record.interactionAttachment !== undefined) {
+        this.#backend.disconnectInteraction?.(record.canonicalKey, record.interactionAttachment);
+      }
       await this.#backend.detach(record.canonicalKey, record.presentationLease).catch(() => undefined);
     } else if (record.phase === "provisional") {
       await this.#backend.release(record.canonicalKey).catch(() => undefined);

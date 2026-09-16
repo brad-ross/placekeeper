@@ -474,6 +474,7 @@ export async function createStaticHostRuntime(
 
   const runtime: HostRuntime = {
     host: "static",
+    capabilities: { localDocumentRefresh: false },
     async bootstrap() {
       return {
         sessionId,
@@ -582,6 +583,18 @@ export async function createStaticHostRuntime(
     },
     async reverseSyncTex() {
       throw new Error("SyncTeX is unavailable in the static browser edition.");
+    },
+    async beginInteraction() {
+      return { status: "unsupported", reason: "static-export-runtime" };
+    },
+    async finalizeInteraction() {
+      return { status: "unsupported", reason: "static-export-runtime" };
+    },
+    async releaseInteraction() {
+      return { status: "unsupported", reason: "static-export-runtime" };
+    },
+    async acknowledgeInteraction() {
+      return { status: "unsupported", reason: "static-export-runtime" };
     },
     dispose() {
       if (disposed) return;

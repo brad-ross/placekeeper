@@ -327,6 +327,7 @@ async function attemptControlUpgrade(input: {
   readonly sessionId: string;
   readonly credential?: string;
   readonly origin?: string;
+  readonly viewId?: string;
 }): Promise<{
   readonly accepted: false;
 } | {
@@ -334,6 +335,8 @@ async function attemptControlUpgrade(input: {
   readonly protocol: string | undefined;
   readonly rawHeaders: readonly string[];
   readonly close: Promise<void>;
+  readonly attachment: Promise<Record<string, unknown>>;
+  readonly destroy: () => void;
 }> {
   return new Promise((resolve) => {
     const request = httpRequest({
@@ -349,15 +352,29 @@ async function attemptControlUpgrade(input: {
         "sec-websocket-version": "13",
         ...(input.credential === undefined
           ? {}
-          : { "sec-websocket-protocol": `placekeeper, placekeeper-auth.${input.credential}` }),
+          : { "sec-websocket-protocol": `placekeeper, placekeeper-auth.${input.credential}${input.viewId === undefined ? "" : `, placekeeper-view.${input.viewId}`}` }),
       },
     });
-    request.on("upgrade", (response, socket) => {
+    request.on("upgrade", (response, socket, head) => {
+      const attachment = Promise.withResolvers<Record<string, unknown>>();
+      const receive = (data: Buffer) => {
+        if (data.byteLength < 2) return;
+        const marker = data[1]! & 0x7f;
+        const headerBytes = marker === 126 ? 4 : 2;
+        const length = marker === 126 ? data.readUInt16BE(2) : marker;
+        if (marker === 127 || data.byteLength < length + headerBytes) return;
+        const value = JSON.parse(data.subarray(headerBytes, length + headerBytes).toString("utf8")) as { kind?: string; attachment?: Record<string, unknown> };
+        if (value.kind === "interaction-attachment" && value.attachment !== undefined) attachment.resolve(value.attachment);
+      };
+      socket.on("data", receive);
+      if (head.byteLength > 0) receive(head);
       resolve({
         accepted: true,
         protocol: response.headers["sec-websocket-protocol"],
         rawHeaders: response.rawHeaders,
         close: new Promise<void>((closed) => socket.once("close", closed)),
+        attachment: attachment.promise,
+        destroy: () => socket.destroy(),
       });
     });
     request.on("error", () => resolve({ accepted: false }));
@@ -385,6 +402,102 @@ function postJson(
 }
 
 describe("loopback HTTP boundary", () => {
+  it("authenticates and orders the shared interaction lifecycle over HTTP", async () => {
+    const { broker, launch, server } = await openBroker();
+    const exchanged = await postJson(
+      `${server.origin}/s/${launch.sessionId}/exchange`,
+      { capability: launch.fragment.slice("#cap=".length) },
+    );
+    const { credential } = await exchanged.json() as { credential: string };
+    const headers = { authorization: `Bearer ${credential}` };
+    const root = `${server.origin}/s/${launch.sessionId}/interactions`;
+    const token = "interaction_transport_1234";
+    const control = await attemptControlUpgrade({ server, sessionId: launch.sessionId, credential,
+      origin: server.origin, viewId: "window-transport-1234" });
+    if (!control.accepted) throw new Error("Expected authenticated control attachment");
+    const attachment = await control.attachment;
+
+    expect((await postJson(`${root}/begin`, { interactionToken: token, order: 1, generation: 1 })).status).toBe(401);
+    const begun = await postJson(`${root}/begin`, { attachment, interactionToken: token, order: 1, generation: 1 }, headers);
+    expect(await begun.json()).toMatchObject({ status: "accepted", generation: 1 });
+    expect(broker.interactions.held(launch.sessionId)).toBe(true);
+    const duplicate = await postJson(`${root}/begin`, { attachment, interactionToken: token, order: 1, generation: 1 }, headers);
+    expect(await duplicate.json()).toMatchObject({ status: "accepted", generation: 1 });
+    const released = await postJson(`${root}/release`, { attachment, interactionToken: token, order: 2 }, headers);
+    expect(await released.json()).toMatchObject({ status: "released" });
+    expect(broker.interactions.held(launch.sessionId)).toBe(false);
+
+    const finalizedToken = "interaction_finalize_1234";
+    const draftId = "00000000-0000-4000-8000-000000000321";
+    await broker.acceptMutation(launch.sessionId, { type: "put-draft", expectedRevision: 0,
+      expectedDraftRevision: -1, draft: { id: draftId, ownerViewId: attachment.attachmentId as string,
+        baseGeneration: 1, revision: 0, kind: "highlight", pageIndex: 0, text: "transport draft",
+        anchor: { kind: "selection", pageIndex: 0, quote: "transport", prefix: "", suffix: "",
+          rect: { x: 1, y: 1, width: 5, height: 5 }, segmentRects: [{ x: 1, y: 1, width: 5, height: 5 }] },
+        disposition: { kind: "resolved", generation: 1 }, status: "protected",
+        createdAt: "2026-09-15T00:00:00.000Z", updatedAt: "2026-09-15T00:00:00.000Z" } });
+    const cross = await attemptControlUpgrade({ server, sessionId: launch.sessionId, credential,
+      origin: server.origin, viewId: "window-cross-attachment-1234" });
+    if (!cross.accepted) throw new Error("Expected cross-attachment control connection");
+    const crossAttachment = await cross.attachment;
+    const crossToken = "interaction_cross_attachment_1234";
+    await postJson(`${root}/begin`, { attachment: crossAttachment, interactionToken: crossToken,
+      order: 1, generation: 1 }, headers);
+    expect((await postJson(`${root}/finalize`, { attachment: crossAttachment,
+      interactionToken: crossToken, order: 2, outcome: "discarded", draftId,
+      expectedDraftRevision: 0 }, headers)).status).toBe(409);
+    expect(broker.state(launch.sessionId)?.pendingDrafts).toHaveLength(1);
+    await postJson(`${root}/release`, { attachment: crossAttachment,
+      interactionToken: crossToken, order: 3 }, headers);
+    cross.destroy();
+    await postJson(`${root}/begin`, { attachment, interactionToken: finalizedToken, order: 3, generation: 1 }, headers);
+    const finalizeBody = {
+      interactionToken: finalizedToken,
+      order: 4,
+      outcome: "applied",
+      draftId,
+      expectedDraftRevision: 0,
+      attachment,
+    };
+    const finalized = await postJson(`${root}/finalize`, finalizeBody, headers);
+    const receipt = await finalized.json();
+    expect(receipt).toMatchObject({ status: "finalized", outcome: "applied", reviewRevision: 2 });
+    expect(broker.state(launch.sessionId)).toMatchObject({ revision: 2, pendingDrafts: [] });
+    expect(await (await postJson(`${root}/finalize`, finalizeBody, headers)).json()).toEqual(receipt);
+    const second = await attemptControlUpgrade({ server, sessionId: launch.sessionId, credential,
+      origin: server.origin, viewId: "window-transport-5678" });
+    if (!second.accepted) throw new Error("Expected a second authenticated attachment");
+    const secondAttachment = await second.attachment;
+    expect(secondAttachment.attachmentId).not.toBe(attachment.attachmentId);
+    await postJson(`${root}/begin`, { attachment, interactionToken: "hold-window-one-1234", order: 6, generation: 1 }, headers);
+    await postJson(`${root}/begin`, { attachment: secondAttachment, interactionToken: "hold-window-two-1234", order: 1, generation: 1 }, headers);
+    control.destroy();
+    await control.close;
+    expect(broker.interactions.held(launch.sessionId)).toBe(true);
+    const reconnected = await attemptControlUpgrade({ server, sessionId: launch.sessionId, credential,
+      origin: server.origin, viewId: "window-transport-1234" });
+    if (!reconnected.accepted) throw new Error("Expected reconnected attachment");
+    const reconnectedAttachment = await reconnected.attachment;
+    expect(reconnectedAttachment.attachmentId).toBe(attachment.attachmentId);
+    expect(reconnectedAttachment.incarnationId).not.toBe(attachment.incarnationId);
+    expect(await (await postJson(`${root}/begin`, {
+      attachment, interactionToken: "stale-window-request-1234", order: 7, generation: 1,
+    }, headers)).json()).toMatchObject({ status: "unauthorized" });
+    expect(await (await postJson(`${root}/acknowledge`, {
+      interactionToken: finalizedToken, order: 1, attachment: reconnectedAttachment,
+    }, headers)).json()).toMatchObject({ status: "released" });
+    await postJson(`${root}/begin`, { attachment: reconnectedAttachment,
+      interactionToken: "hold-window-one-reconnected-1234", order: 2, generation: 1 }, headers);
+    await postJson(`${root}/release`, { attachment: secondAttachment,
+      interactionToken: "hold-window-two-1234", order: 2 }, headers);
+    expect(broker.interactions.held(launch.sessionId)).toBe(true);
+    await postJson(`${root}/release`, { attachment: reconnectedAttachment,
+      interactionToken: "hold-window-one-reconnected-1234", order: 3 }, headers);
+    expect(broker.interactions.held(launch.sessionId)).toBe(false);
+    second.destroy();
+    reconnected.destroy();
+  });
+
   it("authenticates generated-output stale and observation mutations", async () => {
     const { broker, launch, pdf, server } = await openBroker({ generatedOutput: true });
     const exchanged = await postJson(

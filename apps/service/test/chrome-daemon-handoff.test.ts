@@ -152,7 +152,7 @@ describe("Chrome daemon handoff", () => {
     const portId = "runtime-control-port-1";
     const connectionId = "runtime-control-connection-1";
     const exchange = (message: unknown) => requestControl(socketPath, { kind: "chrome-runtime", portId, message });
-    await expect(exchange({ type: "hello", reviewRuntimeVersion: 2, protocol: "placekeeper.chrome-runtime", protocolVersion: 2, connectionId }))
+    await expect(exchange({ type: "hello", reviewRuntimeVersion: 3, protocol: "placekeeper.chrome-runtime", protocolVersion: 2, connectionId }))
       .resolves.toMatchObject({ kind: "chrome-runtime", messages: [{ type: "hello-ack" }] });
     await exchange({ type: "begin", lane: "acquisition", protocolVersion: 2, connectionId, requestId: "request-acquire-1", transferId: "transfer-runtime-1", disposition: "remote-temporary", sourceUrl: "https://papers.example.test/runtime.pdf", displayName: "Runtime.pdf" });
     const bytes = await readFile(join(process.cwd(), "test/fixtures/pdfs/text-native.pdf"));

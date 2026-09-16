@@ -19,11 +19,13 @@ import { deadlineWasSubstantiallyDelayed } from "../../../../packages/core/src/s
 import { CHROME_EXTENSION_ORIGIN } from "./chrome-handoff.js";
 import { canonicalJson } from "../runtime/canonical-json.js";
 import { ChromeRuntimeOperationJournal } from "./runtime-operation-journal.js";
+import type { ReviewInteractionAttachment } from "../sessions/review-interactions.js";
 export { ChromeRuntimeOperationJournal } from "./runtime-operation-journal.js";
 
 const SHA256 = /^[a-f0-9]{64}$/u;
 const NON_IDEMPOTENT_METHODS = new Set<ReviewRuntimeBrokerMethod>([
-  "command", "chooseCopy", "chooseFolder", "chooseOriginal", "retrySave", "locateSave",
+  "command", "beginInteraction", "finalizeInteraction", "releaseInteraction", "acknowledgeInteraction",
+  "chooseCopy", "chooseFolder", "chooseOriginal", "retrySave", "locateSave",
   "exportReviewedCopy",
 ]);
 
@@ -90,6 +92,14 @@ export interface ChromeRuntimeBackend {
   readDocument(canonicalKey: string, generation: number, offset: number, length: number, signal?: AbortSignal): Promise<Buffer>;
   detach(canonicalKey: string, presentationLease: string): Promise<void>;
   release(canonicalKey: string): Promise<void>;
+  interaction?(
+    canonicalKey: string,
+    attachment: ReviewInteractionAttachment,
+    action: "begin" | "finalize" | "release" | "acknowledge",
+    payload: unknown,
+  ): Promise<unknown>;
+  registerInteraction?(canonicalKey: string, authenticatedOwnerKey: string): ReviewInteractionAttachment;
+  disconnectInteraction?(canonicalKey: string, attachment: ReviewInteractionAttachment): void;
 }
 
 export interface ChromeRuntimeAggregateQuotaOptions {
@@ -194,6 +204,23 @@ export class ChromeRuntimeServiceAuthority implements ChromeRuntimeBackend {
     return this.#delegate.detach(canonicalKey, presentationLease);
   }
   release(canonicalKey: string): Promise<void> { return this.#delegate.release(canonicalKey); }
+  interaction(
+    canonicalKey: string,
+    attachment: ReviewInteractionAttachment,
+    action: "begin" | "finalize" | "release" | "acknowledge",
+    payload: unknown,
+  ): Promise<unknown> {
+    return this.#delegate.interaction === undefined
+      ? Promise.resolve({ status: "unauthorized" })
+      : this.#delegate.interaction(canonicalKey, attachment, action, payload);
+  }
+  registerInteraction(canonicalKey: string, authenticatedOwnerKey: string): ReviewInteractionAttachment {
+    if (this.#delegate.registerInteraction === undefined) throw new Error("interaction-unavailable");
+    return this.#delegate.registerInteraction(canonicalKey, authenticatedOwnerKey);
+  }
+  disconnectInteraction(canonicalKey: string, attachment: ReviewInteractionAttachment): void {
+    this.#delegate.disconnectInteraction?.(canonicalKey, attachment);
+  }
 }
 
 export interface CanonicalReviewResolution<T> {

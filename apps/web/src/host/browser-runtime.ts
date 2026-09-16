@@ -10,6 +10,14 @@ import type {
 import type { RejectedReviewCommand } from "../review/review-command-result.js";
 import { loadProductionSession } from "../app/session-api.js";
 import type { HostRuntime, HostRuntimeInvalidation } from "./runtime.js";
+interface ReviewInteractionAttachment {
+  readonly sessionId: string;
+  readonly attachmentId: string;
+  readonly incarnationId: string;
+  readonly capability: string;
+  readonly protocolVersion: 1;
+  readonly capabilities: readonly string[];
+}
 
 export function createBrowserHostRuntime(session: ProductionSession): HostRuntime {
   let loaded: Awaited<ReturnType<typeof loadProductionSession>> | undefined;
@@ -18,6 +26,11 @@ export function createBrowserHostRuntime(session: ProductionSession): HostRuntim
   let retry: ReturnType<typeof setTimeout> | undefined;
   let retryDelayMs = 1_000;
   let stopped = false;
+  const viewIdentity = crypto.randomUUID();
+  let interactionAttachment: ReviewInteractionAttachment | undefined;
+  let attachmentReady = Promise.withResolvers<ReviewInteractionAttachment>();
+  let pendingFinalizations = 0;
+  let deferredInvalidation: HostRuntimeInvalidation | undefined;
 
   const ensureLoaded = async () => loaded ??= await loadProductionSession(session);
   const connectInvalidations = (): void => {
@@ -25,7 +38,7 @@ export function createBrowserHostRuntime(session: ProductionSession): HostRuntim
     const scheme = window.location.protocol === "https:" ? "wss:" : "ws:";
     socket = new WebSocket(
       `${scheme}//${window.location.host}/s/${session.sessionId}/control`,
-      ["placekeeper", `placekeeper-auth.${session.credential}`],
+      ["placekeeper", `placekeeper-auth.${session.credential}`, `placekeeper-view.${viewIdentity}`],
     );
     socket.addEventListener("open", () => { retryDelayMs = 1_000; });
     socket.addEventListener("message", (event) => {
@@ -37,6 +50,11 @@ export function createBrowserHostRuntime(session: ProductionSession): HostRuntim
           reviewRevision?: unknown;
           reason?: unknown;
         };
+        if (value.kind === "interaction-attachment") {
+          interactionAttachment = (value as unknown as { attachment: ReviewInteractionAttachment }).attachment;
+          attachmentReady.resolve(interactionAttachment);
+          return;
+        }
         const successor = value.kind === "document-successor" &&
           Number.isSafeInteger(value.previousGeneration) &&
           Number.isSafeInteger(value.documentGeneration) &&
@@ -54,13 +72,16 @@ export function createBrowserHostRuntime(session: ProductionSession): HostRuntim
           reason: successor ? "generation" : value.reason as "revision" | "freshness",
           ...(successor ? { previousGeneration: value.previousGeneration as number } : {}),
         };
-        for (const listener of invalidationListeners) listener(next);
+        if (pendingFinalizations > 0) deferredInvalidation = next;
+        else for (const listener of invalidationListeners) listener(next);
       } catch {
         // Untrusted control messages are ignored; the next bootstrap rehydrates.
       }
     });
     socket.addEventListener("close", () => {
       socket = undefined;
+      interactionAttachment = undefined;
+      attachmentReady = Promise.withResolvers<ReviewInteractionAttachment>();
       if (!stopped) {
         retry = setTimeout(connectInvalidations, retryDelayMs);
         retryDelayMs = Math.min(retryDelayMs * 2, 30_000);
@@ -80,9 +101,24 @@ export function createBrowserHostRuntime(session: ProductionSession): HostRuntim
       ? {}
       : { requestHeaders: { authorization: `Bearer ${currentSession.credential}` } }),
   });
+  const fetchInteraction = async (action: "begin" | "finalize" | "release" | "acknowledge", payload: unknown): Promise<unknown> => {
+    if (session.credential === undefined) throw new Error("Authenticated interaction lifecycle is unavailable.");
+    connectInvalidations();
+    const attachment = interactionAttachment ?? await attachmentReady.promise;
+    const response = await fetch(`/s/${session.sessionId}/interactions/${action}`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${session.credential}`, "content-type": "application/json" },
+      body: JSON.stringify({ ...(payload as object), attachment }),
+    });
+    if (!response.ok) throw new Error(`Interaction lifecycle failed (${response.status})`);
+    return response.json();
+  };
 
   return {
     host: "browser",
+    get capabilities() { return interactionAttachment?.protocolVersion === 1
+      ? { localDocumentRefresh: true as const, interactionLifecycleVersion: 1 as const }
+      : { localDocumentRefresh: true as const }; },
     async bootstrap() {
       const current = await ensureLoaded();
       connectInvalidations();
@@ -129,6 +165,23 @@ export function createBrowserHostRuntime(session: ProductionSession): HostRuntim
     },
     async forwardSyncTex() { throw new Error("SyncTeX is available through the trusted host only."); },
     async reverseSyncTex() { throw new Error("SyncTeX is available through the trusted host only."); },
+    beginInteraction: (input) => fetchInteraction("begin", input),
+    async finalizeInteraction(input) {
+      pendingFinalizations += 1;
+      try { return await fetchInteraction("finalize", input); }
+      finally {
+        pendingFinalizations -= 1;
+        if (pendingFinalizations === 0 && deferredInvalidation !== undefined) {
+          const next = deferredInvalidation;
+          deferredInvalidation = undefined;
+          setTimeout(() => {
+            if (!stopped) for (const listener of invalidationListeners) listener(next);
+          }, 0);
+        }
+      }
+    },
+    releaseInteraction: (input) => fetchInteraction("release", input),
+    acknowledgeInteraction: (input) => fetchInteraction("acknowledge", input),
     dispose() {
       stopped = true;
       if (retry !== undefined) clearTimeout(retry);

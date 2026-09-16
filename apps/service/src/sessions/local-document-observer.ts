@@ -58,6 +58,9 @@ interface ObservedDocument<Result extends LocalDocumentInspectionResult> {
   readonly directory: string;
   readonly basename: string;
   lastIdentity?: LocalDocumentIdentity;
+  explicitIdentity?: LocalDocumentIdentity;
+  explicitSequence?: number;
+  explicitIdentityReady?: Promise<LocalDocumentIdentity | undefined>;
   latestSequence: number;
   unvalidatedWatcherSequence?: number;
   retryMs: number;
@@ -184,6 +187,36 @@ export class LocalDocumentObserver<Result extends LocalDocumentInspectionResult 
     return sequence;
   }
 
+  async reserveExplicitHint(sessionId: string): Promise<number | undefined> {
+    const record = this.#documents.get(sessionId);
+    if (record === undefined || this.#disposed) return undefined;
+    if (record.coalesceTimer !== undefined) clearTimeout(record.coalesceTimer);
+    delete record.coalesceTimer;
+    delete record.pending;
+    const sequence = ++this.#nextSequence;
+    record.explicitSequence = sequence;
+    record.latestSequence = sequence;
+    this.#admitCandidate({ sessionId, sourcePath: record.sourcePath, sequence, reason: "host-hint" });
+    const identityReady = this.#inspectIdentity(record.sourcePath)
+      .then((info) => identity(info))
+      .catch(() => undefined);
+    record.explicitIdentityReady = identityReady;
+    const currentIdentity = await identityReady;
+    if (this.#documents.get(sessionId) !== record || this.#disposed) return undefined;
+    if (record.explicitSequence !== sequence) return sequence;
+    if (currentIdentity === undefined) delete record.explicitIdentity;
+    else record.explicitIdentity = currentIdentity;
+    return sequence;
+  }
+
+  completeExplicitHint(sessionId: string, sequence: number): void {
+    const record = this.#documents.get(sessionId);
+    if (record?.explicitSequence !== sequence) return;
+    delete record.explicitSequence;
+    delete record.explicitIdentity;
+    delete record.explicitIdentityReady;
+  }
+
   check(sessionId: string, reason: "activation" | "reconnect"): Promise<Result | undefined> {
     const record = this.#documents.get(sessionId);
     if (record === undefined || this.#disposed) return Promise.resolve(undefined);
@@ -244,7 +277,10 @@ export class LocalDocumentObserver<Result extends LocalDocumentInspectionResult 
       watcher.on("change", (_eventType, filename) => {
         const name = filename === null || filename === undefined ? undefined : filename.toString();
         for (const record of directory.sessions.values()) {
-          if (name === record.basename) this.#request(record, "watcher");
+          if (name === record.basename) {
+            if (record.explicitSequence === undefined) this.#request(record, "watcher");
+            else void this.#requestWatcher(record);
+          }
           else if (name === undefined) this.#request(record, "identity");
         }
       });
@@ -260,6 +296,32 @@ export class LocalDocumentObserver<Result extends LocalDocumentInspectionResult 
     }
   }
 
+  async #requestWatcher(record: ObservedDocument<Result>): Promise<void> {
+    if (this.#disposed || this.#documents.get(record.sessionId) !== record) return;
+    const sequence = ++this.#nextSequence;
+    const candidate = { sessionId: record.sessionId, sourcePath: record.sourcePath,
+      sequence, reason: "watcher" as const };
+    // A filesystem notification blocks physical saves immediately. Identity
+    // validation decides only whether it advances authoritative ordering.
+    this.#admitCandidate(candidate);
+    await record.explicitIdentityReady;
+    const info = await this.#inspectIdentity(record.sourcePath).catch(() => undefined);
+    if (this.#disposed || this.#documents.get(record.sessionId) !== record) return;
+    const nextIdentity = info === undefined ? undefined : identity(info);
+    if (sameIdentity(record.explicitIdentity, nextIdentity)) {
+      this.#settleUnchangedCandidate(candidate);
+      return;
+    }
+    delete record.explicitIdentity;
+    delete record.explicitSequence;
+    delete record.explicitIdentityReady;
+    if (sequence < record.latestSequence) {
+      this.#settleUnchangedCandidate(candidate);
+      return;
+    }
+    this.#request(record, "watcher", false, sequence);
+  }
+
   #retryWatch(path: string, directory: DirectoryWatch<Result>): void {
     if (this.#disposed || directory.retryTimer !== undefined) return;
     directory.retryTimer = setTimeout(() => {
@@ -269,13 +331,20 @@ export class LocalDocumentObserver<Result extends LocalDocumentInspectionResult 
     directory.retryTimer.unref?.();
   }
 
-  #request(record: ObservedDocument<Result>, reason: LocalDocumentObservationReason, immediate = false): void {
+  #request(
+    record: ObservedDocument<Result>,
+    reason: LocalDocumentObservationReason,
+    immediate = false,
+    reservedSequence?: number,
+  ): void {
     if (this.#disposed || !this.#documents.has(record.sessionId)) return;
-    const sequence = ++this.#nextSequence;
+    const sequence = reservedSequence ?? ++this.#nextSequence;
     record.latestSequence = sequence;
     if (reason === "watcher") record.unvalidatedWatcherSequence = sequence;
     record.pending = { reason, sequence };
-    this.#admitCandidate({ sessionId: record.sessionId, sourcePath: record.sourcePath, sequence, reason });
+    if (reservedSequence === undefined) {
+      this.#admitCandidate({ sessionId: record.sessionId, sourcePath: record.sourcePath, sequence, reason });
+    }
     if (record.coalesceTimer !== undefined) clearTimeout(record.coalesceTimer);
     record.coalesceTimer = setTimeout(() => {
       delete record.coalesceTimer;

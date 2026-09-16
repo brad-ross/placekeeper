@@ -118,7 +118,7 @@ describe("macOS packaged-shell protocol", () => {
       attemptId: "attempt_identifier_1234",
       message: {
         protocol: "placekeeper.review-runtime",
-        version: 2,
+        version: 3,
         kind: "request",
         runtimeId: "runtime_identifier_1234",
         requestId: "request_identifier_1234",
@@ -131,7 +131,7 @@ describe("macOS packaged-shell protocol", () => {
       ...(message as object),
       message: {
         protocol: "placekeeper.review-runtime",
-        version: 2,
+        version: 3,
         kind: "request",
         runtimeId: "runtime_identifier_1234",
         requestId: "request_identifier_1234",

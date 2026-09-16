@@ -64,6 +64,12 @@ function projection(revision = 0): MacosRuntimeTrustedProjection {
 }
 
 function backend(): MacosRuntimeBackend {
+  const attachment = {
+    sessionId: "session_review_1234", attachmentId: "attachment_native_1234",
+    incarnationId: "incarnation_native_1234", capability: "c".repeat(43),
+    protocolVersion: 1 as const,
+    capabilities: ["session-wide-holds", "durable-finalize-receipts", "connection-incarnations"] as const,
+  };
   return {
     begin: vi.fn(async () => ({
       append: vi.fn(async () => { throw new Error("local source rejects chunks"); }),
@@ -76,6 +82,9 @@ function backend(): MacosRuntimeBackend {
     readDocument: vi.fn(async (_key, _generation, offset, length) => sourceBytes.subarray(offset, offset + length)),
     detach: vi.fn(async () => undefined),
     release: vi.fn(async () => undefined),
+    interaction: vi.fn(async (_key, _attachment, action) => ({ status: action === "begin" ? "accepted" : "released" })),
+    registerInteraction: vi.fn(() => attachment),
+    disconnectInteraction: vi.fn(),
   };
 }
 
@@ -159,6 +168,36 @@ describe("macOS canonical review runtime", () => {
     await manager.detach("helper_12345678");
     expect(service.detach).toHaveBeenCalledOnce();
     expect(manager.activity()).toEqual({ helpers: 0, activeHelpers: 0, resources: 0 });
+  });
+
+  it("binds interaction operations to the native helper incarnation and revokes it on detach", async () => {
+    const service = backend();
+    const manager = new MacosRuntimeManager(service);
+    await admit(manager);
+    await manager.handle("helper_12345678", {
+      ...envelope, requestId: "request_activate_interaction", type: "activate", documentValidated: true,
+    });
+    await expect(manager.handle("helper_12345678", {
+      ...envelope,
+      requestId: "request_begin_interaction",
+      type: "invoke",
+      generation: 1,
+      revision: 0,
+      method: "beginInteraction",
+      payload: { interactionToken: "interaction_native_1234", order: 1, generation: 1 },
+      idempotencyKey: "operation_interaction_1234",
+    })).resolves.toMatchObject({ type: "result", payload: { status: "accepted" } });
+    expect(service.interaction).toHaveBeenCalledWith(
+      "canonical_review_1234",
+      expect.objectContaining({ attachmentId: "attachment_native_1234" }),
+      "begin",
+      expect.any(Object),
+    );
+    await manager.detach("helper_12345678");
+    expect(service.disconnectInteraction).toHaveBeenCalledWith(
+      "canonical_review_1234",
+      expect.objectContaining({ attachmentId: "attachment_native_1234" }),
+    );
   });
 
   it("rejects stale, cross-window, path-bearing, and non-idempotent replay shapes", async () => {
