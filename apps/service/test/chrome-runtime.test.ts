@@ -99,7 +99,7 @@ describe("Chrome least-authority native runtime", () => {
       incarnationId: "incarnation_legacy_extension",
       capability: "c".repeat(43),
       protocolVersion: 1 as const,
-      capabilities: ["session-wide-holds"] as const,
+      capabilities: ["session-wide-holds", "durable-finalize-receipts", "connection-incarnations"] as const,
     }));
     const connection = new ChromeRuntimeConnection({
       callerOrigin: origin,
