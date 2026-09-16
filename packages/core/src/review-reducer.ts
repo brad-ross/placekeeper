@@ -315,11 +315,12 @@ export function reduceReview(
         if (existing.kind !== draft.kind || existing.kind === "delete") {
           throw new InvalidReviewCommandError("Pending review draft kind does not match its Review Item");
         }
+        const anchored = synchronizeReviewItemAnchor(existing, draft.anchor);
         const edited: ReviewItem = {
-          ...existing,
+          ...anchored,
           pageIndex: draft.anchor.pageIndex,
           updatedAt: command.updatedAt,
-          payload: { ...existing.payload, ...anchorPayload, [textField]: draft.text },
+          payload: { ...anchored.payload, [textField]: draft.text },
           ...(existing.reconciliation === undefined ? {} : {
             reconciliation: {
               ...existing.reconciliation,

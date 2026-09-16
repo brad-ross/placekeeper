@@ -5,9 +5,10 @@ import type { ReviewShellAuthoringModel } from './authoring-model.js';
 import {
   authoringAuthorityFor, authoringAuthorityMatches, authoringAnchorSnapshot,
   authoringPreviewAnnotations, authoringSessionIsCurrent, canStartAuthoringSession,
-  createAuthoringSession, pendingDraftForAuthoring, mutableField, initialAuthoringValue,
+  beginReviewInteraction, createAuthoringSession, pendingDraftForAuthoring, mutableField, initialAuthoringValue,
   type AuthoringAuthority, type AuthoringOriginKind, type AuthoringSession,
   type AuthoringSource, type AuthoringWorkspaceSnapshot,
+  type ReviewInteractionHandle, type ReviewInteractionReceipt,
 } from './authoring-session.js';
 
 interface AuthoringOptions {
@@ -41,13 +42,63 @@ export function useAuthoringSession({
   const authoringEditorRef = useRef<HTMLTextAreaElement>(null);
   const saveOptionsWasOpenRef = useRef(saveOptionsOpen ?? false);
   const [authoringSurfaceElement, setAuthoringSurfaceElement] = useState<HTMLElement | null>(null);
-  const authoringOwnerViewIdRef = useRef(crypto.randomUUID());
+  const legacyAuthoringOwnerViewIdRef = useRef(crypto.randomUUID());
+  const authoringAdmissionPendingRef = useRef(false);
+  const focusRestoreTokenRef = useRef(0);
+  const pendingFinalizationRef = useRef<{
+    readonly session: AuthoringSession;
+    readonly value: string;
+    readonly onAccepted?: () => void;
+  } | null>(null);
+  const pendingAcknowledgementRef = useRef<{
+    readonly interaction: ReviewInteractionHandle;
+    readonly receipt: ReviewInteractionReceipt;
+  } | null>(null);
+  const terminalAttemptRef = useRef<{
+    readonly session: AuthoringSession;
+    readonly outcome: 'applied' | 'discarded';
+    readonly draftId: string;
+    readonly expectedDraftRevision: number;
+    readonly onAccepted?: () => void;
+  } | null>(null);
+  const mountedRef = useRef(true);
   const currentAuthoringAuthority = authoringAuthorityFor(
     state,
     documentGeneration,
   );
   const currentAuthoringAuthorityRef = useRef(currentAuthoringAuthority);
   currentAuthoringAuthorityRef.current = currentAuthoringAuthority;
+  const retryPendingAcknowledgement = async () => {
+    const pending = pendingAcknowledgementRef.current;
+    if (pending === null) return;
+    try {
+      await pending.interaction.acknowledge(pending.receipt);
+      if (pendingAcknowledgementRef.current === pending) pendingAcknowledgementRef.current = null;
+    } catch {
+      // The durable receipt remains authoritative and is retried after reconnect.
+    }
+  };
+  useEffect(() => {
+    void retryPendingAcknowledgement();
+  }, [authoring.interactionLifecycle, currentAuthoringAuthority.documentGeneration]);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      const current = authoringSessionRef.current;
+      const terminal = terminalAttemptRef.current;
+      if (current?.interaction === undefined) return;
+      if (terminal === null || terminal.session.token !== current.token) {
+        void current.interaction.release().catch(() => undefined);
+        return;
+      }
+      void current.interaction.finalize(
+        terminal.outcome,
+        terminal.draftId,
+        terminal.expectedDraftRevision,
+      ).then((receipt) => current.interaction?.acknowledge(receipt)).catch(() => undefined);
+    };
+  }, []);
   useEffect(() => {
     authoring.onAuthoringAnchorChange?.(
       authoringSession === null ? null : authoringAnchorSnapshot(authoringSession),
@@ -155,27 +206,62 @@ export function useAuthoringSession({
     commandTailRef.current = result.catch(() => acknowledgedRef.current);
     return result;
   };
-  const beginAuthoring = (
+  const beginAuthoring = async (
     source: AuthoringSource,
     originKind: AuthoringOriginKind,
     trigger: HTMLElement | null,
-  ): boolean => {
-    if (!canStartAuthoringSession(authoringSessionRef.current)) return false;
+  ): Promise<boolean> => {
+    if (authoringAdmissionPendingRef.current || !canStartAuthoringSession(authoringSessionRef.current)) return false;
+    authoringAdmissionPendingRef.current = true;
+    const token = ++authoringSessionTokenRef.current;
+    const authority = currentAuthoringAuthorityRef.current;
+    let interaction;
+    try {
+      if (authoring.interactionLifecycleRequired && authoring.interactionLifecycle === undefined) {
+        throw new Error('The annotation safety connection is still starting. Try again.');
+      }
+      if (authoring.interactionLifecycle !== undefined) {
+        interaction = await beginReviewInteraction(
+          authoring.interactionLifecycle,
+          authority.documentGeneration,
+          `authoring_${crypto.randomUUID()}`,
+        );
+      }
+    } catch (error) {
+      setAnnouncement(error instanceof Error ? error.message : 'The annotation editor could not start safely.');
+      authoringAdmissionPendingRef.current = false;
+      return false;
+    }
+    if (!mountedRef.current) {
+      await interaction?.release().catch(() => undefined);
+      authoringAdmissionPendingRef.current = false;
+      return false;
+    }
+    if (!authoringAuthorityMatches(authority, currentAuthoringAuthorityRef.current)) {
+      await interaction?.release().catch(() => undefined);
+      authoringAdmissionPendingRef.current = false;
+      setAnnouncement('The PDF changed before the annotation editor could open.');
+      return false;
+    }
     prepareAuthoring();
     clearInputDraft();
     const session = createAuthoringSession({
-      token: ++authoringSessionTokenRef.current,
-      authority: currentAuthoringAuthorityRef.current,
+      token,
+      authority,
       source,
       origin: { kind: originKind, trigger },
       workspace: snapshotAuthoringWorkspace(),
+      ...(interaction === undefined ? {} : { interaction }),
     });
     authoringSessionRef.current = session;
+    authoringAdmissionPendingRef.current = false;
     authoring.onAuthoringActiveChange?.(true);
     setAuthoringSession(session);
     openNested();
-    if (state.workflow.mode === 'generated-output') {
-      void protectAuthoringDraft(session, initialAuthoringValue(session));
+    if (state.workflow.mode === 'generated-output' || interaction !== undefined) {
+      void protectAuthoringDraft(session, initialAuthoringValue(session)).catch((error: unknown) => {
+        setAnnouncement(error instanceof Error ? error.message : 'The protected draft could not be saved.');
+      });
     }
     return true;
   };
@@ -187,6 +273,9 @@ export function useAuthoringSession({
   ) => {
     const current = authoringSessionRef.current;
     if (current === null || current.token !== token) return;
+    focusRestoreTokenRef.current += 1;
+    const focusRestoreToken = focusRestoreTokenRef.current;
+    pendingFinalizationRef.current = null;
     authoringSessionRef.current = null;
     authoring.onAuthoringActiveChange?.(false);
     authoring.onAuthoringPreviewChange?.(null);
@@ -198,6 +287,7 @@ export function useAuthoringSession({
     if (reason === 'source-replaced') return;
     setActiveItem(current.workspace.activeItemId);
     requestAnimationFrame(() => requestAnimationFrame(() => {
+      if (focusRestoreTokenRef.current !== focusRestoreToken) return;
       const shell = shellRef.current;
       if (shell === null) return;
       const viewport = shell.querySelector<HTMLElement>('[data-annotation-scroll-viewport]');
@@ -232,6 +322,14 @@ export function useAuthoringSession({
       authoring.authoringAnchorNavigation?.token === session.token
       && authoring.authoringAnchorNavigation.pending
     ) await authoring.authoringAnchorNavigation.onCancelReturn?.();
+    if (session.interaction !== undefined) {
+      try {
+        await finalizeProtectedAuthoring(session, 'discarded');
+      } catch (error) {
+        setAnnouncement(error instanceof Error ? error.message : 'The annotation cancellation was not saved.');
+      }
+      return;
+    }
     if (state.workflow.mode === 'generated-output') {
       await discardProtectedAuthoringDraft(session);
     }
@@ -248,11 +346,13 @@ export function useAuthoringSession({
       current === null
       || authoringSessionIsCurrent(current, currentAuthoringAuthority)
     ) return;
+    if (terminalAttemptRef.current?.session.token === current.token) return;
     if (
       authoring.authoringAnchorNavigation?.token === current.token
       && authoring.authoringAnchorNavigation.pending
     ) authoring.authoringAnchorNavigation.onCancelReturn?.();
     setAnnouncement('This draft belonged to the previous document and was not applied.');
+    void current.interaction?.release().catch(() => undefined);
     closeAuthoringSession(current.token, 'source-replaced');
   }, [currentAuthoringAuthority.documentGeneration, currentAuthoringAuthority.sourceIdentity]);
 
@@ -269,6 +369,7 @@ export function useAuthoringSession({
     const resolution = authoring.authoringSessionResolution;
     const current = authoringSessionRef.current;
     if (resolution === undefined || current === null) return;
+    if (current.interaction !== undefined) return;
     if (resolution.outcome === 'accepted') {
       if (current.source.kind === 'replace' || current.source.kind === 'highlight') {
         consumeSelectionActions(current.source.selectionGeneration);
@@ -308,7 +409,7 @@ export function useAuthoringSession({
       expectedDraftRevision: existing?.revision ?? -1,
       draft: pendingDraftForAuthoring({
         session,
-        ownerViewId: authoringOwnerViewIdRef.current,
+        ownerViewId: session.interaction?.ownerViewId ?? legacyAuthoringOwnerViewIdRef.current,
         text: value,
         revision: existing?.revision ?? 0,
         createdAt: existing?.createdAt ?? updatedAt,
@@ -318,6 +419,11 @@ export function useAuthoringSession({
   }, {
     authority: session.authority,
     onStale: () => closeAuthoringSession(session.token, 'source-replaced'),
+  }).then((next) => {
+    if (!next.pendingDrafts.some(({ id }) => id === session.draftId)) {
+      throw new Error('The protected authoring draft was not acknowledged.');
+    }
+    return next;
   });
 
   const discardProtectedAuthoringDraft = async (session: AuthoringSession): Promise<void> => {
@@ -360,8 +466,81 @@ export function useAuthoringSession({
     }, onAccepted);
   };
 
+  const finalizeProtectedAuthoring = async (
+    session: AuthoringSession,
+    outcome: 'applied' | 'discarded',
+    onAccepted?: () => void,
+  ): Promise<void> => {
+    const interaction = session.interaction;
+    if (interaction === undefined) throw new Error('The annotation interaction is unavailable.');
+    let terminal = terminalAttemptRef.current;
+    if (terminal === null) {
+      await commandTailRef.current;
+      const draft = acknowledgedRef.current.pendingDrafts.find(({ id }) => id === session.draftId);
+      if (draft === undefined) throw new Error('The protected authoring draft is unavailable.');
+      terminal = {
+        session,
+        outcome,
+        draftId: draft.id,
+        expectedDraftRevision: draft.revision,
+        ...(onAccepted === undefined ? {} : { onAccepted }),
+      };
+      terminalAttemptRef.current = terminal;
+    } else if (terminal.session.token !== session.token) {
+      throw new Error('Another annotation completion is still pending.');
+    }
+    const receipt = await interaction.finalize(
+      terminal.outcome,
+      terminal.draftId,
+      terminal.expectedDraftRevision,
+    );
+    if (terminal.outcome === 'applied') terminal.onAccepted?.();
+    terminalAttemptRef.current = null;
+    closeAuthoringSession(
+      session.token,
+      terminal.outcome === 'applied' ? 'accepted' : 'cancelled',
+    );
+    pendingAcknowledgementRef.current = { interaction, receipt };
+    try {
+      await retryPendingAcknowledgement();
+      if (pendingAcknowledgementRef.current !== null) throw new Error('receipt pending');
+    } catch {
+      setAnnouncement('The annotation was saved, but its completion receipt will be retried after reconnect.');
+    }
+  };
+
   const saveAuthoring = async (session: AuthoringSession, value: string) => {
     const source = session.source;
+    if (session.interaction !== undefined) {
+      try {
+        if (terminalAttemptRef.current?.session.token === session.token) {
+          await finalizeProtectedAuthoring(session, terminalAttemptRef.current.outcome);
+          return;
+        }
+        await protectAuthoringDraft(session, value);
+        if (authoring.interactionFinalizationReady === false) {
+          pendingFinalizationRef.current = {
+            session,
+            value,
+            ...(source.kind === 'replace' || source.kind === 'highlight'
+              ? { onAccepted: () => consumeSelectionActions(source.selectionGeneration) }
+              : {}),
+          };
+          authoring.onInteractionFinalizationPrerequisite?.();
+          return;
+        }
+        await finalizeProtectedAuthoring(
+          session,
+          'applied',
+          source.kind === 'replace' || source.kind === 'highlight'
+            ? () => consumeSelectionActions(source.selectionGeneration)
+            : undefined,
+        );
+      } catch (error) {
+        setAnnouncement(error instanceof Error ? error.message : 'The annotation could not be saved.');
+      }
+      return;
+    }
     if (state.workflow.mode === 'generated-output') {
       await applyProtectedAuthoring(
         session,
@@ -410,6 +589,16 @@ export function useAuthoringSession({
       (state) => editReviewItem(state, source.item.id, { [field]: value }),
     );
   };
+
+  useEffect(() => {
+    const pending = pendingFinalizationRef.current;
+    if (authoring.interactionFinalizationReady !== true || pending === null) return;
+    pendingFinalizationRef.current = null;
+    void finalizeProtectedAuthoring(pending.session, 'applied', pending.onAccepted).catch((error: unknown) => {
+      pendingFinalizationRef.current = pending;
+      setAnnouncement(error instanceof Error ? error.message : 'The annotation could not be saved.');
+    });
+  }, [authoring.interactionFinalizationReady]);
 
   return {
     authoringSession,

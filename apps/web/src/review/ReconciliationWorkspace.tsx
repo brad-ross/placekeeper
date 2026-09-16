@@ -10,6 +10,12 @@ import type {
   ReviewState,
 } from "../../../../packages/core/src/review-model.js";
 import type { GenerationRefreshStatus } from "../generation-status.js";
+import {
+  beginReviewInteraction,
+  type ReviewInteractionHandle,
+  type ReviewInteractionReceipt,
+  type ReviewInteractionTransport,
+} from "./authoring-session.js";
 import type { CaretAnchor } from "../pdf/selection-anchor.js";
 import { reliableSelection, type SelectionUpdate } from "../pdf/selection-state.js";
 import { AnnotationMetadata, annotationKindLabel } from "./AnnotationMetadata.js";
@@ -199,6 +205,8 @@ export interface ReconciliationWorkspaceProps {
   readonly onDetailOpenChange?: (open: boolean) => void;
   readonly focusRequestToken?: number;
   readonly onFocusFallback?: () => void;
+  readonly interactionLifecycle?: ReviewInteractionTransport;
+  readonly interactionLifecycleRequired?: boolean;
 }
 
 type ResolutionMode = "apply" | "reattach" | "discard";
@@ -295,6 +303,22 @@ export function ReconciliationWorkspace(props: ReconciliationWorkspaceProps) {
   const detailBackRef = useRef<HTMLButtonElement>(null);
   const returnFocusKeyRef = useRef<string | null>(null);
   const acceptedFocusKeyRef = useRef<string | null>(null);
+  const interactionRef = useRef<ReviewInteractionHandle | null>(null);
+  const interactionAdmissionPendingRef = useRef(false);
+  const terminalAttemptRef = useRef<{
+    readonly interaction: ReviewInteractionHandle;
+    readonly draftId: string;
+    readonly expectedDraftRevision: number;
+  } | null>(null);
+  const mountedRef = useRef(true);
+  const focusRestoreFrameRef = useRef(0);
+  const automaticTerminalRetryKeyRef = useRef<string | null>(null);
+  const generationRef = useRef(props.state.workflow.documentGeneration);
+  generationRef.current = props.state.workflow.documentGeneration;
+  const pendingReceiptRef = useRef<{
+    readonly interaction: ReviewInteractionHandle;
+    readonly receipt: ReviewInteractionReceipt;
+  } | null>(null);
   const activeRecord = detail === null
     ? undefined
     : recordsByKey.get(detail.key);
@@ -316,6 +340,29 @@ export function ReconciliationWorkspace(props: ReconciliationWorkspaceProps) {
   }, [activeRecord !== undefined, props.onDetailOpenChange]);
 
   useEffect(() => () => props.onDetailOpenChange?.(false), [props.onDetailOpenChange]);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      cancelAnimationFrame(focusRestoreFrameRef.current);
+      const terminal = terminalAttemptRef.current;
+      const interaction = interactionRef.current;
+      if (terminal !== null) {
+        void terminal.interaction.finalize(
+          'applied', terminal.draftId, terminal.expectedDraftRevision,
+        ).then((receipt) => terminal.interaction.acknowledge(receipt)).catch(() => undefined);
+      } else {
+        void interaction?.release().catch(() => undefined);
+      }
+    };
+  }, []);
+  useEffect(() => {
+    const pendingReceipt = pendingReceiptRef.current;
+    if (pendingReceipt === null) return;
+    void pendingReceipt.interaction.acknowledge(pendingReceipt.receipt).then(() => {
+      if (pendingReceiptRef.current === pendingReceipt) pendingReceiptRef.current = null;
+    }).catch(() => undefined);
+  }, [props.interactionLifecycle, props.state.workflow.documentGeneration]);
 
   useLayoutEffect(() => {
     if (activeRecord !== undefined) {
@@ -338,18 +385,158 @@ export function ReconciliationWorkspace(props: ReconciliationWorkspaceProps) {
     return () => cancelAnimationFrame(frame);
   }, [props.focusRequestToken]);
 
-  const openDetail = (record: ResolutionRecord, mode: ResolutionMode) => {
+  const openDetail = async (record: ResolutionRecord, mode: ResolutionMode) => {
+    if (interactionAdmissionPendingRef.current || interactionRef.current !== null) return;
     setMessage("");
     returnFocusKeyRef.current = null;
+    if (mode === 'reattach' && props.interactionLifecycleRequired && props.interactionLifecycle === undefined) {
+      setMessage('The annotation safety connection is still starting. Try again.');
+      return;
+    }
+    if (mode === 'reattach' && props.interactionLifecycle !== undefined) {
+      interactionAdmissionPendingRef.current = true;
+      setPending(true);
+      try {
+        const interaction = await beginReviewInteraction(
+          props.interactionLifecycle,
+          props.state.workflow.documentGeneration,
+          `reattach_${crypto.randomUUID()}`,
+        );
+        if (!mountedRef.current) {
+          await interaction.release().catch(() => undefined);
+          return;
+        }
+        interactionRef.current = interaction;
+      } catch (error) {
+        setMessage(error instanceof Error ? error.message : 'Reattachment could not start safely.');
+        return;
+      } finally {
+        interactionAdmissionPendingRef.current = false;
+        setPending(false);
+      }
+    }
     setDetail({
       key: record.key,
       mode,
       generation: props.state.workflow.documentGeneration,
     });
   };
-  const closeDetail = () => {
+  const closeDetail = async () => {
     if (detail !== null) returnFocusKeyRef.current = detail.key;
+    const terminal = terminalAttemptRef.current;
+    if (terminal !== null) {
+      setPending(true);
+      try {
+        await settleReattachment(terminal);
+      } catch (error) {
+        setMessage(error instanceof Error ? error.message : 'Reattachment completion is still pending.');
+      } finally {
+        setPending(false);
+      }
+      return;
+    }
+    const interaction = interactionRef.current;
+    interactionRef.current = null;
+    void interaction?.release().catch(() => undefined);
     setDetail(null);
+  };
+
+  const settleReattachment = async (terminal: NonNullable<typeof terminalAttemptRef.current>) => {
+    const receipt = await terminal.interaction.finalize(
+      'applied', terminal.draftId, terminal.expectedDraftRevision,
+    );
+    terminalAttemptRef.current = null;
+    interactionRef.current = null;
+    setDetail(null);
+    const completedGeneration = terminal.interaction.generation;
+    cancelAnimationFrame(focusRestoreFrameRef.current);
+    focusRestoreFrameRef.current = requestAnimationFrame(() => {
+      if (mountedRef.current && generationRef.current === completedGeneration) props.onFocusFallback?.();
+    });
+    pendingReceiptRef.current = { interaction: terminal.interaction, receipt };
+    await terminal.interaction.acknowledge(receipt);
+    pendingReceiptRef.current = null;
+  };
+
+  useEffect(() => {
+    const terminal = terminalAttemptRef.current;
+    if (pending || terminal === null) return;
+    const retryKey = `${props.state.workflow.documentGeneration}:${props.state.revision}`;
+    if (automaticTerminalRetryKeyRef.current === retryKey) return;
+    automaticTerminalRetryKeyRef.current = retryKey;
+    setPending(true);
+    void settleReattachment(terminal).catch((error: unknown) => {
+      setMessage(error instanceof Error ? error.message : 'Reattachment completion is still pending.');
+    }).finally(() => setPending(false));
+  }, [
+    pending,
+    props.interactionLifecycle,
+    props.state.revision,
+    props.state.workflow.documentGeneration,
+  ]);
+
+  const submitReattachment = async (record: ResolutionRecord, anchor: ReviewAnchorEvidenceV1) => {
+    const interaction = interactionRef.current;
+    if (interaction === null) {
+      await submit(buildReattachmentCommand({
+        target: record.target,
+        stateRevision: props.state.revision,
+        documentGeneration: props.state.workflow.documentGeneration,
+        anchor,
+        updatedAt: new Date().toISOString(),
+      }));
+      return;
+    }
+    setPending(true);
+    setMessage('');
+    try {
+      if (terminalAttemptRef.current !== null) {
+        await settleReattachment(terminalAttemptRef.current);
+        return;
+      }
+      if (!reattachmentGenerationIsCurrent(interaction.generation, props.state.workflow.documentGeneration)) {
+        throw new Error('The PDF changed. Select the text again.');
+      }
+      const now = new Date().toISOString();
+      const existingDraft = record.target.kind === 'draft' ? record.target.draft : undefined;
+      const draftId = existingDraft?.id ?? crypto.randomUUID();
+      const result = await props.onCommand({
+        type: 'put-draft',
+        expectedRevision: props.state.revision,
+        expectedDraftRevision: existingDraft?.revision ?? -1,
+        draft: {
+          id: draftId,
+          ownerViewId: interaction.ownerViewId,
+          baseGeneration: props.state.workflow.documentGeneration,
+          revision: existingDraft?.revision ?? 0,
+          kind: record.kind,
+          ...(record.target.kind === 'item' ? { targetItemId: record.target.id } : {}),
+          pageIndex: anchor.pageIndex,
+          text: record.authoredText,
+          anchor,
+          disposition: { kind: 'resolved', generation: props.state.workflow.documentGeneration },
+          status: 'protected',
+          createdAt: existingDraft?.createdAt ?? now,
+          updatedAt: now,
+        },
+      });
+      const rejection = reconciliationCommandRejectionMessage(result);
+      if (rejection !== null) throw new Error(rejection);
+      const next = result as ReviewState;
+      const protectedDraft = next.pendingDrafts.find(({ id }) => id === draftId);
+      if (protectedDraft === undefined) throw new Error('The reattachment draft was not acknowledged.');
+      terminalAttemptRef.current = {
+        interaction,
+        draftId: protectedDraft.id,
+        expectedDraftRevision: protectedDraft.revision,
+      };
+      automaticTerminalRetryKeyRef.current = null;
+      await settleReattachment(terminalAttemptRef.current);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Reattachment could not be saved.');
+    } finally {
+      setPending(false);
+    }
   };
   const submit = async (command: ReviewCommand) => {
     acceptedFocusKeyRef.current = detail === null
@@ -448,22 +635,14 @@ export function ReconciliationWorkspace(props: ReconciliationWorkspaceProps) {
           {reattachmentInstruction(targetAnchor(activeRecord.value).kind, candidate)}
         </p>
         <div className="reconciliation-workspace__editor-actions">
-          <button className="review-button review-button--secondary" type="button" title="Keep this annotation unresolved" disabled={pending} onClick={() => {
-            closeDetail();
-          }}><ReviewIcon name="close" /><span>Cancel</span></button>
+          <button className="review-button review-button--secondary" type="button" title="Keep this annotation unresolved" disabled={pending} onClick={closeDetail}><ReviewIcon name="close" /><span>Cancel</span></button>
           <button className="review-button review-button--primary" type="button" title="Attach this annotation to the selected text" disabled={pending || candidate.anchor === null} onClick={() => {
             if (candidate.anchor === null) return;
             if (!reattachmentGenerationIsCurrent(detail.generation, props.state.workflow.documentGeneration)) {
               setMessage("The PDF changed. Select the text again.");
               return;
             }
-            void submit(buildReattachmentCommand({
-              target: activeRecord.target,
-              stateRevision: props.state.revision,
-              documentGeneration: props.state.workflow.documentGeneration,
-              anchor: candidate.anchor,
-              updatedAt: new Date().toISOString(),
-            }));
+            void submitReattachment(activeRecord, candidate.anchor);
           }}><ReviewIcon name="check" /><span>Confirm</span></button>
         </div>
       </section> : null}
@@ -529,7 +708,7 @@ export function ReconciliationWorkspace(props: ReconciliationWorkspaceProps) {
               data-workspace-focus-token={`reconciliation:${record.key}`}
               aria-label={`${canApplyDraft ? "Apply" : "Reattach"} previous ${typeLabel} annotation on page ${record.pageNumber}`}
               title={canApplyDraft ? "Apply annotation" : "Reattach annotation"}
-              onClick={() => openDetail(record, canApplyDraft ? "apply" : "reattach")}
+              onClick={() => { void openDetail(record, canApplyDraft ? "apply" : "reattach"); }}
             />
             <div className="annotation-item__title-row">
               <AnnotationMetadata kind={record.kind} pageNumber={record.pageNumber} sectionLabel={record.stateLabel} />
@@ -541,7 +720,7 @@ export function ReconciliationWorkspace(props: ReconciliationWorkspaceProps) {
                   className="annotation-item__action annotation-item__delete"
                   data-reconciliation-action="discard"
                   aria-label={`Discard ${typeLabel} annotation on page ${record.pageNumber}`}
-                  onClick={() => openDetail(record, "discard")}
+                  onClick={() => { void openDetail(record, "discard"); }}
                 ><ReviewIcon name="remove" /></ReviewTooltipButton>
               </div>
             </div>

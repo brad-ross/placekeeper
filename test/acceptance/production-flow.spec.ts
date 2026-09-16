@@ -4214,6 +4214,50 @@ test('returns a live PDF annotation preview through document history without ret
   expect(host.broker.state(launched.sessionId)?.revision).toBe(revisionBeforeDraft);
 });
 
+test('defers an ordinary external replacement through UI save and publishes it with the new annotation', async ({ page }) => {
+  const sourcePath = await freshProductionPdf(plainTextPdf);
+  const launched = await host.open({ pdfPath: sourcePath, sourceRootPath: sourceRoot, fork: true });
+  if (!launched.ok || launched.kind === 'recovery-offered') {
+    throw new Error('Ordinary refresh lifecycle launch failed');
+  }
+  await page.goto(launched.url);
+  await expect(page.locator("[data-page-index='0']").first()).toBeVisible();
+  await chooseFreshCopyDestination(page);
+
+  const pdfPage = page.locator("[data-page-index='0']").first();
+  const pageBox = await pdfPage.boundingBox();
+  if (!pageBox) throw new Error('Ordinary refresh page has no bounds.');
+  await pdfPage.click({
+    button: 'right',
+    position: { x: pageBox.width * 0.7, y: pageBox.height * 0.55 },
+  });
+  await page.getByRole('menuitem', { name: 'Add Page Note' }).click();
+  const composer = page.getByRole('region', { name: 'Page Note' });
+  await composer.getByRole('textbox', { name: 'Comment' }).fill('Included in the successor generation.');
+
+  const replacement = await PDFDocument.load(await readFile(sourcePath));
+  replacement.setSubject(`external-${randomUUID()}`);
+  const observed = Promise.withResolvers<void>();
+  const unsubscribeObservation = host.broker.onLocalDocumentObservation((event) => {
+    if (event.sessionId === launched.sessionId && event.changed) observed.resolve();
+  });
+  await writeFile(sourcePath, await replacement.save());
+  await observed.promise;
+  unsubscribeObservation();
+  expect(host.broker.state(launched.sessionId)?.workflow.documentGeneration).toBe(1);
+
+  await composer.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(composer).toHaveCount(0);
+  await expect.poll(() => host.broker.state(launched.sessionId)?.workflow.documentGeneration).toBe(2);
+  expect(host.broker.state(launched.sessionId)?.items).toEqual([
+    expect.objectContaining({
+      kind: 'pageNote',
+      payload: expect.objectContaining({ comment: 'Included in the successor generation.' }),
+      reconciliation: expect.objectContaining({ baseGeneration: 1 }),
+    }),
+  ]);
+});
+
 test('keeps a first-page multiline highlight composer stable and reveals one icon only when fully offscreen', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 });
   await openFreshProductionFixture(

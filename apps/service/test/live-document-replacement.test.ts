@@ -799,7 +799,7 @@ describe("atomic live document replacement", () => {
     )).toHaveLength(1);
   });
 
-  it("keeps automatic publication gated while allowing an ordinary local review to use the transaction", async () => {
+  it("publishes an ordinary local review through the shared replacement transaction", async () => {
     const value = await fixture({
       inspectGeneration: async () => {
         const text = "Original generated output";

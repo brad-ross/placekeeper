@@ -154,7 +154,7 @@ export interface LocalDocumentObservationEvent {
   readonly observationSequence: number;
   readonly reason: string;
   readonly changed: boolean;
-  readonly publication: "generated-output" | "gated-ordinary-local";
+  readonly publication: "generated-output" | "ordinary-local";
 }
 
 export interface SourceWorkInterruptionCollection {

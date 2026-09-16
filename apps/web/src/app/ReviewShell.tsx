@@ -889,14 +889,14 @@ export function ReviewShell(props: ReviewShellProps) {
         setAnnouncement('Select reliable text to suggest a replacement.');
         return;
       }
-      beginAuthoring({
+      void beginAuthoring({
         kind: 'replace',
         anchor: intent.anchor,
         initialValue: intent.initialText,
         selectionGeneration,
       }, 'typing', trigger);
     } else {
-      beginAuthoring({
+      void beginAuthoring({
         kind: 'insert',
         anchor: intent.anchor,
         initialValue: intent.initialText,
@@ -1078,7 +1078,7 @@ export function ReviewShell(props: ReviewShellProps) {
       return;
     }
     const trigger = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    beginAuthoring({ kind: 'highlight', anchor, selectionGeneration }, 'selection', trigger);
+    void beginAuthoring({ kind: 'highlight', anchor, selectionGeneration }, 'selection', trigger);
   };
 
   const startReplacement = () => {
@@ -1092,7 +1092,7 @@ export function ReviewShell(props: ReviewShellProps) {
       setAnnouncement('Select reliable text to suggest a replacement.');
       return;
     }
-    beginAuthoring({
+    void beginAuthoring({
       kind: 'replace',
       anchor: selectionAnchor,
       initialValue: '',
@@ -1126,7 +1126,7 @@ export function ReviewShell(props: ReviewShellProps) {
     }
     const trigger = pageNoteTriggerRef.current
       ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null);
-    beginAuthoring({ kind: 'pageNote', ...anchor }, 'page', trigger);
+    void beginAuthoring({ kind: 'pageNote', ...anchor }, 'page', trigger);
   };
 
   useEffect(() => {
@@ -1388,8 +1388,8 @@ export function ReviewShell(props: ReviewShellProps) {
       anchorNavigation={anchorNavigation}
       onValueChange={(value) => {
         if (authoringSessionRef.current?.token !== authoringSession.token) return;
-        if (props.state.workflow.mode === 'generated-output') {
-          void protectAuthoringDraft(authoringSession, value);
+        if (props.state.workflow.mode === 'generated-output' || authoringSession.interaction !== undefined) {
+          void protectAuthoringDraft(authoringSession, value).catch(() => undefined);
         }
       }}
       onDismiss={() => dismissAuthoring(authoringSession)}
@@ -1676,7 +1676,7 @@ export function ReviewShell(props: ReviewShellProps) {
                   {...(annotationReaderOwnedItemId === undefined ? {} : {
                     onEdit: (trigger: HTMLButtonElement) => {
                       const item = props.state.items.find(({ id }) => id === annotationReaderOwnedItemId);
-                      if (item !== undefined) beginAuthoring({ kind: 'edit', item }, 'reader-edit', trigger);
+                      if (item !== undefined) void beginAuthoring({ kind: 'edit', item }, 'reader-edit', trigger);
                     },
                     onDelete: async () => {
                       const item = props.state.items.find(({ id }) => id === annotationReaderOwnedItemId);
@@ -1712,7 +1712,7 @@ export function ReviewShell(props: ReviewShellProps) {
                 }}
                 onReadFull={(record, trigger) => openOwnedAnnotationReader(record, trigger, 'peek')}
                 onReaderOverflowChange={settleOwnedReaderOverflow}
-                onEdit={(trigger) => beginAuthoring({ kind: 'edit', item }, 'tray-edit', trigger)}
+                onEdit={(trigger) => { void beginAuthoring({ kind: 'edit', item }, 'tray-edit', trigger); }}
                 onDelete={async () => {
                   await deleteOwnedAnnotation(item);
                   setPeekItemId(undefined);
@@ -1915,7 +1915,7 @@ export function ReviewShell(props: ReviewShellProps) {
                       restoreAnnotationList(annotationReaderSession, { preferRowTarget: true });
                       return;
                     }
-                    beginAuthoring({ kind: 'edit', item }, 'reader-edit', trigger);
+                    void beginAuthoring({ kind: 'edit', item }, 'reader-edit', trigger);
                   },
                   onDelete: async () => {
                     const item = props.state.items.find(({ id }) => id === annotationReaderOwnedItemId);
@@ -1924,16 +1924,22 @@ export function ReviewShell(props: ReviewShellProps) {
                 })}
               />
             ) : <div id="review-annotation-list" aria-label="All annotations">
-            {props.state.workflow.mode === 'generated-output' ? <ReconciliationWorkspace
+            <ReconciliationWorkspace
               state={props.state}
               selectionUpdate={props.selection.selectionUpdate}
               {...(props.selection.caretAnchor === undefined ? {} : { caretAnchor: props.selection.caretAnchor })}
               refreshStatus={props.generationRefreshStatus ?? 'idle'}
               onCommand={(command) => props.authoring.onCommand(command)}
+              {...(props.authoring.interactionLifecycle === undefined
+                ? {}
+                : { interactionLifecycle: props.authoring.interactionLifecycle })}
+              {...(props.authoring.interactionLifecycleRequired
+                ? { interactionLifecycleRequired: true }
+                : {})}
               onDetailOpenChange={setReconciliationDetailOpen}
               focusRequestToken={reconciliationFocusRequest}
               onFocusFallback={focusAnnotationsFallback}
-            /> : null}
+            />
             {reconciliationDetailOpen ? null : <>
             <AnnotationList
               items={visibleOwnedItems}
@@ -1977,7 +1983,7 @@ export function ReviewShell(props: ReviewShellProps) {
                 : { onRetryExistingAnnotations: props.onRetryExistingAnnotations })}
               onEdit={(item, trigger) => {
                 if (authoringSessionRef.current !== null) return;
-                beginAuthoring({ kind: 'edit', item }, 'tray-edit', trigger);
+                void beginAuthoring({ kind: 'edit', item }, 'tray-edit', trigger);
               }}
               onDelete={async (item) => {
                 if (authoringSessionRef.current !== null) return;

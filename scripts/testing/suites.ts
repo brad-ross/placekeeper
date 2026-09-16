@@ -258,6 +258,7 @@ export const suites: Record<string, TestStage[]> = {
         "apps/web/test/review-layout.test.tsx",
         "apps/web/test/annotation-projection.test.ts",
         "apps/web/test/production-review-app.test.tsx",
+        "apps/web/test/refresh-interaction-lifecycle.test.tsx",
         "apps/web/test/codex-context-status.test.tsx",
         "apps/web/test/existing-annotations.test.ts",
         "apps/web/test/main-location-refresh.test.ts",
@@ -326,7 +327,8 @@ export const suites: Record<string, TestStage[]> = {
         "test/acceptance/neutral-design-conformance.spec.ts",
         "test/acceptance/host-interface.spec.ts",
         "test/acceptance/macos-interface.spec.ts",
-        "test/acceptance/annotation-behavior-followup.spec.ts"
+        "test/acceptance/annotation-behavior-followup.spec.ts",
+        "test/acceptance/automatic-pdf-refresh.spec.ts"
       ]
     }
   ],
@@ -349,7 +351,8 @@ export const suites: Record<string, TestStage[]> = {
         "test/acceptance/workspace-row-interactions.spec.ts",
         "test/acceptance/pdf-mark-design.spec.ts",
         "test/acceptance/macos-interface.spec.ts",
-        "test/acceptance/annotation-behavior-followup.spec.ts"
+        "test/acceptance/annotation-behavior-followup.spec.ts",
+        "test/acceptance/automatic-pdf-refresh.spec.ts"
       ]
     }
   ],

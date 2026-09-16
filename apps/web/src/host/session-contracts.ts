@@ -3,6 +3,7 @@ import type { ReviewCommand, ReviewState, SaveDestinationConfirmation } from "..
 import type { SaveStatus } from "../../../../packages/core/src/save-status.js";
 import type { LiveContextBindingStatus } from "../../../../packages/core/src/live-context.js";
 import type { RejectedReviewCommand } from "../review/review-command-result.js";
+import type { ReviewInteractionTransport } from "../review/authoring-session.js";
 
 export interface ProductionSession {
   readonly sessionId: string;
@@ -48,7 +49,11 @@ export type SaveDestinationResult = SaveStatus & {
   readonly nameResult?: ReviewState | RejectedReviewCommand;
 };
 
-export interface ProductionSessionApi {
+export interface ProductionSessionApi extends Partial<ReviewInteractionTransport> {
+  readonly capabilities?: {
+    readonly localDocumentRefresh: boolean;
+    readonly interactionLifecycleVersion?: 1;
+  };
   presence?(): () => void;
   command(command: ReviewCommand): Promise<ReviewState | RejectedReviewCommand>;
   saveStatus(): Promise<SaveStatus>;
@@ -76,4 +81,3 @@ export interface ForwardSyncTexRequest {
 export type HostForwardSyncTexRequest = ForwardSyncTexRequest & {
   readonly token: number;
 };
-

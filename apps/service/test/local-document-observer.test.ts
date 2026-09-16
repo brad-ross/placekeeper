@@ -80,6 +80,8 @@ describe("local document observer", () => {
     await vi.waitFor(() => {
       expect(observed.some((event) => event.sessionId === ordinary.launch.sessionId && event.changed)).toBe(true);
       expect(observed.some((event) => event.sessionId === generated.launch.sessionId && event.changed)).toBe(true);
+      expect(broker.state(ordinary.launch.sessionId)?.workflow.documentGeneration).toBe(2);
+      expect(broker.state(generated.launch.sessionId)?.workflow.documentGeneration).toBe(2);
     }, { timeout: 3_000 });
   });
 

@@ -2717,21 +2717,11 @@ export class SessionBroker {
           changed,
           publication: session.state.workflow.mode === "generated-output"
             ? "generated-output"
-            : "gated-ordinary-local",
+            : "ordinary-local",
         });
       } catch {
         // Observations remain ordered even if a diagnostic consumer fails.
       }
-    }
-    if (session.state.workflow.mode !== "generated-output") {
-      await this.#withSessionTail(session, async () => {
-        if (session.ending) return;
-        if (candidateDigest === session.state.source.digest) {
-          await this.capabilities.refreshApprovedPdf(session.fileId, candidateDigest);
-        }
-        session.latestObservationEpoch = Math.max(session.latestObservationEpoch, candidate.sequence);
-      });
-      return { status: candidateDigest === undefined || changed ? "retry" : "current" };
     }
     if (
       (candidate.reason === "startup" || candidate.reason === "activation" || candidate.reason === "reconnect") &&

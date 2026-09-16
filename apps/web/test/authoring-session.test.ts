@@ -10,6 +10,7 @@ import {
   canStartAuthoringSession,
   createAuthoringSession,
   pendingDraftForAuthoring,
+  beginReviewInteraction,
   type AuthoringSessionSeed,
 } from '../src/review/authoring-session.js';
 import {
@@ -100,6 +101,53 @@ const seed = (
 });
 
 describe('frozen authoring-session contract', () => {
+  it('keeps the exact finalization identity across failure and acknowledges only after receipt consumption', async () => {
+    const calls: Array<{ method: string; input: unknown }> = [];
+    let finalizeAttempts = 0;
+    const interaction = await beginReviewInteraction({
+      beginInteraction: async (input) => {
+        calls.push({ method: 'begin', input });
+        return { status: 'accepted', generation: 7, ownerViewId: 'attachment-a' };
+      },
+      finalizeInteraction: async (input) => {
+        calls.push({ method: 'finalize', input });
+        finalizeAttempts += 1;
+        if (finalizeAttempts === 1) throw new Error('connection reset after send');
+        return {
+          status: 'finalized',
+          sessionId: 'authoring-session',
+          attachmentId: 'attachment-a',
+          interactionToken: input.interactionToken,
+          generation: 7,
+          outcome: input.outcome,
+          reviewRevision: 3,
+        };
+      },
+      releaseInteraction: async (input) => {
+        calls.push({ method: 'release', input });
+        return { status: 'released' };
+      },
+      acknowledgeInteraction: async (input) => {
+        calls.push({ method: 'acknowledge', input });
+        return { status: 'released' };
+      },
+    }, 7, 'interaction-authoring-1');
+
+    expect(interaction.ownerViewId).toBe('attachment-a');
+    await expect(interaction.finalize('applied', 'draft-authoring-1', 2)).rejects.toThrow('connection reset');
+    const receipt = await interaction.finalize('applied', 'draft-authoring-1', 2);
+    expect(calls.filter(({ method }) => method === 'finalize').map(({ input }) => input)).toEqual([
+      { interactionToken: 'interaction-authoring-1', order: 2, outcome: 'applied', draftId: 'draft-authoring-1', expectedDraftRevision: 2 },
+      { interactionToken: 'interaction-authoring-1', order: 2, outcome: 'applied', draftId: 'draft-authoring-1', expectedDraftRevision: 2 },
+    ]);
+    expect(calls.some(({ method }) => method === 'acknowledge')).toBe(false);
+    await interaction.acknowledge(receipt);
+    expect(calls.at(-1)).toEqual({
+      method: 'acknowledge',
+      input: { interactionToken: 'interaction-authoring-1', order: 3 },
+    });
+  });
+
   it('projects in-progress authoring into a protected generation-bound draft', () => {
     const session = createAuthoringSession({
       ...seed({ kind: 'replace', anchor: selection, initialValue: '', selectionGeneration: 11 }),

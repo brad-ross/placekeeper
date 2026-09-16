@@ -203,6 +203,68 @@ describe("host-neutral review runtime", () => {
     })).rejects.toThrow(/packaged PDF worker/iu);
   });
 
+  it("waits for the real browser attachment handshake instead of exposing legacy authoring", async () => {
+    const state = createReviewState({
+      sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaab",
+      source: { fileId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbc", digest: "a".repeat(64), byteLength: 100 },
+    });
+    let socketMessage: ((event: { data: string }) => void) | undefined;
+    const fetch = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const path = String(input);
+      if (path.endsWith("/state")) return Response.json(state);
+      if (path.endsWith("/scope")) return Response.json({ documentTitle: "paper.pdf", launchSurface: "browser" });
+      if (path.endsWith("/save/status")) return Response.json({
+        destination: { phase: "none", generation: 0 },
+        sync: { phase: "clean", desiredRevision: 0, savedRevision: 0 },
+      });
+      if (path.endsWith("/interactions/begin")) {
+        expect(JSON.parse(String(init?.body))).toMatchObject({
+          attachment: { attachmentId: "attachment_browser_delayed" },
+        });
+        return Response.json({
+          status: "accepted", generation: 1, ownerViewId: "attachment_browser_delayed",
+        });
+      }
+      throw new Error(`Unexpected request: ${path}`);
+    });
+    class DelayedSocket {
+      constructor(readonly url: string, readonly protocols: readonly string[]) {}
+      addEventListener(kind: string, listener: (event: { data: string }) => void) {
+        if (kind === "message") socketMessage = listener;
+      }
+      close() {}
+    }
+    vi.stubGlobal("location", new URL("http://127.0.0.1:43179/s/id/bootstrap"));
+    vi.stubGlobal("window", { location: globalThis.location, setTimeout, clearTimeout });
+    vi.stubGlobal("fetch", fetch);
+    vi.stubGlobal("WebSocket", DelayedSocket);
+    const runtime = createBrowserHostRuntime({ sessionId: state.sessionId, credential: "memory-only" });
+
+    await runtime.bootstrap();
+    expect(runtime.capabilities).toEqual({ localDocumentRefresh: true });
+    let settled = false;
+    const admitted = runtime.beginInteraction!({
+      interactionToken: "interaction_browser_delayed", order: 1, generation: 1,
+    }).then((value) => { settled = true; return value; });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    expect(fetch).not.toHaveBeenCalledWith(expect.stringContaining("/interactions/begin"), expect.anything());
+
+    socketMessage?.({ data: JSON.stringify({ kind: "interaction-attachment", attachment: {
+      sessionId: state.sessionId,
+      attachmentId: "attachment_browser_delayed",
+      incarnationId: "incarnation_browser_delayed",
+      capability: "c".repeat(43),
+      protocolVersion: 1,
+      capabilities: ["session-wide-holds"],
+    } }) });
+    await expect(admitted).resolves.toMatchObject({
+      status: "accepted", ownerViewId: "attachment_browser_delayed",
+    });
+    expect(runtime.capabilities).toEqual({ localDocumentRefresh: true, interactionLifecycleVersion: 1 });
+    runtime.dispose();
+  });
+
   it("keeps browser bootstrap, scope, assets, presence, and export on authenticated HTTP/WebSocket", async () => {
     const state = createReviewState({
       sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",

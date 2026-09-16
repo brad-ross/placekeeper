@@ -20,6 +20,119 @@ import type { CaretAnchor, SelectionAnchor } from '../pdf/selection-anchor.js';
 import type { PdfNaturalPoint } from '../pdf/viewer-navigation.js';
 import type { WorkspaceMode } from './reference-navigation-state.js';
 
+export type ReviewInteractionOutcome = 'applied' | 'discarded';
+
+export interface ReviewInteractionReceipt {
+  readonly status: 'finalized';
+  readonly interactionToken: string;
+  readonly generation: number;
+  readonly outcome: ReviewInteractionOutcome;
+  readonly reviewRevision: number;
+  readonly sessionId?: string;
+  readonly attachmentId?: string;
+}
+
+export interface ReviewInteractionTransport {
+  beginInteraction(input: {
+    readonly interactionToken: string;
+    readonly order: number;
+    readonly generation: number;
+  }): Promise<unknown>;
+  finalizeInteraction(input: {
+    readonly interactionToken: string;
+    readonly order: number;
+    readonly outcome: ReviewInteractionOutcome;
+    readonly draftId: string;
+    readonly expectedDraftRevision: number;
+  }): Promise<unknown>;
+  releaseInteraction(input: { readonly interactionToken: string; readonly order: number }): Promise<unknown>;
+  acknowledgeInteraction(input: { readonly interactionToken: string; readonly order: number }): Promise<unknown>;
+}
+
+export interface ReviewInteractionHandle {
+  readonly interactionToken: string;
+  readonly generation: number;
+  readonly ownerViewId: string;
+  finalize(outcome: ReviewInteractionOutcome, draftId: string, expectedDraftRevision: number): Promise<ReviewInteractionReceipt>;
+  acknowledge(receipt: ReviewInteractionReceipt): Promise<void>;
+  release(): Promise<void>;
+}
+
+function lifecycleRecord(value: unknown): Record<string, unknown> | null {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown> : null;
+}
+
+/** Starts one broker-owned interaction and retains an exact finalization request for retries. */
+export async function beginReviewInteraction(
+  transport: ReviewInteractionTransport,
+  generation: number,
+  interactionToken: string = crypto.randomUUID(),
+): Promise<ReviewInteractionHandle> {
+  const begun = lifecycleRecord(await transport.beginInteraction({ interactionToken, order: 1, generation }));
+  if (begun?.status !== 'accepted' || begun.generation !== generation || typeof begun.ownerViewId !== 'string') {
+    const current = typeof begun?.generation === 'number' ? ` Current generation: ${begun.generation}.` : '';
+    throw new Error(`The annotation interaction could not start safely.${current}`);
+  }
+  let finalization: {
+    readonly interactionToken: string;
+    readonly order: 2;
+    readonly outcome: ReviewInteractionOutcome;
+    readonly draftId: string;
+    readonly expectedDraftRevision: number;
+  } | null = null;
+  let consumed = false;
+  let acknowledgement: Promise<void> | null = null;
+  let released = false;
+  return {
+    interactionToken,
+    generation,
+    ownerViewId: begun.ownerViewId,
+    async finalize(outcome, draftId, expectedDraftRevision) {
+      const requested = { interactionToken, order: 2 as const, outcome, draftId, expectedDraftRevision };
+      if (finalization === null) finalization = requested;
+      else if (JSON.stringify(finalization) !== JSON.stringify(requested)) {
+        throw new Error('An uncertain annotation completion must retry the exact finalization request.');
+      }
+      const value = lifecycleRecord(await transport.finalizeInteraction(finalization));
+      if (value?.status !== 'finalized' || value.interactionToken !== interactionToken ||
+        value.generation !== generation || value.outcome !== outcome ||
+        typeof value.reviewRevision !== 'number') {
+        throw new Error('The annotation completion was not durably acknowledged.');
+      }
+      return value as unknown as ReviewInteractionReceipt;
+    },
+    async acknowledge(receipt) {
+      if (consumed) return;
+      if (acknowledgement !== null) return acknowledgement;
+      if (receipt.interactionToken !== interactionToken || receipt.generation !== generation) {
+        throw new Error('The annotation receipt does not belong to this interaction.');
+      }
+      acknowledgement = (async () => {
+        const value = lifecycleRecord(await transport.acknowledgeInteraction({ interactionToken, order: 3 }));
+        if (value?.status !== 'released' && value?.status !== 'missing') {
+          throw new Error('The annotation receipt could not be acknowledged.');
+        }
+        consumed = true;
+      })();
+      try {
+        await acknowledgement;
+      } catch (error) {
+        acknowledgement = null;
+        throw error;
+      }
+    },
+    async release() {
+      if (released || finalization !== null) return;
+      const value = lifecycleRecord(await transport.releaseInteraction({ interactionToken, order: 2 }));
+      if (value?.status !== 'released' && value?.status !== 'missing') {
+        throw new Error('The annotation interaction could not be released safely.');
+      }
+      released = true;
+    },
+  };
+}
+
 export interface AuthoringAuthority {
   readonly sourceIdentity: string;
   readonly documentGeneration: number;
@@ -88,6 +201,7 @@ export interface AuthoringSessionSeed {
   readonly source: AuthoringSource;
   readonly origin: AuthoringOrigin;
   readonly workspace: AuthoringWorkspaceSnapshot;
+  readonly interaction?: ReviewInteractionHandle;
 }
 
 export interface AuthoringSession {
@@ -98,6 +212,7 @@ export interface AuthoringSession {
   readonly origin: AuthoringOrigin;
   readonly workspace: AuthoringWorkspaceSnapshot;
   readonly semantics: AuthoringSemantics;
+  readonly interaction?: ReviewInteractionHandle;
 }
 
 export interface AuthoringAnchorSnapshot {
@@ -280,6 +395,7 @@ export function createAuthoringSession(seed: AuthoringSessionSeed): AuthoringSes
     origin: Object.freeze({ ...seed.origin }),
     workspace: Object.freeze({ ...seed.workspace }),
     semantics: semanticsFor(source),
+    ...(seed.interaction === undefined ? {} : { interaction: seed.interaction }),
   });
 }
 

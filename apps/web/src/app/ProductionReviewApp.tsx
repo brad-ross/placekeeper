@@ -208,6 +208,21 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   const [scope, setScope] = useState(props.scope);
   useEffect(() => setScope(props.scope), [props.scope]);
   const exportOnly = scope.persistenceMode === 'export-only';
+  const interactionLifecycleRequired = props.api.capabilities?.localDocumentRefresh === true;
+  const hasInteractionTransport = props.api.beginInteraction !== undefined
+    && props.api.finalizeInteraction !== undefined
+    && props.api.releaseInteraction !== undefined
+    && props.api.acknowledgeInteraction !== undefined;
+  const interactionLifecycle = hasInteractionTransport && (
+    interactionLifecycleRequired || props.api.capabilities?.interactionLifecycleVersion === 1
+  )
+    ? {
+        beginInteraction: props.api.beginInteraction!,
+        finalizeInteraction: props.api.finalizeInteraction!,
+        releaseInteraction: props.api.releaseInteraction!,
+        acknowledgeInteraction: props.api.acknowledgeInteraction!,
+      }
+    : undefined;
   const [metadataPageTitle, setMetadataPageTitle] = useState<PdfMetadataPageTitle | null>(null);
   const portableItemIdsRef = useRef(initiallyPortableItemIds(
     props.initialState,
@@ -1510,6 +1525,14 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
           },
         }}
         authoring={{
+          ...(interactionLifecycleRequired ? { interactionLifecycleRequired: true } : {}),
+          ...(interactionLifecycle === undefined ? {} : {
+            interactionLifecycle,
+            interactionFinalizationReady: state.workflow.mode === 'generated-output'
+              || exportOnly
+              || saveStatus.destination.phase !== 'none',
+            onInteractionFinalizationPrerequisite: () => openCopyDialog('first-annotation'),
+          }),
           pageMenu: pageMenu === null ? null : {
             invocationId: pageMenu.invocationId,
             placement: pageMenu.placement,
@@ -1590,14 +1613,19 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
                 reason: 'stale-authoring',
               };
             }
-            const gated = gateReviewCommand(
+            // Protected drafts are semantic recovery state and do not establish
+            // a physical PDF destination. Applying one still requires the
+            // ordinary destination prerequisite before broker finalization.
+            const gated = command.type === 'put-draft'
+              ? { kind: 'submit' as const, command }
+              : gateReviewCommand(
               currentState,
               saveStatus,
               command,
               exportOnly
                 ? 'ephemeral'
                 : scope.sourceDisposition === 'remote-temporary' ? 'remote-temporary' : 'local',
-            );
+              );
             if (gated.kind === "choose-destination") {
               openCopyDialog("first-annotation", {
                 command,

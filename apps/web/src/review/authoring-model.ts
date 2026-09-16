@@ -3,10 +3,20 @@ import type { ReviewCommand, ReviewState } from '../../../../packages/core/src/r
 import type { ReviewAnnotation } from '../../../../packages/core/src/pdf-writer.js';
 import type { PdfTargetVisibility, PdfViewportQuery } from '../pdf/viewer-navigation.js';
 import type { ContextPlacement } from './ContextActionPalette.js';
-import type { AuthoringAuthority, AuthoringAnchorSnapshot } from './authoring-session.js';
+import type {
+  AuthoringAuthority,
+  AuthoringAnchorSnapshot,
+  ReviewInteractionTransport,
+} from './authoring-session.js';
 import type { RejectedReviewCommand } from './review-command-result.js';
 
 export interface ReviewShellAuthoringModel {
+  /** Local-refresh hosts provide this before negotiation; begin waits for the authenticated attachment. */
+  interactionLifecycle?: ReviewInteractionTransport;
+  /** Prevents a refresh-capable host from silently falling back to legacy authoring. */
+  interactionLifecycleRequired?: boolean;
+  interactionFinalizationReady?: boolean;
+  onInteractionFinalizationPrerequisite?(): void;
   pageMenu?: {
     readonly invocationId: string;
     readonly placement: ContextPlacement;
