@@ -441,6 +441,16 @@ export class PdfSaveCoordinator {
               revision: delivery.revision,
               stateDigest,
               commit: async () => {
+                // A copy is still derived from an owned local source. Reprove
+                // that source immediately before publication: an explicit
+                // replacement and its filesystem observation can race while
+                // the predecessor writer is running.
+                if (destination.kind === "copy" && delivery.sourceRootId !== undefined) {
+                  await this.#capabilities.validateOriginalForReplacement(
+                    delivery.source.fileId,
+                    delivery.originalDigest,
+                  );
+                }
                 const validatedTarget = destination.kind === "original"
                   ? await this.#capabilities.validateOriginalForReplacement(
                       destination.capabilityId!,
