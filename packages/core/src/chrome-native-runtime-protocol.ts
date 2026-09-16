@@ -63,6 +63,45 @@ export type ChromeRuntimeHostMessage = RuntimeEnvelope & (
   | { readonly lane: "lifecycle"; readonly type: "update-required"; readonly requestId?: string }
 );
 
+export type ChromeRuntimeProjectionChangeReason = "generation" | "revision" | "save" | "recovery";
+
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (record(value)) {
+    return `{${Object.keys(value).sort().map((key) =>
+      `${JSON.stringify(key)}:${canonicalJson(value[key])}`).join(",")}}`;
+  }
+  return JSON.stringify(value) ?? "null";
+}
+
+function projectionLifecycle(value: unknown): unknown {
+  if (!record(value)) return undefined;
+  const state = record(value.state) ? value.state : {};
+  const workflow = record(state.workflow) ? state.workflow : {};
+  return {
+    protected: value.protected,
+    lifecycle: state.lifecycle,
+    freshness: workflow.freshness,
+  };
+}
+
+/** One projection-change policy shared by the native service poll and the
+ * extension's prompt refresh poll. Same-revision freshness/lifecycle changes
+ * remain observable instead of being mistaken for duplicate revisions. */
+export function chromeRuntimeProjectionChangeReason(
+  previous: unknown,
+  current: unknown,
+): ChromeRuntimeProjectionChangeReason | undefined {
+  if (!record(previous) || !record(current)) return "recovery";
+  if (current.generation !== previous.generation) return "generation";
+  if (current.revision !== previous.revision) return "revision";
+  if (canonicalJson(current.saveStatus) !== canonicalJson(previous.saveStatus)) return "save";
+  if (canonicalJson(projectionLifecycle(current)) !== canonicalJson(projectionLifecycle(previous))) {
+    return "recovery";
+  }
+  return undefined;
+}
+
 function record(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }

@@ -42,6 +42,7 @@ interface SharedClientModule {
       subscribe(listener: (message: unknown) => void): () => void;
     };
     readonly onDocumentTitleChange?: (title: string, generation: number) => void;
+    readonly onDocumentReady?: (generation: number) => void;
     readonly onRuntimeError?: (error: Error) => void;
   }): Promise<SharedChromeClient>;
 }
@@ -262,13 +263,13 @@ async function openEmbeddedReview(
           onDocumentTitleChange(nextTitle) {
             document.title = nextTitle;
           },
+          onDocumentReady(generation) {
+            native.confirmDocumentReady(generation);
+          },
           onRuntimeError() {
             if (runtimeFailurePublished) return;
             runtimeFailurePublished = true;
-            for (const listener of lifecycleListeners) listener({
-              type: "disconnected",
-              protected: native.protected,
-            });
+            native.reportViewerFailure();
           },
         });
         if (boundedSignal.aborted) {

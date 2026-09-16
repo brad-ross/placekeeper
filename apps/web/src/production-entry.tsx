@@ -666,6 +666,7 @@ export async function startChromeRuntime(options: {
     subscribe(listener: (message: unknown) => void): () => void;
   };
   readonly onDocumentTitleChange?: (title: string, generation: number) => void;
+  readonly onDocumentReady?: (generation: number) => void;
   readonly onRuntimeError?: (error: Error) => void;
 }): Promise<ChromeRuntimeStartResult> {
   const runtime = createRpcHostRuntime({
@@ -682,9 +683,11 @@ export async function startChromeRuntime(options: {
   try {
     unmount = await startRuntime(runtime, {
       onDocumentReady: (generation) => {
-        if (settled) return;
-        settled = true;
-        ready.resolve(generation);
+        if (!settled) {
+          settled = true;
+          ready.resolve(generation);
+        }
+        options.onDocumentReady?.(generation);
       },
       ...(options.onDocumentTitleChange === undefined
         ? {}

@@ -24,6 +24,8 @@ const pdf = new TextEncoder().encode("%PDF-1.7\nreview\n%%EOF");
 const digest = createHash("sha256").update(pdf).digest("hex");
 const successorPdf = new TextEncoder().encode("%PDF-1.7\nsuccessor review\n%%EOF");
 const successorDigest = createHash("sha256").update(successorPdf).digest("hex");
+const newestPdf = new TextEncoder().encode("%PDF-1.7\nnewest review\n%%EOF");
+const newestDigest = createHash("sha256").update(newestPdf).digest("hex");
 
 function projection(sha256 = digest, byteLength = pdf.byteLength) {
   return {
@@ -83,6 +85,42 @@ function successorProjection() {
   };
 }
 
+function newestProjection() {
+  const second = successorProjection();
+  return {
+    ...second,
+    generation: 3,
+    revision: 2,
+    state: {
+      ...second.state,
+      revision: 2,
+      source: { ...second.state.source, digest: newestDigest, byteLength: newestPdf.byteLength },
+      workflow: { ...second.state.workflow, documentGeneration: 3 },
+    },
+    document: { sha256: newestDigest, byteLength: newestPdf.byteLength, generation: 3 },
+  };
+}
+
+function revisionProjection() {
+  const initial = projection();
+  return {
+    ...initial,
+    revision: 1,
+    state: { ...initial.state, revision: 1 },
+  };
+}
+
+function savedProjection() {
+  const initial = projection();
+  return {
+    ...initial,
+    saveStatus: {
+      ...initial.saveStatus,
+      sync: { phase: "not-saved", desiredRevision: 0, savedRevision: 0, failure: "write-failed" },
+    },
+  };
+}
+
 function runtimePort(options: {
   readonly projection?: ReturnType<typeof projection>;
   readonly local?: boolean;
@@ -91,15 +129,22 @@ function runtimePort(options: {
   readonly recovery?: boolean;
   readonly dropFirstInvoke?: boolean;
   readonly dropKeepalive?: boolean;
+  readonly refreshes?: readonly (ReturnType<typeof projection> | "failure")[];
+  readonly failFirstSuccessorRead?: boolean;
+  readonly refreshDelayMs?: number;
+  readonly readDelayMs?: number;
 } = {}): NativePort & {
   readonly sent: Record<string, unknown>[];
-  invalidate(message: { readonly generation: number; readonly revision: number; readonly reason: "revision" | "generation" | "save" }): void;
+  invalidate(message: { readonly generation: number; readonly revision: number; readonly reason: "revision" | "generation" | "save" | "recovery" }): void;
   acknowledgeLatestKeepalive(): void;
+  requireUpdate(): void;
 } {
   const onMessage = new ReplyEvent<unknown>();
   const onDisconnect = new ReplyEvent<void>();
   const sent: Record<string, unknown>[] = [];
   let droppedInvoke = false;
+  let refreshIndex = 0;
+  let failedSuccessorRead = false;
   const reply = (message: Record<string, unknown>) => queueMicrotask(() => onMessage.emit({
     protocolVersion: 2,
     connectionId,
@@ -114,6 +159,9 @@ function runtimePort(options: {
       const request = sent.findLast(({ type }) => type === "keepalive");
       if (typeof request?.requestId !== "string") throw new Error("No keepalive request is pending.");
       reply({ type: "ack", lane: "lifecycle", requestId: request.requestId });
+    },
+    requireUpdate() {
+      reply({ type: "update-required", lane: "lifecycle" });
     },
     onMessage,
     onDisconnect,
@@ -167,21 +215,34 @@ function runtimePort(options: {
           payload: options.projection ?? projection(),
         });
       } else if (message.type === "refresh") {
-        reply({
-          type: "projection",
-          lane: "lifecycle",
-          requestId: message.requestId,
-          payload: options.successor ?? options.projection ?? projection(),
-        });
-      } else if (message.type === "read" && options.successor !== undefined) {
-        reply({
+        const candidate = options.refreshes?.[Math.min(refreshIndex++, options.refreshes.length - 1)];
+        const respond = () => candidate === "failure"
+          ? reply({ type: "failure", lane: "lifecycle", requestId: message.requestId, reason: "service-unavailable" })
+          : reply({
+            type: "projection",
+            lane: "lifecycle",
+            requestId: message.requestId,
+            payload: candidate ?? options.successor ?? options.projection ?? projection(),
+          });
+        if (options.refreshDelayMs === undefined) respond();
+        else setTimeout(respond, options.refreshDelayMs);
+      } else if (message.type === "read" && (options.successor !== undefined || options.refreshes !== undefined)) {
+        if (options.failFirstSuccessorRead === true && !failedSuccessorRead) {
+          failedSuccessorRead = true;
+          reply({ type: "failure", lane: "resource", requestId: message.requestId, reason: "service-unavailable" });
+          return;
+        }
+        const bytes = message.generation === 3 ? newestPdf : successorPdf;
+        const respond = () => reply({
           type: "resource-chunk",
           lane: "resource",
           requestId: message.requestId,
           sequence: 0,
-          data: Buffer.from(successorPdf).toString("base64"),
+          data: Buffer.from(bytes).toString("base64"),
           done: true,
         });
+        if (options.readDelayMs === undefined) respond();
+        else setTimeout(respond, options.readDelayMs);
       } else if (message.type === "invoke") {
         if (options.dropFirstInvoke === true && !droppedInvoke) {
           droppedInvoke = true;
@@ -194,6 +255,8 @@ function runtimePort(options: {
           method: message.method,
           payload: message.method === "scope"
             ? projection().scope
+            : message.method === "finalizeInteraction"
+              ? { status: "finalized" }
             : message.method === "exportReviewedCopy"
               ? { kind: "reviewed-copy", path: "/private/result.pdf", revision: 0, digest }
               : {},
@@ -495,7 +558,7 @@ describe("embedded Chrome review runtime", () => {
   });
 
   it("delivers a runtime response before its related invalidation", async () => {
-    const port = runtimePort({ resultThenInvalidation: true });
+    const port = runtimePort({ resultThenInvalidation: true, refreshes: [revisionProjection()] });
     const session: NativeEmbeddedReviewSession = await opener(port)({
       originalUrl: "https://papers.example.test/Review.pdf",
       streamUrl: "blob:chrome-authorized-stream",
@@ -540,6 +603,7 @@ describe("embedded Chrome review runtime", () => {
       event: "session-invalidated",
       payload: expect.objectContaining({ generation: 2, previousGeneration: 1 }),
     })));
+    expect(revokeObjectURL).not.toHaveBeenCalled();
 
     session.runtimePort.postMessage({
       protocol: "placekeeper.review-runtime",
@@ -561,7 +625,313 @@ describe("embedded Chrome review runtime", () => {
     })));
     expect(port.sent.some(({ type }) => type === "refresh")).toBe(true);
     expect(port.sent.some(({ type, generation }) => type === "read" && generation === 2)).toBe(true);
+    expect(revokeObjectURL).not.toHaveBeenCalled();
+    session.confirmDocumentReady(2);
     expect(revokeObjectURL).toHaveBeenCalledExactlyOnceWith(`blob:${extensionOrigin}/document-1`);
+  });
+
+  it("polls promptly without overlapping refreshes and retries a transient resource read", async () => {
+    const port = runtimePort({
+      refreshes: [successorProjection(), successorProjection()],
+      failFirstSuccessorRead: true,
+    });
+    const createObjectURL = vi.fn()
+      .mockReturnValueOnce(`blob:${extensionOrigin}/document-1`)
+      .mockReturnValueOnce(`blob:${extensionOrigin}/document-2`);
+    const revokeObjectURL = vi.fn();
+    const session = await opener(port, { createObjectURL, revokeObjectURL })({
+      originalUrl: "https://papers.example.test/Review.pdf",
+      streamUrl: "blob:chrome-authorized-stream",
+    });
+    vi.useFakeTimers();
+    try {
+      const lifecycle = vi.fn();
+      session.subscribeLifecycle(lifecycle);
+      const messages: Array<Record<string, unknown>> = [];
+      session.runtimePort.subscribe((message) => messages.push(message as Record<string, unknown>));
+      await session.activate();
+
+      await vi.advanceTimersByTimeAsync(1_000);
+      await vi.waitFor(() => expect(port.sent.filter(({ type }) => type === "refresh")).toHaveLength(1));
+      expect(messages.some(({ event }) => event === "session-invalidated")).toBe(false);
+      expect(revokeObjectURL).not.toHaveBeenCalled();
+      expect(lifecycle).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(250);
+      await vi.waitFor(() => expect(messages).toContainEqual(expect.objectContaining({
+        event: "session-invalidated",
+        payload: expect.objectContaining({ generation: 2 }),
+      })));
+      expect(port.sent.filter(({ type }) => type === "refresh")).toHaveLength(2);
+      expect(createObjectURL).toHaveBeenCalledTimes(2);
+      expect(revokeObjectURL).not.toHaveBeenCalled();
+    } finally {
+      session.dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps only one prompt refresh request in flight", async () => {
+    const port = runtimePort({
+      refreshes: [successorProjection(), successorProjection()],
+      refreshDelayMs: 1_500,
+    });
+    const createObjectURL = vi.fn()
+      .mockReturnValueOnce(`blob:${extensionOrigin}/document-1`)
+      .mockReturnValueOnce(`blob:${extensionOrigin}/document-2`);
+    const session = await opener(port, { timeoutMs: 5_000, createObjectURL })({
+      originalUrl: "https://papers.example.test/Review.pdf",
+      streamUrl: "blob:chrome-authorized-stream",
+    });
+    vi.useFakeTimers();
+    try {
+      const messages: Array<Record<string, unknown>> = [];
+      session.runtimePort.subscribe((message) => messages.push(message as Record<string, unknown>));
+      await session.activate();
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(port.sent.filter(({ type }) => type === "refresh")).toHaveLength(1);
+      await vi.advanceTimersByTimeAsync(500);
+      await vi.waitFor(() => expect(messages).toContainEqual(expect.objectContaining({
+        event: "session-invalidated",
+        payload: expect.objectContaining({ generation: 2 }),
+      })));
+      expect(port.sent.filter(({ type }) => type === "refresh")).toHaveLength(1);
+      session.confirmDocumentReady(2);
+      await vi.waitFor(() => expect(port.sent.filter(({ type }) => type === "refresh")).toHaveLength(2));
+    } finally {
+      session.dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it("queues finalize behind a slow projection refresh without dropping its receipt", async () => {
+    const port = runtimePort({ refreshes: [projection()], refreshDelayMs: 1_500 });
+    const session = await opener(port, { timeoutMs: 5_000 })({
+      originalUrl: "https://papers.example.test/Review.pdf",
+      streamUrl: "blob:chrome-authorized-stream",
+    });
+    vi.useFakeTimers();
+    try {
+      const messages: Array<Record<string, unknown>> = [];
+      session.runtimePort.subscribe((message) => messages.push(message as Record<string, unknown>));
+      await session.activate();
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(port.sent.filter(({ type }) => type === "refresh")).toHaveLength(1);
+
+      session.runtimePort.postMessage({
+        protocol: "placekeeper.review-runtime", version: 3, kind: "request",
+        runtimeId: connectionId, requestId: "review-finalize-queued", sessionId,
+        generation: 1, revision: 0, method: "finalizeInteraction",
+        payload: {
+          interactionToken: "interaction_chrome_1234", order: 2,
+          outcome: "discarded", draftId: "draft_chrome_1234", expectedDraftRevision: 0,
+        },
+      });
+      expect(port.sent.filter(({ type }) => type === "invoke")).toHaveLength(0);
+
+      await vi.advanceTimersByTimeAsync(1_500);
+      await vi.waitFor(() => expect(messages).toContainEqual(expect.objectContaining({
+        requestId: "review-finalize-queued",
+        ok: true,
+        payload: { status: "finalized" },
+      })));
+      expect(port.sent.filter(({ type }) => type === "invoke")).toHaveLength(1);
+    } finally {
+      session.dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it.each(["dispose", "release"] as const)("cannot publish or leak a successor after %s during its resource read", async (action) => {
+    const port = runtimePort({ refreshes: [successorProjection()], readDelayMs: 1_500 });
+    const createObjectURL = vi.fn()
+      .mockReturnValueOnce(`blob:${extensionOrigin}/document-1`)
+      .mockReturnValueOnce(`blob:${extensionOrigin}/document-2`);
+    const revokeObjectURL = vi.fn();
+    const session = await opener(port, { createObjectURL, revokeObjectURL, timeoutMs: 5_000 })({
+      originalUrl: "https://papers.example.test/Review.pdf",
+      streamUrl: "blob:chrome-authorized-stream",
+    });
+    const messages: Array<Record<string, unknown>> = [];
+    session.runtimePort.subscribe((message) => messages.push(message as Record<string, unknown>));
+    await session.activate();
+    vi.useFakeTimers();
+    try {
+      port.invalidate({ generation: 2, revision: 1, reason: "generation" });
+      await vi.waitFor(() => expect(port.sent.some(({ type, generation }) =>
+        type === "read" && generation === 2)).toBe(true));
+      if (action === "dispose") session.dispose();
+      else await session.release();
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(createObjectURL).toHaveBeenCalledOnce();
+      if (action === "dispose") {
+        expect(revokeObjectURL).toHaveBeenCalledExactlyOnceWith(`blob:${extensionOrigin}/document-1`);
+      } else {
+        expect(revokeObjectURL).not.toHaveBeenCalled();
+        session.dispose();
+        expect(revokeObjectURL).toHaveBeenCalledExactlyOnceWith(`blob:${extensionOrigin}/document-1`);
+      }
+      expect(messages.some(({ event }) => event === "session-invalidated")).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("turns an unready successor viewer failure into the explicit reopen lifecycle", async () => {
+    const port = runtimePort({ refreshes: [successorProjection(), newestProjection()] });
+    const createObjectURL = vi.fn()
+      .mockReturnValueOnce(`blob:${extensionOrigin}/document-1`)
+      .mockReturnValueOnce(`blob:${extensionOrigin}/document-2`);
+    const revokeObjectURL = vi.fn();
+    const session = await opener(port, { createObjectURL, revokeObjectURL })({
+      originalUrl: "https://papers.example.test/Review.pdf",
+      streamUrl: "blob:chrome-authorized-stream",
+    });
+    const lifecycle = vi.fn();
+    session.subscribeLifecycle(lifecycle);
+    await session.activate();
+    port.invalidate({ generation: 2, revision: 1, reason: "generation" });
+    await vi.waitFor(() => expect(createObjectURL).toHaveBeenCalledTimes(2));
+
+    session.reportViewerFailure();
+    expect(lifecycle).toHaveBeenCalledExactlyOnceWith({ type: "disconnected", protected: true });
+    session.confirmDocumentReady(2);
+    expect(revokeObjectURL).not.toHaveBeenCalled();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(port.sent.filter(({ type }) => type === "refresh")).toHaveLength(1);
+
+    session.dispose();
+    expect(new Set(revokeObjectURL.mock.calls.map(([url]) => url))).toEqual(new Set([
+      `blob:${extensionOrigin}/document-1`,
+      `blob:${extensionOrigin}/document-2`,
+    ]));
+  });
+
+  it("stops prompt polling when the native service requires an update", async () => {
+    const port = runtimePort();
+    const session = await opener(port)({
+      originalUrl: "https://papers.example.test/Review.pdf",
+      streamUrl: "blob:chrome-authorized-stream",
+    });
+    const lifecycle = vi.fn();
+    session.subscribeLifecycle(lifecycle);
+    vi.useFakeTimers();
+    try {
+      await session.activate();
+      port.requireUpdate();
+      await vi.waitFor(() => expect(lifecycle).toHaveBeenCalledExactlyOnceWith({
+        type: "update-required",
+        protected: false,
+      }));
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(port.sent.filter(({ type }) => type === "refresh")).toHaveLength(0);
+    } finally {
+      session.dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it("cancels a scheduled refresh retry on disposal", async () => {
+    const port = runtimePort({ refreshes: ["failure"] });
+    const revokeObjectURL = vi.fn();
+    const session = await opener(port, { revokeObjectURL })({
+      originalUrl: "https://papers.example.test/Review.pdf",
+      streamUrl: "blob:chrome-authorized-stream",
+    });
+    vi.useFakeTimers();
+    try {
+      await session.activate();
+      await vi.advanceTimersByTimeAsync(1_000);
+      await vi.waitFor(() => expect(port.sent.filter(({ type }) => type === "refresh")).toHaveLength(1));
+      session.dispose();
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(port.sent.filter(({ type }) => type === "refresh")).toHaveLength(1);
+      expect(revokeObjectURL).toHaveBeenCalledExactlyOnceWith(
+        `blob:${extensionOrigin}/document-1`,
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps the adopted predecessor while coalescing unadopted generation races", async () => {
+    const port = runtimePort({ refreshes: [successorProjection(), newestProjection()] });
+    const createObjectURL = vi.fn()
+      .mockReturnValueOnce(`blob:${extensionOrigin}/document-1`)
+      .mockReturnValueOnce(`blob:${extensionOrigin}/document-2`)
+      .mockReturnValueOnce(`blob:${extensionOrigin}/document-3`);
+    const revokeObjectURL = vi.fn();
+    const session = await opener(port, { createObjectURL, revokeObjectURL })({
+      originalUrl: "https://papers.example.test/Review.pdf",
+      streamUrl: "blob:chrome-authorized-stream",
+    });
+    await session.activate();
+    const messages: Array<Record<string, unknown>> = [];
+    session.runtimePort.subscribe((message) => messages.push(message as Record<string, unknown>));
+
+    port.invalidate({ generation: 2, revision: 1, reason: "generation" });
+    await vi.waitFor(() => expect(messages.filter(({ event }) => event === "session-invalidated")).toHaveLength(1));
+    port.invalidate({ generation: 3, revision: 2, reason: "generation" });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(port.sent.filter(({ type }) => type === "refresh")).toHaveLength(1);
+    expect(messages.filter(({ event }) => event === "session-invalidated")).toHaveLength(1);
+    expect(createObjectURL).toHaveBeenCalledTimes(2);
+    expect(revokeObjectURL).not.toHaveBeenCalled();
+
+    session.confirmDocumentReady(2);
+    await vi.waitFor(() => expect(messages.filter(({ event }) => event === "session-invalidated")).toHaveLength(2));
+    expect(createObjectURL).toHaveBeenCalledTimes(3);
+    expect(revokeObjectURL).toHaveBeenCalledExactlyOnceWith(`blob:${extensionOrigin}/document-1`);
+
+    session.runtimePort.postMessage({
+      protocol: "placekeeper.review-runtime", version: 3, kind: "request",
+      runtimeId: connectionId, requestId: "review-bootstrap-generation-3",
+      method: "bootstrap", payload: {},
+    });
+    await vi.waitFor(() => expect(messages).toContainEqual(expect.objectContaining({
+      requestId: "review-bootstrap-generation-3",
+      generation: 3,
+    })));
+    expect(revokeObjectURL).not.toHaveBeenCalledWith(`blob:${extensionOrigin}/document-2`);
+    session.confirmDocumentReady(2);
+    expect(revokeObjectURL).not.toHaveBeenCalledWith(`blob:${extensionOrigin}/document-2`);
+    session.confirmDocumentReady(3);
+    expect(revokeObjectURL).toHaveBeenCalledWith(`blob:${extensionOrigin}/document-2`);
+
+    session.dispose();
+    expect(revokeObjectURL).toHaveBeenCalledWith(`blob:${extensionOrigin}/document-3`);
+    expect(new Set(revokeObjectURL.mock.calls.map(([url]) => url))).toEqual(new Set([
+      `blob:${extensionOrigin}/document-1`,
+      `blob:${extensionOrigin}/document-2`,
+      `blob:${extensionOrigin}/document-3`,
+    ]));
+  });
+
+  it("publishes same-revision freshness without rematerializing identical document bytes", async () => {
+    const initial = projection();
+    const stale = {
+      ...initial,
+      state: {
+        ...initial.state,
+        workflow: { ...initial.state.workflow, freshness: "possibly-stale" },
+      },
+    };
+    const port = runtimePort({ refreshes: [stale] });
+    const createObjectURL = vi.fn(() => `blob:${extensionOrigin}/document-1`);
+    const session = await opener(port, { createObjectURL })({
+      originalUrl: "https://papers.example.test/Review.pdf",
+      streamUrl: "blob:chrome-authorized-stream",
+    });
+    await session.activate();
+    const messages: Array<Record<string, unknown>> = [];
+    session.runtimePort.subscribe((message) => messages.push(message as Record<string, unknown>));
+
+    port.invalidate({ generation: 1, revision: 0, reason: "recovery" });
+    await vi.waitFor(() => expect(messages).toContainEqual(expect.objectContaining({
+      event: "session-invalidated",
+      payload: expect.objectContaining({ reason: "freshness", generation: 1, revision: 0 }),
+    })));
+    expect(createObjectURL).toHaveBeenCalledOnce();
   });
 
   it("crosses the protected recovery boundary after an accepted export", async () => {
@@ -637,7 +1007,7 @@ describe("embedded Chrome review runtime", () => {
   });
 
   it("crosses the protected boundary when another presentation saves", async () => {
-    const port = runtimePort();
+    const port = runtimePort({ refreshes: [savedProjection()] });
     const session = await opener(port)({
       originalUrl: "https://papers.example.test/Review.pdf",
       streamUrl: "blob:chrome-authorized-stream",

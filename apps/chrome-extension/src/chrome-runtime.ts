@@ -15,6 +15,7 @@ import {
   CHROME_RUNTIME_PROTOCOL,
   CHROME_RUNTIME_PROTOCOL_VERSION,
   CHROME_RUNTIME_RESOURCE_CHUNK_BYTES,
+  chromeRuntimeProjectionChangeReason,
   parseRuntimeHostMessage,
   validateRuntimeExtensionMessage,
   type ChromeRuntimeExtensionMessage,
@@ -24,6 +25,9 @@ import {
 const MAX_DOCUMENT_BYTES = 64 * 1024 * 1024;
 const INTERACTIVE_REQUEST_TIMEOUT_MS = 5 * 60_000 + 5_000;
 const RELEASE_TIMEOUT_MS = 1_000;
+const REFRESH_POLL_MS = 1_000;
+const REFRESH_RETRY_MIN_MS = 250;
+const REFRESH_RETRY_MAX_MS = 4_000;
 const OWNER_SECRET = /^[A-Za-z0-9_-]{43}$/u;
 const OWNER_CLAIM = /^[A-Za-z0-9_-]{16,128}$/u;
 const OWNER_HISTORY_KEY = "__placekeeperChromeOwnerClaim";
@@ -65,6 +69,8 @@ export interface NativeEmbeddedReviewSession {
   readonly runtimePort: ReviewRuntimeMessagePort;
   readonly protected: boolean;
   activate(signal?: AbortSignal): Promise<void>;
+  confirmDocumentReady(generation: number): void;
+  reportViewerFailure(): void;
   release(): Promise<void>;
   dispose(): void;
   subscribeLifecycle(listener: (event: EmbeddedReviewLifecycleEvent) => void): () => void;
@@ -672,39 +678,68 @@ export function createNativeEmbeddedReview(options: NativeEmbeddedReviewOptions)
       let bootstrap = initialBootstrap;
       let active = false;
       let protectedReview = projection.protected;
+      let adoptedDocumentUrl: string | undefined = documentUrl;
+      let pendingDocumentUrl: string | undefined;
       const operationKeys = new Map<string, string>();
       let disposed = false;
       let keepalive: ReturnType<typeof setInterval> | undefined;
+      let refreshPoll: ReturnType<typeof setInterval> | undefined;
+      let refreshRetry: ReturnType<typeof setTimeout> | undefined;
+      let refreshRetryAttempt = 0;
+      let refreshInFlight = false;
+      let refreshRequested = false;
+      let refreshBlockedOnAdoption = false;
       let runtimeInvokes = 0;
       let pendingRefreshes = 0;
-      let refreshTail = Promise.resolve();
       const deferredInvalidations: ChromeRuntimeHostMessage[] = [];
+      const deferredRuntimeRequests: Record<string, unknown>[] = [];
       const runtimeListeners = new Set<(message: unknown) => void>();
       const lifecycleListeners = new Set<(event: EmbeddedReviewLifecycleEvent) => void>();
       let lifecycleFailurePublished = false;
       const emitRuntime = (message: unknown) => {
         for (const listener of runtimeListeners) listener(message);
       };
+      const stopRefreshTimers = () => {
+        if (refreshPoll !== undefined) clearInterval(refreshPoll);
+        if (refreshRetry !== undefined) clearTimeout(refreshRetry);
+        refreshPoll = undefined;
+        refreshRetry = undefined;
+      };
       const publishLifecycleFailure = () => {
-        if (released || lifecycleFailurePublished) return;
+        if (released || disposed || lifecycleFailurePublished) return;
         lifecycleFailurePublished = true;
         if (keepalive !== undefined) clearInterval(keepalive);
+        stopRefreshTimers();
         for (const listener of lifecycleListeners) listener({
           type: "disconnected",
           protected: protectedReview,
         });
       };
-      const publishInvalidation = (message: ChromeRuntimeHostMessage) => {
-        if (message.type !== "invalidation") return;
+      const terminalRefreshFailure = (error: unknown): boolean => error instanceof Error &&
+        /(?:protocol-mismatch|update-required|disconnected|invalid-host-message)/u.test(error.message);
+      const confirmDocumentReady = (generation: number) => {
+        if (released || disposed || lifecycleFailurePublished || !Number.isSafeInteger(generation) ||
+          generation !== projection!.generation ||
+          documentUrl === undefined || documentUrl !== pendingDocumentUrl) return;
+        const retired = adoptedDocumentUrl;
+        adoptedDocumentUrl = documentUrl;
+        pendingDocumentUrl = undefined;
+        refreshBlockedOnAdoption = false;
+        if (retired !== undefined && retired !== documentUrl) options.revokeObjectURL(retired);
+        if (refreshRequested) requestRefresh();
+      };
+      const performRefresh = async () => {
+        if (released || disposed || lifecycleFailurePublished) return;
         pendingRefreshes += 1;
-        refreshTail = refreshTail.then(async () => {
-          if (released || lifecycleFailurePublished) return;
+        let createdDocumentUrl: string | undefined;
+        try {
           const requestId = options.createId();
           const reply = await channel.request({
             type: "refresh",
             lane: "lifecycle",
             requestId,
           }, (candidate) => candidate.type === "projection" && candidate.requestId === requestId);
+          if (released || disposed || lifecycleFailurePublished) return;
           if (reply.type !== "projection") throw new Error("The service did not refresh the review.");
           const next = runtimeProjection(reply.payload);
           const previous = projection!;
@@ -713,14 +748,27 @@ export function createNativeEmbeddedReview(options: NativeEmbeddedReviewOptions)
             (next.generation === previous.generation && next.revision < previous.revision)) {
             throw new Error("The service returned a stale review projection.");
           }
+          const reason = chromeRuntimeProjectionChangeReason(previous, next);
+          if (reason === undefined) return;
+          if (pendingDocumentUrl !== undefined && (
+            next.generation !== previous.generation ||
+            next.document.sha256 !== previous.document.sha256 ||
+            next.document.byteLength !== previous.document.byteLength
+          )) {
+            refreshBlockedOnAdoption = true;
+            refreshRequested = true;
+            return;
+          }
           let nextDocumentUrl = documentUrl;
           if (next.generation !== previous.generation || next.document.sha256 !== previous.document.sha256 ||
             next.document.byteLength !== previous.document.byteLength) {
             const bytes = await readProjectedDocument(channel, next, options.createId, maxDocumentBytes);
+            if (released || disposed || lifecycleFailurePublished) return;
             verifyPdfBytes(bytes, next);
             nextDocumentUrl = options.createObjectURL(new Blob([
               bytes.buffer as ArrayBuffer,
             ], { type: "application/pdf" }));
+            createdDocumentUrl = nextDocumentUrl;
           }
           if (nextDocumentUrl === undefined) throw new Error("The refreshed PDF resource was unavailable.");
           const nextBootstrap = sanitizeChromeReviewRuntimeResponse("bootstrap", {
@@ -732,19 +780,20 @@ export function createNativeEmbeddedReview(options: NativeEmbeddedReviewOptions)
             },
           });
           if (!record(nextBootstrap)) {
-            if (nextDocumentUrl !== documentUrl) options.revokeObjectURL(nextDocumentUrl);
             throw new Error("The refreshed review projection was unsafe.");
           }
-          const retiredDocumentUrl = documentUrl;
+          if (released || disposed || lifecycleFailurePublished) return;
+          if (nextDocumentUrl !== documentUrl) {
+            if (pendingDocumentUrl !== undefined && pendingDocumentUrl !== adoptedDocumentUrl) {
+              options.revokeObjectURL(pendingDocumentUrl);
+            }
+            pendingDocumentUrl = nextDocumentUrl;
+            createdDocumentUrl = undefined;
+          }
           documentUrl = nextDocumentUrl;
           projection = next;
           bootstrap = nextBootstrap;
-          if (message.reason === "save" || next.revision > previous.revision) {
-            protectedReview = true;
-          }
-          if (retiredDocumentUrl !== undefined && retiredDocumentUrl !== nextDocumentUrl) {
-            options.revokeObjectURL(retiredDocumentUrl);
-          }
+          if (next.protected || reason === "save" || next.revision > previous.revision) protectedReview = true;
           emitRuntime({
             protocol: REVIEW_RUNTIME_PROTOCOL,
             version: REVIEW_RUNTIME_VERSION,
@@ -755,21 +804,87 @@ export function createNativeEmbeddedReview(options: NativeEmbeddedReviewOptions)
               sessionId: next.sessionId,
               generation: next.generation,
               revision: next.revision,
-              reason: message.reason === "save" && next.generation === previous.generation
-                ? "freshness"
-                : next.generation === previous.generation ? "revision" : "generation",
+              reason: reason === "generation" ? "generation"
+                : reason === "revision" ? "revision" : "freshness",
               ...(next.generation === previous.generation ? {} : {
                 previousGeneration: previous.generation,
               }),
             },
           });
-        }).catch(() => publishLifecycleFailure()).finally(() => {
+        } finally {
+          if (createdDocumentUrl !== undefined) options.revokeObjectURL(createdDocumentUrl);
           pendingRefreshes = Math.max(0, pendingRefreshes - 1);
-        });
+          if (pendingRefreshes === 0 && deferredRuntimeRequests.length > 0) {
+            const queued = deferredRuntimeRequests.splice(0);
+            queueMicrotask(() => {
+              for (const request of queued) runtimePort.postMessage(request);
+            });
+          }
+        }
+      };
+      const scheduleRefreshRetry = () => {
+        if (released || disposed || lifecycleFailurePublished || refreshRetry !== undefined) return;
+        const delay = Math.min(REFRESH_RETRY_MAX_MS,
+          REFRESH_RETRY_MIN_MS * (2 ** Math.min(refreshRetryAttempt, 4)));
+        refreshRetryAttempt += 1;
+        refreshRetry = setTimeout(() => {
+          refreshRetry = undefined;
+          requestRefresh();
+        }, delay);
+        refreshRetry.unref?.();
+      };
+      const runRefresh = async () => {
+        if (refreshInFlight || released || disposed || lifecycleFailurePublished) return;
+        if (pendingDocumentUrl !== undefined) {
+          refreshBlockedOnAdoption = true;
+          refreshRequested = true;
+          return;
+        }
+        if (refreshRetry !== undefined) {
+          refreshRequested = true;
+          return;
+        }
+        if (refreshBlockedOnAdoption) {
+          refreshRequested = true;
+          return;
+        }
+        if (runtimeInvokes !== 0) {
+          refreshRequested = true;
+          return;
+        }
+        refreshInFlight = true;
+        refreshRequested = false;
+        try {
+          await performRefresh();
+          refreshRetryAttempt = 0;
+          if (refreshRetry !== undefined) {
+            clearTimeout(refreshRetry);
+            refreshRetry = undefined;
+          }
+        } catch (error) {
+          if (terminalRefreshFailure(error)) publishLifecycleFailure();
+          else scheduleRefreshRetry();
+        } finally {
+          refreshInFlight = false;
+          if (refreshRequested) queueMicrotask(() => void runRefresh());
+        }
+      };
+      function requestRefresh(): void {
+        if (refreshInFlight || runtimeInvokes !== 0 || refreshBlockedOnAdoption ||
+          refreshRetry !== undefined) {
+          refreshRequested = true;
+          return;
+        }
+        void runRefresh();
+      }
+      const publishInvalidation = (message: ChromeRuntimeHostMessage) => {
+        if (message.type !== "invalidation") return;
+        requestRefresh();
       };
       const flushInvalidations = () => {
         if (runtimeInvokes !== 0) return;
         for (const message of deferredInvalidations.splice(0)) publishInvalidation(message);
+        if (refreshRequested) requestRefresh();
       };
       const unsubscribeNative = channel.subscribe((message) => {
         if (message.type === "invalidation") {
@@ -781,6 +896,7 @@ export function createNativeEmbeddedReview(options: NativeEmbeddedReviewOptions)
           if (released || lifecycleFailurePublished) return;
           lifecycleFailurePublished = true;
           if (keepalive !== undefined) clearInterval(keepalive);
+          stopRefreshTimers();
           for (const listener of lifecycleListeners) listener({
             type: "update-required",
             protected: protectedReview,
@@ -795,6 +911,7 @@ export function createNativeEmbeddedReview(options: NativeEmbeddedReviewOptions)
         if (released) return;
         released = true;
         if (keepalive !== undefined) clearInterval(keepalive);
+        stopRefreshTimers();
         const requestId = options.createId();
         await channel.request({
           type: "detach",
@@ -832,8 +949,12 @@ export function createNativeEmbeddedReview(options: NativeEmbeddedReviewOptions)
             return;
           }
           const payload = sanitizeChromeReviewRuntimeRequest(method, raw.payload);
-          if (payload === undefined || !active || pendingRefreshes > 0 || lifecycleFailurePublished) {
+          if (payload === undefined || !active || released || disposed || lifecycleFailurePublished) {
             queueMicrotask(() => emitRuntime(reviewResponse(raw, projection!, false, {})));
+            return;
+          }
+          if (pendingRefreshes > 0) {
+            deferredRuntimeRequests.push(raw);
             return;
           }
           const requestId = options.createId();
@@ -902,6 +1023,8 @@ export function createNativeEmbeddedReview(options: NativeEmbeddedReviewOptions)
         displayName,
         runtimePort,
         get protected() { return protectedReview; },
+        confirmDocumentReady,
+        reportViewerFailure: publishLifecycleFailure,
         subscribeLifecycle(listener) {
           lifecycleListeners.add(listener);
           return () => lifecycleListeners.delete(listener);
@@ -955,6 +1078,8 @@ export function createNativeEmbeddedReview(options: NativeEmbeddedReviewOptions)
               message.type === "invalidation").catch(() => publishLifecycleFailure());
           }, Math.max(1_000, Math.floor(channel.leaseMs / 2)));
           keepalive.unref?.();
+          refreshPoll = setInterval(() => requestRefresh(), REFRESH_POLL_MS);
+          refreshPoll.unref?.();
         },
         release,
         dispose() {
@@ -965,10 +1090,14 @@ export function createNativeEmbeddedReview(options: NativeEmbeddedReviewOptions)
           runtimeListeners.clear();
           lifecycleListeners.clear();
           if (keepalive !== undefined) clearInterval(keepalive);
-          if (documentUrl !== undefined) {
-            options.revokeObjectURL(documentUrl);
-            documentUrl = undefined;
+          stopRefreshTimers();
+          const resources = new Set([adoptedDocumentUrl, pendingDocumentUrl, documentUrl]);
+          for (const resource of resources) {
+            if (resource !== undefined) options.revokeObjectURL(resource);
           }
+          adoptedDocumentUrl = undefined;
+          pendingDocumentUrl = undefined;
+          documentUrl = undefined;
           channel.close();
         },
       };

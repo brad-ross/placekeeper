@@ -4,6 +4,7 @@ import {
   CHROME_RUNTIME_PROTOCOL,
   CHROME_RUNTIME_PROTOCOL_VERSION,
   CHROME_RUNTIME_RESOURCE_CHUNK_BYTES,
+  chromeRuntimeProjectionChangeReason,
   parseChromeRuntimeExtensionMessage,
   sanitizeChromeRuntimeProjection,
   type ChromeRuntimeExtensionMessage,
@@ -545,15 +546,13 @@ export class ChromeRuntimeConnection {
           const current = await this.#backend.current(this.#staged.canonicalKey);
           const previous = this.#staged.projection;
           this.#staged = { ...this.#staged, projection: current };
-          const saveChanged = canonicalJson(current.saveStatus) !== canonicalJson(previous.saveStatus);
-          if (current.generation !== previous.generation || current.revision !== previous.revision || saveChanged) {
+          const reason = chromeRuntimeProjectionChangeReason(previous, current);
+          if (reason !== undefined) {
             return {
               type: "invalidation", lane: "runtime", protocolVersion: 2,
               connectionId: this.#connectionId!, revision: current.revision,
               generation: current.generation,
-              reason: current.generation !== previous.generation
-                ? "generation"
-                : current.revision !== previous.revision ? "revision" : "save",
+              reason,
             };
           }
         } catch {

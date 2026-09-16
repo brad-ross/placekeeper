@@ -519,6 +519,59 @@ describe("Chrome least-authority native runtime", () => {
       .resolves.toMatchObject({ type: "failure", reason: "stale-generation" });
   });
 
+  it("invalidates freshness-only projection changes without a revision bump", async () => {
+    const initial = projection();
+    const stale = {
+      ...initial,
+      state: {
+        ...(initial.state as Record<string, unknown>),
+        workflow: {
+          ...((initial.state as Record<string, unknown>).workflow as Record<string, unknown>),
+          freshness: "possibly-stale",
+        },
+      },
+    };
+    const lifecycleChanged = {
+      ...stale,
+      state: {
+        ...(stale.state as Record<string, unknown>),
+        lifecycle: "recovery",
+      },
+    };
+    const current = vi.fn()
+      .mockResolvedValueOnce(stale)
+      .mockResolvedValueOnce(lifecycleChanged);
+    const connection = new ChromeRuntimeConnection({
+      callerOrigin: origin,
+      backend: backend({ current }),
+    });
+    await negotiate(connection);
+    await acquire(connection);
+    await connection.handle({
+      type: "activate", lane: "lifecycle", protocolVersion: 2, connectionId,
+      requestId: "request-activate-freshness", documentValidated: true,
+    });
+
+    await expect(connection.handle({
+      type: "keepalive", lane: "lifecycle", protocolVersion: 2, connectionId,
+      requestId: "request-keepalive-freshness",
+    })).resolves.toMatchObject({
+      type: "invalidation",
+      generation: initial.generation,
+      revision: initial.revision,
+      reason: "recovery",
+    });
+    await expect(connection.handle({
+      type: "keepalive", lane: "lifecycle", protocolVersion: 2, connectionId,
+      requestId: "request-keepalive-lifecycle",
+    })).resolves.toMatchObject({
+      type: "invalidation",
+      generation: initial.generation,
+      revision: initial.revision,
+      reason: "recovery",
+    });
+  });
+
   it("polls service-owned invalidations on a bounded lifecycle heartbeat", async () => {
     const changed = { ...projection(), revision: 1, state: { ...(projection().state as Record<string, unknown>), revision: 1 } };
     const service = backend({ current: vi.fn(async () => changed) });
