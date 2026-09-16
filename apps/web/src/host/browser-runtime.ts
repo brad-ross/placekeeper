@@ -40,7 +40,19 @@ export function createBrowserHostRuntime(session: ProductionSession): HostRuntim
       `${scheme}//${window.location.host}/s/${session.sessionId}/control`,
       ["placekeeper", `placekeeper-auth.${session.credential}`, `placekeeper-view.${viewIdentity}`],
     );
-    socket.addEventListener("open", () => { retryDelayMs = 1_000; });
+    socket.addEventListener("open", () => {
+      retryDelayMs = 1_000;
+      const previous = loaded;
+      if (previous === undefined) return;
+      loaded = undefined;
+      const reconnectHint: HostRuntimeInvalidation = {
+        sessionId: session.sessionId,
+        generation: previous.state.workflow.documentGeneration,
+        revision: previous.state.revision,
+        reason: "freshness",
+      };
+      for (const listener of invalidationListeners) listener(reconnectHint);
+    });
     socket.addEventListener("message", (event) => {
       try {
         const value = JSON.parse(String(event.data)) as {

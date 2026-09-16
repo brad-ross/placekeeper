@@ -71,6 +71,13 @@ export type MacosReviewHelperMessage = ReviewEnvelope & (
       readonly offset: number;
       readonly length: number;
     }
+  | {
+      readonly type: "adopt-resource";
+      readonly resourceId: string;
+      readonly generation: number;
+      readonly byteLength: number;
+      readonly digest: string;
+    }
   | { readonly type: "copy-link"; readonly location: PlacekeeperLinkLocation }
   | { readonly type: "release" }
 );
@@ -100,6 +107,7 @@ export type MacosReviewHelperResponse = ReviewEnvelope & (
     }
   | { readonly type: "result"; readonly method: ReviewRuntimeBrokerMethod; readonly payload: unknown }
   | { readonly type: "resource-bytes"; readonly sequence: number; readonly data: string; readonly done: boolean }
+  | { readonly type: "resource-adopted"; readonly generation: number }
   | { readonly type: "placekeeper-link"; readonly link: string }
   | { readonly type: "released" }
   | { readonly type: "failure"; readonly code: "invalid" | "stale" | "unavailable" | "budget" | "recovery" }
@@ -188,6 +196,13 @@ export function parseMacosReviewHelperMessage(value: unknown): MacosReviewHelper
       && integer(value.length, MACOS_HELPER_RESOURCE_CHUNK_BYTES) && value.length > 0
       ? value as unknown as MacosReviewHelperMessage : undefined;
   }
+  if (value.type === "adopt-resource") {
+    return exact(value, [...base, "resourceId", "generation", "byteLength", "digest"])
+      && id(value.resourceId) && integer(value.generation) && value.generation > 0
+      && integer(value.byteLength, 512 * 1024 * 1024) && value.byteLength >= 5
+      && typeof value.digest === "string" && SHA256.test(value.digest)
+      ? value as unknown as MacosReviewHelperMessage : undefined;
+  }
   if (value.type === "copy-link") {
     return exact(value, [...base, "location"]) && safeLocation(value.location)
       ? value as unknown as MacosReviewHelperMessage : undefined;
@@ -272,6 +287,9 @@ export function validMacosReviewHelperResponse(value: unknown): value is MacosRe
     return exact(value, [...base, "sequence", "data", "done"]) && integer(value.sequence)
       && typeof value.data === "string" && value.data.length <= MACOS_HELPER_RESOURCE_CHUNK_BYTES * 2
       && BASE64.test(value.data) && typeof value.done === "boolean";
+  }
+  if (value.type === "resource-adopted") {
+    return exact(value, [...base, "generation"]) && integer(value.generation) && value.generation > 0;
   }
   if (value.type === "placekeeper-link") {
     if (!exact(value, [...base, "link"]) || typeof value.link !== "string") return false;

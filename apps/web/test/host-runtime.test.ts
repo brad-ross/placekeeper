@@ -11,7 +11,10 @@ import {
   type MacosPageMessage,
 } from "../../../packages/core/src/macos-shell-protocol.js";
 import { createBrowserHostRuntime } from "../src/host/browser-runtime.js";
-import { subscribeRuntimeDocumentSource } from "../src/host/runtime-document-source.js";
+import {
+  subscribeRuntimeDocumentSource,
+  type RuntimeDocumentSourceSnapshot,
+} from "../src/host/runtime-document-source.js";
 import type {
   HostRuntime,
   HostRuntimeBootstrap,
@@ -528,6 +531,124 @@ describe("host-neutral review runtime", () => {
     });
     expect(browser.runtime.bootstrap).toHaveBeenCalledOnce();
     expect(vscode.runtime.bootstrap).toHaveBeenCalledOnce();
+  });
+
+  it("accepts a canonical bootstrap ahead of its invalidation hint and retries a transient failure", async () => {
+    vi.useFakeTimers();
+    const sessionId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const loaded = (generation: number): HostRuntimeBootstrap => ({
+      sessionId,
+      generation,
+      revision: generation,
+      session: { sessionId },
+      state: createReviewState({
+        sessionId,
+        source: { fileId: `file-${generation}`, digest: String(generation).repeat(64), byteLength: generation },
+        workflowMode: "generated-output",
+        documentGeneration: generation,
+      }),
+      scope: { documentTitle: "paper.pdf" },
+      saveStatus: { destination: { phase: "none", generation: 0 }, sync: { phase: "clean", desiredRevision: generation, savedRevision: generation } },
+      viewerAssets: { documentUrl: `snapshot-${generation}.pdf`, pdfiumWasm: "pdfium.wasm" },
+      resourcePolicy: { host: "vscode", issued: new Set([`snapshot-${generation}.pdf`, "pdfium.wasm"]) },
+    });
+    let listener: ((event: HostRuntimeInvalidation) => void) | undefined;
+    const runtime = {
+      bootstrap: vi.fn()
+        .mockRejectedValueOnce(new Error("temporary materialization failure"))
+        .mockResolvedValueOnce(loaded(3)),
+      subscribeInvalidations: vi.fn((next: (event: HostRuntimeInvalidation) => void) => {
+        listener = next;
+        return () => { listener = undefined; };
+      }),
+    } as unknown as HostRuntime;
+    const published: RuntimeDocumentSourceSnapshot[] = [];
+    const unsubscribe = subscribeRuntimeDocumentSource(runtime, loaded(1), (snapshot) => published.push(snapshot));
+
+    listener?.({ sessionId, generation: 2, previousGeneration: 1, revision: 2, reason: "generation" });
+    await vi.waitFor(() => expect(published.at(-1)?.refreshStatus).toBe("failed"));
+    await vi.advanceTimersByTimeAsync(250);
+    await vi.waitFor(() => expect(published.at(-1)).toMatchObject({
+      refreshStatus: "idle", loaded: { generation: 3, revision: 3 },
+    }));
+    expect(runtime.bootstrap).toHaveBeenCalledTimes(2);
+    unsubscribe();
+    vi.useRealTimers();
+  });
+
+  it("retries a behind-fence bootstrap and a stale event cannot cancel the retry", async () => {
+    vi.useFakeTimers();
+    const sessionId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const loaded = (generation: number): HostRuntimeBootstrap => ({
+      sessionId, generation, revision: generation, session: { sessionId },
+      state: createReviewState({ sessionId,
+        source: { fileId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", digest: "a".repeat(64), byteLength: 100 },
+        workflowMode: "generated-output", documentGeneration: generation }),
+      scope: { documentTitle: "paper.pdf" },
+      saveStatus: { destination: { phase: "none", generation: 0 }, sync: { phase: "clean", desiredRevision: generation, savedRevision: generation } },
+      viewerAssets: { documentUrl: `${generation}.pdf`, pdfiumWasm: "pdfium.wasm" },
+      resourcePolicy: { host: "vscode", issued: new Set([`${generation}.pdf`, "pdfium.wasm"]) },
+    });
+    let listener: ((event: HostRuntimeInvalidation) => void) | undefined;
+    const runtime = {
+      bootstrap: vi.fn().mockResolvedValueOnce(loaded(1)).mockResolvedValueOnce(loaded(2)),
+      subscribeInvalidations(next: (event: HostRuntimeInvalidation) => void) { listener = next; return () => undefined; },
+    } as unknown as HostRuntime;
+    const published: RuntimeDocumentSourceSnapshot[] = [];
+    const unsubscribe = subscribeRuntimeDocumentSource(runtime, loaded(1), (snapshot) => published.push(snapshot));
+    listener?.({ sessionId, generation: 2, previousGeneration: 1, revision: 2, reason: "generation" });
+    await vi.waitFor(() => expect(published.at(-1)?.refreshStatus).toBe("failed"));
+    listener?.({ sessionId, generation: 1, revision: 0, reason: "revision" });
+    await vi.advanceTimersByTimeAsync(250);
+    await vi.waitFor(() => expect(published.at(-1)).toMatchObject({ refreshStatus: "idle", loaded: { generation: 2 } }));
+    expect(runtime.bootstrap).toHaveBeenCalledTimes(2);
+    unsubscribe();
+    vi.useRealTimers();
+  });
+
+  it("evicts rejected document materializations and bounds retained successor resources", async () => {
+    const listeners = new Set<(message: unknown) => void>();
+    const sessionId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    let generation = 1;
+    let attempt = 0;
+    const disposed: string[] = [];
+    const materializeDocument = vi.fn(async (source: string) => {
+      attempt += 1;
+      if (source.includes("generation=2") && attempt === 2) throw new Error("transient");
+      return { url: `blob:${source}:${attempt}`, dispose: () => disposed.push(source) };
+    });
+    const port = {
+      panelId: "panel_identifier_1234",
+      subscribe(listener: (message: unknown) => void) { listeners.add(listener); return () => listeners.delete(listener); },
+      postMessage(message: unknown) {
+        const request = message as { requestId: string; method: string };
+        if (request.method !== "bootstrap") return;
+        queueMicrotask(() => {
+          const state = createReviewState({
+            sessionId,
+            source: { fileId: `file-${generation}`, digest: String(generation).repeat(64), byteLength: generation },
+            workflowMode: "generated-output",
+            documentGeneration: generation,
+          });
+          for (const listener of listeners) listener({
+            protocol: REVIEW_RUNTIME_PROTOCOL, version: REVIEW_RUNTIME_VERSION, kind: "response",
+            panelId: "panel_identifier_1234", requestId: request.requestId, sessionId,
+            generation, revision: generation, ok: true,
+            payload: { sessionId, generation, revision: generation, state, scope: {}, saveStatus: {},
+              resources: { document: `document.pdf?generation=${generation}`, pdfiumWasm: "pdfium.wasm" } },
+          });
+        });
+      },
+    };
+    const runtime = createRpcHostRuntime(port, { materializeDocument });
+    await runtime.bootstrap();
+    generation = 2;
+    await expect(runtime.bootstrap()).rejects.toThrow("transient");
+    await expect(runtime.bootstrap()).resolves.toMatchObject({ generation: 2 });
+    generation = 3;
+    await runtime.bootstrap();
+    expect(disposed).toContain("document.pdf?generation=1");
+    runtime.dispose();
   });
 
   it("bootstraps and dispatches through a versioned VS Code RPC without credentials", async () => {

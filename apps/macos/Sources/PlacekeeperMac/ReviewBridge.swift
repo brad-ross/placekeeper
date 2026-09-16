@@ -57,23 +57,28 @@ final class ReviewBridge {
     let runtimeID: String
     let attemptID: String
     private let helper: any ReviewHelperRequesting
-    private let admission: MacReviewAdmission
+    private let resourceID: String
     private(set) var projection: MacRuntimeProjection
     private var activated = false
     private var activating = false
     private var activationWaiters: [(Bool) -> Void] = []
+    private var refreshInFlight = false
+    private var refreshPending = false
+    private var pendingRefreshSend: (([String: Any]) -> Void)?
+    private var installationToken = 0
+    var successorInstaller: ((MacRuntimeProjection, @escaping (Bool) -> Void) -> Void)?
     private let diagnosticsEnabled = ProcessInfo.processInfo.environment["PLACEKEEPER_MAC_DIAGNOSTICS"] == "1"
 
     init(runtimeID: String, attemptID: String, helper: any ReviewHelperRequesting, admission: MacReviewAdmission) {
         self.runtimeID = runtimeID
         self.attemptID = attemptID
         self.helper = helper
-        self.admission = admission
+        resourceID = admission.resourceID
         projection = admission.projection
     }
 
     var documentResourceURL: String {
-        "placekeeper-resource://document/\(admission.resourceID)?generation=\(admission.generation)&role=document"
+        "placekeeper-resource://document/\(resourceID)?generation=\(projection.generation)&role=document"
     }
 
     func handle(_ raw: Any, send: @escaping ([String: Any]) -> Void) {
@@ -167,29 +172,139 @@ final class ReviewBridge {
         }
     }
 
+    func keepalive(send: @escaping ([String: Any]) -> Void, completion: @escaping (Bool) -> Void = { _ in }) {
+        guard activated else { completion(false); return }
+        guard !refreshInFlight else {
+            refreshPending = true
+            pendingRefreshSend = send
+            completion(false)
+            return
+        }
+        refreshInFlight = true
+        guard helper.request(type: "keepalive", fields: [:], completion: { [weak self] reply in
+            Task { @MainActor in
+                guard let self else { return }
+                switch reply {
+                case .invalidation:
+                    self.fetchCurrent(send: send, completion: completion)
+                case let .refreshed(next):
+                    self.installAndPublish(next, send: send) { installed in
+                        self.finishRefresh(success: installed, send: send, completion: completion)
+                    }
+                default:
+                    self.finishRefresh(success: false, send: send, completion: completion)
+                }
+            }
+        }) != nil else {
+            finishRefresh(success: false, send: send, completion: completion)
+            return
+        }
+    }
+
+    private func fetchCurrent(send: @escaping ([String: Any]) -> Void, completion: @escaping (Bool) -> Void) {
+        guard helper.request(type: "refresh", fields: [:], completion: { [weak self] reply in
+            Task { @MainActor in
+                guard let self else { return }
+                guard case let .refreshed(next)? = reply else {
+                    self.finishRefresh(success: false, send: send, completion: completion)
+                    return
+                }
+                self.installAndPublish(next, send: send) { installed in
+                    self.finishRefresh(success: installed, send: send, completion: completion)
+                }
+            }
+        }) != nil else {
+            finishRefresh(success: false, send: send, completion: completion)
+            return
+        }
+    }
+
+    private func requestRefresh(send: @escaping ([String: Any]) -> Void) {
+        guard activated else { return }
+        guard !refreshInFlight else {
+            refreshPending = true
+            pendingRefreshSend = send
+            return
+        }
+        refreshInFlight = true
+        guard helper.request(type: "refresh", fields: [:], completion: { [weak self] reply in
+            Task { @MainActor in
+                guard let self else { return }
+                guard case let .refreshed(next)? = reply else {
+                    self.finishRefresh(success: false, send: send)
+                    return
+                }
+                self.installAndPublish(next, send: send) { installed in
+                    self.finishRefresh(success: installed, send: send)
+                }
+            }
+        }) != nil else { finishRefresh(success: false, send: send); return }
+    }
+
+    private func finishRefresh(
+        success: Bool,
+        send: @escaping ([String: Any]) -> Void,
+        completion: @escaping (Bool) -> Void = { _ in }
+    ) {
+        refreshInFlight = false
+        completion(success)
+        guard refreshPending else { return }
+        refreshPending = false
+        let nextSend = pendingRefreshSend ?? send
+        pendingRefreshSend = nil
+        requestRefresh(send: nextSend)
+    }
+
+    private func installAndPublish(
+        _ next: MacRuntimeProjection,
+        send: @escaping ([String: Any]) -> Void,
+        completion: @escaping (Bool) -> Void = { _ in }
+    ) {
+        guard next.sessionID == projection.sessionID else { completion(false); return }
+        guard Self.isNewer(next, than: projection) else {
+            completion(true)
+            return
+        }
+        installationToken += 1
+        let token = installationToken
+        let publish = { [weak self] in
+            guard let self, token == self.installationToken,
+                  Self.isNewer(next, than: self.projection) else { return false }
+            let previous = self.projection
+            self.projection = next
+            send(self.invalidation(previous: previous, next: next))
+            return true
+        }
+        if next.generation != projection.generation, let successorInstaller {
+            successorInstaller(next) { installed in
+                completion(installed && publish())
+            }
+        } else {
+            completion(publish())
+        }
+    }
+
+    private func invalidation(previous: MacRuntimeProjection, next: MacRuntimeProjection) -> [String: Any] {
+        var payload: [String: Any] = [
+            "sessionId": next.sessionID, "generation": next.generation, "revision": next.revision,
+            "reason": next.generation == previous.generation ? "revision" : "generation",
+        ]
+        if next.generation != previous.generation { payload["previousGeneration"] = previous.generation }
+        return [
+            "protocol": "placekeeper.review-runtime", "version": 3, "kind": "event",
+            "runtimeId": runtimeID, "event": "session-invalidated",
+            "payload": payload,
+        ]
+    }
+
     private func refreshAfterMutation(method: String, send: @escaping ([String: Any]) -> Void) {
         guard Self.nonIdempotent.contains(method) else { return }
-        _ = helper.request(type: "refresh", fields: [:]) { [weak self] reply in
-            Task { @MainActor in
-                guard let self, case let .refreshed(next)? = reply else { return }
-                let previous = self.projection
-                self.projection = next
-                guard next.generation != previous.generation || next.revision != previous.revision else { return }
-                send([
-                    "protocol": "placekeeper.review-runtime",
-                    "version": 3,
-                    "kind": "event",
-                    "runtimeId": self.runtimeID,
-                    "event": "session-invalidated",
-                    "payload": [
-                        "sessionId": next.sessionID,
-                        "generation": next.generation,
-                        "revision": next.revision,
-                        "reason": next.generation == previous.generation ? "revision" : "generation",
-                    ],
-                ])
-            }
-        }
+        requestRefresh(send: send)
+    }
+
+    private static func isNewer(_ candidate: MacRuntimeProjection, than current: MacRuntimeProjection) -> Bool {
+        candidate.generation > current.generation
+            || (candidate.generation == current.generation && candidate.revision > current.revision)
     }
 
     private func response(_ request: MacPageRuntimeRequest, identity: MacRuntimeProjection, payload: Any) -> [String: Any] {

@@ -54,6 +54,8 @@ interface StagedRuntimeRecord extends RuntimeRecordBase {
   phase: "provisional" | "active";
   trustedProjection: ChromeRuntimeProjection;
   projection: MacosRuntimeProjection;
+  readonly documents: Map<number, { readonly byteLength: number; readonly digest: string }>;
+  adoptedResourceGeneration: number;
   interactionAttachment?: import("../sessions/review-interactions.js").ReviewInteractionAttachment;
 }
 
@@ -210,6 +212,7 @@ export class MacosRuntimeManager {
     if (message.type === "keepalive") return this.#keepalive(existing, message, signal);
     if (message.type === "invoke") return this.#invoke(existing, message, signal);
     if (message.type === "read-resource") return this.#read(existing, message, signal, request);
+    if (message.type === "adopt-resource") return this.#adoptResource(existing, message);
     if (message.type === "copy-link") return this.#copyLink(existing, message);
     return this.#failure(message, "invalid");
   }
@@ -316,6 +319,10 @@ export class MacosRuntimeManager {
       phase: "provisional",
       trustedProjection,
       projection,
+      documents: new Map([[projection.generation, {
+        byteLength: projection.document.byteLength, digest: projection.document.sha256,
+      }]]),
+      adoptedResourceGeneration: projection.generation,
     };
     this.#records.set(helperId, record);
     return {
@@ -352,6 +359,7 @@ export class MacosRuntimeManager {
       if (interactionAttachment !== undefined) record.interactionAttachment = interactionAttachment;
       record.trustedProjection = trusted;
       record.projection = projection;
+      this.#rememberDocument(record, projection);
       return { ...this.#envelope(message), type: "active", projection };
     } catch {
       await this.#backend.release(record.canonicalKey).catch(() => undefined);
@@ -372,6 +380,7 @@ export class MacosRuntimeManager {
       if (projection === undefined) throw new Error("invalid-projection");
       record.trustedProjection = trusted;
       record.projection = projection;
+      this.#rememberDocument(record, projection);
       return { ...this.#envelope(message), type: "refreshed", projection };
     } catch {
       return this.#failure(message, "unavailable");
@@ -392,6 +401,7 @@ export class MacosRuntimeManager {
       if (projection === undefined) throw new Error("invalid-projection");
       record.trustedProjection = trusted;
       record.projection = projection;
+      this.#rememberDocument(record, projection);
       const saveChanged = canonicalJson(previous.saveStatus) !== canonicalJson(projection.saveStatus);
       const recoveryChanged = previous.protected !== projection.protected;
       if (projection.generation !== previous.generation || projection.revision !== previous.revision
@@ -434,6 +444,7 @@ export class MacosRuntimeManager {
         if (projection === undefined) throw new Error("invalid-projection");
         record.trustedProjection = trusted;
         record.projection = projection;
+        this.#rememberDocument(record, projection);
         if (message.generation !== projection.generation || message.revision !== projection.revision) {
           return this.#failure(message, "stale");
         }
@@ -465,6 +476,7 @@ export class MacosRuntimeManager {
       if (projection !== undefined) {
         record.trustedProjection = current;
         record.projection = projection;
+        this.#rememberDocument(record, projection);
       }
       return { ...this.#envelope(message), type: "result", method: message.method, payload };
     } catch {
@@ -478,8 +490,9 @@ export class MacosRuntimeManager {
     signal: AbortSignal,
     request: RequestRecord,
   ): Promise<MacosReviewHelperResponse> {
-    if (message.resourceId !== record.resourceId || message.generation !== record.projection.generation
-      || message.offset + message.length > record.projection.document.byteLength) {
+    const descriptor = record.documents.get(message.generation);
+    if (message.resourceId !== record.resourceId || descriptor === undefined
+      || message.offset + message.length > descriptor.byteLength) {
       return this.#failure(message, "stale");
     }
     const resourcesForHelper = this.#activeResourcesByHelper.get(record.helperId) ?? 0;
@@ -496,18 +509,49 @@ export class MacosRuntimeManager {
         signal,
       );
       throwIfAborted(signal);
+      const done = message.offset + bytes.byteLength >= descriptor.byteLength;
       return {
         ...this.#envelope(message),
         type: "resource-bytes",
         sequence: Math.floor(message.offset / MACOS_HELPER_RESOURCE_CHUNK_BYTES),
         data: bytes.toString("base64"),
-        done: message.offset + bytes.byteLength >= record.projection.document.byteLength,
+        done,
       };
     } catch {
       return this.#failure(message, "unavailable");
     } finally {
       releaseResource();
       if (request.releaseResource === releaseResource) request.releaseResource = undefined;
+    }
+  }
+
+  #adoptResource(
+    record: StagedRuntimeRecord,
+    message: Extract<MacosReviewHelperMessage, { readonly type: "adopt-resource" }>,
+  ): MacosReviewHelperResponse {
+    const descriptor = record.documents.get(message.generation);
+    if (message.resourceId !== record.resourceId || descriptor === undefined
+      || descriptor.byteLength !== message.byteLength || descriptor.digest !== message.digest
+      || message.generation < record.adoptedResourceGeneration) {
+      return this.#failure(message, "stale");
+    }
+    record.adoptedResourceGeneration = message.generation;
+    for (const generation of record.documents.keys()) {
+      if (generation < message.generation) record.documents.delete(generation);
+    }
+    return { ...this.#envelope(message), type: "resource-adopted", generation: message.generation };
+  }
+
+  #rememberDocument(record: StagedRuntimeRecord, projection: MacosRuntimeProjection): void {
+    record.documents.set(projection.generation, {
+      byteLength: projection.document.byteLength,
+      digest: projection.document.sha256,
+    });
+    while (record.documents.size > 3) {
+      const oldest = [...record.documents.keys()]
+        .find((generation) => generation !== record.adoptedResourceGeneration);
+      if (oldest === undefined) break;
+      record.documents.delete(oldest);
     }
   }
 

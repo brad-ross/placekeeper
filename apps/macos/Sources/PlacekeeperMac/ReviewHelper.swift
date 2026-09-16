@@ -82,6 +82,7 @@ enum MacReviewHelperReply {
     case invalidation(generation: Int, revision: Int, reason: String)
     case result(method: String, payload: Any)
     case resource(sequence: Int, bytes: Data, done: Bool)
+    case resourceAdopted(generation: Int)
     case released
     case failure(code: String)
 }
@@ -168,6 +169,10 @@ enum MacReviewHelperReplyParser {
                   let bytes = Data(base64Encoded: encoded), bytes.count <= macosHelperResourceChunkBytes,
                   let done = value["done"] as? Bool else { return nil }
             return .resource(sequence: sequence, bytes: bytes, done: done)
+        case "resource-adopted":
+            guard exact(value, base.union(["generation"])),
+                  let generation = positiveInteger(value["generation"]) else { return nil }
+            return .resourceAdopted(generation: generation)
         case "released":
             return exact(value, base) ? .released : nil
         case "failure":

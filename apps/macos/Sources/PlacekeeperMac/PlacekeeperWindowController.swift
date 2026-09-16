@@ -51,6 +51,7 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
     private var visiblePaintConfirmed = false
     private var pendingDocumentReadyGeneration: Int?
     private var activationStarted = false
+    private var keepaliveTimer: Timer?
     private var readinessDiagnosticScheduled = false
     private var pdfiumData: Data?
     private var workerData: Data?
@@ -143,6 +144,9 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
         window.tabbingMode = .disallowed
         window.isReleasedWhenClosed = false
         super.init(window: window)
+        bridge.successorInstaller = { [weak self] projection, completion in
+            self?.installSuccessor(projection, completion: completion) ?? completion(false)
+        }
         window.delegate = self
 
         contentController.add(self, name: "placekeeperShell")
@@ -243,6 +247,8 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
     func helperDidFail() {
         guard !closed, !failed else { return }
         failed = true
+        keepaliveTimer?.invalidate()
+        keepaliveTimer = nil
         webView.stopLoading()
         webView.configuration.userContentController.removeScriptMessageHandler(forName: "placekeeperShell")
         schemeHandler.invalidate()
@@ -266,6 +272,8 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
     func windowWillClose(_ notification: Notification) {
         guard !closed else { return }
         closed = true
+        keepaliveTimer?.invalidate()
+        keepaliveTimer = nil
         webView.stopLoading()
         webView.configuration.userContentController.removeScriptMessageHandler(forName: "placekeeperShell")
         schemeHandler.invalidate()
@@ -273,7 +281,10 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
         onClose(windowID)
     }
 
-    func windowDidBecomeKey(_ notification: Notification) { onBecameKey(windowID) }
+    func windowDidBecomeKey(_ notification: Notification) {
+        onBecameKey(windowID)
+        requestKeepalive()
+    }
 
     func focus() {
         NSApplication.shared.activate(ignoringOtherApps: true)
@@ -539,7 +550,43 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
               let generation = pendingDocumentReadyGeneration else { return }
         activationStarted = true
         bridge.activate(generation: generation) { [weak self] active in
-            if !active { self?.helperDidFail() }
+            guard let self else { return }
+            if !active { self.helperDidFail(); return }
+            self.startKeepalive()
+        }
+    }
+
+    private func startKeepalive() {
+        guard keepaliveTimer == nil, !closed, !failed else { return }
+        requestKeepalive()
+        keepaliveTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.requestKeepalive() }
+        }
+    }
+
+    private func requestKeepalive() {
+        guard !closed, !failed else { return }
+        bridge.keepalive(send: { [weak self] message in self?.sendRuntimeMessage(message) })
+    }
+
+    private func installSuccessor(_ projection: MacRuntimeProjection, completion: @escaping (Bool) -> Void) {
+        schemeHandler.install(projection: projection)
+        schemeHandler.loadDocument(generation: projection.generation) { [weak self] result in
+            DispatchQueue.main.async {
+                guard let self, !self.closed, !self.failed else { completion(false); return }
+                guard case let .success(bytes) = result else { completion(false); return }
+                let source = "placekeeper-resource://document/\(self.admission.resourceID)?generation=\(projection.generation)&role=document"
+                self.installBlob(role: "document-\(projection.generation)", mime: "application/pdf", data: bytes, source: source) { installed in
+                    self.schemeHandler.releaseDocumentCache(generation: projection.generation)
+                    guard installed else { completion(false); return }
+                    self.schemeHandler.acknowledgeAdoption(projection: projection) { acknowledged in
+                        Task { @MainActor in
+                            if acknowledged { self.schemeHandler.adopt(generation: projection.generation) }
+                            completion(acknowledged)
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -729,7 +776,7 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
             helperDidFail()
             return
         }
-        schemeHandler.loadDocument { [weak self] result in
+        schemeHandler.loadDocument(generation: admission.generation) { [weak self] result in
             DispatchQueue.main.async {
                 guard let self, !self.closed else { return }
                 guard case let .success(documentData) = result else {
@@ -757,7 +804,7 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
                             data: documentData,
                             source: self.bridge.documentResourceURL
                         ) { installed in
-                            self.schemeHandler.releaseDocumentCache()
+                            self.schemeHandler.releaseDocumentCache(generation: self.admission.generation)
                             guard installed else {
                                 self.diagnostic("document-install-failed")
                                 self.helperDidFail()
@@ -834,7 +881,11 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
             delete globalThis.__PLACEKEEPER_MAC_BLOB_PARTS__[role];
             if (role === 'pdfium') globalThis.__PLACEKEEPER_MAC_PDFIUM_URL__ = url;
             else if (role === 'worker') globalThis.__PLACEKEEPER_MAC_WORKER_URL__ = url;
-            else globalThis.__PLACEKEEPER_MAC_DOCUMENT_RESOURCE__ = { source, url };
+            else {
+              const resources = globalThis.__PLACEKEEPER_MAC_DOCUMENT_RESOURCES__ ??= {};
+              resources[source] = url;
+              globalThis.__PLACEKEEPER_MAC_DOCUMENT_RESOURCE__ = { source, url };
+            }
             return url.startsWith('blob:');
             """,
             arguments: arguments,

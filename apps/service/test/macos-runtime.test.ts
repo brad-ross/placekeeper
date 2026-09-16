@@ -63,6 +63,31 @@ function projection(revision = 0): MacosRuntimeTrustedProjection {
   };
 }
 
+function generationProjection(generation: number, bytes: Buffer): MacosRuntimeTrustedProjection {
+  const nextDigest = createHash("sha256").update(bytes).digest("hex");
+  const current = projection(generation);
+  return {
+    ...current,
+    generation,
+    revision: generation,
+    state: {
+      ...(current.state as Record<string, unknown>),
+      revision: generation,
+      source: {
+        ...(current.state as { source: Record<string, unknown> }).source,
+        fileId: `c0e41526-1320-4dec-b802-3c17617c032${generation}`,
+        digest: nextDigest,
+        byteLength: bytes.byteLength,
+      },
+      workflow: {
+        ...(current.state as { workflow: Record<string, unknown> }).workflow,
+        documentGeneration: generation,
+      },
+    },
+    document: { sha256: nextDigest, byteLength: bytes.byteLength, generation },
+  };
+}
+
 function backend(): MacosRuntimeBackend {
   const attachment = {
     sessionId: "session_review_1234", attachmentId: "attachment_native_1234",
@@ -307,6 +332,58 @@ describe("macOS canonical review runtime", () => {
       requestId: "request_keepalive_2",
       type: "keepalive",
     })).resolves.toMatchObject({ type: "refreshed", projection: { revision: 2 } });
+  });
+
+  it("retains the predecessor native resource through successor adoption and bounds older generations", async () => {
+    const service = backend();
+    const bytes = new Map([
+      [1, sourceBytes],
+      [2, Buffer.from("%PDF-1.7\ngeneration two\n%%EOF")],
+      [3, Buffer.from("%PDF-1.7\ngeneration three\n%%EOF")],
+    ]);
+    let current = projection();
+    vi.mocked(service.current).mockImplementation(async () => current);
+    vi.mocked(service.readDocument).mockImplementation(async (_key, generation, offset, length) =>
+      bytes.get(generation)!.subarray(offset, offset + length));
+    const manager = new MacosRuntimeManager(service);
+    await admit(manager);
+    await manager.handle("helper_12345678", {
+      ...envelope, requestId: "request_activate_resources", type: "activate", documentValidated: true,
+    });
+    const resourceId = manager.resourceId("helper_12345678")!;
+    current = generationProjection(2, bytes.get(2)!);
+    await manager.handle("helper_12345678", {
+      ...envelope, requestId: "request_refresh_resources_2", type: "refresh",
+    });
+    await expect(manager.handle("helper_12345678", {
+      ...envelope, requestId: "request_read_predecessor", type: "read-resource", resourceId,
+      generation: 1, role: "document", offset: 0, length: sourceBytes.byteLength,
+    })).resolves.toMatchObject({ type: "resource-bytes", data: sourceBytes.toString("base64") });
+    current = generationProjection(3, bytes.get(3)!);
+    await manager.handle("helper_12345678", {
+      ...envelope, requestId: "request_refresh_resources_3", type: "refresh",
+    });
+    await expect(manager.handle("helper_12345678", {
+      ...envelope, requestId: "request_read_adopted_3", type: "read-resource", resourceId,
+      generation: 3, role: "document", offset: 0, length: bytes.get(3)!.byteLength,
+    })).resolves.toMatchObject({ type: "resource-bytes", data: bytes.get(3)!.toString("base64") });
+    await expect(manager.handle("helper_12345678", {
+      ...envelope, requestId: "request_read_predecessor_after_bytes", type: "read-resource", resourceId,
+      generation: 1, role: "document", offset: 0, length: sourceBytes.byteLength,
+    })).resolves.toMatchObject({ type: "resource-bytes" });
+    await expect(manager.handle("helper_12345678", {
+      ...envelope, requestId: "request_reject_bad_adoption", type: "adopt-resource", resourceId,
+      generation: 3, byteLength: bytes.get(3)!.byteLength, digest: "f".repeat(64),
+    })).resolves.toMatchObject({ type: "failure", code: "stale" });
+    await expect(manager.handle("helper_12345678", {
+      ...envelope, requestId: "request_adopt_resource_3", type: "adopt-resource", resourceId,
+      generation: 3, byteLength: bytes.get(3)!.byteLength,
+      digest: createHash("sha256").update(bytes.get(3)!).digest("hex"),
+    })).resolves.toMatchObject({ type: "resource-adopted", generation: 3 });
+    await expect(manager.handle("helper_12345678", {
+      ...envelope, requestId: "request_read_retired", type: "read-resource", resourceId,
+      generation: 1, role: "document", offset: 0, length: sourceBytes.byteLength,
+    })).resolves.toMatchObject({ type: "failure", code: "stale" });
   });
 
   it("contains a stalled helper without starving another window", async () => {

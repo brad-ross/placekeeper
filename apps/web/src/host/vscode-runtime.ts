@@ -175,10 +175,24 @@ export function createRpcHostRuntime(
       pending = options.materializeDocument(sourceUrl);
       materializedDocuments.set(sourceUrl, pending);
     }
-    const resource = await pending;
+    let resource: MaterializedViewerResource;
+    try {
+      resource = await pending;
+    } catch (error) {
+      if (materializedDocuments.get(sourceUrl) === pending) materializedDocuments.delete(sourceUrl);
+      throw error;
+    }
     if (disposed) {
       resource.dispose();
       throw new Error("The review runtime is disposed.");
+    }
+    while (materializedDocuments.size > 2) {
+      const oldest = materializedDocuments.entries().next().value as
+        | [string, Promise<MaterializedViewerResource>]
+        | undefined;
+      if (oldest === undefined) break;
+      materializedDocuments.delete(oldest[0]);
+      void oldest[1].then((value) => value.dispose(), () => undefined);
     }
     return resource;
   };
@@ -190,7 +204,12 @@ export function createRpcHostRuntime(
       pending = options.materializePdfiumWasm(sourceUrl);
       materializedPdfium.set(sourceUrl, pending);
     }
-    const resource = await pending;
+    let resource: MaterializedViewerResource;
+    try { resource = await pending; }
+    catch (error) {
+      if (materializedPdfium.get(sourceUrl) === pending) materializedPdfium.delete(sourceUrl);
+      throw error;
+    }
     if (disposed) {
       resource.dispose();
       throw new Error("The review runtime is disposed.");
@@ -205,7 +224,12 @@ export function createRpcHostRuntime(
       pending = options.materializePdfiumWorker(sourceUrl);
       materializedWorkers.set(sourceUrl, pending);
     }
-    const resource = await pending;
+    let resource: MaterializedViewerResource;
+    try { resource = await pending; }
+    catch (error) {
+      if (materializedWorkers.get(sourceUrl) === pending) materializedWorkers.delete(sourceUrl);
+      throw error;
+    }
     if (disposed) {
       resource.dispose();
       throw new Error("The review runtime is disposed.");
