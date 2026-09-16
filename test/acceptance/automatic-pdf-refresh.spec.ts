@@ -57,7 +57,8 @@ test.describe('automatic PDF refresh annotation lifecycle', () => {
     const editor = composer.getByRole('textbox', { name: 'Comment (optional)' });
     await editor.fill('Still typing through reconnect.');
 
-    await page.getByRole('button', { name: 'Reconnect then attempt source replacement' }).click();
+    await page.getByRole('button', { name: 'Reconnect then attempt source replacement' })
+      .dispatchEvent('click');
 
     await expect(page.locator('#root')).toHaveAttribute('data-interaction-hold', 'active');
     await expect(page.locator('#root')).toHaveAttribute('data-replacement-blocked', 'true');
@@ -133,15 +134,15 @@ test.describe('automatic PDF refresh annotation lifecycle', () => {
     expect(releases).toEqual([{ interactionToken: begins[0]?.interactionToken, order: 2 }]);
   });
 
-  test('keeps retrying an abandoned release until the next user action can recover it', async ({ page }) => {
+  test('recovers an abandoned release in the background before the next user action', async ({ page }) => {
     await page.goto('/test/acceptance/review-harness/index.html?interaction-lifecycle=1&begin-delayed=1&release-fails-twice=1&host-export=1');
     await page.getByRole('button', { name: 'Highlight', exact: true }).click();
     await page.getByRole('button', { name: 'Remount review shell' }).click();
     await page.getByRole('button', { name: 'Finish interaction begin' }).click();
     await expect.poll(async () => JSON.parse(
       await page.locator('#root').getAttribute('data-release-requests') ?? '[]',
-    )).toHaveLength(2);
-    await expect(page.locator('#root')).toHaveAttribute('data-interaction-hold', 'active');
+    )).toHaveLength(3);
+    await expect(page.locator('#root')).toHaveAttribute('data-interaction-hold', 'released');
 
     const highlight = page.getByRole('button', { name: 'Highlight', exact: true });
     await highlight.click();

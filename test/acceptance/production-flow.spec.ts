@@ -2529,7 +2529,7 @@ for (const width of [1280, 760]) {
 
 test("records annotation tray jumps in document history", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 });
-  await openFreshProductionFixture(
+  const { sessionId } = await openFreshProductionFixture(
     page,
     referencePdf,
     "Annotation history launch failed",
@@ -2548,6 +2548,13 @@ test("records annotation tray jumps in document history", async ({ page }) => {
     },
   );
   await expect.poll(() => currentPageText(page)).toBe("1 / 4");
+  await expect.poll(() => {
+    const state = host.broker.state(sessionId);
+    const sync = host.broker.saveStatus(sessionId)?.sync;
+    return state !== undefined && sync?.phase === 'clean'
+      && sync.desiredRevision === state.revision
+      && sync.savedRevision === state.revision;
+  }).toBe(true);
 
   await openAnnotationsWorkspace(page);
   const annotationsPanel = page.locator('#workspace-panel-annotations');
@@ -2559,11 +2566,8 @@ test("records annotation tray jumps in document history", async ({ page }) => {
     name: "Copy link to Page Note annotation on page 3",
   });
   await expect(pageThreeCopyLink).toBeVisible();
-  await expect(pageThreeCopyLink).toBeDisabled();
-  await expect(pageThreeCopyLink).toHaveAttribute(
-    "title",
-    "Save annotation before copying its link",
-  );
+  await expect(pageThreeCopyLink).toBeEnabled();
+  await expect(pageThreeCopyLink).not.toHaveAttribute("title");
 
   const back = page.getByRole("button", { name: "Back in document history" });
   const forward = page.getByRole("button", { name: "Forward in document history" });
@@ -2580,6 +2584,42 @@ test("records annotation tray jumps in document history", async ({ page }) => {
   await page.locator('[data-review-chrome]').hover({ position: { x: 2, y: 2 } });
   await forward.click();
   await expect.poll(() => currentPageText(page)).toBe("3 / 4");
+});
+
+test("keeps unsaved annotation links disabled until the item is portable", async ({ page }) => {
+  const { sessionId } = await openFreshProductionFixture(
+    page,
+    plainTextPdf,
+    "Unsaved annotation link launch failed",
+    async (openedSessionId) => {
+      const initialState = host.broker.state(openedSessionId);
+      if (!initialState) throw new Error("Unsaved annotation link review state is missing");
+      await host.broker.acceptMutation(
+        openedSessionId,
+        addPageNote(
+          initialState,
+          0,
+          { x: 80, y: 160, width: 18, height: 18 },
+          "Unsaved destination.",
+        ),
+      );
+    },
+  );
+  expect(host.broker.saveStatus(sessionId)).toMatchObject({
+    destination: { phase: "none" },
+    sync: { phase: "not-saved", desiredRevision: 1, savedRevision: 0 },
+  });
+
+  await openAnnotationsWorkspace(page);
+  const copyLink = page.locator('#workspace-panel-annotations').getByRole("button", {
+    name: "Copy link to Page Note annotation on page 1",
+  });
+  await expect(copyLink).toBeVisible();
+  await expect(copyLink).toBeDisabled();
+  await expect(copyLink).toHaveAttribute(
+    "title",
+    "Save annotation before copying its link",
+  );
 });
 
 for (const seededAnnotation of [false, true]) {
