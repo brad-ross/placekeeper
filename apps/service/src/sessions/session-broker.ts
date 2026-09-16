@@ -5,7 +5,7 @@ import {
   type ReviewExportFence,
 } from "../../../../packages/core/src/review-runtime-protocol.js";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { open, readdir, readFile, realpath, rm, stat } from "node:fs/promises";
+import { lstat, open, readdir, readFile, realpath, rm, stat } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { documentOrderedItems, projectReviewItems } from "../../../../packages/core/src/annotation-projection.js";
@@ -325,6 +325,15 @@ export class SessionBroker {
     if (attachment === undefined) return;
     this.#interactionAttachments.delete(key);
     this.interactions.disconnect(attachment.attachmentId, attachment.incarnationId);
+  }
+
+  authorizeReviewAttachment(
+    sessionId: string,
+    attachment: ReviewInteractionAttachment,
+  ): boolean {
+    const session = this.#activeById.get(sessionId);
+    return session !== undefined && !session.ending && attachment.sessionId === sessionId &&
+      this.interactions.authorize(attachment);
   }
 
   async beginReviewInteraction(input: {
@@ -1732,14 +1741,20 @@ export class SessionBroker {
     return "settled";
   }
 
-  async #recordCommittedSave(
+  #committedSaveTransition(
     session: ActiveSession,
+    durablePredecessor: RecoverableDraftV3,
     input: {
       readonly revision: number;
       readonly stateDigest: string;
       readonly targetDigest: string;
     },
-  ): Promise<boolean> {
+  ): {
+    readonly current: boolean;
+    readonly durablePredecessor: RecoverableDraftV3;
+    readonly durableSuccessor: RecoverableDraftV3;
+    readonly apply: () => void;
+  } {
     if (session.destination.phase !== "active") {
       throw new Error("Save destination is not active");
     }
@@ -1760,19 +1775,43 @@ export class SessionBroker {
     const acceptedOriginalDigests = destination.kind === "original"
       ? [...new Set([...session.acceptedOriginalDigests, input.targetDigest])]
       : session.acceptedOriginalDigests;
-    await session.store.persist({
+    const durableSuccessor: RecoverableDraftV3 = {
       ...this.#draft(session),
       destination,
       sync,
       ...(acceptedOriginalDigests.length === 0 ? {} : { acceptedOriginalDigests }),
-    });
-    session.destination = destination;
-    session.sync = sync;
-    if (destination.kind === "original") {
-      session.currentOriginalDigest = input.targetDigest;
-      session.acceptedOriginalDigests = acceptedOriginalDigests;
+    };
+    return {
+      current,
+      durablePredecessor,
+      durableSuccessor,
+      apply: () => {
+        session.destination = destination;
+        session.sync = sync;
+        if (destination.kind === "original") {
+          session.currentOriginalDigest = input.targetDigest;
+          session.acceptedOriginalDigests = acceptedOriginalDigests;
+        }
+      },
+    };
+  }
+
+  async #recordCommittedSave(
+    session: ActiveSession,
+    input: {
+      readonly revision: number;
+      readonly stateDigest: string;
+      readonly targetDigest: string;
+    },
+  ): Promise<boolean> {
+    const durablePredecessor = await session.store.recover();
+    if (durablePredecessor === undefined) {
+      throw new Error("The predecessor recovery record is unavailable");
     }
-    return current;
+    const transition = this.#committedSaveTransition(session, durablePredecessor, input);
+    await session.store.persist(transition.durableSuccessor);
+    transition.apply();
+    return transition.current;
   }
 
   async establishSaveDestination(
@@ -1909,25 +1948,94 @@ export class SessionBroker {
     readonly sourceDigest: string;
     readonly revision: number;
     readonly stateDigest: string;
-    readonly commit: () => Promise<string>;
-  }): Promise<"committed-current" | "committed-stale" | "generation-stale"> {
+    readonly commit: (candidateIsCurrent: () => boolean) => Promise<
+      | undefined
+      | {
+          readonly targetDigest: string;
+          readonly settle: () => Promise<"published" | "superseded" | "uncertain">;
+        }
+    >;
+  }): Promise<
+    | "committed-current"
+    | "committed-stale"
+    | "generation-stale"
+    | "target-superseded"
+    | "commit-pending"
+  > {
     const session = this.#activeById.get(input.sessionId);
     if (session === undefined || session.ending) return "generation-stale";
     return this.#withSessionTail(session, async () => {
-      if (
-        session.destination.phase !== "active" ||
-        session.destination.generation !== input.generation ||
-        session.state.workflow.documentGeneration !== input.documentGeneration ||
-        session.state.source.digest !== input.sourceDigest ||
-        session.physicalSaveBarrierEpoch !== undefined
-      ) return "generation-stale";
-      const targetDigest = await input.commit();
-      const current = await this.#recordCommittedSave(session, {
+      const candidateIsCurrent = () => !session.ending &&
+        session.destination.phase === "active" &&
+        session.destination.generation === input.generation &&
+        session.state.workflow.documentGeneration === input.documentGeneration &&
+        session.state.source.digest === input.sourceDigest &&
+        session.physicalSaveBarrierEpoch === undefined;
+      if (!candidateIsCurrent()) return "generation-stale";
+      const durablePredecessor = await session.store.recover();
+      if (durablePredecessor === undefined) {
+        throw new Error("The predecessor recovery record is unavailable");
+      }
+      const publication = await input.commit(candidateIsCurrent);
+      if (publication === undefined) return "generation-stale";
+      const transition = this.#committedSaveTransition(session, durablePredecessor, {
         revision: input.revision,
         stateDigest: input.stateDigest,
-        targetDigest,
+        targetDigest: publication.targetDigest,
       });
-      return current ? "committed-current" : "committed-stale";
+      const committed = () => transition.current ? "committed-current" as const : "committed-stale" as const;
+      const clearBarrier = () => {
+        if (session.replacementCommitBarrier === barrier) delete session.replacementCommitBarrier;
+      };
+      const barrier = {
+        resolve: async (): Promise<"successor" | "predecessor" | "uncertain"> => {
+          let recovered = await session.store.recover().catch(() => undefined);
+          if (recovered !== undefined && isDeepStrictEqual(recovered, transition.durableSuccessor)) {
+            clearBarrier();
+            transition.apply();
+            return "successor";
+          }
+          if (
+            recovered === undefined ||
+            !isDeepStrictEqual(recovered, transition.durablePredecessor)
+          ) return "uncertain";
+          const publicationStatus = await publication.settle();
+          if (publicationStatus === "superseded") {
+            clearBarrier();
+            return "predecessor";
+          }
+          if (publicationStatus === "uncertain") return "uncertain";
+          try {
+            await session.store.persist(transition.durableSuccessor);
+          } catch {
+            recovered = await session.store.recover().catch(() => undefined);
+            if (
+              recovered === undefined ||
+              !isDeepStrictEqual(recovered, transition.durableSuccessor)
+            ) return "uncertain";
+          }
+          clearBarrier();
+          transition.apply();
+          return "successor";
+        },
+      };
+      const publicationStatus = await publication.settle();
+      if (publicationStatus === "superseded") return "target-superseded";
+      if (publicationStatus === "uncertain") {
+        session.replacementCommitBarrier = barrier;
+        return "commit-pending";
+      }
+      try {
+        await session.store.persist(transition.durableSuccessor);
+      } catch {
+        session.replacementCommitBarrier = barrier;
+        const outcome = await barrier.resolve();
+        if (outcome === "successor") return committed();
+        if (outcome === "predecessor") return "target-superseded";
+        return "commit-pending";
+      }
+      transition.apply();
+      return committed();
     });
   }
 
@@ -2711,11 +2819,21 @@ export class SessionBroker {
     let candidateDigest: string | undefined;
     if (
       candidate.reason === "startup" || candidate.reason === "activation" ||
-      candidate.reason === "reconnect" || session.state.workflow.mode !== "generated-output"
+      candidate.reason === "reconnect" || candidate.reason === "audit" ||
+      session.state.workflow.mode !== "generated-output"
     ) {
       candidateDigest = await hashFile(candidate.sourcePath).catch(() => undefined);
     }
-    const changed = candidateDigest === undefined || candidateDigest !== session.state.source.digest;
+    const postDigestInfo = candidateDigest === undefined || candidate.identity === undefined
+      ? undefined
+      : await lstat(candidate.sourcePath).catch(() => undefined);
+    const digestIsTrustworthy = postDigestInfo !== undefined &&
+      postDigestInfo.isFile() && !postDigestInfo.isSymbolicLink() &&
+      postDigestInfo.dev === candidate.identity?.device &&
+      postDigestInfo.ino === candidate.identity?.inode &&
+      postDigestInfo.size === candidate.identity?.byteLength &&
+      postDigestInfo.mtimeMs === candidate.identity?.modifiedAtMs;
+    const changed = !digestIsTrustworthy || candidateDigest !== session.currentOriginalDigest;
     for (const listener of this.#localObservationListeners) {
       try {
         listener({
@@ -2732,11 +2850,13 @@ export class SessionBroker {
         // Observations remain ordered even if a diagnostic consumer fails.
       }
     }
-    if (
-      (candidate.reason === "startup" || candidate.reason === "activation" || candidate.reason === "reconnect") &&
-      candidateDigest === session.state.source.digest
-    ) {
-      return { status: "current" };
+    if (digestIsTrustworthy && candidateDigest === session.currentOriginalDigest) {
+      try {
+        const result = await this.#settleObservedSameDigest(session, candidate, candidateDigest);
+        return { status: "current", result };
+      } catch {
+        return { status: "retry" };
+      }
     }
     try {
       const result = await this.replaceLiveDocument({
@@ -2754,6 +2874,102 @@ export class SessionBroker {
     } catch {
       return { status: "retry" };
     }
+  }
+
+  async #settleObservedSameDigest(
+    session: ActiveSession,
+    candidate: LocalDocumentCandidate,
+    candidateDigest: string,
+  ): Promise<LiveDocumentReplacementResult> {
+    const identity = candidate.identity;
+    if (identity === undefined) throw new Error("A same-digest observation requires stable file identity");
+    let invalidation: { readonly documentGeneration: number; readonly reviewRevision: number } | undefined;
+    const result = await this.#withSessionTail(session, async () => {
+      const currentInfo = await lstat(candidate.sourcePath).catch(() => undefined);
+      if (
+        session.ending ||
+        !this.#localDocumentObserver.isCurrent(session.id, candidate.sequence) ||
+        candidate.sequence < session.latestObservationEpoch ||
+        currentInfo === undefined || !currentInfo.isFile() || currentInfo.isSymbolicLink() ||
+        currentInfo.dev !== identity.device ||
+        currentInfo.ino !== identity.inode ||
+        currentInfo.size !== identity.byteLength ||
+        currentInfo.mtimeMs !== identity.modifiedAtMs
+      ) {
+        return {
+          status: "superseded" as const,
+          sessionId: session.id,
+          documentGeneration: session.state.workflow.documentGeneration,
+          reason: "newer-observation-superseded-candidate",
+        };
+      }
+      if (session.currentOriginalDigest !== candidateDigest) {
+        return {
+          status: "generation-conflict" as const,
+          sessionId: session.id,
+          documentGeneration: session.state.workflow.documentGeneration,
+          reason: "generation-or-source-digest-fence-changed",
+        };
+      }
+      const outputIdentity = {
+        canonicalPath: session.canonicalSourcePath,
+        ...identity,
+      };
+      const currentLineage = session.generationLineage.at(-1);
+      const lineageChanged = !isDeepStrictEqual(currentLineage?.outputIdentity, outputIdentity);
+      const generationLineage = lineageChanged
+        ? session.generationLineage.map((record, index, records) =>
+            index === records.length - 1
+              ? { ...record, outputIdentity, observationEpoch: candidate.sequence }
+              : record
+          )
+        : session.generationLineage;
+      if (lineageChanged) {
+        await this.capabilities.refreshApprovedPdf(session.fileId, session.currentOriginalDigest);
+      }
+      let state = session.state;
+      let sync = session.sync;
+      if (state.workflow.freshness === "possibly-stale") {
+        state = { ...state, workflow: { ...state.workflow, freshness: "current" } };
+        sync = {
+          ...sync,
+          desiredRevision: state.revision,
+          desiredDigest: reviewStateDigest(state),
+        };
+        invalidation = {
+          documentGeneration: state.workflow.documentGeneration,
+          reviewRevision: state.revision,
+        };
+      }
+      if (lineageChanged || state !== session.state) {
+        await session.store.persist({
+          ...this.#draft(session), state, sync, generationLineage,
+          latestObservationEpoch: candidate.sequence,
+        });
+      }
+      session.latestObservationEpoch = Math.max(session.latestObservationEpoch, candidate.sequence);
+      session.state = state;
+      session.sync = sync;
+      session.generationLineage = generationLineage;
+      if (session.physicalSaveBarrierEpoch === candidate.sequence) {
+        delete session.physicalSaveBarrierEpoch;
+        this.#publishPhysicalSaveResume(session.id);
+      }
+      return {
+        status: "same-digest" as const,
+        sessionId: session.id,
+        documentGeneration: session.state.workflow.documentGeneration,
+        reason: "candidate-digest-matches-current-generation",
+      };
+    });
+    if (invalidation !== undefined) {
+      this.controls.publishStateInvalidation(session.id, {
+        documentGeneration: invalidation.documentGeneration,
+        reviewRevision: invalidation.reviewRevision,
+        reason: "freshness",
+      });
+    }
+    return result;
   }
 
   async markLiveDocumentPossiblyStale(

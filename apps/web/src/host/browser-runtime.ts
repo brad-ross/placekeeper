@@ -5,32 +5,87 @@ import type {
   ProductionExportResult,
   ProductionScope,
   ProductionSession,
+  ReviewInteractionAttachment,
   SaveCopyProposal,
 } from "./session-contracts.js";
 import type { RejectedReviewCommand } from "../review/review-command-result.js";
 import { loadProductionSession } from "../app/session-api.js";
 import type { HostRuntime, HostRuntimeInvalidation } from "./runtime.js";
-interface ReviewInteractionAttachment {
-  readonly sessionId: string;
-  readonly attachmentId: string;
-  readonly incarnationId: string;
-  readonly capability: string;
-  readonly protocolVersion: 1;
-  readonly capabilities: readonly string[];
+
+function interactionOwnerCommand(command: ReviewCommand): boolean {
+  return command.type === "put-draft"
+    || command.type === "reattach"
+    || command.type === "apply-draft"
+    || command.type === "discard-reconciliation"
+    || (command.type === "add" && command.authoring !== undefined);
+}
+
+function newOwnerSecret(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(32));
+  return btoa(String.fromCharCode(...bytes))
+    .replaceAll("+", "-")
+    .replaceAll("/", "_")
+    .replace(/=+$/u, "");
+}
+
+const documentOwnerSecrets = Symbol("placekeeper.document-owner-secrets");
+
+function mayRecoverOwnerSecretAfterNavigation(): boolean {
+  const navigation = globalThis.performance?.getEntriesByType?.("navigation")[0] as
+    | { readonly type?: unknown }
+    | undefined;
+  return navigation?.type === "reload" || navigation?.type === "back_forward";
+}
+
+function ownerSecret(sessionId: string): string {
+  const key = `placekeeper.interaction-owner.${sessionId}`;
+  let claimed: Map<string, string>;
+  try {
+    const ownerWindow = window as typeof window & {
+      [documentOwnerSecrets]?: Map<string, string>;
+    };
+    claimed = ownerWindow[documentOwnerSecrets] ??= new Map();
+  } catch {
+    return newOwnerSecret();
+  }
+  const existing = claimed.get(sessionId);
+  if (existing !== undefined) return existing;
+  let recovered: string | null = null;
+  try {
+    recovered = globalThis.sessionStorage?.getItem(key) ?? null;
+  } catch {
+    // Storage can be unavailable while the per-document claim remains usable.
+  }
+  const secret = mayRecoverOwnerSecretAfterNavigation() &&
+    recovered !== null && /^[A-Za-z0-9_-]{43}$/u.test(recovered)
+    ? recovered
+    : newOwnerSecret();
+  claimed.set(sessionId, secret);
+  try {
+    globalThis.sessionStorage?.setItem(key, secret);
+  } catch {
+    // A same-document runtime recreation still reuses the in-memory claim.
+  }
+  return secret;
 }
 
 export function createBrowserHostRuntime(session: ProductionSession): HostRuntime {
   let loaded: Awaited<ReturnType<typeof loadProductionSession>> | undefined;
   const invalidationListeners = new Set<(event: HostRuntimeInvalidation) => void>();
+  const interactionReconnectListeners = new Set<(
+    identity: { readonly generation: number; readonly revision: number },
+  ) => Promise<void>>();
   let socket: WebSocket | undefined;
   let retry: ReturnType<typeof setTimeout> | undefined;
   let retryDelayMs = 1_000;
   let stopped = false;
   const viewIdentity = crypto.randomUUID();
+  const interactionOwnerIdentity = ownerSecret(session.sessionId);
   let interactionAttachment: ReviewInteractionAttachment | undefined;
   let attachmentReady = Promise.withResolvers<ReviewInteractionAttachment>();
   let pendingFinalizations = 0;
   let deferredInvalidation: HostRuntimeInvalidation | undefined;
+  let bootstrapped = false;
 
   const ensureLoaded = async () => loaded ??= await loadProductionSession(session);
   const connectInvalidations = (): void => {
@@ -38,7 +93,12 @@ export function createBrowserHostRuntime(session: ProductionSession): HostRuntim
     const scheme = window.location.protocol === "https:" ? "wss:" : "ws:";
     socket = new WebSocket(
       `${scheme}//${window.location.host}/s/${session.sessionId}/control`,
-      ["placekeeper", `placekeeper-auth.${session.credential}`, `placekeeper-view.${viewIdentity}`],
+      [
+        "placekeeper",
+        `placekeeper-auth.${session.credential}`,
+        `placekeeper-view.${viewIdentity}`,
+        `placekeeper-owner.${interactionOwnerIdentity}`,
+      ],
     );
     socket.addEventListener("open", () => {
       retryDelayMs = 1_000;
@@ -134,6 +194,14 @@ export function createBrowserHostRuntime(session: ProductionSession): HostRuntim
     async bootstrap() {
       const current = await ensureLoaded();
       connectInvalidations();
+      const identity = {
+        generation: current.state.workflow.documentGeneration,
+        revision: current.state.revision,
+      };
+      if (bootstrapped) {
+        await Promise.all([...interactionReconnectListeners].map((listener) => listener(identity)));
+      }
+      bootstrapped = true;
       return {
         sessionId: session.sessionId,
         generation: current.state.workflow.documentGeneration,
@@ -151,7 +219,11 @@ export function createBrowserHostRuntime(session: ProductionSession): HostRuntim
       return () => undefined;
     },
     async command(command: ReviewCommand): Promise<ReviewState | RejectedReviewCommand> {
-      return (await ensureLoaded()).api.command(command);
+      const api = (await ensureLoaded()).api;
+      if (!interactionOwnerCommand(command)) return api.command(command);
+      connectInvalidations();
+      const attachment = interactionAttachment ?? await attachmentReady.promise;
+      return api.command(command, attachment);
     },
     async saveStatus(): Promise<SaveStatus> { return (await ensureLoaded()).api.saveStatus(); },
     async saveProposal(): Promise<SaveCopyProposal> { return (await ensureLoaded()).api.saveProposal(); },
@@ -180,6 +252,10 @@ export function createBrowserHostRuntime(session: ProductionSession): HostRuntim
       connectInvalidations();
       return () => invalidationListeners.delete(listener);
     },
+    subscribeInteractionReconnect(listener) {
+      interactionReconnectListeners.add(listener);
+      return () => interactionReconnectListeners.delete(listener);
+    },
     async forwardSyncTex() { throw new Error("SyncTeX is available through the trusted host only."); },
     async reverseSyncTex() { throw new Error("SyncTeX is available through the trusted host only."); },
     beginInteraction: (input) => fetchInteraction("begin", input),
@@ -205,6 +281,7 @@ export function createBrowserHostRuntime(session: ProductionSession): HostRuntim
       socket?.close();
       socket = undefined;
       invalidationListeners.clear();
+      interactionReconnectListeners.clear();
     },
   };
 }

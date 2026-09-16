@@ -13,6 +13,9 @@ import type { RejectedReviewCommand } from './review-command-result.js';
 export interface ReviewShellAuthoringModel {
   /** Local-refresh hosts provide this before negotiation; begin waits for the authenticated attachment. */
   interactionLifecycle?: ReviewInteractionTransport;
+  subscribeInteractionReconnect?(
+    listener: (identity: { readonly generation: number; readonly revision: number }) => Promise<void>,
+  ): () => void;
   /** Prevents a refresh-capable host from silently falling back to legacy authoring. */
   interactionLifecycleRequired?: boolean;
   interactionFinalizationReady?: boolean;

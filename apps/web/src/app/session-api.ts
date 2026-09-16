@@ -6,6 +6,7 @@ import type {
   ProductionSessionApi,
   ProductionScope,
   ProductionExportResult,
+  ReviewInteractionAttachment,
   SaveCopyProposal,
 } from "../host/session-contracts.js";
 import type { RejectedReviewCommand } from "../review/review-command-result.js";
@@ -216,7 +217,10 @@ export async function loadProductionSession(session: ProductionSession): Promise
     saveStatus,
     api: {
       presence: () => maintainPresence(session),
-      command: async (command: ReviewCommand): Promise<ReviewState | RejectedReviewCommand> => {
+      command: async (
+        command: ReviewCommand,
+        attachment?: ReviewInteractionAttachment,
+      ): Promise<ReviewState | RejectedReviewCommand> => {
         const response = await fetch(`/s/${session.sessionId}/commands`, {
           method: "POST",
           headers: {
@@ -224,7 +228,7 @@ export async function loadProductionSession(session: ProductionSession): Promise
             "content-type": "application/json",
             "x-placekeeper-generation": String(commandGeneration),
           },
-          body: JSON.stringify(command),
+          body: JSON.stringify(attachment === undefined ? command : { command, attachment }),
         });
         if (response.status === 409) {
           const rejected: unknown = await response.json().catch(() => undefined);

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { createReviewState, type ReviewItem } from '../../../packages/core/src/review-model.js';
 import {
@@ -246,6 +246,197 @@ describe('frozen authoring-session contract', () => {
     const accepted = await beginReviewInteraction(ordered, 7, 'reused-after-error');
     await accepted.release();
     expect(orders).toEqual([1, 3]);
+  });
+
+  it('drains an abandoned release after the connection recovers without waiting for user traffic', async () => {
+    vi.useFakeTimers();
+    try {
+      const requests: Array<{ interactionToken: string; order: number }> = [];
+      let connectionHealthy = false;
+      const ordered = attachmentOrderedInteractionTransport({}, {
+        async beginInteraction() { throw new Error('unused'); },
+        async finalizeInteraction() { throw new Error('unused'); },
+        async releaseInteraction(input) {
+          requests.push(input);
+          if (!connectionHealthy) throw new Error('connection unavailable');
+          return { status: 'released' };
+        },
+        async acknowledgeInteraction() { throw new Error('unused'); },
+      });
+
+      await expect(ordered.releaseInteraction({ interactionToken: 'abandoned-release', order: 99 }))
+        .rejects.toThrow('connection unavailable');
+      expect(requests).toEqual([
+        { interactionToken: 'abandoned-release', order: 1 },
+        { interactionToken: 'abandoned-release', order: 1 },
+      ]);
+
+      connectionHealthy = true;
+      await vi.advanceTimersByTimeAsync(25);
+      expect(requests).toEqual([
+        { interactionToken: 'abandoned-release', order: 1 },
+        { interactionToken: 'abandoned-release', order: 1 },
+        { interactionToken: 'abandoned-release', order: 1 },
+      ]);
+      await expect(ordered.releaseInteraction({ interactionToken: 'abandoned-release', order: 100 }))
+        .resolves.toEqual({ status: 'released' });
+      expect(requests).toHaveLength(3);
+      ordered.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('cancels abandoned release retries and ordering state when the last adapter lease is disposed', async () => {
+    vi.useFakeTimers();
+    try {
+      const identity = {};
+      let releaseAttempts = 0;
+      const transport = {
+        async beginInteraction(input: { interactionToken: string; order: number; generation: number }) {
+          return { status: 'accepted', generation: input.generation, ownerViewId: 'attachment-a' };
+        },
+        async finalizeInteraction() { throw new Error('unused'); },
+        async releaseInteraction() {
+          releaseAttempts += 1;
+          throw new Error('connection unavailable');
+        },
+        async acknowledgeInteraction() { throw new Error('unused'); },
+      };
+      const abandoned = attachmentOrderedInteractionTransport(identity, transport);
+      await expect(abandoned.releaseInteraction({ interactionToken: 'cancelled-release', order: 9 }))
+        .rejects.toThrow('connection unavailable');
+      abandoned.dispose();
+
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(releaseAttempts).toBe(2);
+
+      const successorCalls: Array<{ method: string; order: number }> = [];
+      const successor = attachmentOrderedInteractionTransport(identity, {
+        async beginInteraction(input) {
+          successorCalls.push({ method: 'begin', order: input.order });
+          return { status: 'accepted', generation: input.generation, ownerViewId: 'attachment-b' };
+        },
+        async finalizeInteraction() { throw new Error('unused'); },
+        async releaseInteraction(input) {
+          successorCalls.push({ method: 'release', order: input.order });
+          return { status: 'released' };
+        },
+        async acknowledgeInteraction() { throw new Error('unused'); },
+      });
+      const interaction = await beginReviewInteraction(successor, 8, 'successor');
+      await interaction.release();
+      expect(successorCalls).toEqual([
+        { method: 'begin', order: 1 },
+        { method: 'release', order: 2 },
+      ]);
+      successor.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps shared attachment ordering alive until every adapter lease is disposed', async () => {
+    const identity = {};
+    const orders: number[] = [];
+    const transport = {
+      async beginInteraction(input: { interactionToken: string; order: number; generation: number }) {
+        orders.push(input.order);
+        return { status: 'accepted', generation: input.generation, ownerViewId: 'attachment-a' };
+      },
+      async finalizeInteraction() { throw new Error('unused'); },
+      async releaseInteraction(input: { interactionToken: string; order: number }) {
+        orders.push(input.order);
+        return { status: 'released' };
+      },
+      async acknowledgeInteraction() { throw new Error('unused'); },
+    };
+    const first = attachmentOrderedInteractionTransport(identity, transport);
+    const survivor = attachmentOrderedInteractionTransport(identity, transport);
+    first.dispose();
+
+    const interaction = await beginReviewInteraction(survivor, 7, 'survivor');
+    await interaction.release();
+    expect(orders).toEqual([1, 2]);
+    survivor.dispose();
+  });
+
+  it('reacquires with the exact begin request and recovers a matching finalized receipt', async () => {
+    const beginRequests: Array<{ interactionToken: string; order: number; generation: number }> = [];
+    let beginAttempts = 0;
+    const interaction = await beginReviewInteraction({
+      async beginInteraction(input) {
+        beginRequests.push(input);
+        beginAttempts += 1;
+        if (beginAttempts === 1) {
+          return { status: 'accepted', generation: input.generation, ownerViewId: 'attachment-a' };
+        }
+        return {
+          status: 'finalized',
+          interactionToken: input.interactionToken,
+          generation: input.generation,
+          outcome: 'applied',
+          reviewRevision: 4,
+        };
+      },
+      async finalizeInteraction() { throw new Error('unused'); },
+      async releaseInteraction() { throw new Error('unused'); },
+      async acknowledgeInteraction() { throw new Error('unused'); },
+    }, 7, 'reacquired-interaction', 5);
+
+    await expect(interaction.reacquire()).resolves.toEqual({
+      status: 'finalized',
+      interactionToken: 'reacquired-interaction',
+      generation: 7,
+      outcome: 'applied',
+      reviewRevision: 4,
+    });
+    expect(beginRequests).toEqual([
+      { interactionToken: 'reacquired-interaction', order: 5, generation: 7 },
+      { interactionToken: 'reacquired-interaction', order: 5, generation: 7 },
+    ]);
+  });
+
+  it('accepts a current reacquired hold and rejects a stale one', async () => {
+    let beginAttempts = 0;
+    const interaction = await beginReviewInteraction({
+      async beginInteraction(input) {
+        beginAttempts += 1;
+        if (beginAttempts < 3) {
+          return { status: 'accepted', generation: input.generation, ownerViewId: 'attachment-a' };
+        }
+        return { status: 'stale', generation: input.generation + 1 };
+      },
+      async finalizeInteraction() { throw new Error('unused'); },
+      async releaseInteraction() { throw new Error('unused'); },
+      async acknowledgeInteraction() { throw new Error('unused'); },
+    }, 7, 'reacquired-hold', 3);
+
+    await expect(interaction.reacquire()).resolves.toBeUndefined();
+    await expect(interaction.reacquire()).rejects.toThrow('Current generation: 8');
+  });
+
+  it('does not release an existing hold when its exact begin replay loses the connection', async () => {
+    let beginAttempts = 0;
+    let releaseAttempts = 0;
+    const ordered = attachmentOrderedInteractionTransport({}, {
+      async beginInteraction(input) {
+        beginAttempts += 1;
+        if (beginAttempts > 1) throw new Error('connection lost during replay');
+        return { status: 'accepted', generation: input.generation, ownerViewId: 'attachment-a' };
+      },
+      async finalizeInteraction() { throw new Error('unused'); },
+      async releaseInteraction() {
+        releaseAttempts += 1;
+        return { status: 'released' };
+      },
+      async acknowledgeInteraction() { throw new Error('unused'); },
+    });
+    const interaction = await beginReviewInteraction(ordered, 7, 'replayed-hold', 2);
+
+    await expect(interaction.reacquire()).rejects.toThrow('connection lost during replay');
+    expect(releaseAttempts).toBe(0);
+    ordered.dispose();
   });
 
   it('keeps the exact finalization identity across failure and acknowledges only after receipt consumption', async () => {

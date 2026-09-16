@@ -28,6 +28,94 @@ interface AuthoringOptions {
   restoreReaderAfterAuthoring(session: AuthoringSession, reason: 'accepted' | 'cancelled' | 'source-replaced', state?: ReviewState): boolean;
 }
 
+interface PendingAcknowledgement {
+  readonly interaction: ReviewInteractionHandle;
+  readonly receipt: ReviewInteractionReceipt;
+}
+
+/** Retains every exact durable receipt until its own acknowledgement succeeds. */
+export class AuthoringAcknowledgementQueue {
+  readonly #pending = new Map<string, PendingAcknowledgement>();
+  #drainTail: Promise<void> = Promise.resolve();
+  #retryTimer: ReturnType<typeof setTimeout> | null = null;
+  #retryAttempt = 0;
+  #disposed = false;
+
+  enqueue(interaction: ReviewInteractionHandle, receipt: ReviewInteractionReceipt): void {
+    this.#pending.set(receipt.interactionToken, { interaction, receipt });
+  }
+
+  has(interactionToken: string): boolean {
+    return this.#pending.has(interactionToken);
+  }
+
+  drain(): Promise<void> {
+    if (this.#disposed) return Promise.resolve();
+    const pass = this.#drainTail.then(async () => {
+      if (this.#disposed) return;
+      for (const [interactionToken, pending] of [...this.#pending]) {
+        try {
+          await pending.interaction.acknowledge(pending.receipt);
+          if (this.#pending.get(interactionToken) === pending) {
+            this.#pending.delete(interactionToken);
+          }
+        } catch {
+          // The durable receipt remains authoritative and is retried after reconnect.
+        }
+      }
+      if (this.#pending.size === 0) {
+        this.#retryAttempt = 0;
+        if (this.#retryTimer !== null) clearTimeout(this.#retryTimer);
+        this.#retryTimer = null;
+        return;
+      }
+      if (this.#retryTimer !== null) return;
+      const retryDelays = [100, 500, 2_000, 5_000] as const;
+      const delay = retryDelays[Math.min(this.#retryAttempt, retryDelays.length - 1)]!;
+      this.#retryAttempt += 1;
+      this.#retryTimer = setTimeout(() => {
+        this.#retryTimer = null;
+        void this.drain();
+      }, delay);
+    });
+    this.#drainTail = pass.catch(() => undefined);
+    return pass;
+  }
+
+  dispose(): void {
+    this.#disposed = true;
+    if (this.#retryTimer !== null) clearTimeout(this.#retryTimer);
+    this.#retryTimer = null;
+  }
+}
+
+/** A deleted edit may leave the UI only after its hold is released or durably queued for release. */
+export async function releaseDeletedAuthoringInteraction(
+  interaction: ReviewInteractionHandle | undefined,
+  settle: () => void,
+): Promise<void> {
+  try {
+    await interaction?.release();
+  } catch {
+    // The ordered transport retains the exact failed release for its next lifecycle request.
+  } finally {
+    settle();
+  }
+}
+
+export async function finalizeReacquiredInteraction(
+  interaction: ReviewInteractionHandle,
+  outcome: 'applied' | 'discarded',
+  draftId: string,
+  expectedDraftRevision: number,
+): Promise<ReviewInteractionReceipt> {
+  const recovered = await interaction.reacquire();
+  if (recovered !== undefined && recovered.outcome !== outcome) {
+    throw new Error('The recovered annotation receipt does not match the pending completion.');
+  }
+  return recovered ?? interaction.finalize(outcome, draftId, expectedDraftRevision);
+}
+
 /** Owns frozen authoring authority, protected drafts, and the acknowledged command tail.
  * Workspace and reader callbacks run only when an interaction starts or settles.
  */
@@ -51,10 +139,7 @@ export function useAuthoringSession({
     readonly value: string;
     readonly onAccepted?: () => void;
   } | null>(null);
-  const pendingAcknowledgementRef = useRef<{
-    readonly interaction: ReviewInteractionHandle;
-    readonly receipt: ReviewInteractionReceipt;
-  } | null>(null);
+  const pendingAcknowledgementsRef = useRef(new AuthoringAcknowledgementQueue());
   const terminalAttemptRef = useRef<{
     readonly session: AuthoringSession;
     readonly outcome: 'applied' | 'discarded';
@@ -69,23 +154,15 @@ export function useAuthoringSession({
   );
   const currentAuthoringAuthorityRef = useRef(currentAuthoringAuthority);
   currentAuthoringAuthorityRef.current = currentAuthoringAuthority;
-  const retryPendingAcknowledgement = async () => {
-    const pending = pendingAcknowledgementRef.current;
-    if (pending === null) return;
-    try {
-      await pending.interaction.acknowledge(pending.receipt);
-      if (pendingAcknowledgementRef.current === pending) pendingAcknowledgementRef.current = null;
-    } catch {
-      // The durable receipt remains authoritative and is retried after reconnect.
-    }
-  };
+  const retryPendingAcknowledgements = () => pendingAcknowledgementsRef.current.drain();
   useEffect(() => {
-    void retryPendingAcknowledgement();
+    void retryPendingAcknowledgements();
   }, [authoring.interactionLifecycle, currentAuthoringAuthority.documentGeneration]);
   useEffect(() => {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
+      pendingAcknowledgementsRef.current.dispose();
       const current = authoringSessionRef.current;
       const terminal = terminalAttemptRef.current;
       if (current?.interaction === undefined) return;
@@ -227,6 +304,7 @@ export function useAuthoringSession({
           authority.documentGeneration,
           `authoring_${crypto.randomUUID()}`,
         );
+        void retryPendingAcknowledgements();
       }
     } catch (error) {
       setAnnouncement(error instanceof Error ? error.message : 'The annotation editor could not start safely.');
@@ -364,8 +442,11 @@ export function useAuthoringSession({
     if (current === null || current.source.kind !== 'edit') return;
     const editedItemId = current.source.item.id;
     if (state.items.some(({ id }) => id === editedItemId)) return;
+    if (terminalAttemptRef.current?.session.token === current.token) return;
     setAnnouncement('This annotation is no longer available and the edit was not applied.');
-    closeAuthoringSession(current.token, 'source-replaced');
+    void releaseDeletedAuthoringInteraction(current.interaction, () => {
+      closeAuthoringSession(current.token, 'source-replaced');
+    });
   }, [state.items]);
 
   useEffect(() => {
@@ -495,25 +576,72 @@ export function useAuthoringSession({
     } else if (terminal.session.token !== session.token) {
       throw new Error('Another annotation completion is still pending.');
     }
-    const receipt = await interaction.finalize(
+    const receipt = await finalizeReacquiredInteraction(
+      interaction,
       terminal.outcome,
       terminal.draftId,
       terminal.expectedDraftRevision,
     );
-    if (terminal.outcome === 'applied') terminal.onAccepted?.();
-    terminalAttemptRef.current = null;
-    closeAuthoringSession(
-      session.token,
-      terminal.outcome === 'applied' ? 'accepted' : 'cancelled',
-    );
-    pendingAcknowledgementRef.current = { interaction, receipt };
-    try {
-      await retryPendingAcknowledgement();
-      if (pendingAcknowledgementRef.current !== null) throw new Error('receipt pending');
-    } catch {
+    await settleFinalizedInteraction(session, interaction, receipt, terminal.outcome, terminal.onAccepted);
+  };
+
+  async function settleFinalizedInteraction(
+    session: AuthoringSession,
+    interaction: ReviewInteractionHandle,
+    receipt: ReviewInteractionReceipt,
+    outcome: 'applied' | 'discarded',
+    onAccepted?: () => void,
+  ): Promise<void> {
+    if (outcome === 'applied') onAccepted?.();
+    if (terminalAttemptRef.current?.session.token === session.token) terminalAttemptRef.current = null;
+    closeAuthoringSession(session.token, outcome === 'applied' ? 'accepted' : 'cancelled');
+    pendingAcknowledgementsRef.current.enqueue(interaction, receipt);
+    await retryPendingAcknowledgements();
+    if (pendingAcknowledgementsRef.current.has(receipt.interactionToken)) {
       setAnnouncement('The annotation was saved, but its completion receipt will be retried after reconnect.');
     }
-  };
+  }
+
+  useEffect(() => authoring.subscribeInteractionReconnect?.(async ({ generation }) => {
+    const current = authoringSessionRef.current;
+    if (current?.interaction === undefined) return;
+    const closeAfterRelease = () => closeAuthoringSession(current.token, 'source-replaced');
+    if (current.authority.documentGeneration !== generation) {
+      setAnnouncement('The PDF changed while the annotation connection was recovering. The protected draft was not applied.');
+      await releaseDeletedAuthoringInteraction(current.interaction, closeAfterRelease);
+      return;
+    }
+    try {
+      const recovered = await current.interaction.reacquire();
+      if (authoringSessionRef.current?.token !== current.token || recovered === undefined) return;
+      const terminal = terminalAttemptRef.current;
+      if (terminal !== null && terminal.session.token === current.token) {
+        if (recovered.outcome !== terminal.outcome) {
+          throw new Error('The recovered annotation receipt does not match the pending completion.');
+        }
+        await settleFinalizedInteraction(
+          current,
+          current.interaction,
+          recovered,
+          terminal.outcome,
+          terminal.onAccepted,
+        );
+        return;
+      }
+      await settleFinalizedInteraction(
+        current,
+        current.interaction,
+        recovered,
+        recovered.outcome,
+      );
+    } catch (error) {
+      if (authoringSessionRef.current?.token !== current.token) return;
+      setAnnouncement(error instanceof Error
+        ? error.message
+        : 'The annotation connection could not be restored safely.');
+      await releaseDeletedAuthoringInteraction(current.interaction, closeAfterRelease);
+    }
+  }), [authoring.subscribeInteractionReconnect]);
 
   const saveAuthoring = async (session: AuthoringSession, value: string) => {
     const source = session.source;

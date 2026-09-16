@@ -1934,6 +1934,9 @@ export function ReviewShell(props: ReviewShellProps) {
               {...(props.authoring.interactionLifecycle === undefined
                 ? {}
                 : { interactionLifecycle: props.authoring.interactionLifecycle })}
+              {...(props.authoring.subscribeInteractionReconnect === undefined
+                ? {}
+                : { subscribeInteractionReconnect: props.authoring.subscribeInteractionReconnect })}
               {...(props.authoring.interactionLifecycleRequired
                 ? { interactionLifecycleRequired: true }
                 : {})}

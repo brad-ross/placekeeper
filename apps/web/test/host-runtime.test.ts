@@ -239,6 +239,11 @@ describe("host-neutral review runtime", () => {
     }
     vi.stubGlobal("location", new URL("http://127.0.0.1:43179/s/id/bootstrap"));
     vi.stubGlobal("window", { location: globalThis.location, setTimeout, clearTimeout });
+    const sessionValues = new Map<string, string>();
+    vi.stubGlobal("sessionStorage", {
+      getItem: (key: string) => sessionValues.get(key) ?? null,
+      setItem: (key: string, value: string) => { sessionValues.set(key, value); },
+    });
     vi.stubGlobal("fetch", fetch);
     vi.stubGlobal("WebSocket", DelayedSocket);
     const runtime = createBrowserHostRuntime({ sessionId: state.sessionId, credential: "memory-only" });
@@ -274,7 +279,7 @@ describe("host-neutral review runtime", () => {
       source: { fileId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", digest: "a".repeat(64), byteLength: 100 },
     });
     let socketMessage: ((event: { data: string }) => void) | undefined;
-    const fetch = vi.fn(async (input: string | URL | Request) => {
+    const fetch = vi.fn(async (input: string | URL | Request, _init?: RequestInit) => {
       const path = String(input);
       if (path.endsWith("/state")) return Response.json(state);
       if (path.endsWith("/commands")) return Response.json({ ...state, revision: 1, annotationName: "Brad Ross" });
@@ -308,6 +313,11 @@ describe("host-neutral review runtime", () => {
     }
     vi.stubGlobal("location", new URL("http://127.0.0.1:43179/s/id/bootstrap"));
     vi.stubGlobal("window", { location: globalThis.location, setTimeout, clearTimeout });
+    const sessionValues = new Map<string, string>();
+    vi.stubGlobal("sessionStorage", {
+      getItem: (key: string) => sessionValues.get(key) ?? null,
+      setItem: (key: string, value: string) => { sessionValues.set(key, value); },
+    });
     vi.stubGlobal("fetch", fetch);
     vi.stubGlobal("WebSocket", FakeSocket);
     const runtime = createBrowserHostRuntime({ sessionId: state.sessionId, credential: "memory-only" });
@@ -321,6 +331,34 @@ describe("host-neutral review runtime", () => {
     });
     expect(bootstrap.resourcePolicy).toEqual({ host: "browser", origin: "http://127.0.0.1:43179" });
     await expect(runtime.command(setAnnotationName(state, "Brad Ross"))).resolves.toMatchObject({ annotationName: "Brad Ross", revision: 1 });
+    const ownerScopedCommand = {
+      type: "reattach",
+      expectedRevision: 0,
+      id: "item_browser_1234",
+      expectedReconciliationRevision: 0,
+      ownerViewId: "attachment_browser_1234",
+      anchor: {
+        kind: "page",
+        pageIndex: 0,
+        rect: { x: 1, y: 1, width: 5, height: 5 },
+      },
+      updatedAt: "2026-09-16T00:00:00.000Z",
+    } as const;
+    await runtime.command(ownerScopedCommand);
+    const ownerScopedRequest = fetch.mock.calls.find(([, init]) => {
+      if (typeof init?.body !== "string") return false;
+      const body = JSON.parse(init.body) as { command?: { type?: unknown } };
+      return body.command?.type === "reattach";
+    });
+    expect(ownerScopedRequest?.[0]).toBe(`/s/${state.sessionId}/commands`);
+    expect(JSON.parse(String(ownerScopedRequest?.[1]?.body))).toMatchObject({
+      command: ownerScopedCommand,
+      attachment: {
+        attachmentId: "attachment_browser_1234",
+        incarnationId: "incarnation_browser_1234",
+        capability: "c".repeat(43),
+      },
+    });
     await expect(runtime.beginInteraction?.({ interactionToken: "interaction_browser_1234", order: 1, generation: 1 }))
       .resolves.toMatchObject({ status: "accepted" });
     const deliveryOrder: string[] = [];
@@ -345,9 +383,42 @@ describe("host-neutral review runtime", () => {
     fetch.mockResolvedValueOnce(Response.json({ error: { kind: "export-conflict" } }, { status: 409 }));
     await expect(runtime.exportReviewedCopy(true, fence)).rejects.toThrow("Confirm the annotation name again");
     expect(FakeSocket.created[0]).toMatchObject({
-      protocols: ["placekeeper", "placekeeper-auth.memory-only", expect.stringMatching(/^placekeeper-view\./u)],
+      protocols: [
+        "placekeeper",
+        "placekeeper-auth.memory-only",
+        expect.stringMatching(/^placekeeper-view\./u),
+        expect.stringMatching(/^placekeeper-owner\.[A-Za-z0-9_-]{43}$/u),
+      ],
     });
     runtime.dispose();
+    const replacement = createBrowserHostRuntime({ sessionId: state.sessionId, credential: "replacement-memory-only" });
+    await replacement.bootstrap();
+    expect(FakeSocket.created[1]?.protocols.find((value) => value.startsWith("placekeeper-owner.")))
+      .toBe(FakeSocket.created[0]?.protocols.find((value) => value.startsWith("placekeeper-owner.")));
+    replacement.dispose();
+
+    const duplicatedSessionValues = new Map(sessionValues);
+    vi.stubGlobal("window", { location: globalThis.location, setTimeout, clearTimeout });
+    vi.stubGlobal("sessionStorage", {
+      getItem: (key: string) => duplicatedSessionValues.get(key) ?? null,
+      setItem: (key: string, value: string) => { duplicatedSessionValues.set(key, value); },
+    });
+    const duplicate = createBrowserHostRuntime({ sessionId: state.sessionId, credential: "duplicate-memory-only" });
+    await duplicate.bootstrap();
+    expect(FakeSocket.created[2]?.protocols.find((value) => value.startsWith("placekeeper-owner.")))
+      .not.toBe(FakeSocket.created[0]?.protocols.find((value) => value.startsWith("placekeeper-owner.")));
+    duplicate.dispose();
+
+    vi.stubGlobal("window", { location: globalThis.location, setTimeout, clearTimeout });
+    vi.stubGlobal("performance", { getEntriesByType: () => [{ type: "reload" }] });
+    const reloadedDuplicate = createBrowserHostRuntime({
+      sessionId: state.sessionId,
+      credential: "reloaded-duplicate-memory-only",
+    });
+    await reloadedDuplicate.bootstrap();
+    expect(FakeSocket.created[3]?.protocols.find((value) => value.startsWith("placekeeper-owner.")))
+      .toBe(FakeSocket.created[2]?.protocols.find((value) => value.startsWith("placekeeper-owner.")));
+    reloadedDuplicate.dispose();
   });
 
   it("publishes only the newest complete successor and retains the last PDF on failure", async () => {

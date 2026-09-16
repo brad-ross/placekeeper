@@ -260,6 +260,8 @@ export const suites: Record<string, TestStage[]> = {
         "apps/web/test/annotation-projection.test.ts",
         "apps/web/test/production-review-app.test.tsx",
         "apps/web/test/refresh-interaction-lifecycle.test.tsx",
+        "apps/web/test/interaction-reconnect-runtime.test.ts",
+        "apps/web/test/use-authoring-session-lifecycle.test.ts",
         "apps/web/test/codex-context-status.test.tsx",
         "apps/web/test/existing-annotations.test.ts",
         "apps/web/test/main-location-refresh.test.ts",
@@ -329,7 +331,8 @@ export const suites: Record<string, TestStage[]> = {
         "test/acceptance/host-interface.spec.ts",
         "test/acceptance/macos-interface.spec.ts",
         "test/acceptance/annotation-behavior-followup.spec.ts",
-        "test/acceptance/automatic-pdf-refresh.spec.ts"
+        "test/acceptance/automatic-pdf-refresh.spec.ts",
+        "test/acceptance/authoring-lifecycle-regressions.spec.ts"
       ]
     }
   ],
@@ -353,7 +356,8 @@ export const suites: Record<string, TestStage[]> = {
         "test/acceptance/pdf-mark-design.spec.ts",
         "test/acceptance/macos-interface.spec.ts",
         "test/acceptance/annotation-behavior-followup.spec.ts",
-        "test/acceptance/automatic-pdf-refresh.spec.ts"
+        "test/acceptance/automatic-pdf-refresh.spec.ts",
+        "test/acceptance/authoring-lifecycle-regressions.spec.ts"
       ]
     }
   ],
@@ -472,7 +476,9 @@ export const suites: Record<string, TestStage[]> = {
         "test/acceptance/neutral-design-conformance.spec.ts",
         "test/acceptance/host-interface.spec.ts",
         "test/acceptance/macos-interface.spec.ts",
-        "test/acceptance/annotation-behavior-followup.spec.ts"
+        "test/acceptance/annotation-behavior-followup.spec.ts",
+        "test/acceptance/automatic-pdf-refresh.spec.ts",
+        "test/acceptance/authoring-lifecycle-regressions.spec.ts"
       ]
     }
   ],
@@ -495,7 +501,8 @@ export const suites: Record<string, TestStage[]> = {
         "test/acceptance/workspace-row-interactions.spec.ts",
         "test/acceptance/pdf-mark-design.spec.ts",
         "test/acceptance/macos-interface.spec.ts",
-        "test/acceptance/annotation-behavior-followup.spec.ts"
+        "test/acceptance/annotation-behavior-followup.spec.ts",
+        "test/acceptance/authoring-lifecycle-regressions.spec.ts"
       ]
     }
   ],
@@ -574,6 +581,7 @@ export const ciUnitFiles = [
       'apps/service/test/pdf-evidence-service.test.ts',
       'apps/service/test/source-reconciliation-service.test.ts',
       'apps/service/test/live-source-workflow.test.ts',
+      'apps/service/test/local-document-observer.test.ts',
       'apps/service/test/live-document-replacement.test.ts',
       'apps/service/test/codex-live-context.integration.test.ts',
       'packages/core/test/live-context.test.ts',
@@ -593,6 +601,9 @@ export const ciUnitFiles = [
       'apps/web/test/production-review-app.test.tsx',
       'apps/web/test/codex-context-status.test.tsx',
       'apps/web/test/existing-annotations.test.ts',
+      'apps/web/test/refresh-interaction-lifecycle.test.tsx',
+      'apps/web/test/interaction-reconnect-runtime.test.ts',
+      'apps/web/test/use-authoring-session-lifecycle.test.ts',
       'apps/web/test/main-location-refresh.test.ts',
       'apps/web/test/host-runtime.test.ts',
       'apps/web/test/session-api.test.ts',
@@ -613,6 +624,7 @@ export const ciUnitFiles = [
       'apps/vscode/test/rebuild-observer.test.ts',
       'apps/vscode/test/rebuild-navigation.test.ts',
       'packaging/macos/packaging.test.ts',
+      'packaging/macos/native-blob-install.test.ts',
       'packaging/macos/update-vscode.test.mjs',
       'packaging/macos/setup-integrations.test.mjs',
     ];

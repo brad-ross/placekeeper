@@ -13,15 +13,27 @@ import { SessionBroker } from "../src/sessions/session-broker.js";
 import { BrowserSourceStore } from "../src/browser/browser-source-store.js";
 import type { DestinationPicker } from "../src/host/destination-picker.js";
 import { PdfVerificationError, type PdfExportVerifier } from "../src/export/pdf-verifier.js";
-import { DraftSnapshotStore, reviewStateDigest } from "../src/recovery/draft-snapshot.js";
+import {
+  DraftSnapshotStore,
+  reviewStateDigest,
+  type SnapshotHooks,
+} from "../src/recovery/draft-snapshot.js";
 
 const roots: string[] = [];
+const brokers = new Set<SessionBroker>();
 const sha = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
 
 afterEach(async () => {
+  await Promise.allSettled([...brokers].map((broker) => broker.quiesceForShutdown()));
+  brokers.clear();
   vi.restoreAllMocks();
   await Promise.all(roots.splice(0).map((path) => rm(path, { recursive: true, force: true })));
 });
+
+function trackBroker<T extends SessionBroker>(broker: T): T {
+  brokers.add(broker);
+  return broker;
+}
 
 function fakeWriter(beforeWrite: (writeNumber: number) => Promise<void> = async () => {}): PdfWriter {
   let writeNumber = 0;
@@ -75,6 +87,8 @@ async function setup(
       readonly pageCount: number;
       readonly pages: readonly [];
     }>;
+    readonly snapshotHooks?: SnapshotHooks;
+    readonly syncDirectory?: (path: string) => Promise<void>;
   } = {},
 ) {
   const root = await mkdtemp(join(tmpdir(), "placekeeper-save-"));
@@ -82,12 +96,13 @@ async function setup(
   const source = join(root, "paper.pdf");
   const original = new TextEncoder().encode("%PDF-1.7\nsource\n%%EOF");
   await writeFile(source, original);
-  const broker = new SessionBroker({
+  const broker = trackBroker(new SessionBroker({
     recoveryRoot: join(root, "recovery"),
     portableReader: async () => [],
     ...(options.rewriteAssessor === undefined ? {} : { rewriteAssessor: options.rewriteAssessor }),
     ...(options.inspectGeneration === undefined ? {} : { inspectGeneration: options.inspectGeneration }),
-  });
+    ...(options.snapshotHooks === undefined ? {} : { snapshotHooks: options.snapshotHooks }),
+  }));
   const opened = await broker.openReview({
     pdfPath: source,
     ...(options.workflowMode === undefined ? {} : { workflowMode: options.workflowMode }),
@@ -98,6 +113,7 @@ async function setup(
     writer: options.writer ?? fakeWriter(),
     verify: options.verify ?? verifyIds,
     ...(picker === undefined ? {} : { picker }),
+    ...(options.syncDirectory === undefined ? {} : { syncDirectory: options.syncDirectory }),
   });
   return { root, source, original, broker, coordinator, sessionId: opened.launch.sessionId };
 }
@@ -114,7 +130,7 @@ async function setupRemote(picker?: DestinationPicker) {
   await mkdir(browserRoot);
   await writeFile(join(browserRoot, `${sourceHandle}.pdf`), bytes, { mode: 0o600 });
   const browserSources = await BrowserSourceStore.create(browserRoot);
-  const broker = new SessionBroker({ recoveryRoot, portableReader: async () => [] });
+  const broker = trackBroker(new SessionBroker({ recoveryRoot, portableReader: async () => [] }));
   const opened = await broker.openChromeBrowserSource({
     protocolVersion: 1,
     sourceHandle,
@@ -268,14 +284,14 @@ describe("coalescing PDF autosave", () => {
     roots.push(root);
     const source = join(root, "paper.pdf");
     await writeFile(source, "%PDF-1.7\ncorrupt grouped metadata\n%%EOF");
-    const broker = new SessionBroker({
+    const broker = trackBroker(new SessionBroker({
       recoveryRoot: join(root, "recovery"),
       portableReader: async () => {
         throw Object.assign(new Error("Incomplete portable group"), {
           code: "invalid-portable-annotation",
         });
       },
-    });
+    }));
 
     await expect(broker.openReview({ pdfPath: source }))
       .rejects.toMatchObject({ code: "invalid-portable-annotation" });
@@ -570,10 +586,10 @@ describe("coalescing PDF autosave", () => {
     await coordinator.chooseCopy(sessionId, copy);
     await broker.acceptMutation(sessionId, addLongHighlight(0));
 
-    const restarted = new SessionBroker({
+    const restarted = trackBroker(new SessionBroker({
       recoveryRoot: join(root, "recovery"),
       portableReader: async () => [],
-    });
+    }));
     const offered = await restarted.openReview({ pdfPath: source });
     if (offered.kind !== "recovery-offered") throw new Error("Expected recovery offer");
     const resumed = await restarted.openReview({
@@ -619,10 +635,10 @@ describe("coalescing PDF autosave", () => {
     };
     await persistRecoveredState(root, sessionId, legacyState);
 
-    const restarted = new SessionBroker({
+    const restarted = trackBroker(new SessionBroker({
       recoveryRoot: join(root, "recovery"),
       portableReader: async () => [],
-    });
+    }));
     const offered = await restarted.openReview({ pdfPath: source });
     if (offered.kind !== "recovery-offered") throw new Error("Expected recovery offer");
     const resumed = await restarted.openReview({
@@ -664,10 +680,10 @@ describe("coalescing PDF autosave", () => {
     };
     await persistRecoveredState(root, sessionId, recoveredState);
 
-    const restarted = new SessionBroker({
+    const restarted = trackBroker(new SessionBroker({
       recoveryRoot: join(root, "recovery"),
       portableReader: async () => [],
-    });
+    }));
     const offered = await restarted.openReview({ pdfPath: source });
     if (offered.kind !== "recovery-offered") throw new Error("Expected recovery offer");
     const resumed = await restarted.openReview({
@@ -953,6 +969,183 @@ describe("coalescing PDF autosave", () => {
     await expect(replacement).resolves.toMatchObject({ status: "committed", documentGeneration: 2 });
     await coordinator.drain();
     expect(broker.state(sessionId)?.workflow.documentGeneration).toBe(2);
+  });
+
+  it("rechecks the observation barrier after async target validation and before rename", async () => {
+    const { root, source, original, broker, coordinator, sessionId } = await setup();
+    const copy = join(root, "paper-annotated.pdf");
+    await coordinator.chooseCopy(sessionId, copy);
+    const predecessorCopy = await readFile(copy);
+    await broker.acceptMutation(sessionId, add(0));
+
+    const validateDestination = broker.capabilities.validateDestination.bind(broker.capabilities);
+    let validations = 0;
+    let observation: Promise<unknown> | undefined;
+    vi.spyOn(broker.capabilities, "validateDestination").mockImplementation(async (capabilityId) => {
+      const target = await validateDestination(capabilityId);
+      validations += 1;
+      if (validations === 1) {
+        await writeFile(source, new Uint8Array());
+        observation = broker.observeLiveDocumentHint({
+          sessionId,
+          outputPath: source,
+          hostHintToken: "during-target-validation",
+          hostReason: "watcher",
+        });
+        await vi.waitFor(() => expect(broker.physicalSaveBarrierPending(sessionId)).toBe(true));
+      } else if (validations === 2) {
+        expect(await readFile(copy)).toEqual(predecessorCopy);
+      }
+      return target;
+    });
+
+    await coordinator.requestSave(sessionId);
+
+    expect(validations).toBe(1);
+    expect(await readFile(copy)).toEqual(predecessorCopy);
+    await observation;
+    await writeFile(source, original);
+    await broker.observeLiveDocumentHint({ sessionId, outputPath: source, hostReason: "activation" });
+    await coordinator.requestSave(sessionId);
+    expect(validations).toBeGreaterThanOrEqual(2);
+    expect(await readFile(copy)).not.toEqual(predecessorCopy);
+    expect(broker.saveStatus(sessionId)?.sync.phase).toBe("clean");
+  });
+
+  it.each(["beforeFinalRename", "afterFinalRename"] as const)(
+    "recovers a published save when durable state throws at %s",
+    async (fault) => {
+      let injectFault = false;
+      const snapshotHooks: SnapshotHooks = {
+        [fault]: () => {
+          if (!injectFault) return;
+          injectFault = false;
+          throw new Error(`simulated ${fault} failure`);
+        },
+      };
+      const { root, broker, coordinator, sessionId } = await setup(undefined, { snapshotHooks });
+      const copy = join(root, "published-copy.pdf");
+      await coordinator.chooseCopy(sessionId, copy);
+      await broker.acceptMutation(sessionId, add(0));
+      injectFault = true;
+
+      await coordinator.requestSave(sessionId);
+
+      expect(await readFile(copy, "utf8")).toContain(broker.state(sessionId)!.items[0]!.id);
+      expect(broker.saveStatus(sessionId)?.sync).toMatchObject({
+        phase: "clean",
+        savedRevision: 1,
+      });
+      const recovered = await new DraftSnapshotStore(join(root, "recovery", sessionId)).recover();
+      expect(recovered?.sync).toMatchObject({ phase: "clean", savedRevision: 1 });
+    },
+  );
+
+  it("keeps a published save pending until directory durability can be proved", async () => {
+    let failSync = false;
+    let syncCalls = 0;
+    const { root, broker, coordinator, sessionId } = await setup(undefined, {
+      syncDirectory: async () => {
+        syncCalls += 1;
+        if (failSync) throw new Error("simulated directory sync failure");
+      },
+    });
+    const copy = join(root, "durable-copy.pdf");
+    const refreshDestination = broker.capabilities.refreshDestination.bind(broker.capabilities);
+    const refresh = vi.spyOn(broker.capabilities, "refreshDestination").mockImplementation(refreshDestination);
+    await coordinator.chooseCopy(sessionId, copy);
+    expect(syncCalls).toBe(1);
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(broker.replacementCommitPending(sessionId)).toBe(false);
+    await broker.acceptMutation(sessionId, add(0));
+    failSync = true;
+
+    await coordinator.requestSave(sessionId);
+
+    expect(await readFile(copy, "utf8")).toContain(broker.state(sessionId)!.items[0]!.id);
+    expect(broker.replacementCommitPending(sessionId)).toBe(true);
+    expect(broker.saveStatus(sessionId)?.sync.phase).toBe("saving");
+    failSync = false;
+    await expect(broker.resolveReplacementCommit(sessionId)).resolves.toBe("settled");
+    expect(broker.saveStatus(sessionId)?.sync).toMatchObject({ phase: "clean", savedRevision: 1 });
+  });
+
+  it("keeps a published save pending until its refreshed capability is proved", async () => {
+    const { root, broker, coordinator, sessionId } = await setup();
+    const copy = join(root, "capability-copy.pdf");
+    await coordinator.chooseCopy(sessionId, copy);
+    await broker.acceptMutation(sessionId, add(0));
+    const refreshDestination = broker.capabilities.refreshDestination.bind(broker.capabilities);
+    vi.spyOn(broker.capabilities, "refreshDestination")
+      .mockRejectedValueOnce(new Error("simulated capability refresh failure"))
+      .mockImplementation(refreshDestination);
+
+    await coordinator.requestSave(sessionId);
+
+    expect(await readFile(copy, "utf8")).toContain(broker.state(sessionId)!.items[0]!.id);
+    expect(broker.replacementCommitPending(sessionId)).toBe(true);
+    expect(broker.saveStatus(sessionId)?.sync.phase).toBe("saving");
+    await expect(broker.resolveReplacementCommit(sessionId)).resolves.toBe("settled");
+    expect(broker.saveStatus(sessionId)?.sync).toMatchObject({ phase: "clean", savedRevision: 1 });
+  });
+
+  it("does not promote a recovered original save into a duplicate external generation", async () => {
+    let failAfterRename = false;
+    const { source, broker, coordinator, sessionId } = await setup(undefined, {
+      snapshotHooks: {
+        afterFinalRename: () => {
+          if (!failAfterRename) return;
+          failAfterRename = false;
+          throw new Error("simulated uncertain save-state return");
+        },
+      },
+    });
+    await coordinator.chooseOriginal(sessionId);
+    await broker.acceptMutation(sessionId, add(0));
+    failAfterRename = true;
+
+    await coordinator.requestSave(sessionId);
+    const savedBytes = await readFile(source);
+    const observed = await broker.observeLiveDocumentHint({
+      sessionId,
+      outputPath: source,
+      hostReason: "activation",
+    });
+
+    expect(observed).toMatchObject({ status: "same-digest", documentGeneration: 1 });
+    expect(broker.state(sessionId)?.workflow.documentGeneration).toBe(1);
+    expect(await readFile(source)).toEqual(savedBytes);
+    expect(broker.saveStatus(sessionId)?.sync).toMatchObject({ phase: "clean", savedRevision: 1 });
+  });
+
+  it("does not absorb a later external replacement while a published save is uncertain", async () => {
+    let failSync = false;
+    const { source, broker, coordinator, sessionId } = await setup(undefined, {
+      inspectGeneration: async () => ({ pageCount: 1, pages: [] }),
+      syncDirectory: async () => {
+        if (failSync) throw new Error("simulated directory sync failure");
+      },
+    });
+    await coordinator.chooseOriginal(sessionId);
+    await broker.acceptMutation(sessionId, add(0));
+    failSync = true;
+    await coordinator.requestSave(sessionId);
+    expect(broker.replacementCommitPending(sessionId)).toBe(true);
+
+    const external = Buffer.from("%PDF-1.7\nexternal successor\n%%EOF");
+    await writeFile(source, external);
+    failSync = false;
+    const observed = await broker.observeLiveDocumentHint({
+      sessionId,
+      outputPath: source,
+      hostReason: "activation",
+    });
+
+    expect(observed).toMatchObject({ status: "committed", documentGeneration: 2 });
+    expect(broker.state(sessionId)?.workflow.documentGeneration).toBe(2);
+    expect(broker.state(sessionId)?.source.digest).toBe(sha(external));
+    expect(await readFile(source)).toEqual(external);
+    await broker.quiesceForShutdown();
   });
 
   it("suppresses only the exact current original self-save digest", async () => {

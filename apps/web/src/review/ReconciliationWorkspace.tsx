@@ -207,6 +207,9 @@ export interface ReconciliationWorkspaceProps {
   readonly onFocusFallback?: () => void;
   readonly interactionLifecycle?: ReviewInteractionTransport;
   readonly interactionLifecycleRequired?: boolean;
+  readonly subscribeInteractionReconnect?: (
+    listener: (identity: { readonly generation: number; readonly revision: number }) => Promise<void>,
+  ) => () => void;
 }
 
 type ResolutionMode = "apply" | "reattach" | "discard";
@@ -313,6 +316,9 @@ export function ReconciliationWorkspace(props: ReconciliationWorkspaceProps) {
   const mountedRef = useRef(true);
   const focusRestoreFrameRef = useRef(0);
   const automaticTerminalRetryKeyRef = useRef<string | null>(null);
+  const priorRecordKeysRef = useRef(records.map(({ key }) => key));
+  const onFocusFallbackRef = useRef(props.onFocusFallback);
+  onFocusFallbackRef.current = props.onFocusFallback;
   const generationRef = useRef(props.state.workflow.documentGeneration);
   generationRef.current = props.state.workflow.documentGeneration;
   const pendingReceiptRef = useRef<{
@@ -365,15 +371,39 @@ export function ReconciliationWorkspace(props: ReconciliationWorkspaceProps) {
   }, [props.interactionLifecycle, props.state.workflow.documentGeneration]);
 
   useLayoutEffect(() => {
+    if (detail === null || activeRecord !== undefined) {
+      priorRecordKeysRef.current = records.map(({ key }) => key);
+    }
+  }, [activeRecord, detail, records]);
+
+  useLayoutEffect(() => {
     if (activeRecord !== undefined) {
       detailBackRef.current?.focus({ preventScroll: true });
+      return;
+    }
+    if (detail !== null) {
+      if (pending || terminalAttemptRef.current !== null) return;
+      const returnFocusKey = reconciliationFocusKeyAfterRemoval(
+        priorRecordKeysRef.current,
+        detail.key,
+      );
+      const interaction = interactionRef.current;
+      interactionRef.current = null;
+      automaticTerminalRetryKeyRef.current = null;
+      returnFocusKeyRef.current = null;
+      acceptedFocusKeyRef.current = null;
+      setMessage("");
+      setDetail(null);
+      void interaction?.release().catch(() => undefined);
+      if (returnFocusKey === null) onFocusFallbackRef.current?.();
+      else entryRefs.current.get(returnFocusKey)?.focus({ preventScroll: true });
       return;
     }
     const returnFocusKey = returnFocusKeyRef.current;
     if (returnFocusKey === null) return;
     entryRefs.current.get(returnFocusKey)?.focus({ preventScroll: true });
     returnFocusKeyRef.current = null;
-  }, [activeRecord]);
+  }, [activeRecord, detail, pending]);
 
   useLayoutEffect(() => {
     if (props.focusRequestToken === undefined || props.focusRequestToken === 0) return;
@@ -457,6 +487,38 @@ export function ReconciliationWorkspace(props: ReconciliationWorkspaceProps) {
     await terminal.interaction.acknowledge(receipt);
     pendingReceiptRef.current = null;
   };
+
+  useEffect(() => props.subscribeInteractionReconnect?.(async ({ generation }) => {
+    const interaction = interactionRef.current;
+    if (interaction === null) return;
+    setPending(true);
+    try {
+      if (!reattachmentGenerationIsCurrent(interaction.generation, generation)) {
+        throw new Error('The PDF changed. Select the text again.');
+      }
+      const receipt = await interaction.reacquire();
+      if (receipt === undefined) return;
+      if (receipt.generation !== interaction.generation || receipt.outcome !== 'applied') {
+        throw new Error('The saved reattachment receipt did not match this editor.');
+      }
+      terminalAttemptRef.current = null;
+      interactionRef.current = null;
+      setDetail(null);
+      pendingReceiptRef.current = { interaction, receipt };
+      await interaction.acknowledge(receipt);
+      pendingReceiptRef.current = null;
+    } catch (error) {
+      terminalAttemptRef.current = null;
+      interactionRef.current = null;
+      await interaction.release().catch(() => undefined);
+      setDetail(null);
+      setMessage(error instanceof Error
+        ? error.message
+        : 'Reattachment could not resume safely. Select the target again.');
+    } finally {
+      setPending(false);
+    }
+  }), [props.subscribeInteractionReconnect]);
 
   useEffect(() => {
     const terminal = terminalAttemptRef.current;

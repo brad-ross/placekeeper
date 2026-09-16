@@ -79,6 +79,7 @@ export interface PdfSaveCoordinatorOptions {
   readonly verify?: PdfExportVerifier;
   readonly backend?: Omit<PdfBackendRunOptions, "signal">;
   readonly picker?: DestinationPicker;
+  readonly syncDirectory?: (path: string) => Promise<void>;
 }
 
 interface QueueState {
@@ -101,6 +102,7 @@ export class PdfSaveCoordinator {
   readonly #verify: PdfExportVerifier;
   readonly #backend: Omit<PdfBackendRunOptions, "signal">;
   readonly #picker: DestinationPicker | undefined;
+  readonly #syncDirectory: (path: string) => Promise<void>;
   readonly #reuseBackendInspection: boolean;
   readonly #folderSelections = new Map<string, { readonly sessionId: string; readonly path: string }>();
   readonly #queues = new Map<string, QueueState>();
@@ -113,6 +115,7 @@ export class PdfSaveCoordinator {
     this.#verify = options.verify ?? verifyReviewedPdf;
     this.#backend = options.backend ?? {};
     this.#picker = options.picker;
+    this.#syncDirectory = options.syncDirectory ?? syncDirectory;
     this.#reuseBackendInspection = options.verify === undefined;
     this.#broker.onPhysicalSaveResume((sessionId) => {
       if (
@@ -440,12 +443,15 @@ export class PdfSaveCoordinator {
               sourceDigest: delivery.source.digest,
               revision: delivery.revision,
               stateDigest,
-              commit: async () => {
+              commit: async (candidateIsCurrent) => {
                 // A copy is still derived from an owned local source. Reprove
                 // that source immediately before publication: an explicit
                 // replacement and its filesystem observation can race while
                 // the predecessor writer is running.
-                if (destination.kind === "copy" && delivery.sourceRootId !== undefined) {
+                if (
+                  destination.kind === "copy" &&
+                  this.#broker.sourceDisposition(sessionId) === "local"
+                ) {
                   await this.#capabilities.validateOriginalForReplacement(
                     delivery.source.fileId,
                     delivery.originalDigest,
@@ -466,20 +472,39 @@ export class PdfSaveCoordinator {
                   const originalMode = (await stat(validatedTarget)).mode & 0o777;
                   await chmod(temporary, originalMode);
                 }
+                // Observation admission is synchronous and can raise the
+                // physical-save barrier while target validation is awaiting
+                // filesystem work. Recheck every broker-owned fence at the
+                // last JavaScript boundary before publishing the rename.
+                if (!candidateIsCurrent()) return undefined;
                 await rename(temporary, target);
-                await syncDirectory(dirname(target));
-                if (destination.kind === "original") {
-                  await this.#capabilities.refreshApprovedPdf(
-                    destination.capabilityId!,
-                    written.evidence.outputSha256,
-                  );
-                } else {
-                  await this.#capabilities.refreshDestination(
-                    destination.capabilityId!,
-                    written.evidence.outputSha256,
-                  );
-                }
-                return written.evidence.outputSha256;
+                return {
+                  targetDigest: written.evidence.outputSha256,
+                  settle: async () => {
+                    const observedDigest = await hashFile(target).catch(() => undefined);
+                    if (observedDigest === undefined) return "uncertain" as const;
+                    if (observedDigest !== written.evidence.outputSha256) {
+                      return "superseded" as const;
+                    }
+                    try {
+                      await this.#syncDirectory(dirname(target));
+                      if (destination.kind === "original") {
+                        await this.#capabilities.refreshApprovedPdf(
+                          destination.capabilityId!,
+                          written.evidence.outputSha256,
+                        );
+                      } else {
+                        await this.#capabilities.refreshDestination(
+                          destination.capabilityId!,
+                          written.evidence.outputSha256,
+                        );
+                      }
+                      return "published" as const;
+                    } catch {
+                      return "uncertain" as const;
+                    }
+                  },
+                };
               },
             });
             if (committed === "generation-stale") {
@@ -487,6 +512,8 @@ export class PdfSaveCoordinator {
               queue.requested = true;
             } else if (committed === "committed-stale") {
               queue.requested = true;
+            } else if (committed === "target-superseded") {
+              throw new FileCapabilityError("TARGET_CHANGED", "Save target changed after publication");
             }
           } catch (error) {
             await rm(temporary, { force: true });
@@ -494,6 +521,10 @@ export class PdfSaveCoordinator {
           }
         });
       } catch (error) {
+        // A published candidate with unresolved durability/capability evidence
+        // deliberately leaves the session behind the broker commit barrier.
+        // Do not race that classifier with a contradictory failed-save record.
+        if (this.#broker.replacementCommitPending(sessionId)) return;
         await this.#broker.markSaveFailed(sessionId, generation, classifyFailure(error));
         return;
       }

@@ -1386,7 +1386,10 @@ describe("atomic live document replacement", () => {
       item: selectionItem("00000000-0000-4000-8000-000000000008", "blocked"),
       authoring: { ownerViewId: "panel-a", baseGeneration: 1 },
     })).rejects.toThrow(/commit outcome remains uncertain/iu);
-    const physicalSave = vi.fn(async () => "f".repeat(64));
+    const physicalSave = vi.fn(async () => ({
+      targetDigest: "f".repeat(64),
+      settle: async () => "published" as const,
+    }));
     await expect(value.broker.commitSaveCandidate({
       sessionId: value.launch.sessionId,
       generation: 0,

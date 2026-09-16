@@ -156,6 +156,9 @@ export function createRpcHostRuntime(
   const envelopeIdentity = host === "chrome" || host === "macos" ? { runtimeId } : { panelId: runtimeId };
   const pending = new Map<string, PendingRequest>();
   const invalidations = new Set<(event: HostRuntimeInvalidation) => void>();
+  const interactionReconnectListeners = new Set<(
+    identity: { readonly generation: number; readonly revision: number },
+  ) => Promise<void>>();
   const hostCommands = new Set<(command: HostRuntimeCommand) => void>();
   let identity: HostRuntimeIdentity | undefined;
   let interactionLifecycleNegotiated = false;
@@ -164,6 +167,7 @@ export function createRpcHostRuntime(
   let pendingHostCommand: HostRuntimeCommand | undefined;
   let disposed = false;
   let nativeLocationHistory: MemoryReviewLocationHistory | undefined;
+  let bootstrapped = false;
   const materializedPdfium = new Map<string, Promise<MaterializedViewerResource>>();
   const materializedWorkers = new Map<string, Promise<MaterializedViewerResource>>();
   const materializedDocuments = new Map<string, Promise<MaterializedViewerResource>>();
@@ -449,6 +453,11 @@ export function createRpcHostRuntime(
       };
       interactionLifecycleNegotiated = isObject(value.capabilities) &&
         value.capabilities.interactionLifecycleVersion === 1;
+      const reconnectIdentity = { generation: value.generation, revision: value.revision };
+      if (bootstrapped && interactionLifecycleNegotiated) {
+        await Promise.all([...interactionReconnectListeners].map((listener) => listener(reconnectIdentity)));
+      }
+      bootstrapped = true;
       const [documentResourceValue, pdfium, worker] = await Promise.all([
         documentResource(value.resources.document),
         pdfiumResource(value.resources.pdfiumWasm),
@@ -570,6 +579,10 @@ export function createRpcHostRuntime(
       }
       return () => invalidations.delete(listener);
     },
+    subscribeInteractionReconnect(listener) {
+      interactionReconnectListeners.add(listener);
+      return () => interactionReconnectListeners.delete(listener);
+    },
     subscribeHostCommands(listener) {
       hostCommands.add(listener);
       if (pendingHostCommand !== undefined) {
@@ -592,6 +605,7 @@ export function createRpcHostRuntime(
       materializedWorkers.clear();
       pending.clear();
       invalidations.clear();
+      interactionReconnectListeners.clear();
       pendingInvalidation = undefined;
       deferredCommandInvalidation = undefined;
       pendingHostCommand = undefined;

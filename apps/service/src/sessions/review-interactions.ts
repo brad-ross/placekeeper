@@ -134,6 +134,12 @@ export class ReviewInteractions {
     return false;
   }
 
+  authorize(
+    input: Pick<AuthenticatedOperation, "sessionId" | "attachmentId" | "incarnationId" | "capability">,
+  ): boolean {
+    return this.#authenticate(input) !== undefined;
+  }
+
   hydrate(receipts: readonly ReviewInteractionReceipt[]): void {
     for (const receipt of receipts) {
       this.#receipts.set(receiptKey(receipt.attachmentId, receipt.interactionToken), receipt);

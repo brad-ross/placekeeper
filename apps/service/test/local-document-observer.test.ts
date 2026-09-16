@@ -1,5 +1,5 @@
 import { EventEmitter } from "node:events";
-import { lstat, mkdtemp, rename, rm, unlink, writeFile } from "node:fs/promises";
+import { lstat, mkdir, mkdtemp, rename, rm, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 
@@ -18,8 +18,12 @@ const brokers: SessionBroker[] = [];
 
 afterEach(async () => {
   vi.useRealTimers();
-  await Promise.all(brokers.splice(0).map((broker) => broker.quiesceForShutdown()));
-  await Promise.all(temporaryDirectories.splice(0).map((path) => rm(path, { recursive: true, force: true })));
+  try {
+    await Promise.all(brokers.splice(0).map((broker) => broker.quiesceForShutdown()));
+  } finally {
+    vi.restoreAllMocks();
+    await Promise.all(temporaryDirectories.splice(0).map((path) => rm(path, { recursive: true, force: true })));
+  }
 });
 
 async function pdf(title: string): Promise<Buffer> {
@@ -162,7 +166,7 @@ describe("local document observer", () => {
 
     value.watches[0]!.emit("change", "rename", basename(value.sourcePath));
     expect(value.admitted.at(-1)).toMatchObject({ reason: "watcher" });
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await vi.waitFor(() => expect(value.settled.at(-1)).toMatchObject({ reason: "watcher" }));
     await value.observer.flush("ordinary");
     expect(value.observer.isCurrent("ordinary", reserved!)).toBe(true);
     expect(value.settled.at(-1)).toMatchObject({ reason: "watcher" });
@@ -171,7 +175,7 @@ describe("local document observer", () => {
     value.observer.completeExplicitHint("ordinary", reserved!);
     await writeFile(value.sourcePath, "%PDF-1.7\nnewer identity");
     value.watches[0]!.emit("change", "rename", basename(value.sourcePath));
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await vi.waitFor(() => expect(value.observer.isCurrent("ordinary", reserved!)).toBe(false));
     await value.observer.flush("ordinary");
     expect(value.candidates.at(-1)?.reason).toBe("watcher");
     expect(value.observer.isCurrent("ordinary", reserved!)).toBe(false);
@@ -311,6 +315,65 @@ describe("local document observer", () => {
     await vi.advanceTimersByTimeAsync(55_000);
     await value.observer.flush("session");
     expect(value.candidates.at(-1)?.reason).toBe("audit");
+  });
+
+  it("settles an identical broker audit without staging or persisting the PDF again", async () => {
+    vi.useFakeTimers();
+    const directory = await mkdtemp(join(tmpdir(), "placekeeper-broker-audit-"));
+    temporaryDirectories.push(directory);
+    const sourceDirectory = join(directory, "source");
+    const recoveryDirectory = join(directory, "recovery");
+    await Promise.all([mkdir(sourceDirectory), mkdir(recoveryDirectory)]);
+    const sourcePath = join(sourceDirectory, "paper.pdf");
+    await writeFile(sourcePath, await pdf("unchanged"));
+    const inspectGeneration = vi.fn(async () => ({ pageCount: 1, pages: [] }));
+    let countPersists = false;
+    let persistCount = 0;
+    const realSetInterval = globalThis.setInterval;
+    const interval = vi.spyOn(globalThis, "setInterval").mockImplementation((callback, delay) =>
+      realSetInterval(callback, delay === 5_000 ? 120_000 : delay));
+    const broker = new SessionBroker({
+      recoveryRoot: recoveryDirectory,
+      inspectGeneration,
+      snapshotHooks: {
+        beforeFinalRename: () => {
+          if (countPersists) persistCount += 1;
+        },
+      },
+    });
+    brokers.push(broker);
+    const observations: Array<{ reason: string; changed: boolean }> = [];
+    broker.onLocalDocumentObservation(({ reason, changed }) => observations.push({ reason, changed }));
+    const opened = await broker.openReview({
+      pdfPath: sourcePath,
+      surface: "browser",
+      workflowMode: "generated-output",
+    });
+    if (opened.kind !== "opened") throw new Error("Expected open review");
+    interval.mockRestore();
+    await broker.observeLiveDocumentHint({
+      sessionId: opened.launch.sessionId,
+      outputPath: sourcePath,
+      hostReason: "activation",
+    });
+    await vi.advanceTimersByTimeAsync(59_999);
+    await broker.observeLiveDocumentHint({
+      sessionId: opened.launch.sessionId,
+      outputPath: sourcePath,
+      hostReason: "activation",
+    });
+    expect(await broker.settlePhysicalSaveBarrier(opened.launch.sessionId)).toBe(true);
+    persistCount = 0;
+    countPersists = true;
+    await vi.advanceTimersByTimeAsync(1);
+    expect(broker.physicalSaveBarrierPending(opened.launch.sessionId)).toBe(true);
+    await broker.settlePhysicalSaveBarrier(opened.launch.sessionId);
+    countPersists = false;
+
+    expect(observations).toContainEqual({ reason: "audit", changed: false });
+    expect(inspectGeneration).not.toHaveBeenCalled();
+    expect(persistCount).toBe(0);
+    expect(broker.state(opened.launch.sessionId)?.workflow.documentGeneration).toBe(1);
   });
 
   it("cancels watchers, timers, and late completions when a session ends", async () => {

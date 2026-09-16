@@ -29,7 +29,7 @@ test.describe('automatic PDF refresh annotation lifecycle', () => {
     await expect(composer).toHaveCount(0);
     await expect(page.locator('#root')).toHaveAttribute('data-interaction-hold', 'released');
     await expect.poll(async () => page.locator('#root').getAttribute('data-interaction-events')).toBe(
-      '["begin:1","finalize:2:applied","acknowledge:3"]',
+      '["begin:1","begin:1","finalize:2:applied","acknowledge:3"]',
     );
     await expect(page.locator('[data-owned-mark="highlight"]')).toHaveText('Durable before refresh.');
     await expect(page.getByRole('application', { name: 'PDF review canvas' })).toBeFocused();
@@ -45,9 +45,29 @@ test.describe('automatic PDF refresh annotation lifecycle', () => {
     await expect(composer).toHaveCount(0);
     await expect(page.locator('#root')).toHaveAttribute('data-interaction-hold', 'released');
     await expect.poll(async () => page.locator('#root').getAttribute('data-interaction-events')).toBe(
-      '["begin:1","finalize:2:discarded","acknowledge:3"]',
+      '["begin:1","begin:1","finalize:2:discarded","acknowledge:3"]',
     );
     await expect(page.locator('[data-owned-mark="highlight"]')).toHaveCount(0);
+  });
+
+  test('reacquires an actively typed editor before a replacement can publish after reconnect', async ({ page }) => {
+    await page.goto('/test/acceptance/review-harness/index.html?interaction-lifecycle=1&interaction-reconnect=1');
+    await page.getByRole('button', { name: 'Highlight', exact: true }).click();
+    const composer = page.getByRole('region', { name: 'Highlight Comment' });
+    const editor = composer.getByRole('textbox', { name: 'Comment (optional)' });
+    await editor.fill('Still typing through reconnect.');
+
+    await page.getByRole('button', { name: 'Reconnect then attempt source replacement' }).click();
+
+    await expect(page.locator('#root')).toHaveAttribute('data-interaction-hold', 'active');
+    await expect(page.locator('#root')).toHaveAttribute('data-replacement-blocked', 'true');
+    await expect(composer).toBeVisible();
+    await expect(editor).toHaveValue('Still typing through reconnect.');
+    await expect(page.locator('#root')).toHaveAttribute(
+      'data-interaction-events',
+      '["begin:1","begin:1"]',
+    );
+    await composer.getByRole('button', { name: 'Cancel' }).click();
   });
 
   test('releases an admission that resolves after its authoring surface unmounts', async ({ page }) => {
@@ -99,13 +119,14 @@ test.describe('automatic PDF refresh annotation lifecycle', () => {
     await expect(page.locator('#root')).toHaveAttribute('data-interaction-hold', 'released');
     await expect(page.locator('#root')).toHaveAttribute(
       'data-interaction-events',
-      '["begin:1","release:2","begin:3","finalize:4:discarded","acknowledge:5"]',
+      '["begin:1","release:2","begin:3","begin:3","finalize:4:discarded","acknowledge:5"]',
     );
     const begins = JSON.parse(await page.locator('#root').getAttribute('data-begin-requests') ?? '[]') as Array<{
       interactionToken: string; order: number;
     }>;
-    expect(begins).toHaveLength(2);
+    expect(begins).toHaveLength(3);
     expect(begins[0]?.interactionToken).not.toBe(begins[1]?.interactionToken);
+    expect(begins[2]).toEqual(begins[1]);
     const releases = JSON.parse(
       await page.locator('#root').getAttribute('data-release-requests') ?? '[]',
     ) as Array<{ interactionToken: string; order: number }>;
@@ -176,7 +197,7 @@ test.describe('automatic PDF refresh annotation lifecycle', () => {
     expect(requests[1]).toEqual(requests[0]);
     await expect(page.locator('#root')).toHaveAttribute(
       'data-interaction-events',
-      '["begin:1","finalize:2:applied","finalize:2:applied","acknowledge:3"]',
+      '["begin:1","begin:1","finalize:2:applied","begin:1","finalize:2:applied","acknowledge:3"]',
     );
   });
 
@@ -200,6 +221,59 @@ test.describe('automatic PDF refresh annotation lifecycle', () => {
     await expect(page.getByRole('button', {
       name: 'Reattach previous Highlight annotation on page 1',
     })).toHaveCount(0);
+  });
+
+  test('reacquires a manual reattachment before replacement can publish after reconnect', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 760 });
+    await page.goto('/test/acceptance/review-harness/index.html?reconciliation=default&interaction-lifecycle=1&interaction-reconnect=1');
+    await page.getByRole('button', { name: 'Show workspace' }).click();
+    const annotations = page.getByRole('tab', { name: 'Annotations', exact: true });
+    if (await annotations.getAttribute('aria-selected') !== 'true') await annotations.click();
+    await page.getByRole('button', {
+      name: 'Reattach previous Highlight annotation on page 1',
+    }).click();
+    const detail = page.locator('[data-reconciliation-detail="reattach"]');
+    await expect(detail).toBeVisible();
+
+    await page.getByRole('button', { name: 'Reconnect then attempt source replacement' }).click();
+
+    await expect(page.locator('#root')).toHaveAttribute('data-interaction-hold', 'active');
+    await expect(page.locator('#root')).toHaveAttribute('data-replacement-blocked', 'true');
+    await expect(detail).toBeVisible();
+    await expect(page.locator('#root')).toHaveAttribute(
+      'data-interaction-events',
+      '["begin:1","begin:1"]',
+    );
+    await detail.getByRole('button', { name: 'Confirm' }).click();
+    await expect(detail).toHaveCount(0);
+    await expect(page.locator('#root')).toHaveAttribute(
+      'data-interaction-events',
+      '["begin:1","begin:1","finalize:2:applied","acknowledge:3"]',
+    );
+  });
+
+  test('releases a manual reattachment when its selected record vanishes elsewhere', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 760 });
+    await page.goto('/test/acceptance/review-harness/index.html?reconciliation=default&interaction-lifecycle=1&external-reconciliation-removal=1');
+    await page.getByRole('button', { name: 'Show workspace' }).click();
+    const annotations = page.getByRole('tab', { name: 'Annotations', exact: true });
+    if (await annotations.getAttribute('aria-selected') !== 'true') await annotations.click();
+    await page.getByRole('button', {
+      name: 'Reattach previous Highlight annotation on page 1',
+    }).click();
+    await expect(page.locator('#root')).toHaveAttribute('data-interaction-hold', 'active');
+
+    await page.getByRole('button', { name: 'Resolve selected reconciliation elsewhere' }).click();
+
+    await expect(page.locator('[data-reconciliation-detail="reattach"]')).toHaveCount(0);
+    await expect(page.locator('#root')).toHaveAttribute('data-interaction-hold', 'released');
+    await expect(page.locator('#root')).toHaveAttribute(
+      'data-interaction-events',
+      '["begin:1","release:2"]',
+    );
+    await expect(page.getByRole('button', {
+      name: 'Reattach previous Delete annotation on page 2',
+    })).toBeFocused();
   });
 
   test('reconciles an uncertain manual reattachment before cancel can orphan its hold', async ({ page }) => {

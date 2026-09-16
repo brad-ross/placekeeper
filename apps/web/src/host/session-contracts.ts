@@ -53,13 +53,28 @@ export type SaveDestinationResult = SaveStatus & {
   readonly nameResult?: ReviewState | RejectedReviewCommand;
 };
 
+export interface ReviewInteractionAttachment {
+  readonly sessionId: string;
+  readonly attachmentId: string;
+  readonly incarnationId: string;
+  readonly capability: string;
+  readonly protocolVersion: 1;
+  readonly capabilities: readonly string[];
+}
+
 export interface ProductionSessionApi extends Partial<ReviewInteractionTransport> {
   readonly capabilities?: {
     readonly localDocumentRefresh: boolean;
     readonly interactionLifecycleVersion?: 1;
   };
+  subscribeInteractionReconnect?(
+    listener: (identity: { readonly generation: number; readonly revision: number }) => Promise<void>,
+  ): () => void;
   presence?(): () => void;
-  command(command: ReviewCommand): Promise<ReviewState | RejectedReviewCommand>;
+  command(
+    command: ReviewCommand,
+    attachment?: ReviewInteractionAttachment,
+  ): Promise<ReviewState | RejectedReviewCommand>;
   saveStatus(): Promise<SaveStatus>;
   saveProposal(): Promise<SaveCopyProposal>;
   chooseCopy(filename?: string, folderSelectionId?: string, confirmation?: SaveDestinationConfirmation): Promise<SaveDestinationResult>;

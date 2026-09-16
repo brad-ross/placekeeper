@@ -241,6 +241,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
         acknowledgeInteraction: props.api.acknowledgeInteraction!,
       })
     : undefined, [hasInteractionTransport, interactionLifecycleRequired, props.api]);
+  useEffect(() => () => interactionLifecycle?.dispose(), [interactionLifecycle]);
   const [metadataPageTitle, setMetadataPageTitle] = useState<PdfMetadataPageTitle | null>(null);
   const portableItemIdsRef = useRef(initiallyPortableItemIds(
     props.initialState,
@@ -1703,6 +1704,9 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
           ...(interactionLifecycleRequired ? { interactionLifecycleRequired: true } : {}),
           ...(interactionLifecycle === undefined ? {} : {
             interactionLifecycle,
+            ...(props.api.subscribeInteractionReconnect === undefined ? {} : {
+              subscribeInteractionReconnect: props.api.subscribeInteractionReconnect,
+            }),
             interactionFinalizationReady: state.workflow.mode === 'generated-output'
               || exportOnly
               || saveStatus.destination.phase !== 'none',

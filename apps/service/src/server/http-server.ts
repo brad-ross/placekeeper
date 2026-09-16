@@ -41,6 +41,7 @@ const UUID = "[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f
 const VIEW_UUID = "[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}";
 const RECOVERY_ID = /^[A-Za-z0-9_-]{16,128}$/u;
 const ATTACHMENT_ID = /^[A-Za-z0-9_-]{8,128}$/u;
+const ATTACHMENT_RECOVERY_CREDENTIAL = /^[A-Za-z0-9_-]{43}$/u;
 
 function interactionAttachment(value: unknown, sessionId: string): ReviewInteractionAttachment | undefined {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
@@ -53,6 +54,31 @@ function interactionAttachment(value: unknown, sessionId: string): ReviewInterac
     typeof record.capability !== "string" || !/^[A-Za-z0-9_-]{32,128}$/u.test(record.capability) ||
     !Array.isArray(record.capabilities)) return undefined;
   return record as unknown as ReviewInteractionAttachment;
+}
+
+function ownerScopedCommandAttachment(
+  command: unknown,
+): { readonly ownerViewId: string } | undefined {
+  if (typeof command !== "object" || command === null || Array.isArray(command)) return undefined;
+  const value = command as Record<string, unknown>;
+  if (value.type === "put-draft") {
+    const draft = value.draft;
+    return typeof draft === "object" && draft !== null && !Array.isArray(draft) &&
+      typeof (draft as Record<string, unknown>).ownerViewId === "string"
+      ? { ownerViewId: (draft as Record<string, unknown>).ownerViewId as string }
+      : undefined;
+  }
+  if (value.type === "add") {
+    const authoring = value.authoring;
+    return typeof authoring === "object" && authoring !== null && !Array.isArray(authoring) &&
+      typeof (authoring as Record<string, unknown>).ownerViewId === "string"
+      ? { ownerViewId: (authoring as Record<string, unknown>).ownerViewId as string }
+      : undefined;
+  }
+  return ["reattach", "apply-draft", "discard-reconciliation"].includes(String(value.type)) &&
+    typeof value.ownerViewId === "string"
+    ? { ownerViewId: value.ownerViewId }
+    : undefined;
 }
 
 function recoveryOfferIdentity(value: unknown): RecoveryOfferIdentity | undefined {
@@ -939,7 +965,24 @@ export async function startHttpServer(
           send(response, 400, "Invalid request");
           return;
         }
-        const command = (await readJson(request)) as ReviewCommand;
+        const body = await readJson(request);
+        const envelope = typeof body === "object" && body !== null && !Array.isArray(body) &&
+          Object.hasOwn(body, "command")
+          ? body as { readonly command?: unknown; readonly attachment?: unknown }
+          : undefined;
+        const command = (envelope?.command ?? body) as ReviewCommand;
+        const authority = ownerScopedCommandAttachment(command);
+        if (authority !== undefined) {
+          const attachment = interactionAttachment(envelope?.attachment, commandMatch[1]!);
+          if (
+            attachment === undefined ||
+            attachment.attachmentId !== authority.ownerViewId ||
+            !broker.authorizeReviewAttachment(commandMatch[1]!, attachment)
+          ) {
+            send(response, 403, "Current review attachment authority is required");
+            return;
+          }
+        }
         const next = await broker.acceptMutation(
           commandMatch[1]!,
           command,
@@ -1052,11 +1095,17 @@ export async function startHttpServer(
       const clientIdentity = protocols
         ?.find((value) => value.startsWith("placekeeper-view."))
         ?.slice("placekeeper-view.".length);
-      const interactionOwnerKey = `${digestSecretHex(credential)}:${
-        clientIdentity !== undefined && ATTACHMENT_ID.test(clientIdentity)
-          ? clientIdentity
-          : randomBytes(18).toString("base64url")
-      }`;
+      const recoveryCredential = protocols
+        ?.find((value) => value.startsWith("placekeeper-owner."))
+        ?.slice("placekeeper-owner.".length);
+      const interactionOwnerKey = recoveryCredential !== undefined &&
+        ATTACHMENT_RECOVERY_CREDENTIAL.test(recoveryCredential)
+        ? `recovery:${digestSecretHex(recoveryCredential)}`
+        : `connection:${digestSecretHex(credential)}:${
+            clientIdentity !== undefined && ATTACHMENT_ID.test(clientIdentity)
+              ? clientIdentity
+              : randomBytes(18).toString("base64url")
+          }`;
       const interactionAttachment = broker.replaceInteractionAttachment(match[1]!, interactionOwnerKey);
       const accept = createHash("sha1")
         .update(`${key}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`)

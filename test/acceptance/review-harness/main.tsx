@@ -591,6 +591,10 @@ function Harness() {
     status: 'finalized'; interactionToken: string; generation: number;
     outcome: 'applied' | 'discarded'; reviewRevision: number;
   }>());
+  const admittedInteractionTokensRef = useRef(new Set<string>());
+  const interactionReconnectListenersRef = useRef(new Set<(
+    identity: { readonly generation: number; readonly revision: number },
+  ) => Promise<void>>());
   const loseFinalizeResponseRef = useRef(previewParameters.has('finalize-response-lost'));
   const failBeginBeforeAcceptanceRef = useRef(previewParameters.has('begin-preaccept-fails'));
   const loseBeginResponseRef = useRef(previewParameters.has('begin-response-lost'));
@@ -751,9 +755,11 @@ function Harness() {
                 failBeginBeforeAcceptanceRef.current = false;
                 throw new Error('connection reset before interaction admission');
               }
-              if (previewParameters.has('begin-delayed')) {
+              if (previewParameters.has('begin-delayed') &&
+                !admittedInteractionTokensRef.current.has(input.interactionToken)) {
                 await new Promise<void>((resolve) => { finishInteractionBeginRef.current = resolve; });
               }
+              admittedInteractionTokensRef.current.add(input.interactionToken);
               rootElement.setAttribute('data-interaction-hold', 'active');
               rootElement.setAttribute('data-interaction-events', JSON.stringify([
                 ...JSON.parse(rootElement.getAttribute('data-interaction-events') ?? '[]') as string[],
@@ -840,6 +846,14 @@ function Harness() {
               return { status: 'released', interactionToken: input.interactionToken };
             },
           }),
+          ...(previewParameters.has('interaction-reconnect') ? {
+            subscribeInteractionReconnect: (listener: (
+              identity: { readonly generation: number; readonly revision: number },
+            ) => Promise<void>) => {
+              interactionReconnectListenersRef.current.add(listener);
+              return () => interactionReconnectListenersRef.current.delete(listener);
+            },
+          } : {}),
         } : {}),
         pageMenu: pageMenuOpen ? {
           invocationId: 'harness-menu',
@@ -982,6 +996,22 @@ function Harness() {
           ...current,
           source: { ...current.source, digest: 'b'.repeat(64) },
         }))}>Replace source authority</button>
+        {previewParameters.has('interaction-reconnect') ? <button type="button" onClick={async () => {
+          rootElement.setAttribute('data-interaction-hold', 'released');
+          const current = reviewStateRef.current;
+          await Promise.all([...interactionReconnectListenersRef.current].map((listener) => listener({
+            generation: current.workflow.documentGeneration,
+            revision: current.revision,
+          })));
+          if (rootElement.getAttribute('data-interaction-hold') === 'active') {
+            rootElement.setAttribute('data-replacement-blocked', 'true');
+            return;
+          }
+          setState((latest) => ({
+            ...latest,
+            source: { ...latest.source, digest: 'b'.repeat(64) },
+          }));
+        }}>Reconnect then attempt source replacement</button> : null}
         <button
           type="button"
           onClick={() => setExistingAnnotationGeneration((generation) => generation + 1)}
@@ -994,6 +1024,17 @@ function Harness() {
           }
           return reduceReview(current, removeReviewItem(current, targetItemId));
         })}>Remove active annotation</button>
+        {previewParameters.has('external-reconciliation-removal') ? <button
+          type="button"
+          onClick={() => setState((current) => {
+            const target = current.items.find((item) => (
+              item.reconciliation !== undefined && item.reconciliation.disposition.kind !== 'resolved'
+            ));
+            return target === undefined
+              ? current
+              : reduceReview(current, removeReviewItem(current, target.id));
+          })}
+        >Resolve selected reconciliation elsewhere</button> : null}
         <button type="button" onClick={() => setPageMenuOpen(true)}>Open page actions</button>
         <button type="button" onClick={() => setOutlineDiscovery({
           status: 'loaded-tree',

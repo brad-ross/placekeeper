@@ -65,6 +65,35 @@ describe("explicit suite contracts", () => {
     ]) expect(command).toContain(file);
   });
 
+  it("keeps automatic PDF refresh regressions in canonical CI", () => {
+    for (const file of [
+      "apps/service/test/local-document-observer.test.ts",
+      "apps/web/test/refresh-interaction-lifecycle.test.tsx",
+      "packaging/macos/native-blob-install.test.ts",
+    ]) expect(ciUnitFiles).toContain(file);
+
+    expect(suiteCommand("test:ci:chromium")).toContain(
+      "test/acceptance/automatic-pdf-refresh.spec.ts",
+    );
+  });
+
+  it("keeps authoring lifecycle regressions in named and canonical gates", () => {
+    const unit = "apps/web/test/use-authoring-session-lifecycle.test.ts";
+    expect(suiteCommand("test:review")).toContain(unit);
+    expect(ciUnitFiles).toContain(unit);
+    const reconnect = "apps/web/test/interaction-reconnect-runtime.test.ts";
+    expect(suiteCommand("test:review")).toContain(reconnect);
+    expect(ciUnitFiles).toContain(reconnect);
+
+    const browser = "test/acceptance/authoring-lifecycle-regressions.spec.ts";
+    for (const suite of [
+      "test:e2e",
+      "test:e2e:webkit",
+      "test:ci:chromium",
+      "test:ci:webkit",
+    ]) expect(suiteCommand(suite)).toContain(browser);
+  });
+
   it.skipIf(process.platform === "win32")("stops on prerequisite failure with the original exit result", async () => {
     await withRunners(async (directory, env) => {
       const result = invoke("test:web", { ...env, SUITE_FIXTURE_EXIT: "27" });

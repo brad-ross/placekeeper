@@ -17,6 +17,25 @@ import {
 
 const SAFE_ID = /^[A-Za-z0-9_-]{16,128}$/u;
 const MAX_MESSAGE_BYTES = 65_536;
+const attachmentRecoveryCredentials = new Map<string, string>();
+
+function attachmentRecoveryCredential(sessionId: string, panelId: string): string {
+  const key = `${sessionId}\0${panelId}`;
+  const recovered = attachmentRecoveryCredentials.get(key);
+  if (recovered !== undefined) {
+    attachmentRecoveryCredentials.delete(key);
+    attachmentRecoveryCredentials.set(key, recovered);
+    return recovered;
+  }
+  const created = randomBytes(32).toString("base64url");
+  attachmentRecoveryCredentials.set(key, created);
+  while (attachmentRecoveryCredentials.size > 256) {
+    const oldest = attachmentRecoveryCredentials.keys().next().value as string | undefined;
+    if (oldest === undefined) break;
+    attachmentRecoveryCredentials.delete(oldest);
+  }
+  return created;
+}
 
 export interface WebviewRpcIdentity {
   readonly panelId: string;
@@ -55,6 +74,14 @@ const FORWARD_SYNC_TEX_STATUSES = new Set<string>(FORWARD_SYNC_TEX_STATUS_VALUES
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function commandRequiresAttachment(value: unknown): boolean {
+  if (!isObject(value)) return false;
+  if (value.type === "put-draft") return true;
+  if (value.type === "add") return isObject(value.authoring);
+  return value.type === "reattach" || value.type === "apply-draft" ||
+    value.type === "discard-reconciliation";
 }
 
 function safeRuntimeRequestFailure(error: unknown): string {
@@ -372,6 +399,7 @@ export function createLoopbackRuntimeClient(options: LoopbackRuntimeClientOption
     revision: 0,
   };
   const invalidationListeners = new Set<(payload: unknown) => void>();
+  const ownerCredential = attachmentRecoveryCredential(options.launch.sessionId, options.panelId);
   let socket: WebSocket | undefined;
   let socketRetry: ReturnType<typeof setTimeout> | undefined;
   let socketRetryDelayMs = 1_000;
@@ -516,9 +544,14 @@ export function createLoopbackRuntimeClient(options: LoopbackRuntimeClientOption
       }
       let value: unknown;
       if (method === "command") {
+        const attachment = commandRequiresAttachment(trustedPayload)
+          ? interactionAttachment ?? await attachmentReady.promise
+          : undefined;
         const response = await request(route.path, {
           method: "POST",
-          body: JSON.stringify(trustedPayload),
+          body: JSON.stringify(attachment === undefined
+            ? trustedPayload
+            : { command: trustedPayload, attachment }),
           headers: { "x-placekeeper-generation": String(identity.generation) },
         }, signal, [409]);
         const responseText = await response.text();
@@ -623,6 +656,7 @@ export function createLoopbackRuntimeClient(options: LoopbackRuntimeClientOption
       "placekeeper",
       `placekeeper-auth.${options.launch.credential}`,
       `placekeeper-view.${options.panelId}`,
+      `placekeeper-owner.${ownerCredential}`,
     ]);
     socket.addEventListener("open", () => {
       socketRetryDelayMs = 1_000;
