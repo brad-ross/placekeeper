@@ -806,8 +806,8 @@ describe("VS Code local host adapter", () => {
       sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
       credential: "c".repeat(43),
     };
-    await observeLiveDocument(launch, { outputPath: "/tmp/paper.pdf", observationEpoch: 4 }, fetch);
-    await markLiveDocumentPossiblyStale(launch, { observationEpoch: 5 }, fetch);
+    await observeLiveDocument(launch, { outputPath: "/tmp/paper.pdf", hostHintToken: "panel:4" }, fetch);
+    await markLiveDocumentPossiblyStale(launch, { hostHintToken: "panel:5" }, fetch);
     expect(fetch.mock.calls[0]![0]).toBe(`${launch.origin}/s/${launch.sessionId}/observe`);
     expect(fetch.mock.calls[0]![1]).toMatchObject({
       method: "POST",
@@ -817,7 +817,7 @@ describe("VS Code local host adapter", () => {
       }),
     });
     expect(fetch.mock.calls[1]![0]).toBe(`${launch.origin}/s/${launch.sessionId}/stale`);
-    expect(fetch.mock.calls[1]![1]).toMatchObject({ body: JSON.stringify({ observationEpoch: 5 }) });
+    expect(fetch.mock.calls[1]![1]).toMatchObject({ body: JSON.stringify({ hostHintToken: "panel:5" }) });
   });
 
   it("pins bootstrap document bytes to the state generation", async () => {

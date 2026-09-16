@@ -184,6 +184,7 @@ export const suites: Record<string, TestStage[]> = {
         "apps/service/test/placekeeper-link.test.ts",
         "apps/service/test/session-security.test.ts",
         "apps/service/test/recovery.test.ts",
+        "apps/service/test/local-document-observer.test.ts",
         "apps/service/test/live-document-replacement.test.ts",
         "apps/service/test/pdf-save-coordinator.test.ts",
         "apps/service/test/export-transaction.test.ts",
@@ -300,6 +301,7 @@ export const suites: Record<string, TestStage[]> = {
         "apps/vscode/test/latex-workshop-bridge.test.ts",
         "apps/vscode/test/external-launch-registration.test.ts",
         "apps/vscode/test/rebuild-observer.test.ts",
+        "apps/service/test/local-document-observer.test.ts",
         "test/conformance/reviewed-pdf.test.ts"
       ]
     }

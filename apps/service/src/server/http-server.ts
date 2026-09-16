@@ -722,16 +722,29 @@ export async function startHttpServer(
           send(response, 405, "Method not allowed");
           return;
         }
-        const body = await readJson(request) as { outputPath?: unknown; observationEpoch?: unknown };
-        if (typeof body.outputPath !== "string" || !Number.isSafeInteger(body.observationEpoch) ||
-          (body.observationEpoch as number) <= 0) {
+        const body = await readJson(request) as {
+          outputPath?: unknown;
+          observationEpoch?: unknown;
+          hostHintToken?: unknown;
+          reason?: unknown;
+        };
+        if (typeof body.outputPath !== "string" ||
+          (body.hostHintToken !== undefined && typeof body.hostHintToken !== "string") ||
+          (body.reason !== undefined && !["activation", "reveal", "watcher", "interval"].includes(body.reason as string)) ||
+          (body.hostHintToken === undefined && (!Number.isSafeInteger(body.observationEpoch) ||
+            (body.observationEpoch as number) <= 0))) {
           send(response, 400, "Invalid request");
           return;
         }
-        sendJson(response, 200, await broker.replaceLiveDocument({
+        sendJson(response, 200, await broker.observeLiveDocumentHint({
           sessionId: observeMatch[1]!,
           outputPath: body.outputPath,
-          observationEpoch: body.observationEpoch as number,
+          hostHintToken: typeof body.hostHintToken === "string"
+            ? body.hostHintToken
+            : `legacy:${String(body.observationEpoch)}`,
+          ...(typeof body.reason === "string" ? {
+            hostReason: body.reason as "activation" | "reveal" | "watcher" | "interval",
+          } : {}),
         }));
         return;
       }
@@ -741,13 +754,17 @@ export async function startHttpServer(
           return;
         }
         const body = await readJson(request) as Record<string, unknown>;
-        if (!Number.isSafeInteger(body.observationEpoch) || (body.observationEpoch as number) <= 0) {
+        if ((body.hostHintToken !== undefined && typeof body.hostHintToken !== "string") ||
+          (body.hostHintToken === undefined && (!Number.isSafeInteger(body.observationEpoch) ||
+            (body.observationEpoch as number) <= 0))) {
           send(response, 400, "Invalid request");
           return;
         }
-        sendJson(response, 200, await broker.markLiveDocumentPossiblyStale(
+        sendJson(response, 200, await broker.markLiveDocumentPossiblyStaleHint(
           staleMatch[1]!,
-          body.observationEpoch as number,
+          typeof body.hostHintToken === "string"
+            ? body.hostHintToken
+            : `legacy:${String(body.observationEpoch)}`,
         ));
         return;
       }

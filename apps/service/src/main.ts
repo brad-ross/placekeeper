@@ -38,6 +38,12 @@ export async function startLocalService(
     server,
     launch: opened.launch,
     launchUrl,
-    close: () => server.close(),
+    close: async () => {
+      try {
+        await server.close();
+      } finally {
+        await broker.quiesceForShutdown();
+      }
+    },
   };
 }

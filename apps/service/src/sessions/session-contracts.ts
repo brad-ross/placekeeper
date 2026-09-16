@@ -148,6 +148,15 @@ export interface DocumentGenerationEvent {
   readonly migratedTaskSessionId?: string;
 }
 
+export interface LocalDocumentObservationEvent {
+  readonly sessionId: string;
+  readonly sourcePath: string;
+  readonly observationSequence: number;
+  readonly reason: string;
+  readonly changed: boolean;
+  readonly publication: "generated-output" | "gated-ordinary-local";
+}
+
 export interface SourceWorkInterruptionCollection {
   readonly taskSessionId: string;
   readonly previousGeneration: number;

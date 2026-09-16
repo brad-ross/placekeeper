@@ -1,7 +1,7 @@
 import { ReviewExportConflictError, type ReviewExportFence } from "../../../../packages/core/src/review-runtime-protocol.js";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { open, readdir, readFile, realpath, rm, stat } from "node:fs/promises";
-import { basename, isAbsolute, join, relative } from "node:path";
+import { basename, isAbsolute, join, relative, resolve } from "node:path";
 import { documentOrderedItems, projectReviewItems } from "../../../../packages/core/src/annotation-projection.js";
 import { createReviewStateSummary, reviewSemanticDigest } from "../../../../packages/core/src/live-context.js";
 import type { PdfRewriteEligibility } from "../../../../packages/core/src/pdf-writer.js";
@@ -70,6 +70,7 @@ import {
   type HttpBootstrapExchange,
   type LaunchSurface,
   type LiveDocumentReplacementResult,
+  type LocalDocumentObservationEvent,
   type OpenReviewRequest,
   type OpenReviewResult,
   type ResumedBrowserView,
@@ -90,10 +91,19 @@ import { prepareApprovedOpen } from "./approved-open-preparation.js";
 import { prepareRecoveredReview } from "./recovered-review-preparation.js";
 import { inspectReplacementCandidate, prepareReplacementReview } from "./document-replacement-preparation.js";
 import { PresentationRecords } from "./presentation-records.js";
+import {
+  LocalDocumentObserver,
+  type LocalDocumentCandidate,
+  type LocalDocumentInspectionResult,
+} from "./local-document-observer.js";
 
 export * from "./session-contracts.js";
 
 const BOOTSTRAP_TTL_MS = 60_000;
+
+interface BrokerLocalDocumentInspection extends LocalDocumentInspectionResult {
+  readonly result?: LiveDocumentReplacementResult;
+}
 
 function activeKey(path: string, digest: string): string {
   return `${path}\0${digest}`;
@@ -140,6 +150,8 @@ export class SessionBroker {
   readonly #sessionEndListeners = new Set<(sessionId: string, reason: "ended" | "shutdown") => void>();
   readonly #snapshotStores = new Map<string, DraftSnapshotStore>();
   readonly #generationListeners = new Set<(event: DocumentGenerationEvent) => void>();
+  readonly #localObservationListeners = new Set<(event: LocalDocumentObservationEvent) => void>();
+  readonly #localDocumentObserver: LocalDocumentObserver<BrokerLocalDocumentInspection>;
   #sourceWorkInterruptionCollector: SourceWorkInterruptionCollector | undefined;
   readonly #privateSourceRoots = new Set<string>();
   #canonicalRecoveryRoot: string;
@@ -201,6 +213,9 @@ export class SessionBroker {
             return { rewriteEligibility, importedItems, nativeAnnotationsImported };
           }
     );
+    this.#localDocumentObserver = new LocalDocumentObserver({
+      inspectCandidate: (candidate) => this.#inspectLocalDocumentCandidate(candidate),
+    });
   }
 
   onSessionEnd(listener: (sessionId: string, reason: "ended" | "shutdown") => void): () => void {
@@ -211,6 +226,15 @@ export class SessionBroker {
   onGenerationAdvance(listener: (event: DocumentGenerationEvent) => void): () => void {
     this.#generationListeners.add(listener);
     return () => this.#generationListeners.delete(listener);
+  }
+
+  onLocalDocumentObservation(listener: (event: LocalDocumentObservationEvent) => void): () => void {
+    this.#localObservationListeners.add(listener);
+    return () => this.#localObservationListeners.delete(listener);
+  }
+
+  isLocalDocumentObservationCurrent(sessionId: string, sequence: number): boolean {
+    return this.#localDocumentObserver.isCurrent(sessionId, sequence);
   }
 
   registerSourceWorkInterruptionCollector(
@@ -558,6 +582,7 @@ export class SessionBroker {
         throw new Error("A review session workflow mode cannot be downgraded or changed");
       }
       if (request.sourceRootPath !== undefined) await this.#attachSourceRoot(session, request.sourceRootPath);
+      await this.#localDocumentObserver.check(session.id, "reconnect");
       return {
         kind: "focused",
         launch: this.#launch(session, request.surface ?? "browser", request.requestedLocation),
@@ -575,6 +600,7 @@ export class SessionBroker {
       if (request.sourceRootPath !== undefined) {
         await this.#attachSourceRoot(session, request.sourceRootPath);
       }
+      await this.#localDocumentObserver.check(session.id, "reconnect");
       return {
         kind: "focused",
         launch: this.#launch(session, request.surface ?? "browser", request.requestedLocation),
@@ -932,6 +958,20 @@ export class SessionBroker {
       }
       return;
     }
+    const currentIdentity = session.generationLineage.at(-1)?.outputIdentity;
+    this.#localDocumentObserver.observe({
+      sessionId: session.id,
+      sourcePath: session.canonicalSourcePath,
+      initialSequence: session.latestObservationEpoch,
+      ...(currentIdentity === undefined ? {} : {
+        initialIdentity: {
+          device: currentIdentity.device,
+          inode: currentIdentity.inode,
+          byteLength: currentIdentity.byteLength,
+          modifiedAtMs: currentIdentity.modifiedAtMs,
+        },
+      }),
+    });
     this.#activeBySource.set(
       activeKey(session.canonicalSourcePath, session.state.source.digest),
       session.id,
@@ -1642,13 +1682,37 @@ export class SessionBroker {
     readonly sessionId: string;
     readonly outputPath: string;
     readonly observationEpoch: number;
+    readonly serviceSequenceReserved?: boolean;
   }): Promise<LiveDocumentReplacementResult> {
     const session = this.#activeById.get(input.sessionId);
     if (session === undefined || session.ending) throw new Error("Review session is not active");
     if (session.state.workflow.mode !== "generated-output") {
       throw new Error("Live document replacement requires generated-output review mode");
     }
+    if (input.serviceSequenceReserved !== true) {
+      const serviceSequence = this.#localDocumentObserver.orderHint(session.id);
+      if (serviceSequence !== undefined) {
+        return this.replaceLiveDocument({
+          ...input,
+          observationEpoch: serviceSequence,
+          serviceSequenceReserved: true,
+        });
+      }
+    }
     const canonicalOutputPath = await realpath(input.outputPath).catch(() => undefined);
+    if (canonicalOutputPath === undefined) {
+      if (resolve(input.outputPath) !== resolve(session.canonicalSourcePath)) {
+        this.taskBindings.revokeSession(session.id);
+        throw new Error("A rebuild candidate cannot retarget an output-path lineage");
+      }
+      await this.markLiveDocumentPossiblyStale(session.id, input.observationEpoch);
+      return {
+        status: "invalid",
+        sessionId: session.id,
+        documentGeneration: session.state.workflow.documentGeneration,
+        reason: "candidate-path-is-temporarily-unavailable",
+      };
+    }
     if (canonicalOutputPath !== session.canonicalSourcePath) {
       this.taskBindings.revokeSession(session.id);
       throw new Error("A rebuild candidate cannot retarget an output-path lineage");
@@ -1658,7 +1722,15 @@ export class SessionBroker {
     }
 
     const expected = await this.#withSessionTail(session, async () => {
-      if (input.observationEpoch <= session.latestObservationEpoch) return undefined;
+      if (
+        input.serviceSequenceReserved === true &&
+        !this.#localDocumentObserver.isCurrent(session.id, input.observationEpoch)
+      ) return undefined;
+      if (
+        input.serviceSequenceReserved === true
+          ? input.observationEpoch < session.latestObservationEpoch
+          : input.observationEpoch <= session.latestObservationEpoch
+      ) return undefined;
       session.latestObservationEpoch = input.observationEpoch;
       return {
         documentGeneration: session.state.workflow.documentGeneration,
@@ -1684,6 +1756,8 @@ export class SessionBroker {
       await this.#withSessionTail(session, async () => {
         if (
           session.ending || session.latestObservationEpoch !== input.observationEpoch ||
+          (input.serviceSequenceReserved === true &&
+            !this.#localDocumentObserver.isCurrent(session.id, input.observationEpoch)) ||
           session.state.workflow.documentGeneration !== expected.documentGeneration
         ) {
           superseded = true;
@@ -1732,7 +1806,11 @@ export class SessionBroker {
       await rm(staged.path, { force: true });
       let invalidation: { readonly documentGeneration: number; readonly reviewRevision: number } | undefined;
       const result = await this.#withSessionTail(session, async () => {
-        if (session.ending || session.latestObservationEpoch !== input.observationEpoch) {
+        if (
+          session.ending || session.latestObservationEpoch !== input.observationEpoch ||
+          (input.serviceSequenceReserved === true &&
+            !this.#localDocumentObserver.isCurrent(session.id, input.observationEpoch))
+        ) {
           return {
             status: "superseded" as const,
             sessionId: session.id,
@@ -1752,6 +1830,16 @@ export class SessionBroker {
             reason: "generation-digest-or-review-revision-fence-changed",
           };
         }
+        await this.capabilities.refreshApprovedPdf(session.fileId, staged!.digest);
+        const generationLineage = session.generationLineage.map((record, index, records) =>
+          index === records.length - 1
+            ? {
+                ...record,
+                outputIdentity: staged!.outputIdentity,
+                observationEpoch: input.observationEpoch,
+              }
+            : record
+        );
         if (session.state.workflow.freshness === "possibly-stale") {
           const state: ReviewState = {
             ...session.state,
@@ -1762,14 +1850,21 @@ export class SessionBroker {
             desiredRevision: state.revision,
             desiredDigest: reviewStateDigest(state),
           };
-          await session.store.persist({ ...this.#draft(session), state, sync });
+          await session.store.persist({
+            ...this.#draft(session), state, sync, generationLineage,
+            latestObservationEpoch: input.observationEpoch,
+          });
           session.state = state;
           session.sync = sync;
           invalidation = {
             documentGeneration: state.workflow.documentGeneration,
             reviewRevision: state.revision,
           };
-        }
+        } else await session.store.persist({
+          ...this.#draft(session), generationLineage,
+          latestObservationEpoch: input.observationEpoch,
+        });
+        session.generationLineage = generationLineage;
         return {
           status: "same-digest" as const,
           sessionId: session.id,
@@ -1828,7 +1923,11 @@ export class SessionBroker {
     let result: LiveDocumentReplacementResult;
     try {
       result = await this.#withSessionTail(session, async () => {
-        if (session.latestObservationEpoch !== input.observationEpoch) {
+        if (
+          session.latestObservationEpoch !== input.observationEpoch ||
+          (input.serviceSequenceReserved === true &&
+            !this.#localDocumentObserver.isCurrent(session.id, input.observationEpoch))
+        ) {
           await rm(staged!.path, { force: true });
           if (stagedSyncTex?.status === "ready") {
             await rm(stagedSyncTex.snapshot.snapshotPath, { force: true });
@@ -1983,6 +2082,113 @@ export class SessionBroker {
       }
     }
     return result;
+  }
+
+  async observeLiveDocumentHint(input: {
+    readonly sessionId: string;
+    readonly outputPath: string;
+    readonly hostHintToken?: string;
+    readonly hostReason?: "activation" | "reveal" | "watcher" | "interval";
+  }): Promise<LiveDocumentReplacementResult> {
+    const session = this.#activeById.get(input.sessionId);
+    if (session === undefined || session.ending) throw new Error("Review session is not active");
+    const canonicalHintPath = await realpath(input.outputPath).catch(() => undefined);
+    if (
+      canonicalHintPath === undefined
+        ? resolve(input.outputPath) !== resolve(session.canonicalSourcePath)
+        : canonicalHintPath !== session.canonicalSourcePath
+    ) {
+      throw new Error("A document observation hint cannot retarget its review session");
+    }
+    const inspected = input.hostReason === "activation"
+      ? await this.#localDocumentObserver.check(session.id, "activation")
+      : await this.#localDocumentObserver.hint(session.id, {
+          ...(input.hostHintToken === undefined ? {} : { token: input.hostHintToken }),
+        });
+    if (inspected?.result !== undefined) return inspected.result;
+    return {
+      status: "superseded",
+      sessionId: session.id,
+      documentGeneration: session.state.workflow.documentGeneration,
+      reason: "observation-hint-was-coalesced-or-session-ended",
+    };
+  }
+
+  async markLiveDocumentPossiblyStaleHint(
+    sessionId: string,
+    hostHintToken?: string,
+  ): Promise<Awaited<ReturnType<SessionBroker["markLiveDocumentPossiblyStale"]>>> {
+    const session = this.#activeById.get(sessionId);
+    if (session === undefined || session.ending) throw new Error("Review session is not active");
+    void hostHintToken;
+    const sequence = this.#localDocumentObserver.orderHint(sessionId);
+    return this.markLiveDocumentPossiblyStale(sessionId, sequence);
+  }
+
+  async #inspectLocalDocumentCandidate(
+    candidate: LocalDocumentCandidate,
+  ): Promise<BrokerLocalDocumentInspection> {
+    const session = this.#activeById.get(candidate.sessionId);
+    if (session === undefined || session.ending || session.sourceOwnership.disposition !== "local") {
+      return { status: "current" };
+    }
+    let candidateDigest: string | undefined;
+    if (
+      candidate.reason === "startup" || candidate.reason === "activation" ||
+      candidate.reason === "reconnect" || session.state.workflow.mode !== "generated-output"
+    ) {
+      candidateDigest = await hashFile(candidate.sourcePath).catch(() => undefined);
+    }
+    const changed = candidateDigest === undefined || candidateDigest !== session.state.source.digest;
+    for (const listener of this.#localObservationListeners) {
+      try {
+        listener({
+          sessionId: session.id,
+          sourcePath: candidate.sourcePath,
+          observationSequence: candidate.sequence,
+          reason: candidate.reason,
+          changed,
+          publication: session.state.workflow.mode === "generated-output"
+            ? "generated-output"
+            : "gated-ordinary-local",
+        });
+      } catch {
+        // Observations remain ordered even if a diagnostic consumer fails.
+      }
+    }
+    if (session.state.workflow.mode !== "generated-output") {
+      await this.#withSessionTail(session, async () => {
+        if (session.ending) return;
+        if (candidateDigest === session.state.source.digest) {
+          await this.capabilities.refreshApprovedPdf(session.fileId, candidateDigest);
+        }
+        session.latestObservationEpoch = Math.max(session.latestObservationEpoch, candidate.sequence);
+        await session.store.persist(this.#draft(session));
+      });
+      return { status: candidateDigest === undefined || changed ? "retry" : "current" };
+    }
+    if (
+      (candidate.reason === "startup" || candidate.reason === "activation" || candidate.reason === "reconnect") &&
+      candidateDigest === session.state.source.digest
+    ) {
+      return { status: "current" };
+    }
+    try {
+      const result = await this.replaceLiveDocument({
+        sessionId: session.id,
+        outputPath: candidate.sourcePath,
+        observationEpoch: candidate.sequence,
+        serviceSequenceReserved: true,
+      });
+      return {
+        status: result.status === "invalid" || result.status === "generation-conflict"
+          ? "retry"
+          : "current",
+        result,
+      };
+    } catch {
+      return { status: "retry" };
+    }
   }
 
   async markLiveDocumentPossiblyStale(sessionId: string, observationEpoch?: number): Promise<{
@@ -2482,6 +2688,7 @@ export class SessionBroker {
     const sessions = [...this.#activeById.values()];
     await this.drainWrites();
     for (const session of sessions) session.ending = true;
+    this.#localDocumentObserver.dispose();
     // Recovery cleanup is garbage collection, not a shutdown precondition.
     // A verified-clean directory that cannot be removed may be retried later;
     // it must never prevent capability revocation and control-socket teardown.
@@ -2522,6 +2729,7 @@ export class SessionBroker {
     const session = this.#activeById.get(sessionId);
     if (session === undefined) return;
     session.ending = true;
+    this.#localDocumentObserver.stop(sessionId);
     this.#recovery.clearForSession(sessionId);
     this.#activeById.delete(sessionId);
     try {
