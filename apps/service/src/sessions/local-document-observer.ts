@@ -58,7 +58,7 @@ interface ObservedDocument<Result extends LocalDocumentInspectionResult> {
   lastIdentity?: LocalDocumentIdentity;
   latestSequence: number;
   retryMs: number;
-  pending?: { reason: LocalDocumentObservationReason; hostHintToken?: string };
+  pending?: { reason: LocalDocumentObservationReason };
   coalesceTimer?: ReturnType<typeof setTimeout>;
   retryTimer?: ReturnType<typeof setTimeout>;
   identityTimer: ReturnType<typeof setInterval>;
@@ -190,7 +190,7 @@ export class LocalDocumentObserver<Result extends LocalDocumentInspectionResult 
     }
     const pending = record.pending;
     delete record.pending;
-    if (pending !== undefined) return this.#run(record, pending.reason, pending.hostHintToken);
+    if (pending !== undefined) return this.#run(record, pending.reason);
     return record.completion;
   }
 
@@ -267,7 +267,7 @@ export class LocalDocumentObserver<Result extends LocalDocumentInspectionResult 
       delete record.coalesceTimer;
       const pending = record.pending;
       delete record.pending;
-      if (pending !== undefined) void this.#run(record, pending.reason, pending.hostHintToken);
+      if (pending !== undefined) void this.#run(record, pending.reason);
     }, immediate ? 0 : this.#coalesceMs);
     record.coalesceTimer.unref?.();
   }
