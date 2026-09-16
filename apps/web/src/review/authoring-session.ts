@@ -58,6 +58,168 @@ export interface ReviewInteractionHandle {
   release(): Promise<void>;
 }
 
+interface AttachmentInteractionOrderState {
+  nextOrder: number;
+  readonly ordersByToken: Map<string, Partial<Record<InteractionOrderPhase, number>>>;
+  readonly pendingReleases: Map<string, { readonly order: number; readonly retainResult: boolean }>;
+  readonly recoveredReleases: Map<string, unknown>;
+  active: boolean;
+  readonly waiters: Set<() => void>;
+}
+
+type InteractionOrderPhase = 'begin' | 'finalize' | 'release' | 'acknowledge';
+
+const attachmentInteractionOrders = new WeakMap<object, AttachmentInteractionOrderState>();
+
+/** Shares the attachment-wide monotonic order fence across every editor surface and remount. */
+export function attachmentOrderedInteractionTransport(
+  attachmentIdentity: object,
+  transport: ReviewInteractionTransport,
+): ReviewInteractionTransport {
+  let state = attachmentInteractionOrders.get(attachmentIdentity);
+  if (state === undefined) {
+    state = {
+      nextOrder: 1,
+      ordersByToken: new Map(),
+      pendingReleases: new Map(),
+      recoveredReleases: new Map(),
+      active: false,
+      waiters: new Set(),
+    };
+    attachmentInteractionOrders.set(attachmentIdentity, state);
+  }
+  const wakeWaiters = () => {
+    for (const wake of state!.waiters) wake();
+    state!.waiters.clear();
+  };
+  const acquire = async () => {
+    while (state!.active) {
+      await new Promise<void>((resolve) => state!.waiters.add(resolve));
+    }
+    state!.active = true;
+  };
+  const order = (interactionToken: string, phase: InteractionOrderPhase) => {
+    let tokenOrders = state!.ordersByToken.get(interactionToken);
+    if (tokenOrders === undefined) {
+      tokenOrders = {};
+      state!.ordersByToken.set(interactionToken, tokenOrders);
+    }
+    let allocated = tokenOrders[phase];
+    if (allocated === undefined) {
+      allocated = state!.nextOrder;
+      state!.nextOrder += 1;
+      tokenOrders[phase] = allocated;
+    }
+    return allocated;
+  };
+  const drainPendingReleases = async (requestedReleaseToken?: string) => {
+    let requestedResult: unknown;
+    for (const [pendingToken, pending] of state!.pendingReleases) {
+      const result = await transport.releaseInteraction({
+        interactionToken: pendingToken,
+        order: pending.order,
+      });
+      const status = lifecycleRecord(result)?.status;
+      if (status !== 'released' && status !== 'missing') {
+        throw new Error('An abandoned annotation interaction could not be released safely.');
+      }
+      state!.pendingReleases.delete(pendingToken);
+      if (pending.retainResult) state!.recoveredReleases.set(pendingToken, result);
+      else state!.ordersByToken.delete(pendingToken);
+      if (pendingToken === requestedReleaseToken) requestedResult = result;
+    }
+    return requestedResult;
+  };
+  const terminal = (interactionToken: string, result: unknown) => {
+    const status = lifecycleRecord(result)?.status;
+    if (status === 'released' || status === 'missing') state!.ordersByToken.delete(interactionToken);
+    return result;
+  };
+  const send = async <T>(
+    interactionToken: string,
+    phase: InteractionOrderPhase,
+    invoke: (order: number) => Promise<T>,
+  ): Promise<T> => {
+    await acquire();
+    try {
+      if (phase === 'release' && state!.recoveredReleases.has(interactionToken)) {
+        const recovered = state!.recoveredReleases.get(interactionToken);
+        state!.recoveredReleases.delete(interactionToken);
+        state!.ordersByToken.delete(interactionToken);
+        return recovered as T;
+      }
+      const recovered = await drainPendingReleases(phase === 'release' ? interactionToken : undefined);
+      if (recovered !== undefined) {
+        state!.recoveredReleases.delete(interactionToken);
+        state!.ordersByToken.delete(interactionToken);
+        return recovered as T;
+      }
+      return await invoke(order(interactionToken, phase));
+    } finally {
+      state!.active = false;
+      wakeWaiters();
+    }
+  };
+  return {
+    beginInteraction: async (input) => {
+      await acquire();
+      try {
+        await drainPendingReleases();
+        try {
+          const result = await transport.beginInteraction({
+            ...input,
+            order: order(input.interactionToken, 'begin'),
+          });
+          if (lifecycleRecord(result)?.status !== 'accepted') state!.ordersByToken.delete(input.interactionToken);
+          return result;
+        } catch (error) {
+          const releaseOrder = order(input.interactionToken, 'release');
+          const request = { interactionToken: input.interactionToken, order: releaseOrder };
+          try {
+            let released;
+            try {
+              released = await transport.releaseInteraction(request);
+            } catch {
+              released = await transport.releaseInteraction(request);
+            }
+            const status = lifecycleRecord(released)?.status;
+            if (status === 'released' || status === 'missing') {
+              state!.ordersByToken.delete(input.interactionToken);
+            } else {
+              state!.pendingReleases.set(input.interactionToken, { order: releaseOrder, retainResult: false });
+            }
+          } catch {
+            state!.pendingReleases.set(input.interactionToken, { order: releaseOrder, retainResult: false });
+          }
+          throw error;
+        }
+      } finally {
+        state!.active = false;
+        wakeWaiters();
+      }
+    },
+    finalizeInteraction: (input) => send(input.interactionToken, 'finalize', (allocated) =>
+      transport.finalizeInteraction({ ...input, order: allocated })),
+    releaseInteraction: async (input) => terminal(input.interactionToken,
+      await send(input.interactionToken, 'release', async (allocated) => {
+        const request = { ...input, order: allocated };
+        try {
+          return await transport.releaseInteraction(request);
+        } catch {
+          try {
+            return await transport.releaseInteraction(request);
+          } catch (error) {
+            state!.pendingReleases.set(input.interactionToken, { order: allocated, retainResult: true });
+            throw error;
+          }
+        }
+      })),
+    acknowledgeInteraction: async (input) => terminal(input.interactionToken,
+      await send(input.interactionToken, 'acknowledge', (allocated) =>
+        transport.acknowledgeInteraction({ ...input, order: allocated }))),
+  };
+}
+
 function lifecycleRecord(value: unknown): Record<string, unknown> | null {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
     ? value as Record<string, unknown> : null;
@@ -68,15 +230,16 @@ export async function beginReviewInteraction(
   transport: ReviewInteractionTransport,
   generation: number,
   interactionToken: string = crypto.randomUUID(),
+  startingOrder = 1,
 ): Promise<ReviewInteractionHandle> {
-  const begun = lifecycleRecord(await transport.beginInteraction({ interactionToken, order: 1, generation }));
+  const begun = lifecycleRecord(await transport.beginInteraction({ interactionToken, order: startingOrder, generation }));
   if (begun?.status !== 'accepted' || begun.generation !== generation || typeof begun.ownerViewId !== 'string') {
     const current = typeof begun?.generation === 'number' ? ` Current generation: ${begun.generation}.` : '';
     throw new Error(`The annotation interaction could not start safely.${current}`);
   }
   let finalization: {
     readonly interactionToken: string;
-    readonly order: 2;
+    readonly order: number;
     readonly outcome: ReviewInteractionOutcome;
     readonly draftId: string;
     readonly expectedDraftRevision: number;
@@ -89,7 +252,7 @@ export async function beginReviewInteraction(
     generation,
     ownerViewId: begun.ownerViewId,
     async finalize(outcome, draftId, expectedDraftRevision) {
-      const requested = { interactionToken, order: 2 as const, outcome, draftId, expectedDraftRevision };
+      const requested = { interactionToken, order: startingOrder + 1, outcome, draftId, expectedDraftRevision };
       if (finalization === null) finalization = requested;
       else if (JSON.stringify(finalization) !== JSON.stringify(requested)) {
         throw new Error('An uncertain annotation completion must retry the exact finalization request.');
@@ -109,7 +272,7 @@ export async function beginReviewInteraction(
         throw new Error('The annotation receipt does not belong to this interaction.');
       }
       acknowledgement = (async () => {
-        const value = lifecycleRecord(await transport.acknowledgeInteraction({ interactionToken, order: 3 }));
+        const value = lifecycleRecord(await transport.acknowledgeInteraction({ interactionToken, order: startingOrder + 2 }));
         if (value?.status !== 'released' && value?.status !== 'missing') {
           throw new Error('The annotation receipt could not be acknowledged.');
         }
@@ -124,7 +287,7 @@ export async function beginReviewInteraction(
     },
     async release() {
       if (released || finalization !== null) return;
-      const value = lifecycleRecord(await transport.releaseInteraction({ interactionToken, order: 2 }));
+      const value = lifecycleRecord(await transport.releaseInteraction({ interactionToken, order: startingOrder + 1 }));
       if (value?.status !== 'released' && value?.status !== 'missing') {
         throw new Error('The annotation interaction could not be released safely.');
       }

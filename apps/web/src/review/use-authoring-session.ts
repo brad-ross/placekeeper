@@ -39,6 +39,7 @@ export function useAuthoringSession({
   const [authoringSession, setAuthoringSession] = useState<AuthoringSession | null>(null);
   const authoringSessionRef = useRef<AuthoringSession | null>(null);
   const authoringSessionTokenRef = useRef(0);
+  const authoringValueRef = useRef<{ readonly token: number; value: string } | null>(null);
   const authoringEditorRef = useRef<HTMLTextAreaElement>(null);
   const saveOptionsWasOpenRef = useRef(saveOptionsOpen ?? false);
   const [authoringSurfaceElement, setAuthoringSurfaceElement] = useState<HTMLElement | null>(null);
@@ -253,6 +254,7 @@ export function useAuthoringSession({
       workspace: snapshotAuthoringWorkspace(),
       ...(interaction === undefined ? {} : { interaction }),
     });
+    authoringValueRef.current = { token: session.token, value: initialAuthoringValue(session) };
     authoringSessionRef.current = session;
     authoringAdmissionPendingRef.current = false;
     authoring.onAuthoringActiveChange?.(true);
@@ -277,6 +279,7 @@ export function useAuthoringSession({
     const focusRestoreToken = focusRestoreTokenRef.current;
     pendingFinalizationRef.current = null;
     authoringSessionRef.current = null;
+    authoringValueRef.current = null;
     authoring.onAuthoringActiveChange?.(false);
     authoring.onAuthoringPreviewChange?.(null);
     setAuthoringSession(null);
@@ -400,7 +403,9 @@ export function useAuthoringSession({
   const protectAuthoringDraft = (
     session: AuthoringSession,
     value: string,
-  ): Promise<ReviewState> => submit((state) => {
+  ): Promise<ReviewState> => {
+    if (authoringValueRef.current?.token === session.token) authoringValueRef.current.value = value;
+    return submit((state) => {
     const existing = state.pendingDrafts.find(({ id }) => id === session.draftId);
     const updatedAt = new Date().toISOString();
     return {
@@ -416,15 +421,16 @@ export function useAuthoringSession({
         updatedAt,
       }),
     };
-  }, {
-    authority: session.authority,
-    onStale: () => closeAuthoringSession(session.token, 'source-replaced'),
-  }).then((next) => {
-    if (!next.pendingDrafts.some(({ id }) => id === session.draftId)) {
-      throw new Error('The protected authoring draft was not acknowledged.');
-    }
-    return next;
-  });
+    }, {
+      authority: session.authority,
+      onStale: () => closeAuthoringSession(session.token, 'source-replaced'),
+    }).then((next) => {
+      if (!next.pendingDrafts.some(({ id }) => id === session.draftId)) {
+        throw new Error('The protected authoring draft was not acknowledged.');
+      }
+      return next;
+    });
+  };
 
   const discardProtectedAuthoringDraft = async (session: AuthoringSession): Promise<void> => {
     await commandTailRef.current;
@@ -613,6 +619,9 @@ export function useAuthoringSession({
     dismissAuthoring,
     closeNested,
     protectAuthoringDraft,
+    currentAuthoringValue: (session: AuthoringSession) => authoringValueRef.current?.token === session.token
+      ? authoringValueRef.current.value
+      : initialAuthoringValue(session),
     saveAuthoring,
   };
 }

@@ -145,6 +145,7 @@ import {
 import {
   authoringAuthorityFor,
   authoringAuthorityMatches,
+  attachmentOrderedInteractionTransport,
   type AuthoringAnchorSnapshot,
 } from '../review/authoring-session.js';
 import type { ViewerAssetUrls, ViewerResourcePolicy } from '../pdf/embedpdf-viewer.js';
@@ -230,16 +231,16 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     && props.api.finalizeInteraction !== undefined
     && props.api.releaseInteraction !== undefined
     && props.api.acknowledgeInteraction !== undefined;
-  const interactionLifecycle = hasInteractionTransport && (
+  const interactionLifecycle = useMemo(() => hasInteractionTransport && (
     interactionLifecycleRequired || props.api.capabilities?.interactionLifecycleVersion === 1
   )
-    ? {
+    ? attachmentOrderedInteractionTransport(props.api, {
         beginInteraction: props.api.beginInteraction!,
         finalizeInteraction: props.api.finalizeInteraction!,
         releaseInteraction: props.api.releaseInteraction!,
         acknowledgeInteraction: props.api.acknowledgeInteraction!,
-      }
-    : undefined;
+      })
+    : undefined, [hasInteractionTransport, interactionLifecycleRequired, props.api]);
   const [metadataPageTitle, setMetadataPageTitle] = useState<PdfMetadataPageTitle | null>(null);
   const portableItemIdsRef = useRef(initiallyPortableItemIds(
     props.initialState,

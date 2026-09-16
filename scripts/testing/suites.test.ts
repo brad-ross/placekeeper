@@ -43,6 +43,8 @@ describe("explicit suite contracts", () => {
   });
 
   it("keeps WebKit's intentional omissions and repeated fixture stages", () => {
+    expect(suites["test:e2e"]?.[0]).toBe("pnpm build:vscode");
+    expect(suites["test:e2e:webkit"]?.[0]).toBe("pnpm build:vscode");
     expect(suiteCommand("test:e2e")).toContain("neutral-design-conformance.spec.ts");
     expect(suiteCommand("test:e2e:webkit")).not.toContain("neutral-design-conformance.spec.ts");
     expect(suiteCommand("test:e2e:webkit")).not.toContain("host-interface.spec.ts");
@@ -50,6 +52,17 @@ describe("explicit suite contracts", () => {
       "pnpm fixtures:pdf", "pnpm test:pdf-writer", "pnpm test:reviewed-pdf", "pnpm test:pdf-viewer",
     ]);
     expect(suites["test:reviewed-pdf"]?.[0]).toBe("pnpm fixtures:pdf");
+  });
+
+  it("keeps the cross-host refresh and recovery matrix in host integration", () => {
+    const command = suiteCommand("test:host-integration");
+    for (const file of [
+      "apps/service/test/codex-live-context.integration.test.ts",
+      "apps/service/test/live-source-workflow.test.ts",
+      "apps/service/test/live-document-replacement.test.ts",
+      "apps/service/test/recovery.test.ts",
+      "apps/web/test/host-runtime.test.ts",
+    ]) expect(command).toContain(file);
   });
 
   it.skipIf(process.platform === "win32")("stops on prerequisite failure with the original exit result", async () => {

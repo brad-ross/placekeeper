@@ -939,12 +939,13 @@ export async function startHttpServer(
           send(response, 400, "Invalid request");
           return;
         }
+        const command = (await readJson(request)) as ReviewCommand;
         const next = await broker.acceptMutation(
           commandMatch[1]!,
-          (await readJson(request)) as ReviewCommand,
+          command,
           expectedGeneration === undefined ? {} : { expectedGeneration },
         );
-        if (broker.saveStatus(commandMatch[1]!)?.destination.phase === "active") {
+        if (command.type !== 'put-draft' && broker.saveStatus(commandMatch[1]!)?.destination.phase === "active") {
           void options.saving?.requestSave(commandMatch[1]!);
         }
         sendJson(response, 200, next);

@@ -19,6 +19,7 @@ import { PdfSearchWorkspace } from '../../../apps/web/src/review/PdfSearchWorksp
 import { initialPdfSearchState } from '../../../apps/web/src/pdf/pdf-search-model.js';
 import { projectReviewItems } from '../../../apps/web/src/review/annotation-projection.js';
 import { inventoryExistingAnnotations } from '../../../apps/web/src/pdf/existing-annotations.js';
+import { attachmentOrderedInteractionTransport } from '../../../apps/web/src/review/authoring-session.js';
 import type { CaretAnchor, SelectionAnchor } from '../../../apps/web/src/pdf/selection-anchor.js';
 import {
   VIEWER_ZOOM_MAX_PERCENT,
@@ -591,6 +592,10 @@ function Harness() {
     outcome: 'applied' | 'discarded'; reviewRevision: number;
   }>());
   const loseFinalizeResponseRef = useRef(previewParameters.has('finalize-response-lost'));
+  const failBeginBeforeAcceptanceRef = useRef(previewParameters.has('begin-preaccept-fails'));
+  const loseBeginResponseRef = useRef(previewParameters.has('begin-response-lost'));
+  const loseReleaseResponseRef = useRef(previewParameters.has('release-response-lost'));
+  const failReleaseAttemptsRef = useRef(previewParameters.has('release-fails-twice') ? 2 : 0);
   const finishInteractionBeginRef = useRef<(() => void) | null>(null);
   const [outlineDiscovery, setOutlineDiscovery] = useState<PdfOutlineDiscovery>({
     status: 'loading',
@@ -736,8 +741,16 @@ function Harness() {
       authoring={{
         ...(previewParameters.has('interaction-lifecycle') ? {
           interactionFinalizationReady: true,
-          interactionLifecycle: {
+          interactionLifecycle: attachmentOrderedInteractionTransport(rootElement, {
             beginInteraction: async (input: { interactionToken: string; order: number; generation: number }) => {
+              rootElement.setAttribute('data-begin-requests', JSON.stringify([
+                ...JSON.parse(rootElement.getAttribute('data-begin-requests') ?? '[]') as unknown[],
+                input,
+              ]));
+              if (failBeginBeforeAcceptanceRef.current) {
+                failBeginBeforeAcceptanceRef.current = false;
+                throw new Error('connection reset before interaction admission');
+              }
               if (previewParameters.has('begin-delayed')) {
                 await new Promise<void>((resolve) => { finishInteractionBeginRef.current = resolve; });
               }
@@ -746,6 +759,10 @@ function Harness() {
                 ...JSON.parse(rootElement.getAttribute('data-interaction-events') ?? '[]') as string[],
                 `begin:${input.order}`,
               ]));
+              if (loseBeginResponseRef.current) {
+                loseBeginResponseRef.current = false;
+                throw new Error('connection reset after interaction admission');
+              }
               return { status: 'accepted', generation: input.generation, ownerViewId: 'harness-attachment' };
             },
             finalizeInteraction: async (input: { interactionToken: string; order: number; outcome: 'applied' | 'discarded'; draftId: string; expectedDraftRevision: number }) => {
@@ -796,11 +813,23 @@ function Harness() {
               return receipt;
             },
             releaseInteraction: async (input: { interactionToken: string; order: number }) => {
+              rootElement.setAttribute('data-release-requests', JSON.stringify([
+                ...JSON.parse(rootElement.getAttribute('data-release-requests') ?? '[]') as unknown[],
+                input,
+              ]));
+              if (failReleaseAttemptsRef.current > 0) {
+                failReleaseAttemptsRef.current -= 1;
+                throw new Error('connection reset before interaction release');
+              }
               rootElement.setAttribute('data-interaction-hold', 'released');
               rootElement.setAttribute('data-interaction-events', JSON.stringify([
                 ...JSON.parse(rootElement.getAttribute('data-interaction-events') ?? '[]') as string[],
                 `release:${input.order}`,
               ]));
+              if (loseReleaseResponseRef.current) {
+                loseReleaseResponseRef.current = false;
+                throw new Error('connection reset after interaction release');
+              }
               return { status: 'released', interactionToken: input.interactionToken };
             },
             acknowledgeInteraction: async (input: { interactionToken: string; order: number }) => {
@@ -810,7 +839,7 @@ function Harness() {
               ]));
               return { status: 'released', interactionToken: input.interactionToken };
             },
-          },
+          }),
         } : {}),
         pageMenu: pageMenuOpen ? {
           invocationId: 'harness-menu',

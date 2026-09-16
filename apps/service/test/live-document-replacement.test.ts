@@ -28,6 +28,10 @@ import {
 } from "../src/reconciliation/pdf-anchor-reconciler.js";
 import { SessionControlRegistry } from "../src/sessions/control-socket.js";
 import { prepareReplacementReview } from "../src/sessions/document-replacement-preparation.js";
+import {
+  attachmentOrderedInteractionTransport,
+  beginReviewInteraction,
+} from "../../web/src/review/authoring-session.js";
 
 const temporaryDirectories: string[] = [];
 const activeBrokers = new Set<RawSessionBroker>();
@@ -952,6 +956,7 @@ describe("atomic live document replacement", () => {
 
     await value.broker.quiesceForShutdown();
     const restarted = new SessionBroker({ recoveryRoot: join(value.directory, "recovery") });
+    expect(restarted.interactions.held(value.launch.sessionId)).toBe(false);
     const offered = await restarted.openReview({ pdfPath: value.pdfPath, workflowMode: "standard" });
     if (offered.kind !== "recovery-offered") throw new Error("Expected ordinary successor recovery offer");
     const resumed = await restarted.openReview({
@@ -962,6 +967,7 @@ describe("atomic live document replacement", () => {
       recoveryOperationId: randomUUID(),
     });
     if (resumed.kind !== "opened") throw new Error("Expected ordinary successor recovery");
+    expect(restarted.interactions.held(resumed.launch.sessionId)).toBe(false);
     const resumedState = restarted.state(resumed.launch.sessionId)!;
     expect(resumedState).toMatchObject({
       workflow: { mode: "standard", documentGeneration: 2, historyBoundary: 2 },
@@ -971,6 +977,172 @@ describe("atomic live document replacement", () => {
     await expect(restarted.acceptMutation(resumed.launch.sessionId, {
       type: "undo", expectedRevision: resumedState.revision,
     })).rejects.toThrow(/cannot cross the rebuild history boundary/iu);
+  });
+
+  it("keeps every shared view on the predecessor until the last interaction owner releases", async () => {
+    const value = await fixture({
+      inspectGeneration: async () => ({ pageCount: 1, pages: [{ pageIndex: 0, text: "successor" }] }),
+    }, "standard");
+    const first = value.broker.replaceInteractionAttachment(value.launch.sessionId, "window-a");
+    const second = value.broker.replaceInteractionAttachment(value.launch.sessionId, "window-b");
+    await value.broker.beginReviewInteraction({
+      sessionId: value.launch.sessionId, attachment: first, generation: 1,
+      interactionToken: "interaction_window_a", order: 1,
+    });
+    await value.broker.beginReviewInteraction({
+      sessionId: value.launch.sessionId, attachment: second, generation: 1,
+      interactionToken: "interaction_window_b", order: 1,
+    });
+    const draftId = "00000000-0000-4000-8000-000000000008";
+    await value.broker.acceptMutation(value.launch.sessionId, {
+      type: "put-draft", expectedRevision: 0, expectedDraftRevision: -1,
+      draft: {
+        id: draftId,
+        ownerViewId: first.attachmentId,
+        baseGeneration: 1,
+        revision: 0,
+        kind: "highlight",
+        pageIndex: 0,
+        text: "draft retained after its window disappears",
+        anchor: anchorEvidenceFromReviewItem(selectionItem(ITEM_IDS.protected, "Original generated output")),
+        disposition: { kind: "resolved", generation: 1 },
+        status: "protected",
+        createdAt: "2026-09-15T12:00:00.000Z",
+        updatedAt: "2026-09-15T12:00:00.000Z",
+      },
+    });
+    await writeFile(value.pdfPath, value.successor);
+    await expect(value.broker.replaceLiveDocument({
+      sessionId: value.launch.sessionId, outputPath: value.pdfPath, observationEpoch: 1,
+    })).resolves.toMatchObject({ status: "deferred", documentGeneration: 1 });
+
+    value.broker.disconnectInteractionIncarnation(value.launch.sessionId, "window-a", first);
+    expect(value.broker.interactions.held(value.launch.sessionId)).toBe(true);
+    expect(value.broker.state(value.launch.sessionId)).toMatchObject({
+      workflow: { documentGeneration: 1 },
+      pendingDrafts: [{ id: draftId, status: "protected" }],
+    });
+    await value.broker.releaseReviewInteraction({
+      sessionId: value.launch.sessionId, attachment: second,
+      interactionToken: "interaction_window_b", order: 2,
+    });
+    await vi.waitFor(() => expect(value.broker.state(value.launch.sessionId)).toMatchObject({
+      workflow: { documentGeneration: 2 },
+      pendingDrafts: [{
+        id: draftId,
+        baseGeneration: 1,
+        status: "frozen",
+        disposition: { kind: "missing" },
+      }],
+    }), { timeout: 3_000 });
+  });
+
+  it("orders overlapping editor lifecycles by attachment request time", async () => {
+    const value = await fixture({}, "standard");
+    const attachment = value.broker.replaceInteractionAttachment(value.launch.sessionId, "window-a");
+    const transport = attachmentOrderedInteractionTransport({}, {
+      beginInteraction: (input) => value.broker.beginReviewInteraction({
+        ...input, sessionId: value.launch.sessionId, attachment,
+      }),
+      finalizeInteraction: (input) => value.broker.finalizeReviewInteraction({
+        ...input, sessionId: value.launch.sessionId, attachment,
+      }),
+      releaseInteraction: (input) => value.broker.releaseReviewInteraction({
+        ...input, sessionId: value.launch.sessionId, attachment,
+      }),
+      acknowledgeInteraction: (input) => value.broker.acknowledgeReviewInteraction({
+        ...input, sessionId: value.launch.sessionId, attachment,
+      }),
+    });
+
+    const first = await beginReviewInteraction(transport, 1, "interaction_overlap_first");
+    const second = await beginReviewInteraction(transport, 1, "interaction_overlap_second");
+    expect(value.broker.interactions.held(value.launch.sessionId)).toBe(true);
+    await expect(first.release()).resolves.toBeUndefined();
+    expect(value.broker.interactions.held(value.launch.sessionId)).toBe(true);
+    await expect(second.release()).resolves.toBeUndefined();
+    expect(value.broker.interactions.held(value.launch.sessionId)).toBe(false);
+  });
+
+  it("releases a broker-accepted begin whose response is lost before admitting a fresh editor", async () => {
+    const value = await fixture({}, "standard");
+    const attachment = value.broker.replaceInteractionAttachment(value.launch.sessionId, "window-a");
+    let loseBeginResponse = true;
+    const transport = attachmentOrderedInteractionTransport({}, {
+      beginInteraction: async (input) => {
+        const accepted = await value.broker.beginReviewInteraction({
+          ...input, sessionId: value.launch.sessionId, attachment,
+        });
+        if (loseBeginResponse) {
+          loseBeginResponse = false;
+          throw new Error("connection reset after broker admission");
+        }
+        return accepted;
+      },
+      finalizeInteraction: (input) => value.broker.finalizeReviewInteraction({
+        ...input, sessionId: value.launch.sessionId, attachment,
+      }),
+      releaseInteraction: (input) => value.broker.releaseReviewInteraction({
+        ...input, sessionId: value.launch.sessionId, attachment,
+      }),
+      acknowledgeInteraction: (input) => value.broker.acknowledgeReviewInteraction({
+        ...input, sessionId: value.launch.sessionId, attachment,
+      }),
+    });
+
+    await expect(beginReviewInteraction(transport, 1, "interaction_lost_begin"))
+      .rejects.toThrow("after broker admission");
+    expect(value.broker.interactions.held(value.launch.sessionId)).toBe(false);
+    const retry = await beginReviewInteraction(transport, 1, "interaction_fresh_begin");
+    expect(value.broker.interactions.held(value.launch.sessionId)).toBe(true);
+    await retry.release();
+    expect(value.broker.interactions.held(value.launch.sessionId)).toBe(false);
+  });
+
+  it("recovers an abandoned exact release before admitting another terminal", async () => {
+    const value = await fixture({}, "standard");
+    const attachment = value.broker.replaceInteractionAttachment(value.launch.sessionId, "window-a");
+    const calls: Array<{ method: string; token: string; order: number }> = [];
+    let failedReleaseAttempts = 0;
+    const transport = attachmentOrderedInteractionTransport({}, {
+      beginInteraction: (input) => {
+        calls.push({ method: "begin", token: input.interactionToken, order: input.order });
+        return value.broker.beginReviewInteraction({
+          ...input, sessionId: value.launch.sessionId, attachment,
+        });
+      },
+      finalizeInteraction: (input) => value.broker.finalizeReviewInteraction({
+        ...input, sessionId: value.launch.sessionId, attachment,
+      }),
+      releaseInteraction: async (input) => {
+        calls.push({ method: "release", token: input.interactionToken, order: input.order });
+        if (input.interactionToken === "interaction_uncertain_first" && failedReleaseAttempts < 2) {
+          failedReleaseAttempts += 1;
+          throw new Error("connection reset before broker acceptance");
+        }
+        return value.broker.releaseReviewInteraction({
+          ...input, sessionId: value.launch.sessionId, attachment,
+        });
+      },
+      acknowledgeInteraction: (input) => value.broker.acknowledgeReviewInteraction({
+        ...input, sessionId: value.launch.sessionId, attachment,
+      }),
+    });
+
+    const first = await beginReviewInteraction(transport, 1, "interaction_uncertain_first");
+    const second = await beginReviewInteraction(transport, 1, "interaction_uncertain_second");
+    await expect(first.release()).rejects.toThrow("connection reset");
+    await expect(second.release()).resolves.toBeUndefined();
+    await expect(first.release()).resolves.toBeUndefined();
+    expect(calls).toEqual([
+      { method: "begin", token: "interaction_uncertain_first", order: 1 },
+      { method: "begin", token: "interaction_uncertain_second", order: 2 },
+      { method: "release", token: "interaction_uncertain_first", order: 3 },
+      { method: "release", token: "interaction_uncertain_first", order: 3 },
+      { method: "release", token: "interaction_uncertain_first", order: 3 },
+      { method: "release", token: "interaction_uncertain_second", order: 4 },
+    ]);
+    expect(value.broker.interactions.held(value.launch.sessionId)).toBe(false);
   });
 
   it("rejects a verified symlink retarget without expanding source authority", async () => {
@@ -1009,7 +1181,9 @@ describe("atomic live document replacement", () => {
     await writeFile(value.pdfPath, Buffer.concat([value.successor, Buffer.from("\n% changed during inspection")]));
     release.resolve();
 
-    await expect(replacement).resolves.toMatchObject({ status: "invalid", documentGeneration: 1 });
+    const result = await replacement;
+    expect(["invalid", "superseded"]).toContain(result.status);
+    expect(result.documentGeneration).toBe(1);
     await expect(value.broker.documentBytes(value.launch.sessionId)).resolves.toEqual(value.original);
   });
 

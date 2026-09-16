@@ -379,6 +379,7 @@ export function createLoopbackRuntimeClient(options: LoopbackRuntimeClientOption
   let interactionAttachment: unknown;
   let attachmentReady = Promise.withResolvers<unknown>();
   let disposed = false;
+  const materializedDocuments = new Map<string, string>();
   const request = async (
     path: string,
     init: RequestInit = {},
@@ -449,18 +450,25 @@ export function createLoopbackRuntimeClient(options: LoopbackRuntimeClientOption
         throw new Error("Trusted broker state was invalid");
       }
       const generation = stateValue.workflow.documentGeneration as number;
-      const document = await request(
-        `/document/${stateValue.source.fileId}?generation=${generation}`,
-        {},
-        signal,
-      );
-      const bytes = new Uint8Array(await document.arrayBuffer());
-      const documentUri = await options.materializeDocument({
-        bytes,
-        digest: stateValue.source.digest,
-        byteLength: stateValue.source.byteLength as number,
-        generation,
-      });
+      const digest = stateValue.source.digest;
+      const byteLength = stateValue.source.byteLength as number;
+      const documentKey = `${digest}:${byteLength}`;
+      let documentUri = materializedDocuments.get(documentKey);
+      if (documentUri === undefined) {
+        const document = await request(
+          `/document/${stateValue.source.fileId}?generation=${generation}`,
+          {},
+          signal,
+        );
+        const bytes = new Uint8Array(await document.arrayBuffer());
+        documentUri = await options.materializeDocument({ bytes, digest, byteLength, generation });
+        materializedDocuments.set(documentKey, documentUri);
+        while (materializedDocuments.size > 2) {
+          const oldest = materializedDocuments.keys().next().value as string | undefined;
+          if (oldest === undefined) break;
+          materializedDocuments.delete(oldest);
+        }
+      }
       identity.generation = generation;
       identity.revision = stateValue.revision as number;
       observedFreshness = typeof stateValue.workflow.freshness === "string"
@@ -574,6 +582,7 @@ export function createLoopbackRuntimeClient(options: LoopbackRuntimeClientOption
       if (socketRetry !== undefined) clearTimeout(socketRetry);
       socket?.close();
       socket = undefined;
+      materializedDocuments.clear();
       invalidationListeners.clear();
     },
   };

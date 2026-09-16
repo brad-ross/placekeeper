@@ -42,7 +42,7 @@ interface AttachmentRecord {
   readonly attachmentId: string;
   readonly incarnationId: string;
   readonly capabilityHash: string;
-  readonly holds: Map<string, number>;
+  readonly holds: Map<string, { readonly generation: number; lastOrder: number }>;
   lastOrder: number;
   revoked: boolean;
 }
@@ -159,14 +159,14 @@ export class ReviewInteractions {
     if (currentGeneration === undefined || input.generation !== currentGeneration) {
       return { status: "stale", generation: currentGeneration ?? input.generation };
     }
-    const existingGeneration = record.holds.get(input.interactionToken);
-    if (existingGeneration !== undefined) {
-      return existingGeneration === input.generation
-        ? { status: "accepted", generation: existingGeneration, ownerViewId: record.attachmentId }
+    const existing = record.holds.get(input.interactionToken);
+    if (existing !== undefined) {
+      return existing.generation === input.generation
+        ? { status: "accepted", generation: existing.generation, ownerViewId: record.attachmentId }
         : { status: "stale", generation: currentGeneration };
     }
     if (!this.#acceptOrder(record, input.order)) return { status: "out-of-order" };
-    record.holds.set(input.interactionToken, input.generation);
+    record.holds.set(input.interactionToken, { generation: input.generation, lastOrder: input.order });
     return { status: "accepted", generation: input.generation, ownerViewId: record.attachmentId };
   }
 
@@ -175,8 +175,9 @@ export class ReviewInteractions {
     if (record === undefined) return { status: "unauthorized" };
     const receipt = this.#receipt(input);
     if (receipt !== undefined) return receipt;
-    if (!record.holds.has(input.interactionToken)) return { status: "missing" };
-    if (!this.#acceptOrder(record, input.order)) return { status: "out-of-order" };
+    const hold = record.holds.get(input.interactionToken);
+    if (hold === undefined) return { status: "missing" };
+    if (!this.#acceptActiveTokenOrder(record, hold, input.order)) return { status: "out-of-order" };
     record.holds.delete(input.interactionToken);
     this.#notifyIfLast(record.sessionId);
     return { status: "released" };
@@ -194,9 +195,9 @@ export class ReviewInteractions {
     if (record === undefined) return { status: "unauthorized" };
     const replay = this.#receipt(input);
     if (replay !== undefined) return replay;
-    const generation = record.holds.get(input.interactionToken);
-    if (generation === undefined) return { status: "missing" };
-    if (!Number.isSafeInteger(input.order) || input.order <= record.lastOrder) return { status: "out-of-order" };
+    const hold = record.holds.get(input.interactionToken);
+    if (hold === undefined) return { status: "missing" };
+    if (!Number.isSafeInteger(input.order) || input.order <= hold.lastOrder) return { status: "out-of-order" };
     const maximum = this.#options.maxPendingReceipts ?? 256;
     if (this.#receipts.size >= maximum) return { status: "backpressure" };
     const committed = input.commit === undefined
@@ -212,7 +213,7 @@ export class ReviewInteractions {
       sessionId: record.sessionId,
       attachmentId: record.attachmentId,
       interactionToken: input.interactionToken,
-      generation,
+      generation: hold.generation,
       outcome: input.outcome,
       reviewRevision: reviewRevision as number,
     };
@@ -221,7 +222,8 @@ export class ReviewInteractions {
     if (typeof committed === "object" && committed !== null) await committed.persist(receipt);
     else await this.#options.persistReceipt?.(receipt);
     this.#receipts.set(receiptKey(record.attachmentId, input.interactionToken), receipt);
-    record.lastOrder = input.order;
+    record.lastOrder = Math.max(record.lastOrder, input.order);
+    hold.lastOrder = input.order;
     record.holds.delete(input.interactionToken);
     this.#notifyIfLast(record.sessionId);
     return receipt;
@@ -280,6 +282,17 @@ export class ReviewInteractions {
   #acceptOrder(record: AttachmentRecord, order: number): boolean {
     if (!Number.isSafeInteger(order) || order <= record.lastOrder) return false;
     record.lastOrder = order;
+    return true;
+  }
+
+  #acceptActiveTokenOrder(
+    record: AttachmentRecord,
+    hold: { lastOrder: number },
+    order: number,
+  ): boolean {
+    if (!Number.isSafeInteger(order) || order <= hold.lastOrder) return false;
+    hold.lastOrder = order;
+    record.lastOrder = Math.max(record.lastOrder, order);
     return true;
   }
 

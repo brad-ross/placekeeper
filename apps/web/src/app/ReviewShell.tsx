@@ -22,7 +22,7 @@ import { isVisibleFocusTarget } from '../review/focus-target.js';
 import { useAuthoringSession } from '../review/use-authoring-session.js';
 import { useAnnotationReader } from '../review/use-annotation-reader.js';
 
-import { mutableField, initialAuthoringValue } from "../review/authoring-session.js";
+import { mutableField } from "../review/authoring-session.js";
 import { controlledWorkspaceSurfaceAction } from "../review/workspace-surface-policy.js";
 
 import {
@@ -342,6 +342,7 @@ export function ReviewShell(props: ReviewShellProps) {
     dismissAuthoring,
     closeNested,
     protectAuthoringDraft,
+    currentAuthoringValue,
     saveAuthoring,
   } = useAuthoringSession({
     state: props.state, authoring: props.authoring,
@@ -1353,7 +1354,7 @@ export function ReviewShell(props: ReviewShellProps) {
     const source = authoringSession.source;
     const editField = source.kind === 'edit' ? mutableField(source.item) : undefined;
     if (source.kind === 'edit' && editField === undefined) return null;
-    const initialValue = initialAuthoringValue(authoringSession);
+    const initialValue = currentAuthoringValue(authoringSession);
     const fieldLabel = source.kind === 'replace'
       ? 'Replacement'
       : source.kind === 'insert'

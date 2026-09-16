@@ -132,4 +132,26 @@ describe("broker-owned review interactions", () => {
     await expect(interactions.release({ ...attachment, interactionToken: "interaction_failure_1", order: 2 }))
       .resolves.toMatchObject({ status: "released" });
   });
+
+  it("orders active-token terminals independently after attachment admission", async () => {
+    const interactions = new ReviewInteractions({ currentGeneration: () => 1 });
+    const attachment = interactions.register("review-a", "browser-view-a");
+    await expect(interactions.begin({
+      ...attachment, generation: 1, interactionToken: "interaction_first_1", order: 1,
+    })).resolves.toMatchObject({ status: "accepted" });
+    await expect(interactions.begin({
+      ...attachment, generation: 1, interactionToken: "interaction_second_1", order: 2,
+    })).resolves.toMatchObject({ status: "accepted" });
+    await expect(interactions.release({
+      ...attachment, interactionToken: "interaction_second_1", order: 4,
+    })).resolves.toMatchObject({ status: "released" });
+    await expect(interactions.finalize({
+      ...attachment,
+      interactionToken: "interaction_first_1",
+      order: 3,
+      outcome: "applied",
+      commit: async () => 1,
+    })).resolves.toMatchObject({ status: "finalized", reviewRevision: 1 });
+    expect(interactions.held("review-a")).toBe(false);
+  });
 });

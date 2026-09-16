@@ -381,14 +381,18 @@ export class SessionBroker {
           const nextState = this.#reduceMutation(session, command, session.state.workflow.documentGeneration);
           const nextNativeAnnotationLedger = nativeAnnotationLedger(nextState, session.nativeAnnotationLedger);
           const desiredDigest = reviewStateDigest(nextState);
-          const nextSync: DurableSaveSync = {
-            phase: session.destination.phase === "active" ? "saving" : "not-saved",
-            desiredRevision: nextState.revision,
-            desiredDigest,
-            savedRevision: session.sync.savedRevision,
-            ...(session.sync.savedDigest === undefined ? {} : { savedDigest: session.sync.savedDigest }),
-            ...(session.destination.phase === "active" ? {} : { failure: "destination-unconfigured" as const }),
-          };
+          const nextSync: DurableSaveSync = input.outcome === 'discarded'
+            ? session.sync.phase === 'clean'
+              ? { ...session.sync, desiredRevision: nextState.revision, savedRevision: nextState.revision }
+              : session.sync
+            : {
+                phase: session.destination.phase === "active" ? "saving" : "not-saved",
+                desiredRevision: nextState.revision,
+                desiredDigest,
+                savedRevision: session.sync.savedRevision,
+                ...(session.sync.savedDigest === undefined ? {} : { savedDigest: session.sync.savedDigest }),
+                ...(session.destination.phase === "active" ? {} : { failure: "destination-unconfigured" as const }),
+              };
           return {
             reviewRevision: nextState.revision,
             persist: async (receipt) => {
@@ -1748,7 +1752,7 @@ export class SessionBroker {
       throw new Error("Save destination is not active");
     }
     const current =
-      session.state.revision === input.revision &&
+      session.sync.desiredRevision === input.revision &&
       session.sync.desiredDigest === input.stateDigest;
     const destination: DurableSaveDestination = {
       ...session.destination,
@@ -1756,7 +1760,7 @@ export class SessionBroker {
     };
     const sync: DurableSaveSync = {
       phase: current ? "clean" : "saving",
-      desiredRevision: session.state.revision,
+      desiredRevision: session.sync.desiredRevision,
       desiredDigest: session.sync.desiredDigest,
       savedRevision: input.revision,
       savedDigest: input.stateDigest,
@@ -3061,6 +3065,19 @@ export class SessionBroker {
   }
 
   async freezeDelivery(sessionId: string, fence?: ReviewExportFence): Promise<FrozenReviewDelivery> {
+    return this.#freezeDelivery(sessionId, fence, false);
+  }
+
+  /** Freeze the semantic PDF target rather than draft-only review revisions. */
+  async freezeSaveDelivery(sessionId: string): Promise<FrozenReviewDelivery> {
+    return this.#freezeDelivery(sessionId, undefined, true);
+  }
+
+  async #freezeDelivery(
+    sessionId: string,
+    fence: ReviewExportFence | undefined,
+    saveTarget: boolean,
+  ): Promise<FrozenReviewDelivery> {
     const session = this.#activeById.get(sessionId);
     if (session === undefined || session.ending) {
       throw new Error("Review session is not active");
@@ -3084,7 +3101,7 @@ export class SessionBroker {
         sessionId: session.id,
         source: { ...state.source },
         originalDigest: session.currentOriginalDigest,
-        revision: state.revision,
+        revision: saveTarget ? session.sync.desiredRevision : state.revision,
         sourceSnapshotPath: session.sourceSnapshotPath,
         annotations: projectReviewItems(state.items, undefined, {
           ...(state.annotationName === undefined ? {} : { annotationName: state.annotationName }),
@@ -3094,7 +3111,7 @@ export class SessionBroker {
         workflowMode: state.workflow.mode,
         documentGeneration: state.workflow.documentGeneration,
         dispositionDigest: summary.reconciliation.dispositionDigest,
-        stateDigest: reviewStateDigest(state),
+        stateDigest: saveTarget ? session.sync.desiredDigest : reviewStateDigest(state),
         exportEligibility: summary.export,
         ...(session.rootId === undefined ? {} : { sourceRootId: session.rootId }),
         ...(sourceRootPath === undefined ? {} : { sourceRootPath }),
@@ -3157,18 +3174,22 @@ export class SessionBroker {
         session.nativeAnnotationLedger,
       );
       const desiredDigest = reviewStateDigest(nextState);
-      const nextSync: DurableSaveSync = {
-        phase: session.destination.phase === "active" ? "saving" : "not-saved",
-        desiredRevision: nextState.revision,
-        desiredDigest,
-        savedRevision: session.sync.savedRevision,
-        ...(session.sync.savedDigest === undefined
-          ? {}
-          : { savedDigest: session.sync.savedDigest }),
-        ...(session.destination.phase === "active"
-          ? {}
-          : { failure: "destination-unconfigured" as const }),
-      };
+      const nextSync: DurableSaveSync = command.type === 'put-draft'
+        ? session.sync.phase === 'clean'
+          ? { ...session.sync, desiredRevision: nextState.revision, savedRevision: nextState.revision }
+          : session.sync
+        : {
+            phase: session.destination.phase === "active" ? "saving" : "not-saved",
+            desiredRevision: nextState.revision,
+            desiredDigest,
+            savedRevision: session.sync.savedRevision,
+            ...(session.sync.savedDigest === undefined
+              ? {}
+              : { savedDigest: session.sync.savedDigest }),
+            ...(session.destination.phase === "active"
+              ? {}
+              : { failure: "destination-unconfigured" as const }),
+          };
       const nextDraft: RecoverableDraftV3 = {
         ...this.#draft(session),
         state: nextState,

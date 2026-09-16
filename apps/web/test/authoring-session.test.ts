@@ -11,6 +11,7 @@ import {
   createAuthoringSession,
   pendingDraftForAuthoring,
   beginReviewInteraction,
+  attachmentOrderedInteractionTransport,
   type AuthoringSessionSeed,
 } from '../src/review/authoring-session.js';
 import {
@@ -101,6 +102,152 @@ const seed = (
 });
 
 describe('frozen authoring-session contract', () => {
+  it('shares monotonic attachment ordering across editor surfaces and remounts', async () => {
+    const calls: Array<{ method: string; order: number }> = [];
+    const transport = {
+      async beginInteraction(input: { interactionToken: string; order: number; generation: number }) {
+        calls.push({ method: 'begin', order: input.order });
+        return { status: 'accepted', generation: input.generation, ownerViewId: 'attachment-a' };
+      },
+      async finalizeInteraction(input: { interactionToken: string; order: number; outcome: 'applied' | 'discarded'; draftId: string; expectedDraftRevision: number }) {
+        calls.push({ method: 'finalize', order: input.order });
+        return { status: 'finalized', interactionToken: input.interactionToken, generation: 7,
+          outcome: input.outcome, reviewRevision: 1 };
+      },
+      async releaseInteraction(input: { interactionToken: string; order: number }) {
+        calls.push({ method: 'release', order: input.order });
+        return { status: 'released' };
+      },
+      async acknowledgeInteraction(input: { interactionToken: string; order: number }) {
+        calls.push({ method: 'acknowledge', order: input.order });
+        return { status: 'released' };
+      },
+    };
+    const identity = {};
+    const authoring = await beginReviewInteraction(attachmentOrderedInteractionTransport(identity, transport), 7, 'authoring');
+    const receipt = await authoring.finalize('applied', 'draft-a', 0);
+    await authoring.acknowledge(receipt);
+    const reattachment = await beginReviewInteraction(attachmentOrderedInteractionTransport(identity, transport), 7, 'reattach');
+    await reattachment.release();
+
+    expect(calls).toEqual([
+      { method: 'begin', order: 1 },
+      { method: 'finalize', order: 2 },
+      { method: 'acknowledge', order: 3 },
+      { method: 'begin', order: 4 },
+      { method: 'release', order: 5 },
+    ]);
+  });
+
+  it('allocates attachment order when overlapping lifecycle requests are sent', async () => {
+    const calls: Array<{ method: string; token: string; order: number }> = [];
+    const transport = {
+      async beginInteraction(input: { interactionToken: string; order: number; generation: number }) {
+        calls.push({ method: 'begin', token: input.interactionToken, order: input.order });
+        return { status: 'accepted', generation: input.generation, ownerViewId: 'attachment-a' };
+      },
+      async finalizeInteraction(input: { interactionToken: string; order: number }) {
+        calls.push({ method: 'finalize', token: input.interactionToken, order: input.order });
+        return { status: 'finalized', interactionToken: input.interactionToken, generation: 7,
+          outcome: 'applied', reviewRevision: 1 };
+      },
+      async releaseInteraction(input: { interactionToken: string; order: number }) {
+        calls.push({ method: 'release', token: input.interactionToken, order: input.order });
+        return { status: 'released' };
+      },
+      async acknowledgeInteraction(input: { interactionToken: string; order: number }) {
+        calls.push({ method: 'acknowledge', token: input.interactionToken, order: input.order });
+        return { status: 'released' };
+      },
+    };
+    const ordered = attachmentOrderedInteractionTransport({}, transport);
+    const first = await beginReviewInteraction(ordered, 7, 'first');
+    const second = await beginReviewInteraction(ordered, 7, 'second');
+    await first.release();
+    await second.release();
+
+    expect(calls).toEqual([
+      { method: 'begin', token: 'first', order: 1 },
+      { method: 'begin', token: 'second', order: 2 },
+      { method: 'release', token: 'first', order: 3 },
+      { method: 'release', token: 'second', order: 4 },
+    ]);
+  });
+
+  it('drops an explicitly rejected begin allocation before the token is reused', async () => {
+    const orders: number[] = [];
+    let attempts = 0;
+    const ordered = attachmentOrderedInteractionTransport({}, {
+      async beginInteraction(input) {
+        orders.push(input.order);
+        attempts += 1;
+        return attempts === 1
+          ? { status: 'stale', generation: 8 }
+          : { status: 'accepted', generation: input.generation, ownerViewId: 'attachment-a' };
+      },
+      async finalizeInteraction() { throw new Error('unused'); },
+      async releaseInteraction() { return { status: 'released' }; },
+      async acknowledgeInteraction() { return { status: 'released' }; },
+    });
+
+    await expect(beginReviewInteraction(ordered, 7, 'reused')).rejects.toThrow('Current generation: 8');
+    const accepted = await beginReviewInteraction(ordered, 7, 'reused');
+    await accepted.release();
+    expect(orders).toEqual([1, 2]);
+  });
+
+  it('releases a possibly accepted begin before admitting its caller retry', async () => {
+    const calls: Array<{ method: string; token: string; order: number }> = [];
+    let loseFirstBegin = true;
+    const ordered = attachmentOrderedInteractionTransport({}, {
+      async beginInteraction(input) {
+        calls.push({ method: 'begin', token: input.interactionToken, order: input.order });
+        if (loseFirstBegin) {
+          loseFirstBegin = false;
+          throw new Error('connection reset after admission');
+        }
+        return { status: 'accepted', generation: input.generation, ownerViewId: 'attachment-a' };
+      },
+      async finalizeInteraction() { throw new Error('unused'); },
+      async releaseInteraction(input) {
+        calls.push({ method: 'release', token: input.interactionToken, order: input.order });
+        return { status: 'released' };
+      },
+      async acknowledgeInteraction() { return { status: 'released' }; },
+    });
+
+    await expect(beginReviewInteraction(ordered, 7, 'lost-admission')).rejects.toThrow('after admission');
+    const accepted = await beginReviewInteraction(ordered, 7, 'fresh-admission');
+    await accepted.release();
+    expect(calls).toEqual([
+      { method: 'begin', token: 'lost-admission', order: 1 },
+      { method: 'release', token: 'lost-admission', order: 2 },
+      { method: 'begin', token: 'fresh-admission', order: 3 },
+      { method: 'release', token: 'fresh-admission', order: 4 },
+    ]);
+  });
+
+  it('drops a failed begin allocation before the caller retries or abandons its token', async () => {
+    const orders: number[] = [];
+    let attempts = 0;
+    const ordered = attachmentOrderedInteractionTransport({}, {
+      async beginInteraction(input) {
+        orders.push(input.order);
+        attempts += 1;
+        if (attempts === 1) throw new Error('connection reset before admission');
+        return { status: 'accepted', generation: input.generation, ownerViewId: 'attachment-a' };
+      },
+      async finalizeInteraction() { throw new Error('unused'); },
+      async releaseInteraction() { return { status: 'released' }; },
+      async acknowledgeInteraction() { return { status: 'released' }; },
+    });
+
+    await expect(beginReviewInteraction(ordered, 7, 'reused-after-error')).rejects.toThrow('connection reset');
+    const accepted = await beginReviewInteraction(ordered, 7, 'reused-after-error');
+    await accepted.release();
+    expect(orders).toEqual([1, 3]);
+  });
+
   it('keeps the exact finalization identity across failure and acknowledges only after receipt consumption', async () => {
     const calls: Array<{ method: string; input: unknown }> = [];
     let finalizeAttempts = 0;
@@ -131,20 +278,20 @@ describe('frozen authoring-session contract', () => {
         calls.push({ method: 'acknowledge', input });
         return { status: 'released' };
       },
-    }, 7, 'interaction-authoring-1');
+    }, 7, 'interaction-authoring-1', 4);
 
     expect(interaction.ownerViewId).toBe('attachment-a');
     await expect(interaction.finalize('applied', 'draft-authoring-1', 2)).rejects.toThrow('connection reset');
     const receipt = await interaction.finalize('applied', 'draft-authoring-1', 2);
     expect(calls.filter(({ method }) => method === 'finalize').map(({ input }) => input)).toEqual([
-      { interactionToken: 'interaction-authoring-1', order: 2, outcome: 'applied', draftId: 'draft-authoring-1', expectedDraftRevision: 2 },
-      { interactionToken: 'interaction-authoring-1', order: 2, outcome: 'applied', draftId: 'draft-authoring-1', expectedDraftRevision: 2 },
+      { interactionToken: 'interaction-authoring-1', order: 5, outcome: 'applied', draftId: 'draft-authoring-1', expectedDraftRevision: 2 },
+      { interactionToken: 'interaction-authoring-1', order: 5, outcome: 'applied', draftId: 'draft-authoring-1', expectedDraftRevision: 2 },
     ]);
     expect(calls.some(({ method }) => method === 'acknowledge')).toBe(false);
     await interaction.acknowledge(receipt);
     expect(calls.at(-1)).toEqual({
       method: 'acknowledge',
-      input: { interactionToken: 'interaction-authoring-1', order: 3 },
+      input: { interactionToken: 'interaction-authoring-1', order: 6 },
     });
   });
 
@@ -275,15 +422,13 @@ describe('frozen authoring-session contract', () => {
       placekeeper: {
         item: {
           payload: {
-            pages: [
-              { pageIndex: 2, quote: 'the original passage' },
-              { pageIndex: 3, quote: 'continued passage' },
-            ],
             pageBoundaries: [{ afterPageIndex: 2, separator: '\n' }],
           },
         },
       },
     });
+    expect((preview?.custom as { placekeeper?: { item?: { payload?: unknown } } })
+      ?.placekeeper?.item?.payload).not.toHaveProperty('pages');
     expect(authoringPreviewAnnotations(
       session,
       kind === 'replace' ? 'replacement' : 'comment',

@@ -16,6 +16,24 @@ function entitlementKeys(xml: string): string[] {
 }
 
 describe("macOS native gate packaging policy", () => {
+  it("keeps the Swift page/helper vocabulary aligned with refresh lifecycle methods", async () => {
+    const [bridge, helper] = await Promise.all([
+      readFile(resolve("apps/macos/Sources/PlacekeeperMac/ReviewBridge.swift"), "utf8"),
+      readFile(resolve("apps/macos/Sources/PlacekeeperMac/ReviewHelper.swift"), "utf8"),
+    ]);
+    for (const method of [
+      "beginInteraction", "finalizeInteraction", "releaseInteraction", "acknowledgeInteraction",
+      "resolveReadingLocation",
+    ]) {
+      expect(bridge).toContain(`"${method}"`);
+      expect(helper).toContain(`"${method}"`);
+    }
+    const nonIdempotent = bridge.slice(bridge.indexOf("private static let nonIdempotent"));
+    for (const method of ["beginInteraction", "finalizeInteraction", "releaseInteraction", "acknowledgeInteraction"]) {
+      expect(nonIdempotent).toContain(`"${method}"`);
+    }
+  });
+
   it("keeps the proof executable production-shaped and network-free", async () => {
     const [windowSource, appSource, packageSource, shellHtml, shellCss, launchSource, registrySource, lifecycleSource, restorationSource, menuSource, fallbackSource] = await Promise.all([
       readFile(resolve("apps/macos/Sources/PlacekeeperMac/PlacekeeperWindowController.swift"), "utf8"),

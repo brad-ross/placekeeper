@@ -94,8 +94,9 @@ enum MacReviewHelperReplyParser {
     )
     private static let digest = try! NSRegularExpression(pattern: "^[a-f0-9]{64}$")
     private static let methods = Set([
-        "command", "saveStatus", "saveProposal", "chooseCopy", "chooseFolder", "chooseOriginal",
-        "retrySave", "locateSave", "scope", "exportReviewedCopy",
+        "command", "beginInteraction", "finalizeInteraction", "releaseInteraction", "acknowledgeInteraction",
+        "saveStatus", "saveProposal", "chooseCopy", "chooseFolder", "chooseOriginal", "retrySave", "locateSave",
+        "scope", "resolveReadingLocation", "exportReviewedCopy",
     ])
 
     static func parse(

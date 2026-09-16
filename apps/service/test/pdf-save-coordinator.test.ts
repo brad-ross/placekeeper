@@ -764,6 +764,126 @@ describe("coalescing PDF autosave", () => {
     expect(broker.saveStatus(sessionId)?.sync).toMatchObject({ phase: "clean", savedRevision: 2 });
   });
 
+  it("lets an in-flight committed save settle clean across draft-only revisions", async () => {
+    const started = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const writer = fakeWriter(async (writeNumber) => {
+      if (writeNumber === 1) {
+        started.resolve();
+        await release.promise;
+      }
+    });
+    const { root, broker, coordinator, sessionId } = await setup(undefined, { writer });
+    const target = join(root, "paper-annotated.pdf");
+    await coordinator.chooseCopy(sessionId, target);
+    await broker.acceptMutation(sessionId, add(0));
+    const save = coordinator.requestSave(sessionId);
+    await started.promise;
+
+    const attachment = broker.replaceInteractionAttachment(sessionId, "attachment-a");
+    const interactionToken = "interaction_draft_only_save";
+    await broker.beginReviewInteraction({
+      sessionId, attachment, generation: 1, interactionToken, order: 1,
+    });
+    const draftId = randomUUID();
+    await broker.acceptMutation(sessionId, {
+      type: "put-draft", expectedRevision: 1, expectedDraftRevision: -1,
+      draft: {
+        id: draftId,
+        ownerViewId: attachment.attachmentId,
+        baseGeneration: 1,
+        revision: 0,
+        kind: "pageNote",
+        pageIndex: 0,
+        text: "temporary draft",
+        anchor: {
+          kind: "page", pageIndex: 0, nearbyText: "source",
+          rect: { x: 1, y: 1, width: 1, height: 1 },
+        },
+        disposition: { kind: "resolved", generation: 1 },
+        status: "protected",
+        createdAt: "2026-09-16T09:00:00.000Z",
+        updatedAt: "2026-09-16T09:00:00.000Z",
+      },
+    });
+    expect(broker.saveStatus(sessionId)?.sync).toMatchObject({
+      phase: "saving", desiredRevision: 1, savedRevision: 0,
+    });
+    release.resolve();
+    await save;
+    expect(broker.state(sessionId)).toMatchObject({ revision: 2 });
+    expect(broker.saveStatus(sessionId)?.sync).toMatchObject({
+      phase: "clean", desiredRevision: 1, savedRevision: 1,
+    });
+    const receipt = await broker.finalizeReviewInteraction({
+      sessionId, attachment, interactionToken, order: 2,
+      outcome: "discarded", draftId, expectedDraftRevision: 0,
+    });
+    expect(receipt).toMatchObject({ status: "finalized", outcome: "discarded", reviewRevision: 3 });
+    expect(broker.state(sessionId)).toMatchObject({ revision: 3, pendingDrafts: [] });
+    expect(broker.saveStatus(sessionId)?.sync).toMatchObject({
+      phase: "clean", desiredRevision: 3, savedRevision: 3,
+    });
+    await expect(broker.acknowledgeReviewInteraction({
+      sessionId, attachment, interactionToken, order: 3,
+    })).resolves.toMatchObject({ status: "released" });
+
+    await broker.acceptMutation(sessionId, add(3));
+    await coordinator.requestSave(sessionId);
+    expect(broker.saveStatus(sessionId)?.sync).toMatchObject({
+      phase: "clean", desiredRevision: 4, savedRevision: 4,
+    });
+    const contents = await readFile(target, "utf8");
+    for (const item of broker.state(sessionId)!.items) expect(contents).toContain(item.id);
+  }, 15_000);
+
+  it("freezes the committed save target when a draft already advanced review state", async () => {
+    let writes = 0;
+    const { root, broker, coordinator, sessionId } = await setup(undefined, {
+      writer: fakeWriter(async () => { writes += 1; }),
+    });
+    await coordinator.chooseCopy(sessionId, join(root, "paper-annotated.pdf"));
+    expect(writes).toBe(1);
+    await broker.acceptMutation(sessionId, add(0));
+    const draftId = randomUUID();
+    await broker.acceptMutation(sessionId, {
+      type: "put-draft", expectedRevision: 1, expectedDraftRevision: -1,
+      draft: {
+        id: draftId,
+        ownerViewId: "attachment-a",
+        baseGeneration: 1,
+        revision: 0,
+        kind: "pageNote",
+        pageIndex: 0,
+        text: "draft before snapshot capture",
+        anchor: {
+          kind: "page", pageIndex: 0, nearbyText: "source",
+          rect: { x: 1, y: 1, width: 1, height: 1 },
+        },
+        disposition: { kind: "resolved", generation: 1 },
+        status: "protected",
+        createdAt: "2026-09-16T09:00:00.000Z",
+        updatedAt: "2026-09-16T09:00:00.000Z",
+      },
+    });
+
+    expect(broker.state(sessionId)?.revision).toBe(2);
+    expect(broker.saveStatus(sessionId)?.sync).toMatchObject({
+      phase: "saving", desiredRevision: 1, savedRevision: 0,
+    });
+    await coordinator.requestSave(sessionId);
+    expect(writes).toBe(2);
+    expect(broker.saveStatus(sessionId)?.sync).toMatchObject({
+      phase: "clean", desiredRevision: 1, savedRevision: 1,
+    });
+    const exportDelivery = await broker.freezeDelivery(sessionId);
+    const saveDelivery = await broker.freezeSaveDelivery(sessionId);
+    expect(exportDelivery.revision).toBe(2);
+    expect(saveDelivery.revision).toBe(1);
+    expect(broker.isFrozenDeliveryCurrent(exportDelivery)).toBe(true);
+    expect(broker.isFrozenDeliveryCurrent(saveDelivery)).toBe(false);
+  });
+
   it("never lets an old-target completion bless a newly selected destination", async () => {
     const started = Promise.withResolvers<void>();
     const release = Promise.withResolvers<void>();

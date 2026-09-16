@@ -515,6 +515,19 @@ final class MacPoliciesTests: XCTestCase {
             scoped.merging(["runtimeId": "runtime_wrong123"]) { _, new in new },
             runtimeID: "runtime_12345678"
         ))
+
+        for method in [
+            "beginInteraction", "finalizeInteraction", "releaseInteraction", "acknowledgeInteraction",
+            "resolveReadingLocation",
+        ] {
+            XCTAssertEqual(
+                MacPageRuntimeRequest.parse(
+                    scoped.merging(["method": method]) { _, new in new },
+                    runtimeID: "runtime_12345678"
+                )?.method,
+                method
+            )
+        }
     }
 
     func testRecoveryOfferParserKeepsTheServiceOfferExact() {
@@ -548,6 +561,29 @@ final class MacPoliciesTests: XCTestCase {
             if expiry == "invalid" { XCTAssertNil(parsed) }
             else if case let .recoveryOffered(_, value)? = parsed { XCTAssertEqual(value, expiry) }
             else { XCTFail("expected a recovery offer for \(expiry)") }
+        }
+    }
+
+    func testHelperResultParserAcceptsRefreshInteractionAndReadingMethods() {
+        let base: [String: Any] = [
+            "protocolVersion": 1,
+            "windowId": "window_12345678",
+            "attemptId": "attempt_12345678",
+            "requestId": "request_12345678",
+            "type": "result",
+            "payload": ["status": "ok"],
+        ]
+        for method in [
+            "beginInteraction", "finalizeInteraction", "releaseInteraction", "acknowledgeInteraction",
+            "resolveReadingLocation",
+        ] {
+            guard case let .result(parsedMethod, _)? = MacReviewHelperReplyParser.parse(
+                base.merging(["method": method]) { _, new in new },
+                windowID: "window_12345678",
+                attemptID: "attempt_12345678",
+                requestID: "request_12345678"
+            ) else { return XCTFail("expected a result for \(method)") }
+            XCTAssertEqual(parsedMethod, method)
         }
     }
 

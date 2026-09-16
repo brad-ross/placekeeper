@@ -40,8 +40,10 @@ struct MacPageRuntimeRequest {
     }
 
     private static let allowedMethods = Set([
-        "bootstrap", "presence", "detach", "command", "saveStatus", "saveProposal", "chooseCopy",
-        "chooseFolder", "chooseOriginal", "retrySave", "locateSave", "scope", "exportReviewedCopy",
+        "bootstrap", "presence", "detach", "command", "beginInteraction", "finalizeInteraction",
+        "releaseInteraction", "acknowledgeInteraction", "saveStatus", "saveProposal", "chooseCopy",
+        "chooseFolder", "chooseOriginal", "retrySave", "locateSave", "scope", "resolveReadingLocation",
+        "exportReviewedCopy",
     ])
     private static let sessionPattern = "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
 
@@ -385,7 +387,8 @@ final class ReviewBridge {
     }
 
     private static let nonIdempotent = Set([
-        "command", "chooseCopy", "chooseFolder", "chooseOriginal", "retrySave", "locateSave", "exportReviewedCopy",
+        "command", "beginInteraction", "finalizeInteraction", "releaseInteraction", "acknowledgeInteraction",
+        "chooseCopy", "chooseFolder", "chooseOriginal", "retrySave", "locateSave", "exportReviewedCopy",
     ])
 
     private func diagnostic(_ message: String) {

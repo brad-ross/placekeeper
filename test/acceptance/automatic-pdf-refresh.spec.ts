@@ -64,6 +64,95 @@ test.describe('automatic PDF refresh annotation lifecycle', () => {
     await expect(page.getByRole('region', { name: 'Highlight Comment' })).toHaveCount(0);
   });
 
+  test('recovers a fresh editor after begin fails before admission', async ({ page }) => {
+    await page.goto('/test/acceptance/review-harness/index.html?interaction-lifecycle=1&begin-preaccept-fails=1');
+    const highlight = page.getByRole('button', { name: 'Highlight', exact: true });
+    await highlight.click();
+    await expect(page.getByRole('region', { name: 'Highlight Comment' })).toHaveCount(0);
+    await expect(page.locator('#root')).not.toHaveAttribute('data-interaction-hold', 'active');
+
+    await highlight.click();
+    await expect(page.getByRole('region', { name: 'Highlight Comment' })).toBeVisible();
+    const requests = JSON.parse(await page.locator('#root').getAttribute('data-begin-requests') ?? '[]') as Array<{
+      interactionToken: string; order: number;
+    }>;
+    expect(requests).toHaveLength(2);
+    expect(requests[0]?.interactionToken).not.toBe(requests[1]?.interactionToken);
+    expect(requests.map(({ order }) => order)).toEqual([1, 3]);
+    await page.getByRole('region', { name: 'Highlight Comment' })
+      .getByRole('button', { name: 'Cancel' }).click();
+    await expect(page.locator('#root')).toHaveAttribute('data-interaction-hold', 'released');
+  });
+
+  test('releases a lost accepted begin before a fresh user retry can open', async ({ page }) => {
+    await page.goto('/test/acceptance/review-harness/index.html?interaction-lifecycle=1&begin-response-lost=1');
+    const highlight = page.getByRole('button', { name: 'Highlight', exact: true });
+    await highlight.click();
+    await expect(page.getByRole('region', { name: 'Highlight Comment' })).toHaveCount(0);
+    await expect(page.locator('#root')).toHaveAttribute('data-interaction-hold', 'released');
+
+    await highlight.click();
+    const composer = page.getByRole('region', { name: 'Highlight Comment' });
+    await expect(composer).toBeVisible();
+    await composer.getByRole('button', { name: 'Cancel' }).click();
+    await expect(composer).toHaveCount(0);
+    await expect(page.locator('#root')).toHaveAttribute('data-interaction-hold', 'released');
+    await expect(page.locator('#root')).toHaveAttribute(
+      'data-interaction-events',
+      '["begin:1","release:2","begin:3","finalize:4:discarded","acknowledge:5"]',
+    );
+    const begins = JSON.parse(await page.locator('#root').getAttribute('data-begin-requests') ?? '[]') as Array<{
+      interactionToken: string; order: number;
+    }>;
+    expect(begins).toHaveLength(2);
+    expect(begins[0]?.interactionToken).not.toBe(begins[1]?.interactionToken);
+    const releases = JSON.parse(
+      await page.locator('#root').getAttribute('data-release-requests') ?? '[]',
+    ) as Array<{ interactionToken: string; order: number }>;
+    expect(releases).toEqual([{ interactionToken: begins[0]?.interactionToken, order: 2 }]);
+  });
+
+  test('keeps retrying an abandoned release until the next user action can recover it', async ({ page }) => {
+    await page.goto('/test/acceptance/review-harness/index.html?interaction-lifecycle=1&begin-delayed=1&release-fails-twice=1&host-export=1');
+    await page.getByRole('button', { name: 'Highlight', exact: true }).click();
+    await page.getByRole('button', { name: 'Remount review shell' }).click();
+    await page.getByRole('button', { name: 'Finish interaction begin' }).click();
+    await expect.poll(async () => JSON.parse(
+      await page.locator('#root').getAttribute('data-release-requests') ?? '[]',
+    )).toHaveLength(2);
+    await expect(page.locator('#root')).toHaveAttribute('data-interaction-hold', 'active');
+
+    const highlight = page.getByRole('button', { name: 'Highlight', exact: true });
+    await highlight.click();
+    await expect.poll(async () => JSON.parse(
+      await page.locator('#root').getAttribute('data-begin-requests') ?? '[]',
+    )).toHaveLength(2);
+    await page.getByRole('button', { name: 'Finish interaction begin' }).click();
+    const composer = page.getByRole('region', { name: 'Highlight Comment' });
+    await expect(composer).toBeVisible();
+    const releases = JSON.parse(
+      await page.locator('#root').getAttribute('data-release-requests') ?? '[]',
+    ) as Array<{ interactionToken: string; order: number }>;
+    expect(releases).toHaveLength(3);
+    expect(releases[1]).toEqual(releases[0]);
+    expect(releases[2]).toEqual(releases[0]);
+    await composer.getByRole('button', { name: 'Cancel' }).click();
+    await expect(page.locator('#root')).toHaveAttribute('data-interaction-hold', 'released');
+  });
+
+  test('retries an abandoned unmount release with the exact request', async ({ page }) => {
+    await page.goto('/test/acceptance/review-harness/index.html?interaction-lifecycle=1&begin-delayed=1&release-response-lost=1&host-export=1');
+    await page.getByRole('button', { name: 'Highlight', exact: true }).click();
+    await page.getByRole('button', { name: 'Remount review shell' }).click();
+    await page.getByRole('button', { name: 'Finish interaction begin' }).click();
+
+    await expect.poll(async () => page.locator('#root').getAttribute('data-interaction-events')).toBe(
+      '["begin:1","release:2","release:2"]',
+    );
+    await expect(page.locator('#root')).toHaveAttribute('data-interaction-hold', 'released');
+    await expect(page.getByRole('region', { name: 'Highlight Comment' })).toHaveCount(0);
+  });
+
   test('retries the exact terminal request after a lost response and an already-published successor', async ({ page }) => {
     await page.goto('/test/acceptance/review-harness/index.html?interaction-lifecycle=1&finalize-response-lost=1');
     await page.getByRole('button', { name: 'Highlight', exact: true }).click();

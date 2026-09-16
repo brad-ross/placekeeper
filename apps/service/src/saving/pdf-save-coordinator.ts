@@ -362,7 +362,7 @@ export class PdfSaveCoordinator {
       const destination = status.destination;
       const generation = destination.generation;
       try {
-        const delivery = await this.#broker.freezeDelivery(sessionId);
+        const delivery = await this.#broker.freezeSaveDelivery(sessionId);
         const stateDigest = delivery.stateDigest ?? reviewStateDigest({ items: delivery.items ?? [] });
         await withTargetLock(destination.targetPath, async () => {
           const sourcePdf = new Uint8Array(await readFile(delivery.sourceSnapshotPath));
