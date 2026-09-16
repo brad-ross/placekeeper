@@ -1,4 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
+import { digestSecretHex } from "../../../../packages/core/src/session-security.js";
 
 export const REVIEW_INTERACTION_PROTOCOL_VERSION = 1 as const;
 export const REVIEW_INTERACTION_CAPABILITIES = [
@@ -66,10 +67,6 @@ function opaque(prefix: string): string {
   return `${prefix}_${randomBytes(18).toString("base64url")}`;
 }
 
-function digest(value: string): string {
-  return createHash("sha256").update(value).digest("hex");
-}
-
 function receiptKey(ownerKey: string, interactionToken: string): string {
   return `${ownerKey}\0${interactionToken}`;
 }
@@ -110,7 +107,7 @@ export class ReviewInteractions {
       ownerKey: stableOwner,
       attachmentId,
       incarnationId: opaque("incarnation"),
-      capabilityHash: digest(capability),
+      capabilityHash: digestSecretHex(capability),
       holds: new Map(),
       lastOrder: 0,
       revoked: false,
@@ -261,12 +258,16 @@ export class ReviewInteractions {
     for (const [key, receipt] of this.#receipts) {
       if (receipt.sessionId === sessionId) this.#receipts.delete(key);
     }
+    const ownerPrefix = `${sessionId}\0`;
+    for (const ownerKey of this.#attachmentByOwner.keys()) {
+      if (ownerKey.startsWith(ownerPrefix)) this.#attachmentByOwner.delete(ownerKey);
+    }
   }
 
   #authenticate(input: Pick<AuthenticatedOperation, "sessionId" | "attachmentId" | "incarnationId" | "capability">): AttachmentRecord | undefined {
     const record = this.#attachments.get(input.attachmentId);
     return record !== undefined && !record.revoked && record.sessionId === input.sessionId &&
-      record.incarnationId === input.incarnationId && record.capabilityHash === digest(input.capability)
+      record.incarnationId === input.incarnationId && record.capabilityHash === digestSecretHex(input.capability)
       ? record : undefined;
   }
 

@@ -80,12 +80,21 @@ export async function writeWithNativePdfAnnotations(
   const eligibility = await backend.assess(request.sourcePdf);
   if (!eligibility.eligible) throw new PdfWriterError(eligibility.code, eligibility.message);
   const source = await backend.inspect(request.sourcePdf);
+  const ordinalRequestsByPage = new Map<number, Map<number, ReviewAnnotation>>();
+  for (const annotation of nativeRequests) {
+    if (annotation.nativeIdentityProvenance !== 'generation-ordinal' || annotation.nativeSourceObject === undefined) continue;
+    let requestsByIndex = ordinalRequestsByPage.get(annotation.nativeSourceObject.pageIndex);
+    if (requestsByIndex === undefined) {
+      requestsByIndex = new Map();
+      ordinalRequestsByPage.set(annotation.nativeSourceObject.pageIndex, requestsByIndex);
+    }
+    if (!requestsByIndex.has(annotation.nativeSourceObject.annotationIndex)) {
+      requestsByIndex.set(annotation.nativeSourceObject.annotationIndex, annotation);
+    }
+  }
   const mappedNativeAnnotations = source.nativeAnnotations.map((entry) => {
     if (entry.item.payload.identityProvenance === 'verified') return entry;
-    const requested = nativeRequests.find((annotation) =>
-      annotation.nativeIdentityProvenance === 'generation-ordinal' &&
-      annotation.nativeSourceObject?.pageIndex === entry.pageIndex &&
-      annotation.nativeSourceObject.annotationIndex === entry.annotationIndex);
+    const requested = ordinalRequestsByPage.get(entry.pageIndex)?.get(entry.annotationIndex);
     return requested === undefined ? entry : { ...entry, item: { ...entry.item, id: requested.id } };
   });
   const prepared = await prepareNativePdfAnnotations(request.sourcePdf, manageNative ? mappedNativeAnnotations : [], nativeRequests,

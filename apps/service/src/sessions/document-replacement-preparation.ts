@@ -56,7 +56,7 @@ export function prepareReplacementReview(
   const imported: ReviewItem[] = importedItems.flatMap((candidate): ReviewItem[] => {
     const predecessor = predecessorById.get(candidate.id);
     if (candidate.kind !== "pdfAnnotation") {
-      return state.items.some(({ id }) => id === candidate.id) ? [] : [candidate];
+      return predecessorById.has(candidate.id) ? [] : [candidate];
     }
     if (deletedNativeIds.has(candidate.id)) return [];
     if (
@@ -83,10 +83,11 @@ export function prepareReplacementReview(
   const retained = nextState.items.filter((item) =>
     item.kind !== "pdfAnnotation" ||
     (!reconciledNativeIds.has(item.id) && !deletedNativeIds.has(item.id)));
+  const retainedIds = new Set(retained.map(({ id }) => id));
   nextState = {
     ...nextState,
     items: [...retained, ...imported.filter((candidate) =>
-      !retained.some(({ id }) => id === candidate.id))],
+      !retainedIds.has(candidate.id))],
   };
   return nextState;
 }

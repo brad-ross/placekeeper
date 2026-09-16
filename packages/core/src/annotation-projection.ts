@@ -1,4 +1,7 @@
-import { nativePdfAnnotationSubtype } from './native-pdf-annotation.js';
+import {
+  nativePdfAnnotationSubtype,
+  type NativePdfAnnotationIdentityProvenance,
+} from './native-pdf-annotation.js';
 import type { ReviewAnnotation } from "./pdf-writer.js";
 import type { JsonValue, ReviewItem } from "./review-model.js";
 import {
@@ -67,7 +70,7 @@ function annotationBase(item: ReviewItem, author: string) {
     ...(item.kind === 'pdfAnnotation' ? {
       nativeSubtype: nativePdfAnnotationSubtype(item)!,
       ...(item.payload.identityProvenance === 'verified' || item.payload.identityProvenance === 'generation-ordinal'
-        ? { nativeIdentityProvenance: item.payload.identityProvenance as 'verified' | 'generation-ordinal' }
+        ? { nativeIdentityProvenance: item.payload.identityProvenance as NativePdfAnnotationIdentityProvenance }
         : {}),
       ...(Number.isSafeInteger(item.payload.sourceObjectPageIndex) && Number.isSafeInteger(item.payload.sourceObjectAnnotationIndex)
         ? { nativeSourceObject: {

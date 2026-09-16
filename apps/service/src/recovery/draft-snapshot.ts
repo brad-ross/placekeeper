@@ -11,6 +11,7 @@ import {
 import { basename, join } from "node:path";
 import { normalizeReviewState, type ReviewState } from "../../../../packages/core/src/review-model.js";
 import { canonicalSha256 } from "../../../../packages/core/src/live-context.js";
+import type { NativePdfAnnotationIdentityProvenance } from "../../../../packages/core/src/native-pdf-annotation.js";
 import type {
   SaveDestination,
   SaveSync,
@@ -65,7 +66,7 @@ export interface DurableNativeAnnotationLedgerV1 {
   readonly schemaVersion: 1;
   readonly managed: readonly {
     readonly id: string;
-    readonly provenance: "verified" | "generation-ordinal";
+    readonly provenance: NativePdfAnnotationIdentityProvenance;
     readonly sourceDigest: string;
     readonly documentGeneration: number;
   }[];
