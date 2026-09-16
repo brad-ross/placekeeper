@@ -342,6 +342,23 @@ describe('canonical review commands', () => {
     });
   });
 
+  it('initializes ordinary review reconciliation metadata before a generation transition', () => {
+    let { state, commands } = setup();
+    state = reduceReview(state, addHighlight(state, selection, 'Keep', commands));
+
+    expect(state.workflow.mode).toBe('standard');
+    expect(state.items[0]?.reconciliation).toMatchObject({
+      baseGeneration: 1,
+      revision: 0,
+      disposition: { kind: 'resolved', generation: 1 },
+    });
+
+    state = startReviewGeneration(state, { documentGeneration: 2 });
+    expect(state.workflow).toMatchObject({ documentGeneration: 2, historyBoundary: 1 });
+    expect(() => reduceReview(state, { type: 'undo', expectedRevision: state.revision }))
+      .toThrow(/cannot cross the rebuild history boundary/iu);
+  });
+
   it('reattaches while preserving proposed text and fences undo at a rebuild boundary', () => {
     let { state, commands } = setup();
     state = reduceReview(state, addReplace(state, selection, 'same semantics', commands));

@@ -1,15 +1,17 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { PDFDocument, StandardFonts } from "pdf-lib";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { SessionBroker } from "../src/sessions/session-broker.js";
+import { SessionBroker as RawSessionBroker } from "../src/sessions/session-broker.js";
 import type { SessionBrokerOptions } from "../src/sessions/session-broker.js";
 import type { ReviewItem } from "../../../packages/core/src/review-model.js";
 import { reviewSemanticDigest } from "../../../packages/core/src/live-context.js";
 import {
+  anchorEvidenceFromReviewItem,
   createReviewState,
   reviewSelectionPayload,
 } from "../../../packages/core/src/review-model.js";
@@ -27,6 +29,13 @@ import {
 import { SessionControlRegistry } from "../src/sessions/control-socket.js";
 
 const temporaryDirectories: string[] = [];
+const activeBrokers = new Set<RawSessionBroker>();
+class SessionBroker extends RawSessionBroker {
+  constructor(options: ConstructorParameters<typeof RawSessionBroker>[0]) {
+    super(options);
+    activeBrokers.add(this);
+  }
+}
 const ITEM_IDS = {
   stable: "00000000-0000-4000-8000-000000000001",
   ambiguous: "00000000-0000-4000-8000-000000000002",
@@ -37,10 +46,15 @@ const ITEM_IDS = {
 } as const;
 
 afterEach(async () => {
+  await Promise.allSettled([...activeBrokers].map((broker) => broker.quiesceForShutdown()));
+  activeBrokers.clear();
   await Promise.all(temporaryDirectories.splice(0).map((path) => rm(path, { recursive: true, force: true })));
 });
 
-async function fixture(options: Partial<SessionBrokerOptions> = {}) {
+async function fixture(
+  options: Partial<SessionBrokerOptions> = {},
+  workflowMode: "generated-output" | "standard" = "generated-output",
+) {
   const directory = await mkdtemp(join(tmpdir(), "placekeeper-live-replacement-"));
   temporaryDirectories.push(directory);
   const pdfPath = join(directory, "paper.pdf");
@@ -57,7 +71,7 @@ async function fixture(options: Partial<SessionBrokerOptions> = {}) {
   const opened = await broker.openReview({
     pdfPath,
     surface: "vscode",
-    workflowMode: "generated-output",
+    workflowMode,
   });
   if (opened.kind !== "opened") throw new Error("Expected a new generated-output review");
   return { broker, directory, pdfPath, original, successor, launch: opened.launch };
@@ -667,9 +681,200 @@ describe("atomic live document replacement", () => {
       authoring: { ownerViewId: "panel-a", baseGeneration: 1 },
     });
     release.resolve();
-    await expect(candidate).resolves.toMatchObject({ status: "generation-conflict", documentGeneration: 1 });
+    await expect(candidate).resolves.toMatchObject({
+      status: "committed",
+      documentGeneration: 2,
+      reviewRevision: 2,
+    });
     expect(guarded.broker.state(guarded.launch.sessionId)).toMatchObject({
-      workflow: { documentGeneration: 1 }, items: [{ id: ITEM_IDS.racing }],
+      workflow: { documentGeneration: 2 }, items: [{ id: ITEM_IDS.racing }],
+    });
+    expect(guarded.broker.state(guarded.launch.sessionId)?.items.filter(
+      ({ id }) => id === ITEM_IDS.racing,
+    )).toHaveLength(1);
+  });
+
+  it("keeps automatic publication gated while allowing an ordinary local review to use the transaction", async () => {
+    const value = await fixture({
+      inspectGeneration: async () => {
+        const text = "Original generated output";
+        return {
+          pageCount: 1,
+          pages: [{
+            pageIndex: 0,
+            text,
+            geometry: [{
+              charStart: 0,
+              glyphs: Array.from(text, (_, index) => ({
+                x: 10 + index * 5, y: 20, width: 5, height: 8,
+              })),
+            }],
+          }],
+        };
+      },
+    }, "standard");
+    const withItem = await value.broker.acceptMutation(value.launch.sessionId, {
+      type: "add",
+      expectedRevision: 0,
+      item: selectionItem(ITEM_IDS.stable, "Original generated output"),
+      authoring: { ownerViewId: "panel-a", baseGeneration: 1 },
+    });
+    await value.broker.acceptMutation(value.launch.sessionId, {
+      type: "put-draft",
+      expectedRevision: withItem.revision,
+      expectedDraftRevision: -1,
+      draft: {
+        id: "00000000-0000-4000-8000-000000000007",
+        ownerViewId: "panel-a",
+        baseGeneration: 1,
+        revision: 0,
+        kind: "highlight",
+        pageIndex: 0,
+        text: "protected ordinary draft",
+        anchor: anchorEvidenceFromReviewItem(withItem.items[0]!),
+        disposition: { kind: "resolved", generation: 1 },
+        status: "protected",
+        createdAt: "2026-09-15T12:00:00.000Z",
+        updatedAt: "2026-09-15T12:00:00.000Z",
+      },
+    });
+    await writeFile(value.pdfPath, value.successor);
+
+    await expect(value.broker.replaceLiveDocument({
+      sessionId: value.launch.sessionId,
+      outputPath: value.pdfPath,
+      observationEpoch: 1,
+    })).resolves.toMatchObject({ status: "committed", documentGeneration: 2 });
+    expect(value.broker.state(value.launch.sessionId)).toMatchObject({
+      workflow: { mode: "standard", documentRole: "source-pdf", documentGeneration: 2 },
+      items: [{ id: ITEM_IDS.stable, reconciliation: { baseGeneration: 1 } }],
+      pendingDrafts: [{ baseGeneration: 2, status: "protected" }],
+    });
+
+    await value.broker.quiesceForShutdown();
+    const restarted = new SessionBroker({ recoveryRoot: join(value.directory, "recovery") });
+    const offered = await restarted.openReview({ pdfPath: value.pdfPath, workflowMode: "standard" });
+    if (offered.kind !== "recovery-offered") throw new Error("Expected ordinary successor recovery offer");
+    const resumed = await restarted.openReview({
+      pdfPath: value.pdfPath,
+      workflowMode: "standard",
+      recoveryDecision: "resume",
+      recoveryOffer: offered.recoveryOffer,
+      recoveryOperationId: randomUUID(),
+    });
+    if (resumed.kind !== "opened") throw new Error("Expected ordinary successor recovery");
+    const resumedState = restarted.state(resumed.launch.sessionId)!;
+    expect(resumedState).toMatchObject({
+      workflow: { mode: "standard", documentGeneration: 2, historyBoundary: 2 },
+      items: [{ id: ITEM_IDS.stable }],
+      pendingDrafts: [{ baseGeneration: 2, status: "protected", text: "protected ordinary draft" }],
+    });
+    await expect(restarted.acceptMutation(resumed.launch.sessionId, {
+      type: "undo", expectedRevision: resumedState.revision,
+    })).rejects.toThrow(/cannot cross the rebuild history boundary/iu);
+  });
+
+  it("rejects a verified symlink retarget without expanding source authority", async () => {
+    const value = await fixture();
+    const retarget = join(value.directory, "retarget.pdf");
+    await writeFile(retarget, value.successor);
+    await rm(value.pdfPath);
+    await symlink(retarget, value.pdfPath);
+
+    await expect(value.broker.replaceLiveDocument({
+      sessionId: value.launch.sessionId,
+      outputPath: value.pdfPath,
+      observationEpoch: 1,
+    })).rejects.toThrow(/cannot retarget/iu);
+    await expect(value.broker.documentBytes(value.launch.sessionId)).resolves.toEqual(value.original);
+    expect(value.broker.state(value.launch.sessionId)?.workflow.documentGeneration).toBe(1);
+  });
+
+  it("rejects a candidate whose source identity changes while inspection is pending", async () => {
+    const inspection = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const value = await fixture({
+      inspectGeneration: async () => {
+        inspection.resolve();
+        await release.promise;
+        return { pageCount: 1, pages: [{ pageIndex: 0, text: "staged" }] };
+      },
+    });
+    await writeFile(value.pdfPath, value.successor);
+    const replacement = value.broker.replaceLiveDocument({
+      sessionId: value.launch.sessionId,
+      outputPath: value.pdfPath,
+      observationEpoch: 1,
+    });
+    await inspection.promise;
+    await writeFile(value.pdfPath, Buffer.concat([value.successor, Buffer.from("\n% changed during inspection")]));
+    release.resolve();
+
+    await expect(replacement).resolves.toMatchObject({ status: "invalid", documentGeneration: 1 });
+    await expect(value.broker.documentBytes(value.launch.sessionId)).resolves.toEqual(value.original);
+  });
+
+  it("preserves predecessor state and retryability while the canonical path is temporarily missing", async () => {
+    const value = await fixture({
+      inspectGeneration: async () => ({ pageCount: 1, pages: [{ pageIndex: 0, text: "new" }] }),
+    });
+    await value.broker.acceptMutation(value.launch.sessionId, {
+      type: "add", expectedRevision: 0, item: selectionItem(ITEM_IDS.retained, "Original"),
+      authoring: { ownerViewId: "panel-a", baseGeneration: 1 },
+    });
+    const codex = await value.broker.openReview({ pdfPath: value.pdfPath, surface: "codex" });
+    if (codex.kind !== "focused" || codex.launch.bindProof === undefined) {
+      throw new Error("Expected Codex binding proof");
+    }
+    const browserCapability = codex.launch.fragment.slice("#cap=".length);
+    expect(value.broker.taskBindings.claim({
+      bindProof: codex.launch.bindProof,
+      taskSessionId: "task-missing",
+      reviewSessionId: value.launch.sessionId,
+      documentGeneration: 1,
+    }).status).toBe("pending");
+    expect(value.broker.exchangeBootstrap(value.launch.sessionId, browserCapability)).toBeTypeOf("string");
+    expect(value.broker.taskBindings.bindingForTask("task-missing")).toMatchObject({
+      reviewSessionId: value.launch.sessionId,
+      documentGeneration: 1,
+    });
+    await rm(value.pdfPath);
+    await expect(value.broker.replaceLiveDocument({
+      sessionId: value.launch.sessionId, outputPath: value.pdfPath, observationEpoch: 1,
+    })).resolves.toMatchObject({ status: "invalid", reason: "candidate-path-is-temporarily-unavailable" });
+    expect(value.broker.state(value.launch.sessionId)).toMatchObject({
+      workflow: { documentGeneration: 1, freshness: "possibly-stale" },
+      items: [{ id: ITEM_IDS.retained }],
+    });
+    await expect(value.broker.documentBytes(value.launch.sessionId)).resolves.toEqual(value.original);
+    expect(value.broker.taskBindings.bindingForTask("task-missing")).toMatchObject({
+      reviewSessionId: value.launch.sessionId,
+      documentGeneration: 1,
+    });
+
+    await writeFile(value.pdfPath, value.successor);
+    await expect(value.broker.replaceLiveDocument({
+      sessionId: value.launch.sessionId, outputPath: value.pdfPath, observationEpoch: 2,
+    })).resolves.toMatchObject({ status: "committed", documentGeneration: 2 });
+  });
+
+  it("keeps an ordinary local review retryable when its candidate path is temporarily missing", async () => {
+    const value = await fixture({}, "standard");
+    await rm(value.pdfPath);
+
+    await expect(value.broker.replaceLiveDocument({
+      sessionId: value.launch.sessionId,
+      outputPath: value.pdfPath,
+      observationEpoch: 1,
+    })).resolves.toMatchObject({
+      status: "invalid",
+      documentGeneration: 1,
+      reason: "candidate-path-is-temporarily-unavailable",
+    });
+    expect(value.broker.state(value.launch.sessionId)?.workflow).toMatchObject({
+      mode: "standard",
+      documentGeneration: 1,
+      freshness: "current",
     });
   });
 
@@ -732,6 +937,125 @@ describe("atomic live document replacement", () => {
     expect((await new DraftSnapshotStore(
       join(value.directory, "recovery", value.launch.sessionId),
     ).recover())?.state.workflow.documentGeneration).toBe(2);
+  });
+
+  it("keeps committed successor bytes when persistence throws after the recovery rename", async () => {
+    let failAfterRename = false;
+    const value = await fixture({
+      snapshotHooks: {
+        afterFinalRename: () => {
+          if (failAfterRename) {
+            failAfterRename = false;
+            throw new Error("simulated uncertain return after recovery rename");
+          }
+        },
+      },
+      inspectGeneration: async () => ({ pageCount: 1, pages: [{ pageIndex: 0, text: "new" }] }),
+    });
+    await value.broker.acceptMutation(value.launch.sessionId, {
+      type: "add", expectedRevision: 0, item: selectionItem(ITEM_IDS.retained, "Original"),
+      authoring: { ownerViewId: "panel-a", baseGeneration: 1 },
+    });
+    await writeFile(value.pdfPath, value.successor);
+    failAfterRename = true;
+
+    await expect(value.broker.replaceLiveDocument({
+      sessionId: value.launch.sessionId, outputPath: value.pdfPath, observationEpoch: 1,
+    })).resolves.toMatchObject({ status: "committed", documentGeneration: 2 });
+    const recovered = await new DraftSnapshotStore(
+      join(value.directory, "recovery", value.launch.sessionId),
+    ).recover();
+    expect(recovered?.state.workflow.documentGeneration).toBe(2);
+    if (recovered?.source.disposition !== "local") throw new Error("Expected local recovery ownership");
+    await expect(readFile(recovered.source.sourceSnapshotPath)).resolves.toEqual(value.successor);
+    await expect(value.broker.documentBytes(value.launch.sessionId, 1)).resolves.toEqual(value.original);
+    await expect(value.broker.documentBytes(value.launch.sessionId, 2)).resolves.toEqual(value.successor);
+    await expect(value.broker.documentBytes(value.launch.sessionId)).resolves.toEqual(value.successor);
+  });
+
+  it("retains both snapshots when an uncertain persistence outcome cannot be inspected immediately", async () => {
+    let failAfterRename = false;
+    let failRecoveryInspection = false;
+    const value = await fixture({
+      snapshotHooks: {
+        afterFinalRename: () => {
+          if (failAfterRename) {
+            failAfterRename = false;
+            failRecoveryInspection = true;
+            throw new Error("simulated uncertain return after recovery rename");
+          }
+        },
+        beforeRecover: () => {
+          if (failRecoveryInspection) throw new Error("simulated recovery inspection failure");
+        },
+      },
+      inspectGeneration: async () => ({ pageCount: 1, pages: [{ pageIndex: 0, text: "new" }] }),
+    });
+    await value.broker.acceptMutation(value.launch.sessionId, {
+      type: "add", expectedRevision: 0, item: selectionItem(ITEM_IDS.retained, "Original"),
+      authoring: { ownerViewId: "panel-a", baseGeneration: 1 },
+    });
+    await writeFile(value.pdfPath, value.successor);
+    failAfterRename = true;
+
+    await expect(value.broker.replaceLiveDocument({
+      sessionId: value.launch.sessionId, outputPath: value.pdfPath, observationEpoch: 1,
+    })).resolves.toMatchObject({
+      status: "invalid",
+      documentGeneration: 1,
+      reason: "generation-commit-outcome-is-uncertain",
+    });
+    expect(value.broker.replacementCommitPending(value.launch.sessionId)).toBe(true);
+    await expect(value.broker.documentBytes(value.launch.sessionId)).resolves.toEqual(value.original);
+    await expect(value.broker.acceptMutation(value.launch.sessionId, {
+      type: "add",
+      expectedRevision: 1,
+      item: selectionItem("00000000-0000-4000-8000-000000000008", "blocked"),
+      authoring: { ownerViewId: "panel-a", baseGeneration: 1 },
+    })).rejects.toThrow(/commit outcome remains uncertain/iu);
+    const physicalSave = vi.fn(async () => "f".repeat(64));
+    await expect(value.broker.commitSaveCandidate({
+      sessionId: value.launch.sessionId,
+      generation: 0,
+      revision: 1,
+      stateDigest: "a".repeat(64),
+      commit: physicalSave,
+    })).rejects.toThrow(/commit outcome remains uncertain/iu);
+    expect(physicalSave).not.toHaveBeenCalled();
+    await expect(value.broker.replaceLiveDocument({
+      sessionId: value.launch.sessionId,
+      outputPath: value.pdfPath,
+      observationEpoch: 2,
+    })).rejects.toThrow(/commit outcome remains uncertain/iu);
+
+    failRecoveryInspection = false;
+    await expect(value.broker.resolveReplacementCommit(value.launch.sessionId)).resolves.toBe("settled");
+    expect(value.broker.replacementCommitPending(value.launch.sessionId)).toBe(false);
+    expect(value.broker.state(value.launch.sessionId)?.workflow.documentGeneration).toBe(2);
+    const recovered = await new DraftSnapshotStore(
+      join(value.directory, "recovery", value.launch.sessionId),
+    ).recover();
+    expect(recovered?.state.workflow.documentGeneration).toBe(2);
+    if (recovered?.source.disposition !== "local") throw new Error("Expected local recovery ownership");
+    await expect(readFile(recovered.source.sourceSnapshotPath)).resolves.toEqual(value.successor);
+
+    await value.broker.quiesceForShutdown();
+    const restarted = new SessionBroker({ recoveryRoot: join(value.directory, "recovery") });
+    const offered = await restarted.openReview({
+      pdfPath: value.pdfPath,
+      workflowMode: "generated-output",
+    });
+    if (offered.kind !== "recovery-offered") throw new Error("Expected successor recovery offer");
+    const resumed = await restarted.openReview({
+      pdfPath: value.pdfPath,
+      workflowMode: "generated-output",
+      recoveryDecision: "resume",
+      recoveryOffer: offered.recoveryOffer,
+      recoveryOperationId: randomUUID(),
+    });
+    if (resumed.kind !== "opened") throw new Error("Expected successor recovery");
+    expect(restarted.state(resumed.launch.sessionId)?.workflow.documentGeneration).toBe(2);
+    await expect(restarted.documentBytes(resumed.launch.sessionId)).resolves.toEqual(value.successor);
   });
 
   it("migrates only the exact active same-output task lease and revokes authority on retarget", async () => {

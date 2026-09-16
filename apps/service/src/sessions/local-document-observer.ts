@@ -110,6 +110,7 @@ export class LocalDocumentObserver<Result extends LocalDocumentInspectionResult 
   #nextSequence = 0;
   #draining = false;
   #disposed = false;
+  readonly #idleWaiters = new Set<() => void>();
 
   constructor(options: LocalDocumentObserverOptions<Result>) {
     this.#inspectCandidate = options.inspectCandidate;
@@ -221,6 +222,11 @@ export class LocalDocumentObserver<Result extends LocalDocumentInspectionResult 
     for (const sessionId of [...this.#documents.keys()]) this.stop(sessionId);
   }
 
+  async settle(): Promise<void> {
+    if (!this.#draining) return;
+    await new Promise<void>((resolve) => this.#idleWaiters.add(resolve));
+  }
+
   #startWatch(path: string, directory: DirectoryWatch<Result>): void {
     try {
       const watcher = this.#watchDirectory(path);
@@ -318,7 +324,12 @@ export class LocalDocumentObserver<Result extends LocalDocumentInspectionResult 
       }
     } finally {
       this.#draining = false;
-      if (!this.#disposed && this.#queuedInspections.size > 0) void this.#drainInspections();
+      if (!this.#disposed && this.#queuedInspections.size > 0) {
+        void this.#drainInspections();
+      } else {
+        for (const resolve of this.#idleWaiters) resolve();
+        this.#idleWaiters.clear();
+      }
     }
   }
 

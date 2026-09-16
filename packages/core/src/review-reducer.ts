@@ -226,9 +226,7 @@ export function reduceReview(
       }
       items = [
         ...state.items,
-        state.workflow.mode === "generated-output"
-          ? canonicalizeReviewItem(command.item, authoring)
-          : command.item,
+        canonicalizeReviewItem(command.item, authoring),
       ];
       break;
     }

@@ -1,7 +1,8 @@
 import { ReviewExportConflictError, type ReviewExportFence } from "../../../../packages/core/src/review-runtime-protocol.js";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { open, readdir, readFile, realpath, rm, stat } from "node:fs/promises";
-import { basename, isAbsolute, join, relative, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { isDeepStrictEqual } from "node:util";
 import { documentOrderedItems, projectReviewItems } from "../../../../packages/core/src/annotation-projection.js";
 import { createReviewStateSummary, reviewSemanticDigest } from "../../../../packages/core/src/live-context.js";
 import type { PdfRewriteEligibility } from "../../../../packages/core/src/pdf-writer.js";
@@ -44,6 +45,7 @@ import {
   ensurePrivateDirectory,
   snapshotGenerationSyncTexSidecar,
   stageGenerationSnapshot,
+  stagedGenerationSourceIsCurrent,
   type GenerationSyncTexSnapshotResult,
   type StagedGenerationSnapshot,
 } from "../recovery/source-snapshot.js";
@@ -103,6 +105,13 @@ const BOOTSTRAP_TTL_MS = 60_000;
 
 interface BrokerLocalDocumentInspection extends LocalDocumentInspectionResult {
   readonly result?: LiveDocumentReplacementResult;
+}
+
+class ReplacementCommitOutcomeUncertainError extends Error {
+  constructor() {
+    super("The generation commit outcome remains uncertain");
+    this.name = "ReplacementCommitOutcomeUncertainError";
+  }
 }
 
 function activeKey(path: string, digest: string): string {
@@ -919,6 +928,7 @@ export class SessionBroker {
     session.writeTail = promise;
     await predecessor;
     try {
+      await this.#assertReplacementCommitSettled(session);
       if (session.ending) throw new Error("Review session is ending");
       const previousRootId = session.rootId;
       const nextState: ReviewState = {
@@ -1371,10 +1381,30 @@ export class SessionBroker {
     session.writeTail = promise;
     await predecessor;
     try {
+      await this.#assertReplacementCommitSettled(session);
       return await work();
     } finally {
       release();
     }
+  }
+
+  async #assertReplacementCommitSettled(session: ActiveSession): Promise<void> {
+    const barrier = session.replacementCommitBarrier;
+    if (barrier === undefined) return;
+    const outcome = await barrier.resolve();
+    if (outcome === "uncertain") throw new ReplacementCommitOutcomeUncertainError();
+  }
+
+  /** Guard seam for later interaction/save fencing units. */
+  replacementCommitPending(sessionId: string): boolean {
+    return this.#activeById.get(sessionId)?.replacementCommitBarrier !== undefined;
+  }
+
+  async resolveReplacementCommit(sessionId: string): Promise<"settled" | "unavailable"> {
+    const session = this.#activeById.get(sessionId);
+    if (session === undefined || session.ending) return "unavailable";
+    await this.#withSessionTail(session, async () => undefined);
+    return "settled";
   }
 
   async #recordCommittedSave(
@@ -1686,9 +1716,12 @@ export class SessionBroker {
   }): Promise<LiveDocumentReplacementResult> {
     const session = this.#activeById.get(input.sessionId);
     if (session === undefined || session.ending) throw new Error("Review session is not active");
-    if (session.state.workflow.mode !== "generated-output") {
-      throw new Error("Live document replacement requires generated-output review mode");
+    if (session.sourceOwnership.disposition !== "local") {
+      throw new Error("Document replacement requires an explicitly owned local source");
     }
+    // Do not even stage a retry while an earlier persistence outcome is
+    // unresolved: its final path may be the durable successor being retained.
+    await this.#withSessionTail(session, async () => undefined);
     if (input.serviceSequenceReserved !== true) {
       const serviceSequence = this.#localDocumentObserver.orderHint(session.id);
       if (serviceSequence !== undefined) {
@@ -1701,11 +1734,28 @@ export class SessionBroker {
     }
     const canonicalOutputPath = await realpath(input.outputPath).catch(() => undefined);
     if (canonicalOutputPath === undefined) {
-      if (resolve(input.outputPath) !== resolve(session.canonicalSourcePath)) {
+      const missingCanonicalPath = await realpath(dirname(input.outputPath))
+        .then((parent) => join(parent, basename(input.outputPath)))
+        .catch(() => resolve(input.outputPath));
+      if (missingCanonicalPath !== session.canonicalSourcePath) {
         this.taskBindings.revokeSession(session.id);
         throw new Error("A rebuild candidate cannot retarget an output-path lineage");
       }
-      await this.markLiveDocumentPossiblyStale(session.id, input.observationEpoch);
+      if (session.state.workflow.mode === "generated-output") {
+        await this.markLiveDocumentPossiblyStale(
+          session.id,
+          input.observationEpoch,
+          input.serviceSequenceReserved === true,
+        );
+      } else {
+        await this.#withSessionTail(session, async () => {
+          session.latestObservationEpoch = Math.max(
+            session.latestObservationEpoch,
+            input.observationEpoch,
+          );
+          await session.store.persist(this.#draft(session));
+        });
+      }
       return {
         status: "invalid",
         sessionId: session.id,
@@ -1735,7 +1785,6 @@ export class SessionBroker {
       return {
         documentGeneration: session.state.workflow.documentGeneration,
         sourceDigest: session.state.source.digest,
-        reviewRevision: session.state.revision,
       };
     });
     if (expected === undefined) {
@@ -1820,14 +1869,13 @@ export class SessionBroker {
         }
         if (
           session.state.workflow.documentGeneration !== expected.documentGeneration ||
-          session.state.source.digest !== expected.sourceDigest ||
-          session.state.revision !== expected.reviewRevision
+          session.state.source.digest !== expected.sourceDigest
         ) {
           return {
             status: "generation-conflict" as const,
             sessionId: session.id,
             documentGeneration: session.state.workflow.documentGeneration,
-            reason: "generation-digest-or-review-revision-fence-changed",
+            reason: "generation-or-source-digest-fence-changed",
           };
         }
         await this.capabilities.refreshApprovedPdf(session.fileId, staged!.digest);
@@ -1921,6 +1969,7 @@ export class SessionBroker {
 
     let event: DocumentGenerationEvent | undefined;
     let result: LiveDocumentReplacementResult;
+    let retainCommittedSnapshot = false;
     try {
       result = await this.#withSessionTail(session, async () => {
         if (
@@ -1941,8 +1990,7 @@ export class SessionBroker {
         }
         if (
           session.state.workflow.documentGeneration !== expected.documentGeneration ||
-          session.state.source.digest !== expected.sourceDigest ||
-          session.state.revision !== expected.reviewRevision
+          session.state.source.digest !== expected.sourceDigest
         ) {
           await rm(staged!.path, { force: true });
           if (stagedSyncTex?.status === "ready") {
@@ -1952,9 +2000,16 @@ export class SessionBroker {
             status: "generation-conflict" as const,
             sessionId: session.id,
             documentGeneration: session.state.workflow.documentGeneration,
-            reason: "generation-digest-or-review-revision-fence-changed",
+            reason: "generation-or-source-digest-fence-changed",
           };
         }
+
+        if (!await stagedGenerationSourceIsCurrent(session.canonicalSourcePath, staged!)) {
+          throw new Error("The rebuild candidate changed after its private inspection");
+        }
+        // Capability refresh is fallible and therefore precedes the durable
+        // generation record. A failure here leaves the predecessor authoritative.
+        await this.capabilities.refreshApprovedPdf(session.fileId, staged!.digest);
 
         const nextState = prepareReplacementReview(
           session.state, successorGeneration, session.fileId, staged!, inspected.pages,
@@ -1970,6 +2025,10 @@ export class SessionBroker {
               taskSessionId,
               previousGeneration: expected.documentGeneration,
             });
+        const durablePredecessor = await session.store.recover();
+        if (durablePredecessor === undefined) {
+          throw new Error("The predecessor recovery record is unavailable");
+        }
         const snapshotPath = await commitGenerationSnapshot(staged!);
         const record: DurableGenerationRecordV1 = {
           schemaVersion: 1,
@@ -2009,7 +2068,7 @@ export class SessionBroker {
           session.sourceOwnership.disposition === "local"
             ? { ...session.sourceOwnership, sourceSnapshotPath: snapshotPath }
             : session.sourceOwnership;
-        await session.store.persist({
+        const durableSuccessor = {
           ...this.#draft(session),
           source: nextSourceOwnership,
           state: nextState,
@@ -2017,39 +2076,104 @@ export class SessionBroker {
           generationLineage,
           latestObservationEpoch: input.observationEpoch,
           sourceWorkInterruptions,
-        });
-        await this.capabilities.refreshApprovedPdf(session.fileId, staged!.digest);
-
-        for (const [key, owner] of this.#activeBySource) {
-          if (owner === session.id) this.#activeBySource.delete(key);
-        }
-        session.sourceSnapshotPath = snapshotPath;
-        session.sourceOwnership = nextSourceOwnership;
-        session.state = nextState;
-        session.sync = nextSync;
-        session.currentOriginalDigest = staged!.digest;
-        session.generationLineage = generationLineage;
-        session.sourceWorkInterruptions = sourceWorkInterruptions;
-        delete session.syncTexOperationToken;
-        this.#activate(session);
-        this.credentials.revokePendingBootstraps(session.id);
-        this.#presentations.removeSessionBootstraps(session.id);
-        this.#presentations.migrateGeneration(session.id, successorGeneration);
-        const migration = this.taskBindings.migrateGeneration({
-          reviewSessionId: session.id,
-          previousGeneration: expected.documentGeneration,
-          successorGeneration,
-        });
-        const migratedTaskSessionId = migration.status === "migrated"
-          ? migration.taskSessionId
-          : undefined;
-        event = {
-          sessionId: session.id,
-          previousGeneration: expected.documentGeneration,
-          documentGeneration: successorGeneration,
-          reviewRevision: nextState.revision,
-          ...(migratedTaskSessionId === undefined ? {} : { migratedTaskSessionId }),
         };
+        let successorApplied = false;
+        let activatedEvent: DocumentGenerationEvent | undefined;
+        const activateSuccessor = (publish: boolean) => {
+          if (successorApplied) return activatedEvent;
+          successorApplied = true;
+          for (const [key, owner] of this.#activeBySource) {
+            if (owner === session.id) this.#activeBySource.delete(key);
+          }
+          session.sourceSnapshotPath = snapshotPath;
+          session.sourceOwnership = nextSourceOwnership;
+          session.state = nextState;
+          session.sync = nextSync;
+          session.currentOriginalDigest = staged!.digest;
+          session.generationLineage = generationLineage;
+          session.sourceWorkInterruptions = sourceWorkInterruptions;
+          delete session.syncTexOperationToken;
+          this.#activate(session);
+          this.credentials.revokePendingBootstraps(session.id);
+          this.#presentations.removeSessionBootstraps(session.id);
+          this.#presentations.migrateGeneration(session.id, successorGeneration);
+          const migration = this.taskBindings.migrateGeneration({
+            reviewSessionId: session.id,
+            previousGeneration: expected.documentGeneration,
+            successorGeneration,
+          });
+          const migratedTaskSessionId = migration.status === "migrated"
+            ? migration.taskSessionId
+            : undefined;
+          const successorEvent: DocumentGenerationEvent = {
+            sessionId: session.id,
+            previousGeneration: expected.documentGeneration,
+            documentGeneration: successorGeneration,
+            reviewRevision: nextState.revision,
+            ...(migratedTaskSessionId === undefined ? {} : { migratedTaskSessionId }),
+          };
+          activatedEvent = successorEvent;
+          if (publish) {
+            this.controls.publishSuccessor(session.id, successorEvent);
+            for (const listener of this.#generationListeners) {
+              try { listener(successorEvent); } catch { /* Rehydrate through the successor handshake. */ }
+            }
+          } else event = successorEvent;
+          return successorEvent;
+        };
+        const cleanupUnpublishedSuccessor = async () => {
+          await rm(snapshotPath, { force: true }).catch(() => undefined);
+          if (stagedSyncTex?.status === "ready") {
+            await rm(stagedSyncTex.snapshot.snapshotPath, { force: true }).catch(() => undefined);
+          }
+        };
+        const barrier = {
+          resolve: async (): Promise<"successor" | "predecessor" | "uncertain"> => {
+            const recovered = await session.store.recover().catch(() => undefined);
+            const successorBytesComplete = await hashFile(snapshotPath)
+              .then((digest) => digest === staged!.digest)
+              .catch(() => false);
+            if (
+              recovered !== undefined && successorBytesComplete &&
+              isDeepStrictEqual(recovered, durableSuccessor)
+            ) {
+              if (session.replacementCommitBarrier === barrier) {
+                delete session.replacementCommitBarrier;
+              }
+              activateSuccessor(true);
+              return "successor";
+            }
+            if (recovered !== undefined && isDeepStrictEqual(recovered, durablePredecessor)) {
+              if (session.replacementCommitBarrier === barrier) {
+                delete session.replacementCommitBarrier;
+              }
+              await cleanupUnpublishedSuccessor();
+              return "predecessor";
+            }
+            return "uncertain";
+          },
+        };
+        try {
+          await session.store.persist(durableSuccessor);
+        } catch (error) {
+          session.replacementCommitBarrier = barrier;
+          const outcome = await barrier.resolve();
+          if (outcome === "successor") return {
+            status: "committed" as const,
+            sessionId: session.id,
+            previousGeneration: expected.documentGeneration,
+            documentGeneration: successorGeneration,
+            digest: staged!.digest,
+            reviewRevision: nextState.revision,
+            ...(activatedEvent?.migratedTaskSessionId === undefined
+              ? {}
+              : { migratedTaskSessionId: activatedEvent.migratedTaskSessionId }),
+          };
+          if (outcome === "predecessor") throw error;
+          retainCommittedSnapshot = true;
+          throw new ReplacementCommitOutcomeUncertainError();
+        }
+        activateSuccessor(false);
         return {
           status: "committed" as const,
           sessionId: session.id,
@@ -2057,16 +2181,30 @@ export class SessionBroker {
           documentGeneration: successorGeneration,
           digest: staged!.digest,
           reviewRevision: nextState.revision,
-          ...(migratedTaskSessionId === undefined ? {} : { migratedTaskSessionId }),
+          ...(event?.migratedTaskSessionId === undefined
+            ? {}
+            : { migratedTaskSessionId: event.migratedTaskSessionId }),
         };
       });
     } catch (error) {
       if (staged !== undefined) {
         await rm(staged.path, { force: true }).catch(() => undefined);
-        await rm(staged.finalPath, { force: true }).catch(() => undefined);
+        if (!retainCommittedSnapshot) {
+          await rm(staged.finalPath, { force: true }).catch(() => undefined);
+        }
       }
       if (stagedSyncTex?.status === "ready") {
-        await rm(stagedSyncTex.snapshot.snapshotPath, { force: true }).catch(() => undefined);
+        if (!retainCommittedSnapshot) {
+          await rm(stagedSyncTex.snapshot.snapshotPath, { force: true }).catch(() => undefined);
+        }
+      }
+      if (retainCommittedSnapshot) {
+        return {
+          status: "invalid",
+          sessionId: session.id,
+          documentGeneration: session.state.workflow.documentGeneration,
+          reason: "generation-commit-outcome-is-uncertain",
+        };
       }
       return markInvalid(error instanceof Error ? error.message : "generation-commit-failed");
     }
@@ -2122,7 +2260,7 @@ export class SessionBroker {
     if (session === undefined || session.ending) throw new Error("Review session is not active");
     void hostHintToken;
     const sequence = this.#localDocumentObserver.orderHint(sessionId);
-    return this.markLiveDocumentPossiblyStale(sessionId, sequence);
+    return this.markLiveDocumentPossiblyStale(sessionId, sequence, true);
   }
 
   async #inspectLocalDocumentCandidate(
@@ -2191,7 +2329,11 @@ export class SessionBroker {
     }
   }
 
-  async markLiveDocumentPossiblyStale(sessionId: string, observationEpoch?: number): Promise<{
+  async markLiveDocumentPossiblyStale(
+    sessionId: string,
+    observationEpoch?: number,
+    serviceSequenceReserved = false,
+  ): Promise<{
     readonly status: "possibly-stale";
     readonly sessionId: string;
     readonly documentGeneration: number;
@@ -2200,6 +2342,12 @@ export class SessionBroker {
     if (session === undefined || session.ending) throw new Error("Review session is not active");
     if (session.state.workflow.mode !== "generated-output") {
       throw new Error("Freshness observation requires generated-output review mode");
+    }
+    if (!serviceSequenceReserved) {
+      const serviceSequence = this.#localDocumentObserver.orderHint(session.id);
+      if (serviceSequence !== undefined) {
+        return this.markLiveDocumentPossiblyStale(sessionId, serviceSequence, true);
+      }
     }
     if (observationEpoch !== undefined &&
       (!Number.isSafeInteger(observationEpoch) || observationEpoch <= 0)) {
@@ -2457,6 +2605,7 @@ export class SessionBroker {
     session.writeTail = promise;
     await predecessor;
     try {
+      await this.#assertReplacementCommitSettled(session);
       if (session.ending) throw new Error("Review session is ending");
       if (fence && (fence.expectedRevision !== session.state.revision || fence.documentGeneration !== session.state.workflow.documentGeneration)) {
         throw new ReviewExportConflictError();
@@ -2526,6 +2675,10 @@ export class SessionBroker {
     const { promise, resolve: release } = Promise.withResolvers<void>();
     session.writeTail = promise;
     await predecessor;
+    await this.#assertReplacementCommitSettled(session).catch((error) => {
+      release();
+      throw error;
+    });
     if (session.ending) {
       release();
       throw new Error("Review session is ending");
@@ -2578,6 +2731,10 @@ export class SessionBroker {
     const { promise, resolve: release } = Promise.withResolvers<void>();
     session.writeTail = promise;
     await predecessor;
+    await this.#assertReplacementCommitSettled(session).catch((error) => {
+      release();
+      throw error;
+    });
     if (session.ending) {
       release();
       throw new Error("Review session is ending");
@@ -2609,6 +2766,10 @@ export class SessionBroker {
     const { promise, resolve: release } = Promise.withResolvers<void>();
     session.writeTail = promise;
     await predecessor;
+    await this.#assertReplacementCommitSettled(session).catch((error) => {
+      release();
+      throw error;
+    });
     if (session.ending) {
       release();
       throw new Error("Review session is ending");
@@ -2655,6 +2816,10 @@ export class SessionBroker {
     const { promise, resolve: release } = Promise.withResolvers<void>();
     session.writeTail = promise;
     await predecessor;
+    await this.#assertReplacementCommitSettled(session).catch((error) => {
+      release();
+      throw error;
+    });
     if (session.ending) {
       release();
       throw new Error("Review session is ending");
@@ -2686,9 +2851,10 @@ export class SessionBroker {
 
   async quiesceForShutdown(): Promise<void> {
     const sessions = [...this.#activeById.values()];
+    this.#localDocumentObserver.dispose();
+    await this.#localDocumentObserver.settle();
     await this.drainWrites();
     for (const session of sessions) session.ending = true;
-    this.#localDocumentObserver.dispose();
     // Recovery cleanup is garbage collection, not a shutdown precondition.
     // A verified-clean directory that cannot be removed may be retried later;
     // it must never prevent capability revocation and control-socket teardown.

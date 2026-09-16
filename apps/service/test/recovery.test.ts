@@ -30,13 +30,26 @@ import {
 import { assessGenerationRetention, enforceRetention } from "../src/recovery/retention.js";
 import { trackRecoveryTemporaryPath } from "../src/recovery/temporary-path-registry.js";
 import { createSourceSnapshot } from "../src/recovery/source-snapshot.js";
-import { RecoveryOfferUnavailableError, SessionBroker } from "../src/sessions/session-broker.js";
+import {
+  RecoveryOfferUnavailableError,
+  SessionBroker as RawSessionBroker,
+} from "../src/sessions/session-broker.js";
 import { hashFile } from "../src/files/file-capabilities.js";
 
 const temporaryDirectories: string[] = [];
+const activeBrokers = new Set<RawSessionBroker>();
+
+class SessionBroker extends RawSessionBroker {
+  constructor(options: ConstructorParameters<typeof RawSessionBroker>[0]) {
+    super(options);
+    activeBrokers.add(this);
+  }
+}
 
 afterEach(async () => {
   vi.restoreAllMocks();
+  await Promise.allSettled([...activeBrokers].map((broker) => broker.quiesceForShutdown()));
+  activeBrokers.clear();
   await Promise.all(
     temporaryDirectories.splice(0).map((path) =>
       rm(path, { recursive: true, force: true }),

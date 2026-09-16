@@ -137,6 +137,10 @@ interface SnapshotEnvelope {
 export interface SnapshotHooks {
   readonly afterTemporarySync?: () => void | Promise<void>;
   readonly beforeFinalRename?: () => void | Promise<void>;
+  /** Fault-injection seam for an exception after the authoritative record
+   * rename, when callers must inspect recovery rather than assume failure. */
+  readonly afterFinalRename?: () => void | Promise<void>;
+  readonly beforeRecover?: () => void | Promise<void>;
 }
 
 function serialize(draft: RecoverableDraft): string {
@@ -333,6 +337,7 @@ export class DraftSnapshotStore {
       await this.#hooks.beforeFinalRename?.();
       signal?.throwIfAborted();
       await rename(temporaryPath, this.currentPath);
+      await this.#hooks.afterFinalRename?.();
       await chmod(this.currentPath, 0o600);
       const directoryHandle = await open(this.directory, "r");
       try {
@@ -350,6 +355,7 @@ export class DraftSnapshotStore {
   }
 
   async recover(): Promise<RecoverableDraftV3 | undefined> {
+    await this.#hooks.beforeRecover?.();
     await this.initialize();
     const candidates = await Promise.all([
       readValid(this.currentPath),

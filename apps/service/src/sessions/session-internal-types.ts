@@ -54,6 +54,11 @@ export interface ActiveSession {
   readonly documentGeneration: number;
   sourceOwnership: RecoverableSourceOwnership;
   chromeProtected: boolean;
+  /** Blocks every serialized mutation/save/publication while a thrown recovery
+   * persistence call has an unclassified authoritative winner. */
+  replacementCommitBarrier?: {
+    readonly resolve: () => Promise<"successor" | "predecessor" | "uncertain">;
+  };
 }
 
 export interface BrowserLaunchScope {
