@@ -43,6 +43,22 @@ export type ReadingLocationResolutionV1 =
   | { readonly status: "fallback"; readonly generation: number; readonly pageCount: number }
   | { readonly status: "stale"; readonly generation: number };
 
+type ClosedPositiveRect = {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+};
+
+function isClosedPositiveRect(value: unknown): value is ClosedPositiveRect {
+  if (!record(value) || !hasOnlyKeys(value, ["x", "y", "width", "height"])) return false;
+  return typeof value.x === "number" && Number.isFinite(value.x) &&
+    typeof value.y === "number" && Number.isFinite(value.y) &&
+    typeof value.width === "number" && Number.isFinite(value.width) &&
+    typeof value.height === "number" && Number.isFinite(value.height) &&
+    value.width > 0 && value.height > 0;
+}
+
 export function isReadingLocationResolutionRequest(
   value: unknown,
 ): value is ReadingLocationResolutionRequestV1 {
@@ -53,12 +69,8 @@ export function isReadingLocationResolutionRequest(
     anchor.kind !== "caret" || !safeInteger(anchor.pageIndex) ||
     typeof anchor.leftContext !== "string" || typeof anchor.rightContext !== "string" ||
     anchor.leftContext.length > 64 || anchor.rightContext.length > 64 ||
-    anchor.leftContext.length + anchor.rightContext.length < 1 || !record(anchor.rect)) return false;
-  const rect = anchor.rect;
-  if (!hasOnlyKeys(rect, ["x", "y", "width", "height"])) return false;
-  return ["x", "y", "width", "height"].every((key) =>
-    typeof rect[key] === "number" && Number.isFinite(rect[key])) &&
-    (rect.width as number) > 0 && (rect.height as number) > 0;
+    anchor.leftContext.length + anchor.rightContext.length < 1) return false;
+  return isClosedPositiveRect(anchor.rect);
 }
 
 function safeReadingLocationResolution(value: unknown): ReadingLocationResolutionV1 | undefined {
@@ -71,17 +83,10 @@ function safeReadingLocationResolution(value: unknown): ReadingLocationResolutio
     return { status: "fallback", generation: value.generation, pageCount: value.pageCount };
   }
   if (value.status !== "resolved" || !hasOnlyKeys(value, ["status", "generation", "pageIndex", "rect"]) ||
-    !safeInteger(value.pageIndex) || !record(value.rect) ||
-    !hasOnlyKeys(value.rect, ["x", "y", "width", "height"])) return undefined;
+    !safeInteger(value.pageIndex) || !isClosedPositiveRect(value.rect)) return undefined;
   const rect = value.rect;
-  if (!["x", "y", "width", "height"].every((key) =>
-    typeof rect[key] === "number" && Number.isFinite(rect[key])) ||
-    (rect.width as number) <= 0 || (rect.height as number) <= 0) return undefined;
   return { status: "resolved", generation: value.generation, pageIndex: value.pageIndex,
-    rect: {
-      x: rect.x as number, y: rect.y as number,
-      width: rect.width as number, height: rect.height as number,
-    } };
+    rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height } };
 }
 
 export type ReviewRuntimeMethod = typeof REVIEW_RUNTIME_METHODS[number];

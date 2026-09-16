@@ -380,19 +380,11 @@ export class SessionBroker {
           };
           const nextState = this.#reduceMutation(session, command, session.state.workflow.documentGeneration);
           const nextNativeAnnotationLedger = nativeAnnotationLedger(nextState, session.nativeAnnotationLedger);
-          const desiredDigest = reviewStateDigest(nextState);
-          const nextSync: DurableSaveSync = input.outcome === 'discarded'
-            ? session.sync.phase === 'clean'
-              ? { ...session.sync, desiredRevision: nextState.revision, savedRevision: nextState.revision }
-              : session.sync
-            : {
-                phase: session.destination.phase === "active" ? "saving" : "not-saved",
-                desiredRevision: nextState.revision,
-                desiredDigest,
-                savedRevision: session.sync.savedRevision,
-                ...(session.sync.savedDigest === undefined ? {} : { savedDigest: session.sync.savedDigest }),
-                ...(session.destination.phase === "active" ? {} : { failure: "destination-unconfigured" as const }),
-              };
+          const nextSync = this.#deriveMutationSync(
+            session,
+            nextState,
+            input.outcome !== 'discarded',
+          );
           return {
             reviewRevision: nextState.revision,
             persist: async (receipt) => {
@@ -3143,6 +3135,28 @@ export class SessionBroker {
     return nextState;
   }
 
+  #deriveMutationSync(
+    session: ActiveSession,
+    nextState: ReviewState,
+    mutationAffectsPdf: boolean,
+  ): DurableSaveSync {
+    if (!mutationAffectsPdf) {
+      return session.sync.phase === "clean"
+        ? { ...session.sync, desiredRevision: nextState.revision, savedRevision: nextState.revision }
+        : session.sync;
+    }
+    return {
+      phase: session.destination.phase === "active" ? "saving" : "not-saved",
+      desiredRevision: nextState.revision,
+      desiredDigest: reviewStateDigest(nextState),
+      savedRevision: session.sync.savedRevision,
+      ...(session.sync.savedDigest === undefined ? {} : { savedDigest: session.sync.savedDigest }),
+      ...(session.destination.phase === "active"
+        ? {}
+        : { failure: "destination-unconfigured" as const }),
+    };
+  }
+
   async acceptMutation(
     sessionId: string,
     command: ReviewCommand,
@@ -3173,23 +3187,7 @@ export class SessionBroker {
         nextState,
         session.nativeAnnotationLedger,
       );
-      const desiredDigest = reviewStateDigest(nextState);
-      const nextSync: DurableSaveSync = command.type === 'put-draft'
-        ? session.sync.phase === 'clean'
-          ? { ...session.sync, desiredRevision: nextState.revision, savedRevision: nextState.revision }
-          : session.sync
-        : {
-            phase: session.destination.phase === "active" ? "saving" : "not-saved",
-            desiredRevision: nextState.revision,
-            desiredDigest,
-            savedRevision: session.sync.savedRevision,
-            ...(session.sync.savedDigest === undefined
-              ? {}
-              : { savedDigest: session.sync.savedDigest }),
-            ...(session.destination.phase === "active"
-              ? {}
-              : { failure: "destination-unconfigured" as const }),
-          };
+      const nextSync = this.#deriveMutationSync(session, nextState, command.type !== 'put-draft');
       const nextDraft: RecoverableDraftV3 = {
         ...this.#draft(session),
         state: nextState,

@@ -3,7 +3,11 @@ import type {
   ReadingLocationResolutionRequestV1,
 } from '../../../../packages/core/src/review-runtime-protocol.js';
 import type { AnchorPage } from './selection-anchor.js';
-import { assessPageTextReliability, hasUnsupportedReadingOrder } from './text-reliability.js';
+import {
+  assessPageTextReliability,
+  hasUnsupportedReadingOrder,
+  isValidTextRect,
+} from './text-reliability.js';
 import type { PdfViewerLocation } from './viewer-navigation.js';
 
 export interface CapturedReadingLocation {
@@ -43,26 +47,25 @@ export async function captureReadingLocation(input: {
     return fallbackReadingLocation(input);
   }
   let textCursor = 0;
-  const mapped = page.textRects
-    .filter(({ content, rect }) => content.length > 0
-      && Number.isFinite(rect.origin.x) && Number.isFinite(rect.origin.y)
-      && Number.isFinite(rect.size.width) && rect.size.width > 0
-      && Number.isFinite(rect.size.height) && rect.size.height > 0)
-    .flatMap(({ content, rect }) => {
-      const textOffset = page.extractedText.indexOf(content, textCursor);
-      if (textOffset < 0) return [];
-      textCursor = textOffset + content.length;
-      return [{
-        content,
-        textOffset,
-        rect,
-        distance: Math.hypot(
-          input.fallback.anchor.x - (rect.origin.x + rect.size.width / 2),
-          input.fallback.anchor.y - (rect.origin.y + rect.size.height / 2),
-        ),
-      }];
-    });
-  const nearest = mapped.sort((left, right) => left.distance - right.distance)[0];
+  let nearest: {
+    readonly content: string;
+    readonly textOffset: number;
+    readonly rect: AnchorPage['textRects'][number]['rect'];
+    readonly distance: number;
+  } | undefined;
+  for (const { content, rect } of page.textRects) {
+    if (content.length === 0 || !isValidTextRect(rect)) continue;
+    const textOffset = page.extractedText.indexOf(content, textCursor);
+    if (textOffset < 0) continue;
+    textCursor = textOffset + content.length;
+    const distance = Math.hypot(
+      input.fallback.anchor.x - (rect.origin.x + rect.size.width / 2),
+      input.fallback.anchor.y - (rect.origin.y + rect.size.height / 2),
+    );
+    if (nearest === undefined || distance < nearest.distance) {
+      nearest = { content, textOffset, rect, distance };
+    }
+  }
   if (nearest === undefined) {
     return fallbackReadingLocation(input);
   }
