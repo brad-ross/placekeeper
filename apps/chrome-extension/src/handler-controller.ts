@@ -40,12 +40,14 @@ export interface HandlerPorts {
   openEmbedded(info: PdfStreamInfo, signal: AbortSignal): Promise<EmbeddedReviewSession>;
   pendingTitle?(originalUrl: string): void;
   fallback(): void;
+  reloadTab(tabId: number): Promise<void>;
   status?(message: string): void;
 }
 
 export interface HandlerController {
   run(): Promise<void>;
   bypass(): void;
+  reopen(): Promise<void>;
   state(): HandlerState;
 }
 
@@ -70,6 +72,8 @@ export function createHandlerController(ports: HandlerPorts): HandlerController 
   let bypassRequested = false;
   const abort = new AbortController();
   let activeCommitted = false;
+  let tabId: number | undefined;
+  let reopening = false;
   let review: EmbeddedReviewSession | undefined;
   let unsubscribeLifecycle: (() => void) | undefined;
 
@@ -83,6 +87,20 @@ export function createHandlerController(ports: HandlerPorts): HandlerController 
 
   return {
     state: () => current,
+    async reopen() {
+      if (reopening || tabId === undefined ||
+          !["disconnected-clean", "disconnected-protected", "update-required"].includes(current)) return;
+      reopening = true;
+      try {
+        // Reload the PDF's owning tab, not the MIME handler's extension frame.
+        // Chrome must create a new response stream for the replacement handler.
+        await ports.reloadTab(tabId);
+      } catch {
+        ports.status?.("Could not reopen this PDF. Try again or reload the browser tab.");
+      } finally {
+        reopening = false;
+      }
+    },
     bypass: () => {
       if (activeCommitted) return;
       bypassRequested = true;
@@ -107,6 +125,7 @@ export function createHandlerController(ports: HandlerPorts): HandlerController 
           return;
         }
         ports.pendingTitle?.(info.originalUrl);
+        tabId = info.tabId;
         current = "pending";
         ports.status?.("Opening this PDF in Placekeeper…");
         review = await ports.openEmbedded(info, abort.signal);
