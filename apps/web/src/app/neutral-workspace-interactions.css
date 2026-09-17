@@ -144,6 +144,7 @@ li[data-search-result] .pdf-search__result-heading > .pdf-search__result-page {
   }
 
   .review-context-palette .review-action-button--icon,
+  .review-page-menu .review-action-button--icon,
   .link-action-popover__surface [role="menuitem"] {
     width: 44px;
     min-width: 44px;

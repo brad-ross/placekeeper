@@ -2,6 +2,7 @@ import { useEffect, useRef, type CSSProperties, type RefObject } from 'react';
 
 import type { ContextPlacement } from './ContextActionPalette.js';
 import { ReviewIcon } from './ReviewIcon.js';
+import { ReviewTooltipButton } from './ReviewTooltipButton.js';
 import { shortcutForReviewAction } from './review-actions.js';
 
 export interface PageActionMenuProps {
@@ -39,17 +40,19 @@ export function PageActionMenu(props: PageActionMenuProps) {
           <ReviewIcon name="locate" />Go to Source
         </button>
       ) : null}
-      <button
+      <ReviewTooltipButton
         ref={props.triggerRef}
         type="button"
         role="menuitem"
+        className="review-action-button review-action-button--icon"
+        label="Add Page Note"
+        tooltip="Page Note"
         autoFocus={props.onGoToSource === undefined}
         aria-keyshortcuts={shortcutForReviewAction('pageNote')}
-        title="Add Page Note"
         onClick={props.onAddPageNote}
       >
-        <ReviewIcon name="note" />Add Page Note
-      </button>
+        <ReviewIcon name="note" />
+      </ReviewTooltipButton>
     </div>
   );
 }
