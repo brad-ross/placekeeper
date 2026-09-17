@@ -25,6 +25,7 @@
 }
 
 .review-context-palette .review-action-button--icon,
+.review-page-menu .review-action-button--icon,
 .link-action-popover__surface [role="menuitem"] {
   width: 32px;
   min-width: 32px;
