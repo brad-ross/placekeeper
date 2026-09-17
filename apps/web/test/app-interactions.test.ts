@@ -4,8 +4,6 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   caretClientPlacement,
   clampPageNotePoint,
-  enableViewerTextSelection,
-  scheduleViewerTextSelection,
   subscribeToMainDocumentOpened,
   publishViewerCaretRead,
   isCurrentViewerInputSurface,
@@ -27,49 +25,6 @@ const unavailableCaret = {
 };
 
 describe('App interaction boundaries', () => {
-  it('enables text selection for the exact inactive Reference document', () => {
-    const enableForMode = vi.fn();
-    enableViewerTextSelection(
-      { getDefaultMode: () => 'pointerMode' },
-      { enableForMode },
-      'reference',
-    );
-
-    expect(enableForMode).toHaveBeenCalledWith('pointerMode', {
-      enableSelection: true,
-      showSelectionRects: true,
-      enableMarquee: false,
-    }, 'reference');
-  });
-
-  it('enables inactive-document selection after the plugin load dispatch settles', () => {
-    const enableForMode = vi.fn();
-    const queued: Array<() => void> = [];
-    let current = true;
-    scheduleViewerTextSelection(
-      { getDefaultMode: () => 'pointerMode' },
-      { enableForMode },
-      'reference',
-      () => current,
-      (callback) => queued.push(callback),
-    );
-
-    expect(enableForMode).not.toHaveBeenCalled();
-    queued.shift()?.();
-    expect(enableForMode).toHaveBeenCalledOnce();
-
-    scheduleViewerTextSelection(
-      { getDefaultMode: () => 'pointerMode' },
-      { enableForMode },
-      'reference',
-      () => current,
-      (callback) => queued.push(callback),
-    );
-    current = false;
-    queued.shift()?.();
-    expect(enableForMode).toHaveBeenCalledOnce();
-  });
-
   it('places a keyboard note on the focused Reference page before scroll fallback', () => {
     expect(viewerKeyboardPageIndex('1', 1, 4)).toBe(1);
     expect(viewerKeyboardPageIndex(undefined, 2, 4)).toBe(1);

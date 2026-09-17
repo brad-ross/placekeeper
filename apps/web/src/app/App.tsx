@@ -112,49 +112,6 @@ type ViewerCaretResult = Awaited<ReturnType<typeof captureViewerCaret>>;
 
 const FALLBACK_PAGE_NOTE_CURSOR_RADIUS_PX = 18;
 
-interface ViewerInteractionModeSource {
-  getDefaultMode(): string;
-}
-
-interface ViewerTextSelectionControls {
-  enableForMode(
-    modeId: string,
-    options: {
-      readonly enableSelection: boolean;
-      readonly showSelectionRects: boolean;
-      readonly enableMarquee: boolean;
-    },
-    documentId?: string,
-  ): unknown;
-}
-
-/** EmbedPDF otherwise applies this configuration only to its active document. */
-export function enableViewerTextSelection(
-  interaction: ViewerInteractionModeSource,
-  selection: ViewerTextSelectionControls,
-  documentId: string,
-): void {
-  selection.enableForMode(interaction.getDefaultMode(), {
-    enableSelection: true,
-    showSelectionRects: true,
-    enableMarquee: false,
-  }, documentId);
-}
-
-export function scheduleViewerTextSelection(
-  interaction: ViewerInteractionModeSource,
-  selection: ViewerTextSelectionControls,
-  documentId: string,
-  isCurrent: () => boolean,
-  schedule: (callback: () => void) => void = queueMicrotask,
-): void {
-  // DocumentManager publishes "opened" from its SET_DOCUMENT_LOADED subscriber.
-  // The microtask runs after every plugin has processed that same dispatch.
-  schedule(() => {
-    if (isCurrent()) enableViewerTextSelection(interaction, selection, documentId);
-  });
-}
-
 export function viewerKeyboardPageIndex(
   focusedPageIndex: string | undefined,
   currentPageNumber: number | undefined,
@@ -782,7 +739,11 @@ export function App({
     const selectionPlugin = registry.getPlugin<SelectionPlugin>(SelectionPlugin.id);
     const selection = selectionPlugin?.provides();
     if (interaction && selection) {
-      enableViewerTextSelection(interaction, selection, MAIN_PDF_DOCUMENT_ID);
+      selection.enableForMode(interaction.getDefaultMode(), {
+        enableSelection: true,
+        showSelectionRects: true,
+        enableMarquee: false,
+      });
     }
 
     const pageReaders = new Map<string, {
@@ -1127,16 +1088,6 @@ export function App({
         documentManager.onDocumentOpened(({ document }) => {
           if (document?.id !== REFERENCE_PDF_DOCUMENT_ID) return;
           disposeReferenceNavigation();
-          if (interaction && selection) {
-            scheduleViewerTextSelection(
-              interaction,
-              selection,
-              REFERENCE_PDF_DOCUMENT_ID,
-              () => initializationIsCurrent()
-                && registry.getStore().getState().core
-                  .documents[REFERENCE_PDF_DOCUMENT_ID]?.document === document,
-            );
-          }
           const referenceNavigation = createViewerNavigation({
             registry,
             root: () => referenceWorkspaceElementRef.current,
