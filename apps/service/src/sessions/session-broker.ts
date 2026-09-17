@@ -402,19 +402,27 @@ export class SessionBroker {
               const durableSuccessor = { ...this.#draft(session), state: nextState, sync: nextSync,
                 nativeAnnotationLedger: nextNativeAnnotationLedger, interactionReceipts,
                 acknowledgedAt: this.#now().toISOString() };
-              const apply = () => {
+              let applied = false;
+              const apply = (recoverReceipt: boolean) => {
+                if (applied) return;
+                applied = true;
                 session.state = nextState;
                 session.sync = nextSync;
                 session.nativeAnnotationLedger = nextNativeAnnotationLedger;
                 session.interactionReceipts = interactionReceipts;
-                this.interactions.recoverFinalized(receipt);
+                if (recoverReceipt) this.interactions.recoverFinalized(receipt);
+                this.controls.publishStateInvalidation(input.sessionId, {
+                  documentGeneration: nextState.workflow.documentGeneration,
+                  reviewRevision: nextState.revision,
+                  reason: "revision",
+                });
               };
               const barrier = {
                 resolve: async (): Promise<"successor" | "predecessor" | "uncertain"> => {
                   const recovered = await session.store.recover().catch(() => undefined);
                   if (recovered !== undefined && isDeepStrictEqual(recovered, durableSuccessor)) {
                     if (session.replacementCommitBarrier === barrier) delete session.replacementCommitBarrier;
-                    apply();
+                    apply(true);
                     return "successor";
                   }
                   if (predecessor !== undefined && recovered !== undefined && isDeepStrictEqual(recovered, predecessor)) {
@@ -433,23 +441,12 @@ export class SessionBroker {
                 if (settled === "predecessor") throw error;
                 throw new ReplacementCommitOutcomeUncertainError();
               }
-              session.state = nextState;
-              session.sync = nextSync;
-              session.nativeAnnotationLedger = nextNativeAnnotationLedger;
-              session.interactionReceipts = interactionReceipts;
+              apply(false);
             },
           };
         },
       });
     });
-    if ((result as { status?: unknown; outcome?: unknown }).status === "finalized" &&
-      (result as { outcome?: unknown }).outcome === "applied") {
-      this.controls.publishStateInvalidation(input.sessionId, {
-        documentGeneration: session.state.workflow.documentGeneration,
-        reviewRevision: session.state.revision,
-        reason: "revision",
-      });
-    }
     return result;
   }
 

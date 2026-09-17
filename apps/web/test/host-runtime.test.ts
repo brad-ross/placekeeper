@@ -1100,7 +1100,9 @@ describe("host-neutral review runtime", () => {
     runtime.dispose();
   });
 
-  it("delivers an RPC finalization receipt before its deferred successor invalidation", async () => {
+  it.each(["event-before-receipt", "event-after-receipt"] as const)(
+    "delivers an RPC discarded-finalization receipt before its equal-revision invalidation (%s)",
+    async (order) => {
     const listeners = new Set<(message: unknown) => void>();
     const requests: Record<string, unknown>[] = [];
     const runtime = createRpcHostRuntime({
@@ -1130,15 +1132,21 @@ describe("host-neutral review runtime", () => {
       outcome: "discarded", draftId: "draft_rpc_1234", expectedDraftRevision: 0 })
       .then((value) => { delivery.push("receipt"); return value; });
     const request = requests.at(-1)!;
-    listeners.forEach((listener) => listener({ protocol: REVIEW_RUNTIME_PROTOCOL,
-      version: REVIEW_RUNTIME_VERSION, kind: "event", event: "session-invalidated",
-      panelId: "panel_identifier_1234", payload: { sessionId, generation: 2, revision: 1,
-        previousGeneration: 1, reason: "generation" } }));
+    const publishDiscardedRevision = () => listeners.forEach((listener) => listener({
+      protocol: REVIEW_RUNTIME_PROTOCOL,
+      version: REVIEW_RUNTIME_VERSION,
+      kind: "event",
+      event: "session-invalidated",
+      panelId: "panel_identifier_1234",
+      payload: { sessionId, generation: 1, revision: 1, reason: "revision" },
+    }));
+    if (order === "event-before-receipt") publishDiscardedRevision();
     expect(delivery).toEqual([]);
     respond(request, { status: "finalized", interactionToken: "interaction_rpc_1234",
       generation: 1, outcome: "discarded", reviewRevision: 1 });
     await completion;
     expect(delivery).toEqual(["receipt"]);
+    if (order === "event-after-receipt") publishDiscardedRevision();
     const acknowledgement = runtime.acknowledgeInteraction!({ interactionToken: "interaction_rpc_1234", order: 3 });
     const acknowledgementRequest = requests.at(-1)!;
     expect(acknowledgementRequest).toMatchObject({ method: "acknowledgeInteraction", revision: 1 });
@@ -1146,6 +1154,87 @@ describe("host-neutral review runtime", () => {
     await acknowledgement;
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(delivery).toEqual(["receipt", "invalidation"]);
+    runtime.dispose();
+    },
+  );
+
+  it("adopts a finalized receipt recovered by begin before acknowledging through the projection fence", async () => {
+    const listeners = new Set<(message: unknown) => void>();
+    const requests: Record<string, unknown>[] = [];
+    const sessionId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const runtime = createRpcHostRuntime({
+      panelId: "panel_identifier_1234",
+      postMessage(message) { requests.push(message as Record<string, unknown>); },
+      subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); },
+    });
+    const respond = (request: Record<string, unknown>, payload: unknown, revision: number) => {
+      listeners.forEach((listener) => listener({
+        protocol: REVIEW_RUNTIME_PROTOCOL,
+        version: REVIEW_RUNTIME_VERSION,
+        kind: "response",
+        panelId: "panel_identifier_1234",
+        sessionId,
+        generation: 1,
+        revision,
+        requestId: request.requestId,
+        ok: true,
+        payload,
+      }));
+    };
+    const state = createReviewState({
+      sessionId,
+      source: { fileId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", digest: "a".repeat(64), byteLength: 100 },
+      documentGeneration: 1,
+    });
+    const bootstrapping = runtime.bootstrap();
+    respond(requests.at(-1)!, {
+      sessionId,
+      generation: 1,
+      revision: 0,
+      state,
+      scope: { documentTitle: "paper.pdf" },
+      saveStatus: {},
+      resources: {
+        document: "vscode-webview://authority/snapshots/digest.pdf",
+        pdfiumWasm: "vscode-webview://authority/assets/pdfium.wasm",
+      },
+    }, 0);
+    await bootstrapping;
+
+    const recovered = runtime.beginInteraction!({
+      interactionToken: "interaction_recovered_1234",
+      order: 1,
+      generation: 1,
+    });
+    respond(requests.at(-1)!, {
+      status: "finalized",
+      interactionToken: "interaction_recovered_1234",
+      generation: 1,
+      outcome: "discarded",
+      reviewRevision: 1,
+    }, 0);
+    await expect(recovered).resolves.toMatchObject({ status: "finalized", reviewRevision: 1 });
+
+    const invalidations: HostRuntimeInvalidation[] = [];
+    runtime.subscribeInvalidations((event) => invalidations.push(event));
+    listeners.forEach((listener) => listener({
+      protocol: REVIEW_RUNTIME_PROTOCOL,
+      version: REVIEW_RUNTIME_VERSION,
+      kind: "event",
+      event: "session-invalidated",
+      panelId: "panel_identifier_1234",
+      payload: { sessionId, generation: 1, revision: 1, reason: "revision" },
+    }));
+    expect(invalidations).toEqual([{ sessionId, generation: 1, revision: 1, reason: "revision" }]);
+
+    const acknowledgement = runtime.acknowledgeInteraction!({
+      interactionToken: "interaction_recovered_1234",
+      order: 3,
+    });
+    const acknowledgementRequest = requests.at(-1)!;
+    expect(acknowledgementRequest).toMatchObject({ method: "acknowledgeInteraction", revision: 1 });
+    respond(acknowledgementRequest, { status: "released" }, 1);
+    await expect(acknowledgement).resolves.toMatchObject({ status: "released" });
     runtime.dispose();
   });
 

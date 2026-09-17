@@ -161,6 +161,7 @@ export function createRpcHostRuntime(
   ) => Promise<void>>();
   const hostCommands = new Set<(command: HostRuntimeCommand) => void>();
   let identity: HostRuntimeIdentity | undefined;
+  let hydratedIdentity: HostRuntimeIdentity | undefined;
   let interactionLifecycleNegotiated = false;
   let pendingInvalidation: HostRuntimeInvalidation | undefined;
   let deferredCommandInvalidation: HostRuntimeInvalidation | undefined;
@@ -248,10 +249,10 @@ export function createRpcHostRuntime(
 
   const revisionAlreadyObserved = (event: HostRuntimeInvalidation) => (
     event.reason === "revision"
-    && identity !== undefined
-    && event.sessionId === identity.sessionId
-    && event.generation === identity.generation
-    && event.revision <= identity.revision
+    && hydratedIdentity !== undefined
+    && event.sessionId === hydratedIdentity.sessionId
+    && event.generation === hydratedIdentity.generation
+    && event.revision <= hydratedIdentity.revision
   );
 
   const releaseDeferredCommandInvalidation = () => {
@@ -408,6 +409,7 @@ export function createRpcHostRuntime(
       generation: state.workflow.documentGeneration as number,
       revision: state.revision as number,
     };
+    hydratedIdentity = { ...identity };
     if (value.accepted !== false || identity.generation === previous.generation) return;
     return {
       sessionId: identity.sessionId,
@@ -416,6 +418,15 @@ export function createRpcHostRuntime(
       reason: "generation",
       previousGeneration: previous.generation,
     };
+  };
+
+  const adoptFinalizedReceipt = <T>(value: T): T => {
+    if (identity !== undefined && isObject(value) && value.status === "finalized" &&
+      value.generation === identity.generation && Number.isSafeInteger(value.reviewRevision) &&
+      (value.reviewRevision as number) >= identity.revision) {
+      identity = { ...identity, revision: value.reviewRevision as number };
+    }
+    return value;
   };
 
   const chooseDestination = async (method: "chooseCopy" | "chooseOriginal", payload: unknown): Promise<SaveDestinationResult> => {
@@ -451,6 +462,7 @@ export function createRpcHostRuntime(
         generation: value.generation,
         revision: value.revision,
       };
+      hydratedIdentity = { ...identity };
       interactionLifecycleNegotiated = isObject(value.capabilities) &&
         value.capabilities.interactionLifecycleVersion === 1;
       const reconnectIdentity = { generation: value.generation, revision: value.revision };
@@ -563,14 +575,12 @@ export function createRpcHostRuntime(
     scope: (signal) => invoke<ProductionScope>("scope", {}, signal),
     forwardSyncTex: (input) => invoke("forwardSyncTex", input),
     reverseSyncTex: (input) => invoke("reverseSyncTex", input),
-    beginInteraction: (input) => invoke("beginInteraction", input),
+    async beginInteraction(input) {
+      return adoptFinalizedReceipt(await invoke("beginInteraction", input));
+    },
     async finalizeInteraction(input) {
       try {
-        const receipt = await invoke("finalizeInteraction", input);
-        if (identity !== undefined && isObject(receipt) && Number.isSafeInteger(receipt.reviewRevision)) {
-          identity = { ...identity, revision: receipt.reviewRevision as number };
-        }
-        return receipt;
+        return adoptFinalizedReceipt(await invoke("finalizeInteraction", input));
       }
       finally { setTimeout(releaseDeferredCommandInvalidation, 0); }
     },

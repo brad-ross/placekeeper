@@ -8,7 +8,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { SessionBroker as RawSessionBroker } from "../src/sessions/session-broker.js";
 import type { SessionBrokerOptions } from "../src/sessions/session-broker.js";
-import type { ReviewItem } from "../../../packages/core/src/review-model.js";
+import {
+  REVIEW_RUNTIME_PROTOCOL,
+  REVIEW_RUNTIME_VERSION,
+} from "../../../packages/core/src/review-runtime-protocol.js";
+import type { ReviewCommand, ReviewItem, ReviewState } from "../../../packages/core/src/review-model.js";
 import { reviewSemanticDigest } from "../../../packages/core/src/live-context.js";
 import {
   anchorEvidenceFromReviewItem,
@@ -32,6 +36,7 @@ import {
   attachmentOrderedInteractionTransport,
   beginReviewInteraction,
 } from "../../web/src/review/authoring-session.js";
+import { createRpcHostRuntime } from "../../web/src/host/vscode-runtime.js";
 
 const temporaryDirectories: string[] = [];
 const activeBrokers = new Set<RawSessionBroker>();
@@ -1062,6 +1067,364 @@ describe("atomic live document replacement", () => {
     expect(value.broker.interactions.held(value.launch.sessionId)).toBe(true);
     await expect(second.release()).resolves.toBeUndefined();
     expect(value.broker.interactions.held(value.launch.sessionId)).toBe(false);
+  });
+
+  it("publishes the revision that discards a protected authoring draft", async () => {
+    const controls = new SessionControlRegistry({ heartbeat: false });
+    const invalidated = vi.spyOn(controls, "publishStateInvalidation");
+    const value = await fixture({ controls }, "standard");
+    const attachment = value.broker.replaceInteractionAttachment(value.launch.sessionId, "window-a");
+    const interactionToken = "interaction_cancelled_editor";
+    await value.broker.beginReviewInteraction({
+      sessionId: value.launch.sessionId, attachment, generation: 1, interactionToken, order: 1,
+    });
+    const draftId = "00000000-0000-4000-8000-000000000009";
+    await value.broker.acceptMutation(value.launch.sessionId, {
+      type: "put-draft", expectedRevision: 0, expectedDraftRevision: -1,
+      draft: {
+        id: draftId,
+        ownerViewId: attachment.attachmentId,
+        baseGeneration: 1,
+        revision: 0,
+        kind: "highlight",
+        pageIndex: 0,
+        text: "cancelled edit",
+        anchor: anchorEvidenceFromReviewItem(selectionItem(ITEM_IDS.protected, "Original generated output")),
+        disposition: { kind: "resolved", generation: 1 },
+        status: "protected",
+        createdAt: "2026-09-16T12:00:00.000Z",
+        updatedAt: "2026-09-16T12:00:00.000Z",
+      },
+    });
+    invalidated.mockClear();
+
+    await expect(value.broker.finalizeReviewInteraction({
+      sessionId: value.launch.sessionId, attachment, interactionToken, order: 2,
+      outcome: "discarded", draftId, expectedDraftRevision: 0,
+    })).resolves.toMatchObject({ status: "finalized", outcome: "discarded", reviewRevision: 2 });
+
+    expect(invalidated).toHaveBeenCalledWith(value.launch.sessionId, {
+      documentGeneration: 1,
+      reviewRevision: 2,
+      reason: "revision",
+    });
+  });
+
+  it("publishes a durable discarded revision when a later reacquire settles uncertain persistence", async () => {
+    let failAfterRename = false;
+    let failRecoveryInspection = false;
+    const controls = new SessionControlRegistry({ heartbeat: false });
+    const invalidated = vi.spyOn(controls, "publishStateInvalidation");
+    const value = await fixture({
+      controls,
+      snapshotHooks: {
+        afterFinalRename: () => {
+          if (!failAfterRename) return;
+          failAfterRename = false;
+          failRecoveryInspection = true;
+          throw new Error("simulated uncertain return after recovery rename");
+        },
+        beforeRecover: () => {
+          if (failRecoveryInspection) throw new Error("simulated recovery inspection failure");
+        },
+      },
+    }, "standard");
+    const attachment = value.broker.replaceInteractionAttachment(value.launch.sessionId, "window-a");
+    const interactionToken = "interaction_uncertain_cancel";
+    await value.broker.beginReviewInteraction({
+      sessionId: value.launch.sessionId, attachment, generation: 1, interactionToken, order: 1,
+    });
+    const draftId = "00000000-0000-4000-8000-000000000010";
+    await value.broker.acceptMutation(value.launch.sessionId, {
+      type: "put-draft", expectedRevision: 0, expectedDraftRevision: -1,
+      draft: {
+        id: draftId,
+        ownerViewId: attachment.attachmentId,
+        baseGeneration: 1,
+        revision: 0,
+        kind: "highlight",
+        pageIndex: 0,
+        text: "uncertain cancelled edit",
+        anchor: anchorEvidenceFromReviewItem(selectionItem(ITEM_IDS.protected, "Original generated output")),
+        disposition: { kind: "resolved", generation: 1 },
+        status: "protected",
+        createdAt: "2026-09-16T12:00:00.000Z",
+        updatedAt: "2026-09-16T12:00:00.000Z",
+      },
+    });
+    invalidated.mockClear();
+    failAfterRename = true;
+
+    await expect(value.broker.finalizeReviewInteraction({
+      sessionId: value.launch.sessionId, attachment, interactionToken, order: 2,
+      outcome: "discarded", draftId, expectedDraftRevision: 0,
+    })).rejects.toThrow(/commit outcome remains uncertain/iu);
+    expect(value.broker.state(value.launch.sessionId)?.pendingDrafts).toHaveLength(1);
+    expect(invalidated).not.toHaveBeenCalled();
+
+    const listeners = new Set<(message: unknown) => void>();
+    const emit = (message: unknown) => listeners.forEach((listener) => listener(message));
+    invalidated.mockImplementation((publishedSessionId, event) => emit({
+      protocol: REVIEW_RUNTIME_PROTOCOL,
+      version: REVIEW_RUNTIME_VERSION,
+      kind: "event",
+      event: "session-invalidated",
+      panelId: "panel_uncertain_recovery",
+      payload: {
+        sessionId: publishedSessionId,
+        generation: event.documentGeneration,
+        revision: event.reviewRevision,
+        reason: event.reason,
+      },
+    }));
+    const runtime = createRpcHostRuntime({
+      panelId: "panel_uncertain_recovery",
+      subscribe(listener) {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
+      postMessage(message) {
+        const request = message as {
+          readonly requestId: string;
+          readonly method: string;
+          readonly generation?: number;
+          readonly revision?: number;
+          readonly payload: unknown;
+        };
+        queueMicrotask(() => void (async () => {
+          const projection = value.broker.state(value.launch.sessionId)!;
+          let payload: unknown;
+          let ok = true;
+          if (request.method === "bootstrap") {
+            payload = {
+              sessionId: value.launch.sessionId,
+              generation: 1,
+              revision: projection.revision,
+              state: projection,
+              scope: { documentTitle: "paper.pdf" },
+              saveStatus: {},
+              capabilities: { interactionLifecycleVersion: 1 },
+              resources: {
+                document: "vscode-webview://authority/snapshots/digest.pdf",
+                pdfiumWasm: "vscode-webview://authority/assets/pdfium.wasm",
+              },
+            };
+          } else if (request.method === "beginInteraction") {
+            payload = await value.broker.beginReviewInteraction({
+              ...(request.payload as { generation: number; interactionToken: string; order: number }),
+              sessionId: value.launch.sessionId,
+              attachment,
+            });
+          } else if (request.method === "acknowledgeInteraction") {
+            const currentRevision = value.broker.state(value.launch.sessionId)!.revision;
+            if (request.revision !== currentRevision) {
+              ok = false;
+              payload = { kind: "stale-presentation" };
+            } else {
+              payload = await value.broker.acknowledgeReviewInteraction({
+                ...(request.payload as { interactionToken: string; order: number }),
+                sessionId: value.launch.sessionId,
+                attachment,
+              });
+            }
+          } else {
+            throw new Error(`Unexpected runtime method: ${request.method}`);
+          }
+          emit({
+            protocol: REVIEW_RUNTIME_PROTOCOL,
+            version: REVIEW_RUNTIME_VERSION,
+            kind: "response",
+            panelId: "panel_uncertain_recovery",
+            sessionId: value.launch.sessionId,
+            generation: request.method === "bootstrap" ? 1 : request.generation,
+            revision: request.method === "bootstrap" ? projection.revision : request.revision,
+            requestId: request.requestId,
+            ok,
+            payload,
+          });
+        })());
+      },
+    });
+    await runtime.bootstrap();
+
+    failRecoveryInspection = false;
+    await expect(runtime.beginInteraction!({
+      generation: 1,
+      interactionToken,
+      order: 3,
+    })).resolves.toMatchObject({
+      status: "finalized",
+      outcome: "discarded",
+      reviewRevision: 2,
+    });
+    expect(value.broker.state(value.launch.sessionId)?.pendingDrafts).toEqual([]);
+    expect(invalidated).toHaveBeenCalledTimes(1);
+    expect(invalidated).toHaveBeenCalledWith(value.launch.sessionId, {
+      documentGeneration: 1,
+      reviewRevision: 2,
+      reason: "revision",
+    });
+
+    await expect(value.broker.beginReviewInteraction({
+      sessionId: value.launch.sessionId, attachment, generation: 1, interactionToken, order: 4,
+    })).resolves.toMatchObject({ status: "finalized", reviewRevision: 2 });
+    expect(invalidated).toHaveBeenCalledTimes(1);
+
+    await expect(runtime.acknowledgeInteraction!({
+      interactionToken,
+      order: 5,
+    })).resolves.toMatchObject({ status: "released" });
+    runtime.dispose();
+  });
+
+  it("rehydrates discarded drafts through the shared RPC runtime before later apply and cancel edits", async () => {
+    const controls = new SessionControlRegistry({ heartbeat: false });
+    const value = await fixture({ controls }, "standard");
+    const sessionId = value.launch.sessionId;
+    const attachment = value.broker.replaceInteractionAttachment(sessionId, "rpc-window");
+    const listeners = new Set<(message: unknown) => void>();
+    const emit = (message: unknown) => listeners.forEach((listener) => listener(message));
+    vi.spyOn(controls, "publishStateInvalidation").mockImplementation((publishedSessionId, event) => {
+      emit({
+        protocol: REVIEW_RUNTIME_PROTOCOL,
+        version: REVIEW_RUNTIME_VERSION,
+        kind: "event",
+        event: "session-invalidated",
+        panelId: "panel_runtime_delivery",
+        payload: {
+          sessionId: publishedSessionId,
+          generation: event.documentGeneration,
+          revision: event.reviewRevision,
+          reason: event.reason,
+        },
+      });
+    });
+    const runtime = createRpcHostRuntime({
+      panelId: "panel_runtime_delivery",
+      subscribe(listener) {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
+      postMessage(message) {
+        const request = message as {
+          readonly requestId: string;
+          readonly method: string;
+          readonly generation?: number;
+          readonly revision?: number;
+          readonly payload: unknown;
+        };
+        queueMicrotask(() => void (async () => {
+          const requestState = value.broker.state(sessionId)!;
+          let payload: unknown;
+          if (request.method === "bootstrap") {
+            payload = {
+              sessionId,
+              generation: requestState.workflow.documentGeneration,
+              revision: requestState.revision,
+              state: requestState,
+              scope: { documentTitle: "paper.pdf" },
+              saveStatus: {},
+              capabilities: { interactionLifecycleVersion: 1 },
+              resources: {
+                document: "vscode-webview://authority/snapshots/digest.pdf",
+                pdfiumWasm: "vscode-webview://authority/assets/pdfium.wasm",
+              },
+            };
+          } else if (request.method === "command") {
+            payload = await value.broker.acceptMutation(sessionId, request.payload as ReviewCommand);
+          } else if (request.method === "beginInteraction") {
+            payload = await value.broker.beginReviewInteraction({
+              ...(request.payload as { generation: number; interactionToken: string; order: number }),
+              sessionId,
+              attachment,
+            });
+          } else if (request.method === "finalizeInteraction") {
+            payload = await value.broker.finalizeReviewInteraction({
+              ...(request.payload as {
+                interactionToken: string;
+                order: number;
+                outcome: "applied" | "discarded";
+                draftId: string;
+                expectedDraftRevision: number;
+              }),
+              sessionId,
+              attachment,
+            });
+          } else {
+            throw new Error(`Unexpected runtime method: ${request.method}`);
+          }
+          const responseState = value.broker.state(sessionId)!;
+          emit({
+            protocol: REVIEW_RUNTIME_PROTOCOL,
+            version: REVIEW_RUNTIME_VERSION,
+            kind: "response",
+            panelId: "panel_runtime_delivery",
+            sessionId,
+            generation: request.method === "bootstrap"
+              ? responseState.workflow.documentGeneration
+              : request.generation,
+            revision: request.method === "bootstrap" ? responseState.revision : request.revision,
+            requestId: request.requestId,
+            ok: true,
+            payload,
+          });
+        })());
+      },
+    });
+    const bootstrap = await runtime.bootstrap();
+    let pageState: ReviewState = bootstrap.state;
+    runtime.subscribeInvalidations(() => {
+      pageState = structuredClone(value.broker.state(sessionId)!);
+    });
+    const draft = (id: string, text: string) => ({
+      id,
+      ownerViewId: attachment.attachmentId,
+      baseGeneration: 1,
+      revision: 0,
+      kind: "highlight" as const,
+      pageIndex: 0,
+      text,
+      anchor: anchorEvidenceFromReviewItem(selectionItem(ITEM_IDS.protected, "Original generated output")),
+      disposition: { kind: "resolved" as const, generation: 1 },
+      status: "protected" as const,
+      createdAt: "2026-09-16T12:00:00.000Z",
+      updatedAt: "2026-09-16T12:00:00.000Z",
+    });
+    const edit = async (
+      interactionToken: string,
+      draftId: string,
+      outcome: "applied" | "discarded",
+      expectedRevision: number,
+      order: number,
+    ) => {
+      await runtime.beginInteraction!({ interactionToken, order, generation: 1 });
+      const commandResult = await runtime.command({
+        type: "put-draft",
+        expectedRevision,
+        expectedDraftRevision: -1,
+        draft: draft(draftId, `${outcome} edit`),
+      });
+      if ("accepted" in commandResult) throw new Error("Expected the protected draft mutation to succeed");
+      pageState = commandResult;
+      expect(pageState.pendingDrafts).toContainEqual(expect.objectContaining({
+        id: draftId,
+        status: "protected",
+      }));
+      await expect(runtime.finalizeInteraction!({
+        interactionToken,
+        order: order + 1,
+        outcome,
+        draftId,
+        expectedDraftRevision: 0,
+      })).resolves.toMatchObject({ status: "finalized", outcome });
+      await vi.waitFor(() => expect(pageState.pendingDrafts).toEqual([]));
+    };
+
+    await edit("interaction_rpc_cancel", "00000000-0000-4000-8000-000000000013", "discarded", 0, 1);
+    await edit("interaction_rpc_apply", "00000000-0000-4000-8000-000000000014", "applied", 2, 3);
+    await edit("interaction_rpc_cancel_again", "00000000-0000-4000-8000-000000000015", "discarded", 4, 5);
+    expect(pageState.revision).toBe(6);
+    runtime.dispose();
   });
 
   it("releases a broker-accepted begin whose response is lost before admitting a fresh editor", async () => {
