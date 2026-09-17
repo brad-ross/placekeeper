@@ -22,8 +22,19 @@ import {
   viewerPointerButton,
 } from '../src/pdf/viewer-interaction-events.js';
 import type { ViewerInteractionEvent } from '../src/pdf/viewer-interaction-events.js';
+import { referencePageInputLifecycleKey } from '../src/pdf/ReferencePdfViewport.js';
 
 describe('viewer page interaction coordinates', () => {
+  it('rebinds Reference page input when a pending document commits or changes tabs', () => {
+    const pending = referencePageInputLifecycleKey(8, null, 1);
+    const tabA = referencePageInputLifecycleKey(8, 'tab:a', 1);
+    const tabB = referencePageInputLifecycleKey(8, 'tab:b', 1);
+    const nextDocument = referencePageInputLifecycleKey(9, 'tab:b', 1);
+
+    expect(new Set([pending, tabA, tabB, nextDocument])).toHaveLength(4);
+    expect(referencePageInputLifecycleKey(8, 'tab:a', 1)).toBe(tabA);
+  });
+
   it('keeps reference null-clears and mark activations explicitly surface-scoped', () => {
     const surface = { kind: 'reference', documentGeneration: 4, tabIdentity: 'tab:appendix' } as const;
     const events: ViewerInteractionEvent[] = [

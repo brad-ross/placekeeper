@@ -69,6 +69,19 @@ export interface ReferencePdfViewportProps {
   ) => boolean;
 }
 
+/**
+ * EmbedPDF page providers retain native listeners and page-scoped plugin registrations.
+ * A committed Reference tab is therefore part of their lifecycle even when the reusable
+ * backing PDF document does not change.
+ */
+export function referencePageInputLifecycleKey(
+  documentGeneration: number,
+  tabIdentity: string | null,
+  pageIndex: number,
+): string {
+  return JSON.stringify([documentGeneration, tabIdentity, pageIndex]);
+}
+
 /** One reusable inactive-document viewport; application tabs store snapshots, not viewer trees. */
 export function ReferencePdfViewport({
   documentId,
@@ -180,6 +193,11 @@ export function ReferencePdfViewport({
             documentId={documentId}
             renderPage={(layout) => (
               <PagePointerProvider
+                key={referencePageInputLifecycleKey(
+                  documentGeneration,
+                  tabIdentity,
+                  layout.pageIndex,
+                )}
                 documentId={documentId}
                 pageIndex={layout.pageIndex}
                 aria-label={`Reference page ${layout.pageNumber}`}
