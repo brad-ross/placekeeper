@@ -84,13 +84,13 @@
 }
 
 :is(li[data-annotation-origin], .annotation-peek) .annotation-item__title-row
-  > .annotation-item__meta[data-annotation-metadata-layout="row-head"] > .annotation-item__page,
+  > .annotation-item__meta[data-annotation-metadata-layout="row-head"] > :is(.annotation-item__page, .annotation-item__status-icon),
 li[data-search-result] .pdf-search__result-heading > .pdf-search__result-page {
   margin-left: auto;
 }
 
 :is(li[data-annotation-origin], li[data-search-result], .annotation-peek)
-  :is(.annotation-item__page, .pdf-search__result-page) {
+  :is(.annotation-item__page, .annotation-item__status-icon, .pdf-search__result-page) {
   display: grid;
   flex: none;
   width: 26px;
@@ -112,7 +112,7 @@ li[data-search-result] .pdf-search__result-heading > .pdf-search__result-page {
   }
 
   :is(li[data-annotation-origin], li[data-search-result], .annotation-peek)
-    :is(.annotation-item__page, .pdf-search__result-page) {
+    :is(.annotation-item__page, .annotation-item__status-icon, .pdf-search__result-page) {
     width: 44px;
     height: 44px;
   }

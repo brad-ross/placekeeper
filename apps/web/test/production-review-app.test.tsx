@@ -40,11 +40,21 @@ import {
   reattachmentGenerationIsCurrent,
   reattachmentTitle,
   ReconciliationWorkspace,
+  type ReconciliationSummaryPresentation,
 } from "../src/review/ReconciliationWorkspace.js";
 import {
   reviewExportPresentation,
 } from "../src/review/DocumentActionsMenu.js";
 import { MemoryReviewLocationHistory } from "../src/review/review-location-history.js";
+
+function renderReconciliationSummary(summary: ReconciliationSummaryPresentation) {
+  return <section aria-label="Annotations">
+    {summary.notice}
+    {summary.editor}
+    <ol>{summary.rows}</ol>
+    {summary.message}
+  </section>;
+}
 
 describe('scope polling identity', () => {
   const scope: ProductionScope = {
@@ -553,17 +563,18 @@ describe("one production review tree", () => {
       caretAnchor={null}
       refreshStatus="idle"
       onCommand={vi.fn()}
+      renderSummary={renderReconciliationSummary}
     />);
 
-    expect(html).toContain('data-reconciliation-workspace');
-    expect(html).toContain("Needs attention");
+    expect(html).toContain('data-reconciliation-entry=');
+    expect(html).not.toContain("<h2>Needs attention</h2>");
     expect(html).toContain("new sentence");
     expect(html).toContain("unfinished wording");
     expect(html).toContain("Multiple matches");
     expect(html).toContain("Needs new location");
     expect(html).not.toContain('data-reconciliation-action="reattach"');
-    expect(html).toContain('data-reconciliation-action="discard"');
-    expect(html).toContain('aria-label="Reattach previous Replace annotation on page 1"');
+    expect(html).toContain('data-row-action="discard"');
+    expect(html).toContain('aria-label="Reattach previous Replace annotation on page 1 · Multiple matches"');
     expect(html).not.toContain("Ambiguous anchor");
     expect(html).not.toContain("Frozen draft");
     expect(html).not.toContain("two matching passages");
@@ -776,9 +787,11 @@ describe("one production review tree", () => {
         caretAnchor={null}
         refreshStatus={refreshStatus}
         onCommand={vi.fn()}
+        renderSummary={renderReconciliationSummary}
       />);
       expect(html).not.toContain("Needs attention");
-      expect(html).not.toContain("reconciliation-workspace");
+      expect(html).toContain("reconciliation-workspace__notice");
+      expect(html).not.toContain("data-reconciliation-entry");
     }
   });
 
@@ -821,6 +834,7 @@ describe("one production review tree", () => {
       selectionUpdate={{ kind: "cleared", generation: 2 }}
       refreshStatus="idle"
       onCommand={vi.fn()}
+      renderSummary={renderReconciliationSummary}
     />);
 
     expect(html).not.toContain("Needs attention");
@@ -839,8 +853,9 @@ describe("one production review tree", () => {
       selectionUpdate={{ kind: "cleared", generation: 3 }}
       refreshStatus="idle"
       onCommand={vi.fn()}
+      renderSummary={renderReconciliationSummary}
     />);
-    expect(frozenHtml).toContain("Needs attention");
+    expect(frozenHtml).toContain('data-annotation-status-icon="warning"');
     expect(frozenHtml).toContain("Currently being edited");
   });
 

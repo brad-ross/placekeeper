@@ -255,6 +255,38 @@
   min-width: 0;
 }
 
+.reconciliation-editor.comment-composer {
+  width: 100%;
+  margin-bottom: 8px;
+  justify-self: stretch;
+}
+
+.reconciliation-editor .comment-composer__header h2 .review-icon {
+  color: var(--review-danger);
+}
+
+.reconciliation-editor__annotation,
+.reconciliation-editor__context {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.reconciliation-editor__annotation {
+  color: var(--review-ink-primary);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.reconciliation-editor__context {
+  color: var(--review-ink-muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.reconciliation-editor__context > span {
+  font-weight: 500;
+}
+
 .reconciliation-workspace--detail .full-annotation-reader__body {
   gap: 14px;
 }

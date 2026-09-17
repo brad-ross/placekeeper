@@ -1479,6 +1479,16 @@ describe('review shell layout and accessibility contract', () => {
             flags: [],
             appearanceModes: ['normal'],
             supportedAppearance: true,
+          }, {
+            id: 'unresolved-highlight',
+            subtype: 'Highlight',
+            pageIndex: unresolvedAnnotation.pageIndex,
+            rect: { x: 1, y: 2, width: 3, height: 4 },
+            contents: 'Check the identifying variation.',
+            author: 'Placekeeper',
+            flags: [],
+            appearanceModes: ['normal'],
+            supportedAppearance: true,
           }],
         }}
         save={{}}
@@ -1562,17 +1572,27 @@ describe('review shell layout and accessibility contract', () => {
       </ReviewShell>,
     );
 
-    const attention = html.indexOf('<h2>Needs attention</h2>');
     const annotations = html.indexOf('<section class="annotation-drawer__owned"');
+    const annotationList = html.indexOf('<ol', annotations);
+    const unresolved = html.indexOf('data-reconciliation-item="unresolved-highlight"');
     const source = html.indexOf('data-existing-annotation="source-highlight"');
     const owned = html.indexOf('data-review-item="owned-highlight"');
-    expect(attention).toBeGreaterThan(-1);
-    expect(annotations).toBeGreaterThan(attention);
-    expect(source).toBeGreaterThan(annotations);
+    expect(annotations).toBeGreaterThan(-1);
+    expect(annotationList).toBeGreaterThan(annotations);
+    expect(unresolved).toBeGreaterThan(annotationList);
+    expect(source).toBeGreaterThan(unresolved);
     expect(owned).toBeGreaterThan(source);
     expect(html.match(/data-reconciliation-item="unresolved-highlight"/gu)).toHaveLength(1);
     expect(html).not.toContain('data-review-item="unresolved-highlight"');
+    expect(html).not.toContain('data-existing-annotation="unresolved-highlight"');
     expect(html).toContain('data-review-item="owned-highlight"');
+    expect(html).not.toContain('<h2>Needs attention</h2>');
+    const unresolvedRow = html.slice(unresolved, source);
+    expect(unresolvedRow).toContain('data-annotation-status-icon="warning"');
+    expect(unresolvedRow).toContain('lucide-triangle-alert');
+    expect(unresolvedRow).not.toContain('class="annotation-item__page"');
+    expect(unresolvedRow).not.toContain('class="annotation-item__section"');
+    expect(unresolvedRow).not.toContain('Multiple matches</span>');
   });
 
   it('keeps Annotations as the stable empty core and omits optional sections', () => {

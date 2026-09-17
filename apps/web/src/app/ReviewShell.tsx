@@ -313,7 +313,6 @@ export function ReviewShell(props: ReviewShellProps) {
     : props.activeItemId ?? undefined;
   const [consumedSelectionGeneration, setConsumedSelectionGeneration] = useState<number>();
   const [listActivation, setListActivation] = useState<{ readonly id: string; readonly token: number }>();
-  const [reconciliationDetailOpen, setReconciliationDetailOpen] = useState(false);
   const [reconciliationFocusRequest, setReconciliationFocusRequest] = useState(0);
   const availableModes = useContext(WorkspaceModeAvailability);
   const workspacePresentation = useContext(WorkspacePresentation);
@@ -982,7 +981,9 @@ export function ReviewShell(props: ReviewShellProps) {
     if (event.key === 'Escape' && !event.nativeEvent.isComposing) {
       if (
         event.target instanceof Element
-        && event.target.closest('[data-review-page-editor], [data-review-zoom-editor]') !== null
+        && event.target.closest(
+          '[data-review-page-editor], [data-review-zoom-editor], [data-reconciliation-detail]',
+        ) !== null
       ) {
         return;
       }
@@ -1943,61 +1944,59 @@ export function ReviewShell(props: ReviewShellProps) {
               {...(props.authoring.interactionLifecycleRequired
                 ? { interactionLifecycleRequired: true }
                 : {})}
-              onDetailOpenChange={setReconciliationDetailOpen}
               focusRequestToken={reconciliationFocusRequest}
               onFocusFallback={focusAnnotationsFallback}
+              renderSummary={(attention) => <AnnotationList
+                attention={attention}
+                items={visibleOwnedItems}
+                existingAnnotations={existingAnnotations}
+                documentGeneration={navigation.documentGeneration}
+                {...(presentedActiveItemId === undefined ? {} : { activeId: presentedActiveItemId })}
+                {...(presentedActiveItemId !== undefined || activeExistingAnnotationKey === undefined
+                  ? {}
+                  : { activeExistingAnnotationKey })}
+                {...(!annotationsVisible || props.correspondingItemId === undefined
+                  ? {}
+                  : { correspondingId: props.correspondingItemId })}
+                {...(!annotationsVisible || listActivation === undefined ? {} : { activationRequest: listActivation })}
+                {...(props.onItemCorrespondenceChange === undefined
+                  ? {}
+                  : { onCorrespondenceChange: props.onItemCorrespondenceChange })}
+                {...(props.copyItemLink === undefined ? {} : { copyLinkForItem })}
+                onNavigate={(item) => {
+                  if (authoringSessionRef.current !== null) return;
+                  cancelAnnotationRestoration();
+                  cancelReaderResume();
+                  markFramingUserIntent();
+                  setActiveItem(item.id);
+                  props.onNavigate?.(item);
+                }}
+                onNavigateExisting={(annotation) => {
+                  if (authoringSessionRef.current !== null) return;
+                  cancelAnnotationRestoration();
+                  cancelReaderResume();
+                  markFramingUserIntent();
+                  setActiveItem(undefined);
+                  setActiveExistingAnnotationKey(existingAnnotationKey(annotation));
+                  props.onNavigateExisting?.(annotation);
+                }}
+                onReadFull={openOwnedAnnotationReader}
+                onReadFullExisting={openExistingAnnotationReader}
+                onReaderOverflowChange={settleOwnedReaderOverflow}
+                onReaderOverflowChangeExisting={settlePendingReaderResume}
+                {...(props.onRetryExistingAnnotations === undefined
+                  ? {}
+                  : { onRetryExistingAnnotations: props.onRetryExistingAnnotations })}
+                onEdit={(item, trigger) => {
+                  if (authoringSessionRef.current !== null) return;
+                  void beginAuthoring({ kind: 'edit', item }, 'tray-edit', trigger);
+                }}
+                onDelete={async (item) => {
+                  if (authoringSessionRef.current !== null) return;
+                  await deleteOwnedAnnotation(item);
+                }}
+              />}
             />
-            {reconciliationDetailOpen ? null : <>
-            <AnnotationList
-              items={visibleOwnedItems}
-              existingAnnotations={existingAnnotations}
-              documentGeneration={navigation.documentGeneration}
-              {...(presentedActiveItemId === undefined ? {} : { activeId: presentedActiveItemId })}
-              {...(presentedActiveItemId !== undefined || activeExistingAnnotationKey === undefined
-                ? {}
-                : { activeExistingAnnotationKey })}
-              {...(!annotationsVisible || props.correspondingItemId === undefined
-                ? {}
-                : { correspondingId: props.correspondingItemId })}
-              {...(!annotationsVisible || listActivation === undefined ? {} : { activationRequest: listActivation })}
-              {...(props.onItemCorrespondenceChange === undefined
-                ? {}
-                : { onCorrespondenceChange: props.onItemCorrespondenceChange })}
-              {...(props.copyItemLink === undefined ? {} : { copyLinkForItem })}
-              onNavigate={(item) => {
-                if (authoringSessionRef.current !== null) return;
-                cancelAnnotationRestoration();
-                cancelReaderResume();
-                markFramingUserIntent();
-                setActiveItem(item.id);
-                props.onNavigate?.(item);
-              }}
-              onNavigateExisting={(annotation) => {
-                if (authoringSessionRef.current !== null) return;
-                cancelAnnotationRestoration();
-                cancelReaderResume();
-                markFramingUserIntent();
-                setActiveItem(undefined);
-                setActiveExistingAnnotationKey(existingAnnotationKey(annotation));
-                props.onNavigateExisting?.(annotation);
-              }}
-              onReadFull={openOwnedAnnotationReader}
-              onReadFullExisting={openExistingAnnotationReader}
-              onReaderOverflowChange={settleOwnedReaderOverflow}
-              onReaderOverflowChangeExisting={settlePendingReaderResume}
-              {...(props.onRetryExistingAnnotations === undefined
-                ? {}
-                : { onRetryExistingAnnotations: props.onRetryExistingAnnotations })}
-              onEdit={(item, trigger) => {
-                if (authoringSessionRef.current !== null) return;
-                void beginAuthoring({ kind: 'edit', item }, 'tray-edit', trigger);
-              }}
-              onDelete={async (item) => {
-                if (authoringSessionRef.current !== null) return;
-                await deleteOwnedAnnotation(item);
-              }}
-            />
-            </>}
             </div>}
             search={props.workspace.search ?? (
               <div className="workspace-state" data-workspace-focus-token="search:unavailable" tabIndex={-1}>

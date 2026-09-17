@@ -460,6 +460,10 @@
   color: var(--review-ink-muted);
 }
 
+.annotation-item__status-icon {
+  color: var(--review-danger);
+}
+
 .annotation-direction-cue {
   position: sticky;
   z-index: 1;
@@ -560,4 +564,3 @@
 @keyframes annotation-status-spin {
   to { transform: rotate(360deg); }
 }
-

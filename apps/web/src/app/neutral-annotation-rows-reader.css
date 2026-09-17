@@ -118,11 +118,18 @@
   margin-left: auto;
 }
 
-.annotation-item__title-row > .annotation-item__meta[data-annotation-metadata-layout="row-head"] > .annotation-item__page {
+.annotation-item__title-row > .annotation-item__meta[data-annotation-metadata-layout="row-head"] > :is(.annotation-item__page, .annotation-item__status-icon) {
   order: 3;
   margin-left: 6px;
+}
+
+.annotation-item__title-row > .annotation-item__meta[data-annotation-metadata-layout="row-head"] > .annotation-item__page {
   color: #737373;
   font: 400 11px/1.5 var(--pk-font-ui);
+}
+
+.annotation-item__title-row > .annotation-item__meta[data-annotation-metadata-layout="row-head"] > .annotation-item__status-icon {
+  color: var(--review-danger);
 }
 
 .annotation-item__title-row > .annotation-item__meta[data-annotation-metadata-layout="row-head"] > :is(
@@ -323,4 +330,3 @@
 .full-annotation-reader__body p:last-child {
   margin-bottom: 0;
 }
-

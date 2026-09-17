@@ -213,7 +213,7 @@ test.describe('automatic PDF refresh annotation lifecycle', () => {
     }).click();
     await expect(page.locator('#root')).toHaveAttribute('data-interaction-hold', 'active');
     const detail = page.locator('[data-reconciliation-detail="reattach"]');
-    await detail.getByRole('button', { name: 'Confirm' }).click();
+    await detail.getByRole('button', { name: 'Attach' }).click();
 
     await expect(detail).toHaveCount(0);
     await expect.poll(async () => page.locator('#root').getAttribute('data-interaction-events')).toBe(
@@ -245,7 +245,7 @@ test.describe('automatic PDF refresh annotation lifecycle', () => {
       'data-interaction-events',
       '["begin:1","begin:1"]',
     );
-    await detail.getByRole('button', { name: 'Confirm' }).click();
+    await detail.getByRole('button', { name: 'Attach' }).click();
     await expect(detail).toHaveCount(0);
     await expect(page.locator('#root')).toHaveAttribute(
       'data-interaction-events',
@@ -287,7 +287,7 @@ test.describe('automatic PDF refresh annotation lifecycle', () => {
       name: 'Reattach previous Highlight annotation on page 1',
     }).click();
     await page.locator('[data-reconciliation-detail="reattach"]')
-      .getByRole('button', { name: 'Confirm' }).click();
+      .getByRole('button', { name: 'Attach' }).click();
 
     await expect.poll(async () => page.locator('#root').getAttribute('data-interaction-events')).toBe(
       '["begin:1","finalize:2:applied","finalize:2:applied","acknowledge:3"]',
