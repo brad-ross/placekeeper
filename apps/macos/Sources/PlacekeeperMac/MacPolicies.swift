@@ -2,6 +2,48 @@ import Foundation
 
 let macShellProtocolVersion = 1
 
+enum CatastrophicFailureReason: String, CaseIterable {
+    case launchFailure = "launch-failure"
+    case helperProcessExited = "helper-process-exited"
+    case lifecycleHelperFailed = "lifecycle-helper-failed"
+    case contentRuleCompilationFailed = "content-rule-compilation-failed"
+    case navigationFailed = "navigation-failed"
+    case provisionalNavigationFailed = "provisional-navigation-failed"
+    case webContentProcessTerminated = "web-content-process-terminated"
+    case runtimeActivationFailed = "runtime-activation-failed"
+    case executableResourceInvalid = "executable-resource-invalid"
+    case documentResourceInvalid = "document-resource-invalid"
+    case pdfiumInstallFailed = "pdfium-install-failed"
+    case workerInstallFailed = "worker-install-failed"
+    case documentInstallFailed = "document-install-failed"
+}
+
+struct ReviewHelperTermination: Equatable, Sendable {
+    enum Reason: String, Sendable {
+        case exit
+        case uncaughtSignal = "uncaught-signal"
+    }
+
+    let reason: Reason
+    let status: Int32
+}
+
+enum CatastrophicDiagnostics {
+    static func informativeText(
+        build: String,
+        reason: CatastrophicFailureReason,
+        helperTermination: ReviewHelperTermination? = nil
+    ) -> String {
+        let safeBuild = build.replacingOccurrences(
+            of: "[^A-Za-z0-9._-]", with: "_", options: .regularExpression
+        )
+        let helperLine = helperTermination.map {
+            "\nHelper termination: \($0.reason.rawValue) \($0.status)"
+        } ?? ""
+        return "Schema: 2\nShell: native-recovery\nBuild: \(String(safeBuild.prefix(100)))\nReason: \(reason.rawValue)\(helperLine)"
+    }
+}
+
 struct ShellReadinessFence: Equatable {
     private(set) var shellRevision: Int?
     private(set) var routingCommitted = false

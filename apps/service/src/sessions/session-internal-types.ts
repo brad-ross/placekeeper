@@ -44,6 +44,9 @@ export interface ActiveSession {
   lastExportAt?: string;
   currentOriginalDigest: string;
   acceptedOriginalDigests: string[];
+  /** Exact digest currently being published by the serialized original-save
+   * transaction. This is transient and never enters recovery state. */
+  originalSavePublication?: { readonly token: symbol; readonly digest: string };
   ending: boolean;
   writeTail: Promise<void>;
   destination: DurableSaveDestination;

@@ -104,6 +104,170 @@ async function openPrimaryReference(page: Page): Promise<void> {
   await expect(page.getByRole('tab', { name: /Primary result/u })).toHaveAttribute('aria-selected', 'true');
 }
 
+interface AnnotationEditFrame {
+  readonly elapsedMs: number;
+  readonly composerCount: number;
+  readonly composerVisibleCount: number;
+  readonly composerPlacement: string | null;
+  readonly composerRect: { readonly left: number; readonly top: number; readonly width: number; readonly height: number } | null;
+  readonly fullReaderCount: number;
+  readonly compactPeekCount: number;
+  readonly initialViewReady: string | null;
+  readonly generationStatus: string | null;
+  readonly toolsIdentity: boolean;
+  readonly referencesIdentity: boolean;
+  readonly toolsPainted: boolean;
+  readonly referencesPainted: boolean;
+  readonly toolsRect: { readonly left: number; readonly top: number; readonly width: number; readonly height: number } | null;
+  readonly referencesRect: { readonly left: number; readonly top: number; readonly width: number; readonly height: number } | null;
+}
+
+async function beginAnnotationEditFrameAudit(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const startedAt = performance.now();
+    const audit = {
+      finished: false,
+      stopRequested: false,
+      postSettleFrames: 4,
+      timedOut: false,
+      samples: [] as AnnotationEditFrame[],
+    };
+    (window as typeof window & { __annotationEditSurfaceAudit?: typeof audit }).__annotationEditSurfaceAudit = audit;
+    const tools = document.querySelector<HTMLElement>('#review-tools-workspace');
+    const references = document.querySelector<HTMLElement>('#review-workspace');
+    const rect = (element: HTMLElement | null) => {
+      if (element === null) return null;
+      const bounds = element.getBoundingClientRect();
+      return { left: bounds.left, top: bounds.top, width: bounds.width, height: bounds.height };
+    };
+    const painted = (element: HTMLElement | null) => {
+      if (element === null) return false;
+      const style = getComputedStyle(element);
+      const bounds = element.getBoundingClientRect();
+      return element.isConnected
+        && element.getClientRects().length > 0
+        && style.display !== 'none'
+        && style.visibility !== 'hidden'
+        && style.visibility !== 'collapse'
+        && Number(style.opacity) > 0
+        && bounds.width > 0
+        && bounds.height > 0;
+    };
+    const visibleCount = (selector: string) => [...document.querySelectorAll<HTMLElement>(selector)]
+      .filter(painted).length;
+    const sample = () => {
+      if (audit.finished) return;
+      const elapsedMs = performance.now() - startedAt;
+      if (elapsedMs > 5_000) {
+        audit.timedOut = true;
+        audit.finished = true;
+        return;
+      }
+      const composers = [...document.querySelectorAll<HTMLElement>('[data-comment-composer]')];
+      const composer = composers.find(painted) ?? null;
+      const bounds = composer?.getBoundingClientRect();
+      audit.samples.push({
+        elapsedMs,
+        composerCount: composers.length,
+        composerVisibleCount: composers.filter(painted).length,
+        composerPlacement: composer?.dataset.composerPlacement ?? null,
+        composerRect: bounds === undefined ? null : {
+          left: bounds.left,
+          top: bounds.top,
+          width: bounds.width,
+          height: bounds.height,
+        },
+        fullReaderCount: visibleCount('[data-full-annotation-reader="true"]'),
+        compactPeekCount: visibleCount('[data-annotation-peek]:not(.annotation-peek--reader)'),
+        initialViewReady: document.querySelector<HTMLElement>('[data-production-review]')
+          ?.dataset.initialViewReady ?? null,
+        generationStatus: document.querySelector<HTMLElement>('[data-generation-status]')
+          ?.dataset.generationStatus ?? 'idle',
+        toolsIdentity: tools !== null && tools.isConnected
+          && document.querySelector('#review-tools-workspace') === tools,
+        referencesIdentity: references !== null && references.isConnected
+          && document.querySelector('#review-workspace') === references,
+        toolsPainted: painted(tools),
+        referencesPainted: painted(references),
+        toolsRect: rect(tools),
+        referencesRect: rect(references),
+      });
+      if (audit.stopRequested) {
+        audit.postSettleFrames -= 1;
+        if (audit.postSettleFrames === 0) {
+          audit.finished = true;
+          return;
+        }
+      }
+      requestAnimationFrame(sample);
+    };
+    sample();
+  });
+}
+
+async function finishAnnotationEditFrameAudit(page: Page): Promise<readonly AnnotationEditFrame[]> {
+  await page.evaluate(() => {
+    const audit = (window as typeof window & {
+      __annotationEditSurfaceAudit?: { stopRequested: boolean };
+    }).__annotationEditSurfaceAudit;
+    if (audit !== undefined) audit.stopRequested = true;
+  });
+  await expect.poll(() => page.evaluate(() => (
+    window as typeof window & { __annotationEditSurfaceAudit?: { finished: boolean } }
+  ).__annotationEditSurfaceAudit?.finished)).toBe(true);
+  const result = await page.evaluate(() => {
+    const auditedWindow = window as typeof window & {
+      __annotationEditSurfaceAudit?: { samples: AnnotationEditFrame[]; timedOut: boolean };
+    };
+    const audit = auditedWindow.__annotationEditSurfaceAudit;
+    const captured = { samples: audit?.samples ?? [], timedOut: audit?.timedOut ?? true };
+    delete auditedWindow.__annotationEditSurfaceAudit;
+    return captured;
+  });
+  expect(result.timedOut).toBe(false);
+  return result.samples;
+}
+
+function expectStableWorkspaceFrames(
+  frames: readonly AnnotationEditFrame[],
+  tools: { readonly x: number; readonly y: number; readonly width: number; readonly height: number },
+  references: { readonly x: number; readonly y: number; readonly width: number; readonly height: number },
+): void {
+  expect(frames.every((frame) => (
+    frame.initialViewReady === 'true'
+    && frame.generationStatus === 'idle'
+    && frame.toolsIdentity
+    && frame.referencesIdentity
+    && frame.toolsPainted
+    && frame.referencesPainted
+    && frame.toolsRect !== null
+    && frame.referencesRect !== null
+    && frame.toolsRect.left === tools.x
+    && frame.toolsRect.top === tools.y
+    && frame.toolsRect.width === tools.width
+    && frame.toolsRect.height === tools.height
+    && frame.referencesRect.left === references.x
+    && frame.referencesRect.top === references.y
+    && frame.referencesRect.width === references.width
+    && frame.referencesRect.height === references.height
+  ))).toBe(true);
+}
+
+function expectComposerTransition(
+  frames: readonly AnnotationEditFrame[],
+  before: 0 | 1,
+  after: 0 | 1,
+): void {
+  expect(frames.length).toBeGreaterThan(4);
+  expect(frames[0]?.composerVisibleCount).toBe(before);
+  expect(frames.at(-1)?.composerVisibleCount).toBe(after);
+  expect(frames.some(({ composerVisibleCount }) => composerVisibleCount === before)).toBe(true);
+  expect(frames.some(({ composerVisibleCount }) => composerVisibleCount === after)).toBe(true);
+  expect(frames.every(({ composerCount, composerVisibleCount }) => (
+    composerCount <= 1 && composerVisibleCount <= 1
+  ))).toBe(true);
+}
+
 test.beforeEach(async () => {
   temporaryRoot = await mkdtemp(join(tmpdir(), 'placekeeper-annotation-followup-'));
   sourceRoot = join(temporaryRoot, 'source');
@@ -139,6 +303,85 @@ test('uses neutral focus on Back after opening the full annotation text', async 
   await back.press('Enter');
   await expect(reader).toHaveCount(0);
   await expect(peek).toBeVisible();
+});
+
+test('keeps reader edits continuously represented while Edit, Cancel, and Apply settle', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  const { itemId } = await openLongAnnotationFixture(page);
+  await chooseCopyDestination(page);
+  const center = await markCenter(page, itemId);
+  await page.mouse.click(center.x, center.y);
+  const compactPeek = page.locator(`[data-annotation-peek="${itemId}"]`);
+  await compactPeek.locator('[data-read-full-annotation]').click();
+  const reader = page.locator('[data-full-annotation-reader="true"]:visible');
+  await expect(reader).toBeVisible();
+
+  await beginAnnotationEditFrameAudit(page);
+  await reader.locator('[data-full-annotation-action="edit"]').click();
+  const composer = page.getByRole('region', { name: 'Edit Page Note' });
+  await expect(composer).toBeVisible();
+  const openingFrames = await finishAnnotationEditFrameAudit(page);
+  expectComposerTransition(openingFrames, 0, 1);
+  for (const frame of openingFrames.filter(({ composerVisibleCount }) => composerVisibleCount === 1)) {
+    expect(frame.composerPlacement).not.toBeNull();
+    expect(frame.composerRect?.width).toBeGreaterThan(0);
+    expect(frame.composerRect?.height).toBeGreaterThan(0);
+  }
+  const placedOpeningFrames = openingFrames.filter((frame) => frame.composerVisibleCount === 1);
+  const initialComposerRect = placedOpeningFrames[0]?.composerRect;
+  expect(initialComposerRect).toBeDefined();
+  if (initialComposerRect === undefined || initialComposerRect === null) {
+    throw new Error('The first painted composer frame had no finite rectangle.');
+  }
+  expect([
+    initialComposerRect.left,
+    initialComposerRect.top,
+    initialComposerRect.width,
+    initialComposerRect.height,
+  ].every(Number.isFinite)).toBe(true);
+  for (const { composerRect } of placedOpeningFrames) {
+    expect(Math.max(
+      Math.abs((composerRect?.left ?? 0) - (initialComposerRect?.left ?? 0)),
+      Math.abs((composerRect?.top ?? 0) - (initialComposerRect?.top ?? 0)),
+      Math.abs((composerRect?.width ?? 0) - (initialComposerRect?.width ?? 0)),
+      Math.abs((composerRect?.height ?? 0) - (initialComposerRect?.height ?? 0)),
+    )).toBeLessThan(1);
+  }
+  expect(openingFrames.every(({ initialViewReady, generationStatus }) => (
+    initialViewReady === 'true' && generationStatus === 'idle'
+  ))).toBe(true);
+
+  await beginAnnotationEditFrameAudit(page);
+  await composer.getByRole('button', { name: 'Cancel' }).click();
+  await expect(reader).toBeVisible();
+  const cancelFrames = await finishAnnotationEditFrameAudit(page);
+  expectComposerTransition(cancelFrames, 1, 0);
+  expect(cancelFrames[0]?.fullReaderCount).toBe(0);
+  expect(cancelFrames.at(-1)?.fullReaderCount).toBe(1);
+  expect(cancelFrames.every((frame) => (
+    frame.composerVisibleCount + frame.fullReaderCount > 0
+    && frame.compactPeekCount === 0
+    && frame.initialViewReady === 'true'
+    && frame.generationStatus === 'idle'
+  ))).toBe(true);
+
+  await reader.locator('[data-full-annotation-action="edit"]').click();
+  await expect(composer).toBeVisible();
+  const edited = `${LONG_ANNOTATION} Applied without an intermediate compact popup.`;
+  await composer.getByRole('textbox', { name: 'Comment' }).fill(edited);
+  await beginAnnotationEditFrameAudit(page);
+  await composer.getByRole('button', { name: 'Apply', exact: true }).click();
+  await expect(reader).toContainText('Applied without an intermediate compact popup.');
+  const applyFrames = await finishAnnotationEditFrameAudit(page);
+  expectComposerTransition(applyFrames, 1, 0);
+  expect(applyFrames[0]?.fullReaderCount).toBe(0);
+  expect(applyFrames.at(-1)?.fullReaderCount).toBe(1);
+  expect(applyFrames.every((frame) => (
+    frame.composerVisibleCount + frame.fullReaderCount > 0
+    && frame.compactPeekCount === 0
+    && frame.initialViewReady === 'true'
+    && frame.generationStatus === 'idle'
+  ))).toBe(true);
 });
 
 test('uses the hover card and explicitly expands long PDF annotations in a deletable full reader', async ({ page }) => {
@@ -218,7 +461,7 @@ const editContinuityLayouts = [
 
 test.describe('passage edit continuity', () => {
   for (const layout of editContinuityLayouts) test(
-    `keeps ${layout.name} and the real PDF continuously painted while Apply settles`,
+    `keeps ${layout.name} and the real PDF continuously painted while Edit, Cancel, and Apply settle`,
     async ({ page }) => {
   await page.setViewportSize(layout.viewport);
   const { itemId } = await openLongAnnotationFixture(page, 'highlight');
@@ -242,9 +485,20 @@ test.describe('passage edit continuity', () => {
 
   const row = page.locator(`[data-review-item="${itemId}"]`);
   await row.hover();
+  await beginAnnotationEditFrameAudit(page);
   await row.getByRole('button', { name: 'Edit Highlight annotation on page 1' }).click();
   const composer = page.getByRole('region', { name: 'Edit Highlight' });
   await expect(composer).toBeVisible();
+  const openingFrames = await finishAnnotationEditFrameAudit(page);
+  expectComposerTransition(openingFrames, 0, 1);
+  expect(openingFrames.every((frame) => (
+    frame.initialViewReady === 'true'
+    && frame.generationStatus === 'idle'
+    && frame.toolsIdentity
+    && frame.referencesIdentity
+    && frame.toolsPainted
+    && frame.referencesPainted
+  ))).toBe(true);
   for (const tray of [tools, references]) {
     await expect(tray).toBeVisible();
     await expect(tray).toHaveAttribute('data-authoring-takeover', 'true');
@@ -256,8 +510,20 @@ test.describe('passage edit continuity', () => {
   expect(toolsDuring).toEqual(toolsBefore);
   expect(referencesDuring).toEqual(referencesBefore);
 
+  await beginAnnotationEditFrameAudit(page);
+  await composer.getByRole('button', { name: 'Cancel' }).click();
+  await expect(composer).toHaveCount(0);
+  const cancelFrames = await finishAnnotationEditFrameAudit(page);
+  expectComposerTransition(cancelFrames, 1, 0);
+  expectStableWorkspaceFrames(cancelFrames, toolsBefore, referencesBefore);
+
+  await row.hover();
+  await row.getByRole('button', { name: 'Edit Highlight annotation on page 1' }).click();
+  await expect(composer).toBeVisible();
+
   const edited = `${LONG_ANNOTATION} Applied without a viewer flash.`;
   await composer.getByRole('textbox', { name: 'Comment (optional)' }).fill(edited);
+  await beginAnnotationEditFrameAudit(page);
   await page.evaluate((reviewId) => {
     const image = document.querySelector<HTMLImageElement>(
       ".pdf-workspace:not(.pdf-workspace--reference) [data-page-index='0'] > img",
@@ -330,6 +596,9 @@ test.describe('passage edit continuity', () => {
   }, itemId);
   await composer.getByRole('button', { name: 'Apply', exact: true }).click();
   await expect(composer).toHaveCount(0);
+  const applySurfaceFrames = await finishAnnotationEditFrameAudit(page);
+  expectComposerTransition(applySurfaceFrames, 1, 0);
+  expectStableWorkspaceFrames(applySurfaceFrames, toolsBefore, referencesBefore);
   await expect.poll(() => page.evaluate(() => (
     window as typeof window & { __annotationEditPaintAudit?: { finished: boolean } }
   ).__annotationEditPaintAudit?.finished)).toBe(true);

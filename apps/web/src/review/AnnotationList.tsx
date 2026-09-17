@@ -57,6 +57,7 @@ export interface AnnotationAttentionPresentation {
   readonly notice: ReactNode;
   readonly message: ReactNode;
   readonly editor: ReactNode;
+  readonly ownedItemIds: readonly string[];
   readonly existingAnnotationKeys: readonly string[];
 }
 
@@ -269,6 +270,11 @@ export function AnnotationList({
   onDelete,
   attention,
 }: AnnotationListProps) {
+  const visibleItems = useMemo(() => {
+    if (attention === undefined) return items;
+    const excluded = new Set(attention.ownedItemIds);
+    return items.filter((item) => !excluded.has(item.id));
+  }, [attention?.ownedItemIds, items]);
   const visibleExistingAnnotations = useMemo<ExistingAnnotationsDiscovery>(() => {
     if (existingAnnotations.status !== 'ready' || attention === undefined) return existingAnnotations;
     const excluded = new Set(attention.existingAnnotationKeys);
@@ -280,8 +286,8 @@ export function AnnotationList({
     };
   }, [attention?.existingAnnotationKeys, existingAnnotations]);
   const combined = useMemo(
-    () => combinedDocumentOrderedAnnotations(items, visibleExistingAnnotations),
-    [items, visibleExistingAnnotations],
+    () => combinedDocumentOrderedAnnotations(visibleItems, visibleExistingAnnotations),
+    [visibleItems, visibleExistingAnnotations],
   );
   const listRef = useRef<HTMLOListElement>(null);
   const entryRefs = useRef(new Map<string, HTMLButtonElement>());

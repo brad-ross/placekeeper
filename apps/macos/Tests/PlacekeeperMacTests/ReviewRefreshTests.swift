@@ -98,6 +98,55 @@ final class ReviewRefreshTests: XCTestCase {
     }
 
     @MainActor
+    func testOversizedRefreshKeepsProjectionAndReportsRecoverableBudgetFailure() async {
+        let first = MacRuntimeProjection(
+            sessionID: "11111111-1111-4111-8111-111111111111", generation: 1, revision: 0,
+            state: [:], scope: [:], saveStatus: [:], protected: false, location: nil,
+            documentDigest: String(repeating: "a", count: 64), documentByteLength: 100
+        )
+        let helper = RefreshTestHelper()
+        let bridge = ReviewBridge(
+            runtimeID: "runtime_test1234", attemptID: "attempt_test1234", helper: helper,
+            admission: .init(provisionalID: "provisional_test", resourceID: "resource_test1234",
+                generation: 1, byteLength: 100, digest: first.documentDigest,
+                displayName: "Paper.pdf", projection: first)
+        )
+        bridge.activate(generation: 1) { _ in }
+        helper.requests.removeFirst().2(.active(first))
+        await Task.yield()
+        var budgetFailures = 0
+        bridge.onRefreshBudgetExceeded = { budgetFailures += 1 }
+        var succeeded = true
+
+        bridge.keepalive(send: { _ in }, completion: { succeeded = $0 })
+        helper.requests.removeFirst().2(.failure(code: "budget"))
+        await Task.yield()
+
+        XCTAssertFalse(succeeded)
+        XCTAssertEqual(budgetFailures, 1)
+        XCTAssertEqual(bridge.projection.generation, 1)
+        XCTAssertEqual(bridge.projection.revision, 0)
+
+        bridge.keepalive(send: { _ in })
+        helper.requests.removeFirst().2(.failure(code: "budget"))
+        await Task.yield()
+        XCTAssertEqual(budgetFailures, 1, "Timer ticks must not reopen a dismissed budget alert")
+
+        bridge.retryRefreshAfterBudgetFailure(send: { _ in })
+        helper.requests.removeFirst().2(.failure(code: "budget"))
+        await Task.yield()
+        XCTAssertEqual(budgetFailures, 2, "An explicit retry may report the persistent failure again")
+
+        bridge.retryRefreshAfterBudgetFailure(send: { _ in })
+        helper.requests.removeFirst().2(.refreshed(first))
+        await Task.yield()
+        bridge.keepalive(send: { _ in })
+        helper.requests.removeFirst().2(.failure(code: "budget"))
+        await Task.yield()
+        XCTAssertEqual(budgetFailures, 3, "A successful refresh clears the latch for a later failure")
+    }
+
+    @MainActor
     func testConsecutiveRefreshesSerializeInstallationAndRejectRollback() async {
         func projection(_ generation: Int) -> MacRuntimeProjection {
             .init(sessionID: "11111111-1111-4111-8111-111111111111", generation: generation,

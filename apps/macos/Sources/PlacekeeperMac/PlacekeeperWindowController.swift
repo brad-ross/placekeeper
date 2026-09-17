@@ -85,6 +85,7 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
     private var pendingDocumentReadyGeneration: Int?
     private var activationStarted = false
     private var keepaliveTimer: Timer?
+    private var refreshBudgetAlertPresented = false
     private var readinessDiagnosticScheduled = false
     private var pdfiumData: Data?
     private var workerData: Data?
@@ -92,7 +93,7 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
     private var commandToken = 0
     private let onCommandSnapshot: (String) -> Void
     private let onRetry: (String) -> Void
-    private let onDiagnostics: () -> Void
+    private let onDiagnostics: (CatastrophicFailureReason, ReviewHelperTermination?) -> Void
     private let centersOnFirstRoutingCommit: Bool
 
     init(
@@ -109,7 +110,7 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
         onBecameKey: @escaping (String) -> Void,
         onCommandSnapshot: @escaping (String) -> Void,
         onRetry: @escaping (String) -> Void,
-        onDiagnostics: @escaping () -> Void,
+        onDiagnostics: @escaping (CatastrophicFailureReason, ReviewHelperTermination?) -> Void,
         onClose: @escaping (String) -> Void
     ) {
         self.windowID = windowID
@@ -180,6 +181,7 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
         bridge.successorInstaller = { [weak self] projection, completion in
             self?.installSuccessor(projection, completion: completion) ?? completion(false)
         }
+        bridge.onRefreshBudgetExceeded = { [weak self] in self?.presentRefreshBudgetAlert() }
         window.delegate = self
 
         contentController.add(self, name: "placekeeperShell")
@@ -265,7 +267,7 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
                 guard let self else { return }
                 if let error {
                     self.diagnostic("content-rule-error: \(error.localizedDescription)")
-                    self.helperDidFail()
+                    self.helperDidFail(reason: .contentRuleCompilationFailed)
                     return
                 }
                 guard let ruleList,
@@ -277,7 +279,10 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
         }
     }
 
-    func helperDidFail() {
+    func helperDidFail(
+        reason: CatastrophicFailureReason = .helperProcessExited,
+        helperTermination: ReviewHelperTermination? = nil
+    ) {
         guard !closed, !failed else { return }
         failed = true
         keepaliveTimer?.invalidate()
@@ -293,7 +298,7 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
                 guard let self else { return }
                 self.onRetry(self.windowID)
             },
-            onDiagnostics: onDiagnostics,
+            onDiagnostics: { [weak self] in self?.onDiagnostics(reason, helperTermination) },
             onClose: { [weak self] _ in self?.window?.performClose(nil) }
         )
         window?.contentViewController = controller
@@ -528,17 +533,17 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
 
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
         diagnostic("navigation-error: \(error.localizedDescription)")
-        helperDidFail()
+        helperDidFail(reason: .navigationFailed)
     }
 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
         diagnostic("provisional-navigation-error: \(error.localizedDescription)")
-        helperDidFail()
+        helperDidFail(reason: .provisionalNavigationFailed)
     }
 
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
         diagnostic("web-content-process-terminated")
-        helperDidFail()
+        helperDidFail(reason: .webContentProcessTerminated)
     }
 
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
@@ -584,7 +589,7 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
         activationStarted = true
         bridge.activate(generation: generation) { [weak self] active in
             guard let self else { return }
-            if !active { self.helperDidFail(); return }
+            if !active { self.helperDidFail(reason: .runtimeActivationFailed); return }
             self.startKeepalive()
         }
     }
@@ -600,6 +605,26 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
     private func requestKeepalive() {
         guard !closed, !failed else { return }
         bridge.keepalive(send: { [weak self] message in self?.sendRuntimeMessage(message) })
+    }
+
+    private func presentRefreshBudgetAlert() {
+        guard !refreshBudgetAlertPresented, let window, !closed, !failed else { return }
+        refreshBudgetAlertPresented = true
+        let alert = NSAlert()
+        alert.messageText = "Review update is too large to display"
+        alert.informativeText = "The last confirmed view remains open, but it may be out of date. Continue this review in the browser if the update still cannot be displayed."
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Retry Update")
+        alert.addButton(withTitle: "Keep Current View")
+        alert.beginSheetModal(for: window) { [weak self] response in
+            guard let self else { return }
+            self.refreshBudgetAlertPresented = false
+            if response == .alertFirstButtonReturn {
+                self.bridge.retryRefreshAfterBudgetFailure(
+                    send: { [weak self] message in self?.sendRuntimeMessage(message) }
+                )
+            }
+        }
     }
 
     private func installSuccessor(_ projection: MacRuntimeProjection, completion: @escaping (Bool) -> Void) {
@@ -806,7 +831,7 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
     private func installPackagedResources() {
         guard let pdfiumData, let workerData else {
             diagnostic("executable-resource-install-invalid")
-            helperDidFail()
+            helperDidFail(reason: .executableResourceInvalid)
             return
         }
         schemeHandler.loadDocument(generation: admission.generation) { [weak self] result in
@@ -814,21 +839,21 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
                 guard let self, !self.closed else { return }
                 guard case let .success(documentData) = result else {
                     self.diagnostic("document-install-invalid")
-                    self.helperDidFail()
+                    self.helperDidFail(reason: .documentResourceInvalid)
                     return
                 }
                 self.installBlob(role: "pdfium", mime: "application/wasm", data: pdfiumData) { installed in
                     self.pdfiumData = nil
                     guard installed else {
                         self.diagnostic("pdfium-install-failed")
-                        self.helperDidFail()
+                        self.helperDidFail(reason: .pdfiumInstallFailed)
                         return
                     }
                     self.installBlob(role: "worker", mime: "application/javascript", data: workerData) { installed in
                         self.workerData = nil
                         guard installed else {
                             self.diagnostic("worker-install-failed")
-                            self.helperDidFail()
+                            self.helperDidFail(reason: .workerInstallFailed)
                             return
                         }
                         self.installBlob(
@@ -840,7 +865,7 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
                             self.schemeHandler.releaseDocumentCache(generation: self.admission.generation)
                             guard installed else {
                                 self.diagnostic("document-install-failed")
-                                self.helperDidFail()
+                                self.helperDidFail(reason: .documentInstallFailed)
                                 return
                             }
                             self.diagnostic("packaged-resources-installed")

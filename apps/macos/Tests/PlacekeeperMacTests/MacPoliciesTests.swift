@@ -1,6 +1,7 @@
 import Foundation
 import AppKit
 import WebKit
+import CryptoKit
 import XCTest
 @testable import PlacekeeperMac
 
@@ -238,6 +239,43 @@ final class MacPoliciesTests: XCTestCase {
         XCTAssertNil(failed.accept(["decision": "resume"], isMainFrame: true, source: source, expectedSource: source))
     }
 
+    @MainActor
+    func testCatastrophicFallbackKeepsReadableMinimumContentSize() {
+        _ = NSApplication.shared
+        let controller = CatastrophicFallbackViewController(
+            documentName: "fixture.pdf",
+            onRetry: {},
+            onDiagnostics: {},
+            onClose: { _ in }
+        )
+
+        XCTAssertGreaterThanOrEqual(controller.preferredContentSize.width, 520)
+        XCTAssertGreaterThanOrEqual(controller.preferredContentSize.height, 220)
+        XCTAssertGreaterThanOrEqual(controller.view.frame.width, controller.preferredContentSize.width)
+        XCTAssertGreaterThanOrEqual(controller.view.frame.height, controller.preferredContentSize.height)
+    }
+
+    func testCatastrophicDiagnosticsReportsOnlyAFixedFailureReasonAndSafeBuild() {
+        let text = CatastrophicDiagnostics.informativeText(
+            build: "0.1.1 /Users/person/private.pdf",
+            reason: .webContentProcessTerminated
+        )
+
+        XCTAssertEqual(
+            text,
+            "Schema: 2\nShell: native-recovery\nBuild: 0.1.1__Users_person_private.pdf\nReason: web-content-process-terminated"
+        )
+        XCTAssertFalse(text.contains("/Users/"))
+        XCTAssertEqual(CatastrophicFailureReason.allCases.count, 13)
+
+        let signalled = CatastrophicDiagnostics.informativeText(
+            build: "0.1.1",
+            reason: .helperProcessExited,
+            helperTermination: ReviewHelperTermination(reason: .uncaughtSignal, status: 9)
+        )
+        XCTAssertTrue(signalled.hasSuffix("Helper termination: uncaught-signal 9"))
+    }
+
     func testVisibleShellRequiresRoutingVisibilityAndSubsequentPaint() {
         var fence = ShellReadinessFence()
         XCTAssertFalse(fence.shellReady(revision: 4))
@@ -430,6 +468,80 @@ final class MacPoliciesTests: XCTestCase {
         XCTAssertThrowsError(try accumulator.append(oversizedFrame)) { error in
             XCTAssertEqual(error as? HelperFrameError, .oversized)
         }
+    }
+
+    func testHelperAccumulatorReassemblesFragmentedMultiByteFrameAboveLegacyLimit() throws {
+        let body = try JSONSerialization.data(withJSONObject: [
+            "type": "refreshed",
+            "payload": String(repeating: "é", count: 1_000_000),
+        ])
+        XCTAssertGreaterThan(body.count, 256 * 1024)
+        XCTAssertLessThan(body.count, macosHelperMaxFrameBytes)
+        var length = UInt32(body.count).bigEndian
+        var frame = withUnsafeBytes(of: &length) { Data($0) }
+        frame.append(body)
+        var accumulator = HelperFrameAccumulator()
+        var messages: [[String: Any]] = []
+        var offset = 0
+        while offset < frame.count {
+            let end = min(offset + 7_777, frame.count)
+            messages.append(contentsOf: try accumulator.append(frame.subdata(in: offset..<end)))
+            offset = end
+        }
+        XCTAssertEqual(messages.count, 1)
+        XCTAssertEqual((messages.first?["payload"] as? String)?.utf8.count, 2_000_000)
+    }
+
+    func testResponseStreamRequiresOrderedIdentityAndVerifiedCompleteBytes() throws {
+        let windowID = "window_12345678"
+        let attemptID = "attempt_12345678"
+        let requestID = "request_12345678"
+        let streamID = "stream_12345678"
+        let body = Data(String(repeating: "é", count: 2_100_000).utf8)
+        let digest = SHA256.hash(data: body).map { String(format: "%02x", $0) }.joined()
+        let count = (body.count + macosHelperResourceChunkBytes - 1) / macosHelperResourceChunkBytes
+        let base: [String: Any] = [
+            "protocolVersion": 1, "windowId": windowID, "attemptId": attemptID, "requestId": requestID,
+        ]
+        var start = base
+        start.merge([
+            "type": "response-stream-start", "streamId": streamID, "totalBytes": body.count,
+            "chunkCount": count, "sha256": digest,
+        ]) { _, next in next }
+        var accumulator = HelperResponseStreamAccumulator()
+        guard case .pending? = accumulator.accept(
+            start, windowID: windowID, attemptID: attemptID, requestID: requestID
+        ) else { return XCTFail("Stream start was rejected") }
+        for sequence in 0..<count {
+            let offset = sequence * macosHelperResourceChunkBytes
+            var chunk = base
+            chunk.merge([
+                "type": "response-stream-chunk", "streamId": streamID, "sequence": sequence,
+                "data": body.subdata(in: offset..<min(offset + macosHelperResourceChunkBytes, body.count)).base64EncodedString(),
+            ]) { _, next in next }
+            let result = accumulator.accept(chunk, windowID: windowID, attemptID: attemptID, requestID: requestID)
+            if sequence + 1 == count {
+                guard case let .complete(reconstructed)? = result else { return XCTFail("Final chunk did not complete") }
+                XCTAssertEqual(reconstructed, body)
+            } else if case .pending? = result {} else { return XCTFail("Intermediate chunk did not remain pending") }
+        }
+
+        var invalid = HelperResponseStreamAccumulator()
+        XCTAssertNil(invalid.accept(start, windowID: windowID, attemptID: attemptID, requestID: "request_wrong_1234"))
+        XCTAssertNotNil(invalid.accept(start, windowID: windowID, attemptID: attemptID, requestID: requestID))
+        var outOfOrder = base
+        outOfOrder.merge([
+            "type": "response-stream-chunk", "streamId": streamID, "sequence": 1,
+            "data": Data([1]).base64EncodedString(),
+        ]) { _, next in next }
+        XCTAssertNil(invalid.accept(outOfOrder, windowID: windowID, attemptID: attemptID, requestID: requestID))
+
+        var oversizedStart = start
+        oversizedStart["totalBytes"] = macosHelperMaxStreamBytes + 1
+        oversizedStart["chunkCount"] = (macosHelperMaxStreamBytes + macosHelperResourceChunkBytes)
+            / macosHelperResourceChunkBytes
+        var oversized = HelperResponseStreamAccumulator()
+        XCTAssertNil(oversized.accept(oversizedStart, windowID: windowID, attemptID: attemptID, requestID: requestID))
     }
 
     func testHelperReplyParserBindsEnvelopeAndAdmissionDescriptor() {

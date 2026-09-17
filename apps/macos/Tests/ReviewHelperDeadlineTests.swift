@@ -82,7 +82,7 @@ private enum ReviewHelperDeadlineTests {
             argumentPrefix: ["-c", "exec sleep 30"],
             baseEnvironment: ProcessInfo.processInfo.environment,
             requestTimeout: timeout,
-            onExit: { _ in onExit() }
+            onExit: { _, _ in onExit() }
         )
     }
 

@@ -1191,6 +1191,202 @@ describe("coalescing PDF autosave", () => {
     await coordinator.drain();
   });
 
+  it("classifies an observed in-flight original publication as the current save", async () => {
+    const observedPublication = Promise.withResolvers<void>();
+    let observeAfterRename: (() => void) | undefined;
+    let observation: Promise<unknown> | undefined;
+    const { source, broker, coordinator, sessionId } = await setup(undefined, {
+      inspectGeneration: async () => ({ pageCount: 1, pages: [] }),
+      syncDirectory: async () => {
+        observeAfterRename?.();
+        await observedPublication.promise;
+      },
+    });
+    await coordinator.chooseOriginal(sessionId);
+    await broker.acceptMutation(sessionId, add(0));
+    const observations: boolean[] = [];
+    broker.onLocalDocumentObservation((event) => {
+      observations.push(event.changed);
+      observedPublication.resolve();
+    });
+    observeAfterRename = () => {
+      observeAfterRename = undefined;
+      observation = broker.observeLiveDocumentHint({
+        sessionId,
+        outputPath: source,
+        hostReason: "activation",
+      });
+    };
+
+    await coordinator.requestSave(sessionId);
+    await expect(observation).resolves.toMatchObject({
+      status: "same-digest",
+      documentGeneration: 1,
+    });
+    expect(observations).toEqual([false, false]);
+    expect(broker.state(sessionId)?.workflow.documentGeneration).toBe(1);
+  });
+
+  it("keeps an actual same-path original-save watcher event in one generation", async () => {
+    const { broker, coordinator, sessionId } = await setup(undefined, {
+      inspectGeneration: async () => ({ pageCount: 1, pages: [] }),
+    });
+    await coordinator.chooseOriginal(sessionId);
+    await broker.acceptMutation(sessionId, add(0));
+    const observations: Array<{ readonly reason: string; readonly changed: boolean }> = [];
+    const watcherObserved = Promise.withResolvers<void>();
+    broker.onLocalDocumentObservation((event) => {
+      observations.push({ reason: event.reason, changed: event.changed });
+      if (event.reason === "watcher") watcherObserved.resolve();
+    });
+
+    await coordinator.requestSave(sessionId);
+    let watcherTimeout: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([
+        watcherObserved.promise,
+        new Promise<never>((_resolve, reject) => {
+          watcherTimeout = setTimeout(
+            () => reject(new Error("The filesystem watcher did not observe the original save")),
+            2_000,
+          );
+        }),
+      ]);
+    } finally {
+      if (watcherTimeout !== undefined) clearTimeout(watcherTimeout);
+    }
+    await coordinator.drain();
+    await broker.settlePhysicalSaveBarrier(sessionId);
+
+    expect(observations.some(({ reason }) => reason === "watcher")).toBe(true);
+    expect(observations).not.toContainEqual(expect.objectContaining({ changed: true }));
+    expect(broker.state(sessionId)?.workflow.documentGeneration).toBe(1);
+  });
+
+  it("retries one observation until different bytes replacing an in-flight original publication win", async () => {
+    const { source, broker, coordinator, sessionId } = await setup(undefined, {
+      inspectGeneration: async () => ({ pageCount: 1, pages: [] }),
+    });
+    await coordinator.chooseOriginal(sessionId);
+    await broker.acceptMutation(sessionId, add(0));
+    await broker.settlePhysicalSaveBarrier(sessionId);
+    const state = broker.state(sessionId)!;
+    const status = broker.saveStatus(sessionId)!;
+    if (status.destination.phase !== "active") throw new Error("Expected active original destination");
+    const prepared = Buffer.from("%PDF-1.7\nprepared service publication\n%%EOF");
+    const external = Buffer.from("%PDF-1.7\nexternal replacement wins\n%%EOF");
+    const inspected = Promise.withResolvers<void>();
+    let observation: Promise<unknown> | undefined;
+    broker.onLocalDocumentObservation((event) => {
+      if (!event.changed) inspected.resolve();
+    });
+
+    await expect(broker.commitSaveCandidate({
+      sessionId,
+      generation: status.destination.generation,
+      documentGeneration: state.workflow.documentGeneration,
+      sourceDigest: state.source.digest,
+      revision: state.revision,
+      stateDigest: reviewStateDigest(state),
+      targetDigest: sha(prepared),
+      commit: async () => {
+        await writeFile(source, prepared);
+        observation = broker.observeLiveDocumentHint({
+          sessionId,
+          outputPath: source,
+          hostReason: "activation",
+        });
+        await inspected.promise;
+        await writeFile(source, external);
+        return {
+          targetDigest: sha(prepared),
+          settle: async () => "superseded" as const,
+        };
+      },
+    })).resolves.toBe("target-superseded");
+    await expect(observation).resolves.toMatchObject({ status: "superseded" });
+
+    await vi.waitFor(() => {
+      expect(broker.state(sessionId)).toMatchObject({
+        source: { digest: sha(external) },
+        workflow: { documentGeneration: 2 },
+      });
+    });
+  });
+
+  it("clears the in-flight publication marker when original publication throws", async () => {
+    const { source, broker, coordinator, sessionId } = await setup(undefined, {
+      inspectGeneration: async () => ({ pageCount: 1, pages: [] }),
+    });
+    await coordinator.chooseOriginal(sessionId);
+    await broker.acceptMutation(sessionId, add(0));
+    await broker.settlePhysicalSaveBarrier(sessionId);
+    const state = broker.state(sessionId)!;
+    const destination = broker.saveStatus(sessionId)!.destination;
+    if (destination.phase !== "active") throw new Error("Expected active original destination");
+    const prepared = Buffer.from("%PDF-1.7\nfailed service publication\n%%EOF");
+
+    await expect(broker.commitSaveCandidate({
+      sessionId,
+      generation: destination.generation,
+      documentGeneration: state.workflow.documentGeneration,
+      sourceDigest: state.source.digest,
+      revision: state.revision,
+      stateDigest: reviewStateDigest(state),
+      targetDigest: sha(prepared),
+      commit: async () => { throw new Error("simulated publication failure"); },
+    })).rejects.toThrow(/simulated publication failure/u);
+
+    await writeFile(source, prepared);
+    const observations: boolean[] = [];
+    broker.onLocalDocumentObservation((event) => observations.push(event.changed));
+    await expect(broker.observeLiveDocumentHint({
+      sessionId,
+      outputPath: source,
+      hostReason: "activation",
+    })).resolves.toMatchObject({ status: "committed", documentGeneration: 2 });
+    expect(observations.at(-1)).toBe(true);
+  });
+
+  it("clears the in-flight publication marker when durability stays uncertain", async () => {
+    const { source, broker, coordinator, sessionId } = await setup(undefined, {
+      inspectGeneration: async () => ({ pageCount: 1, pages: [] }),
+    });
+    await coordinator.chooseOriginal(sessionId);
+    await broker.acceptMutation(sessionId, add(0));
+    await broker.settlePhysicalSaveBarrier(sessionId);
+    const state = broker.state(sessionId)!;
+    const destination = broker.saveStatus(sessionId)!.destination;
+    if (destination.phase !== "active") throw new Error("Expected active original destination");
+    const prepared = Buffer.from("%PDF-1.7\nuncertain service publication\n%%EOF");
+
+    await expect(broker.commitSaveCandidate({
+      sessionId,
+      generation: destination.generation,
+      documentGeneration: state.workflow.documentGeneration,
+      sourceDigest: state.source.digest,
+      revision: state.revision,
+      stateDigest: reviewStateDigest(state),
+      targetDigest: sha(prepared),
+      commit: async () => {
+        await writeFile(source, prepared);
+        return {
+          targetDigest: sha(prepared),
+          settle: async () => "uncertain" as const,
+        };
+      },
+    })).resolves.toBe("commit-pending");
+
+    const changed = Promise.withResolvers<boolean>();
+    broker.onLocalDocumentObservation((event) => changed.resolve(event.changed));
+    void broker.observeLiveDocumentHint({
+      sessionId,
+      outputPath: source,
+      hostReason: "activation",
+    }).catch(() => undefined);
+    await expect(changed.promise).resolves.toBe(true);
+  });
+
   it("rewrites an empty later revision and preserves the original file mode", async () => {
     const { root, source, broker, coordinator, sessionId } = await setup();
     await chmod(source, 0o640);

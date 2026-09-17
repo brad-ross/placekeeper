@@ -462,6 +462,7 @@ export class PdfSaveCoordinator {
               sourceDigest: delivery.source.digest,
               revision: delivery.revision,
               stateDigest,
+              targetDigest: written.evidence.outputSha256,
               commit: async (candidateIsCurrent) => {
                 // A copy is still derived from an owned local source. Reprove
                 // that source immediately before publication: an explicit

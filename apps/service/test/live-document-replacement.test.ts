@@ -23,7 +23,12 @@ import {
   assertReviewItem,
   reduceReview,
 } from "../../../packages/core/src/review-reducer.js";
-import { projectReviewItemProjections } from "../../../packages/core/src/annotation-projection.js";
+import {
+  projectReviewItem,
+  projectReviewItemProjections,
+} from "../../../packages/core/src/annotation-projection.js";
+import { createSelectedPdfWriter } from "../../../packages/pdf-backends/src/selected-writer.js";
+import { readEditableReviewItems } from "../../../packages/pdf-backends/src/embedpdf-adapter.js";
 import { DraftSnapshotStore } from "../src/recovery/draft-snapshot.js";
 import { PdfEvidenceService } from "../src/context/pdf-evidence-service.js";
 import {
@@ -665,6 +670,67 @@ describe("atomic live document replacement", () => {
     await expect(value.broker.documentBytes(value.launch.sessionId, 2)).resolves.toEqual(value.successor);
     await expect(value.broker.documentBytes(value.launch.sessionId, 3)).resolves.toBeUndefined();
     await expect(readFile(value.pdfPath)).resolves.toEqual(value.successor);
+  });
+
+  it("persists one semantic item when a source replacement carries its saved portable annotation", async () => {
+    const value = await fixture({
+      inspectGeneration: async () => ({
+        pageCount: 2,
+        pages: [
+          { pageIndex: 0, text: "Original text was removed.", geometry: [] },
+          {
+            pageIndex: 1,
+            text: "Changed lead. The blue heron returns to the quiet harbor each spring. Changed trail.",
+            geometry: [],
+          },
+        ],
+      }),
+    }, "standard");
+    const item = selectionItem(
+      ITEM_IDS.stable,
+      "The blue heron returns to the quiet harbor each spring.",
+      "Original lead. ",
+      " Original trail.",
+    );
+    await value.broker.acceptMutation(value.launch.sessionId, {
+      type: "add",
+      expectedRevision: 0,
+      item,
+    }, { expectedGeneration: 1 });
+
+    const writer = await createSelectedPdfWriter();
+    const embeddableSource = new Uint8Array(
+      await readFile("test/fixtures/pdfs/text-native.pdf"),
+    );
+    const reviewed = await writer.write({
+      sourcePdf: embeddableSource,
+      sourceSha256: createHash("sha256").update(embeddableSource).digest("hex"),
+      revision: 1,
+      annotations: [projectReviewItem(item)],
+    });
+    const replacementBytes = reviewed.pdfBytes;
+    expect(await readEditableReviewItems(replacementBytes)).toMatchObject([{ id: item.id }]);
+    await writeFile(value.pdfPath, replacementBytes);
+
+    await expect(value.broker.replaceLiveDocument({
+      sessionId: value.launch.sessionId,
+      outputPath: value.pdfPath,
+      observationEpoch: 1,
+    })).resolves.toMatchObject({ status: "committed", documentGeneration: 2 });
+
+    const state = value.broker.state(value.launch.sessionId)!;
+    expect(state.items).toHaveLength(1);
+    expect(state.pendingDrafts).toEqual([]);
+    expect(state.items[0]).toMatchObject({
+      id: item.id,
+      reconciliation: { disposition: { kind: "missing" } },
+    });
+    const persisted = await new DraftSnapshotStore(
+      join(value.directory, "recovery", value.launch.sessionId),
+    ).recover();
+    expect(persisted?.state.items).toHaveLength(1);
+    expect(persisted?.state.pendingDrafts).toEqual([]);
+    expect(persisted?.state.items[0]).toMatchObject({ id: item.id });
   });
 
   it("reuses the accepted successor inspection for reading resolution", async () => {

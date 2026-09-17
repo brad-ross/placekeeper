@@ -2,6 +2,8 @@ import AppKit
 
 @MainActor
 final class CatastrophicFallbackViewController: NSViewController {
+    static let minimumContentSize = NSSize(width: 520, height: 220)
+
     private let onRetry: () -> Void
     private let onDiagnostics: () -> Void
     private let onClose: (NSWindow?) -> Void
@@ -24,7 +26,7 @@ final class CatastrophicFallbackViewController: NSViewController {
         retryButton.controlSize = .large
         retryButton.keyEquivalent = "\r"
 
-        let content = NSView()
+        let content = NSView(frame: NSRect(origin: .zero, size: Self.minimumContentSize))
         let stack = NSStackView()
         stack.orientation = .vertical
         stack.alignment = .leading
@@ -70,6 +72,7 @@ final class CatastrophicFallbackViewController: NSViewController {
             explanation.widthAnchor.constraint(equalTo: stack.widthAnchor),
             actions.widthAnchor.constraint(equalTo: stack.widthAnchor),
         ])
+        preferredContentSize = Self.minimumContentSize
         view = content
     }
 
@@ -77,6 +80,13 @@ final class CatastrophicFallbackViewController: NSViewController {
 
     override func viewDidAppear() {
         super.viewDidAppear()
+        if let window = view.window {
+            window.contentMinSize = Self.minimumContentSize
+            if window.contentLayoutRect.width < Self.minimumContentSize.width ||
+                window.contentLayoutRect.height < Self.minimumContentSize.height {
+                window.setContentSize(Self.minimumContentSize)
+            }
+        }
         if retryButton.isEnabled { view.window?.makeFirstResponder(retryButton) }
         NSAccessibility.post(element: view, notification: .announcementRequested, userInfo: [
             .announcement: "Placekeeper could not display this review. Retry, Diagnostics, and Close are available.",

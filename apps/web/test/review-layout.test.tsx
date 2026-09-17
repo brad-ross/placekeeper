@@ -1538,62 +1538,95 @@ describe('review shell layout and accessibility contract', () => {
     expect(html).toContain('id="workspace-mode-annotations"');
   });
 
-  it('orders attention before one document-ordered owned and source population without duplicating unresolved items', () => {
-    const html = renderToStaticMarkup(
-      <ReviewShell
-        state={{ ...generatedState, items: [ownedAnnotation, unresolvedAnnotation] }}
-        documentTitle="paper.pdf"
-        existingAnnotations={{
-          status: 'ready',
-          generation: 4,
-          items: [{
-            id: 'source-highlight',
-            subtype: 'Highlight',
-            pageIndex: 1,
-            rect: { x: 1, y: 2, width: 3, height: 4 },
-            contents: 'Source-only comment',
-            author: 'Reviewer',
-            flags: [],
-            appearanceModes: ['normal'],
-            supportedAppearance: true,
-          }],
-        }}
-        save={{}}
-        selection={{
-          selectionUpdate: { kind: 'cleared', generation: 0 },
-        }}
-        authoring={{
-          onCommand: async () => generatedState,
-        }}
-        viewer={{}}
-        workspace={{}}
-      >
-        <div>Document canvas</div>
-      </ReviewShell>,
-    );
+  it.each(['generated-output', 'standard'] as const)(
+    'orders %s attention before one document-ordered owned and source population without duplicating unresolved items',
+    (workflowMode) => {
+      const html = renderToStaticMarkup(
+        <ReviewShell
+          state={{
+            ...generatedState,
+            workflow: { ...generatedState.workflow, mode: workflowMode },
+            items: [ownedAnnotation, unresolvedAnnotation],
+            pendingDrafts: [{
+              id: 'frozen-draft',
+              ownerViewId: 'view-1',
+              baseGeneration: 3,
+              revision: 2,
+              kind: 'highlight',
+              pageIndex: 2,
+              text: 'Keep this authored replacement draft visible.',
+              anchor: unresolvedAnnotation.reconciliation!.anchor,
+              disposition: { kind: 'missing', reason: 'draft-frozen-on-predecessor-generation' },
+              status: 'frozen',
+              createdAt: '2026-08-09T00:01:00.000Z',
+              updatedAt: '2026-08-09T00:01:00.000Z',
+            }],
+          }}
+          documentTitle="paper.pdf"
+          existingAnnotations={{
+            status: 'ready',
+            generation: 4,
+            items: [{
+              id: 'unresolved-highlight',
+              subtype: 'Highlight',
+              pageIndex: 0,
+              rect: { x: 10, y: 10, width: 20, height: 10 },
+              contents: 'Embedded saved copy',
+              author: 'Reviewer',
+              flags: [],
+              appearanceModes: ['normal'],
+              supportedAppearance: true,
+            }, {
+              id: 'source-highlight',
+              subtype: 'Highlight',
+              pageIndex: 1,
+              rect: { x: 1, y: 2, width: 3, height: 4 },
+              contents: 'Source-only comment',
+              author: 'Reviewer',
+              flags: [],
+              appearanceModes: ['normal'],
+              supportedAppearance: true,
+            }],
+          }}
+          save={{}}
+          selection={{
+            selectionUpdate: { kind: 'cleared', generation: 0 },
+          }}
+          authoring={{
+            onCommand: async () => generatedState,
+          }}
+          viewer={{}}
+          workspace={{}}
+        >
+          <div>Document canvas</div>
+        </ReviewShell>,
+      );
 
-    const annotations = html.indexOf('<section class="annotation-drawer__owned"');
-    const annotationList = html.indexOf('<ol', annotations);
-    const unresolved = html.indexOf('data-reconciliation-item="unresolved-highlight"');
-    const source = html.indexOf('data-existing-annotation="source-highlight"');
-    const owned = html.indexOf('data-review-item="owned-highlight"');
-    expect(annotations).toBeGreaterThan(-1);
-    expect(annotationList).toBeGreaterThan(annotations);
-    expect(unresolved).toBeGreaterThan(annotationList);
-    expect(source).toBeGreaterThan(unresolved);
-    expect(owned).toBeGreaterThan(source);
-    expect(html.match(/data-reconciliation-item="unresolved-highlight"/gu)).toHaveLength(1);
-    expect(html).not.toContain('data-review-item="unresolved-highlight"');
-    expect(html).not.toContain('data-existing-annotation="unresolved-highlight"');
-    expect(html).toContain('data-review-item="owned-highlight"');
-    expect(html).not.toContain('<h2>Needs attention</h2>');
-    const unresolvedRow = html.slice(unresolved, source);
-    expect(unresolvedRow).toContain('data-annotation-status-icon="warning"');
-    expect(unresolvedRow).toContain('lucide-triangle-alert');
-    expect(unresolvedRow).not.toContain('class="annotation-item__page"');
-    expect(unresolvedRow).not.toContain('class="annotation-item__section"');
-    expect(unresolvedRow).not.toContain('Multiple matches</span>');
-  });
+      const annotations = html.indexOf('<section class="annotation-drawer__owned"');
+      const annotationList = html.indexOf('<ol', annotations);
+      const unresolved = html.indexOf('data-reconciliation-item="unresolved-highlight"');
+      const source = html.indexOf('data-existing-annotation="source-highlight"');
+      const owned = html.indexOf('data-review-item="owned-highlight"');
+      expect(annotations).toBeGreaterThan(-1);
+      expect(annotationList).toBeGreaterThan(annotations);
+      expect(unresolved).toBeGreaterThan(annotationList);
+      expect(source).toBeGreaterThan(unresolved);
+      expect(owned).toBeGreaterThan(source);
+      expect(html.match(/data-reconciliation-item="unresolved-highlight"/gu)).toHaveLength(1);
+      expect(html.match(/data-reconciliation-draft="frozen-draft"/gu)).toHaveLength(1);
+      expect(html).toContain('Keep this authored replacement draft visible.');
+      expect(html).not.toContain('data-review-item="unresolved-highlight"');
+      expect(html).not.toContain('data-existing-annotation="unresolved-highlight"');
+      expect(html).toContain('data-review-item="owned-highlight"');
+      expect(html).not.toContain('<h2>Needs attention</h2>');
+      const unresolvedRow = html.slice(unresolved, source);
+      expect(unresolvedRow).toContain('data-annotation-status-icon="warning"');
+      expect(unresolvedRow).toContain('lucide-triangle-alert');
+      expect(unresolvedRow).not.toContain('class="annotation-item__page"');
+      expect(unresolvedRow).not.toContain('class="annotation-item__section"');
+      expect(unresolvedRow).not.toContain('Multiple matches</span>');
+    },
+  );
 
   it('keeps Annotations as the stable empty core and omits optional sections', () => {
     const html = renderToStaticMarkup(

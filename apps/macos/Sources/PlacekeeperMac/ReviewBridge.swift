@@ -68,7 +68,9 @@ final class ReviewBridge {
     private var refreshPending = false
     private var pendingRefreshSend: (([String: Any]) -> Void)?
     private var installationToken = 0
+    private var refreshBudgetFailureReported = false
     var successorInstaller: ((MacRuntimeProjection, @escaping (Bool) -> Void) -> Void)?
+    var onRefreshBudgetExceeded: (() -> Void)?
     private let diagnosticsEnabled = ProcessInfo.processInfo.environment["PLACEKEEPER_MAC_DIAGNOSTICS"] == "1"
 
     init(runtimeID: String, attemptID: String, helper: any ReviewHelperRequesting, admission: MacReviewAdmission) {
@@ -194,6 +196,7 @@ final class ReviewBridge {
                         self.finishRefresh(success: installed, send: send, completion: completion)
                     }
                 default:
+                    self.noteRefreshFailure(reply)
                     self.finishRefresh(success: false, send: send, completion: completion)
                 }
             }
@@ -203,11 +206,17 @@ final class ReviewBridge {
         }
     }
 
+    func retryRefreshAfterBudgetFailure(send: @escaping ([String: Any]) -> Void) {
+        refreshBudgetFailureReported = false
+        keepalive(send: send)
+    }
+
     private func fetchCurrent(send: @escaping ([String: Any]) -> Void, completion: @escaping (Bool) -> Void) {
         guard helper.request(type: "refresh", fields: [:], completion: { [weak self] reply in
             Task { @MainActor in
                 guard let self else { return }
                 guard case let .refreshed(next)? = reply else {
+                    self.noteRefreshFailure(reply)
                     self.finishRefresh(success: false, send: send, completion: completion)
                     return
                 }
@@ -233,6 +242,7 @@ final class ReviewBridge {
             Task { @MainActor in
                 guard let self else { return }
                 guard case let .refreshed(next)? = reply else {
+                    self.noteRefreshFailure(reply)
                     self.finishRefresh(success: false, send: send)
                     return
                 }
@@ -249,12 +259,19 @@ final class ReviewBridge {
         completion: @escaping (Bool) -> Void = { _ in }
     ) {
         refreshInFlight = false
+        if success { refreshBudgetFailureReported = false }
         completion(success)
         guard refreshPending else { return }
         refreshPending = false
         let nextSend = pendingRefreshSend ?? send
         pendingRefreshSend = nil
         requestRefresh(send: nextSend)
+    }
+
+    private func noteRefreshFailure(_ reply: MacReviewHelperReply?) {
+        guard case .failure(code: "budget")? = reply, !refreshBudgetFailureReported else { return }
+        refreshBudgetFailureReported = true
+        onRefreshBudgetExceeded?()
     }
 
     private func installAndPublish(

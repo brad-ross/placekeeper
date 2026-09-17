@@ -1945,6 +1945,7 @@ export class SessionBroker {
     readonly sourceDigest: string;
     readonly revision: number;
     readonly stateDigest: string;
+    readonly targetDigest?: string;
     readonly commit: (candidateIsCurrent: () => boolean) => Promise<
       | undefined
       | {
@@ -1962,77 +1963,94 @@ export class SessionBroker {
     const session = this.#activeById.get(input.sessionId);
     if (session === undefined || session.ending) return "generation-stale";
     return this.#withSessionTail(session, async () => {
-      const candidateIsCurrent = () => !session.ending &&
-        session.destination.phase === "active" &&
-        session.destination.generation === input.generation &&
-        session.state.workflow.documentGeneration === input.documentGeneration &&
-        session.state.source.digest === input.sourceDigest &&
-        session.physicalSaveBarrierEpoch === undefined;
-      if (!candidateIsCurrent()) return "generation-stale";
-      const durablePredecessor = await session.store.recover();
-      if (durablePredecessor === undefined) {
-        throw new Error("The predecessor recovery record is unavailable");
-      }
-      const publication = await input.commit(candidateIsCurrent);
-      if (publication === undefined) return "generation-stale";
-      const transition = this.#committedSaveTransition(session, durablePredecessor, {
-        revision: input.revision,
-        stateDigest: input.stateDigest,
-        targetDigest: publication.targetDigest,
-      });
-      const committed = () => transition.current ? "committed-current" as const : "committed-stale" as const;
-      const clearBarrier = () => {
-        if (session.replacementCommitBarrier === barrier) delete session.replacementCommitBarrier;
-      };
-      const barrier = {
-        resolve: async (): Promise<"successor" | "predecessor" | "uncertain"> => {
-          let recovered = await session.store.recover().catch(() => undefined);
-          if (recovered !== undefined && isDeepStrictEqual(recovered, transition.durableSuccessor)) {
+      const publicationToken = Symbol("original-save-publication");
+      try {
+        const candidateIsCurrent = () => !session.ending &&
+          session.destination.phase === "active" &&
+          session.destination.generation === input.generation &&
+          session.state.workflow.documentGeneration === input.documentGeneration &&
+          session.state.source.digest === input.sourceDigest &&
+          session.physicalSaveBarrierEpoch === undefined;
+        if (!candidateIsCurrent()) return "generation-stale";
+        const durablePredecessor = await session.store.recover();
+        if (durablePredecessor === undefined) {
+          throw new Error("The predecessor recovery record is unavailable");
+        }
+        if (
+          session.destination.phase === "active" &&
+          session.destination.kind === "original" &&
+          input.targetDigest !== undefined
+        ) {
+          session.originalSavePublication = { token: publicationToken, digest: input.targetDigest };
+        }
+        const publication = await input.commit(candidateIsCurrent);
+        if (publication === undefined) return "generation-stale";
+        if (input.targetDigest !== undefined && publication.targetDigest !== input.targetDigest) {
+          throw new Error("The published save digest does not match its declared candidate digest");
+        }
+        const transition = this.#committedSaveTransition(session, durablePredecessor, {
+          revision: input.revision,
+          stateDigest: input.stateDigest,
+          targetDigest: publication.targetDigest,
+        });
+        const committed = () => transition.current ? "committed-current" as const : "committed-stale" as const;
+        const clearBarrier = () => {
+          if (session.replacementCommitBarrier === barrier) delete session.replacementCommitBarrier;
+        };
+        const barrier = {
+          resolve: async (): Promise<"successor" | "predecessor" | "uncertain"> => {
+            let recovered = await session.store.recover().catch(() => undefined);
+            if (recovered !== undefined && isDeepStrictEqual(recovered, transition.durableSuccessor)) {
+              clearBarrier();
+              transition.apply();
+              return "successor";
+            }
+            if (
+              recovered === undefined ||
+              !isDeepStrictEqual(recovered, transition.durablePredecessor)
+            ) return "uncertain";
+            const publicationStatus = await publication.settle();
+            if (publicationStatus === "superseded") {
+              clearBarrier();
+              return "predecessor";
+            }
+            if (publicationStatus === "uncertain") return "uncertain";
+            try {
+              await session.store.persist(transition.durableSuccessor);
+            } catch {
+              recovered = await session.store.recover().catch(() => undefined);
+              if (
+                recovered === undefined ||
+                !isDeepStrictEqual(recovered, transition.durableSuccessor)
+              ) return "uncertain";
+            }
             clearBarrier();
             transition.apply();
             return "successor";
-          }
-          if (
-            recovered === undefined ||
-            !isDeepStrictEqual(recovered, transition.durablePredecessor)
-          ) return "uncertain";
-          const publicationStatus = await publication.settle();
-          if (publicationStatus === "superseded") {
-            clearBarrier();
-            return "predecessor";
-          }
-          if (publicationStatus === "uncertain") return "uncertain";
-          try {
-            await session.store.persist(transition.durableSuccessor);
-          } catch {
-            recovered = await session.store.recover().catch(() => undefined);
-            if (
-              recovered === undefined ||
-              !isDeepStrictEqual(recovered, transition.durableSuccessor)
-            ) return "uncertain";
-          }
-          clearBarrier();
-          transition.apply();
-          return "successor";
-        },
-      };
-      const publicationStatus = await publication.settle();
-      if (publicationStatus === "superseded") return "target-superseded";
-      if (publicationStatus === "uncertain") {
-        session.replacementCommitBarrier = barrier;
-        return "commit-pending";
+          },
+        };
+        const publicationStatus = await publication.settle();
+        if (publicationStatus === "superseded") return "target-superseded";
+        if (publicationStatus === "uncertain") {
+          session.replacementCommitBarrier = barrier;
+          return "commit-pending";
+        }
+        try {
+          await session.store.persist(transition.durableSuccessor);
+        } catch {
+          session.replacementCommitBarrier = barrier;
+          const outcome = await barrier.resolve();
+          if (outcome === "successor") return committed();
+          if (outcome === "predecessor") return "target-superseded";
+          return "commit-pending";
+        }
+        transition.apply();
+        return committed();
+      } finally {
+        if (session.originalSavePublication?.token === publicationToken) {
+          delete session.originalSavePublication;
+        }
       }
-      try {
-        await session.store.persist(transition.durableSuccessor);
-      } catch {
-        session.replacementCommitBarrier = barrier;
-        const outcome = await barrier.resolve();
-        if (outcome === "successor") return committed();
-        if (outcome === "predecessor") return "target-superseded";
-        return "commit-pending";
-      }
-      transition.apply();
-      return committed();
     });
   }
 
@@ -2830,7 +2848,10 @@ export class SessionBroker {
       postDigestInfo.ino === candidate.identity?.inode &&
       postDigestInfo.size === candidate.identity?.byteLength &&
       postDigestInfo.mtimeMs === candidate.identity?.modifiedAtMs;
-    const changed = !digestIsTrustworthy || candidateDigest !== session.currentOriginalDigest;
+    const servicePublicationIsCurrent = digestIsTrustworthy &&
+      candidateDigest === session.originalSavePublication?.digest;
+    const changed = !digestIsTrustworthy ||
+      (candidateDigest !== session.currentOriginalDigest && !servicePublicationIsCurrent);
     for (const listener of this.#localObservationListeners) {
       try {
         listener({
@@ -2847,10 +2868,17 @@ export class SessionBroker {
         // Observations remain ordered even if a diagnostic consumer fails.
       }
     }
-    if (digestIsTrustworthy && candidateDigest === session.currentOriginalDigest) {
+    if (
+      digestIsTrustworthy &&
+      candidateDigest !== undefined &&
+      (candidateDigest === session.currentOriginalDigest || servicePublicationIsCurrent)
+    ) {
       try {
         const result = await this.#settleObservedSameDigest(session, candidate, candidateDigest);
-        return { status: "current", result };
+        return {
+          status: result.status === "same-digest" ? "current" : "retry",
+          result,
+        };
       } catch {
         return { status: "retry" };
       }
@@ -2882,16 +2910,28 @@ export class SessionBroker {
     if (identity === undefined) throw new Error("A same-digest observation requires stable file identity");
     let invalidation: { readonly documentGeneration: number; readonly reviewRevision: number } | undefined;
     const result = await this.#withSessionTail(session, async () => {
-      const currentInfo = await lstat(candidate.sourcePath).catch(() => undefined);
+      const preHashInfo = await lstat(candidate.sourcePath).catch(() => undefined);
+      const currentDigest = preHashInfo === undefined
+        ? undefined
+        : await hashFile(candidate.sourcePath).catch(() => undefined);
+      const postHashInfo = currentDigest === undefined
+        ? undefined
+        : await lstat(candidate.sourcePath).catch(() => undefined);
       if (
         session.ending ||
         !this.#localDocumentObserver.isCurrent(session.id, candidate.sequence) ||
         candidate.sequence < session.latestObservationEpoch ||
-        currentInfo === undefined || !currentInfo.isFile() || currentInfo.isSymbolicLink() ||
-        currentInfo.dev !== identity.device ||
-        currentInfo.ino !== identity.inode ||
-        currentInfo.size !== identity.byteLength ||
-        currentInfo.mtimeMs !== identity.modifiedAtMs
+        preHashInfo === undefined || !preHashInfo.isFile() || preHashInfo.isSymbolicLink() ||
+        preHashInfo.dev !== identity.device ||
+        preHashInfo.ino !== identity.inode ||
+        preHashInfo.size !== identity.byteLength ||
+        preHashInfo.mtimeMs !== identity.modifiedAtMs ||
+        postHashInfo === undefined || !postHashInfo.isFile() || postHashInfo.isSymbolicLink() ||
+        postHashInfo.dev !== identity.device ||
+        postHashInfo.ino !== identity.inode ||
+        postHashInfo.size !== identity.byteLength ||
+        postHashInfo.mtimeMs !== identity.modifiedAtMs ||
+        currentDigest !== candidateDigest
       ) {
         return {
           status: "superseded" as const,

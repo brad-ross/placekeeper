@@ -1,37 +1,6 @@
 @preconcurrency import Foundation
 
-let macosHelperMaxFrameBytes = 256 * 1024
-let macosHelperResourceChunkBytes = 64 * 1024
 let macosHelperRequestTimeout: TimeInterval = 15
-
-enum HelperFrameError: Error, Equatable {
-    case empty
-    case oversized
-    case malformedJSON
-}
-
-struct HelperFrameAccumulator {
-    private var buffered = Data()
-
-    mutating func append(_ bytes: Data) throws -> [[String: Any]] {
-        buffered.append(bytes)
-        var messages: [[String: Any]] = []
-        while buffered.count >= 4 {
-            let length = Int(buffered.prefix(4).reduce(UInt32(0)) { ($0 << 8) | UInt32($1) })
-            guard length > 0 else { throw HelperFrameError.empty }
-            guard length <= macosHelperMaxFrameBytes else { throw HelperFrameError.oversized }
-            guard buffered.count >= length + 4 else { break }
-            let body = buffered.subdata(in: 4..<(length + 4))
-            guard let value = try? JSONSerialization.jsonObject(with: body),
-                  let message = value as? [String: Any] else {
-                throw HelperFrameError.malformedJSON
-            }
-            messages.append(message)
-            buffered.removeSubrange(0..<(length + 4))
-        }
-        return messages
-    }
-}
 
 struct MacRuntimeProjection {
     let sessionID: String
@@ -284,6 +253,7 @@ final class SupervisedReviewHelper: ReviewHelperProcess, ReviewHelperRequesting,
     private let deadlineQueue = DispatchQueue(label: "local.placekeeper.macos.helper-deadlines", qos: .utility)
     private var accumulator = HelperFrameAccumulator()
     private var pending: [String: PendingRequest] = [:]
+    private var responseStreams = HelperResponseStreamAccumulator()
     private var finished = false
 
     var isRunning: Bool { process.isRunning }
@@ -297,7 +267,7 @@ final class SupervisedReviewHelper: ReviewHelperProcess, ReviewHelperRequesting,
         argumentPrefix: [String] = [],
         baseEnvironment: [String: String],
         requestTimeout: TimeInterval = macosHelperRequestTimeout,
-        onExit: @escaping @Sendable (String) -> Void
+        onExit: @escaping @Sendable (String, ReviewHelperTermination) -> Void
     ) {
         self.windowID = windowID
         self.attemptID = attemptID
@@ -316,9 +286,13 @@ final class SupervisedReviewHelper: ReviewHelperProcess, ReviewHelperRequesting,
         environment["PLACEKEEPER_WINDOW_ID"] = windowID
         environment["PLACEKEEPER_ATTEMPT_ID"] = attemptID
         process.environment = environment
-        process.terminationHandler = { [weak self] _ in
+        process.terminationHandler = { [weak self] process in
+            let termination = ReviewHelperTermination(
+                reason: process.terminationReason == .uncaughtSignal ? .uncaughtSignal : .exit,
+                status: process.terminationStatus
+            )
             self?.finish()
-            onExit(windowID)
+            onExit(windowID, termination)
         }
         stdoutPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
             let bytes = handle.availableData
@@ -396,10 +370,32 @@ final class SupervisedReviewHelper: ReviewHelperProcess, ReviewHelperRequesting,
         var deliveries: [(Completion, MacReviewHelperReply?)] = []
         for message in messages {
             guard let requestID = message["requestId"] as? String,
-                  let request = pending.removeValue(forKey: requestID) else {
+                  let request = pending[requestID] else {
                 lock.unlock()
                 terminate()
                 return
+            }
+            if ["response-stream-start", "response-stream-chunk"].contains(message["type"] as? String) {
+                guard let streamResult = responseStreams.accept(
+                    message, windowID: windowID, attemptID: attemptID, requestID: requestID
+                ) else {
+                    lock.unlock(); terminate(); return
+                }
+                guard case let .complete(reconstructed) = streamResult else { continue }
+                guard let value = try? JSONSerialization.jsonObject(with: reconstructed),
+                      let complete = value as? [String: Any],
+                      let finished = pending.removeValue(forKey: requestID) else {
+                    lock.unlock(); terminate(); return
+                }
+                finished.deadline.cancel()
+                deliveries.append((finished.completion, MacReviewHelperReplyParser.parse(
+                    complete, windowID: windowID, attemptID: attemptID, requestID: requestID
+                )))
+                continue
+            }
+            guard !responseStreams.contains(requestID),
+                  pending.removeValue(forKey: requestID) != nil else {
+                lock.unlock(); terminate(); return
             }
             request.deadline.cancel()
             deliveries.append((request.completion, MacReviewHelperReplyParser.parse(
@@ -416,6 +412,7 @@ final class SupervisedReviewHelper: ReviewHelperProcess, ReviewHelperRequesting,
         finished = true
         let requests = Array(pending.values)
         pending.removeAll()
+        responseStreams.removeAll()
         lock.unlock()
         for request in requests { request.deadline.cancel() }
         stdoutPipe.fileHandleForReading.readabilityHandler = nil
@@ -430,6 +427,7 @@ final class SupervisedReviewHelper: ReviewHelperProcess, ReviewHelperRequesting,
         finished = true
         let requests = Array(pending.values)
         pending.removeAll()
+        responseStreams.removeAll()
         lock.unlock()
         for request in requests { request.deadline.cancel() }
         stdoutPipe.fileHandleForReading.readabilityHandler = nil

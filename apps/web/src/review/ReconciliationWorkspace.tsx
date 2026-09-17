@@ -719,6 +719,9 @@ export function ReconciliationWorkspace(props: ReconciliationWorkspaceProps) {
   const existingAnnotationKeys = useMemo(() => records.flatMap((record) => record.target.kind === "item"
     ? [existingAnnotationKey({ id: record.target.id, pageIndex: record.pageNumber - 1 })]
     : []), [records]);
+  const ownedItemIds = useMemo(() => records.flatMap((record) => record.target.kind === "item"
+    ? [record.target.id]
+    : []), [records]);
   let editor: ReactNode = null;
   if (activeRecord !== undefined && detail !== null) {
     const typeLabel = annotationKindLabel(activeRecord.kind);
@@ -790,6 +793,7 @@ export function ReconciliationWorkspace(props: ReconciliationWorkspaceProps) {
     notice,
     message: messageNode,
     editor,
+    ownedItemIds,
     existingAnnotationKeys,
   });
 }

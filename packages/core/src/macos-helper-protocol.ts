@@ -12,7 +12,8 @@ import {
 } from "./review-runtime-protocol.js";
 
 export const MACOS_HELPER_PROTOCOL_VERSION = 1 as const;
-export const MACOS_HELPER_MAX_FRAME_BYTES = 256 * 1024;
+export const MACOS_HELPER_MAX_FRAME_BYTES = 4 * 1024 * 1024;
+export const MACOS_HELPER_MAX_STREAM_BYTES = 16 * 1024 * 1024;
 export const MACOS_HELPER_RESOURCE_CHUNK_BYTES = 64 * 1024;
 
 const ID = /^[A-Za-z0-9_-]{8,128}$/u;
