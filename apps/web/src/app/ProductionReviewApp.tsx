@@ -82,8 +82,12 @@ import {
 import type { ViewerFramingControls } from "../pdf/viewer-framing.js";
 import type { PdfViewerNavigation } from "../pdf/viewer-navigation-adapter.js";
 import type {
-  PdfTargetVisibility,
-  PdfViewportQuery,
+  PdfDocumentOrderPage,
+} from '../pdf/document-order-location.js';
+import {
+  naturalAnchorToPdfBottomOriginPoint,
+  type PdfTargetVisibility,
+  type PdfViewportQuery,
 } from '../pdf/viewer-navigation.js';
 import {
   pdfDocumentTitleForSource,
@@ -224,6 +228,7 @@ export function annotationReferenceRequest(
     readonly existingAnnotations: ExistingAnnotationsDiscovery;
     readonly documentGeneration: number;
     readonly pageCount: number;
+    readonly pages: readonly PdfDocumentOrderPage[] | null;
   },
 ): {
   readonly target: NonNullable<ReturnType<typeof pdfNavigationTargetFromPlacekeeperLocation>>;
@@ -253,11 +258,18 @@ export function annotationReferenceRequest(
     point = { x: annotation.rect.x, y: annotation.rect.y };
     label = `${annotation.subtype} annotation on page ${pageIndex + 1}`;
   }
+  if (sources.pages === null) return null;
+  const page = sources.pages[pageIndex];
+  if (page === undefined) return null;
+  const pdfPoint = naturalAnchorToPdfBottomOriginPoint(point, page.size, {
+    x: page.crop.left,
+    y: page.crop.bottom,
+  });
   const target = pdfNavigationTargetFromPlacekeeperLocation({
     kind: 'destination',
     page: pageIndex + 1,
     mode: 'xyz',
-    params: [point.x, point.y, 0],
+    params: [pdfPoint.x, pdfPoint.y, 0],
   }, {
     documentGeneration: sources.documentGeneration,
     pageCount: sources.pageCount,
@@ -272,7 +284,7 @@ export function annotationReferenceRequest(
 export function authoringReferenceTarget(
   anchor: AuthoringAnchorSnapshot,
   currentAuthority: AuthoringAuthority,
-  pageCount: number,
+  pages: readonly PdfDocumentOrderPage[] | null,
 ): NonNullable<ReturnType<typeof pdfNavigationTargetFromPlacekeeperLocation>> | null {
   if (
     anchor.surface?.kind !== 'reference'
@@ -282,14 +294,21 @@ export function authoringReferenceTarget(
     || anchor.referenceRecovery.target.documentGeneration !== currentAuthority.documentGeneration
     || anchor.point === null
   ) return null;
+  if (pages === null) return null;
+  const page = pages[anchor.pageIndex];
+  if (page === undefined) return null;
+  const pdfPoint = naturalAnchorToPdfBottomOriginPoint(anchor.point, page.size, {
+    x: page.crop.left,
+    y: page.crop.bottom,
+  });
   return pdfNavigationTargetFromPlacekeeperLocation({
     kind: 'destination',
     page: anchor.pageIndex + 1,
     mode: 'xyz',
-    params: [anchor.point.x, anchor.point.y, 0],
+    params: [pdfPoint.x, pdfPoint.y, 0],
   }, {
     documentGeneration: currentAuthority.documentGeneration,
-    pageCount,
+    pageCount: pages.length,
   });
 }
 
@@ -802,7 +821,9 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       const target = authoringReferenceTarget(
         anchor,
         currentAuthority,
-        viewerStateRef.current.totalPages,
+        mainNavigationRef.current?.captureDocumentOrderPages()
+          ?? referenceNavigationRef.current?.captureDocumentOrderPages()
+          ?? null,
       );
       if (recovery === undefined || target === null) {
         return { token: anchor.token, visibility: 'unavailable' };
@@ -874,7 +895,9 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       const target = authoringReferenceTarget(
         anchor,
         currentAuthority,
-        viewerStateRef.current.totalPages,
+        mainNavigationRef.current?.captureDocumentOrderPages()
+          ?? referenceNavigationRef.current?.captureDocumentOrderPages()
+          ?? null,
       );
       if (recovery === undefined || target === null) {
         refreshAuthoringAnchorNavigation();
@@ -1542,6 +1565,9 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       existingAnnotations,
       documentGeneration: documentGenerationRef.current,
       pageCount: viewerState.totalPages,
+      pages: mainNavigationRef.current?.captureDocumentOrderPages()
+        ?? referenceNavigationRef.current?.captureDocumentOrderPages()
+        ?? null,
     });
     if (request === null) {
       setNavigationAnnouncement('Annotation passage unavailable.');

@@ -8,6 +8,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { PdfNavigationTarget } from '../src/pdf/pdf-navigation-target.js';
 import { combinePageRotation } from '../src/pdf/owned-overlay.js';
 import {
+  naturalAnchorToPdfBottomOriginPoint,
   pdfBottomOriginPointToNaturalAnchor,
   samePdfViewerLocation,
   type PdfViewerLocation,
@@ -51,6 +52,29 @@ describe('viewer navigation math', () => {
       page,
       { x: 100, y: 200 },
     )).toEqual({ x: 72, y: 160 });
+  });
+
+  it('round trips a cropped natural anchor through a rotated PDF destination', () => {
+    const natural = { x: 72, y: 160 };
+    const cropOrigin = { x: 100, y: 200 };
+    const pdfPoint = naturalAnchorToPdfBottomOriginPoint(natural, page, cropOrigin);
+    expect(pdfPoint).toEqual({ x: 172, y: 840 });
+    const location = createPdfTargetLocation({
+      documentGeneration: 4,
+      pageIndex: 0,
+      zoom: { mode: PdfZoomMode.XYZ, params: [pdfPoint.x, pdfPoint.y, 0] },
+      identity: 'cropped-rotated-annotation',
+    }, {
+      page: { ...page, cropOrigin },
+      viewport,
+      currentZoom: 1.25,
+      rotation: Rotation.Degree90,
+    });
+    expect(location).toMatchObject({
+      anchor: natural,
+      alignment: { xPercent: 0, yPercent: 0 },
+      zoom: 1.25,
+    });
   });
 
   it.each([

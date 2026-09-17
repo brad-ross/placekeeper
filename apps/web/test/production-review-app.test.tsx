@@ -174,6 +174,10 @@ describe("one production review tree", () => {
       existingAnnotations: { status: 'ready' as const, generation: 6, items: [existing] },
       documentGeneration: 4,
       pageCount: 8,
+      pages: Array.from({ length: 8 }, () => ({
+        size: { width: 600, height: 800 },
+        crop: { left: 10, top: 0, bottom: 20 },
+      })),
     };
     const owned = annotationReferenceRequest({ origin: 'owned', itemId: item.id }, sources);
     expect(owned).toMatchObject({
@@ -181,11 +185,11 @@ describe("one production review tree", () => {
       target: { documentGeneration: 4, pageIndex: 2 },
       metadata: { pageContext: 'Page 3' },
     });
-    expect(owned?.target.zoom.params).toEqual([24, 80, 0]);
+    expect(owned?.target.zoom.params).toEqual([34, 740, 0]);
     expect(annotationReferenceRequest({
       origin: 'source', annotationKey: '3:native-a', documentGeneration: 4,
       discoveryGeneration: 6,
-    }, sources)?.target.zoom.params).toEqual([30, 90, 0]);
+    }, sources)?.target.zoom.params).toEqual([40, 730, 0]);
     expect(annotationReferenceRequest({
       origin: 'source', annotationKey: '3:native-a', documentGeneration: 4,
       discoveryGeneration: 5,
@@ -242,13 +246,17 @@ describe("one production review tree", () => {
       },
     };
 
-    const target = authoringReferenceTarget(anchor, authority, 20);
+    const pages = Array.from({ length: 20 }, () => ({
+      size: { width: 600, height: 800 },
+      crop: { left: 10, top: 0, bottom: 20 },
+    }));
+    const target = authoringReferenceTarget(anchor, authority, pages);
     expect(target).toMatchObject({ documentGeneration: 4, pageIndex: 13 });
-    expect(target?.zoom.params).toEqual([44, 180, 0]);
+    expect(target?.zoom.params).toEqual([54, 640, 0]);
     expect(openedOnPageOne.pageIndex).toBe(0);
     expect(authoringReferenceTarget(anchor, {
       sourceIdentity: 'replacement:digest', documentGeneration: 5,
-    }, 20)).toBeNull();
+    }, pages)).toBeNull();
   });
 
   it('keeps equivalent runtime viewer authority stable across review-state snapshots', () => {

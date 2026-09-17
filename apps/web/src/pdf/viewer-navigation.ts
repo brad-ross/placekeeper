@@ -129,3 +129,15 @@ export function pdfBottomOriginPointToNaturalAnchor(
     y: page.height - (point.y - cropOrigin.y),
   };
 }
+
+/** Converts a natural top-origin page anchor into a cropped PDF destination point. */
+export function naturalAnchorToPdfBottomOriginPoint(
+  point: PdfNaturalPoint,
+  page: PdfNaturalPageSize,
+  cropOrigin: PdfNaturalPoint = { x: 0, y: 0 },
+): PdfNaturalPoint {
+  return {
+    x: point.x + cropOrigin.x,
+    y: page.height - point.y + cropOrigin.y,
+  };
+}
