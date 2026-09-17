@@ -1121,6 +1121,8 @@ describe('document-scoped navigation coordinator', () => {
     expect(run.main.controls.applyTarget).not.toHaveBeenCalled();
     expect(run.main.controls.applyLocation).toHaveBeenCalledOnce();
     expect(run.main.controls.applyLocation).toHaveBeenCalledWith(original);
+    expect(run.main.controls.captureLocation)
+      .toHaveBeenCalledWith('viewport-origin');
     expect(run.main.controls.captureLocation()).toEqual(original);
     expect(run.state().mainHistory).toEqual(historyBefore);
     expect(run.reference.controls.applyTarget)

@@ -29,6 +29,7 @@ import {
 import {
   isPdfViewerLocation,
   pdfBottomOriginPointToNaturalAnchor,
+  type PdfLocationCaptureMode,
   type PdfNaturalPageSize,
   type PdfNaturalPoint,
   type PdfTargetVisibility,
@@ -739,7 +740,9 @@ export function createViewerNavigation(
     return { ...best, viewportRect };
   };
 
-  const captureLocation = (): PdfViewerLocation | null => {
+  const captureLocation = (
+    mode: PdfLocationCaptureMode = 'center',
+  ): PdfViewerLocation | null => {
     const viewer = activeViewer();
     if (!viewer) return null;
     let pageIndex: number;
@@ -758,7 +761,9 @@ export function createViewerNavigation(
     const right = Math.min(viewportRect.right, pageRect.right);
     const bottom = Math.min(viewportRect.bottom, pageRect.bottom);
     if (right <= left || bottom <= top) return null;
-    const clientPoint = { x: (left + right) / 2, y: (top + bottom) / 2 };
+    const clientPoint = mode === 'viewport-origin'
+      ? { x: left, y: top }
+      : { x: (left + right) / 2, y: (top + bottom) / 2 };
     const anchor = restorePosition(
       page.size,
       { x: clientPoint.x - pageRect.left, y: clientPoint.y - pageRect.top },

@@ -660,14 +660,16 @@ export class NavigationCoordinator {
       : state.tabs.find((tab) => (
           tab.annotationIdentity !== undefined
           && annotationReaderIdentityMatches(tab.annotationIdentity, options.annotationIdentity!)
-        )));
+    )));
     const preserveMain = preservedMainTarget !== undefined;
     const main = preserveMain ? this.dependencies.getMainNavigation() : undefined;
-    const mainLocation = main?.captureLocation() ?? null;
+    const mainLocation = preservedMainTarget === null
+      ? main?.captureLocation('viewport-origin') ?? null
+      : main?.captureLocation() ?? null;
     const restoreMainLocation = async () => {
       if (!preserveMain) return true;
       if (main && preservedMainTarget !== null) return main.applyTarget(preservedMainTarget);
-      const shifted = main?.captureLocation() ?? null;
+      const shifted = main?.captureLocation('viewport-origin') ?? null;
       return !main
         || !mainLocation
         || samePdfViewerLocation(mainLocation, shifted)

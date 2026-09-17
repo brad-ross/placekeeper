@@ -651,6 +651,10 @@ function navigationHarness(options: {
     setCurrentZoom(zoom: number) {
       currentZoom = zoom;
     },
+    resizeViewport(width: number, height: number) {
+      viewportRect.width = width;
+      viewportRect.height = height;
+    },
     replaceActiveDocument(documentId: string) {
       activeDocumentId = documentId;
       for (const listener of storeListeners) listener();
@@ -1107,6 +1111,24 @@ describe('viewer navigation adapter', () => {
 
     expect(await harness.navigation.applyLocation(captured!)).toBe(true);
     expect(samePdfViewerLocation(harness.navigation.captureLocation(), captured)).toBe(true);
+  });
+
+  it('captures a transient viewport origin that survives tray-driven viewport resizing', async () => {
+    const harness = navigationHarness();
+    const captured = harness.navigation.captureLocation('viewport-origin');
+
+    expect(captured).toEqual({
+      pageIndex: 0,
+      anchor: { x: 100, y: 200 },
+      alignment: { xPercent: 0, yPercent: 0 },
+      zoom: 1,
+    });
+    const originalPagePosition = { left: harness.pageRect.left, top: harness.pageRect.top };
+    harness.resizeViewport(400, 200);
+
+    expect(await harness.navigation.applyLocation(captured!)).toBe(true);
+    expect(harness.pageRect).toMatchObject(originalPagePosition);
+    expect(harness.navigation.captureLocation('viewport-origin')).toEqual(captured);
   });
 
   it('accepts a fully visible fitted page when a tray runway creates artificial horizontal scroll range', async () => {
