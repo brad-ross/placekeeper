@@ -832,7 +832,7 @@ function Harness() {
     >
       {visualScenario ? (
         <VisualDocument items={state.items} onCorrespondenceChange={setCorrespondingItemId} />
-      ) : <div>
+      ) : <div data-annotation-surface="main">
         <button type="button" onClick={() => {
           setSelectionGeneration((generation) => generation + 1);
           setAnchorKind('selection');

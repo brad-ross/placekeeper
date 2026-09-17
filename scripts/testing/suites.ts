@@ -226,6 +226,7 @@ export const suites: Record<string, TestStage[]> = {
         "apps/web/test/text-reliability.test.ts",
         "apps/web/test/selection-anchor.test.ts",
         "apps/web/test/owned-overlay.test.ts",
+        "apps/web/test/annotation-surface.test.ts",
         "apps/web/test/owned-mark-hit-test.test.ts",
         "apps/web/test/viewer-interaction-events.test.ts",
         "apps/web/test/app-interactions.test.ts",
@@ -256,6 +257,7 @@ export const suites: Record<string, TestStage[]> = {
         "apps/web/test/review-layout.test.tsx",
         "apps/web/test/annotation-projection.test.ts",
         "apps/web/test/production-review-app.test.tsx",
+        "apps/web/test/review-shell-reference-authoring.test.tsx",
         "apps/web/test/codex-context-status.test.tsx",
         "apps/web/test/existing-annotations.test.ts",
         "apps/web/test/main-location-refresh.test.ts",
@@ -323,7 +325,9 @@ export const suites: Record<string, TestStage[]> = {
         "test/acceptance/neutral-design-conformance.spec.ts",
         "test/acceptance/host-interface.spec.ts",
         "test/acceptance/macos-interface.spec.ts",
-        "test/acceptance/annotation-behavior-followup.spec.ts"
+        "test/acceptance/annotation-behavior-followup.spec.ts",
+        "test/acceptance/reference-annotations.spec.ts",
+        "test/acceptance/reference-annotation-stale-commands.spec.ts"
       ]
     }
   ],
@@ -346,7 +350,9 @@ export const suites: Record<string, TestStage[]> = {
         "test/acceptance/workspace-row-interactions.spec.ts",
         "test/acceptance/pdf-mark-design.spec.ts",
         "test/acceptance/macos-interface.spec.ts",
-        "test/acceptance/annotation-behavior-followup.spec.ts"
+        "test/acceptance/annotation-behavior-followup.spec.ts",
+        "test/acceptance/reference-annotations.spec.ts",
+        "test/acceptance/reference-annotation-stale-commands.spec.ts"
       ]
     }
   ],
@@ -406,6 +412,8 @@ export const suites: Record<string, TestStage[]> = {
       "files": [
         "apps/web/test/production-review-app.test.tsx",
         "apps/web/test/owned-overlay.test.ts",
+        "apps/web/test/annotation-surface.test.ts",
+        "apps/web/test/review-shell-reference-authoring.test.tsx",
         "apps/vscode/test/extension.test.ts",
         "packaging/macos/packaging.test.ts"
       ]
@@ -415,7 +423,9 @@ export const suites: Record<string, TestStage[]> = {
       "runner": "playwright",
       "options": ["--config", "scripts/testing/config/playwright.config.ts"],
       "files": [
-        "test/acceptance/production-flow.spec.ts"
+        "test/acceptance/production-flow.spec.ts",
+        "test/acceptance/reference-annotations.spec.ts",
+        "test/acceptance/reference-annotation-stale-commands.spec.ts"
       ]
     }
   ],
@@ -460,7 +470,9 @@ export const suites: Record<string, TestStage[]> = {
         "test/acceptance/neutral-design-conformance.spec.ts",
         "test/acceptance/host-interface.spec.ts",
         "test/acceptance/macos-interface.spec.ts",
-        "test/acceptance/annotation-behavior-followup.spec.ts"
+        "test/acceptance/annotation-behavior-followup.spec.ts",
+        "test/acceptance/reference-annotations.spec.ts",
+        "test/acceptance/reference-annotation-stale-commands.spec.ts"
       ]
     }
   ],
@@ -483,7 +495,9 @@ export const suites: Record<string, TestStage[]> = {
         "test/acceptance/workspace-row-interactions.spec.ts",
         "test/acceptance/pdf-mark-design.spec.ts",
         "test/acceptance/macos-interface.spec.ts",
-        "test/acceptance/annotation-behavior-followup.spec.ts"
+        "test/acceptance/annotation-behavior-followup.spec.ts",
+        "test/acceptance/reference-annotations.spec.ts",
+        "test/acceptance/reference-annotation-stale-commands.spec.ts"
       ]
     }
   ],
@@ -578,6 +592,8 @@ export const ciUnitFiles = [
       'apps/web/test/review-layout.test.tsx',
       'apps/web/test/annotation-projection.test.ts',
       'apps/web/test/production-review-app.test.tsx',
+      'apps/web/test/annotation-surface.test.ts',
+      'apps/web/test/review-shell-reference-authoring.test.tsx',
       'apps/web/test/codex-context-status.test.tsx',
       'apps/web/test/existing-annotations.test.ts',
       'apps/web/test/main-location-refresh.test.ts',

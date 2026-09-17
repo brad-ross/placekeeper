@@ -32,12 +32,12 @@ async function prepareCoordinateFixture(page: Page) {
   await page.waitForFunction(() => window.viewerAcceptance.selectionGeometryReady(0));
   await expect.poll(async () => {
     await page.evaluate(() => window.viewerAcceptance.setZoom(1));
-    return page.locator('[data-page-index="0"]').evaluate(element => element.getBoundingClientRect().width);
+    return page.locator('.pdf-workspace__page[data-page-index="0"]').evaluate(element => element.getBoundingClientRect().width);
   }).toBe(612);
 }
 
 async function showSelectablePdfPage(page: Page, pageIndex: number) {
-  const pdfPage = page.locator(`[data-page-index="${pageIndex}"]`);
+  const pdfPage = page.locator(`.pdf-workspace__page[data-page-index="${pageIndex}"]`);
   await expect.poll(async () => {
     await page.evaluate(
       (pageNumber) => window.viewerAcceptance.goToPage(pageNumber),
@@ -97,12 +97,12 @@ async function dragAcrossSelectionPages(
   }
 
   const intermediatePageIndex = Math.floor(lastPageIndex / 2);
-  const intermediateImage = page.locator(`[data-page-index="${intermediatePageIndex}"] > img`);
+  const intermediateImage = page.locator(`.pdf-workspace__page[data-page-index="${intermediatePageIndex}"] > img`);
   const intermediateTextOffscreen = await intermediateImage.evaluate((element) => {
     const selectableLineY = element.getBoundingClientRect().top + 98;
     return selectableLineY <= 0 || selectableLineY >= window.innerHeight;
   }).catch(() => true);
-  const endPage = page.locator(`[data-page-index="${endPageIndex}"]`);
+  const endPage = page.locator(`.pdf-workspace__page[data-page-index="${endPageIndex}"]`);
   await endPage.evaluate((element) => {
     element.dataset.crossPagePointerups = '0';
     element.addEventListener('pointerup', () => {
@@ -185,11 +185,11 @@ test.describe('shared viewer foundation', () => {
     page.on('pageerror', (error) => console.log(`[browser:pageerror] ${error.message}`));
     await page.goto('/test/acceptance/viewer-harness/index.html');
     await prepareCoordinateFixture(page);
-    await expect(page.locator('[data-page-index="0"]')).toBeVisible();
+    await expect(page.locator('.pdf-workspace__page[data-page-index="0"]')).toBeVisible();
   });
 
   test('uses a real pointer selection without creating edits', async ({ page }) => {
-    const pdfPage = page.locator('[data-page-index="0"]');
+    const pdfPage = page.locator('.pdf-workspace__page[data-page-index="0"]');
     await page.waitForFunction(() => window.viewerAcceptance.selectionGeometryReady());
     const renderedPageImage = pdfPage.locator(':scope > img');
     await expect(renderedPageImage).toBeVisible();
@@ -352,7 +352,7 @@ test.describe('shared viewer foundation', () => {
   });
 
   test('never arms text selection from a secondary pointer gesture', async ({ page }) => {
-    const pdfPage = page.locator('[data-page-index="0"]');
+    const pdfPage = page.locator('.pdf-workspace__page[data-page-index="0"]');
     await page.waitForFunction(() => window.viewerAcceptance.selectionGeometryReady());
     const box = await pdfPage.boundingBox();
     if (!box) throw new Error('Rendered PDF page has no bounds.');
@@ -368,7 +368,7 @@ test.describe('shared viewer foundation', () => {
   });
 
   test('treats Control-click as a context gesture without publishing a caret', async ({ page }) => {
-    const pdfPage = page.locator('[data-page-index="0"]');
+    const pdfPage = page.locator('.pdf-workspace__page[data-page-index="0"]');
     await page.waitForFunction(() => window.viewerAcceptance.selectionGeometryReady());
     const box = await pdfPage.boundingBox();
     if (!box) throw new Error('Rendered PDF page has no bounds.');
@@ -394,7 +394,7 @@ test.describe('shared viewer foundation', () => {
       '/test/acceptance/viewer-harness/index.html?reverse-synctex=true&composer=replacement',
     );
     await prepareCoordinateFixture(page);
-    const pdfPage = page.locator('[data-page-index="0"]');
+    const pdfPage = page.locator('.pdf-workspace__page[data-page-index="0"]');
     await expect(pdfPage).toBeVisible();
     const box = await pdfPage.boundingBox();
     if (!box) throw new Error('Rendered PDF page has no bounds.');
@@ -479,7 +479,7 @@ test.describe('shared viewer foundation', () => {
   });
 
   test('repairs a missing primary release before hover movement', async ({ page }) => {
-    const pdfPage = page.locator('[data-page-index="0"]');
+    const pdfPage = page.locator('.pdf-workspace__page[data-page-index="0"]');
     await page.waitForFunction(() => window.viewerAcceptance.selectionGeometryReady());
     const box = await pdfPage.boundingBox();
     if (!box) throw new Error('Rendered PDF page has no bounds.');
@@ -525,7 +525,7 @@ test.describe('shared viewer foundation', () => {
   test('keeps Page Note and navigation available when page semantics are unavailable', async ({ page }) => {
     await page.goto('/test/acceptance/viewer-harness/index.html?fixture=mixed');
     await prepareCoordinateFixture(page);
-    await expect(page.locator('[data-page-index="0"]')).toBeVisible();
+    await expect(page.locator('.pdf-workspace__page[data-page-index="0"]')).toBeVisible();
     await expect(page.locator('[data-semantic-tools-enabled]')).toHaveAttribute(
       'data-semantic-tools-enabled',
       'true',
@@ -537,13 +537,13 @@ test.describe('shared viewer foundation', () => {
       'data-semantic-tools-enabled',
       'false',
     );
-    await expect(page.locator('[data-page-index="1"]')).toBeVisible();
+    await expect(page.locator('.pdf-workspace__page[data-page-index="1"]')).toBeVisible();
   });
 
   test('publishes insertion carets on every text page', async ({ page }) => {
     await page.goto('/test/acceptance/viewer-harness/index.html?fixture=multi-text');
     await prepareCoordinateFixture(page);
-    const first = page.locator('[data-page-index="0"]');
+    const first = page.locator('.pdf-workspace__page[data-page-index="0"]');
     await expect(first).toBeVisible();
     await page.waitForFunction(() => window.viewerAcceptance.selectionGeometryReady(0));
     await first.click({ position: { x: 150, y: 130 } });
@@ -553,7 +553,7 @@ test.describe('shared viewer foundation', () => {
       .toContain('Repeated insertion context.');
 
     await page.evaluate(() => window.viewerAcceptance.goToPage(2));
-    const second = page.locator('[data-page-index="1"]');
+    const second = page.locator('.pdf-workspace__page[data-page-index="1"]');
     await expect(second).toBeVisible();
     await page.waitForFunction(() => window.viewerAcceptance.selectionGeometryReady(1));
     await second.click({ position: { x: 150, y: 130 } });
