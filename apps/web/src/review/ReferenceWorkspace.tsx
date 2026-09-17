@@ -209,6 +209,9 @@ export function ReferenceWorkspace({
   const showReferenceTabs = tabs.length > 0;
   const reserveReferenceTabRail = referenceTabOrientation === 'vertical'
     && pendingReference?.status === 'loading';
+  const referenceViewportConcealed = pendingReference?.status === 'error';
+  const referenceViewportEmpty = pendingReference === null
+    && !tabs.some(({ identity }) => identity === activeTabIdentity);
   const modeListKey = modes.join(':');
   const onDockActionFocus = () => { dockActionFocused.current = true; };
   const onDockActionBlur = (event: FocusEvent<HTMLButtonElement>) => {
@@ -619,8 +622,10 @@ export function ReferenceWorkspace({
             ref={onReferenceViewportHost}
             className="reference-panel__viewport"
             data-reference-viewport-host
-            hidden={pendingReference?.status === 'error' || (activeTab === null && pendingReference === null)}
-            inert={pendingReference?.status === 'error' || (activeTab === null && pendingReference === null)}
+            data-reference-viewport-concealed={referenceViewportConcealed ? 'true' : undefined}
+            aria-hidden={referenceViewportConcealed || referenceViewportEmpty || undefined}
+            hidden={referenceViewportEmpty}
+            inert={referenceViewportConcealed || referenceViewportEmpty}
           />
         </div>
       </section> : null}
