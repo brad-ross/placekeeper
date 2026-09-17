@@ -269,6 +269,7 @@ li[data-search-result] .pdf-search__result-heading > .pdf-search__result-page {
     .full-annotation-reader__back,
     .full-annotation-reader__edit,
     .full-annotation-reader__delete,
+    .full-annotation-reader__open-reference,
     .full-annotation-reader__locate
   ) {
     width: 44px;
@@ -311,7 +312,8 @@ li[data-search-result] .pdf-search__result-heading > .pdf-search__result-page {
 }
 
 /* Keep annotation previews in the exposed PDF area beside open workspaces. */
-.review-layout:is([data-right-overlay="true"], [data-bottom-overlay="true"]) .annotation-peek {
+.review-layout:is([data-right-overlay="true"], [data-bottom-overlay="true"])
+  .annotation-peek:not(.annotation-peek--reference-reader) {
   top: auto;
   right: max(12px, calc(100% - var(--review-overlay-right-start, 100%)));
   bottom: max(12px, calc(100% - var(--review-overlay-bottom-start, 100%)));

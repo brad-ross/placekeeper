@@ -13,6 +13,8 @@ const EDGE = 12;
 const RELATION_GAP = 12;
 const DEFAULT_WIDTH = 340;
 const DEFAULT_HEIGHT = 232;
+const MIN_REFERENCE_POPUP_WIDTH = 280;
+const MIN_REFERENCE_POPUP_HEIGHT = 180;
 
 export type PassageEditorPlacementKind = 'side' | 'above' | 'below' | 'bottom-sheet';
 
@@ -71,17 +73,28 @@ export function choosePassageEditorPlacement(input: {
   readonly editorHeight: number;
   readonly rightBoundary?: number;
   readonly bottomBoundary?: number;
+  readonly applicationLeftBoundary?: number;
+  readonly applicationTopBoundary?: number;
+  readonly applicationRightBoundary?: number;
+  readonly applicationBottomBoundary?: number;
   readonly previous?: PassageEditorPlacementKind;
+  readonly placementScope?: 'main' | 'reference';
 }): PlacementChoice {
-  const stageLeft = input.stage.left + EDGE;
-  const stageTop = input.stage.top + EDGE;
+  const stageLeft = Math.max(input.stage.left + EDGE, input.applicationLeftBoundary ?? -Infinity);
+  const stageTop = Math.max(input.stage.top + EDGE, input.applicationTopBoundary ?? -Infinity);
   const stageRight = Math.min(
     input.stage.right - EDGE,
-    input.rightBoundary ?? input.stage.right - EDGE,
+    input.applicationRightBoundary ?? input.stage.right - EDGE,
+    input.placementScope === 'reference'
+      ? input.stage.right - EDGE
+      : input.rightBoundary ?? input.stage.right - EDGE,
   );
   const stageBottom = Math.min(
     input.stage.bottom - EDGE,
-    input.bottomBoundary ?? input.stage.bottom - EDGE,
+    input.applicationBottomBoundary ?? input.stage.bottom - EDGE,
+    input.placementScope === 'reference'
+      ? input.stage.bottom - EDGE
+      : input.bottomBoundary ?? input.stage.bottom - EDGE,
   );
   const visibleRect = {
     left: stageLeft,
@@ -95,13 +108,16 @@ export function choosePassageEditorPlacement(input: {
   const width = Math.min(DEFAULT_WIDTH, Math.max(0, visibleRect.width));
   const editorWidth = Math.min(Math.max(0, input.editorWidth), width);
   const editorHeight = Math.min(Math.max(0, input.editorHeight), visibleRect.height);
+  const usablePopup = input.placementScope !== 'reference'
+    || (editorWidth >= MIN_REFERENCE_POPUP_WIDTH
+      && editorHeight >= MIN_REFERENCE_POPUP_HEIGHT);
   const spaceRight = stageRight - input.target.right - RELATION_GAP;
   const spaceLeft = input.target.left - RELATION_GAP - stageLeft;
   const spaceBelow = stageBottom - input.target.bottom - RELATION_GAP;
   const spaceAbove = input.target.top - RELATION_GAP - stageTop;
-  const canSide = Math.max(spaceLeft, spaceRight) >= editorWidth;
-  const canBelow = spaceBelow >= editorHeight;
-  const canAbove = spaceAbove >= editorHeight;
+  const canSide = usablePopup && Math.max(spaceLeft, spaceRight) >= editorWidth;
+  const canBelow = usablePopup && spaceBelow >= editorHeight;
+  const canAbove = usablePopup && spaceAbove >= editorHeight;
   let kind: PassageEditorPlacementKind;
   if (input.previous === 'side' && canSide) kind = 'side';
   else if (input.previous === 'below' && canBelow) kind = 'below';
@@ -117,10 +133,13 @@ export function choosePassageEditorPlacement(input: {
       visible,
       style: {
         position: 'absolute',
-        left: `${EDGE}px`,
+        left: `${Math.max(EDGE, stageLeft - input.stage.left)}px`,
         right: `${Math.max(EDGE, input.stage.right - stageRight)}px`,
         bottom: `${Math.max(EDGE, input.stage.bottom - stageBottom)}px`,
         width: 'auto',
+        ...(input.placementScope === 'reference' ? {
+          maxHeight: `${visibleRect.height}px`,
+        } : {}),
       },
     };
   }
@@ -172,23 +191,52 @@ function safePassageEditorPlacement(input: {
   readonly editorHeight: number;
   readonly rightBoundary?: number;
   readonly bottomBoundary?: number;
+  readonly applicationLeftBoundary?: number;
+  readonly applicationTopBoundary?: number;
+  readonly applicationRightBoundary?: number;
+  readonly applicationBottomBoundary?: number;
+  readonly placementScope?: 'main' | 'reference';
 }): PassageEditorPlacement {
+  const localLeft = Math.max(
+    EDGE,
+    (input.applicationLeftBoundary ?? input.stage.left + EDGE) - input.stage.left,
+  );
+  const localTop = Math.max(
+    EDGE,
+    (input.applicationTopBoundary ?? input.stage.top + EDGE) - input.stage.top,
+  );
   const localRight = Math.min(
     input.stage.width - EDGE,
+    (input.applicationRightBoundary ?? input.stage.right - EDGE) - input.stage.left,
     (input.rightBoundary ?? input.stage.right - EDGE) - input.stage.left,
   );
   const localBottom = Math.min(
     input.stage.height - EDGE,
+    (input.applicationBottomBoundary ?? input.stage.bottom - EDGE) - input.stage.top,
     (input.bottomBoundary ?? input.stage.bottom - EDGE) - input.stage.top,
   );
-  const width = Math.min(input.editorWidth, DEFAULT_WIDTH, Math.max(0, localRight - EDGE));
-  const height = Math.min(input.editorHeight, Math.max(0, localBottom - EDGE));
+  const width = Math.min(input.editorWidth, DEFAULT_WIDTH, Math.max(0, localRight - localLeft));
+  const height = Math.min(input.editorHeight, Math.max(0, localBottom - localTop));
+  if (input.placementScope === 'reference'
+    && (width < MIN_REFERENCE_POPUP_WIDTH || height < MIN_REFERENCE_POPUP_HEIGHT)) {
+    return {
+      kind: 'bottom-sheet',
+      style: {
+        position: 'absolute',
+        left: `${localLeft}px`,
+        right: `${Math.max(EDGE, input.stage.width - localRight)}px`,
+        bottom: `${Math.max(EDGE, input.stage.height - localBottom)}px`,
+        width: 'auto',
+        maxHeight: `${Math.max(0, localBottom - localTop)}px`,
+      },
+    };
+  }
   return {
     kind: 'side',
     style: {
       position: 'absolute',
-      left: `${Math.max(EDGE, localRight - width)}px`,
-      top: `${EDGE}px`,
+      left: `${Math.max(localLeft, localRight - width)}px`,
+      top: `${localTop}px`,
       width: `${width}px`,
       maxHeight: `${height}px`,
     },
@@ -202,38 +250,59 @@ function reclampPassageEditorPlacement(input: {
   readonly editorHeight: number;
   readonly rightBoundary?: number;
   readonly bottomBoundary?: number;
+  readonly applicationLeftBoundary?: number;
+  readonly applicationTopBoundary?: number;
+  readonly applicationRightBoundary?: number;
+  readonly applicationBottomBoundary?: number;
+  readonly placementScope?: 'main' | 'reference';
 }): PassageEditorPlacement {
+  const localLeft = Math.max(
+    EDGE,
+    (input.applicationLeftBoundary ?? input.stage.left + EDGE) - input.stage.left,
+  );
+  const localTop = Math.max(
+    EDGE,
+    (input.applicationTopBoundary ?? input.stage.top + EDGE) - input.stage.top,
+  );
   const localRight = Math.min(
     input.stage.width - EDGE,
+    (input.applicationRightBoundary ?? input.stage.right - EDGE) - input.stage.left,
     (input.rightBoundary ?? input.stage.right - EDGE) - input.stage.left,
   );
   const localBottom = Math.min(
     input.stage.height - EDGE,
+    (input.applicationBottomBoundary ?? input.stage.bottom - EDGE) - input.stage.top,
     (input.bottomBoundary ?? input.stage.bottom - EDGE) - input.stage.top,
   );
-  if (input.previous.kind === 'bottom-sheet') {
+  const availableWidth = Math.max(0, localRight - localLeft);
+  const availableHeight = Math.max(0, localBottom - localTop);
+  if (input.previous.kind === 'bottom-sheet'
+    || (input.placementScope === 'reference'
+      && (availableWidth < MIN_REFERENCE_POPUP_WIDTH
+        || availableHeight < MIN_REFERENCE_POPUP_HEIGHT))) {
     return {
       kind: 'bottom-sheet',
       style: {
         position: 'absolute',
-        left: `${EDGE}px`,
+        left: `${localLeft}px`,
         right: `${Math.max(EDGE, input.stage.width - localRight)}px`,
         bottom: `${Math.max(EDGE, input.stage.height - localBottom)}px`,
         width: 'auto',
+        ...(input.placementScope === 'reference' ? { maxHeight: `${availableHeight}px` } : {}),
       },
     };
   }
   const previousLeft = Number.parseFloat(String(input.previous.style?.left ?? EDGE));
   const previousTop = Number.parseFloat(String(input.previous.style?.top ?? EDGE));
-  const left = clamp(previousLeft, EDGE, localRight - input.editorWidth);
-  const top = clamp(previousTop, EDGE, localBottom - input.editorHeight);
+  const left = clamp(previousLeft, localLeft, localRight - input.editorWidth);
+  const top = clamp(previousTop, localTop, localBottom - input.editorHeight);
   return {
     kind: input.previous.kind,
     style: {
       position: 'absolute',
       left: `${left}px`,
       top: `${top}px`,
-      width: `${Math.min(input.editorWidth, Math.max(0, localRight - EDGE))}px`,
+      width: `${Math.min(input.editorWidth, Math.max(0, localRight - localLeft))}px`,
       maxHeight: `${Math.max(0, localBottom - top)}px`,
     },
   };
@@ -261,6 +330,8 @@ export function usePassageEditorPlacement(input: {
   readonly targetSelector?: string;
   readonly fallbackTarget?: ViewerClientPlacement | null;
   readonly layoutGeneration: string | number;
+  readonly placementScope?: 'main' | 'reference';
+  readonly scrollportSelector?: string;
 }): PassageEditorPlacement | undefined {
   const [placement, setPlacement] = useState<PassageEditorPlacement | undefined>(undefined);
   const lastVisiblePlacementRef = useRef<PassageEditorPlacement | undefined>(undefined);
@@ -284,7 +355,10 @@ export function usePassageEditorPlacement(input: {
     const surfaces = input.surfaceRefs
       .map((ref) => ref.current)
       .filter((surface): surface is HTMLElement => surface !== null);
-    const scrollport = stage.querySelector<HTMLElement>('[data-viewer-framing-viewport]');
+    const placementScope = input.placementScope ?? 'main';
+    const scrollport = stage.querySelector<HTMLElement>(
+      input.scrollportSelector ?? '[data-viewer-framing-viewport]',
+    );
     const scheduler = new LatestFrameRequest<number>({
       schedule: (callback) => requestAnimationFrame(callback),
       cancel: (handle) => cancelAnimationFrame(handle),
@@ -292,7 +366,11 @@ export function usePassageEditorPlacement(input: {
         const stageBounds = stage.getBoundingClientRect();
         let rightBoundary: number | undefined;
         let bottomBoundary: number | undefined;
-        for (const surface of surfaces) {
+        let applicationLeftBoundary: number | undefined;
+        let applicationTopBoundary: number | undefined;
+        let applicationRightBoundary: number | undefined;
+        let applicationBottomBoundary: number | undefined;
+        for (const surface of placementScope === 'reference' ? [] : surfaces) {
           const open = surface.dataset.workspaceOpen === 'true'
             || surface.dataset.toolsWorkspaceOpen === 'true';
           if (!open) continue;
@@ -305,10 +383,10 @@ export function usePassageEditorPlacement(input: {
         }
         const visualViewport = globalThis.visualViewport;
         if (visualViewport !== null) {
-          const viewportRight = visualViewport.offsetLeft + visualViewport.width - EDGE;
-          const viewportBottom = visualViewport.offsetTop + visualViewport.height - EDGE;
-          rightBoundary = Math.min(rightBoundary ?? stageBounds.right - EDGE, viewportRight);
-          bottomBoundary = Math.min(bottomBoundary ?? stageBounds.bottom - EDGE, viewportBottom);
+          applicationLeftBoundary = visualViewport.offsetLeft + EDGE;
+          applicationTopBoundary = visualViewport.offsetTop + EDGE;
+          applicationRightBoundary = visualViewport.offsetLeft + visualViewport.width - EDGE;
+          applicationBottomBoundary = visualViewport.offsetTop + visualViewport.height - EDGE;
         }
         const editorBounds = input.editorElement?.getBoundingClientRect();
         const targetElements = input.targetSelector === undefined
@@ -326,14 +404,37 @@ export function usePassageEditorPlacement(input: {
           };
         });
         const usable = {
-          left: stageBounds.left + EDGE,
-          top: stageBounds.top + EDGE,
-          right: rightBoundary ?? stageBounds.right - EDGE,
-          bottom: bottomBoundary ?? stageBounds.bottom - EDGE,
+          left: Math.max(stageBounds.left + EDGE, applicationLeftBoundary ?? -Infinity),
+          top: Math.max(stageBounds.top + EDGE, applicationTopBoundary ?? -Infinity),
+          right: Math.min(
+            stageBounds.right - EDGE,
+            applicationRightBoundary ?? stageBounds.right - EDGE,
+            placementScope === 'reference'
+              ? stageBounds.right - EDGE
+              : rightBoundary ?? stageBounds.right - EDGE,
+          ),
+          bottom: Math.min(
+            stageBounds.bottom - EDGE,
+            applicationBottomBoundary ?? stageBounds.bottom - EDGE,
+            placementScope === 'reference'
+              ? stageBounds.bottom - EDGE
+              : bottomBoundary ?? stageBounds.bottom - EDGE,
+          ),
           width: 0,
           height: 0,
         };
-        const visibleTargets = targetRects.filter((rect) => intersects(rect, usable));
+        const scrollportBounds = scrollport?.getBoundingClientRect();
+        const visibilityBounds = placementScope === 'reference' && scrollportBounds !== undefined
+          ? {
+              left: scrollportBounds.left,
+              top: scrollportBounds.top,
+              right: scrollportBounds.right,
+              bottom: scrollportBounds.bottom,
+              width: scrollportBounds.width,
+              height: scrollportBounds.height,
+            }
+          : usable;
+        const visibleTargets = targetRects.filter((rect) => intersects(rect, visibilityBounds));
         const targetVisibility = targetRects.length === 0
           ? undefined
           : visibleTargets.length > 0 ? 'visible' as const : 'outside' as const;
@@ -375,6 +476,11 @@ export function usePassageEditorPlacement(input: {
               editorHeight: editorBounds?.height || DEFAULT_HEIGHT,
               ...(rightBoundary === undefined ? {} : { rightBoundary }),
               ...(bottomBoundary === undefined ? {} : { bottomBoundary }),
+              ...(applicationLeftBoundary === undefined ? {} : { applicationLeftBoundary }),
+              ...(applicationTopBoundary === undefined ? {} : { applicationTopBoundary }),
+              ...(applicationRightBoundary === undefined ? {} : { applicationRightBoundary }),
+              ...(applicationBottomBoundary === undefined ? {} : { applicationBottomBoundary }),
+              placementScope,
             });
             lastVisiblePlacementRef.current = safe;
             commitPlacement(measuredPlacement(safe));
@@ -387,6 +493,11 @@ export function usePassageEditorPlacement(input: {
             editorHeight: editorBounds?.height || DEFAULT_HEIGHT,
             ...(rightBoundary === undefined ? {} : { rightBoundary }),
             ...(bottomBoundary === undefined ? {} : { bottomBoundary }),
+            ...(applicationLeftBoundary === undefined ? {} : { applicationLeftBoundary }),
+            ...(applicationTopBoundary === undefined ? {} : { applicationTopBoundary }),
+            ...(applicationRightBoundary === undefined ? {} : { applicationRightBoundary }),
+            ...(applicationBottomBoundary === undefined ? {} : { applicationBottomBoundary }),
+            placementScope,
           })));
           return;
         }
@@ -397,6 +508,11 @@ export function usePassageEditorPlacement(input: {
           editorHeight: editorBounds?.height || DEFAULT_HEIGHT,
           ...(rightBoundary === undefined ? {} : { rightBoundary }),
           ...(bottomBoundary === undefined ? {} : { bottomBoundary }),
+          ...(applicationLeftBoundary === undefined ? {} : { applicationLeftBoundary }),
+          ...(applicationTopBoundary === undefined ? {} : { applicationTopBoundary }),
+          ...(applicationRightBoundary === undefined ? {} : { applicationRightBoundary }),
+          ...(applicationBottomBoundary === undefined ? {} : { applicationBottomBoundary }),
+          placementScope,
           ...(preferredKindRef.current?.anchorKey === input.anchorKey
             ? { previous: preferredKindRef.current.kind }
             : {}),
@@ -443,6 +559,8 @@ export function usePassageEditorPlacement(input: {
     input.editorElement,
     input.fallbackTarget,
     input.layoutGeneration,
+    input.placementScope,
+    input.scrollportSelector,
     input.stageRef,
     input.surfaceRefs,
     input.targetSelector,

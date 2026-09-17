@@ -32,9 +32,11 @@ export interface AnnotationListProps {
   correspondingId?: string;
   activationRequest?: { readonly id: string; readonly token: number };
   onNavigate(item: ReviewItem): void;
+  onOpenReference?(item: ReviewItem): void;
   existingAnnotations?: ExistingAnnotationsDiscovery;
   documentGeneration?: number;
   onNavigateExisting?(item: ExistingAnnotation): void;
+  onOpenExistingReference?(item: ExistingAnnotation): void;
   onReadFullExisting?(
     annotation: ExistingAnnotation,
     record: AnnotationReaderRecord,
@@ -110,6 +112,7 @@ export interface AnnotationRowContentProps {
   readonly readerRecord?: AnnotationReaderRecord | null;
   readonly navigationRef?: (node: HTMLButtonElement | null) => void;
   readonly onNavigate?: () => void;
+  readonly onOpenReference?: () => void;
   readonly showSourceReturn?: boolean;
   readonly onReadFull?: (record: AnnotationReaderRecord, trigger: HTMLButtonElement) => void;
   readonly onReaderOverflowChange?: (record: AnnotationReaderRecord, overflowing: boolean) => void;
@@ -128,6 +131,7 @@ export function AnnotationRowContent({
   readerRecord = projectOwnedAnnotationReader(item),
   navigationRef,
   onNavigate,
+  onOpenReference,
   showSourceReturn = false,
   onReadFull,
   onReaderOverflowChange,
@@ -151,6 +155,10 @@ export function AnnotationRowContent({
     ? `page ${pageNumber}`
     : `pages ${pageNumber}–${lastPageNumber}`;
   const actions: RowAction[] = [];
+  if (onOpenReference) actions.push({
+    id: 'open-reference', kind: 'command', icon: 'references',
+    label: 'Open in References', title: 'Open in References', onInvoke: onOpenReference,
+  });
   if (showSourceReturn && onNavigate) actions.push({
     id: 'locate', kind: 'command', icon: 'locate',
     label: 'Back to annotation in PDF', title: 'Back to annotation in PDF', onInvoke: onNavigate,
@@ -215,9 +223,11 @@ export function AnnotationList({
   correspondingId,
   activationRequest,
   onNavigate,
+  onOpenReference,
   existingAnnotations = { status: 'empty', generation: 0, items: [] },
   documentGeneration = 0,
   onNavigateExisting,
+  onOpenExistingReference,
   onReadFullExisting,
   onRetryExistingAnnotations,
   onReadFull,
@@ -313,6 +323,9 @@ export function AnnotationList({
                   else entryRefs.current.delete(focusKey);
                 }}
                 onNavigate={() => onNavigateExisting?.(annotation)}
+                {...(onOpenExistingReference ? {
+                  onOpenReference: () => onOpenExistingReference(annotation),
+                } : {})}
                 {...(onReadFullExisting && readerRecord ? {
                   onReadFull: (record, trigger) => onReadFullExisting(annotation, record, trigger),
                 } : {})}
@@ -367,6 +380,7 @@ export function AnnotationList({
                   else entryRefs.current.delete(focusKey);
                 }}
                 onNavigate={() => onNavigate(item)}
+                {...(onOpenReference ? { onOpenReference: () => onOpenReference(item) } : {})}
                 {...(onReadFull ? { onReadFull } : {})}
                 {...(onReaderOverflowChange ? { onReaderOverflowChange } : {})}
                 onEdit={(trigger) => onEdit(item, trigger)}

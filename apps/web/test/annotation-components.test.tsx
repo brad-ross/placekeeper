@@ -94,6 +94,56 @@ describe('annotation row and reader presentation', () => {
     expect(html).not.toContain('From this PDF');
   });
 
+  it('offers Open in References for owned and read-only source rows without broadening edit permissions', () => {
+    const ownedHtml = renderToStaticMarkup(<AnnotationList
+      items={[replacement]}
+      onNavigate={vi.fn()}
+      onOpenReference={vi.fn()}
+      onEdit={vi.fn()}
+      onDelete={vi.fn()}
+    />);
+    const sourceHtml = renderToStaticMarkup(<AnnotationList
+      items={[]}
+      existingAnnotations={{
+        status: 'ready', generation: 3,
+        items: [{
+          id: 'source-nav', subtype: 'Highlight', pageIndex: 4,
+          rect: { x: 1, y: 2, width: 3, height: 4 }, contents: '',
+          author: '', flags: [], appearanceModes: [], supportedAppearance: true,
+        }],
+      }}
+      documentGeneration={2}
+      onNavigate={vi.fn()}
+      onOpenExistingReference={vi.fn()}
+      onEdit={vi.fn()}
+      onDelete={vi.fn()}
+    />);
+
+    expect(ownedHtml).toContain('data-row-action="open-reference"');
+    expect(ownedHtml).toContain('aria-label="Open in References"');
+    expect(sourceHtml).toContain('data-row-action="open-reference"');
+    expect(sourceHtml).toContain('aria-label="Open in References"');
+    expect(sourceHtml).not.toContain('data-row-action="edit"');
+    expect(sourceHtml).not.toContain('data-row-action="delete"');
+  });
+
+  it('threads Open in References through peeks and full readers', () => {
+    const peek = renderToStaticMarkup(<AnnotationPeek
+      item={replacement}
+      onHoldChange={vi.fn()}
+      onOpenReference={vi.fn()}
+    />);
+    const full = renderToStaticMarkup(<FullAnnotationReader
+      record={projectOwnedAnnotationReader(replacement)!}
+      onBack={vi.fn()}
+      onOpenReference={vi.fn()}
+    />);
+
+    expect(peek).toContain('data-row-action="open-reference"');
+    expect(full).toContain('data-full-annotation-action="open-reference"');
+    expect(full).toContain('aria-label="Open in References"');
+  });
+
   it('restores reader focus only when the disappearing locate action held it', () => {
     expect(shouldRestoreFullAnnotationReaderFocus(true, false, true)).toBe(true);
     expect(shouldRestoreFullAnnotationReaderFocus(true, false, false)).toBe(false);
@@ -177,9 +227,14 @@ describe('annotation row and reader presentation', () => {
       rect: { x: 1, y: 2, width: 3, height: 4 }, contents: 'Complete imported note.',
       author: 'Reviewer', flags: [], appearanceModes: [], supportedAppearance: true,
     }, { documentGeneration: 2, discoveryGeneration: 3 })!;
-    const html = renderToStaticMarkup(<FullAnnotationReader record={record} onBack={vi.fn()} />);
+    const html = renderToStaticMarkup(<FullAnnotationReader
+      record={record}
+      onBack={vi.fn()}
+      onOpenReference={vi.fn()}
+    />);
     expect(html).toContain('Read only');
     expect(html).toContain('Complete imported note.');
+    expect(html).toContain('data-full-annotation-action="open-reference"');
     expect(html).not.toContain('data-full-annotation-action="edit"');
     expect(html).not.toContain('data-full-annotation-action="delete"');
     expect(html).not.toContain('From this PDF');

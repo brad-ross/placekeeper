@@ -10,6 +10,7 @@ export interface AnnotationPeekProps {
   onHoldChange(held: boolean): void;
   copyLink?: CopyLinkControlProps;
   onNavigate?(): void;
+  onOpenReference?(): void;
   showSourceReturn?: boolean;
   onReadFull?(record: AnnotationReaderRecord, trigger: HTMLButtonElement): void;
   onReaderOverflowChange?(record: AnnotationReaderRecord, overflowing: boolean): void;
@@ -23,6 +24,7 @@ export function AnnotationPeek({
   onHoldChange,
   copyLink,
   onNavigate,
+  onOpenReference,
   showSourceReturn = false,
   onReadFull,
   onReaderOverflowChange,
@@ -48,6 +50,7 @@ export function AnnotationPeek({
         showSourceReturn={showSourceReturn}
         {...(selected && copyLink ? { copyLink } : {})}
         {...(onNavigate ? { onNavigate } : {})}
+        {...(onOpenReference ? { onOpenReference } : {})}
         {...(onReadFull ? { onReadFull } : {})}
         {...(onReaderOverflowChange ? { onReaderOverflowChange } : {})}
         {...(selected && onEdit ? { onEdit } : {})}

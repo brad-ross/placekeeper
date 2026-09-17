@@ -92,6 +92,21 @@
   box-shadow: var(--pk-shadow-raised);
 }
 
+.annotation-peek--reference-reader {
+  top: auto;
+  right: auto;
+  bottom: auto;
+  display: flex;
+  max-height: min(30rem, calc(100dvh - 24px));
+  overflow: hidden;
+  transform: none;
+}
+
+.annotation-peek--reference-reader .full-annotation-reader {
+  width: 100%;
+  max-height: inherit;
+}
+
 .annotation-peek .annotation-item__content {
   border-radius: 16px;
 }
@@ -265,6 +280,7 @@
 .full-annotation-reader__back,
 .full-annotation-reader__edit,
 .full-annotation-reader__delete,
+.full-annotation-reader__open-reference,
 .full-annotation-reader__locate {
   width: 32px;
   min-width: 32px;
@@ -281,6 +297,7 @@
 .full-annotation-reader__back:hover,
 .full-annotation-reader__edit:hover,
 .full-annotation-reader__delete:hover,
+.full-annotation-reader__open-reference:hover,
 .full-annotation-reader__locate:hover {
   border: 0;
   color: var(--pk-ink);
@@ -323,4 +340,3 @@
 .full-annotation-reader__body p:last-child {
   margin-bottom: 0;
 }
-
