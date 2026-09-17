@@ -404,17 +404,20 @@ export function sanitizeChromeReviewRuntimeResponse(
     if (!record(value) || (value.sourceDisposition !== "local" && value.sourceDisposition !== "remote-temporary")) {
       return undefined;
     }
-    if (value.sourceDisposition === "remote-temporary") {
-      return hasOnlyKeys(value, ["sourceDisposition"])
-        ? { sourceDisposition: "remote-temporary" }
-        : undefined;
-    }
-    const filename = sanitizeReviewRuntimeDisplayString(value.filename);
-    if (filename === undefined) return undefined;
+    if (value.sourceDisposition === "remote-temporary" &&
+      !hasOnlyKeys(value, ["sourceDisposition", "filename", "folder", "folderSelectionId"])) return undefined;
+    const filename = value.filename === undefined ? undefined
+      : sanitizeReviewRuntimeDisplayString(value.filename);
+    if ((value.filename !== undefined || value.sourceDisposition === "local") && filename === undefined) return undefined;
+    const selectionId = value.folderSelectionId;
+    if (selectionId !== undefined && (typeof selectionId !== "string" ||
+      !SAFE_RUNTIME_ID.test(selectionId) || filename === undefined || typeof value.folder !== "string")) return undefined;
+    if (value.sourceDisposition === "remote-temporary" && value.folder !== undefined && selectionId === undefined) return undefined;
     return {
-      sourceDisposition: "local",
-      filename,
-      folder: "Local folder",
+      sourceDisposition: value.sourceDisposition,
+      ...(filename === undefined ? {} : { filename }),
+      ...(typeof value.folder === "string" ? { folder: selectionId === undefined ? "Local folder" : "Chrome downloads folder" } : {}),
+      ...(selectionId === undefined ? {} : { folderSelectionId: selectionId }),
     };
   }
   if (method === "chooseFolder") {

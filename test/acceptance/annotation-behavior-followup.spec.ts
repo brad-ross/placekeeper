@@ -82,7 +82,7 @@ async function chooseCopyDestination(page: Page): Promise<void> {
   await expect(dialog).toBeVisible();
   await dialog.getByRole('textbox', { name: 'Copy name' })
     .fill(`annotation-followup-${randomUUID()}.pdf`);
-  await dialog.getByRole('button', { name: 'Confirm' }).click();
+  await dialog.getByRole('button', { name: 'Save', exact: true }).click();
   await expect(dialog).toHaveCount(0);
 }
 

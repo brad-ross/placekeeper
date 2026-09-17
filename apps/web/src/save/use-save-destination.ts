@@ -19,11 +19,11 @@ export function useSaveDestination(props: { api: ProductionSessionApi }, scope: 
     readonly pending?: PendingAuthoringCommand;
   } | null>(null);
   const [copyProposal, setCopyProposal] = useState<SaveCopyProposal>();
-  const [folderSelectionId, setFolderSelectionId] = useState<string>();
   const [destinationEstablishing, setDestinationEstablishing] = useState(false);
   const [destinationError, setDestinationError] = useState<string>();
   const [nameError, setNameError] = useState<string>();
   const destinationAttemptRef = useRef(0);
+  const folderChoiceVersionRef = useRef(0);
   const authoringResolutionTokenRef = useRef(0);
   useEffect(() => () => { destinationAttemptRef.current += 1; }, []);
   const [authoringSessionResolution, setAuthoringSessionResolution] = useState<{
@@ -36,13 +36,17 @@ export function useSaveDestination(props: { api: ProductionSessionApi }, scope: 
     const attempt = destinationAttemptRef.current;
     const isCurrent = () => !cancelled && pendingDestinationAttemptIsCurrent(attempt, destinationAttemptRef.current, destinationDialog, stateRef.current, documentGenerationRef.current);
     setDestinationError(undefined);
-    setFolderSelectionId(undefined);
+    const folderChoiceVersion = folderChoiceVersionRef.current;
     void props.api.saveProposal()
       .then((proposal) => {
-        if (isCurrent()) setCopyProposal((current) =>
-          current?.sourceDisposition === 'remote-temporary' && current.folder !== undefined
-            ? current
-            : proposal);
+        if (!isCurrent()) return;
+        if (folderChoiceVersion === folderChoiceVersionRef.current) {
+          setCopyProposal(proposal);
+        } else {
+          const filename = proposal.filename;
+          if (filename !== undefined) setCopyProposal((current) => current === undefined
+            ? proposal : { ...current, filename });
+        }
       })
       .catch(() => {
         if (isCurrent()) setDestinationError("Save options could not be prepared safely.");
@@ -129,15 +133,17 @@ export function useSaveDestination(props: { api: ProductionSessionApi }, scope: 
       const selected = await props.api.chooseFolder();
       if (!isCurrent()) return;
       if (!selected.cancelled && selected.selectionId && selected.folder) {
-        setFolderSelectionId(selected.selectionId);
+        const { selectionId, folder } = selected;
+        folderChoiceVersionRef.current += 1;
         setCopyProposal((current) => scope.sourceDisposition === 'remote-temporary'
-          ? { sourceDisposition: 'remote-temporary', folder: selected.folder! }
+          ? { ...current, sourceDisposition: 'remote-temporary', folder, folderSelectionId: selectionId }
           : {
               sourceDisposition: 'local',
               filename: current?.sourceDisposition === 'local'
                 ? current.filename
                 : "annotated.pdf",
-              folder: selected.folder!,
+              folder,
+              folderSelectionId: selectionId,
             });
       }
     } catch {
@@ -167,7 +173,7 @@ export function useSaveDestination(props: { api: ProductionSessionApi }, scope: 
       const confirmation = { command: setAnnotationName(beforeName, annotationName),
         expectedGeneration: beforeName.workflow.documentGeneration };
       const established = choice === "copy"
-        ? await props.api.chooseCopy(filename, folderSelectionId, confirmation)
+        ? await props.api.chooseCopy(filename, copyProposal?.folderSelectionId, confirmation)
         : await props.api.chooseOriginal(confirmation);
       if (!isCurrent()) return;
       setSaveStatus(established);

@@ -438,7 +438,7 @@ async function chooseFreshCopyDestination(page: Page): Promise<void> {
   await expect(name).not.toHaveValue("");
   await name.fill(filename);
   await expect(name).toHaveValue(filename);
-  await dialog.getByRole("button", { name: "Confirm" }).click();
+  await dialog.getByRole("button", { name: "Save", exact: true }).click();
   try {
     await expect(dialog).toHaveCount(0, { timeout: PRODUCTION_SAVE_TIMEOUT_MS });
   } catch (error) {
@@ -6862,6 +6862,54 @@ test('settles an interrupted zoom before keyboard page navigation', async ({ pag
   await expect(input).toHaveValue('3');
 });
 
+test('a late browser default keeps the chosen folder and supplies the original filename', async ({ page }) => {
+  await page.route('**/scope', async route => {
+    const response = await route.fetch();
+    await route.fulfill({ json: { ...await response.json(), sourceDisposition: 'remote-temporary' } });
+  });
+  const { sessionId } = await openFreshProductionFixture(page, plainTextPdf, 'Deferred defaults fixture failed');
+  const downloads = await mkdtemp(join(root, 'chrome-downloads-'));
+  const chosenFolder = await mkdtemp(join(root, 'chosen-downloads-'));
+  const proposal = await host.saving.browserProposal(sessionId, downloads);
+  const chosen = await host.saving.browserProposal(sessionId, chosenFolder);
+  const release = Promise.withResolvers<void>();
+  await page.route(`**/s/${sessionId}/save/proposal`, async route => {
+    await release.promise;
+    await route.fulfill({ json: { ...proposal, sourceDisposition: 'remote-temporary' } });
+  });
+  await page.route(`**/s/${sessionId}/save/folder`, route => route.fulfill({ json: {
+    cancelled: false, selectionId: chosen.folderSelectionId, folder: chosenFolder,
+  } }));
+  await page.getByRole('button', { name: /Open automatic save options$/u }).click();
+  const dialog = page.getByRole('dialog', { name: 'Choose where to save annotations', exact: true });
+  await dialog.getByRole('button', { name: 'Choose save location', exact: true }).click();
+  await expect(dialog.getByRole('button', { name: `Change save location. Current location: ${chosenFolder}`, exact: true })).toBeVisible();
+  release.resolve();
+  await expect(dialog.getByRole('textbox', { name: 'PDF name' })).toHaveValue(proposal.filename!);
+  await dialog.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect.poll(async () => (await readFile(join(chosenFolder, proposal.filename!))).byteLength).toBeGreaterThan(0);
+});
+
+for (const width of [1280, 360]) {
+  test(`browser download defaults save without editing either field at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 });
+    const { sessionId } = await openFreshProductionFixture(page, plainTextPdf, 'Download defaults fixture failed');
+    const downloads = await mkdtemp(join(root, 'chrome-downloads-'));
+    const proposal = await host.saving.browserProposal(sessionId, downloads);
+    await page.route(`**/s/${sessionId}/save/proposal`, route => route.fulfill({ json: proposal }));
+    await page.getByRole('button', { name: /Open automatic save options$/u }).click();
+    const dialog = page.getByRole('dialog', { name: 'Choose where to save annotations', exact: true });
+    await expect(dialog.getByRole('textbox', { name: 'Copy name' })).toHaveValue(proposal.filename!);
+    const save = dialog.getByRole('button', { name: 'Save', exact: true });
+    await expect(save).toBeEnabled();
+    await save.click();
+    await expect(dialog).toHaveCount(0);
+    await expect.poll(async () => (await readFile(join(downloads, proposal.filename!))).byteLength).toBeGreaterThan(0);
+    expect(host.broker.saveStatus(sessionId)?.destination).toMatchObject({ phase: 'active', kind: 'copy' });
+  });
+}
+
 for (const width of [1280, 620, 360]) {
   test(`document annotation name saves, cancels, and matches copy input at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 });
@@ -6895,7 +6943,7 @@ for (const width of [1280, 620, 360]) {
     await expect(dialog.getByRole('textbox', { name: 'Name on annotations' })).toHaveValue('Placekeeper');
     await dialog.getByRole('radio', { name: 'Modify the original PDF' }).check();
     await dialog.getByRole('textbox', { name: 'Name on annotations' }).fill('  Brad Ross  ');
-    await dialog.getByRole('button', { name: 'Confirm', exact: true }).click();
+    await dialog.getByRole('button', { name: 'Save', exact: true }).click();
     await expect(dialog).toHaveCount(0);
     await expect.poll(() => host.broker.state(sessionId)?.annotationName).toBe('Brad Ross');
     expect(host.broker.state(sessionId)?.items).toHaveLength(0);
@@ -6906,7 +6954,7 @@ for (const width of [1280, 620, 360]) {
     dialog = await open();
     await dialog.getByRole('radio', { name: 'Modify the original PDF' }).check();
     await dialog.getByRole('textbox', { name: 'Name on annotations' }).fill('   ');
-    await dialog.getByRole('button', { name: 'Confirm', exact: true }).click();
+    await dialog.getByRole('button', { name: 'Save', exact: true }).click();
     await expect(dialog).toHaveCount(0);
     await expect.poll(() => host.broker.state(sessionId)?.annotationName).toBe('Placekeeper');
   });
@@ -6918,7 +6966,7 @@ test('document annotation name preserves rejected save drafts for correction and
   const dialog = page.getByRole('dialog', { name: 'Choose where to save annotations', exact: true });
   const name = dialog.getByRole('textbox', { name: 'Name on annotations' });
   await name.fill('x'.repeat(100_000));
-  await dialog.getByRole('button', { name: 'Confirm', exact: true }).click();
+  await dialog.getByRole('button', { name: 'Save', exact: true }).click();
   await expect(dialog.getByRole('alert')).toContainText('Annotation name');
   await expect(name).toHaveValue('x'.repeat(100_000));
   await expect(name).toHaveAttribute('aria-invalid', 'true');
@@ -6926,7 +6974,7 @@ test('document annotation name preserves rejected save drafts for correction and
   expect(host.broker.state(sessionId)?.annotationName).toBeUndefined();
   expect(host.broker.saveStatus(sessionId)?.destination.phase).toBe("none");
   await name.fill('Corrected name');
-  await dialog.getByRole('button', { name: 'Confirm', exact: true }).click();
+  await dialog.getByRole('button', { name: 'Save', exact: true }).click();
   await expect(dialog).toHaveCount(0);
   await expect.poll(() => host.broker.state(sessionId)?.annotationName).toBe('Corrected name');
 });
@@ -6942,7 +6990,7 @@ test('document annotation name is unchanged when establishing the destination fa
   const dialog = page.getByRole('dialog', { name: 'Choose where to save annotations', exact: true });
   await dialog.getByRole('radio', { name: 'Modify the original PDF' }).check();
   await dialog.getByRole('textbox', { name: 'Name on annotations' }).fill('Unconfirmed name');
-  await dialog.getByRole('button', { name: 'Confirm', exact: true }).click();
+  await dialog.getByRole('button', { name: 'Save', exact: true }).click();
   await expect(dialog.getByRole('alert')).toBeVisible();
   expect(commands).toEqual([]);
   expect(host.broker.state(sessionId)?.annotationName).toBeUndefined();
@@ -6966,7 +7014,7 @@ test('document annotation name advances only the pending first annotation revisi
   const dialog = page.getByRole('dialog', { name: 'Choose where to save annotations', exact: true });
   await dialog.getByRole('radio', { name: 'Modify the original PDF' }).check();
   await dialog.getByRole('textbox', { name: 'Name on annotations' }).fill('Brad Ross');
-  await dialog.getByRole('button', { name: 'Confirm', exact: true }).click();
+  await dialog.getByRole('button', { name: 'Save', exact: true }).click();
   await expect(dialog).toHaveCount(0);
   await expect(composer).toHaveCount(0);
   await expect.poll(() => host.broker.state(sessionId)?.items.length).toBe(1);
