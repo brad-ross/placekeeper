@@ -71,6 +71,12 @@
 }
 
 .comment-composer__body { gap: 12px; }
+.comment-composer__persistence-status {
+  margin: 0;
+  color: var(--review-ink-muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
 .comment-composer__input::placeholder { color: #888; opacity: 1; }
 
 #root[data-production-root="true"] .comment-composer textarea.comment-composer__input {

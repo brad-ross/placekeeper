@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from 're
 import { addHighlight, addInsert, addPageNote, addReplace, editReviewItem } from '../../../../packages/core/src/review-commands.js';
 import type { ReviewCommand, ReviewState } from '../../../../packages/core/src/review-model.js';
 import type { ReviewShellAuthoringModel } from './authoring-model.js';
+import type { RejectedReviewCommand } from './review-command-result.js';
 import { isVisibleFocusTarget } from './focus-target.js';
 import {
   authoringAuthorityFor, authoringAuthorityMatches, authoringAnchorSnapshot,
@@ -21,7 +22,7 @@ export function referenceAnnotationTargetSelector(tabIdentity: string, reviewId:
 
 /** Selects visible geometry for both projected owned marks and owned native PDF fragments. */
 export function ownedAnnotationFragmentSelector(reviewId: string): string {
-  return `:is([data-owned-mark], [data-source-reader-mark])[data-review-id="${cssAttributeValue(reviewId)}"]`;
+  return `:is([data-owned-mark], [data-source-reader-mark], [data-owned-native-geometry])[data-review-id="${cssAttributeValue(reviewId)}"]`;
 }
 
 export function referenceAnnotationScrollportSelector(tabIdentity: string): string {
@@ -41,6 +42,42 @@ export function authoringSessionInvalidReason(
     if (!items.some(({ id }) => id === editedItemId)) return 'edit-target';
   }
   return null;
+}
+
+export function authoringCommandDisposition(
+  result: ReviewState | RejectedReviewCommand,
+): 'accepted' | 'rejected' | 'persistence-pending' {
+  if (!('accepted' in result)) return 'accepted';
+  return result.reason === 'persistence-pending' ? 'persistence-pending' : 'rejected';
+}
+
+export interface AuthoringPendingPersistence {
+  readonly token: number;
+  readonly revision: number;
+}
+
+export function authoringPersistencePendingFor(
+  session: AuthoringSession,
+  pending: AuthoringPendingPersistence | null,
+): boolean {
+  return pending?.token === session.token;
+}
+
+export function authoringPersistenceCanClose(input: {
+  readonly session: AuthoringSession;
+  readonly pending: AuthoringPendingPersistence | null;
+  readonly currentAuthority: AuthoringAuthority;
+  readonly items: readonly ReviewState['items'][number][];
+  readonly forcedInvalidToken: number | null;
+  readonly persistedRevision: number | undefined;
+}): boolean {
+  const pending = input.pending;
+  return pending !== null
+    && authoringPersistencePendingFor(input.session, pending)
+    && input.forcedInvalidToken !== input.session.token
+    && authoringSessionInvalidReason(input.session, input.currentAuthority, input.items) === null
+    && input.persistedRevision !== undefined
+    && input.persistedRevision >= pending.revision;
 }
 
 interface AuthoringOptions {
@@ -70,6 +107,8 @@ export function useAuthoringSession({
 }: AuthoringOptions) {
   const [authoringSession, setAuthoringSession] = useState<AuthoringSession | null>(null);
   const [forcedInvalidToken, setForcedInvalidToken] = useState<number | null>(null);
+  const [pendingPersistence, setPendingPersistence] = useState<AuthoringPendingPersistence | null>(null);
+  const pendingPersistenceRef = useRef<AuthoringPendingPersistence | null>(null);
   const authoringSessionRef = useRef<AuthoringSession | null>(null);
   const authoringSessionTokenRef = useRef(0);
   const authoringEditorRef = useRef<HTMLTextAreaElement>(null);
@@ -162,6 +201,7 @@ export function useAuthoringSession({
     options?: {
       readonly authority?: AuthoringAuthority;
       readonly onAccepted?: () => void;
+      readonly onPersistencePending?: (revision: number) => void;
       readonly onStale?: () => void;
     },
   ): Promise<ReviewState> => {
@@ -184,11 +224,17 @@ export function useAuthoringSession({
         options.onStale?.();
         return acknowledgedRef.current;
       }
-      const accepted = !('accepted' in result);
-      const next = accepted ? result : result.state;
+      const disposition = authoringCommandDisposition(result);
+      const accepted = disposition === 'accepted';
+      const next = accepted ? result as ReviewState : (result as RejectedReviewCommand).state;
       acknowledgedRef.current = next;
-      setAnnouncement(accepted ? `Review revision ${next.revision} saved.` : result.message);
+      setAnnouncement(accepted
+        ? `Review revision ${next.revision} saved.`
+        : disposition === 'persistence-pending'
+          ? 'The annotation is waiting to be saved to the PDF.'
+          : (result as RejectedReviewCommand).message);
       if (accepted) options?.onAccepted?.();
+      if (disposition === 'persistence-pending') options?.onPersistencePending?.(next.revision);
       return next;
     });
     commandTailRef.current = result.catch(() => acknowledgedRef.current);
@@ -219,6 +265,8 @@ export function useAuthoringSession({
     });
     authoringSessionRef.current = session;
     setForcedInvalidToken(null);
+    pendingPersistenceRef.current = null;
+    setPendingPersistence(null);
     authoring.onAuthoringActiveChange?.(true);
     setAuthoringSession(session);
     openNested();
@@ -237,6 +285,8 @@ export function useAuthoringSession({
     if (current === null || current.token !== token) return;
     authoringSessionRef.current = null;
     setForcedInvalidToken(null);
+    pendingPersistenceRef.current = null;
+    setPendingPersistence(null);
     authoring.onAuthoringActiveChange?.(false);
     authoring.onAuthoringPreviewChange?.(null);
     setAuthoringSession(null);
@@ -339,6 +389,18 @@ export function useAuthoringSession({
     setForcedInvalidToken(current.token);
     setAnnouncement('This draft belongs to the previous document. Copy your draft or cancel it.');
   }, [authoring.authoringSessionResolution?.token]);
+  useEffect(() => {
+    const current = authoringSessionRef.current;
+    if (current === null || !authoringPersistenceCanClose({
+      session: current,
+      pending: pendingPersistence,
+      currentAuthority: currentAuthoringAuthorityRef.current,
+      items: state.items,
+      forcedInvalidToken,
+      persistedRevision: authoring.persistedRevision,
+    })) return;
+    closeAuthoringSession(current.token, 'accepted', acknowledgedRef.current);
+  }, [authoring.persistedRevision, forcedInvalidToken, pendingPersistence, state.items]);
   const submitAuthoring = async (
     session: AuthoringSession,
     build: (state: ReviewState) => ReviewCommand,
@@ -350,6 +412,11 @@ export function useAuthoringSession({
       onAccepted: () => {
         accepted = true;
         onAccepted?.();
+      },
+      onPersistencePending: (revision) => {
+        const pending = { token: session.token, revision };
+        pendingPersistenceRef.current = pending;
+        setPendingPersistence(pending);
       },
       onStale: () => closeAuthoringSession(session.token, 'source-replaced'),
     });
@@ -421,6 +488,10 @@ export function useAuthoringSession({
   };
 
   const saveAuthoring = async (session: AuthoringSession, value: string) => {
+    if (authoringPersistencePendingFor(session, pendingPersistenceRef.current)) {
+      setAnnouncement('This annotation is already waiting to be saved to the PDF. Use Retry in the save alert.');
+      return;
+    }
     if (forcedInvalidToken === session.token
       || authoringSessionInvalidReason(
         session,
@@ -495,5 +566,7 @@ export function useAuthoringSession({
     protectAuthoringDraft,
     saveAuthoring,
     authoringInvalidReason,
+    authoringPersistencePending: authoringSession !== null
+      && authoringPersistencePendingFor(authoringSession, pendingPersistence),
   };
 }

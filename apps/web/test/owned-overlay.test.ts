@@ -1,8 +1,13 @@
 import { Rotation } from "@embedpdf/models";
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from "vitest";
 
 import { ownedMarkStyle, positionOwnedRect } from "../src/pdf/owned-overlay.js";
-import { buildAnnotationRenderingState } from '../src/pdf/PdfAnnotationLayers.js';
+import {
+  buildAnnotationRenderingState,
+  OwnedNativeAnnotationGeometryTargets,
+} from '../src/pdf/PdfAnnotationLayers.js';
 import { sourceReaderMarkIdentityAttributes } from '../src/pdf/SourceAnnotationMark.js';
 
 import { textCenterFraction, textMarkGeometry } from '../src/pdf/text-mark-geometry.js';
@@ -40,6 +45,19 @@ describe("owned annotation overlay geometry", () => {
       contents: 'Source note', annotationKey: '3:pdf-23', pageIndex: 3,
     });
     expect(sourceReaderMarkIdentityAttributes(visible.sourceMarks.get('3:pdf-23')!)).toEqual({});
+    const geometryHtml = renderToStaticMarkup(createElement(OwnedNativeAnnotationGeometryTargets, {
+      annotations: owned,
+      page: { index: 2, objectNumber: 3, size: { width: 100, height: 100 }, rotation: Rotation.Degree0 },
+      layout: {
+        pageIndex: 2, pageNumber: 3, x: 0, y: 0, width: 200, height: 200,
+        rotatedWidth: 200, rotatedHeight: 200, elevated: false,
+      },
+      documentRotation: Rotation.Degree0,
+    }));
+    expect(geometryHtml).toContain('data-owned-native-geometry="true"');
+    expect(geometryHtml).toContain('data-review-id="review-17"');
+    expect(geometryHtml).toContain('left:2px;top:4px;width:6px;height:8px');
+    expect(geometryHtml).not.toContain('Editable note');
     expect(visible.residualSourceFocusMarks).toEqual([expect.objectContaining({
       id: 'pdf-23', pageIndex: 3, contents: 'Source note',
     })]);

@@ -113,6 +113,19 @@ describe('CommentComposer contextual authoring contract', () => {
     expect(html).toContain('title="Save" disabled="" aria-disabled="true"');
   });
 
+  it('freezes an accepted draft while PDF persistence awaits the global retry', () => {
+    const html = renderComposer({
+      initialValue: 'Already accepted once',
+      persistencePending: true,
+    });
+
+    expect(html).toContain('Already accepted once');
+    expect(html).toContain('textarea');
+    expect(html).toContain('readOnly=""');
+    expect(html).toContain('Waiting for the PDF to save. Use Retry in the save alert.');
+    expect(html).toContain('title="Save" disabled="" aria-disabled="true"');
+  });
+
   it('compacts a Reference sheet to expose its passage without unmounting the draft', () => {
     const html = renderComposer({
       initialValue: 'Selection-sensitive draft',

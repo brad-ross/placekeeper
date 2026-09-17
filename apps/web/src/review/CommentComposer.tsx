@@ -43,6 +43,7 @@ export interface CommentComposerProps {
   fieldLabel?: string;
   saveLabel?: string;
   saveDisabled?: boolean;
+  persistencePending?: boolean;
   anchorNavigation?: CommentComposerAnchorNavigation | undefined;
   editorRef?: RefObject<HTMLTextAreaElement | null>;
   surfaceRef?: (element: HTMLElement | null) => void;
@@ -101,6 +102,7 @@ export function CommentComposer({
   fieldLabel = optional ? 'Comment (optional)' : 'Comment',
   saveLabel = 'Save',
   saveDisabled = false,
+  persistencePending = false,
   anchorNavigation,
   editorRef,
   surfaceRef,
@@ -117,7 +119,7 @@ export function CommentComposer({
   const [submitting, setSubmitting] = useState(false);
   const composingRef = useRef(false);
   const passageSelectionRef = useRef<{ start: number; end: number } | null>(null);
-  const canSave = !saveDisabled
+  const canSave = !saveDisabled && !persistencePending
     && (optional || (allowWhitespace ? value.length > 0 : value.trim().length > 0));
 
   useEffect(() => {
@@ -285,6 +287,7 @@ export function CommentComposer({
             title={fieldLabel}
             placeholder="Add a comment…"
             value={value}
+            readOnly={persistencePending}
             onChange={(event) => {
               const next = event.currentTarget.value;
               setValue(next);
@@ -300,6 +303,11 @@ export function CommentComposer({
             }}
           />
         </label>
+        {persistencePending ? (
+          <p className="comment-composer__persistence-status" role="status">
+            Waiting for the PDF to save. Use Retry in the save alert.
+          </p>
+        ) : null}
         <div className="comment-composer__actions">
           <button
             className="review-button review-button--secondary"

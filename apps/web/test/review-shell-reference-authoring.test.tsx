@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { createReviewState, type ReviewItem, type ReviewState } from '../../../packages/core/src/review-model.js';
 import { ReviewShell } from '../src/app/ReviewShell.js';
+import { acceptedAuthoringCommandRequiresPersistence } from '../src/app/ProductionReviewApp.js';
 import {
   referenceAccessAvailable,
   referenceInspectionFocusSelector,
@@ -12,6 +13,9 @@ import {
 } from '../src/app/ReviewShell.js';
 import {
   authoringSessionInvalidReason,
+  authoringCommandDisposition,
+  authoringPersistenceCanClose,
+  authoringPersistencePendingFor,
   ownedAnnotationFragmentSelector,
   referenceAnnotationTargetSelector,
   referenceAnnotationScrollportSelector,
@@ -94,12 +98,59 @@ describe('Reference authoring continuity', () => {
     expect(authoringSessionInvalidReason(session, session.authority, [])).toBe('edit-target');
   });
 
+  it('retains one accepted authoring mutation until its PDF revision is persisted', () => {
+    const next = { ...reviewState, revision: 1 };
+    const unsettled = {
+      destination: { phase: 'active' as const, generation: 1, kind: 'copy' as const, targetPath: '/tmp/review.pdf' },
+      sync: { phase: 'not-saved' as const, desiredRevision: 1, savedRevision: 0 },
+    };
+
+    expect(acceptedAuthoringCommandRequiresPersistence(next, unsettled, true)).toBe(true);
+    expect(acceptedAuthoringCommandRequiresPersistence(next, {
+      ...unsettled,
+      sync: { phase: 'clean', desiredRevision: 1, savedRevision: 1 },
+    }, true)).toBe(false);
+    expect(acceptedAuthoringCommandRequiresPersistence(next, unsettled, false)).toBe(false);
+    expect(authoringCommandDisposition({
+      accepted: false,
+      state: next,
+      message: 'The annotation is waiting to be saved to the PDF.',
+      reason: 'persistence-pending',
+    })).toBe('persistence-pending');
+    const pending = { token: session.token, revision: 1 };
+    expect(authoringPersistencePendingFor(session, pending)).toBe(true);
+    expect(authoringPersistenceCanClose({
+      session,
+      pending,
+      currentAuthority: session.authority,
+      items: reviewState.items,
+      forcedInvalidToken: null,
+      persistedRevision: 1,
+    })).toBe(true);
+    expect(authoringPersistenceCanClose({
+      session,
+      pending,
+      currentAuthority: { ...session.authority, documentGeneration: 9 },
+      items: reviewState.items,
+      forcedInvalidToken: null,
+      persistedRevision: 9,
+    })).toBe(false);
+    expect(authoringPersistenceCanClose({
+      session,
+      pending,
+      currentAuthority: session.authority,
+      items: reviewState.items,
+      forcedInvalidToken: session.token,
+      persistedRevision: 1,
+    })).toBe(false);
+  });
+
   it('scopes duplicate mark and scrollport lookup to the originating Reference tab', () => {
     expect(ownedAnnotationFragmentSelector('note-1')).toBe(
-      ':is([data-owned-mark], [data-source-reader-mark])[data-review-id="note-1"]',
+      ':is([data-owned-mark], [data-source-reader-mark], [data-owned-native-geometry])[data-review-id="note-1"]',
     );
     expect(referenceAnnotationTargetSelector('tab-1', 'note-1')).toBe(
-      '[data-annotation-surface="reference"][data-reference-tab-identity="tab-1"] :is([data-owned-mark], [data-source-reader-mark])[data-review-id="note-1"]',
+      '[data-annotation-surface="reference"][data-reference-tab-identity="tab-1"] :is([data-owned-mark], [data-source-reader-mark], [data-owned-native-geometry])[data-review-id="note-1"]',
     );
     expect(referenceAnnotationScrollportSelector('tab-1')).toBe(
       '[data-reference-pdf-viewport][data-reference-tab-identity="tab-1"] [data-viewer-framing-viewport]',

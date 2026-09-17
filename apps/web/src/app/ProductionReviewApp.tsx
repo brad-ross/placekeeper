@@ -328,6 +328,16 @@ export interface ProductionReviewAppProps {
   readonly accessibilityTransition?: AccessibilityTransitionEffect;
 }
 
+export function acceptedAuthoringCommandRequiresPersistence(
+  state: ReviewState,
+  status: SaveStatus,
+  authoringPersistenceRequired: boolean,
+): boolean {
+  return authoringPersistenceRequired
+    && status.destination.phase === 'active'
+    && !saveStatusIsCleanCurrent(state, status);
+}
+
 export function ProductionReviewApp(props: ProductionReviewAppProps) {
   const availableModes = useContext(WorkspaceModeAvailability);
   const workspacePresentation = useContext(WorkspacePresentation);
@@ -1984,6 +1994,9 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
           ...(authoringSessionResolution === undefined
             ? {}
             : { authoringSessionResolution }),
+          ...(saveStatus.sync.phase === 'clean'
+            ? { persistedRevision: saveStatus.sync.savedRevision }
+            : {}),
           onAuthoringAnchorChange,
           onAuthoringActiveChange: (active) => { authoringActiveRef.current = active; },
           onAuthoringPreviewChange: setAuthoringPreview,
@@ -2062,6 +2075,21 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
               setSaveStatus(nextSaveStatus);
               if (gated.kind === 'submit-and-choose-destination') {
                 openCopyDialog("first-annotation");
+              }
+              if (acceptedAuthoringCommandRequiresPersistence(
+                next,
+                nextSaveStatus,
+                authority !== undefined
+                  && !exportOnly
+                  && state.workflow.mode !== 'generated-output',
+              )) {
+                setCommandError(null);
+                return {
+                  accepted: false,
+                  state: next,
+                  message: 'The annotation is waiting to be saved to the PDF.',
+                  reason: 'persistence-pending',
+                };
               }
             }
             setCommandError("accepted" in result ? result.message : null);

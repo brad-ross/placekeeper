@@ -403,6 +403,7 @@ export function ReviewShell(props: ReviewShellProps) {
     protectAuthoringDraft,
     saveAuthoring,
     authoringInvalidReason,
+    authoringPersistencePending,
   } = useAuthoringSession({
     state: props.state, authoring: props.authoring,
     documentGeneration: (props.workspace.navigationState ?? surface.navigation).documentGeneration,
@@ -1609,7 +1610,8 @@ export function ReviewShell(props: ReviewShellProps) {
       saveLabel={authoringSession.semantics.primaryLabel}
       optional={authoringSession.semantics.optional}
       allowWhitespace={authoringSession.semantics.allowWhitespace}
-      saveDisabled={authoringInvalidReason !== null}
+      saveDisabled={authoringInvalidReason !== null || authoringPersistencePending}
+      persistencePending={authoringPersistencePending}
       {...(fieldLabel === undefined ? {} : { fieldLabel })}
       initialValue={initialValue}
       editorRef={authoringEditorRef}

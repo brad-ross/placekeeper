@@ -1,4 +1,4 @@
-import type { PdfDocumentObject, PdfEngine, Rotation } from '@embedpdf/models';
+import type { PdfDocumentObject, PdfEngine, PdfPageObject, Rotation } from '@embedpdf/models';
 import type { ReviewAnnotation } from '../../../../packages/core/src/pdf-writer.js';
 import { ReviewIcon } from '../review/ReviewIcon.js';
 import { reviewItemIdForAnnotation } from '../review/annotation-projection.js';
@@ -104,6 +104,40 @@ export interface PdfAnnotationLayersProps {
   readonly onSourceMarkInteraction?: (annotationKey: string, pageIndex: number) => void;
 }
 
+/** Nonpainting geometry for native owned annotations whose visible appearance is rendered by EmbedPDF. */
+export function OwnedNativeAnnotationGeometryTargets({
+  annotations,
+  page,
+  layout,
+  documentRotation,
+}: {
+  readonly annotations: readonly ReviewAnnotation[];
+  readonly page: PdfPageObject;
+  readonly layout: PageLayout;
+  readonly documentRotation: Rotation;
+}) {
+  return <>{annotations.flatMap((annotation) => {
+    if (annotation.kind !== 'pdfAnnotation' || annotation.pageIndex !== layout.pageIndex) return [];
+    return (annotation.quadPoints ?? [annotation.rect]).map((rect, index) => {
+      const transformed = positionOwnedRect(page, layout, documentRotation, rect);
+      return <span
+        key={`${annotation.id}:${index}`}
+        data-owned-native-geometry="true"
+        data-review-id={reviewItemIdForAnnotation(annotation)}
+        data-page-index={layout.pageIndex}
+        style={{
+          position: 'absolute',
+          left: transformed.origin.x,
+          top: transformed.origin.y,
+          width: transformed.size.width,
+          height: transformed.size.height,
+          pointerEvents: 'none',
+        }}
+      />;
+    });
+  })}</>;
+}
+
 /** Canonical annotation projection used by Main and the active Reference document. */
 export function PdfAnnotationLayers({
   documentId,
@@ -131,6 +165,12 @@ export function PdfAnnotationLayers({
       data-owned-annotation-layer
       style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}
     >
+      <OwnedNativeAnnotationGeometryTargets
+        annotations={annotations}
+        page={page}
+        layout={layout}
+        documentRotation={documentRotation}
+      />
       {annotations.flatMap((annotation) => {
         if (annotation.kind === 'pdfAnnotation') return [];
         return (annotation.quadPoints ?? [annotation.rect]).map((rect, index) => (

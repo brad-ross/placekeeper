@@ -49,6 +49,8 @@ export interface ReviewShellAuthoringModel {
     readonly token: number;
     readonly outcome: 'accepted' | 'source-replaced';
   };
+  /** Highest review revision durably written to the configured PDF destination. */
+  persistedRevision?: number;
   /** Production-owned, read-only visibility/Return state for the active frozen anchor. */
   authoringAnchorNavigation?: {
     readonly token: number;
