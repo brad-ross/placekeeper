@@ -6,6 +6,7 @@ import { restorePagePoint } from './selection-anchor.js';
 import type { PdfNavigationMetadata } from './pdf-navigation-metadata.js';
 import type { PdfNavigationTarget } from './pdf-navigation-target.js';
 import type { PdfViewerScope } from './viewer-document-ids.js';
+import type { PdfAnnotationSurface } from './annotation-surface.js';
 
 /** Stable relationship target for the one active link-action menu. */
 export const PDF_LINK_ACTION_MENU_ID = 'pdf-link-action-menu';
@@ -77,9 +78,17 @@ export interface ViewerSelectionPlacement {
 export interface ViewerOwnedMarkInteraction {
   readonly id: string;
   readonly phase: 'enter' | 'leave' | 'focus' | 'blur' | 'activate';
+  readonly pageIndex?: number;
+  readonly placement?: ViewerClientPlacement;
 }
 
-export type ViewerInteractionEvent =
+export interface ViewerSourceMarkInteraction {
+  readonly annotationKey: string;
+  readonly phase: 'activate';
+  readonly pageIndex: number;
+}
+
+export type ViewerInteractionEvent = (
   | { readonly type: 'readiness'; readonly ready: boolean; readonly reason?: string }
   | { readonly type: 'page'; readonly currentPage: number; readonly totalPages: number }
   | { readonly type: 'zoom'; readonly zoomPercent: number }
@@ -98,8 +107,10 @@ export type ViewerInteractionEvent =
   | { readonly type: 'page-note-commit'; readonly value: ViewerPagePoint }
   | { readonly type: 'owned-mark'; readonly value: ViewerOwnedMarkInteraction }
   | { readonly type: 'owned-mark-clear' }
+  | { readonly type: 'source-mark'; readonly value: ViewerSourceMarkInteraction }
   | { readonly type: 'pdf-link'; readonly value: ViewerPdfLinkInvocation }
-  | { readonly type: 'pdf-link-unavailable'; readonly value: ViewerPdfLinkUnavailable };
+  | { readonly type: 'pdf-link-unavailable'; readonly value: ViewerPdfLinkUnavailable }
+) & { readonly surface?: PdfAnnotationSurface };
 
 export type ViewerInteractionListener = (event: ViewerInteractionEvent) => void;
 

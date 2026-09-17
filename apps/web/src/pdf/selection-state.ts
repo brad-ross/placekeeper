@@ -1,8 +1,12 @@
 import type { ReliabilityDiagnostic } from './text-reliability.js';
 import type { SelectionAnchor, SelectionAnchorResult } from './selection-anchor.js';
 import { PDF_SELECTION_PAGE_LIMIT } from './selection-page-limit.js';
+import {
+  samePdfAnnotationSurface,
+  type PdfAnnotationSurface,
+} from './annotation-surface.js';
 
-export type SelectionUpdate =
+export type SelectionUpdate = (
   | { readonly kind: 'cleared'; readonly generation: number }
   | { readonly kind: 'pending'; readonly generation: number }
   | { readonly kind: 'reliable'; readonly generation: number; readonly anchor: SelectionAnchor }
@@ -12,20 +16,16 @@ export type SelectionUpdate =
       readonly generation: number;
       readonly userMessage: string;
       readonly diagnostic: ReliabilityDiagnostic;
-    };
+    }
+) & { readonly surface?: PdfAnnotationSurface };
 
 export const INITIAL_SELECTION_UPDATE: SelectionUpdate = {
   kind: 'cleared',
   generation: 0,
 };
 
-export type PdfCopySurface =
-  | { readonly kind: 'main'; readonly documentGeneration: number }
-  | {
-      readonly kind: 'reference';
-      readonly documentGeneration: number;
-      readonly tabIdentity: string;
-    };
+/** @deprecated Import PdfAnnotationSurface for shared viewer-origin evidence. */
+export type PdfCopySurface = PdfAnnotationSurface;
 
 export type CopySelectionUpdate =
   | { readonly kind: 'cleared'; readonly surface: PdfCopySurface; readonly generation: number }
@@ -68,21 +68,13 @@ export function nativeCopyHasPrecedence(input: {
     );
 }
 
-function sameCopySurface(left: PdfCopySurface, right: PdfCopySurface): boolean {
-  return left.kind === right.kind
-    && left.documentGeneration === right.documentGeneration
-    && (left.kind === 'main' || (
-      right.kind === 'reference' && left.tabIdentity === right.tabIdentity
-    ));
-}
-
 /** Keep one surface snapshot fenced to its exact document/tab and selection generation. */
 export function acceptCopySelectionUpdate(
   current: CopySelectionUpdate | null,
   next: CopySelectionUpdate,
 ): CopySelectionUpdate {
   if (current === null) return next;
-  if (!sameCopySurface(current.surface, next.surface)) {
+  if (!samePdfAnnotationSurface(current.surface, next.surface)) {
     return next.kind === 'cleared' ? next : current;
   }
   if (next.generation < current.generation) return current;
@@ -194,32 +186,57 @@ export function applyPdfCopyCommand(
 
 export class SelectionReadAuthority {
   private generation = 0;
-  private active: { readonly documentId: string; readonly generation: number } | null = null;
+  private active: {
+    readonly documentId: string;
+    readonly generation: number;
+    readonly surface?: PdfAnnotationSurface;
+  } | null = null;
+  private currentSurface: PdfAnnotationSurface | undefined;
 
-  begin(documentId: string): { readonly generation: number; readonly started: boolean } {
-    if (this.active?.documentId === documentId) {
+  begin(
+    documentId: string,
+    surface?: PdfAnnotationSurface,
+  ): { readonly generation: number; readonly started: boolean } {
+    if (this.active?.documentId === documentId
+      && sameOptionalSurface(this.active.surface, surface)) {
       return { generation: this.active.generation, started: false };
     }
     const generation = ++this.generation;
-    this.active = { documentId, generation };
+    this.active = { documentId, generation, ...(surface === undefined ? {} : { surface }) };
+    this.currentSurface = surface;
     return { generation, started: true };
   }
 
-  finish(documentId: string): number | null {
-    if (this.active?.documentId !== documentId) return null;
+  finish(documentId: string, surface?: PdfAnnotationSurface): number | null {
+    if (this.active?.documentId !== documentId
+      || !sameOptionalSurface(this.active.surface, surface)) return null;
     const { generation } = this.active;
     this.active = null;
     return generation;
   }
 
-  invalidate(): Extract<SelectionUpdate, { readonly kind: 'cleared' }> {
+  invalidate(surface?: PdfAnnotationSurface): Extract<SelectionUpdate, { readonly kind: 'cleared' }> {
     this.active = null;
-    return { kind: 'cleared', generation: ++this.generation };
+    this.currentSurface = surface;
+    return {
+      kind: 'cleared',
+      generation: ++this.generation,
+      ...(surface === undefined ? {} : { surface }),
+    };
   }
 
-  isCurrent(generation: number): boolean {
-    return generation === this.generation;
+  isCurrent(generation: number, surface?: PdfAnnotationSurface): boolean {
+    return generation === this.generation
+      && sameOptionalSurface(this.currentSurface, surface);
   }
+}
+
+function sameOptionalSurface(
+  left: PdfAnnotationSurface | undefined,
+  right: PdfAnnotationSurface | undefined,
+): boolean {
+  if (left === undefined || right === undefined) return left === right;
+  return samePdfAnnotationSurface(left, right);
 }
 
 const SELECTION_PENDING_MESSAGE = 'Reading the selected text…';
@@ -231,6 +248,7 @@ export function acceptSelectionUpdate(
 ): SelectionUpdate {
   if (next.generation < current.generation) return current;
   if (next.generation > current.generation) return next;
+  if (!sameOptionalSurface(current.surface, next.surface)) return current;
   if (current.kind !== 'pending') return current;
   return next.kind === 'reliable' || next.kind === 'over-limit' || next.kind === 'unreliable'
     ? next

@@ -12,6 +12,7 @@ import {
   pendingDraftForAuthoring,
   type AuthoringSessionSeed,
 } from '../src/review/authoring-session.js';
+import { PdfZoomMode } from '@embedpdf/models';
 import {
   pendingDestinationAttemptIsCurrent,
   pendingDestinationDisposition,
@@ -361,6 +362,63 @@ describe('frozen authoring-session contract', () => {
 
     expect(session.origin.kind).toBe('reader-edit');
     expect(Object.isFrozen(session.origin)).toBe(true);
+  });
+
+  it('deeply freezes reference recovery identity without making tab identity save authority', () => {
+    const target = {
+      documentGeneration: 7,
+      pageIndex: 13,
+      zoom: { mode: PdfZoomMode.XYZ, params: [18, 24, 1.5] },
+      identity: 'destination-identity',
+    };
+    const surface = {
+      kind: 'reference' as const,
+      documentGeneration: 7,
+      tabIdentity: 'reference-a',
+    };
+    const session = createAuthoringSession({
+      ...seed({ kind: 'insert', anchor: caret, initialValue: 'draft' }),
+      origin: {
+        kind: 'caret',
+        trigger: null,
+        surface,
+        referenceRecovery: {
+          target,
+          tabIdentity: 'reference-a',
+          label: 'Identification strategy',
+          pageContext: 'Page 14',
+        },
+      },
+    });
+
+    target.zoom.params[0] = 999;
+    surface.tabIdentity = 'reference-b';
+
+    expect(session.origin).toMatchObject({
+      surface: { kind: 'reference', documentGeneration: 7, tabIdentity: 'reference-a' },
+      referenceRecovery: {
+        target: {
+          documentGeneration: 7,
+          pageIndex: 13,
+          identity: 'destination-identity',
+          zoom: { params: [18, 24, 1.5] },
+        },
+        tabIdentity: 'reference-a',
+        label: 'Identification strategy',
+        pageContext: 'Page 14',
+      },
+    });
+    expect(Object.isFrozen(session.origin.surface)).toBe(true);
+    expect(Object.isFrozen(session.origin.referenceRecovery)).toBe(true);
+    expect(Object.isFrozen(session.origin.referenceRecovery?.target)).toBe(true);
+    expect(Object.isFrozen(session.origin.referenceRecovery?.target.zoom)).toBe(true);
+    expect(Object.isFrozen(session.origin.referenceRecovery?.target.zoom.params)).toBe(true);
+    expect(authoringAnchorSnapshot(session)).toMatchObject({
+      surface: { tabIdentity: 'reference-a' },
+      referenceRecovery: { target: { identity: 'destination-identity' } },
+    });
+
+    expect(authoringSessionIsCurrent(session, authoringAuthorityFor(state, 7))).toBe(true);
   });
 
   it('fails closed when either source identity or document generation changes', () => {
