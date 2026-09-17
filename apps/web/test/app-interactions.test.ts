@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   caretClientPlacement,
   clampPageNotePoint,
+  enableViewerTextSelection,
   subscribeToMainDocumentOpened,
   publishViewerCaretRead,
   isCurrentViewerInputSurface,
@@ -24,6 +25,21 @@ const unavailableCaret = {
 };
 
 describe('App interaction boundaries', () => {
+  it('enables text selection for the exact inactive Reference document', () => {
+    const enableForMode = vi.fn();
+    enableViewerTextSelection(
+      { getDefaultMode: () => 'pointerMode' },
+      { enableForMode },
+      'reference',
+    );
+
+    expect(enableForMode).toHaveBeenCalledWith('pointerMode', {
+      enableSelection: true,
+      showSelectionRects: true,
+      enableMarquee: false,
+    }, 'reference');
+  });
+
   it('binds Reference input before a tab exists, then advances surfaces on the same document', () => {
     const authority = new ReferenceInputDocumentAuthority();
     const document = {};

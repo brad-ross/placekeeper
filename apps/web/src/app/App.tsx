@@ -112,6 +112,35 @@ type ViewerCaretResult = Awaited<ReturnType<typeof captureViewerCaret>>;
 
 const FALLBACK_PAGE_NOTE_CURSOR_RADIUS_PX = 18;
 
+interface ViewerInteractionModeSource {
+  getDefaultMode(): string;
+}
+
+interface ViewerTextSelectionControls {
+  enableForMode(
+    modeId: string,
+    options: {
+      readonly enableSelection: boolean;
+      readonly showSelectionRects: boolean;
+      readonly enableMarquee: boolean;
+    },
+    documentId?: string,
+  ): unknown;
+}
+
+/** EmbedPDF otherwise applies this configuration only to its active document. */
+export function enableViewerTextSelection(
+  interaction: ViewerInteractionModeSource,
+  selection: ViewerTextSelectionControls,
+  documentId: string,
+): void {
+  selection.enableForMode(interaction.getDefaultMode(), {
+    enableSelection: true,
+    showSelectionRects: true,
+    enableMarquee: false,
+  }, documentId);
+}
+
 /** Binds Reference input to one opened PDF while deriving the active tab per gesture. */
 export class ReferenceInputDocumentAuthority {
   #document: object | null = null;
@@ -713,11 +742,7 @@ export function App({
     const selectionPlugin = registry.getPlugin<SelectionPlugin>(SelectionPlugin.id);
     const selection = selectionPlugin?.provides();
     if (interaction && selection) {
-      selection.enableForMode(interaction.getDefaultMode(), {
-        enableSelection: true,
-        showSelectionRects: true,
-        enableMarquee: false,
-      });
+      enableViewerTextSelection(interaction, selection, MAIN_PDF_DOCUMENT_ID);
     }
 
     const pageReaders = new Map<string, {
@@ -1062,6 +1087,9 @@ export function App({
         documentManager.onDocumentOpened(({ document }) => {
           if (document?.id !== REFERENCE_PDF_DOCUMENT_ID) return;
           disposeReferenceNavigation();
+          if (interaction && selection) {
+            enableViewerTextSelection(interaction, selection, REFERENCE_PDF_DOCUMENT_ID);
+          }
           const referenceNavigation = createViewerNavigation({
             registry,
             root: () => referenceWorkspaceElementRef.current,
