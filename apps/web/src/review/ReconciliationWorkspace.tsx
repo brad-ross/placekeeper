@@ -1,6 +1,9 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactElement, type ReactNode } from "react";
 
-import { anchorEvidenceFromReviewItem } from "../../../../packages/core/src/review-model.js";
+import {
+  anchorEvidenceFromReviewItem,
+  synchronizeReviewItemAnchor,
+} from "../../../../packages/core/src/review-model.js";
 import type {
   PendingReviewDraftV1,
   ReviewAnchorEvidenceV1,
@@ -26,6 +29,15 @@ import {
 import { ReviewIcon } from "./ReviewIcon.js";
 import { ReviewTooltipButton } from "./ReviewTooltipButton.js";
 import { existingAnnotationKey } from "../pdf/existing-annotations.js";
+import {
+  FullAnnotationReaderBody,
+  FullAnnotationReaderMetadata,
+} from "./FullAnnotationReader.js";
+import {
+  projectOwnedAnnotationReader,
+  type AnnotationReaderRecord,
+  type OwnedAnnotationReaderRecord,
+} from "./annotation-reader.js";
 
 export type ReattachmentTarget =
   | {
@@ -174,21 +186,6 @@ export function reattachmentTitle(kind: ReviewItemKind): string {
   return REATTACHMENT_TITLES[kind];
 }
 
-function meaningfulPriorSourceText(
-  target: ReviewItem | PendingReviewDraftV1,
-  authored: string,
-): string | undefined {
-  const anchor = targetAnchor(target);
-  const source = anchor.kind === "selection"
-    ? anchor.quote
-    : anchor.kind === "caret"
-      ? `${anchor.leftContext}▏${anchor.rightContext}`
-      : anchor.nearbyText;
-  const normalizedSource = source?.trim();
-  if (!normalizedSource || normalizedSource === `Page ${anchor.pageIndex + 1}`) return undefined;
-  return normalizedSource === authored.trim() ? undefined : normalizedSource;
-}
-
 function reattachmentInstruction(
   expected: ReviewAnchorEvidenceV1["kind"],
   candidate: { readonly anchor: ReviewAnchorEvidenceV1 | null; readonly message: string },
@@ -235,7 +232,6 @@ interface ResolutionRecord {
   readonly value: ReviewItem | PendingReviewDraftV1;
   readonly kind: ReviewItem["kind"] | PendingReviewDraftV1["kind"];
   readonly pageNumber: number;
-  readonly priorSourceText: string | undefined;
   readonly authoredText: string;
   readonly stateLabel: string;
 }
@@ -268,6 +264,50 @@ function resolutionStateLabel(target: ReviewItem | PendingReviewDraftV1): string
   return "Needs review";
 }
 
+export function projectReconciliationDraftReader(
+  draft: PendingReviewDraftV1,
+): OwnedAnnotationReaderRecord | null {
+  const payload: ReviewItem["payload"] = (() => {
+    switch (draft.kind) {
+      case "replace": return { proposedText: draft.text };
+      case "highlight": return draft.text.trim().length === 0 ? {} : { comment: draft.text };
+      case "delete": return {};
+      case "insert": return { proposedText: draft.text };
+      case "pageNote":
+      case "pdfAnnotation": return { comment: draft.text };
+    }
+  })();
+  const item = synchronizeReviewItemAnchor({
+    id: draft.id,
+    kind: draft.kind,
+    pageIndex: draft.pageIndex,
+    payload,
+    createdAt: draft.createdAt,
+    updatedAt: draft.updatedAt,
+  }, draft.anchor);
+  return projectOwnedAnnotationReader(item);
+}
+
+function reconciliationReaderRecord(record: ResolutionRecord): Pick<AnnotationReaderRecord,
+  | "kind" | "typeLabel" | "pageNumber" | "lastPageNumber"
+  | "contentLabel" | "content" | "sourceText" | "sourceTreatment" | "quoteText"> {
+  if ("payload" in record.value) {
+    const projected = projectOwnedAnnotationReader(record.value);
+    if (projected !== null) return projected;
+  } else {
+    const projected = projectReconciliationDraftReader(record.value);
+    if (projected !== null) return projected;
+  }
+
+  return {
+    kind: record.kind,
+    typeLabel: annotationKindLabel(record.kind),
+    pageNumber: record.pageNumber,
+    contentLabel: "Annotation contents",
+    content: record.authoredText,
+  };
+}
+
 export function ReconciliationWorkspace(props: ReconciliationWorkspaceProps) {
   const records = useMemo<readonly ResolutionRecord[]>(() => [
     ...props.state.items.filter(
@@ -286,7 +326,6 @@ export function ReconciliationWorkspace(props: ReconciliationWorkspaceProps) {
         kind: item.kind,
         pageNumber: item.pageIndex + 1,
         authoredText: text,
-        priorSourceText: meaningfulPriorSourceText(item, text),
         stateLabel: resolutionStateLabel(item),
       };
     }),
@@ -303,7 +342,6 @@ export function ReconciliationWorkspace(props: ReconciliationWorkspaceProps) {
         kind: draft.kind,
         pageNumber: draft.pageIndex + 1,
         authoredText: text,
-        priorSourceText: meaningfulPriorSourceText(draft, text),
         stateLabel: resolutionStateLabel(draft),
       };
     }),
@@ -342,6 +380,10 @@ export function ReconciliationWorkspace(props: ReconciliationWorkspaceProps) {
   const activeRecord = detail === null
     ? undefined
     : recordsByKey.get(detail.key);
+  const activeReaderRecord = useMemo(
+    () => activeRecord === undefined ? null : reconciliationReaderRecord(activeRecord),
+    [activeRecord],
+  );
   const candidate = useMemo(() => detail?.mode !== "reattach" || activeRecord === undefined
     ? null
     : reattachmentCandidateFor(
@@ -755,23 +797,27 @@ export function ReconciliationWorkspace(props: ReconciliationWorkspaceProps) {
     ? [record.target.id]
     : []), [records]);
   let editor: ReactElement | null = null;
-  if (activeRecord !== undefined && detail !== null) {
-    const typeLabel = annotationKindLabel(activeRecord.kind);
+  if (activeRecord !== undefined && activeReaderRecord !== null && detail !== null) {
+    const projectedRecord = activeReaderRecord;
+    const typeLabel = projectedRecord.typeLabel;
     const draft = "payload" in activeRecord.value ? undefined : activeRecord.value;
     const canApplyDraft = draft?.status === "protected" && draft.disposition.kind === "resolved";
     const title = detail.mode === "reattach"
       ? reattachmentTitle(activeRecord.kind)
       : `${detail.mode === "apply" ? "Apply" : "Discard"} ${typeLabel.toLocaleLowerCase()}`;
+    const pageDescription = projectedRecord.lastPageNumber === undefined
+      ? `page ${projectedRecord.pageNumber}`
+      : `pages ${projectedRecord.pageNumber}–${projectedRecord.lastPageNumber}`;
     editor = <section
       ref={editorRef}
       id={`reconciliation-editor-${activeRecord.key.replace(':', '-')}`}
-      className="reconciliation-workspace reconciliation-workspace--detail full-annotation-reader"
+      className="reconciliation-workspace--detail full-annotation-reader"
       data-reconciliation-workspace
       data-reconciliation-reader
       data-reconciliation-detail={detail.mode}
       data-full-annotation-reader="true"
       role="region"
-      aria-label={`${title}, previously page ${activeRecord.pageNumber}`}
+      aria-label={`${title}, previously ${pageDescription}`}
       onKeyDown={(event) => {
         if (event.key !== "Escape" || pending) return;
         event.preventDefault();
@@ -779,31 +825,25 @@ export function ReconciliationWorkspace(props: ReconciliationWorkspaceProps) {
         void closeDetail();
       }}
     >
-      <header className="reconciliation-workspace__detail-header full-annotation-reader__metadata-bar">
-        <ReviewTooltipButton
-          type="button"
-          className="full-annotation-reader__back"
-          data-full-annotation-action="back"
-          label="Back"
-          tooltip="Back to annotations"
-          disabled={pending}
-          onClick={() => { void closeDetail(); }}
-        ><ReviewIcon name="arrow-left" size={16} /></ReviewTooltipButton>
-        <h2>{title}</h2>
+      <header className="full-annotation-reader__metadata-bar">
+        <div className="full-annotation-reader__actions" aria-label="Full annotation actions">
+          <ReviewTooltipButton
+            type="button"
+            className="full-annotation-reader__back"
+            data-full-annotation-action="back"
+            label="Back"
+            tooltip="Back to annotations"
+            disabled={pending}
+            onClick={() => { void closeDetail(); }}
+          ><ReviewIcon name="arrow-left" size={16} /></ReviewTooltipButton>
+        </div>
+        <FullAnnotationReaderMetadata record={projectedRecord} prior />
+        <div className="full-annotation-reader__header-actions" />
       </header>
-      <div className="full-annotation-reader__body">
-        {message ? <p className="reconciliation-workspace__message" role="status">{message}</p> : null}
-        <section className="reconciliation-workspace__intent">
-          <p className="reconciliation-workspace__kicker">Your annotation</p>
-          <p className="reconciliation-workspace__annotation-text">{activeRecord.authoredText}</p>
-        </section>
-        <section className="reconciliation-workspace__prior-context">
-          <p className="reconciliation-workspace__kicker">Previously attached to <span aria-hidden="true">·</span> Page {activeRecord.pageNumber}</p>
-          {activeRecord.priorSourceText === undefined ? null : <p className="reconciliation-workspace__source-text">
-            <span className="sr-only">Original PDF text: </span>{activeRecord.priorSourceText}
-          </p>}
-        </section>
-      </div>
+      <FullAnnotationReaderBody
+        record={projectedRecord}
+        before={message ? <p className="reconciliation-workspace__message" role="status">{message}</p> : null}
+      />
       {detail.mode === "reattach" && candidate !== null ? <section className="reconciliation-workspace__resolution" data-reattachment-selection-mode>
         <p className="reconciliation-workspace__instruction" role={candidate.anchor === null ? "alert" : "status"}>
           {reattachmentInstruction(targetAnchor(activeRecord.value).kind, candidate)}

@@ -1,6 +1,7 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 
 const fixtureUrl = '/test/acceptance/review-harness/index.html?reconciliation=1';
+const productionFixtureUrl = '/test/acceptance/review-harness/index.html?visual=tray&reconciliation=1';
 
 const viewports = [
   { name: 'wide', width: 1280, height: 900 },
@@ -42,6 +43,16 @@ async function openFixture(
 ) {
   await page.setViewportSize({ width: viewport.width, height: viewport.height });
   await page.goto(fixtureUrl);
+  return openAnnotations(page);
+}
+
+async function openProductionFixture(
+  page: Page,
+  viewport: { readonly name: string; readonly width: number; readonly height: number },
+) {
+  await page.setViewportSize({ width: viewport.width, height: viewport.height });
+  await page.goto(productionFixtureUrl);
+  await expect(page.locator('#root')).toHaveAttribute('data-production-root', 'true');
   return openAnnotations(page);
 }
 
@@ -121,6 +132,159 @@ async function expectReaderActionStyling(reader: Locator) {
       minHeight: '30px',
     });
   }
+}
+
+interface ReaderParitySignature {
+  readonly surface: {
+    readonly reader: string;
+    readonly header: string;
+    readonly body: string;
+  };
+  readonly readerGap: number;
+  readonly headerPaddingBottom: number;
+  readonly metadata: {
+    readonly fontFamily: string;
+    readonly fontSize: number;
+    readonly fontWeight: string;
+    readonly lineHeight: number;
+  };
+  readonly content: {
+    readonly fontFamily: string;
+    readonly fontSize: number;
+    readonly fontWeight: string;
+    readonly lineHeight: number;
+    readonly paragraphSpacing: number;
+  };
+}
+
+async function readerParitySignature(
+  reader: Locator,
+  metadataSelector: string,
+  contentSelector: string,
+): Promise<ReaderParitySignature> {
+  return reader.evaluate((element, { metadataSelector, contentSelector }) => {
+    const header = element.querySelector<HTMLElement>('.full-annotation-reader__metadata-bar');
+    const body = element.querySelector<HTMLElement>('.full-annotation-reader__body');
+    const metadata = element.querySelector<HTMLElement>(metadataSelector);
+    const content = element.querySelector<HTMLElement>(contentSelector);
+    if (!header || !body || !metadata || !content) {
+      throw new Error('Reader parity structure is incomplete.');
+    }
+    const readerStyle = getComputedStyle(element);
+    const headerStyle = getComputedStyle(header);
+    const bodyStyle = getComputedStyle(body);
+    const metadataStyle = getComputedStyle(metadata);
+    const contentStyle = getComputedStyle(content);
+    const number = (value: string) => Number.parseFloat(value);
+    let paragraphSpacing = number(contentStyle.marginBottom);
+    if (content.matches(':last-child') && content.parentElement !== null) {
+      const probe = document.createElement(content.tagName.toLocaleLowerCase());
+      probe.hidden = true;
+      content.parentElement.append(probe);
+      paragraphSpacing = number(getComputedStyle(content).marginBottom);
+      probe.remove();
+    }
+    return {
+      surface: {
+        reader: readerStyle.backgroundColor,
+        header: headerStyle.backgroundColor,
+        body: bodyStyle.backgroundColor,
+      },
+      readerGap: number(readerStyle.gap),
+      headerPaddingBottom: number(headerStyle.paddingBottom),
+      metadata: {
+        fontFamily: metadataStyle.fontFamily,
+        fontSize: number(metadataStyle.fontSize),
+        fontWeight: metadataStyle.fontWeight,
+        lineHeight: number(metadataStyle.lineHeight),
+      },
+      content: {
+        fontFamily: contentStyle.fontFamily,
+        fontSize: number(contentStyle.fontSize),
+        fontWeight: contentStyle.fontWeight,
+        lineHeight: number(contentStyle.lineHeight),
+        paragraphSpacing,
+      },
+    };
+  }, { metadataSelector, contentSelector });
+}
+
+async function canonicalReaderSignature(panel: Locator): Promise<ReaderParitySignature> {
+  const trigger = panel.getByRole('button', {
+    name: /Read full Highlight annotation on page 8/u,
+  });
+  await expect(trigger).toBeVisible();
+  await trigger.click();
+  const reader = panel.locator('[data-full-annotation-reader="true"]');
+  await expect(reader).toHaveAttribute('data-annotation-origin', 'source');
+  const signature = await readerParitySignature(
+    reader,
+    '.full-annotation-reader__metadata',
+    '.full-annotation-reader__body p',
+  );
+  await reader.locator('[data-full-annotation-action="back"]').click();
+  await expect(reader).toHaveCount(0);
+  return signature;
+}
+
+async function expectReconciliationReaderParity(
+  reader: Locator,
+  canonical: ReaderParitySignature,
+  mode: 'reattach' | 'discard',
+) {
+  await expect(reader).toHaveAttribute('data-reconciliation-detail', mode);
+  await expect(reader.getByText('Check the identifying variation.', { exact: true })).toBeVisible();
+  await expect(reader.getByText('the previous identification argument', { exact: true })).toBeVisible();
+  await expect(reader.locator('.full-annotation-reader__body > p')).toHaveText(
+    'Check the identifying variation.',
+  );
+  await expect(reader.locator('.full-annotation-reader__quote > p')).toHaveText(
+    'the previous identification argument',
+  );
+
+  const actual = await readerParitySignature(
+    reader,
+    '.full-annotation-reader__metadata',
+    '.full-annotation-reader__body > p',
+  );
+  expect(actual.surface).toEqual(canonical.surface);
+  expect(actual.readerGap).toBeCloseTo(canonical.readerGap, 3);
+  expect(actual.headerPaddingBottom).toBeCloseTo(canonical.headerPaddingBottom, 3);
+  expect(actual.metadata).toEqual(canonical.metadata);
+  expect(actual.content).toEqual(canonical.content);
+
+  const sourceTypography = await reader.locator('.full-annotation-reader__quote > p')
+    .evaluate((element) => {
+      const style = getComputedStyle(element);
+      return {
+        fontFamily: style.fontFamily,
+        fontSize: Number.parseFloat(style.fontSize),
+        fontWeight: style.fontWeight,
+        lineHeight: Number.parseFloat(style.lineHeight),
+      };
+    });
+  expect(sourceTypography).toEqual({
+    fontFamily: canonical.content.fontFamily,
+    fontSize: canonical.content.fontSize,
+    fontWeight: canonical.content.fontWeight,
+    lineHeight: canonical.content.lineHeight,
+  });
+
+  const hierarchy = await reader.evaluate((element) => {
+    const authored = element.querySelector<HTMLElement>('.full-annotation-reader__body > p');
+    const prior = element.querySelector<HTMLElement>('.full-annotation-reader__quote');
+    if (!authored || !prior) throw new Error('Reader content hierarchy is incomplete.');
+    const authoredBounds = authored.getBoundingClientRect();
+    const priorBounds = prior.getBoundingClientRect();
+    return {
+      separation: priorBounds.top - authoredBounds.bottom,
+      authoredParagraphSpacing: Number.parseFloat(getComputedStyle(authored).marginBottom),
+      sourceBackground: getComputedStyle(prior).backgroundColor,
+    };
+  });
+  expect(hierarchy.separation).toBeGreaterThanOrEqual(0);
+  expect(hierarchy.authoredParagraphSpacing).toBeCloseTo(canonical.content.paragraphSpacing, 3);
+  expect(hierarchy.sourceBackground).toBe(canonical.surface.reader);
 }
 
 test('detached annotation swaps its warning for discard at pointer and keyboard intent', async ({ page, browserName }, testInfo) => {
@@ -226,7 +390,11 @@ for (const viewport of viewports) {
     );
     await expect(reader).toHaveAttribute('data-full-annotation-reader', 'true');
     await expect(reader).toHaveAttribute('aria-label', 'Reattach highlight, previously page 1');
-    await expect(reader.getByRole('heading', { name: 'Reattach highlight' })).toBeVisible();
+    await expect(reader.locator('.full-annotation-reader__metadata')).toBeVisible();
+    await expect(reader.locator('.full-annotation-reader__metadata .annotation-item__page'))
+      .toHaveText('1');
+    await expect(reader.locator('.full-annotation-reader__metadata .annotation-item__kind-icon'))
+      .toHaveAttribute('title', 'Highlight');
     await expect(reader.locator('[data-reattachment-selection-mode]')).toBeVisible();
     await expect(panel.getByRole('list', { name: 'Annotations in document order' })).toHaveCount(0);
     await expect(panel.locator('[data-reconciliation-entry]')).toHaveCount(0);
@@ -261,6 +429,42 @@ for (const viewport of viewports) {
     await expect(reader).toHaveCount(0);
     await expect(panel.getByRole('list', { name: 'Annotations in document order' })).toBeVisible();
     await expect(trigger).toBeFocused();
+  });
+
+  test(`${viewport.name} production reattach and discard readers match the canonical full reader`, async ({ page }, testInfo) => {
+    const panel = await openProductionFixture(page, viewport);
+    const canonical = await canonicalReaderSignature(panel);
+    const row = reattachmentRow(panel);
+    const reattach = row.getByRole('button', {
+      name: /Reattach previous Highlight annotation on page 1/u,
+    });
+
+    await reattach.click();
+    const reader = panel.locator('[data-reconciliation-reader]');
+    await expectReconciliationReaderParity(reader, canonical, 'reattach');
+    await page.evaluate(async () => {
+      await document.fonts.ready;
+      await new Promise<void>((resolve) => requestAnimationFrame(() => (
+        requestAnimationFrame(() => resolve())
+      )));
+    });
+    await page.screenshot({
+      path: testInfo.outputPath(`${viewport.name}-production-reattach.png`),
+    });
+
+    await reader.locator('[data-full-annotation-action="back"]').click();
+    await expect(reader).toHaveCount(0);
+    await expect(reattach).toBeFocused();
+    await row.hover();
+    await row.getByRole('button', {
+      name: 'Discard Highlight annotation on page 1',
+    }).click();
+    await expectReconciliationReaderParity(reader, canonical, 'discard');
+    await expect(reader.getByRole('button', { name: 'Cancel' })).toBeVisible();
+    await expect(reader.getByRole('button', { name: 'Discard', exact: true })).toBeVisible();
+    await page.screenshot({
+      path: testInfo.outputPath(`${viewport.name}-production-discard.png`),
+    });
   });
 }
 
@@ -349,10 +553,10 @@ test('long reattachment content scrolls inside the reader body while actions rem
   }).click();
   const reader = panel.locator('[data-reconciliation-reader][data-reconciliation-detail="reattach"]');
   const body = reader.locator('.full-annotation-reader__body');
-  await reader.locator('.reconciliation-workspace__annotation-text').evaluate((element) => {
+  await reader.locator('.full-annotation-reader__body > p').evaluate((element) => {
     element.textContent = `${element.textContent ?? ''} `.repeat(35);
   });
-  await reader.locator('.reconciliation-workspace__source-text').evaluate((element) => {
+  await reader.locator('.full-annotation-reader__quote > p').evaluate((element) => {
     element.textContent = `${element.textContent ?? ''} `.repeat(30);
   });
 

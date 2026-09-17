@@ -12,6 +12,8 @@ import { projectOwnedAnnotationReader } from '../src/review/annotation-reader.js
 import {
   FullAnnotationReader,
   FullAnnotationReaderActions,
+  FullAnnotationReaderBody,
+  FullAnnotationReaderMetadata,
 } from '../src/review/FullAnnotationReader.js';
 import {
   ReviewChrome,
@@ -36,6 +38,7 @@ import {
   type ViewerControls,
 } from '../src/pdf/viewer-controls.js';
 import { createReviewState, type ReviewItem } from '../../../packages/core/src/review-model.js';
+import { projectReconciliationDraftReader } from '../src/review/ReconciliationWorkspace.js';
 import {
   INITIAL_REVIEW_SURFACE_STATE,
   reduceReviewSurface,
@@ -406,6 +409,132 @@ describe('review shell layout and accessibility contract', () => {
     expect(html).not.toContain('In the document');
   });
 
+  it('shares canonical reader content ordering with reconciliation details', () => {
+    const replacementHtml = renderToStaticMarkup(<FullAnnotationReaderBody record={{
+      kind: 'replace',
+      contentLabel: 'Replacement text',
+      content: 'precise replacement',
+      sourceText: 'imprecise source',
+      sourceTreatment: 'struck',
+    }} />);
+    expect(replacementHtml).toContain('class="full-annotation-reader__body"');
+    expect(replacementHtml.indexOf('imprecise source')).toBeLessThan(replacementHtml.indexOf('precise replacement'));
+    expect(replacementHtml).toContain('data-source-treatment="struck"');
+
+    const highlightHtml = renderToStaticMarkup(<FullAnnotationReaderBody record={{
+      kind: 'highlight',
+      contentLabel: 'Comment',
+      content: 'Authored comment',
+      quoteText: 'Prior highlighted source',
+    }} />);
+    expect(highlightHtml.indexOf('Authored comment')).toBeLessThan(highlightHtml.indexOf('Prior highlighted source'));
+    expect(highlightHtml).toContain('class="full-annotation-reader__quote"');
+    expect(annotationStyles).toMatch(
+      /\.reconciliation-workspace--detail\.full-annotation-reader\s*\{[^}]*background:\s*transparent;/u,
+    );
+    expect(annotationStyles).not.toContain('.reconciliation-workspace__prior-context');
+    expect(annotationStyles).not.toContain('.reconciliation-workspace__detail-header');
+  });
+
+  it('projects quote-only frozen drafts through canonical reader semantics', () => {
+    const anchor = {
+      kind: 'selection' as const,
+      pageIndex: 2,
+      quote: 'The predecessor PDF sentence.',
+      prefix: '',
+      suffix: '',
+      rect: { x: 1, y: 2, width: 30, height: 8 },
+      segmentRects: [{ x: 1, y: 2, width: 30, height: 8 }],
+    };
+    const common = {
+      id: 'frozen-draft',
+      ownerViewId: 'view-1',
+      baseGeneration: 3,
+      revision: 1,
+      pageIndex: 2,
+      anchor,
+      disposition: { kind: 'missing' as const, reason: 'source-replaced' },
+      status: 'frozen' as const,
+      createdAt: '2026-09-17T00:00:00.000Z',
+      updatedAt: '2026-09-17T00:00:00.000Z',
+    };
+
+    const deletion = projectReconciliationDraftReader({
+      ...common,
+      kind: 'delete',
+      text: anchor.quote,
+    });
+    expect(deletion).toMatchObject({
+      kind: 'delete',
+      content: '',
+      sourceText: anchor.quote,
+      sourceTreatment: 'struck',
+    });
+
+    const quoteOnlyHighlight = projectReconciliationDraftReader({
+      ...common,
+      kind: 'highlight',
+      text: '',
+    });
+    expect(quoteOnlyHighlight).toMatchObject({
+      kind: 'highlight',
+      content: '',
+      quoteText: anchor.quote,
+    });
+    expect(quoteOnlyHighlight?.content).not.toBe(anchor.quote);
+  });
+
+  it('shares projected native subtype and prior multi-page metadata with reconciliation details', () => {
+    const nativeRecord = projectOwnedAnnotationReader({
+      id: 'native-text',
+      kind: 'pdfAnnotation',
+      pageIndex: 6,
+      createdAt: '2026-09-17T00:00:00.000Z',
+      updatedAt: '2026-09-17T00:00:00.000Z',
+      payload: { comment: 'Native annotation', subtype: 'Text' },
+    });
+    if (nativeRecord === null) throw new Error('Expected native reader projection');
+    const nativeHtml = renderToStaticMarkup(<FullAnnotationReaderMetadata record={nativeRecord} prior />);
+    expect(nativeHtml).toContain('title="Text"');
+    expect(nativeHtml).toContain('title="Previously page 7"');
+    expect(nativeHtml).toContain('aria-label="Previously page 7"');
+
+    const rangeRecord = projectOwnedAnnotationReader({
+      ...ownedAnnotation,
+      pageIndex: 2,
+      payload: {
+        ...ownedAnnotation.payload,
+        quote: 'First page\nLast page',
+        prefix: '',
+        suffix: '',
+        rect: { x: 10, y: 80, width: 40, height: 12 },
+        segmentRects: [{ x: 10, y: 80, width: 40, height: 12 }],
+        reliable: true,
+        pages: [{
+          pageIndex: 2,
+          quote: 'First page',
+          prefix: '',
+          suffix: '',
+          rect: { x: 10, y: 80, width: 40, height: 12 },
+          segmentRects: [{ x: 10, y: 80, width: 40, height: 12 }],
+        }, {
+          pageIndex: 4,
+          quote: 'Last page',
+          prefix: '',
+          suffix: '',
+          rect: { x: 10, y: 20, width: 38, height: 12 },
+          segmentRects: [{ x: 10, y: 20, width: 38, height: 12 }],
+        }],
+        pageBoundaries: [{ afterPageIndex: 2, separator: '\n' }],
+      },
+    });
+    if (rangeRecord === null) throw new Error('Expected multi-page reader projection');
+    const rangeHtml = renderToStaticMarkup(<FullAnnotationReaderMetadata record={rangeRecord} prior />);
+    expect(rangeHtml).toContain('>3–5</span>');
+    expect(rangeHtml).toContain('title="Previously pages 3–5"');
+    expect(rangeHtml).toContain('aria-label="Previously pages 3–5"');
+  });
+
   it('keeps imported full annotations read-only while retaining available author metadata', () => {
     const html = renderToStaticMarkup(
       <FullAnnotationReader
@@ -487,7 +616,7 @@ describe('review shell layout and accessibility contract', () => {
       /#review-annotation-list > \.annotation-drawer__owned:has\(> \[data-reconciliation-reader\]\)\s*\{[^}]*display:\s*flex;[^}]*height:\s*100%;[^}]*min-height:\s*0;/u,
     );
     expect(annotationStyles).toMatch(
-      /@media \(max-height:\s*560px\)[\s\S]*\.reconciliation-workspace--detail\.full-annotation-reader\s*\{[^}]*gap:\s*4px;[^}]*padding-block:\s*6px;[\s\S]*\.reconciliation-workspace--detail \.reconciliation-workspace__detail-header\s*\{[^}]*padding-bottom:\s*0;[\s\S]*\.reconciliation-workspace--detail \.reconciliation-workspace__resolution\s*\{[^}]*gap:\s*2px;/u,
+      /@media \(max-height:\s*560px\)[\s\S]*\.reconciliation-workspace--detail\.full-annotation-reader\s*\{[^}]*padding-block:\s*6px;[\s\S]*\.reconciliation-workspace--detail \.full-annotation-reader__metadata-bar\s*\{[^}]*padding-bottom:\s*0;[\s\S]*\.reconciliation-workspace--detail \.reconciliation-workspace__resolution\s*\{[^}]*gap:\s*2px;[^}]*padding-top:\s*4px;/u,
     );
     expect(neutralStyles).toMatch(
       /@media \(pointer:\s*coarse\)[\s\S]*:is\([\s\S]*\.reconciliation-workspace__editor-actions[\s\S]*\) \.review-button\s*\{[^}]*min-height:\s*44px;/u,

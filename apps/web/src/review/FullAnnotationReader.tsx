@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, type Ref } from 'react';
+import { useLayoutEffect, useRef, type ReactNode, type Ref } from 'react';
 
 import type { PdfTargetVisibility } from '../pdf/viewer-navigation.js';
 import type { AnnotationReaderRecord } from './annotation-reader.js';
@@ -27,6 +27,63 @@ export interface FullAnnotationReaderActionsProps {
   readonly backRef?: Ref<HTMLButtonElement>;
   readonly editRef?: Ref<HTMLButtonElement>;
   readonly deleteRef?: Ref<HTMLButtonElement>;
+}
+
+export interface FullAnnotationReaderBodyProps {
+  readonly record: Pick<AnnotationReaderRecord,
+    'kind' | 'contentLabel' | 'content' | 'sourceText' | 'sourceTreatment' | 'quoteText'>;
+  readonly before?: ReactNode;
+}
+
+export interface FullAnnotationReaderMetadataProps {
+  readonly record: Pick<AnnotationReaderRecord,
+    'kind' | 'typeLabel' | 'pageNumber' | 'lastPageNumber'>;
+  readonly prior?: boolean;
+  readonly readonly?: boolean;
+}
+
+export function FullAnnotationReaderMetadata({
+  record,
+  prior = false,
+  readonly = false,
+}: FullAnnotationReaderMetadataProps) {
+  const pageLabel = record.lastPageNumber === undefined
+    ? `${record.pageNumber}`
+    : `${record.pageNumber}–${record.lastPageNumber}`;
+  const priorPageLabel = record.lastPageNumber === undefined
+    ? `Previously page ${record.pageNumber}`
+    : `Previously pages ${record.pageNumber}–${record.lastPageNumber}`;
+  return <div className="full-annotation-reader__metadata annotation-item__meta" aria-label="Annotation details">
+    <span className="annotation-item__kind-icon" title={record.typeLabel}>
+      <ReviewIcon name={annotationKindIcon(record.kind)} size={16} />
+    </span>
+    <span
+      className="annotation-item__page"
+      {...(prior ? { title: priorPageLabel, 'aria-label': priorPageLabel } : {})}
+    >{pageLabel}</span>
+    {readonly ? <span className="full-annotation-reader__readonly">Read only</span> : null}
+  </div>;
+}
+
+export function FullAnnotationReaderBody({ record, before }: FullAnnotationReaderBodyProps) {
+  const paragraphs = (text: string) => text.split(/\n\s*\n/u).map(
+    (paragraph, index) => <p key={index}>{paragraph}</p>,
+  );
+  return <div className="full-annotation-reader__body">
+    {before}
+    {record.sourceText ? <div className="full-annotation-reader__source" data-source-treatment={record.sourceTreatment}>
+      <h3 className="sr-only">{record.kind === 'delete' ? 'Deleted text' : 'Original text'}</h3>
+      {paragraphs(record.sourceText)}
+    </div> : null}
+    {record.content ? <>
+      <h3 className="sr-only">{record.contentLabel}</h3>
+      {paragraphs(record.content)}
+    </> : null}
+    {record.quoteText ? <div className="full-annotation-reader__quote">
+      <h3 className="sr-only">Highlighted text</h3>
+      {paragraphs(record.quoteText)}
+    </div> : null}
+  </div>;
 }
 
 export function shouldRestoreFullAnnotationReaderFocus(
@@ -90,14 +147,10 @@ export function FullAnnotationReader({ record, onBack, onEdit, onDelete, sourceN
   const pageDescription = record.lastPageNumber === undefined
     ? `page ${record.pageNumber}`
     : `pages ${record.pageNumber}–${record.lastPageNumber}`;
-  const pageLabel = record.lastPageNumber === undefined
-    ? `${record.pageNumber}`
-    : `${record.pageNumber}–${record.lastPageNumber}`;
   const showLocate = sourceNavigation?.visibility === 'outside' || sourceNavigation?.pending === true;
   const backRef = useRef<HTMLButtonElement>(null);
   const locateHeldFocus = useRef(false);
   const previousShowLocate = useRef(showLocate);
-  const paragraphs = (text: string) => text.split(/\n\s*\n/u).map((paragraph, index) => <p key={index}>{paragraph}</p>);
   useLayoutEffect(() => {
     if (shouldRestoreFullAnnotationReaderFocus(
       previousShowLocate.current,
@@ -120,13 +173,7 @@ export function FullAnnotationReader({ record, onBack, onEdit, onDelete, sourceN
         <div className="full-annotation-reader__actions" aria-label="Full annotation actions">
           <FullAnnotationReaderActions onBack={onBack} backRef={backRef} />
         </div>
-        <div className="full-annotation-reader__metadata annotation-item__meta" aria-label="Annotation details">
-          <span className="annotation-item__kind-icon" title={record.typeLabel}>
-            <ReviewIcon name={annotationKindIcon(record.kind)} size={16} />
-          </span>
-          <span className="annotation-item__page">{pageLabel}</span>
-          {record.origin === 'source' ? <span className="full-annotation-reader__readonly">Read only</span> : null}
-        </div>
+        <FullAnnotationReaderMetadata record={record} readonly={record.origin === 'source'} />
         <div className="full-annotation-reader__header-actions">
           {showLocate ? <ReviewTooltipButton
             type="button"
@@ -160,20 +207,7 @@ export function FullAnnotationReader({ record, onBack, onEdit, onDelete, sourceN
         </div>
       </header>
 
-      <div className="full-annotation-reader__body">
-        {record.sourceText ? <div className="full-annotation-reader__source" data-source-treatment={record.sourceTreatment}>
-          <h3 className="sr-only">{record.kind === 'delete' ? 'Deleted text' : 'Original text'}</h3>
-          {paragraphs(record.sourceText)}
-        </div> : null}
-        {record.content ? <>
-          <h3 className="sr-only">{record.contentLabel}</h3>
-          {paragraphs(record.content)}
-        </> : null}
-        {record.quoteText ? <div className="full-annotation-reader__quote">
-          <h3 className="sr-only">Highlighted text</h3>
-          {paragraphs(record.quoteText)}
-        </div> : null}
-      </div>
+      <FullAnnotationReaderBody record={record} />
     </section>
   );
 }

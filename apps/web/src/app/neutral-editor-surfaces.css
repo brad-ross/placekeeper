@@ -155,9 +155,6 @@
 .annotation-item__meta strong,
 .full-annotation-reader__body h3,
 .annotation-direction-cue,
-.reconciliation-workspace__detail-header h2,
-.reconciliation-workspace__header h2,
-.reconciliation-workspace--detail .reconciliation-workspace__kicker,
-.reconciliation-workspace--detail .reconciliation-workspace__annotation-text {
+.reconciliation-workspace__header h2 {
   font-weight: 500;
 }
