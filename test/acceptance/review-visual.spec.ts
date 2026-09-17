@@ -1372,7 +1372,7 @@ test('Save Destination modal', async ({ page }) => {
   const dialog = page.getByRole('dialog', { name: 'Choose Where to Save Annotations' });
   await expect(dialog).toBeVisible();
   await expect(dialog.getByRole('button', { name: 'Cancel' })).toBeVisible();
-  await expect(dialog.getByRole('button', { name: 'Confirm' })).toBeVisible();
+  await expect(dialog.getByRole('button', { name: 'Save', exact: true })).toBeVisible();
   await expectScene(product, 'save-destination-modal.png');
 });
 

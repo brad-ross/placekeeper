@@ -91,9 +91,11 @@ export type SaveCopyProposal =
   | {
       readonly sourceDisposition: "local";
       readonly filename: string;
-      readonly folder: string;
+      readonly folder?: string;
+      readonly folderSelectionId?: string;
     }
-  | { readonly sourceDisposition: "remote-temporary" };
+  | { readonly sourceDisposition: "remote-temporary"; readonly filename?: string;
+      readonly folder?: string; readonly folderSelectionId?: string };
 
 export class PdfSaveCoordinator {
   readonly #broker: SessionBroker;
@@ -156,6 +158,28 @@ export class PdfSaveCoordinator {
     };
   }
 
+  async browserProposal(sessionId: string, folder: string | undefined): Promise<SaveCopyProposal> {
+    const scope = await this.#broker.sessionScope(sessionId);
+    if (scope === undefined) throw new Error("Review session is not active");
+    const filename = validatePdfFilename(scope.sourceDisplayName);
+    return {
+      sourceDisposition: scope.sourceDisposition,
+      filename,
+      ...(folder === undefined ? {} : {
+        folder, folderSelectionId: this.#rememberFolder(sessionId, folder),
+      }),
+    };
+  }
+
+  #rememberFolder(sessionId: string, path: string): string {
+    const selectionId = randomUUID();
+    this.#folderSelections.set(selectionId, { sessionId, path });
+    while (this.#folderSelections.size > 32) {
+      this.#folderSelections.delete(this.#folderSelections.keys().next().value!);
+    }
+    return selectionId;
+  }
+
   async chooseCopyFilename(
     sessionId: string,
     filename?: string,
@@ -174,7 +198,7 @@ export class PdfSaveCoordinator {
       this.#folderSelections.delete(folderSelectionId!);
       throw new FileCapabilityError("INVALID_PATH", "Folder selection belongs to another session");
     }
-    if (remote && selected === undefined) {
+    if ((remote || folderSelectionId !== undefined) && selected === undefined) {
       throw new FileCapabilityError(
         "INVALID_PATH",
         "Choose a new location for this remote browser PDF",
@@ -209,12 +233,7 @@ export class PdfSaveCoordinator {
       proposal.sourceDisposition === "local" ? proposal.folder : undefined,
     );
     if (path === undefined) return { cancelled: true };
-    const selectionId = randomUUID();
-    this.#folderSelections.set(selectionId, { sessionId, path });
-    while (this.#folderSelections.size > 32) {
-      this.#folderSelections.delete(this.#folderSelections.keys().next().value!);
-    }
-    return { cancelled: false, selectionId, folder: path };
+    return { cancelled: false, selectionId: this.#rememberFolder(sessionId, path), folder: path };
   }
 
   async locate(sessionId: string): Promise<void> {

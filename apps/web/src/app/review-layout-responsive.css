@@ -270,7 +270,8 @@
     height: var(--review-control-touch);
   }
 
-  .review-context-palette .review-action-button--icon {
+  .review-context-palette .review-action-button--icon,
+  .review-page-menu .review-action-button--icon {
     width: var(--review-control-touch);
     min-width: var(--review-control-touch);
   }

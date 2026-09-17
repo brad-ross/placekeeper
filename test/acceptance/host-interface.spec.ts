@@ -85,9 +85,13 @@ async function chromePage(page: Page, entry: 'handler' | 'popup') {
   await page.addInitScript(() => {
     const messages = new Set<(message: unknown) => void>();
     const disconnects = new Set<() => void>();
-    const audit = { sent: [] as Record<string, unknown>[], fallback: false, enabled: true };
+    const audit = { sent: [] as Record<string, unknown>[], fallback: false, enabled: true, reloads: [] as number[], failReload: false };
     (window as typeof window & { __chromeUiAudit: typeof audit }).__chromeUiAudit = audit;
     const chrome = {
+      tabs: { reload: async (tabId: number) => {
+        audit.reloads.push(tabId);
+        if (audit.failReload) throw new Error('Reload failed');
+      } },
       storage: { local: {
         get: async (key: string) => ({ [key]: audit.enabled }),
         set: async (values: Record<string, boolean>) => {
@@ -142,6 +146,50 @@ async function controlStyle(page: Page, selector: string) {
       weight: style.fontWeight, background: style.backgroundColor, color: style.color, minHeight: style.minHeight };
   });
 }
+
+test('Chrome disconnect dims the review and Reopen reloads the owning tab with retry on failure', async ({ page }) => {
+  // Keep the real handler/controller/UI; replace only the native review and PDF client.
+  await page.route('**/apps/chrome-extension/src/chrome-runtime.*', (route) => route.fulfill({
+    contentType: 'text/javascript', body: `
+      export const chromePdfDisplayName = () => 'paper.pdf';
+      export const createNativeEmbeddedReview = () => async () => ({
+        displayName: 'paper.pdf', protected: true,
+        runtimePort: { runtimeId: 'fixture', postMessage() {}, subscribe() { return () => {}; } },
+        subscribeLifecycle(listener) { window.disconnectReview = () => listener({type: 'disconnected', protected: true}); return () => {}; },
+        async activate() {}, async release() {}, dispose() {}
+      });`,
+  }));
+  await page.route('**/shared/app.css', (route) => route.fulfill({
+    contentType: 'text/css', path: resolve('dist/web/app.css'),
+  }));
+  await page.route('**/shared/app.js', (route) => route.fulfill({
+    contentType: 'text/javascript', body: `export async function startChromeRuntime() {
+      document.querySelector('#root').innerHTML = '<button style="position:fixed;inset:0;z-index:1000;background:white">PDF content</button>';
+      return { ready: Promise.resolve(1), dispose() {} };
+    }`,
+  }));
+  await chromePage(page, 'handler');
+  await expect(page.locator('#launch-shell')).toBeHidden();
+  expect(await page.locator('body').evaluate((body) => getComputedStyle(body, '::before').content)).toBe('none');
+  await page.evaluate(() => (window as typeof window & { disconnectReview(): void }).disconnectReview());
+  const reopen = page.getByRole('button', { name: 'Reopen PDF', exact: true });
+  await expect(reopen).toBeFocused();
+  await expect(page.locator('#root')).toHaveAttribute('inert', '');
+  const overlay = await page.locator('body').evaluate((body) => {
+    const style = getComputedStyle(body, '::before');
+    return { background: style.backgroundColor, position: style.position, inset: style.inset, zIndex: style.zIndex };
+  });
+  expect(overlay).toEqual({ background: 'rgba(32, 32, 32, 0.15)', position: 'fixed', inset: '0px', zIndex: '9' });
+  await page.screenshot({ path: test.info().outputPath('chrome-disconnected.png') });
+  await page.evaluate(() => { (window as typeof window & { __chromeUiAudit: { failReload: boolean } }).__chromeUiAudit.failReload = true; });
+  await reopen.click();
+  await expect(page.getByRole('status')).toHaveText('Could not reopen this PDF. Try again or reload the browser tab.');
+  await expect(reopen).toBeEnabled();
+  await page.evaluate(() => { (window as typeof window & { __chromeUiAudit: { failReload: boolean } }).__chromeUiAudit.failReload = false; });
+  await reopen.click();
+  expect(await page.evaluate(() => (window as typeof window & { __chromeUiAudit: { reloads: number[] } }).__chromeUiAudit.reloads)).toEqual([1, 1]);
+  expect(page.url()).toContain('/apps/chrome-extension/handler.html');
+});
 
 test('Chrome protected recovery uses the shared neutral dialog language and remains reachable at narrow sizes', async ({ page }) => {
   await chromePage(page, 'handler');

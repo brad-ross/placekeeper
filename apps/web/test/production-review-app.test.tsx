@@ -1319,7 +1319,7 @@ describe("one production review tree", () => {
     expect(html).toContain('compact-editorial-modal__body');
     expect(html).toContain('compact-editorial-modal__footer');
     expect(html.indexOf("Modify the original PDF")).toBeLessThan(html.indexOf("Save to a new copy"));
-    expect(html).toContain("Confirm");
+    expect(html).toContain("Save");
     expect(html).not.toContain('class="lucide lucide-x review-icon"');
     expect(html).not.toContain('class="lucide lucide-check review-icon"');
     expect(html).toContain("You can change this later by clicking the filename.");

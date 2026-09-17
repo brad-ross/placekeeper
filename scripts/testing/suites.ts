@@ -137,6 +137,7 @@ export const suites: Record<string, TestStage[]> = {
         "apps/web/test/copy-link-control.test.ts",
         "apps/chrome-extension/test/native-protocol.test.ts",
         "apps/service/test/chrome-local-refresh.integration.test.ts",
+        "apps/service/test/chrome-download-folder.test.ts",
         "apps/service/test/chrome-runtime.test.ts"
       ]
     }
@@ -564,6 +565,7 @@ export const ciUnitFiles = [
       'packages/pdf-backends/test/backend-host.test.ts',
       'apps/service/test/canonical-json.test.ts',
       'apps/service/test/runtime-retention.test.ts',
+      'apps/service/test/chrome-download-folder.test.ts',
       'apps/service/test/chrome-runtime.test.ts',
       'apps/service/test/macos-runtime.test.ts',
       'apps/service/test/session-security.test.ts',

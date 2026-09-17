@@ -545,6 +545,24 @@ describe("coalescing PDF autosave", () => {
     });
   });
 
+  it("saves a browser copy with its source filename in the proposed downloads folder", async () => {
+    const { durableRoot, coordinator, sessionId, broker } = await setupRemote();
+    const proposal = await coordinator.browserProposal(sessionId, durableRoot);
+    expect(proposal).toMatchObject({ sourceDisposition: "remote-temporary",
+      filename: "Private paper.pdf", folder: durableRoot, folderSelectionId: expect.any(String) });
+    await broker.acceptMutation(sessionId, add(0));
+    await coordinator.chooseCopyFilename(sessionId, proposal.filename, proposal.folderSelectionId);
+    expect(await readFile(join(durableRoot, "Private paper.pdf"), "utf8"))
+      .toContain(broker.state(sessionId)!.items[0]!.id);
+  });
+
+  it("retains the browser filename when its downloads folder is unavailable", async () => {
+    const { coordinator, sessionId } = await setupRemote();
+    expect(await coordinator.browserProposal(sessionId, undefined)).toEqual({
+      sourceDisposition: "remote-temporary", filename: "Private paper.pdf",
+    });
+  });
+
   it("retains the existing source-folder proposal and original option for local PDFs", async () => {
     const { root, source, coordinator, sessionId } = await setup();
     expect(coordinator.proposal(sessionId)).toEqual({
