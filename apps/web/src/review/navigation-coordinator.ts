@@ -798,11 +798,27 @@ export class NavigationCoordinator {
       if (!this.isCurrent(operation)) return false;
       if (!await restoreMainLocation() || !this.isCurrent(operation)) return false;
     }
+    // Committing a new annotation tab replaces its pending shell with the
+    // live Reference viewport. That final portal/layout transition can move
+    // the mounted page after the first target application. Reveal the exact
+    // target once more in committed geometry before exposing annotation
+    // content through onSettled.
+    const explicitReveal = options.annotationIdentity !== undefined
+      || options.preferredTabIdentity !== undefined;
+    const committedSettlement = explicitReveal
+      ? await this.revealReferenceTarget(
+          operation,
+          tabIdentity,
+          target,
+          options.annotationIdentity,
+        )
+      : null;
+    if (explicitReveal && committedSettlement === null) return this.failReference(operation);
     if (!this.referenceSettlementIsCurrent(operation, navigation, tabIdentity)) return false;
     this.pendingReference = null;
     this.referenceRestoreIdentity = null;
     this.dependencies.setPendingReference(null);
-    options.onSettled?.({
+    options.onSettled?.(committedSettlement ?? {
       token: operation.token,
       documentGeneration: operation.documentGeneration,
       tabIdentity,

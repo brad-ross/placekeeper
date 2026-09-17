@@ -1101,11 +1101,18 @@ describe('document-scoped navigation coordinator', () => {
     const run = harness();
     const original = location(3, 96, 1.35);
     const shifted = location(6, 180, 1.8);
+    const referenceShiftedByCommittedLayout = location(7, 240, 1.4);
+    const settled = vi.fn();
+    let layoutSettlements = 0;
     run.main.set(original);
     const historyBefore = run.state().mainHistory;
     vi.mocked(run.controller.open).mockImplementationOnce(async () => {
       run.main.set(shifted);
       return true;
+    });
+    vi.mocked(run.dependencies.layout.settle).mockImplementation(async () => {
+      layoutSettlements += 1;
+      if (layoutSettlements === 2) run.reference.set(referenceShiftedByCommittedLayout);
     });
 
     expect(await run.coordinator.openReference(
@@ -1115,6 +1122,7 @@ describe('document-scoped navigation coordinator', () => {
       {
         annotationIdentity: { origin: 'owned', itemId: 'annotation-a' },
         preferredTabIdentity: 'annotation-origin-tab',
+        onSettled: settled,
       },
     )).toBe(true);
 
@@ -1127,6 +1135,11 @@ describe('document-scoped navigation coordinator', () => {
     expect(run.state().mainHistory).toEqual(historyBefore);
     expect(run.reference.controls.applyTarget)
       .toHaveBeenCalledWith(target(13), 'reference-fit-width');
+    expect(run.reference.controls.applyTarget).toHaveBeenCalledTimes(2);
+    expect(run.reference.controls.captureLocation()).toEqual(location(13));
+    expect(settled).toHaveBeenCalledWith(expect.objectContaining({
+      settledLocation: location(13),
+    }));
   });
 
   it('restores the selected Main search result once when reference opening fails', async () => {
