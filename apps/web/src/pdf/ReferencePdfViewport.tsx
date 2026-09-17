@@ -25,9 +25,13 @@ import {
   isUnsafePageContextTarget,
   normalizePageClientPoint,
   recordViewerPointerButton,
+  scopeViewerInteraction,
   VIEWER_POINTER_BUTTON_NONE,
 } from './viewer-interaction-events.js';
-import type { PdfAnnotationSurface } from './annotation-surface.js';
+import {
+  referencePdfAnnotationSurface,
+  type PdfAnnotationSurface,
+} from './annotation-surface.js';
 import type { ReviewAnnotation } from '../../../../packages/core/src/pdf-writer.js';
 import type { OwnedMarkGeometry } from './owned-mark-hit-test.js';
 import { hitTestOwnedMark } from './owned-mark-hit-test.js';
@@ -44,7 +48,7 @@ export interface ReferencePdfViewportProps {
   readonly documentId: string;
   readonly documentState: DocumentState;
   readonly documentGeneration: number;
-  readonly tabIdentity: string;
+  readonly tabIdentity: string | null;
   readonly engine: PdfEngine;
   readonly host: HTMLElement;
   readonly onInteraction?: (event: ViewerInteractionEvent) => void;
@@ -91,13 +95,11 @@ export function ReferencePdfViewport({
   onKeyboardPageNoteKey,
   onPageContextMenu,
 }: ReferencePdfViewportProps) {
-  const surface = {
-    kind: 'reference',
-    documentGeneration,
-    tabIdentity,
-  } as const;
-  const emit = (event: ViewerInteractionEvent) => onInteraction?.({ ...event, surface });
-  const linkRenderers = sourceAnnotationLinkRenderers({
+  const surface = referencePdfAnnotationSurface(documentGeneration, tabIdentity);
+  const emit = (event: ViewerInteractionEvent) => {
+    if (surface !== null) onInteraction?.(scopeViewerInteraction(event, surface));
+  };
+  const linkRenderers = surface === null ? [] : sourceAnnotationLinkRenderers({
     sourceScope: 'reference',
     documentGeneration,
     pageCount: documentState.document?.pages.length ?? 0,
@@ -115,7 +117,7 @@ export function ReferencePdfViewport({
       data-reference-pdf-viewport
       data-pdf-copy-surface="reference"
       data-annotation-surface="reference"
-      data-reference-tab-identity={tabIdentity}
+      data-reference-tab-identity={tabIdentity ?? undefined}
       aria-label="Reference PDF document"
       role="region"
       onWheelCapture={(event) => {
@@ -203,7 +205,7 @@ export function ReferencePdfViewport({
                   );
                 }}
                 onContextMenu={(event) => {
-                  if (onPageContextMenu === undefined) return;
+                  if (onPageContextMenu === undefined || surface === null) return;
                   if (isUnsafePageContextTarget(event.target)) return;
                   const page = documentState.document?.pages[layout.pageIndex];
                   if (!page) return;
@@ -235,7 +237,7 @@ export function ReferencePdfViewport({
                   if (accepted) event.preventDefault();
                 }}
                 onKeyDown={(event) => {
-                  if (onPageContextMenu === undefined) return;
+                  if (onPageContextMenu === undefined || surface === null) return;
                   if (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10')) return;
                   const page = documentState.document?.pages[layout.pageIndex];
                   if (!page) return;
@@ -312,17 +314,25 @@ export function ReferencePdfViewport({
                   documentRotation={documentState.rotation}
                   layout={layout}
                   annotations={annotationsByPage.get(layout.pageIndex) ?? []}
-                  geometry={geometryByPage.get(layout.pageIndex) ?? []}
+                  geometry={surface === null
+                    ? []
+                    : geometryByPage.get(layout.pageIndex) ?? []}
                   authoringPreviewIds={authoringPreviewIds}
-                  sourceRendering={sourceRendering}
+                  sourceRendering={surface === null
+                    ? { ...sourceRendering, residualSourceFocusMarks: [] }
+                    : sourceRendering}
                   {...(activeOwnedAnnotationId === undefined ? {} : { activeOwnedAnnotationId })}
                   {...(correspondingOwnedAnnotationId === undefined ? {} : { correspondingOwnedAnnotationId })}
-                  keyboardPageNoteCursor={keyboardPageNoteCursor}
-                  {...(onKeyboardPageNoteKey === undefined ? {} : { onKeyboardPageNoteKey })}
-                  onOwnedMarkInteraction={(value) => emit({ type: 'owned-mark', value })}
-                  onSourceMarkInteraction={(annotationKey, pageIndex) => emit({
-                    type: 'source-mark',
-                    value: { annotationKey, phase: 'activate', pageIndex },
+                  keyboardPageNoteCursor={surface === null ? null : keyboardPageNoteCursor}
+                  {...(surface === null || onKeyboardPageNoteKey === undefined
+                    ? {}
+                    : { onKeyboardPageNoteKey })}
+                  {...(surface === null ? {} : {
+                    onOwnedMarkInteraction: (value) => emit({ type: 'owned-mark', value }),
+                    onSourceMarkInteraction: (annotationKey, pageIndex) => emit({
+                      type: 'source-mark',
+                      value: { annotationKey, phase: 'activate', pageIndex },
+                    }),
                   })}
                 />
                 <div data-source-link-layer>

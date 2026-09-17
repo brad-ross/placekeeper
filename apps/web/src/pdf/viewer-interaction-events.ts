@@ -33,6 +33,13 @@ export interface ViewerFixedClientRect {
 
 export type ViewerPdfLinkSourceScope = PdfViewerScope;
 
+export function scopeViewerInteraction(
+  event: ViewerInteractionEvent,
+  surface: PdfAnnotationSurface,
+): ViewerInteractionEvent {
+  return { ...event, surface };
+}
+
 export interface ViewerPdfLinkInvocation {
   readonly sourceScope: ViewerPdfLinkSourceScope;
   readonly sourcePageIndex: number;

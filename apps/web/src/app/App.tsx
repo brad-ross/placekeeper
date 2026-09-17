@@ -74,6 +74,7 @@ import {
 import {
   VIEWER_POINTER_BUTTON_NONE,
   ViewerPrimaryClickGesture,
+  scopeViewerInteraction,
   viewerPointerButton,
   type ViewerCaretUpdate,
   type ViewerClientPlacement,
@@ -99,38 +100,17 @@ import { REVIEW_COLLAPSED_RAIL_SIZE, REVIEW_OVERLAY_INSET, REVIEW_OVERLAY_FADE_S
 import { ReviewIcon } from '../review/ReviewIcon.js';
 import type { PdfSearchResult } from '../pdf/pdf-search-model.js';
 import {
+  isCurrentPdfAnnotationSurface as isCurrentViewerInputSurface,
+  referencePdfAnnotationSurface as referenceInputSurface,
   samePdfAnnotationSurface,
   type PdfAnnotationSurface,
 } from '../pdf/annotation-surface.js';
 
+export { isCurrentViewerInputSurface, referenceInputSurface, scopeViewerInteraction };
+
 type ViewerCaretResult = Awaited<ReturnType<typeof captureViewerCaret>>;
 
 const FALLBACK_PAGE_NOTE_CURSOR_RADIUS_PX = 18;
-
-export function referenceInputSurface(
-  documentGeneration: number,
-  tabIdentity: string | null,
-): Extract<PdfAnnotationSurface, { readonly kind: 'reference' }> | null {
-  return tabIdentity === null
-    ? null
-    : { kind: 'reference', documentGeneration, tabIdentity };
-}
-
-export function scopeViewerInteraction(
-  event: ViewerInteractionEvent,
-  surface: PdfAnnotationSurface,
-): ViewerInteractionEvent {
-  return { ...event, surface };
-}
-
-export function isCurrentViewerInputSurface(
-  surface: PdfAnnotationSurface,
-  documentGeneration: number,
-  activeReferenceTabIdentity: string | null,
-): boolean {
-  return surface.documentGeneration === documentGeneration
-    && (surface.kind === 'main' || surface.tabIdentity === activeReferenceTabIdentity);
-}
 
 /** Binds Reference input to one opened PDF while deriving the active tab per gesture. */
 export class ReferenceInputDocumentAuthority {
@@ -1133,40 +1113,23 @@ export function App({
     }
 
     if (scroll) {
+      const refreshViewerViewport = (documentId: string): boolean => {
+        if (documentId !== MAIN_PDF_DOCUMENT_ID
+          && documentId !== REFERENCE_PDF_DOCUMENT_ID) return false;
+        viewportGenerationRef.current += 1;
+        initializeKeyboardCursor();
+        if (documentId === MAIN_PDF_DOCUMENT_ID) scheduleCaretPlacementRefresh();
+        return documentId === MAIN_PDF_DOCUMENT_ID;
+      };
       subscriptions.current.push(
         scroll.onPageChange(({ documentId, pageNumber }) => {
-          if (documentId === REFERENCE_PDF_DOCUMENT_ID) {
-            viewportGenerationRef.current += 1;
-            initializeKeyboardCursor();
-            return;
-          }
-          if (documentId !== MAIN_PDF_DOCUMENT_ID) return;
-          viewportGenerationRef.current += 1;
-          initializeKeyboardCursor();
-          scheduleCaretPlacementRefresh();
-          void readPage(documentId, pageNumber - 1);
+          if (refreshViewerViewport(documentId)) void readPage(documentId, pageNumber - 1);
         }),
         scroll.onScroll(({ documentId }) => {
-          if (documentId === REFERENCE_PDF_DOCUMENT_ID) {
-            viewportGenerationRef.current += 1;
-            initializeKeyboardCursor();
-            return;
-          }
-          if (documentId !== MAIN_PDF_DOCUMENT_ID) return;
-          viewportGenerationRef.current += 1;
-          initializeKeyboardCursor();
-          scheduleCaretPlacementRefresh();
+          refreshViewerViewport(documentId);
         }),
         scroll.onLayoutChange(({ documentId }) => {
-          if (documentId === REFERENCE_PDF_DOCUMENT_ID) {
-            viewportGenerationRef.current += 1;
-            initializeKeyboardCursor();
-            return;
-          }
-          if (documentId !== MAIN_PDF_DOCUMENT_ID) return;
-          viewportGenerationRef.current += 1;
-          initializeKeyboardCursor();
-          scheduleCaretPlacementRefresh();
+          refreshViewerViewport(documentId);
         }),
         () => caretPlacementRefresh.cancel(),
       );
@@ -1362,7 +1325,11 @@ export function App({
             }, currentSurface);
           };
           const scheduleMenuPlacement = () => {
-            if (placementFrame !== undefined) cancelAnimationFrame(placementFrame);
+            if (placementFrame !== undefined) {
+              cancelAnimationFrame(placementFrame);
+              placementFrame = undefined;
+            }
+            if (currentMenuPlacement === null || currentMenuSurface === null) return;
             placementFrame = requestAnimationFrame(() => {
               placementFrame = undefined;
               refreshMenuPlacement();

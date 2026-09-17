@@ -35,6 +35,7 @@ import {
   type ExistingAnnotationsDiscovery,
 } from "../pdf/existing-annotations.js";
 import {
+  isCurrentPdfAnnotationSurface,
   mainPdfAnnotationSurface,
   type PdfAnnotationSurface,
 } from '../pdf/annotation-surface.js';
@@ -191,11 +192,11 @@ export function pdfAnnotationSurfaceIsCurrent(
   },
 ): boolean {
   if (surface === undefined) return true;
-  if (surface.documentGeneration !== current.documentGeneration) return false;
-  return surface.kind === 'main' || (
-    current.referenceVisible
-    && surface.tabIdentity === current.activeReferenceTabIdentity
-  );
+  return isCurrentPdfAnnotationSurface(
+    surface,
+    current.documentGeneration,
+    current.activeReferenceTabIdentity,
+  ) && (surface.kind === 'main' || current.referenceVisible);
 }
 
 export function frozenReferenceRecovery(tab: Pick<ReferenceTab,
