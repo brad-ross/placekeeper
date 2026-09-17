@@ -32,7 +32,7 @@ import {
   undoReview,
   type ReviewRect,
 } from '../../../../packages/core/src/review-commands.js';
-import type { ReviewItem, ReviewState } from '../../../../packages/core/src/review-model.js';
+import type { ReviewItem, ReviewItemKind, ReviewState } from '../../../../packages/core/src/review-model.js';
 import type { CaretAnchor } from '../pdf/selection-anchor.js';
 import {
   existingAnnotationKey,
@@ -131,7 +131,9 @@ import type {
   WorkspaceMode,
 } from '../review/reference-navigation-state.js';
 import {
+  contextualSelectionActionsAllowed,
   ReconciliationWorkspace,
+  type ResolutionMode,
 } from '../review/ReconciliationWorkspace.js';
 import {
   reviewExportPresentation,
@@ -141,6 +143,24 @@ import type { GenerationRefreshStatus, LocationRestoreStatus } from '../generati
 import { reviewItemIsResolvedForGeneration } from '../../../../packages/core/src/annotation-projection.js';
 import './review-layout.css';
 import './neutral-chrome.css';
+
+export function handleReviewActionShortcut(input: {
+  readonly key: string;
+  readonly altKey: boolean;
+  readonly shiftKey: boolean;
+  readonly ctrlKey: boolean;
+  readonly metaKey: boolean;
+  readonly reconciliationDetailMode: ResolutionMode | null;
+  readonly preventDefault: () => void;
+  readonly invoke: (tool: ReviewItemKind) => void;
+}): boolean {
+  if (!input.altKey || !input.shiftKey || input.ctrlKey || input.metaKey) return false;
+  const tool = reviewActionForKey(input.key);
+  if (tool === undefined) return false;
+  input.preventDefault();
+  if (input.reconciliationDetailMode !== 'reattach') input.invoke(tool);
+  return true;
+}
 
 function ignoreReferenceViewportHost(_element: HTMLDivElement | null): void {}
 
@@ -394,6 +414,7 @@ export function ReviewShell(props: ReviewShellProps) {
     token: 0,
   });
   const reconciliationDetailEscapeHandlerRef = useRef<(() => void) | null>(null);
+  const [reconciliationDetailMode, setReconciliationDetailMode] = useState<ResolutionMode | null>(null);
   const setReconciliationDetailEscapeHandler = useCallback((handler: (() => void) | null) => {
     reconciliationDetailEscapeHandlerRef.current = handler;
   }, []);
@@ -519,6 +540,7 @@ export function ReviewShell(props: ReviewShellProps) {
   const selectionActionsAvailable = (
     selectionAnchor !== null || props.selection.selectionUpdate.kind === 'over-limit'
   ) && props.selection.selectionUpdate.generation !== consumedSelectionGeneration;
+  const contextualSelectionActionsVisible = contextualSelectionActionsAllowed(reconciliationDetailMode);
   const competingPdfSelections = props.selection.pdfCopySnapshots?.main?.kind !== undefined
     && props.selection.pdfCopySnapshots.main.kind !== 'cleared'
     && props.selection.pdfCopySnapshots.reference?.kind !== undefined
@@ -869,7 +891,7 @@ export function ReviewShell(props: ReviewShellProps) {
   };
 
   const handleInputIntent = (intent: ProofreadInputIntent) => {
-    if (authoringSessionRef.current !== null) {
+    if (reconciliationDetailMode === 'reattach' || authoringSessionRef.current !== null) {
       inputControllerRef.current?.clearDraft();
       return;
     }
@@ -1037,10 +1059,15 @@ export function ReviewShell(props: ReviewShellProps) {
       return;
     }
     if (event.defaultPrevented || editable || event.nativeEvent.isComposing) return;
-    if (event.altKey && event.shiftKey && !event.ctrlKey && !event.metaKey) {
-      const tool = reviewActionForKey(event.key);
-      if (tool) {
-        event.preventDefault();
+    if (handleReviewActionShortcut({
+      key: event.key,
+      altKey: event.altKey,
+      shiftKey: event.shiftKey,
+      ctrlKey: event.ctrlKey,
+      metaKey: event.metaKey,
+      reconciliationDetailMode,
+      preventDefault: () => event.preventDefault(),
+      invoke: (tool) => {
         if (authoringSessionRef.current !== null) return;
         if (tool === 'replace') startReplacement();
         if (tool === 'delete') deleteSelection();
@@ -1049,9 +1076,8 @@ export function ReviewShell(props: ReviewShellProps) {
           props.authoring.onRequestKeyboardPageNote?.();
           dispatchSurface({ type: 'open-transient', surface: 'page-note-cursor' });
         }
-        return;
-      }
-    }
+      },
+    })) return;
     if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'z') {
       if (commandSurface.invoke(event.shiftKey ? 'redo' : 'undo')) event.preventDefault();
       return;
@@ -1077,7 +1103,7 @@ export function ReviewShell(props: ReviewShellProps) {
   };
 
   const startHighlight = () => {
-    if (authoringSessionRef.current !== null) return;
+    if (reconciliationDetailMode === 'reattach' || authoringSessionRef.current !== null) return;
     if (props.selection.selectionUpdate.kind === 'over-limit') {
       props.selection.onSelectionPageLimitExceeded?.();
       return;
@@ -1095,7 +1121,7 @@ export function ReviewShell(props: ReviewShellProps) {
   };
 
   const startReplacement = () => {
-    if (authoringSessionRef.current !== null) return;
+    if (reconciliationDetailMode === 'reattach' || authoringSessionRef.current !== null) return;
     if (props.selection.selectionUpdate.kind === 'over-limit') {
       props.selection.onSelectionPageLimitExceeded?.();
       return;
@@ -1114,6 +1140,7 @@ export function ReviewShell(props: ReviewShellProps) {
   };
 
   const deleteSelection = () => {
+    if (reconciliationDetailMode === 'reattach') return;
     if (props.selection.selectionUpdate.kind === 'over-limit') {
       props.selection.onSelectionPageLimitExceeded?.();
       return;
@@ -1132,7 +1159,7 @@ export function ReviewShell(props: ReviewShellProps) {
   };
 
   const startPageNote = (anchor?: { pageIndex: number; position: ReviewRect; nearbyText?: string } | null) => {
-    if (authoringSessionRef.current !== null) return;
+    if (reconciliationDetailMode === 'reattach' || authoringSessionRef.current !== null) return;
     if (!anchor) {
       setAnnouncement('Choose a safe page location to add a Page Note.');
       return;
@@ -1628,7 +1655,7 @@ export function ReviewShell(props: ReviewShellProps) {
           data-review-contextual-host
           data-selection-status={props.selection.selectionUpdate.kind}
         >
-          {selectionActionsAvailable && props.selection.selectionPlacement ? (
+          {contextualSelectionActionsVisible && selectionActionsAvailable && props.selection.selectionPlacement ? (
             <ContextActionPalette
               placement={props.selection.selectionPlacement}
               hidden={!annotationPeeksEnabled || surface.nestedLayer !== 'none'}
@@ -1638,14 +1665,15 @@ export function ReviewShell(props: ReviewShellProps) {
               onHighlight={startHighlight}
             />
           ) : null}
-          {!selectionAnchor && props.selection.caretAnchor && props.selection.caretPlacement ? (
+          {contextualSelectionActionsVisible && !selectionAnchor && props.selection.caretAnchor && props.selection.caretPlacement ? (
             <InsertionCaret
               key={`${props.selection.caretAnchor.pageIndex}:${props.selection.caretAnchor.position.x}:${props.selection.caretAnchor.position.y}`}
               placement={props.selection.caretPlacement}
               hidden={!annotationPeeksEnabled || surface.nestedLayer !== 'none'}
             />
           ) : null}
-          {surface.baseSurface === 'reading' && surface.nestedLayer === 'none' && props.authoring.pageMenu ? (
+          {contextualSelectionActionsVisible && surface.baseSurface === 'reading'
+            && surface.nestedLayer === 'none' && props.authoring.pageMenu ? (
             <PageActionMenu
               placement={props.authoring.pageMenu.placement}
               triggerRef={pageNoteTriggerRef}
@@ -1673,6 +1701,7 @@ export function ReviewShell(props: ReviewShellProps) {
             />
           ) : null}
           {authoringSession === null
+            && contextualSelectionActionsVisible
             && !annotationsVisible
             && annotationPeeksEnabled && annotationReaderSession?.origin === 'peek'
             && annotationReaderRecord !== null ? (
@@ -1700,6 +1729,7 @@ export function ReviewShell(props: ReviewShellProps) {
               </aside>
             ) : null}
           {authoringSession === null
+            && contextualSelectionActionsVisible
             && !annotationsVisible
             && annotationPeeksEnabled && annotationReaderSession?.origin !== 'peek'
             && peekItemId ? (() => {
@@ -1958,6 +1988,7 @@ export function ReviewShell(props: ReviewShellProps) {
               focusRequestToken={reconciliationFocusRequest}
               onFocusFallback={focusAnnotationsFallback}
               onDetailEscapeHandlerChange={setReconciliationDetailEscapeHandler}
+              onDetailModeChange={setReconciliationDetailMode}
               renderSummary={(attention) => <AnnotationList
                 attention={attention}
                 items={visibleOwnedItems}

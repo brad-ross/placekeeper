@@ -34,10 +34,12 @@ import {
 } from "../src/review/annotation-outline-context.js";
 import {
   buildReattachmentCommand,
+  contextualSelectionActionsAllowed,
   reconciliationCommandRejectionMessage,
   reconciliationFocusKeyAfterRemoval,
   reattachmentCandidateFor,
   reattachmentGenerationIsCurrent,
+  reattachmentInstruction,
   reattachmentTitle,
   ReconciliationWorkspace,
   type ReconciliationSummaryPresentation,
@@ -323,6 +325,31 @@ describe("one production review tree", () => {
     expect(reconciliationFocusKeyAfterRemoval(keys, "middle")).toBe("final");
     expect(reconciliationFocusKeyAfterRemoval(keys, "final")).toBe("middle");
     expect(reconciliationFocusKeyAfterRemoval(["only"], "only")).toBeNull();
+  });
+
+  it("suppresses contextual selection actions only while reattaching", () => {
+    expect(contextualSelectionActionsAllowed("reattach")).toBe(false);
+    expect(contextualSelectionActionsAllowed("discard")).toBe(true);
+    expect(contextualSelectionActionsAllowed(null)).toBe(true);
+  });
+
+  it("uses the requested reattachment instruction once selection is possible", () => {
+    expect(reattachmentInstruction("selection", {
+      anchor: null,
+      message: "Select the text to reattach to in the PDF.",
+    })).toBe("Select the text to reattach to in the PDF.");
+    expect(reattachmentInstruction("selection", {
+      anchor: {
+        kind: "selection",
+        pageIndex: 0,
+        quote: "replacement target",
+        prefix: "",
+        suffix: "",
+        rect: { x: 1, y: 2, width: 3, height: 4 },
+        segmentRects: [{ x: 1, y: 2, width: 3, height: 4 }],
+      },
+      message: "Replacement text is valid.",
+    })).toBe("Select the text to reattach to in the PDF.");
   });
 
   it("defers a host forward SyncTeX request until its PDF generation and restoration are ready", () => {

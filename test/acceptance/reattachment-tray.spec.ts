@@ -85,6 +85,16 @@ async function center(locator: Locator) {
   return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
 }
 
+async function rowSurface(locator: Locator) {
+  return locator.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return {
+      backgroundColor: style.backgroundColor,
+      boxShadow: style.boxShadow,
+    };
+  });
+}
+
 async function expectElementsInsideVisiblePanel(panel: Locator, elements: Locator) {
   const geometry = await panel.evaluate((element) => {
     const bounds = element.getBoundingClientRect();
@@ -354,9 +364,12 @@ test('production touch controls stay 44px and contained in a short reader', asyn
     }).click();
     const reader = panel.locator('[data-reconciliation-reader][data-reconciliation-detail="reattach"]');
     const body = reader.locator('.full-annotation-reader__body');
+    await expect(reader.getByText('Select the text to reattach to in the PDF.', { exact: true }))
+      .toBeVisible();
     expect(await body.evaluate((element) => element.clientHeight)).toBeGreaterThan(0);
     const controls = [
       { name: 'Back', locator: reader.locator('[data-full-annotation-action="back"]') },
+      { name: 'Delete', locator: reader.getByRole('button', { name: 'Delete' }) },
       { name: 'Cancel', locator: reader.getByRole('button', { name: 'Cancel' }) },
       { name: 'Attach', locator: reader.getByRole('button', { name: 'Attach' }) },
     ];
@@ -380,9 +393,17 @@ for (const viewport of viewports) {
   test(`${viewport.name} detached card opens a sole reader-style attachment screen and restores the list`, async ({ page }, testInfo) => {
     const panel = await openFixture(page, viewport);
     const row = reattachmentRow(panel);
+    const warning = row.locator('[data-annotation-status-icon="warning"]');
+    const discard = row.getByRole('button', {
+      name: 'Discard Highlight annotation on page 1',
+    });
     const trigger = row.getByRole('button', {
       name: /Reattach previous Highlight annotation on page 1/u,
     });
+    const selectionActions = page.getByRole('toolbar', { name: 'Selection review actions' });
+    await page.mouse.move(0, 0);
+    const restingSurface = await rowSurface(row);
+    await expect(selectionActions).toBeVisible();
     await trigger.click();
 
     const reader = panel.locator(
@@ -396,6 +417,9 @@ for (const viewport of viewports) {
     await expect(reader.locator('.full-annotation-reader__metadata .annotation-item__kind-icon'))
       .toHaveAttribute('title', 'Highlight');
     await expect(reader.locator('[data-reattachment-selection-mode]')).toBeVisible();
+    await expect(reader.getByText('Select the text to reattach to in the PDF.', { exact: true }))
+      .toBeVisible();
+    await expect(selectionActions).toBeHidden();
     await expect(panel.getByRole('list', { name: 'Annotations in document order' })).toHaveCount(0);
     await expect(panel.locator('[data-reconciliation-entry]')).toHaveCount(0);
     const back = reader.locator('[data-full-annotation-action="back"]');
@@ -416,19 +440,36 @@ for (const viewport of viewports) {
     await expect(reader).toHaveCount(0);
     await expect(panel.getByRole('list', { name: 'Annotations in document order' })).toBeVisible();
     await expect(trigger).toBeFocused();
+    await page.mouse.move(0, 0);
+    expect(await isPainted(warning)).toBe(true);
+    expect(await isPainted(discard)).toBe(false);
+    expect(await rowSurface(row)).toEqual(restingSurface);
+    await expect(selectionActions).toBeVisible();
+
+    await page.keyboard.press('Enter');
+    await expect(reader).toBeVisible();
+    await expect(back).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(reader).toHaveCount(0);
+    await expect(trigger).toBeFocused();
+    await expect(selectionActions).toBeVisible();
 
     await trigger.click();
     await expect(reader).toBeVisible();
+    await expect(selectionActions).toBeHidden();
     await page.keyboard.press('Escape');
     await expect(reader).toHaveCount(0);
     await expect(panel.getByRole('list', { name: 'Annotations in document order' })).toBeVisible();
     await expect(trigger).toBeFocused();
+    await expect(selectionActions).toBeVisible();
 
     await trigger.click();
+    await expect(selectionActions).toBeHidden();
     await reader.getByRole('button', { name: 'Cancel' }).click();
     await expect(reader).toHaveCount(0);
     await expect(panel.getByRole('list', { name: 'Annotations in document order' })).toBeVisible();
     await expect(trigger).toBeFocused();
+    await expect(selectionActions).toBeVisible();
   });
 
   test(`${viewport.name} production reattach and discard readers match the canonical full reader`, async ({ page }, testInfo) => {
@@ -438,10 +479,21 @@ for (const viewport of viewports) {
     const reattach = row.getByRole('button', {
       name: /Reattach previous Highlight annotation on page 1/u,
     });
+    const initialReconciliationCount = await panel.locator('[data-reconciliation-entry]').count();
+    const initialRowState = await row.evaluate((element) => ({
+      target: element.getAttribute('data-reconciliation-item')
+        ?? element.getAttribute('data-reconciliation-draft'),
+      text: element.textContent,
+    }));
 
     await reattach.click();
     const reader = panel.locator('[data-reconciliation-reader]');
     await expectReconciliationReaderParity(reader, canonical, 'reattach');
+    await expect(reader.getByText('Select the text to reattach to in the PDF.', { exact: true }))
+      .toBeVisible();
+    const readerDelete = reader.locator('.full-annotation-reader__header-actions')
+      .getByRole('button', { name: 'Delete' });
+    await expect(readerDelete).toHaveAttribute('data-full-annotation-action', 'delete');
     await page.evaluate(async () => {
       await document.fonts.ready;
       await new Promise<void>((resolve) => requestAnimationFrame(() => (
@@ -452,9 +504,18 @@ for (const viewport of viewports) {
       path: testInfo.outputPath(`${viewport.name}-production-reattach.png`),
     });
 
-    await reader.locator('[data-full-annotation-action="back"]').click();
+    await readerDelete.click();
+    await expectReconciliationReaderParity(reader, canonical, 'discard');
+    await expect(reader.locator('[data-discard-confirmation]')).toBeVisible();
+    await reader.getByRole('button', { name: 'Cancel' }).click();
     await expect(reader).toHaveCount(0);
     await expect(reattach).toBeFocused();
+    await expect(panel.locator('[data-reconciliation-entry]')).toHaveCount(initialReconciliationCount);
+    expect(await row.evaluate((element) => ({
+      target: element.getAttribute('data-reconciliation-item')
+        ?? element.getAttribute('data-reconciliation-draft'),
+      text: element.textContent,
+    }))).toEqual(initialRowState);
     await row.hover();
     await row.getByRole('button', {
       name: 'Discard Highlight annotation on page 1',
@@ -467,6 +528,175 @@ for (const viewport of viewports) {
     });
   });
 }
+
+test('reattachment suppresses PDF caret and action shortcuts until the reader exits', async ({ page }) => {
+  const panel = await openFixture(page, viewports[0]);
+  const canvas = page.getByRole('application', { name: 'PDF review canvas' });
+  const trigger = reattachmentRow(panel).getByRole('button', {
+    name: /Reattach previous Highlight annotation on page 1/u,
+  });
+  const caret = page.locator('[data-review-insertion-caret]');
+
+  await page.getByRole('button', { name: 'Use caret' }).click();
+  await expect(caret).toBeVisible();
+  await trigger.click();
+  const reader = panel.locator('[data-reconciliation-reader][data-reconciliation-detail="reattach"]');
+  await expect(reader).toBeVisible();
+  await expect(caret).toBeHidden();
+  await reader.locator('[data-full-annotation-action="back"]').click();
+  await expect(reader).toHaveCount(0);
+  await expect(caret).toBeVisible();
+
+  await trigger.click();
+  await expect(caret).toBeHidden();
+  await page.keyboard.press('Escape');
+  await expect(reader).toHaveCount(0);
+  await expect(caret).toBeVisible();
+
+  await trigger.click();
+  await expect(caret).toBeHidden();
+  await reader.getByRole('button', { name: 'Cancel' }).click();
+  await expect(reader).toHaveCount(0);
+  await expect(caret).toBeVisible();
+
+  await page.getByRole('button', { name: 'Use selection' }).click();
+  const selectionActions = page.getByRole('toolbar', { name: 'Selection review actions' });
+  await expect(selectionActions).toBeVisible();
+  const stateOutput = page.locator('output[data-revision]');
+  const beforeShortcuts = await stateOutput.evaluate((element) => ({
+    revision: element.getAttribute('data-revision'),
+    kinds: element.getAttribute('data-kinds'),
+  }));
+  if (beforeShortcuts.revision === null) throw new Error('Expected harness review revision.');
+
+  await trigger.click();
+  await expect(reader).toBeVisible();
+  for (const shortcut of ['Alt+Shift+KeyD', 'Alt+Shift+KeyH', 'Alt+Shift+KeyR']) {
+    await page.keyboard.press(shortcut);
+    await expect(reader, `${shortcut} must leave reattachment in control`).toBeVisible();
+    await expect(page.getByRole('region', { name: 'Highlight Comment' })).toHaveCount(0);
+    await expect(page.getByRole('region', { name: 'Replacement' })).toHaveCount(0);
+    expect(await stateOutput.evaluate((element) => ({
+      revision: element.getAttribute('data-revision'),
+      kinds: element.getAttribute('data-kinds'),
+    })), `${shortcut} must not mutate the review`).toEqual(beforeShortcuts);
+  }
+
+  await reader.locator('[data-full-annotation-action="back"]').click();
+  await expect(selectionActions).toBeVisible();
+
+  await canvas.focus();
+  await page.keyboard.press('Alt+Shift+KeyR');
+  const replacement = page.getByRole('region', { name: 'Replacement' });
+  await expect(replacement).toBeVisible();
+  await replacement.getByRole('button', { name: 'Cancel' }).click();
+  await expect(replacement).toHaveCount(0);
+
+  await page.getByRole('button', { name: 'Use selection' }).click();
+  await expect(selectionActions).toBeVisible();
+  await canvas.focus();
+  await page.keyboard.press('Alt+Shift+KeyH');
+  const highlight = page.getByRole('region', { name: 'Highlight Comment' });
+  await expect(highlight).toBeVisible();
+  await highlight.getByRole('button', { name: 'Cancel' }).click();
+  await expect(highlight).toHaveCount(0);
+
+  await page.getByRole('button', { name: 'Use selection' }).click();
+  await expect(selectionActions).toBeVisible();
+  await canvas.focus();
+  const beforeDelete = await stateOutput.evaluate((element) => ({
+    revision: element.getAttribute('data-revision'),
+    kinds: element.getAttribute('data-kinds'),
+  }));
+  if (beforeDelete.revision === null || beforeDelete.kinds === null) {
+    throw new Error('Expected pre-delete review state.');
+  }
+  await page.keyboard.press('Alt+Shift+KeyD');
+  await expect(stateOutput).toHaveAttribute(
+    'data-revision',
+    String(Number(beforeDelete.revision) + 1),
+  );
+  await expect(stateOutput).toHaveAttribute(
+    'data-kinds',
+    `${beforeDelete.kinds},delete`,
+  );
+});
+
+test('header Delete settles a failed terminal reattachment before later interactions', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 760 });
+  await page.goto(
+    '/test/acceptance/review-harness/index.html?reconciliation=default'
+      + '&interaction-lifecycle=1&finalize-fails-twice=1',
+  );
+  const panel = await openAnnotations(page);
+  const root = page.locator('#root');
+  const stateOutput = page.locator('output[data-revision]');
+  const highlightEntry = reattachmentRow(panel);
+  const highlightTrigger = highlightEntry.getByRole('button', {
+    name: /Reattach previous Highlight annotation on page 1/u,
+  });
+  const highlightTarget = await highlightEntry.getAttribute('data-reconciliation-item');
+  if (highlightTarget === null) throw new Error('Expected detached highlight target identity.');
+  await highlightTrigger.click();
+  const reader = panel.locator('[data-reconciliation-reader][data-reconciliation-detail="reattach"]');
+  await expect(root).toHaveAttribute('data-interaction-hold', 'active');
+  await reader.getByRole('button', { name: 'Attach' }).click();
+
+  await expect.poll(async () => JSON.parse(
+    await root.getAttribute('data-finalize-requests') ?? '[]',
+  )).toHaveLength(2);
+  await expect(reader).toBeVisible();
+  await expect(reader.getByText(
+    'connection reset before durable interaction finalization',
+    { exact: true },
+  )).toBeVisible();
+  await expect(reader.getByRole('button', { name: 'Delete' })).toBeEnabled();
+  await expect(stateOutput).toHaveAttribute('data-pending-drafts', '1');
+
+  await reader.getByRole('button', { name: 'Delete' }).click();
+
+  await expect(reader).toHaveCount(0);
+  await expect(panel.locator('[data-discard-confirmation]')).toHaveCount(0);
+  await expect.poll(async () => JSON.parse(
+    await root.getAttribute('data-finalize-requests') ?? '[]',
+  )).toHaveLength(3);
+  const finalizeRequests = JSON.parse(
+    await root.getAttribute('data-finalize-requests') ?? '[]',
+  ) as Array<{ readonly outcome: string }>;
+  expect(finalizeRequests[1]).toEqual(finalizeRequests[0]);
+  expect(finalizeRequests[2]).toEqual(finalizeRequests[0]);
+  expect(finalizeRequests.map(({ outcome }) => outcome)).toEqual([
+    'applied',
+    'applied',
+    'applied',
+  ]);
+  expect(JSON.parse(await root.getAttribute('data-release-requests') ?? '[]')).toEqual([]);
+  await expect(root).toHaveAttribute(
+    'data-interaction-events',
+    '["begin:1","finalize:2:applied","acknowledge:3"]',
+  );
+  await expect(root).toHaveAttribute('data-interaction-hold', 'released');
+  await expect(stateOutput).toHaveAttribute('data-pending-drafts', '0');
+  const kinds = (await stateOutput.getAttribute('data-kinds') ?? '').split(',').sort();
+  expect(kinds).toEqual(['delete', 'highlight']);
+  await expect(panel.locator('[data-reconciliation-entry]')).toHaveCount(1);
+  await expect(highlightTrigger).toHaveCount(0);
+  await expect(panel.locator(`[data-review-item="${highlightTarget}"]`)).toHaveCount(1);
+
+  const deleteTrigger = panel.getByRole('button', {
+    name: 'Reattach previous Delete annotation on page 2',
+  });
+  await deleteTrigger.click();
+  await expect(root).toHaveAttribute('data-interaction-hold', 'active');
+  await panel.locator('[data-reconciliation-reader][data-reconciliation-detail="reattach"]')
+    .locator('[data-full-annotation-action="back"]')
+    .click();
+  await expect(deleteTrigger).toBeFocused();
+  await expect(root).toHaveAttribute('data-interaction-hold', 'released');
+  await expect.poll(async () => JSON.parse(
+    await root.getAttribute('data-release-requests') ?? '[]',
+  )).toHaveLength(1);
+});
 
 test('Escape from the PDF closes the attachment reader instead of the workspace', async ({ page }) => {
   const panel = await openFixture(page, viewports[0]);

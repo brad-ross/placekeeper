@@ -596,6 +596,9 @@ function Harness() {
     identity: { readonly generation: number; readonly revision: number },
   ) => Promise<void>>());
   const loseFinalizeResponseRef = useRef(previewParameters.has('finalize-response-lost'));
+  const failFinalizeAttemptsRef = useRef(
+    previewParameters.has('finalize-fails-twice') ? 2 : 0,
+  );
   const failBeginBeforeAcceptanceRef = useRef(previewParameters.has('begin-preaccept-fails'));
   const loseBeginResponseRef = useRef(previewParameters.has('begin-response-lost'));
   const loseReleaseResponseRef = useRef(previewParameters.has('release-response-lost'));
@@ -776,6 +779,10 @@ function Harness() {
                 ...JSON.parse(rootElement.getAttribute('data-finalize-requests') ?? '[]') as unknown[],
                 input,
               ]));
+              if (failFinalizeAttemptsRef.current > 0) {
+                failFinalizeAttemptsRef.current -= 1;
+                throw new Error('connection reset before durable interaction finalization');
+              }
               const recovered = interactionReceiptsRef.current.get(input.interactionToken);
               if (recovered !== undefined) {
                 rootElement.setAttribute('data-interaction-events', JSON.stringify([

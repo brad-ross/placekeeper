@@ -14,6 +14,7 @@ import {
   attachmentOrderedInteractionTransport,
   type AuthoringSessionSeed,
 } from '../src/review/authoring-session.js';
+import { resolveReattachmentDiscardIntent } from '../src/review/ReconciliationWorkspace.js';
 import {
   pendingDestinationAttemptIsCurrent,
   pendingDestinationDisposition,
@@ -484,6 +485,53 @@ describe('frozen authoring-session contract', () => {
       method: 'acknowledge',
       input: { interactionToken: 'interaction-authoring-1', order: 6 },
     });
+  });
+
+  it('settles a failed applied finalization before Delete can enter discard', async () => {
+    const methods: string[] = [];
+    let finalizeAttempts = 0;
+    const interaction = await beginReviewInteraction({
+      async beginInteraction(input) {
+        methods.push('begin');
+        return { status: 'accepted', generation: input.generation, ownerViewId: 'attachment-a' };
+      },
+      async finalizeInteraction(input) {
+        methods.push('finalize');
+        finalizeAttempts += 1;
+        if (finalizeAttempts === 1) throw new Error('response lost after apply');
+        return {
+          status: 'finalized', interactionToken: input.interactionToken,
+          generation: 7, outcome: input.outcome, reviewRevision: 4,
+        };
+      },
+      async releaseInteraction() {
+        methods.push('release');
+        return { status: 'released' };
+      },
+      async acknowledgeInteraction() {
+        methods.push('acknowledge');
+        return { status: 'released' };
+      },
+    }, 7, 'reattach-delete-after-failed-finalize');
+    const terminal = {
+      interaction,
+      draftId: 'draft-after-failed-finalize',
+      expectedDraftRevision: 2,
+    };
+
+    await expect(interaction.finalize(
+      'applied', terminal.draftId, terminal.expectedDraftRevision,
+    )).rejects.toThrow('response lost after apply');
+    let discardOpened = false;
+    await resolveReattachmentDiscardIntent(terminal, async (pending) => {
+      const receipt = await pending.interaction.finalize(
+        'applied', pending.draftId, pending.expectedDraftRevision,
+      );
+      await pending.interaction.acknowledge(receipt);
+    }, () => { discardOpened = true; });
+
+    expect(methods).toEqual(['begin', 'finalize', 'finalize', 'acknowledge']);
+    expect(discardOpened).toBe(false);
   });
 
   it('projects in-progress authoring into a protected generation-bound draft', () => {

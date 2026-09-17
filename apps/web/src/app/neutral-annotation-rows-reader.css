@@ -58,7 +58,7 @@
 }
 
 :is(.review-workspace, .review-tools-workspace) li[data-annotation-origin]:hover,
-:is(.review-workspace, .review-tools-workspace) li[data-annotation-origin]:focus-within:not(:has(.copy-link-control:focus-within)) {
+:is(.review-workspace, .review-tools-workspace) li[data-annotation-origin]:has(:focus-visible):not(:has(.copy-link-control:focus-within)) {
   border: 0;
   background: var(--pk-hover);
   box-shadow: none;
@@ -77,7 +77,7 @@
 }
 
 :is(.review-workspace, .review-tools-workspace) li[data-annotation-origin][data-active="true"]:hover,
-:is(.review-workspace, .review-tools-workspace) li[data-annotation-origin][data-active="true"]:focus-within,
+:is(.review-workspace, .review-tools-workspace) li[data-annotation-origin][data-active="true"]:has(:focus-visible),
 :is(.review-workspace, .review-tools-workspace) li[data-annotation-origin][data-active="true"]:active {
   background: var(--pk-raised);
   box-shadow: 0 2px 6px rgb(0 0 0 / 2%), 0 8px 24px rgb(0 0 0 / 1.6%);
@@ -257,7 +257,7 @@
   outline-offset: 3px;
 }
 
-:is(.review-workspace, .review-tools-workspace) li[data-annotation-origin]:focus-within:not(:has(.copy-link-control:focus-within)) {
+:is(.review-workspace, .review-tools-workspace) li[data-annotation-origin]:has(:focus-visible):not(:has(.copy-link-control:focus-within)) {
   outline: 0;
 }
 

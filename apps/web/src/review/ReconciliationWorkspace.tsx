@@ -51,7 +51,7 @@ export type ReattachmentTarget =
       readonly draft: PendingReviewDraftV1;
     };
 
-const DEFAULT_SELECTION_REATTACHMENT_MESSAGE = "Select one reliable replacement passage in the current PDF.";
+const DEFAULT_SELECTION_REATTACHMENT_MESSAGE = "Select the text to reattach to in the PDF.";
 
 export function buildReattachmentCommand(input: {
   readonly target: ReattachmentTarget;
@@ -186,7 +186,7 @@ export function reattachmentTitle(kind: ReviewItemKind): string {
   return REATTACHMENT_TITLES[kind];
 }
 
-function reattachmentInstruction(
+export function reattachmentInstruction(
   expected: ReviewAnchorEvidenceV1["kind"],
   candidate: { readonly anchor: ReviewAnchorEvidenceV1 | null; readonly message: string },
 ): string {
@@ -195,7 +195,7 @@ function reattachmentInstruction(
   }
   if (expected === "caret") return "Place the caret at the intended insertion point in the PDF, then confirm.";
   if (expected === "page") return "Select text or place the caret on the intended page in the PDF, then confirm.";
-  return "Select the intended text in the PDF, then confirm.";
+  return DEFAULT_SELECTION_REATTACHMENT_MESSAGE;
 }
 
 export interface ReconciliationWorkspaceProps {
@@ -213,17 +213,42 @@ export interface ReconciliationWorkspaceProps {
     listener: (identity: { readonly generation: number; readonly revision: number }) => Promise<void>,
   ) => () => void;
   readonly onDetailEscapeHandlerChange?: (handler: (() => void) | null) => void;
+  readonly onDetailModeChange?: (mode: ResolutionMode | null) => void;
   readonly renderSummary: (summary: ReconciliationSummaryPresentation) => ReactNode;
 }
 
 export type ReconciliationSummaryPresentation = AnnotationAttentionPresentation;
 
-type ResolutionMode = "apply" | "reattach" | "discard";
+export type ResolutionMode = "apply" | "reattach" | "discard";
+
+export function contextualSelectionActionsAllowed(mode: ResolutionMode | null): boolean {
+  return mode !== "reattach";
+}
 
 interface ResolutionDetail {
   readonly key: string;
   readonly mode: ResolutionMode;
   readonly generation: number;
+}
+
+export interface TerminalReattachmentAttempt {
+  readonly interaction: ReviewInteractionHandle;
+  readonly draftId: string;
+  readonly expectedDraftRevision: number;
+}
+
+export async function resolveReattachmentDiscardIntent(
+  terminal: TerminalReattachmentAttempt | null,
+  settle: (terminal: TerminalReattachmentAttempt) => Promise<void>,
+  openDiscard: () => void | Promise<void>,
+): Promise<void> {
+  if (terminal !== null) {
+    // Once finalize has been attempted, the interaction is fenced to its exact
+    // applied outcome. A lost response cannot reopen discard as an alternative.
+    await settle(terminal);
+    return;
+  }
+  await openDiscard();
 }
 
 interface ResolutionRecord {
@@ -362,11 +387,7 @@ export function ReconciliationWorkspace(props: ReconciliationWorkspaceProps) {
   const acceptedFocusPendingRef = useRef(false);
   const interactionRef = useRef<ReviewInteractionHandle | null>(null);
   const interactionAdmissionPendingRef = useRef(false);
-  const terminalAttemptRef = useRef<{
-    readonly interaction: ReviewInteractionHandle;
-    readonly draftId: string;
-    readonly expectedDraftRevision: number;
-  } | null>(null);
+  const terminalAttemptRef = useRef<TerminalReattachmentAttempt | null>(null);
   const mountedRef = useRef(true);
   const automaticTerminalRetryKeyRef = useRef<string | null>(null);
   const priorRecordKeysRef = useRef(records.map(({ key }) => key));
@@ -560,6 +581,12 @@ export function ReconciliationWorkspace(props: ReconciliationWorkspaceProps) {
     return () => props.onDetailEscapeHandlerChange?.(null);
   }, [detail, props.onDetailEscapeHandlerChange]);
 
+  useLayoutEffect(() => {
+    props.onDetailModeChange?.(detail?.mode ?? null);
+  }, [detail?.mode, props.onDetailModeChange]);
+
+  useLayoutEffect(() => () => props.onDetailModeChange?.(null), [props.onDetailModeChange]);
+
   const settleReattachment = async (terminal: NonNullable<typeof terminalAttemptRef.current>) => {
     const receipt = await terminal.interaction.finalize(
       'applied', terminal.draftId, terminal.expectedDraftRevision,
@@ -725,6 +752,37 @@ export function ReconciliationWorkspace(props: ReconciliationWorkspaceProps) {
     reason: "discarded-by-reviewer-during-reconciliation",
     discardedAt: new Date().toISOString(),
   });
+  const openDiscardConfirmation = async () => {
+    if (detail === null || pending) return;
+    setPending(true);
+    try {
+      await resolveReattachmentDiscardIntent(
+        terminalAttemptRef.current,
+        settleReattachment,
+        async () => {
+          const interaction = interactionRef.current;
+          interactionRef.current = null;
+          try {
+            await interaction?.release();
+          } catch (error) {
+            if (mountedRef.current) interactionRef.current = interaction;
+            throw error;
+          }
+          if (!mountedRef.current) return;
+          setMessage("");
+          setDetail({ ...detail, mode: "discard" });
+        },
+      );
+    } catch (error) {
+      if (mountedRef.current) {
+        setMessage(error instanceof Error
+          ? error.message
+          : "Reattachment completion is still pending.");
+      }
+    } finally {
+      if (mountedRef.current) setPending(false);
+    }
+  };
 
   const notice = props.refreshStatus === "reconciling"
     ? <p className="reconciliation-workspace__notice" role="status">A rebuilt PDF is loading and previous annotations are reconciling.</p>
@@ -838,7 +896,17 @@ export function ReconciliationWorkspace(props: ReconciliationWorkspaceProps) {
           ><ReviewIcon name="arrow-left" size={16} /></ReviewTooltipButton>
         </div>
         <FullAnnotationReaderMetadata record={projectedRecord} prior />
-        <div className="full-annotation-reader__header-actions" />
+        <div className="full-annotation-reader__header-actions">
+          {detail.mode === "reattach" ? <ReviewTooltipButton
+            type="button"
+            className="full-annotation-reader__delete"
+            data-full-annotation-action="delete"
+            label="Delete"
+            tooltip="Delete annotation"
+            disabled={pending}
+            onClick={() => { void openDiscardConfirmation(); }}
+          ><ReviewIcon name="remove" size={16} /></ReviewTooltipButton> : null}
+        </div>
       </header>
       <FullAnnotationReaderBody
         record={projectedRecord}

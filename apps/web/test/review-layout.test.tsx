@@ -5,7 +5,10 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 
 import { controlledWorkspaceSurfaceAction } from "../src/review/workspace-surface-policy.js";
-import { ReviewShell } from "../src/app/ReviewShell.js";
+import {
+  handleReviewActionShortcut,
+  ReviewShell,
+} from "../src/app/ReviewShell.js";
 import { AnnotationList } from '../src/review/AnnotationList.js';
 import { AnnotationPeek } from '../src/review/AnnotationPeek.js';
 import { projectOwnedAnnotationReader } from '../src/review/annotation-reader.js';
@@ -112,6 +115,38 @@ const unresolvedAnnotation: ReviewItem = {
 };
 
 describe('review shell layout and accessibility contract', () => {
+  it('blocks authoring shortcuts during reattachment and restores them after exit', () => {
+    const invoked: string[] = [];
+    const prevented: string[] = [];
+    for (const key of ['d', 'h', 'r', 'n']) {
+      expect(handleReviewActionShortcut({
+        key,
+        altKey: true,
+        shiftKey: true,
+        ctrlKey: false,
+        metaKey: false,
+        reconciliationDetailMode: 'reattach',
+        preventDefault: () => prevented.push(`blocked:${key}`),
+        invoke: (tool) => invoked.push(tool),
+      })).toBe(true);
+    }
+    expect(invoked).toEqual([]);
+    expect(prevented).toEqual(['blocked:d', 'blocked:h', 'blocked:r', 'blocked:n']);
+
+    expect(handleReviewActionShortcut({
+      key: 'h',
+      altKey: true,
+      shiftKey: true,
+      ctrlKey: false,
+      metaKey: false,
+      reconciliationDetailMode: null,
+      preventDefault: () => prevented.push('restored:h'),
+      invoke: (tool) => invoked.push(tool),
+    })).toBe(true);
+    expect(invoked).toEqual(['highlight']);
+    expect(prevented.at(-1)).toBe('restored:h');
+  });
+
   it('coordinates one active top-bar menu while pending export owns dismissal', () => {
     expect(resolveTopBarMenuRequest({
       activeMenu: 'navigation',
@@ -623,9 +658,12 @@ describe('review shell layout and accessibility contract', () => {
     );
   });
 
-  it('replaces the detached warning endcap with row actions for pointer, focus, and touch', () => {
+  it('replaces the detached warning endcap for pointer and keyboard intent without pinning pointer-restored focus', () => {
     expect(neutralStyles).toMatch(
-      /:has\(\.row-action-group\):is\(:hover, :focus-within, \[data-corresponding="true"\]\)\s*:is\(\.outline-navigator__page, \.annotation-item__page, \.annotation-item__status-icon, \.pdf-search__result-page\) \{\s*opacity: 0;/u,
+      /:has\(\.row-action-group\):is\(:hover, \[data-corresponding="true"\]\)\s*:is\(\.outline-navigator__page, \.annotation-item__page, \.annotation-item__status-icon, \.pdf-search__result-page\),\s*:is\([^}]+\):has\(\.row-action-group\):has\(:focus-visible\)\s*:is\(\.outline-navigator__page, \.annotation-item__page, \.annotation-item__status-icon, \.pdf-search__result-page\) \{\s*opacity: 0;/u,
+    );
+    expect(neutralStyles).not.toContain(
+      ':is(li[data-annotation-origin], li[data-search-result]):focus-within',
     );
     expect(neutralStyles).toMatch(
       /@media \(pointer: coarse\), \(hover: none\)[\s\S]*:has\(\.row-action-group\)\s*:is\(\.outline-navigator__page, \.annotation-item__page, \.annotation-item__status-icon, \.pdf-search__result-page\) \{\s*opacity: 0;/u,
@@ -1227,7 +1265,7 @@ describe('review shell layout and accessibility contract', () => {
       /\.annotation-item__title-actions \.annotation-item__action\s*\{[^}]*opacity:\s*1;/u,
     );
     expect(annotationStyles).toMatch(
-      /li:hover \.annotation-item__action,\s*:is\(\.review-workspace, \.review-tools-workspace\) li:focus-within \.annotation-item__action,\s*:is\(\.review-workspace, \.review-tools-workspace\) li\[data-active="true"\] \.annotation-item__action\s*\{[^}]*opacity:\s*1;/u,
+      /li:hover \.annotation-item__action,\s*:is\(\.review-workspace, \.review-tools-workspace\) li:has\(:focus-visible\) \.annotation-item__action,\s*:is\(\.review-workspace, \.review-tools-workspace\) li\[data-active="true"\] \.annotation-item__action\s*\{[^}]*opacity:\s*1;/u,
     );
     const coarsePointerRules = responsiveStyles.match(
       /@media \(hover: none\), \(pointer: coarse\) \{([\s\S]*?)\n\}/u,
