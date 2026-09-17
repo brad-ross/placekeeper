@@ -5,6 +5,7 @@ import {
   caretClientPlacement,
   clampPageNotePoint,
   enableViewerTextSelection,
+  scheduleViewerTextSelection,
   subscribeToMainDocumentOpened,
   publishViewerCaretRead,
   isCurrentViewerInputSurface,
@@ -12,6 +13,7 @@ import {
   referenceInputSurface,
   scopeViewerInteraction,
   ViewerInitializationAuthority,
+  viewerKeyboardPageIndex,
 } from '../src/app/App.js';
 import { MAIN_PDF_DOCUMENT_ID } from '../src/pdf/viewer-document-ids.js';
 import type { PdfOutlineDiscovery } from '../src/pdf/pdf-outline.js';
@@ -38,6 +40,41 @@ describe('App interaction boundaries', () => {
       showSelectionRects: true,
       enableMarquee: false,
     }, 'reference');
+  });
+
+  it('enables inactive-document selection after the plugin load dispatch settles', () => {
+    const enableForMode = vi.fn();
+    const queued: Array<() => void> = [];
+    let current = true;
+    scheduleViewerTextSelection(
+      { getDefaultMode: () => 'pointerMode' },
+      { enableForMode },
+      'reference',
+      () => current,
+      (callback) => queued.push(callback),
+    );
+
+    expect(enableForMode).not.toHaveBeenCalled();
+    queued.shift()?.();
+    expect(enableForMode).toHaveBeenCalledOnce();
+
+    scheduleViewerTextSelection(
+      { getDefaultMode: () => 'pointerMode' },
+      { enableForMode },
+      'reference',
+      () => current,
+      (callback) => queued.push(callback),
+    );
+    current = false;
+    queued.shift()?.();
+    expect(enableForMode).toHaveBeenCalledOnce();
+  });
+
+  it('places a keyboard note on the focused Reference page before scroll fallback', () => {
+    expect(viewerKeyboardPageIndex('1', 1, 4)).toBe(1);
+    expect(viewerKeyboardPageIndex(undefined, 2, 4)).toBe(1);
+    expect(viewerKeyboardPageIndex('stale', 3, 4)).toBe(2);
+    expect(viewerKeyboardPageIndex('9', 3, 4)).toBe(2);
   });
 
   it('binds Reference input before a tab exists, then advances surfaces on the same document', () => {

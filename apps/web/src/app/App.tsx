@@ -141,6 +141,35 @@ export function enableViewerTextSelection(
   }, documentId);
 }
 
+export function scheduleViewerTextSelection(
+  interaction: ViewerInteractionModeSource,
+  selection: ViewerTextSelectionControls,
+  documentId: string,
+  isCurrent: () => boolean,
+  schedule: (callback: () => void) => void = queueMicrotask,
+): void {
+  // DocumentManager publishes "opened" from its SET_DOCUMENT_LOADED subscriber.
+  // The microtask runs after every plugin has processed that same dispatch.
+  schedule(() => {
+    if (isCurrent()) enableViewerTextSelection(interaction, selection, documentId);
+  });
+}
+
+export function viewerKeyboardPageIndex(
+  focusedPageIndex: string | undefined,
+  currentPageNumber: number | undefined,
+  pageCount: number,
+): number {
+  if (focusedPageIndex !== undefined && /^(?:0|[1-9]\d*)$/u.test(focusedPageIndex)) {
+    const focused = Number(focusedPageIndex);
+    if (focused < pageCount) return focused;
+  }
+  return Math.min(
+    Math.max(0, pageCount - 1),
+    Math.max(0, (currentPageNumber ?? 1) - 1),
+  );
+}
+
 /** Binds Reference input to one opened PDF while deriving the active tab per gesture. */
 export class ReferenceInputDocumentAuthority {
   #document: object | null = null;
@@ -669,7 +698,18 @@ export function App({
     const core = registry.getStore().getState().core;
     const document = core.documents[documentId]?.document;
     const scroll = registry.getPlugin<ScrollPlugin>(ScrollPlugin.id)?.provides()?.forDocument(documentId);
-    const pageIndex = Math.max(0, (scroll?.getCurrentPage() ?? 1) - 1);
+    const referenceRoot = requestedSurface?.kind === 'reference'
+      ? referenceWorkspaceElementRef.current
+      : null;
+    const activeElement = referenceRoot?.ownerDocument.activeElement;
+    const focusedPage = activeElement instanceof Element && referenceRoot?.contains(activeElement)
+      ? activeElement.closest<HTMLElement>('[data-page-index]')
+      : null;
+    const pageIndex = viewerKeyboardPageIndex(
+      focusedPage?.dataset.pageIndex,
+      scroll?.getCurrentPage(),
+      document?.pages.length ?? 0,
+    );
     const page = document?.pages[pageIndex];
     if (!page) return;
     const previous = keyboardCursorRef.current;
@@ -1088,7 +1128,14 @@ export function App({
           if (document?.id !== REFERENCE_PDF_DOCUMENT_ID) return;
           disposeReferenceNavigation();
           if (interaction && selection) {
-            enableViewerTextSelection(interaction, selection, REFERENCE_PDF_DOCUMENT_ID);
+            scheduleViewerTextSelection(
+              interaction,
+              selection,
+              REFERENCE_PDF_DOCUMENT_ID,
+              () => initializationIsCurrent()
+                && registry.getStore().getState().core
+                  .documents[REFERENCE_PDF_DOCUMENT_ID]?.document === document,
+            );
           }
           const referenceNavigation = createViewerNavigation({
             registry,
