@@ -553,6 +553,11 @@ export function ReviewShell(props: ReviewShellProps) {
     : effectiveReferenceLayout.referenceDock === 'right'
       ? effectiveReferenceLayout.rightWorkspaceOpen
       : effectiveReferenceLayout.bottomReferencesOpen;
+  const pageMenuSurface = props.authoring.pageMenu?.surface;
+  const currentReferencePageMenu = pageMenuSurface?.kind === 'reference'
+    && referenceSurfaceOpen
+    && pageMenuSurface.documentGeneration === navigation.documentGeneration
+    && pageMenuSurface.tabIdentity === navigation.activeTabIdentity;
   const rightSurfaceOpen = effectiveReferenceLayout.kind !== 'narrow-unified'
     && effectiveReferenceLayout.rightWorkspaceOpen;
   const sharedWorkspace = effectiveReferenceLayout.kind === 'narrow-unified'
@@ -1934,7 +1939,9 @@ export function ReviewShell(props: ReviewShellProps) {
               hidden={!annotationPeeksEnabled || surface.nestedLayer !== 'none'}
             />
           ) : null}
-          {surface.baseSurface === 'reading' && surface.nestedLayer === 'none' && props.authoring.pageMenu ? (
+          {(surface.baseSurface === 'reading' || currentReferencePageMenu)
+            && surface.nestedLayer === 'none'
+            && props.authoring.pageMenu ? (
             <PageActionMenu
               placement={props.authoring.pageMenu.placement}
               triggerRef={pageNoteTriggerRef}

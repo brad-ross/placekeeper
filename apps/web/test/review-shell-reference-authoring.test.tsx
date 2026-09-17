@@ -183,4 +183,53 @@ describe('Reference authoring continuity', () => {
     expect(html).toMatch(/id="workspace-mode-references"[^>]*aria-selected="true"/u);
     expect(html).toMatch(/id="workspace-mode-annotations"[^>]*aria-selected="false"/u);
   });
+
+  it('shows page actions only for the current Reference surface while its workspace is open', () => {
+    const target = session.origin.referenceRecovery!.target;
+    const navigationState = reduceReferenceNavigation(
+      createReferenceNavigationState(8),
+      {
+        type: 'open-reference',
+        target,
+        settledLocation: {
+          pageIndex: 4,
+          anchor: { x: 0, y: 0 },
+          alignment: { xPercent: 50, yPercent: 50 },
+          zoom: 1,
+        },
+        tabIdentity: 'tab-1',
+        label: 'Identification strategy',
+        pageContext: 'Page 5',
+      },
+    );
+    const renderPageMenu = (surface: { kind: 'main'; documentGeneration: number } | {
+      kind: 'reference'; documentGeneration: number; tabIdentity: string;
+    }) => renderToStaticMarkup(<ReviewShell
+      state={reviewState}
+      save={{}}
+      selection={{ selectionUpdate: { kind: 'cleared', generation: 0 } }}
+      authoring={{
+        pageMenu: {
+          invocationId: 'reference-page-menu',
+          placement: { left: 120, top: 160 },
+          pageIndex: 4,
+          position: { x: 10, y: 20, width: 4, height: 4 },
+          surface,
+        },
+        onCommand: async () => reviewState,
+      }}
+      viewer={{}}
+      workspace={{ workspaceOpen: true, navigationState }}
+    ><div data-annotation-surface="main">Main document</div></ReviewShell>);
+
+    expect(renderPageMenu({
+      kind: 'reference', documentGeneration: 8, tabIdentity: 'tab-1',
+    })).toContain('aria-label="Add Page Note"');
+    expect(renderPageMenu({
+      kind: 'reference', documentGeneration: 8, tabIdentity: 'other-tab',
+    })).not.toContain('aria-label="Add Page Note"');
+    expect(renderPageMenu({
+      kind: 'main', documentGeneration: 8,
+    })).not.toContain('aria-label="Add Page Note"');
+  });
 });
