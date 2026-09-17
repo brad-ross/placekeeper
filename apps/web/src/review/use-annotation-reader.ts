@@ -4,6 +4,8 @@ import type { ReviewItem, ReviewState } from '../../../../packages/core/src/revi
 import { existingAnnotationKey, type ExistingAnnotation, type ExistingAnnotationsDiscovery } from '../pdf/existing-annotations.js';
 import type { PdfViewerNavigation } from '../pdf/viewer-navigation-adapter.js';
 import type { PdfTargetVisibility } from '../pdf/viewer-navigation.js';
+import type { PdfAnnotationSurface } from '../pdf/annotation-surface.js';
+import type { ViewerClientPlacement } from '../pdf/viewer-interaction-events.js';
 import { authoringAuthorityMatches, type AuthoringAuthority, type AuthoringSession } from './authoring-session.js';
 import { annotationReaderIdentityMatches, resolveAnnotationReader, type AnnotationReaderIdentity, type AnnotationReaderRecord } from './annotation-reader.js';
 import { reviewItemNavigationTarget } from './annotation-outline-context.js';
@@ -29,6 +31,12 @@ interface AnnotationReaderOptions {
   shellRef: RefObject<HTMLElement | null>;
   stageRef: RefObject<HTMLDivElement | null>;
   viewerNavigation: PdfViewerNavigation | undefined;
+  referenceNavigation: PdfViewerNavigation | undefined;
+  referenceInspection: ReferenceAnnotationInspection | null;
+  activeReferenceTabIdentity: string | null;
+  referenceSurfaceOpen: boolean;
+  onReferenceInspectionDismiss(token: number): void;
+  onOpenAnnotationReference(identity: AnnotationReaderIdentity): void;
   annotationsVisible: boolean;
   anyWorkspaceOpen: boolean;
   peekItemId: string | undefined;
@@ -41,11 +49,21 @@ interface AnnotationReaderOptions {
   onNavigateExisting: ((item: ExistingAnnotation) => void) | undefined;
 }
 
+export interface ReferenceAnnotationInspection {
+  readonly token: number;
+  readonly identity: AnnotationReaderIdentity;
+  readonly surface: Extract<PdfAnnotationSurface, { kind: 'reference' }>;
+  readonly pageIndex: number;
+  readonly placement?: ViewerClientPlacement;
+}
+
 /** Owns reader identity, overflow-driven resumption, and cancellable list restoration. */
 export function useAnnotationReader({
   state, items, existingAnnotations, documentGeneration, currentAuthoringAuthority,
   currentAuthoringAuthorityRef, authoringSession, authoringSessionRef,
-  shellRef, stageRef, viewerNavigation, annotationsVisible, anyWorkspaceOpen,
+  shellRef, stageRef, viewerNavigation, referenceNavigation, referenceInspection,
+  activeReferenceTabIdentity, referenceSurfaceOpen, onReferenceInspectionDismiss,
+  onOpenAnnotationReference, annotationsVisible, anyWorkspaceOpen,
   peekItemId, activeItemId, setPeekItemId, setActiveItem, setActiveExistingAnnotationKey,
   markUserIntent, onNavigate, onNavigateExisting,
 }: AnnotationReaderOptions) {
@@ -72,6 +90,14 @@ export function useAnnotationReader({
         ownedItems: items,
         existingAnnotations,
         documentGeneration,
+      });
+  const referenceAnnotationReaderRecord = referenceInspection === null
+    ? null
+    : resolveAnnotationReader(referenceInspection.identity, {
+        ownedItems: items,
+        existingAnnotations,
+        documentGeneration,
+        includeMetadataOnly: true,
       });
   const annotationReaderOwnedItemId = annotationReaderRecord?.identity.origin === 'owned'
     ? annotationReaderRecord.identity.itemId
@@ -103,6 +129,56 @@ export function useAnnotationReader({
               : { pageIndex: annotation.pageIndex, point: { x: annotation.rect.x, y: annotation.rect.y } };
           })()
         : null;
+  const referenceInspectionIdentity = referenceInspection?.identity;
+  const referenceAnnotationReaderTarget = referenceInspectionIdentity === undefined
+    ? null
+    : referenceInspectionIdentity.origin === 'owned'
+      ? (() => {
+          const itemId = referenceInspectionIdentity.itemId;
+          const item = items.find(({ id }) => id === itemId);
+          return item === undefined ? null : reviewItemNavigationTarget(item);
+        })()
+      : existingAnnotations.status === 'ready'
+        ? (() => {
+            const annotationKey = referenceInspectionIdentity.annotationKey;
+            const annotation = existingAnnotations.items.find(
+              (candidate) => existingAnnotationKey(candidate)
+                === annotationKey,
+            );
+            return annotation === undefined
+              ? null
+              : { pageIndex: annotation.pageIndex, point: { x: annotation.rect.x, y: annotation.rect.y } };
+          })()
+        : null;
+  const referenceAnnotationReaderVisibility: PdfTargetVisibility = referenceAnnotationReaderTarget === null
+    || referenceNavigation === undefined
+    ? 'unavailable'
+    : referenceNavigation.pointVisibility(
+        referenceAnnotationReaderTarget.pageIndex,
+        referenceAnnotationReaderTarget.point,
+      );
+  const referenceAnnotationReaderSourceNavigation = referenceInspection === null
+    ? undefined
+    : {
+        visibility: referenceAnnotationReaderVisibility,
+        pending: false,
+        onReturn: () => onOpenAnnotationReference(referenceInspection.identity),
+      };
+
+  useEffect(() => {
+    if (referenceInspection === null) return;
+    if (
+      referenceAnnotationReaderRecord === null
+      || !referenceSurfaceOpen
+      || activeReferenceTabIdentity !== referenceInspection.surface.tabIdentity
+    ) onReferenceInspectionDismiss(referenceInspection.token);
+  }, [
+    activeReferenceTabIdentity,
+    onReferenceInspectionDismiss,
+    referenceAnnotationReaderRecord,
+    referenceInspection,
+    referenceSurfaceOpen,
+  ]);
   void readerNavigationRevision;
   const annotationReaderVisibility: PdfTargetVisibility = annotationReaderTarget === null
     || viewerNavigation === undefined
@@ -428,7 +504,10 @@ export function useAnnotationReader({
     reason: 'accepted' | 'cancelled' | 'source-replaced',
     acceptedState?: ReviewState,
   ): boolean => {
-    const readerOrigin = current.origin.kind === 'reader-edit' ? annotationReaderSession : null;
+    const readerOrigin = current.origin.kind === 'reader-edit'
+      && current.origin.surface?.kind !== 'reference'
+      ? annotationReaderSession
+      : null;
     if (reason === 'source-replaced') {
       if (readerOrigin !== null) {
         if (!authoringAuthorityMatches(readerOrigin.authority, currentAuthoringAuthorityRef.current)) {
@@ -485,6 +564,8 @@ export function useAnnotationReader({
     annotationReaderOwnedItemId,
     annotationReaderVisibility,
     annotationReaderSourceNavigation,
+    referenceAnnotationReaderRecord,
+    referenceAnnotationReaderSourceNavigation,
     cancelReaderResume,
     deferMarkReaderRequest,
     knownOwnedReaderOverflow,

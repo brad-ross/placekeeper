@@ -3,22 +3,35 @@ import type { ReviewCommand, ReviewState } from '../../../../packages/core/src/r
 import type { ReviewAnnotation } from '../../../../packages/core/src/pdf-writer.js';
 import type { PdfTargetVisibility, PdfViewportQuery } from '../pdf/viewer-navigation.js';
 import type { ContextPlacement } from './ContextActionPalette.js';
-import type { AuthoringAuthority, AuthoringAnchorSnapshot } from './authoring-session.js';
+import type { PdfAnnotationSurface } from '../pdf/annotation-surface.js';
+import type {
+  AuthoringAuthority,
+  AuthoringAnchorSnapshot,
+  AuthoringReferenceRecovery,
+} from './authoring-session.js';
 import type { RejectedReviewCommand } from './review-command-result.js';
 
 export interface ReviewShellAuthoringModel {
+  /** Current reliable gesture origin. A started session freezes this value. */
+  surface?: PdfAnnotationSurface;
+  /** Durable Reference passage metadata paired with the current gesture origin. */
+  referenceRecovery?: AuthoringReferenceRecovery;
   pageMenu?: {
     readonly invocationId: string;
     readonly placement: ContextPlacement;
     readonly pageIndex: number;
     readonly position: ReviewRect;
     readonly nearbyText?: string;
+    readonly surface?: PdfAnnotationSurface;
+    readonly referenceRecovery?: AuthoringReferenceRecovery;
   } | null;
   placedPageNote?: {
     readonly token: number;
     readonly pageIndex: number;
     readonly position: ReviewRect;
     readonly nearbyText?: string;
+    readonly surface?: PdfAnnotationSurface;
+    readonly referenceRecovery?: AuthoringReferenceRecovery;
   } | null;
   keyboardPageNoteActive?: boolean;
   onRequestKeyboardPageNote?(): void;

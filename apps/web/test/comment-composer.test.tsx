@@ -105,4 +105,30 @@ describe('CommentComposer contextual authoring contract', () => {
     expect(html).toContain('comment-composer__page-cue"> · 7</span>');
     expect(html.match(/Persistent draft/g)).toHaveLength(1);
   });
+
+  it('keeps a recoverable draft mounted while an invalid target disables Save', () => {
+    const html = renderComposer({ initialValue: 'Recover this draft', saveDisabled: true });
+
+    expect(html).toContain('Recover this draft');
+    expect(html).toContain('title="Save" disabled="" aria-disabled="true"');
+  });
+
+  it('compacts a Reference sheet to expose its passage without unmounting the draft', () => {
+    const html = renderComposer({
+      initialValue: 'Selection-sensitive draft',
+      contextLabel: 'Identification strategy, Page 5',
+      placement: { kind: 'bottom-sheet' },
+      passageExposure: {
+        exposed: true,
+        onExpose: vi.fn(),
+        onResume: vi.fn(),
+      },
+    });
+
+    expect(html).toContain('data-passage-exposed="true"');
+    expect(html).toContain('Identification strategy, Page 5');
+    expect(html).toContain('aria-label="Resume editing"');
+    expect(html).toMatch(/comment-composer__body[^>]*hidden=""[^>]*inert=""/u);
+    expect(html.match(/Selection-sensitive draft/g)).toHaveLength(1);
+  });
 });

@@ -36,6 +36,34 @@
   font: 400 12px/18px var(--pk-font-ui);
 }
 
+.comment-composer__context {
+  display: block;
+  color: var(--pk-muted);
+  font: 400 11px/16px var(--pk-font-ui);
+}
+
+.comment-composer[data-passage-exposed="true"] {
+  gap: 0;
+  padding-block: 9px;
+}
+
+.comment-composer[data-passage-exposed="true"] .comment-composer__body[hidden] {
+  display: none;
+}
+
+#root[data-production-root="true"] .comment-composer .comment-composer__resume {
+  min-height: var(--comment-composer-anchor-size);
+  padding: 6px 9px;
+  white-space: nowrap;
+}
+
+.annotation-peek--reference-reader .reference-inspection__context {
+  margin: 0;
+  padding: 8px 12px 0;
+  color: var(--pk-muted);
+  font: 400 11px/16px var(--pk-font-ui);
+}
+
 .comment-composer__header h2 .review-icon {
   width: 16px;
   height: 16px;
@@ -149,4 +177,3 @@
 .reconciliation-workspace--detail .reconciliation-workspace__annotation-text {
   font-weight: 500;
 }
-

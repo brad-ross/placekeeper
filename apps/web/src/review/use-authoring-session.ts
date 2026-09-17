@@ -2,13 +2,41 @@ import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from 're
 import { addHighlight, addInsert, addPageNote, addReplace, editReviewItem } from '../../../../packages/core/src/review-commands.js';
 import type { ReviewCommand, ReviewState } from '../../../../packages/core/src/review-model.js';
 import type { ReviewShellAuthoringModel } from './authoring-model.js';
+import { isVisibleFocusTarget } from './focus-target.js';
 import {
   authoringAuthorityFor, authoringAuthorityMatches, authoringAnchorSnapshot,
   authoringPreviewAnnotations, authoringSessionIsCurrent, canStartAuthoringSession,
   createAuthoringSession, pendingDraftForAuthoring, mutableField, initialAuthoringValue,
   type AuthoringAuthority, type AuthoringOriginKind, type AuthoringSession,
-  type AuthoringSource, type AuthoringWorkspaceSnapshot,
+  type AuthoringOrigin, type AuthoringSource, type AuthoringWorkspaceSnapshot,
 } from './authoring-session.js';
+
+function cssAttributeValue(value: string): string {
+  return value.replace(/\\/gu, '\\\\').replace(/"/gu, '\\"');
+}
+
+export function referenceAnnotationTargetSelector(tabIdentity: string, reviewId: string): string {
+  return `[data-annotation-surface="reference"][data-reference-tab-identity="${cssAttributeValue(tabIdentity)}"] [data-owned-mark][data-review-id="${cssAttributeValue(reviewId)}"]`;
+}
+
+export function referenceAnnotationScrollportSelector(tabIdentity: string): string {
+  return `[data-reference-pdf-viewport][data-reference-tab-identity="${cssAttributeValue(tabIdentity)}"] [data-viewer-framing-viewport]`;
+}
+
+export type AuthoringSessionInvalidReason = 'document' | 'edit-target';
+
+export function authoringSessionInvalidReason(
+  session: AuthoringSession,
+  currentAuthority: AuthoringAuthority,
+  items: readonly ReviewState['items'][number][],
+): AuthoringSessionInvalidReason | null {
+  if (!authoringSessionIsCurrent(session, currentAuthority)) return 'document';
+  if (session.source.kind === 'edit') {
+    const editedItemId = session.source.item.id;
+    if (!items.some(({ id }) => id === editedItemId)) return 'edit-target';
+  }
+  return null;
+}
 
 interface AuthoringOptions {
   state: ReviewState;
@@ -36,6 +64,7 @@ export function useAuthoringSession({
   clearInputDraft, openNested, closeNestedSurface, restoreReaderAfterAuthoring,
 }: AuthoringOptions) {
   const [authoringSession, setAuthoringSession] = useState<AuthoringSession | null>(null);
+  const [forcedInvalidToken, setForcedInvalidToken] = useState<number | null>(null);
   const authoringSessionRef = useRef<AuthoringSession | null>(null);
   const authoringSessionTokenRef = useRef(0);
   const authoringEditorRef = useRef<HTMLTextAreaElement>(null);
@@ -48,6 +77,11 @@ export function useAuthoringSession({
   );
   const currentAuthoringAuthorityRef = useRef(currentAuthoringAuthority);
   currentAuthoringAuthorityRef.current = currentAuthoringAuthority;
+  const authoringInvalidReason: AuthoringSessionInvalidReason | null = authoringSession === null
+    ? null
+    : forcedInvalidToken === authoringSession.token
+      ? 'document'
+      : authoringSessionInvalidReason(authoringSession, currentAuthoringAuthority, state.items);
   useEffect(() => {
     authoring.onAuthoringAnchorChange?.(
       authoringSession === null ? null : authoringAnchorSnapshot(authoringSession),
@@ -55,12 +89,12 @@ export function useAuthoringSession({
   }, [authoringSession, authoring.onAuthoringAnchorChange]);
   useEffect(() => {
     authoring.onAuthoringPreviewChange?.(
-      authoringSession === null
+      authoringSession === null || authoringInvalidReason !== null
         ? null
         : authoringPreviewAnnotations(authoringSession, initialAuthoringValue(authoringSession)),
     );
     return () => authoring.onAuthoringPreviewChange?.(null);
-  }, [authoringSession, authoring.onAuthoringPreviewChange]);
+  }, [authoringSession, authoringInvalidReason, authoring.onAuthoringPreviewChange]);
   useEffect(() => {
     const wasOpen = saveOptionsWasOpenRef.current;
     const isOpen = saveOptionsOpen ?? false;
@@ -159,6 +193,7 @@ export function useAuthoringSession({
     source: AuthoringSource,
     originKind: AuthoringOriginKind,
     trigger: HTMLElement | null,
+    originContext?: Pick<AuthoringOrigin, 'surface' | 'referenceRecovery'>,
   ): boolean => {
     if (!canStartAuthoringSession(authoringSessionRef.current)) return false;
     prepareAuthoring();
@@ -167,10 +202,18 @@ export function useAuthoringSession({
       token: ++authoringSessionTokenRef.current,
       authority: currentAuthoringAuthorityRef.current,
       source,
-      origin: { kind: originKind, trigger },
+      origin: {
+        kind: originKind,
+        trigger,
+        ...(originContext?.surface === undefined ? {} : { surface: originContext.surface }),
+        ...(originContext?.referenceRecovery === undefined
+          ? {}
+          : { referenceRecovery: originContext.referenceRecovery }),
+      },
       workspace: snapshotAuthoringWorkspace(),
     });
     authoringSessionRef.current = session;
+    setForcedInvalidToken(null);
     authoring.onAuthoringActiveChange?.(true);
     setAuthoringSession(session);
     openNested();
@@ -188,6 +231,7 @@ export function useAuthoringSession({
     const current = authoringSessionRef.current;
     if (current === null || current.token !== token) return;
     authoringSessionRef.current = null;
+    setForcedInvalidToken(null);
     authoring.onAuthoringActiveChange?.(false);
     authoring.onAuthoringPreviewChange?.(null);
     setAuthoringSession(null);
@@ -196,6 +240,21 @@ export function useAuthoringSession({
     if (current.source.kind === 'pageNote') authoring.onPageNoteComposerComplete?.();
     if (restoreReaderAfterAuthoring(current, reason, acceptedState)) return;
     if (reason === 'source-replaced') return;
+    if (current.origin.surface?.kind === 'reference') {
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        const shell = shellRef.current;
+        if (shell === null) return;
+        const origin = isVisibleFocusTarget(current.origin.trigger) ? current.origin.trigger : null;
+        const currentReference = shell.querySelector<HTMLElement>(
+          '[data-reference-tab][aria-selected="true"], [data-reference-pdf-viewport] [data-page-index]',
+        );
+        const currentControl = shell.querySelector<HTMLElement>(
+          '.review-workspace:not([aria-hidden="true"]) [role="tab"][aria-selected="true"], [role="application"]',
+        );
+        (origin ?? currentReference ?? currentControl)?.focus({ preventScroll: true });
+      }));
+      return;
+    }
     setActiveItem(current.workspace.activeItemId);
     requestAnimationFrame(() => requestAnimationFrame(() => {
       const shell = shellRef.current;
@@ -242,28 +301,24 @@ export function useAuthoringSession({
     if (current !== null) await dismissAuthoring(current);
   };
 
+  const announcedInvalidRef = useRef<string | null>(null);
   useLayoutEffect(() => {
     const current = authoringSessionRef.current;
-    if (
-      current === null
-      || authoringSessionIsCurrent(current, currentAuthoringAuthority)
-    ) return;
+    if (current === null || authoringInvalidReason === null) {
+      announcedInvalidRef.current = null;
+      return;
+    }
+    const invalidKey = `${current.token}:${authoringInvalidReason}`;
+    if (announcedInvalidRef.current === invalidKey) return;
+    announcedInvalidRef.current = invalidKey;
     if (
       authoring.authoringAnchorNavigation?.token === current.token
       && authoring.authoringAnchorNavigation.pending
     ) authoring.authoringAnchorNavigation.onCancelReturn?.();
-    setAnnouncement('This draft belonged to the previous document and was not applied.');
-    closeAuthoringSession(current.token, 'source-replaced');
-  }, [currentAuthoringAuthority.documentGeneration, currentAuthoringAuthority.sourceIdentity]);
-
-  useLayoutEffect(() => {
-    const current = authoringSessionRef.current;
-    if (current === null || current.source.kind !== 'edit') return;
-    const editedItemId = current.source.item.id;
-    if (state.items.some(({ id }) => id === editedItemId)) return;
-    setAnnouncement('This annotation is no longer available and the edit was not applied.');
-    closeAuthoringSession(current.token, 'source-replaced');
-  }, [state.items]);
+    setAnnouncement(authoringInvalidReason === 'edit-target'
+      ? 'This annotation is no longer available. Copy your draft or cancel it.'
+      : 'This draft belongs to the previous document. Copy your draft or cancel it.');
+  }, [authoringInvalidReason]);
 
   useEffect(() => {
     const resolution = authoring.authoringSessionResolution;
@@ -276,8 +331,8 @@ export function useAuthoringSession({
       closeAuthoringSession(current.token, 'accepted');
       return;
     }
-    setAnnouncement('This draft belonged to the previous document and was not applied.');
-    closeAuthoringSession(current.token, 'source-replaced');
+    setForcedInvalidToken(current.token);
+    setAnnouncement('This draft belongs to the previous document. Copy your draft or cancel it.');
   }, [authoring.authoringSessionResolution?.token]);
   const submitAuthoring = async (
     session: AuthoringSession,
@@ -361,6 +416,15 @@ export function useAuthoringSession({
   };
 
   const saveAuthoring = async (session: AuthoringSession, value: string) => {
+    if (forcedInvalidToken === session.token
+      || authoringSessionInvalidReason(
+        session,
+        currentAuthoringAuthorityRef.current,
+        state.items,
+      ) !== null) {
+      setAnnouncement('This draft cannot be saved. Copy your draft or cancel it.');
+      return;
+    }
     const source = session.source;
     if (state.workflow.mode === 'generated-output') {
       await applyProtectedAuthoring(
@@ -425,5 +489,6 @@ export function useAuthoringSession({
     closeNested,
     protectAuthoringDraft,
     saveAuthoring,
+    authoringInvalidReason,
   };
 }
