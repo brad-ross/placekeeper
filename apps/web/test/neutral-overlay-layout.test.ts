@@ -192,6 +192,23 @@ describe('passage editor placement', () => {
     });
     expect(shortReference.kind).toBe('bottom-sheet');
   });
+
+  it('keeps short Reference content in a popup when the application has usable capacity', () => {
+    const placement = choosePassageEditorPlacement({
+      stage: rect(0, 50, 1_280, 850),
+      target: rect(350.25, 510.25, 240.5, 29.25),
+      editorWidth: 340,
+      editorHeight: 92.797,
+      placementScope: 'reference',
+      applicationLeftBoundary: 12,
+      applicationTopBoundary: 12,
+      applicationRightBoundary: 1_268,
+      applicationBottomBoundary: 888,
+    });
+
+    expect(placement.kind).toBe('side');
+    expect(placement.style?.left).toBe('602.75px');
+  });
 });
 
 

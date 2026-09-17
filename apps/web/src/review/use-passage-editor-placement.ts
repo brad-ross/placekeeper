@@ -108,16 +108,19 @@ export function choosePassageEditorPlacement(input: {
   const width = Math.min(DEFAULT_WIDTH, Math.max(0, visibleRect.width));
   const editorWidth = Math.min(Math.max(0, input.editorWidth), width);
   const editorHeight = Math.min(Math.max(0, input.editorHeight), visibleRect.height);
+  const popupFitHeight = input.placementScope === 'reference'
+    ? Math.max(editorHeight, MIN_REFERENCE_POPUP_HEIGHT)
+    : editorHeight;
   const usablePopup = input.placementScope !== 'reference'
     || (editorWidth >= MIN_REFERENCE_POPUP_WIDTH
-      && editorHeight >= MIN_REFERENCE_POPUP_HEIGHT);
+      && visibleRect.height >= MIN_REFERENCE_POPUP_HEIGHT);
   const spaceRight = stageRight - input.target.right - RELATION_GAP;
   const spaceLeft = input.target.left - RELATION_GAP - stageLeft;
   const spaceBelow = stageBottom - input.target.bottom - RELATION_GAP;
   const spaceAbove = input.target.top - RELATION_GAP - stageTop;
   const canSide = usablePopup && Math.max(spaceLeft, spaceRight) >= editorWidth;
-  const canBelow = usablePopup && spaceBelow >= editorHeight;
-  const canAbove = usablePopup && spaceAbove >= editorHeight;
+  const canBelow = usablePopup && spaceBelow >= popupFitHeight;
+  const canAbove = usablePopup && spaceAbove >= popupFitHeight;
   let kind: PassageEditorPlacementKind;
   if (input.previous === 'side' && canSide) kind = 'side';
   else if (input.previous === 'below' && canBelow) kind = 'below';
@@ -217,8 +220,9 @@ function safePassageEditorPlacement(input: {
   );
   const width = Math.min(input.editorWidth, DEFAULT_WIDTH, Math.max(0, localRight - localLeft));
   const height = Math.min(input.editorHeight, Math.max(0, localBottom - localTop));
+  const availableHeight = Math.max(0, localBottom - localTop);
   if (input.placementScope === 'reference'
-    && (width < MIN_REFERENCE_POPUP_WIDTH || height < MIN_REFERENCE_POPUP_HEIGHT)) {
+    && (width < MIN_REFERENCE_POPUP_WIDTH || availableHeight < MIN_REFERENCE_POPUP_HEIGHT)) {
     return {
       kind: 'bottom-sheet',
       style: {
@@ -227,7 +231,7 @@ function safePassageEditorPlacement(input: {
         right: `${Math.max(EDGE, input.stage.width - localRight)}px`,
         bottom: `${Math.max(EDGE, input.stage.height - localBottom)}px`,
         width: 'auto',
-        maxHeight: `${Math.max(0, localBottom - localTop)}px`,
+        maxHeight: `${availableHeight}px`,
       },
     };
   }
