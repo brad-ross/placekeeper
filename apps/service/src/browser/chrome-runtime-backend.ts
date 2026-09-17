@@ -1,3 +1,4 @@
+import { chromeDownloadFolder } from "./chrome-download-folder.js";
 import type { ReviewExportFence } from "../../../../packages/core/src/review-runtime-protocol.js";
 import type { SaveDestinationConfirmation } from "../../../../packages/core/src/review-model.js";
 import { rejectedDestinationName } from "../saving/pdf-save-coordinator.js";
@@ -42,6 +43,7 @@ export interface ChromeServiceRuntimeBackendOptions {
   readonly exporting: ExportCoordinator;
   readonly quota?: ChromeRuntimeAggregateQuota;
   readonly runtimeHost?: "chrome" | "macos";
+  readonly downloadFolder?: () => Promise<string | undefined>;
 }
 
 /** Disk-backed adapter from the Chrome runtime protocol to existing service
@@ -59,6 +61,7 @@ export class ChromeServiceRuntimeBackend implements ChromeRuntimeBackend {
   readonly #provisionals = new Map<string, number>();
   readonly #activated = new Set<string>();
   readonly #runtimeHost: "chrome" | "macos";
+  readonly #downloadFolder: () => Promise<string | undefined>;
   readonly #journal: ChromeRuntimeOperationJournal;
 
   constructor(options: ChromeServiceRuntimeBackendOptions) {
@@ -68,6 +71,7 @@ export class ChromeServiceRuntimeBackend implements ChromeRuntimeBackend {
     this.#saving = options.saving;
     this.#exporting = options.exporting;
     this.#runtimeHost = options.runtimeHost ?? "chrome";
+    this.#downloadFolder = options.downloadFolder ?? chromeDownloadFolder;
     this.#journal = new ChromeRuntimeOperationJournal({
       root: join(this.#broker.recoveryRoot, `.${this.#runtimeHost}-operations`),
       scope: (canonicalKey) => {
@@ -188,7 +192,11 @@ export class ChromeServiceRuntimeBackend implements ChromeRuntimeBackend {
         }
         break;
       case "saveStatus": result = this.#broker.saveStatus(record.sessionId); break;
-      case "saveProposal": result = this.#saving.proposal(record.sessionId); break;
+      case "saveProposal":
+        result = this.#runtimeHost === "chrome"
+          ? await this.#saving.browserProposal(record.sessionId, await this.#downloadFolder())
+          : this.#saving.proposal(record.sessionId);
+        break;
       case "chooseCopy":
       case "chooseOriginal": {
         const value = payload as { readonly filename?: string; readonly folderSelectionId?: string;

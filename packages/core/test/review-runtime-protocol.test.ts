@@ -275,6 +275,18 @@ describe("shared review runtime protocol", () => {
     })).toBeUndefined();
   });
 
+  it.each(["local", "remote-temporary"])("preserves %s download defaults without exposing the native folder", (sourceDisposition) => {
+    expect(sanitizeChromeReviewRuntimeResponse("saveProposal", {
+      sourceDisposition, filename: "Original paper.pdf", folder: "/private/custom-downloads",
+      folderSelectionId: "download-selection",
+    })).toEqual({ sourceDisposition, filename: "Original paper.pdf",
+      folder: "Chrome downloads folder", folderSelectionId: "download-selection" });
+    expect(sanitizeChromeReviewRuntimeResponse("saveProposal", {
+      sourceDisposition, filename: "Original paper.pdf", folder: "/private/custom-downloads",
+      folderSelectionId: "../invalid",
+    })).toBeUndefined();
+  });
+
   it("fails closed instead of forwarding raw save and export errors", () => {
     expect(sanitizeChromeReviewRuntimeResponse("saveStatus", {
       destination: { phase: "none", generation: 0 },

@@ -29,11 +29,14 @@ export type SaveCopyProposal =
   | {
       readonly sourceDisposition: 'local';
       readonly filename: string;
-      readonly folder: string;
+      readonly folder?: string;
+      readonly folderSelectionId?: string;
     }
   | {
       readonly sourceDisposition: 'remote-temporary';
+      readonly filename?: string;
       readonly folder?: string;
+      readonly folderSelectionId?: string;
     };
 
 export interface ProductionExportResult {

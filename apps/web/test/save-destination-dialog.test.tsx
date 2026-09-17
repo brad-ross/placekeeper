@@ -43,3 +43,13 @@ it('uses the same field and modal classes for export without global preference t
   expect(html).toMatch(/aria-invalid="true" aria-describedby="[^"]+"/u);
   expect(html).not.toContain('Remembered for future documents');
 });
+
+it('enables Save immediately with the browser PDF name and downloads proposal', () => {
+  const html = renderToStaticMarkup(<SaveDestinationDialog open sourceDisposition="remote-temporary"
+    proposal={{ sourceDisposition: 'remote-temporary', filename: 'Original paper.pdf',
+      folder: 'Chrome downloads folder', folderSelectionId: 'download-selection' }}
+    onConfirm={vi.fn()} onCancel={vi.fn()} />);
+  expect(html).toContain('value="Original paper.pdf"');
+  expect(html).toMatch(/<button[^>]*title="Save annotations"(?![^>]*disabled)[^>]*><span>Save<\/span>/u);
+  expect(html).not.toContain('>Confirm<');
+});
