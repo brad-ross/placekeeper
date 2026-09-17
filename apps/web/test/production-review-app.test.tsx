@@ -16,7 +16,13 @@ import {
 } from "../src/host/synctex-navigation.js";
 import { initiallyPortableItemIds } from "../src/save/portable-checkpoint.js";
 import { canonicalStateSupersedes, firstUnresolvedReviewItemId } from "../src/review/canonical-state.js";
-import { ProductionReviewApp } from "../src/app/ProductionReviewApp.js";
+import {
+  annotationReferenceRequest,
+  authoringReferenceTarget,
+  frozenReferenceRecovery,
+  pdfAnnotationSurfaceIsCurrent,
+  ProductionReviewApp,
+} from "../src/app/ProductionReviewApp.js";
 import { referenceReturnForActiveTab } from "../src/review/reference-presentation.js";
 import {
   viewerAssetUrlsEqual,
@@ -152,6 +158,99 @@ describe('scope polling identity', () => {
 });
 
 describe("one production review tree", () => {
+  it('routes annotation reference requests through canonical geometry and rejects stale source identity', () => {
+    const item = {
+      id: 'owned-a', kind: 'pageNote' as const, pageIndex: 2,
+      createdAt: '2026-09-17T00:00:00.000Z', updatedAt: '2026-09-17T00:00:00.000Z',
+      payload: { position: { x: 24, y: 80, width: 12, height: 12 }, comment: 'Note' },
+    };
+    const existing = {
+      id: 'native-a', subtype: 'Text', pageIndex: 3,
+      rect: { x: 30, y: 90, width: 10, height: 10 }, contents: 'Imported', author: '',
+      flags: [], appearanceModes: [], supportedAppearance: true,
+    };
+    const sources = {
+      items: [item],
+      existingAnnotations: { status: 'ready' as const, generation: 6, items: [existing] },
+      documentGeneration: 4,
+      pageCount: 8,
+    };
+    const owned = annotationReferenceRequest({ origin: 'owned', itemId: item.id }, sources);
+    expect(owned).toMatchObject({
+      pageIndex: 2,
+      target: { documentGeneration: 4, pageIndex: 2 },
+      metadata: { pageContext: 'Page 3' },
+    });
+    expect(owned?.target.zoom.params).toEqual([24, 80, 0]);
+    expect(annotationReferenceRequest({
+      origin: 'source', annotationKey: '3:native-a', documentGeneration: 4,
+      discoveryGeneration: 6,
+    }, sources)?.target.zoom.params).toEqual([30, 90, 0]);
+    expect(annotationReferenceRequest({
+      origin: 'source', annotationKey: '3:native-a', documentGeneration: 4,
+      discoveryGeneration: 5,
+    }, sources)).toBeNull();
+  });
+
+  it('scopes transient annotation evidence and deeply freezes reference recovery', () => {
+    expect(pdfAnnotationSurfaceIsCurrent(
+      { kind: 'reference', documentGeneration: 4, tabIdentity: 'tab-a' },
+      { documentGeneration: 4, activeReferenceTabIdentity: 'tab-a', referenceVisible: true },
+    )).toBe(true);
+    expect(pdfAnnotationSurfaceIsCurrent(
+      { kind: 'reference', documentGeneration: 4, tabIdentity: 'tab-b' },
+      { documentGeneration: 4, activeReferenceTabIdentity: 'tab-a', referenceVisible: true },
+    )).toBe(false);
+    expect(pdfAnnotationSurfaceIsCurrent(
+      { kind: 'reference', documentGeneration: 4, tabIdentity: 'tab-a' },
+      { documentGeneration: 4, activeReferenceTabIdentity: 'tab-a', referenceVisible: false },
+    )).toBe(false);
+    expect(pdfAnnotationSurfaceIsCurrent(undefined, {
+      documentGeneration: 4, activeReferenceTabIdentity: 'tab-a', referenceVisible: true,
+    })).toBe(true);
+
+    const target = {
+      documentGeneration: 4, pageIndex: 2,
+      zoom: { mode: PdfZoomMode.XYZ, params: [24, 80, 0] }, identity: 'canonical',
+    };
+    const recovery = frozenReferenceRecovery({
+      identity: 'tab-a', originalTarget: target, label: 'Note', pageContext: 'Page 3',
+    });
+    target.zoom.params[0] = 999;
+    expect(recovery.target.zoom.params).toEqual([24, 80, 0]);
+    expect(Object.isFrozen(recovery)).toBe(true);
+    expect(Object.isFrozen(recovery.target.zoom.params)).toBe(true);
+  });
+
+  it('returns a Reference draft to its frozen page-14 anchor rather than the tab opening target', () => {
+    const authority = { sourceIdentity: 'file:digest', documentGeneration: 4 };
+    const openedOnPageOne = {
+      documentGeneration: 4, pageIndex: 0,
+      zoom: { mode: PdfZoomMode.XYZ, params: [0, 0, 0] }, identity: 'page-1',
+    };
+    const anchor = {
+      token: 8,
+      authority,
+      pageIndex: 13,
+      point: { x: 44, y: 180 },
+      surface: { kind: 'reference' as const, documentGeneration: 4, tabIdentity: 'tab-a' },
+      referenceRecovery: {
+        target: openedOnPageOne,
+        tabIdentity: 'tab-a',
+        label: 'Original reference',
+        pageContext: 'Page 1',
+      },
+    };
+
+    const target = authoringReferenceTarget(anchor, authority, 20);
+    expect(target).toMatchObject({ documentGeneration: 4, pageIndex: 13 });
+    expect(target?.zoom.params).toEqual([44, 180, 0]);
+    expect(openedOnPageOne.pageIndex).toBe(0);
+    expect(authoringReferenceTarget(anchor, {
+      sourceIdentity: 'replacement:digest', documentGeneration: 5,
+    }, 20)).toBeNull();
+  });
+
   it('keeps equivalent runtime viewer authority stable across review-state snapshots', () => {
     expect(viewerAssetUrlsEqual(
       {

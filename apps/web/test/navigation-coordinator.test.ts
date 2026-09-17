@@ -18,6 +18,7 @@ import {
   type NavigationCoordinatorDependencies,
 } from '../src/review/navigation-coordinator.js';
 import type { ReviewLocationHistoryPort } from '../src/review/review-location-history.js';
+import type { AnnotationReaderIdentity } from '../src/review/annotation-reader.js';
 import {
   createReferenceNavigationState,
   reduceReferenceNavigation,
@@ -150,6 +151,7 @@ function harness(options: {
   });
   const main = navigation(location(0));
   const reference = navigation(location(2));
+  let referenceNavigation: PdfViewerNavigation | null = reference.controls;
   const controller: ReferenceDocumentController = {
     open: vi.fn(async () => true),
     retry: vi.fn(async () => true),
@@ -161,8 +163,8 @@ function harness(options: {
     getState: () => state,
     dispatch,
     getMainNavigation: () => main.controls,
-    getReferenceNavigation: () => reference.controls,
-    waitForReferenceNavigation: async () => reference.controls,
+    getReferenceNavigation: () => referenceNavigation,
+    waitForReferenceNavigation: async () => referenceNavigation,
     getReferenceController: () => controller,
     commitMainFramingPosition: vi.fn(),
     layout: {
@@ -197,6 +199,9 @@ function harness(options: {
     dependencies,
     main,
     reference,
+    replaceReferenceNavigation(value: PdfViewerNavigation | null) {
+      referenceNavigation = value;
+    },
     controller,
     state: () => state,
     referencesOpen: () => referencesOpen,
@@ -938,6 +943,144 @@ describe('document-scoped navigation coordinator', () => {
     expect(run.reference.controls.applyTarget).toHaveBeenCalledTimes(2);
   });
 
+  it('reveals a reused annotation origin afresh and keeps same-page annotations distinct', async () => {
+    const run = harness();
+    const geometricTarget = target(2);
+    const firstIdentity: AnnotationReaderIdentity = { origin: 'owned', itemId: 'annotation-a' };
+    const secondIdentity: AnnotationReaderIdentity = { origin: 'owned', itemId: 'annotation-b' };
+    const firstSettled = vi.fn();
+    expect(await run.coordinator.openReference(
+      geometricTarget,
+      { label: 'First', pageContext: 'Page 3' },
+      undefined,
+      { annotationIdentity: firstIdentity, onSettled: firstSettled },
+    )).toBe(true);
+    const firstTabIdentity = run.state().activeTabIdentity;
+    run.reference.set(location(7, 140, 1.6));
+    vi.mocked(run.reference.controls.applyTarget).mockClear();
+    const movedTarget = target(4);
+
+    expect(await run.coordinator.openReference(
+      movedTarget,
+      { label: 'First', pageContext: 'Page 5' },
+      undefined,
+      { annotationIdentity: firstIdentity, onSettled: firstSettled },
+    )).toBe(true);
+    expect(run.state().activeTabIdentity).toBe(firstTabIdentity);
+    expect(run.reference.controls.applyTarget)
+      .toHaveBeenCalledWith(movedTarget, 'reference-fit-width');
+    expect(firstSettled).toHaveBeenCalledTimes(2);
+    expect(run.state().tabs[0]?.originalTarget).toBe(geometricTarget);
+    expect(run.state().tabs[0]?.annotationTarget).toBe(movedTarget);
+
+    expect(await run.coordinator.openReference(
+      geometricTarget,
+      { label: 'Second', pageContext: 'Page 3' },
+      undefined,
+      { annotationIdentity: secondIdentity },
+    )).toBe(true);
+    expect(run.state().tabs).toHaveLength(2);
+    expect(run.state().tabs.map((tab) => tab.annotationIdentity)).toEqual([
+      firstIdentity,
+      secondIdentity,
+    ]);
+
+    const movedWhileInactive = target(6);
+    expect(await run.coordinator.openReference(
+      movedWhileInactive,
+      { label: 'First', pageContext: 'Page 7' },
+      undefined,
+      { annotationIdentity: firstIdentity },
+    )).toBe(true);
+    expect(run.state().tabs[0]?.annotationTarget).toBe(movedWhileInactive);
+
+    expect(await run.coordinator.openReference(
+      geometricTarget,
+      { label: 'Ordinary', pageContext: 'Page 3' },
+    )).toBe(true);
+    expect(run.state().tabs).toHaveLength(3);
+    expect(run.state().tabs[2]?.identity).toBe(geometricTarget.identity);
+  });
+
+  it('suppresses annotation content settlement when the Reference adapter changes after reveal', async () => {
+    const run = harness();
+    const applied = deferred<boolean>();
+    const onSettled = vi.fn();
+    vi.mocked(run.reference.controls.applyTarget).mockReturnValueOnce(applied.promise);
+    const opening = run.coordinator.openReference(
+      target(2),
+      { label: 'Annotation', pageContext: 'Page 3' },
+      undefined,
+      {
+        annotationIdentity: { origin: 'owned', itemId: 'annotation-a' },
+        onSettled,
+      },
+    );
+    await Promise.resolve();
+    await Promise.resolve();
+    run.replaceReferenceNavigation(navigation(location(2)).controls);
+    applied.resolve(true);
+
+    expect(await opening).toBe(false);
+    expect(onSettled).not.toHaveBeenCalled();
+    expect(run.state().tabs).toEqual([]);
+  });
+
+  it('recreates a closed frozen reference tab for annotation passage recovery', async () => {
+    const run = harness();
+    const annotationIdentity: AnnotationReaderIdentity = {
+      origin: 'source',
+      annotationKey: '2:native-1',
+      documentGeneration: 1,
+      discoveryGeneration: 4,
+    };
+    const options = {
+      annotationIdentity,
+      preferredTabIdentity: 'frozen-origin-tab',
+    };
+    await run.coordinator.openReference(
+      target(2),
+      { label: 'Imported comment', pageContext: 'Page 3' },
+      undefined,
+      options,
+    );
+    await run.coordinator.closeReference('frozen-origin-tab');
+
+    expect(await run.coordinator.openReference(
+      target(2),
+      { label: 'Imported comment', pageContext: 'Page 3' },
+      undefined,
+      options,
+    )).toBe(true);
+    expect(run.state().tabs.map((tab) => tab.identity)).toEqual(['frozen-origin-tab']);
+  });
+
+  it('reveals the frozen passage when recovery reuses an open annotation-origin tab', async () => {
+    const run = harness();
+    const frozenTarget = target(2);
+    await run.coordinator.openReference(
+      frozenTarget,
+      { label: 'Annotation', pageContext: 'Page 3' },
+      undefined,
+      {
+        annotationIdentity: { origin: 'owned', itemId: 'annotation-a' },
+        preferredTabIdentity: 'frozen-origin-tab',
+      },
+    );
+    run.reference.set(location(7, 140, 1.6));
+    vi.mocked(run.reference.controls.applyTarget).mockClear();
+
+    expect(await run.coordinator.openReference(
+      frozenTarget,
+      { label: 'Annotation', pageContext: 'Page 3' },
+      undefined,
+      { preferredTabIdentity: 'frozen-origin-tab' },
+    )).toBe(true);
+    expect(run.reference.controls.applyTarget)
+      .toHaveBeenCalledWith(frozenTarget, 'reference-fit-width');
+    expect(run.state().activeTabIdentity).toBe('frozen-origin-tab');
+  });
+
   it('restores the selected Main search result once while opening a reference', async () => {
     const run = harness();
     const selectedMainTarget = target(5);
@@ -952,6 +1095,36 @@ describe('document-scoped navigation coordinator', () => {
     expect(run.main.controls.applyTarget).toHaveBeenCalledWith(selectedMainTarget);
     expect(vi.mocked(run.controller.open).mock.invocationCallOrder.at(-1))
       .toBeLessThan(vi.mocked(run.main.controls.applyTarget).mock.invocationCallOrder.at(-1)!);
+  });
+
+  it('preserves the exact Main view and history while opening an annotation reference', async () => {
+    const run = harness();
+    const original = location(3, 96, 1.35);
+    const shifted = location(6, 180, 1.8);
+    run.main.set(original);
+    const historyBefore = run.state().mainHistory;
+    vi.mocked(run.controller.open).mockImplementationOnce(async () => {
+      run.main.set(shifted);
+      return true;
+    });
+
+    expect(await run.coordinator.openReference(
+      target(13),
+      { label: 'Annotation passage', pageContext: 'Page 14' },
+      null,
+      {
+        annotationIdentity: { origin: 'owned', itemId: 'annotation-a' },
+        preferredTabIdentity: 'annotation-origin-tab',
+      },
+    )).toBe(true);
+
+    expect(run.main.controls.applyTarget).not.toHaveBeenCalled();
+    expect(run.main.controls.applyLocation).toHaveBeenCalledOnce();
+    expect(run.main.controls.applyLocation).toHaveBeenCalledWith(original);
+    expect(run.main.controls.captureLocation()).toEqual(original);
+    expect(run.state().mainHistory).toEqual(historyBefore);
+    expect(run.reference.controls.applyTarget)
+      .toHaveBeenCalledWith(target(13), 'reference-fit-width');
   });
 
   it('restores the selected Main search result once when reference opening fails', async () => {
