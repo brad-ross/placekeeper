@@ -6,6 +6,10 @@ import {
   clampPageNotePoint,
   subscribeToMainDocumentOpened,
   publishViewerCaretRead,
+  isCurrentViewerInputSurface,
+  ReferenceInputDocumentAuthority,
+  referenceInputSurface,
+  scopeViewerInteraction,
   ViewerInitializationAuthority,
 } from '../src/app/App.js';
 import { MAIN_PDF_DOCUMENT_ID } from '../src/pdf/viewer-document-ids.js';
@@ -20,6 +24,60 @@ const unavailableCaret = {
 };
 
 describe('App interaction boundaries', () => {
+  it('binds Reference input before a tab exists, then advances surfaces on the same document', () => {
+    const authority = new ReferenceInputDocumentAuthority();
+    const document = {};
+    authority.bind(document);
+
+    expect(authority.surface(document, 12, null)).toBeNull();
+    const tabA = authority.surface(document, 12, 'tab:a');
+    expect(tabA).toEqual({
+      kind: 'reference', documentGeneration: 12, tabIdentity: 'tab:a',
+    });
+    if (tabA === null) throw new Error('expected tab A surface');
+    expect(authority.isCurrent(document, tabA, 12, 'tab:a')).toBe(true);
+
+    const tabB = authority.surface(document, 12, 'tab:b');
+    expect(authority.isCurrent(document, tabA, 12, 'tab:b')).toBe(false);
+    expect(tabB).toEqual({
+      kind: 'reference', documentGeneration: 12, tabIdentity: 'tab:b',
+    });
+    if (tabB === null) throw new Error('expected tab B surface');
+    expect(authority.isCurrent(document, tabB, 12, 'tab:b')).toBe(true);
+    expect(authority.surface({}, 12, 'tab:b')).toBeNull();
+  });
+
+  it('envelopes Reference input with the exact live tab and document generation', () => {
+    const surface = referenceInputSurface(8, 'tab:paper-a');
+    expect(surface).not.toBeNull();
+    if (surface === null) throw new Error('expected reference surface');
+    expect(scopeViewerInteraction({ type: 'selection-placement', value: null }, surface)).toEqual({
+      type: 'selection-placement', value: null, surface,
+    });
+    expect(scopeViewerInteraction({
+      type: 'owned-mark',
+      value: { id: 'annotation-1', phase: 'activate', pageIndex: 4 },
+    }, surface)).toEqual({
+      type: 'owned-mark',
+      value: { id: 'annotation-1', phase: 'activate', pageIndex: 4 },
+      surface,
+    });
+    expect(referenceInputSurface(8, null)).toBeNull();
+    expect(isCurrentViewerInputSurface(surface, 8, 'tab:paper-a')).toBe(true);
+    expect(isCurrentViewerInputSurface(surface, 8, 'tab:paper-b')).toBe(false);
+    expect(isCurrentViewerInputSurface(surface, 9, 'tab:paper-a')).toBe(false);
+    expect(isCurrentViewerInputSurface(
+      { kind: 'main', documentGeneration: 8 },
+      8,
+      null,
+    )).toBe(true);
+    expect(isCurrentViewerInputSurface(
+      { kind: 'main', documentGeneration: 8 },
+      9,
+      null,
+    )).toBe(false);
+  });
+
   it('invalidates an older async viewer initialization when a replacement begins', () => {
     const authority = new ViewerInitializationAuthority();
     const oldRegistry = {};

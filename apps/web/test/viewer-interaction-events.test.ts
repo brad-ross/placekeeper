@@ -21,8 +21,22 @@ import {
   ViewerPrimaryClickGesture,
   viewerPointerButton,
 } from '../src/pdf/viewer-interaction-events.js';
+import type { ViewerInteractionEvent } from '../src/pdf/viewer-interaction-events.js';
 
 describe('viewer page interaction coordinates', () => {
+  it('keeps reference null-clears and mark activations explicitly surface-scoped', () => {
+    const surface = { kind: 'reference', documentGeneration: 4, tabIdentity: 'tab:appendix' } as const;
+    const events: ViewerInteractionEvent[] = [
+      { type: 'selection-placement', value: null, surface },
+      { type: 'caret', value: { anchor: null, placement: null }, surface },
+      { type: 'page-menu', value: null, surface },
+      { type: 'owned-mark-clear', surface },
+      { type: 'source-mark', value: { annotationKey: '2:pdf-9', phase: 'activate', pageIndex: 2 }, surface },
+    ];
+
+    expect(events.every((event) => event.surface === surface)).toBe(true);
+  });
+
   it('recognizes secondary-click and mouse Control-click without consuming middle-click', () => {
     expect(isContextPointerGesture({ button: 2, ctrlKey: false, pointerType: 'mouse' })).toBe(true);
     expect(isContextPointerGesture({ button: 0, ctrlKey: true, pointerType: 'mouse' })).toBe(true);

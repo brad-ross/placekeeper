@@ -1,6 +1,5 @@
 import { sourceAnnotationVisualRenderers } from './PdfLinkControl.js';
 import { existingAnnotationKey } from './existing-annotations.js';
-import { MAIN_PDF_DOCUMENT_ID } from './viewer-document-ids.js';
 import { PdfAnnotationName, PdfAnnotationSubtype, type PdfAnnotationObject, type PdfDocumentObject, type PdfEngine } from '@embedpdf/models';
 import { AnnotationLayer, createRenderer } from '@embedpdf/plugin-annotation/react';
 import { useId, useMemo, type CSSProperties } from 'react';
@@ -12,6 +11,9 @@ import type { SourceAnnotationStyle } from './source-annotation-style.js';
 export interface SourceReaderMark {
   readonly style: SourceAnnotationStyle;
   readonly contents: string;
+  readonly pageIndex: number;
+  readonly ownedAnnotationId?: string;
+  readonly annotationKey?: string;
 }
 
 function markKind(annotation: PdfAnnotationObject) {
@@ -56,10 +58,13 @@ function SourceSquiggle({ width, scale }: { width: number; scale: number }) {
 }
 
 function createSourceAnnotationRenderer(
-  marks: ReadonlyMap<string, SourceReaderMark>, engine: PdfEngine, document: PdfDocumentObject,
+  marks: ReadonlyMap<string, SourceReaderMark>,
+  engine: PdfEngine,
+  document: PdfDocumentObject,
 ) {
   return createRenderer({
     id: 'placekeeper-source-reader-style',
+    zIndex: 9,
     matches: (annotation): annotation is PdfAnnotationObject =>
       marks.has(existingAnnotationKey(annotation)) && !annotation.appearanceModes &&
       !annotation.rotation && !annotation.unrotatedRect && markKind(annotation) !== undefined,
@@ -77,6 +82,7 @@ function createSourceAnnotationRenderer(
           key={index} engine={engine} document={document} page={page} rect={rect}
           textAnchored={kind === 'highlight' || kind === 'delete'}
           data-source-reader-mark={kind} data-pdf-mark-style={kind}
+          data-page-index={entry.pageIndex}
           data-has-attached-text={entry.contents.trim().length > 0 ? 'true' : 'false'}
           style={{ position: 'absolute',
             left: (rect.x - annotation.rect.origin.x) * scale,
@@ -90,16 +96,24 @@ function createSourceAnnotationRenderer(
   });
 }
 
-export function SourceAnnotationLayer({ marks, hidden, engine, document, pageIndex }: {
+export function SourceAnnotationLayer({
+  marks,
+  hidden,
+  engine,
+  document,
+  documentId,
+  pageIndex,
+}: {
   marks: ReadonlyMap<string, SourceReaderMark>;
   hidden: ReadonlySet<string>;
   engine: PdfEngine;
   document: PdfDocumentObject;
+  documentId: string;
   pageIndex: number;
 }) {
   const renderers = useMemo(() => [
     ...sourceAnnotationVisualRenderers(hidden),
     createSourceAnnotationRenderer(marks, engine, document),
   ], [hidden, marks, engine, document]);
-  return <AnnotationLayer documentId={MAIN_PDF_DOCUMENT_ID} pageIndex={pageIndex} annotationRenderers={renderers} />;
+  return <AnnotationLayer documentId={documentId} pageIndex={pageIndex} annotationRenderers={renderers} />;
 }
