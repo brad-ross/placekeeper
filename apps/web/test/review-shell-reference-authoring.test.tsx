@@ -12,6 +12,7 @@ import {
 } from '../src/app/ReviewShell.js';
 import {
   authoringSessionInvalidReason,
+  ownedAnnotationFragmentSelector,
   referenceAnnotationTargetSelector,
   referenceAnnotationScrollportSelector,
 } from '../src/review/use-authoring-session.js';
@@ -94,8 +95,11 @@ describe('Reference authoring continuity', () => {
   });
 
   it('scopes duplicate mark and scrollport lookup to the originating Reference tab', () => {
+    expect(ownedAnnotationFragmentSelector('note-1')).toBe(
+      ':is([data-owned-mark], [data-source-reader-mark])[data-review-id="note-1"]',
+    );
     expect(referenceAnnotationTargetSelector('tab-1', 'note-1')).toBe(
-      '[data-annotation-surface="reference"][data-reference-tab-identity="tab-1"] [data-owned-mark][data-review-id="note-1"]',
+      '[data-annotation-surface="reference"][data-reference-tab-identity="tab-1"] :is([data-owned-mark], [data-source-reader-mark])[data-review-id="note-1"]',
     );
     expect(referenceAnnotationScrollportSelector('tab-1')).toBe(
       '[data-reference-pdf-viewport][data-reference-tab-identity="tab-1"] [data-viewer-framing-viewport]',

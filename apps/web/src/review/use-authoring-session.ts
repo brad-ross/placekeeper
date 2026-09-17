@@ -16,7 +16,12 @@ function cssAttributeValue(value: string): string {
 }
 
 export function referenceAnnotationTargetSelector(tabIdentity: string, reviewId: string): string {
-  return `[data-annotation-surface="reference"][data-reference-tab-identity="${cssAttributeValue(tabIdentity)}"] [data-owned-mark][data-review-id="${cssAttributeValue(reviewId)}"]`;
+  return `[data-annotation-surface="reference"][data-reference-tab-identity="${cssAttributeValue(tabIdentity)}"] ${ownedAnnotationFragmentSelector(reviewId)}`;
+}
+
+/** Selects visible geometry for both projected owned marks and owned native PDF fragments. */
+export function ownedAnnotationFragmentSelector(reviewId: string): string {
+  return `:is([data-owned-mark], [data-source-reader-mark])[data-review-id="${cssAttributeValue(reviewId)}"]`;
 }
 
 export function referenceAnnotationScrollportSelector(tabIdentity: string): string {

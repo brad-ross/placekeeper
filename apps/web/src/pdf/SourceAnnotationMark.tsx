@@ -16,6 +16,15 @@ export interface SourceReaderMark {
   readonly annotationKey?: string;
 }
 
+/** DOM identity shared by native-source visuals that represent an owned review item. */
+export function sourceReaderMarkIdentityAttributes(
+  entry: Pick<SourceReaderMark, 'ownedAnnotationId'>,
+): { readonly 'data-review-id'?: string } {
+  return entry.ownedAnnotationId === undefined
+    ? {}
+    : { 'data-review-id': entry.ownedAnnotationId };
+}
+
 function markKind(annotation: PdfAnnotationObject) {
   switch (annotation.type) {
     case PdfAnnotationSubtype.HIGHLIGHT: return 'highlight';
@@ -82,6 +91,7 @@ function createSourceAnnotationRenderer(
           key={index} engine={engine} document={document} page={page} rect={rect}
           textAnchored={kind === 'highlight' || kind === 'delete'}
           data-source-reader-mark={kind} data-pdf-mark-style={kind}
+          {...sourceReaderMarkIdentityAttributes(entry)}
           data-page-index={entry.pageIndex}
           data-has-attached-text={entry.contents.trim().length > 0 ? 'true' : 'false'}
           style={{ position: 'absolute',

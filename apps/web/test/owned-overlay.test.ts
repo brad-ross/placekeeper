@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import { ownedMarkStyle, positionOwnedRect } from "../src/pdf/owned-overlay.js";
 import { buildAnnotationRenderingState } from '../src/pdf/PdfAnnotationLayers.js';
+import { sourceReaderMarkIdentityAttributes } from '../src/pdf/SourceAnnotationMark.js';
 
 import { textCenterFraction, textMarkGeometry } from '../src/pdf/text-mark-geometry.js';
 
@@ -32,9 +33,13 @@ describe("owned annotation overlay geometry", () => {
     expect(visible.sourceMarks.get('2:pdf-17')).toMatchObject({
       contents: 'Editable note', ownedAnnotationId: 'review-17', pageIndex: 2,
     });
+    expect(sourceReaderMarkIdentityAttributes(visible.sourceMarks.get('2:pdf-17')!)).toEqual({
+      'data-review-id': 'review-17',
+    });
     expect(visible.sourceMarks.get('3:pdf-23')).toMatchObject({
       contents: 'Source note', annotationKey: '3:pdf-23', pageIndex: 3,
     });
+    expect(sourceReaderMarkIdentityAttributes(visible.sourceMarks.get('3:pdf-23')!)).toEqual({});
     expect(visible.residualSourceFocusMarks).toEqual([expect.objectContaining({
       id: 'pdf-23', pageIndex: 3, contents: 'Source note',
     })]);
