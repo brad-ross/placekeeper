@@ -245,6 +245,7 @@ async function openEmbeddedReview(
 const controller = createHandlerController({
   isOptedIn: async () => (await readAutoOpenState(autoOpen)).enabled,
   getStreamInfo: async () => chrome.mimeHandler.getStreamInfo(),
+  reloadTab: async (tabId) => chrome.tabs.reload(tabId),
   openEmbedded: openEmbeddedReview,
   fallback: () => {
     void chrome.mimeHandler.abortAndFallbackToNativeHandler();
@@ -273,6 +274,13 @@ const controller = createHandlerController({
 });
 
 bypass.addEventListener("click", () => controller.bypass());
-reopen.addEventListener("click", () => globalThis.location.reload());
+reopen.addEventListener("click", async () => {
+  reopen.disabled = true;
+  try {
+    await controller.reopen();
+  } finally {
+    reopen.disabled = false;
+  }
+});
 bypass.focus();
 void controller.run();

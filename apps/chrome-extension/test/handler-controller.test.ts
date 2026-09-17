@@ -29,11 +29,51 @@ function controllerPorts(overrides: Partial<Parameters<typeof createHandlerContr
     getStreamInfo: async () => streamInfo,
     openEmbedded: vi.fn(async () => reviewSession()),
     fallback: vi.fn(),
+    reloadTab: vi.fn(async (_tabId: number) => undefined),
     ...overrides,
   };
 }
 
 describe("Chrome PDF handler controller", () => {
+  it.each(["disconnected", "update-required"] as const)("reopens the owning PDF tab after %s", async (type) => {
+    let lifecycle!: Parameters<EmbeddedReviewSession["subscribeLifecycle"]>[0];
+    const review = reviewSession({ subscribeLifecycle: (listener) => {
+      lifecycle = listener;
+      return () => undefined;
+    } });
+    const ports = controllerPorts({ openEmbedded: vi.fn(async () => review) });
+    const controller = createHandlerController(ports);
+    await controller.reopen();
+    await controller.run();
+    await controller.reopen();
+    expect(ports.reloadTab).not.toHaveBeenCalled();
+    lifecycle({ type, protected: true });
+    await controller.reopen();
+    expect(ports.reloadTab).toHaveBeenCalledExactlyOnceWith(42);
+    expect(review.release).not.toHaveBeenCalled();
+    expect(ports.fallback).not.toHaveBeenCalled();
+  });
+
+  it("reports failed tab reloads and allows retry without losing the review", async () => {
+    let lifecycle!: Parameters<EmbeddedReviewSession["subscribeLifecycle"]>[0];
+    const ports = controllerPorts({
+      status: vi.fn(),
+      reloadTab: vi.fn().mockRejectedValueOnce(new Error("Tab is unavailable")).mockResolvedValue(undefined),
+      openEmbedded: vi.fn(async () => reviewSession({ subscribeLifecycle: (listener) => {
+        lifecycle = listener;
+        return () => undefined;
+      } })),
+    });
+    const controller = createHandlerController(ports);
+    await controller.run();
+    lifecycle({ type: "disconnected", protected: true });
+    await controller.reopen();
+    expect(ports.status).toHaveBeenLastCalledWith("Could not reopen this PDF. Try again or reload the browser tab.");
+    expect(controller.state()).toBe("disconnected-protected");
+    await controller.reopen();
+    expect(ports.reloadTab).toHaveBeenCalledTimes(2);
+  });
+
   it("mounts and validates before activation without replacing the PDF URL", async () => {
     const order: string[] = [];
     const review = reviewSession({

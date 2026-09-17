@@ -10,6 +10,9 @@ import {
 } from "./opt-in.js";
 
 export interface ChromeApi {
+  readonly tabs: {
+    reload(tabId: number): Promise<void>;
+  };
   readonly storage: {
     readonly local: {
       get(key: string): Promise<Record<string, unknown>>;
