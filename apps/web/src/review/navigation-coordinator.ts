@@ -55,6 +55,7 @@ interface PendingReferenceRequest {
   readonly target: PdfNavigationTarget;
   readonly metadata: NavigationDestinationMetadata;
   readonly documentGeneration: number;
+  readonly preservedMainTarget?: PdfNavigationTarget | null;
   readonly options?: ReferenceOpenOptions;
 }
 
@@ -689,6 +690,7 @@ export class NavigationCoordinator {
         target,
         metadata,
         documentGeneration: operation.documentGeneration,
+        preservedMainTarget,
         ...(Object.keys(options).length === 0 ? {} : { options }),
       };
       this.dependencies.setPendingReference({ status: 'loading', ...metadata });
@@ -845,6 +847,23 @@ export class NavigationCoordinator {
     if (status !== 'failed' && status !== 'loaded') return false;
     const operation = this.begin(pending.documentGeneration, true);
     if (operation === null) return false;
+    const preserveMain = pending.preservedMainTarget !== undefined;
+    const main = preserveMain ? this.dependencies.getMainNavigation() : undefined;
+    const mainLocation = pending.preservedMainTarget === null
+      ? main?.captureLocation('viewport-origin') ?? null
+      : main?.captureLocation() ?? null;
+    const restoreMainLocation = async () => {
+      if (!preserveMain) return true;
+      if (main !== this.dependencies.getMainNavigation()) return false;
+      if (main && pending.preservedMainTarget !== null) {
+        return main.applyTarget(pending.preservedMainTarget);
+      }
+      const shifted = main?.captureLocation('viewport-origin') ?? null;
+      return !main
+        || !mainLocation
+        || samePdfViewerLocation(mainLocation, shifted)
+        || main.applyLocation(mainLocation);
+    };
     this.clearReferenceReturnState();
     this.dependencies.setPendingReference({ status: 'loading', ...pending.metadata });
     const opened = status === 'failed' ? await controller.retry() : true;
@@ -877,11 +896,27 @@ export class NavigationCoordinator {
       ?? (pending.options?.annotationIdentity === undefined
         ? pending.target.identity
         : annotationReferenceTabIdentity(pending.options.annotationIdentity));
+    if (preserveMain) {
+      await this.dependencies.layout.settle();
+      if (!this.isCurrent(operation)) return false;
+      if (!await restoreMainLocation() || !this.isCurrent(operation)) return false;
+    }
+    const explicitReveal = pending.options?.annotationIdentity !== undefined
+      || pending.options?.preferredTabIdentity !== undefined;
+    const committedSettlement = explicitReveal
+      ? await this.revealReferenceTarget(
+          operation,
+          tabIdentity,
+          pending.target,
+          pending.options?.annotationIdentity,
+        )
+      : null;
+    if (explicitReveal && committedSettlement === null) return this.failReference(operation);
     if (!this.referenceSettlementIsCurrent(operation, navigation, tabIdentity)) return false;
     this.pendingReference = null;
     this.referenceRestoreIdentity = null;
     this.dependencies.setPendingReference(null);
-    pending.options?.onSettled?.({
+    pending.options?.onSettled?.(committedSettlement ?? {
       token: operation.token,
       documentGeneration: operation.documentGeneration,
       tabIdentity,

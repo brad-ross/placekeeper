@@ -225,6 +225,13 @@ export class SelectionReadAuthority {
     };
   }
 
+  invalidateIfCurrent(
+    surface: PdfAnnotationSurface,
+  ): Extract<SelectionUpdate, { readonly kind: 'cleared' }> | null {
+    if (!sameOptionalSurface(this.currentSurface, surface)) return null;
+    return this.invalidate(surface);
+  }
+
   isCurrent(generation: number, surface?: PdfAnnotationSurface): boolean {
     return generation === this.generation
       && sameOptionalSurface(this.currentSurface, surface);

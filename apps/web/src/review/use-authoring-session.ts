@@ -80,6 +80,14 @@ export function authoringPersistenceCanClose(input: {
     && input.persistedRevision >= pending.revision;
 }
 
+/** Returns the response token only while it still owns the mounted editor. */
+export function staleAuthoringSessionToken(
+  current: AuthoringSession | null,
+  responseToken: number,
+): number | null {
+  return current?.token === responseToken ? responseToken : null;
+}
+
 interface AuthoringOptions {
   state: ReviewState;
   authoring: ReviewShellAuthoringModel;
@@ -341,6 +349,12 @@ export function useAuthoringSession({
         ))?.focus({ preventScroll: true });
     }));
   };
+  const invalidateAuthoringSession = (token: number) => {
+    const invalidToken = staleAuthoringSessionToken(authoringSessionRef.current, token);
+    if (invalidToken === null) return;
+    setForcedInvalidToken(invalidToken);
+    setAnnouncement('This draft belongs to the previous document. Copy your draft or cancel it.');
+  };
   const dismissAuthoring = async (session: AuthoringSession) => {
     if (
       authoring.authoringAnchorNavigation?.token === session.token
@@ -418,7 +432,7 @@ export function useAuthoringSession({
         pendingPersistenceRef.current = pending;
         setPendingPersistence(pending);
       },
-      onStale: () => closeAuthoringSession(session.token, 'source-replaced'),
+      onStale: () => invalidateAuthoringSession(session.token),
     });
     if (accepted) closeAuthoringSession(session.token, 'accepted', next);
   };
@@ -444,7 +458,7 @@ export function useAuthoringSession({
     };
   }, {
     authority: session.authority,
-    onStale: () => closeAuthoringSession(session.token, 'source-replaced'),
+    onStale: () => invalidateAuthoringSession(session.token),
   });
 
   const discardProtectedAuthoringDraft = async (session: AuthoringSession): Promise<void> => {

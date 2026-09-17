@@ -12,6 +12,7 @@ import {
   scopeViewerInteraction,
   ViewerInitializationAuthority,
   viewerKeyboardPageIndex,
+  viewerPointerMoveSurface,
 } from '../src/app/App.js';
 import { MAIN_PDF_DOCUMENT_ID } from '../src/pdf/viewer-document-ids.js';
 import type { PdfOutlineDiscovery } from '../src/pdf/pdf-outline.js';
@@ -25,6 +26,19 @@ const unavailableCaret = {
 };
 
 describe('App interaction boundaries', () => {
+  it('uses the live surface for hover and the captured surface during a pointer gesture', () => {
+    const main = { kind: 'main' as const, documentGeneration: 8 };
+    const captured = {
+      kind: 'reference' as const, documentGeneration: 8, tabIdentity: 'tab:paper-a',
+    };
+    const liveReference = {
+      kind: 'reference' as const, documentGeneration: 8, tabIdentity: 'tab:paper-b',
+    };
+
+    expect(viewerPointerMoveSurface(null, main)).toEqual(main);
+    expect(viewerPointerMoveSurface(captured, liveReference)).toEqual(captured);
+  });
+
   it('places a keyboard note on the focused Reference page before scroll fallback', () => {
     expect(viewerKeyboardPageIndex('1', 1, 4)).toBe(1);
     expect(viewerKeyboardPageIndex(undefined, 2, 4)).toBe(1);

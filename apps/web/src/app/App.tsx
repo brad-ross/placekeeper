@@ -108,6 +108,13 @@ import {
 
 export { isCurrentViewerInputSurface, referenceInputSurface, scopeViewerInteraction };
 
+export function viewerPointerMoveSurface(
+  capturedSurface: PdfAnnotationSurface | null,
+  currentSurface: PdfAnnotationSurface | null,
+): PdfAnnotationSurface | null {
+  return capturedSurface ?? currentSurface;
+}
+
 type ViewerCaretResult = Awaited<ReturnType<typeof captureViewerCaret>>;
 
 const FALLBACK_PAGE_NOTE_CURSOR_RADIUS_PX = 18;
@@ -582,7 +589,8 @@ export function App({
     activeReferenceTabIdentityRef.current = activeReferenceTabIdentity;
     const previousSurface = referenceInputSurface(documentGeneration, previousTabIdentity);
     if (previousSurface !== null) {
-      onSelectionUpdate?.(selectionReads.current.invalidate(previousSurface));
+      const clearedSelection = selectionReads.current.invalidateIfCurrent(previousSurface);
+      if (clearedSelection !== null) onSelectionUpdate?.(clearedSelection);
       emitFromSurface({ type: 'selection-placement', value: null }, previousSurface);
       emitFromSurface({ type: 'caret', value: { anchor: null, placement: null } }, previousSurface);
       caretReadGeneration.current += 1;
@@ -899,7 +907,10 @@ export function App({
               );
             },
             onPointerMove: (position, event) => {
-              const surface = pointerSurfaces.get(pointerId) ?? null;
+              const surface = viewerPointerMoveSurface(
+                pointerSurfaces.get(pointerId) ?? null,
+                inputSurface(),
+              );
               if (surface === null || !inputSurfaceIsCurrent(surface, documentId, document)) {
                 clearOwnedPointerInteraction();
                 return;

@@ -21,6 +21,7 @@ import type { PdfNaturalPoint } from '../pdf/viewer-navigation.js';
 import type { PdfAnnotationSurface } from '../pdf/annotation-surface.js';
 import type { PdfNavigationTarget } from '../pdf/pdf-navigation-target.js';
 import type { WorkspaceMode } from './reference-navigation-state.js';
+import type { AnnotationReaderIdentity } from './annotation-reader.js';
 
 export interface AuthoringAuthority {
   readonly sourceIdentity: string;
@@ -55,6 +56,7 @@ export interface AuthoringReferenceRecovery {
   readonly tabIdentity: string;
   readonly label: string;
   readonly pageContext: string;
+  readonly annotationIdentity?: AnnotationReaderIdentity;
 }
 
 export type AuthoringSource =
@@ -225,6 +227,9 @@ function cloneReferenceRecovery(recovery: AuthoringReferenceRecovery): Authoring
     tabIdentity: recovery.tabIdentity,
     label: recovery.label,
     pageContext: recovery.pageContext,
+    ...(recovery.annotationIdentity === undefined
+      ? {}
+      : { annotationIdentity: Object.freeze({ ...recovery.annotationIdentity }) }),
   });
 }
 

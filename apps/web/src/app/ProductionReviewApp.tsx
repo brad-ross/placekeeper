@@ -183,8 +183,34 @@ interface ProductionReferenceInspection {
   readonly token: number;
   readonly identity: AnnotationReaderIdentity;
   readonly surface: Extract<PdfAnnotationSurface, { readonly kind: 'reference' }>;
+  readonly referenceRecovery?: AuthoringReferenceRecovery;
   readonly pageIndex: number;
   readonly placement?: ViewerClientPlacement;
+}
+
+interface OwnedMarkCorrespondence {
+  readonly id: string;
+  readonly surface: PdfAnnotationSurface;
+}
+
+export function ownedAnnotationCorrespondence(input: {
+  readonly rowItemId?: string;
+  readonly focusedMark?: OwnedMarkCorrespondence;
+  readonly hoveredMark?: OwnedMarkCorrespondence;
+}): {
+  readonly viewerItemId?: string;
+  readonly contentItemId?: string;
+} {
+  const mark = input.focusedMark ?? input.hoveredMark;
+  if (mark !== undefined) {
+    return {
+      viewerItemId: mark.id,
+      ...(mark.surface.kind === 'main' ? { contentItemId: mark.id } : {}),
+    };
+  }
+  return input.rowItemId === undefined
+    ? {}
+    : { viewerItemId: input.rowItemId, contentItemId: input.rowItemId };
 }
 
 export function pdfAnnotationSurfaceIsCurrent(
@@ -204,7 +230,7 @@ export function pdfAnnotationSurfaceIsCurrent(
 }
 
 export function frozenReferenceRecovery(tab: Pick<ReferenceTab,
-  'identity' | 'originalTarget' | 'annotationTarget' | 'label' | 'pageContext'>): AuthoringReferenceRecovery {
+  'identity' | 'annotationIdentity' | 'originalTarget' | 'annotationTarget' | 'label' | 'pageContext'>): AuthoringReferenceRecovery {
   const currentTarget = tab.annotationTarget ?? tab.originalTarget;
   const target = Object.freeze({
     ...currentTarget,
@@ -218,6 +244,43 @@ export function frozenReferenceRecovery(tab: Pick<ReferenceTab,
     tabIdentity: tab.identity,
     label: tab.label ?? `Page ${target.pageIndex + 1}`,
     pageContext: tab.pageContext ?? `Page ${target.pageIndex + 1}`,
+    ...(tab.annotationIdentity === undefined
+      ? {}
+      : { annotationIdentity: Object.freeze({ ...tab.annotationIdentity }) }),
+  });
+}
+
+export function frozenReferenceRecoveryForSurface(
+  surface: PdfAnnotationSurface | undefined,
+  tabs: readonly ReferenceTab[],
+): AuthoringReferenceRecovery | undefined {
+  if (surface?.kind !== 'reference') return undefined;
+  const tab = tabs.find((candidate) => candidate.identity === surface.tabIdentity);
+  return tab === undefined ? undefined : frozenReferenceRecovery(tab);
+}
+
+function referenceTargetFromNaturalAnchor(input: {
+  readonly point: { readonly x: number; readonly y: number };
+  readonly pageIndex: number;
+  readonly pages: readonly PdfDocumentOrderPage[] | null;
+  readonly documentGeneration: number;
+  readonly pageCount: number;
+}): NonNullable<ReturnType<typeof pdfNavigationTargetFromPlacekeeperLocation>> | null {
+  if (input.pages === null) return null;
+  const page = input.pages[input.pageIndex];
+  if (page === undefined) return null;
+  const pdfPoint = naturalAnchorToPdfBottomOriginPoint(input.point, page.size, {
+    x: page.crop.left,
+    y: page.crop.bottom,
+  });
+  return pdfNavigationTargetFromPlacekeeperLocation({
+    kind: 'destination',
+    page: input.pageIndex + 1,
+    mode: 'xyz',
+    params: [pdfPoint.x, pdfPoint.y, 0],
+  }, {
+    documentGeneration: input.documentGeneration,
+    pageCount: input.pageCount,
   });
 }
 
@@ -258,19 +321,10 @@ export function annotationReferenceRequest(
     point = { x: annotation.rect.x, y: annotation.rect.y };
     label = `${annotation.subtype} annotation on page ${pageIndex + 1}`;
   }
-  if (sources.pages === null) return null;
-  const page = sources.pages[pageIndex];
-  if (page === undefined) return null;
-  const pdfPoint = naturalAnchorToPdfBottomOriginPoint(point, page.size, {
-    x: page.crop.left,
-    y: page.crop.bottom,
-  });
-  const target = pdfNavigationTargetFromPlacekeeperLocation({
-    kind: 'destination',
-    page: pageIndex + 1,
-    mode: 'xyz',
-    params: [pdfPoint.x, pdfPoint.y, 0],
-  }, {
+  const target = referenceTargetFromNaturalAnchor({
+    point,
+    pageIndex,
+    pages: sources.pages,
     documentGeneration: sources.documentGeneration,
     pageCount: sources.pageCount,
   });
@@ -294,21 +348,12 @@ export function authoringReferenceTarget(
     || anchor.referenceRecovery.target.documentGeneration !== currentAuthority.documentGeneration
     || anchor.point === null
   ) return null;
-  if (pages === null) return null;
-  const page = pages[anchor.pageIndex];
-  if (page === undefined) return null;
-  const pdfPoint = naturalAnchorToPdfBottomOriginPoint(anchor.point, page.size, {
-    x: page.crop.left,
-    y: page.crop.bottom,
-  });
-  return pdfNavigationTargetFromPlacekeeperLocation({
-    kind: 'destination',
-    page: anchor.pageIndex + 1,
-    mode: 'xyz',
-    params: [pdfPoint.x, pdfPoint.y, 0],
-  }, {
+  return referenceTargetFromNaturalAnchor({
+    point: anchor.point,
+    pageIndex: anchor.pageIndex,
+    pages,
     documentGeneration: currentAuthority.documentGeneration,
-    pageCount: pages.length,
+    pageCount: pages?.length ?? 0,
   });
 }
 
@@ -426,6 +471,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   });
   const [inventoryRetryGeneration, setInventoryRetryGeneration] = useState(0);
   const [correspondingItemId, setCorrespondingItemId] = useState<string>();
+  const [contentCorrespondingItemId, setContentCorrespondingItemId] = useState<string>();
   const [activeItemId, setActiveItemId] = useState<string>();
   const [referenceInspection, setReferenceInspection] = useState<ProductionReferenceInspection | null>(null);
   const referenceInspectionTokenRef = useRef(0);
@@ -523,8 +569,8 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     canForward: false,
   });
   const [referenceViewportHost, setReferenceViewportHost] = useState<HTMLDivElement | null>(null);
-  const markHoverRef = useRef<string | undefined>(undefined);
-  const markFocusRef = useRef<string | undefined>(undefined);
+  const markHoverRef = useRef<OwnedMarkCorrespondence | undefined>(undefined);
+  const markFocusRef = useRef<OwnedMarkCorrespondence | undefined>(undefined);
   const rowCorrespondenceRef = useRef<string | undefined>(undefined);
   const activationTokenRef = useRef(0);
   useEffect(() => {
@@ -626,6 +672,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       setActiveItemId(undefined);
       setActivationRequest(undefined);
       setCorrespondingItemId(undefined);
+      setContentCorrespondingItemId(undefined);
       markHoverRef.current = undefined;
       markFocusRef.current = undefined;
       rowCorrespondenceRef.current = undefined;
@@ -795,12 +842,13 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     }) ? normalized : null;
   }, []);
   const referenceRecoveryForSurface = useCallback((surface: PdfAnnotationSurface | undefined) => {
-    if (surface?.kind !== 'reference') return undefined;
-    const tab = navigationStateRef.current.tabs.find(
-      (candidate) => candidate.identity === surface.tabIdentity,
-    );
-    return tab === undefined ? undefined : frozenReferenceRecovery(tab);
+    return frozenReferenceRecoveryForSurface(surface, navigationStateRef.current.tabs);
   }, []);
+  const captureDocumentOrderPages = useCallback((): readonly PdfDocumentOrderPage[] | null => (
+    mainNavigationRef.current?.captureDocumentOrderPages()
+      ?? referenceNavigationRef.current?.captureDocumentOrderPages()
+      ?? null
+  ), []);
   const readAuthoringAnchorVisibility = useCallback((): {
     readonly token: number;
     readonly visibility: PdfTargetVisibility;
@@ -821,9 +869,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       const target = authoringReferenceTarget(
         anchor,
         currentAuthority,
-        mainNavigationRef.current?.captureDocumentOrderPages()
-          ?? referenceNavigationRef.current?.captureDocumentOrderPages()
-          ?? null,
+        captureDocumentOrderPages(),
       );
       if (recovery === undefined || target === null) {
         return { token: anchor.token, visibility: 'unavailable' };
@@ -848,7 +894,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
           anchor.point,
         ),
     };
-  }, []);
+  }, [captureDocumentOrderPages]);
   const refreshAuthoringAnchorNavigation = useCallback(() => {
     const next = readAuthoringAnchorVisibility();
     setAuthoringAnchorNavigation((current) => {
@@ -895,9 +941,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       const target = authoringReferenceTarget(
         anchor,
         currentAuthority,
-        mainNavigationRef.current?.captureDocumentOrderPages()
-          ?? referenceNavigationRef.current?.captureDocumentOrderPages()
-          ?? null,
+        captureDocumentOrderPages(),
       );
       if (recovery === undefined || target === null) {
         refreshAuthoringAnchorNavigation();
@@ -907,7 +951,12 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
         target,
         { label: recovery.label, pageContext: `Page ${anchor.pageIndex + 1}` },
         null,
-        { preferredTabIdentity: recovery.tabIdentity },
+        {
+          preferredTabIdentity: recovery.tabIdentity,
+          ...(recovery.annotationIdentity === undefined
+            ? {}
+            : { annotationIdentity: recovery.annotationIdentity }),
+        },
       );
     } else {
       await navigationCoordinator.navigateMainAnnotation({
@@ -1022,9 +1071,17 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     }
     if (update.kind === 'pending' || update.kind === 'ready') setPdfCopyError(null);
   }, []);
-  const publishCorrespondence = () => setCorrespondingItemId(
-    rowCorrespondenceRef.current ?? markFocusRef.current ?? markHoverRef.current,
-  );
+  const publishCorrespondence = () => {
+    const next = ownedAnnotationCorrespondence({
+      ...(rowCorrespondenceRef.current === undefined
+        ? {}
+        : { rowItemId: rowCorrespondenceRef.current }),
+      ...(markFocusRef.current === undefined ? {} : { focusedMark: markFocusRef.current }),
+      ...(markHoverRef.current === undefined ? {} : { hoveredMark: markHoverRef.current }),
+    });
+    setCorrespondingItemId(next.viewerItemId);
+    setContentCorrespondingItemId(next.contentItemId);
+  };
   useEffect(() => () => {
     navigationCoordinator.dispose();
     mainLocationRefresh.cancel();
@@ -1294,21 +1351,24 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       return;
     }
     if (event.type === 'owned-mark') {
+      if (surface === null) return;
       const { id, phase } = event.value;
-      if (phase === 'enter') markHoverRef.current = id;
-      if (phase === 'leave' && markHoverRef.current === id) markHoverRef.current = undefined;
-      if (phase === 'focus') markFocusRef.current = id;
-      if (phase === 'blur' && markFocusRef.current === id) markFocusRef.current = undefined;
+      if (phase === 'enter') markHoverRef.current = { id, surface };
+      if (phase === 'leave' && markHoverRef.current?.id === id) markHoverRef.current = undefined;
+      if (phase === 'focus') markFocusRef.current = { id, surface };
+      if (phase === 'blur' && markFocusRef.current?.id === id) markFocusRef.current = undefined;
       if (phase === 'activate') {
         if (authoringActiveRef.current) return;
-        if (surface?.kind === 'reference') {
+        if (surface.kind === 'reference') {
           const item = stateRef.current.items.find((candidate) => candidate.id === id);
           const location = item === undefined ? null : reviewItemNavigationTarget(item);
           if (location === null) return;
+          const referenceRecovery = referenceRecoveryForSurface(surface);
           setReferenceInspection({
             token: ++referenceInspectionTokenRef.current,
             identity: { origin: 'owned', itemId: id },
             surface,
+            ...(referenceRecovery === undefined ? {} : { referenceRecovery }),
             pageIndex: event.value.pageIndex ?? location.pageIndex,
             ...(event.value.placement === undefined ? {} : { placement: event.value.placement }),
           });
@@ -1326,6 +1386,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       if (!existingAnnotations.items.some(
         (annotation) => existingAnnotationKey(annotation) === event.value.annotationKey,
       )) return;
+      const referenceRecovery = referenceRecoveryForSurface(surface);
       setReferenceInspection({
         token: ++referenceInspectionTokenRef.current,
         identity: {
@@ -1335,6 +1396,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
           discoveryGeneration: existingAnnotations.generation,
         },
         surface,
+        ...(referenceRecovery === undefined ? {} : { referenceRecovery }),
         pageIndex: event.value.pageIndex,
       });
     }
@@ -1565,9 +1627,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       existingAnnotations,
       documentGeneration: documentGenerationRef.current,
       pageCount: viewerState.totalPages,
-      pages: mainNavigationRef.current?.captureDocumentOrderPages()
-        ?? referenceNavigationRef.current?.captureDocumentOrderPages()
-        ?? null,
+      pages: captureDocumentOrderPages(),
     });
     if (request === null) {
       setNavigationAnnouncement('Annotation passage unavailable.');
@@ -1581,10 +1641,14 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
         annotationIdentity: identity,
         onSettled: ({ token, documentGeneration, tabIdentity }) => {
           if (documentGeneration !== documentGenerationRef.current) return;
+          const tab = navigationStateRef.current.tabs.find(
+            (candidate) => candidate.identity === tabIdentity,
+          );
           setReferenceInspection({
             token,
             identity,
             surface: { kind: 'reference', documentGeneration, tabIdentity },
+            ...(tab === undefined ? {} : { referenceRecovery: frozenReferenceRecovery(tab) }),
             pageIndex: request.pageIndex,
           });
         },
@@ -1592,6 +1656,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     );
   }, [
     existingAnnotations,
+    captureDocumentOrderPages,
     navigationCoordinator,
     referencesEnabled,
     viewerState.totalPages,
@@ -1679,6 +1744,13 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     navigationState.workspace.lastMode,
   );
   const referencePdfVisible = referencePdfIsVisible(referenceLayoutState, navigationState);
+  useEffect(() => {
+    refreshAuthoringAnchorNavigation();
+  }, [
+    navigationState.activeTabIdentity,
+    referencePdfVisible,
+    refreshAuthoringAnchorNavigation,
+  ]);
   useEffect(() => {
     if (referencePdfVisible) return;
     setReferenceCopySelection(null);
@@ -1873,7 +1945,9 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
           setReferenceInspection((current) => current?.token === token ? null : current);
         }}
         activeItemId={activeItemId ?? null}
-        {...(correspondingItemId === undefined ? {} : { correspondingItemId })}
+        {...(contentCorrespondingItemId === undefined
+          ? {}
+          : { correspondingItemId: contentCorrespondingItemId })}
         {...(activationRequest === undefined ? {} : { activationRequest })}
         onRetryExistingAnnotations={() => setInventoryRetryGeneration((generation) => generation + 1)}
         onItemCorrespondenceChange={(id) => {

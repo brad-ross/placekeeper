@@ -117,6 +117,33 @@ describe('selection update authority', () => {
     };
     expect(acceptSelectionUpdate(current, newer)).toEqual(newer);
   });
+
+  it('keeps a deferred Main capture current when a departing Reference tab is invalidated', () => {
+    const authority = new SelectionReadAuthority();
+    const main: PdfAnnotationSurface = { kind: 'main', documentGeneration: 7 };
+    const departingReference: PdfAnnotationSurface = {
+      kind: 'reference', documentGeneration: 7, tabIdentity: 'reference-a',
+    };
+    const pending = authority.begin('main', main);
+    const deferredGeneration = authority.finish('main', main);
+
+    expect(deferredGeneration).toBe(pending.generation);
+    expect(authority.invalidateIfCurrent(departingReference)).toBeNull();
+    expect(authority.isCurrent(pending.generation, main)).toBe(true);
+
+    const referencePending = authority.begin('reference', departingReference);
+    const deferredReferenceGeneration = authority.finish('reference', departingReference);
+    const clearedReference = authority.invalidateIfCurrent(departingReference);
+
+    expect(deferredReferenceGeneration).toBe(referencePending.generation);
+    expect(clearedReference).toEqual({
+      kind: 'cleared',
+      generation: referencePending.generation + 1,
+      surface: departingReference,
+    });
+    expect(authority.isCurrent(referencePending.generation, departingReference)).toBe(false);
+    expect(authority.begin('main', main).generation).toBe(referencePending.generation + 2);
+  });
 });
 
 const mainSurface = { kind: 'main' as const, documentGeneration: 3 };

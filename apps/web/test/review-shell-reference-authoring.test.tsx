@@ -7,6 +7,7 @@ import { ReviewShell } from '../src/app/ReviewShell.js';
 import { acceptedAuthoringCommandRequiresPersistence } from '../src/app/ProductionReviewApp.js';
 import {
   referenceAccessAvailable,
+  referenceInspectionAuthoringOrigin,
   referenceInspectionFocusSelector,
   referenceInspectionShouldDismissForKey,
   shouldShowRightWorkspaceRail,
@@ -16,6 +17,7 @@ import {
   authoringCommandDisposition,
   authoringPersistenceCanClose,
   authoringPersistencePendingFor,
+  staleAuthoringSessionToken,
   ownedAnnotationFragmentSelector,
   referenceAnnotationTargetSelector,
   referenceAnnotationScrollportSelector,
@@ -96,6 +98,19 @@ describe('Reference authoring continuity', () => {
       documentGeneration: 9,
     }, [item])).toBe('document');
     expect(authoringSessionInvalidReason(session, session.authority, [])).toBe('edit-target');
+  });
+
+  it('token-guards a late stale Save response so the current editor remains recoverable', () => {
+    expect(staleAuthoringSessionToken(session, session.token)).toBe(session.token);
+    expect(staleAuthoringSessionToken(session, session.token + 1)).toBeNull();
+    expect(staleAuthoringSessionToken(null, session.token)).toBeNull();
+  });
+
+  it('token-guards a late stale put-draft response so it cannot invalidate a replacement editor', () => {
+    const replacement = { ...session, token: session.token + 1 };
+
+    expect(staleAuthoringSessionToken(replacement, session.token)).toBeNull();
+    expect(staleAuthoringSessionToken(replacement, replacement.token)).toBe(replacement.token);
   });
 
   it('retains one accepted authoring mutation until its PDF revision is persisted', () => {
@@ -233,6 +248,23 @@ describe('Reference authoring continuity', () => {
     expect(html).toContain('Identification strategy, Page 5');
     expect(html).toMatch(/id="workspace-mode-references"[^>]*aria-selected="true"/u);
     expect(html).toMatch(/id="workspace-mode-annotations"[^>]*aria-selected="false"/u);
+  });
+
+  it('starts reader editing with recovery frozen from the inspected Reference surface', () => {
+    const recovery = session.origin.referenceRecovery!;
+    const origin = referenceInspectionAuthoringOrigin({
+      token: 7,
+      identity: { origin: 'owned', itemId: item.id },
+      surface: { kind: 'reference', documentGeneration: 8, tabIdentity: 'tab-1' },
+      pageIndex: 4,
+      placement: { left: 120, top: 160 },
+      referenceRecovery: recovery,
+    });
+
+    expect(origin).toEqual({
+      surface: { kind: 'reference', documentGeneration: 8, tabIdentity: 'tab-1' },
+      referenceRecovery: recovery,
+    });
   });
 
   it('shows page actions only for the current Reference surface while its workspace is open', () => {

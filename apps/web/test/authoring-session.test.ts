@@ -376,6 +376,7 @@ describe('frozen authoring-session contract', () => {
       documentGeneration: 7,
       tabIdentity: 'reference-a',
     };
+    const annotationIdentity = { origin: 'owned' as const, itemId: 'annotation-a' };
     const session = createAuthoringSession({
       ...seed({ kind: 'insert', anchor: caret, initialValue: 'draft' }),
       origin: {
@@ -387,12 +388,14 @@ describe('frozen authoring-session contract', () => {
           tabIdentity: 'reference-a',
           label: 'Identification strategy',
           pageContext: 'Page 14',
+          annotationIdentity,
         },
       },
     });
 
     target.zoom.params[0] = 999;
     surface.tabIdentity = 'reference-b';
+    annotationIdentity.itemId = 'annotation-b';
 
     expect(session.origin).toMatchObject({
       surface: { kind: 'reference', documentGeneration: 7, tabIdentity: 'reference-a' },
@@ -406,6 +409,7 @@ describe('frozen authoring-session contract', () => {
         tabIdentity: 'reference-a',
         label: 'Identification strategy',
         pageContext: 'Page 14',
+        annotationIdentity: { origin: 'owned', itemId: 'annotation-a' },
       },
     });
     expect(Object.isFrozen(session.origin.surface)).toBe(true);
@@ -413,6 +417,7 @@ describe('frozen authoring-session contract', () => {
     expect(Object.isFrozen(session.origin.referenceRecovery?.target)).toBe(true);
     expect(Object.isFrozen(session.origin.referenceRecovery?.target.zoom)).toBe(true);
     expect(Object.isFrozen(session.origin.referenceRecovery?.target.zoom.params)).toBe(true);
+    expect(Object.isFrozen(session.origin.referenceRecovery?.annotationIdentity)).toBe(true);
     expect(authoringAnchorSnapshot(session)).toMatchObject({
       surface: { tabIdentity: 'reference-a' },
       referenceRecovery: { target: { identity: 'destination-identity' } },

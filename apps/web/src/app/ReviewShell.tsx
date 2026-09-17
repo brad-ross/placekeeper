@@ -26,7 +26,12 @@ import {
 } from '../review/use-authoring-session.js';
 import { useAnnotationReader } from '../review/use-annotation-reader.js';
 
-import { mutableField, initialAuthoringValue } from "../review/authoring-session.js";
+import {
+  mutableField,
+  initialAuthoringValue,
+  type AuthoringOrigin,
+  type AuthoringReferenceRecovery,
+} from "../review/authoring-session.js";
 import { controlledWorkspaceSurfaceAction } from "../review/workspace-surface-policy.js";
 
 import {
@@ -238,6 +243,15 @@ export interface ReviewShellWorkspaceModel {
   search?: ReactNode;
 }
 
+export interface ReviewShellReferenceInspection {
+  readonly token: number;
+  readonly identity: AnnotationReaderIdentity;
+  readonly surface: Extract<PdfAnnotationSurface, { kind: 'reference' }>;
+  readonly pageIndex: number;
+  readonly placement?: ViewerClientPlacement;
+  readonly referenceRecovery?: AuthoringReferenceRecovery;
+}
+
 export interface ReviewShellProps {
   save: ReviewShellSaveModel;
   selection: ReviewShellSelectionModel;
@@ -274,13 +288,7 @@ export interface ReviewShellProps {
   commandInvocation?: ReviewCommandInvocation;
   accessibilityTransition?: AccessibilityTransitionEffect;
   onOpenAnnotationReference?(identity: AnnotationReaderIdentity): void;
-  referenceInspection?: {
-    readonly token: number;
-    readonly identity: AnnotationReaderIdentity;
-    readonly surface: Extract<PdfAnnotationSurface, { kind: 'reference' }>;
-    readonly pageIndex: number;
-    readonly placement?: ViewerClientPlacement;
-  } | null;
+  referenceInspection?: ReviewShellReferenceInspection | null;
   onReferenceInspectionDismiss?(token: number): void;
   children?: ReactNode;
 }
@@ -310,6 +318,17 @@ export function referenceInspectionShouldDismissForKey(
   isComposing: boolean,
 ): boolean {
   return key === 'Escape' && !isComposing;
+}
+
+export function referenceInspectionAuthoringOrigin(
+  inspection: ReviewShellReferenceInspection,
+): Pick<AuthoringOrigin, 'surface' | 'referenceRecovery'> {
+  return {
+    surface: inspection.surface,
+    ...(inspection.referenceRecovery === undefined
+      ? {}
+      : { referenceRecovery: inspection.referenceRecovery }),
+  };
 }
 
 export function referenceAccessAvailable(input: {
@@ -1906,12 +1925,7 @@ export function ReviewShell(props: ReviewShellProps) {
                             { kind: 'edit', item },
                             'reader-edit',
                             trigger,
-                            {
-                              surface: props.referenceInspection!.surface,
-                              ...(props.authoring.referenceRecovery === undefined
-                                ? {}
-                                : { referenceRecovery: props.authoring.referenceRecovery }),
-                            },
+                            referenceInspectionAuthoringOrigin(props.referenceInspection!),
                           );
                         },
                         onDelete: async () => {

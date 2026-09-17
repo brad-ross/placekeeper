@@ -20,6 +20,8 @@ import {
   annotationReferenceRequest,
   authoringReferenceTarget,
   frozenReferenceRecovery,
+  frozenReferenceRecoveryForSurface,
+  ownedAnnotationCorrespondence,
   pdfAnnotationSurfaceIsCurrent,
   ProductionReviewApp,
 } from "../src/app/ProductionReviewApp.js";
@@ -48,6 +50,34 @@ import {
   reviewExportPresentation,
 } from "../src/review/DocumentActionsMenu.js";
 import { MemoryReviewLocationHistory } from "../src/review/review-location-history.js";
+import type { ReferenceTab } from "../src/review/reference-navigation-state.js";
+
+describe('owned annotation correspondence', () => {
+  it('keeps Reference correspondence in the viewers without opening Main content', () => {
+    expect(ownedAnnotationCorrespondence({
+      focusedMark: {
+        id: 'note-a',
+        surface: { kind: 'reference', documentGeneration: 4, tabIdentity: 'tab-a' },
+      },
+    })).toEqual({ viewerItemId: 'note-a' });
+    expect(ownedAnnotationCorrespondence({
+      hoveredMark: {
+        id: 'note-b',
+        surface: { kind: 'main', documentGeneration: 4 },
+      },
+    })).toEqual({ viewerItemId: 'note-b', contentItemId: 'note-b' });
+    expect(ownedAnnotationCorrespondence({
+      rowItemId: 'note-row',
+      focusedMark: {
+        id: 'note-a',
+        surface: { kind: 'reference', documentGeneration: 4, tabIdentity: 'tab-a' },
+      },
+    })).toEqual({ viewerItemId: 'note-a' });
+    expect(ownedAnnotationCorrespondence({
+      rowItemId: 'note-row',
+    })).toEqual({ viewerItemId: 'note-row', contentItemId: 'note-row' });
+  });
+});
 
 describe('scope polling identity', () => {
   const scope: ProductionScope = {
@@ -217,13 +247,40 @@ describe("one production review tree", () => {
       documentGeneration: 4, pageIndex: 2,
       zoom: { mode: PdfZoomMode.XYZ, params: [24, 80, 0] }, identity: 'canonical',
     };
-    const recovery = frozenReferenceRecovery({
-      identity: 'tab-a', originalTarget: target, label: 'Note', pageContext: 'Page 3',
-    });
+    const annotationIdentity = { origin: 'owned' as const, itemId: 'annotation-a' };
+    const tab: ReferenceTab = {
+      identity: 'tab-a',
+      annotationIdentity,
+      originalTarget: target,
+      settledLocation: {
+        pageIndex: 2,
+        anchor: { x: 24, y: 80 },
+        alignment: { xPercent: 50, yPercent: 35 },
+        zoom: 1,
+      },
+      label: 'Note',
+      pageContext: 'Page 3',
+    };
+    const recovery = frozenReferenceRecovery(tab);
+    const surfaceRecovery = frozenReferenceRecoveryForSurface(
+      { kind: 'reference', documentGeneration: 4, tabIdentity: 'tab-a' },
+      [tab],
+    );
     target.zoom.params[0] = 999;
     expect(recovery.target.zoom.params).toEqual([24, 80, 0]);
+    expect(recovery.annotationIdentity).toEqual(annotationIdentity);
     expect(Object.isFrozen(recovery)).toBe(true);
     expect(Object.isFrozen(recovery.target.zoom.params)).toBe(true);
+
+    expect(surfaceRecovery).toEqual(recovery);
+    expect(frozenReferenceRecoveryForSurface(
+      { kind: 'reference', documentGeneration: 4, tabIdentity: 'missing-tab' },
+      [tab],
+    )).toBeUndefined();
+    expect(frozenReferenceRecoveryForSurface(
+      { kind: 'main', documentGeneration: 4 },
+      [tab],
+    )).toBeUndefined();
   });
 
   it('returns a Reference draft to its frozen page-14 anchor rather than the tab opening target', () => {

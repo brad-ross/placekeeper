@@ -927,6 +927,54 @@ describe('document-scoped navigation coordinator', () => {
       .toHaveBeenNthCalledWith(2, target(4), 'reference-fit-width');
   });
 
+  it('guards annotation retry through committed layout while preserving the latest Main view', async () => {
+    const run = harness();
+    const original = location(3, 96, 1.35);
+    const userLocationBeforeRetry = location(5, 144, 1.6);
+    const shiftedByCommittedLayout = location(7, 220, 1.8);
+    const referenceShiftedByCommittedLayout = location(8, 260, 1.5);
+    const settled = vi.fn();
+    run.main.set(original);
+    vi.mocked(run.controller.open).mockResolvedValueOnce(false);
+
+    expect(await run.coordinator.openReference(
+      target(13),
+      { label: 'Annotation passage', pageContext: 'Page 14' },
+      null,
+      {
+        annotationIdentity: { origin: 'owned', itemId: 'annotation-a' },
+        preferredTabIdentity: 'annotation-origin-tab',
+        onSettled: settled,
+      },
+    )).toBe(false);
+
+    run.main.set(userLocationBeforeRetry);
+    vi.mocked(run.main.controls.applyLocation).mockClear();
+    vi.mocked(run.reference.controls.applyTarget).mockClear();
+    vi.mocked(run.dependencies.layout.settle).mockClear();
+    let retrySettlements = 0;
+    vi.mocked(run.dependencies.layout.settle).mockImplementation(async () => {
+      retrySettlements += 1;
+      if (retrySettlements === 2) {
+        run.main.set(shiftedByCommittedLayout);
+        run.reference.set(referenceShiftedByCommittedLayout);
+      }
+    });
+    vi.mocked(run.controller.snapshot).mockReturnValue({ documentGeneration: 1, status: 'failed' });
+
+    expect(await run.coordinator.retryReference()).toBe(true);
+
+    expect(run.dependencies.layout.settle).toHaveBeenCalledTimes(3);
+    expect(run.main.controls.applyLocation).toHaveBeenCalledOnce();
+    expect(run.main.controls.applyLocation).toHaveBeenCalledWith(userLocationBeforeRetry);
+    expect(run.reference.controls.applyTarget).toHaveBeenCalledTimes(2);
+    expect(run.reference.controls.captureLocation()).toEqual(location(13));
+    expect(settled).toHaveBeenCalledWith(expect.objectContaining({
+      tabIdentity: 'annotation-origin-tab',
+      settledLocation: location(13),
+    }));
+  });
+
   it('deduplicates a canonical target and restores an existing tab snapshot', async () => {
     const run = harness();
     await run.coordinator.openReference(target(2), { label: 'Lemma', pageContext: 'Page 3' });
