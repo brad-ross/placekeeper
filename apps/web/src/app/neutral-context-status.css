@@ -141,10 +141,10 @@
 
 .reconciliation-workspace__prior-context {
   gap: 4px;
-  padding: 10px 12px;
-  border-left: 2px solid var(--pk-muted);
-  border-radius: 0 9px 9px 0;
-  background: var(--pk-selected);
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
 }
 
 .reconciliation-workspace--detail .reconciliation-workspace__source-text {
@@ -221,4 +221,3 @@
   .document-actions__menu > button,
   .document-actions__confirmation > button { min-height: 44px; }
 }
-

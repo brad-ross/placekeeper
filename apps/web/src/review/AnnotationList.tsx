@@ -2,7 +2,7 @@ import { nativePdfAnnotationSubtype, canEditPdfAnnotationComment, canDeletePdfAn
 import { annotationContent as annotationListContent, type AnnotationContent as AnnotationListContent } from './annotation-content.js';
 export { annotationContent as annotationListContent } from './annotation-content.js';
 export type { AnnotationContent as AnnotationListContent } from './annotation-content.js';
-import { useLayoutEffect, useMemo, useRef, type ReactNode } from 'react';
+import { useLayoutEffect, useMemo, useRef, type ReactElement, type ReactNode } from 'react';
 import type { ReviewItem } from '../../../../packages/core/src/review-model.js';
 import {
   existingAnnotationKey,
@@ -56,7 +56,7 @@ export interface AnnotationAttentionPresentation {
   readonly rows: ReactNode;
   readonly notice: ReactNode;
   readonly message: ReactNode;
-  readonly editor: ReactNode;
+  readonly editor: ReactElement | null;
   readonly ownedItemIds: readonly string[];
   readonly existingAnnotationKeys: readonly string[];
 }
@@ -325,6 +325,21 @@ export function AnnotationList({
     });
   };
 
+  if (attention?.editor != null) {
+    return (
+      <section
+        className="annotation-drawer__owned"
+        data-annotation-origin="combined"
+        data-existing-annotations-state={existingAnnotations.status}
+        data-workspace-focus-token="annotations:section"
+        aria-label="Annotations"
+        tabIndex={-1}
+      >
+        {attention.editor}
+      </section>
+    );
+  }
+
   return (
     <section
       className="annotation-drawer__owned"
@@ -335,7 +350,6 @@ export function AnnotationList({
       tabIndex={-1}
     >
       {attention?.notice}
-      {attention?.editor}
       <ol ref={listRef} tabIndex={-1} aria-label="Annotations in document order">
         {attention?.rows}
         {combined.map((entry) => {

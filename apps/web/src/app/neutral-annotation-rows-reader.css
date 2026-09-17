@@ -4,6 +4,18 @@
   padding: 0 12px 12px;
 }
 
+#review-annotation-list:has(> .annotation-drawer__owned > [data-reconciliation-reader]) {
+  height: 100%;
+  min-height: 0;
+}
+
+#review-annotation-list > .annotation-drawer__owned:has(> [data-reconciliation-reader]) {
+  display: flex;
+  height: 100%;
+  min-height: 0;
+  padding: 0;
+}
+
 .outline-navigator,
 .annotation-drawer__owned,
 .existing-annotations,

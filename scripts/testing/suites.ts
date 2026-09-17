@@ -278,7 +278,8 @@ export const suites: Record<string, TestStage[]> = {
       "runner": "playwright",
       "options": ["--config", "scripts/testing/config/playwright.config.ts"],
       "files": [
-        "test/acceptance/review-workflow.spec.ts"
+        "test/acceptance/review-workflow.spec.ts",
+        "test/acceptance/reattachment-tray.spec.ts"
       ]
     }
   ],
@@ -334,6 +335,7 @@ export const suites: Record<string, TestStage[]> = {
         "test/acceptance/host-interface.spec.ts",
         "test/acceptance/macos-interface.spec.ts",
         "test/acceptance/annotation-behavior-followup.spec.ts",
+        "test/acceptance/reattachment-tray.spec.ts",
         "test/acceptance/automatic-pdf-refresh.spec.ts",
         "test/acceptance/authoring-lifecycle-regressions.spec.ts"
       ]
@@ -359,6 +361,7 @@ export const suites: Record<string, TestStage[]> = {
         "test/acceptance/pdf-mark-design.spec.ts",
         "test/acceptance/macos-interface.spec.ts",
         "test/acceptance/annotation-behavior-followup.spec.ts",
+        "test/acceptance/reattachment-tray.spec.ts",
         "test/acceptance/automatic-pdf-refresh.spec.ts",
         "test/acceptance/authoring-lifecycle-regressions.spec.ts"
       ]
@@ -480,6 +483,7 @@ export const suites: Record<string, TestStage[]> = {
         "test/acceptance/host-interface.spec.ts",
         "test/acceptance/macos-interface.spec.ts",
         "test/acceptance/annotation-behavior-followup.spec.ts",
+        "test/acceptance/reattachment-tray.spec.ts",
         "test/acceptance/automatic-pdf-refresh.spec.ts",
         "test/acceptance/authoring-lifecycle-regressions.spec.ts"
       ]
@@ -505,6 +509,7 @@ export const suites: Record<string, TestStage[]> = {
         "test/acceptance/pdf-mark-design.spec.ts",
         "test/acceptance/macos-interface.spec.ts",
         "test/acceptance/annotation-behavior-followup.spec.ts",
+        "test/acceptance/reattachment-tray.spec.ts",
         "test/acceptance/authoring-lifecycle-regressions.spec.ts"
       ]
     }

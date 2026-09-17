@@ -393,6 +393,10 @@ export function ReviewShell(props: ReviewShellProps) {
     kind: 'reading',
     token: 0,
   });
+  const reconciliationDetailEscapeHandlerRef = useRef<(() => void) | null>(null);
+  const setReconciliationDetailEscapeHandler = useCallback((handler: (() => void) | null) => {
+    reconciliationDetailEscapeHandlerRef.current = handler;
+  }, []);
   const setActiveItem = (id: string | undefined) => {
     if (id !== undefined) setActiveExistingAnnotationKey(undefined);
     if (props.activeItemId === undefined) setLocalActiveItemId(id);
@@ -979,6 +983,13 @@ export function ReviewShell(props: ReviewShellProps) {
       }
     }
     if (event.key === 'Escape' && !event.nativeEvent.isComposing) {
+      const reconciliationDetailEscapeHandler = reconciliationDetailEscapeHandlerRef.current;
+      if (reconciliationDetailEscapeHandler !== null) {
+        event.preventDefault();
+        event.stopPropagation();
+        reconciliationDetailEscapeHandler();
+        return;
+      }
       if (
         event.target instanceof Element
         && event.target.closest(
@@ -1946,6 +1957,7 @@ export function ReviewShell(props: ReviewShellProps) {
                 : {})}
               focusRequestToken={reconciliationFocusRequest}
               onFocusFallback={focusAnnotationsFallback}
+              onDetailEscapeHandlerChange={setReconciliationDetailEscapeHandler}
               renderSummary={(attention) => <AnnotationList
                 attention={attention}
                 items={visibleOwnedItems}

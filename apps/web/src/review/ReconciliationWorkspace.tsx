@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactElement, type ReactNode } from "react";
 
 import { anchorEvidenceFromReviewItem } from "../../../../packages/core/src/review-model.js";
 import type {
@@ -24,6 +24,7 @@ import {
   type AnnotationAttentionPresentation,
 } from "./AnnotationList.js";
 import { ReviewIcon } from "./ReviewIcon.js";
+import { ReviewTooltipButton } from "./ReviewTooltipButton.js";
 import { existingAnnotationKey } from "../pdf/existing-annotations.js";
 
 export type ReattachmentTarget =
@@ -214,6 +215,7 @@ export interface ReconciliationWorkspaceProps {
   readonly subscribeInteractionReconnect?: (
     listener: (identity: { readonly generation: number; readonly revision: number }) => Promise<void>,
   ) => () => void;
+  readonly onDetailEscapeHandlerChange?: (handler: (() => void) | null) => void;
   readonly renderSummary: (summary: ReconciliationSummaryPresentation) => ReactNode;
 }
 
@@ -313,10 +315,13 @@ export function ReconciliationWorkspace(props: ReconciliationWorkspaceProps) {
   const [detail, setDetail] = useState<ResolutionDetail | null>(null);
   const [message, setMessage] = useState("");
   const [pending, setPending] = useState(false);
+  const pendingRef = useRef(false);
+  pendingRef.current = pending;
   const entryRefs = useRef(new Map<string, HTMLButtonElement>());
   const editorRef = useRef<HTMLElement>(null);
   const returnFocusKeyRef = useRef<string | null>(null);
   const acceptedFocusKeyRef = useRef<string | null>(null);
+  const acceptedFocusPendingRef = useRef(false);
   const interactionRef = useRef<ReviewInteractionHandle | null>(null);
   const interactionAdmissionPendingRef = useRef(false);
   const terminalAttemptRef = useRef<{
@@ -325,17 +330,15 @@ export function ReconciliationWorkspace(props: ReconciliationWorkspaceProps) {
     readonly expectedDraftRevision: number;
   } | null>(null);
   const mountedRef = useRef(true);
-  const focusRestoreFrameRef = useRef(0);
   const automaticTerminalRetryKeyRef = useRef<string | null>(null);
   const priorRecordKeysRef = useRef(records.map(({ key }) => key));
   const onFocusFallbackRef = useRef(props.onFocusFallback);
   onFocusFallbackRef.current = props.onFocusFallback;
-  const generationRef = useRef(props.state.workflow.documentGeneration);
-  generationRef.current = props.state.workflow.documentGeneration;
   const pendingReceiptRef = useRef<{
     readonly interaction: ReviewInteractionHandle;
     readonly receipt: ReviewInteractionReceipt;
   } | null>(null);
+  const closeDetailRef = useRef<() => Promise<void>>(async () => undefined);
   const activeRecord = detail === null
     ? undefined
     : recordsByKey.get(detail.key);
@@ -359,7 +362,6 @@ export function ReconciliationWorkspace(props: ReconciliationWorkspaceProps) {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
-      cancelAnimationFrame(focusRestoreFrameRef.current);
       const terminal = terminalAttemptRef.current;
       const interaction = interactionRef.current;
       if (terminal !== null) {
@@ -397,6 +399,7 @@ export function ReconciliationWorkspace(props: ReconciliationWorkspaceProps) {
       automaticTerminalRetryKeyRef.current = null;
       returnFocusKeyRef.current = null;
       acceptedFocusKeyRef.current = null;
+      acceptedFocusPendingRef.current = false;
       setMessage("");
       setDetail(null);
       void interaction?.release().catch(() => undefined);
@@ -405,10 +408,29 @@ export function ReconciliationWorkspace(props: ReconciliationWorkspaceProps) {
       return;
     }
     const returnFocusKey = returnFocusKeyRef.current;
-    if (returnFocusKey === null) return;
-    entryRefs.current.get(returnFocusKey)?.focus({ preventScroll: true });
-    returnFocusKeyRef.current = null;
-  }, [activeRecord, detail, pending]);
+    if (returnFocusKey !== null) {
+      entryRefs.current.get(returnFocusKey)?.focus({ preventScroll: true });
+      returnFocusKeyRef.current = null;
+      return;
+    }
+    if (detail !== null || pending || !acceptedFocusPendingRef.current) return;
+    const acceptedFocusKey = acceptedFocusKeyRef.current;
+    if (acceptedFocusKey === null) {
+      acceptedFocusPendingRef.current = false;
+      props.onFocusFallback?.();
+      return;
+    }
+    const acceptedFocusTarget = entryRefs.current.get(acceptedFocusKey);
+    if (acceptedFocusTarget === undefined) {
+      acceptedFocusPendingRef.current = false;
+      acceptedFocusKeyRef.current = null;
+      props.onFocusFallback?.();
+      return;
+    }
+    acceptedFocusPendingRef.current = false;
+    acceptedFocusKeyRef.current = null;
+    acceptedFocusTarget.focus({ preventScroll: true });
+  }, [activeRecord, detail, pending, props.onFocusFallback, records]);
 
   useLayoutEffect(() => {
     if (detailFocusIdentity === null) return;
@@ -482,6 +504,19 @@ export function ReconciliationWorkspace(props: ReconciliationWorkspaceProps) {
     void interaction?.release().catch(() => undefined);
     setDetail(null);
   };
+  closeDetailRef.current = closeDetail;
+
+  useLayoutEffect(() => {
+    if (detail === null) {
+      props.onDetailEscapeHandlerChange?.(null);
+      return;
+    }
+    const handler = () => {
+      if (!pendingRef.current) void closeDetailRef.current();
+    };
+    props.onDetailEscapeHandlerChange?.(handler);
+    return () => props.onDetailEscapeHandlerChange?.(null);
+  }, [detail, props.onDetailEscapeHandlerChange]);
 
   const settleReattachment = async (terminal: NonNullable<typeof terminalAttemptRef.current>) => {
     const receipt = await terminal.interaction.finalize(
@@ -490,11 +525,6 @@ export function ReconciliationWorkspace(props: ReconciliationWorkspaceProps) {
     terminalAttemptRef.current = null;
     interactionRef.current = null;
     setDetail(null);
-    const completedGeneration = terminal.interaction.generation;
-    cancelAnimationFrame(focusRestoreFrameRef.current);
-    focusRestoreFrameRef.current = requestAnimationFrame(() => {
-      if (mountedRef.current && generationRef.current === completedGeneration) props.onFocusFallback?.();
-    });
     pendingReceiptRef.current = { interaction: terminal.interaction, receipt };
     await terminal.interaction.acknowledge(receipt);
     pendingReceiptRef.current = null;
@@ -599,6 +629,11 @@ export function ReconciliationWorkspace(props: ReconciliationWorkspaceProps) {
       const next = result as ReviewState;
       const protectedDraft = next.pendingDrafts.find(({ id }) => id === draftId);
       if (protectedDraft === undefined) throw new Error('The reattachment draft was not acknowledged.');
+      acceptedFocusKeyRef.current = reconciliationFocusKeyAfterRemoval(
+        records.map(({ key }) => key),
+        record.key,
+      );
+      acceptedFocusPendingRef.current = true;
       terminalAttemptRef.current = {
         interaction,
         draftId: protectedDraft.id,
@@ -623,19 +658,16 @@ export function ReconciliationWorkspace(props: ReconciliationWorkspaceProps) {
       const rejectionMessage = reconciliationCommandRejectionMessage(result);
       if (rejectionMessage !== null) {
         acceptedFocusKeyRef.current = null;
+        acceptedFocusPendingRef.current = false;
         setMessage(rejectionMessage);
         return;
       }
+      acceptedFocusPendingRef.current = true;
       setDetail(null);
       returnFocusKeyRef.current = null;
-      requestAnimationFrame(() => {
-        const acceptedFocusKey = acceptedFocusKeyRef.current;
-        acceptedFocusKeyRef.current = null;
-        if (acceptedFocusKey === null) props.onFocusFallback?.();
-        else entryRefs.current.get(acceptedFocusKey)?.focus({ preventScroll: true });
-      });
     } catch {
       acceptedFocusKeyRef.current = null;
+      acceptedFocusPendingRef.current = false;
       setMessage("The review state changed or the command was rejected. Nothing was moved.");
     } finally {
       setPending(false);
@@ -722,7 +754,7 @@ export function ReconciliationWorkspace(props: ReconciliationWorkspaceProps) {
   const ownedItemIds = useMemo(() => records.flatMap((record) => record.target.kind === "item"
     ? [record.target.id]
     : []), [records]);
-  let editor: ReactNode = null;
+  let editor: ReactElement | null = null;
   if (activeRecord !== undefined && detail !== null) {
     const typeLabel = annotationKindLabel(activeRecord.kind);
     const draft = "payload" in activeRecord.value ? undefined : activeRecord.value;
@@ -733,9 +765,11 @@ export function ReconciliationWorkspace(props: ReconciliationWorkspaceProps) {
     editor = <section
       ref={editorRef}
       id={`reconciliation-editor-${activeRecord.key.replace(':', '-')}`}
-      className="reconciliation-editor comment-composer compact-editorial-modal"
+      className="reconciliation-workspace reconciliation-workspace--detail full-annotation-reader"
       data-reconciliation-workspace
+      data-reconciliation-reader
       data-reconciliation-detail={detail.mode}
+      data-full-annotation-reader="true"
       role="region"
       aria-label={`${title}, previously page ${activeRecord.pageNumber}`}
       onKeyDown={(event) => {
@@ -745,22 +779,38 @@ export function ReconciliationWorkspace(props: ReconciliationWorkspaceProps) {
         void closeDetail();
       }}
     >
-      <header className="comment-composer__header compact-editorial-modal__header">
-        <h2><ReviewIcon name="warning" /><span>{title}</span></h2>
+      <header className="reconciliation-workspace__detail-header full-annotation-reader__metadata-bar">
+        <ReviewTooltipButton
+          type="button"
+          className="full-annotation-reader__back"
+          data-full-annotation-action="back"
+          label="Back"
+          tooltip="Back to annotations"
+          disabled={pending}
+          onClick={() => { void closeDetail(); }}
+        ><ReviewIcon name="arrow-left" size={16} /></ReviewTooltipButton>
+        <h2>{title}</h2>
       </header>
-      <div className="comment-composer__body compact-editorial-modal__body">
-        <p className="reconciliation-editor__annotation">{activeRecord.authoredText}</p>
-        {activeRecord.priorSourceText === undefined ? null : <p className="reconciliation-editor__context">
-          <span>Previously page {activeRecord.pageNumber}: </span>{activeRecord.priorSourceText}
-        </p>}
-        {detail.mode === "reattach" && candidate !== null ? <p className="reconciliation-workspace__instruction" role="status" data-reattachment-selection-mode>
-          {reattachmentInstruction(targetAnchor(activeRecord.value).kind, candidate)}
-        </p> : null}
-        {detail.mode === "discard" ? <p className="reconciliation-workspace__instruction">Discard this annotation from the reviewed PDF?</p> : null}
+      <div className="full-annotation-reader__body">
         {message ? <p className="reconciliation-workspace__message" role="status">{message}</p> : null}
+        <section className="reconciliation-workspace__intent">
+          <p className="reconciliation-workspace__kicker">Your annotation</p>
+          <p className="reconciliation-workspace__annotation-text">{activeRecord.authoredText}</p>
+        </section>
+        <section className="reconciliation-workspace__prior-context">
+          <p className="reconciliation-workspace__kicker">Previously attached to <span aria-hidden="true">·</span> Page {activeRecord.pageNumber}</p>
+          {activeRecord.priorSourceText === undefined ? null : <p className="reconciliation-workspace__source-text">
+            <span className="sr-only">Original PDF text: </span>{activeRecord.priorSourceText}
+          </p>}
+        </section>
+      </div>
+      {detail.mode === "reattach" && candidate !== null ? <section className="reconciliation-workspace__resolution" data-reattachment-selection-mode>
+        <p className="reconciliation-workspace__instruction" role={candidate.anchor === null ? "alert" : "status"}>
+          {reattachmentInstruction(targetAnchor(activeRecord.value).kind, candidate)}
+        </p>
         <div className="comment-composer__actions reconciliation-workspace__editor-actions">
           <button className="review-button review-button--secondary" type="button" title="Cancel" disabled={pending} onClick={closeDetail}><span>Cancel</span></button>
-          {detail.mode === "reattach" && candidate !== null ? <button
+          <button
             className="review-button review-button--primary"
             type="button"
             title="Attach this annotation to the selected text"
@@ -773,18 +823,29 @@ export function ReconciliationWorkspace(props: ReconciliationWorkspaceProps) {
               }
               void submitReattachment(activeRecord, candidate.anchor);
             }}
-          >{pending ? <ReviewIcon name="loading" /> : null}<span>Attach</span></button> : null}
-          {detail.mode === "apply" && canApplyDraft ? <button className="review-button review-button--primary" type="button" title="Add this draft to the current PDF" disabled={pending} onClick={() => void submit({
+          >{pending ? <ReviewIcon name="loading" /> : null}<span>Attach</span></button>
+        </div>
+      </section> : null}
+      {detail.mode === "apply" && canApplyDraft ? <section className="reconciliation-workspace__resolution" data-apply-confirmation>
+        <div className="comment-composer__actions reconciliation-workspace__editor-actions">
+          <button className="review-button review-button--secondary" type="button" title="Cancel" disabled={pending} onClick={closeDetail}><span>Cancel</span></button>
+          <button className="review-button review-button--primary" type="button" title="Add this draft to the current PDF" disabled={pending} onClick={() => void submit({
             type: "apply-draft",
             expectedRevision: props.state.revision,
             id: draft.id,
             expectedDraftRevision: draft.revision,
             ownerViewId: draft.ownerViewId,
             updatedAt: new Date().toISOString(),
-          })}>{pending ? <ReviewIcon name="loading" /> : null}<span>Apply</span></button> : null}
-          {detail.mode === "discard" ? <button className="review-button review-button--secondary reconciliation-workspace__destructive" type="button" title="Discard this annotation" disabled={pending} onClick={() => void submit(discardCommand(activeRecord.target))}><span>Discard</span></button> : null}
+          })}>{pending ? <ReviewIcon name="loading" /> : null}<span>Apply</span></button>
         </div>
-      </div>
+      </section> : null}
+      {detail.mode === "discard" ? <section className="reconciliation-workspace__resolution" data-discard-confirmation>
+        <p className="reconciliation-workspace__instruction">Discard this annotation from the reviewed PDF?</p>
+        <div className="comment-composer__actions reconciliation-workspace__editor-actions">
+          <button className="review-button review-button--secondary" type="button" title="Cancel" disabled={pending} onClick={closeDetail}><span>Cancel</span></button>
+          <button className="review-button review-button--secondary reconciliation-workspace__destructive" type="button" title="Discard this annotation" disabled={pending} onClick={() => void submit(discardCommand(activeRecord.target))}><span>Discard</span></button>
+        </div>
+      </section> : null}
     </section>;
   }
   return props.renderSummary({

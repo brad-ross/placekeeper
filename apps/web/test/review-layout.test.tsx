@@ -453,6 +453,56 @@ describe('review shell layout and accessibility contract', () => {
     expect(html).not.toContain('>Delete<');
   });
 
+  it('uses the attention editor as the sole Annotations tray detail', () => {
+    const html = renderToStaticMarkup(
+      <AnnotationList
+        items={[ownedAnnotation]}
+        existingAnnotations={{ status: 'empty', generation: 1, items: [] }}
+        attention={{
+          count: 1,
+          rows: <li data-reconciliation-entry="item:unresolved-highlight">Detached row</li>,
+          notice: <p>Refreshing annotations.</p>,
+          message: <p>List message.</p>,
+          editor: <section data-reconciliation-reader data-reconciliation-detail="reattach">Reader detail</section>,
+          ownedItemIds: [unresolvedAnnotation.id],
+          existingAnnotationKeys: [],
+        }}
+        onNavigate={() => undefined}
+        onEdit={() => undefined}
+        onDelete={() => undefined}
+      />,
+    );
+
+    expect(html).toContain('data-reconciliation-reader="true"');
+    expect(html).toContain('Reader detail');
+    expect(html).not.toContain('<ol');
+    expect(html).not.toContain('Detached row');
+    expect(html).not.toContain('Refreshing annotations.');
+    expect(html).not.toContain('List message.');
+    expect(html).not.toContain('data-review-item="owned-highlight"');
+    expect(neutralStyles).toMatch(
+      /#review-annotation-list:has\(> \.annotation-drawer__owned > \[data-reconciliation-reader\]\)\s*\{[^}]*height:\s*100%;[^}]*min-height:\s*0;/u,
+    );
+    expect(neutralStyles).toMatch(
+      /#review-annotation-list > \.annotation-drawer__owned:has\(> \[data-reconciliation-reader\]\)\s*\{[^}]*display:\s*flex;[^}]*height:\s*100%;[^}]*min-height:\s*0;/u,
+    );
+    expect(annotationStyles).toMatch(
+      /@media \(max-height:\s*560px\)[\s\S]*\.reconciliation-workspace--detail\.full-annotation-reader\s*\{[^}]*gap:\s*4px;[^}]*padding-block:\s*6px;[\s\S]*\.reconciliation-workspace--detail \.reconciliation-workspace__detail-header\s*\{[^}]*padding-bottom:\s*0;[\s\S]*\.reconciliation-workspace--detail \.reconciliation-workspace__resolution\s*\{[^}]*gap:\s*2px;/u,
+    );
+    expect(neutralStyles).toMatch(
+      /@media \(pointer:\s*coarse\)[\s\S]*:is\([\s\S]*\.reconciliation-workspace__editor-actions[\s\S]*\) \.review-button\s*\{[^}]*min-height:\s*44px;/u,
+    );
+  });
+
+  it('replaces the detached warning endcap with row actions for pointer, focus, and touch', () => {
+    expect(neutralStyles).toMatch(
+      /:has\(\.row-action-group\):is\(:hover, :focus-within, \[data-corresponding="true"\]\)\s*:is\(\.outline-navigator__page, \.annotation-item__page, \.annotation-item__status-icon, \.pdf-search__result-page\) \{\s*opacity: 0;/u,
+    );
+    expect(neutralStyles).toMatch(
+      /@media \(pointer: coarse\), \(hover: none\)[\s\S]*:has\(\.row-action-group\)\s*:is\(\.outline-navigator__page, \.annotation-item__page, \.annotation-item__status-icon, \.pdf-search__result-page\) \{\s*opacity: 0;/u,
+    );
+  });
+
   it('keeps search actions direct even in narrow containers', () => {
     expect(annotationStyles).toContain(`container-name: ${ROW_ACTION_CONTAINER_NAME}`);
     expect(annotationStyles).not.toContain('@container row-actions (max-width: 272px)');
