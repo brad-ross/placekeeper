@@ -45,6 +45,8 @@ export interface CommentComposerProps {
   editorRef?: RefObject<HTMLTextAreaElement | null>;
   surfaceRef?: (element: HTMLElement | null) => void;
   placement?: CommentComposerPlacement;
+  terminalPending?: boolean;
+  terminalPendingMessage?: string;
   onValueChange?(value: string): void;
   onSave(value: string): void | Promise<void>;
   onDismiss(): void | Promise<void>;
@@ -77,6 +79,17 @@ export interface BoundedTextAreaHeightInput {
   readonly maxHeight: number;
 }
 
+interface CommentComposerSubmissionState {
+  readonly canSave: boolean;
+  readonly submitting: boolean;
+  readonly composing: boolean;
+  readonly terminalPending: boolean;
+}
+
+function commentComposerCanSubmit(state: CommentComposerSubmissionState): boolean {
+  return state.canSave && !state.submitting && !state.composing && !state.terminalPending;
+}
+
 export function boundedTextAreaHeight(input: BoundedTextAreaHeightInput): number {
   return Math.min(input.maxHeight, Math.max(input.minHeight, input.scrollHeight));
 }
@@ -92,6 +105,8 @@ export function CommentComposer({
   editorRef,
   surfaceRef,
   placement,
+  terminalPending = false,
+  terminalPendingMessage,
   onValueChange,
   onSave,
   onDismiss,
@@ -185,7 +200,12 @@ export function CommentComposer({
   }, [inputRef, value]);
 
   const submit = async () => {
-    if (!canSave || submitting || composingRef.current) return;
+    if (!commentComposerCanSubmit({
+      canSave,
+      submitting,
+      composing: composingRef.current,
+      terminalPending,
+    })) return;
     setSubmitting(true);
     try {
       await onSave(value);
@@ -228,6 +248,7 @@ export function CommentComposer({
             title={fieldLabel}
             placeholder="Add a comment…"
             value={value}
+            readOnly={terminalPending}
             onChange={(event) => {
               const next = event.currentTarget.value;
               setValue(next);
@@ -236,18 +257,30 @@ export function CommentComposer({
             onCompositionStart={() => { composingRef.current = true; }}
             onCompositionEnd={() => { composingRef.current = false; }}
             onKeyDown={(event) => {
-              if ((event.metaKey || event.ctrlKey) && event.key === 'Enter' && canSave && !event.nativeEvent.isComposing) {
+              if ((event.metaKey || event.ctrlKey) && event.key === 'Enter'
+                && commentComposerCanSubmit({
+                  canSave,
+                  submitting,
+                  composing: event.nativeEvent.isComposing,
+                  terminalPending,
+                })) {
                 event.preventDefault();
                 submit();
               }
             }}
           />
         </label>
+        {terminalPendingMessage === undefined ? null : (
+          <p className="comment-composer__terminal-status" role="status">
+            {terminalPendingMessage}
+          </p>
+        )}
         <div className="comment-composer__actions">
           <button
             className="review-button review-button--secondary"
             type="button"
             title="Cancel"
+            disabled={terminalPending}
             onClick={() => void onDismiss()}
           >
             <span>Cancel</span>
@@ -256,8 +289,8 @@ export function CommentComposer({
             className="review-button review-button--primary"
             type="submit"
             title={saveLabel}
-            disabled={!canSave || submitting}
-            aria-disabled={!canSave || submitting}
+            disabled={!canSave || submitting || terminalPending}
+            aria-disabled={!canSave || submitting || terminalPending}
             data-submitting={submitting ? 'true' : undefined}
           >
             {submitting ? <ReviewIcon name="loading" /> : null}

@@ -13,7 +13,7 @@
 
   :is(li[data-annotation-origin], li[data-search-result]):is(:hover, [data-corresponding="true"])
     .row-action-group__direct,
-  :is(li[data-annotation-origin], li[data-search-result]):focus-within
+  :is(li[data-annotation-origin], li[data-search-result]):has(:focus-visible)
     .row-action-group__direct,
   .reference-tab-segment:hover
     :is(.reference-tab-segment__action, .reference-panel__return),
@@ -42,7 +42,9 @@
 }
 
 .review-shell .review-layout :is(.review-workspace, .review-tools-workspace)
-  :is(.outline-navigator__row, li[data-annotation-origin], li[data-search-result]):is(:hover, :focus-within, :active, [data-corresponding="true"]) {
+  :is(.outline-navigator__row, li[data-annotation-origin], li[data-search-result]):is(:hover, :active, [data-corresponding="true"]),
+.review-shell .review-layout :is(.review-workspace, .review-tools-workspace)
+  :is(.outline-navigator__row, li[data-annotation-origin], li[data-search-result]):has(:focus-visible) {
   --workspace-row-surface: #e7e7e7;
   background: var(--workspace-row-surface);
   box-shadow: none;
@@ -84,13 +86,13 @@
 }
 
 :is(li[data-annotation-origin], .annotation-peek) .annotation-item__title-row
-  > .annotation-item__meta[data-annotation-metadata-layout="row-head"] > .annotation-item__page,
+  > .annotation-item__meta[data-annotation-metadata-layout="row-head"] > :is(.annotation-item__page, .annotation-item__status-icon),
 li[data-search-result] .pdf-search__result-heading > .pdf-search__result-page {
   margin-left: auto;
 }
 
 :is(li[data-annotation-origin], li[data-search-result], .annotation-peek)
-  :is(.annotation-item__page, .pdf-search__result-page) {
+  :is(.annotation-item__page, .annotation-item__status-icon, .pdf-search__result-page) {
   display: grid;
   flex: none;
   width: 26px;
@@ -100,8 +102,10 @@ li[data-search-result] .pdf-search__result-heading > .pdf-search__result-page {
 }
 
 @media (hover: hover) and (pointer: fine) {
-  :is(.outline-navigator__row, li[data-annotation-origin], li[data-search-result]):has(.row-action-group):is(:hover, :focus-within, [data-corresponding="true"])
-    :is(.outline-navigator__page, .annotation-item__page, .pdf-search__result-page) {
+  :is(.outline-navigator__row, li[data-annotation-origin], li[data-search-result]):has(.row-action-group):is(:hover, [data-corresponding="true"])
+    :is(.outline-navigator__page, .annotation-item__page, .annotation-item__status-icon, .pdf-search__result-page),
+  :is(.outline-navigator__row, li[data-annotation-origin], li[data-search-result]):has(.row-action-group):has(:focus-visible)
+    :is(.outline-navigator__page, .annotation-item__page, .annotation-item__status-icon, .pdf-search__result-page) {
     opacity: 0;
   }
 }
@@ -112,7 +116,7 @@ li[data-search-result] .pdf-search__result-heading > .pdf-search__result-page {
   }
 
   :is(li[data-annotation-origin], li[data-search-result], .annotation-peek)
-    :is(.annotation-item__page, .pdf-search__result-page) {
+    :is(.annotation-item__page, .annotation-item__status-icon, .pdf-search__result-page) {
     width: 44px;
     height: 44px;
   }
@@ -123,7 +127,7 @@ li[data-search-result] .pdf-search__result-heading > .pdf-search__result-page {
   }
 
   :is(.outline-navigator__row, li[data-annotation-origin], li[data-search-result]):has(.row-action-group)
-    :is(.outline-navigator__page, .annotation-item__page, .pdf-search__result-page) {
+    :is(.outline-navigator__page, .annotation-item__page, .annotation-item__status-icon, .pdf-search__result-page) {
     opacity: 0;
   }
 
@@ -133,7 +137,10 @@ li[data-search-result] .pdf-search__result-heading > .pdf-search__result-page {
 }
 
 @media (pointer: coarse) {
-  #root[data-production-root="true"] .comment-composer .comment-composer__actions .review-button {
+  :is(
+    #root[data-production-root="true"] .comment-composer .comment-composer__actions,
+    .reconciliation-workspace__editor-actions
+  ) .review-button {
     min-height: 44px;
   }
 

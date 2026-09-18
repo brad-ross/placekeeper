@@ -5,9 +5,11 @@ import {
 } from "./handler-controller.js";
 import {
   chromePdfDisplayName,
+  createChromeInteractionOwnerClaimStore,
   createNativeEmbeddedReview,
 } from "./chrome-runtime.js";
 import { readAutoOpenState } from "./opt-in.js";
+import { bytesToBase64 } from "./native-protocol.js";
 import {
   createRecoveryButtons,
   setHandlerButtonContent,
@@ -41,6 +43,7 @@ interface SharedClientModule {
       subscribe(listener: (message: unknown) => void): () => void;
     };
     readonly onDocumentTitleChange?: (title: string, generation: number) => void;
+    readonly onDocumentReady?: (generation: number) => void;
     readonly onRuntimeError?: (error: Error) => void;
   }): Promise<SharedChromeClient>;
 }
@@ -113,6 +116,39 @@ setHandlerButtonContent(bypass, "chrome", "Default");
 setHandlerButtonContent(reopen, "redo", "Reopen PDF", "primary");
 handlerActions.replaceChildren(bypass);
 
+const ownerClaims = new Map<number, ReturnType<typeof createChromeInteractionOwnerClaimStore>>();
+
+function randomBase64Url(bytes: number): string {
+  const value = crypto.getRandomValues(new Uint8Array(bytes));
+  return bytesToBase64(value).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/u, "");
+}
+
+function interactionOwnerSecret(tabId: number): string {
+  let claims = ownerClaims.get(tabId);
+  if (claims === undefined) {
+    claims = createChromeInteractionOwnerClaimStore({
+      tabId,
+      navigationType: () => (performance.getEntriesByType("navigation")[0] as { readonly type?: string } | undefined)?.type,
+      readHistoryState: () => {
+        try { return history.state; } catch { return null; }
+      },
+      replaceHistoryState: (state) => {
+        try { history.replaceState(state, ""); } catch { /* Same-document recovery stays in memory. */ }
+      },
+      readSession: (key) => {
+        try { return sessionStorage.getItem(key); } catch { return null; }
+      },
+      writeSession: (key, value) => {
+        try { sessionStorage.setItem(key, value); } catch { /* Same-document recovery stays in memory. */ }
+      },
+      createSecret: () => randomBase64Url(32),
+      createClaimId: () => randomBase64Url(18),
+    });
+    ownerClaims.set(tabId, claims);
+  }
+  return claims.ownerSecret();
+}
+
 async function chooseProtectedRecovery(
   _recovery: {
     readonly choices: readonly ["resume", "discard", "fork"];
@@ -166,6 +202,12 @@ const openNativeReview = createNativeEmbeddedReview({
   createObjectURL: (blob) => URL.createObjectURL(blob),
   revokeObjectURL: (url) => URL.revokeObjectURL(url),
   getExtensionURL: (path) => chrome.runtime.getURL(path),
+  interactionOwnerSecret: (info) => {
+    if (!("tabId" in info) || !Number.isSafeInteger(info.tabId) || Number(info.tabId) < 0) {
+      throw new Error("Chrome did not provide a trusted tab identity.");
+    }
+    return interactionOwnerSecret(Number(info.tabId));
+  },
   chooseRecovery: chooseProtectedRecovery,
 });
 
@@ -220,13 +262,13 @@ async function openEmbeddedReview(
           onDocumentTitleChange(nextTitle) {
             document.title = nextTitle;
           },
+          onDocumentReady(generation) {
+            native.confirmDocumentReady(generation);
+          },
           onRuntimeError() {
             if (runtimeFailurePublished) return;
             runtimeFailurePublished = true;
-            for (const listener of lifecycleListeners) listener({
-              type: "disconnected",
-              protected: native.protected,
-            });
+            native.reportViewerFailure();
           },
         });
         if (boundedSignal.aborted) {

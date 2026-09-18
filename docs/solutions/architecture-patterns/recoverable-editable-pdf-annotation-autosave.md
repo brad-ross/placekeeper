@@ -1,7 +1,7 @@
 ---
 title: Recoverable autosave for editable PDF annotations
 date: 2026-08-11
-last_updated: 2026-09-10
+last_updated: 2026-09-18
 category: architecture-patterns
 module: PDF annotation persistence
 problem_type: architecture_pattern
@@ -11,7 +11,7 @@ applies_when:
   - Adding automatic PDF annotation persistence without a manual export step
   - Restoring app-created annotations as editable Review Items after reopening a PDF
   - Preserving foreign PDF annotations while replacing app-owned annotations
-  - Allowing a Save Destination to change while a save may be in flight
+  - Allowing a Save Destination or its source Document Generation to change while a save may be in flight
   - Keeping accepted annotation changes recoverable after save or location failures
 related_components:
   - portable annotation codec
@@ -107,7 +107,9 @@ Use the visible annotation as the fallback when private portable metadata no lon
 
 Treat an empty imported inventory and an unsuccessful import as different states. Absence from the requested list authorizes deletion only after a successful native import of these exact source bytes. The broker records `nativeAnnotationImportDigest`, and enables native inventory management only when it matches `state.source.digest` (`apps/service/src/sessions/session-broker.ts`). Recovery retries an unproven import; on failure it preserves source annotations. On success it adds newly imported marks to both current items and every undo snapshot so an unrelated undo cannot silently turn them into deletions (`apps/service/src/sessions/session-broker.ts`).
 
-Use standard `/NM` for identity across readers, including readers that strip private metadata. Unnamed marks initially receive deterministic page/enumeration identities; first save records the persistent native name. Duplicate persistent identities are excluded because ambiguity cannot authorize an edit or deletion (`packages/core/src/native-pdf-annotation.ts`; `packages/pdf-backends/src/native-annotations.ts`). Distinguish comment locks from deletion locks; the importer records both and the writer enforces each operation (`packages/pdf-backends/src/native-annotations.ts`).
+Use standard `/NM` for identity across readers, including readers that strip private metadata. Unverified marks receive fresh identities scoped to their imported generation; page and enumeration index correlate a source object but do not establish continuity across replacements. Only verified persistent identity can carry edits or deletion intent into a successor. Duplicate persistent identities are excluded because ambiguity cannot authorize an edit or deletion (`packages/core/src/native-pdf-annotation.ts`; `packages/pdf-backends/src/native-annotations.ts`). Distinguish comment locks from deletion locks; the importer records both and the writer enforces each operation (`packages/pdf-backends/src/native-annotations.ts`).
+
+Replacement must establish native authority again for the successor bytes. A durable ledger retains verified deletion intent; matching verified identities take the successor object's physical properties and retain the predecessor's authorized comment. Unverified identity collisions remain distinct. Failed inventory reconciliation withholds the successor import digest, so uncertainty cannot become permission to delete all source annotations (`apps/service/src/sessions/document-replacement-preparation.ts:54`, `apps/service/src/sessions/session-broker.ts:2543`).
 
 Deleting a parent also removes its popup, but surviving replies are detached into standalone comments rather than discarded (`packages/pdf-backends/src/native-annotations.ts`). Finally, reopen the result and verify the requested native inventory, comments, authors, subtypes, pages, and geometry before reporting export success (`packages/pdf-backends/src/native-annotations.ts`).
 
@@ -117,29 +119,34 @@ The native preservation regression in `packages/pdf-backends/test/native-annotat
 
 Maintain one draining save loop per session. A request sets a `requested` bit; mutations arriving while a save runs collapse into a later pass over the newest frozen state (`apps/service/src/saving/pdf-save-coordinator.ts`). Different sessions that target the same path are serialized with a target lock (`apps/service/src/saving/pdf-save-coordinator.ts`).
 
-The effective save identity is:
+Separate **publication admission** from **semantic freshness**. A candidate may publish only while its destination generation, Document Generation, and source digest remain current and no admitted source observation blocks it. Review Revision and semantic digest instead determine whether a verified publication satisfies the desired state or needs another pass (`apps/service/src/sessions/session-broker.ts:1977`, `apps/service/src/sessions/session-broker.ts:1767`). Rejecting every older semantic revision would discard useful completed work; allowing an older source generation could overwrite a rebuild.
 
-```text
-(sessionId, targetGeneration, reviewRevision, stateDigest)
-```
+The observer installs a physical-save barrier when it orders a notification, before asynchronous file inspection. Waiting until a changed digest is known leaves a window for predecessor bytes to overwrite the candidate being inspected (`apps/service/src/sessions/local-document-observer.ts:300`, `apps/service/src/sessions/session-broker.ts:269`). The coordinator checks observation settlement before freezing work and again after writing the candidate (`apps/service/src/saving/pdf-save-coordinator.ts:375`, `apps/service/src/saving/pdf-save-coordinator.ts:449`).
 
 The commit sequence is:
 
 ```text
-freeze current ReviewState
+settle admitted source observations before freezing current ReviewState
 write immutable source + complete current annotations
 reopen and verify candidate
 write and fsync a same-directory temporary file
 under the session write tail:
-  reject if targetGeneration is no longer current
-  revalidate target capability and fingerprint
+  prove destination generation, Document Generation, and source digest
+  revalidate source and target authority for the destination kind
+  recheck those fences and the observation barrier immediately before rename
   atomically rename temporary -> target
-  sync the containing directory
+  settle directory durability, capability, and recovery evidence
   mark clean only if reviewRevision and stateDigest are still desired
-otherwise queue the newest desired state again
+otherwise discard a structurally stale candidate or queue newer semantic state
 ```
 
-The coordinator synchronizes the temporary file before calling `commitSaveCandidate`. Its commit callback revalidates original or copy authority, atomically renames the candidate, synchronizes the directory, and refreshes the target digest (`apps/service/src/saving/pdf-save-coordinator.ts`). The broker checks the destination generation while holding the same serialized session tail, then records whether revision and digest are still current (`apps/service/src/sessions/session-broker.ts`). A stale generation discards the temporary file; a valid commit of an older state immediately schedules another pass.
+For an original destination, source and target alias the same owned PDF. During publication the broker records the exact candidate digest as a transient self-save identity; a matching trustworthy observation can recognize that write. Historical accepted digests do not authorize suppressing a later external replacement (`apps/service/src/sessions/session-broker.ts:1991`, `apps/service/src/sessions/session-broker.ts:2848`).
+
+A copy needs **two proofs**: its independently authorized target still matches, and the owned local source used to render it still has the expected digest. An unchanged copy path alone says nothing about whether its source was replaced. After awaited capability checks, the coordinator rechecks broker currentness at the last JavaScript boundary before rename (`apps/service/src/saving/pdf-save-coordinator.ts:466`).
+
+A committed Document Generation advances the active destination generation. An original rebases its fingerprint to the validated successor source; a copy retains its independent target fingerprint until a verified save replaces it (`apps/service/src/sessions/session-broker.ts:2598`).
+
+After an irreversible rename, a synchronization or bookkeeping error is not proof that nothing was saved. Target evidence and durable predecessor/successor recovery determine the winner. While that remains uncertain, the broker's commit barrier blocks further serialized work; the coordinator must not overwrite it with a generic failed-save result (`apps/service/src/saving/pdf-save-coordinator.ts:500`, `apps/service/src/sessions/session-broker.ts:1718`, `apps/service/src/sessions/session-broker.ts:2012`).
 
 ### Let recovery converge through evidence
 
@@ -187,6 +194,10 @@ If revision 4 is being rendered when revisions 5 and 6 are accepted, both later 
 
 If a generation-2 copy save is in flight when the user selects the original, destination establishment persists generation 3. The generation-2 candidate fails its commit fence under the session tail and its temporary file is removed. The generation-3 request writes the complete latest state to the original (`apps/service/src/sessions/session-broker.ts`, `apps/service/src/saving/pdf-save-coordinator.ts`).
 
+### Source replacement during a copy save
+
+A copy candidate may still name the selected destination while its source has become obsolete. The first admitted observation blocks publication even before inspection knows whether the PDF changed. If the source advances, the old candidate fails its generation/digest fence; the next eligible pass uses successor bytes. Accepted semantic edits remain protected independently of that physical delivery (`apps/service/src/saving/pdf-save-coordinator.ts:449`, `apps/service/src/sessions/session-broker.ts:1977`).
+
 ### Reopen, edit, delete, and recover
 
 When an annotated PDF is reopened without private recovery data, valid portable envelopes become a fresh revision-0 ReviewState. If rewriting is allowed and the review is not generated-output, that PDF becomes the active original destination already marked clean (`apps/service/src/sessions/session-broker.ts`, `apps/service/test/recovery.test.ts`). Later edits and deletes follow the same complete-state autosave path. If the target moves while work is pending, restart recovery restores the semantic state, reports `not-saved`, and lets the user locate or replace the destination (`apps/service/test/recovery.test.ts`).
@@ -199,3 +210,6 @@ When an annotated PDF is reopened without private recovery data, valid portable 
 - [Portable PDF annotations invisible in external viewers](../integration-issues/portable-pdf-annotations-invisible-in-external-viewers.md) documents the narrower appearance and crop-relative geometry failure that PR #21 corrected without changing this broader autosave architecture.
 - [Valid long highlights rejected by the portable annotation shape limit](../integration-issues/valid-long-highlights-rejected-by-portable-shape-limit.md) documents why portable resource accounting is dimensional, why authoring and decoding share the 256-segment ceiling, and why portability is checked before mutation acknowledgement.
 - PR #19 contains the implementation described here and merged into `main` on 2026-08-11 (America/New_York).
+
+- [Atomic generation transitions for local PDF replacement](atomic-generation-transitions-for-rebuilt-pdf-reviews.md) owns observation and successor admission; this learning owns the resulting physical-save and native-ownership obligations.
+- [PR #117: Automatic local PDF refresh](https://github.com/brad-ross/placekeeper/pull/117) extends these fences to external local replacement.

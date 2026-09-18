@@ -1,41 +1,12 @@
 @preconcurrency import Foundation
 
-let macosHelperMaxFrameBytes = 256 * 1024
-let macosHelperResourceChunkBytes = 64 * 1024
-
-enum HelperFrameError: Error, Equatable {
-    case empty
-    case oversized
-    case malformedJSON
-}
-
-struct HelperFrameAccumulator {
-    private var buffered = Data()
-
-    mutating func append(_ bytes: Data) throws -> [[String: Any]] {
-        buffered.append(bytes)
-        var messages: [[String: Any]] = []
-        while buffered.count >= 4 {
-            let length = Int(buffered.prefix(4).reduce(UInt32(0)) { ($0 << 8) | UInt32($1) })
-            guard length > 0 else { throw HelperFrameError.empty }
-            guard length <= macosHelperMaxFrameBytes else { throw HelperFrameError.oversized }
-            guard buffered.count >= length + 4 else { break }
-            let body = buffered.subdata(in: 4..<(length + 4))
-            guard let value = try? JSONSerialization.jsonObject(with: body),
-                  let message = value as? [String: Any] else {
-                throw HelperFrameError.malformedJSON
-            }
-            messages.append(message)
-            buffered.removeSubrange(0..<(length + 4))
-        }
-        return messages
-    }
-}
+let macosHelperRequestTimeout: TimeInterval = 15
 
 struct MacRuntimeProjection {
     let sessionID: String
     let generation: Int
     let revision: Int
+    let activeAuthoringDraftIds: [String]
     let state: [String: Any]
     let scope: [String: Any]
     let saveStatus: [String: Any]
@@ -49,6 +20,7 @@ struct MacRuntimeProjection {
             "sessionId": sessionID,
             "generation": generation,
             "revision": revision,
+            "activeAuthoringDraftIds": activeAuthoringDraftIds,
             "state": state,
             "scope": scope,
             "saveStatus": saveStatus,
@@ -82,6 +54,7 @@ enum MacReviewHelperReply {
     case invalidation(generation: Int, revision: Int, reason: String)
     case result(method: String, payload: Any)
     case resource(sequence: Int, bytes: Data, done: Bool)
+    case resourceAdopted(generation: Int)
     case released
     case failure(code: String)
 }
@@ -93,8 +66,9 @@ enum MacReviewHelperReplyParser {
     )
     private static let digest = try! NSRegularExpression(pattern: "^[a-f0-9]{64}$")
     private static let methods = Set([
-        "command", "saveStatus", "saveProposal", "chooseCopy", "chooseFolder", "chooseOriginal",
-        "retrySave", "locateSave", "scope", "exportReviewedCopy",
+        "command", "beginInteraction", "finalizeInteraction", "releaseInteraction", "acknowledgeInteraction",
+        "saveStatus", "saveProposal", "chooseCopy", "chooseFolder", "chooseOriginal", "retrySave", "locateSave",
+        "scope", "resolveReadingLocation", "exportReviewedCopy",
     ])
 
     static func parse(
@@ -153,7 +127,7 @@ enum MacReviewHelperReplyParser {
                   let generation = positiveInteger(value["generation"]),
                   let revision = nonnegativeInteger(value["revision"]),
                   let reason = value["reason"] as? String,
-                  ["revision", "generation", "save", "recovery"].contains(reason) else { return nil }
+                  ["revision", "generation", "save", "recovery", "presence"].contains(reason) else { return nil }
             return .invalidation(generation: generation, revision: revision, reason: reason)
         case "result":
             guard exact(value, base.union(["method", "payload"])),
@@ -168,6 +142,10 @@ enum MacReviewHelperReplyParser {
                   let bytes = Data(base64Encoded: encoded), bytes.count <= macosHelperResourceChunkBytes,
                   let done = value["done"] as? Bool else { return nil }
             return .resource(sequence: sequence, bytes: bytes, done: done)
+        case "resource-adopted":
+            guard exact(value, base.union(["generation"])),
+                  let generation = positiveInteger(value["generation"]) else { return nil }
+            return .resourceAdopted(generation: generation)
         case "released":
             return exact(value, base) ? .released : nil
         case "failure":
@@ -181,7 +159,7 @@ enum MacReviewHelperReplyParser {
 
     private static func projection(_ value: [String: Any]) -> MacRuntimeProjection? {
         let allowed = Set([
-            "sessionId", "generation", "revision", "state", "scope", "saveStatus", "protected", "location", "document",
+            "sessionId", "generation", "revision", "activeAuthoringDraftIds", "state", "scope", "saveStatus", "protected", "location", "document",
         ])
         guard Set(value.keys).isSubset(of: allowed),
               value.keys.contains("sessionId"), value.keys.contains("generation"), value.keys.contains("revision"),
@@ -190,6 +168,7 @@ enum MacReviewHelperReplyParser {
               let sessionID = value["sessionId"] as? String, fullMatch(session, sessionID),
               let generation = positiveInteger(value["generation"]),
               let revision = nonnegativeInteger(value["revision"]),
+              let activeAuthoringDraftIds = safeIDs(value["activeAuthoringDraftIds"]),
               let state = value["state"] as? [String: Any],
               let scope = value["scope"] as? [String: Any],
               let saveStatus = value["saveStatus"] as? [String: Any],
@@ -205,6 +184,7 @@ enum MacReviewHelperReplyParser {
             sessionID: sessionID,
             generation: generation,
             revision: revision,
+            activeAuthoringDraftIds: activeAuthoringDraftIds,
             state: state,
             scope: scope,
             saveStatus: saveStatus,
@@ -220,6 +200,13 @@ enum MacReviewHelperReplyParser {
     private static func safeID(_ value: Any?) -> String? {
         guard let value = value as? String, fullMatch(identifier, value) else { return nil }
         return value
+    }
+
+    private static func safeIDs(_ value: Any?) -> [String]? {
+        guard let value else { return [] }
+        guard let values = value as? [String], values.count <= 256,
+              values.allSatisfy({ safeID($0) != nil }), Set(values).count == values.count else { return nil }
+        return values
     }
 
     private static func safeDigest(_ value: Any?) -> String? {
@@ -261,14 +248,23 @@ protocol ReviewHelperRequesting {
 final class SupervisedReviewHelper: ReviewHelperProcess, ReviewHelperRequesting, @unchecked Sendable {
     typealias Completion = (MacReviewHelperReply?) -> Void
 
+    private struct PendingRequest {
+        let completion: Completion
+        let deadline: DispatchWorkItem
+    }
+
     let windowID: String
     let attemptID: String
     private let process: Process
     private let stdinPipe = Pipe()
     private let stdoutPipe = Pipe()
     private let lock = NSLock()
+    private let writeLock = NSLock()
+    private let requestTimeout: TimeInterval
+    private let deadlineQueue = DispatchQueue(label: "local.placekeeper.macos.helper-deadlines", qos: .utility)
     private var accumulator = HelperFrameAccumulator()
-    private var pending: [String: Completion] = [:]
+    private var pending: [String: PendingRequest] = [:]
+    private var responseStreams = HelperResponseStreamAccumulator()
     private var finished = false
 
     var isRunning: Bool { process.isRunning }
@@ -281,10 +277,12 @@ final class SupervisedReviewHelper: ReviewHelperProcess, ReviewHelperRequesting,
         executable: URL,
         argumentPrefix: [String] = [],
         baseEnvironment: [String: String],
-        onExit: @escaping @Sendable (String) -> Void
+        requestTimeout: TimeInterval = macosHelperRequestTimeout,
+        onExit: @escaping @Sendable (String, ReviewHelperTermination) -> Void
     ) {
         self.windowID = windowID
         self.attemptID = attemptID
+        self.requestTimeout = requestTimeout
         process = Process()
         process.executableURL = executable
         process.arguments = argumentPrefix + ["macos-review-helper"]
@@ -299,9 +297,13 @@ final class SupervisedReviewHelper: ReviewHelperProcess, ReviewHelperRequesting,
         environment["PLACEKEEPER_WINDOW_ID"] = windowID
         environment["PLACEKEEPER_ATTEMPT_ID"] = attemptID
         process.environment = environment
-        process.terminationHandler = { [weak self] _ in
+        process.terminationHandler = { [weak self] process in
+            let termination = ReviewHelperTermination(
+                reason: process.terminationReason == .uncaughtSignal ? .uncaughtSignal : .exit,
+                status: process.terminationStatus
+            )
             self?.finish()
-            onExit(windowID)
+            onExit(windowID, termination)
         }
         stdoutPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
             let bytes = handle.availableData
@@ -333,16 +335,22 @@ final class SupervisedReviewHelper: ReviewHelperProcess, ReviewHelperRequesting,
         var length = UInt32(body.count).bigEndian
         var frame = withUnsafeBytes(of: &length) { Data($0) }
         frame.append(body)
+        let deadline = DispatchWorkItem { [weak self] in self?.expire(requestID: requestID) }
         lock.lock()
         guard !finished, process.isRunning else { lock.unlock(); return nil }
-        pending[requestID] = completion
+        pending[requestID] = PendingRequest(completion: completion, deadline: deadline)
+        lock.unlock()
+        deadlineQueue.asyncAfter(deadline: .now() + requestTimeout, execute: deadline)
+        writeLock.lock()
+        defer { writeLock.unlock() }
         do {
             try stdinPipe.fileHandleForWriting.write(contentsOf: frame)
-            lock.unlock()
             return requestID
         } catch {
-            pending.removeValue(forKey: requestID)
+            lock.lock()
+            let failed = pending.removeValue(forKey: requestID)
             lock.unlock()
+            failed?.deadline.cancel()
             finish()
             return nil
         }
@@ -373,12 +381,35 @@ final class SupervisedReviewHelper: ReviewHelperProcess, ReviewHelperRequesting,
         var deliveries: [(Completion, MacReviewHelperReply?)] = []
         for message in messages {
             guard let requestID = message["requestId"] as? String,
-                  let completion = pending.removeValue(forKey: requestID) else {
+                  let request = pending[requestID] else {
                 lock.unlock()
                 terminate()
                 return
             }
-            deliveries.append((completion, MacReviewHelperReplyParser.parse(
+            if ["response-stream-start", "response-stream-chunk"].contains(message["type"] as? String) {
+                guard let streamResult = responseStreams.accept(
+                    message, windowID: windowID, attemptID: attemptID, requestID: requestID
+                ) else {
+                    lock.unlock(); terminate(); return
+                }
+                guard case let .complete(reconstructed) = streamResult else { continue }
+                guard let value = try? JSONSerialization.jsonObject(with: reconstructed),
+                      let complete = value as? [String: Any],
+                      let finished = pending.removeValue(forKey: requestID) else {
+                    lock.unlock(); terminate(); return
+                }
+                finished.deadline.cancel()
+                deliveries.append((finished.completion, MacReviewHelperReplyParser.parse(
+                    complete, windowID: windowID, attemptID: attemptID, requestID: requestID
+                )))
+                continue
+            }
+            guard !responseStreams.contains(requestID),
+                  pending.removeValue(forKey: requestID) != nil else {
+                lock.unlock(); terminate(); return
+            }
+            request.deadline.cancel()
+            deliveries.append((request.completion, MacReviewHelperReplyParser.parse(
                 message, windowID: windowID, attemptID: attemptID, requestID: requestID
             )))
         }
@@ -386,15 +417,32 @@ final class SupervisedReviewHelper: ReviewHelperProcess, ReviewHelperRequesting,
         for (completion, reply) in deliveries { completion(reply) }
     }
 
+    private func expire(requestID: String) {
+        lock.lock()
+        guard !finished, pending[requestID] != nil else { lock.unlock(); return }
+        finished = true
+        let requests = Array(pending.values)
+        pending.removeAll()
+        responseStreams.removeAll()
+        lock.unlock()
+        for request in requests { request.deadline.cancel() }
+        stdoutPipe.fileHandleForReading.readabilityHandler = nil
+        try? stdinPipe.fileHandleForWriting.close()
+        if process.isRunning { process.terminate() }
+        for request in requests { request.completion(nil) }
+    }
+
     private func finish() {
         lock.lock()
         guard !finished else { lock.unlock(); return }
         finished = true
-        let callbacks = Array(pending.values)
+        let requests = Array(pending.values)
         pending.removeAll()
+        responseStreams.removeAll()
         lock.unlock()
+        for request in requests { request.deadline.cancel() }
         stdoutPipe.fileHandleForReading.readabilityHandler = nil
-        for callback in callbacks { callback(nil) }
+        for request in requests { request.completion(nil) }
     }
 
     deinit { terminate() }

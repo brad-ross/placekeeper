@@ -462,6 +462,30 @@ describe("packaged Codex live-context lifecycle", () => {
       request: { kind: "page-text", pageIndex: 0, maxBytes: 65_536 },
     })).toMatchObject({ kind: "evidence", result: { status: "unavailable", reason: "unauthorized" } });
 
+    await copyFile(resolve("test/fixtures/pdfs/image-only.pdf"), pdf);
+    await expect(host.broker.replaceLiveDocument({
+      sessionId: launch.sessionId,
+      outputPath: pdf,
+      observationEpoch: 1,
+    })).resolves.toMatchObject({
+      status: "committed",
+      documentGeneration: launch.documentGeneration + 1,
+      migratedTaskSessionId: taskSessionId,
+    });
+    expect(await requestControl(socketPath, {
+      kind: "retrieve-evidence-by-handle",
+      handle,
+      request: { kind: "page-text", pageIndex: 0, maxBytes: 65_536 },
+    })).toMatchObject({ kind: "evidence", result: { status: "unavailable" } });
+    const successorWrite = vi.fn();
+    await runHookCommand(["hook", "--event"], hookInput("UserPromptSubmit"), control, successorWrite);
+    expect(injectedContext(successorWrite)).toMatchObject({
+      currentness: "current",
+      document: { generation: launch.documentGeneration + 1 },
+      reviewItems: { mode: "full", itemCount: 3 },
+      evidence: { handle: expect.not.stringMatching(new RegExp(`^${handle}$`, "u")) },
+    });
+
     await runHookCommand(["hook", "--event"], hookInput("SessionEnd"), control, vi.fn());
     const endedWrite = vi.fn();
     await runHookCommand(["hook", "--event"], hookInput("UserPromptSubmit"), control, endedWrite);

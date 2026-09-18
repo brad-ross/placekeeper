@@ -285,135 +285,136 @@ export function usePassageEditorPlacement(input: {
       .map((ref) => ref.current)
       .filter((surface): surface is HTMLElement => surface !== null);
     const scrollport = stage.querySelector<HTMLElement>('[data-viewer-framing-viewport]');
-    const scheduler = new LatestFrameRequest<number>({
-      schedule: (callback) => requestAnimationFrame(callback),
-      cancel: (handle) => cancelAnimationFrame(handle),
-      commit: () => {
-        const stageBounds = stage.getBoundingClientRect();
-        let rightBoundary: number | undefined;
-        let bottomBoundary: number | undefined;
-        for (const surface of surfaces) {
-          const open = surface.dataset.workspaceOpen === 'true'
-            || surface.dataset.toolsWorkspaceOpen === 'true';
-          if (!open) continue;
-          const bounds = surface.getBoundingClientRect();
-          if (surface.dataset.workspacePresentation === 'bottom') {
-            bottomBoundary = Math.min(bottomBoundary ?? stageBounds.bottom, bounds.top - EDGE);
-          } else {
-            rightBoundary = Math.min(rightBoundary ?? stageBounds.right, bounds.left - EDGE);
-          }
+    const commit = () => {
+      const stageBounds = stage.getBoundingClientRect();
+      let rightBoundary: number | undefined;
+      let bottomBoundary: number | undefined;
+      for (const surface of surfaces) {
+        const open = surface.dataset.workspaceOpen === 'true'
+          || surface.dataset.toolsWorkspaceOpen === 'true';
+        if (!open) continue;
+        const bounds = surface.getBoundingClientRect();
+        if (surface.dataset.workspacePresentation === 'bottom') {
+          bottomBoundary = Math.min(bottomBoundary ?? stageBounds.bottom, bounds.top - EDGE);
+        } else {
+          rightBoundary = Math.min(rightBoundary ?? stageBounds.right, bounds.left - EDGE);
         }
-        const visualViewport = globalThis.visualViewport;
-        if (visualViewport !== null) {
-          const viewportRight = visualViewport.offsetLeft + visualViewport.width - EDGE;
-          const viewportBottom = visualViewport.offsetTop + visualViewport.height - EDGE;
-          rightBoundary = Math.min(rightBoundary ?? stageBounds.right - EDGE, viewportRight);
-          bottomBoundary = Math.min(bottomBoundary ?? stageBounds.bottom - EDGE, viewportBottom);
-        }
-        const editorBounds = input.editorElement?.getBoundingClientRect();
-        const targetElements = input.targetSelector === undefined
-          ? []
-          : [...stage.querySelectorAll<HTMLElement>(input.targetSelector)];
-        const targetRects = targetElements.map((element) => {
-          const bounds = element.getBoundingClientRect();
-          return {
-            left: bounds.left,
-            top: bounds.top,
-            right: bounds.right,
-            bottom: bounds.bottom,
-            width: bounds.width,
-            height: bounds.height,
-          };
-        });
-        const usable = {
-          left: stageBounds.left + EDGE,
-          top: stageBounds.top + EDGE,
-          right: rightBoundary ?? stageBounds.right - EDGE,
-          bottom: bottomBoundary ?? stageBounds.bottom - EDGE,
-          width: 0,
-          height: 0,
+      }
+      const visualViewport = globalThis.visualViewport;
+      if (visualViewport !== null) {
+        const viewportRight = visualViewport.offsetLeft + visualViewport.width - EDGE;
+        const viewportBottom = visualViewport.offsetTop + visualViewport.height - EDGE;
+        rightBoundary = Math.min(rightBoundary ?? stageBounds.right - EDGE, viewportRight);
+        bottomBoundary = Math.min(bottomBoundary ?? stageBounds.bottom - EDGE, viewportBottom);
+      }
+      const editorBounds = input.editorElement?.getBoundingClientRect();
+      const targetElements = input.targetSelector === undefined
+        ? []
+        : [...stage.querySelectorAll<HTMLElement>(input.targetSelector)];
+      const targetRects = targetElements.map((element) => {
+        const bounds = element.getBoundingClientRect();
+        return {
+          left: bounds.left,
+          top: bounds.top,
+          right: bounds.right,
+          bottom: bounds.bottom,
+          width: bounds.width,
+          height: bounds.height,
         };
-        const visibleTargets = targetRects.filter((rect) => intersects(rect, usable));
-        const targetVisibility = targetRects.length === 0
-          ? undefined
-          : visibleTargets.length > 0 ? 'visible' as const : 'outside' as const;
-        const measuredPlacement = (next: PassageEditorPlacement): PassageEditorPlacement => ({
-          ...next,
-          ...(targetVisibility === undefined ? {} : { targetVisibility }),
-        });
-        const fallback = input.fallbackTarget === null || input.fallbackTarget === undefined
-          ? null
-          : placementRect(input.fallbackTarget);
-        const activeTarget = visibleTargets.length <= 1
-          ? visibleTargets[0] ?? null
-          : fallback === null
-            ? visibleTargets[0]!
-            : visibleTargets.reduce((nearest, candidate) => {
-                const distance = (rect: RectLike) => (
-                  (rect.left + rect.right - fallback.left - fallback.right) ** 2
-                  + (rect.top + rect.bottom - fallback.top - fallback.bottom) ** 2
-                );
-                return distance(candidate) < distance(nearest) ? candidate : nearest;
-              });
-        const targetUnion = activeTarget === null && targetRects.length > 0
-          ? unionViewerRects(targetRects)
-          : null;
-        const target = activeTarget
-          ?? (targetUnion === null ? fallback : {
-              ...targetUnion,
-              width: targetUnion.right - targetUnion.left,
-              height: targetUnion.bottom - targetUnion.top,
+      });
+      const usable = {
+        left: stageBounds.left + EDGE,
+        top: stageBounds.top + EDGE,
+        right: rightBoundary ?? stageBounds.right - EDGE,
+        bottom: bottomBoundary ?? stageBounds.bottom - EDGE,
+        width: 0,
+        height: 0,
+      };
+      const visibleTargets = targetRects.filter((rect) => intersects(rect, usable));
+      const targetVisibility = targetRects.length === 0
+        ? undefined
+        : visibleTargets.length > 0 ? 'visible' as const : 'outside' as const;
+      const measuredPlacement = (next: PassageEditorPlacement): PassageEditorPlacement => ({
+        ...next,
+        ...(targetVisibility === undefined ? {} : { targetVisibility }),
+      });
+      const fallback = input.fallbackTarget === null || input.fallbackTarget === undefined
+        ? null
+        : placementRect(input.fallbackTarget);
+      const activeTarget = visibleTargets.length <= 1
+        ? visibleTargets[0] ?? null
+        : fallback === null
+          ? visibleTargets[0]!
+          : visibleTargets.reduce((nearest, candidate) => {
+              const distance = (rect: RectLike) => (
+                (rect.left + rect.right - fallback.left - fallback.right) ** 2
+                + (rect.top + rect.bottom - fallback.top - fallback.bottom) ** 2
+              );
+              return distance(candidate) < distance(nearest) ? candidate : nearest;
             });
-        if (target === null || !intersects(target, usable)) {
-          if (lastVisiblePlacementRef.current === undefined) {
-            const safe = safePassageEditorPlacement({
-              stage: stageBounds,
-              // A rendered width can already include a preceding responsive
-              // clamp. Reusing it as the preferred width makes the editor
-              // permanently narrow after the stage grows again.
-              editorWidth: DEFAULT_WIDTH,
-              editorHeight: editorBounds?.height || DEFAULT_HEIGHT,
-              ...(rightBoundary === undefined ? {} : { rightBoundary }),
-              ...(bottomBoundary === undefined ? {} : { bottomBoundary }),
-            });
-            lastVisiblePlacementRef.current = safe;
-            commitPlacement(measuredPlacement(safe));
-            return;
-          }
-          commitPlacement(measuredPlacement(reclampPassageEditorPlacement({
-            previous: lastVisiblePlacementRef.current,
+      const targetUnion = activeTarget === null && targetRects.length > 0
+        ? unionViewerRects(targetRects)
+        : null;
+      const target = activeTarget
+        ?? (targetUnion === null ? fallback : {
+            ...targetUnion,
+            width: targetUnion.right - targetUnion.left,
+            height: targetUnion.bottom - targetUnion.top,
+          });
+      if (target === null || !intersects(target, usable)) {
+        if (lastVisiblePlacementRef.current === undefined) {
+          const safe = safePassageEditorPlacement({
             stage: stageBounds,
+            // A rendered width can already include a preceding responsive
+            // clamp. Reusing it as the preferred width makes the editor
+            // permanently narrow after the stage grows again.
             editorWidth: DEFAULT_WIDTH,
             editorHeight: editorBounds?.height || DEFAULT_HEIGHT,
             ...(rightBoundary === undefined ? {} : { rightBoundary }),
             ...(bottomBoundary === undefined ? {} : { bottomBoundary }),
-          })));
+          });
+          lastVisiblePlacementRef.current = safe;
+          commitPlacement(measuredPlacement(safe));
           return;
         }
-        const choice = choosePassageEditorPlacement({
+        commitPlacement(measuredPlacement(reclampPassageEditorPlacement({
+          previous: lastVisiblePlacementRef.current,
           stage: stageBounds,
-          target,
           editorWidth: DEFAULT_WIDTH,
           editorHeight: editorBounds?.height || DEFAULT_HEIGHT,
           ...(rightBoundary === undefined ? {} : { rightBoundary }),
           ...(bottomBoundary === undefined ? {} : { bottomBoundary }),
-          ...(preferredKindRef.current?.anchorKey === input.anchorKey
-            ? { previous: preferredKindRef.current.kind }
-            : {}),
-        });
-        if (!choice.visible && lastVisiblePlacementRef.current !== undefined) {
-          commitPlacement(measuredPlacement(lastVisiblePlacementRef.current));
-          return;
-        }
-        const next: PassageEditorPlacement = {
-          kind: choice.kind,
-          ...(choice.style === undefined ? {} : { style: choice.style }),
-          ...(targetVisibility === undefined ? {} : { targetVisibility }),
-        };
-        preferredKindRef.current = { anchorKey: input.anchorKey!, kind: choice.kind };
-        lastVisiblePlacementRef.current = next;
-        commitPlacement(next);
-      },
+        })));
+        return;
+      }
+      const choice = choosePassageEditorPlacement({
+        stage: stageBounds,
+        target,
+        editorWidth: DEFAULT_WIDTH,
+        editorHeight: editorBounds?.height || DEFAULT_HEIGHT,
+        ...(rightBoundary === undefined ? {} : { rightBoundary }),
+        ...(bottomBoundary === undefined ? {} : { bottomBoundary }),
+        ...(preferredKindRef.current?.anchorKey === input.anchorKey
+          ? { previous: preferredKindRef.current.kind }
+          : {}),
+      });
+      if (!choice.visible && lastVisiblePlacementRef.current !== undefined) {
+        commitPlacement(measuredPlacement(lastVisiblePlacementRef.current));
+        return;
+      }
+      const next: PassageEditorPlacement = {
+        kind: choice.kind,
+        ...(choice.style === undefined ? {} : { style: choice.style }),
+        ...(targetVisibility === undefined ? {} : { targetVisibility }),
+      };
+      preferredKindRef.current = { anchorKey: input.anchorKey!, kind: choice.kind };
+      lastVisiblePlacementRef.current = next;
+      commitPlacement(next);
+    };
+    const scheduler = new LatestFrameRequest<number>({
+      schedule: (callback) => requestAnimationFrame(callback),
+      cancel: (handle) => cancelAnimationFrame(handle),
+      commit,
     });
     let revision = 0;
     const schedule = () => scheduler.publish(++revision);
@@ -428,7 +429,10 @@ export function usePassageEditorPlacement(input: {
     window.addEventListener('resize', schedule);
     globalThis.visualViewport?.addEventListener('resize', schedule);
     globalThis.visualViewport?.addEventListener('scroll', schedule);
-    schedule();
+    // The editor first mounts without a measured element. Place it during the
+    // layout phase so that default grid positioning cannot reach a painted
+    // frame; subsequent geometry changes remain coalesced by animation frame.
+    commit();
     return () => {
       scheduler.cancel();
       resizeObserver?.disconnect();

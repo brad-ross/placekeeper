@@ -19,6 +19,7 @@ import { PdfSearchWorkspace } from '../../../apps/web/src/review/PdfSearchWorksp
 import { initialPdfSearchState } from '../../../apps/web/src/pdf/pdf-search-model.js';
 import { projectReviewItems } from '../../../apps/web/src/review/annotation-projection.js';
 import { inventoryExistingAnnotations } from '../../../apps/web/src/pdf/existing-annotations.js';
+import { attachmentOrderedInteractionTransport } from '../../../apps/web/src/review/authoring-session.js';
 import type { CaretAnchor, SelectionAnchor } from '../../../apps/web/src/pdf/selection-anchor.js';
 import {
   VIEWER_ZOOM_MAX_PERCENT,
@@ -496,6 +497,7 @@ function createHarnessViewerNavigation(
 ): PdfViewerNavigation {
   return {
     captureLocation: () => null,
+    clampLocation: () => null,
     resolvePageLocation: () => null,
     applyLocation: async () => false,
     fitToWidth: async (waitForSettledGeometry) => {
@@ -541,6 +543,8 @@ function Harness() {
       sessionId: 'acceptance',
       source: { fileId: 'source', digest: 'a'.repeat(64), byteLength: 100 },
     })));
+  const reviewStateRef = useRef(state);
+  reviewStateRef.current = state;
   const [anchorKind, setAnchorKind] = useState<'selection' | 'caret' | 'none'>(
     visualScenario ? (visualScenario.name === 'contextual' ? 'selection' : 'none') : 'selection',
   );
@@ -553,7 +557,9 @@ function Harness() {
   );
   const [visualReferenceViewportHost, setVisualReferenceViewportHost] = useState<HTMLDivElement | null>(null);
   const [harnessReferenceNavigation, setHarnessReferenceNavigation] = useState(
-    () => createReferenceNavigationState(reconciliationPreview === null ? 0 : 2),
+    () => createReferenceNavigationState(
+      previewParameters.has('interaction-lifecycle') ? 1 : reconciliationPreview === null ? 0 : 2,
+    ),
   );
   const anchorKindRef = useRef(anchorKind);
   anchorKindRef.current = anchorKind;
@@ -581,6 +587,23 @@ function Harness() {
   const [shellMount, setShellMount] = useState(0);
   const failNextExportRef = useRef(exportPreview === 'fail-once');
   const finishExportRef = useRef<(() => void) | null>(null);
+  const interactionReceiptsRef = useRef(new Map<string, {
+    status: 'finalized'; interactionToken: string; generation: number;
+    outcome: 'applied' | 'discarded'; reviewRevision: number;
+  }>());
+  const admittedInteractionTokensRef = useRef(new Set<string>());
+  const interactionReconnectListenersRef = useRef(new Set<(
+    identity: { readonly generation: number; readonly revision: number },
+  ) => Promise<void>>());
+  const loseFinalizeResponseRef = useRef(previewParameters.has('finalize-response-lost'));
+  const failFinalizeAttemptsRef = useRef(
+    previewParameters.has('finalize-fails-twice') ? 2 : 0,
+  );
+  const failBeginBeforeAcceptanceRef = useRef(previewParameters.has('begin-preaccept-fails'));
+  const loseBeginResponseRef = useRef(previewParameters.has('begin-response-lost'));
+  const loseReleaseResponseRef = useRef(previewParameters.has('release-response-lost'));
+  const failReleaseAttemptsRef = useRef(previewParameters.has('release-fails-twice') ? 2 : 0);
+  const finishInteractionBeginRef = useRef<(() => void) | null>(null);
   const [outlineDiscovery, setOutlineDiscovery] = useState<PdfOutlineDiscovery>({
     status: 'loading',
     documentGeneration: 0,
@@ -723,6 +746,122 @@ function Harness() {
         },
       }}
       authoring={{
+        ...(previewParameters.has('interaction-lifecycle') ? {
+          interactionFinalizationReady: true,
+          interactionLifecycle: attachmentOrderedInteractionTransport(rootElement, {
+            beginInteraction: async (input: { interactionToken: string; order: number; generation: number }) => {
+              rootElement.setAttribute('data-begin-requests', JSON.stringify([
+                ...JSON.parse(rootElement.getAttribute('data-begin-requests') ?? '[]') as unknown[],
+                input,
+              ]));
+              if (failBeginBeforeAcceptanceRef.current) {
+                failBeginBeforeAcceptanceRef.current = false;
+                throw new Error('connection reset before interaction admission');
+              }
+              if (previewParameters.has('begin-delayed') &&
+                !admittedInteractionTokensRef.current.has(input.interactionToken)) {
+                await new Promise<void>((resolve) => { finishInteractionBeginRef.current = resolve; });
+              }
+              admittedInteractionTokensRef.current.add(input.interactionToken);
+              rootElement.setAttribute('data-interaction-hold', 'active');
+              rootElement.setAttribute('data-interaction-events', JSON.stringify([
+                ...JSON.parse(rootElement.getAttribute('data-interaction-events') ?? '[]') as string[],
+                `begin:${input.order}`,
+              ]));
+              if (loseBeginResponseRef.current) {
+                loseBeginResponseRef.current = false;
+                throw new Error('connection reset after interaction admission');
+              }
+              return { status: 'accepted', generation: input.generation, ownerViewId: 'harness-attachment' };
+            },
+            finalizeInteraction: async (input: { interactionToken: string; order: number; outcome: 'applied' | 'discarded'; draftId: string; expectedDraftRevision: number }) => {
+              rootElement.setAttribute('data-finalize-requests', JSON.stringify([
+                ...JSON.parse(rootElement.getAttribute('data-finalize-requests') ?? '[]') as unknown[],
+                input,
+              ]));
+              if (failFinalizeAttemptsRef.current > 0) {
+                failFinalizeAttemptsRef.current -= 1;
+                throw new Error('connection reset before durable interaction finalization');
+              }
+              const recovered = interactionReceiptsRef.current.get(input.interactionToken);
+              if (recovered !== undefined) {
+                rootElement.setAttribute('data-interaction-events', JSON.stringify([
+                  ...JSON.parse(rootElement.getAttribute('data-interaction-events') ?? '[]') as string[],
+                  `finalize:${input.order}:${input.outcome}`,
+                ]));
+                return recovered;
+              }
+              const current = reviewStateRef.current;
+              const draft = current.pendingDrafts.find(({ id }) => id === input.draftId);
+              if (draft === undefined) throw new Error('Harness draft missing');
+              const next = reduceReview(current, input.outcome === 'applied' ? {
+                type: 'apply-draft', expectedRevision: current.revision,
+                id: draft.id, expectedDraftRevision: input.expectedDraftRevision,
+                ownerViewId: 'harness-attachment', updatedAt: new Date().toISOString(),
+              } : {
+                type: 'discard-reconciliation', expectedRevision: current.revision,
+                target: 'draft', id: draft.id, expectedTargetRevision: input.expectedDraftRevision,
+                ownerViewId: 'harness-attachment', reason: 'cancelled-in-harness',
+                discardedAt: new Date().toISOString(),
+              });
+              const receipt = { status: 'finalized' as const, interactionToken: input.interactionToken,
+                generation: draft.baseGeneration, outcome: input.outcome, reviewRevision: next.revision };
+              interactionReceiptsRef.current.set(input.interactionToken, receipt);
+              const published = loseFinalizeResponseRef.current ? {
+                ...next,
+                source: { ...next.source, digest: 'b'.repeat(64) },
+                workflow: { ...next.workflow, documentGeneration: next.workflow.documentGeneration + 1 },
+              } : next;
+              reviewStateRef.current = published;
+              setState(published);
+              rootElement.setAttribute('data-interaction-hold', 'released');
+              rootElement.setAttribute('data-interaction-events', JSON.stringify([
+                ...JSON.parse(rootElement.getAttribute('data-interaction-events') ?? '[]') as string[],
+                `finalize:${input.order}:${input.outcome}`,
+              ]));
+              if (loseFinalizeResponseRef.current) {
+                loseFinalizeResponseRef.current = false;
+                throw new Error('connection reset after durable successor commit');
+              }
+              return receipt;
+            },
+            releaseInteraction: async (input: { interactionToken: string; order: number }) => {
+              rootElement.setAttribute('data-release-requests', JSON.stringify([
+                ...JSON.parse(rootElement.getAttribute('data-release-requests') ?? '[]') as unknown[],
+                input,
+              ]));
+              if (failReleaseAttemptsRef.current > 0) {
+                failReleaseAttemptsRef.current -= 1;
+                throw new Error('connection reset before interaction release');
+              }
+              rootElement.setAttribute('data-interaction-hold', 'released');
+              rootElement.setAttribute('data-interaction-events', JSON.stringify([
+                ...JSON.parse(rootElement.getAttribute('data-interaction-events') ?? '[]') as string[],
+                `release:${input.order}`,
+              ]));
+              if (loseReleaseResponseRef.current) {
+                loseReleaseResponseRef.current = false;
+                throw new Error('connection reset after interaction release');
+              }
+              return { status: 'released', interactionToken: input.interactionToken };
+            },
+            acknowledgeInteraction: async (input: { interactionToken: string; order: number }) => {
+              rootElement.setAttribute('data-interaction-events', JSON.stringify([
+                ...JSON.parse(rootElement.getAttribute('data-interaction-events') ?? '[]') as string[],
+                `acknowledge:${input.order}`,
+              ]));
+              return { status: 'released', interactionToken: input.interactionToken };
+            },
+          }),
+          ...(previewParameters.has('interaction-reconnect') ? {
+            subscribeInteractionReconnect: (listener: (
+              identity: { readonly generation: number; readonly revision: number },
+            ) => Promise<void>) => {
+              interactionReconnectListenersRef.current.add(listener);
+              return () => interactionReconnectListenersRef.current.delete(listener);
+            },
+          } : {}),
+        } : {}),
         pageMenu: pageMenuOpen ? {
           invocationId: 'harness-menu',
           placement: { left: 300, top: 220 },
@@ -864,6 +1003,22 @@ function Harness() {
           ...current,
           source: { ...current.source, digest: 'b'.repeat(64) },
         }))}>Replace source authority</button>
+        {previewParameters.has('interaction-reconnect') ? <button type="button" onClick={async () => {
+          rootElement.setAttribute('data-interaction-hold', 'released');
+          const current = reviewStateRef.current;
+          await Promise.all([...interactionReconnectListenersRef.current].map((listener) => listener({
+            generation: current.workflow.documentGeneration,
+            revision: current.revision,
+          })));
+          if (rootElement.getAttribute('data-interaction-hold') === 'active') {
+            rootElement.setAttribute('data-replacement-blocked', 'true');
+            return;
+          }
+          setState((latest) => ({
+            ...latest,
+            source: { ...latest.source, digest: 'b'.repeat(64) },
+          }));
+        }}>Reconnect then attempt source replacement</button> : null}
         <button
           type="button"
           onClick={() => setExistingAnnotationGeneration((generation) => generation + 1)}
@@ -876,6 +1031,17 @@ function Harness() {
           }
           return reduceReview(current, removeReviewItem(current, targetItemId));
         })}>Remove active annotation</button>
+        {previewParameters.has('external-reconciliation-removal') ? <button
+          type="button"
+          onClick={() => setState((current) => {
+            const target = current.items.find((item) => (
+              item.reconciliation !== undefined && item.reconciliation.disposition.kind !== 'resolved'
+            ));
+            return target === undefined
+              ? current
+              : reduceReview(current, removeReviewItem(current, target.id));
+          })}
+        >Resolve selected reconciliation elsewhere</button> : null}
         <button type="button" onClick={() => setPageMenuOpen(true)}>Open page actions</button>
         <button type="button" onClick={() => setOutlineDiscovery({
           status: 'loaded-tree',
@@ -1053,6 +1219,10 @@ function Harness() {
             Remount review shell
           </button>
         </div> : null}
+        {previewParameters.has('begin-delayed') ? <button type="button" onClick={() => {
+          finishInteractionBeginRef.current?.();
+          finishInteractionBeginRef.current = null;
+        }}>Finish interaction begin</button> : null}
       </div>}
     </ReviewShell>
   );

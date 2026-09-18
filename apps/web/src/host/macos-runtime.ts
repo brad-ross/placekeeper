@@ -17,6 +17,7 @@ declare global {
     readonly source: string;
     readonly url: string;
   } | undefined;
+  var __PLACEKEEPER_MAC_DOCUMENT_RESOURCES__: Record<string, string> | undefined;
 }
 
 export interface MacosRuntimeBridge {
@@ -31,7 +32,6 @@ export function createMacosHostRuntime(bridge: MacosRuntimeBridge): HostRuntime 
   }
   const packagedPdfium = globalThis.__PLACEKEEPER_MAC_PDFIUM_URL__;
   const packagedWorker = globalThis.__PLACEKEEPER_MAC_WORKER_URL__;
-  const documentResource = globalThis.__PLACEKEEPER_MAC_DOCUMENT_RESOURCE__;
   return createRpcHostRuntime({
     runtimeId: bridge.runtimeId,
     postMessage(message) {
@@ -54,17 +54,23 @@ export function createMacosHostRuntime(bridge: MacosRuntimeBridge): HostRuntime 
     },
   }, {
     host: "macos",
-    ...(documentResource === undefined ? {} : {
-      materializeDocument: async (sourceUrl: string) => {
-        if (sourceUrl !== documentResource.source || !documentResource.url.startsWith("blob:")) {
+    materializeDocument: async (sourceUrl: string) => {
+        const url = globalThis.__PLACEKEEPER_MAC_DOCUMENT_RESOURCES__?.[sourceUrl]
+          ?? (globalThis.__PLACEKEEPER_MAC_DOCUMENT_RESOURCE__?.source === sourceUrl
+            ? globalThis.__PLACEKEEPER_MAC_DOCUMENT_RESOURCE__.url : undefined);
+        if (url === undefined || !url.startsWith("blob:")) {
           throw new Error("The packaged document resource identity was invalid.");
         }
         return {
-          url: documentResource.url,
-          dispose: () => URL.revokeObjectURL(documentResource.url),
+          url,
+          dispose: () => {
+            if (globalThis.__PLACEKEEPER_MAC_DOCUMENT_RESOURCES__?.[sourceUrl] === url) {
+              delete globalThis.__PLACEKEEPER_MAC_DOCUMENT_RESOURCES__[sourceUrl];
+            }
+            URL.revokeObjectURL(url);
+          },
         };
       },
-    }),
     ...(packagedPdfium === undefined ? {} : {
       materializePdfiumWasm: async (sourceUrl: string) => {
         if (sourceUrl !== PACKAGED_PDFIUM_SOURCE ||

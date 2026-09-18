@@ -71,6 +71,7 @@ function navigation(initial = location(0)) {
   return {
     controls: {
       captureLocation: vi.fn<() => PdfViewerLocation | null>(() => current),
+      clampLocation: vi.fn((value: PdfViewerLocation) => value),
       captureDocumentOrderPages: vi.fn(() => []),
       resolvePageLocation: vi.fn((pageIndex: number) => location(pageIndex)),
       resolveTarget: vi.fn((value: PdfNavigationTarget) => location(value.pageIndex)),
@@ -1652,6 +1653,18 @@ describe('document-scoped navigation coordinator', () => {
     expect(run.announcement()).toBe('');
     expect(run.dependencies.layout.hideReferences).toHaveBeenCalled();
     expect(run.dependencies.focusReferenceTab).not.toHaveBeenCalled();
+  });
+
+  it('changes operation identity when deliberate navigation supersedes successor restoration', async () => {
+    const run = harness();
+    const predecessor = run.coordinator.operationIdentity();
+
+    run.coordinator.replaceDocument(2, { preservePresentation: true });
+    const automaticRestore = run.coordinator.operationIdentity();
+    expect(automaticRestore).toBeGreaterThan(predecessor);
+
+    expect(await run.coordinator.navigateMainTarget(target(3, 2), 'direct')).toBe(true);
+    expect(run.coordinator.operationIdentity()).toBeGreaterThan(automaticRestore);
   });
 
   it('invalidates successor semantics while preserving view-local workspace presentation', () => {

@@ -63,6 +63,7 @@ describe("static browser review runtime", () => {
     });
 
     const bootstrap = await runtime.bootstrap();
+    expect(runtime.capabilities).toEqual({ localDocumentRefresh: false });
     expect(bootstrap.state).toMatchObject({
       revision: 0,
       annotationName: "Brad Ross",

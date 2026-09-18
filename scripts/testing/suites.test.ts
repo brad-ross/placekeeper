@@ -43,6 +43,8 @@ describe("explicit suite contracts", () => {
   });
 
   it("keeps WebKit's intentional omissions and repeated fixture stages", () => {
+    expect(suites["test:e2e"]?.[0]).toBe("pnpm build:vscode");
+    expect(suites["test:e2e:webkit"]?.[0]).toBe("pnpm build:vscode");
     expect(suiteCommand("test:e2e")).toContain("neutral-design-conformance.spec.ts");
     expect(suiteCommand("test:e2e:webkit")).not.toContain("neutral-design-conformance.spec.ts");
     expect(suiteCommand("test:e2e:webkit")).not.toContain("host-interface.spec.ts");
@@ -50,6 +52,46 @@ describe("explicit suite contracts", () => {
       "pnpm fixtures:pdf", "pnpm test:pdf-writer", "pnpm test:reviewed-pdf", "pnpm test:pdf-viewer",
     ]);
     expect(suites["test:reviewed-pdf"]?.[0]).toBe("pnpm fixtures:pdf");
+  });
+
+  it("keeps the cross-host refresh and recovery matrix in host integration", () => {
+    const command = suiteCommand("test:host-integration");
+    for (const file of [
+      "apps/service/test/codex-live-context.integration.test.ts",
+      "apps/service/test/live-source-workflow.test.ts",
+      "apps/service/test/live-document-replacement.test.ts",
+      "apps/service/test/recovery.test.ts",
+      "apps/web/test/host-runtime.test.ts",
+    ]) expect(command).toContain(file);
+  });
+
+  it("keeps automatic PDF refresh regressions in canonical CI", () => {
+    for (const file of [
+      "apps/service/test/local-document-observer.test.ts",
+      "apps/web/test/refresh-interaction-lifecycle.test.tsx",
+      "packaging/macos/native-blob-install.test.ts",
+    ]) expect(ciUnitFiles).toContain(file);
+
+    expect(suiteCommand("test:ci:chromium")).toContain(
+      "test/acceptance/automatic-pdf-refresh.spec.ts",
+    );
+  });
+
+  it("keeps authoring lifecycle regressions in named and canonical gates", () => {
+    const unit = "apps/web/test/use-authoring-session-lifecycle.test.ts";
+    expect(suiteCommand("test:review")).toContain(unit);
+    expect(ciUnitFiles).toContain(unit);
+    const reconnect = "apps/web/test/interaction-reconnect-runtime.test.ts";
+    expect(suiteCommand("test:review")).toContain(reconnect);
+    expect(ciUnitFiles).toContain(reconnect);
+
+    const browser = "test/acceptance/authoring-lifecycle-regressions.spec.ts";
+    for (const suite of [
+      "test:e2e",
+      "test:e2e:webkit",
+      "test:ci:chromium",
+      "test:ci:webkit",
+    ]) expect(suiteCommand(suite)).toContain(browser);
   });
 
   it.skipIf(process.platform === "win32")("stops on prerequisite failure with the original exit result", async () => {

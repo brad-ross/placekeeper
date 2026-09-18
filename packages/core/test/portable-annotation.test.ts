@@ -592,9 +592,9 @@ describe("portable annotation codec", () => {
     });
 
     expect(state.items).toEqual([unresolved]);
-    expect(inspectProjectedPortableAnnotation(projectReviewItem(unresolved))).toMatchObject({
+    expect(inspectProjectedPortableAnnotation(projectReviewItem(unresolved))).toEqual({
       status: "owned",
-      item: { id: unresolved.id, reconciliation: { disposition: { kind: "ambiguous" } } },
+      item,
     });
     expect(state.revision).toBe(0);
     expect(state.history).toEqual([]);

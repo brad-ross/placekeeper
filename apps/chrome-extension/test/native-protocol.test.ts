@@ -42,12 +42,12 @@ describe("Chrome runtime protocol v2", () => {
 
   it("keeps v2 negotiation and envelopes separate from the legacy redirect protocol", () => {
     expect(validateRuntimeExtensionMessage({
-      type: "hello", reviewRuntimeVersion: 2,
+      type: "hello", reviewRuntimeVersion: 3,
       protocol: CHROME_RUNTIME_PROTOCOL,
       protocolVersion: CHROME_RUNTIME_PROTOCOL_VERSION,
       connectionId,
     })).toEqual({
-      type: "hello", reviewRuntimeVersion: 2,
+      type: "hello", reviewRuntimeVersion: 3,
       protocol: CHROME_RUNTIME_PROTOCOL,
       protocolVersion: 2,
       connectionId,
@@ -57,7 +57,7 @@ describe("Chrome runtime protocol v2", () => {
       disposition: "remote-temporary",
     })).toBeUndefined();
     expect(validateRuntimeExtensionMessage({
-      type: "hello", reviewRuntimeVersion: 2, protocol: CHROME_RUNTIME_PROTOCOL, protocolVersion: 1, connectionId,
+      type: "hello", reviewRuntimeVersion: 3, protocol: CHROME_RUNTIME_PROTOCOL, protocolVersion: 1, connectionId,
     })).toBeUndefined();
   });
 

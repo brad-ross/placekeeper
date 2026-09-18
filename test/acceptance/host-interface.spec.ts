@@ -117,7 +117,7 @@ async function chromePage(page: Page, entry: 'handler' | 'popup') {
             const reply = (body: Record<string, unknown>) => queueMicrotask(() => {
               for (const listener of messages) listener({ protocolVersion: 2, connectionId: message.connectionId, ...body });
             });
-            if (message.type === 'hello') reply({ type: 'hello-ack', protocol: 'placekeeper.chrome-runtime', reviewRuntimeVersion: 2, leaseMs: 90_000 });
+            if (message.type === 'hello') reply({ type: 'hello-ack', protocol: 'placekeeper.chrome-runtime', reviewRuntimeVersion: 3, leaseMs: 90_000 });
             if (message.type === 'begin') reply({ type: 'ack', lane: 'acquisition', requestId: message.requestId });
             if (message.type === 'chunk') reply({ type: 'ack', lane: 'acquisition', requestId: message.requestId, sequence: message.sequence });
             if (message.type === 'cancel') reply({ type: 'ack', lane: 'acquisition', requestId: message.requestId });

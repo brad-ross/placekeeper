@@ -1,14 +1,14 @@
 ---
-title: Atomic generation transitions for rebuilt PDF reviews
+title: Atomic generation transitions for local PDF replacement
 date: 2026-09-02
-last_updated: 2026-09-10
+last_updated: 2026-09-18
 category: architecture-patterns
-module: Generated PDF rebuild lifecycle
+module: Automatic local PDF replacement lifecycle
 problem_type: architecture_pattern
 component: service_object
 severity: high
 applies_when:
-  - A watched build output may be replaced, truncated, or rewritten while a live review remains open
+  - An owned local PDF may be replaced, truncated, or rewritten while a live review remains open
   - Canonical review intent must survive document replacement without inheriting stale geometry
   - Browser and embedded-editor surfaces must converge on one successor document identity
   - Concurrent review mutations or newer file observations can race candidate validation
@@ -20,18 +20,18 @@ related_components:
   - Review Runtime Protocol
   - Save Sync
   - Protected Recovery
-tags: [generated-pdf, atomic-rebuild, document-generation, rebuild-reconciliation, observation-epoch, generation-fencing, cross-surface-continuity, protected-recovery]
+tags: [local-pdf, document-replacement, document-generation, rebuild-reconciliation, observation-epoch, generation-fencing, cross-surface-continuity, protected-recovery]
 ---
 
-# Atomic generation transitions for rebuilt PDF reviews
+# Atomic generation transitions for local PDF replacement
 
 ## Context
 
-A generated LaTeX PDF can pass through several partial or noisy filesystem states during one compile. Treating every file event as a new document can expose truncated bytes, fork the review session, lose Review Items, or let a slow candidate overwrite newer review work. The embedded workflow instead needed one continuous Placekeeper panel across repeated edits and builds; real VS Code testing confirmed that this continuity, rather than compilation alone, was the user-visible completion condition (session history).
+An owned local PDF may be replaced by any same-path writer. Generated outputs can additionally pass through partial or noisy states during a compile. Treating every file event as a new document can expose truncated bytes, fork the review session, lose Review Items, or let a slow candidate overwrite newer review work. The open review must remain continuous across replacements.
 
-The durable architecture treats the canonical output path as one Generated Output Lineage whose bytes advance through immutable Document Generations. VS Code observes only the bound PDF and its SyncTeX sidecars, coalesces event noise, and sends a monotonically increasing Observation Epoch to the service (`apps/vscode/src/rebuild-observer.ts`). The observer is only a trigger: it delegates candidate validity to the broker and ignores a completed validation when a newer local epoch has appeared (`apps/vscode/src/rebuild-observer.ts`).
+The service owns local-file observation and the generation transition. Host notifications are hints; they do not independently order or commit replacements. A changed candidate must pass stable-byte, Document Generation/source-digest, and observation fences, and all active interaction holds must clear. An admitted observation separately blocks physical save publication until it settles. The broker reconciles the latest durable review state, including annotations completed while candidate inspection was running.
 
-The service owns the transition. It stages stable private bytes, fences the candidate against the current generation, digest, review revision, and newest epoch, carries semantic Review Items through Rebuild Reconciliation, persists the successor generation and Save Sync together, and only then publishes an invalidation. Invalid, unchanged, superseded, racing, or over-budget candidates leave the last successful generation active.
+This broadens the original generated-output design to ordinary owned local PDFs. A build system is only one possible external writer. The distinction between live authoring authority and durable recovery is essential: a disconnected editor must not block refresh forever, but its accepted draft must remain recoverable.
 
 `apps/service/src/sessions/document-replacement-preparation.ts` owns private-byte inspection and successor-state construction. State preparation remains synchronous within the broker’s fenced tail; the helper cannot independently commit or publish.
 
@@ -39,26 +39,41 @@ The service owns the transition. It stages stable private bytes, fences the cand
 
 ### Treat filesystem events as hints
 
-Watch the exact output lineage, not an entire project tree. The extension observer accepts only the canonical PDF and its supported sidecars, advances an epoch for each relevant event, and validates only the latest coalesced epoch (`apps/vscode/src/rebuild-observer.ts`). A source save is a different signal: it marks the last successful generation `possibly-stale` without claiming that a successor PDF exists (`apps/vscode/src/rebuild-observer.ts`, `apps/vscode/src/extension.ts`). Reveal, activation, and bounded interval checks can later revalidate the panel (`apps/vscode/src/rebuild-observer.ts`).
+Observe the owned local PDF through the service's `LocalDocumentObserver`. Its per-session sequence, coalesced queue, retries, and last-hold-release wake-up select the newest candidate for inspection (`apps/service/src/sessions/local-document-observer.ts:358`, `apps/service/src/sessions/session-broker.ts:307`). Host-specific source/sidecar signals remain useful, but ordering and replacement policy belong to the service.
 
-The broker must enforce ordering independently. `replaceLiveDocument` requires a positive epoch, records it in its serialized session tail, and returns `superseded` when the epoch is not newer than the latest epoch recorded in the serialized session; successful transitions persist that epoch with the generation (`apps/service/src/sessions/session-broker.ts`). It compares the epoch again immediately before commit so slow validation cannot publish after a newer observation (`apps/service/src/sessions/session-broker.ts`).
+A source save can mark generated output possibly stale without proving that a successor PDF exists. A file event, same-path replacement, or reconnect must lead to validation rather than a blind viewer reload. The broker rechecks the observation epoch and current source bytes under its serialized session tail before committing (`apps/service/src/sessions/session-broker.ts:2473`).
 
 ### Validate a stable private copy
 
 Prove that one complete regular file was observed. Candidate staging rejects symlinks, non-files, empty files, and files beyond the generation limit; captures device, inode, size, and modification time; opens without following symlinks; and compares file identity around the complete read (`apps/service/src/recovery/source-snapshot.ts`). It rejects partial reads, hashes the copied bytes, and writes and syncs them in a private generation directory before interpretation (`apps/service/src/recovery/source-snapshot.ts`).
 
-The broker re-reads the staged copy, verifies length and digest, and structurally inspects the PDF before admitting it (`apps/service/src/sessions/session-broker.ts`). Same-digest candidates do not create a Document Generation; after the fences are rechecked, they may only restore freshness to current (`apps/service/src/sessions/session-broker.ts`). Invalid candidates preserve predecessor bytes and state and persist `possibly-stale` freshness instead (`apps/service/src/sessions/session-broker.ts`).
+The broker re-reads the staged copy, verifies length and digest, and structurally inspects the PDF before admitting it (`apps/service/src/sessions/session-broker.ts`). Same-digest candidates do not advance Document Generation; they refresh current source and observation metadata and, when needed, restore freshness (`apps/service/src/sessions/session-broker.ts`). Staged or structurally invalid candidates preserve predecessor bytes, Document Generation, and Review Items and mark freshness `possibly-stale`. A temporarily missing ordinary-PDF path preserves current freshness while retaining retryability (`apps/service/src/sessions/session-broker.ts`).
 
 ### Fence every independent race axis
 
-Capture the expected generation, source digest, and review revision before expensive validation, then recheck all three under the session tail immediately before changing canonical state (`apps/service/src/sessions/session-broker.ts`). These identities answer different questions:
+Capture the expected Document Generation and source digest before expensive inspection. Recheck them, current source bytes, and the latest observation under the session tail immediately before changing canonical state (`apps/service/src/sessions/session-broker.ts:2473`). These identities answer different questions:
 
-- The Document Generation identifies which immutable PDF geometry is current and advances monotonically (`packages/core/src/review-model.ts`).
-- The source digest identifies the exact bytes within that generation (`packages/core/src/review-model.ts`).
-- The review revision orders semantic Review Item changes even when the PDF is unchanged (`packages/core/src/review-reducer.ts`, `apps/service/src/sessions/session-broker.ts`).
-- The Observation Epoch orders competing filesystem observations (`apps/service/src/sessions/session-broker.ts`).
+- Document Generation identifies the immutable PDF whose geometry is authoritative.
+- Source digest identifies its exact bytes.
+- Review revision orders semantic annotation changes, including edits made while PDF inspection runs.
+- Observation epoch orders competing file observations.
 
-If any fence changed, reject the candidate and leave current state intact (`apps/service/src/sessions/session-broker.ts`). Do not collapse these axes into one generic “current” flag.
+**A changed review revision is not a reason to discard an otherwise valid candidate.** The previous version of this guide recommended that fence. That would repeatedly reject replacements during legitimate editing and omit the just-finished annotation from the intended transition. Instead, live interaction holds defer publication; once they clear, `prepareReplacementReview(session.state, ...)` uses the latest canonical state under the same serialized tail (`apps/service/src/sessions/session-broker.ts:2523`, `apps/service/src/sessions/session-broker.ts:2543`).
+
+### Separate live authority, durable recovery, and shared presentation
+
+| State | Purpose | End of lifetime |
+| --- | --- | --- |
+| Interaction hold | Prevent a generation change during an admitted source-dependent interaction | Explicit release, durable finalization, or connection-incarnation revocation |
+| Protected draft | Preserve accepted work before final resolution | Durable application or discard |
+| Terminal receipt | Resolve an uncertain Apply/Cancel result after finalization | Separate durable acknowledgement |
+| Active-authoring draft presence | Keep a live draft from appearing as a second recovery card in another viewer | Live claim ends or bounded reconnect presence expires |
+
+A background editor has no inactivity timeout. Conversely, durable draft existence is not evidence that an editor remains alive. Reconnect must authenticate a new incarnation and reacquire authority; it cannot inherit authority merely by presenting a public view identifier (`apps/service/src/sessions/review-interactions.ts:209`, `apps/service/src/sessions/review-interactions.ts:334`).
+
+Finalization persists canonical review state and its idempotent receipt before removing the hold. If persistence fails, the hold and retry identity remain intact (`apps/service/src/sessions/review-interactions.ts:268`). Physical PDF saving is a separate transaction; its source-publication fences must protect the successor without forcing editor completion to wait for file delivery. See the autosave learning below.
+
+Presence suppression must match an **exact draft**, not every draft owned by an attachment. The broker intersects active claims with canonical owner, generation, protected status, and resolved disposition, then returns review state and active IDs atomically (`apps/service/src/sessions/session-broker.ts:3284`). Owner-wide suppression would hide unrelated abandoned work. Persisting active presence would resurrect stale editors after restart; dropping durable drafts with presence would lose recoverable content.
 
 ### Advance PDF and review state together
 
@@ -70,9 +85,9 @@ Within one broker-owned transition, commit the private PDF snapshot and persist 
 
 ### Publish a wake-up, then rebootstrap canonical state
 
-Construct the successor event only after durable state exists and publish it after leaving the commit block (`apps/service/src/sessions/session-broker.ts`). The bounded event carries predecessor generation, successor generation, and review revision (`apps/service/src/sessions/control-socket.ts`). It is notification, not state transfer.
+Publish only after durable successor state is proven. The normal path publishes after the session-tail commit; recovery resolution may publish immediately when it proves the durable successor (`apps/service/src/sessions/session-broker.ts`). The bounded event carries predecessor generation, successor generation, and review revision (`apps/service/src/sessions/control-socket.ts`). It is notification, not state transfer.
 
-The shared document-source coordinator ignores older invalidations, aborts stale bootstraps, and accepts a refreshed bootstrap only when session, generation, and revision satisfy the newest event (`apps/web/src/host/runtime-document-source.ts`). Browser and VS Code therefore converge on the same canonical successor rather than locally applying event fragments.
+The shared document-source coordinator ignores older invalidations, aborts stale bootstraps, and accepts a refreshed bootstrap only when session, generation, and revision satisfy the newest event (`apps/web/src/host/runtime-document-source.ts`). Browser, native, and extension hosts therefore converge on the same canonical successor rather than locally applying event fragments.
 
 ### Preserve the panel without making presentation canonical
 
@@ -82,15 +97,14 @@ The shared viewer separately captures its semantic presentation location before 
 
 ## Why This Matters
 
-The transaction preserves four intentionally distinct state axes: semantic review state, immutable PDF generation, service revision, and disposable viewer presentation. Mixing them causes characteristic failures—stale geometry can become canonical, a viewer preference can accidentally authorize state, or an old candidate can overwrite a new annotation.
+The transaction separates semantic review state, immutable PDF generation, Review Revision, and disposable viewer presentation. Observation order and Save Sync provide additional independent coordination axes. Mixing them causes characteristic failures—stale geometry can become canonical, a viewer preference can accidentally authorize state, or an old candidate can overwrite a new annotation.
 
 Publishing only after persistence and rehydrating through generation/revision fences lets every Review Host Runtime observe the same successor without duplicating reconciliation logic. Keeping panel identity and presentation local lets that successor appear in place instead of reconstructing the user's workspace.
 
-Installed-host testing matters here. During implementation, stale extension assets repeatedly looked like rebuild regressions even after source tests passed; matching build/install hashes and using a fresh VS Code process was necessary before interpreting the live edit-build-refresh loop (session history).
 
 ## When to Apply
 
-- A generated file must update a stateful session without losing semantic work.
+- An owned local file must update a stateful session without losing semantic work.
 - Filesystem notifications may be duplicated, reordered, or emitted while a producer is still writing.
 - Users can mutate canonical review data while candidate validation is in flight.
 - Anchors or drafts must cross changed document geometry with explicit uncertainty.
@@ -102,14 +116,19 @@ Do not use pathname, modification time, or a file event alone as document identi
 
 ### Successful rebuild
 
-1. VS Code coalesces changes for the PDF and sidecar and submits only the newest Observation Epoch (`apps/vscode/test/rebuild-observer.test.ts`).
-2. The broker snapshots private bytes, verifies and inspects them, then proves the epoch, generation, digest, and review revision are still current (`apps/service/src/sessions/session-broker.ts`).
+1. The service coalesces local-file observations and inspects the newest candidate (`apps/service/src/sessions/local-document-observer.ts`).
+2. The broker snapshots private bytes, verifies and inspects them, then proves the epoch, generation, and digest are still current and no interaction hold remains (`apps/service/src/sessions/session-broker.ts`).
 3. It advances the generation, carries stable Review Item IDs through reconciliation, and persists the new lineage and state (`apps/service/test/live-document-replacement.test.ts`).
 4. Each host rebootstraps the same successor; the open panel remains bound to the output path and restores its reading location (`apps/web/test/host-runtime.test.ts`, `apps/vscode/src/review-panel-controller.ts`, `apps/web/src/app/ProductionReviewApp.tsx`).
 
 ### Incomplete, unchanged, or racing candidate
 
-A source save marks the current generation possibly stale without replacing it (`apps/service/test/live-document-replacement.test.ts`). An unchanged candidate restores freshness without incrementing generation (`apps/service/test/live-document-replacement.test.ts`). A structurally invalid candidate preserves the last successful bytes and Review Items (`apps/service/test/live-document-replacement.test.ts`). If review revision changes during inspection, the final fence rejects the candidate; if two candidates overlap, only the newest epoch can commit (`apps/service/test/live-document-replacement.test.ts`).
+A source save marks the current generation possibly stale without replacing it (`apps/service/test/live-document-replacement.test.ts`). An unchanged candidate restores freshness without incrementing generation (`apps/service/test/live-document-replacement.test.ts`). A structurally invalid candidate preserves the last successful bytes and Review Items (`apps/service/test/live-document-replacement.test.ts`). If review revision changes during inspection, final admission reconciles the latest durable state after active holds clear; if two candidates overlap, only the newest current observation can commit (`apps/service/test/live-document-replacement.test.ts`).
+
+### A build arrives during annotation editing
+
+The candidate is inspected but deferred while any participating viewer has an active hold. Apply durably finalizes the annotation and receipt before release. The last release wakes observation again rather than blindly committing old staged bytes. The newest valid PDF is revalidated and reconciled against the just-updated review state. Disconnect instead revokes live authority while preserving the protected draft for recovery.
+
 
 ### Crash at the commit boundary
 
@@ -123,3 +142,5 @@ The recovery test injects failure before the final durable-state rename and obse
 - [Shared production review client with host-specific runtime boundaries](./shared-production-review-client-host-runtime-boundaries.md)
 - [Reject stale viewer selection snapshots before creating annotation anchors](../ui-bugs/reject-stale-viewer-selection-snapshots.md)
 - [PR #68: Fully embedded VS Code LaTeX review](https://github.com/brad-ross/placekeeper/pull/68)
+
+- [PR #117: Automatic local PDF refresh](https://github.com/brad-ross/placekeeper/pull/117) — implementation and follow-up fixes; open at documentation time, 2026-09-18.

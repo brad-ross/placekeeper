@@ -16,7 +16,10 @@ import {
 } from "../src/host/synctex-navigation.js";
 import { initiallyPortableItemIds } from "../src/save/portable-checkpoint.js";
 import { canonicalStateSupersedes, firstUnresolvedReviewItemId } from "../src/review/canonical-state.js";
-import { ProductionReviewApp } from "../src/app/ProductionReviewApp.js";
+import {
+  initialWorkspaceLocationForGeneration,
+  ProductionReviewApp,
+} from "../src/app/ProductionReviewApp.js";
 import { referenceReturnForActiveTab } from "../src/review/reference-presentation.js";
 import {
   viewerAssetUrlsEqual,
@@ -31,17 +34,29 @@ import {
 } from "../src/review/annotation-outline-context.js";
 import {
   buildReattachmentCommand,
+  contextualSelectionActionsAllowed,
   reconciliationCommandRejectionMessage,
   reconciliationFocusKeyAfterRemoval,
   reattachmentCandidateFor,
   reattachmentGenerationIsCurrent,
+  reattachmentInstruction,
   reattachmentTitle,
   ReconciliationWorkspace,
+  type ReconciliationSummaryPresentation,
 } from "../src/review/ReconciliationWorkspace.js";
 import {
   reviewExportPresentation,
 } from "../src/review/DocumentActionsMenu.js";
 import { MemoryReviewLocationHistory } from "../src/review/review-location-history.js";
+
+function renderReconciliationSummary(summary: ReconciliationSummaryPresentation) {
+  return <section aria-label="Annotations">
+    {summary.notice}
+    {summary.editor}
+    <ol>{summary.rows}</ol>
+    {summary.message}
+  </section>;
+}
 
 describe('scope polling identity', () => {
   const scope: ProductionScope = {
@@ -152,6 +167,12 @@ describe('scope polling identity', () => {
 });
 
 describe("one production review tree", () => {
+  it('applies a deliberate initial workspace location only to the launch generation', () => {
+    const location = { pageIndex: 2, top: 180 };
+    expect(initialWorkspaceLocationForGeneration(4, 4, location)).toBe(location);
+    expect(initialWorkspaceLocationForGeneration(4, 5, location)).toBeUndefined();
+  });
+
   it('keeps equivalent runtime viewer authority stable across review-state snapshots', () => {
     expect(viewerAssetUrlsEqual(
       {
@@ -304,6 +325,31 @@ describe("one production review tree", () => {
     expect(reconciliationFocusKeyAfterRemoval(keys, "middle")).toBe("final");
     expect(reconciliationFocusKeyAfterRemoval(keys, "final")).toBe("middle");
     expect(reconciliationFocusKeyAfterRemoval(["only"], "only")).toBeNull();
+  });
+
+  it("suppresses contextual selection actions only while reattaching", () => {
+    expect(contextualSelectionActionsAllowed("reattach")).toBe(false);
+    expect(contextualSelectionActionsAllowed("discard")).toBe(true);
+    expect(contextualSelectionActionsAllowed(null)).toBe(true);
+  });
+
+  it("uses the requested reattachment instruction once selection is possible", () => {
+    expect(reattachmentInstruction("selection", {
+      anchor: null,
+      message: "Select the text to reattach to in the PDF.",
+    })).toBe("Select the text to reattach to in the PDF.");
+    expect(reattachmentInstruction("selection", {
+      anchor: {
+        kind: "selection",
+        pageIndex: 0,
+        quote: "replacement target",
+        prefix: "",
+        suffix: "",
+        rect: { x: 1, y: 2, width: 3, height: 4 },
+        segmentRects: [{ x: 1, y: 2, width: 3, height: 4 }],
+      },
+      message: "Replacement text is valid.",
+    })).toBe("Select the text to reattach to in the PDF.");
   });
 
   it("defers a host forward SyncTeX request until its PDF generation and restoration are ready", () => {
@@ -544,17 +590,18 @@ describe("one production review tree", () => {
       caretAnchor={null}
       refreshStatus="idle"
       onCommand={vi.fn()}
+      renderSummary={renderReconciliationSummary}
     />);
 
-    expect(html).toContain('data-reconciliation-workspace');
-    expect(html).toContain("Needs attention");
+    expect(html).toContain('data-reconciliation-entry=');
+    expect(html).not.toContain("<h2>Needs attention</h2>");
     expect(html).toContain("new sentence");
     expect(html).toContain("unfinished wording");
     expect(html).toContain("Multiple matches");
     expect(html).toContain("Needs new location");
     expect(html).not.toContain('data-reconciliation-action="reattach"');
-    expect(html).toContain('data-reconciliation-action="discard"');
-    expect(html).toContain('aria-label="Reattach previous Replace annotation on page 1"');
+    expect(html).toContain('data-row-action="discard"');
+    expect(html).toContain('aria-label="Reattach previous Replace annotation on page 1 · Multiple matches"');
     expect(html).not.toContain("Ambiguous anchor");
     expect(html).not.toContain("Frozen draft");
     expect(html).not.toContain("two matching passages");
@@ -752,7 +799,7 @@ describe("one production review tree", () => {
     expect(browserHtml).toContain('aria-haspopup="menu"');
   });
 
-  it("omits an empty attention section during rebuild progress and failure", () => {
+  it("keeps rebuild progress and failure notices out of the attention tray", () => {
     const state = createReviewState({
       sessionId: "00000000-0000-4000-8000-000000000091",
       source: { fileId: "00000000-0000-4000-8000-000000000092", digest: "d".repeat(64), byteLength: 1 },
@@ -760,17 +807,157 @@ describe("one production review tree", () => {
       documentGeneration: 2,
     });
 
-    for (const refreshStatus of ["reconciling", "failed"] as const) {
+    const trayMarkup = (["reconciling", "failed"] as const).map((refreshStatus) => {
       const html = renderToStaticMarkup(<ReconciliationWorkspace
         state={state}
         selectionUpdate={{ kind: "cleared", generation: 2 }}
         caretAnchor={null}
         refreshStatus={refreshStatus}
         onCommand={vi.fn()}
+        renderSummary={renderReconciliationSummary}
       />);
       expect(html).not.toContain("Needs attention");
-      expect(html).not.toContain("reconciliation-workspace");
-    }
+      expect(html).not.toContain("reconciliation-workspace__notice");
+      expect(html).not.toContain("A rebuilt PDF is loading");
+      expect(html).not.toContain("The rebuilt PDF could not be validated");
+      expect(html).not.toContain("data-reconciliation-entry");
+      return html;
+    });
+    expect(trayMarkup[0]).toBe(trayMarkup[1]);
+  });
+
+  it("suppresses only exact active protected authoring drafts across peer surfaces", () => {
+    const base = createReviewState({
+      sessionId: "00000000-0000-4000-8000-000000000093",
+      source: { fileId: "00000000-0000-4000-8000-000000000094", digest: "e".repeat(64), byteLength: 1 },
+      documentGeneration: 2,
+    });
+    const draftId = "00000000-0000-4000-8000-000000000095";
+    const abandonedDraftId = "00000000-0000-4000-8000-000000000096";
+    const resolvedItemId = "00000000-0000-4000-8000-000000000097";
+    const state = {
+      ...base,
+      items: [{
+        id: resolvedItemId,
+        kind: "highlight" as const,
+        pageIndex: 0,
+        createdAt: "2026-09-16T18:00:00.000Z",
+        updatedAt: "2026-09-16T18:00:00.000Z",
+        payload: {
+          quote: "current passage",
+          prefix: "the ",
+          suffix: " remains",
+          rect: { x: 1, y: 2, width: 30, height: 8 },
+          segmentRects: [{ x: 1, y: 2, width: 30, height: 8 }],
+          comment: "Canonical resolved annotation",
+        },
+        reconciliation: {
+          schemaVersion: 1 as const,
+          ownerViewId: "view-1",
+          baseGeneration: 1,
+          revision: 1,
+          anchor: {
+            kind: "selection" as const,
+            pageIndex: 0,
+            quote: "current passage",
+            prefix: "the ",
+            suffix: " remains",
+            rect: { x: 1, y: 2, width: 30, height: 8 },
+            segmentRects: [{ x: 1, y: 2, width: 30, height: 8 }],
+          },
+          disposition: { kind: "resolved" as const, generation: 2 },
+          previousAnchors: [],
+        },
+      }],
+      pendingDrafts: [{
+        id: draftId,
+        targetItemId: resolvedItemId,
+        ownerViewId: "view-1",
+        baseGeneration: 2,
+        revision: 1,
+        kind: "highlight" as const,
+        pageIndex: 0,
+        text: "Currently being edited",
+        anchor: {
+          kind: "selection" as const,
+          pageIndex: 0,
+          quote: "current passage",
+          prefix: "the ",
+          suffix: " remains",
+          rect: { x: 1, y: 2, width: 30, height: 8 },
+          segmentRects: [{ x: 1, y: 2, width: 30, height: 8 }],
+        },
+        disposition: { kind: "resolved" as const, generation: 2 },
+        status: "protected" as const,
+        createdAt: "2026-09-16T20:00:00.000Z",
+        updatedAt: "2026-09-16T20:01:00.000Z",
+      }, {
+        id: abandonedDraftId,
+        ownerViewId: "view-1",
+        baseGeneration: 2,
+        revision: 1,
+        kind: "highlight" as const,
+        pageIndex: 0,
+        text: "Abandoned draft from the same owner",
+        anchor: {
+          kind: "selection" as const,
+          pageIndex: 0,
+          quote: "older passage",
+          prefix: "an ",
+          suffix: " remains",
+          rect: { x: 1, y: 12, width: 30, height: 8 },
+          segmentRects: [{ x: 1, y: 12, width: 30, height: 8 }],
+        },
+        disposition: { kind: "resolved" as const, generation: 2 },
+        status: "protected" as const,
+        createdAt: "2026-09-16T19:00:00.000Z",
+        updatedAt: "2026-09-16T19:01:00.000Z",
+      }],
+    };
+
+    const html = renderToStaticMarkup(<ReconciliationWorkspace
+      state={state}
+      activeAuthoringDraftIds={[draftId]}
+      selectionUpdate={{ kind: "cleared", generation: 2 }}
+      refreshStatus="idle"
+      onCommand={vi.fn()}
+      renderSummary={renderReconciliationSummary}
+    />);
+
+    expect(html).not.toContain("Currently being edited");
+    expect(html).toContain("Abandoned draft from the same owner");
+    expect(html).not.toContain("data-reconciliation-item");
+
+    const releasedHtml = renderToStaticMarkup(<ReconciliationWorkspace
+      state={state}
+      activeAuthoringDraftIds={[]}
+      selectionUpdate={{ kind: "cleared", generation: 2 }}
+      refreshStatus="idle"
+      onCommand={vi.fn()}
+      renderSummary={renderReconciliationSummary}
+    />);
+    expect(releasedHtml).toContain("Currently being edited");
+    expect(releasedHtml).toContain("Abandoned draft from the same owner");
+    expect(releasedHtml).not.toContain("data-reconciliation-item");
+
+    const frozenHtml = renderToStaticMarkup(<ReconciliationWorkspace
+      state={{
+        ...state,
+        pendingDrafts: state.pendingDrafts.map((draft) => ({
+          ...draft,
+          status: "frozen" as const,
+          disposition: { kind: "missing" as const, reason: "source-replaced" },
+        })),
+      }}
+      activeAuthoringDraftId={draftId}
+      activeAuthoringDraftIds={[draftId]}
+      selectionUpdate={{ kind: "cleared", generation: 3 }}
+      refreshStatus="idle"
+      onCommand={vi.fn()}
+      renderSummary={renderReconciliationSummary}
+    />);
+    expect(frozenHtml).toContain('data-annotation-status-icon="warning"');
+    expect(frozenHtml).toContain("Currently being edited");
   });
 
   it("exposes Reference return state only for the current tab and document generation", () => {

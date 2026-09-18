@@ -8,9 +8,11 @@ import type {
   DurableSaveDestination,
   DurableSaveSync,
   DurableSourceWorkInterruptionV1,
+  DurableNativeAnnotationLedgerV1,
   RecoverableSourceOwnership,
 } from "../recovery/draft-snapshot.js";
 import type { OpenReviewResult, RecoveryDecision, ReviewPresentationSurface } from "./session-contracts.js";
+import type { ReviewInteractionReceipt } from "./review-interactions.js";
 
 export interface RecoveryOfferRecord {
   readonly expiresAt: string;
@@ -42,6 +44,9 @@ export interface ActiveSession {
   lastExportAt?: string;
   currentOriginalDigest: string;
   acceptedOriginalDigests: string[];
+  /** Exact digest currently being published by the serialized original-save
+   * transaction. This is transient and never enters recovery state. */
+  originalSavePublication?: { readonly token: symbol; readonly digest: string };
   ending: boolean;
   writeTail: Promise<void>;
   destination: DurableSaveDestination;
@@ -49,11 +54,21 @@ export interface ActiveSession {
   rewriteEligibility: PdfRewriteEligibility;
   generationLineage: DurableGenerationRecordV1[];
   latestObservationEpoch: number;
+  /** The newest source observation that must settle before predecessor bytes
+   * may be committed to either the original or an active copy destination. */
+  physicalSaveBarrierEpoch?: number;
   sourceWorkInterruptions: DurableSourceWorkInterruptionV1[];
+  nativeAnnotationLedger: DurableNativeAnnotationLedgerV1;
   syncTexOperationToken?: string;
   readonly documentGeneration: number;
   sourceOwnership: RecoverableSourceOwnership;
   chromeProtected: boolean;
+  interactionReceipts: ReviewInteractionReceipt[];
+  /** Blocks every serialized mutation/save/publication while a thrown recovery
+   * persistence call has an unclassified authoritative winner. */
+  replacementCommitBarrier?: {
+    readonly resolve: () => Promise<"successor" | "predecessor" | "uncertain">;
+  };
 }
 
 export interface BrowserLaunchScope {

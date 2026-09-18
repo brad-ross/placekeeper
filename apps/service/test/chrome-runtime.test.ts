@@ -14,6 +14,7 @@ import {
   type ChromeRuntimeBackend,
   type ChromeRuntimeProjection,
 } from "../src/browser/chrome-runtime.js";
+import { ReviewInteractions } from "../src/sessions/review-interactions.js";
 
 const origin = "chrome-extension://cgegjjjhbhnfgcoipeffhogoojfoekgg/";
 const connectionId = "connection-runtime-1";
@@ -67,8 +68,8 @@ function backend(overrides: Partial<ChromeRuntimeBackend> = {}): ChromeRuntimeBa
 }
 
 async function negotiate(connection: ChromeRuntimeConnection): Promise<void> {
-  await expect(connection.handle({ type: "hello", reviewRuntimeVersion: 2, protocol: "placekeeper.chrome-runtime", protocolVersion: 2, connectionId }))
-    .resolves.toMatchObject({ type: "hello-ack", reviewRuntimeVersion: 2, protocolVersion: 2, connectionId });
+  await expect(connection.handle({ type: "hello", reviewRuntimeVersion: 3, protocol: "placekeeper.chrome-runtime", protocolVersion: 2, connectionId }))
+    .resolves.toMatchObject({ type: "hello-ack", reviewRuntimeVersion: 3, protocolVersion: 2, connectionId });
 }
 
 async function acquire(connection: ChromeRuntimeConnection): Promise<void> {
@@ -79,6 +80,162 @@ async function acquire(connection: ChromeRuntimeConnection): Promise<void> {
 }
 
 describe("Chrome least-authority native runtime", () => {
+  it("rejects malformed interaction owner proofs before acquisition", async () => {
+    for (const interactionOwnerSecret of ["short", "x".repeat(42), "x".repeat(44), `${"x".repeat(42)}!`]) {
+      const connection = new ChromeRuntimeConnection({ callerOrigin: origin, backend: backend() });
+      await negotiate(connection);
+      await expect(connection.handle({
+        type: "claim-owner", lane: "lifecycle", requestId: "request-claim-owner",
+        protocolVersion: 2, connectionId, interactionOwnerSecret,
+      })).resolves.toMatchObject({ type: "failure", reason: "invalid-message" });
+      await connection.disconnect();
+    }
+  });
+
+  it("accepts an old extension's field-free v2 hello without owner negotiation", async () => {
+    const registerInteraction = vi.fn(() => ({
+      sessionId: projection().sessionId,
+      attachmentId: "attachment_legacy_extension",
+      incarnationId: "incarnation_legacy_extension",
+      capability: "c".repeat(43),
+      protocolVersion: 1 as const,
+      capabilities: ["session-wide-holds", "durable-finalize-receipts", "connection-incarnations"] as const,
+    }));
+    const connection = new ChromeRuntimeConnection({
+      callerOrigin: origin,
+      backend: backend({ registerInteraction }),
+      authenticatedOwnerKey: "legacy-extension-owner",
+    });
+    await negotiate(connection);
+    await acquire(connection);
+    await connection.handle({ type: "activate", lane: "lifecycle", protocolVersion: 2,
+      connectionId, requestId: "request-activate-legacy", documentValidated: true });
+    expect(registerInteraction).toHaveBeenCalledWith(expect.any(String), "legacy-extension-owner");
+    await connection.disconnect();
+  });
+
+  it("derives stable session-scoped owner authority without retaining the recovery secret", async () => {
+    const ownerKeys: string[] = [];
+    const commits = vi.fn(async () => 2);
+    const interactions = new ReviewInteractions({ currentGeneration: () => 1 });
+    let draftOwnerViewId: string | undefined;
+    const service = backend({
+      registerInteraction: vi.fn((_canonicalKey, ownerKey) => {
+        ownerKeys.push(ownerKey);
+        return interactions.register(projection().sessionId, ownerKey);
+      }),
+      disconnectInteraction: vi.fn((_canonicalKey, attachment) => {
+        interactions.disconnect(attachment.attachmentId, attachment.incarnationId);
+      }),
+      interaction: vi.fn(async (_canonicalKey, attachment, action, payload) => {
+        const input = payload as {
+          readonly interactionToken: string; readonly order: number; readonly generation?: number;
+          readonly outcome?: "applied" | "discarded"; readonly draftId?: string;
+        };
+        if (action === "begin") {
+          const result = await interactions.begin({
+            ...attachment, interactionToken: input.interactionToken,
+            order: input.order, generation: input.generation!, draftId: input.draftId,
+          });
+          if (draftOwnerViewId === undefined && result.status === "accepted") {
+            draftOwnerViewId = attachment.attachmentId;
+          }
+          return result;
+        }
+        if (action === "finalize") {
+          if (attachment.attachmentId !== draftOwnerViewId) return { status: "unauthorized" };
+          return interactions.finalize({
+            ...attachment, interactionToken: input.interactionToken,
+            order: input.order, outcome: input.outcome!, draftId: input.draftId!, commit: commits,
+          });
+        }
+        if (action === "acknowledge") {
+          return interactions.acknowledge({ ...attachment, interactionToken: input.interactionToken, order: input.order });
+        }
+        return interactions.release({ ...attachment, interactionToken: input.interactionToken, order: input.order });
+      }),
+    });
+    const activateOwner = async (id: string, secret: string) => {
+      const connection = new ChromeRuntimeConnection({ callerOrigin: origin, backend: service });
+      await connection.handle({
+        type: "hello", reviewRuntimeVersion: 3, protocol: "placekeeper.chrome-runtime",
+        protocolVersion: 2, connectionId: id,
+      });
+      await connection.handle({
+        type: "claim-owner", lane: "lifecycle", requestId: `claim-${id}`,
+        protocolVersion: 2, connectionId: id, interactionOwnerSecret: secret,
+      });
+      for (const message of [
+        { type: "begin", lane: "acquisition", requestId: `acquire-${id}`, transferId: `transfer-${id}`, disposition: "remote-temporary", sourceUrl: "https://papers.example.test/paper.pdf" },
+        { type: "chunk", lane: "acquisition", requestId: `chunk-${id}`, transferId: `transfer-${id}`, sequence: 0, data: sourceBytes.toString("base64") },
+        { type: "finish", lane: "acquisition", requestId: `finish-${id}`, transferId: `transfer-${id}`, sequence: 1 },
+        { type: "activate", lane: "lifecycle", requestId: `activate-${id}`, documentValidated: true },
+      ] as const) {
+        await connection.handle({ ...message, protocolVersion: 2, connectionId: id });
+      }
+      return connection;
+    };
+    const invoke = (connection: ChromeRuntimeConnection, id: string, method: "beginInteraction" | "finalizeInteraction" | "acknowledgeInteraction", payload: Record<string, unknown>) =>
+      connection.handle({
+        type: "invoke", lane: "runtime", protocolVersion: 2,
+        connectionId: id, requestId: `request-${method}-${id}`,
+        generation: 1, revision: 0, method, payload,
+        idempotencyKey: `operation-${method}-${id}`,
+      });
+
+    const first = await activateOwner("owner-connection-1", "a".repeat(43));
+    await expect(invoke(first, "owner-connection-1", "beginInteraction", {
+      interactionToken: "interaction-owner-recovery", order: 1, generation: 1,
+      draftId: "draft-owner-recovery",
+    })).resolves.toMatchObject({ type: "result", payload: { status: "accepted" } });
+    await first.disconnect();
+    expect(interactions.held(projection().sessionId)).toBe(false);
+    expect(draftOwnerViewId).toMatch(/^attachment_/u);
+    const unrelated = await activateOwner("owner-connection-3", "b".repeat(43));
+    await invoke(unrelated, "owner-connection-3", "beginInteraction", {
+      interactionToken: "interaction-unrelated-owner", order: 1, generation: 1,
+      draftId: "draft-owner-recovery",
+    });
+    await expect(invoke(unrelated, "owner-connection-3", "finalizeInteraction", {
+      interactionToken: "interaction-unrelated-owner", order: 2, outcome: "applied",
+      draftId: "draft-owner-recovery", expectedDraftRevision: 0,
+    })).resolves.toMatchObject({ type: "result", payload: { status: "unauthorized" } });
+
+    const resumed = await activateOwner("owner-connection-2", "a".repeat(43));
+    await invoke(resumed, "owner-connection-2", "beginInteraction", {
+      interactionToken: "interaction-owner-recovery", order: 1, generation: 1,
+      draftId: "draft-owner-recovery",
+    });
+    expect(interactions.held(projection().sessionId)).toBe(true);
+    const finalized = await invoke(resumed, "owner-connection-2", "finalizeInteraction", {
+      interactionToken: "interaction-owner-recovery", order: 2, outcome: "applied",
+      draftId: "draft-owner-recovery", expectedDraftRevision: 0,
+    });
+    expect(finalized).toMatchObject({ type: "result", payload: { status: "finalized", reviewRevision: 2 } });
+    await expect(invoke(resumed, "owner-connection-2", "finalizeInteraction", {
+      interactionToken: "interaction-owner-recovery", order: 3, outcome: "applied",
+      draftId: "draft-owner-recovery", expectedDraftRevision: 0,
+    })).resolves.toMatchObject({
+      type: "result",
+      payload: { status: "finalized", outcome: "applied", reviewRevision: 2 },
+    });
+
+    expect(ownerKeys[2]).toBe(ownerKeys[0]);
+    expect(ownerKeys[1]).not.toBe(ownerKeys[0]);
+    const forkOwnerKey = `chrome-recovery:${createHash("sha256")
+      .update("placekeeper.chrome-owner\0")
+      .update("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+      .update("\0")
+      .update("a".repeat(43))
+      .digest("base64url")}`;
+    expect(ownerKeys[0]).not.toBe(forkOwnerKey);
+    expect(ownerKeys.every((key) => !key.includes("a".repeat(43)) && !key.includes("b".repeat(43)))).toBe(true);
+    expect(commits).toHaveBeenCalledOnce();
+    expect(service.begin).toHaveBeenCalledWith(expect.objectContaining({ disposition: "remote-temporary" }));
+    await resumed.disconnect();
+    await unrelated.disconnect();
+  });
+
   it("keeps protected recovery service-owned until one bound resume/discard/fork choice", async () => {
     const choose = vi.fn(async () => ({
       canonicalKey: `source-identity-1:${sourceDigest}:1`,
@@ -145,6 +302,64 @@ describe("Chrome least-authority native runtime", () => {
     expect(JSON.stringify(connection.diagnostics())).not.toMatch(/credential|sourceUrl|presentation/i);
   });
 
+  it("binds interaction operations to the authenticated Chrome connection and revokes it on detach", async () => {
+    const attachment = {
+      sessionId: projection().sessionId,
+      attachmentId: "attachment_chrome_1234",
+      incarnationId: "incarnation_chrome_1234",
+      capability: "c".repeat(43),
+      protocolVersion: 1 as const,
+      capabilities: ["session-wide-holds", "durable-finalize-receipts", "connection-incarnations"] as const,
+    };
+    const registerInteraction = vi.fn(() => attachment);
+    const interaction = vi.fn(async () => ({ status: "accepted", generation: 1, ownerViewId: "chrome-view" }));
+    const disconnectInteraction = vi.fn();
+    const service = backend({ registerInteraction, interaction, disconnectInteraction });
+    const authority = new ChromeRuntimeServiceAuthority(service);
+    const connection = new ChromeRuntimeConnection({
+      callerOrigin: origin,
+      backend: authority,
+      authenticatedOwnerKey: "chrome:authenticated-port-1234",
+    });
+    await negotiate(connection);
+    await acquire(connection);
+    await connection.handle({
+      type: "activate", lane: "lifecycle", protocolVersion: 2, connectionId,
+      requestId: "request-activate-interaction", documentValidated: true,
+    });
+
+    const operations = [
+      ["beginInteraction", "begin", { interactionToken: "interaction_chrome_1234", order: 1, generation: 1 }],
+      ["finalizeInteraction", "finalize", { interactionToken: "interaction_chrome_1234", order: 2, outcome: "discarded", draftId: "draft_chrome_1234", expectedDraftRevision: 0 }],
+      ["releaseInteraction", "release", { interactionToken: "interaction_chrome_1234", order: 3 }],
+      ["acknowledgeInteraction", "acknowledge", { interactionToken: "interaction_chrome_1234", order: 4 }],
+    ] as const;
+    for (const [method, _action, payload] of operations) {
+      await expect(connection.handle({
+        type: "invoke", lane: "runtime", protocolVersion: 2, connectionId,
+        requestId: `request-${method}`, generation: 1, revision: 0, method, payload,
+        idempotencyKey: `operation-${method}`,
+      })).resolves.toMatchObject({ type: "result", method, payload: { status: "accepted" } });
+    }
+
+    expect(registerInteraction).toHaveBeenCalledExactlyOnceWith(
+      `source-identity-1:${sourceDigest}:1`,
+      "chrome:authenticated-port-1234",
+    );
+    expect(interaction.mock.calls.map((call) => call.slice(1, 3))).toEqual(
+      operations.map(([, action]) => [attachment, action]),
+    );
+    expect(service.invoke).not.toHaveBeenCalled();
+
+    await connection.disconnect();
+    expect(disconnectInteraction).toHaveBeenCalledExactlyOnceWith(
+      `source-identity-1:${sourceDigest}:1`,
+      attachment,
+    );
+    await connection.disconnect();
+    expect(disconnectInteraction).toHaveBeenCalledOnce();
+  });
+
   it("strips internal source authority before returning a service projection to Chrome", async () => {
     const release = vi.fn(async () => undefined);
     const unsafeProjection = {
@@ -179,10 +394,10 @@ describe("Chrome least-authority native runtime", () => {
 
   it("fails closed on skew, mid-port version changes, v1 smuggling, and agent-only methods", async () => {
     const preflight = new ChromeRuntimeConnection({ callerOrigin: origin, backend: backend() });
-    await expect(preflight.handle({ type: "hello", reviewRuntimeVersion: 2, protocol: "placekeeper.chrome-runtime", protocolVersion: 1, connectionId }))
+    await expect(preflight.handle({ type: "hello", reviewRuntimeVersion: 3, protocol: "placekeeper.chrome-runtime", protocolVersion: 1, connectionId }))
       .resolves.toMatchObject({ type: "failure", reason: "protocol-mismatch" });
 
-    for (const reviewRuntimeVersion of [undefined, 1, 3]) {
+    for (const reviewRuntimeVersion of [undefined, 1, 2]) {
       const mixed = new ChromeRuntimeConnection({ callerOrigin: origin, backend: backend() });
       await expect(mixed.handle({ type: "hello", protocol: "placekeeper.chrome-runtime", protocolVersion: 2,
         connectionId, ...(reviewRuntimeVersion === undefined ? {} : { reviewRuntimeVersion }) }))
@@ -293,7 +508,7 @@ describe("Chrome least-authority native runtime", () => {
     const authority = new ChromeRuntimeServiceAuthority(delegate);
     const invokeThroughFreshConnection = async (id: string) => {
       const connection = new ChromeRuntimeConnection({ callerOrigin: origin, backend: authority });
-      await connection.handle({ type: "hello", reviewRuntimeVersion: 2, protocol: "placekeeper.chrome-runtime", protocolVersion: 2, connectionId: id });
+      await connection.handle({ type: "hello", reviewRuntimeVersion: 3, protocol: "placekeeper.chrome-runtime", protocolVersion: 2, connectionId: id });
       await connection.handle({ type: "begin", lane: "acquisition", protocolVersion: 2, connectionId: id, requestId: `request-acquire-${id}`, transferId: `transfer-${id}`, disposition: "remote-temporary", sourceUrl: "https://papers.example.test/paper.pdf" });
       await connection.handle({ type: "chunk", lane: "acquisition", protocolVersion: 2, connectionId: id, requestId: `request-chunk-${id}`, transferId: `transfer-${id}`, sequence: 0, data: sourceBytes.toString("base64") });
       await connection.handle({ type: "finish", lane: "acquisition", protocolVersion: 2, connectionId: id, requestId: `request-finish-${id}`, transferId: `transfer-${id}`, sequence: 1 });
@@ -332,6 +547,59 @@ describe("Chrome least-authority native runtime", () => {
       .resolves.toMatchObject({ type: "failure", reason: "invalid-message" });
     await expect(connection.handle({ type: "read", lane: "resource", protocolVersion: 2, connectionId, requestId: "request-resource-3", resource: "document", generation: 2, offset: 0, length: 8 }))
       .resolves.toMatchObject({ type: "failure", reason: "stale-generation" });
+  });
+
+  it("invalidates freshness-only projection changes without a revision bump", async () => {
+    const initial = projection();
+    const stale = {
+      ...initial,
+      state: {
+        ...(initial.state as Record<string, unknown>),
+        workflow: {
+          ...((initial.state as Record<string, unknown>).workflow as Record<string, unknown>),
+          freshness: "possibly-stale",
+        },
+      },
+    };
+    const lifecycleChanged = {
+      ...stale,
+      state: {
+        ...(stale.state as Record<string, unknown>),
+        lifecycle: "recovery",
+      },
+    };
+    const current = vi.fn()
+      .mockResolvedValueOnce(stale)
+      .mockResolvedValueOnce(lifecycleChanged);
+    const connection = new ChromeRuntimeConnection({
+      callerOrigin: origin,
+      backend: backend({ current }),
+    });
+    await negotiate(connection);
+    await acquire(connection);
+    await connection.handle({
+      type: "activate", lane: "lifecycle", protocolVersion: 2, connectionId,
+      requestId: "request-activate-freshness", documentValidated: true,
+    });
+
+    await expect(connection.handle({
+      type: "keepalive", lane: "lifecycle", protocolVersion: 2, connectionId,
+      requestId: "request-keepalive-freshness",
+    })).resolves.toMatchObject({
+      type: "invalidation",
+      generation: initial.generation,
+      revision: initial.revision,
+      reason: "recovery",
+    });
+    await expect(connection.handle({
+      type: "keepalive", lane: "lifecycle", protocolVersion: 2, connectionId,
+      requestId: "request-keepalive-lifecycle",
+    })).resolves.toMatchObject({
+      type: "invalidation",
+      generation: initial.generation,
+      revision: initial.revision,
+      reason: "recovery",
+    });
   });
 
   it("polls service-owned invalidations on a bounded lifecycle heartbeat", async () => {
@@ -537,7 +805,7 @@ describe("Chrome least-authority native runtime", () => {
     try {
       const manager = new ChromeRuntimeManager(new ChromeRuntimeServiceAuthority(backend()), { idleLeaseMs: 25 });
       await manager.handle("manager-port-id-0001", {
-        type: "hello", reviewRuntimeVersion: 2, protocol: "placekeeper.chrome-runtime", protocolVersion: 2,
+        type: "hello", reviewRuntimeVersion: 3, protocol: "placekeeper.chrome-runtime", protocolVersion: 2,
         connectionId: "manager-connection-1",
       });
       expect(manager.activity()).toEqual({ connections: 1, queuedEvents: 0 });
@@ -553,11 +821,11 @@ describe("Chrome least-authority native runtime", () => {
     const authority = new ChromeRuntimeServiceAuthority(backend(), { quota });
     const manager = new ChromeRuntimeManager(authority);
     await manager.handle("manager-port-id-0001", {
-      type: "hello", reviewRuntimeVersion: 2, protocol: "placekeeper.chrome-runtime", protocolVersion: 2,
+      type: "hello", reviewRuntimeVersion: 3, protocol: "placekeeper.chrome-runtime", protocolVersion: 2,
       connectionId: "manager-connection-1",
     });
     await expect(manager.handle("manager-port-id-0002", {
-      type: "hello", reviewRuntimeVersion: 2, protocol: "placekeeper.chrome-runtime", protocolVersion: 2,
+      type: "hello", reviewRuntimeVersion: 3, protocol: "placekeeper.chrome-runtime", protocolVersion: 2,
       connectionId: "manager-connection-2",
     })).resolves.toMatchObject([{ type: "failure", reason: "host-busy" }]);
     await manager.close();

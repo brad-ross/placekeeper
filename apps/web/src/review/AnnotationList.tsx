@@ -2,7 +2,7 @@ import { nativePdfAnnotationSubtype, canEditPdfAnnotationComment, canDeletePdfAn
 import { annotationContent as annotationListContent, type AnnotationContent as AnnotationListContent } from './annotation-content.js';
 export { annotationContent as annotationListContent } from './annotation-content.js';
 export type { AnnotationContent as AnnotationListContent } from './annotation-content.js';
-import { useLayoutEffect, useRef } from 'react';
+import { useLayoutEffect, useMemo, useRef, type ReactElement, type ReactNode } from 'react';
 import type { ReviewItem } from '../../../../packages/core/src/review-model.js';
 import {
   existingAnnotationKey,
@@ -48,6 +48,17 @@ export interface AnnotationListProps {
   copyLinkForItem?(item: ReviewItem): CopyLinkControlProps | undefined;
   onEdit(item: ReviewItem, trigger: HTMLButtonElement): void;
   onDelete(item: ReviewItem): Promise<void> | void;
+  attention?: AnnotationAttentionPresentation;
+}
+
+export interface AnnotationAttentionPresentation {
+  readonly count: number;
+  readonly rows: ReactNode;
+  readonly notice: ReactNode;
+  readonly message: ReactNode;
+  readonly editor: ReactElement | null;
+  readonly ownedItemIds: readonly string[];
+  readonly existingAnnotationKeys: readonly string[];
 }
 
 type AnnotationListEntry =
@@ -116,6 +127,15 @@ export interface AnnotationRowContentProps {
   readonly onEdit?: (trigger: HTMLButtonElement) => void;
   readonly onDelete?: () => void;
   readonly onDismiss?: () => void;
+  readonly extraActions?: readonly RowAction[];
+  readonly navigationLabel?: string;
+  readonly navigationTitle?: string;
+  readonly statusIcon?: 'warning';
+  readonly statusIconLabel?: string;
+  readonly navigationFocusToken?: string;
+  readonly navigationExpanded?: boolean;
+  readonly navigationControls?: string;
+  readonly navigationDisabled?: boolean;
 }
 
 export function AnnotationRowContent({
@@ -134,6 +154,15 @@ export function AnnotationRowContent({
   onEdit,
   onDelete,
   onDismiss,
+  extraActions = [],
+  navigationLabel,
+  navigationTitle,
+  statusIcon,
+  statusIconLabel,
+  navigationFocusToken,
+  navigationExpanded,
+  navigationControls,
+  navigationDisabled,
 }: AnnotationRowContentProps) {
   const presentation = suppliedPresentation ?? annotationListContent(item);
   const text = [presentation.sourceText, presentation.content, presentation.quoteText].filter(Boolean).join(' ');
@@ -175,23 +204,35 @@ export function AnnotationRowContent({
     id: 'close', kind: 'command', icon: 'close',
     label: 'Close annotation preview', title: 'Close', onInvoke: onDismiss,
   });
+  actions.push(...extraActions);
 
   return <div className="annotation-item__content">
     {onNavigate ? <button
       ref={navigationRef}
       type="button"
       className="annotation-item__navigation"
-      aria-label={annotationAccessibleLabel({
+      data-workspace-focus-token={navigationFocusToken}
+      aria-expanded={navigationExpanded}
+      aria-controls={navigationControls}
+      disabled={navigationDisabled}
+      aria-label={navigationLabel ?? annotationAccessibleLabel({
         kind,
         pageNumber,
         lastPageNumber,
         ...(text ? { excerpt: text } : {}),
       })}
-      title={`Go to ${kindLabel} annotation on ${pageDescription}`}
+      title={navigationTitle ?? `Go to ${kindLabel} annotation on ${pageDescription}`}
       onClick={onNavigate}
     /> : null}
     <div className="annotation-item__title-row">
-      <AnnotationMetadata kind={kind} pageNumber={pageNumber} lastPageNumber={lastPageNumber} rowHead />
+      <AnnotationMetadata
+        kind={kind}
+        pageNumber={pageNumber}
+        lastPageNumber={lastPageNumber}
+        rowHead
+        {...(statusIcon ? { statusIcon } : {})}
+        {...(statusIconLabel ? { statusIconLabel } : {})}
+      />
       <RowActionGroup actions={actions} rowLabel={`${kindLabel} annotation on ${pageDescription}`} />
     </div>
     <div className="annotation-item__body-row">
@@ -227,9 +268,27 @@ export function AnnotationList({
   copyLinkForItem,
   onEdit,
   onDelete,
+  attention,
 }: AnnotationListProps) {
-  const ordered = documentOrderedItems(items);
-  const combined = combinedDocumentOrderedAnnotations(items, existingAnnotations);
+  const visibleItems = useMemo(() => {
+    if (attention === undefined) return items;
+    const excluded = new Set(attention.ownedItemIds);
+    return items.filter((item) => !excluded.has(item.id));
+  }, [attention?.ownedItemIds, items]);
+  const visibleExistingAnnotations = useMemo<ExistingAnnotationsDiscovery>(() => {
+    if (existingAnnotations.status !== 'ready' || attention === undefined) return existingAnnotations;
+    const excluded = new Set(attention.existingAnnotationKeys);
+    return {
+      ...existingAnnotations,
+      items: existingAnnotations.items.filter(
+        (annotation) => !excluded.has(existingAnnotationKey(annotation)),
+      ),
+    };
+  }, [attention?.existingAnnotationKeys, existingAnnotations]);
+  const combined = useMemo(
+    () => combinedDocumentOrderedAnnotations(visibleItems, visibleExistingAnnotations),
+    [visibleItems, visibleExistingAnnotations],
+  );
   const listRef = useRef<HTMLOListElement>(null);
   const entryRefs = useRef(new Map<string, HTMLButtonElement>());
   const rowRefs = useRef(new Map<string, HTMLLIElement>());
@@ -266,6 +325,21 @@ export function AnnotationList({
     });
   };
 
+  if (attention?.editor != null) {
+    return (
+      <section
+        className="annotation-drawer__owned"
+        data-annotation-origin="combined"
+        data-existing-annotations-state={existingAnnotations.status}
+        data-workspace-focus-token="annotations:section"
+        aria-label="Annotations"
+        tabIndex={-1}
+      >
+        {attention.editor}
+      </section>
+    );
+  }
+
   return (
     <section
       className="annotation-drawer__owned"
@@ -275,7 +349,9 @@ export function AnnotationList({
       aria-label="Annotations"
       tabIndex={-1}
     >
+      {attention?.notice}
       <ol ref={listRef} tabIndex={-1} aria-label="Annotations in document order">
+        {attention?.rows}
         {combined.map((entry) => {
           if (entry.origin === 'source') {
             const { annotation } = entry;
@@ -283,7 +359,7 @@ export function AnnotationList({
             const active = activeExistingAnnotationKey === key;
             const readerRecord = projectExistingAnnotationReader(annotation, {
               documentGeneration,
-              discoveryGeneration: existingAnnotations.generation,
+              discoveryGeneration: visibleExistingAnnotations.generation,
             });
             return <li
               key={`source:${key}`}
@@ -376,6 +452,7 @@ export function AnnotationList({
           );
         })}
       </ol>
+      {attention?.message}
       {existingAnnotations.status === 'loading' ? (
         <p className="annotation-status" data-annotation-status="loading" role="status">
           <ReviewIcon name="loading" className="review-icon annotation-status__icon" />
@@ -389,7 +466,7 @@ export function AnnotationList({
           <button type="button" title="Retry loading existing annotations" onClick={onRetryExistingAnnotations}>Retry</button>
         </div>
       ) : null}
-      {ordered.length === 0 && existingAnnotations.status === 'empty' ? <p className="annotation-empty" data-annotation-status="empty">Select text in the PDF to add an annotation.</p> : null}
+      {(attention?.count ?? 0) === 0 && items.length === 0 && existingAnnotations.status === 'empty' ? <p className="annotation-empty" data-annotation-status="empty">Select text in the PDF to add an annotation.</p> : null}
     </section>
   );
 }

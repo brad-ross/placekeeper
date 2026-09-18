@@ -133,7 +133,7 @@ export type LiveDocumentReplacementResult =
       readonly migratedTaskSessionId?: string;
     }
   | {
-      readonly status: "same-digest" | "invalid" | "superseded" | "generation-conflict" |
+      readonly status: "same-digest" | "invalid" | "superseded" | "generation-conflict" | "deferred" |
         "retention-rejected";
       readonly sessionId: string;
       readonly documentGeneration: number;
@@ -146,6 +146,15 @@ export interface DocumentGenerationEvent {
   readonly documentGeneration: number;
   readonly reviewRevision: number;
   readonly migratedTaskSessionId?: string;
+}
+
+export interface LocalDocumentObservationEvent {
+  readonly sessionId: string;
+  readonly sourcePath: string;
+  readonly observationSequence: number;
+  readonly reason: string;
+  readonly changed: boolean;
+  readonly publication: "generated-output" | "ordinary-local";
 }
 
 export interface SourceWorkInterruptionCollection {
@@ -166,6 +175,7 @@ export interface AtomicSessionProjection {
   readonly sessionId: string;
   readonly documentGeneration: number;
   readonly state: ReviewState;
+  readonly activeAuthoringDraftIds: readonly string[];
   readonly destination: DurableSaveDestination;
   readonly sync: DurableSaveSync;
   readonly sourceByteLength: number;

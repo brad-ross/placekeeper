@@ -4,16 +4,17 @@ export type ValidationReason = "watcher" | "reveal" | "activation" | "interval";
 
 export interface RebuildValidationInput {
   readonly outputPath: string;
-  readonly observationEpoch: number;
+  readonly hostHintToken: string;
   readonly reason: ValidationReason;
 }
 
 export interface RebuildObserverOptions<Result> {
   readonly outputPath: string;
   readonly validate: (input: RebuildValidationInput) => Promise<Result>;
-  readonly markPossiblyStale: (input: { readonly observationEpoch: number }) => Promise<void>;
+  readonly markPossiblyStale: (input: { readonly hostHintToken: string }) => Promise<void>;
   readonly onCurrentResult?: (result: Result, input: RebuildValidationInput) => void;
   readonly initialEpoch?: number;
+  readonly hostHintPrefix?: string;
 }
 
 /** Coalesces noisy filesystem signals while leaving candidate validation to the broker. */
@@ -23,6 +24,7 @@ export class RebuildObserver<Result> {
   readonly #validate: RebuildObserverOptions<Result>["validate"];
   readonly #markPossiblyStale: RebuildObserverOptions<Result>["markPossiblyStale"];
   readonly #onCurrentResult: RebuildObserverOptions<Result>["onCurrentResult"];
+  readonly #hostHintPrefix: string;
   #latestEpoch: number;
   #pendingWatcherEpoch: number | undefined;
   #possiblyStale = false;
@@ -38,6 +40,7 @@ export class RebuildObserver<Result> {
     this.#validate = options.validate;
     this.#markPossiblyStale = options.markPossiblyStale;
     this.#onCurrentResult = options.onCurrentResult;
+    this.#hostHintPrefix = options.hostHintPrefix ?? "vscode";
     this.#latestEpoch = options.initialEpoch ?? 0;
     if (!Number.isSafeInteger(this.#latestEpoch) || this.#latestEpoch < 0) {
       throw new RangeError("initialEpoch must be a non-negative safe integer");
@@ -86,7 +89,11 @@ export class RebuildObserver<Result> {
   async #run(epoch: number, reason: ValidationReason): Promise<void> {
     let result: Result;
     try {
-      result = await this.#validate({ outputPath: this.#outputPath, observationEpoch: epoch, reason });
+      result = await this.#validate({
+        outputPath: this.#outputPath,
+        hostHintToken: `${this.#hostHintPrefix}:${epoch}`,
+        reason,
+      });
     } catch {
       if (!this.#disposed && epoch === this.#latestEpoch) {
         this.#possiblyStale = true;
@@ -97,14 +104,14 @@ export class RebuildObserver<Result> {
     if (this.#disposed || epoch !== this.#latestEpoch) return;
     this.#onCurrentResult?.(result, {
       outputPath: this.#outputPath,
-      observationEpoch: epoch,
+      hostHintToken: `${this.#hostHintPrefix}:${epoch}`,
       reason,
     });
   }
 
   async #markStale(observationEpoch: number): Promise<void> {
     try {
-      await this.#markPossiblyStale({ observationEpoch });
+      await this.#markPossiblyStale({ hostHintToken: `${this.#hostHintPrefix}:${observationEpoch}` });
     } catch {
       // Local stale state remains authoritative until a later validation succeeds.
     }

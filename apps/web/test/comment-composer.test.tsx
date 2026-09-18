@@ -1,7 +1,10 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 
-import { boundedTextAreaHeight, CommentComposer } from '../src/review/CommentComposer.js';
+import {
+  boundedTextAreaHeight,
+  CommentComposer,
+} from '../src/review/CommentComposer.js';
 
 function renderComposer(overrides: Partial<Parameters<typeof CommentComposer>[0]> = {}) {
   return renderToStaticMarkup(
@@ -86,6 +89,19 @@ describe('CommentComposer contextual authoring contract', () => {
     expect(requiredWhitespace).not.toContain('class="comment-composer__label"');
     expect(requiredWhitespace).toContain('disabled=""');
     expect(allowedWhitespace).not.toContain('disabled=""');
+  });
+
+  it('keeps a finalized draft read-only while canonical state retries', () => {
+    const html = renderComposer({
+      initialValue: 'Durably saved text',
+      terminalPending: true,
+      terminalPendingMessage: 'Saved. Waiting for the latest review state; retrying automatically.',
+    });
+
+    expect(html).toContain('readOnly=""');
+    expect(html).toContain('Durably saved text');
+    expect(html).toContain('Saved. Waiting for the latest review state; retrying automatically.');
+    expect(html.match(/disabled=""/g)?.length).toBeGreaterThanOrEqual(2);
   });
 
   it('clamps auto-growth before the editor becomes internally scrollable', () => {

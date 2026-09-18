@@ -152,8 +152,9 @@ describe('standard annotation round trips', () => {
     await expect(verifyReviewedPdf({ sourcePdf, candidatePdf: written.pdfBytes, evidence: written.evidence,
       annotations: requests, manageNativeAnnotations: true })).resolves.toMatchObject({ pageCount: 1 });
     const reopened = await readEditableReviewItems(written.pdfBytes);
-    expect(reopened.map(({ id, payload }) => ({ id, payload })))
-      .toEqual(edited.map(({ id, payload }) => ({ id, payload })));
+    expect(reopened.map(({ id, payload }) => ({ id, payload: { ...payload, identityProvenance: undefined } })))
+      .toEqual(edited.map(({ id, payload }) => ({ id, payload: { ...payload, identityProvenance: undefined } })));
+    expect(reopened.map(({ payload }) => payload.identityProvenance)).toEqual(['verified', 'verified']);
     const remaining = reopened.slice(1).map((item) => projectReviewItem(item));
     const deleted = await writer.write({ sourcePdf: written.pdfBytes, sourceSha256: sha256(written.pdfBytes),
       revision: 2, annotations: remaining, manageNativeAnnotations: true });
@@ -161,6 +162,91 @@ describe('standard annotation round trips', () => {
       annotations: remaining, manageNativeAnnotations: true })).resolves.toMatchObject({ pageCount: 1 });
     expect((await readEditableReviewItems(deleted.pdfBytes)).map(({ id }) => id)).toEqual([reopened[1]!.id]);
   });
+
+  it('does not treat duplicated legacy Placekeeper names as native identity', async () => {
+    const pdf = await PDFDocument.create();
+    const page = pdf.addPage([612, 792]);
+    const legacyName = 'placekeeper-native:5e14134c-6d1b-4bbd-8000-000000000000';
+    page.node.set(PDFName.of('Annots'), pdf.context.obj([
+      pdf.context.register(pdf.context.obj({ Type: 'Annot', Subtype: 'Text',
+        Rect: [100, 600, 120, 620], Contents: PDFString.of('First'), NM: PDFString.of(legacyName) })),
+      pdf.context.register(pdf.context.obj({ Type: 'Annot', Subtype: 'Text',
+        Rect: [200, 600, 220, 620], Contents: PDFString.of('Second'), NM: PDFString.of(legacyName) })),
+    ]));
+    const sourcePdf = await pdf.save();
+    const imported = await readEditableReviewItems(sourcePdf);
+    expect(imported).toHaveLength(2);
+    expect(new Set(imported.map(({ id }) => id)).size).toBe(2);
+    expect(imported.map(({ payload }) => payload.identityProvenance))
+      .toEqual(['generation-ordinal', 'generation-ordinal']);
+
+    const writer = await createSelectedPdfWriter();
+    const promoted = await writer.write({ sourcePdf, sourceSha256: sha256(sourcePdf), revision: 1,
+      annotations: imported.map((item) => projectReviewItem(item)), manageNativeAnnotations: true });
+    const reopened = await readEditableReviewItems(promoted.pdfBytes);
+    expect(reopened.map(({ id }) => id)).toEqual(imported.map(({ id }) => id));
+    expect(reopened.map(({ payload }) => payload.identityProvenance)).toEqual(['verified', 'verified']);
+
+    const retained = reopened.slice(1).map((item) => projectReviewItem({
+      ...item,
+      payload: { ...item.payload, comment: 'Second edited' },
+    }));
+    const deleted = await writer.write({ sourcePdf: promoted.pdfBytes,
+      sourceSha256: sha256(promoted.pdfBytes), revision: 2,
+      annotations: retained, manageNativeAnnotations: true });
+    const finalItems = await readEditableReviewItems(deleted.pdfBytes);
+    expect(finalItems).toHaveLength(1);
+    expect(finalItems[0]).toMatchObject({ id: reopened[1]!.id, payload: { comment: 'Second edited' } });
+  }, 60_000);
+
+  it('allocates different verified IDs when independent PDFs promote the same unnamed ordinal', async () => {
+    const source = async (custom?: string) => {
+      const pdf = await PDFDocument.create();
+      const page = pdf.addPage([612, 792]);
+      page.node.set(PDFName.of('Annots'), pdf.context.obj([
+        pdf.context.register(pdf.context.obj({
+          Type: 'Annot', Subtype: 'Text', Rect: [100, 600, 120, 620],
+          Contents: PDFString.of('Independent mark'),
+          ...(custom === undefined ? {} : { EPDFCustom: PDFHexString.fromText(custom) }),
+        })),
+      ]));
+      return pdf.save();
+    };
+    const firstSource = await source('{malformed bespoke metadata');
+    const secondSource = await source();
+    const firstImported = await readEditableReviewItems(firstSource);
+    const secondImported = await readEditableReviewItems(secondSource);
+    expect(firstImported[0]!.id).not.toBe(secondImported[0]!.id);
+    const writer = await createSelectedPdfWriter();
+    const promote = (bytes: Uint8Array, item: ReviewItem) => writer.write({
+      sourcePdf: bytes,
+      sourceSha256: sha256(bytes),
+      revision: 1,
+      annotations: [projectReviewItem(item)],
+      manageNativeAnnotations: true,
+    });
+    const [firstSaved, secondSaved] = await Promise.all([
+      promote(firstSource, firstImported[0]!),
+      promote(secondSource, secondImported[0]!),
+    ]);
+    const [firstVerified, secondVerified] = await Promise.all([
+      readEditableReviewItems(firstSaved.pdfBytes),
+      readEditableReviewItems(secondSaved.pdfBytes),
+    ]);
+    expect(firstVerified[0]).toMatchObject({
+      id: firstImported[0]!.id,
+      payload: { identityProvenance: 'verified' },
+    });
+    expect(secondVerified[0]).toMatchObject({
+      id: secondImported[0]!.id,
+      payload: { identityProvenance: 'verified' },
+    });
+    expect(firstVerified[0]!.id).not.toBe(secondVerified[0]!.id);
+    const firstPdf = await PDFDocument.load(firstSaved.pdfBytes);
+    const firstDictionary = firstPdf.getPage(0).node.lookup(PDFName.of('Annots'), PDFArray).lookup(0, PDFDict);
+    expect((firstDictionary.lookup(PDFName.of('EPDFCustom')) as PDFHexString).decodeText())
+      .toBe('{malformed bespoke metadata');
+  }, 60_000);
 });
 const annotations: readonly ReviewAnnotation[] = [
   {

@@ -1,0 +1,90 @@
+{
+  "document": "docs/plans/2026-09-15-1824-feat-automatic-local-pdf-refresh-plan.md",
+  "mode": "non-interactive",
+  "document_type": "unified-plan",
+  "date": "2026-09-15",
+  "before_sha256": "28c7e0605ff6eaa4cf0109c3d56b2aac731c1be55a8269d829faf2c042e4f2ec",
+  "after_sha256": "07220acf9521b619bb5758b00e1a1544f67355c6e1a4ca130af72f120e06d435",
+  "edit_authority": "Apply corrections to implementation and verification needed to satisfy the established Product Contract, preserving all settled decisions.",
+  "original_evidence": {
+    "scope": {
+      "reviewer": "scope-guardian",
+      "findings": [],
+      "residual_risks": [],
+      "deferred_questions": []
+    },
+    "adversarial": {
+      "reviewer": "adversarial-document-reviewer",
+      "findings": [],
+      "residual_risks": [],
+      "deferred_questions": []
+    },
+    "security": {
+      "reviewer": "security-lens",
+      "findings": [],
+      "residual_risks": [],
+      "deferred_questions": []
+    },
+    "feasibility": {
+      "reviewer": "feasibility",
+      "findings": [],
+      "residual_risks": [],
+      "deferred_questions": []
+    },
+    "coherence": {
+      "reviewer": "coherence",
+      "findings": [
+        {
+          "title": "U2 and U4 form a circular implementation dependency",
+          "severity": "P2",
+          "section": "U2 - Generalize the atomic replacement transaction / U4 - Add authenticated interaction holds",
+          "why_it_matters": "Implementers cannot follow the declared unit order: U2 says U4 supplies the hold guard before end-to-end enablement, while U4 declares the U2 transaction seam as a prerequisite. That leaves it unclear which U2 work is expected to land before U4 and which work is deferred, risking partial-unit rework or enabling replacement without the required hold guard.",
+          "finding_type": "error",
+          "autofix_class": "gated_auto",
+          "suggested_fix": "Split the U2 dependency into an explicitly named transaction seam that lands before U4 and a post-U4 completion step, then make U4 depend on that seam and make the remaining U2 work depend on U4.",
+          "confidence": 100,
+          "evidence": [
+            "U2. Generalize the atomic replacement transaction \u2014 Dependencies: U1 observation identity contract; U4 supplies the hold guard before end-to-end enablement.",
+            "U4. Add authenticated interaction holds and transport lifetime \u2014 Dependencies: U2 transaction seam."
+          ]
+        }
+      ],
+      "residual_risks": [],
+      "deferred_questions": []
+    },
+    "design": {
+      "reviewer": "design-lens",
+      "findings": [],
+      "residual_risks": [],
+      "deferred_questions": []
+    }
+  },
+  "resolved_findings": [
+    {
+      "source": "coherence",
+      "disposition": "applied",
+      "confidence": 100,
+      "reason": "The integration fence already prevents early publication, but listing U4 under U2 Dependencies can be read as a graph cycle. Separate the build dependency from the existing integration fence; no split or product change is needed.",
+      "change": "U2 depends on U1 and produces a transaction/guard seam. U4 connects the hold guard; publication remains disabled until U3\u2013U5 integrate.",
+      "verification": "U1 -> U2 -> U3/U4 -> U5 -> U6 -> U7 -> U8 is acyclic; existing publication fence and Product Contract unchanged."
+    }
+  ],
+  "coverage": {
+    "completed": [
+      "scope",
+      "adversarial",
+      "security",
+      "feasibility",
+      "coherence",
+      "design"
+    ],
+    "failed": [],
+    "cross_model": "Skipped: no different-provider CLI route installed (claude, grok, cursor-agent absent).",
+    "packs": "No declared packs; resolver returned no errors or warnings."
+  },
+  "fixes_applied": 1,
+  "proposed_fixes_count": 0,
+  "decisions_count": 0,
+  "fyi_count": 0,
+  "result": "Document review complete (non-interactive mode). Applied 1 fix: clarified transaction construction versus interaction-guard integration. No remaining findings. Review complete"
+}

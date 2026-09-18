@@ -12,6 +12,7 @@ export const CHROME_RUNTIME_RESOURCE_CHUNK_BYTES = 192 * 1024;
 
 const ID = /^[A-Za-z0-9_-]{8,128}$/u;
 const OPERATION_KEY = /^[A-Za-z0-9_-]{16,128}$/u;
+const OWNER_SECRET = /^[A-Za-z0-9_-]{43}$/u;
 const SHA256 = /^[a-f0-9]{64}$/u;
 const BASE64 = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u;
 const FORBIDDEN_HOST_KEY = /(?:authorization|bindProof|capability|credential|headers|originalUrl|presentationId|sourceRoot|sourceUrl|syncTex|taskId)/iu;
@@ -40,6 +41,7 @@ export type ChromeRuntimeExtensionMessage = ChromeRuntimeHello | (RuntimeEnvelop
   | { readonly lane: "resource"; readonly type: "ack"; readonly requestId: string; readonly sequence: number }
   | { readonly lane: "resource"; readonly type: "cancel"; readonly requestId: string }
   | { readonly lane: "lifecycle"; readonly type: "activate"; readonly requestId: string; readonly documentValidated: true }
+  | { readonly lane: "lifecycle"; readonly type: "claim-owner"; readonly requestId: string; readonly interactionOwnerSecret: string }
   | { readonly lane: "lifecycle"; readonly type: "refresh"; readonly requestId: string }
   | { readonly lane: "lifecycle"; readonly type: "recover"; readonly requestId: string; readonly decision: "resume" | "discard" | "fork"; readonly offer: { readonly id: string; readonly expiresAt: string }; readonly idempotencyKey: string }
   | { readonly lane: "lifecycle"; readonly type: "keepalive"; readonly requestId: string }
@@ -53,11 +55,57 @@ export type ChromeRuntimeHostMessage = RuntimeEnvelope & (
   | { readonly lane: "lifecycle"; readonly type: "active"; readonly requestId: string; readonly payload: unknown }
   | { readonly lane: "lifecycle"; readonly type: "recovery-offered"; readonly requestId: string; readonly choices: readonly ["resume", "discard", "fork"]; readonly offer: { readonly id: string; readonly expiresAt: string } }
   | { readonly lane: "runtime"; readonly type: "result"; readonly requestId: string; readonly method: ReviewRuntimeBrokerMethod; readonly payload: unknown }
-  | { readonly lane: "runtime"; readonly type: "invalidation"; readonly revision: number; readonly generation: number; readonly reason: "revision" | "generation" | "save" | "recovery" }
+  | { readonly lane: "runtime"; readonly type: "invalidation"; readonly revision: number; readonly generation: number; readonly reason: ChromeRuntimeProjectionChangeReason }
   | { readonly lane: "resource"; readonly type: "resource-chunk"; readonly requestId: string; readonly sequence: number; readonly data: string; readonly done: boolean }
   | { readonly lane: ChromeRuntimeLane; readonly type: "failure"; readonly requestId?: string; readonly reason: string }
   | { readonly lane: "lifecycle"; readonly type: "update-required"; readonly requestId?: string }
 );
+
+export type ChromeRuntimeProjectionChangeReason = "generation" | "revision" | "save" | "recovery" | "presence";
+
+export function isChromeInteractionOwnerSecret(value: unknown): value is string {
+  return typeof value === "string" && OWNER_SECRET.test(value);
+}
+
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (record(value)) {
+    return `{${Object.keys(value).sort().map((key) =>
+      `${JSON.stringify(key)}:${canonicalJson(value[key])}`).join(",")}}`;
+  }
+  return JSON.stringify(value) ?? "null";
+}
+
+function projectionLifecycle(value: unknown): unknown {
+  if (!record(value)) return undefined;
+  const state = record(value.state) ? value.state : {};
+  const workflow = record(state.workflow) ? state.workflow : {};
+  return {
+    protected: value.protected,
+    lifecycle: state.lifecycle,
+    freshness: workflow.freshness,
+  };
+}
+
+/** One projection-change policy shared by the native service poll and the
+ * extension's prompt refresh poll. Same-revision freshness/lifecycle changes
+ * remain observable instead of being mistaken for duplicate revisions. */
+export function chromeRuntimeProjectionChangeReason(
+  previous: unknown,
+  current: unknown,
+): ChromeRuntimeProjectionChangeReason | undefined {
+  if (!record(previous) || !record(current)) return "recovery";
+  if (current.generation !== previous.generation) return "generation";
+  if (current.revision !== previous.revision) return "revision";
+  if (canonicalJson(current.saveStatus) !== canonicalJson(previous.saveStatus)) return "save";
+  const previousPresence = Array.isArray(previous.activeAuthoringDraftIds) ? previous.activeAuthoringDraftIds : [];
+  const currentPresence = Array.isArray(current.activeAuthoringDraftIds) ? current.activeAuthoringDraftIds : [];
+  if (canonicalJson(currentPresence) !== canonicalJson(previousPresence)) return "presence";
+  if (canonicalJson(projectionLifecycle(current)) !== canonicalJson(projectionLifecycle(previous))) {
+    return "recovery";
+  }
+  return undefined;
+}
 
 function record(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -162,6 +210,11 @@ export function parseChromeRuntimeExtensionMessage(value: unknown): ChromeRuntim
     return exact(value, [...base, "documentValidated"]) && value.documentValidated === true
       ? value as unknown as ChromeRuntimeExtensionMessage : undefined;
   }
+  if (value.lane === "lifecycle" && value.type === "claim-owner") {
+    return exact(value, [...base, "interactionOwnerSecret"]) &&
+      isChromeInteractionOwnerSecret(value.interactionOwnerSecret)
+      ? value as unknown as ChromeRuntimeExtensionMessage : undefined;
+  }
   if (value.lane === "lifecycle" && value.type === "recover") {
     return exact(value, [...base, "decision", "offer", "idempotencyKey"]) &&
       (value.decision === "resume" || value.decision === "discard" || value.decision === "fork") &&
@@ -191,6 +244,7 @@ export function sanitizeChromeRuntimeProjection(value: unknown): unknown | undef
   if (!record(value) || !exact(value, [
     "sessionId", "generation", "revision", "state", "scope", "saveStatus",
     "canonicalLinkBase", "protected", "location", "document",
+    ...(value.activeAuthoringDraftIds === undefined ? [] : ["activeAuthoringDraftIds"]),
   ].filter((key) => key !== "location" || value.location !== undefined)) ||
     !record(value.document) ||
     !exact(value.document, ["sha256", "byteLength", "generation"]) ||
@@ -269,7 +323,7 @@ export function parseChromeRuntimeHostMessage(value: unknown): ChromeRuntimeHost
   }
   if (value.type === "invalidation") {
     return value.lane === "runtime" && exact(value, ["type", "lane", "protocolVersion", "connectionId", "revision", "generation", "reason"]) &&
-      safeInteger(value.revision) && safeInteger(value.generation) && ["revision", "generation", "save", "recovery"].includes(String(value.reason))
+      safeInteger(value.revision) && safeInteger(value.generation) && ["revision", "generation", "save", "recovery", "presence"].includes(String(value.reason))
       ? value as unknown as ChromeRuntimeHostMessage : undefined;
   }
   return undefined;
