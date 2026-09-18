@@ -10,7 +10,7 @@ const features = [
   },
   {
     id: 'reference', label: 'Follow references', icon: 'references',
-    description: 'Read straight through or follow a thread. Open tables and appendices in a separate scrolling space without losing your place, then move back and forward through the places you’ve visited.',
+    description: 'Read straight through or follow a thread. Open tables and appendices in a separate scrolling space, then move back and forward through the places you’ve visited.',
     actions: ['Click Appendix A on page 15.', 'Choose Open in References.', 'Scroll the reference, then follow another link.'],
   },
   {
