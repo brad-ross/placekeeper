@@ -8,13 +8,13 @@ const features = [
     actions: ['Open and close the workspace.', 'Jump to a section in Outline.', 'Change the zoom and lock horizontal scrolling.'],
   },
   {
-    id: 'reference', label: 'Follow a reference', icon: 'references',
-    description: 'Look up a table or supporting appendix without leaving the page you’re reading. References have their own scrolling space.',
+    id: 'reference', label: 'Follow references', icon: 'references',
+    description: 'Read straight through or follow a thread. Open tables and appendices in a separate scrolling space without losing your place, then move back and forward through the places you’ve visited.',
     actions: ['Click Appendix A on page 15.', 'Choose Open in References.', 'Scroll the reference, then follow another link.'],
   },
   {
     id: 'annotate', label: 'Make comments', icon: 'annotations',
-    description: 'Keep your comments attached to the passage that prompted them. Highlight text, suggest an edit, or leave a note on the page.',
+    description: 'Highlight a passage, suggest an edit, or leave a note. The app saves your annotations automatically, and they’re compatible with other viewers. On the web, export a copy to take them with you.',
     actions: ['Select a passage to highlight or comment.', 'Write a comment and save it.', 'Click an annotation to revisit or edit it.'],
   },
 ] as const satisfies readonly { id: string; label: string; icon: ReviewIconName; description: string; actions: readonly string[] }[];

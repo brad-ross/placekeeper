@@ -120,7 +120,7 @@ describe("static browser review runtime", () => {
     expect(markup).toContain('aria-label="Explore features"');
     expect(markup).toContain("Read with focus");
     expect(markup).toContain("Make comments");
-    expect(markup).toContain("Follow a reference");
+    expect(markup).toContain("Follow references");
     expect(markup).toContain('title="Read with focus interactive demo"');
     expect(markup).toContain('sandbox="allow-scripts allow-same-origin allow-forms"');
     expect(markup).toContain('aria-label="Placekeeper app surfaces"');
