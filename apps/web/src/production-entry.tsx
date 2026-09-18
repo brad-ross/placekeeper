@@ -491,6 +491,29 @@ export function pendingRuntimeBootstrap(documentTitle: string): HostRuntimeBoots
   };
 }
 
+type GenerationRefreshStatus = "idle" | "reconciling" | "failed";
+
+export function runtimeGenerationRefreshStatus(
+  hasLoadedDocument: boolean,
+  refreshStatus: GenerationRefreshStatus,
+): GenerationRefreshStatus {
+  return hasLoadedDocument ? refreshStatus : "idle";
+}
+
+export function RuntimeLoadingWorkspace(props: {
+  readonly refreshStatus: GenerationRefreshStatus;
+}) {
+  return <section
+    className="macos-loading-shell__workspace"
+    data-runtime-loading-workspace
+    aria-busy="true"
+  >
+    <p role={props.refreshStatus === "failed" ? "alert" : "status"}>
+      {props.refreshStatus === "failed" ? "This review could not be prepared." : "Preparing this review…"}
+    </p>
+  </section>;
+}
+
 export function RuntimeProductionReviewApp(props: {
   readonly runtime?: HostRuntime;
   readonly initial?: HostRuntimeBootstrap;
@@ -507,7 +530,7 @@ export function RuntimeProductionReviewApp(props: {
 }) {
   const [seed, setSeed] = useState(props.initial);
   const [loaded, setLoaded] = useState(props.initial);
-  const [refreshStatus, setRefreshStatus] = useState<"idle" | "reconciling" | "failed">("idle");
+  const [refreshStatus, setRefreshStatus] = useState<GenerationRefreshStatus>("idle");
   const [hostReviewCommand, setHostReviewCommand] = useState<ReviewCommandInvocation>();
   const [hostReattachRequestToken, setHostReattachRequestToken] = useState(0);
   const hostExportSequenceRef = useRef(0);
@@ -606,19 +629,11 @@ export function RuntimeProductionReviewApp(props: {
     viewerAssets={visible.viewerAssets}
     resourcePolicy={visible.resourcePolicy}
     {...(loaded === undefined ? {
-      viewer: <section
-        className="macos-loading-shell__workspace"
-        data-runtime-loading-workspace
-        aria-busy="true"
-      >
-        <p role={refreshStatus === "failed" ? "alert" : "status"}>
-          {refreshStatus === "failed" ? "This review could not be prepared." : "Preparing this review…"}
-        </p>
-      </section>,
+      viewer: <RuntimeLoadingWorkspace refreshStatus={refreshStatus} />,
     } : {})}
     {...(visible.locationHistory === undefined ? {} : { locationHistory: visible.locationHistory })}
     {...(visible.canonicalLinkBase === undefined ? {} : { copyLinkBase: visible.canonicalLinkBase })}
-    generationRefreshStatus={refreshStatus}
+    generationRefreshStatus={runtimeGenerationRefreshStatus(loaded !== undefined, refreshStatus)}
     hostReattachRequestToken={hostReattachRequestToken}
     {...(hostExportRequest === undefined ? {} : {
       hostExportRequestToken: hostExportRequest.token,

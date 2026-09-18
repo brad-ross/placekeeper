@@ -452,19 +452,22 @@ export function ReviewShell(props: ReviewShellProps) {
     : props.state.items;
   const generatedStatusBusy = props.generationRefreshStatus !== 'failed'
     && (props.generationRefreshStatus === 'reconciling' || props.locationRestoreStatus === 'restoring');
-  const generatedStatusMessages = props.state.workflow.mode !== 'generated-output' ? [] : [
+  const generatedStatusMessages = [
     props.generationRefreshStatus === 'reconciling'
       ? 'A rebuilt PDF is loading and Review Items are reconciling.'
       : props.generationRefreshStatus === 'failed'
         ? 'The rebuilt PDF could not be loaded safely. The last successful PDF remains reviewable.'
-        : props.state.workflow.freshness === 'possibly-stale'
+        : props.state.workflow.mode === 'generated-output'
+          && props.state.workflow.freshness === 'possibly-stale'
           ? 'Source changed; waiting for an updated PDF.'
           : '',
-    props.locationRestoreStatus === 'restoring'
-      ? 'Restoring the prior reading position.'
-      : props.locationRestoreStatus === 'fallback'
-        ? 'The prior reading position could not be restored; review remains available.'
-        : '',
+    props.state.workflow.mode === 'generated-output'
+      ? props.locationRestoreStatus === 'restoring'
+        ? 'Restoring the prior reading position.'
+        : props.locationRestoreStatus === 'fallback'
+          ? 'The prior reading position could not be restored; review remains available.'
+          : ''
+      : '',
   ].filter(Boolean);
   const workspaceOpen = props.workspace.workspaceOpen ?? surface.baseSurface === 'workspace';
   const workspaceMode = navigation.workspace.lastMode;

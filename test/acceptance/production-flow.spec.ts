@@ -3,7 +3,7 @@ import { access, copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { expect, test, type Locator, type Page } from "@playwright/test";
-import { PDFDocument } from "pdf-lib";
+import { PDFDocument, StandardFonts } from "pdf-lib";
 
 import { PlacekeeperHost } from "../../apps/service/src/host/placekeeper-host.js";
 import { TaskBindingRegistry } from "../../apps/service/src/context/task-binding-registry.js";
@@ -527,6 +527,156 @@ test.afterEach(async ({ page }) => {
 
 test.afterAll(async () => {
   if (root) await rm(root, { recursive: true, force: true });
+});
+
+test('classifies an initial packaged-runtime bootstrap rejection as one preparation failure', async ({ page }) => {
+  const sourcePath = await freshProductionPdf(plainTextPdf);
+  const launched = await host.open({ pdfPath: sourcePath, sourceRootPath: sourceRoot, fork: true });
+  if (!launched.ok || launched.kind === 'recovery-offered') {
+    throw new Error('Initial bootstrap rejection launch failed');
+  }
+  const initialState = host.broker.state(launched.sessionId);
+  const initialSaveStatus = host.broker.saveStatus(launched.sessionId);
+  if (initialState === undefined || initialSaveStatus === undefined) {
+    throw new Error('Initial bootstrap rejection fixture state is unavailable');
+  }
+  const rejectedBootstrap = {
+    sessionId: launched.sessionId,
+    generation: initialState.workflow.documentGeneration,
+    revision: initialState.revision,
+    state: initialState,
+    scope: { documentTitle: 'Rejected bootstrap.pdf', launchSurface: 'macos' },
+    saveStatus: initialSaveStatus,
+    activeAuthoringDraftIds: [],
+    resources: {
+      document: 'placekeeper-resource://document/rejected_bootstrap?generation=1&role=document',
+      pdfiumWasm: 'placekeeper-app://bundle/assets/pdfium.wasm',
+      worker: 'placekeeper-app://bundle/assets/pdfium-worker.js',
+    },
+  };
+  const shell = await readFile(resolve('dist/macos-web/assets/shell.js'));
+  const bootstrapUrl = new URL(launched.url);
+  const bootstrapDocumentUrl = new URL(bootstrapUrl.pathname, bootstrapUrl.origin).href;
+  const shellUrl = new URL('/acceptance/macos-shell.js', bootstrapUrl.origin).href;
+  await page.addInitScript(() => {
+    const target = window as typeof window & {
+      webkit?: { messageHandlers?: { placekeeperShell?: { postMessage(value: unknown): void } } };
+      __PLACEKEEPER_MAC_RECEIVE__?: (value: unknown) => boolean | void;
+      __acceptanceNativeMessages?: unknown[];
+    };
+    target.__acceptanceNativeMessages = [];
+    target.webkit = {
+      messageHandlers: {
+        placekeeperShell: {
+          postMessage(value: unknown) {
+            target.__acceptanceNativeMessages?.push(value);
+          },
+        },
+      },
+    };
+  });
+  await page.route(shellUrl, (route) => route.fulfill({
+    status: 200,
+    contentType: 'text/javascript',
+    body: shell,
+  }));
+  await page.route(bootstrapDocumentUrl, (route) => route.fulfill({
+    status: 200,
+    contentType: 'text/html',
+    body: `<!doctype html><html><body><div id="root"></div><script type="module" src="${shellUrl}"></script></body></html>`,
+  }));
+  await page.goto(bootstrapUrl.href);
+  await page.waitForFunction(() => typeof (
+    window as typeof window & { __PLACEKEEPER_MAC_RECEIVE__?: unknown }
+  ).__PLACEKEEPER_MAC_RECEIVE__ === 'function');
+  await page.evaluate(() => (
+    window as typeof window & { __PLACEKEEPER_MAC_RECEIVE__(value: unknown): boolean | void }
+  ).__PLACEKEEPER_MAC_RECEIVE__({
+    protocolVersion: 1,
+    type: 'bootstrap',
+    document: {
+      displayName: 'Rejected bootstrap.pdf',
+      resource: {
+        url: 'placekeeper-resource://document/rejected_bootstrap?generation=1&role=document',
+        generation: 1,
+        mime: 'application/pdf',
+        byteLength: 5,
+        digest: 'a'.repeat(64),
+      },
+    },
+    geometry: {
+      identity: 'geometry_acceptance_1234',
+      trafficLightInset: 76,
+      trafficLightBounds: [
+        { x: 16, y: 20, width: 14, height: 14 },
+        { x: 36, y: 20, width: 14, height: 14 },
+        { x: 56, y: 20, width: 14, height: 14 },
+      ],
+      trailingInset: 12,
+    },
+    runtimeId: 'runtime_acceptance_1234',
+    attemptId: 'attempt_acceptance_1234',
+  }));
+  await page.waitForFunction(() => (
+    window as typeof window & { __acceptanceNativeMessages?: Array<{ type?: unknown; message?: { method?: unknown } }> }
+  ).__acceptanceNativeMessages?.some(({ type, message }) => (
+    type === 'runtime-message' && message?.method === 'bootstrap'
+  )) === true);
+  await page.evaluate((payloadJson) => {
+    const payload = JSON.parse(payloadJson) as {
+      sessionId: string;
+      generation: number;
+      revision: number;
+      state: unknown;
+      scope: unknown;
+      saveStatus: unknown;
+      activeAuthoringDraftIds: unknown;
+      resources: unknown;
+    };
+    const target = window as typeof window & {
+      __acceptanceNativeMessages?: Array<{
+        type?: unknown;
+        message?: {
+          protocol?: unknown;
+          version?: unknown;
+          kind?: unknown;
+          requestId?: unknown;
+          method?: unknown;
+        };
+      }>;
+      __PLACEKEEPER_MAC_RECEIVE__(value: unknown): boolean | void;
+    };
+    const request = target.__acceptanceNativeMessages
+      ?.find(({ type, message }) => type === 'runtime-message' && message?.method === 'bootstrap')?.message;
+    if (request?.kind !== 'request' || typeof request.requestId !== 'string') {
+      throw new Error('Packaged bootstrap request was unavailable.');
+    }
+    return target.__PLACEKEEPER_MAC_RECEIVE__({
+      protocolVersion: 1,
+      type: 'runtime-message',
+      runtimeId: 'runtime_acceptance_1234',
+      attemptId: 'attempt_acceptance_1234',
+      message: {
+        protocol: request.protocol,
+        version: request.version,
+        kind: 'response',
+        runtimeId: 'runtime_acceptance_1234',
+        sessionId: payload.sessionId,
+        generation: payload.generation,
+        revision: payload.revision,
+        requestId: request.requestId,
+        method: request.method,
+        ok: true,
+        payload,
+      },
+    });
+  }, JSON.stringify(rejectedBootstrap));
+  const alerts = page.getByRole('alert');
+  await expect(alerts).toHaveCount(1);
+  await expect(alerts).toHaveText('This review could not be prepared.');
+  await expect(page.locator('[data-runtime-loading-workspace]')).toBeVisible();
+  await expect(page.locator('[data-generation-status="failed"]')).toHaveCount(0);
+  await expect(page.getByText(/rebuilt PDF|last successful PDF/iu)).toHaveCount(0);
 });
 
 test('imports standard annotations into the editable tray and saves comment edits and deletion', async ({ page }) => {
@@ -4331,6 +4481,267 @@ test('defers an ordinary external replacement through UI save and publishes it w
       reconciliation: expect.objectContaining({ baseGeneration: 1 }),
     }),
   ]);
+});
+
+test('keeps a manually reattached annotation stationary through pointer Apply in every attachment', async ({ page, context }, testInfo) => {
+  testInfo.setTimeout(90_000);
+  await page.setViewportSize({ width: 1280, height: 900 });
+  const peer = await context.newPage();
+  await peer.setViewportSize({ width: 1280, height: 900 });
+  const sourcePath = await freshProductionPdf(plainTextPdf);
+  const launched = await host.open({ pdfPath: sourcePath, sourceRootPath: sourceRoot, fork: true });
+  if (!launched.ok || launched.kind === 'recovery-offered') {
+    throw new Error('Post-reattachment Apply launch failed');
+  }
+  const peerLaunch = await host.open({ pdfPath: sourcePath, sourceRootPath: sourceRoot });
+  if (!peerLaunch.ok || peerLaunch.kind === 'recovery-offered'
+    || peerLaunch.sessionId !== launched.sessionId) {
+    throw new Error('Post-reattachment peer launch did not join the Review Session');
+  }
+  await Promise.all([page.goto(launched.url), peer.goto(peerLaunch.url)]);
+  for (const surface of [page, peer]) {
+    await expect(surface.locator('[data-production-review]')).toHaveAttribute(
+      'data-initial-view-ready', 'true', { timeout: PRODUCTION_VIEWER_READY_TIMEOUT_MS },
+    );
+    await waitForRenderedPageImage(surface.locator("[data-page-index='0']").first());
+  }
+  await chooseFreshCopyDestination(page);
+
+  const predecessorPage = page.locator("[data-page-index='0']").first();
+  await dragPdfPointer(page, predecessorPage, { x: 76, y: 98 }, { x: 405, y: 98 });
+  const selectionActions = page.getByRole('toolbar', { name: 'Selection review actions' });
+  await expect(selectionActions).toBeVisible();
+  await selectionActions.getByRole('button', { name: 'Highlight', exact: true }).click();
+  const highlightComposer = page.getByRole('region', { name: 'Highlight Comment' });
+  await highlightComposer.getByRole('textbox', { name: 'Comment (optional)' })
+    .fill('Before manual reattachment.');
+  await highlightComposer.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(highlightComposer).toHaveCount(0);
+  await expect.poll(() => host.broker.state(launched.sessionId)?.items.length).toBe(1);
+  const itemId = host.broker.state(launched.sessionId)!.items[0]!.id;
+  await expect.poll(() => host.broker.saveStatus(launched.sessionId)?.sync.phase).toBe('clean');
+
+  const installGenerationNoticeProbe = async (surface: Page) => surface.evaluate((targetId) => {
+    const root = document.querySelector('[data-production-review]');
+    if (root === null) throw new Error('Production review root is unavailable.');
+    const initialRow = root.querySelector<HTMLElement>(`[data-review-item="${targetId}"]`);
+    if (initialRow === null) throw new Error('Generation notice row target is unavailable.');
+    const initialRowY = initialRow.getBoundingClientRect().y;
+    const state = {
+      topLeftSeen: false,
+      trayNoticeSeen: false,
+      initialRowY,
+      rowYWhileTopLeftVisible: [] as number[],
+    };
+    const inspect = () => {
+      const topLeft = document.querySelector<HTMLElement>(
+        '[data-review-toast-stack] [data-generation-status="reconciling"]',
+      );
+      if (topLeft?.innerText.includes('A rebuilt PDF is loading and Review Items are reconciling.')) {
+        state.topLeftSeen = true;
+        const row = root.querySelector<HTMLElement>(`[data-review-item="${targetId}"]`);
+        if (row !== null) state.rowYWhileTopLeftVisible.push(row.getBoundingClientRect().y);
+      }
+      if (root.querySelector('.reconciliation-workspace__notice') !== null) state.trayNoticeSeen = true;
+    };
+    const observer = new MutationObserver(inspect);
+    observer.observe(root, { childList: true, subtree: true, attributes: true });
+    inspect();
+    (window as typeof window & { __generationNoticeProbe?: { state: typeof state; observer: MutationObserver } })
+      .__generationNoticeProbe = { state, observer };
+  }, itemId);
+  await Promise.all([installGenerationNoticeProbe(page), installGenerationNoticeProbe(peer)]);
+
+  const successor = await PDFDocument.create();
+  const successorPage = successor.addPage([612, 792]);
+  const font = await successor.embedFont(StandardFonts.Helvetica);
+  successorPage.drawText('The manual reattachment target remains stationary after Apply.', {
+    x: 72, y: 680, size: 12, font,
+  });
+  await writeFile(sourcePath, await successor.save({ useObjectStreams: false }));
+  await expect.poll(() => host.broker.state(launched.sessionId)?.workflow.documentGeneration).toBe(2);
+  await expect.poll(() => host.broker.state(launched.sessionId)?.items[0]?.reconciliation?.disposition.kind)
+    .toBe('missing');
+  for (const surface of [page, peer]) {
+    await waitForRenderedPageImage(surface.locator("[data-page-index='0']").first());
+    await expect.poll(() => surface.evaluate(() => {
+      const probe = (window as typeof window & {
+        __generationNoticeProbe?: {
+          state: { topLeftSeen: boolean; trayNoticeSeen: boolean; initialRowY: number; rowYWhileTopLeftVisible: number[] };
+          observer: MutationObserver;
+        };
+      }).__generationNoticeProbe;
+      return probe?.state.topLeftSeen ?? false;
+    })).toBe(true);
+    const genuineGenerationEvidence = await surface.evaluate(() => {
+      const target = window as typeof window & {
+        __generationNoticeProbe?: {
+          state: { topLeftSeen: boolean; trayNoticeSeen: boolean; initialRowY: number; rowYWhileTopLeftVisible: number[] };
+          observer: MutationObserver;
+        };
+      };
+      target.__generationNoticeProbe?.observer.disconnect();
+      const evidence = target.__generationNoticeProbe?.state;
+      delete target.__generationNoticeProbe;
+      return evidence;
+    });
+    if (genuineGenerationEvidence === undefined) throw new Error('Generation notice evidence is unavailable.');
+    expect(genuineGenerationEvidence.trayNoticeSeen).toBe(false);
+    expect(genuineGenerationEvidence.rowYWhileTopLeftVisible.length).toBeGreaterThan(0);
+    expect(genuineGenerationEvidence.rowYWhileTopLeftVisible.every(
+      (y) => y === genuineGenerationEvidence.initialRowY,
+    )).toBe(true);
+  }
+
+  await openAnnotationsWorkspace(page);
+  await page.getByRole('button', {
+    name: /Reattach previous Highlight annotation on page 1/u,
+  }).click();
+  const reattachment = page.locator('[data-reconciliation-detail="reattach"]');
+  await expect(reattachment).toBeVisible();
+  await dragPdfPointer(
+    page,
+    page.locator("[data-page-index='0']").first(),
+    { x: 70, y: 102 },
+    { x: 445, y: 102 },
+    undefined,
+    { steps: 12 },
+  );
+  const attach = reattachment.getByRole('button', { name: 'Attach', exact: true });
+  await expect(attach).toBeEnabled();
+  await attach.click();
+  await expect(reattachment).toHaveCount(0);
+  await expect.poll(() => host.broker.state(launched.sessionId)?.items[0]?.reconciliation?.disposition)
+    .toMatchObject({ kind: 'resolved', generation: 2 });
+  await expect.poll(() => host.broker.saveStatus(launched.sessionId)?.sync.phase).toBe('clean');
+
+  await openAnnotationsWorkspace(peer);
+  const ownerRow = page.locator(`#review-annotation-list [data-review-item="${itemId}"]`);
+  const peerRow = peer.locator(`#review-annotation-list [data-review-item="${itemId}"]`);
+  await expect(ownerRow).toContainText('Before manual reattachment.');
+  await expect(peerRow).toContainText('Before manual reattachment.');
+  await ownerRow.hover();
+  await ownerRow.getByRole('button', { name: 'Edit Highlight annotation on page 1' }).click();
+  const editComposer = page.getByRole('region', { name: 'Edit Highlight' });
+  await expect(editComposer).toBeVisible();
+  const changed = 'Changed after manual reattachment.';
+  await editComposer.getByRole('textbox', { name: 'Comment (optional)' }).fill(changed);
+
+  interface ApplyFrame {
+    readonly elapsedMs: number;
+    readonly listIdentity: boolean;
+    readonly rowIdentity: boolean;
+    readonly targetCount: number;
+    readonly paintedTargetCount: number;
+    readonly rowRect: { readonly x: number; readonly y: number; readonly width: number; readonly height: number } | null;
+    readonly rebuiltNoticeCount: number;
+    readonly generationToastCount: number;
+    readonly text: string;
+  }
+  const beginApplyAudit = async (surface: Page) => surface.evaluate((targetId) => {
+    const list = document.querySelector<HTMLElement>('#review-annotation-list');
+    const row = document.querySelector<HTMLElement>(`#review-annotation-list [data-review-item="${targetId}"]`);
+    if (list === null || row === null) throw new Error('Annotation row audit target is unavailable.');
+    const startedAt = performance.now();
+    const audit = { finished: false, stopRequested: false, postSettleFrames: 12, samples: [] as ApplyFrame[] };
+    (window as typeof window & { __postReattachApplyAudit?: typeof audit }).__postReattachApplyAudit = audit;
+    const painted = (element: HTMLElement) => {
+      if (!element.isConnected || element.getClientRects().length === 0) return false;
+      for (let current: HTMLElement | null = element; current !== null; current = current.parentElement) {
+        const style = getComputedStyle(current);
+        if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0) return false;
+      }
+      return true;
+    };
+    const sample = () => {
+      const currentList = document.querySelector<HTMLElement>('#review-annotation-list');
+      const targets = [...document.querySelectorAll<HTMLElement>(
+        `[data-review-item="${targetId}"], [data-reconciliation-item="${targetId}"]`,
+      )];
+      const currentRow = document.querySelector<HTMLElement>(
+        `#review-annotation-list [data-review-item="${targetId}"]`,
+      );
+      const bounds = currentRow?.getBoundingClientRect();
+      const notices = [...document.querySelectorAll<HTMLElement>('.reconciliation-workspace__notice')]
+        .filter((notice) => painted(notice)
+          && notice.innerText.includes('A rebuilt PDF is loading and previous annotations are reconciling.'));
+      const generationToasts = [...document.querySelectorAll<HTMLElement>(
+        '[data-review-toast-stack] [data-generation-status="reconciling"]',
+      )].filter((toast) => painted(toast)
+        && toast.innerText.includes('A rebuilt PDF is loading and Review Items are reconciling.'));
+      audit.samples.push({
+        elapsedMs: performance.now() - startedAt,
+        listIdentity: currentList === list && list.isConnected,
+        rowIdentity: currentRow === row && row.isConnected,
+        targetCount: targets.length,
+        paintedTargetCount: targets.filter(painted).length,
+        rowRect: bounds === undefined ? null : {
+          x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height,
+        },
+        rebuiltNoticeCount: notices.length,
+        generationToastCount: generationToasts.length,
+        text: currentRow?.innerText ?? '',
+      });
+      if (audit.stopRequested) {
+        audit.postSettleFrames -= 1;
+        if (audit.postSettleFrames === 0) {
+          audit.finished = true;
+          return;
+        }
+      }
+      requestAnimationFrame(sample);
+    };
+    sample();
+  }, itemId);
+  const finishApplyAudit = async (surface: Page): Promise<readonly ApplyFrame[]> => {
+    await surface.evaluate(() => {
+      const audit = (window as typeof window & {
+        __postReattachApplyAudit?: { stopRequested: boolean };
+      }).__postReattachApplyAudit;
+      if (audit !== undefined) audit.stopRequested = true;
+    });
+    await expect.poll(() => surface.evaluate(() => (
+      window as typeof window & { __postReattachApplyAudit?: { finished: boolean } }
+    ).__postReattachApplyAudit?.finished)).toBe(true);
+    return surface.evaluate(() => {
+      const target = window as typeof window & {
+        __postReattachApplyAudit?: { samples: ApplyFrame[] };
+      };
+      const samples = target.__postReattachApplyAudit?.samples ?? [];
+      delete target.__postReattachApplyAudit;
+      return samples;
+    });
+  };
+
+  await Promise.all([beginApplyAudit(page), beginApplyAudit(peer)]);
+  await editComposer.getByRole('button', { name: 'Apply', exact: true }).click();
+  await expect(editComposer).toHaveCount(0);
+  await expect(ownerRow).toContainText(changed);
+  await expect(peerRow).toContainText(changed);
+  await expect.poll(() => host.broker.state(launched.sessionId)?.items.find(({ id }) => id === itemId)?.payload.comment)
+    .toBe(changed);
+  await expect.poll(() => host.broker.saveStatus(launched.sessionId)?.sync.phase).toBe('clean');
+  await page.waitForTimeout(250);
+  const [ownerFrames, peerFrames] = await Promise.all([
+    finishApplyAudit(page), finishApplyAudit(peer),
+  ]);
+  await testInfo.attach('post-reattachment-apply-frames.json', {
+    body: JSON.stringify({ itemId, changed, ownerFrames, peerFrames }, null, 2),
+    contentType: 'application/json',
+  });
+
+  for (const frames of [ownerFrames, peerFrames]) {
+    expect(frames.length).toBeGreaterThan(12);
+    expect(frames.every(({ listIdentity, rowIdentity }) => listIdentity && rowIdentity)).toBe(true);
+    expect(frames.every(({ targetCount, paintedTargetCount }) => (
+      targetCount === 1 && paintedTargetCount === 1
+    ))).toBe(true);
+    expect(frames.every(({ rebuiltNoticeCount }) => rebuiltNoticeCount === 0)).toBe(true);
+    expect(frames.every(({ generationToastCount }) => generationToastCount === 0)).toBe(true);
+    const rects = new Set(frames.map(({ rowRect }) => JSON.stringify(rowRect)));
+    expect(rects.size).toBe(1);
+    expect(frames.at(-1)?.text).toContain(changed);
+  }
 });
 
 test('follows a rendered reading passage through inserted pages without changing zoom or focus', async ({ page }) => {

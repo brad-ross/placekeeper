@@ -257,6 +257,8 @@ describe('review shell layout and accessibility contract', () => {
     expect(html).toContain('data-review-toast-stack');
     expect(html).toContain('data-viewer-status');
     expect(html).toContain('data-generation-status="reconciling"');
+    expect(html).not.toContain('reconciliation-workspace__notice');
+    expect(html.match(/A rebuilt PDF is loading and Review Items are reconciling\./gu)).toHaveLength(1);
     expect(html.indexOf('data-review-stage')).toBeLessThan(html.indexOf('data-review-toast-stack'));
     expect(html.indexOf('data-review-toast-stack')).toBeLessThan(html.indexOf('Document canvas'));
     expect(html).not.toContain('review-shell--generation-status');
@@ -288,7 +290,31 @@ describe('review shell layout and accessibility contract', () => {
     expect(html).toContain(`data-generation-busy="${busy}"`);
     const notice = html.slice(html.indexOf('data-generation-status='), html.indexOf('</p>', html.indexOf('data-generation-status=')));
     expect(notice).toContain(`lucide-${icon}`);
+    expect(notice).toContain(`role="${refresh === 'failed' ? 'alert' : 'status'}"`);
     if (refresh === 'idle' && stale) expect(notice).toContain('Source changed; waiting for an updated PDF.');
+  });
+
+  it.each([
+    {
+      refresh: 'reconciling' as const,
+      role: 'status',
+      text: 'A rebuilt PDF is loading and Review Items are reconciling.',
+    },
+    {
+      refresh: 'failed' as const,
+      role: 'alert',
+      text: 'The rebuilt PDF could not be loaded safely. The last successful PDF remains reviewable.',
+    },
+  ])('shows genuine standard-workflow $refresh feedback in the top-left toast', ({ refresh, role, text }) => {
+    const html = renderToStaticMarkup(<ReviewShell state={state}
+      generationRefreshStatus={refresh} locationRestoreStatus="idle"
+      save={{}} selection={{ selectionUpdate: { kind: 'cleared', generation: 0 } }}
+      authoring={{ onCommand: async () => state }} viewer={{}} workspace={{}} />);
+    expect(html).toContain('data-review-toast-stack');
+    expect(html).toContain(`data-generation-status="${refresh}"`);
+    expect(html).toContain(`role="${role}"`);
+    expect(html).toContain(text);
+    expect(html).not.toContain('reconciliation-workspace__notice');
   });
 
   it('persistently exposes the focused PDF copy owner when selections compete', () => {

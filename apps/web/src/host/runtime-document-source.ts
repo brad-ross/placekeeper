@@ -19,9 +19,13 @@ export function subscribeRuntimeDocumentSource(
   let retryTimer: ReturnType<typeof setTimeout> | undefined;
   let loaded = initial;
   let disposed = false;
-  const scheduleRetry = (event: HostRuntimeInvalidation, token: number): void => {
+  const scheduleRetry = (
+    event: HostRuntimeInvalidation,
+    token: number,
+    generationRefresh: boolean,
+  ): void => {
     if (disposed || token !== refreshToken) return;
-    publish({ loaded, refreshStatus: "failed" });
+    if (generationRefresh) publish({ loaded, refreshStatus: "failed" });
     retryTimer = setTimeout(() => refresh(event), 250);
   };
   const refresh = (event: HostRuntimeInvalidation): void => {
@@ -40,7 +44,8 @@ export function subscribeRuntimeDocumentSource(
     refreshController?.abort();
     const controller = new AbortController();
     refreshController = controller;
-    publish({ loaded, refreshStatus: "reconciling" });
+    const generationRefresh = event.generation > loaded.generation;
+    if (generationRefresh) publish({ loaded, refreshStatus: "reconciling" });
     void runtime.bootstrap(controller.signal).then((successor) => {
       if (disposed || token !== refreshToken) return;
       if (
@@ -50,7 +55,7 @@ export function subscribeRuntimeDocumentSource(
         || successor.generation < loaded.generation
         || (successor.generation === loaded.generation && successor.revision < loaded.revision)
       ) {
-        scheduleRetry(event, token);
+        scheduleRetry(event, token, generationRefresh);
         return;
       }
       loaded = successor;
@@ -58,7 +63,7 @@ export function subscribeRuntimeDocumentSource(
       latestRevision = successor.revision;
       publish({ loaded, refreshStatus: "idle" });
     }).catch(() => {
-      scheduleRetry(event, token);
+      scheduleRetry(event, token, generationRefresh);
     });
   };
   const unsubscribe = runtime.subscribeInvalidations((event) => {

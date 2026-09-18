@@ -799,7 +799,7 @@ describe("one production review tree", () => {
     expect(browserHtml).toContain('aria-haspopup="menu"');
   });
 
-  it("omits an empty attention section during rebuild progress and failure", () => {
+  it("keeps rebuild progress and failure notices out of the attention tray", () => {
     const state = createReviewState({
       sessionId: "00000000-0000-4000-8000-000000000091",
       source: { fileId: "00000000-0000-4000-8000-000000000092", digest: "d".repeat(64), byteLength: 1 },
@@ -807,7 +807,7 @@ describe("one production review tree", () => {
       documentGeneration: 2,
     });
 
-    for (const refreshStatus of ["reconciling", "failed"] as const) {
+    const trayMarkup = (["reconciling", "failed"] as const).map((refreshStatus) => {
       const html = renderToStaticMarkup(<ReconciliationWorkspace
         state={state}
         selectionUpdate={{ kind: "cleared", generation: 2 }}
@@ -817,9 +817,13 @@ describe("one production review tree", () => {
         renderSummary={renderReconciliationSummary}
       />);
       expect(html).not.toContain("Needs attention");
-      expect(html).toContain("reconciliation-workspace__notice");
+      expect(html).not.toContain("reconciliation-workspace__notice");
+      expect(html).not.toContain("A rebuilt PDF is loading");
+      expect(html).not.toContain("The rebuilt PDF could not be validated");
       expect(html).not.toContain("data-reconciliation-entry");
-    }
+      return html;
+    });
+    expect(trayMarkup[0]).toBe(trayMarkup[1]);
   });
 
   it("suppresses only exact active protected authoring drafts across peer surfaces", () => {

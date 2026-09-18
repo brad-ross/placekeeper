@@ -789,11 +789,6 @@ export function ReconciliationWorkspace(props: ReconciliationWorkspaceProps) {
     }
   };
 
-  const notice = props.refreshStatus === "reconciling"
-    ? <p className="reconciliation-workspace__notice" role="status">A rebuilt PDF is loading and previous annotations are reconciling.</p>
-    : props.refreshStatus === "failed"
-      ? <p className="reconciliation-workspace__notice" role="alert">The rebuilt PDF could not be validated. The last successful PDF remains reviewable and may be stale.</p>
-      : null;
   const rows = records.map((record) => {
     const typeLabel = annotationKindLabel(record.kind);
     const canApplyDraft = !("payload" in record.value)
@@ -964,7 +959,7 @@ export function ReconciliationWorkspace(props: ReconciliationWorkspaceProps) {
   return props.renderSummary({
     count: records.length,
     rows,
-    notice,
+    notice: null,
     message: messageNode,
     editor,
     ownedItemIds,

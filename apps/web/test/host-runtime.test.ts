@@ -503,7 +503,7 @@ describe("host-neutral review runtime", () => {
     unsubscribe();
   });
 
-  it("rehydrates same-generation freshness invalidations and fences racing refreshes", async () => {
+  it("rehydrates same-generation invalidations without presenting document reconciliation", async () => {
     const sessionId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
     const loaded = (revision: number, freshness: "current" | "possibly-stale"): HostRuntimeBootstrap => ({
       sessionId,
@@ -546,16 +546,130 @@ describe("host-neutral review runtime", () => {
     subscribeRuntimeDocumentSource(runtime, loaded(0, "current"), (snapshot) => published.push(snapshot));
 
     listener?.({ sessionId, generation: 1, revision: 0, reason: "presence" });
+    listener?.({ sessionId, generation: 1, revision: 0, reason: "freshness" });
     listener?.({ sessionId, generation: 1, revision: 1, reason: "revision" });
+    expect(published).toEqual([]);
     completions[0]!(loaded(0, "possibly-stale"));
     await Promise.resolve();
-    expect(published.at(-1)?.refreshStatus).toBe("reconciling");
-    completions[1]!(loaded(1, "possibly-stale"));
+    completions[1]!(loaded(0, "possibly-stale"));
+    await Promise.resolve();
+    expect(published).toEqual([]);
+    completions[2]!(loaded(1, "possibly-stale"));
     await Promise.resolve();
     expect(published.at(-1)).toMatchObject({
       refreshStatus: "idle",
       loaded: { generation: 1, revision: 1, state: { workflow: { freshness: "possibly-stale" } } },
     });
+  });
+
+  it("installs canonical-ahead reconnects without speculating about an unknown generation", async () => {
+    vi.useFakeTimers();
+    const sessionId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const loaded = (generation: number, revision: number): HostRuntimeBootstrap => ({
+      sessionId,
+      generation,
+      revision,
+      session: { sessionId },
+      state: {
+        ...createReviewState({
+          sessionId,
+          source: { fileId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", digest: "a".repeat(64), byteLength: 100 },
+          workflowMode: "generated-output",
+          documentGeneration: generation,
+        }),
+        revision,
+      },
+      scope: { documentTitle: "paper.pdf" },
+      saveStatus: { destination: { phase: "none", generation: 0 }, sync: { phase: "clean", desiredRevision: revision, savedRevision: revision } },
+      viewerAssets: { documentUrl: `snapshot-${generation}.pdf`, pdfiumWasm: "pdfium.wasm" },
+      resourcePolicy: { host: "vscode", issued: new Set([`snapshot-${generation}.pdf`, "pdfium.wasm"]) },
+    });
+    let listener: ((event: HostRuntimeInvalidation) => void) | undefined;
+    const runtime = {
+      bootstrap: vi.fn()
+        .mockResolvedValueOnce(loaded(2, 1))
+        .mockRejectedValueOnce(new Error("temporary peer refresh failure"))
+        .mockResolvedValueOnce(loaded(3, 2)),
+      subscribeInvalidations: vi.fn((next: (event: HostRuntimeInvalidation) => void) => {
+        listener = next;
+        return () => { listener = undefined; };
+      }),
+    } as unknown as HostRuntime;
+    const published: RuntimeDocumentSourceSnapshot[] = [];
+    const unsubscribe = subscribeRuntimeDocumentSource(runtime, loaded(1, 0), (snapshot) => published.push(snapshot));
+
+    listener?.({ sessionId, generation: 1, revision: 0, reason: "freshness" });
+    expect(published).toEqual([]);
+    await vi.waitFor(() => expect(published.at(-1)).toMatchObject({
+      refreshStatus: "idle", loaded: { generation: 2, revision: 1 },
+    }));
+    expect(published.map(({ refreshStatus }) => refreshStatus)).toEqual(["idle"]);
+
+    listener?.({ sessionId, generation: 2, revision: 1, reason: "freshness" });
+    await vi.waitFor(() => expect(vi.getTimerCount()).toBe(1));
+    expect(published.map(({ refreshStatus }) => refreshStatus)).toEqual(["idle"]);
+    await vi.advanceTimersByTimeAsync(250);
+    await vi.waitFor(() => expect(published.at(-1)).toMatchObject({
+      refreshStatus: "idle", loaded: { generation: 3, revision: 2 },
+    }));
+    expect(runtime.bootstrap).toHaveBeenCalledTimes(3);
+    expect(published.map(({ refreshStatus }) => refreshStatus)).toEqual(["idle", "idle"]);
+    unsubscribe();
+    vi.useRealTimers();
+  });
+
+  it("keeps successor reconciliation visible when same-generation events race it", async () => {
+    const sessionId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const loaded = (generation: number, revision: number): HostRuntimeBootstrap => ({
+      sessionId,
+      generation,
+      revision,
+      session: { sessionId },
+      state: createReviewState({
+        sessionId,
+        source: { fileId: `file-${generation}`, digest: String(generation).repeat(64), byteLength: generation },
+        workflowMode: "generated-output",
+        documentGeneration: generation,
+      }),
+      scope: { documentTitle: "paper.pdf" },
+      saveStatus: { destination: { phase: "none", generation: 0 }, sync: { phase: "clean", desiredRevision: revision, savedRevision: revision } },
+      viewerAssets: { documentUrl: `snapshot-${generation}.pdf`, pdfiumWasm: "pdfium.wasm" },
+      resourcePolicy: { host: "vscode", issued: new Set([`snapshot-${generation}.pdf`, "pdfium.wasm"]) },
+    });
+    let listener: ((event: HostRuntimeInvalidation) => void) | undefined;
+    const completions: Array<(value: HostRuntimeBootstrap) => void> = [];
+    const runtime = {
+      bootstrap: vi.fn(() => new Promise<HostRuntimeBootstrap>((resolve) => { completions.push(resolve); })),
+      subscribeInvalidations: vi.fn((next: (event: HostRuntimeInvalidation) => void) => {
+        listener = next;
+        return () => { listener = undefined; };
+      }),
+    } as unknown as HostRuntime;
+    const published: RuntimeDocumentSourceSnapshot[] = [];
+    subscribeRuntimeDocumentSource(runtime, loaded(1, 4), (snapshot) => published.push(snapshot));
+
+    listener?.({ sessionId, generation: 2, previousGeneration: 1, revision: 5, reason: "generation" });
+    expect(published.map(({ refreshStatus }) => refreshStatus)).toEqual(["reconciling"]);
+    for (const reason of ["presence", "freshness", "revision"] as const) {
+      listener?.({ sessionId, generation: 2, revision: 5, reason });
+    }
+    expect(runtime.bootstrap).toHaveBeenCalledTimes(4);
+    expect(published.map(({ refreshStatus }) => refreshStatus)).toEqual([
+      "reconciling", "reconciling", "reconciling", "reconciling",
+    ]);
+    for (const reason of ["presence", "freshness", "revision"] as const) {
+      listener?.({ sessionId, generation: 1, revision: 4, reason });
+    }
+    expect(runtime.bootstrap).toHaveBeenCalledTimes(4);
+    expect(published.at(-1)?.refreshStatus).toBe("reconciling");
+
+    completions.slice(0, -1).forEach((complete) => complete(loaded(2, 5)));
+    await Promise.resolve();
+    expect(published.at(-1)?.refreshStatus).toBe("reconciling");
+    completions.at(-1)?.(loaded(2, 5));
+    await vi.waitFor(() => expect(published.at(-1)).toMatchObject({
+      refreshStatus: "idle", loaded: { generation: 2, revision: 5 },
+    }));
   });
 
   it("publishes equal-revision authoring presence changes as atomic bootstraps", async () => {
