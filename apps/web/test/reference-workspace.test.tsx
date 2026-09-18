@@ -745,6 +745,30 @@ describe('shared reference workspace', () => {
     expect(failed).toContain('Retry reference');
     expect(failed).not.toContain('role="alert"');
   });
+
+  it('keeps failed Reference viewport geometry measurable for draft passage recovery', () => {
+    const html = renderToStaticMarkup(<ReferenceWorkspace
+      open
+      authoringTakeover
+      mode="references"
+      presentation="bottom"
+      modes={['references']}
+      tabs={[{ identity: 'detail', label: 'Target detail', pageContext: 'Page 3' }]}
+      activeTabIdentity="detail"
+      pendingReference={{ status: 'error', label: 'Primary result', pageContext: 'Page 2' }}
+      onModeChange={vi.fn()}
+      onReferenceTabActivate={vi.fn()}
+      onReferenceTabClose={vi.fn()}
+      onSendToMain={vi.fn()}
+      onRetryReference={vi.fn()}
+      onReferenceViewportHost={vi.fn()}
+    />);
+    const viewport = html.match(/<div[^>]*class="reference-panel__viewport"[^>]*>/u)?.[0] ?? '';
+
+    expect(viewport).toContain('data-reference-viewport-concealed="true"');
+    expect(viewport).toContain('inert=""');
+    expect(viewport).not.toContain('hidden=""');
+  });
 });
 
 describe('outline navigator', () => {

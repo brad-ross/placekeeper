@@ -58,6 +58,7 @@ const refreshPreview = requestedRefreshPreview === 'reconciling' || requestedRef
   ? requestedRefreshPreview
   : 'idle';
 const composerPreview = previewParameters.get('composer');
+const composerSavePreview = previewParameters.get('composer-save');
 const requestedComposerReturn = previewParameters.get('return');
 const composerReturnPreview = requestedComposerReturn === 'outside'
   || requestedComposerReturn === 'unavailable'
@@ -83,8 +84,15 @@ if (composerPreview && composerPreviewTitles[composerPreview]) {
 }
 
 function ComposerPreview({ name }: { readonly name: string }) {
+  const deferredSave = useRef<(() => void) | null>(null);
+  const onSave = composerSavePreview === 'deferred'
+    ? () => new Promise<void>((resolve) => { deferredSave.current = resolve; })
+    : async () => undefined;
+  if (composerSavePreview === 'deferred') {
+    Reflect.set(globalThis, 'resolveDeferredComposerSave', () => deferredSave.current?.());
+  }
   const common = {
-    onSave: async () => undefined,
+    onSave,
     onDismiss: () => undefined,
     anchorNavigation: {
       visibility: composerReturnVisibility,
@@ -971,7 +979,7 @@ function Harness() {
     >
       {visualScenario ? (
         <VisualDocument items={state.items} onCorrespondenceChange={setCorrespondingItemId} />
-      ) : <div>
+      ) : <div data-annotation-surface="main">
         <button type="button" onClick={() => {
           setSelectionGeneration((generation) => generation + 1);
           setAnchorKind('selection');

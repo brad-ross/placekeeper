@@ -276,6 +276,7 @@ li[data-search-result] .pdf-search__result-heading > .pdf-search__result-page {
     .full-annotation-reader__back,
     .full-annotation-reader__edit,
     .full-annotation-reader__delete,
+    .full-annotation-reader__open-reference,
     .full-annotation-reader__locate
   ) {
     width: 44px;
@@ -297,19 +298,19 @@ li[data-search-result] .pdf-search__result-heading > .pdf-search__result-page {
 .review-page-menu button .review-icon,
 .link-action-popover [role="menuitem"] .review-icon { color: inherit; }
 
-/* Selected PDF popups share the workspace card's page/action endcap. */
+/* PDF popups share the workspace card's hover/focus action endcap. */
 .annotation-peek .row-action-group__direct {
   opacity: 0;
   pointer-events: none;
   transition: none;
 }
 .annotation-peek[data-source-return="true"] .row-action-group__direct,
-.annotation-peek[data-peek-selected="true"]:is(:hover, :has(:focus-visible)) .row-action-group__direct {
+.annotation-peek:is(:hover, :has(:focus-visible)) .row-action-group__direct {
   opacity: 1;
   pointer-events: auto;
 }
 .annotation-peek[data-source-return="true"] .annotation-item__page,
-.annotation-peek[data-peek-selected="true"]:is(:hover, :has(:focus-visible)):has(.row-action-group) .annotation-item__page {
+.annotation-peek:is(:hover, :has(:focus-visible)):has(.row-action-group) .annotation-item__page {
   opacity: 0;
 }
 @media (pointer: coarse), (hover: none) {
@@ -318,7 +319,8 @@ li[data-search-result] .pdf-search__result-heading > .pdf-search__result-page {
 }
 
 /* Keep annotation previews in the exposed PDF area beside open workspaces. */
-.review-layout:is([data-right-overlay="true"], [data-bottom-overlay="true"]) .annotation-peek {
+.review-layout:is([data-right-overlay="true"], [data-bottom-overlay="true"])
+  .annotation-peek:not(.annotation-peek--reference-inspection) {
   top: auto;
   right: max(12px, calc(100% - var(--review-overlay-right-start, 100%)));
   bottom: max(12px, calc(100% - var(--review-overlay-bottom-start, 100%)));

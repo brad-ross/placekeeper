@@ -386,7 +386,14 @@ export function VisualDocument({
   readonly onCorrespondenceChange: (id: string | undefined) => void;
 }) {
   return (
-    <div style={canvasStyle} role="application" aria-label="PDF review canvas" tabIndex={0} data-visual-document>
+    <div
+      style={canvasStyle}
+      role="application"
+      aria-label="PDF review canvas"
+      tabIndex={0}
+      data-visual-document
+      data-annotation-surface="main"
+    >
       <article style={pageStyle} aria-label="Rendered PDF page">
         <p style={{ margin: 0, font: '600 11px/1.4 ui-sans-serif, system-ui', letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--review-ink-muted)' }}>Working paper · August 2026</p>
         <h1 style={{ margin: '18px 0 10px', fontSize: 27, lineHeight: 1.18, letterSpacing: '-0.02em' }}>Identification with Local Equilibria</h1>

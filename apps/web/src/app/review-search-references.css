@@ -463,6 +463,10 @@
   border-radius: calc(var(--review-radius-row) - 2px);
 }
 
+.reference-panel__viewport[data-reference-viewport-concealed="true"] {
+  visibility: hidden;
+}
+
 .reference-panel__viewport > .pdf-workspace {
   width: 100%;
   height: 100%;
@@ -510,4 +514,3 @@
   color: var(--review-ink-primary);
   background: var(--review-surface-panel);
 }
-

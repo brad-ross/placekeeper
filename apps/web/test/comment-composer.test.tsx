@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   boundedTextAreaHeight,
   CommentComposer,
+  focusCommentComposerEditor,
 } from '../src/review/CommentComposer.js';
 
 function renderComposer(overrides: Partial<Parameters<typeof CommentComposer>[0]> = {}) {
@@ -102,12 +103,28 @@ describe('CommentComposer contextual authoring contract', () => {
     expect(html).toContain('Durably saved text');
     expect(html).toContain('Saved. Waiting for the latest review state; retrying automatically.');
     expect(html.match(/disabled=""/g)?.length).toBeGreaterThanOrEqual(2);
+    expect(html).toContain('aria-busy="true"');
+    expect(html).toContain('data-submitting="true"');
+    expect(html).toContain('lucide-loader-circle');
   });
 
   it('clamps auto-growth before the editor becomes internally scrollable', () => {
     expect(boundedTextAreaHeight({ scrollHeight: 40, minHeight: 84, maxHeight: 220 })).toBe(84);
     expect(boundedTextAreaHeight({ scrollHeight: 160, minHeight: 84, maxHeight: 220 })).toBe(160);
     expect(boundedTextAreaHeight({ scrollHeight: 360, minHeight: 84, maxHeight: 220 })).toBe(220);
+  });
+
+  it('focuses the editor without scrolling its pending placement into view', () => {
+    const editor = {
+      value: 'Draft',
+      focus: vi.fn(),
+      setSelectionRange: vi.fn(),
+    };
+
+    focusCommentComposerEditor(editor);
+
+    expect(editor.focus).toHaveBeenCalledWith({ preventScroll: true });
+    expect(editor.setSelectionRange).toHaveBeenCalledWith(5, 5);
   });
 
   it('exposes stable placement data and an original-page cue without duplicating the draft', () => {
@@ -120,5 +137,63 @@ describe('CommentComposer contextual authoring contract', () => {
     expect(html).toContain('style="left:18px;top:42px"');
     expect(html).toContain('comment-composer__page-cue"> · 7</span>');
     expect(html.match(/Persistent draft/g)).toHaveLength(1);
+  });
+
+  it('keeps a placement-dependent composer editable while deferring its visible paint', () => {
+    const pending = renderComposer({ surfaceRef: vi.fn(), deferUntilPlacement: true });
+    const standalone = renderComposer({ surfaceRef: vi.fn() });
+    const pendingEditor = pending.match(/<textarea[^>]*>/u)?.[0];
+
+    expect(pending).toContain('data-composer-placement="pending"');
+    expect(pending).toContain('opacity:0;pointer-events:none');
+    expect(pendingEditor).toBeDefined();
+    expect(pendingEditor).not.toContain('disabled');
+    expect(pendingEditor).not.toContain('readOnly');
+    expect(standalone).not.toContain('data-composer-placement="pending"');
+    expect(standalone).not.toContain('opacity:0');
+  });
+
+  it('keeps a recoverable draft mounted while an invalid target disables Save', () => {
+    const html = renderComposer({ initialValue: 'Recover this draft', saveDisabled: true });
+
+    expect(html).toContain('Recover this draft');
+    expect(html).toContain('title="Save" disabled="" aria-disabled="true"');
+  });
+
+  it('freezes an accepted draft and keeps Apply visibly and accessibly busy during persistence', () => {
+    const html = renderComposer({
+      initialValue: 'Already accepted once',
+      persistencePending: true,
+      saveLabel: 'Apply',
+    });
+
+    expect(html).toContain('Already accepted once');
+    expect(html).toContain('textarea');
+    expect(html).toContain('readOnly=""');
+    expect(html).not.toContain('Waiting for the PDF to save. Use Retry in the save alert.');
+    expect(html).toContain('role="status"');
+    expect(html).toContain('class="sr-only"');
+    expect(html).toContain('Saving annotation to PDF.');
+    expect(html).toContain('title="Apply" disabled="" aria-disabled="true" aria-busy="true"');
+    expect(html).toContain('data-submitting="true"');
+    expect(html).toContain('lucide-loader-circle');
+  });
+
+  it('compacts a Reference sheet without adding a second context title', () => {
+    const html = renderComposer({
+      initialValue: 'Selection-sensitive draft',
+      placement: { kind: 'bottom-sheet' },
+      passageExposure: {
+        exposed: true,
+        onExpose: vi.fn(),
+        onResume: vi.fn(),
+      },
+    });
+
+    expect(html).toContain('data-passage-exposed="true"');
+    expect(html).not.toContain('comment-composer__context');
+    expect(html).toContain('aria-label="Resume editing"');
+    expect(html).toMatch(/comment-composer__body[^>]*hidden=""[^>]*inert=""/u);
+    expect(html.match(/Selection-sensitive draft/g)).toHaveLength(1);
   });
 });

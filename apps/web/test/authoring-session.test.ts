@@ -14,7 +14,13 @@ import {
   attachmentOrderedInteractionTransport,
   type AuthoringSessionSeed,
 } from '../src/review/authoring-session.js';
+import { PdfZoomMode } from '@embedpdf/models';
 import { resolveReattachmentDiscardIntent } from '../src/review/ReconciliationWorkspace.js';
+import {
+  authoringSaveDisposition,
+  canonicalStateForFinalizedInteraction,
+  interactionReceiptRequiresPersistence,
+} from '../src/review/use-authoring-session.js';
 import {
   pendingDestinationAttemptIsCurrent,
   pendingDestinationDisposition,
@@ -32,6 +38,69 @@ const workspace = {
   activeItemId: 'annotation-2',
   annotationScrollTop: 148,
 };
+
+describe('authoring save authority', () => {
+  it('gives an exact terminal retry precedence over invalid and persistence guards', () => {
+    expect(authoringSaveDisposition({
+      terminalRetryPending: true,
+      invalidReason: 'document',
+      persistencePending: true,
+    })).toBe('retry-terminal');
+    expect(authoringSaveDisposition({
+      terminalRetryPending: false,
+      invalidReason: 'edit-target',
+      persistencePending: false,
+    })).toBe('blocked');
+    expect(authoringSaveDisposition({
+      terminalRetryPending: false,
+      invalidReason: null,
+      persistencePending: false,
+    })).toBe('submit');
+  });
+
+  it('waits for PDF durability only for applied receipts on persistence-backed destinations', () => {
+    expect(interactionReceiptRequiresPersistence({
+      outcome: 'applied',
+      persistenceRequired: true,
+    })).toBe(true);
+    expect(interactionReceiptRequiresPersistence({
+      outcome: 'discarded',
+      persistenceRequired: true,
+    })).toBe(false);
+    expect(interactionReceiptRequiresPersistence({
+      outcome: 'applied',
+      persistenceRequired: false,
+    })).toBe(false);
+  });
+
+  it('accepts a finalized same-session successor before the viewer generation observer catches up', () => {
+    const source = createReviewState({
+      sessionId: 'successor-session',
+      source: { fileId: 'before', digest: 'a'.repeat(64), byteLength: 12 },
+      documentGeneration: 7,
+    });
+    const successor = {
+      ...source,
+      revision: 4,
+      source: { ...source.source, digest: 'b'.repeat(64) },
+      workflow: { ...source.workflow, documentGeneration: 8 },
+    };
+    const receipt = {
+      status: 'finalized' as const,
+      interactionToken: 'terminal-successor',
+      generation: 7,
+      outcome: 'applied' as const,
+      reviewRevision: 4,
+    };
+
+    expect(canonicalStateForFinalizedInteraction(
+      successor,
+      7,
+      receipt,
+      authoringAuthorityFor(source, 7),
+    )).toBe(successor);
+  });
+});
 
 const selection = {
   pageIndex: 2,
@@ -814,6 +883,68 @@ describe('frozen authoring-session contract', () => {
 
     expect(session.origin.kind).toBe('reader-edit');
     expect(Object.isFrozen(session.origin)).toBe(true);
+  });
+
+  it('deeply freezes reference recovery identity without making tab identity save authority', () => {
+    const target = {
+      documentGeneration: 7,
+      pageIndex: 13,
+      zoom: { mode: PdfZoomMode.XYZ, params: [18, 24, 1.5] },
+      identity: 'destination-identity',
+    };
+    const surface = {
+      kind: 'reference' as const,
+      documentGeneration: 7,
+      tabIdentity: 'reference-a',
+    };
+    const annotationIdentity = { origin: 'owned' as const, itemId: 'annotation-a' };
+    const session = createAuthoringSession({
+      ...seed({ kind: 'insert', anchor: caret, initialValue: 'draft' }),
+      origin: {
+        kind: 'caret',
+        trigger: null,
+        surface,
+        referenceRecovery: {
+          target,
+          tabIdentity: 'reference-a',
+          label: 'Identification strategy',
+          pageContext: 'Page 14',
+          annotationIdentity,
+        },
+      },
+    });
+
+    target.zoom.params[0] = 999;
+    surface.tabIdentity = 'reference-b';
+    annotationIdentity.itemId = 'annotation-b';
+
+    expect(session.origin).toMatchObject({
+      surface: { kind: 'reference', documentGeneration: 7, tabIdentity: 'reference-a' },
+      referenceRecovery: {
+        target: {
+          documentGeneration: 7,
+          pageIndex: 13,
+          identity: 'destination-identity',
+          zoom: { params: [18, 24, 1.5] },
+        },
+        tabIdentity: 'reference-a',
+        label: 'Identification strategy',
+        pageContext: 'Page 14',
+        annotationIdentity: { origin: 'owned', itemId: 'annotation-a' },
+      },
+    });
+    expect(Object.isFrozen(session.origin.surface)).toBe(true);
+    expect(Object.isFrozen(session.origin.referenceRecovery)).toBe(true);
+    expect(Object.isFrozen(session.origin.referenceRecovery?.target)).toBe(true);
+    expect(Object.isFrozen(session.origin.referenceRecovery?.target.zoom)).toBe(true);
+    expect(Object.isFrozen(session.origin.referenceRecovery?.target.zoom.params)).toBe(true);
+    expect(Object.isFrozen(session.origin.referenceRecovery?.annotationIdentity)).toBe(true);
+    expect(authoringAnchorSnapshot(session)).toMatchObject({
+      surface: { tabIdentity: 'reference-a' },
+      referenceRecovery: { target: { identity: 'destination-identity' } },
+    });
+
+    expect(authoringSessionIsCurrent(session, authoringAuthorityFor(state, 7))).toBe(true);
   });
 
   it('fails closed when either source identity or document generation changes', () => {

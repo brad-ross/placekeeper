@@ -306,6 +306,7 @@
 .full-annotation-reader__back,
 .full-annotation-reader__edit,
 .full-annotation-reader__delete,
+.full-annotation-reader__open-reference,
 .full-annotation-reader__locate {
   display: inline-flex;
   min-width: var(--review-control-compact);
@@ -324,6 +325,7 @@
 .full-annotation-reader__back:hover,
 .full-annotation-reader__edit:hover,
 .full-annotation-reader__delete:hover,
+.full-annotation-reader__open-reference:hover,
 .full-annotation-reader__locate:hover {
   border-color: var(--review-border-strong);
   background: var(--review-workspace-card-hover);

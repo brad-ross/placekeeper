@@ -8,6 +8,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { PdfNavigationTarget } from '../src/pdf/pdf-navigation-target.js';
 import { combinePageRotation } from '../src/pdf/owned-overlay.js';
 import {
+  naturalAnchorToPdfBottomOriginPoint,
   pdfBottomOriginPointToNaturalAnchor,
   samePdfViewerLocation,
   type PdfViewerLocation,
@@ -51,6 +52,29 @@ describe('viewer navigation math', () => {
       page,
       { x: 100, y: 200 },
     )).toEqual({ x: 72, y: 160 });
+  });
+
+  it('round trips a cropped natural anchor through a rotated PDF destination', () => {
+    const natural = { x: 72, y: 160 };
+    const cropOrigin = { x: 100, y: 200 };
+    const pdfPoint = naturalAnchorToPdfBottomOriginPoint(natural, page, cropOrigin);
+    expect(pdfPoint).toEqual({ x: 172, y: 840 });
+    const location = createPdfTargetLocation({
+      documentGeneration: 4,
+      pageIndex: 0,
+      zoom: { mode: PdfZoomMode.XYZ, params: [pdfPoint.x, pdfPoint.y, 0] },
+      identity: 'cropped-rotated-annotation',
+    }, {
+      page: { ...page, cropOrigin },
+      viewport,
+      currentZoom: 1.25,
+      rotation: Rotation.Degree90,
+    });
+    expect(location).toMatchObject({
+      anchor: natural,
+      alignment: { xPercent: 0, yPercent: 0 },
+      zoom: 1.25,
+    });
   });
 
   it.each([
@@ -652,11 +676,12 @@ function navigationHarness(options: {
     thirdPageRect,
     focus,
     completeZoom: emitZoom,
-    resizeViewport(width: number) {
-      viewportRect.width = width;
-    },
     setCurrentZoom(zoom: number) {
       currentZoom = zoom;
+    },
+    resizeViewport(width: number, height = viewportRect.height) {
+      viewportRect.width = width;
+      viewportRect.height = height;
     },
     replaceActiveDocument(documentId: string) {
       activeDocumentId = documentId;
@@ -1186,6 +1211,24 @@ describe('viewer navigation adapter', () => {
 
     expect(await harness.navigation.applyLocation(captured!)).toBe(true);
     expect(samePdfViewerLocation(harness.navigation.captureLocation(), captured)).toBe(true);
+  });
+
+  it('captures a transient viewport origin that survives tray-driven viewport resizing', async () => {
+    const harness = navigationHarness();
+    const captured = harness.navigation.captureLocation('viewport-origin');
+
+    expect(captured).toEqual({
+      pageIndex: 0,
+      anchor: { x: 100, y: 200 },
+      alignment: { xPercent: 0, yPercent: 0 },
+      zoom: 1,
+    });
+    const originalPagePosition = { left: harness.pageRect.left, top: harness.pageRect.top };
+    harness.resizeViewport(400, 200);
+
+    expect(await harness.navigation.applyLocation(captured!)).toBe(true);
+    expect(harness.pageRect).toMatchObject(originalPagePosition);
+    expect(harness.navigation.captureLocation('viewport-origin')).toEqual(captured);
   });
 
   it('accepts a fully visible fitted page when a tray runway creates artificial horizontal scroll range', async () => {

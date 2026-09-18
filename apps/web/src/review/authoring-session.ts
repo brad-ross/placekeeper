@@ -18,7 +18,10 @@ import type { ReviewAnnotation } from '../../../../packages/core/src/pdf-writer.
 import type { ReviewRect } from '../../../../packages/core/src/review-commands.js';
 import type { CaretAnchor, SelectionAnchor } from '../pdf/selection-anchor.js';
 import type { PdfNaturalPoint } from '../pdf/viewer-navigation.js';
+import type { PdfAnnotationSurface } from '../pdf/annotation-surface.js';
+import type { PdfNavigationTarget } from '../pdf/pdf-navigation-target.js';
 import type { WorkspaceMode } from './reference-navigation-state.js';
+import type { AnnotationReaderIdentity } from './annotation-reader.js';
 
 export type ReviewInteractionOutcome = 'applied' | 'discarded';
 
@@ -454,6 +457,16 @@ export type AuthoringOriginKind =
 export interface AuthoringOrigin {
   readonly kind: AuthoringOriginKind;
   readonly trigger: HTMLElement | null;
+  readonly surface?: PdfAnnotationSurface;
+  readonly referenceRecovery?: AuthoringReferenceRecovery;
+}
+
+export interface AuthoringReferenceRecovery {
+  readonly target: PdfNavigationTarget;
+  readonly tabIdentity: string;
+  readonly label: string;
+  readonly pageContext: string;
+  readonly annotationIdentity?: AnnotationReaderIdentity;
 }
 
 export type AuthoringSource =
@@ -517,6 +530,8 @@ export interface AuthoringAnchorSnapshot {
   readonly authority: AuthoringAuthority;
   readonly pageIndex: number;
   readonly point: PdfNaturalPoint | null;
+  readonly surface?: PdfAnnotationSurface;
+  readonly referenceRecovery?: AuthoringReferenceRecovery;
 }
 
 export function reviewSourceIdentity(
@@ -601,6 +616,45 @@ function cloneReviewItem(item: ReviewItem): ReviewItem {
     payload: Object.freeze(Object.fromEntries(
       Object.entries(item.payload).map(([key, value]) => [key, cloneJson(value)]),
     )),
+  });
+}
+
+function cloneSurface(surface: PdfAnnotationSurface): PdfAnnotationSurface {
+  return Object.freeze({ ...surface });
+}
+
+function cloneNavigationTarget(target: PdfNavigationTarget): PdfNavigationTarget {
+  return Object.freeze({
+    documentGeneration: target.documentGeneration,
+    pageIndex: target.pageIndex,
+    identity: target.identity,
+    zoom: Object.freeze({
+      mode: target.zoom.mode,
+      params: Object.freeze([...target.zoom.params]),
+    }),
+  });
+}
+
+function cloneReferenceRecovery(recovery: AuthoringReferenceRecovery): AuthoringReferenceRecovery {
+  return Object.freeze({
+    target: cloneNavigationTarget(recovery.target),
+    tabIdentity: recovery.tabIdentity,
+    label: recovery.label,
+    pageContext: recovery.pageContext,
+    ...(recovery.annotationIdentity === undefined
+      ? {}
+      : { annotationIdentity: Object.freeze({ ...recovery.annotationIdentity }) }),
+  });
+}
+
+function cloneOrigin(origin: AuthoringOrigin): AuthoringOrigin {
+  return Object.freeze({
+    kind: origin.kind,
+    trigger: origin.trigger,
+    ...(origin.surface === undefined ? {} : { surface: cloneSurface(origin.surface) }),
+    ...(origin.referenceRecovery === undefined
+      ? {}
+      : { referenceRecovery: cloneReferenceRecovery(origin.referenceRecovery) }),
   });
 }
 
@@ -691,7 +745,7 @@ export function createAuthoringSession(seed: AuthoringSessionSeed): AuthoringSes
     draftId: seed.draftId ?? crypto.randomUUID(),
     authority: Object.freeze({ ...seed.authority }),
     source,
-    origin: Object.freeze({ ...seed.origin }),
+    origin: cloneOrigin(seed.origin),
     workspace: Object.freeze({ ...seed.workspace }),
     semantics: semanticsFor(source),
     ...(seed.interaction === undefined ? {} : { interaction: seed.interaction }),
@@ -785,6 +839,10 @@ export function authoringAnchorSnapshot(
     authority: session.authority,
     pageIndex,
     point: point === null ? null : Object.freeze(point),
+    ...(session.origin.surface === undefined ? {} : { surface: session.origin.surface }),
+    ...(session.origin.referenceRecovery === undefined
+      ? {}
+      : { referenceRecovery: session.origin.referenceRecovery }),
   });
 }
 

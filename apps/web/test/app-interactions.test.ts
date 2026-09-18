@@ -6,7 +6,13 @@ import {
   clampPageNotePoint,
   subscribeToMainDocumentOpened,
   publishViewerCaretRead,
+  isCurrentViewerInputSurface,
+  ReferenceInputDocumentAuthority,
+  referenceInputSurface,
+  scopeViewerInteraction,
   ViewerInitializationAuthority,
+  viewerKeyboardPageIndex,
+  viewerPointerMoveSurface,
 } from '../src/app/App.js';
 import { MAIN_PDF_DOCUMENT_ID } from '../src/pdf/viewer-document-ids.js';
 import type { PdfOutlineDiscovery } from '../src/pdf/pdf-outline.js';
@@ -20,6 +26,80 @@ const unavailableCaret = {
 };
 
 describe('App interaction boundaries', () => {
+  it('uses the live surface for hover and the captured surface during a pointer gesture', () => {
+    const main = { kind: 'main' as const, documentGeneration: 8 };
+    const captured = {
+      kind: 'reference' as const, documentGeneration: 8, tabIdentity: 'tab:paper-a',
+    };
+    const liveReference = {
+      kind: 'reference' as const, documentGeneration: 8, tabIdentity: 'tab:paper-b',
+    };
+
+    expect(viewerPointerMoveSurface(null, main)).toEqual(main);
+    expect(viewerPointerMoveSurface(captured, liveReference)).toEqual(captured);
+  });
+
+  it('places a keyboard note on the focused Reference page before scroll fallback', () => {
+    expect(viewerKeyboardPageIndex('1', 1, 4)).toBe(1);
+    expect(viewerKeyboardPageIndex(undefined, 2, 4)).toBe(1);
+    expect(viewerKeyboardPageIndex('stale', 3, 4)).toBe(2);
+    expect(viewerKeyboardPageIndex('9', 3, 4)).toBe(2);
+  });
+
+  it('binds Reference input before a tab exists, then advances surfaces on the same document', () => {
+    const authority = new ReferenceInputDocumentAuthority();
+    const document = {};
+    authority.bind(document);
+
+    expect(authority.surface(document, 12, null)).toBeNull();
+    const tabA = authority.surface(document, 12, 'tab:a');
+    expect(tabA).toEqual({
+      kind: 'reference', documentGeneration: 12, tabIdentity: 'tab:a',
+    });
+    if (tabA === null) throw new Error('expected tab A surface');
+    expect(authority.isCurrent(document, tabA, 12, 'tab:a')).toBe(true);
+
+    const tabB = authority.surface(document, 12, 'tab:b');
+    expect(authority.isCurrent(document, tabA, 12, 'tab:b')).toBe(false);
+    expect(tabB).toEqual({
+      kind: 'reference', documentGeneration: 12, tabIdentity: 'tab:b',
+    });
+    if (tabB === null) throw new Error('expected tab B surface');
+    expect(authority.isCurrent(document, tabB, 12, 'tab:b')).toBe(true);
+    expect(authority.surface({}, 12, 'tab:b')).toBeNull();
+  });
+
+  it('envelopes Reference input with the exact live tab and document generation', () => {
+    const surface = referenceInputSurface(8, 'tab:paper-a');
+    expect(surface).not.toBeNull();
+    if (surface === null) throw new Error('expected reference surface');
+    expect(scopeViewerInteraction({ type: 'selection-placement', value: null }, surface)).toEqual({
+      type: 'selection-placement', value: null, surface,
+    });
+    expect(scopeViewerInteraction({
+      type: 'owned-mark',
+      value: { id: 'annotation-1', phase: 'activate', pageIndex: 4 },
+    }, surface)).toEqual({
+      type: 'owned-mark',
+      value: { id: 'annotation-1', phase: 'activate', pageIndex: 4 },
+      surface,
+    });
+    expect(referenceInputSurface(8, null)).toBeNull();
+    expect(isCurrentViewerInputSurface(surface, 8, 'tab:paper-a')).toBe(true);
+    expect(isCurrentViewerInputSurface(surface, 8, 'tab:paper-b')).toBe(false);
+    expect(isCurrentViewerInputSurface(surface, 9, 'tab:paper-a')).toBe(false);
+    expect(isCurrentViewerInputSurface(
+      { kind: 'main', documentGeneration: 8 },
+      8,
+      null,
+    )).toBe(true);
+    expect(isCurrentViewerInputSurface(
+      { kind: 'main', documentGeneration: 8 },
+      9,
+      null,
+    )).toBe(false);
+  });
+
   it('invalidates an older async viewer initialization when a replacement begins', () => {
     const authority = new ViewerInitializationAuthority();
     const oldRegistry = {};

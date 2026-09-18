@@ -1,7 +1,7 @@
 ---
 title: "Adaptive annotation tray framing without resizing the PDF viewer"
 date: "2026-08-08"
-last_updated: 2026-09-10
+last_updated: 2026-09-18
 category: "architecture-patterns"
 module: "PDF review annotation tray framing"
 problem_type: "architecture_pattern"
@@ -65,6 +65,24 @@ Ordinary reading requests and presentation changes are not reveal requests. The 
 Transition settlement alone does not prove the scroll limits are ready. `waitForSettledGeometry` waits for current surface geometry and the current runway promise, and checks both identities before returning an authority token (`apps/web/src/review/use-annotation-tray-framing.ts`). The layout effect checks cancellation and operation generation after asynchronous boundaries, and suppresses stale correction when the user revision changes (`apps/web/src/review/use-annotation-tray-framing.ts`). Zoom advances user authority without republishing unchanged runway geometry, which would invalidate Fit width's own settlement token (`apps/web/src/review/use-annotation-tray-framing.ts`).
 
 Two unchanged frames and an empty transition-event ledger do not establish settlement: a CSS transition can be pending before `transitionrun` arrives. Inspect pending or running animations on both trays and the reading viewport while waiting, and recheck them when validating the returned token (`apps/web/src/review/use-annotation-tray-framing.ts`, `apps/web/src/pdf/viewer-framing.ts`). Event-end handling and quiet-frame counting alone admitted a fit against intermediate geometry.
+
+### Withhold dependent overlays until their geometry is ready
+
+[PR #121](https://github.com/brad-ross/placekeeper/pull/121), open as of 2026-09-18, applies settlement to annotation cards and editors as well as PDF navigation. Correct final coordinates do not excuse a visible frame at the fallback position. An overlay needs its own measured size and current passage bounds before it can be positioned, so conditional mounting or `display: none` can make measurement depend on the very visibility decision it is meant to establish.
+
+Keep the surface mounted for measurement, but choose its hidden state according to its interaction needs. A passive Reference inspection can remain `visibility: hidden` and pointer-inert until placement exists. A composer must accept keyboard input immediately: it stays at `opacity: 0` with pointer events disabled, while its textarea receives layout-effect focus using `preventScroll`. The same editor becomes visible after placement resolves. Deferring focus or mounting would weaken keyboard readiness; ordinary focus at provisional coordinates can scroll the PDF before the editor appears (`apps/web/src/app/ReviewShell.tsx`, `apps/web/src/review/CommentComposer.tsx`).
+
+Placement is valid for a request and a coordinate scope, not merely for an annotation ID. The placement snapshot carries the anchor key and Main/Reference scope; a mismatch makes it unavailable. The shell supplies the authoring token and surface-specific target selectors, and layout changes trigger fresh measurement. This prevents a prior Main placement from becoming the first visible position of a Reference editor (`apps/web/src/review/use-passage-editor-placement.ts`, `apps/web/src/app/ReviewShell.tsx`). Derive visible anchors from rendered fragments and intersect them with the usable viewport. Durable PDF coordinates identify a passage; they do not replace client geometry when placing its popup or selection toolbar.
+
+Closing the last workspace has an additional boundary. Logical closure starts an animation; it does not mean that the PDF reading frame and runway have settled. Derive the close edge during render so the first closing commit already suppresses Main cards, then maintain that gate until `waitForSettledGeometry` returns current authority. Abort the waiter on reopen or cleanup, and do not let an obsolete close expose a card over the reopened tray. Preserve the selected annotation during the close control's outside-click handling so the final card can be reconstructed after settlement (`apps/web/src/app/ReviewShell.tsx`, `workspaceCloseAllowsMainPeek` and `activeAnnotationShouldDismissForClick`).
+
+These gates solve different races. A resolved overlay measurement cannot make a still-moving PDF anchor final, and a settled workspace cannot make an unmeasured editor positioned. Reuse the framing settlement primitive rather than adding an arbitrary delay to either path. The [composer guide](../design-patterns/contextual-annotation-composer-preserves-document-context-during-authoring.md) separately owns the draft and recovery lifetime.
+
+### Verify the first visible frame and the input lifetime
+
+Start frame probes before the triggering click. Record computed visibility and opacity, placement kind, origin relationship, bounds, and pending or running workspace animations. Reject an unresolved or wrong-surface first position, not just an incorrect endpoint. For editors, start the probe before the click, enter text before stopping and reading it, and verify focus, value, and PDF/window scroll survive the first positioned paint. For tray close, require no visible card during motion and no card from an interrupted close (`test/acceptance/annotation-behavior-followup.spec.ts`, `test/acceptance/reference-annotations.spec.ts`).
+
+Cover normal motion, immediate reopen, resize during close, and reduced motion. Reduced motion removes transitions on the relevant workspace and viewport surfaces, but the correctness gate must still hold without relying on an observed animation. Reference text fragments may also settle after glyph alignment, so do not mistake every later subpixel adjustment for an unresolved first placement. These browser probes measure browser-visible layout, not a separate native compositor's pixels; use native-surface evidence when investigating a native paint failure.
 
 ### Commit scale and anchor together; validate the captured page
 

@@ -214,7 +214,7 @@ async function showPdfSelectionPage(
   pageIndex: number,
   lineY: number,
 ): Promise<{ box: NonNullable<Awaited<ReturnType<Locator["boundingBox"]>>>; scale: number }> {
-  const pdfPage = workspace.locator(`[data-page-index="${pageIndex}"]`);
+  const pdfPage = workspace.locator(`.pdf-workspace__page[data-page-index="${pageIndex}"]`);
   await pdfPage.evaluate((element) => element.scrollIntoView({ block: 'start' }));
   await waitForRenderedPageImage(pdfPage);
   await expect.poll(async () => {
@@ -275,7 +275,7 @@ async function dragAcrossProductionPdfPages(
   }
   await whileSelecting?.();
   await page.mouse.up();
-  await expect(workspace.locator(':scope [data-page-index] > div[style*="mix-blend-mode"]'))
+  await expect(workspace.locator(':scope .pdf-workspace__page[data-page-index] > div[style*="mix-blend-mode"]'))
     .not.toHaveCount(0);
   await page.evaluate(() => new Promise<void>((resolve) => {
     requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
@@ -425,7 +425,9 @@ async function openFreshProductionFixture(
   try {
     await expect(page.locator("[data-production-review]")).toBeVisible();
     await expect(page.locator("[data-production-review]")).toHaveAttribute("data-initial-view-ready", "true");
-    await expect(page.locator(".pdf-workspace:not(.pdf-workspace--reference) [data-page-index='0']"))
+    await expect(page.locator(
+      ".pdf-workspace:not(.pdf-workspace--reference) .pdf-workspace__page[data-page-index='0']",
+    ))
       .toBeVisible({ timeout: PRODUCTION_VIEWER_READY_TIMEOUT_MS });
   } catch (error) {
     throw new Error(`${failureMessage}: ${startupErrors.join("; ") || "production viewer did not become ready"}`, {
@@ -980,7 +982,7 @@ test('keeps a distant search destination stationary from its first visible frame
   await writeFile(distantSearchPdf, await pdfDocument.save());
   await openFreshProductionFixture(page, distantSearchPdf, 'Distant search launch failed');
   const main = page.locator('.pdf-workspace:not(.pdf-workspace--reference)');
-  await main.locator('[data-page-index="0"]').focus();
+  await main.locator('.pdf-workspace__page[data-page-index="0"]').focus();
   await page.keyboard.press(platformFindShortcut);
   const zoom = page.getByRole('textbox', { name: /Current zoom \d+ percent/u });
   await zoom.fill('100');
@@ -996,7 +998,7 @@ test('keeps a distant search destination stationary from its first visible frame
   await expect(results).toHaveCount(2);
   await results.nth(1).click();
   await expect(page.getByRole('textbox', { name: /^Current page/ })).toHaveValue('18');
-  await expect(main.locator('[data-page-index="0"]')).toHaveCount(0);
+  await expect(main.locator('.pdf-workspace__page[data-page-index="0"]')).toHaveCount(0);
   await page.evaluate(() => {
     const state = { running: true, positions: [] as { x: number; y: number }[] };
     (window as unknown as { distantJumpFrames: typeof state }).distantJumpFrames = state;
@@ -1004,7 +1006,7 @@ test('keeps a distant search destination stationary from its first visible frame
       if (!state.running) return;
       const main = document.querySelector('.pdf-workspace:not(.pdf-workspace--reference)');
       const viewport = main?.querySelector('[data-viewer-framing-viewport]')?.getBoundingClientRect();
-      const bounds = main?.querySelector('[data-page-index="0"]')?.getBoundingClientRect();
+      const bounds = main?.querySelector('.pdf-workspace__page[data-page-index="0"]')?.getBoundingClientRect();
       if (viewport && bounds && bounds.top < viewport.bottom && bounds.bottom > viewport.top) {
         state.positions.push({ x: bounds.x, y: bounds.y });
       }
@@ -1057,13 +1059,19 @@ for (const viewportWidth of [1280, 760]) {
       await Promise.all(element.getAnimations({ subtree: true }).map(animation => animation.finished.catch(() => undefined)));
     });
     const main = page.locator('.pdf-workspace:not(.pdf-workspace--reference)');
-    await main.locator('[data-page-index="0"]').focus();
+    await main.locator('.pdf-workspace__page[data-page-index="0"]').focus();
     await page.keyboard.press(platformFindShortcut);
-    await expect(page.getByRole('searchbox', { name: 'Search this PDF' })).toBeVisible();
+    const searchQuery = page.getByRole('searchbox', { name: 'Search this PDF' });
+    await expect(searchQuery).toBeVisible();
+    await expect(searchQuery).toBeFocused();
+    await expect(page.locator('.pdf-search')).toHaveAttribute('data-pdf-search-state', 'idle');
     // Opening Search can start a fit-width transition; enter the manual test
     // scale only after that existing transition has reached its final frame.
-    await page.locator('[data-review-stage]').evaluate(async element => {
-      await Promise.all(element.getAnimations({ subtree: true }).map(animation => animation.finished.catch(() => undefined)));
+    await page.locator('[data-review-stage]').evaluate(async (stage) => {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+      await Promise.all(stage.getAnimations({ subtree: true })
+        .filter((animation) => animation.effect?.getComputedTiming().iterations !== Infinity)
+        .map((animation) => animation.finished.catch(() => undefined)));
     });
     const results = page.locator('#workspace-panel-search [data-search-group="exact"] .annotation-item__navigation');
     const zoom = page.getByRole('textbox', { name: /Current zoom \d+ percent/u });
@@ -1071,7 +1079,19 @@ for (const viewportWidth of [1280, 760]) {
     await zoom.press('Enter');
     await waitForStageMotion();
     await expect(zoom).toHaveValue('100');
+    await expect.poll(async () => (await main.locator('.pdf-workspace__page[data-page-index="0"]').boundingBox())?.width)
+      .toBeCloseTo(612, 0);
+    await page.locator('[data-review-stage]').evaluate(async (stage) => {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+      await Promise.all(stage.getAnimations({ subtree: true })
+        .filter((animation) => animation.effect?.getComputedTiming().iterations !== Infinity)
+        .map((animation) => animation.finished.catch(() => undefined)));
+    });
     const rightFade = page.locator('.review-overlay-frame__right-fade:visible');
+    await main.locator('.pdf-workspace__page[data-page-index="0"]').focus();
+    await page.keyboard.press('Control+Meta+0');
+    await waitForStageMotion();
+    await expect.poll(() => zoom.inputValue()).not.toBe('100');
     const zoomTrigger = page.getByRole('button', { name: 'Open zoom controls' });
     await zoomTrigger.focus();
     if (await zoomTrigger.getAttribute('aria-expanded') === 'true') await zoomTrigger.press('Escape');
@@ -1099,7 +1119,7 @@ for (const viewportWidth of [1280, 760]) {
     const expectFittedPage = async (index: number) => {
       await expect(page.getByRole('textbox', { name: new RegExp(`Current page ${index + 1} of`) })).toHaveValue(String(index + 1));
       await expect(zoom).toHaveValue(fittedZoom);
-      const pdfPage = main.locator(`[data-page-index="${index}"]`);
+      const pdfPage = main.locator(`.pdf-workspace__page[data-page-index="${index}"]`);
       await expect.poll(async () => {
         const viewport = await main.locator('[data-viewer-framing-viewport]').boundingBox();
         const bounds = await pdfPage.boundingBox();
@@ -1118,7 +1138,7 @@ for (const viewportWidth of [1280, 760]) {
         if (!state.running) return;
         const main = document.querySelector('.pdf-workspace:not(.pdf-workspace--reference)');
         const viewport = main?.querySelector('[data-viewer-framing-viewport]')?.getBoundingClientRect();
-        const bounds = main?.querySelector('[data-page-index="1"]')?.getBoundingClientRect();
+        const bounds = main?.querySelector('.pdf-workspace__page[data-page-index="1"]')?.getBoundingClientRect();
         const fade = Array.from(document.querySelectorAll('.review-overlay-frame__right-fade'))
           .find((element) => element.getBoundingClientRect().width > 0)?.getBoundingClientRect();
         if (viewport && bounds && bounds.top < viewport.bottom && bounds.bottom > viewport.top) {
@@ -1172,7 +1192,7 @@ test("searches extracted PDF text with variants, history, references, and retain
   const errors = collectBrowserErrors(page);
   await openFreshProductionFixture(page, searchPdf, "PDF search launch failed");
   const mainWorkspace = page.locator(".pdf-workspace:not(.pdf-workspace--reference)");
-  const firstPage = mainWorkspace.locator("[data-page-index='0']");
+  const firstPage = mainWorkspace.locator(".pdf-workspace__page[data-page-index='0']");
   await expect(firstPage).toBeVisible();
   await firstPage.focus();
 
@@ -1379,14 +1399,14 @@ test("searches extracted PDF text with variants, history, references, and retain
   await exact.locator(".pdf-search__result").nth(1).click();
   await expect.poll(() => currentPageText(page)).toBe("2 / 3");
   const activeSearchHighlights = mainWorkspace.locator(
-    "[data-page-index='1'] [data-pdf-search-highlight]",
+    ".pdf-workspace__page[data-page-index='1'] [data-pdf-search-highlight]",
   );
   await expect(activeSearchHighlights).toHaveCount(2);
   const exactVisibleHighlight = mainWorkspace.locator(
-    "[data-page-index='1'] [data-pdf-search-highlight][data-pdf-search-match-kind='exact']",
+    ".pdf-workspace__page[data-page-index='1'] [data-pdf-search-highlight][data-pdf-search-match-kind='exact']",
   );
   const relatedVisibleHighlight = mainWorkspace.locator(
-    "[data-page-index='1'] [data-pdf-search-highlight][data-pdf-search-match-kind='related']",
+    ".pdf-workspace__page[data-page-index='1'] [data-pdf-search-highlight][data-pdf-search-match-kind='related']",
   );
   await expect(exactVisibleHighlight).toHaveCount(1);
   await expect(relatedVisibleHighlight).toHaveCount(1);
@@ -1412,10 +1432,10 @@ test("searches extracted PDF text with variants, history, references, and retain
   await expectReferenceReady(page, searchReferenceTab);
   const referenceWorkspace = page.locator(".pdf-workspace--reference");
   await expect(referenceWorkspace.locator(
-    "[data-page-index='0'] [data-pdf-search-highlight][data-pdf-search-match-kind='exact']",
+    ".pdf-workspace__page[data-page-index='0'] [data-pdf-search-highlight][data-pdf-search-match-kind='exact']",
   )).toHaveCount(1);
   await expect(referenceWorkspace.locator(
-    "[data-page-index='0'] [data-pdf-search-highlight][data-pdf-search-match-kind='related']",
+    ".pdf-workspace__page[data-page-index='0'] [data-pdf-search-highlight][data-pdf-search-match-kind='related']",
   )).toHaveCount(1);
   await expect.poll(() => mainViewport.evaluate((element) => ({
     left: element.scrollLeft,
@@ -1517,7 +1537,7 @@ for (const { label, width } of [
   test(`restores Search focus only from its last focused target in the ${label} workspace`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 });
     await openFreshProductionFixture(page, equationPdf, 'Search focus launch failed');
-    const mainPage = page.locator('[data-pdf-copy-surface="main"] [data-page-index="0"]');
+    const mainPage = page.locator('[data-pdf-copy-surface="main"] .pdf-workspace__page[data-page-index="0"]');
     await mainPage.focus();
     await page.keyboard.press(platformFindShortcut);
 
@@ -1623,7 +1643,7 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
   await openFreshProductionFixture(page, referencePdf, "Reference navigation launch failed");
   const mainWorkspace = page.locator(".pdf-workspace:not(.pdf-workspace--reference)");
   const mainViewport = mainWorkspace.locator("[data-viewer-framing-viewport]");
-  const mainPageOne = mainWorkspace.locator("[data-page-index='0']");
+  const mainPageOne = mainWorkspace.locator(".pdf-workspace__page[data-page-index='0']");
   await expect(mainPageOne).toBeVisible();
   await expect.poll(() => currentPageText(page)).toBe("1 / 4");
   await mainWorkspace.evaluate((element) => element.setAttribute("data-reference-main-mount", "stable"));
@@ -1738,7 +1758,7 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
 
   const referenceWorkspace = page.locator("[data-reference-pdf-viewport]");
   const referenceViewport = referenceWorkspace.locator("[data-viewer-framing-viewport]");
-  const primaryReferencePage = referenceWorkspace.locator("[data-page-index='1']");
+  const primaryReferencePage = referenceWorkspace.locator(".pdf-workspace__page[data-page-index='1']");
   await expect(primaryReferencePage).toBeVisible();
   await expect.poll(async () => {
     const [viewportBounds, pageBounds] = await Promise.all([
@@ -2240,7 +2260,7 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
   await expect(primaryTab).toHaveCount(0);
   await expect(detailTab).toHaveAttribute("aria-selected", "true");
   await expect(detailTab).toBeFocused();
-  const liveDetailPage = referenceWorkspace.locator("[data-page-index='2']");
+  const liveDetailPage = referenceWorkspace.locator(".pdf-workspace__page[data-page-index='2']");
   await liveDetailPage.evaluate((element) => element.scrollIntoView({ block: 'center' }));
   await expect.poll(async () => {
     const [viewportBounds, pageBounds] = await Promise.all([
@@ -2265,7 +2285,7 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
     name: "Open references",
     includeHidden: true,
   }).getByRole("tab", { includeHidden: true })).toHaveCount(0);
-  const mainPageThree = mainWorkspace.locator("[data-page-index='2']");
+  const mainPageThree = mainWorkspace.locator(".pdf-workspace__page[data-page-index='2']");
   const expectMainPageThreeSettled = async () => expect.poll(async () => {
     const [viewportBounds, pageBounds] = await Promise.all([
       mainViewport.boundingBox(),
@@ -2303,7 +2323,7 @@ test("follows a PDF link in the same reference tab without moving main", async (
   await openFreshProductionFixture(page, referencePdf, "Same-reference navigation launch failed");
   const mainWorkspace = page.locator(".pdf-workspace:not(.pdf-workspace--reference)");
   const mainViewport = mainWorkspace.locator("[data-viewer-framing-viewport]");
-  await expect(mainWorkspace.locator("[data-page-index='0']")).toBeVisible();
+  await expect(mainWorkspace.locator(".pdf-workspace__page[data-page-index='0']")).toBeVisible();
 
   const primaryLink = mainWorkspace.getByRole("button", {
     name: "Open PDF link to Primary result, Page 2",
@@ -2314,7 +2334,7 @@ test("follows a PDF link in the same reference tab without moving main", async (
 
   const referenceWorkspace = page.locator("[data-reference-pdf-viewport]");
   const referenceViewport = referenceWorkspace.locator("[data-viewer-framing-viewport]");
-  await expect(referenceWorkspace.locator("[data-page-index='1']")).toBeVisible();
+  await expect(referenceWorkspace.locator(".pdf-workspace__page[data-page-index='1']")).toBeVisible();
   const mainBefore = {
     page: await currentPageText(page),
     zoom: await currentZoomText(page),
@@ -2340,7 +2360,7 @@ test("follows a PDF link in the same reference tab without moving main", async (
   await expect(primaryTab).toHaveAttribute("aria-selected", "true");
   await expect(page.getByRole("tablist", { name: "Open references" }).getByRole("tab"))
     .toHaveCount(1);
-  const destinationPage = referenceWorkspace.locator("[data-page-index='2']");
+  const destinationPage = referenceWorkspace.locator(".pdf-workspace__page[data-page-index='2']");
   await expect(destinationPage).toBeVisible();
   await expect(destinationPage).toBeFocused();
   await expect.poll(() => referenceViewport.evaluate((element) => element.scrollTop))
@@ -2364,7 +2384,7 @@ test("returns an explored reference without moving main or browser history", asy
 
   const mainWorkspace = page.locator(".pdf-workspace:not(.pdf-workspace--reference)");
   const mainViewport = mainWorkspace.locator("[data-viewer-framing-viewport]");
-  await expect(mainWorkspace.locator("[data-page-index='0']")).toBeVisible();
+  await expect(mainWorkspace.locator(".pdf-workspace__page[data-page-index='0']")).toBeVisible();
   const primaryLink = mainWorkspace.getByRole("button", {
     name: "Open PDF link to Primary result, Page 2",
   });
@@ -2374,7 +2394,7 @@ test("returns an explored reference without moving main or browser history", asy
   await expectReferenceReady(page, primaryTab);
   const referenceWorkspace = page.locator("[data-reference-pdf-viewport]");
   const referenceViewport = referenceWorkspace.locator("[data-viewer-framing-viewport]");
-  const originPage = referenceWorkspace.locator("[data-page-index='1']");
+  const originPage = referenceWorkspace.locator(".pdf-workspace__page[data-page-index='1']");
   const returnControl = page.getByRole("button", { name: "Return to reference" });
   await expect(originPage).toBeVisible();
   await expect(returnControl).toHaveCount(0);
@@ -2496,7 +2516,7 @@ test("returns an explored reference after right and narrow layout reflow", async
   await page.setViewportSize({ width: 1280, height: 900 });
   await openFreshProductionFixture(page, referencePdf, "Reference return reflow launch failed");
   const mainWorkspace = page.locator(".pdf-workspace:not(.pdf-workspace--reference)");
-  await expect(mainWorkspace.locator("[data-page-index='0']")).toBeVisible();
+  await expect(mainWorkspace.locator(".pdf-workspace__page[data-page-index='0']")).toBeVisible();
   await openLinkInReferences(page, mainWorkspace.getByRole("button", {
     name: "Open PDF link to Primary result, Page 2",
   }));
@@ -2506,7 +2526,7 @@ test("returns an explored reference after right and narrow layout reflow", async
   const stage = page.locator("[data-review-stage]");
   const referenceWorkspace = page.locator("[data-reference-pdf-viewport]");
   const referenceViewport = referenceWorkspace.locator("[data-viewer-framing-viewport]");
-  const originPage = referenceWorkspace.locator("[data-page-index='1']");
+  const originPage = referenceWorkspace.locator(".pdf-workspace__page[data-page-index='1']");
   const returnControl = page.getByRole("button", { name: "Return to reference" });
   const driftFromOrigin = async () => {
     await referenceViewport.hover();
@@ -2548,7 +2568,7 @@ test("keeps main PDF link hit targets below an open References viewer", async ({
   await page.setViewportSize({ width: 1367, height: 1324 });
   await openFreshProductionFixture(page, referencePdf, "Reference layering launch failed");
   const mainWorkspace = page.locator(".pdf-workspace:not(.pdf-workspace--reference)");
-  await expect(mainWorkspace.locator("[data-page-index='0']")).toBeVisible();
+  await expect(mainWorkspace.locator(".pdf-workspace__page[data-page-index='0']")).toBeVisible();
 
   const primaryLink = mainWorkspace.getByRole("button", {
     name: "Open PDF link to Primary result, Page 2",
@@ -2982,7 +3002,7 @@ test("switches and sends references from the right-docked workspace", async ({ p
   await page.setViewportSize({ width: 1280, height: 900 });
   await openFreshProductionFixture(page, referencePdf, "Right-docked reference launch failed");
   const mainWorkspace = page.locator(".pdf-workspace:not(.pdf-workspace--reference)");
-  await expect(mainWorkspace.locator("[data-page-index='0']")).toBeVisible();
+  await expect(mainWorkspace.locator(".pdf-workspace__page[data-page-index='0']")).toBeVisible();
 
   const primaryLink = mainWorkspace.getByRole("button", {
     name: "Open PDF link to Primary result, Page 2",
@@ -2994,7 +3014,7 @@ test("switches and sends references from the right-docked workspace", async ({ p
 
   const referenceWorkspace = page.locator("[data-reference-pdf-viewport]");
   const referenceViewport = referenceWorkspace.locator("[data-viewer-framing-viewport]");
-  await expect(referenceWorkspace.locator("[data-page-index='1']")).toBeVisible();
+  await expect(referenceWorkspace.locator(".pdf-workspace__page[data-page-index='1']")).toBeVisible();
   await referenceViewport.evaluate((element) => { element.scrollTop += 96; });
   const detailLink = referenceWorkspace.getByRole("button", {
     name: "Open PDF link to Target-to-target detail link, Page 3",
@@ -3055,7 +3075,7 @@ test("switches and sends references from the right-docked workspace", async ({ p
   await detailTab.click();
   await expect(page.locator(".review-workspace__status")).toHaveText("Reference active.");
   await expect(detailTab).toHaveAttribute("aria-selected", "true");
-  const detailPage = referenceWorkspace.locator("[data-page-index='2']");
+  const detailPage = referenceWorkspace.locator(".pdf-workspace__page[data-page-index='2']");
   await detailPage.evaluate((element) => element.scrollIntoView({ block: "center" }));
   await expect.poll(async () => {
     const [viewportBounds, pageBounds] = await Promise.all([
@@ -3080,14 +3100,14 @@ test("switches and sends references from the right-docked workspace", async ({ p
   await expect.poll(() => currentPageText(page)).toBe("3 / 4");
   await expect(detailTab).toHaveCount(0);
   await expect(primaryTab).toHaveAttribute("aria-selected", "true");
-  await expect(referenceWorkspace.locator("[data-page-index='1']")).toBeVisible();
+  await expect(referenceWorkspace.locator(".pdf-workspace__page[data-page-index='1']")).toBeVisible();
 });
 
 test("keeps compound reference actions in narrow keyboard order through survivor and final close", async ({ page, browserName }) => {
   await page.setViewportSize({ width: 1280, height: 900 });
   await openFreshProductionFixture(page, referencePdf, "Narrow compound reference launch failed");
   const mainWorkspace = page.locator(".pdf-workspace:not(.pdf-workspace--reference)");
-  await expect(mainWorkspace.locator("[data-page-index='0']")).toBeVisible();
+  await expect(mainWorkspace.locator(".pdf-workspace__page[data-page-index='0']")).toBeVisible();
 
   const primaryLink = mainWorkspace.getByRole("button", {
     name: "Open PDF link to Primary result, Page 2",
@@ -3121,7 +3141,7 @@ test("keeps compound reference actions in narrow keyboard order through survivor
     requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
   }));
 
-  const detailPage = referenceWorkspace.locator("[data-page-index='2']");
+  const detailPage = referenceWorkspace.locator(".pdf-workspace__page[data-page-index='2']");
   await detailPage.evaluate((element) => element.scrollIntoView({ block: "center" }));
   await expect.poll(async () => {
     const [viewportBounds, pageBounds] = await Promise.all([
@@ -3181,7 +3201,7 @@ test("keeps compound reference actions touch sized for coarse pointers", async (
   try {
     await openFreshProductionFixture(page, referencePdf, "Coarse-pointer reference launch failed");
     const mainWorkspace = page.locator(".pdf-workspace:not(.pdf-workspace--reference)");
-    await expect(mainWorkspace.locator("[data-page-index='0']")).toBeVisible();
+    await expect(mainWorkspace.locator(".pdf-workspace__page[data-page-index='0']")).toBeVisible();
     await (await currentWorkspaceRail(page)).click();
     const outline = page.getByRole("navigation", { name: "Document outline" });
     const outlineActions = outline.getByRole("button", {
@@ -3307,7 +3327,7 @@ test("keeps outline and rejected link metadata inert inside the installed local 
   );
   const sessionOrigin = new URL(opened.url).origin;
   const mainWorkspace = page.locator(".pdf-workspace:not(.pdf-workspace--reference)");
-  await expect(mainWorkspace.locator("[data-page-index='0']")).toBeVisible();
+  await expect(mainWorkspace.locator(".pdf-workspace__page[data-page-index='0']")).toBeVisible();
   await mainWorkspace.evaluate((element) => element.setAttribute("data-safety-main-mount", "stable"));
 
   const workspaceControl = await currentWorkspaceRail(page);
@@ -3672,7 +3692,7 @@ test("keeps outline and rejected link metadata inert inside the installed local 
   await expect(detailsReferenceCard).toHaveCSS('border-style', 'none');
   await expect(detailsReferenceCard).toHaveCSS('border-radius', '10px');
   await expect(detailsReferenceCard).toHaveCSS('padding', '0px 3px 0px 0px');
-  await expect(page.locator("[data-reference-pdf-viewport] [data-page-index='2']")).toBeVisible();
+  await expect(page.locator("[data-reference-pdf-viewport] .pdf-workspace__page[data-page-index='2']")).toBeVisible();
   await expectMainStateUnchanged();
   await openDetailsInReferences();
   await expect(page.getByRole("tablist", { name: "Open references" }).getByRole("tab"))
@@ -3699,7 +3719,7 @@ test("keeps outline and rejected link metadata inert inside the installed local 
   await expect(stage).toHaveAttribute("data-reference-layout", "narrow-unified");
   await expect(detailsTab).toHaveAttribute("aria-selected", "true");
   await expect(detailsTab).toBeFocused();
-  await expect(page.locator("[data-reference-pdf-viewport] [data-page-index='2']")).toBeVisible();
+  await expect(page.locator("[data-reference-pdf-viewport] .pdf-workspace__page[data-page-index='2']")).toBeVisible();
   await expectMainStateUnchanged(mainStateBeforeNarrowReference);
   await clickHoverRevealedReferenceTabAction(
     page.getByRole("button", { name: "Close active reference" }),
@@ -3817,7 +3837,7 @@ test("keeps outline and rejected link metadata inert inside the installed local 
 test("collapses an outline-free PDF with source annotations to Search and restores workspace focus", async ({ page }) => {
   await openFreshProductionFixture(page, pdf, "No-outline launch failed");
   const mainWorkspace = page.locator(".pdf-workspace:not(.pdf-workspace--reference)");
-  await expect(mainWorkspace.locator("[data-page-index='0']")).toBeVisible();
+  await expect(mainWorkspace.locator(".pdf-workspace__page[data-page-index='0']")).toBeVisible();
   await mainWorkspace.evaluate((element) => element.setAttribute("data-empty-outline-main-mount", "stable"));
   const workspaceControl = await currentWorkspaceRail(page);
   await workspaceControl.click();
@@ -3917,7 +3937,7 @@ test("retries one failed reference clone without exposing raw load details", asy
   await expect.poll(() => documentRequestCount).toBeGreaterThanOrEqual(3);
   await expectReferenceReady(page, primaryTab);
   await expect(primaryTab).toBeFocused();
-  await expect(page.locator("[data-reference-pdf-viewport] [data-page-index='1']")).toBeVisible();
+  await expect(page.locator("[data-reference-pdf-viewport] .pdf-workspace__page[data-page-index='1']")).toBeVisible();
   expect(documentRequestCount).toBeGreaterThanOrEqual(3);
   expect(documentRequestCount).toBeLessThanOrEqual(4);
   expect(documentHeaders.every(({ authorization, cookie }) => (
@@ -3938,7 +3958,7 @@ test('creates an insertion from middle-of-line PDFium caret geometry', async ({ 
   await page.goto(launched.url);
   await chooseFreshCopyDestination(page);
 
-  const pdfPage = page.locator("[data-page-index='0']").first();
+  const pdfPage = page.locator(".pdf-workspace__page[data-page-index='0']").first();
   await expect(pdfPage).toBeVisible();
   await waitForRenderedPageImage(pdfPage);
   await dragPdfPointer(page, pdfPage, { x: 150, y: 99 }, { x: 150, y: 99 });
@@ -4012,7 +4032,7 @@ test('keeps the insertion caret visible beside an open workspace', async ({ page
   }
   await page.goto(launched.url);
 
-  const pdfPage = page.locator("[data-page-index='0']").first();
+  const pdfPage = page.locator(".pdf-workspace__page[data-page-index='0']").first();
   await expect(pdfPage).toBeVisible();
   await waitForRenderedPageImage(pdfPage);
   const workspaceControl = await currentWorkspaceRail(page);
@@ -4054,7 +4074,7 @@ test('keeps repeated-click PDF text selection out of insertion mode', async ({ p
   }
   await page.goto(launched.url);
 
-  const pdfPage = page.locator("[data-page-index='0']").first();
+  const pdfPage = page.locator(".pdf-workspace__page[data-page-index='0']").first();
   await expect(pdfPage).toBeVisible();
   await waitForRenderedPageImage(pdfPage);
   const box = await pdfPage.boundingBox();
@@ -4103,7 +4123,7 @@ test("one installed-style browser tree preserves review state across responsive 
   await expect(page.getByRole("button", { name: "Proofread mode" })).toHaveCount(0);
   await chooseFreshCopyDestination(page);
   const revisionBeforeReplacement = host.broker.state(initialSessionId)!.revision;
-  const pageCanvas = page.locator("[data-page-index='0']").first();
+  const pageCanvas = page.locator(".pdf-workspace__page[data-page-index='0']").first();
   await expect(pageCanvas).toBeVisible();
   await expect.poll(() => currentPageText(page)).toBe('1 / 1');
   const workspace = page.locator('.pdf-workspace');
@@ -4213,8 +4233,8 @@ test('edits the current page and preserves real viewer state through responsive 
   await chooseFreshCopyDestination(page);
   const navigationRevisionBaseline = host.broker.state(launched.sessionId)!.revision;
 
-  const firstPage = page.locator("[data-page-index='0']").first();
-  const secondPage = page.locator("[data-page-index='1']").first();
+  const firstPage = page.locator(".pdf-workspace__page[data-page-index='0']").first();
+  const secondPage = page.locator(".pdf-workspace__page[data-page-index='1']").first();
   await expect(firstPage).toBeVisible();
   await expect.poll(() => currentPageText(page)).toBe('1 / 2');
   await waitForRenderedPageImage(firstPage);
@@ -4386,7 +4406,7 @@ test('returns a live PDF annotation preview through document history without ret
   await chooseFreshCopyDestination(page);
   const revisionBeforeDraft = host.broker.state(launched.sessionId)!.revision;
 
-  const firstPage = page.locator("[data-page-index='0']").first();
+  const firstPage = page.locator(".pdf-workspace__page[data-page-index='0']").first();
   await waitForRenderedPageImage(firstPage);
   const firstPageBox = await firstPage.boundingBox();
   if (!firstPageBox) throw new Error('First authoring page has no bounds.');
@@ -4953,7 +4973,7 @@ test('keeps a first-page multiline highlight composer stable and reveals one ico
   const viewport = page.locator('[data-viewer-framing-viewport]');
   await viewport.evaluate((element) => { element.scrollTop = 0; });
   await expect.poll(() => viewport.evaluate((element) => element.scrollTop)).toBe(0);
-  const pdfPage = page.locator("[data-page-index='0']").first();
+  const pdfPage = page.locator(".pdf-workspace__page[data-page-index='0']").first();
   await waitForRenderedPageImage(pdfPage);
   await dragPdfPointer(page, pdfPage, { x: 76, y: 98 }, { x: 405, y: 128 }, undefined, { steps: 12 });
   const selectionActions = page.getByRole('toolbar', { name: 'Selection review actions' });
@@ -5067,7 +5087,7 @@ test('keeps VS Code composer controls aligned with the web desktop control size'
 
   const review = page.locator('[data-production-review]');
   await expect(review).toHaveAttribute('data-launch-surface', 'vscode');
-  const firstPage = page.locator("[data-page-index='0']").first();
+  const firstPage = page.locator(".pdf-workspace__page[data-page-index='0']").first();
   await waitForRenderedPageImage(firstPage);
   const firstPageBox = await firstPage.boundingBox();
   if (!firstPageBox) throw new Error('VS Code composer page has no bounds.');
@@ -5113,7 +5133,7 @@ test('adds, reads, and edits a full annotation through the production PDF', asyn
   await chooseFreshCopyDestination(page);
   const annotationBaseline = host.broker.state(launched.sessionId)!;
   const baselineIds = new Set(annotationBaseline.items.map(item => item.id));
-  const pdfPage = page.locator("[data-page-index='0']").first();
+  const pdfPage = page.locator(".pdf-workspace__page[data-page-index='0']").first();
   await waitForRenderedPageImage(pdfPage);
   const pageBox = await pdfPage.boundingBox();
   if (!pageBox) throw new Error('Full annotation PDF page has no bounds.');
@@ -5357,7 +5377,7 @@ test('keeps native PDF scrollbars exposed without shifting pages', async ({ page
     const scrollGeometry = () => viewport.evaluate((element) => ({
       clientWidth: element.clientWidth,
       clientHeight: element.clientHeight,
-      pageLeft: element.querySelector('[data-page-index]')!.getBoundingClientRect().left,
+      pageLeft: element.querySelector('.pdf-workspace__page[data-page-index]')!.getBoundingClientRect().left,
     }));
     await page.locator('[data-review-stage]').evaluate(async element => {
       await Promise.all(element.getAnimations({ subtree: true }).map(animation => animation.finished.catch(() => undefined)));
@@ -5382,7 +5402,7 @@ test('defaults a real PDF to fit width and refits bottom and resizable right rea
 
   const mainWorkspace = page.locator('.pdf-workspace:not(.pdf-workspace--reference)');
   const mainViewport = mainWorkspace.locator('[data-viewer-framing-viewport]');
-  const mainPage = mainWorkspace.locator("[data-page-index='0']");
+  const mainPage = mainWorkspace.locator(".pdf-workspace__page[data-page-index='0']");
   const referenceWorkspace = page.locator('[data-review-workspace]');
   const fitWidth = page.getByRole('menuitem', { name: 'Fit width' });
   const waitForStageMotion = async () => {
@@ -5661,7 +5681,7 @@ test('refits opening workspaces only from fit width and preserves manual reading
   const stage = page.locator('[data-review-stage]');
   const drawer = page.locator('#review-tools-workspace');
   const viewport = page.locator('[data-viewer-framing-viewport]');
-  const pdfPage = page.locator("[data-page-index='0']").first();
+  const pdfPage = page.locator(".pdf-workspace__page[data-page-index='0']").first();
   const runway = page.locator('[data-viewer-runway]');
   const workspace = page.locator('.pdf-workspace');
   await expect(pdfPage).toBeVisible();
@@ -5857,7 +5877,7 @@ test('uses the same expanded review tree for a narrow VS Code embed launch', asy
   await expect(chrome).toHaveCount(1);
   await expect(chrome).toHaveAttribute('data-review-chrome-presentation', 'expanded');
   await expect(page.locator('.pdf-workspace')).toHaveCount(1);
-  const pdfPage = page.locator("[data-page-index='0']").first();
+  const pdfPage = page.locator(".pdf-workspace__page[data-page-index='0']").first();
   await expect(pdfPage).toBeVisible();
   const { workspace: workspaceControl } = await openAnnotationsWorkspace(page);
   await expect(page.getByRole('button', { name: 'Close annotations' })).toHaveCount(0);
@@ -6041,7 +6061,7 @@ for (const surface of ['browser', 'vscode'] as const) {
     await page.goto(launched.url);
     const review = page.locator('[data-production-review]');
     await expect(review).toHaveAttribute('data-launch-surface', surface);
-    const firstPage = page.locator("[data-page-index='0']").first();
+    const firstPage = page.locator(".pdf-workspace__page[data-page-index='0']").first();
     await waitForRenderedPageImage(firstPage);
     const viewer = page.locator('.pdf-workspace:not(.pdf-workspace--reference)');
     await viewer.evaluate((element) => {
@@ -6096,7 +6116,7 @@ test('allows PDF text interaction without dismissing the Annotation Tray', async
   }
   await page.setViewportSize({ width: 760, height: 900 });
   await page.goto(launched.url);
-  const pdfPage = page.locator("[data-page-index='0']").first();
+  const pdfPage = page.locator(".pdf-workspace__page[data-page-index='0']").first();
   await waitForRenderedPageImage(pdfPage);
   const { workspace: workspaceControl } = await openAnnotationsWorkspace(page);
   await expect(page.locator('[data-review-stage]')).toHaveAttribute('data-annotation-presentation', 'bottom');
@@ -6130,7 +6150,7 @@ for (const selection of [
     await expect.poll(() => page.evaluate(() => window.getSelection()?.toString() ?? ''))
       .toBe(expectedText);
 
-    const selectedPage = main.locator(`[data-page-index="${selection.end}"]`);
+    const selectedPage = main.locator(`.pdf-workspace__page[data-page-index="${selection.end}"]`);
     const selectedPageBox = await selectedPage.boundingBox();
     if (!selectedPageBox) throw new Error('Selected PDF page has no bounds.');
     await armContextMenuDefaultProbe(page);
@@ -6146,7 +6166,7 @@ for (const selection of [
     expect(await pasteNativeClipboard(page, pasteTarget)).toBe(expectedText);
     expect(host.broker.state(launched.sessionId)?.revision).toBe(0);
     expect(host.broker.state(launched.sessionId)?.items).toHaveLength(0);
-    await expect(main.locator(':scope [data-page-index] > div[style*="mix-blend-mode"]'))
+    await expect(main.locator(':scope .pdf-workspace__page[data-page-index] > div[style*="mix-blend-mode"]'))
       .not.toHaveCount(0);
   });
 }
@@ -6192,7 +6212,7 @@ test('copies a real Main PDF selection from the selection action popup', async (
   await expect(copyFailure).toContainText('could not copy the selected text');
   expect(host.broker.state(launched.sessionId)?.revision).toBe(0);
   expect(host.broker.state(launched.sessionId)?.items).toHaveLength(0);
-  await expect(main.locator(':scope [data-page-index] > div[style*="mix-blend-mode"]'))
+  await expect(main.locator(':scope .pdf-workspace__page[data-page-index] > div[style*="mix-blend-mode"]'))
     .not.toHaveCount(0);
 });
 
@@ -6218,7 +6238,7 @@ test('keeps prior clipboard text while a real cross-page selection is still pend
   await pasteTarget.fill('');
   expect(await pasteNativeClipboard(page, pasteTarget)).toBe(clipboardSentinel);
   expect(host.broker.state(launched.sessionId)?.revision).toBe(0);
-  await expect(main.locator(':scope [data-page-index] > div[style*="mix-blend-mode"]'))
+  await expect(main.locator(':scope .pdf-workspace__page[data-page-index] > div[style*="mix-blend-mode"]'))
     .not.toHaveCount(0);
 });
 
@@ -6241,7 +6261,7 @@ test('copies exactly 12 selected pages through the platform shortcut and native 
 
   expect(host.broker.state(launched.sessionId)?.revision).toBe(0);
   expect(host.broker.state(launched.sessionId)?.items).toHaveLength(0);
-  await expect(main.locator(':scope [data-page-index] > div[style*="mix-blend-mode"]'))
+  await expect(main.locator(':scope .pdf-workspace__page[data-page-index] > div[style*="mix-blend-mode"]'))
     .not.toHaveCount(0);
 });
 
@@ -6269,7 +6289,7 @@ test('rejects a real 13-page copy without changing the clipboard, selection, or 
   expect(await pasteNativeClipboard(page, pasteTarget)).toBe(clipboardSentinel);
   expect(host.broker.state(launched.sessionId)?.revision).toBe(0);
   expect(host.broker.state(launched.sessionId)?.items).toHaveLength(0);
-  await expect(main.locator(':scope [data-page-index] > div[style*="mix-blend-mode"]'))
+  await expect(main.locator(':scope .pdf-workspace__page[data-page-index] > div[style*="mix-blend-mode"]'))
     .not.toHaveCount(0);
 });
 
@@ -6299,7 +6319,7 @@ test('rejects every review action from a real 13-page selection without changing
   }
 
   await expect(page.getByRole('region', { name: /Replacement|Highlight Comment/u })).toHaveCount(0);
-  await expect(main.locator(':scope [data-page-index] > div[style*="mix-blend-mode"]'))
+  await expect(main.locator(':scope .pdf-workspace__page[data-page-index] > div[style*="mix-blend-mode"]'))
     .not.toHaveCount(0);
 });
 
@@ -6375,9 +6395,9 @@ test('copies only the focused Main or Reference selection and preserves DOM prec
 
   await dragAcrossProductionPdfPages(page, main, 0, 1, { y: 58 });
   await dragAcrossProductionPdfPages(page, reference, 1, 2, { y: 58, endX: 350 });
-  await expect(main.locator(':scope [data-page-index] > div[style*="mix-blend-mode"]'))
+  await expect(main.locator(':scope .pdf-workspace__page[data-page-index] > div[style*="mix-blend-mode"]'))
     .not.toHaveCount(0);
-  await expect(reference.locator(':scope [data-page-index] > div[style*="mix-blend-mode"]'))
+  await expect(reference.locator(':scope .pdf-workspace__page[data-page-index] > div[style*="mix-blend-mode"]'))
     .not.toHaveCount(0);
   const referenceText = [
     'Reference navigation fixture — page 2',
@@ -6388,7 +6408,7 @@ test('copies only the focused Main or Reference selection and preserves DOM prec
     window.getSelection()?.toString().replace(/\r\n?/gu, '\n') ?? ''
   )))
     .toBe(referenceText);
-  await reference.locator('[data-page-index="1"]').focus();
+  await reference.locator('.pdf-workspace__page[data-page-index="1"]').focus();
   await page.keyboard.press(platformCopyShortcut);
   expect(await page.locator('p.sr-only[role="status"]').allTextContents())
     .toContain('Copied selected text from Reference PDF.');
@@ -6397,7 +6417,7 @@ test('copies only the focused Main or Reference selection and preserves DOM prec
   await expect(owner).toHaveText('Copy source: Reference PDF');
   expect(await pasteNativeClipboard(page, pasteTarget)).toBe(referenceText);
 
-  await reference.locator('[data-page-index="1"]').focus();
+  await reference.locator('.pdf-workspace__page[data-page-index="1"]').focus();
   const closeReferences = page.getByRole('button', { name: 'Hide References' });
   await closeReferences.click();
   const openReferences = page.getByRole('button', { name: 'Show References' });
@@ -6414,7 +6434,7 @@ test('copies only the focused Main or Reference selection and preserves DOM prec
   });
 
   await pasteTarget.fill('');
-  await main.locator('[data-page-index="0"]').focus();
+  await main.locator('.pdf-workspace__page[data-page-index="0"]').focus();
   await expect(owner).toHaveAttribute('data-pdf-copy-owner', 'main');
   await page.keyboard.press(platformCopyShortcut);
   expect(await pasteNativeClipboard(page, pasteTarget)).toBe([
@@ -6462,9 +6482,9 @@ test('copies only the focused Main or Reference selection and preserves DOM prec
   expect(await pasteNativeClipboard(page, pasteTarget)).toBe('native editable text');
   expect(host.broker.state(launched.sessionId)?.revision).toBe(0);
   expect(host.broker.state(launched.sessionId)?.items).toEqual(initialItems);
-  await expect(main.locator(':scope [data-page-index] > div[style*="mix-blend-mode"]'))
+  await expect(main.locator(':scope .pdf-workspace__page[data-page-index] > div[style*="mix-blend-mode"]'))
     .not.toHaveCount(0);
-  await expect(reference.locator(':scope [data-page-index] > div[style*="mix-blend-mode"]'))
+  await expect(reference.locator(':scope .pdf-workspace__page[data-page-index] > div[style*="mix-blend-mode"]'))
     .not.toHaveCount(0);
 });
 
@@ -6476,7 +6496,7 @@ test('clears Main and Reference PDF selections before preserving link actions', 
     'Selected PDF link launch failed',
   );
   const main = page.locator('[data-pdf-copy-surface="main"]');
-  const mainSelection = main.locator(':scope [data-page-index] > div[style*="mix-blend-mode"]');
+  const mainSelection = main.locator(':scope .pdf-workspace__page[data-page-index] > div[style*="mix-blend-mode"]');
   await dragAcrossProductionPdfPages(page, main, 0, 1, { y: 58 });
   await expect(page.getByRole('toolbar', { name: 'Selection review actions' })).toBeVisible();
   await expect(mainSelection).not.toHaveCount(0);
@@ -6503,7 +6523,7 @@ test('clears Main and Reference PDF selections before preserving link actions', 
 
   const reference = page.locator('[data-pdf-copy-surface="reference"]');
   const referenceSelection = reference.locator(
-    ':scope [data-page-index] > div[style*="mix-blend-mode"]',
+    ':scope .pdf-workspace__page[data-page-index] > div[style*="mix-blend-mode"]',
   );
   await dragAcrossProductionPdfPages(page, reference, 1, 2, { y: 58, endX: 350 });
   await expect(referenceSelection).not.toHaveCount(0);
@@ -6522,7 +6542,7 @@ test('clears Main and Reference PDF selections before preserving link actions', 
   const followAction = page.getByRole('menuitem', { name: 'Follow in this tab' });
   await expect(followAction).toBeFocused();
   await page.keyboard.press('Enter');
-  await expect(reference.locator('[data-page-index="2"]')).toBeFocused();
+  await expect(reference.locator('.pdf-workspace__page[data-page-index="2"]')).toBeFocused();
 });
 
 test('keeps a Reference PDF selection native for the standard context menu', async ({ page }) => {
@@ -6582,7 +6602,7 @@ test('revokes Reference copy authority across tab switch, Send to Main, and fina
 
   await dragAcrossProductionPdfPages(page, main, 0, 1, { y: 58 });
   await dragAcrossProductionPdfPages(page, reference, 1, 2, { y: 58, endX: 350 });
-  const primaryReferencePage = reference.locator('[data-page-index="1"]');
+  const primaryReferencePage = reference.locator('.pdf-workspace__page[data-page-index="1"]');
   await primaryReferencePage.focus();
   const primaryReferenceText = await page.evaluate(() => (
     window.getSelection()?.toString().replace(/\r\n?/gu, '\n') ?? ''
@@ -6605,7 +6625,7 @@ test('revokes Reference copy authority across tab switch, Send to Main, and fina
   });
 
   await dragAcrossProductionPdfPages(page, reference, 2, 3, { y: 58, endX: 350 });
-  const detailReferencePage = reference.locator('[data-page-index="2"]');
+  const detailReferencePage = reference.locator('.pdf-workspace__page[data-page-index="2"]');
   await detailReferencePage.focus();
   const detailReferenceText = await page.evaluate(() => (
     window.getSelection()?.toString().replace(/\r\n?/gu, '\n') ?? ''
@@ -6625,7 +6645,7 @@ test('revokes Reference copy authority across tab switch, Send to Main, and fina
     defaultPrevented: false,
     text: '',
   });
-  await waitForRenderedPageImage(reference.locator('[data-page-index="1"]'));
+  await waitForRenderedPageImage(reference.locator('.pdf-workspace__page[data-page-index="1"]'));
   await page.evaluate(() => new Promise<void>((resolve) => {
     requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
   }));
@@ -6666,7 +6686,7 @@ test('keeps PDF drag selection available while the Annotation Tray is open', asy
   }
   await page.setViewportSize({ width: 760, height: 900 });
   await page.goto(launched.url);
-  const pdfPage = page.locator("[data-page-index='0']").first();
+  const pdfPage = page.locator(".pdf-workspace__page[data-page-index='0']").first();
   await waitForRenderedPageImage(pdfPage);
   const { workspace: workspaceControl } = await openAnnotationsWorkspace(page);
   await expect(page.locator('[data-review-stage]')).toHaveAttribute('data-annotation-presentation', 'bottom');
@@ -6707,7 +6727,7 @@ test('keeps PDF drag selection available while the Annotation Tray is open', asy
       insideInertWorkspace: workspace?.hasAttribute('inert') === true,
       focusBlocked: document.activeElement !== control,
     };
-  })).toEqual({ insideInertWorkspace: true, focusBlocked: true });
+  })).toEqual({ insideInertWorkspace: false, focusBlocked: false });
 });
 
 test("cancels the pending first annotation without modifying the PDF or creating a copy", async ({ page }) => {
@@ -6718,7 +6738,7 @@ test("cancels the pending first annotation without modifying the PDF or creating
   const initialReview = host.broker.state(launched.sessionId)!;
   const originalBytes = await readFile(cancelPdf);
   await page.goto(launched.url);
-  const pageCanvas = page.locator("[data-page-index='0']").first();
+  const pageCanvas = page.locator(".pdf-workspace__page[data-page-index='0']").first();
   await expect(pageCanvas).toBeVisible();
   await waitForRenderedPageImage(pageCanvas);
   await pageCanvas.click({ button: "right", position: { x: 320, y: 420 } });
@@ -6757,7 +6777,7 @@ test("selects Page Notes only until the next click outside annotations", async (
   await chooseFreshCopyDestination(page);
   const initialReview = host.broker.state(launched.sessionId)!;
 
-  const pageCanvas = page.locator("[data-page-index='0']").first();
+  const pageCanvas = page.locator(".pdf-workspace__page[data-page-index='0']").first();
   await expect(pageCanvas).toBeVisible();
   await expect.poll(() => currentPageText(page)).toBe("1 / 1");
   await waitForRenderedPageImage(pageCanvas);
@@ -6807,12 +6827,18 @@ test("selects Page Notes only until the next click outside annotations", async (
   const secondPoint = { x: 300 * scale, y: 300 * scale };
   await pageCanvas.click({ button: "right", position: secondPoint });
   await page.getByRole("menuitem", { name: "Add Page Note" }).click();
-  await page.getByRole("region", { name: "Page Note" })
-    .getByRole("textbox", { name: "Comment" })
-    .fill("Check the evidence.");
-  await page.getByRole("button", { name: "Save", exact: true }).click();
+  const secondComposer = page.getByRole("region", { name: "Page Note" });
+  await secondComposer.getByRole("textbox", { name: "Comment" }).fill("Check the evidence.");
+  await expect.poll(() => host.broker.state(launched.sessionId)?.pendingDrafts
+    .some((draft) => draft.text === "Check the evidence.")).toBe(true);
+  const revisionBeforeSecondSave = host.broker.state(launched.sessionId)!.revision;
+  await secondComposer.getByRole("button", { name: "Save", exact: true }).click();
+  await expect.poll(() => host.broker.state(launched.sessionId)?.revision)
+    .toBeGreaterThan(revisionBeforeSecondSave);
   await expect.poll(() => host.broker.state(launched.sessionId)?.items
     .some((item) => item.payload.comment === "Check the evidence.")).toBe(true);
+  await expect.poll(() => host.broker.saveStatus(launched.sessionId)?.sync.phase).toBe("clean");
+  await expect(secondComposer).toHaveCount(0);
   const secondNote = host.broker.state(launched.sessionId)?.items
     .find((item) => item.payload.comment === "Check the evidence.");
   expect(secondNote?.id).toBeTruthy();
@@ -6881,7 +6907,7 @@ test("selects Page Notes only until the next click outside annotations", async (
       const hit = document.elementFromPoint(x, y);
       if (
         hit instanceof Element
-        && hit.closest('[data-page-index]') === element
+        && hit.closest('.pdf-workspace__page[data-page-index]') === element
         && hit.closest('[data-owned-focus-id], [data-owned-mark], [data-annotation-peek]') === null
       ) return { x, y };
     }
@@ -6890,7 +6916,7 @@ test("selects Page Notes only until the next click outside annotations", async (
         const hit = document.elementFromPoint(x, y);
         if (
           hit instanceof Element
-          && hit.closest('[data-page-index]') === element
+          && hit.closest('.pdf-workspace__page[data-page-index]') === element
           && hit.closest('[data-owned-focus-id], [data-owned-mark], [data-annotation-peek]') === null
         ) return { x, y };
       }
@@ -6992,7 +7018,7 @@ test("places a crop-relative Page Note through the real PDF keyboard cursor", as
   await chooseFreshCopyDestination(page);
   const initialReview = host.broker.state(launched.sessionId)!;
 
-  const pageCanvas = page.locator("[data-page-index='0']").first();
+  const pageCanvas = page.locator(".pdf-workspace__page[data-page-index='0']").first();
   await expect(pageCanvas).toBeVisible();
   await expect.poll(() => currentPageText(page)).toBe("1 / 1");
   await waitForRenderedPageImage(pageCanvas);
@@ -7046,7 +7072,7 @@ test("normalizes a real context gesture on a rotated cropped PDF into crop-relat
   await chooseFreshCopyDestination(page);
   const initialReview = host.broker.state(launched.sessionId)!;
 
-  const pageCanvas = page.locator("[data-page-index='0']").first();
+  const pageCanvas = page.locator(".pdf-workspace__page[data-page-index='0']").first();
   await expect(pageCanvas).toBeVisible();
   await expect.poll(() => currentPageText(page)).toBe("1 / 1");
   await waitForRenderedPageImage(pageCanvas);
@@ -7095,7 +7121,7 @@ test("anchors highlight and delete annotations across inline and display equatio
   const browserErrors = collectBrowserErrors(page);
   await chooseFreshCopyDestination(page);
 
-  const pageCanvas = page.locator("[data-page-index='0']").first();
+  const pageCanvas = page.locator(".pdf-workspace__page[data-page-index='0']").first();
   await waitForRenderedPageImage(pageCanvas);
   await dragPdfPointer(
     page,
@@ -7175,7 +7201,7 @@ for (const key of ["Delete", "Backspace"] as const) {
     await chooseFreshCopyDestination(page);
     const initialReview = host.broker.state(launched.sessionId)!;
 
-    const pageCanvas = page.locator("[data-page-index='0']").first();
+    const pageCanvas = page.locator(".pdf-workspace__page[data-page-index='0']").first();
     await expect(pageCanvas).toBeVisible();
     await waitForRenderedPageImage(pageCanvas);
     await dragPdfPointer(
@@ -7238,7 +7264,7 @@ test("shows command conflicts until a retry succeeds", async ({ page }) => {
   await chooseFreshCopyDestination(page);
   const initialReview = host.broker.state(launched.sessionId)!;
 
-  const pageCanvas = page.locator("[data-page-index='0']").first();
+  const pageCanvas = page.locator(".pdf-workspace__page[data-page-index='0']").first();
   await expect(pageCanvas).toBeVisible();
   await waitForRenderedPageImage(pageCanvas);
   await dragPdfPointer(page, pageCanvas, { x: 253, y: 98 }, { x: 405, y: 98 });
@@ -7269,6 +7295,87 @@ test("shows command conflicts until a retry succeeds", async ({ page }) => {
   expect(host.broker.state(launched.sessionId)?.revision).toBe(initialReview.revision + 2);
 });
 
+test('returns a concurrent draft revision conflict to the preserved composer for retry', async ({ page }) => {
+  const launched = await openFreshProductionFixture(
+    page,
+    pdf,
+    'Fresh pending-destination conflict launch failed',
+  );
+  await chooseFreshCopyDestination(page);
+  const initialReview = host.broker.state(launched.sessionId)!;
+  const pageCanvas = page.locator(".pdf-workspace__page[data-page-index='0']").first();
+  await waitForRenderedPageImage(pageCanvas);
+  await dragPdfPointer(page, pageCanvas, { x: 253, y: 98 }, { x: 405, y: 98 });
+  await page.getByRole('button', { name: 'Replace', exact: true }).click();
+  const composer = page.getByRole('region', { name: 'Replacement' });
+  const editor = composer.getByRole('textbox', { name: 'Replacement' });
+  await expect(composer).toBeVisible();
+  await editor.fill('establish the protected draft');
+  await expect.poll(() => host.broker.state(launched.sessionId)?.pendingDrafts[0]?.text)
+    .toBe('establish the protected draft');
+  const protectedDraft = host.broker.state(launched.sessionId)!.pendingDrafts[0]!;
+
+  const heldRequestEntered = Promise.withResolvers<void>();
+  const releaseHeldRequest = Promise.withResolvers<void>();
+  let held = false;
+  await page.route(`**/s/${launched.sessionId}/commands`, async (route) => {
+    const body = route.request().postDataJSON();
+    const command = body.command ?? body;
+    if (
+      held
+      || command.type !== 'put-draft'
+      || command.draft?.id !== protectedDraft.id
+      || command.draft?.text !== 'retry from authoritative state'
+    ) {
+      await route.continue();
+      return;
+    }
+    held = true;
+    heldRequestEntered.resolve();
+    await releaseHeldRequest.promise;
+    await route.continue();
+  });
+  await editor.fill('retry from authoritative state');
+  await heldRequestEntered.promise;
+  const concurrentState = host.broker.state(launched.sessionId)!;
+  const concurrentDraft = concurrentState.pendingDrafts.find(({ id }) => id === protectedDraft.id)!;
+  await host.broker.acceptMutation(launched.sessionId, {
+    type: 'put-draft',
+    expectedRevision: concurrentState.revision,
+    expectedDraftRevision: concurrentDraft.revision,
+    draft: {
+      ...concurrentDraft,
+      text: 'External concurrent draft revision.',
+      updatedAt: new Date().toISOString(),
+    },
+  });
+  const rejectedUpdate = page.waitForResponse((response) => {
+    if (!response.url().endsWith(`/s/${launched.sessionId}/commands`)) return false;
+    const body = response.request().postDataJSON();
+    const command = body.command ?? body;
+    return command.type === 'put-draft'
+      && command.draft?.text === 'retry from authoritative state';
+  });
+  releaseHeldRequest.resolve();
+  expect((await rejectedUpdate).status()).toBe(409);
+
+  await expect(page.locator('[data-viewer-status]'))
+    .toContainText('Another review window changed this draft');
+  await expect(composer).toBeVisible();
+  await expect(editor).toHaveValue('retry from authoritative state');
+  expect(host.broker.state(launched.sessionId)?.pendingDrafts
+    .find(({ id }) => id === protectedDraft.id)?.text).toBe('External concurrent draft revision.');
+
+  await composer.getByRole('button', { name: 'Apply' }).click();
+  await expect(composer).toHaveCount(0);
+  await expect.poll(() => host.broker.state(launched.sessionId)?.items.length)
+    .toBe(initialReview.items.length + 1);
+  expect(host.broker.state(launched.sessionId)?.items.some((item) => (
+    item.kind === 'replace' && item.payload.proposedText === 'retry from authoritative state'
+  ))).toBe(true);
+  expect(host.broker.state(launched.sessionId)?.pendingDrafts).toEqual([]);
+});
+
 test('merges a first-annotation conflict through its protected draft', async ({ page }) => {
   const launched = await openFreshProductionFixture(
     page,
@@ -7277,7 +7384,7 @@ test('merges a first-annotation conflict through its protected draft', async ({ 
   );
   await chooseFreshCopyDestination(page);
   const initialReview = host.broker.state(launched.sessionId)!;
-  const pageCanvas = page.locator("[data-page-index='0']").first();
+  const pageCanvas = page.locator(".pdf-workspace__page[data-page-index='0']").first();
   await waitForRenderedPageImage(pageCanvas);
   await dragPdfPointer(page, pageCanvas, { x: 253, y: 98 }, { x: 405, y: 98 });
   await page.getByRole('button', { name: 'Replace', exact: true }).click();
@@ -7329,7 +7436,7 @@ test("discards queued typing when a pending selection is cleared", async ({ page
   await chooseFreshCopyDestination(page);
   const initialReview = host.broker.state(launched.sessionId)!;
 
-  const pageCanvas = page.locator("[data-page-index='0']").first();
+  const pageCanvas = page.locator(".pdf-workspace__page[data-page-index='0']").first();
   await expect(pageCanvas).toBeVisible();
   await waitForRenderedPageImage(pageCanvas);
   await dragPdfPointer(page, pageCanvas, { x: 76, y: 98 }, { x: 245, y: 98 });
@@ -7359,7 +7466,7 @@ test("keeps only typing for the newest pending selection", async ({ page }) => {
   await chooseFreshCopyDestination(page);
   const initialReview = host.broker.state(launched.sessionId)!;
 
-  const pageCanvas = page.locator("[data-page-index='0']").first();
+  const pageCanvas = page.locator(".pdf-workspace__page[data-page-index='0']").first();
   await expect(pageCanvas).toBeVisible();
   await waitForRenderedPageImage(pageCanvas);
   await dragPdfPointer(page, pageCanvas, { x: 76, y: 98 }, { x: 245, y: 98 });
@@ -7397,7 +7504,7 @@ for (const dock of ['closed', 'bottom', 'right'] as const) {
     await openFreshProductionFixture(page, referencePdf, 'Anchored zoom launch failed');
     const workspace = page.locator('.pdf-workspace:not(.pdf-workspace--reference)');
     const viewport = workspace.locator('[data-viewer-framing-viewport]');
-    const sheet = workspace.locator('[data-page-index="0"]');
+    const sheet = workspace.locator('.pdf-workspace__page[data-page-index="0"]');
     await waitForRenderedPageImage(sheet);
     if (dock !== 'closed') {
       await openLinkInReferences(page, workspace.getByRole('button', { name: 'Open PDF link to Primary result, Page 2' }));
@@ -7538,10 +7645,10 @@ test('zooms continuously without rebuilding PDF page layout on every gesture fra
   await openFreshProductionFixture(page, referencePdf, 'Smooth zoom launch failed');
   const workspace = page.locator('.pdf-workspace:not(.pdf-workspace--reference)');
   const viewport = workspace.locator('[data-viewer-framing-viewport]');
-  const sheet = workspace.locator('[data-page-index="0"]');
+  const sheet = workspace.locator('.pdf-workspace__page[data-page-index="0"]');
   await waitForRenderedPageImage(sheet);
   const result = await viewport.evaluate(async (element) => {
-    const sheet = element.querySelector<HTMLElement>('[data-page-index="0"]')!;
+    const sheet = element.querySelector<HTMLElement>('.pdf-workspace__page[data-page-index="0"]')!;
     const widths = new Set([sheet.style.width]);
     const observer = new MutationObserver(() => widths.add(sheet.style.width));
     observer.observe(sheet, { attributes: true, attributeFilter: ['style'] });
@@ -7583,7 +7690,7 @@ test('animates toolbar zoom through intermediate sizes and respects reduced moti
   await page.emulateMedia({ reducedMotion: 'no-preference' });
   await openFreshProductionFixture(page, referencePdf, 'Animated zoom launch failed');
   const workspace = page.locator('.pdf-workspace:not(.pdf-workspace--reference)');
-  const sheet = workspace.locator('[data-page-index="0"]');
+  const sheet = workspace.locator('.pdf-workspace__page[data-page-index="0"]');
   await waitForRenderedPageImage(sheet);
   await page.locator('[data-review-chrome]').hover({ position: { x: 2, y: 2 } });
   await page.getByRole('button', { name: 'Open zoom controls' }).hover();
@@ -7605,7 +7712,7 @@ test('animates toolbar zoom through intermediate sizes and respects reduced moti
     if (!animation?.effect) throw new Error('Toolbar zoom did not start an animation');
     const duration = Number(animation.effect.getTiming().duration);
     if (!(duration > 0)) throw new Error('Toolbar zoom animation has no duration');
-    const sheet = element.querySelector('[data-page-index="0"]')!;
+    const sheet = element.querySelector('.pdf-workspace__page[data-page-index="0"]')!;
     const result: number[] = [];
     for (const progress of [0, 0.25, 0.5, 0.75, 1]) {
       animation.currentTime = duration * progress;
@@ -7631,7 +7738,7 @@ test('settles an interrupted zoom before keyboard page navigation', async ({ pag
   await openFreshProductionFixture(page, referencePdf, 'Interrupted zoom launch failed');
   const workspace = page.locator('.pdf-workspace:not(.pdf-workspace--reference)');
   const viewport = workspace.locator('[data-viewer-framing-viewport]');
-  const sheet = workspace.locator('[data-page-index="0"]');
+  const sheet = workspace.locator('.pdf-workspace__page[data-page-index="0"]');
   await waitForRenderedPageImage(sheet);
   const input = page.getByRole('textbox', { name: /Current page \d+ of 4/u });
   await input.fill('3');
@@ -7792,7 +7899,7 @@ test('document annotation name advances only the pending first annotation revisi
     if (request.url().endsWith(`/s/${sessionId}/commands`)) commands.push(request.postDataJSON());
     if (request.url().endsWith(`/s/${sessionId}/save/original`)) commands.push(request.postDataJSON().confirmation.command);
   });
-  const canvas = page.locator("[data-page-index='0']").first();
+  const canvas = page.locator(".pdf-workspace__page[data-page-index='0']").first();
   await waitForRenderedPageImage(canvas);
   await canvas.click({ button: 'right', position: { x: 320, y: 420 } });
   await page.getByRole('menuitem', { name: 'Add Page Note' }).click();
@@ -7825,7 +7932,7 @@ test('document annotation name export rejects a concurrent rename and retries th
     state, 0, { x: 80, y: 160, width: 18, height: 18 }, 'Chosen author survives export retry.',
   ));
   await page.goto(launched.url);
-  await waitForRenderedPageImage(page.locator("[data-page-index='0']").first());
+  await waitForRenderedPageImage(page.locator(".pdf-workspace__page[data-page-index='0']").first());
   let raced = false;
   await page.route(`**/s/${launched.sessionId}/export`, async (route) => {
     if (!raced) {

@@ -15,6 +15,7 @@ import {
   type SelectionUpdate,
   type CopySelectionUpdate,
 } from '../src/pdf/selection-state.js';
+import type { PdfAnnotationSurface } from '../src/pdf/annotation-surface.js';
 
 const anchor = {
   pageIndex: 0,
@@ -82,6 +83,66 @@ describe('selection update authority', () => {
     });
     expect(acceptSelectionUpdate(pending, overLimit)).toEqual(overLimit);
     expect(selectionReadinessMessage(overLimit)).toContain('12 pages');
+  });
+
+  it('rejects stale reference tab and document evidence while preserving monotonic ordering', () => {
+    const authority = new SelectionReadAuthority();
+    const referenceA: PdfAnnotationSurface = {
+      kind: 'reference', documentGeneration: 7, tabIdentity: 'reference-a',
+    };
+    const referenceB: PdfAnnotationSurface = {
+      kind: 'reference', documentGeneration: 7, tabIdentity: 'reference-b',
+    };
+    const pending = authority.begin('paper', referenceA);
+
+    expect(authority.finish('paper', referenceB)).toBeNull();
+    expect(authority.finish('paper', { ...referenceA, documentGeneration: 8 })).toBeNull();
+    expect(authority.finish('paper', referenceA)).toBe(pending.generation);
+    expect(authority.isCurrent(pending.generation, referenceA)).toBe(true);
+    expect(authority.isCurrent(pending.generation, referenceB)).toBe(false);
+
+    const current: SelectionUpdate = {
+      kind: 'pending', generation: pending.generation, surface: referenceA,
+    };
+    expect(acceptSelectionUpdate(current, {
+      kind: 'reliable', generation: pending.generation, surface: referenceB, anchor,
+    })).toEqual(current);
+    expect(acceptSelectionUpdate(current, {
+      kind: 'reliable', generation: pending.generation,
+      surface: { ...referenceA, documentGeneration: 8 }, anchor,
+    })).toEqual(current);
+
+    const newer: SelectionUpdate = {
+      kind: 'cleared', generation: pending.generation + 1, surface: referenceB,
+    };
+    expect(acceptSelectionUpdate(current, newer)).toEqual(newer);
+  });
+
+  it('keeps a deferred Main capture current when a departing Reference tab is invalidated', () => {
+    const authority = new SelectionReadAuthority();
+    const main: PdfAnnotationSurface = { kind: 'main', documentGeneration: 7 };
+    const departingReference: PdfAnnotationSurface = {
+      kind: 'reference', documentGeneration: 7, tabIdentity: 'reference-a',
+    };
+    const pending = authority.begin('main', main);
+    const deferredGeneration = authority.finish('main', main);
+
+    expect(deferredGeneration).toBe(pending.generation);
+    expect(authority.invalidateIfCurrent(departingReference)).toBeNull();
+    expect(authority.isCurrent(pending.generation, main)).toBe(true);
+
+    const referencePending = authority.begin('reference', departingReference);
+    const deferredReferenceGeneration = authority.finish('reference', departingReference);
+    const clearedReference = authority.invalidateIfCurrent(departingReference);
+
+    expect(deferredReferenceGeneration).toBe(referencePending.generation);
+    expect(clearedReference).toEqual({
+      kind: 'cleared',
+      generation: referencePending.generation + 1,
+      surface: departingReference,
+    });
+    expect(authority.isCurrent(referencePending.generation, departingReference)).toBe(false);
+    expect(authority.begin('main', main).generation).toBe(referencePending.generation + 2);
   });
 });
 

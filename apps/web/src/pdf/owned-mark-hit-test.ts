@@ -153,3 +153,78 @@ export class OwnedMarkPointerGesture {
     if (this.#pending?.pointerId === pointerId) this.#pending = null;
   }
 }
+
+export interface OwnedMarkGestureScope {
+  readonly surfaceKey: string;
+  readonly pageIndex: number;
+}
+
+function sameOwnedMarkGestureScope(
+  first: OwnedMarkGestureScope,
+  second: OwnedMarkGestureScope,
+): boolean {
+  return first.surfaceKey === second.surfaceKey && first.pageIndex === second.pageIndex;
+}
+
+/** Binds an owned-mark gesture to its document/tab/page authority. */
+export class ScopedOwnedMarkPointerGesture {
+  readonly #gesture: OwnedMarkPointerGesture;
+  #pending: { readonly pointerId: number; readonly scope: OwnedMarkGestureScope } | null = null;
+
+  constructor(movementThreshold = 5) {
+    this.#gesture = new OwnedMarkPointerGesture(movementThreshold);
+  }
+
+  pointerDown(
+    scope: OwnedMarkGestureScope,
+    pointerId: number,
+    button: number | undefined,
+    point: OwnedMarkPoint,
+    groups: readonly OwnedMarkGeometry[],
+    scale = 1,
+  ): string | undefined {
+    const id = this.#gesture.pointerDown(pointerId, button, point, groups, scale);
+    this.#pending = id === undefined ? null : { pointerId, scope };
+    return id;
+  }
+
+  pointerMove(scope: OwnedMarkGestureScope, pointerId: number, point: OwnedMarkPoint): void {
+    const pending = this.#pending;
+    if (pending === null || pending.pointerId !== pointerId) return;
+    if (!sameOwnedMarkGestureScope(pending.scope, scope)) {
+      this.cancel();
+      return;
+    }
+    this.#gesture.pointerMove(pointerId, point);
+  }
+
+  pointerUp(
+    scope: OwnedMarkGestureScope,
+    pointerId: number,
+    button: number | undefined,
+    point: OwnedMarkPoint,
+    groups: readonly OwnedMarkGeometry[],
+    scale = 1,
+  ): string | undefined {
+    const pending = this.#pending;
+    if (pending !== null && pending.pointerId !== pointerId) return undefined;
+    this.#pending = null;
+    if (pending === null || !sameOwnedMarkGestureScope(pending.scope, scope)) {
+      if (pending !== null) this.#gesture.pointerCancel(pending.pointerId);
+      return undefined;
+    }
+    return this.#gesture.pointerUp(pointerId, button, point, groups, scale);
+  }
+
+  pointerCancel(pointerId: number): void {
+    if (this.#pending?.pointerId !== pointerId) return;
+    this.#pending = null;
+    this.#gesture.pointerCancel(pointerId);
+  }
+
+  cancel(): void {
+    const pending = this.#pending;
+    this.#pending = null;
+    if (pending !== null) this.#gesture.pointerCancel(pending.pointerId);
+  }
+}

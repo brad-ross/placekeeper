@@ -209,6 +209,9 @@ export function ReferenceWorkspace({
   const showReferenceTabs = tabs.length > 0;
   const reserveReferenceTabRail = referenceTabOrientation === 'vertical'
     && pendingReference?.status === 'loading';
+  const referenceViewportConcealed = pendingReference?.status === 'error';
+  const referenceViewportEmpty = pendingReference === null
+    && !tabs.some(({ identity }) => identity === activeTabIdentity);
   const modeListKey = modes.join(':');
   const onDockActionFocus = () => { dockActionFocused.current = true; };
   const onDockActionBlur = (event: FocusEvent<HTMLButtonElement>) => {
@@ -238,6 +241,9 @@ export function ReferenceWorkspace({
     && headerVariant === 'references'
     && modes.length === 1
     && modes[0] === 'references';
+  const authoringEditorHasFocus = () => authoringTakeover
+    && document.activeElement instanceof Element
+    && document.activeElement.closest('[data-comment-composer]') !== null;
 
   const modeFallback = (targetMode: WorkspaceMode): HTMLElement | null => (
     chooseWorkspaceModeFocusTarget({
@@ -256,21 +262,23 @@ export function ReferenceWorkspace({
   useLayoutEffect(() => {
     if (dockActionVisible || !dockActionFocused.current) return;
     dockActionFocused.current = false;
+    if (authoringEditorHasFocus()) return;
     const timeout = setTimeout(() => {
       focusWithoutScroll(modeTabRefs.current.get(mode) ?? modeFallback(mode));
     }, 0);
     return () => clearTimeout(timeout);
-  }, [dockActionVisible, mode]);
+  }, [authoringTakeover, dockActionVisible, mode]);
 
   useLayoutEffect(() => {
     const removedFocus = focusedModeTab.current;
     if (!open || removedFocus === null || removedFocus.element.isConnected) return;
     focusedModeTab.current = null;
+    if (authoringEditorHasFocus()) return;
     const frame = requestAnimationFrame(() => {
       focusWithoutScroll(modeTabRefs.current.get(mode) ?? modeFallback(mode));
     });
     return () => cancelAnimationFrame(frame);
-  }, [mode, modeListKey, open]);
+  }, [authoringTakeover, mode, modeListKey, open]);
 
   useLayoutEffect(() => {
     const was = previous.current;
@@ -284,26 +292,32 @@ export function ReferenceWorkspace({
     // The arriving reference tab receives focus before its first paint.
     if (mode === 'references' && pendingStatus === 'loading') return;
     if (!open || (was.open && was.mode === mode && !retryBecameAvailable)) return;
+    if (authoringEditorHasFocus()) return;
     focusWithoutScroll(modeFallback(mode));
-  }, [open, mode, activeTabIdentity, pendingReference?.status]);
+  }, [authoringTakeover, open, mode, activeTabIdentity, pendingReference?.status]);
 
   useLayoutEffect(() => {
     const changed = previousActiveReference.current !== activeTabIdentity;
     previousActiveReference.current = activeTabIdentity;
     if (!changed || !open || mode !== 'references' || activeTabIdentity === null) return;
+    if (authoringEditorHasFocus()) return;
     // Apply focus before the new tab paints so its page/action endcap and
     // keyboard focus styling do not flash through an unfocused first frame.
     focusWithoutScroll(referenceTabRefs.current.get(activeTabIdentity));
-  }, [activeTabIdentity, mode, open]);
+  }, [activeTabIdentity, authoringTakeover, mode, open]);
 
   useLayoutEffect(() => {
     const identity = closeFocusIdentity.current;
     if (identity === null) return;
+    if (authoringEditorHasFocus()) {
+      closeFocusIdentity.current = null;
+      return;
+    }
     const target = referenceTabRefs.current.get(identity);
     if (!target) return;
     closeFocusIdentity.current = null;
     requestAnimationFrame(() => focusWithoutScroll(target));
-  }, [tabs]);
+  }, [authoringTakeover, tabs]);
 
   useLayoutEffect(() => {
     if (referenceReturn?.pending || !restoreReferenceReturnFocus.current) return;
@@ -396,7 +410,7 @@ export function ReferenceWorkspace({
       data-authoring-takeover={authoringTakeover ? 'true' : undefined}
       aria-label={headerVariant === 'references' ? 'References' : 'Review workspace'}
       aria-hidden={!open}
-      inert={!open || authoringTakeover}
+      inert={!open}
     >
       {modes.length > 0 ? <header className="review-workspace__header">
         {onHide ? <ReviewTooltipButton
@@ -608,8 +622,10 @@ export function ReferenceWorkspace({
             ref={onReferenceViewportHost}
             className="reference-panel__viewport"
             data-reference-viewport-host
-            hidden={pendingReference?.status === 'error' || (activeTab === null && pendingReference === null)}
-            inert={pendingReference?.status === 'error' || (activeTab === null && pendingReference === null)}
+            data-reference-viewport-concealed={referenceViewportConcealed ? 'true' : undefined}
+            aria-hidden={referenceViewportConcealed || referenceViewportEmpty || undefined}
+            hidden={referenceViewportEmpty}
+            inert={referenceViewportConcealed || referenceViewportEmpty}
           />
         </div>
       </section> : null}

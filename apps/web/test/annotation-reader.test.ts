@@ -152,6 +152,17 @@ describe('annotation reader complete-content projection', () => {
       documentGeneration: 1,
       discoveryGeneration: 2,
     })).toBeNull();
+    expect(projectExistingAnnotationReader(withoutContents, {
+      documentGeneration: 1,
+      discoveryGeneration: 2,
+      includeMetadataOnly: true,
+    })).toMatchObject({
+      origin: 'source',
+      kind: 'Highlight',
+      pageNumber: 1,
+      content: '',
+      mutable: false,
+    });
   });
 });
 
@@ -222,5 +233,25 @@ describe('annotation reader identity resolution', () => {
       ...sources,
       existingAnnotations: { status: 'loading', generation: 11 },
     })).toBeNull();
+  });
+
+  it('opts metadata-only source records into reference inspection without changing the default', () => {
+    const metadataOnly = { ...existing, id: 'metadata-only', contents: '   ' };
+    const identity: AnnotationReaderIdentity = {
+      origin: 'source',
+      annotationKey: '4:metadata-only',
+      documentGeneration: 7,
+      discoveryGeneration: 11,
+    };
+    const metadataSources = {
+      ...sources,
+      existingAnnotations: { ...sources.existingAnnotations, items: [metadataOnly] },
+    };
+
+    expect(resolveAnnotationReader(identity, metadataSources)).toBeNull();
+    expect(resolveAnnotationReader(identity, {
+      ...metadataSources,
+      includeMetadataOnly: true,
+    })).toMatchObject({ content: '', mutable: false, pageNumber: 5 });
   });
 });

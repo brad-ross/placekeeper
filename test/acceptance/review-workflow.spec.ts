@@ -147,6 +147,34 @@ test.describe('canonical review workflow', () => {
     await expect(page.getByRole('button', { name: 'Proofread mode' })).toHaveCount(0);
   });
 
+  test('keeps Apply busy until its asynchronous save resolves', async ({ page }) => {
+    await page.goto(
+      '/test/acceptance/review-harness/index.html?visual=reading&composer=edit-replacement&composer-save=deferred',
+    );
+    const composer = page.getByRole('region', { name: 'Edit Replacement' });
+    const apply = composer.getByRole('button', { name: 'Apply', exact: true });
+
+    await apply.click();
+
+    await expect(apply).toBeDisabled();
+    await expect(apply).toHaveAttribute('aria-busy', 'true');
+    await expect(apply).toHaveAttribute('data-submitting', 'true');
+    await expect(composer.getByRole('status')).toHaveText('Saving annotation.');
+    await expect(apply.locator('.lucide-loader-circle')).toBeVisible();
+
+    await page.evaluate(() => {
+      const resolveSave = Reflect.get(globalThis, 'resolveDeferredComposerSave');
+      if (typeof resolveSave !== 'function') throw new Error('Deferred composer save is unavailable');
+      resolveSave();
+    });
+
+    await expect(apply).toBeEnabled();
+    await expect(apply).not.toHaveAttribute('aria-busy', 'true');
+    await expect(apply).not.toHaveAttribute('data-submitting', 'true');
+    await expect(composer.getByRole('status')).toHaveCount(0);
+    await expect(apply.locator('.lucide-loader-circle')).toHaveCount(0);
+  });
+
   test('discloses mounted annotation actions at intent without activating their row', async ({
     page,
     browserName,
@@ -2354,7 +2382,7 @@ test.describe('canonical review workflow', () => {
     await expect(row.locator('.annotation-item__navigation')).toBeFocused();
   });
 
-  test('drops reader editing safely when its document or item authority becomes stale', async ({ page }) => {
+  test('retains reader editing safely until explicit cancel when its authority becomes stale', async ({ page }) => {
     await page.getByRole('button', { name: 'Seed annotations' }).click();
     await page.getByRole('button', { name: 'Seed long annotation' }).click();
     await openAnnotationsWorkspace(page);
@@ -2364,11 +2392,20 @@ test.describe('canonical review workflow', () => {
     const itemId = await row.getAttribute('data-review-item');
     await row.getByRole('button', { name: /Read full Page Note annotation/u }).click();
     await page.locator('[data-full-annotation-action="edit"]').click();
+    const composer = page.getByRole('region', { name: 'Edit Page Note' });
+    const editor = composer.getByRole('textbox', { name: 'Comment' });
+    const apply = composer.getByRole('button', { name: 'Apply', exact: true });
+    const replacedAuthorityDraft = 'Keep this exact draft after document authority changes.';
+    await editor.fill(replacedAuthorityDraft);
 
     await page.getByRole('button', { name: 'Replace source authority' }).evaluate((button) => {
       button.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
-    await expect(page.getByRole('region', { name: 'Edit Page Note' })).toHaveCount(0);
+    await expect(composer).toBeVisible();
+    await expect(editor).toHaveValue(replacedAuthorityDraft);
+    await expect(apply).toBeDisabled();
+    await composer.getByRole('button', { name: 'Cancel' }).click();
+    await expect(composer).toHaveCount(0);
     await expect(page.locator('[data-full-annotation-reader="true"]')).toHaveCount(0);
     await expect(page.locator(`[data-review-item="${itemId}"]`)).toBeVisible();
 
@@ -2378,12 +2415,18 @@ test.describe('canonical review workflow', () => {
     await page.locator(`[data-review-item="${itemId}"]`)
       .getByRole('button', { name: /Read full Page Note annotation/u }).click();
     await page.locator('[data-full-annotation-action="edit"]').click();
+    const deletedItemDraft = 'Keep this exact draft after the annotation disappears.';
+    await editor.fill(deletedItemDraft);
     await page.getByRole('button', { name: 'Remove active annotation' }).evaluate((button) => {
       button.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
-    await expect(page.getByRole('region', { name: 'Edit Page Note' })).toHaveCount(0);
-    await expect(page.locator('[data-full-annotation-reader="true"]')).toHaveCount(0);
+    await expect(composer).toBeVisible();
+    await expect(editor).toHaveValue(deletedItemDraft);
+    await expect(apply).toBeDisabled();
     await expect(page.locator(`[data-review-item="${itemId}"]`)).toHaveCount(0);
+    await composer.getByRole('button', { name: 'Cancel' }).click();
+    await expect(composer).toHaveCount(0);
+    await expect(page.locator('[data-full-annotation-reader="true"]')).toHaveCount(0);
     await expect(page.locator('[data-review-item]')).not.toHaveCount(0);
     await expect(page.locator('[data-review-item][data-active="true"]')).toHaveCount(0);
   });

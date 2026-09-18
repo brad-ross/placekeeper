@@ -31,6 +31,16 @@ An opaque, expiring authorization to retrieve bounded document evidence for a ve
 
 Evidence access is rechecked against the live association; an old handle cannot make cached document content current.
 
+## PDF annotation presentation
+
+### Reference Tab
+A secondary view of a PDF passage that lets the reviewer inspect related material while keeping the main reading position separate.
+
+### PDF Annotation Surface
+The particular Main view or Reference Tab, within a Document Generation, that supplied an annotation interaction.
+
+The same annotation can appear on multiple surfaces; shared annotation identity does not give one surface ownership of another surface's transient inspection.
+
 ## Annotation authoring and recovery
 
 ### Protected Draft

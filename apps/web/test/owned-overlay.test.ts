@@ -1,11 +1,85 @@
 import { Rotation } from "@embedpdf/models";
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from "vitest";
 
 import { ownedMarkStyle, positionOwnedRect } from "../src/pdf/owned-overlay.js";
+import {
+  buildAnnotationRenderingState,
+  OwnedNativeAnnotationGeometryTargets,
+} from '../src/pdf/PdfAnnotationLayers.js';
+import { sourceReaderMarkIdentityAttributes } from '../src/pdf/SourceAnnotationMark.js';
 
 import { textCenterFraction, textMarkGeometry } from '../src/pdf/text-mark-geometry.js';
 
 describe("owned annotation overlay geometry", () => {
+  it('shares frozen native-source suppression and residual reader marks across viewers', () => {
+    const native = {
+      id: 'owned-native',
+      pageIndex: 2,
+      sourceId: 'pdf-17',
+      readerStyle: {},
+    } as const;
+    const residual = {
+      id: 'pdf-23', subtype: 'Highlight', pageIndex: 3,
+      rect: { x: 10, y: 20, width: 30, height: 12 }, contents: 'Source note',
+      author: 'Reviewer', flags: [], appearanceModes: [], supportedAppearance: true,
+      readerStyle: {},
+    } as const;
+    const owned = [{
+      id: 'owned-native', reviewItemId: 'review-17', kind: 'pdfAnnotation', pageIndex: 2,
+      rect: { x: 1, y: 2, width: 3, height: 4 }, contents: 'Editable note',
+      author: 'Reviewer', createdAt: '2026-09-17T00:00:00.000Z',
+      modifiedAt: '2026-09-17T00:00:00.000Z',
+    }] as const;
+
+    const visible = buildAnnotationRenderingState(owned, [native], [residual]);
+    expect(visible.hiddenSourceKeys).toEqual(new Set());
+    expect(visible.sourceMarks.get('2:pdf-17')).toMatchObject({
+      contents: 'Editable note', ownedAnnotationId: 'review-17', pageIndex: 2,
+    });
+    expect(sourceReaderMarkIdentityAttributes(visible.sourceMarks.get('2:pdf-17')!)).toEqual({
+      'data-review-id': 'review-17',
+    });
+    expect(visible.sourceMarks.get('3:pdf-23')).toMatchObject({
+      contents: 'Source note', annotationKey: '3:pdf-23', pageIndex: 3,
+    });
+    expect(sourceReaderMarkIdentityAttributes(visible.sourceMarks.get('3:pdf-23')!)).toEqual({});
+    const geometryHtml = renderToStaticMarkup(createElement(OwnedNativeAnnotationGeometryTargets, {
+      annotations: owned,
+      page: { index: 2, objectNumber: 3, size: { width: 100, height: 100 }, rotation: Rotation.Degree0 },
+      layout: {
+        pageIndex: 2, pageNumber: 3, x: 0, y: 0, width: 200, height: 200,
+        rotatedWidth: 200, rotatedHeight: 200, elevated: false,
+      },
+      documentRotation: Rotation.Degree0,
+    }));
+    expect(geometryHtml).toContain('data-owned-native-geometry="true"');
+    expect(geometryHtml).toContain('data-review-id="review-17"');
+    expect(geometryHtml).toContain('left:2px;top:4px;width:6px;height:8px');
+    expect(geometryHtml).not.toContain('Editable note');
+    expect(visible.residualSourceFocusMarks).toEqual([expect.objectContaining({
+      id: 'pdf-23', pageIndex: 3, contents: 'Source note',
+    })]);
+
+    const afterDelete = buildAnnotationRenderingState([], [native], [residual]);
+    expect(afterDelete.hiddenSourceKeys).toEqual(new Set(['2:pdf-17']));
+    expect(afterDelete.sourceMarks.has('2:pdf-17')).toBe(false);
+    expect(afterDelete.sourceMarks.has('3:pdf-23')).toBe(true);
+
+    const overlappingSource = {
+      ...residual,
+      id: 'pdf-17',
+      pageIndex: 2,
+      contents: 'Frozen native source copy',
+    } as const;
+    const overlapVisible = buildAnnotationRenderingState(owned, [native], [overlappingSource]);
+    expect(overlapVisible.residualSourceFocusMarks).toEqual([]);
+    const overlapAfterDelete = buildAnnotationRenderingState([], [native], [overlappingSource]);
+    expect(overlapAfterDelete.hiddenSourceKeys).toEqual(new Set(['2:pdf-17']));
+    expect(overlapAfterDelete.residualSourceFocusMarks).toEqual([]);
+  });
+
   it("treats owned geometry as crop-relative and applies rotation plus zoom exactly once", () => {
     const positioned = positionOwnedRect(
       {

@@ -232,7 +232,9 @@ export const suites: Record<string, TestStage[]> = {
         "apps/web/test/selection-anchor.test.ts",
         "apps/web/test/reading-location.test.ts",
         "apps/web/test/owned-overlay.test.ts",
+        "apps/web/test/annotation-surface.test.ts",
         "apps/web/test/owned-mark-hit-test.test.ts",
+        "apps/web/test/reference-pdf-viewport.test.ts",
         "apps/web/test/viewer-interaction-events.test.ts",
         "apps/web/test/app-interactions.test.ts",
         "apps/web/test/existing-annotations.test.ts"
@@ -262,6 +264,7 @@ export const suites: Record<string, TestStage[]> = {
         "apps/web/test/review-layout.test.tsx",
         "apps/web/test/annotation-projection.test.ts",
         "apps/web/test/production-review-app.test.tsx",
+        "apps/web/test/review-shell-reference-authoring.test.tsx",
         "apps/web/test/refresh-interaction-lifecycle.test.tsx",
         "apps/web/test/interaction-reconnect-runtime.test.ts",
         "apps/web/test/use-authoring-session-lifecycle.test.ts",
@@ -335,6 +338,8 @@ export const suites: Record<string, TestStage[]> = {
         "test/acceptance/host-interface.spec.ts",
         "test/acceptance/macos-interface.spec.ts",
         "test/acceptance/annotation-behavior-followup.spec.ts",
+        "test/acceptance/reference-annotations.spec.ts",
+        "test/acceptance/reference-annotation-stale-commands.spec.ts",
         "test/acceptance/reattachment-tray.spec.ts",
         "test/acceptance/automatic-pdf-refresh.spec.ts",
         "test/acceptance/authoring-lifecycle-regressions.spec.ts"
@@ -361,6 +366,8 @@ export const suites: Record<string, TestStage[]> = {
         "test/acceptance/pdf-mark-design.spec.ts",
         "test/acceptance/macos-interface.spec.ts",
         "test/acceptance/annotation-behavior-followup.spec.ts",
+        "test/acceptance/reference-annotations.spec.ts",
+        "test/acceptance/reference-annotation-stale-commands.spec.ts",
         "test/acceptance/reattachment-tray.spec.ts",
         "test/acceptance/automatic-pdf-refresh.spec.ts",
         "test/acceptance/authoring-lifecycle-regressions.spec.ts"
@@ -428,6 +435,8 @@ export const suites: Record<string, TestStage[]> = {
       "files": [
         "apps/web/test/production-review-app.test.tsx",
         "apps/web/test/owned-overlay.test.ts",
+        "apps/web/test/annotation-surface.test.ts",
+        "apps/web/test/review-shell-reference-authoring.test.tsx",
         "apps/vscode/test/extension.test.ts",
         "packaging/macos/packaging.test.ts"
       ]
@@ -437,7 +446,9 @@ export const suites: Record<string, TestStage[]> = {
       "runner": "playwright",
       "options": ["--config", "scripts/testing/config/playwright.config.ts"],
       "files": [
-        "test/acceptance/production-flow.spec.ts"
+        "test/acceptance/production-flow.spec.ts",
+        "test/acceptance/reference-annotations.spec.ts",
+        "test/acceptance/reference-annotation-stale-commands.spec.ts"
       ]
     }
   ],
@@ -483,6 +494,8 @@ export const suites: Record<string, TestStage[]> = {
         "test/acceptance/host-interface.spec.ts",
         "test/acceptance/macos-interface.spec.ts",
         "test/acceptance/annotation-behavior-followup.spec.ts",
+        "test/acceptance/reference-annotations.spec.ts",
+        "test/acceptance/reference-annotation-stale-commands.spec.ts",
         "test/acceptance/reattachment-tray.spec.ts",
         "test/acceptance/automatic-pdf-refresh.spec.ts",
         "test/acceptance/authoring-lifecycle-regressions.spec.ts"
@@ -509,6 +522,8 @@ export const suites: Record<string, TestStage[]> = {
         "test/acceptance/pdf-mark-design.spec.ts",
         "test/acceptance/macos-interface.spec.ts",
         "test/acceptance/annotation-behavior-followup.spec.ts",
+        "test/acceptance/reference-annotations.spec.ts",
+        "test/acceptance/reference-annotation-stale-commands.spec.ts",
         "test/acceptance/reattachment-tray.spec.ts",
         "test/acceptance/authoring-lifecycle-regressions.spec.ts"
       ]
@@ -608,6 +623,9 @@ export const ciUnitFiles = [
       'apps/web/test/review-layout.test.tsx',
       'apps/web/test/annotation-projection.test.ts',
       'apps/web/test/production-review-app.test.tsx',
+      'apps/web/test/annotation-surface.test.ts',
+      'apps/web/test/reference-pdf-viewport.test.ts',
+      'apps/web/test/review-shell-reference-authoring.test.tsx',
       'apps/web/test/codex-context-status.test.tsx',
       'apps/web/test/existing-annotations.test.ts',
       'apps/web/test/refresh-interaction-lifecycle.test.tsx',

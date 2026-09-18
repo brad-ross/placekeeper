@@ -17,8 +17,23 @@ import {
 import { initiallyPortableItemIds } from "../src/save/portable-checkpoint.js";
 import { canonicalStateSupersedes, firstUnresolvedReviewItemId } from "../src/review/canonical-state.js";
 import {
-  initialWorkspaceLocationForGeneration,
+  annotationReferenceRequest,
+  authoringReferenceTarget,
+  frozenReferenceRecovery,
+  frozenReferenceRecoveryForSurface,
+  ownedAnnotationCorrespondence,
+  pinReferenceInspection,
+  pdfAnnotationSurfaceIsCurrent,
   ProductionReviewApp,
+  referenceInspectionShouldReuse,
+  referenceInspectionShouldPreserveSelection,
+  referenceInspectionCorrespondenceAuthority,
+  correspondenceAfterReferenceInspectionDismiss,
+  referenceInspectionShouldSuppressRestoredFocus,
+  referenceInspectionPresentationForPhase,
+  referenceInspectionReplacementChangesAuthority,
+  selectedReferenceInspectionCorrespondence,
+  initialWorkspaceLocationForGeneration,
 } from "../src/app/ProductionReviewApp.js";
 import { referenceReturnForActiveTab } from "../src/review/reference-presentation.js";
 import {
@@ -48,6 +63,189 @@ import {
   reviewExportPresentation,
 } from "../src/review/DocumentActionsMenu.js";
 import { MemoryReviewLocationHistory } from "../src/review/review-location-history.js";
+import type { ReferenceTab } from "../src/review/reference-navigation-state.js";
+
+describe('owned annotation correspondence', () => {
+  it('uses one preview/selection lifecycle for owned and source Reference marks', () => {
+    expect(referenceInspectionPresentationForPhase('enter')).toBe('preview');
+    expect(referenceInspectionPresentationForPhase('focus')).toBe('preview');
+    expect(referenceInspectionPresentationForPhase('activate')).toBe('selected');
+    expect(referenceInspectionPresentationForPhase('leave')).toBe('dismiss');
+    expect(referenceInspectionPresentationForPhase('blur')).toBe('dismiss');
+  });
+
+  it('keeps a clicked card selected and consumes only the immediate restored focus', () => {
+    const surface = { kind: 'reference', documentGeneration: 4, tabIdentity: 'tab-a' } as const;
+    const identity = { origin: 'owned', itemId: 'note-a' } as const;
+    const selected = { identity, surface, selected: true };
+
+    expect(referenceInspectionShouldPreserveSelection(selected, identity, surface)).toBe(true);
+    expect(referenceInspectionShouldPreserveSelection(
+      selected,
+      { origin: 'owned', itemId: 'note-b' },
+      surface,
+    )).toBe(false);
+    expect(referenceInspectionShouldSuppressRestoredFocus(
+      { identity, surface, expiresAt: 1_500 },
+      identity,
+      surface,
+      1_000,
+    )).toBe(true);
+    expect(referenceInspectionShouldSuppressRestoredFocus(
+      { identity, surface, expiresAt: 1_500 },
+      identity,
+      surface,
+      2_000,
+    )).toBe(false);
+  });
+
+  it('pins only the current Reference inspection when its card body is clicked', () => {
+    const inspection = {
+      token: 8,
+      identity: { origin: 'owned', itemId: 'note-a' } as const,
+      surface: { kind: 'reference', documentGeneration: 4, tabIdentity: 'tab-a' } as const,
+      pageIndex: 2,
+      selected: false,
+    };
+
+    expect(pinReferenceInspection(inspection, 8)).toEqual({ ...inspection, selected: true });
+    expect(pinReferenceInspection(inspection, 7)).toBe(inspection);
+    expect(pinReferenceInspection({ ...inspection, selected: true }, 8).selected).toBe(true);
+    expect(selectedReferenceInspectionCorrespondence(inspection)).toEqual({
+      id: 'note-a', surface: inspection.surface,
+    });
+    expect(selectedReferenceInspectionCorrespondence({
+      ...inspection,
+      identity: {
+        origin: 'source', annotationKey: 'source-a', documentGeneration: 4,
+        discoveryGeneration: 2,
+      },
+    })).toBeUndefined();
+  });
+
+  it('upgrades a matching source preview instead of deduplicating its activation', () => {
+    const surface = { kind: 'reference', documentGeneration: 4, tabIdentity: 'tab-a' } as const;
+    const identity = {
+      origin: 'source',
+      annotationKey: 'source-a',
+      documentGeneration: 4,
+      discoveryGeneration: 2,
+    } as const;
+    const preview = { identity, surface, selected: false };
+
+    expect(referenceInspectionShouldReuse(preview, identity, surface, 'preview')).toBe(true);
+    expect(referenceInspectionShouldReuse(preview, identity, surface, 'selected')).toBe(false);
+    expect(referenceInspectionShouldReuse(
+      { ...preview, selected: true }, identity, surface, 'selected',
+    )).toBe(true);
+  });
+
+  it('keeps Reference correspondence in the viewers without opening Main content', () => {
+    expect(ownedAnnotationCorrespondence({
+      focusedMark: {
+        id: 'note-a',
+        surface: { kind: 'reference', documentGeneration: 4, tabIdentity: 'tab-a' },
+      },
+    })).toEqual({ viewerItemId: 'note-a' });
+    expect(ownedAnnotationCorrespondence({
+      hoveredMark: {
+        id: 'note-b',
+        surface: { kind: 'main', documentGeneration: 4 },
+      },
+    })).toEqual({ viewerItemId: 'note-b', contentItemId: 'note-b' });
+    expect(ownedAnnotationCorrespondence({
+      rowItemId: 'note-row',
+      focusedMark: {
+        id: 'note-a',
+        surface: { kind: 'reference', documentGeneration: 4, tabIdentity: 'tab-a' },
+      },
+    })).toEqual({ viewerItemId: 'note-a' });
+    expect(ownedAnnotationCorrespondence({
+      rowItemId: 'note-row',
+    })).toEqual({ viewerItemId: 'note-row', contentItemId: 'note-row' });
+    expect(ownedAnnotationCorrespondence({
+      focusedMark: {
+        id: 'note-main',
+        surface: { kind: 'main', documentGeneration: 4 },
+      },
+      hoveredMark: {
+        id: 'note-reference',
+        surface: { kind: 'reference', documentGeneration: 4, tabIdentity: 'tab-a' },
+      },
+      preferredMark: {
+        id: 'note-reference',
+        surface: { kind: 'reference', documentGeneration: 4, tabIdentity: 'tab-a' },
+      },
+    })).toEqual({ viewerItemId: 'note-reference' });
+    const referenceSurface = {
+      kind: 'reference', documentGeneration: 4, tabIdentity: 'tab-a',
+    } as const;
+    expect(referenceInspectionCorrespondenceAuthority({
+      identity: { origin: 'owned', itemId: 'note-reference' },
+      surface: referenceSurface,
+    }, 'note-reference', referenceSurface)).toEqual({
+      id: 'note-reference',
+      surface: referenceSurface,
+    });
+    expect(ownedAnnotationCorrespondence({
+      focusedMark: {
+        id: 'note-main',
+        surface: { kind: 'main', documentGeneration: 4 },
+      },
+      preferredMark: {
+        id: 'note-main-new-interaction',
+        surface: { kind: 'main', documentGeneration: 4 },
+      },
+    })).toEqual({
+      viewerItemId: 'note-main-new-interaction',
+      contentItemId: 'note-main-new-interaction',
+    });
+  });
+
+  it('clears dismissed Reference correspondence without replacing a newer Main interaction', () => {
+    const surface = {
+      kind: 'reference', documentGeneration: 4, tabIdentity: 'tab-a',
+    } as const;
+    const inspection = {
+      identity: { origin: 'owned', itemId: 'note-a' } as const,
+      surface,
+    };
+
+    expect(correspondenceAfterReferenceInspectionDismiss(inspection, {
+      id: 'note-a', surface,
+    })).toEqual({});
+    expect(correspondenceAfterReferenceInspectionDismiss(inspection, {
+      id: 'note-a', surface,
+    }, 'note-row')).toEqual({
+      viewerItemId: 'note-row', contentItemId: 'note-row',
+    });
+    expect(correspondenceAfterReferenceInspectionDismiss(inspection, {
+      id: 'note-a', surface: { kind: 'main', documentGeneration: 4 },
+    })).toBeUndefined();
+    expect(correspondenceAfterReferenceInspectionDismiss(inspection, {
+      id: 'note-b', surface,
+    })).toBeUndefined();
+  });
+
+  it('releases owned correspondence when a source inspection replaces it', () => {
+    const surface = {
+      kind: 'reference', documentGeneration: 4, tabIdentity: 'tab-a',
+    } as const;
+    const owned = { identity: { origin: 'owned', itemId: 'note-a' } as const, surface };
+    const source = {
+      identity: {
+        origin: 'source', annotationKey: 'source-b', documentGeneration: 4,
+        discoveryGeneration: 2,
+      } as const,
+      surface,
+    };
+
+    expect(referenceInspectionReplacementChangesAuthority(owned, source)).toBe(true);
+    expect(referenceInspectionReplacementChangesAuthority(source, source)).toBe(false);
+    expect(referenceInspectionReplacementChangesAuthority(null, source)).toBe(false);
+  });
+
+});
 
 function renderReconciliationSummary(summary: ReconciliationSummaryPresentation) {
   return <section aria-label="Annotations">
@@ -167,6 +365,136 @@ describe('scope polling identity', () => {
 });
 
 describe("one production review tree", () => {
+  it('routes annotation reference requests through canonical geometry and rejects stale source identity', () => {
+    const item = {
+      id: 'owned-a', kind: 'pageNote' as const, pageIndex: 2,
+      createdAt: '2026-09-17T00:00:00.000Z', updatedAt: '2026-09-17T00:00:00.000Z',
+      payload: { position: { x: 24, y: 80, width: 12, height: 12 }, comment: 'Note' },
+    };
+    const existing = {
+      id: 'native-a', subtype: 'Text', pageIndex: 3,
+      rect: { x: 30, y: 90, width: 10, height: 10 }, contents: 'Imported', author: '',
+      flags: [], appearanceModes: [], supportedAppearance: true,
+    };
+    const sources = {
+      items: [item],
+      existingAnnotations: { status: 'ready' as const, generation: 6, items: [existing] },
+      documentGeneration: 4,
+      pageCount: 8,
+      pages: Array.from({ length: 8 }, () => ({
+        size: { width: 600, height: 800 },
+        crop: { left: 10, top: 0, bottom: 20 },
+      })),
+    };
+    const owned = annotationReferenceRequest({ origin: 'owned', itemId: item.id }, sources);
+    expect(owned).toMatchObject({
+      pageIndex: 2,
+      target: { documentGeneration: 4, pageIndex: 2 },
+      metadata: { pageContext: 'Page 3' },
+    });
+    expect(owned?.target.zoom.params).toEqual([34, 740, 0]);
+    expect(annotationReferenceRequest({
+      origin: 'source', annotationKey: '3:native-a', documentGeneration: 4,
+      discoveryGeneration: 6,
+    }, sources)?.target.zoom.params).toEqual([40, 730, 0]);
+    expect(annotationReferenceRequest({
+      origin: 'source', annotationKey: '3:native-a', documentGeneration: 4,
+      discoveryGeneration: 5,
+    }, sources)).toBeNull();
+  });
+
+  it('scopes transient annotation evidence and deeply freezes reference recovery', () => {
+    expect(pdfAnnotationSurfaceIsCurrent(
+      { kind: 'reference', documentGeneration: 4, tabIdentity: 'tab-a' },
+      { documentGeneration: 4, activeReferenceTabIdentity: 'tab-a', referenceVisible: true },
+    )).toBe(true);
+    expect(pdfAnnotationSurfaceIsCurrent(
+      { kind: 'reference', documentGeneration: 4, tabIdentity: 'tab-b' },
+      { documentGeneration: 4, activeReferenceTabIdentity: 'tab-a', referenceVisible: true },
+    )).toBe(false);
+    expect(pdfAnnotationSurfaceIsCurrent(
+      { kind: 'reference', documentGeneration: 4, tabIdentity: 'tab-a' },
+      { documentGeneration: 4, activeReferenceTabIdentity: 'tab-a', referenceVisible: false },
+    )).toBe(false);
+    expect(pdfAnnotationSurfaceIsCurrent(undefined, {
+      documentGeneration: 4, activeReferenceTabIdentity: 'tab-a', referenceVisible: true,
+    })).toBe(true);
+
+    const target = {
+      documentGeneration: 4, pageIndex: 2,
+      zoom: { mode: PdfZoomMode.XYZ, params: [24, 80, 0] }, identity: 'canonical',
+    };
+    const annotationIdentity = { origin: 'owned' as const, itemId: 'annotation-a' };
+    const tab: ReferenceTab = {
+      identity: 'tab-a',
+      annotationIdentity,
+      originalTarget: target,
+      settledLocation: {
+        pageIndex: 2,
+        anchor: { x: 24, y: 80 },
+        alignment: { xPercent: 50, yPercent: 35 },
+        zoom: 1,
+      },
+      label: 'Note',
+      pageContext: 'Page 3',
+    };
+    const recovery = frozenReferenceRecovery(tab);
+    const surfaceRecovery = frozenReferenceRecoveryForSurface(
+      { kind: 'reference', documentGeneration: 4, tabIdentity: 'tab-a' },
+      [tab],
+    );
+    target.zoom.params[0] = 999;
+    expect(recovery.target.zoom.params).toEqual([24, 80, 0]);
+    expect(recovery.annotationIdentity).toEqual(annotationIdentity);
+    expect(Object.isFrozen(recovery)).toBe(true);
+    expect(Object.isFrozen(recovery.target.zoom.params)).toBe(true);
+
+    expect(surfaceRecovery).toEqual(recovery);
+    expect(frozenReferenceRecoveryForSurface(
+      { kind: 'reference', documentGeneration: 4, tabIdentity: 'missing-tab' },
+      [tab],
+    )).toBeUndefined();
+    expect(frozenReferenceRecoveryForSurface(
+      { kind: 'main', documentGeneration: 4 },
+      [tab],
+    )).toBeUndefined();
+  });
+
+  it('returns a Reference draft to its frozen page-14 anchor rather than the tab opening target', () => {
+    const authority = {
+      sessionId: 'session-a', sourceIdentity: 'file:digest', documentGeneration: 4,
+    };
+    const openedOnPageOne = {
+      documentGeneration: 4, pageIndex: 0,
+      zoom: { mode: PdfZoomMode.XYZ, params: [0, 0, 0] }, identity: 'page-1',
+    };
+    const anchor = {
+      token: 8,
+      authority,
+      pageIndex: 13,
+      point: { x: 44, y: 180 },
+      surface: { kind: 'reference' as const, documentGeneration: 4, tabIdentity: 'tab-a' },
+      referenceRecovery: {
+        target: openedOnPageOne,
+        tabIdentity: 'tab-a',
+        label: 'Original reference',
+        pageContext: 'Page 1',
+      },
+    };
+
+    const pages = Array.from({ length: 20 }, () => ({
+      size: { width: 600, height: 800 },
+      crop: { left: 10, top: 0, bottom: 20 },
+    }));
+    const target = authoringReferenceTarget(anchor, authority, pages);
+    expect(target).toMatchObject({ documentGeneration: 4, pageIndex: 13 });
+    expect(target?.zoom.params).toEqual([54, 640, 0]);
+    expect(openedOnPageOne.pageIndex).toBe(0);
+    expect(authoringReferenceTarget(anchor, {
+      sessionId: 'session-a', sourceIdentity: 'replacement:digest', documentGeneration: 5,
+    }, pages)).toBeNull();
+  });
+
   it('applies a deliberate initial workspace location only to the launch generation', () => {
     const location = { pageIndex: 2, top: 180 };
     expect(initialWorkspaceLocationForGeneration(4, 4, location)).toBe(location);

@@ -17,6 +17,7 @@ export interface FullAnnotationReaderProps {
   readonly onBack: (restoreRowFocus?: boolean) => void;
   readonly onEdit?: (trigger: HTMLButtonElement) => void;
   readonly onDelete?: (trigger: HTMLButtonElement) => void | Promise<void>;
+  readonly onOpenReference?: () => void;
   readonly sourceNavigation?: FullAnnotationReaderSourceNavigation;
 }
 
@@ -24,6 +25,7 @@ export interface FullAnnotationReaderActionsProps {
   readonly onBack: (restoreRowFocus?: boolean) => void;
   readonly onEdit?: (trigger: HTMLButtonElement) => void;
   readonly onDelete?: (trigger: HTMLButtonElement) => void | Promise<void>;
+  readonly onOpenReference?: () => void;
   readonly backRef?: Ref<HTMLButtonElement>;
   readonly editRef?: Ref<HTMLButtonElement>;
   readonly deleteRef?: Ref<HTMLButtonElement>;
@@ -98,6 +100,7 @@ export function FullAnnotationReaderActions({
   onBack,
   onEdit,
   onDelete,
+  onOpenReference,
   backRef,
   editRef,
   deleteRef,
@@ -127,6 +130,18 @@ export function FullAnnotationReaderActions({
         <ReviewIcon name="edit" size={16} />
       </ReviewTooltipButton>
     )}
+    {onOpenReference === undefined ? null : (
+      <ReviewTooltipButton
+        type="button"
+        className="full-annotation-reader__open-reference"
+        data-full-annotation-action="open-reference"
+        label="Open in References"
+        tooltip="Open in References"
+        onClick={onOpenReference}
+      >
+        <ReviewIcon name="references" size={16} />
+      </ReviewTooltipButton>
+    )}
     {onDelete === undefined ? null : (
       <ReviewTooltipButton
         ref={deleteRef}
@@ -143,7 +158,14 @@ export function FullAnnotationReaderActions({
   </>;
 }
 
-export function FullAnnotationReader({ record, onBack, onEdit, onDelete, sourceNavigation }: FullAnnotationReaderProps) {
+export function FullAnnotationReader({
+  record,
+  onBack,
+  onEdit,
+  onDelete,
+  onOpenReference,
+  sourceNavigation,
+}: FullAnnotationReaderProps) {
   const pageDescription = record.lastPageNumber === undefined
     ? `page ${record.pageNumber}`
     : `pages ${record.pageNumber}–${record.lastPageNumber}`;
@@ -175,6 +197,14 @@ export function FullAnnotationReader({ record, onBack, onEdit, onDelete, sourceN
         </div>
         <FullAnnotationReaderMetadata record={record} readonly={record.origin === 'source'} />
         <div className="full-annotation-reader__header-actions">
+          {onOpenReference === undefined ? null : <ReviewTooltipButton
+            type="button"
+            className="full-annotation-reader__open-reference"
+            data-full-annotation-action="open-reference"
+            label="Open in References"
+            tooltip="Open in References"
+            onClick={onOpenReference}
+          ><ReviewIcon name="references" size={16} /></ReviewTooltipButton>}
           {showLocate ? <ReviewTooltipButton
             type="button"
             className="full-annotation-reader__locate"
