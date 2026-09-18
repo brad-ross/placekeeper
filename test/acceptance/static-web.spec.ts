@@ -579,7 +579,7 @@ test('@critical selecting the reference demo restores its sample only when refer
   const demo = page.frameLocator('iframe[aria-hidden="false"]');
   await demo.locator('[data-initial-view-ready="true"]').waitFor({ state: 'attached' });
   const features = page.getByRole('tablist', { name: 'Explore features' });
-  const reference = features.getByRole('tab', { name: 'Follow a reference', exact: true });
+  const reference = features.getByRole('tab', { name: 'Follow references', exact: true });
   const appendix = demo.getByRole('tab', { name: 'Appendix A, Page 31', exact: true });
   await reference.click();
   await expect(appendix).toBeVisible();
