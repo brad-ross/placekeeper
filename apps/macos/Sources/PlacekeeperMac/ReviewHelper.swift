@@ -6,6 +6,7 @@ struct MacRuntimeProjection {
     let sessionID: String
     let generation: Int
     let revision: Int
+    let activeAuthoringDraftIds: [String]
     let state: [String: Any]
     let scope: [String: Any]
     let saveStatus: [String: Any]
@@ -19,6 +20,7 @@ struct MacRuntimeProjection {
             "sessionId": sessionID,
             "generation": generation,
             "revision": revision,
+            "activeAuthoringDraftIds": activeAuthoringDraftIds,
             "state": state,
             "scope": scope,
             "saveStatus": saveStatus,
@@ -125,7 +127,7 @@ enum MacReviewHelperReplyParser {
                   let generation = positiveInteger(value["generation"]),
                   let revision = nonnegativeInteger(value["revision"]),
                   let reason = value["reason"] as? String,
-                  ["revision", "generation", "save", "recovery"].contains(reason) else { return nil }
+                  ["revision", "generation", "save", "recovery", "presence"].contains(reason) else { return nil }
             return .invalidation(generation: generation, revision: revision, reason: reason)
         case "result":
             guard exact(value, base.union(["method", "payload"])),
@@ -157,7 +159,7 @@ enum MacReviewHelperReplyParser {
 
     private static func projection(_ value: [String: Any]) -> MacRuntimeProjection? {
         let allowed = Set([
-            "sessionId", "generation", "revision", "state", "scope", "saveStatus", "protected", "location", "document",
+            "sessionId", "generation", "revision", "activeAuthoringDraftIds", "state", "scope", "saveStatus", "protected", "location", "document",
         ])
         guard Set(value.keys).isSubset(of: allowed),
               value.keys.contains("sessionId"), value.keys.contains("generation"), value.keys.contains("revision"),
@@ -166,6 +168,7 @@ enum MacReviewHelperReplyParser {
               let sessionID = value["sessionId"] as? String, fullMatch(session, sessionID),
               let generation = positiveInteger(value["generation"]),
               let revision = nonnegativeInteger(value["revision"]),
+              let activeAuthoringDraftIds = safeIDs(value["activeAuthoringDraftIds"]),
               let state = value["state"] as? [String: Any],
               let scope = value["scope"] as? [String: Any],
               let saveStatus = value["saveStatus"] as? [String: Any],
@@ -181,6 +184,7 @@ enum MacReviewHelperReplyParser {
             sessionID: sessionID,
             generation: generation,
             revision: revision,
+            activeAuthoringDraftIds: activeAuthoringDraftIds,
             state: state,
             scope: scope,
             saveStatus: saveStatus,
@@ -196,6 +200,13 @@ enum MacReviewHelperReplyParser {
     private static func safeID(_ value: Any?) -> String? {
         guard let value = value as? String, fullMatch(identifier, value) else { return nil }
         return value
+    }
+
+    private static func safeIDs(_ value: Any?) -> [String]? {
+        guard let value else { return [] }
+        guard let values = value as? [String], values.count <= 256,
+              values.allSatisfy({ safeID($0) != nil }), Set(values).count == values.count else { return nil }
+        return values
     }
 
     private static func safeDigest(_ value: Any?) -> String? {

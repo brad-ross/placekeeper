@@ -295,6 +295,15 @@ export class SessionBroker {
     });
     this.interactions = new ReviewInteractions({
       currentGeneration: (sessionId) => this.#activeById.get(sessionId)?.state.workflow.documentGeneration,
+      onPresenceChange: (sessionId) => {
+        const state = this.#activeById.get(sessionId)?.state;
+        if (state === undefined) return;
+        this.controls.publishStateInvalidation(sessionId, {
+          documentGeneration: state.workflow.documentGeneration,
+          reviewRevision: state.revision,
+          reason: "presence",
+        });
+      },
       onLastRelease: (sessionId) => {
         void this.#localDocumentObserver.hint(sessionId, { token: "interaction-release" });
       },
@@ -342,12 +351,14 @@ export class SessionBroker {
     readonly generation: number;
     readonly interactionToken: string;
     readonly order: number;
+    readonly draftId?: string;
   }): Promise<unknown> {
     const session = this.#activeById.get(input.sessionId);
     if (session === undefined || session.ending) return { status: "unauthorized" };
     return this.#withSessionTail(session, async () => {
       return this.interactions.begin({ ...input.attachment, sessionId: input.sessionId, generation: input.generation,
-        interactionToken: input.interactionToken, order: input.order });
+        interactionToken: input.interactionToken, order: input.order,
+        ...(input.draftId === undefined ? {} : { draftId: input.draftId }) });
     });
   }
 
@@ -369,6 +380,7 @@ export class SessionBroker {
         interactionToken: input.interactionToken,
         order: input.order,
         outcome: input.outcome,
+        draftId: input.draftId,
         commit: async () => {
           const draft = session.state.pendingDrafts.find((candidate) => candidate.id === input.draftId);
           if (draft === undefined || draft.revision !== input.expectedDraftRevision || draft.status !== "protected") {
@@ -3258,6 +3270,7 @@ export class SessionBroker {
         sessionId: session.id,
         documentGeneration: session.state.workflow.documentGeneration,
         state: structuredClone(session.state),
+        activeAuthoringDraftIds: this.#activeAuthoringDraftIds(session),
         destination: structuredClone(session.destination),
         sync: structuredClone(session.sync),
         sourceByteLength: session.state.source.byteLength,
@@ -3266,6 +3279,35 @@ export class SessionBroker {
         ...(sourceRootPath === undefined ? {} : { sourceRootPath }),
       };
     });
+  }
+
+  async runtimeState(sessionId: string): Promise<{
+    readonly state: ReviewState;
+    readonly activeAuthoringDraftIds: readonly string[];
+  } | undefined> {
+    const session = this.#activeById.get(sessionId);
+    if (session === undefined || session.ending) return undefined;
+    return this.#withSessionTail(session, async () => {
+      if (session.ending || this.#activeById.get(sessionId) !== session) return undefined;
+      return {
+        state: structuredClone(session.state),
+        activeAuthoringDraftIds: this.#activeAuthoringDraftIds(session),
+      };
+    });
+  }
+
+  #activeAuthoringDraftIds(session: ActiveSession): string[] {
+    const generation = session.state.workflow.documentGeneration;
+    const claims = this.interactions.activeAuthoringClaims(session.id);
+    const active = new Set(claims.flatMap((claim) => {
+      if (claim.generation !== generation) return [];
+      const draft = session.state.pendingDrafts.find((candidate) => candidate.id === claim.draftId);
+      return draft !== undefined && draft.ownerViewId === claim.attachmentId &&
+        draft.baseGeneration === claim.generation && draft.status === "protected" &&
+        draft.disposition.kind === "resolved" && draft.disposition.generation === generation
+        ? [draft.id] : [];
+    }));
+    return [...active].sort().slice(0, 256);
   }
 
   /** Compatibility projection over a lightweight atomic snapshot. The

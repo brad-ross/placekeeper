@@ -371,6 +371,9 @@ export function useAuthoringSession({
     authoringAdmissionPendingRef.current = true;
     const token = ++authoringSessionTokenRef.current;
     const authority = currentAuthoringAuthorityRef.current;
+    // Freeze the durable draft identity before admission so every reconnect
+    // replays the same exact authoring presence binding.
+    const draftId = crypto.randomUUID();
     let interaction;
     try {
       if (authoring.interactionLifecycleRequired && authoring.interactionLifecycle === undefined) {
@@ -381,6 +384,8 @@ export function useAuthoringSession({
           authoring.interactionLifecycle,
           authority.documentGeneration,
           `authoring_${crypto.randomUUID()}`,
+          1,
+          draftId,
         );
         void retryPendingAcknowledgements();
       }
@@ -404,6 +409,7 @@ export function useAuthoringSession({
     clearInputDraft();
     const session = createAuthoringSession({
       token,
+      draftId,
       authority,
       source,
       origin: { kind: originKind, trigger },

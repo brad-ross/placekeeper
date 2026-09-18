@@ -55,13 +55,13 @@ export type ChromeRuntimeHostMessage = RuntimeEnvelope & (
   | { readonly lane: "lifecycle"; readonly type: "active"; readonly requestId: string; readonly payload: unknown }
   | { readonly lane: "lifecycle"; readonly type: "recovery-offered"; readonly requestId: string; readonly choices: readonly ["resume", "discard", "fork"]; readonly offer: { readonly id: string; readonly expiresAt: string } }
   | { readonly lane: "runtime"; readonly type: "result"; readonly requestId: string; readonly method: ReviewRuntimeBrokerMethod; readonly payload: unknown }
-  | { readonly lane: "runtime"; readonly type: "invalidation"; readonly revision: number; readonly generation: number; readonly reason: "revision" | "generation" | "save" | "recovery" }
+  | { readonly lane: "runtime"; readonly type: "invalidation"; readonly revision: number; readonly generation: number; readonly reason: ChromeRuntimeProjectionChangeReason }
   | { readonly lane: "resource"; readonly type: "resource-chunk"; readonly requestId: string; readonly sequence: number; readonly data: string; readonly done: boolean }
   | { readonly lane: ChromeRuntimeLane; readonly type: "failure"; readonly requestId?: string; readonly reason: string }
   | { readonly lane: "lifecycle"; readonly type: "update-required"; readonly requestId?: string }
 );
 
-export type ChromeRuntimeProjectionChangeReason = "generation" | "revision" | "save" | "recovery";
+export type ChromeRuntimeProjectionChangeReason = "generation" | "revision" | "save" | "recovery" | "presence";
 
 export function isChromeInteractionOwnerSecret(value: unknown): value is string {
   return typeof value === "string" && OWNER_SECRET.test(value);
@@ -98,6 +98,9 @@ export function chromeRuntimeProjectionChangeReason(
   if (current.generation !== previous.generation) return "generation";
   if (current.revision !== previous.revision) return "revision";
   if (canonicalJson(current.saveStatus) !== canonicalJson(previous.saveStatus)) return "save";
+  const previousPresence = Array.isArray(previous.activeAuthoringDraftIds) ? previous.activeAuthoringDraftIds : [];
+  const currentPresence = Array.isArray(current.activeAuthoringDraftIds) ? current.activeAuthoringDraftIds : [];
+  if (canonicalJson(currentPresence) !== canonicalJson(previousPresence)) return "presence";
   if (canonicalJson(projectionLifecycle(current)) !== canonicalJson(projectionLifecycle(previous))) {
     return "recovery";
   }
@@ -241,6 +244,7 @@ export function sanitizeChromeRuntimeProjection(value: unknown): unknown | undef
   if (!record(value) || !exact(value, [
     "sessionId", "generation", "revision", "state", "scope", "saveStatus",
     "canonicalLinkBase", "protected", "location", "document",
+    ...(value.activeAuthoringDraftIds === undefined ? [] : ["activeAuthoringDraftIds"]),
   ].filter((key) => key !== "location" || value.location !== undefined)) ||
     !record(value.document) ||
     !exact(value.document, ["sha256", "byteLength", "generation"]) ||
@@ -319,7 +323,7 @@ export function parseChromeRuntimeHostMessage(value: unknown): ChromeRuntimeHost
   }
   if (value.type === "invalidation") {
     return value.lane === "runtime" && exact(value, ["type", "lane", "protocolVersion", "connectionId", "revision", "generation", "reason"]) &&
-      safeInteger(value.revision) && safeInteger(value.generation) && ["revision", "generation", "save", "recovery"].includes(String(value.reason))
+      safeInteger(value.revision) && safeInteger(value.generation) && ["revision", "generation", "save", "recovery", "presence"].includes(String(value.reason))
       ? value as unknown as ChromeRuntimeHostMessage : undefined;
   }
   return undefined;

@@ -119,6 +119,16 @@ function validIdentity(value: unknown): value is HostRuntimeIdentity {
     Number.isSafeInteger(value.revision) && (value.revision as number) >= 0;
 }
 
+function activeAuthoringDraftIds(value: unknown): readonly string[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > 256 ||
+    value.some((id) => typeof id !== "string" || !ID.test(id)) ||
+    new Set(value).size !== value.length) {
+    throw new Error("The trusted host returned invalid authoring presence.");
+  }
+  return Object.freeze([...value]) as readonly string[];
+}
+
 function validHostCommand(value: unknown): value is HostRuntimeCommand {
   if (!isObject(value) || typeof value.command !== "string") return false;
   if (value.command === "review-command") {
@@ -290,7 +300,7 @@ export function createRpcHostRuntime(
     if (message.kind === "event" && message.event === "session-invalidated") {
       if (!validIdentity(message.payload) || !isObject(message.payload) ||
         (message.payload.reason !== "generation" && message.payload.reason !== "revision" &&
-          message.payload.reason !== "freshness") ||
+          message.payload.reason !== "freshness" && message.payload.reason !== "presence") ||
         (message.payload.previousGeneration !== undefined &&
           !Number.isSafeInteger(message.payload.previousGeneration))) return;
       const event: HostRuntimeInvalidation = {
@@ -511,6 +521,7 @@ export function createRpcHostRuntime(
       }
       return {
         ...value,
+        activeAuthoringDraftIds: activeAuthoringDraftIds(value.activeAuthoringDraftIds),
         session: { sessionId: value.sessionId },
         state: value.state as unknown as ReviewState,
         scope: value.scope as unknown as ProductionScope,

@@ -504,7 +504,7 @@ describe("loopback HTTP boundary", () => {
     expect((await postJson(commandUrl, { command: putDraft, attachment }, headers)).status).toBe(200);
     const crossToken = "interaction_cross_attachment_1234";
     await postJson(`${root}/begin`, { attachment: crossAttachment, interactionToken: crossToken,
-      order: 1, generation: 1 }, headers);
+      order: 1, generation: 1, draftId }, headers);
     expect((await postJson(`${root}/finalize`, { attachment: crossAttachment,
       interactionToken: crossToken, order: 2, outcome: "discarded", draftId,
       expectedDraftRevision: 0 }, headers)).status).toBe(409);
@@ -512,7 +512,9 @@ describe("loopback HTTP boundary", () => {
     await postJson(`${root}/release`, { attachment: crossAttachment,
       interactionToken: crossToken, order: 3 }, headers);
     cross.destroy();
-    await postJson(`${root}/begin`, { attachment, interactionToken: finalizedToken, order: 3, generation: 1 }, headers);
+    await postJson(`${root}/begin`, {
+      attachment, interactionToken: finalizedToken, order: 3, generation: 1,
+    }, headers);
     const finalizeBody = {
       interactionToken: finalizedToken,
       order: 4,

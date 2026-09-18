@@ -175,6 +175,7 @@ export interface AtomicSessionProjection {
   readonly sessionId: string;
   readonly documentGeneration: number;
   readonly state: ReviewState;
+  readonly activeAuthoringDraftIds: readonly string[];
   readonly destination: DurableSaveDestination;
   readonly sync: DurableSaveSync;
   readonly sourceByteLength: number;

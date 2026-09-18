@@ -166,6 +166,7 @@ interface AuthoringAnchorNavigationState {
 export interface ProductionReviewAppProps {
   readonly session: ProductionSession;
   readonly initialState: ReviewState;
+  readonly activeAuthoringDraftIds?: readonly string[];
   readonly initialSaveStatus?: SaveStatus;
   readonly scope: ProductionScope;
   readonly api: ProductionSessionApi;
@@ -1567,6 +1568,9 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       <NativePdfSelectionBridge owner={pdfCopyOwner} snapshots={pdfCopySnapshots} />
       <ReviewShell
         state={state}
+        {...(props.activeAuthoringDraftIds === undefined ? {} : {
+          activeAuthoringDraftIds: props.activeAuthoringDraftIds,
+        })}
         documentTitle={scope.documentTitle}
         generationRefreshStatus={props.generationRefreshStatus ?? 'idle'}
         locationRestoreStatus={locationRestoreStatus}

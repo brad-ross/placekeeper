@@ -130,12 +130,12 @@ describe("Chrome least-authority native runtime", () => {
       interaction: vi.fn(async (_canonicalKey, attachment, action, payload) => {
         const input = payload as {
           readonly interactionToken: string; readonly order: number; readonly generation?: number;
-          readonly outcome?: "applied" | "discarded";
+          readonly outcome?: "applied" | "discarded"; readonly draftId?: string;
         };
         if (action === "begin") {
           const result = await interactions.begin({
             ...attachment, interactionToken: input.interactionToken,
-            order: input.order, generation: input.generation!,
+            order: input.order, generation: input.generation!, draftId: input.draftId,
           });
           if (draftOwnerViewId === undefined && result.status === "accepted") {
             draftOwnerViewId = attachment.attachmentId;
@@ -146,7 +146,7 @@ describe("Chrome least-authority native runtime", () => {
           if (attachment.attachmentId !== draftOwnerViewId) return { status: "unauthorized" };
           return interactions.finalize({
             ...attachment, interactionToken: input.interactionToken,
-            order: input.order, outcome: input.outcome!, commit: commits,
+            order: input.order, outcome: input.outcome!, draftId: input.draftId!, commit: commits,
           });
         }
         if (action === "acknowledge") {
@@ -186,6 +186,7 @@ describe("Chrome least-authority native runtime", () => {
     const first = await activateOwner("owner-connection-1", "a".repeat(43));
     await expect(invoke(first, "owner-connection-1", "beginInteraction", {
       interactionToken: "interaction-owner-recovery", order: 1, generation: 1,
+      draftId: "draft-owner-recovery",
     })).resolves.toMatchObject({ type: "result", payload: { status: "accepted" } });
     await first.disconnect();
     expect(interactions.held(projection().sessionId)).toBe(false);
@@ -193,6 +194,7 @@ describe("Chrome least-authority native runtime", () => {
     const unrelated = await activateOwner("owner-connection-3", "b".repeat(43));
     await invoke(unrelated, "owner-connection-3", "beginInteraction", {
       interactionToken: "interaction-unrelated-owner", order: 1, generation: 1,
+      draftId: "draft-owner-recovery",
     });
     await expect(invoke(unrelated, "owner-connection-3", "finalizeInteraction", {
       interactionToken: "interaction-unrelated-owner", order: 2, outcome: "applied",
@@ -202,6 +204,7 @@ describe("Chrome least-authority native runtime", () => {
     const resumed = await activateOwner("owner-connection-2", "a".repeat(43));
     await invoke(resumed, "owner-connection-2", "beginInteraction", {
       interactionToken: "interaction-owner-recovery", order: 1, generation: 1,
+      draftId: "draft-owner-recovery",
     });
     expect(interactions.held(projection().sessionId)).toBe(true);
     const finalized = await invoke(resumed, "owner-connection-2", "finalizeInteraction", {

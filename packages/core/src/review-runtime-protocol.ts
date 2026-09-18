@@ -126,6 +126,7 @@ export function isReviewPanelKey(value: unknown): value is string {
 }
 
 const SAFE_RUNTIME_ID = /^[A-Za-z0-9_-]{8,128}$/u;
+const MAX_ACTIVE_AUTHORING_DRAFTS = 256;
 const SESSION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const SHA256 = /^[0-9a-f]{64}$/u;
 const FORBIDDEN_CHROME_KEY = /(?:authorization|bindProof|capability|commandId|credential|executable|headers|originalUrl|presentationId|sourceRoot|sourceUrl|syncTex|taskId)/iu;
@@ -148,6 +149,17 @@ function record(value: unknown): value is Record<string, unknown> {
 
 function safeInteger(value: unknown): value is number {
   return Number.isSafeInteger(value) && (value as number) >= 0;
+}
+
+function safeActiveAuthoringDraftIds(value: unknown): string[] | undefined {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > MAX_ACTIVE_AUTHORING_DRAFTS) return undefined;
+  const ids: string[] = [];
+  for (const candidate of value) {
+    if (typeof candidate !== "string" || !SAFE_RUNTIME_ID.test(candidate) || ids.includes(candidate)) return undefined;
+    ids.push(candidate);
+  }
+  return ids;
 }
 
 export function sanitizeReviewRuntimeDisplayString(value: unknown, limit = 255): string | undefined {
@@ -371,8 +383,9 @@ export function sanitizeChromeReviewRuntimeRequest(
     return isReadingLocationResolutionRequest(payload) ? closedJsonClone(payload) : undefined;
   }
   if (method === "beginInteraction") {
-    return hasOnlyKeys(payload, ["interactionToken", "order", "generation"]) &&
+    return hasOnlyKeys(payload, ["interactionToken", "order", "generation", "draftId"]) &&
       typeof payload.interactionToken === "string" && SAFE_RUNTIME_ID.test(payload.interactionToken) &&
+      (payload.draftId === undefined || (typeof payload.draftId === "string" && SAFE_RUNTIME_ID.test(payload.draftId))) &&
       safeInteger(payload.order) && (payload.order as number) > 0 &&
       safeInteger(payload.generation) && (payload.generation as number) > 0
       ? closedJsonClone(payload) : undefined;
@@ -444,13 +457,14 @@ export function sanitizeChromeReviewRuntimeResponse(
     for (const key of Object.keys(scopeInput)) if (FORBIDDEN_CHROME_KEY.test(key)) delete scopeInput[key];
     const scope = safeChromeScope(scopeInput);
     const saveStatus = safeChromeSaveStatus(value.saveStatus);
+    const activeAuthoringDraftIds = safeActiveAuthoringDraftIds(value.activeAuthoringDraftIds);
     const canonicalLinkBase = safeChromeCanonicalLinkBase(value.canonicalLinkBase);
     const location = value.location === undefined ? undefined : safeChromeLocation(value.location);
     const resources = value.resources;
     if (state === undefined || !record(state) || state.sessionId !== value.sessionId ||
       state.revision !== value.revision || !record(state.workflow) ||
       state.workflow.documentGeneration !== value.generation || scope === undefined ||
-      saveStatus === undefined || canonicalLinkBase === undefined ||
+      saveStatus === undefined || activeAuthoringDraftIds === undefined || canonicalLinkBase === undefined ||
       (value.location !== undefined && location === undefined) || typeof resources.document !== "string" ||
       typeof resources.pdfiumWasm !== "string" || typeof resources.worker !== "string") return undefined;
     return {
@@ -460,6 +474,7 @@ export function sanitizeChromeReviewRuntimeResponse(
       state,
       scope,
       saveStatus,
+      activeAuthoringDraftIds,
       ...(typeof value.protected === "boolean" ? { protected: value.protected } : {}),
       resources: {
         document: resources.document,

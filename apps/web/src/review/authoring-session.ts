@@ -37,6 +37,7 @@ export interface ReviewInteractionTransport {
     readonly interactionToken: string;
     readonly order: number;
     readonly generation: number;
+    readonly draftId?: string;
   }): Promise<unknown>;
   finalizeInteraction(input: {
     readonly interactionToken: string;
@@ -343,8 +344,14 @@ export async function beginReviewInteraction(
   generation: number,
   interactionToken: string = crypto.randomUUID(),
   startingOrder = 1,
+  draftId?: string,
 ): Promise<ReviewInteractionHandle> {
-  const beginRequest = { interactionToken, order: startingOrder, generation };
+  const beginRequest = {
+    interactionToken,
+    order: startingOrder,
+    generation,
+    ...(draftId === undefined ? {} : { draftId }),
+  };
   const begun = lifecycleRecord(await transport.beginInteraction(beginRequest));
   if (begun?.status !== 'accepted' || begun.generation !== generation || typeof begun.ownerViewId !== 'string') {
     const current = typeof begun?.generation === 'number' ? ` Current generation: ${begun.generation}.` : '';

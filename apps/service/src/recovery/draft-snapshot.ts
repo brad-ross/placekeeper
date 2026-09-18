@@ -27,6 +27,8 @@ import {
   trackRecoveryTemporaryPath,
 } from "./temporary-path-registry.js";
 
+const RECOVERY_ID = /^[A-Za-z0-9_-]{8,128}$/u;
+
 export interface LegacyRecoverableDraft {
   readonly schemaVersion: 1;
   readonly canonicalSourcePath: string;
@@ -141,6 +143,7 @@ export interface RecoverableDraftV3 {
     readonly sessionId: string;
     readonly attachmentId: string;
     readonly interactionToken: string;
+    readonly draftId?: string;
     readonly generation: number;
     readonly outcome: "applied" | "discarded";
     readonly reviewRevision: number;
@@ -275,6 +278,9 @@ function validInteractionReceipts(value: unknown): boolean {
     typeof (entry as { sessionId?: unknown }).sessionId === "string" &&
     typeof (entry as { attachmentId?: unknown }).attachmentId === "string" &&
     typeof (entry as { interactionToken?: unknown }).interactionToken === "string" &&
+    ((entry as { draftId?: unknown }).draftId === undefined ||
+      (typeof (entry as { draftId?: unknown }).draftId === "string" &&
+        RECOVERY_ID.test((entry as { draftId: string }).draftId))) &&
     Number.isSafeInteger((entry as { generation?: unknown }).generation) &&
     ((entry as { generation: number }).generation > 0) &&
     ((entry as { outcome?: unknown }).outcome === "applied" || (entry as { outcome?: unknown }).outcome === "discarded") &&

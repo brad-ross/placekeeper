@@ -35,6 +35,7 @@ export interface MacosRuntimeProjection {
   readonly state: unknown;
   readonly scope: unknown;
   readonly saveStatus: unknown;
+  readonly activeAuthoringDraftIds: readonly string[];
   readonly protected: boolean;
   readonly location?: unknown;
   readonly document: {
@@ -104,7 +105,7 @@ export type MacosReviewHelperResponse = ReviewEnvelope & (
       readonly type: "invalidation";
       readonly generation: number;
       readonly revision: number;
-      readonly reason: "revision" | "generation" | "save" | "recovery";
+      readonly reason: "revision" | "generation" | "save" | "recovery" | "presence";
     }
   | { readonly type: "result"; readonly method: ReviewRuntimeBrokerMethod; readonly payload: unknown }
   | { readonly type: "resource-bytes"; readonly sequence: number; readonly data: string; readonly done: boolean }
@@ -276,7 +277,7 @@ export function validMacosReviewHelperResponse(value: unknown): value is MacosRe
   if (value.type === "invalidation") {
     return exact(value, [...base, "generation", "revision", "reason"])
       && integer(value.generation) && value.generation > 0 && integer(value.revision)
-      && ["revision", "generation", "save", "recovery"].includes(String(value.reason));
+      && ["revision", "generation", "save", "recovery", "presence"].includes(String(value.reason));
   }
   if (value.type === "result") {
     return exact(value, [...base, "method", "payload"])

@@ -64,6 +64,7 @@ interface RuntimeProjection {
   readonly sessionId: string;
   readonly generation: number;
   readonly revision: number;
+  readonly activeAuthoringDraftIds: readonly string[];
   readonly state: Record<string, unknown>;
   readonly scope: Record<string, unknown>;
   readonly saveStatus: Record<string, unknown>;
@@ -268,7 +269,14 @@ function runtimeProjection(value: unknown): RuntimeProjection | undefined {
     !Number.isSafeInteger(value.document.byteLength) || !Number.isSafeInteger(value.document.generation)) {
     return undefined;
   }
-  return value as unknown as RuntimeProjection;
+  const ids = value.activeAuthoringDraftIds;
+  if (ids !== undefined && (!Array.isArray(ids) || ids.length > 256 ||
+    ids.some((id) => typeof id !== "string" || !OWNER_CLAIM.test(id)) ||
+    new Set(ids).size !== ids.length)) return undefined;
+  return {
+    ...value,
+    activeAuthoringDraftIds: Object.freeze(ids === undefined ? [] : [...ids]),
+  } as unknown as RuntimeProjection;
 }
 
 class NativeRuntimeChannel {
@@ -845,7 +853,8 @@ export function createNativeEmbeddedReview(options: NativeEmbeddedReviewOptions)
               generation: next.generation,
               revision: next.revision,
               reason: reason === "generation" ? "generation"
-                : reason === "revision" ? "revision" : "freshness",
+                : reason === "revision" ? "revision"
+                  : reason === "presence" ? "presence" : "freshness",
               ...(next.generation === previous.generation ? {} : {
                 previousGeneration: previous.generation,
               }),
@@ -1148,7 +1157,8 @@ export function createNativeEmbeddedReview(options: NativeEmbeddedReviewOptions)
                 generation: next.generation,
                 revision: next.revision,
                 reason: reason === "generation" ? "generation"
-                  : reason === "revision" ? "revision" : "freshness",
+                  : reason === "revision" ? "revision"
+                    : reason === "presence" ? "presence" : "freshness",
                 ...(next.generation === previous.generation ? {} : {
                   previousGeneration: previous.generation,
                 }),

@@ -549,6 +549,12 @@ describe("VS Code local host adapter", () => {
     const fenced = { ...request, method: "exportReviewedCopy", payload: { fence: { expectedRevision: 7, documentGeneration: 2 }, confirmPossiblyStale: true } };
     expect(parseWebviewRequest(fenced, expected, new Set())).toEqual(fenced);
     expect(parseWebviewRequest({ ...fenced, payload: { fence: { expectedRevision: 7 } } }, expected, new Set())).toBeUndefined();
+    const begin = { ...request, method: "beginInteraction", payload: {
+      interactionToken: "interaction_vscode_1234", order: 1, generation: 2,
+      draftId: "draft_vscode_live_1234",
+    } };
+    expect(parseWebviewRequest(begin, expected, new Set())).toEqual(begin);
+    expect(parseWebviewRequest({ ...begin, payload: { ...begin.payload, draftId: "unsafe draft" } }, expected, new Set())).toBeUndefined();
     const confirmation = { command: { type: "set-annotation-name", expectedRevision: 7, annotationName: "Brad Ross" }, expectedGeneration: 2 };
     for (const method of ["chooseCopy", "chooseOriginal"]) {
       const named = { ...request, method, payload: { confirmation } };

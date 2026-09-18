@@ -260,7 +260,8 @@ export class ChromeServiceRuntimeBackend implements ChromeRuntimeBackend {
       order: value.order as number,
     };
     if (action === "begin") {
-      return this.#broker.beginReviewInteraction({ ...common, generation: value.generation as number });
+      return this.#broker.beginReviewInteraction({ ...common, generation: value.generation as number,
+        ...(typeof value.draftId === "string" ? { draftId: value.draftId } : {}) });
     }
     if (action === "release") return this.#broker.releaseReviewInteraction(common);
     if (action === "acknowledge") return this.#broker.acknowledgeReviewInteraction(common);
@@ -446,11 +447,12 @@ export class ChromeServiceRuntimeBackend implements ChromeRuntimeBackend {
 
   async #projection(record: CanonicalRecord): Promise<ChromeRuntimeProjection> {
     this.#refreshRecord(record);
-    const state = this.#broker.state(record.sessionId);
+    const runtimeState = await this.#broker.runtimeState(record.sessionId);
+    const state = runtimeState?.state;
     const scope = await this.#broker.sessionScope(record.sessionId);
     const saveStatus = this.#broker.saveStatus(record.sessionId);
     const canonicalLinkBase = this.#broker.canonicalLinkBase(record.sessionId);
-    if (state === undefined || scope === undefined || saveStatus === undefined || canonicalLinkBase === undefined) {
+    if (runtimeState === undefined || state === undefined || scope === undefined || saveStatus === undefined || canonicalLinkBase === undefined) {
       throw new Error("canonical-review-unavailable");
     }
     return {
@@ -460,6 +462,7 @@ export class ChromeServiceRuntimeBackend implements ChromeRuntimeBackend {
       state,
       scope,
       saveStatus,
+      activeAuthoringDraftIds: runtimeState.activeAuthoringDraftIds,
       canonicalLinkBase,
       protected: this.#broker.chromeProtected(record.sessionId),
       location: { kind: "page", page: 1 },

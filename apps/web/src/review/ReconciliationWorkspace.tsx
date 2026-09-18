@@ -201,6 +201,7 @@ export function reattachmentInstruction(
 export interface ReconciliationWorkspaceProps {
   readonly state: ReviewState;
   readonly activeAuthoringDraftId?: string;
+  readonly activeAuthoringDraftIds?: readonly string[];
   readonly selectionUpdate: SelectionUpdate;
   readonly caretAnchor?: CaretAnchor | null;
   readonly refreshStatus: GenerationRefreshStatus;
@@ -334,6 +335,10 @@ function reconciliationReaderRecord(record: ResolutionRecord): Pick<AnnotationRe
 }
 
 export function ReconciliationWorkspace(props: ReconciliationWorkspaceProps) {
+  const activeAuthoringDraftIds = useMemo(() => new Set([
+    ...(props.activeAuthoringDraftIds ?? []),
+    ...(props.activeAuthoringDraftId === undefined ? [] : [props.activeAuthoringDraftId]),
+  ]), [props.activeAuthoringDraftId, props.activeAuthoringDraftIds]);
   const records = useMemo<readonly ResolutionRecord[]>(() => [
     ...props.state.items.filter(
       (item) => item.reconciliation !== undefined && item.reconciliation.disposition.kind !== "resolved",
@@ -355,7 +360,7 @@ export function ReconciliationWorkspace(props: ReconciliationWorkspaceProps) {
       };
     }),
     ...props.state.pendingDrafts.filter(
-      (draft) => draft.id !== props.activeAuthoringDraftId
+      (draft) => !activeAuthoringDraftIds.has(draft.id)
         || draft.status !== "protected"
         || draft.disposition.kind !== "resolved",
     ).map((draft): ResolutionRecord => {
@@ -370,7 +375,7 @@ export function ReconciliationWorkspace(props: ReconciliationWorkspaceProps) {
         stateLabel: resolutionStateLabel(draft),
       };
     }),
-  ], [props.activeAuthoringDraftId, props.state.items, props.state.pendingDrafts]);
+  ], [activeAuthoringDraftIds, props.state.items, props.state.pendingDrafts]);
   const recordsByKey = useMemo(
     () => new Map(records.map((record) => [record.key, record] as const)),
     [records],

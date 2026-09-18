@@ -1108,6 +1108,82 @@ describe("atomic live document replacement", () => {
     }), { timeout: 3_000 });
   });
 
+  it("projects only the exact authenticated live authoring draft at an equal review revision", async () => {
+    const controls = new SessionControlRegistry({ heartbeat: false });
+    const invalidated = vi.spyOn(controls, "publishStateInvalidation");
+    const value = await fixture({ controls }, "standard");
+    const owner = value.broker.replaceInteractionAttachment(value.launch.sessionId, "window-a");
+    const peer = value.broker.replaceInteractionAttachment(value.launch.sessionId, "window-b");
+    const liveDraftId = "00000000-0000-4000-8000-000000000018";
+    const abandonedDraftId = "00000000-0000-4000-8000-000000000019";
+    await value.broker.beginReviewInteraction({
+      sessionId: value.launch.sessionId,
+      attachment: owner,
+      generation: 1,
+      interactionToken: "interaction_exact_draft",
+      order: 1,
+      draftId: liveDraftId,
+    });
+    expect(await value.broker.runtimeState(value.launch.sessionId)).toMatchObject({
+      state: { revision: 0 },
+      activeAuthoringDraftIds: [],
+    });
+    const draft = (id: string, text: string) => ({
+      id,
+      ownerViewId: owner.attachmentId,
+      baseGeneration: 1,
+      revision: 0,
+      kind: "highlight" as const,
+      pageIndex: 0,
+      text,
+      anchor: anchorEvidenceFromReviewItem(selectionItem(ITEM_IDS.protected, "Original generated output")),
+      disposition: { kind: "resolved" as const, generation: 1 },
+      status: "protected" as const,
+      createdAt: "2026-09-17T12:00:00.000Z",
+      updatedAt: "2026-09-17T12:00:00.000Z",
+    });
+    await value.broker.acceptMutation(value.launch.sessionId, {
+      type: "put-draft", expectedRevision: 0, expectedDraftRevision: -1,
+      draft: draft(liveDraftId, "live draft"),
+    });
+    await value.broker.acceptMutation(value.launch.sessionId, {
+      type: "put-draft", expectedRevision: 1, expectedDraftRevision: -1,
+      draft: draft(abandonedDraftId, "same-owner abandoned draft"),
+    });
+    expect(await value.broker.runtimeState(value.launch.sessionId)).toMatchObject({
+      state: { revision: 2 },
+      activeAuthoringDraftIds: [liveDraftId],
+    });
+
+    await value.broker.beginReviewInteraction({
+      sessionId: value.launch.sessionId,
+      attachment: peer,
+      generation: 1,
+      interactionToken: "interaction_forged_draft",
+      order: 1,
+      draftId: abandonedDraftId,
+    });
+    expect((await value.broker.runtimeState(value.launch.sessionId))?.activeAuthoringDraftIds)
+      .toEqual([liveDraftId]);
+
+    invalidated.mockClear();
+    await value.broker.releaseReviewInteraction({
+      sessionId: value.launch.sessionId,
+      attachment: owner,
+      interactionToken: "interaction_exact_draft",
+      order: 2,
+    });
+    expect(await value.broker.runtimeState(value.launch.sessionId)).toMatchObject({
+      state: { revision: 2 },
+      activeAuthoringDraftIds: [],
+    });
+    expect(invalidated).toHaveBeenCalledWith(value.launch.sessionId, {
+      documentGeneration: 1,
+      reviewRevision: 2,
+      reason: "presence",
+    });
+  });
+
   it("orders overlapping editor lifecycles by attachment request time", async () => {
     const value = await fixture({}, "standard");
     const attachment = value.broker.replaceInteractionAttachment(value.launch.sessionId, "window-a");
@@ -1135,16 +1211,16 @@ describe("atomic live document replacement", () => {
     expect(value.broker.interactions.held(value.launch.sessionId)).toBe(false);
   });
 
-  it("publishes the revision that discards a protected authoring draft", async () => {
+  it("lets a generic reconciliation hold protect then finalize an adopted draft", async () => {
     const controls = new SessionControlRegistry({ heartbeat: false });
     const invalidated = vi.spyOn(controls, "publishStateInvalidation");
     const value = await fixture({ controls }, "standard");
     const attachment = value.broker.replaceInteractionAttachment(value.launch.sessionId, "window-a");
     const interactionToken = "interaction_cancelled_editor";
+    const draftId = "00000000-0000-4000-8000-000000000009";
     await value.broker.beginReviewInteraction({
       sessionId: value.launch.sessionId, attachment, generation: 1, interactionToken, order: 1,
     });
-    const draftId = "00000000-0000-4000-8000-000000000009";
     await value.broker.acceptMutation(value.launch.sessionId, {
       type: "put-draft", expectedRevision: 0, expectedDraftRevision: -1,
       draft: {
@@ -1197,10 +1273,10 @@ describe("atomic live document replacement", () => {
     }, "standard");
     const attachment = value.broker.replaceInteractionAttachment(value.launch.sessionId, "window-a");
     const interactionToken = "interaction_uncertain_cancel";
-    await value.broker.beginReviewInteraction({
-      sessionId: value.launch.sessionId, attachment, generation: 1, interactionToken, order: 1,
-    });
     const draftId = "00000000-0000-4000-8000-000000000010";
+    await value.broker.beginReviewInteraction({
+      sessionId: value.launch.sessionId, attachment, generation: 1, interactionToken, order: 1, draftId,
+    });
     await value.broker.acceptMutation(value.launch.sessionId, {
       type: "put-draft", expectedRevision: 0, expectedDraftRevision: -1,
       draft: {
@@ -1318,23 +1394,28 @@ describe("atomic live document replacement", () => {
       generation: 1,
       interactionToken,
       order: 3,
+      draftId,
     })).resolves.toMatchObject({
       status: "finalized",
       outcome: "discarded",
       reviewRevision: 2,
     });
     expect(value.broker.state(value.launch.sessionId)?.pendingDrafts).toEqual([]);
-    expect(invalidated).toHaveBeenCalledTimes(1);
     expect(invalidated).toHaveBeenCalledWith(value.launch.sessionId, {
       documentGeneration: 1,
       reviewRevision: 2,
       reason: "revision",
     });
+    expect(invalidated).toHaveBeenCalledWith(value.launch.sessionId, {
+      documentGeneration: 1,
+      reviewRevision: 2,
+      reason: "presence",
+    });
 
     await expect(value.broker.beginReviewInteraction({
-      sessionId: value.launch.sessionId, attachment, generation: 1, interactionToken, order: 4,
+      sessionId: value.launch.sessionId, attachment, generation: 1, interactionToken, order: 4, draftId,
     })).resolves.toMatchObject({ status: "finalized", reviewRevision: 2 });
-    expect(invalidated).toHaveBeenCalledTimes(1);
+    expect(invalidated).toHaveBeenCalledTimes(2);
 
     await expect(runtime.acknowledgeInteraction!({
       interactionToken,
@@ -1463,7 +1544,7 @@ describe("atomic live document replacement", () => {
       expectedRevision: number,
       order: number,
     ) => {
-      await runtime.beginInteraction!({ interactionToken, order, generation: 1 });
+      await runtime.beginInteraction!({ interactionToken, order, generation: 1, draftId });
       const commandResult = await runtime.command({
         type: "put-draft",
         expectedRevision,

@@ -226,7 +226,7 @@ function validNativeRuntimeMessage(value: unknown, runtimeId: string): boolean {
     return exact(value.payload, [
       "sessionId", "generation", "revision", "reason",
       ...(value.payload.previousGeneration === undefined ? [] : ["previousGeneration"]),
-    ]) && ["generation", "revision", "freshness"].includes(String(value.payload.reason))
+    ]) && ["generation", "revision", "freshness", "presence"].includes(String(value.payload.reason))
       && (value.payload.previousGeneration === undefined || safeInteger(value.payload.previousGeneration));
   }
   if (value.kind !== "response" || !opaqueId(value.requestId) || !runtimeIdentity(value)

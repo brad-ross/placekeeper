@@ -467,6 +467,7 @@ export function pendingRuntimeBootstrap(documentTitle: string): HostRuntimeBoots
     sessionId: PENDING_SESSION_ID,
     generation: 0,
     revision: 0,
+    activeAuthoringDraftIds: [],
     session: { sessionId: PENDING_SESSION_ID },
     state,
     scope: { documentTitle, launchSurface: "macos" },
@@ -596,6 +597,9 @@ export function RuntimeProductionReviewApp(props: {
   return <ProductionReviewApp
     session={visible.session}
     initialState={visible.state}
+    {...(visible.activeAuthoringDraftIds === undefined ? {} : {
+      activeAuthoringDraftIds: visible.activeAuthoringDraftIds,
+    })}
     initialSaveStatus={visible.saveStatus}
     scope={visible.scope}
     api={loaded === undefined ? pendingApi : props.runtime ?? pendingApi}

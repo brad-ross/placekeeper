@@ -21,7 +21,7 @@ export interface SessionControlRegistryOptions {
   readonly heartbeat?: boolean;
 }
 
-export type SessionStateInvalidationReason = "revision" | "freshness";
+export type SessionStateInvalidationReason = "revision" | "freshness" | "presence";
 
 function serverFrame(opcode: number, payload = Buffer.alloc(0)): Buffer {
   if (payload.byteLength <= 125) {

@@ -1158,14 +1158,11 @@ describe("embedded Chrome review runtime", () => {
     ]));
   });
 
-  it("publishes same-revision freshness without rematerializing identical document bytes", async () => {
+  it("publishes same-revision authoring presence without rematerializing identical document bytes", async () => {
     const initial = projection();
     const stale = {
       ...initial,
-      state: {
-        ...initial.state,
-        workflow: { ...initial.state.workflow, freshness: "possibly-stale" },
-      },
+      activeAuthoringDraftIds: ["draft_chrome_live_1234"],
     };
     const port = runtimePort({ refreshes: [stale] });
     const createObjectURL = vi.fn(() => `blob:${extensionOrigin}/document-1`);
@@ -1180,9 +1177,18 @@ describe("embedded Chrome review runtime", () => {
     port.invalidate({ generation: 1, revision: 0, reason: "recovery" });
     await vi.waitFor(() => expect(messages).toContainEqual(expect.objectContaining({
       event: "session-invalidated",
-      payload: expect.objectContaining({ reason: "freshness", generation: 1, revision: 0 }),
+      payload: expect.objectContaining({ reason: "presence", generation: 1, revision: 0 }),
     })));
     expect(createObjectURL).toHaveBeenCalledOnce();
+    session.runtimePort.postMessage({
+      protocol: "placekeeper.review-runtime", version: 3, kind: "request",
+      runtimeId: connectionId, requestId: "review-bootstrap-presence",
+      method: "bootstrap", payload: {},
+    });
+    await vi.waitFor(() => expect(messages).toContainEqual(expect.objectContaining({
+      requestId: "review-bootstrap-presence",
+      payload: expect.objectContaining({ activeAuthoringDraftIds: ["draft_chrome_live_1234"] }),
+    })));
   });
 
   it("crosses the protected recovery boundary after an accepted export", async () => {

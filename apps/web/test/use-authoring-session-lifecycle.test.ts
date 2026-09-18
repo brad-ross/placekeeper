@@ -239,16 +239,20 @@ describe('authoring interaction lifecycle ownership', () => {
       capability: attachment.capability,
     });
     const transport = attachmentOrderedInteractionTransport({}, {
-      beginInteraction: (input) => broker.begin({ ...authenticated(input), generation: input.generation }),
+      beginInteraction: (input) => broker.begin({ ...authenticated(input), generation: input.generation,
+        ...(input.draftId === undefined ? {} : { draftId: input.draftId }) }),
       finalizeInteraction: (input) => broker.finalize({
         ...authenticated(input),
         outcome: input.outcome,
+        draftId: input.draftId,
         reviewRevision: 9,
       }),
       releaseInteraction: (input) => broker.release(authenticated(input)),
       acknowledgeInteraction: (input) => broker.acknowledge(authenticated(input)),
     });
-    const active = await beginReviewInteraction(transport, 4, 'open-editor-token');
+    const active = await beginReviewInteraction(
+      transport, 4, 'open-editor-token', 1, '00000000-0000-4000-8000-000000000446',
+    );
     expect(broker.held(sessionId)).toBe(true);
 
     attachment = broker.register(sessionId, 'browser-view');

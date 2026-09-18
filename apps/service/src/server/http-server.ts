@@ -657,10 +657,11 @@ export async function startHttpServer(
       }
 
       const stateMatch = new RegExp(`^/s/(${UUID})/state$`, "u").exec(pathname);
+      const runtimeStateMatch = new RegExp(`^/s/(${UUID})/runtime-state$`, "u").exec(pathname);
       const scopeMatch = new RegExp(`^/s/(${UUID})/scope$`, "u").exec(pathname);
       const documentMatch = new RegExp(`^/s/(${UUID})/document/(${UUID})$`, "u").exec(pathname);
       const authenticatedSessionId =
-        stateMatch?.[1] ?? scopeMatch?.[1] ?? documentMatch?.[1] ?? commandMatch?.[1] ??
+        stateMatch?.[1] ?? runtimeStateMatch?.[1] ?? scopeMatch?.[1] ?? documentMatch?.[1] ?? commandMatch?.[1] ??
         saveMatch?.[1] ?? exportMatch?.[1] ?? readingLocationMatch?.[1] ?? observeMatch?.[1] ?? staleMatch?.[1] ?? syncTexMatch?.[1] ?? interactionMatch?.[1];
       if (authenticatedSessionId !== undefined) {
         const credential = bearerCredential(request);
@@ -675,6 +676,12 @@ export async function startHttpServer(
 
       if (stateMatch !== null && request.method === "GET") {
         sendJson(response, 200, broker.state(stateMatch[1]!));
+        return;
+      }
+      if (runtimeStateMatch !== null && request.method === "GET") {
+        const projection = await broker.runtimeState(runtimeStateMatch[1]!);
+        if (projection === undefined) send(response, 404, "Not found");
+        else sendJson(response, 200, projection);
         return;
       }
       if (scopeMatch !== null && request.method === "GET") {
@@ -892,7 +899,12 @@ export async function startHttpServer(
             send(response, 400, "Invalid interaction generation");
             return;
           }
-          sendJson(response, 200, await broker.beginReviewInteraction({ ...common, generation: body.generation as number }));
+          if (body.draftId !== undefined && (typeof body.draftId !== "string" || !RECOVERY_ID.test(body.draftId))) {
+            send(response, 400, "Invalid authoring draft identity");
+            return;
+          }
+          sendJson(response, 200, await broker.beginReviewInteraction({ ...common, generation: body.generation as number,
+            ...(typeof body.draftId === "string" ? { draftId: body.draftId } : {}) }));
           return;
         }
         if (action === "release") {

@@ -69,11 +69,13 @@ final class ReviewRefreshTests: XCTestCase {
         let digest = String(repeating: "a", count: 64)
         let first = MacRuntimeProjection(
             sessionID: "11111111-1111-4111-8111-111111111111", generation: 1, revision: 0,
+            activeAuthoringDraftIds: [],
             state: [:], scope: [:], saveStatus: [:], protected: false, location: nil,
             documentDigest: digest, documentByteLength: 100
         )
         let next = MacRuntimeProjection(
             sessionID: first.sessionID, generation: 2, revision: 0,
+            activeAuthoringDraftIds: [],
             state: [:], scope: [:], saveStatus: [:], protected: false, location: nil,
             documentDigest: String(repeating: "b", count: 64), documentByteLength: 101
         )
@@ -101,6 +103,7 @@ final class ReviewRefreshTests: XCTestCase {
     func testOversizedRefreshKeepsProjectionAndReportsRecoverableBudgetFailure() async {
         let first = MacRuntimeProjection(
             sessionID: "11111111-1111-4111-8111-111111111111", generation: 1, revision: 0,
+            activeAuthoringDraftIds: [],
             state: [:], scope: [:], saveStatus: [:], protected: false, location: nil,
             documentDigest: String(repeating: "a", count: 64), documentByteLength: 100
         )
@@ -150,7 +153,8 @@ final class ReviewRefreshTests: XCTestCase {
     func testConsecutiveRefreshesSerializeInstallationAndRejectRollback() async {
         func projection(_ generation: Int) -> MacRuntimeProjection {
             .init(sessionID: "11111111-1111-4111-8111-111111111111", generation: generation,
-                revision: generation, state: [:], scope: [:], saveStatus: [:], protected: false,
+                revision: generation, activeAuthoringDraftIds: [],
+                state: [:], scope: [:], saveStatus: [:], protected: false,
                 location: nil, documentDigest: String(repeating: generation == 1 ? "a" : generation == 2 ? "b" : "c", count: 64),
                 documentByteLength: 100 + generation)
         }

@@ -144,9 +144,12 @@ function validPayload(method: ReviewRuntimeMethod, payload: unknown): boolean {
   }
   if (method === "resolveReadingLocation") return isReadingLocationResolutionRequest(payload);
   if (method === "beginInteraction") {
-    return keys.length === 3 && typeof payload.interactionToken === "string" && SAFE_ID.test(payload.interactionToken) &&
+    return keys.length >= 3 && keys.length <= 4 &&
+      keys.every((key) => ["interactionToken", "order", "generation", "draftId"].includes(key)) &&
+      typeof payload.interactionToken === "string" && SAFE_ID.test(payload.interactionToken) &&
       Number.isSafeInteger(payload.order) && (payload.order as number) > 0 &&
-      Number.isSafeInteger(payload.generation) && (payload.generation as number) > 0;
+      Number.isSafeInteger(payload.generation) && (payload.generation as number) > 0 &&
+      (payload.draftId === undefined || (typeof payload.draftId === "string" && SAFE_ID.test(payload.draftId)));
   }
   if (method === "releaseInteraction" || method === "acknowledgeInteraction") {
     return keys.length === 2 && typeof payload.interactionToken === "string" && SAFE_ID.test(payload.interactionToken) &&
@@ -678,7 +681,7 @@ export function createLoopbackRuntimeClient(options: LoopbackRuntimeClientOption
         const sameGeneration = value.kind === "session-invalidated" &&
           Number.isSafeInteger(value.documentGeneration) &&
           Number.isSafeInteger(value.reviewRevision) &&
-          (value.reason === "revision" || value.reason === "freshness");
+          (value.reason === "revision" || value.reason === "freshness" || value.reason === "presence");
         if (!successor && !sameGeneration) return;
         const payload = {
           sessionId: identity.sessionId,

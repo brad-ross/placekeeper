@@ -338,6 +338,7 @@ final class ReviewBridge {
         guard candidate.generation == current.generation,
               candidate.revision == current.revision else { return false }
         let candidateLifecycle: NSDictionary = [
+            "activeAuthoringDraftIds": candidate.activeAuthoringDraftIds,
             "state": candidate.state,
             "scope": candidate.scope,
             "saveStatus": candidate.saveStatus,
@@ -345,6 +346,7 @@ final class ReviewBridge {
             "location": candidate.location ?? NSNull(),
         ]
         let currentLifecycle: NSDictionary = [
+            "activeAuthoringDraftIds": current.activeAuthoringDraftIds,
             "state": current.state,
             "scope": current.scope,
             "saveStatus": current.saveStatus,

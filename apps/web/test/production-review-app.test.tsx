@@ -822,17 +822,52 @@ describe("one production review tree", () => {
     }
   });
 
-  it("does not present the active protected authoring draft as recovery work", () => {
+  it("suppresses only exact active protected authoring drafts across peer surfaces", () => {
     const base = createReviewState({
       sessionId: "00000000-0000-4000-8000-000000000093",
       source: { fileId: "00000000-0000-4000-8000-000000000094", digest: "e".repeat(64), byteLength: 1 },
       documentGeneration: 2,
     });
     const draftId = "00000000-0000-4000-8000-000000000095";
+    const abandonedDraftId = "00000000-0000-4000-8000-000000000096";
+    const resolvedItemId = "00000000-0000-4000-8000-000000000097";
     const state = {
       ...base,
+      items: [{
+        id: resolvedItemId,
+        kind: "highlight" as const,
+        pageIndex: 0,
+        createdAt: "2026-09-16T18:00:00.000Z",
+        updatedAt: "2026-09-16T18:00:00.000Z",
+        payload: {
+          quote: "current passage",
+          prefix: "the ",
+          suffix: " remains",
+          rect: { x: 1, y: 2, width: 30, height: 8 },
+          segmentRects: [{ x: 1, y: 2, width: 30, height: 8 }],
+          comment: "Canonical resolved annotation",
+        },
+        reconciliation: {
+          schemaVersion: 1 as const,
+          ownerViewId: "view-1",
+          baseGeneration: 1,
+          revision: 1,
+          anchor: {
+            kind: "selection" as const,
+            pageIndex: 0,
+            quote: "current passage",
+            prefix: "the ",
+            suffix: " remains",
+            rect: { x: 1, y: 2, width: 30, height: 8 },
+            segmentRects: [{ x: 1, y: 2, width: 30, height: 8 }],
+          },
+          disposition: { kind: "resolved" as const, generation: 2 },
+          previousAnchors: [],
+        },
+      }],
       pendingDrafts: [{
         id: draftId,
+        targetItemId: resolvedItemId,
         ownerViewId: "view-1",
         baseGeneration: 2,
         revision: 1,
@@ -852,20 +887,54 @@ describe("one production review tree", () => {
         status: "protected" as const,
         createdAt: "2026-09-16T20:00:00.000Z",
         updatedAt: "2026-09-16T20:01:00.000Z",
+      }, {
+        id: abandonedDraftId,
+        ownerViewId: "view-1",
+        baseGeneration: 2,
+        revision: 1,
+        kind: "highlight" as const,
+        pageIndex: 0,
+        text: "Abandoned draft from the same owner",
+        anchor: {
+          kind: "selection" as const,
+          pageIndex: 0,
+          quote: "older passage",
+          prefix: "an ",
+          suffix: " remains",
+          rect: { x: 1, y: 12, width: 30, height: 8 },
+          segmentRects: [{ x: 1, y: 12, width: 30, height: 8 }],
+        },
+        disposition: { kind: "resolved" as const, generation: 2 },
+        status: "protected" as const,
+        createdAt: "2026-09-16T19:00:00.000Z",
+        updatedAt: "2026-09-16T19:01:00.000Z",
       }],
     };
 
     const html = renderToStaticMarkup(<ReconciliationWorkspace
       state={state}
-      activeAuthoringDraftId={draftId}
+      activeAuthoringDraftIds={[draftId]}
       selectionUpdate={{ kind: "cleared", generation: 2 }}
       refreshStatus="idle"
       onCommand={vi.fn()}
       renderSummary={renderReconciliationSummary}
     />);
 
-    expect(html).not.toContain("Needs attention");
     expect(html).not.toContain("Currently being edited");
+    expect(html).toContain("Abandoned draft from the same owner");
+    expect(html).not.toContain("data-reconciliation-item");
+
+    const releasedHtml = renderToStaticMarkup(<ReconciliationWorkspace
+      state={state}
+      activeAuthoringDraftIds={[]}
+      selectionUpdate={{ kind: "cleared", generation: 2 }}
+      refreshStatus="idle"
+      onCommand={vi.fn()}
+      renderSummary={renderReconciliationSummary}
+    />);
+    expect(releasedHtml).toContain("Currently being edited");
+    expect(releasedHtml).toContain("Abandoned draft from the same owner");
+    expect(releasedHtml).not.toContain("data-reconciliation-item");
 
     const frozenHtml = renderToStaticMarkup(<ReconciliationWorkspace
       state={{
@@ -877,6 +946,7 @@ describe("one production review tree", () => {
         })),
       }}
       activeAuthoringDraftId={draftId}
+      activeAuthoringDraftIds={[draftId]}
       selectionUpdate={{ kind: "cleared", generation: 3 }}
       refreshStatus="idle"
       onCommand={vi.fn()}

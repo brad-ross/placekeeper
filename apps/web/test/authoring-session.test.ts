@@ -103,6 +103,27 @@ const seed = (
 });
 
 describe('frozen authoring-session contract', () => {
+  it('carries one frozen authoring draft identity through begin and reconnect', async () => {
+    const begins: Array<{ readonly draftId?: string }> = [];
+    const transport = {
+      async beginInteraction(input: { interactionToken: string; order: number; generation: number; draftId?: string }) {
+        begins.push(input);
+        return { status: 'accepted', generation: input.generation, ownerViewId: 'attachment-a' };
+      },
+      async finalizeInteraction() { throw new Error('unused'); },
+      async releaseInteraction() { return { status: 'released' }; },
+      async acknowledgeInteraction() { throw new Error('unused'); },
+    };
+    const interaction = await beginReviewInteraction(transport, 7, 'authoring', 1, 'draft-frozen');
+    await interaction.reacquire();
+    await interaction.release();
+
+    expect(begins).toEqual([
+      expect.objectContaining({ draftId: 'draft-frozen' }),
+      expect.objectContaining({ draftId: 'draft-frozen' }),
+    ]);
+  });
+
   it('shares monotonic attachment ordering across editor surfaces and remounts', async () => {
     const calls: Array<{ method: string; order: number }> = [];
     const transport = {

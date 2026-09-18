@@ -134,14 +134,14 @@ export function createBrowserHostRuntime(session: ProductionSession): HostRuntim
         const sameGeneration = value.kind === "session-invalidated" &&
           Number.isSafeInteger(value.documentGeneration) &&
           Number.isSafeInteger(value.reviewRevision) &&
-          (value.reason === "revision" || value.reason === "freshness");
+          (value.reason === "revision" || value.reason === "freshness" || value.reason === "presence");
         if (!successor && !sameGeneration) return;
         loaded = undefined;
         const next: HostRuntimeInvalidation = {
           sessionId: session.sessionId,
           generation: value.documentGeneration as number,
           revision: value.reviewRevision as number,
-          reason: successor ? "generation" : value.reason as "revision" | "freshness",
+          reason: successor ? "generation" : value.reason as "revision" | "freshness" | "presence",
           ...(successor ? { previousGeneration: value.previousGeneration as number } : {}),
         };
         if (pendingFinalizations > 0) deferredInvalidation = next;
@@ -206,6 +206,7 @@ export function createBrowserHostRuntime(session: ProductionSession): HostRuntim
         sessionId: session.sessionId,
         generation: current.state.workflow.documentGeneration,
         revision: current.state.revision,
+        activeAuthoringDraftIds: current.activeAuthoringDraftIds,
         session,
         state: current.state,
         scope: current.scope,

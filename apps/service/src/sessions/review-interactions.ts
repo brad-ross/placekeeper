@@ -7,6 +7,8 @@ export const REVIEW_INTERACTION_CAPABILITIES = [
   "durable-finalize-receipts",
   "connection-incarnations",
 ] as const;
+const AUTHORING_DRAFT_ID = /^[A-Za-z0-9_-]{8,128}$/u;
+const MAX_ACTIVE_AUTHORING_DRAFTS = 256;
 
 export type ReviewInteractionOutcome = "applied" | "discarded";
 
@@ -24,6 +26,7 @@ export interface ReviewInteractionReceipt {
   readonly sessionId: string;
   readonly attachmentId: string;
   readonly interactionToken: string;
+  readonly draftId?: string;
   readonly generation: number;
   readonly outcome: ReviewInteractionOutcome;
   readonly reviewRevision: number;
@@ -42,8 +45,8 @@ interface AttachmentRecord {
   readonly attachmentId: string;
   readonly incarnationId: string;
   readonly capabilityHash: string;
-  readonly holds: Map<string, { readonly generation: number; lastOrder: number }>;
-  readonly terminalFences: Map<string, number>;
+  readonly holds: Map<string, { readonly generation: number; readonly draftId?: string; lastOrder: number }>;
+  readonly terminalFences: Map<string, { readonly order: number; readonly draftId?: string }>;
   lastOrder: number;
   revoked: boolean;
 }
@@ -61,6 +64,8 @@ export interface ReviewInteractionsOptions {
   readonly currentGeneration: (sessionId: string) => number | undefined;
   readonly persistReceipt?: (receipt: ReviewInteractionReceipt) => Promise<void>;
   readonly onLastRelease?: (sessionId: string) => void;
+  readonly onPresenceChange?: (sessionId: string) => void;
+  readonly reconnectPresenceMs?: number;
   readonly maxPendingReceipts?: number;
   readonly maxTerminalFences?: number;
 }
@@ -88,8 +93,20 @@ export class ReviewInteractions {
   readonly #attachments = new Map<string, AttachmentRecord>();
   readonly #attachmentByOwner = new Map<string, string>();
   readonly #receipts = new Map<string, ReviewInteractionReceipt>();
+  readonly #reconnectPresence = new Map<string, {
+    readonly ownerKey: string;
+    readonly sessionId: string;
+    readonly attachmentId: string;
+    readonly generation: number;
+    readonly draftId: string;
+    readonly timer: ReturnType<typeof setTimeout>;
+  }>();
 
   constructor(options: ReviewInteractionsOptions) {
+    const reconnectPresenceMs = options.reconnectPresenceMs ?? 5_000;
+    if (!Number.isSafeInteger(reconnectPresenceMs) || reconnectPresenceMs <= 0) {
+      throw new RangeError("reconnectPresenceMs must be a positive safe integer");
+    }
     this.#options = options;
   }
 
@@ -99,6 +116,7 @@ export class ReviewInteractions {
     const previous = previousId === undefined ? undefined : this.#attachments.get(previousId);
     const attachmentId = previous?.attachmentId ?? stableAttachmentId(stableOwner);
     if (previous !== undefined) {
+      this.#retainReconnectPresence(previous);
       previous.revoked = true;
       this.#attachments.delete(previous.attachmentId);
       this.#releaseAll(previous);
@@ -134,6 +152,33 @@ export class ReviewInteractions {
     return false;
   }
 
+  activeAuthoringClaims(sessionId: string): readonly {
+    readonly attachmentId: string;
+    readonly draftId: string;
+    readonly generation: number;
+  }[] {
+    const claims = new Map<string, { attachmentId: string; draftId: string; generation: number }>();
+    for (const record of this.#attachments.values()) {
+      if (record.revoked || record.sessionId !== sessionId) continue;
+      for (const hold of record.holds.values()) {
+        if (hold.draftId === undefined) continue;
+        const claim = { attachmentId: record.attachmentId, draftId: hold.draftId, generation: hold.generation };
+        claims.set(`${claim.attachmentId}\0${claim.draftId}\0${claim.generation}`, claim);
+      }
+    }
+    for (const presence of this.#reconnectPresence.values()) {
+      if (presence.sessionId !== sessionId) continue;
+      const projected = {
+        attachmentId: presence.attachmentId,
+        draftId: presence.draftId,
+        generation: presence.generation,
+      };
+      claims.set(`${projected.attachmentId}\0${projected.draftId}\0${projected.generation}`, projected);
+    }
+    return [...claims.values()].sort((left, right) => left.draftId.localeCompare(right.draftId))
+      .slice(0, MAX_ACTIVE_AUTHORING_DRAFTS);
+  }
+
   authorize(
     input: Pick<AuthenticatedOperation, "sessionId" | "attachmentId" | "incarnationId" | "capability">,
   ): boolean {
@@ -150,7 +195,9 @@ export class ReviewInteractions {
     this.#receipts.set(receiptKey(receipt.attachmentId, receipt.interactionToken), receipt);
     const record = this.#attachments.get(receipt.attachmentId);
     if (record?.sessionId === receipt.sessionId) {
+      const hold = record.holds.get(receipt.interactionToken);
       record.holds.delete(receipt.interactionToken);
+      if (hold?.draftId !== undefined) this.#options.onPresenceChange?.(receipt.sessionId);
       this.#notifyIfLast(receipt.sessionId);
     }
   }
@@ -159,30 +206,43 @@ export class ReviewInteractions {
     this.#receipts.delete(receiptKey(attachmentId, interactionToken));
   }
 
-  async begin(input: AuthenticatedOperation & { readonly generation: number }): Promise<LifecycleResult> {
+  async begin(input: AuthenticatedOperation & { readonly generation: number; readonly draftId?: string }): Promise<LifecycleResult> {
     const record = this.#authenticate(input);
     if (record === undefined) return { status: "unauthorized" };
+    if (input.draftId !== undefined && !AUTHORING_DRAFT_ID.test(input.draftId)) return { status: "unauthorized" };
     const receipt = this.#receipt(input);
-    if (receipt !== undefined) return receipt;
+    if (receipt !== undefined) {
+      return input.draftId === undefined || receipt.draftId === undefined || receipt.draftId === input.draftId
+        ? receipt : { status: "unauthorized" };
+    }
     const currentGeneration = this.#options.currentGeneration(input.sessionId);
     if (currentGeneration === undefined || input.generation !== currentGeneration) {
       return { status: "stale", generation: currentGeneration ?? input.generation };
     }
     const existing = record.holds.get(input.interactionToken);
     if (existing !== undefined) {
+      if (existing.draftId !== input.draftId) return { status: "unauthorized" };
       return existing.generation === input.generation
         ? { status: "accepted", generation: existing.generation, ownerViewId: record.attachmentId }
         : { status: "stale", generation: currentGeneration };
     }
     const terminalOrder = record.terminalFences.get(input.interactionToken);
     if (terminalOrder !== undefined) {
-      if (!Number.isSafeInteger(input.order) || input.order <= terminalOrder) {
+      if (terminalOrder.draftId !== undefined && terminalOrder.draftId !== input.draftId) {
+        return { status: "unauthorized" };
+      }
+      if (!Number.isSafeInteger(input.order) || input.order <= terminalOrder.order) {
         return { status: "out-of-order" };
       }
       record.terminalFences.delete(input.interactionToken);
     }
     if (!this.#acceptOrder(record, input.order)) return { status: "out-of-order" };
-    record.holds.set(input.interactionToken, { generation: input.generation, lastOrder: input.order });
+    record.holds.set(input.interactionToken, { generation: input.generation, lastOrder: input.order,
+      ...(input.draftId === undefined ? {} : { draftId: input.draftId }) });
+    if (input.draftId !== undefined) {
+      this.#consumeReconnectPresence(record.ownerKey, input.draftId, input.generation);
+      this.#options.onPresenceChange?.(record.sessionId);
+    }
     return { status: "accepted", generation: input.generation, ownerViewId: record.attachmentId };
   }
 
@@ -199,12 +259,15 @@ export class ReviewInteractions {
     }
     if (!this.#acceptActiveTokenOrder(record, hold, input.order)) return { status: "out-of-order" };
     record.holds.delete(input.interactionToken);
+    this.#recordTerminalFence(record, input.interactionToken, input.order, hold.draftId);
+    if (hold.draftId !== undefined) this.#options.onPresenceChange?.(record.sessionId);
     this.#notifyIfLast(record.sessionId);
     return { status: "released" };
   }
 
   async finalize(input: AuthenticatedOperation & {
     readonly outcome: ReviewInteractionOutcome;
+    readonly draftId: string;
     readonly reviewRevision?: number;
     readonly commit?: () => Promise<number | {
       readonly reviewRevision: number;
@@ -214,9 +277,13 @@ export class ReviewInteractions {
     const record = this.#authenticate(input);
     if (record === undefined) return { status: "unauthorized" };
     const replay = this.#receipt(input);
-    if (replay !== undefined) return replay;
+    if (replay !== undefined) {
+      return replay.draftId === undefined || replay.draftId === input.draftId
+        ? replay : { status: "unauthorized" };
+    }
     const hold = record.holds.get(input.interactionToken);
     if (hold === undefined) return { status: "missing" };
+    if (hold.draftId !== undefined && hold.draftId !== input.draftId) return { status: "unauthorized" };
     if (!Number.isSafeInteger(input.order) || input.order <= hold.lastOrder) return { status: "out-of-order" };
     const maximum = this.#options.maxPendingReceipts ?? 256;
     if (this.#receipts.size >= maximum) return { status: "backpressure" };
@@ -233,6 +300,7 @@ export class ReviewInteractions {
       sessionId: record.sessionId,
       attachmentId: record.attachmentId,
       interactionToken: input.interactionToken,
+      draftId: input.draftId,
       generation: hold.generation,
       outcome: input.outcome,
       reviewRevision: reviewRevision as number,
@@ -245,6 +313,7 @@ export class ReviewInteractions {
     record.lastOrder = Math.max(record.lastOrder, input.order);
     hold.lastOrder = input.order;
     record.holds.delete(input.interactionToken);
+    if (hold.draftId !== undefined) this.#options.onPresenceChange?.(record.sessionId);
     this.#notifyIfLast(record.sessionId);
     return receipt;
   }
@@ -265,6 +334,7 @@ export class ReviewInteractions {
   disconnect(attachmentId: string, incarnationId: string): void {
     const record = this.#attachments.get(attachmentId);
     if (record === undefined || record.incarnationId !== incarnationId) return;
+    this.#retainReconnectPresence(record);
     record.revoked = true;
     this.#attachments.delete(attachmentId);
     this.#releaseAll(record);
@@ -279,6 +349,11 @@ export class ReviewInteractions {
     }
     for (const [key, receipt] of this.#receipts) {
       if (receipt.sessionId === sessionId) this.#receipts.delete(key);
+    }
+    for (const [key, presence] of this.#reconnectPresence) {
+      if (presence.sessionId !== sessionId) continue;
+      clearTimeout(presence.timer);
+      this.#reconnectPresence.delete(key);
     }
     const ownerPrefix = `${sessionId}\0`;
     for (const ownerKey of this.#attachmentByOwner.keys()) {
@@ -316,11 +391,11 @@ export class ReviewInteractions {
     return true;
   }
 
-  #recordTerminalFence(record: AttachmentRecord, interactionToken: string, order: number): void {
+  #recordTerminalFence(record: AttachmentRecord, interactionToken: string, order: number, draftId?: string): void {
     const previous = record.terminalFences.get(interactionToken);
-    if (previous === undefined || order > previous) {
+    if (previous === undefined || order > previous.order) {
       record.terminalFences.delete(interactionToken);
-      record.terminalFences.set(interactionToken, order);
+      record.terminalFences.set(interactionToken, { order, ...(draftId === undefined ? {} : { draftId }) });
     }
     record.lastOrder = Math.max(record.lastOrder, order);
     const maximum = Math.max(0, this.#options.maxTerminalFences ?? 256);
@@ -333,8 +408,44 @@ export class ReviewInteractions {
 
   #releaseAll(record: AttachmentRecord): void {
     const hadHolds = record.holds.size > 0;
+    const hadPresence = [...record.holds.values()].some((hold) => hold.draftId !== undefined);
     record.holds.clear();
+    if (hadPresence) this.#options.onPresenceChange?.(record.sessionId);
     if (hadHolds) this.#notifyIfLast(record.sessionId);
+  }
+
+  #retainReconnectPresence(record: AttachmentRecord): void {
+    const claims = [...record.holds.values()].flatMap((hold) => hold.draftId === undefined
+      ? [] : [{ generation: hold.generation, draftId: hold.draftId }])
+      .slice(0, MAX_ACTIVE_AUTHORING_DRAFTS);
+    for (const claim of claims) {
+      const key = `${record.ownerKey}\0${claim.draftId}\0${claim.generation}`;
+      // Repeated incarnation churn cannot extend an already detached claim.
+      if (this.#reconnectPresence.has(key)) continue;
+      const timer = setTimeout(() => {
+        const current = this.#reconnectPresence.get(key);
+        if (current?.timer !== timer) return;
+        this.#reconnectPresence.delete(key);
+        this.#options.onPresenceChange?.(record.sessionId);
+      }, this.#options.reconnectPresenceMs ?? 5_000);
+      timer.unref?.();
+      this.#reconnectPresence.set(key, {
+        ownerKey: record.ownerKey,
+        sessionId: record.sessionId,
+        attachmentId: record.attachmentId,
+        generation: claim.generation,
+        draftId: claim.draftId,
+        timer,
+      });
+    }
+  }
+
+  #consumeReconnectPresence(ownerKey: string, draftId: string, generation: number): void {
+    const key = `${ownerKey}\0${draftId}\0${generation}`;
+    const presence = this.#reconnectPresence.get(key);
+    if (presence === undefined) return;
+    clearTimeout(presence.timer);
+    this.#reconnectPresence.delete(key);
   }
 
   #notifyIfLast(sessionId: string): void {

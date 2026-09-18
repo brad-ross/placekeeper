@@ -18,6 +18,8 @@ export interface HostRuntimeIdentity {
 }
 
 export interface HostRuntimeBootstrap extends HostRuntimeIdentity {
+  /** Ephemeral broker presence; absent on older hosts and never persisted in ReviewState. */
+  readonly activeAuthoringDraftIds?: readonly string[];
   readonly session: ProductionSession;
   readonly state: ReviewState;
   readonly scope: ProductionScope;
@@ -29,7 +31,7 @@ export interface HostRuntimeBootstrap extends HostRuntimeIdentity {
 }
 
 export interface HostRuntimeInvalidation extends HostRuntimeIdentity {
-  readonly reason: "generation" | "revision" | "freshness";
+  readonly reason: "generation" | "revision" | "freshness" | "presence";
   readonly previousGeneration?: number;
 }
 

@@ -252,6 +252,7 @@ export interface ReviewShellProps {
   viewer: ReviewShellViewerModel;
   workspace: ReviewShellWorkspaceModel;
   state: ReviewState;
+  readonly activeAuthoringDraftIds?: readonly string[];
   documentTitle?: string;
   generationRefreshStatus?: GenerationRefreshStatus;
   locationRestoreStatus?: LocationRestoreStatus;
@@ -1974,6 +1975,9 @@ export function ReviewShell(props: ReviewShellProps) {
             ) : <div id="review-annotation-list" aria-label="All annotations">
             <ReconciliationWorkspace
               state={props.state}
+              {...(props.activeAuthoringDraftIds === undefined ? {} : {
+                activeAuthoringDraftIds: props.activeAuthoringDraftIds,
+              })}
               {...(authoringSession === null
                 ? {}
                 : { activeAuthoringDraftId: authoringSession.draftId })}

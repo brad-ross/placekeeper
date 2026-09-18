@@ -36,6 +36,24 @@ function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+const SAFE_RUNTIME_ID = /^[A-Za-z0-9_-]{8,128}$/u;
+
+function activeAuthoringDraftIds(value: unknown): readonly string[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > 256 ||
+    value.some((id) => typeof id !== "string" || !SAFE_RUNTIME_ID.test(id)) ||
+    new Set(value).size !== value.length) {
+    throw new Error("The local review presence was invalid.");
+  }
+  return Object.freeze([...value]) as readonly string[];
+}
+
+class LocalReviewRequestError extends Error {
+  constructor(readonly status: number) {
+    super(`The local review action failed safely (${status}).`);
+  }
+}
+
 function validBootstrapUrl(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
   try {
@@ -157,7 +175,7 @@ function client(session: ProductionSession) {
           throw new Error("Review changed. Confirm the annotation name again to export the latest review.");
         }
       }
-      throw new Error(`The local review action failed safely (${response.status}).`);
+      throw new LocalReviewRequestError(response.status);
     }
     return response.json() as Promise<T>;
   };
@@ -200,19 +218,27 @@ function maintainPresence(session: ProductionSession): () => void {
 
 export async function loadProductionSession(session: ProductionSession): Promise<{
   readonly state: ReviewState;
+  readonly activeAuthoringDraftIds: readonly string[];
   readonly scope: ProductionScope;
   readonly api: ProductionSessionApi;
   readonly saveStatus: SaveStatus;
 }> {
   const { request, post } = client(session);
-  const [state, scope, saveStatus] = await Promise.all([
-    request<ReviewState>("/state"),
+  const [runtimeState, scope, saveStatus] = await Promise.all([
+    request<{ readonly state: ReviewState; readonly activeAuthoringDraftIds?: unknown }>("/runtime-state")
+      .catch(async (error: unknown) => {
+        if (!(error instanceof LocalReviewRequestError) || error.status !== 404) throw error;
+        return { state: await request<ReviewState>("/state"), activeAuthoringDraftIds: undefined };
+      }),
     request<ProductionScope>("/scope"),
     request<SaveStatus>("/save/status"),
   ]);
+  const state = runtimeState.state;
+  const activeDraftIds = activeAuthoringDraftIds(runtimeState.activeAuthoringDraftIds);
   let commandGeneration = state.workflow.documentGeneration;
   return {
     state,
+    activeAuthoringDraftIds: activeDraftIds,
     scope,
     saveStatus,
     api: {

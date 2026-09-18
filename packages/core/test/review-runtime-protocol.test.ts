@@ -16,8 +16,20 @@ import {
   sanitizeReviewRuntimeDisplayString,
 } from "../src/review-runtime-protocol.js";
 import { createReviewState } from "../src/review-model.js";
+import { chromeRuntimeProjectionChangeReason } from "../src/chrome-native-runtime-protocol.js";
 
 describe("shared review runtime protocol", () => {
+  it("detects exact authoring presence changes at an equal review revision", () => {
+    const projection = { generation: 1, revision: 4, saveStatus: {}, state: {}, activeAuthoringDraftIds: [] };
+    expect(chromeRuntimeProjectionChangeReason(projection, {
+      ...projection,
+      activeAuthoringDraftIds: ["draft_authoring_1234"],
+    })).toBe("presence");
+    expect(chromeRuntimeProjectionChangeReason(
+      { ...projection, activeAuthoringDraftIds: undefined },
+      projection,
+    )).toBeUndefined();
+  });
   it("preserves export fences and rejects malformed fences at host boundaries", () => {
     const payload = { confirmPossiblyStale: true, fence: { expectedRevision: 3, documentGeneration: 1 } };
     for (const sanitize of [sanitizeChromeReviewRuntimeRequest, sanitizeMacosReviewRuntimeRequest]) {
@@ -127,6 +139,23 @@ describe("shared review runtime protocol", () => {
   });
 
   it("accepts only closed Chrome request payloads without capability primitives", () => {
+    expect(sanitizeChromeReviewRuntimeRequest("beginInteraction", {
+      interactionToken: "interaction_token_1234",
+      order: 1,
+      generation: 1,
+      draftId: "draft_identifier_1234",
+    })).toEqual({
+      interactionToken: "interaction_token_1234",
+      order: 1,
+      generation: 1,
+      draftId: "draft_identifier_1234",
+    });
+    expect(sanitizeChromeReviewRuntimeRequest("beginInteraction", {
+      interactionToken: "interaction_token_1234",
+      order: 1,
+      generation: 1,
+      draftId: "unsafe/draft",
+    })).toBeUndefined();
     expect(sanitizeChromeReviewRuntimeRequest("chooseCopy", {
       filename: "Reviewed.pdf",
       folderSelectionId: "opaque_folder_selection_1234",
@@ -209,6 +238,7 @@ describe("shared review runtime protocol", () => {
         destination: { phase: "none", generation: 0 },
         sync: { phase: "clean", desiredRevision: 0, savedRevision: 0 },
       },
+      activeAuthoringDraftIds: ["draft_authoring_1234"],
       resources: {
         document: "blob:chrome-extension://abcdefghijklmnopabcdefghijklmnop/document",
         pdfiumWasm: "chrome-extension://abcdefghijklmnopabcdefghijklmnop/assets/pdfium.wasm",
@@ -224,6 +254,7 @@ describe("shared review runtime protocol", () => {
       scope: { documentTitle: "Paper.pdf", launchSurface: "chrome" },
       canonicalLinkBase: "placekeeper:///Papers/Paper.pdf",
       location: { kind: "page", page: 4 },
+      activeAuthoringDraftIds: ["draft_authoring_1234"],
     });
     const serialized = JSON.stringify(projected);
     for (const canary of ["must-not-cross", "/Users/reader/secret", "task-secret", "proof-secret"]) {
@@ -236,8 +267,16 @@ describe("shared review runtime protocol", () => {
     expect(macosProjected).toMatchObject({
       state: { nativeAnnotationImportDigest: "a".repeat(64), annotationName: "Brad Ross" },
       scope: { documentTitle: "Paper.pdf", launchSurface: "macos" },
+      activeAuthoringDraftIds: ["draft_authoring_1234"],
     });
     expect(macosProjected).not.toHaveProperty("canonicalLinkBase");
+    expect(sanitizeChromeReviewRuntimeResponse("bootstrap", {
+      ...bootstrap,
+      activeAuthoringDraftIds: ["draft_authoring_1234", "draft_authoring_1234"],
+    })).toBeUndefined();
+    const { activeAuthoringDraftIds: _activeAuthoringDraftIds, ...legacyBootstrap } = bootstrap;
+    expect(sanitizeChromeReviewRuntimeResponse("bootstrap", legacyBootstrap))
+      .toMatchObject({ activeAuthoringDraftIds: [] });
     for (const invalidDigest of [new String("a".repeat(64)), "A".repeat(64), "a".repeat(63)]) {
       expect(sanitizeChromeReviewRuntimeResponse("command", {
         ...state,

@@ -1,11 +1,12 @@
 import { randomUUID } from 'node:crypto';
-import { copyFile, mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { copyFile, mkdir, mkdtemp, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 
 import { PlacekeeperHost } from '../../apps/service/src/host/placekeeper-host.js';
 import { addDelete, addHighlight, addPageNote, addReplace } from '../../packages/core/src/review-commands.js';
+import { encodePlacekeeperLink } from '../../packages/core/src/placekeeper-link.js';
 
 let temporaryRoot = '';
 let sourceRoot = '';
@@ -84,6 +85,65 @@ async function chooseCopyDestination(page: Page): Promise<void> {
     .fill(`annotation-followup-${randomUUID()}.pdf`);
   await dialog.getByRole('button', { name: 'Save', exact: true }).click();
   await expect(dialog).toHaveCount(0);
+}
+
+async function openSharedAnnotationFixture(
+  owner: Page,
+  peer: Page,
+): Promise<{ sessionId: string; itemId: string; siblingId: string }> {
+  const directory = join(temporaryRoot, randomUUID());
+  await mkdir(directory);
+  const pdfPath = join(directory, basename(fixturePdf));
+  await copyFile(fixturePdf, pdfPath);
+  const launched = await host.open({ pdfPath });
+  if (!launched.ok || launched.kind === 'recovery-offered') {
+    throw new Error(`Shared annotation launch failed: ${JSON.stringify(launched)}`);
+  }
+  const peerLaunch = await host.openLink({
+    link: encodePlacekeeperLink({
+      path: await realpath(pdfPath),
+      location: { kind: 'page', page: 1 },
+    }),
+  });
+  if (!peerLaunch.ok || peerLaunch.kind === 'confirmation-required' || peerLaunch.kind === 'recovery-offered') {
+    throw new Error(`Shared annotation peer launch failed: ${JSON.stringify(peerLaunch)}`);
+  }
+  if (peerLaunch.sessionId !== launched.sessionId) {
+    throw new Error('Shared annotation peer opened a different Review Session.');
+  }
+
+  const initial = host.broker.state(launched.sessionId);
+  if (initial === undefined) throw new Error('Shared annotation review state is unavailable.');
+  await host.broker.acceptMutation(launched.sessionId, addPageNote(
+    initial, 0, { x: 84, y: 164, width: 18, height: 18 }, 'Cross-attachment editable marker.',
+  ));
+  const afterTarget = host.broker.state(launched.sessionId)!;
+  const initialIds = new Set(initial.items.map(({ id }) => id));
+  const itemId = afterTarget.items.find(({ id }) => !initialIds.has(id))?.id;
+  if (itemId === undefined) throw new Error('Shared annotation target was not created.');
+  await host.broker.acceptMutation(launched.sessionId, addPageNote(
+    afterTarget, 0, { x: 200, y: 164, width: 18, height: 18 }, 'Cross-attachment sibling marker.',
+  ));
+  const siblingId = host.broker.state(launched.sessionId)!.items
+    .find(({ id }) => id !== itemId && !initialIds.has(id))?.id;
+  if (siblingId === undefined) throw new Error('Shared annotation sibling was not created.');
+
+  await Promise.all([owner.goto(launched.url), peer.goto(peerLaunch.url)]);
+  for (const page of [owner, peer]) {
+    await expect(page.locator('[data-production-review]')).toBeVisible();
+    await expect(page.locator('[data-production-review]'))
+      .toHaveAttribute('data-initial-view-ready', 'true', { timeout: 15_000 });
+    await waitForRenderedPageImage(page);
+  }
+  await chooseCopyDestination(owner);
+  for (const page of [owner, peer]) {
+    const showWorkspace = page.getByRole('button', { name: 'Show workspace' });
+    if (await showWorkspace.count()) await showWorkspace.click();
+    await page.getByRole('tab', { name: 'Annotations', exact: true }).click();
+    await expect(page.getByRole('tab', { name: 'Annotations', exact: true }))
+      .toHaveAttribute('aria-selected', 'true');
+  }
+  return { sessionId: launched.sessionId, itemId, siblingId };
 }
 
 async function markCenter(page: Page, itemId: string): Promise<{ x: number; y: number }> {
@@ -290,6 +350,19 @@ interface CompactEditFrame {
   readonly rowActionsPaint: string;
   readonly rowEndcapPaint: string;
   readonly composerPaint: string;
+  readonly allRows: readonly {
+    readonly origin: string;
+    readonly reviewItemId: string;
+    readonly reconciliationEntry: string;
+    readonly reconciliationDraftId: string;
+    readonly text: string;
+    readonly painted: boolean;
+    readonly hovered: boolean;
+    readonly focusVisibleWithin: boolean;
+    readonly paint: string;
+    readonly actionsPaint: string;
+    readonly endcapPaint: string;
+  }[];
 }
 
 async function beginCompactEditFrameAudit(page: Page): Promise<void> {
@@ -327,6 +400,7 @@ async function beginCompactEditFrameAudit(page: Page): Promise<void> {
       const tools = document.querySelector<HTMLElement>('#review-tools-workspace');
       const selectedTab = document.querySelector<HTMLElement>('[data-workspace-mode="annotations"]');
       const rows = [...list?.querySelectorAll<HTMLElement>('li[data-review-item][data-annotation-origin="owned"]') ?? []];
+      const allRows = [...list?.querySelectorAll<HTMLElement>('li[data-annotation-origin]') ?? []];
       const ownedRow = rows.find((candidate) => candidate.innerText.includes('Compact')) ?? rows.at(-1) ?? null;
       const composer = document.querySelector<HTMLElement>('[data-comment-composer]');
       audit.samples.push({
@@ -359,6 +433,19 @@ async function beginCompactEditFrameAudit(page: Page): Promise<void> {
         rowActionsPaint: paint(ownedRow?.querySelector<HTMLElement>('.row-action-group__direct') ?? null),
         rowEndcapPaint: paint(ownedRow?.querySelector<HTMLElement>('.annotation-item__page, .annotation-item__status-icon') ?? null),
         composerPaint: paint(composer),
+        allRows: allRows.map((row) => ({
+          origin: row.dataset.annotationOrigin ?? '',
+          reviewItemId: row.dataset.reviewItem ?? '',
+          reconciliationEntry: row.dataset.reconciliationEntry ?? '',
+          reconciliationDraftId: row.dataset.reconciliationDraft ?? '',
+          text: row.innerText,
+          painted: paintedThroughAncestors(row),
+          hovered: row.matches(':hover'),
+          focusVisibleWithin: row.matches(':has(:focus-visible)'),
+          paint: paint(row),
+          actionsPaint: paint(row.querySelector<HTMLElement>('.row-action-group__direct')),
+          endcapPaint: paint(row.querySelector<HTMLElement>('.annotation-item__page, .annotation-item__status-icon')),
+        })),
       });
       if (audit.stopRequested) {
         audit.postSettleFrames -= 1;
@@ -513,16 +600,29 @@ test('does not repaint stale compact annotation content while real lifecycle req
   testInfo.setTimeout(60_000);
   await page.setViewportSize({ width: 1280, height: 900 });
   const lifecycle: Array<{ phase: 'request' | 'response'; path: string; elapsedMs: number }> = [];
+  const delayedRuntimeStateResponses: Array<{
+    path: string;
+    interceptedAt: number;
+    fulfilledAt?: number;
+  }> = [];
+  const runtimeStateChecks: Array<{
+    apply: 'unchanged' | 'changed-peek' | 'changed-tray';
+    actionStartedAt: number;
+    delayedResponseMs: number;
+  }> = [];
   const startedAt = Date.now();
+  const isRuntimeStatePath = (path: string) => (
+    path.endsWith('/runtime-state') || path.endsWith('/state')
+  );
   page.on('request', (request) => {
     const path = new URL(request.url()).pathname;
-    if (path.includes('/interactions/') || path.endsWith('/commands') || path.endsWith('/state')) {
+    if (path.includes('/interactions/') || path.endsWith('/commands') || isRuntimeStatePath(path)) {
       lifecycle.push({ phase: 'request', path: path.replace(/\/s\/[^/]+/u, '/s/:session'), elapsedMs: Date.now() - startedAt });
     }
   });
   page.on('response', (response) => {
     const path = new URL(response.url()).pathname;
-    if (path.includes('/interactions/') || path.endsWith('/commands') || path.endsWith('/state')) {
+    if (path.includes('/interactions/') || path.endsWith('/commands') || isRuntimeStatePath(path)) {
       lifecycle.push({ phase: 'response', path: path.replace(/\/s\/[^/]+/u, '/s/:session'), elapsedMs: Date.now() - startedAt });
     }
   });
@@ -534,10 +634,32 @@ test('does not repaint stale compact annotation content while real lifecycle req
     await new Promise((resolveDelay) => setTimeout(resolveDelay, 100));
     await route.continue();
   });
-  await page.route('**/s/*/state', async (route) => {
+  await page.route('**/s/*/runtime-state', async (route) => {
+    const response = await route.fetch();
+    const intercepted = {
+      path: new URL(route.request().url()).pathname.replace(/\/s\/[^/]+/u, '/s/:session'),
+      interceptedAt: Date.now(),
+    } as { path: string; interceptedAt: number; fulfilledAt?: number };
+    delayedRuntimeStateResponses.push(intercepted);
     await new Promise((resolveDelay) => setTimeout(resolveDelay, 220));
-    await route.continue();
+    intercepted.fulfilledAt = Date.now();
+    await route.fulfill({ response });
   });
+  const expectDelayedRuntimeStateAfter = async (
+    apply: 'unchanged' | 'changed-peek' | 'changed-tray',
+    actionStartedAt: number,
+  ) => {
+    await expect.poll(() => delayedRuntimeStateResponses.filter(({ interceptedAt, fulfilledAt }) => (
+      interceptedAt >= actionStartedAt && fulfilledAt !== undefined
+    )).length, { message: `${apply} Apply must consume a delayed /runtime-state response.` }).toBeGreaterThan(0);
+    const intercepted = delayedRuntimeStateResponses.find(({ interceptedAt, fulfilledAt }) => (
+      interceptedAt >= actionStartedAt && fulfilledAt !== undefined
+    ));
+    if (intercepted?.fulfilledAt === undefined) throw new Error(`${apply} runtime-state delay was not observed.`);
+    const delayedResponseMs = intercepted.fulfilledAt - intercepted.interceptedAt;
+    expect(delayedResponseMs).toBeGreaterThanOrEqual(200);
+    runtimeStateChecks.push({ apply, actionStartedAt, delayedResponseMs });
+  };
 
   const before = 'Compact before edit marker.';
   const after = 'Compact after edit marker.';
@@ -568,9 +690,11 @@ test('does not repaint stale compact annotation content while real lifecycle req
   await peek.getByRole('button', { name: 'Edit Page Note annotation on page 1' }).click();
   await expect(composer).toBeVisible();
   await beginCompactEditFrameAudit(page);
+  const unchangedApplyStartedAt = Date.now();
   await composer.getByRole('button', { name: 'Apply', exact: true }).click();
   await expect(composer).toHaveCount(0);
   await expect(peek).toContainText(before);
+  await expectDelayedRuntimeStateAfter('unchanged', unchangedApplyStartedAt);
   await page.waitForTimeout(300);
   const unchangedFrames = await finishCompactEditFrameAudit(page);
 
@@ -579,9 +703,11 @@ test('does not repaint stale compact annotation content while real lifecycle req
   await expect(composer).toBeVisible();
   await composer.getByRole('textbox', { name: 'Comment' }).fill(after);
   await beginCompactEditFrameAudit(page);
+  const changedPeekApplyStartedAt = Date.now();
   await composer.getByRole('button', { name: 'Apply', exact: true }).click();
   await expect(composer).toHaveCount(0);
   await expect(peek).toContainText(after);
+  await expectDelayedRuntimeStateAfter('changed-peek', changedPeekApplyStartedAt);
   await page.waitForTimeout(300);
   const changedFrames = await finishCompactEditFrameAudit(page);
 
@@ -595,13 +721,25 @@ test('does not repaint stale compact annotation content while real lifecycle req
   await expect(composer).toBeVisible();
   await composer.getByRole('textbox', { name: 'Comment' }).fill(afterInTray);
   await beginCompactEditFrameAudit(page);
+  const changedTrayApplyStartedAt = Date.now();
   await composer.getByRole('button', { name: 'Apply', exact: true }).click();
   await expect(composer).toHaveCount(0);
   await expect(row).toContainText(afterInTray);
+  await expectDelayedRuntimeStateAfter('changed-tray', changedTrayApplyStartedAt);
   await page.waitForTimeout(300);
   const trayChangedFrames = await finishCompactEditFrameAudit(page);
 
-  const evidence = { openingFrames, cancelFrames, unchangedFrames, changedFrames, trayChangedFrames, lifecycle };
+  expect(runtimeStateChecks.map(({ apply }) => apply)).toEqual(['unchanged', 'changed-peek', 'changed-tray']);
+  const evidence = {
+    openingFrames,
+    cancelFrames,
+    unchangedFrames,
+    changedFrames,
+    trayChangedFrames,
+    lifecycle,
+    delayedRuntimeStateResponses,
+    runtimeStateChecks,
+  };
   await testInfo.attach('compact-edit-frame-evidence.json', {
     body: JSON.stringify(evidence, null, 2),
     contentType: 'application/json',
@@ -619,6 +757,137 @@ test('does not repaint stale compact annotation content while real lifecycle req
   const postTrayChangedComposer = trayChangedFrames.filter((frame) => frame.composerCount === 0);
   expect(postTrayChangedComposer.length).toBeGreaterThan(0);
   expect(postTrayChangedComposer.every((frame) => frame.rowText.includes(afterInTray))).toBe(true);
+});
+
+test('keeps live protected drafts out of every attachment and reveals exact abandoned recovery', async ({ page, context }, testInfo) => {
+  testInfo.setTimeout(60_000);
+  await page.setViewportSize({ width: 1280, height: 900 });
+  const peer = await context.newPage();
+  await peer.setViewportSize({ width: 1280, height: 900 });
+  const { sessionId, itemId, siblingId } = await openSharedAnnotationFixture(page, peer);
+  const composer = page.getByRole('region', { name: 'Edit Page Note' });
+  const row = () => page.locator(`#review-annotation-list [data-review-item="${itemId}"]`);
+  const openEditor = async () => {
+    await row().hover();
+    const edit = row().getByRole('button', { name: 'Edit Page Note annotation on page 1' });
+    const editBounds = await edit.boundingBox();
+    if (editBounds === null) throw new Error('The original Edit action has no bounds.');
+    await edit.click();
+    await expect(composer).toBeVisible();
+    await expect.poll(() => host.broker.state(sessionId)?.pendingDrafts
+      .find(({ targetItemId }) => targetItemId === itemId)).not.toBeUndefined();
+    const draft = host.broker.state(sessionId)!.pendingDrafts
+      .find(({ targetItemId }) => targetItemId === itemId)!;
+    return { draft, editBounds };
+  };
+
+  const first = await openEditor();
+  const abandonedDraftId = randomUUID();
+  const beforeAbandoned = host.broker.state(sessionId)!;
+  const timestamp = new Date().toISOString();
+  await host.broker.acceptMutation(sessionId, {
+    type: 'put-draft',
+    expectedRevision: beforeAbandoned.revision,
+    expectedDraftRevision: -1,
+    draft: {
+      ...first.draft,
+      id: abandonedDraftId,
+      targetItemId: siblingId,
+      revision: 0,
+      text: 'Unrelated abandoned recovery marker.',
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    },
+  });
+  const abandonedRows = (surface: Page) => surface.locator(
+    `[data-reconciliation-draft="${abandonedDraftId}"]`,
+  );
+  await expect(abandonedRows(page)).toBeVisible();
+  await expect(abandonedRows(peer)).toBeVisible();
+
+  const apply = async (
+    name: 'unchanged' | 'changed',
+    activeDraftId: string,
+    editBounds: { x: number; y: number; width: number; height: number },
+    value?: string,
+  ) => {
+    if (value !== undefined) await composer.getByRole('textbox', { name: 'Comment' }).fill(value);
+    const button = composer.getByRole('button', { name: 'Apply', exact: true });
+    await button.focus();
+    await page.mouse.move(editBounds.x + editBounds.width / 2, editBounds.y + editBounds.height / 2);
+    await beginCompactEditFrameAudit(page);
+    await beginCompactEditFrameAudit(peer);
+    await button.press('Enter');
+    await expect(composer).toHaveCount(0);
+    if (value !== undefined) await expect(row()).toContainText(value);
+    await page.waitForTimeout(300);
+    const [ownerFrames, peerFrames] = await Promise.all([
+      finishCompactEditFrameAudit(page),
+      finishCompactEditFrameAudit(peer),
+    ]);
+    return { name, activeDraftId, ownerFrames, peerFrames };
+  };
+
+  const unchanged = await apply('unchanged', first.draft.id, first.editBounds);
+  const second = await openEditor();
+  const changedText = 'Cross-attachment changed marker.';
+  const changed = await apply('changed', second.draft.id, second.editBounds, changedText);
+
+  const third = await openEditor();
+  await expect(abandonedRows(peer)).toBeVisible();
+  const peerActiveBeforeRelease = await peer.locator(
+    `[data-reconciliation-draft="${third.draft.id}"]`,
+  ).count();
+  const revisionBeforeRelease = host.broker.state(sessionId)!.revision;
+  await beginCompactEditFrameAudit(peer);
+  await page.close();
+  const releasedRow = peer.locator(`[data-reconciliation-draft="${third.draft.id}"]`);
+  await expect(releasedRow).toBeVisible({ timeout: 10_000 });
+  const releaseFrames = await finishCompactEditFrameAudit(peer);
+  const revisionAfterRelease = host.broker.state(sessionId)!.revision;
+
+  const evidence = {
+    abandonedDraftId,
+    peerActiveBeforeRelease,
+    revisionBeforeRelease,
+    revisionAfterRelease,
+    unchanged,
+    changed,
+    releasedDraftId: third.draft.id,
+    releaseFrames,
+  };
+  await testInfo.attach('cross-attachment-authoring-presence-frames.json', {
+    body: JSON.stringify(evidence, null, 2),
+    contentType: 'application/json',
+  });
+
+  for (const scenario of [unchanged, changed]) {
+    for (const frames of [scenario.ownerFrames, scenario.peerFrames]) {
+      expect(frames.length).toBeGreaterThan(4);
+      expect(frames.every(({ selectedTab }) => selectedTab)).toBe(true);
+      expect(frames.every(({ listIdentity }) => listIdentity)).toBe(true);
+      expect(frames.every(({ allRows }) => allRows
+        .filter(({ reconciliationDraftId }) => reconciliationDraftId === scenario.activeDraftId)
+        .length === 0)).toBe(true);
+      expect(frames.every(({ allRows }) => allRows
+        .filter(({ reconciliationDraftId }) => reconciliationDraftId === abandonedDraftId)
+        .length === 1)).toBe(true);
+      expect(frames.every(({ allRows }) => allRows
+        .some(({ reconciliationDraftId, painted }) => (
+          reconciliationDraftId === abandonedDraftId && painted
+        )))).toBe(true);
+      expect(frames.every(({ allRows }) => allRows
+        .some(({ reviewItemId }) => reviewItemId === siblingId))).toBe(true);
+    }
+  }
+  expect(peerActiveBeforeRelease).toBe(0);
+  expect(revisionAfterRelease).toBe(revisionBeforeRelease);
+  expect(releaseFrames.some(({ allRows }) => allRows
+    .every(({ reconciliationDraftId }) => reconciliationDraftId !== third.draft.id))).toBe(true);
+  expect(releaseFrames.at(-1)?.allRows
+    .filter(({ reconciliationDraftId }) => reconciliationDraftId === third.draft.id)).toHaveLength(1);
+  expect(releaseFrames.at(-1)?.allRows
+    .filter(({ reconciliationDraftId }) => reconciliationDraftId === abandonedDraftId)).toHaveLength(1);
 });
 
 test('keeps compact card paint stable through pointer and keyboard Edit and Cancel', async ({ page, browserName }, testInfo) => {

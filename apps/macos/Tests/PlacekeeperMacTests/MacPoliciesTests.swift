@@ -549,6 +549,7 @@ final class MacPoliciesTests: XCTestCase {
             "sessionId": "11111111-1111-4111-8111-111111111111",
             "generation": 1,
             "revision": 0,
+            "activeAuthoringDraftIds": ["draft_macos_live_1234"],
             "state": ["schemaVersion": 2],
             "scope": ["documentTitle": "Paper.pdf", "launchSurface": "macos"],
             "saveStatus": ["destination": ["phase": "none", "generation": 0]],
@@ -577,6 +578,17 @@ final class MacPoliciesTests: XCTestCase {
         ) else { return XCTFail("expected an admitted reply") }
         XCTAssertEqual(value.resourceID, "resource_12345678")
         XCTAssertEqual(value.projection.sessionID, "11111111-1111-4111-8111-111111111111")
+        XCTAssertEqual(value.projection.activeAuthoringDraftIds, ["draft_macos_live_1234"])
+        var invalidPresence = admitted
+        invalidPresence["projection"] = projection.merging([
+            "activeAuthoringDraftIds": ["draft_macos_live_1234", "draft_macos_live_1234"],
+        ]) { _, new in new }
+        XCTAssertNil(MacReviewHelperReplyParser.parse(
+            invalidPresence,
+            windowID: "window_12345678",
+            attemptID: "attempt_12345678",
+            requestID: "request_12345678"
+        ))
         XCTAssertNil(MacReviewHelperReplyParser.parse(
             admitted.merging(["attemptId": "attempt_other123"]) { _, new in new },
             windowID: "window_12345678",
@@ -877,7 +889,8 @@ extension MacPoliciesTests {
     func testBridgeAllowsCommittedRevisionWhileRefreshIsPending() async {
         func projection(_ revision: Int) -> MacRuntimeProjection {
             .init(sessionID: "11111111-1111-4111-8111-111111111111", generation: 1,
-                  revision: revision, state: [:], scope: [:], saveStatus: [:], protected: false,
+                  revision: revision, activeAuthoringDraftIds: [],
+                  state: [:], scope: [:], saveStatus: [:], protected: false,
                   location: nil, documentDigest: String(repeating: "a", count: 64), documentByteLength: 100)
         }
         let helper = BridgeTestHelper()

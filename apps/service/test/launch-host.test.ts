@@ -315,6 +315,14 @@ describe("persistent launch host", () => {
       reviewSessionId: launched.sessionId,
       documentGeneration: 1,
     });
+    const runtimeStateResponse = await fetch(`${launch.origin}/s/${launched.sessionId}/runtime-state`, {
+      headers: { authorization: `Bearer ${credential}` },
+    });
+    expect(runtimeStateResponse.status).toBe(200);
+    expect(await runtimeStateResponse.json()).toMatchObject({
+      state: { sessionId: launched.sessionId, revision: 0 },
+      activeAuthoringDraftIds: [],
+    });
 
     const scope = await fetch(`${launch.origin}/s/${launched.sessionId}/scope`, {
       headers: { authorization: `Bearer ${credential}` },

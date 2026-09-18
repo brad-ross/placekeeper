@@ -37,6 +37,7 @@ export interface ChromeRuntimeProjection {
   readonly state: unknown;
   readonly scope: unknown;
   readonly saveStatus: unknown;
+  readonly activeAuthoringDraftIds?: readonly string[];
   readonly canonicalLinkBase: string;
   readonly protected: boolean;
   readonly location?: unknown;

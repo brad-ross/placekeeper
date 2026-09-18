@@ -91,6 +91,7 @@ describe("host-neutral review runtime", () => {
               sessionId,
               generation: 1,
               revision: 0,
+              activeAuthoringDraftIds: ["draft_macos_live_1234"],
               state,
               scope: {
                 documentTitle: "Paper.pdf",
@@ -126,6 +127,7 @@ describe("host-neutral review runtime", () => {
 
     const bootstrap = await runtime.bootstrap();
     expect(bootstrap).toMatchObject({
+      activeAuthoringDraftIds: ["draft_macos_live_1234"],
       scope: { documentTitle: "Paper.pdf", launchSurface: "macos" },
       resourcePolicy: {
         host: "macos",
@@ -214,6 +216,7 @@ describe("host-neutral review runtime", () => {
     let socketMessage: ((event: { data: string }) => void) | undefined;
     const fetch = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       const path = String(input);
+      if (path.endsWith("/runtime-state")) return new Response(null, { status: 404 });
       if (path.endsWith("/state")) return Response.json(state);
       if (path.endsWith("/scope")) return Response.json({ documentTitle: "paper.pdf", launchSurface: "browser" });
       if (path.endsWith("/save/status")) return Response.json({
@@ -249,6 +252,12 @@ describe("host-neutral review runtime", () => {
     const runtime = createBrowserHostRuntime({ sessionId: state.sessionId, credential: "memory-only" });
 
     await runtime.bootstrap();
+    const presenceInvalidations: HostRuntimeInvalidation[] = [];
+    runtime.subscribeInvalidations((event) => presenceInvalidations.push(event));
+    socketMessage?.({ data: JSON.stringify({
+      kind: "session-invalidated", documentGeneration: 1, reviewRevision: 0, reason: "presence",
+    }) });
+    expect(presenceInvalidations).toEqual([expect.objectContaining({ reason: "presence", revision: 0 })]);
     expect(runtime.capabilities).toEqual({ localDocumentRefresh: true });
     let settled = false;
     const admitted = runtime.beginInteraction!({
@@ -281,6 +290,10 @@ describe("host-neutral review runtime", () => {
     let socketMessage: ((event: { data: string }) => void) | undefined;
     const fetch = vi.fn(async (input: string | URL | Request, _init?: RequestInit) => {
       const path = String(input);
+      if (path.endsWith("/runtime-state")) return Response.json({
+        state,
+        activeAuthoringDraftIds: ["draft_browser_live_1234"],
+      });
       if (path.endsWith("/state")) return Response.json(state);
       if (path.endsWith("/commands")) return Response.json({ ...state, revision: 1, annotationName: "Brad Ross" });
       if (path.endsWith("/interactions/begin")) return Response.json({ status: "accepted", generation: 1 });
@@ -330,6 +343,7 @@ describe("host-neutral review runtime", () => {
       requestHeaders: { authorization: "Bearer memory-only" },
     });
     expect(bootstrap.resourcePolicy).toEqual({ host: "browser", origin: "http://127.0.0.1:43179" });
+    expect(bootstrap.activeAuthoringDraftIds).toEqual(["draft_browser_live_1234"]);
     await expect(runtime.command(setAnnotationName(state, "Brad Ross"))).resolves.toMatchObject({ annotationName: "Brad Ross", revision: 1 });
     const ownerScopedCommand = {
       type: "reattach",
@@ -531,7 +545,7 @@ describe("host-neutral review runtime", () => {
     const published: Array<{ loaded: HostRuntimeBootstrap; refreshStatus: string }> = [];
     subscribeRuntimeDocumentSource(runtime, loaded(0, "current"), (snapshot) => published.push(snapshot));
 
-    listener?.({ sessionId, generation: 1, revision: 0, reason: "freshness" });
+    listener?.({ sessionId, generation: 1, revision: 0, reason: "presence" });
     listener?.({ sessionId, generation: 1, revision: 1, reason: "revision" });
     completions[0]!(loaded(0, "possibly-stale"));
     await Promise.resolve();
@@ -542,6 +556,44 @@ describe("host-neutral review runtime", () => {
       refreshStatus: "idle",
       loaded: { generation: 1, revision: 1, state: { workflow: { freshness: "possibly-stale" } } },
     });
+  });
+
+  it("publishes equal-revision authoring presence changes as atomic bootstraps", async () => {
+    const sessionId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const loaded = (activeAuthoringDraftIds: readonly string[]): HostRuntimeBootstrap => ({
+      sessionId,
+      generation: 1,
+      revision: 0,
+      activeAuthoringDraftIds,
+      session: { sessionId },
+      state: createReviewState({
+        sessionId,
+        source: { fileId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", digest: "a".repeat(64), byteLength: 100 },
+        workflowMode: "generated-output",
+        documentGeneration: 1,
+      }),
+      scope: { documentTitle: "paper.pdf" },
+      saveStatus: { destination: { phase: "none", generation: 0 }, sync: { phase: "clean", desiredRevision: 0, savedRevision: 0 } },
+      viewerAssets: { documentUrl: "snapshot-1.pdf", pdfiumWasm: "pdfium.wasm" },
+      resourcePolicy: { host: "vscode", issued: new Set(["snapshot-1.pdf", "pdfium.wasm"]) },
+    });
+    let listener: ((event: HostRuntimeInvalidation) => void) | undefined;
+    const runtime = {
+      bootstrap: vi.fn().mockResolvedValueOnce(loaded(["draft-live"])).mockResolvedValueOnce(loaded([])),
+      subscribeInvalidations: vi.fn((next: (event: HostRuntimeInvalidation) => void) => {
+        listener = next;
+        return () => { listener = undefined; };
+      }),
+    } as unknown as HostRuntime;
+    const published: HostRuntimeBootstrap[] = [];
+    subscribeRuntimeDocumentSource(runtime, loaded([]), ({ loaded: next, refreshStatus }) => {
+      if (refreshStatus === "idle") published.push(next);
+    });
+
+    listener?.({ sessionId, generation: 1, revision: 0, reason: "presence" });
+    await vi.waitFor(() => expect(published.at(-1)?.activeAuthoringDraftIds).toEqual(["draft-live"]));
+    listener?.({ sessionId, generation: 1, revision: 0, reason: "freshness" });
+    await vi.waitFor(() => expect(published.at(-1)?.activeAuthoringDraftIds).toEqual([]));
   });
 
   it("rehydrates concurrent browser and VS Code views from one successor identity", async () => {

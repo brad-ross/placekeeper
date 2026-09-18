@@ -26,6 +26,7 @@ describe('browser interaction reconnect barrier', () => {
     let attachment = broker.register(sessionId, 'browser-view');
     const fetch = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       const path = String(input);
+      if (path.endsWith('/runtime-state')) return Response.json({ state, activeAuthoringDraftIds: [] });
       if (path.endsWith('/state')) return Response.json(state);
       if (path.endsWith('/scope')) return Response.json({ documentTitle: 'paper.pdf', launchSurface: 'browser' });
       if (path.endsWith('/save/status')) return Response.json({
@@ -48,13 +49,15 @@ describe('browser interaction reconnect barrier', () => {
           order: body.order,
         };
         if (action === 'begin') {
-          return Response.json(await broker.begin({ ...authenticated, generation: body.generation as number }));
+          return Response.json(await broker.begin({ ...authenticated, generation: body.generation as number,
+            draftId: body.draftId as string }));
         }
         if (action === 'release') return Response.json(await broker.release(authenticated));
         if (action === 'acknowledge') return Response.json(await broker.acknowledge(authenticated));
         return Response.json(await broker.finalize({
           ...authenticated,
           outcome: body.outcome as 'applied' | 'discarded',
+          draftId: body.draftId as string,
           reviewRevision: 1,
         }));
       }
@@ -103,7 +106,9 @@ describe('browser interaction reconnect barrier', () => {
       releaseInteraction: runtime.releaseInteraction,
       acknowledgeInteraction: runtime.acknowledgeInteraction,
     });
-    const editor = await beginReviewInteraction(lifecycle, 4, 'actively-typed-editor');
+    const editor = await beginReviewInteraction(
+      lifecycle, 4, 'actively-typed-editor', 1, '00000000-0000-4000-8000-000000000445',
+    );
     expect(broker.held(sessionId)).toBe(true);
 
     let reconnectBootstrap: Promise<unknown> | undefined;
