@@ -837,7 +837,7 @@ test('reuses an annotation Reference tab, reveals its mark, and leaves Main and 
   await expect(inspection).toHaveAttribute('data-peek-selected', 'true');
   await expect(inspection.locator('[data-full-annotation-reader]')).toHaveCount(0);
   await expect(inspection.locator('.reference-inspection__context')).toHaveCount(0);
-  await expect(inspection.getByRole('button', { name: 'Back' })).toHaveCount(0);
+  await expect(inspection.getByRole('button', { name: 'Back', exact: true })).toHaveCount(0);
   await expect(page.getByRole('tab', { name: 'Annotations', exact: true }))
     .toHaveAttribute('aria-selected', 'true');
   expect(await mainSnapshot(page)).toEqual(unchangedMain);
@@ -1071,26 +1071,110 @@ test('creates, edits, reopens, and deletes one shared selection annotation from 
 
 test('opens a residual source mark in References as read only, including metadata-only content', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 });
-  await openFixture(page, annotatedReferencePdf);
+  const sessionId = await openFixture(page, annotatedReferencePdf, async (id) => {
+    const state = host.broker.state(id);
+    if (!state) throw new Error('Owned-to-source inspection state is unavailable.');
+    await host.broker.acceptMutation(id, addPageNote(
+      state,
+      0,
+      { x: 400, y: 340, width: 18, height: 18 },
+      'Owned inspection replaced by a source inspection.',
+    ));
+  });
   await openAnnotations(page);
-  const sourceRow = page.locator('[data-existing-annotation]').first();
-  await expect(sourceRow).toBeVisible();
-  await sourceRow.hover();
-  await sourceRow.getByRole('button', { name: 'Open in References' }).click();
-
+  const ownedItem = host.broker.state(sessionId)!.items.find(
+    (candidate) => candidate.payload.comment === 'Owned inspection replaced by a source inspection.',
+  );
+  if (!ownedItem) throw new Error('Owned-to-source inspection item is unavailable.');
+  const ownedRow = page.locator(`[data-review-item="${ownedItem.id}"]`);
+  await ownedRow.hover();
+  await ownedRow.getByRole('button', { name: 'Open in References' }).click();
+  await expectReferenceReady(page, page.locator('[data-reference-tab][aria-selected="true"]'));
+  const inspection = page.locator('[data-reference-annotation-inspection]');
+  const ownedMark = page.locator(
+    `[data-reference-pdf-viewport] [data-owned-mark][data-review-id="${ownedItem.id}"]`,
+  ).first();
+  await expect(inspection).toHaveAttribute('data-annotation-origin', 'owned');
+  await expect(inspection).toHaveAttribute('data-peek-selected', 'true');
   const tab = page.locator('[data-reference-tab][aria-selected="true"]');
-  await expectReferenceReady(page, tab);
   const sourceMark = page.locator('[data-reference-pdf-viewport] [data-source-focus-id]').first();
   await expect(sourceMark).toBeVisible();
   await expect(sourceMark).toHaveAttribute('data-source-focus-id', /metadata-only-residual/u);
-  await page.locator(
+  const referencePage = page.locator(
     '[data-reference-pdf-viewport] .pdf-workspace__page[data-page-index="0"]',
-  ).click({ position: { x: 8, y: 8 } });
-  await expect(page.locator('[data-reference-annotation-inspection]')).toHaveCount(0);
-  await sourceMark.focus();
-  const inspection = page.locator('[data-reference-annotation-inspection]');
-  await expect(inspection).toBeVisible();
+  );
+  await referencePage.click({ position: { x: 8, y: 8 } });
+  await expect(inspection).toHaveCount(0);
+  await ownedMark.scrollIntoViewIfNeeded();
+  await expect(ownedMark).toBeInViewport();
+  const ownedPoint = await ownedMark.evaluate((element) => {
+    const referenceRoot = element.closest('[data-reference-pdf-viewport]');
+    const referenceViewport = element.closest('.reference-panel__viewport');
+    const framingViewport = element.closest('[data-viewer-framing-viewport]');
+    const referencePage = element.closest('[data-page-index]');
+    if (!referenceRoot || !referenceViewport || !framingViewport || !referencePage) {
+      throw new Error('Owned-to-source mark is outside the Reference PDF.');
+    }
+    const markBounds = element.getBoundingClientRect();
+    const rootBounds = referenceRoot.getBoundingClientRect();
+    const viewportBounds = referenceViewport.getBoundingClientRect();
+    const framingBounds = framingViewport.getBoundingClientRect();
+    const pageBounds = referencePage.getBoundingClientRect();
+    const left = Math.max(
+      markBounds.left,
+      rootBounds.left,
+      viewportBounds.left,
+      framingBounds.left,
+      pageBounds.left,
+    );
+    const top = Math.max(
+      markBounds.top,
+      rootBounds.top,
+      viewportBounds.top,
+      framingBounds.top,
+      pageBounds.top,
+    );
+    const right = Math.min(
+      markBounds.right,
+      rootBounds.right,
+      viewportBounds.right,
+      framingBounds.right,
+      pageBounds.right,
+    );
+    const bottom = Math.min(
+      markBounds.bottom,
+      rootBounds.bottom,
+      viewportBounds.bottom,
+      framingBounds.bottom,
+      pageBounds.bottom,
+    );
+    if (right <= left || bottom <= top) {
+      throw new Error('Owned-to-source mark has no visible Reference PDF intersection.');
+    }
+    return { x: (left + right) / 2, y: (top + bottom) / 2 };
+  });
+  await expectReferencePointerTargetNonInteractive(
+    page,
+    ownedPoint,
+    'Owned-to-source Reference hover',
+  );
+  await page.mouse.move(ownedPoint.x, ownedPoint.y);
+  await expect(inspection).toHaveAttribute('data-annotation-origin', 'owned');
   await expect(inspection).toHaveAttribute('data-peek-selected', 'false');
+  await expect(ownedMark).toHaveAttribute('data-corresponding', 'true');
+  await expect(ownedMark).toHaveCSS('outline-style', 'solid');
+
+  const referencePageBounds = await referencePage.boundingBox();
+  if (!referencePageBounds) throw new Error('Owned-to-source Reference page has no bounds.');
+  await page.mouse.move(referencePageBounds.x + 8, referencePageBounds.y + 8);
+  await expect(page.locator('[data-reference-pdf-viewport]'))
+    .toHaveAttribute('data-owned-mark-hovered', 'false');
+  await sourceMark.focus();
+  await expect(inspection).toBeVisible();
+  await expect(inspection).toHaveAttribute('data-annotation-origin', 'source');
+  await expect(inspection).toHaveAttribute('data-peek-selected', 'false');
+  await expect(ownedMark).toHaveAttribute('data-corresponding', 'false');
+  await expect(ownedMark).toHaveCSS('outline-style', 'none');
   await tab.focus();
   await expect(inspection).toHaveCount(0);
   await sourceMark.focus();
@@ -1111,8 +1195,9 @@ test('opens a residual source mark in References as read only, including metadat
   await expect(inspection.getByRole('button', { name: /Edit/u })).toHaveCount(0);
   await expect(inspection.getByRole('button', { name: /Remove/u })).toHaveCount(0);
   await expect(inspection.locator('[data-row-action="open-reference"]')).toBeVisible();
-  await expect(inspection.locator('[data-row-action]')).toHaveCount(1);
-  await expect(inspection.getByRole('button', { name: 'Back' })).toHaveCount(0);
+  await expect(inspection.locator('[data-row-action="locate"]')).toBeVisible();
+  await expect(inspection.getByRole('button', { name: 'Back to annotation in PDF' })).toBeVisible();
+  await expect(inspection.getByRole('button', { name: 'Back', exact: true })).toHaveCount(0);
   await inspection.getByRole('button', { name: 'Open in References' }).focus();
   await page.keyboard.press('Escape');
   await expect(inspection).toHaveCount(0);
@@ -1160,15 +1245,25 @@ test('keeps Reference card hover, selection, dismissal, and focus lifecycle moun
   });
   const directActions = inspection.locator('.row-action-group__direct');
   await expect(inspection.locator('[data-full-annotation-reader]')).toHaveCount(0);
-  await expect(inspection.getByRole('button', { name: 'Back' })).toHaveCount(0);
+  await expect(inspection.getByRole('button', { name: 'Back', exact: true })).toHaveCount(0);
 
   await editAction.focus();
   await page.keyboard.press('Escape');
   await expect(inspection).toHaveCount(0);
   await expect(mark).toBeFocused();
+  await expect(ownedMark).toHaveAttribute('data-corresponding', 'true');
+  await expect(ownedMark).toHaveCSS('outline-style', 'solid');
 
+  await activeTab.hover();
+  await activeTab.focus();
+  await expect(activeTab).toBeFocused();
+  await expect(ownedMark).toHaveAttribute('data-corresponding', 'false');
+  await expect(ownedMark).toHaveCSS('outline-style', 'none');
+
+  await mark.focus();
+  await expect(inspection).toHaveAttribute('data-peek-selected', 'false');
   await page.keyboard.press('Enter');
-  await expect(inspection).toBeVisible();
+  await expect(inspection).toHaveAttribute('data-peek-selected', 'true');
   await page.locator(
     '[data-reference-pdf-viewport] .pdf-workspace__page[data-page-index="0"]',
   ).click({ position: { x: 8, y: 8 } });
@@ -1199,12 +1294,20 @@ test('keeps Reference card hover, selection, dismissal, and focus lifecycle moun
   await page.mouse.move(hoverPoint.x, hoverPoint.y);
   await expectFirstVisibleReferenceCard(page, 'reference-hover-with-visible-main-twin');
   await expect(inspection).toBeVisible();
+  await expect(page.locator('[data-reference-pdf-viewport]'))
+    .toHaveAttribute('data-owned-mark-hovered', 'true');
+  await expect(ownedMark).toHaveAttribute('data-corresponding', 'true');
+  await expect(ownedMark).toHaveAttribute('data-active', 'false');
+  await expect(ownedMark).toHaveCSS('outline-style', 'solid');
   await expect(mainCard).toHaveCount(0);
   await expect(mainFocus).toBeFocused();
   await expect(inspection).toHaveAttribute('data-peek-selected', 'false');
   await expect(directActions).toHaveCSS('opacity', '0');
   await expect(directActions).toHaveCSS('pointer-events', 'none');
   await inspection.hover();
+  await expect(page.locator('[data-reference-pdf-viewport]'))
+    .toHaveAttribute('data-owned-mark-hovered', 'false');
+  await expect(ownedMark).toHaveAttribute('data-corresponding', 'true');
   const referenceHoldStartedAt = await page.evaluate(() => performance.now());
   await expect.poll(() => page.evaluate(({ itemId, startedAt }) => {
     const matchingCards = [...document.querySelectorAll<HTMLElement>('[data-annotation-peek]')]
@@ -1235,6 +1338,11 @@ test('keeps Reference card hover, selection, dismissal, and focus lifecycle moun
   if (!referencePageBounds) throw new Error('Reference page has no pointer bounds.');
   await page.mouse.move(referencePageBounds.x + 8, referencePageBounds.y + 8);
   await expect(inspection).toHaveCount(0);
+  await expect(page.locator('[data-reference-pdf-viewport]'))
+    .toHaveAttribute('data-owned-mark-hovered', 'false');
+  await expect(ownedMark).toHaveAttribute('data-corresponding', 'false');
+  await expect(ownedMark).toHaveAttribute('data-active', 'false');
+  await expect(ownedMark).toHaveCSS('outline-style', 'none');
 
   const selectedPoint = await currentOwnedMarkPoint();
   await page.mouse.move(selectedPoint.x, selectedPoint.y);
@@ -1246,6 +1354,8 @@ test('keeps Reference card hover, selection, dismissal, and focus lifecycle moun
   await inspection.locator('.annotation-item__excerpt-main').click();
   await expect(inspection).toBeVisible();
   await expect(inspection).toHaveAttribute('data-peek-selected', 'true');
+  await expect(ownedMark).toHaveAttribute('data-corresponding', 'true');
+  await expect(ownedMark).toHaveCSS('outline-style', 'solid');
   await page.mouse.move(referencePageBounds.x + 8, referencePageBounds.y + 8);
   const leaveStartedAt = await page.evaluate(() => performance.now());
   await expect.poll(() => page.evaluate((startedAt) => (
@@ -1253,6 +1363,10 @@ test('keeps Reference card hover, selection, dismissal, and focus lifecycle moun
       && document.querySelector('[data-reference-annotation-inspection]') !== null
   ), leaveStartedAt)).toBe(true);
   await expect(inspection).toHaveAttribute('data-peek-selected', 'true');
+  await expect(page.locator('[data-reference-pdf-viewport]'))
+    .toHaveAttribute('data-owned-mark-hovered', 'false');
+  await expect(ownedMark).toHaveAttribute('data-corresponding', 'true');
+  await expect(ownedMark).toHaveCSS('outline-style', 'solid');
   await editAction.focus();
   await page.keyboard.press('Escape');
   await expect(inspection).toHaveCount(0);
@@ -1342,7 +1456,7 @@ test('keeps long Reference card text and actions reachable in a compact viewport
   });
   await expect(inspection).toHaveAttribute('data-peek-selected', 'true');
   await expect(inspection.locator('[data-full-annotation-reader]')).toHaveCount(0);
-  await expect(inspection.getByRole('button', { name: 'Back' })).toHaveCount(0);
+  await expect(inspection.getByRole('button', { name: 'Back', exact: true })).toHaveCount(0);
   const body = inspection.locator('.annotation-item__excerpt');
   expect(await body.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(true);
   await body.evaluate((element) => { element.scrollTop = element.scrollHeight; });

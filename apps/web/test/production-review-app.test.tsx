@@ -28,8 +28,11 @@ import {
   referenceInspectionShouldReuse,
   referenceInspectionShouldPreserveSelection,
   referenceInspectionCorrespondenceAuthority,
+  correspondenceAfterReferenceInspectionDismiss,
   referenceInspectionShouldSuppressRestoredFocus,
   referenceInspectionPresentationForPhase,
+  referenceInspectionReplacementChangesAuthority,
+  selectedReferenceInspectionCorrespondence,
 } from "../src/app/ProductionReviewApp.js";
 import { referenceReturnForActiveTab } from "../src/review/reference-presentation.js";
 import {
@@ -104,6 +107,16 @@ describe('owned annotation correspondence', () => {
     expect(pinReferenceInspection(inspection, 8)).toEqual({ ...inspection, selected: true });
     expect(pinReferenceInspection(inspection, 7)).toBe(inspection);
     expect(pinReferenceInspection({ ...inspection, selected: true }, 8).selected).toBe(true);
+    expect(selectedReferenceInspectionCorrespondence(inspection)).toEqual({
+      id: 'note-a', surface: inspection.surface,
+    });
+    expect(selectedReferenceInspectionCorrespondence({
+      ...inspection,
+      identity: {
+        origin: 'source', annotationKey: 'source-a', documentGeneration: 4,
+        discoveryGeneration: 2,
+      },
+    })).toBeUndefined();
   });
 
   it('upgrades a matching source preview instead of deduplicating its activation', () => {
@@ -184,6 +197,50 @@ describe('owned annotation correspondence', () => {
       contentItemId: 'note-main-new-interaction',
     });
   });
+
+  it('clears dismissed Reference correspondence without replacing a newer Main interaction', () => {
+    const surface = {
+      kind: 'reference', documentGeneration: 4, tabIdentity: 'tab-a',
+    } as const;
+    const inspection = {
+      identity: { origin: 'owned', itemId: 'note-a' } as const,
+      surface,
+    };
+
+    expect(correspondenceAfterReferenceInspectionDismiss(inspection, {
+      id: 'note-a', surface,
+    })).toEqual({});
+    expect(correspondenceAfterReferenceInspectionDismiss(inspection, {
+      id: 'note-a', surface,
+    }, 'note-row')).toEqual({
+      viewerItemId: 'note-row', contentItemId: 'note-row',
+    });
+    expect(correspondenceAfterReferenceInspectionDismiss(inspection, {
+      id: 'note-a', surface: { kind: 'main', documentGeneration: 4 },
+    })).toBeUndefined();
+    expect(correspondenceAfterReferenceInspectionDismiss(inspection, {
+      id: 'note-b', surface,
+    })).toBeUndefined();
+  });
+
+  it('releases owned correspondence when a source inspection replaces it', () => {
+    const surface = {
+      kind: 'reference', documentGeneration: 4, tabIdentity: 'tab-a',
+    } as const;
+    const owned = { identity: { origin: 'owned', itemId: 'note-a' } as const, surface };
+    const source = {
+      identity: {
+        origin: 'source', annotationKey: 'source-b', documentGeneration: 4,
+        discoveryGeneration: 2,
+      } as const,
+      surface,
+    };
+
+    expect(referenceInspectionReplacementChangesAuthority(owned, source)).toBe(true);
+    expect(referenceInspectionReplacementChangesAuthority(source, source)).toBe(false);
+    expect(referenceInspectionReplacementChangesAuthority(null, source)).toBe(false);
+  });
+
 });
 
 describe('scope polling identity', () => {

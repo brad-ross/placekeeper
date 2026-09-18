@@ -212,6 +212,17 @@ export function pinReferenceInspection<T extends {
   return { ...inspection, selected: true };
 }
 
+export function selectedReferenceInspectionCorrespondence(
+  inspection: {
+    readonly identity: AnnotationReaderIdentity;
+    readonly surface: Extract<PdfAnnotationSurface, { readonly kind: 'reference' }>;
+  },
+): OwnedMarkCorrespondence | undefined {
+  return inspection.identity.origin === 'owned'
+    ? { id: inspection.identity.itemId, surface: inspection.surface }
+    : undefined;
+}
+
 export function referenceInspectionPresentationForPhase(
   phase: 'enter' | 'leave' | 'focus' | 'blur' | 'activate',
 ): 'preview' | 'selected' | 'dismiss' {
@@ -246,6 +257,39 @@ export function referenceInspectionCorrespondenceAuthority(
   return referenceInspectionMatches(inspection, identity, surface)
     ? { id: itemId, surface }
     : undefined;
+}
+
+export function correspondenceAfterReferenceInspectionDismiss(
+  inspection: {
+    readonly identity: AnnotationReaderIdentity;
+    readonly surface: Extract<PdfAnnotationSurface, { readonly kind: 'reference' }>;
+  },
+  published: OwnedMarkCorrespondence | undefined,
+  rowItemId?: string,
+): ReturnType<typeof ownedAnnotationCorrespondence> | undefined {
+  const ownsPublishedCorrespondence = published !== undefined
+    && referenceInspectionCorrespondenceAuthority(
+      inspection,
+      published.id,
+      published.surface,
+    ) !== undefined;
+  if (!ownsPublishedCorrespondence) return undefined;
+  return ownedAnnotationCorrespondence({
+    ...(rowItemId === undefined ? {} : { rowItemId }),
+  });
+}
+
+export function referenceInspectionReplacementChangesAuthority(
+  current: {
+    readonly identity: AnnotationReaderIdentity;
+    readonly surface: Extract<PdfAnnotationSurface, { readonly kind: 'reference' }>;
+  } | null,
+  next: {
+    readonly identity: AnnotationReaderIdentity;
+    readonly surface: Extract<PdfAnnotationSurface, { readonly kind: 'reference' }>;
+  },
+): boolean {
+  return current !== null && !referenceInspectionMatches(current, next.identity, next.surface);
 }
 
 export function referenceInspectionShouldPreserveSelection(
@@ -574,6 +618,10 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   referenceInspectionRef.current = referenceInspection;
   const referenceInspectionTokenRef = useRef(0);
   const referenceInspectionHeldTokenRef = useRef<number | null>(null);
+  const markHoverRef = useRef<OwnedMarkCorrespondence | undefined>(undefined);
+  const markFocusRef = useRef<OwnedMarkCorrespondence | undefined>(undefined);
+  const rowCorrespondenceRef = useRef<string | undefined>(undefined);
+  const publishedMarkCorrespondenceRef = useRef<OwnedMarkCorrespondence | undefined>(undefined);
   const suppressedReferenceInspectionFocusRef = useRef<{
     readonly identity: AnnotationReaderIdentity;
     readonly surface: Extract<PdfAnnotationSurface, { readonly kind: 'reference' }>;
@@ -586,14 +634,73 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       referenceInspectionDismissTimerRef.current = null;
     }
   }, []);
+  const publishCorrespondence = useCallback((preferredMark?: OwnedMarkCorrespondence) => {
+    const mark = preferredMark ?? markFocusRef.current ?? markHoverRef.current;
+    const next = ownedAnnotationCorrespondence({
+      ...(rowCorrespondenceRef.current === undefined
+        ? {}
+        : { rowItemId: rowCorrespondenceRef.current }),
+      ...(mark === undefined ? {} : { preferredMark: mark }),
+    });
+    publishedMarkCorrespondenceRef.current = mark;
+    setCorrespondingItemId(next.viewerItemId);
+    setContentCorrespondingItemId(next.contentItemId);
+  }, []);
+  const releaseReferenceInspectionCorrespondence = useCallback((
+    inspection: ProductionReferenceInspection,
+  ) => {
+    const next = correspondenceAfterReferenceInspectionDismiss(
+      inspection,
+      publishedMarkCorrespondenceRef.current,
+      rowCorrespondenceRef.current,
+    );
+    if (next === undefined) return;
+    publishedMarkCorrespondenceRef.current = undefined;
+    setCorrespondingItemId(next.viewerItemId);
+    setContentCorrespondingItemId(next.contentItemId);
+  }, []);
+  const dismissReferenceInspection = useCallback((token: number, includeSelected: boolean) => {
+    const current = referenceInspectionRef.current;
+    if (current?.token !== token || (!includeSelected && current.selected)) return false;
+    cancelReferenceInspectionDismiss();
+    referenceInspectionRef.current = null;
+    if (referenceInspectionHeldTokenRef.current === token) {
+      referenceInspectionHeldTokenRef.current = null;
+    }
+    setReferenceInspection(null);
+    releaseReferenceInspectionCorrespondence(current);
+    return true;
+  }, [cancelReferenceInspectionDismiss, releaseReferenceInspectionCorrespondence]);
+  const replaceReferenceInspection = useCallback((next: ProductionReferenceInspection) => {
+    const current = referenceInspectionRef.current;
+    cancelReferenceInspectionDismiss();
+    if (current !== null && referenceInspectionReplacementChangesAuthority(current, next)) {
+      releaseReferenceInspectionCorrespondence(current);
+    }
+    referenceInspectionHeldTokenRef.current = null;
+    referenceInspectionRef.current = next;
+    setReferenceInspection(next);
+  }, [cancelReferenceInspectionDismiss, releaseReferenceInspectionCorrespondence]);
+  const resetReferenceInspectionForDocument = useCallback(() => {
+    cancelReferenceInspectionDismiss();
+    referenceInspectionRef.current = null;
+    referenceInspectionHeldTokenRef.current = null;
+    publishedMarkCorrespondenceRef.current = undefined;
+    markHoverRef.current = undefined;
+    markFocusRef.current = undefined;
+    rowCorrespondenceRef.current = undefined;
+    setReferenceInspection(null);
+    setCorrespondingItemId(undefined);
+    setContentCorrespondingItemId(undefined);
+  }, [cancelReferenceInspectionDismiss]);
   const scheduleReferenceInspectionDismiss = useCallback((token: number) => {
     cancelReferenceInspectionDismiss();
     referenceInspectionDismissTimerRef.current = setTimeout(() => {
       referenceInspectionDismissTimerRef.current = null;
       if (referenceInspectionHeldTokenRef.current === token) return;
-      setReferenceInspection((current) => current?.token === token && !current.selected ? null : current);
+      dismissReferenceInspection(token, false);
     }, 120);
-  }, [cancelReferenceInspectionDismiss]);
+  }, [cancelReferenceInspectionDismiss, dismissReferenceInspection]);
   useEffect(() => () => cancelReferenceInspectionDismiss(), [cancelReferenceInspectionDismiss]);
   const [caretSurface, setCaretSurface] = useState<PdfAnnotationSurface>();
   const [activationRequest, setActivationRequest] = useState<{ id: string; token: number }>();
@@ -689,9 +796,6 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     canForward: false,
   });
   const [referenceViewportHost, setReferenceViewportHost] = useState<HTMLDivElement | null>(null);
-  const markHoverRef = useRef<OwnedMarkCorrespondence | undefined>(undefined);
-  const markFocusRef = useRef<OwnedMarkCorrespondence | undefined>(undefined);
-  const rowCorrespondenceRef = useRef<string | undefined>(undefined);
   const activationTokenRef = useRef(0);
   useEffect(() => {
     if (props.hostReattachRequestToken === undefined || props.hostReattachRequestToken <= 0) return;
@@ -795,6 +899,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       setContentCorrespondingItemId(undefined);
       markHoverRef.current = undefined;
       markFocusRef.current = undefined;
+      publishedMarkCorrespondenceRef.current = undefined;
       deferredReferenceOwnedHoverRef.current = null;
       rowCorrespondenceRef.current = undefined;
     }
@@ -1153,27 +1258,23 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     state.workflow.documentGeneration,
   ]);
   useEffect(() => {
-    setReferenceInspection((current) => {
-      if (current === null) return null;
-      if (
-        current.surface.documentGeneration !== state.workflow.documentGeneration
-        || current.surface.tabIdentity !== navigationState.activeTabIdentity
-        || !referencePdfIsVisible(referenceLayoutState, navigationState)
-      ) return null;
-      const identity = current.identity;
-      if (identity.origin === 'owned') {
-        return state.items.some(({ id }) => id === identity.itemId) ? current : null;
-      }
-      return existingAnnotations.status === 'ready'
+    const current = referenceInspectionRef.current;
+    if (current === null) return;
+    const identity = current.identity;
+    const remainsCurrent = current.surface.documentGeneration === state.workflow.documentGeneration
+      && current.surface.tabIdentity === navigationState.activeTabIdentity
+      && referencePdfIsVisible(referenceLayoutState, navigationState)
+      && (identity.origin === 'owned'
+        ? state.items.some(({ id }) => id === identity.itemId)
+        : existingAnnotations.status === 'ready'
         && identity.documentGeneration === state.workflow.documentGeneration
         && identity.discoveryGeneration === existingAnnotations.generation
         && existingAnnotations.items.some(
           (annotation) => existingAnnotationKey(annotation) === identity.annotationKey,
-        )
-        ? current
-        : null;
-    });
+        ));
+    if (!remainsCurrent) dismissReferenceInspection(current.token, true);
   }, [
+    dismissReferenceInspection,
     existingAnnotations,
     navigationState,
     referenceLayoutState,
@@ -1192,18 +1293,6 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     }
     if (update.kind === 'pending' || update.kind === 'ready') setPdfCopyError(null);
   }, []);
-  const publishCorrespondence = (preferredMark?: OwnedMarkCorrespondence) => {
-    const next = ownedAnnotationCorrespondence({
-      ...(rowCorrespondenceRef.current === undefined
-        ? {}
-        : { rowItemId: rowCorrespondenceRef.current }),
-      ...(markFocusRef.current === undefined ? {} : { focusedMark: markFocusRef.current }),
-      ...(markHoverRef.current === undefined ? {} : { hoveredMark: markHoverRef.current }),
-      ...(preferredMark === undefined ? {} : { preferredMark }),
-    });
-    setCorrespondingItemId(next.viewerItemId);
-    setContentCorrespondingItemId(next.contentItemId);
-  };
   useEffect(() => () => {
     navigationCoordinator.dispose();
     mainLocationRefresh.cancel();
@@ -1291,10 +1380,10 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     setPlacedPageNote(null);
     setKeyboardPageNoteActive(false);
     setKeyboardPageNoteSurface(undefined);
-    setReferenceInspection(null);
+    resetReferenceInspectionForDocument();
     setActiveItemId(undefined);
-    setCorrespondingItemId(undefined);
-  }, [mainLocationRefresh, navigationCoordinator, sourceIdentity, state.workflow.documentGeneration]);
+  }, [mainLocationRefresh, navigationCoordinator, resetReferenceInspectionForDocument,
+    sourceIdentity, state.workflow.documentGeneration]);
   useEffect(() => {
     destination.invalidatePendingDestination();
   }, [destinationDialog, sourceIdentity, state.sessionId, state.workflow.documentGeneration]);
@@ -1526,7 +1615,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
         if (location === null) return;
         cancelReferenceInspectionDismiss();
         const referenceRecovery = referenceRecoveryForSurface(surface);
-        setReferenceInspection({
+        replaceReferenceInspection({
           token: ++referenceInspectionTokenRef.current,
           identity,
           surface,
@@ -1550,7 +1639,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
           if (location === null) return;
           const referenceRecovery = referenceRecoveryForSurface(surface);
           cancelReferenceInspectionDismiss();
-          setReferenceInspection({
+          replaceReferenceInspection({
             token: ++referenceInspectionTokenRef.current,
             identity: { origin: 'owned', itemId: id },
             surface,
@@ -1600,7 +1689,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       }
       cancelReferenceInspectionDismiss();
       const referenceRecovery = referenceRecoveryForSurface(surface);
-      setReferenceInspection({
+      replaceReferenceInspection({
         token: ++referenceInspectionTokenRef.current,
         identity,
         surface,
@@ -1618,6 +1707,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     mainLocationRefresh,
     navigationCoordinator,
     referenceRecoveryForSurface,
+    replaceReferenceInspection,
     requestReverseSyncTex,
     scheduleReferenceInspectionDismiss,
   ]);
@@ -1680,7 +1770,8 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     setReferenceNavigation(navigation);
     if (navigation === null) {
       navigationCoordinator.referenceNavigationUnavailable();
-      setReferenceInspection(null);
+      const current = referenceInspectionRef.current;
+      if (current !== null) dismissReferenceInspection(current.token, true);
     }
     navigation?.replaceDocument(documentGenerationRef.current);
     if (navigation) {
@@ -1691,7 +1782,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
         waiter.resolve(waiter.documentGeneration === generation ? navigation : null);
       }
     }
-  }, [navigationCoordinator, refreshAuthoringAnchorNavigation]);
+  }, [dismissReferenceInspection, navigationCoordinator, refreshAuthoringAnchorNavigation]);
   const onExistingAnnotationsDiscovery = useCallback((result: ExistingAnnotationsDiscovery) => {
     setExistingAnnotations(result);
   }, []);
@@ -1894,7 +1985,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
           const tab = navigationStateRef.current.tabs.find(
             (candidate) => candidate.identity === tabIdentity,
           );
-          setReferenceInspection({
+          replaceReferenceInspection({
             token,
             identity,
             surface: { kind: 'reference', documentGeneration, tabIdentity },
@@ -1909,6 +2000,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     existingAnnotations,
     captureDocumentOrderPages,
     navigationCoordinator,
+    replaceReferenceInspection,
     referencesEnabled,
     viewerState.totalPages,
   ]);
@@ -2193,15 +2285,11 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
         onOpenAnnotationReference={openAnnotationReference}
         referenceInspection={referenceInspection}
         onReferenceInspectionDismiss={(token, restoreFocus) => {
-          cancelReferenceInspectionDismiss();
           const current = referenceInspectionRef.current;
           suppressedReferenceInspectionFocusRef.current = restoreFocus === true && current?.token === token
             ? { identity: current.identity, surface: current.surface, expiresAt: Date.now() + 500 }
             : null;
-          if (referenceInspectionHeldTokenRef.current === token) {
-            referenceInspectionHeldTokenRef.current = null;
-          }
-          setReferenceInspection((current) => current?.token === token ? null : current);
+          dismissReferenceInspection(token, true);
         }}
         onReferenceInspectionHoldChange={(token, held) => {
           if (referenceInspectionRef.current?.token !== token) return;
@@ -2210,11 +2298,14 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
           else if (!referenceInspectionRef.current.selected) scheduleReferenceInspectionDismiss(token);
         }}
         onReferenceInspectionSelect={(token) => {
-          if (referenceInspectionRef.current?.token !== token) return;
+          const current = referenceInspectionRef.current;
+          if (current?.token !== token) return;
           cancelReferenceInspectionDismiss();
-          setReferenceInspection((current) => current === null
-            ? null
-            : pinReferenceInspection(current, token));
+          const selected = pinReferenceInspection(current, token);
+          referenceInspectionRef.current = selected;
+          setReferenceInspection(selected);
+          const selectedCorrespondence = selectedReferenceInspectionCorrespondence(selected);
+          if (selectedCorrespondence !== undefined) publishCorrespondence(selectedCorrespondence);
         }}
         activeItemId={activeItemId ?? null}
         {...(contentCorrespondingItemId === undefined
