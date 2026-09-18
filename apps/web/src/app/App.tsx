@@ -846,7 +846,11 @@ export function App({
       const ownedGesture = new OwnedMarkPointerGesture();
       const clickGesture = new ViewerPrimaryClickGesture();
       const pointerSurfaces = new Map<number, PdfAnnotationSurface>();
-      let hoveredOwnedId: string | undefined;
+      let hoveredOwned: {
+        readonly id: string;
+        readonly pageIndex: number;
+        readonly surface: PdfAnnotationSurface;
+      } | undefined;
       for (const page of document.pages) {
         const pointerId = page.index + 1;
         const pageGeometry = () => ownedGeometryByPageRef.current.get(page.index) ?? [];
@@ -860,14 +864,19 @@ export function App({
           id: string | undefined,
           surface: PdfAnnotationSurface | null = inputSurface(),
         ) => {
-          if (hoveredOwnedId === id) return;
-          if (hoveredOwnedId) {
+          if (id !== undefined && surface !== null
+            && hoveredOwned?.id === id
+            && hoveredOwned.pageIndex === page.index
+            && samePdfAnnotationSurface(hoveredOwned.surface, surface)) return;
+          if (hoveredOwned !== undefined) {
             publish({
               type: 'owned-mark',
-              value: { id: hoveredOwnedId, phase: 'leave', pageIndex: page.index },
-            }, surface);
+              value: { id: hoveredOwned.id, phase: 'leave', pageIndex: hoveredOwned.pageIndex },
+            }, hoveredOwned.surface);
           }
-          hoveredOwnedId = id;
+          hoveredOwned = id === undefined || surface === null
+            ? undefined
+            : { id, pageIndex: page.index, surface };
           root()?.setAttribute('data-owned-mark-hovered', id ? 'true' : 'false');
           if (id) publish({
             type: 'owned-mark',

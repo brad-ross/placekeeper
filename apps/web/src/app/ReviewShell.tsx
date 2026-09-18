@@ -70,7 +70,7 @@ import {
   projectOwnedAnnotationReader,
   type AnnotationReaderIdentity,
 } from '../review/annotation-reader.js';
-import { AnnotationPeek } from '../review/AnnotationPeek.js';
+import { AnnotationPeek, AnnotationRecordPeek } from '../review/AnnotationPeek.js';
 import { CommentComposer } from '../review/CommentComposer.js';
 import {
   ContextActionPalette,
@@ -250,6 +250,7 @@ export interface ReviewShellReferenceInspection {
   readonly pageIndex: number;
   readonly placement?: ViewerClientPlacement;
   readonly referenceRecovery?: AuthoringReferenceRecovery;
+  readonly selected?: boolean;
 }
 
 export interface ReviewShellProps {
@@ -289,7 +290,8 @@ export interface ReviewShellProps {
   accessibilityTransition?: AccessibilityTransitionEffect;
   onOpenAnnotationReference?(identity: AnnotationReaderIdentity): void;
   referenceInspection?: ReviewShellReferenceInspection | null;
-  onReferenceInspectionDismiss?(token: number): void;
+  onReferenceInspectionDismiss?(token: number, restoreFocus?: boolean): void;
+  onReferenceInspectionHoldChange?(token: number, held: boolean): void;
   children?: ReactNode;
 }
 
@@ -318,6 +320,21 @@ export function referenceInspectionShouldDismissForKey(
   isComposing: boolean,
 ): boolean {
   return key === 'Escape' && !isComposing;
+}
+
+export function referenceInspectionShouldDismissForClick(
+  target: Pick<Element, 'closest'>,
+): boolean {
+  return target.closest('[data-annotation-surface="reference"]') !== null
+    && target.closest([
+      '[data-reference-annotation-inspection]',
+      '[data-annotation-surface="reference"][data-owned-mark-hovered="true"]',
+      '[data-owned-focus-id]',
+      '[data-source-focus-id]',
+      '[data-owned-mark]',
+      '[data-source-reader-mark]',
+      '[data-owned-native-geometry]',
+    ].join(', ')) === null;
 }
 
 export function referenceInspectionAuthoringOrigin(
@@ -660,6 +677,9 @@ export function ReviewShell(props: ReviewShellProps) {
     markUserIntent: workspaceFraming.markUserIntent,
     onNavigate: props.onNavigate, onNavigateExisting: props.onNavigateExisting,
   });
+  const referenceInspectionOwnedItem = referenceAnnotationReaderRecord?.origin === 'owned'
+    ? props.state.items.find(({ id }) => id === referenceAnnotationReaderRecord.identity.itemId)
+    : undefined;
 
   const pendingOpeningFitRef = useRef(false);
   const priorWorkspaceLayoutRef = useRef({
@@ -806,12 +826,6 @@ export function ReviewShell(props: ReviewShellProps) {
           ),
         }),
   });
-  const referenceInspectionContext = props.referenceInspection === null
-    || props.referenceInspection === undefined
-    ? undefined
-    : referenceTabs.find(
-        ({ identity }) => identity === props.referenceInspection?.surface.tabIdentity,
-      );
   const referenceInspectionReturnTargetRef = useRef<HTMLElement | null>(null);
   useLayoutEffect(() => {
     const inspection = props.referenceInspection;
@@ -827,7 +841,7 @@ export function ReviewShell(props: ReviewShellProps) {
     const inspection = props.referenceInspection;
     if (inspection === null || inspection === undefined) return;
     const original = referenceInspectionReturnTargetRef.current;
-    props.onReferenceInspectionDismiss?.(inspection.token);
+    props.onReferenceInspectionDismiss?.(inspection.token, restoreFocus);
     if (!restoreFocus) return;
     requestAnimationFrame(() => {
       const activeTab = shellRef.current?.querySelector<HTMLElement>(
@@ -1617,15 +1631,11 @@ export function ReviewShell(props: ReviewShellProps) {
       }
       : undefined;
     const referenceContext = authoringSession.origin.referenceRecovery;
-    const contextLabel = referenceContext === undefined
-      ? undefined
-      : `${referenceContext.label} · Page ${authoringPageIndex + 1}`;
     const canExposeReferencePassage = referenceContext !== undefined
       && (authoringPlacement?.kind === 'bottom-sheet' || passageExposedToken === authoringSession.token)
       && anchorNavigation !== undefined;
     return <CommentComposer
       title={authoringSession.semantics.title}
-      {...(contextLabel === undefined ? {} : { contextLabel })}
       saveLabel={authoringSession.semantics.primaryLabel}
       optional={authoringSession.semantics.optional}
       allowWhitespace={authoringSession.semantics.allowWhitespace}
@@ -1710,6 +1720,14 @@ export function ReviewShell(props: ReviewShellProps) {
         if (pointerScrollRef.current?.id === event.pointerId) pointerScrollRef.current = undefined;
       }}
       onClickCapture={(event) => {
+        if (
+          authoringSessionRef.current === null
+          && props.referenceInspection !== null
+          && props.referenceInspection !== undefined
+          && event.button === 0
+          && event.target instanceof Element
+          && referenceInspectionShouldDismissForClick(event.target)
+        ) dismissReferenceInspection(false);
         if (
           authoringSessionRef.current === null
           && (peekItemId !== undefined || annotationReaderSession?.origin === 'peek')
@@ -1882,42 +1900,47 @@ export function ReviewShell(props: ReviewShellProps) {
             && props.referenceInspection !== null
             && props.referenceInspection !== undefined
             && referenceAnnotationReaderRecord !== null ? (
-              <aside
-                ref={setReferenceInspectionSurfaceElement}
-                className="annotation-peek annotation-peek--reader annotation-peek--reference-reader"
-                data-reference-annotation-inspection={props.referenceInspection.token}
-                data-reference-tab-identity={props.referenceInspection.surface.tabIdentity}
-                data-placement={referenceInspectionPlacement?.kind}
-                aria-label={referenceInspectionContext === undefined
-                  ? `Reference annotation, page ${props.referenceInspection.pageIndex + 1}`
-                  : `${referenceInspectionContext.label}, ${referenceInspectionContext.pageContext}`}
-                style={referenceInspectionPlacement?.style}
-              >
-                <p className="reference-inspection__context">
-                  {referenceInspectionContext === undefined
-                    ? `Reference, Page ${props.referenceInspection.pageIndex + 1}`
-                    : `${referenceInspectionContext.label}, ${referenceInspectionContext.pageContext}`}
-                </p>
-                <FullAnnotationReader
-                  record={referenceAnnotationReaderRecord}
-                  onBack={() => dismissReferenceInspection(true)}
-                  {...(props.onOpenAnnotationReference === undefined ? {} : {
-                    onOpenReference: () => props.onOpenAnnotationReference?.(
-                      props.referenceInspection!.identity,
-                    ),
-                  })}
-                  {...(referenceAnnotationReaderSourceNavigation === undefined
-                    ? {}
-                    : { sourceNavigation: referenceAnnotationReaderSourceNavigation })}
-                  {...(referenceAnnotationReaderRecord.origin !== 'owned'
-                    || !referenceAnnotationReaderRecord.mutable
-                    ? {}
-                    : {
+              <AnnotationRecordPeek
+                record={referenceAnnotationReaderRecord}
+                {...(referenceInspectionOwnedItem === undefined
+                  ? {}
+                  : { item: referenceInspectionOwnedItem })}
+                selected={props.referenceInspection.selected ?? true}
+                className="annotation-peek--reference-inspection"
+                surfaceRef={setReferenceInspectionSurfaceElement}
+                {...(referenceInspectionPlacement === undefined
+                  ? {}
+                  : { style: referenceInspectionPlacement.style })}
+                inspectionToken={props.referenceInspection.token}
+                referenceTabIdentity={props.referenceInspection.surface.tabIdentity}
+                {...(referenceInspectionPlacement === undefined
+                  ? {}
+                  : { placementKind: referenceInspectionPlacement.kind })}
+                onHoldChange={(held) => props.onReferenceInspectionHoldChange?.(
+                  props.referenceInspection!.token,
+                  held,
+                )}
+                {...(props.onOpenAnnotationReference === undefined ? {} : {
+                  onOpenReference: () => props.onOpenAnnotationReference?.(
+                    props.referenceInspection!.identity,
+                  ),
+                })}
+                {...(referenceAnnotationReaderSourceNavigation?.visibility !== 'outside'
+                  ? {}
+                  : {
+                      showSourceReturn: true,
+                      onNavigate: referenceAnnotationReaderSourceNavigation.onReturn,
+                    })}
+                {...(referenceAnnotationReaderRecord.origin !== 'owned'
+                  || !referenceAnnotationReaderRecord.mutable
+                  ? {}
+                  : (() => {
+                      const item = referenceInspectionOwnedItem;
+                      if (item === undefined) return {};
+                      const copyLink = copyLinkForItem(item);
+                      return {
+                        ...(copyLink === undefined ? {} : { copyLink }),
                         onEdit: (trigger: HTMLButtonElement) => {
-                          const item = props.state.items.find(
-                            ({ id }) => id === referenceAnnotationReaderRecord.identity.itemId,
-                          );
-                          if (item === undefined) return;
                           if (annotationReaderSession !== null) {
                             closeAnnotationReader(annotationReaderSession, false);
                           }
@@ -1929,14 +1952,12 @@ export function ReviewShell(props: ReviewShellProps) {
                           );
                         },
                         onDelete: async () => {
-                          const item = props.state.items.find(
-                            ({ id }) => id === referenceAnnotationReaderRecord.identity.itemId,
-                          );
-                          if (item !== undefined) await deleteOwnedAnnotation(item);
+                          await deleteOwnedAnnotation(item);
+                          dismissReferenceInspection(false);
                         },
-                      })}
-                />
-              </aside>
+                      };
+                    })())}
+              />
             ) : null}
           {selectionActionsAvailable && props.selection.selectionPlacement ? (
             <ContextActionPalette

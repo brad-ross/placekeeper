@@ -64,7 +64,6 @@
   font-weight: 500;
 }
 
-.comment-composer__context { display: flex; flex: none; align-items: center; gap: 5px; }
 .comment-composer__page-cue { color: var(--review-ink-muted); font-size: 11px; font-variant-numeric: tabular-nums; }
 
 .comment-composer__anchor {

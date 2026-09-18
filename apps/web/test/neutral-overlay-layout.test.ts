@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
 import { measureReviewOverlayGeometry } from '../src/review/use-review-overlay-geometry.js';
-import { chooseContextActionPlacement } from '../src/review/ContextActionPalette.js';
+import {
+  chooseContextActionAvailableRect,
+  chooseContextActionPlacement,
+} from '../src/review/ContextActionPalette.js';
 import { choosePassageEditorPlacement } from '../src/review/use-passage-editor-placement.js';
 
 const rect = (left: number, top: number, width: number, height: number) => ({
@@ -213,6 +216,40 @@ describe('passage editor placement', () => {
 
 
 describe('selection action placement', () => {
+  it('uses the Reference viewport instead of the bottom-tray exclusion boundary', () => {
+    const host = rect(0, 0, 1_200, 900);
+    const viewport = rect(0, 0, 1_200, 900);
+    const referenceViewport = rect(12, 610, 1_176, 278);
+
+    expect(chooseContextActionAvailableRect({
+      host,
+      viewport,
+      referenceViewport,
+      surface: 'reference',
+      overlayRight: 1_188,
+      overlayBottom: 598,
+    })).toEqual(rect(24, 622, 1_152, 254));
+    expect(chooseContextActionAvailableRect({
+      host,
+      viewport,
+      referenceViewport,
+      surface: 'main',
+      overlayRight: 1_188,
+      overlayBottom: 598,
+    })).toEqual(rect(12, 12, 1_176, 586));
+  });
+
+  it('intersects a Reference viewport with the visible window on narrow and short layouts', () => {
+    expect(chooseContextActionAvailableRect({
+      host: rect(100, 40, 600, 500),
+      viewport: rect(140, 80, 420, 260),
+      referenceViewport: rect(110, 60, 580, 440),
+      surface: 'reference',
+      overlayRight: 300,
+      overlayBottom: 220,
+    })).toEqual(rect(52, 52, 396, 236));
+  });
+
   it('places actions above the whole selected passage rather than over the following line', () => {
     expect(chooseContextActionPlacement({
       selection: rect(300, 160, 120, 24), available: rect(12, 52, 900, 600),

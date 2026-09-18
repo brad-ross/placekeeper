@@ -24,6 +24,10 @@ import {
   ownedAnnotationCorrespondence,
   pdfAnnotationSurfaceIsCurrent,
   ProductionReviewApp,
+  referenceInspectionShouldReuse,
+  referenceInspectionShouldPreserveSelection,
+  referenceInspectionShouldSuppressRestoredFocus,
+  referenceInspectionPresentationForPhase,
 } from "../src/app/ProductionReviewApp.js";
 import { referenceReturnForActiveTab } from "../src/review/reference-presentation.js";
 import {
@@ -53,6 +57,56 @@ import { MemoryReviewLocationHistory } from "../src/review/review-location-histo
 import type { ReferenceTab } from "../src/review/reference-navigation-state.js";
 
 describe('owned annotation correspondence', () => {
+  it('uses one preview/selection lifecycle for owned and source Reference marks', () => {
+    expect(referenceInspectionPresentationForPhase('enter')).toBe('preview');
+    expect(referenceInspectionPresentationForPhase('focus')).toBe('preview');
+    expect(referenceInspectionPresentationForPhase('activate')).toBe('selected');
+    expect(referenceInspectionPresentationForPhase('leave')).toBe('dismiss');
+    expect(referenceInspectionPresentationForPhase('blur')).toBe('dismiss');
+  });
+
+  it('keeps a clicked card selected and consumes only the immediate restored focus', () => {
+    const surface = { kind: 'reference', documentGeneration: 4, tabIdentity: 'tab-a' } as const;
+    const identity = { origin: 'owned', itemId: 'note-a' } as const;
+    const selected = { identity, surface, selected: true };
+
+    expect(referenceInspectionShouldPreserveSelection(selected, identity, surface)).toBe(true);
+    expect(referenceInspectionShouldPreserveSelection(
+      selected,
+      { origin: 'owned', itemId: 'note-b' },
+      surface,
+    )).toBe(false);
+    expect(referenceInspectionShouldSuppressRestoredFocus(
+      { identity, surface, expiresAt: 1_500 },
+      identity,
+      surface,
+      1_000,
+    )).toBe(true);
+    expect(referenceInspectionShouldSuppressRestoredFocus(
+      { identity, surface, expiresAt: 1_500 },
+      identity,
+      surface,
+      2_000,
+    )).toBe(false);
+  });
+
+  it('upgrades a matching source preview instead of deduplicating its activation', () => {
+    const surface = { kind: 'reference', documentGeneration: 4, tabIdentity: 'tab-a' } as const;
+    const identity = {
+      origin: 'source',
+      annotationKey: 'source-a',
+      documentGeneration: 4,
+      discoveryGeneration: 2,
+    } as const;
+    const preview = { identity, surface, selected: false };
+
+    expect(referenceInspectionShouldReuse(preview, identity, surface, 'preview')).toBe(true);
+    expect(referenceInspectionShouldReuse(preview, identity, surface, 'selected')).toBe(false);
+    expect(referenceInspectionShouldReuse(
+      { ...preview, selected: true }, identity, surface, 'selected',
+    )).toBe(true);
+  });
+
   it('keeps Reference correspondence in the viewers without opening Main content', () => {
     expect(ownedAnnotationCorrespondence({
       focusedMark: {

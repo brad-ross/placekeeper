@@ -36,7 +36,6 @@ export interface CommentComposerPlacement {
 
 export interface CommentComposerProps {
   title: string;
-  contextLabel?: string;
   initialValue?: string;
   optional?: boolean;
   allowWhitespace?: boolean;
@@ -95,7 +94,6 @@ export function boundedTextAreaHeight(input: BoundedTextAreaHeightInput): number
 
 export function CommentComposer({
   title,
-  contextLabel,
   initialValue = '',
   optional = false,
   allowWhitespace = false,
@@ -119,6 +117,7 @@ export function CommentComposer({
   const [submitting, setSubmitting] = useState(false);
   const composingRef = useRef(false);
   const passageSelectionRef = useRef<{ start: number; end: number } | null>(null);
+  const busy = submitting || persistencePending;
   const canSave = !saveDisabled && !persistencePending
     && (optional || (allowWhitespace ? value.length > 0 : value.trim().length > 0));
 
@@ -251,9 +250,6 @@ export function CommentComposer({
           <span>{title}{anchorNavigation?.visibility === 'outside' && anchorNavigation.pageNumber !== undefined
             ? <span className="comment-composer__page-cue"> · {anchorNavigation.pageNumber}</span>
             : null}</span>
-          {contextLabel === undefined ? null : (
-            <small className="comment-composer__context">{contextLabel}</small>
-          )}
         </h2>
         {passageExposed ? (
           <button
@@ -303,10 +299,10 @@ export function CommentComposer({
             }}
           />
         </label>
-        {persistencePending ? (
-          <p className="comment-composer__persistence-status" role="status">
-            Waiting for the PDF to save. Use Retry in the save alert.
-          </p>
+        {busy ? (
+          <span className="sr-only" role="status">
+            {persistencePending ? 'Saving annotation to PDF.' : 'Saving annotation.'}
+          </span>
         ) : null}
         <div className="comment-composer__actions">
           <button
@@ -321,11 +317,12 @@ export function CommentComposer({
             className="review-button review-button--primary"
             type="submit"
             title={saveLabel}
-            disabled={!canSave || submitting}
-            aria-disabled={!canSave || submitting}
-            data-submitting={submitting ? 'true' : undefined}
+            disabled={!canSave || busy}
+            aria-disabled={!canSave || busy}
+            aria-busy={busy ? 'true' : undefined}
+            data-submitting={busy ? 'true' : undefined}
           >
-            {submitting ? <ReviewIcon name="loading" /> : null}
+            {busy ? <ReviewIcon name="loading" /> : null}
             <span>{saveLabel}</span>
           </button>
         </div>

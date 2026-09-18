@@ -88,7 +88,9 @@ async function openReferenceEditor(page: Page, itemId: string): Promise<{
   });
   const inspection = page.locator('[data-reference-annotation-inspection]');
   await expect(inspection).toBeVisible();
-  await inspection.getByRole('button', { name: 'Edit' }).click();
+  await expect(inspection).toHaveAttribute('data-peek-selected', 'true');
+  await inspection.hover();
+  await inspection.getByRole('button', { name: 'Edit Page Note annotation on page 1' }).click();
   const composer = page.getByRole('region', { name: 'Edit Page Note' });
   const editor = composer.getByRole('textbox', { name: 'Comment' });
   const apply = composer.getByRole('button', { name: 'Apply', exact: true });

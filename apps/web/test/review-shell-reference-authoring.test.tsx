@@ -9,6 +9,7 @@ import {
   referenceAccessAvailable,
   referenceInspectionAuthoringOrigin,
   referenceInspectionFocusSelector,
+  referenceInspectionShouldDismissForClick,
   referenceInspectionShouldDismissForKey,
   shouldShowRightWorkspaceRail,
 } from '../src/app/ReviewShell.js';
@@ -184,6 +185,18 @@ describe('Reference authoring continuity', () => {
     expect(referenceInspectionShouldDismissForKey('Enter', false)).toBe(false);
   });
 
+  it('dismisses Reference inspection only for background clicks inside its PDF tab', () => {
+    const target = (insideReference: boolean, insideProtectedTarget: boolean) => ({
+      closest: (selector: string) => selector === '[data-annotation-surface="reference"]'
+        ? insideReference ? {} : null
+        : insideProtectedTarget ? {} : null,
+    }) as unknown as Pick<Element, 'closest'>;
+
+    expect(referenceInspectionShouldDismissForClick(target(true, false))).toBe(true);
+    expect(referenceInspectionShouldDismissForClick(target(true, true))).toBe(false);
+    expect(referenceInspectionShouldDismissForClick(target(false, false))).toBe(false);
+  });
+
   it('keeps only Reference access available when a draft hides its docked workspace', () => {
     expect(referenceAccessAvailable({
       referencesAvailable: true,
@@ -209,7 +222,7 @@ describe('Reference authoring continuity', () => {
     })).toBe(false);
   });
 
-  it('renders Reference inspection without selecting the annotation list workspace', () => {
+  it('renders Reference inspection with the same compact peek card as Main', () => {
     const target = session.origin.referenceRecovery!.target;
     const navigationState = reduceReferenceNavigation(
       createReferenceNavigationState(8),
@@ -244,8 +257,13 @@ describe('Reference authoring continuity', () => {
     ><div data-annotation-surface="main">Main document</div></ReviewShell>);
 
     expect(html).toContain('data-reference-annotation-inspection="7"');
+    expect(html).toContain('data-annotation-peek="note-1"');
+    expect(html).toContain('data-peek-selected="true"');
     expect(html).toContain('Frozen draft text');
-    expect(html).toContain('Identification strategy, Page 5');
+    expect(html).not.toMatch(/data-reference-annotation-inspection="7"[^>]*aria-label="Identification strategy, Page 5"/u);
+    expect(html).not.toContain('reference-inspection__context');
+    expect(html).not.toContain('data-full-annotation-reader="true"');
+    expect(html).not.toContain('aria-label="Back"');
     expect(html).toMatch(/id="workspace-mode-references"[^>]*aria-selected="true"/u);
     expect(html).toMatch(/id="workspace-mode-annotations"[^>]*aria-selected="false"/u);
   });

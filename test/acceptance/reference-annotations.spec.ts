@@ -19,6 +19,10 @@ let annotatedReferencePdf = '';
 let host: PlacekeeperHost;
 
 const READY_TIMEOUT = 15_000;
+const LONG_REFERENCE_COMMENT = Array.from(
+  { length: 48 },
+  (_, index) => `Reader paragraph ${index + 1} stays available while the content surface scrolls.`,
+).join('\n\n');
 
 // Integrated matrix: shared/repeated/passive content (AE1–AE4, AE8), placement and
 // draft continuity (AE5–AE7), stale and failed saves (AE9–AE10), and real selection,
@@ -152,6 +156,31 @@ async function clickWithHitEvidence(control: Locator, label: string): Promise<vo
   }
 }
 
+async function expectReferencePointerTargetNonInteractive(
+  page: Page,
+  point: { x: number; y: number },
+  label: string,
+): Promise<void> {
+  const evidence = await page.evaluate(({ x, y }) => {
+    const interactiveSelector = [
+      '[data-pdf-link-control]', '[data-review-contextual-ui]', '[data-review-editor]',
+      'input', 'textarea', '[contenteditable="true"]',
+    ].join(',');
+    const hit = document.elementFromPoint(x, y);
+    return {
+      pageIndex: hit?.closest('[data-page-index]')?.getAttribute('data-page-index') ?? null,
+      referenceOwned: hit?.closest('[data-reference-pdf-viewport]') !== null,
+      interactiveTarget: hit?.closest(interactiveSelector)?.outerHTML.slice(0, 800) ?? null,
+      hit: hit?.outerHTML.slice(0, 800) ?? null,
+    };
+  }, point);
+  expect(evidence, `${label} hit evidence: ${JSON.stringify(evidence)}`).toMatchObject({
+    pageIndex: '0',
+    referenceOwned: true,
+    interactiveTarget: null,
+  });
+}
+
 async function dragSelection(page: Page, pdfPage: Locator): Promise<void> {
   await pdfPage.evaluate((element) => element.scrollIntoView({ block: 'start' }));
   const image = pdfPage.locator(':scope > img');
@@ -196,6 +225,46 @@ async function dragSelection(page: Page, pdfPage: Locator): Promise<void> {
       insertionCaretCount,
     })}`);
   }
+}
+
+async function referenceSelectionBounds(page: Page) {
+  return page.locator(
+    '[data-reference-pdf-viewport] .pdf-workspace__page[data-page-index="1"]'
+      + ' > div[style*="mix-blend-mode"]',
+  ).evaluateAll((elements) => {
+    const rects = elements.map((element) => element.getBoundingClientRect())
+      .filter(({ width, height }) => width > 0 && height > 0);
+    if (rects.length === 0) throw new Error('Reference selection has no painted rectangles.');
+    const left = Math.min(...rects.map((rect) => rect.left));
+    const top = Math.min(...rects.map((rect) => rect.top));
+    const right = Math.max(...rects.map((rect) => rect.right));
+    const bottom = Math.max(...rects.map((rect) => rect.bottom));
+    return { x: left, y: top, width: right - left, height: bottom - top };
+  });
+}
+
+async function expectSelectionActionsInsideReference(
+  page: Page,
+  relationship: 'above' | 'below',
+): Promise<void> {
+  const actions = page.getByRole('toolbar', { name: 'Selection review actions' });
+  const referenceViewport = page.locator('.reference-panel__viewport');
+  await expect.poll(async () => {
+    const [actionsBounds, viewportBounds, selectionBounds] = await Promise.all([
+      actions.boundingBox(),
+      referenceViewport.boundingBox(),
+      referenceSelectionBounds(page),
+    ]);
+    if (actionsBounds === null || viewportBounds === null) return false;
+    const inside = actionsBounds.x >= viewportBounds.x - 1
+      && actionsBounds.y >= viewportBounds.y - 1
+      && actionsBounds.x + actionsBounds.width <= viewportBounds.x + viewportBounds.width + 1
+      && actionsBounds.y + actionsBounds.height <= viewportBounds.y + viewportBounds.height + 1;
+    const related = relationship === 'above'
+      ? actionsBounds.y + actionsBounds.height <= selectionBounds.y + 1
+      : actionsBounds.y >= selectionBounds.y + selectionBounds.height - 1;
+    return inside && related;
+  }).toBe(true);
 }
 
 async function openPageNoteContextMenu(page: Page, pdfPage: Locator): Promise<void> {
@@ -255,6 +324,39 @@ async function openPageNoteContextMenu(page: Page, pdfPage: Locator): Promise<vo
     })}`);
   }
   await addPageNote.click();
+}
+
+async function openLongReferenceCard(page: Page) {
+  const sessionId = await openFixture(page, referencePdf, async (id) => {
+    const state = host.broker.state(id);
+    if (!state) throw new Error('Long-card review state is unavailable.');
+    await host.broker.acceptMutation(id, addPageNote(
+      state,
+      0,
+      { x: 400, y: 340, width: 18, height: 18 },
+      LONG_REFERENCE_COMMENT,
+    ));
+  });
+  await openAnnotations(page);
+  const item = host.broker.state(sessionId)!.items.find(
+    (candidate) => candidate.payload.comment === LONG_REFERENCE_COMMENT,
+  );
+  if (!item) throw new Error('Long-card annotation is unavailable.');
+  const row = page.locator(`[data-review-item="${item.id}"]`);
+  await row.hover();
+  await row.getByRole('button', { name: 'Open in References' }).click();
+  const activeTab = page.locator('[data-reference-tab][aria-selected="true"]');
+  await expectReferenceReady(page, activeTab);
+  const mark = page.locator(
+    `[data-reference-pdf-viewport] [data-owned-focus-id="${item.id}"]`,
+  );
+  const ownedMark = page.locator(
+    `[data-reference-pdf-viewport] [data-owned-mark][data-review-id="${item.id}"]`,
+  ).first();
+  const inspection = page.locator('[data-reference-annotation-inspection]');
+  await expect(mark).toBeVisible();
+  await expect(inspection).toBeVisible();
+  return { activeTab, inspection, mark, ownedMark };
 }
 
 test.beforeAll(async () => {
@@ -352,8 +454,15 @@ test('reuses an annotation Reference tab, reveals its mark, and leaves Main and 
   await expect(page.locator('[data-reference-annotation-inspection]')).toBeVisible();
   await referenceMark.focus();
   await page.keyboard.press('Enter');
-  await expect(page.locator('[data-reference-annotation-inspection]')).toBeVisible();
-  await expect(page.locator('[data-annotation-peek]')).toHaveCount(0);
+  const inspection = page.locator('[data-reference-annotation-inspection]');
+  await expect(inspection).toBeVisible();
+  await expect(inspection).toHaveAccessibleName('Page Note annotation preview');
+  await expect(inspection).toHaveAttribute('data-annotation-peek', item.id);
+  await expect(inspection).toHaveAttribute('data-annotation-state', 'selected');
+  await expect(inspection).toHaveAttribute('data-peek-selected', 'true');
+  await expect(inspection.locator('[data-full-annotation-reader]')).toHaveCount(0);
+  await expect(inspection.locator('.reference-inspection__context')).toHaveCount(0);
+  await expect(inspection.getByRole('button', { name: 'Back' })).toHaveCount(0);
   await expect(page.getByRole('tab', { name: 'Annotations', exact: true }))
     .toHaveAttribute('aria-selected', 'true');
   expect(await mainSnapshot(page)).toEqual(unchangedMain);
@@ -394,6 +503,27 @@ test('creates, edits, reopens, and deletes one shared selection annotation from 
     '[data-reference-pdf-viewport] .pdf-workspace__page[data-page-index="1"]',
   );
   await dragSelection(page, referencePage);
+  await expect(page.locator('[data-review-stage]')).toHaveAttribute(
+    'data-reference-layout',
+    /wide-(?:bottom|split)/u,
+  );
+  await expectSelectionActionsInsideReference(page, 'above');
+  await page.locator(
+    '[data-reference-pdf-viewport] [data-viewer-framing-viewport]',
+  ).evaluate((element) => {
+    const viewport = element.closest<HTMLElement>('.reference-panel__viewport');
+    const selectionRects = Array.from(element.querySelectorAll<HTMLElement>(
+      '.pdf-workspace__page[data-page-index="1"] > div[style*="mix-blend-mode"]',
+    )).map((selection) => selection.getBoundingClientRect())
+      .filter(({ width, height }) => width > 0 && height > 0);
+    if (selectionRects.length === 0 || viewport === null) {
+      throw new Error('Reference selection geometry is unavailable.');
+    }
+    const selectionTop = Math.min(...selectionRects.map((rect) => rect.top));
+    const viewportBounds = viewport.getBoundingClientRect();
+    element.scrollTop += selectionTop - viewportBounds.top - 2;
+  });
+  await expectSelectionActionsInsideReference(page, 'below');
   await page.getByRole('toolbar', { name: 'Selection review actions' })
     .getByRole('button', { name: 'Highlight', exact: true }).click();
   const composer = page.getByRole('region', { name: 'Highlight Comment' });
@@ -449,90 +579,283 @@ test('opens a residual source mark in References as read only, including metadat
   const sourceMark = page.locator('[data-reference-pdf-viewport] [data-source-focus-id]').first();
   await expect(sourceMark).toBeVisible();
   await expect(sourceMark).toHaveAttribute('data-source-focus-id', /metadata-only-residual/u);
+  await page.locator(
+    '[data-reference-pdf-viewport] .pdf-workspace__page[data-page-index="0"]',
+  ).click({ position: { x: 8, y: 8 } });
+  await expect(page.locator('[data-reference-annotation-inspection]')).toHaveCount(0);
   await sourceMark.focus();
-  await page.keyboard.press('Enter');
   const inspection = page.locator('[data-reference-annotation-inspection]');
   await expect(inspection).toBeVisible();
-  const details = inspection.getByLabel('Annotation details');
-  await expect(details.locator('.annotation-item__kind-icon')).toHaveAttribute('title', 'unknow');
-  await expect(details.locator('.annotation-item__page')).toHaveText('1');
-  await expect(details.locator('.full-annotation-reader__readonly')).toHaveText('Read only');
-  await expect(inspection.locator('.full-annotation-reader__body')).toBeEmpty();
+  await expect(inspection).toHaveAttribute('data-peek-selected', 'false');
+  await tab.focus();
+  await expect(inspection).toHaveCount(0);
+  await sourceMark.focus();
+  await expect(inspection).toBeVisible();
+  await expect(inspection).toHaveAttribute('data-peek-selected', 'false');
+  await page.keyboard.press('Enter');
+  await expect(inspection).toBeVisible();
+  await expect(inspection).toHaveAttribute('data-peek-selected', 'true');
+  await expect(inspection).toHaveAccessibleName('unknow annotation preview');
+  await expect(inspection).toHaveAttribute('data-annotation-origin', 'source');
+  await expect(inspection).toHaveAttribute('data-readonly', 'true');
+  await expect(inspection.locator('.annotation-item__kind-icon')).toHaveAttribute('title', 'unknow');
+  await expect(inspection.locator('.annotation-item__page')).toHaveText('1');
+  await expect(inspection.locator('.annotation-item__excerpt')).toHaveCount(0);
   await expect(inspection).not.toContainText('Read-only source');
   await expect(inspection).not.toContainText('Annotation contents');
-  await expect(inspection.getByRole('button', { name: 'Edit' })).toHaveCount(0);
-  await expect(inspection.getByRole('button', { name: 'Delete' })).toHaveCount(0);
-  await expect(inspection.locator('[data-full-annotation-action="open-reference"]')).toBeVisible();
-  await inspection.getByRole('button', { name: 'Back' }).focus();
+  await expect(inspection.getByRole('button', { name: /Edit/u })).toHaveCount(0);
+  await expect(inspection.getByRole('button', { name: /Remove/u })).toHaveCount(0);
+  await expect(inspection.locator('[data-row-action="open-reference"]')).toBeVisible();
+  await expect(inspection.locator('[data-row-action]')).toHaveCount(1);
+  await expect(inspection.getByRole('button', { name: 'Back' })).toHaveCount(0);
+  await inspection.getByRole('button', { name: 'Open in References' }).focus();
   await page.keyboard.press('Escape');
   await expect(inspection).toHaveCount(0);
   await expect(sourceMark).toBeFocused();
   await expect(page.getByRole('textbox', { name: /^Current page 1 of 4/u })).toHaveValue('1');
 });
 
-test('keeps long Reference reader actions reachable and restores keyboard focus with a tab fallback', async ({ page }) => {
+test('keeps Reference card hover, selection, dismissal, and focus lifecycle mounted', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 });
-  const longComment = Array.from(
-    { length: 48 },
-    (_, index) => `Reader paragraph ${index + 1} stays available while the content surface scrolls.`,
-  ).join('\n\n');
-  const sessionId = await openFixture(page, referencePdf, async (id) => {
-    const state = host.broker.state(id);
-    if (!state) throw new Error('Long-reader review state is unavailable.');
-    await host.broker.acceptMutation(id, addPageNote(
-      state,
-      0,
-      { x: 90, y: 180, width: 18, height: 18 },
-      longComment,
-    ));
+  const { activeTab, inspection, mark, ownedMark } = await openLongReferenceCard(page);
+  const currentOwnedMarkPoint = async () => {
+    const bounds = await ownedMark.boundingBox();
+    if (!bounds) throw new Error('Reference annotation mark has no pointer bounds.');
+    const point = {
+      x: bounds.x + bounds.width / 2,
+      y: bounds.y + bounds.height / 2,
+    };
+    const hit = await page.evaluate(({ x, y }) => {
+      const target = document.elementFromPoint(x, y);
+      return {
+        pageIndex: target?.closest('[data-page-index]')?.getAttribute('data-page-index'),
+        referenceOwned: target?.closest('[data-reference-pdf-viewport]') != null,
+      };
+    }, point);
+    expect(hit).toEqual({ pageIndex: '0', referenceOwned: true });
+    return point;
+  };
+  const editAction = inspection.getByRole('button', {
+    name: 'Edit Page Note annotation on page 1',
   });
-  await openAnnotations(page);
-  const item = host.broker.state(sessionId)!.items.find(
-    (candidate) => candidate.payload.comment === longComment,
-  );
-  if (!item) throw new Error('Long-reader annotation is unavailable.');
-  const row = page.locator(`[data-review-item="${item.id}"]`);
-  await row.hover();
-  await row.getByRole('button', { name: 'Open in References' }).click();
-  const activeTab = page.locator('[data-reference-tab][aria-selected="true"]');
-  await expectReferenceReady(page, activeTab);
-  const mark = page.locator(
-    `[data-reference-pdf-viewport] [data-owned-focus-id="${item.id}"]`,
-  );
-  const inspection = page.locator('[data-reference-annotation-inspection]');
-  await expect(mark).toBeVisible();
-  await expect(inspection).toBeVisible();
+  await expect(inspection.locator('[data-full-annotation-reader]')).toHaveCount(0);
+  await expect(inspection.getByRole('button', { name: 'Back' })).toHaveCount(0);
 
-  await inspection.getByRole('button', { name: 'Back' }).focus();
+  await editAction.focus();
   await page.keyboard.press('Escape');
   await expect(inspection).toHaveCount(0);
   await expect(mark).toBeFocused();
 
   await page.keyboard.press('Enter');
   await expect(inspection).toBeVisible();
-  const body = inspection.locator('.full-annotation-reader__body');
+  await page.locator(
+    '[data-reference-pdf-viewport] .pdf-workspace__page[data-page-index="0"]',
+  ).click({ position: { x: 8, y: 8 } });
+  await expect(inspection).toHaveCount(0);
+  await ownedMark.scrollIntoViewIfNeeded();
+  await expect(ownedMark).toBeInViewport();
+
+  const hoverPoint = await currentOwnedMarkPoint();
+  await expectReferencePointerTargetNonInteractive(page, hoverPoint, 'Long-card hover');
+  await page.mouse.move(hoverPoint.x, hoverPoint.y);
+  await expect(inspection).toBeVisible();
+  await expect(inspection).toHaveAttribute('data-peek-selected', 'false');
+  await inspection.hover();
+  await page.waitForTimeout(180);
+  await expect(inspection).toBeVisible();
+  await expect(inspection).toHaveAttribute('data-peek-selected', 'false');
+  const referencePage = page.locator(
+    '[data-reference-pdf-viewport] .pdf-workspace__page[data-page-index="0"]',
+  );
+  const referencePageBounds = await referencePage.boundingBox();
+  if (!referencePageBounds) throw new Error('Reference page has no pointer bounds.');
+  await page.mouse.move(referencePageBounds.x + 8, referencePageBounds.y + 8);
+  await expect(inspection).toHaveCount(0);
+
+  const selectedPoint = await currentOwnedMarkPoint();
+  await page.mouse.click(selectedPoint.x, selectedPoint.y);
+  await expect(inspection).toBeVisible();
+  await expect(inspection).toHaveAttribute('data-peek-selected', 'true');
+  await page.mouse.move(referencePageBounds.x + 8, referencePageBounds.y + 8);
+  const reentryPoint = await currentOwnedMarkPoint();
+  await page.mouse.move(reentryPoint.x, reentryPoint.y);
+  await page.waitForTimeout(180);
+  await expect(inspection).toBeVisible();
+  await expect(inspection).toHaveAttribute('data-peek-selected', 'true');
+  await editAction.focus();
+  await page.keyboard.press('Escape');
+  await expect(inspection).toHaveCount(0);
+  await expect(mark).toBeFocused();
+
+  await page.keyboard.press('Enter');
+  await expect(inspection).toBeVisible();
+  await mark.evaluate((element) => element.remove());
+  await editAction.focus();
+  await page.keyboard.press('Escape');
+  await expect(inspection).toHaveCount(0);
+  await expect(activeTab).toBeFocused();
+});
+
+test('cancels an owned-mark press when the active Reference tab changes', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  const sessionId = await openFixture(page, referencePdf, async (id) => {
+    const state = host.broker.state(id);
+    if (!state) throw new Error('Cross-tab pointer fixture state is unavailable.');
+    await host.broker.acceptMutation(id, addPageNote(
+      state,
+      0,
+      { x: 400, y: 340, width: 18, height: 18 },
+      'Pointer press belongs to its initiating Reference tab.',
+    ));
+    await host.broker.acceptMutation(id, addPageNote(
+      host.broker.state(id)!,
+      0,
+      { x: 460, y: 400, width: 18, height: 18 },
+      'Successor Reference tab must not inherit the pointer press.',
+    ));
+  });
+  await openAnnotations(page);
+  const state = host.broker.state(sessionId)!;
+  const initiatingItem = state.items.find(
+    (item) => item.payload.comment === 'Pointer press belongs to its initiating Reference tab.',
+  );
+  const successorItem = state.items.find(
+    (item) => item.payload.comment === 'Successor Reference tab must not inherit the pointer press.',
+  );
+  if (!initiatingItem || !successorItem) throw new Error('Cross-tab pointer items are unavailable.');
+  const openItem = async (id: string) => {
+    const row = page.locator(`[data-review-item="${id}"]`);
+    await row.hover();
+    await row.getByRole('button', { name: 'Open in References' }).click();
+    const selectedTab = page.locator('[data-reference-tab][aria-selected="true"]');
+    await expectReferenceReady(page, selectedTab);
+    return selectedTab.getAttribute('data-reference-tab');
+  };
+  const initiatingTabIdentity = await openItem(initiatingItem.id);
+  const successorTabIdentity = await openItem(successorItem.id);
+  if (!initiatingTabIdentity || !successorTabIdentity) {
+    throw new Error('Cross-tab pointer identities are unavailable.');
+  }
+  const initiatingTab = page.locator(`[data-reference-tab="${initiatingTabIdentity}"]`);
+  const successorTab = page.locator(`[data-reference-tab="${successorTabIdentity}"]`);
+  await initiatingTab.click();
+  await expectReferenceReady(page, initiatingTab);
+  const inspection = page.locator('[data-reference-annotation-inspection]');
+  await page.keyboard.press('Escape');
+  await expect(inspection).toHaveCount(0);
+  const initiatingMark = page.locator(
+    `[data-reference-pdf-viewport] [data-owned-mark][data-review-id="${initiatingItem.id}"]`,
+  );
+  const bounds = await initiatingMark.boundingBox();
+  if (!bounds) throw new Error('Initiating Reference mark has no pointer bounds.');
+  const point = { x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 };
+  await expectReferencePointerTargetNonInteractive(page, point, 'Cross-tab pointerdown');
+  await page.mouse.move(point.x, point.y);
+  await expect(inspection).toHaveAttribute('data-peek-selected', 'false');
+  await page.mouse.down();
+  await successorTab.focus();
+  await page.keyboard.press('Enter');
+  await expectReferenceReady(page, successorTab);
+  await page.mouse.up();
+  await expect(inspection).toHaveCount(0);
+});
+
+test('keeps long Reference card text and actions reachable in a compact viewport', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  const { inspection } = await openLongReferenceCard(page);
+  const editAction = inspection.getByRole('button', {
+    name: 'Edit Page Note annotation on page 1',
+  });
+  const deleteAction = inspection.getByRole('button', {
+    name: 'Remove Page Note annotation on page 1',
+  });
+  await expect(inspection).toHaveAttribute('data-peek-selected', 'true');
+  await expect(inspection.locator('[data-full-annotation-reader]')).toHaveCount(0);
+  await expect(inspection.getByRole('button', { name: 'Back' })).toHaveCount(0);
+  const body = inspection.locator('.annotation-item__excerpt');
   expect(await body.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(true);
   await body.evaluate((element) => { element.scrollTop = element.scrollHeight; });
   await expect.poll(() => body.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
-  await expect(inspection.getByRole('button', { name: 'Back' })).toBeVisible();
-  await expect(inspection.getByRole('button', { name: 'Edit' })).toBeVisible();
-  await expect(inspection.getByRole('button', { name: 'Delete' })).toBeVisible();
-  await inspection.getByRole('button', { name: 'Edit' }).click();
+  await inspection.hover();
+  await expect(editAction).toBeVisible();
+  await expect(deleteAction).toBeVisible();
+
+  await page.setViewportSize({ width: 300, height: 600 });
+  await expect(inspection).toBeVisible();
+  await expect.poll(() => body.evaluate(
+    (element) => element.scrollHeight > element.clientHeight,
+  )).toBe(true);
+  await expect(editAction).toBeVisible();
+  await expect(deleteAction).toBeVisible();
+  await body.evaluate((element) => { element.scrollTop = 0; });
+  const compactScrollportBounds = await body.boundingBox();
+  if (!compactScrollportBounds) throw new Error('Compact Reference scrollport has no bounds.');
+  await page.mouse.move(
+    compactScrollportBounds.x + compactScrollportBounds.width / 2,
+    compactScrollportBounds.y + compactScrollportBounds.height / 2,
+  );
+  await page.mouse.wheel(0, 10_000);
+  await expect.poll(() => body.evaluate(
+    (element) => element.scrollTop + element.clientHeight >= element.scrollHeight - 1,
+  )).toBe(true);
+  const compactGeometry = await body.evaluate((element) => {
+    const card = element.closest<HTMLElement>('[data-reference-annotation-inspection]');
+    const text = element.querySelector<HTMLElement>('.annotation-item__excerpt-text');
+    const node = text?.firstChild;
+    if (card === null || !(node instanceof Text) || node.length === 0) {
+      throw new Error('Compact Reference card text geometry is unavailable.');
+    }
+    const finalCharacter = document.createRange();
+    finalCharacter.setStart(node, node.length - 1);
+    finalCharacter.setEnd(node, node.length);
+    return {
+      card: card.getBoundingClientRect().toJSON(),
+      scrollport: element.getBoundingClientRect().toJSON(),
+      finalCharacter: finalCharacter.getBoundingClientRect().toJSON(),
+      scrollTop: element.scrollTop,
+    };
+  });
+  expect(compactGeometry.scrollTop).toBeGreaterThan(0);
+  expect(compactGeometry.scrollport.y).toBeGreaterThanOrEqual(compactGeometry.card.y - 1);
+  expect(compactGeometry.scrollport.y + compactGeometry.scrollport.height)
+    .toBeLessThanOrEqual(compactGeometry.card.y + compactGeometry.card.height + 1);
+  expect(compactGeometry.finalCharacter.y).toBeGreaterThanOrEqual(
+    compactGeometry.scrollport.y - 1,
+  );
+  expect(compactGeometry.finalCharacter.y + compactGeometry.finalCharacter.height)
+    .toBeLessThanOrEqual(
+      compactGeometry.scrollport.y + compactGeometry.scrollport.height + 1,
+    );
+  const [compactCardBounds, compactEditBounds, compactDeleteBounds] = await Promise.all([
+    inspection.boundingBox(),
+    editAction.boundingBox(),
+    deleteAction.boundingBox(),
+  ]);
+  if (!compactCardBounds || !compactEditBounds || !compactDeleteBounds) {
+    throw new Error('Compact Reference card action geometry is unavailable.');
+  }
+  for (const actionBounds of [compactEditBounds, compactDeleteBounds]) {
+    expect(actionBounds.x).toBeGreaterThanOrEqual(compactCardBounds.x - 1);
+    expect(actionBounds.x + actionBounds.width)
+      .toBeLessThanOrEqual(compactCardBounds.x + compactCardBounds.width + 1);
+    expect(actionBounds.y).toBeGreaterThanOrEqual(compactCardBounds.y - 1);
+    expect(actionBounds.y + actionBounds.height)
+      .toBeLessThanOrEqual(compactCardBounds.y + compactCardBounds.height + 1);
+  }
+
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await expect(inspection).toBeVisible();
+  await inspection.hover();
+  await expect(editAction).toBeVisible();
+  await expect(deleteAction).toBeVisible();
+  await editAction.click();
   const composer = page.getByRole('region', { name: 'Edit Page Note' });
-  await expect(composer.getByRole('textbox', { name: 'Comment' })).toHaveValue(longComment);
+  await expect(composer.getByRole('textbox', { name: 'Comment' }))
+    .toHaveValue(LONG_REFERENCE_COMMENT);
   await expect(composer.getByRole('button', { name: 'Apply', exact: true })).toBeVisible();
   await expect(composer.getByRole('button', { name: 'Cancel', exact: true })).toBeVisible();
   await composer.getByRole('button', { name: 'Cancel', exact: true }).click();
   await expect(composer).toHaveCount(0);
-
-  await mark.focus();
-  await page.keyboard.press('Enter');
-  await expect(inspection).toBeVisible();
-  await mark.evaluate((element) => element.remove());
-  await inspection.getByRole('button', { name: 'Back' }).focus();
-  await page.keyboard.press('Escape');
-  await expect(inspection).toHaveCount(0);
-  await expect(activeTab).toBeFocused();
 });
 
 test('opens an editable native import beside References without resizing the tray', async ({ page }) => {
@@ -566,7 +889,7 @@ test('opens an editable native import beside References without resizing the tra
         value: (element as HTMLInputElement).value,
       })));
     const placementEvidence = await inspection.evaluate((element) => {
-      const reader = element.closest<HTMLElement>('.annotation-peek--reference-reader') ?? element;
+      const reader = element.closest<HTMLElement>('.annotation-peek--reference-inspection') ?? element;
       const stage = document.querySelector<HTMLElement>('[data-review-stage]');
       const scrollport = document.querySelector<HTMLElement>(
         '[data-reference-pdf-viewport] [data-viewer-framing-viewport]',
@@ -596,13 +919,23 @@ test('opens an editable native import beside References without resizing the tra
       main: await mainSnapshot(page),
     })}`);
   }
-  await expect(inspection.getByRole('button', { name: 'Edit' })).toBeVisible();
-  await expect(inspection.getByRole('button', { name: 'Delete' })).toBeVisible();
+  await expect(inspection.getByRole('button', {
+    name: /Edit .* annotation on page 1/u,
+  })).toBeVisible();
+  await expect(inspection.getByRole('button', {
+    name: /Remove .* annotation on page 1/u,
+  })).toBeVisible();
   const tray = page.getByRole('complementary', { name: 'References' });
+  const nativeMark = page.locator(
+    `[data-reference-pdf-viewport] [data-owned-focus-id="${native.id}"]`,
+  ).first();
   const [trayBefore, readerBounds] = await Promise.all([tray.boundingBox(), inspection.boundingBox()]);
   if (!trayBefore || !readerBounds) throw new Error('Native reader geometry is unavailable.');
   expect(readerBounds.y).toBeLessThan(trayBefore.y);
-  await inspection.getByRole('button', { name: 'Back' }).click();
+  await inspection.getByRole('button', { name: /Edit .* annotation on page 1/u }).focus();
+  await page.keyboard.press('Escape');
+  await expect(inspection).toHaveCount(0);
+  await expect(nativeMark).toBeFocused();
   const nativeBounds = await page.locator(
     `[data-reference-pdf-viewport] [data-owned-native-geometry][data-review-id="${native.id}"]`,
   ).first().boundingBox();
@@ -612,16 +945,16 @@ test('opens an editable native import beside References without resizing the tra
     nativeBounds.y + nativeBounds.height / 2,
   );
   await expect(inspection).toBeVisible();
+  await expect(inspection).toHaveAttribute('data-peek-selected', 'true');
   expect(await tray.boundingBox()).toEqual(trayBefore);
 
   await page.setViewportSize({ width: 300, height: 600 });
-  const nativeMark = page.locator(
-    `[data-reference-pdf-viewport] [data-owned-focus-id="${native.id}"]`,
-  ).first();
   await nativeMark.focus();
   await page.keyboard.press('Enter');
   await expect(inspection).toBeVisible();
-  await expect(page.locator('[data-annotation-peek]')).toHaveCount(0);
+  await expect(inspection).toHaveAttribute('data-annotation-peek', native.id);
+  await expect(inspection).toHaveAttribute('data-peek-selected', 'true');
+  await expect(inspection.locator('[data-full-annotation-reader]')).toHaveCount(0);
 });
 
 test('closes a deleted passive reader and preserves a stale edit with Save disabled', async ({ page }) => {
@@ -665,7 +998,11 @@ test('closes a deleted passive reader and preserves a stale edit with Save disab
   await staleRow.getByRole('button', { name: 'Open in References' }).click();
   await expectReferenceReady(page, page.locator('[data-reference-tab][aria-selected="true"]'));
   const inspection = page.locator('[data-reference-annotation-inspection]');
-  await inspection.getByRole('button', { name: 'Edit' }).click();
+  await expect(inspection).toHaveAttribute('data-peek-selected', 'true');
+  await inspection.hover();
+  await inspection.getByRole('button', {
+    name: 'Edit Page Note annotation on page 1',
+  }).click();
   const composer = page.getByRole('region', { name: 'Edit Page Note' });
   const editor = composer.getByRole('textbox', { name: 'Comment' });
   await editor.fill('Recover this text after the target disappears.');
@@ -717,7 +1054,11 @@ test('retains a Reference edit but clears its preview when document authority is
   await row.getByRole('button', { name: 'Open in References' }).click();
   await expectReferenceReady(page, page.locator('[data-reference-tab][aria-selected="true"]'));
   const inspection = page.locator('[data-reference-annotation-inspection]');
-  await inspection.getByRole('button', { name: 'Edit' }).click();
+  await expect(inspection).toHaveAttribute('data-peek-selected', 'true');
+  await inspection.hover();
+  await inspection.getByRole('button', {
+    name: 'Edit Page Note annotation on page 1',
+  }).click();
   const composer = page.getByRole('region', { name: 'Edit Page Note' });
   const editor = composer.getByRole('textbox', { name: 'Comment' });
   const apply = composer.getByRole('button', { name: 'Apply', exact: true });
@@ -781,7 +1122,11 @@ test('recovers a closed annotation-origin editor and reuses its tab after applyi
   if (!tabIdentity) throw new Error('Annotation-origin tab identity is unavailable.');
 
   const inspection = page.locator('[data-reference-annotation-inspection]');
-  await inspection.getByRole('button', { name: 'Edit' }).click();
+  await expect(inspection).toHaveAttribute('data-peek-selected', 'true');
+  await inspection.hover();
+  await inspection.getByRole('button', {
+    name: 'Edit Page Note annotation on page 1',
+  }).click();
   const composer = page.getByRole('region', { name: 'Edit Page Note' });
   const editor = composer.getByRole('textbox', { name: 'Comment' });
   const revisedComment = 'Recovered edit still belongs to its annotation-origin tab.';
@@ -845,6 +1190,7 @@ test('authors on a Reference page and preserves one focused draft through switch
   const composer = page.getByRole('region', { name: 'Page Note' });
   const editor = composer.getByRole('textbox', { name: 'Comment' });
   const draft = 'Reference draft survives resize, closure, and an authoritative retry.';
+  await expect(composer).not.toContainText('Primary result · Page 2');
   await editor.fill(draft);
   await editor.evaluate((element) => (element as HTMLTextAreaElement).setSelectionRange(10, 25));
   const editorNode = await editor.evaluateHandle((element) => element);
@@ -1017,10 +1363,17 @@ test('retains Reference draft text and Main state when the PDF save fails', asyn
   await composer.getByRole('button', { name: 'Save', exact: true }).click();
   const failure = page.getByRole('alert');
   await expect(failure).toContainText('Couldn’t save your latest annotations.');
+  const save = composer.getByRole('button', { name: 'Save', exact: true });
+  await expect(save).toHaveAttribute('aria-busy', 'true');
+  await expect(save.locator('.lucide-loader-circle')).toBeVisible();
+  await expect(composer.getByRole('status')).toHaveText('Saving annotation to PDF.');
+  await expect(composer).not.toContainText(
+    'Waiting for the PDF to save. Use Retry in the save alert.',
+  );
   await expect(editor).toHaveValue(draft);
   await expect(editor).toHaveAttribute('readonly', '');
   await expect(composer).toBeVisible();
-  await expect(composer.getByRole('button', { name: 'Save', exact: true })).toBeDisabled();
+  await expect(save).toBeDisabled();
   await expect.poll(() => host.broker.saveStatus(sessionId)?.sync.phase).toBe('not-saved');
   const accepted = host.broker.state(sessionId)!;
   const acceptedItem = accepted.items.find((item) => item.payload.comment === draft);
@@ -1057,10 +1410,10 @@ test('keeps Reference links above marks and creates a keyboard Page Note on the 
       quote: 'Target-to-target overlap',
       prefix: '',
       suffix: '',
-      rect: { x: 72, y: 600, width: 288, height: 20 },
+      rect: { x: 72, y: 172, width: 288, height: 20 },
       segmentRects: [
-        { x: 72, y: 600, width: 228, height: 20 },
-        { x: 300, y: 600, width: 60, height: 20 },
+        { x: 72, y: 172, width: 228, height: 20 },
+        { x: 300, y: 172, width: 60, height: 20 },
       ],
       reliable: true,
     }, 'Two fragments overlap the PDF link.'));
@@ -1078,9 +1431,44 @@ test('keeps Reference links above marks and creates a keyboard Page Note on the 
     name: 'Open PDF link to Target-to-target detail link, Page 3',
   });
   await expect(targetLink).toBeVisible();
-  await targetLink.focus();
+  const overlapMarks = await reference
+    .locator(`[data-owned-mark][data-review-id="${overlap.id}"]`)
+    .all();
+  const [linkBounds, ...markBounds] = await Promise.all([
+    targetLink.boundingBox(),
+    ...overlapMarks.map((mark) => mark.boundingBox()),
+  ]);
+  if (!linkBounds) throw new Error('Overlapping Reference link geometry is unavailable.');
+  const concreteMarkBounds = markBounds.map((bounds) => {
+    if (!bounds) throw new Error('Overlapping Reference mark geometry is unavailable.');
+    return bounds;
+  });
+  const overlapBounds = concreteMarkBounds
+    .map((bounds) => ({
+      left: Math.max(linkBounds.x, bounds.x),
+      top: Math.max(linkBounds.y, bounds.y),
+      right: Math.min(linkBounds.x + linkBounds.width, bounds.x + bounds.width),
+      bottom: Math.min(linkBounds.y + linkBounds.height, bounds.y + bounds.height),
+    }))
+    .find((bounds) => bounds.right > bounds.left && bounds.bottom > bounds.top);
+  if (!overlapBounds) throw new Error('Reference link does not overlap the owned annotation.');
+  const overlapPoint = {
+    x: (overlapBounds.left + overlapBounds.right) / 2,
+    y: (overlapBounds.top + overlapBounds.bottom) / 2,
+  };
+  expect(await targetLink.evaluate((element, point) => {
+    const hit = document.elementFromPoint(point.x, point.y);
+    return hit !== null && element.contains(hit);
+  }, overlapPoint)).toBe(true);
+  await page.mouse.click(overlapPoint.x, overlapPoint.y);
+  const openInReferences = page.getByRole('menuitem', { name: /Open in References/u });
+  await expect(openInReferences).toBeVisible();
+  await expect(page.locator('[data-reference-annotation-inspection]')).toHaveCount(0);
+  await page.keyboard.press('Escape');
+  await expect(openInReferences).toHaveCount(0);
+  await expect(targetLink).toBeFocused();
   await page.keyboard.press('Enter');
-  await expect(page.getByRole('menuitem', { name: /Open in References/u })).toBeFocused();
+  await expect(openInReferences).toBeFocused();
   await page.keyboard.press('Escape');
 
   const pageTwo = reference.locator('.pdf-workspace__page[data-page-index="1"]');

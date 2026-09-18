@@ -8,7 +8,11 @@ import { OwnedTextMark } from './OwnedTextMark.js';
 import { ownedMarkStyle, positionOwnedRect } from './owned-overlay.js';
 import type { OwnedMarkGeometry } from './owned-mark-hit-test.js';
 import { SourceAnnotationLayer, type SourceReaderMark } from './SourceAnnotationMark.js';
-import type { ViewerOwnedMarkInteraction, ViewerPagePoint } from './viewer-interaction-events.js';
+import type {
+  ViewerOwnedMarkInteraction,
+  ViewerPagePoint,
+  ViewerSourceMarkInteraction,
+} from './viewer-interaction-events.js';
 
 export interface AnnotationRenderingState {
   readonly hiddenSourceKeys: ReadonlySet<string>;
@@ -101,7 +105,7 @@ export interface PdfAnnotationLayersProps {
   readonly keyboardPageNoteCursor?: ViewerPagePoint | null;
   readonly onKeyboardPageNoteKey?: (key: string) => void;
   readonly onOwnedMarkInteraction?: (interaction: ViewerOwnedMarkInteraction) => void;
-  readonly onSourceMarkInteraction?: (annotationKey: string, pageIndex: number) => void;
+  readonly onSourceMarkInteraction?: (interaction: ViewerSourceMarkInteraction) => void;
 }
 
 /** Nonpainting geometry for native owned annotations whose visible appearance is rendered by EmbedPDF. */
@@ -253,12 +257,44 @@ export function PdfAnnotationLayers({
             title={mark.contents.trim().length > 0
               ? `Open source annotation on page ${layout.pageNumber}`
               : `Source annotation details on page ${layout.pageNumber}`}
+            onPointerEnter={(event) => onSourceMarkInteraction?.({
+              annotationKey,
+              phase: 'enter',
+              pageIndex: layout.pageIndex,
+              placement: {
+                left: event.currentTarget.getBoundingClientRect().left,
+                top: event.currentTarget.getBoundingClientRect().top,
+              },
+            })}
+            onPointerLeave={() => onSourceMarkInteraction?.({
+              annotationKey, phase: 'leave', pageIndex: layout.pageIndex,
+            })}
+            onFocus={(event) => onSourceMarkInteraction?.({
+              annotationKey,
+              phase: 'focus',
+              pageIndex: layout.pageIndex,
+              placement: {
+                left: event.currentTarget.getBoundingClientRect().left,
+                top: event.currentTarget.getBoundingClientRect().top,
+              },
+            })}
+            onBlur={() => onSourceMarkInteraction?.({
+              annotationKey, phase: 'blur', pageIndex: layout.pageIndex,
+            })}
             onPointerDown={(event) => event.stopPropagation()}
             onPointerUp={(event) => event.stopPropagation()}
             onClick={(event) => {
               event.preventDefault();
               event.stopPropagation();
-              onSourceMarkInteraction?.(annotationKey, layout.pageIndex);
+              onSourceMarkInteraction?.({
+                annotationKey,
+                phase: 'activate',
+                pageIndex: layout.pageIndex,
+                placement: {
+                  left: event.currentTarget.getBoundingClientRect().left,
+                  top: event.currentTarget.getBoundingClientRect().top,
+                },
+              });
             }}
             style={{
               left: transformed.origin.x + transformed.size.width / 2,

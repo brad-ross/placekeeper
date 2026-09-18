@@ -8,7 +8,7 @@ import {
   annotationListContent,
   combinedDocumentOrderedAnnotations,
 } from '../src/review/AnnotationList.js';
-import { AnnotationPeek } from '../src/review/AnnotationPeek.js';
+import { AnnotationPeek, AnnotationRecordPeek } from '../src/review/AnnotationPeek.js';
 import { ContextActionPalette } from '../src/review/ContextActionPalette.js';
 import {
   FullAnnotationReader,
@@ -144,6 +144,29 @@ describe('annotation row and reader presentation', () => {
     expect(full).toContain('aria-label="Open in References"');
   });
 
+  it('projects a read-only source record through the shared peek card', () => {
+    const record = projectExistingAnnotationReader({
+      id: 'source-peek', subtype: 'Highlight', pageIndex: 4,
+      rect: { x: 1, y: 2, width: 3, height: 4 }, contents: 'Complete imported note.',
+      author: 'Reviewer', flags: [], appearanceModes: [], supportedAppearance: true,
+    }, { documentGeneration: 2, discoveryGeneration: 3 })!;
+    const html = renderToStaticMarkup(<AnnotationRecordPeek
+      record={record}
+      selected
+      onHoldChange={vi.fn()}
+      onOpenReference={vi.fn()}
+    />);
+
+    expect(html).toContain('data-annotation-origin="source"');
+    expect(html).toContain('data-readonly="true"');
+    expect(html).toContain('data-annotation-kind="Highlight"');
+    expect(html).toContain('data-row-action="open-reference"');
+    expect(html).toContain('Complete imported note.');
+    expect(html).not.toContain('data-row-action="edit"');
+    expect(html).not.toContain('data-row-action="delete"');
+    expect(html).not.toContain('aria-label="Back"');
+  });
+
   it('restores reader focus only when the disappearing locate action held it', () => {
     expect(shouldRestoreFullAnnotationReaderFocus(true, false, true)).toBe(true);
     expect(shouldRestoreFullAnnotationReaderFocus(true, false, false)).toBe(false);
@@ -189,6 +212,35 @@ describe('annotation row and reader presentation', () => {
     const reader = projectOwnedAnnotationReader(highlightWithComment)!;
     expect(reader.content).toBe('Explain why this identifies the coefficient.');
     expect(reader.content).not.toContain('Local variation identifies demand.');
+  });
+
+  it('keeps Main native annotation subtype metadata when no peek override is supplied', () => {
+    const nativeHighlight: ReviewItem = {
+      ...replacement,
+      id: 'native-highlight',
+      kind: 'pdfAnnotation',
+      payload: { subtype: 'Highlight', comment: 'Native highlight comment.' },
+    };
+    const html = renderToStaticMarkup(<AnnotationPeek
+      item={nativeHighlight}
+      selected
+      onHoldChange={vi.fn()}
+      onEdit={vi.fn()}
+    />);
+
+    expect(html).toContain('title="Highlight"');
+    expect(html).toContain('aria-label="Edit Highlight annotation on page 4"');
+    expect(html).not.toContain('Edit PDF annotation annotation');
+
+    const referenceHtml = renderToStaticMarkup(<AnnotationRecordPeek
+      record={projectOwnedAnnotationReader(nativeHighlight)!}
+      item={nativeHighlight}
+      selected
+      onHoldChange={vi.fn()}
+      onEdit={vi.fn()}
+    />);
+    expect(referenceHtml).toContain('title="Highlight"');
+    expect(referenceHtml).toContain('aria-label="Edit Highlight annotation on page 4"');
   });
 
   it('uses a quote-only treatment for highlights without an authored comment', () => {

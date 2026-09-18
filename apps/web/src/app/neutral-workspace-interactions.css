@@ -313,7 +313,7 @@ li[data-search-result] .pdf-search__result-heading > .pdf-search__result-page {
 
 /* Keep annotation previews in the exposed PDF area beside open workspaces. */
 .review-layout:is([data-right-overlay="true"], [data-bottom-overlay="true"])
-  .annotation-peek:not(.annotation-peek--reference-reader) {
+  .annotation-peek:not(.annotation-peek--reference-inspection) {
   top: auto;
   right: max(12px, calc(100% - var(--review-overlay-right-start, 100%)));
   bottom: max(12px, calc(100% - var(--review-overlay-bottom-start, 100%)));

@@ -7,6 +7,7 @@ import { Scroller } from '@embedpdf/plugin-scroll/react';
 import { SelectionLayer } from '@embedpdf/plugin-selection/react';
 import { Viewport } from '@embedpdf/plugin-viewport/react';
 import { AnchoredZoomGestureWrapper as ZoomGestureWrapper } from './AnchoredZoomGestureWrapper.js';
+import { useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 
 import type { PdfSearchResult } from './pdf-search-model.js';
@@ -21,6 +22,7 @@ import {
 } from './reference-manual-scroll.js';
 import type { ViewerInteractionEvent } from './viewer-interaction-events.js';
 import {
+  PDF_LINK_INTERACTION_ATTRIBUTE,
   isContextPointerGesture,
   isUnsafePageContextTarget,
   normalizePageClientPoint,
@@ -34,7 +36,7 @@ import {
 } from './annotation-surface.js';
 import type { ReviewAnnotation } from '../../../../packages/core/src/pdf-writer.js';
 import type { OwnedMarkGeometry } from './owned-mark-hit-test.js';
-import { hitTestOwnedMark } from './owned-mark-hit-test.js';
+import { hitTestOwnedMark, ScopedOwnedMarkPointerGesture } from './owned-mark-hit-test.js';
 import type { ViewerPagePoint } from './viewer-interaction-events.js';
 import type { AnnotationRenderingState } from './PdfAnnotationLayers.js';
 import { PdfAnnotationLayers } from './PdfAnnotationLayers.js';
@@ -43,6 +45,47 @@ import type { PageContextMenuRequest } from './PdfWorkspace.js';
 const PDF_TEXT_SELECTION_STYLE = {
   background: 'var(--review-pdf-selection-bg)',
 } as const;
+
+const REFERENCE_OWNED_MARK_INTERACTIVE_TARGET = [
+  `[${PDF_LINK_INTERACTION_ATTRIBUTE}]`,
+  '[data-review-contextual-ui]',
+  '[data-review-editor]',
+  'input',
+  'textarea',
+  '[contenteditable="true"]',
+].join(',');
+
+export function referenceOwnedMarkTargetIsInteractive(target: EventTarget | null): boolean {
+  const candidate = target as { closest?: (selector: string) => unknown } | null;
+  return typeof candidate?.closest === 'function'
+    && candidate.closest(REFERENCE_OWNED_MARK_INTERACTIVE_TARGET) !== null;
+}
+
+function referencePagePointer(
+  documentState: DocumentState,
+  pageIndex: number,
+  element: HTMLElement,
+  clientX: number,
+  clientY: number,
+) {
+  const page = documentState.document?.pages[pageIndex];
+  if (!page) return null;
+  const bounds = element.getBoundingClientRect();
+  const rotation = combinePageRotation(page.rotation, documentState.rotation);
+  const rotatedSize = transformSize(page.size, rotation, 1);
+  const scale = bounds.width / rotatedSize.width;
+  const point = normalizePageClientPoint(
+    { x: clientX, y: clientY },
+    {
+      pageSize: page.size,
+      rotation,
+      scale,
+      elementLeft: bounds.left,
+      elementTop: bounds.top,
+    },
+  );
+  return point === null ? null : { point, scale };
+}
 
 export interface ReferencePdfViewportProps {
   readonly documentId: string;
@@ -96,6 +139,17 @@ export function ReferencePdfViewport({
   onPageContextMenu,
 }: ReferencePdfViewportProps) {
   const surface = referencePdfAnnotationSurface(documentGeneration, tabIdentity);
+  const hoveredOwnedMarkRef = useRef<{
+    readonly id: string;
+    readonly pageIndex: number;
+    readonly surfaceKey: string;
+  } | null>(null);
+  const surfaceKey = `${documentGeneration}:${tabIdentity ?? ''}`;
+  const ownedPointerGestureRef = useRef(new ScopedOwnedMarkPointerGesture());
+  useEffect(() => {
+    ownedPointerGestureRef.current.cancel();
+    return () => ownedPointerGestureRef.current.cancel();
+  }, [surfaceKey]);
   const emit = (event: ViewerInteractionEvent) => {
     if (surface !== null) onInteraction?.(scopeViewerInteraction(event, surface));
   };
@@ -194,15 +248,142 @@ export function ReferencePdfViewport({
                     contextGesture ? VIEWER_POINTER_BUTTON_NONE : event.button,
                   );
                   if (contextGesture) {
+                    ownedPointerGestureRef.current.pointerCancel(event.pointerId);
                     event.preventDefault();
                     event.stopPropagation();
+                    return;
                   }
+                  if (referenceOwnedMarkTargetIsInteractive(event.target)) {
+                    ownedPointerGestureRef.current.pointerCancel(event.pointerId);
+                    return;
+                  }
+                  const pointer = referencePagePointer(
+                    documentState,
+                    layout.pageIndex,
+                    event.currentTarget,
+                    event.clientX,
+                    event.clientY,
+                  );
+                  if (pointer === null) ownedPointerGestureRef.current.pointerCancel(event.pointerId);
+                  else ownedPointerGestureRef.current.pointerDown(
+                      { surfaceKey, pageIndex: layout.pageIndex },
+                      event.pointerId,
+                      event.button,
+                      pointer.point,
+                      geometryByPage.get(layout.pageIndex) ?? [],
+                      pointer.scale,
+                    );
                 }}
                 onPointerUpCapture={(event) => {
                   recordViewerPointerButton(
                     event.currentTarget,
                     isContextPointerGesture(event) ? VIEWER_POINTER_BUTTON_NONE : event.button,
                   );
+                  if (referenceOwnedMarkTargetIsInteractive(event.target)) {
+                    ownedPointerGestureRef.current.pointerCancel(event.pointerId);
+                    return;
+                  }
+                  const pointer = referencePagePointer(
+                    documentState,
+                    layout.pageIndex,
+                    event.currentTarget,
+                    event.clientX,
+                    event.clientY,
+                  );
+                  if (pointer === null) ownedPointerGestureRef.current.pointerCancel(event.pointerId);
+                  const ownedId = pointer === null
+                    ? undefined
+                    : ownedPointerGestureRef.current.pointerUp(
+                        { surfaceKey, pageIndex: layout.pageIndex },
+                        event.pointerId,
+                        event.button,
+                        pointer.point,
+                        geometryByPage.get(layout.pageIndex) ?? [],
+                        pointer.scale,
+                      );
+                  if (ownedId !== undefined) emit({
+                    type: 'owned-mark',
+                    value: {
+                      id: ownedId,
+                      phase: 'activate',
+                      pageIndex: layout.pageIndex,
+                      placement: { left: event.clientX, top: event.clientY },
+                    },
+                  });
+                }}
+                onPointerMoveCapture={(event) => {
+                  if (surface === null) return;
+                  if (referenceOwnedMarkTargetIsInteractive(event.target)) {
+                    ownedPointerGestureRef.current.pointerCancel(event.pointerId);
+                    const previous = hoveredOwnedMarkRef.current;
+                    if (previous?.pageIndex === layout.pageIndex
+                      && previous.surfaceKey === surfaceKey) {
+                      hoveredOwnedMarkRef.current = null;
+                      event.currentTarget.closest<HTMLElement>('[data-reference-pdf-viewport]')
+                        ?.setAttribute('data-owned-mark-hovered', 'false');
+                      emit({
+                        type: 'owned-mark',
+                        value: { id: previous.id, phase: 'leave', pageIndex: previous.pageIndex },
+                      });
+                    }
+                    return;
+                  }
+                  const pointer = referencePagePointer(
+                    documentState,
+                    layout.pageIndex,
+                    event.currentTarget,
+                    event.clientX,
+                    event.clientY,
+                  );
+                  if (pointer !== null) ownedPointerGestureRef.current.pointerMove(
+                    { surfaceKey, pageIndex: layout.pageIndex },
+                    event.pointerId,
+                    pointer.point,
+                  );
+                  const nextId = pointer === null
+                    ? undefined
+                    : hitTestOwnedMark(
+                        geometryByPage.get(layout.pageIndex) ?? [],
+                        pointer.point,
+                        pointer.scale,
+                      );
+                  const previous = hoveredOwnedMarkRef.current;
+                  if (previous !== null
+                    && previous.id === nextId
+                    && previous.pageIndex === layout.pageIndex
+                    && previous.surfaceKey === surfaceKey) return;
+                  if (previous !== null && previous.surfaceKey === surfaceKey) emit({
+                    type: 'owned-mark',
+                    value: { id: previous.id, phase: 'leave', pageIndex: previous.pageIndex },
+                  });
+                  hoveredOwnedMarkRef.current = nextId === undefined
+                    ? null
+                    : { id: nextId, pageIndex: layout.pageIndex, surfaceKey };
+                  event.currentTarget.closest<HTMLElement>('[data-reference-pdf-viewport]')
+                    ?.setAttribute('data-owned-mark-hovered', nextId === undefined ? 'false' : 'true');
+                  if (nextId !== undefined) emit({
+                    type: 'owned-mark',
+                    value: {
+                      id: nextId,
+                      phase: 'enter',
+                      pageIndex: layout.pageIndex,
+                      placement: { left: event.clientX, top: event.clientY },
+                    },
+                  });
+                }}
+                onPointerLeave={(event) => {
+                  ownedPointerGestureRef.current.pointerCancel(event.pointerId);
+                  const previous = hoveredOwnedMarkRef.current;
+                  if (previous === null
+                    || previous.pageIndex !== layout.pageIndex
+                    || previous.surfaceKey !== surfaceKey) return;
+                  hoveredOwnedMarkRef.current = null;
+                  event.currentTarget.closest<HTMLElement>('[data-reference-pdf-viewport]')
+                    ?.setAttribute('data-owned-mark-hovered', 'false');
+                  emit({
+                    type: 'owned-mark',
+                    value: { id: previous.id, phase: 'leave', pageIndex: previous.pageIndex },
+                  });
                 }}
                 onContextMenu={(event) => {
                   if (onPageContextMenu === undefined || surface === null) return;
@@ -329,9 +510,9 @@ export function ReferencePdfViewport({
                     : { onKeyboardPageNoteKey })}
                   {...(surface === null ? {} : {
                     onOwnedMarkInteraction: (value) => emit({ type: 'owned-mark', value }),
-                    onSourceMarkInteraction: (annotationKey, pageIndex) => emit({
+                    onSourceMarkInteraction: (value) => emit({
                       type: 'source-mark',
-                      value: { annotationKey, phase: 'activate', pageIndex },
+                      value,
                     }),
                   })}
                 />

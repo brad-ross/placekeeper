@@ -474,9 +474,9 @@ export function PdfWorkspace({
                           : keyboardPageNoteCursor}
                         {...(onKeyboardPageNoteKey === undefined ? {} : { onKeyboardPageNoteKey })}
                         {...(onOwnedMarkInteraction === undefined ? {} : { onOwnedMarkInteraction })}
-                        onSourceMarkInteraction={(annotationKey, pageIndex) => onViewerInteraction?.({
+                        onSourceMarkInteraction={(value) => onViewerInteraction?.({
                           type: 'source-mark',
-                          value: { annotationKey, phase: 'activate', pageIndex },
+                          value,
                         })}
                       />
                       <div data-source-link-layer>

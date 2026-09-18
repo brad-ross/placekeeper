@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { ReviewAnnotation } from '../../../packages/core/src/pdf-writer.js';
 import {
   OwnedMarkPointerGesture,
+  ScopedOwnedMarkPointerGesture,
   groupOwnedMarkGeometry,
   hitTestOwnedMark,
 } from '../src/pdf/owned-mark-hit-test.js';
@@ -110,6 +111,42 @@ describe('owned mark page-space hit testing', () => {
 
     gesture.pointerDown(2, 0, { x: 20, y: 20 }, groups);
     expect(gesture.pointerUp(2, 2, { x: 20, y: 20 }, groups)).toBeUndefined();
+  });
+
+  it('cancels activation when Reference surface or page authority changes', () => {
+    const groups = groupOwnedMarkGeometry([
+      annotation('mark', [{ x: 10, y: 10, width: 30, height: 20 }]),
+    ]);
+    const gesture = new ScopedOwnedMarkPointerGesture();
+    const first = { surfaceKey: '8:tab-a', pageIndex: 0 };
+
+    gesture.pointerDown(first, 1, 0, { x: 20, y: 20 }, groups);
+    expect(gesture.pointerUp(
+      { surfaceKey: '8:tab-b', pageIndex: 0 },
+      1, 0, { x: 20, y: 20 }, groups,
+    )).toBeUndefined();
+
+    gesture.pointerDown(first, 2, 0, { x: 20, y: 20 }, groups);
+    expect(gesture.pointerUp(
+      { surfaceKey: '8:tab-a', pageIndex: 1 },
+      2, 0, { x: 20, y: 20 }, groups,
+    )).toBeUndefined();
+
+    gesture.pointerDown(first, 3, 0, { x: 20, y: 20 }, groups);
+    gesture.cancel();
+    expect(gesture.pointerUp(first, 3, 0, { x: 20, y: 20 }, groups)).toBeUndefined();
+
+    gesture.pointerDown(first, 4, 0, { x: 20, y: 20 }, groups);
+    expect(gesture.pointerUp(
+      { surfaceKey: '9:tab-a', pageIndex: 0 },
+      4, 0, { x: 20, y: 20 }, groups,
+    )).toBeUndefined();
+
+    gesture.pointerDown(first, 5, 0, { x: 20, y: 20 }, groups);
+    expect(gesture.pointerUp(
+      first, 6, 0, { x: 20, y: 20 }, groups,
+    )).toBeUndefined();
+    expect(gesture.pointerUp(first, 5, 0, { x: 20, y: 20 }, groups)).toBe('mark');
   });
 });
 

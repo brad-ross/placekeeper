@@ -228,6 +228,7 @@ export const suites: Record<string, TestStage[]> = {
         "apps/web/test/owned-overlay.test.ts",
         "apps/web/test/annotation-surface.test.ts",
         "apps/web/test/owned-mark-hit-test.test.ts",
+        "apps/web/test/reference-pdf-viewport.test.ts",
         "apps/web/test/viewer-interaction-events.test.ts",
         "apps/web/test/app-interactions.test.ts",
         "apps/web/test/existing-annotations.test.ts"
@@ -593,6 +594,7 @@ export const ciUnitFiles = [
       'apps/web/test/annotation-projection.test.ts',
       'apps/web/test/production-review-app.test.tsx',
       'apps/web/test/annotation-surface.test.ts',
+      'apps/web/test/reference-pdf-viewport.test.ts',
       'apps/web/test/review-shell-reference-authoring.test.tsx',
       'apps/web/test/codex-context-status.test.tsx',
       'apps/web/test/existing-annotations.test.ts',

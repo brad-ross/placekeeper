@@ -91,8 +91,9 @@ export interface ViewerOwnedMarkInteraction {
 
 export interface ViewerSourceMarkInteraction {
   readonly annotationKey: string;
-  readonly phase: 'activate';
+  readonly phase: 'enter' | 'leave' | 'focus' | 'blur' | 'activate';
   readonly pageIndex: number;
+  readonly placement?: ViewerClientPlacement;
 }
 
 export type ViewerInteractionEvent = (

@@ -147,6 +147,34 @@ test.describe('canonical review workflow', () => {
     await expect(page.getByRole('button', { name: 'Proofread mode' })).toHaveCount(0);
   });
 
+  test('keeps Apply busy until its asynchronous save resolves', async ({ page }) => {
+    await page.goto(
+      '/test/acceptance/review-harness/index.html?visual=reading&composer=edit-replacement&composer-save=deferred',
+    );
+    const composer = page.getByRole('region', { name: 'Edit Replacement' });
+    const apply = composer.getByRole('button', { name: 'Apply', exact: true });
+
+    await apply.click();
+
+    await expect(apply).toBeDisabled();
+    await expect(apply).toHaveAttribute('aria-busy', 'true');
+    await expect(apply).toHaveAttribute('data-submitting', 'true');
+    await expect(composer.getByRole('status')).toHaveText('Saving annotation.');
+    await expect(apply.locator('.lucide-loader-circle')).toBeVisible();
+
+    await page.evaluate(() => {
+      const resolveSave = Reflect.get(globalThis, 'resolveDeferredComposerSave');
+      if (typeof resolveSave !== 'function') throw new Error('Deferred composer save is unavailable');
+      resolveSave();
+    });
+
+    await expect(apply).toBeEnabled();
+    await expect(apply).not.toHaveAttribute('aria-busy', 'true');
+    await expect(apply).not.toHaveAttribute('data-submitting', 'true');
+    await expect(composer.getByRole('status')).toHaveCount(0);
+    await expect(apply.locator('.lucide-loader-circle')).toHaveCount(0);
+  });
+
   test('discloses mounted annotation actions at intent without activating their row', async ({
     page,
     browserName,

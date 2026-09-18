@@ -92,19 +92,46 @@
   box-shadow: var(--pk-shadow-raised);
 }
 
-.annotation-peek--reference-reader {
+.annotation-peek--reference-inspection {
   top: auto;
   right: auto;
   bottom: auto;
   display: flex;
+  flex-direction: column;
   max-height: min(30rem, calc(100dvh - 24px));
   overflow: hidden;
   transform: none;
 }
 
-.annotation-peek--reference-reader .full-annotation-reader {
-  width: 100%;
-  max-height: inherit;
+.annotation-peek--reference-inspection .annotation-item__content {
+  display: grid;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.annotation-peek--reference-inspection .annotation-item__body-row {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.annotation-peek--reference-inspection .annotation-item__excerpt {
+  min-height: 0;
+  max-height: min(22rem, calc(100dvh - 8rem));
+  overflow: auto;
+  overscroll-behavior: contain;
+  pointer-events: auto;
+}
+
+.annotation-peek--reference-inspection :is(
+  .annotation-item__excerpt-main,
+  .annotation-item__quote
+) {
+  display: block;
+  overflow: visible;
+  -webkit-box-orient: initial;
+  -webkit-line-clamp: unset;
 }
 
 .annotation-peek .annotation-item__content {

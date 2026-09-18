@@ -113,23 +113,28 @@ describe('CommentComposer contextual authoring contract', () => {
     expect(html).toContain('title="Save" disabled="" aria-disabled="true"');
   });
 
-  it('freezes an accepted draft while PDF persistence awaits the global retry', () => {
+  it('freezes an accepted draft and keeps Apply visibly and accessibly busy during persistence', () => {
     const html = renderComposer({
       initialValue: 'Already accepted once',
       persistencePending: true,
+      saveLabel: 'Apply',
     });
 
     expect(html).toContain('Already accepted once');
     expect(html).toContain('textarea');
     expect(html).toContain('readOnly=""');
-    expect(html).toContain('Waiting for the PDF to save. Use Retry in the save alert.');
-    expect(html).toContain('title="Save" disabled="" aria-disabled="true"');
+    expect(html).not.toContain('Waiting for the PDF to save. Use Retry in the save alert.');
+    expect(html).toContain('role="status"');
+    expect(html).toContain('class="sr-only"');
+    expect(html).toContain('Saving annotation to PDF.');
+    expect(html).toContain('title="Apply" disabled="" aria-disabled="true" aria-busy="true"');
+    expect(html).toContain('data-submitting="true"');
+    expect(html).toContain('lucide-loader-circle');
   });
 
-  it('compacts a Reference sheet to expose its passage without unmounting the draft', () => {
+  it('compacts a Reference sheet without adding a second context title', () => {
     const html = renderComposer({
       initialValue: 'Selection-sensitive draft',
-      contextLabel: 'Identification strategy, Page 5',
       placement: { kind: 'bottom-sheet' },
       passageExposure: {
         exposed: true,
@@ -139,7 +144,7 @@ describe('CommentComposer contextual authoring contract', () => {
     });
 
     expect(html).toContain('data-passage-exposed="true"');
-    expect(html).toContain('Identification strategy, Page 5');
+    expect(html).not.toContain('comment-composer__context');
     expect(html).toContain('aria-label="Resume editing"');
     expect(html).toMatch(/comment-composer__body[^>]*hidden=""[^>]*inert=""/u);
     expect(html.match(/Selection-sensitive draft/g)).toHaveLength(1);
