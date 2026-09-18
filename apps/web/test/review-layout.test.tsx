@@ -5,13 +5,18 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 
 import { controlledWorkspaceSurfaceAction } from "../src/review/workspace-surface-policy.js";
-import { ReviewShell } from "../src/app/ReviewShell.js";
+import {
+  handleReviewActionShortcut,
+  ReviewShell,
+} from "../src/app/ReviewShell.js";
 import { AnnotationList } from '../src/review/AnnotationList.js';
 import { AnnotationPeek } from '../src/review/AnnotationPeek.js';
 import { projectOwnedAnnotationReader } from '../src/review/annotation-reader.js';
 import {
   FullAnnotationReader,
   FullAnnotationReaderActions,
+  FullAnnotationReaderBody,
+  FullAnnotationReaderMetadata,
 } from '../src/review/FullAnnotationReader.js';
 import {
   ReviewChrome,
@@ -36,6 +41,7 @@ import {
   type ViewerControls,
 } from '../src/pdf/viewer-controls.js';
 import { createReviewState, type ReviewItem } from '../../../packages/core/src/review-model.js';
+import { projectReconciliationDraftReader } from '../src/review/ReconciliationWorkspace.js';
 import {
   INITIAL_REVIEW_SURFACE_STATE,
   reduceReviewSurface,
@@ -109,6 +115,38 @@ const unresolvedAnnotation: ReviewItem = {
 };
 
 describe('review shell layout and accessibility contract', () => {
+  it('blocks authoring shortcuts during reattachment and restores them after exit', () => {
+    const invoked: string[] = [];
+    const prevented: string[] = [];
+    for (const key of ['d', 'h', 'r', 'n']) {
+      expect(handleReviewActionShortcut({
+        key,
+        altKey: true,
+        shiftKey: true,
+        ctrlKey: false,
+        metaKey: false,
+        reconciliationDetailMode: 'reattach',
+        preventDefault: () => prevented.push(`blocked:${key}`),
+        invoke: (tool) => invoked.push(tool),
+      })).toBe(true);
+    }
+    expect(invoked).toEqual([]);
+    expect(prevented).toEqual(['blocked:d', 'blocked:h', 'blocked:r', 'blocked:n']);
+
+    expect(handleReviewActionShortcut({
+      key: 'h',
+      altKey: true,
+      shiftKey: true,
+      ctrlKey: false,
+      metaKey: false,
+      reconciliationDetailMode: null,
+      preventDefault: () => prevented.push('restored:h'),
+      invoke: (tool) => invoked.push(tool),
+    })).toBe(true);
+    expect(invoked).toEqual(['highlight']);
+    expect(prevented.at(-1)).toBe('restored:h');
+  });
+
   it('coordinates one active top-bar menu while pending export owns dismissal', () => {
     expect(resolveTopBarMenuRequest({
       activeMenu: 'navigation',
@@ -219,6 +257,8 @@ describe('review shell layout and accessibility contract', () => {
     expect(html).toContain('data-review-toast-stack');
     expect(html).toContain('data-viewer-status');
     expect(html).toContain('data-generation-status="reconciling"');
+    expect(html).not.toContain('reconciliation-workspace__notice');
+    expect(html.match(/A rebuilt PDF is loading and Review Items are reconciling\./gu)).toHaveLength(1);
     expect(html.indexOf('data-review-stage')).toBeLessThan(html.indexOf('data-review-toast-stack'));
     expect(html.indexOf('data-review-toast-stack')).toBeLessThan(html.indexOf('Document canvas'));
     expect(html).not.toContain('review-shell--generation-status');
@@ -250,7 +290,31 @@ describe('review shell layout and accessibility contract', () => {
     expect(html).toContain(`data-generation-busy="${busy}"`);
     const notice = html.slice(html.indexOf('data-generation-status='), html.indexOf('</p>', html.indexOf('data-generation-status=')));
     expect(notice).toContain(`lucide-${icon}`);
+    expect(notice).toContain(`role="${refresh === 'failed' ? 'alert' : 'status'}"`);
     if (refresh === 'idle' && stale) expect(notice).toContain('Source changed; waiting for an updated PDF.');
+  });
+
+  it.each([
+    {
+      refresh: 'reconciling' as const,
+      role: 'status',
+      text: 'A rebuilt PDF is loading and Review Items are reconciling.',
+    },
+    {
+      refresh: 'failed' as const,
+      role: 'alert',
+      text: 'The rebuilt PDF could not be loaded safely. The last successful PDF remains reviewable.',
+    },
+  ])('shows genuine standard-workflow $refresh feedback in the top-left toast', ({ refresh, role, text }) => {
+    const html = renderToStaticMarkup(<ReviewShell state={state}
+      generationRefreshStatus={refresh} locationRestoreStatus="idle"
+      save={{}} selection={{ selectionUpdate: { kind: 'cleared', generation: 0 } }}
+      authoring={{ onCommand: async () => state }} viewer={{}} workspace={{}} />);
+    expect(html).toContain('data-review-toast-stack');
+    expect(html).toContain(`data-generation-status="${refresh}"`);
+    expect(html).toContain(`role="${role}"`);
+    expect(html).toContain(text);
+    expect(html).not.toContain('reconciliation-workspace__notice');
   });
 
   it('persistently exposes the focused PDF copy owner when selections compete', () => {
@@ -406,6 +470,132 @@ describe('review shell layout and accessibility contract', () => {
     expect(html).not.toContain('In the document');
   });
 
+  it('shares canonical reader content ordering with reconciliation details', () => {
+    const replacementHtml = renderToStaticMarkup(<FullAnnotationReaderBody record={{
+      kind: 'replace',
+      contentLabel: 'Replacement text',
+      content: 'precise replacement',
+      sourceText: 'imprecise source',
+      sourceTreatment: 'struck',
+    }} />);
+    expect(replacementHtml).toContain('class="full-annotation-reader__body"');
+    expect(replacementHtml.indexOf('imprecise source')).toBeLessThan(replacementHtml.indexOf('precise replacement'));
+    expect(replacementHtml).toContain('data-source-treatment="struck"');
+
+    const highlightHtml = renderToStaticMarkup(<FullAnnotationReaderBody record={{
+      kind: 'highlight',
+      contentLabel: 'Comment',
+      content: 'Authored comment',
+      quoteText: 'Prior highlighted source',
+    }} />);
+    expect(highlightHtml.indexOf('Authored comment')).toBeLessThan(highlightHtml.indexOf('Prior highlighted source'));
+    expect(highlightHtml).toContain('class="full-annotation-reader__quote"');
+    expect(annotationStyles).toMatch(
+      /\.reconciliation-workspace--detail\.full-annotation-reader\s*\{[^}]*background:\s*transparent;/u,
+    );
+    expect(annotationStyles).not.toContain('.reconciliation-workspace__prior-context');
+    expect(annotationStyles).not.toContain('.reconciliation-workspace__detail-header');
+  });
+
+  it('projects quote-only frozen drafts through canonical reader semantics', () => {
+    const anchor = {
+      kind: 'selection' as const,
+      pageIndex: 2,
+      quote: 'The predecessor PDF sentence.',
+      prefix: '',
+      suffix: '',
+      rect: { x: 1, y: 2, width: 30, height: 8 },
+      segmentRects: [{ x: 1, y: 2, width: 30, height: 8 }],
+    };
+    const common = {
+      id: 'frozen-draft',
+      ownerViewId: 'view-1',
+      baseGeneration: 3,
+      revision: 1,
+      pageIndex: 2,
+      anchor,
+      disposition: { kind: 'missing' as const, reason: 'source-replaced' },
+      status: 'frozen' as const,
+      createdAt: '2026-09-17T00:00:00.000Z',
+      updatedAt: '2026-09-17T00:00:00.000Z',
+    };
+
+    const deletion = projectReconciliationDraftReader({
+      ...common,
+      kind: 'delete',
+      text: anchor.quote,
+    });
+    expect(deletion).toMatchObject({
+      kind: 'delete',
+      content: '',
+      sourceText: anchor.quote,
+      sourceTreatment: 'struck',
+    });
+
+    const quoteOnlyHighlight = projectReconciliationDraftReader({
+      ...common,
+      kind: 'highlight',
+      text: '',
+    });
+    expect(quoteOnlyHighlight).toMatchObject({
+      kind: 'highlight',
+      content: '',
+      quoteText: anchor.quote,
+    });
+    expect(quoteOnlyHighlight?.content).not.toBe(anchor.quote);
+  });
+
+  it('shares projected native subtype and prior multi-page metadata with reconciliation details', () => {
+    const nativeRecord = projectOwnedAnnotationReader({
+      id: 'native-text',
+      kind: 'pdfAnnotation',
+      pageIndex: 6,
+      createdAt: '2026-09-17T00:00:00.000Z',
+      updatedAt: '2026-09-17T00:00:00.000Z',
+      payload: { comment: 'Native annotation', subtype: 'Text' },
+    });
+    if (nativeRecord === null) throw new Error('Expected native reader projection');
+    const nativeHtml = renderToStaticMarkup(<FullAnnotationReaderMetadata record={nativeRecord} prior />);
+    expect(nativeHtml).toContain('title="Text"');
+    expect(nativeHtml).toContain('title="Previously page 7"');
+    expect(nativeHtml).toContain('aria-label="Previously page 7"');
+
+    const rangeRecord = projectOwnedAnnotationReader({
+      ...ownedAnnotation,
+      pageIndex: 2,
+      payload: {
+        ...ownedAnnotation.payload,
+        quote: 'First page\nLast page',
+        prefix: '',
+        suffix: '',
+        rect: { x: 10, y: 80, width: 40, height: 12 },
+        segmentRects: [{ x: 10, y: 80, width: 40, height: 12 }],
+        reliable: true,
+        pages: [{
+          pageIndex: 2,
+          quote: 'First page',
+          prefix: '',
+          suffix: '',
+          rect: { x: 10, y: 80, width: 40, height: 12 },
+          segmentRects: [{ x: 10, y: 80, width: 40, height: 12 }],
+        }, {
+          pageIndex: 4,
+          quote: 'Last page',
+          prefix: '',
+          suffix: '',
+          rect: { x: 10, y: 20, width: 38, height: 12 },
+          segmentRects: [{ x: 10, y: 20, width: 38, height: 12 }],
+        }],
+        pageBoundaries: [{ afterPageIndex: 2, separator: '\n' }],
+      },
+    });
+    if (rangeRecord === null) throw new Error('Expected multi-page reader projection');
+    const rangeHtml = renderToStaticMarkup(<FullAnnotationReaderMetadata record={rangeRecord} prior />);
+    expect(rangeHtml).toContain('>3–5</span>');
+    expect(rangeHtml).toContain('title="Previously pages 3–5"');
+    expect(rangeHtml).toContain('aria-label="Previously pages 3–5"');
+  });
+
   it('keeps imported full annotations read-only while retaining available author metadata', () => {
     const html = renderToStaticMarkup(
       <FullAnnotationReader
@@ -451,6 +641,59 @@ describe('review shell layout and accessibility contract', () => {
     expect(html).not.toContain('>Back<');
     expect(html).not.toContain('>Edit<');
     expect(html).not.toContain('>Delete<');
+  });
+
+  it('uses the attention editor as the sole Annotations tray detail', () => {
+    const html = renderToStaticMarkup(
+      <AnnotationList
+        items={[ownedAnnotation]}
+        existingAnnotations={{ status: 'empty', generation: 1, items: [] }}
+        attention={{
+          count: 1,
+          rows: <li data-reconciliation-entry="item:unresolved-highlight">Detached row</li>,
+          notice: <p>Refreshing annotations.</p>,
+          message: <p>List message.</p>,
+          editor: <section data-reconciliation-reader data-reconciliation-detail="reattach">Reader detail</section>,
+          ownedItemIds: [unresolvedAnnotation.id],
+          existingAnnotationKeys: [],
+        }}
+        onNavigate={() => undefined}
+        onEdit={() => undefined}
+        onDelete={() => undefined}
+      />,
+    );
+
+    expect(html).toContain('data-reconciliation-reader="true"');
+    expect(html).toContain('Reader detail');
+    expect(html).not.toContain('<ol');
+    expect(html).not.toContain('Detached row');
+    expect(html).not.toContain('Refreshing annotations.');
+    expect(html).not.toContain('List message.');
+    expect(html).not.toContain('data-review-item="owned-highlight"');
+    expect(neutralStyles).toMatch(
+      /#review-annotation-list:has\(> \.annotation-drawer__owned > \[data-reconciliation-reader\]\)\s*\{[^}]*height:\s*100%;[^}]*min-height:\s*0;/u,
+    );
+    expect(neutralStyles).toMatch(
+      /#review-annotation-list > \.annotation-drawer__owned:has\(> \[data-reconciliation-reader\]\)\s*\{[^}]*display:\s*flex;[^}]*height:\s*100%;[^}]*min-height:\s*0;/u,
+    );
+    expect(annotationStyles).toMatch(
+      /@media \(max-height:\s*560px\)[\s\S]*\.reconciliation-workspace--detail\.full-annotation-reader\s*\{[^}]*padding-block:\s*6px;[\s\S]*\.reconciliation-workspace--detail \.full-annotation-reader__metadata-bar\s*\{[^}]*padding-bottom:\s*0;[\s\S]*\.reconciliation-workspace--detail \.reconciliation-workspace__resolution\s*\{[^}]*gap:\s*2px;[^}]*padding-top:\s*4px;/u,
+    );
+    expect(neutralStyles).toMatch(
+      /@media \(pointer:\s*coarse\)[\s\S]*:is\([\s\S]*\.reconciliation-workspace__editor-actions[\s\S]*\) \.review-button\s*\{[^}]*min-height:\s*44px;/u,
+    );
+  });
+
+  it('replaces the detached warning endcap for pointer and keyboard intent without pinning pointer-restored focus', () => {
+    expect(neutralStyles).toMatch(
+      /:has\(\.row-action-group\):is\(:hover, \[data-corresponding="true"\]\)\s*:is\(\.outline-navigator__page, \.annotation-item__page, \.annotation-item__status-icon, \.pdf-search__result-page\),\s*:is\([^}]+\):has\(\.row-action-group\):has\(:focus-visible\)\s*:is\(\.outline-navigator__page, \.annotation-item__page, \.annotation-item__status-icon, \.pdf-search__result-page\) \{\s*opacity: 0;/u,
+    );
+    expect(neutralStyles).not.toContain(
+      ':is(li[data-annotation-origin], li[data-search-result]):focus-within',
+    );
+    expect(neutralStyles).toMatch(
+      /@media \(pointer: coarse\), \(hover: none\)[\s\S]*:has\(\.row-action-group\)\s*:is\(\.outline-navigator__page, \.annotation-item__page, \.annotation-item__status-icon, \.pdf-search__result-page\) \{\s*opacity: 0;/u,
+    );
   });
 
   it('keeps search actions direct even in narrow containers', () => {
@@ -1048,7 +1291,7 @@ describe('review shell layout and accessibility contract', () => {
       /\.annotation-item__title-actions \.annotation-item__action\s*\{[^}]*opacity:\s*1;/u,
     );
     expect(annotationStyles).toMatch(
-      /li:hover \.annotation-item__action,\s*:is\(\.review-workspace, \.review-tools-workspace\) li:focus-within \.annotation-item__action,\s*:is\(\.review-workspace, \.review-tools-workspace\) li\[data-active="true"\] \.annotation-item__action\s*\{[^}]*opacity:\s*1;/u,
+      /li:hover \.annotation-item__action,\s*:is\(\.review-workspace, \.review-tools-workspace\) li:has\(:focus-visible\) \.annotation-item__action,\s*:is\(\.review-workspace, \.review-tools-workspace\) li\[data-active="true"\] \.annotation-item__action\s*\{[^}]*opacity:\s*1;/u,
     );
     const coarsePointerRules = responsiveStyles.match(
       /@media \(hover: none\), \(pointer: coarse\) \{([\s\S]*?)\n\}/u,
@@ -1479,6 +1722,16 @@ describe('review shell layout and accessibility contract', () => {
             flags: [],
             appearanceModes: ['normal'],
             supportedAppearance: true,
+          }, {
+            id: 'unresolved-highlight',
+            subtype: 'Highlight',
+            pageIndex: unresolvedAnnotation.pageIndex,
+            rect: { x: 1, y: 2, width: 3, height: 4 },
+            contents: 'Check the identifying variation.',
+            author: 'Placekeeper',
+            flags: [],
+            appearanceModes: ['normal'],
+            supportedAppearance: true,
           }],
         }}
         save={{}}
@@ -1528,52 +1781,95 @@ describe('review shell layout and accessibility contract', () => {
     expect(html).toContain('id="workspace-mode-annotations"');
   });
 
-  it('orders attention before one document-ordered owned and source population without duplicating unresolved items', () => {
-    const html = renderToStaticMarkup(
-      <ReviewShell
-        state={{ ...generatedState, items: [ownedAnnotation, unresolvedAnnotation] }}
-        documentTitle="paper.pdf"
-        existingAnnotations={{
-          status: 'ready',
-          generation: 4,
-          items: [{
-            id: 'source-highlight',
-            subtype: 'Highlight',
-            pageIndex: 1,
-            rect: { x: 1, y: 2, width: 3, height: 4 },
-            contents: 'Source-only comment',
-            author: 'Reviewer',
-            flags: [],
-            appearanceModes: ['normal'],
-            supportedAppearance: true,
-          }],
-        }}
-        save={{}}
-        selection={{
-          selectionUpdate: { kind: 'cleared', generation: 0 },
-        }}
-        authoring={{
-          onCommand: async () => generatedState,
-        }}
-        viewer={{}}
-        workspace={{}}
-      >
-        <div>Document canvas</div>
-      </ReviewShell>,
-    );
+  it.each(['generated-output', 'standard'] as const)(
+    'orders %s attention before one document-ordered owned and source population without duplicating unresolved items',
+    (workflowMode) => {
+      const html = renderToStaticMarkup(
+        <ReviewShell
+          state={{
+            ...generatedState,
+            workflow: { ...generatedState.workflow, mode: workflowMode },
+            items: [ownedAnnotation, unresolvedAnnotation],
+            pendingDrafts: [{
+              id: 'frozen-draft',
+              ownerViewId: 'view-1',
+              baseGeneration: 3,
+              revision: 2,
+              kind: 'highlight',
+              pageIndex: 2,
+              text: 'Keep this authored replacement draft visible.',
+              anchor: unresolvedAnnotation.reconciliation!.anchor,
+              disposition: { kind: 'missing', reason: 'draft-frozen-on-predecessor-generation' },
+              status: 'frozen',
+              createdAt: '2026-08-09T00:01:00.000Z',
+              updatedAt: '2026-08-09T00:01:00.000Z',
+            }],
+          }}
+          documentTitle="paper.pdf"
+          existingAnnotations={{
+            status: 'ready',
+            generation: 4,
+            items: [{
+              id: 'unresolved-highlight',
+              subtype: 'Highlight',
+              pageIndex: 0,
+              rect: { x: 10, y: 10, width: 20, height: 10 },
+              contents: 'Embedded saved copy',
+              author: 'Reviewer',
+              flags: [],
+              appearanceModes: ['normal'],
+              supportedAppearance: true,
+            }, {
+              id: 'source-highlight',
+              subtype: 'Highlight',
+              pageIndex: 1,
+              rect: { x: 1, y: 2, width: 3, height: 4 },
+              contents: 'Source-only comment',
+              author: 'Reviewer',
+              flags: [],
+              appearanceModes: ['normal'],
+              supportedAppearance: true,
+            }],
+          }}
+          save={{}}
+          selection={{
+            selectionUpdate: { kind: 'cleared', generation: 0 },
+          }}
+          authoring={{
+            onCommand: async () => generatedState,
+          }}
+          viewer={{}}
+          workspace={{}}
+        >
+          <div>Document canvas</div>
+        </ReviewShell>,
+      );
 
-    const attention = html.indexOf('<h2>Needs attention</h2>');
-    const annotations = html.indexOf('<section class="annotation-drawer__owned"');
-    const source = html.indexOf('data-existing-annotation="source-highlight"');
-    const owned = html.indexOf('data-review-item="owned-highlight"');
-    expect(attention).toBeGreaterThan(-1);
-    expect(annotations).toBeGreaterThan(attention);
-    expect(source).toBeGreaterThan(annotations);
-    expect(owned).toBeGreaterThan(source);
-    expect(html.match(/data-reconciliation-item="unresolved-highlight"/gu)).toHaveLength(1);
-    expect(html).not.toContain('data-review-item="unresolved-highlight"');
-    expect(html).toContain('data-review-item="owned-highlight"');
-  });
+      const annotations = html.indexOf('<section class="annotation-drawer__owned"');
+      const annotationList = html.indexOf('<ol', annotations);
+      const unresolved = html.indexOf('data-reconciliation-item="unresolved-highlight"');
+      const source = html.indexOf('data-existing-annotation="source-highlight"');
+      const owned = html.indexOf('data-review-item="owned-highlight"');
+      expect(annotations).toBeGreaterThan(-1);
+      expect(annotationList).toBeGreaterThan(annotations);
+      expect(unresolved).toBeGreaterThan(annotationList);
+      expect(source).toBeGreaterThan(unresolved);
+      expect(owned).toBeGreaterThan(source);
+      expect(html.match(/data-reconciliation-item="unresolved-highlight"/gu)).toHaveLength(1);
+      expect(html.match(/data-reconciliation-draft="frozen-draft"/gu)).toHaveLength(1);
+      expect(html).toContain('Keep this authored replacement draft visible.');
+      expect(html).not.toContain('data-review-item="unresolved-highlight"');
+      expect(html).not.toContain('data-existing-annotation="unresolved-highlight"');
+      expect(html).toContain('data-review-item="owned-highlight"');
+      expect(html).not.toContain('<h2>Needs attention</h2>');
+      const unresolvedRow = html.slice(unresolved, source);
+      expect(unresolvedRow).toContain('data-annotation-status-icon="warning"');
+      expect(unresolvedRow).toContain('lucide-triangle-alert');
+      expect(unresolvedRow).not.toContain('class="annotation-item__page"');
+      expect(unresolvedRow).not.toContain('class="annotation-item__section"');
+      expect(unresolvedRow).not.toContain('Multiple matches</span>');
+    },
+  );
 
   it('keeps Annotations as the stable empty core and omits optional sections', () => {
     const html = renderToStaticMarkup(

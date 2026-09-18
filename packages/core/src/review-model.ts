@@ -540,12 +540,10 @@ export function normalizeReviewState(state: ReviewState): ReviewState {
     ...state,
     ...(state.annotationName === undefined ? {} : { annotationName: normalizeAnnotationName(state.annotationName) }),
     workflow,
-    items: workflow.mode === "generated-output"
-      ? state.items.map((item) => canonicalizeReviewItem(item, {
-          ownerViewId: item.reconciliation?.ownerViewId ?? "legacy-view",
-          baseGeneration: item.reconciliation?.baseGeneration ?? workflow.documentGeneration,
-        }))
-      : [...state.items],
+    items: state.items.map((item) => canonicalizeReviewItem(item, {
+      ownerViewId: item.reconciliation?.ownerViewId ?? "legacy-view",
+      baseGeneration: item.reconciliation?.baseGeneration ?? workflow.documentGeneration,
+    })),
     pendingDrafts: state.pendingDrafts ?? [],
     discardAudit: state.discardAudit ?? [],
   };

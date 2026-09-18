@@ -28,11 +28,18 @@ import type {
 } from './ReferenceWorkspace.js';
 import type { PlacekeeperLinkLocation } from '../../../../packages/core/src/placekeeper-link.js';
 import type { ReviewLocationHistoryPort } from './review-location-history.js';
+import {
+  annotationReaderIdentityMatches,
+  type AnnotationReaderIdentity,
+} from './annotation-reader.js';
 import type {
   ReferenceNavigationAction,
   ReferenceNavigationState,
 } from './reference-navigation-state.js';
-import { referenceTabSuccessorIdentity } from './reference-navigation-state.js';
+import {
+  annotationReferenceTabIdentity,
+  referenceTabSuccessorIdentity,
+} from './reference-navigation-state.js';
 
 export interface NavigationDestinationMetadata {
   readonly label: string;
@@ -48,6 +55,24 @@ interface PendingReferenceRequest {
   readonly target: PdfNavigationTarget;
   readonly metadata: NavigationDestinationMetadata;
   readonly documentGeneration: number;
+  readonly preservedMainTarget?: PdfNavigationTarget | null;
+  readonly options?: ReferenceOpenOptions;
+}
+
+export interface ReferenceOpenSettlement {
+  readonly token: number;
+  readonly documentGeneration: number;
+  readonly tabIdentity: string;
+  readonly target: PdfNavigationTarget;
+  readonly settledLocation: PdfViewerLocation;
+  readonly navigation: PdfViewerNavigation;
+}
+
+export interface ReferenceOpenOptions {
+  readonly annotationIdentity?: AnnotationReaderIdentity;
+  /** Recreates the exact frozen origin after its tab was closed. */
+  readonly preferredTabIdentity?: string;
+  readonly onSettled?: (settlement: ReferenceOpenSettlement) => void;
 }
 
 /** Transient, active-viewer presentation state; never part of durable review navigation. */
@@ -279,6 +304,11 @@ export class NavigationCoordinator {
   constructor(private readonly dependencies: NavigationCoordinatorDependencies) {
     this.documentGeneration = dependencies.getState().documentGeneration;
     this.locationRestored = dependencies.locationHistory === undefined;
+  }
+
+  /** View-local authority token used to fence automatic successor restoration. */
+  operationIdentity(): number {
+    return this.operationToken;
   }
 
   startLocationHistory(): void {
@@ -619,19 +649,33 @@ export class NavigationCoordinator {
     target: PdfNavigationTarget,
     metadata: NavigationDestinationMetadata,
     preservedMainTarget?: PdfNavigationTarget | null,
+    options: ReferenceOpenOptions = {},
   ): Promise<boolean> {
     const operation = this.begin(target.documentGeneration);
     if (operation === null) return false;
     this.clearReferenceReturnState();
     const state = this.dependencies.getState();
-    const existing = state.tabs.find((tab) => tab.identity === target.identity);
+    const preferredExisting = options.preferredTabIdentity === undefined
+      ? undefined
+      : state.tabs.find((tab) => tab.identity === options.preferredTabIdentity);
+    const existing = preferredExisting ?? (options.annotationIdentity === undefined
+      ? state.tabs.find((tab) => (
+          tab.annotationIdentity === undefined
+          && tab.originalTarget.identity === target.identity
+        ))
+      : state.tabs.find((tab) => (
+          tab.annotationIdentity !== undefined
+          && annotationReaderIdentityMatches(tab.annotationIdentity, options.annotationIdentity!)
+    )));
     const preserveMain = preservedMainTarget !== undefined;
     const main = preserveMain ? this.dependencies.getMainNavigation() : undefined;
-    const mainLocation = main?.captureLocation() ?? null;
+    const mainLocation = preservedMainTarget === null
+      ? main?.captureLocation('viewport-origin') ?? null
+      : main?.captureLocation() ?? null;
     const restoreMainLocation = async () => {
       if (!preserveMain) return true;
       if (main && preservedMainTarget !== null) return main.applyTarget(preservedMainTarget);
-      const shifted = main?.captureLocation() ?? null;
+      const shifted = main?.captureLocation('viewport-origin') ?? null;
       return !main
         || !mainLocation
         || samePdfViewerLocation(mainLocation, shifted)
@@ -651,6 +695,8 @@ export class NavigationCoordinator {
         target,
         metadata,
         documentGeneration: operation.documentGeneration,
+        preservedMainTarget,
+        ...(Object.keys(options).length === 0 ? {} : { options }),
       };
       this.dependencies.setPendingReference({ status: 'loading', ...metadata });
     }
@@ -664,12 +710,32 @@ export class NavigationCoordinator {
         await this.dependencies.layout.settle();
         if (!this.isCurrent(operation)) return false;
       }
-      if (!await this.restoreReferenceTab(operation, existing.identity, false)) return false;
+      const explicitReveal = options.annotationIdentity !== undefined
+        || options.preferredTabIdentity !== undefined;
+      const annotationSettlement = !explicitReveal
+        ? null
+        : await this.revealReferenceTarget(
+            operation,
+            existing.identity,
+            target,
+            options.annotationIdentity,
+          );
+      if (!explicitReveal) {
+        if (!await this.restoreReferenceTab(operation, existing.identity, false)) return false;
+      } else if (annotationSettlement === null) {
+        return false;
+      }
       if (!this.isCurrent(operation)) return false;
       if (preserveMain) {
         await this.dependencies.layout.settle();
         if (!this.isCurrent(operation)) return false;
         if (!await restoreMainLocation() || !this.isCurrent(operation)) return false;
+      }
+      if (annotationSettlement !== null) {
+        if (!this.referenceSettlementIsCurrent(operation, annotationSettlement.navigation, existing.identity)) {
+          return false;
+        }
+        options.onSettled?.(annotationSettlement);
       }
       this.dependencies.focusReferenceTab(existing.identity);
       this.dependencies.setAnnouncement(`Reference active: ${metadata.label}.`);
@@ -681,6 +747,7 @@ export class NavigationCoordinator {
         target,
         metadata,
         documentGeneration: operation.documentGeneration,
+        ...(Object.keys(options).length === 0 ? {} : { options }),
       };
       this.dependencies.setPendingReference({ status: 'loading', ...metadata });
     }
@@ -712,12 +779,23 @@ export class NavigationCoordinator {
     );
     if (settledLocation === null) return failPreservingMain();
 
+    const tabIdentity = options.preferredTabIdentity
+      ?? (options.annotationIdentity === undefined
+        ? target.identity
+        : annotationReferenceTabIdentity(options.annotationIdentity));
+
     this.dependencies.dispatch({
       type: 'open-reference',
       target,
       settledLocation,
       label: metadata.label,
       pageContext: metadata.pageContext,
+      ...(options.annotationIdentity === undefined
+        ? {}
+        : { annotationIdentity: options.annotationIdentity }),
+      ...(options.preferredTabIdentity === undefined
+        ? {}
+        : { tabIdentity: options.preferredTabIdentity }),
     });
     // Reference mounting can settle the shared runway more than once. Restore
     // Main only after the tab and its final layout are committed so the viewer
@@ -727,10 +805,35 @@ export class NavigationCoordinator {
       if (!this.isCurrent(operation)) return false;
       if (!await restoreMainLocation() || !this.isCurrent(operation)) return false;
     }
+    // Committing a new annotation tab replaces its pending shell with the
+    // live Reference viewport. That final portal/layout transition can move
+    // the mounted page after the first target application. Reveal the exact
+    // target once more in committed geometry before exposing annotation
+    // content through onSettled.
+    const explicitReveal = options.annotationIdentity !== undefined
+      || options.preferredTabIdentity !== undefined;
+    const committedSettlement = explicitReveal
+      ? await this.revealReferenceTarget(
+          operation,
+          tabIdentity,
+          target,
+          options.annotationIdentity,
+        )
+      : null;
+    if (explicitReveal && committedSettlement === null) return this.failReference(operation);
+    if (!this.referenceSettlementIsCurrent(operation, navigation, tabIdentity)) return false;
     this.pendingReference = null;
     this.referenceRestoreIdentity = null;
     this.dependencies.setPendingReference(null);
-    this.dependencies.focusReferenceTab(target.identity);
+    options.onSettled?.(committedSettlement ?? {
+      token: operation.token,
+      documentGeneration: operation.documentGeneration,
+      tabIdentity,
+      target,
+      settledLocation,
+      navigation,
+    });
+    this.dependencies.focusReferenceTab(tabIdentity);
     this.dependencies.setAnnouncement(`Reference opened: ${metadata.label}.`);
     this.refreshCurrentOutline();
     return true;
@@ -749,6 +852,23 @@ export class NavigationCoordinator {
     if (status !== 'failed' && status !== 'loaded') return false;
     const operation = this.begin(pending.documentGeneration, true);
     if (operation === null) return false;
+    const preserveMain = pending.preservedMainTarget !== undefined;
+    const main = preserveMain ? this.dependencies.getMainNavigation() : undefined;
+    const mainLocation = pending.preservedMainTarget === null
+      ? main?.captureLocation('viewport-origin') ?? null
+      : main?.captureLocation() ?? null;
+    const restoreMainLocation = async () => {
+      if (!preserveMain) return true;
+      if (main !== this.dependencies.getMainNavigation()) return false;
+      if (main && pending.preservedMainTarget !== null) {
+        return main.applyTarget(pending.preservedMainTarget);
+      }
+      const shifted = main?.captureLocation('viewport-origin') ?? null;
+      return !main
+        || !mainLocation
+        || samePdfViewerLocation(mainLocation, shifted)
+        || main.applyLocation(mainLocation);
+    };
     this.clearReferenceReturnState();
     this.dependencies.setPendingReference({ status: 'loading', ...pending.metadata });
     const opened = status === 'failed' ? await controller.retry() : true;
@@ -770,11 +890,46 @@ export class NavigationCoordinator {
       settledLocation,
       label: pending.metadata.label,
       pageContext: pending.metadata.pageContext,
+      ...(pending.options?.annotationIdentity === undefined
+        ? {}
+        : { annotationIdentity: pending.options.annotationIdentity }),
+      ...(pending.options?.preferredTabIdentity === undefined
+        ? {}
+        : { tabIdentity: pending.options.preferredTabIdentity }),
     });
+    const tabIdentity = pending.options?.preferredTabIdentity
+      ?? (pending.options?.annotationIdentity === undefined
+        ? pending.target.identity
+        : annotationReferenceTabIdentity(pending.options.annotationIdentity));
+    if (preserveMain) {
+      await this.dependencies.layout.settle();
+      if (!this.isCurrent(operation)) return false;
+      if (!await restoreMainLocation() || !this.isCurrent(operation)) return false;
+    }
+    const explicitReveal = pending.options?.annotationIdentity !== undefined
+      || pending.options?.preferredTabIdentity !== undefined;
+    const committedSettlement = explicitReveal
+      ? await this.revealReferenceTarget(
+          operation,
+          tabIdentity,
+          pending.target,
+          pending.options?.annotationIdentity,
+        )
+      : null;
+    if (explicitReveal && committedSettlement === null) return this.failReference(operation);
+    if (!this.referenceSettlementIsCurrent(operation, navigation, tabIdentity)) return false;
     this.pendingReference = null;
     this.referenceRestoreIdentity = null;
     this.dependencies.setPendingReference(null);
-    this.dependencies.focusReferenceTab(pending.target.identity);
+    pending.options?.onSettled?.(committedSettlement ?? {
+      token: operation.token,
+      documentGeneration: operation.documentGeneration,
+      tabIdentity,
+      target: pending.target,
+      settledLocation,
+      navigation,
+    });
+    this.dependencies.focusReferenceTab(tabIdentity);
     this.dependencies.setAnnouncement(`Reference opened: ${pending.metadata.label}.`);
     return true;
   }
@@ -1301,13 +1456,107 @@ export class NavigationCoordinator {
     target: PdfNavigationTarget,
   ): Promise<PdfViewerLocation | null> {
     await this.dependencies.layout.settle();
-    if (!this.isCurrent(operation)) return null;
+    if (!this.isCurrent(operation) || this.dependencies.getReferenceNavigation() !== navigation) {
+      return null;
+    }
     this.dependencies.resetReferenceManualScrollIntent();
     const applied = await navigation.applyTarget(target, 'reference-fit-width');
     this.dependencies.resetReferenceManualScrollIntent();
     if (!applied) return null;
-    if (!this.isCurrent(operation)) return null;
+    if (!this.isCurrent(operation) || this.dependencies.getReferenceNavigation() !== navigation) {
+      return null;
+    }
     return navigation.captureLocation();
+  }
+
+  private referenceSettlementIsCurrent(
+    operation: Operation,
+    navigation: PdfViewerNavigation,
+    tabIdentity: string,
+  ): boolean {
+    const state = this.dependencies.getState();
+    return this.isCurrent(operation)
+      && this.dependencies.getReferenceNavigation() === navigation
+      && state.documentGeneration === operation.documentGeneration
+      && state.activeTabIdentity === tabIdentity
+      && state.tabs.some((tab) => tab.identity === tabIdentity);
+  }
+
+  private async revealReferenceTarget(
+    operation: Operation,
+    tabIdentity: string,
+    target: PdfNavigationTarget,
+    annotationIdentity?: AnnotationReaderIdentity,
+  ): Promise<ReferenceOpenSettlement | null> {
+    const state = this.dependencies.getState();
+    const tab = state.tabs.find((candidate) => candidate.identity === tabIdentity);
+    const navigation = this.dependencies.getReferenceNavigation();
+    const outgoingLocation = navigation?.captureLocation() ?? null;
+    if (
+      tab === undefined
+      || (annotationIdentity !== undefined && (
+        tab.annotationIdentity === undefined
+        || !annotationReaderIdentityMatches(tab.annotationIdentity, annotationIdentity)
+      ))
+      || navigation === null
+      || outgoingLocation === null
+    ) return null;
+
+    if (state.activeTabIdentity !== tabIdentity) {
+      this.dependencies.dispatch({
+        type: 'request-reference-switch',
+        token: operation.token,
+        targetIdentity: tabIdentity,
+        outgoingLocation,
+      });
+    }
+    const settledLocation = await this.applyReferenceTargetAfterLayout(
+      operation,
+      navigation,
+      target,
+    );
+    if (settledLocation === null) {
+      if (state.activeTabIdentity !== tabIdentity) {
+        this.dependencies.dispatch({
+          type: 'complete-reference-switch',
+          token: operation.token,
+          documentGeneration: operation.documentGeneration,
+          success: false,
+        });
+      }
+      return null;
+    }
+    if (state.activeTabIdentity === tabIdentity) {
+      this.dependencies.dispatch({
+        type: 'refresh-active-reference',
+        settledLocation,
+        ...(annotationIdentity === undefined ? {} : { annotationTarget: target }),
+      });
+    } else {
+      this.dependencies.dispatch({
+        type: 'complete-reference-switch',
+        token: operation.token,
+        documentGeneration: operation.documentGeneration,
+        success: true,
+        settledLocation,
+      });
+      if (annotationIdentity !== undefined) {
+        this.dependencies.dispatch({
+          type: 'refresh-active-reference',
+          settledLocation,
+          annotationTarget: target,
+        });
+      }
+    }
+    if (!this.referenceSettlementIsCurrent(operation, navigation, tabIdentity)) return null;
+    return {
+      token: operation.token,
+      documentGeneration: operation.documentGeneration,
+      tabIdentity,
+      target,
+      settledLocation,
+      navigation,
+    };
   }
 
   private async restoreReferenceTab(
@@ -1392,12 +1641,16 @@ export class NavigationCoordinator {
     this.dependencies.resetReferenceManualScrollIntent();
     let applied = await navigation.applyLocation(tab.settledLocation);
     this.dependencies.resetReferenceManualScrollIntent();
-    if (!this.isCurrent(operation)) return null;
+    if (!this.isCurrent(operation) || this.dependencies.getReferenceNavigation() !== navigation) {
+      return null;
+    }
     if (!applied) {
       this.dependencies.resetReferenceManualScrollIntent();
       applied = await navigation.applyTarget(tab.originalTarget, 'reference-fit-width');
       this.dependencies.resetReferenceManualScrollIntent();
-      if (!this.isCurrent(operation)) return null;
+      if (!this.isCurrent(operation) || this.dependencies.getReferenceNavigation() !== navigation) {
+        return null;
+      }
     }
     return applied ? navigation.captureLocation() : null;
   }

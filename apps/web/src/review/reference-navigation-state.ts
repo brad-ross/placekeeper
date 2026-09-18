@@ -3,6 +3,10 @@ import {
   samePdfViewerLocation,
   type PdfViewerLocation,
 } from '../pdf/viewer-navigation.js';
+import {
+  annotationReaderIdentityMatches,
+  type AnnotationReaderIdentity,
+} from './annotation-reader.js';
 
 export type WorkspaceMode = 'outline' | 'search' | 'references' | 'annotations';
 
@@ -32,6 +36,10 @@ export interface WorkspaceMemory {
 
 export interface ReferenceTab {
   readonly identity: string;
+  /** Optional annotation provenance; never substitutes for geometric target identity. */
+  readonly annotationIdentity?: AnnotationReaderIdentity;
+  /** Current canonical annotation anchor; ordinary tabs rely on originalTarget alone. */
+  readonly annotationTarget?: PdfNavigationTarget;
   /** The canonical target that first created this durable tab. */
   readonly originalTarget: PdfNavigationTarget;
   /** The most recently settled, fully restorable view for this tab. */
@@ -107,8 +115,15 @@ export type ReferenceNavigationAction =
       readonly settledLocation: PdfViewerLocation;
       readonly label?: string;
       readonly pageContext?: string;
+      readonly annotationIdentity?: AnnotationReaderIdentity;
+      /** Frozen recovery identity used when recreating a closed annotation tab. */
+      readonly tabIdentity?: string;
     }
-  | { readonly type: 'refresh-active-reference'; readonly settledLocation: PdfViewerLocation }
+  | {
+      readonly type: 'refresh-active-reference';
+      readonly settledLocation: PdfViewerLocation;
+      readonly annotationTarget?: PdfNavigationTarget;
+    }
   | {
       readonly type: 'request-reference-switch';
       readonly token: number;
@@ -224,13 +239,21 @@ function replaceTabLocation(
   tabs: readonly ReferenceTab[],
   identity: string,
   settledLocation: PdfViewerLocation,
+  annotationTarget?: PdfNavigationTarget,
 ): readonly ReferenceTab[] {
   const index = tabs.findIndex((tab) => tab.identity === identity);
   if (index < 0) return tabs;
   const current = tabs[index]!;
-  if (exactlySameLocation(current.settledLocation, settledLocation)) return tabs;
+  if (
+    exactlySameLocation(current.settledLocation, settledLocation)
+    && (annotationTarget === undefined || current.annotationTarget === annotationTarget)
+  ) return tabs;
   const next = [...tabs];
-  next[index] = { ...current, settledLocation };
+  next[index] = {
+    ...current,
+    settledLocation,
+    ...(annotationTarget === undefined ? {} : { annotationTarget }),
+  };
   return next;
 }
 
@@ -263,6 +286,17 @@ export function referenceTabSuccessorIdentity(
   removedIndex: number,
 ): string | null {
   return tabs[removedIndex + 1]?.identity ?? tabs[removedIndex - 1]?.identity ?? null;
+}
+
+export function annotationReferenceTabIdentity(identity: AnnotationReaderIdentity): string {
+  return identity.origin === 'owned'
+    ? `annotation:owned:${encodeURIComponent(identity.itemId)}`
+    : [
+        'annotation:source',
+        identity.documentGeneration,
+        identity.discoveryGeneration,
+        encodeURIComponent(identity.annotationKey),
+      ].join(':');
 }
 
 function withoutTab(
@@ -306,7 +340,15 @@ export function reduceReferenceNavigation(
       };
     case 'open-reference': {
       if (action.target.documentGeneration !== state.documentGeneration) return state;
-      const existing = state.tabs.find((tab) => tab.identity === action.target.identity);
+      const existing = action.annotationIdentity === undefined
+        ? state.tabs.find((tab) => (
+            tab.annotationIdentity === undefined
+            && tab.originalTarget.identity === action.target.identity
+          ))
+        : state.tabs.find((tab) => (
+            tab.annotationIdentity !== undefined
+            && annotationReaderIdentityMatches(tab.annotationIdentity, action.annotationIdentity!)
+          ));
       if (existing) {
         if (
           state.activeTabIdentity === existing.identity
@@ -320,10 +362,21 @@ export function reduceReferenceNavigation(
           workspace: { ...state.workspace, lastMode: 'references' },
         };
       }
+      const tabIdentity = action.tabIdentity
+        ?? (action.annotationIdentity === undefined
+          ? action.target.identity
+          : annotationReferenceTabIdentity(action.annotationIdentity));
+      if (state.tabs.some((tab) => tab.identity === tabIdentity)) return state;
       const tab: ReferenceTab = {
-        identity: action.target.identity,
+        identity: tabIdentity,
         originalTarget: action.target,
         settledLocation: action.settledLocation,
+        ...(action.annotationIdentity === undefined
+          ? {}
+          : {
+              annotationIdentity: action.annotationIdentity,
+              annotationTarget: action.target,
+            }),
         ...(action.label === undefined ? {} : { label: action.label }),
         ...(action.pageContext === undefined ? {} : { pageContext: action.pageContext }),
       };
@@ -341,6 +394,7 @@ export function reduceReferenceNavigation(
         state.tabs,
         state.activeTabIdentity,
         action.settledLocation,
+        action.annotationTarget,
       );
       return tabs === state.tabs ? state : { ...state, tabs };
     }

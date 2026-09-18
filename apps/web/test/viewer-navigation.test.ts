@@ -8,6 +8,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { PdfNavigationTarget } from '../src/pdf/pdf-navigation-target.js';
 import { combinePageRotation } from '../src/pdf/owned-overlay.js';
 import {
+  naturalAnchorToPdfBottomOriginPoint,
   pdfBottomOriginPointToNaturalAnchor,
   samePdfViewerLocation,
   type PdfViewerLocation,
@@ -51,6 +52,29 @@ describe('viewer navigation math', () => {
       page,
       { x: 100, y: 200 },
     )).toEqual({ x: 72, y: 160 });
+  });
+
+  it('round trips a cropped natural anchor through a rotated PDF destination', () => {
+    const natural = { x: 72, y: 160 };
+    const cropOrigin = { x: 100, y: 200 };
+    const pdfPoint = naturalAnchorToPdfBottomOriginPoint(natural, page, cropOrigin);
+    expect(pdfPoint).toEqual({ x: 172, y: 840 });
+    const location = createPdfTargetLocation({
+      documentGeneration: 4,
+      pageIndex: 0,
+      zoom: { mode: PdfZoomMode.XYZ, params: [pdfPoint.x, pdfPoint.y, 0] },
+      identity: 'cropped-rotated-annotation',
+    }, {
+      page: { ...page, cropOrigin },
+      viewport,
+      currentZoom: 1.25,
+      rotation: Rotation.Degree90,
+    });
+    expect(location).toMatchObject({
+      anchor: natural,
+      alignment: { xPercent: 0, yPercent: 0 },
+      zoom: 1.25,
+    });
   });
 
   it.each([
@@ -298,6 +322,7 @@ function navigationHarness(options: {
   viewportWidth?: number;
   throwViewportScroll?: boolean;
   timeoutMs?: number;
+  onNextFrame?: (frame: number, pageRect: RectState) => void;
 } = {}) {
   const combinedRotation = combinePageRotation(
     options.pageRotation ?? Rotation.Degree0,
@@ -410,6 +435,7 @@ function navigationHarness(options: {
   let viewportScrollTop = options.constrainedVertical === 'end' ? 1_600 : 0;
   let staleViewportMetricsReads = options.staleViewportMetricsReads ?? 0;
   let viewportResized = false;
+  let frame = 0;
   const storeListeners = new Set<() => void>();
   type HarnessZoomEvent = Pick<
     ZoomChangeEvent,
@@ -631,6 +657,8 @@ function navigationHarness(options: {
     runway: () => options.runway ?? { right: 0, bottom: 0 },
     timeoutMs: options.timeoutMs ?? 25,
     nextFrame: async () => {
+      frame += 1;
+      options.onNextFrame?.(frame, pageRect);
       paintedPages.push({ ...pageRect });
       if (options.initiallyUnready && viewportRect.width === 0) {
         viewportRect.width = 600;
@@ -651,6 +679,10 @@ function navigationHarness(options: {
     setCurrentZoom(zoom: number) {
       currentZoom = zoom;
     },
+    resizeViewport(width: number, height = viewportRect.height) {
+      viewportRect.width = width;
+      viewportRect.height = height;
+    },
     replaceActiveDocument(documentId: string) {
       activeDocumentId = documentId;
       for (const listener of storeListeners) listener();
@@ -659,6 +691,25 @@ function navigationHarness(options: {
 }
 
 describe('viewer navigation adapter', () => {
+  it('clamps fallback pages and natural coordinates without changing zoom or alignment', () => {
+    const harness = navigationHarness({
+      farTargetInitiallyUnmounted: true,
+      destinationPageWidth: 320,
+    });
+
+    expect(harness.navigation.clampLocation({
+      pageIndex: 9,
+      anchor: { x: 900, y: 1_200 },
+      alignment: { xPercent: 45, yPercent: 55 },
+      zoom: 1.75,
+    })).toEqual({
+      pageIndex: 2,
+      anchor: { x: 320, y: 800 },
+      alignment: { xPercent: 45, yPercent: 55 },
+      zoom: 1.75,
+    });
+  });
+
   it.each([
     ['XYZ', target(PdfZoomMode.XYZ, [300, 400, 2])],
     ['fit-page', target(PdfZoomMode.FitPage)],
@@ -984,7 +1035,7 @@ describe('viewer navigation adapter', () => {
     expect(harness.log).toEqual([]);
   });
 
-  it('rolls back if settled workspace geometry changes while fit zoom is pending', async () => {
+  it('accepts live fitted geometry when the fit invalidates its settlement token', async () => {
     let current = true;
     const harness = navigationHarness({ manualZoom: true, viewportGap: 10, timeoutMs: 250 });
     const fitting = harness.navigation.fitToWidth(async () => ({
@@ -993,6 +1044,59 @@ describe('viewer navigation adapter', () => {
     }));
     await vi.waitFor(() => expect(harness.log).toContain(`zoom:${580 / 600}`));
     current = false;
+    harness.completeZoom(580 / 600);
+
+    expect(await fitting).toBe(true);
+    expect(harness.log).not.toContain('zoom:1');
+  });
+
+  it('waits for delayed live page geometry after the zoom event', async () => {
+    const harness = navigationHarness({
+      manualZoom: true,
+      viewportGap: 10,
+      timeoutMs: 250,
+      onNextFrame: (frame, pageRect) => {
+        if (frame !== 5) return;
+        pageRect.left = 10;
+        pageRect.width = 580;
+      },
+    });
+    const fitting = harness.navigation.fitToWidth();
+    await vi.waitFor(() => expect(harness.log).toContain(`zoom:${580 / 600}`));
+    harness.completeZoom(580 / 600);
+    harness.pageRect.left = 180;
+    harness.pageRect.width = 620;
+
+    expect(await fitting).toBe(true);
+    expect(harness.log).not.toContain('zoom:1');
+  });
+
+  it('rolls back when live workspace geometry no longer matches the requested fit', async () => {
+    let current = true;
+    const harness = navigationHarness({ manualZoom: true, viewportGap: 10, timeoutMs: 250 });
+    const fitting = harness.navigation.fitToWidth(async () => ({
+      revision: 3,
+      isCurrent: () => current,
+    }));
+    await vi.waitFor(() => expect(harness.log).toContain(`zoom:${580 / 600}`));
+    current = false;
+    harness.resizeViewport(500);
+    harness.completeZoom(580 / 600);
+
+    expect(await fitting).toBe(false);
+    expect(harness.log).toContain('zoom:1');
+  });
+
+  it('rolls back when the live workspace expands beyond the requested fit', async () => {
+    let current = true;
+    const harness = navigationHarness({ manualZoom: true, viewportGap: 10, timeoutMs: 250 });
+    const fitting = harness.navigation.fitToWidth(async () => ({
+      revision: 3,
+      isCurrent: () => current,
+    }));
+    await vi.waitFor(() => expect(harness.log).toContain(`zoom:${580 / 600}`));
+    current = false;
+    harness.resizeViewport(700);
     harness.completeZoom(580 / 600);
 
     expect(await fitting).toBe(false);
@@ -1107,6 +1211,24 @@ describe('viewer navigation adapter', () => {
 
     expect(await harness.navigation.applyLocation(captured!)).toBe(true);
     expect(samePdfViewerLocation(harness.navigation.captureLocation(), captured)).toBe(true);
+  });
+
+  it('captures a transient viewport origin that survives tray-driven viewport resizing', async () => {
+    const harness = navigationHarness();
+    const captured = harness.navigation.captureLocation('viewport-origin');
+
+    expect(captured).toEqual({
+      pageIndex: 0,
+      anchor: { x: 100, y: 200 },
+      alignment: { xPercent: 0, yPercent: 0 },
+      zoom: 1,
+    });
+    const originalPagePosition = { left: harness.pageRect.left, top: harness.pageRect.top };
+    harness.resizeViewport(400, 200);
+
+    expect(await harness.navigation.applyLocation(captured!)).toBe(true);
+    expect(harness.pageRect).toMatchObject(originalPagePosition);
+    expect(harness.navigation.captureLocation('viewport-origin')).toEqual(captured);
   });
 
   it('accepts a fully visible fitted page when a tray runway creates artificial horizontal scroll range', async () => {

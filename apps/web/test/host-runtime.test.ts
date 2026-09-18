@@ -11,7 +11,10 @@ import {
   type MacosPageMessage,
 } from "../../../packages/core/src/macos-shell-protocol.js";
 import { createBrowserHostRuntime } from "../src/host/browser-runtime.js";
-import { subscribeRuntimeDocumentSource } from "../src/host/runtime-document-source.js";
+import {
+  subscribeRuntimeDocumentSource,
+  type RuntimeDocumentSourceSnapshot,
+} from "../src/host/runtime-document-source.js";
 import type {
   HostRuntime,
   HostRuntimeBootstrap,
@@ -88,6 +91,7 @@ describe("host-neutral review runtime", () => {
               sessionId,
               generation: 1,
               revision: 0,
+              activeAuthoringDraftIds: ["draft_macos_live_1234"],
               state,
               scope: {
                 documentTitle: "Paper.pdf",
@@ -123,6 +127,7 @@ describe("host-neutral review runtime", () => {
 
     const bootstrap = await runtime.bootstrap();
     expect(bootstrap).toMatchObject({
+      activeAuthoringDraftIds: ["draft_macos_live_1234"],
       scope: { documentTitle: "Paper.pdf", launchSurface: "macos" },
       resourcePolicy: {
         host: "macos",
@@ -203,15 +208,102 @@ describe("host-neutral review runtime", () => {
     })).rejects.toThrow(/packaged PDF worker/iu);
   });
 
+  it("waits for the real browser attachment handshake instead of exposing legacy authoring", async () => {
+    const state = createReviewState({
+      sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaab",
+      source: { fileId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbc", digest: "a".repeat(64), byteLength: 100 },
+    });
+    let socketMessage: ((event: { data: string }) => void) | undefined;
+    const fetch = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const path = String(input);
+      if (path.endsWith("/runtime-state")) return new Response(null, { status: 404 });
+      if (path.endsWith("/state")) return Response.json(state);
+      if (path.endsWith("/scope")) return Response.json({ documentTitle: "paper.pdf", launchSurface: "browser" });
+      if (path.endsWith("/save/status")) return Response.json({
+        destination: { phase: "none", generation: 0 },
+        sync: { phase: "clean", desiredRevision: 0, savedRevision: 0 },
+      });
+      if (path.endsWith("/interactions/begin")) {
+        expect(JSON.parse(String(init?.body))).toMatchObject({
+          attachment: { attachmentId: "attachment_browser_delayed" },
+        });
+        return Response.json({
+          status: "accepted", generation: 1, ownerViewId: "attachment_browser_delayed",
+        });
+      }
+      throw new Error(`Unexpected request: ${path}`);
+    });
+    class DelayedSocket {
+      constructor(readonly url: string, readonly protocols: readonly string[]) {}
+      addEventListener(kind: string, listener: (event: { data: string }) => void) {
+        if (kind === "message") socketMessage = listener;
+      }
+      close() {}
+    }
+    vi.stubGlobal("location", new URL("http://127.0.0.1:43179/s/id/bootstrap"));
+    vi.stubGlobal("window", { location: globalThis.location, setTimeout, clearTimeout });
+    const sessionValues = new Map<string, string>();
+    vi.stubGlobal("sessionStorage", {
+      getItem: (key: string) => sessionValues.get(key) ?? null,
+      setItem: (key: string, value: string) => { sessionValues.set(key, value); },
+    });
+    vi.stubGlobal("fetch", fetch);
+    vi.stubGlobal("WebSocket", DelayedSocket);
+    const runtime = createBrowserHostRuntime({ sessionId: state.sessionId, credential: "memory-only" });
+
+    await runtime.bootstrap();
+    const presenceInvalidations: HostRuntimeInvalidation[] = [];
+    runtime.subscribeInvalidations((event) => presenceInvalidations.push(event));
+    socketMessage?.({ data: JSON.stringify({
+      kind: "session-invalidated", documentGeneration: 1, reviewRevision: 0, reason: "presence",
+    }) });
+    expect(presenceInvalidations).toEqual([expect.objectContaining({ reason: "presence", revision: 0 })]);
+    expect(runtime.capabilities).toEqual({ localDocumentRefresh: true });
+    let settled = false;
+    const admitted = runtime.beginInteraction!({
+      interactionToken: "interaction_browser_delayed", order: 1, generation: 1,
+    }).then((value) => { settled = true; return value; });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    expect(fetch).not.toHaveBeenCalledWith(expect.stringContaining("/interactions/begin"), expect.anything());
+
+    socketMessage?.({ data: JSON.stringify({ kind: "interaction-attachment", attachment: {
+      sessionId: state.sessionId,
+      attachmentId: "attachment_browser_delayed",
+      incarnationId: "incarnation_browser_delayed",
+      capability: "c".repeat(43),
+      protocolVersion: 1,
+      capabilities: ["session-wide-holds"],
+    } }) });
+    await expect(admitted).resolves.toMatchObject({
+      status: "accepted", ownerViewId: "attachment_browser_delayed",
+    });
+    expect(runtime.capabilities).toEqual({ localDocumentRefresh: true, interactionLifecycleVersion: 1 });
+    runtime.dispose();
+  });
+
   it("keeps browser bootstrap, scope, assets, presence, and export on authenticated HTTP/WebSocket", async () => {
     const state = createReviewState({
       sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
       source: { fileId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", digest: "a".repeat(64), byteLength: 100 },
     });
-    const fetch = vi.fn(async (input: string | URL | Request) => {
+    let socketMessage: ((event: { data: string }) => void) | undefined;
+    const fetch = vi.fn(async (input: string | URL | Request, _init?: RequestInit) => {
       const path = String(input);
+      if (path.endsWith("/runtime-state")) return Response.json({
+        state,
+        activeAuthoringDraftIds: ["draft_browser_live_1234"],
+      });
       if (path.endsWith("/state")) return Response.json(state);
       if (path.endsWith("/commands")) return Response.json({ ...state, revision: 1, annotationName: "Brad Ross" });
+      if (path.endsWith("/interactions/begin")) return Response.json({ status: "accepted", generation: 1 });
+      if (path.endsWith("/interactions/finalize")) {
+        socketMessage?.({ data: JSON.stringify({ kind: "document-successor", previousGeneration: 1,
+          documentGeneration: 2, reviewRevision: 1 }) });
+        return Response.json({ status: "finalized", outcome: "discarded", reviewRevision: 1 });
+      }
+      if (path.endsWith("/interactions/release")) return Response.json({ status: "released" });
+      if (path.endsWith("/interactions/acknowledge")) return Response.json({ status: "released" });
       if (path.endsWith("/scope")) return Response.json({ documentTitle: "paper.pdf", launchSurface: "browser" });
       if (path.endsWith("/save/status")) return Response.json({ destination: { phase: "none", generation: 0 }, sync: { phase: "clean", desiredRevision: 0, desiredDigest: "b".repeat(64), savedRevision: 0, savedDigest: "b".repeat(64) } });
       if (path.endsWith("/export")) return Response.json({ kind: "reviewed-copy", path: "/tmp/reviewed.pdf", revision: 0, digest: "c".repeat(64) });
@@ -220,23 +312,79 @@ describe("host-neutral review runtime", () => {
     class FakeSocket {
       static created: FakeSocket[] = [];
       constructor(readonly url: string, readonly protocols: readonly string[]) { FakeSocket.created.push(this); }
-      addEventListener() {}
+      addEventListener(kind: string, listener: (event: { data: string }) => void) {
+        if (kind === "message") {
+          socketMessage = listener;
+          listener({ data: JSON.stringify({ kind: "interaction-attachment", attachment: {
+            sessionId: state.sessionId, attachmentId: "attachment_browser_1234",
+            incarnationId: "incarnation_browser_1234", capability: "c".repeat(43),
+            protocolVersion: 1, capabilities: ["session-wide-holds"],
+          } }) });
+        }
+      }
       close() {}
     }
     vi.stubGlobal("location", new URL("http://127.0.0.1:43179/s/id/bootstrap"));
     vi.stubGlobal("window", { location: globalThis.location, setTimeout, clearTimeout });
+    const sessionValues = new Map<string, string>();
+    vi.stubGlobal("sessionStorage", {
+      getItem: (key: string) => sessionValues.get(key) ?? null,
+      setItem: (key: string, value: string) => { sessionValues.set(key, value); },
+    });
     vi.stubGlobal("fetch", fetch);
     vi.stubGlobal("WebSocket", FakeSocket);
     const runtime = createBrowserHostRuntime({ sessionId: state.sessionId, credential: "memory-only" });
 
     const bootstrap = await runtime.bootstrap();
+    expect(runtime.capabilities).toEqual({ localDocumentRefresh: true, interactionLifecycleVersion: 1 });
     expect(bootstrap.viewerAssets).toMatchObject({
       documentUrl: `/s/${state.sessionId}/document/${state.source.fileId}?generation=1`,
       workerUrl: `/s/${state.sessionId}/assets/pdfium-worker.js`,
       requestHeaders: { authorization: "Bearer memory-only" },
     });
     expect(bootstrap.resourcePolicy).toEqual({ host: "browser", origin: "http://127.0.0.1:43179" });
+    expect(bootstrap.activeAuthoringDraftIds).toEqual(["draft_browser_live_1234"]);
     await expect(runtime.command(setAnnotationName(state, "Brad Ross"))).resolves.toMatchObject({ annotationName: "Brad Ross", revision: 1 });
+    const ownerScopedCommand = {
+      type: "reattach",
+      expectedRevision: 0,
+      id: "item_browser_1234",
+      expectedReconciliationRevision: 0,
+      ownerViewId: "attachment_browser_1234",
+      anchor: {
+        kind: "page",
+        pageIndex: 0,
+        rect: { x: 1, y: 1, width: 5, height: 5 },
+      },
+      updatedAt: "2026-09-16T00:00:00.000Z",
+    } as const;
+    await runtime.command(ownerScopedCommand);
+    const ownerScopedRequest = fetch.mock.calls.find(([, init]) => {
+      if (typeof init?.body !== "string") return false;
+      const body = JSON.parse(init.body) as { command?: { type?: unknown } };
+      return body.command?.type === "reattach";
+    });
+    expect(ownerScopedRequest?.[0]).toBe(`/s/${state.sessionId}/commands`);
+    expect(JSON.parse(String(ownerScopedRequest?.[1]?.body))).toMatchObject({
+      command: ownerScopedCommand,
+      attachment: {
+        attachmentId: "attachment_browser_1234",
+        incarnationId: "incarnation_browser_1234",
+        capability: "c".repeat(43),
+      },
+    });
+    await expect(runtime.beginInteraction?.({ interactionToken: "interaction_browser_1234", order: 1, generation: 1 }))
+      .resolves.toMatchObject({ status: "accepted" });
+    const deliveryOrder: string[] = [];
+    runtime.subscribeInvalidations(() => deliveryOrder.push("invalidation"));
+    const finalized = runtime.finalizeInteraction?.({ interactionToken: "interaction_browser_1234", order: 2,
+      outcome: "discarded", draftId: "draft_browser_1234", expectedDraftRevision: 1 })
+      .then((value) => { deliveryOrder.push("receipt"); return value; });
+    await expect(finalized)
+      .resolves.toMatchObject({ status: "finalized" });
+    expect(deliveryOrder).toEqual(["receipt"]);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(deliveryOrder).toEqual(["receipt", "invalidation"]);
     expect(fetch).toHaveBeenCalledWith(`/s/${state.sessionId}/commands`, expect.objectContaining({
       body: JSON.stringify(setAnnotationName(state, "Brad Ross")),
       headers: expect.objectContaining({ "x-placekeeper-generation": "1" }),
@@ -249,9 +397,42 @@ describe("host-neutral review runtime", () => {
     fetch.mockResolvedValueOnce(Response.json({ error: { kind: "export-conflict" } }, { status: 409 }));
     await expect(runtime.exportReviewedCopy(true, fence)).rejects.toThrow("Confirm the annotation name again");
     expect(FakeSocket.created[0]).toMatchObject({
-      protocols: ["placekeeper", "placekeeper-auth.memory-only"],
+      protocols: [
+        "placekeeper",
+        "placekeeper-auth.memory-only",
+        expect.stringMatching(/^placekeeper-view\./u),
+        expect.stringMatching(/^placekeeper-owner\.[A-Za-z0-9_-]{43}$/u),
+      ],
     });
     runtime.dispose();
+    const replacement = createBrowserHostRuntime({ sessionId: state.sessionId, credential: "replacement-memory-only" });
+    await replacement.bootstrap();
+    expect(FakeSocket.created[1]?.protocols.find((value) => value.startsWith("placekeeper-owner.")))
+      .toBe(FakeSocket.created[0]?.protocols.find((value) => value.startsWith("placekeeper-owner.")));
+    replacement.dispose();
+
+    const duplicatedSessionValues = new Map(sessionValues);
+    vi.stubGlobal("window", { location: globalThis.location, setTimeout, clearTimeout });
+    vi.stubGlobal("sessionStorage", {
+      getItem: (key: string) => duplicatedSessionValues.get(key) ?? null,
+      setItem: (key: string, value: string) => { duplicatedSessionValues.set(key, value); },
+    });
+    const duplicate = createBrowserHostRuntime({ sessionId: state.sessionId, credential: "duplicate-memory-only" });
+    await duplicate.bootstrap();
+    expect(FakeSocket.created[2]?.protocols.find((value) => value.startsWith("placekeeper-owner.")))
+      .not.toBe(FakeSocket.created[0]?.protocols.find((value) => value.startsWith("placekeeper-owner.")));
+    duplicate.dispose();
+
+    vi.stubGlobal("window", { location: globalThis.location, setTimeout, clearTimeout });
+    vi.stubGlobal("performance", { getEntriesByType: () => [{ type: "reload" }] });
+    const reloadedDuplicate = createBrowserHostRuntime({
+      sessionId: state.sessionId,
+      credential: "reloaded-duplicate-memory-only",
+    });
+    await reloadedDuplicate.bootstrap();
+    expect(FakeSocket.created[3]?.protocols.find((value) => value.startsWith("placekeeper-owner.")))
+      .toBe(FakeSocket.created[2]?.protocols.find((value) => value.startsWith("placekeeper-owner.")));
+    reloadedDuplicate.dispose();
   });
 
   it("publishes only the newest complete successor and retains the last PDF on failure", async () => {
@@ -322,7 +503,7 @@ describe("host-neutral review runtime", () => {
     unsubscribe();
   });
 
-  it("rehydrates same-generation freshness invalidations and fences racing refreshes", async () => {
+  it("rehydrates same-generation invalidations without presenting document reconciliation", async () => {
     const sessionId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
     const loaded = (revision: number, freshness: "current" | "possibly-stale"): HostRuntimeBootstrap => ({
       sessionId,
@@ -364,17 +545,169 @@ describe("host-neutral review runtime", () => {
     const published: Array<{ loaded: HostRuntimeBootstrap; refreshStatus: string }> = [];
     subscribeRuntimeDocumentSource(runtime, loaded(0, "current"), (snapshot) => published.push(snapshot));
 
+    listener?.({ sessionId, generation: 1, revision: 0, reason: "presence" });
     listener?.({ sessionId, generation: 1, revision: 0, reason: "freshness" });
     listener?.({ sessionId, generation: 1, revision: 1, reason: "revision" });
+    expect(published).toEqual([]);
     completions[0]!(loaded(0, "possibly-stale"));
     await Promise.resolve();
-    expect(published.at(-1)?.refreshStatus).toBe("reconciling");
-    completions[1]!(loaded(1, "possibly-stale"));
+    completions[1]!(loaded(0, "possibly-stale"));
+    await Promise.resolve();
+    expect(published).toEqual([]);
+    completions[2]!(loaded(1, "possibly-stale"));
     await Promise.resolve();
     expect(published.at(-1)).toMatchObject({
       refreshStatus: "idle",
       loaded: { generation: 1, revision: 1, state: { workflow: { freshness: "possibly-stale" } } },
     });
+  });
+
+  it("installs canonical-ahead reconnects without speculating about an unknown generation", async () => {
+    vi.useFakeTimers();
+    const sessionId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const loaded = (generation: number, revision: number): HostRuntimeBootstrap => ({
+      sessionId,
+      generation,
+      revision,
+      session: { sessionId },
+      state: {
+        ...createReviewState({
+          sessionId,
+          source: { fileId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", digest: "a".repeat(64), byteLength: 100 },
+          workflowMode: "generated-output",
+          documentGeneration: generation,
+        }),
+        revision,
+      },
+      scope: { documentTitle: "paper.pdf" },
+      saveStatus: { destination: { phase: "none", generation: 0 }, sync: { phase: "clean", desiredRevision: revision, savedRevision: revision } },
+      viewerAssets: { documentUrl: `snapshot-${generation}.pdf`, pdfiumWasm: "pdfium.wasm" },
+      resourcePolicy: { host: "vscode", issued: new Set([`snapshot-${generation}.pdf`, "pdfium.wasm"]) },
+    });
+    let listener: ((event: HostRuntimeInvalidation) => void) | undefined;
+    const runtime = {
+      bootstrap: vi.fn()
+        .mockResolvedValueOnce(loaded(2, 1))
+        .mockRejectedValueOnce(new Error("temporary peer refresh failure"))
+        .mockResolvedValueOnce(loaded(3, 2)),
+      subscribeInvalidations: vi.fn((next: (event: HostRuntimeInvalidation) => void) => {
+        listener = next;
+        return () => { listener = undefined; };
+      }),
+    } as unknown as HostRuntime;
+    const published: RuntimeDocumentSourceSnapshot[] = [];
+    const unsubscribe = subscribeRuntimeDocumentSource(runtime, loaded(1, 0), (snapshot) => published.push(snapshot));
+
+    listener?.({ sessionId, generation: 1, revision: 0, reason: "freshness" });
+    expect(published).toEqual([]);
+    await vi.waitFor(() => expect(published.at(-1)).toMatchObject({
+      refreshStatus: "idle", loaded: { generation: 2, revision: 1 },
+    }));
+    expect(published.map(({ refreshStatus }) => refreshStatus)).toEqual(["idle"]);
+
+    listener?.({ sessionId, generation: 2, revision: 1, reason: "freshness" });
+    await vi.waitFor(() => expect(vi.getTimerCount()).toBe(1));
+    expect(published.map(({ refreshStatus }) => refreshStatus)).toEqual(["idle"]);
+    await vi.advanceTimersByTimeAsync(250);
+    await vi.waitFor(() => expect(published.at(-1)).toMatchObject({
+      refreshStatus: "idle", loaded: { generation: 3, revision: 2 },
+    }));
+    expect(runtime.bootstrap).toHaveBeenCalledTimes(3);
+    expect(published.map(({ refreshStatus }) => refreshStatus)).toEqual(["idle", "idle"]);
+    unsubscribe();
+    vi.useRealTimers();
+  });
+
+  it("keeps successor reconciliation visible when same-generation events race it", async () => {
+    const sessionId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const loaded = (generation: number, revision: number): HostRuntimeBootstrap => ({
+      sessionId,
+      generation,
+      revision,
+      session: { sessionId },
+      state: createReviewState({
+        sessionId,
+        source: { fileId: `file-${generation}`, digest: String(generation).repeat(64), byteLength: generation },
+        workflowMode: "generated-output",
+        documentGeneration: generation,
+      }),
+      scope: { documentTitle: "paper.pdf" },
+      saveStatus: { destination: { phase: "none", generation: 0 }, sync: { phase: "clean", desiredRevision: revision, savedRevision: revision } },
+      viewerAssets: { documentUrl: `snapshot-${generation}.pdf`, pdfiumWasm: "pdfium.wasm" },
+      resourcePolicy: { host: "vscode", issued: new Set([`snapshot-${generation}.pdf`, "pdfium.wasm"]) },
+    });
+    let listener: ((event: HostRuntimeInvalidation) => void) | undefined;
+    const completions: Array<(value: HostRuntimeBootstrap) => void> = [];
+    const runtime = {
+      bootstrap: vi.fn(() => new Promise<HostRuntimeBootstrap>((resolve) => { completions.push(resolve); })),
+      subscribeInvalidations: vi.fn((next: (event: HostRuntimeInvalidation) => void) => {
+        listener = next;
+        return () => { listener = undefined; };
+      }),
+    } as unknown as HostRuntime;
+    const published: RuntimeDocumentSourceSnapshot[] = [];
+    subscribeRuntimeDocumentSource(runtime, loaded(1, 4), (snapshot) => published.push(snapshot));
+
+    listener?.({ sessionId, generation: 2, previousGeneration: 1, revision: 5, reason: "generation" });
+    expect(published.map(({ refreshStatus }) => refreshStatus)).toEqual(["reconciling"]);
+    for (const reason of ["presence", "freshness", "revision"] as const) {
+      listener?.({ sessionId, generation: 2, revision: 5, reason });
+    }
+    expect(runtime.bootstrap).toHaveBeenCalledTimes(4);
+    expect(published.map(({ refreshStatus }) => refreshStatus)).toEqual([
+      "reconciling", "reconciling", "reconciling", "reconciling",
+    ]);
+    for (const reason of ["presence", "freshness", "revision"] as const) {
+      listener?.({ sessionId, generation: 1, revision: 4, reason });
+    }
+    expect(runtime.bootstrap).toHaveBeenCalledTimes(4);
+    expect(published.at(-1)?.refreshStatus).toBe("reconciling");
+
+    completions.slice(0, -1).forEach((complete) => complete(loaded(2, 5)));
+    await Promise.resolve();
+    expect(published.at(-1)?.refreshStatus).toBe("reconciling");
+    completions.at(-1)?.(loaded(2, 5));
+    await vi.waitFor(() => expect(published.at(-1)).toMatchObject({
+      refreshStatus: "idle", loaded: { generation: 2, revision: 5 },
+    }));
+  });
+
+  it("publishes equal-revision authoring presence changes as atomic bootstraps", async () => {
+    const sessionId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const loaded = (activeAuthoringDraftIds: readonly string[]): HostRuntimeBootstrap => ({
+      sessionId,
+      generation: 1,
+      revision: 0,
+      activeAuthoringDraftIds,
+      session: { sessionId },
+      state: createReviewState({
+        sessionId,
+        source: { fileId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", digest: "a".repeat(64), byteLength: 100 },
+        workflowMode: "generated-output",
+        documentGeneration: 1,
+      }),
+      scope: { documentTitle: "paper.pdf" },
+      saveStatus: { destination: { phase: "none", generation: 0 }, sync: { phase: "clean", desiredRevision: 0, savedRevision: 0 } },
+      viewerAssets: { documentUrl: "snapshot-1.pdf", pdfiumWasm: "pdfium.wasm" },
+      resourcePolicy: { host: "vscode", issued: new Set(["snapshot-1.pdf", "pdfium.wasm"]) },
+    });
+    let listener: ((event: HostRuntimeInvalidation) => void) | undefined;
+    const runtime = {
+      bootstrap: vi.fn().mockResolvedValueOnce(loaded(["draft-live"])).mockResolvedValueOnce(loaded([])),
+      subscribeInvalidations: vi.fn((next: (event: HostRuntimeInvalidation) => void) => {
+        listener = next;
+        return () => { listener = undefined; };
+      }),
+    } as unknown as HostRuntime;
+    const published: HostRuntimeBootstrap[] = [];
+    subscribeRuntimeDocumentSource(runtime, loaded([]), ({ loaded: next, refreshStatus }) => {
+      if (refreshStatus === "idle") published.push(next);
+    });
+
+    listener?.({ sessionId, generation: 1, revision: 0, reason: "presence" });
+    await vi.waitFor(() => expect(published.at(-1)?.activeAuthoringDraftIds).toEqual(["draft-live"]));
+    listener?.({ sessionId, generation: 1, revision: 0, reason: "freshness" });
+    await vi.waitFor(() => expect(published.at(-1)?.activeAuthoringDraftIds).toEqual([]));
   });
 
   it("rehydrates concurrent browser and VS Code views from one successor identity", async () => {
@@ -435,6 +768,124 @@ describe("host-neutral review runtime", () => {
     });
     expect(browser.runtime.bootstrap).toHaveBeenCalledOnce();
     expect(vscode.runtime.bootstrap).toHaveBeenCalledOnce();
+  });
+
+  it("accepts a canonical bootstrap ahead of its invalidation hint and retries a transient failure", async () => {
+    vi.useFakeTimers();
+    const sessionId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const loaded = (generation: number): HostRuntimeBootstrap => ({
+      sessionId,
+      generation,
+      revision: generation,
+      session: { sessionId },
+      state: createReviewState({
+        sessionId,
+        source: { fileId: `file-${generation}`, digest: String(generation).repeat(64), byteLength: generation },
+        workflowMode: "generated-output",
+        documentGeneration: generation,
+      }),
+      scope: { documentTitle: "paper.pdf" },
+      saveStatus: { destination: { phase: "none", generation: 0 }, sync: { phase: "clean", desiredRevision: generation, savedRevision: generation } },
+      viewerAssets: { documentUrl: `snapshot-${generation}.pdf`, pdfiumWasm: "pdfium.wasm" },
+      resourcePolicy: { host: "vscode", issued: new Set([`snapshot-${generation}.pdf`, "pdfium.wasm"]) },
+    });
+    let listener: ((event: HostRuntimeInvalidation) => void) | undefined;
+    const runtime = {
+      bootstrap: vi.fn()
+        .mockRejectedValueOnce(new Error("temporary materialization failure"))
+        .mockResolvedValueOnce(loaded(3)),
+      subscribeInvalidations: vi.fn((next: (event: HostRuntimeInvalidation) => void) => {
+        listener = next;
+        return () => { listener = undefined; };
+      }),
+    } as unknown as HostRuntime;
+    const published: RuntimeDocumentSourceSnapshot[] = [];
+    const unsubscribe = subscribeRuntimeDocumentSource(runtime, loaded(1), (snapshot) => published.push(snapshot));
+
+    listener?.({ sessionId, generation: 2, previousGeneration: 1, revision: 2, reason: "generation" });
+    await vi.waitFor(() => expect(published.at(-1)?.refreshStatus).toBe("failed"));
+    await vi.advanceTimersByTimeAsync(250);
+    await vi.waitFor(() => expect(published.at(-1)).toMatchObject({
+      refreshStatus: "idle", loaded: { generation: 3, revision: 3 },
+    }));
+    expect(runtime.bootstrap).toHaveBeenCalledTimes(2);
+    unsubscribe();
+    vi.useRealTimers();
+  });
+
+  it("retries a behind-fence bootstrap and a stale event cannot cancel the retry", async () => {
+    vi.useFakeTimers();
+    const sessionId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const loaded = (generation: number): HostRuntimeBootstrap => ({
+      sessionId, generation, revision: generation, session: { sessionId },
+      state: createReviewState({ sessionId,
+        source: { fileId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", digest: "a".repeat(64), byteLength: 100 },
+        workflowMode: "generated-output", documentGeneration: generation }),
+      scope: { documentTitle: "paper.pdf" },
+      saveStatus: { destination: { phase: "none", generation: 0 }, sync: { phase: "clean", desiredRevision: generation, savedRevision: generation } },
+      viewerAssets: { documentUrl: `${generation}.pdf`, pdfiumWasm: "pdfium.wasm" },
+      resourcePolicy: { host: "vscode", issued: new Set([`${generation}.pdf`, "pdfium.wasm"]) },
+    });
+    let listener: ((event: HostRuntimeInvalidation) => void) | undefined;
+    const runtime = {
+      bootstrap: vi.fn().mockResolvedValueOnce(loaded(1)).mockResolvedValueOnce(loaded(2)),
+      subscribeInvalidations(next: (event: HostRuntimeInvalidation) => void) { listener = next; return () => undefined; },
+    } as unknown as HostRuntime;
+    const published: RuntimeDocumentSourceSnapshot[] = [];
+    const unsubscribe = subscribeRuntimeDocumentSource(runtime, loaded(1), (snapshot) => published.push(snapshot));
+    listener?.({ sessionId, generation: 2, previousGeneration: 1, revision: 2, reason: "generation" });
+    await vi.waitFor(() => expect(published.at(-1)?.refreshStatus).toBe("failed"));
+    listener?.({ sessionId, generation: 1, revision: 0, reason: "revision" });
+    await vi.advanceTimersByTimeAsync(250);
+    await vi.waitFor(() => expect(published.at(-1)).toMatchObject({ refreshStatus: "idle", loaded: { generation: 2 } }));
+    expect(runtime.bootstrap).toHaveBeenCalledTimes(2);
+    unsubscribe();
+    vi.useRealTimers();
+  });
+
+  it("evicts rejected document materializations and bounds retained successor resources", async () => {
+    const listeners = new Set<(message: unknown) => void>();
+    const sessionId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    let generation = 1;
+    let attempt = 0;
+    const disposed: string[] = [];
+    const materializeDocument = vi.fn(async (source: string) => {
+      attempt += 1;
+      if (source.includes("generation=2") && attempt === 2) throw new Error("transient");
+      return { url: `blob:${source}:${attempt}`, dispose: () => disposed.push(source) };
+    });
+    const port = {
+      panelId: "panel_identifier_1234",
+      subscribe(listener: (message: unknown) => void) { listeners.add(listener); return () => listeners.delete(listener); },
+      postMessage(message: unknown) {
+        const request = message as { requestId: string; method: string };
+        if (request.method !== "bootstrap") return;
+        queueMicrotask(() => {
+          const state = createReviewState({
+            sessionId,
+            source: { fileId: `file-${generation}`, digest: String(generation).repeat(64), byteLength: generation },
+            workflowMode: "generated-output",
+            documentGeneration: generation,
+          });
+          for (const listener of listeners) listener({
+            protocol: REVIEW_RUNTIME_PROTOCOL, version: REVIEW_RUNTIME_VERSION, kind: "response",
+            panelId: "panel_identifier_1234", requestId: request.requestId, sessionId,
+            generation, revision: generation, ok: true,
+            payload: { sessionId, generation, revision: generation, state, scope: {}, saveStatus: {},
+              resources: { document: `document.pdf?generation=${generation}`, pdfiumWasm: "pdfium.wasm" } },
+          });
+        });
+      },
+    };
+    const runtime = createRpcHostRuntime(port, { materializeDocument });
+    await runtime.bootstrap();
+    generation = 2;
+    await expect(runtime.bootstrap()).rejects.toThrow("transient");
+    await expect(runtime.bootstrap()).resolves.toMatchObject({ generation: 2 });
+    generation = 3;
+    await runtime.bootstrap();
+    expect(disposed).toContain("document.pdf?generation=1");
+    runtime.dispose();
   });
 
   it("bootstraps and dispatches through a versioned VS Code RPC without credentials", async () => {
@@ -812,6 +1263,144 @@ describe("host-neutral review runtime", () => {
     expect(invalidations).toEqual([
       { sessionId, generation: 1, revision: 1, reason: "revision" },
     ]);
+    runtime.dispose();
+  });
+
+  it.each(["event-before-receipt", "event-after-receipt"] as const)(
+    "delivers an RPC discarded-finalization receipt before its equal-revision invalidation (%s)",
+    async (order) => {
+    const listeners = new Set<(message: unknown) => void>();
+    const requests: Record<string, unknown>[] = [];
+    const runtime = createRpcHostRuntime({
+      panelId: "panel_identifier_1234",
+      postMessage(message) { requests.push(message as Record<string, unknown>); },
+      subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); },
+    });
+    const sessionId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const state = createReviewState({ sessionId, source: {
+      fileId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", digest: "a".repeat(64), byteLength: 100,
+    }, workflowMode: "generated-output", documentGeneration: 1 });
+    const respond = (request: Record<string, unknown>, payload: unknown, generation = 1, revision = 0) => {
+      listeners.forEach((listener) => listener({ protocol: REVIEW_RUNTIME_PROTOCOL,
+        version: REVIEW_RUNTIME_VERSION, kind: "response", panelId: "panel_identifier_1234",
+        sessionId, generation, revision, requestId: request.requestId, ok: true, payload }));
+    };
+    const bootstrapping = runtime.bootstrap();
+    respond(requests.at(-1)!, { sessionId, generation: 1, revision: 0, state,
+      scope: { documentTitle: "paper.pdf" }, saveStatus: {}, resources: {
+        document: "vscode-webview://authority/snapshots/digest.pdf",
+        pdfiumWasm: "vscode-webview://authority/assets/pdfium.wasm",
+      } });
+    await bootstrapping;
+    const delivery: string[] = [];
+    runtime.subscribeInvalidations(() => delivery.push("invalidation"));
+    const completion = runtime.finalizeInteraction!({ interactionToken: "interaction_rpc_1234", order: 2,
+      outcome: "discarded", draftId: "draft_rpc_1234", expectedDraftRevision: 0 })
+      .then((value) => { delivery.push("receipt"); return value; });
+    const request = requests.at(-1)!;
+    const publishDiscardedRevision = () => listeners.forEach((listener) => listener({
+      protocol: REVIEW_RUNTIME_PROTOCOL,
+      version: REVIEW_RUNTIME_VERSION,
+      kind: "event",
+      event: "session-invalidated",
+      panelId: "panel_identifier_1234",
+      payload: { sessionId, generation: 1, revision: 1, reason: "revision" },
+    }));
+    if (order === "event-before-receipt") publishDiscardedRevision();
+    expect(delivery).toEqual([]);
+    respond(request, { status: "finalized", interactionToken: "interaction_rpc_1234",
+      generation: 1, outcome: "discarded", reviewRevision: 1 });
+    await completion;
+    expect(delivery).toEqual(["receipt"]);
+    if (order === "event-after-receipt") publishDiscardedRevision();
+    const acknowledgement = runtime.acknowledgeInteraction!({ interactionToken: "interaction_rpc_1234", order: 3 });
+    const acknowledgementRequest = requests.at(-1)!;
+    expect(acknowledgementRequest).toMatchObject({ method: "acknowledgeInteraction", revision: 1 });
+    respond(acknowledgementRequest, { status: "released" }, 1, 1);
+    await acknowledgement;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(delivery).toEqual(["receipt", "invalidation"]);
+    runtime.dispose();
+    },
+  );
+
+  it("adopts a finalized receipt recovered by begin before acknowledging through the projection fence", async () => {
+    const listeners = new Set<(message: unknown) => void>();
+    const requests: Record<string, unknown>[] = [];
+    const sessionId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const runtime = createRpcHostRuntime({
+      panelId: "panel_identifier_1234",
+      postMessage(message) { requests.push(message as Record<string, unknown>); },
+      subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); },
+    });
+    const respond = (request: Record<string, unknown>, payload: unknown, revision: number) => {
+      listeners.forEach((listener) => listener({
+        protocol: REVIEW_RUNTIME_PROTOCOL,
+        version: REVIEW_RUNTIME_VERSION,
+        kind: "response",
+        panelId: "panel_identifier_1234",
+        sessionId,
+        generation: 1,
+        revision,
+        requestId: request.requestId,
+        ok: true,
+        payload,
+      }));
+    };
+    const state = createReviewState({
+      sessionId,
+      source: { fileId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", digest: "a".repeat(64), byteLength: 100 },
+      documentGeneration: 1,
+    });
+    const bootstrapping = runtime.bootstrap();
+    respond(requests.at(-1)!, {
+      sessionId,
+      generation: 1,
+      revision: 0,
+      state,
+      scope: { documentTitle: "paper.pdf" },
+      saveStatus: {},
+      resources: {
+        document: "vscode-webview://authority/snapshots/digest.pdf",
+        pdfiumWasm: "vscode-webview://authority/assets/pdfium.wasm",
+      },
+    }, 0);
+    await bootstrapping;
+
+    const recovered = runtime.beginInteraction!({
+      interactionToken: "interaction_recovered_1234",
+      order: 1,
+      generation: 1,
+    });
+    respond(requests.at(-1)!, {
+      status: "finalized",
+      interactionToken: "interaction_recovered_1234",
+      generation: 1,
+      outcome: "discarded",
+      reviewRevision: 1,
+    }, 0);
+    await expect(recovered).resolves.toMatchObject({ status: "finalized", reviewRevision: 1 });
+
+    const invalidations: HostRuntimeInvalidation[] = [];
+    runtime.subscribeInvalidations((event) => invalidations.push(event));
+    listeners.forEach((listener) => listener({
+      protocol: REVIEW_RUNTIME_PROTOCOL,
+      version: REVIEW_RUNTIME_VERSION,
+      kind: "event",
+      event: "session-invalidated",
+      panelId: "panel_identifier_1234",
+      payload: { sessionId, generation: 1, revision: 1, reason: "revision" },
+    }));
+    expect(invalidations).toEqual([{ sessionId, generation: 1, revision: 1, reason: "revision" }]);
+
+    const acknowledgement = runtime.acknowledgeInteraction!({
+      interactionToken: "interaction_recovered_1234",
+      order: 3,
+    });
+    const acknowledgementRequest = requests.at(-1)!;
+    expect(acknowledgementRequest).toMatchObject({ method: "acknowledgeInteraction", revision: 1 });
+    respond(acknowledgementRequest, { status: "released" }, 1);
+    await expect(acknowledgement).resolves.toMatchObject({ status: "released" });
     runtime.dispose();
   });
 

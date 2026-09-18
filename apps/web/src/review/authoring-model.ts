@@ -3,22 +3,47 @@ import type { ReviewCommand, ReviewState } from '../../../../packages/core/src/r
 import type { ReviewAnnotation } from '../../../../packages/core/src/pdf-writer.js';
 import type { PdfTargetVisibility, PdfViewportQuery } from '../pdf/viewer-navigation.js';
 import type { ContextPlacement } from './ContextActionPalette.js';
-import type { AuthoringAuthority, AuthoringAnchorSnapshot } from './authoring-session.js';
+import type { PdfAnnotationSurface } from '../pdf/annotation-surface.js';
+import type {
+  AuthoringAuthority,
+  AuthoringAnchorSnapshot,
+  AuthoringReferenceRecovery,
+  ReviewInteractionTransport,
+} from './authoring-session.js';
 import type { RejectedReviewCommand } from './review-command-result.js';
 
 export interface ReviewShellAuthoringModel {
+  /** Current reliable gesture origin. A started session freezes this value. */
+  surface?: PdfAnnotationSurface;
+  /** Durable Reference passage metadata paired with the current gesture origin. */
+  referenceRecovery?: AuthoringReferenceRecovery;
+  /** Local-refresh hosts provide this before negotiation; begin waits for the authenticated attachment. */
+  interactionLifecycle?: ReviewInteractionTransport;
+  subscribeInteractionReconnect?(
+    listener: (identity: { readonly generation: number; readonly revision: number }) => Promise<void>,
+  ): () => void;
+  /** Prevents a refresh-capable host from silently falling back to legacy authoring. */
+  interactionLifecycleRequired?: boolean;
+  interactionFinalizationReady?: boolean;
+  /** Applied interaction receipts remain open until this destination confirms PDF persistence. */
+  interactionPersistenceRequired?: boolean;
+  onInteractionFinalizationPrerequisite?(): void;
   pageMenu?: {
     readonly invocationId: string;
     readonly placement: ContextPlacement;
     readonly pageIndex: number;
     readonly position: ReviewRect;
     readonly nearbyText?: string;
+    readonly surface?: PdfAnnotationSurface;
+    readonly referenceRecovery?: AuthoringReferenceRecovery;
   } | null;
   placedPageNote?: {
     readonly token: number;
     readonly pageIndex: number;
     readonly position: ReviewRect;
     readonly nearbyText?: string;
+    readonly surface?: PdfAnnotationSurface;
+    readonly referenceRecovery?: AuthoringReferenceRecovery;
   } | null;
   keyboardPageNoteActive?: boolean;
   onRequestKeyboardPageNote?(): void;
@@ -36,6 +61,8 @@ export interface ReviewShellAuthoringModel {
     readonly token: number;
     readonly outcome: 'accepted' | 'source-replaced';
   };
+  /** Highest review revision durably written to the configured PDF destination. */
+  persistedRevision?: number;
   /** Production-owned, read-only visibility/Return state for the active frozen anchor. */
   authoringAnchorNavigation?: {
     readonly token: number;

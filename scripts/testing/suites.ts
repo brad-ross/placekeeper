@@ -136,6 +136,8 @@ export const suites: Record<string, TestStage[]> = {
         "apps/web/test/review-location-history.test.ts",
         "apps/web/test/copy-link-control.test.ts",
         "apps/chrome-extension/test/native-protocol.test.ts",
+        "apps/service/test/chrome-local-refresh.integration.test.ts",
+        "apps/service/test/chrome-download-folder.test.ts",
         "apps/service/test/chrome-runtime.test.ts"
       ]
     }
@@ -150,6 +152,7 @@ export const suites: Record<string, TestStage[]> = {
         "apps/service/test/chrome-handoff.test.ts",
         "apps/service/test/chrome-native-host.test.ts",
         "apps/service/test/chrome-daemon-handoff.test.ts",
+        "apps/service/test/chrome-local-refresh.integration.test.ts",
         "apps/service/test/browser-source-store.test.ts",
         "apps/service/test/pdf-save-coordinator.test.ts",
         "apps/web/test/production-review-app.test.tsx",
@@ -183,7 +186,9 @@ export const suites: Record<string, TestStage[]> = {
         "packages/core/test/placekeeper-link.test.ts",
         "apps/service/test/placekeeper-link.test.ts",
         "apps/service/test/session-security.test.ts",
+        "apps/service/test/review-interactions.test.ts",
         "apps/service/test/recovery.test.ts",
+        "apps/service/test/local-document-observer.test.ts",
         "apps/service/test/live-document-replacement.test.ts",
         "apps/service/test/pdf-save-coordinator.test.ts",
         "apps/service/test/export-transaction.test.ts",
@@ -210,6 +215,7 @@ export const suites: Record<string, TestStage[]> = {
       "options": [],
       "files": [
         "apps/service/test/session-security.test.ts",
+        "apps/service/test/review-interactions.test.ts",
         "apps/service/test/recovery.test.ts",
         "apps/service/test/export-transaction.test.ts",
         "apps/service/test/replace-original.test.ts"
@@ -224,8 +230,11 @@ export const suites: Record<string, TestStage[]> = {
       "files": [
         "apps/web/test/text-reliability.test.ts",
         "apps/web/test/selection-anchor.test.ts",
+        "apps/web/test/reading-location.test.ts",
         "apps/web/test/owned-overlay.test.ts",
+        "apps/web/test/annotation-surface.test.ts",
         "apps/web/test/owned-mark-hit-test.test.ts",
+        "apps/web/test/reference-pdf-viewport.test.ts",
         "apps/web/test/viewer-interaction-events.test.ts",
         "apps/web/test/app-interactions.test.ts",
         "apps/web/test/existing-annotations.test.ts"
@@ -255,6 +264,10 @@ export const suites: Record<string, TestStage[]> = {
         "apps/web/test/review-layout.test.tsx",
         "apps/web/test/annotation-projection.test.ts",
         "apps/web/test/production-review-app.test.tsx",
+        "apps/web/test/review-shell-reference-authoring.test.tsx",
+        "apps/web/test/refresh-interaction-lifecycle.test.tsx",
+        "apps/web/test/interaction-reconnect-runtime.test.ts",
+        "apps/web/test/use-authoring-session-lifecycle.test.ts",
         "apps/web/test/codex-context-status.test.tsx",
         "apps/web/test/existing-annotations.test.ts",
         "apps/web/test/main-location-refresh.test.ts",
@@ -268,7 +281,8 @@ export const suites: Record<string, TestStage[]> = {
       "runner": "playwright",
       "options": ["--config", "scripts/testing/config/playwright.config.ts"],
       "files": [
-        "test/acceptance/review-workflow.spec.ts"
+        "test/acceptance/review-workflow.spec.ts",
+        "test/acceptance/reattachment-tray.spec.ts"
       ]
     }
   ],
@@ -300,12 +314,13 @@ export const suites: Record<string, TestStage[]> = {
         "apps/vscode/test/latex-workshop-bridge.test.ts",
         "apps/vscode/test/external-launch-registration.test.ts",
         "apps/vscode/test/rebuild-observer.test.ts",
+        "apps/service/test/local-document-observer.test.ts",
         "test/conformance/reviewed-pdf.test.ts"
       ]
     }
   ],
   "test:e2e": [
-    "pnpm build:web",
+    "pnpm build:vscode",
     {
       "runner": "playwright",
       "options": ["--config", "scripts/testing/config/playwright.config.ts"],
@@ -322,12 +337,17 @@ export const suites: Record<string, TestStage[]> = {
         "test/acceptance/neutral-design-conformance.spec.ts",
         "test/acceptance/host-interface.spec.ts",
         "test/acceptance/macos-interface.spec.ts",
-        "test/acceptance/annotation-behavior-followup.spec.ts"
+        "test/acceptance/annotation-behavior-followup.spec.ts",
+        "test/acceptance/reference-annotations.spec.ts",
+        "test/acceptance/reference-annotation-stale-commands.spec.ts",
+        "test/acceptance/reattachment-tray.spec.ts",
+        "test/acceptance/automatic-pdf-refresh.spec.ts",
+        "test/acceptance/authoring-lifecycle-regressions.spec.ts"
       ]
     }
   ],
   "test:e2e:webkit": [
-    "pnpm build:web",
+    "pnpm build:vscode",
     {
       "runner": "playwright",
       "options": [
@@ -345,7 +365,12 @@ export const suites: Record<string, TestStage[]> = {
         "test/acceptance/workspace-row-interactions.spec.ts",
         "test/acceptance/pdf-mark-design.spec.ts",
         "test/acceptance/macos-interface.spec.ts",
-        "test/acceptance/annotation-behavior-followup.spec.ts"
+        "test/acceptance/annotation-behavior-followup.spec.ts",
+        "test/acceptance/reference-annotations.spec.ts",
+        "test/acceptance/reference-annotation-stale-commands.spec.ts",
+        "test/acceptance/reattachment-tray.spec.ts",
+        "test/acceptance/automatic-pdf-refresh.spec.ts",
+        "test/acceptance/authoring-lifecycle-regressions.spec.ts"
       ]
     }
   ],
@@ -368,7 +393,12 @@ export const suites: Record<string, TestStage[]> = {
         "apps/service/test/launch-host.test.ts",
         "apps/service/test/open-command.test.ts",
         "apps/service/test/doctor-command.test.ts",
+        "apps/service/test/codex-live-context.integration.test.ts",
+        "apps/service/test/live-source-workflow.test.ts",
+        "apps/service/test/live-document-replacement.test.ts",
+        "apps/service/test/recovery.test.ts",
         "apps/web/test/codex-context-status.test.tsx",
+        "apps/web/test/host-runtime.test.ts",
         "apps/web/test/production-review-app.test.tsx",
         "apps/vscode/test/extension.test.ts",
         "packaging/macos/packaging.test.ts"
@@ -405,6 +435,8 @@ export const suites: Record<string, TestStage[]> = {
       "files": [
         "apps/web/test/production-review-app.test.tsx",
         "apps/web/test/owned-overlay.test.ts",
+        "apps/web/test/annotation-surface.test.ts",
+        "apps/web/test/review-shell-reference-authoring.test.tsx",
         "apps/vscode/test/extension.test.ts",
         "packaging/macos/packaging.test.ts"
       ]
@@ -414,7 +446,9 @@ export const suites: Record<string, TestStage[]> = {
       "runner": "playwright",
       "options": ["--config", "scripts/testing/config/playwright.config.ts"],
       "files": [
-        "test/acceptance/production-flow.spec.ts"
+        "test/acceptance/production-flow.spec.ts",
+        "test/acceptance/reference-annotations.spec.ts",
+        "test/acceptance/reference-annotation-stale-commands.spec.ts"
       ]
     }
   ],
@@ -459,7 +493,12 @@ export const suites: Record<string, TestStage[]> = {
         "test/acceptance/neutral-design-conformance.spec.ts",
         "test/acceptance/host-interface.spec.ts",
         "test/acceptance/macos-interface.spec.ts",
-        "test/acceptance/annotation-behavior-followup.spec.ts"
+        "test/acceptance/annotation-behavior-followup.spec.ts",
+        "test/acceptance/reference-annotations.spec.ts",
+        "test/acceptance/reference-annotation-stale-commands.spec.ts",
+        "test/acceptance/reattachment-tray.spec.ts",
+        "test/acceptance/automatic-pdf-refresh.spec.ts",
+        "test/acceptance/authoring-lifecycle-regressions.spec.ts"
       ]
     }
   ],
@@ -482,7 +521,11 @@ export const suites: Record<string, TestStage[]> = {
         "test/acceptance/workspace-row-interactions.spec.ts",
         "test/acceptance/pdf-mark-design.spec.ts",
         "test/acceptance/macos-interface.spec.ts",
-        "test/acceptance/annotation-behavior-followup.spec.ts"
+        "test/acceptance/annotation-behavior-followup.spec.ts",
+        "test/acceptance/reference-annotations.spec.ts",
+        "test/acceptance/reference-annotation-stale-commands.spec.ts",
+        "test/acceptance/reattachment-tray.spec.ts",
+        "test/acceptance/authoring-lifecycle-regressions.spec.ts"
       ]
     }
   ],
@@ -542,9 +585,11 @@ export const ciUnitFiles = [
       'packages/pdf-backends/test/backend-host.test.ts',
       'apps/service/test/canonical-json.test.ts',
       'apps/service/test/runtime-retention.test.ts',
+      'apps/service/test/chrome-download-folder.test.ts',
       'apps/service/test/chrome-runtime.test.ts',
       'apps/service/test/macos-runtime.test.ts',
       'apps/service/test/session-security.test.ts',
+      'apps/service/test/review-interactions.test.ts',
       'apps/service/test/recovery.test.ts',
       'apps/service/test/pdf-save-coordinator.test.ts',
       'apps/service/test/export-transaction.test.ts',
@@ -560,6 +605,7 @@ export const ciUnitFiles = [
       'apps/service/test/pdf-evidence-service.test.ts',
       'apps/service/test/source-reconciliation-service.test.ts',
       'apps/service/test/live-source-workflow.test.ts',
+      'apps/service/test/local-document-observer.test.ts',
       'apps/service/test/live-document-replacement.test.ts',
       'apps/service/test/codex-live-context.integration.test.ts',
       'packages/core/test/live-context.test.ts',
@@ -569,6 +615,7 @@ export const ciUnitFiles = [
       'apps/web/test/save-state-controller.test.ts',
       'apps/web/test/proofread-gestures.test.tsx',
       'apps/web/test/selection-anchor.test.ts',
+      'apps/web/test/reading-location.test.ts',
       'apps/web/test/selection-state.test.ts',
       'apps/web/test/review-surface-state.test.ts',
       'apps/web/test/viewer-controls.test.ts',
@@ -576,8 +623,14 @@ export const ciUnitFiles = [
       'apps/web/test/review-layout.test.tsx',
       'apps/web/test/annotation-projection.test.ts',
       'apps/web/test/production-review-app.test.tsx',
+      'apps/web/test/annotation-surface.test.ts',
+      'apps/web/test/reference-pdf-viewport.test.ts',
+      'apps/web/test/review-shell-reference-authoring.test.tsx',
       'apps/web/test/codex-context-status.test.tsx',
       'apps/web/test/existing-annotations.test.ts',
+      'apps/web/test/refresh-interaction-lifecycle.test.tsx',
+      'apps/web/test/interaction-reconnect-runtime.test.ts',
+      'apps/web/test/use-authoring-session-lifecycle.test.ts',
       'apps/web/test/main-location-refresh.test.ts',
       'apps/web/test/host-runtime.test.ts',
       'apps/web/test/session-api.test.ts',
@@ -598,6 +651,7 @@ export const ciUnitFiles = [
       'apps/vscode/test/rebuild-observer.test.ts',
       'apps/vscode/test/rebuild-navigation.test.ts',
       'packaging/macos/packaging.test.ts',
+      'packaging/macos/native-blob-install.test.ts',
       'packaging/macos/update-vscode.test.mjs',
       'packaging/macos/setup-integrations.test.mjs',
     ];

@@ -147,6 +147,34 @@ test.describe('canonical review workflow', () => {
     await expect(page.getByRole('button', { name: 'Proofread mode' })).toHaveCount(0);
   });
 
+  test('keeps Apply busy until its asynchronous save resolves', async ({ page }) => {
+    await page.goto(
+      '/test/acceptance/review-harness/index.html?visual=reading&composer=edit-replacement&composer-save=deferred',
+    );
+    const composer = page.getByRole('region', { name: 'Edit Replacement' });
+    const apply = composer.getByRole('button', { name: 'Apply', exact: true });
+
+    await apply.click();
+
+    await expect(apply).toBeDisabled();
+    await expect(apply).toHaveAttribute('aria-busy', 'true');
+    await expect(apply).toHaveAttribute('data-submitting', 'true');
+    await expect(composer.getByRole('status')).toHaveText('Saving annotation.');
+    await expect(apply.locator('.lucide-loader-circle')).toBeVisible();
+
+    await page.evaluate(() => {
+      const resolveSave = Reflect.get(globalThis, 'resolveDeferredComposerSave');
+      if (typeof resolveSave !== 'function') throw new Error('Deferred composer save is unavailable');
+      resolveSave();
+    });
+
+    await expect(apply).toBeEnabled();
+    await expect(apply).not.toHaveAttribute('aria-busy', 'true');
+    await expect(apply).not.toHaveAttribute('data-submitting', 'true');
+    await expect(composer.getByRole('status')).toHaveCount(0);
+    await expect(apply.locator('.lucide-loader-circle')).toHaveCount(0);
+  });
+
   test('discloses mounted annotation actions at intent without activating their row', async ({
     page,
     browserName,
@@ -277,10 +305,8 @@ test.describe('canonical review workflow', () => {
     await expect(page.getByRole('tab', { name: 'Annotations', exact: true }).locator('.review-icon'))
       .toBeVisible();
 
-    const reconciliation = page.getByRole('region', { name: 'Needs attention' });
-    await expect(reconciliation.getByRole('heading', {
-      name: 'Needs attention',
-    })).toBeVisible();
+    const reconciliation = page.getByRole('region', { name: 'Annotations', exact: true });
+    await expect(reconciliation.getByRole('heading', { name: 'Needs attention' })).toHaveCount(0);
     await expect(reconciliation.locator('[data-reconciliation-entry]')).toHaveCount(2);
     await expect(reconciliation.getByRole('button', {
       name: 'Reattach previous Highlight annotation on page 1',
@@ -291,36 +317,43 @@ test.describe('canonical review workflow', () => {
       name: 'Discard Delete annotation on page 2',
     })).toBeVisible();
 
-    await reconciliation.getByRole('button', {
+    const reattachTrigger = reconciliation.getByRole('button', {
       name: 'Reattach previous Highlight annotation on page 1',
-    }).click();
+    });
+    await reattachTrigger.focus();
+    await page.keyboard.press('Enter');
     const reattachDetail = page.locator('[data-reconciliation-detail="reattach"]');
     await expect(reattachDetail).toHaveAttribute(
       'aria-label',
-      'Resolve previous Highlight annotation on page 1',
+      'Reattach highlight, previously page 1',
     );
     await expect(reattachDetail.getByRole('heading', { name: 'Reattach highlight' })).toBeVisible();
-    await expect(reattachDetail.getByText('Your annotation')).toBeVisible();
     await expect(reattachDetail.getByText('Check the identifying variation.')).toBeVisible();
-    await expect(reattachDetail.getByText('Multiple matches')).toHaveCount(1);
-    await expect(reattachDetail.getByText('Previously attached to · Page 1')).toBeVisible();
     await expect(reattachDetail.getByText('the previous identification argument')).toBeVisible();
     await expect(reattachDetail.getByText('Select the intended text in the PDF, then confirm.')).toBeVisible();
     await expect(reattachDetail.locator('.full-annotation-reader__metadata')).toHaveCount(0);
     await expect(reattachDetail.locator('[data-reattachment-preview]')).toHaveCount(0);
     await expect(reattachDetail.locator('.reconciliation-workspace__editor')).toHaveCount(0);
-    await reattachDetail.getByRole('button', { name: 'Back' }).click();
-    await expect(page.getByRole('button', {
-      name: 'Reattach previous Highlight annotation on page 1',
-    })).toBeFocused();
+    const reattachCancel = reattachDetail.getByRole('button', { name: 'Cancel' });
+    await expect(reattachCancel).toBeFocused();
+    await page.getByRole('button', { name: 'Clear anchors' }).evaluate((button) => {
+      (button as HTMLButtonElement).click();
+    });
+    await expect(reattachCancel).toBeFocused();
+    await page.getByRole('button', { name: 'Use selection' }).evaluate((button) => {
+      (button as HTMLButtonElement).click();
+    });
+    await expect(reattachCancel).toBeFocused();
+    await page.keyboard.press('Escape');
+    await expect(reattachTrigger).toBeFocused();
 
     await reconciliation.getByRole('button', {
       name: 'Reattach previous Highlight annotation on page 1',
     }).click();
-    await expect(page.getByRole('region', { name: 'Annotations', exact: true })).toHaveCount(0);
-    await expect(reattachDetail.getByRole('button', { name: 'Confirm' })).toBeEnabled();
+    await expect(page.getByRole('region', { name: 'Annotations', exact: true })).toHaveCount(1);
+    await expect(reattachDetail.getByRole('button', { name: 'Attach' })).toBeEnabled();
 
-    await reattachDetail.getByRole('button', { name: 'Confirm' }).click();
+    await reattachDetail.getByRole('button', { name: 'Attach' }).click();
     await expect(page.locator('[data-reconciliation-detail]')).toHaveCount(0);
     await expect(page.getByText('Reattachment saved.')).toHaveCount(0);
     await expect(page.locator('[data-reconciliation-entry]')).toHaveCount(1);
@@ -334,23 +367,21 @@ test.describe('canonical review workflow', () => {
     const deleteAction = page.getByRole('button', {
       name: 'Discard Delete annotation on page 2',
     });
-    const destructiveColor = await deleteAction.evaluate((element) => getComputedStyle(element).color);
     await deleteAction.click();
     const discardDetail = page.locator('[data-reconciliation-detail="discard"]');
     await expect(discardDetail).toHaveAttribute(
       'aria-label',
-      'Resolve previous Delete annotation on page 2',
+      'Discard delete, previously page 2',
     );
     await expect(discardDetail.getByText('obsolete robustness sentence')).toBeVisible();
-    await expect(discardDetail.getByText('Missing text')).toHaveCount(1);
+    await expect(discardDetail.getByText('Missing text')).toHaveCount(0);
     await expect(discardDetail.getByText('The original text is no longer present. Select its new location.')).toHaveCount(0);
     const discardButton = discardDetail.getByRole('button', { name: 'Discard', exact: true });
-    await expect(discardButton).toHaveCSS('color', destructiveColor);
-    await expect(discardButton.locator('.review-icon')).toHaveCSS('color', destructiveColor);
+    await expect(discardButton).toHaveClass(/reconciliation-workspace__destructive/);
     await discardButton.click();
 
     await expect(page.locator('[data-reconciliation-entry]')).toHaveCount(0);
-    await expect(page.getByRole('region', { name: 'Needs attention' })).toHaveCount(0);
+    await expect(page.getByRole('heading', { name: 'Needs attention' })).toHaveCount(0);
     await expect(page.getByText('No previous annotations need attention.')).toHaveCount(0);
     await expect(page.getByText('Discard recorded.')).toHaveCount(0);
     await expect(page.locator('[data-workspace-focus-token="annotations:section"]')).toBeFocused();
@@ -365,6 +396,47 @@ test.describe('canonical review workflow', () => {
     await expect(exportAction).toBeFocused();
     await page.keyboard.press('Escape');
     await expect(documentActionsTrigger).toBeFocused();
+  });
+
+  test('keeps a delayed reconciliation command bound to its original row', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.goto('/test/acceptance/review-harness/index.html?reconciliation=1');
+    await openAnnotationsWorkspace(page);
+
+    const firstDiscard = page.getByRole('button', {
+      name: 'Discard Highlight annotation on page 1',
+    });
+    const secondNavigation = page.getByRole('button', {
+      name: 'Reattach previous Delete annotation on page 2',
+    });
+    const secondDiscard = page.getByRole('button', {
+      name: 'Discard Delete annotation on page 2',
+    });
+    await page.getByRole('button', { name: 'Hold next command' }).click();
+    await firstDiscard.focus();
+    await page.keyboard.press('Enter');
+
+    const originalEditor = page.getByRole('region', {
+      name: 'Discard highlight, previously page 1',
+    });
+    await originalEditor.getByRole('button', { name: 'Discard', exact: true }).click();
+    await expect(originalEditor.getByRole('button', { name: 'Discard', exact: true })).toBeDisabled();
+    await expect(secondNavigation).toBeDisabled();
+    await expect(secondDiscard).toBeDisabled();
+
+    await secondNavigation.evaluate((button) => {
+      button.removeAttribute('disabled');
+      (button as HTMLButtonElement).click();
+    });
+    await expect(originalEditor).toBeVisible();
+    await expect(page.getByRole('region', {
+      name: 'Reattach delete, previously page 2',
+    })).toHaveCount(0);
+
+    await page.getByRole('button', { name: 'Release command' }).click();
+    await expect(originalEditor).toHaveCount(0);
+    await expect(secondNavigation).toBeFocused();
+    await expect(page.locator('[data-reconciliation-entry]')).toHaveCount(1);
   });
 
   test('limits the document-title hover surface without moving toolbar groups', async ({ page }) => {
@@ -440,15 +512,15 @@ test.describe('canonical review workflow', () => {
     }).click();
     const detail = page.locator('[data-reconciliation-detail="reattach"]');
     await expect(detail.getByRole('heading', { name: 'Reattach page note' })).toBeVisible();
-    await expect(detail.getByText('Previously attached to · Page 3')).toBeVisible();
+    await expect(detail.getByText(/Previously page 3:/u)).toBeVisible();
     await expect(detail.getByText('Original PDF text:')).toHaveCount(0);
     await expect(detail.getByText('Page 3', { exact: true })).toHaveCount(0);
-    await detail.getByRole('button', { name: 'Back' }).click();
+    await detail.getByRole('button', { name: 'Cancel' }).click();
 
     await page.getByRole('button', {
       name: 'Reattach previous Page Note annotation on page 4',
     }).click();
-    await expect(detail.getByText('Previously attached to · Page 4')).toBeVisible();
+    await expect(detail.getByText(/Previously page 4:/u)).toBeVisible();
     await expect(detail.getByText('The appendix extends the comparison.')).toBeVisible();
   });
 
@@ -2310,7 +2382,7 @@ test.describe('canonical review workflow', () => {
     await expect(row.locator('.annotation-item__navigation')).toBeFocused();
   });
 
-  test('drops reader editing safely when its document or item authority becomes stale', async ({ page }) => {
+  test('retains reader editing safely until explicit cancel when its authority becomes stale', async ({ page }) => {
     await page.getByRole('button', { name: 'Seed annotations' }).click();
     await page.getByRole('button', { name: 'Seed long annotation' }).click();
     await openAnnotationsWorkspace(page);
@@ -2320,11 +2392,20 @@ test.describe('canonical review workflow', () => {
     const itemId = await row.getAttribute('data-review-item');
     await row.getByRole('button', { name: /Read full Page Note annotation/u }).click();
     await page.locator('[data-full-annotation-action="edit"]').click();
+    const composer = page.getByRole('region', { name: 'Edit Page Note' });
+    const editor = composer.getByRole('textbox', { name: 'Comment' });
+    const apply = composer.getByRole('button', { name: 'Apply', exact: true });
+    const replacedAuthorityDraft = 'Keep this exact draft after document authority changes.';
+    await editor.fill(replacedAuthorityDraft);
 
     await page.getByRole('button', { name: 'Replace source authority' }).evaluate((button) => {
       button.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
-    await expect(page.getByRole('region', { name: 'Edit Page Note' })).toHaveCount(0);
+    await expect(composer).toBeVisible();
+    await expect(editor).toHaveValue(replacedAuthorityDraft);
+    await expect(apply).toBeDisabled();
+    await composer.getByRole('button', { name: 'Cancel' }).click();
+    await expect(composer).toHaveCount(0);
     await expect(page.locator('[data-full-annotation-reader="true"]')).toHaveCount(0);
     await expect(page.locator(`[data-review-item="${itemId}"]`)).toBeVisible();
 
@@ -2334,12 +2415,18 @@ test.describe('canonical review workflow', () => {
     await page.locator(`[data-review-item="${itemId}"]`)
       .getByRole('button', { name: /Read full Page Note annotation/u }).click();
     await page.locator('[data-full-annotation-action="edit"]').click();
+    const deletedItemDraft = 'Keep this exact draft after the annotation disappears.';
+    await editor.fill(deletedItemDraft);
     await page.getByRole('button', { name: 'Remove active annotation' }).evaluate((button) => {
       button.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
-    await expect(page.getByRole('region', { name: 'Edit Page Note' })).toHaveCount(0);
-    await expect(page.locator('[data-full-annotation-reader="true"]')).toHaveCount(0);
+    await expect(composer).toBeVisible();
+    await expect(editor).toHaveValue(deletedItemDraft);
+    await expect(apply).toBeDisabled();
     await expect(page.locator(`[data-review-item="${itemId}"]`)).toHaveCount(0);
+    await composer.getByRole('button', { name: 'Cancel' }).click();
+    await expect(composer).toHaveCount(0);
+    await expect(page.locator('[data-full-annotation-reader="true"]')).toHaveCount(0);
     await expect(page.locator('[data-review-item]')).not.toHaveCount(0);
     await expect(page.locator('[data-review-item][data-active="true"]')).toHaveCount(0);
   });
@@ -2651,6 +2738,7 @@ test.describe('canonical review workflow', () => {
   });
 
   test('keeps the annotations tray open while editing an owned annotation', async ({ page }) => {
+    await page.goto('/test/acceptance/review-harness/index.html?interaction-lifecycle=1');
     await page.getByRole('button', { name: 'Highlight', exact: true }).click();
     await page.getByRole('button', { name: 'Save', exact: true }).click();
     const { annotations, workspace } = await openAnnotationsWorkspace(page);
@@ -2676,6 +2764,7 @@ test.describe('canonical review workflow', () => {
     await edit.press('Enter');
     await expect(editor).toBeVisible();
     await editor.getByRole('textbox', { name: 'Comment (optional)' }).fill('Edited in the open tray.');
+    await expect(page.getByRole('region', { name: 'Needs attention' })).toHaveCount(0);
     await editor.getByRole('button', { name: 'Apply', exact: true }).click();
 
     await expect(editor).toHaveCount(0);

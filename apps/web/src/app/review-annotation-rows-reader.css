@@ -53,9 +53,9 @@
 }
 
 :is(.review-workspace, .review-tools-workspace) li[data-annotation-origin]:not([data-active="true"]):hover,
-:is(.review-workspace, .review-tools-workspace) li[data-annotation-origin]:not([data-active="true"]):focus-within:not(:has(.copy-link-control:focus-within)),
+:is(.review-workspace, .review-tools-workspace) li[data-annotation-origin]:not([data-active="true"]):has(:focus-visible):not(:has(.copy-link-control:focus-within)),
 :is(.review-workspace, .review-tools-workspace) li[data-search-result]:hover,
-:is(.review-workspace, .review-tools-workspace) li[data-search-result]:focus-within:not(:has(.copy-link-control:focus-within)) {
+:is(.review-workspace, .review-tools-workspace) li[data-search-result]:has(:focus-visible):not(:has(.copy-link-control:focus-within)) {
   border-color: var(--review-border-strong);
   background: var(--review-workspace-card-hover);
 }
@@ -81,7 +81,7 @@
 }
 
 :is(.review-workspace, .review-tools-workspace) li[data-annotation-origin]:hover,
-:is(.review-workspace, .review-tools-workspace) li[data-annotation-origin]:focus-within {
+:is(.review-workspace, .review-tools-workspace) li[data-annotation-origin]:has(:focus-visible) {
   border: 0;
 }
 
@@ -306,6 +306,7 @@
 .full-annotation-reader__back,
 .full-annotation-reader__edit,
 .full-annotation-reader__delete,
+.full-annotation-reader__open-reference,
 .full-annotation-reader__locate {
   display: inline-flex;
   min-width: var(--review-control-compact);
@@ -324,6 +325,7 @@
 .full-annotation-reader__back:hover,
 .full-annotation-reader__edit:hover,
 .full-annotation-reader__delete:hover,
+.full-annotation-reader__open-reference:hover,
 .full-annotation-reader__locate:hover {
   border-color: var(--review-border-strong);
   background: var(--review-workspace-card-hover);
@@ -430,14 +432,14 @@
   outline: none;
 }
 
-:is(.review-workspace, .review-tools-workspace) li[data-annotation-origin]:focus-within:not(:has(.copy-link-control:focus-within)),
-:is(.review-workspace, .review-tools-workspace) li[data-search-result]:focus-within:not(:has(.copy-link-control:focus-within)) {
+:is(.review-workspace, .review-tools-workspace) li[data-annotation-origin]:has(:focus-visible):not(:has(.copy-link-control:focus-within)),
+:is(.review-workspace, .review-tools-workspace) li[data-search-result]:has(:focus-visible):not(:has(.copy-link-control:focus-within)) {
   outline: 3px solid var(--review-focus);
   outline-offset: 2px;
 }
 
 :is(.review-workspace, .review-tools-workspace) li:hover .annotation-item__action,
-:is(.review-workspace, .review-tools-workspace) li:focus-within .annotation-item__action,
+:is(.review-workspace, .review-tools-workspace) li:has(:focus-visible) .annotation-item__action,
 :is(.review-workspace, .review-tools-workspace) li[data-active="true"] .annotation-item__action {
   opacity: 1;
 }
@@ -458,6 +460,10 @@
   align-self: center;
   place-items: center;
   color: var(--review-ink-muted);
+}
+
+.annotation-item__status-icon {
+  color: var(--review-danger);
 }
 
 .annotation-direction-cue {
@@ -560,4 +566,3 @@
 @keyframes annotation-status-spin {
   to { transform: rotate(360deg); }
 }
-

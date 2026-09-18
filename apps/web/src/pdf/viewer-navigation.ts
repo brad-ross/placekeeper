@@ -36,6 +36,14 @@ export interface PdfViewerLocationTolerances {
 }
 
 /**
+ * Selects the semantic point captured from the live reading viewport.
+ * Durable navigation uses the visible-page center. Transient layout
+ * preservation uses the viewport origin so resizing a tray cannot recenter
+ * the document vertically or horizontally.
+ */
+export type PdfLocationCaptureMode = 'center' | 'viewport-origin';
+
+/**
  * A transient client-coordinate rectangle covering part of the live viewer.
  * Authoring overlays use this read-only geometry without publishing runway or
  * otherwise changing the viewer's framing state.
@@ -55,7 +63,9 @@ export interface PdfViewportQuery {
 export type PdfTargetVisibility = 'visible' | 'outside' | 'unavailable';
 
 export interface ViewerNavigationControls {
-  captureLocation(): PdfViewerLocation | null;
+  captureLocation(mode?: PdfLocationCaptureMode): PdfViewerLocation | null;
+  /** Clamps a neutral location to the current document without moving the viewer. */
+  clampLocation(location: PdfViewerLocation): PdfViewerLocation | null;
   applyLocation(location: PdfViewerLocation, viewport?: PdfViewportQuery): Promise<boolean>;
   fitToWidth(waitForSettledGeometry?: WaitForSettledViewerGeometry): Promise<boolean>;
   fitToWidthReady(): boolean;
@@ -119,5 +129,17 @@ export function pdfBottomOriginPointToNaturalAnchor(
   return {
     x: point.x - cropOrigin.x,
     y: page.height - (point.y - cropOrigin.y),
+  };
+}
+
+/** Converts a natural top-origin page anchor into a cropped PDF destination point. */
+export function naturalAnchorToPdfBottomOriginPoint(
+  point: PdfNaturalPoint,
+  page: PdfNaturalPageSize,
+  cropOrigin: PdfNaturalPoint = { x: 0, y: 0 },
+): PdfNaturalPoint {
+  return {
+    x: point.x + cropOrigin.x,
+    y: page.height - point.y + cropOrigin.y,
   };
 }

@@ -40,7 +40,9 @@ function ContextActionButton({ kind, iconOnly = false, onAction }: ContextAction
   );
 }
 
-export type ContextPlacement = ViewerClientPlacement;
+export type ContextPlacement = ViewerClientPlacement & {
+  readonly surface?: 'main' | 'reference';
+};
 
 export interface ContextActionPaletteProps {
   readonly placement: ContextPlacement;
@@ -49,6 +51,43 @@ export interface ContextActionPaletteProps {
   onReplace?(): void;
   onDelete?(): void;
   onHighlight?(): void;
+}
+
+export function chooseContextActionAvailableRect(input: {
+  readonly host: ViewerFixedClientRect;
+  readonly viewport: ViewerFixedClientRect;
+  readonly referenceViewport?: ViewerFixedClientRect;
+  readonly surface?: ContextPlacement['surface'];
+  readonly overlayRight: number;
+  readonly overlayBottom: number;
+}): ViewerFixedClientRect {
+  const inset = 12;
+  const { host, viewport, referenceViewport } = input;
+  const windowLeft = Math.max(0, viewport.left - host.left) + inset;
+  const windowTop = Math.max(0, viewport.top - host.top) + inset;
+  const windowRight = Math.min(host.width, viewport.right - host.left) - inset;
+  const windowBottom = Math.min(host.height, viewport.bottom - host.top) - inset;
+  const useReferenceViewport = input.surface === 'reference' && referenceViewport !== undefined;
+  const left = useReferenceViewport
+    ? Math.max(windowLeft, referenceViewport.left - host.left + inset)
+    : windowLeft;
+  const top = useReferenceViewport
+    ? Math.max(windowTop, referenceViewport.top - host.top + inset)
+    : windowTop;
+  const right = useReferenceViewport
+    ? Math.min(windowRight, referenceViewport.right - host.left - inset)
+    : Math.min(windowRight, input.overlayRight);
+  const bottom = useReferenceViewport
+    ? Math.min(windowBottom, referenceViewport.bottom - host.top - inset)
+    : Math.min(windowBottom, input.overlayBottom);
+  return {
+    left,
+    top,
+    right,
+    bottom,
+    width: Math.max(0, right - left),
+    height: Math.max(0, bottom - top),
+  };
 }
 
 export function chooseContextActionPlacement(input: {
@@ -82,6 +121,11 @@ export function ContextActionPalette(props: ContextActionPaletteProps) {
     const host = element?.closest<HTMLElement>('.review-contextual-host');
     const stage = element?.closest<HTMLElement>('[data-review-stage]');
     if (!element || !host) return;
+    const referenceViewportElement = props.placement.surface === 'reference'
+      ? stage?.querySelector<HTMLElement>(
+        '.reference-panel__viewport:not([data-reference-viewport-concealed="true"])',
+      )
+      : undefined;
     const place = () => {
       const bounds = host.getBoundingClientRect();
       const stageStyle = stage ? getComputedStyle(stage) : null;
@@ -90,18 +134,44 @@ export function ContextActionPalette(props: ContextActionPaletteProps) {
       const viewportTop = viewport?.offsetTop ?? 0;
       const viewportRight = viewportLeft + (viewport?.width ?? window.innerWidth);
       const viewportBottom = viewportTop + (viewport?.height ?? window.innerHeight);
-      const left = Math.max(0, viewportLeft - bounds.left) + 12;
-      const topEdge = Math.max(0, viewportTop - bounds.top) + 12;
-      const windowRight = Math.min(bounds.width, viewportRight - bounds.left) - 12;
-      const windowBottom = Math.min(bounds.height, viewportBottom - bounds.top) - 12;
       const width = element.getBoundingClientRect().width;
       const height = element.getBoundingClientRect().height;
-      const trayRight = stage?.dataset.rightOverlay === 'true' ? parseFloat(stageStyle!.getPropertyValue('--review-overlay-right-start')) - 12 : windowRight;
-      const trayBottom = stage?.dataset.bottomOverlay === 'true' ? parseFloat(stageStyle!.getPropertyValue('--review-overlay-bottom-start')) - 12 : windowBottom;
+      const hostRight = Math.min(bounds.width, viewportRight - bounds.left) - 12;
+      const hostBottom = Math.min(bounds.height, viewportBottom - bounds.top) - 12;
+      const trayRight = stage?.dataset.rightOverlay === 'true' ? parseFloat(stageStyle!.getPropertyValue('--review-overlay-right-start')) - 12 : hostRight;
+      const trayBottom = stage?.dataset.bottomOverlay === 'true' ? parseFloat(stageStyle!.getPropertyValue('--review-overlay-bottom-start')) - 12 : hostBottom;
       // The actual visible window is the hard boundary, even when a host or
       // layout viewport extends beyond it during browser zoom or scrolling.
-      const right = trayRight - left >= width ? Math.min(windowRight, trayRight) : windowRight;
-      const bottom = trayBottom - topEdge >= height ? Math.min(windowBottom, trayBottom) : windowBottom;
+      const referenceViewport = referenceViewportElement?.getBoundingClientRect();
+      const available = chooseContextActionAvailableRect({
+        host: bounds,
+        viewport: {
+          left: viewportLeft,
+          top: viewportTop,
+          right: viewportRight,
+          bottom: viewportBottom,
+          width: viewportRight - viewportLeft,
+          height: viewportBottom - viewportTop,
+        },
+        ...(referenceViewport === undefined ? {} : { referenceViewport }),
+        ...(props.placement.surface === undefined ? {} : { surface: props.placement.surface }),
+        overlayRight: trayRight,
+        overlayBottom: trayBottom,
+      });
+      const right = props.placement.surface === 'reference'
+        ? available.right
+        : available.right - available.left >= width ? available.right : hostRight;
+      const bottom = props.placement.surface === 'reference'
+        ? available.bottom
+        : available.bottom - available.top >= height ? available.bottom : hostBottom;
+      const availableWidth = Math.max(0, right - available.left);
+      const availableHeight = Math.max(0, bottom - available.top);
+      const placementWidth = props.placement.surface === 'reference'
+        ? Math.min(width, availableWidth)
+        : width;
+      const placementHeight = props.placement.surface === 'reference'
+        ? Math.min(height, availableHeight)
+        : height;
       const anchorX = props.placement.left - bounds.left;
       const anchorY = props.placement.top - bounds.top;
       const source = props.placement.selectionBounds;
@@ -110,11 +180,32 @@ export function ContextActionPalette(props: ContextActionPaletteProps) {
         : { ...source, left: source.left - bounds.left, right: source.right - bounds.left,
           top: source.top - bounds.top, bottom: source.bottom - bounds.top };
       const position = chooseContextActionPlacement({
-        selection, available: { left, top: topEdge, right, bottom, width: right - left, height: bottom - topEdge },
-        width, height,
+        selection,
+        available: {
+          ...available,
+          right,
+          bottom,
+          width: availableWidth,
+          height: availableHeight,
+        },
+        width: placementWidth,
+        height: placementHeight,
       });
-      const next = { position: 'absolute' as const, ...position, transform: 'none' };
-      setBoundedStyle((current) => current?.left === next.left && current?.top === next.top ? current : next);
+      const next: CSSProperties = {
+        position: 'absolute',
+        ...position,
+        transform: 'none',
+        ...(props.placement.surface === 'reference' ? {
+          maxWidth: availableWidth,
+          maxHeight: availableHeight,
+          overflow: 'auto',
+        } : {}),
+      };
+      setBoundedStyle((current) => current?.left === next.left
+        && current?.top === next.top
+        && current?.maxWidth === next.maxWidth
+        && current?.maxHeight === next.maxHeight
+        ? current : next);
     };
     place();
     const frame = requestAnimationFrame(place);
@@ -124,6 +215,7 @@ export function ContextActionPalette(props: ContextActionPaletteProps) {
     window.visualViewport?.addEventListener('scroll', place);
     const resize = new ResizeObserver(place);
     resize.observe(host); resize.observe(element);
+    if (referenceViewportElement) resize.observe(referenceViewportElement);
     const mutation = new MutationObserver(place);
     if (stage) mutation.observe(stage, { attributes: true, attributeFilter: ['style', 'data-right-overlay', 'data-bottom-overlay'] });
     return () => {

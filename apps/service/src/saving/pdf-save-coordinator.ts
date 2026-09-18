@@ -79,6 +79,7 @@ export interface PdfSaveCoordinatorOptions {
   readonly verify?: PdfExportVerifier;
   readonly backend?: Omit<PdfBackendRunOptions, "signal">;
   readonly picker?: DestinationPicker;
+  readonly syncDirectory?: (path: string) => Promise<void>;
 }
 
 interface QueueState {
@@ -90,9 +91,11 @@ export type SaveCopyProposal =
   | {
       readonly sourceDisposition: "local";
       readonly filename: string;
-      readonly folder: string;
+      readonly folder?: string;
+      readonly folderSelectionId?: string;
     }
-  | { readonly sourceDisposition: "remote-temporary" };
+  | { readonly sourceDisposition: "remote-temporary"; readonly filename?: string;
+      readonly folder?: string; readonly folderSelectionId?: string };
 
 export class PdfSaveCoordinator {
   readonly #broker: SessionBroker;
@@ -101,6 +104,7 @@ export class PdfSaveCoordinator {
   readonly #verify: PdfExportVerifier;
   readonly #backend: Omit<PdfBackendRunOptions, "signal">;
   readonly #picker: DestinationPicker | undefined;
+  readonly #syncDirectory: (path: string) => Promise<void>;
   readonly #reuseBackendInspection: boolean;
   readonly #folderSelections = new Map<string, { readonly sessionId: string; readonly path: string }>();
   readonly #queues = new Map<string, QueueState>();
@@ -113,7 +117,16 @@ export class PdfSaveCoordinator {
     this.#verify = options.verify ?? verifyReviewedPdf;
     this.#backend = options.backend ?? {};
     this.#picker = options.picker;
+    this.#syncDirectory = options.syncDirectory ?? syncDirectory;
     this.#reuseBackendInspection = options.verify === undefined;
+    this.#broker.onPhysicalSaveResume((sessionId) => {
+      if (
+        this.#queues.get(sessionId)?.running === undefined &&
+        this.#broker.saveStatus(sessionId)?.sync.phase !== "clean"
+      ) {
+        void this.requestSave(sessionId);
+      }
+    });
   }
 
   #assertRewriteEligible(sessionId: string): void {
@@ -145,6 +158,28 @@ export class PdfSaveCoordinator {
     };
   }
 
+  async browserProposal(sessionId: string, folder: string | undefined): Promise<SaveCopyProposal> {
+    const scope = await this.#broker.sessionScope(sessionId);
+    if (scope === undefined) throw new Error("Review session is not active");
+    const filename = validatePdfFilename(scope.sourceDisplayName);
+    return {
+      sourceDisposition: scope.sourceDisposition,
+      filename,
+      ...(folder === undefined ? {} : {
+        folder, folderSelectionId: this.#rememberFolder(sessionId, folder),
+      }),
+    };
+  }
+
+  #rememberFolder(sessionId: string, path: string): string {
+    const selectionId = randomUUID();
+    this.#folderSelections.set(selectionId, { sessionId, path });
+    while (this.#folderSelections.size > 32) {
+      this.#folderSelections.delete(this.#folderSelections.keys().next().value!);
+    }
+    return selectionId;
+  }
+
   async chooseCopyFilename(
     sessionId: string,
     filename?: string,
@@ -163,7 +198,7 @@ export class PdfSaveCoordinator {
       this.#folderSelections.delete(folderSelectionId!);
       throw new FileCapabilityError("INVALID_PATH", "Folder selection belongs to another session");
     }
-    if (remote && selected === undefined) {
+    if ((remote || folderSelectionId !== undefined) && selected === undefined) {
       throw new FileCapabilityError(
         "INVALID_PATH",
         "Choose a new location for this remote browser PDF",
@@ -198,12 +233,7 @@ export class PdfSaveCoordinator {
       proposal.sourceDisposition === "local" ? proposal.folder : undefined,
     );
     if (path === undefined) return { cancelled: true };
-    const selectionId = randomUUID();
-    this.#folderSelections.set(selectionId, { sessionId, path });
-    while (this.#folderSelections.size > 32) {
-      this.#folderSelections.delete(this.#folderSelections.keys().next().value!);
-    }
-    return { cancelled: false, selectionId, folder: path };
+    return { cancelled: false, selectionId: this.#rememberFolder(sessionId, path), folder: path };
   }
 
   async locate(sessionId: string): Promise<void> {
@@ -347,10 +377,14 @@ export class PdfSaveCoordinator {
       queue.requested = false;
       const status = this.#broker.saveStatus(sessionId);
       if (status?.destination.phase !== "active") return;
+      if (
+        this.#broker.physicalSaveBarrierPending(sessionId) &&
+        !await this.#broker.settlePhysicalSaveBarrier(sessionId)
+      ) return;
       const destination = status.destination;
       const generation = destination.generation;
       try {
-        const delivery = await this.#broker.freezeDelivery(sessionId);
+        const delivery = await this.#broker.freezeSaveDelivery(sessionId);
         const stateDigest = delivery.stateDigest ?? reviewStateDigest({ items: delivery.items ?? [] });
         await withTargetLock(destination.targetPath, async () => {
           const sourcePdf = new Uint8Array(await readFile(delivery.sourceSnapshotPath));
@@ -395,7 +429,16 @@ export class PdfSaveCoordinator {
           });
 
           const target = destination.targetPath;
-          const temporary = join(dirname(target), `.placekeeper-${randomUUID()}.tmp`);
+          const targetDirectory = dirname(target);
+          const privateDirectory = dirname(delivery.sourceSnapshotPath);
+          const [targetDirectoryInfo, privateDirectoryInfo] = await Promise.all([
+            stat(targetDirectory),
+            stat(privateDirectory),
+          ]);
+          const temporary = join(
+            targetDirectoryInfo.dev === privateDirectoryInfo.dev ? privateDirectory : targetDirectory,
+            `.placekeeper-${randomUUID()}.tmp`,
+          );
           const handle = await open(temporary, "wx", 0o600);
           try {
             await handle.writeFile(written.pdfBytes);
@@ -404,12 +447,36 @@ export class PdfSaveCoordinator {
             await handle.close();
           }
           try {
+            if (
+              this.#broker.physicalSaveBarrierPending(sessionId) &&
+              !await this.#broker.settlePhysicalSaveBarrier(sessionId)
+            ) {
+              await rm(temporary, { force: true });
+              queue.requested = true;
+              return;
+            }
             const committed = await this.#broker.commitSaveCandidate({
               sessionId,
               generation,
+              documentGeneration: delivery.documentGeneration,
+              sourceDigest: delivery.source.digest,
               revision: delivery.revision,
               stateDigest,
-              commit: async () => {
+              targetDigest: written.evidence.outputSha256,
+              commit: async (candidateIsCurrent) => {
+                // A copy is still derived from an owned local source. Reprove
+                // that source immediately before publication: an explicit
+                // replacement and its filesystem observation can race while
+                // the predecessor writer is running.
+                if (
+                  destination.kind === "copy" &&
+                  this.#broker.sourceDisposition(sessionId) === "local"
+                ) {
+                  await this.#capabilities.validateOriginalForReplacement(
+                    delivery.source.fileId,
+                    delivery.originalDigest,
+                  );
+                }
                 const validatedTarget = destination.kind === "original"
                   ? await this.#capabilities.validateOriginalForReplacement(
                       destination.capabilityId!,
@@ -425,26 +492,48 @@ export class PdfSaveCoordinator {
                   const originalMode = (await stat(validatedTarget)).mode & 0o777;
                   await chmod(temporary, originalMode);
                 }
+                // Observation admission is synchronous and can raise the
+                // physical-save barrier while target validation is awaiting
+                // filesystem work. Recheck every broker-owned fence at the
+                // last JavaScript boundary before publishing the rename.
+                if (!candidateIsCurrent()) return undefined;
                 await rename(temporary, target);
-                await syncDirectory(dirname(target));
-                if (destination.kind === "original") {
-                  await this.#capabilities.refreshApprovedPdf(
-                    destination.capabilityId!,
-                    written.evidence.outputSha256,
-                  );
-                } else {
-                  await this.#capabilities.refreshDestination(
-                    destination.capabilityId!,
-                    written.evidence.outputSha256,
-                  );
-                }
-                return written.evidence.outputSha256;
+                return {
+                  targetDigest: written.evidence.outputSha256,
+                  settle: async () => {
+                    const observedDigest = await hashFile(target).catch(() => undefined);
+                    if (observedDigest === undefined) return "uncertain" as const;
+                    if (observedDigest !== written.evidence.outputSha256) {
+                      return "superseded" as const;
+                    }
+                    try {
+                      await this.#syncDirectory(dirname(target));
+                      if (destination.kind === "original") {
+                        await this.#capabilities.refreshApprovedPdf(
+                          destination.capabilityId!,
+                          written.evidence.outputSha256,
+                        );
+                      } else {
+                        await this.#capabilities.refreshDestination(
+                          destination.capabilityId!,
+                          written.evidence.outputSha256,
+                        );
+                      }
+                      return "published" as const;
+                    } catch {
+                      return "uncertain" as const;
+                    }
+                  },
+                };
               },
             });
             if (committed === "generation-stale") {
               await rm(temporary, { force: true });
+              queue.requested = true;
             } else if (committed === "committed-stale") {
               queue.requested = true;
+            } else if (committed === "target-superseded") {
+              throw new FileCapabilityError("TARGET_CHANGED", "Save target changed after publication");
             }
           } catch (error) {
             await rm(temporary, { force: true });
@@ -452,6 +541,10 @@ export class PdfSaveCoordinator {
           }
         });
       } catch (error) {
+        // A published candidate with unresolved durability/capability evidence
+        // deliberately leaves the session behind the broker commit barrier.
+        // Do not race that classifier with a contradictory failed-save record.
+        if (this.#broker.replacementCommitPending(sessionId)) return;
         await this.#broker.markSaveFailed(sessionId, generation, classifyFailure(error));
         return;
       }

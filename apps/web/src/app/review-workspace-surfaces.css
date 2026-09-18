@@ -251,7 +251,12 @@
   visibility: hidden;
 }
 
-:is(.review-workspace, .review-tools-workspace)[data-authoring-takeover="true"] {
+.review-workspace[data-authoring-takeover="true"] {
+  pointer-events: auto;
+  transition: none;
+}
+
+.review-tools-workspace[data-authoring-takeover="true"] {
   pointer-events: none;
   transition: none;
 }

@@ -36,6 +36,21 @@
   font: 400 12px/18px var(--pk-font-ui);
 }
 
+.comment-composer[data-passage-exposed="true"] {
+  gap: 0;
+  padding-block: 9px;
+}
+
+.comment-composer[data-passage-exposed="true"] .comment-composer__body[hidden] {
+  display: none;
+}
+
+#root[data-production-root="true"] .comment-composer .comment-composer__resume {
+  min-height: var(--comment-composer-anchor-size);
+  padding: 6px 9px;
+  white-space: nowrap;
+}
+
 .comment-composer__header h2 .review-icon {
   width: 16px;
   height: 16px;
@@ -58,7 +73,10 @@
   font: 400 14px/1.65 var(--pk-font-ui);
 }
 
-#root[data-production-root="true"] .comment-composer .comment-composer__actions .review-button {
+:is(
+  #root[data-production-root="true"] .comment-composer .comment-composer__actions,
+  .reconciliation-workspace__editor-actions
+) .review-button {
   min-height: 30px;
   padding: 7px 11px;
   border: 0;
@@ -67,16 +85,25 @@
   font: 400 12px/1.2 var(--pk-font-ui);
 }
 
-#root[data-production-root="true"] .comment-composer .comment-composer__actions .review-button--secondary:hover:not(:disabled) {
+:is(
+  #root[data-production-root="true"] .comment-composer .comment-composer__actions,
+  .reconciliation-workspace__editor-actions
+) .review-button--secondary:hover:not(:disabled) {
   background: var(--pk-hover);
 }
 
-#root[data-production-root="true"] .comment-composer .comment-composer__actions .review-button--primary {
+:is(
+  #root[data-production-root="true"] .comment-composer .comment-composer__actions,
+  .reconciliation-workspace__editor-actions
+) .review-button--primary {
   color: #fff;
   background: #3c3c3c;
 }
 
-#root[data-production-root="true"] .comment-composer .comment-composer__actions .review-button--primary:hover:not(:disabled) {
+:is(
+  #root[data-production-root="true"] .comment-composer .comment-composer__actions,
+  .reconciliation-workspace__editor-actions
+) .review-button--primary:hover:not(:disabled) {
   border-color: transparent;
   color: #fff;
   background: #252525;
@@ -143,10 +170,6 @@
 .annotation-item__meta strong,
 .full-annotation-reader__body h3,
 .annotation-direction-cue,
-.reconciliation-workspace__detail-header h2,
-.reconciliation-workspace__header h2,
-.reconciliation-workspace--detail .reconciliation-workspace__kicker,
-.reconciliation-workspace--detail .reconciliation-workspace__annotation-text {
+.reconciliation-workspace__header h2 {
   font-weight: 500;
 }
-

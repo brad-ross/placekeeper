@@ -11,6 +11,7 @@ import {
 import { basename, join } from "node:path";
 import { normalizeReviewState, type ReviewState } from "../../../../packages/core/src/review-model.js";
 import { canonicalSha256 } from "../../../../packages/core/src/live-context.js";
+import type { NativePdfAnnotationIdentityProvenance } from "../../../../packages/core/src/native-pdf-annotation.js";
 import type {
   SaveDestination,
   SaveSync,
@@ -25,6 +26,8 @@ import {
   isRecoveryTemporaryPathActive,
   trackRecoveryTemporaryPath,
 } from "./temporary-path-registry.js";
+
+const RECOVERY_ID = /^[A-Za-z0-9_-]{8,128}$/u;
 
 export interface LegacyRecoverableDraft {
   readonly schemaVersion: 1;
@@ -61,6 +64,17 @@ export interface DurableSourceWorkInterruptionV1 {
   readonly appliedChanges?: readonly DurableInterruptedSourceChangeV1[];
 }
 
+export interface DurableNativeAnnotationLedgerV1 {
+  readonly schemaVersion: 1;
+  readonly managed: readonly {
+    readonly id: string;
+    readonly provenance: NativePdfAnnotationIdentityProvenance;
+    readonly sourceDigest: string;
+    readonly documentGeneration: number;
+  }[];
+  readonly deletedIds: readonly string[];
+}
+
 export interface DurableInterruptedSourceChangeV1 {
   readonly schemaVersion: 1;
   readonly executionId: string;
@@ -83,6 +97,7 @@ export interface RecoverableDraftV2 {
   readonly generationLineage?: readonly DurableGenerationRecordV1[];
   readonly latestObservationEpoch?: number;
   readonly sourceWorkInterruptions?: readonly DurableSourceWorkInterruptionV1[];
+  readonly nativeAnnotationLedger?: DurableNativeAnnotationLedgerV1;
 }
 
 export type SourceDisposition = "local" | "remote-temporary";
@@ -122,6 +137,17 @@ export interface RecoverableDraftV3 {
   readonly generationLineage?: readonly DurableGenerationRecordV1[];
   readonly latestObservationEpoch?: number;
   readonly sourceWorkInterruptions?: readonly DurableSourceWorkInterruptionV1[];
+  readonly nativeAnnotationLedger?: DurableNativeAnnotationLedgerV1;
+  readonly interactionReceipts?: readonly {
+    readonly status: "finalized";
+    readonly sessionId: string;
+    readonly attachmentId: string;
+    readonly interactionToken: string;
+    readonly draftId?: string;
+    readonly generation: number;
+    readonly outcome: "applied" | "discarded";
+    readonly reviewRevision: number;
+  }[];
   /** A Chrome review that accepted a potentially durable side effect must
    * remain recoverable even when its save state is currently clean. */
   readonly chromeProtected?: true;
@@ -137,6 +163,10 @@ interface SnapshotEnvelope {
 export interface SnapshotHooks {
   readonly afterTemporarySync?: () => void | Promise<void>;
   readonly beforeFinalRename?: () => void | Promise<void>;
+  /** Fault-injection seam for an exception after the authoritative record
+   * rename, when callers must inspect recovery rather than assume failure. */
+  readonly afterFinalRename?: () => void | Promise<void>;
+  readonly beforeRecover?: () => void | Promise<void>;
 }
 
 function serialize(draft: RecoverableDraft): string {
@@ -221,6 +251,43 @@ function validV3Source(source: RecoverableSourceOwnership): boolean {
     source.byteLength > 0;
 }
 
+function validNativeAnnotationLedger(value: unknown): boolean {
+  if (value === undefined) return true;
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
+  const ledger = value as Partial<DurableNativeAnnotationLedgerV1>;
+  if (ledger.schemaVersion !== 1 || !Array.isArray(ledger.managed) || !Array.isArray(ledger.deletedIds)) return false;
+  const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
+  const seen = new Set<string>();
+  for (const entry of ledger.managed) {
+    if (entry === null || typeof entry !== "object" ||
+      !uuid.test(entry.id) || seen.has(entry.id) ||
+      (entry.provenance !== "verified" && entry.provenance !== "generation-ordinal") ||
+      !/^[a-f0-9]{64}$/u.test(entry.sourceDigest) ||
+      !Number.isSafeInteger(entry.documentGeneration) || entry.documentGeneration < 1) return false;
+    seen.add(entry.id);
+  }
+  return ledger.deletedIds.every((id) => typeof id === "string" && uuid.test(id) && seen.has(id)) &&
+    new Set(ledger.deletedIds).size === ledger.deletedIds.length;
+}
+
+function validInteractionReceipts(value: unknown): boolean {
+  if (value === undefined) return true;
+  if (!Array.isArray(value) || value.length > 256) return false;
+  return value.every((entry) => entry !== null && typeof entry === "object" &&
+    (entry as { status?: unknown }).status === "finalized" &&
+    typeof (entry as { sessionId?: unknown }).sessionId === "string" &&
+    typeof (entry as { attachmentId?: unknown }).attachmentId === "string" &&
+    typeof (entry as { interactionToken?: unknown }).interactionToken === "string" &&
+    ((entry as { draftId?: unknown }).draftId === undefined ||
+      (typeof (entry as { draftId?: unknown }).draftId === "string" &&
+        RECOVERY_ID.test((entry as { draftId: string }).draftId))) &&
+    Number.isSafeInteger((entry as { generation?: unknown }).generation) &&
+    ((entry as { generation: number }).generation > 0) &&
+    ((entry as { outcome?: unknown }).outcome === "applied" || (entry as { outcome?: unknown }).outcome === "discarded") &&
+    Number.isSafeInteger((entry as { reviewRevision?: unknown }).reviewRevision) &&
+    ((entry as { reviewRevision: number }).reviewRevision >= 0));
+}
+
 function parse(contents: string): RecoverableDraftV3 | undefined {
   try {
     const envelope = JSON.parse(contents) as SnapshotEnvelope;
@@ -231,6 +298,8 @@ function parse(contents: string): RecoverableDraftV3 | undefined {
       ![1, 2, 3].includes(envelope.payload.schemaVersion) ||
       (envelope.payload.schemaVersion === 3 && (
         !validV3Source(envelope.payload.source) ||
+        !validNativeAnnotationLedger(envelope.payload.nativeAnnotationLedger) ||
+        !validInteractionReceipts(envelope.payload.interactionReceipts) ||
         (envelope.payload.chromeProtected !== undefined && envelope.payload.chromeProtected !== true) ||
         (envelope.payload.source.disposition === "remote-temporary" && (
           envelope.payload.source.digest !== envelope.payload.state.source.digest ||
@@ -333,6 +402,7 @@ export class DraftSnapshotStore {
       await this.#hooks.beforeFinalRename?.();
       signal?.throwIfAborted();
       await rename(temporaryPath, this.currentPath);
+      await this.#hooks.afterFinalRename?.();
       await chmod(this.currentPath, 0o600);
       const directoryHandle = await open(this.directory, "r");
       try {
@@ -350,6 +420,7 @@ export class DraftSnapshotStore {
   }
 
   async recover(): Promise<RecoverableDraftV3 | undefined> {
+    await this.#hooks.beforeRecover?.();
     await this.initialize();
     const candidates = await Promise.all([
       readValid(this.currentPath),

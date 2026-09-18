@@ -342,6 +342,61 @@ describe('canonical review commands', () => {
     });
   });
 
+  it('initializes ordinary review reconciliation metadata before a generation transition', () => {
+    let { state, commands } = setup();
+    state = reduceReview(state, addHighlight(state, selection, 'Keep', commands));
+
+    expect(state.workflow.mode).toBe('standard');
+    expect(state.items[0]?.reconciliation).toMatchObject({
+      baseGeneration: 1,
+      revision: 0,
+      disposition: { kind: 'resolved', generation: 1 },
+    });
+
+    state = startReviewGeneration(state, { documentGeneration: 2 });
+    expect(state.workflow).toMatchObject({ documentGeneration: 2, historyBoundary: 1 });
+    expect(() => reduceReview(state, { type: 'undo', expectedRevision: state.revision }))
+      .toThrow(/cannot cross the rebuild history boundary/iu);
+  });
+
+  it('applies an acknowledged protected draft in an ordinary review', () => {
+    let { state } = setup();
+    state = reduceReview(state, {
+      type: 'put-draft',
+      expectedRevision: state.revision,
+      expectedDraftRevision: -1,
+      draft: {
+        id: '00000000-0000-4000-8000-000000000199',
+        ownerViewId: 'attachment-ordinary',
+        baseGeneration: state.workflow.documentGeneration,
+        revision: 0,
+        kind: 'highlight',
+        pageIndex: 0,
+        text: 'ordinary protected text',
+        anchor: { kind: 'selection', ...selection },
+        disposition: { kind: 'resolved', generation: state.workflow.documentGeneration },
+        status: 'protected',
+        createdAt: '2026-09-15T12:00:00.000Z',
+        updatedAt: '2026-09-15T12:00:01.000Z',
+      },
+    });
+    state = reduceReview(state, {
+      type: 'apply-draft',
+      expectedRevision: state.revision,
+      id: state.pendingDrafts[0]!.id,
+      expectedDraftRevision: state.pendingDrafts[0]!.revision,
+      ownerViewId: 'attachment-ordinary',
+      updatedAt: '2026-09-15T12:00:02.000Z',
+    });
+    expect(state.workflow.mode).toBe('standard');
+    expect(state.pendingDrafts).toEqual([]);
+    expect(state.items[0]).toMatchObject({
+      kind: 'highlight',
+      payload: { comment: 'ordinary protected text' },
+      reconciliation: { ownerViewId: 'attachment-ordinary' },
+    });
+  });
+
   it('reattaches while preserving proposed text and fences undo at a rebuild boundary', () => {
     let { state, commands } = setup();
     state = reduceReview(state, addReplace(state, selection, 'same semantics', commands));

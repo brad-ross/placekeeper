@@ -1,8 +1,13 @@
-import type { ReviewExportFence } from "../../../../packages/core/src/review-runtime-protocol.js";
+import type {
+  ReadingLocationResolutionRequestV1,
+  ReadingLocationResolutionV1,
+  ReviewExportFence,
+} from "../../../../packages/core/src/review-runtime-protocol.js";
 import type { ReviewCommand, ReviewState, SaveDestinationConfirmation } from "../../../../packages/core/src/review-model.js";
 import type { SaveStatus } from "../../../../packages/core/src/save-status.js";
 import type { LiveContextBindingStatus } from "../../../../packages/core/src/live-context.js";
 import type { RejectedReviewCommand } from "../review/review-command-result.js";
+import type { ReviewInteractionTransport } from "../review/authoring-session.js";
 
 export interface ProductionSession {
   readonly sessionId: string;
@@ -29,11 +34,14 @@ export type SaveCopyProposal =
   | {
       readonly sourceDisposition: 'local';
       readonly filename: string;
-      readonly folder: string;
+      readonly folder?: string;
+      readonly folderSelectionId?: string;
     }
   | {
       readonly sourceDisposition: 'remote-temporary';
+      readonly filename?: string;
       readonly folder?: string;
+      readonly folderSelectionId?: string;
     };
 
 export interface ProductionExportResult {
@@ -48,9 +56,28 @@ export type SaveDestinationResult = SaveStatus & {
   readonly nameResult?: ReviewState | RejectedReviewCommand;
 };
 
-export interface ProductionSessionApi {
+export interface ReviewInteractionAttachment {
+  readonly sessionId: string;
+  readonly attachmentId: string;
+  readonly incarnationId: string;
+  readonly capability: string;
+  readonly protocolVersion: 1;
+  readonly capabilities: readonly string[];
+}
+
+export interface ProductionSessionApi extends Partial<ReviewInteractionTransport> {
+  readonly capabilities?: {
+    readonly localDocumentRefresh: boolean;
+    readonly interactionLifecycleVersion?: 1;
+  };
+  subscribeInteractionReconnect?(
+    listener: (identity: { readonly generation: number; readonly revision: number }) => Promise<void>,
+  ): () => void;
   presence?(): () => void;
-  command(command: ReviewCommand): Promise<ReviewState | RejectedReviewCommand>;
+  command(
+    command: ReviewCommand,
+    attachment?: ReviewInteractionAttachment,
+  ): Promise<ReviewState | RejectedReviewCommand>;
   saveStatus(): Promise<SaveStatus>;
   saveProposal(): Promise<SaveCopyProposal>;
   chooseCopy(filename?: string, folderSelectionId?: string, confirmation?: SaveDestinationConfirmation): Promise<SaveDestinationResult>;
@@ -58,6 +85,7 @@ export interface ProductionSessionApi {
   chooseOriginal(confirmation?: SaveDestinationConfirmation): Promise<SaveDestinationResult>;
   retrySave(): Promise<SaveStatus>;
   locateSave(): Promise<SaveStatus>;
+  resolveReadingLocation?(input: ReadingLocationResolutionRequestV1): Promise<ReadingLocationResolutionV1>;
   exportReviewedCopy?(confirmPossiblyStale?: true, fence?: ReviewExportFence): Promise<ProductionExportResult>;
   scope(signal?: AbortSignal): Promise<ProductionScope>;
 }
@@ -76,4 +104,3 @@ export interface ForwardSyncTexRequest {
 export type HostForwardSyncTexRequest = ForwardSyncTexRequest & {
   readonly token: number;
 };
-

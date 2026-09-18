@@ -116,7 +116,7 @@
 }
 
 .outline-navigator__row:hover > .row-action-group,
-.outline-navigator__row:focus-within > .row-action-group {
+.outline-navigator__row:has(:focus-visible) > .row-action-group {
   background: inherit;
 }
 
@@ -185,12 +185,12 @@
 }
 
 .outline-navigator__row:hover .row-action-group__direct,
-.outline-navigator__row:focus-within .row-action-group__direct,
+.outline-navigator__row:has(:focus-visible) .row-action-group__direct,
 li[data-annotation-origin]:hover .row-action-group__direct,
-li[data-annotation-origin]:focus-within .row-action-group__direct,
+li[data-annotation-origin]:has(:focus-visible) .row-action-group__direct,
 li[data-annotation-origin][data-active="true"] .row-action-group__direct,
 li[data-search-result]:hover .row-action-group__direct,
-li[data-search-result]:focus-within .row-action-group__direct,
+li[data-search-result]:has(:focus-visible) .row-action-group__direct,
 li[data-search-result][data-active="true"] .row-action-group__direct {
   opacity: 1;
   pointer-events: auto;
@@ -374,4 +374,3 @@ li[data-search-result] .row-action-group__secondary {
 }
 .link-action-popover [role="menuitem"]:focus-visible { outline: 3px solid var(--review-focus, #245c9c); outline-offset: 0; }
 .link-action-popover [role="menuitem"] .review-icon { color: var(--review-ink-muted, #676a63); }
-

@@ -15,6 +15,8 @@ import {
   CHROME_RUNTIME_PROTOCOL,
   CHROME_RUNTIME_PROTOCOL_VERSION,
   CHROME_RUNTIME_RESOURCE_CHUNK_BYTES,
+  chromeRuntimeProjectionChangeReason,
+  isChromeInteractionOwnerSecret,
   parseRuntimeHostMessage,
   validateRuntimeExtensionMessage,
   type ChromeRuntimeExtensionMessage,
@@ -24,8 +26,26 @@ import {
 const MAX_DOCUMENT_BYTES = 64 * 1024 * 1024;
 const INTERACTIVE_REQUEST_TIMEOUT_MS = 5 * 60_000 + 5_000;
 const RELEASE_TIMEOUT_MS = 1_000;
+const REFRESH_POLL_MS = 1_000;
+const REFRESH_RETRY_MIN_MS = 250;
+const REFRESH_RETRY_MAX_MS = 4_000;
+const OWNER_CLAIM = /^[A-Za-z0-9_-]{16,128}$/u;
+const OWNER_HISTORY_KEY = "__placekeeperChromeOwnerClaim";
+const TERMINAL_REFRESH_FAILURES = new Set([
+  "protocol-mismatch",
+  "update-required",
+  "disconnected",
+  "invalid-host-message",
+  "invalid-service-response",
+  "invalid-state",
+  "connection-closed",
+]);
 const NON_IDEMPOTENT = new Set<ReviewRuntimeBrokerMethod>([
   "command",
+  "beginInteraction",
+  "finalizeInteraction",
+  "releaseInteraction",
+  "acknowledgeInteraction",
   "chooseCopy",
   "chooseFolder",
   "chooseOriginal",
@@ -44,6 +64,7 @@ interface RuntimeProjection {
   readonly sessionId: string;
   readonly generation: number;
   readonly revision: number;
+  readonly activeAuthoringDraftIds: readonly string[];
   readonly state: Record<string, unknown>;
   readonly scope: Record<string, unknown>;
   readonly saveStatus: Record<string, unknown>;
@@ -62,6 +83,8 @@ export interface NativeEmbeddedReviewSession {
   readonly runtimePort: ReviewRuntimeMessagePort;
   readonly protected: boolean;
   activate(signal?: AbortSignal): Promise<void>;
+  confirmDocumentReady(generation: number): void;
+  reportViewerFailure(): void;
   release(): Promise<void>;
   dispose(): void;
   subscribeLifecycle(listener: (event: EmbeddedReviewLifecycleEvent) => void): () => void;
@@ -74,6 +97,7 @@ export interface NativeEmbeddedReviewOptions {
   createObjectURL(blob: Blob): string;
   revokeObjectURL(url: string): void;
   getExtensionURL(path: string): string;
+  interactionOwnerSecret?(info: PdfStreamInfo): string | Promise<string>;
   chooseRecovery?(
     offer: { readonly choices: readonly ["resume", "discard", "fork"]; readonly offer: { readonly id: string; readonly expiresAt: string } },
     signal?: AbortSignal,
@@ -81,6 +105,64 @@ export interface NativeEmbeddedReviewOptions {
   timeoutMs?: number;
   maxDocumentBytes?: number;
   now?(): number;
+}
+
+interface ChromeInteractionOwnerClaimEnvironment {
+  readonly tabId: number;
+  navigationType(): string | undefined;
+  readHistoryState(): unknown;
+  replaceHistoryState(state: unknown): void;
+  readSession(key: string): string | null;
+  writeSession(key: string, value: string): void;
+  createSecret(): string;
+  createClaimId(): string;
+}
+
+function objectRecord(value: unknown): Record<string, unknown> {
+  return record(value) ? value : {};
+}
+
+/** Binds recovery authority to one Chrome tab and one history entry. The
+ * history claim is public routing metadata; the 256-bit secret stays in
+ * sessionStorage and crosses only the extension/native channel. */
+export function createChromeInteractionOwnerClaimStore(
+  environment: ChromeInteractionOwnerClaimEnvironment,
+): { ownerSecret(): string } {
+  let claimed: string | undefined;
+  return {
+    ownerSecret() {
+      if (claimed !== undefined) return claimed;
+      const historyState = objectRecord(environment.readHistoryState());
+      const existing = objectRecord(historyState[OWNER_HISTORY_KEY]);
+      const navigationType = environment.navigationType();
+      const recoverableNavigation = navigationType === "reload" || navigationType === "back_forward";
+      const existingClaim = existing.tabId === environment.tabId &&
+        typeof existing.claimId === "string" && OWNER_CLAIM.test(existing.claimId)
+        ? existing.claimId : undefined;
+      const recovered = recoverableNavigation && existingClaim !== undefined
+        ? environment.readSession(`placekeeper.chrome-interaction-owner.${environment.tabId}.${existingClaim}`)
+        : null;
+      if (isChromeInteractionOwnerSecret(recovered)) {
+        claimed = recovered;
+        return claimed;
+      }
+      const claimId = environment.createClaimId();
+      const secret = environment.createSecret();
+      if (!OWNER_CLAIM.test(claimId) || !isChromeInteractionOwnerSecret(secret)) {
+        throw new Error("Invalid Chrome interaction owner identity.");
+      }
+      environment.replaceHistoryState({
+        ...historyState,
+        [OWNER_HISTORY_KEY]: { tabId: environment.tabId, claimId },
+      });
+      environment.writeSession(
+        `placekeeper.chrome-interaction-owner.${environment.tabId}.${claimId}`,
+        secret,
+      );
+      claimed = secret;
+      return secret;
+    },
+  };
 }
 
 interface PendingNativeRequest {
@@ -114,10 +196,20 @@ function aborted(): Error {
   return new DOMException("The embedded review was cancelled.", "AbortError");
 }
 
+class NativeRuntimeError extends Error {
+  constructor(readonly reason: string, message: string) {
+    super(message);
+  }
+}
+
 function reasonError(reason: string): Error {
-  if (reason === "export-conflict") return new Error("Review changed. Confirm the annotation name again to export the latest review.");
-  if (reason === "protocol-mismatch" || reason === "update-required") return new Error("Update the Placekeeper Chrome extension and native service, then reopen this review (protocol-mismatch).");
-  return new Error(`Chrome native runtime ${reason}.`);
+  if (reason === "export-conflict") {
+    return new NativeRuntimeError(reason, "Review changed. Confirm the annotation name again to export the latest review.");
+  }
+  if (reason === "protocol-mismatch" || reason === "update-required") {
+    return new NativeRuntimeError(reason, "Update the Placekeeper Chrome extension and native service, then reopen this review (protocol-mismatch).");
+  }
+  return new NativeRuntimeError(reason, `Chrome native runtime ${reason}.`);
 }
 
 export function chromePdfDisplayName(originalUrl: string): string {
@@ -177,7 +269,14 @@ function runtimeProjection(value: unknown): RuntimeProjection | undefined {
     !Number.isSafeInteger(value.document.byteLength) || !Number.isSafeInteger(value.document.generation)) {
     return undefined;
   }
-  return value as unknown as RuntimeProjection;
+  const ids = value.activeAuthoringDraftIds;
+  if (ids !== undefined && (!Array.isArray(ids) || ids.length > 256 ||
+    ids.some((id) => typeof id !== "string" || !OWNER_CLAIM.test(id)) ||
+    new Set(ids).size !== ids.length)) return undefined;
+  return {
+    ...value,
+    activeAuthoringDraftIds: Object.freeze(ids === undefined ? [] : [...ids]),
+  } as unknown as RuntimeProjection;
 }
 
 class NativeRuntimeChannel {
@@ -213,7 +312,7 @@ class NativeRuntimeChannel {
     return () => this.#disconnects.delete(listener);
   }
 
-  async negotiate(signal?: AbortSignal): Promise<void> {
+  async negotiate(interactionOwnerSecret?: string, signal?: AbortSignal): Promise<boolean> {
     const reply = await this.#requestInternal({
       type: "hello",
       reviewRuntimeVersion: REVIEW_RUNTIME_VERSION,
@@ -223,6 +322,21 @@ class NativeRuntimeChannel {
     }, (message) => message.type === "hello-ack", signal, true);
     if (reply.type !== "hello-ack") throw reasonError("protocol-mismatch");
     this.#leaseMs = reply.leaseMs;
+    if (interactionOwnerSecret === undefined) return false;
+    const requestId = this.connectionId;
+    try {
+      const claimed = await this.request({
+        type: "claim-owner",
+        lane: "lifecycle",
+        requestId,
+        interactionOwnerSecret,
+      }, (message) => message.type === "ack" && message.lane === "lifecycle" &&
+        message.requestId === requestId, signal);
+      return claimed.type === "ack";
+    } catch (error) {
+      if (error instanceof NativeRuntimeError && error.reason === "invalid-message") return false;
+      throw error;
+    }
   }
 
   request(
@@ -451,7 +565,9 @@ async function readProjectedDocument(
   maxBytes: number,
   signal?: AbortSignal,
 ): Promise<Uint8Array> {
-  if (projection.document.byteLength > maxBytes) throw new Error("The PDF exceeds Placekeeper's Chrome size limit.");
+  if (projection.document.byteLength > maxBytes) {
+    throw new NativeRuntimeError("invalid-service-response", "The PDF exceeds Placekeeper's Chrome size limit.");
+  }
   const requestId = createId();
   let reply = await channel.request({
     type: "read",
@@ -466,9 +582,14 @@ async function readProjectedDocument(
   const chunks: Uint8Array[] = [];
   let byteLength = 0;
   while (reply.type === "resource-chunk") {
-    const bytes = bytesFromBase64(reply.data);
+    let bytes: Uint8Array;
+    try {
+      bytes = bytesFromBase64(reply.data);
+    } catch {
+      throw new NativeRuntimeError("invalid-service-response", "The native document resource was malformed.");
+    }
     if (bytes.byteLength === 0 || byteLength + bytes.byteLength > projection.document.byteLength) {
-      throw new Error("The native document resource was malformed.");
+      throw new NativeRuntimeError("invalid-service-response", "The native document resource was malformed.");
     }
     chunks.push(bytes);
     byteLength += bytes.byteLength;
@@ -483,7 +604,7 @@ async function readProjectedDocument(
       message.sequence === previousSequence + 1, signal);
   }
   if (byteLength !== projection.document.byteLength) {
-    throw new Error("The native document resource ended at the wrong length.");
+    throw new NativeRuntimeError("invalid-service-response", "The native document resource ended at the wrong length.");
   }
   return concatenate(chunks, byteLength);
 }
@@ -522,7 +643,8 @@ export function createNativeEmbeddedReview(options: NativeEmbeddedReviewOptions)
     let documentUrl: string | undefined;
     let released = false;
     try {
-      await channel.negotiate(signal);
+      const interactionOwnerSecret = await options.interactionOwnerSecret?.(info);
+      const ownerProofAvailable = await channel.negotiate(interactionOwnerSecret, signal);
       const local = new URL(info.originalUrl).protocol === "file:";
       if (!local) {
         try {
@@ -566,6 +688,7 @@ export function createNativeEmbeddedReview(options: NativeEmbeddedReviewOptions)
       }, (message) => (message.type === "projection" || message.type === "recovery-offered") &&
         message.requestId === finishId, signal);
       if (finish.type === "recovery-offered") {
+        if (!ownerProofAvailable) throw reasonError("update-required");
         if (options.chooseRecovery === undefined) throw new Error("Protected recovery requires a user choice.");
         const decision = await options.chooseRecovery({
           choices: finish.choices,
@@ -607,79 +730,118 @@ export function createNativeEmbeddedReview(options: NativeEmbeddedReviewOptions)
       let bootstrap = initialBootstrap;
       let active = false;
       let protectedReview = projection.protected;
+      let adoptedDocumentUrl: string | undefined = documentUrl;
+      let pendingDocumentUrl: string | undefined;
       const operationKeys = new Map<string, string>();
       let disposed = false;
       let keepalive: ReturnType<typeof setInterval> | undefined;
+      let refreshPoll: ReturnType<typeof setInterval> | undefined;
+      let refreshRetry: ReturnType<typeof setTimeout> | undefined;
+      let refreshRetryAttempt = 0;
+      let refreshInFlight = false;
+      let refreshRequested = false;
       let runtimeInvokes = 0;
       let pendingRefreshes = 0;
-      let refreshTail = Promise.resolve();
-      const deferredInvalidations: ChromeRuntimeHostMessage[] = [];
+      const deferredRuntimeRequests: Record<string, unknown>[] = [];
       const runtimeListeners = new Set<(message: unknown) => void>();
       const lifecycleListeners = new Set<(event: EmbeddedReviewLifecycleEvent) => void>();
       let lifecycleFailurePublished = false;
       const emitRuntime = (message: unknown) => {
         for (const listener of runtimeListeners) listener(message);
       };
+      const stopRefreshTimers = () => {
+        if (refreshPoll !== undefined) clearInterval(refreshPoll);
+        if (refreshRetry !== undefined) clearTimeout(refreshRetry);
+        refreshPoll = undefined;
+        refreshRetry = undefined;
+      };
       const publishLifecycleFailure = () => {
-        if (released || lifecycleFailurePublished) return;
+        if (released || disposed || lifecycleFailurePublished) return;
         lifecycleFailurePublished = true;
         if (keepalive !== undefined) clearInterval(keepalive);
+        stopRefreshTimers();
         for (const listener of lifecycleListeners) listener({
           type: "disconnected",
           protected: protectedReview,
         });
       };
-      const publishInvalidation = (message: ChromeRuntimeHostMessage) => {
-        if (message.type !== "invalidation") return;
+      const terminalRefreshFailure = (error: unknown): boolean => error instanceof NativeRuntimeError &&
+        TERMINAL_REFRESH_FAILURES.has(error.reason);
+      const confirmDocumentReady = (generation: number) => {
+        if (released || disposed || lifecycleFailurePublished || !Number.isSafeInteger(generation) ||
+          generation !== projection!.generation ||
+          documentUrl === undefined || documentUrl !== pendingDocumentUrl) return;
+        const retired = adoptedDocumentUrl;
+        adoptedDocumentUrl = documentUrl;
+        pendingDocumentUrl = undefined;
+        if (retired !== undefined && retired !== documentUrl) options.revokeObjectURL(retired);
+        if (refreshRequested) requestRefresh();
+      };
+      const performRefresh = async () => {
+        if (released || disposed || lifecycleFailurePublished) return;
         pendingRefreshes += 1;
-        refreshTail = refreshTail.then(async () => {
-          if (released || lifecycleFailurePublished) return;
+        let createdDocumentUrl: string | undefined;
+        try {
           const requestId = options.createId();
           const reply = await channel.request({
             type: "refresh",
             lane: "lifecycle",
             requestId,
           }, (candidate) => candidate.type === "projection" && candidate.requestId === requestId);
-          if (reply.type !== "projection") throw new Error("The service did not refresh the review.");
+          if (released || disposed || lifecycleFailurePublished) return;
+          if (reply.type !== "projection") {
+            throw new NativeRuntimeError("invalid-service-response", "The service did not refresh the review.");
+          }
           const next = runtimeProjection(reply.payload);
           const previous = projection!;
           if (next === undefined || next.sessionId !== previous.sessionId ||
             next.generation < previous.generation ||
             (next.generation === previous.generation && next.revision < previous.revision)) {
-            throw new Error("The service returned a stale review projection.");
+            throw new NativeRuntimeError("invalid-service-response", "The service returned a stale review projection.");
           }
+          const reason = chromeRuntimeProjectionChangeReason(previous, next);
+          if (reason === undefined) return;
           let nextDocumentUrl = documentUrl;
           if (next.generation !== previous.generation || next.document.sha256 !== previous.document.sha256 ||
             next.document.byteLength !== previous.document.byteLength) {
             const bytes = await readProjectedDocument(channel, next, options.createId, maxDocumentBytes);
-            verifyPdfBytes(bytes, next);
+            try {
+              verifyPdfBytes(bytes, next);
+            } catch {
+              throw new NativeRuntimeError("invalid-service-response", "The refreshed PDF resource was invalid.");
+            }
+            if (released || disposed || lifecycleFailurePublished) return;
             nextDocumentUrl = options.createObjectURL(new Blob([
               bytes.buffer as ArrayBuffer,
             ], { type: "application/pdf" }));
+            createdDocumentUrl = nextDocumentUrl;
           }
-          if (nextDocumentUrl === undefined) throw new Error("The refreshed PDF resource was unavailable.");
+          if (nextDocumentUrl === undefined) {
+            throw new NativeRuntimeError("invalid-service-response", "The refreshed PDF resource was unavailable.");
+          }
           const nextBootstrap = sanitizeChromeReviewRuntimeResponse("bootstrap", {
             ...next,
             resources: {
               document: nextDocumentUrl,
-              pdfiumWasm: options.getExtensionURL("shared/pdfium.wasm"),
-              worker: options.getExtensionURL("shared/pdfium-worker.js"),
+              pdfiumWasm,
+              worker,
             },
           });
           if (!record(nextBootstrap)) {
-            if (nextDocumentUrl !== documentUrl) options.revokeObjectURL(nextDocumentUrl);
-            throw new Error("The refreshed review projection was unsafe.");
+            throw new NativeRuntimeError("invalid-service-response", "The refreshed review projection was unsafe.");
           }
-          const retiredDocumentUrl = documentUrl;
+          if (released || disposed || lifecycleFailurePublished) return;
+          if (nextDocumentUrl !== documentUrl) {
+            if (pendingDocumentUrl !== undefined && pendingDocumentUrl !== adoptedDocumentUrl) {
+              options.revokeObjectURL(pendingDocumentUrl);
+            }
+            pendingDocumentUrl = nextDocumentUrl;
+            createdDocumentUrl = undefined;
+          }
           documentUrl = nextDocumentUrl;
           projection = next;
           bootstrap = nextBootstrap;
-          if (message.reason === "save" || next.revision > previous.revision) {
-            protectedReview = true;
-          }
-          if (retiredDocumentUrl !== undefined && retiredDocumentUrl !== nextDocumentUrl) {
-            options.revokeObjectURL(retiredDocumentUrl);
-          }
+          if (next.protected || reason === "save" || next.revision > previous.revision) protectedReview = true;
           emitRuntime({
             protocol: REVIEW_RUNTIME_PROTOCOL,
             version: REVIEW_RUNTIME_VERSION,
@@ -690,32 +852,89 @@ export function createNativeEmbeddedReview(options: NativeEmbeddedReviewOptions)
               sessionId: next.sessionId,
               generation: next.generation,
               revision: next.revision,
-              reason: message.reason === "save" && next.generation === previous.generation
-                ? "freshness"
-                : next.generation === previous.generation ? "revision" : "generation",
+              reason: reason === "generation" ? "generation"
+                : reason === "revision" ? "revision"
+                  : reason === "presence" ? "presence" : "freshness",
               ...(next.generation === previous.generation ? {} : {
                 previousGeneration: previous.generation,
               }),
             },
           });
-        }).catch(() => publishLifecycleFailure()).finally(() => {
+        } finally {
+          if (createdDocumentUrl !== undefined) options.revokeObjectURL(createdDocumentUrl);
           pendingRefreshes = Math.max(0, pendingRefreshes - 1);
-        });
+          if (pendingRefreshes === 0 && deferredRuntimeRequests.length > 0) {
+            const queued = deferredRuntimeRequests.splice(0);
+            queueMicrotask(() => {
+              for (const request of queued) runtimePort.postMessage(request);
+            });
+          }
+        }
       };
-      const flushInvalidations = () => {
-        if (runtimeInvokes !== 0) return;
-        for (const message of deferredInvalidations.splice(0)) publishInvalidation(message);
+      const scheduleRefreshRetry = () => {
+        if (released || disposed || lifecycleFailurePublished || refreshRetry !== undefined) return;
+        const delay = Math.min(REFRESH_RETRY_MAX_MS,
+          REFRESH_RETRY_MIN_MS * (2 ** Math.min(refreshRetryAttempt, 4)));
+        refreshRetryAttempt += 1;
+        refreshRetry = setTimeout(() => {
+          refreshRetry = undefined;
+          requestRefresh();
+        }, delay);
+        refreshRetry.unref?.();
+      };
+      const runRefresh = async () => {
+        if (refreshInFlight || released || disposed || lifecycleFailurePublished) return;
+        if (pendingDocumentUrl !== undefined) {
+          refreshRequested = true;
+          return;
+        }
+        if (refreshRetry !== undefined) {
+          refreshRequested = true;
+          return;
+        }
+        if (runtimeInvokes !== 0) {
+          refreshRequested = true;
+          return;
+        }
+        refreshInFlight = true;
+        refreshRequested = false;
+        try {
+          await performRefresh();
+          refreshRetryAttempt = 0;
+          if (refreshRetry !== undefined) {
+            clearTimeout(refreshRetry);
+            refreshRetry = undefined;
+          }
+        } catch (error) {
+          if (terminalRefreshFailure(error)) publishLifecycleFailure();
+          else scheduleRefreshRetry();
+        } finally {
+          refreshInFlight = false;
+          if (refreshRequested) queueMicrotask(() => void runRefresh());
+        }
+      };
+      function requestRefresh(): void {
+        if (refreshInFlight || runtimeInvokes !== 0 || pendingDocumentUrl !== undefined ||
+          refreshRetry !== undefined) {
+          refreshRequested = true;
+          return;
+        }
+        void runRefresh();
+      }
+      const publishInvalidation = (message: ChromeRuntimeHostMessage) => {
+        if (message.type !== "invalidation") return;
+        requestRefresh();
       };
       const unsubscribeNative = channel.subscribe((message) => {
         if (message.type === "invalidation") {
-          if (runtimeInvokes === 0) publishInvalidation(message);
-          else deferredInvalidations.push(message);
+          publishInvalidation(message);
           return;
         }
         if (message.type === "update-required") {
           if (released || lifecycleFailurePublished) return;
           lifecycleFailurePublished = true;
           if (keepalive !== undefined) clearInterval(keepalive);
+          stopRefreshTimers();
           for (const listener of lifecycleListeners) listener({
             type: "update-required",
             protected: protectedReview,
@@ -730,6 +949,7 @@ export function createNativeEmbeddedReview(options: NativeEmbeddedReviewOptions)
         if (released) return;
         released = true;
         if (keepalive !== undefined) clearInterval(keepalive);
+        stopRefreshTimers();
         const requestId = options.createId();
         await channel.request({
           type: "detach",
@@ -767,8 +987,12 @@ export function createNativeEmbeddedReview(options: NativeEmbeddedReviewOptions)
             return;
           }
           const payload = sanitizeChromeReviewRuntimeRequest(method, raw.payload);
-          if (payload === undefined || !active || pendingRefreshes > 0 || lifecycleFailurePublished) {
+          if (payload === undefined || !active || released || disposed || lifecycleFailurePublished) {
             queueMicrotask(() => emitRuntime(reviewResponse(raw, projection!, false, {})));
+            return;
+          }
+          if (pendingRefreshes > 0) {
+            deferredRuntimeRequests.push(raw);
             return;
           }
           const requestId = options.createId();
@@ -811,6 +1035,11 @@ export function createNativeEmbeddedReview(options: NativeEmbeddedReviewOptions)
                 };
                 bootstrap = { ...bootstrap, state: safe, revision: safe.revision };
                 protectedReview = true;
+              } else if (method === "finalizeInteraction" && record(safe) &&
+                Number.isSafeInteger(safe.reviewRevision)) {
+                projection = { ...projection!, revision: safe.reviewRevision as number };
+                bootstrap = { ...bootstrap, revision: safe.reviewRevision };
+                protectedReview = true;
               } else if (["chooseCopy", "chooseOriginal", "retrySave", "locateSave"].includes(method)) {
                 bootstrap = { ...bootstrap, saveStatus: safe };
                 protectedReview = true;
@@ -827,7 +1056,7 @@ export function createNativeEmbeddedReview(options: NativeEmbeddedReviewOptions)
                 error instanceof Error && error.message.startsWith("Review changed.") ? { kind: "export-conflict" } : {}));
             }).finally(() => {
               runtimeInvokes = Math.max(0, runtimeInvokes - 1);
-              flushInvalidations();
+              if (runtimeInvokes === 0 && refreshRequested) requestRefresh();
             });
           return;
         },
@@ -837,6 +1066,8 @@ export function createNativeEmbeddedReview(options: NativeEmbeddedReviewOptions)
         displayName,
         runtimePort,
         get protected() { return protectedReview; },
+        confirmDocumentReady,
+        reportViewerFailure: publishLifecycleFailure,
         subscribeLifecycle(listener) {
           lifecycleListeners.add(listener);
           return () => lifecycleListeners.delete(listener);
@@ -850,18 +1081,71 @@ export function createNativeEmbeddedReview(options: NativeEmbeddedReviewOptions)
             requestId,
             documentValidated: true,
           }, (message) => message.type === "active" && message.requestId === requestId, activateSignal);
+          if (released || disposed || lifecycleFailurePublished) return;
           if (reply.type !== "active") throw new Error("The service did not activate the review.");
           const next = runtimeProjection(reply.payload);
-          if (next === undefined || next.document.sha256 !== projection!.document.sha256 ||
-            next.document.byteLength !== projection!.document.byteLength ||
-            next.document.generation !== projection!.document.generation) {
-            throw new Error("The active document identity changed before activation.");
-          }
           const previous = projection!;
-          projection = next;
-          bootstrap = { ...bootstrap, ...next };
+          if (next === undefined || next.sessionId !== previous.sessionId ||
+            next.generation < previous.generation ||
+            (next.generation === previous.generation && next.revision < previous.revision)) {
+            throw new NativeRuntimeError("invalid-service-response", "The service returned an invalid active projection.");
+          }
+          let nextDocumentUrl = documentUrl;
+          let createdDocumentUrl: string | undefined;
+          const abandonCreatedDocument = () => {
+            if (createdDocumentUrl === undefined) return;
+            options.revokeObjectURL(createdDocumentUrl);
+            createdDocumentUrl = undefined;
+          };
+          try {
+            if (next.generation !== previous.generation || next.document.sha256 !== previous.document.sha256 ||
+              next.document.byteLength !== previous.document.byteLength) {
+              const bytes = await readProjectedDocument(channel, next, options.createId, maxDocumentBytes, activateSignal);
+              if (released || disposed || lifecycleFailurePublished) return;
+              try {
+                verifyPdfBytes(bytes, next);
+              } catch {
+                throw new NativeRuntimeError("invalid-service-response", "The active PDF resource was invalid.");
+              }
+              nextDocumentUrl = options.createObjectURL(new Blob([
+                bytes.buffer as ArrayBuffer,
+              ], { type: "application/pdf" }));
+              createdDocumentUrl = nextDocumentUrl;
+              if (released || disposed || lifecycleFailurePublished) {
+                abandonCreatedDocument();
+                return;
+              }
+            }
+            if (nextDocumentUrl === undefined) {
+              throw new NativeRuntimeError("invalid-service-response", "The active PDF resource was unavailable.");
+            }
+            const nextBootstrap = sanitizeChromeReviewRuntimeResponse("bootstrap", {
+              ...next,
+              resources: { document: nextDocumentUrl, pdfiumWasm, worker },
+            });
+            if (!record(nextBootstrap)) {
+              throw new NativeRuntimeError("invalid-service-response", "The active review projection was unsafe.");
+            }
+            if (released || disposed || lifecycleFailurePublished) {
+              abandonCreatedDocument();
+              return;
+            }
+            if (nextDocumentUrl !== documentUrl) {
+              pendingDocumentUrl = nextDocumentUrl;
+              createdDocumentUrl = undefined;
+            }
+            documentUrl = nextDocumentUrl;
+            projection = next;
+            bootstrap = nextBootstrap;
+          } catch (error) {
+            abandonCreatedDocument();
+            throw error;
+          }
+          if (released || disposed || lifecycleFailurePublished) return;
+          if (next.protected) protectedReview = true;
           active = true;
-          if (next.generation !== previous.generation || next.revision !== previous.revision) {
+          const reason = chromeRuntimeProjectionChangeReason(previous, next);
+          if (reason !== undefined) {
             emitRuntime({
               protocol: REVIEW_RUNTIME_PROTOCOL,
               version: REVIEW_RUNTIME_VERSION,
@@ -872,7 +1156,9 @@ export function createNativeEmbeddedReview(options: NativeEmbeddedReviewOptions)
                 sessionId: next.sessionId,
                 generation: next.generation,
                 revision: next.revision,
-                reason: next.generation === previous.generation ? "revision" : "generation",
+                reason: reason === "generation" ? "generation"
+                  : reason === "revision" ? "revision"
+                    : reason === "presence" ? "presence" : "freshness",
                 ...(next.generation === previous.generation ? {} : {
                   previousGeneration: previous.generation,
                 }),
@@ -887,9 +1173,14 @@ export function createNativeEmbeddedReview(options: NativeEmbeddedReviewOptions)
               lane: "lifecycle",
               requestId: id,
             }, (message) => (message.type === "ack" && message.requestId === id) ||
-              message.type === "invalidation").catch(() => publishLifecycleFailure());
+              message.type === "invalidation").catch((error: unknown) => {
+                if (terminalRefreshFailure(error)) publishLifecycleFailure();
+                else requestRefresh();
+              });
           }, Math.max(1_000, Math.floor(channel.leaseMs / 2)));
           keepalive.unref?.();
+          refreshPoll = setInterval(() => requestRefresh(), REFRESH_POLL_MS);
+          refreshPoll.unref?.();
         },
         release,
         dispose() {
@@ -900,10 +1191,14 @@ export function createNativeEmbeddedReview(options: NativeEmbeddedReviewOptions)
           runtimeListeners.clear();
           lifecycleListeners.clear();
           if (keepalive !== undefined) clearInterval(keepalive);
-          if (documentUrl !== undefined) {
-            options.revokeObjectURL(documentUrl);
-            documentUrl = undefined;
+          stopRefreshTimers();
+          const resources = new Set([adoptedDocumentUrl, pendingDocumentUrl, documentUrl]);
+          for (const resource of resources) {
+            if (resource !== undefined) options.revokeObjectURL(resource);
           }
+          adoptedDocumentUrl = undefined;
+          pendingDocumentUrl = undefined;
+          documentUrl = undefined;
           channel.close();
         },
       };

@@ -13,7 +13,7 @@
 
   :is(li[data-annotation-origin], li[data-search-result]):is(:hover, [data-corresponding="true"])
     .row-action-group__direct,
-  :is(li[data-annotation-origin], li[data-search-result]):focus-within
+  :is(li[data-annotation-origin], li[data-search-result]):has(:focus-visible)
     .row-action-group__direct,
   .reference-tab-segment:hover
     :is(.reference-tab-segment__action, .reference-panel__return),
@@ -42,7 +42,9 @@
 }
 
 .review-shell .review-layout :is(.review-workspace, .review-tools-workspace)
-  :is(.outline-navigator__row, li[data-annotation-origin], li[data-search-result]):is(:hover, :focus-within, :active, [data-corresponding="true"]) {
+  :is(.outline-navigator__row, li[data-annotation-origin], li[data-search-result]):is(:hover, :active, [data-corresponding="true"]),
+.review-shell .review-layout :is(.review-workspace, .review-tools-workspace)
+  :is(.outline-navigator__row, li[data-annotation-origin], li[data-search-result]):has(:focus-visible) {
   --workspace-row-surface: #e7e7e7;
   background: var(--workspace-row-surface);
   box-shadow: none;
@@ -84,13 +86,13 @@
 }
 
 :is(li[data-annotation-origin], .annotation-peek) .annotation-item__title-row
-  > .annotation-item__meta[data-annotation-metadata-layout="row-head"] > .annotation-item__page,
+  > .annotation-item__meta[data-annotation-metadata-layout="row-head"] > :is(.annotation-item__page, .annotation-item__status-icon),
 li[data-search-result] .pdf-search__result-heading > .pdf-search__result-page {
   margin-left: auto;
 }
 
 :is(li[data-annotation-origin], li[data-search-result], .annotation-peek)
-  :is(.annotation-item__page, .pdf-search__result-page) {
+  :is(.annotation-item__page, .annotation-item__status-icon, .pdf-search__result-page) {
   display: grid;
   flex: none;
   width: 26px;
@@ -100,8 +102,10 @@ li[data-search-result] .pdf-search__result-heading > .pdf-search__result-page {
 }
 
 @media (hover: hover) and (pointer: fine) {
-  :is(.outline-navigator__row, li[data-annotation-origin], li[data-search-result]):has(.row-action-group):is(:hover, :focus-within, [data-corresponding="true"])
-    :is(.outline-navigator__page, .annotation-item__page, .pdf-search__result-page) {
+  :is(.outline-navigator__row, li[data-annotation-origin], li[data-search-result]):has(.row-action-group):is(:hover, [data-corresponding="true"])
+    :is(.outline-navigator__page, .annotation-item__page, .annotation-item__status-icon, .pdf-search__result-page),
+  :is(.outline-navigator__row, li[data-annotation-origin], li[data-search-result]):has(.row-action-group):has(:focus-visible)
+    :is(.outline-navigator__page, .annotation-item__page, .annotation-item__status-icon, .pdf-search__result-page) {
     opacity: 0;
   }
 }
@@ -112,7 +116,7 @@ li[data-search-result] .pdf-search__result-heading > .pdf-search__result-page {
   }
 
   :is(li[data-annotation-origin], li[data-search-result], .annotation-peek)
-    :is(.annotation-item__page, .pdf-search__result-page) {
+    :is(.annotation-item__page, .annotation-item__status-icon, .pdf-search__result-page) {
     width: 44px;
     height: 44px;
   }
@@ -123,7 +127,7 @@ li[data-search-result] .pdf-search__result-heading > .pdf-search__result-page {
   }
 
   :is(.outline-navigator__row, li[data-annotation-origin], li[data-search-result]):has(.row-action-group)
-    :is(.outline-navigator__page, .annotation-item__page, .pdf-search__result-page) {
+    :is(.outline-navigator__page, .annotation-item__page, .annotation-item__status-icon, .pdf-search__result-page) {
     opacity: 0;
   }
 
@@ -133,7 +137,10 @@ li[data-search-result] .pdf-search__result-heading > .pdf-search__result-page {
 }
 
 @media (pointer: coarse) {
-  #root[data-production-root="true"] .comment-composer .comment-composer__actions .review-button {
+  :is(
+    #root[data-production-root="true"] .comment-composer .comment-composer__actions,
+    .reconciliation-workspace__editor-actions
+  ) .review-button {
     min-height: 44px;
   }
 
@@ -144,6 +151,7 @@ li[data-search-result] .pdf-search__result-heading > .pdf-search__result-page {
   }
 
   .review-context-palette .review-action-button--icon,
+  .review-page-menu .review-action-button--icon,
   .link-action-popover__surface [role="menuitem"] {
     width: 44px;
     min-width: 44px;
@@ -268,6 +276,7 @@ li[data-search-result] .pdf-search__result-heading > .pdf-search__result-page {
     .full-annotation-reader__back,
     .full-annotation-reader__edit,
     .full-annotation-reader__delete,
+    .full-annotation-reader__open-reference,
     .full-annotation-reader__locate
   ) {
     width: 44px;
@@ -289,19 +298,19 @@ li[data-search-result] .pdf-search__result-heading > .pdf-search__result-page {
 .review-page-menu button .review-icon,
 .link-action-popover [role="menuitem"] .review-icon { color: inherit; }
 
-/* Selected PDF popups share the workspace card's page/action endcap. */
+/* PDF popups share the workspace card's hover/focus action endcap. */
 .annotation-peek .row-action-group__direct {
   opacity: 0;
   pointer-events: none;
   transition: none;
 }
 .annotation-peek[data-source-return="true"] .row-action-group__direct,
-.annotation-peek[data-peek-selected="true"]:is(:hover, :has(:focus-visible)) .row-action-group__direct {
+.annotation-peek:is(:hover, :has(:focus-visible)) .row-action-group__direct {
   opacity: 1;
   pointer-events: auto;
 }
 .annotation-peek[data-source-return="true"] .annotation-item__page,
-.annotation-peek[data-peek-selected="true"]:is(:hover, :has(:focus-visible)):has(.row-action-group) .annotation-item__page {
+.annotation-peek:is(:hover, :has(:focus-visible)):has(.row-action-group) .annotation-item__page {
   opacity: 0;
 }
 @media (pointer: coarse), (hover: none) {
@@ -310,7 +319,8 @@ li[data-search-result] .pdf-search__result-heading > .pdf-search__result-page {
 }
 
 /* Keep annotation previews in the exposed PDF area beside open workspaces. */
-.review-layout:is([data-right-overlay="true"], [data-bottom-overlay="true"]) .annotation-peek {
+.review-layout:is([data-right-overlay="true"], [data-bottom-overlay="true"])
+  .annotation-peek:not(.annotation-peek--reference-inspection) {
   top: auto;
   right: max(12px, calc(100% - var(--review-overlay-right-start, 100%)));
   bottom: max(12px, calc(100% - var(--review-overlay-bottom-start, 100%)));

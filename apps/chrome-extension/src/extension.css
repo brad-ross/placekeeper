@@ -24,6 +24,7 @@ body {
 
 .handler #root {
   position: fixed;
+  z-index: 0;
   inset: 0;
   min-width: 0;
   min-height: 0;
@@ -36,6 +37,14 @@ body {
 .handler #launch-shell {
   position: relative;
   z-index: 10;
+}
+
+.handler:has(#root:not(:empty)):has(#launch-shell:not([hidden]))::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 9;
+  background: rgb(32 32 32 / 15%);
 }
 
 .handler #launch-shell[hidden] {

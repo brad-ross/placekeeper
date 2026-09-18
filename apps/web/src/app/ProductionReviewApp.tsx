@@ -1,5 +1,5 @@
 import { pdfNavigationTargetFromPlacekeeperLocation } from '../pdf/pdf-navigation-target.js';
-import { useContext, useCallback, useEffect, useMemo, useReducer, useRef, useState, type ReactNode } from "react";
+import { useContext, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, type ReactNode } from "react";
 import type { PluginRegistry } from "@embedpdf/core";
 import type { PdfDocumentObject, PdfEngine } from '@embedpdf/models';
 import { SelectionPlugin } from "@embedpdf/plugin-selection";
@@ -29,7 +29,30 @@ import {
   sanitizeReviewRuntimeDisplayString,
 } from "../../../../packages/core/src/review-runtime-protocol.js";
 import type { CaretAnchor } from "../pdf/selection-anchor.js";
-import type { ExistingAnnotation, ExistingAnnotationsDiscovery } from "../pdf/existing-annotations.js";
+import {
+  existingAnnotationKey,
+  type ExistingAnnotation,
+  type ExistingAnnotationsDiscovery,
+} from "../pdf/existing-annotations.js";
+import {
+  isCurrentPdfAnnotationSurface,
+  mainPdfAnnotationSurface,
+  samePdfAnnotationSurface,
+  type PdfAnnotationSurface,
+} from '../pdf/annotation-surface.js';
+import {
+  MAIN_PDF_DOCUMENT_ID,
+  REFERENCE_PDF_DOCUMENT_ID,
+} from '../pdf/viewer-document-ids.js';
+import { createEngineAnchorPageReader } from '../pdf/viewer-selection-adapter.js';
+import {
+  captureReadingLocation,
+  fallbackReadingLocation,
+  readingCaptureIsCurrent,
+  readingLocationRequest,
+  resolvedReadingLocation,
+  type CapturedReadingLocation,
+} from '../pdf/reading-location.js';
 import {
   acceptCopySelectionUpdate,
   acceptSelectionUpdate,
@@ -69,8 +92,12 @@ import {
 import type { ViewerFramingControls } from "../pdf/viewer-framing.js";
 import type { PdfViewerNavigation } from "../pdf/viewer-navigation-adapter.js";
 import type {
-  PdfTargetVisibility,
-  PdfViewportQuery,
+  PdfDocumentOrderPage,
+} from '../pdf/document-order-location.js';
+import {
+  naturalAnchorToPdfBottomOriginPoint,
+  type PdfTargetVisibility,
+  type PdfViewportQuery,
 } from '../pdf/viewer-navigation.js';
 import {
   pdfDocumentTitleForSource,
@@ -87,7 +114,9 @@ import type {
   ViewerPageMenuInvocation,
   ViewerPdfLinkInvocation,
 } from "../pdf/viewer-interaction-events.js";
+import { annotationReaderIdentityMatches, type AnnotationReaderIdentity } from '../review/annotation-reader.js';
 import { PageNotePlacementAuthority } from "../review/review-surface-state.js";
+import type { ContextPlacement } from '../review/ContextActionPalette.js';
 import {
   NavigationCoordinator,
   type ReferenceReturnPresentationState,
@@ -103,6 +132,7 @@ import {
   createReferenceNavigationState,
   reduceReferenceNavigation,
   type ReferenceNavigationAction,
+  type ReferenceTab,
 } from "../review/reference-navigation-state.js";
 import type { PendingReferencePanel } from "../review/ReferenceWorkspace.js";
 import { PdfSearchWorkspace } from '../review/PdfSearchWorkspace.js';
@@ -136,7 +166,10 @@ import {
 import {
   authoringAuthorityFor,
   authoringAuthorityMatches,
+  type AuthoringAuthority,
+  attachmentOrderedInteractionTransport,
   type AuthoringAnchorSnapshot,
+  type AuthoringReferenceRecovery,
 } from '../review/authoring-session.js';
 import type { ViewerAssetUrls, ViewerResourcePolicy } from '../pdf/embedpdf-viewer.js';
 import type { GenerationRefreshStatus, LocationRestoreStatus } from '../generation-status.js';
@@ -153,9 +186,330 @@ interface AuthoringAnchorNavigationState {
   readonly pending: boolean;
 }
 
+type ProductionPageMenuInvocation = ViewerPageMenuInvocation & {
+  readonly surface: PdfAnnotationSurface;
+  readonly referenceRecovery?: AuthoringReferenceRecovery;
+};
+
+interface ProductionReferenceInspection {
+  readonly token: number;
+  readonly identity: AnnotationReaderIdentity;
+  readonly surface: Extract<PdfAnnotationSurface, { readonly kind: 'reference' }>;
+  readonly referenceRecovery?: AuthoringReferenceRecovery;
+  readonly pageIndex: number;
+  readonly placement?: ViewerClientPlacement;
+  readonly selected: boolean;
+}
+
+interface OwnedMarkCorrespondence {
+  readonly id: string;
+  readonly surface: PdfAnnotationSurface;
+}
+
+interface DeferredReferenceOwnedHover {
+  readonly id: string;
+  readonly pageIndex?: number;
+  readonly placement?: ViewerClientPlacement;
+  readonly surface: Extract<PdfAnnotationSurface, { readonly kind: 'reference' }>;
+  readonly itemWasPresent: boolean;
+}
+
+export function pinReferenceInspection<T extends {
+  readonly token: number;
+  readonly selected: boolean;
+}>(inspection: T, token: number): T {
+  if (inspection.token !== token || inspection.selected) return inspection;
+  return { ...inspection, selected: true };
+}
+
+export function selectedReferenceInspectionCorrespondence(
+  inspection: {
+    readonly identity: AnnotationReaderIdentity;
+    readonly surface: Extract<PdfAnnotationSurface, { readonly kind: 'reference' }>;
+  },
+): OwnedMarkCorrespondence | undefined {
+  return inspection.identity.origin === 'owned'
+    ? { id: inspection.identity.itemId, surface: inspection.surface }
+    : undefined;
+}
+
+export function referenceInspectionPresentationForPhase(
+  phase: 'enter' | 'leave' | 'focus' | 'blur' | 'activate',
+): 'preview' | 'selected' | 'dismiss' {
+  if (phase === 'activate') return 'selected';
+  if (phase === 'enter' || phase === 'focus') return 'preview';
+  return 'dismiss';
+}
+
+export function referenceInspectionMatches(
+  inspection: {
+    readonly identity: AnnotationReaderIdentity;
+    readonly surface: Extract<PdfAnnotationSurface, { readonly kind: 'reference' }>;
+  } | null,
+  identity: AnnotationReaderIdentity,
+  surface: Extract<PdfAnnotationSurface, { readonly kind: 'reference' }>,
+): boolean {
+  return inspection !== null
+    && annotationReaderIdentityMatches(inspection.identity, identity)
+    && samePdfAnnotationSurface(inspection.surface, surface);
+}
+
+export function referenceInspectionCorrespondenceAuthority(
+  inspection: {
+    readonly identity: AnnotationReaderIdentity;
+    readonly surface: Extract<PdfAnnotationSurface, { readonly kind: 'reference' }>;
+  } | null,
+  itemId: string,
+  surface: PdfAnnotationSurface,
+): OwnedMarkCorrespondence | undefined {
+  if (surface.kind !== 'reference') return undefined;
+  const identity = { origin: 'owned', itemId } as const;
+  return referenceInspectionMatches(inspection, identity, surface)
+    ? { id: itemId, surface }
+    : undefined;
+}
+
+export function correspondenceAfterReferenceInspectionDismiss(
+  inspection: {
+    readonly identity: AnnotationReaderIdentity;
+    readonly surface: Extract<PdfAnnotationSurface, { readonly kind: 'reference' }>;
+  },
+  published: OwnedMarkCorrespondence | undefined,
+  rowItemId?: string,
+): ReturnType<typeof ownedAnnotationCorrespondence> | undefined {
+  const ownsPublishedCorrespondence = published !== undefined
+    && referenceInspectionCorrespondenceAuthority(
+      inspection,
+      published.id,
+      published.surface,
+    ) !== undefined;
+  if (!ownsPublishedCorrespondence) return undefined;
+  return ownedAnnotationCorrespondence({
+    ...(rowItemId === undefined ? {} : { rowItemId }),
+  });
+}
+
+export function referenceInspectionReplacementChangesAuthority(
+  current: {
+    readonly identity: AnnotationReaderIdentity;
+    readonly surface: Extract<PdfAnnotationSurface, { readonly kind: 'reference' }>;
+  } | null,
+  next: {
+    readonly identity: AnnotationReaderIdentity;
+    readonly surface: Extract<PdfAnnotationSurface, { readonly kind: 'reference' }>;
+  },
+): boolean {
+  return current !== null && !referenceInspectionMatches(current, next.identity, next.surface);
+}
+
+export function referenceInspectionShouldPreserveSelection(
+  inspection: {
+    readonly identity: AnnotationReaderIdentity;
+    readonly surface: Extract<PdfAnnotationSurface, { readonly kind: 'reference' }>;
+    readonly selected: boolean;
+  } | null,
+  identity: AnnotationReaderIdentity,
+  surface: Extract<PdfAnnotationSurface, { readonly kind: 'reference' }>,
+): boolean {
+  return inspection?.selected === true && referenceInspectionMatches(inspection, identity, surface);
+}
+
+export function referenceInspectionShouldReuse(
+  inspection: {
+    readonly identity: AnnotationReaderIdentity;
+    readonly surface: Extract<PdfAnnotationSurface, { readonly kind: 'reference' }>;
+    readonly selected: boolean;
+  } | null,
+  identity: AnnotationReaderIdentity,
+  surface: Extract<PdfAnnotationSurface, { readonly kind: 'reference' }>,
+  presentation: 'preview' | 'selected',
+): boolean {
+  return referenceInspectionMatches(inspection, identity, surface)
+    && (inspection?.selected === true || presentation === 'preview');
+}
+
+export function referenceInspectionShouldSuppressRestoredFocus(
+  suppression: {
+    readonly identity: AnnotationReaderIdentity;
+    readonly surface: Extract<PdfAnnotationSurface, { readonly kind: 'reference' }>;
+    readonly expiresAt: number;
+  },
+  identity: AnnotationReaderIdentity,
+  surface: Extract<PdfAnnotationSurface, { readonly kind: 'reference' }>,
+  now: number,
+): boolean {
+  return suppression.expiresAt >= now && referenceInspectionMatches(suppression, identity, surface);
+}
+
+export function ownedAnnotationCorrespondence(input: {
+  readonly rowItemId?: string;
+  readonly focusedMark?: OwnedMarkCorrespondence;
+  readonly hoveredMark?: OwnedMarkCorrespondence;
+  readonly preferredMark?: OwnedMarkCorrespondence;
+}): {
+  readonly viewerItemId?: string;
+  readonly contentItemId?: string;
+} {
+  const mark = input.preferredMark ?? input.focusedMark ?? input.hoveredMark;
+  if (mark !== undefined) {
+    return {
+      viewerItemId: mark.id,
+      ...(mark.surface.kind === 'main' ? { contentItemId: mark.id } : {}),
+    };
+  }
+  return input.rowItemId === undefined
+    ? {}
+    : { viewerItemId: input.rowItemId, contentItemId: input.rowItemId };
+}
+
+export function pdfAnnotationSurfaceIsCurrent(
+  surface: PdfAnnotationSurface | undefined,
+  current: {
+    readonly documentGeneration: number;
+    readonly activeReferenceTabIdentity: string | null;
+    readonly referenceVisible: boolean;
+  },
+): boolean {
+  if (surface === undefined) return true;
+  return isCurrentPdfAnnotationSurface(
+    surface,
+    current.documentGeneration,
+    current.activeReferenceTabIdentity,
+  ) && (surface.kind === 'main' || current.referenceVisible);
+}
+
+export function frozenReferenceRecovery(tab: Pick<ReferenceTab,
+  'identity' | 'annotationIdentity' | 'originalTarget' | 'annotationTarget' | 'label' | 'pageContext'>): AuthoringReferenceRecovery {
+  const currentTarget = tab.annotationTarget ?? tab.originalTarget;
+  const target = Object.freeze({
+    ...currentTarget,
+    zoom: Object.freeze({
+      ...currentTarget.zoom,
+      params: Object.freeze([...currentTarget.zoom.params]),
+    }),
+  });
+  return Object.freeze({
+    target,
+    tabIdentity: tab.identity,
+    label: tab.label ?? `Page ${target.pageIndex + 1}`,
+    pageContext: tab.pageContext ?? `Page ${target.pageIndex + 1}`,
+    ...(tab.annotationIdentity === undefined
+      ? {}
+      : { annotationIdentity: Object.freeze({ ...tab.annotationIdentity }) }),
+  });
+}
+
+export function frozenReferenceRecoveryForSurface(
+  surface: PdfAnnotationSurface | undefined,
+  tabs: readonly ReferenceTab[],
+): AuthoringReferenceRecovery | undefined {
+  if (surface?.kind !== 'reference') return undefined;
+  const tab = tabs.find((candidate) => candidate.identity === surface.tabIdentity);
+  return tab === undefined ? undefined : frozenReferenceRecovery(tab);
+}
+
+function referenceTargetFromNaturalAnchor(input: {
+  readonly point: { readonly x: number; readonly y: number };
+  readonly pageIndex: number;
+  readonly pages: readonly PdfDocumentOrderPage[] | null;
+  readonly documentGeneration: number;
+  readonly pageCount: number;
+}): NonNullable<ReturnType<typeof pdfNavigationTargetFromPlacekeeperLocation>> | null {
+  if (input.pages === null) return null;
+  const page = input.pages[input.pageIndex];
+  if (page === undefined) return null;
+  const pdfPoint = naturalAnchorToPdfBottomOriginPoint(input.point, page.size, {
+    x: page.crop.left,
+    y: page.crop.bottom,
+  });
+  return pdfNavigationTargetFromPlacekeeperLocation({
+    kind: 'destination',
+    page: input.pageIndex + 1,
+    mode: 'xyz',
+    params: [pdfPoint.x, pdfPoint.y, 0],
+  }, {
+    documentGeneration: input.documentGeneration,
+    pageCount: input.pageCount,
+  });
+}
+
+export function annotationReferenceRequest(
+  identity: AnnotationReaderIdentity,
+  sources: {
+    readonly items: readonly ReviewItem[];
+    readonly existingAnnotations: ExistingAnnotationsDiscovery;
+    readonly documentGeneration: number;
+    readonly pageCount: number;
+    readonly pages: readonly PdfDocumentOrderPage[] | null;
+  },
+): {
+  readonly target: NonNullable<ReturnType<typeof pdfNavigationTargetFromPlacekeeperLocation>>;
+  readonly metadata: { readonly label: string; readonly pageContext: string };
+  readonly pageIndex: number;
+} | null {
+  let pageIndex: number;
+  let point: { readonly x: number; readonly y: number };
+  let label: string;
+  if (identity.origin === 'owned') {
+    const item = sources.items.find(({ id }) => id === identity.itemId);
+    const location = item === undefined ? null : reviewItemNavigationTarget(item);
+    if (item === undefined || location === null) return null;
+    ({ pageIndex, point } = location);
+    label = `Annotation on page ${pageIndex + 1}`;
+  } else {
+    if (
+      identity.documentGeneration !== sources.documentGeneration
+      || sources.existingAnnotations.status !== 'ready'
+      || identity.discoveryGeneration !== sources.existingAnnotations.generation
+    ) return null;
+    const annotation = sources.existingAnnotations.items.find(
+      (candidate) => existingAnnotationKey(candidate) === identity.annotationKey,
+    );
+    if (annotation === undefined) return null;
+    pageIndex = annotation.pageIndex;
+    point = { x: annotation.rect.x, y: annotation.rect.y };
+    label = `${annotation.subtype} annotation on page ${pageIndex + 1}`;
+  }
+  const target = referenceTargetFromNaturalAnchor({
+    point,
+    pageIndex,
+    pages: sources.pages,
+    documentGeneration: sources.documentGeneration,
+    pageCount: sources.pageCount,
+  });
+  return target === null ? null : {
+    target,
+    metadata: { label, pageContext: `Page ${pageIndex + 1}` },
+    pageIndex,
+  };
+}
+
+export function authoringReferenceTarget(
+  anchor: AuthoringAnchorSnapshot,
+  currentAuthority: AuthoringAuthority,
+  pages: readonly PdfDocumentOrderPage[] | null,
+): NonNullable<ReturnType<typeof pdfNavigationTargetFromPlacekeeperLocation>> | null {
+  if (
+    anchor.surface?.kind !== 'reference'
+    || anchor.referenceRecovery === undefined
+    || !authoringAuthorityMatches(anchor.authority, currentAuthority)
+    || anchor.surface.documentGeneration !== currentAuthority.documentGeneration
+    || anchor.referenceRecovery.target.documentGeneration !== currentAuthority.documentGeneration
+    || anchor.point === null
+  ) return null;
+  return referenceTargetFromNaturalAnchor({
+    point: anchor.point,
+    pageIndex: anchor.pageIndex,
+    pages,
+    documentGeneration: currentAuthority.documentGeneration,
+    pageCount: pages?.length ?? 0,
+  });
+}
+
 export interface ProductionReviewAppProps {
   readonly session: ProductionSession;
   readonly initialState: ReviewState;
+  readonly activeAuthoringDraftIds?: readonly string[];
   readonly initialSaveStatus?: SaveStatus;
   readonly scope: ProductionScope;
   readonly api: ProductionSessionApi;
@@ -188,6 +542,24 @@ export interface ProductionReviewAppProps {
   readonly accessibilityTransition?: AccessibilityTransitionEffect;
 }
 
+export function acceptedAuthoringCommandRequiresPersistence(
+  state: ReviewState,
+  status: SaveStatus,
+  authoringPersistenceRequired: boolean,
+): boolean {
+  return authoringPersistenceRequired
+    && status.destination.phase === 'active'
+    && !saveStatusIsCleanCurrent(state, status);
+}
+
+export function initialWorkspaceLocationForGeneration(
+  initialGeneration: number,
+  currentGeneration: number,
+  location: { readonly pageIndex: number; readonly top: number } | undefined,
+) {
+  return currentGeneration === initialGeneration ? location : undefined;
+}
+
 export function ProductionReviewApp(props: ProductionReviewAppProps) {
   const availableModes = useContext(WorkspaceModeAvailability);
   const workspacePresentation = useContext(WorkspacePresentation);
@@ -208,6 +580,22 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   const [scope, setScope] = useState(props.scope);
   useEffect(() => setScope(props.scope), [props.scope]);
   const exportOnly = scope.persistenceMode === 'export-only';
+  const interactionLifecycleRequired = props.api.capabilities?.localDocumentRefresh === true;
+  const hasInteractionTransport = props.api.beginInteraction !== undefined
+    && props.api.finalizeInteraction !== undefined
+    && props.api.releaseInteraction !== undefined
+    && props.api.acknowledgeInteraction !== undefined;
+  const interactionLifecycle = useMemo(() => hasInteractionTransport && (
+    interactionLifecycleRequired || props.api.capabilities?.interactionLifecycleVersion === 1
+  )
+    ? attachmentOrderedInteractionTransport(props.api, {
+        beginInteraction: props.api.beginInteraction!,
+        finalizeInteraction: props.api.finalizeInteraction!,
+        releaseInteraction: props.api.releaseInteraction!,
+        acknowledgeInteraction: props.api.acknowledgeInteraction!,
+      })
+    : undefined, [hasInteractionTransport, interactionLifecycleRequired, props.api]);
+  useEffect(() => () => interactionLifecycle?.dispose(), [interactionLifecycle]);
   const [metadataPageTitle, setMetadataPageTitle] = useState<PdfMetadataPageTitle | null>(null);
   const portableItemIdsRef = useRef(initiallyPortableItemIds(
     props.initialState,
@@ -225,6 +613,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   );
   const authoringAnchorRef = useRef<AuthoringAnchorSnapshot | null>(null);
   const authoringActiveRef = useRef(false);
+  const deferredReferenceOwnedHoverRef = useRef<DeferredReferenceOwnedHover | null>(null);
   const authoringViewportRef = useRef<PdfViewportQuery | null>(null);
   const [authoringAnchorNavigation, setAuthoringAnchorNavigation] = useState<
     AuthoringAnchorNavigationState | null
@@ -245,22 +634,117 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   const [locationRestoreStatus, setLocationRestoreStatus] = useState<LocationRestoreStatus>('idle');
   const stateRef = useRef(state);
   stateRef.current = state;
-  const [selectionPlacement, setSelectionPlacement] = useState<ViewerClientPlacement | null>(null);
+  const [selectionPlacement, setSelectionPlacement] = useState<ContextPlacement | null>(null);
+  const [selectionPlacementSurface, setSelectionPlacementSurface] = useState<PdfAnnotationSurface>();
   const [caret, setCaret] = useState<CaretAnchor | null>(null);
   const [caretPlacement, setCaretPlacement] = useState<ViewerClientPlacement | null>(null);
-  const [pageMenu, setPageMenu] = useState<ViewerPageMenuInvocation | null>(null);
+  const [pageMenu, setPageMenu] = useState<ProductionPageMenuInvocation | null>(null);
   const [keyboardPageNoteActive, setKeyboardPageNoteActive] = useState(false);
+  const [keyboardPageNoteSurface, setKeyboardPageNoteSurface] = useState<PdfAnnotationSurface>();
   const [existingAnnotations, setExistingAnnotations] = useState<ExistingAnnotationsDiscovery>({
     status: 'loading', generation: 0,
   });
   const [inventoryRetryGeneration, setInventoryRetryGeneration] = useState(0);
   const [correspondingItemId, setCorrespondingItemId] = useState<string>();
+  const [contentCorrespondingItemId, setContentCorrespondingItemId] = useState<string>();
   const [activeItemId, setActiveItemId] = useState<string>();
+  const [referenceInspection, setReferenceInspection] = useState<ProductionReferenceInspection | null>(null);
+  const referenceInspectionRef = useRef(referenceInspection);
+  referenceInspectionRef.current = referenceInspection;
+  const referenceInspectionTokenRef = useRef(0);
+  const referenceInspectionHeldTokenRef = useRef<number | null>(null);
+  const markHoverRef = useRef<OwnedMarkCorrespondence | undefined>(undefined);
+  const markFocusRef = useRef<OwnedMarkCorrespondence | undefined>(undefined);
+  const rowCorrespondenceRef = useRef<string | undefined>(undefined);
+  const publishedMarkCorrespondenceRef = useRef<OwnedMarkCorrespondence | undefined>(undefined);
+  const suppressedReferenceInspectionFocusRef = useRef<{
+    readonly identity: AnnotationReaderIdentity;
+    readonly surface: Extract<PdfAnnotationSurface, { readonly kind: 'reference' }>;
+    readonly expiresAt: number;
+  } | null>(null);
+  const referenceInspectionDismissTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cancelReferenceInspectionDismiss = useCallback(() => {
+    if (referenceInspectionDismissTimerRef.current !== null) {
+      clearTimeout(referenceInspectionDismissTimerRef.current);
+      referenceInspectionDismissTimerRef.current = null;
+    }
+  }, []);
+  const publishCorrespondence = useCallback((preferredMark?: OwnedMarkCorrespondence) => {
+    const mark = preferredMark ?? markFocusRef.current ?? markHoverRef.current;
+    const next = ownedAnnotationCorrespondence({
+      ...(rowCorrespondenceRef.current === undefined
+        ? {}
+        : { rowItemId: rowCorrespondenceRef.current }),
+      ...(mark === undefined ? {} : { preferredMark: mark }),
+    });
+    publishedMarkCorrespondenceRef.current = mark;
+    setCorrespondingItemId(next.viewerItemId);
+    setContentCorrespondingItemId(next.contentItemId);
+  }, []);
+  const releaseReferenceInspectionCorrespondence = useCallback((
+    inspection: ProductionReferenceInspection,
+  ) => {
+    const next = correspondenceAfterReferenceInspectionDismiss(
+      inspection,
+      publishedMarkCorrespondenceRef.current,
+      rowCorrespondenceRef.current,
+    );
+    if (next === undefined) return;
+    publishedMarkCorrespondenceRef.current = undefined;
+    setCorrespondingItemId(next.viewerItemId);
+    setContentCorrespondingItemId(next.contentItemId);
+  }, []);
+  const dismissReferenceInspection = useCallback((token: number, includeSelected: boolean) => {
+    const current = referenceInspectionRef.current;
+    if (current?.token !== token || (!includeSelected && current.selected)) return false;
+    cancelReferenceInspectionDismiss();
+    referenceInspectionRef.current = null;
+    if (referenceInspectionHeldTokenRef.current === token) {
+      referenceInspectionHeldTokenRef.current = null;
+    }
+    setReferenceInspection(null);
+    releaseReferenceInspectionCorrespondence(current);
+    return true;
+  }, [cancelReferenceInspectionDismiss, releaseReferenceInspectionCorrespondence]);
+  const replaceReferenceInspection = useCallback((next: ProductionReferenceInspection) => {
+    const current = referenceInspectionRef.current;
+    cancelReferenceInspectionDismiss();
+    if (current !== null && referenceInspectionReplacementChangesAuthority(current, next)) {
+      releaseReferenceInspectionCorrespondence(current);
+    }
+    referenceInspectionHeldTokenRef.current = null;
+    referenceInspectionRef.current = next;
+    setReferenceInspection(next);
+  }, [cancelReferenceInspectionDismiss, releaseReferenceInspectionCorrespondence]);
+  const resetReferenceInspectionForDocument = useCallback(() => {
+    cancelReferenceInspectionDismiss();
+    referenceInspectionRef.current = null;
+    referenceInspectionHeldTokenRef.current = null;
+    publishedMarkCorrespondenceRef.current = undefined;
+    markHoverRef.current = undefined;
+    markFocusRef.current = undefined;
+    rowCorrespondenceRef.current = undefined;
+    setReferenceInspection(null);
+    setCorrespondingItemId(undefined);
+    setContentCorrespondingItemId(undefined);
+  }, [cancelReferenceInspectionDismiss]);
+  const scheduleReferenceInspectionDismiss = useCallback((token: number) => {
+    cancelReferenceInspectionDismiss();
+    referenceInspectionDismissTimerRef.current = setTimeout(() => {
+      referenceInspectionDismissTimerRef.current = null;
+      if (referenceInspectionHeldTokenRef.current === token) return;
+      dismissReferenceInspection(token, false);
+    }, 120);
+  }, [cancelReferenceInspectionDismiss, dismissReferenceInspection]);
+  useEffect(() => () => cancelReferenceInspectionDismiss(), [cancelReferenceInspectionDismiss]);
+  const [caretSurface, setCaretSurface] = useState<PdfAnnotationSurface>();
   const [activationRequest, setActivationRequest] = useState<{ id: string; token: number }>();
   const [placedPageNote, setPlacedPageNote] = useState<{
     readonly token: number;
     readonly pageIndex: number;
     readonly position: { x: number; y: number; width: number; height: number };
+    readonly surface: PdfAnnotationSurface;
+    readonly referenceRecovery?: AuthoringReferenceRecovery;
   } | null>(null);
   const placementAuthority = useRef(new PageNotePlacementAuthority());
   const placedToken = useRef(0);
@@ -279,6 +763,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   const notifiedDocumentReadyGenerationRef = useRef<number | null>(null);
   const [mainNavigation, setMainNavigation] = useState<PdfViewerNavigation | null>(null);
   const referenceNavigationRef = useRef<PdfViewerNavigation | null>(null);
+  const [referenceNavigation, setReferenceNavigation] = useState<PdfViewerNavigation | null>(null);
   const referenceControllerRef = useRef<ReferenceDocumentController | null>(null);
   const referenceManualScrollObserverRef = useRef(new ReferenceManualScrollObserver());
   const [referenceReturnState, renderReferenceReturnState] = useState<
@@ -296,6 +781,62 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     timeout: ReturnType<typeof setTimeout> | null;
   }>>([]);
   const documentGenerationRef = useRef(props.initialState.workflow.documentGeneration);
+  const initialDocumentGenerationRef = useRef(props.initialState.workflow.documentGeneration);
+  const viewportIdentityRef = useRef(0);
+  const readingUserMovementRef = useRef(0);
+  const readingPageReaderRef = useRef<{
+    readonly generation: number;
+    readonly reader: ReturnType<typeof createEngineAnchorPageReader>;
+  } | null>(null);
+  const pendingReadingRestoreRef = useRef<{
+    readonly successorGeneration: number;
+    readonly userMovementIdentity: number;
+    readonly captured: Promise<CapturedReadingLocation | null>;
+  } | null>(null);
+  const readingRestoreOperationRef = useRef<number | null>(null);
+  const latestReadingCaptureRef = useRef<CapturedReadingLocation | null>(null);
+  const captureCurrentReadingLocation = useCallback((): Promise<CapturedReadingLocation | null> => {
+    const generation = documentGenerationRef.current;
+    const viewportIdentity = viewportIdentityRef.current;
+    const navigation = mainNavigationRef.current;
+    const reader = readingPageReaderRef.current;
+    let fallback: ReturnType<PdfViewerNavigation['captureLocation']>;
+    try {
+      fallback = navigation?.captureLocation() ?? null;
+    } catch {
+      return Promise.resolve(null);
+    }
+    if (fallback === null || fallback === undefined || reader?.generation !== generation) {
+      return Promise.resolve(null);
+    }
+    const boundedFallback = fallbackReadingLocation({ generation, viewportIdentity, fallback });
+    let page: ReturnType<typeof reader.reader.read>;
+    try {
+      page = reader.reader.read(fallback.pageIndex);
+    } catch {
+      return Promise.resolve(boundedFallback);
+    }
+    return captureReadingLocation({
+      generation,
+      viewportIdentity,
+      fallback,
+      page,
+    }).then((captured) => {
+      if (readingCaptureIsCurrent(
+        captured,
+        documentGenerationRef.current,
+        viewportIdentityRef.current,
+      )) {
+        latestReadingCaptureRef.current = captured;
+        return captured;
+      }
+      return null;
+    }, () => readingCaptureIsCurrent(
+      boundedFallback,
+      documentGenerationRef.current,
+      viewportIdentityRef.current,
+    ) ? boundedFallback : null);
+  }, []);
   const navigationStateRef = useRef(createReferenceNavigationState(documentGenerationRef.current));
   const [navigationState, setNavigationState] = useState(navigationStateRef.current);
   const [referenceLayoutState, dispatchReferenceLayout] = useReducer(
@@ -346,9 +887,6 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     canForward: false,
   });
   const [referenceViewportHost, setReferenceViewportHost] = useState<HTMLDivElement | null>(null);
-  const markHoverRef = useRef<string | undefined>(undefined);
-  const markFocusRef = useRef<string | undefined>(undefined);
-  const rowCorrespondenceRef = useRef<string | undefined>(undefined);
   const activationTokenRef = useRef(0);
   useEffect(() => {
     if (props.hostReattachRequestToken === undefined || props.hostReattachRequestToken <= 0) return;
@@ -363,6 +901,8 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     setActivationRequest({ id, token: ++activationTokenRef.current });
   }, [props.hostReattachRequestToken]);
   const [viewerState, setViewerState] = useState<ViewerControlsSnapshot>(unavailableViewerControls);
+  const viewerStateRef = useRef(viewerState);
+  viewerStateRef.current = viewerState;
   const requestReverseSyncTex = useHostSyncTex({
     hostForwardSyncTexRequest: props.hostForwardSyncTexRequest,
     hostReverseSyncTexRequestToken: props.hostReverseSyncTexRequestToken,
@@ -447,8 +987,11 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       setActiveItemId(undefined);
       setActivationRequest(undefined);
       setCorrespondingItemId(undefined);
+      setContentCorrespondingItemId(undefined);
       markHoverRef.current = undefined;
       markFocusRef.current = undefined;
+      publishedMarkCorrespondenceRef.current = undefined;
+      deferredReferenceOwnedHoverRef.current = null;
       rowCorrespondenceRef.current = undefined;
     }
     if (mode !== 'references') setRightWorkspaceMode(mode);
@@ -590,46 +1133,85 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   const [initialViewReady, setInitialViewReady] = useState(false);
   const workspacePresentationRef = useRef(workspacePresentation);
   workspacePresentationRef.current = workspacePresentation;
-  const sampleReferenceOpened = useRef(false);
   useEffect(() => {
-    if (!initialViewReady || !workspacePresentation?.sampleReference || workspacePresentation.mode !== 'references' || sampleReferenceOpened.current) return;
+    if (!initialViewReady || !workspacePresentation?.sampleReference || workspacePresentation.mode !== 'references' || navigationStateRef.current.tabs.length > 0) return;
     const target = pdfNavigationTargetFromPlacekeeperLocation(workspacePresentation.sampleReference.pdfY === undefined
       ? { kind: 'page', page: workspacePresentation.sampleReference.page }
       : { kind: 'destination', page: workspacePresentation.sampleReference.page, mode: 'xyz', params: [0, workspacePresentation.sampleReference.pdfY, 0] }, {
       documentGeneration: state.workflow.documentGeneration, pageCount: viewerState.totalPages,
     });
-    if (target) void navigationCoordinator.openReference(target, { label: workspacePresentation.sampleReference.label, pageContext: `Page ${workspacePresentation.sampleReference.page}` }).then((opened) => {
-      if (opened) sampleReferenceOpened.current = true;
-    });
+    if (target) void navigationCoordinator.openReference(target, { label: workspacePresentation.sampleReference.label, pageContext: `Page ${workspacePresentation.sampleReference.page}` });
     return () => navigationCoordinator.cancelPendingNavigation();
-  }, [initialViewReady, workspacePresentation?.mode, workspacePresentation?.sampleReference, viewerState.totalPages, navigationCoordinator]);
+  }, [initialViewReady, workspacePresentation?.activation, workspacePresentation?.mode, workspacePresentation?.sampleReference, viewerState.totalPages, navigationCoordinator]);
   const mainLocationRefresh = useMemo(
     () => createTrailingTaskScheduler(() => navigationCoordinator.refreshMainLocation()),
     [navigationCoordinator],
   );
+  const currentAnnotationSurface = useCallback((surface?: PdfAnnotationSurface) => {
+    const normalized = surface ?? mainPdfAnnotationSurface(documentGenerationRef.current);
+    return pdfAnnotationSurfaceIsCurrent(normalized, {
+      documentGeneration: documentGenerationRef.current,
+      activeReferenceTabIdentity: navigationStateRef.current.activeTabIdentity,
+      referenceVisible: referencePdfIsVisible(
+        referenceLayoutStateRef.current,
+        navigationStateRef.current,
+      ),
+    }) ? normalized : null;
+  }, []);
+  const referenceRecoveryForSurface = useCallback((surface: PdfAnnotationSurface | undefined) => {
+    return frozenReferenceRecoveryForSurface(surface, navigationStateRef.current.tabs);
+  }, []);
+  const captureDocumentOrderPages = useCallback((): readonly PdfDocumentOrderPage[] | null => (
+    mainNavigationRef.current?.captureDocumentOrderPages()
+      ?? referenceNavigationRef.current?.captureDocumentOrderPages()
+      ?? null
+  ), []);
   const readAuthoringAnchorVisibility = useCallback((): {
     readonly token: number;
     readonly visibility: PdfTargetVisibility;
   } | null => {
     const anchor = authoringAnchorRef.current;
     if (anchor === null) return null;
-    const navigation = mainNavigationRef.current;
     const currentAuthority = authoringAuthorityFor(
       stateRef.current,
       documentGenerationRef.current,
     );
     const current = anchor.point !== null
       && authoringAuthorityMatches(anchor.authority, currentAuthority);
+    if (!current || anchor.point === null) {
+      return { token: anchor.token, visibility: 'unavailable' };
+    }
+    if (anchor.surface?.kind === 'reference') {
+      const recovery = anchor.referenceRecovery;
+      const target = authoringReferenceTarget(
+        anchor,
+        currentAuthority,
+        captureDocumentOrderPages(),
+      );
+      if (recovery === undefined || target === null) {
+        return { token: anchor.token, visibility: 'unavailable' };
+      }
+      const active = navigationStateRef.current.activeTabIdentity === recovery.tabIdentity
+        && referencePdfIsVisible(referenceLayoutStateRef.current, navigationStateRef.current);
+      const navigation = referenceNavigationRef.current;
+      return {
+        token: anchor.token,
+        visibility: !active || navigation === null
+          ? 'outside'
+          : navigation.targetVisibility(target),
+      };
+    }
+    const navigation = mainNavigationRef.current;
     return {
       token: anchor.token,
-      visibility: !current || navigation === null || anchor.point === null
+      visibility: navigation === null
         ? 'unavailable'
         : navigation.pointVisibility(
           anchor.pageIndex,
           anchor.point,
         ),
     };
-  }, []);
+  }, [captureDocumentOrderPages]);
   const refreshAuthoringAnchorNavigation = useCallback(() => {
     const next = readAuthoringAnchorVisibility();
     setAuthoringAnchorNavigation((current) => {
@@ -671,11 +1253,35 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     setAuthoringAnchorNavigation((current) => current?.token === token
       ? { ...current, pending: true }
       : current);
-    await navigationCoordinator.navigateMainAnnotation({
-      pageIndex: anchor.pageIndex,
-      point: anchor.point,
-      viewport: authoringViewportRef.current ?? {},
-    });
+    if (anchor.surface?.kind === 'reference') {
+      const recovery = anchor.referenceRecovery;
+      const target = authoringReferenceTarget(
+        anchor,
+        currentAuthority,
+        captureDocumentOrderPages(),
+      );
+      if (recovery === undefined || target === null) {
+        refreshAuthoringAnchorNavigation();
+        return;
+      }
+      await navigationCoordinator.openReference(
+        target,
+        { label: recovery.label, pageContext: `Page ${anchor.pageIndex + 1}` },
+        null,
+        {
+          preferredTabIdentity: recovery.tabIdentity,
+          ...(recovery.annotationIdentity === undefined
+            ? {}
+            : { annotationIdentity: recovery.annotationIdentity }),
+        },
+      );
+    } else {
+      await navigationCoordinator.navigateMainAnnotation({
+        pageIndex: anchor.pageIndex,
+        point: anchor.point,
+        viewport: authoringViewportRef.current ?? {},
+      });
+    }
     if (authoringAnchorRef.current?.token !== token) return;
     const next = readAuthoringAnchorVisibility();
     setAuthoringAnchorNavigation(next === null ? null : { ...next, pending: false });
@@ -689,12 +1295,83 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   }, [navigationCoordinator]);
 
   const onSelectionUpdate = useCallback((update: SelectionUpdate) => {
+    if (currentAnnotationSurface(update.surface) === null) return;
     setSelectionUpdate((current) => acceptSelectionUpdate(current, update));
-  }, []);
+  }, [currentAnnotationSurface]);
   useEffect(() => {
     setReferenceCopySelection(null);
     setPdfCopyOwner((owner) => owner === 'reference' ? null : owner);
   }, [navigationState.activeTabIdentity]);
+  useEffect(() => {
+    const current = {
+      documentGeneration: state.workflow.documentGeneration,
+      activeReferenceTabIdentity: navigationState.activeTabIdentity,
+      referenceVisible: referencePdfIsVisible(referenceLayoutState, navigationState),
+    };
+    const obsolete = (surface: PdfAnnotationSurface | undefined) => surface?.kind === 'reference'
+      && !pdfAnnotationSurfaceIsCurrent(surface, current);
+    if (obsolete(selectionUpdate.surface)) {
+      setSelectionUpdate((selection) => ({
+        kind: 'cleared',
+        generation: selection.generation + 1,
+      }));
+    }
+    if (obsolete(selectionPlacementSurface)) {
+      setSelectionPlacement(null);
+      setSelectionPlacementSurface(undefined);
+    }
+    if (obsolete(caretSurface)) {
+      setCaret(null);
+      setCaretPlacement(null);
+      setCaretSurface(undefined);
+    }
+    if (pageMenu !== null && obsolete(pageMenu.surface)) {
+      placementAuthority.current.dismissContext(pageMenu.invocationId);
+      setPageMenu(null);
+    }
+    if (placedPageNote !== null && obsolete(placedPageNote.surface)) {
+      setPlacedPageNote(null);
+    }
+    if (obsolete(keyboardPageNoteSurface)) {
+      placementAuthority.current.clearKeyboardCursor();
+      setKeyboardPageNoteActive(false);
+      setKeyboardPageNoteSurface(undefined);
+    }
+  }, [
+    caretSurface,
+    keyboardPageNoteSurface,
+    navigationState,
+    pageMenu,
+    placedPageNote,
+    referenceLayoutState,
+    selectionPlacementSurface,
+    selectionUpdate.surface,
+    state.workflow.documentGeneration,
+  ]);
+  useEffect(() => {
+    const current = referenceInspectionRef.current;
+    if (current === null) return;
+    const identity = current.identity;
+    const remainsCurrent = current.surface.documentGeneration === state.workflow.documentGeneration
+      && current.surface.tabIdentity === navigationState.activeTabIdentity
+      && referencePdfIsVisible(referenceLayoutState, navigationState)
+      && (identity.origin === 'owned'
+        ? state.items.some(({ id }) => id === identity.itemId)
+        : existingAnnotations.status === 'ready'
+        && identity.documentGeneration === state.workflow.documentGeneration
+        && identity.discoveryGeneration === existingAnnotations.generation
+        && existingAnnotations.items.some(
+          (annotation) => existingAnnotationKey(annotation) === identity.annotationKey,
+        ));
+    if (!remainsCurrent) dismissReferenceInspection(current.token, true);
+  }, [
+    dismissReferenceInspection,
+    existingAnnotations,
+    navigationState,
+    referenceLayoutState,
+    state.items,
+    state.workflow.documentGeneration,
+  ]);
   const onCopySelectionUpdate = useCallback((update: CopySelectionUpdate) => {
     if (update.surface.documentGeneration !== documentGenerationRef.current) return;
     if (update.surface.kind === 'reference') {
@@ -707,9 +1384,6 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     }
     if (update.kind === 'pending' || update.kind === 'ready') setPdfCopyError(null);
   }, []);
-  const publishCorrespondence = () => setCorrespondingItemId(
-    rowCorrespondenceRef.current ?? markFocusRef.current ?? markHoverRef.current,
-  );
   useEffect(() => () => {
     navigationCoordinator.dispose();
     mainLocationRefresh.cancel();
@@ -752,13 +1426,40 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     const next = `${props.initialState.workflow.documentGeneration}:${props.initialState.revision}:${props.initialState.workflow.freshness}:${props.initialState.source.fileId}:${props.initialState.source.digest}`;
     if (next === initialStateKeyRef.current) return;
     initialStateKeyRef.current = next;
-    portableItemIdsRef.current = initiallyPortableItemIds(
-      props.initialState,
-      props.initialSaveStatus,
-    );
-    setState(props.initialState);
-    if (props.initialSaveStatus !== undefined) setSaveStatus(props.initialSaveStatus);
+    const commit = () => {
+      if (initialStateKeyRef.current !== next) return;
+      portableItemIdsRef.current = initiallyPortableItemIds(
+        props.initialState,
+        props.initialSaveStatus,
+      );
+      setState(props.initialState);
+      if (props.initialSaveStatus !== undefined) setSaveStatus(props.initialSaveStatus);
+    };
+    const pending = pendingReadingRestoreRef.current;
+    if (pending?.successorGeneration === props.initialState.workflow.documentGeneration) {
+      // Keep the predecessor viewer mounted until its bounded semantic capture
+      // settles; replacing it earlier would invalidate the page-text cache.
+      void pending.captured.then(commit, commit);
+    } else commit();
   }, [props.initialState]);
+  useLayoutEffect(() => {
+    const successorGeneration = props.initialState.workflow.documentGeneration;
+    const predecessorGeneration = documentGenerationRef.current;
+    if (successorGeneration <= predecessorGeneration) return;
+    const cached = latestReadingCaptureRef.current;
+    if (cached === null && mainNavigationRef.current === null) {
+      pendingReadingRestoreRef.current = null;
+      return;
+    }
+    pendingReadingRestoreRef.current = {
+      successorGeneration,
+      userMovementIdentity: readingUserMovementRef.current,
+      captured: cached?.generation === predecessorGeneration
+        && cached.viewportIdentity === viewportIdentityRef.current
+        ? Promise.resolve(cached)
+        : captureCurrentReadingLocation(),
+    };
+  }, [captureCurrentReadingLocation, props.initialState]);
   useEffect(() => {
     if (sourceIdentity === sourceIdentityRef.current) return;
     mainLocationRefresh.cancel();
@@ -781,6 +1482,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     setMainDocumentReadyGeneration(null);
     viewerControlsGenerationRef.current = null;
     navigationCoordinator.replaceDocument(nextGeneration, { preservePresentation: true });
+    readingRestoreOperationRef.current = navigationCoordinator.operationIdentity();
     search.reset();
     setSelectionUpdate((current) => ({ kind: 'cleared', generation: current.generation + 1 }));
     setMainCopySelection(null);
@@ -789,11 +1491,18 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     setPdfCopyOwnerIndicatorVisible(false);
     setPdfCopyError(null);
     setCaret(null);
+    setCaretSurface(undefined);
     setSelectionPlacement(null);
+    setSelectionPlacementSurface(undefined);
     setCaretPlacement(null);
+    setPageMenu(null);
+    setPlacedPageNote(null);
+    setKeyboardPageNoteActive(false);
+    setKeyboardPageNoteSurface(undefined);
+    resetReferenceInspectionForDocument();
     setActiveItemId(undefined);
-    setCorrespondingItemId(undefined);
-  }, [mainLocationRefresh, navigationCoordinator, sourceIdentity, state.workflow.documentGeneration]);
+  }, [mainLocationRefresh, navigationCoordinator, resetReferenceInspectionForDocument,
+    sourceIdentity, state.workflow.documentGeneration]);
   useEffect(() => {
     destination.invalidatePendingDestination();
   }, [destinationDialog, sourceIdentity, state.sessionId, state.workflow.documentGeneration]);
@@ -817,60 +1526,116 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     ) return;
     const generation = documentGenerationRef.current;
     restoringLocationGenerationRef.current = generation;
+    const restoreOperation = readingRestoreOperationRef.current;
     let cancelled = false;
     const restoreWhenSettled = async () => {
-      const ready = await waitForReviewNavigationReady({
-        isCurrent: () => !cancelled && generation === documentGenerationRef.current,
-        isReady: () => (
-          viewerControlsGenerationRef.current === generation
-          && (mainNavigationRef.current?.fitToWidthReady() ?? false)
-        ),
-      });
-      if (!ready) {
-        if (restoringLocationGenerationRef.current === generation) {
-          restoringLocationGenerationRef.current = null;
+      let restored = false;
+      let settled = false;
+      try {
+        const ready = await waitForReviewNavigationReady({
+          isCurrent: () => !cancelled && generation === documentGenerationRef.current,
+          isReady: () => (
+            viewerControlsGenerationRef.current === generation
+            && (mainNavigationRef.current?.fitToWidthReady() ?? false)
+          ),
+        });
+        if (!ready) return;
+        const initialLocation = initialWorkspaceLocationForGeneration(
+          initialDocumentGenerationRef.current,
+          generation,
+          workspacePresentationRef.current?.initialLocation,
+        );
+        if (!initialLocation && viewerControlsRef.current?.usesAutomaticFitWidth()) {
+          // Establish default framing before restoring an explicit destination.
+          // A later fit would move its anchor and replace the exact URL with a page link.
+          await mainNavigationRef.current?.fitToWidth();
+          if (cancelled || generation !== documentGenerationRef.current) return;
         }
-        if (!cancelled && generation === documentGenerationRef.current) {
-          setLocationRestoreStatus('fallback');
+        navigationCoordinator.startLocationHistory();
+        const pendingReading = pendingReadingRestoreRef.current?.successorGeneration === generation
+          ? pendingReadingRestoreRef.current : null;
+        if (pendingReading !== null) {
+          pendingReadingRestoreRef.current = null;
+          const captured = await pendingReading.captured;
+          if (captured !== null && !cancelled && generation === documentGenerationRef.current &&
+            pendingReading.userMovementIdentity === readingUserMovementRef.current &&
+            readingRestoreOperationRef.current === navigationCoordinator.operationIdentity()) {
+            const request = readingLocationRequest(captured);
+            let resolution;
+            try {
+              resolution = request === null || props.api.resolveReadingLocation === undefined
+                ? { status: 'fallback' as const, generation, pageCount: Math.max(1, search.getPageCount()) }
+                : await props.api.resolveReadingLocation({ ...request, generation });
+            } catch {
+              resolution = {
+                status: 'fallback' as const,
+                generation,
+                pageCount: Math.max(1, search.getPageCount()),
+              };
+            }
+            if (!cancelled && generation === documentGenerationRef.current &&
+              pendingReading.userMovementIdentity === readingUserMovementRef.current &&
+              readingRestoreOperationRef.current === navigationCoordinator.operationIdentity()) {
+              const navigation = mainNavigationRef.current;
+              const location = resolution.status === 'stale' || navigation === null
+                ? null
+                : navigation.clampLocation(resolvedReadingLocation(captured, resolution));
+              if (resolution.status !== 'stale' && navigation !== null && location !== null) {
+                try {
+                  restored = await navigation.applyLocation(location);
+                } catch {
+                  restored = false;
+                }
+              }
+            }
+          }
+        } else {
+          const presentation = pendingPresentationLocationRef.current;
+          restored = locationHistory === undefined
+            ? presentation === null
+              ? true
+              : await navigationCoordinator.restorePresentationLocation(presentation, generation)
+            : await navigationCoordinator.restoreCurrentLocation();
         }
-        return;
-      }
-      if (!workspacePresentationRef.current?.initialLocation
-        && viewerControlsRef.current?.usesAutomaticFitWidth()) {
-        // Establish default framing before restoring an explicit destination.
-        // A later fit would move its anchor and replace the exact URL with a page link.
-        await mainNavigationRef.current?.fitToWidth();
         if (cancelled || generation !== documentGenerationRef.current) return;
-      }
-      navigationCoordinator.startLocationHistory();
-      const presentation = pendingPresentationLocationRef.current;
-      const restored = locationHistory === undefined
-        ? presentation === null
-          ? true
-          : await navigationCoordinator.restorePresentationLocation(presentation, generation)
-        : await navigationCoordinator.restoreCurrentLocation();
-      if (!cancelled && generation === documentGenerationRef.current) {
         if (restored) viewerControlsRef.current?.freezeCurrentZoom();
-        const initialLocation = workspacePresentationRef.current?.initialLocation;
         const startingLocation = mainNavigationRef.current?.captureLocation();
         if (initialLocation && startingLocation) {
           // Position the excerpt, then let the shell fit its settled reading frame.
-          await mainNavigationRef.current?.applyLocation({
-            ...startingLocation,
-            pageIndex: initialLocation.pageIndex,
-            anchor: { ...startingLocation.anchor, y: initialLocation.top },
-            alignment: { ...startingLocation.alignment, yPercent: 0 },
-          });
-          if (!cancelled && generation === documentGenerationRef.current) setInitialFitRequest(generation);
+          const applied = await mainNavigationRef.current?.applyLocation({
+              ...startingLocation,
+              pageIndex: initialLocation.pageIndex,
+              anchor: { ...startingLocation.anchor, y: initialLocation.top },
+              alignment: { ...startingLocation.alignment, yPercent: 0 },
+            }) ?? false;
+          if (applied && !cancelled && generation === documentGenerationRef.current) {
+            setInitialFitRequest(generation);
+          } else {
+            restored = false;
+            setInitialViewReady(true);
+          }
         } else {
           setInitialViewReady(true);
         }
         restoredLocationGenerationRef.current = generation;
         pendingPresentationLocationRef.current = null;
         setLocationRestoreStatus(restored ? 'idle' : 'fallback');
-      }
-      if (restoringLocationGenerationRef.current === generation) {
-        restoringLocationGenerationRef.current = null;
+        settled = true;
+      } catch {
+        restored = false;
+      } finally {
+        if (readingRestoreOperationRef.current === restoreOperation) {
+          readingRestoreOperationRef.current = null;
+        }
+        if (!settled && !cancelled && generation === documentGenerationRef.current) {
+          restoredLocationGenerationRef.current = generation;
+          pendingPresentationLocationRef.current = null;
+          setInitialViewReady(true);
+          setLocationRestoreStatus('fallback');
+        }
+        if (restoringLocationGenerationRef.current === generation) {
+          restoringLocationGenerationRef.current = null;
+        }
       }
     };
     void restoreWhenSettled();
@@ -893,6 +1658,17 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   const onViewerInteraction = useCallback((event: ViewerInteractionEvent) => {
     if (!interactionAvailability.current.referencesEnabled && (event.type === 'pdf-link' || event.type === 'pdf-link-unavailable')) return;
     if (!interactionAvailability.current.authoringEnabled && ['caret', 'page-menu', 'page-note-cursor', 'page-note-commit'].includes(event.type)) return;
+    const surface = currentAnnotationSurface(event.surface);
+    if ([
+      'selection-placement',
+      'caret',
+      'page-menu',
+      'page-note-cursor',
+      'page-note-commit',
+      'owned-mark',
+      'owned-mark-clear',
+      'source-mark',
+    ].includes(event.type) && surface === null) return;
     if (event.type === 'reverse-synctex') {
       requestReverseSyncTex(event.value);
       return;
@@ -908,59 +1684,248 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     if (event.type === 'scroll') {
       mainLocationRefresh.schedule();
       authoringAnchorRefresh.schedule();
+      void captureCurrentReadingLocation();
       return;
     }
     if (event.type === "selection-placement") {
-      setSelectionPlacement(event.value?.placement ?? null);
+      setSelectionPlacement(event.value === null || surface === null
+        ? null
+        : { ...event.value.placement, surface: surface.kind });
+      setSelectionPlacementSurface(event.value === null ? undefined : surface ?? undefined);
       return;
     }
     if (event.type === "caret") {
       setCaret(event.value.anchor);
       setCaretPlacement(event.value.placement);
+      setCaretSurface(event.value.anchor === null ? undefined : surface ?? undefined);
       return;
     }
     if (event.type === "page-menu") {
       placementAuthority.current.clearKeyboardCursor();
       setKeyboardPageNoteActive(false);
-      setPageMenu(event.value);
+      setKeyboardPageNoteSurface(undefined);
+      const referenceRecovery = referenceRecoveryForSurface(surface ?? undefined);
+      setPageMenu(event.value === null || surface === null ? null : {
+        ...event.value,
+        surface,
+        ...(referenceRecovery === undefined ? {} : { referenceRecovery }),
+      });
       if (event.value) placementAuthority.current.setContextPoint(event.value.invocationId, event.value.point);
       return;
     }
     if (event.type === "page-note-cursor") {
       if (event.value) placementAuthority.current.setKeyboardCursor(event.value);
       else placementAuthority.current.clearKeyboardCursor();
+      if (event.value) setKeyboardPageNoteSurface(surface ?? undefined);
       return;
     }
     if (event.type === "page-note-commit") {
       const point = placementAuthority.current.consumeKeyboardCursor(event.value);
       if (!point) return;
       setKeyboardPageNoteActive(false);
+      const referenceRecovery = referenceRecoveryForSurface(surface ?? undefined);
       setPlacedPageNote({
         token: ++placedToken.current,
         pageIndex: point.pageIndex,
         position: { x: point.x, y: point.y, width: 18, height: 18 },
+        surface: surface ?? mainPdfAnnotationSurface(documentGenerationRef.current),
+        ...(referenceRecovery === undefined ? {} : { referenceRecovery }),
       });
       return;
     }
     if (event.type === 'owned-mark-clear') {
+      if (surface?.kind === 'reference') return;
       if (authoringActiveRef.current) return;
       setActiveItemId(undefined);
       return;
     }
     if (event.type === 'owned-mark') {
+      if (surface === null) return;
       const { id, phase } = event.value;
-      if (phase === 'enter') markHoverRef.current = id;
-      if (phase === 'leave' && markHoverRef.current === id) markHoverRef.current = undefined;
-      if (phase === 'focus') markFocusRef.current = id;
-      if (phase === 'blur' && markFocusRef.current === id) markFocusRef.current = undefined;
+      const referencePresentation = referenceInspectionPresentationForPhase(phase);
+      const preferredMark = referencePresentation === 'dismiss'
+        ? referenceInspectionCorrespondenceAuthority(referenceInspectionRef.current, id, surface)
+        : { id, surface };
+      if (phase === 'enter') markHoverRef.current = { id, surface };
+      if (phase === 'leave' && markHoverRef.current?.id === id) markHoverRef.current = undefined;
+      if (phase === 'focus') markFocusRef.current = { id, surface };
+      if (phase === 'blur' && markFocusRef.current?.id === id) markFocusRef.current = undefined;
+      if (surface.kind === 'reference' && referencePresentation === 'dismiss') {
+        const deferred = deferredReferenceOwnedHoverRef.current;
+        if (deferred?.id === id
+          && samePdfAnnotationSurface(deferred.surface, surface)) {
+          deferredReferenceOwnedHoverRef.current = null;
+        }
+      }
+      if (surface.kind === 'reference' && referencePresentation === 'preview') {
+        if (authoringActiveRef.current) {
+          if (phase === 'enter') deferredReferenceOwnedHoverRef.current = {
+            id,
+            surface,
+            itemWasPresent: stateRef.current.items.some((candidate) => candidate.id === id),
+            ...(event.value.pageIndex === undefined ? {} : { pageIndex: event.value.pageIndex }),
+            ...(event.value.placement === undefined ? {} : { placement: event.value.placement }),
+          };
+          return;
+        }
+        deferredReferenceOwnedHoverRef.current = null;
+        const identity = { origin: 'owned', itemId: id } as const;
+        const suppressedFocus = suppressedReferenceInspectionFocusRef.current;
+        if (phase === 'focus' && suppressedFocus !== null) {
+          suppressedReferenceInspectionFocusRef.current = null;
+          if (referenceInspectionShouldSuppressRestoredFocus(
+            suppressedFocus, identity, surface, Date.now(),
+          )) {
+            publishCorrespondence(preferredMark);
+            return;
+          }
+        }
+        const current = referenceInspectionRef.current;
+        if (referenceInspectionMatches(current, identity, surface)) {
+          cancelReferenceInspectionDismiss();
+          publishCorrespondence(preferredMark);
+          return;
+        }
+        const item = stateRef.current.items.find((candidate) => candidate.id === id);
+        const location = item === undefined ? null : reviewItemNavigationTarget(item);
+        if (location === null) return;
+        cancelReferenceInspectionDismiss();
+        const referenceRecovery = referenceRecoveryForSurface(surface);
+        replaceReferenceInspection({
+          token: ++referenceInspectionTokenRef.current,
+          identity,
+          surface,
+          ...(referenceRecovery === undefined ? {} : { referenceRecovery }),
+          pageIndex: event.value.pageIndex ?? location.pageIndex,
+          ...(event.value.placement === undefined ? {} : { placement: event.value.placement }),
+          selected: false,
+        });
+      }
+      if (surface.kind === 'reference' && referencePresentation === 'dismiss') {
+        const current = referenceInspectionRef.current;
+        if (current?.identity.origin === 'owned'
+          && current.identity.itemId === id
+          && !current.selected) scheduleReferenceInspectionDismiss(current.token);
+      }
       if (phase === 'activate') {
         if (authoringActiveRef.current) return;
+        if (surface.kind === 'reference') {
+          const item = stateRef.current.items.find((candidate) => candidate.id === id);
+          const location = item === undefined ? null : reviewItemNavigationTarget(item);
+          if (location === null) return;
+          const referenceRecovery = referenceRecoveryForSurface(surface);
+          cancelReferenceInspectionDismiss();
+          replaceReferenceInspection({
+            token: ++referenceInspectionTokenRef.current,
+            identity: { origin: 'owned', itemId: id },
+            surface,
+            ...(referenceRecovery === undefined ? {} : { referenceRecovery }),
+            pageIndex: event.value.pageIndex ?? location.pageIndex,
+            ...(event.value.placement === undefined ? {} : { placement: event.value.placement }),
+            selected: true,
+          });
+          publishCorrespondence(preferredMark);
+          return;
+        }
         setActiveItemId(id);
         setActivationRequest({ id, token: ++activationTokenRef.current });
       }
-      publishCorrespondence();
+      publishCorrespondence(preferredMark);
+      return;
     }
-  }, [authoringAnchorRefresh, mainLocationRefresh, navigationCoordinator, requestReverseSyncTex]);
+    if (event.type === 'source-mark' && surface?.kind === 'reference') {
+      if (existingAnnotations.status !== 'ready') return;
+      if (!existingAnnotations.items.some(
+        (annotation) => existingAnnotationKey(annotation) === event.value.annotationKey,
+      )) return;
+      const current = referenceInspectionRef.current;
+      const referencePresentation = referenceInspectionPresentationForPhase(event.value.phase);
+      if (referencePresentation === 'dismiss') {
+        if (current?.identity.origin === 'source'
+          && current.identity.annotationKey === event.value.annotationKey
+          && !current.selected) scheduleReferenceInspectionDismiss(current.token);
+        return;
+      }
+      const identity: AnnotationReaderIdentity = {
+        origin: 'source',
+        annotationKey: event.value.annotationKey,
+        documentGeneration: surface.documentGeneration,
+        discoveryGeneration: existingAnnotations.generation,
+      };
+      const suppressedFocus = suppressedReferenceInspectionFocusRef.current;
+      if (event.value.phase === 'focus' && suppressedFocus !== null) {
+        suppressedReferenceInspectionFocusRef.current = null;
+        if (referenceInspectionShouldSuppressRestoredFocus(
+          suppressedFocus, identity, surface, Date.now(),
+        )) return;
+      }
+      if (referenceInspectionShouldReuse(current, identity, surface, referencePresentation)) {
+        cancelReferenceInspectionDismiss();
+        return;
+      }
+      cancelReferenceInspectionDismiss();
+      const referenceRecovery = referenceRecoveryForSurface(surface);
+      replaceReferenceInspection({
+        token: ++referenceInspectionTokenRef.current,
+        identity,
+        surface,
+        ...(referenceRecovery === undefined ? {} : { referenceRecovery }),
+        pageIndex: event.value.pageIndex,
+        ...(event.value.placement === undefined ? {} : { placement: event.value.placement }),
+        selected: referencePresentation === 'selected',
+      });
+    }
+  }, [
+    authoringAnchorRefresh,
+    cancelReferenceInspectionDismiss,
+    captureCurrentReadingLocation,
+    currentAnnotationSurface,
+    existingAnnotations,
+    mainLocationRefresh,
+    navigationCoordinator,
+    referenceRecoveryForSurface,
+    replaceReferenceInspection,
+    requestReverseSyncTex,
+    scheduleReferenceInspectionDismiss,
+  ]);
+  const replayDeferredReferenceOwnedHover = useCallback(() => {
+    const deferred = deferredReferenceOwnedHoverRef.current;
+    if (deferred === null || authoringActiveRef.current) return;
+    const currentSurface = currentAnnotationSurface(deferred.surface);
+    const hovered = markHoverRef.current;
+    if (currentSurface?.kind !== 'reference'
+      || hovered === undefined
+      || hovered.id !== deferred.id
+      || !samePdfAnnotationSurface(hovered.surface, deferred.surface)) {
+      deferredReferenceOwnedHoverRef.current = null;
+      return;
+    }
+    const itemPresent = stateRef.current.items.some((candidate) => candidate.id === deferred.id);
+    if (!itemPresent) {
+      if (deferred.itemWasPresent) deferredReferenceOwnedHoverRef.current = null;
+      return;
+    }
+    deferredReferenceOwnedHoverRef.current = null;
+    onViewerInteraction({
+      type: 'owned-mark',
+      value: {
+        id: deferred.id,
+        phase: 'enter',
+        ...(deferred.pageIndex === undefined ? {} : { pageIndex: deferred.pageIndex }),
+        ...(deferred.placement === undefined ? {} : { placement: deferred.placement }),
+      },
+      surface: deferred.surface,
+    });
+  }, [currentAnnotationSurface, onViewerInteraction]);
+  useEffect(() => {
+    replayDeferredReferenceOwnedHover();
+  }, [
+    navigationState,
+    referenceLayoutState,
+    replayDeferredReferenceOwnedHover,
+    state.items,
+    state.workflow.documentGeneration,
+  ]);
   const onReferenceDocumentControls = useCallback((controls: ReferenceDocumentController | null) => {
     referenceControllerRef.current = controls;
     if (controls === null) navigationCoordinator.referenceNavigationUnavailable();
@@ -976,10 +1941,16 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       setMainNavigationReadyGeneration(navigation === null ? null : documentGenerationRef.current);
       navigationCoordinator.refreshMainLocation();
       refreshAuthoringAnchorNavigation();
+      void captureCurrentReadingLocation();
       return;
     }
     referenceNavigationRef.current = navigation;
-    if (navigation === null) navigationCoordinator.referenceNavigationUnavailable();
+    setReferenceNavigation(navigation);
+    if (navigation === null) {
+      navigationCoordinator.referenceNavigationUnavailable();
+      const current = referenceInspectionRef.current;
+      if (current !== null) dismissReferenceInspection(current.token, true);
+    }
     navigation?.replaceDocument(documentGenerationRef.current);
     if (navigation) {
       const generation = documentGenerationRef.current;
@@ -989,7 +1960,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
         waiter.resolve(waiter.documentGeneration === generation ? navigation : null);
       }
     }
-  }, [navigationCoordinator, refreshAuthoringAnchorNavigation]);
+  }, [captureCurrentReadingLocation, dismissReferenceInspection, navigationCoordinator, refreshAuthoringAnchorNavigation]);
   const onExistingAnnotationsDiscovery = useCallback((result: ExistingAnnotationsDiscovery) => {
     setExistingAnnotations(result);
   }, []);
@@ -1028,10 +1999,14 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       initialPresentationAppliedRef.current = true;
     }
     controls.subscribe(() => {
+      if (restoringLocationGenerationRef.current !== documentGenerationRef.current) {
+        viewportIdentityRef.current += 1;
+      }
       setViewerState(controls.snapshot());
       mainLocationRefresh.schedule();
+      void captureCurrentReadingLocation();
     });
-  }, [mainLocationRefresh, props.initialPresentation]);
+  }, [captureCurrentReadingLocation, mainLocationRefresh, props.initialPresentation]);
   useEffect(() => {
     if (!viewerState.ready || props.onPresentationChange === undefined) return;
     props.onPresentationChange({
@@ -1041,6 +2016,11 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   }, [props.onPresentationChange, viewerState]);
   const onMainDocumentReady = useCallback((engine: PdfEngine, document: PdfDocumentObject) => {
     const documentGeneration = documentGenerationRef.current;
+    readingPageReaderRef.current = {
+      generation: documentGeneration,
+      reader: createEngineAnchorPageReader(engine, document),
+    };
+    void captureCurrentReadingLocation();
     const documentSourceIdentity = sourceIdentity;
     search.initialize(engine, document, documentGeneration, () => {
       setMainDocumentReadyGeneration(documentGeneration);
@@ -1056,7 +2036,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
         }
       });
     });
-  }, [sourceIdentity]);
+  }, [captureCurrentReadingLocation, sourceIdentity]);
   useEffect(() => {
     const generation = state.workflow.documentGeneration;
     if (props.onDocumentReady === undefined
@@ -1145,6 +2125,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       ownedAnnotations={ownedAnnotations}
       authoringPreview={authoringPreview}
       keyboardPageNoteActive={keyboardPageNoteActive}
+      {...(keyboardPageNoteSurface === undefined ? {} : { keyboardPageNoteSurface })}
       onViewerInteraction={onViewerInteraction}
       reverseSyncTexEnabled={props.onReverseSyncTex !== undefined}
       {...(activeItemId === undefined ? {} : { activeOwnedAnnotationId: activeItemId })}
@@ -1166,6 +2147,54 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       searchResults={searchResults}
     />
   );
+
+  const openAnnotationReference = useCallback((identity: AnnotationReaderIdentity) => {
+    if (!referencesEnabled) return;
+    const request = annotationReferenceRequest(identity, {
+      items: stateRef.current.items,
+      existingAnnotations,
+      documentGeneration: documentGenerationRef.current,
+      pageCount: viewerState.totalPages,
+      pages: captureDocumentOrderPages(),
+    });
+    if (request === null) {
+      setNavigationAnnouncement('Annotation passage unavailable.');
+      return;
+    }
+    void navigationCoordinator.openReference(
+      request.target,
+      request.metadata,
+      null,
+      {
+        annotationIdentity: identity,
+        onSettled: ({ token, documentGeneration, tabIdentity }) => {
+          if (documentGeneration !== documentGenerationRef.current) return;
+          const tab = navigationStateRef.current.tabs.find(
+            (candidate) => candidate.identity === tabIdentity,
+          );
+          replaceReferenceInspection({
+            token,
+            identity,
+            surface: { kind: 'reference', documentGeneration, tabIdentity },
+            ...(tab === undefined ? {} : { referenceRecovery: frozenReferenceRecovery(tab) }),
+            pageIndex: request.pageIndex,
+            selected: true,
+          });
+        },
+      },
+    );
+  }, [
+    existingAnnotations,
+    captureDocumentOrderPages,
+    navigationCoordinator,
+    replaceReferenceInspection,
+    referencesEnabled,
+    viewerState.totalPages,
+  ]);
+  const authoringSurface = selectionUpdate.kind === 'reliable'
+    ? currentAnnotationSurface(selectionUpdate.surface) ?? undefined
+    : currentAnnotationSurface(caretSurface) ?? undefined;
+  const authoringReferenceRecovery = referenceRecoveryForSurface(authoringSurface);
 
   const activateSearchResult = (result: PdfSearchResult) => {
     const target = pdfSearchResultTarget(result, navigationState.documentGeneration);
@@ -1245,6 +2274,13 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     navigationState.workspace.lastMode,
   );
   const referencePdfVisible = referencePdfIsVisible(referenceLayoutState, navigationState);
+  useEffect(() => {
+    refreshAuthoringAnchorNavigation();
+  }, [
+    navigationState.activeTabIdentity,
+    referencePdfVisible,
+    refreshAuthoringAnchorNavigation,
+  ]);
   useEffect(() => {
     if (referencePdfVisible) return;
     setReferenceCopySelection(null);
@@ -1360,9 +2396,15 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     <main
       data-production-review
       data-initial-view-ready={initialViewReady}
+      data-location-restore-status={locationRestoreStatus}
       inert={availableModes !== null && !initialViewReady}
       data-launch-surface={scope.launchSurface ?? 'browser'}
       ref={productionRootRef}
+      onWheelCapture={() => {
+        if (restoringLocationGenerationRef.current === documentGenerationRef.current) {
+          readingUserMovementRef.current += 1;
+        }
+      }}
       onPointerDownCapture={(event) => {
         const surface = event.target instanceof Element
           ? event.target.closest<HTMLElement>('[data-pdf-copy-surface]')?.dataset.pdfCopySurface
@@ -1379,6 +2421,9 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       <NativePdfSelectionBridge owner={pdfCopyOwner} snapshots={pdfCopySnapshots} />
       <ReviewShell
         state={state}
+        {...(props.activeAuthoringDraftIds === undefined ? {} : {
+          activeAuthoringDraftIds: props.activeAuthoringDraftIds,
+        })}
         documentTitle={scope.documentTitle}
         generationRefreshStatus={props.generationRefreshStatus ?? 'idle'}
         locationRestoreStatus={locationRestoreStatus}
@@ -1433,8 +2478,35 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
           },
         })}
         existingAnnotations={existingAnnotations}
+        onOpenAnnotationReference={openAnnotationReference}
+        referenceInspection={referenceInspection}
+        onReferenceInspectionDismiss={(token, restoreFocus) => {
+          const current = referenceInspectionRef.current;
+          suppressedReferenceInspectionFocusRef.current = restoreFocus === true && current?.token === token
+            ? { identity: current.identity, surface: current.surface, expiresAt: Date.now() + 500 }
+            : null;
+          dismissReferenceInspection(token, true);
+        }}
+        onReferenceInspectionHoldChange={(token, held) => {
+          if (referenceInspectionRef.current?.token !== token) return;
+          referenceInspectionHeldTokenRef.current = held ? token : null;
+          if (held) cancelReferenceInspectionDismiss();
+          else if (!referenceInspectionRef.current.selected) scheduleReferenceInspectionDismiss(token);
+        }}
+        onReferenceInspectionSelect={(token) => {
+          const current = referenceInspectionRef.current;
+          if (current?.token !== token) return;
+          cancelReferenceInspectionDismiss();
+          const selected = pinReferenceInspection(current, token);
+          referenceInspectionRef.current = selected;
+          setReferenceInspection(selected);
+          const selectedCorrespondence = selectedReferenceInspectionCorrespondence(selected);
+          if (selectedCorrespondence !== undefined) publishCorrespondence(selectedCorrespondence);
+        }}
         activeItemId={activeItemId ?? null}
-        {...(correspondingItemId === undefined ? {} : { correspondingItemId })}
+        {...(contentCorrespondingItemId === undefined
+          ? {}
+          : { correspondingItemId: contentCorrespondingItemId })}
         {...(activationRequest === undefined ? {} : { activationRequest })}
         onRetryExistingAnnotations={() => setInventoryRetryGeneration((generation) => generation + 1)}
         onItemCorrespondenceChange={(id) => {
@@ -1507,17 +2579,42 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
             const currentSelection = selectionUpdateRef.current;
             if (currentSelection.kind !== "reliable" || currentSelection.generation !== generation) return;
             const registry = viewerRegistry.current;
-            const documentId = registry?.getStore().getState().core.activeDocumentId;
-            if (!documentId) return;
+            if (!registry) return;
+            const surface = currentSelection.surface;
+            const documentId = surface?.kind === 'reference'
+              ? REFERENCE_PDF_DOCUMENT_ID
+              : MAIN_PDF_DOCUMENT_ID;
             registry.getPlugin<SelectionPlugin>(SelectionPlugin.id)?.provides()?.clear(documentId);
           },
         }}
         authoring={{
+          ...(authoringSurface === undefined ? {} : { surface: authoringSurface }),
+          ...(authoringReferenceRecovery === undefined
+            ? {}
+            : { referenceRecovery: authoringReferenceRecovery }),
+          ...(interactionLifecycleRequired ? { interactionLifecycleRequired: true } : {}),
+          ...(interactionLifecycle === undefined ? {} : {
+            interactionLifecycle,
+            ...(props.api.subscribeInteractionReconnect === undefined ? {} : {
+              subscribeInteractionReconnect: props.api.subscribeInteractionReconnect,
+            }),
+            interactionFinalizationReady: state.workflow.mode === 'generated-output'
+              || exportOnly
+              || saveStatus.destination.phase !== 'none',
+            interactionPersistenceRequired: saveStatus.destination.phase === 'active'
+              && !exportOnly
+              && state.workflow.mode !== 'generated-output',
+            onInteractionFinalizationPrerequisite: () => openCopyDialog('first-annotation'),
+          }),
           pageMenu: pageMenu === null ? null : {
             invocationId: pageMenu.invocationId,
             placement: pageMenu.placement,
             pageIndex: pageMenu.point.pageIndex,
             position: { x: pageMenu.point.x, y: pageMenu.point.y, width: 18, height: 18 },
+            surface: pageMenu.surface,
+            ...(pageMenu.referenceRecovery === undefined
+              ? {}
+              : { referenceRecovery: pageMenu.referenceRecovery }),
           },
           ...(props.onReverseSyncTex === undefined ? {} : {
             onGoToSource: (menu: {
@@ -1537,11 +2634,23 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
             if (pageMenu) placementAuthority.current.dismissContext(pageMenu.invocationId);
             setPageMenu(null);
             placementAuthority.current.clearKeyboardCursor();
+            const activeReferenceIdentity = navigationStateRef.current.activeTabIdentity;
+            const surface = pdfCopyOwner === 'reference'
+              && activeReferenceIdentity !== null
+              && referencePdfIsVisible(referenceLayoutStateRef.current, navigationStateRef.current)
+              ? {
+                  kind: 'reference' as const,
+                  documentGeneration: documentGenerationRef.current,
+                  tabIdentity: activeReferenceIdentity,
+                }
+              : mainPdfAnnotationSurface(documentGenerationRef.current);
+            setKeyboardPageNoteSurface(surface);
             setKeyboardPageNoteActive(true);
           },
           onCancelKeyboardPageNote: () => {
             placementAuthority.current.clearKeyboardCursor();
             setKeyboardPageNoteActive(false);
+            setKeyboardPageNoteSurface(undefined);
           },
           onPageMenuDismiss: (invocationId) => {
             placementAuthority.current.dismissContext(invocationId);
@@ -1558,8 +2667,14 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
           ...(authoringSessionResolution === undefined
             ? {}
             : { authoringSessionResolution }),
+          ...(saveStatus.sync.phase === 'clean'
+            ? { persistedRevision: saveStatus.sync.savedRevision }
+            : {}),
           onAuthoringAnchorChange,
-          onAuthoringActiveChange: (active) => { authoringActiveRef.current = active; },
+          onAuthoringActiveChange: (active) => {
+            authoringActiveRef.current = active;
+            if (!active) replayDeferredReferenceOwnedHover();
+          },
           onAuthoringPreviewChange: setAuthoringPreview,
           onAuthoringViewportChange,
           ...(authoringAnchorNavigation === null ? {} : {
@@ -1575,6 +2690,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
             placementAuthority.current.clear();
             setPageMenu(null);
             setKeyboardPageNoteActive(false);
+            setKeyboardPageNoteSurface(undefined);
           },
           onCommand: async (command, authority) => {
             const currentState = stateRef.current;
@@ -1593,14 +2709,19 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
                 reason: 'stale-authoring',
               };
             }
-            const gated = gateReviewCommand(
+            // Protected drafts are semantic recovery state and do not establish
+            // a physical PDF destination. Applying one still requires the
+            // ordinary destination prerequisite before broker finalization.
+            const gated = command.type === 'put-draft'
+              ? { kind: 'submit' as const, command }
+              : gateReviewCommand(
               currentState,
               saveStatus,
               command,
               exportOnly
                 ? 'ephemeral'
                 : scope.sourceDisposition === 'remote-temporary' ? 'remote-temporary' : 'local',
-            );
+              );
             if (gated.kind === "choose-destination") {
               openCopyDialog("first-annotation", {
                 command,
@@ -1636,6 +2757,21 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
               if (gated.kind === 'submit-and-choose-destination') {
                 openCopyDialog("first-annotation");
               }
+              if (acceptedAuthoringCommandRequiresPersistence(
+                next,
+                nextSaveStatus,
+                authority !== undefined
+                  && !exportOnly
+                  && state.workflow.mode !== 'generated-output',
+              )) {
+                setCommandError(null);
+                return {
+                  accepted: false,
+                  state: next,
+                  message: 'The annotation is waiting to be saved to the PDF.',
+                  reason: 'persistence-pending',
+                };
+              }
             }
             setCommandError("accepted" in result ? result.message : null);
             return result;
@@ -1645,6 +2781,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
           ...(viewerControlsRef.current === undefined ? {} : { viewerControls: viewerControlsRef.current }),
           ...(viewerFraming === undefined ? {} : { viewerFraming }),
           ...(mainNavigation === null ? {} : { viewerNavigation: mainNavigation }),
+          ...(referenceNavigation === null ? {} : { referenceNavigation }),
           viewerState,
           viewerNavigationIntentToken: searchNavigationIntentToken,
           onCommitMainFramingPositionChange,

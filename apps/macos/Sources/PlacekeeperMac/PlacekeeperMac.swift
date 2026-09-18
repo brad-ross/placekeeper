@@ -236,9 +236,9 @@ final class PlacekeeperAppDelegate: NSObject, NSApplicationDelegate {
                 executable: helperCommand.executable,
                 argumentPrefix: helperCommand.argumentPrefix,
                 baseEnvironment: helperBaseEnvironment,
-                onExit: { [weak self] failedWindowID in
+                onExit: { [weak self] failedWindowID, termination in
                     Task { @MainActor in
-                        self?.helperDidExit(windowID: failedWindowID)
+                        self?.helperDidExit(windowID: failedWindowID, termination: termination)
                     }
                 }
               ), helperSupervisor.attach(helper) else {
@@ -434,7 +434,9 @@ final class PlacekeeperAppDelegate: NSObject, NSApplicationDelegate {
             onBecameKey: { [weak self] keyWindowID in self?.windowRegistry.noteKey(windowID: keyWindowID) },
             onCommandSnapshot: { [weak self] _ in self?.menuCoordinator.refresh() },
             onRetry: { [weak self] failedWindowID in self?.retryDocumentWindow(windowID: failedWindowID) },
-            onDiagnostics: { [weak self] in self?.showDiagnostics() },
+            onDiagnostics: { [weak self] reason, termination in
+                self?.showDiagnostics(reason: reason, helperTermination: termination)
+            },
             onClose: { [weak self] closedWindowID in
                 guard let self else { return }
                 self.retireHelper(windowID: closedWindowID)
@@ -501,8 +503,12 @@ final class PlacekeeperAppDelegate: NSObject, NSApplicationDelegate {
         restorationStore.save(controllers.compactMap(\.restorationRecord))
     }
 
-    private func helperDidExit(windowID: String) {
-        controllers.first { $0.windowID == windowID }?.helperDidFail()
+    private func helperDidExit(windowID: String, termination: ReviewHelperTermination) {
+        diagnostic("review-helper-exited: \(termination.reason.rawValue) \(termination.status)")
+        controllers.first { $0.windowID == windowID }?.helperDidFail(
+            reason: .helperProcessExited,
+            helperTermination: termination
+        )
         retireHelper(windowID: windowID, helperAlreadyExited: true)
         updateActivity()
     }
@@ -523,14 +529,18 @@ final class PlacekeeperAppDelegate: NSObject, NSApplicationDelegate {
         enqueueLaunchURLs([source])
     }
 
-    private func showDiagnostics() {
+    private func showDiagnostics(
+        reason: CatastrophicFailureReason,
+        helperTermination: ReviewHelperTermination? = nil
+    ) {
         let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "development"
-        let safeBuild = build.replacingOccurrences(
-            of: "[^A-Za-z0-9._-]", with: "_", options: .regularExpression
-        )
         let alert = NSAlert()
         alert.messageText = "Placekeeper Diagnostics"
-        alert.informativeText = "Schema: 1\nShell: native-recovery\nBuild: \(String(safeBuild.prefix(100)))"
+        alert.informativeText = CatastrophicDiagnostics.informativeText(
+            build: build,
+            reason: reason,
+            helperTermination: helperTermination
+        )
         alert.alertStyle = .informational
         alert.addButton(withTitle: "OK")
         alert.runModal()
@@ -583,7 +593,7 @@ final class PlacekeeperAppDelegate: NSObject, NSApplicationDelegate {
         lifecycleRegistered = false
         diagnostic("lifecycle-helper-failed")
         for controller in controllers {
-            controller.helperDidFail()
+            controller.helperDidFail(reason: .lifecycleHelperFailed)
             retireHelper(windowID: controller.windowID)
         }
         for (windowID, recovery) in recoveryAttempts {
@@ -646,7 +656,7 @@ final class PlacekeeperAppDelegate: NSObject, NSApplicationDelegate {
                 guard let sourceURL else { return }
                 self?.enqueueLaunchURLs([sourceURL])
             },
-            onDiagnostics: { [weak self] in self?.showDiagnostics() },
+            onDiagnostics: { [weak self] in self?.showDiagnostics(reason: .launchFailure) },
             onClose: { [weak self] closingWindow in
                 closingWindow?.close()
                 self?.fallbackWindows.removeAll { $0 === closingWindow }

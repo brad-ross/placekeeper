@@ -98,6 +98,7 @@ export interface ExistingAnnotationReaderProjectionOptions {
   readonly documentGeneration: number;
   readonly discoveryGeneration: number;
   readonly sectionLabel?: string;
+  readonly includeMetadataOnly?: boolean;
 }
 
 export function projectExistingAnnotationReader(
@@ -105,7 +106,7 @@ export function projectExistingAnnotationReader(
   options: ExistingAnnotationReaderProjectionOptions,
 ): ExistingAnnotationReaderRecord | null {
   const content = nonBlankString(annotation.contents);
-  if (content === null) return null;
+  if (content === null && options.includeMetadataOnly !== true) return null;
 
   const sectionLabel = nonBlankString(options.sectionLabel);
   const author = nonBlankString(annotation.author);
@@ -123,7 +124,7 @@ export function projectExistingAnnotationReader(
     ...(sectionLabel === null ? {} : { sectionLabel }),
     ...(author === null ? {} : { author }),
     contentLabel: 'Annotation contents',
-    content,
+    content: content ?? '',
     mutable: false,
   };
 }
@@ -134,6 +135,7 @@ export interface AnnotationReaderSources {
   readonly documentGeneration: number;
   readonly ownedSectionLabels?: ReadonlyMap<string, string>;
   readonly sourceSectionLabels?: ReadonlyMap<string, string>;
+  readonly includeMetadataOnly?: boolean;
 }
 
 /** Resolve transient reader identity against current annotation and source authority. */
@@ -165,6 +167,9 @@ export function resolveAnnotationReader(
     : projectExistingAnnotationReader(annotation, {
         documentGeneration: identity.documentGeneration,
         discoveryGeneration: identity.discoveryGeneration,
+        ...(sources.includeMetadataOnly === undefined ? {} : {
+          includeMetadataOnly: sources.includeMetadataOnly,
+        }),
         ...(sectionLabel === undefined ? {} : { sectionLabel }),
       });
 }

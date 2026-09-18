@@ -83,29 +83,19 @@ async function openFocusedReattachment(
 
 async function expectFocusedReattachmentGeometry(detail: Locator): Promise<void> {
   const geometry = await detail.evaluate((element) => {
-    const header = element.querySelector<HTMLElement>('.reconciliation-workspace__detail-header');
+    const header = element.querySelector<HTMLElement>('.comment-composer__header');
     const title = header?.querySelector<HTMLElement>('h2');
-    const pill = header?.querySelector<HTMLElement>('.reconciliation-workspace__state-pill');
-    const back = header?.querySelector<HTMLElement>('.full-annotation-reader__back');
-    const discard = header?.querySelector<HTMLElement>('.full-annotation-reader__edit');
-    if (!header || !title || !pill || !back || !discard) throw new Error('Focused reattachment header is incomplete.');
+    const actions = element.querySelector<HTMLElement>('.comment-composer__actions');
+    if (!header || !title || !actions) throw new Error('Focused reattachment surface is incomplete.');
     return {
       clientWidth: element.clientWidth,
       scrollWidth: element.scrollWidth,
       title: title.getBoundingClientRect().toJSON(),
-      pill: pill.getBoundingClientRect().toJSON(),
-      back: back.getBoundingClientRect().toJSON(),
-      discard: discard.getBoundingClientRect().toJSON(),
+      actions: actions.getBoundingClientRect().toJSON(),
     };
   });
   expect(geometry.scrollWidth).toBeLessThanOrEqual(geometry.clientWidth + 1);
-  expect(geometry.pill.x).toBeGreaterThanOrEqual(geometry.title.x + geometry.title.width - 0.5);
-  expect(geometry.pill.y).toBeGreaterThanOrEqual(geometry.title.y - 8);
-  expect(geometry.pill.y + geometry.pill.height).toBeLessThanOrEqual(
-    geometry.title.y + geometry.title.height + 8,
-  );
-  expect(geometry.back.width).toBeCloseTo(geometry.discard.width, 1);
-  expect(geometry.back.height).toBeCloseTo(geometry.discard.height, 1);
+  expect(geometry.actions.y).toBeGreaterThan(geometry.title.y + geometry.title.height);
 }
 
 async function expectAnnotationTrayOverflow(
@@ -709,8 +699,7 @@ test('task-first generated Annotation Tray and blocked document menu', async ({ 
   const annotations = page.getByRole('tab', { name: 'Annotations', exact: true });
   if (await annotations.getAttribute('aria-selected') !== 'true') await annotations.click();
 
-  const headings = page.locator('#workspace-panel-annotations h2');
-  await expect(headings).toHaveText(['Needs attention']);
+  await expect(page.locator('#workspace-panel-annotations h2')).toHaveCount(0);
   const resolved = page.locator('[data-review-item="00000000-0000-4000-8000-000000000208"]');
   await resolved.locator('.annotation-item__navigation').focus();
   await expect(resolved.locator('.row-action-group__direct')).toHaveCSS('opacity', '1');
@@ -1383,7 +1372,7 @@ test('Save Destination modal', async ({ page }) => {
   const dialog = page.getByRole('dialog', { name: 'Choose Where to Save Annotations' });
   await expect(dialog).toBeVisible();
   await expect(dialog.getByRole('button', { name: 'Cancel' })).toBeVisible();
-  await expect(dialog.getByRole('button', { name: 'Confirm' })).toBeVisible();
+  await expect(dialog.getByRole('button', { name: 'Save', exact: true })).toBeVisible();
   await expectScene(product, 'save-destination-modal.png');
 });
 

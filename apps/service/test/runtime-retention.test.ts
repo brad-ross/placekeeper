@@ -1,6 +1,6 @@
 import { addPageNote, setAnnotationName } from "../../../packages/core/src/review-commands.js";
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -33,7 +33,7 @@ async function runtimeFixture() {
       broker, writer, picker: { chooseFolder, locatePdf: async () => undefined },
     });
     const exporting = new ExportCoordinator({ writer, capabilities: broker.capabilities });
-    const backend = new ChromeServiceRuntimeBackend({ broker, browserSources, transferStore, saving, exporting });
+    const backend = new ChromeServiceRuntimeBackend({ broker, browserSources, transferStore, saving, exporting, downloadFolder: async () => join(root, "downloads") });
     const authority = backend.authority();
     const stage = async (remote = false) => {
       const sink = await authority.begin({
@@ -53,6 +53,26 @@ async function runtimeFixture() {
 }
 
 describe("canonical review retention", () => {
+  it.each([false, true])("returns usable download defaults through Chrome (remote: %s)", async (remote) => {
+    const data = await runtimeFixture();
+    await mkdir(join(data.root, "downloads"));
+    const staged = await data.stage(remote);
+    if ("choose" in staged) throw new Error("Expected initial review");
+    await data.authority.activate(staged.canonicalKey, "presentation");
+    const proposal = await data.authority.invoke(staged.canonicalKey, "saveProposal", undefined,
+      { payloadDigest: "a".repeat(64) }) as { filename: string; folderSelectionId: string };
+    expect(proposal).toMatchObject({ filename: remote ? "Browser PDF.pdf" : "paper.pdf",
+      folder: join(data.root, "downloads"), folderSelectionId: expect.any(String) });
+    const save = vi.spyOn(data.saving, "requestSave").mockResolvedValue(undefined);
+    await data.authority.invoke(staged.canonicalKey, "chooseCopy", {
+      filename: proposal.filename, folderSelectionId: proposal.folderSelectionId,
+    }, { idempotencyKey: "default-save", payloadDigest: "b".repeat(64) });
+    expect(data.broker.saveStatus(staged.projection.sessionId)?.destination).toMatchObject({
+      phase: "active", kind: "copy", targetPath: join(await realpath(join(data.root, "downloads")), proposal.filename),
+    });
+    save.mockRestore();
+  });
+
   it.each(["chooseCopy", "chooseOriginal"] as const)("returns accepted and rejected name confirmations through Chrome %s", async (method) => {
     const data = await runtimeFixture();
     const staged = await data.stage();

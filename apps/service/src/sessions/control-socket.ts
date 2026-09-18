@@ -21,7 +21,7 @@ export interface SessionControlRegistryOptions {
   readonly heartbeat?: boolean;
 }
 
-export type SessionStateInvalidationReason = "revision" | "freshness";
+export type SessionStateInvalidationReason = "revision" | "freshness" | "presence";
 
 function serverFrame(opcode: number, payload = Buffer.alloc(0)): Buffer {
   if (payload.byteLength <= 125) {
@@ -60,7 +60,15 @@ export class SessionControlRegistry {
     }
   }
 
-  registerSocket(sessionId: string, socket: Duplex, initialData?: Buffer): () => void {
+  registerSocket(
+    sessionId: string,
+    socket: Duplex,
+    initialData?: Buffer,
+    lifecycle: {
+      readonly onDisconnect?: () => void;
+      readonly readyEvent?: Readonly<Record<string, unknown>>;
+    } = {},
+  ): () => void {
     const clients = this.#clients.get(sessionId) ?? new Set<ControlClient>();
     this.#graceExpiresAt.delete(sessionId);
     const client: ControlClient = {
@@ -74,6 +82,7 @@ export class SessionControlRegistry {
     const unregister = (): void => {
       if (!registered) return;
       registered = false;
+      lifecycle.onDisconnect?.();
       if (client.heartbeat !== undefined) clearInterval(client.heartbeat);
       clients.delete(client);
       if (clients.size === 0 && this.#clients.get(sessionId) === clients) {
@@ -146,6 +155,10 @@ export class SessionControlRegistry {
     socket.once("close", unregister);
     socket.once("error", unregister);
     if (initialData !== undefined && initialData.byteLength > 0) receive(initialData);
+    if (lifecycle.readyEvent !== undefined) socket.write(serverFrame(
+      0x1,
+      Buffer.from(JSON.stringify(lifecycle.readyEvent), "utf8"),
+    ));
     if (this.#heartbeat) {
       client.heartbeat = setInterval(() => {
         if (this.#now() - client.lastPongAt >= HEARTBEAT_TIMEOUT_MS) {

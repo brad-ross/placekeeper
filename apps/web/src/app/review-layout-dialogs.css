@@ -64,7 +64,6 @@
   font-weight: 500;
 }
 
-.comment-composer__context { display: flex; flex: none; align-items: center; gap: 5px; }
 .comment-composer__page-cue { color: var(--review-ink-muted); font-size: 11px; font-variant-numeric: tabular-nums; }
 
 .comment-composer__anchor {
@@ -90,6 +89,13 @@
   justify-content: flex-end;
   flex-wrap: wrap;
   gap: var(--review-action-group-gap);
+}
+
+.comment-composer__terminal-status {
+  margin: 0;
+  color: var(--review-ink-muted);
+  font-size: 12px;
+  line-height: 1.4;
 }
 
 .comment-composer__anchor[data-return-state="pending"] .review-icon {

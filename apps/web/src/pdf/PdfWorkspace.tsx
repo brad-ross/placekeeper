@@ -1,6 +1,5 @@
 import { MainDocumentPreviewBoundary, MainDocumentPreviewLimit } from './MainDocumentPreviewBoundary.js';
-import { SourceAnnotationLayer, type SourceReaderMark } from './SourceAnnotationMark.js';
-import { existingAnnotationKey, type SourceNativeAnnotation } from './existing-annotations.js';
+import type { ExistingAnnotation, SourceNativeAnnotation } from './existing-annotations.js';
 import { ANNOTATION_CSS_VARIABLES } from '../../../../packages/core/src/annotation-appearance.js';
 import type { PluginRegistry } from '@embedpdf/core';
 import { EmbedPDF, type PluginBatchRegistrations } from '@embedpdf/core/react';
@@ -17,19 +16,22 @@ import { useContext, useMemo, useRef } from 'react';
 import type { ReviewAnnotation } from '../../../../packages/core/src/pdf-writer.js';
 import type { PdfSearchResult } from './pdf-search-model.js';
 import type { ReferenceScrollPosition } from './reference-manual-scroll.js';
-import { OwnedTextMark } from './OwnedTextMark.js';
 import { ReviewIcon } from '../review/ReviewIcon.js';
-import { combinePageRotation, ownedMarkStyle, positionOwnedRect } from './owned-overlay.js';
+import { combinePageRotation, positionOwnedRect } from './owned-overlay.js';
 import { groupOwnedMarkGeometryByPage, hitTestOwnedMark } from './owned-mark-hit-test.js';
 import {
   mergeAuthoringPreviewProjections,
-  reviewItemIdForAnnotation,
 } from '../review/annotation-projection.js';
 import {
   sourceAnnotationLinkRenderers,
 } from './PdfLinkControl.js';
 import { ReferencePdfViewport } from './ReferencePdfViewport.js';
+import {
+  buildAnnotationRenderingState,
+  PdfAnnotationLayers,
+} from './PdfAnnotationLayers.js';
 import type { ViewerRunway } from './viewer-framing.js';
+import type { PdfAnnotationSurface } from './annotation-surface.js';
 import {
   MAIN_PDF_DOCUMENT_ID,
   REFERENCE_PDF_DOCUMENT_ID,
@@ -64,10 +66,15 @@ export interface PdfWorkspaceProps {
   onInitialized?: (registry: PluginRegistry) => Promise<void>;
   ownedAnnotations?: readonly ReviewAnnotation[];
   sourceNativeAnnotations?: readonly SourceNativeAnnotation[];
+  sourceAnnotations?: readonly ExistingAnnotation[];
   authoringPreview?: readonly ReviewAnnotation[] | null;
   keyboardPageNoteCursor?: ViewerPagePoint | null;
+  keyboardPageNoteSurface?: PdfAnnotationSurface;
   onKeyboardPageNoteKey?: (key: string) => void;
-  onPageContextMenu?: (request: PageContextMenuRequest) => boolean;
+  onPageContextMenu?: (
+    request: PageContextMenuRequest,
+    surface?: PdfAnnotationSurface,
+  ) => boolean;
   fillContainer?: boolean;
   activeOwnedAnnotationId?: string;
   correspondingOwnedAnnotationId?: string;
@@ -80,6 +87,7 @@ export interface PdfWorkspaceProps {
   referenceViewportHost?: HTMLElement | null;
   onReferenceViewportElement?: (element: HTMLDivElement | null) => void;
   onReferenceScrollIntent?: (position: ReferenceScrollPosition) => void;
+  referenceTabIdentity?: string | null;
   searchResults?: readonly PdfSearchResult[];
 }
 
@@ -106,8 +114,10 @@ export function PdfWorkspace({
   onInitialized,
   ownedAnnotations = [],
   sourceNativeAnnotations = [],
+  sourceAnnotations = [],
   authoringPreview = null,
   keyboardPageNoteCursor = null,
+  keyboardPageNoteSurface,
   onKeyboardPageNoteKey,
   onPageContextMenu,
   fillContainer = false,
@@ -122,6 +132,7 @@ export function PdfWorkspace({
   referenceViewportHost = null,
   onReferenceViewportElement,
   onReferenceScrollIntent,
+  referenceTabIdentity = null,
   searchResults = [],
 }: PdfWorkspaceProps) {
   const previewLimit = useContext(MainDocumentPreviewLimit);
@@ -133,19 +144,14 @@ export function PdfWorkspace({
     () => mergeAuthoringPreviewProjections(ownedAnnotations, authoringPreview),
     [authoringPreview, ownedAnnotations],
   );
-  const sourceRendering = useMemo(() => {
-    const byId = new Map(ownedAnnotations.map((annotation) => [annotation.id, annotation]));
-    const hidden = new Set(sourceNativeAnnotations.filter(({ id }) => !byId.has(id))
-      .map(({ pageIndex, sourceId }) => existingAnnotationKey({ pageIndex, id: sourceId })));
-    const marks = new Map<string, SourceReaderMark>();
-    for (const source of sourceNativeAnnotations) {
-      const annotation = byId.get(source.id);
-      if (annotation && source.readerStyle) marks.set(existingAnnotationKey({ pageIndex: source.pageIndex, id: source.sourceId }), {
-        style: source.readerStyle, contents: annotation.contents,
-      });
-    }
-    return { hidden, marks };
-  }, [ownedAnnotations, sourceNativeAnnotations]);
+  const sourceRendering = useMemo(
+    () => buildAnnotationRenderingState(
+      ownedAnnotations,
+      sourceNativeAnnotations,
+      sourceAnnotations,
+    ),
+    [ownedAnnotations, sourceAnnotations, sourceNativeAnnotations],
+  );
   const authoringPreviewIds = useMemo(
     () => new Set(authoringPreview?.map(({ id }) => id) ?? []),
     [authoringPreview],
@@ -170,6 +176,7 @@ export function PdfWorkspace({
       role="region"
       className="pdf-workspace"
       data-pdf-copy-surface="main"
+      data-annotation-surface="main"
       style={{ ...ANNOTATION_CSS_VARIABLES, ...(fillContainer ? {} : { height: '70vh', minHeight: 480 }) }}
     >
       <EmbedPDF
@@ -450,118 +457,28 @@ export function PdfWorkspace({
                             })
                         ))}
                       </div>
-                      <div
-                        inert
-                        aria-hidden="true"
-                        data-owned-annotation-layer
-                        style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}
-                      >
-                        {(annotationsByPage.get(layout.pageIndex) ?? [])
-                          .flatMap((annotation) => {
-                            const page = activePdf.pages[layout.pageIndex];
-                            if (!page || annotation.kind === 'pdfAnnotation') return [];
-                            return (annotation.quadPoints ?? [annotation.rect]).map((rect, index) => {
-                              const markStyle = ownedMarkStyle(
-                                page,
-                                layout,
-                                mainDocument.rotation,
-                                rect,
-                              );
-                              return (
-                                <OwnedTextMark
-                                  engine={engine} document={activePdf} page={page} rect={rect}
-                                  textAnchored={['highlight', 'delete', 'replace'].includes(annotation.kind)}
-                                  key={`${annotation.id}:${index}`}
-                                  data-owned-mark={annotation.kind}
-                                  data-pdf-mark-style={annotation.kind}
-                                  data-has-attached-text={annotation.contents.trim().length > 0 ? 'true' : 'false'}
-                                  data-review-id={reviewItemIdForAnnotation(annotation)}
-                                  data-authoring-preview={authoringPreviewIds.has(annotation.id) ? 'true' : undefined}
-                                  data-corresponding={correspondingOwnedAnnotationId === reviewItemIdForAnnotation(annotation) ? 'true' : 'false'}
-                                  data-active={activeOwnedAnnotationId === reviewItemIdForAnnotation(annotation) ? 'true' : 'false'}
-                                  style={markStyle}
-                                >
-                                  {annotation.kind === 'pageNote' ? <ReviewIcon name="note" size={14} /> : null}
-                                </OwnedTextMark>
-                              );
-                            });
-                          })}
-                      </div>
-                      <div className="owned-mark-focus-layer" data-owned-focus-layer>
-                        {(geometryByPage.get(layout.pageIndex) ?? []).map((group) => {
-                          const annotation = (annotationsByPage.get(layout.pageIndex) ?? [])
-                            .find((candidate) => reviewItemIdForAnnotation(candidate) === group.id);
-                          const page = activePdf.pages[layout.pageIndex];
-                          const rect = group.rects[0];
-                          if (!annotation || !page || !rect) return null;
-                          const transformed = positionOwnedRect(page, layout, mainDocument.rotation, rect);
-                          return (
-                            <button
-                              key={group.id}
-                              type="button"
-                              className="owned-mark-focus-proxy"
-                              data-owned-focus-id={group.id}
-                              aria-label={`${annotation.kind} annotation on page ${annotation.pageIndex + 1}`}
-                              title={`Go to ${annotation.kind} annotation on page ${annotation.pageIndex + 1}`}
-                              onFocus={() => onOwnedMarkInteraction?.({ id: group.id, phase: 'focus' })}
-                              onBlur={() => onOwnedMarkInteraction?.({ id: group.id, phase: 'blur' })}
-                              onKeyDown={(event) => {
-                                if (event.key === 'Enter' || event.key === ' ') event.preventDefault();
-                              }}
-                              onKeyUp={(event) => {
-                                if (event.key !== 'Enter' && event.key !== ' ') return;
-                                event.preventDefault();
-                                onOwnedMarkInteraction?.({ id: group.id, phase: 'activate' });
-                              }}
-                              style={{ left: transformed.origin.x, top: transformed.origin.y }}
-                            />
-                          );
+                      <PdfAnnotationLayers
+                        documentId={MAIN_PDF_DOCUMENT_ID}
+                        engine={engine}
+                        document={activePdf}
+                        documentRotation={mainDocument.rotation}
+                        layout={layout}
+                        annotations={annotationsByPage.get(layout.pageIndex) ?? []}
+                        geometry={geometryByPage.get(layout.pageIndex) ?? []}
+                        authoringPreviewIds={authoringPreviewIds}
+                        sourceRendering={sourceRendering}
+                        {...(activeOwnedAnnotationId === undefined ? {} : { activeOwnedAnnotationId })}
+                        {...(correspondingOwnedAnnotationId === undefined ? {} : { correspondingOwnedAnnotationId })}
+                        keyboardPageNoteCursor={keyboardPageNoteSurface?.kind === 'reference'
+                          ? null
+                          : keyboardPageNoteCursor}
+                        {...(onKeyboardPageNoteKey === undefined ? {} : { onKeyboardPageNoteKey })}
+                        {...(onOwnedMarkInteraction === undefined ? {} : { onOwnedMarkInteraction })}
+                        onSourceMarkInteraction={(value) => onViewerInteraction?.({
+                          type: 'source-mark',
+                          value,
                         })}
-                      </div>
-                      {keyboardPageNoteCursor?.pageIndex === layout.pageIndex ? (() => {
-                        const page = activePdf.pages[layout.pageIndex];
-                        if (!page) return null;
-                        const transformed = positionOwnedRect(
-                          page,
-                          layout,
-                          mainDocument.rotation,
-                          {
-                            x: keyboardPageNoteCursor.x,
-                            y: keyboardPageNoteCursor.y,
-                            width: 1,
-                            height: 1,
-                          },
-                        );
-                        return (
-                          <button
-                            type="button"
-                            autoFocus
-                            className="page-note-placement-cursor"
-                            data-review-contextual-ui
-                            aria-label="Page Note placement cursor. Use arrow keys to move, Enter to place, or Escape to cancel."
-                            title="Place Page Note"
-                            onKeyDown={(event) => {
-                              if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Enter', 'Escape'].includes(event.key)) return;
-                              event.preventDefault();
-                              event.stopPropagation();
-                              onKeyboardPageNoteKey?.(event.key);
-                            }}
-                            style={{ left: transformed.origin.x, top: transformed.origin.y }}
-                          >
-                            <ReviewIcon name="plus" />
-                          </button>
-                        );
-                      })() : null}
-                      <div
-                        aria-hidden="true"
-                        data-source-annotation-layer
-                        style={{ pointerEvents: 'none' }}
-                      >
-                        <SourceAnnotationLayer
-                          document={activePdf} engine={engine} pageIndex={layout.pageIndex}
-                          marks={sourceRendering.marks} hidden={sourceRendering.hidden}
-                        />
-                      </div>
+                      />
                       <div data-source-link-layer>
                         <AnnotationLayer
                           documentId={MAIN_PDF_DOCUMENT_ID}
@@ -593,8 +510,21 @@ export function PdfWorkspace({
                 documentId={REFERENCE_PDF_DOCUMENT_ID}
                 documentState={referenceDocument}
                 documentGeneration={documentGeneration}
+                tabIdentity={referenceTabIdentity}
                 host={referenceViewportHost}
                 searchResultsByPage={searchResultsByPage}
+                engine={engine}
+                annotationsByPage={annotationsByPage}
+                geometryByPage={geometryByPage}
+                authoringPreviewIds={authoringPreviewIds}
+                sourceRendering={sourceRendering}
+                {...(activeOwnedAnnotationId === undefined ? {} : { activeOwnedAnnotationId })}
+                {...(correspondingOwnedAnnotationId === undefined ? {} : { correspondingOwnedAnnotationId })}
+                keyboardPageNoteCursor={keyboardPageNoteSurface?.kind === 'reference'
+                  ? keyboardPageNoteCursor
+                  : null}
+                {...(onKeyboardPageNoteKey === undefined ? {} : { onKeyboardPageNoteKey })}
+                {...(onPageContextMenu === undefined ? {} : { onPageContextMenu })}
                 {...(onViewerInteraction === undefined ? {} : { onInteraction: onViewerInteraction })}
                 {...(onReferenceViewportElement === undefined ? {} : { onViewportElement: onReferenceViewportElement })}
                 {...(onReferenceScrollIntent === undefined ? {} : { onScrollIntent: onReferenceScrollIntent })}

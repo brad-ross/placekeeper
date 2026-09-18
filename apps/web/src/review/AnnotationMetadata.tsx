@@ -6,6 +6,8 @@ export interface AnnotationMetadataProps {
   readonly lastPageNumber?: number;
   readonly sectionLabel?: string;
   readonly rowHead?: boolean;
+  readonly statusIcon?: ReviewIconName;
+  readonly statusIconLabel?: string;
 }
 
 const ANNOTATION_KIND_LABELS: Readonly<Record<string, string>> = {
@@ -52,7 +54,15 @@ export function annotationAccessibleLabel(input: AnnotationMetadataProps & {
   ].filter((value): value is string => typeof value === 'string' && value.length > 0).join(' · ');
 }
 
-export function AnnotationMetadata({ kind, pageNumber, lastPageNumber, sectionLabel, rowHead = false }: AnnotationMetadataProps) {
+export function AnnotationMetadata({
+  kind,
+  pageNumber,
+  lastPageNumber,
+  sectionLabel,
+  rowHead = false,
+  statusIcon,
+  statusIconLabel,
+}: AnnotationMetadataProps) {
   const icon = annotationKindIcon(kind);
   const kindLabel = annotationKindLabel(kind);
   return (
@@ -68,11 +78,15 @@ export function AnnotationMetadata({ kind, pageNumber, lastPageNumber, sectionLa
       >
         <ReviewIcon name={icon} size={16} />
       </span>
-      <span className="annotation-item__page">
-        {lastPageNumber !== undefined && lastPageNumber !== pageNumber
-          ? `${pageNumber}–${lastPageNumber}`
-          : pageNumber}
-      </span>
+      {statusIcon === undefined ? <span className="annotation-item__page">
+          {lastPageNumber !== undefined && lastPageNumber !== pageNumber
+            ? `${pageNumber}–${lastPageNumber}`
+            : pageNumber}
+        </span> : <span
+          className="annotation-item__kind-icon annotation-item__status-icon"
+          data-annotation-status-icon={statusIcon}
+          title={statusIconLabel}
+        ><ReviewIcon name={statusIcon} size={16} /></span>}
       {sectionLabel ? (
         <>
           <span className="annotation-item__separator">·</span>

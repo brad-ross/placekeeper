@@ -232,6 +232,15 @@ async function currentOutputMatches(
   }
 }
 
+/** Rechecks that the mutable source still denotes the exact bytes staged for
+ * this transaction. This must run at the serialized commit boundary. */
+export async function stagedGenerationSourceIsCurrent(
+  outputPath: string,
+  snapshot: StagedGenerationSnapshot,
+): Promise<boolean> {
+  return currentOutputMatches(outputPath, snapshot.outputIdentity, snapshot.digest);
+}
+
 /** Copies a stable `.synctex` or `.synctex.gz` observation beside the private
  * PDF snapshot. The mutable output and sidecar are both re-fenced, so queries
  * never run against the build directory and a late/partial pair is not bound. */

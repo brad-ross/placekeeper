@@ -58,11 +58,18 @@ test('toolbar controls match canonical rest, hover, keyboard, and open-menu stat
     const zoomMock = mock.frame.locator('.pk-zoom-trigger');
     await zoom.click(); await zoomMock.click();
     await zoom.focus(); await zoomMock.focus();
-    await page.mouse.move(0, 0); await mock.page.mouse.move(0, 0);
+    const zoomSurface = visible(page, '.top-bar-menu__surface');
+    const zoomSurfaceMock = mock.frame.locator('.pk-zoom-popover');
+    await expect(zoomSurface).toBeVisible();
+    await expect(zoomSurfaceMock).toBeVisible();
+    // Move off each trigger without leaving its open-menu hover region. Moving
+    // to an unrelated page point starts the product menu's asynchronous
+    // dismissal and can detach it while the style comparison is polling.
+    await zoomSurface.hover(); await zoomSurfaceMock.hover();
     await expect(zoom).toBeFocused();
     await match(zoom, zoomMock, [...control, 'width', 'height']);
     await match(zoom.locator('svg'), zoomMock.locator('svg'), icon);
-    await match(visible(page, '.top-bar-menu__surface'), mock.frame.locator('.pk-zoom-popover'), surface);
+    await match(zoomSurface, zoomSurfaceMock, surface);
     // Finish the pointer-hover comparison before checking keyboard navigation.
     // Hover menus close when the pointer leaves, independently of focus.
     await zoom.press('Escape');

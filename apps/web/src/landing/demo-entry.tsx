@@ -15,6 +15,7 @@ const DEMO_PAGE_RANGE = { firstPage: 14, lastPage: 16 };
 export type DemoMode = 'read' | 'reference' | 'annotate';
 
 function DemoApp({ runtime, initial, mode }: { runtime: HostRuntime; initial: HostRuntimeBootstrap; mode: DemoMode }) {
+  const [activation, setActivation] = useState(0);
   const [ready, setReady] = useState(false);
   const [selectedMode, setSelectedMode] = useState(mode);
   useEffect(() => {
@@ -24,15 +25,16 @@ function DemoApp({ runtime, initial, mode }: { runtime: HostRuntime; initial: Ho
       if (next === 'read' || next === 'reference' || next === 'annotate') {
         document.body.dataset.landingDemo = next;
         setSelectedMode(next);
+        setActivation(Number(frame?.getAttribute('data-demo-activation') ?? 0));
       }
     };
     update();
     const observer = new MutationObserver(update);
-    if (frame) observer.observe(frame, { attributes: true, attributeFilter: ['data-demo-mode'] });
+    if (frame) observer.observe(frame, { attributes: true, attributeFilter: ['data-demo-mode', 'data-demo-activation'] });
     return () => observer.disconnect();
   }, []);
   return <MainDocumentPreviewLimit value={DEMO_PAGE_RANGE}><DocumentActionsEnabled value={false}><WorkspaceInitialReferenceDock value="right"><WorkspaceModeAvailability value={selectedMode === 'read' ? ['outline'] : selectedMode === 'reference' ? ['references'] : ['annotations']}>
-    <WorkspacePresentation value={ready ? { mode: selectedMode === 'read' ? 'outline' : selectedMode === 'reference' ? 'references' : 'annotations', open: selectedMode !== 'read', referenceDock: 'bottom', sampleReference: { page: 31, label: 'Appendix A', pdfY: 175.702 }, bottomHeight: 260, initialLocation: { pageIndex: 13, top: 330 } } : null}>
+    <WorkspacePresentation value={ready ? { activation, mode: selectedMode === 'read' ? 'outline' : selectedMode === 'reference' ? 'references' : 'annotations', open: selectedMode !== 'read', referenceDock: 'bottom', sampleReference: { page: 31, label: 'Appendix A', pdfY: 175.702 }, bottomHeight: 260, initialLocation: { pageIndex: 13, top: 330 } } : null}>
     <RuntimeProductionReviewApp runtime={runtime} initial={initial}
       onDocumentReady={() => { document.body.dataset.demoReady = 'true'; setReady(true); }}
     />

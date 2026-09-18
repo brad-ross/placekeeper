@@ -119,6 +119,16 @@ function validIdentity(value: unknown): value is HostRuntimeIdentity {
     Number.isSafeInteger(value.revision) && (value.revision as number) >= 0;
 }
 
+function activeAuthoringDraftIds(value: unknown): readonly string[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > 256 ||
+    value.some((id) => typeof id !== "string" || !ID.test(id)) ||
+    new Set(value).size !== value.length) {
+    throw new Error("The trusted host returned invalid authoring presence.");
+  }
+  return Object.freeze([...value]) as readonly string[];
+}
+
 function validHostCommand(value: unknown): value is HostRuntimeCommand {
   if (!isObject(value) || typeof value.command !== "string") return false;
   if (value.command === "review-command") {
@@ -156,13 +166,19 @@ export function createRpcHostRuntime(
   const envelopeIdentity = host === "chrome" || host === "macos" ? { runtimeId } : { panelId: runtimeId };
   const pending = new Map<string, PendingRequest>();
   const invalidations = new Set<(event: HostRuntimeInvalidation) => void>();
+  const interactionReconnectListeners = new Set<(
+    identity: { readonly generation: number; readonly revision: number },
+  ) => Promise<void>>();
   const hostCommands = new Set<(command: HostRuntimeCommand) => void>();
   let identity: HostRuntimeIdentity | undefined;
+  let hydratedIdentity: HostRuntimeIdentity | undefined;
+  let interactionLifecycleNegotiated = false;
   let pendingInvalidation: HostRuntimeInvalidation | undefined;
   let deferredCommandInvalidation: HostRuntimeInvalidation | undefined;
   let pendingHostCommand: HostRuntimeCommand | undefined;
   let disposed = false;
   let nativeLocationHistory: MemoryReviewLocationHistory | undefined;
+  let bootstrapped = false;
   const materializedPdfium = new Map<string, Promise<MaterializedViewerResource>>();
   const materializedWorkers = new Map<string, Promise<MaterializedViewerResource>>();
   const materializedDocuments = new Map<string, Promise<MaterializedViewerResource>>();
@@ -174,10 +190,24 @@ export function createRpcHostRuntime(
       pending = options.materializeDocument(sourceUrl);
       materializedDocuments.set(sourceUrl, pending);
     }
-    const resource = await pending;
+    let resource: MaterializedViewerResource;
+    try {
+      resource = await pending;
+    } catch (error) {
+      if (materializedDocuments.get(sourceUrl) === pending) materializedDocuments.delete(sourceUrl);
+      throw error;
+    }
     if (disposed) {
       resource.dispose();
       throw new Error("The review runtime is disposed.");
+    }
+    while (materializedDocuments.size > 2) {
+      const oldest = materializedDocuments.entries().next().value as
+        | [string, Promise<MaterializedViewerResource>]
+        | undefined;
+      if (oldest === undefined) break;
+      materializedDocuments.delete(oldest[0]);
+      void oldest[1].then((value) => value.dispose(), () => undefined);
     }
     return resource;
   };
@@ -189,7 +219,12 @@ export function createRpcHostRuntime(
       pending = options.materializePdfiumWasm(sourceUrl);
       materializedPdfium.set(sourceUrl, pending);
     }
-    const resource = await pending;
+    let resource: MaterializedViewerResource;
+    try { resource = await pending; }
+    catch (error) {
+      if (materializedPdfium.get(sourceUrl) === pending) materializedPdfium.delete(sourceUrl);
+      throw error;
+    }
     if (disposed) {
       resource.dispose();
       throw new Error("The review runtime is disposed.");
@@ -204,7 +239,12 @@ export function createRpcHostRuntime(
       pending = options.materializePdfiumWorker(sourceUrl);
       materializedWorkers.set(sourceUrl, pending);
     }
-    const resource = await pending;
+    let resource: MaterializedViewerResource;
+    try { resource = await pending; }
+    catch (error) {
+      if (materializedWorkers.get(sourceUrl) === pending) materializedWorkers.delete(sourceUrl);
+      throw error;
+    }
     if (disposed) {
       resource.dispose();
       throw new Error("The review runtime is disposed.");
@@ -219,16 +259,16 @@ export function createRpcHostRuntime(
 
   const revisionAlreadyObserved = (event: HostRuntimeInvalidation) => (
     event.reason === "revision"
-    && identity !== undefined
-    && event.sessionId === identity.sessionId
-    && event.generation === identity.generation
-    && event.revision <= identity.revision
+    && hydratedIdentity !== undefined
+    && event.sessionId === hydratedIdentity.sessionId
+    && event.generation === hydratedIdentity.generation
+    && event.revision <= hydratedIdentity.revision
   );
 
   const releaseDeferredCommandInvalidation = () => {
     if (
       deferredCommandInvalidation === undefined
-      || [...pending.values()].some((request) => ["command", "chooseCopy", "chooseOriginal"].includes(request.method))
+      || [...pending.values()].some((request) => ["command", "chooseCopy", "chooseOriginal", "finalizeInteraction"].includes(request.method))
     ) return;
     const deferred = deferredCommandInvalidation;
     deferredCommandInvalidation = undefined;
@@ -260,7 +300,7 @@ export function createRpcHostRuntime(
     if (message.kind === "event" && message.event === "session-invalidated") {
       if (!validIdentity(message.payload) || !isObject(message.payload) ||
         (message.payload.reason !== "generation" && message.payload.reason !== "revision" &&
-          message.payload.reason !== "freshness") ||
+          message.payload.reason !== "freshness" && message.payload.reason !== "presence") ||
         (message.payload.previousGeneration !== undefined &&
           !Number.isSafeInteger(message.payload.previousGeneration))) return;
       const event: HostRuntimeInvalidation = {
@@ -274,8 +314,9 @@ export function createRpcHostRuntime(
       };
       if (revisionAlreadyObserved(event)) return;
       if (
-        event.reason === "revision"
-        && [...pending.values()].some((request) => ["command", "chooseCopy", "chooseOriginal"].includes(request.method))
+        [...pending.values()].some((request) => request.method === "finalizeInteraction") ||
+        (event.reason === "revision"
+        && [...pending.values()].some((request) => ["command", "chooseCopy", "chooseOriginal"].includes(request.method)))
       ) {
         if (
           deferredCommandInvalidation === undefined
@@ -378,6 +419,7 @@ export function createRpcHostRuntime(
       generation: state.workflow.documentGeneration as number,
       revision: state.revision as number,
     };
+    hydratedIdentity = { ...identity };
     if (value.accepted !== false || identity.generation === previous.generation) return;
     return {
       sessionId: identity.sessionId,
@@ -386,6 +428,15 @@ export function createRpcHostRuntime(
       reason: "generation",
       previousGeneration: previous.generation,
     };
+  };
+
+  const adoptFinalizedReceipt = <T>(value: T): T => {
+    if (identity !== undefined && isObject(value) && value.status === "finalized" &&
+      value.generation === identity.generation && Number.isSafeInteger(value.reviewRevision) &&
+      (value.reviewRevision as number) >= identity.revision) {
+      identity = { ...identity, revision: value.reviewRevision as number };
+    }
+    return value;
   };
 
   const chooseDestination = async (method: "chooseCopy" | "chooseOriginal", payload: unknown): Promise<SaveDestinationResult> => {
@@ -405,6 +456,9 @@ export function createRpcHostRuntime(
 
   return {
     host,
+    get capabilities() { return interactionLifecycleNegotiated
+      ? { localDocumentRefresh: true as const, interactionLifecycleVersion: 1 as const }
+      : { localDocumentRefresh: true as const }; },
     async bootstrap(signal?: AbortSignal): Promise<HostRuntimeBootstrap> {
       const value = await invoke<Record<string, unknown>>("bootstrap", {}, signal);
       if (!validIdentity(value) || !isObject(value.state) || !isObject(value.scope) ||
@@ -418,6 +472,14 @@ export function createRpcHostRuntime(
         generation: value.generation,
         revision: value.revision,
       };
+      hydratedIdentity = { ...identity };
+      interactionLifecycleNegotiated = isObject(value.capabilities) &&
+        value.capabilities.interactionLifecycleVersion === 1;
+      const reconnectIdentity = { generation: value.generation, revision: value.revision };
+      if (bootstrapped && interactionLifecycleNegotiated) {
+        await Promise.all([...interactionReconnectListeners].map((listener) => listener(reconnectIdentity)));
+      }
+      bootstrapped = true;
       const [documentResourceValue, pdfium, worker] = await Promise.all([
         documentResource(value.resources.document),
         pdfiumResource(value.resources.pdfiumWasm),
@@ -459,6 +521,7 @@ export function createRpcHostRuntime(
       }
       return {
         ...value,
+        activeAuthoringDraftIds: activeAuthoringDraftIds(value.activeAuthoringDraftIds),
         session: { sessionId: value.sessionId },
         state: value.state as unknown as ReviewState,
         scope: value.scope as unknown as ProductionScope,
@@ -514,6 +577,7 @@ export function createRpcHostRuntime(
     chooseOriginal: (confirmation) => chooseDestination("chooseOriginal", confirmation === undefined ? {} : { confirmation }),
     retrySave: () => invoke("retrySave"),
     locateSave: () => invoke("locateSave"),
+    resolveReadingLocation: (input) => invoke("resolveReadingLocation", input),
     exportReviewedCopy: (confirmPossiblyStale, fence) => invoke<ProductionExportResult>(
       "exportReviewedCopy",
       { ...(confirmPossiblyStale === true ? { confirmPossiblyStale: true } : {}),
@@ -522,6 +586,17 @@ export function createRpcHostRuntime(
     scope: (signal) => invoke<ProductionScope>("scope", {}, signal),
     forwardSyncTex: (input) => invoke("forwardSyncTex", input),
     reverseSyncTex: (input) => invoke("reverseSyncTex", input),
+    async beginInteraction(input) {
+      return adoptFinalizedReceipt(await invoke("beginInteraction", input));
+    },
+    async finalizeInteraction(input) {
+      try {
+        return adoptFinalizedReceipt(await invoke("finalizeInteraction", input));
+      }
+      finally { setTimeout(releaseDeferredCommandInvalidation, 0); }
+    },
+    releaseInteraction: (input) => invoke("releaseInteraction", input),
+    acknowledgeInteraction: (input) => invoke("acknowledgeInteraction", input),
     subscribeInvalidations(listener) {
       invalidations.add(listener);
       if (pendingInvalidation !== undefined) {
@@ -530,6 +605,10 @@ export function createRpcHostRuntime(
         listener(event);
       }
       return () => invalidations.delete(listener);
+    },
+    subscribeInteractionReconnect(listener) {
+      interactionReconnectListeners.add(listener);
+      return () => interactionReconnectListeners.delete(listener);
     },
     subscribeHostCommands(listener) {
       hostCommands.add(listener);
@@ -553,6 +632,7 @@ export function createRpcHostRuntime(
       materializedWorkers.clear();
       pending.clear();
       invalidations.clear();
+      interactionReconnectListeners.clear();
       pendingInvalidation = undefined;
       deferredCommandInvalidation = undefined;
       pendingHostCommand = undefined;

@@ -2,6 +2,7 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { access, mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -24,6 +25,151 @@ afterEach(async () => {
 });
 
 describe("Chrome daemon handoff", () => {
+  it("recovers one local Chrome draft and terminal receipt only for the same tab secret across daemon restarts", async () => {
+    const root = await mkdtemp(join(tmpdir(), "placekeeper-chrome-owner-recovery-"));
+    roots.push(root);
+    const recoveryRoot = join(root, "recovery");
+    const browserSourceRoot = join(root, "browser-sources");
+    const assets = join(root, "assets");
+    const pdf = join(root, "Owner recovery.pdf");
+    await Promise.all([mkdir(browserSourceRoot), mkdir(assets)]);
+    await writeFile(join(assets, "app.js"), "export function start(){}\n");
+    await writeFile(pdf, "%PDF-1.7\nowner recovery\n%%EOF");
+    const start = () => PlacekeeperHost.start({
+      recoveryRoot, browserSourceRoot, webAssets: { root: assets }, port: 0,
+      browserSourceInspector: async () => ({ rewriteEligibility: { eligible: true } as const, importedItems: [] }),
+    });
+    const secret = "s".repeat(43);
+    const otherSecret = "o".repeat(43);
+    const exchange = async (host: PlacekeeperHost, portId: string, message: Record<string, unknown>) =>
+      host.chromeRuntime.handle(portId, message);
+    const open = async (
+      host: PlacekeeperHost,
+      portId: string,
+      connectionId: string,
+      interactionOwnerSecret: string,
+      recoveryOperationId: string,
+    ) => {
+      await exchange(host, portId, {
+        type: "hello", reviewRuntimeVersion: 3, protocol: "placekeeper.chrome-runtime",
+        protocolVersion: 2, connectionId,
+      });
+      const base = { protocolVersion: 2, connectionId };
+      await exchange(host, portId, {
+        ...base, type: "claim-owner", lane: "lifecycle", requestId: `claim-${connectionId}`,
+        interactionOwnerSecret,
+      });
+      const transferId = `transfer-${connectionId}`;
+      await exchange(host, portId, {
+        ...base, type: "begin", lane: "acquisition", requestId: `begin-${connectionId}`,
+        transferId, disposition: "local", fileUrl: pathToFileURL(pdf).href,
+      });
+      let result = await exchange(host, portId, {
+        ...base, type: "finish", lane: "acquisition", requestId: `finish-${connectionId}`,
+        transferId, sequence: 0,
+      });
+      const offered = result[0];
+      if (offered?.type === "recovery-offered") {
+        result = await exchange(host, portId, {
+          ...base, type: "recover", lane: "lifecycle", requestId: `recover-${connectionId}`,
+          decision: "resume", offer: offered.offer, idempotencyKey: recoveryOperationId,
+        });
+      }
+      const staged = result[0];
+      if (staged?.type !== "projection") throw new Error("Expected staged Chrome projection");
+      await exchange(host, portId, {
+        ...base, type: "activate", lane: "lifecycle", requestId: `activate-${connectionId}`,
+        documentValidated: true,
+      });
+      return {
+        generation: (staged.payload as { generation: number }).generation,
+        revision: (staged.payload as { revision: number }).revision,
+      };
+    };
+    const invoke = async (
+      host: PlacekeeperHost,
+      portId: string,
+      connectionId: string,
+      generation: number,
+      revision: number,
+      method: string,
+      payload: Record<string, unknown>,
+      operation: string,
+    ) => (await exchange(host, portId, {
+      type: "invoke", lane: "runtime", protocolVersion: 2, connectionId,
+      requestId: `request-${operation}`, generation, revision, method, payload,
+      idempotencyKey: `operation-${operation}`,
+    }))[0];
+
+    let host = await start();
+    hosts.push(host);
+    const first = await open(host, "owner-port-before-restart", "owner-connection-before", secret, "recovery-owner-before-0001");
+    const begun = await invoke(host, "owner-port-before-restart", "owner-connection-before",
+      first.generation, first.revision, "beginInteraction",
+      { interactionToken: "interaction-owner-restart", order: 1, generation: 1 }, "owner-begin-before");
+    if (begun?.type !== "result") throw new Error("Expected Chrome interaction admission");
+    const ownerViewId = (begun.payload as { ownerViewId: string }).ownerViewId;
+    const draftId = "00000000-0000-4000-8000-000000000888";
+    const command = await invoke(host, "owner-port-before-restart", "owner-connection-before",
+      1, 0, "command", {
+        type: "put-draft", expectedRevision: 0, expectedDraftRevision: -1,
+        draft: {
+          id: draftId, ownerViewId, baseGeneration: 1, revision: 0, kind: "highlight",
+          pageIndex: 0, text: "Chrome restart draft",
+          anchor: { kind: "selection", pageIndex: 0, quote: "owner", prefix: "", suffix: "",
+            rect: { x: 1, y: 1, width: 5, height: 5 }, segmentRects: [{ x: 1, y: 1, width: 5, height: 5 }] },
+          disposition: { kind: "resolved", generation: 1 }, status: "protected",
+          createdAt: "2026-09-16T00:00:00.000Z", updatedAt: "2026-09-16T00:00:00.000Z",
+        },
+      }, "owner-put-draft");
+    expect(command).toMatchObject({ type: "result", payload: { revision: 1 } });
+    await host.chromeRuntime.detach("owner-port-before-restart");
+    await host.close();
+    hosts.splice(hosts.indexOf(host), 1);
+
+    host = await start();
+    hosts.push(host);
+    const resumed = await open(host, "owner-port-after-restart", "owner-connection-after", secret, "recovery-owner-after-0001");
+    const unrelated = await open(host, "other-port-after-restart", "other-connection-after", otherSecret, "recovery-other-after-0001");
+    await invoke(host, "other-port-after-restart", "other-connection-after",
+      unrelated.generation, unrelated.revision, "beginInteraction",
+      { interactionToken: "interaction-other-restart", order: 1, generation: 1 }, "other-begin-after");
+    expect(await invoke(host, "other-port-after-restart", "other-connection-after",
+      1, 1, "finalizeInteraction", {
+        interactionToken: "interaction-other-restart", order: 2, outcome: "applied",
+        draftId, expectedDraftRevision: 0,
+      }, "other-finalize-after")).toMatchObject({ type: "failure", reason: "operation-rejected" });
+
+    await invoke(host, "owner-port-after-restart", "owner-connection-after",
+      resumed.generation, resumed.revision, "beginInteraction",
+      { interactionToken: "interaction-owner-restart", order: 1, generation: 1 }, "owner-begin-after");
+    const receipt = await invoke(host, "owner-port-after-restart", "owner-connection-after",
+      1, 1, "finalizeInteraction", {
+        interactionToken: "interaction-owner-restart", order: 2, outcome: "applied",
+        draftId, expectedDraftRevision: 0,
+      }, "owner-finalize-after");
+    expect(receipt).toMatchObject({ type: "result", payload: { status: "finalized", reviewRevision: 2 } });
+    await host.chromeRuntime.detach("owner-port-after-restart");
+    await host.chromeRuntime.detach("other-port-after-restart");
+    await host.close();
+    hosts.splice(hosts.indexOf(host), 1);
+
+    host = await start();
+    hosts.push(host);
+    const replayed = await open(host, "owner-port-replay", "owner-connection-replay", secret, "recovery-owner-replay-0001");
+    expect(await invoke(host, "owner-port-replay", "owner-connection-replay",
+      replayed.generation, replayed.revision, "finalizeInteraction", {
+        interactionToken: "interaction-owner-restart", order: 1, outcome: "applied",
+        draftId, expectedDraftRevision: 0,
+      }, "owner-finalize-replay")).toMatchObject({
+      type: "result", payload: { status: "finalized", reviewRevision: 2 },
+    });
+    expect(await invoke(host, "owner-port-replay", "owner-connection-replay",
+      replayed.generation, replayed.revision, "acknowledgeInteraction",
+      { interactionToken: "interaction-owner-restart", order: 2 }, "owner-ack-replay"))
+      .toMatchObject({ type: "result", payload: { status: "released" } });
+  });
+
   it("offers the existing protected draft when Chrome re-verifies the same remote source after restart", async () => {
     const root = await mkdtemp(join(tmpdir(), "placekeeper-chrome-recovery-"));
     roots.push(root);
@@ -152,7 +298,7 @@ describe("Chrome daemon handoff", () => {
     const portId = "runtime-control-port-1";
     const connectionId = "runtime-control-connection-1";
     const exchange = (message: unknown) => requestControl(socketPath, { kind: "chrome-runtime", portId, message });
-    await expect(exchange({ type: "hello", reviewRuntimeVersion: 2, protocol: "placekeeper.chrome-runtime", protocolVersion: 2, connectionId }))
+    await expect(exchange({ type: "hello", reviewRuntimeVersion: 3, protocol: "placekeeper.chrome-runtime", protocolVersion: 2, connectionId }))
       .resolves.toMatchObject({ kind: "chrome-runtime", messages: [{ type: "hello-ack" }] });
     await exchange({ type: "begin", lane: "acquisition", protocolVersion: 2, connectionId, requestId: "request-acquire-1", transferId: "transfer-runtime-1", disposition: "remote-temporary", sourceUrl: "https://papers.example.test/runtime.pdf", displayName: "Runtime.pdf" });
     const bytes = await readFile(join(process.cwd(), "test/fixtures/pdfs/text-native.pdf"));

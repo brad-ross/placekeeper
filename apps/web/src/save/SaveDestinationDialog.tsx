@@ -30,7 +30,7 @@ export interface SaveDestinationDialogProps {
 
 export function SaveDestinationDialog(props: SaveDestinationDialogProps) {
   const [choice, setChoice] = useState<"copy" | "original">("copy");
-  const [filename, setFilename] = useState("");
+  const [filename, setFilename] = useState(props.proposal?.filename ?? "");
   const [annotationName, setAnnotationName] = useState(props.annotationName ?? DEFAULT_ANNOTATION_NAME);
   const nameErrorId = useId();
   const titleId = useId();
@@ -39,9 +39,7 @@ export function SaveDestinationDialog(props: SaveDestinationDialogProps) {
   const dialogRef = useRef<HTMLElement>(null);
   const lastProposalFilename = useRef<string | undefined>(undefined);
   const remote = props.sourceDisposition === "remote-temporary";
-  const proposalFilename = props.proposal?.sourceDisposition === "local"
-    ? props.proposal.filename
-    : undefined;
+  const proposalFilename = props.proposal?.filename;
   const proposalFolder = props.proposal?.folder;
 
   useLayoutEffect(() => {
@@ -91,7 +89,7 @@ export function SaveDestinationDialog(props: SaveDestinationDialogProps) {
           <h2 id={titleId}>Choose where to save annotations</h2>
           <p id={descriptionId} className="compact-editorial-modal__description">
             {remote
-              ? "Choose a new PDF name and location. The private browser source is never modified."
+              ? "Save an annotated copy of this PDF. You can change its name and location."
               : "You can change this later by clicking the filename."}
           </p>
         </header>
@@ -228,19 +226,19 @@ export function SaveDestinationDialog(props: SaveDestinationDialogProps) {
           <button
             type="button"
             className="review-button review-button--primary"
-            title="Confirm automatic save options"
+            title="Save annotations"
             disabled={
               restricted ||
               props.establishing ||
               (choice === "copy" && (
                 filename.trim() === "" ||
-                (remote ? proposalFolder === undefined : props.proposal === undefined)
+                proposalFolder === undefined
               ))
             }
             onClick={() => void props.onConfirm(choice, filename, annotationName)}
           >
             {props.establishing ? <ReviewIcon name="loading" /> : null}
-            <span>Confirm</span>
+            <span>Save</span>
           </button>
         </footer>
       </section>

@@ -274,6 +274,10 @@ describe("same-task live source workflow", () => {
         changedPaths: ["paper.tex"],
       }],
     })).rejects.toThrow(/handle|generation|unavailable/iu);
+    await expect(value.context.refresh({ taskSessionId })).resolves.toMatchObject({
+      status: "current",
+      identity: { documentGeneration: 2 },
+    });
   });
 
   it("keeps the build command outside the service and verifies an observable clean structural PDF", async () => {

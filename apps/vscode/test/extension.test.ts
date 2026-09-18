@@ -549,6 +549,12 @@ describe("VS Code local host adapter", () => {
     const fenced = { ...request, method: "exportReviewedCopy", payload: { fence: { expectedRevision: 7, documentGeneration: 2 }, confirmPossiblyStale: true } };
     expect(parseWebviewRequest(fenced, expected, new Set())).toEqual(fenced);
     expect(parseWebviewRequest({ ...fenced, payload: { fence: { expectedRevision: 7 } } }, expected, new Set())).toBeUndefined();
+    const begin = { ...request, method: "beginInteraction", payload: {
+      interactionToken: "interaction_vscode_1234", order: 1, generation: 2,
+      draftId: "draft_vscode_live_1234",
+    } };
+    expect(parseWebviewRequest(begin, expected, new Set())).toEqual(begin);
+    expect(parseWebviewRequest({ ...begin, payload: { ...begin.payload, draftId: "unsafe draft" } }, expected, new Set())).toBeUndefined();
     const confirmation = { command: { type: "set-annotation-name", expectedRevision: 7, annotationName: "Brad Ross" }, expectedGeneration: 2 };
     for (const method of ["chooseCopy", "chooseOriginal"]) {
       const named = { ...request, method, payload: { confirmation } };
@@ -806,8 +812,8 @@ describe("VS Code local host adapter", () => {
       sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
       credential: "c".repeat(43),
     };
-    await observeLiveDocument(launch, { outputPath: "/tmp/paper.pdf", observationEpoch: 4 }, fetch);
-    await markLiveDocumentPossiblyStale(launch, { observationEpoch: 5 }, fetch);
+    await observeLiveDocument(launch, { outputPath: "/tmp/paper.pdf", hostHintToken: "panel:4" }, fetch);
+    await markLiveDocumentPossiblyStale(launch, { hostHintToken: "panel:5" }, fetch);
     expect(fetch.mock.calls[0]![0]).toBe(`${launch.origin}/s/${launch.sessionId}/observe`);
     expect(fetch.mock.calls[0]![1]).toMatchObject({
       method: "POST",
@@ -817,7 +823,7 @@ describe("VS Code local host adapter", () => {
       }),
     });
     expect(fetch.mock.calls[1]![0]).toBe(`${launch.origin}/s/${launch.sessionId}/stale`);
-    expect(fetch.mock.calls[1]![1]).toMatchObject({ body: JSON.stringify({ observationEpoch: 5 }) });
+    expect(fetch.mock.calls[1]![1]).toMatchObject({ body: JSON.stringify({ hostHintToken: "panel:5" }) });
   });
 
   it("pins bootstrap document bytes to the state generation", async () => {

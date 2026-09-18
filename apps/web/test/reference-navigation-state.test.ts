@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { PdfNavigationTarget } from '../src/pdf/pdf-navigation-target.js';
 import type { PdfViewerLocation } from '../src/pdf/viewer-navigation.js';
+import type { AnnotationReaderIdentity } from '../src/review/annotation-reader.js';
 import {
   createReferenceNavigationState,
   reduceReferenceNavigation,
@@ -31,11 +32,16 @@ function open(
   state: ReferenceNavigationState,
   destination: PdfNavigationTarget,
   settledLocation: PdfViewerLocation,
+  options: {
+    readonly annotationIdentity?: AnnotationReaderIdentity;
+    readonly tabIdentity?: string;
+  } = {},
 ): ReferenceNavigationState {
   return reduceReferenceNavigation(state, {
     type: 'open-reference',
     target: destination,
     settledLocation,
+    ...options,
   });
 }
 
@@ -113,6 +119,63 @@ describe('reference tab state', () => {
 
     expect(state.tabs.map((tab) => tab.identity)).toEqual(['upper', 'lower']);
     expect(state.activeTabIdentity).toBe('lower');
+  });
+
+  it('deduplicates annotation origins independently from canonical geometric targets', () => {
+    const sharedTarget = target('canonical-geometry', 2);
+    const firstIdentity = { origin: 'owned' as const, itemId: 'annotation-a' };
+    const secondIdentity = { origin: 'owned' as const, itemId: 'annotation-b' };
+    let state = open(
+      createReferenceNavigationState(4),
+      sharedTarget,
+      location(2, 20),
+      { annotationIdentity: firstIdentity },
+    );
+    state = open(state, sharedTarget, location(2, 40), {
+      annotationIdentity: secondIdentity,
+    });
+    const movedTarget = target('moved-current-anchor', 5);
+    state = open(state, movedTarget, location(5, 60), {
+      annotationIdentity: firstIdentity,
+    });
+    state = open(state, sharedTarget, location(2, 80));
+
+    expect(state.tabs).toHaveLength(3);
+    expect(state.tabs[0]?.originalTarget).toBe(sharedTarget);
+    // Reducer-level repeated opens select the origin. The coordinator publishes
+    // the newly verified annotation target with its settled location.
+    expect(state.tabs[0]?.annotationTarget).toBe(sharedTarget);
+    expect(state.tabs[0]?.annotationIdentity).toEqual(firstIdentity);
+    expect(state.tabs[1]?.annotationIdentity).toEqual(secondIdentity);
+    expect(state.tabs[2]?.annotationIdentity).toBeUndefined();
+    expect(state.tabs[2]?.identity).toBe(sharedTarget.identity);
+  });
+
+  it('recreates a closed annotation tab with its frozen recovery tab identity', () => {
+    const annotationIdentity = {
+      origin: 'source' as const,
+      annotationKey: '4:native-1',
+      documentGeneration: 4,
+      discoveryGeneration: 9,
+    };
+    let state = open(createReferenceNavigationState(4), target('anchor', 3), location(3), {
+      annotationIdentity,
+      tabIdentity: 'frozen-reference-tab',
+    });
+    expect(state.tabs[0]?.identity).toBe('frozen-reference-tab');
+    state = reduceReferenceNavigation(state, {
+      type: 'close-reference',
+      targetIdentity: 'frozen-reference-tab',
+      focusReturnToken: 'reader',
+    });
+    state = open(state, target('anchor', 3), location(3), {
+      annotationIdentity,
+      tabIdentity: 'frozen-reference-tab',
+    });
+
+    expect(state.tabs).toHaveLength(1);
+    expect(state.tabs[0]?.identity).toBe('frozen-reference-tab');
+    expect(state.tabs[0]?.originalTarget.identity).toBe('anchor');
   });
 
   it('saves the outgoing live view and rejects stale rapid-switch completions', () => {

@@ -74,6 +74,7 @@ import {
 import {
   VIEWER_POINTER_BUTTON_NONE,
   ViewerPrimaryClickGesture,
+  scopeViewerInteraction,
   viewerPointerButton,
   type ViewerCaretUpdate,
   type ViewerClientPlacement,
@@ -98,10 +99,72 @@ import type { ReviewAnnotation } from '../../../../packages/core/src/pdf-writer.
 import { REVIEW_COLLAPSED_RAIL_SIZE, REVIEW_OVERLAY_INSET, REVIEW_OVERLAY_FADE_SIZE } from '../review/use-review-overlay-geometry.js';
 import { ReviewIcon } from '../review/ReviewIcon.js';
 import type { PdfSearchResult } from '../pdf/pdf-search-model.js';
+import {
+  isCurrentPdfAnnotationSurface as isCurrentViewerInputSurface,
+  referencePdfAnnotationSurface as referenceInputSurface,
+  samePdfAnnotationSurface,
+  type PdfAnnotationSurface,
+} from '../pdf/annotation-surface.js';
+
+export { isCurrentViewerInputSurface, referenceInputSurface, scopeViewerInteraction };
+
+export function viewerPointerMoveSurface(
+  capturedSurface: PdfAnnotationSurface | null,
+  currentSurface: PdfAnnotationSurface | null,
+): PdfAnnotationSurface | null {
+  return capturedSurface ?? currentSurface;
+}
 
 type ViewerCaretResult = Awaited<ReturnType<typeof captureViewerCaret>>;
 
 const FALLBACK_PAGE_NOTE_CURSOR_RADIUS_PX = 18;
+
+export function viewerKeyboardPageIndex(
+  focusedPageIndex: string | undefined,
+  currentPageNumber: number | undefined,
+  pageCount: number,
+): number {
+  if (focusedPageIndex !== undefined && /^(?:0|[1-9]\d*)$/u.test(focusedPageIndex)) {
+    const focused = Number(focusedPageIndex);
+    if (focused < pageCount) return focused;
+  }
+  return Math.min(
+    Math.max(0, pageCount - 1),
+    Math.max(0, (currentPageNumber ?? 1) - 1),
+  );
+}
+
+/** Binds Reference input to one opened PDF while deriving the active tab per gesture. */
+export class ReferenceInputDocumentAuthority {
+  #document: object | null = null;
+
+  bind(document: object): void {
+    this.#document = document;
+  }
+
+  clear(): void {
+    this.#document = null;
+  }
+
+  surface(
+    document: object | null | undefined,
+    documentGeneration: number,
+    tabIdentity: string | null,
+  ): Extract<PdfAnnotationSurface, { readonly kind: 'reference' }> | null {
+    if (document == null || document !== this.#document) return null;
+    return referenceInputSurface(documentGeneration, tabIdentity);
+  }
+
+  isCurrent(
+    document: object | null | undefined,
+    surface: Extract<PdfAnnotationSurface, { readonly kind: 'reference' }>,
+    documentGeneration: number,
+    tabIdentity: string | null,
+  ): boolean {
+    const current = this.surface(document, documentGeneration, tabIdentity);
+    return current !== null && samePdfAnnotationSurface(current, surface);
+  }
+}
 
 export interface MainDocumentOpenedSource {
   onDocumentOpened(listener: (event: { document: { id: string } | null }) => void): () => void;
@@ -215,6 +278,7 @@ export interface AppProps {
   onViewerInteraction?: (event: ViewerInteractionEvent) => void;
   reverseSyncTexEnabled?: boolean;
   keyboardPageNoteActive?: boolean;
+  keyboardPageNoteSurface?: PdfAnnotationSurface;
   activeOwnedAnnotationId?: string;
   correspondingOwnedAnnotationId?: string;
   onExistingAnnotationsDiscovery?: (result: ExistingAnnotationsDiscovery) => void;
@@ -272,6 +336,7 @@ export function App({
   onViewerInteraction,
   reverseSyncTexEnabled = false,
   keyboardPageNoteActive = false,
+  keyboardPageNoteSurface,
   activeOwnedAnnotationId,
   correspondingOwnedAnnotationId,
   onExistingAnnotationsDiscovery,
@@ -303,12 +368,17 @@ export function App({
   const mainCopyReads = useRef(new SelectionReadAuthority());
   const referenceCopyReads = useRef(new SelectionReadAuthority());
   const activeReferenceTabIdentityRef = useRef(activeReferenceTabIdentity);
+  const latestReferenceTabIdentityRef = useRef(activeReferenceTabIdentity);
+  latestReferenceTabIdentityRef.current = activeReferenceTabIdentity;
+  const documentGenerationRef = useRef(documentGeneration);
+  documentGenerationRef.current = documentGeneration;
   const registryRef = useRef<PluginRegistry | null>(null);
   const framingControlsRef = useRef<ViewerFramingControls | null>(null);
   const workspaceElementRef = useRef<HTMLDivElement | null>(null);
   const referenceWorkspaceElementRef = useRef<HTMLDivElement | null>(null);
   const mainNavigationRef = useRef<PdfViewerNavigation | null>(null);
   const referenceNavigationRef = useRef<PdfViewerNavigation | null>(null);
+  const referenceInputDocument = useRef(new ReferenceInputDocumentAuthority());
   const referenceControllerRef = useRef<ReferenceDocumentController | null>(null);
   const ownedReferenceManualScrollObserver = useRef(new ReferenceManualScrollObserver());
   const referenceManualScrollObserver = providedReferenceManualScrollObserver
@@ -317,11 +387,13 @@ export function App({
   onReferenceManualScrollRef.current = onReferenceManualScroll;
   const [viewerRunway, setViewerRunway] = useState<ViewerRunway>({ right: 0, bottom: 0 });
   const viewerRunwayRef = useRef<ViewerRunway>(viewerRunway);
-  const activeDocumentIdRef = useRef<string | null>(null);
   const viewportGenerationRef = useRef(0);
   const caretReadGeneration = useRef(0);
   const menuInvocation = useRef(0);
   const keyboardActiveRef = useRef(keyboardPageNoteActive);
+  const keyboardPageNoteSurfaceRef = useRef(keyboardPageNoteSurface);
+  keyboardPageNoteSurfaceRef.current = keyboardPageNoteSurface;
+  const keyboardCursorSurfaceRef = useRef<PdfAnnotationSurface | undefined>(undefined);
   const keyboardCursorRef = useRef<ViewerPagePoint | null>(null);
   const [keyboardCursor, setKeyboardCursor] = useState<ViewerPagePoint | null>(null);
   const inventoryAuthority = useRef(new ExistingAnnotationDiscoveryAuthority());
@@ -342,7 +414,10 @@ export function App({
   const sourceStyles = useRef(new WeakMap<object, Promise<SourceAnnotationStyles>>());
   const sourceOwnedAnnotations = useRef(new WeakMap<
     object,
-    readonly Pick<ExistingAnnotation, 'id' | 'pageIndex'>[]
+    readonly (Pick<ExistingAnnotation, 'id' | 'pageIndex'> & {
+      readonly sourceObjectPageIndex?: number;
+      readonly sourceObjectAnnotationIndex?: number;
+    })[]
   >());
   const ownedGeometryByPage = useMemo(
     () => groupOwnedMarkGeometryByPage(ownedAnnotations),
@@ -350,9 +425,6 @@ export function App({
   );
   const ownedGeometryByPageRef = useRef(ownedGeometryByPage);
   ownedGeometryByPageRef.current = ownedGeometryByPage;
-  const ownedPointerGesture = useRef(new OwnedMarkPointerGesture());
-  const primaryClickGesture = useRef(new ViewerPrimaryClickGesture());
-  const hoveredOwnedId = useRef<string | undefined>(undefined);
   const viewer = useMemo(
     () => createLocalPdfiumViewer(
       assets,
@@ -383,6 +455,12 @@ export function App({
     }
     onViewerInteraction?.(event);
   }, [onViewerInteraction]);
+  const emitFromSurface = useCallback((
+    event: ViewerInteractionEvent,
+    surface?: PdfAnnotationSurface,
+  ) => {
+    emit(surface === undefined ? event : scopeViewerInteraction(event, surface));
+  }, [emit]);
   const publishInventory = useCallback((result: ExistingAnnotationsDiscovery) => {
     setInventoryState(result);
     if (result.status === 'ready') setSourceAnnotations(result.items);
@@ -396,7 +474,14 @@ export function App({
     currentInventoryDocument.current = { id: documentId, document };
     let owned = sourceOwnedAnnotations.current.get(document);
     if (owned === undefined) {
-      owned = ownedAnnotationsRef.current.map(({ id, pageIndex }) => ({ id, pageIndex }));
+      owned = ownedAnnotationsRef.current.map(({ id, pageIndex, nativeSourceObject }) => ({
+        id,
+        pageIndex,
+        ...(nativeSourceObject === undefined ? {} : {
+          sourceObjectPageIndex: nativeSourceObject.pageIndex,
+          sourceObjectAnnotationIndex: nativeSourceObject.annotationIndex,
+        }),
+      }));
       sourceOwnedAnnotations.current.set(document, owned);
     }
     const token = inventoryAuthority.current.begin(documentId);
@@ -417,11 +502,22 @@ export function App({
           owned,
         );
         if (result) {
-          const importedIds = new Set(owned.map(existingAnnotationKey));
-          setSourceNativeAnnotations(discovered.flatMap((annotation) =>
-            annotation.sourceId !== undefined && importedIds.has(existingAnnotationKey(annotation))
-              ? [{ id: annotation.id, pageIndex: annotation.pageIndex, sourceId: annotation.sourceId,
-                  ...(annotation.readerStyle === undefined ? {} : { readerStyle: annotation.readerStyle }) }] : []));
+          const importedIds = new Map(owned.map((annotation) => [existingAnnotationKey(annotation), annotation.id]));
+          const importedSourceObjects = new Map(owned.flatMap((annotation) =>
+            annotation.sourceObjectPageIndex === undefined || annotation.sourceObjectAnnotationIndex === undefined
+              ? [] : [[`${annotation.sourceObjectPageIndex}:${annotation.sourceObjectAnnotationIndex}`, annotation.id] as const]));
+          setSourceNativeAnnotations(discovered.flatMap((annotation) => {
+            const sourceObjectKey = annotation.sourceObjectPageIndex === undefined
+              || annotation.sourceObjectAnnotationIndex === undefined
+              ? undefined
+              : `${annotation.sourceObjectPageIndex}:${annotation.sourceObjectAnnotationIndex}` as const;
+            const importedId = importedIds.get(existingAnnotationKey(annotation))
+              ?? (sourceObjectKey === undefined ? undefined : importedSourceObjects.get(sourceObjectKey));
+            return annotation.sourceId !== undefined && importedId !== undefined
+              ? [{ id: importedId, pageIndex: annotation.pageIndex, sourceId: annotation.sourceId,
+                  ...(annotation.readerStyle === undefined ? {} : { readerStyle: annotation.readerStyle }) }]
+              : [];
+          }));
           publishInventory(result);
         }
       },
@@ -509,19 +605,31 @@ export function App({
   }, [clearReferenceSubscriptions, clearSubscriptions, onReferenceDocumentControls, onViewerNavigationInitialized, viewer]);
 
   useEffect(() => {
+    const previousTabIdentity = activeReferenceTabIdentityRef.current;
     const generation = referenceCopyReads.current.invalidate().generation;
     activeReferenceTabIdentityRef.current = activeReferenceTabIdentity;
-    if (activeReferenceTabIdentity === null) return;
+    const previousSurface = referenceInputSurface(documentGeneration, previousTabIdentity);
+    if (previousSurface !== null) {
+      const clearedSelection = selectionReads.current.invalidateIfCurrent(previousSurface);
+      if (clearedSelection !== null) onSelectionUpdate?.(clearedSelection);
+      emitFromSurface({ type: 'selection-placement', value: null }, previousSurface);
+      emitFromSurface({ type: 'caret', value: { anchor: null, placement: null } }, previousSurface);
+      caretReadGeneration.current += 1;
+      if (keyboardCursorSurfaceRef.current?.kind === 'reference') {
+        keyboardCursorRef.current = null;
+        keyboardCursorSurfaceRef.current = undefined;
+        setKeyboardCursor(null);
+        emitFromSurface({ type: 'page-note-cursor', value: null }, previousSurface);
+      }
+    }
+    const surface = referenceInputSurface(documentGeneration, activeReferenceTabIdentity);
+    if (surface === null) return;
     onCopySelectionUpdate?.({
       kind: 'cleared',
-      surface: {
-        kind: 'reference',
-        documentGeneration,
-        tabIdentity: activeReferenceTabIdentity,
-      },
+      surface,
       generation,
     });
-  }, [activeReferenceTabIdentity, documentGeneration, onCopySelectionUpdate]);
+  }, [activeReferenceTabIdentity, documentGeneration, emitFromSurface, onCopySelectionUpdate, onSelectionUpdate]);
   const updateViewerRunway = useCallback((runway: ViewerRunway) => {
     const next = {
       right: Math.max(0, runway.right),
@@ -539,20 +647,55 @@ export function App({
     referenceWorkspaceElementRef.current = element;
   }, []);
 
-  const publishKeyboardCursor = useCallback((point: ViewerPagePoint | null) => {
+  const publishKeyboardCursor = useCallback((
+    point: ViewerPagePoint | null,
+    surface = keyboardCursorSurfaceRef.current,
+  ) => {
     keyboardCursorRef.current = point;
     setKeyboardCursor(point);
-    emit({ type: 'page-note-cursor', value: point });
-  }, [emit]);
+    emitFromSurface({ type: 'page-note-cursor', value: point }, surface);
+    if (point === null) keyboardCursorSurfaceRef.current = undefined;
+    else keyboardCursorSurfaceRef.current = surface;
+  }, [emitFromSurface]);
 
   const initializeKeyboardCursor = useCallback(() => {
     const registry = registryRef.current;
-    const documentId = activeDocumentIdRef.current;
+    const requestedSurface = keyboardPageNoteSurfaceRef.current;
+    const documentId = requestedSurface?.kind === 'reference'
+      ? REFERENCE_PDF_DOCUMENT_ID
+      : MAIN_PDF_DOCUMENT_ID;
+    if (requestedSurface?.kind === 'reference'
+      && requestedSurface.tabIdentity !== latestReferenceTabIdentityRef.current) return;
+    if (requestedSurface !== undefined && !isCurrentViewerInputSurface(
+      requestedSurface,
+      documentGenerationRef.current,
+      latestReferenceTabIdentityRef.current,
+    )) return;
     if (!registry || !documentId || !keyboardActiveRef.current) return;
+    if (requestedSurface?.kind === 'reference') {
+      const currentDocument = registry.getStore().getState().core.documents[documentId]?.document;
+      if (!referenceInputDocument.current.isCurrent(
+        currentDocument,
+        requestedSurface,
+        documentGenerationRef.current,
+        latestReferenceTabIdentityRef.current,
+      )) return;
+    }
     const core = registry.getStore().getState().core;
     const document = core.documents[documentId]?.document;
     const scroll = registry.getPlugin<ScrollPlugin>(ScrollPlugin.id)?.provides()?.forDocument(documentId);
-    const pageIndex = Math.max(0, (scroll?.getCurrentPage() ?? 1) - 1);
+    const referenceRoot = requestedSurface?.kind === 'reference'
+      ? referenceWorkspaceElementRef.current
+      : null;
+    const activeElement = referenceRoot?.ownerDocument.activeElement;
+    const focusedPage = activeElement instanceof Element && referenceRoot?.contains(activeElement)
+      ? activeElement.closest<HTMLElement>('[data-page-index]')
+      : null;
+    const pageIndex = viewerKeyboardPageIndex(
+      focusedPage?.dataset.pageIndex,
+      scroll?.getCurrentPage(),
+      document?.pages.length ?? 0,
+    );
     const page = document?.pages[pageIndex];
     if (!page) return;
     const previous = keyboardCursorRef.current;
@@ -566,14 +709,14 @@ export function App({
       pageIndex,
       viewportGeneration: viewportGenerationRef.current,
       ...position,
-    });
+    }, requestedSurface);
   }, [publishKeyboardCursor]);
 
   useEffect(() => {
     keyboardActiveRef.current = keyboardPageNoteActive;
     if (keyboardPageNoteActive) initializeKeyboardCursor();
     else if (keyboardCursorRef.current !== null) publishKeyboardCursor(null);
-  }, [initializeKeyboardCursor, keyboardPageNoteActive, publishKeyboardCursor]);
+  }, [initializeKeyboardCursor, keyboardPageNoteActive, keyboardPageNoteSurface, publishKeyboardCursor]);
 
   const initializeViewer = useCallback(async (registry: PluginRegistry) => {
     const initializationGeneration = viewerInitialization.current.begin(registry);
@@ -581,6 +724,18 @@ export function App({
       viewerInitialization.current.isCurrent(initializationGeneration, registry)
       && registryRef.current === registry
     );
+    const inputSurfaceIsCurrent = (
+      surface: PdfAnnotationSurface,
+      documentId: string,
+      document?: PdfDocumentObject,
+    ) => initializationIsCurrent()
+      && isCurrentViewerInputSurface(
+        surface,
+        documentGenerationRef.current,
+        latestReferenceTabIdentityRef.current,
+      )
+      && (document === undefined
+        || registry.getStore().getState().core.documents[documentId]?.document === document);
     caretReadGeneration.current += 1;
     registryRef.current = registry;
     clearSubscriptions();
@@ -636,16 +791,23 @@ export function App({
     };
     let currentCaret: CaretAnchor | null = null;
     let currentCaretPlacement: ViewerClientPlacement | null = null;
+    let mainInputDocument: PdfDocumentObject | null = null;
     const publishCaret = (value: ViewerCaretUpdate) => {
+      const surface = { kind: 'main' as const, documentGeneration };
+      if (mainInputDocument === null
+        || !inputSurfaceIsCurrent(surface, MAIN_PDF_DOCUMENT_ID, mainInputDocument)) return;
       currentCaret = value.anchor;
       currentCaretPlacement = value.placement;
-      emit({ type: 'caret', value });
+      emitFromSurface({ type: 'caret', value }, surface);
     };
-    const caretPlacement = (anchor: CaretAnchor): ViewerClientPlacement | null => {
-      const active = registry.getStore().getState().core.documents[MAIN_PDF_DOCUMENT_ID];
+    const caretPlacement = (
+      anchor: CaretAnchor,
+      documentId = MAIN_PDF_DOCUMENT_ID,
+      root: HTMLDivElement | null = workspaceElementRef.current,
+    ): ViewerClientPlacement | null => {
+      const active = registry.getStore().getState().core.documents[documentId];
       const page = active?.document?.pages[anchor.pageIndex];
-      const element = workspaceElementRef.current
-        ?.querySelector<HTMLElement>(`[data-page-index="${anchor.pageIndex}"]`);
+      const element = root?.querySelector<HTMLElement>(`[data-page-index="${anchor.pageIndex}"]`);
       return page && element
         ? caretClientPlacement({
             anchor,
@@ -694,12 +856,207 @@ export function App({
         setDetectedSelectionReliable(true);
       }
     };
+    const registerDocumentInput = (
+      documentId: string,
+      document: PdfDocumentObject,
+      root: () => HTMLDivElement | null,
+      inputSurface: () => PdfAnnotationSurface | null,
+    ): (() => void) => {
+      if (!interaction) return () => {};
+      const inputSubscriptions: Array<() => void> = [];
+      const ownedGesture = new OwnedMarkPointerGesture();
+      const clickGesture = new ViewerPrimaryClickGesture();
+      const pointerSurfaces = new Map<number, PdfAnnotationSurface>();
+      let hoveredOwned: {
+        readonly id: string;
+        readonly pageIndex: number;
+        readonly surface: PdfAnnotationSurface;
+      } | undefined;
+      for (const page of document.pages) {
+        const pointerId = page.index + 1;
+        const pageGeometry = () => ownedGeometryByPageRef.current.get(page.index) ?? [];
+        const pageScale = () => registry.getStore().getState().core.documents[documentId]?.scale ?? 1;
+        const publish = (event: ViewerInteractionEvent, surface = inputSurface()) => {
+          if (surface !== null && inputSurfaceIsCurrent(surface, documentId, document)) {
+            emitFromSurface(event, surface);
+          }
+        };
+        const setHoveredOwned = (
+          id: string | undefined,
+          surface: PdfAnnotationSurface | null = inputSurface(),
+        ) => {
+          if (id !== undefined && surface !== null
+            && hoveredOwned?.id === id
+            && hoveredOwned.pageIndex === page.index
+            && samePdfAnnotationSurface(hoveredOwned.surface, surface)) return;
+          if (hoveredOwned !== undefined) {
+            publish({
+              type: 'owned-mark',
+              value: { id: hoveredOwned.id, phase: 'leave', pageIndex: hoveredOwned.pageIndex },
+            }, hoveredOwned.surface);
+          }
+          hoveredOwned = id === undefined || surface === null
+            ? undefined
+            : { id, pageIndex: page.index, surface };
+          root()?.setAttribute('data-owned-mark-hovered', id ? 'true' : 'false');
+          if (id) publish({
+            type: 'owned-mark',
+            value: { id, phase: 'enter', pageIndex: page.index },
+          }, surface);
+        };
+        const clearOwnedPointerInteraction = () => {
+          const surface = pointerSurfaces.get(pointerId) ?? null;
+          ownedGesture.pointerCancel(pointerId);
+          pointerSurfaces.delete(pointerId);
+          setHoveredOwned(undefined, surface);
+        };
+        inputSubscriptions.push(interaction.registerAlways({
+          scope: { type: 'page', documentId, pageIndex: page.index },
+          handlers: {
+            onPointerDown: (position, event) => {
+              const surface = inputSurface();
+              if (surface === null || !inputSurfaceIsCurrent(surface, documentId, document)) {
+                pointerSurfaces.delete(pointerId);
+                return;
+              }
+              pointerSurfaces.set(pointerId, surface);
+              const button = viewerPointerButton(event);
+              clickGesture.pointerDown(
+                pointerId,
+                button,
+                position,
+                { x: event.clientX, y: event.clientY },
+                (selection?.getState(documentId).selection ?? null) !== null,
+              );
+              ownedGesture.pointerDown(
+                pointerId,
+                button ?? -1,
+                position,
+                pageGeometry(),
+                pageScale(),
+              );
+            },
+            onPointerMove: (position, event) => {
+              const surface = viewerPointerMoveSurface(
+                pointerSurfaces.get(pointerId) ?? null,
+                inputSurface(),
+              );
+              if (surface === null || !inputSurfaceIsCurrent(surface, documentId, document)) {
+                clearOwnedPointerInteraction();
+                return;
+              }
+              clickGesture.pointerMove(pointerId, event.clientX, event.clientY);
+              ownedGesture.pointerMove(pointerId, position);
+              setHoveredOwned(
+                hitTestOwnedMark(pageGeometry(), position, pageScale()),
+                surface,
+              );
+            },
+            onPointerLeave: clearOwnedPointerInteraction,
+            onPointerCancel: () => {
+              clickGesture.cancel();
+              clearOwnedPointerInteraction();
+            },
+            onPointerUp: (position, event) => {
+              const surface = pointerSurfaces.get(pointerId) ?? null;
+              pointerSurfaces.delete(pointerId);
+              if (surface === null || !inputSurfaceIsCurrent(surface, documentId, document)) return;
+              const button = viewerPointerButton(event) ?? VIEWER_POINTER_BUTTON_NONE;
+              const click = clickGesture.pointerUp(
+                pointerId,
+                button,
+                event.clientX,
+                event.clientY,
+              );
+              const ownedId = ownedGesture.pointerUp(
+                pointerId,
+                button,
+                position,
+                pageGeometry(),
+                pageScale(),
+              );
+              if (button !== 0) return;
+              if (ownedId) {
+                publish({
+                  type: 'owned-mark',
+                  value: {
+                    id: ownedId,
+                    phase: 'activate',
+                    pageIndex: page.index,
+                    placement: { left: event.clientX, top: event.clientY },
+                  },
+                }, surface);
+                return;
+              }
+              publish({ type: 'owned-mark-clear' }, surface);
+              const pagePoint: ViewerPagePoint = {
+                documentId,
+                pageIndex: page.index,
+                viewportGeneration: viewportGenerationRef.current,
+                x: position.x,
+                y: position.y,
+              };
+              const keyboardSurface = keyboardPageNoteSurfaceRef.current;
+              if (keyboardActiveRef.current
+                && (keyboardSurface?.kind ?? 'main') === surface.kind
+                && (surface.kind === 'main'
+                  || keyboardSurface?.kind !== 'reference'
+                  || keyboardSurface.tabIdentity === surface.tabIdentity)) {
+                publishKeyboardCursor(pagePoint, surface);
+                publish({ type: 'page-note-commit', value: pagePoint }, surface);
+                publishKeyboardCursor(null, surface);
+                return;
+              }
+              if (!click || click.hadSelectionAtPress) return;
+              const selectionState = selection?.getState(documentId);
+              if (selection && selectionState?.selection !== null) selection.clear(documentId);
+              const generation = ++caretReadGeneration.current;
+              void publishViewerCaretRead({
+                read: captureViewerCaret({
+                  pageIndex: page.index,
+                  point: click.pagePoint,
+                  pages: pageReaderFor(documentId, document),
+                  ...(selectionState?.geometry[page.index] === undefined
+                    ? {}
+                    : { geometry: selectionState.geometry[page.index] }),
+                }),
+                isCurrent: () => generation === caretReadGeneration.current
+                  && inputSurfaceIsCurrent(surface, documentId, document),
+                placement: (anchor) => caretPlacement(
+                  anchor,
+                  documentId,
+                  root(),
+                ) ?? { left: click.clientPoint.x, top: click.clientPoint.y },
+                emit: (event) => {
+                  if (event.type !== 'caret') return;
+                  if (surface.kind === 'main') {
+                    publishCaret(event.value);
+                    if (event.value.anchor !== null) scheduleCaretPlacementRefresh();
+                  } else publish(event, surface);
+                },
+              });
+            },
+            onClick: (position) => {
+              if (hitTestOwnedMark(pageGeometry(), position, pageScale()) === undefined) {
+                publish({ type: 'owned-mark-clear' });
+              }
+            },
+          },
+        }));
+      }
+      return () => {
+        for (const unsubscribe of inputSubscriptions.splice(0)) unsubscribe();
+        root()?.removeAttribute('data-owned-mark-hovered');
+      };
+    };
     const loadDocument = async (documentId: string) => {
       if (documentId !== MAIN_PDF_DOCUMENT_ID || !initializationIsCurrent()) return;
       caretReadGeneration.current += 1;
-      activeDocumentIdRef.current = MAIN_PDF_DOCUMENT_ID;
       const document = registry.getStore().getState().core.documents[documentId]?.document;
       if (!document) return;
+      mainInputDocument = document;
+      currentCaret = null;
+      currentCaretPlacement = null;
       onMainDocumentReady?.(registry.getEngine(), document);
       mainNavigationRef.current?.dispose();
       const mainNavigation = createViewerNavigation({
@@ -727,132 +1084,12 @@ export function App({
       installViewerFraming();
       currentInventoryDocument.current = { id: documentId, document };
       discoverOutline(document);
-      if (interaction) {
-        for (const page of document.pages) {
-          const pointerId = page.index + 1;
-          const pageGeometry = () => ownedGeometryByPageRef.current.get(page.index) ?? [];
-          const pageScale = () => registry.getStore().getState().core.documents[documentId]?.scale ?? 1;
-          const setHoveredOwned = (id: string | undefined) => {
-            if (hoveredOwnedId.current === id) return;
-            if (hoveredOwnedId.current) {
-              emit({ type: 'owned-mark', value: { id: hoveredOwnedId.current, phase: 'leave' } });
-            }
-            hoveredOwnedId.current = id;
-            workspaceElementRef.current?.setAttribute('data-owned-mark-hovered', id ? 'true' : 'false');
-            if (id) emit({ type: 'owned-mark', value: { id, phase: 'enter' } });
-          };
-          const clearOwnedPointerInteraction = () => {
-            ownedPointerGesture.current.pointerCancel(pointerId);
-            setHoveredOwned(undefined);
-          };
-          subscriptions.current.push(interaction.registerAlways({
-            scope: { type: 'page', documentId, pageIndex: page.index },
-            handlers: {
-              onPointerDown: (position, event) => {
-                const button = viewerPointerButton(event);
-                primaryClickGesture.current.pointerDown(
-                  pointerId,
-                  button,
-                  position,
-                  { x: event.clientX, y: event.clientY },
-                  (selection?.getState(documentId).selection ?? null) !== null,
-                );
-                ownedPointerGesture.current.pointerDown(
-                  pointerId,
-                  button ?? -1,
-                  position,
-                  pageGeometry(),
-                  pageScale(),
-                );
-              },
-              onPointerMove: (position, event) => {
-                const point = position;
-                primaryClickGesture.current.pointerMove(
-                  pointerId,
-                  event.clientX,
-                  event.clientY,
-                );
-                ownedPointerGesture.current.pointerMove(pointerId, point);
-                setHoveredOwned(hitTestOwnedMark(pageGeometry(), point, pageScale()));
-              },
-              onPointerLeave: clearOwnedPointerInteraction,
-              onPointerCancel: () => {
-                primaryClickGesture.current.cancel();
-                clearOwnedPointerInteraction();
-              },
-              onPointerUp: (position, event) => {
-                const button = viewerPointerButton(event) ?? VIEWER_POINTER_BUTTON_NONE;
-                const click = primaryClickGesture.current.pointerUp(
-                  pointerId,
-                  button,
-                  event.clientX,
-                  event.clientY,
-                );
-                const ownedId = ownedPointerGesture.current.pointerUp(
-                  pointerId,
-                  button,
-                  position,
-                  pageGeometry(),
-                  pageScale(),
-                );
-                if (button !== 0) return;
-                if (ownedId) {
-                  emit({ type: 'owned-mark', value: { id: ownedId, phase: 'activate' } });
-                  return;
-                }
-                emit({ type: 'owned-mark-clear' });
-                const pagePoint: ViewerPagePoint = {
-                  documentId,
-                  pageIndex: page.index,
-                  viewportGeneration: viewportGenerationRef.current,
-                  x: position.x,
-                  y: position.y,
-                };
-                if (keyboardActiveRef.current) {
-                  publishKeyboardCursor(pagePoint);
-                  emit({ type: 'page-note-commit', value: pagePoint });
-                  publishKeyboardCursor(null);
-                  return;
-                }
-                if (!click || click.hadSelectionAtPress) return;
-                const selectionState = selection?.getState(documentId);
-                if (selection && selectionState?.selection !== null) {
-                  selection.clear(documentId);
-                }
-                const generation = ++caretReadGeneration.current;
-                void publishViewerCaretRead({
-                  read: captureViewerCaret({
-                    pageIndex: page.index,
-                    point: click.pagePoint,
-                    pages: pageReaderFor(documentId, document),
-                    ...(selectionState?.geometry[page.index] === undefined
-                      ? {}
-                      : { geometry: selectionState.geometry[page.index] }),
-                  }),
-                  isCurrent: () => generation === caretReadGeneration.current,
-                  placement: (anchor) => {
-                    const fallback: ViewerClientPlacement = {
-                      left: click.clientPoint.x,
-                      top: click.clientPoint.y,
-                    };
-                    return caretPlacement(anchor) ?? fallback;
-                  },
-                  emit: (event) => {
-                    if (event.type !== 'caret') return;
-                    publishCaret(event.value);
-                    if (event.value.anchor !== null) scheduleCaretPlacementRefresh();
-                  },
-                });
-              },
-              onClick: (position) => {
-                if (hitTestOwnedMark(pageGeometry(), position, pageScale()) === undefined) {
-                  emit({ type: 'owned-mark-clear' });
-                }
-              },
-            },
-          }));
-        }
-      }
+      subscriptions.current.push(registerDocumentInput(
+        documentId,
+        document,
+        () => workspaceElementRef.current,
+        () => ({ kind: 'main', documentGeneration }),
+      ));
       await readPage(documentId, 0);
       if (!initializationIsCurrent()) return;
     };
@@ -863,6 +1100,7 @@ export function App({
     const scroll = registry.getPlugin<ScrollPlugin>(ScrollPlugin.id)?.provides();
     if (documentManager) {
       let unsubscribeReferenceScroll: (() => void) | null = null;
+      let disposeReferenceInput: (() => void) | null = null;
       const initializeMain = (documentId: string) => {
         if (!initializationIsCurrent()) return;
         void loadDocument(documentId).then(() => {
@@ -877,6 +1115,9 @@ export function App({
         subscribeToMainDocumentOpened(documentManager, initializeMain),
       );
       const disposeReferenceNavigation = () => {
+        disposeReferenceInput?.();
+        disposeReferenceInput = null;
+        referenceInputDocument.current.clear();
         unsubscribeReferenceScroll?.();
         unsubscribeReferenceScroll = null;
         referenceManualScrollObserver.clear();
@@ -896,6 +1137,17 @@ export function App({
           });
           referenceNavigationRef.current = referenceNavigation;
           onViewerNavigationInitialized?.('reference', referenceNavigation);
+          referenceInputDocument.current.bind(document);
+          disposeReferenceInput = registerDocumentInput(
+            REFERENCE_PDF_DOCUMENT_ID,
+            document,
+            () => referenceWorkspaceElementRef.current,
+            () => referenceInputDocument.current.surface(
+              document,
+              documentGenerationRef.current,
+              latestReferenceTabIdentityRef.current,
+            ),
+          );
           unsubscribeReferenceScroll = scroll === undefined
             ? null
             : subscribeToReferenceManualScroll(
@@ -928,25 +1180,23 @@ export function App({
     }
 
     if (scroll) {
+      const refreshViewerViewport = (documentId: string): boolean => {
+        if (documentId !== MAIN_PDF_DOCUMENT_ID
+          && documentId !== REFERENCE_PDF_DOCUMENT_ID) return false;
+        viewportGenerationRef.current += 1;
+        initializeKeyboardCursor();
+        if (documentId === MAIN_PDF_DOCUMENT_ID) scheduleCaretPlacementRefresh();
+        return documentId === MAIN_PDF_DOCUMENT_ID;
+      };
       subscriptions.current.push(
         scroll.onPageChange(({ documentId, pageNumber }) => {
-          if (documentId !== MAIN_PDF_DOCUMENT_ID) return;
-          viewportGenerationRef.current += 1;
-          initializeKeyboardCursor();
-          scheduleCaretPlacementRefresh();
-          void readPage(documentId, pageNumber - 1);
+          if (refreshViewerViewport(documentId)) void readPage(documentId, pageNumber - 1);
         }),
         scroll.onScroll(({ documentId }) => {
-          if (documentId !== MAIN_PDF_DOCUMENT_ID) return;
-          viewportGenerationRef.current += 1;
-          initializeKeyboardCursor();
-          scheduleCaretPlacementRefresh();
+          refreshViewerViewport(documentId);
         }),
         scroll.onLayoutChange(({ documentId }) => {
-          if (documentId !== MAIN_PDF_DOCUMENT_ID) return;
-          viewportGenerationRef.current += 1;
-          initializeKeyboardCursor();
-          scheduleCaretPlacementRefresh();
+          refreshViewerViewport(documentId);
         }),
         () => caretPlacementRefresh.cancel(),
       );
@@ -958,20 +1208,24 @@ export function App({
           return { kind: 'main', documentGeneration };
         }
         if (documentId !== REFERENCE_PDF_DOCUMENT_ID) return null;
-        const tabIdentity = activeReferenceTabIdentityRef.current;
-        return tabIdentity === null
-          ? null
-          : { kind: 'reference', documentGeneration, tabIdentity };
+        const currentDocument = registry.getStore().getState().core
+          .documents[REFERENCE_PDF_DOCUMENT_ID]?.document;
+        return referenceInputDocument.current.surface(
+          currentDocument,
+          documentGenerationRef.current,
+          latestReferenceTabIdentityRef.current,
+        );
       };
       const copyAuthority = (surface: PdfCopySurface) => surface.kind === 'main'
         ? mainCopyReads.current
         : referenceCopyReads.current;
       const beginCopySelectionRead = (documentId: string) => {
         const surface = copySurface(documentId);
-        if (surface === null) return;
+        if (surface === null || !inputSurfaceIsCurrent(surface, documentId)) return;
         const authority = copyAuthority(surface);
         const { generation, started } = authority.begin(
           surface.kind === 'main' ? documentId : `${documentId}:${surface.tabIdentity}`,
+          surface,
         );
         if (started) onCopySelectionUpdate?.({ kind: 'pending', surface, generation });
       };
@@ -981,48 +1235,62 @@ export function App({
         generation: number,
       ) => {
         const authority = copyAuthority(surface);
+        const document = registry.getStore().getState().core.documents[documentId]?.document;
+        if (!document || !inputSurfaceIsCurrent(surface, documentId, document)) return;
         try {
           const evidence = await readViewerSelectionEvidence(documentId, selection);
-          if (authority.isCurrent(generation)) {
+          if (authority.isCurrent(generation, surface)
+            && inputSurfaceIsCurrent(surface, documentId, document)) {
             onCopySelectionUpdate?.(
               copySelectionUpdateFromEvidence(surface, generation, evidence),
             );
           }
         } catch {
-          if (authority.isCurrent(generation)) {
+          if (authority.isCurrent(generation, surface)
+            && inputSurfaceIsCurrent(surface, documentId, document)) {
             onCopySelectionUpdate?.({ kind: 'unavailable', surface, generation });
           }
         }
       };
-      const beginSelectionRead = (documentId: string) => {
-        const { generation, started } = selectionReads.current.begin(documentId);
+      const beginSelectionRead = (documentId: string, surface: PdfAnnotationSurface) => {
+        if (!inputSurfaceIsCurrent(surface, documentId)) return;
+        const { generation, started } = selectionReads.current.begin(documentId, surface);
         if (!started) return;
-        onSelectionUpdate?.({ kind: 'pending', generation });
+        onSelectionUpdate?.({ kind: 'pending', generation, surface });
       };
-      const captureSelection = async (documentId: string, generation: number) => {
+      const captureSelection = async (
+        documentId: string,
+        generation: number,
+        surface: PdfAnnotationSurface,
+      ) => {
         const document = registry.getStore().getState().core.documents[documentId]?.document;
+        if (!inputSurfaceIsCurrent(surface, documentId)) return;
         if (!document) {
-          onSelectionUpdate?.(selectionReads.current.invalidate());
+          onSelectionUpdate?.(selectionReads.current.invalidate(surface));
           return;
         }
+        if (!inputSurfaceIsCurrent(surface, documentId, document)) return;
         const captureGate = globalThis.__placekeeperSelectionCaptureTestGate;
         if (captureGate !== undefined) await captureGate.wait(generation);
-        if (!selectionReads.current.isCurrent(generation)) return;
+        if (!selectionReads.current.isCurrent(generation, surface)
+          || !inputSurfaceIsCurrent(surface, documentId, document)) return;
         const result = await captureViewerSelection({
           documentId,
           selection,
           pages: pageReaderFor(documentId, document),
         });
-        if (selectionReads.current.isCurrent(generation)) {
+        if (selectionReads.current.isCurrent(generation, surface)
+          && inputSurfaceIsCurrent(surface, documentId, document)) {
           setDetectedSelectionReliable(
             result.ok || result.diagnostic === 'selection-page-limit-exceeded',
           );
-          onSelectionUpdate?.(terminalSelectionUpdate(generation, result));
+          onSelectionUpdate?.({ ...terminalSelectionUpdate(generation, result), surface });
         }
       };
       subscriptions.current.push(
         selection.onSelectionChange(({ documentId, selection: selectedRange }) => {
           const surface = copySurface(documentId);
+          if (surface !== null && !inputSurfaceIsCurrent(surface, documentId)) return;
           if (surface !== null) {
             const authority = copyAuthority(surface);
             if (selectedRange === null) {
@@ -1033,109 +1301,155 @@ export function App({
               });
             } else beginCopySelectionRead(documentId);
           }
-          if (documentId !== MAIN_PDF_DOCUMENT_ID) return;
+          if (surface === null) return;
           if (selectedRange === null) {
-            setDetectedSelectionReliable(true);
-            onSelectionUpdate?.(selectionReads.current.invalidate());
-            emit({ type: 'selection-placement', value: null });
+            if (surface.kind === 'main') setDetectedSelectionReliable(true);
+            onSelectionUpdate?.(selectionReads.current.invalidate(surface));
+            emitFromSurface({ type: 'selection-placement', value: null }, surface);
           } else {
             caretReadGeneration.current += 1;
-            publishCaret({ anchor: null, placement: null });
-            beginSelectionRead(documentId);
+            if (surface.kind === 'main') publishCaret({ anchor: null, placement: null });
+            else emitFromSurface({ type: 'caret', value: { anchor: null, placement: null } }, surface);
+            beginSelectionRead(documentId, surface);
           }
         }),
         selection.onEndSelection(({ documentId }) => {
           const surface = copySurface(documentId);
+          if (surface !== null && !inputSurfaceIsCurrent(surface, documentId)) return;
           if (surface !== null) {
             const authority = copyAuthority(surface);
             const identity = surface.kind === 'main'
               ? documentId
               : `${documentId}:${surface.tabIdentity}`;
-            const copyGeneration = authority.finish(identity);
+            const copyGeneration = authority.finish(identity, surface);
             if (copyGeneration !== null) {
               void captureCopySelection(documentId, surface, copyGeneration);
             }
           }
-          if (documentId !== MAIN_PDF_DOCUMENT_ID) return;
-          const generation = selectionReads.current.finish(documentId);
+          if (surface === null) return;
+          const generation = selectionReads.current.finish(documentId, surface);
           if (generation === null) return;
-          void captureSelection(documentId, generation);
+          void captureSelection(documentId, generation, surface);
         }),
       );
-      const mainId = registry.getStore().getState().core.documents[MAIN_PDF_DOCUMENT_ID]
-        ? MAIN_PDF_DOCUMENT_ID
-        : null;
-      if (selectionPlugin && mainId) {
-        let currentMenuPlacement: Parameters<Parameters<typeof selectionPlugin.onMenuPlacement>[1]>[0] = null;
-        let placementFrame: number | undefined;
-        const refreshMenuPlacement = () => {
-          const placement = currentMenuPlacement;
-          if (!placement?.isVisible) {
-            emit({ type: 'selection-placement', value: null });
-            return;
-          }
-          const active = registry.getStore().getState().core.documents[mainId];
-          const page = active?.document?.pages[placement.pageIndex];
-          const element = workspaceElementRef.current
-            ?.querySelector<HTMLElement>(`[data-page-index="${placement.pageIndex}"]`);
-          if (!page || !element) return;
-          const bounds = element.getBoundingClientRect();
-          const rotation = combinePageRotation(page.rotation, active.rotation);
-          const rotatedSize = transformSize(page.size, rotation, 1);
-          const scale = bounds.width / rotatedSize.width;
-          const transformed = transformRect(page.size, placement.rect, rotation, scale);
-          emit({
-            type: 'selection-placement',
-            value: {
-              pageIndex: placement.pageIndex,
-              rect: {
-                x: placement.rect.origin.x,
-                y: placement.rect.origin.y,
-                width: placement.rect.size.width,
-                height: placement.rect.size.height,
-              },
-              placement: {
-                selectionBounds: {
-                  left: bounds.left + transformed.origin.x,
-                  top: bounds.top + transformed.origin.y,
-                  right: bounds.left + transformed.origin.x + transformed.size.width,
-                  bottom: bounds.top + transformed.origin.y + transformed.size.height,
-                  width: transformed.size.width,
-                  height: transformed.size.height,
+      if (selectionPlugin) {
+        const installMenuPlacement = (
+          documentId: string,
+          root: () => HTMLDivElement | null,
+          surface: () => PdfAnnotationSurface | null,
+        ) => {
+          let currentMenuPlacement: Parameters<Parameters<typeof selectionPlugin.onMenuPlacement>[1]>[0] = null;
+          let currentMenuSurface: PdfAnnotationSurface | null = null;
+          let placementFrame: number | undefined;
+          const refreshMenuPlacement = () => {
+            const currentSurface = surface();
+            const active = registry.getStore().getState().core.documents[documentId];
+            if (currentSurface === null || !active?.document
+              || !inputSurfaceIsCurrent(currentSurface, documentId, active.document)) return;
+            if (currentMenuSurface === null
+              || !samePdfAnnotationSurface(currentMenuSurface, currentSurface)) return;
+            const placement = currentMenuPlacement;
+            if (!placement?.isVisible) {
+              emitFromSurface({ type: 'selection-placement', value: null }, currentSurface);
+              return;
+            }
+            const page = active?.document?.pages[placement.pageIndex];
+            const element = root()?.querySelector<HTMLElement>(
+              `[data-page-index="${placement.pageIndex}"]`,
+            );
+            if (!page || !element) return;
+            const bounds = element.getBoundingClientRect();
+            const rotation = combinePageRotation(page.rotation, active.rotation);
+            const rotatedSize = transformSize(page.size, rotation, 1);
+            const scale = bounds.width / rotatedSize.width;
+            const transformed = transformRect(page.size, placement.rect, rotation, scale);
+            emitFromSurface({
+              type: 'selection-placement',
+              value: {
+                pageIndex: placement.pageIndex,
+                rect: {
+                  x: placement.rect.origin.x,
+                  y: placement.rect.origin.y,
+                  width: placement.rect.size.width,
+                  height: placement.rect.size.height,
                 },
-                left: bounds.left + transformed.origin.x + transformed.size.width / 2,
-                top: bounds.top + (placement.suggestTop
-                  ? transformed.origin.y
-                  : transformed.origin.y + transformed.size.height),
-                suggestTop: placement.suggestTop,
+                placement: {
+                  selectionBounds: {
+                    left: bounds.left + transformed.origin.x,
+                    top: bounds.top + transformed.origin.y,
+                    right: bounds.left + transformed.origin.x + transformed.size.width,
+                    bottom: bounds.top + transformed.origin.y + transformed.size.height,
+                    width: transformed.size.width,
+                    height: transformed.size.height,
+                  },
+                  left: bounds.left + transformed.origin.x + transformed.size.width / 2,
+                  top: bounds.top + (placement.suggestTop
+                    ? transformed.origin.y
+                    : transformed.origin.y + transformed.size.height),
+                  suggestTop: placement.suggestTop,
+                },
               },
-            },
+            }, currentSurface);
+          };
+          const scheduleMenuPlacement = () => {
+            if (placementFrame !== undefined) {
+              cancelAnimationFrame(placementFrame);
+              placementFrame = undefined;
+            }
+            if (currentMenuPlacement === null || currentMenuSurface === null) return;
+            placementFrame = requestAnimationFrame(() => {
+              placementFrame = undefined;
+              refreshMenuPlacement();
+            });
+          };
+          subscriptions.current.push(selectionPlugin.onMenuPlacement(documentId, (placement) => {
+            const placementSurface = surface();
+            const activeDocument = registry.getStore().getState().core
+              .documents[documentId]?.document;
+            if (placementSurface === null || !activeDocument
+              || !inputSurfaceIsCurrent(placementSurface, documentId, activeDocument)) return;
+            if (placement?.isVisible || !selection.getState(documentId).selection) {
+              currentMenuPlacement = placement;
+              currentMenuSurface = placementSurface;
+            }
+            refreshMenuPlacement();
+            scheduleMenuPlacement();
+          }));
+          const workspace = root();
+          const observer = new MutationObserver(scheduleMenuPlacement);
+          if (workspace) observer.observe(workspace, {
+            subtree: true,
+            childList: true,
+            attributes: true,
+            attributeFilter: ['style', 'width', 'height'],
+          });
+          workspace?.addEventListener('scroll', scheduleMenuPlacement, true);
+          window.addEventListener('resize', scheduleMenuPlacement);
+          subscriptions.current.push(() => {
+            observer.disconnect();
+            workspace?.removeEventListener('scroll', scheduleMenuPlacement, true);
+            window.removeEventListener('resize', scheduleMenuPlacement);
+            if (placementFrame !== undefined) cancelAnimationFrame(placementFrame);
           });
         };
-        const scheduleMenuPlacement = () => {
-          if (placementFrame !== undefined) cancelAnimationFrame(placementFrame);
-          placementFrame = requestAnimationFrame(() => { placementFrame = undefined; refreshMenuPlacement(); });
-        };
-        subscriptions.current.push(selectionPlugin.onMenuPlacement(mainId, (placement) => {
-          // Zoom can transiently hide the plugin menu while its text selection
-          // remains valid. Retain the PDF anchor until the selection is cleared.
-          if (placement?.isVisible || !selection?.getState(mainId).selection) {
-            currentMenuPlacement = placement;
-          }
-          refreshMenuPlacement();
-          scheduleMenuPlacement();
-        }));
-        const workspace = workspaceElementRef.current;
-        const observer = new MutationObserver(scheduleMenuPlacement);
-        if (workspace) observer.observe(workspace, { subtree: true, childList: true, attributes: true, attributeFilter: ['style', 'width', 'height'] });
-        workspace?.addEventListener('scroll', scheduleMenuPlacement, true);
-        window.addEventListener('resize', scheduleMenuPlacement);
-        subscriptions.current.push(() => {
-          observer.disconnect();
-          workspace?.removeEventListener('scroll', scheduleMenuPlacement, true);
-          window.removeEventListener('resize', scheduleMenuPlacement);
-          if (placementFrame !== undefined) cancelAnimationFrame(placementFrame);
-        });
+        installMenuPlacement(
+          MAIN_PDF_DOCUMENT_ID,
+          () => workspaceElementRef.current,
+          () => ({ kind: 'main', documentGeneration }),
+        );
+        installMenuPlacement(
+          REFERENCE_PDF_DOCUMENT_ID,
+          () => referenceWorkspaceElementRef.current,
+          () => {
+            const currentDocument = registry.getStore().getState().core
+              .documents[REFERENCE_PDF_DOCUMENT_ID]?.document;
+            return referenceInputDocument.current.surface(
+              currentDocument,
+              documentGenerationRef.current,
+              latestReferenceTabIdentityRef.current,
+            );
+          },
+        );
       }
     }
 
@@ -1158,17 +1472,39 @@ export function App({
   const selectionMessage = effectivePageReliability && !effectiveSelectionReliability
     ? SELECTION_UNAVAILABLE_MESSAGE
     : null;
-  const pageContextMenu = useCallback((request: PageContextMenuRequest): boolean => {
+  const pageContextMenu = useCallback((
+    request: PageContextMenuRequest,
+    surface?: PdfAnnotationSurface,
+  ): boolean => {
     const registry = registryRef.current;
-    const documentId = activeDocumentIdRef.current;
+    const documentId = surface?.kind === 'reference'
+      ? REFERENCE_PDF_DOCUMENT_ID
+      : MAIN_PDF_DOCUMENT_ID;
+    if (surface?.kind === 'reference'
+      && surface.tabIdentity !== latestReferenceTabIdentityRef.current) return false;
+    const inputSurface = surface ?? { kind: 'main' as const, documentGeneration };
+    if (!isCurrentViewerInputSurface(
+      inputSurface,
+      documentGenerationRef.current,
+      latestReferenceTabIdentityRef.current,
+    )) return false;
     if (!registry || !documentId) return false;
+    if (inputSurface.kind === 'reference') {
+      const currentDocument = registry.getStore().getState().core.documents[documentId]?.document;
+      if (!referenceInputDocument.current.isCurrent(
+        currentDocument,
+        inputSurface,
+        documentGenerationRef.current,
+        latestReferenceTabIdentityRef.current,
+      )) return false;
+    }
     const page = registry.getStore().getState().core.documents[documentId]
       ?.document?.pages[request.pageIndex];
     if (!page) return false;
     const selection = registry.getPlugin<SelectionPlugin>(SelectionPlugin.id)?.provides();
     if (selection?.getState(documentId).selection !== null) return false;
     const point = clampPageNotePoint(request, page, 18);
-    emit({
+    emitFromSurface({
       type: 'page-menu',
       value: {
         invocationId: `page-menu-${++menuInvocation.current}`,
@@ -1181,20 +1517,22 @@ export function App({
         },
         placement: { left: request.clientX, top: request.clientY },
       },
-    });
+    }, inputSurface);
     return true;
-  }, [emit]);
+  }, [documentGeneration, emitFromSurface]);
 
   const clampKeyboardCursor = useCallback((cursor: ViewerPagePoint): ViewerPagePoint => {
     const registry = registryRef.current;
     const active = registry?.getStore().getState().core.documents[cursor.documentId];
     const page = active?.document?.pages[cursor.pageIndex];
     if (!page) return cursor;
-    const pageElement = workspaceElementRef.current?.querySelector<HTMLElement>(
+    const root = cursor.documentId === REFERENCE_PDF_DOCUMENT_ID
+      ? referenceWorkspaceElementRef.current
+      : workspaceElementRef.current;
+    const pageElement = root?.querySelector<HTMLElement>(
       `[data-page-index="${cursor.pageIndex}"]`,
     );
-    const cursorElement = workspaceElementRef.current
-      ?.querySelector<HTMLElement>('.page-note-placement-cursor');
+    const cursorElement = root?.querySelector<HTMLElement>('.page-note-placement-cursor');
     const pageBounds = pageElement?.getBoundingClientRect();
     const cursorBounds = cursorElement?.getBoundingClientRect();
     const rotation = combinePageRotation(page.rotation, active.rotation);
@@ -1212,13 +1550,19 @@ export function App({
   const keyboardCursorKey = useCallback((key: string) => {
     const cursor = keyboardCursorRef.current;
     if (!cursor) return;
+    const surface = keyboardCursorSurfaceRef.current;
+    if (surface !== undefined && !isCurrentViewerInputSurface(
+      surface,
+      documentGenerationRef.current,
+      latestReferenceTabIdentityRef.current,
+    )) return;
     if (key === 'Escape') {
       publishKeyboardCursor(null);
       return;
     }
     if (key === 'Enter') {
-      emit({ type: 'page-note-commit', value: clampKeyboardCursor(cursor) });
-      publishKeyboardCursor(null);
+      emitFromSurface({ type: 'page-note-commit', value: clampKeyboardCursor(cursor) }, surface);
+      publishKeyboardCursor(null, surface);
       return;
     }
     const delta = 4;
@@ -1226,8 +1570,8 @@ export function App({
       ...cursor,
       x: cursor.x + (key === 'ArrowLeft' ? -delta : key === 'ArrowRight' ? delta : 0),
       y: cursor.y + (key === 'ArrowUp' ? -delta : key === 'ArrowDown' ? delta : 0),
-    }));
-  }, [clampKeyboardCursor, emit, publishKeyboardCursor]);
+    }), surface);
+  }, [clampKeyboardCursor, emitFromSurface, publishKeyboardCursor]);
   const workspace = (
     <PdfWorkspace
       engine={viewer.engine}
@@ -1237,20 +1581,44 @@ export function App({
       searchResults={searchResults}
       ownedAnnotations={ownedAnnotations}
       sourceNativeAnnotations={sourceNativeAnnotations}
+      sourceAnnotations={sourceAnnotations}
       authoringPreview={authoringPreview}
       keyboardPageNoteCursor={keyboardCursor}
+      {...(keyboardPageNoteSurface === undefined ? {} : { keyboardPageNoteSurface })}
       onKeyboardPageNoteKey={keyboardCursorKey}
       onPageContextMenu={pageContextMenu}
       fillContainer={embeddedInReviewShell}
       {...(activeOwnedAnnotationId === undefined ? {} : { activeOwnedAnnotationId })}
       {...(correspondingOwnedAnnotationId === undefined ? {} : { correspondingOwnedAnnotationId })}
-      onOwnedMarkInteraction={(value) => emit({ type: 'owned-mark', value })}
+      onOwnedMarkInteraction={(value) => emitFromSurface(
+        { type: 'owned-mark', value },
+        { kind: 'main', documentGeneration },
+      )}
       runway={viewerRunway}
       onWorkspaceElement={setWorkspaceElement}
       documentGeneration={documentGeneration}
-      onViewerInteraction={emit}
+      onViewerInteraction={(event) => {
+        const surface = event.surface ?? { kind: 'main' as const, documentGeneration };
+        if (!isCurrentViewerInputSurface(
+          surface,
+          documentGenerationRef.current,
+          latestReferenceTabIdentityRef.current,
+        )) return;
+        if (surface.kind === 'reference') {
+          const currentDocument = registryRef.current?.getStore().getState().core
+            .documents[REFERENCE_PDF_DOCUMENT_ID]?.document;
+          if (!referenceInputDocument.current.isCurrent(
+            currentDocument,
+            surface,
+            documentGenerationRef.current,
+            latestReferenceTabIdentityRef.current,
+          )) return;
+        }
+        emitFromSurface(event, surface);
+      }}
       reverseSyncTexEnabled={reverseSyncTexEnabled}
       referenceViewportHost={referenceViewportHost}
+      referenceTabIdentity={activeReferenceTabIdentity}
       onReferenceViewportElement={setReferenceWorkspaceElement}
       onReferenceScrollIntent={(position) => referenceManualScrollObserver.arm(position)}
     />

@@ -151,6 +151,28 @@ async function placePdfInsertionCaret(
   await page.mouse.up();
 }
 
+async function stableBoundingBox(
+  locator: Locator,
+): Promise<NonNullable<Awaited<ReturnType<Locator['boundingBox']>>>> {
+  let previous: Awaited<ReturnType<Locator['boundingBox']>> = null;
+  let current: Awaited<ReturnType<Locator['boundingBox']>> = null;
+  let stableSamples = 0;
+  await expect.poll(async () => {
+    current = await locator.boundingBox();
+    if (current === null || previous === null) {
+      stableSamples = 0;
+    } else {
+      const unchanged = (['x', 'y', 'width', 'height'] as const)
+        .every((field) => Math.abs(current![field] - previous![field]) < 0.25);
+      stableSamples = unchanged ? stableSamples + 1 : 0;
+    }
+    previous = current;
+    return stableSamples;
+  }).toBeGreaterThanOrEqual(3);
+  if (current === null) throw new Error('Rendered PDF page has no stable bounds.');
+  return current;
+}
+
 test("@critical @representative keeps the local keyboard journey private and round-trips an editable item", async ({ browser, page }) => {
   const requests: { method: string; url: string }[] = [];
   page.on("request", (request) => requests.push({ method: request.method(), url: request.url() }));
@@ -207,7 +229,14 @@ test("@critical @representative keeps the local keyboard journey private and rou
     expect.objectContaining({ subtype: "stamp", contents: "Existing unsupported stamp" }),
     expect.objectContaining({ contents: "Static export proof.", author: "Brad Ross", hasNormalAppearance: true }),
   ]));
-  expect(firstCatalog.nativeAnnotations?.map(({ item }) => item)).toEqual(sourceCatalog.nativeAnnotations?.map(({ item }) => item));
+  const nativeSemantics = (catalog: typeof sourceCatalog) => catalog.nativeAnnotations?.map(({ item }) => {
+    const { id: _id, payload, ...semanticItem } = item;
+    const { identityProvenance: _identityProvenance, ...semanticPayload } = payload;
+    return { ...semanticItem, payload: semanticPayload };
+  });
+  expect(nativeSemantics(firstCatalog)).toEqual(nativeSemantics(sourceCatalog));
+  expect(firstCatalog.nativeAnnotations?.map(({ item }) => item.payload.identityProvenance))
+    .toEqual(['verified', 'verified']);
   for (const original of sourceCatalog.annotations) {
     expect(firstCatalog.annotations.find(({ contents }) => contents === original.contents)?.author).toBe(original.author);
   }
@@ -501,7 +530,18 @@ for (const width of [390, 1280]) test(`@critical landing showcase and PDF contro
   const showcase = page.getByRole('tablist', { name: 'Explore features' });
   await expect(showcase.getByRole('tab', { name: 'Read with focus', exact: true })).toHaveAttribute('aria-selected', 'true');
   for (const label of ['Read with focus', 'Follow references', 'Make comments']) {
-    await expect(showcase.getByText(label, { exact: true })).toBeVisible();
+    const tab = showcase.getByRole('tab', { name: label, exact: true });
+    await expect(tab).toBeVisible();
+    await expect(tab.locator('svg')).toBeVisible();
+    if (width === 390) {
+      await expect(tab.getByText(label, { exact: true })).toBeHidden();
+      await tab.hover();
+      await expect(page.getByRole('tooltip', { name: label, exact: true })).toBeVisible();
+      await page.mouse.move(0, 0);
+      await expect(page.getByRole('tooltip')).toHaveCount(0);
+    } else {
+      await expect(tab.getByText(label, { exact: true })).toBeVisible();
+    }
   }
   for (const name of ['Follow references', 'Make comments', 'Read with focus']) {
     const feature = showcase.getByRole('tab', { name, exact: true });
@@ -532,6 +572,27 @@ for (const width of [390, 1280]) test(`@critical landing showcase and PDF contro
   await page.getByRole('link', { name: 'Try it', exact: true }).click();
   await expect(upload).toBeInViewport();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
+
+test('@critical selecting the reference demo restores its sample only when references are empty', async ({ page }) => {
+  await page.goto('./');
+  const demo = page.frameLocator('iframe[aria-hidden="false"]');
+  await demo.locator('[data-initial-view-ready="true"]').waitFor({ state: 'attached' });
+  const features = page.getByRole('tablist', { name: 'Explore features' });
+  const reference = features.getByRole('tab', { name: 'Follow a reference', exact: true });
+  const appendix = demo.getByRole('tab', { name: 'Appendix A, Page 31', exact: true });
+  await reference.click();
+  await expect(appendix).toBeVisible();
+  await reference.click();
+  await expect(appendix).toHaveCount(1);
+  for (const switchAway of [false, true]) {
+    await demo.getByRole('button', { name: 'Close active reference', exact: true }).click();
+    await expect(appendix).toHaveCount(0);
+    if (switchAway) await features.getByRole('tab', { name: 'Read with focus', exact: true }).click();
+    await reference.click();
+    await expect(appendix).toBeVisible();
+    await expect(demo.locator('[data-reference-pdf-viewport] [data-page-index="30"] > img').first()).toBeVisible();
+  }
 });
 
 test('@critical landing demos support zoom, references, and isolated comments', async ({ page }) => {
@@ -672,7 +733,7 @@ test('@critical selecting demo text opens annotation actions after switching mod
     await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
     await Promise.all(document.getAnimations().map((animation) => animation.finished.catch(() => {})));
   });
-  const box = (await pdf.boundingBox())!;
+  const box = await stableBoundingBox(pdf);
   const scale = box.width / 612;
   // Drag across the unannotated first line of Section 4.1 in the real paper.
   await page.mouse.move(box.x + 52 * scale, box.y + 375 * scale);
@@ -702,7 +763,7 @@ test('@critical visitors can insert text in the comments demo', async ({ page })
     await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
     await Promise.all(document.getAnimations().map((animation) => animation.finished.catch(() => {})));
   });
-  const box = (await pdf.boundingBox())!;
+  const box = await stableBoundingBox(pdf);
   const scale = box.width / 612;
   await page.mouse.click(box.x + 160 * scale, box.y + 375 * scale);
   const caret = demo.locator('[data-review-insertion-caret]');
@@ -717,7 +778,7 @@ test('@critical visitors can insert text in the comments demo', async ({ page })
     await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
     await Promise.all(document.getAnimations().filter((animation) => animation.effect?.getComputedTiming().iterations !== Infinity).map((animation) => animation.finished.catch(() => {})));
   });
-  const reopenedBox = (await pdf.boundingBox())!;
+  const reopenedBox = await stableBoundingBox(pdf);
   const reopenedScale = reopenedBox.width / 612;
   await page.mouse.click(reopenedBox.x + 160 * reopenedScale, reopenedBox.y + 375 * reopenedScale);
   await page.keyboard.type('New text');

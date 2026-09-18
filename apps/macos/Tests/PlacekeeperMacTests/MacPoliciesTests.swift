@@ -1,6 +1,7 @@
 import Foundation
 import AppKit
 import WebKit
+import CryptoKit
 import XCTest
 @testable import PlacekeeperMac
 
@@ -238,6 +239,43 @@ final class MacPoliciesTests: XCTestCase {
         XCTAssertNil(failed.accept(["decision": "resume"], isMainFrame: true, source: source, expectedSource: source))
     }
 
+    @MainActor
+    func testCatastrophicFallbackKeepsReadableMinimumContentSize() {
+        _ = NSApplication.shared
+        let controller = CatastrophicFallbackViewController(
+            documentName: "fixture.pdf",
+            onRetry: {},
+            onDiagnostics: {},
+            onClose: { _ in }
+        )
+
+        XCTAssertGreaterThanOrEqual(controller.preferredContentSize.width, 520)
+        XCTAssertGreaterThanOrEqual(controller.preferredContentSize.height, 220)
+        XCTAssertGreaterThanOrEqual(controller.view.frame.width, controller.preferredContentSize.width)
+        XCTAssertGreaterThanOrEqual(controller.view.frame.height, controller.preferredContentSize.height)
+    }
+
+    func testCatastrophicDiagnosticsReportsOnlyAFixedFailureReasonAndSafeBuild() {
+        let text = CatastrophicDiagnostics.informativeText(
+            build: "0.1.1 /Users/person/private.pdf",
+            reason: .webContentProcessTerminated
+        )
+
+        XCTAssertEqual(
+            text,
+            "Schema: 2\nShell: native-recovery\nBuild: 0.1.1__Users_person_private.pdf\nReason: web-content-process-terminated"
+        )
+        XCTAssertFalse(text.contains("/Users/"))
+        XCTAssertEqual(CatastrophicFailureReason.allCases.count, 13)
+
+        let signalled = CatastrophicDiagnostics.informativeText(
+            build: "0.1.1",
+            reason: .helperProcessExited,
+            helperTermination: ReviewHelperTermination(reason: .uncaughtSignal, status: 9)
+        )
+        XCTAssertTrue(signalled.hasSuffix("Helper termination: uncaught-signal 9"))
+    }
+
     func testVisibleShellRequiresRoutingVisibilityAndSubsequentPaint() {
         var fence = ShellReadinessFence()
         XCTAssertFalse(fence.shellReady(revision: 4))
@@ -432,11 +470,86 @@ final class MacPoliciesTests: XCTestCase {
         }
     }
 
+    func testHelperAccumulatorReassemblesFragmentedMultiByteFrameAboveLegacyLimit() throws {
+        let body = try JSONSerialization.data(withJSONObject: [
+            "type": "refreshed",
+            "payload": String(repeating: "é", count: 1_000_000),
+        ])
+        XCTAssertGreaterThan(body.count, 256 * 1024)
+        XCTAssertLessThan(body.count, macosHelperMaxFrameBytes)
+        var length = UInt32(body.count).bigEndian
+        var frame = withUnsafeBytes(of: &length) { Data($0) }
+        frame.append(body)
+        var accumulator = HelperFrameAccumulator()
+        var messages: [[String: Any]] = []
+        var offset = 0
+        while offset < frame.count {
+            let end = min(offset + 7_777, frame.count)
+            messages.append(contentsOf: try accumulator.append(frame.subdata(in: offset..<end)))
+            offset = end
+        }
+        XCTAssertEqual(messages.count, 1)
+        XCTAssertEqual((messages.first?["payload"] as? String)?.utf8.count, 2_000_000)
+    }
+
+    func testResponseStreamRequiresOrderedIdentityAndVerifiedCompleteBytes() throws {
+        let windowID = "window_12345678"
+        let attemptID = "attempt_12345678"
+        let requestID = "request_12345678"
+        let streamID = "stream_12345678"
+        let body = Data(String(repeating: "é", count: 2_100_000).utf8)
+        let digest = SHA256.hash(data: body).map { String(format: "%02x", $0) }.joined()
+        let count = (body.count + macosHelperResourceChunkBytes - 1) / macosHelperResourceChunkBytes
+        let base: [String: Any] = [
+            "protocolVersion": 1, "windowId": windowID, "attemptId": attemptID, "requestId": requestID,
+        ]
+        var start = base
+        start.merge([
+            "type": "response-stream-start", "streamId": streamID, "totalBytes": body.count,
+            "chunkCount": count, "sha256": digest,
+        ]) { _, next in next }
+        var accumulator = HelperResponseStreamAccumulator()
+        guard case .pending? = accumulator.accept(
+            start, windowID: windowID, attemptID: attemptID, requestID: requestID
+        ) else { return XCTFail("Stream start was rejected") }
+        for sequence in 0..<count {
+            let offset = sequence * macosHelperResourceChunkBytes
+            var chunk = base
+            chunk.merge([
+                "type": "response-stream-chunk", "streamId": streamID, "sequence": sequence,
+                "data": body.subdata(in: offset..<min(offset + macosHelperResourceChunkBytes, body.count)).base64EncodedString(),
+            ]) { _, next in next }
+            let result = accumulator.accept(chunk, windowID: windowID, attemptID: attemptID, requestID: requestID)
+            if sequence + 1 == count {
+                guard case let .complete(reconstructed)? = result else { return XCTFail("Final chunk did not complete") }
+                XCTAssertEqual(reconstructed, body)
+            } else if case .pending? = result {} else { return XCTFail("Intermediate chunk did not remain pending") }
+        }
+
+        var invalid = HelperResponseStreamAccumulator()
+        XCTAssertNil(invalid.accept(start, windowID: windowID, attemptID: attemptID, requestID: "request_wrong_1234"))
+        XCTAssertNotNil(invalid.accept(start, windowID: windowID, attemptID: attemptID, requestID: requestID))
+        var outOfOrder = base
+        outOfOrder.merge([
+            "type": "response-stream-chunk", "streamId": streamID, "sequence": 1,
+            "data": Data([1]).base64EncodedString(),
+        ]) { _, next in next }
+        XCTAssertNil(invalid.accept(outOfOrder, windowID: windowID, attemptID: attemptID, requestID: requestID))
+
+        var oversizedStart = start
+        oversizedStart["totalBytes"] = macosHelperMaxStreamBytes + 1
+        oversizedStart["chunkCount"] = (macosHelperMaxStreamBytes + macosHelperResourceChunkBytes)
+            / macosHelperResourceChunkBytes
+        var oversized = HelperResponseStreamAccumulator()
+        XCTAssertNil(oversized.accept(oversizedStart, windowID: windowID, attemptID: attemptID, requestID: requestID))
+    }
+
     func testHelperReplyParserBindsEnvelopeAndAdmissionDescriptor() {
         let projection: [String: Any] = [
             "sessionId": "11111111-1111-4111-8111-111111111111",
             "generation": 1,
             "revision": 0,
+            "activeAuthoringDraftIds": ["draft_macos_live_1234"],
             "state": ["schemaVersion": 2],
             "scope": ["documentTitle": "Paper.pdf", "launchSurface": "macos"],
             "saveStatus": ["destination": ["phase": "none", "generation": 0]],
@@ -465,6 +578,17 @@ final class MacPoliciesTests: XCTestCase {
         ) else { return XCTFail("expected an admitted reply") }
         XCTAssertEqual(value.resourceID, "resource_12345678")
         XCTAssertEqual(value.projection.sessionID, "11111111-1111-4111-8111-111111111111")
+        XCTAssertEqual(value.projection.activeAuthoringDraftIds, ["draft_macos_live_1234"])
+        var invalidPresence = admitted
+        invalidPresence["projection"] = projection.merging([
+            "activeAuthoringDraftIds": ["draft_macos_live_1234", "draft_macos_live_1234"],
+        ]) { _, new in new }
+        XCTAssertNil(MacReviewHelperReplyParser.parse(
+            invalidPresence,
+            windowID: "window_12345678",
+            attemptID: "attempt_12345678",
+            requestID: "request_12345678"
+        ))
         XCTAssertNil(MacReviewHelperReplyParser.parse(
             admitted.merging(["attemptId": "attempt_other123"]) { _, new in new },
             windowID: "window_12345678",
@@ -476,7 +600,7 @@ final class MacPoliciesTests: XCTestCase {
     func testPageRuntimeRequestRequiresClosedCurrentIdentity() {
         let bootstrap: [String: Any] = [
             "protocol": "placekeeper.review-runtime",
-            "version": 2,
+            "version": 3,
             "kind": "request",
             "runtimeId": "runtime_12345678",
             "requestId": "request_12345678",
@@ -498,7 +622,7 @@ final class MacPoliciesTests: XCTestCase {
 
         let scoped: [String: Any] = [
             "protocol": "placekeeper.review-runtime",
-            "version": 2,
+            "version": 3,
             "kind": "request",
             "runtimeId": "runtime_12345678",
             "requestId": "request_abcdefgh",
@@ -515,6 +639,19 @@ final class MacPoliciesTests: XCTestCase {
             scoped.merging(["runtimeId": "runtime_wrong123"]) { _, new in new },
             runtimeID: "runtime_12345678"
         ))
+
+        for method in [
+            "beginInteraction", "finalizeInteraction", "releaseInteraction", "acknowledgeInteraction",
+            "resolveReadingLocation",
+        ] {
+            XCTAssertEqual(
+                MacPageRuntimeRequest.parse(
+                    scoped.merging(["method": method]) { _, new in new },
+                    runtimeID: "runtime_12345678"
+                )?.method,
+                method
+            )
+        }
     }
 
     func testRecoveryOfferParserKeepsTheServiceOfferExact() {
@@ -548,6 +685,29 @@ final class MacPoliciesTests: XCTestCase {
             if expiry == "invalid" { XCTAssertNil(parsed) }
             else if case let .recoveryOffered(_, value)? = parsed { XCTAssertEqual(value, expiry) }
             else { XCTFail("expected a recovery offer for \(expiry)") }
+        }
+    }
+
+    func testHelperResultParserAcceptsRefreshInteractionAndReadingMethods() {
+        let base: [String: Any] = [
+            "protocolVersion": 1,
+            "windowId": "window_12345678",
+            "attemptId": "attempt_12345678",
+            "requestId": "request_12345678",
+            "type": "result",
+            "payload": ["status": "ok"],
+        ]
+        for method in [
+            "beginInteraction", "finalizeInteraction", "releaseInteraction", "acknowledgeInteraction",
+            "resolveReadingLocation",
+        ] {
+            guard case let .result(parsedMethod, _)? = MacReviewHelperReplyParser.parse(
+                base.merging(["method": method]) { _, new in new },
+                windowID: "window_12345678",
+                attemptID: "attempt_12345678",
+                requestID: "request_12345678"
+            ) else { return XCTFail("expected a result for \(method)") }
+            XCTAssertEqual(parsedMethod, method)
         }
     }
 
@@ -729,7 +889,8 @@ extension MacPoliciesTests {
     func testBridgeAllowsCommittedRevisionWhileRefreshIsPending() async {
         func projection(_ revision: Int) -> MacRuntimeProjection {
             .init(sessionID: "11111111-1111-4111-8111-111111111111", generation: 1,
-                  revision: revision, state: [:], scope: [:], saveStatus: [:], protected: false,
+                  revision: revision, activeAuthoringDraftIds: [],
+                  state: [:], scope: [:], saveStatus: [:], protected: false,
                   location: nil, documentDigest: String(repeating: "a", count: 64), documentByteLength: 100)
         }
         let helper = BridgeTestHelper()
@@ -741,7 +902,7 @@ extension MacPoliciesTests {
         helper.requests.removeFirst().completion(.active(projection(0)))
         await Task.yield()
         func request(_ method: String, revision: Int) -> [String: Any] {
-            ["protocol": "placekeeper.review-runtime", "version": 2, "kind": "request",
+            ["protocol": "placekeeper.review-runtime", "version": 3, "kind": "request",
              "runtimeId": "runtime_test1234", "requestId": "request_" + method,
              "sessionId": projection(0).sessionID, "generation": 1, "revision": revision,
              "method": method, "payload": [String: Any]()]

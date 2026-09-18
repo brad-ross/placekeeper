@@ -14,6 +14,8 @@ import {
 export interface ExistingAnnotation {
   readonly id: string;
   readonly sourceId?: string;
+  readonly sourceObjectPageIndex?: number;
+  readonly sourceObjectAnnotationIndex?: number;
   readonly readerStyle?: SourceAnnotationStyle;
   readonly subtype: string;
   readonly pageIndex: number;
@@ -32,6 +34,8 @@ export type SourceNativeAnnotation = Pick<ExistingAnnotation, 'id' | 'pageIndex'
 export interface ExistingAnnotationSource {
   id: string;
   sourceId?: string;
+  sourceObjectPageIndex?: number;
+  sourceObjectAnnotationIndex?: number;
   readerStyle?: SourceAnnotationStyle;
   subtype: string;
   pageIndex: number;
@@ -62,6 +66,8 @@ export function inventoryExistingAnnotations(
     .map((annotation) => ({
       id: annotation.id,
       ...(annotation.sourceId === undefined ? {} : { sourceId: annotation.sourceId }),
+      ...(annotation.sourceObjectPageIndex === undefined ? {} : { sourceObjectPageIndex: annotation.sourceObjectPageIndex }),
+      ...(annotation.sourceObjectAnnotationIndex === undefined ? {} : { sourceObjectAnnotationIndex: annotation.sourceObjectAnnotationIndex }),
       ...(annotation.readerStyle === undefined ? {} : { readerStyle: annotation.readerStyle }),
       subtype: annotation.subtype,
       pageIndex: annotation.pageIndex,
@@ -83,13 +89,20 @@ export function existingAnnotationKey(
 export function mergeExistingAnnotations(
   discovered: readonly ExistingAnnotation[],
   explicit: readonly ExistingAnnotation[],
-  owned: readonly Pick<ExistingAnnotation, 'id' | 'pageIndex'>[] = [],
+  owned: readonly (Pick<ExistingAnnotation, 'id' | 'pageIndex'> & {
+    readonly sourceObjectPageIndex?: number;
+    readonly sourceObjectAnnotationIndex?: number;
+  })[] = [],
 ): readonly ExistingAnnotation[] {
   const merged = new Map<string, ExistingAnnotation>();
   const ownedKeys = new Set(owned.map(existingAnnotationKey));
+  const ownedSourceObjects = new Set(owned.flatMap((annotation) =>
+    annotation.sourceObjectPageIndex === undefined || annotation.sourceObjectAnnotationIndex === undefined
+      ? [] : [`${annotation.sourceObjectPageIndex}:${annotation.sourceObjectAnnotationIndex}`]));
   for (const annotation of discovered) {
     if (
       !ownedKeys.has(existingAnnotationKey(annotation)) &&
+      !ownedSourceObjects.has(`${annotation.sourceObjectPageIndex}:${annotation.sourceObjectAnnotationIndex}`) &&
       !isNavigationalPdfAnnotationSubtype(annotation.subtype)
     ) {
       merged.set(existingAnnotationKey(annotation), annotation);
@@ -123,7 +136,10 @@ export class ExistingAnnotationDiscoveryAuthority {
     token: ExistingAnnotationDiscoveryToken,
     discovered: readonly ExistingAnnotation[],
     explicit: readonly ExistingAnnotation[],
-    owned: readonly Pick<ExistingAnnotation, 'id' | 'pageIndex'>[] = [],
+    owned: readonly (Pick<ExistingAnnotation, 'id' | 'pageIndex'> & {
+      readonly sourceObjectPageIndex?: number;
+      readonly sourceObjectAnnotationIndex?: number;
+    })[] = [],
   ): ExistingAnnotationsDiscovery | null {
     if (!this.isCurrent(token)) return null;
     const items = mergeExistingAnnotations(discovered, explicit, owned);
@@ -180,6 +196,10 @@ export async function inventoryDocumentAnnotations(
       .map((annotation, annotationIndex) => ({
         id: nativeIds.get(`${page}:${annotationIndex}`) ?? annotation.id,
         ...(nativeIds.has(`${page}:${annotationIndex}`) ? { sourceId: annotation.id } : {}),
+        ...(nativeIds.has(`${page}:${annotationIndex}`) ? {
+          sourceObjectPageIndex: Number(page),
+          sourceObjectAnnotationIndex: annotationIndex,
+        } : {}),
         ...(sourceStyles?.pageAnnotationCounts[Number(page)] === annotations.length && sourceStyles.byIndex.has(`${page}:${annotationIndex}`)
           ? { readerStyle: sourceStyles.byIndex.get(`${page}:${annotationIndex}`)! } : {}),
         subtype: PdfAnnotationSubtypeName[annotation.type] ?? `Unsupported ${annotation.type}`,

@@ -138,6 +138,7 @@ describe("production review commands", () => {
     });
     vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
       const path = String(input);
+      if (path.endsWith("/runtime-state")) return jsonResponse({ state, activeAuthoringDraftIds: [] });
       if (path.endsWith("/state")) return jsonResponse(state);
       if (path.endsWith("/scope")) return jsonResponse({ documentTitle: "Paper.pdf" });
       if (path.endsWith("/save/status")) {
@@ -193,11 +194,8 @@ describe("production review commands", () => {
     vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       const url = String(input);
       requests.push({ url, ...(init === undefined ? {} : { init }) });
-      if (url.endsWith("/state")) {
-        return jsonResponse(requests.filter(({ url: seen }) => seen.endsWith("/state")).length === 1
-          ? predecessor
-          : successor);
-      }
+      if (url.endsWith("/runtime-state")) return jsonResponse({ state: predecessor, activeAuthoringDraftIds: [] });
+      if (url.endsWith("/state")) return jsonResponse(successor);
       if (url.endsWith("/scope")) return jsonResponse({ documentTitle: "paper.pdf" });
       if (url.endsWith("/save/status")) {
         return jsonResponse({
