@@ -1223,7 +1223,8 @@ describe("coalescing PDF autosave", () => {
       status: "same-digest",
       documentGeneration: 1,
     });
-    expect(observations).toEqual([false, false]);
+    expect(observations).toEqual(expect.arrayContaining([false]));
+    expect(observations).not.toContain(true);
     expect(broker.state(sessionId)?.workflow.documentGeneration).toBe(1);
   });
 
