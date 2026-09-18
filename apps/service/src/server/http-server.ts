@@ -1,4 +1,10 @@
-import { ReviewExportConflictError, isReviewExportFence, isSaveDestinationConfirmation, type ReviewExportFence } from "../../../../packages/core/src/review-runtime-protocol.js";
+import {
+  ReviewExportConflictError,
+  isReadingLocationResolutionRequest,
+  isReviewExportFence,
+  isSaveDestinationConfirmation,
+  type ReviewExportFence,
+} from "../../../../packages/core/src/review-runtime-protocol.js";
 import { rejectedDestinationName } from "../saving/pdf-save-coordinator.js";
 import { createHash, randomBytes } from "node:crypto";
 import { readFile, realpath } from "node:fs/promises";
@@ -7,6 +13,7 @@ import type { Socket } from "node:net";
 import { basename, extname, join } from "node:path";
 import {
   RESTRICTIVE_CSP,
+  digestSecretHex,
   validateRequestSecurity,
 } from "../../../../packages/core/src/session-security.js";
 import type { ReviewCommand } from "../../../../packages/core/src/review-model.js";
@@ -27,11 +34,52 @@ import type { PdfSaveCoordinator } from "../saving/pdf-save-coordinator.js";
 import type { DaemonLifecycleCoordinator } from "../host/daemon-lifecycle.js";
 import { ExportCoordinatorError, type ExportCoordinator } from "../export/export-coordinator.js";
 import { openPlacekeeperLink, parsePlacekeeperReadableViewRoute } from "../links/placekeeper-link.js";
+import type { ReviewInteractionAttachment } from "../sessions/review-interactions.js";
 
 const MAX_BODY_BYTES = 256 * 1024;
 const UUID = "[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}";
 const VIEW_UUID = "[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}";
 const RECOVERY_ID = /^[A-Za-z0-9_-]{16,128}$/u;
+const ATTACHMENT_ID = /^[A-Za-z0-9_-]{8,128}$/u;
+const ATTACHMENT_RECOVERY_CREDENTIAL = /^[A-Za-z0-9_-]{43}$/u;
+
+function interactionAttachment(value: unknown, sessionId: string): ReviewInteractionAttachment | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
+  const record = value as Record<string, unknown>;
+  if (Object.keys(record).some((key) => ![
+    "sessionId", "attachmentId", "incarnationId", "capability", "protocolVersion", "capabilities",
+  ].includes(key)) || record.sessionId !== sessionId || record.protocolVersion !== 1 ||
+    typeof record.attachmentId !== "string" || !ATTACHMENT_ID.test(record.attachmentId) ||
+    typeof record.incarnationId !== "string" || !ATTACHMENT_ID.test(record.incarnationId) ||
+    typeof record.capability !== "string" || !/^[A-Za-z0-9_-]{32,128}$/u.test(record.capability) ||
+    !Array.isArray(record.capabilities)) return undefined;
+  return record as unknown as ReviewInteractionAttachment;
+}
+
+function ownerScopedCommandAttachment(
+  command: unknown,
+): { readonly ownerViewId: string } | undefined {
+  if (typeof command !== "object" || command === null || Array.isArray(command)) return undefined;
+  const value = command as Record<string, unknown>;
+  if (value.type === "put-draft") {
+    const draft = value.draft;
+    return typeof draft === "object" && draft !== null && !Array.isArray(draft) &&
+      typeof (draft as Record<string, unknown>).ownerViewId === "string"
+      ? { ownerViewId: (draft as Record<string, unknown>).ownerViewId as string }
+      : undefined;
+  }
+  if (value.type === "add") {
+    const authoring = value.authoring;
+    return typeof authoring === "object" && authoring !== null && !Array.isArray(authoring) &&
+      typeof (authoring as Record<string, unknown>).ownerViewId === "string"
+      ? { ownerViewId: (authoring as Record<string, unknown>).ownerViewId as string }
+      : undefined;
+  }
+  return ["reattach", "apply-draft", "discard-reconciliation"].includes(String(value.type)) &&
+    typeof value.ownerViewId === "string"
+    ? { ownerViewId: value.ownerViewId }
+    : undefined;
+}
 
 function recoveryOfferIdentity(value: unknown): RecoveryOfferIdentity | undefined {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
@@ -325,13 +373,15 @@ export async function startHttpServer(
         "u",
       ).exec(pathname);
       const exportMatch = new RegExp(`^/s/(${UUID})/export$`, "u").exec(pathname);
+      const readingLocationMatch = new RegExp(`^/s/(${UUID})/reading-location$`, "u").exec(pathname);
       const observeMatch = new RegExp(`^/s/(${UUID})/observe$`, "u").exec(pathname);
       const staleMatch = new RegExp(`^/s/(${UUID})/stale$`, "u").exec(pathname);
       const syncTexMatch = new RegExp(`^/s/(${UUID})/synctex/(forward|reverse)$`, "u").exec(pathname);
+      const interactionMatch = new RegExp(`^/s/(${UUID})/interactions/(begin|finalize|release|acknowledge)$`, "u").exec(pathname);
       const mutates = exchangeMatch !== null || resumeMatch !== null || reopenMatch || commandMatch !== null ||
-        exportMatch !== null || observeMatch !== null || staleMatch !== null || syncTexMatch !== null ||
+        exportMatch !== null || observeMatch !== null || staleMatch !== null || syncTexMatch !== null || interactionMatch !== null ||
         (saveMatch !== null && saveMatch[2] !== "status" && saveMatch[2] !== "proposal");
-      const expectsJson = mutates;
+      const expectsJson = mutates || readingLocationMatch !== null;
       const contentLength = Number(request.headers["content-length"] ?? 0);
       const bodyLimit = MAX_BODY_BYTES;
       const failure = validateRequestSecurity(
@@ -607,11 +657,12 @@ export async function startHttpServer(
       }
 
       const stateMatch = new RegExp(`^/s/(${UUID})/state$`, "u").exec(pathname);
+      const runtimeStateMatch = new RegExp(`^/s/(${UUID})/runtime-state$`, "u").exec(pathname);
       const scopeMatch = new RegExp(`^/s/(${UUID})/scope$`, "u").exec(pathname);
       const documentMatch = new RegExp(`^/s/(${UUID})/document/(${UUID})$`, "u").exec(pathname);
       const authenticatedSessionId =
-        stateMatch?.[1] ?? scopeMatch?.[1] ?? documentMatch?.[1] ?? commandMatch?.[1] ??
-        saveMatch?.[1] ?? exportMatch?.[1] ?? observeMatch?.[1] ?? staleMatch?.[1] ?? syncTexMatch?.[1];
+        stateMatch?.[1] ?? runtimeStateMatch?.[1] ?? scopeMatch?.[1] ?? documentMatch?.[1] ?? commandMatch?.[1] ??
+        saveMatch?.[1] ?? exportMatch?.[1] ?? readingLocationMatch?.[1] ?? observeMatch?.[1] ?? staleMatch?.[1] ?? syncTexMatch?.[1] ?? interactionMatch?.[1];
       if (authenticatedSessionId !== undefined) {
         const credential = bearerCredential(request);
         if (
@@ -627,12 +678,31 @@ export async function startHttpServer(
         sendJson(response, 200, broker.state(stateMatch[1]!));
         return;
       }
+      if (runtimeStateMatch !== null && request.method === "GET") {
+        const projection = await broker.runtimeState(runtimeStateMatch[1]!);
+        if (projection === undefined) send(response, 404, "Not found");
+        else sendJson(response, 200, projection);
+        return;
+      }
       if (scopeMatch !== null && request.method === "GET") {
         sendJson(
           response,
           200,
           await broker.sessionScope(scopeMatch[1]!, bearerCredential(request)),
         );
+        return;
+      }
+      if (readingLocationMatch !== null) {
+        if (request.method !== "POST") {
+          send(response, 405, "Method not allowed");
+          return;
+        }
+        const body: unknown = await readJson(request);
+        if (!isReadingLocationResolutionRequest(body)) {
+          send(response, 400, "Invalid reading location");
+          return;
+        }
+        sendJson(response, 200, await broker.resolveReadingLocation(readingLocationMatch[1]!, body));
         return;
       }
       if (saveMatch !== null) {
@@ -722,16 +792,29 @@ export async function startHttpServer(
           send(response, 405, "Method not allowed");
           return;
         }
-        const body = await readJson(request) as { outputPath?: unknown; observationEpoch?: unknown };
-        if (typeof body.outputPath !== "string" || !Number.isSafeInteger(body.observationEpoch) ||
-          (body.observationEpoch as number) <= 0) {
+        const body = await readJson(request) as {
+          outputPath?: unknown;
+          observationEpoch?: unknown;
+          hostHintToken?: unknown;
+          reason?: unknown;
+        };
+        if (typeof body.outputPath !== "string" ||
+          (body.hostHintToken !== undefined && typeof body.hostHintToken !== "string") ||
+          (body.reason !== undefined && !["activation", "reveal", "watcher", "interval"].includes(body.reason as string)) ||
+          (body.hostHintToken === undefined && (!Number.isSafeInteger(body.observationEpoch) ||
+            (body.observationEpoch as number) <= 0))) {
           send(response, 400, "Invalid request");
           return;
         }
-        sendJson(response, 200, await broker.replaceLiveDocument({
+        sendJson(response, 200, await broker.observeLiveDocumentHint({
           sessionId: observeMatch[1]!,
           outputPath: body.outputPath,
-          observationEpoch: body.observationEpoch as number,
+          hostHintToken: typeof body.hostHintToken === "string"
+            ? body.hostHintToken
+            : `legacy:${String(body.observationEpoch)}`,
+          ...(typeof body.reason === "string" ? {
+            hostReason: body.reason as "activation" | "reveal" | "watcher" | "interval",
+          } : {}),
         }));
         return;
       }
@@ -741,13 +824,17 @@ export async function startHttpServer(
           return;
         }
         const body = await readJson(request) as Record<string, unknown>;
-        if (!Number.isSafeInteger(body.observationEpoch) || (body.observationEpoch as number) <= 0) {
+        if ((body.hostHintToken !== undefined && typeof body.hostHintToken !== "string") ||
+          (body.hostHintToken === undefined && (!Number.isSafeInteger(body.observationEpoch) ||
+            (body.observationEpoch as number) <= 0))) {
           send(response, 400, "Invalid request");
           return;
         }
-        sendJson(response, 200, await broker.markLiveDocumentPossiblyStale(
+        sendJson(response, 200, await broker.markLiveDocumentPossiblyStaleHint(
           staleMatch[1]!,
-          body.observationEpoch as number,
+          typeof body.hostHintToken === "string"
+            ? body.hostHintToken
+            : `legacy:${String(body.observationEpoch)}`,
         ));
         return;
       }
@@ -786,6 +873,64 @@ export async function startHttpServer(
           pageIndex: body.pageIndex as number,
           point: { x: (body.point as { x: number }).x, y: (body.point as { y: number }).y },
         }));
+        return;
+      }
+      if (interactionMatch !== null) {
+        if (request.method !== "POST") {
+          send(response, 405, "Method not allowed");
+          return;
+        }
+        const body = await readJson(request) as Record<string, unknown>;
+        const attachment = interactionAttachment(body.attachment, interactionMatch[1]!);
+        if (typeof body.interactionToken !== "string" || !RECOVERY_ID.test(body.interactionToken) ||
+          !Number.isSafeInteger(body.order) || (body.order as number) <= 0 || attachment === undefined) {
+          send(response, 400, "Invalid interaction lifecycle request");
+          return;
+        }
+        const common = {
+          sessionId: interactionMatch[1]!,
+          attachment,
+          interactionToken: body.interactionToken,
+          order: body.order as number,
+        };
+        const action = interactionMatch[2]!;
+        if (action === "begin") {
+          if (!Number.isSafeInteger(body.generation) || (body.generation as number) < 1) {
+            send(response, 400, "Invalid interaction generation");
+            return;
+          }
+          if (body.draftId !== undefined && (typeof body.draftId !== "string" || !RECOVERY_ID.test(body.draftId))) {
+            send(response, 400, "Invalid authoring draft identity");
+            return;
+          }
+          sendJson(response, 200, await broker.beginReviewInteraction({ ...common, generation: body.generation as number,
+            ...(typeof body.draftId === "string" ? { draftId: body.draftId } : {}) }));
+          return;
+        }
+        if (action === "release") {
+          sendJson(response, 200, await broker.releaseReviewInteraction(common));
+          return;
+        }
+        if (action === "acknowledge") {
+          sendJson(response, 200, await broker.acknowledgeReviewInteraction(common));
+          return;
+        }
+        if ((body.outcome !== "applied" && body.outcome !== "discarded") ||
+          typeof body.draftId !== "string" || !RECOVERY_ID.test(body.draftId) ||
+          !Number.isSafeInteger(body.expectedDraftRevision) || (body.expectedDraftRevision as number) < 0) {
+          send(response, 400, "Invalid interaction finalization");
+          return;
+        }
+        const finalized = await broker.finalizeReviewInteraction({
+          ...common,
+          outcome: body.outcome,
+          draftId: body.draftId,
+          expectedDraftRevision: body.expectedDraftRevision as number,
+        });
+        if (body.outcome === "applied" && broker.saveStatus(common.sessionId)?.destination.phase === "active") {
+          void options.saving?.requestSave(common.sessionId);
+        }
+        sendJson(response, 200, finalized);
         return;
       }
       if (documentMatch !== null && request.method === "GET") {
@@ -832,12 +977,30 @@ export async function startHttpServer(
           send(response, 400, "Invalid request");
           return;
         }
+        const body = await readJson(request);
+        const envelope = typeof body === "object" && body !== null && !Array.isArray(body) &&
+          Object.hasOwn(body, "command")
+          ? body as { readonly command?: unknown; readonly attachment?: unknown }
+          : undefined;
+        const command = (envelope?.command ?? body) as ReviewCommand;
+        const authority = ownerScopedCommandAttachment(command);
+        if (authority !== undefined) {
+          const attachment = interactionAttachment(envelope?.attachment, commandMatch[1]!);
+          if (
+            attachment === undefined ||
+            attachment.attachmentId !== authority.ownerViewId ||
+            !broker.authorizeReviewAttachment(commandMatch[1]!, attachment)
+          ) {
+            send(response, 403, "Current review attachment authority is required");
+            return;
+          }
+        }
         const next = await broker.acceptMutation(
           commandMatch[1]!,
-          (await readJson(request)) as ReviewCommand,
+          command,
           expectedGeneration === undefined ? {} : { expectedGeneration },
         );
-        if (broker.saveStatus(commandMatch[1]!)?.destination.phase === "active") {
+        if (command.type !== 'put-draft' && broker.saveStatus(commandMatch[1]!)?.destination.phase === "active") {
           void options.saving?.requestSave(commandMatch[1]!);
         }
         sendJson(response, 200, next);
@@ -941,13 +1104,33 @@ export async function startHttpServer(
       }
       const key = request.headers["sec-websocket-key"];
       if (typeof key !== "string") return reject();
+      const clientIdentity = protocols
+        ?.find((value) => value.startsWith("placekeeper-view."))
+        ?.slice("placekeeper-view.".length);
+      const recoveryCredential = protocols
+        ?.find((value) => value.startsWith("placekeeper-owner."))
+        ?.slice("placekeeper-owner.".length);
+      const interactionOwnerKey = recoveryCredential !== undefined &&
+        ATTACHMENT_RECOVERY_CREDENTIAL.test(recoveryCredential)
+        ? `recovery:${digestSecretHex(recoveryCredential)}`
+        : `connection:${digestSecretHex(credential)}:${
+            clientIdentity !== undefined && ATTACHMENT_ID.test(clientIdentity)
+              ? clientIdentity
+              : randomBytes(18).toString("base64url")
+          }`;
+      const interactionAttachment = broker.replaceInteractionAttachment(match[1]!, interactionOwnerKey);
       const accept = createHash("sha1")
         .update(`${key}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`)
         .digest("base64");
       socket.write(
         `HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\nSec-WebSocket-Protocol: placekeeper\r\n\r\n`,
       );
-      broker.controls.registerSocket(match[1]!, socket, head);
+      broker.controls.registerSocket(match[1]!, socket, head, {
+        readyEvent: { kind: "interaction-attachment", attachment: interactionAttachment },
+        onDisconnect: () => broker.disconnectInteractionIncarnation(
+          match[1]!, interactionOwnerKey, interactionAttachment,
+        ),
+      });
       activity?.complete();
     } catch {
       reject();

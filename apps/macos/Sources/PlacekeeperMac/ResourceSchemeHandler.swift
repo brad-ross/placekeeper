@@ -6,7 +6,7 @@ final class MacDocumentResourceLoader: @unchecked Sendable {
     private let helper: SupervisedReviewHelper
     private let resourceID: String
     private let generation: Int
-    private let byteLength: Int
+    let expectedLength: Int
     private let digest: String
     private let lock = NSLock()
     private var cached: Data?
@@ -19,7 +19,7 @@ final class MacDocumentResourceLoader: @unchecked Sendable {
         self.helper = helper
         resourceID = admission.resourceID
         generation = admission.generation
-        byteLength = admission.byteLength
+        expectedLength = admission.byteLength
         digest = admission.digest
     }
 
@@ -31,8 +31,8 @@ final class MacDocumentResourceLoader: @unchecked Sendable {
         guard !loading else { lock.unlock(); return }
         loading = true
         lock.unlock()
-        diagnostic("resource-load-start: \(byteLength) bytes")
-        guard let accumulated = NSMutableData(capacity: byteLength) else {
+        diagnostic("resource-load-start: \(expectedLength) bytes")
+        guard let accumulated = NSMutableData(capacity: expectedLength) else {
             fail(URLError(.dataLengthExceedsMaximum)); return
         }
         read(offset: 0, accumulated: accumulated)
@@ -57,7 +57,7 @@ final class MacDocumentResourceLoader: @unchecked Sendable {
     }
 
     private func read(offset: Int, accumulated: NSMutableData) {
-        let length = min(macosHelperResourceChunkBytes, byteLength - offset)
+        let length = min(macosHelperResourceChunkBytes, expectedLength - offset)
         guard length > 0 else { finish(Data(referencing: accumulated)); return }
         let expectedSequence = offset / macosHelperResourceChunkBytes
         guard helper.request(type: "read-resource", fields: [
@@ -71,13 +71,13 @@ final class MacDocumentResourceLoader: @unchecked Sendable {
             guard !self.isInvalidated else { return }
             guard case let .resource(sequence, bytes, done)? = reply,
                   sequence == expectedSequence, !bytes.isEmpty, bytes.count <= length,
-                  done == (offset + bytes.count >= self.byteLength) else {
+                  done == (offset + bytes.count >= self.expectedLength) else {
                 self.diagnostic("resource-chunk-invalid: sequence \(expectedSequence)")
                 self.fail(URLError(.cannotDecodeContentData)); return
             }
             self.diagnostic("resource-chunk: sequence \(sequence), \(bytes.count) bytes, done \(done)")
             accumulated.append(bytes)
-            guard accumulated.length <= self.byteLength else {
+            guard accumulated.length <= self.expectedLength else {
                 self.fail(URLError(.dataLengthExceedsMaximum)); return
             }
             if done { self.finish(Data(referencing: accumulated)) }
@@ -90,7 +90,7 @@ final class MacDocumentResourceLoader: @unchecked Sendable {
 
     private func finish(_ bytes: Data) {
         let computed = SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined()
-        guard bytes.count == byteLength, computed == digest, bytes.starts(with: Data("%PDF".utf8)) else {
+        guard bytes.count == expectedLength, computed == digest, bytes.starts(with: Data("%PDF".utf8)) else {
             diagnostic("resource-validation-failed")
             fail(URLError(.cannotDecodeContentData)); return
         }
@@ -131,11 +131,11 @@ final class MacDocumentResourceLoader: @unchecked Sendable {
 final class MacSchemeHandler: NSObject, WKURLSchemeHandler, @unchecked Sendable {
     private let packagedRoot: URL
     private let manifestKeys: Set<String>
-    private let documentLoader: MacDocumentResourceLoader
     private let resourceID: String
-    private let generation: Int
-    private let byteLength: Int
+    private let helper: SupervisedReviewHelper
     private let lock = NSLock()
+    private var documentLoaders: [Int: MacDocumentResourceLoader] = [:]
+    private var currentGeneration: Int
     private var liveTasks = Set<ObjectIdentifier>()
     private var invalidated = false
     private let diagnosticsEnabled = ProcessInfo.processInfo.environment["PLACEKEEPER_MAC_DIAGNOSTICS"] == "1"
@@ -143,18 +143,68 @@ final class MacSchemeHandler: NSObject, WKURLSchemeHandler, @unchecked Sendable 
     init(packagedRoot: URL, manifestKeys: Set<String>, helper: SupervisedReviewHelper, admission: MacReviewAdmission) {
         self.packagedRoot = packagedRoot.resolvingSymlinksInPath().standardizedFileURL
         self.manifestKeys = manifestKeys
-        documentLoader = MacDocumentResourceLoader(helper: helper, admission: admission)
+        self.helper = helper
         resourceID = admission.resourceID
-        generation = admission.generation
-        byteLength = admission.byteLength
+        currentGeneration = admission.generation
+        documentLoaders[admission.generation] = MacDocumentResourceLoader(helper: helper, admission: admission)
     }
 
-    func loadDocument(completion: @escaping (Result<Data, Error>) -> Void) {
-        documentLoader.load(completion: completion)
+    func install(projection: MacRuntimeProjection) {
+        let admission = MacReviewAdmission(
+            provisionalID: "successor_resource", resourceID: resourceID,
+            generation: projection.generation, byteLength: projection.documentByteLength,
+            digest: projection.documentDigest, displayName: "successor.pdf", projection: projection
+        )
+        lock.lock()
+        if documentLoaders[projection.generation] == nil {
+            documentLoaders[projection.generation] = MacDocumentResourceLoader(helper: helper, admission: admission)
+        }
+        let abandoned = documentLoaders.keys.filter {
+            $0 != currentGeneration && $0 != projection.generation
+        }
+        let abandonedLoaders = abandoned.compactMap { documentLoaders.removeValue(forKey: $0) }
+        lock.unlock()
+        for loader in abandonedLoaders { loader.invalidate() }
     }
 
-    func releaseDocumentCache() {
-        documentLoader.releaseCache()
+    func loadDocument(generation: Int, completion: @escaping (Result<Data, Error>) -> Void) {
+        lock.lock()
+        let loader = documentLoaders[generation]
+        lock.unlock()
+        guard let loader else { completion(.failure(URLError(.resourceUnavailable))); return }
+        loader.load(completion: completion)
+    }
+
+    func adopt(generation: Int) {
+        lock.lock()
+        currentGeneration = generation
+        let stale = documentLoaders.keys.filter { $0 != generation }
+        let loaders = stale.compactMap { documentLoaders.removeValue(forKey: $0) }
+        lock.unlock()
+        for loader in loaders { loader.invalidate() }
+    }
+
+    func acknowledgeAdoption(
+        projection: MacRuntimeProjection,
+        completion: @escaping (Bool) -> Void
+    ) {
+        guard helper.request(type: "adopt-resource", fields: [
+            "resourceId": resourceID,
+            "generation": projection.generation,
+            "byteLength": projection.documentByteLength,
+            "digest": projection.documentDigest,
+        ], completion: { reply in
+            guard case let .resourceAdopted(generation)? = reply,
+                  generation == projection.generation else { completion(false); return }
+            completion(true)
+        }) != nil else { completion(false); return }
+    }
+
+    func releaseDocumentCache(generation: Int) {
+        lock.lock()
+        let loader = documentLoaders[generation]
+        lock.unlock()
+        loader?.releaseCache()
     }
 
     func webView(_ webView: WKWebView, start urlSchemeTask: WKURLSchemeTask) {
@@ -174,9 +224,15 @@ final class MacSchemeHandler: NSObject, WKURLSchemeHandler, @unchecked Sendable 
             }
             respond(urlSchemeTask, id: taskID, url: url, bytes: bytes, mime: mimeType(for: key)); return
         }
-        guard let identity = MacSchemePolicy.resourceIdentity(for: url), identity.id == resourceID,
-              identity.generation == generation else {
+        guard let identity = MacSchemePolicy.resourceIdentity(for: url), identity.id == resourceID else {
             diagnostic("resource-request-rejected")
+            fail(urlSchemeTask, id: taskID, error: URLError(.noPermissionsToReadFile)); return
+        }
+        lock.lock()
+        let loader = documentLoaders[identity.generation]
+        let expectedLength = loader?.expectedLength
+        lock.unlock()
+        guard let loader, let expectedLength else {
             fail(urlSchemeTask, id: taskID, error: URLError(.noPermissionsToReadFile)); return
         }
         diagnostic("document-resource-request")
@@ -184,10 +240,10 @@ final class MacSchemeHandler: NSObject, WKURLSchemeHandler, @unchecked Sendable 
             urlSchemeTask,
             id: taskID,
             url: url,
-            expectedLength: byteLength,
+            expectedLength: expectedLength,
             mime: "application/pdf"
         ) else { return }
-        documentLoader.load { [weak self, weak task = urlSchemeTask as AnyObject] result in
+        loader.load { [weak self, weak task = urlSchemeTask as AnyObject] result in
             DispatchQueue.main.async {
                 guard let self, let task = task as? WKURLSchemeTask else { return }
                 switch result {
@@ -208,8 +264,10 @@ final class MacSchemeHandler: NSObject, WKURLSchemeHandler, @unchecked Sendable 
         lock.lock()
         invalidated = true
         liveTasks.removeAll()
+        let loaders = Array(documentLoaders.values)
+        documentLoaders.removeAll()
         lock.unlock()
-        documentLoader.invalidate()
+        for loader in loaders { loader.invalidate() }
     }
 
     private func respond(_ task: WKURLSchemeTask, id: ObjectIdentifier, url: URL, bytes: Data, mime: String) {

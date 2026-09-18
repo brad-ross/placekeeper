@@ -19,16 +19,25 @@ import {
   startHttpServer,
   type LocalHttpServer,
 } from "../src/server/http-server.js";
-import { SessionBroker } from "../src/sessions/session-broker.js";
+import { SessionBroker as RawSessionBroker } from "../src/sessions/session-broker.js";
 import type { LaunchSurface, SessionLaunch } from "../src/sessions/session-broker.js";
 import { SessionControlRegistry } from "../src/sessions/control-socket.js";
 
 const temporaryDirectories: string[] = [];
 const servers: LocalHttpServer[] = [];
+const activeBrokers = new Set<RawSessionBroker>();
+class SessionBroker extends RawSessionBroker {
+  constructor(options: ConstructorParameters<typeof RawSessionBroker>[0]) {
+    super(options);
+    activeBrokers.add(this);
+  }
+}
 
 afterEach(async () => {
   vi.restoreAllMocks();
   await Promise.all(servers.splice(0).map((server) => server.close()));
+  await Promise.allSettled([...activeBrokers].map((broker) => broker.quiesceForShutdown()));
+  activeBrokers.clear();
   await Promise.all(
     temporaryDirectories.splice(0).map((path) =>
       rm(path, { recursive: true, force: true }),
@@ -327,6 +336,8 @@ async function attemptControlUpgrade(input: {
   readonly sessionId: string;
   readonly credential?: string;
   readonly origin?: string;
+  readonly viewId?: string;
+  readonly ownerCredential?: string;
 }): Promise<{
   readonly accepted: false;
 } | {
@@ -334,6 +345,8 @@ async function attemptControlUpgrade(input: {
   readonly protocol: string | undefined;
   readonly rawHeaders: readonly string[];
   readonly close: Promise<void>;
+  readonly attachment: Promise<Record<string, unknown>>;
+  readonly destroy: () => void;
 }> {
   return new Promise((resolve) => {
     const request = httpRequest({
@@ -349,15 +362,29 @@ async function attemptControlUpgrade(input: {
         "sec-websocket-version": "13",
         ...(input.credential === undefined
           ? {}
-          : { "sec-websocket-protocol": `placekeeper, placekeeper-auth.${input.credential}` }),
+          : { "sec-websocket-protocol": `placekeeper, placekeeper-auth.${input.credential}${input.viewId === undefined ? "" : `, placekeeper-view.${input.viewId}`}${input.ownerCredential === undefined ? "" : `, placekeeper-owner.${input.ownerCredential}`}` }),
       },
     });
-    request.on("upgrade", (response, socket) => {
+    request.on("upgrade", (response, socket, head) => {
+      const attachment = Promise.withResolvers<Record<string, unknown>>();
+      const receive = (data: Buffer) => {
+        if (data.byteLength < 2) return;
+        const marker = data[1]! & 0x7f;
+        const headerBytes = marker === 126 ? 4 : 2;
+        const length = marker === 126 ? data.readUInt16BE(2) : marker;
+        if (marker === 127 || data.byteLength < length + headerBytes) return;
+        const value = JSON.parse(data.subarray(headerBytes, length + headerBytes).toString("utf8")) as { kind?: string; attachment?: Record<string, unknown> };
+        if (value.kind === "interaction-attachment" && value.attachment !== undefined) attachment.resolve(value.attachment);
+      };
+      socket.on("data", receive);
+      if (head.byteLength > 0) receive(head);
       resolve({
         accepted: true,
         protocol: response.headers["sec-websocket-protocol"],
         rawHeaders: response.rawHeaders,
         close: new Promise<void>((closed) => socket.once("close", closed)),
+        attachment: attachment.promise,
+        destroy: () => socket.destroy(),
       });
     });
     request.on("error", () => resolve({ accepted: false }));
@@ -385,6 +412,284 @@ function postJson(
 }
 
 describe("loopback HTTP boundary", () => {
+  it("authenticates bounded read-only reading-location requests to one session", async () => {
+    const { broker, launch, directory, server } = await openBroker();
+    const exchange = await postJson(
+      `${server.origin}/s/${launch.sessionId}/exchange`,
+      { capability: launch.fragment.slice("#cap=".length) },
+    );
+    const { credential } = await exchange.json() as { credential: string };
+    const readingUrl = `${server.origin}/s/${launch.sessionId}/reading-location`;
+    const request = {
+      generation: 2,
+      anchor: {
+        kind: "caret",
+        pageIndex: 0,
+        leftContext: "left",
+        rightContext: "right",
+        rect: { x: 1, y: 2, width: 1, height: 8 },
+      },
+    };
+
+    expect((await postJson(readingUrl, request)).status).toBe(401);
+    expect((await postJson(readingUrl, {
+      ...request,
+      anchor: { ...request.anchor, leftContext: "x".repeat(65) },
+    }, { authorization: `Bearer ${credential}` })).status).toBe(400);
+    const stale = await postJson(readingUrl, request, {
+      authorization: `Bearer ${credential}`,
+    });
+    expect(stale.status).toBe(200);
+    await expect(stale.json()).resolves.toEqual({ status: "stale", generation: 1 });
+
+    const foreignPdf = join(directory, "foreign.pdf");
+    await writeFile(foreignPdf, "%PDF-1.7\nforeign document text\n%%EOF");
+    const foreign = await broker.openReview({ pdfPath: foreignPdf, surface: "browser" });
+    if (foreign.kind !== "opened") throw new Error("Expected a foreign review session");
+    const foreignExchange = await postJson(
+      `${server.origin}/s/${foreign.launch.sessionId}/exchange`,
+      { capability: foreign.launch.fragment.slice("#cap=".length) },
+    );
+    const foreignCredential = (await foreignExchange.json() as { credential: string }).credential;
+    expect((await postJson(readingUrl, request, {
+      authorization: `Bearer ${foreignCredential}`,
+    })).status).toBe(401);
+  });
+
+  it("authenticates and orders the shared interaction lifecycle over HTTP", async () => {
+    const { broker, launch, server } = await openBroker();
+    const exchanged = await postJson(
+      `${server.origin}/s/${launch.sessionId}/exchange`,
+      { capability: launch.fragment.slice("#cap=".length) },
+    );
+    const { credential } = await exchanged.json() as { credential: string };
+    const headers = { authorization: `Bearer ${credential}` };
+    const root = `${server.origin}/s/${launch.sessionId}/interactions`;
+    const token = "interaction_transport_1234";
+    const ownerCredential = "A".repeat(43);
+    const control = await attemptControlUpgrade({ server, sessionId: launch.sessionId, credential,
+      origin: server.origin, viewId: "window-transport-1234", ownerCredential });
+    if (!control.accepted) throw new Error("Expected authenticated control attachment");
+    const attachment = await control.attachment;
+
+    expect((await postJson(`${root}/begin`, { interactionToken: token, order: 1, generation: 1 })).status).toBe(401);
+    const begun = await postJson(`${root}/begin`, { attachment, interactionToken: token, order: 1, generation: 1 }, headers);
+    expect(await begun.json()).toMatchObject({ status: "accepted", generation: 1 });
+    expect(broker.interactions.held(launch.sessionId)).toBe(true);
+    const duplicate = await postJson(`${root}/begin`, { attachment, interactionToken: token, order: 1, generation: 1 }, headers);
+    expect(await duplicate.json()).toMatchObject({ status: "accepted", generation: 1 });
+    const released = await postJson(`${root}/release`, { attachment, interactionToken: token, order: 2 }, headers);
+    expect(await released.json()).toMatchObject({ status: "released" });
+    expect(broker.interactions.held(launch.sessionId)).toBe(false);
+
+    const finalizedToken = "interaction_finalize_1234";
+    const draftId = "00000000-0000-4000-8000-000000000321";
+    const putDraft = { type: "put-draft", expectedRevision: 0,
+      expectedDraftRevision: -1, draft: { id: draftId, ownerViewId: attachment.attachmentId as string,
+        baseGeneration: 1, revision: 0, kind: "highlight", pageIndex: 0, text: "transport draft",
+        anchor: { kind: "selection", pageIndex: 0, quote: "transport", prefix: "", suffix: "",
+          rect: { x: 1, y: 1, width: 5, height: 5 }, segmentRects: [{ x: 1, y: 1, width: 5, height: 5 }] },
+        disposition: { kind: "resolved", generation: 1 }, status: "protected",
+        createdAt: "2026-09-15T00:00:00.000Z", updatedAt: "2026-09-15T00:00:00.000Z" } } as const;
+    const cross = await attemptControlUpgrade({ server, sessionId: launch.sessionId, credential,
+      origin: server.origin, viewId: "window-cross-attachment-1234" });
+    if (!cross.accepted) throw new Error("Expected cross-attachment control connection");
+    const crossAttachment = await cross.attachment;
+    const commandUrl = `${server.origin}/s/${launch.sessionId}/commands`;
+    expect((await postJson(commandUrl, { command: putDraft, attachment: crossAttachment }, headers)).status).toBe(403);
+    expect((await postJson(commandUrl, { command: putDraft, attachment: {
+      ...attachment, capability: "B".repeat(43),
+    } }, headers)).status).toBe(403);
+    expect(broker.state(launch.sessionId)?.revision).toBe(0);
+    expect((await postJson(commandUrl, { command: putDraft, attachment }, headers)).status).toBe(200);
+    const crossToken = "interaction_cross_attachment_1234";
+    await postJson(`${root}/begin`, { attachment: crossAttachment, interactionToken: crossToken,
+      order: 1, generation: 1, draftId }, headers);
+    expect((await postJson(`${root}/finalize`, { attachment: crossAttachment,
+      interactionToken: crossToken, order: 2, outcome: "discarded", draftId,
+      expectedDraftRevision: 0 }, headers)).status).toBe(409);
+    expect(broker.state(launch.sessionId)?.pendingDrafts).toHaveLength(1);
+    await postJson(`${root}/release`, { attachment: crossAttachment,
+      interactionToken: crossToken, order: 3 }, headers);
+    cross.destroy();
+    await postJson(`${root}/begin`, {
+      attachment, interactionToken: finalizedToken, order: 3, generation: 1,
+    }, headers);
+    const finalizeBody = {
+      interactionToken: finalizedToken,
+      order: 4,
+      outcome: "applied",
+      draftId,
+      expectedDraftRevision: 0,
+      attachment,
+    };
+    const finalized = await postJson(`${root}/finalize`, finalizeBody, headers);
+    const receipt = await finalized.json();
+    expect(receipt).toMatchObject({ status: "finalized", outcome: "applied", reviewRevision: 2 });
+    expect(broker.state(launch.sessionId)).toMatchObject({ revision: 2, pendingDrafts: [] });
+    expect(await (await postJson(`${root}/finalize`, finalizeBody, headers)).json()).toEqual(receipt);
+    const second = await attemptControlUpgrade({ server, sessionId: launch.sessionId, credential,
+      origin: server.origin, viewId: "window-transport-5678" });
+    if (!second.accepted) throw new Error("Expected a second authenticated attachment");
+    const secondAttachment = await second.attachment;
+    expect(secondAttachment.attachmentId).not.toBe(attachment.attachmentId);
+    await postJson(`${root}/begin`, { attachment, interactionToken: "hold-window-one-1234", order: 6, generation: 1 }, headers);
+    await postJson(`${root}/begin`, { attachment: secondAttachment, interactionToken: "hold-window-two-1234", order: 1, generation: 1 }, headers);
+    control.destroy();
+    await control.close;
+    expect(broker.interactions.held(launch.sessionId)).toBe(true);
+    const reconnected = await attemptControlUpgrade({ server, sessionId: launch.sessionId, credential,
+      origin: server.origin, viewId: "window-transport-1234", ownerCredential });
+    if (!reconnected.accepted) throw new Error("Expected reconnected attachment");
+    const reconnectedAttachment = await reconnected.attachment;
+    expect(reconnectedAttachment.attachmentId).toBe(attachment.attachmentId);
+    expect(reconnectedAttachment.incarnationId).not.toBe(attachment.incarnationId);
+    expect(await (await postJson(`${root}/begin`, {
+      attachment, interactionToken: "stale-window-request-1234", order: 7, generation: 1,
+    }, headers)).json()).toMatchObject({ status: "unauthorized" });
+    expect((await postJson(commandUrl, { command: {
+      ...putDraft,
+      expectedRevision: 2,
+      draft: { ...putDraft.draft, id: "00000000-0000-4000-8000-000000000654" },
+    }, attachment }, headers)).status).toBe(403);
+    expect(await (await postJson(`${root}/acknowledge`, {
+      interactionToken: finalizedToken, order: 1, attachment: reconnectedAttachment,
+    }, headers)).json()).toMatchObject({ status: "released" });
+    await postJson(`${root}/begin`, { attachment: reconnectedAttachment,
+      interactionToken: "hold-window-one-reconnected-1234", order: 2, generation: 1 }, headers);
+    await postJson(`${root}/release`, { attachment: secondAttachment,
+      interactionToken: "hold-window-two-1234", order: 2 }, headers);
+    expect(broker.interactions.held(launch.sessionId)).toBe(true);
+    await postJson(`${root}/release`, { attachment: reconnectedAttachment,
+      interactionToken: "hold-window-one-reconnected-1234", order: 3 }, headers);
+    expect(broker.interactions.held(launch.sessionId)).toBe(false);
+    second.destroy();
+    reconnected.destroy();
+  });
+
+  it("replays and acknowledges a durable finalize receipt after broker restart using a secret attachment recovery identity", async () => {
+    const { broker, launch, directory, pdf, server } = await openBroker();
+    const firstExchange = await postJson(
+      `${server.origin}/s/${launch.sessionId}/exchange`,
+      { capability: launch.fragment.slice("#cap=".length) },
+    );
+    const firstCredential = (await firstExchange.json() as { credential: string }).credential;
+    const ownerCredential = "C".repeat(43);
+    const firstControl = await attemptControlUpgrade({
+      server,
+      sessionId: launch.sessionId,
+      credential: firstCredential,
+      origin: server.origin,
+      viewId: "window-before-restart-1234",
+      ownerCredential,
+    });
+    if (!firstControl.accepted) throw new Error("Expected pre-restart control attachment");
+    const firstAttachment = await firstControl.attachment;
+    const interactionToken = "interaction_restart_retry_1234";
+    const draftId = "00000000-0000-4000-8000-000000000777";
+    const firstHeaders = { authorization: `Bearer ${firstCredential}` };
+    const commandUrl = `${server.origin}/s/${launch.sessionId}/commands`;
+    const interactionRoot = `${server.origin}/s/${launch.sessionId}/interactions`;
+    const putDraft = {
+      type: "put-draft",
+      expectedRevision: 0,
+      expectedDraftRevision: -1,
+      draft: {
+        id: draftId,
+        ownerViewId: firstAttachment.attachmentId as string,
+        baseGeneration: 1,
+        revision: 0,
+        kind: "highlight",
+        pageIndex: 0,
+        text: "restart receipt",
+        anchor: {
+          kind: "selection",
+          pageIndex: 0,
+          quote: "restart",
+          prefix: "",
+          suffix: "",
+          rect: { x: 1, y: 1, width: 5, height: 5 },
+          segmentRects: [{ x: 1, y: 1, width: 5, height: 5 }],
+        },
+        disposition: { kind: "resolved", generation: 1 },
+        status: "protected",
+        createdAt: "2026-09-15T00:00:00.000Z",
+        updatedAt: "2026-09-15T00:00:00.000Z",
+      },
+    } as const;
+    expect((await postJson(commandUrl, { command: putDraft, attachment: firstAttachment }, firstHeaders)).status).toBe(200);
+    await postJson(`${interactionRoot}/begin`, {
+      attachment: firstAttachment,
+      interactionToken,
+      order: 1,
+      generation: 1,
+    }, firstHeaders);
+    const finalize = {
+      attachment: firstAttachment,
+      interactionToken,
+      order: 2,
+      outcome: "applied",
+      draftId,
+      expectedDraftRevision: 0,
+    } as const;
+    const receipt = await (await postJson(`${interactionRoot}/finalize`, finalize, firstHeaders)).json();
+    expect(receipt).toMatchObject({ status: "finalized", outcome: "applied", reviewRevision: 2 });
+
+    firstControl.destroy();
+    await firstControl.close;
+    await server.close();
+    servers.splice(servers.indexOf(server), 1);
+    await broker.quiesceForShutdown();
+
+    const restarted = new SessionBroker({ recoveryRoot: join(directory, "recovery") });
+    const offered = await restarted.openReview({ pdfPath: pdf, surface: "browser" });
+    if (offered.kind !== "recovery-offered") throw new Error("Expected durable receipt recovery offer");
+    const resumed = await restarted.openReview({
+      pdfPath: pdf,
+      surface: "browser",
+      recoveryDecision: "resume",
+      recoveryOffer: offered.recoveryOffer,
+      recoveryOperationId: randomUUID(),
+    });
+    if (resumed.kind !== "opened") throw new Error("Expected resumed durable review");
+    const restartedServer = await startHttpServer(restarted);
+    servers.push(restartedServer);
+    const restartedExchange = await postJson(
+      `${restartedServer.origin}/s/${resumed.launch.sessionId}/exchange`,
+      { capability: resumed.launch.fragment.slice("#cap=".length) },
+    );
+    const restartedCredential = (await restartedExchange.json() as { credential: string }).credential;
+    expect(restartedCredential).not.toBe(firstCredential);
+    const restartedControl = await attemptControlUpgrade({
+      server: restartedServer,
+      sessionId: resumed.launch.sessionId,
+      credential: restartedCredential,
+      origin: restartedServer.origin,
+      viewId: "window-after-restart-5678",
+      ownerCredential,
+    });
+    if (!restartedControl.accepted) throw new Error("Expected post-restart control attachment");
+    const restartedAttachment = await restartedControl.attachment;
+    expect(restartedAttachment.attachmentId).toBe(firstAttachment.attachmentId);
+    expect(restartedAttachment.incarnationId).not.toBe(firstAttachment.incarnationId);
+    const restartedHeaders = { authorization: `Bearer ${restartedCredential}` };
+    const restartedRoot = `${restartedServer.origin}/s/${resumed.launch.sessionId}/interactions`;
+    const replay = await (await postJson(`${restartedRoot}/finalize`, {
+      ...finalize,
+      attachment: restartedAttachment,
+      order: 1,
+    }, restartedHeaders)).json();
+    expect(replay).toEqual(receipt);
+    expect(await (await postJson(`${restartedRoot}/acknowledge`, {
+      attachment: restartedAttachment,
+      interactionToken,
+      order: 2,
+    }, restartedHeaders)).json()).toMatchObject({ status: "released" });
+    const stored = await new DraftSnapshotStore(join(directory, "recovery", resumed.launch.sessionId)).recover();
+    expect(stored?.schemaVersion === 3 ? stored.interactionReceipts : undefined).toEqual([]);
+    restartedControl.destroy();
+  });
+
   it("authenticates generated-output stale and observation mutations", async () => {
     const { broker, launch, pdf, server } = await openBroker({ generatedOutput: true });
     const exchanged = await postJson(

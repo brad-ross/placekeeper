@@ -151,6 +151,28 @@ async function placePdfInsertionCaret(
   await page.mouse.up();
 }
 
+async function stableBoundingBox(
+  locator: Locator,
+): Promise<NonNullable<Awaited<ReturnType<Locator['boundingBox']>>>> {
+  let previous: Awaited<ReturnType<Locator['boundingBox']>> = null;
+  let current: Awaited<ReturnType<Locator['boundingBox']>> = null;
+  let stableSamples = 0;
+  await expect.poll(async () => {
+    current = await locator.boundingBox();
+    if (current === null || previous === null) {
+      stableSamples = 0;
+    } else {
+      const unchanged = (['x', 'y', 'width', 'height'] as const)
+        .every((field) => Math.abs(current![field] - previous![field]) < 0.25);
+      stableSamples = unchanged ? stableSamples + 1 : 0;
+    }
+    previous = current;
+    return stableSamples;
+  }).toBeGreaterThanOrEqual(3);
+  if (current === null) throw new Error('Rendered PDF page has no stable bounds.');
+  return current;
+}
+
 test("@critical @representative keeps the local keyboard journey private and round-trips an editable item", async ({ browser, page }) => {
   const requests: { method: string; url: string }[] = [];
   page.on("request", (request) => requests.push({ method: request.method(), url: request.url() }));
@@ -207,7 +229,14 @@ test("@critical @representative keeps the local keyboard journey private and rou
     expect.objectContaining({ subtype: "stamp", contents: "Existing unsupported stamp" }),
     expect.objectContaining({ contents: "Static export proof.", author: "Brad Ross", hasNormalAppearance: true }),
   ]));
-  expect(firstCatalog.nativeAnnotations?.map(({ item }) => item)).toEqual(sourceCatalog.nativeAnnotations?.map(({ item }) => item));
+  const nativeSemantics = (catalog: typeof sourceCatalog) => catalog.nativeAnnotations?.map(({ item }) => {
+    const { id: _id, payload, ...semanticItem } = item;
+    const { identityProvenance: _identityProvenance, ...semanticPayload } = payload;
+    return { ...semanticItem, payload: semanticPayload };
+  });
+  expect(nativeSemantics(firstCatalog)).toEqual(nativeSemantics(sourceCatalog));
+  expect(firstCatalog.nativeAnnotations?.map(({ item }) => item.payload.identityProvenance))
+    .toEqual(['verified', 'verified']);
   for (const original of sourceCatalog.annotations) {
     expect(firstCatalog.annotations.find(({ contents }) => contents === original.contents)?.author).toBe(original.author);
   }
@@ -704,7 +733,7 @@ test('@critical selecting demo text opens annotation actions after switching mod
     await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
     await Promise.all(document.getAnimations().map((animation) => animation.finished.catch(() => {})));
   });
-  const box = (await pdf.boundingBox())!;
+  const box = await stableBoundingBox(pdf);
   const scale = box.width / 612;
   // Drag across the unannotated first line of Section 4.1 in the real paper.
   await page.mouse.move(box.x + 52 * scale, box.y + 375 * scale);
@@ -734,7 +763,7 @@ test('@critical visitors can insert text in the comments demo', async ({ page })
     await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
     await Promise.all(document.getAnimations().map((animation) => animation.finished.catch(() => {})));
   });
-  const box = (await pdf.boundingBox())!;
+  const box = await stableBoundingBox(pdf);
   const scale = box.width / 612;
   await page.mouse.click(box.x + 160 * scale, box.y + 375 * scale);
   const caret = demo.locator('[data-review-insertion-caret]');
@@ -749,7 +778,7 @@ test('@critical visitors can insert text in the comments demo', async ({ page })
     await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
     await Promise.all(document.getAnimations().filter((animation) => animation.effect?.getComputedTiming().iterations !== Infinity).map((animation) => animation.finished.catch(() => {})));
   });
-  const reopenedBox = (await pdf.boundingBox())!;
+  const reopenedBox = await stableBoundingBox(pdf);
   const reopenedScale = reopenedBox.width / 612;
   await page.mouse.click(reopenedBox.x + 160 * reopenedScale, reopenedBox.y + 375 * reopenedScale);
   await page.keyboard.type('New text');

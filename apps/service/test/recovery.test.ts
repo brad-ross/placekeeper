@@ -30,13 +30,26 @@ import {
 import { assessGenerationRetention, enforceRetention } from "../src/recovery/retention.js";
 import { trackRecoveryTemporaryPath } from "../src/recovery/temporary-path-registry.js";
 import { createSourceSnapshot } from "../src/recovery/source-snapshot.js";
-import { RecoveryOfferUnavailableError, SessionBroker } from "../src/sessions/session-broker.js";
+import {
+  RecoveryOfferUnavailableError,
+  SessionBroker as RawSessionBroker,
+} from "../src/sessions/session-broker.js";
 import { hashFile } from "../src/files/file-capabilities.js";
 
 const temporaryDirectories: string[] = [];
+const activeBrokers = new Set<RawSessionBroker>();
+
+class SessionBroker extends RawSessionBroker {
+  constructor(options: ConstructorParameters<typeof RawSessionBroker>[0]) {
+    super(options);
+    activeBrokers.add(this);
+  }
+}
 
 afterEach(async () => {
   vi.restoreAllMocks();
+  await Promise.allSettled([...activeBrokers].map((broker) => broker.quiesceForShutdown()));
+  activeBrokers.clear();
   await Promise.all(
     temporaryDirectories.splice(0).map((path) =>
       rm(path, { recursive: true, force: true }),
@@ -391,6 +404,90 @@ describe("atomic recovery generations", () => {
 });
 
 describe("broker acknowledgement and restart recovery", () => {
+  it("persists verified native deletion ownership across restart recovery", async () => {
+    const directory = await temporaryDirectory();
+    const pdf = join(directory, "paper.pdf");
+    await writeFile(pdf, "%PDF-1.7\nnative source\n%%EOF");
+    const nativeId = "00000000-0000-4000-8000-000000000070";
+    const nativeItem = {
+      id: nativeId,
+      kind: "pdfAnnotation" as const,
+      pageIndex: 0,
+      createdAt: "2026-09-15T12:00:00.000Z",
+      updatedAt: "2026-09-15T12:00:00.000Z",
+      payload: {
+        position: { x: 10, y: 10, width: 18, height: 18 },
+        comment: "delete me",
+        author: "External reviewer",
+        subtype: "text",
+        identityProvenance: "verified",
+      },
+    };
+    const recoveryRoot = join(directory, "recovery");
+    const first = new SessionBroker({ recoveryRoot, portableReader: async () => [nativeItem] });
+    const opened = await first.openReview({ pdfPath: pdf });
+    if (opened.kind !== "opened") throw new Error("Expected opened review");
+    await first.acceptMutation(opened.launch.sessionId, {
+      type: "remove",
+      expectedRevision: 0,
+      id: nativeId,
+    });
+    const stored = await new DraftSnapshotStore(join(recoveryRoot, opened.launch.sessionId)).recover();
+    expect(stored?.schemaVersion === 3 ? stored.nativeAnnotationLedger : undefined)
+      .toMatchObject({ deletedIds: [nativeId] });
+    await first.quiesceForShutdown();
+
+    const restarted = new SessionBroker({ recoveryRoot, portableReader: async () => [nativeItem] });
+    const offered = await restarted.openReview({ pdfPath: pdf });
+    if (offered.kind !== "recovery-offered") throw new Error("Expected recovery offer");
+    const resumed = await restarted.openReview({
+      pdfPath: pdf,
+      recoveryDecision: "resume",
+      recoveryOffer: offered.recoveryOffer,
+      recoveryOperationId: randomUUID(),
+    });
+    if (resumed.kind !== "opened") throw new Error("Expected resumed review");
+    expect(restarted.state(resumed.launch.sessionId)?.items).toEqual([]);
+    const recovered = await new DraftSnapshotStore(join(recoveryRoot, resumed.launch.sessionId)).recover();
+    expect(recovered?.schemaVersion === 3 ? recovered.nativeAnnotationLedger : undefined)
+      .toMatchObject({ deletedIds: [nativeId] });
+  });
+
+  it("rejects malformed durable native ownership ledgers", async () => {
+    const directory = await temporaryDirectory();
+    const store = new DraftSnapshotStore(directory);
+    const valid = {
+      ...draft(1),
+      schemaVersion: 3 as const,
+      source: {
+        disposition: "local" as const,
+        canonicalSourcePath: "/private/example/paper.pdf",
+        sourceSnapshotPath: "/private/example/source.pdf",
+        displayName: "paper.pdf",
+      },
+      destination: { phase: "none" as const, generation: 0 },
+      sync: {
+        phase: "not-saved" as const,
+        desiredRevision: 1,
+        desiredDigest: reviewStateDigest(draft(1).state),
+        savedRevision: 0,
+        failure: "destination-unconfigured" as const,
+      },
+      nativeAnnotationLedger: {
+        schemaVersion: 1 as const,
+        managed: [{
+          id: "not-a-uuid",
+          provenance: "verified" as const,
+          sourceDigest: "a".repeat(64),
+          documentGeneration: 1,
+        }],
+        deletedIds: [],
+      },
+    };
+    await store.persist(valid as unknown as RecoverableDraft);
+    await expect(store.recover()).resolves.toBeUndefined();
+  });
+
   it("notifies terminal listeners even when recovery removal fails", async () => {
     const root = await temporaryDirectory();
     const pdf = join(root, "paper.pdf");

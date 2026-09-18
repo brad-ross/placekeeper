@@ -26,6 +26,7 @@ interface RowActionBase {
 export interface RowCommandAction extends RowActionBase {
   readonly kind: 'command';
   readonly icon: ReviewIconName;
+  readonly disabled?: boolean;
   readonly onInvoke: (trigger: HTMLButtonElement) => void;
 }
 
@@ -69,6 +70,7 @@ function DirectAction({ action }: { readonly action: RowAction }) {
       data-workspace-focus-token={action.focusToken}
       label={action.label}
       tooltip={action.title}
+      disabled={action.disabled}
       onClick={(event) => action.onInvoke(event.currentTarget)}
     >
       <ReviewIcon name={action.icon} size={16} />
@@ -177,6 +179,7 @@ export function RowActionGroup({ actions, rowLabel }: RowActionGroupProps) {
                 data-row-action={action.id}
                 data-workspace-focus-token={action.focusToken}
                 title={action.title}
+                disabled={action.disabled}
                 onClick={(event) => {
                   action.onInvoke(event.currentTarget);
                   closeAndRestore();

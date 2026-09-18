@@ -535,6 +535,18 @@ export function createViewerNavigation(
     return operation;
   };
 
+  const operationOwnsViewer = (operation: NavigationOperation): boolean => {
+    if (
+      disposed
+      || operation.signal.aborted
+      || operation.generation !== operationGeneration
+      || operation.documentGeneration !== documentGeneration
+      || activeOperation?.operation !== operation
+    ) return false;
+    const core = options.registry.getStore().getState().core;
+    return core.documents[operation.documentId]?.document === operation.document;
+  };
+
   const operationIsCurrent = (operation: NavigationOperation): boolean => {
     let geometryIsCurrent = true;
     try {
@@ -542,16 +554,7 @@ export function createViewerNavigation(
     } catch {
       geometryIsCurrent = false;
     }
-    if (
-      disposed
-      || operation.signal.aborted
-      || !geometryIsCurrent
-      || operation.generation !== operationGeneration
-      || operation.documentGeneration !== documentGeneration
-      || activeOperation?.operation !== operation
-    ) return false;
-    const core = options.registry.getStore().getState().core;
-    return core.documents[operation.documentId]?.document === operation.document;
+    return geometryIsCurrent && operationOwnsViewer(operation);
   };
 
   const viewerStillOwnsDocument = (viewer: ActiveViewer): boolean => {
@@ -1403,10 +1406,15 @@ export function createViewerNavigation(
         observerPositionedPage = positionFittedPage();
         zoomed = await zoomRequest;
       }
-      if (!zoomed || !operationIsCurrent(operation)) {
+      if (!zoomed || !operationOwnsViewer(operation)) {
         if (!operation.signal.aborted && operation.mutated) await rollbackOperation(operation);
         return false;
       }
+      // The settlement token guards the geometry used to choose this scale.
+      // The viewer's own zoom/layout events can invalidate that token after
+      // the scale commits, so validate the result against live geometry below.
+      // Operation, document, and cancellation ownership remain mandatory.
+      delete operation.geometryIsCurrent;
       if (!await waitForFrames(operation, 2, fitDeadline)) {
         if (!operation.signal.aborted && operation.mutated) await rollbackOperation(operation);
         return false;
@@ -1415,36 +1423,62 @@ export function createViewerNavigation(
       // the tray-aware offsets without exposing EmbedPDF's full-width frame.
       // Keep this fallback for unchanged zooms and non-DOM test adapters.
       if (!observerPositionedPage) positionFittedPage();
-      if (!await waitForFrames(operation, 2, Date.now() + timeoutMs)) {
+      // The zoom deadline ends when the viewer emits the requested scale, but
+      // WebKit can commit the corresponding DOM geometry afterward. Give that
+      // post-zoom phase one normal timeout, still capped by the frame limit below.
+      const postZoomGeometryDeadline = Date.now() + timeoutMs;
+      if (!await waitForFrames(operation, 2, postZoomGeometryDeadline)) {
         if (!operation.signal.aborted && operation.mutated) await rollbackOperation(operation);
         return false;
       }
 
-      // Native scroll anchoring can adjust the vertical offset after the resize
-      // observer runs. Align once more against the settled page before validation.
-      positionFittedPage();
-      const settledGeometry = operationIsCurrent(operation)
-        ? pageGeometry(viewer, visible.pageIndex)
-        : null;
-      const boundedFit = requestedZoom <= VIEWER_ZOOM_MIN_PERCENT / 100 + zoomTolerance
-        || requestedZoom >= VIEWER_ZOOM_MAX_PERCENT / 100 - zoomTolerance;
-      const widthTarget = visible.viewportRect.width - 2 * fitGap;
-      const widthMatches = settledGeometry !== null
-        && (boundedFit || Math.abs(settledGeometry.pageRect.width - widthTarget) <= coordinateTolerance);
-      const edgesFit = settledGeometry !== null
-        && (boundedFit || (
-          settledGeometry.pageRect.left
-            >= settledGeometry.viewportRect.left + fitMargins.left - coordinateTolerance
-          && settledGeometry.pageRect.right
-            <= settledGeometry.viewportRect.right - fitMargins.right + coordinateTolerance
-        ));
-      // The native current-page indicator includes content behind trays and
-      // can change after zooming in a tall viewport. Validate the fitted
-      // page's geometry and anchor directly instead of rolling that fit back.
-      const applied = zoomed
-        && widthMatches
-        && edgesFit
-        && locationMatchesView(viewer, location, true);
+      let applied = false;
+      // WebKit can publish the zoom event before the page element reaches its
+      // final size. Sample a bounded number of frames; each sample validates
+      // the original target against live geometry and never reissues the zoom.
+      for (let attempt = 0; attempt < 8 && operationOwnsViewer(operation); attempt += 1) {
+        // Native scroll anchoring can adjust the vertical offset after the resize
+        // observer runs. Align against each live page sample before validation.
+        positionFittedPage();
+        const settledGeometry = pageGeometry(viewer, visible.pageIndex);
+        const liveFitMargins = options.fitWidthMargins?.()
+          ?? { left: viewer.viewportGap, right: viewer.viewportGap };
+        const liveFitGap = (liveFitMargins.left + liveFitMargins.right) / 2;
+        const liveRequestedZoom = settledGeometry === null ? null : fitViewerWidthZoom({
+          viewportWidth: settledGeometry.viewportRect.width,
+          pageWidth: rotatedPage.width,
+          viewportGap: liveFitGap,
+        });
+        const targetMatchesLiveGeometry = liveRequestedZoom !== null
+          && Math.abs(liveRequestedZoom - requestedZoom) <= zoomTolerance;
+        const boundedFit = liveRequestedZoom !== null && (
+          liveRequestedZoom <= VIEWER_ZOOM_MIN_PERCENT / 100 + zoomTolerance
+          || liveRequestedZoom >= VIEWER_ZOOM_MAX_PERCENT / 100 - zoomTolerance
+        );
+        const widthTarget = settledGeometry === null
+          ? 0
+          : settledGeometry.viewportRect.width - 2 * liveFitGap;
+        const widthMatches = settledGeometry !== null
+          && (boundedFit || Math.abs(settledGeometry.pageRect.width - widthTarget) <= coordinateTolerance);
+        const edgesFit = settledGeometry !== null
+          && (boundedFit || (
+            settledGeometry.pageRect.left
+              >= settledGeometry.viewportRect.left + liveFitMargins.left - coordinateTolerance
+            && settledGeometry.pageRect.right
+              <= settledGeometry.viewportRect.right - liveFitMargins.right + coordinateTolerance
+          ));
+        // The native current-page indicator includes content behind trays and
+        // can change after zooming in a tall viewport. Validate the fitted
+        // page's geometry and anchor directly instead of rolling that fit back.
+        const locationMatches = locationMatchesView(viewer, location, true);
+        applied = zoomed
+          && targetMatchesLiveGeometry
+          && widthMatches
+          && edgesFit
+          && locationMatches;
+        if (applied || attempt === 7) break;
+        if (!await waitForFrames(operation, 1, postZoomGeometryDeadline)) break;
+      }
       if (!applied && !operation.signal.aborted && operation.mutated) {
         await rollbackOperation(operation);
       }
@@ -1666,6 +1700,21 @@ export function createViewerNavigation(
 
   return {
     captureLocation,
+    clampLocation(location) {
+      const viewer = activeViewer();
+      if (!viewer || !isPdfViewerLocation(location) || viewer.pages.length === 0) return null;
+      const pageIndex = clamp(location.pageIndex, 0, viewer.pages.length - 1);
+      const page = viewer.pages[pageIndex];
+      if (!page) return null;
+      return {
+        ...location,
+        pageIndex,
+        anchor: {
+          x: clamp(location.anchor.x, 0, page.size.width),
+          y: clamp(location.anchor.y, 0, page.size.height),
+        },
+      };
+    },
     captureDocumentOrderPages() {
       const viewer = activeViewer();
       return viewer?.pages.map((page) => ({

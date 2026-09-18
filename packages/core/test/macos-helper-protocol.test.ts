@@ -23,6 +23,13 @@ describe("macOS helper protocols", () => {
     expect(decodeMacosHelperFrame(frame)).toEqual(value);
   });
 
+  it("round-trips a projection larger than the former 256 KiB ceiling", () => {
+    const value = { projection: "x".repeat(300 * 1024) };
+    const frame = encodeMacosHelperFrame(value);
+    expect(frame.byteLength).toBeGreaterThan(256 * 1024);
+    expect(decodeMacosHelperFrame(frame)).toEqual(value);
+  });
+
   it("keeps the review lane closed and generation-bound", () => {
     expect(parseMacosReviewHelperMessage({
       ...base,

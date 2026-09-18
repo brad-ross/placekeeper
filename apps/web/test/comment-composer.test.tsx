@@ -92,6 +92,22 @@ describe('CommentComposer contextual authoring contract', () => {
     expect(allowedWhitespace).not.toContain('disabled=""');
   });
 
+  it('keeps a finalized draft read-only while canonical state retries', () => {
+    const html = renderComposer({
+      initialValue: 'Durably saved text',
+      terminalPending: true,
+      terminalPendingMessage: 'Saved. Waiting for the latest review state; retrying automatically.',
+    });
+
+    expect(html).toContain('readOnly=""');
+    expect(html).toContain('Durably saved text');
+    expect(html).toContain('Saved. Waiting for the latest review state; retrying automatically.');
+    expect(html.match(/disabled=""/g)?.length).toBeGreaterThanOrEqual(2);
+    expect(html).toContain('aria-busy="true"');
+    expect(html).toContain('data-submitting="true"');
+    expect(html).toContain('lucide-loader-circle');
+  });
+
   it('clamps auto-growth before the editor becomes internally scrollable', () => {
     expect(boundedTextAreaHeight({ scrollHeight: 40, minHeight: 84, maxHeight: 220 })).toBe(84);
     expect(boundedTextAreaHeight({ scrollHeight: 160, minHeight: 84, maxHeight: 220 })).toBe(160);

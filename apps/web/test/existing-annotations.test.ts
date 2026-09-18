@@ -66,6 +66,23 @@ describe('existing annotation discovery state', () => {
     ]);
   });
 
+  it('matches generation-scoped native annotations by their source object ordinal', () => {
+    const discovered = inventoryExistingAnnotations([{
+      ...source('ephemeral-browser-id'),
+      sourceId: 'source-name',
+      sourceObjectPageIndex: 0,
+      sourceObjectAnnotationIndex: 3,
+    }]);
+    const owned = [{
+      id: 'service-generation-id',
+      pageIndex: 0,
+      sourceObjectPageIndex: 0,
+      sourceObjectAnnotationIndex: 3,
+    }];
+
+    expect(mergeExistingAnnotations(discovered, [], owned)).toEqual([]);
+  });
+
   it('keeps loading, populated, empty, and error distinct and ignores stale generations', () => {
     const authority = new ExistingAnnotationDiscoveryAuthority();
     const first = authority.begin('document-a');

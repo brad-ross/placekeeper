@@ -52,6 +52,8 @@ export interface CommentComposerProps {
     readonly onExpose: () => void;
     readonly onResume: () => void;
   };
+  terminalPending?: boolean;
+  terminalPendingMessage?: string;
   onValueChange?(value: string): void;
   onSave(value: string): void | Promise<void>;
   onDismiss(): void | Promise<void>;
@@ -88,6 +90,17 @@ export interface BoundedTextAreaHeightInput {
   readonly maxHeight: number;
 }
 
+interface CommentComposerSubmissionState {
+  readonly canSave: boolean;
+  readonly submitting: boolean;
+  readonly composing: boolean;
+  readonly terminalPending: boolean;
+}
+
+function commentComposerCanSubmit(state: CommentComposerSubmissionState): boolean {
+  return state.canSave && !state.submitting && !state.composing && !state.terminalPending;
+}
+
 export function boundedTextAreaHeight(input: BoundedTextAreaHeightInput): number {
   return Math.min(input.maxHeight, Math.max(input.minHeight, input.scrollHeight));
 }
@@ -114,6 +127,8 @@ export function CommentComposer({
   placement,
   deferUntilPlacement = false,
   passageExposure,
+  terminalPending = false,
+  terminalPendingMessage,
   onValueChange,
   onSave,
   onDismiss,
@@ -125,7 +140,7 @@ export function CommentComposer({
   const [submitting, setSubmitting] = useState(false);
   const composingRef = useRef(false);
   const passageSelectionRef = useRef<{ start: number; end: number } | null>(null);
-  const busy = submitting || persistencePending;
+  const busy = submitting || persistencePending || terminalPending;
   const canSave = !saveDisabled && !persistencePending
     && (optional || (allowWhitespace ? value.length > 0 : value.trim().length > 0));
   const placementPending = deferUntilPlacement && placement === undefined;
@@ -210,7 +225,12 @@ export function CommentComposer({
   }, [inputRef, value]);
 
   const submit = async () => {
-    if (!canSave || submitting || composingRef.current) return;
+    if (!commentComposerCanSubmit({
+      canSave,
+      submitting,
+      composing: composingRef.current,
+      terminalPending,
+    })) return;
     setSubmitting(true);
     try {
       await onSave(value);
@@ -291,7 +311,7 @@ export function CommentComposer({
             title={fieldLabel}
             placeholder="Add a comment…"
             value={value}
-            readOnly={persistencePending}
+            readOnly={persistencePending || terminalPending}
             onChange={(event) => {
               const next = event.currentTarget.value;
               setValue(next);
@@ -300,23 +320,35 @@ export function CommentComposer({
             onCompositionStart={() => { composingRef.current = true; }}
             onCompositionEnd={() => { composingRef.current = false; }}
             onKeyDown={(event) => {
-              if ((event.metaKey || event.ctrlKey) && event.key === 'Enter' && canSave && !event.nativeEvent.isComposing) {
+              if ((event.metaKey || event.ctrlKey) && event.key === 'Enter'
+                && commentComposerCanSubmit({
+                  canSave,
+                  submitting,
+                  composing: event.nativeEvent.isComposing,
+                  terminalPending,
+                })) {
                 event.preventDefault();
                 submit();
               }
             }}
           />
         </label>
-        {busy ? (
+        {submitting || persistencePending ? (
           <span className="sr-only" role="status">
             {persistencePending ? 'Saving annotation to PDF.' : 'Saving annotation.'}
           </span>
         ) : null}
+        {terminalPendingMessage === undefined ? null : (
+          <p className="comment-composer__terminal-status" role="status">
+            {terminalPendingMessage}
+          </p>
+        )}
         <div className="comment-composer__actions">
           <button
             className="review-button review-button--secondary"
             type="button"
             title="Cancel"
+            disabled={terminalPending}
             onClick={() => void onDismiss()}
           >
             <span>Cancel</span>

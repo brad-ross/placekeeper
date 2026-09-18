@@ -1,4 +1,5 @@
 import type { ReviewItemKind } from './review-model.js';
+import type { NativePdfAnnotationIdentityProvenance } from './native-pdf-annotation.js';
 
 export type ReviewAnnotationKind = ReviewItemKind;
 
@@ -41,6 +42,8 @@ interface ReviewAnnotationBase {
   custom?: unknown;
   /** Present for a comment-only edit of an existing standard PDF annotation. */
   nativeSubtype?: string;
+  nativeIdentityProvenance?: NativePdfAnnotationIdentityProvenance;
+  nativeSourceObject?: { readonly pageIndex: number; readonly annotationIndex: number };
 }
 
 export type ReviewAnnotation = ReviewAnnotationBase & {

@@ -23,6 +23,39 @@ private final class TitlebarSpacingView: NSView {
 final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler {
     private static let toolbarHorizontalMargin: CGFloat = 16
     private static let toolbarHeight: CGFloat = 52
+    private static let blobTransferBeginScript = """
+        const transfers = globalThis.__PLACEKEEPER_MAC_BLOB_TRANSFERS__ ??= {};
+        transfers[role] = { id: transferId, parts: [] };
+        return true;
+        """
+    private static let blobTransferAppendScript = """
+        const transfer = globalThis.__PLACEKEEPER_MAC_BLOB_TRANSFERS__?.[role];
+        if (transfer?.id !== transferId || !Array.isArray(transfer.parts)) return false;
+        const binary = atob(base64);
+        const bytes = new Uint8Array(binary.length);
+        for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+        transfer.parts.push(bytes);
+        return bytes.length;
+        """
+    private static let blobTransferPublishScript = """
+        const transfer = globalThis.__PLACEKEEPER_MAC_BLOB_TRANSFERS__?.[role];
+        if (transfer?.id !== transferId || !Array.isArray(transfer.parts) || transfer.parts.length === 0) return false;
+        const url = URL.createObjectURL(new Blob(transfer.parts, { type: mime }));
+        delete globalThis.__PLACEKEEPER_MAC_BLOB_TRANSFERS__[role];
+        if (role === 'pdfium') globalThis.__PLACEKEEPER_MAC_PDFIUM_URL__ = url;
+        else if (role === 'worker') globalThis.__PLACEKEEPER_MAC_WORKER_URL__ = url;
+        else {
+          const resources = globalThis.__PLACEKEEPER_MAC_DOCUMENT_RESOURCES__ ??= {};
+          resources[source] = url;
+          globalThis.__PLACEKEEPER_MAC_DOCUMENT_RESOURCE__ = { source, url };
+        }
+        return url.startsWith('blob:');
+        """
+    private static let blobTransferDiscardScript = """
+        const transfers = globalThis.__PLACEKEEPER_MAC_BLOB_TRANSFERS__;
+        if (transfers?.[role]?.id === transferId) delete transfers[role];
+        return true;
+        """
     private let titlebarSpacing = NSTitlebarAccessoryViewController()
     private let nativeTitlebarHeight: CGFloat
     let windowID: String
@@ -51,6 +84,8 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
     private var visiblePaintConfirmed = false
     private var pendingDocumentReadyGeneration: Int?
     private var activationStarted = false
+    private var keepaliveTimer: Timer?
+    private var refreshBudgetAlertPresented = false
     private var readinessDiagnosticScheduled = false
     private var pdfiumData: Data?
     private var workerData: Data?
@@ -58,7 +93,7 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
     private var commandToken = 0
     private let onCommandSnapshot: (String) -> Void
     private let onRetry: (String) -> Void
-    private let onDiagnostics: () -> Void
+    private let onDiagnostics: (CatastrophicFailureReason, ReviewHelperTermination?) -> Void
     private let centersOnFirstRoutingCommit: Bool
 
     init(
@@ -75,7 +110,7 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
         onBecameKey: @escaping (String) -> Void,
         onCommandSnapshot: @escaping (String) -> Void,
         onRetry: @escaping (String) -> Void,
-        onDiagnostics: @escaping () -> Void,
+        onDiagnostics: @escaping (CatastrophicFailureReason, ReviewHelperTermination?) -> Void,
         onClose: @escaping (String) -> Void
     ) {
         self.windowID = windowID
@@ -143,6 +178,10 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
         window.tabbingMode = .disallowed
         window.isReleasedWhenClosed = false
         super.init(window: window)
+        bridge.successorInstaller = { [weak self] projection, completion in
+            self?.installSuccessor(projection, completion: completion) ?? completion(false)
+        }
+        bridge.onRefreshBudgetExceeded = { [weak self] in self?.presentRefreshBudgetAlert() }
         window.delegate = self
 
         contentController.add(self, name: "placekeeperShell")
@@ -228,7 +267,7 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
                 guard let self else { return }
                 if let error {
                     self.diagnostic("content-rule-error: \(error.localizedDescription)")
-                    self.helperDidFail()
+                    self.helperDidFail(reason: .contentRuleCompilationFailed)
                     return
                 }
                 guard let ruleList,
@@ -240,9 +279,14 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
         }
     }
 
-    func helperDidFail() {
+    func helperDidFail(
+        reason: CatastrophicFailureReason = .helperProcessExited,
+        helperTermination: ReviewHelperTermination? = nil
+    ) {
         guard !closed, !failed else { return }
         failed = true
+        keepaliveTimer?.invalidate()
+        keepaliveTimer = nil
         webView.stopLoading()
         webView.configuration.userContentController.removeScriptMessageHandler(forName: "placekeeperShell")
         schemeHandler.invalidate()
@@ -254,7 +298,7 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
                 guard let self else { return }
                 self.onRetry(self.windowID)
             },
-            onDiagnostics: onDiagnostics,
+            onDiagnostics: { [weak self] in self?.onDiagnostics(reason, helperTermination) },
             onClose: { [weak self] _ in self?.window?.performClose(nil) }
         )
         window?.contentViewController = controller
@@ -266,6 +310,8 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
     func windowWillClose(_ notification: Notification) {
         guard !closed else { return }
         closed = true
+        keepaliveTimer?.invalidate()
+        keepaliveTimer = nil
         webView.stopLoading()
         webView.configuration.userContentController.removeScriptMessageHandler(forName: "placekeeperShell")
         schemeHandler.invalidate()
@@ -273,7 +319,10 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
         onClose(windowID)
     }
 
-    func windowDidBecomeKey(_ notification: Notification) { onBecameKey(windowID) }
+    func windowDidBecomeKey(_ notification: Notification) {
+        onBecameKey(windowID)
+        requestKeepalive()
+    }
 
     func focus() {
         NSApplication.shared.activate(ignoringOtherApps: true)
@@ -484,17 +533,17 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
 
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
         diagnostic("navigation-error: \(error.localizedDescription)")
-        helperDidFail()
+        helperDidFail(reason: .navigationFailed)
     }
 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
         diagnostic("provisional-navigation-error: \(error.localizedDescription)")
-        helperDidFail()
+        helperDidFail(reason: .provisionalNavigationFailed)
     }
 
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
         diagnostic("web-content-process-terminated")
-        helperDidFail()
+        helperDidFail(reason: .webContentProcessTerminated)
     }
 
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
@@ -539,7 +588,63 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
               let generation = pendingDocumentReadyGeneration else { return }
         activationStarted = true
         bridge.activate(generation: generation) { [weak self] active in
-            if !active { self?.helperDidFail() }
+            guard let self else { return }
+            if !active { self.helperDidFail(reason: .runtimeActivationFailed); return }
+            self.startKeepalive()
+        }
+    }
+
+    private func startKeepalive() {
+        guard keepaliveTimer == nil, !closed, !failed else { return }
+        requestKeepalive()
+        keepaliveTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.requestKeepalive() }
+        }
+    }
+
+    private func requestKeepalive() {
+        guard !closed, !failed else { return }
+        bridge.keepalive(send: { [weak self] message in self?.sendRuntimeMessage(message) })
+    }
+
+    private func presentRefreshBudgetAlert() {
+        guard !refreshBudgetAlertPresented, let window, !closed, !failed else { return }
+        refreshBudgetAlertPresented = true
+        let alert = NSAlert()
+        alert.messageText = "Review update is too large to display"
+        alert.informativeText = "The last confirmed view remains open, but it may be out of date. Continue this review in the browser if the update still cannot be displayed."
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Retry Update")
+        alert.addButton(withTitle: "Keep Current View")
+        alert.beginSheetModal(for: window) { [weak self] response in
+            guard let self else { return }
+            self.refreshBudgetAlertPresented = false
+            if response == .alertFirstButtonReturn {
+                self.bridge.retryRefreshAfterBudgetFailure(
+                    send: { [weak self] message in self?.sendRuntimeMessage(message) }
+                )
+            }
+        }
+    }
+
+    private func installSuccessor(_ projection: MacRuntimeProjection, completion: @escaping (Bool) -> Void) {
+        schemeHandler.install(projection: projection)
+        schemeHandler.loadDocument(generation: projection.generation) { [weak self] result in
+            DispatchQueue.main.async {
+                guard let self, !self.closed, !self.failed else { completion(false); return }
+                guard case let .success(bytes) = result else { completion(false); return }
+                let source = "placekeeper-resource://document/\(self.admission.resourceID)?generation=\(projection.generation)&role=document"
+                self.installBlob(role: "document-\(projection.generation)", mime: "application/pdf", data: bytes, source: source) { installed in
+                    self.schemeHandler.releaseDocumentCache(generation: projection.generation)
+                    guard installed else { completion(false); return }
+                    self.schemeHandler.acknowledgeAdoption(projection: projection) { acknowledged in
+                        Task { @MainActor in
+                            if acknowledged { self.schemeHandler.adopt(generation: projection.generation) }
+                            completion(acknowledged)
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -726,29 +831,29 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
     private func installPackagedResources() {
         guard let pdfiumData, let workerData else {
             diagnostic("executable-resource-install-invalid")
-            helperDidFail()
+            helperDidFail(reason: .executableResourceInvalid)
             return
         }
-        schemeHandler.loadDocument { [weak self] result in
+        schemeHandler.loadDocument(generation: admission.generation) { [weak self] result in
             DispatchQueue.main.async {
                 guard let self, !self.closed else { return }
                 guard case let .success(documentData) = result else {
                     self.diagnostic("document-install-invalid")
-                    self.helperDidFail()
+                    self.helperDidFail(reason: .documentResourceInvalid)
                     return
                 }
                 self.installBlob(role: "pdfium", mime: "application/wasm", data: pdfiumData) { installed in
                     self.pdfiumData = nil
                     guard installed else {
                         self.diagnostic("pdfium-install-failed")
-                        self.helperDidFail()
+                        self.helperDidFail(reason: .pdfiumInstallFailed)
                         return
                     }
                     self.installBlob(role: "worker", mime: "application/javascript", data: workerData) { installed in
                         self.workerData = nil
                         guard installed else {
                             self.diagnostic("worker-install-failed")
-                            self.helperDidFail()
+                            self.helperDidFail(reason: .workerInstallFailed)
                             return
                         }
                         self.installBlob(
@@ -757,10 +862,10 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
                             data: documentData,
                             source: self.bridge.documentResourceURL
                         ) { installed in
-                            self.schemeHandler.releaseDocumentCache()
+                            self.schemeHandler.releaseDocumentCache(generation: self.admission.generation)
                             guard installed else {
                                 self.diagnostic("document-install-failed")
-                                self.helperDidFail()
+                                self.helperDidFail(reason: .documentInstallFailed)
                                 return
                             }
                             self.diagnostic("packaged-resources-installed")
@@ -779,7 +884,24 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
         source: String? = nil,
         completion: @escaping (Bool) -> Void
     ) {
-        installBlobChunk(role: role, mime: mime, data: data, source: source, offset: 0, completion: completion)
+        guard !closed, !failed, !data.isEmpty else { completion(false); return }
+        let transferID = UUID().uuidString
+        webView.callAsyncJavaScript(
+            Self.blobTransferBeginScript,
+            arguments: ["role": role, "transferId": transferID],
+            in: nil,
+            in: .page
+        ) { [weak self] result in
+            guard let self else { return }
+            guard case let .success(value) = result, value as? Bool == true else {
+                self.discardBlobTransfer(role: role, transferID: transferID, completion: completion)
+                return
+            }
+            self.installBlobChunk(
+                role: role, mime: mime, data: data, source: source,
+                transferID: transferID, offset: 0, completion: completion
+            )
+        }
     }
 
     private func installBlobChunk(
@@ -787,6 +909,7 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
         mime: String,
         data: Data,
         source: String?,
+        transferID: String,
         offset: Int,
         completion: @escaping (Bool) -> Void
     ) {
@@ -796,21 +919,14 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
             let end = min(data.count, offset + chunkSize)
             let encoded = data.subdata(in: offset..<end).base64EncodedString()
             webView.callAsyncJavaScript(
-                """
-                const binary = atob(base64);
-                const bytes = new Uint8Array(binary.length);
-                for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
-                const parts = globalThis.__PLACEKEEPER_MAC_BLOB_PARTS__ ??= {};
-                (parts[role] ??= []).push(bytes);
-                return bytes.length;
-                """,
-                arguments: ["base64": encoded, "role": role],
+                Self.blobTransferAppendScript,
+                arguments: ["base64": encoded, "role": role, "transferId": transferID],
                 in: nil,
                 in: .page
             ) { [weak self] result in
                 guard let self else { return }
                 guard case let .success(value) = result, (value as? NSNumber)?.intValue == end - offset else {
-                    completion(false)
+                    self.discardBlobTransfer(role: role, transferID: transferID, completion: completion)
                     return
                 }
                 self.installBlobChunk(
@@ -818,32 +934,41 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
                     mime: mime,
                     data: data,
                     source: source,
+                    transferID: transferID,
                     offset: end,
                     completion: completion
                 )
             }
             return
         }
-        var arguments: [String: Any] = ["role": role, "mime": mime]
+        var arguments: [String: Any] = ["role": role, "mime": mime, "transferId": transferID]
         if let source { arguments["source"] = source }
         webView.callAsyncJavaScript(
-            """
-            const parts = globalThis.__PLACEKEEPER_MAC_BLOB_PARTS__?.[role];
-            if (!Array.isArray(parts) || parts.length === 0) return false;
-            const url = URL.createObjectURL(new Blob(parts, { type: mime }));
-            delete globalThis.__PLACEKEEPER_MAC_BLOB_PARTS__[role];
-            if (role === 'pdfium') globalThis.__PLACEKEEPER_MAC_PDFIUM_URL__ = url;
-            else if (role === 'worker') globalThis.__PLACEKEEPER_MAC_WORKER_URL__ = url;
-            else globalThis.__PLACEKEEPER_MAC_DOCUMENT_RESOURCE__ = { source, url };
-            return url.startsWith('blob:');
-            """,
+            Self.blobTransferPublishScript,
             arguments: arguments,
             in: nil,
             in: .page
-        ) { result in
-            guard case let .success(value) = result else { completion(false); return }
-            completion(value as? Bool == true)
+        ) { [weak self] result in
+            guard let self else { return }
+            guard case let .success(value) = result, value as? Bool == true else {
+                self.discardBlobTransfer(role: role, transferID: transferID, completion: completion)
+                return
+            }
+            completion(true)
         }
+    }
+
+    private func discardBlobTransfer(
+        role: String,
+        transferID: String,
+        completion: @escaping (Bool) -> Void
+    ) {
+        webView.callAsyncJavaScript(
+            Self.blobTransferDiscardScript,
+            arguments: ["role": role, "transferId": transferID],
+            in: nil,
+            in: .page
+        ) { _ in completion(false) }
     }
 
 }

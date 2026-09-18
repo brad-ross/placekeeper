@@ -429,13 +429,18 @@ export function createPortableAnnotationCustom(
   item: ReviewItem,
   annotation: ReviewAnnotation,
 ): PortableAnnotationCustom {
-  const { importedAnnotationAuthor: _importedAuthor, ...portableItem } = item;
+  const {
+    importedAnnotationAuthor: _importedAuthor,
+    reconciliation: _runtimeReconciliation,
+    ...portableItem
+  } = item;
+  const { pages: _runtimePages, ...portablePayload } = portableItem.payload;
   return {
     placekeeper: {
       schemaVersion: 2,
       owner: PORTABLE_ANNOTATION_OWNER,
       itemId: item.id,
-      item: portableItem,
+      item: { ...portableItem, payload: portablePayload },
       projection: projectionFor(item, annotation),
     },
   };

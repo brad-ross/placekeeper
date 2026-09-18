@@ -91,6 +91,13 @@
   gap: var(--review-action-group-gap);
 }
 
+.comment-composer__terminal-status {
+  margin: 0;
+  color: var(--review-ink-muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
 .comment-composer__anchor[data-return-state="pending"] .review-icon {
   animation: review-loader-spin .8s linear infinite;
 }

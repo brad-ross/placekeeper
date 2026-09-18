@@ -107,7 +107,11 @@ async function brokerMutation(
 
 export function observeLiveDocument(
   launch: ExchangedVscodeLaunch,
-  input: { readonly outputPath: string; readonly observationEpoch: number },
+  input: {
+    readonly outputPath: string;
+    readonly hostHintToken: string;
+    readonly reason?: "watcher" | "reveal" | "activation" | "interval";
+  },
   fetchImpl: typeof fetch = fetch,
   signal?: AbortSignal,
 ): Promise<unknown> {
@@ -116,7 +120,7 @@ export function observeLiveDocument(
 
 export function markLiveDocumentPossiblyStale(
   launch: ExchangedVscodeLaunch,
-  input: { readonly observationEpoch: number },
+  input: { readonly hostHintToken: string },
   fetchImpl: typeof fetch = fetch,
   signal?: AbortSignal,
 ): Promise<unknown> {

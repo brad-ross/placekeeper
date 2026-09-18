@@ -1,10 +1,30 @@
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 
 import {
+  RuntimeLoadingWorkspace,
+  runtimeGenerationRefreshStatus,
   parseVscodePresentationState,
   terminalRecoveryDocumentIdentity,
   terminalRecoveryLocationFragment,
 } from '../src/production-entry.js';
+
+describe('runtime generation refresh presentation', () => {
+  it('keeps initial preparation failure separate from later rebuild failure', () => {
+    const initialFailure = renderToStaticMarkup(createElement(RuntimeLoadingWorkspace, {
+      refreshStatus: 'failed',
+    }));
+
+    expect(initialFailure.match(/role="alert"/gu)).toHaveLength(1);
+    expect(initialFailure).toContain('This review could not be prepared.');
+    expect(initialFailure).not.toContain('rebuilt PDF');
+    expect(initialFailure).not.toContain('last successful PDF');
+    expect(runtimeGenerationRefreshStatus(false, 'failed')).toBe('idle');
+    expect(runtimeGenerationRefreshStatus(true, 'failed')).toBe('failed');
+    expect(runtimeGenerationRefreshStatus(true, 'reconciling')).toBe('reconciling');
+  });
+});
 
 describe('terminal readable-view recovery', () => {
   it('preserves canonical page, item, and durable destination fragments', () => {

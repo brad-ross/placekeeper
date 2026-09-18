@@ -512,7 +512,6 @@ test('creates, edits, reopens, and deletes one shared selection annotation from 
   await page.setViewportSize({ width: 1280, height: 900 });
   const sessionId = await openFixture(page, referencePdf);
   await chooseCopyDestination(page);
-  const baseline = host.broker.state(sessionId)!;
   await openPrimaryReference(page);
   const unchangedMain = await mainSnapshot(page);
   const referencePage = page.locator(
@@ -560,7 +559,9 @@ test('creates, edits, reopens, and deletes one shared selection annotation from 
     .fill('Shared Reference highlight.');
   await composer.getByRole('button', { name: 'Save', exact: true }).click();
   await expect(composer).toHaveCount(0);
-  await expect.poll(() => host.broker.state(sessionId)?.revision).toBe(baseline.revision + 1);
+  await expect.poll(() => host.broker.state(sessionId)?.items.some(
+    (candidate) => candidate.payload.comment === 'Shared Reference highlight.',
+  )).toBe(true);
   const item = host.broker.state(sessionId)!.items.find(
     (candidate) => candidate.payload.comment === 'Shared Reference highlight.',
   )!;
@@ -656,6 +657,9 @@ test('creates, edits, reopens, and deletes one shared selection annotation from 
   );
   await expect(appliedEdit).toHaveCount(0);
   await expect(inspection).toHaveCount(0);
+  await expect.poll(() => host.broker.state(sessionId)?.items.find(
+    (candidate) => candidate.id === item.id,
+  )?.payload.comment).toBe('Edited shared Reference highlight.');
 
   await page.reload();
   await expect(page.locator('[data-production-review]')).toHaveAttribute(
@@ -1331,17 +1335,21 @@ test('closes a deleted passive reader and preserves a stale edit with Save disab
   }).click();
   const composer = page.getByRole('region', { name: 'Edit Page Note' });
   const editor = composer.getByRole('textbox', { name: 'Comment' });
-  await editor.fill('Recover this text after the target disappears.');
+  const recoverableDraft = 'Recover this text after the target disappears.';
+  await editor.fill(recoverableDraft);
+  await expect.poll(() => host.broker.state(sessionId)?.pendingDrafts.find(
+    (candidate) => candidate.targetItemId === stale.id,
+  )?.text).toBe(recoverableDraft);
   await host.broker.acceptMutation(
     sessionId,
     removeReviewItem(host.broker.state(sessionId)!, stale.id),
   );
-  await expect(editor).toHaveValue('Recover this text after the target disappears.');
+  await expect(editor).toHaveValue(recoverableDraft);
   await expect(composer.getByRole('button', { name: 'Apply', exact: true })).toBeDisabled();
   expect(host.broker.state(sessionId)!.items.some(({ id }) => id === stale.id)).toBe(false);
 });
 
-test('retains a Reference edit but clears its preview when document authority is replaced', async ({ page }) => {
+test('defers document authority replacement while a Reference edit is active', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 });
   const livePdf = await freshPdf(referencePdf);
   const launched = await host.open({
@@ -1405,21 +1413,25 @@ test('retains a Reference edit but clears its preview when document authority is
     observationEpoch: 2,
   });
   expect(replacement).toMatchObject({
-    status: 'committed',
-    previousGeneration: launched.documentGeneration,
-    documentGeneration: launched.documentGeneration + 1,
+    status: 'deferred',
+    documentGeneration: launched.documentGeneration,
+    reason: 'active-review-interaction',
   });
   await expect(composer).toBeVisible();
   await expect(editor).toHaveValue(draft);
-  await expect(apply).toBeDisabled();
-  await expect(page.locator('[data-authoring-preview="true"]')).toHaveCount(0);
-  await apply.evaluate((button: HTMLButtonElement) => button.click());
-  await expect(apply).toBeDisabled();
+  await expect(apply).toBeEnabled();
+  await expect(page.locator(
+    `[data-reference-pdf-viewport] [data-review-id="${item.id}"][data-authoring-preview="true"]`,
+  )).not.toHaveCount(0);
   expect(host.broker.state(launched.sessionId)!.items.some(
     (candidate) => candidate.payload.comment === draft,
   )).toBe(false);
   await composer.getByRole('button', { name: 'Cancel', exact: true }).click();
   await expect(composer).toHaveCount(0);
+  await expect.poll(() => host.broker.state(launched.sessionId)?.workflow.documentGeneration, {
+    timeout: READY_TIMEOUT,
+  }).toBe(launched.documentGeneration + 1);
+  expect(host.broker.state(launched.sessionId)?.pendingDrafts).toHaveLength(0);
 });
 
 test('recovers a closed annotation-origin editor and reuses its tab after applying the edit', async ({ page }) => {
@@ -1494,7 +1506,6 @@ test('authors on a Reference page and preserves one focused draft through switch
   await page.setViewportSize({ width: 1280, height: 900 });
   const sessionId = await openFixture(page, referencePdf);
   await chooseCopyDestination(page);
-  const baseline = host.broker.state(sessionId)!;
   const originTab = await openPrimaryReference(page);
   const reference = page.locator('[data-reference-pdf-viewport]');
   const detailLink = reference.getByRole('button', {
@@ -1662,7 +1673,9 @@ test('authors on a Reference page and preserves one focused draft through switch
   ));
   await composer.getByRole('button', { name: 'Save', exact: true }).click();
   await expect(composer).toHaveCount(0);
-  await expect.poll(() => host.broker.state(sessionId)?.revision).toBe(baseline.revision + 2);
+  await expect.poll(() => host.broker.state(sessionId)?.items.some(
+    (item) => item.payload.comment === draft,
+  )).toBe(true);
   const saved = host.broker.state(sessionId)!.items.find((item) => item.payload.comment === draft);
   expect(saved).toMatchObject({ kind: 'pageNote', pageIndex: 1 });
   await expect(page.getByRole('textbox', { name: /^Current page 1 of 4/u })).toHaveValue('1');

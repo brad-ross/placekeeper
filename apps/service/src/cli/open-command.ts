@@ -69,8 +69,20 @@ export { INSTALLED_SMOKE_DAEMON_FLAG, INSTALLED_SMOKE_HTTP_PORT_FLAG };
 async function writeStdoutFrame(frame: Buffer): Promise<void> {
   if (process.stdout.write(frame)) return;
   await new Promise<void>((resolveWrite, rejectWrite) => {
-    process.stdout.once("drain", resolveWrite);
-    process.stdout.once("error", rejectWrite);
+    const cleanup = () => {
+      process.stdout.off("drain", onDrain);
+      process.stdout.off("error", onError);
+    };
+    const onDrain = () => {
+      cleanup();
+      resolveWrite();
+    };
+    const onError = (error: Error) => {
+      cleanup();
+      rejectWrite(error);
+    };
+    process.stdout.once("drain", onDrain);
+    process.stdout.once("error", onError);
   });
 }
 
@@ -373,7 +385,12 @@ async function main(): Promise<number> {
   if (process.argv[2] === "macos-review-helper") {
     const identity = macosReviewHelperIdentity(process.env);
     if (identity === undefined) return 2;
-    return runMacosReviewHelperCommand({ input: process.stdin, write: writeStdoutFrame, identity });
+    return runMacosReviewHelperCommand({
+      input: process.stdin,
+      write: writeStdoutFrame,
+      identity,
+      diagnostic: (stage) => process.stderr.write(`[PlacekeeperHelper] failed: ${stage}\n`),
+    });
   }
   if (process.argv[2] === "macos-lifecycle-control") {
     return runMacosLifecycleControlCommand({

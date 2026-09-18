@@ -51,7 +51,7 @@ const reviewState: ReviewState = {
 
 const session = createAuthoringSession({
   token: 1,
-  authority: { sourceIdentity: JSON.stringify(['reference-authoring', 'paper', 'a'.repeat(64)]), documentGeneration: 8 },
+  authority: { sessionId: reviewState.sessionId, sourceIdentity: JSON.stringify(['reference-authoring', 'paper', 'a'.repeat(64)]), documentGeneration: 8 },
   source: { kind: 'edit', item },
   origin: {
     kind: 'reader-edit',

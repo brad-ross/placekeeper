@@ -8,6 +8,7 @@ import type {
   AuthoringAuthority,
   AuthoringAnchorSnapshot,
   AuthoringReferenceRecovery,
+  ReviewInteractionTransport,
 } from './authoring-session.js';
 import type { RejectedReviewCommand } from './review-command-result.js';
 
@@ -16,6 +17,17 @@ export interface ReviewShellAuthoringModel {
   surface?: PdfAnnotationSurface;
   /** Durable Reference passage metadata paired with the current gesture origin. */
   referenceRecovery?: AuthoringReferenceRecovery;
+  /** Local-refresh hosts provide this before negotiation; begin waits for the authenticated attachment. */
+  interactionLifecycle?: ReviewInteractionTransport;
+  subscribeInteractionReconnect?(
+    listener: (identity: { readonly generation: number; readonly revision: number }) => Promise<void>,
+  ): () => void;
+  /** Prevents a refresh-capable host from silently falling back to legacy authoring. */
+  interactionLifecycleRequired?: boolean;
+  interactionFinalizationReady?: boolean;
+  /** Applied interaction receipts remain open until this destination confirms PDF persistence. */
+  interactionPersistenceRequired?: boolean;
+  onInteractionFinalizationPrerequisite?(): void;
   pageMenu?: {
     readonly invocationId: string;
     readonly placement: ContextPlacement;

@@ -306,6 +306,11 @@ export class NavigationCoordinator {
     this.locationRestored = dependencies.locationHistory === undefined;
   }
 
+  /** View-local authority token used to fence automatic successor restoration. */
+  operationIdentity(): number {
+    return this.operationToken;
+  }
+
   startLocationHistory(): void {
     if (this.locationHistoryStarted || this.dependencies.locationHistory === undefined) return;
     this.locationHistoryStarted = true;

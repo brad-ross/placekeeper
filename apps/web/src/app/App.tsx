@@ -414,7 +414,10 @@ export function App({
   const sourceStyles = useRef(new WeakMap<object, Promise<SourceAnnotationStyles>>());
   const sourceOwnedAnnotations = useRef(new WeakMap<
     object,
-    readonly Pick<ExistingAnnotation, 'id' | 'pageIndex'>[]
+    readonly (Pick<ExistingAnnotation, 'id' | 'pageIndex'> & {
+      readonly sourceObjectPageIndex?: number;
+      readonly sourceObjectAnnotationIndex?: number;
+    })[]
   >());
   const ownedGeometryByPage = useMemo(
     () => groupOwnedMarkGeometryByPage(ownedAnnotations),
@@ -471,7 +474,14 @@ export function App({
     currentInventoryDocument.current = { id: documentId, document };
     let owned = sourceOwnedAnnotations.current.get(document);
     if (owned === undefined) {
-      owned = ownedAnnotationsRef.current.map(({ id, pageIndex }) => ({ id, pageIndex }));
+      owned = ownedAnnotationsRef.current.map(({ id, pageIndex, nativeSourceObject }) => ({
+        id,
+        pageIndex,
+        ...(nativeSourceObject === undefined ? {} : {
+          sourceObjectPageIndex: nativeSourceObject.pageIndex,
+          sourceObjectAnnotationIndex: nativeSourceObject.annotationIndex,
+        }),
+      }));
       sourceOwnedAnnotations.current.set(document, owned);
     }
     const token = inventoryAuthority.current.begin(documentId);
@@ -492,11 +502,22 @@ export function App({
           owned,
         );
         if (result) {
-          const importedIds = new Set(owned.map(existingAnnotationKey));
-          setSourceNativeAnnotations(discovered.flatMap((annotation) =>
-            annotation.sourceId !== undefined && importedIds.has(existingAnnotationKey(annotation))
-              ? [{ id: annotation.id, pageIndex: annotation.pageIndex, sourceId: annotation.sourceId,
-                  ...(annotation.readerStyle === undefined ? {} : { readerStyle: annotation.readerStyle }) }] : []));
+          const importedIds = new Map(owned.map((annotation) => [existingAnnotationKey(annotation), annotation.id]));
+          const importedSourceObjects = new Map(owned.flatMap((annotation) =>
+            annotation.sourceObjectPageIndex === undefined || annotation.sourceObjectAnnotationIndex === undefined
+              ? [] : [[`${annotation.sourceObjectPageIndex}:${annotation.sourceObjectAnnotationIndex}`, annotation.id] as const]));
+          setSourceNativeAnnotations(discovered.flatMap((annotation) => {
+            const sourceObjectKey = annotation.sourceObjectPageIndex === undefined
+              || annotation.sourceObjectAnnotationIndex === undefined
+              ? undefined
+              : `${annotation.sourceObjectPageIndex}:${annotation.sourceObjectAnnotationIndex}` as const;
+            const importedId = importedIds.get(existingAnnotationKey(annotation))
+              ?? (sourceObjectKey === undefined ? undefined : importedSourceObjects.get(sourceObjectKey));
+            return annotation.sourceId !== undefined && importedId !== undefined
+              ? [{ id: importedId, pageIndex: annotation.pageIndex, sourceId: annotation.sourceId,
+                  ...(annotation.readerStyle === undefined ? {} : { readerStyle: annotation.readerStyle }) }]
+              : [];
+          }));
           publishInventory(result);
         }
       },

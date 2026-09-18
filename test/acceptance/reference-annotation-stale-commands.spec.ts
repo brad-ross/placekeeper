@@ -5,14 +5,13 @@ import { basename, join, resolve } from 'node:path';
 import { expect, test, type Page, type Request } from '@playwright/test';
 
 import { PlacekeeperHost } from '../../apps/service/src/host/placekeeper-host.js';
-import { addPageNote } from '../../packages/core/src/review-commands.js';
+import { addPageNote, removeReviewItem } from '../../packages/core/src/review-commands.js';
 
 const READY_TIMEOUT = 15_000;
 
 let root = '';
 let sourceRoot = '';
 let referencePdf = '';
-let replacementPdf = '';
 let host: PlacekeeperHost;
 
 async function freshPdf(path: string): Promise<string> {
@@ -110,7 +109,11 @@ async function deferNextCommand(
   const release = Promise.withResolvers<void>();
   let held = false;
   await page.route(`**/s/${sessionId}/commands`, async (route) => {
-    const command = route.request().postDataJSON() as { readonly type?: unknown };
+    const body = route.request().postDataJSON() as {
+      readonly type?: unknown;
+      readonly command?: { readonly type?: unknown };
+    };
+    const command = body.command ?? body;
     if (held || command.type !== commandType) {
       await route.continue();
       return;
@@ -121,24 +124,6 @@ async function deferNextCommand(
     await route.continue();
   });
   return { entered: entered.promise, release: release.resolve };
-}
-
-async function replaceAuthority(input: {
-  readonly sessionId: string;
-  readonly documentGeneration: number;
-  readonly livePdf: string;
-}): Promise<void> {
-  await copyFile(replacementPdf, input.livePdf);
-  const replacement = await host.broker.replaceLiveDocument({
-    sessionId: input.sessionId,
-    outputPath: input.livePdf,
-    observationEpoch: 1,
-  });
-  expect(replacement).toMatchObject({
-    status: 'committed',
-    previousGeneration: input.documentGeneration,
-    documentGeneration: input.documentGeneration + 1,
-  });
 }
 
 async function releaseAndWaitForConflict(
@@ -174,7 +159,6 @@ test.beforeAll(async () => {
   sourceRoot = join(root, 'source');
   await mkdir(sourceRoot);
   referencePdf = resolve('test/fixtures/pdfs/reference-navigation.pdf');
-  replacementPdf = resolve('test/fixtures/pdfs/reference-navigation-annotated.pdf');
 });
 
 test.beforeEach(async () => {
@@ -193,22 +177,27 @@ test.afterAll(async () => {
   if (root) await rm(root, { recursive: true, force: true });
 });
 
-test('retains the editor after a deferred Apply command returns stale', async ({ page }) => {
+test('retains a Reference editor after a deferred draft update returns stale', async ({ page }) => {
   const opened = await openFixture(page, 'generated-output');
   const { composer, editor, apply } = await openReferenceEditor(page, opened.itemId);
-  const draft = 'Keep this edit after its deferred Apply response becomes stale.';
+  const initialDraft = 'Establish this protected Reference edit before its next update.';
+  await editor.fill(initialDraft);
+  await expect.poll(() => host.broker.state(opened.sessionId)?.pendingDrafts.find(
+    (candidate) => candidate.text === initialDraft,
+  )?.text).toBe(initialDraft);
+
+  const gate = await deferNextCommand(page, opened.sessionId, 'put-draft');
+  const draft = 'Keep this edit after its deferred draft update becomes stale.';
   await editor.fill(draft);
   await expect(page.locator('[data-authoring-preview="true"]')).not.toHaveCount(0);
-  await expect.poll(() => host.broker.state(opened.sessionId)?.pendingDrafts.find(
-    (candidate) => candidate.text === draft,
-  )?.text).toBe(draft);
-
-  const gate = await deferNextCommand(page, opened.sessionId, 'apply-draft');
-  await apply.click();
   const request = await gate.entered;
   try {
-    await replaceAuthority(opened);
-    await expectRecoverableEditor({ page, draft, composer, editor, apply });
+    const current = host.broker.state(opened.sessionId);
+    if (!current) throw new Error('Concurrent Reference state is unavailable.');
+    await host.broker.acceptMutation(
+      opened.sessionId,
+      removeReviewItem(current, opened.itemId),
+    );
     await releaseAndWaitForConflict(page, request, gate.release);
     await expectRecoverableEditor({ page, draft, composer, editor, apply });
     expect(host.broker.state(opened.sessionId)?.items.some(
@@ -216,12 +205,18 @@ test('retains the editor after a deferred Apply command returns stale', async ({
     )).toBe(false);
     await composer.getByRole('button', { name: 'Cancel', exact: true }).click();
     await expect(composer).toHaveCount(0);
+    await expect.poll(() => host.broker.state(opened.sessionId)?.pendingDrafts.some(
+      (candidate) => candidate.targetItemId === opened.itemId,
+    )).toBe(false);
+    expect(host.broker.state(opened.sessionId)?.items.some(
+      (candidate) => candidate.id === opened.itemId || candidate.payload.comment === draft,
+    )).toBe(false);
   } finally {
     gate.release();
   }
 });
 
-test('retains the editor after a deferred put-draft command returns stale', async ({ page }) => {
+test('retains a typed Reference recovery draft when its initial protection returns stale', async ({ page }) => {
   const opened = await openFixture(page, 'generated-output');
   const gate = await deferNextCommand(page, opened.sessionId, 'put-draft');
   const editorPromise = openReferenceEditor(page, opened.itemId);
@@ -230,13 +225,34 @@ test('retains the editor after a deferred put-draft command returns stale', asyn
     const { composer, editor, apply } = await editorPromise;
     const draft = 'Keep this protected draft after its deferred response becomes stale.';
     await editor.fill(draft);
-    await replaceAuthority(opened);
-    await expectRecoverableEditor({ page, draft, composer, editor, apply });
+    const current = host.broker.state(opened.sessionId);
+    if (!current) throw new Error('Concurrent Reference state is unavailable.');
+    await host.broker.acceptMutation(
+      opened.sessionId,
+      removeReviewItem(current, opened.itemId),
+    );
     await releaseAndWaitForConflict(page, request, gate.release);
     await expectRecoverableEditor({ page, draft, composer, editor, apply });
-    expect(host.broker.state(opened.sessionId)?.pendingDrafts).toHaveLength(0);
+    await expect.poll(() => host.broker.state(opened.sessionId)?.pendingDrafts.find(
+      (candidate) => candidate.text === draft,
+    )).toMatchObject({
+      baseGeneration: opened.documentGeneration,
+      revision: 0,
+      status: 'protected',
+      targetItemId: opened.itemId,
+      disposition: { kind: 'resolved', generation: opened.documentGeneration },
+    });
+    expect(host.broker.state(opened.sessionId)?.items.some(
+      (candidate) => candidate.id === opened.itemId || candidate.payload.comment === draft,
+    )).toBe(false);
     await composer.getByRole('button', { name: 'Cancel', exact: true }).click();
     await expect(composer).toHaveCount(0);
+    await expect.poll(() => host.broker.state(opened.sessionId)?.pendingDrafts.some(
+      (candidate) => candidate.targetItemId === opened.itemId,
+    )).toBe(false);
+    expect(host.broker.state(opened.sessionId)?.items.some(
+      (candidate) => candidate.id === opened.itemId || candidate.payload.comment === draft,
+    )).toBe(false);
   } finally {
     gate.release();
   }

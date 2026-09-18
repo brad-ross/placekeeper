@@ -4,6 +4,18 @@
   padding: 0 12px 12px;
 }
 
+#review-annotation-list:has(> .annotation-drawer__owned > [data-reconciliation-reader]) {
+  height: 100%;
+  min-height: 0;
+}
+
+#review-annotation-list > .annotation-drawer__owned:has(> [data-reconciliation-reader]) {
+  display: flex;
+  height: 100%;
+  min-height: 0;
+  padding: 0;
+}
+
 .outline-navigator,
 .annotation-drawer__owned,
 .existing-annotations,
@@ -46,7 +58,7 @@
 }
 
 :is(.review-workspace, .review-tools-workspace) li[data-annotation-origin]:hover,
-:is(.review-workspace, .review-tools-workspace) li[data-annotation-origin]:focus-within:not(:has(.copy-link-control:focus-within)) {
+:is(.review-workspace, .review-tools-workspace) li[data-annotation-origin]:has(:focus-visible):not(:has(.copy-link-control:focus-within)) {
   border: 0;
   background: var(--pk-hover);
   box-shadow: none;
@@ -65,7 +77,7 @@
 }
 
 :is(.review-workspace, .review-tools-workspace) li[data-annotation-origin][data-active="true"]:hover,
-:is(.review-workspace, .review-tools-workspace) li[data-annotation-origin][data-active="true"]:focus-within,
+:is(.review-workspace, .review-tools-workspace) li[data-annotation-origin][data-active="true"]:has(:focus-visible),
 :is(.review-workspace, .review-tools-workspace) li[data-annotation-origin][data-active="true"]:active {
   background: var(--pk-raised);
   box-shadow: 0 2px 6px rgb(0 0 0 / 2%), 0 8px 24px rgb(0 0 0 / 1.6%);
@@ -160,11 +172,18 @@
   margin-left: auto;
 }
 
-.annotation-item__title-row > .annotation-item__meta[data-annotation-metadata-layout="row-head"] > .annotation-item__page {
+.annotation-item__title-row > .annotation-item__meta[data-annotation-metadata-layout="row-head"] > :is(.annotation-item__page, .annotation-item__status-icon) {
   order: 3;
   margin-left: 6px;
+}
+
+.annotation-item__title-row > .annotation-item__meta[data-annotation-metadata-layout="row-head"] > .annotation-item__page {
   color: #737373;
   font: 400 11px/1.5 var(--pk-font-ui);
+}
+
+.annotation-item__title-row > .annotation-item__meta[data-annotation-metadata-layout="row-head"] > .annotation-item__status-icon {
+  color: var(--review-danger);
 }
 
 .annotation-item__title-row > .annotation-item__meta[data-annotation-metadata-layout="row-head"] > :is(
@@ -280,7 +299,7 @@
   outline-offset: 3px;
 }
 
-:is(.review-workspace, .review-tools-workspace) li[data-annotation-origin]:focus-within:not(:has(.copy-link-control:focus-within)) {
+:is(.review-workspace, .review-tools-workspace) li[data-annotation-origin]:has(:focus-visible):not(:has(.copy-link-control:focus-within)) {
   outline: 0;
 }
 

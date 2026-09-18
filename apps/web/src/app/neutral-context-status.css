@@ -100,8 +100,7 @@
   font-family: var(--pk-font-ui);
 }
 
-.reconciliation-workspace__header h2,
-.reconciliation-workspace__detail-header h2 {
+.reconciliation-workspace__header h2 {
   color: var(--pk-ink);
   font-size: 13px;
   font-weight: 500;
@@ -118,42 +117,6 @@
   font-weight: 400;
   letter-spacing: 0;
   text-transform: none;
-}
-
-.reconciliation-workspace--detail .reconciliation-workspace__intent {
-  gap: 4px;
-}
-
-.reconciliation-workspace--detail .reconciliation-workspace__kicker {
-  color: var(--pk-muted);
-  font-size: 11px;
-  font-weight: 400;
-  letter-spacing: 0;
-  text-transform: none;
-}
-
-.reconciliation-workspace--detail .reconciliation-workspace__annotation-text {
-  color: var(--pk-ink);
-  font-size: 13px;
-  font-weight: 500;
-  line-height: 1.45;
-}
-
-.reconciliation-workspace__prior-context {
-  gap: 4px;
-  padding: 10px 12px;
-  border-left: 2px solid var(--pk-muted);
-  border-radius: 0 9px 9px 0;
-  background: var(--pk-selected);
-}
-
-.reconciliation-workspace--detail .reconciliation-workspace__source-text {
-  color: var(--pk-muted);
-  font-family: var(--pk-font-ui);
-  font-size: 12px;
-  font-style: normal;
-  font-weight: 400;
-  line-height: 1.5;
 }
 
 .reconciliation-workspace--detail .reconciliation-workspace__instruction {
@@ -221,4 +184,3 @@
   .document-actions__menu > button,
   .document-actions__confirmation > button { min-height: 44px; }
 }
-

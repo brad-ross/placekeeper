@@ -64,6 +64,8 @@ export type PdfTargetVisibility = 'visible' | 'outside' | 'unavailable';
 
 export interface ViewerNavigationControls {
   captureLocation(mode?: PdfLocationCaptureMode): PdfViewerLocation | null;
+  /** Clamps a neutral location to the current document without moving the viewer. */
+  clampLocation(location: PdfViewerLocation): PdfViewerLocation | null;
   applyLocation(location: PdfViewerLocation, viewport?: PdfViewportQuery): Promise<boolean>;
   fitToWidth(waitForSettledGeometry?: WaitForSettledViewerGeometry): Promise<boolean>;
   fitToWidthReady(): boolean;

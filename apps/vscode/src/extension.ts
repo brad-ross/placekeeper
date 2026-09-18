@@ -408,10 +408,11 @@ export function activate(context: vscode.ExtensionContext): void {
     const bridge = new VersionedWebviewBridge(client, (message) => panel.webview.postMessage(message));
     const observer = new RebuildObserver({
       outputPath: binding.outputPath,
-      initialEpoch: Date.now() * 1_000,
-      validate: ({ outputPath, observationEpoch }) => observeLiveDocument(exchanged, { outputPath, observationEpoch }),
-      markPossiblyStale: ({ observationEpoch }) =>
-        markLiveDocumentPossiblyStale(exchanged, { observationEpoch }).then(() => undefined),
+      hostHintPrefix: `${windowId}:${panelId}`,
+      validate: ({ outputPath, hostHintToken, reason }) =>
+        observeLiveDocument(exchanged, { outputPath, hostHintToken, reason }),
+      markPossiblyStale: ({ hostHintToken }) =>
+        markLiveDocumentPossiblyStale(exchanged, { hostHintToken }).then(() => undefined),
       onCurrentResult: (result, input) => {
         if (typeof result !== "object" || result === null) return;
         const status = (result as { status?: unknown }).status;

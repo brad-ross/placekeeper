@@ -1,7 +1,7 @@
 import { PDFArray, PDFDict, PDFDocument, PDFHexString, PDFName, PDFNumber, PDFStream, PDFString } from 'pdf-lib';
 import { READER_APPEARANCE_KEY } from '../../core/src/annotation-appearance.js';
 import { type PdfAnnotationObject } from '@embedpdf/models';
-import { canEditPdfAnnotationComment, canDeletePdfAnnotation, isEditablePdfAnnotationSubtype, nativePdfAnnotationId, NATIVE_PDF_ANNOTATION_NAME_PREFIX } from '../../core/src/native-pdf-annotation.js';
+import { canEditPdfAnnotationComment, canDeletePdfAnnotation, isEditablePdfAnnotationSubtype, nativePdfAnnotationIdentity, VERIFIED_NATIVE_PDF_ANNOTATION_NAME_PREFIX } from '../../core/src/native-pdf-annotation.js';
 import { PdfWriterError, type ReviewAnnotation, type PdfWriteRequest, type PdfWriteResult, type PdfRewriteEligibility, type PdfWrittenAnnotationEvidence } from '../../core/src/pdf-writer.js';
 import { embedPdfSubtypeName } from './embedpdf-annotation.js';
 import type { ReviewItem } from '../../core/src/review-model.js';
@@ -80,7 +80,24 @@ export async function writeWithNativePdfAnnotations(
   const eligibility = await backend.assess(request.sourcePdf);
   if (!eligibility.eligible) throw new PdfWriterError(eligibility.code, eligibility.message);
   const source = await backend.inspect(request.sourcePdf);
-  const prepared = await prepareNativePdfAnnotations(request.sourcePdf, manageNative ? source.nativeAnnotations : [], nativeRequests,
+  const ordinalRequestsByPage = new Map<number, Map<number, ReviewAnnotation>>();
+  for (const annotation of nativeRequests) {
+    if (annotation.nativeIdentityProvenance !== 'generation-ordinal' || annotation.nativeSourceObject === undefined) continue;
+    let requestsByIndex = ordinalRequestsByPage.get(annotation.nativeSourceObject.pageIndex);
+    if (requestsByIndex === undefined) {
+      requestsByIndex = new Map();
+      ordinalRequestsByPage.set(annotation.nativeSourceObject.pageIndex, requestsByIndex);
+    }
+    if (!requestsByIndex.has(annotation.nativeSourceObject.annotationIndex)) {
+      requestsByIndex.set(annotation.nativeSourceObject.annotationIndex, annotation);
+    }
+  }
+  const mappedNativeAnnotations = source.nativeAnnotations.map((entry) => {
+    if (entry.item.payload.identityProvenance === 'verified') return entry;
+    const requested = ordinalRequestsByPage.get(entry.pageIndex)?.get(entry.annotationIndex);
+    return requested === undefined ? entry : { ...entry, item: { ...entry.item, id: requested.id } };
+  });
+  const prepared = await prepareNativePdfAnnotations(request.sourcePdf, manageNative ? mappedNativeAnnotations : [], nativeRequests,
     portableCommentEdits(source, request.annotations));
   const written = await backend.write({
     ...request, sourcePdf: prepared.pdfBytes, sourceSha256: await backend.sha256(prepared.pdfBytes),
@@ -110,7 +127,7 @@ export async function writeWithNativePdfAnnotations(
     }
     return { ...annotation, id: requested.id };
   });
-  const managedNames = new Set(source.nativeAnnotations.map(({ item }) => `${NATIVE_PDF_ANNOTATION_NAME_PREFIX}${item.id}`));
+  const managedNames = new Set(nativeRequests.map(({ id }) => `${VERIFIED_NATIVE_PDF_ANNOTATION_NAME_PREFIX}${id}`));
   const common = { originalSha256: request.sourceSha256, outputSha256: await backend.sha256(pdfBytes), annotations: [...written.evidence.annotations, ...evidence] };
   return {
     ...written, pdfBytes,
@@ -138,7 +155,8 @@ export function nativeAnnotationsFromPages(
   pages.forEach((annotations, pageIndex) => annotations.forEach((annotation, annotationIndex) => {
     const subtype = embedPdfSubtypeName(annotation.type);
     if (ownedObjects.has(annotation) || !isEditablePdfAnnotationSubtype(subtype)) return;
-    const id = nativePdfAnnotationId(pageIndex, annotationIndex, annotation.id);
+    const identity = nativePdfAnnotationIdentity(pageIndex, annotationIndex, annotation.id);
+    const id = identity.id;
     // Ambiguous persistent identity cannot authorize an edit or deletion.
     if (seenIds.has(id)) {
       const previous = result.findIndex(({ item }) => item.id === id);
@@ -154,6 +172,9 @@ export function nativeAnnotationsFromPages(
         position: { x: annotation.rect.origin.x, y: annotation.rect.origin.y,
           width: annotation.rect.size.width, height: annotation.rect.size.height },
         comment: annotation.contents ?? '', author: annotation.author ?? '', subtype,
+        identityProvenance: identity.provenance,
+        sourceObjectPageIndex: pageIndex,
+        sourceObjectAnnotationIndex: annotationIndex,
         ...(annotation.flags?.some((flag) => flag === 'readOnly' || flag === 'lockedContents') ? { contentsLocked: true } : {}),
         ...(annotation.flags?.some((flag) => flag === 'readOnly' || flag === 'locked') ? { deletionLocked: true } : {}),
       },
@@ -245,11 +266,11 @@ async function prepareNativePdfAnnotations(
     }
     if (!dictionary.has(PDFName.of('AP'))) {
       const names = appearanceLessNames.get(entry.pageIndex) ?? new Set<string>();
-      names.add(`${NATIVE_PDF_ANNOTATION_NAME_PREFIX}${entry.item.id}`);
+      names.add(`${VERIFIED_NATIVE_PDF_ANNOTATION_NAME_PREFIX}${entry.item.id}`);
       appearanceLessNames.set(entry.pageIndex, names);
     }
     // A standard /NM supplies stable identity even if another reader strips private data.
-    dictionary.set(PDFName.of('NM'), PDFString.of(`${NATIVE_PDF_ANNOTATION_NAME_PREFIX}${entry.item.id}`));
+    dictionary.set(PDFName.of('NM'), PDFString.of(`${VERIFIED_NATIVE_PDF_ANNOTATION_NAME_PREFIX}${entry.item.id}`));
     if (requestedAnnotation.contents !== entry.item.payload.comment) {
       if (!canEditPdfAnnotationComment(entry.item)) throw new PdfWriterError('permission-denied', 'This PDF annotation comment is locked.');
       dictionary.set(PDFName.of('Contents'), PDFHexString.fromText(requestedAnnotation.contents));
@@ -258,16 +279,8 @@ async function prepareNativePdfAnnotations(
       dictionary.delete(PDFName.of('RC'));
     }
     // External edits make old Placekeeper projections stale. Retain other custom data.
-    const custom = dictionary.lookup(PDFName.of('EPDFCustom'));
-    if (custom instanceof PDFString || custom instanceof PDFHexString) {
-      try {
-        const data = JSON.parse(custom.decodeText());
-        if (data && typeof data === 'object' && !Array.isArray(data) && 'placekeeper' in data) {
-          delete data.placekeeper;
-          dictionary.set(PDFName.of('EPDFCustom'), PDFHexString.fromText(JSON.stringify(data)));
-        }
-      } catch { /* Bespoke data belongs to its original application. */ }
-    }
+    // Provenance lives in the versioned /NM namespace. Leave unrelated or
+    // malformed application-owned EPDFCustom bytes untouched.
   }
   // Replies to a deleted parent become standalone comments; their content and appearance survive.
   if (removals.size > 0) pdf.getPages().forEach((page, pageIndex) => {
