@@ -6,11 +6,14 @@ import { createReviewState, type ReviewItem, type ReviewState } from '../../../p
 import { ReviewShell } from '../src/app/ReviewShell.js';
 import { acceptedAuthoringCommandRequiresPersistence } from '../src/app/ProductionReviewApp.js';
 import {
+  activeAnnotationShouldDismissForClick,
   referenceAccessAvailable,
   referenceInspectionFocusSelector,
   referenceInspectionShouldDismissForClick,
   referenceInspectionShouldDismissForKey,
+  mainAnnotationPeekCanOpen,
   takeReferenceInspectionForAuthoring,
+  workspaceCloseAllowsMainPeek,
   shouldShowRightWorkspaceRail,
 } from '../src/app/ReviewShell.js';
 import {
@@ -70,6 +73,48 @@ const session = createAuthoringSession({
 });
 
 describe('Reference authoring continuity', () => {
+  it('preserves the selected Main annotation when its workspace close control is clicked', () => {
+    const target = (matchedSelector: string | null) => ({
+      closest: (selector: string) => matchedSelector !== null && selector.includes(matchedSelector)
+        ? {} : null,
+    }) as unknown as Pick<Element, 'closest'>;
+
+    expect(activeAnnotationShouldDismissForClick(target('.review-workspace__close'))).toBe(false);
+    expect(activeAnnotationShouldDismissForClick(target('[data-review-item]'))).toBe(false);
+    expect(activeAnnotationShouldDismissForClick(target(null))).toBe(true);
+  });
+
+  it('holds a selected Main card until the closing workspace geometry is current', async () => {
+    expect(mainAnnotationPeekCanOpen({
+      workspaceOpen: false,
+      workspaceClosePending: true,
+      activeItemId: 'note-1',
+    })).toBe(false);
+    expect(mainAnnotationPeekCanOpen({
+      workspaceOpen: false,
+      workspaceClosePending: false,
+      activeItemId: 'note-1',
+    })).toBe(true);
+    expect(mainAnnotationPeekCanOpen({
+      workspaceOpen: true,
+      workspaceClosePending: false,
+      activeItemId: 'note-1',
+    })).toBe(false);
+
+    const signal = new AbortController().signal;
+    expect(await workspaceCloseAllowsMainPeek(async () => ({
+      revision: 4,
+      isCurrent: () => true,
+    }), signal)).toBe(true);
+    let settlementAttempt = 0;
+    expect(await workspaceCloseAllowsMainPeek(async () => ({
+      revision: ++settlementAttempt,
+      isCurrent: () => settlementAttempt > 1,
+    }), signal)).toBe(true);
+    expect(settlementAttempt).toBe(2);
+    expect(await workspaceCloseAllowsMainPeek(async () => null, signal)).toBe(false);
+  });
+
   it('keeps Reference controls interactive while one editor owns authoring', () => {
     const html = renderToStaticMarkup(<ReferenceWorkspace
       open

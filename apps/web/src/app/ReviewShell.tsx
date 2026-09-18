@@ -131,6 +131,7 @@ import {
 import type { AccessibilityTransitionEffect } from './accessibility-transitions.js';
 import {
   useWorkspaceFraming,
+  type WorkspaceFraming,
   type WorkspaceOpenRequest,
 } from '../review/use-annotation-tray-framing.js';
 import { useReviewOverlayGeometry } from '../review/use-review-overlay-geometry.js';
@@ -159,6 +160,34 @@ import './neutral-chrome.css';
 function ignoreReferenceViewportHost(_element: HTMLDivElement | null): void {}
 function ignoreReferenceInspectionDismiss(_token: number): void {}
 function ignoreOpenAnnotationReference(_identity: AnnotationReaderIdentity): void {}
+
+export function mainAnnotationPeekCanOpen(input: {
+  readonly workspaceOpen: boolean;
+  readonly workspaceClosePending: boolean;
+  readonly activeItemId?: string | undefined;
+}): boolean {
+  return !input.workspaceOpen
+    && !input.workspaceClosePending
+    && input.activeItemId !== undefined;
+}
+
+export function activeAnnotationShouldDismissForClick(target: Pick<Element, 'closest'>): boolean {
+  return target.closest(
+    '[data-review-item], [data-existing-annotation], [data-owned-focus-id], [data-page-index], .annotation-peek, .review-workspace__close',
+  ) === null;
+}
+
+export async function workspaceCloseAllowsMainPeek(
+  waitForSettledGeometry: WorkspaceFraming['waitForSettledGeometry'],
+  signal: AbortSignal,
+): Promise<boolean> {
+  while (!signal.aborted) {
+    const geometry = await waitForSettledGeometry(signal);
+    if (geometry === null) return false;
+    if (geometry.isCurrent()) return true;
+  }
+  return false;
+}
 
 export interface ReviewShellSaveModel {
   savedLabel?: string;
@@ -650,6 +679,30 @@ export function ReviewShell(props: ReviewShellProps) {
       referenceLayout.bottomReferenceHeight,
     ].join(':'),
   });
+  const priorAnyWorkspaceOpenRef = useRef(anyWorkspaceOpen);
+  const [workspaceClosePending, setWorkspaceClosePending] = useState(false);
+  // The close edge is derived during render so the first closing commit is
+  // gated before the layout effect can publish its pending state.
+  const workspaceCloseStarted = !anyWorkspaceOpen && priorAnyWorkspaceOpenRef.current;
+  const deferMainPeeksForWorkspaceClose = workspaceCloseStarted || workspaceClosePending;
+  useLayoutEffect(() => {
+    const wasOpen = priorAnyWorkspaceOpenRef.current;
+    priorAnyWorkspaceOpenRef.current = anyWorkspaceOpen;
+    if (anyWorkspaceOpen) {
+      setWorkspaceClosePending(false);
+      return;
+    }
+    if (!wasOpen) return;
+    const settlement = new AbortController();
+    setWorkspaceClosePending(true);
+    void workspaceCloseAllowsMainPeek(
+      workspaceFraming.waitForSettledGeometry,
+      settlement.signal,
+    ).then((settled) => {
+      if (settled && !settlement.signal.aborted) setWorkspaceClosePending(false);
+    });
+    return () => settlement.abort();
+  }, [anyWorkspaceOpen, workspaceFraming.waitForSettledGeometry]);
   const {
     restoreReaderAfterAuthoring,
     annotationReaderSession,
@@ -967,7 +1020,15 @@ export function ReviewShell(props: ReviewShellProps) {
       setPeekItemId(undefined);
       return;
     }
-    if (!anyWorkspaceOpen && activeItemId !== undefined) {
+    if (deferMainPeeksForWorkspaceClose) {
+      setPeekItemId(undefined);
+      return;
+    }
+    if (mainAnnotationPeekCanOpen({
+      workspaceOpen: anyWorkspaceOpen,
+      workspaceClosePending: deferMainPeeksForWorkspaceClose,
+      activeItemId,
+    })) {
       setPeekItemId(activeItemId);
       return;
     }
@@ -979,7 +1040,8 @@ export function ReviewShell(props: ReviewShellProps) {
     } else if (!peekHeldRef.current) {
       setPeekItemId(undefined);
     }
-  }, [annotationPeeksEnabled, annotationsVisible, anyWorkspaceOpen, props.correspondingItemId, activeItemId]);
+  }, [annotationPeeksEnabled, annotationsVisible, anyWorkspaceOpen, deferMainPeeksForWorkspaceClose,
+    props.correspondingItemId, activeItemId]);
 
   useEffect(() => {
     const request = props.activationRequest;
@@ -1656,7 +1718,7 @@ export function ReviewShell(props: ReviewShellProps) {
       initialValue={initialValue}
       editorRef={authoringEditorRef}
       surfaceRef={setAuthoringSurfaceElement}
-      deferUntilPlacement={authoringReferenceTabIdentity !== undefined}
+      deferUntilPlacement
       {...((passageExposedToken === authoringSession.token ? exposedPassagePlacement.current : authoringPlacement) === undefined
         ? {}
         : { placement: (passageExposedToken === authoringSession.token ? exposedPassagePlacement.current : authoringPlacement)! })}
@@ -1752,7 +1814,7 @@ export function ReviewShell(props: ReviewShellProps) {
           && (activeItemId !== undefined || activeExistingAnnotationKey !== undefined)
           && event.button === 0
           && event.target instanceof Element
-          && event.target.closest('[data-review-item], [data-existing-annotation], [data-owned-focus-id], [data-page-index], .annotation-peek') === null
+          && activeAnnotationShouldDismissForClick(event.target)
         ) {
           setActiveItem(undefined);
           setActiveExistingAnnotationKey(undefined);
@@ -2027,6 +2089,7 @@ export function ReviewShell(props: ReviewShellProps) {
           ) : null}
           {authoringSession === null
             && !annotationsVisible
+            && !deferMainPeeksForWorkspaceClose
             && annotationPeeksEnabled && annotationReaderSession?.origin === 'peek'
             && annotationReaderRecord !== null ? (
               <aside className="annotation-peek annotation-peek--reader">
@@ -2061,6 +2124,7 @@ export function ReviewShell(props: ReviewShellProps) {
             ) : null}
           {authoringSession === null
             && !annotationsVisible
+            && !deferMainPeeksForWorkspaceClose
             && annotationPeeksEnabled && annotationReaderSession?.origin !== 'peek'
             && peekItemId ? (() => {
             const item = props.state.items.find(({ id }) => id === peekItemId);

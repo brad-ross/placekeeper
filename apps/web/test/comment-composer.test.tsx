@@ -1,7 +1,11 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 
-import { boundedTextAreaHeight, CommentComposer } from '../src/review/CommentComposer.js';
+import {
+  boundedTextAreaHeight,
+  CommentComposer,
+  focusCommentComposerEditor,
+} from '../src/review/CommentComposer.js';
 
 function renderComposer(overrides: Partial<Parameters<typeof CommentComposer>[0]> = {}) {
   return renderToStaticMarkup(
@@ -94,6 +98,19 @@ describe('CommentComposer contextual authoring contract', () => {
     expect(boundedTextAreaHeight({ scrollHeight: 360, minHeight: 84, maxHeight: 220 })).toBe(220);
   });
 
+  it('focuses the editor without scrolling its pending placement into view', () => {
+    const editor = {
+      value: 'Draft',
+      focus: vi.fn(),
+      setSelectionRange: vi.fn(),
+    };
+
+    focusCommentComposerEditor(editor);
+
+    expect(editor.focus).toHaveBeenCalledWith({ preventScroll: true });
+    expect(editor.setSelectionRange).toHaveBeenCalledWith(5, 5);
+  });
+
   it('exposes stable placement data and an original-page cue without duplicating the draft', () => {
     const html = renderComposer({
       initialValue: 'Persistent draft',
@@ -106,14 +123,18 @@ describe('CommentComposer contextual authoring contract', () => {
     expect(html.match(/Persistent draft/g)).toHaveLength(1);
   });
 
-  it('defers an explicitly placement-dependent composer while Main remains visible', () => {
+  it('keeps a placement-dependent composer editable while deferring its visible paint', () => {
     const pending = renderComposer({ surfaceRef: vi.fn(), deferUntilPlacement: true });
-    const main = renderComposer({ surfaceRef: vi.fn() });
+    const standalone = renderComposer({ surfaceRef: vi.fn() });
+    const pendingEditor = pending.match(/<textarea[^>]*>/u)?.[0];
 
     expect(pending).toContain('data-composer-placement="pending"');
-    expect(pending).toContain('visibility:hidden');
-    expect(main).not.toContain('data-composer-placement="pending"');
-    expect(main).not.toContain('visibility:hidden');
+    expect(pending).toContain('opacity:0;pointer-events:none');
+    expect(pendingEditor).toBeDefined();
+    expect(pendingEditor).not.toContain('disabled');
+    expect(pendingEditor).not.toContain('readOnly');
+    expect(standalone).not.toContain('data-composer-placement="pending"');
+    expect(standalone).not.toContain('opacity:0');
   });
 
   it('keeps a recoverable draft mounted while an invalid target disables Save', () => {

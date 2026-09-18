@@ -104,6 +104,278 @@ async function openPrimaryReference(page: Page): Promise<void> {
   await expect(page.getByRole('tab', { name: /Primary result/u })).toHaveAttribute('aria-selected', 'true');
 }
 
+type MainSurfaceSample = {
+  placement: string | null;
+  inlineStyle: string | null;
+  rect: { left: number; top: number; right: number; bottom: number; width: number; height: number };
+  origin: { left: number; top: number; right: number; bottom: number } | null;
+  computed: { position: string; visibility: string; opacity: string };
+  focusedWithin: boolean;
+};
+
+type MainSurfaceProbeEvidence = {
+  first: MainSurfaceSample | null;
+  frames: Array<{ visible: boolean; transitionActive: boolean; transitionStarted: boolean }>;
+  visibleSamples: MainSurfaceSample[];
+};
+
+async function installFirstVisibleMainSurfaceProbe(
+  page: Page,
+  key: string,
+  surfaceSelector: string,
+  originSelector: string,
+  transitionSelector?: string,
+): Promise<void> {
+  await page.evaluate(({ key, surfaceSelector, originSelector, transitionSelector }) => {
+    type Sample = MainSurfaceSample;
+    type Frame = { visible: boolean; transitionActive: boolean; transitionStarted: boolean };
+    type Probe = {
+      first: Sample | null;
+      frames: Frame[];
+      visibleSamples: Sample[];
+      frame: number | null;
+      stop: () => void;
+    };
+    const scope = window as typeof window & { __mainFirstVisibleSurfaceProbes?: Record<string, Probe> };
+    scope.__mainFirstVisibleSurfaceProbes?.[key]?.stop();
+    const transitionElement = transitionSelector === undefined
+      ? null
+      : document.querySelector<HTMLElement>(transitionSelector);
+    const activeProperties = new Set<string>();
+    let transitionStarted = false;
+    const onTransitionRun = (event: TransitionEvent) => {
+      if (event.target !== transitionElement) return;
+      transitionStarted = true;
+      activeProperties.add(event.propertyName);
+    };
+    const onTransitionSettled = (event: TransitionEvent) => {
+      if (event.target !== transitionElement) return;
+      activeProperties.delete(event.propertyName);
+    };
+    transitionElement?.addEventListener('transitionrun', onTransitionRun);
+    transitionElement?.addEventListener('transitionend', onTransitionSettled);
+    transitionElement?.addEventListener('transitioncancel', onTransitionSettled);
+    const probe: Probe = {
+      first: null,
+      frames: [],
+      visibleSamples: [],
+      frame: null,
+      stop: () => undefined,
+    };
+    const sampleSurface = (): Sample | null => {
+      const surface = document.querySelector<HTMLElement>(surfaceSelector);
+      if (surface === null) return null;
+      const bounds = surface.getBoundingClientRect();
+      const style = getComputedStyle(surface);
+      if (bounds.width <= 0 || bounds.height <= 0 || style.display === 'none'
+        || style.visibility === 'hidden' || Number(style.opacity) <= 0) return null;
+      const originElement = document.querySelector<HTMLElement>(originSelector);
+      const originBounds = originElement?.getBoundingClientRect();
+      return {
+        placement: surface.getAttribute('data-composer-placement')
+          ?? surface.getAttribute('data-placement'),
+        inlineStyle: surface.getAttribute('style'),
+        rect: {
+          left: bounds.left,
+          top: bounds.top,
+          right: bounds.right,
+          bottom: bounds.bottom,
+          width: bounds.width,
+          height: bounds.height,
+        },
+        origin: originBounds === undefined ? null : {
+          left: originBounds.left,
+          top: originBounds.top,
+          right: originBounds.right,
+          bottom: originBounds.bottom,
+        },
+        computed: {
+          position: style.position,
+          visibility: style.visibility,
+          opacity: style.opacity,
+        },
+        focusedWithin: surface.contains(document.activeElement),
+      };
+    };
+    const capture = () => {
+      const sample = sampleSurface();
+      const transitionActive = activeProperties.size > 0
+        || transitionElement?.getAnimations().some(({ pending, playState }) => (
+          pending || playState === 'running'
+        )) === true;
+      probe.frames.push({
+        visible: sample !== null,
+        transitionActive,
+        transitionStarted,
+      });
+      if (sample !== null) {
+        probe.visibleSamples.push(sample);
+        probe.first ??= sample;
+      }
+      probe.frame = requestAnimationFrame(capture);
+    };
+    probe.stop = () => {
+      if (probe.frame !== null) cancelAnimationFrame(probe.frame);
+      probe.frame = null;
+      transitionElement?.removeEventListener('transitionrun', onTransitionRun);
+      transitionElement?.removeEventListener('transitionend', onTransitionSettled);
+      transitionElement?.removeEventListener('transitioncancel', onTransitionSettled);
+    };
+    (scope.__mainFirstVisibleSurfaceProbes ??= {})[key] = probe;
+    probe.frame = requestAnimationFrame(capture);
+  }, { key, surfaceSelector, originSelector, transitionSelector });
+}
+
+async function finishFirstVisibleMainSurfaceProbe(
+  page: Page,
+  key: string,
+): Promise<MainSurfaceProbeEvidence> {
+  await expect.poll(() => page.evaluate((probeKey) => {
+    const probe = (window as typeof window & {
+      __mainFirstVisibleSurfaceProbes?: Record<string, MainSurfaceProbeEvidence>;
+    }).__mainFirstVisibleSurfaceProbes?.[probeKey];
+    const samples = probe?.visibleSamples ?? [];
+    if (samples.length < 2) return false;
+    return JSON.stringify(samples.at(-1)) === JSON.stringify(samples.at(-2));
+  }, key)).toBe(true);
+  return stopFirstVisibleMainSurfaceProbe(page, key);
+}
+
+async function stopFirstVisibleMainSurfaceProbe(
+  page: Page,
+  key: string,
+): Promise<MainSurfaceProbeEvidence> {
+  return page.evaluate((probeKey) => {
+    const probe = (window as typeof window & {
+      __mainFirstVisibleSurfaceProbes?: Record<
+        string,
+        MainSurfaceProbeEvidence & { stop: () => void }
+      >;
+    }).__mainFirstVisibleSurfaceProbes?.[probeKey];
+    if (probe === undefined) throw new Error(`Missing Main surface probe: ${probeKey}`);
+    probe.stop();
+    return { first: probe.first, frames: probe.frames, visibleSamples: probe.visibleSamples };
+  }, key);
+}
+
+function placementRelationship(sample: MainSurfaceSample): string {
+  if (sample.origin === null) return 'missing-origin';
+  if (sample.rect.bottom <= sample.origin.top + 1) return 'above';
+  if (sample.rect.top >= sample.origin.bottom - 1) return 'below';
+  if (sample.rect.right <= sample.origin.left + 1) return 'left';
+  if (sample.rect.left >= sample.origin.right - 1) return 'right';
+  return 'overlap';
+}
+
+function expectFirstMainSurfacePaintResolved(evidence: MainSurfaceProbeEvidence): void {
+  const first = evidence.first;
+  const settled = evidence.visibleSamples.at(-1);
+  expect(first).not.toBeNull();
+  expect(settled).toBeDefined();
+  if (first === null || settled === undefined) return;
+  expect(['side', 'above', 'below', 'bottom-sheet']).toContain(first.placement);
+  expect(first.placement).toBe(settled.placement);
+  expect(first.inlineStyle?.trim().length).toBeGreaterThan(0);
+  expect(first.computed).toEqual(settled.computed);
+  expect(first.computed.position).toBe('absolute');
+  expect(first.origin).not.toBeNull();
+  expect(placementRelationship(first)).toBe(placementRelationship(settled));
+  expect(first.rect).toEqual(settled.rect);
+}
+
+async function mainScrollSnapshot(page: Page): Promise<{
+  windowX: number;
+  windowY: number;
+  pdfLeft: number;
+  pdfTop: number;
+}> {
+  return page.evaluate(() => {
+    const viewport = document.querySelector<HTMLElement>(
+      '.pdf-workspace:not(.pdf-workspace--reference) [data-viewer-framing-viewport]',
+    );
+    if (viewport === null) throw new Error('Main PDF viewport is unavailable.');
+    return {
+      windowX: window.scrollX,
+      windowY: window.scrollY,
+      pdfLeft: viewport.scrollLeft,
+      pdfTop: viewport.scrollTop,
+    };
+  });
+}
+
+async function expectWorkspaceAnimationsSettled(workspace: Locator): Promise<void> {
+  await expect.poll(() => workspace.evaluate((element) => (
+    element.getAnimations().some(({ pending, playState }) => (
+      pending || playState === 'running'
+    ))
+  ))).toBe(false);
+}
+
+async function closeSelectedMainCardAfterWorkspaceSettles(
+  page: Page,
+  options: {
+    itemId: string;
+    key: string;
+    tools: Locator;
+    peek: Locator;
+    expectAnimatedTransition: boolean;
+    resizeTo?: { width: number; height: number };
+  },
+): Promise<void> {
+  await installFirstVisibleMainSurfaceProbe(
+    page,
+    options.key,
+    `[data-annotation-peek="${options.itemId}"]`,
+    `[data-owned-mark][data-review-id="${options.itemId}"]`,
+    '#review-tools-workspace',
+  );
+  await options.tools.getByRole('button', { name: 'Hide workspace', exact: true }).click();
+  if (options.resizeTo !== undefined) await page.setViewportSize(options.resizeTo);
+  await expect(options.tools).toHaveAttribute('data-tools-workspace-open', 'false');
+  await expectWorkspaceAnimationsSettled(options.tools);
+  await expect.poll(() => options.tools.evaluate((element) => getComputedStyle(element).visibility))
+    .toBe('hidden');
+  await expect(options.peek).toHaveAttribute('data-peek-selected', 'true');
+
+  const cardPaint = await finishFirstVisibleMainSurfaceProbe(page, options.key);
+  if (options.expectAnimatedTransition) {
+    expect(cardPaint.frames.some(({ transitionActive }) => transitionActive)).toBe(true);
+  }
+  expect(
+    cardPaint.frames.some(({ visible, transitionActive }) => visible && transitionActive),
+    'The selected Main card painted before the Annotations tray finished closing',
+  ).toBe(false);
+  expect(cardPaint.first?.computed).toEqual(cardPaint.visibleSamples.at(-1)?.computed);
+  expect(cardPaint.first?.computed.position).toBe('absolute');
+  expect(cardPaint.first?.origin).not.toBeNull();
+  expect(cardPaint.first === null ? null : placementRelationship(cardPaint.first))
+    .toBe(placementRelationship(cardPaint.visibleSamples.at(-1)!));
+  expect(cardPaint.first?.rect).toEqual(cardPaint.visibleSamples.at(-1)?.rect);
+}
+
+async function openAndSelectAnnotationWorkspace(
+  page: Page,
+  itemId: string,
+  selectRow: boolean,
+): Promise<{ annotations: Locator; navigation: Locator; row: Locator; tools: Locator }> {
+  await page.getByRole('button', { name: 'Show workspace', exact: true }).click();
+  const tools = page.locator('#review-tools-workspace');
+  const annotations = tools.getByRole('tab', { name: 'Annotations', exact: true });
+  if (await annotations.getAttribute('aria-selected') !== 'true') await annotations.click();
+  await expect(annotations).toHaveAttribute('aria-selected', 'true');
+  await expect(tools).toHaveAttribute('data-tools-workspace-open', 'true');
+  await expectWorkspaceAnimationsSettled(tools);
+  await expect.poll(() => tools.evaluate((element) => getComputedStyle(element).transform))
+    .toBe('none');
+  const row = tools.locator(`[data-review-item="${itemId}"]`);
+  const navigation = row.locator('.annotation-item__navigation');
+  await navigation.focus();
+  await expect(navigation).toBeFocused();
+  if (selectRow) await navigation.press('Enter');
+  await expect(row).toHaveAttribute('data-active', 'true');
+  return { annotations, navigation, row, tools };
+}
+
 test.beforeEach(async () => {
   temporaryRoot = await mkdtemp(join(tmpdir(), 'placekeeper-annotation-followup-'));
   sourceRoot = join(temporaryRoot, 'source');
@@ -431,20 +703,45 @@ test('outside click and Escape dismiss an expanded popup without retaining full 
   await expect(page.locator('[data-annotation-peek]')).toHaveCount(0);
 });
 
-test('outside click dismisses a compact popup restored after cancelling an edit', async ({ page }) => {
+test('opens a focused Main editor at its PDF anchor before paint and dismisses the card after Cancel', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 });
   const { itemId } = await openLongAnnotationFixture(page, 'highlight', {
     content: 'Cancel this edit.',
   });
+  await expect(page.locator('#review-tools-workspace'))
+    .toHaveAttribute('data-tools-workspace-open', 'false');
   const mark = page.locator(`[data-owned-mark][data-review-id="${itemId}"]`).first();
   await mark.scrollIntoViewIfNeeded();
   const center = await markCenter(page, itemId);
   await page.mouse.click(center.x, center.y);
   const peek = page.locator(`[data-annotation-peek="${itemId}"]`);
+  await expect(peek).toHaveAttribute('data-peek-selected', 'true');
   await peek.hover();
+  const scrollBeforeEdit = await mainScrollSnapshot(page);
+  await installFirstVisibleMainSurfaceProbe(
+    page,
+    'main-closed-workspace-edit',
+    '[data-comment-composer]',
+    `[data-owned-mark][data-review-id="${itemId}"]`,
+  );
   await peek.getByRole('button', { name: 'Edit Highlight annotation on page 1' }).click();
   const composer = page.getByRole('region', { name: 'Edit Highlight' });
-  await expect(composer).toBeVisible();
+  const editor = composer.getByRole('textbox', { name: 'Comment (optional)' });
+  await expect(composer).toHaveCount(1);
+  await expect(editor).toBeFocused();
+  expect(await mainScrollSnapshot(page)).toEqual(scrollBeforeEdit);
+  await page.keyboard.press('ControlOrMeta+A');
+  await page.keyboard.type('Main editor input survives its first positioned paint.');
+  await expect(editor).toHaveValue('Main editor input survives its first positioned paint.');
+  const composerPaint = await finishFirstVisibleMainSurfaceProbe(
+    page,
+    'main-closed-workspace-edit',
+  );
+  expectFirstMainSurfacePaintResolved(composerPaint);
+  expect(composerPaint.first?.focusedWithin).toBe(true);
+  await expect(editor).toBeFocused();
+  expect(await mainScrollSnapshot(page)).toEqual(scrollBeforeEdit);
+  await expect(editor).toHaveValue('Main editor input survives its first positioned paint.');
   await composer.getByRole('button', { name: 'Cancel', exact: true }).click();
   await expect(peek).toBeVisible();
 
@@ -488,6 +785,91 @@ test('outside click dismisses a compact popup restored after cancelling an edit'
   expect(outside).toMatchObject({ pageIndex: '0', unsafe: false });
   await page.mouse.click(outside.x, outside.y);
   await expect(peek).toHaveCount(0);
+});
+
+test('waits for the closing Annotations tray before first painting the selected Main card', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  const { itemId } = await openLongAnnotationFixture(page, 'highlight', {
+    content: 'Restore this selected card after the workspace settles.',
+  });
+  const mark = page.locator(`[data-owned-mark][data-review-id="${itemId}"]`).first();
+  await mark.scrollIntoViewIfNeeded();
+  const peek = page.locator(`[data-annotation-peek="${itemId}"]`);
+  const { tools } = await openAndSelectAnnotationWorkspace(page, itemId, true);
+  await expect(peek).toHaveCount(0);
+  await expect(mark).toBeVisible();
+  await closeSelectedMainCardAfterWorkspaceSettles(page, {
+    itemId,
+    key: 'main-card-after-tools-close',
+    tools,
+    peek,
+    expectAnimatedTransition: true,
+  });
+
+  const reopened = await openAndSelectAnnotationWorkspace(page, itemId, true);
+  await expect(peek).toHaveCount(0);
+  await installFirstVisibleMainSurfaceProbe(
+    page,
+    'main-card-aborted-tools-close',
+    `[data-annotation-peek="${itemId}"]`,
+    `[data-owned-mark][data-review-id="${itemId}"]`,
+    '#review-tools-workspace',
+  );
+  await reopened.tools.getByRole('button', { name: 'Hide workspace', exact: true }).click();
+  expect(await reopened.tools.evaluate((element) => element.getAnimations().some(
+    ({ pending, playState }) => pending || playState === 'running',
+  ))).toBe(true);
+  await page.getByRole('button', { name: 'Show workspace', exact: true }).click();
+  await expect(reopened.tools).toHaveAttribute('data-tools-workspace-open', 'true');
+  await expectWorkspaceAnimationsSettled(reopened.tools);
+  await expect.poll(() => reopened.tools.evaluate((element) => getComputedStyle(element).transform))
+    .toBe('none');
+  await expect(peek).toHaveCount(0);
+  const abortedClosePaint = await stopFirstVisibleMainSurfaceProbe(
+    page,
+    'main-card-aborted-tools-close',
+  );
+  expect(abortedClosePaint.frames.some(({ transitionActive }) => transitionActive)).toBe(true);
+  expect(
+    abortedClosePaint.frames.some(({ visible }) => visible),
+    'The selected Main card painted during a close that was immediately reopened',
+  ).toBe(false);
+
+  await reopened.navigation.focus();
+  await expect(reopened.navigation).toBeFocused();
+  await reopened.navigation.press('Enter');
+  await expect(reopened.row).toHaveAttribute('data-active', 'true');
+  await closeSelectedMainCardAfterWorkspaceSettles(page, {
+    itemId,
+    key: 'main-card-after-tools-reopen-resize-close',
+    tools: reopened.tools,
+    peek,
+    expectAnimatedTransition: true,
+    resizeTo: { width: 1180, height: 840 },
+  });
+});
+
+test('settles a reduced-motion Annotations close before painting the selected Main card', async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  expect(await page.evaluate(() => matchMedia('(prefers-reduced-motion: reduce)').matches))
+    .toBe(true);
+  await page.setViewportSize({ width: 1280, height: 900 });
+  const { itemId } = await openLongAnnotationFixture(page, 'highlight', {
+    content: 'Restore this selected card after reduced-motion settlement.',
+  });
+  const mark = page.locator(`[data-owned-mark][data-review-id="${itemId}"]`).first();
+  await mark.scrollIntoViewIfNeeded();
+  const peek = page.locator(`[data-annotation-peek="${itemId}"]`);
+  const { tools } = await openAndSelectAnnotationWorkspace(page, itemId, true);
+  await expect(peek).toHaveCount(0);
+  await expect(mark).toBeVisible();
+  await closeSelectedMainCardAfterWorkspaceSettles(page, {
+    itemId,
+    key: 'main-card-after-reduced-motion-tools-close',
+    tools,
+    peek,
+    expectAnimatedTransition: false,
+  });
 });
 
 

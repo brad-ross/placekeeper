@@ -1,5 +1,4 @@
 import {
-  useEffect,
   useId,
   useLayoutEffect,
   useRef,
@@ -93,6 +92,13 @@ export function boundedTextAreaHeight(input: BoundedTextAreaHeightInput): number
   return Math.min(input.maxHeight, Math.max(input.minHeight, input.scrollHeight));
 }
 
+export function focusCommentComposerEditor(
+  editor: Pick<HTMLTextAreaElement, 'focus' | 'setSelectionRange' | 'value'>,
+): void {
+  editor.focus({ preventScroll: true });
+  editor.setSelectionRange(editor.value.length, editor.value.length);
+}
+
 export function CommentComposer({
   title,
   initialValue = '',
@@ -124,12 +130,10 @@ export function CommentComposer({
     && (optional || (allowWhitespace ? value.length > 0 : value.trim().length > 0));
   const placementPending = deferUntilPlacement && placement === undefined;
 
-  useEffect(() => {
-    if (placementPending) return;
+  useLayoutEffect(() => {
     const input = inputRef.current;
-    input?.focus();
-    input?.setSelectionRange(input.value.length, input.value.length);
-  }, [inputRef, placementPending]);
+    if (input !== null) focusCommentComposerEditor(input);
+  }, [inputRef]);
 
   useLayoutEffect(() => {
     const editor = inputRef.current;
@@ -242,7 +246,7 @@ export function CommentComposer({
       data-comment-composer
       data-composer-placement={placementPending ? 'pending' : placement?.kind}
       data-passage-exposed={passageExposed ? 'true' : undefined}
-      style={placementPending ? { visibility: 'hidden' } : placement?.style}
+      style={placementPending ? { opacity: 0, pointerEvents: 'none' } : placement?.style}
       onSubmit={(event) => {
         event.preventDefault();
         submit();
