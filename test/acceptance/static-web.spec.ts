@@ -529,7 +529,7 @@ for (const width of [390, 1280]) test(`@critical landing showcase and PDF contro
   await expect(page.getByLabel('Document URL')).toBeVisible();
   const showcase = page.getByRole('tablist', { name: 'Explore features' });
   await expect(showcase.getByRole('tab', { name: 'Read with focus', exact: true })).toHaveAttribute('aria-selected', 'true');
-  for (const label of ['Read with focus', 'Follow a reference', 'Make comments']) {
+  for (const label of ['Read with focus', 'Follow references', 'Make comments']) {
     const tab = showcase.getByRole('tab', { name: label, exact: true });
     await expect(tab).toBeVisible();
     await expect(tab.locator('svg')).toBeVisible();
@@ -543,7 +543,7 @@ for (const width of [390, 1280]) test(`@critical landing showcase and PDF contro
       await expect(tab.getByText(label, { exact: true })).toBeVisible();
     }
   }
-  for (const name of ['Follow a reference', 'Make comments', 'Read with focus']) {
+  for (const name of ['Follow references', 'Make comments', 'Read with focus']) {
     const feature = showcase.getByRole('tab', { name, exact: true });
     await feature.focus();
     await page.keyboard.press('Enter');
@@ -579,7 +579,7 @@ test('@critical selecting the reference demo restores its sample only when refer
   const demo = page.frameLocator('iframe[aria-hidden="false"]');
   await demo.locator('[data-initial-view-ready="true"]').waitFor({ state: 'attached' });
   const features = page.getByRole('tablist', { name: 'Explore features' });
-  const reference = features.getByRole('tab', { name: 'Follow a reference', exact: true });
+  const reference = features.getByRole('tab', { name: 'Follow references', exact: true });
   const appendix = demo.getByRole('tab', { name: 'Appendix A, Page 31', exact: true });
   await reference.click();
   await expect(appendix).toBeVisible();
@@ -622,7 +622,7 @@ test('@critical landing demos support zoom, references, and isolated comments', 
 
   await zoom.fill('100');
   await zoom.press('Enter');
-  await feature('Follow a reference').click();
+  await feature('Follow references').click();
   await iframe.scrollIntoViewIfNeeded();
   await expect(demo.locator('[data-page-index="13"] > img').first()).toBeVisible();
   // Let the tray's opening animation and focus handoff settle before driving
@@ -709,7 +709,7 @@ test('@critical visitors can add demo annotations and hide them between modes', 
   await demo.getByRole('button', { name: 'Save', exact: true }).click();
   await expect(comment).toHaveCount(0);
   await expect(demo.locator('[data-owned-mark]')).toHaveCount(6);
-  for (const name of ['Read with focus', 'Follow a reference']) {
+  for (const name of ['Read with focus', 'Follow references']) {
     await feature(name).click();
     await expect(demo.locator('[data-owned-mark]')).toHaveCount(0);
     await expect(demo.locator('.annotation-peek')).toHaveCount(0);
@@ -827,7 +827,7 @@ test('@critical real-paper demo keeps its metadata while bounding the main previ
   expect(new Set(momentum.offsets).size).toBe(1);
   await demo.getByRole('button', { name: 'Show workspace', exact: true }).click();
   await expect(demo.getByRole('button', { name: /Theoretical Properties/ }).first()).toBeVisible();
-  await page.getByRole('tab', { name: 'Follow a reference', exact: true }).click();
+  await page.getByRole('tab', { name: 'Follow references', exact: true }).click();
   await expect(demo.getByRole('tab', { name: 'Appendix A, Page 31', exact: true })).toBeVisible();
   await expect(demo.locator('[data-reference-pdf-viewport] [data-page-index="30"] > img').first()).toBeVisible();
   await expect(currentPage).toHaveValue('14');
@@ -856,7 +856,7 @@ test('@critical demo starts fitted and Fit Width keeps the requested scale', asy
   // Initial fitting must match the button's horizontal geometry, not just its percentage.
   const initialBounds = (await readPage.boundingBox())!;
   await expect(demo.locator('body')).not.toHaveAttribute('data-unfitted-demo-paint', 'true');
-  for (const mode of ['Read with focus', 'Follow a reference', 'Make comments']) {
+  for (const mode of ['Read with focus', 'Follow references', 'Make comments']) {
     await page.getByRole('tab', { name: mode, exact: true }).click();
     await demo.locator('body').evaluate(async () => {
       await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
