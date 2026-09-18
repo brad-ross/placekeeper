@@ -423,6 +423,7 @@ export async function beginReviewInteraction(
 }
 
 export interface AuthoringAuthority {
+  readonly sessionId: string;
   readonly sourceIdentity: string;
   readonly documentGeneration: number;
 }
@@ -522,6 +523,7 @@ export function authoringAuthorityFor(
   documentGeneration: number,
 ): AuthoringAuthority {
   return Object.freeze({
+    sessionId: state.sessionId,
     sourceIdentity: reviewSourceIdentity(state),
     documentGeneration,
   });
@@ -532,6 +534,7 @@ export function authoringAuthorityMatches(
   current: AuthoringAuthority,
 ): boolean {
   return captured.sourceIdentity === current.sourceIdentity
+    && captured.sessionId === current.sessionId
     && captured.documentGeneration === current.documentGeneration;
 }
 

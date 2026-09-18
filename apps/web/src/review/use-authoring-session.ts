@@ -33,6 +33,22 @@ interface PendingAcknowledgement {
   readonly receipt: ReviewInteractionReceipt;
 }
 
+interface PendingCanonicalFinalization {
+  readonly session: AuthoringSession;
+  readonly receipt: ReviewInteractionReceipt;
+  readonly outcome: 'applied' | 'discarded';
+  readonly settled: Promise<void>;
+  readonly resolve: () => void;
+  readonly timeout: ReturnType<typeof setTimeout>;
+}
+
+interface PendingReaderRestoration {
+  readonly token: number;
+  readonly session: AuthoringSession;
+}
+
+const canonicalFinalizationPendingNoticeMs = 5_000;
+
 /** Retains every exact durable receipt until its own acknowledgement succeeds. */
 export class AuthoringAcknowledgementQueue {
   readonly #pending = new Map<string, PendingAcknowledgement>();
@@ -116,6 +132,54 @@ export async function finalizeReacquiredInteraction(
   return recovered ?? interaction.finalize(outcome, draftId, expectedDraftRevision);
 }
 
+/** A finalization receipt may paint from its exact revision or authoritative session successor. */
+export function canonicalStateForFinalizedInteraction(
+  state: ReviewState,
+  documentGeneration: number,
+  receipt: ReviewInteractionReceipt,
+  authority: AuthoringAuthority,
+): ReviewState | undefined {
+  if (state.sessionId !== authority.sessionId || state.workflow.documentGeneration !== documentGeneration) {
+    return undefined;
+  }
+  if (documentGeneration > receipt.generation) return state;
+  if (documentGeneration !== receipt.generation || state.revision < receipt.reviewRevision) {
+    return undefined;
+  }
+  return authoringAuthorityFor(state, documentGeneration).sourceIdentity === authority.sourceIdentity
+    ? state
+    : undefined;
+}
+
+export function consumeFinalizedInteractionState(input: {
+  readonly state: ReviewState;
+  readonly documentGeneration: number;
+  readonly receipt: ReviewInteractionReceipt;
+  readonly authority: AuthoringAuthority;
+  readonly outcome: 'applied' | 'discarded';
+  readonly announce: (message: string) => void;
+  readonly close: (reason: 'accepted' | 'cancelled' | 'source-replaced', state?: ReviewState) => void;
+}): boolean {
+  const canonical = canonicalStateForFinalizedInteraction(
+    input.state,
+    input.documentGeneration,
+    input.receipt,
+    input.authority,
+  );
+  if (canonical !== undefined) {
+    input.close(input.outcome === 'applied' ? 'accepted' : 'cancelled', canonical);
+    return true;
+  }
+  if (input.state.sessionId !== input.authority.sessionId) {
+    input.announce(input.outcome === 'applied'
+      ? 'The annotation was saved before the document changed.'
+      : 'The cancellation was saved before the document changed.');
+    input.close('source-replaced');
+    return true;
+  }
+  return false;
+}
+
 /** Owns frozen authoring authority, protected drafts, and the acknowledged command tail.
  * Workspace and reader callbacks run only when an interaction starts or settles.
  */
@@ -125,6 +189,10 @@ export function useAuthoringSession({
   clearInputDraft, openNested, closeNestedSurface, restoreReaderAfterAuthoring,
 }: AuthoringOptions) {
   const [authoringSession, setAuthoringSession] = useState<AuthoringSession | null>(null);
+  const [authoringTerminalPending, setAuthoringTerminalPending] = useState<{
+    readonly token: number;
+    readonly delayed: boolean;
+  } | null>(null);
   const authoringSessionRef = useRef<AuthoringSession | null>(null);
   const authoringSessionTokenRef = useRef(0);
   const authoringValueRef = useRef<{ readonly token: number; value: string } | null>(null);
@@ -134,6 +202,7 @@ export function useAuthoringSession({
   const legacyAuthoringOwnerViewIdRef = useRef(crypto.randomUUID());
   const authoringAdmissionPendingRef = useRef(false);
   const focusRestoreTokenRef = useRef(0);
+  const pendingReaderRestorationRef = useRef<PendingReaderRestoration | null>(null);
   const pendingFinalizationRef = useRef<{
     readonly session: AuthoringSession;
     readonly value: string;
@@ -147,7 +216,10 @@ export function useAuthoringSession({
     readonly expectedDraftRevision: number;
     readonly onAccepted?: () => void;
   } | null>(null);
+  const pendingCanonicalFinalizationRef = useRef<PendingCanonicalFinalization | null>(null);
   const mountedRef = useRef(true);
+  const latestStateRef = useRef(state);
+  latestStateRef.current = state;
   const currentAuthoringAuthority = authoringAuthorityFor(
     state,
     documentGeneration,
@@ -163,6 +235,12 @@ export function useAuthoringSession({
     return () => {
       mountedRef.current = false;
       pendingAcknowledgementsRef.current.dispose();
+      const pendingCanonical = pendingCanonicalFinalizationRef.current;
+      if (pendingCanonical !== null) {
+        clearTimeout(pendingCanonical.timeout);
+        pendingCanonical.resolve();
+        pendingCanonicalFinalizationRef.current = null;
+      }
       const current = authoringSessionRef.current;
       const terminal = terminalAttemptRef.current;
       if (current?.interaction === undefined) return;
@@ -353,8 +431,16 @@ export function useAuthoringSession({
   ) => {
     const current = authoringSessionRef.current;
     if (current === null || current.token !== token) return;
+    const pendingCanonical = pendingCanonicalFinalizationRef.current;
+    if (pendingCanonical?.session.token === token) {
+      clearTimeout(pendingCanonical.timeout);
+      pendingCanonical.resolve();
+      pendingCanonicalFinalizationRef.current = null;
+    }
+    setAuthoringTerminalPending((pending) => pending?.token === token ? null : pending);
     focusRestoreTokenRef.current += 1;
     const focusRestoreToken = focusRestoreTokenRef.current;
+    pendingReaderRestorationRef.current = null;
     pendingFinalizationRef.current = null;
     authoringSessionRef.current = null;
     authoringValueRef.current = null;
@@ -367,37 +453,60 @@ export function useAuthoringSession({
     if (restoreReaderAfterAuthoring(current, reason, acceptedState)) return;
     if (reason === 'source-replaced') return;
     setActiveItem(current.workspace.activeItemId);
-    requestAnimationFrame(() => requestAnimationFrame(() => {
-      if (focusRestoreTokenRef.current !== focusRestoreToken) return;
-      const shell = shellRef.current;
-      if (shell === null) return;
-      const viewport = shell.querySelector<HTMLElement>('[data-annotation-scroll-viewport]');
-      if (viewport !== null) viewport.scrollTop = current.workspace.annotationScrollTop;
-      const originTrigger = current.origin.trigger;
-      const restoredItem = current.workspace.activeItemId === undefined
-        ? null
-        : [...shell.querySelectorAll<HTMLElement>('[data-review-item]')]
-          .find((element) => element.dataset.reviewItem === current.workspace.activeItemId);
-      const restoredPeek = current.workspace.activeItemId === undefined ? null
-        : [...shell.querySelectorAll<HTMLElement>('[data-annotation-peek]')]
-          .find((element) => element.dataset.annotationPeek === current.workspace.activeItemId);
-      const target = originTrigger?.isConnected === true
-        ? originTrigger
-        : current.origin.kind === 'tray-edit'
-          ? (restoredPeek ?? restoredItem)?.querySelector<HTMLElement>('[data-row-action="edit"]')
-          : current.origin.kind === 'reader-edit'
-            ? restoredItem?.querySelector<HTMLElement>('.annotation-item__navigation')
-          : null;
-      const workspaceFallback = current.workspace.open
-        ? shell.querySelector<HTMLElement>(`#workspace-panel-${current.workspace.mode}`)
-        : null;
-      (target
-        ?? workspaceFallback
-        ?? shell.querySelector<HTMLElement>(
-          '.pdf-workspace:not(.pdf-workspace--reference) [data-page-index], [role="application"]',
-        ))?.focus({ preventScroll: true });
-    }));
+    pendingReaderRestorationRef.current = { token: focusRestoreToken, session: current };
   };
+
+  useLayoutEffect(() => {
+    const pending = pendingReaderRestorationRef.current;
+    if (pending === null || pending.token !== focusRestoreTokenRef.current) return;
+    pendingReaderRestorationRef.current = null;
+    const shell = shellRef.current;
+    if (shell === null) return;
+    const { session } = pending;
+    const viewport = shell.querySelector<HTMLElement>('[data-annotation-scroll-viewport]');
+    if (viewport !== null) viewport.scrollTop = session.workspace.annotationScrollTop;
+    const originTrigger = session.origin.trigger;
+    const restoredItem = session.workspace.activeItemId === undefined
+      ? null
+      : [...shell.querySelectorAll<HTMLElement>('[data-review-item]')]
+        .find((element) => element.dataset.reviewItem === session.workspace.activeItemId);
+    const restoredPeek = session.workspace.activeItemId === undefined ? null
+      : [...shell.querySelectorAll<HTMLElement>('[data-annotation-peek]')]
+        .find((element) => element.dataset.annotationPeek === session.workspace.activeItemId);
+    const target = originTrigger?.isConnected === true
+      ? originTrigger
+      : session.origin.kind === 'tray-edit'
+        ? (restoredPeek ?? restoredItem)?.querySelector<HTMLElement>('[data-row-action="edit"]')
+        : session.origin.kind === 'reader-edit'
+          ? restoredItem?.querySelector<HTMLElement>('.annotation-item__navigation')
+        : null;
+    const workspaceFallback = session.workspace.open
+      ? shell.querySelector<HTMLElement>(`#workspace-panel-${session.workspace.mode}`)
+      : null;
+    (target
+      ?? workspaceFallback
+      ?? shell.querySelector<HTMLElement>(
+        '.pdf-workspace:not(.pdf-workspace--reference) [data-page-index], [role="application"]',
+      ))?.focus({ preventScroll: true });
+  }, [authoringSession]);
+
+  useLayoutEffect(() => {
+    const pending = pendingCanonicalFinalizationRef.current;
+    if (pending === null) return;
+    const canonical = canonicalStateForFinalizedInteraction(
+      state,
+      documentGeneration,
+      pending.receipt,
+      pending.session.authority,
+    );
+    if (canonical === undefined) return;
+    closeAuthoringSession(
+      pending.session.token,
+      pending.outcome === 'applied' ? 'accepted' : 'cancelled',
+      canonical,
+    );
+  }, [state, documentGeneration]);
+
   const dismissAuthoring = async (session: AuthoringSession) => {
     if (
       authoring.authoringAnchorNavigation?.token === session.token
@@ -427,6 +536,28 @@ export function useAuthoringSession({
       current === null
       || authoringSessionIsCurrent(current, currentAuthoringAuthority)
     ) return;
+    const pending = pendingCanonicalFinalizationRef.current;
+    if (pending?.session.token === current.token) {
+      const canonical = canonicalStateForFinalizedInteraction(
+        state,
+        documentGeneration,
+        pending.receipt,
+        pending.session.authority,
+      );
+      if (canonical !== undefined) {
+        closeAuthoringSession(
+          current.token,
+          pending.outcome === 'applied' ? 'accepted' : 'cancelled',
+          canonical,
+        );
+      } else if (state.sessionId !== pending.session.authority.sessionId) {
+        setAnnouncement(pending.outcome === 'applied'
+          ? 'The annotation was saved before the document changed.'
+          : 'The cancellation was saved before the document changed.');
+        closeAuthoringSession(current.token, 'source-replaced');
+      }
+      return;
+    }
     if (terminalAttemptRef.current?.session.token === current.token) return;
     if (
       authoring.authoringAnchorNavigation?.token === current.token
@@ -560,6 +691,11 @@ export function useAuthoringSession({
   ): Promise<void> => {
     const interaction = session.interaction;
     if (interaction === undefined) throw new Error('The annotation interaction is unavailable.');
+    const pendingCanonical = pendingCanonicalFinalizationRef.current;
+    if (pendingCanonical?.session.token === session.token) {
+      await pendingCanonical.settled;
+      return;
+    }
     let terminal = terminalAttemptRef.current;
     if (terminal === null) {
       await commandTailRef.current;
@@ -592,11 +728,51 @@ export function useAuthoringSession({
     outcome: 'applied' | 'discarded',
     onAccepted?: () => void,
   ): Promise<void> {
+    const existing = pendingCanonicalFinalizationRef.current;
+    if (existing?.session.token === session.token) {
+      await existing.settled;
+      return;
+    }
     if (outcome === 'applied') onAccepted?.();
     if (terminalAttemptRef.current?.session.token === session.token) terminalAttemptRef.current = null;
-    closeAuthoringSession(session.token, outcome === 'applied' ? 'accepted' : 'cancelled');
+    const stateSettled = consumeFinalizedInteractionState({
+      state: latestStateRef.current,
+      documentGeneration: currentAuthoringAuthorityRef.current.documentGeneration,
+      receipt,
+      authority: session.authority,
+      outcome,
+      announce: setAnnouncement,
+      close: (reason, canonical) => closeAuthoringSession(session.token, reason, canonical),
+    });
+    if (!stateSettled) {
+      let resolveSettled!: () => void;
+      const settled = new Promise<void>((resolve) => { resolveSettled = resolve; });
+      const timeout = setTimeout(() => {
+        const pending = pendingCanonicalFinalizationRef.current;
+        if (pending?.session.token !== session.token) return;
+        setAnnouncement(outcome === 'applied'
+          ? 'The annotation was saved. Placekeeper is still retrying the latest review state.'
+          : 'The cancellation was saved. Placekeeper is still retrying the latest review state.');
+        setAuthoringTerminalPending({ token: session.token, delayed: true });
+      }, canonicalFinalizationPendingNoticeMs);
+      setAuthoringTerminalPending({ token: session.token, delayed: false });
+      pendingCanonicalFinalizationRef.current = {
+        session,
+        receipt,
+        outcome,
+        settled,
+        resolve: resolveSettled,
+        timeout,
+      };
+    }
     pendingAcknowledgementsRef.current.enqueue(interaction, receipt);
-    await retryPendingAcknowledgements();
+    const acknowledgement = retryPendingAcknowledgements();
+    const pending = pendingCanonicalFinalizationRef.current;
+    if (pending?.session.token === session.token) {
+      await Promise.all([acknowledgement, pending.settled]);
+    } else {
+      await acknowledgement;
+    }
     if (pendingAcknowledgementsRef.current.has(receipt.interactionToken)) {
       setAnnouncement('The annotation was saved, but its completion receipt will be retried after reconnect.');
     }
@@ -605,6 +781,10 @@ export function useAuthoringSession({
   useEffect(() => authoring.subscribeInteractionReconnect?.(async ({ generation }) => {
     const current = authoringSessionRef.current;
     if (current?.interaction === undefined) return;
+    if (pendingCanonicalFinalizationRef.current?.session.token === current.token) {
+      await retryPendingAcknowledgements();
+      return;
+    }
     const closeAfterRelease = () => closeAuthoringSession(current.token, 'source-replaced');
     if (current.authority.documentGeneration !== generation) {
       setAnnouncement('The PDF changed while the annotation connection was recovering. The protected draft was not applied.');
@@ -736,6 +916,10 @@ export function useAuthoringSession({
 
   return {
     authoringSession,
+    authoringTerminalPending: authoringSession !== null
+      && authoringTerminalPending?.token === authoringSession.token
+      ? authoringTerminalPending
+      : null,
     authoringSessionRef,
     authoringEditorRef,
     authoringSurfaceElement,

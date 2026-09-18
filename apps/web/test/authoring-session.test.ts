@@ -594,7 +594,7 @@ describe('frozen authoring-session contract', () => {
 
     expect(session).toMatchObject({
       token: 1,
-      authority: { sourceIdentity: expect.any(String), documentGeneration: 7 },
+      authority: { sessionId: state.sessionId, sourceIdentity: expect.any(String), documentGeneration: 7 },
       workspace,
       semantics,
       source,

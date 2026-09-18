@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 
+import { createReviewState } from '../../../packages/core/src/review-model.js';
 import {
   attachmentOrderedInteractionTransport,
+  authoringAuthorityFor,
   beginReviewInteraction,
   type ReviewInteractionHandle,
   type ReviewInteractionReceipt,
@@ -9,6 +11,8 @@ import {
 import { ReviewInteractions } from '../../service/src/sessions/review-interactions.js';
 import {
   AuthoringAcknowledgementQueue,
+  canonicalStateForFinalizedInteraction,
+  consumeFinalizedInteractionState,
   finalizeReacquiredInteraction,
   releaseDeletedAuthoringInteraction,
 } from '../src/review/use-authoring-session.js';
@@ -39,7 +43,106 @@ function interaction(
   };
 }
 
+function reviewState(documentGeneration: number, sessionId = 'canonical-session') {
+  return createReviewState({
+    sessionId,
+    source: { fileId: `paper-${documentGeneration}`, digest: String(documentGeneration).repeat(64), byteLength: 12 },
+    documentGeneration,
+  });
+}
+
 describe('authoring interaction lifecycle ownership', () => {
+  it('keeps finalized authoring open until the canonical state reaches its receipt revision', () => {
+    const finalized = receipt('canonical-state-gate');
+    const state = { ...reviewState(finalized.generation), revision: finalized.reviewRevision - 1 };
+    const authority = authoringAuthorityFor(state, finalized.generation);
+
+    expect(canonicalStateForFinalizedInteraction(
+      state,
+      finalized.generation,
+      finalized,
+      authority,
+    )).toBeUndefined();
+    const canonical = { ...state, revision: finalized.reviewRevision };
+    expect(canonicalStateForFinalizedInteraction(
+      canonical,
+      finalized.generation,
+      finalized,
+      authority,
+    )).toBe(canonical);
+  });
+
+  it.each(['applied', 'discarded'] as const)(
+    'settles a finalized %s receipt from authoritative same-session successor state',
+    (outcome) => {
+      const finalized = { ...receipt(`successor-${outcome}`), outcome };
+      const source = reviewState(finalized.generation);
+      const successor = reviewState(finalized.generation + 1);
+
+      expect(canonicalStateForFinalizedInteraction(
+        successor,
+        finalized.generation + 1,
+        finalized,
+        authoringAuthorityFor(source, finalized.generation),
+      )).toBe(successor);
+    },
+  );
+
+  it('never binds a receipt to an unrelated successor that arrived before settlement', () => {
+    const finalized = receipt('unrelated-successor-gate');
+    const source = reviewState(finalized.generation);
+    const unrelated = reviewState(finalized.generation + 1, 'another-session');
+
+    expect(canonicalStateForFinalizedInteraction(
+      unrelated,
+      finalized.generation + 1,
+      finalized,
+      authoringAuthorityFor(source, finalized.generation),
+    )).toBeUndefined();
+  });
+
+  it.each(['applied', 'discarded'] as const)(
+    'settles a %s receipt when unrelated state won the race before receipt delivery',
+    (outcome) => {
+      const finalized = { ...receipt(`pre-receipt-replacement-${outcome}`), outcome };
+      const source = reviewState(finalized.generation);
+      const unrelated = reviewState(finalized.generation + 1, 'replacement-session');
+      const announce = vi.fn();
+      const close = vi.fn();
+
+      expect(consumeFinalizedInteractionState({
+        state: unrelated,
+        documentGeneration: finalized.generation + 1,
+        receipt: finalized,
+        authority: authoringAuthorityFor(source, finalized.generation),
+        outcome,
+        announce,
+        close,
+      })).toBe(true);
+      expect(announce).toHaveBeenCalledWith(outcome === 'applied'
+        ? 'The annotation was saved before the document changed.'
+        : 'The cancellation was saved before the document changed.');
+      expect(close).toHaveBeenCalledWith('source-replaced');
+    },
+  );
+
+  it('never consumes replaced source state at the receipt generation', () => {
+    const finalized = receipt('replaced-source-gate');
+    const source = { ...reviewState(finalized.generation), revision: finalized.reviewRevision };
+    const replaced = createReviewState({
+      sessionId: source.sessionId,
+      source: { fileId: 'replacement', digest: 'f'.repeat(64), byteLength: 18 },
+      documentGeneration: finalized.generation,
+    });
+
+    expect(canonicalStateForFinalizedInteraction(
+      { ...replaced, revision: finalized.reviewRevision },
+      finalized.generation,
+      finalized,
+      authoringAuthorityFor(source, finalized.generation),
+    )).toBeUndefined();
+  });
+
   it('releases a concurrently deleted edit before allowing its editor to close', async () => {
     let finishRelease: (() => void) | undefined;
     const release = vi.fn(() => new Promise<void>((resolve) => { finishRelease = resolve; }));

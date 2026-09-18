@@ -268,6 +268,131 @@ function expectComposerTransition(
   ))).toBe(true);
 }
 
+interface CompactEditFrame {
+  readonly elapsedMs: number;
+  readonly composerCount: number;
+  readonly peekCount: number;
+  readonly peekText: string;
+  readonly peekRect: { readonly left: number; readonly top: number; readonly width: number; readonly height: number } | null;
+  readonly rowCount: number;
+  readonly rowText: string;
+  readonly panelPainted: boolean;
+  readonly listIdentity: boolean;
+  readonly selectedTab: boolean;
+  readonly toolsInert: boolean;
+  readonly generationStatus: string;
+  readonly activeElement: string;
+  readonly runningAnimations: readonly string[];
+  readonly peekPaint: string;
+  readonly peekActionsPaint: string;
+  readonly peekEndcapPaint: string;
+  readonly rowPaint: string;
+  readonly rowActionsPaint: string;
+  readonly rowEndcapPaint: string;
+  readonly composerPaint: string;
+}
+
+async function beginCompactEditFrameAudit(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const startedAt = performance.now();
+    const list = document.querySelector<HTMLElement>('#review-annotation-list');
+    const audit = { finished: false, stopRequested: false, postSettleFrames: 12, samples: [] as CompactEditFrame[] };
+    (window as typeof window & { __compactEditAudit?: typeof audit }).__compactEditAudit = audit;
+    const paintedThroughAncestors = (element: HTMLElement | null): boolean => {
+      if (element === null || !element.isConnected || element.getClientRects().length === 0) return false;
+      for (let current: HTMLElement | null = element; current !== null; current = current.parentElement) {
+        const style = getComputedStyle(current);
+        if (style.display === 'none' || style.visibility === 'hidden' || style.visibility === 'collapse'
+          || Number(style.opacity) === 0) return false;
+      }
+      const bounds = element.getBoundingClientRect();
+      return bounds.width > 0 && bounds.height > 0;
+    };
+    const label = (element: Element | null): string => {
+      if (!(element instanceof HTMLElement)) return '';
+      return [element.tagName, element.id, element.dataset.rowAction, element.getAttribute('aria-label')]
+        .filter(Boolean).join(':');
+    };
+    const paint = (element: HTMLElement | null): string => {
+      if (element === null) return 'absent';
+      const style = getComputedStyle(element);
+      return [style.display, style.visibility, style.opacity, style.backgroundColor,
+        style.boxShadow, style.outlineStyle, style.outlineWidth, style.pointerEvents].join('|');
+    };
+    const sample = () => {
+      if (audit.finished) return;
+      const peek = document.querySelector<HTMLElement>('[data-annotation-peek]:not(.annotation-peek--reader)');
+      const bounds = peek?.getBoundingClientRect();
+      const panel = document.querySelector<HTMLElement>('#workspace-panel-annotations');
+      const tools = document.querySelector<HTMLElement>('#review-tools-workspace');
+      const selectedTab = document.querySelector<HTMLElement>('[data-workspace-mode="annotations"]');
+      const rows = [...list?.querySelectorAll<HTMLElement>('li[data-review-item][data-annotation-origin="owned"]') ?? []];
+      const ownedRow = rows.find((candidate) => candidate.innerText.includes('Compact')) ?? rows.at(-1) ?? null;
+      const composer = document.querySelector<HTMLElement>('[data-comment-composer]');
+      audit.samples.push({
+        elapsedMs: performance.now() - startedAt,
+        composerCount: [...document.querySelectorAll<HTMLElement>('[data-comment-composer]')]
+          .filter(paintedThroughAncestors).length,
+        peekCount: [...document.querySelectorAll<HTMLElement>('[data-annotation-peek]:not(.annotation-peek--reader)')]
+          .filter(paintedThroughAncestors).length,
+        peekText: peek?.innerText ?? '',
+        peekRect: bounds === undefined ? null : {
+          left: bounds.left, top: bounds.top, width: bounds.width, height: bounds.height,
+        },
+        rowCount: rows.length,
+        rowText: rows.map((row) => row.innerText).join('\n---\n'),
+        panelPainted: paintedThroughAncestors(panel),
+        listIdentity: list !== null && list.isConnected
+          && document.querySelector('#review-annotation-list') === list,
+        selectedTab: selectedTab?.getAttribute('aria-selected') === 'true',
+        toolsInert: tools?.hasAttribute('inert') ?? false,
+        generationStatus: document.querySelector<HTMLElement>('[data-generation-status]')
+          ?.dataset.generationStatus ?? 'idle',
+        activeElement: label(document.activeElement),
+        runningAnimations: document.getAnimations()
+          .filter((animation) => animation.playState === 'running')
+          .map((animation) => label((animation.effect as KeyframeEffect | null)?.target as Element | null)),
+        peekPaint: paint(peek),
+        peekActionsPaint: paint(peek?.querySelector<HTMLElement>('.row-action-group__direct') ?? null),
+        peekEndcapPaint: paint(peek?.querySelector<HTMLElement>('.annotation-item__page, .annotation-item__status-icon') ?? null),
+        rowPaint: paint(ownedRow),
+        rowActionsPaint: paint(ownedRow?.querySelector<HTMLElement>('.row-action-group__direct') ?? null),
+        rowEndcapPaint: paint(ownedRow?.querySelector<HTMLElement>('.annotation-item__page, .annotation-item__status-icon') ?? null),
+        composerPaint: paint(composer),
+      });
+      if (audit.stopRequested) {
+        audit.postSettleFrames -= 1;
+        if (audit.postSettleFrames === 0) {
+          audit.finished = true;
+          return;
+        }
+      }
+      requestAnimationFrame(sample);
+    };
+    sample();
+  });
+}
+
+async function finishCompactEditFrameAudit(page: Page): Promise<readonly CompactEditFrame[]> {
+  await page.evaluate(() => {
+    const audit = (window as typeof window & {
+      __compactEditAudit?: { stopRequested: boolean };
+    }).__compactEditAudit;
+    if (audit !== undefined) audit.stopRequested = true;
+  });
+  await expect.poll(() => page.evaluate(() => (
+    window as typeof window & { __compactEditAudit?: { finished: boolean } }
+  ).__compactEditAudit?.finished)).toBe(true);
+  return page.evaluate(() => {
+    const auditedWindow = window as typeof window & {
+      __compactEditAudit?: { samples: CompactEditFrame[] };
+    };
+    const samples = auditedWindow.__compactEditAudit?.samples ?? [];
+    delete auditedWindow.__compactEditAudit;
+    return samples;
+  });
+}
+
 test.beforeEach(async () => {
   temporaryRoot = await mkdtemp(join(tmpdir(), 'placekeeper-annotation-followup-'));
   sourceRoot = join(temporaryRoot, 'source');
@@ -382,6 +507,253 @@ test('keeps reader edits continuously represented while Edit, Cancel, and Apply 
     && frame.initialViewReady === 'true'
     && frame.generationStatus === 'idle'
   ))).toBe(true);
+});
+
+test('does not repaint stale compact annotation content while real lifecycle requests settle', async ({ page }, testInfo) => {
+  testInfo.setTimeout(60_000);
+  await page.setViewportSize({ width: 1280, height: 900 });
+  const lifecycle: Array<{ phase: 'request' | 'response'; path: string; elapsedMs: number }> = [];
+  const startedAt = Date.now();
+  page.on('request', (request) => {
+    const path = new URL(request.url()).pathname;
+    if (path.includes('/interactions/') || path.endsWith('/commands') || path.endsWith('/state')) {
+      lifecycle.push({ phase: 'request', path: path.replace(/\/s\/[^/]+/u, '/s/:session'), elapsedMs: Date.now() - startedAt });
+    }
+  });
+  page.on('response', (response) => {
+    const path = new URL(response.url()).pathname;
+    if (path.includes('/interactions/') || path.endsWith('/commands') || path.endsWith('/state')) {
+      lifecycle.push({ phase: 'response', path: path.replace(/\/s\/[^/]+/u, '/s/:session'), elapsedMs: Date.now() - startedAt });
+    }
+  });
+  await page.route('**/s/*/interactions/*', async (route) => {
+    await new Promise((resolveDelay) => setTimeout(resolveDelay, 140));
+    await route.continue();
+  });
+  await page.route('**/s/*/commands', async (route) => {
+    await new Promise((resolveDelay) => setTimeout(resolveDelay, 100));
+    await route.continue();
+  });
+  await page.route('**/s/*/state', async (route) => {
+    await new Promise((resolveDelay) => setTimeout(resolveDelay, 220));
+    await route.continue();
+  });
+
+  const before = 'Compact before edit marker.';
+  const after = 'Compact after edit marker.';
+  const { itemId } = await openLongAnnotationFixture(page, 'pageNote', { content: before });
+  await chooseCopyDestination(page);
+  const center = await markCenter(page, itemId);
+  await page.mouse.click(center.x, center.y);
+  const peek = page.locator(`[data-annotation-peek="${itemId}"]`);
+  await expect(peek).toBeVisible();
+  await expect(peek).toContainText(before);
+
+  const edit = peek.getByRole('button', { name: 'Edit Page Note annotation on page 1' });
+  await peek.hover();
+  await beginCompactEditFrameAudit(page);
+  await edit.click();
+  const composer = page.getByRole('region', { name: 'Edit Page Note' });
+  await expect(composer).toBeVisible();
+  const openingFrames = await finishCompactEditFrameAudit(page);
+
+  await beginCompactEditFrameAudit(page);
+  await composer.getByRole('button', { name: 'Cancel' }).click();
+  await expect(composer).toHaveCount(0);
+  await expect(peek).toContainText(before);
+  await page.waitForTimeout(300);
+  const cancelFrames = await finishCompactEditFrameAudit(page);
+
+  await peek.hover();
+  await peek.getByRole('button', { name: 'Edit Page Note annotation on page 1' }).click();
+  await expect(composer).toBeVisible();
+  await beginCompactEditFrameAudit(page);
+  await composer.getByRole('button', { name: 'Apply', exact: true }).click();
+  await expect(composer).toHaveCount(0);
+  await expect(peek).toContainText(before);
+  await page.waitForTimeout(300);
+  const unchangedFrames = await finishCompactEditFrameAudit(page);
+
+  await peek.hover();
+  await peek.getByRole('button', { name: 'Edit Page Note annotation on page 1' }).click();
+  await expect(composer).toBeVisible();
+  await composer.getByRole('textbox', { name: 'Comment' }).fill(after);
+  await beginCompactEditFrameAudit(page);
+  await composer.getByRole('button', { name: 'Apply', exact: true }).click();
+  await expect(composer).toHaveCount(0);
+  await expect(peek).toContainText(after);
+  await page.waitForTimeout(300);
+  const changedFrames = await finishCompactEditFrameAudit(page);
+
+  const afterInTray = 'Compact after tray edit marker.';
+  await page.getByRole('button', { name: 'Show workspace' }).click();
+  await page.getByRole('tab', { name: 'Annotations', exact: true }).click();
+  const row = page.locator(`#review-annotation-list [data-review-item="${itemId}"]`);
+  await expect(row).toContainText(after);
+  await row.hover();
+  await row.getByRole('button', { name: 'Edit Page Note annotation on page 1' }).click();
+  await expect(composer).toBeVisible();
+  await composer.getByRole('textbox', { name: 'Comment' }).fill(afterInTray);
+  await beginCompactEditFrameAudit(page);
+  await composer.getByRole('button', { name: 'Apply', exact: true }).click();
+  await expect(composer).toHaveCount(0);
+  await expect(row).toContainText(afterInTray);
+  await page.waitForTimeout(300);
+  const trayChangedFrames = await finishCompactEditFrameAudit(page);
+
+  const evidence = { openingFrames, cancelFrames, unchangedFrames, changedFrames, trayChangedFrames, lifecycle };
+  await testInfo.attach('compact-edit-frame-evidence.json', {
+    body: JSON.stringify(evidence, null, 2),
+    contentType: 'application/json',
+  });
+
+  for (const frames of [openingFrames, cancelFrames, unchangedFrames, changedFrames, trayChangedFrames]) {
+    expect(new Set(frames.map((frame) => frame.rowCount)).size).toBe(1);
+    expect(frames.every((frame) => frame.listIdentity)).toBe(true);
+    expect(frames.every((frame) => frame.generationStatus === 'idle')).toBe(true);
+  }
+  const postChangedComposer = changedFrames.filter((frame) => frame.composerCount === 0);
+  expect(postChangedComposer.length).toBeGreaterThan(0);
+  expect(postChangedComposer.every((frame) => frame.peekCount === 1)).toBe(true);
+  expect(postChangedComposer.every((frame) => frame.peekText.includes(after))).toBe(true);
+  const postTrayChangedComposer = trayChangedFrames.filter((frame) => frame.composerCount === 0);
+  expect(postTrayChangedComposer.length).toBeGreaterThan(0);
+  expect(postTrayChangedComposer.every((frame) => frame.rowText.includes(afterInTray))).toBe(true);
+});
+
+test('keeps compact card paint stable through pointer and keyboard Edit and Cancel', async ({ page, browserName }, testInfo) => {
+  testInfo.setTimeout(60_000);
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.route('**/s/*/interactions/*', async (route) => {
+    await new Promise((resolveDelay) => setTimeout(resolveDelay, 140));
+    await route.continue();
+  });
+  await page.route('**/s/*/commands', async (route) => {
+    await new Promise((resolveDelay) => setTimeout(resolveDelay, 100));
+    await route.continue();
+  });
+
+  const { itemId } = await openLongAnnotationFixture(page, 'pageNote', {
+    content: 'Compact focus paint marker.',
+  });
+  await chooseCopyDestination(page);
+  const center = await markCenter(page, itemId);
+  await page.mouse.click(center.x, center.y);
+  const peek = page.locator(`[data-annotation-peek="${itemId}"]`);
+  const edit = peek.getByRole('button', { name: 'Edit Page Note annotation on page 1' });
+  const composer = page.getByRole('region', { name: 'Edit Page Note' });
+  await expect(peek).toBeVisible();
+
+  await peek.hover();
+  await testInfo.attach('pointer-before-edit.png', {
+    body: await page.screenshot(), contentType: 'image/png',
+  });
+  await beginCompactEditFrameAudit(page);
+  await edit.click();
+  await expect(composer).toBeVisible();
+  await testInfo.attach('pointer-editor.png', {
+    body: await page.screenshot(), contentType: 'image/png',
+  });
+  const pointerEditFrames = await finishCompactEditFrameAudit(page);
+
+  await beginCompactEditFrameAudit(page);
+  await composer.getByRole('button', { name: 'Cancel' }).click();
+  await expect(peek).toBeVisible();
+  await page.waitForTimeout(300);
+  const pointerCancelFrames = await finishCompactEditFrameAudit(page);
+  await testInfo.attach('pointer-after-cancel.png', {
+    body: await page.screenshot(), contentType: 'image/png',
+  });
+
+  await page.mouse.move(1, 1);
+  await peek.locator('.annotation-item__navigation').focus();
+  await page.keyboard.press(browserName === 'webkit' ? 'Alt+Tab' : 'Tab');
+  await expect(edit).toBeFocused();
+  await testInfo.attach('keyboard-before-edit.png', {
+    body: await page.screenshot(), contentType: 'image/png',
+  });
+  await beginCompactEditFrameAudit(page);
+  await edit.press('Enter');
+  await expect(composer).toBeVisible();
+  const keyboardEditFrames = await finishCompactEditFrameAudit(page);
+  await composer.getByRole('button', { name: 'Cancel' }).focus();
+
+  await beginCompactEditFrameAudit(page);
+  await composer.getByRole('button', { name: 'Cancel' }).press('Enter');
+  await expect(peek).toBeVisible();
+  await page.waitForTimeout(300);
+  const keyboardCancelFrames = await finishCompactEditFrameAudit(page);
+  await testInfo.attach('keyboard-after-cancel.png', {
+    body: await page.screenshot(), contentType: 'image/png',
+  });
+
+  await page.getByRole('button', { name: 'Show workspace' }).click();
+  await page.getByRole('tab', { name: 'Annotations', exact: true }).click();
+  const row = page.locator(`#review-annotation-list [data-review-item="${itemId}"]`);
+  const rowEdit = row.getByRole('button', { name: 'Edit Page Note annotation on page 1' });
+  await row.hover();
+  await rowEdit.click();
+  await expect(composer).toBeVisible();
+  await beginCompactEditFrameAudit(page);
+  await composer.getByRole('button', { name: 'Cancel' }).click();
+  await expect(composer).toHaveCount(0);
+  await page.waitForTimeout(300);
+  const pointerTrayCancelFrames = await finishCompactEditFrameAudit(page);
+
+  await page.mouse.move(1, 1);
+  await row.locator('.annotation-item__navigation').focus();
+  await page.keyboard.press(browserName === 'webkit' ? 'Alt+Tab' : 'Tab');
+  await expect(rowEdit).toBeFocused();
+  await rowEdit.press('Enter');
+  await expect(composer).toBeVisible();
+  await composer.getByRole('button', { name: 'Cancel' }).focus();
+  await beginCompactEditFrameAudit(page);
+  await composer.getByRole('button', { name: 'Cancel' }).press('Enter');
+  await expect(composer).toHaveCount(0);
+  await page.waitForTimeout(300);
+  const keyboardTrayCancelFrames = await finishCompactEditFrameAudit(page);
+
+  await testInfo.attach('compact-edit-cancel-paint-evidence.json', {
+    body: JSON.stringify({
+      pointerEditFrames, pointerCancelFrames, keyboardEditFrames, keyboardCancelFrames,
+      pointerTrayCancelFrames, keyboardTrayCancelFrames,
+    }, null, 2),
+    contentType: 'application/json',
+  });
+
+  for (const frames of [pointerEditFrames, keyboardEditFrames]) {
+    const preComposer = frames.filter((frame) => frame.composerCount === 0 && frame.peekCount === 1);
+    expect(new Set(preComposer.map((frame) => frame.peekPaint)).size).toBe(1);
+    expect(new Set(preComposer.map((frame) => frame.peekActionsPaint)).size).toBe(1);
+  }
+  for (const frames of [pointerCancelFrames, keyboardCancelFrames]) {
+    const postComposer = frames.filter((frame) => frame.composerCount === 0 && frame.peekCount === 1);
+    expect(postComposer.length).toBeGreaterThan(0);
+    expect(new Set(postComposer.map((frame) => frame.peekPaint)).size).toBe(1);
+    expect(new Set(postComposer.map((frame) => frame.peekActionsPaint)).size).toBe(1);
+  }
+  for (const frames of [pointerTrayCancelFrames, keyboardTrayCancelFrames]) {
+    const postComposer = frames.filter((frame) => frame.composerCount === 0);
+    expect(postComposer.length).toBeGreaterThan(0);
+    expect(new Set(postComposer.map((frame) => frame.rowPaint)).size).toBe(1);
+    expect(new Set(postComposer.map((frame) => frame.rowActionsPaint)).size).toBe(1);
+  }
+});
+
+test('terminal pending composer ignores keyboard submission shortcuts', async ({ page }) => {
+  await page.goto('/test/acceptance/comment-composer-harness/index.html');
+  const root = page.locator('#root');
+  const editor = page.getByRole('textbox', { name: 'Comment' });
+
+  await expect(editor).toHaveValue('Durably saved terminal text');
+  await expect(editor).toHaveAttribute('readonly', '');
+  await editor.focus();
+  await editor.press('Control+Enter');
+  await editor.press('Meta+Enter');
+
+  await expect(root).toHaveAttribute('data-save-calls', '0');
+  await expect(editor).toHaveValue('Durably saved terminal text');
+  await expect(page.getByText('Saved. Waiting for the latest review state; retrying automatically.')).toBeVisible();
 });
 
 test('uses the hover card and explicitly expands long PDF annotations in a deletable full reader', async ({ page }) => {

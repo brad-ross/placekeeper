@@ -57,7 +57,7 @@ describe('automatic refresh interaction lifecycle', () => {
       }, 4, `interaction-${workflowMode}`);
       const session = createAuthoringSession({
         token: 1,
-        authority: { sourceIdentity: 'source', documentGeneration: 4 },
+        authority: { sessionId: state.sessionId, sourceIdentity: 'source', documentGeneration: 4 },
         source: { kind: 'highlight', anchor: selection, selectionGeneration: 2 },
         origin: { kind: 'selection', trigger: null },
         workspace: { open: false, mode: 'annotations', annotationScrollTop: 0 },

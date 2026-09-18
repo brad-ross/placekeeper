@@ -350,6 +350,7 @@ export function ReviewShell(props: ReviewShellProps) {
 
   const {
     authoringSession,
+    authoringTerminalPending,
     authoringSessionRef,
     authoringEditorRef,
     authoringSurfaceElement,
@@ -1426,6 +1427,10 @@ export function ReviewShell(props: ReviewShellProps) {
       surfaceRef={setAuthoringSurfaceElement}
       {...(authoringPlacement === undefined ? {} : { placement: authoringPlacement })}
       anchorNavigation={anchorNavigation}
+      terminalPending={authoringTerminalPending !== null}
+      {...(authoringTerminalPending?.delayed === true ? {
+        terminalPendingMessage: 'Saved. Waiting for the latest review state; retrying automatically.',
+      } : {})}
       onValueChange={(value) => {
         if (authoringSessionRef.current?.token !== authoringSession.token) return;
         if (props.state.workflow.mode === 'generated-output' || authoringSession.interaction !== undefined) {
