@@ -11,7 +11,7 @@ applies_when:
   - "Annotation authoring must remain bound to its original passage during navigation"
   - "A stable provisional mark can show the frozen anchor in the live document"
   - "A passage-attached nonmodal editor must remain usable after its anchor leaves view"
-  - "A nested prerequisite must preserve draft and source authority"
+  - "Live PDF refresh must coexist with protected drafts and asynchronous finalization"
   - "Host revision events may arrive before their originating command response"
 related_components:
   - "Contextual Annotation Composer"
@@ -27,8 +27,8 @@ tags:
   - "stable-preview-projection"
   - "passage-placement"
   - "anchor-recovery"
-  - "command-invalidation-ordering"
-  - "nonmodal-composer"
+  - "interaction-lifecycle"
+  - "pdf-persistence"
 ---
 
 # Contextual Annotation Composer preserves document context during authoring
@@ -45,13 +45,13 @@ The [accepted passage-attached editor contract](../../plans/2026-09-05-neutral-s
 
 Create one authoring session from the source identity, document generation, selection/caret/page anchor or existing Review Item, originating PDF Annotation Surface, origin control, and workspace snapshot. A Reference origin also freezes a recovery target and preferred tab identity; the active tab is not a substitute for that origin. Clone and freeze nested geometry and payloads rather than retaining mutable selection objects (`apps/web/src/review/authoring-session.ts`). `useAuthoringSession` refuses a second active session and asks the shell to snapshot workspace mode, active item, and annotation scroll before authoring (`apps/web/src/review/use-authoring-session.ts`).
 
-Typing changes the composer's local value, not the frozen source. Generated-output authoring additionally protects that text as a revisioned draft. Apply first protects the latest value and then submits the exact protected draft revision; commands carry the original session authority and revoke stale submission authority rather than retargeting the draft (`apps/web/src/review/use-authoring-session.ts`). Exploration may change what is visible without changing what Apply means.
+Typing changes the composer's local value, not the frozen source. Generated-output authoring and interaction-lifecycle authoring additionally protect that text as a revisioned draft. Apply first protects the latest value and then submits the exact protected draft revision; commands carry the original session authority and revoke stale submission authority rather than retargeting the draft (`apps/web/src/review/use-authoring-session.ts`). Exploration may change what is visible without changing what Apply means.
 
 ### Keep document projection stable while text changes
 
 Construct a temporary Review Item from the frozen source and use the ordinary Review Item projection functions, including page-specific projections for multi-page anchors (`apps/web/src/review/authoring-session.ts`). Publish preview annotations when the session changes, not on every keystroke (`apps/web/src/review/use-authoring-session.ts`). The PDF merges previews into its visible annotation population, while interaction geometry remains derived from accepted annotations (`apps/web/src/pdf/PdfWorkspace.tsx`).
 
-This distinction prevents unchanged PDF geometry from becoming a controlled text-input surface. Current text stays authoritative in the composer and protected draft until commit. Cancel clears provisional presentation; generated-output cancellation also discards its protected draft through the canonical command path. Neither operation turns a preview into an accepted Review Item (`apps/web/src/review/use-authoring-session.ts`).
+This distinction prevents unchanged PDF geometry from becoming a controlled text-input surface. Current text stays authoritative in the composer and protected draft until commit. Cancel clears provisional presentation and discards protected work through the appropriate canonical command or interaction finalization path. Neither operation turns a preview into an accepted Review Item (`apps/web/src/review/use-authoring-session.ts`).
 
 ### Attach placement to visible passage geometry
 
@@ -67,7 +67,7 @@ When the target leaves view, keep the last usable editor placement and reclamp i
 
 The composer remains a nonmodal form in the drawer host. Supporting workspaces stay mounted, but authoring is not a blanket inert state: an open Reference workspace keeps its tab, hide/show, and close controls available while suppressing automatic focus changes that would steal editor focus. Competing semantic operations are guarded separately, including Send to Main during authoring (`apps/web/src/app/ReviewShell.tsx`, `apps/web/src/review/ReferenceWorkspace.tsx`, `apps/web/src/review/OutlineAnnotationsWorkspace.tsx`). The old guidance that the editor must replace and hide the edge surface should not be restored.
 
-Closing clears the provisional projection and nested authoring state, restores the recorded active item and list scroll, and returns focus with `preventScroll`. Originating controls, restored row actions, the prior workspace, and the PDF provide ordered fallbacks. Edits launched from the full reader have their own reader-resume branch (`apps/web/src/review/use-authoring-session.ts`). This restores interaction context without using a synthetic tray toggle or rewinding the current PDF location.
+Closing clears the provisional projection and nested authoring state. Ordinary Main-origin closing restores the recorded active item and annotation-list scroll, using the originating control, restored row actions, prior workspace, and PDF as ordered focus fallbacks. Reference-origin closing preserves the current Reference context and prefers its visible origin control or current Reference view for focus. Both focus-restoration paths use `preventScroll`; source-replacement closure skips restoration. Edits launched from the full reader have their own reader-resume branch (`apps/web/src/review/use-authoring-session.ts`). This restores interaction context without using a synthetic tray toggle or rewinding the current PDF location.
 
 Save Destination may temporarily inert the drawer host, including the still-mounted composer. Cancelling that prerequisite returns focus to its editor; the prerequisite never becomes draft authority (`apps/web/src/review/use-authoring-session.ts`).
 
@@ -81,15 +81,25 @@ Keep Cancel and Save/Apply beside the input. For an optional highlight comment, 
 
 [PR #121](https://github.com/brad-ross/placekeeper/pull/121), open as of 2026-09-18, extends frozen authoring to Reference Tabs. Switching tabs, hiding References, changing the dock, or closing the origin changes whether the passage is visible; none changes what Apply means. Retain the same composer and text node through those transitions. An inactive or unmounted origin is outside, not automatically invalid. Back to passage is the explicit way to reconstruct its view (`apps/web/src/review/authoring-session.ts`, `apps/web/src/review/use-authoring-session.ts`, `apps/web/src/app/ProductionReviewApp.tsx`).
 
-Document replacement and removal of an edited item are different: they revoke semantic authority. Remove the stale provisional projection and disable Apply while keeping the draft available for copy or cancel. Check authority before and after awaiting a command response, and associate invalidation with the originating session token so a late response cannot invalidate a newer editor. Preserving text does not authorize submitting it against a successor document (`apps/web/src/review/use-authoring-session.ts`, `apps/web/src/app/ProductionReviewApp.tsx`).
+A lifecycle-capable host admits an Interaction Hold before opening the editor. An active Reference edit therefore defers local PDF replacement until its interaction finishes; a replacement request does not itself invalidate the draft. If authority actually changes, or another view deletes the edited item, remove the stale provisional projection and block a new Apply. Reference editors retain copyable text and release their hold, whereas Main editors with an interaction release their hold and close. Legacy editors without an interaction retain invalid text. Keep these presentation policies separate from source authority (`apps/web/src/review/use-authoring-session.ts`, `beginAuthoring` and its invalidation layout effect).
+
+Retaining text and releasing a hold are not the same as discarding a Protected Draft. If an edited item disappears within the current generation, Cancel must discard its protected draft before closing; otherwise queued typing can leave a recovery entry after explicit cancellation. If document authority changed, do not send a discard against the old authority. A failed current-generation discard retains the editor. Check authority before and after awaiting commands, and bind invalidation to the original session token (`apps/web/src/review/use-authoring-session.ts`, `dismissAuthoring`; `test/acceptance/reference-annotation-stale-commands.spec.ts`).
+
+### Separate an uncertain terminal result from a new submission
+
+After a finalization response is lost, the server may already have applied the annotation and published a successor generation. Ordinary invalid-draft checks cannot decide whether that operation completed. Retry the frozen terminal outcome, draft ID, and draft revision before checking whether a new submission is allowed; the retry must ignore later textarea changes. The button's disabled state must use the same precedence as the handler, or the correct retry code becomes unreachable (`apps/web/src/review/use-authoring-session.ts`, `authoringSaveDisposition`, `saveAuthoring`, and `finalizeProtectedAuthoring`; `apps/web/src/app/ReviewShell.tsx`).
+
+Canonical state and viewer observation can advance separately. A same-session canonical successor can settle the original receipt even while the viewer-generation observer lags. For same-generation settlement, retain the receipt revision, source identity, and observer-generation checks. This recognizes a completed operation; it does not grant an old draft permission to mutate the successor (`apps/web/src/review/use-authoring-session.ts`, `canonicalStateForFinalizedInteraction`; `test/acceptance/automatic-pdf-refresh.spec.ts`).
 
 ### Close after the required persistence boundary
 
-Canonical mutation acceptance and PDF durability are separate facts. When the host requires authoring persistence, an active destination exists, and the accepted state is not yet clean/current, the command reports `persistence-pending`. Keep the editor mounted with its text read-only and duplicate submission blocked. Apply shows saving progress in the button during submission and pending persistence, rather than turning retry instructions into a second annotation popup (`apps/web/src/app/ProductionReviewApp.tsx`, `apps/web/src/review/review-command-result.ts`, `apps/web/src/review/CommentComposer.tsx`).
+Canonical acceptance, terminal-receipt acknowledgement, and PDF durability are separate facts. The legacy command path can report `persistence-pending`; the interaction path must carry an explicit persistence requirement into receipt settlement. Production requires that tail for an active save destination when the session is neither export-only nor generated-output. Missing `persistedRevision` alone cannot establish the requirement, because some valid workflows do not save to that destination (`apps/web/src/app/ProductionReviewApp.tsx`, `interactionPersistenceRequired`).
 
-Record the accepted revision with the authoring token. Close only after the persisted revision reaches it and the current session still has valid source and edit-target authority. A failed PDF write does not unaccept the item: retry or choosing a new destination must persist the already accepted mutation rather than applying it again. Do not impose this tail on command paths that do not require it (`apps/web/src/review/use-authoring-session.ts`, `authoringPersistenceCanClose`; `apps/web/src/app/ProductionReviewApp.tsx`, `acceptedAuthoringCommandRequiresPersistence`). The [autosave architecture](../architecture-patterns/recoverable-editable-pdf-annotation-autosave.md) owns the underlying durability and recovery contract.
+When PDF persistence is required and canonical state accounts for an applied receipt, record its review revision with the authoring token and acknowledge the receipt independently. Keep the editor mounted, read-only, and protected against duplicate submission until persistence reaches that revision and source/edit-target authority remains valid. Discarded receipts do not wait for PDF persistence. Apply shows progress within the button; a failed PDF write uses the existing save-recovery UI rather than another annotation popup (`apps/web/src/review/use-authoring-session.ts`, `settleCanonicalAuthoring` and `authoringPersistenceCanClose`; `apps/web/src/review/CommentComposer.tsx`).
 
-The discriminating regression combines these lifetimes: preserve one editor node and draft across switch/hide/close; explicitly recover the frozen tab without moving Main; fail the PDF write after accepting exactly one item; retry without duplication; and close only when persistence catches up. Separate tests replace the document or delete the edit target and prove text survives while submission is disabled (`test/acceptance/reference-annotations.spec.ts`).
+A failed PDF write does not undo acceptance of the annotation. Retry or a new destination must persist the accepted mutation rather than applying it again. Reconnect during this persistence wait retries receipt acknowledgement without reacquiring or reapplying the completed interaction. Closing the editor after acceptance is also different from discarding an unapplied draft. The [autosave architecture](../architecture-patterns/recoverable-editable-pdf-annotation-autosave.md) owns the underlying durability and recovery contract.
+
+The discriminating regressions combine these boundaries: retain one editor across Reference switch/hide/close; defer replacement during its hold; fail PDF persistence after accepting exactly one annotation; retry without duplication; and close only after durability catches up. Separately lose the finalization response after publishing a successor, and delete an edit target while draft protection is queued, then Cancel and prove the protected draft is gone. [PR #121](https://github.com/brad-ross/placekeeper/pull/121) adds this live PDF refresh integration coverage for Chromium and WebKit; the PR remains open as of 2026-09-18 (`test/acceptance/reference-annotations.spec.ts`, `test/acceptance/reference-annotation-stale-commands.spec.ts`, `test/acceptance/automatic-pdf-refresh.spec.ts`).
 
 ### Reconcile host invalidations with their originating command
 
@@ -101,7 +111,7 @@ A separate interaction boundary also survives the redesign: reverse-SyncTeX PDF 
 
 ## Why This Matters
 
-These failures share a mistaken ownership transfer: live selection replacing frozen source, keystrokes replacing stable geometry, conditional visibility replacing placement, a command notification replacing its response, or a completed PDF gesture retaining the next click. Each lifetime needs its own authority.
+These failures share a mistaken ownership transfer: live selection replacing frozen source, keystrokes replacing stable geometry, conditional visibility replacing placement, a command notification replacing its response, or a completed PDF gesture retaining the next click. Each lifetime needs its own authority. An editor closing, an interaction ending, and a PDF save finishing likewise prove different things: none alone establishes that unfinished text was discarded or accepted text reached the destination. Collapsing these boundaries can orphan cancelled drafts, duplicate accepted annotations, or disable the only valid retry.
 
 Placement is presentation, not semantic ownership. Keeping that boundary allows a local editor to follow a visible passage, remain usable after scrolling away, survive nested prerequisites, and commit exactly the original intended annotation. Retained workspace state provides continuity without requiring the obsolete edge layout.
 
@@ -121,6 +131,8 @@ A protected draft command emits revision 12 before returning revision 12. The ru
 
 ## Related
 
+- [Atomic generation transitions](../architecture-patterns/atomic-generation-transitions-for-rebuilt-pdf-reviews.md) owns replacement admission and the separate lifetimes of holds, protected drafts, and receipts.
+- [Temporal UI regression testing](../workflow-issues/prove-temporal-ui-stability-across-stateful-lifecycle-seams.md) explains how to test composed lifecycle transitions and intermediate frames.
 - [Overlay framing](../architecture-patterns/adaptive-annotation-tray-framing.md) separates passive reachability from explicit navigation.
 - [Full Annotation Reader](full-annotation-reader-preserves-tray-context.md) owns inspection identity and return-to-list restoration.
 - [Host runtime boundaries](../architecture-patterns/shared-production-review-client-host-runtime-boundaries.md) retain transport-specific authority outside shared review UI.
