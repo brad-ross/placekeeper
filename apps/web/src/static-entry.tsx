@@ -232,7 +232,7 @@ export function StaticLauncher(props: {
       <h2 id="more-features-title">More ways to work with your document</h2>
       <article><span className="landing-symbol" aria-hidden="true">∑</span><div><h3>Symbol search</h3><p>Find mathematical symbols by name or LaTeX command.</p></div></article>
       <article><ReviewIcon name="lock" size={20} /><div><h3>Horizontal scroll lock</h3><p>Keep the page steady while scrolling a zoomed-in document.</p></div></article>
-      <article><ReviewIcon name="refresh" size={20} /><div><h3>Keep up with changes</h3><p>Keep reading as other apps or agents update your document. Placekeeper refreshes the document and helps you reattach annotations when passages move or change.</p></div></article>
+      <article><ReviewIcon name="refresh" size={20} /><div><h3>Keep up with changes</h3><p>Keep reading as other apps or agents update your document. Placekeeper helps you reattach annotations when passages move or change.</p></div></article>
       <article><ReviewIcon name="fit-width" size={20} /><div><h3>Fit to width</h3><p>Fit the page to your reading space with a single click.</p></div></article>
     </section>
     <SurfaceShowcase />
