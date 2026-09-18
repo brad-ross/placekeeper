@@ -204,6 +204,14 @@ interface DeferredReferenceOwnedHover {
   readonly itemWasPresent: boolean;
 }
 
+export function pinReferenceInspection<T extends {
+  readonly token: number;
+  readonly selected: boolean;
+}>(inspection: T, token: number): T {
+  if (inspection.token !== token || inspection.selected) return inspection;
+  return { ...inspection, selected: true };
+}
+
 export function referenceInspectionPresentationForPhase(
   phase: 'enter' | 'leave' | 'focus' | 'blur' | 'activate',
 ): 'preview' | 'selected' | 'dismiss' {
@@ -223,6 +231,21 @@ export function referenceInspectionMatches(
   return inspection !== null
     && annotationReaderIdentityMatches(inspection.identity, identity)
     && samePdfAnnotationSurface(inspection.surface, surface);
+}
+
+export function referenceInspectionCorrespondenceAuthority(
+  inspection: {
+    readonly identity: AnnotationReaderIdentity;
+    readonly surface: Extract<PdfAnnotationSurface, { readonly kind: 'reference' }>;
+  } | null,
+  itemId: string,
+  surface: PdfAnnotationSurface,
+): OwnedMarkCorrespondence | undefined {
+  if (surface.kind !== 'reference') return undefined;
+  const identity = { origin: 'owned', itemId } as const;
+  return referenceInspectionMatches(inspection, identity, surface)
+    ? { id: itemId, surface }
+    : undefined;
 }
 
 export function referenceInspectionShouldPreserveSelection(
@@ -268,11 +291,12 @@ export function ownedAnnotationCorrespondence(input: {
   readonly rowItemId?: string;
   readonly focusedMark?: OwnedMarkCorrespondence;
   readonly hoveredMark?: OwnedMarkCorrespondence;
+  readonly preferredMark?: OwnedMarkCorrespondence;
 }): {
   readonly viewerItemId?: string;
   readonly contentItemId?: string;
 } {
-  const mark = input.focusedMark ?? input.hoveredMark;
+  const mark = input.preferredMark ?? input.focusedMark ?? input.hoveredMark;
   if (mark !== undefined) {
     return {
       viewerItemId: mark.id,
@@ -1168,13 +1192,14 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     }
     if (update.kind === 'pending' || update.kind === 'ready') setPdfCopyError(null);
   }, []);
-  const publishCorrespondence = () => {
+  const publishCorrespondence = (preferredMark?: OwnedMarkCorrespondence) => {
     const next = ownedAnnotationCorrespondence({
       ...(rowCorrespondenceRef.current === undefined
         ? {}
         : { rowItemId: rowCorrespondenceRef.current }),
       ...(markFocusRef.current === undefined ? {} : { focusedMark: markFocusRef.current }),
       ...(markHoverRef.current === undefined ? {} : { hoveredMark: markHoverRef.current }),
+      ...(preferredMark === undefined ? {} : { preferredMark }),
     });
     setCorrespondingItemId(next.viewerItemId);
     setContentCorrespondingItemId(next.contentItemId);
@@ -1453,6 +1478,9 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       if (surface === null) return;
       const { id, phase } = event.value;
       const referencePresentation = referenceInspectionPresentationForPhase(phase);
+      const preferredMark = referencePresentation === 'dismiss'
+        ? referenceInspectionCorrespondenceAuthority(referenceInspectionRef.current, id, surface)
+        : { id, surface };
       if (phase === 'enter') markHoverRef.current = { id, surface };
       if (phase === 'leave' && markHoverRef.current?.id === id) markHoverRef.current = undefined;
       if (phase === 'focus') markFocusRef.current = { id, surface };
@@ -1483,14 +1511,14 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
           if (referenceInspectionShouldSuppressRestoredFocus(
             suppressedFocus, identity, surface, Date.now(),
           )) {
-            publishCorrespondence();
+            publishCorrespondence(preferredMark);
             return;
           }
         }
         const current = referenceInspectionRef.current;
         if (referenceInspectionMatches(current, identity, surface)) {
           cancelReferenceInspectionDismiss();
-          publishCorrespondence();
+          publishCorrespondence(preferredMark);
           return;
         }
         const item = stateRef.current.items.find((candidate) => candidate.id === id);
@@ -1531,13 +1559,13 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
             ...(event.value.placement === undefined ? {} : { placement: event.value.placement }),
             selected: true,
           });
-          publishCorrespondence();
+          publishCorrespondence(preferredMark);
           return;
         }
         setActiveItemId(id);
         setActivationRequest({ id, token: ++activationTokenRef.current });
       }
-      publishCorrespondence();
+      publishCorrespondence(preferredMark);
       return;
     }
     if (event.type === 'source-mark' && surface?.kind === 'reference') {
@@ -2180,6 +2208,13 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
           referenceInspectionHeldTokenRef.current = held ? token : null;
           if (held) cancelReferenceInspectionDismiss();
           else if (!referenceInspectionRef.current.selected) scheduleReferenceInspectionDismiss(token);
+        }}
+        onReferenceInspectionSelect={(token) => {
+          if (referenceInspectionRef.current?.token !== token) return;
+          cancelReferenceInspectionDismiss();
+          setReferenceInspection((current) => current === null
+            ? null
+            : pinReferenceInspection(current, token));
         }}
         activeItemId={activeItemId ?? null}
         {...(contentCorrespondingItemId === undefined

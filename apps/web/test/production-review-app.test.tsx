@@ -22,10 +22,12 @@ import {
   frozenReferenceRecovery,
   frozenReferenceRecoveryForSurface,
   ownedAnnotationCorrespondence,
+  pinReferenceInspection,
   pdfAnnotationSurfaceIsCurrent,
   ProductionReviewApp,
   referenceInspectionShouldReuse,
   referenceInspectionShouldPreserveSelection,
+  referenceInspectionCorrespondenceAuthority,
   referenceInspectionShouldSuppressRestoredFocus,
   referenceInspectionPresentationForPhase,
 } from "../src/app/ProductionReviewApp.js";
@@ -90,6 +92,20 @@ describe('owned annotation correspondence', () => {
     )).toBe(false);
   });
 
+  it('pins only the current Reference inspection when its card body is clicked', () => {
+    const inspection = {
+      token: 8,
+      identity: { origin: 'owned', itemId: 'note-a' } as const,
+      surface: { kind: 'reference', documentGeneration: 4, tabIdentity: 'tab-a' } as const,
+      pageIndex: 2,
+      selected: false,
+    };
+
+    expect(pinReferenceInspection(inspection, 8)).toEqual({ ...inspection, selected: true });
+    expect(pinReferenceInspection(inspection, 7)).toBe(inspection);
+    expect(pinReferenceInspection({ ...inspection, selected: true }, 8).selected).toBe(true);
+  });
+
   it('upgrades a matching source preview instead of deduplicating its activation', () => {
     const surface = { kind: 'reference', documentGeneration: 4, tabIdentity: 'tab-a' } as const;
     const identity = {
@@ -130,6 +146,43 @@ describe('owned annotation correspondence', () => {
     expect(ownedAnnotationCorrespondence({
       rowItemId: 'note-row',
     })).toEqual({ viewerItemId: 'note-row', contentItemId: 'note-row' });
+    expect(ownedAnnotationCorrespondence({
+      focusedMark: {
+        id: 'note-main',
+        surface: { kind: 'main', documentGeneration: 4 },
+      },
+      hoveredMark: {
+        id: 'note-reference',
+        surface: { kind: 'reference', documentGeneration: 4, tabIdentity: 'tab-a' },
+      },
+      preferredMark: {
+        id: 'note-reference',
+        surface: { kind: 'reference', documentGeneration: 4, tabIdentity: 'tab-a' },
+      },
+    })).toEqual({ viewerItemId: 'note-reference' });
+    const referenceSurface = {
+      kind: 'reference', documentGeneration: 4, tabIdentity: 'tab-a',
+    } as const;
+    expect(referenceInspectionCorrespondenceAuthority({
+      identity: { origin: 'owned', itemId: 'note-reference' },
+      surface: referenceSurface,
+    }, 'note-reference', referenceSurface)).toEqual({
+      id: 'note-reference',
+      surface: referenceSurface,
+    });
+    expect(ownedAnnotationCorrespondence({
+      focusedMark: {
+        id: 'note-main',
+        surface: { kind: 'main', documentGeneration: 4 },
+      },
+      preferredMark: {
+        id: 'note-main-new-interaction',
+        surface: { kind: 'main', documentGeneration: 4 },
+      },
+    })).toEqual({
+      viewerItemId: 'note-main-new-interaction',
+      contentItemId: 'note-main-new-interaction',
+    });
   });
 });
 

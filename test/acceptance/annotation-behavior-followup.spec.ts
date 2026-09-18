@@ -431,6 +431,65 @@ test('outside click and Escape dismiss an expanded popup without retaining full 
   await expect(page.locator('[data-annotation-peek]')).toHaveCount(0);
 });
 
+test('outside click dismisses a compact popup restored after cancelling an edit', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  const { itemId } = await openLongAnnotationFixture(page, 'highlight', {
+    content: 'Cancel this edit.',
+  });
+  const mark = page.locator(`[data-owned-mark][data-review-id="${itemId}"]`).first();
+  await mark.scrollIntoViewIfNeeded();
+  const center = await markCenter(page, itemId);
+  await page.mouse.click(center.x, center.y);
+  const peek = page.locator(`[data-annotation-peek="${itemId}"]`);
+  await peek.hover();
+  await peek.getByRole('button', { name: 'Edit Highlight annotation on page 1' }).click();
+  const composer = page.getByRole('region', { name: 'Edit Highlight' });
+  await expect(composer).toBeVisible();
+  await composer.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await expect(peek).toBeVisible();
+
+  const image = await waitForRenderedPageImage(page);
+  const outside = await image.evaluate((element) => {
+    const pageElement = element.closest<HTMLElement>('[data-page-index]');
+    const viewport = element.closest<HTMLElement>('[data-viewer-framing-viewport]');
+    if (pageElement === null || viewport === null) {
+      throw new Error('Main rendered page has no page or viewport boundary.');
+    }
+    const pageBounds = pageElement.getBoundingClientRect();
+    const viewportBounds = viewport.getBoundingClientRect();
+    const left = Math.max(pageBounds.left, viewportBounds.left) + 24;
+    const right = Math.min(pageBounds.right, viewportBounds.right) - 24;
+    const top = Math.max(pageBounds.top, viewportBounds.top) + 24;
+    const bottom = Math.min(pageBounds.bottom, viewportBounds.bottom) - 24;
+    const unsafe = [
+      'a', 'button', 'input', 'textarea',
+      '[data-owned-focus-id]', '[data-owned-mark]', '[data-source-reader-mark]',
+      '[data-owned-native-geometry]', '[data-source-link-layer]',
+      '[data-pdf-link-interaction]', '[data-review-contextual-ui]',
+      '[data-annotation-peek]', '[data-comment-composer]',
+    ].join(',');
+    for (let y = top; y <= bottom; y += 32) {
+      for (let x = left; x <= right; x += 32) {
+        const hit = document.elementFromPoint(x, y);
+        if (hit instanceof Element
+          && hit.closest('[data-page-index]') === pageElement
+          && hit.closest(unsafe) === null) {
+          return {
+            x,
+            y,
+            pageIndex: hit.closest('[data-page-index]')?.getAttribute('data-page-index'),
+            unsafe: false,
+          };
+        }
+      }
+    }
+    throw new Error('Main rendered page has no visible blank dismissal point.');
+  });
+  expect(outside).toMatchObject({ pageIndex: '0', unsafe: false });
+  await page.mouse.click(outside.x, outside.y);
+  await expect(peek).toHaveCount(0);
+});
+
 
 for (const [kind, content] of [['highlight', 'Short comment.'], ['highlight', ''], ['replace', 'Short replacement.'], ['delete', '']] as const) {
   test(`full ${kind} popup retains overflowing source text with ${content || 'no authored text'}`, async ({ page }) => {

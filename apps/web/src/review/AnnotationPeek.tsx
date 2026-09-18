@@ -19,6 +19,7 @@ export interface AnnotationPeekProps {
   readOnly?: boolean;
   selected?: boolean;
   onHoldChange(held: boolean): void;
+  onSelect?(): void;
   copyLink?: CopyLinkControlProps;
   onNavigate?(): void;
   onOpenReference?(): void;
@@ -35,6 +36,24 @@ export interface AnnotationPeekProps {
   placementKind?: string;
 }
 
+const ANNOTATION_PEEK_ACTION_SELECTOR = [
+  'button',
+  'a',
+  'input',
+  'select',
+  'textarea',
+  '[role="button"]',
+  '[role="menuitem"]',
+].join(', ');
+
+export function annotationPeekBodyRequestsSelection(
+  target: unknown,
+): boolean {
+  if (typeof target !== 'object' || target === null || !('closest' in target)
+    || typeof target.closest !== 'function') return false;
+  return target.closest(ANNOTATION_PEEK_ACTION_SELECTOR) === null;
+}
+
 export function AnnotationPeek({
   item,
   presentation,
@@ -46,6 +65,7 @@ export function AnnotationPeek({
   readOnly = false,
   selected = false,
   onHoldChange,
+  onSelect,
   copyLink,
   onNavigate,
   onOpenReference,
@@ -81,6 +101,9 @@ export function AnnotationPeek({
       style={style}
       onPointerEnter={() => onHoldChange(true)}
       onPointerLeave={() => onHoldChange(false)}
+      onClick={(event) => {
+        if (onSelect && annotationPeekBodyRequestsSelection(event.target)) onSelect();
+      }}
     >
       <AnnotationRowContent
         item={item}
@@ -90,13 +113,13 @@ export function AnnotationPeek({
         {...(lastPageNumber === undefined ? {} : { lastPageNumber })}
         {...(readerRecord === undefined ? {} : { readerRecord })}
         showSourceReturn={showSourceReturn}
-        {...(selected && copyLink ? { copyLink } : {})}
+        {...(copyLink ? { copyLink } : {})}
         {...(onNavigate ? { onNavigate } : {})}
         {...(onOpenReference ? { onOpenReference } : {})}
         {...(onReadFull ? { onReadFull } : {})}
         {...(onReaderOverflowChange ? { onReaderOverflowChange } : {})}
-        {...(selected && onEdit ? { onEdit } : {})}
-        {...(selected && onDelete ? { onDelete } : {})}
+        {...(!readOnly && onEdit ? { onEdit } : {})}
+        {...(!readOnly && onDelete ? { onDelete } : {})}
       />
     </aside>
   );

@@ -7,10 +7,10 @@ import { ReviewShell } from '../src/app/ReviewShell.js';
 import { acceptedAuthoringCommandRequiresPersistence } from '../src/app/ProductionReviewApp.js';
 import {
   referenceAccessAvailable,
-  referenceInspectionAuthoringOrigin,
   referenceInspectionFocusSelector,
   referenceInspectionShouldDismissForClick,
   referenceInspectionShouldDismissForKey,
+  takeReferenceInspectionForAuthoring,
   shouldShowRightWorkspaceRail,
 } from '../src/app/ReviewShell.js';
 import {
@@ -257,6 +257,9 @@ describe('Reference authoring continuity', () => {
     ><div data-annotation-surface="main">Main document</div></ReviewShell>);
 
     expect(html).toContain('data-reference-annotation-inspection="7"');
+    expect(html).toMatch(
+      /data-reference-annotation-inspection="7"[^>]*style="visibility:hidden;pointer-events:none"/u,
+    );
     expect(html).toContain('data-annotation-peek="note-1"');
     expect(html).toContain('data-peek-selected="true"');
     expect(html).toContain('Frozen draft text');
@@ -270,19 +273,22 @@ describe('Reference authoring continuity', () => {
 
   it('starts reader editing with recovery frozen from the inspected Reference surface', () => {
     const recovery = session.origin.referenceRecovery!;
-    const origin = referenceInspectionAuthoringOrigin({
+    const inspection = {
       token: 7,
       identity: { origin: 'owned', itemId: item.id },
       surface: { kind: 'reference', documentGeneration: 8, tabIdentity: 'tab-1' },
       pageIndex: 4,
       placement: { left: 120, top: 160 },
       referenceRecovery: recovery,
-    });
+    } as const;
+    const dismiss = vi.fn();
+    const origin = takeReferenceInspectionForAuthoring(inspection, dismiss);
 
     expect(origin).toEqual({
       surface: { kind: 'reference', documentGeneration: 8, tabIdentity: 'tab-1' },
       referenceRecovery: recovery,
     });
+    expect(dismiss).toHaveBeenCalledWith(7, false);
   });
 
   it('shows page actions only for the current Reference surface while its workspace is open', () => {

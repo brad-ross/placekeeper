@@ -8,7 +8,11 @@ import {
   annotationListContent,
   combinedDocumentOrderedAnnotations,
 } from '../src/review/AnnotationList.js';
-import { AnnotationPeek, AnnotationRecordPeek } from '../src/review/AnnotationPeek.js';
+import {
+  AnnotationPeek,
+  AnnotationRecordPeek,
+  annotationPeekBodyRequestsSelection,
+} from '../src/review/AnnotationPeek.js';
 import { ContextActionPalette } from '../src/review/ContextActionPalette.js';
 import {
   FullAnnotationReader,
@@ -144,6 +148,33 @@ describe('annotation row and reader presentation', () => {
     expect(full).toContain('aria-label="Open in References"');
   });
 
+  it('keeps owned preview actions mounted for hover and selects only from the card body', () => {
+    const onSelect = vi.fn();
+    const html = renderToStaticMarkup(<AnnotationPeek
+      item={replacement}
+      onHoldChange={vi.fn()}
+      onSelect={onSelect}
+      onEdit={vi.fn()}
+      onDelete={vi.fn()}
+    />);
+    const peek = AnnotationPeek({
+      item: replacement,
+      onHoldChange: vi.fn(),
+      onSelect,
+    });
+
+    expect(html).toContain('data-peek-selected="false"');
+    expect(html).toContain('data-row-action="edit"');
+    expect(html).toContain('data-row-action="delete"');
+    expect(annotationPeekBodyRequestsSelection({ closest: () => null })).toBe(true);
+    expect(annotationPeekBodyRequestsSelection({
+      closest: (selector: string) => selector.includes('button') ? {} as Element : null,
+    })).toBe(false);
+    peek.props.onClick({ target: { closest: () => null } });
+    peek.props.onClick({ target: { closest: () => ({} as Element) } });
+    expect(onSelect).toHaveBeenCalledTimes(1);
+  });
+
   it('projects a read-only source record through the shared peek card', () => {
     const record = projectExistingAnnotationReader({
       id: 'source-peek', subtype: 'Highlight', pageIndex: 4,
@@ -155,6 +186,8 @@ describe('annotation row and reader presentation', () => {
       selected
       onHoldChange={vi.fn()}
       onOpenReference={vi.fn()}
+      onEdit={vi.fn()}
+      onDelete={vi.fn()}
     />);
 
     expect(html).toContain('data-annotation-origin="source"');

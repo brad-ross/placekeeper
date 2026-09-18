@@ -47,6 +47,7 @@ export interface CommentComposerProps {
   editorRef?: RefObject<HTMLTextAreaElement | null>;
   surfaceRef?: (element: HTMLElement | null) => void;
   placement?: CommentComposerPlacement;
+  deferUntilPlacement?: boolean;
   passageExposure?: {
     readonly exposed: boolean;
     readonly onExpose: () => void;
@@ -105,6 +106,7 @@ export function CommentComposer({
   editorRef,
   surfaceRef,
   placement,
+  deferUntilPlacement = false,
   passageExposure,
   onValueChange,
   onSave,
@@ -120,12 +122,14 @@ export function CommentComposer({
   const busy = submitting || persistencePending;
   const canSave = !saveDisabled && !persistencePending
     && (optional || (allowWhitespace ? value.length > 0 : value.trim().length > 0));
+  const placementPending = deferUntilPlacement && placement === undefined;
 
   useEffect(() => {
+    if (placementPending) return;
     const input = inputRef.current;
     input?.focus();
     input?.setSelectionRange(input.value.length, input.value.length);
-  }, [inputRef]);
+  }, [inputRef, placementPending]);
 
   useLayoutEffect(() => {
     const editor = inputRef.current;
@@ -236,9 +240,9 @@ export function CommentComposer({
       aria-labelledby={titleId}
       className="comment-composer compact-editorial-modal"
       data-comment-composer
-      data-composer-placement={placement?.kind}
+      data-composer-placement={placementPending ? 'pending' : placement?.kind}
       data-passage-exposed={passageExposed ? 'true' : undefined}
-      style={placement?.style}
+      style={placementPending ? { visibility: 'hidden' } : placement?.style}
       onSubmit={(event) => {
         event.preventDefault();
         submit();

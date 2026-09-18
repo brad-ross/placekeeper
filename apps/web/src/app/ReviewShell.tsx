@@ -292,6 +292,7 @@ export interface ReviewShellProps {
   referenceInspection?: ReviewShellReferenceInspection | null;
   onReferenceInspectionDismiss?(token: number, restoreFocus?: boolean): void;
   onReferenceInspectionHoldChange?(token: number, held: boolean): void;
+  onReferenceInspectionSelect?(token: number): void;
   children?: ReactNode;
 }
 
@@ -346,6 +347,15 @@ export function referenceInspectionAuthoringOrigin(
       ? {}
       : { referenceRecovery: inspection.referenceRecovery }),
   };
+}
+
+export function takeReferenceInspectionForAuthoring(
+  inspection: ReviewShellReferenceInspection,
+  dismiss: (token: number, restoreFocus?: boolean) => void,
+): Pick<AuthoringOrigin, 'surface' | 'referenceRecovery'> {
+  const origin = referenceInspectionAuthoringOrigin(inspection);
+  dismiss(inspection.token, false);
+  return origin;
 }
 
 export function referenceAccessAvailable(input: {
@@ -452,6 +462,7 @@ export function ReviewShell(props: ReviewShellProps) {
       annotationScrollTop: shellRef.current?.querySelector<HTMLElement>('[data-annotation-scroll-viewport]')?.scrollTop ?? 0,
     }),
     prepareAuthoring: () => {
+      peekHeldRef.current = false;
       cancelAnnotationRestoration();
       cancelReaderResume();
     },
@@ -1645,6 +1656,7 @@ export function ReviewShell(props: ReviewShellProps) {
       initialValue={initialValue}
       editorRef={authoringEditorRef}
       surfaceRef={setAuthoringSurfaceElement}
+      deferUntilPlacement={authoringReferenceTabIdentity !== undefined}
       {...((passageExposedToken === authoringSession.token ? exposedPassagePlacement.current : authoringPlacement) === undefined
         ? {}
         : { placement: (passageExposedToken === authoringSession.token ? exposedPassagePlacement.current : authoringPlacement)! })}
@@ -1908,9 +1920,10 @@ export function ReviewShell(props: ReviewShellProps) {
                 selected={props.referenceInspection.selected ?? true}
                 className="annotation-peek--reference-inspection"
                 surfaceRef={setReferenceInspectionSurfaceElement}
-                {...(referenceInspectionPlacement === undefined
-                  ? {}
-                  : { style: referenceInspectionPlacement.style })}
+                style={referenceInspectionPlacement?.style ?? {
+                  visibility: 'hidden',
+                  pointerEvents: 'none',
+                }}
                 inspectionToken={props.referenceInspection.token}
                 referenceTabIdentity={props.referenceInspection.surface.tabIdentity}
                 {...(referenceInspectionPlacement === undefined
@@ -1919,6 +1932,9 @@ export function ReviewShell(props: ReviewShellProps) {
                 onHoldChange={(held) => props.onReferenceInspectionHoldChange?.(
                   props.referenceInspection!.token,
                   held,
+                )}
+                onSelect={() => props.onReferenceInspectionSelect?.(
+                  props.referenceInspection!.token,
                 )}
                 {...(props.onOpenAnnotationReference === undefined ? {} : {
                   onOpenReference: () => props.onOpenAnnotationReference?.(
@@ -1941,6 +1957,10 @@ export function ReviewShell(props: ReviewShellProps) {
                       return {
                         ...(copyLink === undefined ? {} : { copyLink }),
                         onEdit: (trigger: HTMLButtonElement) => {
+                          const origin = takeReferenceInspectionForAuthoring(
+                            props.referenceInspection!,
+                            props.onReferenceInspectionDismiss ?? ignoreReferenceInspectionDismiss,
+                          );
                           if (annotationReaderSession !== null) {
                             closeAnnotationReader(annotationReaderSession, false);
                           }
@@ -1948,7 +1968,7 @@ export function ReviewShell(props: ReviewShellProps) {
                             { kind: 'edit', item },
                             'reader-edit',
                             trigger,
-                            referenceInspectionAuthoringOrigin(props.referenceInspection!),
+                            origin,
                           );
                         },
                         onDelete: async () => {
@@ -2046,6 +2066,10 @@ export function ReviewShell(props: ReviewShellProps) {
             const item = props.state.items.find(({ id }) => id === peekItemId);
             if (item === undefined) return null;
             const copyLink = copyLinkForItem(item);
+            const selectPeekItem = () => {
+              workspaceFraming.markUserIntent();
+              setActiveItem(item.id);
+            };
             return (
               <AnnotationPeek
                 item={item}
@@ -2063,9 +2087,11 @@ export function ReviewShell(props: ReviewShellProps) {
                     setPeekItemId(undefined);
                   }
                 }}
+                {...(anyWorkspaceOpen || activeItemId !== item.id
+                  ? { onSelect: selectPeekItem }
+                  : {})}
                 onNavigate={() => {
-                  workspaceFraming.markUserIntent();
-                  setActiveItem(item.id);
+                  selectPeekItem();
                   props.onNavigate?.(item);
                 }}
                 onReadFull={(record, trigger) => openOwnedAnnotationReader(record, trigger, 'peek')}

@@ -25,6 +25,25 @@ export interface PassageEditorPlacement {
   readonly targetVisibility?: 'visible' | 'outside';
 }
 
+interface PassageEditorPlacementSnapshot {
+  readonly anchorKey: string;
+  readonly placementScope: 'main' | 'reference';
+  readonly placement: PassageEditorPlacement;
+}
+
+export function passageEditorPlacementForRequest(input: {
+  readonly snapshot: PassageEditorPlacementSnapshot | undefined;
+  readonly anchorKey: string | null;
+  readonly placementScope?: 'main' | 'reference';
+}): PassageEditorPlacement | undefined {
+  const placementScope = input.placementScope ?? 'main';
+  return input.anchorKey !== null
+    && input.snapshot?.anchorKey === input.anchorKey
+    && input.snapshot.placementScope === placementScope
+    ? input.snapshot.placement
+    : undefined;
+}
+
 interface RectLike {
   readonly left: number;
   readonly top: number;
@@ -337,20 +356,34 @@ export function usePassageEditorPlacement(input: {
   readonly placementScope?: 'main' | 'reference';
   readonly scrollportSelector?: string;
 }): PassageEditorPlacement | undefined {
-  const [placement, setPlacement] = useState<PassageEditorPlacement | undefined>(undefined);
+  const [placementSnapshot, setPlacementSnapshot] = useState<
+    PassageEditorPlacementSnapshot | undefined
+  >(undefined);
   const lastVisiblePlacementRef = useRef<PassageEditorPlacement | undefined>(undefined);
-  const preferredKindRef = useRef<{
+  const measurementRequestRef = useRef<{
     readonly anchorKey: string;
-    readonly kind: PassageEditorPlacementKind;
+    readonly placementScope: 'main' | 'reference';
   } | undefined>(undefined);
-  const commitPlacement = (next: PassageEditorPlacement | undefined) => {
-    setPlacement((current) => samePlacement(current, next) ? current : next);
+  const preferredKindRef = useRef<PassageEditorPlacementKind | undefined>(undefined);
+  const commitPlacement = (
+    anchorKey: string,
+    placementScope: 'main' | 'reference',
+    next: PassageEditorPlacement,
+  ) => {
+    setPlacementSnapshot((current) => (
+      current?.anchorKey === anchorKey
+      && current.placementScope === placementScope
+      && samePlacement(current.placement, next)
+        ? current
+        : { anchorKey, placementScope, placement: next }
+    ));
   };
 
   useLayoutEffect(() => {
     if (!input.active || input.anchorKey === null) {
-      commitPlacement(undefined);
+      setPlacementSnapshot(undefined);
       lastVisiblePlacementRef.current = undefined;
+      measurementRequestRef.current = undefined;
       preferredKindRef.current = undefined;
       return;
     }
@@ -360,6 +393,15 @@ export function usePassageEditorPlacement(input: {
       .map((ref) => ref.current)
       .filter((surface): surface is HTMLElement => surface !== null);
     const placementScope = input.placementScope ?? 'main';
+    const anchorKey = input.anchorKey;
+    const measurementRequest = measurementRequestRef.current;
+    if (measurementRequest === undefined
+      || measurementRequest.anchorKey !== anchorKey
+      || measurementRequest.placementScope !== placementScope) {
+      measurementRequestRef.current = { anchorKey, placementScope };
+      lastVisiblePlacementRef.current = undefined;
+      preferredKindRef.current = undefined;
+    }
     const scrollport = stage.querySelector<HTMLElement>(
       input.scrollportSelector ?? '[data-viewer-framing-viewport]',
     );
@@ -487,22 +529,26 @@ export function usePassageEditorPlacement(input: {
               placementScope,
             });
             lastVisiblePlacementRef.current = safe;
-            commitPlacement(measuredPlacement(safe));
+            commitPlacement(anchorKey, placementScope, measuredPlacement(safe));
             return;
           }
-          commitPlacement(measuredPlacement(reclampPassageEditorPlacement({
-            previous: lastVisiblePlacementRef.current,
-            stage: stageBounds,
-            editorWidth: DEFAULT_WIDTH,
-            editorHeight: editorBounds?.height || DEFAULT_HEIGHT,
-            ...(rightBoundary === undefined ? {} : { rightBoundary }),
-            ...(bottomBoundary === undefined ? {} : { bottomBoundary }),
-            ...(applicationLeftBoundary === undefined ? {} : { applicationLeftBoundary }),
-            ...(applicationTopBoundary === undefined ? {} : { applicationTopBoundary }),
-            ...(applicationRightBoundary === undefined ? {} : { applicationRightBoundary }),
-            ...(applicationBottomBoundary === undefined ? {} : { applicationBottomBoundary }),
+          commitPlacement(
+            anchorKey,
             placementScope,
-          })));
+            measuredPlacement(reclampPassageEditorPlacement({
+              previous: lastVisiblePlacementRef.current,
+              stage: stageBounds,
+              editorWidth: DEFAULT_WIDTH,
+              editorHeight: editorBounds?.height || DEFAULT_HEIGHT,
+              ...(rightBoundary === undefined ? {} : { rightBoundary }),
+              ...(bottomBoundary === undefined ? {} : { bottomBoundary }),
+              ...(applicationLeftBoundary === undefined ? {} : { applicationLeftBoundary }),
+              ...(applicationTopBoundary === undefined ? {} : { applicationTopBoundary }),
+              ...(applicationRightBoundary === undefined ? {} : { applicationRightBoundary }),
+              ...(applicationBottomBoundary === undefined ? {} : { applicationBottomBoundary }),
+              placementScope,
+            })),
+          );
           return;
         }
         const choice = choosePassageEditorPlacement({
@@ -517,12 +563,14 @@ export function usePassageEditorPlacement(input: {
           ...(applicationRightBoundary === undefined ? {} : { applicationRightBoundary }),
           ...(applicationBottomBoundary === undefined ? {} : { applicationBottomBoundary }),
           placementScope,
-          ...(preferredKindRef.current?.anchorKey === input.anchorKey
-            ? { previous: preferredKindRef.current.kind }
-            : {}),
+          ...(preferredKindRef.current === undefined ? {} : { previous: preferredKindRef.current }),
         });
         if (!choice.visible && lastVisiblePlacementRef.current !== undefined) {
-          commitPlacement(measuredPlacement(lastVisiblePlacementRef.current));
+          commitPlacement(
+            anchorKey,
+            placementScope,
+            measuredPlacement(lastVisiblePlacementRef.current),
+          );
           return;
         }
         const next: PassageEditorPlacement = {
@@ -530,9 +578,9 @@ export function usePassageEditorPlacement(input: {
           ...(choice.style === undefined ? {} : { style: choice.style }),
           ...(targetVisibility === undefined ? {} : { targetVisibility }),
         };
-        preferredKindRef.current = { anchorKey: input.anchorKey!, kind: choice.kind };
+        preferredKindRef.current = choice.kind;
         lastVisiblePlacementRef.current = next;
-        commitPlacement(next);
+        commitPlacement(anchorKey, placementScope, next);
       },
     });
     let revision = 0;
@@ -570,5 +618,11 @@ export function usePassageEditorPlacement(input: {
     input.targetSelector,
   ]);
 
-  return placement;
+  return input.active
+    ? passageEditorPlacementForRequest({
+        snapshot: placementSnapshot,
+        anchorKey: input.anchorKey,
+        placementScope: input.placementScope ?? 'main',
+      })
+    : undefined;
 }

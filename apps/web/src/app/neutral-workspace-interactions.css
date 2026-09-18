@@ -291,19 +291,19 @@ li[data-search-result] .pdf-search__result-heading > .pdf-search__result-page {
 .review-page-menu button .review-icon,
 .link-action-popover [role="menuitem"] .review-icon { color: inherit; }
 
-/* Selected PDF popups share the workspace card's page/action endcap. */
+/* PDF popups share the workspace card's hover/focus action endcap. */
 .annotation-peek .row-action-group__direct {
   opacity: 0;
   pointer-events: none;
   transition: none;
 }
 .annotation-peek[data-source-return="true"] .row-action-group__direct,
-.annotation-peek[data-peek-selected="true"]:is(:hover, :has(:focus-visible)) .row-action-group__direct {
+.annotation-peek:is(:hover, :has(:focus-visible)) .row-action-group__direct {
   opacity: 1;
   pointer-events: auto;
 }
 .annotation-peek[data-source-return="true"] .annotation-item__page,
-.annotation-peek[data-peek-selected="true"]:is(:hover, :has(:focus-visible)):has(.row-action-group) .annotation-item__page {
+.annotation-peek:is(:hover, :has(:focus-visible)):has(.row-action-group) .annotation-item__page {
   opacity: 0;
 }
 @media (pointer: coarse), (hover: none) {

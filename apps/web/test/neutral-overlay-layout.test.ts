@@ -5,7 +5,10 @@ import {
   chooseContextActionAvailableRect,
   chooseContextActionPlacement,
 } from '../src/review/ContextActionPalette.js';
-import { choosePassageEditorPlacement } from '../src/review/use-passage-editor-placement.js';
+import {
+  choosePassageEditorPlacement,
+  passageEditorPlacementForRequest,
+} from '../src/review/use-passage-editor-placement.js';
 
 const rect = (left: number, top: number, width: number, height: number) => ({
   left,
@@ -58,6 +61,21 @@ describe('neutral overlay geometry', () => {
 });
 
 describe('passage editor placement', () => {
+  it('does not expose placement from a previous authoring token or surface scope', () => {
+    const mainPlacement = { kind: 'side' as const, style: { left: '640px' } };
+
+    expect(passageEditorPlacementForRequest({
+      snapshot: { anchorKey: '1', placementScope: 'main', placement: mainPlacement },
+      anchorKey: '2',
+      placementScope: 'reference',
+    })).toBeUndefined();
+    expect(passageEditorPlacementForRequest({
+      snapshot: { anchorKey: '2', placementScope: 'reference', placement: mainPlacement },
+      anchorKey: '2',
+      placementScope: 'reference',
+    })).toBe(mainPlacement);
+  });
+
   it('prefers available side space and keeps that choice while it remains valid', () => {
     const initial = choosePassageEditorPlacement({
       stage: rect(0, 0, 1_100, 760),

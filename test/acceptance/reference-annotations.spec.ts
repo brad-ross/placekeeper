@@ -72,18 +72,25 @@ async function openAnnotations(page: Page): Promise<void> {
 
 async function expectReferenceReady(page: Page, tab: Locator): Promise<void> {
   const retry = page.getByRole('button', { name: 'Retry reference' });
+  const viewport = page.locator('[data-reference-pdf-viewport]');
+  const targetIsReady = async () => (
+    await tab.count() > 0
+      && await tab.getAttribute('aria-selected') === 'true'
+      && await viewport.isVisible()
+  );
   for (let attempt = 0; attempt < 3; attempt += 1) {
     await expect.poll(async () => (
       await retry.isVisible()
-      || await page.locator('[data-reference-pdf-viewport]').count() > 0
+      || await targetIsReady()
     ), { timeout: READY_TIMEOUT }).toBe(true);
-    if (await page.locator('[data-reference-pdf-viewport]').count() > 0) break;
+    if (await targetIsReady()) break;
+    await expect(retry).toBeVisible();
     await retry.click();
     await expect(page.locator('[data-reference-pending="loading"]')).toHaveCount(0, {
       timeout: READY_TIMEOUT,
     });
   }
-  await expect(page.locator('[data-reference-pdf-viewport]')).toBeVisible({
+  await expect(viewport).toBeVisible({
     timeout: READY_TIMEOUT,
   });
   await expect(tab).toHaveAttribute('aria-selected', 'true', { timeout: READY_TIMEOUT });
@@ -265,6 +272,374 @@ async function expectSelectionActionsInsideReference(
       : actionsBounds.y >= selectionBounds.y + selectionBounds.height - 1;
     return inside && related;
   }).toBe(true);
+}
+
+interface ReferencePlacementSample {
+  placement: string | null;
+  inlineStyle: string | null;
+  rect: { left: number; top: number; right: number; bottom: number; width: number; height: number };
+  origin: { left: number; top: number; right: number; bottom: number; width: number; height: number } | null;
+  viewport: { left: number; top: number; right: number; bottom: number };
+  computed: { display: string; visibility: string; opacity: string; position: string };
+  mutationCount: number;
+}
+
+async function installFirstVisibleReferencePlacementProbe(
+  page: Page,
+  key: string,
+  targetSelector: string,
+  originSelector: string,
+): Promise<void> {
+  await page.evaluate(({ key, targetSelector, originSelector }) => {
+    type Probe = {
+      first: ReferencePlacementSample | null;
+      mutationCount: number;
+      observer: MutationObserver;
+      frame: number | null;
+    };
+    const scope = globalThis as typeof globalThis & {
+      __referenceFirstVisiblePlacementProbes?: Record<string, Probe>;
+    };
+    const probes = scope.__referenceFirstVisiblePlacementProbes ??= {};
+    probes[key]?.observer.disconnect();
+    if (probes[key]?.frame !== null && probes[key]?.frame !== undefined) {
+      cancelAnimationFrame(probes[key]!.frame!);
+    }
+    const bounds = (element: Element | null) => {
+      if (element === null) return null;
+      const rect = element.getBoundingClientRect();
+      return {
+        left: rect.left,
+        top: rect.top,
+        right: rect.right,
+        bottom: rect.bottom,
+        width: rect.width,
+        height: rect.height,
+      };
+    };
+    const observer = new MutationObserver((mutations) => {
+      probes[key]!.mutationCount += mutations.length;
+    });
+    const probe: Probe = { first: null, mutationCount: 0, observer, frame: null };
+    probes[key] = probe;
+    observer.observe(document.documentElement, {
+      subtree: true,
+      childList: true,
+      attributes: true,
+      attributeFilter: ['class', 'style', 'data-composer-placement'],
+    });
+    const capture = () => {
+      const target = document.querySelector<HTMLElement>(targetSelector);
+      const rect = bounds(target);
+      const computed = target === null ? null : getComputedStyle(target);
+      if (target !== null && rect !== null && rect.width > 0 && rect.height > 0
+        && computed !== null && computed.display !== 'none' && computed.visibility !== 'hidden'
+        && Number(computed.opacity) > 0) {
+        probe.first = {
+          placement: target.getAttribute('data-composer-placement'),
+          inlineStyle: target.getAttribute('style'),
+          rect,
+          origin: bounds(document.querySelector(originSelector)),
+          viewport: globalThis.visualViewport === null
+            ? { left: 0, top: 0, right: innerWidth, bottom: innerHeight }
+            : {
+                left: globalThis.visualViewport.offsetLeft,
+                top: globalThis.visualViewport.offsetTop,
+                right: globalThis.visualViewport.offsetLeft + globalThis.visualViewport.width,
+                bottom: globalThis.visualViewport.offsetTop + globalThis.visualViewport.height,
+              },
+          computed: {
+            display: computed.display,
+            visibility: computed.visibility,
+            opacity: computed.opacity,
+            position: computed.position,
+          },
+          mutationCount: probe.mutationCount,
+        };
+        observer.disconnect();
+        probe.frame = null;
+        return;
+      }
+      probe.frame = requestAnimationFrame(capture);
+    };
+    probe.frame = requestAnimationFrame(capture);
+  }, { key, targetSelector, originSelector });
+}
+
+async function expectFirstVisibleReferencePlacement(
+  page: Page,
+  key: string,
+  target: Locator,
+  originSelector: string,
+): Promise<void> {
+  await expect.poll(() => page.evaluate((probeKey) => {
+    const scope = globalThis as typeof globalThis & {
+      __referenceFirstVisiblePlacementProbes?: Record<
+        string,
+        { first: ReferencePlacementSample | null }
+      >;
+    };
+    return scope.__referenceFirstVisiblePlacementProbes?.[probeKey]?.first ?? null;
+  }, key)).not.toBeNull();
+  await expect(target).toHaveAttribute(
+    'data-composer-placement',
+    /^(?:above|below|side|bottom-sheet)$/u,
+  );
+  const first = await page.evaluate((probeKey) => {
+    const scope = globalThis as typeof globalThis & {
+      __referenceFirstVisiblePlacementProbes?: Record<
+        string,
+        { first: ReferencePlacementSample | null }
+      >;
+    };
+    return scope.__referenceFirstVisiblePlacementProbes?.[probeKey]?.first ?? null;
+  }, key);
+  if (first === null) throw new Error(`${key} first-visible placement was not captured.`);
+  const settled = await target.evaluate(async (element, selector) => {
+    const bounds = (candidate: Element | null) => {
+      if (candidate === null) return null;
+      const rect = candidate.getBoundingClientRect();
+      return {
+        left: rect.left,
+        top: rect.top,
+        right: rect.right,
+        bottom: rect.bottom,
+        width: rect.width,
+        height: rect.height,
+      };
+    };
+    const sample = (): Omit<ReferencePlacementSample, 'mutationCount'> => {
+      const computed = getComputedStyle(element);
+      return {
+        placement: element.getAttribute('data-composer-placement'),
+        inlineStyle: element.getAttribute('style'),
+        rect: bounds(element)!,
+        origin: bounds(document.querySelector(selector)),
+        viewport: globalThis.visualViewport === null
+          ? { left: 0, top: 0, right: innerWidth, bottom: innerHeight }
+          : {
+              left: globalThis.visualViewport.offsetLeft,
+              top: globalThis.visualViewport.offsetTop,
+              right: globalThis.visualViewport.offsetLeft + globalThis.visualViewport.width,
+              bottom: globalThis.visualViewport.offsetTop + globalThis.visualViewport.height,
+            },
+        computed: {
+          display: computed.display,
+          visibility: computed.visibility,
+          opacity: computed.opacity,
+          position: computed.position,
+        },
+      };
+    };
+    let previous = sample();
+    for (let frame = 0; frame < 30; frame += 1) {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      const current = sample();
+      if (JSON.stringify(current) === JSON.stringify(previous)) return current;
+      previous = current;
+    }
+    throw new Error('Reference placement did not settle across consecutive animation frames.');
+  }, originSelector);
+  const relationship = (sample: Pick<ReferencePlacementSample, 'rect' | 'origin'>) => {
+    if (sample.origin === null) return 'missing-origin';
+    if (sample.rect.bottom <= sample.origin.top + 1) return 'above';
+    if (sample.rect.top >= sample.origin.bottom - 1) return 'below';
+    if (sample.rect.right <= sample.origin.left + 1) return 'left';
+    if (sample.rect.left >= sample.origin.right - 1) return 'right';
+    return 'overlap';
+  };
+  expect(first.mutationCount, `${key} observer saw no authoring mutation`).toBeGreaterThan(0);
+  expect(first.placement, `${key} painted once with the unresolved Main placement`).toBe(settled.placement);
+  expect(first.inlineStyle?.trim().length, `${key} first paint had no positioned inline style`)
+    .toBeGreaterThan(0);
+  expect(first.computed).toEqual(settled.computed);
+  expect(first.computed.position).toBe('absolute');
+  expect(relationship(first), `${key} first paint was not resolved from its Reference origin`)
+    .toBe(relationship(settled));
+  expect(first.origin, `${key} first paint had no Reference origin`).not.toBeNull();
+  expect(settled.origin, `${key} settled placement had no Reference origin`).not.toBeNull();
+  expect(first.rect.width).toBe(settled.rect.width);
+  expect(first.rect.height).toBe(settled.rect.height);
+  expect(first.rect.left).toBeGreaterThanOrEqual(first.viewport.left);
+  expect(first.rect.top).toBeGreaterThanOrEqual(first.viewport.top);
+  expect(first.rect.right).toBeLessThanOrEqual(first.viewport.right);
+  expect(first.rect.bottom).toBeLessThanOrEqual(first.viewport.bottom);
+}
+
+async function installFirstVisibleReferenceCardProbe(
+  page: Page,
+  key: string,
+  itemId: string,
+): Promise<void> {
+  await page.evaluate(({ key, itemId }) => {
+    type CardSample = {
+      referenceInspection: boolean;
+      selected: string | null;
+    };
+    type CardProbe = {
+      first: CardSample[] | null;
+      frames: CardSample[][];
+      frame: number | null;
+    };
+    const scope = globalThis as typeof globalThis & {
+      __referenceFirstVisibleCardProbes?: Record<string, CardProbe>;
+    };
+    const probes = scope.__referenceFirstVisibleCardProbes ??= {};
+    if (probes[key]?.frame !== null && probes[key]?.frame !== undefined) {
+      cancelAnimationFrame(probes[key]!.frame!);
+    }
+    const probe: CardProbe = {
+      first: null,
+      frames: [],
+      frame: null,
+    };
+    probes[key] = probe;
+    const capture = () => {
+      const visible = [...document.querySelectorAll<HTMLElement>('[data-annotation-peek]')]
+        .filter((element) => element.dataset.annotationPeek === itemId)
+        .filter((element) => {
+          const bounds = element.getBoundingClientRect();
+          const style = getComputedStyle(element);
+          return bounds.width > 0 && bounds.height > 0 && style.display !== 'none'
+            && style.visibility !== 'hidden' && Number(style.opacity) > 0;
+        })
+        .map((element) => ({
+          referenceInspection: element.hasAttribute('data-reference-annotation-inspection'),
+          selected: element.getAttribute('data-peek-selected'),
+        }));
+      probe.frames.push(visible);
+      if (visible.length > 0 && probe.first === null) {
+        probe.first = visible;
+      }
+      probe.frame = requestAnimationFrame(capture);
+    };
+    probe.frame = requestAnimationFrame(capture);
+  }, { key, itemId });
+}
+
+async function expectFirstVisibleReferenceCard(page: Page, key: string): Promise<void> {
+  await expect.poll(() => page.evaluate((probeKey) => {
+    const scope = globalThis as typeof globalThis & {
+      __referenceFirstVisibleCardProbes?: Record<
+        string,
+        { first: Array<{ referenceInspection: boolean; selected: string | null }> | null }
+      >;
+    };
+    return scope.__referenceFirstVisibleCardProbes?.[probeKey]?.first ?? null;
+  }, key)).not.toBeNull();
+  const first = await page.evaluate((probeKey) => {
+    const scope = globalThis as typeof globalThis & {
+      __referenceFirstVisibleCardProbes?: Record<
+        string,
+        { first: Array<{ referenceInspection: boolean; selected: string | null }> | null }
+      >;
+    };
+    return scope.__referenceFirstVisibleCardProbes?.[probeKey]?.first ?? null;
+  }, key);
+  expect(first).toEqual([{
+    referenceInspection: true,
+    selected: 'false',
+  }]);
+}
+
+async function expectReferenceCardProbeOnlyReference(page: Page, key: string): Promise<void> {
+  const frames = await page.evaluate((probeKey) => {
+    const scope = globalThis as typeof globalThis & {
+      __referenceFirstVisibleCardProbes?: Record<
+        string,
+        {
+          frames: Array<Array<{ referenceInspection: boolean; selected: string | null }>>;
+          frame: number | null;
+        }
+      >;
+    };
+    const probe = scope.__referenceFirstVisibleCardProbes?.[probeKey];
+    if (!probe) return [];
+    if (probe.frame !== null) cancelAnimationFrame(probe.frame);
+    probe.frame = null;
+    return probe.frames;
+  }, key);
+  expect(frames.some((frame) => frame.some(({ referenceInspection }) => referenceInspection)))
+    .toBe(true);
+  expect(
+    frames.some((frame) => frame.some(({ referenceInspection }) => !referenceInspection)),
+    `${key} painted a Main card while the Reference card was acquiring or holding the pointer`,
+  ).toBe(false);
+}
+
+async function installPostClickTransitionProbe(
+  page: Page,
+  key: string,
+  fromSelector: string,
+  toSelector: string,
+  terminal: 'to-visible' | 'from-hidden',
+): Promise<void> {
+  await page.evaluate(({ key, fromSelector, toSelector, terminal }) => {
+    type TransitionFrame = { fromVisible: boolean; toVisible: boolean };
+    type TransitionProbe = {
+      frames: TransitionFrame[];
+      complete: boolean;
+      frame: number | null;
+    };
+    const scope = globalThis as typeof globalThis & {
+      __referenceTransitionProbes?: Record<string, TransitionProbe>;
+    };
+    const probes = scope.__referenceTransitionProbes ??= {};
+    if (probes[key]?.frame !== null && probes[key]?.frame !== undefined) {
+      cancelAnimationFrame(probes[key]!.frame!);
+    }
+    const probe: TransitionProbe = { frames: [], complete: false, frame: null };
+    probes[key] = probe;
+    const visible = (selector: string) => [...document.querySelectorAll<HTMLElement>(selector)]
+      .some((element) => {
+        const bounds = element.getBoundingClientRect();
+        const style = getComputedStyle(element);
+        return bounds.width > 0 && bounds.height > 0 && style.display !== 'none'
+          && style.visibility !== 'hidden' && Number(style.opacity) > 0;
+      });
+    const capture = () => {
+      const frame = {
+        fromVisible: visible(fromSelector),
+        toVisible: visible(toSelector),
+      };
+      probe.frames.push(frame);
+      const complete = terminal === 'to-visible' ? frame.toVisible : !frame.fromVisible;
+      if (complete) {
+        probe.complete = true;
+        probe.frame = null;
+        return;
+      }
+      probe.frame = requestAnimationFrame(capture);
+    };
+    document.addEventListener('click', () => {
+      probe.frame = requestAnimationFrame(capture);
+    }, { capture: true, once: true });
+  }, { key, fromSelector, toSelector, terminal });
+}
+
+async function expectPostClickTransitionWithoutSurface(
+  page: Page,
+  key: string,
+  forbidden: 'fromVisible' | 'toVisible',
+): Promise<void> {
+  await expect.poll(() => page.evaluate((probeKey) => {
+    const scope = globalThis as typeof globalThis & {
+      __referenceTransitionProbes?: Record<string, { complete: boolean }>;
+    };
+    return scope.__referenceTransitionProbes?.[probeKey]?.complete ?? false;
+  }, key)).toBe(true);
+  const frames = await page.evaluate((probeKey) => {
+    const scope = globalThis as typeof globalThis & {
+      __referenceTransitionProbes?: Record<
+        string,
+        { frames: Array<{ fromVisible: boolean; toVisible: boolean }> }
+      >;
+    };
+    return scope.__referenceTransitionProbes?.[probeKey]?.frames ?? [];
+  }, key);
+  expect(frames.length).toBeGreaterThan(0);
+  expect(frames.some((frame) => frame[forbidden]), `${key} painted an intermediate surface`)
+    .toBe(false);
 }
 
 async function openPageNoteContextMenu(page: Page, pdfPage: Locator): Promise<void> {
@@ -524,12 +899,26 @@ test('creates, edits, reopens, and deletes one shared selection annotation from 
     element.scrollTop += selectionTop - viewportBounds.top - 2;
   });
   await expectSelectionActionsInsideReference(page, 'below');
-  await page.getByRole('toolbar', { name: 'Selection review actions' })
-    .getByRole('button', { name: 'Highlight', exact: true }).click();
+  const highlight = page.getByRole('toolbar', { name: 'Selection review actions' })
+    .getByRole('button', { name: 'Highlight', exact: true });
+  await installFirstVisibleReferencePlacementProbe(
+    page,
+    'reference-highlight-create',
+    '[data-comment-composer]',
+    '[data-reference-pdf-viewport] [data-authoring-preview="true"]',
+  );
+  await highlight.click();
   const composer = page.getByRole('region', { name: 'Highlight Comment' });
+  await expectFirstVisibleReferencePlacement(
+    page,
+    'reference-highlight-create',
+    composer,
+    '[data-reference-pdf-viewport] [data-authoring-preview="true"]',
+  );
   await composer.getByRole('textbox', { name: 'Comment (optional)' })
     .fill('Shared Reference highlight.');
   await composer.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(composer).toHaveCount(0);
   await expect.poll(() => host.broker.state(sessionId)?.revision).toBe(baseline.revision + 1);
   const item = host.broker.state(sessionId)!.items.find(
     (candidate) => candidate.payload.comment === 'Shared Reference highlight.',
@@ -544,6 +933,89 @@ test('creates, edits, reopens, and deletes one shared selection annotation from 
   )).not.toHaveCount(0);
   expect(await mainSnapshot(page)).toEqual(unchangedMain);
 
+  const referenceFocus = page.locator(
+    `[data-reference-pdf-viewport] [data-owned-focus-id="${item.id}"]`,
+  );
+  await expect(referenceFocus).toBeVisible();
+  await referenceFocus.focus();
+  await page.keyboard.press('Enter');
+  const inspection = page.locator('[data-reference-annotation-inspection]');
+  await expect(inspection).toHaveAttribute('data-peek-selected', 'true');
+  await inspection.hover();
+  const editAction = inspection.getByRole('button', {
+    name: 'Edit Highlight annotation on page 2',
+  });
+  await expect(editAction).toBeVisible();
+  await installFirstVisibleReferencePlacementProbe(
+    page,
+    'reference-highlight-edit',
+    '[data-comment-composer]',
+    `[data-reference-pdf-viewport] [data-owned-mark][data-review-id="${item.id}"]`,
+  );
+  await installPostClickTransitionProbe(
+    page,
+    'reference-highlight-edit-open',
+    '[data-reference-annotation-inspection]',
+    '[data-comment-composer]',
+    'to-visible',
+  );
+  await editAction.click();
+  const edit = page.getByRole('region', { name: 'Edit Highlight' });
+  await expectPostClickTransitionWithoutSurface(
+    page,
+    'reference-highlight-edit-open',
+    'fromVisible',
+  );
+  await expectFirstVisibleReferencePlacement(
+    page,
+    'reference-highlight-edit',
+    edit,
+    `[data-reference-pdf-viewport] [data-owned-mark][data-review-id="${item.id}"]`,
+  );
+  await edit.getByRole('textbox', { name: 'Comment' }).fill('Cancelled Reference edit.');
+  await installPostClickTransitionProbe(
+    page,
+    'reference-highlight-edit-cancel',
+    '[data-comment-composer]',
+    '[data-reference-annotation-inspection]',
+    'from-hidden',
+  );
+  await edit.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await expectPostClickTransitionWithoutSurface(
+    page,
+    'reference-highlight-edit-cancel',
+    'toVisible',
+  );
+  await expect(edit).toHaveCount(0);
+  await expect(inspection).toHaveCount(0);
+
+  await referenceFocus.focus();
+  await page.keyboard.press('Enter');
+  await expect(inspection).toHaveAttribute('data-peek-selected', 'true');
+  await inspection.hover();
+  await inspection.getByRole('button', {
+    name: 'Edit Highlight annotation on page 2',
+  }).click();
+  const appliedEdit = page.getByRole('region', { name: 'Edit Highlight' });
+  await expect(appliedEdit).toBeVisible();
+  await appliedEdit.getByRole('textbox', { name: 'Comment' })
+    .fill('Edited shared Reference highlight.');
+  await installPostClickTransitionProbe(
+    page,
+    'reference-highlight-edit-apply',
+    '[data-comment-composer]',
+    '[data-reference-annotation-inspection]',
+    'from-hidden',
+  );
+  await appliedEdit.getByRole('button', { name: 'Apply', exact: true }).click();
+  await expectPostClickTransitionWithoutSurface(
+    page,
+    'reference-highlight-edit-apply',
+    'toVisible',
+  );
+  await expect(appliedEdit).toHaveCount(0);
+  await expect(inspection).toHaveCount(0);
+
   await page.reload();
   await expect(page.locator('[data-production-review]')).toHaveAttribute(
     'data-initial-view-ready',
@@ -551,13 +1023,45 @@ test('creates, edits, reopens, and deletes one shared selection annotation from 
   );
   await openAnnotations(page);
   const row = page.locator(`[data-review-item="${item.id}"]`);
-  await expect(row).toContainText('Shared Reference highlight.');
-  await row.hover();
-  await row.getByRole('button', { name: /Edit Highlight annotation/u }).click();
-  const edit = page.getByRole('region', { name: 'Edit Highlight' });
-  await edit.getByRole('textbox', { name: 'Comment' }).fill('Edited shared Reference highlight.');
-  await edit.getByRole('button', { name: 'Apply', exact: true }).click();
   await expect(row).toContainText('Edited shared Reference highlight.');
+
+  await page.getByRole('button', { name: 'Hide workspace', exact: true }).click();
+  const workspace = page.locator('[data-review-workspace]');
+  await expect(workspace).toHaveAttribute('data-workspace-open', 'false');
+  const mainMark = page.locator(
+    `.pdf-workspace:not(.pdf-workspace--reference) [data-owned-mark][data-review-id="${item.id}"]`,
+  ).first();
+  await mainMark.scrollIntoViewIfNeeded();
+  const mainMarkBounds = await mainMark.boundingBox();
+  if (!mainMarkBounds) throw new Error('Main annotation mark has no pointer bounds.');
+  await page.mouse.click(
+    mainMarkBounds.x + mainMarkBounds.width / 2,
+    mainMarkBounds.y + mainMarkBounds.height / 2,
+  );
+  const mainCard = page.locator(
+    `[data-annotation-peek="${item.id}"]:not([data-reference-annotation-inspection])`,
+  );
+  await expect(mainCard).toBeVisible();
+  await mainCard.hover();
+  await mainCard.getByRole('button', {
+    name: 'Edit Highlight annotation on page 2',
+  }).click();
+  const mainEdit = page.getByRole('region', { name: 'Edit Highlight' });
+  await expect(mainEdit).toBeVisible();
+  await mainEdit.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await expect(mainEdit).toHaveCount(0);
+  await expect(workspace).toHaveAttribute('data-workspace-open', 'false');
+  await expect(mainCard).toBeVisible();
+  await expect(mainCard).toHaveAttribute('data-peek-selected', 'true');
+  const mainPageImage = page.locator(
+    '.pdf-workspace:not(.pdf-workspace--reference) .pdf-workspace__page[data-page-index="1"] > img',
+  );
+  const mainPageBounds = await mainPageImage.boundingBox();
+  if (!mainPageBounds) throw new Error('Main PDF page has no outside-click bounds.');
+  await page.mouse.click(mainPageBounds.x + 30, mainPageBounds.y + 300);
+  await expect(mainCard).toHaveCount(0);
+
+  await openAnnotations(page);
   await row.hover();
   await row.getByRole('button', { name: /Remove Highlight annotation/u }).click();
   await expect.poll(() => host.broker.state(sessionId)?.items.some(({ id }) => id === item.id))
@@ -603,6 +1107,7 @@ test('opens a residual source mark in References as read only, including metadat
   await expect(inspection.locator('.annotation-item__excerpt')).toHaveCount(0);
   await expect(inspection).not.toContainText('Read-only source');
   await expect(inspection).not.toContainText('Annotation contents');
+  await inspection.hover();
   await expect(inspection.getByRole('button', { name: /Edit/u })).toHaveCount(0);
   await expect(inspection.getByRole('button', { name: /Remove/u })).toHaveCount(0);
   await expect(inspection.locator('[data-row-action="open-reference"]')).toBeVisible();
@@ -618,6 +1123,18 @@ test('opens a residual source mark in References as read only, including metadat
 test('keeps Reference card hover, selection, dismissal, and focus lifecycle mounted', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 });
   const { activeTab, inspection, mark, ownedMark } = await openLongReferenceCard(page);
+  const itemId = await inspection.getAttribute('data-annotation-peek');
+  if (!itemId) throw new Error('Long-card annotation identity is unavailable.');
+  const mainOwnedMark = page.locator(
+    `.pdf-workspace:not(.pdf-workspace--reference) [data-owned-mark][data-review-id="${itemId}"]`,
+  ).first();
+  const mainFocus = page.locator(
+    `.pdf-workspace:not(.pdf-workspace--reference) [data-owned-focus-id="${itemId}"]`,
+  );
+  const mainCard = page.locator(
+    `[data-annotation-peek="${itemId}"]:not([data-reference-annotation-inspection])`,
+  );
+  await expect(mainOwnedMark).toBeVisible();
   const currentOwnedMarkPoint = async () => {
     const bounds = await ownedMark.boundingBox();
     if (!bounds) throw new Error('Reference annotation mark has no pointer bounds.');
@@ -638,6 +1155,10 @@ test('keeps Reference card hover, selection, dismissal, and focus lifecycle moun
   const editAction = inspection.getByRole('button', {
     name: 'Edit Page Note annotation on page 1',
   });
+  const removeAction = inspection.getByRole('button', {
+    name: 'Remove Page Note annotation on page 1',
+  });
+  const directActions = inspection.locator('.row-action-group__direct');
   await expect(inspection.locator('[data-full-annotation-reader]')).toHaveCount(0);
   await expect(inspection.getByRole('button', { name: 'Back' })).toHaveCount(0);
 
@@ -652,18 +1173,61 @@ test('keeps Reference card hover, selection, dismissal, and focus lifecycle moun
     '[data-reference-pdf-viewport] .pdf-workspace__page[data-page-index="0"]',
   ).click({ position: { x: 8, y: 8 } });
   await expect(inspection).toHaveCount(0);
+
+  const toolsWorkspace = page.locator('#review-tools-workspace');
+  await toolsWorkspace.getByRole('button', { name: 'Hide workspace', exact: true }).click();
+  await expect(toolsWorkspace).toHaveAttribute('data-tools-workspace-open', 'false');
+  await expect(activeTab).toHaveAttribute('aria-selected', 'true');
   await ownedMark.scrollIntoViewIfNeeded();
   await expect(ownedMark).toBeInViewport();
 
+  await expect(mainFocus).toBeVisible();
+  await mainFocus.focus();
+  await expect(mainFocus).toBeFocused();
+  await expect(mainCard).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(mainCard).toHaveCount(0);
+  await expect(mainFocus).toBeFocused();
+
   const hoverPoint = await currentOwnedMarkPoint();
   await expectReferencePointerTargetNonInteractive(page, hoverPoint, 'Long-card hover');
+  await installFirstVisibleReferenceCardProbe(
+    page,
+    'reference-hover-with-visible-main-twin',
+    itemId,
+  );
   await page.mouse.move(hoverPoint.x, hoverPoint.y);
+  await expectFirstVisibleReferenceCard(page, 'reference-hover-with-visible-main-twin');
   await expect(inspection).toBeVisible();
+  await expect(mainCard).toHaveCount(0);
+  await expect(mainFocus).toBeFocused();
   await expect(inspection).toHaveAttribute('data-peek-selected', 'false');
+  await expect(directActions).toHaveCSS('opacity', '0');
+  await expect(directActions).toHaveCSS('pointer-events', 'none');
   await inspection.hover();
-  await page.waitForTimeout(180);
+  const referenceHoldStartedAt = await page.evaluate(() => performance.now());
+  await expect.poll(() => page.evaluate(({ itemId, startedAt }) => {
+    const matchingCards = [...document.querySelectorAll<HTMLElement>('[data-annotation-peek]')]
+      .filter((element) => element.dataset.annotationPeek === itemId);
+    return performance.now() - startedAt >= 180
+      && matchingCards.some((element) => (
+        element.hasAttribute('data-reference-annotation-inspection')
+      ))
+      && matchingCards.every((element) => (
+        element.hasAttribute('data-reference-annotation-inspection')
+      ));
+  }, { itemId, startedAt: referenceHoldStartedAt })).toBe(true);
+  await expectReferenceCardProbeOnlyReference(
+    page,
+    'reference-hover-with-visible-main-twin',
+  );
   await expect(inspection).toBeVisible();
+  await expect(mainCard).toHaveCount(0);
   await expect(inspection).toHaveAttribute('data-peek-selected', 'false');
+  await expect(directActions).toHaveCSS('opacity', '1');
+  await expect(directActions).toHaveCSS('pointer-events', 'auto');
+  await expect(editAction).toBeVisible();
+  await expect(removeAction).toBeVisible();
   const referencePage = page.locator(
     '[data-reference-pdf-viewport] .pdf-workspace__page[data-page-index="0"]',
   );
@@ -673,14 +1237,21 @@ test('keeps Reference card hover, selection, dismissal, and focus lifecycle moun
   await expect(inspection).toHaveCount(0);
 
   const selectedPoint = await currentOwnedMarkPoint();
-  await page.mouse.click(selectedPoint.x, selectedPoint.y);
+  await page.mouse.move(selectedPoint.x, selectedPoint.y);
+  await expect(inspection).toHaveAttribute('data-peek-selected', 'false');
+  await inspection.hover();
+  await expect(directActions).toHaveCSS('opacity', '1');
+  await expect(directActions).toHaveCSS('pointer-events', 'auto');
+  await expect(editAction).toBeVisible();
+  await inspection.locator('.annotation-item__excerpt-main').click();
   await expect(inspection).toBeVisible();
   await expect(inspection).toHaveAttribute('data-peek-selected', 'true');
   await page.mouse.move(referencePageBounds.x + 8, referencePageBounds.y + 8);
-  const reentryPoint = await currentOwnedMarkPoint();
-  await page.mouse.move(reentryPoint.x, reentryPoint.y);
-  await page.waitForTimeout(180);
-  await expect(inspection).toBeVisible();
+  const leaveStartedAt = await page.evaluate(() => performance.now());
+  await expect.poll(() => page.evaluate((startedAt) => (
+    performance.now() - startedAt >= 180
+      && document.querySelector('[data-reference-annotation-inspection]') !== null
+  ), leaveStartedAt)).toBe(true);
   await expect(inspection).toHaveAttribute('data-peek-selected', 'true');
   await editAction.focus();
   await page.keyboard.press('Escape');

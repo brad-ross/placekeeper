@@ -106,6 +106,16 @@ describe('CommentComposer contextual authoring contract', () => {
     expect(html.match(/Persistent draft/g)).toHaveLength(1);
   });
 
+  it('defers an explicitly placement-dependent composer while Main remains visible', () => {
+    const pending = renderComposer({ surfaceRef: vi.fn(), deferUntilPlacement: true });
+    const main = renderComposer({ surfaceRef: vi.fn() });
+
+    expect(pending).toContain('data-composer-placement="pending"');
+    expect(pending).toContain('visibility:hidden');
+    expect(main).not.toContain('data-composer-placement="pending"');
+    expect(main).not.toContain('visibility:hidden');
+  });
+
   it('keeps a recoverable draft mounted while an invalid target disables Save', () => {
     const html = renderComposer({ initialValue: 'Recover this draft', saveDisabled: true });
 
