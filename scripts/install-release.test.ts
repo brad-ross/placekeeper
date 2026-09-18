@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { gzipSync } from "node:zlib";
 import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { releaseIdentity, renderBootstrap, SOURCE_INSTALL_COMMAND } from "./package-source-release.js";
 
 const loader = await readFile(new URL("./install-latest.sh", import.meta.url), "utf8");
@@ -100,7 +101,7 @@ source="$TEST_ARCHIVE"
 case "$*" in *releases/latest/download*) source="$TEST_BOOTSTRAP";; esac
 while [ "$#" -gt 0 ]; do if [ "$1" = -o ]; then shift; cp "$source" "$1"; fi; shift; done
 `, { mode: 0o755 });
-  const result = spawnSync("/bin/sh", ["-c", SOURCE_INSTALL_COMMAND], { env: { ...test.env, PATH: `${join(test.dir, "bin")}:/usr/bin:/bin`, TEST_LOADER: new URL("./install-latest.sh", import.meta.url).pathname, TEST_BOOTSTRAP: join(test.dir, "bootstrap") }, encoding: "utf8" });
+  const result = spawnSync("/bin/sh", ["-c", SOURCE_INSTALL_COMMAND], { env: { ...test.env, PATH: `${join(test.dir, "bin")}:/usr/bin:/bin`, TEST_LOADER: fileURLToPath(new URL("./install-latest.sh", import.meta.url)), TEST_BOOTSTRAP: join(test.dir, "bootstrap") }, encoding: "utf8" });
   expect(result.status, result.stderr).toBe(0);
   const requests = await readFile(test.env.TEST_REQUESTS, "utf8");
   expect(requests.match(/releases\/latest\/download/g)).toHaveLength(1);
