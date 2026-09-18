@@ -1,7 +1,7 @@
 ---
 title: "Full Annotation Reader preserves Annotation Tray context"
 date: "2026-08-24"
-last_updated: 2026-09-10
+last_updated: 2026-09-18
 category: "design-patterns"
 module: "Full Annotation Reader"
 problem_type: "design_pattern"
@@ -60,6 +60,22 @@ Origin determines restoration. A list-origin reader returns to list context; a p
 With the workspace closed, selected annotation state retains the compact popup independently of hover correspondence (`apps/web/src/app/ReviewShell.tsx`). The popup distinguishes selected and preview state and exposes owned actions accordingly (`apps/web/src/review/AnnotationPeek.tsx`). Hovering is not equivalent to selecting or expanding.
 
 A PDF mark activation cancels older restoration and reader-resume work, clears the current reader, and changes selection. When no workspace is open it returns a compact peek, even if the annotation previously overflowed; expansion requires the explicit Read full action. The workspace-open branch may still disclose a measured long annotation in the list (`apps/web/src/app/ReviewShell.tsx`). This distinction prevents cached overflow knowledge from silently reopening the full popup after dismissal.
+
+### Keep shared annotation identity separate from surface ownership
+
+[PR #121](https://github.com/brad-ross/placekeeper/pull/121), open as of 2026-09-18, extends compact inspection to Reference Tabs. Main and References render the same canonical annotation, but their interaction evidence is not interchangeable. A PDF annotation surface identifies Main or a particular Reference Tab within a Document Generation (`apps/web/src/pdf/annotation-surface.ts`). Item identity answers which annotation is shown; surface identity answers which rendering produced the interaction.
+
+A newer Reference hover must take precedence over lingering Main keyboard focus, even when both identify the same item. The mark event supplies a preferred correspondence owner. The Reference inspection retains that owner while the pointer crosses from the mark into its card; raw mark hover can already be false during this handoff. Clearing correspondence immediately on mark leave can expose Main's older focus and flash its popup. Keeping correspondence after the inspection disappears instead strands the mark's border (`apps/web/src/app/ProductionReviewApp.tsx`, `ownedAnnotationCorrespondence` and `referenceInspectionCorrespondenceAuthority`).
+
+Dismissal and replacement therefore release only correspondence still owned by the outgoing inspection's item and surface. They preserve a newer published Main interaction and may restore current row correspondence. Replacing an owned inspection with a source inspection requires the same release: the source successor cannot later claim the old owned mark and clean it up. Pinning updates both selected state and owned correspondence, so card persistence and mark styling agree (`apps/web/src/app/ProductionReviewApp.tsx`, `dismissReferenceInspection`, `replaceReferenceInspection`, and `onReferenceInspectionSelect`). A document replacement clears the old transient inspection and correspondence inputs rather than restoring an old-document fallback.
+
+Reference previews and selected cards share Main's compact presentation. Card-body clicks pin a preview; action controls keep their own commands. Long inline content scrolls within the card rather than requiring a Reference-specific header or Back control. Read-only source cards may still expose navigation actions, including Open in References and Back to annotation in PDF when source return is available; navigation is not editing (`apps/web/src/review/AnnotationPeek.tsx`, `apps/web/src/app/ReviewShell.tsx`). The measured-disclosure rules above still apply to presentations that use the Full Annotation Reader.
+
+### Diagnose correspondence from its owners, not its border
+
+An outline alone does not establish stale PDF hover. Annotation-row hover and focus also publish correspondence (`apps/web/src/review/AnnotationList.tsx`). During PR #121 validation, a WebKit test moved keyboard focus to the Reference tab and expected the outline to vanish, but the pointer still hovered the annotation row. A trace showed the correct active element, no inspection, and a live row matching `:hover`. Browser-specific focus cleanup was the wrong fix and was removed. The test now moves the pointer to the tab before checking focus-away cleanup.
+
+Preserve the full sequence in browser regressions: Reference hover with Main still focused; mark-to-card travel; unpinned dismissal; pinning and pointer leave; Escape with restored mark focus; focus departure with no row hover; and owned-to-source replacement. Inspect raw mark hover, published correspondence, selection, and actual pointer target separately. Painted marks are not necessarily pointer targets, and a bounding-box center can be clipped by a short Reference viewport. Scroll the mark into view and verify a noninteractive PDF hit point before attributing a missing preview to state handling (`test/acceptance/reference-annotations.spec.ts`). The final focused sequences passed Chromium and WebKit; unit checks cover dismissal preserving a newer Main owner.
 
 ### Keep detail disclosure separate from source navigation
 
