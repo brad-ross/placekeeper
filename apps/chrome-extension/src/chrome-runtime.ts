@@ -30,7 +30,6 @@ const REFRESH_POLL_MS = 1_000;
 const REFRESH_RETRY_MIN_MS = 250;
 const REFRESH_RETRY_MAX_MS = 4_000;
 const OWNER_CLAIM = /^[A-Za-z0-9_-]{16,128}$/u;
-const OWNER_HISTORY_KEY = "__placekeeperChromeOwnerClaim";
 const TERMINAL_REFRESH_FAILURES = new Set([
   "protocol-mismatch",
   "update-required",
@@ -109,60 +108,40 @@ export interface NativeEmbeddedReviewOptions {
 
 interface ChromeInteractionOwnerClaimEnvironment {
   readonly tabId: number;
-  navigationType(): string | undefined;
-  readHistoryState(): unknown;
-  replaceHistoryState(state: unknown, url: string): void;
+  readonly originalUrl: string;
   readSession(key: string): string | null;
   writeSession(key: string, value: string): void;
   createSecret(): string;
-  createClaimId(): string;
 }
 
-function objectRecord(value: unknown): Record<string, unknown> {
-  return record(value) ? value : {};
-}
-
-/** Binds recovery authority to one Chrome tab and one history entry. The
- * history claim is public routing metadata; the 256-bit secret stays in
- * sessionStorage and crosses only the extension/native channel. */
+/** Chrome recreates its MIME frame on reload with empty history.state and a
+ * "navigate" timing entry, but retains sessionStorage. Bind the secret to the
+ * trusted tab and source instead; the service also scopes it to the recovered
+ * review session and fences old connection incarnations. Never write handler
+ * history: Chrome 153 can crash on a same-URL replaceState. */
 export function createChromeInteractionOwnerClaimStore(
   environment: ChromeInteractionOwnerClaimEnvironment,
 ): { ownerSecret(): string } {
+  if (!Number.isSafeInteger(environment.tabId) || environment.tabId < 0) {
+    throw new Error("Invalid Chrome interaction owner tab.");
+  }
+  const source = new URL(environment.originalUrl);
+  source.hash = "";
+  const storageKey = `placekeeper.chrome-interaction-owner.v2.${environment.tabId}.${sha256Hex(source.href)}`;
   let claimed: string | undefined;
   return {
     ownerSecret() {
       if (claimed !== undefined) return claimed;
-      const historyState = objectRecord(environment.readHistoryState());
-      const existing = objectRecord(historyState[OWNER_HISTORY_KEY]);
-      const navigationType = environment.navigationType();
-      const recoverableNavigation = navigationType === "reload" || navigationType === "back_forward";
-      const existingClaim = existing.tabId === environment.tabId &&
-        typeof existing.claimId === "string" && OWNER_CLAIM.test(existing.claimId)
-        ? existing.claimId : undefined;
-      const recovered = recoverableNavigation && existingClaim !== undefined
-        ? environment.readSession(`placekeeper.chrome-interaction-owner.${environment.tabId}.${existingClaim}`)
-        : null;
+      const recovered = environment.readSession(storageKey);
       if (isChromeInteractionOwnerSecret(recovered)) {
         claimed = recovered;
         return claimed;
       }
-      const claimId = environment.createClaimId();
       const secret = environment.createSecret();
-      if (!OWNER_CLAIM.test(claimId) || !isChromeInteractionOwnerSecret(secret)) {
+      if (!isChromeInteractionOwnerSecret(secret)) {
         throw new Error("Invalid Chrome interaction owner identity.");
       }
-      // Chrome 153's MIME handler counts a same-URL replaceState as a second
-      // completed extension navigation and hits a browser-process CHECK.
-      // A nonempty fragment avoids that exact handler-URL match while keeping
-      // the claim on this history entry and the outer PDF URL unchanged.
-      environment.replaceHistoryState({
-        ...historyState,
-        [OWNER_HISTORY_KEY]: { tabId: environment.tabId, claimId },
-      }, "#placekeeper-review");
-      environment.writeSession(
-        `placekeeper.chrome-interaction-owner.${environment.tabId}.${claimId}`,
-        secret,
-      );
+      environment.writeSession(storageKey, secret);
       claimed = secret;
       return secret;
     },

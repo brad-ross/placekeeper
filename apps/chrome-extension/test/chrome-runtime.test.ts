@@ -324,55 +324,82 @@ function opener(port: NativePort, overrides: Partial<Parameters<typeof createNat
 }
 
 describe("embedded Chrome review runtime", () => {
-  it("keeps one 256-bit owner secret only for the same tab navigation entry", () => {
+  it("recovers the same tab and source when Chrome recreates the MIME frame as a new navigation", () => {
     const storage = new Map<string, string>();
-    let historyState: unknown = null;
-    let navigationType = "navigate";
     let next = 0;
-    const replaceHistoryState = vi.fn((state: unknown, url?: string) => {
-      // Chrome's MIME handler treats a same-URL History API update as a
-      // second completed handler navigation and terminates the browser.
-      if (!url?.startsWith("#") || url.length === 1) {
-        throw new Error("MIME handler history writes need a nonempty fragment");
-      }
-      historyState = state;
-    });
-    const environment = (tabId: number) => ({
-      tabId,
-      navigationType: () => navigationType,
-      readHistoryState: () => historyState,
+    const replaceHistoryState = vi.fn();
+    const environment = {
+      tabId: 41,
+      originalUrl: "https://papers.example.test/Review.pdf?private=source",
+      // These are Chrome 153's observed values on BOTH initial open and reload.
+      navigationType: () => "navigate",
+      readHistoryState: () => null,
       replaceHistoryState,
       readSession: (key: string) => storage.get(key) ?? null,
       writeSession: (key: string, value: string) => { storage.set(key, value); },
       createSecret: () => `${String(++next).padStart(2, "0")}${"s".repeat(41)}`,
       createClaimId: () => `claim_${String(++next).padStart(16, "0")}`,
-    });
+    };
+    const first = createChromeInteractionOwnerClaimStore(environment).ownerSecret();
+    const reloaded = createChromeInteractionOwnerClaimStore(environment).ownerSecret();
+    expect(reloaded).toBe(first);
+    expect(replaceHistoryState).not.toHaveBeenCalled();
+    expect([...storage.keys()].join()).not.toContain("private=source");
+    expect(storage.size).toBe(1);
+  });
 
+  it("isolates owner secrets by tab and source while ignoring PDF page fragments", () => {
+    const storage = new Map<string, string>();
+    let next = 0;
+    const environment = (tabId: number, originalUrl = "https://papers.example.test/Review.pdf") => ({
+      tabId,
+      originalUrl,
+      readSession: (key: string) => storage.get(key) ?? null,
+      writeSession: (key: string, value: string) => { storage.set(key, value); },
+      createSecret: () => `${String(++next).padStart(2, "0")}${"s".repeat(41)}`,
+    });
     const firstDocument = createChromeInteractionOwnerClaimStore(environment(41));
     const first = firstDocument.ownerSecret();
     expect(first).toMatch(/^[A-Za-z0-9_-]{43}$/u);
     expect(firstDocument.ownerSecret()).toBe(first);
-    expect(replaceHistoryState).toHaveBeenCalledTimes(1);
-
-    navigationType = "reload";
-    const reloaded = createChromeInteractionOwnerClaimStore(environment(41));
-    expect(reloaded.ownerSecret()).toBe(first);
-    navigationType = "back_forward";
     expect(createChromeInteractionOwnerClaimStore(environment(41)).ownerSecret()).toBe(first);
+    expect(createChromeInteractionOwnerClaimStore(environment(41,
+      "https://papers.example.test/Review.pdf#page=2")).ownerSecret()).toBe(first);
 
-    const duplicatedHistory = historyState;
+    // Chrome can copy sessionStorage into a duplicated tab. Its trusted tab ID
+    // must prevent that tab from recovering the original's authoring authority.
     const duplicatedStorage = new Map(storage);
     const duplicate = createChromeInteractionOwnerClaimStore({
       ...environment(99),
-      readHistoryState: () => duplicatedHistory,
       readSession: (key) => duplicatedStorage.get(key) ?? null,
       writeSession: (key, value) => { duplicatedStorage.set(key, value); },
     });
     expect(duplicate.ownerSecret()).not.toBe(first);
+    expect(createChromeInteractionOwnerClaimStore(environment(41,
+      "https://papers.example.test/Other.pdf")).ownerSecret()).not.toBe(first);
+    expect(createChromeInteractionOwnerClaimStore(environment(41,
+      "https://papers.example.test/Review.pdf?revision=2")).ownerSecret()).not.toBe(first);
+    expect(createChromeInteractionOwnerClaimStore(environment(41)).ownerSecret()).toBe(first);
 
-    navigationType = "navigate";
-    historyState = null;
+    storage.clear();
     expect(createChromeInteractionOwnerClaimStore(environment(41)).ownerSecret()).not.toBe(first);
+  });
+
+  it("replaces corrupt stored owner proofs and rejects invalid new proofs", () => {
+    const writeSession = vi.fn();
+    const environment = {
+      tabId: 41,
+      originalUrl: "file:///tmp/review.pdf",
+      readSession: () => "invalid-secret",
+      writeSession,
+      createSecret: () => "s".repeat(43),
+    };
+    expect(createChromeInteractionOwnerClaimStore(environment).ownerSecret()).toBe("s".repeat(43));
+    expect(writeSession).toHaveBeenCalledTimes(1);
+    expect(() => createChromeInteractionOwnerClaimStore({ ...environment, tabId: -1 })).toThrow();
+    expect(() => createChromeInteractionOwnerClaimStore({
+      ...environment, createSecret: () => "invalid-secret",
+    }).ownerSecret()).toThrow("Invalid Chrome interaction owner identity");
   });
 
   it("negotiates tab owner proof after a field-free v2 hello", async () => {
