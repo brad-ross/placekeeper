@@ -71,6 +71,7 @@ describe("Chrome extension static contract", () => {
     const handlerEntry = await readFile(resolve(extensionRoot, "src/handler-entry.ts"), "utf8");
     expect(handlerEntry).not.toContain("chrome.tabs.update");
     expect(handlerEntry).not.toContain("window.location.replace");
+    expect(handlerEntry).toContain('history.replaceState(state, "", url)');
   });
 
   it("mounts the packaged shared client directly in the PDF handler", async () => {

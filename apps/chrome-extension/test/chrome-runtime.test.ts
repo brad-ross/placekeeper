@@ -329,11 +329,19 @@ describe("embedded Chrome review runtime", () => {
     let historyState: unknown = null;
     let navigationType = "navigate";
     let next = 0;
+    const replaceHistoryState = vi.fn((state: unknown, url?: string) => {
+      // Chrome's MIME handler treats a same-URL History API update as a
+      // second completed handler navigation and terminates the browser.
+      if (!url?.startsWith("#") || url.length === 1) {
+        throw new Error("MIME handler history writes need a nonempty fragment");
+      }
+      historyState = state;
+    });
     const environment = (tabId: number) => ({
       tabId,
       navigationType: () => navigationType,
       readHistoryState: () => historyState,
-      replaceHistoryState: (state: unknown) => { historyState = state; },
+      replaceHistoryState,
       readSession: (key: string) => storage.get(key) ?? null,
       writeSession: (key: string, value: string) => { storage.set(key, value); },
       createSecret: () => `${String(++next).padStart(2, "0")}${"s".repeat(41)}`,
@@ -344,6 +352,7 @@ describe("embedded Chrome review runtime", () => {
     const first = firstDocument.ownerSecret();
     expect(first).toMatch(/^[A-Za-z0-9_-]{43}$/u);
     expect(firstDocument.ownerSecret()).toBe(first);
+    expect(replaceHistoryState).toHaveBeenCalledTimes(1);
 
     navigationType = "reload";
     const reloaded = createChromeInteractionOwnerClaimStore(environment(41));

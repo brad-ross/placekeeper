@@ -132,8 +132,8 @@ function interactionOwnerSecret(tabId: number): string {
       readHistoryState: () => {
         try { return history.state; } catch { return null; }
       },
-      replaceHistoryState: (state) => {
-        try { history.replaceState(state, ""); } catch { /* Same-document recovery stays in memory. */ }
+      replaceHistoryState: (state, url) => {
+        try { history.replaceState(state, "", url); } catch { /* Same-document recovery stays in memory. */ }
       },
       readSession: (key) => {
         try { return sessionStorage.getItem(key); } catch { return null; }

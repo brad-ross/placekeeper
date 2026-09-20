@@ -111,7 +111,7 @@ interface ChromeInteractionOwnerClaimEnvironment {
   readonly tabId: number;
   navigationType(): string | undefined;
   readHistoryState(): unknown;
-  replaceHistoryState(state: unknown): void;
+  replaceHistoryState(state: unknown, url: string): void;
   readSession(key: string): string | null;
   writeSession(key: string, value: string): void;
   createSecret(): string;
@@ -151,10 +151,14 @@ export function createChromeInteractionOwnerClaimStore(
       if (!OWNER_CLAIM.test(claimId) || !isChromeInteractionOwnerSecret(secret)) {
         throw new Error("Invalid Chrome interaction owner identity.");
       }
+      // Chrome 153's MIME handler counts a same-URL replaceState as a second
+      // completed extension navigation and hits a browser-process CHECK.
+      // A nonempty fragment avoids that exact handler-URL match while keeping
+      // the claim on this history entry and the outer PDF URL unchanged.
       environment.replaceHistoryState({
         ...historyState,
         [OWNER_HISTORY_KEY]: { tabId: environment.tabId, claimId },
-      });
+      }, "#placekeeper-review");
       environment.writeSession(
         `placekeeper.chrome-interaction-owner.${environment.tabId}.${claimId}`,
         secret,
