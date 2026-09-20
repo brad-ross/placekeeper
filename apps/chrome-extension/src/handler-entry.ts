@@ -123,18 +123,12 @@ function randomBase64Url(bytes: number): string {
   return bytesToBase64(value).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/u, "");
 }
 
-function interactionOwnerSecret(tabId: number): string {
+function interactionOwnerSecret(tabId: number, originalUrl: string): string {
   let claims = ownerClaims.get(tabId);
   if (claims === undefined) {
     claims = createChromeInteractionOwnerClaimStore({
       tabId,
-      navigationType: () => (performance.getEntriesByType("navigation")[0] as { readonly type?: string } | undefined)?.type,
-      readHistoryState: () => {
-        try { return history.state; } catch { return null; }
-      },
-      replaceHistoryState: (state) => {
-        try { history.replaceState(state, ""); } catch { /* Same-document recovery stays in memory. */ }
-      },
+      originalUrl,
       readSession: (key) => {
         try { return sessionStorage.getItem(key); } catch { return null; }
       },
@@ -142,7 +136,6 @@ function interactionOwnerSecret(tabId: number): string {
         try { sessionStorage.setItem(key, value); } catch { /* Same-document recovery stays in memory. */ }
       },
       createSecret: () => randomBase64Url(32),
-      createClaimId: () => randomBase64Url(18),
     });
     ownerClaims.set(tabId, claims);
   }
@@ -206,7 +199,7 @@ const openNativeReview = createNativeEmbeddedReview({
     if (!("tabId" in info) || !Number.isSafeInteger(info.tabId) || Number(info.tabId) < 0) {
       throw new Error("Chrome did not provide a trusted tab identity.");
     }
-    return interactionOwnerSecret(Number(info.tabId));
+    return interactionOwnerSecret(Number(info.tabId), info.originalUrl);
   },
   chooseRecovery: chooseProtectedRecovery,
 });
