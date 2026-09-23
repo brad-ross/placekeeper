@@ -142,6 +142,8 @@ function LinkActionItem({
   return (
     <ReviewTooltipButton
       label={label}
+      // The label is visible; a duplicate tooltip would cover the snippet.
+      tooltip={false}
       ref={itemRef}
       type="button"
       role="menuitem"

@@ -50,15 +50,19 @@ test('PDF link pointer opening does not impersonate a tooltip hover', async ({ p
   await expect(action).toBeFocused();
   await page.waitForTimeout(700);
   await expect(page.getByRole('tooltip')).toHaveCount(0);
+  // Link-menu actions carry visible labels (R4), so neither hover nor keyboard
+  // focus adds a duplicate tooltip over the destination snippet.
+  await expect(action).toHaveText('Open in References');
   await action.hover();
-  await expect(page.getByRole('tooltip', { name: 'Open in References', exact: true })).toBeVisible();
+  await page.waitForTimeout(700);
+  await expect(page.getByRole('tooltip')).toHaveCount(0);
   await page.mouse.move(0, 0);
   await expect(page.getByRole('tooltip')).toHaveCount(0);
   await action.press('Escape');
   await expect(link).toBeFocused();
   await link.press('Enter');
   await expect(action).toBeFocused();
-  await expect(page.getByRole('tooltip', { name: 'Open in References', exact: true })).toBeVisible();
+  await expect(page.getByRole('tooltip')).toHaveCount(0);
 });
 
 test('search has a borderless input and equally inset clear action', async ({ page }) => {
