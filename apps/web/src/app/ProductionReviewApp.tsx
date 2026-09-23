@@ -2190,6 +2190,13 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   const onViewerFramingInitialized = useCallback((controls: ViewerFramingControls) => {
     setViewerFraming(controls);
   }, []);
+  const currentDestinationBands = destinationBands !== null
+    && destinationBands.documentGeneration === navigationState.documentGeneration
+    ? destinationBands
+    : null;
+  const activeReferenceDestinationBand: DestinationBand | null = navigationState.activeTabIdentity === null
+    ? null
+    : currentDestinationBands?.references.get(navigationState.activeTabIdentity) ?? null;
   const viewer = props.viewer ?? (
     <App
       embeddedInReviewShell
@@ -2221,6 +2228,8 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       {...(props.onViewerError === undefined ? {} : { onViewerError: props.onViewerError })}
       onViewerFramingInitialized={onViewerFramingInitialized}
       searchResults={searchResults}
+      mainDestinationBand={currentDestinationBands?.main ?? null}
+      referenceDestinationBand={activeReferenceDestinationBand}
     />
   );
 
@@ -2457,13 +2466,6 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     navigationState,
     referenceReturnState,
   );
-  const currentDestinationBands = destinationBands !== null
-    && destinationBands.documentGeneration === navigationState.documentGeneration
-    ? destinationBands
-    : null;
-  const activeReferenceDestinationBand: DestinationBand | null = navigationState.activeTabIdentity === null
-    ? null
-    : currentDestinationBands?.references.get(navigationState.activeTabIdentity) ?? null;
   const anyTrayOpen = effectiveReferenceLayout.kind === 'narrow-unified'
     ? effectiveReferenceLayout.open
     : effectiveReferenceLayout.rightWorkspaceOpen || effectiveReferenceLayout.bottomReferencesOpen;

@@ -188,6 +188,19 @@
   background: color-mix(in srgb, var(--review-warning) 42%, transparent);
 }
 
+/* Transient, inert Destination Band (KTD8); never an annotation. */
+[data-pdf-destination-band] {
+  border-radius: 2px;
+  background: var(--review-destination-band);
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+[data-pdf-destination-band-edge="true"] {
+  box-shadow: inset 2px 0 0 var(--review-destination-band-edge);
+}
+
 @keyframes review-spin {
   to { transform: rotate(1turn); }
 }

@@ -1,4 +1,10 @@
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
+
+import { createReviewState, type ReviewState } from '../../../packages/core/src/review-model.js';
+import { ReviewShell } from '../src/app/ReviewShell.js';
+import type { DestinationBand } from '../src/review/navigation-coordinator.js';
 
 import {
   ExistingAnnotationDiscoveryAuthority,
@@ -105,5 +111,54 @@ describe('existing annotation discovery state', () => {
       generation: populated.generation,
       items: [{ id: 'kept' }],
     });
+  });
+});
+
+describe('Destination Bands and annotation projections', () => {
+  const band: DestinationBand = {
+    documentGeneration: 1,
+    targetIdentity: 'band-target-p14',
+    pageIndex: 13,
+    rects: [{ origin: { x: 72, y: 100 }, size: { width: 400, height: 12 } }],
+  };
+  const reviewState: ReviewState = {
+    ...createReviewState({
+      sessionId: 'band-session',
+      source: { fileId: 'paper', digest: 'b'.repeat(64), byteLength: 10 },
+    }),
+    items: [{
+      id: 'note-1', kind: 'pageNote', pageIndex: 2,
+      createdAt: '2026-09-23T00:00:00.000Z', updatedAt: '2026-09-23T00:00:00.000Z',
+      payload: { comment: 'Reader note' },
+    }],
+  };
+  const inventory = inventoryExistingAnnotations([source('reader-highlight'), link('citation-link')]);
+
+  function annotationsList(bands: boolean): string {
+    return renderToStaticMarkup(createElement(ReviewShell, {
+      state: reviewState,
+      save: {},
+      selection: { selectionUpdate: { kind: 'cleared', generation: 0 } },
+      authoring: { onCommand: async () => reviewState },
+      viewer: {},
+      existingAnnotations: { status: 'ready', generation: 1, items: inventory },
+      workspace: {
+        listOpen: true,
+        ...(bands ? {
+          mainDestinationBand: band,
+          referenceDestinationBands: new Map([['tab-1', band]]),
+          activeReferenceDestinationBand: band,
+        } : {}),
+      },
+    }, createElement('div', { 'data-annotation-surface': 'main' }, 'Main document')));
+  }
+
+  it('Covers AE6. a present band adds nothing to the existing-annotation inventory or the Annotations list', () => {
+    expect(inventory.map(({ id }) => id)).toEqual(['reader-highlight']);
+    const withBands = annotationsList(true);
+    expect(withBands).toContain('Reader note');
+    expect(withBands).not.toContain('band-target-p14');
+    expect(withBands).not.toContain('data-pdf-destination-band');
+    expect(withBands).toBe(annotationsList(false));
   });
 });

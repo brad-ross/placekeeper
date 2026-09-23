@@ -13,6 +13,9 @@
   --review-border-strong: #c7c7c7;
   --review-selection-bg: #fff;
   --review-pdf-selection-bg: #cfdeea;
+  /* Destination Band: translucent green, distinct from highlight gold and selection blue-gray. */
+  --review-destination-band: rgb(46 160 90 / 18%);
+  --review-destination-band-edge: rgb(31 122 67);
   --review-selection-ink: #333;
   --review-focus: #496789;
   --review-success: #2d684d;

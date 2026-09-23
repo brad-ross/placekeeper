@@ -1,9 +1,15 @@
 import type { DocumentState } from '@embedpdf/core';
 import { useRegistry } from '@embedpdf/core/react';
-import { transformSize, type PdfEngine } from '@embedpdf/models';
+import {
+  transformSize,
+  type PdfEngine,
+  type PdfPageObject,
+  type Rotation,
+} from '@embedpdf/models';
 import { AnnotationLayer } from '@embedpdf/plugin-annotation/react';
 import { PagePointerProvider } from '@embedpdf/plugin-interaction-manager/react';
 import { RenderLayer } from '@embedpdf/plugin-render/react';
+import type { PageLayout } from '@embedpdf/plugin-scroll';
 import { Scroller } from '@embedpdf/plugin-scroll/react';
 import { SelectionLayer } from '@embedpdf/plugin-selection/react';
 import { Viewport } from '@embedpdf/plugin-viewport/react';
@@ -43,6 +49,72 @@ import type { ViewerPagePoint } from './viewer-interaction-events.js';
 import type { AnnotationRenderingState } from './PdfAnnotationLayers.js';
 import { PdfAnnotationLayers } from './PdfAnnotationLayers.js';
 import type { PageContextMenuRequest } from './PdfWorkspace.js';
+import type { DestinationBand } from '../review/navigation-coordinator.js';
+
+/** Fill token for the transient Destination Band; the link-menu snippet reuses it. */
+export const DESTINATION_BAND_TOKEN = '--review-destination-band';
+/** Darker same-hue edge token drawn on the band's first rect. */
+export const DESTINATION_BAND_EDGE_TOKEN = '--review-destination-band-edge';
+
+export interface DestinationBandLayerProps {
+  readonly band: DestinationBand | null | undefined;
+  readonly page: PdfPageObject | undefined;
+  readonly layout: PageLayout;
+  readonly documentRotation: Rotation;
+  readonly documentGeneration: number;
+}
+
+/**
+ * Inert overlay marking a followed link's destination extent (R10–R12, KTD8).
+ * A sibling of the search-highlight layer: outside annotation layers, never a
+ * ReviewItem, and carrying no annotation identity. Band rects are crop-relative
+ * page device space, like link rects, so they position without crop offsets.
+ */
+export function DestinationBandLayer({
+  band,
+  page,
+  layout,
+  documentRotation,
+  documentGeneration,
+}: DestinationBandLayerProps) {
+  if (
+    band == null
+    || page === undefined
+    || band.pageIndex !== layout.pageIndex
+    || band.documentGeneration !== documentGeneration
+    || band.rects.length === 0
+  ) return null;
+  return (
+    <div
+      inert
+      aria-hidden="true"
+      data-pdf-destination-band-layer
+      data-destination-target={band.targetIdentity}
+      style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}
+    >
+      {band.rects.map((rect, index) => {
+        const positioned = positionOwnedRect(page, layout, documentRotation, {
+          x: rect.origin.x,
+          y: rect.origin.y,
+          width: rect.size.width,
+          height: rect.size.height,
+        });
+        return <span
+          key={index}
+          data-pdf-destination-band=""
+          {...(index === 0 ? { 'data-pdf-destination-band-edge': 'true' } : {})}
+          style={{
+            position: 'absolute',
+            left: positioned.origin.x,
+            top: positioned.origin.y,
+            width: positioned.size.width,
+            height: positioned.size.height,
+          }}
+        />;
+      })}
+    </div>
+  );
+}
 
 const PDF_TEXT_SELECTION_STYLE = {
   background: 'var(--review-pdf-selection-bg)',
@@ -100,6 +172,8 @@ export interface ReferencePdfViewportProps {
   readonly onScrollIntent?: (position: ReferenceScrollPosition) => void;
   readonly onViewportElement?: (element: HTMLDivElement | null) => void;
   readonly searchResultsByPage?: ReadonlyMap<number, readonly PdfSearchResult[]>;
+  /** The active References tab's Destination Band, passed like search results. */
+  readonly destinationBand?: DestinationBand | null;
   readonly annotationsByPage?: ReadonlyMap<number, readonly ReviewAnnotation[]>;
   readonly geometryByPage?: ReadonlyMap<number, readonly OwnedMarkGeometry[]>;
   readonly authoringPreviewIds?: ReadonlySet<string>;
@@ -126,6 +200,7 @@ export function ReferencePdfViewport({
   onScrollIntent,
   onViewportElement,
   searchResultsByPage = new Map(),
+  destinationBand = null,
   annotationsByPage = new Map(),
   geometryByPage = new Map(),
   authoringPreviewIds = new Set(),
@@ -492,6 +567,13 @@ export function ReferencePdfViewport({
                     })
                   ))}
                 </div>
+                <DestinationBandLayer
+                  band={destinationBand}
+                  page={documentState.document?.pages[layout.pageIndex]}
+                  layout={layout}
+                  documentRotation={documentState.rotation}
+                  documentGeneration={documentGeneration}
+                />
                 <PdfAnnotationLayers
                   documentId={documentId}
                   engine={engine}

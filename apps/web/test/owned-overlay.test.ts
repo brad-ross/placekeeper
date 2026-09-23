@@ -9,6 +9,7 @@ import {
   OwnedNativeAnnotationGeometryTargets,
 } from '../src/pdf/PdfAnnotationLayers.js';
 import { sourceReaderMarkIdentityAttributes } from '../src/pdf/SourceAnnotationMark.js';
+import { DestinationBandLayer } from '../src/pdf/ReferencePdfViewport.js';
 
 import { textCenterFraction, textMarkGeometry } from '../src/pdf/text-mark-geometry.js';
 
@@ -104,6 +105,30 @@ describe("owned annotation overlay geometry", () => {
       origin: { x: 1480, y: 20 },
       size: { width: 80, height: 60 },
     });
+  });
+
+  it('positions Destination Band rects like link rects: crop-relative, rotated and zoomed once', () => {
+    const page = {
+      index: 0, objectNumber: 1, size: { width: 600, height: 800 }, rotation: Rotation.Degree90,
+      boxes: {
+        media: { left: 0, top: 0, right: 700, bottom: 1000 },
+        crop: { left: 100, top: 200, right: 700, bottom: 1000 },
+      },
+    };
+    const layout = {
+      pageIndex: 0, pageNumber: 1, x: 0, y: 0,
+      width: 1200, height: 1600, rotatedWidth: 1600, rotatedHeight: 1200, elevated: false,
+    };
+    const html = renderToStaticMarkup(createElement(DestinationBandLayer, {
+      band: {
+        documentGeneration: 1, targetIdentity: 't', pageIndex: 0,
+        rects: [{ origin: { x: 10, y: 20 }, size: { width: 30, height: 40 } }],
+      },
+      page, layout, documentRotation: Rotation.Degree0, documentGeneration: 1,
+    }));
+    const expected = positionOwnedRect(page, layout, Rotation.Degree0, { x: 10, y: 20, width: 30, height: 40 });
+    expect(expected).toEqual({ origin: { x: 1480, y: 20 }, size: { width: 80, height: 60 } });
+    expect(html).toContain('left:1480px;top:20px;width:80px;height:60px');
   });
 
   it("combines page and document rotation", () => {

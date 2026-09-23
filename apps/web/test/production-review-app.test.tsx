@@ -40,7 +40,8 @@ import {
   viewerAssetUrlsEqual,
   viewerResourcePoliciesEqual,
 } from "../src/host/viewer-resource-equivalence.js";
-import { visibleCodexContext, updateProductionScope } from "../src/host/context-projection.js";
+import { reviewStateRequestKey, visibleCodexContext, updateProductionScope } from "../src/host/context-projection.js";
+import type { DestinationBandPresentationState } from "../src/review/navigation-coordinator.js";
 import { SaveDestinationDialog } from "../src/save/SaveDestinationDialog.js";
 import {
   canDeriveAnnotationOutlineLabels,
@@ -360,6 +361,36 @@ describe('scope polling identity', () => {
         const next = { ...scope, codexContext: changedContext };
         expect(updateProductionScope(current, next)).toBe(next);
       }
+    }
+  });
+});
+
+describe("Destination Band projection boundary", () => {
+  it("Covers AE6. keeps bands out of the review state that feeds Codex context and export", () => {
+    const state = createReviewState({
+      sessionId: "00000000-0000-4000-8000-0000000000b1",
+      source: { fileId: "00000000-0000-4000-8000-0000000000b2", digest: "e".repeat(64), byteLength: 1 },
+    });
+    const bands: DestinationBandPresentationState = {
+      documentGeneration: state.workflow.documentGeneration,
+      main: {
+        documentGeneration: state.workflow.documentGeneration,
+        targetIdentity: "band-target-main",
+        pageIndex: 13,
+        rects: [{ origin: { x: 72, y: 100 }, size: { width: 400, height: 12 } }],
+      },
+      references: new Map(),
+    };
+    // Bands live beside navigation presentation, never inside ReviewState.
+    expect(Object.keys(state).some((key) => /band|destination|navigation/iu.test(key))).toBe(false);
+    const projections = [
+      reviewStateRequestKey(state),
+      JSON.stringify(createReviewStateSummary(state)),
+      JSON.stringify(state),
+    ];
+    for (const projection of projections) {
+      expect(projection).not.toContain(bands.main!.targetIdentity);
+      expect(projection).not.toMatch(/destination.?band/iu);
     }
   });
 });

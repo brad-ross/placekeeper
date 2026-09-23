@@ -31,6 +31,7 @@ import {
   type ViewerResourcePolicy,
 } from '../pdf/embedpdf-viewer.js';
 import { PdfWorkspace, type PageContextMenuRequest } from '../pdf/PdfWorkspace.js';
+import type { DestinationBand } from '../review/navigation-coordinator.js';
 import {
   PdfOutlineDiscoveryAuthority,
   readPdfOutline,
@@ -298,6 +299,10 @@ export interface AppProps {
   onMainDocumentReady?: (engine: PdfEngine, document: PdfDocumentObject) => void;
   onViewerError?: (error: Error) => void;
   searchResults?: readonly PdfSearchResult[];
+  /** Transient main-reader Destination Band (R12); never part of review state. */
+  mainDestinationBand?: DestinationBand | null;
+  /** The active References tab's Destination Band (R10). */
+  referenceDestinationBand?: DestinationBand | null;
 }
 
 export class ViewerInitializationAuthority {
@@ -353,6 +358,8 @@ export function App({
   onMainDocumentReady,
   onViewerError,
   searchResults = [],
+  mainDestinationBand = null,
+  referenceDestinationBand = null,
 }: AppProps) {
   const [sourceAnnotations, setSourceAnnotations] = useState<readonly ExistingAnnotation[]>([]);
   const [inventoryState, setInventoryState] = useState<ExistingAnnotationsDiscovery>({
@@ -1581,6 +1588,8 @@ export function App({
       documentLabel={documentTitle}
       onInitialized={initializeViewer}
       searchResults={searchResults}
+      mainDestinationBand={mainDestinationBand}
+      referenceDestinationBand={referenceDestinationBand}
       ownedAnnotations={ownedAnnotations}
       sourceNativeAnnotations={sourceNativeAnnotations}
       sourceAnnotations={sourceAnnotations}
