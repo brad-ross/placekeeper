@@ -3,6 +3,10 @@ import { describe, expect, it, vi } from 'vitest';
 
 import type { PlacekeeperLinkLocation } from '../../../packages/core/src/placekeeper-link.js';
 import type { PdfNavigationTarget } from '../src/pdf/pdf-navigation-target.js';
+import type {
+  DestinationDescriptionRequest,
+  PdfDestinationDescription,
+} from '../src/pdf/destination-description.js';
 import { createPdfNavigationMetadata } from '../src/pdf/pdf-navigation-metadata.js';
 import type { ViewerPdfLinkInvocation } from '../src/pdf/viewer-interaction-events.js';
 import type { ReferenceDocumentController } from '../src/pdf/reference-document.js';
@@ -13,6 +17,9 @@ import {
   NavigationCoordinator,
   resolveContainingOutlineItem,
   resolveCurrentOutlineItemId,
+  type DestinationBandPresentationState,
+  type LinkActionBusyState,
+  type LinkDescriptionPresentationState,
   type ReferenceReturnPresentationState,
   type OutlineTargetOrderLocation,
   type NavigationCoordinatorDependencies,
@@ -52,14 +59,40 @@ const durableDestination = (
 const linkRequest = (
   pageIndex: number,
   sourceScope: 'main' | 'reference' = 'reference',
+  options: { readonly authorLabel?: boolean } = {},
 ): ViewerPdfLinkInvocation => ({
   sourceScope,
   sourcePageIndex: 0,
   target: target(pageIndex),
-  metadata: createPdfNavigationMetadata({ contents: `Target ${pageIndex}`, pageIndex }),
+  metadata: createPdfNavigationMetadata(options.authorLabel === false
+    ? { pageIndex }
+    : { contents: `Target ${pageIndex}`, pageIndex }),
   opener: { isConnected: true, focus: vi.fn() } as unknown as HTMLButtonElement,
   clientRect: { left: 1, top: 1, right: 2, bottom: 2, width: 1, height: 1 },
   sourceRects: [],
+});
+
+const extentRect = (y: number) => ({
+  origin: { x: 72, y },
+  size: { width: 400, height: 12 },
+});
+
+const destinationDescription = (
+  pageIndex: number,
+  overrides: Partial<PdfDestinationDescription> = {},
+): PdfDestinationDescription => ({
+  documentGeneration: 1,
+  targetIdentity: target(pageIndex).identity,
+  pageIndex,
+  pageNumeral: String(pageIndex + 1),
+  spot: { x: 72, y: 100 },
+  extent: [extentRect(100), extentRect(112)],
+  clickedText: 'Agarwal, Dahleh, et al. (2023)',
+  heading: 'References',
+  kindLabel: null,
+  name: 'Agarwal, Dahleh, et al. (2023)',
+  nameSource: 'clicked-text',
+  ...overrides,
 });
 
 function deferred<T>() {
@@ -80,6 +113,7 @@ function navigation(initial = location(0)) {
       targetVisibility: vi.fn<PdfViewerNavigation['targetVisibility']>(() => 'visible'),
       locationVisibility: vi.fn<PdfViewerNavigation['locationVisibility']>(() => 'visible'),
       pointVisibility: vi.fn<PdfViewerNavigation['pointVisibility']>(() => 'visible'),
+      rectVisibility: vi.fn<PdfViewerNavigation['rectVisibility']>(() => 'visible'),
       applyTarget: vi.fn(async (value: PdfNavigationTarget) => {
         current = location(value.pageIndex);
         return true;
@@ -141,8 +175,16 @@ function harness(options: {
   readonly locationHistory?: ReturnType<typeof locationHistory>;
   readonly portableItems?: ReadonlyMap<string, { readonly pageIndex: number; readonly point: { readonly x: number; readonly y: number } | null }>;
   readonly pageCount?: number;
+  readonly describeDestination?: (
+    request: DestinationDescriptionRequest,
+    signal: AbortSignal,
+  ) => Promise<PdfDestinationDescription | null>;
+  readonly descriptionTimeoutMs?: number;
 } = {}) {
   let state: ReferenceNavigationState = createReferenceNavigationState(1);
+  let bands: DestinationBandPresentationState | null = null;
+  let linkDescription: LinkDescriptionPresentationState | null = null;
+  let linkBusy: LinkActionBusyState | null = null;
   let referencesOpen = false;
   let pending: Parameters<NavigationCoordinatorDependencies['setPendingReference']>[0] = null;
   let referenceReturn: ReferenceReturnPresentationState | null = null;
@@ -191,6 +233,17 @@ function harness(options: {
     getOutlineDiscovery: () => ({ status: 'loaded-empty', documentGeneration: state.documentGeneration }),
     setCurrentOutlineItemId: vi.fn(),
     getPageCount: () => options.pageCount ?? 8,
+    ...(options.describeDestination === undefined ? {} : {
+      describeDestination: options.describeDestination,
+    }),
+    ...(options.descriptionTimeoutMs === undefined ? {} : {
+      descriptionTimeoutMs: options.descriptionTimeoutMs,
+    }),
+    setDestinationBands: vi.fn((value: DestinationBandPresentationState) => { bands = value; }),
+    setLinkDescription: vi.fn((value: LinkDescriptionPresentationState | null) => {
+      linkDescription = value;
+    }),
+    setLinkActionBusy: vi.fn((value: LinkActionBusyState | null) => { linkBusy = value; }),
     ...(options.locationHistory === undefined ? {} : {
       locationHistory: options.locationHistory.history,
       resolvePortableItem: (itemId: string) => options.portableItems?.get(itemId) ?? null,
@@ -211,6 +264,11 @@ function harness(options: {
     pending: () => pending,
     referenceReturn: () => referenceReturn,
     announcement: () => announcement,
+    bands: () => bands,
+    mainBand: () => bands?.main ?? null,
+    referenceBand: (identity: string) => bands?.references.get(identity) ?? null,
+    linkDescription: () => linkDescription,
+    linkBusy: () => linkBusy,
   };
 }
 
@@ -1919,6 +1977,390 @@ describe('document-scoped navigation coordinator', () => {
     expect(run.referencesOpen()).toBe(true);
     expect(run.dependencies.layout.hideReferences).not.toHaveBeenCalled();
     expect(run.main.controls.focusAtDestination).not.toHaveBeenCalled();
+  });
+});
+
+describe('link destination descriptions and destination bands', () => {
+  const describing = (
+    resolve: (request: DestinationDescriptionRequest) => PdfDestinationDescription | null
+      | Promise<PdfDestinationDescription | null>,
+  ) => vi.fn(async (request: DestinationDescriptionRequest, _signal: AbortSignal) => resolve(request));
+
+  it('Covers AE1. names a References tab from the resolved clicked text and bands it', async () => {
+    const describeDestination = describing(() => destinationDescription(13));
+    const run = harness({ describeDestination });
+    const request = linkRequest(13, 'main', { authorLabel: false });
+
+    expect(run.coordinator.requestLink(request)).toBe(true);
+    expect(describeDestination).toHaveBeenCalledWith(expect.objectContaining({
+      target: request.target,
+      sourcePageIndex: request.sourcePageIndex,
+      sourceRects: request.sourceRects,
+    }), expect.any(AbortSignal));
+    expect(run.linkDescription()).toMatchObject({ request, status: 'resolving', description: null });
+    await vi.waitFor(() => expect(run.linkDescription()).toMatchObject({
+      request,
+      status: 'resolved',
+      description: destinationDescription(13),
+    }));
+
+    expect(await run.coordinator.chooseLink('references', request)).toBe(true);
+    expect(run.state().tabs).toHaveLength(1);
+    expect(run.state().tabs[0]).toMatchObject({
+      identity: target(13).identity,
+      label: 'Agarwal, Dahleh, et al. (2023)',
+      pageContext: 'Page 14',
+    });
+    expect(run.referenceBand(target(13).identity)).toEqual({
+      documentGeneration: 1,
+      targetIdentity: target(13).identity,
+      pageIndex: 13,
+      rects: [extentRect(100), extentRect(112)],
+    });
+    expect(run.mainBand()).toBeNull();
+    expect(run.linkBusy()).toBeNull();
+    expect(run.linkDescription()).toBeNull();
+
+    // The band persists while the reader scrolls away and back, and across tab switches.
+    const band = run.referenceBand(target(13).identity);
+    vi.mocked(run.reference.controls.targetVisibility).mockReturnValue('outside');
+    run.coordinator.observeReferenceManualScroll();
+    vi.mocked(run.reference.controls.targetVisibility).mockReturnValue('visible');
+    run.coordinator.observeReferenceManualScroll();
+    await run.coordinator.openReference(target(15), { label: 'Other', pageContext: 'Page 16' });
+    expect(await run.coordinator.switchReference(target(13).identity)).toBe(true);
+    expect(run.referenceBand(target(13).identity)).toEqual(band);
+  });
+
+  it('keeps an author-provided link name over the resolved description name', async () => {
+    const run = harness({ describeDestination: describing(() => destinationDescription(5)) });
+    const request = linkRequest(5, 'main');
+    run.coordinator.requestLink(request);
+    expect(await run.coordinator.chooseLink('references', request)).toBe(true);
+    expect(run.state().tabs[0]?.label).toBe('Target 5');
+    expect(run.referenceBand(target(5).identity)).not.toBeNull();
+  });
+
+  it('waits for a pending name stage behind a busy action, then opens with the resolved name', async () => {
+    const pending = deferred<PdfDestinationDescription | null>();
+    const describeDestination = vi.fn((_request: DestinationDescriptionRequest, _signal: AbortSignal) => (
+      pending.promise
+    ));
+    const run = harness({ describeDestination });
+    const request = linkRequest(13, 'main', { authorLabel: false });
+    run.coordinator.requestLink(request);
+
+    const choosing = run.coordinator.chooseLink('references', request);
+    expect(run.linkBusy()).toEqual({ request, choice: 'references' });
+    expect(describeDestination.mock.calls[0]![1].aborted).toBe(false);
+    expect(run.state().tabs).toEqual([]);
+    expect(run.pending()).toBeNull();
+
+    pending.resolve(destinationDescription(13));
+    expect(await choosing).toBe(true);
+    expect(run.linkBusy()).toBeNull();
+    expect(run.state().tabs[0]?.label).toBe('Agarwal, Dahleh, et al. (2023)');
+    expect(run.referenceBand(target(13).identity)).not.toBeNull();
+  });
+
+  it('shows the resolved name on the pending tab while the reference loads', async () => {
+    const run = harness({ describeDestination: describing(() => destinationDescription(13)) });
+    const opened = deferred<boolean>();
+    vi.mocked(run.controller.open).mockReturnValueOnce(opened.promise);
+    const request = linkRequest(13, 'main', { authorLabel: false });
+    run.coordinator.requestLink(request);
+
+    const choosing = run.coordinator.chooseLink('references', request);
+    await vi.waitFor(() => expect(run.pending()).toMatchObject({
+      status: 'loading',
+      label: 'Agarwal, Dahleh, et al. (2023)',
+    }));
+    opened.resolve(true);
+    expect(await choosing).toBe(true);
+  });
+
+  it('opens with the page fallback and no band when the name stage bound expires', async () => {
+    const never = deferred<PdfDestinationDescription | null>();
+    const describeDestination = vi.fn((_request: DestinationDescriptionRequest, _signal: AbortSignal) => (
+      never.promise
+    ));
+    const run = harness({ describeDestination, descriptionTimeoutMs: 5 });
+    const request = linkRequest(13, 'main', { authorLabel: false });
+    run.coordinator.requestLink(request);
+
+    expect(await run.coordinator.chooseLink('references', request)).toBe(true);
+    expect(run.state().tabs[0]?.label).toBe('Page 14');
+    expect(run.referenceBand(target(13).identity)).toBeNull();
+    expect(describeDestination.mock.calls[0]![1].aborted).toBe(true);
+    expect(run.linkBusy()).toBeNull();
+
+    never.resolve(destinationDescription(13));
+    await Promise.resolve();
+    expect(run.referenceBand(target(13).identity)).toBeNull();
+    expect(run.state().tabs[0]?.label).toBe('Page 14');
+  });
+
+  it('reuses an open outline tab for a matching link, keeping its label and gaining the band', async () => {
+    const run = harness({
+      describeDestination: describing(() => destinationDescription(5, { name: '2.3', nameSource: 'clicked-text' })),
+    });
+    await run.coordinator.openReference(target(5), {
+      label: '2.3 The Aggregated Projection Matrix', pageContext: 'Page 6',
+    });
+    expect(run.referenceBand(target(5).identity)).toBeNull();
+    const request = linkRequest(5, 'main', { authorLabel: false });
+    run.coordinator.requestLink(request);
+
+    expect(await run.coordinator.chooseLink('references', request)).toBe(true);
+    expect(run.state().tabs).toHaveLength(1);
+    expect(run.state().tabs[0]?.label).toBe('2.3 The Aggregated Projection Matrix');
+    expect(run.referenceBand(target(5).identity)).toMatchObject({ pageIndex: 5 });
+  });
+
+  it('Covers AE5. records no band for a destination without a spot', async () => {
+    const run = harness({
+      describeDestination: describing(() => destinationDescription(9, {
+        spot: null,
+        extent: null,
+        name: '10',
+        nameSource: 'page',
+      })),
+    });
+    const request = linkRequest(9, 'main', { authorLabel: false });
+    run.coordinator.requestLink(request);
+    expect(await run.coordinator.chooseLink('references', request)).toBe(true);
+    expect(run.state().tabs[0]?.label).toBe('10');
+    expect(run.referenceBand(target(9).identity)).toBeNull();
+
+    const main = linkRequest(9, 'main', { authorLabel: false });
+    run.coordinator.requestLink(main);
+    expect(await run.coordinator.chooseLink('main', main)).toBe(true);
+    expect(run.mainBand()).toBeNull();
+  });
+
+  it('leaves the band on the original destination when following a link in the same tab', async () => {
+    const run = harness({
+      describeDestination: describing((request) => destinationDescription(request.target.pageIndex)),
+    });
+    const opening = linkRequest(3, 'main', { authorLabel: false });
+    run.coordinator.requestLink(opening);
+    await run.coordinator.chooseLink('references', opening);
+    const band = run.referenceBand(target(3).identity);
+    expect(band).toMatchObject({ pageIndex: 3 });
+
+    const follow = linkRequest(7, 'reference', { authorLabel: false });
+    expect(run.coordinator.requestLink(follow)).toBe(true);
+    expect(await run.coordinator.chooseLink('same-reference', follow)).toBe(true);
+    expect(run.referenceBand(target(3).identity)).toEqual(band);
+    expect(run.referenceBand(target(7).identity)).toBeNull();
+    expect(run.bands()?.references.size).toBe(1);
+  });
+
+  it('drops a tab band on close and every band and description on document replacement', async () => {
+    const run = harness({
+      describeDestination: describing((request) => destinationDescription(request.target.pageIndex)),
+    });
+    for (const pageIndex of [3, 4]) {
+      const request = linkRequest(pageIndex, 'main', { authorLabel: false });
+      run.coordinator.requestLink(request);
+      await run.coordinator.chooseLink('references', request);
+    }
+    const main = linkRequest(6, 'main', { authorLabel: false });
+    run.coordinator.requestLink(main);
+    await run.coordinator.chooseLink('main', main, { preserveWorkspace: true });
+    expect(run.mainBand()).not.toBeNull();
+    expect(run.bands()?.references.size).toBe(2);
+
+    expect(await run.coordinator.closeReference(target(3).identity)).toBe(true);
+    expect(run.referenceBand(target(3).identity)).toBeNull();
+    expect(run.referenceBand(target(4).identity)).not.toBeNull();
+
+    const pending = deferred<PdfDestinationDescription | null>();
+    const late = vi.fn((_request: DestinationDescriptionRequest, _signal: AbortSignal) => pending.promise);
+    const other = harness({ describeDestination: late });
+    const opening = linkRequest(4, 'main', { authorLabel: false });
+    other.coordinator.requestLink(opening);
+    other.coordinator.replaceDocument(2);
+    expect(late.mock.calls[0]![1].aborted).toBe(true);
+    expect(other.linkDescription()).toBeNull();
+    pending.resolve(destinationDescription(4));
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(other.linkDescription()).toBeNull();
+
+    run.coordinator.replaceDocument(2);
+    expect(run.bands()).toEqual({ documentGeneration: 2, main: null, references: new Map() });
+  });
+
+  it('aborts in-flight resolution when the menu is dismissed and ignores a late result', async () => {
+    const pending = deferred<PdfDestinationDescription | null>();
+    const describeDestination = vi.fn((_request: DestinationDescriptionRequest, _signal: AbortSignal) => (
+      pending.promise
+    ));
+    const run = harness({ describeDestination });
+    const request = linkRequest(4, 'main', { authorLabel: false });
+    run.coordinator.requestLink(request);
+    run.coordinator.dismissLink(request);
+
+    expect(describeDestination.mock.calls[0]![1].aborted).toBe(true);
+    expect(run.linkDescription()).toBeNull();
+    pending.resolve(destinationDescription(4));
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(run.linkDescription()).toBeNull();
+  });
+
+  it('aborts a superseded link description when another link is invoked', async () => {
+    const describeDestination = vi.fn((_request: DestinationDescriptionRequest, _signal: AbortSignal) => (
+      new Promise<PdfDestinationDescription | null>(() => undefined)
+    ));
+    const run = harness({ describeDestination });
+    const first = linkRequest(4, 'main', { authorLabel: false });
+    const second = linkRequest(5, 'main', { authorLabel: false });
+    run.coordinator.requestLink(first);
+    run.coordinator.requestLink(second);
+    expect(describeDestination.mock.calls[0]![1].aborted).toBe(true);
+    expect(describeDestination.mock.calls[1]![1].aborted).toBe(false);
+    expect(run.linkDescription()).toMatchObject({ request: second, status: 'resolving' });
+  });
+
+  it('sets the main band after the jump settles once a pending name stage finishes', async () => {
+    const pending = deferred<PdfDestinationDescription | null>();
+    const describeDestination = vi.fn((_request: DestinationDescriptionRequest, _signal: AbortSignal) => (
+      pending.promise
+    ));
+    const run = harness({ describeDestination });
+    const request = linkRequest(6, 'main', { authorLabel: false });
+    run.coordinator.requestLink(request);
+
+    const choosing = run.coordinator.chooseLink('main', request);
+    expect(run.linkBusy()).toEqual({ request, choice: 'main' });
+    await vi.waitFor(() => expect(run.main.controls.captureLocation()?.pageIndex).toBe(6));
+    expect(run.mainBand()).toBeNull();
+    expect(describeDestination.mock.calls[0]![1].aborted).toBe(false);
+
+    pending.resolve(destinationDescription(6));
+    expect(await choosing).toBe(true);
+    expect(run.mainBand()).toEqual({
+      documentGeneration: 1,
+      targetIdentity: target(6).identity,
+      pageIndex: 6,
+      rects: [extentRect(100), extentRect(112)],
+    });
+    expect(run.linkBusy()).toBeNull();
+  });
+
+  it('does not set the main band when newer navigation supersedes the jump before naming finishes', async () => {
+    const pending = deferred<PdfDestinationDescription | null>();
+    const run = harness({
+      describeDestination: vi.fn((_request: DestinationDescriptionRequest, _signal: AbortSignal) => pending.promise),
+    });
+    const request = linkRequest(6, 'main', { authorLabel: false });
+    run.coordinator.requestLink(request);
+    const choosing = run.coordinator.chooseLink('main', request);
+    await vi.waitFor(() => expect(run.main.controls.captureLocation()?.pageIndex).toBe(6));
+
+    expect(await run.coordinator.navigateMainTarget(target(2), 'outline')).toBe(true);
+    pending.resolve(destinationDescription(6));
+    await choosing;
+    expect(run.mainBand()).toBeNull();
+  });
+
+  it('Covers AE4. clears the main band once rect visibility reports it outside and never restores it', async () => {
+    const run = harness({ describeDestination: describing(() => destinationDescription(6)) });
+    const request = linkRequest(6, 'main', { authorLabel: false });
+    run.coordinator.requestLink(request);
+    expect(await run.coordinator.chooseLink('main', request)).toBe(true);
+    expect(run.mainBand()).not.toBeNull();
+
+    run.coordinator.refreshMainLocation();
+    expect(run.main.controls.rectVisibility).toHaveBeenLastCalledWith(6, {
+      origin: { x: 72, y: 100 },
+      size: { width: 400, height: 24 },
+    });
+    expect(run.mainBand()).not.toBeNull();
+
+    vi.mocked(run.main.controls.rectVisibility).mockReturnValue('unavailable');
+    run.coordinator.refreshMainLocation();
+    expect(run.mainBand()).not.toBeNull();
+
+    vi.mocked(run.main.controls.rectVisibility).mockReturnValue('outside');
+    run.coordinator.refreshMainLocation();
+    expect(run.mainBand()).toBeNull();
+
+    vi.mocked(run.main.controls.rectVisibility).mockReturnValue('visible');
+    run.coordinator.refreshMainLocation();
+    expect(run.mainBand()).toBeNull();
+  });
+
+  const withMainBand = async (options: Parameters<typeof harness>[0] = {}) => {
+    const run = harness({
+      ...options,
+      describeDestination: describing((request) => destinationDescription(request.target.pageIndex)),
+    });
+    const request = linkRequest(6, 'main', { authorLabel: false });
+    run.coordinator.requestLink(request);
+    expect(await run.coordinator.chooseLink('main', request)).toBe(true);
+    expect(run.mainBand()).not.toBeNull();
+    return run;
+  };
+
+  it('clears the main band on a new link invocation', async () => {
+    const run = await withMainBand();
+    run.coordinator.requestLink(linkRequest(2, 'main', { authorLabel: false }));
+    expect(run.mainBand()).toBeNull();
+  });
+
+  it('clears the main band on outline, search, and annotation jumps without setting a new one', async () => {
+    for (const jump of [
+      (run: ReturnType<typeof harness>) => run.coordinator.navigateMainTarget(target(2), 'outline'),
+      (run: ReturnType<typeof harness>) => run.coordinator.navigateMainTarget(target(3), 'search'),
+      (run: ReturnType<typeof harness>) => run.coordinator.navigateMainAnnotation({
+        pageIndex: 4, point: { x: 10, y: 10 },
+      }),
+    ]) {
+      const run = await withMainBand();
+      const jumping = jump(run);
+      expect(run.mainBand()).toBeNull();
+      expect(await jumping).toBe(true);
+      expect(run.mainBand()).toBeNull();
+    }
+  });
+
+  it('keeps the main band through References actions that leave the main reader in place', async () => {
+    const run = await withMainBand();
+    await run.coordinator.openReferencesWorkspace();
+    expect(run.mainBand()).not.toBeNull();
+    await run.coordinator.openReference(target(3), createPdfNavigationMetadata({ contents: 'Third', pageIndex: 3 }));
+    expect(run.mainBand()).not.toBeNull();
+    expect(await run.coordinator.closeReference(target(3).identity)).toBe(true);
+    expect(run.mainBand()).not.toBeNull();
+  });
+
+  it('clears the main band when Back or Forward is requested', async () => {
+    const run = await withMainBand();
+    const back = run.coordinator.historyBack();
+    expect(run.mainBand()).toBeNull();
+    await back;
+
+    const browser = locationHistory();
+    const hosted = await withMainBand({ locationHistory: browser });
+    hosted.coordinator.startLocationHistory();
+    void hosted.coordinator.historyBack();
+    expect(hosted.mainBand()).toBeNull();
+
+    const forward = await withMainBand({ locationHistory: locationHistory() });
+    void forward.coordinator.historyForward();
+    expect(forward.mainBand()).toBeNull();
+  });
+
+  it('never resolves a description or sets a band for outline and search jumps', async () => {
+    const describeDestination = describing(() => destinationDescription(2));
+    const run = harness({ describeDestination });
+    expect(await run.coordinator.navigateMainTarget(target(2), 'outline')).toBe(true);
+    expect(await run.coordinator.navigateMainTarget(target(3), 'search')).toBe(true);
+    expect(describeDestination).not.toHaveBeenCalled();
+    expect(run.mainBand()).toBeNull();
   });
 });
 

@@ -91,8 +91,9 @@ import {
 } from "../pdf/viewer-controls.js";
 import type { ViewerFramingControls } from "../pdf/viewer-framing.js";
 import type { PdfViewerNavigation } from "../pdf/viewer-navigation-adapter.js";
-import type {
-  PdfDocumentOrderPage,
+import {
+  createPdfOutlineTargetOrderLocation,
+  type PdfDocumentOrderPage,
 } from '../pdf/document-order-location.js';
 import {
   naturalAnchorToPdfBottomOriginPoint,
@@ -118,9 +119,20 @@ import { annotationReaderIdentityMatches, type AnnotationReaderIdentity } from '
 import { PageNotePlacementAuthority } from "../review/review-surface-state.js";
 import type { ContextPlacement } from '../review/ContextActionPalette.js';
 import {
+  createOutlineContainmentResolver,
   NavigationCoordinator,
+  type DestinationBand,
+  type DestinationBandPresentationState,
+  type LinkActionBusyState,
+  type LinkDescriptionPresentationState,
+  type OutlineContainmentResolver,
   type ReferenceReturnPresentationState,
 } from "../review/navigation-coordinator.js";
+import {
+  createDestinationDescriptionResolver,
+  createEngineDestinationPageReader,
+  type DestinationDescriptionResolver,
+} from '../pdf/destination-description.js';
 import {
   BrowserReviewLocationHistory,
   type ReviewLocationHistoryEnvironment,
@@ -560,6 +572,8 @@ export function initialWorkspaceLocationForGeneration(
   return currentGeneration === initialGeneration ? location : undefined;
 }
 
+const EMPTY_DESTINATION_BANDS: ReadonlyMap<string, DestinationBand> = new Map();
+
 export function ProductionReviewApp(props: ProductionReviewAppProps) {
   const availableModes = useContext(WorkspaceModeAvailability);
   const workspacePresentation = useContext(WorkspacePresentation);
@@ -853,6 +867,15 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     Extract<ViewerInteractionEvent, { readonly type: 'pdf-link' }>['value'] | null
   >(null);
   const [navigationAnnouncement, setNavigationAnnouncement] = useState('');
+  // Transient link-destination presentation (KTD1, KTD9, KTD10). Never part of
+  // ReviewState, durable navigation, export, or Codex context.
+  const [linkDescription, setLinkDescription] = useState<LinkDescriptionPresentationState | null>(null);
+  const [linkActionBusy, setLinkActionBusy] = useState<LinkActionBusyState | null>(null);
+  const [destinationBands, setDestinationBands] = useState<DestinationBandPresentationState | null>(null);
+  const destinationDescriberRef = useRef<{
+    readonly generation: number;
+    readonly resolver: DestinationDescriptionResolver;
+  } | null>(null);
   const outlineDiscoveryRef = useRef<PdfOutlineDiscovery>({
     status: 'loading',
     documentGeneration: documentGenerationRef.current,
@@ -1118,6 +1141,15 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       getOutlineDiscovery: () => outlineDiscoveryRef.current,
       setCurrentOutlineItemId,
       getPageCount: () => search.getPageCount(),
+      describeDestination: (request, signal) => {
+        const describer = destinationDescriberRef.current;
+        return describer === null || describer.generation !== request.target.documentGeneration
+          ? Promise.resolve(null)
+          : describer.resolver.resolve(request, signal);
+      },
+      setLinkDescription,
+      setLinkActionBusy,
+      setDestinationBands,
       // Native loading shells mount before their host history is available.
       // Keep the coordinator on the same history port the toolbar observes.
       get locationHistory() { return locationHistoryRef.current; },
@@ -1386,6 +1418,8 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   }, []);
   useEffect(() => () => {
     navigationCoordinator.dispose();
+    destinationDescriberRef.current?.resolver.dispose();
+    destinationDescriberRef.current = null;
     mainLocationRefresh.cancel();
     authoringAnchorRefresh.cancel();
     viewerControlsRef.current?.dispose();
@@ -1481,6 +1515,8 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     setMainNavigationReadyGeneration(null);
     setMainDocumentReadyGeneration(null);
     viewerControlsGenerationRef.current = null;
+    destinationDescriberRef.current?.resolver.dispose();
+    destinationDescriberRef.current = null;
     navigationCoordinator.replaceDocument(nextGeneration, { preservePresentation: true });
     readingRestoreOperationRef.current = navigationCoordinator.operationIdentity();
     search.reset();
@@ -2020,6 +2056,46 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       generation: documentGeneration,
       reader: createEngineAnchorPageReader(engine, document),
     };
+    destinationDescriberRef.current?.resolver.dispose();
+    // The outline may load after the document; resolve headings lazily and
+    // prepare one containment index per loaded outline.
+    let headingIndex: {
+      readonly discovery: PdfOutlineDiscovery;
+      readonly resolve: OutlineContainmentResolver;
+    } | null = null;
+    destinationDescriberRef.current = {
+      generation: documentGeneration,
+      resolver: createDestinationDescriptionResolver({
+        documentGeneration,
+        reader: createEngineDestinationPageReader(engine, document),
+        resolveHeading: (location) => {
+          const discovery = outlineDiscoveryRef.current;
+          if (discovery.documentGeneration !== documentGeneration) return null;
+          if (headingIndex?.discovery !== discovery) {
+            headingIndex = {
+              discovery,
+              resolve: createOutlineContainmentResolver({
+                discovery,
+                resolveTarget: (target) => {
+                  const page = document.pages[target.pageIndex];
+                  return page === undefined ? null : createPdfOutlineTargetOrderLocation(target, {
+                    documentGeneration,
+                    page: {
+                      ...page.size,
+                      cropOrigin: {
+                        x: page.boxes?.crop.left ?? 0,
+                        y: page.boxes?.crop.bottom ?? 0,
+                      },
+                    },
+                  });
+                },
+              }),
+            };
+          }
+          return headingIndex.resolve(location)?.label ?? null;
+        },
+      }),
+    };
     void captureCurrentReadingLocation();
     const documentSourceIdentity = sourceIdentity;
     search.initialize(engine, document, documentGeneration, () => {
@@ -2381,6 +2457,13 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     navigationState,
     referenceReturnState,
   );
+  const currentDestinationBands = destinationBands !== null
+    && destinationBands.documentGeneration === navigationState.documentGeneration
+    ? destinationBands
+    : null;
+  const activeReferenceDestinationBand: DestinationBand | null = navigationState.activeTabIdentity === null
+    ? null
+    : currentDestinationBands?.references.get(navigationState.activeTabIdentity) ?? null;
   const anyTrayOpen = effectiveReferenceLayout.kind === 'narrow-unified'
     ? effectiveReferenceLayout.open
     : effectiveReferenceLayout.rightWorkspaceOpen || effectiveReferenceLayout.bottomReferencesOpen;
@@ -2806,6 +2889,11 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
           outlineDiscovery,
           currentOutlineItemId,
           linkActionRequest,
+          linkDescription,
+          linkActionBusy,
+          mainDestinationBand: currentDestinationBands?.main ?? null,
+          referenceDestinationBands: currentDestinationBands?.references ?? EMPTY_DESTINATION_BANDS,
+          activeReferenceDestinationBand,
           navigationAnnouncement,
           canNavigateBack: locationHistory === undefined
             ? navigationState.mainHistory.index > 0

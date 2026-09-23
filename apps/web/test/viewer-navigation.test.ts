@@ -822,6 +822,74 @@ describe('viewer navigation adapter', () => {
     })).toBe('unavailable');
   });
 
+  it('reports a page rect visible while any part is unobscured and outside only when none is', () => {
+    // Page at client (-100, -200), scale 1; viewport 600x400 at the origin.
+    const harness = navigationHarness();
+    const rect = (x: number, y: number, width: number, height: number) => ({
+      origin: { x, y },
+      size: { width, height },
+    });
+
+    expect(harness.navigation.rectVisibility(0, rect(150, 250, 100, 20))).toBe('visible');
+    // Straddles the viewport bottom edge: client y 390..420.
+    expect(harness.navigation.rectVisibility(0, rect(150, 590, 100, 30))).toBe('visible');
+    // Straddles the viewport top edge: client y -10..10.
+    expect(harness.navigation.rectVisibility(0, rect(150, 190, 100, 20))).toBe('visible');
+    // Fully above: client y -100..-50.
+    expect(harness.navigation.rectVisibility(0, rect(150, 100, 100, 50))).toBe('outside');
+    // Fully below: client y 410..440.
+    expect(harness.navigation.rectVisibility(0, rect(150, 610, 100, 30))).toBe('outside');
+    // Fully left of the viewport: client x -90..-10.
+    expect(harness.navigation.rectVisibility(0, rect(10, 250, 80, 20))).toBe('outside');
+
+    harness.pageRect.top = -801;
+    expect(harness.navigation.rectVisibility(0, rect(150, 250, 100, 20))).toBe('outside');
+
+    // Transient occlusion covers the lower part of the viewport.
+    harness.pageRect.top = -200;
+    expect(harness.navigation.rectVisibility(0, rect(150, 500, 100, 30), {
+      occlusion: { left: 0, top: 250, right: 600, bottom: 400 },
+    })).toBe('outside');
+    expect(harness.navigation.rectVisibility(0, rect(150, 440, 100, 30), {
+      occlusion: { left: 0, top: 250, right: 600, bottom: 400 },
+    })).toBe('visible');
+  });
+
+  it('counts runway areas as obscured for rect visibility', () => {
+    const harness = navigationHarness({ runway: { right: 0, bottom: 100 } });
+    const rect = (y: number) => ({ origin: { x: 150, y }, size: { width: 100, height: 20 } });
+
+    // Viewport bottom is 300 after the runway: client y 310..330 is covered.
+    expect(harness.navigation.rectVisibility(0, rect(510))).toBe('outside');
+    expect(harness.navigation.rectVisibility(0, rect(490))).toBe('visible');
+  });
+
+  it('reports malformed rects unavailable and an unmounted page outside', () => {
+    const harness = navigationHarness();
+    expect(harness.navigation.rectVisibility(0, {
+      origin: { x: Number.NaN, y: 10 },
+      size: { width: 10, height: 10 },
+    })).toBe('unavailable');
+    expect(harness.navigation.rectVisibility(0, {
+      origin: { x: 10, y: 10 },
+      size: { width: -1, height: 10 },
+    })).toBe('unavailable');
+    expect(harness.navigation.rectVisibility(-1, {
+      origin: { x: 10, y: 10 },
+      size: { width: 10, height: 10 },
+    })).toBe('unavailable');
+    expect(harness.navigation.rectVisibility(0, {
+      origin: { x: 10, y: 790 },
+      size: { width: 10, height: 50 },
+    })).toBe('unavailable');
+
+    const unmounted = navigationHarness({ farTargetInitiallyUnmounted: true });
+    expect(unmounted.navigation.rectVisibility(2, {
+      origin: { x: 10, y: 10 },
+      size: { width: 10, height: 10 },
+    })).toBe('outside');
+  });
+
   it('returns a neutral page point into the same unobscured rectangle used for visibility', async () => {
     const rightHarness = navigationHarness();
     const rightDestination: PdfViewerLocation = {

@@ -5,6 +5,15 @@ export interface PdfNaturalPoint {
   readonly y: number;
 }
 
+/**
+ * A rectangle in natural, unrotated, top-origin page coordinates (PDF points
+ * relative to the crop box) — the same space as link annotation rects.
+ */
+export interface PdfNaturalRect {
+  readonly origin: PdfNaturalPoint;
+  readonly size: PdfNaturalPageSize;
+}
+
 export interface PdfNaturalPageSize {
   readonly width: number;
   readonly height: number;

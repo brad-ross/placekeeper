@@ -32,6 +32,7 @@ import {
   type PdfLocationCaptureMode,
   type PdfNaturalPageSize,
   type PdfNaturalPoint,
+  type PdfNaturalRect,
   type PdfTargetVisibility,
   type PdfViewportOcclusion,
   type PdfViewportQuery,
@@ -88,6 +89,16 @@ export interface PdfViewerNavigation extends ViewerNavigationControls {
   pointVisibility(
     pageIndex: number,
     point: PdfNaturalPoint,
+    viewport?: PdfViewportQuery,
+  ): PdfTargetVisibility;
+  /**
+   * Reports whether any part of a natural page rect occupies an optionally
+   * unobscured viewport. Runway areas count as obscured; the rect is
+   * `outside` only when none of it is visible.
+   */
+  rectVisibility(
+    pageIndex: number,
+    rect: PdfNaturalRect,
     viewport?: PdfViewportQuery,
   ): PdfTargetVisibility;
   /** Captures neutral page geometry without exposing viewer-library state. */
@@ -1612,6 +1623,63 @@ export function createViewerNavigation(
       : 'outside';
   };
 
+  const rectVisibility = (
+    pageIndex: number,
+    rect: PdfNaturalRect,
+    viewport?: PdfViewportQuery,
+  ): PdfTargetVisibility => {
+    const viewer = activeViewer();
+    if (viewer === null) return 'unavailable';
+    const { origin, size } = rect;
+    if (
+      !Number.isSafeInteger(pageIndex)
+      || pageIndex < 0
+      || ![origin.x, origin.y, size.width, size.height].every(Number.isFinite)
+      || origin.x < 0
+      || origin.y < 0
+      || size.width < 0
+      || size.height < 0
+      || !hasUsablePageTree(viewer)
+    ) return 'unavailable';
+    const page = viewer.pages[pageIndex];
+    if (
+      page === undefined
+      || origin.x + size.width > page.size.width + coordinateTolerance
+      || origin.y + size.height > page.size.height + coordinateTolerance
+    ) return 'unavailable';
+    const pageElement = options.root()
+      ?.querySelector<HTMLElement>(pageSelector(pageIndex)) ?? null;
+    if (pageElement === null) return 'outside';
+    const geometry = pageGeometry(viewer, pageIndex, undefined, viewport);
+    if (geometry === null) return 'unavailable';
+    const corners = [
+      { x: origin.x, y: origin.y },
+      { x: origin.x + size.width, y: origin.y },
+      { x: origin.x, y: origin.y + size.height },
+      { x: origin.x + size.width, y: origin.y + size.height },
+    ].map((anchor) => clientPointForLocation(geometry, {
+      pageIndex,
+      anchor: {
+        x: Math.min(anchor.x, page.size.width),
+        y: Math.min(anchor.y, page.size.height),
+      },
+      alignment: { xPercent: 50, yPercent: 50 },
+      zoom: geometry.scale,
+    }));
+    const left = Math.min(...corners.map(({ x }) => x));
+    const right = Math.max(...corners.map(({ x }) => x));
+    const top = Math.min(...corners.map(({ y }) => y));
+    const bottom = Math.max(...corners.map(({ y }) => y));
+    const { viewportRect } = geometry;
+    // Touching an edge is not overlap: a rect scrolled exactly to the edge is gone.
+    return right > viewportRect.left
+      && left < viewportRect.right
+      && bottom > viewportRect.top
+      && top < viewportRect.bottom
+      ? 'visible'
+      : 'outside';
+  };
+
   const locationVisibility = (
     location: PdfViewerLocation,
     viewport?: PdfViewportQuery,
@@ -1785,6 +1853,7 @@ export function createViewerNavigation(
     targetVisibility,
     locationVisibility,
     pointVisibility,
+    rectVisibility,
     applyLocation,
     fitToWidth,
     isFitToWidth() {

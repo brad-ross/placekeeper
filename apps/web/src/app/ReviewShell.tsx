@@ -62,6 +62,11 @@ import type {
   ViewerPdfLinkInvocation,
 } from '../pdf/viewer-interaction-events.js';
 import type { PdfAnnotationSurface } from '../pdf/annotation-surface.js';
+import type {
+  DestinationBand,
+  LinkActionBusyState,
+  LinkDescriptionPresentationState,
+} from '../review/navigation-coordinator.js';
 import type { PdfOutlineDiscovery, PdfOutlineItem } from '../pdf/pdf-outline.js';
 import { AnnotationList } from '../review/AnnotationList.js';
 import { FullAnnotationReader } from '../review/FullAnnotationReader.js';
@@ -267,6 +272,16 @@ export interface ReviewShellWorkspaceModel {
   outlineDiscovery?: PdfOutlineDiscovery;
   currentOutlineItemId?: string | null;
   linkActionRequest?: ViewerPdfLinkInvocation | null;
+  /** Transient destination description for the open link menu or the chosen action (U5). */
+  linkDescription?: LinkDescriptionPresentationState | null;
+  /** The chosen link action while it waits for the name stage; render `aria-busy` (U5). */
+  linkActionBusy?: LinkActionBusyState | null;
+  /** Transient main-reader Destination Band (U4). */
+  mainDestinationBand?: DestinationBand | null;
+  /** Transient Destination Bands keyed by References tab identity (U4). */
+  referenceDestinationBands?: ReadonlyMap<string, DestinationBand>;
+  /** The active References tab's band, for the reference viewport (U4). */
+  activeReferenceDestinationBand?: DestinationBand | null;
   navigationAnnouncement?: string;
   canNavigateBack?: boolean;
   canNavigateForward?: boolean;

@@ -520,6 +520,7 @@ function createHarnessViewerNavigation(
     targetVisibility: () => 'unavailable',
     locationVisibility: () => 'unavailable',
     pointVisibility: () => 'unavailable',
+    rectVisibility: () => 'unavailable',
     captureDocumentOrderPages: () => [],
     applyTarget: async () => false,
     cancelPendingNavigation: async () => undefined,
