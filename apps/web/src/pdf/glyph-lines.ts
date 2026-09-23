@@ -45,8 +45,10 @@ export function mergeGlyphLineSegments(
   const from = Math.max(0, start);
   const to = Math.min(glyphs.length, end);
   for (let index = from; index < to; index += 1) {
-    const glyph = glyphs[index]!;
-    if (!drawableGlyph(glyph)) continue;
+    // The engine leaves holes for characters it generates without a glyph
+    // (for example the space it inserts before a far-right equation number).
+    const glyph = glyphs[index];
+    if (glyph === undefined || !drawableGlyph(glyph)) continue;
     const rect: Rect = {
       origin: { x: glyph.origin.x + offset.x, y: glyph.origin.y + offset.y },
       size: { ...glyph.size },

@@ -231,6 +231,26 @@ describe('destination extent (KTD5)', () => {
     expect(description.kindLabel).toBe('Eq. 1');
   });
 
+  it('tolerates engine glyph holes for generated characters, such as the space before "(1)"', () => {
+    const page = pageText([
+      { text: 'matrix as follows:', x: 72, top: 276 },
+      { text: 'Y = P X + E (1)', x: 150, top: 300, gapBefore: { 12: 200 } },
+      { text: 'where P is the aggregated projection.', x: 72, top: 320 },
+    ]);
+    // PDFium returns a sparse glyph array: the generated space has no entry.
+    const holeIndex = Array.from(page.text).indexOf('(') - 1;
+    const glyphs = [...page.glyphs];
+    delete glyphs[holeIndex];
+    expect(holeIndex in glyphs).toBe(false);
+    const description = describe_({
+      target: xyz(2, 72, pdfY(292)),
+      destinationText: { ...page, glyphs },
+      sourceRects: [sourceSpan(1, 25, 26)],
+    });
+    expect(description.extent).toHaveLength(1);
+    expect(description.name).toBe('Eq. 1');
+  });
+
   it('finds a centered equation when the XYZ left sits at the text margin', () => {
     const page = pageText([
       { text: 'We consider the linear model in which', x: 72, top: 264 },
