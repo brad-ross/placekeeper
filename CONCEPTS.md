@@ -36,6 +36,11 @@ Evidence access is rechecked against the live association; an old handle cannot 
 ### Reference Tab
 A secondary view of a PDF passage that lets the reviewer inspect related material while keeping the main reading position separate.
 
+### Destination Band
+A transient mark over the passage a followed PDF link points to, so the reader can see exactly which spot the link meant.
+
+It is presentation only: never an annotation, never saved or exported.
+
 ### PDF Annotation Surface
 The particular Main view or Reference Tab, within a Document Generation, that supplied an annotation interaction.
 
