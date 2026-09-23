@@ -355,8 +355,8 @@ async function followLinkInSameReference(
     try {
       await expect(firstAction).toBeFocused({ timeout: 1_500 });
       await expect(menu.getByRole("menuitem")).toHaveCount(4);
-      await expect(action).toHaveAttribute("title", "Follow in this tab");
-      await expect(action).toHaveText("");
+      await expect(action).toHaveAccessibleName("Follow in this tab");
+      await expect(action).toHaveText("Follow in this tab");
       await page.keyboard.press("ArrowDown");
       await expect(action).toBeFocused({ timeout: 1_500 });
       await page.keyboard.press("Enter");
@@ -1657,26 +1657,42 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
   await expect(primaryMenu).toBeVisible();
   await expect(primaryMenu.getByRole("menuitem", { name: /Open in References/u })).toBeFocused();
   await expect(primaryMenu.getByRole("menuitem")).toHaveCount(3);
-  await expect(primaryMenu.locator("svg")).toHaveCount(3);
+  // R3/R4: a fixed-height destination snippet sits above text-labeled actions.
+  const primarySnippet = primaryMenu.locator("[data-destination-snippet]");
+  await expect(primarySnippet).toHaveCount(1);
+  await expect(primarySnippet).toHaveAttribute("aria-hidden", "true");
+  await expect(primaryMenu.locator("[role='menuitem'] svg")).toHaveCount(3);
   await expect(primaryMenu.getByRole("menuitem").first()).toHaveAttribute("aria-label", "Open in References");
   await expect(primaryMenu.getByRole("menuitem").nth(1)).toHaveAttribute("aria-label", "Open in main document");
   const copyTargetLink = primaryMenu.getByRole("menuitem", {
     name: "Copy link to exact destination on page 2",
   });
   await expect(copyTargetLink).not.toHaveAttribute("title", "Copy exact destination link");
-  await expect(primaryMenu.getByRole("menuitem").first()).toHaveText("");
-  await expect(primaryMenu.getByRole("menuitem").last()).toHaveText("");
+  await expect(primaryMenu.getByRole("menuitem").first()).toHaveText("Open in References");
+  await expect(primaryMenu.getByRole("menuitem").nth(1)).toHaveText("Open in main document");
+  await expect(primaryMenu.getByRole("menuitem").last()).toHaveText("Copy link");
   const firstMenuItemBounds = await primaryMenu.getByRole("menuitem").first().boundingBox();
   expect(firstMenuItemBounds).not.toBeNull();
-  expect(firstMenuItemBounds!.width).toBe(32);
   expect(firstMenuItemBounds!.height).toBe(32);
+  const snippetBounds = await primarySnippet.boundingBox();
+  expect(snippetBounds).not.toBeNull();
+  // 112px reserved content height plus its 1px frame.
+  expect(snippetBounds!.height).toBe(114);
+  expect(snippetBounds!.y + snippetBounds!.height).toBeLessThanOrEqual(firstMenuItemBounds!.y);
   const menuBounds = await primaryMenu.boundingBox();
   expect(menuBounds).not.toBeNull();
-  expect(menuBounds!.width).toBeLessThan(140);
-  expect(menuBounds!.height).toBe(44);
+  // A 292px content column plus the surface padding.
+  expect(menuBounds!.width).toBeGreaterThan(280);
+  expect(menuBounds!.width).toBeLessThanOrEqual(320);
+  expect(firstMenuItemBounds!.width).toBeGreaterThan(menuBounds!.width - 16);
   const popoverBounds = await page.locator("[data-link-action-popover]").boundingBox();
   expect(popoverBounds).not.toBeNull();
-  expect(popoverBounds!.height).toBe(46);
+  // The snippet reserves its height, so the async image never resizes the menu.
+  await expect(primarySnippet).toHaveAttribute("data-snippet-status", "ready", {
+    timeout: REFERENCE_READY_TIMEOUT_MS,
+  });
+  expect((await page.locator("[data-link-action-popover]").boundingBox())!.height)
+    .toBe(popoverBounds!.height);
   expect(menuBounds!.x).toBeGreaterThanOrEqual(0);
   expect(menuBounds!.y).toBeGreaterThanOrEqual(0);
   expect(menuBounds!.x + menuBounds!.width).toBeLessThanOrEqual(1280);
