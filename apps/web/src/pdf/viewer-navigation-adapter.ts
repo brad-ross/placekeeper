@@ -64,6 +64,8 @@ export interface ViewerNavigationAdapterOptions {
   readonly runway?: () => ViewerRunway;
   /** Optional layout-owned margin for explicit width fitting. */
   readonly fitWidthMargins?: () => { left: number; right: number } | undefined;
+  /** Largest scale width fitting may choose; wider viewports center the page between wider margins. */
+  readonly maxFitWidthZoom?: number;
   readonly timeoutMs?: number;
   readonly coordinateTolerancePixels?: number;
   readonly zoomTolerance?: number;
@@ -222,6 +224,21 @@ export function fitViewerWidthZoom(input: {
     VIEWER_ZOOM_MIN_PERCENT / 100,
     VIEWER_ZOOM_MAX_PERCENT / 100,
   );
+}
+
+/** Widens fit margins equally so a fitted page never exceeds `maxZoom`. */
+export function readingWidthFitMargins(input: {
+  readonly margins: { readonly left: number; readonly right: number };
+  readonly viewportWidth: number;
+  readonly pageWidth: number;
+  readonly maxZoom?: number;
+}): { left: number; right: number } {
+  const { margins, viewportWidth, pageWidth, maxZoom } = input;
+  if (maxZoom === undefined || !validDimension(maxZoom) || !validDimension(pageWidth)) return margins;
+  const extra = (viewportWidth - margins.left - margins.right - pageWidth * maxZoom) / 2;
+  return Number.isFinite(extra) && extra > 0
+    ? { left: margins.left + extra, right: margins.right + extra }
+    : margins;
 }
 
 function numericParams(target: PdfNavigationTarget, count: number): readonly number[] | null {
@@ -457,6 +474,12 @@ export function createViewerNavigation(
     ?? DEFAULT_COORDINATE_TOLERANCE_PIXELS;
   const zoomTolerance = options.zoomTolerance ?? DEFAULT_ZOOM_TOLERANCE;
   const nextFrame = options.nextFrame ?? defaultNextFrame;
+  const readingFitMargins = (viewer: ActiveViewer, viewportWidth: number, pageWidth: number) => readingWidthFitMargins({
+    margins: options.fitWidthMargins?.() ?? { left: viewer.viewportGap, right: viewer.viewportGap },
+    viewportWidth,
+    pageWidth,
+    ...(options.maxFitWidthZoom === undefined ? {} : { maxZoom: options.maxFitWidthZoom }),
+  });
   let documentGeneration = options.documentGeneration;
   let operationGeneration = 0;
   let activeOperation: { operation: NavigationOperation; abort: AbortController } | null = null;
@@ -1073,7 +1096,7 @@ export function createViewerNavigation(
     const rotation = combinePageRotation(page.rotation, viewer.documentRotation);
     const width = transformSize(page.size, rotation, location.zoom).width;
     if (width > bounds.width + coordinateTolerance) return location;
-    const margins = options.fitWidthMargins?.() ?? { left: viewer.viewportGap, right: viewer.viewportGap };
+    const margins = readingFitMargins(viewer, bounds.width, transformSize(page.size, rotation, 1).width);
     const hasRoom = width <= bounds.width - margins.left - margins.right + coordinateTolerance;
     const left = hasRoom ? margins.left : 0;
     const right = bounds.width - (hasRoom ? margins.right : 0);
@@ -1171,9 +1194,9 @@ export function createViewerNavigation(
     try {
       const geometry = pageGeometry(viewer, pageIndex, undefined, viewport);
       if (geometry === null) return false;
-      const { pageRect, viewportRect, viewportElement } = geometry;
+      const { page, pageRect, rotation, viewportRect, viewportElement } = geometry;
       if (pageRect.width > viewportRect.width + coordinateTolerance) return true;
-      const margins = options.fitWidthMargins?.() ?? { left: viewer.viewportGap, right: viewer.viewportGap };
+      const margins = readingFitMargins(viewer, viewportRect.width, transformSize(page.size, rotation, 1).width);
       const hasRoomForMargins = pageRect.width <= viewportRect.width - margins.left - margins.right + coordinateTolerance;
       const readingLeft = viewportRect.left + (hasRoomForMargins ? margins.left : 0);
       const readingRight = viewportRect.right - (hasRoomForMargins ? margins.right : 0);
@@ -1302,7 +1325,7 @@ export function createViewerNavigation(
       if (geometry === null) return false;
       const { page, viewportRect, rotation } = geometry;
       const rotatedPage = transformSize(page.size, rotation, 1);
-      const fitMargins = options.fitWidthMargins?.() ?? { left: viewer.viewportGap, right: viewer.viewportGap };
+      const fitMargins = readingFitMargins(viewer, viewportRect.width, rotatedPage.width);
       const fitGap = (fitMargins.left + fitMargins.right) / 2;
       const requestedZoom = fitViewerWidthZoom({
         viewportWidth: viewportRect.width,
@@ -1441,8 +1464,11 @@ export function createViewerNavigation(
         // observer runs. Align against each live page sample before validation.
         positionFittedPage();
         const settledGeometry = pageGeometry(viewer, visible.pageIndex);
-        const liveFitMargins = options.fitWidthMargins?.()
-          ?? { left: viewer.viewportGap, right: viewer.viewportGap };
+        const liveFitMargins = readingFitMargins(
+          viewer,
+          settledGeometry?.viewportRect.width ?? 0,
+          rotatedPage.width,
+        );
         const liveFitGap = (liveFitMargins.left + liveFitMargins.right) / 2;
         const liveRequestedZoom = settledGeometry === null ? null : fitViewerWidthZoom({
           viewportWidth: settledGeometry.viewportRect.width,
@@ -1764,7 +1790,7 @@ export function createViewerNavigation(
       const geometry = pageGeometry(viewer, visible.pageIndex, visible);
       if (!geometry) return false;
       const pageWidth = transformSize(geometry.page.size, geometry.rotation, 1).width;
-      const margins = options.fitWidthMargins?.() ?? { left: viewer.viewportGap, right: viewer.viewportGap };
+      const margins = readingFitMargins(viewer, geometry.viewportRect.width, pageWidth);
       const zoom = fitViewerWidthZoom({
         viewportWidth: geometry.viewportRect.width,
         pageWidth,

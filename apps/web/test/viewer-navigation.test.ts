@@ -22,6 +22,7 @@ import {
   createViewerNavigation,
   fitViewerWidthZoom,
   focusViewerDestination,
+  readingWidthFitMargins,
 } from '../src/pdf/viewer-navigation-adapter.js';
 import type { ViewerRunway } from '../src/pdf/viewer-framing.js';
 
@@ -43,6 +44,13 @@ describe('viewer navigation math', () => {
     expect(fitViewerWidthZoom({ viewportWidth: 20, pageWidth: 1_000, viewportGap: 0 })).toBe(0.2);
     expect(fitViewerWidthZoom({ viewportWidth: 10_000, pageWidth: 100, viewportGap: 0 })).toBe(60);
     expect(fitViewerWidthZoom({ viewportWidth: 20, pageWidth: 600, viewportGap: 10 })).toBeNull();
+  });
+  it('widens fit margins equally only when the fitted page would exceed the reading zoom cap', () => {
+    const margins = { left: 30, right: 10 };
+    expect(readingWidthFitMargins({ margins, viewportWidth: 1_440, pageWidth: 600, maxZoom: 1.5 }))
+      .toEqual({ left: 280, right: 260 });
+    expect(readingWidthFitMargins({ margins, viewportWidth: 800, pageWidth: 600, maxZoom: 1.5 })).toBe(margins);
+    expect(readingWidthFitMargins({ margins, viewportWidth: 1_440, pageWidth: 600 })).toBe(margins);
   });
   it('converts PDF bottom-origin destination coordinates to natural top-origin page anchors', () => {
     expect(pdfBottomOriginPointToNaturalAnchor({ x: 72, y: 640 }, page))
@@ -322,6 +330,7 @@ function navigationHarness(options: {
   viewportWidth?: number;
   throwViewportScroll?: boolean;
   timeoutMs?: number;
+  maxFitWidthZoom?: number;
   onNextFrame?: (frame: number, pageRect: RectState) => void;
 } = {}) {
   const combinedRotation = combinePageRotation(
@@ -655,6 +664,7 @@ function navigationHarness(options: {
       }) }) as HTMLElement,
     }),
     runway: () => options.runway ?? { right: 0, bottom: 0 },
+    ...(options.maxFitWidthZoom === undefined ? {} : { maxFitWidthZoom: options.maxFitWidthZoom }),
     timeoutMs: options.timeoutMs ?? 25,
     nextFrame: async () => {
       frame += 1;
@@ -863,6 +873,16 @@ describe('viewer navigation adapter', () => {
 
     expect(await harness.navigation.fitToWidth()).toBe(true);
     expect(harness.log).toContain(`zoom:${580 / 600}`);
+  });
+
+  it('caps fit width at the reading zoom and centers the page in a wide viewport', async () => {
+    const harness = navigationHarness({ viewportGap: 10, viewportWidth: 1_400, maxFitWidthZoom: 1.5 });
+
+    expect(await harness.navigation.fitToWidth()).toBe(true);
+    expect(harness.log).toContain('zoom:1.5');
+    expect(harness.pageRect.width).toBeCloseTo(900);
+    expect(harness.pageRect.left).toBeCloseTo(250);
+    expect(harness.navigation.isFitToWidth?.()).toBe(true);
   });
 
   it('excludes a non-overlay vertical scrollbar gutter from fit width', async () => {
