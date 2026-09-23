@@ -134,6 +134,10 @@ import {
   type DestinationDescriptionResolver,
 } from '../pdf/destination-description.js';
 import {
+  createEngineDestinationSnippetRenderer,
+  type DestinationSnippetRenderer,
+} from '../pdf/destination-snippet.js';
+import {
   BrowserReviewLocationHistory,
   type ReviewLocationHistoryEnvironment,
   type ReviewLocationHistoryPort,
@@ -876,6 +880,19 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     readonly generation: number;
     readonly resolver: DestinationDescriptionResolver;
   } | null>(null);
+  // The link menu's snippet stage (KTD3): a region render of the current main document.
+  const destinationSnippetRendererRef = useRef<{
+    readonly generation: number;
+    readonly render: DestinationSnippetRenderer;
+  } | null>(null);
+  const renderDestinationSnippet = useCallback<DestinationSnippetRenderer>((description, signal) => {
+    const renderer = destinationSnippetRendererRef.current;
+    return renderer === null
+      || renderer.generation !== description.documentGeneration
+      || renderer.generation !== documentGenerationRef.current
+      ? Promise.resolve(null)
+      : renderer.render(description, signal);
+  }, []);
   const outlineDiscoveryRef = useRef<PdfOutlineDiscovery>({
     status: 'loading',
     documentGeneration: documentGenerationRef.current,
@@ -1420,6 +1437,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     navigationCoordinator.dispose();
     destinationDescriberRef.current?.resolver.dispose();
     destinationDescriberRef.current = null;
+    destinationSnippetRendererRef.current = null;
     mainLocationRefresh.cancel();
     authoringAnchorRefresh.cancel();
     viewerControlsRef.current?.dispose();
@@ -1517,6 +1535,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     viewerControlsGenerationRef.current = null;
     destinationDescriberRef.current?.resolver.dispose();
     destinationDescriberRef.current = null;
+    destinationSnippetRendererRef.current = null;
     navigationCoordinator.replaceDocument(nextGeneration, { preservePresentation: true });
     readingRestoreOperationRef.current = navigationCoordinator.operationIdentity();
     search.reset();
@@ -2057,6 +2076,10 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       reader: createEngineAnchorPageReader(engine, document),
     };
     destinationDescriberRef.current?.resolver.dispose();
+    destinationSnippetRendererRef.current = {
+      generation: documentGeneration,
+      render: createEngineDestinationSnippetRenderer({ engine, document, documentGeneration }),
+    };
     // The outline may load after the document; resolve headings lazily and
     // prepare one containment index per loaded outline.
     let headingIndex: {
@@ -2893,6 +2916,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
           linkActionRequest,
           linkDescription,
           linkActionBusy,
+          renderDestinationSnippet,
           mainDestinationBand: currentDestinationBands?.main ?? null,
           referenceDestinationBands: currentDestinationBands?.references ?? EMPTY_DESTINATION_BANDS,
           activeReferenceDestinationBand,

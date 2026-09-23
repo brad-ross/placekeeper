@@ -62,6 +62,7 @@ import type {
   ViewerPdfLinkInvocation,
 } from '../pdf/viewer-interaction-events.js';
 import type { PdfAnnotationSurface } from '../pdf/annotation-surface.js';
+import type { DestinationSnippetRenderer } from '../pdf/destination-snippet.js';
 import type {
   DestinationBand,
   LinkActionBusyState,
@@ -276,6 +277,8 @@ export interface ReviewShellWorkspaceModel {
   linkDescription?: LinkDescriptionPresentationState | null;
   /** The chosen link action while it waits for the name stage; render `aria-busy` (U5). */
   linkActionBusy?: LinkActionBusyState | null;
+  /** Region-renders the link menu's destination snippet (U5, KTD3). */
+  renderDestinationSnippet?: DestinationSnippetRenderer;
   /** Transient main-reader Destination Band (U4). */
   mainDestinationBand?: DestinationBand | null;
   /** Transient Destination Bands keyed by References tab identity (U4). */
@@ -1739,11 +1742,24 @@ export function ReviewShell(props: ReviewShellProps) {
       disabled: props.copyItemLink.disabled?.(item) ?? false,
     };
   };
-  const activePdfLinkCopy = props.workspace.linkActionRequest === null
-    || props.workspace.linkActionRequest === undefined
+  // Choosing Open in References closes the request while the destination name
+  // resolves; keep that menu shown, busy and inert, until the open proceeds (U5).
+  const linkActionBusy = props.workspace.linkActionBusy ?? null;
+  const shownLinkActionRequest = props.workspace.linkActionRequest
+    ?? (linkActionBusy?.choice === 'references' ? linkActionBusy.request : null);
+  const shownLinkActionBusyChoice = linkActionBusy !== null
+    && shownLinkActionRequest !== null
+    && linkActionBusy.request === shownLinkActionRequest
+    ? linkActionBusy.choice
+    : null;
+  const shownLinkDescription = shownLinkActionRequest !== null
+    && props.workspace.linkDescription?.request === shownLinkActionRequest
+    ? props.workspace.linkDescription
+    : null;
+  const activePdfLinkCopy = shownLinkActionRequest === null
     || props.workspace.copyLinkForLinkAction === undefined
     ? undefined
-    : props.workspace.copyLinkForLinkAction(props.workspace.linkActionRequest);
+    : props.workspace.copyLinkForLinkAction(shownLinkActionRequest);
   const [passageExposedToken, setPassageExposedToken] = useState<number | null>(null);
   const exposedPassagePlacement = useRef<PassageEditorPlacement | undefined>(undefined);
   useEffect(() => {
@@ -2616,9 +2632,14 @@ export function ReviewShell(props: ReviewShellProps) {
         inert={props.save.saveOptionsOpen ?? false}
       />
       <LinkActionPopover
-        request={props.workspace.linkActionRequest ?? null}
+        request={shownLinkActionRequest}
         openInReferencesDisabled={false}
         {...(activePdfLinkCopy === undefined ? {} : { copyLink: activePdfLinkCopy })}
+        destination={shownLinkDescription}
+        {...(props.workspace.renderDestinationSnippet === undefined
+          ? {}
+          : { renderDestinationSnippet: props.workspace.renderDestinationSnippet })}
+        busyChoice={shownLinkActionBusyChoice}
         onChoose={(choice, request) => props.workspace.onLinkActionChoose?.(choice, request)}
         onDismiss={(request, reason) => props.workspace.onLinkActionDismiss?.(request, reason)}
         sourceFocusFallback={(source) => {
