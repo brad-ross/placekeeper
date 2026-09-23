@@ -885,6 +885,16 @@ describe('viewer navigation adapter', () => {
     expect(harness.navigation.isFitToWidth?.()).toBe(true);
   });
 
+  it('follows fit width only while the last fitted scale remains current', async () => {
+    const harness = navigationHarness({ viewportGap: 10 });
+
+    expect(harness.navigation.followsFitWidth?.()).toBe(false);
+    expect(await harness.navigation.fitToWidth()).toBe(true);
+    expect(harness.navigation.followsFitWidth?.()).toBe(true);
+    harness.setCurrentZoom(1.25);
+    expect(harness.navigation.followsFitWidth?.()).toBe(false);
+  });
+
   it('excludes a non-overlay vertical scrollbar gutter from fit width', async () => {
     const harness = navigationHarness({
       constrainedHorizontal: true,

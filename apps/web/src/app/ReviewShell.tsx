@@ -176,6 +176,9 @@ export function handleReviewActionShortcut(input: {
   return true;
 }
 
+/** Lets a window drag settle before a fitted page follows its new width. */
+const RESIZE_REFIT_DELAY_MS = 120;
+
 function ignoreReferenceViewportHost(_element: HTMLDivElement | null): void {}
 function ignoreReferenceInspectionDismiss(_token: number): void {}
 function ignoreOpenAnnotationReference(_identity: AnnotationReaderIdentity): void {}
@@ -799,7 +802,7 @@ export function ReviewShell(props: ReviewShellProps) {
     if (!pendingOpeningFitRef.current || navigation === undefined) return;
     let current = true;
     // Only an already-fitted page follows the new width on opening.
-    // Manual zooms, resizing, docking, and closing preserve the current scale.
+    // Manual zooms, docking, and closing preserve the current scale.
     workspaceFraming.markUserIntent(undefined, { captureSettledPosition: false });
     void navigation.fitToWidth(async (signal) => {
       const geometry = await workspaceFraming.waitForSettledGeometry(signal);
@@ -1525,6 +1528,21 @@ export function ReviewShell(props: ReviewShellProps) {
     const frame = requestAnimationFrame(() => { void fitWidthCommand(); });
     return () => cancelAnimationFrame(frame);
   }, [workspacePresentation?.mode, workspacePresentation?.open, workspacePresentation?.referenceDock, fitWidthCommand]);
+  const fittedStageWidthRef = useRef<number | null>(null);
+  useEffect(() => {
+    // A page still at its last Fit Width scale follows window resizes. Any
+    // manual or destination zoom since that fit keeps its scale instead.
+    const width = workspaceFraming.stageSize.width;
+    const previous = fittedStageWidthRef.current;
+    fittedStageWidthRef.current = width;
+    if (previous === null || width === 0 || Math.abs(width - previous) < 1) return;
+    const follows = () => props.viewer.viewerNavigation?.followsFitWidth?.() ?? false;
+    if (!follows()) return;
+    const timer = setTimeout(() => {
+      if (follows()) void fitWidthCommand();
+    }, RESIZE_REFIT_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [workspaceFraming.stageSize.width, props.viewer.viewerNavigation, fitWidthCommand]);
   const beforeViewerAction = async () => {
     await props.viewer.viewerNavigation?.cancelPendingNavigation();
     commitMainFramingPosition();

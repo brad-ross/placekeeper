@@ -70,6 +70,8 @@ export interface ViewerNavigationControls {
   fitToWidth(waitForSettledGeometry?: WaitForSettledViewerGeometry): Promise<boolean>;
   fitToWidthReady(): boolean;
   isFitToWidth?(): boolean;
+  /** True while the scale from the last successful Fit Width is still current, so the fit should follow resizes. */
+  followsFitWidth?(): boolean;
   replaceDocument(documentGeneration: number): void;
   focusAtDestination(pageIndex: number): boolean;
   dispose(): void;

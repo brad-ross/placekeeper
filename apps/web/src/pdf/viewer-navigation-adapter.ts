@@ -485,6 +485,8 @@ export function createViewerNavigation(
   let activeOperation: { operation: NavigationOperation; abort: AbortController } | null = null;
   let rollbackBarrier: Promise<void> | null = null;
   let disposed = false;
+  let fittedZoom: number | null = null;
+  let fitOperation: NavigationOperation | null = null;
 
   const cancelPendingOperation = (): Promise<void> | null => {
     const cancelled = activeOperation;
@@ -1300,6 +1302,7 @@ export function createViewerNavigation(
     const operation = await beginOperation(viewer);
     if (operation === null) return false;
     let fitLayoutObserver: ResizeObserver | null = null;
+    fitOperation = operation;
     try {
       const deadline = Date.now() + timeoutMs;
       if (waitForSettledGeometry) {
@@ -1508,6 +1511,7 @@ export function createViewerNavigation(
       if (!applied && !operation.signal.aborted && operation.mutated) {
         await rollbackOperation(operation);
       }
+      if (applied) fittedZoom = viewer.zoom.getState().currentZoomLevel;
       return applied;
     } catch {
       if (!operation.signal.aborted && operation.mutated) {
@@ -1516,6 +1520,7 @@ export function createViewerNavigation(
       return false;
     } finally {
       fitLayoutObserver?.disconnect();
+      if (fitOperation === operation) fitOperation = null;
       if (activeOperation?.operation === operation) activeOperation = null;
     }
   };
@@ -1797,6 +1802,18 @@ export function createViewerNavigation(
         viewportGap: (margins.left + margins.right) / 2,
       });
       return zoom !== null && Math.abs(viewer.zoom.getState().currentZoomLevel - zoom) * pageWidth <= 1;
+    },
+    followsFitWidth() {
+      const viewer = activeViewer();
+      if (!viewer) return false;
+      // A resize during an unfinished fit must fit again at the newer width.
+      if (fitOperation !== null && activeOperation?.operation === fitOperation) return true;
+      if (fittedZoom === null) return false;
+      try {
+        return Math.abs(viewer.zoom.getState().currentZoomLevel - fittedZoom) <= zoomTolerance;
+      } catch {
+        return false;
+      }
     },
     fitToWidthReady() {
       const viewer = activeViewer();
