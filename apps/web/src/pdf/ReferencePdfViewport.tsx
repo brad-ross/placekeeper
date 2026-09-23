@@ -1,4 +1,5 @@
 import type { DocumentState } from '@embedpdf/core';
+import { useRegistry } from '@embedpdf/core/react';
 import { transformSize, type PdfEngine } from '@embedpdf/models';
 import { AnnotationLayer } from '@embedpdf/plugin-annotation/react';
 import { PagePointerProvider } from '@embedpdf/plugin-interaction-manager/react';
@@ -14,6 +15,7 @@ import type { PdfSearchResult } from './pdf-search-model.js';
 import { positionOwnedRect } from './owned-overlay.js';
 import { combinePageRotation } from './owned-overlay.js';
 import {
+  pageLinkAnnotationsFromRegistry,
   sourceAnnotationLinkRenderers,
 } from './PdfLinkControl.js';
 import {
@@ -139,6 +141,7 @@ export function ReferencePdfViewport({
   onPageContextMenu,
 }: ReferencePdfViewportProps) {
   const surface = referencePdfAnnotationSurface(documentGeneration, tabIdentity);
+  const { registry } = useRegistry();
   const hoveredOwnedMarkRef = useRef<{
     readonly id: string;
     readonly pageIndex: number;
@@ -157,6 +160,7 @@ export function ReferencePdfViewport({
     sourceScope: 'reference',
     documentGeneration,
     pageCount: documentState.document?.pages.length ?? 0,
+    pageLinkAnnotations: pageLinkAnnotationsFromRegistry(registry, documentId),
     ...(onInteraction === undefined ? {} : { onInteraction: emit }),
   });
   const publishScrollIntent = (root: HTMLDivElement) => {

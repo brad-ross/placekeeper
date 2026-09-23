@@ -23,6 +23,7 @@ import {
   mergeAuthoringPreviewProjections,
 } from '../review/annotation-projection.js';
 import {
+  pageLinkAnnotationsFromRegistry,
   sourceAnnotationLinkRenderers,
 } from './PdfLinkControl.js';
 import { ReferencePdfViewport } from './ReferencePdfViewport.js';
@@ -184,7 +185,7 @@ export function PdfWorkspace({
         plugins={plugins}
         {...(onInitialized === undefined ? {} : { onInitialized })}
       >
-        {({ documents, pluginsReady }) => {
+        {({ documents, pluginsReady, registry }) => {
           const mainDocument = documents[MAIN_PDF_DOCUMENT_ID];
           if (mainDocument?.status === 'error') {
             return <div className="pdf-workspace__loading" role="alert">
@@ -223,6 +224,7 @@ export function PdfWorkspace({
             sourceScope: 'main',
             documentGeneration,
             pageCount: activePdf.pages.length,
+            pageLinkAnnotations: pageLinkAnnotationsFromRegistry(registry, MAIN_PDF_DOCUMENT_ID),
             ...(onViewerInteraction === undefined ? {} : { onInteraction: onViewerInteraction }),
           });
           const referenceDocument = documents[REFERENCE_PDF_DOCUMENT_ID];

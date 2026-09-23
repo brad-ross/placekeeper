@@ -4,7 +4,10 @@ import {
   type PdfLinkAnnoObject,
   type PdfAnnotationObject,
   type PdfLinkTarget,
+  type Rect,
 } from '@embedpdf/models';
+import type { PluginRegistry } from '@embedpdf/core';
+import type { AnnotationPlugin } from '@embedpdf/plugin-annotation';
 import {
   createRenderer,
   type BoxedAnnotationRenderer,
@@ -16,6 +19,7 @@ import { classifyPdfNavigationTarget } from './pdf-navigation-target.js';
 import {
   PDF_LINK_ACTION_MENU_ID,
   PDF_LINK_INTERACTION_ATTRIBUTE,
+  fixedPdfLinkSourceRects,
   fixedViewerClientRect,
   type ViewerInteractionEvent,
   type ViewerPdfLinkSourceScope,
@@ -23,11 +27,15 @@ import {
 
 export const PDF_LINK_RENDERER_ID = 'link';
 
+/** Reads the annotations currently on one source page, consulted at activation time. */
+export type PdfPageLinkAnnotations = (pageIndex: number) => readonly PdfAnnotationObject[];
+
 export interface PdfLinkControlProps {
   readonly annotation: PdfLinkAnnoObject;
   readonly sourceScope: ViewerPdfLinkSourceScope;
   readonly documentGeneration: number;
   readonly pageCount: number;
+  readonly pageLinkAnnotations?: PdfPageLinkAnnotations;
   readonly onInteraction?: (event: ViewerInteractionEvent) => void;
 }
 
@@ -35,7 +43,50 @@ export interface PdfLinkAnnotationRendererOptions {
   readonly sourceScope: ViewerPdfLinkSourceScope;
   readonly documentGeneration: number;
   readonly pageCount: number;
+  /** Same-page annotations used to merge split link areas that share one target. */
+  readonly pageLinkAnnotations?: PdfPageLinkAnnotations;
   readonly onInteraction?: (event: ViewerInteractionEvent) => void;
+}
+
+/** Reads a document's tracked page annotations from the EmbedPDF annotation plugin. */
+export function pageLinkAnnotationsFromRegistry(
+  registry: PluginRegistry | null,
+  documentId: string,
+): PdfPageLinkAnnotations {
+  return (pageIndex) => registry
+    ?.getPlugin<AnnotationPlugin>('annotation' satisfies typeof AnnotationPlugin.id)
+    ?.provides()
+    .forDocument(documentId)
+    .getAnnotations({ pageIndex })
+    .map(({ object }) => object) ?? [];
+}
+
+/**
+ * Collects every link area on the clicked link's page whose target classifies to
+ * the same identity, always including the clicked area, in reading order.
+ */
+export function pdfLinkSourceRects(
+  clicked: PdfLinkAnnoObject,
+  targetIdentity: string,
+  context: { readonly documentGeneration: number; readonly pageCount: number },
+  pageLinkAnnotations?: PdfPageLinkAnnotations,
+): readonly Rect[] {
+  let pageAnnotations: readonly PdfAnnotationObject[] = [];
+  try {
+    pageAnnotations = pageLinkAnnotations?.(clicked.pageIndex) ?? [];
+  } catch {
+    // Sibling geometry only enriches naming; the clicked area alone stays valid.
+  }
+  const siblings = pageAnnotations.filter((annotation): annotation is PdfLinkAnnoObject => (
+    annotation.type === PdfAnnotationSubtype.LINK
+    && annotation.pageIndex === clicked.pageIndex
+    && annotation.id !== clicked.id
+    && (() => {
+      const sibling = classifyPdfNavigationTarget(annotation.target, context);
+      return sibling.ok && sibling.target.identity === targetIdentity;
+    })()
+  ));
+  return fixedPdfLinkSourceRects([clicked.rect, ...siblings.map(({ rect }) => rect)]);
 }
 
 function stopPointerFallthrough(event: PointerEvent<HTMLButtonElement>): void {
@@ -64,6 +115,7 @@ export function PdfLinkControl({
   sourceScope,
   documentGeneration,
   pageCount,
+  pageLinkAnnotations,
   onInteraction,
 }: PdfLinkControlProps) {
   const classification = classifyPdfNavigationTarget(annotation.target, {
@@ -112,6 +164,12 @@ export function PdfLinkControl({
         metadata: safeMetadata,
         opener: event.currentTarget,
         clientRect: fixedViewerClientRect(event.currentTarget.getBoundingClientRect()),
+        sourceRects: pdfLinkSourceRects(
+          annotation,
+          current.target.identity,
+          { documentGeneration, pageCount },
+          pageLinkAnnotations,
+        ),
       },
     });
   };

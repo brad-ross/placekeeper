@@ -59,6 +59,7 @@ const linkRequest = (
   metadata: createPdfNavigationMetadata({ contents: `Target ${pageIndex}`, pageIndex }),
   opener: { isConnected: true, focus: vi.fn() } as unknown as HTMLButtonElement,
   clientRect: { left: 1, top: 1, right: 2, bottom: 2, width: 1, height: 1 },
+  sourceRects: [],
 });
 
 function deferred<T>() {
@@ -580,6 +581,7 @@ describe('document-scoped navigation coordinator', () => {
       metadata: createPdfNavigationMetadata({ contents: 'Newest', pageIndex: 5 }),
       opener: {} as HTMLButtonElement,
       clientRect: { left: 1, top: 1, right: 2, bottom: 2, width: 1, height: 1 },
+      sourceRects: [],
     };
     expect(run.coordinator.requestLink(newest)).toBe(true);
     expect(run.state().pendingMainNavigation).toBeNull();
