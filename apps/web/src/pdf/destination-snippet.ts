@@ -20,6 +20,14 @@ import type { PdfDestinationDescription } from './destination-description.js';
 export const DESTINATION_SNIPPET_ASPECT = 0.4;
 /** CSS width the strip is rendered for; matches the menu's snippet frame. */
 export const DESTINATION_SNIPPET_CSS_WIDTH = 280;
+/**
+ * CSS pixels per PDF point for a destination with a spot. At actual size body
+ * text stays readable, so the strip crops to the start of the passage instead
+ * of shrinking the whole page width into the frame.
+ */
+export const DESTINATION_SNIPPET_SCALE = 1;
+/** Points kept left of the extent so its first glyphs are not flush with the frame. */
+const LEADING_MARGIN = 8;
 /** Share of the strip kept above the extent as leading context. */
 const LEADING_CONTEXT = 0.3;
 const MAX_DEVICE_PIXEL_RATIO = 2;
@@ -39,18 +47,29 @@ function clamp(value: number, minimum: number, maximum: number): number {
   return Math.min(Math.max(value, minimum), Math.max(minimum, maximum));
 }
 
-/** A page-width strip around the extent, or the top of the page without a spot. */
+/**
+ * A readable, actual-size strip starting at the passage, or the top of the
+ * whole page (scaled to fit) when the destination names no spot.
+ */
 export function destinationSnippetRegion(
   description: Pick<PdfDestinationDescription, 'spot' | 'extent'>,
   page: Size,
   aspect: number = DESTINATION_SNIPPET_ASPECT,
+  cssWidth: number = DESTINATION_SNIPPET_CSS_WIDTH,
 ): Rect {
-  const width = page.width;
-  const height = Math.min(page.height, width * aspect);
   const { spot, extent } = description;
+  const width = spot === null
+    ? page.width
+    : Math.min(page.width, cssWidth / DESTINATION_SNIPPET_SCALE);
+  const height = Math.min(page.height, width * aspect);
+  let left = 0;
   let top = 0;
   if (spot !== null) {
     const lines = extent ?? [];
+    const extentLeft = lines.length > 0
+      ? Math.min(...lines.map(({ origin }) => origin.x))
+      : spot.x;
+    left = clamp(extentLeft - LEADING_MARGIN, 0, page.width - width);
     const extentTop = lines.length > 0
       ? Math.min(...lines.map(({ origin }) => origin.y))
       : spot.y;
@@ -61,7 +80,7 @@ export function destinationSnippetRegion(
     if (extentBottom > top + height) top = extentBottom - height;
     top = clamp(top, 0, page.height - height);
   }
-  return { origin: { x: 0, y: top }, size: { width, height } };
+  return { origin: { x: left, y: top }, size: { width, height } };
 }
 
 /** Percent-of-region box for one extent line in the snippet overlay. */
@@ -110,14 +129,14 @@ export function createEngineDestinationSnippetRenderer(options: {
     if (signal.aborted || description.documentGeneration !== options.documentGeneration) return null;
     const page = options.document.pages[description.pageIndex];
     if (page === undefined || page.size.width <= 0 || page.size.height <= 0) return null;
-    const region = destinationSnippetRegion(description, page.size);
+    const region = destinationSnippetRegion(description, page.size, DESTINATION_SNIPPET_ASPECT, cssWidth);
     const dpr = clamp(
       options.devicePixelRatio ?? globalThis.devicePixelRatio ?? 1,
       1,
       MAX_DEVICE_PIXEL_RATIO,
     );
     const task = options.engine.renderPageRect(options.document, page, region, {
-      scaleFactor: cssWidth / page.size.width,
+      scaleFactor: cssWidth / region.size.width,
       dpr,
     });
     const abort = () => task.abort({ code: PdfErrorCode.Cancelled, message: 'Destination snippet cancelled' });

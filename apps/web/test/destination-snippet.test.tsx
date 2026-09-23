@@ -15,6 +15,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { PdfDestinationDescription } from '../src/pdf/destination-description.js';
 import {
   DESTINATION_SNIPPET_ASPECT,
+  DESTINATION_SNIPPET_CSS_WIDTH,
   createDestinationSnippetSession,
   createEngineDestinationSnippetRenderer,
   destinationSnippetOverlay,
@@ -61,13 +62,23 @@ function deferred<T>() {
 }
 
 describe('destination snippet region (KTD3)', () => {
-  it('renders a page-width strip that contains the extent with context above it', () => {
+  it('renders an actual-size strip starting at the passage with context above it', () => {
     const region = destinationSnippetRegion(description(), PAGE);
-    expect(region.origin.x).toBe(0);
-    expect(region.size.width).toBe(PAGE.width);
-    expect(region.size.height).toBeCloseTo(PAGE.width * DESTINATION_SNIPPET_ASPECT);
+    // Readable text: one CSS pixel per point, so the strip is the frame width
+    // in points and begins just left of the extent rather than at the page edge.
+    expect(region.size.width).toBe(DESTINATION_SNIPPET_CSS_WIDTH);
+    expect(region.origin.x).toBe(64);
+    expect(region.size.height).toBeCloseTo(DESTINATION_SNIPPET_CSS_WIDTH * DESTINATION_SNIPPET_ASPECT);
     expect(region.origin.y).toBeLessThan(400);
     expect(region.origin.y + region.size.height).toBeGreaterThanOrEqual(426);
+  });
+
+  it('keeps the actual-size strip inside the page when the passage sits near the right edge', () => {
+    const region = destinationSnippetRegion(description({
+      spot: { x: 500, y: 400 },
+      extent: [rect(500, 400, 90, 12)],
+    }), PAGE);
+    expect(region.origin.x + region.size.width).toBe(PAGE.width);
   });
 
   it('clamps the strip inside the page near the bottom edge', () => {
@@ -85,8 +96,8 @@ describe('destination snippet region (KTD3)', () => {
     expect(region.size.width).toBe(PAGE.width);
   });
 
-  it('keeps short landscape pages whole', () => {
-    const region = destinationSnippetRegion(description(), { width: 800, height: 200 });
+  it('keeps short landscape whole-page destinations whole', () => {
+    const region = destinationSnippetRegion(description({ spot: null, extent: null }), { width: 800, height: 200 });
     expect(region).toEqual(rect(0, 0, 800, 200));
   });
 
@@ -133,12 +144,12 @@ describe('engine destination snippet renderer', () => {
     const result = render(description(), new AbortController().signal);
     fake.pending.resolve(fake.blob);
     const image = await result;
-    const expectedRegion = destinationSnippetRegion(description(), PAGE);
+    const expectedRegion = destinationSnippetRegion(description(), PAGE, DESTINATION_SNIPPET_ASPECT, 300);
     expect(fake.renderPageRect).toHaveBeenCalledWith(
       fake.document,
       fake.page,
       expectedRegion,
-      expect.objectContaining({ scaleFactor: 0.5, dpr: 2 }),
+      expect.objectContaining({ scaleFactor: 1, dpr: 2 }),
     );
     expect(image).toEqual({ blob: fake.blob, region: expectedRegion });
   });
