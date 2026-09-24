@@ -2079,6 +2079,42 @@ describe('link destination descriptions and destination bands', () => {
     expect(await choosing).toBe(true);
   });
 
+  it('cancels a busy Open in References when its menu is dismissed during the name wait', async () => {
+    const pending = deferred<PdfDestinationDescription | null>();
+    const describeDestination = vi.fn((_request: DestinationDescriptionRequest, _signal: AbortSignal) => (
+      pending.promise
+    ));
+    const run = harness({ describeDestination });
+    const request = linkRequest(13, 'main', { authorLabel: false });
+    run.coordinator.requestLink(request);
+
+    const choosing = run.coordinator.chooseLink('references', request);
+    expect(run.linkBusy()).toEqual({ request, choice: 'references' });
+    run.coordinator.dismissLink(request);
+
+    expect(await choosing).toBe(false);
+    expect(run.linkBusy()).toBeNull();
+    expect(describeDestination.mock.calls[0]![1].aborted).toBe(true);
+    pending.resolve(destinationDescription(13));
+    await Promise.resolve();
+    expect(run.state().tabs).toEqual([]);
+    expect(run.referenceBand(target(13).identity)).toBeNull();
+  });
+
+  it('bands a link tab created by retrying a failed Open in References', async () => {
+    const run = harness({ describeDestination: describing(() => destinationDescription(13)) });
+    vi.mocked(run.controller.open).mockResolvedValueOnce(false);
+    const request = linkRequest(13, 'main', { authorLabel: false });
+    run.coordinator.requestLink(request);
+    expect(await run.coordinator.chooseLink('references', request)).toBe(false);
+    expect(run.state().tabs).toEqual([]);
+
+    vi.mocked(run.controller.snapshot).mockReturnValue({ documentGeneration: 1, status: 'failed' });
+    expect(await run.coordinator.retryReference()).toBe(true);
+    expect(run.state().tabs[0]?.label).toBe('Agarwal, Dahleh, et al. (2023)');
+    expect(run.referenceBand(target(13).identity)).not.toBeNull();
+  });
+
   it('opens with the page fallback and no band when the name stage bound expires', async () => {
     const never = deferred<PdfDestinationDescription | null>();
     const describeDestination = vi.fn((_request: DestinationDescriptionRequest, _signal: AbortSignal) => (
@@ -2263,6 +2299,42 @@ describe('link destination descriptions and destination bands', () => {
     expect(await run.coordinator.navigateMainTarget(target(2), 'outline')).toBe(true);
     pending.resolve(destinationDescription(6));
     await choosing;
+    expect(run.mainBand()).toBeNull();
+  });
+
+  it('shows the main band while the jump is still settling and keeps it through the jump\'s own scrolling', async () => {
+    const run = harness({ describeDestination: describing(() => destinationDescription(6)) });
+    const apply = deferred<boolean>();
+    vi.mocked(run.main.controls.applyTarget).mockImplementationOnce(() => apply.promise);
+    const request = linkRequest(6, 'main', { authorLabel: false });
+    run.coordinator.requestLink(request);
+    const choosing = run.coordinator.chooseLink('main', request);
+
+    await vi.waitFor(() => expect(run.mainBand()).not.toBeNull());
+    vi.mocked(run.main.controls.rectVisibility).mockReturnValue('outside');
+    run.coordinator.refreshMainLocation();
+    expect(run.mainBand()).not.toBeNull();
+
+    vi.mocked(run.main.controls.rectVisibility).mockReturnValue('visible');
+    apply.resolve(true);
+    expect(await choosing).toBe(true);
+    expect(run.mainBand()).not.toBeNull();
+    vi.mocked(run.main.controls.rectVisibility).mockReturnValue('outside');
+    run.coordinator.refreshMainLocation();
+    expect(run.mainBand()).toBeNull();
+  });
+
+  it('removes an early main band when its jump fails', async () => {
+    const run = harness({ describeDestination: describing(() => destinationDescription(6)) });
+    const apply = deferred<boolean>();
+    vi.mocked(run.main.controls.applyTarget).mockImplementationOnce(() => apply.promise);
+    const request = linkRequest(6, 'main', { authorLabel: false });
+    run.coordinator.requestLink(request);
+    const choosing = run.coordinator.chooseLink('main', request);
+
+    await vi.waitFor(() => expect(run.mainBand()).not.toBeNull());
+    apply.resolve(false);
+    expect(await choosing).toBe(false);
     expect(run.mainBand()).toBeNull();
   });
 

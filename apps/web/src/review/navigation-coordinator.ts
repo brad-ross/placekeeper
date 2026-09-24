@@ -410,7 +410,11 @@ export class NavigationCoordinator {
   private publishedDescription: LinkDescriptionTask | null = null;
   private linkActionBusy: LinkActionBusyState | null = null;
   private mainBand: DestinationBand | null = null;
+  /** False while the main band is shown ahead of its still-settling jump. */
+  private mainBandSettled = true;
   private referenceBands = new Map<string, DestinationBand>();
+  /** The band of a link open that failed, applied if that open is retried. */
+  private retryBand: { readonly targetIdentity: string; readonly band: DestinationBand } | null = null;
 
   constructor(private readonly dependencies: NavigationCoordinatorDependencies) {
     this.documentGeneration = dependencies.getState().documentGeneration;
@@ -579,6 +583,12 @@ export class NavigationCoordinator {
   }
 
   dismissLink(request: ViewerPdfLinkInvocation): void {
+    // Dismissing a busy menu cancels the chosen action that is still waiting
+    // for its destination name.
+    if (this.chosenDescription?.request === request) {
+      this.releaseDescription(this.chosenDescription);
+      return;
+    }
     if (this.linkRequest !== request) return;
     this.clearLinkRequest();
   }
@@ -606,7 +616,10 @@ export class NavigationCoordinator {
         break;
       case 'main':
         choiceOperation = this.navigateMainTarget(request.target, 'direct', options);
-        if (description !== null) this.handOffDescription(description, request, choice);
+        if (description !== null) {
+          this.handOffDescription(description, request, choice);
+          this.showMainBandEarly(description, this.operationToken);
+        }
         break;
       case 'same-reference':
         if (description !== null) this.releaseDescription(description);
@@ -642,12 +655,15 @@ export class NavigationCoordinator {
     if (this.chosenDescription !== task) return false;
     this.releaseDescription(task);
     if (!this.generationMatches(request.target.documentGeneration)) return false;
+    const band = bandFromDescription(description);
+    // Kept for a retry of this open, which creates the tab later.
+    this.retryBand = band === null ? null : { targetIdentity: request.target.identity, band };
     const opened = await this.openReference(
       request.target,
       linkReferenceMetadata(request.metadata, description),
     );
     if (!opened || !this.generationMatches(request.target.documentGeneration)) return opened;
-    const band = bandFromDescription(description);
+    this.retryBand = null;
     const tab = this.dependencies.getState().tabs.find((candidate) => (
       candidate.annotationIdentity === undefined
       && candidate.originalTarget.identity === request.target.identity
@@ -660,7 +676,26 @@ export class NavigationCoordinator {
     return opened;
   }
 
-  /** Sets the main band after a settled link jump if the jump is still current (KTD10). */
+  /**
+   * Shows the main band as soon as the name stage resolves, while the jump is
+   * still settling. Scrolling cannot clear it until the jump settles.
+   */
+  private showMainBandEarly(task: LinkDescriptionTask, operationToken: number): void {
+    void task.promise.then((description) => {
+      const band = bandFromDescription(description);
+      if (
+        band === null
+        || this.chosenDescription !== task
+        || this.operationToken !== operationToken
+        || !this.generationMatches(band.documentGeneration)
+      ) return;
+      this.mainBand = band;
+      this.mainBandSettled = false;
+      this.publishBands();
+    });
+  }
+
+  /** Confirms the main band once the link jump settles, or removes it when the jump failed (KTD10). */
   private async settleMainBand(
     task: LinkDescriptionTask,
     succeeded: boolean,
@@ -668,6 +703,7 @@ export class NavigationCoordinator {
   ): Promise<void> {
     if (!succeeded || this.operationToken !== operationToken || this.chosenDescription !== task) {
       if (this.chosenDescription === task) this.releaseDescription(task);
+      if (!this.mainBandSettled && this.operationToken === operationToken) this.clearMainBand();
       return;
     }
     const description = await this.awaitChosenDescription(task);
@@ -678,8 +714,12 @@ export class NavigationCoordinator {
       band === null
       || this.operationToken !== operationToken
       || !this.generationMatches(band.documentGeneration)
-    ) return;
+    ) {
+      if (!this.mainBandSettled && this.operationToken === operationToken) this.clearMainBand();
+      return;
+    }
     this.mainBand = band;
+    this.mainBandSettled = true;
     this.publishBands();
   }
 
@@ -805,6 +845,7 @@ export class NavigationCoordinator {
   }
 
   private clearMainBand(): void {
+    this.mainBandSettled = true;
     if (this.mainBand === null) return;
     this.mainBand = null;
     this.publishBands();
@@ -838,6 +879,8 @@ export class NavigationCoordinator {
       this.clearMainBand();
       return;
     }
+    // Programmatic scrolling during the jump must not clear a band shown early.
+    if (!this.mainBandSettled) return;
     const visibility = this.dependencies.getMainNavigation()
       ?.rectVisibility(band.pageIndex, bandBounds(band)) ?? 'unavailable';
     if (visibility === 'outside') this.clearMainBand();
@@ -1253,6 +1296,18 @@ export class NavigationCoordinator {
     this.pendingReference = null;
     this.referenceRestoreIdentity = null;
     this.dependencies.setPendingReference(null);
+    // A retried link open gets the band its first attempt resolved (KTD9).
+    const retryBand = this.retryBand;
+    this.retryBand = null;
+    if (
+      retryBand !== null
+      && pending.options?.annotationIdentity === undefined
+      && retryBand.targetIdentity === pending.target.identity
+      && this.generationMatches(retryBand.band.documentGeneration)
+    ) {
+      this.referenceBands.set(tabIdentity, retryBand.band);
+      this.publishBands();
+    }
     pending.options?.onSettled?.(committedSettlement ?? {
       token: operation.token,
       documentGeneration: operation.documentGeneration,
@@ -1760,7 +1815,9 @@ export class NavigationCoordinator {
     this.abortLinkDescription();
     this.abortChosenDescription();
     this.mainBand = null;
+    this.mainBandSettled = true;
     this.referenceBands.clear();
+    this.retryBand = null;
     this.publishBands();
     this.locationRestored = this.dependencies.locationHistory === undefined;
     this.dependencies.getMainNavigation()?.replaceDocument(documentGeneration);
