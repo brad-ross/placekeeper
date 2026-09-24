@@ -456,12 +456,16 @@ export function describePdfDestination(input: DescribePdfDestinationInput): PdfD
     subject: input.subject,
     pageIndex: target.pageIndex,
   }).authorLabel;
-  // R7 precedence: the first available name wins.
+  // R7 precedence: the first available name wins. An equation, figure, or
+  // table label names the destination itself, so it outranks the enclosing
+  // section heading; a section reference is better named by that heading.
+  const sectionKind = kind !== null && kind.startsWith('Section ');
   const candidates: readonly (readonly [string | null, DestinationNameSource])[] = [
     [author, 'author'],
     [clicked !== null && !isReferenceCode(clicked) ? clicked : null, 'clicked-text'],
+    [sectionKind ? null : kind, 'kind'],
     [heading, 'heading'],
-    [kind, 'kind'],
+    [sectionKind ? kind : null, 'kind'],
   ];
   const chosen = candidates.find(([candidate]) => candidate !== null);
   const [name, nameSource]: readonly [string, DestinationNameSource] = chosen

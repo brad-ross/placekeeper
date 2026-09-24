@@ -437,6 +437,21 @@ describe('tab name precedence (R7, KTD7)', () => {
     expect(description.nameSource).toBe('kind');
   });
 
+  it('names an equation reference "Eq. 1" ahead of its enclosing section heading', () => {
+    const page = pageText([
+      { text: 'y = Ax + b (1)', x: 150, top: 300, gapBefore: { 11: 300 } },
+    ]);
+    const description = describe_({
+      target: xyz(2, 72, pdfY(295)),
+      destinationText: page,
+      sourceRects: [sourceSpan(1, 25, 26)],
+      heading: '2 Setup and Intuition',
+    });
+    expect(description.heading).toBe('2 Setup and Intuition');
+    expect(description.name).toBe('Eq. 1');
+    expect(description.nameSource).toBe('kind');
+  });
+
   it('falls back to the bare page numeral for an unrecognized destination', () => {
     const page = pageText([{ text: 'Plain prose without a number.', x: 72, top: 300 }]);
     const description = describe_({
