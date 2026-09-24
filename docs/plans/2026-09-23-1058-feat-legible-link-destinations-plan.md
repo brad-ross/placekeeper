@@ -47,6 +47,7 @@ After arriving, the reference view scrolls near the destination but marks nothin
 - **The preview lives in the click menu, not on hover.** (session-settled: user-directed — chosen over a hover label, a hover snippet, and a hover snippet that pins on click: nothing should appear while reading, and one surface should answer "where does this go?") Governs R3, R5.
 - **Menu actions get visible labels.** This supersedes "Keep the existing icon-forward link-action popover and action order" in `docs/plans/2026-09-05-neutral-soft-design-contract.md`; action order is unchanged. Governs R4.
 - **Tab names start from the clicked text, bolstered for numeric references.** (session-settled: user-approved — chosen over always the clicked text, always the destination section, and always the destination text: the clicked text suits citations, while section and equation links need the destination's heading or kind to be recognizable) Governs R7.
+- **Equation labels come before section names.** (session-settled: user-directed — chosen over naming equation links after their enclosing section heading: a tab named "Eq. 1" says what the link points to, while the section name does not) Figure and table labels follow the same rule; a section reference is still named by its own heading. Governs R7.
 - **The destination mark is a persistent soft band.** (session-settled: user-directed — chosen over an arrival flash, a margin marker, and a flash that settles into a margin marker: it is the most obvious mark) Governs R10, R11.
 - **The band covers the target line and the rest of its block, capped.** (session-settled: user-approved — chosen over the target line only and a fixed-height band: a whole bibliography entry should read as marked, while a long theorem should not be banded in full) Governs R2.
 - **The main reader shows the band until the reader moves on.** (session-settled: user-approved — chosen over keeping it as long as References does and over no main-reader mark: jumps in the main reader are equally disorienting, but a lingering band would clutter ongoing reading) Governs R12.
@@ -76,7 +77,7 @@ flowchart TB
 
 **References tab names**
 
-- R7. A References tab opened from a link is named by the first available of: the link's author-provided name; the text the reader clicked, unless it reads as only a number or reference code; the destination's section heading; a kind-qualified label such as "Eq. 1" or "Section 2.3" when the kind of destination is clear; the bare page numeral.
+- R7. A References tab opened from a link is named by the first available of: the link's author-provided name; the text the reader clicked, unless it reads as only a number or reference code; an equation, figure, or table label such as "Eq. 1" when the destination is recognizably one; the destination's section heading; a "Section 2.3" label when the destination is recognizably a section; the bare page numeral.
 - R8. A truncated tab name remains fully available through its tooltip and accessible label.
 - R9. Tabs opened from the outline, search results, or annotations keep their existing names.
 
@@ -97,10 +98,10 @@ flowchart TB
   - **Given:** the text "2.3" links to the heading "2.3 The Aggregated Projection Matrix".
   - **When:** the reader opens it in References.
   - **Then:** the tab is named after the heading, not "2.3".
-- AE3. Equation reference with no usable heading. **Covers R7.**
-  - **Given:** the text "1" links to equation (1), and the destination's section heading is unavailable.
+- AE3. Equation reference. **Covers R7.**
+  - **Given:** the text "1" links to equation (1), with or without a usable section heading.
   - **When:** the reader opens it in References.
-  - **Then:** the tab is named "Eq. 1" if the destination is recognizably an equation, otherwise by its bare page numeral.
+  - **Then:** the tab is named "Eq. 1" if the destination is recognizably an equation, otherwise by its section heading or bare page numeral.
 - AE4. Main-reader band clears. **Covers R12.**
   - **Given:** the reader chooses Open in main document on a citation link.
   - **When:** the reader keeps reading the destination, then scrolls until the banded entry is fully off screen.
@@ -150,8 +151,8 @@ flowchart TB
 - KTD3. **The snippet is a region render, not a second viewer.** The snippet uses the engine's `renderPageRect` for a page-width strip around the extent, shown as an object-URL image. The object URL is revoked when the menu closes. The extent highlight is a DOM overlay drawn with the same style token as the band, not burned into the bitmap. A second live EmbedPDF viewer was rejected: the reference viewer already holds the only extra document slot. Governs R3, R6.
 - KTD4. **A spot exists only for an XYZ destination whose y lies inside the page crop box and more than one point above its bottom edge.** The engine turns a null XYZ top into y = 0, which would otherwise read as the page bottom. Fit, FitH without a top, and null-top XYZ are therefore whole-page destinations. Unreliable page text, as judged by the existing `assessPageTextReliability` gate, keeps the spot but yields no extent: no highlight and no band. Governs R6, R13.
 - KTD5. **Extent detection uses merged glyph lines from the destination page.** The glyph-to-line merge in `apps/web/src/pdf/pdf-search-controller.ts` is extracted into a shared helper. The target line is the first line whose top is at or below the spot. The block continues while the gap to the next line stays within 1.5 times the median line pitch and neither font size nor weight changes. A return to the block's opening indent after a hanging-indent line ends a bibliography entry. The block is capped at three lines. Governs R2.
-- KTD6. **Clicked text merges same-destination link areas on the source page.** hyperref and natbib split one citation into several link annotations with the same target. The resolver reads glyphs under every same-page annotation whose target identity matches, in reading order, then sanitizes the result with the existing metadata normalizer. "Reads as only a number or reference code" means the merged text contains no run of two or more letters (for example "2.3", "(1)", "[12]"; "1b" and "A.3" count as codes). Governs R7.
-- KTD7. **Tab-name precedence is implemented literally as R7 orders it.** (session-settled: user-approved — chosen over always the clicked text, always the destination section, and always the destination text: the clicked text suits citations, while section and equation links need the destination's heading or kind to be recognizable) The section heading comes from the existing outline containment resolver. When that resolver is unavailable for the document it counts as no heading, per link. Kind labels are conservative: "Eq. N" when the target line ends in a parenthesized number, "Section N" when the target line begins with the clicked number, "Figure N"/"Table N" when the target line begins with that caption word. Otherwise the next fallback applies. Governs R7, R9. **Conflict call-out:** in a PDF with a usable outline, the heading step ranks above the kind label, so most equation links will be named after their section rather than "Eq. N". AE3 then describes only the no-outline path. This is workable as settled, but the user may want kind labels to rank above headings for equations.
+- KTD6. **Clicked text merges same-destination link areas on the source page.** hyperref and natbib split one citation into several link annotations with the same target. The resolver reads glyphs under the same-page annotations whose target identity matches and that chain to the clicked area by adjacency (next to each other on a line, or wrapping from the end of one line onto the next), in reading order, then sanitizes the result with the existing metadata normalizer. A second citation of the same work elsewhere on the page stays separate. "Reads as only a number or reference code" means the merged text contains no run of two or more letters (for example "2.3", "(1)", "[12]"; "1b" and "A.3" count as codes). Governs R7.
+- KTD7. **Tab-name precedence is implemented as R7 orders it.** (session-settled: user-directed — chosen over ranking the section heading above equation labels: "Eq. N" names the destination itself) The section heading comes from the existing outline containment resolver. When that resolver is unavailable for the document it counts as no heading, per link. Kind labels are conservative: "Eq. N" when the target line ends in a parenthesized number, "Section N" when the target line begins with the clicked number, "Figure N"/"Table N" when the target line begins with that caption word. Equation, figure, and table labels rank above the heading; the "Section N" label ranks below it. Otherwise the next fallback applies. Governs R7, R9.
 - KTD8. **Bands are rendered as a sibling overlay layer to the search-highlight layer in both viewports.** The layer is inert, `aria-hidden`, and has no pointer events. It sits outside `PdfAnnotationLayers` and the source-link layer, and is positioned with `positionOwnedRect`. It carries its own color token, starting from a translucent green tint (about 18% alpha) with a 2px left edge in a darker shade of the same hue. That hue is distinct from the yellow-gold highlight fill and from the blue-gray selection background and search highlight. Keeping it out of `ReviewItem`s and the annotation plugin keeps it out of export, the annotation list, and Codex context (R11). Tests assert this at each projection boundary, per `docs/solutions/integration-issues/exclude-navigation-links-from-existing-pdf-annotations.md`. Governs R10, R11.
 - KTD9. **The References band follows the tab's original destination and attaches to any tab reached from a link.** Band state is a transient map from tab identity to band, owned by the navigation coordinator next to the reference-return presentation state. It is set whenever a link opens or deduplicates into a tab with a spot. It is dropped on tab close and on document generation change. A deduplicated outline, search, or annotation tab keeps its name (R9) and gains the band. "Follow in this tab" leaves the band on the original destination, matching the return control. Governs R9, R10.
 - KTD10. **The main-reader band clears on the first of four events.** It is set only after a successful `chooseLink('main')` jump settles, never from outline, search, or annotation jumps. It clears on:
@@ -344,7 +345,7 @@ U1 and U2 are independent foundations. U3 wires them into navigation. U4 and U5 
 **Approach:**
 1. Render one inert, `aria-hidden` band element per extent rectangle, positioned with `positionOwnedRect` on the band's page only.
 2. Pass the active tab's band into the reference viewport as a prop, the same way search results are passed.
-3. Implement KTD8's band token. Review it in the U6 visual snapshots, where it must read as marked on a white page and remain distinguishable when a highlight annotation or search hit overlaps it.
+3. Implement KTD8's band token. It must read as marked on a white page and remain distinguishable when a highlight annotation or search hit overlaps it; check this in the U6 acceptance screenshots.
 
 **Patterns to follow:** search highlight layers in both viewports (`data-pdf-search-highlight-layer`), `apps/web/src/pdf/owned-overlay.ts`.
 
@@ -410,7 +411,6 @@ U1 and U2 are independent foundations. U3 wires them into navigation. U4 and U5 
 - Modify `test/fixtures/pdfs/generate.ts` (a bibliography page with hanging-indent entries, and links without `Contents`: a split citation, a section reference, an equation reference, and a `/XYZ null null null` link)
 - Create `test/acceptance/legible-link-destinations.spec.ts`
 - Modify `scripts/testing/suites.ts` (register the new spec in `test:e2e` and `test:ci:chromium`)
-- Modify `test/acceptance/review-visual.spec.ts` and its snapshots (link menu with snippet, banded reference tab, narrow layout)
 
 **Approach:**
 1. Extend `referenceNavigationPdf` or add a sibling fixture so every AE has a concrete link.
@@ -423,14 +423,14 @@ U1 and U2 are independent foundations. U3 wires them into navigation. U4 and U5 
 **Test scenarios:**
 - Covers AE1. Click the split citation. The menu shows the snippet and labeled actions. Open in References yields a tab named with the full citation and a banded entry that survives scrolling away and back.
 - Covers AE2. The section-reference tab is named after its heading.
-- Covers AE3. The equation-reference tab in the no-outline fixture is named "Eq. 1".
+- Covers AE3. The equation-reference tab is named "Eq. 1".
 - Covers AE4. Open in main document shows a band that clears after scrolling it fully out of view and stays cleared on return.
 - Covers AE5. The null-top link shows the top-of-page snippet with no highlight and no band.
 - Covers AE6. After opening a banded tab, the Annotations list and an exported reviewed PDF contain no band.
 - A long link-derived tab name truncates with ellipsis in the right-docked tab bar and fills the vertical rail, with the full name available as its accessible label (R8).
 - The menu over an overlapping References viewer stays below it in stacking order, in Chromium and WebKit.
 
-**Verification:** The new acceptance spec passes in Chromium and WebKit. Visual snapshots are updated only for the menu, band, and tab-name changes.
+**Verification:** The new acceptance spec passes in Chromium and WebKit. Visual snapshot regeneration is out of scope for this plan (user-directed); the acceptance screenshots stand in for visual review.
 
 ---
 
@@ -443,7 +443,6 @@ U1 and U2 are independent foundations. U3 wires them into navigation. U4 and U5 
 | CI unit | `pnpm test:ci:unit` | The CI vitest configuration picks up the new test files. |
 | Acceptance | `pnpm test:e2e` and `pnpm test:ci:chromium` | U6 acceptance flows, including the newly registered spec, pass. |
 | WebKit | `pnpm test:ci:webkit` | Menu stacking and band geometry hold in WebKit. |
-| Visual | `pnpm test:visual` | Snapshot changes are limited to the menu, band, and tab names. |
 
 ---
 
