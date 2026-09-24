@@ -134,6 +134,7 @@ describe('Destination Bands and annotation projections', () => {
   };
   const inventory = inventoryExistingAnnotations([source('reader-highlight'), link('citation-link')]);
 
+  // Bands reach the shell only inside the rendered viewer, as they do in production.
   function annotationsList(bands: boolean): string {
     return renderToStaticMarkup(createElement(ReviewShell, {
       state: reviewState,
@@ -142,23 +143,27 @@ describe('Destination Bands and annotation projections', () => {
       authoring: { onCommand: async () => reviewState },
       viewer: {},
       existingAnnotations: { status: 'ready', generation: 1, items: inventory },
-      workspace: {
-        listOpen: true,
-        ...(bands ? {
-          mainDestinationBand: band,
-          referenceDestinationBands: new Map([['tab-1', band]]),
-          activeReferenceDestinationBand: band,
-        } : {}),
-      },
-    }, createElement('div', { 'data-annotation-surface': 'main' }, 'Main document')));
+      workspace: { listOpen: true },
+    }, createElement(
+      'div',
+      { 'data-annotation-surface': 'main' },
+      'Main document',
+      bands ? createElement('div', {
+        'data-pdf-destination-band-layer': '',
+        'data-destination-target': band.targetIdentity,
+      }) : null,
+    )));
   }
 
   it('Covers AE6. a present band adds nothing to the existing-annotation inventory or the Annotations list', () => {
     expect(inventory.map(({ id }) => id)).toEqual(['reader-highlight']);
     const withBands = annotationsList(true);
     expect(withBands).toContain('Reader note');
-    expect(withBands).not.toContain('band-target-p14');
-    expect(withBands).not.toContain('data-pdf-destination-band');
-    expect(withBands).toBe(annotationsList(false));
+    // The band appears once, in the viewer, and nowhere in the Annotations list.
+    expect(withBands.split('band-target-p14')).toHaveLength(2);
+    expect(withBands.replace(
+      /<div data-pdf-destination-band-layer="" data-destination-target="band-target-p14"><\/div>/u,
+      '',
+    )).toBe(annotationsList(false));
   });
 });

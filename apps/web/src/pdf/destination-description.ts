@@ -456,15 +456,17 @@ export function describePdfDestination(input: DescribePdfDestinationInput): PdfD
     subject: input.subject,
     pageIndex: target.pageIndex,
   }).authorLabel;
-  const [name, nameSource]: readonly [string, DestinationNameSource] = author !== null
-    ? [author, 'author']
-    : clicked !== null && !isReferenceCode(clicked)
-      ? [clicked, 'clicked-text']
-      : heading !== null
-        ? [heading, 'heading']
-        : kind !== null
-          ? [kind, 'kind']
-          : [pageNumeral, 'page'];
+  // R7 precedence: the first available name wins.
+  const candidates: readonly (readonly [string | null, DestinationNameSource])[] = [
+    [author, 'author'],
+    [clicked !== null && !isReferenceCode(clicked) ? clicked : null, 'clicked-text'],
+    [heading, 'heading'],
+    [kind, 'kind'],
+  ];
+  const chosen = candidates.find(([candidate]) => candidate !== null);
+  const [name, nameSource]: readonly [string, DestinationNameSource] = chosen
+    ? [chosen[0]!, chosen[1]]
+    : [pageNumeral, 'page'];
 
   return {
     documentGeneration: target.documentGeneration,
@@ -552,24 +554,24 @@ export function createEngineDestinationPageReader(
     const page = document.pages[pageIndex];
     if (!page) throw new Error(`PDF page ${pageIndex} is unavailable.`);
     const signal = disposal.signal;
+    // Style runs are optional; read them alongside the required text so a
+    // failure only drops the style signal without delaying the other reads.
+    const runsRead = abortableTask(engine.getPageTextRuns(document, page), signal).then(
+      (runs) => runs.runs.map((run): DestinationTextStyleRun => ({
+        charIndex: run.charIndex,
+        charCount: run.charCount,
+        fontSize: run.fontSize,
+        fontWeight: run.font.weight,
+      })),
+      () => undefined,
+    );
     const [text, glyphs, textRects] = await Promise.all([
       abortableTask(engine.extractText(document, [pageIndex]), signal),
       abortableTask(engine.getPageGlyphs(document, page), signal),
       abortableTask(engine.getPageTextRects(document, page), signal),
     ]);
-    let styleRuns: DestinationTextStyleRun[] | undefined;
-    try {
-      const runs = await abortableTask(engine.getPageTextRuns(document, page), signal);
-      styleRuns = runs.runs.map((run) => ({
-        charIndex: run.charIndex,
-        charCount: run.charCount,
-        fontSize: run.fontSize,
-        fontWeight: run.font.weight,
-      }));
-    } catch {
-      if (signal.aborted) throw new Error('Destination page reader disposed.');
-      styleRuns = undefined;
-    }
+    const styleRuns = await runsRead;
+    if (styleRuns === undefined && signal.aborted) throw new Error('Destination page reader disposed.');
     return {
       text,
       glyphs,

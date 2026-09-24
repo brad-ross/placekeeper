@@ -847,7 +847,7 @@ export class NavigationCoordinator {
     target: PdfNavigationTarget,
     sourceTabIdentity: string,
   ): Promise<boolean> {
-    const operation = this.begin(target.documentGeneration, false, false);
+    const operation = this.begin(target.documentGeneration, { movesMain: false });
     if (operation === null) return false;
     this.clearReferenceReturnState();
     const state = this.dependencies.getState();
@@ -983,7 +983,7 @@ export class NavigationCoordinator {
     preservedMainTarget?: PdfNavigationTarget | null,
     options: ReferenceOpenOptions = {},
   ): Promise<boolean> {
-    const operation = this.begin(target.documentGeneration, false, false);
+    const operation = this.begin(target.documentGeneration, { movesMain: false });
     if (operation === null) return false;
     this.clearReferenceReturnState();
     const state = this.dependencies.getState();
@@ -1182,7 +1182,7 @@ export class NavigationCoordinator {
     ) return false;
     const status = controller.snapshot().status;
     if (status !== 'failed' && status !== 'loaded') return false;
-    const operation = this.begin(pending.documentGeneration, true, false);
+    const operation = this.begin(pending.documentGeneration, { preservePendingReference: true, movesMain: false });
     if (operation === null) return false;
     const preserveMain = pending.preservedMainTarget !== undefined;
     const main = preserveMain ? this.dependencies.getMainNavigation() : undefined;
@@ -1267,7 +1267,7 @@ export class NavigationCoordinator {
   }
 
   async switchReference(identity: string): Promise<boolean> {
-    const operation = this.begin(this.documentGeneration, false, false);
+    const operation = this.begin(this.documentGeneration, { movesMain: false });
     if (operation === null) return false;
     this.clearReferenceReturnState();
     await this.dependencies.layout.settle();
@@ -1283,7 +1283,7 @@ export class NavigationCoordinator {
       this.dependencies.layout.revealReferences();
       return true;
     }
-    const operation = this.begin(this.documentGeneration, false, false);
+    const operation = this.begin(this.documentGeneration, { movesMain: false });
     if (operation === null) return false;
     this.clearReferenceReturnState();
     this.dependencies.dispatch({ type: 'select-workspace-mode', mode: 'references' });
@@ -1324,7 +1324,7 @@ export class NavigationCoordinator {
   }
 
   async closeReference(identity: string): Promise<boolean> {
-    const operation = this.begin(this.documentGeneration, false, false);
+    const operation = this.begin(this.documentGeneration, { movesMain: false });
     if (operation === null) return false;
     this.clearReferenceReturnState();
     const state = this.dependencies.getState();
@@ -2329,9 +2329,11 @@ export class NavigationCoordinator {
 
   private begin(
     documentGeneration = this.documentGeneration,
-    preservePendingReference = false,
-    // Reference-only operations leave the main reader where it is, so its band stays.
-    movesMain = true,
+    {
+      preservePendingReference = false,
+      // Reference-only operations leave the main reader where it is, so its band stays.
+      movesMain = true,
+    }: { readonly preservePendingReference?: boolean; readonly movesMain?: boolean } = {},
   ): Operation | null {
     if (!this.generationMatches(documentGeneration)) return null;
     this.dependencies.resetReferenceManualScrollIntent();

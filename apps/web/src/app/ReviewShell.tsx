@@ -64,7 +64,6 @@ import type {
 import type { PdfAnnotationSurface } from '../pdf/annotation-surface.js';
 import type { DestinationSnippetRenderer } from '../pdf/destination-snippet.js';
 import type {
-  DestinationBand,
   LinkActionBusyState,
   LinkDescriptionPresentationState,
 } from '../review/navigation-coordinator.js';
@@ -279,12 +278,6 @@ export interface ReviewShellWorkspaceModel {
   linkActionBusy?: LinkActionBusyState | null;
   /** Region-renders the link menu's destination snippet (U5, KTD3). */
   renderDestinationSnippet?: DestinationSnippetRenderer;
-  /** Transient main-reader Destination Band (U4). */
-  mainDestinationBand?: DestinationBand | null;
-  /** Transient Destination Bands keyed by References tab identity (U4). */
-  referenceDestinationBands?: ReadonlyMap<string, DestinationBand>;
-  /** The active References tab's band, for the reference viewport (U4). */
-  activeReferenceDestinationBand?: DestinationBand | null;
   navigationAnnouncement?: string;
   canNavigateBack?: boolean;
   canNavigateForward?: boolean;

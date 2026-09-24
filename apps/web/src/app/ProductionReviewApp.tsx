@@ -576,7 +576,6 @@ export function initialWorkspaceLocationForGeneration(
   return currentGeneration === initialGeneration ? location : undefined;
 }
 
-const EMPTY_DESTINATION_BANDS: ReadonlyMap<string, DestinationBand> = new Map();
 
 export function ProductionReviewApp(props: ProductionReviewAppProps) {
   const availableModes = useContext(WorkspaceModeAvailability);
@@ -2917,9 +2916,6 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
           linkDescription,
           linkActionBusy,
           renderDestinationSnippet,
-          mainDestinationBand: currentDestinationBands?.main ?? null,
-          referenceDestinationBands: currentDestinationBands?.references ?? EMPTY_DESTINATION_BANDS,
-          activeReferenceDestinationBand,
           navigationAnnouncement,
           canNavigateBack: locationHistory === undefined
             ? navigationState.mainHistory.index > 0
