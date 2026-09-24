@@ -373,6 +373,23 @@ function glyphInside(glyph: PdfGlyphObject, rect: Rect): boolean {
     && y <= rect.origin.y + rect.size.height + SOURCE_RECT_TOLERANCE;
 }
 
+/**
+ * Glyph boxes can spill past the crop edge; a band that overhangs the page
+ * cannot be judged scrolled out of view, so extents stay on the page.
+ */
+function clipToPage(rects: readonly Rect[], geometry: DestinationPageGeometry): readonly Rect[] | null {
+  const clipped = rects.flatMap((rect) => {
+    const left = Math.max(rect.origin.x, 0);
+    const top = Math.max(rect.origin.y, 0);
+    const right = Math.min(rect.origin.x + rect.size.width, geometry.width);
+    const bottom = Math.min(rect.origin.y + rect.size.height, geometry.height);
+    return right > left && bottom > top
+      ? [{ origin: { x: left, y: top }, size: { width: right - left, height: bottom - top } }]
+      : [];
+  });
+  return clipped.length === 0 ? null : clipped;
+}
+
 function validRect(rect: Rect): boolean {
   return finite(rect.origin.x, rect.origin.y, rect.size.width, rect.size.height)
     && rect.size.width > 0
@@ -444,7 +461,7 @@ export function describePdfDestination(input: DescribePdfDestinationInput): PdfD
   const block = spot !== null && reliablePageText(input.destinationText)
     ? resolveTargetBlock(input.destinationText, spot)
     : null;
-  const extent = block === null ? null : block.lines.map(({ rect }) => rect);
+  const extent = block === null ? null : clipToPage(block.lines.map(({ rect }) => rect), input.geometry);
   const clicked = clickedText(input.sourceText, input.sourceRects);
   const heading = sanitizePdfDisplayText(input.heading);
   const kind = block === null || block.targetLineText.length === 0

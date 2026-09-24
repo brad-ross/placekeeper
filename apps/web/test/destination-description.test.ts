@@ -205,6 +205,14 @@ describe('destination extent (KTD5)', () => {
       .toHaveLength(1);
   });
 
+  it('clips an extent that spills past the page edge to the page', () => {
+    const page = pageText([
+      { text: 'A line that runs off the right edge of the page', x: 400, top: 100 },
+    ]);
+    const extent = describe_({ target: xyz(0, 400, pdfY(98)), destinationText: page }).extent;
+    expect(extent).toEqual([rect(400, 100, 200, 10)]);
+  });
+
   it('stops a block at a vertical gap beyond 1.5 times the median line pitch', () => {
     const page = pageText([
       { text: 'First paragraph line one.', x: 72, top: 100 },
