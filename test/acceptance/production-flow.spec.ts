@@ -5492,10 +5492,16 @@ test('defaults a real PDF to fit width and refits bottom and resizable right rea
     const rightGap = rightEdge === undefined ? 0 : standardGap;
     await expect.poll(async () => {
       const geometry = await horizontalGeometry(rightEdge);
+      // At the reading-zoom cap the page stops growing and is centered, so the
+      // unused width splits evenly between both gaps.
+      const capped = await zoomValue().inputValue() === '150';
+      const extra = capped
+        ? Math.max(0, (geometry.intervalWidth - standardGap - rightGap - geometry.pageWidth) / 2)
+        : 0;
       return Math.max(
-        Math.abs(geometry.pageWidth - (geometry.intervalWidth - standardGap - rightGap)),
-        Math.abs(geometry.leftGap - standardGap),
-        Math.abs(geometry.rightGap - rightGap),
+        Math.abs(geometry.pageWidth - (geometry.intervalWidth - standardGap - rightGap - 2 * extra)),
+        Math.abs(geometry.leftGap - standardGap - extra),
+        Math.abs(geometry.rightGap - rightGap - extra),
       );
     }).toBeLessThan(3);
     const geometry = await horizontalGeometry(rightEdge);
@@ -5563,12 +5569,13 @@ test('defaults a real PDF to fit width and refits bottom and resizable right rea
   expect(bottomGeometry.pageWidth).toBeCloseTo(closedGeometry.pageWidth, 0);
   await expect(page.getByRole('textbox', { name: /Current page 1 of 4/u })).toHaveValue('1');
 
+  // A fitted page follows window resizes, returning to the capped zoom when wide again.
   await page.setViewportSize({ width: 760, height: 900 });
   await expect(page.locator('[data-review-stage]')).toHaveAttribute('data-annotation-presentation', 'bottom');
-  expect(await zoomValue().inputValue()).toBe(closedZoom);
+  await expect.poll(() => zoomValue().inputValue()).not.toBe(closedZoom);
   await page.setViewportSize({ width: 1280, height: 900 });
   await expect(page.locator('[data-review-stage]')).toHaveAttribute('data-annotation-presentation', 'right');
-  expect(await zoomValue().inputValue()).toBe(closedZoom);
+  await expect.poll(() => zoomValue().inputValue()).toBe(closedZoom);
 
   await clickHoverRevealedReferenceDockAction(
     page.getByRole('button', { name: 'Move References to right' }),
@@ -5580,45 +5587,41 @@ test('defaults a real PDF to fit width and refits bottom and resizable right rea
     .toBeGreaterThan(0);
   const rightWorkspaceBounds = await referenceWorkspace.boundingBox();
   if (!rightWorkspaceBounds) throw new Error('Right workspace has no bounds.');
-  expect(await zoomValue().inputValue()).toBe(closedZoom);
-  expect(await mainPage.boundingBox().then((bounds) => bounds?.width))
-    .toBeCloseTo(bottomGeometry.pageWidth, 0);
   await expect.poll(async () => {
     const bounds = (await mainWorkspace.boundingBox())!;
     return Math.abs(bounds.x + bounds.width - rightWorkspaceBounds.x);
   }).toBeLessThan(1);
-  await fitAndWait();
+  // The capped page still fits the right-docked reading width without a new fit.
+  await waitForStageMotion();
   const initialRightGeometry = await expectFitted(24, rightWorkspaceBounds.x);
   await expectScrollbarAtWindowEdge();
-  expect(initialRightGeometry.pageWidth).toBeLessThan(bottomGeometry.pageWidth);
+  // A right dock still leaves room for the capped page at this window width.
+  expect(initialRightGeometry.pageWidth).toBeLessThanOrEqual(bottomGeometry.pageWidth + 1);
   const rightFitZoom = await zoomValue().inputValue();
 
   const rightSplitter = page.getByRole('separator', { name: 'Resize References' });
   await expect(rightSplitter).toHaveAttribute('aria-orientation', 'vertical');
-  await rightSplitter.press('ArrowLeft');
+  // Widen References until the reading width is narrower than the fitted page.
+  for (let step = 0; step < 20; step += 1) {
+    const workspaceLeft = (await referenceWorkspace.boundingBox())?.x ?? 0;
+    if (workspaceLeft - 2 * 24 < initialRightGeometry.pageWidth - 40) break;
+    await rightSplitter.press('ArrowLeft');
+    await waitForStageMotion();
+  }
   await expect.poll(async () => (await referenceWorkspace.boundingBox())?.width ?? 0)
     .toBeGreaterThan(rightWorkspaceBounds.width);
   const resizedWorkspaceBounds = await referenceWorkspace.boundingBox();
   if (!resizedWorkspaceBounds) throw new Error('Resized right workspace has no bounds.');
+  // Dragging the docked References splitter keeps the page's scale until Fit Width.
   expect(await zoomValue().inputValue()).toBe(rightFitZoom);
-  expect(await mainPage.boundingBox().then((bounds) => bounds?.width)).toBeCloseTo(
-    initialRightGeometry.pageWidth,
-    0,
-  );
-
   await fitAndWait();
   const resizedRightGeometry = await expectFitted(24, resizedWorkspaceBounds.x);
   expect(resizedRightGeometry.pageWidth).toBeLessThan(initialRightGeometry.pageWidth);
-  const resizedFitZoom = await zoomValue().inputValue();
+  expect(await zoomValue().inputValue()).not.toBe(rightFitZoom);
 
   await page.setViewportSize({ width: 1240, height: 900 });
   await expect(referenceWorkspace).toHaveAttribute('data-workspace-presentation', 'right');
-  expect(await zoomValue().inputValue()).toBe(resizedFitZoom);
-  expect(await mainPage.boundingBox().then((bounds) => bounds?.width)).toBeCloseTo(
-    resizedRightGeometry.pageWidth,
-    0,
-  );
-  await fitAndWait();
+  await waitForStageMotion();
   const resizedViewportWorkspaceBounds = await referenceWorkspace.boundingBox();
   if (!resizedViewportWorkspaceBounds) throw new Error('Responsive right workspace has no bounds.');
   await expectFitted(24, resizedViewportWorkspaceBounds.x);

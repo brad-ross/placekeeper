@@ -276,6 +276,10 @@ test("Covers AE4. the main-reader band clears once scrolled fully out of view an
   const layer = mainBandLayer(page);
   const bands = layer.locator("[data-pdf-destination-band]");
   await expect(bands).toHaveCount(3, { timeout: READY_TIMEOUT_MS });
+  // The band appears while the jump is still settling; scrolling before it
+  // settles would be pulled back to the destination.
+  await expect(page.locator(".review-workspace__status"))
+    .toHaveText("Main document destination opened.", { timeout: READY_TIMEOUT_MS });
   const viewport = mainWorkspace(page).locator("[data-viewer-framing-viewport]");
   await expect.poll(() => boundsInside(bands.first(), viewport)).toBe(true);
 
