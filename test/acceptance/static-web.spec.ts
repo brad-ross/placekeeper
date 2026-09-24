@@ -642,7 +642,9 @@ test('@critical landing demos support zoom, references, and isolated comments', 
   await demo.locator('[data-pdf-copy-surface="main"] [data-page-index="14"]').getByRole('button', { name: 'Open PDF link to Page 31', exact: true }).first().click();
   await demo.getByRole('menuitem', { name: 'Open in References', exact: true }).focus();
   await page.keyboard.press('Enter');
-  await expect(demo.getByText('Reference opened: Page 31.', { exact: true })).toBeAttached();
+  // A link without an author name is named from its destination (the clicked
+  // text reads as a reference code, so the section heading names the tab).
+  await expect(demo.getByText('Reference opened: Proof of Theorem 1.', { exact: true })).toBeAttached();
   const reference = demo.locator('[data-reference-pdf-viewport] [data-viewer-framing-viewport]');
   await expect(reference.locator('[data-page-index="30"] > img').first()).toBeVisible();
   const before = await reference.evaluate((element) => element.scrollTop);
