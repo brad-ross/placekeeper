@@ -48,6 +48,7 @@ After arriving, the reference view scrolls near the destination but marks nothin
 - **Menu actions get visible labels.** This supersedes "Keep the existing icon-forward link-action popover and action order" in `docs/plans/2026-09-05-neutral-soft-design-contract.md`; action order is unchanged. Governs R4.
 - **Tab names start from the clicked text, bolstered for numeric references.** (session-settled: user-approved — chosen over always the clicked text, always the destination section, and always the destination text: the clicked text suits citations, while section and equation links need the destination's heading or kind to be recognizable) Governs R7.
 - **Equation labels come before section names.** (session-settled: user-directed — chosen over naming equation links after their enclosing section heading: a tab named "Eq. 1" says what the link points to, while the section name does not) Figure and table labels follow the same rule; a section reference is still named by its own heading. Governs R7.
+- **Icon-only actions in one row, and a blue highlight-style band.** (session-settled: user-directed after review in the browser — chosen over visibly labeled actions and a green band with an edge stripe: the snippet already says where the link goes, so the actions can stay compact, and the band should read like the app's other text highlights) The action row puts the icons left and the destination page numeral right, in the annotation peek card's page style. Supersedes R4's visible labels and KTD8's green tint and edge. Governs R4, R10.
 - **The destination mark is a persistent soft band.** (session-settled: user-directed — chosen over an arrival flash, a margin marker, and a flash that settles into a margin marker: it is the most obvious mark) Governs R10, R11.
 - **The band covers the target line and the rest of its block, capped.** (session-settled: user-approved — chosen over the target line only and a fixed-height band: a whole bibliography entry should read as marked, while a long theorem should not be banded in full) Governs R2.
 - **The main reader shows the band until the reader moves on.** (session-settled: user-approved — chosen over keeping it as long as References does and over no main-reader mark: jumps in the main reader are equally disorienting, but a lingering band would clutter ongoing reading) Governs R12.
@@ -71,7 +72,7 @@ flowchart TB
 **Link menu**
 
 - R3. Clicking a link opens its action menu with a rendered snippet of the destination page around the target spot, the extent (R2) highlighted, and the destination's bare page numeral.
-- R4. Menu actions show visible text labels, keeping today's actions and order: Open in References, Follow in this tab (only inside References), Open in main document, and Copy link.
+- R4. Menu actions stay icon-only with tooltips, in one row below the snippet, keeping today's actions and order: Open in References, Follow in this tab (only inside References), Open in main document, and Copy link. The destination page numeral closes the row on the right.
 - R5. Pointing at a link without clicking shows no preview.
 - R6. When the link targets a whole page rather than a spot, the snippet shows the top of that page with nothing highlighted.
 
