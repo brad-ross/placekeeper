@@ -62,8 +62,27 @@ export function pageLinkAnnotationsFromRegistry(
 }
 
 /**
- * Collects every link area on the clicked link's page whose target classifies to
- * the same identity, always including the clicked area, in reading order.
+ * Whether two same-destination link areas are pieces of one link: next to each
+ * other on a line, or one wrapping from the end of a line onto the next.
+ */
+function adjacentLinkAreas(a: Rect, b: Rect): boolean {
+  const height = Math.max(a.size.height, b.size.height, 1);
+  const aCenter = a.origin.y + a.size.height / 2;
+  const bCenter = b.origin.y + b.size.height / 2;
+  if (Math.abs(aCenter - bCenter) <= height / 2) {
+    const gap = Math.max(b.origin.x - (a.origin.x + a.size.width), a.origin.x - (b.origin.x + b.size.width), 0);
+    return gap <= height * 2;
+  }
+  const [upper, lower] = aCenter < bCenter ? [a, b] : [b, a];
+  const lineGap = lower.origin.y - (upper.origin.y + upper.size.height);
+  // A wrapped link continues at the start of the next line, left of where it broke.
+  return lineGap <= height && lower.origin.x < upper.origin.x;
+}
+
+/**
+ * Collects the link areas that form the clicked link: same-page areas with the
+ * same destination that chain to the clicked area by adjacency, in reading
+ * order. A second citation of the same work elsewhere on the page is separate.
  */
 export function pdfLinkSourceRects(
   clicked: PdfLinkAnnoObject,
@@ -86,7 +105,22 @@ export function pdfLinkSourceRects(
       return sibling.ok && sibling.target.identity === targetIdentity;
     })()
   ));
-  return fixedPdfLinkSourceRects([clicked.rect, ...siblings.map(({ rect }) => rect)]);
+  const chain: Rect[] = [clicked.rect];
+  let remaining = siblings.map(({ rect }) => rect);
+  for (let grew = true; grew;) {
+    grew = false;
+    const next: Rect[] = [];
+    for (const rect of remaining) {
+      if (chain.some((member) => adjacentLinkAreas(member, rect))) {
+        chain.push(rect);
+        grew = true;
+      } else {
+        next.push(rect);
+      }
+    }
+    remaining = next;
+  }
+  return fixedPdfLinkSourceRects(chain);
 }
 
 function stopPointerFallthrough(event: PointerEvent<HTMLButtonElement>): void {

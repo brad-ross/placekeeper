@@ -182,6 +182,19 @@ describe('PDF link source geometry', () => {
     expect(activate(secondLine, page).value.sourceRects).toEqual(expected);
   });
 
+  it('keeps a second citation of the same work on the page separate from the clicked one', () => {
+    // natbib author and year pieces sit together; the same work is cited again lower down.
+    const author = pageLink('cite-a', rect(100, 50, 90), { type: 'destination', destination });
+    const year = pageLink('cite-y', rect(195, 50, 30), { type: 'destination', destination: { ...destination } });
+    const laterSameLine = pageLink('cite-b', rect(420, 50, 90), { type: 'destination', destination: { ...destination } });
+    const laterParagraph = pageLink('cite-c', rect(60, 200, 90), { type: 'destination', destination: { ...destination } });
+    const page = () => [author, year, laterSameLine, laterParagraph];
+
+    expect(activate(author, page).value.sourceRects).toEqual([rect(100, 50, 90), rect(195, 50, 30)]);
+    expect(activate(laterSameLine, page).value.sourceRects).toEqual([rect(420, 50, 90)]);
+    expect(activate(laterParagraph, page).value.sourceRects).toEqual([rect(60, 200, 90)]);
+  });
+
   it('never merges links whose targets classify to different identities', () => {
     const own = pageLink('a', rect(10, 10), { type: 'destination', destination });
     const other = pageLink('b', rect(60, 10), { type: 'destination', destination: otherDestination });
