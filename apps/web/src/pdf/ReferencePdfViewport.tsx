@@ -53,8 +53,6 @@ import type { DestinationBand } from '../review/navigation-coordinator.js';
 
 /** Fill token for the transient Destination Band; the link-menu snippet reuses it. */
 export const DESTINATION_BAND_TOKEN = '--review-destination-band';
-/** Darker same-hue edge token drawn on the band's first rect. */
-export const DESTINATION_BAND_EDGE_TOKEN = '--review-destination-band-edge';
 
 export interface DestinationBandLayerProps {
   readonly band: DestinationBand | null | undefined;
@@ -102,7 +100,6 @@ export function DestinationBandLayer({
         return <span
           key={index}
           data-pdf-destination-band=""
-          {...(index === 0 ? { 'data-pdf-destination-band-edge': 'true' } : {})}
           style={{
             position: 'absolute',
             left: positioned.origin.x,

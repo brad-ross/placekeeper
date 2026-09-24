@@ -60,12 +60,13 @@ describe('link action chooser', () => {
     expect(linkActionDismissRestoresFocus('copy-success')).toBe(true);
   });
 
-  // Covers AE1 (R3, R4): labeled actions keep today's order below the destination snippet.
-  it('shows labeled actions in the existing order below the destination snippet', () => {
+  // Covers AE1 (R3, R4): icon actions keep today's order in one row below the destination snippet.
+  it('shows icon actions in the existing order below the destination snippet, then the page', () => {
     const html = renderToStaticMarkup(
       <LinkActionMenuContent
         label="Lemma A.7"
         pageContext="Page 18"
+        pageNumeral="18"
         sourceScope="main"
         firstItemRef={() => undefined}
         snippet={<div data-destination-snippet="">snippet</div>}
@@ -86,11 +87,12 @@ describe('link action chooser', () => {
     expect(html).toMatch(
       /data-destination-snippet[\s\S]*aria-label="Open in References"[\s\S]*aria-label="Open in main document"[\s\S]*aria-label="Copy link to exact destination on page 18"/u,
     );
-    // Visible text labels, in order, next to the existing glyphs.
+    // Icon-only actions in one row, the destination page numeral last.
     expect(html).toMatch(
-      /lucide-[\w-]+[\s\S]*?>Open in References<\/span>[\s\S]*lucide-chevron-right[\s\S]*?>Open in main document<\/span>[\s\S]*lucide-link[\s\S]*?>Copy link<\/span>/u,
+      /class="link-action-popover__actions"[\s\S]*lucide-chevron-right[\s\S]*lucide-link[\s\S]*class="link-action-popover__page" aria-hidden="true">18<\/span>/u,
     );
-    expect(html).toContain('copy-link-control__trigger--labeled');
+    expect(html).toContain('copy-link-control__trigger--icon-only');
+    expect(html).not.toMatch(/>(Open in References|Open in main document|Copy link)<\/span>/u);
     // Enabled actions keep the shared custom tooltip, not a native title.
     expect(html).not.toContain('title="Open in References"');
     expect(html).not.toContain('title="Open in main document"');
@@ -107,13 +109,13 @@ describe('link action chooser', () => {
       <LinkActionMenuContent
         label="Lemma A.7"
         pageContext="Page 18"
+        pageNumeral="18"
         sourceScope="main"
         firstItemRef={() => undefined}
         snippet={<DestinationSnippetFrame
           image={{ status: 'loading' }}
           description={null}
           resolving
-          pageNumeral="18"
         />}
         onChoose={() => undefined}
         onKeyDown={() => undefined}
@@ -129,11 +131,12 @@ describe('link action chooser', () => {
     expect(html.match(/role="menuitem"/g)).toHaveLength(2);
   });
 
-  it('puts labeled Follow in this tab before the right-most main action inside References', () => {
+  it('puts Follow in this tab before the right-most main action inside References', () => {
     const html = renderToStaticMarkup(
       <LinkActionMenuContent
         label="Target-to-target detail link"
         pageContext="Page 3"
+        pageNumeral="3"
         sourceScope="reference"
         firstItemRef={() => undefined}
         copyLink={{
@@ -151,9 +154,7 @@ describe('link action chooser', () => {
     expect(html).toMatch(
       /aria-label="Open in References"[\s\S]*aria-label="Follow in this tab"[\s\S]*aria-label="Open in main document"[\s\S]*aria-label="Copy link to exact destination on page 3"/u,
     );
-    expect(html).toMatch(
-      />Open in References<\/span>[\s\S]*lucide-arrow-right[\s\S]*?>Follow in this tab<\/span>[\s\S]*lucide-square-arrow-out-up-right[\s\S]*?>Open in main document<\/span>/u,
-    );
+    expect(html).toMatch(/lucide-arrow-right[\s\S]*lucide-square-arrow-out-up-right/u);
     expect(html).not.toContain('title="Follow in this tab"');
     expect(html.match(/role="menuitem"/g)).toHaveLength(4);
   });
@@ -163,6 +164,7 @@ describe('link action chooser', () => {
       <LinkActionMenuContent
         label="Lemma A.7"
         pageContext="Page 18"
+        pageNumeral="18"
         sourceScope="main"
         firstItemRef={() => undefined}
         openInReferencesDisabled
@@ -174,7 +176,7 @@ describe('link action chooser', () => {
 
     expect(html).toMatch(/aria-label="Open in References"[^>]*disabled/u);
     expect(html).toMatch(/aria-label="Open in main document"(?![^>]*disabled)/u);
-    expect(html).toContain('>Open in References</span>');
+    expect(html).toMatch(/aria-label="Open in References"[^>]*disabled/u);
   });
 
   it('marks the chosen action busy and the menu non-interactive while its name resolves', () => {
@@ -182,6 +184,7 @@ describe('link action chooser', () => {
       <LinkActionMenuContent
         label="Lemma A.7"
         pageContext="Page 18"
+        pageNumeral="18"
         sourceScope="main"
         firstItemRef={() => undefined}
         busyChoice="references"

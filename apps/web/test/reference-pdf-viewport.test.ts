@@ -5,7 +5,6 @@ import { describe, expect, it } from 'vitest';
 
 import { readCssSource } from '../../../test/support/read-css-source.js';
 import {
-  DESTINATION_BAND_EDGE_TOKEN,
   DESTINATION_BAND_TOKEN,
   DestinationBandLayer,
   referenceOwnedMarkTargetIsInteractive,
@@ -83,12 +82,6 @@ describe('Destination Band layer', () => {
     expect(renderBand()).toBe(html);
   });
 
-  it('marks only the first rect with the band edge', () => {
-    const html = renderBand();
-    expect(html.match(/data-pdf-destination-band-edge="true"/gu)).toHaveLength(1);
-    expect(html.indexOf('data-pdf-destination-band-edge')).toBeLessThan(html.indexOf('top:113px'));
-  });
-
   it('is inert, aria-hidden, pointer-transparent, textless, and carries no annotation identity', () => {
     const html = renderBand();
     expect(html).toMatch(/^<div inert="" aria-hidden="true" data-pdf-destination-band-layer=/u);
@@ -136,21 +129,22 @@ describe('Destination Band styling', () => {
   const tokens = readCssSource(new URL('../src/app/review-design-tokens.css', import.meta.url));
   const styles = readCssSource(new URL('../src/app/review-search-references.css', import.meta.url));
 
-  it('defines a translucent green band token and a darker same-hue edge', () => {
+  it('defines a translucent blue band token with no separate edge', () => {
     expect(DESTINATION_BAND_TOKEN).toBe('--review-destination-band');
-    expect(DESTINATION_BAND_EDGE_TOKEN).toBe('--review-destination-band-edge');
-    expect(tokens).toMatch(/--review-destination-band:\s*rgb\(\d+ \d+ \d+ \/ 18%\);/u);
-    expect(tokens).toMatch(/--review-destination-band-edge:\s*rgb\(\d+ \d+ \d+\);/u);
+    expect(tokens).toMatch(/--review-destination-band:\s*rgb\(\d+ \d+ \d+ \/ \d+%\);/u);
+    expect(tokens).not.toContain('--review-destination-band-edge');
   });
 
-  it('paints the band from its own token, never selectable, with a 2px edge on the first rect', () => {
+  it('paints the band from its own token like a text highlight, never selectable', () => {
     const bandRule = /\[data-pdf-destination-band\]\s*\{([^}]*)\}/u.exec(styles)?.[1] ?? '';
     expect(bandRule).toContain('var(--review-destination-band)');
     expect(bandRule).toContain('pointer-events: none');
     expect(bandRule).toContain('user-select: none');
     expect(bandRule).not.toContain('--review-pdf-selection-bg');
     expect(bandRule).not.toContain('--review-warning');
-    const edgeRule = /\[data-pdf-destination-band-edge="true"\]\s*\{([^}]*)\}/u.exec(styles)?.[1] ?? '';
-    expect(edgeRule).toContain('inset 2px 0 0 var(--review-destination-band-edge)');
+    // Same shape and blending as highlight marks.
+    expect(bandRule).toContain('border-radius: var(--pdf-mark-radius, 3px)');
+    expect(bandRule).toContain('mix-blend-mode: multiply');
+    expect(styles).not.toContain('data-pdf-destination-band-edge');
   });
 });

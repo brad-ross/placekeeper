@@ -47,11 +47,10 @@
 }
 
 /*
- * Destination Band: translucent green, distinct from highlight gold and
- * selection blue-gray. The link menu is portaled outside the review root, and
- * its snippet highlight paints in the same tokens.
+ * Destination Band: translucent blue, painted like a text highlight and
+ * distinct from highlight gold and selection blue-gray. The link menu is
+ * portaled outside the review root, and its snippet highlight uses the same token.
  */
 :is(#root[data-production-root="true"], .terminal-recovery, .top-bar-menu__surface, .static-launcher, .handler, .link-action-popover) {
-  --review-destination-band: rgb(46 160 90 / 18%);
-  --review-destination-band-edge: rgb(31 122 67);
+  --review-destination-band: rgb(56 132 230 / 24%);
 }

@@ -115,7 +115,8 @@ export const ReviewTooltipButton = forwardRef<HTMLButtonElement, ReviewTooltipBu
       // A portal alone cannot paint above native popovers.
       surface.showPopover?.();
       const anchor = button.getBoundingClientRect();
-      const menu = button.closest('.top-bar-menu__surface');
+      // Menus keep tooltips below them so a tip never covers the menu's content.
+      const menu = button.closest('.top-bar-menu__surface, .link-action-popover__surface');
       const placementAnchor = menu?.getBoundingClientRect() ?? anchor;
       const bounds = surface.getBoundingClientRect();
       const viewportWidth = globalThis.visualViewport?.width ?? document.documentElement.clientWidth;

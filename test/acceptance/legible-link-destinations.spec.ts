@@ -203,26 +203,35 @@ test("Covers AE1. a split citation previews its bibliography entry, names its ta
   const citation = bodyLink(page, 4, 0);
   const menu = await openLinkMenu(page, citation, 4);
 
-  // The snippet comes first, above labeled actions in the existing order.
+  // The snippet comes first, above one row of icon actions and the page.
   const snippet = await expectSnippetReady(menu);
-  await expect(snippet.locator(".destination-snippet__page")).toHaveText("4");
   const extent = snippet.locator("[data-destination-snippet-extent]");
   await expect(extent).toHaveCount(3);
-  // The highlight paints in the band's tint and edge even though the menu is
-  // portaled outside the review root.
-  await expect(extent.first()).toHaveCSS("background-color", "rgba(46, 160, 90, 0.18)");
-  await expect(extent.first()).toHaveCSS("box-shadow", /rgb\(31, 122, 67\)/u);
+  // The highlight paints in the band's blue even though the menu is portaled
+  // outside the review root.
+  await expect(extent.first()).toHaveCSS("background-color", "rgba(56, 132, 230, 0.24)");
   const items = menu.getByRole("menuitem");
   await expect(items).toHaveCount(3);
-  await expect(items.nth(0)).toHaveText("Open in References");
-  await expect(items.nth(1)).toHaveText("Open in main document");
-  await expect(items.nth(2)).toContainText("Copy link");
-  // Labeled actions add no tooltip that would cover the snippet.
+  await expect(items.nth(0)).toHaveAttribute("aria-label", "Open in References");
+  await expect(items.nth(1)).toHaveAttribute("aria-label", "Open in main document");
+  await expect(items.nth(2)).toHaveAttribute("aria-label", /^Copy link/u);
   await expect(items.first()).toBeFocused();
-  await expect(page.getByRole("tooltip")).toHaveCount(0);
   const snippetBox = await snippet.boundingBox();
   const firstItemBox = await items.first().boundingBox();
+  const lastItemBox = await items.nth(2).boundingBox();
   expect(snippetBox!.y + snippetBox!.height).toBeLessThanOrEqual(firstItemBox!.y + 1);
+  // Icon actions share one row, left-aligned, and the page sits at its right end.
+  expect(Math.abs(lastItemBox!.y - firstItemBox!.y)).toBeLessThan(1);
+  expect(firstItemBox!.x - snippetBox!.x).toBeLessThan(2);
+  const pageNumeral = menu.locator(".link-action-popover__page");
+  await expect(pageNumeral).toHaveText("4");
+  const pageBox = await pageNumeral.boundingBox();
+  expect(snippetBox!.x + snippetBox!.width - (pageBox!.x + pageBox!.width)).toBeLessThan(8);
+  expect(pageBox!.y + pageBox!.height / 2 - (firstItemBox!.y + firstItemBox!.height / 2)).toBeLessThan(2);
+  // Tooltips open below the menu, never over the snippet.
+  const tooltip = page.getByRole("tooltip", { name: "Open in References", exact: true });
+  await expect(tooltip).toBeVisible();
+  expect((await tooltip.boundingBox())!.y).toBeGreaterThan(firstItemBox!.y + firstItemBox!.height);
   await page.locator("[data-link-action-popover]").screenshot({
     path: test.info().outputPath("link-menu-with-snippet.png"),
     animations: "disabled",
@@ -234,7 +243,7 @@ test("Covers AE1. a split citation previews its bibliography entry, names its ta
   // The whole three-line bibliography entry carries the band.
   const bands = referenceBandLayer(page).locator("[data-pdf-destination-band]");
   await expect(bands).toHaveCount(3, { timeout: READY_TIMEOUT_MS });
-  await expect(bands.first()).toHaveAttribute("data-pdf-destination-band-edge", "true");
+  await expect(bands.first()).toHaveCSS("mix-blend-mode", "multiply");
   await expect(referenceBandLayer(page)).toHaveAttribute("aria-hidden", "true");
   await expect(bands.first()).toHaveCSS("pointer-events", "none");
   await page.screenshot({ path: test.info().outputPath("banded-reference-tab.png"), animations: "disabled" });
@@ -301,7 +310,7 @@ test("Covers AE5. a null-top link previews the top of its page with no highlight
   await openFixture(page, outlinedPdf);
   const menu = await openLinkMenu(page, bodyLink(page, 5), 5);
   const snippet = await expectSnippetReady(menu);
-  await expect(snippet.locator(".destination-snippet__page")).toHaveText("5");
+  await expect(menu.locator(".link-action-popover__page")).toHaveText("5");
   await expect(snippet.locator("[data-destination-snippet-extent]")).toHaveCount(0);
   // The clicked words name the tab; the whole-page target adds no kind label.
   const tab = await chooseOpenInReferences(page, menu, "supplementary appendix, Page 5");

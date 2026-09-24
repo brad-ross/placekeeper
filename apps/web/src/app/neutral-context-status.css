@@ -57,7 +57,8 @@
   outline-offset: 3px;
 }
 
-/* Link menu: destination snippet above labeled actions (R3, R4; KTD11). */
+/* Link menu: destination snippet above one row of icon actions and the
+   destination page (R3, R4; KTD11). */
 .link-action-popover__surface {
   --destination-snippet-height: 112px;
   display: flex;
@@ -68,38 +69,36 @@
   gap: 2px;
 }
 
-.link-action-popover__surface :is(
-  .link-action-popover__item,
-  .copy-link-control__trigger--labeled
-)[role="menuitem"] {
+.link-action-popover__actions {
   display: flex;
-  width: 100%;
   min-width: 0;
-  height: auto;
-  min-height: 32px;
+  flex-wrap: wrap;
   align-items: center;
-  justify-content: flex-start;
-  gap: 9px;
-  padding: 0 10px;
-  text-align: start;
+  gap: 2px;
+}
+
+.link-action-popover__surface .link-action-popover__actions [role="menuitem"] {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
 }
 
 @media (pointer: coarse) {
-  .link-action-popover__surface :is(
-    .link-action-popover__item,
-    .copy-link-control__trigger--labeled
-  )[role="menuitem"] {
-    min-height: 44px;
+  .link-action-popover__surface .link-action-popover__actions [role="menuitem"] {
+    width: 44px;
+    min-width: 44px;
+    height: 44px;
   }
 }
 
-.link-action-popover__surface :is(
-  .link-action-popover__label,
-  .copy-link-control__label
-) {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
+/* Matches the page number on annotation peek cards. */
+.link-action-popover__page {
+  margin-left: auto;
+  padding: 0 6px;
+  color: #737373;
+  font: 400 11px/1.5 var(--pk-font-ui);
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 
@@ -160,20 +159,8 @@
 
 .destination-snippet__extent {
   position: absolute;
-  border-radius: 2px;
-}
-
-.destination-snippet__page {
-  position: absolute;
-  right: 6px;
-  bottom: 6px;
-  padding: 1px 6px;
-  border-radius: 6px;
-  color: var(--pk-muted);
-  background: rgb(255 255 255 / 88%);
-  box-shadow: 0 0 0 1px var(--pk-border);
-  font: 500 11px/16px var(--pk-font-ui);
-  font-variant-numeric: tabular-nums;
+  border-radius: var(--pdf-mark-radius, 3px);
+  mix-blend-mode: multiply;
 }
 
 .codex-context-status {

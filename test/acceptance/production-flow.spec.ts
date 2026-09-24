@@ -1673,12 +1673,11 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
     name: "Copy link to exact destination on page 2",
   });
   await expect(copyTargetLink).not.toHaveAttribute("title", "Copy exact destination link");
-  await expect(primaryMenu.getByRole("menuitem").first()).toHaveText("Open in References");
-  await expect(primaryMenu.getByRole("menuitem").nth(1)).toHaveText("Open in main document");
-  await expect(primaryMenu.getByRole("menuitem").last()).toHaveText("Copy link");
+  await expect(primaryMenu.locator(".link-action-popover__page")).toHaveText("2");
   const firstMenuItemBounds = await primaryMenu.getByRole("menuitem").first().boundingBox();
   expect(firstMenuItemBounds).not.toBeNull();
   expect(firstMenuItemBounds!.height).toBe(32);
+  expect(firstMenuItemBounds!.width).toBe(32);
   const snippetBounds = await primarySnippet.boundingBox();
   expect(snippetBounds).not.toBeNull();
   // 112px reserved content height plus its 1px frame.
@@ -1689,7 +1688,6 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
   // A 292px content column plus the surface padding.
   expect(menuBounds!.width).toBeGreaterThan(280);
   expect(menuBounds!.width).toBeLessThanOrEqual(320);
-  expect(firstMenuItemBounds!.width).toBeGreaterThan(menuBounds!.width - 16);
   const popoverBounds = await page.locator("[data-link-action-popover]").boundingBox();
   expect(popoverBounds).not.toBeNull();
   // The snippet reserves its height, so the async image never resizes the menu.

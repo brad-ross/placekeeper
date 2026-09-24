@@ -188,17 +188,15 @@
   background: color-mix(in srgb, var(--review-warning) 42%, transparent);
 }
 
-/* Transient, inert Destination Band (KTD8); never an annotation. */
+/* Transient, inert Destination Band (KTD8); never an annotation. It is
+   painted like a text highlight mark, in its own color. */
 [data-pdf-destination-band] {
-  border-radius: 2px;
+  border-radius: var(--pdf-mark-radius, 3px);
   background: var(--review-destination-band);
+  mix-blend-mode: multiply;
   pointer-events: none;
   user-select: none;
   -webkit-user-select: none;
-}
-
-[data-pdf-destination-band-edge="true"] {
-  box-shadow: inset 2px 0 0 var(--review-destination-band-edge);
 }
 
 @keyframes review-spin {

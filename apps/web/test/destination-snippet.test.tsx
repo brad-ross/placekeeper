@@ -23,10 +23,7 @@ import {
   type DestinationSnippetImageState,
 } from '../src/pdf/destination-snippet.js';
 import { PdfLinkControl } from '../src/pdf/PdfLinkControl.js';
-import {
-  DESTINATION_BAND_EDGE_TOKEN,
-  DESTINATION_BAND_TOKEN,
-} from '../src/pdf/ReferencePdfViewport.js';
+import { DESTINATION_BAND_TOKEN } from '../src/pdf/ReferencePdfViewport.js';
 import { DestinationSnippetFrame } from '../src/review/DestinationSnippet.js';
 
 const PAGE = { width: 600, height: 800 };
@@ -257,7 +254,6 @@ describe('destination snippet frame (R3, R6; KTD11)', () => {
         image={{ status: 'ready', url: 'blob:snippet-1', region }}
         description={description()}
         resolving={false}
-        pageNumeral="14"
       />,
     );
     expect(html).toContain('data-destination-snippet=""');
@@ -266,8 +262,8 @@ describe('destination snippet frame (R3, R6; KTD11)', () => {
     expect(html).toMatch(/<img[^>]*src="blob:snippet-1"/u);
     expect(html.match(/data-destination-snippet-extent=""/g)).toHaveLength(2);
     expect(html).toContain(`var(${DESTINATION_BAND_TOKEN})`);
-    expect(html).toContain(`var(${DESTINATION_BAND_EDGE_TOKEN})`);
-    expect(html).toMatch(/class="destination-snippet__page"[^>]*>14<\/span>/u);
+    // The page numeral lives in the menu's action row, not on the preview.
+    expect(html).not.toContain('destination-snippet__page');
     expect(html).not.toMatch(/tabindex|<button|<input/u);
   });
 
@@ -278,7 +274,6 @@ describe('destination snippet frame (R3, R6; KTD11)', () => {
         image={{ status: 'ready', url: 'blob:snippet-1', region: rect(0, 0, 600, 240) }}
         description={description({ spot: null, extent: null })}
         resolving={false}
-        pageNumeral="14"
       />,
     );
     expect(html).toMatch(/<img[^>]*src="blob:snippet-1"/u);
@@ -289,18 +284,16 @@ describe('destination snippet frame (R3, R6; KTD11)', () => {
     const frame = (markup: string) => markup.match(/<div[^>]*data-destination-snippet=""[^>]*>/u)?.[0]
       .replace(/data-snippet-status="\w+"/u, '');
     const pending = renderToStaticMarkup(
-      <DestinationSnippetFrame image={{ status: 'idle' }} description={null} resolving pageNumeral="14" />,
+      <DestinationSnippetFrame image={{ status: 'idle' }} description={null} resolving />,
     );
     const ready = renderToStaticMarkup(
       <DestinationSnippetFrame
         image={{ status: 'ready', url: 'blob:snippet-1', region }}
         description={description()}
         resolving={false}
-        pageNumeral="14"
       />,
     );
     expect(pending).toContain('data-snippet-status="loading"');
-    expect(pending).toContain('>14</span>');
     expect(pending).not.toContain('<img');
     expect(frame(pending)).toBe(frame(ready));
 
@@ -313,17 +306,15 @@ describe('destination snippet frame (R3, R6; KTD11)', () => {
     expect(rule).toMatch(/overflow:\s*hidden/u);
   });
 
-  it('shows the page numeral alone when the render fails', () => {
+  it('shows an empty frame when the render fails; the action row still shows the page', () => {
     const html = renderToStaticMarkup(
       <DestinationSnippetFrame
         image={{ status: 'failed' }}
         description={description()}
         resolving={false}
-        pageNumeral="14"
       />,
     );
     expect(html).toContain('data-snippet-status="unavailable"');
-    expect(html).toContain('>14</span>');
     expect(html).not.toContain('<img');
     expect(html).not.toContain('data-destination-snippet-extent');
   });

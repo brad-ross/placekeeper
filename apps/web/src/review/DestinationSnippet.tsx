@@ -7,18 +7,13 @@ import {
   type DestinationSnippetImageState,
   type DestinationSnippetRenderer,
 } from '../pdf/destination-snippet.js';
-import {
-  DESTINATION_BAND_EDGE_TOKEN,
-  DESTINATION_BAND_TOKEN,
-} from '../pdf/ReferencePdfViewport.js';
+import { DESTINATION_BAND_TOKEN } from '../pdf/ReferencePdfViewport.js';
 
 export interface DestinationSnippetFrameProps {
   readonly image: DestinationSnippetImageState;
   readonly description: PdfDestinationDescription | null;
   /** The destination description is still resolving. */
   readonly resolving: boolean;
-  /** The bare destination page numeral, for example "14". */
-  readonly pageNumeral: string;
 }
 
 /**
@@ -30,7 +25,6 @@ export function DestinationSnippetFrame({
   image,
   description,
   resolving,
-  pageNumeral,
 }: DestinationSnippetFrameProps) {
   const status = image.status === 'ready'
     ? 'ready'
@@ -63,13 +57,11 @@ export function DestinationSnippetFrame({
                 width: `${box.width}%`,
                 height: `${box.height}%`,
                 background: `var(${DESTINATION_BAND_TOKEN})`,
-                ...(index === 0 ? { boxShadow: `inset 2px 0 0 var(${DESTINATION_BAND_EDGE_TOKEN})` } : {}),
               } satisfies CSSProperties}
             />
           ))}
         </div>
       ) : null}
-      <span className="destination-snippet__page">{pageNumeral}</span>
     </div>
   );
 }
@@ -96,11 +88,10 @@ function useDestinationSnippetImage(
 export interface DestinationSnippetProps {
   readonly description: PdfDestinationDescription | null;
   readonly resolving: boolean;
-  readonly pageNumeral: string;
   readonly render?: DestinationSnippetRenderer;
 }
 
-export function DestinationSnippet({ description, resolving, pageNumeral, render }: DestinationSnippetProps) {
+export function DestinationSnippet({ description, resolving, render }: DestinationSnippetProps) {
   const image = useDestinationSnippetImage(description, render);
   return (
     <DestinationSnippetFrame
@@ -108,7 +99,6 @@ export function DestinationSnippet({ description, resolving, pageNumeral, render
       description={description}
       // The render starts in an effect; treat the first paint as loading.
       resolving={resolving || (image.status === 'idle' && description !== null && render !== undefined)}
-      pageNumeral={description?.pageNumeral ?? pageNumeral}
     />
   );
 }

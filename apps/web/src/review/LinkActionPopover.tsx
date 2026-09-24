@@ -142,8 +142,6 @@ function LinkActionItem({
   return (
     <ReviewTooltipButton
       label={label}
-      // The label is visible; a duplicate tooltip would cover the snippet.
-      tooltip={false}
       ref={itemRef}
       type="button"
       role="menuitem"
@@ -157,7 +155,6 @@ function LinkActionItem({
       }}
     >
       <ReviewIcon name={icon} />
-      <span className="link-action-popover__label">{label}</span>
     </ReviewTooltipButton>
   );
 }
@@ -165,6 +162,7 @@ function LinkActionItem({
 export function LinkActionMenuContent({
   label,
   pageContext,
+  pageNumeral,
   sourceScope,
   firstItemRef,
   copyLink,
@@ -177,11 +175,13 @@ export function LinkActionMenuContent({
 }: {
   readonly label: string;
   readonly pageContext: string;
+  /** The destination page numeral, shown at the end of the action row. */
+  readonly pageNumeral: string;
   readonly sourceScope: ViewerPdfLinkSourceScope;
   readonly firstItemRef: Ref<HTMLButtonElement>;
   readonly copyLink?: CopyLinkControlProps;
   readonly openInReferencesDisabled?: boolean;
-  /** Non-focusable destination preview shown above the actions (R3). */
+  /** Non-focusable destination preview shown above the action row (R3). */
   readonly snippet?: ReactNode;
   /** The chosen action waiting for its destination name; the menu is inert meanwhile. */
   readonly busyChoice?: LinkActionChoice | null;
@@ -201,44 +201,47 @@ export function LinkActionMenuContent({
       onBlur={onBlur}
     >
       {snippet}
-      <LinkActionItem
-        label="Open in References"
-        icon="references"
-        choice="references"
-        itemRef={openInReferencesDisabled ? undefined : firstItemRef}
-        disabled={openInReferencesDisabled}
-        busyChoice={busyChoice}
-        onChoose={onChoose}
-      />
-      {sourceScope === 'reference' ? (
+      <div className="link-action-popover__actions">
         <LinkActionItem
-          label="Follow in this tab"
-          icon="arrow-right"
-          choice="same-reference"
-          itemRef={openInReferencesDisabled ? firstItemRef : undefined}
+          label="Open in References"
+          icon="references"
+          choice="references"
+          itemRef={openInReferencesDisabled ? undefined : firstItemRef}
+          disabled={openInReferencesDisabled}
           busyChoice={busyChoice}
           onChoose={onChoose}
         />
-      ) : null}
-      <LinkActionItem
-        label="Open in main document"
-        icon={sourceScope === 'main' ? 'chevron-right' : 'open-main'}
-        choice="main"
-        itemRef={openInReferencesDisabled && sourceScope === 'main' ? firstItemRef : undefined}
-        busyChoice={busyChoice}
-        onChoose={onChoose}
-      />
-      {copyLink === undefined ? null : (
-        <CopyLinkControl
-          {...copyLink}
-          {...(busy ? { disabled: true } : {})}
-          variant="popover"
-          presentation="labeled"
-          visibleLabel="Copy link"
-          buttonRole="menuitem"
-          feedbackPlacement="inline"
+        {sourceScope === 'reference' ? (
+          <LinkActionItem
+            label="Follow in this tab"
+            icon="arrow-right"
+            choice="same-reference"
+            itemRef={openInReferencesDisabled ? firstItemRef : undefined}
+            busyChoice={busyChoice}
+            onChoose={onChoose}
+          />
+        ) : null}
+        <LinkActionItem
+          label="Open in main document"
+          icon={sourceScope === 'main' ? 'chevron-right' : 'open-main'}
+          choice="main"
+          itemRef={openInReferencesDisabled && sourceScope === 'main' ? firstItemRef : undefined}
+          busyChoice={busyChoice}
+          onChoose={onChoose}
         />
-      )}
+        {copyLink === undefined ? null : (
+          <CopyLinkControl
+            {...copyLink}
+            {...(busy ? { disabled: true } : {})}
+            variant="popover"
+            presentation="icon-only"
+            buttonRole="menuitem"
+            feedbackPlacement="inline"
+          />
+        )}
+        {/* The menu's accessible name already carries the page. */}
+        <span className="link-action-popover__page" aria-hidden="true">{pageNumeral}</span>
+      </div>
     </div>
   );
 }
@@ -425,7 +428,9 @@ export function LinkActionPopover({
     const items = enabledMenuItems(event.currentTarget);
     const activeIndex = items.indexOf(document.activeElement as HTMLButtonElement);
     if (activeIndex < 0) return;
-    const nextIndex = compositeFocusIndex(activeIndex, items.length, event.key);
+    // The actions sit in one row, so the horizontal arrows move between them too.
+    const key = event.key === 'ArrowRight' ? 'ArrowDown' : event.key === 'ArrowLeft' ? 'ArrowUp' : event.key;
+    const nextIndex = compositeFocusIndex(activeIndex, items.length, key);
     if (nextIndex === null) return;
     event.preventDefault();
     items[nextIndex]?.focus({ preventScroll: true });
@@ -459,6 +464,7 @@ export function LinkActionPopover({
       <LinkActionMenuContent
         label={request.metadata.label}
         pageContext={request.metadata.pageContext}
+        pageNumeral={destination?.description?.pageNumeral ?? String(request.target.pageIndex + 1)}
         sourceScope={request.sourceScope}
         firstItemRef={firstItemRef}
         {...(dismissingCopyLink === undefined ? {} : { copyLink: dismissingCopyLink })}
@@ -467,7 +473,6 @@ export function LinkActionPopover({
           <DestinationSnippet
             description={destination?.description ?? null}
             resolving={destination?.status === 'resolving'}
-            pageNumeral={String(request.target.pageIndex + 1)}
             {...(renderDestinationSnippet === undefined ? {} : { render: renderDestinationSnippet })}
           />
         )}
