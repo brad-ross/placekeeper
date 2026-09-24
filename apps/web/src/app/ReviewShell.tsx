@@ -1547,11 +1547,19 @@ export function ReviewShell(props: ReviewShellProps) {
     const previous = fittedStageWidthRef.current;
     fittedStageWidthRef.current = width;
     if (previous === null || width === 0 || Math.abs(width - previous) < 1) return;
-    const follows = () => props.viewer.viewerNavigation?.followsFitWidth?.() ?? false;
+    const navigation = props.viewer.viewerNavigation;
+    const follows = () => navigation?.followsFitWidth?.() ?? false;
     if (!follows()) return;
-    const timer = setTimeout(() => {
-      if (follows()) void fitWidthCommand();
-    }, RESIZE_REFIT_DELAY_MS);
+    // Fitting cancels pending navigation, so wait out a link jump in flight.
+    let timer: ReturnType<typeof setTimeout>;
+    const refit = () => {
+      if (navigation?.navigationPending?.()) {
+        timer = setTimeout(refit, RESIZE_REFIT_DELAY_MS);
+      } else if (follows()) {
+        void fitWidthCommand();
+      }
+    };
+    timer = setTimeout(refit, RESIZE_REFIT_DELAY_MS);
     return () => clearTimeout(timer);
   }, [workspaceFraming.stageSize.width, props.viewer.viewerNavigation, fitWidthCommand]);
   const beforeViewerAction = async () => {

@@ -81,6 +81,8 @@ export interface ViewerNavigationControls {
   isFitToWidth?(): boolean;
   /** True while the scale from the last successful Fit Width is still current, so the fit should follow resizes. */
   followsFitWidth?(): boolean;
+  /** True while a movement other than Fit Width is still settling; starting a fit would cancel it. */
+  navigationPending?(): boolean;
   replaceDocument(documentGeneration: number): void;
   focusAtDestination(pageIndex: number): boolean;
   dispose(): void;

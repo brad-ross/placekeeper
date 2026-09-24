@@ -497,6 +497,7 @@ export function createViewerNavigation(
   let rollbackBarrier: Promise<void> | null = null;
   let disposed = false;
   let fittedZoom: number | null = null;
+  let fittedDocument: object | null = null;
   let fitOperation: NavigationOperation | null = null;
 
   const cancelPendingOperation = (): Promise<void> | null => {
@@ -1522,7 +1523,10 @@ export function createViewerNavigation(
       if (!applied && !operation.signal.aborted && operation.mutated) {
         await rollbackOperation(operation);
       }
-      if (applied) fittedZoom = viewer.zoom.getState().currentZoomLevel;
+      if (applied) {
+        fittedZoom = viewer.zoom.getState().currentZoomLevel;
+        fittedDocument = viewer.document;
+      }
       return applied;
     } catch {
       if (!operation.signal.aborted && operation.mutated) {
@@ -1877,12 +1881,16 @@ export function createViewerNavigation(
       if (!viewer) return false;
       // A resize during an unfinished fit must fit again at the newer width.
       if (fitOperation !== null && activeOperation?.operation === fitOperation) return true;
-      if (fittedZoom === null) return false;
+      // A replaced document inherits the zoom level, not the fit.
+      if (fittedZoom === null || fittedDocument !== viewer.document) return false;
       try {
         return Math.abs(viewer.zoom.getState().currentZoomLevel - fittedZoom) <= zoomTolerance;
       } catch {
         return false;
       }
+    },
+    navigationPending() {
+      return activeOperation !== null && activeOperation.operation !== fitOperation;
     },
     fitToWidthReady() {
       const viewer = activeViewer();

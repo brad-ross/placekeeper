@@ -605,7 +605,7 @@ function navigationHarness(options: {
       return () => activityListeners.delete(listener);
     },
   };
-  const document = {
+  let document = {
     pages: (options.farTargetInitiallyUnmounted || options.staleCurrentPageWithThirdVisible || options.reportedPageAfterZoom !== undefined
       ? [0, 1, 2]
       : [0]).map((index) => ({
@@ -695,6 +695,11 @@ function navigationHarness(options: {
     },
     replaceActiveDocument(documentId: string) {
       activeDocumentId = documentId;
+      for (const listener of storeListeners) listener();
+    },
+    /** Loads a different file into the same viewer document slot. */
+    loadNewFile() {
+      document = { ...document };
       for (const listener of storeListeners) listener();
     },
   };
@@ -961,6 +966,34 @@ describe('viewer navigation adapter', () => {
     expect(harness.navigation.followsFitWidth?.()).toBe(true);
     harness.setCurrentZoom(1.25);
     expect(harness.navigation.followsFitWidth?.()).toBe(false);
+  });
+
+  it('does not carry a fit over to a newly loaded file at the same zoom', async () => {
+    const harness = navigationHarness({ viewportGap: 10 });
+
+    expect(await harness.navigation.fitToWidth()).toBe(true);
+    harness.loadNewFile();
+    harness.navigation.replaceDocument(2);
+    expect(harness.navigation.followsFitWidth?.()).toBe(false);
+    expect(await harness.navigation.fitToWidth()).toBe(true);
+    expect(harness.navigation.followsFitWidth?.()).toBe(true);
+  });
+
+  it('reports a link jump as pending navigation but not its own fit', async () => {
+    const harness = navigationHarness({ manualZoom: true, timeoutMs: 250 });
+
+    expect(harness.navigation.navigationPending?.()).toBe(false);
+    const jump = harness.navigation.applyLocation({
+      pageIndex: 0,
+      anchor: { x: 20, y: 30 },
+      alignment: { xPercent: 0, yPercent: 0 },
+      zoom: 1.5,
+    });
+    await vi.waitFor(() => expect(harness.log).toContain('zoom:1.5'));
+    expect(harness.navigation.navigationPending?.()).toBe(true);
+    harness.completeZoom(1.5);
+    expect(await jump).toBe(true);
+    expect(harness.navigation.navigationPending?.()).toBe(false);
   });
 
   it('excludes a non-overlay vertical scrollbar gutter from fit width', async () => {
