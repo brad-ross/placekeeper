@@ -331,6 +331,30 @@ test("@representative creates a selection-derived highlight on a cropped PDF wit
   await reopenedContext.close();
 });
 
+test("@representative places search highlights on the matched text of a cropped PDF", async ({ page }) => {
+  await page.goto("./");
+  await page.locator("input[type=file]").setInputFiles(representativePdf);
+  await waitForStaticPdf(page);
+  const pdfPage = page.locator("[data-page-index='0']").first();
+  const box = await pdfPage.boundingBox();
+  if (box === null) throw new Error("Rendered cropped page has no bounds.");
+  await openAnnotationsWorkspace(page);
+  await page.getByRole("tab", { name: "Search", exact: true }).click();
+  await page.getByRole("searchbox").fill("equilibrium");
+  await page.keyboard.press("Enter");
+  const highlight = page.locator("[data-pdf-search-highlight]").first();
+  await expect(highlight).toBeVisible();
+  const hit = await highlight.boundingBox();
+  if (hit === null) throw new Error("Search highlight has no bounds.");
+  // The matched line is 14pt text on baseline y = 690 inside a crop box whose top is y = 756.
+  const scale = box.width / 540;
+  const centerY = (hit.y + hit.height / 2 - box.y) / scale;
+  expect(centerY).toBeGreaterThan(756 - 706);
+  expect(centerY).toBeLessThan(756 - 684);
+  expect(hit.x).toBeGreaterThan(box.x);
+  expect(hit.x + hit.width).toBeLessThan(box.x + box.width);
+});
+
 test("exhaustive profile exports and reopens all five editable annotation kinds", async ({
   browser,
   browserName,

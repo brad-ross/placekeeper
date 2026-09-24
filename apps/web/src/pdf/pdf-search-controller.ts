@@ -46,7 +46,6 @@ export interface PdfSearchPageGeometry {
   readonly width: number;
   readonly height: number;
   readonly cropLeft: number;
-  readonly cropTop: number;
   readonly cropBottom: number;
 }
 
@@ -135,7 +134,6 @@ export function createEnginePdfSearchPageReader(
             width: page.size.width,
             height: page.size.height,
             cropLeft: page.boxes?.crop.left ?? 0,
-            cropTop: page.boxes?.crop.top ?? 0,
             cropBottom: page.boxes?.crop.bottom ?? 0,
           },
         };
@@ -259,7 +257,6 @@ function findPageMatches(input: {
         input.page.glyphs,
         sourceStart,
         sourceEnd + 1,
-        { x: input.page.geometry.cropLeft, y: input.page.geometry.cropTop },
       );
       const firstOrigin = rects[0]?.origin;
       if (rects.length > 0 && firstOrigin) {
