@@ -1539,18 +1539,25 @@ export function ReviewShell(props: ReviewShellProps) {
     const frame = requestAnimationFrame(() => { void fitWidthCommand(); });
     return () => cancelAnimationFrame(frame);
   }, [workspacePresentation?.mode, workspacePresentation?.open, workspacePresentation?.referenceDock, fitWidthCommand]);
-  // A docked right surface overlays the stage, so the page reads in what is left.
-  const readingWidth = workspaceFraming.stageSize.width
-    - (effectiveReferenceLayout.kind !== 'narrow-unified' && rightSurfaceOpen ? effectiveReferenceLayout.rightWidth : 0);
-  const fittedReadingWidthRef = useRef<number | null>(null);
+  // A docked right surface overlays the stage, so its width also sets the
+  // reading width. Opening or closing it fits through the disclosure path.
+  const stageWidth = workspaceFraming.stageSize.width;
+  const dockedRightWidth = effectiveReferenceLayout.kind !== 'narrow-unified' && rightSurfaceOpen
+    ? effectiveReferenceLayout.rightWidth
+    : null;
+  const fittedReadingFrameRef = useRef<{ stage: number; dock: number | null } | null>(null);
   useEffect(() => {
     // A page still at its last Fit Width scale follows window resizes and
     // docked-surface resizes. Any manual or destination zoom since that fit
     // keeps its scale instead.
-    const width = readingWidth;
-    const previous = fittedReadingWidthRef.current;
-    fittedReadingWidthRef.current = width;
-    if (previous === null || width === 0 || Math.abs(width - previous) < 1) return;
+    const previous = fittedReadingFrameRef.current;
+    fittedReadingFrameRef.current = { stage: stageWidth, dock: dockedRightWidth };
+    if (previous === null || stageWidth === 0) return;
+    const stageResized = Math.abs(stageWidth - previous.stage) >= 1;
+    const dockResized = dockedRightWidth !== null
+      && previous.dock !== null
+      && Math.abs(dockedRightWidth - previous.dock) >= 1;
+    if (!stageResized && !dockResized) return;
     const navigation = props.viewer.viewerNavigation;
     const follows = () => navigation?.followsFitWidth?.() ?? false;
     if (!follows()) return;
@@ -1565,7 +1572,7 @@ export function ReviewShell(props: ReviewShellProps) {
     };
     timer = setTimeout(refit, RESIZE_REFIT_DELAY_MS);
     return () => clearTimeout(timer);
-  }, [readingWidth, props.viewer.viewerNavigation, fitWidthCommand]);
+  }, [stageWidth, dockedRightWidth, props.viewer.viewerNavigation, fitWidthCommand]);
   const beforeViewerAction = async () => {
     await props.viewer.viewerNavigation?.cancelPendingNavigation();
     commitMainFramingPosition();
