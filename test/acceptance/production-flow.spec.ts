@@ -1092,6 +1092,11 @@ for (const viewportWidth of [1280, 760]) {
     await page.keyboard.press('Control+Meta+0');
     await waitForStageMotion();
     await expect.poll(() => zoom.inputValue()).not.toBe('100');
+    // The zoom menu offers Fit width only while the page is not already fitted.
+    await zoom.fill('100');
+    await zoom.press('Enter');
+    await waitForStageMotion();
+    await expect(zoom).toHaveValue('100');
     const zoomTrigger = page.getByRole('button', { name: 'Open zoom controls' });
     await zoomTrigger.focus();
     if (await zoomTrigger.getAttribute('aria-expanded') === 'true') await zoomTrigger.press('Escape');
