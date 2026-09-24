@@ -5612,9 +5612,8 @@ test('defaults a real PDF to fit width and refits bottom and resizable right rea
     .toBeGreaterThan(rightWorkspaceBounds.width);
   const resizedWorkspaceBounds = await referenceWorkspace.boundingBox();
   if (!resizedWorkspaceBounds) throw new Error('Resized right workspace has no bounds.');
-  // Dragging the docked References splitter keeps the page's scale until Fit Width.
-  expect(await zoomValue().inputValue()).toBe(rightFitZoom);
-  await fitAndWait();
+  // Dragging the docked References splitter re-fits the still-fitted page.
+  await waitForStageMotion();
   const resizedRightGeometry = await expectFitted(24, resizedWorkspaceBounds.x);
   expect(resizedRightGeometry.pageWidth).toBeLessThan(initialRightGeometry.pageWidth);
   expect(await zoomValue().inputValue()).not.toBe(rightFitZoom);
