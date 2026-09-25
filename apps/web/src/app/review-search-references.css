@@ -176,15 +176,14 @@
   list-style: none;
 }
 
+/* Search hits are painted like text highlight marks, in the selection wash. */
 [data-pdf-search-highlight] {
-  border: 1px solid var(--review-focus);
-  border-radius: 2px;
+  border-radius: var(--pdf-mark-radius, 3px);
   background: color-mix(in srgb, var(--review-pdf-selection-bg) 72%, transparent);
-  box-shadow: 0 0 0 1px rgb(255 255 255 / 55%), 0 1px 4px rgb(25 31 23 / 24%);
+  mix-blend-mode: multiply;
 }
 
 [data-pdf-search-highlight][data-pdf-search-match-kind="related"] {
-  border-color: color-mix(in srgb, var(--review-warning) 78%, #795a00);
   background: color-mix(in srgb, var(--review-warning) 42%, transparent);
 }
 

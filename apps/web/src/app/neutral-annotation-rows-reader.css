@@ -182,7 +182,7 @@
 }
 
 .annotation-item__kind-icon[data-annotation-kind-icon="insert"] {
-  color: var(--pdf-edit-ink);
+  color: var(--pdf-insert-ink);
 }
 
 .annotation-item__title-row > .row-action-group {

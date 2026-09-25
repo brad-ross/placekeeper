@@ -120,7 +120,7 @@
   position: absolute;
   content: '';
   border-radius: var(--review-radius-round);
-  background: color-mix(in srgb, var(--review-focus) 55%, transparent);
+  background: var(--review-border-strong);
   opacity: 0;
   transition: opacity 100ms ease-out;
 }
