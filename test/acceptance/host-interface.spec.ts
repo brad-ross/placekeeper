@@ -281,7 +281,9 @@ async function openAnimatedHostReview(page: Page, width = 1280) {
 }
 
 test('normal-motion workspace opening fits once after the tray settles', async ({ page }) => {
-  await openAnimatedHostReview(page);
+  // Narrow enough that the fitted page stays below the reading-zoom cap both
+  // before and after the tray opens, so the refit visibly narrows the page.
+  await openAnimatedHostReview(page, 960);
   const samples = await page.evaluate(() => new Promise<{ width: number; trayX: number }[]>((resolve) => {
     const pdf = document.querySelector<HTMLElement>('[data-page-index="0"]')!;
     const tray = document.querySelector<HTMLElement>('#review-tools-workspace')!;
@@ -362,7 +364,16 @@ for (const { referencesOpen, tall, zoomPercent } of [
 ]) {
   test(`workspace opening preserves ${zoomPercent}% manual zoom with References ${referencesOpen ? 'open' : 'closed'} in a ${tall ? 'tall' : 'standard'} viewport`, async ({ page }) => {
     await openAnimatedHostReview(page);
-    if (tall) await page.setViewportSize({ width: 1006, height: 1481 });
+    if (tall) {
+      await page.setViewportSize({ width: 1006, height: 1481 });
+      // The fitted page follows the resize; let it settle before using its links.
+      await expect.poll(async () => {
+        const before = await page.locator('[data-page-index="0"]').first().boundingBox();
+        await page.waitForTimeout(250);
+        const after = await page.locator('[data-page-index="0"]').first().boundingBox();
+        return before !== null && after !== null && Math.abs(before.width - after.width) < 0.5;
+      }).toBe(true);
+    }
     if (referencesOpen) {
       await page.getByRole('button', { name: 'Open PDF link to Primary result, Page 2', exact: true }).click();
       await page.getByRole('menuitem', { name: 'Open in References', exact: true }).click();

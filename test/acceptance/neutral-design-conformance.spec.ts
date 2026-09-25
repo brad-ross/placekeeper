@@ -15,6 +15,14 @@ async function canonical(browser: Browser, baseURL: string | undefined, scene: s
     #pk-canonical .pk-row { padding: 8px 8px 8px 12px !important; }
     #pk-canonical .pk-row.pk-current { box-shadow: 0 2px 7px rgb(0 0 0 / 2.4%) !important; }
     #pk-canonical .pk-ref-title { min-height: 32px !important; padding: 7px 8px !important; }
+    /* Reader polish: 32px outline rows, the selection toolbar's inset for top-bar
+       menus, the peek card's border and shadow on the passage editor, and kind
+       icons in their marks' ink. */
+    #pk-canonical .pk-outline { padding: 6px 6px 6px 4px !important; }
+    #pk-canonical .pk-outline-disclosure { height: 32px !important; min-height: 32px !important; }
+    #pk-canonical .pk-zoom-popover { padding: 5px !important; }
+    #pk-canonical .pk-editor { border: 1px solid #dedede !important; box-shadow: 0 3px 10px #00000008, 0 12px 30px #00000009 !important; }
+    #pk-canonical .pk-peek .pk-kind, #pk-canonical .pk-peek .pk-kind svg { color: #b1840d !important; }
   ` });
   await frame.locator('#pk-review-scene').selectOption({ label: scene });
   await page.mouse.move(0, 0);

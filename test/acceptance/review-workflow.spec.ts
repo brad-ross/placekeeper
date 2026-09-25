@@ -1236,7 +1236,8 @@ test.describe('canonical review workflow', () => {
       truncated: element.scrollWidth > element.clientWidth,
     }));
     expect(longTitleGeometry.truncated).toBe(true);
-    expect(longTitleGeometry.width).toBeLessThanOrEqual(256.5);
+    // A 320px identity cap: 8px padding each side, the 16px icon, and a 7px gap.
+    expect(longTitleGeometry.width).toBeLessThanOrEqual(281.5);
     const shortTitleGeometry = await longTitle.evaluate((element) => {
       element.textContent = 'A.pdf';
       return {
@@ -1311,11 +1312,14 @@ test.describe('canonical review workflow', () => {
     for (const gap of controlGaps) expect(gap).toBeCloseTo(8, 1);
     expect(Math.abs(geometry.file.x + geometry.file.width + 8 - geometry.context.x)).toBeLessThanOrEqual(.5);
     expect(Math.abs(geometry.file.y + geometry.file.height / 2 - geometry.context.y - geometry.context.height / 2)).toBeLessThanOrEqual(.5);
-    expect(geometry.pageNumber.width).toBe(26);
-    expect(geometry.pageAlign).toBe('center');
+    // The page input fits its digits (about 0.62em each) after a 6px lead.
+    const pageDigits = (await pagePosition.locator('.review-chrome__page-input').inputValue()).length;
+    expect(geometry.pageNumber.width).toBeCloseTo(6 + pageDigits * 0.62 * 13, 0);
+    expect(geometry.pageAlign).toBe('right');
     expect(Math.abs(geometry.pageNumber.x + geometry.pageNumber.width - geometry.pageButton.x)).toBeLessThanOrEqual(.5);
-    expect(Math.abs(geometry.pageButton.width - geometry.pageText.width - 6)).toBeLessThanOrEqual(.5);
-    expect(Math.abs(geometry.zoom.x + 5 - geometry.zoomNumber.x)).toBeLessThanOrEqual(.5);
+    // A space-wide lead before "/" and the 6px trailing padding.
+    expect(Math.abs(geometry.pageButton.width - geometry.pageText.width - 6 - 0.3 * 13)).toBeLessThanOrEqual(.5);
+    expect(Math.abs(geometry.zoom.x + 6 - geometry.zoomNumber.x)).toBeLessThanOrEqual(.5);
     expect(Math.abs(geometry.zoomNumber.x + geometry.zoomNumber.width - geometry.zoomUnit.x)).toBeLessThanOrEqual(.5);
     expect(Math.abs(geometry.zoomUnit.x + geometry.zoomUnit.width - geometry.zoomButton.x)).toBeLessThanOrEqual(.5);
     expect(geometry.zoomButton.width).toBe(20);

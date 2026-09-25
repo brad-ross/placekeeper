@@ -2243,9 +2243,11 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
   await expect(page.locator("[data-review-stage]")).toHaveAttribute("data-reference-layout", "wide-split");
   await expect(toolsWorkspace).toHaveAttribute("data-tools-workspace-open", "true");
   await expect(workspace).toHaveAttribute("data-workspace-presentation", "bottom");
-  // The default fit-width scale refits when the tools tray occupies reading space.
+  // The default fit-width scale refits when the tools tray occupies reading
+  // space. At the reading-zoom cap the page may already fit beside the tray,
+  // so the scale never grows and the page must stay clear of the tray.
   await expect.poll(async () => Number.parseInt(await currentZoomText(page), 10))
-    .toBeLessThan(Number.parseInt(zoomBeforeDocking, 10));
+    .toBeLessThanOrEqual(Number.parseInt(zoomBeforeDocking, 10));
   await expect.poll(async () => {
     const viewport = await mainViewport.boundingBox();
     const paper = await mainPageOne.boundingBox();
@@ -5735,7 +5737,9 @@ test('refits opening workspaces only from fit width and preserves manual reading
     }).toBeLessThan(3);
   };
   await expectOpeningFit();
-  expect((await pdfPage.boundingBox())!.width).toBeLessThan(initialWidth);
+  // Here the tray-open fit lands at about the 150% reading cap, so the page
+  // may keep its width; it must never grow.
+  expect((await pdfPage.boundingBox())!.width).toBeLessThanOrEqual(initialWidth + 0.5);
   const fittedZoom = await currentZoomText(page);
   await toggleWorkspace(page);
   await expect(drawer).toBeHidden();
@@ -7667,6 +7671,19 @@ test('zooms continuously without rebuilding PDF page layout on every gesture fra
   const workspace = page.locator('.pdf-workspace:not(.pdf-workspace--reference)');
   const viewport = workspace.locator('[data-viewer-framing-viewport]');
   const sheet = workspace.locator('.pdf-workspace__page[data-page-index="0"]');
+  await waitForRenderedPageImage(sheet);
+  // Start wider than the viewport: a page narrower than the viewport stays
+  // centered, so its pinch point would re-center instead of holding still.
+  const zoom = page.getByRole('textbox', { name: /Current zoom \d+ percent/u });
+  await zoom.fill('250');
+  await zoom.press('Enter');
+  await expect.poll(async () => (await sheet.boundingBox())!.width).toBeGreaterThan((await viewport.boundingBox())!.width);
+  // Let the animated toolbar zoom finish before measuring the gesture.
+  await expect.poll(async () => {
+    const before = (await sheet.boundingBox())!.width;
+    await page.waitForTimeout(200);
+    return Math.abs((await sheet.boundingBox())!.width - before);
+  }).toBeLessThan(0.5);
   await waitForRenderedPageImage(sheet);
   const result = await viewport.evaluate(async (element) => {
     const sheet = element.querySelector<HTMLElement>('.pdf-workspace__page[data-page-index="0"]')!;
