@@ -17,6 +17,7 @@ import {
   NavigationCoordinator,
   resolveContainingOutlineItem,
   resolveCurrentOutlineItemId,
+  resolveLeadingVisibleOutlineItemId,
   type DestinationBandPresentationState,
   type LinkActionBusyState,
   type LinkDescriptionPresentationState,
@@ -2476,6 +2477,34 @@ describe('current outline destination', () => {
       },
       currentLocation: location(5),
       resolveTarget: (candidate) => candidate === safe ? location(1) : null,
+    })).toBeNull();
+  });
+
+  it('marks the first heading when the reader is above it and it is on screen', () => {
+    const first = target(0);
+    const second = target(1);
+    const discovery = {
+      status: 'loaded-tree' as const,
+      documentGeneration: 1,
+      items: [
+        { id: 'setup', label: 'Setup', pageContext: 'Page 1', target: first, children: [
+          { id: 'panels', label: 'Panels', pageContext: 'Page 1', target: second, children: [] },
+        ] },
+      ],
+    };
+    const resolveTarget = (candidate: typeof first) => candidate === first ? location(0, 600) : location(0, 700);
+    const atTop = location(0, 0);
+
+    expect(resolveCurrentOutlineItemId({ discovery, currentLocation: atTop, resolveTarget })).toBeNull();
+    expect(resolveLeadingVisibleOutlineItemId({
+      discovery, currentLocation: atTop, resolveTarget, isVisible: () => true,
+    })).toBe('setup');
+    // Off screen, or once the reader is past it, the leading heading is not forced current.
+    expect(resolveLeadingVisibleOutlineItemId({
+      discovery, currentLocation: atTop, resolveTarget, isVisible: () => false,
+    })).toBeNull();
+    expect(resolveLeadingVisibleOutlineItemId({
+      discovery, currentLocation: location(0, 650), resolveTarget, isVisible: () => true,
     })).toBeNull();
   });
 

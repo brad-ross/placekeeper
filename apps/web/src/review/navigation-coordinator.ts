@@ -353,6 +353,32 @@ export function resolveCurrentOutlineItemId(input: {
   })?.id ?? null;
 }
 
+/**
+ * The first bookmark in reading order, when the reader is still above it and
+ * it is already on screen. A document opened at its first page often shows
+ * its first heading below the fold's top; that heading is where the reader is.
+ */
+export function resolveLeadingVisibleOutlineItemId(input: {
+  readonly discovery: PdfOutlineDiscovery;
+  readonly currentLocation: PdfViewerLocation;
+  readonly resolveTarget: (target: PdfNavigationTarget) => PdfViewerLocation | null;
+  readonly isVisible: (location: PdfViewerLocation) => boolean;
+}): string | null {
+  if (input.discovery.status !== 'loaded-tree') return null;
+  const flatten = (items: readonly PdfOutlineItem[]): PdfOutlineItem[] => items.flatMap((item) => [item, ...flatten(item.children)]);
+  let leading: { readonly id: string; readonly location: PdfViewerLocation; readonly order: readonly number[] } | null = null;
+  for (const item of flatten(input.discovery.items)) {
+    const location = item.target === null ? null : input.resolveTarget(item.target);
+    const order = location === null ? null : locationOrder(location);
+    if (location !== null && order !== null && (leading === null || compareOrder(order, leading.order) < 0)) {
+      leading = { id: item.id, location, order };
+    }
+  }
+  const currentOrder = locationOrder(input.currentLocation);
+  if (leading === null || currentOrder === null || compareOrder(currentOrder, leading.order) > 0) return null;
+  return input.isVisible(leading.location) ? leading.id : null;
+}
+
 const REFERENCE_FAILURE = 'Reference unavailable. Retry when ready.';
 const MAIN_FAILURE = 'Destination unavailable. The current location was preserved.';
 const HISTORY_FAILURE = 'Document history destination unavailable.';
@@ -1775,11 +1801,17 @@ export class NavigationCoordinator {
       this.dependencies.setCurrentOutlineItemId(null);
       return;
     }
-    this.dependencies.setCurrentOutlineItemId(resolveCurrentOutlineItemId({
-      discovery: this.dependencies.getOutlineDiscovery(),
-      currentLocation,
-      resolveTarget: (target) => navigation.resolveTarget(target),
-    }));
+    const discovery = this.dependencies.getOutlineDiscovery();
+    const resolveTarget = (target: PdfNavigationTarget) => navigation.resolveTarget(target);
+    this.dependencies.setCurrentOutlineItemId(
+      resolveCurrentOutlineItemId({ discovery, currentLocation, resolveTarget })
+      ?? resolveLeadingVisibleOutlineItemId({
+        discovery,
+        currentLocation,
+        resolveTarget,
+        isVisible: (location) => navigation.locationVisibility(location) === 'visible',
+      }),
+    );
   }
 
   /** Restores view-local page/zoom state without publishing navigation history. */
