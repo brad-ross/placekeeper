@@ -191,6 +191,13 @@ function canonicalTextWithMap(
   return { text: canonical.join(''), sourceIndexes };
 }
 
+/**
+ * PDFium marks a hyphen at a line break with U+FFFE; with soft hyphens and
+ * stray control glyphs it would render as a box, so excerpts drop them and
+ * rejoin the word.
+ */
+const EXCERPT_INVISIBLE = /[\u0000-\u0008\u000e-\u001f\u007f-\u009f\u00ad\ufffe\uffff]/u;
+
 function excerpt(characters: readonly string[], start: number, count: number): {
   readonly text: string;
   readonly match: { readonly start: number; readonly length: number };
@@ -202,7 +209,9 @@ function excerpt(characters: readonly string[], start: number, count: number): {
   let normalized = '';
   let previousWasWhitespace = false;
   for (const character of source) {
-    if (/\s/u.test(character)) {
+    if (EXCERPT_INVISIBLE.test(character)) {
+      // Zero-width: keeps the match boundaries aligned without a character.
+    } else if (/\s/u.test(character)) {
       if (normalized.length > 0 && !previousWasWhitespace) normalized += ' ';
       previousWasWhitespace = true;
     } else {

@@ -93,6 +93,7 @@ import type { ViewerFramingControls } from "../pdf/viewer-framing.js";
 import type { PdfViewerNavigation } from "../pdf/viewer-navigation-adapter.js";
 import {
   createPdfOutlineTargetOrderLocation,
+  type PdfDocumentOrderLocation,
   type PdfDocumentOrderPage,
 } from '../pdf/document-order-location.js';
 import {
@@ -777,6 +778,10 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   const mainNavigationRef = useRef<PdfViewerNavigation | null>(null);
   const [mainNavigationReadyGeneration, setMainNavigationReadyGeneration] = useState<number | null>(null);
   const [mainDocumentReadyGeneration, setMainDocumentReadyGeneration] = useState<number | null>(null);
+  const sectionResolverRef = useRef<{
+    readonly generation: number;
+    readonly resolve: (location: PdfDocumentOrderLocation) => string | null;
+  } | null>(null);
   const notifiedDocumentReadyGenerationRef = useRef<number | null>(null);
   const [mainNavigation, setMainNavigation] = useState<PdfViewerNavigation | null>(null);
   const referenceNavigationRef = useRef<PdfViewerNavigation | null>(null);
@@ -2085,37 +2090,39 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       readonly discovery: PdfOutlineDiscovery;
       readonly resolve: OutlineContainmentResolver;
     } | null = null;
+    const resolveSection = (location: PdfDocumentOrderLocation): string | null => {
+      const discovery = outlineDiscoveryRef.current;
+      if (discovery.documentGeneration !== documentGeneration) return null;
+      if (headingIndex?.discovery !== discovery) {
+        headingIndex = {
+          discovery,
+          resolve: createOutlineContainmentResolver({
+            discovery,
+            resolveTarget: (target) => {
+              const page = document.pages[target.pageIndex];
+              return page === undefined ? null : createPdfOutlineTargetOrderLocation(target, {
+                documentGeneration,
+                page: {
+                  ...page.size,
+                  cropOrigin: {
+                    x: page.boxes?.crop.left ?? 0,
+                    y: page.boxes?.crop.bottom ?? 0,
+                  },
+                },
+              });
+            },
+          }),
+        };
+      }
+      return headingIndex.resolve(location)?.label ?? null;
+    };
+    sectionResolverRef.current = { generation: documentGeneration, resolve: resolveSection };
     destinationDescriberRef.current = {
       generation: documentGeneration,
       resolver: createDestinationDescriptionResolver({
         documentGeneration,
         reader: createEngineDestinationPageReader(engine, document),
-        resolveHeading: (location) => {
-          const discovery = outlineDiscoveryRef.current;
-          if (discovery.documentGeneration !== documentGeneration) return null;
-          if (headingIndex?.discovery !== discovery) {
-            headingIndex = {
-              discovery,
-              resolve: createOutlineContainmentResolver({
-                discovery,
-                resolveTarget: (target) => {
-                  const page = document.pages[target.pageIndex];
-                  return page === undefined ? null : createPdfOutlineTargetOrderLocation(target, {
-                    documentGeneration,
-                    page: {
-                      ...page.size,
-                      cropOrigin: {
-                        x: page.boxes?.crop.left ?? 0,
-                        y: page.boxes?.crop.bottom ?? 0,
-                      },
-                    },
-                  });
-                },
-              }),
-            };
-          }
-          return headingIndex.resolve(location)?.label ?? null;
-        },
+        resolveHeading: resolveSection,
       }),
     };
     void captureCurrentReadingLocation();
@@ -2364,8 +2371,19 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
           : 'Copy target page link',
       };
     };
+  const sectionLabelAt = useCallback((location: PdfDocumentOrderLocation): string | null => {
+    const resolver = sectionResolverRef.current;
+    if (resolver === null || resolver.generation !== documentGenerationRef.current) return null;
+    if (outlineDiscovery.status !== 'loaded-tree' || ![location.anchor.x, location.anchor.y].every(Number.isFinite)) return null;
+    return resolver.resolve(location);
+  }, [outlineDiscovery, mainDocumentReadyGeneration]);
+  const searchResultSectionLabel = useCallback((result: PdfSearchResult): string | null => {
+    const origin = result.rects[0]?.origin;
+    return origin === undefined ? null : sectionLabelAt({ pageIndex: result.pageIndex, anchor: origin });
+  }, [sectionLabelAt]);
   const searchWorkspace = (
     <PdfSearchWorkspace
+      sectionLabelForResult={searchResultSectionLabel}
       state={searchState}
       onQueryChange={submitSearchQuery}
       onResultActivate={activateSearchResult}

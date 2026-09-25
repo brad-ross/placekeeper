@@ -520,7 +520,19 @@
   font: 400 13px/1.55 var(--pk-font-ui);
 }
 
-.pdf-search__result-icon { color: var(--pk-muted); }
+/* The section and the page share one line: section on the left, truncating,
+   page on the right where row actions take its place on hover. */
+.pdf-search__result-heading > .pdf-search__result-section {
+  order: 1;
+  min-width: 0;
+  flex: 0 1 auto;
+  overflow: hidden;
+  color: #737373;
+  font: 400 11px/1.5 var(--pk-font-ui);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .pdf-search__result-heading .pdf-search__result-page {
   order: 3;
   margin-left: 6px;

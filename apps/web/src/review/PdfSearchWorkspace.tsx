@@ -27,10 +27,15 @@ export interface PdfSearchWorkspaceProps {
     result: PdfSearchResult,
   ) => Pick<CopyLinkControlProps, 'getLink' | 'writeText' | 'disabled'> | undefined;
   readonly onAlternativeActivate: (alternative: PdfSearchAlternative) => void;
+  /** The outline section containing a result, when the PDF has a usable outline. */
+  readonly sectionLabelForResult?: (result: PdfSearchResult) => string | null;
 }
 
-function resultLabel(result: PdfSearchResult): string {
-  return `${result.excerpt || result.matchedForm}, page ${result.pageIndex + 1}`;
+function resultLabel(result: PdfSearchResult, sectionLabel: string | null): string {
+  const location = sectionLabel === null
+    ? `page ${result.pageIndex + 1}`
+    : `${sectionLabel}, page ${result.pageIndex + 1}`;
+  return `${result.excerpt || result.matchedForm}, ${location}`;
 }
 
 function resultExcerptParts(result: PdfSearchResult): {
@@ -100,6 +105,7 @@ export function PdfSearchWorkspace({
   onResultOpenReference,
   copyLinkForResult,
   onAlternativeActivate,
+  sectionLabelForResult,
 }: PdfSearchWorkspaceProps) {
   const queryInputRef = useRef<HTMLInputElement>(null);
   const [symbolSuggestionsOpen, setSymbolSuggestionsOpen] = useState(false);
@@ -269,6 +275,7 @@ export function PdfSearchWorkspace({
               {group.results.map((result) => {
                 const excerptParts = resultExcerptParts(result);
                 const pageNumber = result.pageIndex + 1;
+                const sectionLabel = sectionLabelForResult?.(result) ?? null;
                 const copyLink = copyLinkForResult?.(result);
                 const actions: readonly RowAction[] = [
                   {
@@ -299,12 +306,16 @@ export function PdfSearchWorkspace({
                       type="button"
                       className="annotation-item__navigation"
                       data-workspace-focus-token={`search:${result.id}`}
-                      aria-label={resultLabel(result)}
+                      aria-label={resultLabel(result, sectionLabel)}
                       title={`Go to result on page ${pageNumber}`}
                       onClick={() => onResultActivate(result)}
                     />
                     <div className="annotation-item__title-row pdf-search__result-heading">
-                      <ReviewIcon name="search" className="review-icon pdf-search__result-icon" />
+                      {sectionLabel === null ? null : (
+                        <span className="pdf-search__result-section" title={sectionLabel} aria-hidden="true">
+                          {sectionLabel}
+                        </span>
+                      )}
                       <RowActionGroup actions={actions} rowLabel={`Search result on page ${pageNumber}`} />
                       <span className="pdf-search__result-page">{pageNumber}</span>
                     </div>
