@@ -36,6 +36,7 @@ import {
 } from '../src/review/OutlineAnnotationsWorkspace.js';
 import type { PdfOutlineItem } from '../src/pdf/pdf-outline.js';
 import { RIGHT_WORKSPACE_MODES } from '../src/review/reference-navigation-state.js';
+import { AnnotationCountBadge } from '../src/review/AnnotationCountBadge.js';
 import {
   createOutlineExpansionState,
   setOutlineExpandedItemIds,
@@ -258,31 +259,11 @@ describe('shared reference workspace', () => {
     expect(WORKSPACE_MODES).toEqual(['outline', 'search', 'annotations', 'references']);
   });
 
-  it('shows the annotation count beside the selected Annotations tab label only', () => {
-    const render = (mode: 'annotations' | 'search') => renderToStaticMarkup(
-      <OutlineExpansionProvider discovery={{ status: 'loaded-empty', documentGeneration: 1 }}>
-        <OutlineAnnotationsWorkspace
-          open
-          annotationCount={3}
-          mode={mode}
-          modes={RIGHT_WORKSPACE_MODES}
-          presentation="right"
-          headerVariant="tools"
-          outline={{ status: 'loaded-empty', documentGeneration: 1 }}
-          currentOutlineItemId={null}
-          annotations={<div>Owned annotation rows</div>}
-          search={<div>PDF search</div>}
-          onModeChange={() => undefined}
-          onOutlineActivate={() => undefined}
-          onOutlineReference={() => undefined}
-        />
-      </OutlineExpansionProvider>,
-    );
-    const selected = render('annotations');
-    expect(selected).toContain('class="review-workspace__mode-count" data-workspace-mode-count-for="annotations" aria-hidden="true">3</span>');
-    // The tab keeps its plain accessible name.
-    expect(selected).toMatch(/id="workspace-mode-annotations"[^>]*aria-label="Annotations"/u);
-    expect(render('search')).not.toContain('review-workspace__mode-count');
+  it('shows the annotation count as text for screen readers and a number on screen', () => {
+    const many = renderToStaticMarkup(<AnnotationCountBadge count={3} />);
+    expect(many).toBe('<span class="review-workspace__annotation-count" data-annotation-count="3"><span aria-hidden="true">3</span><span class="sr-only">3 annotations</span></span>');
+    expect(renderToStaticMarkup(<AnnotationCountBadge count={1} />)).toContain('<span class="sr-only">1 annotation</span>');
+    expect(renderToStaticMarkup(<AnnotationCountBadge count={0} />)).toBe('');
   });
 
   it('falls back to Search when the selected Outline mode is unavailable', () => {

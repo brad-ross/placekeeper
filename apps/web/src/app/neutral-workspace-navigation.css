@@ -646,6 +646,29 @@
   border: 0;
 }
 
+/* Row actions match the annotation card actions: 26px buttons inset evenly
+   from the row's right, top, and (on one-line rows) bottom edges. */
+@media (hover: hover) and (pointer: fine) {
+  .outline-navigator .row-action-group {
+    top: 3px;
+    right: 3px;
+    width: auto;
+    min-width: 0;
+  }
+
+  .outline-navigator :is(
+    .row-action-group__action,
+    .copy-link-control__trigger--row,
+    .row-action-group__trigger
+  ) {
+    width: 26px;
+    min-width: 26px;
+    height: 26px;
+    min-height: 26px;
+    border-radius: 6px;
+  }
+}
+
 .outline-navigator__disclosure .review-icon { width: 16px; height: 16px; }
 .outline-navigator .outline-navigator__disclosure { color: var(--pk-ink); }
 

@@ -22,8 +22,6 @@ import { ReviewTooltipButton } from './ReviewTooltipButton.js';
 export interface OutlineAnnotationsWorkspaceProps {
   readonly workspaceRef?: Ref<HTMLElement>;
   readonly open: boolean;
-  /** Annotations in the list, shown beside the Annotations tab label. */
-  readonly annotationCount?: number;
   /** The workspace keeps its live state while the composer temporarily occupies its edge. */
   readonly authoringTakeover?: boolean;
   readonly mode: WorkspaceMode;
@@ -58,7 +56,6 @@ export function chooseToolModeFocusTarget(
 export function OutlineAnnotationsWorkspace({
   workspaceRef,
   open,
-  annotationCount,
   authoringTakeover = false,
   mode,
   modes,
@@ -207,7 +204,6 @@ export function OutlineAnnotationsWorkspace({
             onClick={onHide}
           ><ReviewIcon name={presentation === 'bottom' ? 'chevron-down' : 'chevron-right'} /></ReviewTooltipButton> : null}
           <WorkspaceModeStrip
-            {...(annotationCount === undefined ? {} : { counts: { annotations: annotationCount } })}
             modes={toolModes}
             selectedMode={effectiveToolMode}
             onModeChange={onModeChange}

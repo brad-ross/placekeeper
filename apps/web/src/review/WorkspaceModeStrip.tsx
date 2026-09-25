@@ -44,8 +44,6 @@ export interface WorkspaceModeStripProps<Mode extends WorkspaceMode> {
   ) => void;
   readonly dockAction?: WorkspaceDockAction;
   readonly quietSingleMode?: boolean;
-  /** Item counts shown beside the selected mode's label, such as annotations. */
-  readonly counts?: Partial<Record<Mode, number>>;
 }
 
 export function WorkspaceModeStrip<Mode extends WorkspaceMode>({
@@ -58,7 +56,6 @@ export function WorkspaceModeStrip<Mode extends WorkspaceMode>({
   onModeBlur,
   dockAction,
   quietSingleMode = false,
-  counts,
 }: WorkspaceModeStripProps<Mode>) {
   const availableModes = useContext(WorkspaceModeAvailability);
   const dockAttached = selectedMode === 'references' && dockAction !== undefined;
@@ -79,7 +76,6 @@ export function WorkspaceModeStrip<Mode extends WorkspaceMode>({
           const unavailable = availableModes !== null && !availableModes.includes(mode);
           const presentation = MODE_PRESENTATION[mode];
           const compound = dockAttached && mode === 'references';
-          const count = counts?.[mode];
           return (
             <span
               key={mode}
@@ -127,12 +123,6 @@ export function WorkspaceModeStrip<Mode extends WorkspaceMode>({
                     aria-hidden="true"
                   >
                     {presentation.label}
-                  </span>
-                ) : null}
-                {selected && count !== undefined && count > 0 ? (
-                  // The list itself announces its length; the count is visual only.
-                  <span className="review-workspace__mode-count" data-workspace-mode-count-for={mode} aria-hidden="true">
-                    {count}
                   </span>
                 ) : null}
               </ReviewTooltipButton>

@@ -69,6 +69,7 @@ import type {
   LinkDescriptionPresentationState,
 } from '../review/navigation-coordinator.js';
 import type { PdfOutlineDiscovery, PdfOutlineItem } from '../pdf/pdf-outline.js';
+import { AnnotationCountBadge } from '../review/AnnotationCountBadge.js';
 import { AnnotationList } from '../review/AnnotationList.js';
 import { FullAnnotationReader } from '../review/FullAnnotationReader.js';
 import {
@@ -703,6 +704,9 @@ export function ReviewShell(props: ReviewShellProps) {
   const anyWorkspaceOpen = workspaceOpen || referenceSurfaceOpen || toolsSurfaceOpen;
   const annotationsVisible = toolsSurfaceOpen && effectiveWorkspaceMode === 'annotations';
   const outlineExpansionToggleVisible = toolsSurfaceOpen && effectiveWorkspaceMode === 'outline';
+  const annotationCountBadge = effectiveWorkspaceMode === 'annotations'
+    ? <AnnotationCountBadge count={annotationCount} />
+    : null;
   const selectionAnchor = reliableSelection(props.selection.selectionUpdate);
   const selectionActionsAvailable = (
     selectionAnchor !== null || props.selection.selectionUpdate.kind === 'over-limit'
@@ -2370,7 +2374,6 @@ export function ReviewShell(props: ReviewShellProps) {
           )}
           <OutlineExpansionProvider discovery={visibleOutlineDiscovery}>
           <ReferenceWorkspace
-            annotationCount={annotationCount}
             workspaceRef={workspaceFraming.referenceSurfaceRef}
             open={referenceSurfaceOpen}
             authoringTakeover={authoringSession !== null}
@@ -2451,11 +2454,13 @@ export function ReviewShell(props: ReviewShellProps) {
             onReferenceViewportHost={props.workspace.onReferenceViewportHost ?? ignoreReferenceViewportHost}
             onModeFocusTokenChange={rememberWorkspaceModeFocus}
             headerAction={sharedWorkspace ? (
-              <OutlineExpansionToggleSlot visible={outlineExpansionToggleVisible} />
+              <>
+                <OutlineExpansionToggleSlot visible={outlineExpansionToggleVisible} />
+                {annotationCountBadge}
+              </>
             ) : null}
           />
           <OutlineAnnotationsWorkspace
-            annotationCount={annotationCount}
             workspaceRef={workspaceFraming.toolsSurfaceRef}
             open={toolsSurfaceOpen}
             authoringTakeover={authoringSession !== null}
@@ -2466,7 +2471,10 @@ export function ReviewShell(props: ReviewShellProps) {
             outline={visibleOutlineDiscovery}
             currentOutlineItemId={props.workspace.currentOutlineItemId ?? null}
             headerAction={(
-              <OutlineExpansionToggleSlot visible={outlineExpansionToggleVisible} />
+              <>
+                <OutlineExpansionToggleSlot visible={outlineExpansionToggleVisible} />
+                {annotationCountBadge}
+              </>
             )}
             onModeChange={selectWorkspaceMode}
             onHide={() => {

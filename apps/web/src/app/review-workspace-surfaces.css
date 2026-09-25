@@ -296,6 +296,19 @@
   margin-left: auto;
 }
 
+/* The annotation count takes the collapse toggle's corner of the header. */
+.review-workspace__annotation-count {
+  display: grid;
+  min-width: var(--review-control-compact);
+  height: var(--review-control-compact);
+  margin-left: auto;
+  padding-inline: 4px;
+  place-items: center;
+  color: var(--review-ink-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
 .review-workspace__outline-toggle > .review-icon {
   transform: translate(.5px, 1px);
 }
@@ -474,13 +487,6 @@
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
-}
-
-.review-workspace__mode-count {
-  flex: none;
-  color: var(--review-ink-muted);
-  font-size: 11px;
-  font-variant-numeric: tabular-nums;
 }
 
 .review-workspace__mode-tab[aria-selected="true"],

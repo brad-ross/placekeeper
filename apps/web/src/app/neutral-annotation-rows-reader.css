@@ -83,6 +83,13 @@
   box-shadow: 0 2px 6px rgb(0 0 0 / 2%), 0 8px 24px rgb(0 0 0 / 1.6%);
 }
 
+/* On the grey hover background the quotation rule would vanish; darken it
+   there, but not on the selected (white) row. */
+:is(.review-workspace, .review-tools-workspace) li[data-annotation-origin]:not([data-active="true"]):is(:hover, :has(:focus-visible))
+  :is(.annotation-item__quote, .annotation-item__source) {
+  border-left-color: #c8c8c8;
+}
+
 :is(.review-workspace, .review-tools-workspace) li[data-corresponding="true"]::before {
   content: none;
 }
@@ -170,7 +177,11 @@
   color: var(--pdf-note-ink);
 }
 
-.annotation-item__kind-icon:is([data-annotation-kind-icon="replace"], [data-annotation-kind-icon="delete"], [data-annotation-kind-icon="insert"]) {
+.annotation-item__kind-icon:is([data-annotation-kind-icon="replace"], [data-annotation-kind-icon="delete"]) {
+  color: var(--pdf-correction-ink);
+}
+
+.annotation-item__kind-icon[data-annotation-kind-icon="insert"] {
   color: var(--pdf-edit-ink);
 }
 
