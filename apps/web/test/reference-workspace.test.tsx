@@ -258,6 +258,33 @@ describe('shared reference workspace', () => {
     expect(WORKSPACE_MODES).toEqual(['outline', 'search', 'annotations', 'references']);
   });
 
+  it('shows the annotation count beside the selected Annotations tab label only', () => {
+    const render = (mode: 'annotations' | 'search') => renderToStaticMarkup(
+      <OutlineExpansionProvider discovery={{ status: 'loaded-empty', documentGeneration: 1 }}>
+        <OutlineAnnotationsWorkspace
+          open
+          annotationCount={3}
+          mode={mode}
+          modes={RIGHT_WORKSPACE_MODES}
+          presentation="right"
+          headerVariant="tools"
+          outline={{ status: 'loaded-empty', documentGeneration: 1 }}
+          currentOutlineItemId={null}
+          annotations={<div>Owned annotation rows</div>}
+          search={<div>PDF search</div>}
+          onModeChange={() => undefined}
+          onOutlineActivate={() => undefined}
+          onOutlineReference={() => undefined}
+        />
+      </OutlineExpansionProvider>,
+    );
+    const selected = render('annotations');
+    expect(selected).toContain('class="review-workspace__mode-count" data-workspace-mode-count-for="annotations" aria-hidden="true">3</span>');
+    // The tab keeps its plain accessible name.
+    expect(selected).toMatch(/id="workspace-mode-annotations"[^>]*aria-label="Annotations"/u);
+    expect(render('search')).not.toContain('review-workspace__mode-count');
+  });
+
   it('falls back to Search when the selected Outline mode is unavailable', () => {
     const html = renderToStaticMarkup(
       <OutlineExpansionProvider discovery={{ status: 'loaded-empty', documentGeneration: 1 }}>

@@ -92,6 +92,8 @@ export type PendingReferencePanel =
 
 export interface ReferenceWorkspaceProps {
   readonly open: boolean;
+  /** Annotations in the list, shown beside the Annotations tab label. */
+  readonly annotationCount?: number;
   /** The workspace keeps its live state while the composer temporarily occupies its edge. */
   readonly authoringTakeover?: boolean;
   readonly workspaceRef?: Ref<HTMLElement>;
@@ -157,6 +159,7 @@ export function chooseWorkspaceModeFocusTarget(input: {
 
 export function ReferenceWorkspace({
   open,
+  annotationCount,
   authoringTakeover = false,
   workspaceRef,
   mode,
@@ -422,6 +425,7 @@ export function ReferenceWorkspace({
           onClick={onHide}
         ><ReviewIcon name={presentation === 'bottom' ? 'chevron-down' : 'chevron-right'} /></ReviewTooltipButton> : null}
         <WorkspaceModeStrip
+          {...(annotationCount === undefined ? {} : { counts: { annotations: annotationCount } })}
           modes={modes}
           selectedMode={mode}
           onModeChange={onModeChange}

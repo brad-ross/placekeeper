@@ -476,6 +476,13 @@
   text-overflow: ellipsis;
 }
 
+.review-workspace__mode-count {
+  flex: none;
+  color: var(--review-ink-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
 .review-workspace__mode-tab[aria-selected="true"],
 .reference-tabs button[aria-selected="true"] {
   border-color: var(--review-border);

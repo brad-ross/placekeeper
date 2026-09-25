@@ -2551,6 +2551,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
         })}
         documentTitle={scope.documentTitle}
         displayTitle={pageTitle}
+        sectionLabelAt={sectionLabelAt}
         generationRefreshStatus={props.generationRefreshStatus ?? 'idle'}
         locationRestoreStatus={locationRestoreStatus}
         toolError={pdfCopyError ?? commandError}

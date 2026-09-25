@@ -41,6 +41,7 @@ import {
   type ReviewRect,
 } from '../../../../packages/core/src/review-commands.js';
 import type { ReviewItem, ReviewItemKind, ReviewState } from '../../../../packages/core/src/review-model.js';
+import type { PdfDocumentOrderLocation } from '../pdf/document-order-location.js';
 import type { CaretAnchor } from '../pdf/selection-anchor.js';
 import {
   existingAnnotationKey,
@@ -326,6 +327,8 @@ export interface ReviewShellProps {
   documentTitle?: string;
   /** The PDF's own title when it has one; the chrome shows it with the filename as its tooltip. */
   displayTitle?: string;
+  /** The outline section containing a page location, when the PDF has a usable outline. */
+  sectionLabelAt?: (location: PdfDocumentOrderLocation) => string | null;
   generationRefreshStatus?: GenerationRefreshStatus;
   locationRestoreStatus?: LocationRestoreStatus;
   toolError?: string | null;
@@ -602,6 +605,8 @@ export function ReviewShell(props: ReviewShellProps) {
         props.state.workflow.documentGeneration,
       ))
     : props.state.items;
+  const annotationCount = visibleOwnedItems.length
+    + (existingAnnotations.status === 'ready' ? existingAnnotations.items.length : 0);
   const generatedStatusBusy = props.generationRefreshStatus !== 'failed'
     && (props.generationRefreshStatus === 'reconciling' || props.locationRestoreStatus === 'restoring');
   const generatedStatusMessages = [
@@ -2365,6 +2370,7 @@ export function ReviewShell(props: ReviewShellProps) {
           )}
           <OutlineExpansionProvider discovery={visibleOutlineDiscovery}>
           <ReferenceWorkspace
+            annotationCount={annotationCount}
             workspaceRef={workspaceFraming.referenceSurfaceRef}
             open={referenceSurfaceOpen}
             authoringTakeover={authoringSession !== null}
@@ -2449,6 +2455,7 @@ export function ReviewShell(props: ReviewShellProps) {
             ) : null}
           />
           <OutlineAnnotationsWorkspace
+            annotationCount={annotationCount}
             workspaceRef={workspaceFraming.toolsSurfaceRef}
             open={toolsSurfaceOpen}
             authoringTakeover={authoringSession !== null}
@@ -2539,6 +2546,7 @@ export function ReviewShell(props: ReviewShellProps) {
               onDetailModeChange={setReconciliationDetailMode}
               renderSummary={(attention) => <AnnotationList
                 attention={attention}
+                {...(props.sectionLabelAt === undefined ? {} : { sectionLabelAt: props.sectionLabelAt })}
                 items={visibleOwnedItems}
                 existingAnnotations={existingAnnotations}
                 documentGeneration={navigation.documentGeneration}
