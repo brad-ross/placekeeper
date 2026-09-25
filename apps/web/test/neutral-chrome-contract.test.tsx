@@ -6,6 +6,7 @@ import { documentIdentityLabel } from '../src/review/DocumentActionsMenu.js';
 import {
   pageInputWidth,
   ReviewChrome,
+  zoomInputWidth,
   validPageNumber,
   validZoomPercent,
 } from '../src/review/ReviewChrome.js';
@@ -76,6 +77,12 @@ describe('neutral toolbar contract', () => {
     expect(pageInputWidth('123')).toBe(`calc(${3 * 0.62}em + 6px)`);
     expect(pageInputWidth('')).toBe('calc(0.62em + 6px)');
     expect(chrome()).toContain('style="width:calc(0.62em + 6px)"');
+  });
+
+  it('sizes the zoom input to its digits too', () => {
+    expect(zoomInputWidth('100')).toBe(`${3 * 0.62}em`);
+    expect(zoomInputWidth('85')).toBe(`${2 * 0.62}em`);
+    expect(chrome()).toContain(`style="width:${3 * 0.62}em"`);
   });
 
   it('omits each unavailable history action without reserving an empty edit group', () => {

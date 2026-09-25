@@ -274,6 +274,7 @@
    page input is sized to its digits (inline width) so "1 / 33" keeps even
    spacing, with left padding that mirrors the disclosure's right padding. */
 .review-chrome__page-editor > .review-chrome__page-input {
+  box-sizing: border-box;
   width: calc(2em + 6px);
   padding-left: 6px;
   text-align: right;
@@ -290,11 +291,12 @@
   font: 400 13px/20px var(--pk-font-ui) !important;
 }
 
+/* The same 6px lead as the page input, so every chrome gap reads alike. */
 .review-chrome__zoom-value {
   display: inline-flex;
   min-height: 32px;
   align-items: center;
-  padding-left: 5px;
+  padding-left: 6px;
 }
 
 .review-chrome__zoom-suffix {
@@ -335,13 +337,14 @@
 }
 
 .top-bar-menu__surface {
-  padding: 7px;
-  gap: 3px;
+  /* The same inset as the text selection toolbar. */
+  padding: 5px;
+  gap: 2px;
   border-color: #e0e0e0;
   font: 400 13px/20px var(--pk-font-ui);
 }
 
-.top-bar-menu__surface .review-chrome__control-cluster { gap: 3px; }
+.top-bar-menu__surface .review-chrome__control-cluster { gap: 2px; }
 
 .top-bar-menu__surface [data-review-horizontal-lock][aria-checked="true"] {
   background: var(--pk-selected);

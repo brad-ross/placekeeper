@@ -83,6 +83,11 @@ export function pageInputWidth(value: string): string {
   return `calc(${Math.max(1, value.length) * 0.62}em + 6px)`;
 }
 
+/** Fits the zoom input to its digits; its 6px lead sits on the zoom value. */
+export function zoomInputWidth(value: string): string {
+  return `${Math.max(1, value.length) * 0.62}em`;
+}
+
 export interface ReviewChromeProps {
   readonly documentTitle: string;
   /** The PDF's own title when it has one; shown in place of the filename. */
@@ -570,6 +575,7 @@ export function ReviewChrome({
           aria-describedby={zoomInvalid ? zoomErrorId : undefined}
           aria-errormessage={zoomInvalid ? zoomErrorId : undefined}
           value={editingZoom ? zoomDraft : String(viewerState.zoomPercent)}
+          style={{ width: zoomInputWidth(editingZoom ? zoomDraft : String(viewerState.zoomPercent)) }}
           onPointerDown={() => { zoomPointerActivationRef.current = !editingZoom; }}
           onPointerUp={(event) => {
             if (!zoomPointerActivationRef.current) return;
