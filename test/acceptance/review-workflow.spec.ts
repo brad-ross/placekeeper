@@ -1285,11 +1285,10 @@ test.describe('canonical review workflow', () => {
       const zoomNumber = bounds('.review-chrome__zoom-input');
       const zoomUnit = bounds('.review-chrome__zoom-suffix');
       const zoomButton = bounds('.review-chrome__zoom-disclosure');
-      const zoomIcon = bounds('.review-chrome__zoom-disclosure .review-icon');
       return {
         file: file.toJSON(), context: contextStatus.toJSON(),
         pageGroup: pageGroup.toJSON(), pageNumber: pageNumber.toJSON(), pageButton: pageButton.toJSON(), pageText: pageText.toJSON(),
-        zoom: zoom.toJSON(), zoomNumber: zoomNumber.toJSON(), zoomUnit: zoomUnit.toJSON(), zoomButton: zoomButton.toJSON(), zoomIcon: zoomIcon.toJSON(),
+        zoom: zoom.toJSON(), zoomNumber: zoomNumber.toJSON(), zoomUnit: zoomUnit.toJSON(), zoomButton: zoomButton.toJSON(),
         filePadding: [styles(':scope > .review-chrome__identity > .review-chrome__save-identity').paddingTop, styles(':scope > .review-chrome__identity > .review-chrome__save-identity').paddingRight],
         fileGap: styles(':scope > .review-chrome__identity > .review-chrome__save-identity').gap,
         fileRadius: styles(':scope > .review-chrome__identity > .review-chrome__save-identity').borderRadius,
@@ -1321,10 +1320,10 @@ test.describe('canonical review workflow', () => {
     expect(Math.abs(geometry.pageButton.width - geometry.pageText.width - 6 - 0.3 * 13)).toBeLessThanOrEqual(.5);
     expect(Math.abs(geometry.zoom.x + 6 - geometry.zoomNumber.x)).toBeLessThanOrEqual(.5);
     expect(Math.abs(geometry.zoomNumber.x + geometry.zoomNumber.width - geometry.zoomUnit.x)).toBeLessThanOrEqual(.5);
-    expect(Math.abs(geometry.zoomUnit.x + geometry.zoomUnit.width - geometry.zoomButton.x)).toBeLessThanOrEqual(.5);
-    expect(geometry.zoomButton.width).toBe(20);
+    // The "%" suffix is the menu button, like the page group's "/ 33", with 6px trailing padding.
+    expect(Math.abs(geometry.zoomUnit.x - geometry.zoomButton.x)).toBeLessThanOrEqual(.5);
+    expect(Math.abs(geometry.zoomButton.width - geometry.zoomUnit.width - 6)).toBeLessThanOrEqual(.5);
     expect(geometry.zoomButton.height).toBe(32);
-    expect(Math.abs(geometry.zoomButton.x + geometry.zoomButton.width / 2 - geometry.zoomIcon.x - geometry.zoomIcon.width / 2)).toBeLessThanOrEqual(.5);
 
     await pagePosition.hover();
     await expect(pagePosition).toHaveCSS('background-color', 'rgb(231, 231, 231)');

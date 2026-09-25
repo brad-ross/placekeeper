@@ -75,8 +75,10 @@ test('toolbar controls match canonical rest, hover, keyboard, and open-menu stat
     // dismissal and can detach it while the style comparison is polling.
     await zoomSurface.hover(); await zoomSurfaceMock.hover();
     await expect(zoom).toBeFocused();
-    await match(zoom, zoomMock, [...control, 'width', 'height']);
-    await match(zoom.locator('svg'), zoomMock.locator('svg'), icon);
+    // The approved chevron trigger is now the "%" suffix itself (reader polish),
+    // so it keeps the toolbar's type and surface, with the page button's line
+    // height, and has no icon.
+    await match(zoom, zoomMock, [...typography.filter((name) => name !== 'lineHeight'), 'borderTopWidth', 'backgroundColor', 'boxShadow', 'height']);
     await match(zoomSurface, zoomSurfaceMock, surface);
     // Finish the pointer-hover comparison before checking keyboard navigation.
     // Hover menus close when the pointer leaves, independently of focus.

@@ -98,7 +98,8 @@ for (const [pageIndex, rotation] of [0, 90, 180, 270].entries()) {
     expect(await paint(comment)).toMatchObject({ underline: '""', underlineColor: 'rgb(177, 132, 13)' });
     expect(await paint(deletion)).toMatchObject({ strike: '""', strikeColor: 'rgb(195, 79, 84)', underline: 'none', background: 'rgba(0, 0, 0, 0)' });
     expect(await paint(replacement)).toMatchObject({ strike: '""', strikeColor: 'rgb(195, 79, 84)', underline: '""', underlineColor: 'rgb(195, 79, 84)', background: 'rgba(218, 78, 78, 0.2)' });
-    expect(await paint(insertion)).toMatchObject({ animation: 'none', caretColor: 'rgb(94, 117, 136)', background: 'rgba(0, 0, 0, 0)' });
+    // Insertions share the link-destination blue: a filled marker and blue caret.
+    expect(await paint(insertion)).toMatchObject({ animation: 'none', caretColor: 'rgb(47, 111, 196)', background: 'rgba(56, 132, 230, 0.24)' });
     await expect(pdfPage.locator('[data-owned-mark="pageNote"] .lucide-sticky-note')).toBeVisible();
     for (const mark of await marks.all()) {
       expect(await mark.evaluate((element) => (element as HTMLElement).style.transform)).toContain(`rotate(${rotation}deg)`);
