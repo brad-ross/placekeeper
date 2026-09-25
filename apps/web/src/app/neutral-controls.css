@@ -308,10 +308,16 @@
   color: var(--pk-ink);
 }
 
+/* The "%" suffix is the menu button, mirroring the page group's "/ 33", with
+   the same 6px trailing padding. */
 .review-chrome__zoom-disclosure {
-  width: 20px !important;
-  min-width: 20px !important;
-  padding: 0 !important;
+  width: auto !important;
+  min-width: 0 !important;
+  padding: 0 6px 0 0 !important;
+  justify-content: flex-start !important;
+  border-radius: 0 8px 8px 0 !important;
+  color: var(--pk-ink) !important;
+  font: 400 13px/20px var(--pk-font-ui) !important;
 }
 
 .review-chrome .review-chrome__page-disclosure:hover:not(:disabled),

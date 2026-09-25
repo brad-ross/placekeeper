@@ -702,20 +702,21 @@ export function ReviewChrome({
     role="group"
     aria-label="PDF zoom"
   >
-    <span className="review-chrome__zoom-value">{zoomValue()}<span aria-hidden="true" className="review-chrome__zoom-suffix">%</span></span>
+    {/* Like the page group's "/ 33", the fixed "%" suffix opens the menu. */}
+    <span className="review-chrome__zoom-value">{zoomValue()}</span>
     <ReviewTooltipButton
       label="Open zoom controls"
       tooltip={false}
       ref={(element) => { zoomAnchorRef.current = element; }}
       type="button"
-      className="review-chrome__icon-control review-chrome__zoom-disclosure"
+      className="review-chrome__zoom-disclosure"
       aria-label="Open zoom controls"
       aria-haspopup="menu"
       aria-expanded={activeTopBarMenu === 'zoom'}
       aria-controls={zoomMenuId}
       disabled={!viewerState.zoomReady}
       onClick={(event) => activateMenu('zoom', event)}
-    ><ReviewIcon name="chevron-down" size={16} /></ReviewTooltipButton>
+    ><span aria-hidden="true" className="review-chrome__zoom-suffix">%</span></ReviewTooltipButton>
     <TopBarMenu hoverOpen={topBarMenuHoverOpen} hoverRegionRef={zoomHoverRef} open={activeTopBarMenu === 'zoom'} menuId={zoomMenuId} label="PDF zoom" openerRef={zoomAnchorRef} focusOnOpen={topBarMenuKeyboardOpenRef.current} onDismiss={() => requestTopBarMenu('zoom', false)}>
       <div className="review-chrome__control-cluster" role="group" aria-label="Zoom controls">
         {horizontalScrollAvailable ? <ReviewTooltipButton
@@ -744,7 +745,7 @@ export function ReviewChrome({
   const sizingCluster = (_candidate: ReviewChromePresentation): ReactNode => <div className="review-chrome__viewer-controls" style={{ display: 'inline-flex', gridColumn: 'auto', gridRow: 'auto', flexWrap: 'nowrap' }}>
     {canUndo || canRedo ? <span className="review-chrome__control-cluster">{canUndo ? <button type="button" title="Undo" className="review-chrome__icon-control"><ReviewIcon name="undo" /></button> : null}{canRedo ? <button type="button" title="Redo" className="review-chrome__icon-control"><ReviewIcon name="redo" /></button> : null}</span> : null}
     <span className="review-chrome__control-cluster">{canNavigateBack ? <button type="button" title="Back in document history" className="review-chrome__icon-control"><ReviewIcon name="arrow-left" /></button> : null}{canNavigateForward ? <button type="button" title="Forward in document history" className="review-chrome__icon-control"><ReviewIcon name="arrow-right" /></button> : null}<span className="review-chrome__stat">{viewerState.pageReady ? `${viewerState.currentPage} / ${viewerState.totalPages}` : '— / —'}</span></span>
-    <span className="review-chrome__control-cluster"><span className="review-chrome__stat">{viewerState.zoomReady ? `${viewerState.zoomPercent}%` : '—%'}</span><button type="button" title="Zoom controls" className="review-chrome__icon-control"><ReviewIcon name="chevron-down" size={16} /></button></span>
+    <span className="review-chrome__control-cluster"><span className="review-chrome__stat">{viewerState.zoomReady ? `${viewerState.zoomPercent}%` : '—%'}</span></span>
     {copyLink === undefined ? null : <div className="review-chrome__link"><button type="button" title="Copy link to current location" className="review-chrome__icon-control"><ReviewIcon name="link" /></button></div>}
   </div>;
 
