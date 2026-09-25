@@ -3,10 +3,11 @@
   width: min(340px, calc(100% - 24px));
   gap: 12px;
   padding: 12px;
-  border: 0;
+  /* The same raised card as the annotation peek, so it stands off the page. */
+  border: 1px solid #dedede;
   border-radius: 16px;
   background: var(--pk-raised);
-  box-shadow: 0 2px 8px #00000007, 0 12px 32px #0000000d;
+  box-shadow: var(--pk-shadow-raised);
 }
 
 .comment-composer__header {
