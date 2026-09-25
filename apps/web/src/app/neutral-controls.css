@@ -84,11 +84,18 @@
   gap: var(--pk-toolbar-gap);
 }
 
+/* One cap for the identity and its trigger, so a long PDF title truncates
+   without leaving a gap before the page controls. */
+.review-chrome__identity > .document-actions {
+  min-width: 0;
+  max-width: 320px;
+}
+
 .review-chrome .review-chrome__save-identity,
 .review-chrome__identity .document-actions__trigger {
   width: max-content;
   flex: 0 1 auto;
-  max-width: min(280px, 100%);
+  max-width: min(320px, 100%);
   min-width: 0;
   min-height: 32px;
   justify-content: flex-start;
@@ -107,7 +114,7 @@
 .review-chrome__filename {
   width: auto;
   min-width: 0;
-  max-width: 250px;
+  max-width: none;
   overflow: hidden;
   font: inherit;
   text-overflow: ellipsis;
@@ -263,13 +270,19 @@
   appearance: textfield;
 }
 
-/* WebKit pageZoom scales ch widths twice; em tracks only the text size. */
-.review-chrome__page-input { width: 2em; text-align: center; }
+/* WebKit pageZoom scales ch widths twice; em tracks only the text size. The
+   page input is sized to its digits (inline width) so "1 / 33" keeps even
+   spacing, with left padding that mirrors the disclosure's right padding. */
+.review-chrome__page-editor > .review-chrome__page-input {
+  width: calc(2em + 6px);
+  padding-left: 6px;
+  text-align: right;
+}
 .review-chrome__zoom-input { width: 2em; text-align: right; }
 
 .review-chrome__page-disclosure {
   min-width: 0 !important;
-  padding: 0 6px 0 0 !important;
+  padding: 0 6px 0 .3em !important;
   justify-content: flex-start !important;
   gap: 6px !important;
   border-radius: 0 8px 8px 0 !important;

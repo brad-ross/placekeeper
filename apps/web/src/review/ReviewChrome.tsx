@@ -13,6 +13,7 @@ import { CodexContextStatus } from './CodexContextStatus.js';
 import { CopyLinkControl, type CopyLinkControlProps } from './CopyLinkControl.js';
 import {
   DocumentActionsMenu,
+  documentIdentityLabel,
   type DocumentActionsMenuProps,
 } from './DocumentActionsMenu.js';
 import { TopBarMenu } from './TopBarMenu.js';
@@ -77,8 +78,15 @@ export function resolveTopBarMenuRequest(input: {
   return input.activeMenu === input.requestedMenu ? null : input.activeMenu;
 }
 
+/** Fits the page input to its digits (about 0.6em each) plus its 6px left padding. */
+export function pageInputWidth(value: string): string {
+  return `calc(${Math.max(1, value.length) * 0.62}em + 6px)`;
+}
+
 export interface ReviewChromeProps {
   readonly documentTitle: string;
+  /** The PDF's own title when it has one; shown in place of the filename. */
+  readonly displayTitle?: string;
   readonly savedLabel?: string;
   readonly showSaveStatusDot?: boolean;
   readonly savePhase?: 'clean' | 'saving' | 'not-saved';
@@ -87,6 +95,7 @@ export interface ReviewChromeProps {
   readonly documentActions?: Omit<
     DocumentActionsMenuProps,
     | 'documentTitle'
+    | 'displayTitle'
     | 'savedLabel'
     | 'savePhase'
     | 'open'
@@ -120,6 +129,7 @@ export interface ReviewChromeProps {
 export function ReviewChrome({
   showSaveStatusDot = true,
   documentTitle,
+  displayTitle = documentTitle,
   savedLabel = 'Saved',
   savePhase = 'clean',
   savePendingDestination = false,
@@ -203,7 +213,8 @@ export function ReviewChrome({
     : savePhase === 'saving'
       ? 'Saving changes'
       : savedLabel;
-  const saveControlLabel = `${documentTitle}, ${saveStatusText}. Open automatic save options`;
+  const identityLabel = documentIdentityLabel(displayTitle, documentTitle);
+  const saveControlLabel = `${identityLabel}, ${saveStatusText}. Open automatic save options`;
   const pageUnavailableId = 'viewer-page-controls-readiness';
   const zoomUnavailableId = 'viewer-zoom-controls-readiness';
   const fitWidthUnavailableId = 'viewer-fit-width-readiness';
@@ -495,6 +506,7 @@ export function ReviewChrome({
           aria-describedby={pageInvalid ? pageErrorId : undefined}
           aria-errormessage={pageInvalid ? pageErrorId : undefined}
           value={editingPage ? pageDraft : String(viewerState.currentPage)}
+          style={{ width: pageInputWidth(editingPage ? pageDraft : String(viewerState.currentPage)) }}
           onPointerDown={() => { pagePointerActivationRef.current = !editingPage; }}
           onPointerUp={(event) => {
             if (!pagePointerActivationRef.current) return;
@@ -731,7 +743,7 @@ export function ReviewChrome({
   </div>;
 
   const sizingIdentity = <div className="review-chrome__identity">
-    {documentActions !== undefined ? <div className="document-actions"><button type="button" className="review-chrome__save-identity document-actions__trigger" title="Open document actions"><ReviewIcon name="file" size={16} /><span className="review-chrome__filename">{documentTitle}</span>{!showSaveStatusDot || savePhase === 'clean' ? null : <span className="review-chrome__save-dot" data-save-phase={savePhase} />}</button></div> : saveOptionsAvailable ? <button type="button" className="review-chrome__save-identity" title="Open automatic save options"><ReviewIcon name="file" size={16} /><span className="review-chrome__filename">{documentTitle}</span>{!showSaveStatusDot || savePhase === 'clean' ? null : <span className="review-chrome__save-dot" data-save-phase={savePhase} />}</button> : <div className="review-chrome__save-identity"><ReviewIcon name="file" size={16} /><span className="review-chrome__filename">{documentTitle}</span>{!showSaveStatusDot || savePhase === 'clean' ? null : <span className="review-chrome__save-dot" data-save-phase={savePhase} />}</div>}
+    {documentActions !== undefined ? <div className="document-actions"><button type="button" className="review-chrome__save-identity document-actions__trigger" title="Open document actions"><ReviewIcon name="file" size={16} /><span className="review-chrome__filename">{displayTitle}</span>{!showSaveStatusDot || savePhase === 'clean' ? null : <span className="review-chrome__save-dot" data-save-phase={savePhase} />}</button></div> : saveOptionsAvailable ? <button type="button" className="review-chrome__save-identity" title="Open automatic save options"><ReviewIcon name="file" size={16} /><span className="review-chrome__filename">{displayTitle}</span>{!showSaveStatusDot || savePhase === 'clean' ? null : <span className="review-chrome__save-dot" data-save-phase={savePhase} />}</button> : <div className="review-chrome__save-identity"><ReviewIcon name="file" size={16} /><span className="review-chrome__filename">{displayTitle}</span>{!showSaveStatusDot || savePhase === 'clean' ? null : <span className="review-chrome__save-dot" data-save-phase={savePhase} />}</div>}
     {codexContext === undefined ? null : <div className="review-chrome__context"><div className="codex-context-status"><ReviewIcon name="agent" size={16} /></div></div>}
   </div>;
 
@@ -746,6 +758,7 @@ export function ReviewChrome({
       {documentActions !== undefined ? <DocumentActionsMenu
         {...documentActions}
         documentTitle={documentTitle}
+        displayTitle={displayTitle}
         savedLabel={savedLabel}
         savePhase={savePhase}
         showSaveStatusDot={showSaveStatusDot}
@@ -755,14 +768,14 @@ export function ReviewChrome({
           setDocumentMenuPending(pending);
           if (pending) setActiveTopBarMenu('document');
         }}
-      /> : saveOptionsAvailable ? <ReviewTooltipButton ref={saveTriggerRef} label={saveControlLabel} tooltip={`${documentTitle} — Save options`} type="button" className="review-chrome__save-identity" aria-haspopup="dialog" aria-expanded={saveOptionsOpen} onClick={onSaveOptions}>
+      /> : saveOptionsAvailable ? <ReviewTooltipButton ref={saveTriggerRef} label={saveControlLabel} tooltip={documentTitle} type="button" className="review-chrome__save-identity" aria-haspopup="dialog" aria-expanded={saveOptionsOpen} onClick={onSaveOptions}>
         <ReviewIcon name="file" size={16} />
-        <span className="review-chrome__filename">{documentTitle}</span>
+        <span className="review-chrome__filename">{displayTitle}</span>
         {!showSaveStatusDot || savePhase === 'clean' ? null : <span className="review-chrome__save-dot" data-save-phase={savePhase} aria-hidden="true" />}
         <span className="sr-only" data-review-saved-status>{saveStatusDisplay}</span>
-      </ReviewTooltipButton> : <div className="review-chrome__save-identity" aria-label={`${documentTitle}, ${saveStatusText}`} title={documentTitle} tabIndex={0}>
+      </ReviewTooltipButton> : <div className="review-chrome__save-identity" aria-label={`${identityLabel}, ${saveStatusText}`} title={documentTitle} tabIndex={0}>
         <ReviewIcon name="file" size={16} />
-        <span className="review-chrome__filename">{documentTitle}</span>
+        <span className="review-chrome__filename">{displayTitle}</span>
         {!showSaveStatusDot || savePhase === 'clean' ? null : <span className="review-chrome__save-dot" data-save-phase={savePhase} aria-hidden="true" />}
         <span className="sr-only" data-review-saved-status>{saveStatusDisplay}</span>
       </div>}

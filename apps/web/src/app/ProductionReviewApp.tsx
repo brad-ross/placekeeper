@@ -2532,6 +2532,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
           activeAuthoringDraftIds: props.activeAuthoringDraftIds,
         })}
         documentTitle={scope.documentTitle}
+        displayTitle={pageTitle}
         generationRefreshStatus={props.generationRefreshStatus ?? 'idle'}
         locationRestoreStatus={locationRestoreStatus}
         toolError={pdfCopyError ?? commandError}

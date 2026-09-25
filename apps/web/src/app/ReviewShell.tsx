@@ -324,6 +324,8 @@ export interface ReviewShellProps {
   state: ReviewState;
   readonly activeAuthoringDraftIds?: readonly string[];
   documentTitle?: string;
+  /** The PDF's own title when it has one; the chrome shows it with the filename as its tooltip. */
+  displayTitle?: string;
   generationRefreshStatus?: GenerationRefreshStatus;
   locationRestoreStatus?: LocationRestoreStatus;
   toolError?: string | null;
@@ -1948,6 +1950,7 @@ export function ReviewShell(props: ReviewShellProps) {
       <ReviewChrome
         showSaveStatusDot={!props.save.exportOnly}
         documentTitle={props.documentTitle ?? 'Local PDF'}
+        {...(props.displayTitle === undefined ? {} : { displayTitle: props.displayTitle })}
         {...(props.save.savedLabel === undefined ? {} : { savedLabel: props.save.savedLabel })}
         {...(props.save.savePhase === undefined ? {} : { savePhase: props.save.savePhase })}
         savePendingDestination={props.save.savePendingDestination ?? false}

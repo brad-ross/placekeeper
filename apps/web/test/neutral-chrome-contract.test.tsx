@@ -2,7 +2,9 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import { VIEWER_ZOOM_MAX_PERCENT } from '../src/pdf/viewer-controls.js';
 
+import { documentIdentityLabel } from '../src/review/DocumentActionsMenu.js';
 import {
+  pageInputWidth,
   ReviewChrome,
   validPageNumber,
   validZoomPercent,
@@ -54,6 +56,26 @@ describe('neutral toolbar contract', () => {
     expect(html).toContain('<span aria-hidden="true">/ 12</span>');
     expect(html).toContain('class="review-chrome__zoom-input"');
     expect(html).toContain('class="review-chrome__zoom-suffix">%</span>');
+  });
+
+  it('shows the PDF title in the identity with the filename alone as its tooltip', () => {
+    const html = chrome({
+      displayTitle: 'Estimating Counterfactual Matrix Means',
+      saveOptionsAvailable: true,
+    });
+    expect(html).toContain('<span class="review-chrome__filename">Estimating Counterfactual Matrix Means</span>');
+    expect(html).not.toContain('Save options');
+    expect(html).toContain('aria-label="Estimating Counterfactual Matrix Means, paper.pdf, Saved. Open automatic save options"');
+    expect(documentIdentityLabel('paper.pdf', 'paper.pdf')).toBe('paper.pdf');
+    // Without a PDF title the filename is shown, as before.
+    expect(chrome()).toContain('<span class="review-chrome__filename">paper.pdf</span>');
+  });
+
+  it('sizes the page input to its digits so the page group spaces evenly', () => {
+    expect(pageInputWidth('3')).toBe('calc(0.62em + 6px)');
+    expect(pageInputWidth('123')).toBe(`calc(${3 * 0.62}em + 6px)`);
+    expect(pageInputWidth('')).toBe('calc(0.62em + 6px)');
+    expect(chrome()).toContain('style="width:calc(0.62em + 6px)"');
   });
 
   it('omits each unavailable history action without reserving an empty edit group', () => {
