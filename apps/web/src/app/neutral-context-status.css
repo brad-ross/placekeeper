@@ -290,3 +290,24 @@
   .document-actions__menu > button,
   .document-actions__confirmation > button { min-height: 44px; }
 }
+
+/* Where an insertion or page note used to sit, set off like a quotation. */
+.reconciliation-workspace--detail .reconciliation-workspace__prior-context {
+  margin: 14px 0 0;
+  padding-left: 8px;
+  border-left: 2px solid #dedede;
+  color: var(--pk-muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.reconciliation-workspace--detail .reconciliation-workspace__prior-context h3 {
+  margin: 0 0 2px;
+  color: #737373;
+  font: 400 11px/1.5 var(--pk-font-ui);
+}
+
+.reconciliation-workspace--detail .reconciliation-workspace__prior-context p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}

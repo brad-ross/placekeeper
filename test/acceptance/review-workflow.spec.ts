@@ -504,9 +504,7 @@ test.describe('canonical review workflow', () => {
     })).toBeFocused();
   });
 
-  // The full-reader reattach view (#117) shows a Page Note's comment but no
-  // longer quotes the text near its prior location.
-  test('reattaches Page Notes through the full annotation reader', async ({ page }) => {
+  test('shows Page Note source context only when it identifies the prior location', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 900 });
     await page.goto('/test/acceptance/review-harness/index.html?reconciliation=page-notes');
     await openAnnotationsWorkspace(page);
@@ -515,9 +513,11 @@ test.describe('canonical review workflow', () => {
       name: 'Reattach previous Page Note annotation on page 3',
     }).click();
     const detail = page.locator('[data-reconciliation-detail="reattach"]');
+    const prior = detail.locator('[data-reattachment-prior-context]');
     await expect(detail).toHaveAttribute('aria-label', 'Reattach page note, previously page 3');
     await expect(detail.getByText('Check the full-page comparison.')).toBeVisible();
-    await expect(detail.getByText('Original PDF text:')).toHaveCount(0);
+    // No nearby text was recorded, so there is no prior-location context.
+    await expect(prior).toHaveCount(0);
     await expect(detail.getByText('Page 3', { exact: true })).toHaveCount(0);
     await detail.getByRole('button', { name: 'Cancel' }).click();
 
@@ -526,6 +526,24 @@ test.describe('canonical review workflow', () => {
     }).click();
     await expect(detail).toHaveAttribute('aria-label', 'Reattach page note, previously page 4');
     await expect(detail.getByText('Verify the appendix transition.')).toBeVisible();
+    await expect(prior.getByRole('heading', { name: 'Previously near' })).toBeVisible();
+    await expect(prior.getByText('The appendix extends the comparison.')).toBeVisible();
+  });
+
+  test('shows the text around an insertion\'s prior location while reattaching it', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.goto('/test/acceptance/review-harness/index.html?reconciliation=insertions');
+    await openAnnotationsWorkspace(page);
+
+    const trigger = page.getByRole('button', { name: /^Reattach previous Insert/u });
+    await trigger.focus();
+    await page.keyboard.press('Enter');
+    const detail = page.locator('[data-reconciliation-detail="reattach"]');
+    await expect(detail).toHaveAttribute('aria-label', 'Reattach insertion, previously page 2');
+    await expect(detail.getByText('consistent', { exact: true })).toBeVisible();
+    const prior = detail.locator('[data-reattachment-prior-context]');
+    await expect(prior.getByRole('heading', { name: 'Previously between' })).toBeVisible();
+    await expect(prior.getByText('the estimator is▏ under weak dependence')).toBeVisible();
   });
 
   test('keeps stale confirmation, pending export, and retry feedback inside document actions', async ({ page }) => {
