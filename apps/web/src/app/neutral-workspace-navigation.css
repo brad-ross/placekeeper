@@ -605,7 +605,7 @@
   .copy-link-control__trigger--row,
   .row-action-group__trigger
 ):focus-visible {
-  outline: 2px solid #496789;
+  outline: 2px solid var(--pk-focus);
   outline-offset: 3px;
 }
 
@@ -646,12 +646,12 @@
   border: 0;
 }
 
-/* Row actions match the annotation card actions: 26px buttons inset evenly
-   from the row's right, top, and (on one-line rows) bottom edges. */
+/* Row actions match the annotation card actions: 26px buttons centred in the
+   32px row, flush with the page number's slot at the destination's edge. */
 @media (hover: hover) and (pointer: fine) {
   .outline-navigator .row-action-group {
     top: 3px;
-    right: 3px;
+    right: 4px;
     width: auto;
     min-width: 0;
   }
@@ -666,6 +666,11 @@
     height: 26px;
     min-height: 26px;
     border-radius: 6px;
+  }
+
+  /* The page number sits in the last action's slot, centred on its icon. */
+  .outline-navigator .outline-navigator__row .outline-navigator__page {
+    width: 26px;
   }
 }
 

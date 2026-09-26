@@ -85,14 +85,14 @@ describe('neutral toolbar contract', () => {
     expect(chrome()).toContain(`style="width:${3 * 0.62}em"`);
   });
 
-  it('omits each unavailable history action without reserving an empty edit group', () => {
+  it('keeps every history action in place and greys out the unavailable ones', () => {
     const html = chrome();
     const live = html.slice(0, html.indexOf('data-review-chrome-sizing-rack'));
-    expect(live).not.toContain('aria-label="Undo"');
-    expect(live).not.toContain('aria-label="Redo"');
-    expect(live).not.toContain('data-main-history="back"');
-    expect(live).toContain('data-main-history="forward"');
-    expect(live).not.toContain('aria-label="Edit history"');
+    expect(live).toContain('aria-label="Edit history"');
+    expect(live).toMatch(/<button[^>]*disabled=""[^>]*aria-label="Undo"/u);
+    expect(live).toMatch(/<button[^>]*disabled=""[^>]*aria-label="Redo"/u);
+    expect(live).toMatch(/<button[^>]*data-main-history="back"[^>]*disabled=""/u);
+    expect(live).toMatch(/<button[^>]*data-main-history="forward"(?![^>]*disabled)[^>]*>/u);
   });
 });
 

@@ -14,7 +14,8 @@
   --review-selection-bg: #fff;
   --review-pdf-selection-bg: #cfdeea;
   --review-selection-ink: #333;
-  --review-focus: #496789;
+  /* Keyboard focus uses the app's one accent blue (insertions, link destinations). */
+  --review-focus: #2f6fc4;
   --review-success: #2d684d;
   --review-danger: #9a3d34;
   --review-warning: #d9ad2b;

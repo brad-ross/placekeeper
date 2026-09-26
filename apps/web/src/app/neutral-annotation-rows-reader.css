@@ -325,7 +325,7 @@
 }
 
 .review-shell .annotation-item__navigation:focus-visible {
-  outline: 2px solid #496789;
+  outline: 2px solid var(--pk-focus);
   outline-offset: 3px;
 }
 

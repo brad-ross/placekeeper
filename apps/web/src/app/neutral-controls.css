@@ -20,7 +20,7 @@
   --pk-border: #e5e5e5;
   --pk-hover: #e7e7e7;
   --pk-selected: #fafafa;
-  --pk-focus: #496789;
+  --pk-focus: var(--pdf-insert-ink);
   --pk-radius-control: 10px;
   --pk-radius-tray: 16px;
   --pk-space: 12px;
@@ -164,6 +164,16 @@
     :is([data-review-copy-link], [data-main-history]) {
     opacity: 1;
     pointer-events: auto;
+  }
+
+  /* History keeps fixed slots: an unavailable Back or Forward hides with the
+     bar at rest and shows at the shared disabled opacity when revealed. */
+  [data-review-chrome] [data-main-history]:disabled {
+    opacity: 0;
+  }
+
+  [data-review-chrome]:is(:hover, :has(:focus-visible, [aria-expanded="true"])) [data-main-history]:disabled {
+    opacity: .35;
   }
 
   /* Prevent hidden history controls from painting without removing them from
@@ -409,4 +419,12 @@
   font: 400 12px/1.4 var(--pk-font-ui);
   overflow-wrap: anywhere;
   pointer-events: none;
+}
+
+/* Narrow bars have no room for fixed history slots; unavailable history
+   actions give their space back to the page and zoom controls. */
+@media (max-width: 759px) {
+  .review-chrome :is(.review-chrome__history-control, [data-main-history]):disabled:not([aria-busy="true"]) {
+    display: none;
+  }
 }

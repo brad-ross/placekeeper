@@ -1605,7 +1605,7 @@ describe("one production review tree", () => {
     />);
     expect(html).toContain("Real shared PDF viewer");
     expect(html).not.toContain("aria-label=\"Actions\"");
-    expect(html).not.toContain('aria-label="Edit history"');
+    expect(html).toMatch(/<button[^>]*disabled=""[^>]*aria-label="Undo"/u);
     expect(html).toContain('aria-label="Document navigation"');
     expect(html).toContain('aria-label="Current page unavailable"');
     expect(html).toContain('aria-label="PDF zoom"');
