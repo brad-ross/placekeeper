@@ -469,6 +469,7 @@ export function ReferenceWorkspace({
             {!showReferenceTabs && pendingReference?.status === 'loading' ? (
               <span className="reference-tab-segment reference-tab-segment--compound" role="presentation">
                 <button className="reference-tab-segment__selector" type="button" role="tab"
+                  title={`Opening ${pendingReference.label}`}
                   aria-selected="true" aria-disabled="true" aria-busy="true" tabIndex={-1}>
                   <span>{pendingReference.label}</span>
                   <small>{pendingReference.pageContext.replace(/^Page\s+/u, '')}</small>
