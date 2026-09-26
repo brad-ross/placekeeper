@@ -46,6 +46,14 @@ The particular Main view or Reference Tab, within a Document Generation, that su
 
 The same annotation can appear on multiple surfaces; shared annotation identity does not give one surface ownership of another surface's transient inspection.
 
+## Review toolbar
+
+### Toolbar Presentation
+One of an ordered set of compositions for the single-row review toolbar, from all control groups shown directly to groups tucked behind compact triggers, chosen by measuring what actually fits rather than by fixed breakpoints.
+*Avoid:* Responsive Toolbar Presentation, toolbar mode
+
+Groups collapse in a fixed priority order, with edit history first and document navigation last, and a compact trigger still shows its group's essential state. Controls whose availability depends on history or page position keep their place and are disabled rather than removed, so availability alone never changes the composition.
+
 ## Annotation authoring and recovery
 
 ### Protected Draft
