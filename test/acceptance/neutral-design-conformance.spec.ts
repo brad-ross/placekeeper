@@ -23,6 +23,8 @@ async function canonical(browser: Browser, baseURL: string | undefined, scene: s
     #pk-canonical .pk-zoom-popover { padding: 5px !important; }
     #pk-canonical .pk-editor { border: 1px solid #dedede !important; box-shadow: 0 3px 10px #00000008, 0 12px 30px #00000009 !important; }
     #pk-canonical .pk-peek .pk-kind, #pk-canonical .pk-peek .pk-kind svg { color: #b1840d !important; }
+    /* Keyboard focus rings use the insertion blue accent. */
+    #pk-canonical *:focus-visible { outline-color: #2f6fc4 !important; }
   ` });
   await frame.locator('#pk-review-scene').selectOption({ label: scene });
   await page.mouse.move(0, 0);

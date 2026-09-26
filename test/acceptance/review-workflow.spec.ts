@@ -327,23 +327,25 @@ test.describe('canonical review workflow', () => {
       'aria-label',
       'Reattach highlight, previously page 1',
     );
-    await expect(reattachDetail.getByRole('heading', { name: 'Reattach highlight' })).toBeVisible();
+    // Reattachment uses the full annotation reader (#117): the prior page in its
+    // metadata bar, then the comment and highlighted text, then the instruction.
+    await expect(reattachDetail.getByRole('heading', { name: 'Comment' })).toBeVisible();
     await expect(reattachDetail.getByText('Check the identifying variation.')).toBeVisible();
     await expect(reattachDetail.getByText('the previous identification argument')).toBeVisible();
-    await expect(reattachDetail.getByText('Select the intended text in the PDF, then confirm.')).toBeVisible();
-    await expect(reattachDetail.locator('.full-annotation-reader__metadata')).toHaveCount(0);
+    await expect(reattachDetail.getByText('Select the text to reattach to in the PDF.')).toBeVisible();
     await expect(reattachDetail.locator('[data-reattachment-preview]')).toHaveCount(0);
     await expect(reattachDetail.locator('.reconciliation-workspace__editor')).toHaveCount(0);
-    const reattachCancel = reattachDetail.getByRole('button', { name: 'Cancel' });
-    await expect(reattachCancel).toBeFocused();
+    // The full reader focuses its Back control first.
+    const reattachBack = reattachDetail.getByRole('button', { name: 'Back', exact: true });
+    await expect(reattachBack).toBeFocused();
     await page.getByRole('button', { name: 'Clear anchors' }).evaluate((button) => {
       (button as HTMLButtonElement).click();
     });
-    await expect(reattachCancel).toBeFocused();
+    await expect(reattachBack).toBeFocused();
     await page.getByRole('button', { name: 'Use selection' }).evaluate((button) => {
       (button as HTMLButtonElement).click();
     });
-    await expect(reattachCancel).toBeFocused();
+    await expect(reattachBack).toBeFocused();
     await page.keyboard.press('Escape');
     await expect(reattachTrigger).toBeFocused();
 
@@ -367,7 +369,9 @@ test.describe('canonical review workflow', () => {
     const deleteAction = page.getByRole('button', {
       name: 'Discard Delete annotation on page 2',
     });
-    await deleteAction.click();
+    // Row actions show on hover or focus; activate this one from the keyboard.
+    await deleteAction.focus();
+    await deleteAction.press('Enter');
     const discardDetail = page.locator('[data-reconciliation-detail="discard"]');
     await expect(discardDetail).toHaveAttribute(
       'aria-label',
@@ -421,13 +425,11 @@ test.describe('canonical review workflow', () => {
     });
     await originalEditor.getByRole('button', { name: 'Discard', exact: true }).click();
     await expect(originalEditor.getByRole('button', { name: 'Discard', exact: true })).toBeDisabled();
-    await expect(secondNavigation).toBeDisabled();
-    await expect(secondDiscard).toBeDisabled();
-
-    await secondNavigation.evaluate((button) => {
-      button.removeAttribute('disabled');
-      (button as HTMLButtonElement).click();
-    });
+    // The detail view holds the whole tray (#117), so no other row can take a
+    // command while this one is pending.
+    await expect(secondNavigation).toHaveCount(0);
+    await expect(secondDiscard).toHaveCount(0);
+    await expect(originalEditor.getByRole('button', { name: 'Back', exact: true })).toBeDisabled();
     await expect(originalEditor).toBeVisible();
     await expect(page.getByRole('region', {
       name: 'Reattach delete, previously page 2',
@@ -502,7 +504,9 @@ test.describe('canonical review workflow', () => {
     })).toBeFocused();
   });
 
-  test('shows Page Note source context only when it identifies the prior location', async ({ page }) => {
+  // The full-reader reattach view (#117) shows a Page Note's comment but no
+  // longer quotes the text near its prior location.
+  test('reattaches Page Notes through the full annotation reader', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 900 });
     await page.goto('/test/acceptance/review-harness/index.html?reconciliation=page-notes');
     await openAnnotationsWorkspace(page);
@@ -511,8 +515,8 @@ test.describe('canonical review workflow', () => {
       name: 'Reattach previous Page Note annotation on page 3',
     }).click();
     const detail = page.locator('[data-reconciliation-detail="reattach"]');
-    await expect(detail.getByRole('heading', { name: 'Reattach page note' })).toBeVisible();
-    await expect(detail.getByText(/Previously page 3:/u)).toBeVisible();
+    await expect(detail).toHaveAttribute('aria-label', 'Reattach page note, previously page 3');
+    await expect(detail.getByText('Check the full-page comparison.')).toBeVisible();
     await expect(detail.getByText('Original PDF text:')).toHaveCount(0);
     await expect(detail.getByText('Page 3', { exact: true })).toHaveCount(0);
     await detail.getByRole('button', { name: 'Cancel' }).click();
@@ -520,8 +524,8 @@ test.describe('canonical review workflow', () => {
     await page.getByRole('button', {
       name: 'Reattach previous Page Note annotation on page 4',
     }).click();
-    await expect(detail.getByText(/Previously page 4:/u)).toBeVisible();
-    await expect(detail.getByText('The appendix extends the comparison.')).toBeVisible();
+    await expect(detail).toHaveAttribute('aria-label', 'Reattach page note, previously page 4');
+    await expect(detail.getByText('Verify the appendix transition.')).toBeVisible();
   });
 
   test('keeps stale confirmation, pending export, and retry feedback inside document actions', async ({ page }) => {
@@ -1358,7 +1362,8 @@ test.describe('canonical review workflow', () => {
     const expectToolbarRevealed = async () => {
       await expect(rightControls).toHaveCSS('opacity', '1');
       for (const control of await bar.locator('[data-review-copy-link], [data-main-history]').all()) {
-        await expect(control).toHaveCSS('opacity', '1');
+        // Unavailable history keeps its slot, greyed out.
+        await expect(control).toHaveCSS('opacity', await control.isDisabled() ? '0.35' : '1');
         await expect(control).toHaveCSS('pointer-events', 'auto');
       }
       for (const control of await bar.locator('[data-main-history]').all()) {
@@ -1376,8 +1381,9 @@ test.describe('canonical review workflow', () => {
     }
     await bar.hover({ position: { x: 2, y: 2 } });
     await expect(rightControls).toHaveCSS('opacity', '1');
+    // History keeps its slots: an unavailable direction is revealed greyed out.
     for (const control of await bar.locator('[data-review-copy-link], [data-main-history]').all()) {
-      await expect(control).toHaveCSS('opacity', '1');
+      await expect(control).toHaveCSS('opacity', await control.isDisabled() ? '0.35' : '1');
     }
     await page.getByRole('button', { name: 'Open zoom controls' }).hover();
     const zoomMenu = page.getByRole('menu', { name: 'PDF zoom', exact: true });
@@ -1521,8 +1527,10 @@ test.describe('canonical review workflow', () => {
           requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
         }));
         const chromeButtons = chrome.locator(':scope > .review-chrome__identity button, :scope > .review-chrome__left-controls button, :scope > .review-chrome__viewer-controls button');
+        // Narrow bars drop unavailable history actions (display: none).
         const chromeButtonHeights = await chromeButtons.evaluateAll((buttons) => (
-          buttons.map((button) => button.getBoundingClientRect().height)
+          buttons.filter((button) => button.getClientRects().length > 0)
+            .map((button) => button.getBoundingClientRect().height)
         ));
         expect(chromeButtonHeights.length).toBeGreaterThan(0);
         expect(chromeButtonHeights.every((height) => height >= 44)).toBe(true);
@@ -2482,8 +2490,8 @@ test.describe('canonical review workflow', () => {
     const canvas = page.getByRole('application', { name: 'PDF review canvas' });
     await canvas.focus();
     await expect(canvas).toBeFocused();
-    await expect(page.getByRole('button', { name: 'Undo' })).toHaveCount(0);
-    await expect(page.getByRole('button', { name: 'Redo' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Undo' })).toBeDisabled();
+    await expect(page.getByRole('button', { name: 'Redo' })).toBeDisabled();
     await page.keyboard.type('x');
     await page.keyboard.press('Delete');
     await page.keyboard.press('ControlOrMeta+z');

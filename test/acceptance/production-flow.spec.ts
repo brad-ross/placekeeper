@@ -859,17 +859,18 @@ test('keeps toolbar icons visible throughout document-history navigation', async
   expect(audit).toBeDefined();
   expect(audit!.samples).toHaveLength(60);
   expect(audit!.samples.every((sample) => sample.stableIconsPainted)).toBe(true);
-  expect(audit!.samples.every((sample) => sample.historyControlCount > 0)).toBe(true);
+  // Back and Forward keep fixed slots: Back stays under the pointer (greyed
+  // once there is nowhere to go back to) and Forward becomes available beside it.
+  expect(audit!.samples.every((sample) => sample.historyControlCount === 2)).toBe(true);
   expect(audit!.samples.every((sample) => sample.historyControlsPainted)).toBe(true);
   expect(audit!.samples.every(
     (sample) => sample.navigationWidth >= audit!.baselineNavigationWidth,
   )).toBe(true);
   expect(audit!.samples.every((sample) => sample.historyHovered)).toBe(true);
-  expect(audit!.samples.every(
-    (sample) => sample.historyBackground === audit!.expectedBackground,
-  )).toBe(true);
-  expect(audit!.samples.some((sample) => sample.historyDirection === 'forward')).toBe(true);
+  expect(audit!.samples[0]!.historyBackground).toBe(audit!.expectedBackground);
+  expect(audit!.samples.every((sample) => sample.historyDirection === 'back')).toBe(true);
   expect(audit!.samples.every((sample) => sample.initialControlRetained)).toBe(true);
+  await expect(back).toBeDisabled();
   await expect(page.getByRole('button', { name: 'Forward in document history' })).toBeEnabled();
 });
 
@@ -1092,7 +1093,7 @@ for (const viewportWidth of [1280, 760]) {
     await page.keyboard.press('Control+Meta+0');
     await waitForStageMotion();
     await expect.poll(() => zoom.inputValue()).not.toBe('100');
-    // The zoom menu offers Fit width only while the page is not already fitted.
+    // The zoom menu enables Fit width only while the page is not already fitted.
     await zoom.fill('100');
     await zoom.press('Enter');
     await waitForStageMotion();
@@ -1108,9 +1109,9 @@ for (const viewportWidth of [1280, 760]) {
     await fitWidth.press('Enter');
     await expect(fitWidth).toHaveAttribute('aria-busy', 'true');
     await waitForStageMotion();
-    await expect(fitWidth).toHaveCount(0);
+    await expect(fitWidth).toBeDisabled();
     await waitForStageMotion();
-    await expect(fitWidth).toHaveCount(0);
+    await expect(fitWidth).toBeDisabled();
     await page.keyboard.press('Escape');
     // Use the app's settled fit geometry, then preserve that scale as manual zoom.
     await expect.poll(() => zoom.inputValue()).not.toBe('100');
@@ -2780,7 +2781,7 @@ test("records annotation tray jumps in document history", async ({ page }) => {
 
   const back = page.getByRole("button", { name: "Back in document history" });
   const forward = page.getByRole("button", { name: "Forward in document history" });
-  await expect(back).toHaveCount(0);
+  await expect(back).toBeDisabled();
   await pageThreeAnnotation.click();
   await expect.poll(() => currentPageText(page)).toBe("3 / 4");
   await expect(back).toBeEnabled();
@@ -3389,7 +3390,9 @@ test("keeps outline and rejected link metadata inert inside the installed local 
   const openDetailsInReferences = async () => {
     await details.focus();
     if (await detailsReference.isVisible()) {
-      await detailsReference.click();
+      // Row actions show on hover or keyboard focus; activate from the keyboard.
+      await detailsReference.focus();
+      await detailsReference.press("Enter");
       return;
     }
     await detailsRow.getByRole("button", {
@@ -3556,7 +3559,8 @@ test("keeps outline and rejected link metadata inert inside the installed local 
     };
   });
   expect(fineDisclosureGeometry).toMatchObject({
-    height: 34,
+    // Outline rows are 32px tall (reader polish).
+    height: 32,
     marginLeft: "0px",
     width: 28,
   });
@@ -3621,13 +3625,14 @@ test("keeps outline and rejected link metadata inert inside the installed local 
     };
   });
   expect(nestedLongLabelGeometry.actionRightInset).toBeCloseTo(4, 0);
-  expect(nestedLongLabelGeometry.actionWidth).toBe(64);
+  // Two 26px outline actions with a 2px gap.
+  expect(nestedLongLabelGeometry.actionWidth).toBe(54);
   expect(nestedLongLabelGeometry).toMatchObject({
     contained: true,
     noHorizontalOverflow: true,
     rowBorderStyle: "none",
     rowPaddingRight: "4px",
-    spacerHeight: 34,
+    spacerHeight: 32,
     spacerWidth: 28,
   });
   expect(nestedLongLabelGeometry.actionRightInset).toBeCloseTo(4, 0);
@@ -3670,8 +3675,10 @@ test("keeps outline and rejected link metadata inert inside the installed local 
   await expect(nestedAnnotation).toHaveCSS('border-radius', '12px');
   await expect(nestedAnnotation).toHaveCSS('padding', '0px');
   await expect(nestedAnnotation.locator('.annotation-item__page')).toHaveText('3');
-  await expect(nestedAnnotation.locator('.annotation-item__separator')).toHaveCount(0);
-  await expect(nestedAnnotation.locator('.annotation-item__section')).toHaveCount(0);
+  // Annotation rows name the outline section they fall in, on the page's line
+  // without a visible separator.
+  await expect(nestedAnnotation.locator('.annotation-item__separator')).toBeHidden();
+  await expect(nestedAnnotation.locator('.annotation-item__section')).toBeVisible();
   await expect(nestedAnnotation.locator('.annotation-item__navigation')).toHaveAccessibleName(
     /Page 3/u,
   );
@@ -3749,6 +3756,12 @@ test("keeps outline and rejected link metadata inert inside the installed local 
   await page.getByRole("tab", { name: "Outline", exact: true }).click();
   await page.setViewportSize({ width: 1280, height: 900 });
   await expect(stage).toHaveAttribute("data-reference-layout", "wide-right");
+  // A fitted page re-fits after a resize; let the zoom and current section settle.
+  await expect.poll(async () => {
+    const before = await currentZoomText(page);
+    await page.waitForTimeout(200);
+    return before === await currentZoomText(page);
+  }).toBe(true);
 
   await expect(details).toBeVisible();
   await details.focus();
@@ -3811,7 +3824,7 @@ test("keeps outline and rejected link metadata inert inside the installed local 
   await page.locator('[data-review-chrome]').hover({ position: { x: 2, y: 2 } });
   await back.click();
   await expect.poll(() => currentPageText(page)).toBe("1 / 4");
-  await expect(back).toHaveCount(0);
+  await expect(back).toBeDisabled();
   await expect(forward).toBeEnabled();
 
   const hostileLink = mainWorkspace.getByRole("button", {
@@ -3822,7 +3835,8 @@ test("keeps outline and rejected link metadata inert inside the installed local 
     name: "Open img src=x onerror=alert(1), Page 3",
   });
   await expect(hostileMenu).toBeVisible();
-  await expect(hostileMenu.locator("script,img")).toHaveCount(0);
+  // Only the rendered destination preview may be an image; hostile text stays text.
+  await expect(hostileMenu.locator("script,img:not(.destination-snippet__image)")).toHaveCount(0);
   expect(await hostileMenu.textContent()).not.toMatch(/[<>\u202e\u0000]/u);
   await page.keyboard.press("Escape");
   await expect(hostileLink).toBeFocused();
@@ -3834,7 +3848,7 @@ test("keeps outline and rejected link metadata inert inside the installed local 
     await currentPage.press('Enter');
     await expect.poll(() => currentPageText(page)).toBe(expectedPage);
   }
-  await expect(back).toHaveCount(0);
+  await expect(back).toBeDisabled();
   await expect(forward).toBeEnabled();
   const unavailable = mainWorkspace.getByRole("button", { name: "PDF link target unavailable" });
   await expect(unavailable).toHaveCount(6);
@@ -3846,7 +3860,7 @@ test("keeps outline and rejected link metadata inert inside the installed local 
     "This PDF link cannot be opened safely.",
   );
   await expect.poll(() => currentPageText(page)).toBe("4 / 4");
-  await expect(back).toHaveCount(0);
+  await expect(back).toBeDisabled();
   await expect(forward).toBeEnabled();
   await expect(page.locator("[data-reference-tab]")).toHaveCount(0);
   await expect(workspace).toHaveAttribute("data-tools-workspace-open", "false");
@@ -5255,7 +5269,7 @@ test('keeps the bottom workspace evenly inset across open and close', async ({ p
   await expect(tray).toHaveAttribute('data-tools-workspace-open', 'false');
 });
 
-test('shows zoom actions only when fitting or horizontal locking is useful', async ({ page }) => {
+test('enables Fit width and shows Horizontal lock only when they are useful', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'no-preference' });
   await page.setViewportSize({ width: 1280, height: 900 });
   await openFreshProductionFixture(page, referencePdf, 'Conditional zoom actions launch failed');
@@ -5275,7 +5289,7 @@ test('shows zoom actions only when fitting or horizontal locking is useful', asy
     await openMenu();
   };
   await openMenu();
-  await expect(fit).toHaveCount(0);
+  await expect(fit).toBeDisabled();
   await expect(lock).toHaveCount(0);
   const trailingPositions = async () => Promise.all(['Zoom out', 'Zoom in'].map(async (name) => (await page.getByRole('menuitem', { name, exact: true }).boundingBox())!.x));
   const originalPositions = await trailingPositions();
@@ -5301,7 +5315,7 @@ test('shows zoom actions only when fitting or horizontal locking is useful', asy
   };
   await zoomOutWithoutLockFlash();
   await setZoom('250');
-  await expect(fit).toBeVisible();
+  await expect(fit).toBeEnabled();
   await expect(lock).toBeVisible();
   await expect.poll(trailingPositions).toEqual(originalPositions);
   const actionLabels = await menu.locator('[role=menuitem], [role=menuitemcheckbox]').evaluateAll((elements) => elements.map((element) => element.getAttribute('aria-label')));
@@ -5310,11 +5324,11 @@ test('shows zoom actions only when fitting or horizontal locking is useful', asy
   await expect(lock).toHaveAttribute('aria-checked', 'true');
   await expect(page.locator('.review-document [data-viewer-framing-viewport]')).toHaveCSS('overflow-x', 'hidden');
   await fit.click();
-  await expect(fit).toHaveCount(0);
+  await expect(fit).toBeDisabled();
   await expect(lock).toHaveCount(0);
   await expect.poll(trailingPositions).toEqual(originalPositions);
   await setZoom('50');
-  await expect(fit).toBeVisible();
+  await expect(fit).toBeEnabled();
   await expect(lock).toHaveCount(0);
   await zoomOutWithoutLockFlash();
 });
@@ -5445,9 +5459,9 @@ test('defaults a real PDF to fit width and refits bottom and resizable right rea
     await expect(fitWidth).toBeVisible();
     await fitWidth.click();
     await waitForStageMotion();
-    await expect(fitWidth).toHaveCount(0);
+    await expect(fitWidth).toBeDisabled();
     await waitForStageMotion();
-    await expect(fitWidth).toHaveCount(0);
+    await expect(fitWidth).toBeDisabled();
   };
   const zoomValue = () => page.getByRole('textbox', {
     name: /Current zoom \d+ percent\. Enter a zoom percentage/u,
@@ -5456,7 +5470,7 @@ test('defaults a real PDF to fit width and refits bottom and resizable right rea
   await waitForRenderedPageImage(mainPage);
   await page.locator('[data-review-chrome]').hover({ position: { x: 2, y: 2 } });
   await page.getByRole('button', { name: 'Open zoom controls' }).click();
-  await expect(fitWidth).toHaveCount(0);
+  await expect(fitWidth).toBeDisabled();
   await expect(mainViewport).toHaveCSS('scrollbar-gutter', 'stable');
   await mainWorkspace.evaluate((element) => element.setAttribute('data-fit-width-main-mount', 'stable'));
   await expect(page.getByRole('textbox', { name: /Current page 1 of 4/u })).toHaveValue('1');
@@ -5520,7 +5534,7 @@ test('defaults a real PDF to fit width and refits bottom and resizable right rea
   const expectScrollbarAtWindowEdge = async () => {
     if (await fitWidth.isVisible()) {
       await page.keyboard.press('Escape');
-      await expect(fitWidth).toHaveCount(0);
+      await expect(fitWidth).toBeHidden();
     }
     const stageBounds = (await page.locator('[data-review-stage]').boundingBox())!;
     await expect.poll(async () => {
@@ -6111,8 +6125,10 @@ for (const surface of ['browser', 'vscode'] as const) {
 
     await expect(page.getByRole('tab', { name: 'Annotations', exact: true }))
       .toHaveAttribute('aria-selected', 'true');
-    const attention = page.getByRole('region', { name: 'Needs attention' });
-    await expect(attention).toBeVisible();
+    // Entries needing attention lead the Annotations list (#117 removed the
+    // separate "Needs attention" region).
+    const attention = page.locator('[data-reconciliation-entry]');
+    await expect(attention).toHaveCount(1);
     const pendingDraft = attention.getByRole('button', {
       name: 'Reattach previous Highlight annotation on page 1',
     });
@@ -7611,10 +7627,10 @@ for (const dock of ['closed', 'bottom', 'right'] as const) {
   });
 }
 
-test('keeps page and zoom popups aligned on every painted frame as actions appear', async ({ page }) => {
+test('keeps page and zoom popups aligned on every painted frame as actions change', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 });
   await openFreshProductionFixture(page, referencePdf, 'Popup resize launch failed');
-  const checkResize = async (label: string, trigger: Locator, action: string) => {
+  const checkResize = async (label: string, trigger: Locator, action: string, resizes: boolean | null) => {
     await page.locator('[data-review-chrome]').hover({ position: { x: 2, y: 2 } });
     await trigger.hover();
     const menu = page.getByRole('menu', { name: label, exact: true });
@@ -7647,22 +7663,26 @@ test('keeps page and zoom popups aligned on every painted frame as actions appea
     await menu.getByRole('menuitem', { name: action, exact: true }).click();
     const frames = await samples;
     expect(frames.every((frame) => frame.connected && frame.open)).toBe(true);
-    expect(Math.max(...frames.map((frame) => frame.width)) - Math.min(...frames.map((frame) => frame.width))).toBeGreaterThan(20);
+    const widthChange = Math.max(...frames.map((frame) => frame.width)) - Math.min(...frames.map((frame) => frame.width));
+    // Page steps and Fit width keep fixed slots (greyed when unavailable), so
+    // page menus keep their width; only Horizontal lock can come and go.
+    if (resizes === true) expect(widthChange).toBeGreaterThan(20);
+    else if (resizes === false) expect(widthChange).toBeLessThan(1);
     expect(Math.max(...frames.map((frame) => frame.error))).toBeLessThan(1);
     await page.keyboard.press('Escape');
   };
   const zoomTrigger = page.getByRole('button', { name: 'Open zoom controls' });
-  await checkResize('PDF zoom', zoomTrigger, 'Zoom in');
-  await checkResize('PDF zoom', zoomTrigger, 'Fit width');
+  await checkResize('PDF zoom', zoomTrigger, 'Zoom in', null);
+  await checkResize('PDF zoom', zoomTrigger, 'Fit width', null);
   const pageTrigger = page.getByRole('button', { name: /Page \d+ of 4\. Open page navigation/u });
-  await checkResize('Page navigation', pageTrigger, 'Next page');
-  await checkResize('Page navigation', pageTrigger, 'Previous page');
+  await checkResize('Page navigation', pageTrigger, 'Next page', false);
+  await checkResize('Page navigation', pageTrigger, 'Previous page', false);
   const pageInput = page.getByRole('textbox', { name: /Current page \d+ of 4/u });
   await pageInput.fill('4');
   await pageInput.press('Enter');
   await expect(pageInput).toHaveValue('4');
-  await checkResize('Page navigation', pageTrigger, 'Previous page');
-  await checkResize('Page navigation', pageTrigger, 'Next page');
+  await checkResize('Page navigation', pageTrigger, 'Previous page', false);
+  await checkResize('Page navigation', pageTrigger, 'Next page', false);
 });
 
 test('zooms continuously without rebuilding PDF page layout on every gesture frame', async ({ page }, testInfo) => {
