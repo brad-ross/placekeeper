@@ -7,6 +7,7 @@ import {
   type Rect,
 } from '@embedpdf/models';
 
+import { hasReliableGlyphGeometry, mergeGlyphLineRects } from './glyph-lines.js';
 import { assessPageTextReliability, type TextRect } from './text-reliability.js';
 import {
   PDF_SEARCH_MAX_INDEX_BYTES,
@@ -45,7 +46,6 @@ export interface PdfSearchPageGeometry {
   readonly width: number;
   readonly height: number;
   readonly cropLeft: number;
-  readonly cropTop: number;
   readonly cropBottom: number;
 }
 
@@ -134,7 +134,6 @@ export function createEnginePdfSearchPageReader(
             width: page.size.width,
             height: page.size.height,
             cropLeft: page.boxes?.crop.left ?? 0,
-            cropTop: page.boxes?.crop.top ?? 0,
             cropBottom: page.boxes?.crop.bottom ?? 0,
           },
         };
@@ -192,82 +191,12 @@ function canonicalTextWithMap(
   return { text: canonical.join(''), sourceIndexes };
 }
 
-function glyphRects(
-  glyphs: readonly PdfGlyphObject[],
-  start: number,
-  end: number,
-  geometry: PdfSearchPageGeometry,
-): Rect[] {
-  const rects = glyphs.slice(start, end).flatMap((glyph) => {
-    if (
-      glyph.isEmpty
-      || glyph.isSpace
-      || !Number.isFinite(glyph.origin.x)
-      || !Number.isFinite(glyph.origin.y)
-      || !Number.isFinite(glyph.size.width)
-      || !Number.isFinite(glyph.size.height)
-      || glyph.size.width <= 0
-      || glyph.size.height <= 0
-    ) return [];
-    return [{
-      origin: {
-        x: glyph.origin.x + geometry.cropLeft,
-        y: glyph.origin.y + geometry.cropTop,
-      },
-      size: { ...glyph.size },
-    }];
-  });
-  return rects.reduce<Rect[]>((lines, rect) => {
-    const previous = lines.at(-1);
-    if (!previous) return [rect];
-    const previousCenter = previous.origin.y + previous.size.height / 2;
-    const rectCenter = rect.origin.y + rect.size.height / 2;
-    const sameLine = Math.abs(previousCenter - rectCenter)
-      <= Math.max(previous.size.height, rect.size.height);
-    const horizontalGap = Math.max(
-      0,
-      Math.max(previous.origin.x, rect.origin.x)
-        - Math.min(
-          previous.origin.x + previous.size.width,
-          rect.origin.x + rect.size.width,
-        ),
-    );
-    if (!sameLine || horizontalGap > Math.max(previous.size.height, rect.size.height) * 1.5) {
-      lines.push(rect);
-      return lines;
-    }
-    const left = Math.min(previous.origin.x, rect.origin.x);
-    const top = Math.min(previous.origin.y, rect.origin.y);
-    const right = Math.max(
-      previous.origin.x + previous.size.width,
-      rect.origin.x + rect.size.width,
-    );
-    const bottom = Math.max(
-      previous.origin.y + previous.size.height,
-      rect.origin.y + rect.size.height,
-    );
-    lines[lines.length - 1] = {
-      origin: { x: left, y: top },
-      size: { width: right - left, height: bottom - top },
-    };
-    return lines;
-  }, []);
-}
-
-function hasReliableGlyphGeometry(glyphs: readonly PdfGlyphObject[]): boolean {
-  return glyphs.every((glyph) => (
-    glyph.isEmpty
-    || glyph.isSpace
-    || (
-      Number.isFinite(glyph.origin.x)
-      && Number.isFinite(glyph.origin.y)
-      && Number.isFinite(glyph.size.width)
-      && Number.isFinite(glyph.size.height)
-      && glyph.size.width > 0
-      && glyph.size.height > 0
-    )
-  ));
-}
+/**
+ * PDFium marks a hyphen at a line break with U+FFFE; with soft hyphens and
+ * stray control glyphs it would render as a box, so excerpts drop them and
+ * rejoin the word.
+ */
+const EXCERPT_INVISIBLE = /[\u0000-\u0008\u000e-\u001f\u007f-\u009f\u00ad\ufffe\uffff]/u;
 
 function excerpt(characters: readonly string[], start: number, count: number): {
   readonly text: string;
@@ -280,7 +209,9 @@ function excerpt(characters: readonly string[], start: number, count: number): {
   let normalized = '';
   let previousWasWhitespace = false;
   for (const character of source) {
-    if (/\s/u.test(character)) {
+    if (EXCERPT_INVISIBLE.test(character)) {
+      // Zero-width: keeps the match boundaries aligned without a character.
+    } else if (/\s/u.test(character)) {
       if (normalized.length > 0 && !previousWasWhitespace) normalized += ' ';
       previousWasWhitespace = true;
     } else {
@@ -331,11 +262,10 @@ function findPageMatches(input: {
     const sourceEnd = indexed.sourceIndexes[matchIndex + query.length - 1];
     if (sourceStart !== undefined && sourceEnd !== undefined) {
       const charCount = sourceEnd - sourceStart + 1;
-      const rects = glyphRects(
+      const rects = mergeGlyphLineRects(
         input.page.glyphs,
         sourceStart,
         sourceEnd + 1,
-        input.page.geometry,
       );
       const firstOrigin = rects[0]?.origin;
       if (rects.length > 0 && firstOrigin) {

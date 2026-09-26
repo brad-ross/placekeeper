@@ -35,6 +35,7 @@ export interface FullAnnotationReaderBodyProps {
   readonly record: Pick<AnnotationReaderRecord,
     'kind' | 'contentLabel' | 'content' | 'sourceText' | 'sourceTreatment' | 'quoteText'>;
   readonly before?: ReactNode;
+  readonly after?: ReactNode;
 }
 
 export interface FullAnnotationReaderMetadataProps {
@@ -67,7 +68,7 @@ export function FullAnnotationReaderMetadata({
   </div>;
 }
 
-export function FullAnnotationReaderBody({ record, before }: FullAnnotationReaderBodyProps) {
+export function FullAnnotationReaderBody({ record, before, after }: FullAnnotationReaderBodyProps) {
   const paragraphs = (text: string) => text.split(/\n\s*\n/u).map(
     (paragraph, index) => <p key={index}>{paragraph}</p>,
   );
@@ -85,6 +86,7 @@ export function FullAnnotationReaderBody({ record, before }: FullAnnotationReade
       <h3 className="sr-only">Highlighted text</h3>
       {paragraphs(record.quoteText)}
     </div> : null}
+    {after}
   </div>;
 }
 

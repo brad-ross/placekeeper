@@ -21,6 +21,33 @@ const result: PdfSearchResult = {
 };
 
 describe('PDF search workspace', () => {
+  it('shows the section and page on one line without a per-result icon', () => {
+    const render = (sectionLabelForResult?: (searchResult: PdfSearchResult) => string | null) => renderToStaticMarkup(<PdfSearchWorkspace
+      state={{
+        ...initialPdfSearchState(8),
+        status: 'results',
+        query: 'lambda',
+        groups: [{ id: 'exact', label: 'Exact matches', results: [result] }],
+      }}
+      onQueryChange={vi.fn()}
+      onResultActivate={vi.fn()}
+      onResultOpenReference={vi.fn()}
+      onAlternativeActivate={vi.fn()}
+      {...(sectionLabelForResult === undefined ? {} : { sectionLabelForResult })}
+    />);
+
+    const withSection = render(() => 'Introduction');
+    expect(withSection).not.toContain('pdf-search__result-icon');
+    expect(withSection).toMatch(
+      /class="annotation-item__title-row pdf-search__result-heading"><span class="pdf-search__result-section" title="Introduction" aria-hidden="true">Introduction<\/span>[\s\S]*class="pdf-search__result-page">4<\/span>/u,
+    );
+    expect(withSection).toContain('aria-label="Let λ denote the arrival rate., Introduction, page 4"');
+
+    const withoutSection = render(() => null);
+    expect(withoutSection).not.toContain('pdf-search__result-section');
+    expect(withoutSection).toContain('aria-label="Let λ denote the arrival rate., page 4"');
+  });
+
   it('renders a familiar searchbox with distinct main and reference actions', () => {
     const html = renderToStaticMarkup(<PdfSearchWorkspace
       state={{

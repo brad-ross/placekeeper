@@ -34,7 +34,7 @@ export function InstallDialog({ dialogRef, onClose }: {
       <h2 id="install-dialog-title">Install Placekeeper</h2>
     </header>
     <p>Run the command below to install the Mac app and optionally install integrations. You can run it again to install integrations and update the app later.</p>
-    <button type="button" className="install-dialog__command" autoFocus aria-label="Copy command" onClick={async () => {
+    <button type="button" className="install-dialog__command" autoFocus aria-label="Copy command" title="Copy command" onClick={async () => {
         if (window.getSelection()?.toString()) return;
         const current = generation.current;
         try {

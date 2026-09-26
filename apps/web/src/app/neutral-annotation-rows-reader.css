@@ -83,6 +83,13 @@
   box-shadow: 0 2px 6px rgb(0 0 0 / 2%), 0 8px 24px rgb(0 0 0 / 1.6%);
 }
 
+/* On the grey hover background the quotation rule would vanish; darken it
+   there, but not on the selected (white) row. */
+:is(.review-workspace, .review-tools-workspace) li[data-annotation-origin]:not([data-active="true"]):is(:hover, :has(:focus-visible))
+  :is(.annotation-item__quote, .annotation-item__source) {
+  border-left-color: #c8c8c8;
+}
+
 :is(.review-workspace, .review-tools-workspace) li[data-corresponding="true"]::before {
   content: none;
 }
@@ -165,6 +172,19 @@
   order: 1;
 }
 
+/* Kind icons take the ink of their marks on the page. */
+.annotation-item__kind-icon:is([data-annotation-kind-icon="highlight"], [data-annotation-kind-icon="note"]) {
+  color: var(--pdf-note-ink);
+}
+
+.annotation-item__kind-icon:is([data-annotation-kind-icon="replace"], [data-annotation-kind-icon="delete"]) {
+  color: var(--pdf-correction-ink);
+}
+
+.annotation-item__kind-icon[data-annotation-kind-icon="insert"] {
+  color: var(--pdf-insert-ink);
+}
+
 .annotation-item__title-row > .row-action-group {
   order: 2;
   width: auto;
@@ -186,11 +206,22 @@
   color: var(--review-danger);
 }
 
-.annotation-item__title-row > .annotation-item__meta[data-annotation-metadata-layout="row-head"] > :is(
-  .annotation-item__separator,
-  .annotation-item__section
-) {
-  order: 4;
+/* The section follows the kind icon on the page's line; row actions take the
+   page number's place on hover. */
+.annotation-item__title-row > .annotation-item__meta[data-annotation-metadata-layout="row-head"] > .annotation-item__separator {
+  display: none;
+}
+
+.annotation-item__title-row > .annotation-item__meta[data-annotation-metadata-layout="row-head"] > .annotation-item__section {
+  order: 1;
+  width: auto;
+  min-width: 0;
+  flex: 0 1 auto;
+  overflow: hidden;
+  color: #737373;
+  font: 400 11px/1.5 var(--pk-font-ui);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 :is(li[data-annotation-origin], li[data-search-result], .annotation-peek) .row-action-group__direct {
@@ -254,35 +285,34 @@
   -webkit-line-clamp: 3;
 }
 
-.annotation-item__source {
-  display: block;
-  margin-bottom: 5px;
-  color: #777;
-  font-size: 12px;
+/* Quoted PDF text reads as a quotation above the note. */
+.annotation-item__source,
+.annotation-item__quote {
+  margin: 0 0 6px;
+  padding-left: 8px;
+  border-left: 2px solid var(--pk-border);
+  color: var(--pk-muted);
+  font: 400 13px/1.5 var(--pk-font-ui);
 }
 
-.annotation-item__content-separator {
-  display: none;
-}
+
 
 .annotation-item__excerpt-text {
   display: block;
 }
 
+.annotation-item__source,
 .annotation-item__quote {
   display: -webkit-box;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 3;
   overflow: hidden;
-  margin-top: 6px;
-  color: var(--pk-muted);
-  font: 400 13px/1.5 var(--pk-font-ui);
   overflow-wrap: anywhere;
   white-space: pre-line;
 }
 
-.annotation-item__quote[data-quote-only="true"] {
-  margin-top: 0;
+:is(.annotation-item__quote, .annotation-item__source)[data-quote-only="true"] {
+  margin-bottom: 0;
 }
 
 .annotation-item__provenance {
@@ -295,7 +325,7 @@
 }
 
 .review-shell .annotation-item__navigation:focus-visible {
-  outline: 2px solid #496789;
+  outline: 2px solid var(--pk-focus);
   outline-offset: 3px;
 }
 

@@ -1,3 +1,9 @@
+import type { Rect } from '@embedpdf/models';
+
+import type {
+  DestinationDescriptionRequest,
+  PdfDestinationDescription,
+} from '../pdf/destination-description.js';
 import type { PdfNavigationMetadata } from '../pdf/pdf-navigation-metadata.js';
 import {
   pdfNavigationTargetFromPlacekeeperLocation,
@@ -80,6 +86,51 @@ export interface ReferenceReturnPresentationState extends ReferenceReturnControl
   readonly documentGeneration: number;
 }
 
+/**
+ * A transient Destination Band (R10–R13). Rects are in page device space —
+ * top-left origin, PDF points relative to the crop box — like link rects.
+ * Never part of ReviewState, durable navigation, export, or Codex context.
+ */
+export interface DestinationBand {
+  readonly documentGeneration: number;
+  readonly targetIdentity: string;
+  readonly pageIndex: number;
+  readonly rects: readonly Rect[];
+}
+
+/** Transient band presentation: the main reader's band and one per References tab. */
+export interface DestinationBandPresentationState {
+  readonly documentGeneration: number;
+  readonly main: DestinationBand | null;
+  /** Keyed by References tab identity; bands follow each tab's original destination. */
+  readonly references: ReadonlyMap<string, DestinationBand>;
+}
+
+/** Transient description of the link whose action menu is open or whose chosen action is naming. */
+export interface LinkDescriptionPresentationState {
+  readonly request: ViewerPdfLinkInvocation;
+  readonly documentGeneration: number;
+  readonly status: 'resolving' | 'resolved';
+  /** Null while resolving, or when resolution produced no description. */
+  readonly description: PdfDestinationDescription | null;
+}
+
+/** The chosen link action while it waits for the name stage (render `aria-busy`). */
+export interface LinkActionBusyState {
+  readonly request: ViewerPdfLinkInvocation;
+  readonly choice: LinkActionChoice;
+}
+
+interface LinkDescriptionTask {
+  readonly request: ViewerPdfLinkInvocation;
+  readonly documentGeneration: number;
+  readonly controller: AbortController;
+  readonly promise: Promise<PdfDestinationDescription | null>;
+}
+
+/** Matches the viewer navigation adapter's bounded navigation timeout. */
+const DEFAULT_DESCRIPTION_TIMEOUT_MS = 1_500;
+
 export interface NavigationCoordinatorDependencies {
   readonly getState: () => ReferenceNavigationState;
   readonly dispatch: (action: ReferenceNavigationAction) => void;
@@ -113,10 +164,62 @@ export interface NavigationCoordinatorDependencies {
     readonly pageIndex: number;
     readonly point: PdfNaturalPoint | null;
   } | null;
+  /** Resolves the name stage of a link destination description (KTD1, KTD2). */
+  readonly describeDestination?: (
+    request: DestinationDescriptionRequest,
+    signal: AbortSignal,
+  ) => Promise<PdfDestinationDescription | null>;
+  /** Bound on waiting for the name stage after an action is chosen. */
+  readonly descriptionTimeoutMs?: number;
+  readonly setLinkDescription?: (state: LinkDescriptionPresentationState | null) => void;
+  readonly setLinkActionBusy?: (state: LinkActionBusyState | null) => void;
+  readonly setDestinationBands?: (state: DestinationBandPresentationState) => void;
 }
 
 function metadataFromLink(metadata: PdfNavigationMetadata): NavigationDestinationMetadata {
   return { label: metadata.label, pageContext: metadata.pageContext };
+}
+
+function authorProvided(metadata: PdfNavigationMetadata): boolean {
+  return metadata.source === 'contents' || metadata.source === 'subject';
+}
+
+/**
+ * R7: an author-provided link name wins; otherwise the resolved description's
+ * name; without a description (bound expired), today's page-context fallback.
+ */
+function linkReferenceMetadata(
+  metadata: PdfNavigationMetadata,
+  description: PdfDestinationDescription | null,
+): NavigationDestinationMetadata {
+  const fallback = metadataFromLink(metadata);
+  if (authorProvided(metadata) || description === null) return fallback;
+  return { label: description.name, pageContext: fallback.pageContext };
+}
+
+function bandFromDescription(
+  description: PdfDestinationDescription | null,
+): DestinationBand | null {
+  if (
+    description === null
+    || description.spot === null
+    || description.extent === null
+    || description.extent.length === 0
+  ) return null;
+  return {
+    documentGeneration: description.documentGeneration,
+    targetIdentity: description.targetIdentity,
+    pageIndex: description.pageIndex,
+    rects: description.extent,
+  };
+}
+
+function bandBounds(band: DestinationBand): Rect {
+  const left = Math.min(...band.rects.map(({ origin }) => origin.x));
+  const top = Math.min(...band.rects.map(({ origin }) => origin.y));
+  const right = Math.max(...band.rects.map(({ origin, size }) => origin.x + size.width));
+  const bottom = Math.max(...band.rects.map(({ origin, size }) => origin.y + size.height));
+  return { origin: { x: left, y: top }, size: { width: right - left, height: bottom - top } };
 }
 
 function locationOrder(location: PdfDocumentOrderLocation): readonly number[] | null {
@@ -250,6 +353,32 @@ export function resolveCurrentOutlineItemId(input: {
   })?.id ?? null;
 }
 
+/**
+ * The first bookmark in reading order, when the reader is still above it and
+ * it is already on screen. A document opened at its first page often shows
+ * its first heading below the fold's top; that heading is where the reader is.
+ */
+export function resolveLeadingVisibleOutlineItemId(input: {
+  readonly discovery: PdfOutlineDiscovery;
+  readonly currentLocation: PdfViewerLocation;
+  readonly resolveTarget: (target: PdfNavigationTarget) => PdfViewerLocation | null;
+  readonly isVisible: (location: PdfViewerLocation) => boolean;
+}): string | null {
+  if (input.discovery.status !== 'loaded-tree') return null;
+  const flatten = (items: readonly PdfOutlineItem[]): PdfOutlineItem[] => items.flatMap((item) => [item, ...flatten(item.children)]);
+  let leading: { readonly id: string; readonly location: PdfViewerLocation; readonly order: readonly number[] } | null = null;
+  for (const item of flatten(input.discovery.items)) {
+    const location = item.target === null ? null : input.resolveTarget(item.target);
+    const order = location === null ? null : locationOrder(location);
+    if (location !== null && order !== null && (leading === null || compareOrder(order, leading.order) < 0)) {
+      leading = { id: item.id, location, order };
+    }
+  }
+  const currentOrder = locationOrder(input.currentLocation);
+  if (leading === null || currentOrder === null || compareOrder(currentOrder, leading.order) > 0) return null;
+  return input.isVisible(leading.location) ? leading.id : null;
+}
+
 const REFERENCE_FAILURE = 'Reference unavailable. Retry when ready.';
 const MAIN_FAILURE = 'Destination unavailable. The current location was preserved.';
 const HISTORY_FAILURE = 'Document history destination unavailable.';
@@ -300,6 +429,18 @@ export class NavigationCoordinator {
   private locationHistoryStarted = false;
   private locationRestored: boolean;
   private disposed = false;
+  /** Owned by the open link menu; aborted on dismissal or supersession. */
+  private linkDescription: LinkDescriptionTask | null = null;
+  /** Handed to a chosen action; aborted when newer navigation supersedes it. */
+  private chosenDescription: LinkDescriptionTask | null = null;
+  private publishedDescription: LinkDescriptionTask | null = null;
+  private linkActionBusy: LinkActionBusyState | null = null;
+  private mainBand: DestinationBand | null = null;
+  /** False while the main band is shown ahead of its still-settling jump. */
+  private mainBandSettled = true;
+  private referenceBands = new Map<string, DestinationBand>();
+  /** The band of a link open that failed, applied if that open is retried. */
+  private retryBand: { readonly targetIdentity: string; readonly band: DestinationBand } | null = null;
 
   constructor(private readonly dependencies: NavigationCoordinatorDependencies) {
     this.documentGeneration = dependencies.getState().documentGeneration;
@@ -438,6 +579,7 @@ export class NavigationCoordinator {
     ) {
       this.linkRequest = null;
       this.linkRequestSourceTabIdentity = null;
+      this.abortLinkDescription();
       this.dependencies.setLinkActionRequest(null);
       this.dependencies.setAnnouncement(LINK_UNAVAILABLE);
       return false;
@@ -450,6 +592,7 @@ export class NavigationCoordinator {
     this.linkRequest = request;
     this.linkRequestSourceTabIdentity = sourceTabIdentity;
     this.dependencies.setLinkActionRequest(request);
+    this.startLinkDescription(request);
     return true;
   }
 
@@ -466,6 +609,12 @@ export class NavigationCoordinator {
   }
 
   dismissLink(request: ViewerPdfLinkInvocation): void {
+    // Dismissing a busy menu cancels the chosen action that is still waiting
+    // for its destination name.
+    if (this.chosenDescription?.request === request) {
+      this.releaseDescription(this.chosenDescription);
+      return;
+    }
     if (this.linkRequest !== request) return;
     this.clearLinkRequest();
   }
@@ -479,19 +628,27 @@ export class NavigationCoordinator {
       return false;
     }
     const sourceTabIdentity = this.linkRequestSourceTabIdentity;
+    // Choosing closes the menu but hands the in-flight name stage to the
+    // chosen operation instead of aborting it (KTD1).
+    const description = this.linkDescription;
+    this.linkDescription = null;
     this.clearLinkRequest();
     let choiceOperation: Promise<boolean>;
     switch (choice) {
       case 'references':
-        choiceOperation = this.openReference(
-          request.target,
-          metadataFromLink(request.metadata),
-        );
+        choiceOperation = description === null
+          ? this.openReference(request.target, metadataFromLink(request.metadata))
+          : this.openLinkReference(request, description);
         break;
       case 'main':
         choiceOperation = this.navigateMainTarget(request.target, 'direct', options);
+        if (description !== null) {
+          this.handOffDescription(description, request, choice);
+          this.showMainBandEarly(description, this.operationToken);
+        }
         break;
       case 'same-reference':
+        if (description !== null) this.releaseDescription(description);
         choiceOperation = request.sourceScope === 'reference' && sourceTabIdentity !== null
           ? this.navigateReferenceTarget(request.target, sourceTabIdentity)
           : Promise.resolve(false);
@@ -499,6 +656,9 @@ export class NavigationCoordinator {
     }
     const choiceOperationToken = this.operationToken;
     const succeeded = await choiceOperation;
+    if (choice === 'main' && description !== null) {
+      await this.settleMainBand(description, succeeded, choiceOperationToken);
+    }
     if (
       !succeeded
       && choice !== 'references'
@@ -511,11 +671,252 @@ export class NavigationCoordinator {
     return succeeded;
   }
 
+  /** Awaits the bounded name stage, then opens the References tab it names and bands it. */
+  private async openLinkReference(
+    request: ViewerPdfLinkInvocation,
+    task: LinkDescriptionTask,
+  ): Promise<boolean> {
+    this.handOffDescription(task, request, 'references');
+    const description = await this.awaitChosenDescription(task);
+    if (this.chosenDescription !== task) return false;
+    this.releaseDescription(task);
+    if (!this.generationMatches(request.target.documentGeneration)) return false;
+    const band = bandFromDescription(description);
+    // Kept for a retry of this open, which creates the tab later.
+    this.retryBand = band === null ? null : { targetIdentity: request.target.identity, band };
+    const opened = await this.openReference(
+      request.target,
+      linkReferenceMetadata(request.metadata, description),
+    );
+    if (!opened || !this.generationMatches(request.target.documentGeneration)) return opened;
+    this.retryBand = null;
+    const tab = this.dependencies.getState().tabs.find((candidate) => (
+      candidate.annotationIdentity === undefined
+      && candidate.originalTarget.identity === request.target.identity
+    ));
+    // A deduplicated outline or search tab keeps its name and gains the band (KTD9).
+    if (band !== null && tab !== undefined) {
+      this.referenceBands.set(tab.identity, band);
+      this.publishBands();
+    }
+    return opened;
+  }
+
+  /**
+   * Shows the main band as soon as the name stage resolves, while the jump is
+   * still settling. Scrolling cannot clear it until the jump settles.
+   */
+  private showMainBandEarly(task: LinkDescriptionTask, operationToken: number): void {
+    void task.promise.then((description) => {
+      const band = bandFromDescription(description);
+      if (
+        band === null
+        || this.chosenDescription !== task
+        || this.operationToken !== operationToken
+        || !this.generationMatches(band.documentGeneration)
+      ) return;
+      this.mainBand = band;
+      this.mainBandSettled = false;
+      this.publishBands();
+    });
+  }
+
+  /** Confirms the main band once the link jump settles, or removes it when the jump failed (KTD10). */
+  private async settleMainBand(
+    task: LinkDescriptionTask,
+    succeeded: boolean,
+    operationToken: number,
+  ): Promise<void> {
+    if (!succeeded || this.operationToken !== operationToken || this.chosenDescription !== task) {
+      if (this.chosenDescription === task) this.releaseDescription(task);
+      if (!this.mainBandSettled && this.operationToken === operationToken) this.clearMainBand();
+      return;
+    }
+    const description = await this.awaitChosenDescription(task);
+    if (this.chosenDescription !== task) return;
+    this.releaseDescription(task);
+    const band = bandFromDescription(description);
+    if (
+      band === null
+      || this.operationToken !== operationToken
+      || !this.generationMatches(band.documentGeneration)
+    ) {
+      if (!this.mainBandSettled && this.operationToken === operationToken) this.clearMainBand();
+      return;
+    }
+    this.mainBand = band;
+    this.mainBandSettled = true;
+    this.publishBands();
+  }
+
+  private startLinkDescription(request: ViewerPdfLinkInvocation): void {
+    this.abortLinkDescription();
+    const describe = this.dependencies.describeDestination;
+    if (describe === undefined) return;
+    const controller = new AbortController();
+    const documentGeneration = this.documentGeneration;
+    const author = authorProvided(request.metadata) ? request.metadata.authorLabel : null;
+    let described: Promise<PdfDestinationDescription | null>;
+    try {
+      described = describe({
+        target: request.target,
+        sourcePageIndex: request.sourcePageIndex,
+        sourceRects: request.sourceRects,
+        ...(author === null ? {} : { contents: author }),
+      }, controller.signal);
+    } catch {
+      described = Promise.resolve(null);
+    }
+    const task: LinkDescriptionTask = {
+      request,
+      documentGeneration,
+      controller,
+      promise: described.then((description) => (
+        controller.signal.aborted
+        || description === null
+        || description.documentGeneration !== documentGeneration
+        || description.targetIdentity !== request.target.identity
+        || !this.generationMatches(documentGeneration)
+          ? null
+          : description
+      ), () => null),
+    };
+    this.linkDescription = task;
+    this.publishDescription(task, 'resolving', null);
+    void task.promise.then((description) => {
+      if (this.linkDescription !== task && this.chosenDescription !== task) return;
+      this.publishDescription(task, 'resolved', description);
+    });
+  }
+
+  private handOffDescription(
+    task: LinkDescriptionTask,
+    request: ViewerPdfLinkInvocation,
+    choice: LinkActionChoice,
+  ): void {
+    if (this.chosenDescription !== null && this.chosenDescription !== task) {
+      this.releaseDescription(this.chosenDescription);
+    }
+    this.chosenDescription = task;
+    this.setLinkActionBusy({ request, choice });
+  }
+
+  /** Detaches and aborts a description; shared page reads still settle into the reader cache. */
+  private releaseDescription(task: LinkDescriptionTask): void {
+    if (this.chosenDescription === task) {
+      this.chosenDescription = null;
+      this.setLinkActionBusy(null);
+    }
+    if (this.linkDescription === task) this.linkDescription = null;
+    task.controller.abort();
+    this.unpublishDescription(task);
+  }
+
+  private abortLinkDescription(): void {
+    if (this.linkDescription !== null) this.releaseDescription(this.linkDescription);
+  }
+
+  private abortChosenDescription(): void {
+    if (this.chosenDescription !== null) this.releaseDescription(this.chosenDescription);
+  }
+
+  private async awaitChosenDescription(
+    task: LinkDescriptionTask,
+  ): Promise<PdfDestinationDescription | null> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let onAbort: (() => void) | undefined;
+    const bounded = new Promise<null>((resolve) => {
+      timer = setTimeout(
+        () => resolve(null),
+        this.dependencies.descriptionTimeoutMs ?? DEFAULT_DESCRIPTION_TIMEOUT_MS,
+      );
+      onAbort = () => resolve(null);
+      if (task.controller.signal.aborted) resolve(null);
+      else task.controller.signal.addEventListener('abort', onAbort, { once: true });
+    });
+    try {
+      return await Promise.race([task.promise, bounded]);
+    } finally {
+      clearTimeout(timer);
+      if (onAbort !== undefined) task.controller.signal.removeEventListener('abort', onAbort);
+      // A late name is never applied after the bound (KTD2).
+      task.controller.abort();
+    }
+  }
+
+  private publishDescription(
+    task: LinkDescriptionTask,
+    status: LinkDescriptionPresentationState['status'],
+    description: PdfDestinationDescription | null,
+  ): void {
+    this.publishedDescription = task;
+    this.dependencies.setLinkDescription?.({
+      request: task.request,
+      documentGeneration: task.documentGeneration,
+      status,
+      description,
+    });
+  }
+
+  private unpublishDescription(task: LinkDescriptionTask): void {
+    if (this.publishedDescription !== task) return;
+    this.publishedDescription = null;
+    this.dependencies.setLinkDescription?.(null);
+  }
+
+  private setLinkActionBusy(state: LinkActionBusyState | null): void {
+    if (this.linkActionBusy === state) return;
+    this.linkActionBusy = state;
+    this.dependencies.setLinkActionBusy?.(state);
+  }
+
+  private clearMainBand(): void {
+    this.mainBandSettled = true;
+    if (this.mainBand === null) return;
+    this.mainBand = null;
+    this.publishBands();
+  }
+
+  private pruneReferenceBands(): void {
+    if (this.referenceBands.size === 0) return;
+    const identities = new Set(this.dependencies.getState().tabs.map(({ identity }) => identity));
+    let changed = false;
+    for (const identity of [...this.referenceBands.keys()]) {
+      if (identities.has(identity)) continue;
+      this.referenceBands.delete(identity);
+      changed = true;
+    }
+    if (changed) this.publishBands();
+  }
+
+  private publishBands(): void {
+    this.dependencies.setDestinationBands?.({
+      documentGeneration: this.documentGeneration,
+      main: this.mainBand,
+      references: new Map(this.referenceBands),
+    });
+  }
+
+  /** KTD10: the main band clears once its whole rect leaves the unobscured viewport. */
+  private refreshMainBandVisibility(): void {
+    const band = this.mainBand;
+    if (band === null) return;
+    if (!this.generationMatches(band.documentGeneration)) {
+      this.clearMainBand();
+      return;
+    }
+    // Programmatic scrolling during the jump must not clear a band shown early.
+    if (!this.mainBandSettled) return;
+    const visibility = this.dependencies.getMainNavigation()
+      ?.rectVisibility(band.pageIndex, bandBounds(band)) ?? 'unavailable';
+    if (visibility === 'outside') this.clearMainBand();
+  }
+
   private async navigateReferenceTarget(
     target: PdfNavigationTarget,
     sourceTabIdentity: string,
   ): Promise<boolean> {
-    const operation = this.begin(target.documentGeneration);
+    const operation = this.begin(target.documentGeneration, { movesMain: false });
     if (operation === null) return false;
     this.clearReferenceReturnState();
     const state = this.dependencies.getState();
@@ -651,7 +1052,7 @@ export class NavigationCoordinator {
     preservedMainTarget?: PdfNavigationTarget | null,
     options: ReferenceOpenOptions = {},
   ): Promise<boolean> {
-    const operation = this.begin(target.documentGeneration);
+    const operation = this.begin(target.documentGeneration, { movesMain: false });
     if (operation === null) return false;
     this.clearReferenceReturnState();
     const state = this.dependencies.getState();
@@ -850,7 +1251,7 @@ export class NavigationCoordinator {
     ) return false;
     const status = controller.snapshot().status;
     if (status !== 'failed' && status !== 'loaded') return false;
-    const operation = this.begin(pending.documentGeneration, true);
+    const operation = this.begin(pending.documentGeneration, { preservePendingReference: true, movesMain: false });
     if (operation === null) return false;
     const preserveMain = pending.preservedMainTarget !== undefined;
     const main = preserveMain ? this.dependencies.getMainNavigation() : undefined;
@@ -921,6 +1322,18 @@ export class NavigationCoordinator {
     this.pendingReference = null;
     this.referenceRestoreIdentity = null;
     this.dependencies.setPendingReference(null);
+    // A retried link open gets the band its first attempt resolved (KTD9).
+    const retryBand = this.retryBand;
+    this.retryBand = null;
+    if (
+      retryBand !== null
+      && pending.options?.annotationIdentity === undefined
+      && retryBand.targetIdentity === pending.target.identity
+      && this.generationMatches(retryBand.band.documentGeneration)
+    ) {
+      this.referenceBands.set(tabIdentity, retryBand.band);
+      this.publishBands();
+    }
     pending.options?.onSettled?.(committedSettlement ?? {
       token: operation.token,
       documentGeneration: operation.documentGeneration,
@@ -935,7 +1348,7 @@ export class NavigationCoordinator {
   }
 
   async switchReference(identity: string): Promise<boolean> {
-    const operation = this.begin();
+    const operation = this.begin(this.documentGeneration, { movesMain: false });
     if (operation === null) return false;
     this.clearReferenceReturnState();
     await this.dependencies.layout.settle();
@@ -951,7 +1364,7 @@ export class NavigationCoordinator {
       this.dependencies.layout.revealReferences();
       return true;
     }
-    const operation = this.begin();
+    const operation = this.begin(this.documentGeneration, { movesMain: false });
     if (operation === null) return false;
     this.clearReferenceReturnState();
     this.dependencies.dispatch({ type: 'select-workspace-mode', mode: 'references' });
@@ -992,7 +1405,7 @@ export class NavigationCoordinator {
   }
 
   async closeReference(identity: string): Promise<boolean> {
-    const operation = this.begin();
+    const operation = this.begin(this.documentGeneration, { movesMain: false });
     if (operation === null) return false;
     this.clearReferenceReturnState();
     const state = this.dependencies.getState();
@@ -1004,6 +1417,7 @@ export class NavigationCoordinator {
         targetIdentity: identity,
         focusReturnToken: this.dependencies.layout.referenceRailFocusToken(),
       });
+      this.pruneReferenceBands();
       this.dependencies.setAnnouncement('Reference closed.');
       return true;
     }
@@ -1017,6 +1431,7 @@ export class NavigationCoordinator {
         targetIdentity: identity,
         focusReturnToken: this.dependencies.layout.referenceRailFocusToken(),
       });
+      this.pruneReferenceBands();
       this.dependencies.focusReferenceTab(successorIdentity);
       this.dependencies.setAnnouncement('Reference closed. Adjacent reference active.');
       return true;
@@ -1027,6 +1442,7 @@ export class NavigationCoordinator {
       targetIdentity: identity,
       focusReturnToken: this.dependencies.layout.referenceRailFocusToken(),
     });
+    this.pruneReferenceBands();
     this.dependencies.layout.hideReferences();
     await this.dependencies.getReferenceController()?.close();
     if (!this.isCurrent(operation)) return false;
@@ -1097,6 +1513,7 @@ export class NavigationCoordinator {
       success: true,
       settledLocation,
     });
+    this.pruneReferenceBands();
     if (finalReference) this.dependencies.layout.hideReferencesAfterSend();
     const survivingIdentity = this.dependencies.getState().activeTabIdentity;
     this.referenceRestoreIdentity = survivingIdentity;
@@ -1282,6 +1699,7 @@ export class NavigationCoordinator {
   }
 
   historyBack(viewport?: PdfViewportQuery): Promise<boolean> {
+    this.clearMainBand();
     if (this.dependencies.locationHistory !== undefined) {
       this.pendingHistoryViewport = viewport;
       const traversing = this.dependencies.locationHistory.back();
@@ -1297,6 +1715,7 @@ export class NavigationCoordinator {
   }
 
   historyForward(viewport?: PdfViewportQuery): Promise<boolean> {
+    this.clearMainBand();
     if (this.dependencies.locationHistory !== undefined) {
       this.pendingHistoryViewport = viewport;
       const traversing = this.dependencies.locationHistory.forward();
@@ -1321,6 +1740,7 @@ export class NavigationCoordinator {
   }
 
   refreshMainLocation(): void {
+    this.refreshMainBandVisibility();
     const state = this.dependencies.getState();
     if (
       this.activeDestinationRestoreToken !== null
@@ -1381,11 +1801,17 @@ export class NavigationCoordinator {
       this.dependencies.setCurrentOutlineItemId(null);
       return;
     }
-    this.dependencies.setCurrentOutlineItemId(resolveCurrentOutlineItemId({
-      discovery: this.dependencies.getOutlineDiscovery(),
-      currentLocation,
-      resolveTarget: (target) => navigation.resolveTarget(target),
-    }));
+    const discovery = this.dependencies.getOutlineDiscovery();
+    const resolveTarget = (target: PdfNavigationTarget) => navigation.resolveTarget(target);
+    this.dependencies.setCurrentOutlineItemId(
+      resolveCurrentOutlineItemId({ discovery, currentLocation, resolveTarget })
+      ?? resolveLeadingVisibleOutlineItemId({
+        discovery,
+        currentLocation,
+        resolveTarget,
+        isVisible: (location) => navigation.locationVisibility(location) === 'visible',
+      }),
+    );
   }
 
   /** Restores view-local page/zoom state without publishing navigation history. */
@@ -1418,6 +1844,13 @@ export class NavigationCoordinator {
     this.referenceRestoreIdentity = null;
     this.semanticItemLocation = null;
     this.clearSemanticDestination();
+    this.abortLinkDescription();
+    this.abortChosenDescription();
+    this.mainBand = null;
+    this.mainBandSettled = true;
+    this.referenceBands.clear();
+    this.retryBand = null;
+    this.publishBands();
     this.locationRestored = this.dependencies.locationHistory === undefined;
     this.dependencies.getMainNavigation()?.replaceDocument(documentGeneration);
     this.dependencies.getReferenceNavigation()?.replaceDocument(documentGeneration);
@@ -1446,6 +1879,10 @@ export class NavigationCoordinator {
     this.referenceRestoreIdentity = null;
     this.semanticItemLocation = null;
     this.clearSemanticDestination();
+    this.abortLinkDescription();
+    this.abortChosenDescription();
+    this.mainBand = null;
+    this.referenceBands.clear();
     this.dependencies.locationHistory?.dispose();
     void this.dependencies.getReferenceController()?.close();
   }
@@ -1981,11 +2418,17 @@ export class NavigationCoordinator {
 
   private begin(
     documentGeneration = this.documentGeneration,
-    preservePendingReference = false,
+    {
+      preservePendingReference = false,
+      // Reference-only operations leave the main reader where it is, so its band stays.
+      movesMain = true,
+    }: { readonly preservePendingReference?: boolean; readonly movesMain?: boolean } = {},
   ): Operation | null {
     if (!this.generationMatches(documentGeneration)) return null;
     this.dependencies.resetReferenceManualScrollIntent();
     this.clearLinkRequest();
+    this.abortChosenDescription();
+    if (movesMain) this.clearMainBand();
     this.cancelPendingTransactions(preservePendingReference);
     this.activeDestinationRestoreToken = null;
     return {
@@ -2012,6 +2455,8 @@ export class NavigationCoordinator {
 
   private supersede(): void {
     this.clearLinkRequest();
+    this.abortChosenDescription();
+    this.clearMainBand();
     this.cancelPendingTransactions();
     this.activeDestinationRestoreToken = null;
     this.operationToken += 1;
@@ -2028,6 +2473,7 @@ export class NavigationCoordinator {
   }
 
   private clearLinkRequest(): void {
+    this.abortLinkDescription();
     if (this.linkRequest === null && this.linkRequestSourceTabIdentity === null) return;
     this.linkRequest = null;
     this.linkRequestSourceTabIdentity = null;

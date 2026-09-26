@@ -5,6 +5,15 @@ export interface PdfNaturalPoint {
   readonly y: number;
 }
 
+/**
+ * A rectangle in natural, unrotated, top-origin page coordinates (PDF points
+ * relative to the crop box) — the same space as link annotation rects.
+ */
+export interface PdfNaturalRect {
+  readonly origin: PdfNaturalPoint;
+  readonly size: PdfNaturalPageSize;
+}
+
 export interface PdfNaturalPageSize {
   readonly width: number;
   readonly height: number;
@@ -70,6 +79,10 @@ export interface ViewerNavigationControls {
   fitToWidth(waitForSettledGeometry?: WaitForSettledViewerGeometry): Promise<boolean>;
   fitToWidthReady(): boolean;
   isFitToWidth?(): boolean;
+  /** True while the scale from the last successful Fit Width is still current, so the fit should follow resizes. */
+  followsFitWidth?(): boolean;
+  /** True while a movement other than Fit Width is still settling; starting a fit would cancel it. */
+  navigationPending?(): boolean;
   replaceDocument(documentGeneration: number): void;
   focusAtDestination(pageIndex: number): boolean;
   dispose(): void;

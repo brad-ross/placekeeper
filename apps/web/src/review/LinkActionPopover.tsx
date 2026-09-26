@@ -6,10 +6,13 @@ import {
   type CSSProperties,
   type FocusEvent,
   type KeyboardEvent,
+  type ReactNode,
   type Ref,
 } from 'react';
 import { createPortal } from 'react-dom';
 
+import type { PdfDestinationDescription } from '../pdf/destination-description.js';
+import type { DestinationSnippetRenderer } from '../pdf/destination-snippet.js';
 import type {
   ViewerFixedClientRect,
   ViewerPdfLinkInvocation,
@@ -17,8 +20,9 @@ import type {
 } from '../pdf/viewer-interaction-events.js';
 import { PDF_LINK_ACTION_MENU_ID } from '../pdf/viewer-interaction-events.js';
 import { CopyLinkControl, type CopyLinkControlProps } from './CopyLinkControl.js';
+import { DestinationSnippet } from './DestinationSnippet.js';
 import { compositeFocusIndex, enabledMenuItems } from './menu-focus.js';
-import { ReviewIcon } from './ReviewIcon.js';
+import { ReviewIcon, type ReviewIconName } from './ReviewIcon.js';
 import { ReviewTooltipButton } from './ReviewTooltipButton.js';
 
 export type LinkActionChoice = 'references' | 'main' | 'same-reference';
@@ -46,6 +50,17 @@ export interface LinkActionPopoverProps {
   readonly openInReferencesDisabled?: boolean;
   /** Resolves a stable focus surface when the source link has been virtualized. */
   readonly sourceFocusFallback?: (source: ViewerPdfLinkSourceScope) => HTMLElement | null;
+  /** The request's destination description; null until resolution starts. */
+  readonly destination?: LinkActionDestinationState | null;
+  /** Region-renders the destination snippet (KTD3). */
+  readonly renderDestinationSnippet?: DestinationSnippetRenderer;
+  /** The chosen action while it waits for the destination name (`aria-busy`). */
+  readonly busyChoice?: LinkActionChoice | null;
+}
+
+export interface LinkActionDestinationState {
+  readonly status: 'resolving' | 'resolved';
+  readonly description: PdfDestinationDescription | null;
 }
 
 interface ViewportRect {
@@ -106,78 +121,127 @@ export function setLinkActionOpenerExpanded(
   opener.setAttribute('aria-expanded', expanded ? 'true' : 'false');
 }
 
+function LinkActionItem({
+  label,
+  icon,
+  choice,
+  itemRef,
+  disabled = false,
+  busyChoice,
+  onChoose,
+}: {
+  readonly label: string;
+  readonly icon: ReviewIconName;
+  readonly choice: LinkActionChoice;
+  readonly itemRef?: Ref<HTMLButtonElement> | undefined;
+  readonly disabled?: boolean;
+  readonly busyChoice: LinkActionChoice | null;
+  readonly onChoose: (choice: LinkActionChoice) => void;
+}) {
+  const busy = busyChoice !== null;
+  return (
+    <ReviewTooltipButton
+      label={label}
+      ref={itemRef}
+      type="button"
+      role="menuitem"
+      className="link-action-popover__item"
+      aria-label={label}
+      {...(busyChoice === choice ? { 'aria-busy': 'true' as const } : {})}
+      {...(busy ? { 'aria-disabled': 'true' as const } : {})}
+      disabled={disabled}
+      onClick={() => {
+        if (!busy) onChoose(choice);
+      }}
+    >
+      <ReviewIcon name={icon} />
+    </ReviewTooltipButton>
+  );
+}
+
 export function LinkActionMenuContent({
   label,
   pageContext,
+  pageNumeral,
   sourceScope,
   firstItemRef,
   copyLink,
   openInReferencesDisabled = false,
+  snippet,
+  busyChoice = null,
   onChoose,
   onKeyDown,
   onBlur,
 }: {
   readonly label: string;
   readonly pageContext: string;
+  /** The destination page numeral, shown at the end of the action row. */
+  readonly pageNumeral: string;
   readonly sourceScope: ViewerPdfLinkSourceScope;
   readonly firstItemRef: Ref<HTMLButtonElement>;
   readonly copyLink?: CopyLinkControlProps;
   readonly openInReferencesDisabled?: boolean;
+  /** Non-focusable destination preview shown above the action row (R3). */
+  readonly snippet?: ReactNode;
+  /** The chosen action waiting for its destination name; the menu is inert meanwhile. */
+  readonly busyChoice?: LinkActionChoice | null;
   readonly onChoose: (choice: LinkActionChoice) => void;
   readonly onKeyDown: (event: KeyboardEvent<HTMLDivElement>) => void;
   readonly onBlur: (event: FocusEvent<HTMLDivElement>) => void;
 }) {
+  const busy = busyChoice !== null;
   return (
     <div
       id={PDF_LINK_ACTION_MENU_ID}
       className="link-action-popover__surface"
       role="menu"
       aria-label={`Open ${label}, ${pageContext}`}
+      {...(busy ? { 'aria-busy': 'true' as const, 'data-link-action-busy': '' } : {})}
       onKeyDown={onKeyDown}
       onBlur={onBlur}
     >
-      <ReviewTooltipButton
-        label="Open in References"
-        ref={openInReferencesDisabled ? undefined : firstItemRef}
-        type="button"
-        role="menuitem"
-        aria-label="Open in References"
-        disabled={openInReferencesDisabled}
-        onClick={() => onChoose('references')}
-      >
-        <ReviewIcon name="references" />
-      </ReviewTooltipButton>
-      {sourceScope === 'reference' ? (
-        <ReviewTooltipButton
-          label="Follow in this tab"
-          ref={openInReferencesDisabled ? firstItemRef : undefined}
-          type="button"
-          role="menuitem"
-          aria-label="Follow in this tab"
-          onClick={() => onChoose('same-reference')}
-        >
-          <ReviewIcon name="arrow-right" />
-        </ReviewTooltipButton>
-      ) : null}
-      <ReviewTooltipButton
-        label="Open in main document"
-        ref={openInReferencesDisabled && sourceScope === 'main' ? firstItemRef : undefined}
-        type="button"
-        role="menuitem"
-        aria-label="Open in main document"
-        onClick={() => onChoose('main')}
-      >
-        <ReviewIcon name={sourceScope === 'main' ? 'chevron-right' : 'open-main'} />
-      </ReviewTooltipButton>
-      {copyLink === undefined ? null : (
-        <CopyLinkControl
-          {...copyLink}
-          variant="popover"
-          presentation="icon-only"
-          buttonRole="menuitem"
-          feedbackPlacement="inline"
+      {snippet}
+      <div className="link-action-popover__actions">
+        <LinkActionItem
+          label="Open in References"
+          icon="references"
+          choice="references"
+          itemRef={openInReferencesDisabled ? undefined : firstItemRef}
+          disabled={openInReferencesDisabled}
+          busyChoice={busyChoice}
+          onChoose={onChoose}
         />
-      )}
+        {sourceScope === 'reference' ? (
+          <LinkActionItem
+            label="Follow in this tab"
+            icon="arrow-right"
+            choice="same-reference"
+            itemRef={openInReferencesDisabled ? firstItemRef : undefined}
+            busyChoice={busyChoice}
+            onChoose={onChoose}
+          />
+        ) : null}
+        <LinkActionItem
+          label="Open in main document"
+          icon={sourceScope === 'main' ? 'chevron-right' : 'open-main'}
+          choice="main"
+          itemRef={openInReferencesDisabled && sourceScope === 'main' ? firstItemRef : undefined}
+          busyChoice={busyChoice}
+          onChoose={onChoose}
+        />
+        {copyLink === undefined ? null : (
+          <CopyLinkControl
+            {...copyLink}
+            {...(busy ? { disabled: true } : {})}
+            variant="popover"
+            presentation="icon-only"
+            buttonRole="menuitem"
+            feedbackPlacement="inline"
+          />
+        )}
+        {/* The menu's accessible name already carries the page. */}
+        <span className="link-action-popover__page" aria-hidden="true">{pageNumeral}</span>
+      </div>
     </div>
   );
 }
@@ -226,6 +290,9 @@ export function LinkActionPopover({
   copyLink,
   openInReferencesDisabled = false,
   sourceFocusFallback,
+  destination = null,
+  renderDestinationSnippet,
+  busyChoice = null,
 }: LinkActionPopoverProps) {
   const popoverRef = useRef<HTMLDivElement>(null);
   const firstItemRef = useRef<HTMLButtonElement>(null);
@@ -361,7 +428,9 @@ export function LinkActionPopover({
     const items = enabledMenuItems(event.currentTarget);
     const activeIndex = items.indexOf(document.activeElement as HTMLButtonElement);
     if (activeIndex < 0) return;
-    const nextIndex = compositeFocusIndex(activeIndex, items.length, event.key);
+    // The actions sit in one row, so the horizontal arrows move between them too.
+    const key = event.key === 'ArrowRight' ? 'ArrowDown' : event.key === 'ArrowLeft' ? 'ArrowUp' : event.key;
+    const nextIndex = compositeFocusIndex(activeIndex, items.length, key);
     if (nextIndex === null) return;
     event.preventDefault();
     items[nextIndex]?.focus({ preventScroll: true });
@@ -395,10 +464,19 @@ export function LinkActionPopover({
       <LinkActionMenuContent
         label={request.metadata.label}
         pageContext={request.metadata.pageContext}
+        pageNumeral={destination?.description?.pageNumeral ?? String(request.target.pageIndex + 1)}
         sourceScope={request.sourceScope}
         firstItemRef={firstItemRef}
         {...(dismissingCopyLink === undefined ? {} : { copyLink: dismissingCopyLink })}
         openInReferencesDisabled={openInReferencesDisabled}
+        snippet={(
+          <DestinationSnippet
+            description={destination?.description ?? null}
+            resolving={destination?.status === 'resolving'}
+            {...(renderDestinationSnippet === undefined ? {} : { render: renderDestinationSnippet })}
+          />
+        )}
+        busyChoice={busyChoice}
         onChoose={choose}
         onKeyDown={keyDown}
         onBlur={blur}

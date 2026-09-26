@@ -88,6 +88,11 @@ function intersects(first: RectLike, second: RectLike): boolean {
 export function choosePassageEditorPlacement(input: {
   readonly stage: RectLike;
   readonly target: RectLike;
+  /**
+   * The PDF page holding the passage. Beside it means in the page margin, so
+   * a side placement must clear the whole page rather than only the passage.
+   */
+  readonly page?: RectLike;
   readonly editorWidth: number;
   readonly editorHeight: number;
   readonly rightBoundary?: number;
@@ -133,8 +138,9 @@ export function choosePassageEditorPlacement(input: {
   const usablePopup = input.placementScope !== 'reference'
     || (editorWidth >= MIN_REFERENCE_POPUP_WIDTH
       && visibleRect.height >= MIN_REFERENCE_POPUP_HEIGHT);
-  const spaceRight = stageRight - input.target.right - RELATION_GAP;
-  const spaceLeft = input.target.left - RELATION_GAP - stageLeft;
+  const sideAnchor = input.page ?? input.target;
+  const spaceRight = stageRight - sideAnchor.right - RELATION_GAP;
+  const spaceLeft = sideAnchor.left - RELATION_GAP - stageLeft;
   const spaceBelow = stageBottom - input.target.bottom - RELATION_GAP;
   const spaceAbove = input.target.top - RELATION_GAP - stageTop;
   const canSide = usablePopup && Math.max(spaceLeft, spaceRight) >= editorWidth;
@@ -178,8 +184,8 @@ export function choosePassageEditorPlacement(input: {
   const localStageBottom = stageBottom - input.stage.top;
   const left = kind === 'side'
     ? spaceRight >= editorWidth
-      ? localTarget.right + RELATION_GAP
-      : localTarget.left - RELATION_GAP - editorWidth
+      ? sideAnchor.right - input.stage.left + RELATION_GAP
+      : sideAnchor.left - input.stage.left - RELATION_GAP - editorWidth
     : clamp(
       localTarget.left + (input.target.width - editorWidth) / 2,
       localStageLeft,
@@ -548,9 +554,27 @@ export function usePassageEditorPlacement(input: {
         );
         return;
       }
+      // The page under the passage's center; the editor opens beside it only
+      // in the margin, never over the text column.
+      const targetCenter = { x: (target.left + target.right) / 2, y: (target.top + target.bottom) / 2 };
+      const pageBounds = [...stage.querySelectorAll<HTMLElement>('[data-page-index]')]
+        .map((element) => element.getBoundingClientRect())
+        .find((bounds) => bounds.width > 0
+          && targetCenter.x >= bounds.left && targetCenter.x <= bounds.right
+          && targetCenter.y >= bounds.top && targetCenter.y <= bounds.bottom);
       const choice = choosePassageEditorPlacement({
         stage: stageBounds,
         target,
+        ...(pageBounds === undefined ? {} : {
+          page: {
+            left: pageBounds.left,
+            top: pageBounds.top,
+            right: pageBounds.right,
+            bottom: pageBounds.bottom,
+            width: pageBounds.width,
+            height: pageBounds.height,
+          },
+        }),
         editorWidth: DEFAULT_WIDTH,
         editorHeight: editorBounds?.height || DEFAULT_HEIGHT,
         ...(rightBoundary === undefined ? {} : { rightBoundary }),

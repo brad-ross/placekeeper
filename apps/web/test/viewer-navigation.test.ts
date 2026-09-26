@@ -22,6 +22,7 @@ import {
   createViewerNavigation,
   fitViewerWidthZoom,
   focusViewerDestination,
+  readingWidthFitMargins,
 } from '../src/pdf/viewer-navigation-adapter.js';
 import type { ViewerRunway } from '../src/pdf/viewer-framing.js';
 
@@ -43,6 +44,13 @@ describe('viewer navigation math', () => {
     expect(fitViewerWidthZoom({ viewportWidth: 20, pageWidth: 1_000, viewportGap: 0 })).toBe(0.2);
     expect(fitViewerWidthZoom({ viewportWidth: 10_000, pageWidth: 100, viewportGap: 0 })).toBe(60);
     expect(fitViewerWidthZoom({ viewportWidth: 20, pageWidth: 600, viewportGap: 10 })).toBeNull();
+  });
+  it('widens fit margins equally only when the fitted page would exceed the reading zoom cap', () => {
+    const margins = { left: 30, right: 10 };
+    expect(readingWidthFitMargins({ margins, viewportWidth: 1_440, pageWidth: 600, maxZoom: 1.5 }))
+      .toEqual({ left: 280, right: 260 });
+    expect(readingWidthFitMargins({ margins, viewportWidth: 800, pageWidth: 600, maxZoom: 1.5 })).toBe(margins);
+    expect(readingWidthFitMargins({ margins, viewportWidth: 1_440, pageWidth: 600 })).toBe(margins);
   });
   it('converts PDF bottom-origin destination coordinates to natural top-origin page anchors', () => {
     expect(pdfBottomOriginPointToNaturalAnchor({ x: 72, y: 640 }, page))
@@ -322,6 +330,7 @@ function navigationHarness(options: {
   viewportWidth?: number;
   throwViewportScroll?: boolean;
   timeoutMs?: number;
+  maxFitWidthZoom?: number;
   onNextFrame?: (frame: number, pageRect: RectState) => void;
 } = {}) {
   const combinedRotation = combinePageRotation(
@@ -596,7 +605,7 @@ function navigationHarness(options: {
       return () => activityListeners.delete(listener);
     },
   };
-  const document = {
+  let document = {
     pages: (options.farTargetInitiallyUnmounted || options.staleCurrentPageWithThirdVisible || options.reportedPageAfterZoom !== undefined
       ? [0, 1, 2]
       : [0]).map((index) => ({
@@ -655,6 +664,7 @@ function navigationHarness(options: {
       }) }) as HTMLElement,
     }),
     runway: () => options.runway ?? { right: 0, bottom: 0 },
+    ...(options.maxFitWidthZoom === undefined ? {} : { maxFitWidthZoom: options.maxFitWidthZoom }),
     timeoutMs: options.timeoutMs ?? 25,
     nextFrame: async () => {
       frame += 1;
@@ -685,6 +695,11 @@ function navigationHarness(options: {
     },
     replaceActiveDocument(documentId: string) {
       activeDocumentId = documentId;
+      for (const listener of storeListeners) listener();
+    },
+    /** Loads a different file into the same viewer document slot. */
+    loadNewFile() {
+      document = { ...document };
       for (const listener of storeListeners) listener();
     },
   };
@@ -812,6 +827,74 @@ describe('viewer navigation adapter', () => {
     })).toBe('unavailable');
   });
 
+  it('reports a page rect visible while any part is unobscured and outside only when none is', () => {
+    // Page at client (-100, -200), scale 1; viewport 600x400 at the origin.
+    const harness = navigationHarness();
+    const rect = (x: number, y: number, width: number, height: number) => ({
+      origin: { x, y },
+      size: { width, height },
+    });
+
+    expect(harness.navigation.rectVisibility(0, rect(150, 250, 100, 20))).toBe('visible');
+    // Straddles the viewport bottom edge: client y 390..420.
+    expect(harness.navigation.rectVisibility(0, rect(150, 590, 100, 30))).toBe('visible');
+    // Straddles the viewport top edge: client y -10..10.
+    expect(harness.navigation.rectVisibility(0, rect(150, 190, 100, 20))).toBe('visible');
+    // Fully above: client y -100..-50.
+    expect(harness.navigation.rectVisibility(0, rect(150, 100, 100, 50))).toBe('outside');
+    // Fully below: client y 410..440.
+    expect(harness.navigation.rectVisibility(0, rect(150, 610, 100, 30))).toBe('outside');
+    // Fully left of the viewport: client x -90..-10.
+    expect(harness.navigation.rectVisibility(0, rect(10, 250, 80, 20))).toBe('outside');
+
+    harness.pageRect.top = -801;
+    expect(harness.navigation.rectVisibility(0, rect(150, 250, 100, 20))).toBe('outside');
+
+    // Transient occlusion covers the lower part of the viewport.
+    harness.pageRect.top = -200;
+    expect(harness.navigation.rectVisibility(0, rect(150, 500, 100, 30), {
+      occlusion: { left: 0, top: 250, right: 600, bottom: 400 },
+    })).toBe('outside');
+    expect(harness.navigation.rectVisibility(0, rect(150, 440, 100, 30), {
+      occlusion: { left: 0, top: 250, right: 600, bottom: 400 },
+    })).toBe('visible');
+  });
+
+  it('counts runway areas as obscured for rect visibility', () => {
+    const harness = navigationHarness({ runway: { right: 0, bottom: 100 } });
+    const rect = (y: number) => ({ origin: { x: 150, y }, size: { width: 100, height: 20 } });
+
+    // Viewport bottom is 300 after the runway: client y 310..330 is covered.
+    expect(harness.navigation.rectVisibility(0, rect(510))).toBe('outside');
+    expect(harness.navigation.rectVisibility(0, rect(490))).toBe('visible');
+  });
+
+  it('reports malformed rects unavailable and an unmounted page outside', () => {
+    const harness = navigationHarness();
+    expect(harness.navigation.rectVisibility(0, {
+      origin: { x: Number.NaN, y: 10 },
+      size: { width: 10, height: 10 },
+    })).toBe('unavailable');
+    expect(harness.navigation.rectVisibility(0, {
+      origin: { x: 10, y: 10 },
+      size: { width: -1, height: 10 },
+    })).toBe('unavailable');
+    expect(harness.navigation.rectVisibility(-1, {
+      origin: { x: 10, y: 10 },
+      size: { width: 10, height: 10 },
+    })).toBe('unavailable');
+    expect(harness.navigation.rectVisibility(0, {
+      origin: { x: 10, y: 790 },
+      size: { width: 10, height: 50 },
+    })).toBe('unavailable');
+
+    const unmounted = navigationHarness({ farTargetInitiallyUnmounted: true });
+    expect(unmounted.navigation.rectVisibility(2, {
+      origin: { x: 10, y: 10 },
+      size: { width: 10, height: 10 },
+    })).toBe('outside');
+  });
+
   it('returns a neutral page point into the same unobscured rectangle used for visibility', async () => {
     const rightHarness = navigationHarness();
     const rightDestination: PdfViewerLocation = {
@@ -863,6 +946,54 @@ describe('viewer navigation adapter', () => {
 
     expect(await harness.navigation.fitToWidth()).toBe(true);
     expect(harness.log).toContain(`zoom:${580 / 600}`);
+  });
+
+  it('caps fit width at the reading zoom and centers the page in a wide viewport', async () => {
+    const harness = navigationHarness({ viewportGap: 10, viewportWidth: 1_400, maxFitWidthZoom: 1.5 });
+
+    expect(await harness.navigation.fitToWidth()).toBe(true);
+    expect(harness.log).toContain('zoom:1.5');
+    expect(harness.pageRect.width).toBeCloseTo(900);
+    expect(harness.pageRect.left).toBeCloseTo(250);
+    expect(harness.navigation.isFitToWidth?.()).toBe(true);
+  });
+
+  it('follows fit width only while the last fitted scale remains current', async () => {
+    const harness = navigationHarness({ viewportGap: 10 });
+
+    expect(harness.navigation.followsFitWidth?.()).toBe(false);
+    expect(await harness.navigation.fitToWidth()).toBe(true);
+    expect(harness.navigation.followsFitWidth?.()).toBe(true);
+    harness.setCurrentZoom(1.25);
+    expect(harness.navigation.followsFitWidth?.()).toBe(false);
+  });
+
+  it('does not carry a fit over to a newly loaded file at the same zoom', async () => {
+    const harness = navigationHarness({ viewportGap: 10 });
+
+    expect(await harness.navigation.fitToWidth()).toBe(true);
+    harness.loadNewFile();
+    harness.navigation.replaceDocument(2);
+    expect(harness.navigation.followsFitWidth?.()).toBe(false);
+    expect(await harness.navigation.fitToWidth()).toBe(true);
+    expect(harness.navigation.followsFitWidth?.()).toBe(true);
+  });
+
+  it('reports a link jump as pending navigation but not its own fit', async () => {
+    const harness = navigationHarness({ manualZoom: true, timeoutMs: 250 });
+
+    expect(harness.navigation.navigationPending?.()).toBe(false);
+    const jump = harness.navigation.applyLocation({
+      pageIndex: 0,
+      anchor: { x: 20, y: 30 },
+      alignment: { xPercent: 0, yPercent: 0 },
+      zoom: 1.5,
+    });
+    await vi.waitFor(() => expect(harness.log).toContain('zoom:1.5'));
+    expect(harness.navigation.navigationPending?.()).toBe(true);
+    harness.completeZoom(1.5);
+    expect(await jump).toBe(true);
+    expect(harness.navigation.navigationPending?.()).toBe(false);
   });
 
   it('excludes a non-overlay vertical scrollbar gutter from fit width', async () => {

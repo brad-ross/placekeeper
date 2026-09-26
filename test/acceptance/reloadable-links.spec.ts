@@ -289,7 +289,8 @@ test("copies canonical PDF destinations and reopens them without source UI state
   await expect(outlineCopy.locator(".lucide-link")).toBeVisible();
   await outlineCopy.focus();
   await expect(outlineCopy).toBeFocused();
-  await outlineCopy.click();
+  // Activate from the keyboard focus it already has, like the search row below.
+  await outlineCopy.press("Enter");
   const outlineLink = await copiedPlacekeeperLink(page);
   expect(outlineLink).toMatch(/#v=2&page=2&mode=xyz&params=72,640,0$/u);
 
@@ -303,7 +304,7 @@ test("copies canonical PDF destinations and reopens them without source UI state
   });
   await pageOnlyCopy.focus();
   await expect(pageOnlyCopy).toBeFocused();
-  await pageOnlyCopy.click();
+  await pageOnlyCopy.press("Enter");
   expect(await copiedPlacekeeperLink(page)).toMatch(/#v=1&page=4$/u);
 
   await page.getByRole("tab", { name: "Search", exact: true }).click();

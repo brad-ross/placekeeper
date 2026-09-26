@@ -1010,7 +1010,7 @@ describe('review shell layout and accessibility contract', () => {
     expect(html).toContain('aria-label="Current page 3 of 12. Enter a page number"');
     expect(html).toContain('aria-label="PDF zoom"');
     expect(html).toContain('aria-label="Current zoom 100 percent. Enter a zoom percentage"');
-    expect(html).not.toContain('aria-label="Edit history"');
+    expect(html).toMatch(/<button[^>]*disabled=""[^>]*aria-label="Undo"/u);
   });
 
   it('measures every fixed identity and icon footprint in the sizing rack', () => {
@@ -1359,7 +1359,7 @@ describe('review shell layout and accessibility contract', () => {
     expect(html).toContain('data-review-nested-host');
     expect(html.match(/Document canvas/g)).toHaveLength(1);
     expect(html).not.toContain('Codex');
-    expect(html).not.toContain('aria-label="Edit history"');
+    expect(html).toMatch(/<button[^>]*disabled=""[^>]*aria-label="Undo"/u);
     expect(html).toContain('aria-label="Document navigation"');
     expect(html).toContain('aria-label="Current page unavailable"');
     expect(html).toContain('aria-label="PDF zoom"');
@@ -1672,7 +1672,7 @@ describe('review shell layout and accessibility contract', () => {
       '.outline-navigator__disclosure .review-icon { width: 16px; height: 16px; }',
     );
     expect(neutralStyles).toContain(
-      '):focus-visible {\n  outline: 2px solid #496789;\n  outline-offset: 3px;',
+      '):focus-visible {\n  outline: 2px solid var(--pk-focus);\n  outline-offset: 3px;',
     );
   });
 

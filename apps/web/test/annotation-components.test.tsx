@@ -68,6 +68,41 @@ describe('annotation row and reader presentation', () => {
     )).toEqual(['source-first', 'owned-middle', 'source-last']);
   });
 
+  it('quotes the replaced text in its own block above the replacement', () => {
+    const html = renderToStaticMarkup(<AnnotationRowContent item={replacement} />);
+    const source = html.indexOf('class="annotation-item__source" data-source-treatment="struck" data-quote-only="false"');
+    expect(source).toBeGreaterThan(-1);
+    // The replacement is outside the quote's clamp, so a long quote cannot hide it.
+    expect(html).toMatch(/imprecise source<\/span><span class="annotation-item__excerpt-main"><span class="annotation-item__excerpt-text">precise replacement<\/span>/u);
+    expect(html).not.toContain('annotation-item__content-separator');
+  });
+
+  it('names the section beside the page in list rows', () => {
+    const located: ReviewItem = { ...replacement, payload: { ...replacement.payload, rect: { x: 40, y: 300, width: 80, height: 12 } } };
+    const sectionLabelAt = vi.fn(() => 'Short Panel Settings');
+    const html = renderToStaticMarkup(<AnnotationList
+      items={[located]}
+      sectionLabelAt={sectionLabelAt}
+      onNavigate={vi.fn()}
+      onEdit={vi.fn()}
+      onDelete={vi.fn()}
+    />);
+    expect(sectionLabelAt).toHaveBeenCalledWith({ pageIndex: 3, anchor: { x: 40, y: 300 } });
+    expect(html).toContain('class="annotation-item__section" title="Short Panel Settings">Short Panel Settings</span>');
+    expect(html).toContain('aria-label="Replace · Page 4 · Short Panel Settings');
+    expect(html).toContain('data-annotation-kind-icon="replace"');
+
+    // Without a known position the row names no section.
+    const unplaced = renderToStaticMarkup(<AnnotationList
+      items={[replacement]}
+      sectionLabelAt={() => 'Short Panel Settings'}
+      onNavigate={vi.fn()}
+      onEdit={vi.fn()}
+      onDelete={vi.fn()}
+    />);
+    expect(unplaced).not.toContain('annotation-item__section');
+  });
+
   it('renders a source-PDF row in the shared list with immutable identity and no actions', () => {
     const html = renderToStaticMarkup(<AnnotationList
       items={[]}
@@ -226,14 +261,14 @@ describe('annotation row and reader presentation', () => {
     expect(html).not.toContain('>Replace</strong>');
   });
 
-  it('renders a highlight comment followed by its supporting quote in rows and peeks', () => {
+  it('renders a highlight quote first, set off above its comment, in rows and peeks', () => {
     expect(annotationListContent(highlightWithComment)).toEqual({
       content: 'Explain why this identifies the coefficient.',
       quoteText: 'Local variation identifies demand.',
     });
     const rowHtml = renderToStaticMarkup(<AnnotationRowContent item={highlightWithComment} />);
-    expect(rowHtml.indexOf('Explain why this identifies the coefficient.'))
-      .toBeLessThan(rowHtml.indexOf('Local variation identifies demand.'));
+    expect(rowHtml.indexOf('Local variation identifies demand.'))
+      .toBeLessThan(rowHtml.indexOf('Explain why this identifies the coefficient.'));
     expect(rowHtml).toContain('class="annotation-item__quote" data-quote-only="false"');
 
     const peekHtml = renderToStaticMarkup(<AnnotationPeek

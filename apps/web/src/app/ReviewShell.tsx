@@ -41,6 +41,7 @@ import {
   type ReviewRect,
 } from '../../../../packages/core/src/review-commands.js';
 import type { ReviewItem, ReviewItemKind, ReviewState } from '../../../../packages/core/src/review-model.js';
+import type { PdfDocumentOrderLocation } from '../pdf/document-order-location.js';
 import type { CaretAnchor } from '../pdf/selection-anchor.js';
 import {
   existingAnnotationKey,
@@ -62,7 +63,13 @@ import type {
   ViewerPdfLinkInvocation,
 } from '../pdf/viewer-interaction-events.js';
 import type { PdfAnnotationSurface } from '../pdf/annotation-surface.js';
+import type { DestinationSnippetRenderer } from '../pdf/destination-snippet.js';
+import type {
+  LinkActionBusyState,
+  LinkDescriptionPresentationState,
+} from '../review/navigation-coordinator.js';
 import type { PdfOutlineDiscovery, PdfOutlineItem } from '../pdf/pdf-outline.js';
+import { AnnotationCountBadge } from '../review/AnnotationCountBadge.js';
 import { AnnotationList } from '../review/AnnotationList.js';
 import { FullAnnotationReader } from '../review/FullAnnotationReader.js';
 import {
@@ -176,6 +183,9 @@ export function handleReviewActionShortcut(input: {
   return true;
 }
 
+/** Lets a window drag settle before a fitted page follows its new width. */
+const RESIZE_REFIT_DELAY_MS = 120;
+
 function ignoreReferenceViewportHost(_element: HTMLDivElement | null): void {}
 function ignoreReferenceInspectionDismiss(_token: number): void {}
 function ignoreOpenAnnotationReference(_identity: AnnotationReaderIdentity): void {}
@@ -264,6 +274,12 @@ export interface ReviewShellWorkspaceModel {
   outlineDiscovery?: PdfOutlineDiscovery;
   currentOutlineItemId?: string | null;
   linkActionRequest?: ViewerPdfLinkInvocation | null;
+  /** Transient destination description for the open link menu or the chosen action (U5). */
+  linkDescription?: LinkDescriptionPresentationState | null;
+  /** The chosen link action while it waits for the name stage; render `aria-busy` (U5). */
+  linkActionBusy?: LinkActionBusyState | null;
+  /** Region-renders the link menu's destination snippet (U5, KTD3). */
+  renderDestinationSnippet?: DestinationSnippetRenderer;
   navigationAnnouncement?: string;
   canNavigateBack?: boolean;
   canNavigateForward?: boolean;
@@ -310,6 +326,10 @@ export interface ReviewShellProps {
   state: ReviewState;
   readonly activeAuthoringDraftIds?: readonly string[];
   documentTitle?: string;
+  /** The PDF's own title when it has one; the chrome shows it with the filename as its tooltip. */
+  displayTitle?: string;
+  /** The outline section containing a page location, when the PDF has a usable outline. */
+  sectionLabelAt?: (location: PdfDocumentOrderLocation) => string | null;
   generationRefreshStatus?: GenerationRefreshStatus;
   locationRestoreStatus?: LocationRestoreStatus;
   toolError?: string | null;
@@ -586,6 +606,8 @@ export function ReviewShell(props: ReviewShellProps) {
         props.state.workflow.documentGeneration,
       ))
     : props.state.items;
+  const annotationCount = visibleOwnedItems.length
+    + (existingAnnotations.status === 'ready' ? existingAnnotations.items.length : 0);
   const generatedStatusBusy = props.generationRefreshStatus !== 'failed'
     && (props.generationRefreshStatus === 'reconciling' || props.locationRestoreStatus === 'restoring');
   const generatedStatusMessages = [
@@ -682,6 +704,9 @@ export function ReviewShell(props: ReviewShellProps) {
   const anyWorkspaceOpen = workspaceOpen || referenceSurfaceOpen || toolsSurfaceOpen;
   const annotationsVisible = toolsSurfaceOpen && effectiveWorkspaceMode === 'annotations';
   const outlineExpansionToggleVisible = toolsSurfaceOpen && effectiveWorkspaceMode === 'outline';
+  const annotationCountBadge = effectiveWorkspaceMode === 'annotations'
+    ? <AnnotationCountBadge count={annotationCount} />
+    : null;
   const selectionAnchor = reliableSelection(props.selection.selectionUpdate);
   const selectionActionsAvailable = (
     selectionAnchor !== null || props.selection.selectionUpdate.kind === 'over-limit'
@@ -799,7 +824,7 @@ export function ReviewShell(props: ReviewShellProps) {
     if (!pendingOpeningFitRef.current || navigation === undefined) return;
     let current = true;
     // Only an already-fitted page follows the new width on opening.
-    // Manual zooms, resizing, docking, and closing preserve the current scale.
+    // Manual zooms, docking, and closing preserve the current scale.
     workspaceFraming.markUserIntent(undefined, { captureSettledPosition: false });
     void navigation.fitToWidth(async (signal) => {
       const geometry = await workspaceFraming.waitForSettledGeometry(signal);
@@ -1525,6 +1550,40 @@ export function ReviewShell(props: ReviewShellProps) {
     const frame = requestAnimationFrame(() => { void fitWidthCommand(); });
     return () => cancelAnimationFrame(frame);
   }, [workspacePresentation?.mode, workspacePresentation?.open, workspacePresentation?.referenceDock, fitWidthCommand]);
+  // A docked right surface overlays the stage, so its width also sets the
+  // reading width. Opening or closing it fits through the disclosure path.
+  const stageWidth = workspaceFraming.stageSize.width;
+  const dockedRightWidth = effectiveReferenceLayout.kind !== 'narrow-unified' && rightSurfaceOpen
+    ? effectiveReferenceLayout.rightWidth
+    : null;
+  const fittedReadingFrameRef = useRef<{ stage: number; dock: number | null } | null>(null);
+  useEffect(() => {
+    // A page still at its last Fit Width scale follows window resizes and
+    // docked-surface resizes. Any manual or destination zoom since that fit
+    // keeps its scale instead.
+    const previous = fittedReadingFrameRef.current;
+    fittedReadingFrameRef.current = { stage: stageWidth, dock: dockedRightWidth };
+    if (previous === null || stageWidth === 0) return;
+    const stageResized = Math.abs(stageWidth - previous.stage) >= 1;
+    const dockResized = dockedRightWidth !== null
+      && previous.dock !== null
+      && Math.abs(dockedRightWidth - previous.dock) >= 1;
+    if (!stageResized && !dockResized) return;
+    const navigation = props.viewer.viewerNavigation;
+    const follows = () => navigation?.followsFitWidth?.() ?? false;
+    if (!follows()) return;
+    // Fitting cancels pending navigation, so wait out a link jump in flight.
+    let timer: ReturnType<typeof setTimeout>;
+    const refit = () => {
+      if (navigation?.navigationPending?.()) {
+        timer = setTimeout(refit, RESIZE_REFIT_DELAY_MS);
+      } else if (follows()) {
+        void fitWidthCommand();
+      }
+    };
+    timer = setTimeout(refit, RESIZE_REFIT_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [stageWidth, dockedRightWidth, props.viewer.viewerNavigation, fitWidthCommand]);
   const beforeViewerAction = async () => {
     await props.viewer.viewerNavigation?.cancelPendingNavigation();
     commitMainFramingPosition();
@@ -1706,11 +1765,24 @@ export function ReviewShell(props: ReviewShellProps) {
       disabled: props.copyItemLink.disabled?.(item) ?? false,
     };
   };
-  const activePdfLinkCopy = props.workspace.linkActionRequest === null
-    || props.workspace.linkActionRequest === undefined
+  // Choosing Open in References closes the request while the destination name
+  // resolves; keep that menu shown, busy and inert, until the open proceeds (U5).
+  const linkActionBusy = props.workspace.linkActionBusy ?? null;
+  const shownLinkActionRequest = props.workspace.linkActionRequest
+    ?? (linkActionBusy?.choice === 'references' ? linkActionBusy.request : null);
+  const shownLinkActionBusyChoice = linkActionBusy !== null
+    && shownLinkActionRequest !== null
+    && linkActionBusy.request === shownLinkActionRequest
+    ? linkActionBusy.choice
+    : null;
+  const shownLinkDescription = shownLinkActionRequest !== null
+    && props.workspace.linkDescription?.request === shownLinkActionRequest
+    ? props.workspace.linkDescription
+    : null;
+  const activePdfLinkCopy = shownLinkActionRequest === null
     || props.workspace.copyLinkForLinkAction === undefined
     ? undefined
-    : props.workspace.copyLinkForLinkAction(props.workspace.linkActionRequest);
+    : props.workspace.copyLinkForLinkAction(shownLinkActionRequest);
   const [passageExposedToken, setPassageExposedToken] = useState<number | null>(null);
   const exposedPassagePlacement = useRef<PassageEditorPlacement | undefined>(undefined);
   useEffect(() => {
@@ -1887,6 +1959,7 @@ export function ReviewShell(props: ReviewShellProps) {
       <ReviewChrome
         showSaveStatusDot={!props.save.exportOnly}
         documentTitle={props.documentTitle ?? 'Local PDF'}
+        {...(props.displayTitle === undefined ? {} : { displayTitle: props.displayTitle })}
         {...(props.save.savedLabel === undefined ? {} : { savedLabel: props.save.savedLabel })}
         {...(props.save.savePhase === undefined ? {} : { savePhase: props.save.savePhase })}
         savePendingDestination={props.save.savePendingDestination ?? false}
@@ -2381,7 +2454,10 @@ export function ReviewShell(props: ReviewShellProps) {
             onReferenceViewportHost={props.workspace.onReferenceViewportHost ?? ignoreReferenceViewportHost}
             onModeFocusTokenChange={rememberWorkspaceModeFocus}
             headerAction={sharedWorkspace ? (
-              <OutlineExpansionToggleSlot visible={outlineExpansionToggleVisible} />
+              <>
+                <OutlineExpansionToggleSlot visible={outlineExpansionToggleVisible} />
+                {annotationCountBadge}
+              </>
             ) : null}
           />
           <OutlineAnnotationsWorkspace
@@ -2395,7 +2471,10 @@ export function ReviewShell(props: ReviewShellProps) {
             outline={visibleOutlineDiscovery}
             currentOutlineItemId={props.workspace.currentOutlineItemId ?? null}
             headerAction={(
-              <OutlineExpansionToggleSlot visible={outlineExpansionToggleVisible} />
+              <>
+                <OutlineExpansionToggleSlot visible={outlineExpansionToggleVisible} />
+                {annotationCountBadge}
+              </>
             )}
             onModeChange={selectWorkspaceMode}
             onHide={() => {
@@ -2475,6 +2554,7 @@ export function ReviewShell(props: ReviewShellProps) {
               onDetailModeChange={setReconciliationDetailMode}
               renderSummary={(attention) => <AnnotationList
                 attention={attention}
+                {...(props.sectionLabelAt === undefined ? {} : { sectionLabelAt: props.sectionLabelAt })}
                 items={visibleOwnedItems}
                 existingAnnotations={existingAnnotations}
                 documentGeneration={navigation.documentGeneration}
@@ -2583,9 +2663,14 @@ export function ReviewShell(props: ReviewShellProps) {
         inert={props.save.saveOptionsOpen ?? false}
       />
       <LinkActionPopover
-        request={props.workspace.linkActionRequest ?? null}
+        request={shownLinkActionRequest}
         openInReferencesDisabled={false}
         {...(activePdfLinkCopy === undefined ? {} : { copyLink: activePdfLinkCopy })}
+        destination={shownLinkDescription}
+        {...(props.workspace.renderDestinationSnippet === undefined
+          ? {}
+          : { renderDestinationSnippet: props.workspace.renderDestinationSnippet })}
+        busyChoice={shownLinkActionBusyChoice}
         onChoose={(choice, request) => props.workspace.onLinkActionChoose?.(choice, request)}
         onDismiss={(request, reason) => props.workspace.onLinkActionDismiss?.(request, reason)}
         sourceFocusFallback={(source) => {

@@ -24,6 +24,7 @@ import {
   type AnnotationReaderRecord,
 } from './annotation-reader.js';
 import { RowActionGroup, type RowAction } from './RowActionGroup.js';
+import type { PdfDocumentOrderLocation } from '../pdf/document-order-location.js';
 
 export interface AnnotationListProps {
   items: readonly ReviewItem[];
@@ -51,6 +52,8 @@ export interface AnnotationListProps {
   onEdit(item: ReviewItem, trigger: HTMLButtonElement): void;
   onDelete(item: ReviewItem): Promise<void> | void;
   attention?: AnnotationAttentionPresentation;
+  /** The outline section containing a page location, shown beside the page number. */
+  sectionLabelAt?(location: PdfDocumentOrderLocation): string | null;
 }
 
 export interface AnnotationAttentionPresentation {
@@ -106,6 +109,16 @@ export function combinedDocumentOrderedAnnotations(
 }
 
 
+function entrySectionLabel(
+  entry: AnnotationListEntry,
+  sectionLabelAt: AnnotationListProps['sectionLabelAt'],
+): string | undefined {
+  // Entries without a known position sort last and name no section.
+  if (sectionLabelAt === undefined || entry.y === Number.MAX_SAFE_INTEGER) return undefined;
+  const x = entry.x === Number.MAX_SAFE_INTEGER ? 0 : entry.x;
+  return sectionLabelAt({ pageIndex: entry.pageIndex, anchor: { x, y: entry.y } }) ?? undefined;
+}
+
 function annotationState(active: boolean, corresponding: boolean): string {
   if (active && corresponding) return 'active-corresponding';
   if (active) return 'active';
@@ -119,6 +132,7 @@ export interface AnnotationRowContentProps {
   readonly kind?: string;
   readonly pageNumber?: number;
   readonly lastPageNumber?: number;
+  readonly sectionLabel?: string;
   readonly copyLink?: CopyLinkControlProps;
   readonly readerRecord?: AnnotationReaderRecord | null;
   readonly navigationRef?: (node: HTMLButtonElement | null) => void;
@@ -147,6 +161,7 @@ export function AnnotationRowContent({
   kind: suppliedKind,
   pageNumber: suppliedPageNumber,
   lastPageNumber: suppliedLastPageNumber,
+  sectionLabel,
   copyLink,
   readerRecord = projectOwnedAnnotationReader(item),
   navigationRef,
@@ -227,6 +242,7 @@ export function AnnotationRowContent({
         kind,
         pageNumber,
         lastPageNumber,
+        ...(sectionLabel ? { sectionLabel } : {}),
         ...(text ? { excerpt: text } : {}),
       })}
       title={navigationTitle ?? `Go to ${kindLabel} annotation on ${pageDescription}`}
@@ -237,6 +253,7 @@ export function AnnotationRowContent({
         kind={kind}
         pageNumber={pageNumber}
         lastPageNumber={lastPageNumber}
+        {...(sectionLabel ? { sectionLabel } : {})}
         rowHead
         {...(statusIcon ? { statusIcon } : {})}
         {...(statusIconLabel ? { statusIconLabel } : {})}
@@ -279,6 +296,7 @@ export function AnnotationList({
   onEdit,
   onDelete,
   attention,
+  sectionLabelAt,
 }: AnnotationListProps) {
   const visibleItems = useMemo(() => {
     if (attention === undefined) return items;
@@ -371,6 +389,7 @@ export function AnnotationList({
               documentGeneration,
               discoveryGeneration: visibleExistingAnnotations.generation,
             });
+            const sectionLabel = entrySectionLabel(entry, sectionLabelAt);
             return <li
               key={`source:${key}`}
               data-existing-annotation={annotation.id}
@@ -392,6 +411,7 @@ export function AnnotationList({
                 presentation={{ content: annotation.contents }}
                 kind={annotation.subtype}
                 pageNumber={annotation.pageIndex + 1}
+                {...(sectionLabel ? { sectionLabel } : {})}
                 readerRecord={readerRecord}
                 navigationRef={(node) => {
                   const focusKey = `source:${key}`;
@@ -414,6 +434,7 @@ export function AnnotationList({
           const corresponding = correspondingId === item.id;
           const copyLink = copyLinkForItem?.(item);
           const readerRecord = projectOwnedAnnotationReader(item);
+          const sectionLabel = entrySectionLabel(entry, sectionLabelAt);
           return (
             <li
               key={item.id}
@@ -448,6 +469,7 @@ export function AnnotationList({
             >
               <AnnotationRowContent
                 item={item}
+                {...(sectionLabel ? { sectionLabel } : {})}
                 {...(copyLink ? { copyLink } : {})}
                 readerRecord={readerRecord}
                 navigationRef={(node) => {

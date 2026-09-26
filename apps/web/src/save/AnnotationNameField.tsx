@@ -11,7 +11,7 @@ export function AnnotationNameField(props: {
   return <>
     <label className="save-destination-filename">
       <span>Name on annotations</span>
-      <input ref={props.inputRef} value={props.value} disabled={props.disabled}
+      <input ref={props.inputRef} value={props.value} disabled={props.disabled} title="Name on annotations"
         aria-invalid={props.error !== undefined}
         aria-describedby={props.error === undefined ? undefined : props.errorId}
         onChange={(event) => props.onChange(event.currentTarget.value)} />

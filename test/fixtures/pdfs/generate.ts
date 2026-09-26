@@ -613,6 +613,215 @@ async function referenceNavigationPdf() {
   return document.save({ useObjectStreams: false });
 }
 
+/**
+ * LaTeX-style links with no author-provided names (no /Contents): hyperref
+ * and natbib emit bare link rectangles over the visible citation, section,
+ * and equation text. With `outline: false` the same document carries no
+ * outline, so headings are unavailable and equation links fall back to their
+ * kind label.
+ */
+async function legibleLinkDestinationsPdf(options: { readonly outline: boolean }) {
+  const document = await createFixturePdf();
+  const roman = await document.embedFont(StandardFonts.TimesRoman);
+  const bold = await document.embedFont(StandardFonts.TimesRomanBold);
+  const pages = Array.from({ length: 6 }, (_, index) => {
+    const page = document.addPage([612, 792]);
+    page.drawText(`Legible link destinations fixture — page ${index + 1}`, {
+      x: 72,
+      y: 740,
+      size: 9,
+      font: roman,
+    });
+    return page;
+  });
+  const [bodyPage, sectionPage, equationPage, bibliographyPage, appendixPage, closingPage] = pages;
+  if (!bodyPage || !sectionPage || !equationPage || !bibliographyPage || !appendixPage || !closingPage) {
+    throw new Error('legible link destinations fixture requires six pages');
+  }
+  const context = document.context;
+  const bodySize = 11;
+  const drawParagraph = (
+    page: PDFPage,
+    lines: readonly string[],
+    top: number,
+    pitch = 14,
+    size = bodySize,
+  ) => {
+    lines.forEach((line, index) => page.drawText(line, { x: 72, y: top - index * pitch, size, font: roman }));
+  };
+  const xyz = (page: PDFPage, x: number, top: number) => context.obj([page.ref, PDFName.of('XYZ'), x, top, null]);
+
+  // Body text, page 1. Each link rectangle covers only the linked words.
+  bodyPage.drawText('1 Introduction', { x: 72, y: 690, size: 13, font: bold });
+  type LinkSpan = { readonly prefix: string; readonly linked: string; readonly y: number };
+  const linkRect = ({ prefix, linked, y }: LinkSpan): [number, number, number, number] => {
+    const left = 72 + roman.widthOfTextAtSize(prefix, bodySize);
+    return [left, y - 3, left + roman.widthOfTextAtSize(linked, bodySize), y + bodySize];
+  };
+  const citationLineOne = { prefix: 'Matrix completion under confounding was studied by ', linked: 'Agarwal, Dahleh,', y: 660 };
+  const citationLineTwo = { prefix: '', linked: 'et al. (2023)', y: 646 };
+  const sectionReference = { prefix: 'The projection is constructed in Section ', linked: '2.3', y: 618 };
+  const equationReference = { prefix: 'The estimator then follows from equation (', linked: '1', y: 604 };
+  const wholePageReference = { prefix: 'Derivations are collected in the ', linked: 'supplementary appendix', y: 590 };
+  const longCitationLineOne = {
+    prefix: 'A related bound appears in ',
+    linked: 'Montgomery-Hernandez, Oyelaran-Whitfield, Castellanos-Ruiz,',
+    y: 562,
+  };
+  const longCitationLineTwo = { prefix: '', linked: 'and Van der Berghe-Nakamura (2021)', y: 548 };
+  drawParagraph(bodyPage, [
+    `${citationLineOne.prefix}${citationLineOne.linked}`,
+    `${citationLineTwo.linked} and extended to panel data in later work.`,
+  ], 660);
+  drawParagraph(bodyPage, [
+    `${sectionReference.prefix}${sectionReference.linked} from the observed entries.`,
+    `${equationReference.prefix}${equationReference.linked}) without further assumptions.`,
+    `${wholePageReference.prefix}${wholePageReference.linked} at the end of the paper.`,
+  ], 618);
+  drawParagraph(bodyPage, [
+    `${longCitationLineOne.prefix}${longCitationLineOne.linked}`,
+    `${longCitationLineTwo.linked}, which we do not repeat here.`,
+  ], 562);
+
+  // Section heading, page 2.
+  const sectionHeadingTop = 652;
+  sectionPage.drawText('2.3 The Aggregated Projection Matrix', { x: 72, y: 640, size: 13, font: bold });
+  drawParagraph(sectionPage, [
+    'We aggregate the unit-level projections into a single matrix that maps observed',
+    'entries onto the latent factor space. The aggregation keeps the rank fixed and',
+    'preserves the ordering of units used throughout the estimation procedure.',
+    'Subsequent sections rely on this construction when bounding the error terms.',
+  ], 620);
+
+  // Display equation with a right-aligned number, page 3.
+  equationPage.drawText('3 Estimation', { x: 72, y: 690, size: 13, font: bold });
+  drawParagraph(equationPage, [
+    'Combining the projection with the observation model yields the estimator',
+  ], 660);
+  const equationBaseline = 628;
+  equationPage.drawText('Y = P X + E', { x: 250, y: equationBaseline, size: bodySize, font: roman });
+  equationPage.drawText('(1)', {
+    x: 540 - roman.widthOfTextAtSize('(1)', bodySize),
+    y: equationBaseline,
+    size: bodySize,
+    font: roman,
+  });
+  drawParagraph(equationPage, [
+    'where P is the aggregated projection and E collects the idiosyncratic noise.',
+  ], 600);
+
+  // Bibliography with hanging-indent entries, page 4.
+  bibliographyPage.drawText('References', { x: 72, y: 690, size: 13, font: bold });
+  const bibliographySize = 10;
+  const bibliographyPitch = 12;
+  const entries = [
+    [
+      'Abadie, A. and Imbens, G. W. Matching on the estimated propensity score.',
+      'Econometrica, 84(2):781-807, 2016.',
+    ],
+    [
+      'Agarwal, A., Dahleh, M., Shah, D., and Shen, D. Causal matrix completion.',
+      'In Proceedings of the Thirty Sixth Conference on Learning Theory,',
+      'pages 3821-3826. PMLR, 2023.',
+    ],
+    [
+      'Montgomery-Hernandez, R., Oyelaran-Whitfield, T., Castellanos-Ruiz, M., and',
+      'Van der Berghe-Nakamura, K. Sharp bounds for low-rank panels. Journal of',
+      'Econometric Methods, 12(1):1-44, 2021.',
+    ],
+    [
+      'Zhang, L. and Ortiz, P. Factor models with missing entries. Biometrika,',
+      '108(3):591-610, 2019.',
+    ],
+  ] as const;
+  const entryTops: number[] = [];
+  let baseline = 664;
+  for (const entry of entries) {
+    // hyperref anchors a bibliography target slightly above the entry's first baseline.
+    entryTops.push(baseline + bibliographySize);
+    entry.forEach((line, index) => {
+      bibliographyPage.drawText(line, {
+        x: index === 0 ? 72 : 90,
+        y: baseline,
+        size: bibliographySize,
+        font: roman,
+      });
+      baseline -= bibliographyPitch;
+    });
+    baseline -= 2;
+  }
+
+  // Appendix and a closing page with one more citation, pages 5 and 6.
+  appendixPage.drawText('Appendix A. Supplementary derivations', { x: 72, y: 690, size: 13, font: bold });
+  drawParagraph(appendixPage, [
+    'This appendix collects the derivations omitted from the main text.',
+  ], 660);
+  const closingCitation = { prefix: 'Closing remarks; missing entries are treated as in ', linked: 'Zhang and Ortiz (2019)', y: 690 };
+  drawParagraph(closingPage, [`${closingCitation.prefix}${closingCitation.linked}.`], 690);
+
+  const agarwalDestination = xyz(bibliographyPage, 72, entryTops[1]!);
+  const longCitationDestination = xyz(bibliographyPage, 72, entryTops[2]!);
+  const closingCitationDestination = xyz(bibliographyPage, 72, entryTops[3]!);
+  const sectionDestination = xyz(sectionPage, 72, sectionHeadingTop);
+  const equationDestination = xyz(equationPage, 72, equationBaseline + bodySize + 2);
+  // A null-top XYZ destination names no spot: the whole appendix page.
+  const wholePageDestination = context.obj([appendixPage.ref, PDFName.of('XYZ'), null, null, null]);
+
+  const annotations = PDFArray.withContext(context);
+  const addLink = (span: LinkSpan, destination: PDFObject) => {
+    annotations.push(context.register(context.obj({
+      Type: 'Annot',
+      Subtype: 'Link',
+      Rect: linkRect(span),
+      Border: [0, 0, 0],
+      Dest: destination,
+    })));
+  };
+  // natbib splits one citation across a line break into two link annotations
+  // sharing one destination.
+  addLink(citationLineOne, agarwalDestination);
+  addLink(citationLineTwo, agarwalDestination);
+  addLink(sectionReference, sectionDestination);
+  addLink(equationReference, equationDestination);
+  addLink(wholePageReference, wholePageDestination);
+  addLink(longCitationLineOne, longCitationDestination);
+  addLink(longCitationLineTwo, longCitationDestination);
+  bodyPage.node.set(PDFName.of('Annots'), annotations);
+  closingPage.node.set(PDFName.of('Annots'), context.obj([context.register(context.obj({
+    Type: 'Annot',
+    Subtype: 'Link',
+    Rect: linkRect(closingCitation),
+    Border: [0, 0, 0],
+    Dest: closingCitationDestination,
+  }))]));
+
+  if (options.outline) {
+    const outlines = context.obj({ Type: 'Outlines', Count: 5 });
+    const outlinesRef = context.register(outlines);
+    const entriesSpec = [
+      ['1 Introduction', xyz(bodyPage, 72, 704)],
+      ['2.3 The Aggregated Projection Matrix', sectionDestination],
+      ['3 Estimation', xyz(equationPage, 72, 704)],
+      ['References', xyz(bibliographyPage, 72, 704)],
+      ['Appendix A. Supplementary derivations', xyz(appendixPage, 72, 704)],
+    ] as const;
+    const items = entriesSpec.map(([title, destination]) => context.obj({
+      Title: PDFHexString.fromText(title),
+      Parent: outlinesRef,
+      Dest: destination,
+    }));
+    const refs = items.map((item) => context.register(item));
+    items.forEach((item, index) => {
+      if (index > 0) item.set(PDFName.of('Prev'), refs[index - 1]!);
+      if (index < items.length - 1) item.set(PDFName.of('Next'), refs[index + 1]!);
+    });
+    outlines.set(PDFName.of('First'), refs[0]!);
+    outlines.set(PDFName.of('Last'), refs.at(-1)!);
+    document.catalog.set(PDFName.of('Outlines'), outlinesRef);
+  }
+  return document.save({ useObjectStreams: false });
+}
+
 async function annotatedReferenceNavigationPdf(sourcePdf: Uint8Array): Promise<Uint8Array> {
   const timestamp = '2026-08-23T12:00:00.000Z';
   const item: ReviewItem = {
@@ -771,6 +980,11 @@ await Promise.all([
   writeFixture(
     'reference-navigation-annotated.pdf',
     await annotatedReferenceNavigationPdf(await referenceNavigation),
+  ),
+  writeFixture('legible-link-destinations.pdf', await legibleLinkDestinationsPdf({ outline: true })),
+  writeFixture(
+    'legible-link-destinations-no-outline.pdf',
+    await legibleLinkDestinationsPdf({ outline: false }),
   ),
   writeFixture('preservation-corpus.pdf', await preservationCorpusPdf()),
   writeFixture(

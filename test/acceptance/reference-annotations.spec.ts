@@ -1188,6 +1188,10 @@ test('keeps long Reference card text and actions reachable in a compact viewport
   await expect(composer).toHaveCount(0);
 });
 
+// Passage editors float in the page margin when it fits, else above or below the
+// line; any of these (never the bottom sheet) keeps the tray's size.
+const floatingPlacement = /^(?:side|above|below)$/u;
+
 test('opens an editable native import beside References without resizing the tray', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 });
   const sessionId = await openFixture(page, referencePdf);
@@ -1261,7 +1265,13 @@ test('opens an editable native import beside References without resizing the tra
   ).first();
   const [trayBefore, readerBounds] = await Promise.all([tray.boundingBox(), inspection.boundingBox()]);
   if (!trayBefore || !readerBounds) throw new Error('Native reader geometry is unavailable.');
-  expect(readerBounds.y).toBeLessThan(trayBefore.y);
+  const markBounds = await nativeMark.boundingBox();
+  if (!markBounds) throw new Error('Native Reference mark geometry is unavailable.');
+  // The reader floats beside the mark without covering it.
+  expect(readerBounds.y >= markBounds.y + markBounds.height - 1
+    || readerBounds.y + readerBounds.height <= markBounds.y + 1
+    || readerBounds.x >= markBounds.x + markBounds.width - 1
+    || readerBounds.x + readerBounds.width <= markBounds.x + 1).toBe(true);
   await inspection.getByRole('button', { name: /Edit .* annotation on page 1/u }).focus();
   await page.keyboard.press('Escape');
   await expect(inspection).toHaveCount(0);
@@ -1485,7 +1495,7 @@ test('recovers a closed annotation-origin editor and reuses its tab after applyi
   await expect(page.locator(
     `[data-reference-pdf-viewport] [data-owned-focus-id="${item.id}"]`,
   )).toBeVisible();
-  await expect(composer).toHaveAttribute('data-composer-placement', 'side');
+  await expect(composer).toHaveAttribute('data-composer-placement', floatingPlacement);
   await expect(composer.getByRole('button', { name: 'Resume editing' })).toHaveCount(0);
   await expect(editor).toBeVisible();
   await expect(editor).toHaveValue(revisedComment);
@@ -1534,7 +1544,7 @@ test('authors on a Reference page and preserves one focused draft through switch
   const [trayAfter, composerBounds] = await Promise.all([tray.boundingBox(), composer.boundingBox()]);
   expect(trayAfter).toEqual(trayBefore);
   if (!trayAfter || !composerBounds) throw new Error('Reference composer geometry is unavailable.');
-  await expect(composer).toHaveAttribute('data-composer-placement', 'side');
+  await expect(composer).toHaveAttribute('data-composer-placement', floatingPlacement);
   expect(composerBounds.width).toBeLessThan(trayAfter.width);
   expect(composerBounds.x).toBeGreaterThanOrEqual(trayAfter.x);
   expect(composerBounds.x + composerBounds.width)
@@ -1547,7 +1557,7 @@ test('authors on a Reference page and preserves one focused draft through switch
   expect(await editor.evaluate((element, original) => element === original, editorNode)).toBe(true);
   await clickWithHitEvidence(originTab, 'Origin Reference tab');
   await expectReferenceReady(page, originTab);
-  await expect(composer).toHaveAttribute('data-composer-placement', 'side');
+  await expect(composer).toHaveAttribute('data-composer-placement', floatingPlacement);
   await editor.focus();
   await expect(editor).toBeFocused();
 
@@ -1556,14 +1566,14 @@ test('authors on a Reference page and preserves one focused draft through switch
     'Hide References',
   );
   await expect(editor).toHaveValue(draft);
-  await expect(composer).toHaveAttribute('data-composer-placement', 'side');
+  await expect(composer).toHaveAttribute('data-composer-placement', floatingPlacement);
   expect(await editor.evaluate((element, original) => element === original, editorNode)).toBe(true);
   await clickWithHitEvidence(
     page.getByRole('button', { name: 'Show References' }),
     'Show References',
   );
   await expectReferenceReady(page, originTab);
-  await expect(composer).toHaveAttribute('data-composer-placement', 'side');
+  await expect(composer).toHaveAttribute('data-composer-placement', floatingPlacement);
   await editor.focus();
   await expect(editor).toBeFocused();
   await editor.evaluate((element) => (element as HTMLTextAreaElement).setSelectionRange(10, 25));
@@ -1581,7 +1591,7 @@ test('authors on a Reference page and preserves one focused draft through switch
   await expect(composer.getByRole('button', { name: 'Cancel', exact: true })).toBeVisible();
 
   await page.setViewportSize({ width: 1280, height: 900 });
-  await expect(composer).toHaveAttribute('data-composer-placement', 'side');
+  await expect(composer).toHaveAttribute('data-composer-placement', floatingPlacement);
   await expect(editor).toHaveValue(draft);
   expect(await editor.evaluate((element, original) => element === original, editorNode)).toBe(true);
 
@@ -1662,7 +1672,7 @@ test('authors on a Reference page and preserves one focused draft through switch
     end: (element as HTMLTextAreaElement).selectionEnd,
   }))).toEqual({ start: 10, end: 25 });
   await page.setViewportSize({ width: 1280, height: 900 });
-  await expect(composer).toHaveAttribute('data-composer-placement', 'side');
+  await expect(composer).toHaveAttribute('data-composer-placement', floatingPlacement);
 
   const external = host.broker.state(sessionId)!;
   await host.broker.acceptMutation(sessionId, addPageNote(

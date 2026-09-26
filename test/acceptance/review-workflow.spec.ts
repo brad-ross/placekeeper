@@ -327,23 +327,25 @@ test.describe('canonical review workflow', () => {
       'aria-label',
       'Reattach highlight, previously page 1',
     );
-    await expect(reattachDetail.getByRole('heading', { name: 'Reattach highlight' })).toBeVisible();
+    // Reattachment uses the full annotation reader (#117): the prior page in its
+    // metadata bar, then the comment and highlighted text, then the instruction.
+    await expect(reattachDetail.getByRole('heading', { name: 'Comment' })).toBeVisible();
     await expect(reattachDetail.getByText('Check the identifying variation.')).toBeVisible();
     await expect(reattachDetail.getByText('the previous identification argument')).toBeVisible();
-    await expect(reattachDetail.getByText('Select the intended text in the PDF, then confirm.')).toBeVisible();
-    await expect(reattachDetail.locator('.full-annotation-reader__metadata')).toHaveCount(0);
+    await expect(reattachDetail.getByText('Select the text to reattach to in the PDF.')).toBeVisible();
     await expect(reattachDetail.locator('[data-reattachment-preview]')).toHaveCount(0);
     await expect(reattachDetail.locator('.reconciliation-workspace__editor')).toHaveCount(0);
-    const reattachCancel = reattachDetail.getByRole('button', { name: 'Cancel' });
-    await expect(reattachCancel).toBeFocused();
+    // The full reader focuses its Back control first.
+    const reattachBack = reattachDetail.getByRole('button', { name: 'Back', exact: true });
+    await expect(reattachBack).toBeFocused();
     await page.getByRole('button', { name: 'Clear anchors' }).evaluate((button) => {
       (button as HTMLButtonElement).click();
     });
-    await expect(reattachCancel).toBeFocused();
+    await expect(reattachBack).toBeFocused();
     await page.getByRole('button', { name: 'Use selection' }).evaluate((button) => {
       (button as HTMLButtonElement).click();
     });
-    await expect(reattachCancel).toBeFocused();
+    await expect(reattachBack).toBeFocused();
     await page.keyboard.press('Escape');
     await expect(reattachTrigger).toBeFocused();
 
@@ -367,7 +369,9 @@ test.describe('canonical review workflow', () => {
     const deleteAction = page.getByRole('button', {
       name: 'Discard Delete annotation on page 2',
     });
-    await deleteAction.click();
+    // Row actions show on hover or focus; activate this one from the keyboard.
+    await deleteAction.focus();
+    await deleteAction.press('Enter');
     const discardDetail = page.locator('[data-reconciliation-detail="discard"]');
     await expect(discardDetail).toHaveAttribute(
       'aria-label',
@@ -421,13 +425,11 @@ test.describe('canonical review workflow', () => {
     });
     await originalEditor.getByRole('button', { name: 'Discard', exact: true }).click();
     await expect(originalEditor.getByRole('button', { name: 'Discard', exact: true })).toBeDisabled();
-    await expect(secondNavigation).toBeDisabled();
-    await expect(secondDiscard).toBeDisabled();
-
-    await secondNavigation.evaluate((button) => {
-      button.removeAttribute('disabled');
-      (button as HTMLButtonElement).click();
-    });
+    // The detail view holds the whole tray (#117), so no other row can take a
+    // command while this one is pending.
+    await expect(secondNavigation).toHaveCount(0);
+    await expect(secondDiscard).toHaveCount(0);
+    await expect(originalEditor.getByRole('button', { name: 'Back', exact: true })).toBeDisabled();
     await expect(originalEditor).toBeVisible();
     await expect(page.getByRole('region', {
       name: 'Reattach delete, previously page 2',
@@ -511,17 +513,37 @@ test.describe('canonical review workflow', () => {
       name: 'Reattach previous Page Note annotation on page 3',
     }).click();
     const detail = page.locator('[data-reconciliation-detail="reattach"]');
-    await expect(detail.getByRole('heading', { name: 'Reattach page note' })).toBeVisible();
-    await expect(detail.getByText(/Previously page 3:/u)).toBeVisible();
-    await expect(detail.getByText('Original PDF text:')).toHaveCount(0);
+    const prior = detail.locator('[data-reattachment-prior-context]');
+    await expect(detail).toHaveAttribute('aria-label', 'Reattach page note, previously page 3');
+    await expect(detail.getByText('Check the full-page comparison.')).toBeVisible();
+    // No nearby text was recorded, so there is no prior-location context.
+    await expect(prior).toHaveCount(0);
     await expect(detail.getByText('Page 3', { exact: true })).toHaveCount(0);
     await detail.getByRole('button', { name: 'Cancel' }).click();
 
     await page.getByRole('button', {
       name: 'Reattach previous Page Note annotation on page 4',
     }).click();
-    await expect(detail.getByText(/Previously page 4:/u)).toBeVisible();
-    await expect(detail.getByText('The appendix extends the comparison.')).toBeVisible();
+    await expect(detail).toHaveAttribute('aria-label', 'Reattach page note, previously page 4');
+    await expect(detail.getByText('Verify the appendix transition.')).toBeVisible();
+    await expect(prior.getByRole('heading', { name: 'Previously near' })).toBeVisible();
+    await expect(prior.getByText('The appendix extends the comparison.')).toBeVisible();
+  });
+
+  test('shows the text around an insertion\'s prior location while reattaching it', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.goto('/test/acceptance/review-harness/index.html?reconciliation=insertions');
+    await openAnnotationsWorkspace(page);
+
+    const trigger = page.getByRole('button', { name: /^Reattach previous Insert/u });
+    await trigger.focus();
+    await page.keyboard.press('Enter');
+    const detail = page.locator('[data-reconciliation-detail="reattach"]');
+    await expect(detail).toHaveAttribute('aria-label', 'Reattach insertion, previously page 2');
+    await expect(detail.getByText('consistent', { exact: true })).toBeVisible();
+    const prior = detail.locator('[data-reattachment-prior-context]');
+    await expect(prior.getByRole('heading', { name: 'Previously between' })).toBeVisible();
+    await expect(prior.getByText('the estimator is▏ under weak dependence')).toBeVisible();
   });
 
   test('keeps stale confirmation, pending export, and retry feedback inside document actions', async ({ page }) => {
@@ -1236,7 +1258,8 @@ test.describe('canonical review workflow', () => {
       truncated: element.scrollWidth > element.clientWidth,
     }));
     expect(longTitleGeometry.truncated).toBe(true);
-    expect(longTitleGeometry.width).toBeLessThanOrEqual(256.5);
+    // A 320px identity cap: 8px padding each side, the 16px icon, and a 7px gap.
+    expect(longTitleGeometry.width).toBeLessThanOrEqual(281.5);
     const shortTitleGeometry = await longTitle.evaluate((element) => {
       element.textContent = 'A.pdf';
       return {
@@ -1284,11 +1307,10 @@ test.describe('canonical review workflow', () => {
       const zoomNumber = bounds('.review-chrome__zoom-input');
       const zoomUnit = bounds('.review-chrome__zoom-suffix');
       const zoomButton = bounds('.review-chrome__zoom-disclosure');
-      const zoomIcon = bounds('.review-chrome__zoom-disclosure .review-icon');
       return {
         file: file.toJSON(), context: contextStatus.toJSON(),
         pageGroup: pageGroup.toJSON(), pageNumber: pageNumber.toJSON(), pageButton: pageButton.toJSON(), pageText: pageText.toJSON(),
-        zoom: zoom.toJSON(), zoomNumber: zoomNumber.toJSON(), zoomUnit: zoomUnit.toJSON(), zoomButton: zoomButton.toJSON(), zoomIcon: zoomIcon.toJSON(),
+        zoom: zoom.toJSON(), zoomNumber: zoomNumber.toJSON(), zoomUnit: zoomUnit.toJSON(), zoomButton: zoomButton.toJSON(),
         filePadding: [styles(':scope > .review-chrome__identity > .review-chrome__save-identity').paddingTop, styles(':scope > .review-chrome__identity > .review-chrome__save-identity').paddingRight],
         fileGap: styles(':scope > .review-chrome__identity > .review-chrome__save-identity').gap,
         fileRadius: styles(':scope > .review-chrome__identity > .review-chrome__save-identity').borderRadius,
@@ -1308,19 +1330,23 @@ test.describe('canonical review workflow', () => {
       const boxes = controls.map((control) => control.getBoundingClientRect()).filter((box) => box.width > 0);
       return boxes.slice(1).map((box, index) => box.left - boxes[index]!.right);
     });
-    for (const gap of controlGaps) expect(gap).toBeCloseTo(8, 1);
+    // Groups sit 8px apart; paired buttons (Undo/Redo, Back/Forward) touch.
+    for (const gap of controlGaps) expect([0, 8].some((expected) => Math.abs(gap - expected) < .05)).toBe(true);
     expect(Math.abs(geometry.file.x + geometry.file.width + 8 - geometry.context.x)).toBeLessThanOrEqual(.5);
     expect(Math.abs(geometry.file.y + geometry.file.height / 2 - geometry.context.y - geometry.context.height / 2)).toBeLessThanOrEqual(.5);
-    expect(geometry.pageNumber.width).toBe(26);
-    expect(geometry.pageAlign).toBe('center');
+    // The page input fits its digits (about 0.62em each) after a 6px lead.
+    const pageDigits = (await pagePosition.locator('.review-chrome__page-input').inputValue()).length;
+    expect(geometry.pageNumber.width).toBeCloseTo(6 + pageDigits * 0.62 * 13, 0);
+    expect(geometry.pageAlign).toBe('right');
     expect(Math.abs(geometry.pageNumber.x + geometry.pageNumber.width - geometry.pageButton.x)).toBeLessThanOrEqual(.5);
-    expect(Math.abs(geometry.pageButton.width - geometry.pageText.width - 6)).toBeLessThanOrEqual(.5);
-    expect(Math.abs(geometry.zoom.x + 5 - geometry.zoomNumber.x)).toBeLessThanOrEqual(.5);
+    // A space-wide lead before "/" and the 6px trailing padding.
+    expect(Math.abs(geometry.pageButton.width - geometry.pageText.width - 6 - 0.3 * 13)).toBeLessThanOrEqual(.5);
+    expect(Math.abs(geometry.zoom.x + 6 - geometry.zoomNumber.x)).toBeLessThanOrEqual(.5);
     expect(Math.abs(geometry.zoomNumber.x + geometry.zoomNumber.width - geometry.zoomUnit.x)).toBeLessThanOrEqual(.5);
-    expect(Math.abs(geometry.zoomUnit.x + geometry.zoomUnit.width - geometry.zoomButton.x)).toBeLessThanOrEqual(.5);
-    expect(geometry.zoomButton.width).toBe(20);
+    // The "%" suffix is the menu button, like the page group's "/ 33", with 6px trailing padding.
+    expect(Math.abs(geometry.zoomUnit.x - geometry.zoomButton.x)).toBeLessThanOrEqual(.5);
+    expect(Math.abs(geometry.zoomButton.width - geometry.zoomUnit.width - 6)).toBeLessThanOrEqual(.5);
     expect(geometry.zoomButton.height).toBe(32);
-    expect(Math.abs(geometry.zoomButton.x + geometry.zoomButton.width / 2 - geometry.zoomIcon.x - geometry.zoomIcon.width / 2)).toBeLessThanOrEqual(.5);
 
     await pagePosition.hover();
     await expect(pagePosition).toHaveCSS('background-color', 'rgb(231, 231, 231)');
@@ -1355,7 +1381,8 @@ test.describe('canonical review workflow', () => {
     const expectToolbarRevealed = async () => {
       await expect(rightControls).toHaveCSS('opacity', '1');
       for (const control of await bar.locator('[data-review-copy-link], [data-main-history]').all()) {
-        await expect(control).toHaveCSS('opacity', '1');
+        // Unavailable history keeps its slot, greyed out.
+        await expect(control).toHaveCSS('opacity', await control.isDisabled() ? '0.35' : '1');
         await expect(control).toHaveCSS('pointer-events', 'auto');
       }
       for (const control of await bar.locator('[data-main-history]').all()) {
@@ -1373,8 +1400,9 @@ test.describe('canonical review workflow', () => {
     }
     await bar.hover({ position: { x: 2, y: 2 } });
     await expect(rightControls).toHaveCSS('opacity', '1');
+    // History keeps its slots: an unavailable direction is revealed greyed out.
     for (const control of await bar.locator('[data-review-copy-link], [data-main-history]').all()) {
-      await expect(control).toHaveCSS('opacity', '1');
+      await expect(control).toHaveCSS('opacity', await control.isDisabled() ? '0.35' : '1');
     }
     await page.getByRole('button', { name: 'Open zoom controls' }).hover();
     const zoomMenu = page.getByRole('menu', { name: 'PDF zoom', exact: true });
@@ -1518,8 +1546,10 @@ test.describe('canonical review workflow', () => {
           requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
         }));
         const chromeButtons = chrome.locator(':scope > .review-chrome__identity button, :scope > .review-chrome__left-controls button, :scope > .review-chrome__viewer-controls button');
+        // Narrow bars drop unavailable history actions (display: none).
         const chromeButtonHeights = await chromeButtons.evaluateAll((buttons) => (
-          buttons.map((button) => button.getBoundingClientRect().height)
+          buttons.filter((button) => button.getClientRects().length > 0)
+            .map((button) => button.getBoundingClientRect().height)
         ));
         expect(chromeButtonHeights.length).toBeGreaterThan(0);
         expect(chromeButtonHeights.every((height) => height >= 44)).toBe(true);
@@ -2479,8 +2509,8 @@ test.describe('canonical review workflow', () => {
     const canvas = page.getByRole('application', { name: 'PDF review canvas' });
     await canvas.focus();
     await expect(canvas).toBeFocused();
-    await expect(page.getByRole('button', { name: 'Undo' })).toHaveCount(0);
-    await expect(page.getByRole('button', { name: 'Redo' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Undo' })).toBeDisabled();
+    await expect(page.getByRole('button', { name: 'Redo' })).toBeDisabled();
     await page.keyboard.type('x');
     await page.keyboard.press('Delete');
     await page.keyboard.press('ControlOrMeta+z');

@@ -63,7 +63,8 @@ async function fixture(page: Page, pageIndex = 0) {
   const pageInput = page.getByRole('textbox', { name: /^Current page/ });
   await expect(pageInput).toHaveValue('1');
   if (pageIndex !== 0) { await pageInput.fill(String(pageIndex + 1)); await pageInput.press('Enter'); }
-  const pdfPage = page.locator(`.pdf-workspace:not(.pdf-workspace--reference) [data-page-index="${pageIndex}"]`);
+  // Marks and their focus proxies also carry data-page-index; pick the page itself.
+  const pdfPage = page.locator(`.pdf-workspace:not(.pdf-workspace--reference) .pdf-workspace__page[data-page-index="${pageIndex}"]`);
   await expect(pdfPage.locator(':scope > img')).toBeVisible({ timeout: 15000 });
   await expect(pdfPage.locator('[data-owned-mark]')).toHaveCount(6);
   return { pdfPage, current, sessionId: launched.sessionId };
@@ -98,7 +99,8 @@ for (const [pageIndex, rotation] of [0, 90, 180, 270].entries()) {
     expect(await paint(comment)).toMatchObject({ underline: '""', underlineColor: 'rgb(177, 132, 13)' });
     expect(await paint(deletion)).toMatchObject({ strike: '""', strikeColor: 'rgb(195, 79, 84)', underline: 'none', background: 'rgba(0, 0, 0, 0)' });
     expect(await paint(replacement)).toMatchObject({ strike: '""', strikeColor: 'rgb(195, 79, 84)', underline: '""', underlineColor: 'rgb(195, 79, 84)', background: 'rgba(218, 78, 78, 0.2)' });
-    expect(await paint(insertion)).toMatchObject({ animation: 'none', caretColor: 'rgb(94, 117, 136)', background: 'rgba(0, 0, 0, 0)' });
+    // Insertions share the link-destination blue: a filled marker and blue caret.
+    expect(await paint(insertion)).toMatchObject({ animation: 'none', caretColor: 'rgb(47, 111, 196)', background: 'rgba(56, 132, 230, 0.24)' });
     await expect(pdfPage.locator('[data-owned-mark="pageNote"] .lucide-sticky-note')).toBeVisible();
     for (const mark of await marks.all()) {
       expect(await mark.evaluate((element) => (element as HTMLElement).style.transform)).toContain(`rotate(${rotation}deg)`);
@@ -251,7 +253,8 @@ test('clicked PDF popup persists and discloses actions over its page number only
   await expect(peek).toBeVisible();
   await expect(peek).toHaveAttribute('data-peek-selected', 'false');
   await expect.poll(() => page.evaluate(({ x, y }) => getComputedStyle(document.elementFromPoint(x, y)!).cursor, { x: box.x + box.width / 2, y: box.y + box.height / 2 })).toBe('pointer');
-  await expect(peek.locator('.row-action-group')).toHaveCount(0);
+  // Actions stay mounted but hidden until popup intent.
+  await expect(peek.locator('.row-action-group__direct')).toHaveCSS('opacity', '0');
   await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
   await expect(peek).toHaveAttribute('data-peek-selected', 'true');
   await expect(peek.getByRole('button', { name: /close/i })).toHaveCount(0);

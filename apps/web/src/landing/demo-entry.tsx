@@ -34,7 +34,7 @@ function DemoApp({ runtime, initial, mode }: { runtime: HostRuntime; initial: Ho
     return () => observer.disconnect();
   }, []);
   return <MainDocumentPreviewLimit value={DEMO_PAGE_RANGE}><DocumentActionsEnabled value={false}><WorkspaceInitialReferenceDock value="right"><WorkspaceModeAvailability value={selectedMode === 'read' ? ['outline'] : selectedMode === 'reference' ? ['references'] : ['annotations']}>
-    <WorkspacePresentation value={ready ? { activation, mode: selectedMode === 'read' ? 'outline' : selectedMode === 'reference' ? 'references' : 'annotations', open: selectedMode !== 'read', referenceDock: 'bottom', sampleReference: { page: 31, label: 'Appendix A', pdfY: 175.702 }, bottomHeight: 260, initialLocation: { pageIndex: 13, top: 330 } } : null}>
+    <WorkspacePresentation value={ready ? { activation, mode: selectedMode === 'read' ? 'outline' : selectedMode === 'reference' ? 'references' : 'annotations', open: selectedMode !== 'read', referenceDock: 'bottom', sampleReference: { page: 31, label: 'Appendix A', pdfY: 175.702 }, bottomHeight: 260, initialLocation: { pageIndex: 13, top: 300 } } : null}>
     <RuntimeProductionReviewApp runtime={runtime} initial={initial}
       onDocumentReady={() => { document.body.dataset.demoReady = 'true'; setReady(true); }}
     />

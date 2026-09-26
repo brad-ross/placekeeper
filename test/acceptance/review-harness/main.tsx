@@ -209,6 +209,41 @@ function createReconciliationPreviewState(variant = 'default'): ReviewState {
       }],
     };
   }
+  if (variant === 'insertions') {
+    const caretAnchor = {
+      kind: 'caret' as const,
+      pageIndex: 1,
+      leftContext: 'the estimator is',
+      rightContext: ' under weak dependence',
+      rect: { x: 180, y: 300, width: 2, height: 14 },
+    };
+    return {
+      ...state,
+      items: [{
+        id: '00000000-0000-4000-8000-000000000209',
+        kind: 'insert',
+        pageIndex: 1,
+        createdAt: '2026-08-30T00:00:00.000Z',
+        updatedAt: '2026-08-30T00:00:00.000Z',
+        payload: {
+          proposedText: 'consistent',
+          leftContext: caretAnchor.leftContext,
+          rightContext: caretAnchor.rightContext,
+          reliable: true,
+          position: caretAnchor.rect,
+        },
+        reconciliation: {
+          schemaVersion: 1,
+          ownerViewId: 'harness-view',
+          baseGeneration: 1,
+          revision: 1,
+          anchor: caretAnchor,
+          disposition: { kind: 'missing', reason: 'The previous passage is not present in this PDF.' },
+          previousAnchors: [],
+        },
+      }],
+    };
+  }
   if (variant === 'page-notes') {
     const pageAnchor = {
       kind: 'page' as const,
@@ -520,6 +555,7 @@ function createHarnessViewerNavigation(
     targetVisibility: () => 'unavailable',
     locationVisibility: () => 'unavailable',
     pointVisibility: () => 'unavailable',
+    rectVisibility: () => 'unavailable',
     captureDocumentOrderPages: () => [],
     applyTarget: async () => false,
     cancelPendingNavigation: async () => undefined,

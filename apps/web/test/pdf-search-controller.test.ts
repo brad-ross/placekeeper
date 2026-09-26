@@ -11,7 +11,6 @@ const PAGE_GEOMETRY: PdfSearchPageGeometry = {
   width: 600,
   height: 800,
   cropLeft: 0,
-  cropTop: 0,
   cropBottom: 0,
 };
 
@@ -107,6 +106,21 @@ describe('PDF search controller', () => {
     expect(state.groups[0]?.results[0]?.matchedForm).toBe('stable');
   });
 
+  it('rejoins words split by line-break hyphen markers and soft hyphens in excerpts', async () => {
+    const controller = createPdfSearchController({
+      documentGeneration: 1,
+      reader: reader(['perturbation the\ufffeory and gener\u00adalization\u0001 hold']),
+    });
+
+    const result = (await controller.search('hold')).groups[0]?.results[0];
+
+    expect(result?.excerpt).toBe('perturbation theory and generalization hold');
+    expect(result?.excerpt.slice(
+      result.excerptMatch.start,
+      result.excerptMatch.start + result.excerptMatch.length,
+    )).toBe('hold');
+  });
+
   it('maps collapsed source whitespace to the displayed match range', async () => {
     const controller = createPdfSearchController({
       documentGeneration: 1,
@@ -122,7 +136,7 @@ describe('PDF search controller', () => {
     )).toBe('stable model');
   });
 
-  it('converts engine glyph geometry for overlays and PDF navigation', async () => {
+  it('keeps overlay rects crop-relative and converts navigation to PDF space', async () => {
     const controller = createPdfSearchController({
       documentGeneration: 1,
       reader: {
@@ -136,7 +150,6 @@ describe('PDF search controller', () => {
               width: 540,
               height: 720,
               cropLeft: 36,
-              cropTop: 756,
               cropBottom: 36,
             },
             textRects: [{
@@ -151,7 +164,7 @@ describe('PDF search controller', () => {
     const result = (await controller.search('stable')).groups[0]?.results[0];
 
     expect(result?.rects).toEqual([{
-      origin: { x: 36, y: 766 },
+      origin: { x: 0, y: 10 },
       size: { width: 30, height: 8 },
     }]);
     expect(result?.navigationPoint).toEqual({ x: 36, y: 746 });

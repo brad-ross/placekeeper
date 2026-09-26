@@ -144,6 +144,9 @@ export const MACOS_TITLEBAR_INTERACTIVE_SELECTOR = [
   "[role='button']",
   "[role='link']",
   "[tabindex]:not([tabindex='-1'])",
+  // The gaps inside a control group (between Undo and Redo, say) are part of
+  // the group, not window background, so they must not drag the window.
+  "[data-review-chrome-group]",
 ].join(",");
 
 export const MACOS_TITLEBAR_POPUP_SELECTOR = ".document-actions__menu";

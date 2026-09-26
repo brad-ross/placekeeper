@@ -39,7 +39,7 @@ function useAnnotationExcerptOverflow(
     const measure = () => {
       animationFrame = 0;
       if (disposed) return;
-      const nextOverflowing = [...excerpt.querySelectorAll<HTMLElement>('.annotation-item__excerpt-main, .annotation-item__quote')]
+      const nextOverflowing = [...excerpt.querySelectorAll<HTMLElement>('.annotation-item__excerpt-main, .annotation-item__quote, .annotation-item__source')]
         .some(annotationExcerptOverflows);
       setOverflowing(nextOverflowing);
       onOverflowChangeRef.current?.(nextOverflowing);
@@ -53,7 +53,7 @@ function useAnnotationExcerptOverflow(
       ? null
       : new ResizeObserver(scheduleMeasure);
     resizeObserver?.observe(excerpt);
-    for (const measuredExcerpt of excerpt.querySelectorAll<HTMLElement>('.annotation-item__excerpt-main, .annotation-item__quote')) {
+    for (const measuredExcerpt of excerpt.querySelectorAll<HTMLElement>('.annotation-item__excerpt-main, .annotation-item__quote, .annotation-item__source')) {
       resizeObserver?.observe(measuredExcerpt);
     }
     if (excerpt.parentElement !== null) resizeObserver?.observe(excerpt.parentElement);
@@ -107,18 +107,21 @@ export function AnnotationExcerpt({
       : (nextOverflowing) => onOverflowChange(readerRecord, nextOverflowing),
   );
 
+  // The quoted passage always comes first, set off like a quotation and
+  // clamped on its own, so the note or replacement below it stays visible.
   const contents = <>
-    <span className="annotation-item__excerpt-main">
-      {sourceText ? (
-        <span className="annotation-item__source" data-source-treatment={sourceTreatment}>
-          {sourceText}
-        </span>
-      ) : null}
-      {sourceText && content ? <span className="annotation-item__content-separator" aria-hidden="true" /> : null}
-      {content ? <span className="annotation-item__excerpt-text">{content}</span> : null}
-    </span>
+    {sourceText ? (
+      <span className="annotation-item__source" data-source-treatment={sourceTreatment} data-quote-only={content ? 'false' : 'true'}>
+        {sourceText}
+      </span>
+    ) : null}
     {quoteText ? (
       <span className="annotation-item__quote" data-quote-only={content ? 'false' : 'true'}>{quoteText}</span>
+    ) : null}
+    {content ? (
+      <span className="annotation-item__excerpt-main">
+        <span className="annotation-item__excerpt-text">{content}</span>
+      </span>
     ) : null}
   </>;
 

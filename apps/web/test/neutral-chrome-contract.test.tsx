@@ -2,8 +2,11 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import { VIEWER_ZOOM_MAX_PERCENT } from '../src/pdf/viewer-controls.js';
 
+import { documentIdentityLabel } from '../src/review/DocumentActionsMenu.js';
 import {
+  pageInputWidth,
   ReviewChrome,
+  zoomInputWidth,
   validPageNumber,
   validZoomPercent,
 } from '../src/review/ReviewChrome.js';
@@ -56,14 +59,40 @@ describe('neutral toolbar contract', () => {
     expect(html).toContain('class="review-chrome__zoom-suffix">%</span>');
   });
 
-  it('omits each unavailable history action without reserving an empty edit group', () => {
+  it('shows the PDF title in the identity with the filename alone as its tooltip', () => {
+    const html = chrome({
+      displayTitle: 'Estimating Counterfactual Matrix Means',
+      saveOptionsAvailable: true,
+    });
+    expect(html).toContain('<span class="review-chrome__filename">Estimating Counterfactual Matrix Means</span>');
+    expect(html).not.toContain('Save options');
+    expect(html).toContain('aria-label="Estimating Counterfactual Matrix Means, paper.pdf, Saved. Open automatic save options"');
+    expect(documentIdentityLabel('paper.pdf', 'paper.pdf')).toBe('paper.pdf');
+    // Without a PDF title the filename is shown, as before.
+    expect(chrome()).toContain('<span class="review-chrome__filename">paper.pdf</span>');
+  });
+
+  it('sizes the page input to its digits so the page group spaces evenly', () => {
+    expect(pageInputWidth('3')).toBe('calc(0.62em + 6px)');
+    expect(pageInputWidth('123')).toBe(`calc(${3 * 0.62}em + 6px)`);
+    expect(pageInputWidth('')).toBe('calc(0.62em + 6px)');
+    expect(chrome()).toContain('style="width:calc(0.62em + 6px)"');
+  });
+
+  it('sizes the zoom input to its digits too', () => {
+    expect(zoomInputWidth('100')).toBe(`${3 * 0.62}em`);
+    expect(zoomInputWidth('85')).toBe(`${2 * 0.62}em`);
+    expect(chrome()).toContain(`style="width:${3 * 0.62}em"`);
+  });
+
+  it('keeps every history action in place and greys out the unavailable ones', () => {
     const html = chrome();
     const live = html.slice(0, html.indexOf('data-review-chrome-sizing-rack'));
-    expect(live).not.toContain('aria-label="Undo"');
-    expect(live).not.toContain('aria-label="Redo"');
-    expect(live).not.toContain('data-main-history="back"');
-    expect(live).toContain('data-main-history="forward"');
-    expect(live).not.toContain('aria-label="Edit history"');
+    expect(live).toContain('aria-label="Edit history"');
+    expect(live).toMatch(/<button[^>]*disabled=""[^>]*aria-label="Undo"/u);
+    expect(live).toMatch(/<button[^>]*disabled=""[^>]*aria-label="Redo"/u);
+    expect(live).toMatch(/<button[^>]*data-main-history="back"[^>]*disabled=""/u);
+    expect(live).toMatch(/<button[^>]*data-main-history="forward"(?![^>]*disabled)[^>]*>/u);
   });
 });
 
