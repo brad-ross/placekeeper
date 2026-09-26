@@ -142,11 +142,13 @@
   overflow: hidden;
 }
 
+/* On hover the resize edge shows as a thin line that fades out toward both
+   ends of the tray, instead of tracing the tray's rounded corners. */
 .reference-resize-handle[data-reference-resize-handle="right"]::after {
   inset: 0 auto 0 0;
-  width: calc(2 * var(--pk-radius-tray));
-  border-radius: var(--pk-radius-tray) 0 0 var(--pk-radius-tray);
-  background: linear-gradient(to right, #aaa 0 2px, transparent 2px);
+  width: 2px;
+  border-radius: 1px;
+  background: linear-gradient(to bottom, transparent, #aaa 25%, #aaa 75%, transparent);
 }
 
 .reference-resize-handle[data-reference-resize-handle="bottom"] {
@@ -158,11 +160,11 @@
 
 .reference-resize-handle[data-reference-resize-handle="bottom"]::after {
   inset: 0 0 auto;
-  height: calc(2 * var(--pk-radius-tray));
+  height: 2px;
   box-sizing: border-box;
   border: 0;
-  border-radius: var(--pk-radius-tray) var(--pk-radius-tray) 0 0;
-  background: linear-gradient(#aaa 0 2px, transparent 2px);
+  border-radius: 1px;
+  background: linear-gradient(to right, transparent, #aaa 25%, #aaa 75%, transparent);
 }
 
 .reference-resize-handle:hover::after,
