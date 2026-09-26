@@ -75,7 +75,9 @@
   --review-chrome-height: 50px;
   grid-template-columns: minmax(0, max-content) max-content minmax(max-content, 1fr);
   gap: var(--pk-toolbar-gap);
-  padding-inline: 12px;
+  /* The end controls sit as far from the sides as from the top: the 32px
+     controls are centred vertically, so match that inset horizontally. */
+  padding-inline: calc((var(--review-chrome-height) - 32px) / 2);
   border: 0;
   color: var(--pk-ink);
   background: var(--pk-canvas);
