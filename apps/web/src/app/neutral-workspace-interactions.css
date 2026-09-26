@@ -40,6 +40,22 @@
     .pdf-search__result-page {
     opacity: 0;
   }
+
+  /* Revealed actions cover the page number and more; the section title
+     truncates before them instead of running underneath. */
+  :is(li[data-annotation-origin], li[data-search-result], .annotation-peek):has(.row-action-group[data-row-action-count="1"]) { --row-actions-width: 26px; }
+  :is(li[data-annotation-origin], li[data-search-result], .annotation-peek):has(.row-action-group[data-row-action-count="2"]) { --row-actions-width: 52px; }
+  :is(li[data-annotation-origin], li[data-search-result], .annotation-peek):has(.row-action-group[data-row-action-count="3"]) { --row-actions-width: 78px; }
+  :is(li[data-annotation-origin], li[data-search-result], .annotation-peek):has(.row-action-group[data-row-action-count="4"]) { --row-actions-width: 104px; }
+  :is(li[data-annotation-origin], li[data-search-result], .annotation-peek):has(.row-action-group[data-row-action-count="5"]) { --row-actions-width: 130px; }
+
+  :is(li[data-annotation-origin], li[data-search-result]):is(:hover, [data-corresponding="true"], :has(:focus-visible))
+    :is(.annotation-item__section, .pdf-search__result-section),
+  li[data-search-result][data-active="true"]:has(.annotation-item__navigation:focus) .pdf-search__result-section,
+  .annotation-peek:is(:hover, :has(:focus-visible), [data-source-return="true"]) .annotation-item__section {
+    /* The hidden page number already holds about 16px of that space. */
+    margin-right: max(0px, calc(var(--row-actions-width, 16px) - 16px));
+  }
 }
 
 /* All workspace entries use the outline's intent and selection behavior.

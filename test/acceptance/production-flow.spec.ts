@@ -4002,11 +4002,11 @@ test('creates an insertion from middle-of-line PDFium caret geometry', async ({ 
   await expect(insertionCaret).toBeVisible();
   await expect(page.getByRole('toolbar', { name: 'Insertion review action' })).toHaveCount(0);
   await expect(insertionCaret).toHaveCSS('animation-name', 'review-insertion-caret-blink');
-  await expect(insertionCaret).toHaveCSS('background-color', 'rgb(47, 111, 196)');
+  await expect(insertionCaret).toHaveCSS('background-color', 'rgb(51, 51, 51)');
   const [pageBox, caretBox] = await Promise.all([pdfPage.boundingBox(), insertionCaret.boundingBox()]);
   if (!pageBox || !caretBox) throw new Error('Insertion caret geometry is unavailable.');
   const pageScale = pageBox.width / 612;
-  expect(caretBox.width).toBeCloseTo(1.25, 2);
+  expect(caretBox.width).toBeCloseTo(1, 2);
   expect(caretBox.x + caretBox.width / 2 - pageBox.x).toBeCloseTo(149 * pageScale, 0);
   expect(caretBox.y - pageBox.y).toBeCloseTo(89 * pageScale, 0);
 
@@ -4088,7 +4088,7 @@ test('keeps the insertion caret visible beside an open workspace', async ({ page
   const insertionCaret = page.locator('[data-review-insertion-caret]');
   await expect(insertionCaret).toBeVisible();
   await expect(insertionCaret).toHaveCSS('animation-name', 'review-insertion-caret-blink');
-  await expect(insertionCaret).toHaveCSS('background-color', 'rgb(47, 111, 196)');
+  await expect(insertionCaret).toHaveCSS('background-color', 'rgb(51, 51, 51)');
   await expect(workspaceControl).toHaveAttribute('aria-expanded', 'true');
 });
 

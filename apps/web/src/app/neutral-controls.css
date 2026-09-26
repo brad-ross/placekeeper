@@ -191,13 +191,18 @@
   gap: 2px;
 }
 
-.review-chrome__edit-cluster,
 .review-chrome__navigation-cluster {
   gap: var(--pk-toolbar-gap);
 }
 
+/* Undo/Redo and Back/Forward are pairs: their buttons touch, so the icons sit
+   close together while the groups keep the toolbar's spacing between them. */
+.review-chrome__edit-cluster {
+  gap: 0;
+}
+
 .review-chrome__navigation-cluster > [data-main-history] + [data-main-history] {
-  margin-left: calc(2px - var(--pk-toolbar-gap));
+  margin-left: calc(0px - var(--pk-toolbar-gap));
 }
 
 .review-chrome button,

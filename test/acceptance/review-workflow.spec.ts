@@ -1312,7 +1312,8 @@ test.describe('canonical review workflow', () => {
       const boxes = controls.map((control) => control.getBoundingClientRect()).filter((box) => box.width > 0);
       return boxes.slice(1).map((box, index) => box.left - boxes[index]!.right);
     });
-    for (const gap of controlGaps) expect(gap).toBeCloseTo(8, 1);
+    // Groups sit 8px apart; paired buttons (Undo/Redo, Back/Forward) touch.
+    for (const gap of controlGaps) expect([0, 8].some((expected) => Math.abs(gap - expected) < .05)).toBe(true);
     expect(Math.abs(geometry.file.x + geometry.file.width + 8 - geometry.context.x)).toBeLessThanOrEqual(.5);
     expect(Math.abs(geometry.file.y + geometry.file.height / 2 - geometry.context.y - geometry.context.height / 2)).toBeLessThanOrEqual(.5);
     // The page input fits its digits (about 0.62em each) after a 6px lead.

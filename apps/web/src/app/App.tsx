@@ -225,8 +225,9 @@ export function caretClientPlacement(input: {
   const placement = {
     left: input.pageBounds.left + transformed.origin.x + transformed.size.width / 2,
     top: input.pageBounds.top + transformed.origin.y + transformed.size.height / 2,
-    width: rotation % 2 === 0 ? 1.25 : transformed.size.width,
-    height: rotation % 2 === 0 ? transformed.size.height : 1.25,
+    // A 1px bar, like an ordinary text cursor.
+    width: rotation % 2 === 0 ? 1 : transformed.size.width,
+    height: rotation % 2 === 0 ? transformed.size.height : 1,
     rotation,
   };
   return Object.values(placement).every(Number.isFinite) ? placement : null;
