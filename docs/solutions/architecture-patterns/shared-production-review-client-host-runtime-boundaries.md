@@ -1,7 +1,7 @@
 ---
 title: Shared production review client with host-specific runtime boundaries
 date: 2026-09-02
-last_updated: 2026-09-10
+last_updated: 2026-09-26
 category: architecture-patterns
 module: Embedded review runtime
 problem_type: architecture_pattern
@@ -137,9 +137,9 @@ Keep app lifecycle control disjoint from review authority. Its protocol can regi
 
 ### Treat the native titlebar as a joint geometry contract
 
-The shared layout owns a 54px base top-bar token; macOS derives its override from twice the native traffic-light center coordinate (`apps/web/src/app/review-layout-foundation.css`). The Mac host passes traffic-light and trailing insets into the shared layout, aligns the web bar's center with the native controls, and independently positions the standard AppKit buttons on the same leading geometry (`apps/web/src/macos-entry.tsx`, `apps/macos/Sources/PlacekeeperMac/PlacekeeperWindowController.swift`). Do not fork the toolbar merely to gain a native titlebar.
+The shared layout owns the base top-bar height token, `--review-chrome-height` (54px in `apps/web/src/app/review-design-tokens.css`, rendered at 50px by the neutral chrome in `apps/web/src/app/neutral-controls.css`); macOS derives its override from twice the native traffic-light center coordinate (`apps/web/src/app/review-shell-chrome.css`). The Mac host passes traffic-light and trailing insets into the shared layout, aligns the web bar's center with the native controls, and independently positions the standard AppKit buttons on the same leading geometry (`apps/web/src/macos-entry.tsx`, `apps/macos/Sources/PlacekeeperMac/PlacekeeperWindowController.swift`). Do not fork the toolbar merely to gain a native titlebar.
 
-Dragging cannot be one static CSS rectangle because the toolbar contains responsive live controls. The page measures the rendered bar, subtracts traffic lights and every visible interactive control, and publishes the remaining gaps. Native accepts them only when no transition is in progress, the geometry identity matches, the revision increases, and every rectangle is valid (`apps/web/src/macos-entry.tsx`, `apps/macos/Sources/PlacekeeperMac/MacPolicies.swift`). Resize, screen, backing-scale, and full-screen transitions clear the overlays before issuing a fresh geometry identity. Safe native overlays perform ordinary drag or standard double-click zoom without stealing web-button interaction (`apps/macos/Sources/PlacekeeperMac/PlacekeeperWindowController.swift`).
+Dragging cannot be one static CSS rectangle because the toolbar contains responsive live controls. The page measures the rendered bar, subtracts traffic lights, every visible interactive control, and each whole toolbar control group (`[data-review-chrome-group]`, so the seam between paired buttons such as Undo and Redo is never a drag region), and publishes the remaining gaps (`MACOS_TITLEBAR_INTERACTIVE_SELECTOR` in `apps/web/src/macos-entry.tsx`). Native accepts them only when no transition is in progress, the geometry identity matches, the revision increases, and every rectangle is valid (`apps/web/src/macos-entry.tsx`, `apps/macos/Sources/PlacekeeperMac/MacPolicies.swift`). Resize, screen, backing-scale, and full-screen transitions clear the overlays before issuing a fresh geometry identity. Safe native overlays perform ordinary drag or standard double-click zoom without stealing web-button interaction (`apps/macos/Sources/PlacekeeperMac/PlacekeeperWindowController.swift`).
 
 ### Make reconnect-safe mutations and invalidations explicit
 
@@ -271,7 +271,7 @@ The source path routes the request, the service result establishes semantic iden
 
 1. Keep the shared base toolbar token and the macOS traffic-light-derived height override.
 2. Inject native traffic-light bounds and insets instead of adding another toolbar.
-3. Measure the rendered interactive controls and publish only the gaps as drag candidates.
+3. Measure the rendered interactive controls and control groups, and publish only the gaps as drag candidates.
 4. Clear native overlays when a geometry transition starts.
 5. Mint a new geometry identity and accept only a strictly newer region revision for it.
 6. Let AppKit perform drag and double-click zoom inside accepted gaps.
