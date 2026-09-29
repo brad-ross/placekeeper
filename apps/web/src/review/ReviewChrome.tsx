@@ -13,6 +13,7 @@ import { CodexContextStatus } from './CodexContextStatus.js';
 import { CopyLinkControl, type CopyLinkControlProps } from './CopyLinkControl.js';
 import {
   DocumentActionsMenu,
+  documentIdentityLabel,
   type DocumentActionsMenuProps,
 } from './DocumentActionsMenu.js';
 import { TopBarMenu } from './TopBarMenu.js';
@@ -77,8 +78,20 @@ export function resolveTopBarMenuRequest(input: {
   return input.activeMenu === input.requestedMenu ? null : input.activeMenu;
 }
 
+/** Fits the page input to its digits (about 0.6em each) plus its 6px left padding. */
+export function pageInputWidth(value: string): string {
+  return `calc(${Math.max(1, value.length) * 0.62}em + 6px)`;
+}
+
+/** Fits the zoom input to its digits; its 6px lead sits on the zoom value. */
+export function zoomInputWidth(value: string): string {
+  return `${Math.max(1, value.length) * 0.62}em`;
+}
+
 export interface ReviewChromeProps {
   readonly documentTitle: string;
+  /** The PDF's own title when it has one; shown in place of the filename. */
+  readonly displayTitle?: string;
   readonly savedLabel?: string;
   readonly showSaveStatusDot?: boolean;
   readonly savePhase?: 'clean' | 'saving' | 'not-saved';
@@ -87,6 +100,7 @@ export interface ReviewChromeProps {
   readonly documentActions?: Omit<
     DocumentActionsMenuProps,
     | 'documentTitle'
+    | 'displayTitle'
     | 'savedLabel'
     | 'savePhase'
     | 'open'
@@ -120,6 +134,7 @@ export interface ReviewChromeProps {
 export function ReviewChrome({
   showSaveStatusDot = true,
   documentTitle,
+  displayTitle = documentTitle,
   savedLabel = 'Saved',
   savePhase = 'clean',
   savePendingDestination = false,
@@ -203,7 +218,8 @@ export function ReviewChrome({
     : savePhase === 'saving'
       ? 'Saving changes'
       : savedLabel;
-  const saveControlLabel = `${documentTitle}, ${saveStatusText}. Open automatic save options`;
+  const identityLabel = documentIdentityLabel(displayTitle, documentTitle);
+  const saveControlLabel = `${identityLabel}, ${saveStatusText}. Open automatic save options`;
   const pageUnavailableId = 'viewer-page-controls-readiness';
   const zoomUnavailableId = 'viewer-zoom-controls-readiness';
   const fitWidthUnavailableId = 'viewer-fit-width-readiness';
@@ -411,13 +427,14 @@ export function ReviewChrome({
       focusedPageStep.current = null;
       return;
     }
-    if (button === null || button.isConnected) return;
+    if (button === null || (button.isConnected && !button.disabled)) return;
     focusedPageStep.current = null;
-    // Page navigation settles asynchronously; the old step can disappear well
-    // after the click's next frame. Restore focus when React removes it.
-    if (document.activeElement !== document.body) return;
+    // Page navigation settles asynchronously; the old step can be greyed out at
+    // the first or last page well after the click's next frame. Move focus to
+    // the step that still works.
+    if (document.activeElement !== document.body && document.activeElement !== button) return;
     const remaining = document.getElementById(navigationMenuId)
-      ?.querySelector<HTMLButtonElement>('[data-review-page-step]');
+      ?.querySelector<HTMLButtonElement>('[data-review-page-step]:not(:disabled)');
     (remaining ?? navigationAnchorRef.current)?.focus({ preventScroll: true });
   });
 
@@ -488,6 +505,7 @@ export function ReviewChrome({
         <input
           ref={pageInputRef}
           className="review-chrome__page-input"
+          title="Page number"
           type="text"
           inputMode="numeric"
           aria-label={`Current page ${viewerState.currentPage} of ${viewerState.totalPages}. Enter a page number`}
@@ -495,6 +513,7 @@ export function ReviewChrome({
           aria-describedby={pageInvalid ? pageErrorId : undefined}
           aria-errormessage={pageInvalid ? pageErrorId : undefined}
           value={editingPage ? pageDraft : String(viewerState.currentPage)}
+          style={{ width: pageInputWidth(editingPage ? pageDraft : String(viewerState.currentPage)) }}
           onPointerDown={() => { pagePointerActivationRef.current = !editingPage; }}
           onPointerUp={(event) => {
             if (!pagePointerActivationRef.current) return;
@@ -551,6 +570,7 @@ export function ReviewChrome({
         <input
           ref={zoomInputRef}
           className="review-chrome__zoom-input"
+          title="Zoom percentage"
           type="text"
           inputMode="numeric"
           aria-label={`Current zoom ${viewerState.zoomPercent} percent. Enter a zoom percentage`}
@@ -558,6 +578,7 @@ export function ReviewChrome({
           aria-describedby={zoomInvalid ? zoomErrorId : undefined}
           aria-errormessage={zoomInvalid ? zoomErrorId : undefined}
           value={editingZoom ? zoomDraft : String(viewerState.zoomPercent)}
+          style={{ width: zoomInputWidth(editingZoom ? zoomDraft : String(viewerState.zoomPercent)) }}
           onPointerDown={() => { zoomPointerActivationRef.current = !editingZoom; }}
           onPointerUp={(event) => {
             if (!zoomPointerActivationRef.current) return;
@@ -609,7 +630,9 @@ export function ReviewChrome({
     aria-label="Zoom unavailable"
   >—</span>;
 
-  const historyControls = canUndo || canRedo ? <span
+  // Edit history keeps both slots so the toolbar never shifts; unavailable
+  // actions are greyed out rather than removed.
+  const historyControls = <span
     ref={(element) => { historyAnchorRef.current = element; }}
     tabIndex={-1}
     data-review-chrome-group="history"
@@ -617,28 +640,23 @@ export function ReviewChrome({
     role="group"
     aria-label="Edit history"
   >
-    {canUndo ? <ReviewTooltipButton label="Undo" type="button" className="review-chrome__icon-control review-chrome__history-control" onClick={onUndo}><ReviewIcon name="undo" /></ReviewTooltipButton> : null}
-    {canRedo ? <ReviewTooltipButton label="Redo" type="button" className="review-chrome__icon-control review-chrome__history-control" onClick={onRedo}><ReviewIcon name="redo" /></ReviewTooltipButton> : null}
-  </span> : null;
+    <ReviewTooltipButton label="Undo" type="button" className="review-chrome__icon-control review-chrome__history-control" disabled={!canUndo} onClick={onUndo}><ReviewIcon name="undo" /></ReviewTooltipButton>
+    <ReviewTooltipButton label="Redo" type="button" className="review-chrome__icon-control review-chrome__history-control" disabled={!canRedo} onClick={onRedo}><ReviewIcon name="redo" /></ReviewTooltipButton>
+  </span>;
 
   const mainHistoryControl = (direction: 'back' | 'forward') => {
     const backward = direction === 'back';
+    const available = backward ? canNavigateBack : canNavigateForward;
     return <ReviewTooltipButton
       label={backward ? 'Back in document history' : 'Forward in document history'}
       type="button"
       className="review-chrome__icon-control review-chrome__main-history-control"
       data-main-history={direction}
       aria-busy={documentNavigationPending ? 'true' : undefined}
-      disabled={documentNavigationPending}
+      disabled={documentNavigationPending || !available}
       onClick={backward ? onNavigateBack : onNavigateForward}
     ><ReviewIcon name={backward ? 'arrow-left' : 'arrow-right'} /></ReviewTooltipButton>;
   };
-  const primaryHistoryDirection = canNavigateBack
-    ? 'back'
-    : canNavigateForward
-      ? 'forward'
-      : null;
-  const secondaryHistoryDirection = canNavigateBack && canNavigateForward ? 'forward' : null;
 
   const navigationControls = <span
     data-review-chrome-group="navigation"
@@ -666,12 +684,13 @@ export function ReviewChrome({
       ><span aria-hidden="true">/ {viewerState.pageReady ? viewerState.totalPages : '—'}</span></ReviewTooltipButton>
     </span>
       {copyLink === undefined ? null : <div className="review-chrome__link" data-review-copy-link><CopyLinkControl {...copyLink} /></div>}
-    {primaryHistoryDirection === null ? null : mainHistoryControl(primaryHistoryDirection)}
-    {secondaryHistoryDirection === null ? null : mainHistoryControl(secondaryHistoryDirection)}
+    {/* Back and Forward keep fixed slots, greyed out when unavailable. */}
+    {mainHistoryControl('back')}
+    {mainHistoryControl('forward')}
     <TopBarMenu hoverOpen={topBarMenuHoverOpen} hoverRegionRef={navigationHoverRef} open={activeTopBarMenu === 'navigation'} menuId={navigationMenuId} label="Page navigation" openerRef={navigationAnchorRef} focusOnOpen={topBarMenuKeyboardOpenRef.current} onDismiss={() => requestTopBarMenu('navigation', false)}>
       <div className="review-chrome__control-cluster review-chrome__page-menu" role="group" aria-label="Page navigation controls">
-        {viewerState.pageReady && viewerState.currentPage > 1 ? <ReviewTooltipButton label="Previous page" type="button" role="menuitem" className="review-chrome__icon-control" data-review-page-step="previous" onPointerDown={preparePageStep} onPointerUp={clearPageStepIntent} onPointerCancel={clearPageStepIntent} onClick={(event) => runPageStep(event.currentTarget, () => controls?.previousPage())}><ReviewIcon name="chevron-up" /></ReviewTooltipButton> : null}
-        {viewerState.pageReady && viewerState.currentPage < viewerState.totalPages ? <ReviewTooltipButton label="Next page" type="button" role="menuitem" className="review-chrome__icon-control" data-review-page-step="next" onPointerDown={preparePageStep} onPointerUp={clearPageStepIntent} onPointerCancel={clearPageStepIntent} onClick={(event) => runPageStep(event.currentTarget, () => controls?.nextPage())}><ReviewIcon name="chevron-down" /></ReviewTooltipButton> : null}
+        <ReviewTooltipButton label="Previous page" type="button" role="menuitem" className="review-chrome__icon-control" data-review-page-step="previous" disabled={!viewerState.pageReady || viewerState.currentPage <= 1} onPointerDown={preparePageStep} onPointerUp={clearPageStepIntent} onPointerCancel={clearPageStepIntent} onClick={(event) => runPageStep(event.currentTarget, () => controls?.previousPage())}><ReviewIcon name="chevron-up" /></ReviewTooltipButton>
+        <ReviewTooltipButton label="Next page" type="button" role="menuitem" className="review-chrome__icon-control" data-review-page-step="next" disabled={!viewerState.pageReady || viewerState.currentPage >= viewerState.totalPages} onPointerDown={preparePageStep} onPointerUp={clearPageStepIntent} onPointerCancel={clearPageStepIntent} onClick={(event) => runPageStep(event.currentTarget, () => controls?.nextPage())}><ReviewIcon name="chevron-down" /></ReviewTooltipButton>
       </div>
     </TopBarMenu>
   </span>;
@@ -684,20 +703,21 @@ export function ReviewChrome({
     role="group"
     aria-label="PDF zoom"
   >
-    <span className="review-chrome__zoom-value">{zoomValue()}<span aria-hidden="true" className="review-chrome__zoom-suffix">%</span></span>
+    {/* Like the page group's "/ 33", the fixed "%" suffix opens the menu. */}
+    <span className="review-chrome__zoom-value">{zoomValue()}</span>
     <ReviewTooltipButton
       label="Open zoom controls"
       tooltip={false}
       ref={(element) => { zoomAnchorRef.current = element; }}
       type="button"
-      className="review-chrome__icon-control review-chrome__zoom-disclosure"
+      className="review-chrome__zoom-disclosure"
       aria-label="Open zoom controls"
       aria-haspopup="menu"
       aria-expanded={activeTopBarMenu === 'zoom'}
       aria-controls={zoomMenuId}
       disabled={!viewerState.zoomReady}
       onClick={(event) => activateMenu('zoom', event)}
-    ><ReviewIcon name="chevron-down" size={16} /></ReviewTooltipButton>
+    ><span aria-hidden="true" className="review-chrome__zoom-suffix">%</span></ReviewTooltipButton>
     <TopBarMenu hoverOpen={topBarMenuHoverOpen} hoverRegionRef={zoomHoverRef} open={activeTopBarMenu === 'zoom'} menuId={zoomMenuId} label="PDF zoom" openerRef={zoomAnchorRef} focusOnOpen={topBarMenuKeyboardOpenRef.current} onDismiss={() => requestTopBarMenu('zoom', false)}>
       <div className="review-chrome__control-cluster" role="group" aria-label="Zoom controls">
         {horizontalScrollAvailable ? <ReviewTooltipButton
@@ -711,7 +731,7 @@ export function ReviewChrome({
           disabled={!viewerState.zoomReady || onToggleHorizontalScrollLock === undefined}
           onClick={onToggleHorizontalScrollLock}
         ><ReviewIcon name={horizontalScrollLocked ? 'lock' : 'unlock'} /></ReviewTooltipButton> : null}
-        {!fitWidthCurrent ? <ReviewTooltipButton label="Fit width" type="button" role="menuitem" className="review-chrome__icon-control review-chrome__fit-width" data-review-zoom-action="fit-width" aria-busy={fitWidthPending ? 'true' : 'false'} aria-describedby={zoomUnavailable ?? (!fitWidthReady ? fitWidthUnavailableId : undefined)} disabled={!viewerState.zoomReady || !fitWidthReady} onPointerDown={prepareZoomAction} onPointerUp={clearZoomActionIntent} onPointerCancel={clearZoomActionIntent} onClick={(event) => runFitWidth(event.currentTarget)}><ReviewIcon name="fit-width" /></ReviewTooltipButton> : null}
+        <ReviewTooltipButton label="Fit width" type="button" role="menuitem" className="review-chrome__icon-control review-chrome__fit-width" data-review-zoom-action="fit-width" data-fit-width-current={fitWidthCurrent ? 'true' : undefined} aria-busy={fitWidthPending ? 'true' : 'false'} aria-describedby={zoomUnavailable ?? (!fitWidthReady ? fitWidthUnavailableId : undefined)} disabled={!viewerState.zoomReady || !fitWidthReady || fitWidthCurrent} onPointerDown={prepareZoomAction} onPointerUp={clearZoomActionIntent} onPointerCancel={clearZoomActionIntent} onClick={(event) => runFitWidth(event.currentTarget)}><ReviewIcon name="fit-width" /></ReviewTooltipButton>
         <ReviewTooltipButton label="Zoom out" type="button" role="menuitem" className="review-chrome__icon-control" data-review-zoom-action="out" aria-describedby={zoomUnavailable} disabled={!viewerState.zoomReady} onPointerDown={prepareZoomAction} onPointerUp={clearZoomActionIntent} onPointerCancel={clearZoomActionIntent} onClick={(event) => runZoomAction(event.currentTarget, () => controls?.zoomOut())}><ReviewIcon name="minus" /></ReviewTooltipButton>
         <ReviewTooltipButton label="Zoom in" type="button" role="menuitem" className="review-chrome__icon-control" data-review-zoom-action="in" aria-describedby={zoomUnavailable} disabled={!viewerState.zoomReady} onPointerDown={prepareZoomAction} onPointerUp={clearZoomActionIntent} onPointerCancel={clearZoomActionIntent} onClick={(event) => runZoomAction(event.currentTarget, () => controls?.zoomIn())}><ReviewIcon name="plus" /></ReviewTooltipButton>
       </div>
@@ -724,14 +744,15 @@ export function ReviewChrome({
   </>;
 
   const sizingCluster = (_candidate: ReviewChromePresentation): ReactNode => <div className="review-chrome__viewer-controls" style={{ display: 'inline-flex', gridColumn: 'auto', gridRow: 'auto', flexWrap: 'nowrap' }}>
+    {/* Measure only available history actions: narrow bars hide the unavailable ones. */}
     {canUndo || canRedo ? <span className="review-chrome__control-cluster">{canUndo ? <button type="button" title="Undo" className="review-chrome__icon-control"><ReviewIcon name="undo" /></button> : null}{canRedo ? <button type="button" title="Redo" className="review-chrome__icon-control"><ReviewIcon name="redo" /></button> : null}</span> : null}
     <span className="review-chrome__control-cluster">{canNavigateBack ? <button type="button" title="Back in document history" className="review-chrome__icon-control"><ReviewIcon name="arrow-left" /></button> : null}{canNavigateForward ? <button type="button" title="Forward in document history" className="review-chrome__icon-control"><ReviewIcon name="arrow-right" /></button> : null}<span className="review-chrome__stat">{viewerState.pageReady ? `${viewerState.currentPage} / ${viewerState.totalPages}` : '— / —'}</span></span>
-    <span className="review-chrome__control-cluster"><span className="review-chrome__stat">{viewerState.zoomReady ? `${viewerState.zoomPercent}%` : '—%'}</span><button type="button" title="Zoom controls" className="review-chrome__icon-control"><ReviewIcon name="chevron-down" size={16} /></button></span>
+    <span className="review-chrome__control-cluster"><span className="review-chrome__stat">{viewerState.zoomReady ? `${viewerState.zoomPercent}%` : '—%'}</span></span>
     {copyLink === undefined ? null : <div className="review-chrome__link"><button type="button" title="Copy link to current location" className="review-chrome__icon-control"><ReviewIcon name="link" /></button></div>}
   </div>;
 
   const sizingIdentity = <div className="review-chrome__identity">
-    {documentActions !== undefined ? <div className="document-actions"><button type="button" className="review-chrome__save-identity document-actions__trigger" title="Open document actions"><ReviewIcon name="file" size={16} /><span className="review-chrome__filename">{documentTitle}</span>{!showSaveStatusDot || savePhase === 'clean' ? null : <span className="review-chrome__save-dot" data-save-phase={savePhase} />}</button></div> : saveOptionsAvailable ? <button type="button" className="review-chrome__save-identity" title="Open automatic save options"><ReviewIcon name="file" size={16} /><span className="review-chrome__filename">{documentTitle}</span>{!showSaveStatusDot || savePhase === 'clean' ? null : <span className="review-chrome__save-dot" data-save-phase={savePhase} />}</button> : <div className="review-chrome__save-identity"><ReviewIcon name="file" size={16} /><span className="review-chrome__filename">{documentTitle}</span>{!showSaveStatusDot || savePhase === 'clean' ? null : <span className="review-chrome__save-dot" data-save-phase={savePhase} />}</div>}
+    {documentActions !== undefined ? <div className="document-actions"><button type="button" className="review-chrome__save-identity document-actions__trigger" title="Open document actions"><ReviewIcon name="file" size={16} /><span className="review-chrome__filename">{displayTitle}</span>{!showSaveStatusDot || savePhase === 'clean' ? null : <span className="review-chrome__save-dot" data-save-phase={savePhase} />}</button></div> : saveOptionsAvailable ? <button type="button" className="review-chrome__save-identity" title="Open automatic save options"><ReviewIcon name="file" size={16} /><span className="review-chrome__filename">{displayTitle}</span>{!showSaveStatusDot || savePhase === 'clean' ? null : <span className="review-chrome__save-dot" data-save-phase={savePhase} />}</button> : <div className="review-chrome__save-identity"><ReviewIcon name="file" size={16} /><span className="review-chrome__filename">{displayTitle}</span>{!showSaveStatusDot || savePhase === 'clean' ? null : <span className="review-chrome__save-dot" data-save-phase={savePhase} />}</div>}
     {codexContext === undefined ? null : <div className="review-chrome__context"><div className="codex-context-status"><ReviewIcon name="agent" size={16} /></div></div>}
   </div>;
 
@@ -746,6 +767,7 @@ export function ReviewChrome({
       {documentActions !== undefined ? <DocumentActionsMenu
         {...documentActions}
         documentTitle={documentTitle}
+        displayTitle={displayTitle}
         savedLabel={savedLabel}
         savePhase={savePhase}
         showSaveStatusDot={showSaveStatusDot}
@@ -755,14 +777,14 @@ export function ReviewChrome({
           setDocumentMenuPending(pending);
           if (pending) setActiveTopBarMenu('document');
         }}
-      /> : saveOptionsAvailable ? <ReviewTooltipButton ref={saveTriggerRef} label={saveControlLabel} tooltip={`${documentTitle} — Save options`} type="button" className="review-chrome__save-identity" aria-haspopup="dialog" aria-expanded={saveOptionsOpen} onClick={onSaveOptions}>
+      /> : saveOptionsAvailable ? <ReviewTooltipButton ref={saveTriggerRef} label={saveControlLabel} tooltip={documentTitle} type="button" className="review-chrome__save-identity" aria-haspopup="dialog" aria-expanded={saveOptionsOpen} onClick={onSaveOptions}>
         <ReviewIcon name="file" size={16} />
-        <span className="review-chrome__filename">{documentTitle}</span>
+        <span className="review-chrome__filename">{displayTitle}</span>
         {!showSaveStatusDot || savePhase === 'clean' ? null : <span className="review-chrome__save-dot" data-save-phase={savePhase} aria-hidden="true" />}
         <span className="sr-only" data-review-saved-status>{saveStatusDisplay}</span>
-      </ReviewTooltipButton> : <div className="review-chrome__save-identity" aria-label={`${documentTitle}, ${saveStatusText}`} title={documentTitle} tabIndex={0}>
+      </ReviewTooltipButton> : <div className="review-chrome__save-identity" aria-label={`${identityLabel}, ${saveStatusText}`} title={documentTitle} tabIndex={0}>
         <ReviewIcon name="file" size={16} />
-        <span className="review-chrome__filename">{documentTitle}</span>
+        <span className="review-chrome__filename">{displayTitle}</span>
         {!showSaveStatusDot || savePhase === 'clean' ? null : <span className="review-chrome__save-dot" data-save-phase={savePhase} aria-hidden="true" />}
         <span className="sr-only" data-review-saved-status>{saveStatusDisplay}</span>
       </div>}

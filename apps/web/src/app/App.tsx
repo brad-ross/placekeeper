@@ -31,6 +31,7 @@ import {
   type ViewerResourcePolicy,
 } from '../pdf/embedpdf-viewer.js';
 import { PdfWorkspace, type PageContextMenuRequest } from '../pdf/PdfWorkspace.js';
+import type { DestinationBand } from '../review/navigation-coordinator.js';
 import {
   PdfOutlineDiscoveryAuthority,
   readPdfOutline,
@@ -41,6 +42,7 @@ import {
   type ReferenceDocumentController,
 } from '../pdf/reference-document.js';
 import { createViewerFramingControls } from '../pdf/viewer-framing-adapter.js';
+import { VIEWER_READING_FIT_MAX_PERCENT } from '../pdf/viewer-controls.js';
 import {
   LatestFrameRequest,
   type ViewerFramingControls,
@@ -223,8 +225,9 @@ export function caretClientPlacement(input: {
   const placement = {
     left: input.pageBounds.left + transformed.origin.x + transformed.size.width / 2,
     top: input.pageBounds.top + transformed.origin.y + transformed.size.height / 2,
-    width: rotation % 2 === 0 ? 1.25 : transformed.size.width,
-    height: rotation % 2 === 0 ? transformed.size.height : 1.25,
+    // A 1px bar, like an ordinary text cursor.
+    width: rotation % 2 === 0 ? 1 : transformed.size.width,
+    height: rotation % 2 === 0 ? transformed.size.height : 1,
     rotation,
   };
   return Object.values(placement).every(Number.isFinite) ? placement : null;
@@ -297,6 +300,10 @@ export interface AppProps {
   onMainDocumentReady?: (engine: PdfEngine, document: PdfDocumentObject) => void;
   onViewerError?: (error: Error) => void;
   searchResults?: readonly PdfSearchResult[];
+  /** Transient main-reader Destination Band (R12); never part of review state. */
+  mainDestinationBand?: DestinationBand | null;
+  /** The active References tab's Destination Band (R10). */
+  referenceDestinationBand?: DestinationBand | null;
 }
 
 export class ViewerInitializationAuthority {
@@ -352,6 +359,8 @@ export function App({
   onMainDocumentReady,
   onViewerError,
   searchResults = [],
+  mainDestinationBand = null,
+  referenceDestinationBand = null,
 }: AppProps) {
   const [sourceAnnotations, setSourceAnnotations] = useState<readonly ExistingAnnotation[]>([]);
   const [inventoryState, setInventoryState] = useState<ExistingAnnotationsDiscovery>({
@@ -1066,6 +1075,7 @@ export function App({
         documentId: MAIN_PDF_DOCUMENT_ID,
         documentGeneration,
         runway: () => viewerRunwayRef.current,
+        maxFitWidthZoom: VIEWER_READING_FIT_MAX_PERCENT / 100,
         fitWidthMargins: () => {
           const stage = workspaceElementRef.current?.closest<HTMLElement>('[data-review-stage]');
           if (stage?.dataset.rightSurfaceOpen === 'true') {
@@ -1579,6 +1589,8 @@ export function App({
       documentLabel={documentTitle}
       onInitialized={initializeViewer}
       searchResults={searchResults}
+      mainDestinationBand={mainDestinationBand}
+      referenceDestinationBand={referenceDestinationBand}
       ownedAnnotations={ownedAnnotations}
       sourceNativeAnnotations={sourceNativeAnnotations}
       sourceAnnotations={sourceAnnotations}

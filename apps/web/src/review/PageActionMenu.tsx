@@ -1,4 +1,4 @@
-import { useEffect, useRef, type CSSProperties, type RefObject } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type RefObject } from 'react';
 
 import type { ContextPlacement } from './ContextActionPalette.js';
 import { ReviewIcon } from './ReviewIcon.js';
@@ -13,9 +13,45 @@ export interface PageActionMenuProps {
   onDismiss(): void;
 }
 
+const VIEWPORT_MARGIN = 8;
+
+/** Keeps a fixed menu opened at a point fully inside the viewport. */
+export function clampMenuToViewport(
+  point: { readonly left: number; readonly top: number },
+  size: { readonly width: number; readonly height: number },
+  viewport: { readonly width: number; readonly height: number },
+): { left: number; top: number } {
+  const maxLeft = viewport.width - size.width - VIEWPORT_MARGIN;
+  const maxTop = viewport.height - size.height - VIEWPORT_MARGIN;
+  return {
+    left: Math.max(VIEWPORT_MARGIN, Math.min(point.left, maxLeft)),
+    top: Math.max(VIEWPORT_MARGIN, Math.min(point.top, maxTop)),
+  };
+}
+
 export function PageActionMenu(props: PageActionMenuProps) {
-  const style: CSSProperties = { left: props.placement.left, top: props.placement.top };
   const menuRef = useRef<HTMLDivElement>(null);
+  const [position, setPosition] = useState({ left: props.placement.left, top: props.placement.top });
+  // A menu opened near the window's bottom or right edge moves inside it.
+  useLayoutEffect(() => {
+    const menu = menuRef.current;
+    const point = { left: props.placement.left, top: props.placement.top };
+    if (!menu) {
+      setPosition(point);
+      return;
+    }
+    // Measure from the rendered box, which may sit offset from its style position.
+    const bounds = menu.getBoundingClientRect();
+    const offset = { left: bounds.left - position.left, top: bounds.top - position.top };
+    const clamped = clampMenuToViewport(
+      { left: point.left + offset.left, top: point.top + offset.top },
+      { width: bounds.width, height: bounds.height },
+      { width: window.innerWidth, height: window.innerHeight },
+    );
+    setPosition({ left: clamped.left - offset.left, top: clamped.top - offset.top });
+  // Position is read only to learn the CSS offset; the placement drives this.
+  }, [props.placement.left, props.placement.top]);
+  const style: CSSProperties = position;
   useEffect(() => {
     const dismissOutside = (event: PointerEvent) => {
       // Chromium dispatches `contextmenu` before the secondary pointerup. Ignore

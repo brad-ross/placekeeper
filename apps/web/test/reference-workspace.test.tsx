@@ -2,8 +2,10 @@ import { PdfZoomMode } from '@embedpdf/models';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 
+import { DestinationSnippetFrame } from '../src/review/DestinationSnippet.js';
 import {
   LinkActionMenuContent,
+  LinkActionPopover,
   linkActionDismissRestoresFocus,
   placeLinkActionPopover,
   setLinkActionOpenerExpanded,
@@ -34,6 +36,7 @@ import {
 } from '../src/review/OutlineAnnotationsWorkspace.js';
 import type { PdfOutlineItem } from '../src/pdf/pdf-outline.js';
 import { RIGHT_WORKSPACE_MODES } from '../src/review/reference-navigation-state.js';
+import { AnnotationCountBadge } from '../src/review/AnnotationCountBadge.js';
 import {
   createOutlineExpansionState,
   setOutlineExpandedItemIds,
@@ -58,13 +61,16 @@ describe('link action chooser', () => {
     expect(linkActionDismissRestoresFocus('copy-success')).toBe(true);
   });
 
-  it('keeps the default action first in a compact icon-only nonmodal menu', () => {
+  // Covers AE1 (R3, R4): icon actions keep today's order in one row below the destination snippet.
+  it('shows icon actions in the existing order below the destination snippet, then the page', () => {
     const html = renderToStaticMarkup(
       <LinkActionMenuContent
         label="Lemma A.7"
         pageContext="Page 18"
+        pageNumeral="18"
         sourceScope="main"
         firstItemRef={() => undefined}
+        snippet={<div data-destination-snippet="">snippet</div>}
         copyLink={{
           getLink: () => 'placekeeper:///tmp/Paper.pdf#v=2&page=18&mode=fit-page',
           writeText: async () => undefined,
@@ -79,26 +85,59 @@ describe('link action chooser', () => {
 
     expect(html).toContain('role="menu"');
     expect(html).toContain(`id="${PDF_LINK_ACTION_MENU_ID}"`);
-    expect(html).toMatch(/aria-label="Open in References"[\s\S]*aria-label="Open in main document"[\s\S]*aria-label="Copy link to exact destination on page 18"/u);
+    expect(html).toMatch(
+      /data-destination-snippet[\s\S]*aria-label="Open in References"[\s\S]*aria-label="Open in main document"[\s\S]*aria-label="Copy link to exact destination on page 18"/u,
+    );
+    // Icon-only actions in one row, the destination page numeral last.
+    expect(html).toMatch(
+      /class="link-action-popover__actions"[\s\S]*lucide-chevron-right[\s\S]*lucide-link[\s\S]*class="link-action-popover__page" aria-hidden="true">18<\/span>/u,
+    );
+    expect(html).toContain('copy-link-control__trigger--icon-only');
+    expect(html).not.toMatch(/>(Open in References|Open in main document|Copy link)<\/span>/u);
+    // Enabled actions keep the shared custom tooltip, not a native title.
     expect(html).not.toContain('title="Open in References"');
     expect(html).not.toContain('title="Open in main document"');
     expect(html).not.toContain('title="Copy exact destination link"');
-    expect(html).toMatch(/aria-label="Open in main document"[^>]*>[\s\S]*?lucide-chevron-right/u);
-    expect(html).toMatch(/aria-label="Copy link to exact destination on page 18"[^>]*>[\s\S]*?lucide-link/u);
     expect(html.match(/role="menuitem"/g)).toHaveLength(3);
-    expect(html.match(/<svg/g)).toHaveLength(3);
-    expect(html).not.toContain('<small>');
-    expect(html).not.toContain('<span>Open in');
     expect(html).not.toContain('role="dialog"');
+    expect(html).not.toContain('aria-busy="true"');
     expect(html).toContain('Lemma A.7');
     expect(html).toContain('Page 18');
   });
 
-  it('puts Follow in this Reference Tab before the right-most main action', () => {
+  it('keeps the snippet out of the menu focus order', () => {
+    const html = renderToStaticMarkup(
+      <LinkActionMenuContent
+        label="Lemma A.7"
+        pageContext="Page 18"
+        pageNumeral="18"
+        sourceScope="main"
+        firstItemRef={() => undefined}
+        snippet={<DestinationSnippetFrame
+          image={{ status: 'loading' }}
+          description={null}
+          resolving
+        />}
+        onChoose={() => undefined}
+        onKeyDown={() => undefined}
+        onBlur={() => undefined}
+      />,
+    );
+    const snippetStart = html.indexOf('data-destination-snippet');
+    expect(snippetStart).toBeGreaterThan(-1);
+    const snippet = html.slice(snippetStart, html.indexOf('<button'));
+    expect(snippetStart).toBeLessThan(html.indexOf('<button'));
+    expect(snippet).not.toMatch(/tabindex|role="menuitem"|<input/u);
+    expect(snippet).toContain('aria-hidden="true"');
+    expect(html.match(/role="menuitem"/g)).toHaveLength(2);
+  });
+
+  it('puts Follow in this tab before the right-most main action inside References', () => {
     const html = renderToStaticMarkup(
       <LinkActionMenuContent
         label="Target-to-target detail link"
         pageContext="Page 3"
+        pageNumeral="3"
         sourceScope="reference"
         firstItemRef={() => undefined}
         copyLink={{
@@ -116,15 +155,9 @@ describe('link action chooser', () => {
     expect(html).toMatch(
       /aria-label="Open in References"[\s\S]*aria-label="Follow in this tab"[\s\S]*aria-label="Open in main document"[\s\S]*aria-label="Copy link to exact destination on page 3"/u,
     );
-    expect(html).not.toContain('title="Open in References"');
+    expect(html).toMatch(/lucide-arrow-right[\s\S]*lucide-square-arrow-out-up-right/u);
     expect(html).not.toContain('title="Follow in this tab"');
-    expect(html).not.toContain('title="Open in main document"');
-    expect(html).not.toContain('title="Copy exact destination link"');
-    expect(html).toMatch(/aria-label="Follow in this tab"[^>]*>[\s\S]*?lucide-arrow-right/u);
-    expect(html).toMatch(/aria-label="Open in main document"[^>]*>[\s\S]*?lucide-square-arrow-out-up-right/u);
-    expect(html).toMatch(/aria-label="Copy link to exact destination on page 3"[^>]*>[\s\S]*?lucide-link/u);
     expect(html.match(/role="menuitem"/g)).toHaveLength(4);
-    expect(html.match(/<svg/g)).toHaveLength(4);
   });
 
   it('keeps main-document links available while References is displaced by authoring', () => {
@@ -132,6 +165,7 @@ describe('link action chooser', () => {
       <LinkActionMenuContent
         label="Lemma A.7"
         pageContext="Page 18"
+        pageNumeral="18"
         sourceScope="main"
         firstItemRef={() => undefined}
         openInReferencesDisabled
@@ -143,6 +177,37 @@ describe('link action chooser', () => {
 
     expect(html).toMatch(/aria-label="Open in References"[^>]*disabled/u);
     expect(html).toMatch(/aria-label="Open in main document"(?![^>]*disabled)/u);
+    expect(html).toMatch(/aria-label="Open in References"[^>]*disabled/u);
+  });
+
+  it('marks the chosen action busy and the menu non-interactive while its name resolves', () => {
+    const html = renderToStaticMarkup(
+      <LinkActionMenuContent
+        label="Lemma A.7"
+        pageContext="Page 18"
+        pageNumeral="18"
+        sourceScope="main"
+        firstItemRef={() => undefined}
+        busyChoice="references"
+        onChoose={() => undefined}
+        onKeyDown={() => undefined}
+        onBlur={() => undefined}
+      />,
+    );
+
+    const tag = (name: string) => html.match(new RegExp(`<button[^>]*aria-label="${name}"[^>]*>`, 'u'))?.[0] ?? '';
+    expect(html).toMatch(/<div[^>]*role="menu"[^>]*aria-busy="true"/u);
+    expect(tag('Open in References')).toContain('aria-busy="true"');
+    expect(tag('Open in main document')).not.toContain('aria-busy="true"');
+    expect(tag('Open in main document')).toContain('aria-disabled="true"');
+    expect(html.match(/aria-busy="true"/g)).toHaveLength(2);
+  });
+
+  it('renders no menu without a clicked link request (R5)', () => {
+    const html = renderToStaticMarkup(
+      <LinkActionPopover request={null} onChoose={() => undefined} onDismiss={() => undefined} />,
+    );
+    expect(html).toBe('');
   });
 
   it('wraps menu focus for arrows and supports Home and End', () => {
@@ -192,6 +257,13 @@ describe('link action chooser', () => {
 describe('shared reference workspace', () => {
   it('keeps Search between Outline and Annotations with References right-most', () => {
     expect(WORKSPACE_MODES).toEqual(['outline', 'search', 'annotations', 'references']);
+  });
+
+  it('shows the annotation count as text for screen readers and a number on screen', () => {
+    const many = renderToStaticMarkup(<AnnotationCountBadge count={3} />);
+    expect(many).toBe('<span class="review-workspace__annotation-count" data-annotation-count="3"><span aria-hidden="true">3</span><span class="sr-only">3 annotations</span></span>');
+    expect(renderToStaticMarkup(<AnnotationCountBadge count={1} />)).toContain('<span class="sr-only">1 annotation</span>');
+    expect(renderToStaticMarkup(<AnnotationCountBadge count={0} />)).toBe('');
   });
 
   it('falls back to Search when the selected Outline mode is unavailable', () => {

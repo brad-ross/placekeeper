@@ -142,11 +142,13 @@
   overflow: hidden;
 }
 
+/* On hover the resize edge shows as a thin line that fades out toward both
+   ends of the tray, instead of tracing the tray's rounded corners. */
 .reference-resize-handle[data-reference-resize-handle="right"]::after {
   inset: 0 auto 0 0;
-  width: calc(2 * var(--pk-radius-tray));
-  border-radius: var(--pk-radius-tray) 0 0 var(--pk-radius-tray);
-  background: linear-gradient(to right, #aaa 0 2px, transparent 2px);
+  width: 1.5px;
+  border-radius: 1px;
+  background: linear-gradient(to bottom, transparent, #aaa 25%, #aaa 75%, transparent);
 }
 
 .reference-resize-handle[data-reference-resize-handle="bottom"] {
@@ -158,15 +160,15 @@
 
 .reference-resize-handle[data-reference-resize-handle="bottom"]::after {
   inset: 0 0 auto;
-  height: calc(2 * var(--pk-radius-tray));
+  height: 1.5px;
   box-sizing: border-box;
   border: 0;
-  border-radius: var(--pk-radius-tray) var(--pk-radius-tray) 0 0;
-  background: linear-gradient(#aaa 0 2px, transparent 2px);
+  border-radius: 1px;
+  background: linear-gradient(to right, transparent, #aaa 25%, #aaa 75%, transparent);
 }
 
 .reference-resize-handle:hover::after,
-.reference-resize-handle:focus-visible::after { opacity: .65; }
+.reference-resize-handle:focus-visible::after { opacity: .45; }
 
 .reference-tabs {
   gap: 5px;
@@ -520,7 +522,19 @@
   font: 400 13px/1.55 var(--pk-font-ui);
 }
 
-.pdf-search__result-icon { color: var(--pk-muted); }
+/* The section and the page share one line: section on the left, truncating,
+   page on the right where row actions take its place on hover. */
+.pdf-search__result-heading > .pdf-search__result-section {
+  order: 1;
+  min-width: 0;
+  flex: 0 1 auto;
+  overflow: hidden;
+  color: #737373;
+  font: 400 11px/1.5 var(--pk-font-ui);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .pdf-search__result-heading .pdf-search__result-page {
   order: 3;
   margin-left: 6px;
@@ -571,7 +585,7 @@
 }
 
 .outline-navigator__row {
-  min-height: 34px;
+  min-height: 32px;
   border: 0;
   border-radius: 9px;
   background: transparent;
@@ -593,7 +607,7 @@
   .copy-link-control__trigger--row,
   .row-action-group__trigger
 ):focus-visible {
-  outline: 2px solid #496789;
+  outline: 2px solid var(--pk-focus);
   outline-offset: 3px;
 }
 
@@ -619,8 +633,8 @@
 .outline-navigator__disclosure-spacer {
   width: 28px;
   min-width: 28px;
-  height: 34px;
-  min-height: 34px;
+  height: 32px;
+  min-height: 32px;
   color: var(--pk-ink);
 }
 
@@ -632,6 +646,34 @@
   .row-action-group__trigger
 ) {
   border: 0;
+}
+
+/* Row actions match the annotation card actions: 26px buttons centred in the
+   32px row, flush with the page number's slot at the destination's edge. */
+@media (hover: hover) and (pointer: fine) {
+  .outline-navigator .row-action-group {
+    top: 3px;
+    right: 4px;
+    width: auto;
+    min-width: 0;
+  }
+
+  .outline-navigator :is(
+    .row-action-group__action,
+    .copy-link-control__trigger--row,
+    .row-action-group__trigger
+  ) {
+    width: 26px;
+    min-width: 26px;
+    height: 26px;
+    min-height: 26px;
+    border-radius: 6px;
+  }
+
+  /* The page number sits in the last action's slot, centred on its icon. */
+  .outline-navigator .outline-navigator__row .outline-navigator__page {
+    width: 26px;
+  }
 }
 
 .outline-navigator__disclosure .review-icon { width: 16px; height: 16px; }

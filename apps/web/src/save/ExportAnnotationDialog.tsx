@@ -40,8 +40,8 @@ export function ExportAnnotationDialog(props: {
           error={props.error} errorId={errorId} inputRef={firstRef} />
       </div>
       <footer className="compact-editorial-modal__footer">
-        <button className="review-button" type="button" disabled={props.pending} onClick={props.onCancel}><span>Cancel</span></button>
-        <button className="review-button review-button--primary" type="button" disabled={props.pending}
+        <button className="review-button" type="button" title="Cancel export" disabled={props.pending} onClick={props.onCancel}><span>Cancel</span></button>
+        <button className="review-button review-button--primary" type="button" title="Export annotated PDF" disabled={props.pending}
           onClick={() => props.onConfirm(name)}>
           {props.pending ? <ReviewIcon name="loading" /> : null}<span>Export</span>
         </button>

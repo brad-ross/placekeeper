@@ -10,6 +10,8 @@ execution: code
 
 # Reduce GitHub Actions CI Minute Usage - Plan
 
+> **Status note (2026-09-29):** The per-pull-request gate this plan describes (R1, R5, AE1) is not currently active. `.github/workflows/ci.yml` was later switched to `workflow_dispatch` only ("Temporarily manual-only"), so pull requests run only `.github/workflows/static-web.yml`. The requirements below record the intended design; restoring the `pull_request` and `push` triggers brings it back. Until then, see [Run the real acceptance suites locally while CI is manual-only](../solutions/workflow-issues/run-real-acceptance-suites-while-ci-is-manual-only.md).
+
 ## Goal Capsule
 
 - **Objective:** Cut routine GitHub Actions consumption by moving ordinary validation off billed macOS runners, canceling obsolete work, and running each proof once without dropping meaningful Linux, Chromium, WebKit, visual, packaging, or release evidence.

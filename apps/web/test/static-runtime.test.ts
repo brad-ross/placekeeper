@@ -132,7 +132,8 @@ describe("static browser review runtime", () => {
     expect(markup).not.toContain("Sample document ·");
     expect(markup).not.toContain("Annotations must be exported manually");
     expect(markup).toContain("or drop a PDF here");
-    expect(markup).toContain("Horizontal scroll lock");
+    expect(markup).toContain("Keep up with changes");
+    expect(markup).not.toContain("Fit to width");
     expect(markup).not.toContain("64 MB maximum");
     expect(markup).not.toContain("CORS");
     expect(markup.indexOf("Upload PDF")).toBeLessThan(markup.indexOf('aria-label="Document URL"'));

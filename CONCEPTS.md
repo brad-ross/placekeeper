@@ -36,10 +36,23 @@ Evidence access is rechecked against the live association; an old handle cannot 
 ### Reference Tab
 A secondary view of a PDF passage that lets the reviewer inspect related material while keeping the main reading position separate.
 
+### Destination Band
+A transient mark over the passage a followed PDF link points to, so the reader can see exactly which spot the link meant.
+
+It is presentation only: never an annotation, never saved or exported.
+
 ### PDF Annotation Surface
 The particular Main view or Reference Tab, within a Document Generation, that supplied an annotation interaction.
 
 The same annotation can appear on multiple surfaces; shared annotation identity does not give one surface ownership of another surface's transient inspection.
+
+## Review toolbar
+
+### Toolbar Presentation
+One of an ordered set of compositions for the single-row review toolbar, from all control groups shown directly to groups tucked behind compact triggers, chosen by measuring what actually fits rather than by fixed breakpoints.
+*Avoid:* Responsive Toolbar Presentation, toolbar mode
+
+Groups collapse in a fixed priority order, with edit history first and document navigation last, and a compact trigger still shows its group's essential state. Controls whose availability depends on history or page position keep their place and are disabled rather than removed, so availability alone never changes the composition.
 
 ## Annotation authoring and recovery
 

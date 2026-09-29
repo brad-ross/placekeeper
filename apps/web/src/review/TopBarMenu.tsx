@@ -87,6 +87,9 @@ export function TopBarMenu({
       menu: { width: bounds.width, height: bounds.height },
       viewport: visibleReviewViewport(),
       alignment: 'end',
+      // The top bar's end controls sit 9px from the window edge; keep the
+      // window inset smaller so menus can still align under them.
+      margin: 8,
     });
     setPlacement((current) => current?.left === next.left
       && current.top === next.top

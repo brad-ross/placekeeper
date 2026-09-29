@@ -69,6 +69,8 @@ export interface CopyLinkControlProps extends CopyLinkActionData {
   readonly title?: string;
   readonly variant?: 'chrome' | 'annotation' | 'row' | 'popover';
   readonly presentation?: 'icon-only' | 'labeled';
+  /** Short visible text for the labeled presentation; the accessible name stays `ariaLabel`. */
+  readonly visibleLabel?: string;
   readonly buttonRole?: 'menuitem';
   readonly triggerRef?: Ref<HTMLButtonElement>;
   readonly feedbackPlacement?: 'floating' | 'inline';
@@ -100,6 +102,7 @@ export function CopyLinkControl({
   title = 'Copy link',
   variant = 'chrome',
   presentation = 'icon-only',
+  visibleLabel,
   buttonRole,
   triggerRef,
   feedbackPlacement = 'floating',
@@ -180,7 +183,7 @@ export function CopyLinkControl({
       >
         <ReviewIcon name="link" size={16} />
         {presentation === 'labeled' ? (
-          <span className="copy-link-control__label">{ariaLabel}</span>
+          <span className="copy-link-control__label">{visibleLabel ?? ariaLabel}</span>
         ) : null}
       </ReviewTooltipButton>
       {status.status === 'success' ? (

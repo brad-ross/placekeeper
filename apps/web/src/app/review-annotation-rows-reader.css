@@ -273,7 +273,6 @@
 
 .annotation-item__source { color: var(--review-ink-muted); }
 .annotation-item__source[data-source-treatment="struck"] { text-decoration: line-through; }
-.annotation-item__content-separator::after { color: var(--review-ink-quiet); content: " → "; }
 
 .full-annotation-reader {
   display: grid;

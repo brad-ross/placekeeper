@@ -76,7 +76,8 @@ html, body, #root {
   grid-template-columns: minmax(0, 1fr) 380px;
   gap: 70px;
   align-items: center;
-  padding: 72px 0 58px;
+  /* Tight enough that the whole demo fits in the first screen at 1440×900. */
+  padding: 40px 0 28px;
 }
 
 .landing-dot {
@@ -372,7 +373,7 @@ html, body, #root {
 .landing-demo-viewport {
   position: relative;
   width: 100%;
-  aspect-ratio: 1000 / 664;
+  aspect-ratio: 1000 / 600;
   overflow: hidden;
   border: 1px solid var(--review-border);
   border-radius: 13px;
@@ -384,7 +385,7 @@ html, body, #root {
   inset: 0;
   display: block;
   width: 1000px;
-  height: 664px;
+  height: 600px;
   border: 0;
   transform: scale(var(--demo-scale));
   transform-origin: top left;
@@ -396,7 +397,7 @@ html, body, #root {
   letter-spacing: -1px;
 }
 .static-launcher .landing-demo-explanation p {
-  margin-top: 16px;
+  margin-top: 0;
   color: var(--review-ink-muted);
   font-size: 16px;
   line-height: 1.8;
@@ -414,15 +415,17 @@ html, body, #root {
 }
 @media (max-width: 900px) {
   .landing-demo-row { grid-template-columns: 1fr; gap: 40px; }
-  .landing-demo-explanation { width: 100%; max-width: 580px; margin-inline: auto; text-align: center; }
-  .landing-demo-explanation ul { margin: 16px 0; padding-left: 0; list-style-position: inside; }
+  /* A centered block with left-aligned text keeps the bullets scannable. */
+  .landing-demo-explanation { width: 100%; max-width: 580px; margin-inline: auto; }
+  .landing-demo-explanation ul { margin: 16px 0; }
 
 }
 
 .landing-surfaces {
   display: grid;
   grid-template-columns: 380px minmax(0, 1fr);
-  align-items: center;
+  /* The screenshot starts level with the list it illustrates. */
+  align-items: start;
   row-gap: 48px;
   column-gap: clamp(48px, 6vw, 80px);
   padding: 54px 0;
@@ -540,7 +543,7 @@ body[data-landing-demo] { --review-focus: #888; --pk-focus: #888; }
 body[data-landing-demo] :is(button, input, textarea, [contenteditable="true"]):not(.review-chrome__page-input, .review-chrome__zoom-input, .reference-tab-segment__selector):focus-visible { outline: 2px solid #888 !important; outline-offset: 2px; box-shadow: none !important; }
 .static-launcher :is(.landing-github, .landing-invitations a:not(.landing-invitations__download), .review-workspace__mode-tab):active:not(:disabled) { background: #dedede; box-shadow: inset 0 1px 3px rgb(0 0 0 / 12%); }
 
-.landing-demo-selector { padding: 8px; margin-bottom: 32px; }
+.landing-demo-selector { padding: 8px; margin-bottom: 20px; }
 .landing-demo-selector .review-workspace__tabs .review-workspace__mode-tab { min-height: 42px !important; padding: 8px 15px; font-size: 16px; font-weight: 500; letter-spacing: -.3px; gap: 8px; }
 .landing-demo-selector .review-workspace__mode-tab > svg { width: 18px; height: 18px; }
 .static-launcher .landing-drop-hint { font-size: 13px; }

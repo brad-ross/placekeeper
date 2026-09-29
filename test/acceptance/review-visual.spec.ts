@@ -926,7 +926,7 @@ test('Outline pointer and keyboard states match the canonical tree', async ({ pa
   await inactiveDestination.focus();
   await expect(inactiveDestination).toBeFocused();
   await expect(inactiveDestination).toHaveCSS('outline-width', '2px');
-  await expect(inactiveDestination).toHaveCSS('outline-color', 'rgb(73, 103, 137)');
+  await expect(inactiveDestination).toHaveCSS('outline-color', 'rgb(47, 111, 196)');
   await expect(inactiveDestination).toHaveCSS('outline-offset', '3px');
   await expect(inactiveRow).toHaveCSS('outline-style', 'none');
 
@@ -941,7 +941,7 @@ test('Outline pointer and keyboard states match the canonical tree', async ({ pa
   await page.mouse.move(1, 1);
   await expect(copyAction).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
   await expect(copyAction).toHaveCSS('outline-width', '2px');
-  await expect(copyAction).toHaveCSS('outline-color', 'rgb(73, 103, 137)');
+  await expect(copyAction).toHaveCSS('outline-color', 'rgb(47, 111, 196)');
   await expect(copyAction).toHaveCSS('outline-offset', '3px');
   await expect(currentRow).toHaveCSS('outline-style', 'none');
 });

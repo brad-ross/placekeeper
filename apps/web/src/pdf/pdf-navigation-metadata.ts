@@ -50,6 +50,23 @@ function boundDisplayText(value: string, maxLength: number): string {
   return value;
 }
 
+/**
+ * Sanitizes untrusted text extracted from a PDF page (for example the text
+ * under a link) with the same rules as author labels: controls, bidi
+ * overrides, and markup delimiters are removed, whitespace is collapsed, and
+ * the result is bounded. Returns null when nothing displayable remains.
+ */
+export function sanitizePdfDisplayText(
+  value: unknown,
+  maxLength: number = MAX_PDF_NAVIGATION_LABEL_LENGTH,
+): string | null {
+  if (!Number.isSafeInteger(maxLength) || maxLength < 1) {
+    throw new Error('PDF navigation label length must be a positive safe integer.');
+  }
+  const normalized = normalizeAuthorText(value);
+  return normalized === null ? null : boundDisplayText(normalized, maxLength);
+}
+
 /** Creates inert, bounded labels while preserving trusted page context separately. */
 export function createPdfNavigationMetadata(
   input: PdfNavigationMetadataInput,

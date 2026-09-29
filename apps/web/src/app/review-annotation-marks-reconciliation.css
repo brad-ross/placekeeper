@@ -47,6 +47,15 @@
   background: var(--pdf-edit-ink);
 }
 
+/* Insertions are blue: a filled marker at the insertion point, painted like
+   the other marks, with a small, steady caret below the text. */
+[data-pdf-mark-style="insert"] {
+  --pdf-mark-ink: var(--pdf-insert-ink);
+  --pdf-edit-ink: var(--pdf-insert-ink);
+  --pdf-edit-fill: var(--pdf-insert-fill);
+  background: var(--pdf-edit-fill);
+}
+
 /* Saved insertions retain a small, steady caret below the text. */
 [data-pdf-mark-style="insert"]::after {
   content: '';
@@ -110,9 +119,17 @@
 [data-owned-mark="pageNote"][data-corresponding="true"] {
   outline-color: var(--pdf-note-ink);
 }
+/* A selected mark is outlined in its own ink, like a hovered one. */
 [data-owned-mark][data-active="true"]:not([data-owned-mark="insert"]):not([data-corresponding="true"]) {
-  outline: 1.5px solid var(--pdf-active-ink);
+  outline: 1.5px solid var(--pdf-mark-ink);
   outline-offset: 0;
+}
+[data-owned-mark="highlight"][data-active="true"],
+[data-owned-mark="pageNote"][data-active="true"] {
+  outline-color: var(--pdf-note-ink);
+}
+[data-owned-mark="insert"]:is([data-corresponding="true"], [data-active="true"]) {
+  --pdf-edit-fill: rgb(56 132 230 / 36%);
 }
 [data-owned-mark="insert"]:is([data-corresponding="true"], [data-active="true"])::before {
   content: '';
@@ -128,7 +145,7 @@
 [data-owned-mark="insert"][data-active="true"]::before,
 .pdf-workspace:has(.owned-mark-focus-proxy:focus-visible)
   [data-owned-mark="insert"][data-corresponding="true"]::before {
-  outline: 1.5px solid var(--pdf-active-ink);
+  outline: 1.5px solid var(--pdf-insert-ink);
   outline-offset: 1px;
 }
 

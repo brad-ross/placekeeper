@@ -1,4 +1,4 @@
-import type { Position, Rotation, Size } from '@embedpdf/models';
+import type { Position, Rect, Rotation, Size } from '@embedpdf/models';
 
 import type { CaretAnchor, PdfSpaceRect } from './selection-anchor.js';
 import type { ReliabilityDiagnostic } from './text-reliability.js';
@@ -49,6 +49,12 @@ export interface ViewerPdfLinkInvocation {
   readonly opener: HTMLButtonElement;
   /** Fixed activation-time geometry for chooser placement. */
   readonly clientRect: ViewerFixedClientRect;
+  /**
+   * Every link area on the source page whose classified target identity matches
+   * this link's, including the clicked area, in reading order. Page device
+   * space (top-left origin, PDF points), the same space as the link rect.
+   */
+  readonly sourceRects: readonly Rect[];
 }
 
 export interface ViewerPdfLinkUnavailable {
@@ -146,6 +152,40 @@ export function fixedViewerClientRect(rect: Pick<DOMRectReadOnly,
     width: rect.width,
     height: rect.height,
   });
+}
+
+function usablePageRect(rect: Rect): boolean {
+  const { origin, size } = rect;
+  return Number.isFinite(origin.x) && Number.isFinite(origin.y)
+    && Number.isFinite(size.width) && Number.isFinite(size.height)
+    && size.width > 0 && size.height > 0;
+}
+
+/**
+ * Copies page-space link rects into frozen values in reading order: rects are
+ * grouped into lines when their vertical centers fall inside a line's span,
+ * lines run top to bottom, and rects within a line run left to right.
+ */
+export function fixedPdfLinkSourceRects(rects: readonly Rect[]): readonly Rect[] {
+  const byTop = rects
+    .filter(usablePageRect)
+    .map((rect): Rect => Object.freeze({
+      origin: Object.freeze({ x: rect.origin.x, y: rect.origin.y }),
+      size: Object.freeze({ width: rect.size.width, height: rect.size.height }),
+    }))
+    .sort((a, b) => a.origin.y - b.origin.y || a.origin.x - b.origin.x);
+  const lines: { top: number; bottom: number; rects: Rect[] }[] = [];
+  for (const rect of byTop) {
+    const center = rect.origin.y + rect.size.height / 2;
+    const line = lines.at(-1);
+    if (line !== undefined && center >= line.top && center <= line.bottom) {
+      line.rects.push(rect);
+      line.bottom = Math.max(line.bottom, rect.origin.y + rect.size.height);
+    } else {
+      lines.push({ top: rect.origin.y, bottom: rect.origin.y + rect.size.height, rects: [rect] });
+    }
+  }
+  return Object.freeze(lines.flatMap((line) => line.rects.sort((a, b) => a.origin.x - b.origin.x)));
 }
 
 export function dispatchNeutralViewerPointerUp(target: EventTarget, event: {

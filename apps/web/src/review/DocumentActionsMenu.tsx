@@ -67,6 +67,8 @@ export function reviewExportPresentation(input: {
 
 export interface DocumentActionsMenuProps {
   readonly documentTitle: string;
+  /** The PDF's own title when it has one; the filename otherwise. */
+  readonly displayTitle?: string;
   readonly savedLabel: string;
   readonly showSaveStatusDot?: boolean;
   readonly savePhase?: 'clean' | 'saving' | 'not-saved';
@@ -101,9 +103,15 @@ const EXPORT_OUTCOME_MESSAGES: Readonly<Record<ExportOutcome, string>> = {
 
 export const DocumentActionsEnabled = createContext(true);
 
+/** Names the document by its title, keeping the filename when the two differ. */
+export function documentIdentityLabel(displayTitle: string, filename: string): string {
+  return displayTitle === filename ? filename : `${displayTitle}, ${filename}`;
+}
+
 export function DocumentActionsMenu({
   showSaveStatusDot = true,
   documentTitle,
+  displayTitle = documentTitle,
   savedLabel,
   savePhase = 'clean',
   presentation,
@@ -267,6 +275,7 @@ export function DocumentActionsMenu({
     resultMessage ? resultId : '',
   ].filter(Boolean).join(' ');
   const exportLabel = pending ? 'Exporting…' : outcome === 'failure' ? 'Retry export' : 'Export';
+  const identityLabel = documentIdentityLabel(displayTitle, documentTitle);
 
   return <div
     ref={rootRef}
@@ -276,13 +285,13 @@ export function DocumentActionsMenu({
     onBlur={onBlur}
   >
     <ReviewTooltipButton
-      label={enabled ? `${documentTitle}, ${savedLabel}. Open document actions` : documentTitle}
-      tooltip={enabled ? `${documentTitle} — Save options` : documentTitle}
+      label={enabled ? `${identityLabel}, ${savedLabel}. Open document actions` : identityLabel}
+      tooltip={documentTitle}
       ref={triggerRef}
       type="button"
       className="review-chrome__save-identity document-actions__trigger"
       data-document-actions-trigger
-      aria-label={enabled ? `${documentTitle}, ${savedLabel}. Open document actions` : documentTitle}
+      aria-label={enabled ? `${identityLabel}, ${savedLabel}. Open document actions` : identityLabel}
       aria-haspopup={enabled ? "menu" : undefined}
       aria-expanded={enabled ? open : undefined}
       aria-controls={enabled ? menuId : undefined}
@@ -293,7 +302,7 @@ export function DocumentActionsMenu({
       }}
     >
       <ReviewIcon name="file" size={16} />
-      <span className="review-chrome__filename">{documentTitle}</span>
+      <span className="review-chrome__filename">{displayTitle}</span>
       {!showSaveStatusDot || savePhase === 'clean' ? null : <span className="review-chrome__save-dot" data-save-phase={savePhase} aria-hidden="true" />}
       <span className="sr-only" data-review-saved-status>{savedLabel}</span>
     </ReviewTooltipButton>

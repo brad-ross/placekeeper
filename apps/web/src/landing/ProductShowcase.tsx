@@ -10,8 +10,8 @@ const features = [
   },
   {
     id: 'reference', label: 'Follow references', icon: 'references',
-    description: 'Read straight through or follow a thread. Open tables and appendices in a separate scrolling space, then move back and forward through the places you’ve visited.',
-    actions: ['Click Appendix A on page 15.', 'Choose Open in References.', 'Scroll the reference, then follow another link.'],
+    description: 'Read straight through or follow a thread. Every link previews where it goes. Open a citation, table, or appendix beside your place: its tab is named for what it points to, and the passage it links to stays highlighted.',
+    actions: ['Click Appendix A on page 15 to preview it.', 'Choose Open in References.', 'Scroll the reference, then follow another link.'],
   },
   {
     id: 'annotate', label: 'Make comments', icon: 'annotations',
@@ -79,7 +79,8 @@ export function ProductShowcase() {
         sandbox="allow-scripts allow-same-origin allow-forms" />
       </div>
       <div className="landing-demo-explanation">
-        <h2>{feature.label}</h2>
+        {/* The selected tab already names the demo on screen. */}
+        <h2 className="sr-only">{feature.label}</h2>
         <p>{feature.description}</p>
         <ul>{feature.actions.map((action) => <li key={action}>{action}</li>)}</ul>
       </div>

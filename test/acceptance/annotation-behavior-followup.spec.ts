@@ -1324,7 +1324,8 @@ test('uses the hover card and explicitly expands long PDF annotations in a delet
   await expect(peek.locator('.annotation-item__excerpt-main')).toHaveCSS('-webkit-line-clamp', '3');
   await expect(peek).toHaveCSS('border-radius', '16px');
   await expect(peek).not.toHaveCSS('box-shadow', 'none');
-  await expect(peek.locator('.row-action-group')).toHaveCount(0);
+  // The hover preview keeps its actions mounted but hidden until popup intent.
+  await expect(peek.locator('.row-action-group__direct')).toHaveCSS('opacity', '0');
   await peek.hover();
   await expect(peek).toBeVisible();
   await page.mouse.move(1, 1);
@@ -1429,7 +1430,9 @@ test.describe('passage edit continuity', () => {
   for (const tray of [tools, references]) {
     await expect(tray).toBeVisible();
     await expect(tray).toHaveAttribute('data-authoring-takeover', 'true');
-    await expect(tray).toHaveAttribute('inert', '');
+    // References stay usable while editing, so a Reference page can be annotated.
+    if (tray === tools) await expect(tray).toHaveAttribute('inert', '');
+    else await expect(tray).not.toHaveAttribute('inert');
     await expect(tray).toHaveAttribute('aria-hidden', 'false');
     await expect(tray).toHaveAttribute('data-edit-mount-probe', 'stable');
   }

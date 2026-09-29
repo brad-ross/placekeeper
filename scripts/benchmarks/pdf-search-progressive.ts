@@ -6,7 +6,7 @@ const text = 'x '.repeat(150);
 const snapshot: PdfSearchPageSnapshot = {
   text,
   glyphs: Array.from(text, (_, index) => ({ origin: { x: index * 5, y: 10 }, size: { width: 5, height: 8 } })),
-  geometry: { width: 1600, height: 800, cropLeft: 0, cropTop: 0, cropBottom: 0 },
+  geometry: { width: 1600, height: 800, cropLeft: 0, cropBottom: 0 },
   textRects: [{ content: text, rect: { origin: { x: 0, y: 10 }, size: { width: 1500, height: 8 } } }],
 };
 for (const pageCount of [250, 1000]) {

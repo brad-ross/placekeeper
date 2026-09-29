@@ -78,7 +78,8 @@ for (const width of [1280, 620, 390]) {
     await outline.hover();
     const outlineBounds = (await outline.boundingBox())!;
     const outlineTitleBounds = (await outline.locator('.outline-navigator__title').boundingBox())!;
-    expect(outlineBounds.height - outlineTitleBounds.height).toBeCloseTo(20, 1);
+    // 32px outline rows around a single title line (reader polish).
+    expect(outlineBounds.height - outlineTitleBounds.height).toBeCloseTo(12.5, 1);
     const outlineHover = await rowPaint(outline);
     expect(outlineHover.background).toBe('rgb(231, 231, 231)');
     await expect(outline.locator('.outline-navigator__page')).toHaveCSS('opacity', '0');
@@ -149,7 +150,7 @@ for (const width of [1280, 620, 390]) {
       await expect(actions.locator('button').first()).toBeFocused();
       await expect(actions).toHaveCSS('opacity', '1');
       await expect(number).toHaveCSS('opacity', '0');
-      await expect(actions.locator('button').first()).toHaveCSS('outline-color', 'rgb(73, 103, 137)');
+      await expect(actions.locator('button').first()).toHaveCSS('outline-color', 'rgb(47, 111, 196)');
       await leaveRow(page);
     }
   });

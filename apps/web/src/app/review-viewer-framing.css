@@ -326,22 +326,23 @@
   display: none;
 }
 
+/* A plain text cursor: thin, dark grey, blinking on and off at the system rate. */
 .review-insertion-caret {
   position: fixed;
   z-index: 3;
-  width: 1.25px;
+  width: 1px;
   height: 1.15rem;
-  background: var(--pdf-active-ink);
-  border-radius: 1px;
+  background: #333;
+  border-radius: 0;
   box-shadow: none;
   pointer-events: none;
   transform: translate(-50%, -50%);
-  animation: review-insertion-caret-blink 1.2s ease-in-out infinite;
+  animation: review-insertion-caret-blink 1.06s step-end infinite;
 }
 
 @keyframes review-insertion-caret-blink {
-  0%, 40%, 100% { opacity: 1; }
-  60%, 80% { opacity: .2; }
+  0% { opacity: 1; }
+  50% { opacity: 0; }
 }
 
 .review-insertion-caret[hidden] { display: none; }

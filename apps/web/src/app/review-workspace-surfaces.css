@@ -120,7 +120,7 @@
   position: absolute;
   content: '';
   border-radius: var(--review-radius-round);
-  background: color-mix(in srgb, var(--review-focus) 55%, transparent);
+  background: var(--review-border-strong);
   opacity: 0;
   transition: opacity 100ms ease-out;
 }
@@ -294,6 +294,19 @@
 
 .review-workspace__outline-toggle {
   margin-left: auto;
+}
+
+/* The annotation count takes the collapse toggle's corner of the header. */
+.review-workspace__annotation-count {
+  display: grid;
+  min-width: var(--review-control-compact);
+  height: var(--review-control-compact);
+  margin-left: auto;
+  padding-inline: 4px;
+  place-items: center;
+  color: var(--review-ink-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
 }
 
 .review-workspace__outline-toggle > .review-icon {

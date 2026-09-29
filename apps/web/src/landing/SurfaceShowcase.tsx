@@ -27,7 +27,7 @@ export function SurfaceShowcase() {
   return <section className="landing-surfaces" aria-label="Placekeeper app surfaces">
     <h2>Use Placekeeper where you work</h2>
     <div className="landing-surfaces__list">
-      {surfaces.map((surface) => <button key={surface.id} type="button" aria-pressed={surface.id === selected.id}
+      {surfaces.map((surface) => <button key={surface.id} type="button" title={`Show ${surface.label}`} aria-pressed={surface.id === selected.id}
         aria-controls={`${id}-illustration`} onClick={() => setSelected(surface)}>
         {surface.icon ? <img className="landing-surface-icon" src={surface.icon} alt="" width="28" height="28" /> : <Globe className="landing-surface-icon" aria-hidden="true" size={28} />}
         <span><strong>{surface.label}</strong><span>{surface.description}</span></span>

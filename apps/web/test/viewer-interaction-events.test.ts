@@ -12,6 +12,7 @@ import {
   REFERENCE_PDF_DOCUMENT_ID,
 } from '../src/pdf/viewer-document-ids.js';
 import {
+  fixedPdfLinkSourceRects,
   fixedViewerClientRect,
   isContextPointerGesture,
   isReverseSyncTexPointerGesture,
@@ -127,6 +128,44 @@ describe('viewer page interaction coordinates', () => {
       left: 10, top: 20, right: 40, bottom: 60, width: 30, height: 40,
     });
     expect(Object.isFrozen(fixed)).toBe(true);
+  });
+
+  describe('PDF link source rects', () => {
+    const rect = (x: number, y: number, width = 20, height = 10) => ({
+      origin: { x, y }, size: { width, height },
+    });
+
+    it('copies and freezes page-space rects so live annotation objects are not retained', () => {
+      const live = rect(10, 20);
+      const fixed = fixedPdfLinkSourceRects([live]);
+      live.origin.x = 999;
+
+      expect(fixed).toEqual([rect(10, 20)]);
+      expect(Object.isFrozen(fixed)).toBe(true);
+      expect(Object.isFrozen(fixed[0])).toBe(true);
+      expect(Object.isFrozen(fixed[0]!.origin)).toBe(true);
+      expect(Object.isFrozen(fixed[0]!.size)).toBe(true);
+    });
+
+    it('orders rects top-to-bottom by line, then left-to-right within a line', () => {
+      const secondLineLeft = rect(10, 40);
+      const firstLineRight = rect(200, 11, 30, 8);
+      const firstLineLeft = rect(50, 10);
+      const secondLineRight = rect(120, 42);
+
+      expect(fixedPdfLinkSourceRects([
+        secondLineRight, firstLineRight, secondLineLeft, firstLineLeft,
+      ])).toEqual([firstLineLeft, firstLineRight, secondLineLeft, secondLineRight]);
+    });
+
+    it('drops non-finite or empty geometry instead of emitting it', () => {
+      expect(fixedPdfLinkSourceRects([
+        rect(Number.NaN, 10),
+        rect(10, 10, 0, 10),
+        rect(10, 10, 10, -1),
+        rect(5, 5),
+      ])).toEqual([rect(5, 5)]);
+    });
   });
 });
 

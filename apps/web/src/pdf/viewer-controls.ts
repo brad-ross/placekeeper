@@ -39,6 +39,8 @@ export interface InitializedViewerControls extends ViewerControls {
 
 export const VIEWER_ZOOM_MIN_PERCENT = 20;
 export const VIEWER_ZOOM_MAX_PERCENT = 6000;
+/** Fit Width stops here so wide windows keep body text at a comfortable reading size. */
+export const VIEWER_READING_FIT_MAX_PERCENT = 150;
 
 const UNAVAILABLE = 'Viewer controls become available when the PDF is ready.';
 const PAGE_UNAVAILABLE = 'Page controls become available when PDF navigation is ready.';

@@ -6,9 +6,11 @@
   --pdf-note-ink: #b1840d;
   --pdf-edit-fill: rgb(105 148 169 / 23%);
   --pdf-edit-ink: #5e7588;
+  /* Insertions share the link-destination blue. */
+  --pdf-insert-fill: rgb(56 132 230 / 24%);
+  --pdf-insert-ink: #2f6fc4;
   --pdf-correction-fill: rgb(218 78 78 / 20%);
   --pdf-correction-ink: #c34f54;
-  --pdf-active-ink: #496789;
   --pk-font-ui: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --pk-canvas: #f7f7f7;
   --pk-tray: #f0f0f0;
@@ -18,7 +20,7 @@
   --pk-border: #e5e5e5;
   --pk-hover: #e7e7e7;
   --pk-selected: #fafafa;
-  --pk-focus: #496789;
+  --pk-focus: var(--pdf-insert-ink);
   --pk-radius-control: 10px;
   --pk-radius-tray: 16px;
   --pk-space: 12px;
@@ -73,7 +75,9 @@
   --review-chrome-height: 50px;
   grid-template-columns: minmax(0, max-content) max-content minmax(max-content, 1fr);
   gap: var(--pk-toolbar-gap);
-  padding-inline: 12px;
+  /* The end controls sit as far from the sides as from the top: the 32px
+     controls are centred vertically, so match that inset horizontally. */
+  padding-inline: calc((var(--review-chrome-height) - 32px) / 2);
   border: 0;
   color: var(--pk-ink);
   background: var(--pk-canvas);
@@ -84,11 +88,18 @@
   gap: var(--pk-toolbar-gap);
 }
 
+/* One cap for the identity and its trigger, so a long PDF title truncates
+   without leaving a gap before the page controls. */
+.review-chrome__identity > .document-actions {
+  min-width: 0;
+  max-width: 320px;
+}
+
 .review-chrome .review-chrome__save-identity,
 .review-chrome__identity .document-actions__trigger {
   width: max-content;
   flex: 0 1 auto;
-  max-width: min(280px, 100%);
+  max-width: min(320px, 100%);
   min-width: 0;
   min-height: 32px;
   justify-content: flex-start;
@@ -107,7 +118,7 @@
 .review-chrome__filename {
   width: auto;
   min-width: 0;
-  max-width: 250px;
+  max-width: none;
   overflow: hidden;
   font: inherit;
   text-overflow: ellipsis;
@@ -157,6 +168,16 @@
     pointer-events: auto;
   }
 
+  /* History keeps fixed slots: an unavailable Back or Forward hides with the
+     bar at rest and shows at the shared disabled opacity when revealed. */
+  [data-review-chrome] [data-main-history]:disabled {
+    opacity: 0;
+  }
+
+  [data-review-chrome]:is(:hover, :has(:focus-visible, [aria-expanded="true"])) [data-main-history]:disabled {
+    opacity: .35;
+  }
+
   /* Prevent hidden history controls from painting without removing them from
      keyboard navigation or the accessibility tree. */
   [data-review-chrome] [data-main-history] {
@@ -172,13 +193,18 @@
   gap: 2px;
 }
 
-.review-chrome__edit-cluster,
 .review-chrome__navigation-cluster {
   gap: var(--pk-toolbar-gap);
 }
 
+/* Undo/Redo and Back/Forward are pairs: their buttons touch, so the icons sit
+   close together while the groups keep the toolbar's spacing between them. */
+.review-chrome__edit-cluster {
+  gap: 0;
+}
+
 .review-chrome__navigation-cluster > [data-main-history] + [data-main-history] {
-  margin-left: calc(2px - var(--pk-toolbar-gap));
+  margin-left: calc(0px - var(--pk-toolbar-gap));
 }
 
 .review-chrome button,
@@ -263,13 +289,20 @@
   appearance: textfield;
 }
 
-/* WebKit pageZoom scales ch widths twice; em tracks only the text size. */
-.review-chrome__page-input { width: 2em; text-align: center; }
+/* WebKit pageZoom scales ch widths twice; em tracks only the text size. The
+   page input is sized to its digits (inline width) so "1 / 33" keeps even
+   spacing, with left padding that mirrors the disclosure's right padding. */
+.review-chrome__page-editor > .review-chrome__page-input {
+  box-sizing: border-box;
+  width: calc(2em + 6px);
+  padding-left: 6px;
+  text-align: right;
+}
 .review-chrome__zoom-input { width: 2em; text-align: right; }
 
 .review-chrome__page-disclosure {
   min-width: 0 !important;
-  padding: 0 6px 0 0 !important;
+  padding: 0 6px 0 .3em !important;
   justify-content: flex-start !important;
   gap: 6px !important;
   border-radius: 0 8px 8px 0 !important;
@@ -277,11 +310,12 @@
   font: 400 13px/20px var(--pk-font-ui) !important;
 }
 
+/* The same 6px lead as the page input, so every chrome gap reads alike. */
 .review-chrome__zoom-value {
   display: inline-flex;
   min-height: 32px;
   align-items: center;
-  padding-left: 5px;
+  padding-left: 6px;
 }
 
 .review-chrome__zoom-suffix {
@@ -293,10 +327,16 @@
   color: var(--pk-ink);
 }
 
+/* The "%" suffix is the menu button, mirroring the page group's "/ 33", with
+   the same 6px trailing padding. */
 .review-chrome__zoom-disclosure {
-  width: 20px !important;
-  min-width: 20px !important;
-  padding: 0 !important;
+  width: auto !important;
+  min-width: 0 !important;
+  padding: 0 6px 0 0 !important;
+  justify-content: flex-start !important;
+  border-radius: 0 8px 8px 0 !important;
+  color: var(--pk-ink) !important;
+  font: 400 13px/20px var(--pk-font-ui) !important;
 }
 
 .review-chrome .review-chrome__page-disclosure:hover:not(:disabled),
@@ -322,13 +362,14 @@
 }
 
 .top-bar-menu__surface {
-  padding: 7px;
-  gap: 3px;
+  /* The same inset as the text selection toolbar. */
+  padding: 5px;
+  gap: 2px;
   border-color: #e0e0e0;
   font: 400 13px/20px var(--pk-font-ui);
 }
 
-.top-bar-menu__surface .review-chrome__control-cluster { gap: 3px; }
+.top-bar-menu__surface .review-chrome__control-cluster { gap: 2px; }
 
 .top-bar-menu__surface [data-review-horizontal-lock][aria-checked="true"] {
   background: var(--pk-selected);
@@ -385,4 +426,12 @@
   font: 400 12px/1.4 var(--pk-font-ui);
   overflow-wrap: anywhere;
   pointer-events: none;
+}
+
+/* Narrow bars have no room for fixed history slots; unavailable history
+   actions give their space back to the page and zoom controls. */
+@media (max-width: 759px) {
+  .review-chrome :is(.review-chrome__history-control, [data-main-history]):disabled:not([aria-busy="true"]) {
+    display: none;
+  }
 }

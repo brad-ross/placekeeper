@@ -23,9 +23,11 @@ import {
   mergeAuthoringPreviewProjections,
 } from '../review/annotation-projection.js';
 import {
+  pageLinkAnnotationsFromRegistry,
   sourceAnnotationLinkRenderers,
 } from './PdfLinkControl.js';
-import { ReferencePdfViewport } from './ReferencePdfViewport.js';
+import { DestinationBandLayer, ReferencePdfViewport } from './ReferencePdfViewport.js';
+import type { DestinationBand } from '../review/navigation-coordinator.js';
 import {
   buildAnnotationRenderingState,
   PdfAnnotationLayers,
@@ -89,6 +91,10 @@ export interface PdfWorkspaceProps {
   onReferenceScrollIntent?: (position: ReferenceScrollPosition) => void;
   referenceTabIdentity?: string | null;
   searchResults?: readonly PdfSearchResult[];
+  /** Transient main-reader Destination Band (R12). */
+  mainDestinationBand?: DestinationBand | null;
+  /** The active References tab's Destination Band (R10). */
+  referenceDestinationBand?: DestinationBand | null;
 }
 
 const PDF_TEXT_SELECTION_STYLE = {
@@ -134,6 +140,8 @@ export function PdfWorkspace({
   onReferenceScrollIntent,
   referenceTabIdentity = null,
   searchResults = [],
+  mainDestinationBand = null,
+  referenceDestinationBand = null,
 }: PdfWorkspaceProps) {
   const previewLimit = useContext(MainDocumentPreviewLimit);
   const pressedPrimaryPointers = useRef(new Map<number, HTMLDivElement>());
@@ -184,7 +192,7 @@ export function PdfWorkspace({
         plugins={plugins}
         {...(onInitialized === undefined ? {} : { onInitialized })}
       >
-        {({ documents, pluginsReady }) => {
+        {({ documents, pluginsReady, registry }) => {
           const mainDocument = documents[MAIN_PDF_DOCUMENT_ID];
           if (mainDocument?.status === 'error') {
             return <div className="pdf-workspace__loading" role="alert">
@@ -223,6 +231,7 @@ export function PdfWorkspace({
             sourceScope: 'main',
             documentGeneration,
             pageCount: activePdf.pages.length,
+            pageLinkAnnotations: pageLinkAnnotationsFromRegistry(registry, MAIN_PDF_DOCUMENT_ID),
             ...(onViewerInteraction === undefined ? {} : { onInteraction: onViewerInteraction }),
           });
           const referenceDocument = documents[REFERENCE_PDF_DOCUMENT_ID];
@@ -457,6 +466,13 @@ export function PdfWorkspace({
                             })
                         ))}
                       </div>
+                      <DestinationBandLayer
+                        band={mainDestinationBand}
+                        page={activePdf.pages[layout.pageIndex]}
+                        layout={layout}
+                        documentRotation={mainDocument.rotation}
+                        documentGeneration={documentGeneration}
+                      />
                       <PdfAnnotationLayers
                         documentId={MAIN_PDF_DOCUMENT_ID}
                         engine={engine}
@@ -513,6 +529,7 @@ export function PdfWorkspace({
                 tabIdentity={referenceTabIdentity}
                 host={referenceViewportHost}
                 searchResultsByPage={searchResultsByPage}
+                destinationBand={referenceDestinationBand}
                 engine={engine}
                 annotationsByPage={annotationsByPage}
                 geometryByPage={geometryByPage}

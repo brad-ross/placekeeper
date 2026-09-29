@@ -188,7 +188,7 @@ describe('App interaction boundaries', () => {
       page: { size: { width: 612, height: 792 }, rotation: Rotation.Degree0 },
       documentRotation: Rotation.Degree0,
       pageBounds: { left: 100, top: 50, width: 1_224, height: 1_584 },
-    })).toEqual({ left: 398, top: 244, width: 1.25, height: 32, rotation: Rotation.Degree0 });
+    })).toEqual({ left: 398, top: 244, width: 1, height: 32, rotation: Rotation.Degree0 });
   });
 
   it('drops a deferred caret read after its viewer generation becomes stale', async () => {

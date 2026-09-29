@@ -91,6 +91,26 @@ function targetAnchor(target: ReviewItem | PendingReviewDraftV1): ReviewAnchorEv
   return "payload" in target ? anchorEvidenceFromReviewItem(target) : target.anchor;
 }
 
+/** Text that shows where an insertion or page note used to sit, so its new
+ * place can be found. Selection anchors already show their own quoted text. */
+function priorLocationContext(
+  target: ReviewItem | PendingReviewDraftV1,
+): { readonly label: string; readonly text: string } | null {
+  const anchor = targetAnchor(target);
+  if (anchor.kind === "caret") {
+    const left = anchor.leftContext.trimStart();
+    const right = anchor.rightContext.trimEnd();
+    if (left.trim() === "" && right.trim() === "") return null;
+    return { label: "Previously between", text: `${left}▏${right}` };
+  }
+  if (anchor.kind === "page") {
+    const nearby = anchor.nearbyText?.trim();
+    if (!nearby || nearby === `Page ${anchor.pageIndex + 1}`) return null;
+    return { label: "Previously near", text: nearby };
+  }
+  return null;
+}
+
 function selectionEvidence(
   update: SelectionUpdate,
 ): Extract<ReviewAnchorEvidenceV1, { readonly kind: "selection" }> | null {
@@ -863,6 +883,7 @@ export function ReconciliationWorkspace(props: ReconciliationWorkspaceProps) {
     const title = detail.mode === "reattach"
       ? reattachmentTitle(activeRecord.kind)
       : `${detail.mode === "apply" ? "Apply" : "Discard"} ${typeLabel.toLocaleLowerCase()}`;
+    const priorContext = priorLocationContext(activeRecord.value);
     const pageDescription = projectedRecord.lastPageNumber === undefined
       ? `page ${projectedRecord.pageNumber}`
       : `pages ${projectedRecord.pageNumber}–${projectedRecord.lastPageNumber}`;
@@ -911,6 +932,10 @@ export function ReconciliationWorkspace(props: ReconciliationWorkspaceProps) {
       <FullAnnotationReaderBody
         record={projectedRecord}
         before={message ? <p className="reconciliation-workspace__message" role="status">{message}</p> : null}
+        after={detail.mode === "reattach" && priorContext !== null ? <div className="reconciliation-workspace__prior-context" data-reattachment-prior-context>
+          <h3>{priorContext.label}</h3>
+          <p>{priorContext.text}</p>
+        </div> : null}
       />
       {detail.mode === "reattach" && candidate !== null ? <section className="reconciliation-workspace__resolution" data-reattachment-selection-mode>
         <p className="reconciliation-workspace__instruction" role={candidate.anchor === null ? "alert" : "status"}>
