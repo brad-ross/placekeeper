@@ -10,6 +10,7 @@ import {
   type CodexPendingPresentation,
 } from "../../../../packages/core/src/codex-mcp-protocol.js";
 import { digestSecretHex } from "../../../../packages/core/src/session-security.js";
+import type { PlacekeeperLinkLocation } from "../../../../packages/core/src/placekeeper-link.js";
 import type { MatchedRestartReconnectTicket } from "../context/restart-reconnect-store.js";
 import type { TaskBindingAuthorityCheck } from "../context/task-binding-registry.js";
 import { CodexServiceRuntimeBackend } from "./codex-runtime-backend.js";
@@ -22,6 +23,7 @@ type Scope = NonNullable<ReturnType<SessionBroker["nativeAdmissionScope"]>>;
 
 interface Launch {
   scope: Scope;
+  readonly requestedLocation?: PlacekeeperLinkLocation;
   readonly handoff: string;
   readonly bindProof: string;
   readonly admissionKey: string;
@@ -145,6 +147,7 @@ export class CodexRuntimeManager {
   stageLaunch(input: {
     readonly sessionId: string;
     readonly kind: "opened" | "focused";
+    readonly requestedLocation?: PlacekeeperLinkLocation;
   }): CodexNativeLaunchSuccess | undefined {
     this.#sweep();
     const scope = this.#broker.nativeAdmissionScope(input.sessionId);
@@ -164,6 +167,7 @@ export class CodexRuntimeManager {
     const expiresAtMs = this.#now().getTime() + this.#ttlMs;
     this.#launches.set(digestSecretHex(handoff), {
       scope,
+      ...(input.requestedLocation === undefined ? {} : { requestedLocation: input.requestedLocation }),
       handoff,
       bindProof,
       admissionKey,
@@ -596,7 +600,9 @@ export class CodexRuntimeManager {
     panel.active = active;
     panel.leaseExpiresAtMs = this.#now().getTime() + this.#panelLeaseMs;
     this.#backend?.attach({ sessionId: panel.launch.scope.reviewSessionId, taskSessionId: panel.launch.owner!,
-      runtimeId: active.runtimeId, attemptId: active.attemptId, generation: active.generation });
+      runtimeId: active.runtimeId, attemptId: active.attemptId, generation: active.generation,
+      ...(panel.launch.requestedLocation === undefined ? {} : { requestedLocation: panel.launch.requestedLocation }),
+    });
     return active;
   }
 

@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { readFile, realpath } from "node:fs/promises";
 import { join, sep } from "node:path";
+import type { PlacekeeperLinkLocation } from "../../../../packages/core/src/placekeeper-link.js";
 import type { CodexAppRequest, CodexResourceDescriptor } from "../../../../packages/core/src/codex-mcp-protocol.js";
 import { sanitizeCodexReviewRuntimeResponse, type ReviewRuntimeBrokerMethod } from "../../../../packages/core/src/review-runtime-protocol.js";
 import { ChromeRuntimeOperationJournal } from "../browser/runtime-operation-journal.js";
@@ -16,6 +17,7 @@ export interface CodexActiveScope {
   readonly runtimeId: string;
   readonly attemptId: string;
   readonly generation: number;
+  readonly requestedLocation?: PlacekeeperLinkLocation;
 }
 interface Resource {
   readonly descriptor: CodexResourceDescriptor;
@@ -114,6 +116,7 @@ export class CodexServiceRuntimeBackend {
         state: runtime?.state, activeAuthoringDraftIds: runtime?.activeAuthoringDraftIds,
         scope: scopeValue, saveStatus: this.#broker.saveStatus(scope.sessionId),
         protected: this.#broker.chromeProtected(scope.sessionId),
+        ...(record.scope.requestedLocation === undefined ? {} : { location: record.scope.requestedLocation }),
         resources: Object.fromEntries(Object.entries(resources).map(([name, resource]) => [name, resource.descriptor.handle])),
       });
       if (projected === undefined) throw new Error("invalid-service-response");

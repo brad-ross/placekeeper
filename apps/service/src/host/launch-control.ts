@@ -187,6 +187,7 @@ export type PlacekeeperControlRequest =
   | { readonly kind: "link-open"; readonly request: LinkOpenRequest }
   | {
       readonly kind: "claim-binding";
+      readonly native?: true;
       readonly taskSessionId: string;
       readonly reviewSessionId: string;
       readonly documentGeneration: number;
@@ -290,6 +291,7 @@ export type PlacekeeperControlResponse =
   | { readonly kind: "link-preflight"; readonly response: LinkPreflightResponse }
   | { readonly kind: "link-open"; readonly response: LinkLaunchResponse }
   | { readonly kind: "binding"; readonly result: TaskBindingClaimResult }
+  | { readonly kind: "codex-binding"; readonly status: "accepted" | "denied" }
   | { readonly kind: "context"; readonly result: LiveContextRefreshResult }
   | { readonly kind: "revoked" }
   | { readonly kind: "context-acknowledged"; readonly accepted: boolean }
@@ -444,7 +446,7 @@ function isControlRequest(value: unknown): value is PlacekeeperControlRequest {
       (value.rebuildVerificationId === undefined || typeof value.rebuildVerificationId === "string");
   }
   if (value.kind === "claim-binding") {
-    return typeof value.taskSessionId === "string" &&
+    return (value.native === undefined || value.native === true) && typeof value.taskSessionId === "string" &&
       typeof value.reviewSessionId === "string" &&
       typeof value.documentGeneration === "number" &&
       typeof value.bindProof === "string";
@@ -491,10 +493,18 @@ async function dispatch(
       },
     };
   }
-  // Native service orchestration is introduced by the admission unit. Until
-  // then these closed contracts fail explicitly instead of reaching evidence.
   if (request.kind === "codex-display" || request.kind === "codex-attest" || request.kind === "codex-app") {
-    return { kind: "error", reason: "unavailable" };
+    return await host.lifecycle.runActivity<PlacekeeperControlResponse>(async () => {
+      if (request.kind === "codex-display") {
+        const result = host.codexRuntime.display(request.request.handoff);
+        return result === undefined ? { kind: "error", reason: "unavailable" }
+          : { kind: "codex-display", receipt: result.receipt, pending: result.privateMeta };
+      }
+      if (request.kind === "codex-attest") {
+        return { kind: "codex-attestation", status: host.codexRuntime.attestDisplay(request.receipt, request.taskSessionId) ? "accepted" : "denied" };
+      }
+      return { kind: "codex-app", response: await host.codexRuntime.handle(request.request) };
+    }) ?? { kind: "error", reason: "unavailable" };
   }
   if (request.kind === "launch") {
     return { kind: "launch", response: await host.open(request.request) };
@@ -571,12 +581,16 @@ async function dispatch(
   try {
     response = await host.lifecycle.runActivity<PlacekeeperControlResponse>(async () => {
     if (request.kind === "claim-binding") {
+      if (request.native === true) {
+        return { kind: "codex-binding", status: host.codexRuntime.claimLaunch(request) ? "accepted" : "denied" };
+      }
       return {
         kind: "binding",
         result: await host.broker.claimTaskBinding(request),
       };
     }
     if (request.kind === "refresh-context") {
+      await host.codexRuntime.trustedTaskPrompt(request.taskSessionId);
       await host.broker.prepareTaskContext(request.taskSessionId);
       return {
         kind: "context",
@@ -594,6 +608,7 @@ async function dispatch(
     }
     if (request.kind === "revoke-task") {
       host.context.discardTask(request.taskSessionId);
+      await host.codexRuntime.revokeTask(request.taskSessionId);
       await host.broker.revokeTask(request.taskSessionId);
       host.reconciliation.discardTask(request.taskSessionId);
       host.sourceWorkflow.discardTask(request.taskSessionId);

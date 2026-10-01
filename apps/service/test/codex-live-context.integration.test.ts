@@ -107,6 +107,7 @@ describe("packaged Codex live-context lifecycle", () => {
       vi.fn(),
     );
 
+    if (!("url" in launched)) throw new Error("Expected browser launch");
     const launchedUrl = new URL(launched.url);
     const capability = new URLSearchParams(launchedUrl.hash.slice(1)).get("cap");
     const exchange = await postJson(
@@ -268,6 +269,7 @@ describe("packaged Codex live-context lifecycle", () => {
       tool_response: JSON.stringify(launch),
     }), control, vi.fn());
 
+    if (!("url" in launch)) throw new Error("Expected browser launch");
     const launchedUrl = new URL(launch.url);
     const capability = new URLSearchParams(launchedUrl.hash.slice(1)).get("cap");
     const exchanged = await fetch(`${launchedUrl.origin}/s/${launch.sessionId}/exchange`, {
@@ -325,6 +327,7 @@ describe("packaged Codex live-context lifecycle", () => {
       bindProof: launch.bindProof,
     })).toMatchObject({ kind: "binding", result: { status: "denied" } });
 
+    if (!("url" in launch)) throw new Error("Expected browser launch");
     const launchedUrl = new URL(launch.url);
     const capability = new URLSearchParams(launchedUrl.hash.slice(1)).get("cap");
     const exchanged = await fetch(`${launchedUrl.origin}/s/${launch.sessionId}/exchange`, {

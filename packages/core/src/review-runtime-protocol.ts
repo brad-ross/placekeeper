@@ -333,7 +333,8 @@ function safeChromeSaveStatus(value: unknown): unknown | undefined {
     };
   } else return undefined;
   if ((value.sync.phase !== "clean" && value.sync.phase !== "saving" && value.sync.phase !== "not-saved") ||
-    !safeInteger(value.sync.desiredRevision) || !safeInteger(value.sync.savedRevision) ||
+    !safeInteger(value.sync.desiredRevision) ||
+    !(value.sync.savedRevision === -1 || safeInteger(value.sync.savedRevision)) ||
     (value.sync.failure !== undefined &&
       (typeof value.sync.failure !== "string" || !SAVE_FAILURE_REASONS.has(value.sync.failure)))) return undefined;
   let rewriteEligibility: unknown;

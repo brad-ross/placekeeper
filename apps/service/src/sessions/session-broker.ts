@@ -715,6 +715,13 @@ export class SessionBroker {
     surface: ReviewPresentationSurface,
     requestedLocation?: PlacekeeperLinkLocation,
   ): SessionLaunch {
+    // Native admission owns its own presentation and never uses HTTP launch authority.
+    if (surface === "codex-native") {
+      return { sessionId: session.id, fileId: session.fileId,
+        ...(session.rootId === undefined ? {} : { rootId: session.rootId }),
+        launchPath: "", fragment: "", surface,
+        documentGeneration: session.state.workflow.documentGeneration };
+    }
     const capability = this.credentials.issueBootstrap(session.id, BOOTSTRAP_TTL_MS);
     const reconnectBrowserToken = surface === "codex"
       ? randomBytes(32).toString("base64url")

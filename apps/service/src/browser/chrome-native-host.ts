@@ -79,7 +79,7 @@ export function createDaemonChromeBrowserOpener(
 ): ChromeBrowserReviewOpener {
   const browserDestination = async (response: LaunchResponse): Promise<string> => {
     if (
-      !response.ok || response.kind === "recovery-offered" ||
+      !response.ok || response.kind === "recovery-offered" || !("url" in response) ||
       response.bindProof !== undefined ||
       (response.kind !== "opened" && response.kind !== "focused")
     ) throw new Error("service-unavailable");

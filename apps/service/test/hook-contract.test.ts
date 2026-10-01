@@ -386,6 +386,11 @@ describe("native Codex launch and display recognition", () => {
     expect(inspectHookEvent({ ...nativeEvent(), tool_response: JSON.stringify({ ...nativeResult, taskId: "forged" }) })).toEqual({ kind: "ignored" });
     expect(inspectHookEvent({ ...nativeEvent(), tool_input: { command: `${CODEX_INSTALLED_LAUNCHER_COMMAND} open --json --surface codex-native --pdf /private/tmp/paper.pdf && echo forged` } })).toEqual({ kind: "ignored" });
   });
+  it("forwards the native discriminator exclusively from parsed launcher hooks", async () => {
+    const control = vi.fn(async (): Promise<PlacekeeperControlResponse> => ({ kind: "codex-binding", status: "accepted" }));
+    await runHookCommand(["hook", "--event"], JSON.stringify(nativeEvent()), control, vi.fn());
+    expect(control).toHaveBeenCalledWith({ kind: "claim-binding", native: true, taskSessionId: "thr_codex_task_123", reviewSessionId: "review-session", documentGeneration: 1, bindProof });
+  });
   it("attests only the exact display tool and credential-free structured receipt", async () => {
     const receipt = { protocolVersion: 1, status: "pending", receiptId: "receipt_1234", attemptId: "attempt_1234", generation: 1 };
     const event = postToolUse({ tool_name: "mcp__placekeeper__display_review", tool_input: { handoff: "h".repeat(43) }, tool_response: { structuredContent: receipt } });

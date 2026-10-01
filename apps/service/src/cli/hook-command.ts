@@ -418,14 +418,15 @@ export async function runHookCommand(
         reviewSessionId: event.reviewSessionId,
         documentGeneration: event.documentGeneration,
         bindProof: event.bindProof,
+        ...(event.native === true ? { native: true as const } : {}),
       });
-      if (response.kind === "binding" && response.result.status === "denied") {
+      if ((response.kind === "binding" && response.result.status === "denied") || (response.kind === "codex-binding" && response.status === "denied")) {
         await write(`${JSON.stringify(hookOutput(
           "PostToolUse",
           "Placekeeper could not associate this launch with the current task. The review may already belong to another task, or the launch proof may have expired. An open browser does not establish agent context. If another task owns the review, ask whether to open an independent review with --fork; otherwise rerun the exact installed launch command. Do not replay a bind proof or use another task's context.",
           "Placekeeper could not connect agent context to this task.",
         ))}\n`);
-      } else if (response.kind === "binding") {
+      } else if (response.kind === "binding" || response.kind === "codex-binding") {
         await write(`${JSON.stringify(hookOutput(
           "PostToolUse",
           event.native === true
