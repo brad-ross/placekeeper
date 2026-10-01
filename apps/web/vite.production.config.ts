@@ -81,6 +81,8 @@ export default defineConfig({
     },
     rollupOptions: {
       output: {
+        // This module runs as an app; fully minify it despite Vite's ES library default.
+        minify: true,
         entryFileNames: "app.js",
         chunkFileNames: "[name].js",
         assetFileNames: "app.[ext]",
