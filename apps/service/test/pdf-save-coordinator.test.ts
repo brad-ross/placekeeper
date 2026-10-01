@@ -723,14 +723,27 @@ describe("coalescing PDF autosave", () => {
 
   it("creates a proactive copy, then persists the complete accepted state", async () => {
     const { root, broker, coordinator, sessionId } = await setup();
+    const observed: { reason: string; phase: string; revision: number }[] = [];
+    const unsubscribe = broker.onStateInvalidation((event) => {
+      observed.push({ reason: event.reason, phase: broker.saveStatus(sessionId)!.sync.phase, revision: event.reviewRevision });
+    });
     const target = join(root, "paper-annotated.pdf");
     await coordinator.chooseCopy(sessionId, target);
     expect(await readFile(target, "utf8")).toContain("items:");
+    expect(observed).toEqual([
+      { reason: "save", phase: "saving", revision: 0 },
+      { reason: "save", phase: "clean", revision: 0 },
+    ]);
 
     await broker.acceptMutation(sessionId, add(0));
     await coordinator.requestSave(sessionId);
     expect(await readFile(target, "utf8")).toContain(broker.state(sessionId)!.items[0]!.id);
     expect(broker.saveStatus(sessionId)?.sync.phase).toBe("clean");
+    expect(observed.slice(2)).toEqual([
+      { reason: "revision", phase: "saving", revision: 1 },
+      { reason: "save", phase: "clean", revision: 1 },
+    ]);
+    unsubscribe();
   });
 
   it("does not rewrite the original until the first accepted annotation", async () => {

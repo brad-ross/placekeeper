@@ -1,6 +1,7 @@
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Duplex } from "node:stream";
 import { randomUUID } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { CodexPendingPresentation, CodexAppResponse } from "../../../packages/core/src/codex-mcp-protocol.js";
@@ -16,20 +17,21 @@ afterEach(async () => {
   await Promise.all(brokers.splice(0).map((broker) => broker.quiesceForShutdown()));
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
-async function fixture() {
+async function fixture(generated = false) {
   const root = await mkdtemp(join(tmpdir(), "placekeeper-native-")); roots.push(root);
   const pdf = join(root, "paper.pdf"); await writeFile(pdf, "%PDF-1.7\nnative authority fixture\n%%EOF");
   let time = 1000;
   const now = () => new Date(time);
   const build = () => {
     const broker = new SessionBroker({ recoveryRoot: join(root, "recovery"), now, portableReader: async () => [],
+      inspectGeneration: async () => ({ pageCount: 1, pages: [{ pageIndex: 0, text: "successor" }] }),
       taskBindings: new TaskBindingRegistry({ now, pendingTtlMs: 100, activeLeaseTtlMs: 1000 }) });
     brokers.push(broker);
     const manager = new CodexRuntimeManager(broker, { now, pendingTtlMs: 100 }); managers.push(manager);
     return { broker, manager };
   };
   const initial = build();
-  const opened = await initial.broker.openReview({ pdfPath: pdf });
+  const opened = await initial.broker.openReview({ pdfPath: pdf, ...(generated ? { workflowMode: "generated-output" as const } : {}) });
   if (opened.kind !== "opened") throw new Error("Expected opened");
   return { ...initial, pdf, sessionId: opened.launch.sessionId, build, advance(ms: number) { time += ms; } };
 }
@@ -323,3 +325,123 @@ describe("native two-hook admission with real broker authority", () => {
     expect((await next.manager.pending({ ...request(panel.privateMeta, "status"), capability: panel.active.reconnectTicket })).status).toBe("denied");
   });
 });
+
+
+describe("canonical native watermark", () => {
+  it("observes same-generation destination and save phase changes through authenticated reads", async () => {
+    const { broker, manager, sessionId, pdf } = await fixture();
+    const { active } = await activate(manager, sessionId);
+    const raw = activeRequest(active);
+    const events: string[] = [];
+    const unsubscribe = broker.onStateInvalidation((event) => events.push(event.reason));
+    const initial = manager.readWatermark(raw)!;
+    expect(initial.watermark).toBe(0);
+    expect(manager.readWatermark({ ...raw, capability: "wrong-capability" })).toBeUndefined();
+    await broker.establishSaveDestination(sessionId, { kind: "copy", targetPath: pdf + ".copy", capabilityId: "destination" });
+    const saving = manager.readWatermark(raw)!;
+    expect(saving.watermark).toBeGreaterThan(initial.watermark);
+    expect(saving.documentGeneration).toBe(initial.documentGeneration);
+    expect(saving.reviewRevision).toBe(initial.reviewRevision);
+    await broker.markSaveFailed(sessionId, broker.saveStatus(sessionId)!.destination.generation, "write-failed");
+    expect(manager.readWatermark(raw)!.watermark).toBeGreaterThan(saving.watermark);
+    expect(events).toEqual(["save", "save"]);
+    const pending = broker.saveStatus(sessionId)!.sync;
+    const failedWatermark = manager.readWatermark(raw)!.watermark;
+    expect(await broker.markSaveCommitted({ sessionId, generation: broker.saveStatus(sessionId)!.destination.generation,
+      revision: pending.desiredRevision - 1, stateDigest: "older-state", targetDigest: "older-target" })).toBe(false);
+    expect(broker.saveStatus(sessionId)!.sync.phase).toBe("saving");
+    expect(manager.readWatermark(raw)!.watermark).toBeGreaterThan(failedWatermark);
+    expect(events).toEqual(["save", "save", "save"]);
+    unsubscribe();
+    await broker.establishSaveDestination(sessionId, { kind: "copy", targetPath: pdf + ".other", capabilityId: "other" });
+    expect(events).toHaveLength(3);
+  });
+
+  it("watermarks real mutation, authoring finalize, release and disconnect; keeps browser delivery", async () => {
+    const { broker, manager, sessionId } = await fixture();
+    const { active } = await activate(manager, sessionId);
+    const raw = activeRequest(active);
+    const frames: string[] = [];
+    const socket = new Duplex({ read() {}, write(chunk, _encoding, done) { frames.push(chunk.toString()); done(); } });
+    const close = broker.controls.registerSocket(sessionId, socket);
+    const events: string[] = [];
+    broker.onStateInvalidation((event) => events.push(event.reason));
+    let last = manager.readWatermark(raw)!.watermark;
+    const advanced = () => { const next = manager.readWatermark(raw)!.watermark; expect(next).toBeGreaterThan(last); last = next; };
+    await protectWork(broker, sessionId); advanced();
+    const attachment = broker.replaceInteractionAttachment(sessionId, "author");
+    const draftId = randomUUID();
+    await broker.beginReviewInteraction({ sessionId, attachment, generation: 1, interactionToken: "authoring_token_1", order: 1, draftId }); advanced();
+    await broker.acceptMutation(sessionId, { type: "put-draft", expectedRevision: 1, expectedDraftRevision: -1, draft: {
+      id: draftId, ownerViewId: attachment.attachmentId, baseGeneration: 1, revision: 0, kind: "pageNote", pageIndex: 0,
+      text: "a note", anchor: { kind: "page", pageIndex: 0, nearbyText: "source", rect: { x: 1, y: 1, width: 1, height: 1 } },
+      disposition: { kind: "resolved", generation: 1 }, status: "protected", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+    } }); advanced();
+    expect(await broker.finalizeReviewInteraction({ sessionId, attachment, interactionToken: "authoring_token_1", order: 2,
+      outcome: "applied", draftId, expectedDraftRevision: 0 })).toMatchObject({ status: "finalized", outcome: "applied" }); advanced();
+    await broker.beginReviewInteraction({ sessionId, attachment, generation: 1, interactionToken: "authoring_token_2", order: 3, draftId: "draft_released" }); advanced();
+    await broker.releaseReviewInteraction({ sessionId, attachment, interactionToken: "authoring_token_2", order: 4 }); advanced();
+    await broker.beginReviewInteraction({ sessionId, attachment, generation: 1, interactionToken: "authoring_token_3", order: 5, draftId: "draft_disconnected" }); advanced();
+    broker.disconnectInteractionIncarnation(sessionId, "author", attachment); advanced();
+    expect(events.filter((reason) => reason === "revision")).toHaveLength(3);
+    expect(events.filter((reason) => reason === "presence").length).toBeGreaterThanOrEqual(6);
+    expect(frames.some((frame) => frame.includes('"kind":"session-invalidated"') && frame.includes('"reason":"revision"'))).toBe(true);
+    expect(frames.some((frame) => frame.includes('"reason":"presence"'))).toBe(true);
+    close(); socket.destroy();
+  });
+
+  it("watermarks freshness and generation, rejects the old generation, and cleans termination", async () => {
+    const { broker, manager, sessionId, pdf } = await fixture(true);
+    const { active } = await activate(manager, sessionId);
+    const raw = activeRequest(active);
+    const events: string[] = [];
+    broker.onStateInvalidation((event) => events.push(event.reason));
+    const initial = manager.readWatermark(raw)!;
+    await broker.markLiveDocumentPossiblyStale(sessionId);
+    expect(manager.readWatermark(raw)!.watermark).toBeGreaterThan(initial.watermark);
+    await broker.replaceLiveDocument({ sessionId, outputPath: pdf, observationEpoch: 2 });
+    expect(broker.state(sessionId)!.workflow.freshness).toBe("current");
+    expect(events.filter((reason) => reason === "freshness")).toHaveLength(2);
+    await writeFile(pdf, "%PDF-1.7\nsuccessor native document\n%%EOF");
+    const successor = await broker.replaceLiveDocument({ sessionId, outputPath: pdf, observationEpoch: 3 });
+    expect(successor.status).toBe("committed");
+    expect(events).toContain("generation");
+    expect(manager.readWatermark(raw)).toBeUndefined();
+    expect(manager.activityCount()).toBe(0);
+    const next = await activate(manager, sessionId);
+    await broker.finish(sessionId);
+    expect(events.at(-1)).toBe("terminated");
+    expect(manager.readWatermark(activeRequest(next.active))).toBeUndefined();
+    expect(manager.activityCount()).toBe(0);
+  });
+
+  it("notifies save commit and recovered pending scheduling without materializing documents", async () => {
+    const { broker, manager, sessionId, pdf, build } = await fixture();
+    const { active } = await activate(manager, sessionId);
+    await protectWork(broker, sessionId);
+    await broker.establishSaveDestination(sessionId, { kind: "original", targetPath: pdf, capabilityId: "original" });
+    const sync = broker.saveStatus(sessionId)!.sync;
+    const before = manager.readWatermark(activeRequest(active))!.watermark;
+    expect(await broker.markSaveCommitted({ sessionId, generation: broker.saveStatus(sessionId)!.destination.generation,
+      revision: sync.desiredRevision, stateDigest: sync.desiredDigest, targetDigest: broker.state(sessionId)!.source.digest })).toBe(true);
+    expect(manager.readWatermark(activeRequest(active))!.watermark).toBeGreaterThan(before);
+    await protectWorkWithRevision(broker, sessionId);
+    manager.dispose(); await broker.quiesceForShutdown();
+    const next = build();
+    const resumed: string[] = []; const events: string[] = [];
+    next.broker.onPhysicalSaveResume((id) => resumed.push(id));
+    next.broker.onStateInvalidation((event) => events.push(event.reason));
+    const offered = await next.broker.openReview({ pdfPath: pdf });
+    if (offered.kind !== "recovery-offered") throw new Error("Expected recovery offer");
+    await next.broker.openReview({ pdfPath: pdf, recoveryDecision: "resume", recoveryOffer: offered.recoveryOffer, recoveryOperationId: randomUUID() });
+    expect(next.broker.saveStatus(sessionId)!.sync.phase).toBe("saving");
+    expect(resumed).toEqual([sessionId]);
+    expect(events).toContain("save");
+  });
+
+});
+
+async function protectWorkWithRevision(broker: SessionBroker, sessionId: string) {
+  const item = broker.state(sessionId)!.items[0]!;
+  await broker.acceptMutation(sessionId, { type: "remove", expectedRevision: broker.state(sessionId)!.revision, id: item.id });
+}

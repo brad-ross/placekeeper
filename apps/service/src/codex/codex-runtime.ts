@@ -30,6 +30,7 @@ interface Launch {
 interface Panel {
   readonly launch: Launch;
   readonly meta: CodexPendingPresentation;
+  watermark: number;
   ready: boolean;
   attested: boolean;
   active?: Extract<CodexAppResponse, { status: "active" }>;
@@ -56,6 +57,7 @@ export class CodexRuntimeManager {
     expiresAtMs: number;
   }>();
   readonly #unsubscribe: () => void;
+  readonly #unsubscribeState: () => void;
   #disposed = false;
   #tail: Promise<unknown> = Promise.resolve();
 
@@ -72,6 +74,23 @@ export class CodexRuntimeManager {
     ) {
       throw new RangeError("Invalid pending TTL");
     }
+    this.#unsubscribeState = broker.onStateInvalidation((event) => {
+      for (const [id, panel] of this.#panels) {
+        if (panel.launch.scope.reviewSessionId !== event.sessionId) continue;
+        panel.watermark += 1;
+        if (event.reason === "generation" && panel.meta.generation !== event.documentGeneration) {
+          this.#removePanel(id);
+        }
+      }
+      if (event.reason === "generation") {
+        for (const [key, launch] of this.#launches) {
+          if (launch.scope.reviewSessionId === event.sessionId && launch.scope.documentGeneration !== event.documentGeneration) {
+            this.#broker.taskBindings.detachPresentation(digestSecretHex(launch.admissionKey));
+            this.#launches.delete(key);
+          }
+        }
+      }
+    });
     this.#unsubscribe = broker.onSessionEnd((sessionId) => {
       for (const [id, panel] of this.#panels) {
         if (panel.launch.scope.reviewSessionId === sessionId) {
@@ -182,6 +201,7 @@ export class CodexRuntimeManager {
     this.#panels.set(meta.runtimeId, {
       launch,
       meta,
+      watermark: 0,
       ready: false,
       attested: false,
     });
@@ -297,6 +317,24 @@ export class CodexRuntimeManager {
     };
   }
 
+  /** Cheap app-only poll. The private active envelope authenticates scope before any read. */
+  readWatermark(raw: unknown): {
+    readonly watermark: number;
+    readonly documentGeneration: number;
+    readonly reviewRevision: number;
+  } | undefined {
+    const scope = this.resolveActive(raw);
+    if (scope === undefined) return undefined;
+    const panel = this.#panels.get(scope.runtimeId);
+    const state = this.#broker.state(scope.sessionId);
+    if (panel === undefined || state === undefined) return undefined;
+    return {
+      watermark: panel.watermark,
+      documentGeneration: state.workflow.documentGeneration,
+      reviewRevision: state.revision,
+    };
+  }
+
   /** The source must already have been reopened/recovered through normal approval. */
   stageReconnect(raw: unknown): Promise<CodexAppResponse> {
     return this.#serialize(async () => {
@@ -347,6 +385,7 @@ export class CodexRuntimeManager {
           expiresAtMs: Math.min(ticket.expiresAtMs, this.#now().getTime() + this.#ttlMs),
         },
         meta,
+        watermark: 0,
         ready: true,
         attested: false,
         restart: ticket,
@@ -505,6 +544,7 @@ export class CodexRuntimeManager {
   dispose(): void {
     this.#disposed = true;
     this.#unsubscribe();
+    this.#unsubscribeState();
     for (const id of this.#panels.keys()) {
       this.#removePanel(id);
     }

@@ -167,6 +167,14 @@ function abortable<T>(operation: Promise<T>, signal: AbortSignal | undefined): P
   });
 }
 
+/** Internal canonical-state notification; carries no document bytes or capabilities. */
+export interface SessionStateInvalidation {
+  readonly sessionId: string;
+  readonly documentGeneration: number;
+  readonly reviewRevision: number;
+  readonly reason: "revision" | "freshness" | "presence" | "save" | "generation" | "terminated";
+}
+
 export class SessionBroker {
   readonly recoveryRoot: string;
   readonly capabilities: FileCapabilityRegistry;
@@ -197,6 +205,7 @@ export class SessionBroker {
   readonly #openingByOutputPath = new Map<string, Promise<void>>();
   readonly #presentations = new PresentationRecords();
   readonly #recovery: RecoveryDecisions;
+  readonly #stateInvalidationListeners = new Set<(event: SessionStateInvalidation) => void>();
   readonly #sessionEndListeners = new Set<(sessionId: string, reason: "ended" | "shutdown") => void>();
   readonly #snapshotStores = new Map<string, DraftSnapshotStore>();
   readonly #generationListeners = new Set<(event: DocumentGenerationEvent) => void>();
@@ -298,7 +307,7 @@ export class SessionBroker {
       onPresenceChange: (sessionId) => {
         const state = this.#activeById.get(sessionId)?.state;
         if (state === undefined) return;
-        this.controls.publishStateInvalidation(sessionId, {
+        this.#publishStateInvalidation(sessionId, {
           documentGeneration: state.workflow.documentGeneration,
           reviewRevision: state.revision,
           reason: "presence",
@@ -423,7 +432,7 @@ export class SessionBroker {
                 session.nativeAnnotationLedger = nextNativeAnnotationLedger;
                 session.interactionReceipts = interactionReceipts;
                 if (recoverReceipt) this.interactions.recoverFinalized(receipt);
-                this.controls.publishStateInvalidation(input.sessionId, {
+                this.#publishStateInvalidation(input.sessionId, {
                   documentGeneration: nextState.workflow.documentGeneration,
                   reviewRevision: nextState.revision,
                   reason: "revision",
@@ -523,6 +532,40 @@ export class SessionBroker {
           session.interactionReceipts = interactionReceipts;
         },
       });
+    });
+  }
+
+  /** Service-only observation. Public transports must authenticate their own scope. */
+  onStateInvalidation(listener: (event: SessionStateInvalidation) => void): () => void {
+    this.#stateInvalidationListeners.add(listener);
+    return () => { this.#stateInvalidationListeners.delete(listener); };
+  }
+
+  #emitStateInvalidation(event: SessionStateInvalidation): void {
+    for (const listener of this.#stateInvalidationListeners) {
+      try { listener(event); } catch { /* Canonical state remains available for rehydration. */ }
+    }
+  }
+
+  #publishStateInvalidation(
+    sessionId: string,
+    event: Omit<SessionStateInvalidation, "sessionId">,
+  ): void {
+    this.#emitStateInvalidation({ sessionId, ...event });
+    // Keep the browser protocol unchanged; Save Sync also requires a state refresh.
+    if (event.reason !== "generation" && event.reason !== "terminated") {
+      this.controls.publishStateInvalidation(sessionId, {
+        ...event,
+        reason: event.reason === "save" ? "revision" : event.reason,
+      });
+    }
+  }
+
+  #publishSaveInvalidation(session: ActiveSession): void {
+    this.#publishStateInvalidation(session.id, {
+      documentGeneration: session.state.workflow.documentGeneration,
+      reviewRevision: session.state.revision,
+      reason: "save",
     });
   }
 
@@ -1179,6 +1222,7 @@ export class SessionBroker {
       this.interactions.hydrate(session.interactionReceipts);
       await session.store.persist(this.#draft(session));
       this.#activate(session);
+      this.#publishSaveInvalidation(session);
       if (resumePendingSave) this.#publishPhysicalSaveResume(session.id);
       return {
         kind: "opened",
@@ -1853,6 +1897,7 @@ export class SessionBroker {
           session.currentOriginalDigest = input.targetDigest;
           session.acceptedOriginalDigests = acceptedOriginalDigests;
         }
+        this.#publishSaveInvalidation(session);
       },
     };
   }
@@ -1920,7 +1965,8 @@ export class SessionBroker {
         session.state = nextState;
         session.destination = destination;
         session.sync = sync;
-        if (confirmation !== undefined) this.controls.publishStateInvalidation(sessionId, {
+        this.#publishSaveInvalidation(session);
+        if (confirmation !== undefined) this.#publishStateInvalidation(sessionId, {
           documentGeneration: nextState.workflow.documentGeneration,
           reviewRevision: nextState.revision,
           reason: "revision",
@@ -1980,6 +2026,7 @@ export class SessionBroker {
       session.destination = destination;
       session.sync = sync;
       this.#activate(session);
+      this.#publishSaveInvalidation(session);
       return { destination, sync };
     });
   }
@@ -2140,6 +2187,7 @@ export class SessionBroker {
       };
       await session.store.persist({ ...this.#draft(session), sync });
       session.sync = sync;
+      this.#publishSaveInvalidation(session);
     });
   }
 
@@ -2357,6 +2405,11 @@ export class SessionBroker {
         await session.store.persist({ ...this.#draft(session), state, sync });
         session.state = state;
         session.sync = sync;
+        this.#publishStateInvalidation(session.id, {
+          documentGeneration: state.workflow.documentGeneration,
+          reviewRevision: state.revision,
+          reason: "freshness",
+        });
       });
       return {
         // This staged candidate was inspected and proved invalid. A newer
@@ -2455,7 +2508,7 @@ export class SessionBroker {
         };
       });
       if (invalidation !== undefined) {
-        this.controls.publishStateInvalidation(session.id, {
+        this.#publishStateInvalidation(session.id, {
           documentGeneration: invalidation.documentGeneration,
           reviewRevision: invalidation.reviewRevision,
           reason: "freshness",
@@ -2735,6 +2788,7 @@ export class SessionBroker {
           };
           activatedEvent = successorEvent;
           if (publish) {
+            this.#emitStateInvalidation({ ...successorEvent, reason: "generation" });
             this.controls.publishSuccessor(session.id, successorEvent);
             for (const listener of this.#generationListeners) {
               try { listener(successorEvent); } catch { /* Rehydrate through the successor handshake. */ }
@@ -2830,6 +2884,7 @@ export class SessionBroker {
       return markInvalid(error instanceof Error ? error.message : "generation-commit-failed");
     }
     if (event !== undefined) {
+      this.#emitStateInvalidation({ ...event, reason: "generation" });
       this.controls.publishSuccessor(event.sessionId, event);
       for (const listener of this.#generationListeners) {
         try {
@@ -3064,7 +3119,7 @@ export class SessionBroker {
       };
     });
     if (invalidation !== undefined) {
-      this.controls.publishStateInvalidation(session.id, {
+      this.#publishStateInvalidation(session.id, {
         documentGeneration: invalidation.documentGeneration,
         reviewRevision: invalidation.reviewRevision,
         reason: "freshness",
@@ -3141,7 +3196,7 @@ export class SessionBroker {
       };
     });
     if (invalidation !== undefined) {
-      this.controls.publishStateInvalidation(session.id, {
+      this.#publishStateInvalidation(session.id, {
         documentGeneration: invalidation.documentGeneration,
         reviewRevision: invalidation.reviewRevision,
         reason: "freshness",
@@ -3547,7 +3602,7 @@ export class SessionBroker {
       session.state = nextState;
       session.sync = nextSync;
       session.nativeAnnotationLedger = nextNativeAnnotationLedger;
-      this.controls.publishStateInvalidation(sessionId, {
+      this.#publishStateInvalidation(sessionId, {
         documentGeneration: nextState.workflow.documentGeneration,
         reviewRevision: nextState.revision,
         reason: "revision",
@@ -3708,6 +3763,8 @@ export class SessionBroker {
       this.taskBindings.revokeSession(session.id);
       this.controls.cancel(session.id);
       this.interactions.revokeSession(session.id);
+      this.#emitStateInvalidation({ sessionId: session.id, documentGeneration: session.state.workflow.documentGeneration,
+        reviewRevision: session.state.revision, reason: "terminated" });
       for (const listener of this.#sessionEndListeners) listener(session.id, "shutdown");
     }
     this.#snapshotStores.clear();
@@ -3779,6 +3836,8 @@ export class SessionBroker {
       await session.store.remove();
     } finally {
       this.#snapshotStores.delete(sessionId);
+      this.#emitStateInvalidation({ sessionId, documentGeneration: session.state.workflow.documentGeneration,
+        reviewRevision: session.state.revision, reason: "terminated" });
       for (const listener of this.#sessionEndListeners) listener(sessionId, "ended");
     }
   }
