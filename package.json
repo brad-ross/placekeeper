@@ -28,6 +28,7 @@
     "icons:generate": "sh packaging/macos/icon/generate-icons.sh",
     "fixtures:pdf": "tsx test/fixtures/pdfs/generate.ts",
     "test": "node --import tsx scripts/testing/run-suite.ts test",
+    "test:codex-native": "node --import tsx scripts/testing/run-suite.ts test:codex-native",
     "test:pdf-writer": "node --import tsx scripts/testing/run-suite.ts test:pdf-writer",
     "test:reviewed-pdf": "node --import tsx scripts/testing/run-suite.ts test:reviewed-pdf",
     "test:pdf-viewer": "node --import tsx scripts/testing/run-suite.ts test:pdf-viewer",

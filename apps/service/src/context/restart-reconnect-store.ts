@@ -6,8 +6,14 @@ import { digestSecretHex } from "../../../../packages/core/src/session-security.
 import { ensurePrivateDirectory } from "../recovery/source-snapshot.js";
 
 const DEFAULT_TTL_MS = 15 * 60_000;
+export interface NativeRestartScope {
+  readonly runtimeId: string;
+  readonly attemptId: string;
+  readonly documentGeneration: number;
+}
 
 interface RestartReconnectRecord {
+  readonly native?: NativeRestartScope;
   readonly schemaVersion: 1;
   readonly ticketId: string;
   readonly taskSessionHash: string;
@@ -24,6 +30,8 @@ interface RestartReconnectEnvelope {
 }
 
 export interface MatchedRestartReconnectTicket {
+  readonly reviewSessionHash: string;
+  readonly native?: NativeRestartScope;
   readonly ticketId: string;
   readonly taskSessionHash: string;
   readonly browserTokenHash: string;
@@ -44,7 +52,6 @@ function isDigest(value: unknown): value is string {
 function isTicketId(value: unknown): value is string {
   return typeof value === "string" && /^[0-9a-f-]{36}$/u.test(value);
 }
-
 function parse(contents: string): RestartReconnectRecord | undefined {
   try {
     const envelope = JSON.parse(contents) as RestartReconnectEnvelope;
@@ -52,6 +59,12 @@ function parse(contents: string): RestartReconnectRecord | undefined {
     const record = envelope.payload;
     return envelope.checksum === digestSecretHex(payload) &&
       record.schemaVersion === 1 &&
+      (record.native === undefined || (
+        typeof record.native.runtimeId === "string" &&
+        typeof record.native.attemptId === "string" &&
+        Number.isSafeInteger(record.native.documentGeneration) &&
+        record.native.documentGeneration >= 1
+      )) &&
       isTicketId(record.ticketId) &&
       isDigest(record.taskSessionHash) &&
       isDigest(record.reviewSessionHash) &&
@@ -86,13 +99,27 @@ export class RestartReconnectStore {
     }
   }
 
+  get ticketLifetimeMs(): number {
+    return this.#ttlMs;
+  }
+
   async initialize(): Promise<void> {
     await this.#serialize(async () => {
       await ensurePrivateDirectory(this.directory);
-      const entries = await readdir(this.directory, { withFileTypes: true });
+      const entries = await readdir(this.directory, {
+        withFileTypes: true,
+      });
       await Promise.all(entries
         .filter((entry) => entry.isFile() && /^\.ticket-.*\.tmp$/u.test(entry.name))
-        .map((entry) => rm(join(this.directory, entry.name), { force: true })));
+        .map((entry) => rm(join(this.directory, entry.name), {
+          force: true,
+        })));
+      const records = await this.#records();
+      await Promise.all(records
+        .filter((record) => record.native !== undefined && record.expiresAtMs <= this.#nowMs())
+        .map((record) => rm(this.#path(record.browserTokenHash), {
+          force: true,
+        })));
     });
   }
 
@@ -102,18 +129,24 @@ export class RestartReconnectStore {
     readonly browserToken: string;
     readonly canonicalSourcePath: string;
     readonly sourceDigest: string;
+    readonly native?: NativeRestartScope;
   }): Promise<void> {
     if (
       input.taskSessionId.length === 0 ||
       input.reviewSessionId.length === 0 ||
       input.browserToken.length === 0 ||
       input.canonicalSourcePath.length === 0
-    ) throw new TypeError("Reconnect scope is invalid");
+    ) {
+      throw new TypeError("Reconnect scope is invalid");
+    }
     await this.#serialize(async () => {
       await ensurePrivateDirectory(this.directory);
       const now = this.#nowMs();
       const record: RestartReconnectRecord = {
         schemaVersion: 1,
+        ...(input.native === undefined ? {} : {
+          native: input.native,
+        }),
         ticketId: randomUUID(),
         taskSessionHash: digestSecretHex(input.taskSessionId),
         reviewSessionHash: digestSecretHex(input.reviewSessionId),
@@ -122,9 +155,11 @@ export class RestartReconnectStore {
         sourceDigest: input.sourceDigest,
         expiresAtMs: now + this.#ttlMs,
       };
-      if (!isDigest(record.sourceDigest)) throw new TypeError("Reconnect source digest is invalid");
+      if (!isDigest(record.sourceDigest)) {
+        throw new TypeError("Reconnect source digest is invalid");
+      }
       const current = await this.#read(record.browserTokenHash);
-      const unchangedAndFresh =
+      const unchangedAndFresh = JSON.stringify(current?.native) === JSON.stringify(record.native) &&
         current?.taskSessionHash === record.taskSessionHash &&
         current.reviewSessionHash === record.reviewSessionHash &&
         current.sourcePathHash === record.sourcePathHash &&
@@ -135,9 +170,16 @@ export class RestartReconnectStore {
         const records = await this.#records();
         await Promise.all(records
           .filter((candidate) =>
-            candidate.taskSessionHash === record.taskSessionHash &&
-            candidate.browserTokenHash !== record.browserTokenHash)
-          .map((candidate) => rm(this.#path(candidate.browserTokenHash), { force: true })));
+            (candidate.native !== undefined && candidate.expiresAtMs <= now) ||
+            (
+              record.native === undefined &&
+              candidate.native === undefined &&
+              candidate.taskSessionHash === record.taskSessionHash &&
+              candidate.browserTokenHash !== record.browserTokenHash
+            ))
+          .map((candidate) => rm(this.#path(candidate.browserTokenHash), {
+            force: true,
+          })));
       }
     });
   }
@@ -150,7 +192,7 @@ export class RestartReconnectStore {
     return this.#serialize(async () => {
       const browserTokenHash = digestSecretHex(input.browserToken);
       const record = await this.#read(browserTokenHash);
-      if (record === undefined) return undefined;
+      if (record === undefined || record.native !== undefined) return undefined;
       if (record.expiresAtMs <= this.#nowMs()) {
         await rm(this.#path(browserTokenHash), { force: true });
         return undefined;
@@ -159,6 +201,25 @@ export class RestartReconnectStore {
         record.sourcePathHash !== digestSecretHex(input.canonicalSourcePath) ||
         record.sourceDigest !== input.sourceDigest
       ) return undefined;
+      return record;
+    });
+  }
+
+  /** Native peers retain separate tickets; the pending copy carries no task identity. */
+  async matchNative(input: NativeRestartScope & {
+    readonly ticket: string;
+  }): Promise<MatchedRestartReconnectTicket | undefined> {
+    return this.#serialize(async () => {
+      const record = await this.#read(digestSecretHex(input.ticket));
+      if (
+        record?.native === undefined ||
+        record.expiresAtMs <= this.#nowMs() ||
+        record.native.runtimeId !== input.runtimeId ||
+        record.native.attemptId !== input.attemptId ||
+        record.native.documentGeneration !== input.documentGeneration
+      ) {
+        return undefined;
+      }
       return record;
     });
   }
@@ -188,6 +249,12 @@ export class RestartReconnectStore {
       }
       return false;
     });
+  }
+
+  async revokeToken(token: string): Promise<void> {
+    await this.#serialize(() => rm(this.#path(digestSecretHex(token)), {
+      force: true,
+    }));
   }
 
   async revokeTask(taskSessionId: string): Promise<void> {

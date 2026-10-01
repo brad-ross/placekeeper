@@ -476,3 +476,74 @@ describe("task-scoped PDF binding registry", () => {
     expect(registry.bindingForTask("task-generation")).toBeUndefined();
   });
 });
+
+describe("native reservations preserve browser behavior", () => {
+  it("keeps native proofs out of browser auto-add and reserves exclusive ownership until activation", () => {
+    const { registry } = registryFixture();
+    const input = { taskSessionId: "task-a", reviewSessionId: "review-a", documentGeneration: 1 };
+    const capability = "native-private-capability";
+    const proof = registry.issueBindProof({ ...input, browserCapability: capability, native: true });
+    expect(registry.claim({ ...input, bindProof: proof })).toEqual({ status: "denied" });
+    expect(registry.claimNative({ ...input, bindProof: proof }).status).toBe("pending");
+    const browser = registry.issueBindProof({ reviewSessionId: "review-a", documentGeneration: 1, browserCapability: "browser-peer" });
+    expect(registry.claim({ ...input, taskSessionId: "task-b", bindProof: browser })).toEqual({ status: "denied" });
+    expect(registry.bindingForTask("task-a")).toBeUndefined();
+    expect(registry.activateNative({ ...input, browserCapabilityHash: digestSecretHex(capability) }).status).toBe("active");
+    const peer = registry.issueBindProof({ ...input, browserCapability: "native-peer", native: true });
+    expect(registry.claimNative({ ...input, bindProof: peer }).status).toBe("pending");
+    expect(registry.hasPresentationAuthority({ ...input, browserCapabilityHash: digestSecretHex("native-peer") })).toBe(false);
+    registry.revokeTask("task-a");
+    expect(registry.activateNative({ ...input, browserCapabilityHash: digestSecretHex("native-peer") })).toEqual({ status: "denied" });
+  });
+});
+
+describe("same-association browser/native admission coexistence", () => {
+  it.each([
+    ["native-first", "native-first"],
+    ["native-first", "browser-first"],
+    ["browser-first", "native-first"],
+    ["browser-first", "browser-first"],
+  ])("preserves both memberships with %s claim and %s activation", (claimOrder, activationOrder) => {
+    const { registry } = registryFixture();
+    const binding = { taskSessionId: "task-a", reviewSessionId: "review-a", documentGeneration: 1 };
+    const nativeScope = { ...binding, browserCapabilityHash: digestSecretHex("native-panel") };
+    const native = registry.issueBindProof({ ...binding, browserCapability: "native-panel", native: true });
+    const browser = registry.issueBindProof({ ...binding, browserCapability: "browser-panel" });
+    const claimNative = () => registry.claimNative({ ...binding, bindProof: native });
+    const claimBrowser = () => registry.claim({ ...binding, bindProof: browser });
+    if (claimOrder === "native-first") {
+      expect(claimNative().status).toBe("pending");
+      expect(claimBrowser().status).toBe("pending");
+    } else {
+      expect(claimBrowser().status).toBe("pending");
+      expect(claimNative().status).toBe("pending");
+    }
+    const activateBrowser = () => registry.activateBrowser({ ...binding, browserCapability: "browser-panel" });
+    if (activationOrder === "native-first") {
+      expect(registry.activateNative(nativeScope).status).toBe("active");
+      expect(activateBrowser().status).toBe("active");
+    } else {
+      expect(activateBrowser().status).toBe("active");
+      expect(registry.activateNative(nativeScope).status).toBe("active");
+    }
+    expect(registry.hasPresentationAuthority(nativeScope)).toBe(true);
+    expect(registry.hasPresentationAuthority({ ...binding, browserCapabilityHash: digestSecretHex("browser-panel") })).toBe(true);
+  });
+});
+
+describe("in-flight native authority checks", () => {
+  it("invalidates only matching task/review checks and releases without tombstones", () => {
+    const { registry } = registryFixture();
+    const one = registry.beginAuthorityCheck({ taskSessionId: "task-a", reviewSessionId: "review-a", documentGeneration: 1 });
+    const peer = registry.beginAuthorityCheck({ taskSessionId: "task-b", reviewSessionId: "review-b", documentGeneration: 1 });
+    expect(registry.activityCount()).toBe(2);
+    registry.revokeTask("task-a");
+    expect(one.isCurrent()).toBe(false);
+    expect(peer.isCurrent()).toBe(true);
+    expect(registry.activityCount()).toBe(1);
+    one.release();
+    peer.release();
+    expect(peer.isCurrent()).toBe(false);
+    expect(registry.activityCount()).toBe(0);
+  });
+});

@@ -6,6 +6,7 @@ export type TestStage = string | {
 };
 
 export const suites: Record<string, TestStage[]> = {
+  "test:codex-native": [{ runner: "vitest", options: [], files: ["packages/core/test/codex-mcp-protocol.test.ts", "apps/service/test/codex-runtime.test.ts", "apps/service/test/task-binding-registry.test.ts", "apps/service/test/restart-reconnect-store.test.ts"] }],
   "test:source-release": [{ runner: "vitest", options: [], files: ["scripts/source-release.test.ts", "scripts/install-release.test.ts"] }],
   "test:static:distribution": [
     {
@@ -580,6 +581,8 @@ export const suites: Record<string, TestStage[]> = {
 /** Canonical CI is deliberately narrower than all repository tests; includes the updater's .mjs tests. */
 export const ciUnitFiles = [
       'packages/core/test/codex-mcp-protocol.test.ts',
+      'apps/service/test/codex-runtime.test.ts',
+      'apps/service/test/restart-reconnect-store.test.ts',
       'apps/service/test/macos-daemon-runtime.test.ts',
       'scripts/source-release.test.ts',
       'scripts/install-release.test.ts',

@@ -1427,6 +1427,40 @@ export class SessionBroker {
     return this.#exchangeBootstrap(sessionId, capability);
   }
 
+  /** Service-only admission metadata. Never include this scope in model output. */
+  nativeAdmissionScope(sessionId: string): {
+    readonly reviewSessionId: string;
+    readonly documentGeneration: number;
+    readonly canonicalSourcePath: string;
+    readonly sourceDigest: string;
+  } | undefined {
+    const session = this.#activeById.get(sessionId);
+    return session === undefined || session.ending ? undefined : {
+      reviewSessionId: session.id,
+      documentGeneration: session.state.workflow.documentGeneration,
+      canonicalSourcePath: session.canonicalSourcePath,
+      sourceDigest: session.state.source.digest,
+    };
+  }
+
+  nativeRestartScope(
+    sourcePathHash: string,
+    sourceDigest: string,
+    reviewSessionHash: string,
+  ): ReturnType<SessionBroker["nativeAdmissionScope"]> {
+    for (const session of this.#activeById.values()) {
+      if (
+        !session.ending &&
+        digestSecretHex(session.id) === reviewSessionHash &&
+        digestSecretHex(session.canonicalSourcePath) === sourcePathHash &&
+        session.state.source.digest === sourceDigest
+      ) {
+        return this.nativeAdmissionScope(session.id);
+      }
+    }
+    return undefined;
+  }
+
   async claimTaskBinding(input: {
     readonly bindProof: string;
     readonly taskSessionId: string;
