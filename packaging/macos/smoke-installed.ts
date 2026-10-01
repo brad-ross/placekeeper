@@ -237,7 +237,7 @@ if [ "$#" -eq 1 ]; then /usr/bin/printf '%s\\n' "$1" >> "$contents_dir/Resources
 
 type HookEvent = "PostToolUse" | "UserPromptSubmit" | "SessionEnd";
 
-async function installedHookTimeouts(installedApp: string): Promise<Record<HookEvent, number>> {
+export async function installedHookTimeouts(installedApp: string): Promise<Record<HookEvent, number>> {
   const pluginRoot = join(installedApp, "Contents/Resources/integrations/codex-plugin");
   await validateCodexPlugin(pluginRoot);
   const hooksDocument = parseObject(
@@ -251,10 +251,16 @@ async function installedHookTimeouts(installedApp: string): Promise<Record<HookE
   const timeouts = {} as Record<HookEvent, number>;
   for (const event of ["PostToolUse", "UserPromptSubmit", "SessionEnd"] as const) {
     const declarations = (hooks as Record<string, unknown>)[event];
-    if (!Array.isArray(declarations) || declarations.length !== 1) {
+    if (!Array.isArray(declarations) || (event !== "PostToolUse" && declarations.length !== 1)) {
       throw new Error(`Installed hook manifest omitted ${event}`);
     }
-    const declaration = declarations[0] as { hooks?: unknown };
+    // This smoke emits synthetic Bash launch events. The canonical native
+    // display declaration is independently validated above, not exercised here.
+    const applicable = event === "PostToolUse"
+      ? declarations.filter((value: unknown) => typeof value === "object" && value !== null && !Array.isArray(value) && (value as { matcher?: unknown }).matcher === "^Bash$")
+      : declarations;
+    if (applicable.length !== 1) throw new Error(`Installed hook manifest has no unique ${event} handler`);
+    const declaration = applicable[0] as { hooks?: unknown };
     if (!Array.isArray(declaration.hooks) || declaration.hooks.length !== 1) {
       throw new Error(`Installed hook manifest has an invalid ${event} declaration`);
     }

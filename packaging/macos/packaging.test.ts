@@ -1,7 +1,7 @@
 import { chmod, copyFile, cp, mkdir, mkdtemp, readFile, readdir, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
 import {
@@ -32,6 +32,7 @@ import {
   OPEN_LOCATION_SCRIPT,
 } from "./launcher.mjs";
 import {
+  installedHookTimeouts,
   rewriteSmokeProbeBundleIdentifier,
   validateDoctorEvidence,
 } from "./smoke-installed.js";
@@ -1057,6 +1058,27 @@ describe("macOS distribution manifests", () => {
       ...appManifest,
       embeddedArtifacts: { vscodeExtension: "apps/vscode" },
     })).toThrow(/Codex plugin/u);
+  });
+
+  it("installed smoke selects the canonical Bash timeout while retaining native display validation", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pk-installed-hooks-"));
+    const pluginRoot = join(root, "Contents/Resources/integrations/codex-plugin");
+    try {
+      await mkdir(dirname(pluginRoot), { recursive: true });
+      await cp(resolve("integrations/codex-plugin"), pluginRoot, { recursive: true });
+      await expect(installedHookTimeouts(root)).resolves.toEqual({ PostToolUse: 8_000, UserPromptSubmit: 8_000, SessionEnd: 3_000 });
+      const file = join(pluginRoot, "hooks/hooks.json");
+      const source = await readFile(file, "utf8");
+      const hooks = JSON.parse(source);
+      hooks.hooks.PostToolUse[1].matcher = "^Bash$";
+      await writeFile(file, JSON.stringify(hooks));
+      await expect(installedHookTimeouts(root)).rejects.toThrow(/PostToolUse/u);
+      await writeFile(file, source);
+      const invalidHandler = JSON.parse(source);
+      invalidHandler.hooks.UserPromptSubmit[0].hooks.push(invalidHandler.hooks.UserPromptSubmit[0].hooks[0]);
+      await writeFile(file, JSON.stringify(invalidHandler));
+      await expect(installedHookTimeouts(root)).rejects.toThrow(/UserPromptSubmit/u);
+    } finally { await rm(root, { recursive: true, force: true }); }
   });
 
   it("validates both canonical Codex PostToolUse declarations", async () => {
