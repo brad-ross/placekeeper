@@ -541,6 +541,9 @@ export class SessionBroker {
     return () => this.#localObservationListeners.delete(listener);
   }
 
+  /** Register the save coordinator's pending-work resumption contract. The
+   * coordinator must be attached before opening recovery reviews so safely
+   * restored pending saves can remain durable and resume after activation. */
   onPhysicalSaveResume(listener: (sessionId: string) => void): () => void {
     this.#physicalSaveResumeListeners.add(listener);
     return () => this.#physicalSaveResumeListeners.delete(listener);
@@ -1103,6 +1106,20 @@ export class SessionBroker {
           };
         }
       }
+      // A coordinator attached before recovery can resume interrupted pending
+      // work. Without that resumption contract, retain the broker-only recovery
+      // behavior above. Persist this pending state before notifying below so a
+      // second process exit before the physical write cannot lose eligibility.
+      const resumePendingSave = matchingDraft.sync.phase === "saving" &&
+        this.#physicalSaveResumeListeners.size > 0 &&
+        destination.phase === "active" && destination.capabilityId !== undefined &&
+        rewriteEligibility.eligible && resumedState.workflow.mode !== "generated-output" &&
+        !geometryMigrated && nativeMigration.length === 0 &&
+        sync.phase === "not-saved" && sync.failure === "write-failed";
+      if (resumePendingSave) {
+        const { failure: _interruptedFailure, ...pendingSync } = sync;
+        sync = { ...pendingSync, phase: "saving" };
+      }
       const recoveredSnapshotInfo = await stat(recoveredSnapshotPath);
       const recoveredGeneration = resumedState.workflow.documentGeneration;
       const generationLineage = matchingDraft.generationLineage === undefined
@@ -1162,6 +1179,7 @@ export class SessionBroker {
       this.interactions.hydrate(session.interactionReceipts);
       await session.store.persist(this.#draft(session));
       this.#activate(session);
+      if (resumePendingSave) this.#publishPhysicalSaveResume(session.id);
       return {
         kind: "opened",
         launch: this.#launch(session, request.surface ?? "browser", request.requestedLocation),

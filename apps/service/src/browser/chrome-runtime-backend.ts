@@ -1,8 +1,5 @@
+import { LocalReviewBackend } from "../runtime/local-review-backend.js";
 import { chromeDownloadFolder } from "./chrome-download-folder.js";
-import type { ReviewExportFence } from "../../../../packages/core/src/review-runtime-protocol.js";
-import type { SaveDestinationConfirmation } from "../../../../packages/core/src/review-model.js";
-import { rejectedDestinationName } from "../saving/pdf-save-coordinator.js";
-import type { ReviewCommand } from "../../../../packages/core/src/review-model.js";
 import { join } from "node:path";
 import type { ReviewRuntimeBrokerMethod } from "../../../../packages/core/src/review-runtime-protocol.js";
 import type { ExportCoordinator } from "../export/export-coordinator.js";
@@ -54,7 +51,7 @@ export class ChromeServiceRuntimeBackend implements ChromeRuntimeBackend {
   readonly #browserSources: BrowserSourceStore;
   readonly #transferStore: ChromeTransferStore;
   readonly #saving: PdfSaveCoordinator;
-  readonly #exporting: ExportCoordinator;
+  readonly #review: LocalReviewBackend;
   readonly #index = new ChromeCanonicalReviewIndex<CanonicalRecord | ChromeRuntimeRecovery>();
   readonly #records = new Map<string, CanonicalRecord>();
   readonly #presentations = new Map<string, Set<string>>();
@@ -69,7 +66,7 @@ export class ChromeServiceRuntimeBackend implements ChromeRuntimeBackend {
     this.#browserSources = options.browserSources;
     this.#transferStore = options.transferStore;
     this.#saving = options.saving;
-    this.#exporting = options.exporting;
+    this.#review = new LocalReviewBackend(options);
     this.#runtimeHost = options.runtimeHost ?? "chrome";
     this.#downloadFolder = options.downloadFolder ?? chromeDownloadFolder;
     this.#journal = new ChromeRuntimeOperationJournal({
@@ -177,70 +174,11 @@ export class ChromeServiceRuntimeBackend implements ChromeRuntimeBackend {
   ): Promise<unknown> {
     const record = this.#record(canonicalKey);
     this.#refreshRecord(record);
-    if (["command", "chooseCopy", "chooseFolder", "chooseOriginal", "retrySave", "locateSave", "exportReviewedCopy"].includes(method)) {
-      // Establish the durable recovery boundary before attempting a side
-      // effect. A rejected operation may conservatively retain a clean draft;
-      // a committed operation can never lose its protection marker.
-      await this.#broker.protectChromeReview(record.sessionId);
-    }
-    let result: unknown;
-    switch (method) {
-      case "command":
-        result = await this.#broker.acceptMutation(record.sessionId, payload as ReviewCommand, { expectedGeneration: record.generation });
-        if (this.#broker.saveStatus(record.sessionId)?.destination.phase === "active") {
-          void this.#saving.requestSave(record.sessionId);
-        }
-        break;
-      case "saveStatus": result = this.#broker.saveStatus(record.sessionId); break;
-      case "saveProposal":
-        result = this.#runtimeHost === "chrome"
-          ? await this.#saving.browserProposal(record.sessionId, await this.#downloadFolder())
-          : this.#saving.proposal(record.sessionId);
-        break;
-      case "chooseCopy":
-      case "chooseOriginal": {
-        const value = payload as { readonly filename?: string; readonly folderSelectionId?: string;
-          readonly confirmation?: SaveDestinationConfirmation };
-        let nameResult;
-        try {
-          const state = method === "chooseCopy"
-            ? await this.#saving.chooseCopyFilename(record.sessionId, value.filename, value.folderSelectionId, value.confirmation)
-            : await this.#saving.chooseOriginal(record.sessionId, value.confirmation);
-          if (value.confirmation !== undefined) nameResult = state;
-        } catch (error) {
-          if (value.confirmation === undefined) throw error;
-          nameResult = rejectedDestinationName(error, this.#broker.state(record.sessionId));
-          if (nameResult === undefined) throw error;
-        }
-        result = { ...this.#broker.saveStatus(record.sessionId),
-          ...(nameResult === undefined ? {} : { nameResult }),
-        };
-        break;
-      }
-      case "chooseFolder": result = await this.#saving.chooseFolder(record.sessionId); break;
-      case "retrySave":
-        await this.#saving.retry(record.sessionId);
-        result = this.#broker.saveStatus(record.sessionId);
-        break;
-      case "locateSave":
-        await this.#saving.locate(record.sessionId);
-        result = this.#broker.saveStatus(record.sessionId);
-        break;
-      case "scope": result = await this.#broker.sessionScope(record.sessionId); break;
-      case "resolveReadingLocation":
-        result = await this.#broker.resolveReadingLocation(record.sessionId, payload as import("../../../../packages/core/src/review-runtime-protocol.js").ReadingLocationResolutionRequestV1);
-        break;
-      case "exportReviewedCopy": {
-        const value = payload as { readonly confirmPossiblyStale?: true; readonly fence?: ReviewExportFence };
-        const frozen = await this.#broker.freezeDelivery(record.sessionId, value.fence);
-        result = await this.#exporting.exportReviewedCopy({
-          ...frozen,
-          ...(value.confirmPossiblyStale === true ? { staleConfirmed: true as const } : {}),
-        });
-        break;
-      }
-      default: throw new Error("chrome-method-forbidden");
-    }
+    const result = method === "saveProposal"
+      ? this.#runtimeHost === "chrome"
+        ? await this.#saving.browserProposal(record.sessionId, await this.#downloadFolder())
+        : this.#saving.proposal(record.sessionId)
+      : await this.#review.invoke(record.sessionId, record.generation, method, payload);
     this.#refreshRecord(record);
     return result;
   }
@@ -252,29 +190,7 @@ export class ChromeServiceRuntimeBackend implements ChromeRuntimeBackend {
     payload: unknown,
   ): Promise<unknown> {
     const record = this.#record(canonicalKey);
-    const value = payload as Record<string, unknown>;
-    const common = {
-      sessionId: record.sessionId,
-      attachment,
-      interactionToken: value.interactionToken as string,
-      order: value.order as number,
-    };
-    if (action === "begin") {
-      return this.#broker.beginReviewInteraction({ ...common, generation: value.generation as number,
-        ...(typeof value.draftId === "string" ? { draftId: value.draftId } : {}) });
-    }
-    if (action === "release") return this.#broker.releaseReviewInteraction(common);
-    if (action === "acknowledge") return this.#broker.acknowledgeReviewInteraction(common);
-    const result = await this.#broker.finalizeReviewInteraction({
-      ...common,
-      outcome: value.outcome as "applied" | "discarded",
-      draftId: value.draftId as string,
-      expectedDraftRevision: value.expectedDraftRevision as number,
-    });
-    if (value.outcome === "applied" && this.#broker.saveStatus(record.sessionId)?.destination.phase === "active") {
-      void this.#saving.requestSave(record.sessionId);
-    }
-    return result;
+    return this.#review.interaction(record.sessionId, attachment, action, payload);
   }
 
   registerInteraction(canonicalKey: string, authenticatedOwnerKey: string) {
