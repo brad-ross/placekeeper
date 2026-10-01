@@ -24,7 +24,6 @@ type Scope = NonNullable<ReturnType<SessionBroker["nativeAdmissionScope"]>>;
 interface Launch {
   scope: Scope;
   readonly requestedLocation?: PlacekeeperLinkLocation;
-  readonly handoff: string;
   readonly bindProof: string;
   readonly admissionKey: string;
   readonly expiresAtMs: number;
@@ -168,7 +167,6 @@ export class CodexRuntimeManager {
     this.#launches.set(digestSecretHex(handoff), {
       scope,
       ...(input.requestedLocation === undefined ? {} : { requestedLocation: input.requestedLocation }),
-      handoff,
       bindProof,
       admissionKey,
       expiresAtMs,
@@ -489,7 +487,6 @@ export class CodexRuntimeManager {
       const panel: Panel = {
         launch: {
           scope,
-          handoff: "",
           bindProof: "",
           admissionKey: secret(),
           expiresAtMs: Math.min(ticket.expiresAtMs, this.#now().getTime() + this.#ttlMs),

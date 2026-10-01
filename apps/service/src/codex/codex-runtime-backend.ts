@@ -5,7 +5,7 @@ import type { PlacekeeperLinkLocation } from "../../../../packages/core/src/plac
 import type { CodexAppRequest, CodexResourceDescriptor } from "../../../../packages/core/src/codex-mcp-protocol.js";
 import { sanitizeCodexReviewRuntimeResponse, type ReviewRuntimeBrokerMethod } from "../../../../packages/core/src/review-runtime-protocol.js";
 import { ChromeRuntimeOperationJournal } from "../browser/runtime-operation-journal.js";
-import { LocalReviewBackend } from "../runtime/local-review-backend.js";
+import { isReviewSideEffectMethod, LocalReviewBackend } from "../runtime/local-review-backend.js";
 import type { SessionBroker } from "../sessions/session-broker.js";
 import type { ReviewInteractionAttachment } from "../sessions/review-interactions.js";
 import type { PdfSaveCoordinator } from "../saving/pdf-save-coordinator.js";
@@ -30,7 +30,6 @@ interface Presentation {
   resources?: Record<"document" | "pdfiumWasm" | "worker", Resource>;
   materializing?: Promise<Record<"document" | "pdfiumWasm" | "worker", Resource>>;
 }
-const effects = new Set(["command", "chooseCopy", "chooseFolder", "chooseOriginal", "retrySave", "locateSave", "exportReviewedCopy"]);
 
 /** Trusted native effects and immutable resource handles. No path or service
  * credential crosses this boundary; the caller fences authority around awaits. */
@@ -156,7 +155,7 @@ export class CodexServiceRuntimeBackend {
     };
     // Finalization uses canonical persisted receipts, whose outcome must remain
     // recoverable independently of this adapter's operation journal.
-    return effects.has(method)
+    return isReviewSideEffectMethod(method)
       ? this.#journal.commit(scope.sessionId, request.requestId, { generation: scope.generation, method, payload: request.payload }, invoke)
       : invoke();
   }

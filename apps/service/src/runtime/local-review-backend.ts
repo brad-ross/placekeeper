@@ -5,6 +5,14 @@ import { rejectedDestinationName, type PdfSaveCoordinator } from "../saving/pdf-
 import type { SessionBroker } from "../sessions/session-broker.js";
 import type { ReviewInteractionAttachment } from "../sessions/review-interactions.js";
 
+const reviewSideEffectMethods = new Set<ReviewRuntimeBrokerMethod>([
+  "command", "chooseCopy", "chooseFolder", "chooseOriginal", "retrySave", "locateSave", "exportReviewedCopy",
+]);
+
+export function isReviewSideEffectMethod(method: ReviewRuntimeBrokerMethod): boolean {
+  return reviewSideEffectMethods.has(method);
+}
+
 /** Trusted session effects shared by host adapters. The caller owns admission,
  * operation journaling, source staging, and host-specific destination defaults.
  * All durable review state and physical PDF writes remain broker/coordinator owned. */
@@ -30,7 +38,7 @@ export class LocalReviewBackend {
     payload: unknown,
     options: { readonly expectedDocumentGeneration?: number } = {},
   ): Promise<unknown> {
-    if (["command", "chooseCopy", "chooseFolder", "chooseOriginal", "retrySave", "locateSave", "exportReviewedCopy"].includes(method)) {
+    if (isReviewSideEffectMethod(method)) {
       // Establish the durable recovery boundary before attempting a side
       // effect. A rejected operation may conservatively retain a clean draft;
       // a committed operation can never lose its protection marker.
