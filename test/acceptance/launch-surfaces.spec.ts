@@ -103,7 +103,7 @@ test("VS Code review loads the shared client directly without a localhost frame"
   );
 });
 
-test("only the Codex adapter requests the Codex launch surface", async () => {
+test("only the Codex adapter requests the native Codex launch surface", async () => {
   const finder = await readFile(resolve("packaging/macos/launcher.mjs"), "utf8");
   const vscode = await readFile(resolve("apps/vscode/src/launch-client.ts"), "utf8");
   const skill = await readFile(
@@ -112,12 +112,16 @@ test("only the Codex adapter requests the Codex launch surface", async () => {
   );
   expect(finder).toContain('["open", "--json", "--surface", "finder"');
   expect(finder).not.toContain('"--surface", "codex"');
+  expect(finder).not.toContain('"--surface", "codex-native"');
   expect(vscode).toContain('["open", "--json", "--surface", "vscode"');
   expect(vscode).not.toContain('"--surface", "codex"');
-  expect(skill).toContain("--surface codex");
+  expect(vscode).not.toContain('"--surface", "codex-native"');
+  expect(skill).toContain("--surface codex-native");
   expect(skill).toContain(
-    '`"$HOME/Applications/Placekeeper.app/Contents/MacOS/placekeeper" open-link --json --surface codex --confirmed',
+    '`"$HOME/Applications/Placekeeper.app/Contents/MacOS/placekeeper" open-link --json --surface codex-native --confirmed',
   );
+  expect(skill).toContain("mcp__placekeeper__display_review");
+  expect(skill).toContain("trusted display PostToolUse hook");
   expect(skill).toContain("rerun the same full installed-launcher command");
   expect(skill).not.toContain("Then run `open-link");
 });

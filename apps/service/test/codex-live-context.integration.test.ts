@@ -500,3 +500,39 @@ describe("packaged Codex live-context lifecycle", () => {
     })).toMatchObject({ kind: "evidence", result: { status: "unavailable", reason: "unauthorized" } });
   });
 });
+
+describe("native prompt context through packaged hooks", () => {
+  it("refreshes accepted native work through the owning trusted prompt and supplies bounded evidence", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pk-native-context-")); roots.push(root);
+    const assets = join(root, "assets"), pdf = join(root, "review.pdf");
+    await mkdir(assets); await copyFile(resolve("test/fixtures/pdfs/text-native-with-annotations.pdf"), pdf);
+    await writeFile(join(assets, "pdfium.wasm"), "engine"); await writeFile(join(assets, "pdfium-worker.js"), "worker");
+    const host = await PlacekeeperHost.start({ recoveryRoot: join(root, "recovery"), webAssets: { root: assets }, port: 0 }); hosts.push(host);
+    const socket = join(root, "c.sock"); controls.push(await startLaunchControlServer(host, socket));
+    const control = (request: Parameters<typeof requestControl>[1]) => requestControl(socket, request);
+    const launch = await requestLaunch(socket, { pdfPath: pdf, surface: "codex-native", workflowMode: "generated-output" });
+    if (!launch.ok || launch.kind === "recovery-offered" || !("surface" in launch) || launch.surface !== "codex-native") throw new Error("Native launch required");
+    const write = vi.fn();
+    await runHookCommand(["hook", "--event"], JSON.stringify({ session_id: taskSessionId, hook_event_name: "PostToolUse", tool_name: "Bash", tool_input: { command: `${CODEX_INSTALLED_LAUNCHER_COMMAND} open --json --surface codex-native --pdf '${pdf}' --generated-output` }, tool_response: JSON.stringify(launch) }), control, write);
+    const displayed = await control({ kind: "codex-display", request: { handoff: launch.handoff.token } });
+    if (displayed.kind !== "codex-display") throw new Error("Native display required");
+    await runHookCommand(["hook", "--event"], JSON.stringify({ session_id: taskSessionId, hook_event_name: "PostToolUse", tool_name: "mcp__placekeeper__display_review", tool_input: { handoff: launch.handoff.token }, tool_response: { structuredContent: displayed.receipt } }), control, write);
+    const p = displayed.pending;
+    const ready = await control({ kind: "codex-app", request: { protocolVersion: 1, runtimeId: p.runtimeId, attemptId: p.attemptId, generation: p.generation, requestId: "ready-context", capability: p.pendingCapability, authority: "pending", method: "ready", payload: {} } });
+    if (ready.kind !== "codex-app" || ready.response.status !== "active") throw new Error("Native promotion required");
+    const a = ready.response;
+    const edit = await control({ kind: "codex-app", request: { protocolVersion: 1, runtimeId: a.runtimeId, attemptId: a.attemptId, generation: a.generation, requestId: "edit-context", capability: a.presentationCapability, authority: "presentation", method: "command", payload: { type: "set-annotation-name", expectedRevision: host.broker.state(launch.sessionId)!.revision, annotationName: "Native context acceptance" } } });
+    expect(edit).toMatchObject({ kind: "codex-app", response: { status: "ok" } });
+    await runHookCommand(["hook", "--event"], hookInput("UserPromptSubmit"), control, write);
+    const context = injectedContext(write);
+    expect(context.currentness).toBe("current");
+    expect(context.document.reviewRevision).toBe(host.broker.state(launch.sessionId)!.revision);
+    expect(JSON.stringify(context)).not.toContain(a.presentationCapability);
+    expect(JSON.stringify(context)).not.toContain(p.pendingCapability);
+    expect(context).toHaveProperty("evidence.handle");
+    expect(context).toHaveProperty("saveSync");
+    const other = vi.fn();
+    await runHookCommand(["hook", "--event"], JSON.stringify({ session_id: "other-native-chat", hook_event_name: "UserPromptSubmit", prompt: "What are my notes?" }), control, other);
+    expect(JSON.stringify(injectedContext(other))).not.toContain("Native context acceptance");
+  });
+});

@@ -132,10 +132,11 @@ describe("Codex lifecycle hook", () => {
 
   it("publishes a direct launch that binds without requiring an interpreter wrapper", async () => {
     const skill = await readFile(new URL("../../../integrations/codex-plugin/skills/placekeeper/SKILL.md", import.meta.url), "utf8");
-    const launch = skill.match(/`("\$HOME[^`]+ open --json --surface codex --pdf <absolute-local-pdf-path>)`/u)?.[1];
+    const launch = skill.match(/`("\$HOME[^`]+ open --json --surface codex-native --pdf <absolute-local-pdf-path>)`/u)?.[1];
     expect(launch).toBeDefined();
     expect(inspectHookEvent(postToolUse({
       tool_input: { command: launch!.replace("<absolute-local-pdf-path>", "'/private/tmp/paper with spaces.pdf'") },
+      tool_response: JSON.stringify({ ok: true, kind: "opened", surface: "codex-native", sessionId: "review-session", documentGeneration: 1, bindProof, handoff: { token: "h".repeat(43), expiresAt: "2099-01-01T00:00:00.000Z" } }),
     }))).toMatchObject({ kind: "claim" });
     expect(skill).not.toContain("with an argument array");
     expect(skill).toContain("Do not wrap the launcher in Python");

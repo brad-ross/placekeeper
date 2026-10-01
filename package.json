@@ -7,7 +7,7 @@
     "node": ">=24.0.0"
   },
   "scripts": {
-    "build": "pnpm build:service && pnpm build:vscode && pnpm build:chrome:bundle",
+    "build": "pnpm build:service && pnpm build:vscode && pnpm build:chrome:bundle && pnpm build:codex-mcp",
     "build:service": "vite build --config apps/service/vite.config.ts",
     "prebuild:web": "pnpm catalog:check",
     "build:web": "vite build --config apps/web/vite.production.config.ts",
@@ -83,9 +83,13 @@
     "test:production-integration": "node --import tsx scripts/testing/run-suite.ts test:production-integration",
     "test:full-validation": "node --import tsx scripts/testing/run-suite.ts test:full-validation",
     "package:source-release": "node --import tsx scripts/package-source-release.ts",
-    "test:source-release": "node --import tsx scripts/testing/run-suite.ts test:source-release"
+    "test:source-release": "node --import tsx scripts/testing/run-suite.ts test:source-release",
+    "build:codex-mcp": "vite build --config apps/codex-mcp/vite.config.ts && vite build --config apps/codex-mcp/vite.config.ts --mode server",
+    "qualify:codex-native": "node --import tsx scripts/qualify-codex-native.ts"
   },
   "dependencies": {
+    "@modelcontextprotocol/ext-apps": "1.7.5",
+    "@modelcontextprotocol/sdk": "1.31.0",
     "@embedpdf/core": "2.14.4",
     "@embedpdf/engines": "2.14.4",
     "@embedpdf/models": "2.14.4",

@@ -290,9 +290,9 @@ export function formatPromptContext(
 ): string {
   if (result.status === "unavailable") {
     const recovery = result.reason === "pending"
-      ? "The task claim is pending browser authentication. Finish opening the already launched Placekeeper tab, then ask again."
+      ? "The task claim is pending presentation verification. Finish opening the launched Placekeeper review and check its trusted hooks, then ask again."
       : result.reason === "expired"
-        ? `The task binding expired. Reopen the PDF with ${CODEX_INSTALLED_LAUNCHER_COMMAND} open --json --surface codex --pdf <absolute-pdf-path>, then ask again.`
+        ? `The task binding expired. Reopen the PDF through the installed Placekeeper skill in this chat, then ask again.`
         : "No current task binding is available. Reopen the PDF in Placekeeper from this task if live context is needed.";
     return JSON.stringify({
       kind: "placekeeper-live-context",

@@ -705,6 +705,7 @@ async function requiredSkill(pluginRoot: string): Promise<string> {
 }
 
 function validatePluginIdentity(pluginManifest: Record<string, unknown>): void {
+  if (pluginManifest.mcpServers !== "./.mcp.json") throw new Error("The Codex plugin must register its native MCP transport");
   if (pluginManifest.skills !== "./skills/") throw new Error("The Codex plugin must expose its installed skill directory");
   const pluginAuthor = record(pluginManifest.author, "Codex plugin author");
   const pluginInterface = record(pluginManifest.interface, "Codex plugin interface");
@@ -789,7 +790,7 @@ async function validateSkillContract(pluginRoot: string): Promise<void> {
   }));
   const canonicalContract = [entrypoint, ...referenceContents].join("\n");
   const requiredContractFragments = [
-    `${CODEX_INSTALLED_LAUNCHER_COMMAND} open --json --surface codex --pdf <absolute-local-pdf-path>`,
+    `${CODEX_INSTALLED_LAUNCHER_COMMAND} open --json --surface codex-native --pdf <absolute-local-pdf-path>`,
     "recovery-offered",
     "placekeeper-live-context",
     "context items --handle",
@@ -803,7 +804,10 @@ async function validateSkillContract(pluginRoot: string): Promise<void> {
     "context source rebuild-verify --handle",
     "context source complete --handle",
     "A failed refresh blocks completion.",
-    "Do not print, summarize, save, or copy the capability URL elsewhere.",
+    "Do not print, summarize, save, or copy the handoff, bind proof, or any private capability elsewhere.",
+    "mcp__placekeeper__display_review",
+    "trusted display",
+    "Do not claim successful native activation or current context",
     "Do not bypass ordinary permission prompts",
     "Do not submit, create, or monitor another Codex task.",
   ];
@@ -847,6 +851,12 @@ export async function validateCodexPlugin(pluginRoot: string): Promise<void> {
   }
   validatePluginIdentity(record(JSON.parse(pluginSource) as unknown, "Codex plugin manifest"));
   validateHookContract(record(JSON.parse(hookSource) as unknown, "Codex hook manifest"));
+  const mcp = record(JSON.parse(await readFile(resolve(pluginRoot, ".mcp.json"), "utf8")), "Codex MCP configuration");
+  const servers = record(mcp.mcpServers, "Codex MCP servers");
+  const native = record(servers.placekeeper, "Placekeeper native MCP server");
+  if (Object.keys(servers).join() !== "placekeeper" || native.command !== "/bin/sh" || JSON.stringify(native.args) !== JSON.stringify(["${PLUGIN_ROOT}/scripts/mcp.sh"]) || Object.keys(native).sort().join() !== "args,command") throw new Error("The native MCP registration must use the packaged local adapter");
+  const script = await readFile(resolve(pluginRoot, "scripts/mcp.sh"), "utf8");
+  if (!script.includes('exec "$node" "$server"') || !script.includes("Contents/Resources/codex-mcp/server.js") || !script.includes("Contents/Resources/node/bin/node")) throw new Error("The native MCP entry must use installed bundled assets");
   await Promise.all([
     validateSkillContract(pluginRoot),
     validateAgentMetadata(pluginRoot),

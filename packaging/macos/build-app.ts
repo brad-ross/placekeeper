@@ -275,6 +275,7 @@ export async function buildMacApp(options: BuildOptions): Promise<string> {
   if (!appManifest.architectures.includes(options.arch)) throw new Error(`Unsupported architecture: ${options.arch}`);
   if (appManifest.nodeVersion !== backendManifest.nodeVersion) throw new Error("Runtime manifest Node versions differ");
   const serviceEntry = resolve(options.serviceDist, "main.js");
+  const codexMcpDist = resolve(repoRoot, "dist/codex-mcp");
   const vscodeExtension = resolve(repoRoot, appManifest.embeddedArtifacts.vscodeExtension);
   const vscodeDist = resolve(vscodeExtension, "dist");
   const codexPlugin = resolve(repoRoot, appManifest.embeddedArtifacts.codexPlugin);
@@ -285,6 +286,10 @@ export async function buildMacApp(options: BuildOptions): Promise<string> {
   for (const required of [
     options.nodeRuntime,
     serviceEntry,
+    resolve(codexMcpDist, "server.js"),
+    resolve(codexMcpDist, "review-v1.html"),
+    resolve(codexPlugin, ".mcp.json"),
+    resolve(codexPlugin, "scripts/mcp.sh"),
     options.webDist,
     resolve(vscodeDist, "extension.cjs"),
     resolve(vscodeExtension, "assets/placekeeper.png"),
@@ -306,6 +311,7 @@ export async function buildMacApp(options: BuildOptions): Promise<string> {
   ]) await access(required);
   await validateMacIconSet(iconset);
   await assertSelfContainedService(serviceEntry);
+  await assertSelfContainedService(resolve(codexMcpDist, "server.js"));
   const version = (await run(options.nodeRuntime, ["--version"])).replace(/^v/u, "");
   if (version !== appManifest.nodeVersion) throw new Error(`Expected Node ${appManifest.nodeVersion}, received ${version}`);
   if (process.arch !== options.arch) throw new Error(`Build host architecture ${process.arch} does not match ${options.arch}`);
@@ -329,6 +335,7 @@ export async function buildMacApp(options: BuildOptions): Promise<string> {
   await chmod(nodePath, 0o755);
   await mkdir(resolve(resources, "service"), { recursive: true, mode: 0o755 });
   await copyFile(serviceEntry, resolve(resources, "service/main.js"));
+  await cp(codexMcpDist, resolve(resources, "codex-mcp"), { recursive: true, errorOnExist: true });
   await cp(options.webDist, resolve(resources, "web"), { recursive: true, errorOnExist: true });
   await cp(codexPlugin, resolve(resources, "integrations/codex-plugin"), { recursive: true, errorOnExist: true });
   // Keep every optional setup dependency in the durable installed bundle.

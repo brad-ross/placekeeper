@@ -1049,6 +1049,9 @@ describe("macOS distribution manifests", () => {
     expect(build).toContain('resolve(contents, "MacOS/placekeeper-vscode")');
     expect(build).toContain('resolve(resources, "vscode-launcher.mjs")');
     expect(build).toContain('resolve(codexPlugin, "hooks/hooks.json")');
+    expect(build).toContain('resolve(codexMcpDist, "server.js")');
+    expect(build).toContain('resolve(codexMcpDist, "review-v1.html")');
+    expect(build).toContain('resolve(resources, "codex-mcp")');
     const appManifest = JSON.parse(await readFile(resolve("packaging/macos/app-bundle.json"), "utf8"));
     expect(() => validateAppBundleManifest({
       ...appManifest,
@@ -1096,6 +1099,22 @@ describe("macOS distribution manifests", () => {
     } finally {
       await rm(root, { recursive: true, force: true });
     }
+  });
+
+  it.each(["remote", "wrong-entry", "extra-server", "missing-entry"])("rejects %s native MCP packaging", async (failure) => {
+    const root = await mkdtemp(join(tmpdir(), "pk-mcp-package-"));
+    const pluginRoot = join(root, "codex-plugin");
+    try {
+      await cp(resolve("integrations/codex-plugin"), pluginRoot, { recursive: true });
+      const file = join(pluginRoot, ".mcp.json");
+      const mcp = JSON.parse(await readFile(file, "utf8"));
+      if (failure === "remote") mcp.mcpServers.placekeeper = { url: "https://example.invalid" };
+      if (failure === "wrong-entry") mcp.mcpServers.placekeeper.args = ["/tmp/untrusted.sh"];
+      if (failure === "extra-server") mcp.mcpServers.other = { command: "/bin/sh" };
+      if (failure === "missing-entry") await rm(join(pluginRoot, "scripts/mcp.sh"));
+      await writeFile(file, JSON.stringify(mcp));
+      await expect(validateCodexPlugin(pluginRoot)).rejects.toThrow();
+    } finally { await rm(root, { recursive: true, force: true }); }
   });
 
   it("rejects a missing or operationally incomplete Codex skill", async () => {

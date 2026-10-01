@@ -6,7 +6,7 @@ export type TestStage = string | {
 };
 
 export const suites: Record<string, TestStage[]> = {
-  "test:codex-native": [{ runner: "vitest", options: [], files: ["packages/core/test/codex-mcp-protocol.test.ts", "apps/service/test/codex-runtime.test.ts", "apps/service/test/codex-backend.test.ts", "apps/service/test/codex-host.test.ts", "apps/service/test/task-binding-registry.test.ts", "apps/service/test/restart-reconnect-store.test.ts"] }],
+  "test:codex-native": [{ runner: "vitest", options: [], files: ["apps/codex-mcp/test/service-client.integration.test.ts", "apps/codex-mcp/test/server.test.ts", "apps/codex-mcp/test/resources.test.ts", "apps/codex-mcp/test/qualification.test.ts", "apps/service/test/codex-live-context.integration.test.ts", "apps/service/test/hook-contract.test.ts", "packages/core/test/codex-mcp-protocol.test.ts", "apps/service/test/codex-runtime.test.ts", "apps/service/test/codex-backend.test.ts", "apps/service/test/codex-host.test.ts", "apps/service/test/task-binding-registry.test.ts", "apps/service/test/restart-reconnect-store.test.ts"] }],
   "test:source-release": [{ runner: "vitest", options: [], files: ["scripts/source-release.test.ts", "scripts/install-release.test.ts"] }],
   "test:static:distribution": [
     {
@@ -582,6 +582,7 @@ export const suites: Record<string, TestStage[]> = {
 
 /** Canonical CI is deliberately narrower than all repository tests; includes the updater's .mjs tests. */
 export const ciUnitFiles = [
+  "apps/codex-mcp/test/service-client.integration.test.ts", "apps/codex-mcp/test/server.test.ts", "apps/codex-mcp/test/resources.test.ts", "apps/codex-mcp/test/qualification.test.ts",
       'packages/core/test/codex-mcp-protocol.test.ts',
       'apps/service/test/codex-runtime.test.ts',
       'apps/service/test/codex-backend.test.ts',

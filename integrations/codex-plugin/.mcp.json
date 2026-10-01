@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "placekeeper": {
+      "command": "/bin/sh",
+      "args": ["${PLUGIN_ROOT}/scripts/mcp.sh"]
+    }
+  }
+}
