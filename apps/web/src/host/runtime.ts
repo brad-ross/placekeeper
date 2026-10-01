@@ -43,7 +43,7 @@ export type HostRuntimeCommand =
   | ({ readonly command: "forward-synctex" } & ForwardSyncTexRequest);
 
 export interface HostRuntime extends ProductionSessionApi {
-  readonly host: "browser" | "vscode" | "chrome" | "macos" | "static";
+  readonly host: "browser" | "vscode" | "chrome" | "macos" | "codex" | "static";
   bootstrap(signal?: AbortSignal): Promise<HostRuntimeBootstrap>;
   subscribeInvalidations(listener: (event: HostRuntimeInvalidation) => void): () => void;
   subscribeHostCommands?(listener: (command: HostRuntimeCommand) => void): () => void;

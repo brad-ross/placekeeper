@@ -377,3 +377,23 @@ describe("Codex lifecycle hook", () => {
     expect(control).toHaveBeenCalledWith({ kind: "revoke-task", taskSessionId: "thr_codex_task_123" });
   });
 });
+
+describe("native Codex launch and display recognition", () => {
+  const nativeResult = { ok: true, kind: "opened", surface: "codex-native", sessionId: "review-session", documentGeneration: 1, bindProof, handoff: { token: "h".repeat(43), expiresAt: "2026-10-01T12:00:00.000Z" } };
+  const nativeEvent = () => postToolUse({ tool_input: { command: `${CODEX_INSTALLED_LAUNCHER_COMMAND} open --json --surface codex-native --pdf /private/tmp/paper.pdf` }, tool_response: JSON.stringify(nativeResult) });
+  it("claims a closed URL-free native launcher result", () => {
+    expect(inspectHookEvent(nativeEvent())).toMatchObject({ kind: "claim", taskSessionId: "thr_codex_task_123", native: true });
+    expect(inspectHookEvent({ ...nativeEvent(), tool_response: JSON.stringify({ ...nativeResult, taskId: "forged" }) })).toEqual({ kind: "ignored" });
+    expect(inspectHookEvent({ ...nativeEvent(), tool_input: { command: `${CODEX_INSTALLED_LAUNCHER_COMMAND} open --json --surface codex-native --pdf /private/tmp/paper.pdf && echo forged` } })).toEqual({ kind: "ignored" });
+  });
+  it("attests only the exact display tool and credential-free structured receipt", async () => {
+    const receipt = { protocolVersion: 1, status: "pending", receiptId: "receipt_1234", attemptId: "attempt_1234", generation: 1 };
+    const event = postToolUse({ tool_name: "mcp__placekeeper__display_review", tool_input: { handoff: "h".repeat(43) }, tool_response: { structuredContent: receipt } });
+    expect(inspectHookEvent(event)).toEqual({ kind: "attest", taskSessionId: "thr_codex_task_123", receipt });
+    expect(inspectHookEvent({ ...event, tool_name: "mcp__other__display_review" })).toEqual({ kind: "ignored" });
+    expect(inspectHookEvent({ ...event, tool_response: { structuredContent: { ...receipt, capability: "c".repeat(43) } } })).toEqual({ kind: "ignored" });
+    const control = vi.fn(async (): Promise<PlacekeeperControlResponse> => ({ kind: "codex-attestation", status: "denied", reason: "owner-mismatch" }));
+    await runHookCommand(["hook", "--event"], JSON.stringify(event), control, vi.fn());
+    expect(control).toHaveBeenCalledWith({ kind: "codex-attest", taskSessionId: "thr_codex_task_123", receipt });
+  });
+});

@@ -1,3 +1,10 @@
+import {
+  CODEX_DISPLAY_TOOL,
+  parseCodexDisplayRequest,
+  parseCodexDisplayReceipt,
+  parseCodexNativeLaunchSuccess,
+  type CodexDisplayReceipt,
+} from "../../../../packages/core/src/codex-mcp-protocol.js";
 import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
 
@@ -37,7 +44,9 @@ export type HookLifecycleEvent =
       readonly reviewSessionId: string;
       readonly documentGeneration: number;
       readonly bindProof: string;
+      readonly native?: true;
     }
+  | { readonly kind: "attest"; readonly taskSessionId: string; readonly receipt: CodexDisplayReceipt }
   | { readonly kind: "refresh"; readonly taskSessionId: string }
   | { readonly kind: "revoke"; readonly taskSessionId: string }
   | { readonly kind: "ignored" };
@@ -112,32 +121,36 @@ function tokenizeCodexOpenCommand(command: string): readonly string[] | undefine
   return args === undefined ? undefined : [installedLauncherPath(), ...args];
 }
 
-function isCodexOpenCommand(value: unknown): boolean {
-  if (!isObject(value) || typeof value.command !== "string") return false;
+function codexOpenSurface(value: unknown): "codex" | "codex-native" | undefined {
+  if (!isObject(value) || typeof value.command !== "string") return undefined;
   const tokens = tokenizeCodexOpenCommand(value.command);
   if (
     tokens === undefined ||
     (tokens[0] !== installedLauncherPath() && tokens[0] !== "placekeeper")
-  ) return false;
+  ) return undefined;
   try {
     if (tokens[1] === "open-link") {
       const request = parseOpenLinkArguments(tokens.slice(1));
-      return request.operation === "open" && request.surface === "codex";
+      return request.operation === "open" && (request.surface === "codex" || request.surface === "codex-native") ? request.surface : undefined;
     }
     const request = parseOpenArguments(tokens.slice(1));
-    return request.surface === "codex" && isAbsolute(request.pdfPath);
+    return (request.surface === "codex" || request.surface === "codex-native") && isAbsolute(request.pdfPath) ? request.surface : undefined;
   } catch {
-    return false;
+    return undefined;
   }
 }
 
-function launchResponse(value: unknown): Omit<Extract<HookLifecycleEvent, { kind: "claim" }>, "kind" | "taskSessionId"> | undefined {
+function launchResponse(value: unknown, surface: "codex" | "codex-native"): Omit<Extract<HookLifecycleEvent, { kind: "claim" }>, "kind" | "taskSessionId"> | undefined {
   const output = typeof value === "string" ? value : undefined;
   if (output === undefined) return undefined;
   const serialized = output.trim();
   if (serialized.length === 0 || Buffer.byteLength(serialized) > 65_536) return undefined;
   let parsed: unknown;
   try { parsed = JSON.parse(serialized) as unknown; } catch { return undefined; }
+  if (surface === "codex-native") {
+    const native = parseCodexNativeLaunchSuccess(parsed);
+    return native === undefined ? undefined : { reviewSessionId: native.sessionId, documentGeneration: native.documentGeneration, bindProof: native.bindProof, native: true };
+  }
   if (
     !isObject(parsed) || parsed.ok !== true ||
     (parsed.kind !== "opened" && parsed.kind !== "focused") ||
@@ -169,8 +182,14 @@ export function inspectHookEvent(value: unknown): HookLifecycleEvent {
   const taskSessionId = taskIdentity(value);
   if (taskSessionId === undefined) return { kind: "ignored" };
   if (value.hook_event_name === "PostToolUse") {
-    if (value.tool_name !== "Bash" || !isCodexOpenCommand(value.tool_input)) return { kind: "ignored" };
-    const response = launchResponse(value.tool_response);
+    if (value.tool_name === CODEX_DISPLAY_TOOL) {
+      if (parseCodexDisplayRequest(value.tool_input) === undefined || !isObject(value.tool_response)) return { kind: "ignored" };
+      const receipt = parseCodexDisplayReceipt(value.tool_response.structuredContent);
+      return receipt === undefined ? { kind: "ignored" } : { kind: "attest", taskSessionId, receipt };
+    }
+    const surface = value.tool_name === "Bash" ? codexOpenSurface(value.tool_input) : undefined;
+    if (surface === undefined) return { kind: "ignored" };
+    const response = launchResponse(value.tool_response, surface);
     return response === undefined ? { kind: "ignored" } : { kind: "claim", taskSessionId, ...response };
   }
   if (value.hook_event_name === "UserPromptSubmit" && typeof value.prompt === "string") {
@@ -409,8 +428,15 @@ export async function runHookCommand(
       } else if (response.kind === "binding") {
         await write(`${JSON.stringify(hookOutput(
           "PostToolUse",
-          "Placekeeper associated this launch with the current task. Live context will become current after the in-app browser completes its authenticated bootstrap.",
+          event.native === true
+            ? "Placekeeper associated this launch with the current task. Display the handoff in the native panel; live context becomes current after trusted display attestation and authenticated readiness."
+            : "Placekeeper associated this launch with the current task. Live context will become current after the in-app browser completes its authenticated bootstrap.",
         ))}\n`);
+      }
+    } else if (event.kind === "attest") {
+      const response = await control({ kind: "codex-attest", taskSessionId: event.taskSessionId, receipt: event.receipt });
+      if (response.kind !== "codex-attestation" || response.status !== "accepted") {
+        await write(`${JSON.stringify(hookOutput("PostToolUse", "Placekeeper could not verify this native presentation for the current chat. Reopen the PDF to retry; live context remains unavailable.", "Placekeeper native presentation was not verified."))}\n`);
       }
     } else if (event.kind === "refresh") {
       const response = await control({ kind: "refresh-context", taskSessionId: event.taskSessionId });
@@ -440,6 +466,9 @@ export async function runHookCommand(
     }
   } catch (error) {
     const timedOut = error instanceof PlacekeeperControlTimeoutError;
+    if (event.kind === "attest") {
+      await write(`${JSON.stringify(hookOutput("PostToolUse", "Placekeeper could not verify this native presentation because the local service is unavailable. Reopen the PDF to retry; live context remains unavailable.", "Placekeeper native presentation verification failed."))}\n`);
+    }
     if (event.kind === "claim" && timedOut) {
       await write(`${JSON.stringify(hookOutput(
         "PostToolUse",

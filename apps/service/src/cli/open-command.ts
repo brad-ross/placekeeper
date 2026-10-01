@@ -166,7 +166,7 @@ export function parseOpenArguments(args: readonly string[]): LaunchRequest {
     }
     if (argument === "--surface") {
       const value = takeValue(args, index, argument);
-      if (!isLaunchSurface(value)) {
+      if (surface !== undefined || !isLaunchSurface(value)) {
         throw new Error("Unsupported launch surface");
       }
       surface = value;

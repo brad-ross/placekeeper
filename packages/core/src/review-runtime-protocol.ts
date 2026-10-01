@@ -2,7 +2,7 @@ import type { ReviewAnchorEvidenceV1, SaveDestinationConfirmation } from "./revi
 export const REVIEW_RUNTIME_PROTOCOL = "placekeeper.review-runtime" as const;
 export const REVIEW_RUNTIME_VERSION = 3 as const;
 
-export const REVIEW_RUNTIME_HOSTS = ["vscode", "chrome", "macos"] as const;
+export const REVIEW_RUNTIME_HOSTS = ["vscode", "chrome", "macos", "codex"] as const;
 export type ReviewRuntimeHost = typeof REVIEW_RUNTIME_HOSTS[number];
 
 export const REVIEW_RUNTIME_METHODS = [
@@ -99,6 +99,9 @@ export type ReviewRuntimeBrokerMethod = Exclude<
 export const REVIEW_RUNTIME_HOST_METHODS = {
   vscode: REVIEW_RUNTIME_METHODS,
   chrome: REVIEW_RUNTIME_METHODS.filter((method) => (
+    method !== "forwardSyncTex" && method !== "reverseSyncTex"
+  )),
+  codex: REVIEW_RUNTIME_METHODS.filter((method) => (
     method !== "forwardSyncTex" && method !== "reverseSyncTex"
   )),
   macos: REVIEW_RUNTIME_METHODS.filter((method) => (

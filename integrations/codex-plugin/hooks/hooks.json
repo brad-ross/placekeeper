@@ -13,6 +13,18 @@
             "additionalContextLimit": 131072
           }
         ]
+      },
+      {
+        "matcher": "^mcp__placekeeper__display_review$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$HOME/Applications/Placekeeper.app/Contents/MacOS/placekeeper\" hook --event",
+            "timeout": 8,
+            "statusMessage": "Verifying Placekeeper native presentation",
+            "additionalContextLimit": 131072
+          }
+        ]
       }
     ],
     "UserPromptSubmit": [

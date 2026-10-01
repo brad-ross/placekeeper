@@ -825,3 +825,11 @@ describe("open command", () => {
     expect(host.broker.taskBindings.bindingForTask("task-a")).toBeUndefined();
   });
 });
+
+describe("explicit native launch surface", () => {
+  it("parses native separately from the existing Codex browser surface", () => {
+    expect(parseOpenArguments(["open", "--json", "--surface", "codex-native", "--pdf", "/tmp/paper.pdf"])).toMatchObject({ surface: "codex-native" });
+    expect(parseOpenArguments(["open", "--json", "--surface", "codex", "--pdf", "/tmp/paper.pdf"])).toMatchObject({ surface: "codex" });
+    expect(() => parseOpenArguments(["open", "--json", "--surface", "codex-native", "--surface", "codex", "--pdf", "/tmp/paper.pdf"])).toThrow();
+  });
+});

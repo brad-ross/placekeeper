@@ -1,3 +1,14 @@
+import {
+  parseCodexAppRequest,
+  parseCodexDisplayRequest,
+  parseCodexDisplayReceipt,
+  type CodexAppRequest,
+  type CodexAppResponse,
+  type CodexDisplayRequest,
+  type CodexDisplayReceipt,
+  type CodexPendingPresentation,
+  type CodexAdmissionFailure,
+} from "../../../../packages/core/src/codex-mcp-protocol.js";
 import { chmod, mkdir, unlink } from "node:fs/promises";
 import { createConnection, createServer, type Server, type Socket } from "node:net";
 import { dirname } from "node:path";
@@ -143,6 +154,9 @@ function upgradePresentation(reason: DaemonUpgradeReason): {
 }
 
 export type PlacekeeperControlRequest =
+  | { readonly kind: "codex-display"; readonly request: CodexDisplayRequest }
+  | { readonly kind: "codex-attest"; readonly taskSessionId: string; readonly receipt: CodexDisplayReceipt }
+  | { readonly kind: "codex-app"; readonly request: CodexAppRequest }
   | {
       readonly kind: "management";
       readonly protocolVersion: typeof MANAGEMENT_PROTOCOL_VERSION;
@@ -246,6 +260,9 @@ export type PlacekeeperControlRequest =
     };
 
 export type PlacekeeperControlResponse =
+  | { readonly kind: "codex-display"; readonly receipt: CodexDisplayReceipt; readonly pending: CodexPendingPresentation }
+  | { readonly kind: "codex-attestation"; readonly status: "accepted" | "denied"; readonly reason?: CodexAdmissionFailure }
+  | { readonly kind: "codex-app"; readonly response: CodexAppResponse }
   | {
       readonly kind: "management";
       readonly protocolVersion: typeof MANAGEMENT_PROTOCOL_VERSION;
@@ -335,6 +352,20 @@ function isObject(value: unknown): value is Record<string, unknown> {
 
 function isControlRequest(value: unknown): value is PlacekeeperControlRequest {
   if (!isObject(value) || typeof value.kind !== "string") return false;
+  if (value.kind === "codex-display") {
+    return Object.keys(value).length === 2 &&
+      parseCodexDisplayRequest(value.request) !== undefined;
+  }
+  if (value.kind === "codex-app") {
+    return Object.keys(value).length === 2 &&
+      parseCodexAppRequest(value.request) !== undefined;
+  }
+  if (value.kind === "codex-attest") {
+    return Object.keys(value).length === 3 &&
+      typeof value.taskSessionId === "string" &&
+      /^[A-Za-z0-9._:-]{1,256}$/u.test(value.taskSessionId) &&
+      parseCodexDisplayReceipt(value.receipt) !== undefined;
+  }
   if (value.kind === "management") {
     return value.protocolVersion === MANAGEMENT_PROTOCOL_VERSION &&
       (value.operation === "status" ||
@@ -459,6 +490,11 @@ async function dispatch(
         activity: live.activity,
       },
     };
+  }
+  // Native service orchestration is introduced by the admission unit. Until
+  // then these closed contracts fail explicitly instead of reaching evidence.
+  if (request.kind === "codex-display" || request.kind === "codex-attest" || request.kind === "codex-app") {
+    return { kind: "error", reason: "unavailable" };
   }
   if (request.kind === "launch") {
     return { kind: "launch", response: await host.open(request.request) };

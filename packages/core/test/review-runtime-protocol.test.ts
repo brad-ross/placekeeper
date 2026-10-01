@@ -107,8 +107,9 @@ describe("shared review runtime protocol", () => {
   });
 
   it("defines Chrome as a reduced, compiler-visible RPC host", () => {
-    expect(REVIEW_RUNTIME_HOSTS).toEqual(["vscode", "chrome", "macos"]);
+    expect(REVIEW_RUNTIME_HOSTS).toEqual(["vscode", "chrome", "macos", "codex"]);
     expect(REVIEW_RUNTIME_HOST_METHODS.vscode).toEqual(REVIEW_RUNTIME_METHODS);
+    expect(REVIEW_RUNTIME_HOST_METHODS.codex).toEqual(REVIEW_RUNTIME_HOST_METHODS.chrome);
     expect(REVIEW_RUNTIME_HOST_METHODS.chrome).not.toContain("forwardSyncTex");
     expect(REVIEW_RUNTIME_HOST_METHODS.chrome).not.toContain("reverseSyncTex");
     expect(isReviewRuntimeMethodForHost("chrome", "command")).toBe(true);
