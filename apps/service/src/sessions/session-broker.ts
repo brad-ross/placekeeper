@@ -1920,6 +1920,12 @@ export class SessionBroker {
     return transition.current;
   }
 
+  #assertExpectedDocumentGeneration(session: ActiveSession, expected: number | undefined): void {
+    if (expected !== undefined && expected !== session.state.workflow.documentGeneration) {
+      throw new ReviewGenerationConflictError(expected, session.state.workflow.documentGeneration, session.state.revision);
+    }
+  }
+
   async establishSaveDestination(
     sessionId: string,
     input: {
@@ -1928,12 +1934,18 @@ export class SessionBroker {
       readonly capabilityId: string;
       readonly fingerprint?: string;
       readonly confirmation?: SaveDestinationConfirmation;
+      readonly expectedDocumentGeneration?: number;
+      readonly expectedDestinationGeneration?: number;
     },
   ): Promise<{ readonly destination: DurableSaveDestination; readonly sync: DurableSaveSync; readonly state: ReviewState }> {
     const session = this.#activeById.get(sessionId);
     if (session === undefined || session.ending) throw new Error("Review session is not active");
     return this.#withSessionTail(session, async () => {
       if (session.ending) throw new Error("Review session is ending");
+      this.#assertExpectedDocumentGeneration(session, input.expectedDocumentGeneration);
+      if (input.expectedDestinationGeneration !== undefined && input.expectedDestinationGeneration !== session.destination.generation) {
+        throw new Error("save-destination-conflict");
+      }
       this.#assertSaveDestinationAllowed(session, input);
       const write = this.controls.beginWrite(sessionId);
       try {
@@ -1982,18 +1994,28 @@ export class SessionBroker {
       readonly targetPath: string;
       readonly capabilityId: string;
       readonly fingerprint: string;
+      readonly expectedDocumentGeneration?: number;
+      readonly expectedDestinationGeneration?: number;
+      /** Trusted capability rebind runs under the canonical generation tail. */
+      readonly prepareTargetPath?: () => Promise<string>;
     },
   ): Promise<{ readonly destination: DurableSaveDestination; readonly sync: DurableSaveSync }> {
     const session = this.#activeById.get(sessionId);
     if (session === undefined || session.ending) throw new Error("Review session is not active");
     return this.#withSessionTail(session, async () => {
       if (session.ending) throw new Error("Review session is ending");
-      this.#assertSaveDestinationAllowed(session, { kind: "original", targetPath: input.targetPath });
+      this.#assertExpectedDocumentGeneration(session, input.expectedDocumentGeneration);
+      if (input.expectedDestinationGeneration !== undefined && input.expectedDestinationGeneration !== session.destination.generation) {
+        throw new Error("save-destination-conflict");
+      }
+      const targetPath = input.prepareTargetPath === undefined ? input.targetPath : await input.prepareTargetPath();
+      if (session.ending) throw new Error("Review session is ending");
+      this.#assertSaveDestinationAllowed(session, { kind: "original", targetPath });
       const destination: DurableSaveDestination = {
         phase: "active",
         generation: session.destination.generation + 1,
         kind: "original",
-        targetPath: input.targetPath,
+        targetPath,
         capabilityId: input.capabilityId,
         fingerprint: input.fingerprint,
       };
@@ -2008,8 +2030,8 @@ export class SessionBroker {
         session.sourceOwnership.disposition === "local"
           ? {
               ...session.sourceOwnership,
-              canonicalSourcePath: input.targetPath,
-              displayName: basename(input.targetPath),
+              canonicalSourcePath: targetPath,
+              displayName: basename(targetPath),
             }
           : session.sourceOwnership;
       await session.store.persist({
@@ -2021,7 +2043,7 @@ export class SessionBroker {
       for (const [key, owner] of this.#activeBySource) {
         if (owner === sessionId) this.#activeBySource.delete(key);
       }
-      session.canonicalSourcePath = input.targetPath;
+      session.canonicalSourcePath = targetPath;
       session.sourceOwnership = sourceOwnership;
       session.destination = destination;
       session.sync = sync;
@@ -3458,8 +3480,8 @@ export class SessionBroker {
     };
   }
 
-  async freezeDelivery(sessionId: string, fence?: ReviewExportFence): Promise<FrozenReviewDelivery> {
-    return this.#freezeDelivery(sessionId, fence, false);
+  async freezeDelivery(sessionId: string, fence?: ReviewExportFence, expectedDocumentGeneration?: number): Promise<FrozenReviewDelivery> {
+    return this.#freezeDelivery(sessionId, fence, false, expectedDocumentGeneration);
   }
 
   /** Freeze the semantic PDF target rather than draft-only review revisions. */
@@ -3471,6 +3493,7 @@ export class SessionBroker {
     sessionId: string,
     fence: ReviewExportFence | undefined,
     saveTarget: boolean,
+    expectedDocumentGeneration?: number,
   ): Promise<FrozenReviewDelivery> {
     const session = this.#activeById.get(sessionId);
     if (session === undefined || session.ending) {
@@ -3483,6 +3506,7 @@ export class SessionBroker {
     try {
       await this.#assertReplacementCommitSettled(session);
       if (session.ending) throw new Error("Review session is ending");
+      this.#assertExpectedDocumentGeneration(session, expectedDocumentGeneration);
       if (fence && (fence.expectedRevision !== session.state.revision || fence.documentGeneration !== session.state.workflow.documentGeneration)) {
         throw new ReviewExportConflictError();
       }

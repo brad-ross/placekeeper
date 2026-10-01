@@ -607,3 +607,19 @@ export class ReviewExportConflictError extends Error {
     this.name = "ReviewExportConflictError";
   }
 }
+
+/** Native Codex projections share the path-free native host boundary. Resource
+ * strings are opaque handles; immutable descriptors travel in the app envelope. */
+export function sanitizeCodexReviewRuntimeResponse(
+  method: ReviewRuntimeMethod,
+  value: unknown,
+): unknown | undefined {
+  if (!isReviewRuntimeMethodForHost("codex", method)) return undefined;
+  const projected = sanitizeMacosReviewRuntimeResponse(method, value);
+  if (!record(projected)) return projected;
+  if (method === "scope") return { ...projected, launchSurface: "codex" };
+  if (method === "bootstrap" && record(projected.scope)) {
+    return { ...projected, scope: { ...projected.scope, launchSurface: "codex" } };
+  }
+  return projected;
+}

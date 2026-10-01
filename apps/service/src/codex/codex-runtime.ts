@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import {
+  CODEX_MAX_ENCODED_RESPONSE_BYTES,
   parseCodexAppRequest,
   parseCodexDisplayReceipt,
   type CodexAppRequest,
@@ -11,6 +12,7 @@ import {
 import { digestSecretHex } from "../../../../packages/core/src/session-security.js";
 import type { MatchedRestartReconnectTicket } from "../context/restart-reconnect-store.js";
 import type { TaskBindingAuthorityCheck } from "../context/task-binding-registry.js";
+import { CodexServiceRuntimeBackend } from "./codex-runtime-backend.js";
 import type { SessionBroker } from "../sessions/session-broker.js";
 
 const secret = (): string => randomBytes(32).toString("base64url");
@@ -19,7 +21,7 @@ const opaque = (): string => randomBytes(16).toString("base64url");
 type Scope = NonNullable<ReturnType<SessionBroker["nativeAdmissionScope"]>>;
 
 interface Launch {
-  readonly scope: Scope;
+  scope: Scope;
   readonly handoff: string;
   readonly bindProof: string;
   readonly admissionKey: string;
@@ -31,6 +33,8 @@ interface Panel {
   readonly launch: Launch;
   readonly meta: CodexPendingPresentation;
   watermark: number;
+  leaseExpiresAtMs?: number;
+  relocatedTicket?: Promise<void>;
   ready: boolean;
   attested: boolean;
   active?: Extract<CodexAppResponse, { status: "active" }>;
@@ -48,6 +52,11 @@ export class CodexRuntimeManager {
   readonly #broker: SessionBroker;
   readonly #now: () => Date;
   readonly #ttlMs: number;
+  readonly #panelLeaseMs: number;
+  readonly #backend: CodexServiceRuntimeBackend | undefined;
+  readonly #leaseTimer: ReturnType<typeof setInterval>;
+  readonly #requests = new Set<Promise<CodexAppResponse>>();
+  #closing = false;
   readonly #launches = new Map<string, Launch>();
   readonly #panels = new Map<string, Panel>();
   // A restart ticket cannot revive a detached/expired panel in its issuing process.
@@ -64,22 +73,50 @@ export class CodexRuntimeManager {
   constructor(broker: SessionBroker, options: {
     readonly now?: () => Date;
     readonly pendingTtlMs?: number;
+    readonly panelLeaseMs?: number;
+    readonly backend?: CodexServiceRuntimeBackend;
   } = {}) {
     this.#broker = broker;
     this.#now = options.now ?? (() => new Date());
     this.#ttlMs = options.pendingTtlMs ?? 60_000;
+    this.#panelLeaseMs = options.panelLeaseMs ?? 30_000;
+    this.#backend = options.backend;
+    if (!Number.isSafeInteger(this.#panelLeaseMs) || this.#panelLeaseMs <= 0) throw new RangeError("Invalid panel lease");
     if (
       !Number.isSafeInteger(this.#ttlMs) ||
       this.#ttlMs <= 0
     ) {
       throw new RangeError("Invalid pending TTL");
     }
+    this.#leaseTimer = setInterval(() => this.#sweep(), Math.min(1000, this.#panelLeaseMs));
+    this.#leaseTimer.unref();
     this.#unsubscribeState = broker.onStateInvalidation((event) => {
       for (const [id, panel] of this.#panels) {
         if (panel.launch.scope.reviewSessionId !== event.sessionId) continue;
         panel.watermark += 1;
+        // Only the broker's committed save notification can migrate a path.
+        // Relocation preserves this exact review, generation and PDF digest.
+        const relocated = event.reason === "save" ? broker.nativeAdmissionScope(event.sessionId) : undefined;
+        if (relocated !== undefined && relocated.documentGeneration === panel.meta.generation &&
+          relocated.sourceDigest === panel.launch.scope.sourceDigest &&
+          relocated.canonicalSourcePath !== panel.launch.scope.canonicalSourcePath) {
+          panel.launch.scope = relocated;
+          if (panel.active !== undefined) {
+            const refreshing = this.#serialize(() => this.#refreshRelocatedTicket(panel));
+            panel.relocatedTicket = refreshing.catch(() => { this.#removePanel(id); });
+          }
+        }
         if (event.reason === "generation" && panel.meta.generation !== event.documentGeneration) {
           this.#removePanel(id);
+        }
+      }
+      if (event.reason === "save") {
+        const relocated = broker.nativeAdmissionScope(event.sessionId);
+        for (const launch of this.#launches.values()) {
+          if (relocated !== undefined && launch.scope.reviewSessionId === event.sessionId &&
+            launch.scope.documentGeneration === relocated.documentGeneration && launch.scope.sourceDigest === relocated.sourceDigest) {
+            launch.scope = relocated;
+          }
         }
       }
       if (event.reason === "generation") {
@@ -112,7 +149,7 @@ export class CodexRuntimeManager {
     this.#sweep();
     const scope = this.#broker.nativeAdmissionScope(input.sessionId);
     if (
-      this.#disposed ||
+      this.#disposed || this.#closing ||
       scope === undefined
     ) {
       return undefined;
@@ -152,6 +189,7 @@ export class CodexRuntimeManager {
     readonly reviewSessionId: string;
     readonly documentGeneration: number;
   }): boolean {
+    if (this.#closing) return false;
     this.#sweep();
     const launch = [...this.#launches.values()].find((entry) => entry.bindProof === input.bindProof);
     if (
@@ -173,6 +211,7 @@ export class CodexRuntimeManager {
     readonly receipt: CodexDisplayReceipt;
     readonly privateMeta: CodexPendingPresentation;
   } | undefined {
+    if (this.#closing) return undefined;
     this.#sweep();
     const key = digestSecretHex(handoff);
     const launch = this.#launches.get(key);
@@ -218,6 +257,7 @@ export class CodexRuntimeManager {
   }
 
   attestDisplay(rawReceipt: unknown, trustedTaskSessionId: string): boolean {
+    if (this.#closing) return false;
     this.#sweep();
     const receipt = parseCodexDisplayReceipt(rawReceipt);
     const panel = receipt === undefined ? undefined : [...this.#panels.values()].find((entry) => entry.meta.receiptId === receipt.receiptId);
@@ -238,6 +278,7 @@ export class CodexRuntimeManager {
   }
 
   pending(raw: unknown): Promise<CodexAppResponse> {
+    if (this.#closing) return Promise.resolve(denied("unavailable"));
     return this.#serialize(async () => {
       this.#sweep();
       const request = parseCodexAppRequest(raw);
@@ -317,6 +358,70 @@ export class CodexRuntimeManager {
     };
   }
 
+  /** The private per-panel channel is the only entry for app operations.
+   * Polling and ordinary reads never renew liveness. U3 must qualify delivery
+   * of renew independently of visibility throttling. */
+  handle(raw: unknown): Promise<CodexAppResponse> {
+    if (this.#closing || this.#disposed) return Promise.resolve(denied("unavailable"));
+    const result = this.#handle(raw).catch(() => denied("unavailable"));
+    this.#requests.add(result);
+    void result.then(() => this.#requests.delete(result));
+    return result;
+  }
+
+  async #handle(raw: unknown): Promise<CodexAppResponse> {
+    const request = parseCodexAppRequest(raw);
+    if (request === undefined) return denied("invalid");
+    if (request.authority === "pending") return this.pending(request);
+    if (request.authority === "reconnect") return this.stageReconnect(request);
+    const scope = this.resolveActive(request);
+    if (scope === undefined) return denied("revoked");
+    if (request.method === "detach") {
+      await this.detach(scope.runtimeId);
+      return { status: "ok", payload: {} };
+    }
+    if (request.method === "renew") {
+      const panel = this.#panels.get(scope.runtimeId)!;
+      const renewed = this.#broker.taskBindings.renew(this.#binding(panel));
+      if (renewed.status !== "active") return denied("revoked");
+      panel.leaseExpiresAtMs = this.#now().getTime() + this.#panelLeaseMs;
+      return { status: "ok", payload: { leaseExpiresAt: new Date(panel.leaseExpiresAtMs).toISOString() } };
+    }
+    if (request.method === "watermark") {
+      const watermark = this.readWatermark(request);
+      return watermark === undefined ? denied("revoked") : { status: "ok", payload: watermark };
+    }
+    if (this.#backend === undefined) return denied("unavailable");
+    try {
+      const payload = await this.#backend.handle(scope, request, () => this.resolveActive(request) !== undefined);
+      await this.#panels.get(scope.runtimeId)?.relocatedTicket;
+      // A reply issued after detach, replacement or revocation may never
+      // hydrate the old view, even if its admitted durable edit succeeded.
+      if (this.resolveActive(request) === undefined) return denied("revoked");
+      const response: CodexAppResponse = { status: "ok", payload };
+      return Buffer.byteLength(JSON.stringify(response)) <= CODEX_MAX_ENCODED_RESPONSE_BYTES ? response : denied("unavailable");
+    } catch (error) {
+      return denied(error instanceof Error && error.message === "invalid-resource" ? "invalid" : "unavailable");
+    }
+  }
+
+  /** Only call for a verified panel-channel EOF; a shared transport client's
+   * EOF conveys no individual presentation authority and must not use this. */
+  disconnect(raw: unknown): Promise<CodexAppResponse> {
+    const request = parseCodexAppRequest(raw);
+    if (request?.authority !== "presentation") return Promise.resolve(denied("invalid"));
+    return this.handle({ ...request, method: "detach", payload: {} });
+  }
+
+  get panelLeaseMs(): number { return this.#panelLeaseMs; }
+
+  async close(): Promise<void> {
+    this.#closing = true;
+    await this.#tail;
+    await Promise.allSettled([...this.#requests]);
+    this.dispose();
+  }
+
   /** Cheap app-only poll. The private active envelope authenticates scope before any read. */
   readWatermark(raw: unknown): {
     readonly watermark: number;
@@ -337,6 +442,7 @@ export class CodexRuntimeManager {
 
   /** The source must already have been reopened/recovered through normal approval. */
   stageReconnect(raw: unknown): Promise<CodexAppResponse> {
+    if (this.#closing) return Promise.resolve(denied("unavailable"));
     return this.#serialize(async () => {
       this.#sweep();
       const request = parseCodexAppRequest(raw);
@@ -397,6 +503,7 @@ export class CodexRuntimeManager {
   }
 
   trustedTaskPrompt(taskSessionId: string): Promise<void> {
+    if (this.#closing) return Promise.resolve();
     return this.#serialize(async () => {
       this.#sweep();
       if (
@@ -487,7 +594,29 @@ export class CodexRuntimeManager {
     }
     this.#seenRuntimes.set(active.runtimeId, this.#now().getTime() + this.#broker.restartReconnects.ticketLifetimeMs);
     panel.active = active;
+    panel.leaseExpiresAtMs = this.#now().getTime() + this.#panelLeaseMs;
+    this.#backend?.attach({ sessionId: panel.launch.scope.reviewSessionId, taskSessionId: panel.launch.owner!,
+      runtimeId: active.runtimeId, attemptId: active.attemptId, generation: active.generation });
     return active;
+  }
+
+  async #refreshRelocatedTicket(panel: Panel): Promise<void> {
+    if (!this.#panelCurrent(panel) || !this.#authorized(panel) || panel.active === undefined) return;
+    const check = this.#broker.taskBindings.beginAuthorityCheck(this.#binding(panel));
+    const active = panel.active;
+    try {
+      await this.#broker.restartReconnects.issue({
+        ...panel.launch.scope,
+        taskSessionId: panel.launch.owner!,
+        browserToken: active.reconnectTicket,
+        native: { runtimeId: active.runtimeId, attemptId: active.attemptId, documentGeneration: active.generation },
+      });
+      // Disposal preserves restart continuation; canonical revocation still
+      // owns persisted revocation independently through the ticket store.
+      if (!this.#disposed && (!check.isCurrent() || !this.#panelCurrent(panel) || !this.#authorized(panel))) {
+        await this.#broker.restartReconnects.revokeToken(active.reconnectTicket);
+      }
+    } finally { check.release(); }
   }
 
   revokeTask(taskSessionId: string): Promise<void> {
@@ -543,6 +672,7 @@ export class CodexRuntimeManager {
 
   dispose(): void {
     this.#disposed = true;
+    clearInterval(this.#leaseTimer);
     this.#unsubscribe();
     this.#unsubscribeState();
     for (const id of this.#panels.keys()) {
@@ -605,6 +735,7 @@ export class CodexRuntimeManager {
     const panel = this.#panels.get(id);
     if (panel !== undefined) {
       this.#broker.taskBindings.detachPresentation(digestSecretHex(panel.launch.admissionKey));
+      this.#backend?.detach(id);
     }
     this.#panels.delete(id);
   }
@@ -623,7 +754,8 @@ export class CodexRuntimeManager {
     for (const [id, panel] of this.#panels) {
       if (
         !this.#current(panel.launch) ||
-        (panel.active === undefined ? panel.launch.expiresAtMs <= now : !this.#authorized(panel))
+        (panel.active === undefined ? panel.launch.expiresAtMs <= now :
+          panel.leaseExpiresAtMs! <= now || !this.#authorized(panel))
       ) {
         this.#removePanel(id);
       }

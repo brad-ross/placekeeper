@@ -154,7 +154,7 @@ export type CodexAppRequest = AppEnvelope & ({
   readonly payload: Record<string, never>;
 } | {
   readonly authority: "presentation";
-  readonly method: ReviewRuntimeMethod | "resource" | "watermark";
+  readonly method: ReviewRuntimeMethod | "resource" | "watermark" | "renew";
   readonly payload: unknown;
 } | {
   readonly authority: "reconnect";
@@ -193,9 +193,9 @@ export function parseCodexAppRequest(value: unknown): CodexAppRequest | undefine
   if (value.authority !== "presentation") {
     return undefined;
   }
-  if (value.method === "watermark" &&
+  if ((value.method === "watermark" || value.method === "renew") &&
     Object.keys(value.payload).length === 0)
-    return { ...envelope, authority: "presentation", method: "watermark", payload: {} };
+    return { ...envelope, authority: "presentation", method: value.method, payload: {} };
   if (value.method === "resource") {
     const p = value.payload;
     if (!closed(p, ["handle", "offset", "length"]) ||

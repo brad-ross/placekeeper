@@ -16,7 +16,14 @@ import { PdfSaveCoordinator } from "../src/saving/pdf-save-coordinator.js";
 import { ExportCoordinator } from "../src/export/export-coordinator.js";
 
 const directories: string[] = [];
+const fixtures: { readonly broker: SessionBroker; readonly saving: PdfSaveCoordinator }[] = [];
 afterEach(async () => {
+  // These fixtures own source observers and asynchronous save queues as well
+  // as files. Settle that work before removing its canonical recovery store.
+  for (const fixture of fixtures.splice(0)) {
+    await fixture.saving.drain();
+    await fixture.broker.quiesceForShutdown();
+  }
   await Promise.all(directories.splice(0).map((path) => rm(path, { recursive: true, force: true })));
 });
 
@@ -35,6 +42,7 @@ async function runtimeFixture(writerOverride?: PdfWriter, importedItems: readonl
       broker, writer, verify: async ({ annotations }) => ({ pageCount: 1, annotationIds: annotations.map(({ id }) => id) }),
       picker: { chooseFolder, locatePdf: async () => undefined },
     });
+    fixtures.push({ broker, saving });
     const exporting = new ExportCoordinator({ writer, capabilities: broker.capabilities });
     const backend = new ChromeServiceRuntimeBackend({ broker, browserSources, transferStore, saving, exporting, downloadFolder: async () => join(root, "downloads") });
     const authority = backend.authority();

@@ -17,6 +17,12 @@ describe("closed Codex MCP contracts", () => {
     for (const method of ["ready", "status"]) expect(parseCodexAppRequest({ ...base, authority: "pending", capability, method, payload: {} })).toBeDefined();
     for (const method of ["resource", "command", "bootstrap"]) expect(parseCodexAppRequest({ ...base, authority: "pending", capability, method, payload: {} })).toBeUndefined();
   });
+  it("admits independent private panel renewal only with empty presentation payload", () => {
+    const request = { ...base, authority: "presentation", capability, method: "renew", payload: {} };
+    expect(parseCodexAppRequest(request)).toEqual(request);
+    expect(parseCodexAppRequest({ ...request, authority: "pending" })).toBeUndefined();
+    expect(parseCodexAppRequest({ ...request, payload: { visible: true } })).toBeUndefined();
+  });
   it("validates active identity, closed method payloads and bounded resource chunks", () => {
     const request = { ...base, authority: "presentation", capability, method: "resource", payload: { handle: id, offset: 0, length: CODEX_RESOURCE_CHUNK_BYTES } };
     expect(parseCodexAppRequest(request)).toEqual(request);

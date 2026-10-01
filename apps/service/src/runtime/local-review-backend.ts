@@ -28,6 +28,7 @@ export class LocalReviewBackend {
     generation: number,
     method: Exclude<ReviewRuntimeBrokerMethod, "saveProposal">,
     payload: unknown,
+    options: { readonly expectedDocumentGeneration?: number } = {},
   ): Promise<unknown> {
     if (["command", "chooseCopy", "chooseFolder", "chooseOriginal", "retrySave", "locateSave", "exportReviewedCopy"].includes(method)) {
       // Establish the durable recovery boundary before attempting a side
@@ -51,8 +52,8 @@ export class LocalReviewBackend {
         let nameResult;
         try {
           const state = method === "chooseCopy"
-            ? await this.#saving.chooseCopyFilename(sessionId, value.filename, value.folderSelectionId, value.confirmation)
-            : await this.#saving.chooseOriginal(sessionId, value.confirmation);
+            ? await this.#saving.chooseCopyFilename(sessionId, value.filename, value.folderSelectionId, value.confirmation, options.expectedDocumentGeneration)
+            : await this.#saving.chooseOriginal(sessionId, value.confirmation, options.expectedDocumentGeneration);
           if (value.confirmation !== undefined) nameResult = state;
         } catch (error) {
           if (value.confirmation === undefined) throw error;
@@ -64,13 +65,13 @@ export class LocalReviewBackend {
         };
         break;
       }
-      case "chooseFolder": result = await this.#saving.chooseFolder(sessionId); break;
+      case "chooseFolder": result = await this.#saving.chooseFolder(sessionId, options.expectedDocumentGeneration); break;
       case "retrySave":
-        await this.#saving.retry(sessionId);
+        await this.#saving.retry(sessionId, options.expectedDocumentGeneration);
         result = this.#broker.saveStatus(sessionId);
         break;
       case "locateSave":
-        await this.#saving.locate(sessionId);
+        await this.#saving.locate(sessionId, options.expectedDocumentGeneration);
         result = this.#broker.saveStatus(sessionId);
         break;
       case "scope": result = await this.#broker.sessionScope(sessionId); break;
@@ -79,7 +80,7 @@ export class LocalReviewBackend {
         break;
       case "exportReviewedCopy": {
         const value = payload as { readonly confirmPossiblyStale?: true; readonly fence?: ReviewExportFence };
-        const frozen = await this.#broker.freezeDelivery(sessionId, value.fence);
+        const frozen = await this.#broker.freezeDelivery(sessionId, value.fence, options.expectedDocumentGeneration);
         result = await this.#exporting.exportReviewedCopy({
           ...frozen,
           ...(value.confirmPossiblyStale === true ? { staleConfirmed: true as const } : {}),
