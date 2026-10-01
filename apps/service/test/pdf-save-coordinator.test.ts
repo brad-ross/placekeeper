@@ -1335,6 +1335,10 @@ describe("coalescing PDF autosave", () => {
     await coordinator.chooseOriginal(sessionId);
     await broker.acceptMutation(sessionId, add(0));
     await broker.settlePhysicalSaveBarrier(sessionId);
+    // Observer settlement can resume autosave. These tests own publication,
+    // so drain that writer and its observation before capturing the candidate.
+    await coordinator.drain();
+    await broker.settlePhysicalSaveBarrier(sessionId);
     const state = broker.state(sessionId)!;
     const destination = broker.saveStatus(sessionId)!.destination;
     if (destination.phase !== "active") throw new Error("Expected active original destination");
@@ -1368,6 +1372,10 @@ describe("coalescing PDF autosave", () => {
     });
     await coordinator.chooseOriginal(sessionId);
     await broker.acceptMutation(sessionId, add(0));
+    await broker.settlePhysicalSaveBarrier(sessionId);
+    // Observer settlement can resume autosave. These tests own publication,
+    // so drain that writer and its observation before capturing the candidate.
+    await coordinator.drain();
     await broker.settlePhysicalSaveBarrier(sessionId);
     const state = broker.state(sessionId)!;
     const destination = broker.saveStatus(sessionId)!.destination;

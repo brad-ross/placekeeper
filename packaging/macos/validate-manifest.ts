@@ -628,22 +628,30 @@ export function validateAppBundleManifest(value: unknown): AppBundleManifest {
 export const CODEX_SKILL_NAME = "placekeeper";
 
 const CODEX_HOOK_SPECS = {
-  PostToolUse: {
-    timeout: 8,
-    additionalContextLimit: 131072,
-    statusMessage: "Connecting Placekeeper context",
-    matcher: "^Bash$",
-  },
-  UserPromptSubmit: {
+  PostToolUse: [
+    {
+      timeout: 8,
+      additionalContextLimit: 131072,
+      statusMessage: "Connecting Placekeeper context",
+      matcher: "^Bash$",
+    },
+    {
+      timeout: 8,
+      additionalContextLimit: 131072,
+      statusMessage: "Verifying Placekeeper native presentation",
+      matcher: "^mcp__placekeeper__display_review$",
+    },
+  ],
+  UserPromptSubmit: [{
     timeout: 8,
     additionalContextLimit: 131072,
     statusMessage: "Refreshing Placekeeper context",
-  },
-  SessionEnd: {
+  }],
+  SessionEnd: [{
     timeout: 3,
     additionalContextLimit: 256,
     statusMessage: "Disconnecting Placekeeper context",
-  },
+  }],
 } as const;
 type CodexHookEvent = keyof typeof CODEX_HOOK_SPECS;
 
@@ -731,37 +739,39 @@ function validateHookContract(hookManifest: Record<string, unknown>): void {
   }
   for (const event of Object.keys(CODEX_HOOK_SPECS) as CodexHookEvent[]) {
     const declarations = hooksRoot[event];
-    if (!Array.isArray(declarations) || declarations.length !== 1) {
-      throw new Error(`The packaged Codex plugin must declare exactly one ${event} hook`);
+    const expectedDeclarations = CODEX_HOOK_SPECS[event];
+    if (!Array.isArray(declarations) || declarations.length !== expectedDeclarations.length) {
+      throw new Error(`The packaged Codex plugin must declare exactly ${expectedDeclarations.length} ${event} hooks`);
     }
 
-    const declaration = record(declarations[0], `${event} hook declaration`);
-    const expected = CODEX_HOOK_SPECS[event];
-    const expectedMatcher = "matcher" in expected
-      ? expected.matcher
-      : undefined;
-    if (declaration.matcher !== expectedMatcher) {
-      throw new Error(`The packaged ${event} hook matcher changed`);
-    }
-    if (!Array.isArray(declaration.hooks) || declaration.hooks.length !== 1) {
-      throw new Error(`The packaged Codex plugin must declare exactly one ${event} handler`);
-    }
-    const handler = record(declaration.hooks[0], `${event} hook handler`);
-    const expectedCommand = `${CODEX_INSTALLED_LAUNCHER_COMMAND} hook --event`;
-    if (handler.type !== "command" || handler.command !== expectedCommand) {
-      throw new Error(`The packaged ${event} hook must use the canonical installed launcher command`);
-    }
-    if (
-      handler.timeout !== expected.timeout ||
-      handler.additionalContextLimit !== expected.additionalContextLimit ||
-      handler.statusMessage !== expected.statusMessage
-    ) {
-      throw new Error(`The packaged ${event} hook timeout, context limit, or status changed`);
-    }
-    if (event !== "SessionEnd" && expected.timeout <= CONTROL_REQUEST_TIMEOUT_SECONDS) {
-      throw new Error(
-        `The packaged ${event} hook timeout must exceed the ${CONTROL_REQUEST_TIMEOUT_SECONDS}-second control client timeout`,
-      );
+    for (const [index, expected] of expectedDeclarations.entries()) {
+      const declaration = record(declarations[index], `${event} hook declaration`);
+      const expectedMatcher = "matcher" in expected
+        ? expected.matcher
+        : undefined;
+      if (declaration.matcher !== expectedMatcher) {
+        throw new Error(`The packaged ${event} hook matcher changed`);
+      }
+      if (!Array.isArray(declaration.hooks) || declaration.hooks.length !== 1) {
+        throw new Error(`The packaged Codex plugin must declare exactly one ${event} handler`);
+      }
+      const handler = record(declaration.hooks[0], `${event} hook handler`);
+      const expectedCommand = `${CODEX_INSTALLED_LAUNCHER_COMMAND} hook --event`;
+      if (handler.type !== "command" || handler.command !== expectedCommand) {
+        throw new Error(`The packaged ${event} hook must use the canonical installed launcher command`);
+      }
+      if (
+        handler.timeout !== expected.timeout ||
+        handler.additionalContextLimit !== expected.additionalContextLimit ||
+        handler.statusMessage !== expected.statusMessage
+      ) {
+        throw new Error(`The packaged ${event} hook timeout, context limit, or status changed`);
+      }
+      if (event !== "SessionEnd" && expected.timeout <= CONTROL_REQUEST_TIMEOUT_SECONDS) {
+        throw new Error(
+          `The packaged ${event} hook timeout must exceed the ${CONTROL_REQUEST_TIMEOUT_SECONDS}-second control client timeout`,
+        );
+      }
     }
   }
 }

@@ -1056,6 +1056,48 @@ describe("macOS distribution manifests", () => {
     })).toThrow(/Codex plugin/u);
   });
 
+  it("validates both canonical Codex PostToolUse declarations", async () => {
+    await expect(validateCodexPlugin(resolve("integrations/codex-plugin"))).resolves.toBeUndefined();
+  });
+
+  it.each([
+    "missing-launcher", "missing-display", "extra-declaration", "duplicate-display",
+    "malformed-display", "wrong-display-matcher", "wrong-launcher-matcher",
+    "wrong-display-command", "wrong-display-timeout", "wrong-display-context-limit",
+    "wrong-display-status", "extra-display-handler",
+  ])("rejects the %s Codex hook contract", async (failure) => {
+    const root = await mkdtemp(join(tmpdir(), "placekeeper-hook-contract-"));
+    const pluginRoot = join(root, "codex-plugin");
+    try {
+      await cp(resolve("integrations/codex-plugin"), pluginRoot, { recursive: true });
+      const path = join(pluginRoot, "hooks/hooks.json");
+      const manifest = JSON.parse(await readFile(path, "utf8")) as {
+        hooks: { PostToolUse: Array<{ matcher?: string; hooks: Array<Record<string, unknown>> }> };
+      };
+      const declarations = manifest.hooks.PostToolUse;
+      const display = declarations[1]!;
+      const handler = display.hooks[0]!;
+      switch (failure) {
+        case "missing-launcher": declarations.splice(0, 1); break;
+        case "missing-display": declarations.splice(1, 1); break;
+        case "extra-declaration": declarations.push(structuredClone(display)); break;
+        case "duplicate-display": declarations[0] = structuredClone(display); break;
+        case "malformed-display": declarations[1] = null as unknown as typeof display; break;
+        case "wrong-display-matcher": display.matcher = "^mcp__.*__display_review$"; break;
+        case "wrong-launcher-matcher": declarations[0]!.matcher = "Bash"; break;
+        case "wrong-display-command": handler.command = "placekeeper hook --event"; break;
+        case "wrong-display-timeout": handler.timeout = 5; break;
+        case "wrong-display-context-limit": handler.additionalContextLimit = 256; break;
+        case "wrong-display-status": handler.statusMessage = "Connecting Placekeeper context"; break;
+        case "extra-display-handler": display.hooks.push(structuredClone(handler)); break;
+      }
+      await writeFile(path, JSON.stringify(manifest));
+      await expect(validateCodexPlugin(pluginRoot)).rejects.toThrow(/PostToolUse/u);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("rejects a missing or operationally incomplete Codex skill", async () => {
     const root = await mkdtemp(join(tmpdir(), "placekeeper-plugin-contract-"));
     const pluginRoot = join(root, "codex-plugin");
