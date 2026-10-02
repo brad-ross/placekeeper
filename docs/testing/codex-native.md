@@ -16,8 +16,8 @@ cover these files. Existing active-review upgrade deferral remains in force.
 
 The existing compatibility plugin registers `./.mcp.json`, the official
 compatibility format. There is no unused portable `mcp.json` duplicate. Its sole
-server `placekeeper` executes `/bin/sh ${PLUGIN_ROOT}/scripts/mcp.sh`, which uses
-the installed bundled Node runtime and adapter. The adapter accesses the existing
+server `placekeeper` executes `/bin/sh -c` with the fixed command
+`exec /bin/sh "$HOME/Applications/Placekeeper.app/Contents/Resources/integrations/codex-plugin/scripts/mcp.sh"`. The explicit shell expands `HOME`; the wrapper uses the installed bundled Node runtime and adapter. MCP arguments are literal argv, so plugin-hook `PLUGIN_ROOT` expansion must not be assumed here. The adapter accesses the existing
 private daemon socket, adds no HTTP listener and cannot stop the daemon on EOF.
 
 Use the existing app/plugin installation flow, review its trust prompts, enable

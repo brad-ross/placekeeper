@@ -1,3 +1,8 @@
+import { copyFile, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { describe, expect, it, vi } from "vitest";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { RESOURCE_MIME_TYPE } from "@modelcontextprotocol/ext-apps/server";
@@ -55,5 +60,45 @@ describe("packaged native MCP transport", () => {
       expect((await client.callTool({ name: APP_TOOL, arguments: { request } })).structuredContent).toBeUndefined();
     } finally { await client.close(); await server.close(); }
     expect(service.app).toHaveBeenCalledOnce();
+  });
+});
+
+
+describe("packaged native command resolution", () => {
+  it("initializes from a spaced fixture HOME without plugin argument interpolation or plugin cwd", async () => {
+    const home = await mkdtemp(join(tmpdir(), "pk MCP home "));
+    const resources = join(home, "Applications/Placekeeper.app/Contents/Resources");
+    const wrapper = join(resources, "integrations/codex-plugin/scripts/mcp.sh");
+    const node = join(resources, "node/bin/node"), server = join(resources, "codex-mcp/server.js");
+    const sdk = (path: string) => JSON.stringify(pathToFileURL(resolve(`node_modules/@modelcontextprotocol/sdk/dist/esm/${path}`)).href);
+    const registration = JSON.parse(await readFile(resolve("integrations/codex-plugin/.mcp.json"), "utf8")).mcpServers.placekeeper as { command: string; args: string[] };
+    try {
+      await Promise.all([dirname(wrapper), dirname(node), dirname(server)].map((directory) => mkdir(directory, { recursive: true })));
+      await copyFile(resolve("integrations/codex-plugin/scripts/mcp.sh"), wrapper);
+      await symlink(process.execPath, node);
+      await writeFile(server, `import { Server } from ${sdk("server/index.js")};
+import { StdioServerTransport } from ${sdk("server/stdio.js")};
+import { ListToolsRequestSchema } from ${sdk("types.js")};
+const server = new Server({name:"installed-fixture",version:"1"},{capabilities:{tools:{}}});
+server.setRequestHandler(ListToolsRequestSchema,async()=>({tools:[]}));
+await server.connect(new StdioServerTransport());
+`);
+      const client = new Client({ name: "packaged-resolution-test", version: "1" });
+      const transport = new StdioClientTransport({ ...registration, env: { HOME: home }, cwd: tmpdir(), stderr: "pipe" });
+      try {
+        await client.connect(transport);
+        expect(client.getServerVersion()).toEqual({ name: "installed-fixture", version: "1" });
+        expect((await client.listTools()).tools).toEqual([]);
+      } finally { await client.close(); }
+      // Setting the hook environment variable cannot expand a literal MCP argv.
+      const literalClient = new Client({ name: "literal-resolution-test", version: "1" });
+      const literal = new StdioClientTransport({ command: "/bin/sh", args: ["${PLUGIN_ROOT}/scripts/mcp.sh"], env: { HOME: home, PLUGIN_ROOT: join(resources, "integrations/codex-plugin") }, cwd: tmpdir(), stderr: "pipe" });
+      let stderr = "";
+      literal.stderr?.on("data", (chunk: Buffer) => { stderr += chunk.toString(); });
+      try {
+        await expect(literalClient.connect(literal)).rejects.toThrow(/Connection closed/u);
+        expect(stderr).toContain("${PLUGIN_ROOT}/scripts/mcp.sh");
+      } finally { await literalClient.close(); }
+    } finally { await rm(home, { recursive: true, force: true }); }
   });
 });

@@ -854,7 +854,7 @@ export async function validateCodexPlugin(pluginRoot: string): Promise<void> {
   const mcp = record(JSON.parse(await readFile(resolve(pluginRoot, ".mcp.json"), "utf8")), "Codex MCP configuration");
   const servers = record(mcp.mcpServers, "Codex MCP servers");
   const native = record(servers.placekeeper, "Placekeeper native MCP server");
-  if (Object.keys(servers).join() !== "placekeeper" || native.command !== "/bin/sh" || JSON.stringify(native.args) !== JSON.stringify(["${PLUGIN_ROOT}/scripts/mcp.sh"]) || Object.keys(native).sort().join() !== "args,command") throw new Error("The native MCP registration must use the packaged local adapter");
+  if (Object.keys(servers).join() !== "placekeeper" || native.command !== "/bin/sh" || JSON.stringify(native.args) !== JSON.stringify(["-c", 'exec /bin/sh "$HOME/Applications/Placekeeper.app/Contents/Resources/integrations/codex-plugin/scripts/mcp.sh"']) || Object.keys(native).sort().join() !== "args,command") throw new Error("The native MCP registration must use the packaged local adapter");
   const script = await readFile(resolve(pluginRoot, "scripts/mcp.sh"), "utf8");
   if (!script.includes('exec "$node" "$server"') || !script.includes("Contents/Resources/codex-mcp/server.js") || !script.includes("Contents/Resources/node/bin/node")) throw new Error("The native MCP entry must use installed bundled assets");
   await Promise.all([
