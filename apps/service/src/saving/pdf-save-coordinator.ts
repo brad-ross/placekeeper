@@ -484,6 +484,7 @@ export class PdfSaveCoordinator {
               revision: delivery.revision,
               stateDigest,
               targetDigest: written.evidence.outputSha256,
+              verifiedNativeAnnotationIds: delivery.annotations.filter(annotation => annotation.kind === "pdfAnnotation").map(annotation => annotation.id),
               commit: async (candidateIsCurrent) => {
                 // A copy is still derived from an owned local source. Reprove
                 // that source immediately before publication: an explicit

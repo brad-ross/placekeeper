@@ -74,8 +74,16 @@ function presentationEnvelope(method: PresentationRequest["method"], value: unkn
   if (active === undefined) throw new Error("No native presentation");
   return { ...envelopeIdentity(active), authority: "presentation", method, payload: value, capability: active.presentationCapability };
 }
+function staleGenerationReply(): Error { const error = new Error("Obsolete native generation reply"); error.name = "AbortError"; return error; }
 async function payload(method: PresentationRequest["method"], value: unknown = {}, attempt = incarnation): Promise<unknown> {
-  const response = await call(presentationEnvelope(method, value), attempt);
+  const request = presentationEnvelope(method, value);
+  let response: CodexAppResponse;
+  try { response = await call(request, attempt); }
+  catch (error) {
+    if (attempt === incarnation && active !== undefined && (request.generation !== active.generation || request.capability !== active.presentationCapability)) throw staleGenerationReply();
+    throw error;
+  }
+  if (active !== undefined && (request.generation !== active.generation || request.capability !== active.presentationCapability)) throw staleGenerationReply();
   if (response.status === "denied") throw deniedFailure(response.reason);
   if (response.status !== "ok") throw new Error(`Native request ${response.status}`);
   if (method === "bootstrap" && typeof response.payload === "object" && response.payload !== null) productionSessionId = (response.payload as { sessionId: string }).sessionId;
@@ -84,18 +92,28 @@ async function payload(method: PresentationRequest["method"], value: unknown = {
 /** Runs regardless of visibility. Actual hidden-panel delivery is an installed-host gate. */
 async function renew(attempt: number) {
   try { await payload("renew", {}, attempt); if (attempt !== incarnation) return; lastRenewal = new Date().toISOString(); document.querySelector<HTMLElement>("#renewal")!.textContent = `Last authenticated panel renewal: ${lastRenewal}`; recordDiagnostic("renewed"); }
-  catch (error) { if (attempt === incarnation) { recordDiagnostic("failed", { failure: diagnosticFailure(error) }); stop(); display("Reconnect: the native connection ended. Accepted work remains recoverable. Ask this chat to reconnect Placekeeper using a fresh native launch."); } return; }
+  catch (error) { if (attempt === incarnation && error instanceof Error && error.name === "AbortError") { renewal = setTimeout(() => void renew(attempt), 5_000); return; } if (attempt === incarnation) { recordDiagnostic("failed", { failure: diagnosticFailure(error) }); stop(); display("Reconnect: the native connection ended. Accepted work remains recoverable. Ask this chat to reconnect Placekeeper using a fresh native launch."); } return; }
   if (attempt === incarnation) renewal = setTimeout(() => void renew(attempt), 5_000);
 }
 async function poll(attempt: number, previous?: number) {
   try {
-    const response = await payload("watermark", {}, attempt) as { watermark: number; documentGeneration: number; reviewRevision: number };
-    if (response.watermark !== previous && previous !== undefined && active !== undefined && productionSessionId !== undefined) {
-      const event: HostRuntimeInvalidation = { sessionId: productionSessionId, generation: response.documentGeneration, revision: response.reviewRevision, reason: response.documentGeneration === active.generation ? "freshness" : "generation" };
+    const response = await payload("watermark", {}, attempt) as { watermark: number; sessionId?: string; documentGeneration: number; reviewRevision: number; presentation?: Extract<CodexAppResponse, { status: "active" }> };
+    if (response.sessionId !== undefined) {
+      if (productionSessionId !== undefined && productionSessionId !== response.sessionId) throw new NativeDiagnosticError("incarnation-mismatch");
+      productionSessionId = response.sessionId;
+    }
+    const successor = response.presentation;
+    const previousGeneration = active?.generation;
+    if (successor !== undefined) {
+      if (active === undefined || successor.status !== "active" || successor.runtimeId !== active.runtimeId || successor.attemptId !== active.attemptId || successor.generation !== response.documentGeneration || successor.generation <= active.generation || typeof successor.presentationCapability !== "string" || typeof successor.reconnectTicket !== "string") throw new NativeDiagnosticError("incarnation-mismatch");
+      active = successor;
+    }
+    if ((successor !== undefined || response.watermark !== previous && previous !== undefined) && active !== undefined && productionSessionId !== undefined) {
+      const event: HostRuntimeInvalidation = { sessionId: productionSessionId, generation: response.documentGeneration, revision: response.reviewRevision, reason: response.documentGeneration === previousGeneration ? "freshness" : "generation" };
       for (const listener of runtimeInvalidations) listener(event);
     }
     if (attempt === incarnation) timer = setTimeout(() => void poll(attempt, response.watermark), document.hidden ? 5_000 : 1_000);
-  } catch (error) { if (attempt === incarnation) { recordDiagnostic("failed", { failure: diagnosticFailure(error) }); stop(); display(error instanceof ResourceAllocationError ? "The host could not allocate memory for this document. Close other panels and reopen the PDF; accepted work remains recoverable." : "Reconnect: current review cannot be verified. Accepted work remains recoverable. Ask this chat to reconnect Placekeeper using a fresh native launch."); } }
+  } catch (error) { if (attempt === incarnation && error instanceof Error && error.name === "AbortError") { timer = setTimeout(() => void poll(attempt, previous), 1_000); return; } if (attempt === incarnation) { recordDiagnostic("failed", { failure: diagnosticFailure(error) }); stop(); display(error instanceof ResourceAllocationError ? "The host could not allocate memory for this document. Close other panels and reopen the PDF; accepted work remains recoverable." : "Reconnect: current review cannot be verified. Accepted work remains recoverable. Ask this chat to reconnect Placekeeper using a fresh native launch."); } }
 }
 async function admit(attempt: number, method: PendingRequest["method"] = "ready") {
   try {

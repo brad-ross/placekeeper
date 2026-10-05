@@ -132,11 +132,22 @@ function activeKey(path: string, digest: string): string {
 function nativeAnnotationLedger(
   state: ReviewState,
   previous?: DurableNativeAnnotationLedgerV1,
+  verifiedOriginalSaveIds: ReadonlySet<string> = new Set(),
 ): DurableNativeAnnotationLedgerV1 {
   const managed = new Map((previous?.managed ?? []).map((entry) => [entry.id, entry]));
+  // Only a checked original publication may establish persistent /NM
+  // identity for an ordinal import; semantic state and history stay unchanged.
+  for (const id of verifiedOriginalSaveIds) {
+    const entry = managed.get(id);
+    if (entry?.sourceDigest === state.source.digest && entry.documentGeneration === state.workflow.documentGeneration) {
+      managed.set(id, { ...entry, provenance: "verified" });
+    }
+  }
   for (const item of state.items) {
     if (item.kind !== "pdfAnnotation") continue;
-    const provenance = item.payload.identityProvenance;
+    const prior = managed.get(item.id);
+    const provenance = prior?.provenance === "verified" && prior.sourceDigest === state.source.digest &&
+      prior.documentGeneration === state.workflow.documentGeneration ? "verified" : item.payload.identityProvenance;
     if (provenance !== "verified" && provenance !== "generation-ordinal") continue;
     managed.set(item.id, {
       id: item.id,
@@ -1860,6 +1871,7 @@ export class SessionBroker {
       readonly revision: number;
       readonly stateDigest: string;
       readonly targetDigest: string;
+      readonly verifiedNativeAnnotationIds?: readonly string[];
     },
   ): {
     readonly current: boolean;
@@ -1887,8 +1899,12 @@ export class SessionBroker {
     const acceptedOriginalDigests = destination.kind === "original"
       ? [...new Set([...session.acceptedOriginalDigests, input.targetDigest])]
       : session.acceptedOriginalDigests;
+    const ledger = destination.kind === "original" && input.verifiedNativeAnnotationIds !== undefined
+      ? nativeAnnotationLedger(session.state, session.nativeAnnotationLedger, new Set(input.verifiedNativeAnnotationIds))
+      : session.nativeAnnotationLedger;
     const durableSuccessor: RecoverableDraftV3 = {
       ...this.#draft(session),
+      nativeAnnotationLedger: ledger,
       destination,
       sync,
       ...(acceptedOriginalDigests.length === 0 ? {} : { acceptedOriginalDigests }),
@@ -1900,6 +1916,7 @@ export class SessionBroker {
       apply: () => {
         session.destination = destination;
         session.sync = sync;
+        session.nativeAnnotationLedger = ledger;
         if (destination.kind === "original") {
           session.currentOriginalDigest = input.targetDigest;
           session.acceptedOriginalDigests = acceptedOriginalDigests;
@@ -2086,6 +2103,8 @@ export class SessionBroker {
     readonly revision: number;
     readonly stateDigest: string;
     readonly targetDigest?: string;
+    /** Native IDs whose standard /NM identity was verified in this candidate. */
+    readonly verifiedNativeAnnotationIds?: readonly string[];
     readonly commit: (candidateIsCurrent: () => boolean) => Promise<
       | undefined
       | {
@@ -2132,6 +2151,7 @@ export class SessionBroker {
           revision: input.revision,
           stateDigest: input.stateDigest,
           targetDigest: publication.targetDigest,
+          ...(input.verifiedNativeAnnotationIds === undefined ? {} : { verifiedNativeAnnotationIds: input.verifiedNativeAnnotationIds }),
         });
         const committed = () => transition.current ? "committed-current" as const : "committed-stale" as const;
         const clearBarrier = () => {
@@ -2674,12 +2694,16 @@ export class SessionBroker {
         // generation record. A failure here leaves the predecessor authoritative.
         await this.capabilities.refreshApprovedPdf(session.fileId, staged!.digest);
 
+        const verifiedPredecessorNativeIds = new Set(session.nativeAnnotationLedger.managed.filter(entry =>
+          entry.provenance === "verified" && entry.sourceDigest === session.state.source.digest &&
+          entry.documentGeneration === session.state.workflow.documentGeneration).map(entry => entry.id));
         let nextState = prepareReplacementReview(
           session.state, successorGeneration, session.fileId, staged!, inspected.pages,
           importedSuccessorItems,
           new Set(session.nativeAnnotationLedger.deletedIds),
+          verifiedPredecessorNativeIds,
         );
-        if (session.state.items.some((item) =>
+        if (nextState.items.some((item) =>
           item.kind === "pdfAnnotation" && item.payload.identityProvenance !== "verified")) {
           nativeInventoryReconciled = false;
         }

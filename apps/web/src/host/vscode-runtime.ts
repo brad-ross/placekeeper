@@ -174,6 +174,7 @@ export function createRpcHostRuntime(
   const hostCommands = new Set<(command: HostRuntimeCommand) => void>();
   let identity: HostRuntimeIdentity | undefined;
   let hydratedIdentity: HostRuntimeIdentity | undefined;
+  let codexDocumentRefresh = false;
   let interactionLifecycleNegotiated = false;
   let pendingInvalidation: HostRuntimeInvalidation | undefined;
   let deferredCommandInvalidation: HostRuntimeInvalidation | undefined;
@@ -372,7 +373,7 @@ export function createRpcHostRuntime(
           : message.payload;
       if (payload === undefined) current.reject(new Error("The trusted host returned an invalid response."));
       else current.resolve(host === "codex" && current.method === "bootstrap" && isObject(payload) && isObject(message.payload) && isObject(message.payload.capabilities)
-        ? { ...payload, capabilities: { interactionLifecycleVersion: message.payload.capabilities.interactionLifecycleVersion } } : payload);
+        ? { ...payload, capabilities: { localDocumentRefresh: message.payload.capabilities.localDocumentRefresh === true, interactionLifecycleVersion: message.payload.capabilities.interactionLifecycleVersion } } : payload);
     } else {
       const conflict = (isObject(message.error) && message.error.kind === "export-conflict") ||
         (isObject(message.payload) && message.payload.kind === "export-conflict");
@@ -482,8 +483,8 @@ export function createRpcHostRuntime(
   return {
     host,
     get capabilities() { return interactionLifecycleNegotiated
-      ? { localDocumentRefresh: host !== "codex", interactionLifecycleVersion: 1 as const }
-      : { localDocumentRefresh: host !== "codex" }; },
+      ? { localDocumentRefresh: host !== "codex" || codexDocumentRefresh, interactionLifecycleVersion: 1 as const }
+      : { localDocumentRefresh: host !== "codex" || codexDocumentRefresh }; },
     async bootstrap(signal?: AbortSignal): Promise<HostRuntimeBootstrap> {
       const epoch = ++bootstrapEpoch;
       const current = () => !disposed && !signal?.aborted && epoch === bootstrapEpoch;
@@ -501,6 +502,7 @@ export function createRpcHostRuntime(
         revision: value.revision,
       };
       hydratedIdentity = { ...identity };
+      codexDocumentRefresh = host === "codex" && isObject(value.capabilities) && value.capabilities.localDocumentRefresh === true;
       interactionLifecycleNegotiated = isObject(value.capabilities) &&
         value.capabilities.interactionLifecycleVersion === 1;
       const reconnectIdentity = { generation: value.generation, revision: value.revision };

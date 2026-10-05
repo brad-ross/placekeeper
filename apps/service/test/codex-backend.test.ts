@@ -29,7 +29,7 @@ async function fixture(generated = true) {
   const backend = new CodexServiceRuntimeBackend({ broker, saving, exporting, assetRoot: assets });
   let time = 1000;
   const manager = new CodexRuntimeManager(broker, { backend, now: () => new Date(time), panelLeaseMs: 100 });
-  cleanups.push(async () => { manager.dispose(); await saving.drain(); await broker.quiesceForShutdown(); await rm(root, { recursive: true, force: true }); });
+  cleanups.push(async () => { await manager.close(); await saving.drain(); await broker.quiesceForShutdown(); await rm(root, { recursive: true, force: true }); });
   const opened = await broker.openReview({ pdfPath, surface: "codex-native", ...(generated ? { workflowMode: "generated-output" as const } : {}) });
   if (opened.kind === "recovery-offered") throw new Error("recovery");
   const sessionId = opened.launch.sessionId;
@@ -109,7 +109,107 @@ describe("active native service backend", () => {
     await writeFile(f.pdfPath, "%PDF-1.7\nsuccessor\n%%EOF");
     expect(await f.broker.replaceLiveDocument({ sessionId: f.sessionId, outputPath: f.pdfPath, observationEpoch: 1 })).toMatchObject({ status: "committed" });
     expect(await f.manager.handle(request(a, "resource", { handle: first.resources.document, offset: 0, length: 1 }))).toMatchObject({ status: "denied" });
-    expect(f.backend.retentionStatus()).toMatchObject({ presentations: 0, resources: 0 });
+    expect(f.backend.retentionStatus()).toMatchObject({ presentations: 1, resources: 0 });
+  });
+
+  it("hands live panels a canonical successor while denying predecessor document and edit authority", async () => {
+    const f = await fixture(); const a = await f.panel(); const b = await f.panel();
+    const initial = payload(await f.manager.handle(request(a, "bootstrap")));
+    await writeFile(f.pdfPath, "%PDF-1.7\nsuccessor\n%%EOF");
+    expect(await f.broker.replaceLiveDocument({ sessionId: f.sessionId, outputPath: f.pdfPath, observationEpoch: 1 })).toMatchObject({ status: "committed" });
+    for (const method of ["bootstrap", "command", "resource"] as const) {
+      const value = method === "command" ? { type: "set-annotation-name", expectedRevision: 1, annotationName: "Stale" }
+        : method === "resource" ? { handle: initial.resourceDescriptors.document.handle, offset: 0, length: 1 } : {};
+      expect(await f.manager.handle(request(a, method, value))).toMatchObject({ status: "denied" });
+    }
+    const handoff = payload(await f.manager.handle(request(a, "watermark")));
+    expect(handoff.presentation).toMatchObject({ generation: 2, runtimeId: a.runtimeId, attemptId: a.attemptId });
+    expect(handoff.presentation.presentationCapability).not.toBe(a.presentationCapability);
+    const successor = handoff.presentation as typeof a;
+    const refreshed = payload(await f.manager.handle(request(successor, "bootstrap")));
+    expect(refreshed).toMatchObject({ generation: 2, capabilities: { localDocumentRefresh: true } });
+    expect(refreshed.resourceDescriptors.document.handle).not.toBe(initial.resourceDescriptors.document.handle);
+    expect(await f.manager.handle(request(a, "watermark"))).toMatchObject({ status: "denied" });
+    expect(await f.manager.handle(request(b, "renew"))).toMatchObject({ status: "ok" });
+    const peer = payload(await f.manager.handle(request(b, "watermark"))).presentation;
+    expect(payload(await f.manager.handle(request(peer, "bootstrap"))).generation).toBe(2);
+    expect(f.backend.retentionStatus().presentations).toBe(2);
+  });
+
+  it("coalesces successive replacements and expires predecessor handoffs independently of renewal", async () => {
+    const f = await fixture(); const a = await f.panel();
+    for (let generation = 2; generation <= 3; generation++) {
+      await writeFile(f.pdfPath, `%PDF-1.7\ngeneration ${generation}\n%%EOF`);
+      expect(await f.broker.replaceLiveDocument({ sessionId: f.sessionId, outputPath: f.pdfPath, observationEpoch: generation })).toMatchObject({ status: "committed" });
+    }
+    const first = payload(await f.manager.handle(request(a, "watermark")));
+    const replay = payload(await f.manager.handle(request(a, "watermark")));
+    expect(replay.presentation).toEqual(first.presentation);
+    expect(first.presentation.generation).toBe(3);
+    // A predecessor may renew participation, but never its handoff deadline.
+    f.advance(70);
+    expect(await f.manager.handle(request(a, "renew"))).toMatchObject({ status: "ok" });
+    f.advance(40);
+    expect(await f.manager.handle(request(a, "renew"))).toMatchObject({ status: "denied" });
+    expect(await f.manager.handle(request(first.presentation, "bootstrap"))).toMatchObject({ status: "ok" });
+    expect(await f.manager.handle(request(a, "watermark"))).toMatchObject({ status: "denied" });
+  });
+
+  it("denies an in-flight predecessor bootstrap without retiring its live successor", async () => {
+    const f = await fixture(); const a = await f.panel();
+    const original = f.broker.runtimeState.bind(f.broker);
+    const reached = Promise.withResolvers<void>(), gate = Promise.withResolvers<void>();
+    vi.spyOn(f.broker, "runtimeState").mockImplementationOnce(async (...args) => { reached.resolve(); await gate.promise; return original(...args); });
+    const oldBootstrap = f.manager.handle(request(a, "bootstrap"));
+    await reached.promise;
+    await writeFile(f.pdfPath, "%PDF-1.7\nchanged during bootstrap\n%%EOF");
+    await f.broker.replaceLiveDocument({ sessionId: f.sessionId, outputPath: f.pdfPath, observationEpoch: 1 });
+    const successor = payload(await f.manager.handle(request(a, "watermark"))).presentation;
+    gate.resolve();
+    expect(await oldBootstrap).toMatchObject({ status: "denied" });
+    expect(payload(await f.manager.handle(request(successor, "bootstrap"))).generation).toBe(2);
+    expect(f.backend.retentionStatus().presentations).toBe(1);
+  });
+
+  it("keeps a connected editor hold through peer updates and releases participation on actual detach", async () => {
+    const f = await fixture(), editor = await f.panel(), peer = await f.panel();
+    const began = payload(await f.manager.handle(request(editor, "beginInteraction", {
+      interactionToken: "connected_editor", order: 1, generation: 1,
+    })));
+    const draftId = randomUUID();
+    const time = "2026-10-05T12:00:00Z";
+    payload(await f.manager.handle(request(editor, "command", { type: "put-draft", expectedRevision: 0, expectedDraftRevision: -1,
+      draft: { id: draftId, ownerViewId: began.ownerViewId, baseGeneration: 1, revision: 0, kind: "pageNote", pageIndex: 0,
+        text: "keep this draft", anchor: { kind: "page", pageIndex: 0, nearbyText: "native resource", rect: { x: 1, y: 1, width: 2, height: 2 } },
+        disposition: { kind: "resolved", generation: 1 }, status: "protected", createdAt: time, updatedAt: time } }, "protected_editor_draft")));
+    payload(await f.manager.handle(request(peer, "command", { type: "set-annotation-name", expectedRevision: 1, annotationName: "Peer" }, "peer_update")));
+    payload(await f.manager.handle(request(editor, "bootstrap")));
+    expect(f.broker.interactions.held(f.sessionId)).toBe(true);
+    await writeFile(f.pdfPath, "%PDF-1.7\nreplacement while editor connected\n%%EOF");
+    expect(await f.broker.replaceLiveDocument({ sessionId: f.sessionId, outputPath: f.pdfPath, observationEpoch: 1 })).toMatchObject({ status: "deferred" });
+    expect(f.broker.state(f.sessionId)?.workflow.documentGeneration).toBe(1);
+    await f.manager.detach(editor.runtimeId);
+    await vi.waitFor(() => expect(f.broker.state(f.sessionId)?.workflow.documentGeneration).toBe(2));
+    expect(f.broker.interactions.held(f.sessionId)).toBe(false);
+    expect(f.broker.state(f.sessionId)?.pendingDrafts[0]).toMatchObject({ id: draftId, text: "keep this draft", status: "frozen" });
+    const successor = payload(await f.manager.handle(request(peer, "watermark"))).presentation;
+    expect(payload(await f.manager.handle(request(successor, "bootstrap"))).state.pendingDrafts[0].id).toBe(draftId);
+  });
+
+  it("rechecks canonical revocation during successor reconnect-ticket persistence", async () => {
+    const f = await fixture(), a = await f.panel();
+    const gate = Promise.withResolvers<void>(), reached = Promise.withResolvers<void>();
+    const issue = f.broker.restartReconnects.issue.bind(f.broker.restartReconnects);
+    vi.spyOn(f.broker.restartReconnects, "issue").mockImplementationOnce(async (...args) => { reached.resolve(); await gate.promise; return issue(...args); });
+    await writeFile(f.pdfPath, "%PDF-1.7\nreplacement before revoked ticket\n%%EOF");
+    await f.broker.replaceLiveDocument({ sessionId: f.sessionId, outputPath: f.pdfPath, observationEpoch: 1 });
+    await reached.promise;
+    f.broker.taskBindings.revokeTask("task-native");
+    gate.resolve();
+    expect(await f.manager.handle(request(a, "watermark"))).toMatchObject({ status: "denied" });
+    await f.manager.close();
+    expect(await f.broker.restartReconnects.matchNative({ ticket: a.reconnectTicket, runtimeId: a.runtimeId, attemptId: a.attemptId, documentGeneration: 2 })).toBeUndefined();
+    expect(f.backend.retentionStatus().presentations).toBe(0);
   });
 
   it("rejects a late bootstrap after detach and lets a peer hold remain live", async () => {

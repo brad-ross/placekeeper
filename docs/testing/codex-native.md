@@ -392,3 +392,11 @@ This gate establishes U4 production rendering. Save/refresh/context completion,
 installation acceptance, the representative corpus, performance comparisons,
 and full keyboard/dialog qualification remain U5–U8 work. The report distinguishes
 the last observed running host build from the application bundle later found on disk.
+
+## U5 save and refresh qualification
+
+The [U5 qualification record](codex-native-u5-qualification.json) records the installed native edit, original-save, source-replacement and second-save flow. Two imported annotations retain their identities and comments across repeated replacements. Missing or incomplete source writes retain the last valid reader; restoration recovers clean Save Sync. One measured replacement became visible within 1.175 seconds.
+
+The actual flow exposed an identity-proof gap after the first original save. The canonical save publication now durably records verified native identities, and replacement uses only matching source/generation proof. Actual-PDF tests cover save, replacement, undo, restart, copy and unsuccessful publication. The existing unproven-identity behavior remains conservative.
+
+This gate does not establish full host parity. The context badge still requires U6 integration, and U8 owns full dialog, lifecycle and representative-document acceptance.

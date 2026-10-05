@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "unit": "U5",
+  "status": "passed",
+  "qualifiedAt": "2026-10-05T21:21:00Z",
+  "scope": "Native save, generation handoff and refresh composition; full U6-U8 acceptance remains outstanding.",
+  "artifact": {
+    "managementProtocolVersion": 1,
+    "daemonIdentity": "e250cee3a3e2a0b3173739b4f9227039bbd7a388aa9fe0fea936b8ae18db301f",
+    "installArtifactIdentity": "5dc4cb964e371dd43b0cdc74bd9e1af55ac7358fab7bf3ce89ad082e5879d5b5"
+  },
+  "automatedChecks": {
+    "native": "20 files / 266 tests passed",
+    "shared": "7 files / 205 tests passed",
+    "typecheck": "passed",
+    "candidateBuild": "passed",
+    "isolatedInstalledSmoke": "passed: native reader, offline writer and Codex hook lifecycle",
+    "fixedNative": "20 files / 273 tests passed, serial with loopback permission",
+    "fixedShared": "3 files / 103 tests passed, serial",
+    "fixedTypecheck": "passed",
+    "fixedCandidateSmoke": "passed",
+    "disclosedFailures": "Sandbox loopback denied first native run; concurrent run hit hook timing and shared watcher sequencing failures, serial reruns passed; no test weakened."
+  },
+  "actualHostChecks": {
+    "nativeEditAndOriginalAutosave": "Passed: user edited imported annotation; disk PDF contains exact comment and two native IDs.",
+    "successorAndSecondSave": "Passed: four-to-five-page replacement retained two IDs; second user edit saved in five-page original.",
+    "repeatedRefresh": "Passed: five-to-eight-page successive replacements retained exactly two annotations, second saved comment and 89 percent zoom.",
+    "missingAndPartialSource": "Last valid five-page reader and both comments retained. Partial source reported Not saved; restoring exact valid source recovered Saved automatically.",
+    "refreshLatencyUpperBoundSeconds": 1.175,
+    "timing": {
+      "renameStarted": 1791235223119,
+      "observedPageCountAt": 1791235224294
+    },
+    "limits": [
+      "Editor hover controls required manual user clicks; automation could inspect results.",
+      "Context badge remains unavailable despite current trusted prompt context; assigned to U6.",
+      "Full host dialog, lifecycle and corpus acceptance remains U8."
+    ]
+  },
+  "resolvedRegression": "successful save assigned physical native IDs without retaining canonical identity proof; refresh conservatively split imported items, causing subsequent writer rejection",
+  "fix": "Persist verified native annotation identity proof in the canonical original-save publication transition. Only exact predecessor source/generation proof reconciles ordinal imports with verified successor IDs; copies and unsuccessful writes confer no proof."
+}

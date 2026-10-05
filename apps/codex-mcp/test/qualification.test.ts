@@ -75,7 +75,8 @@ async function qualificationShellFixture(withControl: boolean, action: "bridge-c
   const clear = vi.fn();
   const runtimeDispose = vi.fn();
   const runtime = { dispose: runtimeDispose };
-  vi.doMock("../../web/src/host/codex-runtime.js", () => ({ createCodexHostRuntime: vi.fn(() => runtime) }));
+  let port!: import("../../web/src/host/codex-runtime.js").CodexRuntimePort;
+  vi.doMock("../../web/src/host/codex-runtime.js", () => ({ createCodexHostRuntime: vi.fn((value) => { port = value; return runtime; }) }));
   const mount = vi.fn((element: Element, mountedRuntime: typeof runtime, _onError: unknown, onReady: () => void) => {
     element.textContent = "Shared production review mounted";
     queueMicrotask(onReady);
@@ -90,7 +91,7 @@ async function qualificationShellFixture(withControl: boolean, action: "bridge-c
     onhostcontextchanged: unknown;
     requestTeardown = vi.fn(async () => {}); close = vi.fn(async () => {}); connect = async () => {};
     requestDisplayMode = async () => ({ mode: "inline" });
-    callServerTool = vi.fn(async (input: { arguments: { request: { method: string } } }) => {
+    callServerTool = vi.fn(async (input: { arguments: { request: { method: string } } }): Promise<{ content: never[]; _meta: Record<string, unknown> }> => {
       const method = input.arguments.request.method; calls.push(method);
       const response = method === "ready" ? { status: "active", runtimeId: "runtime-1", attemptId: "attempt-1", generation: 1, presentationCapability: "p".repeat(43), reconnectTicket: "r".repeat(43) } : { status: "ok", payload: method === "bootstrap" ? { resourceDescriptors: {} } : { watermark: 1 } };
       const grant = withControl && method === "renew" && !grantSent ? controlGrant(action, Date.now()) : undefined;
@@ -103,7 +104,7 @@ async function qualificationShellFixture(withControl: boolean, action: "bridge-c
   await import("../src/shell.js");
   app.ontoolresult!({ structuredContent: { protocolVersion: 1, status: "pending", receiptId: "receipt-1", attemptId: "attempt-1", generation: 1 }, _meta: { "placekeeper/pending": { protocolVersion: 1, runtimeId: "runtime-1", attemptId: "attempt-1", generation: 1, receiptId: "receipt-1", pendingCapability: "p".repeat(43) }, "placekeeper/qualification": { runId: own.runId, invocationNonce: own.invocationNonce, expiresAt: new Date(Date.now() + 60_000).toISOString() } } });
   await vi.advanceTimersByTimeAsync(0);
-  return { app, calls, created, status, detail, renewal, root, clear, mount, runtimeDispose };
+  return { app, calls, created, status, detail, renewal, root, clear, mount, runtimeDispose, port };
 }
 it("normal shell has no qualification button and continues ordinary renewal without a descriptor grant", async () => {
   const f = await qualificationShellFixture(false);
@@ -261,4 +262,45 @@ it("shared closed grant fields preserve v1 and old action allowlists and timesta
     ]) expect(parse(invalid, now)).toBeUndefined();
     for (const key of Object.keys(valid)) { const missing = { ...valid } as Record<string, unknown>; delete missing[key]; expect(parse(missing, now)).toBeUndefined(); }
   }
+});
+
+it("shell adopts a private successor before invalidation and ignores late predecessor renew/bootstrap replies", async () => {
+  const f = await qualificationShellFixture(false);
+  const original = f.app.callServerTool.getMockImplementation()!;
+  const successor = { status: "active" as const, runtimeId: "runtime-1", attemptId: "attempt-1", generation: 2,
+    presentationCapability: "s".repeat(43), reconnectTicket: "r".repeat(43) };
+  let finishRenew!: (value: any) => void, finishBootstrap!: (value: any) => void;
+  let delayBootstrap = false, handedOff = false;
+  const events: import("../../web/src/host/runtime.js").HostRuntimeInvalidation[] = [];
+  f.port.subscribeInvalidations(event => events.push(event));
+  f.app.callServerTool.mockImplementation(async (input) => {
+    const request = input.arguments.request as { method: string; generation: number; capability: string };
+    if (request.method === "bootstrap") {
+      if (delayBootstrap) return new Promise(resolve => { finishBootstrap = resolve; });
+      return { content: [], _meta: { "placekeeper/response": { status: "ok", payload: { sessionId: "canonical-session" } } } };
+    }
+    if (request.method === "renew" && request.generation === 1) return new Promise(resolve => { finishRenew = resolve; });
+    if (request.method === "watermark") {
+      const advance = finishRenew !== undefined;
+      handedOff ||= advance;
+      return { content: [], _meta: { "placekeeper/response": { status: "ok", payload: { watermark: handedOff ? 2 : 1, sessionId: "canonical-session",
+        documentGeneration: handedOff ? 2 : 1, reviewRevision: handedOff ? 1 : 0,
+        ...(advance && request.generation === 1 ? { presentation: successor } : {}) } } } };
+    }
+    return original(input);
+  });
+  delayBootstrap = true;
+  const oldBootstrap = f.port.call("bootstrap", {});
+  const obsolete = expect(oldBootstrap).rejects.toMatchObject({ name: "AbortError" });
+  await vi.advanceTimersByTimeAsync(6000);
+  expect(events).toContainEqual({ sessionId: "canonical-session", generation: 2, revision: 1, reason: "generation" });
+  const denied = { content: [], _meta: { "placekeeper/response": { status: "denied", reason: "revoked" } } };
+  finishBootstrap(denied); finishRenew(denied); await obsolete; await vi.advanceTimersByTimeAsync(0);
+  expect(f.root.textContent).toBe("Shared production review mounted");
+  expect(f.runtimeDispose).not.toHaveBeenCalled();
+  delayBootstrap = false;
+  await f.port.call("bootstrap", {});
+  const last = f.app.callServerTool.mock.calls.at(-1)![0].arguments.request as unknown as { generation: number; capability: string };
+  expect(last).toMatchObject({ generation: 2, capability: successor.presentationCapability });
+  await f.app.onteardown!();
 });

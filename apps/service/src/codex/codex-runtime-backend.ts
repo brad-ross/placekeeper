@@ -59,6 +59,7 @@ export class CodexServiceRuntimeBackend {
   }
 
   attach(scope: CodexActiveScope): void {
+    this.detach(scope.runtimeId);
     const ownerKey = `codex:${scope.runtimeId}`;
     this.#presentations.set(scope.runtimeId, {
       scope, ownerKey,
@@ -123,7 +124,7 @@ export class CodexServiceRuntimeBackend {
         ...projected as object,
         resourceDescriptors: Object.fromEntries(Object.entries(resources).map(([name, resource]) => [name, resource.descriptor])),
         interaction: record.attachment,
-        capabilities: { localDocumentRefresh: false, interactionLifecycleVersion: 1 },
+        capabilities: { localDocumentRefresh: true, interactionLifecycleVersion: 1 },
       };
     }
     if (request.method === "resource") {

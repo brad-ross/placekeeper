@@ -3,22 +3,19 @@ import { createRoot } from 'react-dom/client';
 import type { HostRuntime, HostRuntimeBootstrap } from './host/runtime.js';
 import { RuntimeProductionReviewApp, RuntimeFailureBoundary } from './production-entry.js';
 import './app/review-layout.css';
+import { loadRuntimeDocumentSource } from './host/runtime-document-source.js';
 
 function CodexProductionReview({ runtime, onError, onReady }: { runtime: HostRuntime; onError: (error: Error) => void; onReady: (generation: number) => void }) {
   const [initial, setInitial] = useState<HostRuntimeBootstrap>();
   const [failed, setFailed] = useState(false);
   const [attempt, setAttempt] = useState(0);
   useEffect(() => {
-    const controller = new AbortController();
+    if (initial !== undefined) return;
     setFailed(false);
-    void runtime.bootstrap(controller.signal).then(value => {
-      if (!controller.signal.aborted) setInitial(value);
-    }).catch((error: unknown) => {
-      if (controller.signal.aborted) return;
+    return loadRuntimeDocumentSource(runtime, setInitial, (error: unknown) => {
       setFailed(true); onError(error instanceof Error ? error : new Error('The native PDF could not be loaded.'));
     });
-    return () => controller.abort();
-  }, [runtime, attempt, onError]);
+  }, [runtime, initial, attempt, onError]);
   if (initial !== undefined) return <RuntimeProductionReviewApp runtime={runtime} initial={initial} onRuntimeError={onError} onDocumentReady={onReady} />;
   if (failed) return <div role="alert">The PDF resources could not be verified. <button onClick={() => setAttempt(value => value + 1)}>Retry</button></div>;
   return <div role="status">Loading PDF…</div>;

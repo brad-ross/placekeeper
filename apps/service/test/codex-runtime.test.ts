@@ -18,7 +18,7 @@ const roots: string[] = [];
 const brokers: SessionBroker[] = [];
 const managers: CodexRuntimeManager[] = [];
 afterEach(async () => {
-  managers.splice(0).forEach((manager) => manager.dispose());
+  await Promise.all(managers.splice(0).map((manager) => manager.close()));
   await Promise.all(brokers.splice(0).map((broker) => broker.quiesceForShutdown()));
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
@@ -468,12 +468,12 @@ describe("canonical native watermark", () => {
     const successor = await broker.replaceLiveDocument({ sessionId, outputPath: pdf, observationEpoch: 3 });
     expect(successor.status).toBe("committed");
     expect(events).toContain("generation");
-    expect(manager.readWatermark(raw)).toBeUndefined();
-    expect(manager.activityCount()).toBe(0);
-    const next = await activate(manager, sessionId);
+    const next = manager.readWatermark(raw)!.presentation!;
+    expect(next.generation).toBe(2);
+    expect(manager.activityCount()).toBe(1);
     await broker.finish(sessionId);
     expect(events.at(-1)).toBe("terminated");
-    expect(manager.readWatermark(activeRequest(next.active))).toBeUndefined();
+    expect(manager.readWatermark(activeRequest(next))).toBeUndefined();
     expect(manager.activityCount()).toBe(0);
   });
 

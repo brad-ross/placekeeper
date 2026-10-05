@@ -34,7 +34,8 @@ interface Launch {
 
 interface Panel {
   readonly launch: Launch;
-  readonly meta: CodexPendingPresentation;
+  meta: CodexPendingPresentation;
+  readonly handoffs: Map<string, { generation: number; expiresAtMs: number }>;
   watermark: number;
   leaseExpiresAtMs?: number;
   relocatedTicket?: Promise<void>;
@@ -120,7 +121,21 @@ export class CodexRuntimeManager {
           }
         }
         if (event.reason === "generation" && panel.meta.generation !== event.documentGeneration) {
-          this.#removePanel(id);
+          const successor = broker.nativeAdmissionScope(event.sessionId);
+          if (panel.active === undefined || successor === undefined) { this.#removePanel(id); continue; }
+          // Canonical migration preserves only the live association. Previous
+          // document authority is retired immediately; control handoffs expire
+          // at the old lease deadline and never authorize document operations.
+          panel.handoffs.set(digestSecretHex(panel.active.presentationCapability), {
+            generation: panel.active.generation, expiresAtMs: panel.leaseExpiresAtMs!,
+          });
+          panel.launch.scope = successor;
+          panel.meta = { ...panel.meta, generation: successor.documentGeneration };
+          panel.active = { ...panel.active, generation: successor.documentGeneration, presentationCapability: secret() };
+          if (!this.#authorized(panel)) { this.#removePanel(id); continue; }
+          this.#backend?.attach({ sessionId: event.sessionId, taskSessionId: panel.launch.owner!,
+            runtimeId: id, attemptId: panel.meta.attemptId, generation: successor.documentGeneration });
+          panel.relocatedTicket = this.#serialize(() => this.#refreshRelocatedTicket(panel)).catch(() => { this.#removePanel(id); });
         }
       }
       if (event.reason === "save") {
@@ -259,6 +274,7 @@ export class CodexRuntimeManager {
       launch,
       meta,
       watermark: 0,
+      handoffs: new Map(),
       ready: false,
       attested: false,
     });
@@ -382,7 +398,7 @@ export class CodexRuntimeManager {
     const panel = this.#panels.get(request.runtimeId);
     if (
       panel?.active === undefined ||
-      !this.#envelope(panel, request, panel.active.presentationCapability) ||
+      !(this.#envelope(panel, request, panel.active.presentationCapability) || this.#handoffEnvelope(panel, request)) ||
       !this.#authorized(panel)
     ) {
       return undefined;
@@ -392,7 +408,7 @@ export class CodexRuntimeManager {
       taskSessionId: panel.launch.owner!,
       runtimeId: request.runtimeId,
       attemptId: request.attemptId,
-      generation: request.generation,
+      generation: panel.meta.generation,
     };
   }
 
@@ -419,6 +435,8 @@ export class CodexRuntimeManager {
     if (request.authority === "reconnect") return this.stageReconnect(request);
     const scope = this.resolveActive(request);
     if (scope === undefined) return denied("revoked");
+    const panel = this.#panels.get(scope.runtimeId)!;
+    if (request.generation === panel.meta.generation) panel.handoffs.clear();
     if (request.method === "detach") {
       await this.detach(scope.runtimeId);
       return { status: "ok", payload: {} };
@@ -431,6 +449,7 @@ export class CodexRuntimeManager {
       return { status: "ok", payload: { leaseExpiresAt: new Date(panel.leaseExpiresAtMs).toISOString() } };
     }
     if (request.method === "watermark") {
+      await panel.relocatedTicket;
       const watermark = this.readWatermark(request);
       return watermark === undefined ? denied("revoked") : { status: "ok", payload: watermark };
     }
@@ -468,8 +487,10 @@ export class CodexRuntimeManager {
   /** Cheap app-only poll. The private active envelope authenticates scope before any read. */
   readWatermark(raw: unknown): {
     readonly watermark: number;
+    readonly sessionId: string;
     readonly documentGeneration: number;
     readonly reviewRevision: number;
+    readonly presentation?: Extract<CodexAppResponse, { status: "active" }>;
   } | undefined {
     const scope = this.resolveActive(raw);
     if (scope === undefined) return undefined;
@@ -478,8 +499,10 @@ export class CodexRuntimeManager {
     if (panel === undefined || state === undefined) return undefined;
     return {
       watermark: panel.watermark,
+      sessionId: scope.sessionId,
       documentGeneration: state.workflow.documentGeneration,
       reviewRevision: state.revision,
+      ...(parseCodexAppRequest(raw)?.generation !== panel.meta.generation ? { presentation: panel.active! } : {}),
     };
   }
 
@@ -534,6 +557,7 @@ export class CodexRuntimeManager {
         },
         meta,
         watermark: 0,
+        handoffs: new Map(),
         ready: true,
         attested: false,
         restart: ticket,
@@ -777,6 +801,13 @@ export class CodexRuntimeManager {
       digestSecretHex(capability) === digestSecretHex(request.capability);
   }
 
+  #handoffEnvelope(panel: Panel, request: CodexAppRequest): boolean {
+    if (request.authority !== "presentation" || (request.method !== "watermark" && request.method !== "renew")) return false;
+    const handoff = panel.handoffs.get(digestSecretHex(request.capability));
+    return handoff !== undefined && handoff.generation === request.generation &&
+      panel.meta.attemptId === request.attemptId && handoff.expiresAtMs > this.#now().getTime();
+  }
+
   #removePanel(id: string): void {
     const panel = this.#panels.get(id);
     if (panel !== undefined) {
@@ -798,6 +829,7 @@ export class CodexRuntimeManager {
       }
     }
     for (const [id, panel] of this.#panels) {
+      for (const [key, handoff] of panel.handoffs) if (handoff.expiresAtMs <= now) panel.handoffs.delete(key);
       if (
         !this.#current(panel.launch) ||
         (panel.active === undefined ? panel.launch.expiresAtMs <= now :
