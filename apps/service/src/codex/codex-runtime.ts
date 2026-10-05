@@ -1,3 +1,5 @@
+import type { NativeQualificationExperiments } from "./native-qualification-experiments.js";
+import type { NativeQualificationObserver } from "./native-qualification.js";
 import { randomBytes } from "node:crypto";
 import {
   CODEX_MAX_ENCODED_RESPONSE_BYTES,
@@ -51,6 +53,8 @@ const denied = (reason: Extract<CodexAppResponse, { status: "denied" }>["reason"
  * from parsed trusted hooks. Model arguments and transport identities cannot supply owners. */
 export class CodexRuntimeManager {
   readonly #broker: SessionBroker;
+  readonly #qualification: NativeQualificationObserver | undefined;
+  readonly #experiments: NativeQualificationExperiments | undefined;
   readonly #now: () => Date;
   readonly #ttlMs: number;
   readonly #panelLeaseMs: number;
@@ -76,8 +80,12 @@ export class CodexRuntimeManager {
     readonly pendingTtlMs?: number;
     readonly panelLeaseMs?: number;
     readonly backend?: CodexServiceRuntimeBackend;
+    readonly qualification?: NativeQualificationObserver;
+    readonly experiments?: NativeQualificationExperiments;
   } = {}) {
     this.#broker = broker;
+    this.#qualification = options.qualification;
+    this.#experiments = options.experiments;
     this.#now = options.now ?? (() => new Date());
     this.#ttlMs = options.pendingTtlMs ?? 60_000;
     this.#panelLeaseMs = options.panelLeaseMs ?? 30_000;
@@ -92,6 +100,10 @@ export class CodexRuntimeManager {
     this.#leaseTimer = setInterval(() => this.#sweep(), Math.min(1000, this.#panelLeaseMs));
     this.#leaseTimer.unref();
     this.#unsubscribeState = broker.onStateInvalidation((event) => {
+      if (event.reason === "save") {
+        const committedScope = broker.nativeAdmissionScope(event.sessionId);
+        if (committedScope !== undefined) broker.taskBindings.relocateNativeReconnect(event.sessionId, committedScope.canonicalSourcePath);
+      }
       for (const [id, panel] of this.#panels) {
         if (panel.launch.scope.reviewSessionId !== event.sessionId) continue;
         panel.watermark += 1;
@@ -191,6 +203,7 @@ export class CodexRuntimeManager {
     readonly reviewSessionId: string;
     readonly documentGeneration: number;
   }): boolean {
+    this.#qualification?.record("claim-arrived", { taskSessionId: input.taskSessionId, reviewSessionId: input.reviewSessionId, generation: input.documentGeneration });
     if (this.#closing) return false;
     this.#sweep();
     const launch = [...this.#launches.values()].find((entry) => entry.bindProof === input.bindProof);
@@ -199,13 +212,16 @@ export class CodexRuntimeManager {
       launch.owner !== undefined ||
       !this.#current(launch)
     ) {
+      this.#qualification?.record("claim-denied", { taskSessionId: input.taskSessionId, reviewSessionId: input.reviewSessionId, generation: input.documentGeneration, ...(launch?.owner === undefined ? { denial: "launch-not-current" } : {}) });
       return false;
     }
     const result = this.#broker.taskBindings.claimNative(input);
     if (result.status === "denied") {
+      this.#qualification?.record("claim-denied", { taskSessionId: input.taskSessionId, reviewSessionId: input.reviewSessionId, generation: input.documentGeneration });
       return false;
     }
     launch.owner = input.taskSessionId;
+    this.#qualification?.record("claim-accepted", { taskSessionId: input.taskSessionId, reviewSessionId: input.reviewSessionId, generation: input.documentGeneration });
     return true;
   }
 
@@ -246,6 +262,8 @@ export class CodexRuntimeManager {
       ready: false,
       attested: false,
     });
+    try { this.#experiments?.displayIssued({ protocolVersion: 1, status: "pending", receiptId: meta.receiptId, attemptId: meta.attemptId, generation: meta.generation }, launch.expiresAtMs); } catch { /* Scheduling diagnostics cannot affect admission. */ }
+    this.#qualification?.record("display-issued", { runtimeId: meta.runtimeId, attemptId: meta.attemptId, receiptId: meta.receiptId, generation: meta.generation, taskSessionId: launch.owner, reviewSessionId: launch.scope.reviewSessionId });
     return {
       receipt: {
         protocolVersion: 1,
@@ -262,6 +280,7 @@ export class CodexRuntimeManager {
     if (this.#closing) return false;
     this.#sweep();
     const receipt = parseCodexDisplayReceipt(rawReceipt);
+    this.#qualification?.record("attestation-arrived", { ...receipt, taskSessionId: trustedTaskSessionId });
     const panel = receipt === undefined ? undefined : [...this.#panels.values()].find((entry) => entry.meta.receiptId === receipt.receiptId);
     if (
       panel === undefined ||
@@ -272,9 +291,20 @@ export class CodexRuntimeManager {
       panel.launch.owner !== trustedTaskSessionId ||
       !this.#claimed(panel)
     ) {
+      this.#qualification?.record("attestation-denied", {
+        ...receipt, taskSessionId: trustedTaskSessionId,
+        panelExists: panel !== undefined,
+        ...(panel === undefined ? {} : {
+          restarting: panel.restart !== undefined, alreadyAttested: panel.attested,
+          attemptMatch: receipt?.attemptId === panel.meta.attemptId,
+          generationMatch: receipt?.generation === panel.meta.generation,
+          ownerMatch: panel.launch.owner === trustedTaskSessionId,
+        }),
+      });
       return false;
     }
     panel.attested = true;
+    this.#qualification?.record("attestation-accepted", { runtimeId: panel.meta.runtimeId, attemptId: panel.meta.attemptId, receiptId: panel.meta.receiptId, generation: panel.meta.generation, taskSessionId: trustedTaskSessionId, reviewSessionId: panel.launch.scope.reviewSessionId });
     // This hook acknowledgment never returns app authority. The authenticated pending channel promotes.
     return true;
   }
@@ -285,6 +315,7 @@ export class CodexRuntimeManager {
       this.#sweep();
       const request = parseCodexAppRequest(raw);
       if (request?.authority !== "pending") {
+        this.#qualification?.record("pending-denied", { denial: "invalid" });
         return denied("invalid");
       }
       const panel = this.#panels.get(request.runtimeId);
@@ -292,6 +323,7 @@ export class CodexRuntimeManager {
         panel === undefined ||
         !this.#envelope(panel, request, panel.meta.pendingCapability)
       ) {
+        this.#qualification?.record("pending-denied", { runtimeId: request.runtimeId, attemptId: request.attemptId, generation: request.generation, denial: "invalid" });
         return denied("invalid");
       }
       if (!this.#current(panel.launch)) {
@@ -302,6 +334,7 @@ export class CodexRuntimeManager {
         return this.#authorized(panel) ? panel.active : denied("revoked");
       }
       if (request.method === "ready") {
+        this.#qualification?.record("ready-accepted", { runtimeId: panel.meta.runtimeId, attemptId: panel.meta.attemptId, receiptId: panel.meta.receiptId, generation: panel.meta.generation, taskSessionId: panel.launch.owner, reviewSessionId: panel.launch.scope.reviewSessionId });
         panel.ready = true;
       }
       if (panel.restart !== undefined) {
@@ -309,6 +342,9 @@ export class CodexRuntimeManager {
       }
       if (!this.#claimed(panel)) {
         return denied("revoked");
+      }
+      if (panel.ready && !panel.attested) {
+        try { this.#experiments?.authenticatedReady({ protocolVersion: 1, status: "pending", receiptId: panel.meta.receiptId, attemptId: panel.meta.attemptId, generation: panel.meta.generation }, panel.launch.expiresAtMs); } catch { /* Scheduling diagnostics cannot affect pending. */ }
       }
       if (
         !panel.ready ||
@@ -367,7 +403,12 @@ export class CodexRuntimeManager {
     if (this.#closing || this.#disposed) return Promise.resolve(denied("unavailable"));
     const result = this.#handle(raw).catch(() => denied("unavailable"));
     this.#requests.add(result);
-    void result.then(() => this.#requests.delete(result));
+    void result.then((response) => {
+      this.#requests.delete(result);
+      if (this.#qualification === undefined) return;
+      const request = parseCodexAppRequest(raw);
+      if (request !== undefined) this.#qualification.record("app-result", { runtimeId: request.runtimeId, attemptId: request.attemptId, generation: request.generation, method: request.method, status: response.status, ...(response.status === "denied" ? { denial: response.reason } : {}) });
+    });
     return result;
   }
 
@@ -595,11 +636,13 @@ export class CodexRuntimeManager {
     }
     this.#seenRuntimes.set(active.runtimeId, this.#now().getTime() + this.#broker.restartReconnects.ticketLifetimeMs);
     panel.active = active;
+    this.#qualification?.record("promotion-accepted", { runtimeId: panel.meta.runtimeId, attemptId: panel.meta.attemptId, receiptId: panel.meta.receiptId, generation: panel.meta.generation, taskSessionId: panel.launch.owner, reviewSessionId: panel.launch.scope.reviewSessionId });
     panel.leaseExpiresAtMs = this.#now().getTime() + this.#panelLeaseMs;
     this.#backend?.attach({ sessionId: panel.launch.scope.reviewSessionId, taskSessionId: panel.launch.owner!,
       runtimeId: active.runtimeId, attemptId: active.attemptId, generation: active.generation,
       ...(panel.launch.requestedLocation === undefined ? {} : { requestedLocation: panel.launch.requestedLocation }),
     });
+    this.#broker.taskBindings.rememberNativeReconnect({ ...this.#binding(panel), pdfPath: panel.launch.scope.canonicalSourcePath });
     return active;
   }
 
@@ -760,6 +803,7 @@ export class CodexRuntimeManager {
         (panel.active === undefined ? panel.launch.expiresAtMs <= now :
           panel.leaseExpiresAtMs! <= now || !this.#authorized(panel))
       ) {
+        this.#qualification?.record((panel.active === undefined ? panel.launch.expiresAtMs <= now : panel.leaseExpiresAtMs! <= now) ? "panel-expired" : "panel-ended", { runtimeId: panel.meta.runtimeId, attemptId: panel.meta.attemptId, receiptId: panel.meta.receiptId, generation: panel.meta.generation, taskSessionId: panel.launch.owner, reviewSessionId: panel.launch.scope.reviewSessionId });
         this.#removePanel(id);
       }
     }

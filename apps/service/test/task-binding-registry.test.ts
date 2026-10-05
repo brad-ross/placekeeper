@@ -547,3 +547,82 @@ describe("in-flight native authority checks", () => {
     expect(registry.activityCount()).toBe(0);
   });
 });
+
+describe("advisory native reconnect hints", () => {
+  function activateHint(registry: TaskBindingRegistry, task = "task-a", review = "review-a", pdfPath = "/private/tmp/paper.pdf") {
+    const input = { taskSessionId: task, reviewSessionId: review, documentGeneration: 1, browserCapabilityHash: digestSecretHex(`native-${task}`) };
+    const bindProof = registry.issueBindProof({ ...input, browserCapability: `native-${task}`, native: true });
+    expect(registry.claimNative({ ...input, bindProof }).status).toBe("pending");
+    expect(registry.rememberNativeReconnect({ ...input, pdfPath })).toBe(false);
+    expect(registry.activateNative(input).status).toBe("active");
+    expect(registry.rememberNativeReconnect({ ...input, pdfPath })).toBe(true);
+    return input;
+  }
+
+  it("retains only same-task path guidance after detach without authority, ownership or activity", () => {
+    const { registry } = registryFixture();
+    const input = activateHint(registry);
+    registry.detachPresentation(input.browserCapabilityHash);
+    expect(registry.nativeReconnectForTask("task-a")).toMatchObject({ kind: "reopen-previous-source", pdfPath: "/private/tmp/paper.pdf" });
+    expect(registry.nativeReconnectForTask("task-b")).toBeUndefined();
+    expect(registry.bindingForTask("task-a")).toBeUndefined();
+    expect(registry.hasPresentationAuthority(input)).toBe(false);
+    expect(registry.activityCount()).toBe(0);
+    expect(registry.activateNative(input)).toEqual({ status: "denied" });
+    const peer = activateHint(registry, "task-b");
+    expect(registry.nativeReconnectForTask("task-a")).toBeUndefined();
+    registry.detachPresentation(peer.browserCapabilityHash);
+    expect(registry.nativeReconnectForTask("task-a")).toBeDefined();
+  });
+
+  it("uses fixed expiry, committed relocation and explicit revocation without guessing invalid paths", () => {
+    const { registry, advance } = registryFixture();
+    const input = activateHint(registry);
+    registry.detachPresentation(input.browserCapabilityHash);
+    const expiresAt = registry.nativeReconnectForTask("task-a")!.expiresAt;
+    advance(24 * 60 * 60_000 - 1);
+    expect(registry.nativeReconnectForTask("task-a")!.expiresAt).toBe(expiresAt);
+    registry.relocateNativeReconnect("review-a", "/private/tmp/saved.pdf");
+    expect(registry.nativeReconnectForTask("task-a")!.pdfPath).toBe("/private/tmp/saved.pdf");
+    advance(1);
+    expect(registry.nativeReconnectForTask("task-a")).toBeUndefined();
+    activateHint(registry);
+    registry.relocateNativeReconnect("review-a", "relative.pdf");
+    expect(registry.nativeReconnectForTask("task-a")).toBeUndefined();
+    registry.revokeTask("task-a");
+    activateHint(registry);
+    registry.revokeSession("review-a");
+    expect(registry.nativeReconnectForTask("task-a")).toBeUndefined();
+    activateHint(registry);
+    registry.revokeTask("task-a");
+    expect(registry.nativeReconnectForTask("task-a")).toBeUndefined();
+  });
+
+  it("replaces prior targets on new verified activation and bounds inactive hint retention", () => {
+    const { registry } = registryFixture();
+    const first = activateHint(registry);
+    registry.detachPresentation(first.browserCapabilityHash);
+    const next = activateHint(registry, "task-a", "review-b", "/private/tmp/new.pdf");
+    registry.detachPresentation(next.browserCapabilityHash);
+    expect(registry.nativeReconnectForTask("task-a")!.pdfPath).toBe("/private/tmp/new.pdf");
+    for (let index = 0; index < 256; index++) {
+      const input = activateHint(registry, `task-${index}`, `review-${index}`);
+      registry.detachPresentation(input.browserCapabilityHash);
+    }
+    expect(registry.nativeReconnectForTask("task-a")).toBeUndefined();
+    expect(registry.nativeReconnectForTask("task-255")).toBeDefined();
+    expect(registry.activityCount()).toBe(0);
+    registry.revokeAll();
+    expect(registry.nativeReconnectForTask("task-255")).toBeUndefined();
+  });
+
+  it("clears historical native guidance when the task explicitly claims a different browser review", () => {
+    const { registry } = registryFixture();
+    const native = activateHint(registry);
+    registry.detachPresentation(native.browserCapabilityHash);
+    const bindProof = issue(registry, { reviewSessionId: "browser-review", browserCapability: "browser-new" });
+    expect(registry.claim({ bindProof, taskSessionId: "task-a", reviewSessionId: "browser-review", documentGeneration: 1 }).status).toBe("pending");
+    expect(registry.nativeReconnectForTask("task-a")).toBeUndefined();
+    expect(registry.activateBrowser({ reviewSessionId: "browser-review", documentGeneration: 1, browserCapability: "browser-new" }).status).toBe("active");
+  });
+});

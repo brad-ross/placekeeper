@@ -94,6 +94,9 @@ describe("native host private control and trusted hooks", () => {
     expect(await app(f, request(b, "bootstrap"))).toMatchObject({ status: "ok" });
     await app(f, request(b, "detach"));
     expect(f.host.codexRuntime.activityCount()).toBe(0);
+    expect(f.host.broker.taskBindings.nativeReconnectForTask("task-native")).toBeDefined();
+    expect(f.host.lifecycle.status().activity).toEqual({ reviewPresence: 0, codexTasks: 0, transientWork: 0 });
+    expect(f.host.broker.interactions.retentionStatus()).toEqual({ attachments: 0, owners: 0 });
     await f.request({ kind: "revoke-task", taskSessionId: "task-native" });
     expect(f.host.lifecycle.status().activity).toEqual({ reviewPresence: 0, codexTasks: 0, transientWork: 0 });
   });

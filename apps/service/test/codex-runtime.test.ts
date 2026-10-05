@@ -1,4 +1,7 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { spawn } from "node:child_process";
+import { resolve } from "node:path";
+import { NativeQualificationExperiments } from "../src/codex/native-qualification-experiments.js";
+import { mkdtemp, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Duplex } from "node:stream";
@@ -8,7 +11,9 @@ import type { CodexPendingPresentation, CodexAppResponse } from "../../../packag
 import { CodexRuntimeManager } from "../src/codex/codex-runtime.js";
 import { SessionBroker } from "../src/sessions/session-broker.js";
 import { TaskBindingRegistry } from "../src/context/task-binding-registry.js";
+import { LiveContextService } from "../src/context/live-context-service.js";
 
+import { NativeQualificationObserver } from "../src/codex/native-qualification.js";
 const roots: string[] = [];
 const brokers: SessionBroker[] = [];
 const managers: CodexRuntimeManager[] = [];
@@ -17,17 +22,17 @@ afterEach(async () => {
   await Promise.all(brokers.splice(0).map((broker) => broker.quiesceForShutdown()));
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
-async function fixture(generated = false) {
+async function fixture(generated = false, qualification?: NativeQualificationObserver, experiments?: import("../src/codex/native-qualification-experiments.js").NativeQualificationExperiments, realTime = false) {
   const root = await mkdtemp(join(tmpdir(), "placekeeper-native-")); roots.push(root);
   const pdf = join(root, "paper.pdf"); await writeFile(pdf, "%PDF-1.7\nnative authority fixture\n%%EOF");
-  let time = 1000;
+  let time = realTime ? Date.now() : 1000;
   const now = () => new Date(time);
   const build = () => {
     const broker = new SessionBroker({ recoveryRoot: join(root, "recovery"), now, portableReader: async () => [],
       inspectGeneration: async () => ({ pageCount: 1, pages: [{ pageIndex: 0, text: "successor" }] }),
-      taskBindings: new TaskBindingRegistry({ now, pendingTtlMs: 100, activeLeaseTtlMs: 1000 }) });
+      taskBindings: new TaskBindingRegistry({ now, pendingTtlMs: 100, activeLeaseTtlMs: 1000, ...(qualification === undefined ? {} : { qualification }) }) });
     brokers.push(broker);
-    const manager = new CodexRuntimeManager(broker, { now, pendingTtlMs: 100 }); managers.push(manager);
+    const manager = new CodexRuntimeManager(broker, { now, pendingTtlMs: realTime ? 60000 : 100, ...(experiments === undefined ? {} : { experiments }), ...(qualification === undefined ? {} : { qualification }) }); managers.push(manager);
     return { broker, manager };
   };
   const initial = build();
@@ -67,13 +72,53 @@ function reconnect(active: Extract<CodexAppResponse, { status: "active" }>) {
 }
 
 describe("native two-hook admission with real broker authority", () => {
+  it("remembers an activated source without current context, then uses fresh hooks to reconnect durable work", async () => {
+    const { broker, manager, sessionId, pdf } = await fixture();
+    const context = new LiveContextService({ broker, now: () => new Date(1000), inspectPdf: async () => ({ pageCount: 1, existingAnnotations: [], warnings: [], sourceHints: new Map() }) });
+    const panel = stage(manager, sessionId);
+    expect(broker.taskBindings.nativeReconnectForTask("task-a")).toBeUndefined();
+    expect(await manager.pending(request(panel.privateMeta))).toEqual({ status: "pending" });
+    expect(broker.taskBindings.nativeReconnectForTask("task-a")).toBeUndefined();
+    expect(manager.attestDisplay(panel.receipt, "task-a")).toBe(true);
+    const active = await manager.pending(request(panel.privateMeta));
+    if (active.status !== "active") throw new Error("Expected active");
+    await protectWork(broker, sessionId);
+    expect((await context.refresh({ taskSessionId: "task-a" })).status).toBe("current");
+    await manager.detach(active.runtimeId);
+    expect(await manager.pending(request(panel.privateMeta))).toEqual({ status: "denied", reason: "invalid" });
+    expect(await manager.handle(activeRequest(active))).toEqual({ status: "denied", reason: "revoked" });
+    expect(await manager.stageReconnect(reconnect(active))).toEqual({ status: "denied", reason: "replayed" });
+    const disconnected = await context.refresh({ taskSessionId: "task-a" });
+    expect(disconnected).toEqual({ schemaVersion: 1, status: "unavailable", checkedAt: new Date(1000).toISOString(), reason: "unbound", reconnect: { kind: "reopen-previous-source", pdfPath: await realpath(pdf), expiresAt: new Date(1000 + 24 * 60 * 60_000).toISOString() } });
+    expect(await context.refresh({ taskSessionId: "task-b" })).toEqual({ schemaVersion: 1, status: "unavailable", checkedAt: new Date(1000).toISOString(), reason: "unbound" });
+    expect(broker.taskBindings.activityCount()).toBe(0);
+    const reopened = await broker.openReview({ pdfPath: pdf, surface: "codex-native" });
+    expect(reopened.kind).toBe("focused");
+    const fresh = await activate(manager, sessionId);
+    expect(fresh.active.runtimeId).not.toBe(active.runtimeId);
+    expect(fresh.active.presentationCapability).not.toBe(active.presentationCapability);
+    expect(broker.state(sessionId)!.revision).toBe(1);
+    const current = await context.refresh({ taskSessionId: "task-a" });
+    expect(current).toMatchObject({ status: "current", identity: { reviewRevision: 1 }, reviewItems: { itemCount: 1 } });
+    expect(current).not.toHaveProperty("reconnect");
+    await manager.revokeTask("task-a");
+    expect(broker.taskBindings.nativeReconnectForTask("task-a")).toBeUndefined();
+  });
   it.each(["ready-first", "hook-first"])("requires every panel's hooks and readiness, %s", async (order) => {
-    const { broker, manager, sessionId } = await fixture();
+    const { broker, manager, sessionId, advance } = await fixture();
+    const context = new LiveContextService({ broker, now: () => new Date(1000), inspectPdf: async () => ({ pageCount: 1, existingAnnotations: [], warnings: [], sourceHints: new Map() }) });
     for (let index = 0; index < 2; index++) {
       const panel = stage(manager, sessionId);
       expect(manager.resolveActive({ ...request(panel.privateMeta), authority: "presentation", method: "watermark", capability: panel.receipt.receiptId })).toBeUndefined();
       if (order === "ready-first") {
         expect(await manager.pending(request(panel.privateMeta))).toEqual({ status: "pending" });
+        advance(25);
+        expect(await manager.pending(request(panel.privateMeta, "status"))).toEqual({ status: "pending" });
+        expect(await manager.handle({ ...request(panel.privateMeta), authority: "presentation", method: "bootstrap" })).toEqual({ status: "denied", reason: "revoked" });
+        if (index === 0) {
+          expect(broker.taskBindings.bindingForTask("task-a")).toBeUndefined();
+          expect(await context.refresh({ taskSessionId: "task-a" })).toMatchObject({ status: "unavailable", reason: "pending" });
+        }
         expect(manager.attestDisplay(panel.receipt, "task-a")).toBe(true);
       } else {
         expect(manager.attestDisplay(panel.receipt, "task-a")).toBe(true);
@@ -109,14 +154,31 @@ describe("native two-hook admission with real broker authority", () => {
 
   it("expires admissions and rejects revoked, stale and wrong-attempt authority", async () => {
     const { manager, broker, sessionId, advance } = await fixture();
-    const panel = stage(manager, sessionId); advance(100);
+    const panel = stage(manager, sessionId);
+    expect(await manager.pending(request(panel.privateMeta))).toEqual({ status: "pending" });
+    advance(100);
     expect(manager.attestDisplay(panel.receipt, "task-a")).toBe(false);
     expect((await manager.pending(request(panel.privateMeta))).status).toBe("denied");
+    expect(broker.taskBindings.bindingForTask("task-a")).toBeUndefined();
+    expect(manager.activityCount()).toBe(0);
     const active = await activate(manager, sessionId);
     expect(manager.resolveActive({ ...activeRequest(active.active), attemptId: "wrong_attempt" })).toBeUndefined();
     broker.taskBindings.migrateGeneration({ reviewSessionId: sessionId, previousGeneration: 1, successorGeneration: 2 });
     expect(manager.resolveActive(activeRequest(active.active))).toBeUndefined();
     expect(manager.activityCount()).toBe(0);
+  });
+
+  it("cannot revive a ready admission with delayed attestation after task revocation", async () => {
+    const { manager, broker, sessionId } = await fixture();
+    const panel = stage(manager, sessionId);
+    expect(await manager.pending(request(panel.privateMeta))).toEqual({ status: "pending" });
+    await manager.revokeTask("task-a");
+    expect(manager.attestDisplay(panel.receipt, "task-a")).toBe(false);
+    expect(await manager.pending(request(panel.privateMeta, "status"))).toEqual({ status: "denied", reason: "invalid" });
+    expect(await manager.handle({ ...request(panel.privateMeta), authority: "presentation", method: "bootstrap" })).toEqual({ status: "denied", reason: "revoked" });
+    expect(broker.taskBindings.bindingForTask("task-a")).toBeUndefined();
+    expect(manager.activityCount()).toBe(0);
+    expect(broker.taskBindings.activityCount()).toBe(0);
   });
 
   it("cleans unclaimed launch proofs and claimed admissions on dispose", async () => {
@@ -445,3 +507,106 @@ async function protectWorkWithRevision(broker: SessionBroker, sessionId: string)
   const item = broker.state(sessionId)!.items[0]!;
   await broker.acceptMutation(sessionId, { type: "remove", expectedRevision: broker.state(sessionId)!.revision, id: item.id });
 }
+
+it.each([true, false])("privately records actual acceptance order and equal trusted task hashes (ready first: %s)", async (readyFirst) => {
+  const root = await mkdtemp(join(tmpdir(), "native-order-")); roots.push(root);
+  const runId = "b".repeat(32);
+  await writeFile(join(root, "native-qualification.json"), JSON.stringify({ version: 1, runId, salt: "s".repeat(43), observe: true, createdAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 60_000).toISOString() }), { mode: 0o600 });
+  const f = await fixture(false, new NativeQualificationObserver(root, "daemon"));
+  const panel = stage(f.manager, f.sessionId);
+  if (readyFirst) expect(await f.manager.pending(request(panel.privateMeta))).toEqual({ status: "pending" });
+  expect(f.manager.attestDisplay(panel.receipt, "task-a")).toBe(true);
+  expect((await f.manager.pending(request(panel.privateMeta, readyFirst ? "status" : "ready"))).status).toBe("active");
+  const directory = join(root, "native-qualification", runId);
+  const records = (await Promise.all((await readdir(directory)).map(file => readFile(join(directory, file), "utf8")))).join("").trim().split("\n").map(line => JSON.parse(line));
+  const events = records.map(r => r.event);
+  if (readyFirst) expect(events.indexOf("ready-accepted")).toBeLessThan(events.indexOf("attestation-accepted"));
+  else expect(events.indexOf("attestation-accepted")).toBeLessThan(events.indexOf("ready-accepted"));
+  expect(events.indexOf("attestation-accepted")).toBeLessThan(events.indexOf("promotion-accepted"));
+  expect(records.find(r => r.event === "claim-accepted").taskHash).toEqual(records.find(r => r.event === "attestation-accepted").taskHash);
+  expect(JSON.stringify(records)).not.toContain("task-a");
+});
+it("routine successful polling leaves private evidence capacity for later denial, expiry and fresh admission", async () => {
+  const root = await mkdtemp(join(tmpdir(), "native-poll-evidence-")); roots.push(root);
+  const runId = "d".repeat(32);
+  await writeFile(join(root, "native-qualification.json"), JSON.stringify({ version: 1, runId, salt: "s".repeat(43), observe: true, createdAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 60_000).toISOString() }), { mode: 0o600 });
+  const f = await fixture(false, new NativeQualificationObserver(root, "daemon"));
+  const initial = await activate(f.manager, f.sessionId);
+  for (let index = 0; index < 500; index++) {
+    expect((await f.manager.handle(activeRequest(initial.active))).status).toBe("ok");
+    expect((await f.manager.handle({ ...activeRequest(initial.active), method: "renew" })).status).toBe("ok");
+  }
+  expect((await f.manager.handle({ ...activeRequest(initial.active), capability: "x".repeat(43) })).status).toBe("denied");
+  // A changed outcome for the same method must be recorded after the denial.
+  expect((await f.manager.handle(activeRequest(initial.active))).status).toBe("ok");
+  f.advance(f.manager.panelLeaseMs + 1);
+  expect(f.manager.resolveActive(activeRequest(initial.active))).toBeUndefined();
+  await activate(f.manager, f.sessionId);
+  const directory = join(root, "native-qualification", runId);
+  const stored = (await Promise.all((await readdir(directory)).map(file => readFile(join(directory, file), "utf8")))).join("");
+  const records = stored.trim().split("\n").map(line => JSON.parse(line));
+  expect(records.filter(r => r.event === "app-result" && r.method === "watermark").map(r => r.status)).toEqual(["ok", "denied", "ok"]);
+  expect(records.filter(r => r.event === "app-result" && r.method === "renew")).toHaveLength(1);
+  expect(records.map(r => r.event)).toContain("panel-expired");
+  expect(records.filter(r => r.event === "claim-accepted")).toHaveLength(2);
+  expect(records.filter(r => r.event === "promotion-accepted")).toHaveLength(2);
+  expect(records.length).toBeLessThanOrEqual(256); expect(Buffer.byteLength(stored)).toBeLessThanOrEqual(32768);
+});
+
+it("emits ready scheduling only in the authenticated claimed ready-first pending branch", async () => {
+  const experiments = { displayIssued: vi.fn(), authenticatedReady: vi.fn() };
+  const { manager, sessionId } = await fixture(false, undefined, experiments as never);
+  const panel = stage(manager, sessionId);
+  expect(experiments.displayIssued).toHaveBeenCalledWith(panel.receipt, 1100);
+  expect(await manager.pending(request(panel.privateMeta, "status"))).toEqual({ status: "pending" });
+  expect(await manager.pending({ ...request(panel.privateMeta), capability: "wrong" })).toMatchObject({ status: "denied" });
+  expect(await manager.pending({ ...request(panel.privateMeta), attemptId: "wrong" })).toMatchObject({ status: "denied" });
+  expect(experiments.authenticatedReady).not.toHaveBeenCalled();
+  expect(await manager.pending(request(panel.privateMeta))).toEqual({ status: "pending" });
+  expect(experiments.authenticatedReady).toHaveBeenCalledWith(panel.receipt, 1100);
+  expect(manager.attestDisplay(panel.receipt, "task-a")).toBe(true);
+  experiments.authenticatedReady.mockClear();
+  expect(await manager.pending(request(panel.privateMeta, "status"))).toMatchObject({ status: "active" });
+  expect(experiments.authenticatedReady).not.toHaveBeenCalled();
+});
+it("revocation and marker failures preserve ordinary runtime pending/denial", async () => {
+  const experiments = { displayIssued: vi.fn(), authenticatedReady: vi.fn(() => { throw new Error("file-failure"); }) };
+  const { manager, sessionId } = await fixture(false, undefined, experiments as never);
+  const panel = stage(manager, sessionId);
+  expect(await manager.pending(request(panel.privateMeta))).toEqual({ status: "pending" });
+  expect(experiments.authenticatedReady).toHaveBeenCalledTimes(1);
+  await manager.revokeTask("task-a");
+  expect(await manager.pending(request(panel.privateMeta))).toMatchObject({ status: "denied" });
+  expect(experiments.authenticatedReady).toHaveBeenCalledTimes(1);
+});
+
+it("actual runtime ready-first releases the same genuine hook before ordinary attestation and status activation", async () => {
+  const root = await mkdtemp(join(tmpdir(), "native-ready-chain-")); roots.push(root);
+  const runId = "a".repeat(32), processNonce = "b".repeat(32), invocationNonce = "c".repeat(32);
+  const expiresAt = new Date(Date.now() + 60000).toISOString();
+  await writeFile(join(root, "native-qualification-experiments.json"), JSON.stringify({ version: 1, actionId: "d".repeat(32), createdAt: new Date().toISOString(), expiresAt, budget: 1, action: "genuine-attestation-after-readiness", target: { runId, processNonce }, waitMs: 2000 }), { mode: 0o600 });
+  const experiments = new NativeQualificationExperiments(root);
+  const { manager, sessionId } = await fixture(false, undefined, experiments, true);
+  const panel = stage(manager, sessionId);
+  await experiments.publicResult(panel.receipt, { runId, invocationNonce, expiresAt }, processNonce);
+  const event = { session_id: "task-a", hook_event_name: "PostToolUse", tool_name: "mcp__placekeeper__display_review", tool_input: { handoff: "h".repeat(43) }, tool_response: { structuredContent: panel.receipt } };
+  const source = `import ${JSON.stringify(resolve("apps/service/src/cli/context-command.ts"))};
+import {runHookCommand} from ${JSON.stringify(resolve("apps/service/src/cli/hook-command.ts"))};
+await runHookCommand(['hook','--event'],${JSON.stringify(JSON.stringify(event))},async request=>{process.stdout.write(JSON.stringify(request));return {kind:'codex-attestation',status:'accepted'}},()=>{});`;
+  const child = spawn(process.execPath, ["--import", "tsx", "--input-type=module", "-e", source], { env: { ...process.env, PLACEKEEPER_MAC_DEVELOPMENT_ROOT: root }, stdio: ["ignore", "pipe", "pipe"] });
+  let output = ""; child.stdout.on("data", data => { output += String(data); });
+  const completed = new Promise(resolve => child.once("close", resolve));
+  const dir = join(root, "native-qualification-experiments", runId);
+  for (let check = 0; check < 100 && !(await readdir(dir)).includes("hook-consumed.json"); check++) await new Promise(resolve => setTimeout(resolve, 10));
+  expect((await readdir(dir))).toContain("hook-consumed.json");
+  expect(output).toBe("");
+  expect(await manager.pending(request(panel.privateMeta, "status"))).toEqual({ status: "pending" });
+  expect((await readdir(dir))).not.toContain("ready.json");
+  expect(await manager.pending(request(panel.privateMeta))).toEqual({ status: "pending" });
+  expect(await completed).toBe(0);
+  const ordinary = JSON.parse(output);
+  expect(ordinary).toEqual({ kind: "codex-attest", taskSessionId: "task-a", receipt: panel.receipt });
+  expect(manager.attestDisplay(ordinary.receipt, ordinary.taskSessionId)).toBe(true);
+  expect(await manager.pending(request(panel.privateMeta, "status"))).toMatchObject({ status: "active" });
+  expect(JSON.parse(await readFile(join(dir, "hook-terminal.json"), "utf8")).outcome).toBe("ready");
+});

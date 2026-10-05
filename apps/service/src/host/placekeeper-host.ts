@@ -1,3 +1,5 @@
+import type { NativeQualificationExperiments } from "../codex/native-qualification-experiments.js";
+import type { NativeQualificationObserver } from "../codex/native-qualification.js";
 import type { CodexNativeLaunchSuccess } from "../../../../packages/core/src/codex-mcp-protocol.js";
 import type {
   LaunchSurface as BrokerLaunchSurface,
@@ -16,7 +18,7 @@ import { MacOsDestinationPicker } from "./destination-picker.js";
 import { LiveContextService } from "../context/live-context-service.js";
 import { SourceReconciliationService } from "../context/source-reconciliation-service.js";
 import { LiveSourceWorkflowService } from "../context/live-source-workflow-service.js";
-import type { TaskBindingRegistry } from "../context/task-binding-registry.js";
+import { TaskBindingRegistry } from "../context/task-binding-registry.js";
 import { DaemonLifecycleCoordinator } from "./daemon-lifecycle.js";
 import { decodePlacekeeperLink } from "../../../../packages/core/src/placekeeper-link.js";
 import { openPlacekeeperLink } from "../links/placekeeper-link.js";
@@ -102,6 +104,8 @@ export type BrowserLaunchResponse =
   | { readonly ok: false; readonly error: LaunchFailure };
 
 export interface PlacekeeperHostOptions {
+  readonly nativeQualification?: NativeQualificationObserver;
+  readonly nativeQualificationExperiments?: NativeQualificationExperiments;
   readonly recoveryRoot: string;
   readonly browserSourceRoot?: string;
   readonly webAssets?: WebAssetOptions;
@@ -208,9 +212,11 @@ export class PlacekeeperHost {
   }
 
   static async start(options: PlacekeeperHostOptions): Promise<PlacekeeperHost> {
+    const taskBindings = options.taskBindings ?? (options.nativeQualification === undefined
+      ? undefined : new TaskBindingRegistry({ qualification: options.nativeQualification }));
     const broker = new SessionBroker({
       recoveryRoot: options.recoveryRoot,
-      ...(options.taskBindings === undefined ? {} : { taskBindings: options.taskBindings }),
+      ...(taskBindings === undefined ? {} : { taskBindings }),
       ...(options.browserSourceInspector === undefined
         ? {}
         : { browserSourceInspector: options.browserSourceInspector }),
@@ -250,6 +256,8 @@ export class PlacekeeperHost {
     const macosRuntime = new MacosRuntimeManager(macosRuntimeBackend.authority());
     const macosLifecycle = new MacosAppLifecycleManager(macosRuntime);
     const codexRuntime = new CodexRuntimeManager(broker, {
+      ...(options.nativeQualification === undefined ? {} : { qualification: options.nativeQualification }),
+      ...(options.nativeQualificationExperiments === undefined ? {} : { experiments: options.nativeQualificationExperiments }),
       backend: new CodexServiceRuntimeBackend({ broker, saving, exporting,
         ...(options.webAssets === undefined ? {} : { assetRoot: options.webAssets.root }),
       }),

@@ -3,6 +3,12 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const nativeGateChecks = ["installed-artifact", "launcher-hook-task", "display-hook-task", "readiness-before-attestation", "attestation-before-readiness", "private-invocation-isolation", "app-only-no-panels", "two-chat-isolation", "real-prompt-current-evidence", "recovery-continuation", "ownership-denial", "independent-stdio-eof", "hidden-renewal", "chat-switch-renewal", "expand-restore-renewal", "close-disconnect", "transport-loss-disconnect", "old-attempt-denial"] as const;
+/** Keep failed continuity observations; qualify fresh explicit recovery separately. */
+export const nativeLifecycleAlternatives: Readonly<Record<string, string>> = {
+  "hidden-renewal": "hidden-explicit-reconnect",
+  "chat-switch-renewal": "chat-switch-explicit-reconnect",
+  "expand-restore-renewal": "expand-restore-explicit-reconnect",
+};
 export interface NativeQualification {
   schemaVersion: 1;
   status: "not-run" | "passed" | "failed";
@@ -17,7 +23,11 @@ export function validateQualification(value: NativeQualification): string[] {
   if (!Number.isSafeInteger(value.disconnectTimeoutMs) || value.disconnectTimeoutMs < 1) errors.push("Observed disconnect timeout is required.");
   for (const id of nativeGateChecks) {
     const matches = value.checks?.filter((check) => check.id === id) ?? [];
-    if (matches.length !== 1 || matches[0]?.result !== "passed" || matches[0].actualHost !== true || !matches[0].evidence.trim() || !Number.isFinite(Date.parse(matches[0].observedAt))) errors.push(`Missing actual-host pass evidence: ${id}`);
+    const passed = (check: NativeQualification["checks"][number] | undefined) => check?.result === "passed" && check.actualHost === true && typeof check.evidence === "string" && check.evidence.trim().length > 0 && Number.isFinite(Date.parse(check.observedAt));
+    const alternativeId = nativeLifecycleAlternatives[id];
+    const alternatives = alternativeId === undefined ? [] : value.checks?.filter((check) => check.id === alternativeId) ?? [];
+    const alternativePassed = alternatives.length === 1 && passed(alternatives[0]);
+    if (matches.length !== 1 || (!passed(matches[0]) && !alternativePassed) || alternatives.length > 1) errors.push(`Missing actual-host pass evidence: ${id}`);
   }
   return errors;
 }

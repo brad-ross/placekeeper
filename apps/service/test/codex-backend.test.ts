@@ -260,6 +260,21 @@ describe("active native service backend", () => {
     expect(exportCopy).not.toHaveBeenCalled();
   });
 
+  it("updates disconnected reconnect guidance only after a committed canonical relocation", async () => {
+    const f = await fixture(false), panel = await f.panel();
+    const state = f.broker.state(f.sessionId)!;
+    await f.broker.establishSaveDestination(f.sessionId, { kind: "original", targetPath: f.pdfPath, capabilityId: state.source.fileId, fingerprint: state.source.digest });
+    await f.manager.detach(panel.runtimeId);
+    const previous = f.broker.taskBindings.nativeReconnectForTask("task-native")!;
+    const relocated = join(f.root, "relocated.pdf");
+    await writeFile(relocated, await readFile(f.pdfPath));
+    const approved = await f.broker.capabilities.approvePdf(relocated);
+    expect(f.broker.taskBindings.nativeReconnectForTask("task-native")).toEqual(previous);
+    await f.broker.relocateOriginalDestination(f.sessionId, { targetPath: approved.canonicalPath, capabilityId: approved.id, fingerprint: state.source.digest });
+    expect(f.broker.taskBindings.nativeReconnectForTask("task-native")).toEqual({ ...previous, pdfPath: approved.canonicalPath });
+    expect(f.broker.taskBindings.bindingForTask("task-native")).toBeUndefined();
+  });
+
   it("keeps same-generation relocation usable and reconnects with the relocated source proof", async () => {
     const f = await fixture(false); const a = await f.panel(); const b = await f.panel();
     const bootstrap = payload(await f.manager.handle(request(a, "bootstrap")));
@@ -276,9 +291,11 @@ describe("active native service backend", () => {
     expect(matched).toBeDefined();
     const scope = matched === undefined ? undefined : f.broker.nativeRestartScope(matched.sourcePathHash, matched.sourceDigest, matched.reviewSessionHash);
     expect(scope?.canonicalSourcePath).toContain("relocated.pdf");
+    expect(f.broker.taskBindings.nativeReconnectForTask("task-native")?.pdfPath).toBe(scope?.canonicalSourcePath);
     await f.manager.close();
     await f.saving.drain();
     await f.broker.quiesceForShutdown();
+    expect(f.broker.taskBindings.nativeReconnectForTask("task-native")).toBeUndefined();
     const broker = new SessionBroker({ recoveryRoot: f.broker.recoveryRoot, portableReader: async () => [] });
     await broker.initialize();
     const offered = await broker.openReview({ pdfPath: relocated, surface: "codex-native" });

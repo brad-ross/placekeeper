@@ -417,3 +417,23 @@ function pagesRect(item: ReviewItem, index: number): Record<string, number> {
   }
   return page.rect as Record<string, number>;
 }
+
+describe("unavailable native reconnect guidance", () => {
+  const checkedAt = "2026-10-02T16:00:00.000Z";
+  const reconnect = { kind: "reopen-previous-source" as const, pdfPath: "/private/tmp/user's $(literal).pdf", expiresAt: "2026-10-03T16:00:00.000Z" };
+  it("copies only historical target data into an unavailable observation", () => {
+    const observation = createUnavailableLiveContextObservation({ checkedAt, reason: "unbound", reconnect });
+    expect(observation).toEqual({ schemaVersion: 1, status: "unavailable", checkedAt, reason: "unbound", reconnect });
+    expect(observation.reconnect).not.toBe(reconnect);
+  });
+  it.each([
+    { ...reconnect, pdfPath: "relative.pdf" },
+    { ...reconnect, pdfPath: "/private/tmp/bad\npath.pdf" },
+    { ...reconnect, pdfPath: `/${"x".repeat(4096)}` },
+    { ...reconnect, expiresAt: "tomorrow" },
+    { ...reconnect, expiresAt: "2026-02-30T16:00:00.000Z" },
+    { ...reconnect, capability: "must-never-project" },
+  ])("rejects malformed or authority-bearing guidance", (invalid) => {
+    expect(() => createUnavailableLiveContextObservation({ checkedAt, reason: "unbound", reconnect: invalid })).toThrow("Invalid reconnect guidance");
+  });
+});

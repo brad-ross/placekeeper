@@ -1082,13 +1082,18 @@ describe("macOS distribution manifests", () => {
   });
 
   it("validates both canonical Codex PostToolUse declarations", async () => {
+    const config = JSON.parse(await readFile(resolve("integrations/codex-plugin/hooks/hooks.json"), "utf8"));
+    expect(config.hooks.PostToolUse[0].hooks[0].timeout).toBe(8);
+    expect(config.hooks.PostToolUse[1].hooks[0].timeout).toBe(55);
+    expect(config.hooks.UserPromptSubmit[0].hooks[0].timeout).toBe(8);
+    expect(config.hooks.SessionEnd[0].hooks[0].timeout).toBe(3);
     await expect(validateCodexPlugin(resolve("integrations/codex-plugin"))).resolves.toBeUndefined();
   });
 
   it.each([
     "missing-launcher", "missing-display", "extra-declaration", "duplicate-display",
     "malformed-display", "wrong-display-matcher", "wrong-launcher-matcher",
-    "wrong-display-command", "wrong-display-timeout", "wrong-display-context-limit",
+    "wrong-display-command", "wrong-display-timeout", "old-display-timeout", "wrong-display-context-limit",
     "wrong-display-status", "extra-display-handler",
   ])("rejects the %s Codex hook contract", async (failure) => {
     const root = await mkdtemp(join(tmpdir(), "placekeeper-hook-contract-"));
@@ -1112,6 +1117,7 @@ describe("macOS distribution manifests", () => {
         case "wrong-launcher-matcher": declarations[0]!.matcher = "Bash"; break;
         case "wrong-display-command": handler.command = "placekeeper hook --event"; break;
         case "wrong-display-timeout": handler.timeout = 5; break;
+        case "old-display-timeout": handler.timeout = 8; break;
         case "wrong-display-context-limit": handler.additionalContextLimit = 256; break;
         case "wrong-display-status": handler.statusMessage = "Connecting Placekeeper context"; break;
         case "extra-display-handler": display.hooks.push(structuredClone(handler)); break;

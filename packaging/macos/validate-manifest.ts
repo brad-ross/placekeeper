@@ -636,7 +636,7 @@ const CODEX_HOOK_SPECS = {
       matcher: "^Bash$",
     },
     {
-      timeout: 8,
+      timeout: 55,
       additionalContextLimit: 131072,
       statusMessage: "Verifying Placekeeper native presentation",
       matcher: "^mcp__placekeeper__display_review$",

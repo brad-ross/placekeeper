@@ -1,3 +1,5 @@
+import { CONTROL_REQUEST_TIMEOUT_MS } from "./control-constants.js";
+export { CONTROL_REQUEST_TIMEOUT_MS } from "./control-constants.js";
 import {
   parseCodexAppRequest,
   parseCodexDisplayRequest,
@@ -69,7 +71,6 @@ import {
 // private control socket into an unbounded transport.
 const MAX_MESSAGE_BYTES = 16 * 1024 * 1024;
 export const MAX_CONTROL_EVIDENCE_BYTES = 8 * 1024 * 1024;
-export const CONTROL_REQUEST_TIMEOUT_MS = 5_000;
 export const MANAGEMENT_PROTOCOL_VERSION = 1;
 
 export type DaemonLifecycleState = "accepting" | "draining" | "shutdown-committed";
