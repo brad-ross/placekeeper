@@ -1,0 +1,40 @@
+{
+  "unit": "U7",
+  "status": "passed",
+  "base": "3fd8ff988218c55e032a4ee36b5236468f8abd91",
+  "review": "Root inspected all eight owned paths and requested honest runtime-teardown test labels plus explicitly browser-only replacement guidance; fixed by same worker. No open diff findings.",
+  "verification": {
+    "focusedFull": "7 files; 133/134 initially passed; sole dry-run timeout under competing build passed standalone in 57.51s. All 134 distinct tests have passing evidence.",
+    "typecheck": "passed",
+    "diffCheck": "passed",
+    "candidateBuild": "passed",
+    "isolatedInstalledSmoke": "passed"
+  },
+  "installedUpdate": "Normal coordinator installed after full user restart. Normal setup reported plugin version 0.1.0+codex.20261005000000; host discovery/trust/reload remains pending.",
+  "next": "U8 full corpus and lifecycle acceptance.",
+  "artifactChecks": {
+    "Contents/Resources/integrations/codex-plugin/.codex-plugin/plugin.json": true,
+    "Contents/Resources/integrations/codex-plugin/skills/placekeeper/SKILL.md": true,
+    "Contents/Resources/installer/setup-integrations.mjs": true,
+    "cached .codex-plugin/plugin.json": true,
+    "cached skills/placekeeper/SKILL.md": true,
+    "cached skills/placekeeper/references/live-evidence.md": true,
+    "cached .mcp.json": true
+  },
+  "host": {
+    "bundleVersion": "26.930.51102",
+    "bundleBuild": "13100",
+    "reload": "User confirmed full restarts after app installation and plugin refresh."
+  },
+  "actualHost": {
+    "pluginDiscovery": "Updated version 0.1.0+codex.20261005000000 in the session skill catalog; matching skill read and native display tool callable.",
+    "nativeActivation": "Fresh isolated fixture opened through direct installed launcher, trusted claim, one display, user expansion. Native UI ready with four pages and Saved. Real user prompt 2026-10-05T22:15:01.788Z delivered current generation 1 revision 0 and three items; native badge agreed.",
+    "browserCompatibility": "Separate ordinary-browser launch after update rendered four-page fixture, outline and search. Search returned primary passage and navigation put that passage at viewport top. No Codex binding was required.",
+    "searchIndicatorCharacterization": "Both hosts report most-visible page 3 after the page-2 passage aligns at top in 910x1362 viewport. Page2 top -45.64 height702.5, page3 top665.72 height702.5; screenshot confirmed the requested passage at top. Existing viewer/coordinator policy and 5 focused tests support this; not treated as wrong target navigation.",
+    "copyLimits": "Browser search-row copy reported Link copied but automation clipboard read was empty. Native hover-only row copy could not be clicked by synthetic automation. Exact page/item/destination copy remains separately qualified in U6."
+  },
+  "limits": [
+    "Live user plugin disable/removal was not performed. Existing disabled-state installer tests and closed/disposed native-runtime browser tests cover those boundaries; manual removal remains the established documented host action.",
+    "This U7 report covers installation/update and browser entry. Full corpus, composed lifecycle, performance and broader host acceptance remain U8."
+  ]
+}

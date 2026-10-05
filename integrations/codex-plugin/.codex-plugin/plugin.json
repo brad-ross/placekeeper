@@ -1,6 +1,6 @@
 {
   "name": "codex-plugin",
-  "version": "0.1.0+codex.20260813212014",
+  "version": "0.1.0+codex.20261005000000",
   "description": "Open a local PDF in Placekeeper and keep its content and annotations current in the hosting Codex task.",
   "author": {
     "name": "Placekeeper"
