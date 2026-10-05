@@ -6,7 +6,7 @@ import type { HostRuntime, HostRuntimeInvalidation } from './runtime.js';
 
 export interface CodexRuntimePort {
   readonly runtimeId: string;
-  call(method: ReviewRuntimeMethod | 'resource', payload: unknown): Promise<unknown>;
+  call(method: ReviewRuntimeMethod | 'resource' | 'createLink', payload: unknown): Promise<unknown>;
   subscribeInvalidations(listener: (event: HostRuntimeInvalidation) => void): () => void;
 }
 
@@ -62,5 +62,10 @@ export function createCodexHostRuntime(port: CodexRuntimePort, environment: {
       }).catch(() => publish({ protocol: REVIEW_RUNTIME_PROTOCOL, version: REVIEW_RUNTIME_VERSION, kind: 'response', runtimeId: port.runtimeId, requestId: message.requestId, method: message.method, sessionId: message.sessionId, generation: message.generation, revision: message.revision, ok: false, error: { kind: 'native-resource-or-command-failed' } }));
     },
   }, { host: 'codex', materializeDocument: materialize('document'), materializePdfiumWasm: materialize('pdfiumWasm'), materializePdfiumWorker: materialize('worker') });
-  return { ...runtime, get capabilities() { return runtime.capabilities!; }, dispose() { if (disposed) return; disposed = true; unsubscribe(); runtime.dispose(); descriptors.clear(); listeners.clear(); for (const materializer of materializers.values()) materializer.clear(); materializers.clear(); } };
+  return { ...runtime, get capabilities() { return runtime.capabilities!; }, async createLink(location) {
+    if (disposed) throw new Error('Native review disconnected.');
+    const value = await port.call('createLink', { location });
+    if (disposed || typeof value !== 'object' || value === null || !('link' in value) || typeof value.link !== 'string' || !value.link.startsWith('placekeeper:///')) throw new Error('Native link unavailable.');
+    return value.link;
+  }, dispose() { if (disposed) return; disposed = true; unsubscribe(); runtime.dispose(); descriptors.clear(); listeners.clear(); for (const materializer of materializers.values()) materializer.clear(); materializers.clear(); } };
 }

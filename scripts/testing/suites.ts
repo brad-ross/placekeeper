@@ -6,7 +6,7 @@ export type TestStage = string | {
 };
 
 export const suites: Record<string, TestStage[]> = {
-  "test:codex-native": [{ runner: "vitest", options: [], files: ["apps/web/test/codex-runtime.test.ts", "apps/web/test/codex-refresh.test.tsx", "apps/service/test/codex-persistence.integration.test.ts", "apps/web/test/codex-bundle.test.ts", "apps/web/test/host-render-layer.test.ts", "apps/codex-mcp/test/service-client.integration.test.ts", "apps/codex-mcp/test/server.test.ts", "apps/codex-mcp/test/resources.test.ts", "apps/codex-mcp/test/lifecycle-diagnostics.test.ts", "apps/codex-mcp/test/qualification.test.ts", "apps/service/test/codex-live-context.integration.test.ts", "apps/service/test/hook-contract.test.ts", "packages/core/test/codex-mcp-protocol.test.ts", "apps/service/test/codex-runtime.test.ts", "apps/service/test/native-qualification.test.ts", "apps/service/test/native-qualification-experiments.test.ts", "apps/service/test/codex-backend.test.ts", "apps/service/test/codex-host.test.ts", "apps/service/test/task-binding-registry.test.ts", "apps/service/test/restart-reconnect-store.test.ts"] }],
+  "test:codex-native": [{ runner: "vitest", options: [], files: ["apps/web/test/codex-host-actions.test.tsx", "apps/web/test/codex-runtime.test.ts", "apps/web/test/codex-refresh.test.tsx", "apps/service/test/codex-persistence.integration.test.ts", "apps/web/test/codex-bundle.test.ts", "apps/web/test/host-render-layer.test.ts", "apps/codex-mcp/test/service-client.integration.test.ts", "apps/codex-mcp/test/server.test.ts", "apps/codex-mcp/test/resources.test.ts", "apps/codex-mcp/test/lifecycle-diagnostics.test.ts", "apps/codex-mcp/test/qualification.test.ts", "apps/service/test/codex-live-context.integration.test.ts", "apps/service/test/hook-contract.test.ts", "packages/core/test/codex-mcp-protocol.test.ts", "apps/service/test/codex-runtime.test.ts", "apps/service/test/native-qualification.test.ts", "apps/service/test/native-qualification-experiments.test.ts", "apps/service/test/codex-backend.test.ts", "apps/service/test/codex-host.test.ts", "apps/service/test/task-binding-registry.test.ts", "apps/service/test/restart-reconnect-store.test.ts"] }],
   "test:source-release": [{ runner: "vitest", options: [], files: ["scripts/source-release.test.ts", "scripts/install-release.test.ts"] }],
   "test:static:distribution": [
     {
@@ -271,6 +271,7 @@ export const suites: Record<string, TestStage[]> = {
         "apps/web/test/interaction-reconnect-runtime.test.ts",
         "apps/web/test/use-authoring-session-lifecycle.test.ts",
         "apps/web/test/codex-context-status.test.tsx",
+        "apps/web/test/codex-host-actions.test.tsx",
         "apps/web/test/existing-annotations.test.ts",
         "apps/web/test/main-location-refresh.test.ts",
         "apps/web/test/navigation-coordinator.test.ts",
@@ -404,6 +405,7 @@ export const suites: Record<string, TestStage[]> = {
         "apps/service/test/live-document-replacement.test.ts",
         "apps/service/test/recovery.test.ts",
         "apps/web/test/codex-context-status.test.tsx",
+        "apps/web/test/codex-host-actions.test.tsx",
         "apps/web/test/host-runtime.test.ts",
         "apps/web/test/production-review-app.test.tsx",
         "apps/vscode/test/extension.test.ts",
@@ -583,6 +585,7 @@ export const suites: Record<string, TestStage[]> = {
 
 /** Canonical CI is deliberately narrower than all repository tests; includes the updater's .mjs tests. */
 export const ciUnitFiles = [
+  "apps/web/test/codex-host-actions.test.tsx",
   "apps/web/test/codex-runtime.test.ts", "apps/web/test/codex-refresh.test.tsx", "apps/service/test/codex-persistence.integration.test.ts", "apps/web/test/codex-bundle.test.ts", "apps/web/test/host-render-layer.test.ts", "apps/codex-mcp/test/service-client.integration.test.ts", "apps/codex-mcp/test/server.test.ts", "apps/codex-mcp/test/resources.test.ts", "apps/codex-mcp/test/lifecycle-diagnostics.test.ts", "apps/codex-mcp/test/qualification.test.ts",
       'packages/core/test/codex-mcp-protocol.test.ts',
       'apps/service/test/codex-runtime.test.ts',

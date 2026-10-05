@@ -50,3 +50,12 @@ describe("closed Codex MCP contracts", () => {
     expect(parseCodexResourceDescriptor({ ...descriptor, path: "/private/paper.pdf" })).toBeUndefined();
   });
 });
+
+it('accepts only closed app-only semantic link locations', () => {
+  const request = { ...base, authority: 'presentation', capability, method: 'createLink', payload: { location: { kind: 'page', page: 1 } } };
+  expect(parseCodexAppRequest(request)).toBeDefined();
+  expect(parseCodexAppRequest({ ...request, authority: 'pending' })).toBeUndefined();
+  for (const location of [{ kind: 'page', page: 0 }, { kind: 'page', page: 1, path: '/private/other.pdf' }, { kind: 'item', page: 1, itemId: 'forged' }, { kind: 'destination', page: 1, mode: 'xyz', params: [NaN, 0, 1] }]) {
+    expect(parseCodexAppRequest({ ...request, payload: { location } })).toBeUndefined();
+  }
+});

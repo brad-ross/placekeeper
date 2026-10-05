@@ -1,3 +1,4 @@
+import type { PlacekeeperLinkLocation } from "../../../../packages/core/src/placekeeper-link.js";
 import { pdfNavigationTargetFromPlacekeeperLocation } from '../pdf/pdf-navigation-target.js';
 import { useContext, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, type ReactNode } from "react";
 import type { PluginRegistry } from "@embedpdf/core";
@@ -2337,9 +2338,16 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     }
     await navigator.clipboard.writeText(link);
   };
+  const createLink = useMemo(() => props.api.createLink?.bind(props.api), [props.api]);
+  const linkForLocation = (location: PlacekeeperLinkLocation): string | Promise<string> => {
+    if (createLink !== undefined) return createLink(location);
+    if (copyLinkBase === undefined) throw new Error('Link unavailable.');
+    return buildPlacekeeperCopyLink(copyLinkBase, location);
+  };
   const pdfTargetCopyLinkContext: PdfTargetCopyLinkContext | undefined =
-    props.session.appLinkBase === undefined ? undefined : {
-      appLinkBase: props.session.appLinkBase,
+    props.session.appLinkBase === undefined && props.api.createLink === undefined ? undefined : {
+      ...(props.session.appLinkBase === undefined ? {} : { appLinkBase: props.session.appLinkBase }),
+      ...(createLink === undefined ? {} : { createLink }),
       document: {
         documentGeneration: documentGenerationRef.current,
         pageCount: viewerState.totalPages,
@@ -2575,30 +2583,28 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
         {...(scope.launchSurface === 'codex'
           ? { codexContext: visibleCodexContext(codexContext, state) ?? UNAVAILABLE_CODEX_CONTEXT }
           : {})}
-        {...(copyLinkBase === undefined || locationHistory === undefined ? {} : {
+        {...((copyLinkBase === undefined && props.api.createLink === undefined) || locationHistory === undefined ? {} : {
           ...(scope.launchSurface === 'chrome' ? {} : {
             copyLink: {
               disabled: navigationState.pendingMainNavigation !== null
                 || navigationState.pendingSendToMain !== null,
               getLink: () => {
                 mainLocationRefresh.flush();
-                return buildPlacekeeperCopyLink(
-                  copyLinkBase,
-                  navigationCoordinator.currentLinkLocation(),
-                );
+                const location = navigationCoordinator.currentLinkLocation();
+                return linkForLocation(location);
               },
               writeText: writePlacekeeperLink,
             },
           }),
           copyItemLink: {
-            getLink: (item: ReviewItem) => buildPlacekeeperCopyLink(
-              copyLinkBase,
-              {
+            getLink: (item: ReviewItem) => {
+              const location: PlacekeeperLinkLocation = {
                 kind: 'item',
                 page: item.pageIndex + 1,
                 itemId: item.id,
-              },
-            ),
+              };
+              return linkForLocation(location);
+            },
             disabled: (item: ReviewItem) => !portableItemIdsRef.current.has(item.id)
               || !saveStatusIsCleanCurrent(state, saveStatus),
             writeText: writePlacekeeperLink,

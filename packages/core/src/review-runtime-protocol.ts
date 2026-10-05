@@ -609,6 +609,43 @@ export class ReviewExportConflictError extends Error {
   }
 }
 
+function safeCodexObservationIdentity(value: unknown): unknown | undefined {
+  if (!record(value) || !hasOnlyKeys(value, ["placekeeperSessionId", "documentGeneration", "source", "reviewRevision", "stateDigest"]) ||
+    typeof value.placekeeperSessionId !== "string" || !SESSION_ID.test(value.placekeeperSessionId) ||
+    !safeInteger(value.documentGeneration) || value.documentGeneration < 1 || !safeInteger(value.reviewRevision) ||
+    typeof value.stateDigest !== "string" || !SHA256.test(value.stateDigest) || !record(value.source) ||
+    !hasOnlyKeys(value.source, ["fileId", "digest", "byteLength"]) ||
+    typeof value.source.fileId !== "string" || !SESSION_ID.test(value.source.fileId) ||
+    typeof value.source.digest !== "string" || !SHA256.test(value.source.digest) ||
+    !safeInteger(value.source.byteLength) || value.source.byteLength < 1) return undefined;
+  return closedJsonClone(value);
+}
+
+function safeCodexContext(value: unknown): unknown | undefined {
+  if (!record(value)) return undefined;
+  const timestamp = (input: unknown) => typeof input === "string" && Number.isFinite(Date.parse(input));
+  if (value.status === "unbound" && hasOnlyKeys(value, ["status"])) return { status: "unbound" };
+  if (value.status === "current" && hasOnlyKeys(value, ["status", "identity", "leaseExpiresAt"])) {
+    const identity = safeCodexObservationIdentity(value.identity);
+    return identity !== undefined && timestamp(value.leaseExpiresAt) ? { status: "current", identity, leaseExpiresAt: value.leaseExpiresAt } : undefined;
+  }
+  const lastVerified = value.lastVerified === undefined ? undefined : safeCodexObservationIdentity(value.lastVerified);
+  if (value.lastVerified !== undefined && lastVerified === undefined) return undefined;
+  if (value.status === "unavailable" && hasOnlyKeys(value, ["status", "reason", "lastVerified"]) &&
+    ["unbound", "pending", "unavailable", "stale_generation", "expired", "unauthorized"].includes(String(value.reason))) {
+    return { status: "unavailable", reason: value.reason, ...(lastVerified === undefined ? {} : { lastVerified }) };
+  }
+  if ((value.status === "refreshing" || value.status === "pending") &&
+    hasOnlyKeys(value, value.status === "pending" ? ["status", "placekeeperSessionId", "documentGeneration", "expiresAt"] : ["status", "placekeeperSessionId", "documentGeneration", "lastVerified"]) &&
+    typeof value.placekeeperSessionId === "string" && SESSION_ID.test(value.placekeeperSessionId) &&
+    safeInteger(value.documentGeneration) && value.documentGeneration >= 1) {
+    if (value.status === "pending") return timestamp(value.expiresAt) ? closedJsonClone(value) : undefined;
+    return { status: "refreshing", placekeeperSessionId: value.placekeeperSessionId, documentGeneration: value.documentGeneration,
+      ...(lastVerified === undefined ? {} : { lastVerified }) };
+  }
+  return undefined;
+}
+
 /** Native Codex projections share the path-free native host boundary. Resource
  * strings are opaque handles; immutable descriptors travel in the app envelope. */
 export function sanitizeCodexReviewRuntimeResponse(
@@ -618,9 +655,12 @@ export function sanitizeCodexReviewRuntimeResponse(
   if (!isReviewRuntimeMethodForHost("codex", method)) return undefined;
   const projected = sanitizeMacosReviewRuntimeResponse(method, value);
   if (!record(projected)) return projected;
-  if (method === "scope") return { ...projected, launchSurface: "codex" };
+  const scope = method === "scope" ? value : record(value) ? value.scope : undefined;
+  const codexContext = record(scope) && scope.codexContext !== undefined ? safeCodexContext(scope.codexContext) : undefined;
+  if (record(scope) && scope.codexContext !== undefined && codexContext === undefined) return undefined;
+  if (method === "scope") return { ...projected, launchSurface: "codex", ...(codexContext === undefined ? {} : { codexContext }) };
   if (method === "bootstrap" && record(projected.scope)) {
-    return { ...projected, scope: { ...projected.scope, launchSurface: "codex" } };
+    return { ...projected, scope: { ...projected.scope, launchSurface: "codex", ...(codexContext === undefined ? {} : { codexContext }) } };
   }
   return projected;
 }

@@ -12,6 +12,7 @@ Open the user's PDF in the native Codex panel and keep review discussion and req
 - An open request is complete when the launcher succeeds, the native display tool returns a pending receipt, and both trusted launch and display hooks report success. Report a binding conflict or unavailable context instead of claiming live access.
 - For questions or review, inspect relevant evidence and answer the request. Annotations alone do not authorize source edits. Read [live-evidence.md](references/live-evidence.md) when current Review Items or PDF evidence are needed.
 - For requested source changes or a clean rebuild, read [source-work.md](references/source-work.md). Continue through the authorized work and its final disposition; report applied, preserved, and unresolved feedback plus rebuild verification when requested.
+- Native page/item/destination links use the canonical review location. Clipboard denial leaves a selectable link; link creation failure must be reported as unavailable. A link never supplies another chat’s binding or evidence.
 - Reuse a current binding for follow-up work. Read only the references needed for the active workflow. Launch again when the user requests opening a PDF, a binding needs recovery, or an explicitly identified source root needs attaching.
 
 ## Shared constraints

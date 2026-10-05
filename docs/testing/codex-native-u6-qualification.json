@@ -1,0 +1,26 @@
+{
+  "unit": "U6",
+  "status": "passed",
+  "base": "34d5b3d4125e73ee4d85e40f1623cb3db3e9ea21",
+  "review": "Root reviewed all 20 changed/new paths, authority scope and context projection, private semantic link lane, async clipboard behavior, tests, registry and skill references. No remaining finding before installed qualification.",
+  "verification": {
+    "nativeAndAffectedShared": "28 files / 444 tests passed, serial with loopback access",
+    "typecheck": "passed",
+    "diffCheck": "passed",
+    "build": "service, shared web, VS Code web copy, Chrome, macOS web, Codex client/server passed; initial VS Code copy invoked from wrong cwd failed before writes, rerun in apps/vscode passed",
+    "packagedSmoke": "passed: isolated native reader, writer and hook lifecycle"
+  },
+  "next": "U7 installation, update, and browser compatibility.",
+  "installedUpdate": "Normal coordinator installed after full user restart; candidate identity and existing selected artifacts match.",
+  "actualHost": {
+    "initialBadge": "Actual native UI Agent context current at review revision 0 matched trusted expanded reply at 21:44:12Z.",
+    "pageLink": "Actual click generated canonical page-one link; synthetic clipboard denied with selectable fallback.",
+    "outlineDestinationLink": "User copied canonical v2 page2 xyz 72,640,0 link from Overview control.",
+    "boundedEvidence": "Installed CLI retrieved 102 bytes of page-two text via native-bound evidence.",
+    "sourceWorkflow": "Installed CLI begin, propose, reconcile, fingerprint guarded recheck and complete passed on isolated source-root fixture. Full baseline dispositions returned; source hash unchanged.",
+    "itemLink": "User copied canonical page-one link with the first annotation ID; actual control displayed Link copied.",
+    "pendingSaveContext": "Own fixture was temporarily unavailable. Accepted comment appeared in native UI with Agent context updating. Real user prompt at 2026-10-05T21:49:46Z delivered current generation 1 revision 4, the exact accepted comment, and saving condition (desired 4, saved 3). Native badge then showed current at revision 4 while saving remained pending.",
+    "saveRecovery": "Restoring the fixture automatically finished saving. Actual native UI displayed Saved, two annotations and the exact accepted comment; editor closed. No claim of a failed-save case from this pending-save check."
+  },
+  "scope": "U6 context, semantic links, bounded evidence and source-work integration. Full corpus and remaining lifecycle acceptance belong to U8."
+}

@@ -1,3 +1,4 @@
+import { addPageNote } from "../../../packages/core/src/review-commands.js";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { createHash, randomUUID } from "node:crypto";
 import { canonicalJson } from "../src/runtime/canonical-json.js";
@@ -439,4 +440,23 @@ describe("active native service backend", () => {
     }
   });
 
+});
+
+it('creates precise links only for the admitted canonical review and current items', async () => {
+  const f = await fixture(); const active = await f.panel();
+  const result = payload(await f.manager.handle(request(active, 'createLink', { location: { kind: 'destination', page: 1, mode: 'xyz', params: [72, 80, 1] } })));
+  expect(result.link).toContain('placekeeper:///');
+  expect(result.link).toContain('mode=xyz');
+  expect(result.link).not.toContain(active.presentationCapability);
+  expect(await f.manager.handle(request(active, 'createLink', { location: { kind: 'item', page: 1, itemId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' } }))).toEqual({ status: 'denied', reason: 'invalid' });
+  const item = { id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', intent: 'pageNote', pageIndex: 0,
+    geometry: { kind: 'rect', rect: { x: 1, y: 2, width: 10, height: 10 } }, payload: { text: 'Review' },
+    createdAt: '2026-10-05T12:00:00.000Z', updatedAt: '2026-10-05T12:00:00.000Z' };
+  // Use the canonical command constructor so link membership follows accepted work.
+  const command = addPageNote(f.broker.state(f.sessionId)!, 0, { x: 1, y: 2, width: 10, height: 10 }, 'Review', { createId: () => item.id, now: () => item.createdAt });
+  await f.manager.handle(request(active, 'command', command, 'add_link_item'));
+  expect(payload(await f.manager.handle(request(active, 'createLink', { location: { kind: 'item', page: 1, itemId: item.id } }, 'copy_link_item'))).link).toContain(`item=${item.id}`);
+  expect(await f.manager.handle(request(active, 'createLink', { location: { kind: 'item', page: 2, itemId: item.id } }, 'wrong_link_page'))).toEqual({ status: 'denied', reason: 'invalid' });
+  await f.manager.handle(request(active, 'detach'));
+  expect(await f.manager.handle(request(active, 'createLink', { location: { kind: 'page', page: 1 } }, 'detached_link'))).toMatchObject({ status: 'denied' });
 });

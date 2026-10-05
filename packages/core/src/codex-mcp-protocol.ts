@@ -1,3 +1,4 @@
+import { encodePlacekeeperLinkFragment, decodePlacekeeperLinkFragment, type PlacekeeperLinkLocation } from "./placekeeper-link.js";
 import { isReviewRuntimeMethodForHost, sanitizeChromeReviewRuntimeRequest, type ReviewRuntimeMethod, } from "./review-runtime-protocol.js";
 export const CODEX_MCP_PROTOCOL = "placekeeper.codex-mcp" as const;
 export const CODEX_MCP_PROTOCOL_VERSION = 1 as const;
@@ -154,7 +155,7 @@ export type CodexAppRequest = AppEnvelope & ({
   readonly payload: Record<string, never>;
 } | {
   readonly authority: "presentation";
-  readonly method: ReviewRuntimeMethod | "resource" | "watermark" | "renew";
+  readonly method: ReviewRuntimeMethod | "resource" | "watermark" | "renew" | "createLink";
   readonly payload: unknown;
 } | {
   readonly authority: "reconnect";
@@ -196,6 +197,16 @@ export function parseCodexAppRequest(value: unknown): CodexAppRequest | undefine
   if ((value.method === "watermark" || value.method === "renew") &&
     Object.keys(value.payload).length === 0)
     return { ...envelope, authority: "presentation", method: value.method, payload: {} };
+  if (value.method === "createLink") {
+    const location = value.payload.location;
+    if (!closed(value.payload, ["location"]) || !record(location) ||
+      !closed(location, location.kind === "item" ? ["kind", "page", "itemId"] : location.kind === "destination" ? ["kind", "page", "mode", "params"] : ["kind", "page"]) ||
+      !["page", "item", "destination"].includes(String(location.kind))) return undefined;
+    try {
+      const parsed = decodePlacekeeperLinkFragment(encodePlacekeeperLinkFragment(location as unknown as PlacekeeperLinkLocation));
+      return { ...envelope, authority: "presentation", method: "createLink", payload: { location: parsed } };
+    } catch { return undefined; }
+  }
   if (value.method === "resource") {
     const p = value.payload;
     if (!closed(p, ["handle", "offset", "length"]) ||

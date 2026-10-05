@@ -1,5 +1,5 @@
 export interface CopyLinkActionData {
-  readonly getLink: () => string;
+  readonly getLink: () => string | Promise<string>;
   readonly writeText: (link: string) => Promise<void>;
   readonly disabled?: boolean;
 }

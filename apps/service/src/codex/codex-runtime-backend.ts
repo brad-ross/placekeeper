@@ -1,7 +1,8 @@
 import { createHash, randomBytes } from "node:crypto";
 import { readFile, realpath } from "node:fs/promises";
 import { join, sep } from "node:path";
-import type { PlacekeeperLinkLocation } from "../../../../packages/core/src/placekeeper-link.js";
+import { reviewSemanticDigest, type LiveContextBindingStatus } from "../../../../packages/core/src/live-context.js";
+import { encodePlacekeeperLinkFragment, type PlacekeeperLinkLocation } from "../../../../packages/core/src/placekeeper-link.js";
 import type { CodexAppRequest, CodexResourceDescriptor } from "../../../../packages/core/src/codex-mcp-protocol.js";
 import { sanitizeCodexReviewRuntimeResponse, type ReviewRuntimeBrokerMethod } from "../../../../packages/core/src/review-runtime-protocol.js";
 import { ChromeRuntimeOperationJournal } from "../browser/runtime-operation-journal.js";
@@ -110,7 +111,7 @@ export class CodexServiceRuntimeBackend {
       const resources = await this.#resources(record);
       if (!current()) throw new Error("presentation-unavailable");
       const runtime = await this.#broker.runtimeState(scope.sessionId);
-      const scopeValue = await this.#broker.sessionScope(scope.sessionId);
+      const scopeValue = await this.#scope(scope, current);
       const projected = sanitizeCodexReviewRuntimeResponse("bootstrap", {
         sessionId: scope.sessionId, generation: scope.generation, revision: runtime?.state.revision,
         state: runtime?.state, activeAuthoringDraftIds: runtime?.activeAuthoringDraftIds,
@@ -138,6 +139,14 @@ export class CodexServiceRuntimeBackend {
       if (bytes === undefined || bytes.length !== length) throw new Error("resource-unavailable");
       return { offset: value.offset, dataBase64: bytes.toString("base64"), done: value.offset + length === resource.descriptor.byteLength };
     }
+    if (request.method === "createLink") {
+      const location = (request.payload as { location: PlacekeeperLinkLocation }).location;
+      const state = this.#broker.state(scope.sessionId);
+      const base = this.#broker.canonicalLinkBase(scope.sessionId);
+      if (!current() || state?.workflow.documentGeneration !== scope.generation || base === undefined) throw new Error("presentation-unavailable");
+      if (location.kind === "item" && !state.items.some(item => item.id === location.itemId && item.pageIndex + 1 === location.page)) throw new Error("invalid-resource");
+      return { link: `${base}#${encodePlacekeeperLinkFragment(location)}` };
+    }
     if (request.method === "presence") return {};
     const method = request.method as ReviewRuntimeBrokerMethod;
     const interactionAction = method === "beginInteraction" ? "begin"
@@ -148,7 +157,8 @@ export class CodexServiceRuntimeBackend {
       if (!current()) throw new Error("presentation-unavailable");
       const result = interactionAction !== undefined
         ? await this.#review.interaction(scope.sessionId, record.attachment, interactionAction, request.payload)
-        : method === "saveProposal" ? this.#saving.proposal(scope.sessionId)
+        : method === "scope" ? await this.#scope(scope, current)
+          : method === "saveProposal" ? this.#saving.proposal(scope.sessionId)
           : await this.#review.invoke(scope.sessionId, scope.generation, method as Exclude<ReviewRuntimeBrokerMethod, "saveProposal">, request.payload, { expectedDocumentGeneration: scope.generation });
       const projected = sanitizeCodexReviewRuntimeResponse(method, result);
       if (projected === undefined) throw new Error("invalid-service-response");
@@ -159,6 +169,28 @@ export class CodexServiceRuntimeBackend {
     return isReviewSideEffectMethod(method)
       ? this.#journal.commit(scope.sessionId, request.requestId, { generation: scope.generation, method, payload: request.payload }, invoke)
       : invoke();
+  }
+
+  async #scope(scope: CodexActiveScope, current: () => boolean): Promise<unknown> {
+    const value = await this.#broker.sessionScope(scope.sessionId);
+    const state = this.#broker.state(scope.sessionId);
+    if (!current() || state?.workflow.documentGeneration !== scope.generation) throw new Error("presentation-unavailable");
+    const binding = this.#broker.taskBindings.bindingForTask(scope.taskSessionId);
+    let codexContext: LiveContextBindingStatus = { status: "unavailable", reason: "unbound" };
+    if (binding?.reviewSessionId === scope.sessionId && binding.documentGeneration === scope.generation &&
+      this.#broker.taskBindings.taskForGeneration(scope.sessionId, scope.generation) === scope.taskSessionId &&
+      Date.parse(binding.leaseExpiresAt) > Date.now()) {
+      const verified = binding.lastVerified;
+      const matches = verified?.placekeeperSessionId === scope.sessionId &&
+        verified.documentGeneration === scope.generation && verified.reviewRevision === state.revision &&
+        verified.source.fileId === state.source.fileId && verified.source.digest === state.source.digest &&
+        verified.source.byteLength === state.source.byteLength && verified.stateDigest === reviewSemanticDigest(state.items);
+      codexContext = matches
+        ? { status: "current", identity: verified, leaseExpiresAt: binding.leaseExpiresAt }
+        : { status: "refreshing", placekeeperSessionId: scope.sessionId, documentGeneration: scope.generation,
+            ...(verified === undefined ? {} : { lastVerified: verified }) };
+    }
+    return { ...value as object, launchSurface: "codex", codexContext };
   }
 
   #resources(record: Presentation): Promise<Record<"document" | "pdfiumWasm" | "worker", Resource>> {

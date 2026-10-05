@@ -395,3 +395,13 @@ describe("shared review runtime protocol", () => {
     })).toBeUndefined();
   });
 });
+
+it('projects only closed path-free native context status and identity', () => {
+  const identity = { placekeeperSessionId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', documentGeneration: 1, reviewRevision: 2,
+    source: { fileId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', digest: 'a'.repeat(64), byteLength: 4 }, stateDigest: 'b'.repeat(64) };
+  const scope = { documentTitle: 'Review.pdf', codexContext: { status: 'current', identity, leaseExpiresAt: '2026-10-05T12:00:00.000Z' } };
+  expect(sanitizeCodexReviewRuntimeResponse('scope', scope)).toMatchObject({ launchSurface: 'codex', codexContext: scope.codexContext });
+  for (const codexContext of [{ ...scope.codexContext, taskId: 'private' }, { ...scope.codexContext, identity: { ...identity, path: '/private/review.pdf' } }, { ...scope.codexContext, identity: { ...identity, stateDigest: 'wrong' } }]) {
+    expect(sanitizeCodexReviewRuntimeResponse('scope', { ...scope, codexContext })).toBeUndefined();
+  }
+});
