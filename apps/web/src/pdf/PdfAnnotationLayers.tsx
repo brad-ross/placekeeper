@@ -91,6 +91,7 @@ interface PageLayout {
 }
 
 export interface PdfAnnotationLayersProps {
+  resourceHost?: import('./embedpdf-viewer.js').ViewerResourcePolicy['host'];
   readonly documentId: string;
   readonly engine: PdfEngine;
   readonly document: PdfDocumentObject;
@@ -144,6 +145,7 @@ export function OwnedNativeAnnotationGeometryTargets({
 
 /** Canonical annotation projection used by Main and the active Reference document. */
 export function PdfAnnotationLayers({
+  resourceHost = 'browser',
   documentId,
   engine,
   document,
@@ -334,6 +336,7 @@ export function PdfAnnotationLayers({
       style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}
     >
       <SourceAnnotationLayer
+        resourceHost={resourceHost}
         documentId={documentId}
         document={document}
         engine={engine}

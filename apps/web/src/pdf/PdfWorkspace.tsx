@@ -7,7 +7,8 @@ import type { PdfEngine } from '@embedpdf/models';
 import { transformSize } from '@embedpdf/models';
 import { AnnotationLayer } from '@embedpdf/plugin-annotation/react';
 import { PagePointerProvider } from '@embedpdf/plugin-interaction-manager/react';
-import { RenderLayer } from '@embedpdf/plugin-render/react';
+import { HostRenderLayer as RenderLayer } from './HostRenderLayer.js';
+import type { ViewerResourcePolicy } from './embedpdf-viewer.js';
 import { Scroller } from '@embedpdf/plugin-scroll/react';
 import { SelectionLayer } from '@embedpdf/plugin-selection/react';
 import { Viewport } from '@embedpdf/plugin-viewport/react';
@@ -62,6 +63,7 @@ export interface PageContextMenuRequest {
 }
 
 export interface PdfWorkspaceProps {
+  resourceHost?: ViewerResourcePolicy['host'];
   engine: PdfEngine;
   plugins: PluginBatchRegistrations;
   documentLabel?: string;
@@ -114,6 +116,7 @@ function groupByPageIndex<T extends { readonly pageIndex: number }>(
 }
 
 export function PdfWorkspace({
+  resourceHost = 'browser',
   engine,
   plugins,
   documentLabel = 'PDF document',
@@ -423,6 +426,7 @@ export function PdfWorkspace({
                       }}
                     >
                       <RenderLayer
+                        resourceHost={resourceHost}
                         documentId={MAIN_PDF_DOCUMENT_ID}
                         pageIndex={layout.pageIndex}
                         style={{ pointerEvents: 'none' }}
@@ -474,6 +478,7 @@ export function PdfWorkspace({
                         documentGeneration={documentGeneration}
                       />
                       <PdfAnnotationLayers
+                        resourceHost={resourceHost}
                         documentId={MAIN_PDF_DOCUMENT_ID}
                         engine={engine}
                         document={activePdf}
@@ -523,6 +528,7 @@ export function PdfWorkspace({
             </Viewport>
             {referenceViewportHost && referenceDocument ? (
               <ReferencePdfViewport
+                resourceHost={resourceHost}
                 documentId={REFERENCE_PDF_DOCUMENT_ID}
                 documentState={referenceDocument}
                 documentGeneration={documentGeneration}

@@ -918,11 +918,12 @@ interface DistributionValidationOptions {
 }
 
 export interface SharedWebAssetManifest {
-  readonly schemaVersion: 3;
+  readonly schemaVersion: 4;
   readonly app: string;
   readonly stylesheet: string;
   readonly pdfiumWasm: string;
   readonly pdfiumWorker: string;
+  readonly pdfiumCodexWorker: string;
   readonly integrity: Readonly<Record<string, string>>;
 }
 
@@ -938,15 +939,16 @@ export async function validateSharedWebDistribution(webRoot: string): Promise<Sh
   try { value = JSON.parse(manifestSource) as unknown; }
   catch { throw new Error("The shared web asset-manifest.json is invalid JSON"); }
   const manifest = record(value, "Shared web asset manifest");
-  const exactManifestKeys = ["app", "integrity", "pdfiumWasm", "pdfiumWorker", "schemaVersion", "stylesheet"];
-  if (Object.keys(manifest).sort().join("\n") !== exactManifestKeys.join("\n") || manifest.schemaVersion !== 3) {
+  const exactManifestKeys = ["app", "integrity", "pdfiumCodexWorker", "pdfiumWasm", "pdfiumWorker", "schemaVersion", "stylesheet"];
+  if (Object.keys(manifest).sort().join("\n") !== exactManifestKeys.join("\n") || manifest.schemaVersion !== 4) {
     throw new Error("The shared web asset manifest has an unsupported shape");
   }
   const app = boundedString(manifest.app, "Shared web app asset");
   const stylesheet = boundedString(manifest.stylesheet, "Shared web stylesheet asset");
   const pdfiumWasm = boundedString(manifest.pdfiumWasm, "Shared web PDFium asset");
   const pdfiumWorker = boundedString(manifest.pdfiumWorker, "Shared web PDFium worker asset");
-  const assets = [app, stylesheet, pdfiumWasm, pdfiumWorker];
+  const pdfiumCodexWorker = boundedString(manifest.pdfiumCodexWorker, "Shared web Codex PDFium worker asset");
+  const assets = [app, stylesheet, pdfiumWasm, pdfiumWorker, pdfiumCodexWorker];
   if (assets.some((name) => !/^[A-Za-z0-9._-]+$/u.test(name))) {
     throw new Error("Shared web assets must be local filenames");
   }
@@ -978,12 +980,18 @@ export async function validateSharedWebDistribution(webRoot: string): Promise<Sh
     !workerSource.includes('type === "wasmInit"')) {
     throw new Error(`The packaged PDFium worker contract is invalid: ${pdfiumWorker}`);
   }
+  const codexWorkerSource = bytes.get(pdfiumCodexWorker)!.toString("utf8");
+  if (!codexWorkerSource.includes("class PdfiumEngineRunner") || !codexWorkerSource.includes('type === "wasmInit"') ||
+    !codexWorkerSource.includes("const wasmBinary = event.data.wasmBinary;") || codexWorkerSource.includes("await fetch(wasmUrl)")) {
+    throw new Error(`The packaged Codex PDFium worker contract is invalid: ${pdfiumCodexWorker}`);
+  }
   return {
-    schemaVersion: 3,
+    schemaVersion: 4,
     app,
     stylesheet,
     pdfiumWasm,
     pdfiumWorker,
+    pdfiumCodexWorker,
     integrity: Object.freeze({ ...integrity }) as Readonly<Record<string, string>>,
   };
 }

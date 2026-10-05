@@ -7,6 +7,7 @@ import {
 } from '@embedpdf/models';
 
 import type { PdfDestinationDescription } from './destination-description.js';
+import { subscribeNativeImage } from './HostRenderLayer.js';
 
 /*
  * Link-menu destination snippet (R3, R6; KTD3, KTD11).
@@ -33,6 +34,7 @@ const LEADING_CONTEXT = 0.3;
 const MAX_DEVICE_PIXEL_RATIO = 2;
 
 export interface DestinationSnippetImage {
+  readonly nativeImage?: true;
   readonly blob: Blob;
   /** The page region the image shows. */
   readonly region: Rect;
@@ -118,6 +120,7 @@ export function destinationSnippetOverlay(
 
 /** Region-renders destination strips from the main document's engine. */
 export function createEngineDestinationSnippetRenderer(options: {
+  readonly resourceHost?: import('./embedpdf-viewer.js').ViewerResourcePolicy['host'];
   readonly engine: PdfEngine;
   readonly document: PdfDocumentObject;
   readonly documentGeneration: number;
@@ -143,7 +146,7 @@ export function createEngineDestinationSnippetRenderer(options: {
     signal.addEventListener('abort', abort, { once: true });
     try {
       const blob = await task.toPromise();
-      return signal.aborted ? null : { blob, region };
+      return signal.aborted ? null : { blob, region, ...(options.resourceHost === 'codex' ? { nativeImage: true as const } : {}) };
     } catch {
       return null;
     } finally {
@@ -174,10 +177,13 @@ export function createDestinationSnippetSession(options: {
   const revokeObjectURL = options.revokeObjectURL ?? ((url: string) => URL.revokeObjectURL(url));
   let controller: AbortController | null = null;
   let url: string | null = null;
+  let releaseImage: (() => void) | undefined;
   const release = () => {
     controller?.abort();
     controller = null;
-    if (url !== null) revokeObjectURL(url);
+    releaseImage?.();
+    releaseImage = undefined;
+    if (url !== null && !url.startsWith('data:')) revokeObjectURL(url);
     url = null;
   };
   return {
@@ -202,8 +208,15 @@ export function createDestinationSnippetSession(options: {
           options.onChange({ status: 'failed' });
           return;
         }
-        url = createObjectURL(image.blob);
-        options.onChange({ status: 'ready', url, region: image.region });
+        const publish = (imageUrl: string) => {
+          if (current.signal.aborted || controller !== current) return;
+          url = imageUrl;
+          options.onChange({ status: 'ready', url, region: image.region });
+        };
+        if (image.nativeImage) releaseImage = subscribeNativeImage(image.blob, publish, undefined, () => {
+          if (!current.signal.aborted && controller === current) options.onChange({ status: 'failed' });
+        });
+        else publish(createObjectURL(image.blob));
       });
     },
     dispose: release,

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { chmod, copyFile, cp, mkdir, mkdtemp, readFile, readdir, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { tmpdir } from "node:os";
@@ -945,12 +946,14 @@ describe("macOS distribution manifests", () => {
     const chromeWeb = await validateSharedWebDistribution(resolve("apps/chrome-extension/dist/shared"));
     expect(vscodeWeb).toEqual(web);
     expect(chromeWeb).toEqual(web);
-    expect(web.schemaVersion).toBe(3);
+    expect(web.schemaVersion).toBe(4);
+    expect(web.pdfiumCodexWorker).toBe("pdfium-codex-worker.js");
     expect(web.pdfiumWorker).toBe("pdfium-worker.js");
     expect(Object.keys(web.integrity).sort()).toEqual([
       web.app,
       web.pdfiumWasm,
       web.pdfiumWorker,
+      web.pdfiumCodexWorker,
       web.stylesheet,
     ].sort());
   });
@@ -989,6 +992,7 @@ describe("macOS distribution manifests", () => {
       manifest.stylesheet,
       manifest.pdfiumWasm,
       manifest.pdfiumWorker,
+      manifest.pdfiumCodexWorker,
     ]) {
       const root = await mkdtemp(join(tmpdir(), "placekeeper-shared-asset-"));
       try {
@@ -1204,4 +1208,32 @@ describe("source prerequisite preflight", () => {
       expect(await readdir(root)).toHaveLength(2);
     } finally { await rm(root, { recursive: true, force: true }); }
   });
+});
+
+it('integrity-pins the dedicated Codex worker and rejects missing, stale or role-swapped native assets', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'placekeeper-codex-shared-manifest-'));
+  const assets: Record<string, string> = {
+    'app.js': 'export function start() {}',
+    'app.css': ':root {}',
+    'pdfium.wasm': 'wasm fixture',
+    'pdfium-worker.js': 'class PdfiumEngineRunner {}\nif (type === "wasmInit") { const response = await fetch(wasmUrl); }',
+    'pdfium-codex-worker.js': 'class PdfiumEngineRunner {}\nif (type === "wasmInit") { const wasmBinary = event.data.wasmBinary; }',
+  };
+  const manifest = () => ({ schemaVersion: 4, app: 'app.js', stylesheet: 'app.css', pdfiumWasm: 'pdfium.wasm', pdfiumWorker: 'pdfium-worker.js', pdfiumCodexWorker: 'pdfium-codex-worker.js', integrity: Object.fromEntries(Object.entries(assets).map(([name, bytes]) => [name, createHash('sha256').update(bytes).digest('hex')])) });
+  try {
+    for (const [name, bytes] of Object.entries(assets)) await writeFile(join(root, name), bytes);
+    await writeFile(join(root, 'asset-manifest.json'), JSON.stringify(manifest()));
+    await expect(validateSharedWebDistribution(root)).resolves.toMatchObject({ schemaVersion: 4, pdfiumCodexWorker: 'pdfium-codex-worker.js' });
+    await rm(join(root, 'pdfium-codex-worker.js'));
+    await expect(validateSharedWebDistribution(root)).rejects.toThrow(/missing|pdfium-codex-worker/u);
+    await writeFile(join(root, 'pdfium-codex-worker.js'), 'stale');
+    await expect(validateSharedWebDistribution(root)).rejects.toThrow('Shared web asset is stale: pdfium-codex-worker.js');
+    assets['pdfium-codex-worker.js'] = assets['pdfium-worker.js']!;
+    await writeFile(join(root, 'pdfium-codex-worker.js'), assets['pdfium-codex-worker.js']);
+    await writeFile(join(root, 'asset-manifest.json'), JSON.stringify(manifest()));
+    await expect(validateSharedWebDistribution(root)).rejects.toThrow('packaged Codex PDFium worker contract is invalid');
+    const { pdfiumCodexWorker: _omitted, ...incomplete } = manifest();
+    await writeFile(join(root, 'asset-manifest.json'), JSON.stringify(incomplete));
+    await expect(validateSharedWebDistribution(root)).rejects.toThrow('unsupported shape');
+  } finally { await rm(root, { recursive: true, force: true }); }
 });

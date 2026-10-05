@@ -257,8 +257,9 @@ export async function extensionRuntimeIdentity(root: string): Promise<string> {
     stylesheet?: unknown;
     pdfiumWasm?: unknown;
     pdfiumWorker?: unknown;
+    pdfiumCodexWorker?: unknown;
   };
-  const shared = [manifest.app, manifest.stylesheet, manifest.pdfiumWasm, manifest.pdfiumWorker];
+  const shared = [manifest.app, manifest.stylesheet, manifest.pdfiumWasm, manifest.pdfiumWorker, manifest.pdfiumCodexWorker];
   if (shared.some((name) => typeof name !== "string" || !/^[A-Za-z0-9._-]+$/u.test(name))) {
     throw new Error("Installed extension shared-client manifest is invalid.");
   }
@@ -353,7 +354,7 @@ async function extensionState(worker: ChromeServiceWorker): Promise<{
       read("handler.html"), read("popup.html"), read("shared/asset-manifest.json"),
     ]);
     const sharedManifest = JSON.parse(decoder.decode(sharedManifestBytes)) as {
-      app: string; stylesheet: string; pdfiumWasm: string; pdfiumWorker: string;
+      app: string; stylesheet: string; pdfiumWasm: string; pdfiumWorker: string; pdfiumCodexWorker: string;
     };
     const html = `${decoder.decode(handlerBytes)}\n${decoder.decode(popupBytes)}`;
     const entries = [...html.matchAll(/(?:src|href)="(?:\.\/|\/)(assets\/[A-Za-z0-9._-]+)"/gu)]
@@ -361,7 +362,7 @@ async function extensionState(worker: ChromeServiceWorker): Promise<{
     const paths = [...new Set([
       "manifest.json", "background.js", "handler.html", "popup.html", "shared/asset-manifest.json",
       ...entries,
-      ...[sharedManifest.app, sharedManifest.stylesheet, sharedManifest.pdfiumWasm, sharedManifest.pdfiumWorker]
+      ...[sharedManifest.app, sharedManifest.stylesheet, sharedManifest.pdfiumWasm, sharedManifest.pdfiumWorker, sharedManifest.pdfiumCodexWorker]
         .map((name) => `shared/${name}`),
     ])].sort();
     const known = new Map<string, ArrayBuffer>([

@@ -124,9 +124,15 @@ test('marks preserve color through hover, activation, zoom, and comment removal'
   await expect(comment).toHaveCSS('outline-color', 'rgb(150, 112, 6)');
   await page.mouse.move(0, 0);
   await expect(comment).toHaveCSS('background-color', before.background);
+  // Activating the mark opens the tray and settles its fit-width layout first.
+  await expect.poll(() => page.locator('.review-workspace').evaluateAll(elements => elements.flatMap(element => element.getAnimations({ subtree: true })).filter(animation => animation.pending || animation.playState === 'running').length)).toBe(0);
   const zoom = page.getByRole('textbox', { name: /^Current zoom/ });
   await zoom.fill('150'); await zoom.press('Enter');
   await expect(zoom).toHaveValue('150');
+  // The control adopts its value before the rendered zoom animation finishes.
+  const zoomContent = pdfPage.locator('xpath=ancestor::*[@data-viewer-zoom-content][1]');
+  await expect.poll(() => zoomContent.evaluate(element => element.getAnimations().filter(animation => animation.pending || animation.playState === 'running').length)).toBe(0);
+  await expect.poll(() => comment.evaluate(element => Number((element as HTMLElement).style.getPropertyValue('--pdf-mark-scale')))).toBeCloseTo(1.5, 2);
   const selected = pdfPage.locator(`[data-owned-mark][data-review-id="${itemId}"]`);
   await expect(selected).toHaveCSS('background-color', before.background);
   const originalBoxStyle = await selected.evaluate((element) => ({ height: (element as HTMLElement).style.height, transform: (element as HTMLElement).style.transform }));

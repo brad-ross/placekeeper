@@ -173,7 +173,7 @@ export class CodexServiceRuntimeBackend {
         return { bytes, descriptor: { handle: randomBytes(16).toString("base64url"), byteLength: bytes.length,
           sha256: createHash("sha256").update(bytes).digest("hex"), mediaType } };
       };
-      const [pdfiumWasm, worker] = await Promise.all([asset("pdfium.wasm", "application/wasm"), asset("pdfium-worker.js", "text/javascript")]);
+      const [pdfiumWasm, worker] = await Promise.all([asset("pdfium.wasm", "application/wasm"), asset("pdfium-codex-worker.js", "text/javascript")]);
       const state = this.#broker.state(record.scope.sessionId);
       if (this.#presentations.get(record.scope.runtimeId) !== record || state?.workflow.documentGeneration !== record.scope.generation) throw new Error("presentation-unavailable");
       const document: Resource = { descriptor: { handle: randomBytes(16).toString("base64url"), byteLength: state.source.byteLength,

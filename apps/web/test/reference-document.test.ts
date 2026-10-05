@@ -21,6 +21,27 @@ function deferred<T>() {
 }
 
 describe('reference document scope', () => {
+  it('opens repeated native References from fresh buffer copies without detaching verified source bytes', async () => {
+    const documentBytes = new Uint8Array([37, 80, 68, 70]);
+    const resources = { document: 'blob:codex-sandbox://native/document', pdfiumWasm: 'blob:codex-sandbox://native/wasm', worker: 'blob:codex-sandbox://native/worker' };
+    const openDocumentUrl = vi.fn();
+    const openDocumentBuffer = vi.fn(options => {
+      const transferred = structuredClone(options.buffer, { transfer: [options.buffer] });
+      expect(new Uint8Array(transferred)).toEqual(documentBytes);
+      return resolvedTask({ documentId: REFERENCE_PDF_DOCUMENT_ID, task: resolvedTask(undefined) });
+    });
+    const controller = createReferenceDocumentController({
+      documentManager: { openDocumentUrl, openDocumentBuffer, retryDocument: vi.fn(), closeDocument: vi.fn(() => resolvedTask(undefined)), getActiveDocumentId: () => MAIN_PDF_DOCUMENT_ID, getDocumentState: () => null },
+      assetUrls: { documentUrl: resources.document, pdfiumWasm: resources.pdfiumWasm, documentBytes },
+      resourcePolicy: { host: 'codex', resources }, origin: 'codex-sandbox://native', documentGeneration: 1,
+    });
+    expect(await controller.open()).toBe(true);
+    await controller.close();
+    expect(await controller.open()).toBe(true);
+    expect(documentBytes.byteLength).toBe(4);
+    expect(openDocumentBuffer).toHaveBeenCalledTimes(2);
+    expect(openDocumentUrl).not.toHaveBeenCalled();
+  });
   it.each([
     'https://file.vscode-cdn.net/review/document.pdf',
     'vscode-webview://review/document.pdf',
@@ -92,6 +113,7 @@ describe('reference document scope', () => {
       pdfiumWasm: '/pdfium.wasm', documentUrl: '/document.pdf',
       requestHeaders: { Authorization: 'Bearer memory-only-secret' },
     }, 'http://127.0.0.1:4173');
+    if (!('url' in fresh)) throw new Error('Browser Reference must preserve URL options');
     expect(options).not.toBe(fresh);
     expect(options.requestOptions?.headers).not.toBe(fresh.requestOptions?.headers);
     expect(getActiveDocumentId()).toBe(MAIN_PDF_DOCUMENT_ID);

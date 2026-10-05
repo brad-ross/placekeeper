@@ -61,19 +61,27 @@ it("records a teardown notification as requested only and never logs raw SDK err
 });
 
 import { afterEach } from "vitest";
-afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); vi.doUnmock("@modelcontextprotocol/ext-apps"); vi.doUnmock("../src/resources.js"); });
+afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); vi.doUnmock("@modelcontextprotocol/ext-apps"); vi.doUnmock("../../web/src/codex-entry.js"); vi.doUnmock("../../web/src/host/codex-runtime.js"); });
 async function qualificationShellFixture(withControl: boolean, action: "bridge-close" | "request-teardown" = "bridge-close", oldControl = false) {
   vi.resetModules(); vi.useFakeTimers({ now: new Date("2026-10-02T12:00:00.000Z") });
   class Element {
     textContent = ""; removed = false; onclick: (() => void | Promise<void>) | undefined;
     before() {} setAttribute() {} remove() { this.removed = true; }
   }
-  const status = new Element(), detail = new Element(), renewal = new Element(), expand = new Element(), restore = new Element();
+  const status = new Element(), detail = new Element(), renewal = new Element(), expand = new Element(), restore = new Element(), root = new Element();
   const created: { tag: string; element: Element }[] = [];
-  vi.stubGlobal("document", { hidden: false, querySelector: (selector: string) => ({ "#status": status, "#detail": detail, "#renewal": renewal, "#expand": expand, "#restore": restore } as Record<string, Element>)[selector], createElement: (tag: string) => { const element = new Element(); created.push({ tag, element }); return element; } });
+  vi.stubGlobal("document", { hidden: false, querySelector: (selector: string) => ({ "#status": status, "#detail": detail, "#renewal": renewal, "#expand": expand, "#restore": restore, "#root": root } as Record<string, Element>)[selector], createElement: (tag: string) => { const element = new Element(); created.push({ tag, element }); return element; } });
   vi.stubGlobal("window", {});
   const clear = vi.fn();
-  vi.doMock("../src/resources.js", () => ({ ResourceAllocationError: class extends Error {}, VerifiedResourceMaterializer: class { clear = clear; materialize = async () => new Uint8Array([1]); }, resourceDescriptors: () => ({ document: { handle: "resource", sha256: "a".repeat(64) } }) }));
+  const runtimeDispose = vi.fn();
+  const runtime = { dispose: runtimeDispose };
+  vi.doMock("../../web/src/host/codex-runtime.js", () => ({ createCodexHostRuntime: vi.fn(() => runtime) }));
+  const mount = vi.fn((element: Element, mountedRuntime: typeof runtime, _onError: unknown, onReady: () => void) => {
+    element.textContent = "Shared production review mounted";
+    queueMicrotask(onReady);
+    return () => { clear(); element.textContent = ""; mountedRuntime.dispose(); };
+  });
+  vi.doMock("../../web/src/codex-entry.js", () => ({ mountCodexProductionReview: mount }));
   let grantSent = false;
   const calls: string[] = [];
   class MockApp {
@@ -95,32 +103,33 @@ async function qualificationShellFixture(withControl: boolean, action: "bridge-c
   await import("../src/shell.js");
   app.ontoolresult!({ structuredContent: { protocolVersion: 1, status: "pending", receiptId: "receipt-1", attemptId: "attempt-1", generation: 1 }, _meta: { "placekeeper/pending": { protocolVersion: 1, runtimeId: "runtime-1", attemptId: "attempt-1", generation: 1, receiptId: "receipt-1", pendingCapability: "p".repeat(43) }, "placekeeper/qualification": { runId: own.runId, invocationNonce: own.invocationNonce, expiresAt: new Date(Date.now() + 60_000).toISOString() } } });
   await vi.advanceTimersByTimeAsync(0);
-  return { app, calls, created, status, detail, renewal, clear };
+  return { app, calls, created, status, detail, renewal, root, clear, mount, runtimeDispose };
 }
 it("normal shell has no qualification button and continues ordinary renewal without a descriptor grant", async () => {
   const f = await qualificationShellFixture(false);
   expect(f.created.filter(item => item.tag === "button")).toHaveLength(0);
+  expect(f.mount).toHaveBeenCalledOnce(); expect(f.root.textContent).toBe("Shared production review mounted"); expect(f.runtimeDispose).not.toHaveBeenCalled();
   expect(f.calls).toContain("ready"); expect(f.calls).toContain("renew");
   await vi.advanceTimersByTimeAsync(5000); expect(f.calls.filter(method => method === "renew")).toHaveLength(2);
   expect(f.app.close).not.toHaveBeenCalled(); expect(f.app.requestTeardown).not.toHaveBeenCalled();
 });
 it("the actual shell bridge button clears current UI and stops renew/poll before closing its own SDK App", async () => {
   const f = await qualificationShellFixture(true), button = f.created.find(item => item.tag === "button")!.element;
-  expect(f.app.close).not.toHaveBeenCalled(); expect(f.detail.textContent).not.toBe("");
-  await button.onclick!(); expect(f.app.close).toHaveBeenCalledOnce(); expect(f.detail.textContent).toBe(""); expect(f.clear).toHaveBeenCalled(); expect(f.calls).not.toContain("detach");
+  expect(f.app.close).not.toHaveBeenCalled(); expect(f.root.textContent).not.toBe("");
+  await button.onclick!(); expect(f.app.close).toHaveBeenCalledOnce(); expect(f.detail.textContent).toBe(""); expect(f.root.textContent).toBe(""); expect(f.clear).toHaveBeenCalled(); expect(f.runtimeDispose).toHaveBeenCalledOnce(); expect(f.calls).not.toContain("detach");
   const count = f.calls.length; await vi.advanceTimersByTimeAsync(10_000); expect(f.calls).toHaveLength(count); expect(f.status.textContent).toContain("this panel bridge was closed"); expect(f.renewal.textContent).toBe("Authenticated panel renewal stopped.");
   expect(f.created.filter(item => item.tag === "pre").map(item => item.element.textContent).join(" ")).not.toMatch(/presentationCapability|pendingCapability|reconnectTicket|pppppppp/);
 });
 it("an expired actual shell grant removes its button and cannot close the bridge", async () => {
   const f = await qualificationShellFixture(true), button = f.created.find(item => item.tag === "button")!.element;
-  await vi.advanceTimersByTimeAsync(1001); expect(button.removed).toBe(true); await button.onclick!(); expect(f.app.close).not.toHaveBeenCalled(); expect(f.status.textContent).toContain("Verified");
+  await vi.advanceTimersByTimeAsync(1001); expect(button.removed).toBe(true); await button.onclick!(); expect(f.app.close).not.toHaveBeenCalled(); expect(f.status.textContent).toContain("review ready");
 });
 
 it("the actual shell teardown button only requests the host; normal host teardown detaches its own presentation", async () => {
   const f = await qualificationShellFixture(true, "request-teardown"), button = f.created.find(item => item.tag === "button")!.element;
-  await button.onclick!(); expect(f.app.requestTeardown).toHaveBeenCalledOnce(); expect(f.app.close).not.toHaveBeenCalled(); expect(f.calls).not.toContain("detach"); expect(f.detail.textContent).not.toBe("");
+  await button.onclick!(); expect(f.app.requestTeardown).toHaveBeenCalledOnce(); expect(f.app.close).not.toHaveBeenCalled(); expect(f.calls).not.toContain("detach"); expect(f.root.textContent).not.toBe("");
   expect(f.created.filter(item => item.tag === "pre").map(item => item.element.textContent).join(" ")).toContain('"outcome": "requested"');
-  await f.app.onteardown!(); expect(f.calls.filter(method => method === "detach")).toHaveLength(1); expect(f.detail.textContent).toBe("");
+  await f.app.onteardown!(); expect(f.calls.filter(method => method === "detach")).toHaveLength(1); expect(f.detail.textContent).toBe(""); expect(f.root.textContent).toBe("");
   const count = f.calls.length; await vi.advanceTimersByTimeAsync(10_000); expect(f.calls).toHaveLength(count);
 });
 
@@ -191,7 +200,7 @@ it("checks grant expiry before each old request and missing retirement replies c
 });
 it("actual shell retire keeps bridge open, clears ordinary UI/timers and teardown cannot detach a successor", async () => {
   const f = await qualificationShellFixture(true, "bridge-close", true), retire = f.created.find(item => item.tag === "button")!.element;
-  await retire.onclick!(); expect(f.calls.filter(method => method === "detach")).toHaveLength(1); expect(f.detail.textContent).toBe("");
+  await retire.onclick!(); expect(f.calls.filter(method => method === "detach")).toHaveLength(1); expect(f.detail.textContent).toBe(""); expect(f.root.textContent).toBe("");
   expect(f.app.close).not.toHaveBeenCalled(); expect(f.app.requestTeardown).not.toHaveBeenCalled();
   const probe = f.created.filter(item => item.tag === "button").at(-1)!.element;
   expect(probe.textContent).toContain("probe old attempt"); const count = f.calls.length;
@@ -205,12 +214,12 @@ it("actual SDK disconnect wipes the old controller and late ordinary/probe repli
   await vi.advanceTimersByTimeAsync(5000); // One normal renewal is now outstanding.
   const retire = f.created.find(item => item.tag === "button")!.element; await retire.onclick!();
   late({ content: [], _meta: { "placekeeper/response": { status: "ok", payload: { watermark: 1 } } } }); await vi.advanceTimersByTimeAsync(0);
-  expect(f.detail.textContent).toBe(""); expect(f.renewal.textContent).toBe("Authenticated panel renewal stopped.");
+  expect(f.detail.textContent).toBe(""); expect(f.root.textContent).toBe(""); expect(f.renewal.textContent).toBe("Authenticated panel renewal stopped.");
   const probe = f.created.filter(item => item.tag === "button").at(-1)!.element;
   f.app.callServerTool.mockImplementationOnce(() => new Promise(resolve => { late = resolve; }));
   const operation = probe.onclick!(); f.app.onclose!();
   late({ content: [], _meta: { "placekeeper/response": { status: "ok", payload: { watermark: 1 } } } }); await operation;
-  expect(f.detail.textContent).toBe(""); expect(f.status.textContent).toContain("unsupported");
+  expect(f.detail.textContent).toBe(""); expect(f.root.textContent).toBe(""); expect(f.status.textContent).toContain("unsupported");
   expect(f.created.filter(item => item.tag === "pre").map(item => item.element.textContent).join(" ")).not.toMatch(/Capability|qqqqqq|pppppp|reconnectTicket/);
 });
 it("mock successor participation remains active when exact predecessor credentials are rejected", async () => {
@@ -233,7 +242,7 @@ it("host reuse of a retired shell wipes old authority without accepting a succes
   const probe = f.created.filter(item => item.tag === "button").at(-1)!.element, count = f.calls.length;
   f.app.ontoolresult!({ _meta: { "placekeeper/pending": { runtimeId: "successor" } } });
   expect(f.status.textContent).toContain("unsupported"); expect(probe.removed).toBe(true); await probe.onclick!();
-  await vi.advanceTimersByTimeAsync(5000); expect(f.calls).toHaveLength(count); expect(f.detail.textContent).toBe("");
+  await vi.advanceTimersByTimeAsync(5000); expect(f.calls).toHaveLength(count); expect(f.detail.textContent).toBe(""); expect(f.root.textContent).toBe("");
 });
 it("shared closed grant fields preserve v1 and old action allowlists and timestamp boundaries", () => {
   const now = Date.parse("2026-10-03T12:00:00.000Z");

@@ -45,8 +45,9 @@ export async function readSourceAnnotationStyles(bytes: Uint8Array): Promise<Sou
 }
 
 /** The caller validates the source URL using its host's document resource policy. */
-export async function fetchSourceAnnotationStyles(options: { url: string; requestOptions?: RequestInit }): Promise<SourceAnnotationStyles> {
+export async function fetchSourceAnnotationStyles(options: { url: string; requestOptions?: RequestInit } | { buffer: ArrayBuffer }): Promise<SourceAnnotationStyles> {
   try {
+    if ('buffer' in options) return await readSourceAnnotationStyles(new Uint8Array(options.buffer));
     const response = await fetch(options.url, {
       ...options.requestOptions, redirect: 'error', signal: AbortSignal.timeout(10_000),
     });

@@ -7,6 +7,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   createLocalPdfiumViewerPlugins,
   createTrustedPdfiumWorker,
+  buildViewerDocumentOptions,
   validateViewerResourceUrl,
 } from '../src/pdf/embedpdf-viewer.js';
 import { MAIN_PDF_DOCUMENT_ID } from '../src/pdf/viewer-document-ids.js';
@@ -180,4 +181,31 @@ describe('EmbedPDF registry configuration', () => {
     listeners.get('error')?.(new Event('error'));
     expect(onWorkerError).toHaveBeenCalledTimes(2);
   });
+});
+
+it('supplies Codex verified WASM bytes to the packaged worker without a Blob fetch', () => {
+  const resources = { document: 'blob:https://native/document', pdfiumWasm: 'blob:https://native/wasm', worker: 'blob:https://native/worker' };
+  const postMessage = vi.fn();
+  const wasm = new Uint8Array([0, 97, 115, 109]);
+  const worker = createTrustedPdfiumWorker(resources.worker, { host: 'codex', resources }, () => ({ postMessage, addEventListener: vi.fn() }) as unknown as Worker, undefined, wasm);
+  worker.postMessage({ type: 'wasmInit', wasmUrl: resources.pdfiumWasm, fontFallback: null });
+  expect(postMessage).toHaveBeenCalledWith({ type: 'wasmInit', wasmUrl: resources.pdfiumWasm, fontFallback: null, wasmBinary: wasm.buffer }, []);
+  const sent = postMessage.mock.calls[0]![0].wasmBinary as ArrayBuffer;
+  expect(sent).not.toBe(wasm.buffer);
+  expect(new Uint8Array(sent)).toEqual(wasm);
+  const missingBytesFactory = vi.fn(() => ({ postMessage }) as unknown as Worker);
+  expect(() => createTrustedPdfiumWorker(resources.worker, { host: 'codex', resources }, missingBytesFactory)).toThrow('Verified native engine bytes');
+  expect(missingBytesFactory).not.toHaveBeenCalled();
+});
+
+it('loads Codex PDFs from verified buffer bytes and keeps other hosts on their existing URL path', () => {
+  const resources = { document: 'blob:codex-sandbox://native/document', pdfiumWasm: 'blob:codex-sandbox://native/wasm', worker: 'blob:codex-sandbox://native/worker' };
+  const documentBytes = new Uint8Array([37, 80, 68, 70]);
+  const assets = { documentUrl: resources.document, pdfiumWasm: resources.pdfiumWasm, documentBytes };
+  const options = buildViewerDocumentOptions(assets, { host: 'codex', resources });
+  expect(options).toEqual({ name: 'Local PDF', buffer: documentBytes.buffer });
+  expect((options as { buffer: ArrayBuffer }).buffer).not.toBe(documentBytes.buffer);
+  expect(() => buildViewerDocumentOptions({ documentUrl: assets.documentUrl, pdfiumWasm: assets.pdfiumWasm }, { host: 'codex', resources })).toThrow('Verified native document bytes');
+  expect(() => buildViewerDocumentOptions({ ...assets, documentUrl: resources.worker }, { host: 'codex', resources })).toThrow(/role/iu);
+  expect(buildViewerDocumentOptions(assets, { host: 'macos', resources })).toHaveProperty('url', resources.document);
 });

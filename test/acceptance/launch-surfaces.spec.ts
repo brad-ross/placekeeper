@@ -95,8 +95,9 @@ test("VS Code review loads the shared client directly without a localhost frame"
   expect(extension).not.toContain("postMessage({ type: \"launch-url\"");
   expect(productionEntry).toContain("export async function startVscode");
   await expect(validateSharedWebDistribution(resolve("dist/web"))).resolves.toMatchObject({
-    schemaVersion: 3,
+    schemaVersion: 4,
     pdfiumWorker: "pdfium-worker.js",
+    pdfiumCodexWorker: "pdfium-codex-worker.js",
   });
   await expect(validateSharedWebDistribution(resolve("apps/vscode/dist/web"))).resolves.toEqual(
     await validateSharedWebDistribution(resolve("dist/web")),

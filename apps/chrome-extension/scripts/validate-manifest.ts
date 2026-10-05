@@ -71,6 +71,7 @@ const sharedManifest = JSON.parse(await readFile(resolve(sharedRoot, "asset-mani
   readonly stylesheet?: unknown;
   readonly pdfiumWasm?: unknown;
   readonly pdfiumWorker?: unknown;
+  readonly pdfiumCodexWorker?: unknown;
   readonly integrity?: unknown;
 };
 const sharedAssets = [
@@ -78,8 +79,9 @@ const sharedAssets = [
   sharedManifest.stylesheet,
   sharedManifest.pdfiumWasm,
   sharedManifest.pdfiumWorker,
+  sharedManifest.pdfiumCodexWorker,
 ];
-if (sharedManifest.schemaVersion !== 3 ||
+if (sharedManifest.schemaVersion !== 4 ||
   sharedAssets.some((name) => typeof name !== "string" || !/^[A-Za-z0-9._-]+$/u.test(name)) ||
   new Set(sharedAssets).size !== sharedAssets.length ||
   typeof sharedManifest.integrity !== "object" || sharedManifest.integrity === null) {

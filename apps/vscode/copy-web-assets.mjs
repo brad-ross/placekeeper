@@ -5,9 +5,9 @@ import { resolve } from "node:path";
 const sourceRoot = resolve("../../dist/web");
 const destinationRoot = resolve("dist/web");
 const manifest = JSON.parse(await readFile(resolve(sourceRoot, "asset-manifest.json"), "utf8"));
-const assetNames = [manifest.app, manifest.stylesheet, manifest.pdfiumWasm, manifest.pdfiumWorker];
+const assetNames = [manifest.app, manifest.stylesheet, manifest.pdfiumWasm, manifest.pdfiumWorker, manifest.pdfiumCodexWorker];
 if (
-  manifest.schemaVersion !== 3 ||
+  manifest.schemaVersion !== 4 ||
   assetNames.some((name) => typeof name !== "string" || !/^[A-Za-z0-9._-]+$/u.test(name)) ||
   new Set(assetNames).size !== assetNames.length ||
   typeof manifest.integrity !== "object" || manifest.integrity === null ||

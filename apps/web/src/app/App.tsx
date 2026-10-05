@@ -1584,6 +1584,7 @@ export function App({
   }, [clampKeyboardCursor, emitFromSurface, publishKeyboardCursor]);
   const workspace = (
     <PdfWorkspace
+      resourceHost={resourcePolicy?.host ?? 'browser'}
       engine={viewer.engine}
       plugins={viewer.plugins}
       documentLabel={documentTitle}

@@ -8,7 +8,8 @@ import {
 } from '@embedpdf/models';
 import { AnnotationLayer } from '@embedpdf/plugin-annotation/react';
 import { PagePointerProvider } from '@embedpdf/plugin-interaction-manager/react';
-import { RenderLayer } from '@embedpdf/plugin-render/react';
+import { HostRenderLayer as RenderLayer } from './HostRenderLayer.js';
+import type { ViewerResourcePolicy } from './embedpdf-viewer.js';
 import type { PageLayout } from '@embedpdf/plugin-scroll';
 import { Scroller } from '@embedpdf/plugin-scroll/react';
 import { SelectionLayer } from '@embedpdf/plugin-selection/react';
@@ -159,6 +160,7 @@ function referencePagePointer(
 }
 
 export interface ReferencePdfViewportProps {
+  readonly resourceHost?: ViewerResourcePolicy['host'];
   readonly documentId: string;
   readonly documentState: DocumentState;
   readonly documentGeneration: number;
@@ -187,6 +189,7 @@ export interface ReferencePdfViewportProps {
 
 /** One reusable inactive-document viewport; application tabs store snapshots, not viewer trees. */
 export function ReferencePdfViewport({
+  resourceHost = 'browser',
   documentId,
   documentState,
   documentGeneration,
@@ -519,6 +522,7 @@ export function ReferencePdfViewport({
                 }}
               >
                 <RenderLayer
+                  resourceHost={resourceHost}
                   documentId={documentId}
                   pageIndex={layout.pageIndex}
                   style={{ pointerEvents: 'none' }}
@@ -572,6 +576,7 @@ export function ReferencePdfViewport({
                   documentGeneration={documentGeneration}
                 />
                 <PdfAnnotationLayers
+                  resourceHost={resourceHost}
                   documentId={documentId}
                   engine={engine}
                   document={documentState.document!}

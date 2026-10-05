@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import { defineConfig, type Plugin } from "vite";
 import {
   buildPackagedPdfiumWorkerSource,
+  buildCodexPdfiumWorkerSource,
   EMBEDPDF_ENGINE_VERSION,
 } from "../../scripts/build/pdfium-worker-source.js";
 import { emitPdfiumAssets, loadPinnedPdfiumWorkerSource } from "../../scripts/build/pdfium-assets.js";
@@ -14,6 +15,7 @@ export function offlinePdfium(): Plugin {
   return {
     name: "offline-pdfium",
     generateBundle() {
+      this.emitFile({ type: "asset", fileName: "pdfium-codex-worker.js", source: buildCodexPdfiumWorkerSource(workerSource) });
       emitPdfiumAssets(this, {
         wasm: { fileName: "pdfium.wasm" },
         worker: { fileName: "pdfium-worker.js" },
@@ -41,8 +43,9 @@ function sharedAssetManifest(): Plugin {
       const stylesheet = "app.css";
       const pdfiumWasm = "pdfium.wasm";
       const pdfiumWorker = "pdfium-worker.js";
+      const pdfiumCodexWorker = "pdfium-codex-worker.js";
       const integrity = Object.fromEntries(
-        [app, stylesheet, pdfiumWasm, pdfiumWorker].map((name) => [
+        [app, stylesheet, pdfiumWasm, pdfiumWorker, pdfiumCodexWorker].map((name) => [
           name,
           createHash("sha256").update(bytes(name)).digest("hex"),
         ]),
@@ -51,11 +54,12 @@ function sharedAssetManifest(): Plugin {
         type: "asset",
         fileName: "asset-manifest.json",
         source: JSON.stringify({
-          schemaVersion: 3,
+          schemaVersion: 4,
           app,
           stylesheet,
           pdfiumWasm,
           pdfiumWorker,
+          pdfiumCodexWorker,
           integrity,
         }),
       });

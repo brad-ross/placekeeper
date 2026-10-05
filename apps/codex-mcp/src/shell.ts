@@ -1,3 +1,6 @@
+import { createCodexHostRuntime } from "../../web/src/host/codex-runtime.js";
+import { mountCodexProductionReview } from "../../web/src/codex-entry.js";
+import type { HostRuntimeInvalidation } from "../../web/src/host/runtime.js";
 import { OLD_ATTEMPT_META_KEY } from "./old-attempt-contract.js";
 import { ShellOldAttempt } from "./shell-old-attempt.js";
 import { QUALIFICATION_CONTROLS_META_KEY } from "./qualification-controls-contract.js";
@@ -5,7 +8,7 @@ import { ShellQualificationControls } from "./shell-qualification-controls.js";
 import { App } from "@modelcontextprotocol/ext-apps";
 import { parseCodexDisplayReceipt, parseCodexPendingPresentation, type CodexAppRequest, type CodexAppResponse, type CodexPendingPresentation } from "../../../packages/core/src/codex-mcp-protocol.js";
 import { APP_TOOL, PENDING_META_KEY, QUALIFICATION_META_KEY } from "./transport-contract.js";
-import { ResourceAllocationError, VerifiedResourceMaterializer, resourceDescriptors } from "./resources.js";
+import { ResourceAllocationError } from "./resources.js";
 import { deniedFailure, diagnosticFailure, LifecycleDiagnostics, NativeDiagnosticError, verifiedAppReply } from "./lifecycle-diagnostics.js";
 
 const app = new App({ name: "Placekeeper", version: "1.0.0" });
@@ -24,11 +27,13 @@ const diagnostics = new LifecycleDiagnostics(crypto.randomUUID(), () => new Date
 const diagnosticView = document.createElement("pre");
 diagnosticView.setAttribute("aria-label", "Native lifecycle qualification diagnostics");
 detail.before(diagnosticView);
-function renderDiagnostics() { diagnosticView.textContent = JSON.stringify({ ...diagnostics.snapshot(), ...(oldAttempt.snapshot() === undefined ? {} : { oldAttempt: oldAttempt.snapshot() }), ...(qualificationControls.snapshot() === undefined ? {} : { control: qualificationControls.snapshot() }) }, null, 2); }
+function renderDiagnostics() { diagnosticView.hidden = diagnostics.snapshot().qualification === undefined; document.querySelector<HTMLElement>("#renewal")!.hidden = diagnosticView.hidden; diagnosticView.textContent = JSON.stringify({ ...diagnostics.snapshot(), ...(oldAttempt.snapshot() === undefined ? {} : { oldAttempt: oldAttempt.snapshot() }), ...(qualificationControls.snapshot() === undefined ? {} : { control: qualificationControls.snapshot() }) }, null, 2); }
 function recordDiagnostic(...args: Parameters<LifecycleDiagnostics["record"]>) { diagnostics.record(...args); renderDiagnostics(); }
 renderDiagnostics();
 let incarnation = 0;
-const documentMaterializer = new VerifiedResourceMaterializer();
+let productionSessionId: string | undefined;
+let unmountProduction: (() => void) | undefined;
+const runtimeInvalidations = new Set<(event: HostRuntimeInvalidation) => void>();
 let pending: CodexPendingPresentation | undefined;
 let active: Extract<CodexAppResponse, { status: "active" }> | undefined;
 let timer: ReturnType<typeof setTimeout> | undefined;
@@ -39,10 +44,10 @@ function stop(preserveRetirement = false) {
   else { retiredOwnInvocation = true; pending = undefined; admissionOldGrant = undefined; }
   qualificationControls.clear(); qualificationButton?.remove(); qualificationButton = undefined;
   if (qualificationExpiry !== undefined) clearTimeout(qualificationExpiry);
-  incarnation++; documentMaterializer.clear();
+  incarnation++; unmountProduction?.(); unmountProduction = undefined; runtimeInvalidations.clear();
   if (timer !== undefined) clearTimeout(timer);
   if (renewal !== undefined) clearTimeout(renewal);
-  active = undefined; detail.textContent = "";
+  active = undefined; productionSessionId = undefined; detail.textContent = "";
 }
 function display(text: string) { status.textContent = text; }
 async function call(request: CodexAppRequest, attempt: number): Promise<CodexAppResponse> {
@@ -73,17 +78,8 @@ async function payload(method: PresentationRequest["method"], value: unknown = {
   const response = await call(presentationEnvelope(method, value), attempt);
   if (response.status === "denied") throw deniedFailure(response.reason);
   if (response.status !== "ok") throw new Error(`Native request ${response.status}`);
+  if (method === "bootstrap" && typeof response.payload === "object" && response.payload !== null) productionSessionId = (response.payload as { sessionId: string }).sessionId;
   return response.payload;
-}
-async function bootstrap(attempt: number) {
-  const result = await payload("bootstrap", {}, attempt) as Record<string, unknown>;
-  const descriptors = resourceDescriptors(result.resourceDescriptors);
-  if (descriptors === undefined) throw new Error("Unverified document manifest");
-  const bytes = await documentMaterializer.materialize(attempt, descriptors.document, (offset, length) => payload("resource", { handle: descriptors.document.handle, offset, length }, attempt), { current: () => incarnation === attempt, digest: async (data) => Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", data))).map((byte) => byte.toString(16).padStart(2, "0")).join("") });
-  if (attempt !== incarnation) return;
-  detail.textContent = JSON.stringify({ generation: result.generation, revision: result.revision, reviewState: result.state, saveSync: result.saveStatus, protected: result.protected, document: { byteLength: bytes.length, sha256: descriptors.document.sha256 }, lastRenewal }, null, 2);
-  recordDiagnostic("verified");
-  display("Verified native review context. U3 qualification shell; production reader qualification is pending.");
 }
 /** Runs regardless of visibility. Actual hidden-panel delivery is an installed-host gate. */
 async function renew(attempt: number) {
@@ -93,8 +89,11 @@ async function renew(attempt: number) {
 }
 async function poll(attempt: number, previous?: number) {
   try {
-    const response = await payload("watermark", {}, attempt) as { watermark: number };
-    if (response.watermark !== previous) await bootstrap(attempt);
+    const response = await payload("watermark", {}, attempt) as { watermark: number; documentGeneration: number; reviewRevision: number };
+    if (response.watermark !== previous && previous !== undefined && active !== undefined && productionSessionId !== undefined) {
+      const event: HostRuntimeInvalidation = { sessionId: productionSessionId, generation: response.documentGeneration, revision: response.reviewRevision, reason: response.documentGeneration === active.generation ? "freshness" : "generation" };
+      for (const listener of runtimeInvalidations) listener(event);
+    }
     if (attempt === incarnation) timer = setTimeout(() => void poll(attempt, response.watermark), document.hidden ? 5_000 : 1_000);
   } catch (error) { if (attempt === incarnation) { recordDiagnostic("failed", { failure: diagnosticFailure(error) }); stop(); display(error instanceof ResourceAllocationError ? "The host could not allocate memory for this document. Close other panels and reopen the PDF; accepted work remains recoverable." : "Reconnect: current review cannot be verified. Accepted work remains recoverable. Ask this chat to reconnect Placekeeper using a fresh native launch."); } }
 }
@@ -106,7 +105,16 @@ async function admit(attempt: number, method: PendingRequest["method"] = "ready"
     if (response.status === "denied") throw deniedFailure(response.reason);
     if (response.status !== "active") throw new NativeDiagnosticError("unexpected-status");
     if (response.runtimeId !== pending?.runtimeId || response.attemptId !== pending.attemptId || response.generation !== pending.generation) throw new NativeDiagnosticError("incarnation-mismatch");
-    active = response; armOldAttempt(admissionOldGrant); admissionOldGrant = undefined; recordDiagnostic("active"); void renew(attempt); void poll(attempt);
+    active = response; armOldAttempt(admissionOldGrant); admissionOldGrant = undefined; recordDiagnostic("active");
+    const runtime = createCodexHostRuntime({ runtimeId: active.runtimeId,
+      call: (method, value) => payload(method, value, attempt),
+      subscribeInvalidations(listener) { runtimeInvalidations.add(listener); return () => runtimeInvalidations.delete(listener); },
+    });
+    unmountProduction = mountCodexProductionReview(document.querySelector<HTMLElement>("#root")!, runtime, (error) => {
+      if (attempt !== incarnation) return;
+      display(error instanceof ResourceAllocationError ? "The host could not allocate memory for this document. Close other panels and reopen the PDF; accepted work remains recoverable." : "The PDF could not be loaded. Retry opening this review through a fresh native launch; accepted work remains recoverable.");
+    }, () => { if (attempt === incarnation) { recordDiagnostic("verified"); display("Placekeeper review ready."); } });
+    display("Placekeeper review connected."); void renew(attempt); void poll(attempt);
   } catch (error) { if (attempt === incarnation) { recordDiagnostic("failed", { failure: diagnosticFailure(error) }); stop(); display("Reconnect: this invocation can no longer establish a native connection. Accepted work remains recoverable. Ask this chat to reconnect Placekeeper using a fresh native launch. If a fresh launch also fails, check the matching plugin hooks and MCP server."); } }
 }
 function ownQualificationTarget() {

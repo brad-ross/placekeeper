@@ -257,7 +257,7 @@ test('collapsed narrow workspace matches the bottom References rail backing and 
   }
 });
 
-test('bottom resize handle sits inside the tray and follows its upper corners', async ({ page }) => {
+test('bottom resize handle sits inside the tray with a thin faded upper edge', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 });
   await page.goto('/test/acceptance/review-harness/index.html?visual=reference-layout');
   await page.getByRole('button', { name: 'Show References', exact: true }).click();
@@ -273,9 +273,10 @@ test('bottom resize handle sits inside the tray and follows its upper corners', 
   await handle.hover();
   const paint = await handle.evaluate((element) => {
     const line = getComputedStyle(element, '::after');
-    return { radius: line.borderTopLeftRadius, top: line.top, border: line.borderTopWidth, opacity: line.opacity };
+    return { radius: line.borderTopLeftRadius, top: line.top, border: line.borderTopWidth, opacity: line.opacity, thickness: line.height, gradient: line.backgroundImage };
   });
-  expect(paint).toMatchObject({ radius: '16px', top: '0px', border: '0px' });
+  expect(paint).toMatchObject({ radius: '1px', top: '0px', border: '0px', thickness: '1.5px' });
+  expect(paint.gradient).toContain('to right');
   await page.mouse.move(handleBox.x + handleBox.width / 2, handleBox.y + 5);
   await page.mouse.down();
   await page.mouse.move(handleBox.x + handleBox.width / 2, handleBox.y - 45, { steps: 5 });
@@ -312,10 +313,12 @@ test('vertical reference tabs fill their rail and horizontal tabs fit their titl
   await expect.poll(async () => Math.abs((await handle.boundingBox())!.x - (await tray.boundingBox())!.x)).toBeLessThan(.5);
   const shape = await handle.evaluate((element) => {
     const style = getComputedStyle(element, '::after');
-    return { radius: style.borderTopLeftRadius, gradient: style.backgroundImage, overflow: getComputedStyle(element).overflow };
+    return { radius: style.borderTopLeftRadius, gradient: style.backgroundImage, overflow: getComputedStyle(element).overflow, thickness: style.width };
   });
-  expect(shape.radius).toBe('16px');
-  expect(shape.gradient).toContain('to right');
+  expect(shape.radius).toBe('1px');
+  expect(shape.thickness).toBe('1.5px');
+  // Chromium omits the default downward direction when serializing gradients.
+  expect(shape.gradient).toBe('linear-gradient(rgba(0, 0, 0, 0), rgb(170, 170, 170) 25%, rgb(170, 170, 170) 75%, rgba(0, 0, 0, 0))');
   expect(shape.overflow).toBe('hidden');
 });
 

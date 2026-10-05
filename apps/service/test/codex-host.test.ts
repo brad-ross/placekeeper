@@ -20,7 +20,7 @@ async function fixture() {
   await copyFile(resolve("test/fixtures/pdfs/text-native.pdf"), pdf);
   await writeFile(join(assets, "app.js"), "export function start(){}\n");
   await writeFile(join(assets, "pdfium.wasm"), "engine");
-  await writeFile(join(assets, "pdfium-worker.js"), "worker");
+  await writeFile(join(assets, "pdfium-codex-worker.js"), "worker");
   let startCount = 0;
   const start = async () => {
     const host = await PlacekeeperHost.start({ recoveryRoot, webAssets: { root: assets } });

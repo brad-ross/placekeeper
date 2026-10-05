@@ -84,6 +84,7 @@
     "test:full-validation": "node --import tsx scripts/testing/run-suite.ts test:full-validation",
     "package:source-release": "node --import tsx scripts/package-source-release.ts",
     "test:source-release": "node --import tsx scripts/testing/run-suite.ts test:source-release",
+    "build:codex": "pnpm build:web && pnpm build:codex-mcp",
     "build:codex-mcp": "vite build --config apps/codex-mcp/vite.config.ts && vite build --config apps/codex-mcp/vite.config.ts --mode server",
     "qualify:codex-native": "node --import tsx scripts/qualify-codex-native.ts"
   },

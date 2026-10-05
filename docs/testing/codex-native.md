@@ -373,3 +373,22 @@ hook/readiness ordering, two distinct real tasks, actual receipt routing, old
 receipt status, current prompts, private-shell behavior and old authenticated
 attempt denial remain actual-host prerequisites. The verifier and U4 gate are
 unchanged. The private retire/probe controller is outside this implementation.
+
+## U4 production reader qualification
+
+The [U4 qualification record](codex-native-u4-qualification.json) records the
+October 5 actual installed native reader gate: visible decoded PDF and source
+appearances, search, previews, nested Reference Tabs, and user-confirmed text
+selection/copy, reading history, and keyboard focus. The production HTML built
+after final export cleanup is byte-identical to the qualified installed asset.
+
+The native host denies Blob fetches and Blob images. The shared engine receives
+verified document/WASM buffers; native page, source-appearance, and preview
+rasters use cancellable data-image conversion. The strict-CSP browser regression
+checks decoded pixels with those same restrictions, including rotated stamp
+appearance preservation. Other hosts retain their existing resource policy.
+
+This gate establishes U4 production rendering. Save/refresh/context completion,
+installation acceptance, the representative corpus, performance comparisons,
+and full keyboard/dialog qualification remain U5–U8 work. The report distinguishes
+the last observed running host build from the application bundle later found on disk.

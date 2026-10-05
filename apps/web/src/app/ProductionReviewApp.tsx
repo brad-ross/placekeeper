@@ -2082,7 +2082,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     destinationDescriberRef.current?.resolver.dispose();
     destinationSnippetRendererRef.current = {
       generation: documentGeneration,
-      render: createEngineDestinationSnippetRenderer({ engine, document, documentGeneration }),
+      render: createEngineDestinationSnippetRenderer({ engine, document, documentGeneration, resourceHost: resourcePolicyRef.current?.host ?? 'browser' }),
     };
     // The outline may load after the document; resolve headings lazily and
     // prepare one containment index per loaded outline.

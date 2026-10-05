@@ -506,7 +506,7 @@ describe("native prompt context through packaged hooks", () => {
     const root = await mkdtemp(join(tmpdir(), "pk-native-context-")); roots.push(root);
     const assets = join(root, "assets"), pdf = join(root, "review.pdf");
     await mkdir(assets); await copyFile(resolve("test/fixtures/pdfs/text-native-with-annotations.pdf"), pdf);
-    await writeFile(join(assets, "pdfium.wasm"), "engine"); await writeFile(join(assets, "pdfium-worker.js"), "worker");
+    await writeFile(join(assets, "pdfium.wasm"), "engine"); await writeFile(join(assets, "pdfium-codex-worker.js"), "worker");
     const host = await PlacekeeperHost.start({ recoveryRoot: join(root, "recovery"), webAssets: { root: assets }, port: 0 }); hosts.push(host);
     const socket = join(root, "c.sock"); controls.push(await startLaunchControlServer(host, socket));
     const control = (request: Parameters<typeof requestControl>[1]) => requestControl(socket, request);

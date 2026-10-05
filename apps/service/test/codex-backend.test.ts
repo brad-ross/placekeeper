@@ -19,7 +19,7 @@ async function fixture(generated = true) {
   await writeFile(pdfPath, "%PDF-1.7\nnative resource\n%%EOF");
   const assets = join(root, "assets"); await mkdir(assets);
   await writeFile(join(assets, "pdfium.wasm"), "engine");
-  await writeFile(join(assets, "pdfium-worker.js"), "worker");
+  await writeFile(join(assets, "pdfium-codex-worker.js"), "worker");
   const broker = new SessionBroker({ recoveryRoot: join(root, "recovery"), portableReader: async () => [],
     inspectGeneration: async () => ({ pageCount: 1, pages: [{ pageIndex: 0, text: "next" }] }) });
   const writer = { write: async (): Promise<never> => { throw new Error("unexpected write"); } };
