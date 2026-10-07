@@ -26,3 +26,9 @@ Captured on September 12, 2026, without reconstructed window chrome. Web uses a 
 - `surface-chrome.png` (2880 × 1800): a temporary Chrome for Testing 153 profile with only the current Placekeeper extension. The original arXiv URL stays in the address bar, with Section 4.1 on page 14 and Appendix A on page 31 in the bottom References tray. The temporary profile has its own native-host registration.
 
 - `surface-chatgpt.png` (2880 × 1800): user-provided window capture of a clean ChatGPT conversation explaining Theorem 1, with the theorem visible on page 15 in Placekeeper’s in-app reader.
+
+## Codex native plugin capture
+
+- `surface-codex.png` (3104 × 2024, PNG with alpha): user-supplied capture on October 7, 2026 at 2:14 AM EDT, with the chat titled “Counterfactual Matrix Means,” replacing the ChatGPT in-app-browser showcase. The window size was confirmed by the user as 1440 × 900 macOS points; the supplied image includes surrounding capture padding. Original pixels are preserved. The showcase clips the surrounding shadow/padding with CSS to the measured opaque window bounds: x=112, y=76, width=2880, height=1800, matching the other 16:10 captures.
+- Shows the native Placekeeper tab beside a conversation explaining Theorem 1, with original page 15 of arXiv:2312.07520v3 visible.
+- Installed from revision `dcd0ad64`, including the toolbar title-width fix and shorter tool description. Installed reader and server bundles were verified against the build. Codex host build was not recorded.

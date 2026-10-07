@@ -76,8 +76,7 @@ html, body, #root {
   grid-template-columns: minmax(0, 1fr) 380px;
   gap: 70px;
   align-items: center;
-  /* Tight enough that the whole demo fits in the first screen at 1440×900. */
-  padding: 40px 0 28px;
+  padding: 40px 0 56px;
 }
 
 .landing-dot {
@@ -422,20 +421,35 @@ html, body, #root {
 }
 
 .landing-surfaces {
+  container-type: inline-size;
   display: grid;
-  grid-template-columns: 380px minmax(0, 1fr);
-  /* The screenshot starts level with the list it illustrates. */
+  grid-template-columns: minmax(0, 1fr);
+  /* Keep the surface choices above the full-width screenshot. */
   align-items: start;
-  row-gap: 48px;
-  column-gap: clamp(48px, 6vw, 80px);
+  gap: 36px;
   padding: 54px 0;
 }
 .landing-surfaces__list {
-  display: flex;
-  flex-direction: column;
-  gap: 7px;
+  display: grid;
+  grid-auto-flow: column;
+  /* Reserve a 48px glimpse of the next card, plus the inter-card gap. */
+  grid-auto-columns: calc(100% - 60px);
+  gap: 12px;
+  overflow-x: auto;
+  padding: 8px 4px 20px;
+  scroll-snap-type: x proximity;
+}
+@container (min-width: 600px) {
+  .landing-surfaces__list { grid-auto-columns: calc((100% - 72px) / 2); }
+}
+@container (min-width: 900px) {
+  .landing-surfaces__list { grid-auto-columns: calc((100% - 84px) / 3); }
+}
+@container (min-width: 1120px) {
+  .landing-surfaces__list { grid-auto-columns: calc((100% - 96px) / 4); }
 }
 .landing-surfaces__list button {
+  scroll-snap-align: start;
   display: flex;
   align-items: flex-start;
   gap: 13px;
@@ -451,6 +465,16 @@ html, body, #root {
 .landing-surfaces__list button > span > span { display: block; margin-top: 5px; font-size: 16px; line-height: 1.65; color: var(--review-ink-muted); }
 .landing-host { margin: 0; border: 1px solid var(--review-border); border-radius: 13px; overflow: hidden; background: #f7f7f7; box-shadow: var(--review-shadow-page); }
 .landing-host__capture { display: block; width: 100%; height: auto; }
+/* Show the 2880 × 1800 window inside the original 3104 × 2024 capture.
+   Remove only the surrounding shadow/padding without resampling the asset. */
+.landing-host--codex { position: relative; aspect-ratio: 2880 / 1800; }
+.landing-host--codex .landing-host__capture {
+  position: absolute;
+  width: calc(100% * 3104 / 2880);
+  max-width: none;
+  left: calc(-100% * 112 / 2880);
+  top: calc(-100% * 76 / 1800);
+}
 .landing-host__title { display: flex; align-items: center; justify-content: center; position: relative; gap: 7px; height: 38px; background: #ededed; font-size: 11px; color: #666; }
 .landing-host__window-controls { position: absolute; left: 14px; display: flex; gap: 6px; }
 .landing-host__window-controls i { display: block; width: 8px; height: 8px; border-radius: 50%; background: #ccc; }
@@ -468,22 +492,6 @@ html, body, #root {
 .static-launcher .landing-invitations p { margin: 15px 0 23px; max-width: 480px; font-size: 16px; color: var(--review-ink-muted); line-height: 1.8; }
 .landing-invitations :is(a, button) { display: inline-flex; align-items: center; gap: 12px; min-height: 44px; padding: 10px 17px; border: 1px solid var(--review-border-strong); border-radius: 9px; font-size: 12px; text-decoration: none; }
 .landing-invitations .landing-invitations__download { background: var(--review-ink-primary); color: white; border-color: var(--review-ink-primary); }
-@media (max-width: 1000px) {
-  .landing-surfaces { grid-template-columns: minmax(0, 1fr); gap: 36px; }
-  .landing-surfaces > h2 { grid-row: 1; }
-  .landing-surfaces > .landing-host { grid-row: 3; width: 100%; }
-  .landing-surfaces__list {
-    grid-row: 2;
-    display: grid;
-    grid-auto-flow: column;
-    grid-auto-columns: min(280px, 85%);
-    gap: 12px;
-    overflow-x: auto;
-    padding: 8px 4px 20px;
-    scroll-snap-type: x proximity;
-  }
-  .landing-surfaces__list button { scroll-snap-align: start; align-items: flex-start; }
-}
 @media (max-width: 760px) {
   .landing-surfaces { grid-template-columns: 1fr; gap: 36px; padding: 35px 0; }
   .landing-host__editor, .landing-host__conversation { display: none; }
