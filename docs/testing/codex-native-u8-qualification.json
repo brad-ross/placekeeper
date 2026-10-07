@@ -1379,5 +1379,76 @@
     "authority": "User explicitly deferred performance/memory and authorized closeout review, checks, report and local commit; reported by root orchestrator during this execution.",
     "effect": "These gates remain unproved. No waiver, reduced sample requirement, passing performance claim, or full-parity promotion."
   },
-  "closeoutPolicy": "User authorized local closeout and commit. Completed functional checks and scoped automated regressions support that closeout; full parity remains not-run due user-deferred performance and OS memory acceptance. No release claim."
+  "closeoutPolicy": "User authorized local closeout and commit. Completed functional checks and scoped automated regressions support that closeout; full parity remains not-run due user-deferred performance and OS memory acceptance. No release claim.",
+  "codeReview": {
+    "status": "complete",
+    "scope": {
+      "base": "39f52cfe97b7c49dcdc84b1f85d55196325d7ccc",
+      "head": "99bea3892434893a4a91c8745dd8d7b8bb132da3",
+      "files_changed": 55,
+      "user_working_edits_excluded": true
+    },
+    "localReview": {
+      "completedReviewLenses": 10,
+      "actionableFindings": 0,
+      "artifact": "/tmp/compound-engineering-503/ce-code-review/20261006-205534-u8-closeout/review.json"
+    },
+    "crossModel": {
+      "receipt": {
+        "cross_model_route": "claude",
+        "cross_model_target": "claude",
+        "cross_model_harness": "claude",
+        "serving_family": "claude",
+        "model_requested": "claude-opus-5-5",
+        "model_actual": "claude-opus-5-5",
+        "effort_requested": "high",
+        "effort_actual": "unverified",
+        "receipt_supported": true,
+        "independence_verified": true
+      },
+      "findings": [],
+      "actionableFindings": [],
+      "observations": [
+        {
+          "subject": "Long-lived native picker host timeout",
+          "disposition": "residual risk, not confirmed defect",
+          "basis": "Core explicitly sets socket and SDK deadlines of 310 and 315 seconds for chooseFolder/locateSave. An additional host timeout is not established. Actual native picker observations are recorded separately; no full-duration host proof is claimed."
+        },
+        {
+          "subject": "Ordinary write socket deadline",
+          "disposition": "pre-existing performance-sensitive limit, not U8 defect",
+          "basis": "Default private socket timeout is 5000ms. Claude identifies it as pre-existing; no measured write exceeding deadline established. Explicitly deferred performance/resource qualification remains unqualified."
+        },
+        {
+          "subject": "Close fallback waits for lease after transport failure",
+          "disposition": "intentional bounded recovery, not new defect",
+          "basis": "shell.ts Close captures detach before stop and warns service closure cannot be confirmed/lease will expire on failure. codex-runtime.ts detach immediately removes panel before ticket revocation; backend.detach disconnects interaction incarnation. Genuine unavailable transport uses measured lease fallback, not false success."
+        },
+        {
+          "subject": "Reference selection layer document assertion",
+          "disposition": "unconfirmed lifecycle residual, not actionable finding",
+          "basis": "PdfWorkspace mounts ReferencePdfViewport only with a referenceDocument state; Scroller ties layout to documentId and clears it on cleanup. No closing/switching render with null document and live layout was established. Existing rotation/selection acceptance passed; residual is conditional."
+        },
+        {
+          "subject": "Bridge does not load packaged SDK shell",
+          "disposition": "known evidence boundary, not missing functional commit gate",
+          "basis": "Bridge is explicitly simulated actualHost:false; native installed Close/save/reopen observations and mocked-shell units are separately recorded. Build artifact is not misrepresented as bridge execution."
+        },
+        {
+          "subject": "Deferred audit superseded by order hint",
+          "disposition": "bounded edge coverage observation",
+          "basis": "finishInspection sequence check intentionally retains deferredAudit on successors; completeExplicitHint schedules audit when latest/no-work condition permits, and periodic audit timer independently remains. No stale publication or indefinite failure established."
+        },
+        {
+          "subject": "Equal-counter Save Sync phase change",
+          "disposition": "narrow test observation, no proven defect",
+          "basis": "save-state-controller tests cover same-review-revision peer convergence and equal-counter new failures. Helper intentionally permits same-counter phase changes for truthful canonical updates. A stale not-saved bootstrap during saving requires proven request ordering to establish user defect; none supplied."
+        }
+      ],
+      "receiptPath": "/tmp/compound-engineering-503/ce-code-review/20261006-212528-u8-claude-extended/cross-model-addendum.json",
+      "receiptSha256": "a25e037adf7b85a877ab15354c4a6b34d98227ac6f2907a37651a7fe70f62864"
+    },
+    "qualificationLimit": "Performance/OS resource measurements still deferred; no full native parity claim.",
+    "retryProvenance": "The first Claude pass exhausted its 40-turn limit without a usable review. The user explicitly requested continuation; the same route and committed scope completed with a 120-turn limit. No source changes resulted."
+  }
 }
