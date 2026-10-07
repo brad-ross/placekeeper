@@ -59,3 +59,11 @@ it('accepts only closed app-only semantic link locations', () => {
     expect(parseCodexAppRequest({ ...request, payload: { location } })).toBeUndefined();
   }
 });
+
+
+it("accepts only the closed native export-conflict operation error", () => {
+  const response = { status: "operation-error", reason: "export-conflict" };
+  expect(parseCodexAppResponse(response)).toEqual(response);
+  for (const reason of ["/private/path", "unknown", "unavailable"]) expect(parseCodexAppResponse({ ...response, reason })).toBeUndefined();
+  expect(parseCodexAppResponse({ ...response, message: "/private/path" })).toBeUndefined();
+});

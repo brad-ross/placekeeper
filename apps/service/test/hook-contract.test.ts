@@ -398,6 +398,16 @@ describe("native Codex launch and display recognition", () => {
     expect(inspectHookEvent(event)).toEqual({ kind: "attest", taskSessionId: "thr_codex_task_123", receipt });
     expect(inspectHookEvent({ ...event, tool_name: "mcp__other__display_review" })).toEqual({ kind: "ignored" });
     expect(inspectHookEvent({ ...event, tool_response: { structuredContent: { ...receipt, capability: "c".repeat(43) } } })).toEqual({ kind: "ignored" });
+    const accepted = vi.fn(async (): Promise<PlacekeeperControlResponse> => ({ kind: "codex-attestation", status: "accepted" }));
+    const output = vi.fn();
+    await runHookCommand(["hook", "--event"], JSON.stringify(event), accepted, output);
+    expect(output).toHaveBeenCalledTimes(1);
+    const success = JSON.parse(output.mock.calls[0]![0]);
+    expect(success.hookSpecificOutput.hookEventName).toBe("PostToolUse");
+    expect(success.hookSpecificOutput.additionalContext).toContain("trusted display attestation succeeded");
+    expect(success.hookSpecificOutput.additionalContext).toContain("readiness and current context require");
+    expect(JSON.stringify(success)).not.toContain(receipt.receiptId);
+    expect(JSON.stringify(success)).not.toContain("thr_codex_task_123");
     const control = vi.fn(async (): Promise<PlacekeeperControlResponse> => ({ kind: "codex-attestation", status: "denied", reason: "owner-mismatch" }));
     await runHookCommand(["hook", "--event"], JSON.stringify(event), control, vi.fn());
     expect(control).toHaveBeenCalledWith({ kind: "codex-attest", taskSessionId: "thr_codex_task_123", receipt });

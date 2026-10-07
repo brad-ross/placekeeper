@@ -3,6 +3,7 @@ import { PdfErrorCode, ignore, type PdfErrorReason, type Task } from '@embedpdf/
 import { RenderLayer, useRenderCapability } from '@embedpdf/plugin-render/react';
 import { useEffect, useState, type ComponentProps } from 'react';
 import type { ViewerResourcePolicy } from './embedpdf-viewer.js';
+import { combinePageRotation } from './owned-overlay.js';
 
 /** Codex permits data images, but does not permit Blob image URLs. */
 export function subscribeNativeRaster(
@@ -39,22 +40,51 @@ export function subscribeNativeImage(blob: Blob, publish: (url: string) => void,
 
 type RenderProps = ComponentProps<typeof RenderLayer>;
 
-function NativeRenderLayer({ documentId, pageIndex, scale, dpr, style, ...props }: RenderProps) {
+export function subscribeBrowserRaster(
+  task: Pick<Task<Blob, PdfErrorReason>, 'wait' | 'abort'>,
+  publish: (url: string, release: () => void) => void,
+  urls: Pick<typeof URL, 'createObjectURL' | 'revokeObjectURL'> = URL,
+): () => void {
+  let current = true;
+  let imageUrl: string | undefined;
+  const release = () => {
+    if (imageUrl === undefined) return;
+    urls.revokeObjectURL(imageUrl);
+    imageUrl = undefined;
+  };
+  task.wait(blob => {
+    if (!current) return;
+    imageUrl = urls.createObjectURL(blob);
+    publish(imageUrl, release);
+  }, ignore);
+  return () => {
+    current = false;
+    release();
+    task.abort({ code: PdfErrorCode.Cancelled, message: 'canceled render task' });
+  };
+}
+
+export function HostRenderLayer({ resourceHost, documentId, pageIndex, scale, dpr, style, onLoad, ...props }: RenderProps & { resourceHost: ViewerResourcePolicy['host'] }) {
   const { provides } = useRenderCapability();
   const documentState = useDocumentState(documentId);
-  const [imageUrl, setImageUrl] = useState<string>();
+  const [image, setImage] = useState<{ url: string; key: string; release?: () => void }>();
   const actualScale = scale ?? documentState?.scale ?? 1;
   const actualDpr = dpr ?? window.devicePixelRatio;
   const refreshVersion = documentState?.pageRefreshVersions[pageIndex] ?? 0;
+  // The scroller already lays out the rotated page; render its pixels in that
+  // same orientation instead of stretching an unrotated bitmap into the box.
+  const rotation = combinePageRotation(documentState?.document?.pages[pageIndex]?.rotation ?? 0, documentState?.rotation ?? 0);
+  // A previous bitmap can cover a zoom render, but cannot cover a page turn or
+  // rotation: its orientation would disagree with the overlays and page box.
+  const key = `${resourceHost}:${documentId}:${pageIndex}:${rotation}`;
   useEffect(() => {
     if (!provides) return;
-    return subscribeNativeRaster(provides.forDocument(documentId).renderPage({
-      pageIndex, options: { scaleFactor: actualScale, dpr: actualDpr },
-    }), setImageUrl);
-  }, [provides, documentId, pageIndex, actualScale, actualDpr, refreshVersion]);
-  return imageUrl ? <img src={imageUrl} {...props} style={{ width: '100%', height: '100%', ...style }} /> : null;
-}
-
-export function HostRenderLayer({ resourceHost, ...props }: RenderProps & { resourceHost: ViewerResourcePolicy['host'] }) {
-  return resourceHost === 'codex' ? <NativeRenderLayer {...props} /> : <RenderLayer {...props} />;
+    const task = provides.forDocument(documentId).renderPage({
+      pageIndex, options: { scaleFactor: actualScale, dpr: actualDpr, rotation },
+    });
+    return resourceHost === 'codex'
+      ? subscribeNativeRaster(task, url => setImage({ url, key }))
+      : subscribeBrowserRaster(task, (url, release) => setImage({ url, key, release }));
+  }, [provides, documentId, pageIndex, actualScale, actualDpr, rotation, refreshVersion, resourceHost, key]);
+  return image?.key === key ? <img src={image.url} {...props} onLoad={event => { image.release?.(); onLoad?.(event); }} style={{ width: '100%', height: '100%', ...style }} /> : null;
 }

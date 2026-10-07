@@ -400,3 +400,150 @@ The [U5 qualification record](codex-native-u5-qualification.json) records the in
 The actual flow exposed an identity-proof gap after the first original save. The canonical save publication now durably records verified native identities, and replacement uses only matching source/generation proof. Actual-PDF tests cover save, replacement, undo, restart, copy and unsuccessful publication. The existing unproven-identity behavior remains conservative.
 
 This gate does not establish full host parity. The context badge still requires U6 integration, and U8 owns full dialog, lifecycle and representative-document acceptance.
+
+## U8 complete product acceptance
+
+U8 adds `codex-native-review.spec.ts`, `codex-native-lifecycle.spec.ts`, and the
+resource lifecycle cases in `codex-native-resources.spec.ts`. They run in
+`test:codex-native`, `test:e2e`, and canonical `test:ci:chromium`; the existing CI
+workflow invokes that registry after fixture generation and shared builds.
+The bridge uses the real session broker, admission manager, backend, PDF writer,
+verified resource materializer and production React reader. Its trusted launch
+and display events are test-controlled; it is **not installed Codex evidence**.
+Resource counts prove worker termination, object URL revocation and service
+handle release, not a host process's peak memory or every compositor frame.
+
+`large-text-heavy.pdf` has 120 pages and 48 fixed text lines per page, fixed PDF
+metadata, and unique `corpus-PAGE-LINE` search tokens. Regenerate with the existing
+fixture generator. Keep one exact digest per comparison rather than using a
+randomized metadata variant for a cold-open sample.
+
+Prepare a separate full product report:
+
+```
+pnpm qualify:codex-native init-parity /absolute/private/path/u8-host-report.json
+pnpm qualify:codex-native verify-parity /absolute/private/path/u8-host-report.json
+```
+
+Version 1 remains the U3 transport/correlation gate, with its historical failed
+observations and explicit reconnect alternatives. Version 2 requires every AE,
+native keyboard/focus, large-resource lifecycle, update, corpus and performance
+evidence. Cross-host regressions require explicitly labeled automated-regression
+evidence with actualHost:false; native UI observations remain actualHost:true. Reference the reviewed U3 JSON by path and
+SHA-256 and explain which unchanged boundaries justify inherited evidence;
+verification rechecks that exact report. It does not turn a bridge pass, old
+artifact pass, or operator assertion into an actual current-host observation.
+Record exact running Codex build, OS, plugin version and installed artifact
+identity. Preserve evidence timestamps and provenance from U3–U7 when inheriting
+checks. Do not rewrite them as observations of the current artifact.
+
+### Actual-host checklist
+
+1. **AE1 / R1–R6:** Open each corpus PDF through the installed launcher/display
+   in its intended chat. Record actual decoded pixels, page count, expected text
+   selection availability, search results, rotation/crop, nested References and
+   return to main position. Imported supported annotations retain their edit
+   restrictions; remaining Existing PDF Annotations remain inspectable. Protected
+   PDFs preserve existing save restrictions. Exercise exact page/item/destination
+   links and configured source navigation. Repeat keyboard shortcuts, Tab and
+   Shift+Tab, menu Escape, dialog focus return and Reference focus return in
+   narrow and expanded presentations. Record reserved shortcuts and verify the
+   action through a reachable control.
+2. **AE2–AE5 / R7–R16:** Carry the same semantic item and Protected Draft through
+   edit, delayed/failed save, participating peer hold, valid replacement, missing
+   and invalid source intervals, manual reattachment, disconnect and fresh reopen.
+   Record intermediate revision, generation, draft/item identity, destination and
+   Save Sync. A write failure must remain recoverable and cannot report the latest
+   revision saved. Verify independent per-view location/zoom and identical bytes
+   avoiding a reset. Complete a real copy save through the dialog and prove the
+   original digest unchanged. Confirm the explicit original-destination radio and subsequent Save separately
+   from automatic original autosave. The current product calls `chooseOriginal`
+   with the existing Save Destination confirmation; it does not expose the
+   standalone `ExportCoordinator.replaceOriginal` as a UI action. Do not claim
+   that original destination selection exercised the export transaction's
+   replacement method. Preserve that method's existing service regression gate.
+   Verify generated-output export and portable reviewed-PDF reopen independently
+   of the former session's private snapshots. Use either a genuinely fresh
+   recovery root or the supported fresh native import of a uniquely copied PDF.
+   For the latter, record the copied path and digest, a new Review Session ID,
+   revision 0, imported portable items, and absence of the former Protected
+   Drafts; establish that the fresh-session branch read the copied PDF rather
+   than hydrating the former snapshot. This proves independent import within
+   the existing recovery root, not a physically new root. Neither route may
+   substitute old snapshot state for annotations read from the reviewed PDF.
+3. **AE6–AE8 / R17–R23:** Use two actual chats and multiple presentations. If the owning chat already
+   has an active review, close/disconnect its previous presentations before a
+   normal fresh launch of another PDF; preserve explicit rebind semantics where
+   exposed. A denied launch must not proceed to display or silently take ownership. Prompt
+   each after accepted unsaved changes and verify current items and truthful Save
+   Sync. Observe peer edits automatically within the active polling contract.
+   Replace/rebind/disconnect, then deny old receipts, attempts and evidence. Send
+   a real unavailable prompt, explicitly request fresh reconnect in its owning
+   chat, and recover durable work without reviving the predecessor's authority.
+   Evidence from a simulated UserPromptSubmit is never a real user prompt.
+4. **AE9–AE10 / R24–R26:** Exercise recoverable unavailable-service/unsupported
+   capability guidance, normal installed update/reload/discovery, and independent
+   browser entry. After replacing the installed artifact, reload/restart the
+   Placekeeper MCP server in Codex (restart Codex if needed): resource HTML is
+   captured at server startup. Verify that the running Placekeeper MCP processes
+   started after installation before claiming native observations of the current
+   artifact; matching installed files alone does not establish the running HTML.
+   Retain the documented manual plugin disable/removal limitation
+   if the operator did not perform it. Run the registry's browser, Chrome, macOS
+   and VS Code gates for every changed shared boundary; include command/result
+   artifacts and label automated cross-host evidence separately from native UI.
+5. Repeat large-document close/reopen and generation changes. Confirm no lost
+   input or crash, expired participation/holds, recoverable work and bounded
+   retained workers/resources. Record process memory throughout the cycles;
+   bridge cleanup counters alone cannot establish actual-host bounded memory.
+
+### Comparable runtime measurements
+
+Use the same machine, identical fixture digests, comparable viewport/zoom, and
+three or more completed samples per host for the representative large-text-heavy
+workload and each of the five metrics. The report requires those five rows; record
+other same-corpus workload measurements where useful without making every metric
+on every PDF a new acceptance gate. Record raw samples, timestamps,
+operation endpoints and method. Compare medians for first readable page, search,
+selection, refresh and peak memory. Investigate a native median above twice the
+browser median before acceptance; attach the investigation and disposition.
+
+Cold open starts before a fresh installed launcher and ends when the requested
+page's image has decoded and is visible. Record launcher-to-display and required
+user expansion delay separately; do not silently remove host scheduling from one
+side of the comparison. Generation replacement is a **refresh** measurement:
+start at atomic successor-file installation, end at decoded visible pixels of the
+accepted generation, and retain generation/digest proof. It is not a cold open.
+Search starts at input and ends with settled expected results; a result click is
+separate navigation. Selection starts at pointer release and ends with usable
+selection controls; confirm selected text with real clipboard use separately.
+Image-only PDFs correctly have no text selection, rather than a fabricated
+selection timing. Record actual no-text evidence for image-only behavior. Its search completion
+can be measured with the expected zero results when collecting optional samples.
+
+For peak memory, record the identified host renderer/worker processes and daemon
+with an OS measurement at a fixed cadence through each operation, together with
+idle baseline and maximum aggregate resident bytes. State whether the host process
+set could be isolated and whether other chats/apps were active. JavaScript heap,
+object URL counts and backend byte counters are not substitutes for OS memory.
+If process attribution or an endpoint cannot be measured, mark the metric unproved
+and keep full acceptance outstanding. A corpus refresh observed in an already
+expanded panel may fill refresh evidence while cold-open evidence remains open.
+
+The installed Codex automation surface can only read the expanded DOM; it cannot
+inject timing listeners or synthesize native text selection. The hidden `verified`
+time records document readiness, not decoded visible pixels. User expansion delay
+and launch-to-user-reply time do not establish first-readable latency. Use a
+time-stamped screen recording of a fresh launcher, including the initial inline
+card, with user-operated selection and clipboard checks, and inspect endpoint
+frames on the same machine for both hosts. Record frame resolution and uncertainty.
+For an already expanded card, a timed DOM read may confirm that its visible image
+is complete with nonzero natural dimensions after refresh; this bounds the
+observed refresh endpoint and cannot establish a cold-open endpoint. If the
+recording or reliable endpoint observation is unavailable, leave that measurement
+unproved. Do not add production listeners solely to fill the report.
+
+Use **Close review** in every retained presentation to release its authenticated
+association before opening another document in that chat. Closing one panel keeps
+its peers connected and accepted work recoverable. Closing a host side-panel tab
+alone may leave the inline card alive; it is not proof of service detach.

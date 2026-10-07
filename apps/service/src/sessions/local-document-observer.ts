@@ -58,6 +58,9 @@ interface ObservedDocument<Result extends LocalDocumentInspectionResult> {
   readonly directory: string;
   readonly basename: string;
   lastIdentity?: LocalDocumentIdentity;
+  inspecting?: { sequence: number; identity?: LocalDocumentIdentity; identityReady?: Promise<LocalDocumentIdentity | undefined> };
+  deferredAudit?: boolean;
+  timerIdentityPending?: boolean;
   explicitIdentity?: LocalDocumentIdentity;
   explicitSequence?: number;
   explicitIdentityReady?: Promise<LocalDocumentIdentity | undefined>;
@@ -155,8 +158,8 @@ export class LocalDocumentObserver<Result extends LocalDocumentInspectionResult 
       ...(input.initialIdentity === undefined ? {} : { lastIdentity: input.initialIdentity }),
       latestSequence: input.initialSequence ?? 0,
       retryMs: this.#coalesceMs,
-      identityTimer: setInterval(() => this.#request(record, "identity"), this.#identityIntervalMs),
-      auditTimer: setInterval(() => this.#request(record, "audit"), this.#auditIntervalMs),
+      identityTimer: setInterval(() => void this.#requestTimer(record, "identity"), this.#identityIntervalMs),
+      auditTimer: setInterval(() => void this.#requestTimer(record, "audit"), this.#auditIntervalMs),
       completion: Promise.resolve(undefined),
     };
     record.identityTimer.unref?.();
@@ -215,6 +218,7 @@ export class LocalDocumentObserver<Result extends LocalDocumentInspectionResult 
     delete record.explicitSequence;
     delete record.explicitIdentity;
     delete record.explicitIdentityReady;
+    if (record.deferredAudit && (record.latestSequence === sequence || record.inspecting === undefined && record.pending === undefined && !this.#queuedInspections.has(sessionId))) { delete record.deferredAudit; this.#request(record, "audit"); }
   }
 
   check(sessionId: string, reason: "activation" | "reconnect"): Promise<Result | undefined> {
@@ -233,7 +237,16 @@ export class LocalDocumentObserver<Result extends LocalDocumentInspectionResult 
     const pending = record.pending;
     delete record.pending;
     if (pending !== undefined) return this.#run(record, pending.reason, undefined, pending.sequence);
-    return record.completion;
+    const result = await record.completion;
+    // Completion may release a deferred audit; flush includes that newly queued check.
+    if (this.#documents.get(sessionId) !== record) return result;
+    const followUp = this.#documents.get(sessionId)?.pending;
+    if (followUp !== undefined) {
+      if (record.coalesceTimer !== undefined) clearTimeout(record.coalesceTimer);
+      delete record.coalesceTimer; delete record.pending;
+      return this.#run(record, followUp.reason, undefined, followUp.sequence);
+    }
+    return result;
   }
 
   stop(sessionId: string): void {
@@ -281,7 +294,7 @@ export class LocalDocumentObserver<Result extends LocalDocumentInspectionResult 
             if (record.explicitSequence === undefined) this.#request(record, "watcher");
             else void this.#requestWatcher(record);
           }
-          else if (name === undefined) this.#request(record, "identity");
+          else if (name === undefined) void this.#requestTimer(record, "identity");
         }
       });
       watcher.on("error", () => {
@@ -329,6 +342,31 @@ export class LocalDocumentObserver<Result extends LocalDocumentInspectionResult 
       if (!this.#disposed && directory.sessions.size > 0) this.#startWatch(path, directory);
     }, this.#maxRetryMs);
     directory.retryTimer.unref?.();
+  }
+
+  async #requestTimer(record: ObservedDocument<Result>, reason: "identity" | "audit"): Promise<void> {
+    if (this.#disposed || this.#documents.get(record.sessionId) !== record) return;
+    // A queued full audit already covers identity wakeups and must not be downgraded.
+    if (record.pending?.reason === "audit" || this.#queuedInspections.get(record.sessionId)?.candidate.reason === "audit") return;
+    const inspecting = record.explicitSequence === undefined ? record.inspecting : { sequence: record.explicitSequence, explicit: true };
+    if (inspecting === undefined) { this.#request(record, reason); return; }
+    if (reason === "audit") record.deferredAudit = true;
+    if (record.timerIdentityPending) return;
+    record.timerIdentityPending = true;
+    try {
+      if ("explicit" in inspecting) await record.explicitIdentityReady;
+      if (!("explicit" in inspecting)) await inspecting.identityReady;
+      const candidateIdentity = "explicit" in inspecting ? record.explicitIdentity : inspecting.identity;
+      const info = await this.#inspectIdentity(record.sourcePath).catch(() => undefined);
+      if (this.#disposed || this.#documents.get(record.sessionId) !== record) return;
+      const nextIdentity = info === undefined ? undefined : identity(info);
+      // Unchanged timer wakeups must not revoke a useful full inspection. An
+      // audit still runs afterwards; unreadable sources retain bounded retry.
+      const stillInspecting = "explicit" in inspecting ? record.explicitSequence === inspecting.sequence : record.inspecting === inspecting;
+      if (stillInspecting && record.latestSequence === inspecting.sequence &&
+          (sameIdentity(candidateIdentity, nextIdentity) || candidateIdentity === undefined && nextIdentity === undefined)) return;
+      if (stillInspecting && record.latestSequence === inspecting.sequence) this.#request(record, reason);
+    } finally { delete record.timerIdentityPending; }
   }
 
   #request(
@@ -427,14 +465,18 @@ export class LocalDocumentObserver<Result extends LocalDocumentInspectionResult 
       this.#disposed || !this.#documents.has(record.sessionId) ||
       !this.isCurrent(record.sessionId, candidate.sequence)
     ) return undefined;
-    const info = await this.#inspectIdentity(record.sourcePath).catch(() => undefined);
-    const nextIdentity = info === undefined ? undefined : identity(info);
+    const identityReady = this.#inspectIdentity(record.sourcePath).then(info => identity(info)).catch(() => undefined);
+    const inspecting: NonNullable<ObservedDocument<Result>["inspecting"]> = { sequence: candidate.sequence, identityReady };
+    record.inspecting = inspecting;
+    const nextIdentity = await identityReady;
+    if (nextIdentity !== undefined) inspecting.identity = nextIdentity;
     if (
       candidate.reason === "identity" &&
       record.unvalidatedWatcherSequence === undefined &&
       sameIdentity(record.lastIdentity, nextIdentity)
     ) {
       this.#settleUnchangedCandidate(candidate);
+      this.#finishInspection(record, candidate.sequence);
       return undefined;
     }
     let result: Result;
@@ -446,6 +488,8 @@ export class LocalDocumentObserver<Result extends LocalDocumentInspectionResult 
     } catch {
       if (!this.#disposed && this.isCurrent(record.sessionId, candidate.sequence)) this.#scheduleRetry(record);
       return undefined;
+    } finally {
+      this.#finishInspection(record, candidate.sequence);
     }
     if (this.#disposed || !this.isCurrent(record.sessionId, candidate.sequence)) return result;
     if (result.status === "current") {
@@ -460,6 +504,18 @@ export class LocalDocumentObserver<Result extends LocalDocumentInspectionResult 
       delete record.retryTimer;
     } else this.#scheduleRetry(record);
     return result;
+  }
+
+  #finishInspection(record: ObservedDocument<Result>, sequence: number): void {
+    if (record.inspecting?.sequence === sequence) delete record.inspecting;
+    if (!record.deferredAudit) return;
+    // Recheck at dispatch: a genuine successor may be admitted before this microtask.
+    queueMicrotask(() => {
+      if (this.#disposed || this.#documents.get(record.sessionId) !== record ||
+          record.latestSequence !== sequence || record.explicitSequence !== undefined || !record.deferredAudit) return;
+      delete record.deferredAudit;
+      this.#request(record, "audit");
+    });
   }
 
   #scheduleRetry(record: ObservedDocument<Result>): void {

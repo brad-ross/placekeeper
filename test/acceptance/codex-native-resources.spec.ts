@@ -1,4 +1,4 @@
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFile, writeFile, rename } from 'node:fs/promises';
 import { expect, test } from '@playwright/test';
 import { PDFDocument } from 'pdf-lib';
 
@@ -157,4 +157,92 @@ test('native verified resources decode Main and Reference pixels without network
   expect(result.highlightStyles).toContainEqual({ mixBlendMode: 'normal', zIndex: '0' });
   expect(result.highlightStyles).toContainEqual({ mixBlendMode: 'multiply', zIndex: '0' });
   expect(result.violations).toEqual([]);
+});
+
+import { nativeBridge } from '../support/codex-native-bridge.js';
+
+test('test MCP bridge releases obsolete large-document resources across replacement and repeated close', async ({ context }, info) => {
+  info.setTimeout(120_000);
+  const bridge = await nativeBridge('large-text-heavy.pdf');
+  const samples: unknown[] = [];
+  try {
+    for (let cycle = 0; cycle < 3; cycle++) {
+      const page = await context.newPage();
+      await page.addInitScript(() => {
+        const workers = new Set<Worker>(), urls = new Set<string>();
+        const OriginalWorker = window.Worker;
+        window.Worker = class extends OriginalWorker {
+          constructor(url: string | URL, options?: WorkerOptions) { super(url, options); workers.add(this); }
+          override terminate() { workers.delete(this); super.terminate(); }
+        };
+        const create = URL.createObjectURL.bind(URL), revoke = URL.revokeObjectURL.bind(URL);
+        URL.createObjectURL = value => { const url = create(value); urls.add(url); return url; };
+        URL.revokeObjectURL = url => { urls.delete(url); revoke(url); };
+        (window as any).nativeAcceptanceRetention = () => ({ workers: workers.size, urls: urls.size });
+      });
+      const panel = await bridge.panel(page);
+      for (const fixture of ['text-native.pdf', 'large-text-heavy.pdf']) {
+        const generation = bridge.broker.state(bridge.sessionId)!.workflow.documentGeneration;
+        const before = await page.locator('[data-page-index="0"] > img').first().getAttribute('src');
+        const started = performance.now();
+        await writeFile(`${bridge.pdfPath}.next`, await readFile(`test/fixtures/pdfs/${fixture}`));
+        await rename(`${bridge.pdfPath}.next`, bridge.pdfPath);
+        const replacement = await bridge.broker.replaceLiveDocument({ sessionId: bridge.sessionId, outputPath: bridge.pdfPath, observationEpoch: generation });
+        samples.push({ cycle, fixture, replacement, held: bridge.broker.interactions.held(bridge.sessionId) });
+        await expect.poll(() => bridge.broker.state(bridge.sessionId)?.workflow.documentGeneration, { timeout: 20_000 }).toBe(generation + 1);
+        await expect.poll(() => page.locator('[data-page-index="0"] > img').first().getAttribute('src')).not.toBe(before);
+        await page.locator('[data-page-index="0"] > img').first().evaluate((image: HTMLImageElement) => image.decode());
+        samples.push({ cycle, fixture, actualHost: false, refreshMs: performance.now() - started,
+          retention: await page.evaluate(() => (window as any).nativeAcceptanceRetention()) });
+        expect(await page.evaluate(() => (window as any).nativeAcceptanceErrors)).toEqual([]);
+        expect(bridge.backend.retentionStatus()).toMatchObject({ presentations: 1, resources: 3 });
+      }
+      await panel.disconnect();
+      await expect.poll(() => page.evaluate(() => (window as any).nativeAcceptanceRetention())).toEqual({ workers: 0, urls: 0 });
+      expect(bridge.backend.retentionStatus()).toMatchObject({ presentations: 0, resources: 0 });
+      await page.close();
+    }
+    await info.attach('bridge-resource-lifecycle', { body: JSON.stringify({ actualHost: false, scope: 'observable worker termination, object URL revocation and backend handle release; not OS peak memory', samples }), contentType: 'application/json' });
+  } finally { const evidence = info.outputPath('resource-observations.json'); await writeFile(evidence, JSON.stringify({ actualHost: false, samples }, null, 2)); await info.attach('bridge-resource-observations', { path: evidence, contentType: 'application/json' }); await bridge.dispose(); }
+});
+
+test('shared browser viewer retires its own workers on replacement and unmount', async ({ page }, info) => {
+  const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
+  await page.addInitScript(() => {
+    const workers = new Set<Worker>(), urls = new Set<string>(), Original = window.Worker;
+    const create = URL.createObjectURL.bind(URL), revoke = URL.revokeObjectURL.bind(URL);
+    URL.createObjectURL = value => { const url = create(value); urls.add(url); return url; };
+    URL.revokeObjectURL = url => { urls.delete(url); revoke(url); };
+    (window as any).sharedViewerUrls = () => urls.size;
+    window.Worker = class extends Original { constructor(url: string | URL, options?: WorkerOptions) { super(url, options); workers.add(this); } override postMessage(message: any, transfer: any) { if ((window as any).stallViewerClose && message.method === 'closeAllDocuments') return; super.postMessage(message, transfer); } override terminate() { workers.delete(this); super.terminate(); } };
+    (window as any).sharedViewerWorkers = () => workers.size;
+  });
+  await page.route('**/shared-viewer-cleanup', route => route.fulfill({ contentType: 'text/html', body: '<div id="root"></div>' }));
+  await page.route('**/browser-cleanup.pdf?*', route => route.fulfill({ contentType: 'application/pdf', path: 'test/fixtures/pdfs/text-native.pdf' }));
+  await page.route('**/browser-cleanup.wasm', route => route.fulfill({ contentType: 'application/wasm', path: 'dist/web/pdfium.wasm' }));
+  await page.goto('/shared-viewer-cleanup');
+  await page.evaluate(async () => {
+    const { App } = await import(/* @vite-ignore */ ('/apps/web/src/app/App.tsx' as string));
+    const { default: { createElement } } = await import(/* @vite-ignore */ ('/@id/react' as string));
+    const { default: { createRoot } } = await import(/* @vite-ignore */ ('/@id/react-dom/client' as string));
+    const root = createRoot(document.getElementById('root')!);
+    const engines: any[] = []; (window as any).sharedViewerEngines = engines;
+    const render = (generation: number) => root.render(createElement(App, { documentGeneration: generation, onMainDocumentReady: (engine: any) => { if (!engines.includes(engine)) engines.push(engine); }, assets: { documentUrl: `${location.origin}/browser-cleanup.pdf?generation=${generation}`, pdfiumWasm: `${location.origin}/browser-cleanup.wasm` } }));
+    (window as any).sharedViewerRender = render; (window as any).sharedViewerClose = () => root.unmount(); render(1);
+  });
+  for (const generation of [1, 2, 3]) {
+    if (generation > 1) await page.evaluate(value => (window as any).sharedViewerRender(value), generation);
+    await expect(page.locator('[data-page-index="0"] > img').first()).toBeVisible();
+    await expect.poll(() => page.evaluate(() => (window as any).sharedViewerWorkers())).toBe(2);
+    await expect.poll(() => page.evaluate(() => (window as any).sharedViewerEngines.length)).toBe(generation);
+    await page.locator('[data-page-index="0"] > img').first().evaluate((image: HTMLImageElement) => image.decode());
+  }
+  await page.evaluate(() => { (window as any).stallViewerClose = true; (window as any).sharedViewerClose(); });
+  await expect.poll(() => page.evaluate(() => (window as any).sharedViewerWorkers()), { timeout: 10_000 }).toBe(0);
+  await expect.poll(() => page.evaluate(() => (window as any).sharedViewerUrls())).toBe(0);
+  expect(errors, 'uncaught errors before repeated destroy').toEqual([]);
+  await page.evaluate(() => { for (const engine of (window as any).sharedViewerEngines) { engine.destroy().wait(() => {}, () => {}); engine.destroy().wait(() => {}, () => {}); } });
+  expect(await page.evaluate(() => ({ workers: (window as any).sharedViewerWorkers(), urls: (window as any).sharedViewerUrls() }))).toEqual({ workers: 0, urls: 0 });
+  expect(errors).toEqual([]);
+  await info.attach('shared-browser-cleanup', { body: JSON.stringify({ actualHost: false, replacements: 2, terminatedWorkers: true, revokedOwnedUrls: true, repeatedDestroySafe: true, pageErrors: errors }), contentType: 'application/json' });
 });

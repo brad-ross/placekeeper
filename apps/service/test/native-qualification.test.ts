@@ -303,3 +303,11 @@ it("only the genuine async display hook receives the readiness scheduling host b
   expect(config.hooks.UserPromptSubmit[0].hooks[0].timeout).toBe(8);
   expect(config.hooks.SessionEnd[0].hooks[0].timeout).toBe(3);
 });
+
+it("observes the closed operation-error status without service payload or paths", () => {
+  const f = fixture(); f.write();
+  f.observer.record("app-result", { runtimeId: "runtime_1234", attemptId: "attempt_1234", method: "exportReviewedCopy", status: "operation-error", generation: 1 });
+  const records = f.records();
+  expect(records.at(-1)).toMatchObject({ event: "app-result", method: "exportReviewedCopy", status: "operation-error", generation: 1 });
+  expect(JSON.stringify(records)).not.toMatch(/payload|path|presentationCapability/);
+});

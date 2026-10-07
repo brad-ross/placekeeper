@@ -1,6 +1,6 @@
 import { requestControl } from "../../service/src/host/launch-control.js";
 import { defaultDaemonPaths } from "../../service/src/host/service-daemon.js";
-import { CODEX_MAX_ENCODED_RESPONSE_BYTES, parseCodexAppRequest, parseCodexAppResponse, parseCodexDisplayRequest, parseCodexDisplayReceipt, parseCodexPendingPresentation, type CodexAppRequest, type CodexAppResponse, type CodexDisplayRequest, type CodexDisplayReceipt, type CodexPendingPresentation } from "../../../packages/core/src/codex-mcp-protocol.js";
+import { CODEX_MAX_ENCODED_RESPONSE_BYTES, codexPickerTimeouts, parseCodexAppRequest, parseCodexAppResponse, parseCodexDisplayRequest, parseCodexDisplayReceipt, parseCodexPendingPresentation, type CodexAppRequest, type CodexAppResponse, type CodexDisplayRequest, type CodexDisplayReceipt, type CodexPendingPresentation } from "../../../packages/core/src/codex-mcp-protocol.js";
 
 export interface NativeServiceClient {
   display(request: CodexDisplayRequest): Promise<{ receipt: CodexDisplayReceipt; pending: CodexPendingPresentation }>;
@@ -8,7 +8,11 @@ export interface NativeServiceClient {
 }
 /** A disposable socket per request; adapter EOF never owns daemon lifetime. */
 export function createServiceClient(socketPath = defaultDaemonPaths().socketPath): NativeServiceClient {
-  const control = (request: Parameters<typeof requestControl>[1]) => requestControl(socketPath, request, { maxMessageBytes: CODEX_MAX_ENCODED_RESPONSE_BYTES });
+  const control = (request: Parameters<typeof requestControl>[1]) => {
+    const picker = request.kind === "codex-app" ? codexPickerTimeouts(request.request) : undefined;
+    return requestControl(socketPath, request, { maxMessageBytes: CODEX_MAX_ENCODED_RESPONSE_BYTES,
+      ...(picker === undefined ? {} : { timeoutMs: picker.socketMs }) });
+  };
   return {
     async display(raw) {
       const request = parseCodexDisplayRequest(raw);

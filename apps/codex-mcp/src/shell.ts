@@ -6,7 +6,7 @@ import { ShellOldAttempt } from "./shell-old-attempt.js";
 import { QUALIFICATION_CONTROLS_META_KEY } from "./qualification-controls-contract.js";
 import { ShellQualificationControls } from "./shell-qualification-controls.js";
 import { App } from "@modelcontextprotocol/ext-apps";
-import { parseCodexDisplayReceipt, parseCodexPendingPresentation, type CodexAppRequest, type CodexAppResponse, type CodexPendingPresentation } from "../../../packages/core/src/codex-mcp-protocol.js";
+import { codexPickerTimeouts, NativeOperationError, parseCodexDisplayReceipt, parseCodexPendingPresentation, type CodexAppRequest, type CodexAppResponse, type CodexPendingPresentation } from "../../../packages/core/src/codex-mcp-protocol.js";
 import { APP_TOOL, PENDING_META_KEY, QUALIFICATION_META_KEY } from "./transport-contract.js";
 import { ResourceAllocationError } from "./resources.js";
 import { deniedFailure, diagnosticFailure, LifecycleDiagnostics, NativeDiagnosticError, verifiedAppReply } from "./lifecycle-diagnostics.js";
@@ -14,6 +14,7 @@ import { deniedFailure, diagnosticFailure, LifecycleDiagnostics, NativeDiagnosti
 const app = new App({ name: "Placekeeper", version: "1.0.0" });
 const status = document.querySelector<HTMLElement>("#status")!;
 const detail = document.querySelector<HTMLElement>("#detail")!;
+const closeReview = document.querySelector<HTMLButtonElement>("#close")!;
 let traceStorage: Storage | undefined;
 try { traceStorage = window.sessionStorage; } catch { /* Sandboxed hosts may disable storage. */ }
 const qualificationControls = new ShellQualificationControls();
@@ -21,6 +22,7 @@ let qualificationButton: HTMLButtonElement | undefined;
 let oldAttemptButton: HTMLButtonElement | undefined;
 let admissionOldGrant: unknown;
 let retiredOwnInvocation = false;
+let closedOwnInvocation = false;
 const oldAttempt = new ShellOldAttempt(Date.now, () => { renderOldAttemptButton(); renderDiagnostics(); });
 let qualificationExpiry: ReturnType<typeof setTimeout> | undefined;
 const diagnostics = new LifecycleDiagnostics(crypto.randomUUID(), () => new Date(), traceStorage);
@@ -44,19 +46,26 @@ function stop(preserveRetirement = false) {
   else { retiredOwnInvocation = true; pending = undefined; admissionOldGrant = undefined; }
   qualificationControls.clear(); qualificationButton?.remove(); qualificationButton = undefined;
   if (qualificationExpiry !== undefined) clearTimeout(qualificationExpiry);
-  incarnation++; unmountProduction?.(); unmountProduction = undefined; runtimeInvalidations.clear();
+  // Presence cleanup may call the runtime port during unmount. Retire ordinary
+  // authority first; the caller owns any captured, explicit detach request.
+  incarnation++; active = undefined; closeReview.disabled = true;
+  unmountProduction?.(); unmountProduction = undefined; runtimeInvalidations.clear();
   if (timer !== undefined) clearTimeout(timer);
   if (renewal !== undefined) clearTimeout(renewal);
-  active = undefined; productionSessionId = undefined; detail.textContent = "";
+  productionSessionId = undefined; detail.textContent = "";
 }
 function display(text: string) { status.textContent = text; }
 async function call(request: CodexAppRequest, attempt: number): Promise<CodexAppResponse> {
   let result;
-  try { result = await app.callServerTool({ name: APP_TOOL, arguments: { request } }); }
+  try {
+    const picker = codexPickerTimeouts(request);
+    result = await app.callServerTool({ name: APP_TOOL, arguments: { request } },
+      picker === undefined ? undefined : { timeout: picker.sdkMs, maxTotalTimeout: picker.sdkMs });
+  }
   catch { throw new NativeDiagnosticError("transport"); }
   if (attempt !== incarnation) throw new NativeDiagnosticError("stale-reply");
   const response = verifiedAppReply(result);
-  if (response.status !== "denied") armQualificationControl(result._meta?.[QUALIFICATION_CONTROLS_META_KEY]);
+  if (response.status !== "denied" && response.status !== "operation-error") armQualificationControl(result._meta?.[QUALIFICATION_CONTROLS_META_KEY]);
   if (response.status === "active") admissionOldGrant = result._meta?.[OLD_ATTEMPT_META_KEY];
   else if (request.authority === "presentation" && request.method === "renew" && response.status === "ok") armOldAttempt(result._meta?.[OLD_ATTEMPT_META_KEY]);
   return response;
@@ -85,6 +94,7 @@ async function payload(method: PresentationRequest["method"], value: unknown = {
   }
   if (active !== undefined && (request.generation !== active.generation || request.capability !== active.presentationCapability)) throw staleGenerationReply();
   if (response.status === "denied") throw deniedFailure(response.reason);
+  if (response.status === "operation-error") throw new NativeOperationError();
   if (response.status !== "ok") throw new Error(`Native request ${response.status}`);
   if (method === "bootstrap" && typeof response.payload === "object" && response.payload !== null) productionSessionId = (response.payload as { sessionId: string }).sessionId;
   return response.payload;
@@ -121,9 +131,10 @@ async function admit(attempt: number, method: PendingRequest["method"] = "ready"
     const response = await call(pendingEnvelope(method), attempt);
     if (response.status === "pending") { recordDiagnostic("pending"); display("Waiting for trusted display hook verification…"); timer = setTimeout(() => void admit(attempt, "status"), 1_000); return; }
     if (response.status === "denied") throw deniedFailure(response.reason);
+  if (response.status === "operation-error") throw new NativeOperationError();
     if (response.status !== "active") throw new NativeDiagnosticError("unexpected-status");
     if (response.runtimeId !== pending?.runtimeId || response.attemptId !== pending.attemptId || response.generation !== pending.generation) throw new NativeDiagnosticError("incarnation-mismatch");
-    active = response; armOldAttempt(admissionOldGrant); admissionOldGrant = undefined; recordDiagnostic("active");
+    active = response; closeReview.disabled = false; armOldAttempt(admissionOldGrant); admissionOldGrant = undefined; recordDiagnostic("active");
     const runtime = createCodexHostRuntime({ runtimeId: active.runtimeId,
       call: (method, value) => payload(method, value, attempt),
       subscribeInvalidations(listener) { runtimeInvalidations.add(listener); return () => runtimeInvalidations.delete(listener); },
@@ -187,6 +198,7 @@ function renderOldAttemptButton() {
   };
 }
 app.ontoolresult = (result) => {
+  if (closedOwnInvocation) { display("Review closed. Reopen Placekeeper through a fresh launch to start another presentation; accepted work remains recoverable."); return; }
   if (retiredOwnInvocation) {
     oldAttempt.clear("unsupported");
     display("Qualification unsupported: the host reused the retired shell for another invocation. Its old authority was discarded; reopen through a fresh owning shell.");
@@ -206,3 +218,23 @@ app.onhostcontextchanged = (context) => { if (context.displayMode !== undefined)
 app.onclose = () => { oldAttempt.clear("unsupported"); stop(); display("Reconnect: the original native bridge disconnected. The old-attempt probe is unsupported; accepted work remains recoverable."); };
 app.onerror = () => { if (!["armed", "retiring", "retired", "probing"].includes(oldAttempt.snapshot()?.phase ?? "")) return; oldAttempt.clear("unsupported"); stop(); display("Reconnect: the native bridge cannot be verified. The old-attempt probe is unsupported; accepted work remains recoverable."); };
 void app.connect().then(() => { recordDiagnostic("connected"); }).catch(() => { oldAttempt.clear("unsupported"); recordDiagnostic("failed", { failure: "transport" }); display("This host cannot connect the Placekeeper native app. Enable the plugin, reload Codex, and reopen the PDF."); });
+
+closeReview.onclick = async () => {
+  if (active === undefined) return;
+  const request = presentationEnvelope("detach");
+  // Retire local authority before the service round trip, including late replies.
+  stop(); closedOwnInvocation = true; pending = undefined;
+  const closedIncarnation = incarnation;
+  display("Closing review… Accepted work remains recoverable.");
+  try {
+    const response = verifiedAppReply(await app.callServerTool(
+      { name: APP_TOOL, arguments: { request } },
+      { timeout: 10_000, maxTotalTimeout: 10_000 },
+    ));
+    if (closedIncarnation !== incarnation) return;
+    if (response.status !== "ok") throw new Error("Detach was not confirmed");
+    display("Review closed. Accepted work remains recoverable. Other open review panels remain connected.");
+  } catch {
+    if (closedIncarnation === incarnation) display("Review stopped locally; service closure could not be confirmed. Renewal has stopped and this panel’s lease will expire. Accepted work remains recoverable.");
+  }
+};

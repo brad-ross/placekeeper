@@ -1,9 +1,10 @@
-import { addPageNote } from "../../../packages/core/src/review-commands.js";
+import { addPageNote, editReviewItem, setAnnotationName } from "../../../packages/core/src/review-commands.js";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { createHash, randomUUID } from "node:crypto";
 import { canonicalJson } from "../src/runtime/canonical-json.js";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
+import { createEmbedPdfWriter } from "../../../packages/pdf-backends/src/embedpdf-adapter.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CodexRuntimeManager } from "../src/codex/codex-runtime.js";
 import { CodexServiceRuntimeBackend } from "../src/codex/codex-runtime-backend.js";
@@ -14,16 +15,16 @@ import type { CodexAppRequest, CodexAppResponse } from "../../../packages/core/s
 
 const cleanups: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const cleanup of cleanups.splice(0)) await cleanup(); });
-async function fixture(generated = true) {
+async function fixture(generated = true, imported = false) {
   const root = await mkdtemp(join(tmpdir(), "native-backend-"));
   const pdfPath = join(root, "paper.pdf");
-  await writeFile(pdfPath, "%PDF-1.7\nnative resource\n%%EOF");
+  await writeFile(pdfPath, imported ? await readFile(resolve("test/fixtures/pdfs/text-native-with-annotations.pdf")) : "%PDF-1.7\nnative resource\n%%EOF");
   const assets = join(root, "assets"); await mkdir(assets);
   await writeFile(join(assets, "pdfium.wasm"), "engine");
   await writeFile(join(assets, "pdfium-codex-worker.js"), "worker");
-  const broker = new SessionBroker({ recoveryRoot: join(root, "recovery"), portableReader: async () => [],
+  const broker = new SessionBroker({ recoveryRoot: join(root, "recovery"), ...(imported ? {} : { portableReader: async () => [] }),
     inspectGeneration: async () => ({ pageCount: 1, pages: [{ pageIndex: 0, text: "next" }] }) });
-  const writer = { write: async (): Promise<never> => { throw new Error("unexpected write"); } };
+  const writer = imported ? await createEmbedPdfWriter() : { write: async (): Promise<never> => { throw new Error("unexpected write"); } };
   const picker = { chooseFolder: vi.fn(async (): Promise<string | undefined> => root), locatePdf: vi.fn(async (): Promise<string | undefined> => undefined) };
   const saving = new PdfSaveCoordinator({ broker, writer, picker });
   const exporting = new ExportCoordinator({ writer, capabilities: broker.capabilities });
@@ -45,7 +46,7 @@ async function fixture(generated = true) {
     if (a.status !== "active") throw new Error("activation");
     return a;
   };
-  return { root, broker, manager, backend, saving, sessionId, pdfPath, exporting, picker, panel, advance(ms: number) { time += ms; } };
+  return { root, broker, manager, backend, saving, sessionId, pdfPath, exporting, picker, writer, panel, advance(ms: number) { time += ms; } };
 }
 function request(active: Extract<CodexAppResponse, { status: "active" }>, method: CodexAppRequest["method"], payload = {}, requestId = "request_1234") {
   return { protocolVersion: 1, runtimeId: active.runtimeId, attemptId: active.attemptId, generation: active.generation,
@@ -54,6 +55,46 @@ function request(active: Extract<CodexAppResponse, { status: "active" }>, method
 function payload(result: CodexAppResponse): any { expect(result.status).toBe("ok"); return result.status === "ok" ? result.payload : undefined; }
 
 describe("active native service backend", () => {
+  it("keeps imported original bytes unchanged when a protected comment draft is canceled", async () => {
+    const f = await fixture(false, true), a = await f.panel();
+    const before = await readFile(f.pdfPath);
+    const items = structuredClone(f.broker.state(f.sessionId)!.items);
+    expect(items).toHaveLength(2);
+    expect(f.broker.saveStatus(f.sessionId)).toMatchObject({ destination: { kind: "original", phase: "active" }, sync: { phase: "clean" } });
+    const writes = vi.spyOn(f.writer, "write");
+    const saves = vi.spyOn(f.saving, "requestSave");
+    for (const [index, item] of items.entries()) {
+      const draftId = randomUUID(), interactionToken = `inspect_${randomUUID()}`, order = index * 3 + 1;
+      const began = payload(await f.manager.handle(request(a, "beginInteraction", { generation: 1, interactionToken, order, draftId }, randomUUID())));
+      const time = "2026-10-06T01:57:00Z";
+      payload(await f.manager.handle(request(a, "command", { type: "put-draft", expectedRevision: f.broker.state(f.sessionId)!.revision, expectedDraftRevision: -1,
+        draft: { id: draftId, ownerViewId: began.ownerViewId, baseGeneration: 1, revision: 0, kind: "pdfAnnotation", targetItemId: item.id,
+          pageIndex: 0, text: item.payload.comment, anchor: { kind: "page", pageIndex: 0, rect: item.payload.position },
+          disposition: { kind: "resolved", generation: 1 }, status: "protected", createdAt: time, updatedAt: time } }, randomUUID())));
+      expect(f.broker.state(f.sessionId)!.pendingDrafts[0]).toMatchObject({ id: draftId, text: item.payload.comment, status: "protected" });
+      // The protected draft is durable even though it has no physical PDF effect.
+      const persisted = JSON.parse(await readFile(join(f.root, "recovery", f.sessionId, "draft.json"), "utf8"));
+      expect(persisted.payload.state.pendingDrafts[0]?.id).toBe(draftId);
+      expect(payload(await f.manager.handle(request(a, "finalizeInteraction", { interactionToken, order: order + 1, outcome: "discarded", draftId, expectedDraftRevision: 0 }, randomUUID())))).toMatchObject({ status: "finalized", outcome: "discarded" });
+      payload(await f.manager.handle(request(a, "acknowledgeInteraction", { interactionToken, order: order + 2 }, randomUUID())));
+      await f.saving.drain();
+      expect((await readFile(f.pdfPath)).equals(before)).toBe(true);
+      expect(writes).not.toHaveBeenCalled();
+    }
+    await f.saving.drain();
+    expect((await readFile(f.pdfPath)).equals(before)).toBe(true);
+    expect(writes).not.toHaveBeenCalled();
+    expect(saves).not.toHaveBeenCalled();
+    expect(f.broker.state(f.sessionId)).toMatchObject({ items, pendingDrafts: [] });
+    expect(f.broker.saveStatus(f.sessionId)?.sync).toMatchObject({ phase: "clean", desiredRevision: 4, savedRevision: 4 });
+    // A real accepted comment change still uses ordinary original autosave.
+    payload(await f.manager.handle(request(a, "command", editReviewItem(f.broker.state(f.sessionId)!, items[0]!.id, { comment: "Accepted imported edit" }), randomUUID())));
+    await f.saving.drain();
+    expect(writes).toHaveBeenCalledTimes(1);
+    expect(await readFile(f.pdfPath)).not.toEqual(before);
+    expect(f.broker.saveStatus(f.sessionId)?.sync).toMatchObject({ phase: "clean", savedRevision: 5 });
+  }, 30_000);
+
   it("scopes resources to each panel and reuses handles for same-generation canonical status", async () => {
     const f = await fixture(); const a = await f.panel(); const b = await f.panel();
     const reads = vi.spyOn(f.broker, "documentRange");
@@ -211,6 +252,18 @@ describe("active native service backend", () => {
     await f.manager.close();
     expect(await f.broker.restartReconnects.matchNative({ ticket: a.reconnectTicket, runtimeId: a.runtimeId, attemptId: a.attemptId, documentGeneration: 2 })).toBeUndefined();
     expect(f.backend.retentionStatus().presentations).toBe(0);
+  });
+
+  it("authenticated close detaches only its presentation and preserves peer work until the last close", async () => {
+    const f = await fixture(), a = await f.panel(), b = await f.panel();
+    payload(await f.manager.handle(request(a, "command", { type: "set-annotation-name", expectedRevision: 0, annotationName: "Durable peer work" })));
+    expect(await f.manager.handle(request(a, "detach"))).toMatchObject({ status: "ok" });
+    expect(await f.manager.handle(request(a, "bootstrap"))).toMatchObject({ status: "denied" });
+    expect(payload(await f.manager.handle(request(b, "bootstrap"))).state.annotationName).toBe("Durable peer work");
+    expect(f.backend.retentionStatus().presentations).toBe(1);
+    expect(await f.manager.handle(request(b, "detach"))).toMatchObject({ status: "ok" });
+    expect(f.backend.retentionStatus()).toMatchObject({ presentations: 0, resources: 0 });
+    expect(f.broker.state(f.sessionId)?.annotationName).toBe("Durable peer work");
   });
 
   it("rejects a late bootstrap after detach and lets a peer hold remain live", async () => {
@@ -459,4 +512,21 @@ it('creates precise links only for the admitted canonical review and current ite
   expect(await f.manager.handle(request(active, 'createLink', { location: { kind: 'item', page: 2, itemId: item.id } }, 'wrong_link_page'))).toEqual({ status: 'denied', reason: 'invalid' });
   await f.manager.handle(request(active, 'detach'));
   expect(await f.manager.handle(request(active, 'createLink', { location: { kind: 'page', page: 1 } }, 'detached_link'))).toMatchObject({ status: 'denied' });
+});
+
+
+it("preserves native export conflicts from real revision fences and denies detached replies", async () => {
+  const f = await fixture(false), active = await f.panel();
+  await f.broker.acceptMutation(f.sessionId, setAnnotationName(f.broker.state(f.sessionId)!, "Reviewer"));
+  const fence = { expectedRevision: f.broker.state(f.sessionId)!.revision, documentGeneration: 1 };
+  await f.broker.acceptMutation(f.sessionId, setAnnotationName(f.broker.state(f.sessionId)!, "Other window"));
+  const exportCopy = vi.spyOn(f.exporting, "exportReviewedCopy");
+  expect(await f.manager.handle(request(active, "exportReviewedCopy", { fence }, "conflict_request"))).toEqual({ status: "operation-error", reason: "export-conflict" });
+  expect(exportCopy).not.toHaveBeenCalled();
+  const gate = Promise.withResolvers<void>(), reached = Promise.withResolvers<void>();
+  const original = f.broker.freezeDelivery.bind(f.broker);
+  vi.spyOn(f.broker, "freezeDelivery").mockImplementationOnce(async (...args) => { reached.resolve(); await gate.promise; return original(...args); });
+  const pending = f.manager.handle(request(active, "exportReviewedCopy", { fence }, "detached_conflict"));
+  await reached.promise; await f.manager.detach(active.runtimeId); gate.resolve();
+  expect(await pending).toEqual({ status: "denied", reason: "revoked" });
 });

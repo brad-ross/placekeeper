@@ -447,12 +447,13 @@ describe("macOS distribution manifests", () => {
   });
 
   it("pins the Placekeeper runtime identity without pinning the content-derived daemon hash", async () => {
-    const [installer, smoke, serviceDaemon, launchControl, hookCommand, pdfInspector, exportCoordinator, vscodePackage, vscodeExtension] =
+    const [installer, smoke, serviceDaemon, launchControl, controlProtocol, hookCommand, pdfInspector, exportCoordinator, vscodePackage, vscodeExtension] =
       await Promise.all([
         readFile(resolve("install.sh"), "utf8"),
         readFile(resolve("packaging/macos/smoke-installed.ts"), "utf8"),
         readFile(resolve("apps/service/src/host/service-daemon.ts"), "utf8"),
         readFile(resolve("apps/service/src/host/launch-control.ts"), "utf8"),
+        readFile(resolve("apps/service/src/host/control-protocol.ts"), "utf8"),
         readFile(resolve("apps/service/src/cli/hook-command.ts"), "utf8"),
         readFile(resolve("apps/service/src/pdf/inspect-pdf.ts"), "utf8"),
         readFile(resolve("apps/service/src/export/export-coordinator.ts"), "utf8"),
@@ -471,9 +472,10 @@ describe("macOS distribution manifests", () => {
     expect(serviceDaemon).toContain('"PLACEKEEPER_DAEMON_IDENTITY"');
     expect(serviceDaemon).toContain('"PLACEKEEPER_INSTALL_ARTIFACT_IDENTITY"');
     expect(serviceDaemon).toContain('join(appSupportRoot, "lifecycle.lock")');
-    expect(launchControl).toContain("export const MANAGEMENT_PROTOCOL_VERSION = 1");
-    expect(launchControl).toContain('readonly kind: "exact"');
-    expect(launchControl).toContain('readonly kind: "incompatible"');
+    expect(controlProtocol).toContain("export const MANAGEMENT_PROTOCOL_VERSION = 1");
+    expect(controlProtocol).toContain('readonly kind: "exact"');
+    expect(controlProtocol).toContain('readonly kind: "incompatible"');
+    expect(launchControl).toMatch(/export\s*\{[^}]*\bMANAGEMENT_PROTOCOL_VERSION\b[^}]*\btype DaemonCompatibilityResult\b[^}]*\} from "\.\/control-protocol\.js";/u);
     expect(hookCommand).toContain('kind: "placekeeper-live-context"');
     expect(pdfInspector).toContain('"application/vnd.placekeeper.rgba+json"');
     expect(exportCoordinator).toContain('`.placekeeper-${randomUUID()}.tmp`');
@@ -523,6 +525,7 @@ describe("macOS distribution manifests", () => {
     expect(runtime.releaseGate.adobeAcrobatReader).toBe("pass");
   });
 
+  // The required isolated cold SDK typecheck can exceed one minute.
   it.runIf(process.platform === "darwin")("offers a non-mutating dry run for the one-command source installer", async () => {
     const installer = await readFile(resolve("install.sh"), "utf8");
     const { stdout } = await execFileAsync("/bin/sh", [resolve("install.sh"), "--dry-run"], {
@@ -541,7 +544,7 @@ describe("macOS distribution manifests", () => {
     expect(installer).toContain("install --frozen-lockfile");
     expect(installer).not.toContain("xattr");
     expect(installer).not.toContain("spctl --master-disable");
-  }, 60_000);
+  }, 180_000);
 
   it.runIf(process.platform === "darwin")("rejects incomplete native bundles before replacing the installed app", async () => {
     const root = await mkdtemp(resolve(tmpdir(), "placekeeper-incomplete-native-"));

@@ -1,0 +1,1383 @@
+{
+  "schemaVersion": 2,
+  "unit": "U8",
+  "status": "not-run",
+  "host": {
+    "codexBuild": "13232 shortVersion26.930.61225 (running executable path and on-disk bundle metadata; not in-memory hash)",
+    "os": "macOS26.7 build25G229 arm64",
+    "pluginVersion": "0.1.0+codex.20261005000000",
+    "artifactDigest": "398ab7730369ee1b91045dcdfe85a54e518571040b5bc08a9f8a6287f3cdb68d"
+  },
+  "transportGate": {
+    "reportPath": "codex-native-u3-qualification.json",
+    "sha256": "0472b7c3737bba7fe2767b337ec6d7dd19ab3282b65b3fca823fafe60cb65860",
+    "provenance": "Preserve dated actual two-chat isolation, ownership denial, old-attempt/receipt denial, scoped transport loss and explicit fresh reconnect. Admission/liveness/task registry predicates unchanged by U8; current normal activation/context witnesses support applicability. Normal Close shell changed and must use later actual Close observations instead of claiming old immediate detach. Build12947 observations are not reruns on13100; retain version caveat. No blanket demand to rerun all two-chat security trials solely due renderer changes. Build13232 latest workflow observations do not constitute rerun of build12947 two-chat trials."
+  },
+  "checks": [
+    {
+      "id": "AE1",
+      "result": "passed",
+      "evidence": "/tmp/placekeeper-native-implementation/u8-root-evidence.json#/correctedActualCorpus; selectionStyleFixedInstallation/actualHostVerification; inherited docs/testing/codex-native-u4-qualification.json#/actualHostChecks and u6 qualification#/actualHost source/link controls. Changed raster boundaries have later actual corrections; no memory/performance claim.",
+      "observedAt": "2026-10-06T19:00:20.413Z",
+      "actualHost": true,
+      "evidenceScope": "actual-codex"
+    },
+    {
+      "id": "AE2",
+      "result": "passed",
+      "evidence": "/tmp/placekeeper-native-implementation/u8-owned-lifecycle-20261006/failed-reopen-evidence.json; Close while target obstructed, reopened same item/draft desired87 saved86 not-saved; exact restoration automatic clean87, draft separate. No explicit Retry causality.",
+      "observedAt": "2026-10-07T00:40:30.736Z",
+      "actualHost": true,
+      "evidenceScope": "actual-codex"
+    },
+    {
+      "id": "AE3",
+      "result": "passed",
+      "evidence": "/tmp/placekeeper-native-implementation/u8-export-portable-20261007/evidence.json; actual generated-output Export input unchanged and fresh native portable import unique copied inode/path new session revision0 no former drafts. Fresh import branch, existing physical recovery root. /tmp/placekeeper-native-implementation/u8-root-evidence.json#/copySave;originalDestination plus inherited U5 original autosave; service Replace Original remains distinct automated gate. Current same verified evidence handle canonical items retrieval additionally confirms original ID/highlight/comment/quote through normal installed context items command; initial sandbox failure retained, same-handle authorized local socket retry succeeded, no RPC bypass.",
+      "observedAt": "2026-10-07T00:43:46.624Z",
+      "actualHost": true,
+      "evidenceScope": "actual-codex"
+    },
+    {
+      "id": "AE4",
+      "result": "passed",
+      "evidence": "/tmp/placekeeper-native-implementation/u8-owned-lifecycle-20261006/actual-evidence.json; native hold retained gen1, Close released successor gen2, same item/draft recovered; fixed actual reattachment clean49 one original item, draft consumed. Independent native132/peer150 zoom retained; historical duplicate and Undo preserved.",
+      "observedAt": "2026-10-07T00:35:20.193Z",
+      "actualHost": true,
+      "evidenceScope": "actual-codex"
+    },
+    {
+      "id": "AE5",
+      "result": "passed",
+      "evidence": "/tmp/placekeeper-native-implementation/u8-root-evidence.json#/correctedActualCorpus/5 plus docs/testing/codex-native-u5-qualification.json#/actualHostChecks; actual identical/missing/partial/successor behavior with last-valid pixels/location. No measured latency or OS memory claim.",
+      "observedAt": "2026-10-06T02:05:55.846047+00:00",
+      "actualHost": true,
+      "evidenceScope": "actual-codex"
+    },
+    {
+      "id": "AE6",
+      "result": "passed",
+      "evidence": "/Users/bross1/.codex/worktrees/dcb8/placekeeper/docs/testing/codex-native-u3-qualification.json#/checks and historicalProvenance; actual two-chat/ownership/old-attempt evidence inherited under unchanged admission/liveness/task authority. Latest large successor proves generation evidence denial. Not a13232 security rerun.",
+      "observedAt": "2026-10-04T17:32:23Z",
+      "actualHost": true,
+      "evidenceScope": "actual-codex"
+    },
+    {
+      "id": "AE7",
+      "result": "passed",
+      "evidence": "/tmp/placekeeper-native-implementation/u8-owned-lifecycle-20261006/failed-reopen-evidence.json#/reopenedPrompt; real prompt current accepted comment, Protected Draft and failed87/86 Save Sync. /tmp/placekeeper-native-implementation/u8-owned-lifecycle-20261006/actual-evidence.json#/controlledFailureAndSourceHold/promptVerification corroborates failed-save held generation context.",
+      "observedAt": "2026-10-07T00:39:35.125Z",
+      "actualHost": true,
+      "evidenceScope": "actual-codex"
+    },
+    {
+      "id": "AE8",
+      "result": "passed",
+      "evidence": "/tmp/placekeeper-native-implementation/u8-owned-lifecycle-20261006/actual-evidence.json#/controlledFailureAndSourceHold; authorized same-session browser edit automatically visible in native, protected draft/editor preserved. Supporting peer-save-retry automated equal-revision settlement evidence separately labeled.",
+      "observedAt": "2026-10-06T23:36:58.946Z",
+      "actualHost": true,
+      "evidenceScope": "actual-codex"
+    },
+    {
+      "id": "AE9",
+      "result": "passed",
+      "evidence": "/Users/bross1/.codex/worktrees/dcb8/placekeeper/docs/testing/codex-native-u3-qualification.json#/checks/recovery-continuation and explicit reconnect alternatives; docs/testing/codex-native-u7-qualification.json#/actualHost recovery guidance; /tmp/placekeeper-native-implementation/u8-draft-identity-installation.json#/actualNativeVerification restart/current activation. Manual plugin disable/removal limitation retained.",
+      "observedAt": "2026-10-07T00:35:20.193Z",
+      "actualHost": true,
+      "evidenceScope": "actual-codex"
+    },
+    {
+      "id": "AE10",
+      "result": "passed",
+      "evidence": "docs/testing/codex-native-u7-qualification.json#/actualHost/browserCompatibility; inherited independent ordinary browser after update. observedAt is U7 native real-prompt anchor; exact browser action timestamp not separately recorded. Later browser peer proves usability, not independent-entry rerun.",
+      "observedAt": "2026-10-05T22:15:01.788Z",
+      "actualHost": true,
+      "evidenceScope": "actual-codex"
+    },
+    {
+      "id": "keyboard-narrow-expanded",
+      "result": "passed",
+      "evidence": "/tmp/placekeeper-native-implementation/u8-root-evidence.json#/hostKeyboard; dated actual user Command-C/Tab/ShiftTab/Escape/Reference/focus-return narrow and expanded; successful focus/control boundaries unchanged by latest identity fix.",
+      "observedAt": "2026-10-05T22:21:52.166Z",
+      "actualHost": true,
+      "evidenceScope": "actual-codex"
+    },
+    {
+      "id": "large-resource-lifecycle",
+      "result": "not-run",
+      "evidence": "Performance/memory qualification deferred by user. Actual repeated large/small reopen and generation replacement with attributable OS baseline/cadence/max remains unproved; bridge worker/object URL counts do not fill this gate.",
+      "observedAt": "",
+      "actualHost": false,
+      "evidenceScope": "actual-codex"
+    },
+    {
+      "id": "cross-host-regressions",
+      "result": "passed",
+      "evidence": "/tmp/placekeeper-native-implementation/u8-closeout-validation.json#/crossHostDisposition; current whole-tree typecheck, 56 boundary unit tests across 4 files and 4 exact prior-failure rechecks across 3 files passed. Reviewed exact-current-hash rendering 8 mounted cases/64 selections plus 71 units, peer-save 150 units/5 mounted cases, and retained 2 mounted targeted/untargeted draft cases establish affected-boundary regression acceptance. No final broad rerun or actual installed VS Code UI claim.",
+      "observedAt": "2026-10-07T00:58:24.509806+00:00",
+      "actualHost": false,
+      "evidenceScope": "automated-regression"
+    },
+    {
+      "id": "installed-update",
+      "result": "passed",
+      "evidence": "/tmp/placekeeper-native-implementation/u8-draft-identity-installation.json plus /tmp/placekeeper-native-implementation/u8-current-host-identity-20261007.json; normal install selected equality; MCP starts20:33:59/20:39:15/20:46:19 EDT after00:29:28UTC install; latest native reattachment/export/import uses restarted processes. Running metadata caveat retained.",
+      "observedAt": "2026-10-07T00:35:20.193Z",
+      "actualHost": true,
+      "evidenceScope": "actual-codex"
+    }
+  ],
+  "corpus": [
+    {
+      "fixture": "text-native.pdf",
+      "sha256": "6cb57709b6cfad8fa36bafcf32afdc0b41c5f71f378e1e2c6a3ae9c4ab6d1b5a",
+      "result": "passed",
+      "actualHost": true,
+      "evidence": "/tmp/placekeeper-native-implementation/u8-root-evidence.json#/correctedActualCorpus/6; dated actual corpus inheritance; not newest artifact rerun. Large behavior does not fill runtime/OS resource gates.",
+      "observedAt": "2026-10-06T02:15:07.508Z"
+    },
+    {
+      "fixture": "image-only.pdf",
+      "sha256": "7017552e1ebdb4a54314a87cf56a1e2e1d9bad77d94172487dfee73c13668aac",
+      "result": "passed",
+      "actualHost": true,
+      "evidence": "/tmp/placekeeper-native-implementation/u8-root-evidence.json#/correctedActualCorpus/7; dated actual corpus inheritance; not newest artifact rerun. Large behavior does not fill runtime/OS resource gates.",
+      "observedAt": "2026-10-06T02:18:26.144811+00:00"
+    },
+    {
+      "fixture": "mixed-text-image.pdf",
+      "sha256": "b48560c2403e72bff4fc53950524658e7b3a55e812cbd84ba175fd1ee28aba06",
+      "result": "passed",
+      "actualHost": true,
+      "evidence": "/tmp/placekeeper-native-implementation/u8-root-evidence.json#/correctedActualCorpus/0; dated actual corpus inheritance; not newest artifact rerun. Large behavior does not fill runtime/OS resource gates.",
+      "observedAt": "2026-10-06T01:52:22.731Z"
+    },
+    {
+      "fixture": "rotation-90-crop.pdf",
+      "sha256": "afa3ab6c992bd6c38b690de2c24568c3ab7ea1d79d924102d44d767b93170aaa",
+      "result": "passed",
+      "actualHost": true,
+      "evidence": "/tmp/placekeeper-native-implementation/u8-root-evidence.json#/selectionStyleFixedInstallation/actualHostVerification; dated actual corpus inheritance; not newest artifact rerun. Large behavior does not fill runtime/OS resource gates.",
+      "observedAt": "2026-10-06T19:00:20.413Z"
+    },
+    {
+      "fixture": "reference-navigation.pdf",
+      "sha256": "44c7df2bb840ed3ae04205105b042af3acd33076a354e6a88a966a641b8f5e5f",
+      "result": "passed",
+      "actualHost": true,
+      "evidence": "/tmp/placekeeper-native-implementation/u8-root-evidence.json#/correctedActualCorpus/1; dated actual corpus inheritance; not newest artifact rerun. Large behavior does not fill runtime/OS resource gates.",
+      "observedAt": "2026-10-06T01:56:26.872825+00:00"
+    },
+    {
+      "fixture": "text-native-with-annotations.pdf",
+      "sha256": "680647716f2336daf1bed3c4361eacd82274e30207a5d108105fcb1f70b21654",
+      "result": "passed",
+      "actualHost": true,
+      "evidence": "/tmp/placekeeper-native-implementation/u8-root-evidence.json#/importedCancelFixedInstallation/actualHostVerification; dated actual corpus inheritance; not newest artifact rerun. Large behavior does not fill runtime/OS resource gates.",
+      "observedAt": "2026-10-06T02:21:53.310572+00:00"
+    },
+    {
+      "fixture": "docmdp-no-annotation.pdf",
+      "sha256": "2e36850f4e705d33b7522d66d15b2848d28684f03c18da7f9aa080089b4bb23a",
+      "result": "passed",
+      "actualHost": true,
+      "evidence": "/tmp/placekeeper-native-implementation/u8-root-evidence.json#/correctedActualCorpus/3; dated actual corpus inheritance; not newest artifact rerun. Large behavior does not fill runtime/OS resource gates.",
+      "observedAt": "2026-10-06T02:02:41.905191+00:00"
+    },
+    {
+      "fixture": "encrypted-no-annotation.pdf",
+      "sha256": "5ce14f5a0adae8a67a5c6d5e56de33e9d6367fd96cf4193a9d6d2a42d6adc699",
+      "result": "passed",
+      "actualHost": true,
+      "evidence": "/tmp/placekeeper-native-implementation/u8-root-evidence.json#/correctedActualCorpus/4; dated actual corpus inheritance; not newest artifact rerun. Large behavior does not fill runtime/OS resource gates.",
+      "observedAt": "2026-10-06T02:04:07.448086+00:00"
+    },
+    {
+      "fixture": "large-text-heavy.pdf",
+      "sha256": "67cdcdabb64ddf6fb4c6ebeb43aa19f6d589fab86f0a4c28284472222cc339d6",
+      "result": "passed",
+      "actualHost": true,
+      "evidence": "/tmp/placekeeper-native-implementation/u8-root-evidence.json#/correctedActualCorpus/5; dated actual corpus inheritance; not newest artifact rerun. Large behavior does not fill runtime/OS resource gates.",
+      "observedAt": "2026-10-06T02:05:55.846047+00:00"
+    }
+  ],
+  "performance": [
+    {
+      "metric": "first-readable-ms",
+      "fixture": "large-text-heavy.pdf",
+      "native": [],
+      "browser": [],
+      "actualHost": false,
+      "sameMachine": "",
+      "evidence": "DEFERRED BY USER; UNPROVED. No qualifying >=3 completed native/browser same-machine same-digest actual endpoint/OS measurement samples collected.",
+      "observedAt": "",
+      "investigation": ""
+    },
+    {
+      "metric": "search-ms",
+      "fixture": "large-text-heavy.pdf",
+      "native": [],
+      "browser": [],
+      "actualHost": false,
+      "sameMachine": "",
+      "evidence": "DEFERRED BY USER; UNPROVED. No qualifying >=3 completed native/browser same-machine same-digest actual endpoint/OS measurement samples collected.",
+      "observedAt": "",
+      "investigation": ""
+    },
+    {
+      "metric": "selection-ms",
+      "fixture": "large-text-heavy.pdf",
+      "native": [],
+      "browser": [],
+      "actualHost": false,
+      "sameMachine": "",
+      "evidence": "DEFERRED BY USER; UNPROVED. No qualifying >=3 completed native/browser same-machine same-digest actual endpoint/OS measurement samples collected.",
+      "observedAt": "",
+      "investigation": ""
+    },
+    {
+      "metric": "refresh-ms",
+      "fixture": "large-text-heavy.pdf",
+      "native": [],
+      "browser": [],
+      "actualHost": false,
+      "sameMachine": "",
+      "evidence": "DEFERRED BY USER; UNPROVED. No qualifying >=3 completed native/browser same-machine same-digest actual endpoint/OS measurement samples collected.",
+      "observedAt": "",
+      "investigation": ""
+    },
+    {
+      "metric": "peak-memory-bytes",
+      "fixture": "large-text-heavy.pdf",
+      "native": [],
+      "browser": [],
+      "actualHost": false,
+      "sameMachine": "",
+      "evidence": "DEFERRED BY USER; UNPROVED. No qualifying >=3 completed native/browser same-machine same-digest actual endpoint/OS measurement samples collected.",
+      "observedAt": "",
+      "investigation": ""
+    }
+  ],
+  "consolidatedAt": "2026-10-07T00:55:44.374268+00:00",
+  "scope": "U8 functional qualification closeout with dated actual-host and inherited evidence. Performance comparison and actual-host OS memory qualification explicitly deferred by the user. Full native parity remains unproven; status not-run is intentional.",
+  "hostProvenance": {
+    "current": {
+      "observedAt": "2026-10-07T00:46:29.235870+00:00",
+      "os": "ProductName:\t\tmacOS\nProductVersion:\t\t26.7\nBuildVersion:\t\t25G229\n",
+      "machine": "arm64",
+      "runningDesktopHost": {
+        "processes": [
+          "53040     1 Tue Oct  6 20:33:49 2026     /Applications/ChatGPT.app/Contents/MacOS/ChatGPT"
+        ],
+        "executable": "/Applications/ChatGPT.app/Contents/MacOS/ChatGPT",
+        "bundleVersion": "13232",
+        "shortVersion": "26.930.61225",
+        "bundleIdentity": "com.openai.codex",
+        "qualification": "running executable path plus on-disk bundle metadata; not an in-memory executable hash"
+      },
+      "placekeeperMcpProcesses": [
+        "53353 Tue Oct  6 20:33:59 2026     /Users/bross1/Applications/Placekeeper.app/Contents/Resources/node/bin/node /Users/bross1/Applications/Placekeeper.app/Contents/Resources/codex-mcp/server.js",
+        "54896 Tue Oct  6 20:39:15 2026     /Users/bross1/Applications/Placekeeper.app/Contents/Resources/node/bin/node /Users/bross1/Applications/Placekeeper.app/Contents/Resources/codex-mcp/server.js",
+        "56874 Tue Oct  6 20:46:19 2026     /Users/bross1/Applications/Placekeeper.app/Contents/Resources/node/bin/node /Users/bross1/Applications/Placekeeper.app/Contents/Resources/codex-mcp/server.js"
+      ],
+      "installedNativeHtmlSha256": "53afb96183d32420a22b8b81ccff5f2ad02be3d15b2d82b508c8c24fed074966",
+      "installedBuildIdentity": {
+        "managementProtocolVersion": 1,
+        "daemonIdentity": "129c39625cade1edfc275ef4e9b2f4fa794a095965d3045f5ad41e7b965672e9",
+        "installArtifactIdentity": "398ab7730369ee1b91045dcdfe85a54e518571040b5bc08a9f8a6287f3cdb68d"
+      },
+      "candidateBuildIdentityMatches": true,
+      "buildIdentityObservedAt": "2026-10-07T00:49:15.567673+00:00"
+    },
+    "candidateBuildIdentity": {
+      "managementProtocolVersion": 1,
+      "daemonIdentity": "129c39625cade1edfc275ef4e9b2f4fa794a095965d3045f5ad41e7b965672e9",
+      "installArtifactIdentity": "398ab7730369ee1b91045dcdfe85a54e518571040b5bc08a9f8a6287f3cdb68d"
+    },
+    "installation": {
+      "at": "2026-10-07T00:27:39.032849+00:00",
+      "candidate": "/tmp/placekeeper-native-implementation/u8-draft-identity-candidate/Placekeeper.app",
+      "build": "passed",
+      "macWeb": "passed",
+      "package": "passed",
+      "focusedRegression": "old code fails duplicate; fixed two mounted cases pass",
+      "typecheck": "worker passed",
+      "smoke": {
+        "first": "native startup timeout60s under system node26; cause unproven",
+        "pinnedNode24": "passed native readiness, offline writer and Codex hook lifecycle"
+      },
+      "installation": {
+        "ok": true,
+        "status": "installed",
+        "at": "2026-10-07T00:29:28.710601+00:00"
+      },
+      "testReview": "native panel closed through Close review; browser peer313 closed; accepted original item and recovered draft preserved after Undo",
+      "checks": {
+        "Contents/Resources/service/main.js": {
+          "matches": true,
+          "sha256": "a572bc39f45188e19537bcc5f65847118642c075d95b4f2859b18c4030f760aa"
+        },
+        "Contents/Resources/MacWeb/macos.html": {
+          "matches": true,
+          "sha256": "04dec1ddb2800bda07b7580addb4bb8b96b2871d56e280ee51abb0f335f465da"
+        },
+        "Contents/Resources/MacWeb/assets/shell.js": {
+          "matches": true,
+          "sha256": "4fef64fdca7280a6cbfb98044e6134141f6a5f7173d733dd8d894699d1f5c014"
+        },
+        "Contents/Resources/codex-mcp/review-v1.html": {
+          "matches": true,
+          "sha256": "53afb96183d32420a22b8b81ccff5f2ad02be3d15b2d82b508c8c24fed074966"
+        },
+        "Contents/Resources/web/app.js": {
+          "matches": true,
+          "sha256": "5abe5ad2df16c69da4e4ff2bc6cc300afe02fbe401d8b0cb4db624853b096dc1"
+        }
+      },
+      "actualNativeVerification": {
+        "status": "passed",
+        "observedAt": "2026-10-07T00:35:20.193Z",
+        "revision": 49,
+        "originalItemPreserved": true,
+        "duplicateCreated": false,
+        "draftConsumed": true,
+        "save": "clean49",
+        "pluginReloadRequired": true
+      }
+    },
+    "artifactIdentityCaveat": "Installed build identity read at2026-10-07T00:49:15.567673+00:00 matches latest candidate exactly. Running executable path/on-disk host metadata is not an in-memory executable hash.",
+    "versionInheritance": "U3 observations build12947; earlier U8 bundle13100. Newest actual workflows after restart are build13232 per running path/on-disk observation. Historical security/corpus evidence is inherited, not rerun on13232."
+  },
+  "inheritance": [
+    {
+      "unit": "U4",
+      "source": "docs/testing/codex-native-u4-qualification.json /actualHostChecks",
+      "disposition": "Retain dated reader/reference/search/copy/history evidence; latest corpus provides actual rendering and rotated-selection correction rather than repeat all U4 actions. Worker lifecycle and raster implementation changed, so earlier U4 is not current artifact resource/performance proof."
+    },
+    {
+      "unit": "U5",
+      "source": "docs/testing/codex-native-u5-qualification.json /actualHostChecks",
+      "disposition": "Original autosave/native identity reconciliation, accepted save and repeated successor/missing/partial observations remain scoped historical actual evidence. No U8 diff to pdf-save-coordinator, save-destination, mutation/reconciliation reducer or interaction registry; local-review-backend only suppresses put-draft autosave (cancel bug fix). Observer sequencing changed and has new large-corpus actual replacement evidence. Does not fill composed Protected Draft/write failure/peer hold/reattachment."
+    },
+    {
+      "unit": "U6",
+      "source": "docs/testing/codex-native-u6-qualification.json /actualHost",
+      "disposition": "Preserve actual page/item/destination links, bounded PDF text and isolated source-work begin/propose/reconcile/fingerprint/complete evidence. createLink and source workflow/context projection boundaries unchanged; hook diff adds truthful successful attestation message only. Resource manifest materialization and export failure mapping changed; do not inherit resource-transfer/export-conflict proofs. Pending-save real prompt at21:49:46Z remains actual pending evidence, never failed-save evidence. Latest actual current prompts corroborate context path."
+    },
+    {
+      "unit": "U7",
+      "source": "docs/testing/codex-native-u7-qualification.json /actualHost plus /artifactChecks",
+      "disposition": "Retain dated discovery/reload/native activation and independent browser entry. Installer/setup/plugin registration source unchanged in U8; current normal installed candidate equality plus19:00:20.413Z native user confirmation support activation after later fixes. launch-control moves validation/types into control-protocol; operational routing unchanged. No new installation/removal trial required merely to relabel historical evidence. Manual disable/removal limitation stays."
+    },
+    {
+      "unit": "U3",
+      "source": "docs/testing/codex-native-u3-qualification.json /checks, /outsideVerifierProofs, /historicalProvenance",
+      "disposition": "Preserve dated actual two-chat isolation, ownership denial, old-attempt/receipt denial, scoped transport loss and explicit fresh reconnect. Admission/liveness/task registry predicates unchanged by U8; current normal activation/context witnesses support applicability. Normal Close shell changed and must use later actual Close observations instead of claiming old immediate detach. Build12947 observations are not reruns on13100; retain version caveat. No blanket demand to rerun all two-chat security trials solely due renderer changes."
+    },
+    {
+      "unit": "U8 keyboard/save",
+      "source": "u8-root-evidence.json /hostKeyboard /copySave /originalDestination /copyReopen",
+      "disposition": "Retain user actual narrow/expanded Tab/ShiftTab/Escape/copy/reference/focus confirmation22:21:52Z and normal copy save22:25:29Z plus explicit original radio+Save22:30:29Z. Shared control/focus/destination authorization boundaries unchanged. Native timeout handling changes errors, not successful authorization. copyReopen is same-session Resume only, not fresh portable import."
+    }
+  ],
+  "evidencePolicy": "Original observation timestamps/artifact scopes retained. actualHost:true includes explicitly inherited actual observations. Consolidation time is not an observation. No bridge pass promoted. Latest lifecycle/export proofs supersede older blanket outstanding labels. Historical failures retained.",
+  "automatedVerification": {
+    "actualHost": false,
+    "broadDatedRuns": [
+      {
+        "time": "2026-10-06T00:43:34.606146+00:00",
+        "scope": "75 unique Vitest files across test:service,test:review,test:save-export,test:source-rebuild,test:host-integration,test:codex-native,test:source-release plus embedpdf-viewer.test.ts",
+        "result": "passed",
+        "files": 75,
+        "tests": 1430,
+        "durationSeconds": 164.91,
+        "execSession": 52566
+      },
+      {
+        "time": "2026-10-06T01:02:11.952170+00:00",
+        "scope": "all registered test:e2e Playwright cases, prior full build:vscode prerequisite passed",
+        "result": "passed",
+        "tests": 375,
+        "durationMinutes": 18.5,
+        "execSession": 65270,
+        "config": "/tmp/placekeeper-native-implementation/u8-browser-corrected.config.mts",
+        "artifacts": "/tmp/placekeeper-native-implementation/u8-browser-corrected-results",
+        "host": "isolated headless Chrome, 1 worker, actualHost:false"
+      },
+      {
+        "time": "2026-10-06T01:21:00.718904+00:00",
+        "scope": "Final76uniqueVitestfiles across7gates plus PDF writer/reviewedPDF and embedpdf-viewer",
+        "result": "1466passed2failed; owner assertion corrected+targetedpassed; unchanged installer dryrun still60secondtimeout",
+        "files": 76,
+        "passed": 1466,
+        "failed": 2,
+        "total": 1468,
+        "durationSeconds": 185.69,
+        "execSession": 4713,
+        "targetedRecheck": {
+          "execSession": 94075,
+          "passed": 1,
+          "failed": 1,
+          "skipped": 62,
+          "remaining": "installer dryrun60secondtimeout, bounded diagnosis in progress"
+        }
+      },
+      {
+        "time": "2026-10-06T01:36:34.418653+00:00",
+        "scope": "31 final native corpus/lifecycle/resource/export-conflict and rotation/PDF-browser conformance cases",
+        "result": "passed",
+        "tests": 31,
+        "durationMinutes": 2.8,
+        "execSession": 62824,
+        "actualHost": false,
+        "artifacts": "/tmp/placekeeper-native-implementation/u8-final-native-conformance-results"
+      },
+      {
+        "scope": "remaining packaging failures",
+        "result": "both cleared by focused rechecks",
+        "ownerAssertion": "passed session94075",
+        "dryrun": "passed102.82seconds with locally justified180second cold SDK integration budget",
+        "evidence": "/tmp/placekeeper-native-implementation/u8-dry-run-diagnosis/budget-correction.json",
+        "fullUnionRerun": false
+      }
+    ],
+    "peerSaveRetry": {
+      "schemaVersion": 1,
+      "status": "fixed-not-installed; parent owns review/package/installation",
+      "recordedAt": "2026-10-06T22:15:45.767881+00:00",
+      "baseline": {
+        "head": "39f52cfe97b7c49dcdc84b1f85d55196325d7ccc",
+        "sharedTree": "dirty with preexisting U8 work preserved",
+        "fixOwnedFiles": [
+          "apps/web/src/app/ProductionReviewApp.tsx",
+          "apps/web/src/save/save-state-controller.ts",
+          "apps/web/test/save-state-controller.test.ts",
+          "test/acceptance/production-flow.spec.ts"
+        ],
+        "preexistingChangesInFixOwnedFiles": false,
+        "noStash": true
+      },
+      "problem": "Accepted peer Apply remains waiting and peer reports failed SaveSync after another view successfully retries at same review revision.",
+      "cause": "ProductionReviewApp initial-state key gate excludes SaveSync-only bootstrap changes; failed sync stops save polling, so canonical clean update does not reach local status/persistedRevision.",
+      "fix": {
+        "source": "ProductionReviewApp has separate effect with initialSaveStatus dependency to adopt save-only canonical updates. Existing keyed document/state adoption left intact, including source-transition SaveStatus assignment.",
+        "guard": "Current session, document generation, fileId/digest; canonical review revision not older than current; canonical desired/saved revision and destination generation not older than local status. Allows failure/phase changes and newer destination transitions when progress has not regressed.",
+        "statePreservation": "No source/state adoption policy changes, UI reloads, authoring resets, reading reset or changes to actual installed application. Existing clean-current portability effect updates portable checkpoint when status converges."
+      },
+      "red": {
+        "runner": "ordinary browser production-flow existing acceptance suite, two authenticated views, real copy path obstruction/restoration, owner Retry UI",
+        "test": "same-revision browser peer retry settles accepted Apply and preserves an active protected draft",
+        "beforeCodeChange": true,
+        "failure": "Broker clean with unchanged accepted review revision; peer Retry count remains1 (expected0), reproducing actual symptom.",
+        "assertionArtifact": "/tmp/placekeeper-native-implementation/u8-peer-save-retry-red-assertion.txt",
+        "rawLog": "/tmp/placekeeper-native-implementation/u8-peer-save-retry-red.log",
+        "provenanceLimitation": "Initial stalled pnpm invocation later wrote identity-verification failure over raw RED header. Actual assertion/tail preserved and extracted; do not call this a complete clean RED run log. Earlier native-bridge setup failure and invalid pageNote fixture were corrected before exact RED, not regression evidence."
+      },
+      "green": {
+        "browser": {
+          "passed": 5,
+          "durationSeconds": 11.6,
+          "log": "/tmp/placekeeper-native-implementation/u8-peer-save-retry-browser.log",
+          "scope": [
+            "same-revision ordinary peer retry; peer failed state clears, Saved attached, accepted composer closes; owner active protected draft ID/text and accepted comment preserved",
+            "existing imported annotations edits/deletion saves",
+            "unsaved links disabled until portable",
+            "external source replacement deferred through UI save",
+            "newer generation cancels predecessor reading restore"
+          ]
+        },
+        "unit": {
+          "passed": 150,
+          "files": 4,
+          "log": "/tmp/placekeeper-native-implementation/u8-peer-save-retry-unit.log",
+          "scope": [
+            "save-state-controller guards and poll behavior",
+            "authoring persistence settlement",
+            "production-review-app projections",
+            "host-runtime equal-revision invalidations/source adoption"
+          ]
+        },
+        "typecheck": {
+          "passed": true,
+          "log": "/tmp/placekeeper-native-implementation/u8-peer-save-retry-types.log"
+        },
+        "build": {
+          "passed": true,
+          "log": "/tmp/placekeeper-native-implementation/u8-peer-save-retry-final-build.log"
+        },
+        "diffCheck": {
+          "passed": true
+        }
+      },
+      "changes": [
+        {
+          "path": "/Users/bross1/.codex/worktrees/dcb8/placekeeper/apps/web/src/app/ProductionReviewApp.tsx",
+          "sha256": "c5bf2527cd181697d5156d7d517a2385286ed68eeb87bee4f5607222387800e1"
+        },
+        {
+          "path": "/Users/bross1/.codex/worktrees/dcb8/placekeeper/apps/web/src/save/save-state-controller.ts",
+          "sha256": "0e2593e1b734b182308b3b3c5d9f2413e8e5853e0ea261f4b696e2959bf39b05"
+        },
+        {
+          "path": "/Users/bross1/.codex/worktrees/dcb8/placekeeper/apps/web/test/save-state-controller.test.ts",
+          "sha256": "7dd25b710e5acf689b6a5537e8f62136cd83efc6ceb37b88a1ebc83d59521dfc"
+        },
+        {
+          "path": "/Users/bross1/.codex/worktrees/dcb8/placekeeper/test/acceptance/production-flow.spec.ts",
+          "sha256": "05418f4277ea8e7fe2ccea3baf0c6724c9f651c8227c3d71861308120f331b74"
+        }
+      ],
+      "limitations": [
+        "Actual installed view not rerun on fix; parent must package/reinstall and resume actual-host acceptance.",
+        "Stale-status guard tests exercise exported decision function; real mounted regression verifies shared app effects at same revision. Existing canonical runtime fences own older source/revision event suppression; no unrelated state-adoption changes added.",
+        "No commit, push or PR."
+      ],
+      "next": "Parent review then packaging and actual-host retry/peer convergence confirmation."
+    },
+    "draftIdentity": {
+      "status": "fixed-and-focused-verified",
+      "changedFiles": [
+        "apps/web/src/review/ReconciliationWorkspace.tsx",
+        "test/acceptance/codex-native-lifecycle.spec.ts"
+      ],
+      "change": "Lifecycle draft reattachment preserves existing edit targetItemId. Untargeted drafts still create new items; item reattachment target and existing concurrency/generation/ownership fences unchanged.",
+      "tests": {
+        "redOriginal": "Mounted targeted edit regression failed: expected one item, got two; untargeted draft passed.",
+        "greenFixed": "Both mounted browser cases passed after restoring fix (2 passed).",
+        "typecheck": "./node_modules/.bin/tsc -p tsconfig.base.json --noEmit passed (exit0).",
+        "browserEnvironment": "Used temp Playwright config /tmp/placekeeper-native-implementation/reattachment-playwright.config.ts with direct local Vite port4187 and already installed Chromium1161; default Playwright1228 absent. No install.",
+        "coverage": "Mounted ReconciliationWorkspace with interactionLifecycle required. Actual UI navigation + Attach, put-draft reduction, finalize apply-draft reduction, acknowledge. Checks original identity, new quote/protected comment/resolved generation2, no duplicate, draft consumed; originally untargeted draft creates draft-id item."
+      },
+      "selectionGeneration": "SelectionUpdate.generation is selection-read authority sequence (SelectionReadAuthority.begin increments independently), not documentGeneration. Test selection sequence1 with documentGeneration2 is valid.",
+      "limits": "No packaging, live service/UI mutation, install, commit, or full lifecycle suite run. Other dirty work preserved."
+    },
+    "finalReviewResolution": {
+      "status": "resolved",
+      "scope": "Bounded read-only post-fix review of the five previously confirmed findings and their changes in the current working tree.",
+      "findings": [
+        {
+          "number": 1,
+          "status": "resolved",
+          "evidence": "codexPickerTimeouts limits extended budgets to presentation chooseFolder/locateSave: 310 seconds for the control socket and 315 seconds for SDK timeout/maxTotalTimeout, above the existing five-minute picker budget; ordinary defaults remain unchanged; inspected socket test uses genuine control transport and delayed 5.2-second pickers, and its log reports 2/2 passing; shell tests cover explicit budgets and stale replies after Close."
+        },
+        {
+          "number": 2,
+          "status": "resolved",
+          "evidence": "launch-control.ts is now 665 lines and reexports moved public contracts; independent read-only comparison with HEAD confirmed management types, request/response unions and validator are byte-identical apart from the validator export keyword; inspected extraction receipt lists no missing public names, and control/runtime contract log reports 73 tests passing."
+        },
+        {
+          "number": 3,
+          "status": "resolved",
+          "evidence": "Manifest entries use fresh epoch keys while transfers remain pending, retain keys only after verified materialization, and retain descriptor identity fences plus identity-checked cache removal; inspected generation-change and same-generation tests delay initial resource replies, assert successor completion and fulfilled-resource reuse without rereads, and verify disposal; focused log reports 133 tests passing."
+        },
+        {
+          "number": 4,
+          "status": "resolved",
+          "evidence": "Accepted display attestation now emits fixed PostToolUse success context explicitly separating attestation from panel readiness and current context; inspected hook test asserts success text and absence of receipt/task identifiers; focused test log is passing."
+        },
+        {
+          "number": 5,
+          "status": "resolved",
+          "evidence": "A closed operation-error/export-conflict response is parsed without arbitrary exception text; manager emits it only for typed export conflicts after current-authority revalidation, shell preserves it through a typed sentinel after incarnation/generation checks and excludes error responses from grant activation, and RPC checks response identity before mapping shared recovery guidance; inspected tests cover real revision conflict, detached late conflict, generic-error sanitization and the production export dialog, whose acceptance log reports a pass with zero PDF writes."
+        }
+      ],
+      "newDefects": [],
+      "verification": "Inspected current source, focused regression tests, actual test logs and the extraction receipt; independently compared extracted declarations/validator without editing source or rerunning stateful tests.",
+      "limitations": [
+        "This bounded review does not certify the outstanding actual-host U8 qualification.",
+        "A picker may continue after transport closure; the fix preserves bounded results and stale-reply fencing rather than adding cancellation."
+      ]
+    },
+    "policy": "Clean 1,430 unit tests / 375 browser checks predate later fixes. The subsequent 1,468-test union had failures cleared by focused rechecks. Final current checks and exact-hash inherited affected-boundary receipts now pass; no clean current full-suite rerun or actual installed VS Code UI claimed.",
+    "finalCloseout": {
+      "schemaVersion": 1,
+      "scope": "U8 automated final validation only; no native UI, performance/OS memory measurement, source changes, installation, or commit.",
+      "observedAt": "2026-10-07T00:58:24.509806+00:00",
+      "status": "passed-focused-current-checks-and-reviewed-inheritance",
+      "commandsExecutedNow": [
+        {
+          "command": "./node_modules/.bin/tsc -p tsconfig.base.json --noEmit",
+          "exitCode": 0,
+          "log": "/tmp/placekeeper-native-implementation/u8-closeout-current-typecheck.log",
+          "scope": "Whole current TypeScript tree.",
+          "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "command": "node node_modules/vitest/vitest.mjs run apps/web/test/host-runtime.test.ts apps/web/test/codex-runtime.test.ts apps/web/test/embedpdf-viewer.test.ts apps/web/test/host-render-layer.test.ts --maxWorkers=1",
+          "exitCode": 0,
+          "filesPassed": 4,
+          "testsPassed": 56,
+          "log": "/tmp/placekeeper-native-implementation/u8-closeout-current-boundary-units.log",
+          "scope": "Current shared browser/VSCode/Codex RPC resource lifecycle, host adapter invalidation, real engine resource/render boundaries.",
+          "logSha256": "f8f3a59ea369d5e73c825e50ceab85e319be7cdb9463c6a23cbb80d692e58266"
+        },
+        {
+          "command": "node node_modules/vitest/vitest.mjs run apps/service/test/pdf-save-coordinator.test.ts apps/service/test/synctex.test.ts packaging/macos/packaging.test.ts -t 'does not absorb a later external replacement|classifies an observed in-flight original publication|ignores a late result after a rapid successor|offers a non-mutating dry run' --maxWorkers=1",
+          "exitCode": 0,
+          "filesPassed": 3,
+          "testsPassed": 4,
+          "testsSkipped": 134,
+          "log": "/tmp/placekeeper-native-implementation/u8-closeout-prior-failures-recheck.log",
+          "scope": "Exact prior material failure cases cleared on current source. No blanket broad-union pass claimed.",
+          "logSha256": "663a56c0cd80c81f8d1f6ed3fb84ff89fc3c86f8ce24cbd43445507bdcf416a5"
+        }
+      ],
+      "retainedExactHashReceipts": [
+        {
+          "receipt": "/tmp/placekeeper-native-implementation/u8-selection-compositing-fix.json",
+          "exactCurrentSourceMatch": true,
+          "comparisons": {
+            "apps/web/src/pdf/owned-overlay.ts": {
+              "expectedSha256": "06538074eff9e89e6e7dc986e5a6a79f09b9b1f864e57ba80d2ef655cbca27a2",
+              "currentSha256": "06538074eff9e89e6e7dc986e5a6a79f09b9b1f864e57ba80d2ef655cbca27a2",
+              "exactMatch": true
+            },
+            "apps/web/test/owned-overlay.test.ts": {
+              "expectedSha256": "ab79605efd327e18ac14c201aa5fe3d228428efedfa6ff24edfc224e5f39c039",
+              "currentSha256": "ab79605efd327e18ac14c201aa5fe3d228428efedfa6ff24edfc224e5f39c039",
+              "exactMatch": true
+            },
+            "test/acceptance/host-raster-rotation.spec.ts": {
+              "expectedSha256": "70c7e18d01ea350f3c8de53d07be59708ba8b33fd3a076c5b918b2ddc509a8b1",
+              "currentSha256": "70c7e18d01ea350f3c8de53d07be59708ba8b33fd3a076c5b918b2ddc509a8b1",
+              "exactMatch": true
+            }
+          },
+          "validation": {
+            "browser": {
+              "result": "8/8 PASS;64 real selections and screenshot pixel comparisons across Main/References, four intrinsic\u00d7four viewer rotations, two resource policies",
+              "elapsedSeconds": 32.3,
+              "log": "/tmp/placekeeper-native-implementation/u8-selection-compositing-green.log"
+            },
+            "units": {
+              "result": "71/71 PASS",
+              "elapsedSeconds": 1.21,
+              "log": "/tmp/placekeeper-native-implementation/u8-selection-compositing-units.log"
+            },
+            "types": {
+              "result": "PASS exit0",
+              "log": "/tmp/placekeeper-native-implementation/u8-selection-compositing-types.log"
+            },
+            "diffCheck": "PASS exit0"
+          },
+          "disposition": "Retain passing tests; do not rerun at unchanged boundary."
+        },
+        {
+          "receipt": "/tmp/placekeeper-native-implementation/u8-peer-save-retry-fix.json",
+          "exactCurrentSourceMatch": true,
+          "comparisons": {
+            "/Users/bross1/.codex/worktrees/dcb8/placekeeper/apps/web/src/app/ProductionReviewApp.tsx": {
+              "expectedSha256": "c5bf2527cd181697d5156d7d517a2385286ed68eeb87bee4f5607222387800e1",
+              "currentSha256": "c5bf2527cd181697d5156d7d517a2385286ed68eeb87bee4f5607222387800e1",
+              "exactMatch": true
+            },
+            "/Users/bross1/.codex/worktrees/dcb8/placekeeper/apps/web/src/save/save-state-controller.ts": {
+              "expectedSha256": "0e2593e1b734b182308b3b3c5d9f2413e8e5853e0ea261f4b696e2959bf39b05",
+              "currentSha256": "0e2593e1b734b182308b3b3c5d9f2413e8e5853e0ea261f4b696e2959bf39b05",
+              "exactMatch": true
+            },
+            "/Users/bross1/.codex/worktrees/dcb8/placekeeper/apps/web/test/save-state-controller.test.ts": {
+              "expectedSha256": "7dd25b710e5acf689b6a5537e8f62136cd83efc6ceb37b88a1ebc83d59521dfc",
+              "currentSha256": "7dd25b710e5acf689b6a5537e8f62136cd83efc6ceb37b88a1ebc83d59521dfc",
+              "exactMatch": true
+            },
+            "/Users/bross1/.codex/worktrees/dcb8/placekeeper/test/acceptance/production-flow.spec.ts": {
+              "expectedSha256": "05418f4277ea8e7fe2ccea3baf0c6724c9f651c8227c3d71861308120f331b74",
+              "currentSha256": "05418f4277ea8e7fe2ccea3baf0c6724c9f651c8227c3d71861308120f331b74",
+              "exactMatch": true
+            }
+          },
+          "validation": {
+            "browser": {
+              "passed": 5,
+              "durationSeconds": 11.6,
+              "log": "/tmp/placekeeper-native-implementation/u8-peer-save-retry-browser.log",
+              "scope": [
+                "same-revision ordinary peer retry; peer failed state clears, Saved attached, accepted composer closes; owner active protected draft ID/text and accepted comment preserved",
+                "existing imported annotations edits/deletion saves",
+                "unsaved links disabled until portable",
+                "external source replacement deferred through UI save",
+                "newer generation cancels predecessor reading restore"
+              ]
+            },
+            "unit": {
+              "passed": 150,
+              "files": 4,
+              "log": "/tmp/placekeeper-native-implementation/u8-peer-save-retry-unit.log",
+              "scope": [
+                "save-state-controller guards and poll behavior",
+                "authoring persistence settlement",
+                "production-review-app projections",
+                "host-runtime equal-revision invalidations/source adoption"
+              ]
+            },
+            "typecheck": {
+              "passed": true,
+              "log": "/tmp/placekeeper-native-implementation/u8-peer-save-retry-types.log"
+            },
+            "build": {
+              "passed": true,
+              "log": "/tmp/placekeeper-native-implementation/u8-peer-save-retry-final-build.log"
+            },
+            "diffCheck": {
+              "passed": true
+            }
+          },
+          "disposition": "Retain passing tests; do not rerun at unchanged boundary."
+        },
+        {
+          "receipt": "/tmp/placekeeper-native-implementation/u8-selection-rotation-fix.json",
+          "sourceMatches": {
+            "apps/web/src/pdf/PdfWorkspace.tsx": true,
+            "apps/web/src/pdf/ReferencePdfViewport.tsx": true
+          },
+          "disposition": "Original natural-anchor/view-wrapper changes remain exact; later compositing receipt supersedes overlay/test hashes and reruns full8case browser/Codex/Main/References matrix."
+        }
+      ],
+      "retainedMountedDraftReceipt": {
+        "path": "/tmp/placekeeper-native-implementation/u8-owned-draft-identity-fix.json",
+        "resultsPath": "/tmp/placekeeper-native-implementation/reattachment-test-results/.last-run.json",
+        "results": {
+          "status": "passed",
+          "failedTests": []
+        },
+        "testConfig": "/tmp/placekeeper-native-implementation/reattachment-playwright.config.ts",
+        "scope": "2 mounted ReconciliationWorkspace cases: targeted edit retains original target identity without duplicate; untargeted draft creates new item. Source restoration finalmtime23:50:15.713Z precedes passing result23:50:17.581Z. Existing receipt lacks pre-run hashes; current source hash attached, no historical hash fabricated.",
+        "disposition": "Accept existing focused same-final-source fix witness plus current typecheck; no additional mounted run necessary absent subsequent source edits."
+      },
+      "crossHostDisposition": {
+        "result": "passed-automated-regression-at-changed-boundaries",
+        "actualHost": false,
+        "evidenceScope": "automated-regression",
+        "sharedUIEngine": "Exact current compositing/wrapper hashes retain8/8 mounted cases (64 selections) across browser and Codex policies, Main/References, intrinsic/viewer rotations;71overlay/anchor/state units. Current embedpdf/HostRenderLayer units passed.",
+        "VSCodeRuntime": "Current host-runtime+codex-runtime unit suites passed with shared RPC path and VSCode resource invalidation/lifecycle use. Prior final resource133test receipt is supplemental; no actual installedVSCodeUI qualification claimed.",
+        "browserEntryAndSave": "Unchanged browser App source since earlier broad349pass+18targetedresolution witness; latest shared ProductionReviewApp/save-controller source/test hashes exactly match150unit+5ordinary mounted browser cases including same-revision peer retry preservation. Final draft reattachment validated separately by2mounted tests through shared reconciliation component.",
+        "serviceSourceSaveFences": "Current four selected prior failure regressions pass, resolving recorded autosave/external-replacement, SyncTeX late-result and installer timing uncertainty without weakening tests.",
+        "limits": "This is finite changed-boundary regression acceptance, not a final all-suite rerun or actual-host/browser timing/memory claim."
+      },
+      "broadHistoryPreserved": {
+        "rootRegression": {
+          "suites": [
+            "test:service",
+            "test:review",
+            "test:save-export",
+            "test:source-rebuild",
+            "test:host-integration",
+            "test:codex-native",
+            "test:source-release"
+          ],
+          "files": 74,
+          "passed": 1416,
+          "failed": 1,
+          "total": 1417,
+          "durationSeconds": 171.34,
+          "failure": "Unchanged installer dry-run test timed out at60seconds during Apple SDK/compiler prerequisites. Isolated rerun also timed out.",
+          "manualDryRun": "Traced original install.sh --dry-run subsequently completed exit0; original test timeout remains unresolved, no assertion weakened.",
+          "isolatedInstallerRecheck": "Failed same60secondtimeout; traced original manual dryrun passed exit0. No assertions changed.",
+          "postRestartInstallerRecheck": {
+            "result": "passed unchanged",
+            "durationSeconds": 44.42,
+            "suiteDurationSeconds": 44.98,
+            "tests": 1,
+            "skipped": 63,
+            "note": "Original full union remains1416pass1timeout; sole failure cleared by targeted unchanged rerun, no full union rerun."
+          }
+        },
+        "browserRegression": {
+          "status": "all-failures-cleared-by-targeted-reruns",
+          "sessionId": 84605,
+          "count": 367,
+          "config": "/tmp/placekeeper-native-implementation/u8-browser-regressions.config.mts",
+          "scope": "Registered test:e2e files,1worker, isolated installed headless Chrome; no existing user browser touched.",
+          "passed": 349,
+          "failed": 18,
+          "total": 367,
+          "durationMinutes": 32.6,
+          "originalPassed": 349,
+          "originalFailed": 18,
+          "noncanonicalRecheck": "All10original cases passed unchanged;12tests with2additionalwidths",
+          "canonicalRecheck": "8/8passed after bounded iframe identity and pointer-reset harness correction, exact assertions unchanged",
+          "diagnosis": "/tmp/placekeeper-native-implementation/u8-browser-failure-diagnosis.md",
+          "fullSuiteRerun": false
+        },
+        "priorFailedLogs": [
+          "u8-root-regressions.log",
+          "u8-regression-recheck.log"
+        ],
+        "policy": "Old failures retained; targeted final current reruns resolve exact cases. Do not relabel old broad logs as all passed."
+      },
+      "currentSourceSha256": {
+        "apps/web/src/app/App.tsx": "0b9d406832a5450f2e12f2f59c91875fc386c02cb5aefba180e7e08aa1c9de7b",
+        "apps/web/src/app/ProductionReviewApp.tsx": "c5bf2527cd181697d5156d7d517a2385286ed68eeb87bee4f5607222387800e1",
+        "apps/web/src/host/codex-runtime.ts": "0d77829483c46093d825a8770bcaa806bfb2b5ae16df21cf64af136c08058a54",
+        "apps/web/src/host/vscode-runtime.ts": "ff6ff51e3368d80068f2f087a0b8efe7cae29802158011f0d997d804ee7a0d1a",
+        "apps/web/src/pdf/HostRenderLayer.tsx": "863bb5bbcf3f008b79886a228c2bf7c4910d334e9aad664a428065883ea6bd01",
+        "apps/web/src/pdf/embedpdf-viewer.ts": "228ac95b3cb78f9122442d1045a2fbde14a4671606873575c8c61932068bbae7",
+        "apps/web/src/pdf/owned-overlay.ts": "06538074eff9e89e6e7dc986e5a6a79f09b9b1f864e57ba80d2ef655cbca27a2",
+        "apps/web/src/pdf/PdfWorkspace.tsx": "b4ed4a3767bcb339fc41cd30bf34794b224842cafc1ae90a8ffbe781cabfad5b",
+        "apps/web/src/pdf/ReferencePdfViewport.tsx": "ae636ae49d5169f36fb32608376a9347961e9198b57c8bc7e4a6f93ce9c3532e",
+        "apps/web/src/review/ReconciliationWorkspace.tsx": "fa0559ef3ff664e3b09b38d4f9340dd811c36179f3a2b58c0b2653a54df25b52",
+        "apps/web/src/save/save-state-controller.ts": "0e2593e1b734b182308b3b3c5d9f2413e8e5853e0ea261f4b696e2959bf39b05",
+        "apps/service/src/sessions/local-document-observer.ts": "8bfe835a884d57ec64344e4d44903e3e683804cf8b751dc6796d2a5491d452db",
+        "apps/service/src/runtime/local-review-backend.ts": "7576936ae26e0b83239367e83eb85a39714baa2bf88918ec074c61865b5243f0",
+        "apps/service/src/codex/codex-runtime-backend.ts": "d35217064ab4934b46439a1b2b0819c4af85306d88edd459d5865239e9ddec58",
+        "apps/service/src/codex/codex-runtime.ts": "c80e74d1411af1e7b262af7edcb0dcca63dbc4d547c84b96b7324e0bf64748ae",
+        "scripts/testing/suites.ts": "c3199eb1d34069f1f6fd66d7d0fa86b4e765c602f9beaeaffe4d678e046d9588"
+      },
+      "blockers": [],
+      "next": "Report worker may mark cross-host-regressions passed with automated-regression scope and link this receipt. Root owns review, report completeness and local commit; any subsequent code change invalidates only affected boundary receipt."
+    }
+  },
+  "historicalFailures": {
+    "priorCorpus": [
+      {
+        "fixture": "text-native.pdf",
+        "pages": 1,
+        "status": "rendered",
+        "decodedImage": [
+          944,
+          1221
+        ],
+        "visibleText": "Selectable placekeeper text: unique equilibrium clearly.",
+        "close": "local retirement; service confirmation unavailable; next normal document successfully claimed"
+      },
+      {
+        "fixture": "image-only.pdf",
+        "pages": 1,
+        "status": "rendered",
+        "decodedImage": [
+          1193,
+          1544
+        ],
+        "search": "No reliable extracted text is available to search in this PDF.",
+        "close": "local retirement; unconfirmed closure message returned immediately; next normal document successfully claimed"
+      },
+      {
+        "fixture": "rotation-90-crop.pdf",
+        "pages": 1,
+        "status": "failed-aspect-and-orientation",
+        "decodedImage": [
+          895,
+          1194
+        ],
+        "displayDimensions": [
+          596.875,
+          447.65625
+        ],
+        "search": "equilibrium:1result",
+        "currentPrompt": "2026-10-06T00:12:59.502Z generation1 revision0 current",
+        "followup": "Bounded renderer fix and native/browser pixel regression assigned"
+      }
+    ],
+    "rotation": {
+      "observedAt": "2026-10-06T02:23:19.016Z",
+      "sourceDigest": "afa3ab6c992bd6c38b690de2c24568c3ab7ea1d79d924102d44d767b93170aaa",
+      "bytes": 1014,
+      "generation": 1,
+      "revision": 0,
+      "searchAlignment": "user reports works",
+      "selectionAlignment": "FAILED: user reports text does not follow rotated text",
+      "status": "read-only source diagnosis dispatched; native inspection timed out without producing screenshot",
+      "candidate": "u8-cancel-fixed-candidate"
+    },
+    "importedCancel": {
+      "evidence": "/tmp/placekeeper-native-implementation/u8-imported-cancel-fix.json",
+      "review": "/tmp/placekeeper-native-implementation/u8-imported-cancel-review.json",
+      "status": "reviewed;97service2reader tests +fulltypes+fullbuild+macwebPASS; packaging underway; not installed"
+    },
+    "reattachmentDuplicate": {
+      "promptAt": "2026-10-06T23:45:37.076Z",
+      "generation": 2,
+      "revision": 41,
+      "sync": "clean41",
+      "originalItemStillUnresolved": "53780b96-7777-43c3-a90e-360cfa91a133",
+      "unexpectedNewItem": "a171551e-f8d0-49b5-912c-8f15c2f7e617",
+      "newComment": "U8 owned protected draft",
+      "newQuote": "New reattachment target",
+      "pendingDrafts": 0,
+      "rootCause": "ReconciliationWorkspace submitReattachment rebuild drops existing edit draft targetItemId; diagnosis/fix worker in progress",
+      "normalUndoRecovery": {
+        "at": "2026-10-06T23:47:59.473649+00:00",
+        "actions": 2,
+        "first": "Removed duplicate, restored draft Ready to apply",
+        "second": "Restored original item Missing text and draft Needs new location",
+        "peer": "Saved, one accepted item plus protected draft; page1 zoom150"
+      }
+    },
+    "stalePostinstall": {
+      "sessionId": "ff112721-0734-4b3e-8ec1-2443057b6dec",
+      "status": "post-install-repeat-diagnosed-read-only",
+      "durableProof": {
+        "stateRevision": 45,
+        "history38Before": {
+          "draftId": "a171551e-f8d0-49b5-912c-8f15c2f7e617",
+          "targetItemId": "53780b96-7777-43c3-a90e-360cfa91a133",
+          "revision": 27,
+          "status": "frozen",
+          "baseGeneration": 1
+        },
+        "history38After": {
+          "sameDraftId": true,
+          "targetItemId": null,
+          "revision": 28,
+          "status": "protected",
+          "baseGeneration": 2,
+          "ownerViewId": "attachment_PrPvoiQyFTcL7Pm9cmqX4ua8lq67CpGV",
+          "updatedAt": "2026-10-07T00:32:05.639Z"
+        },
+        "history39": "Consumes untargeted revision28 draft and adds draft-id new item. Original53780\u2026 retains accepted peer text and missing disposition."
+      },
+      "excludedCause": "Resumed draft was NOT already missing edit identity; latest put-draft itself removed targetItemId.",
+      "sourceProof": {
+        "apps/codex-mcp/src/server.ts:79": "startStdioServer reads review-v1.html once into shell",
+        "apps/codex-mcp/src/server.ts:65": "createNativeServer captures shell argument",
+        "apps/codex-mcp/src/server.ts:74": "ReadResource serves captured shell, not reread installed bytes"
+      },
+      "processEvidenceLocalEDT": [
+        {
+          "pid": 29148,
+          "start": "2026-10-06 18:46:26"
+        },
+        {
+          "pid": 30283,
+          "start": "2026-10-06 18:50:03"
+        },
+        {
+          "pid": 37680,
+          "start": "2026-10-06 19:27:20"
+        },
+        {
+          "pid": 49268,
+          "start": "2026-10-06 20:21:39"
+        },
+        {
+          "pid": 49273,
+          "start": "2026-10-06 20:21:39"
+        },
+        {
+          "pid": 51515,
+          "start": "2026-10-06 20:28:56"
+        }
+      ],
+      "processCommand": "Installed Resources/node/bin/node Resources/codex-mcp/server.js; all predate root reported20:29EDT installation. New daemon PID51713 starts20:29:17 but daemon restart does not restart separate MCP resource servers.",
+      "conclusion": "Strong supported cause is preinstall MCP server captured old native HTML still serving old reattachment code after disk installation. Exact per-card serving PID is not mapped, but all running installed MCP servers predate installation and latest mutation matches old-code target omission. Host resource cache could additionally retain old HTML; reload should reset both.",
+      "nextStep": "Root restore checkpoint via two ordinary Undo actions and Close, then user reload Placekeeper plugin/Codex to restart resource server and host cache. Verify new MCP process start after installation before fresh approved reopen and retry. No process killing or new production change required.",
+      "qualificationNote": "Actual-host post-install acceptance must use freshly started MCP resource server; disk asset hashes alone do not prove running card version.",
+      "mutations": "No code/tests/service/UI/install/process mutations; only temp diagnosis report."
+    },
+    "resolution": "Later installed corrections supersede scoped failures; preserve failed attempts and old artifact identity."
+  },
+  "latestActualEvidence": {
+    "ownedLifecycle": {
+      "sessionId": "ff112721-0734-4b3e-8ec1-2443057b6dec",
+      "status": "in progress",
+      "initialPrompt": {
+        "at": "2026-10-06T23:31:21.920Z",
+        "generation": 1,
+        "revision": 0,
+        "items": {
+          "delete": 1,
+          "pdfAnnotation": 2
+        },
+        "sync": "clean original0"
+      },
+      "setup": {
+        "at": "2026-10-06T23:35:07.800007+00:00",
+        "surface": "ordinary same-session browser peer while native remained connected",
+        "removed": "Two imported highlights and original app-owned delete via normal Remove controls on disposable fixture",
+        "created": {
+          "kind": "highlight",
+          "quote": "Body TOC: repeated, alias",
+          "comment": "U8 owned lifecycle accepted comment",
+          "interaction": "real browser text drag then Highlight, comment, Save"
+        },
+        "destination": "reviewed.pdf via normal save-copy dialog",
+        "browserStatus": "Saved; one Highlight; page1of4 zoom150",
+        "nativeStatus": "Latest control inspection timed out; human asked to edit highlight text to U8 owned protected draft and leave pending"
+      },
+      "files": {
+        "source.pdf": {
+          "bytes": 17248,
+          "sha256": "8deab3669b47b927dd146b02f813ca9f3d03447f62a43b6c365fdd81d9c4c902"
+        },
+        "reviewed.pdf": {
+          "bytes": 17248,
+          "sha256": "8deab3669b47b927dd146b02f813ca9f3d03447f62a43b6c365fdd81d9c4c902"
+        },
+        "original.pdf": {
+          "bytes": 18847,
+          "sha256": "46a4cac209888f711ce80d88a96df3b439cea6c9fd0363b21a694cde556faa57"
+        },
+        "successor.pdf": {
+          "bytes": 890,
+          "sha256": "f83053820f5e9566b86f114317e7ad0ec694cf8b47a3c05343a96ce7eeb6cf08"
+        }
+      },
+      "draftPrompt": {
+        "at": "2026-10-06T23:35:24.065Z",
+        "generation": 1,
+        "revision": 34,
+        "sync": "clean34",
+        "itemId": "53780b96-7777-43c3-a90e-360cfa91a133",
+        "draftId": "a171551e-f8d0-49b5-912c-8f15c2f7e617",
+        "acceptedComment": "U8 owned lifecycle accepted comment",
+        "userConfirmedEditorText": "U8 owned protected draft"
+      },
+      "controlledFailureAndSourceHold": {
+        "at": "2026-10-06T23:36:18.473083+00:00",
+        "mechanism": "Own reviewed.pdf renamed to reviewed-before-failure.pdf; empty directory blocks copy destination",
+        "acceptedComment": "U8 owned accepted during save failure",
+        "bothViews": "Not saved and Retry",
+        "nativeDraftText": "U8 owned protected draft",
+        "nativeEditor": "Edit Highlight remains open",
+        "nativePage": 1,
+        "nativeZoom": 132,
+        "peerPage": 1,
+        "peerZoom": 150,
+        "sourceBeforeSha256": "8deab3669b47b927dd146b02f813ca9f3d03447f62a43b6c365fdd81d9c4c902",
+        "sourceAfterSha256": "f83053820f5e9566b86f114317e7ad0ec694cf8b47a3c05343a96ce7eeb6cf08",
+        "sourceAfterBytes": 890,
+        "status": "awaiting fresh prompt while held and not saved",
+        "promptVerification": {
+          "at": "2026-10-06T23:36:58.946Z",
+          "currentness": "current",
+          "generation": 1,
+          "revision": 38,
+          "sync": "not-saved",
+          "desiredRevision": 38,
+          "savedRevision": 37,
+          "failure": "target-changed",
+          "pendingDraftId": "a171551e-f8d0-49b5-912c-8f15c2f7e617",
+          "acceptedComment": "U8 owned accepted during save failure"
+        },
+        "destinationRestoredAt": "2026-10-06T23:37:05.356786+00:00"
+      },
+      "disconnectAndRefresh": {
+        "at": "2026-10-06T23:38:21.824762+00:00",
+        "retryBeforeDisconnect": "Peer Retry invoked after exact target restoration; still Not saved while source replacement held. No success claim at this stage.",
+        "nativeClose": "Normal Close review; accepted work remains recoverable",
+        "peerAfterClose": "One-page successor, Saved, same accepted comment Missing text and protected draft Needs new location; peer editor closed; page1 zoom150",
+        "nativeRelaunch": "Normal focused same session generation2; trusted claim and display attestation succeeded; awaiting user expansion/readiness",
+        "reviewedPdfSha256": "048b7d26367f5dbb8398e9c3ff363707c72385c24cf12252265112c58fde19c8",
+        "noObstructionRemains": true
+      },
+      "nativeRecoveredPrompt": {
+        "at": "2026-10-06T23:44:03.147Z",
+        "currentness": "current",
+        "generation": 2,
+        "revision": 39,
+        "sync": "clean39",
+        "copyDestinationGeneration": 3,
+        "sameItemId": "53780b96-7777-43c3-a90e-360cfa91a133",
+        "sameDraftId": "a171551e-f8d0-49b5-912c-8f15c2f7e617",
+        "unresolvedItems": 1,
+        "pendingDrafts": 1,
+        "precedingAttempt": "23:38 presentation never became active before connection expiry; user explicitly requested reconnect at23:43:19; new launch and attestation succeeded"
+      },
+      "reattachmentBug": {
+        "promptAt": "2026-10-06T23:45:37.076Z",
+        "generation": 2,
+        "revision": 41,
+        "sync": "clean41",
+        "originalItemStillUnresolved": "53780b96-7777-43c3-a90e-360cfa91a133",
+        "unexpectedNewItem": "a171551e-f8d0-49b5-912c-8f15c2f7e617",
+        "newComment": "U8 owned protected draft",
+        "newQuote": "New reattachment target",
+        "pendingDrafts": 0,
+        "rootCause": "ReconciliationWorkspace submitReattachment rebuild drops existing edit draft targetItemId; diagnosis/fix worker in progress",
+        "normalUndoRecovery": {
+          "at": "2026-10-06T23:47:59.473649+00:00",
+          "actions": 2,
+          "first": "Removed duplicate, restored draft Ready to apply",
+          "second": "Restored original item Missing text and draft Needs new location",
+          "peer": "Saved, one accepted item plus protected draft; page1 zoom150"
+        }
+      },
+      "fixedNativeReattachment": {
+        "observedAt": "2026-10-07T00:35:20.193Z",
+        "currentness": "current",
+        "generation": 2,
+        "revision": 49,
+        "itemCount": 1,
+        "editedItemId": "53780b96-7777-43c3-a90e-360cfa91a133",
+        "added": [],
+        "comment": "U8 owned protected draft",
+        "quote": "New reattachment target ",
+        "pendingDraftIds": [],
+        "unresolvedItemIds": [],
+        "savedRevision": 49,
+        "exportEligible": true,
+        "pluginRestartVerified": "All active MCP server processes started after installed update; prior stale-code attempt retained as failure evidence"
+      }
+    },
+    "failedReopen": {
+      "startedAt": "2026-10-07T00:38:33.437239+00:00",
+      "sessionId": "ff112721-0734-4b3e-8ec1-2443057b6dec",
+      "itemId": "53780b96-7777-43c3-a90e-360cfa91a133",
+      "nativeDraftId": "2e7048de-a797-4ee3-9330-3cb3c3d1a696",
+      "initialPrompt": {
+        "revision": 83,
+        "generation": 2,
+        "save": "clean83"
+      },
+      "obstruction": {
+        "path": "/tmp/placekeeper-native-implementation/u8-owned-lifecycle-20261006/reviewed.pdf",
+        "backup": "/tmp/placekeeper-native-implementation/u8-owned-lifecycle-20261006/reviewed-before-reopen-failure.pdf",
+        "backupSha256": "b045ceef91e22776859fcba4dbe6732c3cd4a2d6c2102cd041c2f8ce4cfe3274",
+        "kind": "empty directory at existing copy destination"
+      },
+      "status": "passed AE2 actual closed-and-reopened failed save with accepted edit/protected draft, then verified automatic save recovery",
+      "beforeClose": {
+        "observedAt": "2026-10-07T00:39:34.898903+00:00",
+        "nativeSave": "Not saved; Retry visible",
+        "acceptedComment": "U8 accepted during failed-save reopen",
+        "nativeEditorText": "U8 draft across failed-save reopen",
+        "nativePage": 1,
+        "nativeZoom": 77,
+        "peerPage": 1,
+        "peerZoom": 150
+      },
+      "closure": {
+        "native": "Close review normal control confirmed closed; accepted work recoverable",
+        "peer": "browser tab closed after native",
+        "obstructionStillPresent": true
+      },
+      "freshOpen": {
+        "kind": "focused",
+        "sessionId": "ff112721-0734-4b3e-8ec1-2443057b6dec",
+        "generation": 2,
+        "trustedLaunch": "succeeded",
+        "trustedDisplay": "succeeded",
+        "currentPrompt": "awaiting user expanded-ready prompt"
+      },
+      "reopenedPrompt": {
+        "at": "2026-10-07T00:39:35.125Z",
+        "currentness": "current",
+        "generation": 2,
+        "revision": 87,
+        "desiredRevision": 87,
+        "savedRevision": 86,
+        "save": "not-saved",
+        "failure": "target-changed",
+        "itemId": "53780b96-7777-43c3-a90e-360cfa91a133",
+        "acceptedComment": "U8 accepted during failed-save reopen",
+        "pendingDraftId": "2e7048de-a797-4ee3-9330-3cb3c3d1a696",
+        "draftVisibleText": "U8 draft across failed-save reopen",
+        "draftUI": "Ready to apply"
+      },
+      "restoredAt": "2026-10-07T00:40:03.929164+00:00",
+      "restoreExactHashMatches": true,
+      "obstructionRemaining": false,
+      "afterRestore": {
+        "ui": "Saved",
+        "draft": "Ready to apply; U8 draft across failed-save reopen",
+        "retry": "Attempted click found no Retry button; automatic recovery completed first, no explicit Retry causality claim",
+        "portableSavedItem": {
+          "id": "53780b96-7777-43c3-a90e-360cfa91a133",
+          "kind": "highlight",
+          "pageIndex": 0,
+          "createdAt": "2026-10-06T23:33:41.057Z",
+          "updatedAt": "2026-10-07T00:38:39.958Z",
+          "payload": {
+            "quote": "New reattachment target ",
+            "prefix": "",
+            "suffix": "on the successor.",
+            "rect": {
+              "x": 72,
+              "y": 89,
+              "width": 157,
+              "height": 16
+            },
+            "segmentRects": [
+              {
+                "x": 72,
+                "y": 89,
+                "width": 157,
+                "height": 16
+              }
+            ],
+            "pageBoundaries": [],
+            "reliable": true,
+            "comment": "U8 accepted during failed-save reopen"
+          }
+        },
+        "pending": "fresh prompt saved-revision verification",
+        "freshPrompt": {
+          "at": "2026-10-07T00:40:30.736Z",
+          "currentness": "current",
+          "generation": 2,
+          "revision": 87,
+          "desiredRevision": 87,
+          "savedRevision": 87,
+          "sync": "clean",
+          "itemCount": 1,
+          "pendingDraftId": "2e7048de-a797-4ee3-9330-3cb3c3d1a696"
+        }
+      }
+    },
+    "generatedExportPortable": {
+      "createdAt": "2026-10-07T00:41:53.362873+00:00",
+      "source": "/tmp/placekeeper-native-implementation/u8-owned-lifecycle-20261006/reviewed.pdf",
+      "input": "/tmp/placekeeper-native-implementation/u8-export-portable-20261007/generated-output.pdf",
+      "inputSha256": "34fbaf97dd9d159914fe5c970623705375bf71dbc9757ae587a7f136ad0fee11",
+      "inputInode": 46755984,
+      "status": "passed actual native generated-output export and independent portable import",
+      "generatedSession": {
+        "id": "c81091d9-a99e-4103-8f2c-77de923c7bb6",
+        "generation": 1,
+        "revision": 0,
+        "role": "generated-output",
+        "destination": "none",
+        "trustedPromptAt": "2026-10-07T00:42:23.848Z"
+      },
+      "export": {
+        "status": "actual native menu Export + normal Export reviewed PDF dialog success",
+        "author": "Placekeeper",
+        "output": "/tmp/placekeeper-native-implementation/u8-export-portable-20261007/generated-output-reviewed.pdf",
+        "outputSha256": "412f69b8074514d8daa870bd53538e096a9268923c6ecf29e06d5bcb958056fe",
+        "inputUnchanged": true,
+        "items": [
+          {
+            "id": "53780b96-7777-43c3-a90e-360cfa91a133",
+            "kind": "highlight",
+            "pageIndex": 0,
+            "createdAt": "2026-10-06T23:33:41.057Z",
+            "updatedAt": "2026-10-07T00:38:39.958Z",
+            "payload": {
+              "quote": "New reattachment target ",
+              "prefix": "",
+              "suffix": "on the successor.",
+              "rect": {
+                "x": 72,
+                "y": 89,
+                "width": 157,
+                "height": 16
+              },
+              "segmentRects": [
+                {
+                  "x": 72,
+                  "y": 89,
+                  "width": 157,
+                  "height": 16
+                }
+              ],
+              "pageBoundaries": [],
+              "reliable": true,
+              "comment": "U8 accepted during failed-save reopen"
+            }
+          }
+        ]
+      },
+      "independentInput": {
+        "path": "/tmp/placekeeper-native-implementation/u8-export-portable-20261007/independent-portable.pdf",
+        "inode": 46756410,
+        "sha256": "412f69b8074514d8daa870bd53538e096a9268923c6ecf29e06d5bcb958056fe"
+      },
+      "nativeIndependentImport": {
+        "sessionId": "d8991954-01a6-4cd9-b069-ddc758cb1ea2",
+        "observedAt": "2026-10-07T00:43:46.624Z",
+        "currentness": "current",
+        "generation": 1,
+        "revision": 0,
+        "sourceDigest": "412f69b8074514d8daa870bd53538e096a9268923c6ecf29e06d5bcb958056fe",
+        "byteLength": 3810,
+        "itemCount": 1,
+        "pendingDraftIds": [],
+        "unresolvedItemIds": [],
+        "save": "clean0",
+        "destination": "original",
+        "nativeDOM": {
+          "data-review-item": "53780b96-7777-43c3-a90e-360cfa91a133",
+          "origin": "owned",
+          "comment": "U8 accepted during failed-save reopen",
+          "quote": "New reattachment target",
+          "annotations": 1
+        },
+        "independence": "Normal opened result, unique copied path/inode, new session, revision0 imported portable item. Fresh-session branch reads copied PDF; only resume branch hydrates former snapshot. Existing recovery root; not physically fresh root.",
+        "contextItemsRetrieval": {
+          "initial": "sandboxed same current handle returned unavailable; CLI catches socket errors as unavailable",
+          "normalPermissionRetry": "same installed context items command and same still-current handle with normal require_escalated succeeded",
+          "total": 1,
+          "itemId": "53780b96-7777-43c3-a90e-360cfa91a133",
+          "intent": "highlight",
+          "comment": "U8 accepted during failed-save reopen",
+          "quote": "New reattachment target ",
+          "note": "No alternate handle, session search, private authority or protocol bypass."
+        }
+      }
+    }
+  },
+  "sourceSnapshots": [
+    {
+      "path": "/tmp/placekeeper-native-implementation/u8-root-evidence.json",
+      "sha256": "8bada4608d94e37266175d774618d8c8d0f1c38eb6b81ee697031eaa8cec2be3"
+    },
+    {
+      "path": "/tmp/placekeeper-native-implementation/u8-current-remaining-audit.json",
+      "sha256": "38f3c6c85a6bd030c736ab77339046eefa60bcf909d2641e470755b4f2f9e121"
+    },
+    {
+      "path": "/tmp/placekeeper-native-implementation/u8-owned-lifecycle-20261006/actual-evidence.json",
+      "sha256": "5e9290a264aeee41af06bf98dc5db8ee4a4d537375c469b490cb37363e486e4e"
+    },
+    {
+      "path": "/tmp/placekeeper-native-implementation/u8-owned-lifecycle-20261006/failed-reopen-evidence.json",
+      "sha256": "c296ea07f7683d7da6291e36846d78f9fcf9d303ee0f0fe1cb7804e6310aba15"
+    },
+    {
+      "path": "/tmp/placekeeper-native-implementation/u8-export-portable-20261007/evidence.json",
+      "sha256": "05556855c96d74d625b493cdce92eb267d262b8c0958a704627f0b5fbed14937"
+    },
+    {
+      "path": "/tmp/placekeeper-native-implementation/u8-draft-identity-installation.json",
+      "sha256": "338df6219964f0b53549bac6c1e984c15279d00ca2bce3bfb666139f9002a548"
+    },
+    {
+      "path": "/tmp/placekeeper-native-implementation/u8-current-host-identity-20261007.json",
+      "sha256": "2217b0c10b77ff08419df711ecbb585d11716b53a86485fb62563f82a0c6c7e1"
+    },
+    {
+      "path": "/Users/bross1/.codex/worktrees/dcb8/placekeeper/docs/testing/codex-native-u3-qualification.json",
+      "sha256": "0472b7c3737bba7fe2767b337ec6d7dd19ab3282b65b3fca823fafe60cb65860"
+    },
+    {
+      "path": "/Users/bross1/.codex/worktrees/dcb8/placekeeper/docs/testing/codex-native-u4-qualification.json",
+      "sha256": "ee33d2cdbdea00bd883f6de9e135720c3f5b6ac4a7ca4b98e6b3ec64ae6dded2"
+    },
+    {
+      "path": "/Users/bross1/.codex/worktrees/dcb8/placekeeper/docs/testing/codex-native-u5-qualification.json",
+      "sha256": "3ea9c00fe29991257a165933498753d00e0f30bbdc79ba297f582715da58d94b"
+    },
+    {
+      "path": "/Users/bross1/.codex/worktrees/dcb8/placekeeper/docs/testing/codex-native-u6-qualification.json",
+      "sha256": "42c212786856b4b469d1def11ef404295f568213cbc2b5bd0cfdfa3d7b34ae50"
+    },
+    {
+      "path": "/Users/bross1/.codex/worktrees/dcb8/placekeeper/docs/testing/codex-native-u7-qualification.json",
+      "sha256": "abf1e61b408d9ff6dce71d863eaf229c3d3442d8e814eed20eccdd8d50c55f65"
+    },
+    {
+      "path": "/Users/bross1/.codex/worktrees/dcb8/placekeeper/scripts/qualify-codex-native.ts",
+      "sha256": "687d35ca5e1cee5620a5976c636d2b8d900e63130355b97955961a6ec1acea54"
+    },
+    {
+      "path": "/tmp/placekeeper-native-implementation/u8-closeout-validation.json",
+      "sha256": "d40cbe9150bacd9f1eca158d801896d7cce521e2c24230868a1d35b3cfca4f55"
+    }
+  ],
+  "missingRequiredFieldsOrEvidence": [
+    "User-deferred actual large-resource-lifecycle OS memory/no input loss/participation release qualification",
+    "User-deferred five performance rows lack >=3 native/browser completed samples, actual endpoint timestamps, OS attribution, comparable setup and >2x investigation where needed",
+    "AE10 browser independent-entry exact separate timestamp absent; preserve U7 anchor caveat or add independently dated actual observation",
+    "status remains not-run until full gates pass"
+  ],
+  "userDeferral": {
+    "scope": [
+      "five same-machine native/browser performance comparisons",
+      "actual-host OS memory and bounded retention qualification"
+    ],
+    "authority": "User explicitly deferred performance/memory and authorized closeout review, checks, report and local commit; reported by root orchestrator during this execution.",
+    "effect": "These gates remain unproved. No waiver, reduced sample requirement, passing performance claim, or full-parity promotion."
+  },
+  "closeoutPolicy": "User authorized local closeout and commit. Completed functional checks and scoped automated regressions support that closeout; full parity remains not-run due user-deferred performance and OS memory acceptance. No release claim."
+}

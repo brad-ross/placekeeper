@@ -350,7 +350,8 @@ export function createRpcHostRuntime(
     const current = pending.get(message.requestId);
     if (current === undefined) return;
     if ((host === "macos" || host === "codex") && message.method !== current.method) return;
-    if (host === "codex" && message.ok === false) {
+    if (host === "codex" && message.ok === false &&
+      !(isObject(message.error) && message.error.kind === "export-conflict" && Object.keys(message.error).length === 1)) {
       pending.delete(message.requestId); current.abort?.();
       current.reject(new Error("The native review action or resource could not be verified."));
       return;
@@ -388,9 +389,8 @@ export function createRpcHostRuntime(
     if (!isReviewRuntimeMethodForHost(host, method)) {
       return Promise.reject(new Error(`The ${method} capability is unavailable in ${host === "chrome" ? "Chrome" : "this host"}.`));
     }
-    const outboundPayload = host === "chrome"
+    const outboundPayload = host === "chrome" || host === "codex"
       ? sanitizeChromeReviewRuntimeRequest(method, payload)
-      : host === "codex" ? sanitizeChromeReviewRuntimeRequest(method, payload)
       : host === "macos" ? sanitizeMacosReviewRuntimeRequest(method, payload) : payload;
     if (outboundPayload === undefined) {
       return Promise.reject(new Error("The review runtime request was invalid."));
@@ -532,19 +532,22 @@ export function createRpcHostRuntime(
         ...(typeof value.resources.worker === "string" ? [value.resources.worker] : []),
         ...(worker === undefined ? [] : [worker.url]),
       ]);
-      const nativeResources = (host === "chrome" || host === "macos" || host === "codex") && typeof value.resources.worker === "string"
-        ? host === "macos" || host === "codex"
-          ? worker === undefined ? undefined : {
-              document: documentResourceValue.url,
-              pdfiumWasm: pdfium.url,
-              worker: worker.url,
-            }
-          : {
-              document: value.resources.document,
-              pdfiumWasm: value.resources.pdfiumWasm,
-              worker: value.resources.worker,
-            }
-        : undefined;
+      let nativeResources: { document: string; pdfiumWasm: string; worker: string } | undefined;
+      if (typeof value.resources.worker === "string") {
+        if (host === "chrome") {
+          nativeResources = {
+            document: value.resources.document,
+            pdfiumWasm: value.resources.pdfiumWasm,
+            worker: value.resources.worker,
+          };
+        } else if ((host === "macos" || host === "codex") && worker !== undefined) {
+          nativeResources = {
+            document: documentResourceValue.url,
+            pdfiumWasm: pdfium.url,
+            worker: worker.url,
+          };
+        }
+      }
       if ((host === "chrome" || host === "macos" || host === "codex") &&
         (nativeResources === undefined || nativeResources.worker === undefined)) {
         throw new Error("The trusted host returned incomplete packaged resources.");

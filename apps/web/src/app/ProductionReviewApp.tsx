@@ -179,6 +179,7 @@ import {
 import { SaveDestinationDialog } from "../save/SaveDestinationDialog.js";
 import {
   gateReviewCommand,
+  canonicalSaveStatusCanApply,
   pollSaveStatusUntilSettled,
 } from "../save/save-state-controller.js";
 import {
@@ -1499,6 +1500,13 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       void pending.captured.then(commit, commit);
     } else commit();
   }, [props.initialState]);
+  useEffect(() => {
+    const canonicalStatus = props.initialSaveStatus;
+    if (canonicalStatus === undefined) return;
+    setSaveStatus((current) => canonicalSaveStatusCanApply(
+      stateRef.current, props.initialState, current, canonicalStatus,
+    ) ? canonicalStatus : current);
+  }, [props.initialState, props.initialSaveStatus]);
   useLayoutEffect(() => {
     const successorGeneration = props.initialState.workflow.documentGeneration;
     const predecessorGeneration = documentGenerationRef.current;

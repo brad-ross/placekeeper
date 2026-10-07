@@ -240,6 +240,19 @@ export type CodexAdmissionFailure =
   | "stale-generation"
   | "revoked"
   | "unavailable";
+/** Interactive native pickers have a five-minute process budget. Transport
+ * deadlines include bounded completion slack; ordinary requests keep defaults. */
+export function codexPickerTimeouts(request: CodexAppRequest): { socketMs: number; sdkMs: number } | undefined {
+  return request.authority === "presentation" && (request.method === "chooseFolder" || request.method === "locateSave")
+    ? { socketMs: 310_000, sdkMs: 315_000 } : undefined;
+}
+
+/** Closed operation outcome, never an arbitrary service exception message. */
+export class NativeOperationError extends Error {
+  readonly reason = "export-conflict" as const;
+  constructor() { super("native-export-conflict"); this.name = "NativeOperationError"; }
+}
+
 export type CodexAppResponse = {
   readonly status: "pending";
 } | {
@@ -252,6 +265,9 @@ export type CodexAppResponse = {
 } | {
   readonly status: "ok";
   readonly payload: unknown;
+} | {
+  readonly status: "operation-error";
+  readonly reason: "export-conflict";
 } | {
   readonly status: "denied";
   readonly reason: CodexAdmissionFailure;
@@ -314,6 +330,8 @@ export function parseCodexAppResponse(value: unknown): CodexAppResponse | undefi
   if (!record(value)) {
     return undefined;
   }
+  if (value.status === "operation-error" && value.reason === "export-conflict" && closed(value, ["status", "reason"]))
+    return { status: "operation-error", reason: "export-conflict" };
   if (value.status === "pending" && closed(value, ["status"]))
     return {
       status: "pending"

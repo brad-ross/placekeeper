@@ -16,6 +16,9 @@ import {
   rgb,
 } from 'pdf-lib';
 
+import { createFixturePdf } from './fixture-document.js';
+import { largeTextHeavyPdf } from './large-text-heavy.js';
+
 import { projectReviewItem } from '../../../packages/core/src/annotation-projection.js';
 import type { ReviewItem } from '../../../packages/core/src/review-model.js';
 import { createSelectedPdfWriter } from '../../../packages/pdf-backends/src/selected-writer.js';
@@ -91,7 +94,6 @@ function addReportedMathSymbolInventory(document: PDFDocument, page: PDFPage): v
   )));
 }
 const outputDirectory = resolve('test/fixtures/pdfs');
-const fixtureMetadataDate = new Date('2024-01-01T00:00:00.000Z');
 const encryptedNoAnnotationBase64 =
   'JVBERi0xLjcKJeLjz9MKMSAwIG9iago8PAovUHJvZHVjZXIgPGRlOTU0NjMwYzIwMGU1MTc2YmYwNjdhOTAxMWYxNjBjMjZlN2Y5M2NiMDg1YzNmMTc0MzAzYmQ5NmVlYWU5ODU+Cj4+CmVuZG9iagoyIDAgb2JqCjw8Ci9UeXBlIC9QYWdlcwovQ291bnQgMQovS2lkcyBbIDQgMCBSIF0KPj4KZW5kb2JqCjMgMCBvYmoKPDwKL1R5cGUgL0NhdGFsb2cKL1BhZ2VzIDIgMCBSCj4+CmVuZG9iago0IDAgb2JqCjw8Ci9UeXBlIC9QYWdlCi9SZXNvdXJjZXMgPDwKL0ZvbnQgPDwKL0hlbHZldGljYS03MDk4NDgwNzg5IDUgMCBSCi9IZWx2ZXRpY2EtOTc0MjY4MjU2OCA1IDAgUgo+PgovWE9iamVjdCA8PAo+PgovRXh0R1N0YXRlIDw8Cj4+Cj4+Ci9NZWRpYUJveCBbIDAgMCA2MTIgNzkyIF0KL0Fubm90cyBbIF0KL0NvbnRlbnRzIFsgNiAwIFIgXQovUGFyZW50IDIgMCBSCj4+CmVuZG9iago1IDAgb2JqCjw8Ci9UeXBlIC9Gb250Ci9TdWJ0eXBlIC9UeXBlMQovQmFzZUZvbnQgL0hlbHZldGljYQovRW5jb2RpbmcgL1dpbkFuc2lFbmNvZGluZwo+PgplbmRvYmoKNiAwIG9iago8PAovRmlsdGVyIC9GbGF0ZURlY29kZQovTGVuZ3RoIDI1Ngo+PgpzdHJlYW0K+D741cssH9mtvMVGLzls9Uow/5r8LccUtB9r7Lwh1mStk3Na1fAdvsTJ4jNo7Ar07jFUILdMwU1qaQIQ4cQbQzSkxonj+kiYVngxdZLOUPnASxVGRFuZuTOp9h/+/8Go4xRIoK4IDYF9sTEbyUzr/28knmX1oJtUOV1CENJeHcU4IENHxw3P99W18tTKufF4DrjyKqsVCo3QrbrhvesjJNWiINW3cmTJlPWMMc23UP4nxs3QFqXLSyZXp/6RVTwfSb9w5hNeiaV0rdRuLf0upQ2i9glRC4GT1H3Xq+iqtkShFfjDpJlPX7VFzd/+SBv+PXfRIN7Cui271Ps2WhfnlQplbmRzdHJlYW0KZW5kb2JqCjcgMCBvYmoKPDwKL1YgNQovUiA2Ci9MZW5ndGggMjU2Ci9QIDQKL0ZpbHRlciAvU3RhbmRhcmQKL08gPDUxZGNjOGJmM2FkYjYzNDMwMDc1NTA1ZWI4ODk1ZmVlOWQyMDRhOTg5ZjhjMjZjOWY1ZDQ0OWNiMGI2MjRmZTkwNTJjMGQxNGIzYzhiYzhiNmU5ZGE4NGUzM2UzM2I5ZD4KL1UgPGM1NjJmYTI4YTU3YzE5MTQ3MDE0ZTdkNzA4ZTJjZjJiZjRmN2Y2NjMxMzljMzIxZDM5MmNhNmJhM2M0NzJmZmU3MjVjMjlkNTliODliZWFmMGIyOTJjNWQ0MzJlNGQxZD4KL0NGIDw8Ci9TdGRDRiA8PAovQXV0aEV2ZW50IC9Eb2NPcGVuCi9DRk0gL0FFU1YzCi9MZW5ndGggMzIKPj4KPj4KL1N0bUYgL1N0ZENGCi9TdHJGIC9TdGRDRgovT0UgPGFlOWI4OGVhZDM2MWVlMjUyOTYyZGY2NmNmNWYzMjQ2NDdlMDliNWNhZDMwNzZmYzJlMDI4OGE3MzA0YmY2MTU+Ci9VRSA8ZTQ4NWM4MjNhNTM2MzVkMTdkYmZlZDk4ZTAzNDIxYzEwYTU2MGI5ZWM3NDlkZGM1MzY0ZWNlMGFkY2MyY2UxMj4KL1Blcm1zIDw3MDBlMDE5YmRlNjE4ZGRmMzk0NzNhYjdiMzMxMWMyMz4KPj4KZW5kb2JqCnhyZWYKMCA4CjAwMDAwMDAwMDAgNjU1MzUgZiAKMDAwMDAwMDAxNSAwMDAwMCBuIAowMDAwMDAwMTEzIDAwMDAwIG4gCjAwMDAwMDAxNzIgMDAwMDAgbiAKMDAwMDAwMDIyMSAwMDAwMCBuIAowMDAwMDAwNDQzIDAwMDAwIG4gCjAwMDAwMDA1NDAgMDAwMDAgbiAKMDAwMDAwMDg2OCAwMDAwMCBuIAp0cmFpbGVyCjw8Ci9TaXplIDgKL1Jvb3QgMyAwIFIKL0luZm8gMSAwIFIKL0lEIFsgPDM1MzQzOTMxNjMzOTYxMzczMjY1NjEzOTM5NjMzNDY0MzEzMTMxNjMzNjY1MzQ2MTY0Mzg2NTM0MzE2NjMyMzc+IDwzNTM0MzkzMTYzMzk2MTM3MzI2NTYxMzkzOTYzMzQ2NDMxMzEzMTYzMzY2NTM0NjE2NDM4NjUzNDMxNjYzMjM3PiBdCi9FbmNyeXB0IDcgMCBSCj4+CnN0YXJ0eHJlZgoxNDE0CiUlRU9GCg==';
 
@@ -99,15 +101,6 @@ async function writeFixture(name: string, bytes: Uint8Array): Promise<void> {
   const path = resolve(outputDirectory, name);
   await mkdir(dirname(path), { recursive: true });
   await writeFile(path, bytes);
-}
-
-async function createFixturePdf(): Promise<PDFDocument> {
-  const document = await PDFDocument.create();
-  // pdf-lib otherwise stamps both values with the wall clock. These fixtures
-  // are integrity-pinned release inputs, so their metadata must be reproducible.
-  document.setCreationDate(fixtureMetadataDate);
-  document.setModificationDate(fixtureMetadataDate);
-  return document;
 }
 
 function addExistingAnnotations(document: PDFDocument): void {
@@ -950,6 +943,7 @@ async function certifiedPdf() {
   return document.save({ useObjectStreams: false });
 }
 
+
 await mkdir(outputDirectory, { recursive: true });
 await mkdir(resolve('test/fixtures/pdfium'), { recursive: true });
 const referenceNavigation = referenceNavigationPdf();
@@ -958,6 +952,7 @@ await Promise.all([
     resolve('test/fixtures/pdfium/pdfium.wasm'),
     await readFile(resolve('node_modules/@embedpdf/pdfium/dist/pdfium.wasm')),
   ),
+  writeFixture('large-text-heavy.pdf', await largeTextHeavyPdf()),
   writeFixture('text-native.pdf', await textPdf()),
   writeFixture('text-native-with-annotations.pdf', await textPdf({ annotations: true })),
   writeFixture('image-only.pdf', await imageOnlyPdf()),

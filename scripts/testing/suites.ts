@@ -6,7 +6,7 @@ export type TestStage = string | {
 };
 
 export const suites: Record<string, TestStage[]> = {
-  "test:codex-native": [{ runner: "vitest", options: [], files: ["apps/service/test/codex-daemon-runtime.test.ts", "apps/web/test/codex-host-actions.test.tsx", "apps/web/test/codex-runtime.test.ts", "apps/web/test/codex-refresh.test.tsx", "apps/service/test/codex-persistence.integration.test.ts", "apps/web/test/codex-bundle.test.ts", "apps/web/test/host-render-layer.test.ts", "apps/codex-mcp/test/service-client.integration.test.ts", "apps/codex-mcp/test/server.test.ts", "apps/codex-mcp/test/resources.test.ts", "apps/codex-mcp/test/lifecycle-diagnostics.test.ts", "apps/codex-mcp/test/qualification.test.ts", "apps/service/test/codex-live-context.integration.test.ts", "apps/service/test/hook-contract.test.ts", "packages/core/test/codex-mcp-protocol.test.ts", "apps/service/test/codex-runtime.test.ts", "apps/service/test/native-qualification.test.ts", "apps/service/test/native-qualification-experiments.test.ts", "apps/service/test/codex-backend.test.ts", "apps/service/test/codex-host.test.ts", "apps/service/test/task-binding-registry.test.ts", "apps/service/test/restart-reconnect-store.test.ts"] }],
+  "test:codex-native": [{ runner: "vitest", options: [], files: ["apps/service/test/codex-daemon-runtime.test.ts", "apps/web/test/codex-host-actions.test.tsx", "apps/web/test/codex-runtime.test.ts", "apps/web/test/codex-refresh.test.tsx", "apps/service/test/codex-persistence.integration.test.ts", "apps/web/test/codex-bundle.test.ts", "apps/web/test/host-render-layer.test.ts", "apps/codex-mcp/test/service-client.integration.test.ts", "apps/codex-mcp/test/server.test.ts", "apps/codex-mcp/test/resources.test.ts", "apps/codex-mcp/test/lifecycle-diagnostics.test.ts", "apps/codex-mcp/test/qualification.test.ts", "apps/service/test/codex-live-context.integration.test.ts", "apps/service/test/hook-contract.test.ts", "packages/core/test/codex-mcp-protocol.test.ts", "apps/service/test/codex-runtime.test.ts", "apps/service/test/native-qualification.test.ts", "apps/service/test/native-qualification-experiments.test.ts", "apps/service/test/codex-backend.test.ts", "apps/service/test/codex-host.test.ts", "apps/service/test/task-binding-registry.test.ts", "apps/service/test/restart-reconnect-store.test.ts"] }, "pnpm fixtures:pdf", "pnpm build:codex", { runner: "playwright", options: ["--config", "scripts/testing/config/playwright.config.ts"], files: ["test/acceptance/codex-native-review.spec.ts", "test/acceptance/codex-native-lifecycle.spec.ts", "test/acceptance/codex-native-resources.spec.ts", "test/acceptance/host-raster-rotation.spec.ts"] }],
   "test:source-release": [{ runner: "vitest", options: [], files: ["scripts/source-release.test.ts", "scripts/install-release.test.ts"] }],
   "test:static:distribution": [
     {
@@ -332,6 +332,7 @@ export const suites: Record<string, TestStage[]> = {
         "test/acceptance/viewer.spec.ts",
         "test/acceptance/review-workflow.spec.ts",
         "test/acceptance/production-flow.spec.ts",
+        "test/acceptance/host-raster-rotation.spec.ts",
         "test/acceptance/reloadable-links.spec.ts",
         "test/acceptance/legible-link-destinations.spec.ts",
         "test/acceptance/interface-followup.spec.ts",
@@ -339,6 +340,8 @@ export const suites: Record<string, TestStage[]> = {
         "test/acceptance/workspace-row-interactions.spec.ts",
         "test/acceptance/pdf-mark-design.spec.ts",
         "test/acceptance/codex-native-resources.spec.ts",
+        "test/acceptance/codex-native-review.spec.ts",
+        "test/acceptance/codex-native-lifecycle.spec.ts",
         "test/acceptance/neutral-design-conformance.spec.ts",
         "test/acceptance/host-interface.spec.ts",
         "test/acceptance/macos-interface.spec.ts",
@@ -364,6 +367,7 @@ export const suites: Record<string, TestStage[]> = {
         "test/acceptance/viewer.spec.ts",
         "test/acceptance/review-workflow.spec.ts",
         "test/acceptance/production-flow.spec.ts",
+        "test/acceptance/host-raster-rotation.spec.ts",
         "test/acceptance/reloadable-links.spec.ts",
         "test/acceptance/legible-link-destinations.spec.ts",
         "test/acceptance/interface-followup.spec.ts",
@@ -416,7 +420,8 @@ export const suites: Record<string, TestStage[]> = {
       "runner": "playwright",
       "options": ["--config", "scripts/testing/config/playwright.config.ts"],
       "files": [
-        "test/acceptance/launch-surfaces.spec.ts"
+        "test/acceptance/launch-surfaces.spec.ts",
+        "test/acceptance/host-raster-rotation.spec.ts"
       ]
     }
   ],
@@ -456,6 +461,7 @@ export const suites: Record<string, TestStage[]> = {
       "options": ["--config", "scripts/testing/config/playwright.config.ts"],
       "files": [
         "test/acceptance/production-flow.spec.ts",
+        "test/acceptance/host-raster-rotation.spec.ts",
         "test/acceptance/reference-annotations.spec.ts",
         "test/acceptance/reference-annotation-stale-commands.spec.ts"
       ]
@@ -491,9 +497,13 @@ export const suites: Record<string, TestStage[]> = {
         "test/conformance/pdf-viewer.conformance.spec.ts",
         "test/conformance/pdf-appearance.conformance.spec.ts",
         "test/acceptance/viewer.spec.ts",
+        "test/acceptance/codex-native-resources.spec.ts",
+        "test/acceptance/codex-native-review.spec.ts",
+        "test/acceptance/codex-native-lifecycle.spec.ts",
         "test/acceptance/review-workflow.spec.ts",
         "test/acceptance/launch-surfaces.spec.ts",
         "test/acceptance/production-flow.spec.ts",
+        "test/acceptance/host-raster-rotation.spec.ts",
         "test/acceptance/reloadable-links.spec.ts",
         "test/acceptance/legible-link-destinations.spec.ts",
         "test/acceptance/interface-followup.spec.ts",
@@ -525,6 +535,7 @@ export const suites: Record<string, TestStage[]> = {
         "test/acceptance/viewer.spec.ts",
         "test/acceptance/review-workflow.spec.ts",
         "test/acceptance/production-flow.spec.ts",
+        "test/acceptance/host-raster-rotation.spec.ts",
         "test/acceptance/reloadable-links.spec.ts",
         "test/acceptance/legible-link-destinations.spec.ts",
         "test/acceptance/interface-followup.spec.ts",

@@ -12,6 +12,13 @@ import type { ReviewInteractionAttachment } from "../sessions/review-interaction
 import type { PdfSaveCoordinator } from "../saving/pdf-save-coordinator.js";
 import type { ExportCoordinator } from "../export/export-coordinator.js";
 
+const interactionActions: Partial<Record<ReviewRuntimeBrokerMethod, Parameters<LocalReviewBackend["interaction"]>[2]>> = {
+  beginInteraction: "begin",
+  finalizeInteraction: "finalize",
+  releaseInteraction: "release",
+  acknowledgeInteraction: "acknowledge",
+};
+
 export interface CodexActiveScope {
   readonly sessionId: string;
   readonly taskSessionId: string;
@@ -149,17 +156,19 @@ export class CodexServiceRuntimeBackend {
     }
     if (request.method === "presence") return {};
     const method = request.method as ReviewRuntimeBrokerMethod;
-    const interactionAction = method === "beginInteraction" ? "begin"
-      : method === "finalizeInteraction" ? "finalize"
-        : method === "releaseInteraction" ? "release"
-          : method === "acknowledgeInteraction" ? "acknowledge" : undefined;
+    const interactionAction = interactionActions[method];
     const invoke = async () => {
       if (!current()) throw new Error("presentation-unavailable");
-      const result = interactionAction !== undefined
-        ? await this.#review.interaction(scope.sessionId, record.attachment, interactionAction, request.payload)
-        : method === "scope" ? await this.#scope(scope, current)
-          : method === "saveProposal" ? this.#saving.proposal(scope.sessionId)
-          : await this.#review.invoke(scope.sessionId, scope.generation, method as Exclude<ReviewRuntimeBrokerMethod, "saveProposal">, request.payload, { expectedDocumentGeneration: scope.generation });
+      let result: unknown;
+      if (interactionAction !== undefined) {
+        result = await this.#review.interaction(scope.sessionId, record.attachment, interactionAction, request.payload);
+      } else if (method === "scope") {
+        result = await this.#scope(scope, current);
+      } else if (method === "saveProposal") {
+        result = this.#saving.proposal(scope.sessionId);
+      } else {
+        result = await this.#review.invoke(scope.sessionId, scope.generation, method as Exclude<ReviewRuntimeBrokerMethod, "saveProposal">, request.payload, { expectedDocumentGeneration: scope.generation });
+      }
       const projected = sanitizeCodexReviewRuntimeResponse(method, result);
       if (projected === undefined) throw new Error("invalid-service-response");
       return projected;

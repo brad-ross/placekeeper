@@ -48,7 +48,7 @@ export class LocalReviewBackend {
     switch (method) {
       case "command":
         result = await this.#broker.acceptMutation(sessionId, payload as ReviewCommand, { expectedGeneration: generation });
-        if (this.#broker.saveStatus(sessionId)?.destination.phase === "active") {
+        if ((payload as ReviewCommand).type !== "put-draft" && this.#broker.saveStatus(sessionId)?.destination.phase === "active") {
           void this.#saving.requestSave(sessionId);
         }
         break;

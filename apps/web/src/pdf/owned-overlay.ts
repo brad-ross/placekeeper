@@ -50,3 +50,23 @@ export function positionOwnedRect(
     scale,
   );
 }
+
+/** SelectionPlugin paints natural page rects; rotate that paint without changing its anchors. */
+export function selectionLayerStyle(
+  page: PdfPageObject,
+  layout: PageLayout,
+  documentRotation: Rotation,
+): CSSProperties {
+  const rotation = combinePageRotation(page.rotation, documentRotation);
+  return {
+    position: 'absolute',
+    left: layout.rotatedWidth / 2,
+    top: layout.rotatedHeight / 2,
+    width: layout.width,
+    height: layout.height,
+    transform: `translate(-50%, -50%) rotate(${rotation * 90}deg)`,
+    // The transform isolates descendant blending; blend the group with the raster.
+    mixBlendMode: 'multiply',
+    pointerEvents: 'none',
+  };
+}

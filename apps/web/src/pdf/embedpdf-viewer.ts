@@ -144,9 +144,12 @@ export function createTrustedPdfiumWorker(
     const postMessage = worker.postMessage.bind(worker);
     worker.postMessage = ((message: unknown, transfer?: Transferable[]) => {
       const input = message as { type?: string };
-      const value = input?.type === 'wasmInit'
-        ? { ...input, wasmBinary: verifiedBytes.slice().buffer } : message;
-      postMessage(value, transfer ?? []);
+      if (input?.type !== 'wasmInit') {
+        postMessage(message, transfer ?? []);
+        return;
+      }
+      const wasmBinary = verifiedBytes.slice().buffer;
+      postMessage({ ...input, wasmBinary }, [...(transfer ?? []), wasmBinary]);
     }) as Worker['postMessage'];
   }
   return worker;

@@ -18,7 +18,7 @@ import type { ReviewAnnotation } from '../../../../packages/core/src/pdf-writer.
 import type { PdfSearchResult } from './pdf-search-model.js';
 import type { ReferenceScrollPosition } from './reference-manual-scroll.js';
 import { ReviewIcon } from '../review/ReviewIcon.js';
-import { combinePageRotation, positionOwnedRect } from './owned-overlay.js';
+import { combinePageRotation, positionOwnedRect, selectionLayerStyle } from './owned-overlay.js';
 import { groupOwnedMarkGeometryByPage, hitTestOwnedMark } from './owned-mark-hit-test.js';
 import {
   mergeAuthoringPreviewProjections,
@@ -431,11 +431,13 @@ export function PdfWorkspace({
                         pageIndex={layout.pageIndex}
                         style={{ pointerEvents: 'none' }}
                       />
-                      <SelectionLayer
-                        documentId={MAIN_PDF_DOCUMENT_ID}
-                        pageIndex={layout.pageIndex}
-                        textStyle={PDF_TEXT_SELECTION_STYLE}
-                      />
+                      <div style={selectionLayerStyle(activePdf.pages[layout.pageIndex]!, layout, mainDocument.rotation)}>
+                        <SelectionLayer
+                          documentId={MAIN_PDF_DOCUMENT_ID}
+                          pageIndex={layout.pageIndex}
+                          textStyle={PDF_TEXT_SELECTION_STYLE}
+                        />
+                      </div>
                       <div
                         inert
                         aria-hidden="true"

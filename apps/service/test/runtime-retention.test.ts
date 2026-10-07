@@ -138,6 +138,8 @@ describe("canonical review retention", () => {
     await data.authority.activate(staged.canonicalKey, "presentation");
     const sessionId = staged.projection.sessionId;
     const state = data.broker.state(sessionId)!;
+    // Settle startup observation while clean before modeling a pending destination.
+    await expect(data.broker.settlePhysicalSaveBarrier(sessionId)).resolves.toBe(true);
     await data.broker.establishSaveDestination(sessionId, {
       kind: "original", targetPath: join(data.root, "paper.pdf"),
       capabilityId: state.source.fileId, fingerprint: state.source.digest,
@@ -169,6 +171,8 @@ describe("canonical review retention", () => {
     await data.authority.activate(staged.canonicalKey, "presentation");
     const sessionId = staged.projection.sessionId;
     const before = data.broker.state(sessionId)!;
+    // Settle startup observation while clean before modeling a pending destination.
+    await expect(data.broker.settlePhysicalSaveBarrier(sessionId)).resolves.toBe(true);
     await data.broker.establishSaveDestination(sessionId, {
       kind: "original", targetPath: join(data.root, "paper.pdf"),
       capabilityId: before.source.fileId, fingerprint: before.source.digest,
@@ -204,6 +208,8 @@ describe("canonical review retention", () => {
     await data.authority.activate(staged.canonicalKey, "presentation");
     const sessionId = staged.projection.sessionId;
     const before = data.broker.state(sessionId)!;
+    // Settle startup observation while clean before modeling a pending destination.
+    await expect(data.broker.settlePhysicalSaveBarrier(sessionId)).resolves.toBe(true);
     await data.broker.establishSaveDestination(sessionId, {
       kind: "original", targetPath: join(data.root, "paper.pdf"),
       capabilityId: before.source.fileId, fingerprint: before.source.digest,

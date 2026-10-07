@@ -4,6 +4,7 @@ import { createReviewState, type ReviewCommand } from "../../../packages/core/sr
 import type { SaveStatus } from "../../../packages/core/src/save-status.js";
 import {
   gateReviewCommand,
+  canonicalSaveStatusCanApply,
   pollSaveStatusUntilSettled,
 } from "../src/save/save-state-controller.js";
 
@@ -120,5 +121,37 @@ describe("save status polling", () => {
       async () => {},
     );
     expect(published.map(({ sync }) => sync.phase)).toEqual(["saving", "saving", "clean"]);
+  });
+});
+
+describe('canonical save-status convergence', () => {
+  const current = { ...state, revision: 107 };
+  const failed = { destination: { phase: 'active', generation: 2, kind: 'copy', targetPath: '/reviewed.pdf' },
+    sync: { phase: 'not-saved', desiredRevision: 107, savedRevision: 106, failure: 'target-changed' } } satisfies SaveStatus;
+  const clean: SaveStatus = { ...failed, sync: { phase: 'clean', desiredRevision: 107, savedRevision: 107 } };
+  it('adopts a peer retry without a review revision or source change', () => {
+    expect(canonicalSaveStatusCanApply(current, current, failed, clean)).toBe(true);
+  });
+  it('does not replace newer local commands or completed saves with an older bootstrap', () => {
+    expect(canonicalSaveStatusCanApply({ ...current, revision: 108 }, current, failed, clean)).toBe(false);
+    expect(canonicalSaveStatusCanApply(current, current, clean, failed)).toBe(false);
+    expect(canonicalSaveStatusCanApply(current, current,
+      { ...failed, sync: { ...failed.sync, desiredRevision: 108 } }, clean)).toBe(false);
+    expect(canonicalSaveStatusCanApply(current, current,
+      { ...failed, destination: { ...failed.destination, generation: 3 } }, clean)).toBe(false);
+  });
+  it('keeps save state scoped to its session, source, and generation', () => {
+    for (const stale of [
+      { ...current, sessionId: 'other-session' },
+      { ...current, source: { ...current.source, fileId: 'other-file' } },
+      { ...current, source: { ...current.source, digest: 'b'.repeat(64) } },
+      { ...current, workflow: { ...current.workflow, documentGeneration: 2 } },
+    ]) expect(canonicalSaveStatusCanApply(current, stale, failed, clean)).toBe(false);
+  });
+  it('allows new failures and destination transitions when progress has not regressed', () => {
+    expect(canonicalSaveStatusCanApply(current, current, clean,
+      { ...clean, sync: { ...clean.sync, phase: 'not-saved', failure: 'write-failed' } })).toBe(true);
+    expect(canonicalSaveStatusCanApply(current, current, failed,
+      { ...clean, destination: { ...failed.destination, generation: 3 } })).toBe(true);
   });
 });

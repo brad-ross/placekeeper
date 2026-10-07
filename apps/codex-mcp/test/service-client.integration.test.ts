@@ -2,7 +2,7 @@ import { copyFile, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { RESOURCE_MIME_TYPE } from "@modelcontextprotocol/ext-apps/server";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
@@ -10,6 +10,7 @@ import { PlacekeeperHost } from "../../service/src/host/placekeeper-host.js";
 import { requestControl, requestLaunch, startLaunchControlServer } from "../../service/src/host/launch-control.js";
 import { CODEX_INSTALLED_LAUNCHER_COMMAND, runHookCommand } from "../../service/src/cli/hook-command.js";
 import { parseCodexAppResponse, parseCodexDisplayReceipt, parseCodexNativeLaunchSuccess, parseCodexPendingPresentation, type CodexAppRequest, type CodexAppResponse } from "../../../packages/core/src/codex-mcp-protocol.js";
+import { MacOsDestinationPicker } from "../../service/src/host/destination-picker.js";
 import { createServiceClient } from "../src/service-client.js";
 import { createNativeServer } from "../src/server.js";
 import { PENDING_META_KEY, RESPONSE_META_KEY } from "../src/transport-contract.js";
@@ -62,3 +63,42 @@ describe("native SDK transport with canonical daemon", () => {
     }
   });
 });
+
+
+it.runIf(process.platform === "darwin")("retains native picker results after the ordinary five-second socket deadline", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pk-picker-")), pdf = join(root, "review.pdf"), socket = join(root, "c.sock");
+  await copyFile(resolve("test/fixtures/pdfs/text-native.pdf"), pdf);
+  const host = await PlacekeeperHost.start({ recoveryRoot: join(root, "recovery"), port: 0 });
+  const control = await startLaunchControlServer(host, socket);
+  const folder = vi.spyOn(MacOsDestinationPicker.prototype, "chooseFolder").mockImplementation(async () => {
+    await new Promise(resolve => setTimeout(resolve, 5_200)); return root;
+  });
+  const locate = vi.spyOn(MacOsDestinationPicker.prototype, "locatePdf").mockImplementation(async () => {
+    await new Promise(resolve => setTimeout(resolve, 5_200)); return undefined;
+  });
+  try {
+    const opened = await host.broker.openReview({ pdfPath: pdf, surface: "codex-native" });
+    if (opened.kind === "recovery-offered") throw new Error("unexpected recovery");
+    const sessionId = opened.launch.sessionId, manager = host.codexRuntime;
+    const launch = manager.stageLaunch({ sessionId, kind: "opened" })!;
+    expect(manager.claimLaunch({ bindProof: launch.bindProof, reviewSessionId: sessionId, documentGeneration: 1, taskSessionId: "picker-chat" })).toBe(true);
+    const display = manager.display(launch.handoff.token)!;
+    expect(manager.attestDisplay(display.receipt, "picker-chat")).toBe(true);
+    const active = await manager.pending({ protocolVersion: 1, runtimeId: display.privateMeta.runtimeId, attemptId: display.privateMeta.attemptId,
+      generation: 1, capability: display.privateMeta.pendingCapability, requestId: randomUUID(), authority: "pending", method: "ready", payload: {} });
+    if (active.status !== "active") throw new Error("Expected admission");
+    const client = createServiceClient(socket);
+    const request = (method: "chooseFolder" | "locateSave" | "chooseOriginal") => ({ protocolVersion: 1 as const, runtimeId: active.runtimeId, attemptId: active.attemptId,
+      generation: 1, capability: active.presentationCapability, requestId: randomUUID(), authority: "presentation" as const, method, payload: {} });
+    // Actual socket baseline: the unmodified short control policy loses the picker result.
+    await expect(requestControl(socket, { kind: "codex-app", request: request("chooseFolder") })).rejects.toThrow("timed out");
+    const response = await client.app(request("chooseFolder"));
+    expect(response).toMatchObject({ status: "ok", payload: { cancelled: false, selectionId: expect.any(String) } });
+    expect(await client.app(request("chooseOriginal"))).toMatchObject({ status: "ok" });
+    await host.saving.drain();
+    expect(await client.app(request("locateSave"))).toMatchObject({ status: "ok" });
+    expect(folder).toHaveBeenCalledTimes(2); expect(locate).toHaveBeenCalledTimes(1);
+  } finally {
+    folder.mockRestore(); locate.mockRestore(); await control.close(); await host.close(); await rm(root, { recursive: true, force: true });
+  }
+}, 30_000);

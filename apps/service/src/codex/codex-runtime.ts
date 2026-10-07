@@ -1,3 +1,4 @@
+import { ReviewExportConflictError } from "../../../../packages/core/src/review-runtime-protocol.js";
 import type { NativeQualificationExperiments } from "./native-qualification-experiments.js";
 import type { NativeQualificationObserver } from "./native-qualification.js";
 import { randomBytes } from "node:crypto";
@@ -463,6 +464,8 @@ export class CodexRuntimeManager {
       const response: CodexAppResponse = { status: "ok", payload };
       return Buffer.byteLength(JSON.stringify(response)) <= CODEX_MAX_ENCODED_RESPONSE_BYTES ? response : denied("unavailable");
     } catch (error) {
+      if (this.resolveActive(request) === undefined) return denied("revoked");
+      if (request.method === "exportReviewedCopy" && error instanceof ReviewExportConflictError) return { status: "operation-error", reason: "export-conflict" };
       return denied(error instanceof Error && error.message === "invalid-resource" ? "invalid" : "unavailable");
     }
   }

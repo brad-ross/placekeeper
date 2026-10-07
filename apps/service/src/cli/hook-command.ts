@@ -450,6 +450,8 @@ export async function runHookCommand(
       qualification.record("hook-result", { ...event.receipt, status: response.kind === "codex-attestation" ? response.status : "ignored", taskSessionId: event.taskSessionId });
       if (response.kind !== "codex-attestation" || response.status !== "accepted") {
         await write(`${JSON.stringify(hookOutput("PostToolUse", "Placekeeper could not verify this native presentation for the current chat. Reopen the PDF to retry; live context remains unavailable.", "Placekeeper native presentation was not verified."))}\n`);
+      } else {
+        await write(`${JSON.stringify(hookOutput("PostToolUse", "Placekeeper trusted display attestation succeeded for this chat. Authenticated panel readiness and current context require separate verification; this attestation does not establish either."))}\n`);
       }
     } else if (event.kind === "refresh") {
       const response = await control({ kind: "refresh-context", taskSessionId: event.taskSessionId });

@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { access, copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { access, copyFile, mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { expect, test, type Locator, type Page } from "@playwright/test";
@@ -8017,4 +8017,68 @@ test('document annotation name export rejects a concurrent rename and retries th
   const items = await readEditableReviewItems(new Uint8Array(await readFile(result.path)));
   expect(items).toHaveLength(1);
   expect(items[0]?.importedAnnotationAuthor).toBe('Alice');
+});
+
+test('same-revision browser peer retry settles accepted Apply and preserves an active protected draft', async ({ page, context }) => {
+  const sourcePath = await freshProductionPdf(plainTextPdf);
+  const ownerLaunch = await host.open({ pdfPath: sourcePath, sourceRootPath: sourceRoot, fork: true });
+  if (!ownerLaunch.ok || ownerLaunch.kind === 'recovery-offered') throw new Error('Retry owner launch failed');
+  const sessionId = ownerLaunch.sessionId;
+  const acceptedId = randomUUID(), protectedId = randomUUID();
+  for (const [id, comment] of [[acceptedId, 'Before retry'], [protectedId, 'Separate draft target']] as const) {
+    const state = host.broker.state(sessionId)!;
+    await host.broker.acceptMutation(sessionId, { type: 'add', expectedRevision: state.revision,
+      item: { id, kind: 'pageNote', pageIndex: 0, createdAt: '2026-10-06T00:00:00Z', updatedAt: '2026-10-06T00:00:00Z',
+        payload: { position: { x: 200, y: 200, width: 18, height: 18 }, comment } } });
+  }
+  await host.saving.chooseCopyFilename(sessionId, 'reviewed.pdf');
+  await host.saving.drain();
+  const destination = host.broker.saveStatus(sessionId)!.destination;
+  if (destination.phase !== 'active') throw new Error('Copy destination was not active');
+  const target = destination.targetPath, preserved = `${target}.preserved`;
+  const peerLaunch = await host.open({ pdfPath: sourcePath, sourceRootPath: sourceRoot });
+  if (!peerLaunch.ok || peerLaunch.kind === 'recovery-offered' || peerLaunch.sessionId !== sessionId) throw new Error('Retry peer did not join');
+  const peer = await context.newPage();
+  await Promise.all([page.goto(ownerLaunch.url), peer.goto(peerLaunch.url)]);
+  for (const surface of [page, peer]) {
+    await expect(surface.locator('[data-production-review]')).toHaveAttribute('data-initial-view-ready', 'true');
+    await openAnnotationsWorkspace(surface);
+  }
+  const protectedRow = page.locator(`[data-review-item="${protectedId}"]`);
+  await protectedRow.hover();
+  await protectedRow.getByRole('button', { name: 'Edit Page Note annotation on page 1' }).click();
+  const ownerEditor = page.getByRole('region', { name: /^Edit Page Note/u });
+  await ownerEditor.getByRole('textbox', { name: 'Comment', exact: true }).fill('Protected through peer retry');
+  await expect.poll(() => host.broker.state(sessionId)!.pendingDrafts.find(d => d.targetItemId === protectedId)?.text).toBe('Protected through peer retry');
+  const draftId = host.broker.state(sessionId)!.pendingDrafts.find(d => d.targetItemId === protectedId)!.id;
+  const row = peer.locator(`[data-review-item="${acceptedId}"]`);
+  await row.hover();
+  await row.getByRole('button', { name: 'Edit Page Note annotation on page 1' }).click();
+  const peerEditor = peer.getByRole('region', { name: /^Edit Page Note/u });
+  await peerEditor.getByRole('textbox', { name: 'Comment', exact: true }).fill('Accepted through peer retry');
+  await rename(target, preserved);
+  await mkdir(target);
+  try {
+    await peerEditor.getByRole('button', { name: 'Apply', exact: true }).click();
+    await expect.poll(() => host.broker.saveStatus(sessionId)!.sync.phase).toBe('not-saved');
+    await expect(peer.getByRole('button', { name: 'Retry', exact: true })).toBeVisible();
+    await expect(peerEditor).toBeVisible();
+    const failedRevision = host.broker.state(sessionId)!.revision;
+    await rm(target, { recursive: true });
+    await rename(preserved, target);
+    await page.getByRole('button', { name: 'Retry', exact: true }).click();
+    await expect.poll(() => host.broker.saveStatus(sessionId)!.sync.phase).toBe('clean');
+    expect(host.broker.state(sessionId)!.revision).toBe(failedRevision);
+    await expect(peer.getByRole('button', { name: 'Retry', exact: true })).toHaveCount(0);
+    await expect(peer.getByText('Saved', { exact: true })).toBeAttached();
+    await expect(peerEditor).toHaveCount(0);
+    await expect(ownerEditor.getByRole('textbox', { name: 'Comment', exact: true })).toHaveValue('Protected through peer retry');
+    expect(host.broker.state(sessionId)!.pendingDrafts).toEqual([expect.objectContaining({ id: draftId, text: 'Protected through peer retry' })]);
+    await expect(row).toContainText('Accepted through peer retry');
+  } finally {
+    if (await access(preserved).then(() => true, () => false)) {
+      await rm(target, { recursive: true, force: true });
+      await rename(preserved, target);
+    }
+  }
 });

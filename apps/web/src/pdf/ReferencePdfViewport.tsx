@@ -19,7 +19,7 @@ import { useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 
 import type { PdfSearchResult } from './pdf-search-model.js';
-import { positionOwnedRect } from './owned-overlay.js';
+import { positionOwnedRect, selectionLayerStyle } from './owned-overlay.js';
 import { combinePageRotation } from './owned-overlay.js';
 import {
   pageLinkAnnotationsFromRegistry,
@@ -527,11 +527,13 @@ export function ReferencePdfViewport({
                   pageIndex={layout.pageIndex}
                   style={{ pointerEvents: 'none' }}
                 />
-                <SelectionLayer
-                  documentId={documentId}
-                  pageIndex={layout.pageIndex}
-                  textStyle={PDF_TEXT_SELECTION_STYLE}
-                />
+                <div style={selectionLayerStyle(documentState.document!.pages[layout.pageIndex]!, layout, documentState.rotation)}>
+                  <SelectionLayer
+                    documentId={documentId}
+                    pageIndex={layout.pageIndex}
+                    textStyle={PDF_TEXT_SELECTION_STYLE}
+                  />
+                </div>
                 <div
                   inert
                   aria-hidden="true"

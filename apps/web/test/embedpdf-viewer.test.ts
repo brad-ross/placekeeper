@@ -183,16 +183,40 @@ describe('EmbedPDF registry configuration', () => {
   });
 });
 
-it('supplies Codex verified WASM bytes to the packaged worker without a Blob fetch', () => {
+it('transfers only fresh Codex WASM copies while retaining verified bytes and caller transfers', () => {
   const resources = { document: 'blob:https://native/document', pdfiumWasm: 'blob:https://native/wasm', worker: 'blob:https://native/worker' };
-  const postMessage = vi.fn();
+  const deliveries: Record<string, unknown>[] = [];
+  const postMessage = vi.fn((message: Record<string, unknown>, transfer: Transferable[]) => {
+    deliveries.push(structuredClone(message, { transfer }));
+  });
   const wasm = new Uint8Array([0, 97, 115, 109]);
   const worker = createTrustedPdfiumWorker(resources.worker, { host: 'codex', resources }, () => ({ postMessage, addEventListener: vi.fn() }) as unknown as Worker, undefined, wasm);
-  worker.postMessage({ type: 'wasmInit', wasmUrl: resources.pdfiumWasm, fontFallback: null });
-  expect(postMessage).toHaveBeenCalledWith({ type: 'wasmInit', wasmUrl: resources.pdfiumWasm, fontFallback: null, wasmBinary: wasm.buffer }, []);
-  const sent = postMessage.mock.calls[0]![0].wasmBinary as ArrayBuffer;
-  expect(sent).not.toBe(wasm.buffer);
-  expect(new Uint8Array(sent)).toEqual(wasm);
+  const extra = new Uint8Array([17, 23]);
+  const originalTransfers = [extra.buffer];
+  worker.postMessage({ type: 'wasmInit', wasmUrl: resources.pdfiumWasm, fontFallback: null, extra: extra.buffer }, originalTransfers);
+  const [message, transfers] = postMessage.mock.calls[0]!;
+  const sent = message.wasmBinary as ArrayBuffer;
+  expect(transfers).toHaveLength(2);
+  expect(transfers[0]).toBe(extra.buffer);
+  expect(transfers[1]).toBe(sent);
+  expect(originalTransfers).toHaveLength(1);
+  expect(originalTransfers[0]).toBe(extra.buffer);
+  expect(sent).not.toBe(wasm.buffer); expect(sent.byteLength).toBe(0);
+  expect(extra.byteLength).toBe(0);
+  expect(wasm).toEqual(new Uint8Array([0, 97, 115, 109]));
+  expect(new Uint8Array(deliveries[0]!.wasmBinary as ArrayBuffer)).toEqual(wasm);
+  expect(new Uint8Array(deliveries[0]!.extra as ArrayBuffer)).toEqual(new Uint8Array([17, 23]));
+  worker.postMessage({ type: 'wasmInit', wasmUrl: resources.pdfiumWasm });
+  expect(postMessage.mock.calls[1]![0].wasmBinary).not.toBe(sent);
+  expect(new Uint8Array(deliveries[1]!.wasmBinary as ArrayBuffer)).toEqual(wasm);
+  expect(wasm.byteLength).toBe(4);
+  const payload = new Uint8Array([31]);
+  const ordinary = { type: 'execute', payload: payload.buffer }, ordinaryTransfers = [payload.buffer];
+  worker.postMessage(ordinary, ordinaryTransfers);
+  expect(postMessage.mock.calls[2]![0]).toBe(ordinary);
+  expect(postMessage.mock.calls[2]![1]).toBe(ordinaryTransfers);
+  expect(deliveries[2]!.wasmBinary).toBeUndefined();
+  expect(new Uint8Array(deliveries[2]!.payload as ArrayBuffer)).toEqual(new Uint8Array([31]));
   const missingBytesFactory = vi.fn(() => ({ postMessage }) as unknown as Worker);
   expect(() => createTrustedPdfiumWorker(resources.worker, { host: 'codex', resources }, missingBytesFactory)).toThrow('Verified native engine bytes');
   expect(missingBytesFactory).not.toHaveBeenCalled();

@@ -1,5 +1,5 @@
 import { REVIEW_RUNTIME_PROTOCOL, REVIEW_RUNTIME_VERSION, type ReviewRuntimeMethod } from '../../../../packages/core/src/review-runtime-protocol.js';
-import type { CodexResourceDescriptor } from '../../../../packages/core/src/codex-mcp-protocol.js';
+import { NativeOperationError, type CodexResourceDescriptor } from '../../../../packages/core/src/codex-mcp-protocol.js';
 import { VerifiedResourceMaterializer, resourceDescriptors } from '../../../codex-mcp/src/resources.js';
 import { createRpcHostRuntime, type MaterializedViewerResource } from './vscode-runtime.js';
 import type { HostRuntime, HostRuntimeInvalidation } from './runtime.js';
@@ -19,6 +19,8 @@ export function createCodexHostRuntime(port: CodexRuntimePort, environment: {
   let disposed = false;
   let bootstrapRequestId: string | undefined;
   const descriptors = new Map<string, CodexResourceDescriptor>();
+  const entries = new Map<string, { key: string; fulfilled: boolean }>();
+  let manifestEpoch = 0;
   const listeners = new Set<(message: unknown) => void>();
   const materializers = new Map<string, VerifiedResourceMaterializer>();
   const createURL = environment.createObjectURL ?? URL.createObjectURL.bind(URL);
@@ -32,8 +34,10 @@ export function createCodexHostRuntime(port: CodexRuntimePort, environment: {
     let materializer = materializers.get(role);
     if (materializer === undefined) { materializer = new VerifiedResourceMaterializer(); materializers.set(role, materializer); }
     const bytes = await materializer.materialize(1, descriptor, (offset, length) => port.call('resource', { handle: descriptor.handle, offset, length }), { current: () => !disposed && descriptors.get(handle) === descriptor, digest });
-    if (disposed) throw new Error('Native review disconnected.');
+    if (disposed || descriptors.get(handle) !== descriptor) throw new Error('Native review disconnected.');
     const url = createURL(new Blob([bytes], { type: descriptor.mediaType }));
+    const entry = entries.get(`${role}:${descriptor.sha256}:${descriptor.byteLength}`);
+    if (entry?.key === handle) entry.fulfilled = true;
     let released = false;
     return { url, ...(role === 'pdfiumWasm' || role === 'document' ? { bytes } : {}), dispose() { if (!released) { released = true; revokeURL(url); } } };
   };
@@ -49,17 +53,27 @@ export function createCodexHostRuntime(port: CodexRuntimePort, environment: {
           const manifest = resourceDescriptors((value as Record<string, unknown>).resourceDescriptors);
           if (manifest === undefined) throw new Error('Unverified native resources.');
           descriptors.clear();
+          manifestEpoch++;
+          const retained = new Set<string>();
           const resources: Record<string, string> = {};
           for (const [role, descriptor] of Object.entries(manifest)) {
-            // Content equivalence retains verified bytes within this admitted presentation only.
-            const key = `${role}:${descriptor.sha256}:${descriptor.byteLength}`;
-            descriptors.set(key, descriptor); resources[role] = key;
+            // Reuse fulfilled verified resources only. Pending transfers belong
+            // to the previous descriptor authority and need a fresh epoch key.
+            const content = `${role}:${descriptor.sha256}:${descriptor.byteLength}`;
+            retained.add(content);
+            let entry = entries.get(content);
+            if (entry?.fulfilled !== true) {
+              entry = { key: `${content}:${manifestEpoch}`, fulfilled: false };
+              entries.set(content, entry);
+            }
+            descriptors.set(entry.key, descriptor); resources[role] = entry.key;
           }
+          for (const content of entries.keys()) if (!retained.has(content)) entries.delete(content);
           value = { ...value as object, resources };
         }
         const identity = message.method === 'bootstrap' ? value as object : { sessionId: message.sessionId, generation: message.generation, revision: message.revision };
         publish({ protocol: REVIEW_RUNTIME_PROTOCOL, version: REVIEW_RUNTIME_VERSION, kind: 'response', runtimeId: port.runtimeId, requestId: message.requestId, method: message.method, ...identity, ok: true, payload: value });
-      }).catch(() => publish({ protocol: REVIEW_RUNTIME_PROTOCOL, version: REVIEW_RUNTIME_VERSION, kind: 'response', runtimeId: port.runtimeId, requestId: message.requestId, method: message.method, sessionId: message.sessionId, generation: message.generation, revision: message.revision, ok: false, error: { kind: 'native-resource-or-command-failed' } }));
+      }).catch(error => publish({ protocol: REVIEW_RUNTIME_PROTOCOL, version: REVIEW_RUNTIME_VERSION, kind: 'response', runtimeId: port.runtimeId, requestId: message.requestId, method: message.method, sessionId: message.sessionId, generation: message.generation, revision: message.revision, ok: false, error: { kind: error instanceof NativeOperationError ? 'export-conflict' : 'native-resource-or-command-failed' } }));
     },
   }, { host: 'codex', materializeDocument: materialize('document'), materializePdfiumWasm: materialize('pdfiumWasm'), materializePdfiumWorker: materialize('worker') });
   return { ...runtime, get capabilities() { return runtime.capabilities!; }, async createLink(location) {
@@ -67,5 +81,5 @@ export function createCodexHostRuntime(port: CodexRuntimePort, environment: {
     const value = await port.call('createLink', { location });
     if (disposed || typeof value !== 'object' || value === null || !('link' in value) || typeof value.link !== 'string' || !value.link.startsWith('placekeeper:///')) throw new Error('Native link unavailable.');
     return value.link;
-  }, dispose() { if (disposed) return; disposed = true; unsubscribe(); runtime.dispose(); descriptors.clear(); listeners.clear(); for (const materializer of materializers.values()) materializer.clear(); materializers.clear(); } };
+  }, dispose() { if (disposed) return; disposed = true; unsubscribe(); runtime.dispose(); descriptors.clear(); entries.clear(); listeners.clear(); for (const materializer of materializers.values()) materializer.clear(); materializers.clear(); } };
 }

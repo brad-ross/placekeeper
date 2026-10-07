@@ -613,6 +613,21 @@ export function App({
     caretReadGeneration.current += 1;
   }, [clearReferenceSubscriptions, clearSubscriptions, onReferenceDocumentControls, onViewerNavigationInitialized, viewer]);
 
+  useEffect(() => () => {
+    // Capture this generation's engine: successor renders own a different one.
+    // Drain document work before releasing the PDF and encoder workers.
+    const engine = viewer.engine;
+    let destroyed = false;
+    const destroy = () => {
+      if (destroyed) return;
+      destroyed = true; clearTimeout(deadline);
+      engine.destroy().wait(() => undefined, () => undefined);
+    };
+    // A failed worker may never acknowledge close; this engine is already retired.
+    const deadline = setTimeout(destroy, 5_000);
+    engine.closeAllDocuments().wait(destroy, destroy);
+  }, [viewer.engine]);
+
   useEffect(() => {
     const previousTabIdentity = activeReferenceTabIdentityRef.current;
     const generation = referenceCopyReads.current.invalidate().generation;

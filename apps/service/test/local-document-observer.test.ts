@@ -410,3 +410,126 @@ describe("local document observer", () => {
     expect(value.candidates.at(-1)?.identity?.byteLength).toBeGreaterThan(0);
   });
 });
+
+it("lets long inspection finish across unchanged timer wakeups, then performs a full digest audit", async () => {
+  vi.useFakeTimers();
+  const f = await fixture(); f.observer.dispose();
+  const initialStats = await lstat(f.sourcePath);
+  const gate = Promise.withResolvers<void>();
+  const seen: LocalDocumentCandidate[] = [];
+  const observer = new LocalDocumentObserver({ watchDirectory: () => Object.assign(new EventEmitter(), { close() {} }),
+    inspectIdentity: async () => initialStats, coalesceMs: 1, identityIntervalMs: 20, auditIntervalMs: 30,
+    inspectCandidate: async candidate => { seen.push(candidate); if (seen.length === 1) await gate.promise; return { status: "current" }; },
+  });
+  try {
+    observer.observe({ sessionId: "long", sourcePath: f.sourcePath });
+    await vi.advanceTimersByTimeAsync(1); await vi.waitFor(() => expect(seen).toHaveLength(1));
+    await vi.advanceTimersByTimeAsync(100);
+    expect(observer.isCurrent("long", seen[0]!.sequence)).toBe(true);
+    gate.resolve(); await observer.settle(); await vi.advanceTimersByTimeAsync(2); await observer.settle();
+    expect(seen.some(candidate => candidate.reason === "audit")).toBe(true);
+  } finally { gate.resolve(); observer.dispose(); await observer.settle(); }
+});
+
+it("supersedes long inspection when a later actual identity changes and immediately fences named watcher events", async () => {
+  vi.useFakeTimers();
+  const f = await fixture(); f.observer.dispose();
+  const watch = Object.assign(new EventEmitter(), { close() {} });
+  let currentStats = await lstat(f.sourcePath);
+  const gate = Promise.withResolvers<void>(); const seen: LocalDocumentCandidate[] = [];
+  const admitted: Array<Omit<LocalDocumentCandidate, "identity">> = [];
+  const observer = new LocalDocumentObserver({ watchDirectory: () => watch, admitCandidate: c => admitted.push(c),
+    inspectIdentity: async () => currentStats, coalesceMs: 1, identityIntervalMs: 20, auditIntervalMs: 60_000,
+    inspectCandidate: async candidate => { seen.push(candidate); if (seen.length === 1) await gate.promise; return { status: "current" }; },
+  });
+  try {
+    observer.observe({ sessionId: "long", sourcePath: f.sourcePath });
+    await vi.advanceTimersByTimeAsync(1); await vi.waitFor(() => expect(seen).toHaveLength(1));
+    await vi.advanceTimersByTimeAsync(50);
+    expect(observer.isCurrent("long", seen[0]!.sequence)).toBe(true);
+    await writeFile(f.sourcePath, "%PDF-1.7\nnew real identity with longer bytes");
+    currentStats = await lstat(f.sourcePath);
+    await vi.advanceTimersByTimeAsync(20); await vi.waitFor(() => expect(observer.isCurrent("long", seen[0]!.sequence)).toBe(false));
+    const count = admitted.length; watch.emit("change", "rename", basename(f.sourcePath));
+    expect(admitted).toHaveLength(count + 1); expect(admitted.at(-1)?.reason).toBe("watcher");
+    gate.resolve(); await vi.advanceTimersByTimeAsync(2); await observer.settle();
+    expect(seen.at(-1)?.identity?.byteLength).toBeGreaterThan(seen[0]!.identity!.byteLength);
+    expect(observer.isCurrent("long", seen.at(-1)!.sequence)).toBe(true);
+  } finally { gate.resolve(); observer.dispose(); await observer.settle(); }
+});
+
+it("retains bounded retry after an unreadable long candidate across timer wakeups", async () => {
+  vi.useFakeTimers();
+  const f = await fixture(); f.observer.dispose();
+  const gate = Promise.withResolvers<void>(); let calls = 0;
+  const observer = new LocalDocumentObserver({ watchDirectory: () => Object.assign(new EventEmitter(), { close() {} }),
+    inspectIdentity: async () => { throw new Error("unreadable"); }, coalesceMs: 10, identityIntervalMs: 20, auditIntervalMs: 60_000,
+    inspectCandidate: async candidate => { calls++; expect(candidate.identity).toBeUndefined(); if (calls === 1) await gate.promise; return { status: "retry" }; },
+  });
+  try {
+    observer.observe({ sessionId: "unreadable", sourcePath: f.sourcePath }); await vi.advanceTimersByTimeAsync(1);
+    await vi.advanceTimersByTimeAsync(100); expect(calls).toBe(1);
+    gate.resolve(); await observer.settle(); await vi.advanceTimersByTimeAsync(11); await observer.settle();
+    expect(calls).toBeGreaterThan(1);
+  } finally { gate.resolve(); observer.dispose(); await observer.settle(); }
+});
+
+it("keeps explicit replacement authority through unchanged identity timers and anonymous directory noise", async () => {
+  vi.useFakeTimers(); const f = await fixture(); f.observer.dispose();
+  let currentStats = await lstat(f.sourcePath); const watch = Object.assign(new EventEmitter(), { close() {} });
+  const seen: LocalDocumentCandidate[] = [];
+  const observer = new LocalDocumentObserver({ watchDirectory: () => watch, inspectIdentity: async () => currentStats,
+    coalesceMs: 1, identityIntervalMs: 20, auditIntervalMs: 30, inspectCandidate: async c => { seen.push(c); return { status: "current" }; } });
+  try {
+    observer.observe({ sessionId: "explicit", sourcePath: f.sourcePath }); await vi.advanceTimersByTimeAsync(1); await observer.settle();
+    const sequence = (await observer.reserveExplicitHint("explicit"))!;
+    for (let i = 0; i < 5; i++) { watch.emit("change", "rename", undefined); await vi.advanceTimersByTimeAsync(20); }
+    expect(observer.isCurrent("explicit", sequence)).toBe(true);
+    await writeFile(f.sourcePath, "%PDF-1.7\nactual later successor identity"); currentStats = await lstat(f.sourcePath);
+    await vi.advanceTimersByTimeAsync(20); expect(observer.isCurrent("explicit", sequence)).toBe(false);
+    observer.completeExplicitHint("explicit", sequence); await vi.advanceTimersByTimeAsync(2); await observer.settle();
+    expect(seen.some(c => c.reason === "audit")).toBe(true);
+  } finally { observer.dispose(); await observer.settle(); }
+});
+
+it("does not let a stale inspection's deferred audit revoke its real watcher successor", async () => {
+  vi.useFakeTimers(); const f = await fixture(); f.observer.dispose(); let stats = await lstat(f.sourcePath);
+  const watch = Object.assign(new EventEmitter(), { close() {} }); const first = Promise.withResolvers<void>(), second = Promise.withResolvers<void>();
+  const seen: LocalDocumentCandidate[] = [];
+  const observer = new LocalDocumentObserver({ watchDirectory: () => watch, inspectIdentity: async () => stats, coalesceMs: 1, identityIntervalMs: 20, auditIntervalMs: 30,
+    inspectCandidate: async c => { seen.push(c); if (seen.length === 1) await first.promise; if (seen.length === 2) await second.promise; return { status: "current" }; } });
+  try {
+    observer.observe({ sessionId: "successor", sourcePath: f.sourcePath }); await vi.advanceTimersByTimeAsync(1);
+    await vi.advanceTimersByTimeAsync(35); await writeFile(f.sourcePath, "%PDF-1.7\nreal watcher successor"); stats = await lstat(f.sourcePath); watch.emit("change", "rename", basename(f.sourcePath));
+    await vi.advanceTimersByTimeAsync(2); first.resolve(); await vi.advanceTimersByTimeAsync(1);
+    expect(seen[1]?.reason).toBe("watcher"); expect(observer.isCurrent("successor", seen[1]!.sequence)).toBe(true);
+    second.resolve(); await observer.settle(); await vi.advanceTimersByTimeAsync(2); await observer.flush("successor"); await observer.settle();
+    expect(seen.at(-1)?.reason).toBe("audit");
+  } finally { first.resolve(); second.resolve(); observer.dispose(); await observer.settle(); }
+});
+
+it("does not revoke a candidate while its initial identity read spans timer intervals", async () => {
+  vi.useFakeTimers(); const f = await fixture(); f.observer.dispose(); const stats = await lstat(f.sourcePath);
+  const identityGate = Promise.withResolvers<typeof stats>(); const seen: LocalDocumentCandidate[] = [];
+  const observer = new LocalDocumentObserver({ watchDirectory: () => Object.assign(new EventEmitter(), { close() {} }),
+    inspectIdentity: async () => identityGate.promise, coalesceMs: 1, identityIntervalMs: 20, auditIntervalMs: 60_000,
+    inspectCandidate: async c => { seen.push(c); return { status: "current" }; } });
+  try {
+    observer.observe({ sessionId: "slow-stat", sourcePath: f.sourcePath }); await vi.advanceTimersByTimeAsync(1);
+    await vi.advanceTimersByTimeAsync(100); identityGate.resolve(stats); await observer.settle();
+    expect(seen).toHaveLength(1); expect(observer.isCurrent("slow-stat", seen[0]!.sequence)).toBe(true);
+  } finally { identityGate.resolve(stats); observer.dispose(); await observer.settle(); }
+});
+
+it("runs a deferred full audit after a slow unchanged identity shortcut", async () => {
+  vi.useFakeTimers(); const f = await fixture(); f.observer.dispose(); const stats = await lstat(f.sourcePath);
+  const gate = Promise.withResolvers<typeof stats>(); let reads = 0; const seen: LocalDocumentCandidate[] = [];
+  const observer = new LocalDocumentObserver({ watchDirectory: () => Object.assign(new EventEmitter(), { close() {} }),
+    inspectIdentity: async () => ++reads === 2 ? gate.promise : stats, coalesceMs: 1, identityIntervalMs: 20, auditIntervalMs: 30,
+    inspectCandidate: async c => { seen.push(c); return { status: "current" }; } });
+  try {
+    observer.observe({ sessionId: "slow-unchanged", sourcePath: f.sourcePath }); await vi.advanceTimersByTimeAsync(1); await observer.settle();
+    await vi.advanceTimersByTimeAsync(100); gate.resolve(stats); await observer.settle(); await vi.advanceTimersByTimeAsync(2); await observer.flush("slow-unchanged");
+    expect(seen.some(c => c.reason === "audit")).toBe(true);
+  } finally { gate.resolve(stats); observer.dispose(); await observer.settle(); }
+});
