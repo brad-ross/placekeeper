@@ -190,6 +190,10 @@ test('test MCP bridge releases obsolete large-document resources across replacem
         const replacement = await bridge.broker.replaceLiveDocument({ sessionId: bridge.sessionId, outputPath: bridge.pdfPath, observationEpoch: generation });
         samples.push({ cycle, fixture, replacement, held: bridge.broker.interactions.held(bridge.sessionId) });
         await expect.poll(() => bridge.broker.state(bridge.sessionId)?.workflow.documentGeneration, { timeout: 20_000 }).toBe(generation + 1);
+        // A zoom repaint can change the old page's image before replacement is displayed.
+        // These alternating fixtures have distinct page counts, so wait for the new document.
+        const pages = fixture === 'text-native.pdf' ? 1 : 120;
+        await expect(page.getByRole('textbox', { name: new RegExp(`Current page \\d+ of ${pages}\\.`) })).toBeVisible();
         await expect.poll(() => page.locator('[data-page-index="0"] > img').first().getAttribute('src')).not.toBe(before);
         await page.locator('[data-page-index="0"] > img').first().evaluate((image: HTMLImageElement) => image.decode());
         samples.push({ cycle, fixture, actualHost: false, refreshMs: performance.now() - started,
