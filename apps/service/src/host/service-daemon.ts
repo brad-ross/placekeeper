@@ -1,3 +1,5 @@
+import { NativeQualificationExperiments } from "../codex/native-qualification-experiments.js";
+import { NativeQualificationObserver } from "../codex/native-qualification.js";
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { lstat, unlink, writeFile } from "node:fs/promises";
@@ -156,6 +158,8 @@ export async function startServiceDaemon(paths = defaultDaemonPaths()): Promise<
   try {
     await removeConfirmedStaleSocket(paths.socketPath);
     host = await PlacekeeperHost.start({
+      nativeQualification: new NativeQualificationObserver(paths.appSupportRoot, "daemon"),
+      nativeQualificationExperiments: new NativeQualificationExperiments(paths.appSupportRoot),
       recoveryRoot: paths.recoveryRoot,
       browserSourceRoot: join(paths.appSupportRoot, "browser-sources"),
       webAssets: { root: paths.webAssetsRoot },

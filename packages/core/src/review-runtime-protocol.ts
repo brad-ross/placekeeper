@@ -2,7 +2,7 @@ import type { ReviewAnchorEvidenceV1, SaveDestinationConfirmation } from "./revi
 export const REVIEW_RUNTIME_PROTOCOL = "placekeeper.review-runtime" as const;
 export const REVIEW_RUNTIME_VERSION = 3 as const;
 
-export const REVIEW_RUNTIME_HOSTS = ["vscode", "chrome", "macos"] as const;
+export const REVIEW_RUNTIME_HOSTS = ["vscode", "chrome", "macos", "codex"] as const;
 export type ReviewRuntimeHost = typeof REVIEW_RUNTIME_HOSTS[number];
 
 export const REVIEW_RUNTIME_METHODS = [
@@ -99,6 +99,9 @@ export type ReviewRuntimeBrokerMethod = Exclude<
 export const REVIEW_RUNTIME_HOST_METHODS = {
   vscode: REVIEW_RUNTIME_METHODS,
   chrome: REVIEW_RUNTIME_METHODS.filter((method) => (
+    method !== "forwardSyncTex" && method !== "reverseSyncTex"
+  )),
+  codex: REVIEW_RUNTIME_METHODS.filter((method) => (
     method !== "forwardSyncTex" && method !== "reverseSyncTex"
   )),
   macos: REVIEW_RUNTIME_METHODS.filter((method) => (
@@ -330,7 +333,8 @@ function safeChromeSaveStatus(value: unknown): unknown | undefined {
     };
   } else return undefined;
   if ((value.sync.phase !== "clean" && value.sync.phase !== "saving" && value.sync.phase !== "not-saved") ||
-    !safeInteger(value.sync.desiredRevision) || !safeInteger(value.sync.savedRevision) ||
+    !safeInteger(value.sync.desiredRevision) ||
+    !(value.sync.savedRevision === -1 || safeInteger(value.sync.savedRevision)) ||
     (value.sync.failure !== undefined &&
       (typeof value.sync.failure !== "string" || !SAVE_FAILURE_REASONS.has(value.sync.failure)))) return undefined;
   let rewriteEligibility: unknown;
@@ -603,4 +607,60 @@ export class ReviewExportConflictError extends Error {
     super("Review changed. Confirm the annotation name again to export the latest review.");
     this.name = "ReviewExportConflictError";
   }
+}
+
+function safeCodexObservationIdentity(value: unknown): unknown | undefined {
+  if (!record(value) || !hasOnlyKeys(value, ["placekeeperSessionId", "documentGeneration", "source", "reviewRevision", "stateDigest"]) ||
+    typeof value.placekeeperSessionId !== "string" || !SESSION_ID.test(value.placekeeperSessionId) ||
+    !safeInteger(value.documentGeneration) || value.documentGeneration < 1 || !safeInteger(value.reviewRevision) ||
+    typeof value.stateDigest !== "string" || !SHA256.test(value.stateDigest) || !record(value.source) ||
+    !hasOnlyKeys(value.source, ["fileId", "digest", "byteLength"]) ||
+    typeof value.source.fileId !== "string" || !SESSION_ID.test(value.source.fileId) ||
+    typeof value.source.digest !== "string" || !SHA256.test(value.source.digest) ||
+    !safeInteger(value.source.byteLength) || value.source.byteLength < 1) return undefined;
+  return closedJsonClone(value);
+}
+
+function safeCodexContext(value: unknown): unknown | undefined {
+  if (!record(value)) return undefined;
+  const timestamp = (input: unknown) => typeof input === "string" && Number.isFinite(Date.parse(input));
+  if (value.status === "unbound" && hasOnlyKeys(value, ["status"])) return { status: "unbound" };
+  if (value.status === "current" && hasOnlyKeys(value, ["status", "identity", "leaseExpiresAt"])) {
+    const identity = safeCodexObservationIdentity(value.identity);
+    return identity !== undefined && timestamp(value.leaseExpiresAt) ? { status: "current", identity, leaseExpiresAt: value.leaseExpiresAt } : undefined;
+  }
+  const lastVerified = value.lastVerified === undefined ? undefined : safeCodexObservationIdentity(value.lastVerified);
+  if (value.lastVerified !== undefined && lastVerified === undefined) return undefined;
+  if (value.status === "unavailable" && hasOnlyKeys(value, ["status", "reason", "lastVerified"]) &&
+    ["unbound", "pending", "unavailable", "stale_generation", "expired", "unauthorized"].includes(String(value.reason))) {
+    return { status: "unavailable", reason: value.reason, ...(lastVerified === undefined ? {} : { lastVerified }) };
+  }
+  if ((value.status === "refreshing" || value.status === "pending") &&
+    hasOnlyKeys(value, value.status === "pending" ? ["status", "placekeeperSessionId", "documentGeneration", "expiresAt"] : ["status", "placekeeperSessionId", "documentGeneration", "lastVerified"]) &&
+    typeof value.placekeeperSessionId === "string" && SESSION_ID.test(value.placekeeperSessionId) &&
+    safeInteger(value.documentGeneration) && value.documentGeneration >= 1) {
+    if (value.status === "pending") return timestamp(value.expiresAt) ? closedJsonClone(value) : undefined;
+    return { status: "refreshing", placekeeperSessionId: value.placekeeperSessionId, documentGeneration: value.documentGeneration,
+      ...(lastVerified === undefined ? {} : { lastVerified }) };
+  }
+  return undefined;
+}
+
+/** Native Codex projections share the path-free native host boundary. Resource
+ * strings are opaque handles; immutable descriptors travel in the app envelope. */
+export function sanitizeCodexReviewRuntimeResponse(
+  method: ReviewRuntimeMethod,
+  value: unknown,
+): unknown | undefined {
+  if (!isReviewRuntimeMethodForHost("codex", method)) return undefined;
+  const projected = sanitizeMacosReviewRuntimeResponse(method, value);
+  if (!record(projected)) return projected;
+  const scope = method === "scope" ? value : record(value) ? value.scope : undefined;
+  const codexContext = record(scope) && scope.codexContext !== undefined ? safeCodexContext(scope.codexContext) : undefined;
+  if (record(scope) && scope.codexContext !== undefined && codexContext === undefined) return undefined;
+  if (method === "scope") return { ...projected, launchSurface: "codex", ...(codexContext === undefined ? {} : { codexContext }) };
+  if (method === "bootstrap" && record(projected.scope)) {
+    return { ...projected, scope: { ...projected.scope, launchSurface: "codex", ...(codexContext === undefined ? {} : { codexContext }) } };
+  }
+  return projected;
 }

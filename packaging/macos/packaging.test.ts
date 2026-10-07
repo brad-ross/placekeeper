@@ -1,7 +1,8 @@
+import { createHash } from "node:crypto";
 import { chmod, copyFile, cp, mkdir, mkdtemp, readFile, readdir, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
 import {
@@ -32,6 +33,7 @@ import {
   OPEN_LOCATION_SCRIPT,
 } from "./launcher.mjs";
 import {
+  installedHookTimeouts,
   rewriteSmokeProbeBundleIdentifier,
   validateDoctorEvidence,
 } from "./smoke-installed.js";
@@ -445,12 +447,13 @@ describe("macOS distribution manifests", () => {
   });
 
   it("pins the Placekeeper runtime identity without pinning the content-derived daemon hash", async () => {
-    const [installer, smoke, serviceDaemon, launchControl, hookCommand, pdfInspector, exportCoordinator, vscodePackage, vscodeExtension] =
+    const [installer, smoke, serviceDaemon, launchControl, controlProtocol, hookCommand, pdfInspector, exportCoordinator, vscodePackage, vscodeExtension] =
       await Promise.all([
         readFile(resolve("install.sh"), "utf8"),
         readFile(resolve("packaging/macos/smoke-installed.ts"), "utf8"),
         readFile(resolve("apps/service/src/host/service-daemon.ts"), "utf8"),
         readFile(resolve("apps/service/src/host/launch-control.ts"), "utf8"),
+        readFile(resolve("apps/service/src/host/control-protocol.ts"), "utf8"),
         readFile(resolve("apps/service/src/cli/hook-command.ts"), "utf8"),
         readFile(resolve("apps/service/src/pdf/inspect-pdf.ts"), "utf8"),
         readFile(resolve("apps/service/src/export/export-coordinator.ts"), "utf8"),
@@ -469,9 +472,10 @@ describe("macOS distribution manifests", () => {
     expect(serviceDaemon).toContain('"PLACEKEEPER_DAEMON_IDENTITY"');
     expect(serviceDaemon).toContain('"PLACEKEEPER_INSTALL_ARTIFACT_IDENTITY"');
     expect(serviceDaemon).toContain('join(appSupportRoot, "lifecycle.lock")');
-    expect(launchControl).toContain("export const MANAGEMENT_PROTOCOL_VERSION = 1");
-    expect(launchControl).toContain('readonly kind: "exact"');
-    expect(launchControl).toContain('readonly kind: "incompatible"');
+    expect(controlProtocol).toContain("export const MANAGEMENT_PROTOCOL_VERSION = 1");
+    expect(controlProtocol).toContain('readonly kind: "exact"');
+    expect(controlProtocol).toContain('readonly kind: "incompatible"');
+    expect(launchControl).toMatch(/export\s*\{[^}]*\bMANAGEMENT_PROTOCOL_VERSION\b[^}]*\btype DaemonCompatibilityResult\b[^}]*\} from "\.\/control-protocol\.js";/u);
     expect(hookCommand).toContain('kind: "placekeeper-live-context"');
     expect(pdfInspector).toContain('"application/vnd.placekeeper.rgba+json"');
     expect(exportCoordinator).toContain('`.placekeeper-${randomUUID()}.tmp`');
@@ -521,6 +525,7 @@ describe("macOS distribution manifests", () => {
     expect(runtime.releaseGate.adobeAcrobatReader).toBe("pass");
   });
 
+  // The required isolated cold SDK typecheck can exceed one minute.
   it.runIf(process.platform === "darwin")("offers a non-mutating dry run for the one-command source installer", async () => {
     const installer = await readFile(resolve("install.sh"), "utf8");
     const { stdout } = await execFileAsync("/bin/sh", [resolve("install.sh"), "--dry-run"], {
@@ -539,7 +544,7 @@ describe("macOS distribution manifests", () => {
     expect(installer).toContain("install --frozen-lockfile");
     expect(installer).not.toContain("xattr");
     expect(installer).not.toContain("spctl --master-disable");
-  }, 60_000);
+  }, 180_000);
 
   it.runIf(process.platform === "darwin")("rejects incomplete native bundles before replacing the installed app", async () => {
     const root = await mkdtemp(resolve(tmpdir(), "placekeeper-incomplete-native-"));
@@ -944,12 +949,14 @@ describe("macOS distribution manifests", () => {
     const chromeWeb = await validateSharedWebDistribution(resolve("apps/chrome-extension/dist/shared"));
     expect(vscodeWeb).toEqual(web);
     expect(chromeWeb).toEqual(web);
-    expect(web.schemaVersion).toBe(3);
+    expect(web.schemaVersion).toBe(4);
+    expect(web.pdfiumCodexWorker).toBe("pdfium-codex-worker.js");
     expect(web.pdfiumWorker).toBe("pdfium-worker.js");
     expect(Object.keys(web.integrity).sort()).toEqual([
       web.app,
       web.pdfiumWasm,
       web.pdfiumWorker,
+      web.pdfiumCodexWorker,
       web.stylesheet,
     ].sort());
   });
@@ -988,6 +995,7 @@ describe("macOS distribution manifests", () => {
       manifest.stylesheet,
       manifest.pdfiumWasm,
       manifest.pdfiumWorker,
+      manifest.pdfiumCodexWorker,
     ]) {
       const root = await mkdtemp(join(tmpdir(), "placekeeper-shared-asset-"));
       try {
@@ -1049,11 +1057,99 @@ describe("macOS distribution manifests", () => {
     expect(build).toContain('resolve(contents, "MacOS/placekeeper-vscode")');
     expect(build).toContain('resolve(resources, "vscode-launcher.mjs")');
     expect(build).toContain('resolve(codexPlugin, "hooks/hooks.json")');
+    expect(build).toContain('resolve(codexMcpDist, "server.js")');
+    expect(build).toContain('resolve(codexMcpDist, "review-v1.html")');
+    expect(build).toContain('resolve(resources, "codex-mcp")');
     const appManifest = JSON.parse(await readFile(resolve("packaging/macos/app-bundle.json"), "utf8"));
     expect(() => validateAppBundleManifest({
       ...appManifest,
       embeddedArtifacts: { vscodeExtension: "apps/vscode" },
     })).toThrow(/Codex plugin/u);
+  });
+
+  it("installed smoke selects the canonical Bash timeout while retaining native display validation", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pk-installed-hooks-"));
+    const pluginRoot = join(root, "Contents/Resources/integrations/codex-plugin");
+    try {
+      await mkdir(dirname(pluginRoot), { recursive: true });
+      await cp(resolve("integrations/codex-plugin"), pluginRoot, { recursive: true });
+      await expect(installedHookTimeouts(root)).resolves.toEqual({ PostToolUse: 8_000, UserPromptSubmit: 8_000, SessionEnd: 3_000 });
+      const file = join(pluginRoot, "hooks/hooks.json");
+      const source = await readFile(file, "utf8");
+      const hooks = JSON.parse(source);
+      hooks.hooks.PostToolUse[1].matcher = "^Bash$";
+      await writeFile(file, JSON.stringify(hooks));
+      await expect(installedHookTimeouts(root)).rejects.toThrow(/PostToolUse/u);
+      await writeFile(file, source);
+      const invalidHandler = JSON.parse(source);
+      invalidHandler.hooks.UserPromptSubmit[0].hooks.push(invalidHandler.hooks.UserPromptSubmit[0].hooks[0]);
+      await writeFile(file, JSON.stringify(invalidHandler));
+      await expect(installedHookTimeouts(root)).rejects.toThrow(/UserPromptSubmit/u);
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+
+  it("validates both canonical Codex PostToolUse declarations", async () => {
+    const config = JSON.parse(await readFile(resolve("integrations/codex-plugin/hooks/hooks.json"), "utf8"));
+    expect(config.hooks.PostToolUse[0].hooks[0].timeout).toBe(8);
+    expect(config.hooks.PostToolUse[1].hooks[0].timeout).toBe(55);
+    expect(config.hooks.UserPromptSubmit[0].hooks[0].timeout).toBe(8);
+    expect(config.hooks.SessionEnd[0].hooks[0].timeout).toBe(3);
+    await expect(validateCodexPlugin(resolve("integrations/codex-plugin"))).resolves.toBeUndefined();
+  });
+
+  it.each([
+    "missing-launcher", "missing-display", "extra-declaration", "duplicate-display",
+    "malformed-display", "wrong-display-matcher", "wrong-launcher-matcher",
+    "wrong-display-command", "wrong-display-timeout", "old-display-timeout", "wrong-display-context-limit",
+    "wrong-display-status", "extra-display-handler",
+  ])("rejects the %s Codex hook contract", async (failure) => {
+    const root = await mkdtemp(join(tmpdir(), "placekeeper-hook-contract-"));
+    const pluginRoot = join(root, "codex-plugin");
+    try {
+      await cp(resolve("integrations/codex-plugin"), pluginRoot, { recursive: true });
+      const path = join(pluginRoot, "hooks/hooks.json");
+      const manifest = JSON.parse(await readFile(path, "utf8")) as {
+        hooks: { PostToolUse: Array<{ matcher?: string; hooks: Array<Record<string, unknown>> }> };
+      };
+      const declarations = manifest.hooks.PostToolUse;
+      const display = declarations[1]!;
+      const handler = display.hooks[0]!;
+      switch (failure) {
+        case "missing-launcher": declarations.splice(0, 1); break;
+        case "missing-display": declarations.splice(1, 1); break;
+        case "extra-declaration": declarations.push(structuredClone(display)); break;
+        case "duplicate-display": declarations[0] = structuredClone(display); break;
+        case "malformed-display": declarations[1] = null as unknown as typeof display; break;
+        case "wrong-display-matcher": display.matcher = "^mcp__.*__display_review$"; break;
+        case "wrong-launcher-matcher": declarations[0]!.matcher = "Bash"; break;
+        case "wrong-display-command": handler.command = "placekeeper hook --event"; break;
+        case "wrong-display-timeout": handler.timeout = 5; break;
+        case "old-display-timeout": handler.timeout = 8; break;
+        case "wrong-display-context-limit": handler.additionalContextLimit = 256; break;
+        case "wrong-display-status": handler.statusMessage = "Connecting Placekeeper context"; break;
+        case "extra-display-handler": display.hooks.push(structuredClone(handler)); break;
+      }
+      await writeFile(path, JSON.stringify(manifest));
+      await expect(validateCodexPlugin(pluginRoot)).rejects.toThrow(/PostToolUse/u);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it.each(["remote", "wrong-entry", "extra-server", "missing-entry"])("rejects %s native MCP packaging", async (failure) => {
+    const root = await mkdtemp(join(tmpdir(), "pk-mcp-package-"));
+    const pluginRoot = join(root, "codex-plugin");
+    try {
+      await cp(resolve("integrations/codex-plugin"), pluginRoot, { recursive: true });
+      const file = join(pluginRoot, ".mcp.json");
+      const mcp = JSON.parse(await readFile(file, "utf8"));
+      if (failure === "remote") mcp.mcpServers.placekeeper = { url: "https://example.invalid" };
+      if (failure === "wrong-entry") mcp.mcpServers.placekeeper.args = ["/tmp/untrusted.sh"];
+      if (failure === "extra-server") mcp.mcpServers.other = { command: "/bin/sh" };
+      if (failure === "missing-entry") await rm(join(pluginRoot, "scripts/mcp.sh"));
+      await writeFile(file, JSON.stringify(mcp));
+      await expect(validateCodexPlugin(pluginRoot)).rejects.toThrow();
+    } finally { await rm(root, { recursive: true, force: true }); }
   });
 
   it("rejects a missing or operationally incomplete Codex skill", async () => {
@@ -1115,4 +1211,32 @@ describe("source prerequisite preflight", () => {
       expect(await readdir(root)).toHaveLength(2);
     } finally { await rm(root, { recursive: true, force: true }); }
   });
+});
+
+it('integrity-pins the dedicated Codex worker and rejects missing, stale or role-swapped native assets', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'placekeeper-codex-shared-manifest-'));
+  const assets: Record<string, string> = {
+    'app.js': 'export function start() {}',
+    'app.css': ':root {}',
+    'pdfium.wasm': 'wasm fixture',
+    'pdfium-worker.js': 'class PdfiumEngineRunner {}\nif (type === "wasmInit") { const response = await fetch(wasmUrl); }',
+    'pdfium-codex-worker.js': 'class PdfiumEngineRunner {}\nif (type === "wasmInit") { const wasmBinary = event.data.wasmBinary; }',
+  };
+  const manifest = () => ({ schemaVersion: 4, app: 'app.js', stylesheet: 'app.css', pdfiumWasm: 'pdfium.wasm', pdfiumWorker: 'pdfium-worker.js', pdfiumCodexWorker: 'pdfium-codex-worker.js', integrity: Object.fromEntries(Object.entries(assets).map(([name, bytes]) => [name, createHash('sha256').update(bytes).digest('hex')])) });
+  try {
+    for (const [name, bytes] of Object.entries(assets)) await writeFile(join(root, name), bytes);
+    await writeFile(join(root, 'asset-manifest.json'), JSON.stringify(manifest()));
+    await expect(validateSharedWebDistribution(root)).resolves.toMatchObject({ schemaVersion: 4, pdfiumCodexWorker: 'pdfium-codex-worker.js' });
+    await rm(join(root, 'pdfium-codex-worker.js'));
+    await expect(validateSharedWebDistribution(root)).rejects.toThrow(/missing|pdfium-codex-worker/u);
+    await writeFile(join(root, 'pdfium-codex-worker.js'), 'stale');
+    await expect(validateSharedWebDistribution(root)).rejects.toThrow('Shared web asset is stale: pdfium-codex-worker.js');
+    assets['pdfium-codex-worker.js'] = assets['pdfium-worker.js']!;
+    await writeFile(join(root, 'pdfium-codex-worker.js'), assets['pdfium-codex-worker.js']);
+    await writeFile(join(root, 'asset-manifest.json'), JSON.stringify(manifest()));
+    await expect(validateSharedWebDistribution(root)).rejects.toThrow('packaged Codex PDFium worker contract is invalid');
+    const { pdfiumCodexWorker: _omitted, ...incomplete } = manifest();
+    await writeFile(join(root, 'asset-manifest.json'), JSON.stringify(incomplete));
+    await expect(validateSharedWebDistribution(root)).rejects.toThrow('unsupported shape');
+  } finally { await rm(root, { recursive: true, force: true }); }
 });

@@ -42,6 +42,21 @@ describe("explicit suite contracts", () => {
     expect(ciUnitFiles).toContain("packaging/macos/update-vscode.test.mjs");
   });
 
+  it("runs all native corpus/lifecycle/resource acceptance in the native and canonical Chromium gates", () => {
+    for (const suite of ["test:codex-native", "test:e2e", "test:ci:chromium"]) {
+      for (const file of ["codex-native-review.spec.ts", "codex-native-lifecycle.spec.ts", "codex-native-resources.spec.ts"]) expect(suiteCommand(suite)).toContain(file);
+    }
+    expect(suiteCommand("test:codex-native")).toContain("pnpm fixtures:pdf");
+    expect(suiteCommand("test:codex-native")).toContain("pnpm build:codex");
+    expect(ciUnitFiles).toContain("apps/codex-mcp/test/qualification.test.ts");
+  });
+
+  it("checks shared host raster geometry in native, host, production and browser gates", () => {
+    for (const suite of ["test:codex-native", "test:host-integration", "test:production-integration", "test:e2e", "test:e2e:webkit", "test:ci:chromium", "test:ci:webkit"]) {
+      expect(suiteCommand(suite)).toContain("host-raster-rotation.spec.ts");
+    }
+  });
+
   it("keeps WebKit's intentional omissions and repeated fixture stages", () => {
     expect(suites["test:e2e"]?.[0]).toBe("pnpm build:vscode");
     expect(suites["test:e2e:webkit"]?.[0]).toBe("pnpm build:vscode");

@@ -6,6 +6,32 @@ export interface RuntimeDocumentSourceSnapshot {
   readonly refreshStatus: GenerationRefreshStatus;
 }
 
+/** Covers canonical replacement while the first resource acquisition is still
+ * pending. The caller retains this subscription until the shared reader mounts. */
+export function loadRuntimeDocumentSource(
+  runtime: HostRuntime,
+  publish: (loaded: HostRuntimeBootstrap) => void,
+  fail: (error: unknown) => void,
+): () => void {
+  let disposed = false;
+  let controller: AbortController | undefined;
+  let epoch = 0;
+  let generation = 0;
+  const load = () => {
+    const token = ++epoch;
+    controller?.abort();
+    controller = new AbortController();
+    void runtime.bootstrap(controller.signal).then(value => {
+      if (!disposed && token === epoch) { generation = value.generation; publish(value); }
+    }).catch(error => { if (!disposed && token === epoch) fail(error); });
+  };
+  const unsubscribe = runtime.subscribeInvalidations(event => {
+    if (!disposed && event.reason === "generation" && event.generation > generation) { generation = event.generation; load(); }
+  });
+  load();
+  return () => { disposed = true; controller?.abort(); unsubscribe(); };
+}
+
 /** Joins trusted invalidations to fresh canonical bootstrap state with generation fences. */
 export function subscribeRuntimeDocumentSource(
   runtime: HostRuntime,

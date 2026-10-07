@@ -914,11 +914,11 @@ describe('outline navigator', () => {
       id: 'unavailable', label: 'Unavailable', pageContext: null, target: null, children: [],
     }, context)).toBeUndefined();
 
-    await exact?.writeText(exact.getLink());
+    await exact?.writeText(await exact.getLink());
     expect(writeText).toHaveBeenCalledOnce();
     currentGeneration = 4;
-    await expect(page?.writeText(page.getLink())).rejects.toThrow('replaced PDF');
-    await expect(clickedTarget?.writeText(clickedTarget.getLink())).rejects.toThrow('replaced PDF');
+    await expect(page?.writeText(await page.getLink())).rejects.toThrow('replaced PDF');
+    await expect(clickedTarget?.writeText(await clickedTarget.getLink())).rejects.toThrow('replaced PDF');
     expect(writeText).toHaveBeenCalledOnce();
   });
 

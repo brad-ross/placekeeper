@@ -16,9 +16,14 @@ The version of a Review Session's canonical review state, ordering accepted chan
 A new revision can update annotations without replacing PDF bytes; transient presence can change without a new revision.
 
 ### Task Binding
-The exclusive association between an agent task and a Review Session's Document Generation, established through a correlated launch and authenticated browser activation.
+The exclusive association between an agent task and a Review Session's Document Generation, established through a correlated launch and authenticated host activation.
 
 Ownership alone does not mean the agent has a current observation; prompt-time verification establishes freshness separately.
+
+### Native Reconnect Hint
+A task-scoped reminder of a previously approved native review source, used to request a fresh launch after live participation ends.
+
+It carries reopening intent only: it grants no Task Binding, current observation, ownership reservation, or access to recovered work.
 
 ### Live PDF Context
 The task-scoped observation of a bound review at prompt time, with review changes and bounded access to its document evidence.

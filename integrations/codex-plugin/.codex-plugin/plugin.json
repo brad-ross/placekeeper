@@ -1,6 +1,6 @@
 {
   "name": "codex-plugin",
-  "version": "0.1.0+codex.20260813212014",
+  "version": "0.2.0",
   "description": "Open a local PDF in Placekeeper and keep its content and annotations current in the hosting Codex task.",
   "author": {
     "name": "Placekeeper"
@@ -9,7 +9,7 @@
   "interface": {
     "displayName": "Placekeeper",
     "shortDescription": "Review a local PDF with live task context.",
-    "longDescription": "Launches one explicitly referenced local PDF in the desktop built-in browser, then uses packaged lifecycle hooks to provide task-scoped PDF and annotation context on every prompt.",
+    "longDescription": "Launches one explicitly referenced local PDF in the native Codex panel and uses trusted lifecycle hooks to provide task-scoped PDF and annotation context on every prompt.",
     "developerName": "Placekeeper",
     "category": "Productivity",
     "capabilities": [],
@@ -18,5 +18,6 @@
     "composerIcon": "./assets/placekeeper.svg",
     "logo": "./assets/placekeeper.svg",
     "logoDark": "./assets/placekeeper.svg"
-  }
+  },
+  "mcpServers": "./.mcp.json"
 }

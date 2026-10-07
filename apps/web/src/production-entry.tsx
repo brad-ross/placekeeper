@@ -413,7 +413,7 @@ export async function startRuntime(
   return () => reactRoot.unmount();
 }
 
-class RuntimeFailureBoundary extends Component<{
+export class RuntimeFailureBoundary extends Component<{
   readonly children: ReactNode;
   readonly onError?: (error: Error) => void;
 }, { readonly failed: boolean }> {

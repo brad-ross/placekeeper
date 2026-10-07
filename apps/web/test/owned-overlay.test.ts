@@ -3,7 +3,7 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from "vitest";
 
-import { ownedMarkStyle, positionOwnedRect } from "../src/pdf/owned-overlay.js";
+import { ownedMarkStyle, positionOwnedRect, selectionLayerStyle } from "../src/pdf/owned-overlay.js";
 import {
   buildAnnotationRenderingState,
   OwnedNativeAnnotationGeometryTargets,
@@ -199,5 +199,19 @@ it('shares centered paint bounds and strike alignment across text annotation sty
     // The shared optical lift must not move the strike off the letter-body center.
     const center = rect.y * scale + rect.height * scale / 2 + geometry.offset;
     expect(center - geometry.height / 2 + geometry.height * parseFloat(geometry.strikePosition) / 100).toBeCloseTo(22 * scale);
+  }
+});
+
+
+it.each([0, 1, 2, 3] as const)('keeps selection paint in natural crop space before intrinsic rotation%s plus viewer rotation', intrinsic => {
+  const page = { index: 0, objectNumber: 1, size: { width: 400, height: 600 }, rotation: intrinsic,
+    boxes: { media: { left: 0, top: 0, right: 600, bottom: 800 }, crop: { left: 40, top: 60, right: 440, bottom: 660 } } };
+  for (const viewer of [0, 1, 2, 3] as const) {
+    const combined = (intrinsic + viewer) % 4;
+    const layout = { pageIndex: 0, pageNumber: 1, x: 0, y: 0, width: 800, height: 1200,
+      rotatedWidth: combined % 2 ? 1200 : 800, rotatedHeight: combined % 2 ? 800 : 1200, elevated: false };
+    expect(selectionLayerStyle(page, layout, viewer)).toEqual({ position: 'absolute',
+      left: combined % 2 ? 600 : 400, top: combined % 2 ? 400 : 600,
+      width: 800, height: 1200, transform: `translate(-50%, -50%) rotate(${combined * 90}deg)`, mixBlendMode: 'multiply', pointerEvents: 'none' });
   }
 });

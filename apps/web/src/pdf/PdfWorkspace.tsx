@@ -7,7 +7,8 @@ import type { PdfEngine } from '@embedpdf/models';
 import { transformSize } from '@embedpdf/models';
 import { AnnotationLayer } from '@embedpdf/plugin-annotation/react';
 import { PagePointerProvider } from '@embedpdf/plugin-interaction-manager/react';
-import { RenderLayer } from '@embedpdf/plugin-render/react';
+import { HostRenderLayer as RenderLayer } from './HostRenderLayer.js';
+import type { ViewerResourcePolicy } from './embedpdf-viewer.js';
 import { Scroller } from '@embedpdf/plugin-scroll/react';
 import { SelectionLayer } from '@embedpdf/plugin-selection/react';
 import { Viewport } from '@embedpdf/plugin-viewport/react';
@@ -17,7 +18,7 @@ import type { ReviewAnnotation } from '../../../../packages/core/src/pdf-writer.
 import type { PdfSearchResult } from './pdf-search-model.js';
 import type { ReferenceScrollPosition } from './reference-manual-scroll.js';
 import { ReviewIcon } from '../review/ReviewIcon.js';
-import { combinePageRotation, positionOwnedRect } from './owned-overlay.js';
+import { combinePageRotation, positionOwnedRect, selectionLayerStyle } from './owned-overlay.js';
 import { groupOwnedMarkGeometryByPage, hitTestOwnedMark } from './owned-mark-hit-test.js';
 import {
   mergeAuthoringPreviewProjections,
@@ -62,6 +63,7 @@ export interface PageContextMenuRequest {
 }
 
 export interface PdfWorkspaceProps {
+  resourceHost?: ViewerResourcePolicy['host'];
   engine: PdfEngine;
   plugins: PluginBatchRegistrations;
   documentLabel?: string;
@@ -114,6 +116,7 @@ function groupByPageIndex<T extends { readonly pageIndex: number }>(
 }
 
 export function PdfWorkspace({
+  resourceHost = 'browser',
   engine,
   plugins,
   documentLabel = 'PDF document',
@@ -423,15 +426,18 @@ export function PdfWorkspace({
                       }}
                     >
                       <RenderLayer
+                        resourceHost={resourceHost}
                         documentId={MAIN_PDF_DOCUMENT_ID}
                         pageIndex={layout.pageIndex}
                         style={{ pointerEvents: 'none' }}
                       />
-                      <SelectionLayer
-                        documentId={MAIN_PDF_DOCUMENT_ID}
-                        pageIndex={layout.pageIndex}
-                        textStyle={PDF_TEXT_SELECTION_STYLE}
-                      />
+                      <div style={selectionLayerStyle(activePdf.pages[layout.pageIndex]!, layout, mainDocument.rotation)}>
+                        <SelectionLayer
+                          documentId={MAIN_PDF_DOCUMENT_ID}
+                          pageIndex={layout.pageIndex}
+                          textStyle={PDF_TEXT_SELECTION_STYLE}
+                        />
+                      </div>
                       <div
                         inert
                         aria-hidden="true"
@@ -474,6 +480,7 @@ export function PdfWorkspace({
                         documentGeneration={documentGeneration}
                       />
                       <PdfAnnotationLayers
+                        resourceHost={resourceHost}
                         documentId={MAIN_PDF_DOCUMENT_ID}
                         engine={engine}
                         document={activePdf}
@@ -523,6 +530,7 @@ export function PdfWorkspace({
             </Viewport>
             {referenceViewportHost && referenceDocument ? (
               <ReferencePdfViewport
+                resourceHost={resourceHost}
                 documentId={REFERENCE_PDF_DOCUMENT_ID}
                 documentState={referenceDocument}
                 documentGeneration={documentGeneration}

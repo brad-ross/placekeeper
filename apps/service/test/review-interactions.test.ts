@@ -3,6 +3,27 @@ import { describe, expect, it, vi } from "vitest";
 import { ReviewInteractions } from "../src/sessions/review-interactions.js";
 
 describe("broker-owned review interactions", () => {
+  it("retires disconnected owner indexes without losing reconnect receipts or newer incarnations", async () => {
+    const interactions = new ReviewInteractions({ currentGeneration: () => 1 });
+    for (let index = 0; index < 20; index++) {
+      const attachment = interactions.register("review-a", `native-panel-${index}`);
+      interactions.disconnect(attachment.attachmentId, attachment.incarnationId);
+    }
+    expect(interactions.retentionStatus()).toEqual({ attachments: 0, owners: 0 });
+    const first = interactions.register("review-a", "native-panel");
+    await interactions.begin({ ...first, generation: 1, interactionToken: "finalize_token", order: 1 });
+    const receipt = await interactions.finalize({ ...first, interactionToken: "finalize_token", order: 2,
+      outcome: "applied", draftId: "draft_1234", commit: async () => ({ reviewRevision: 1, persist: async () => {} }) });
+    interactions.disconnect(first.attachmentId, first.incarnationId);
+    const next = interactions.register("review-a", "native-panel");
+    expect(next.attachmentId).toBe(first.attachmentId);
+    interactions.disconnect(first.attachmentId, first.incarnationId);
+    expect(interactions.authorize(next)).toBe(true);
+    expect(interactions.retentionStatus()).toEqual({ attachments: 1, owners: 1 });
+    expect(await interactions.finalize({ ...next, interactionToken: "finalize_token", order: 2,
+      outcome: "discarded", draftId: "draft_1234", commit: async () => { throw new Error("must replay"); } })).toEqual(receipt);
+  });
+
   it("projects exact authoring draft presence and rejects an active token rebind", async () => {
     const presenceChanged = vi.fn();
     const interactions = new ReviewInteractions({

@@ -21,6 +21,7 @@ export function viewerAssetUrlsEqual(
     && second !== undefined
     && first.pdfiumWasm === second.pdfiumWasm
     && first.workerUrl === second.workerUrl
+    && first.pdfiumWasmBytes === second.pdfiumWasmBytes
     && first.documentUrl === second.documentUrl
     && equalStringRecord(first.requestHeaders, second.requestHeaders)
   );
@@ -43,7 +44,7 @@ export function viewerResourcePoliciesEqual(
       && first.resources.pdfiumWasm === second.resources.pdfiumWasm
       && first.resources.worker === second.resources.worker;
   }
-  return first.host === 'macos' && second.host === 'macos'
+  return (first.host === 'macos' || first.host === 'codex') && (second.host === 'macos' || second.host === 'codex')
     && first.resources.document === second.resources.document
     && first.resources.pdfiumWasm === second.resources.pdfiumWasm
     && first.resources.worker === second.resources.worker;

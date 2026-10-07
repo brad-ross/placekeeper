@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "placekeeper": {
+      "command": "/bin/sh",
+      "args": [
+        "-c",
+        "exec /bin/sh \"$HOME/Applications/Placekeeper.app/Contents/Resources/integrations/codex-plugin/scripts/mcp.sh\""
+      ]
+    }
+  }
+}

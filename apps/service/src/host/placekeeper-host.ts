@@ -1,3 +1,6 @@
+import type { NativeQualificationExperiments } from "../codex/native-qualification-experiments.js";
+import type { NativeQualificationObserver } from "../codex/native-qualification.js";
+import type { CodexNativeLaunchSuccess } from "../../../../packages/core/src/codex-mcp-protocol.js";
 import type {
   LaunchSurface as BrokerLaunchSurface,
   RecoveryDecision,
@@ -15,7 +18,7 @@ import { MacOsDestinationPicker } from "./destination-picker.js";
 import { LiveContextService } from "../context/live-context-service.js";
 import { SourceReconciliationService } from "../context/source-reconciliation-service.js";
 import { LiveSourceWorkflowService } from "../context/live-source-workflow-service.js";
-import type { TaskBindingRegistry } from "../context/task-binding-registry.js";
+import { TaskBindingRegistry } from "../context/task-binding-registry.js";
 import { DaemonLifecycleCoordinator } from "./daemon-lifecycle.js";
 import { decodePlacekeeperLink } from "../../../../packages/core/src/placekeeper-link.js";
 import { openPlacekeeperLink } from "../links/placekeeper-link.js";
@@ -33,6 +36,9 @@ import { ChromeRuntimeManager } from "../browser/chrome-runtime.js";
 import { ChromeServiceRuntimeBackend } from "../browser/chrome-runtime-backend.js";
 import { MacosRuntimeManager } from "../macos/macos-runtime.js";
 import { MacosAppLifecycleManager } from "../macos/app-lifecycle.js";
+
+import { CodexRuntimeManager } from "../codex/codex-runtime.js";
+import { CodexServiceRuntimeBackend } from "../codex/codex-runtime-backend.js";
 
 export type LaunchSurface = BrokerLaunchSurface;
 
@@ -77,7 +83,9 @@ export type LinkLaunchResponse = LaunchResponse | {
   readonly path: string;
 };
 
-export type LaunchResponse =
+export type LaunchResponse = BrowserLaunchResponse | CodexNativeLaunchSuccess;
+
+export type BrowserLaunchResponse =
   | {
       readonly ok: true;
       readonly kind: "opened" | "focused";
@@ -96,6 +104,8 @@ export type LaunchResponse =
   | { readonly ok: false; readonly error: LaunchFailure };
 
 export interface PlacekeeperHostOptions {
+  readonly nativeQualification?: NativeQualificationObserver;
+  readonly nativeQualificationExperiments?: NativeQualificationExperiments;
   readonly recoveryRoot: string;
   readonly browserSourceRoot?: string;
   readonly webAssets?: WebAssetOptions;
@@ -168,6 +178,7 @@ export class PlacekeeperHost {
   readonly chromeRuntime: ChromeRuntimeManager;
   readonly macosRuntime: MacosRuntimeManager;
   readonly macosLifecycle: MacosAppLifecycleManager;
+  readonly codexRuntime: CodexRuntimeManager;
   #closePromise?: Promise<void>;
 
   private constructor(
@@ -183,6 +194,7 @@ export class PlacekeeperHost {
     chromeRuntime: ChromeRuntimeManager,
     macosRuntime: MacosRuntimeManager,
     macosLifecycle: MacosAppLifecycleManager,
+    codexRuntime: CodexRuntimeManager,
   ) {
     this.broker = broker;
     this.server = server;
@@ -196,12 +208,15 @@ export class PlacekeeperHost {
     this.chromeRuntime = chromeRuntime;
     this.macosRuntime = macosRuntime;
     this.macosLifecycle = macosLifecycle;
+    this.codexRuntime = codexRuntime;
   }
 
   static async start(options: PlacekeeperHostOptions): Promise<PlacekeeperHost> {
+    const taskBindings = options.taskBindings ?? (options.nativeQualification === undefined
+      ? undefined : new TaskBindingRegistry({ qualification: options.nativeQualification }));
     const broker = new SessionBroker({
       recoveryRoot: options.recoveryRoot,
-      ...(options.taskBindings === undefined ? {} : { taskBindings: options.taskBindings }),
+      ...(taskBindings === undefined ? {} : { taskBindings }),
       ...(options.browserSourceInspector === undefined
         ? {}
         : { browserSourceInspector: options.browserSourceInspector }),
@@ -240,6 +255,13 @@ export class PlacekeeperHost {
     });
     const macosRuntime = new MacosRuntimeManager(macosRuntimeBackend.authority());
     const macosLifecycle = new MacosAppLifecycleManager(macosRuntime);
+    const codexRuntime = new CodexRuntimeManager(broker, {
+      ...(options.nativeQualification === undefined ? {} : { qualification: options.nativeQualification }),
+      ...(options.nativeQualificationExperiments === undefined ? {} : { experiments: options.nativeQualificationExperiments }),
+      backend: new CodexServiceRuntimeBackend({ broker, saving, exporting,
+        ...(options.webAssets === undefined ? {} : { assetRoot: options.webAssets.root }),
+      }),
+    });
     const lifecycle = new DaemonLifecycleCoordinator({
       activity: () => {
         const activity = broker.activity();
@@ -249,7 +271,7 @@ export class PlacekeeperHost {
         return {
           ...activity,
           reviewPresence: activity.reviewPresence + chromeActivity.connections
-            + macosActivity.helpers + macosAppActivity.appInstances,
+            + macosActivity.helpers + macosAppActivity.appInstances + codexRuntime.activityCount(),
           transientWork: activity.transientWork + saving.activityCount(),
         };
       },
@@ -289,9 +311,12 @@ export class PlacekeeperHost {
       chromeRuntime,
       macosRuntime,
       macosLifecycle,
+      codexRuntime,
     );
   }
 
+  async open(request: LaunchRequest & { readonly surface?: Exclude<LaunchSurface, "codex-native"> }): Promise<BrowserLaunchResponse>;
+  async open(request: LaunchRequest): Promise<LaunchResponse>;
   async open(request: LaunchRequest): Promise<LaunchResponse> {
     const response = await this.lifecycle.runActivity(() => this.#open(request));
     return response ?? upgradeFailure();
@@ -300,7 +325,7 @@ export class PlacekeeperHost {
   async openChromeBrowserSource(
     request: ChromeBrowserSourceOpenRequest,
     signal?: AbortSignal,
-  ): Promise<LaunchResponse> {
+  ): Promise<BrowserLaunchResponse> {
     const response = await this.lifecycle.runActivity(async () => {
       try {
         const opened = await this.broker.openChromeBrowserSource(request, this.browserSources, signal);
@@ -341,6 +366,8 @@ export class PlacekeeperHost {
     return response ?? upgradeFailure();
   }
 
+  async openLink(request: LinkOpenRequest & { readonly surface?: Exclude<LaunchSurface, "codex-native"> }): Promise<Exclude<LinkLaunchResponse, CodexNativeLaunchSuccess>>;
+  async openLink(request: LinkOpenRequest): Promise<LinkLaunchResponse>;
   async openLink(request: LinkOpenRequest): Promise<LinkLaunchResponse> {
     const response = await this.lifecycle.runActivity(() => this.#openLink(request));
     return response ?? upgradeFailure();
@@ -370,6 +397,11 @@ export class PlacekeeperHost {
           choices: opened.choices,
           recoveryOffer: opened.recoveryOffer,
         };
+      }
+      if (surface === "codex-native") {
+        return this.codexRuntime.stageLaunch({ sessionId: opened.launch.sessionId, kind: opened.kind,
+          requestedLocation: decodePlacekeeperLink(request.link).location })
+          ?? upgradeFailure();
       }
       return {
         ok: true,
@@ -421,6 +453,10 @@ export class PlacekeeperHost {
           recoveryOffer: opened.recoveryOffer,
         };
       }
+      if (surface === "codex-native") {
+        return this.codexRuntime.stageLaunch({ sessionId: opened.launch.sessionId, kind: opened.kind })
+          ?? upgradeFailure();
+      }
       return {
         ok: true,
         kind: opened.kind,
@@ -440,6 +476,7 @@ export class PlacekeeperHost {
 
   async close(): Promise<void> {
     this.#closePromise ??= (async () => {
+      await this.codexRuntime.close();
       this.context.discardAll();
       await this.server.close();
       await this.chromeRuntime.close();

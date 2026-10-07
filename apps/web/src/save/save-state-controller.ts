@@ -21,6 +21,24 @@ export function gateReviewCommand(
     : { kind: "choose-destination", pending: command };
 }
 
+/** Save completion can advance without a review revision. Only adopt it for
+ * the current document, and never replace newer locally observed progress. */
+export function canonicalSaveStatusCanApply(
+  currentState: ReviewState,
+  canonicalState: ReviewState,
+  currentStatus: SaveStatus,
+  canonicalStatus: SaveStatus,
+): boolean {
+  return canonicalState.sessionId === currentState.sessionId
+    && canonicalState.workflow.documentGeneration === currentState.workflow.documentGeneration
+    && canonicalState.source.fileId === currentState.source.fileId
+    && canonicalState.source.digest === currentState.source.digest
+    && canonicalState.revision >= currentState.revision
+    && canonicalStatus.destination.generation >= currentStatus.destination.generation
+    && canonicalStatus.sync.desiredRevision >= currentStatus.sync.desiredRevision
+    && canonicalStatus.sync.savedRevision >= currentStatus.sync.savedRevision;
+}
+
 function delay(ms: number, signal: AbortSignal): Promise<void> {
   return new Promise((resolve) => {
     const timer = setTimeout(resolve, ms);

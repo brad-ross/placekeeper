@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -168,5 +168,36 @@ describe("restart reconnect tickets", () => {
     advance(75);
     await store.issue(ticket);
     await expect(store.consumeForTask(replacementCandidate!, ticket.taskSessionId)).resolves.toBe(false);
+  });
+});
+
+describe("native reconnect ticket purpose and peer scope", () => {
+  it("retains both native peer tickets while preserving browser single-ticket replacement", async () => {
+    const { store } = await fixture();
+    const native = { runtimeId: "runtime_a", attemptId: "attempt_a", documentGeneration: 1 };
+    await store.issue({ ...ticket, browserToken: "native-a", native });
+    await store.issue({ ...ticket, browserToken: "native-b", native: { ...native, runtimeId: "runtime_b" } });
+    await store.issue(ticket);
+    await store.issue({ ...ticket, browserToken: "browser-b" });
+    expect(await store.matchBrowser(ticket)).toBeUndefined();
+    expect(await store.matchBrowser({ ...ticket, browserToken: "native-a" })).toBeUndefined();
+    const first = await store.matchNative({ ...native, ticket: "native-a" });
+    const second = await store.matchNative({ ...native, runtimeId: "runtime_b", ticket: "native-b" });
+    expect(first).toBeDefined();
+    expect(second).toBeDefined();
+    expect(await store.matchNative({ ...native, attemptId: "wrong_attempt", ticket: "native-a" })).toBeUndefined();
+    expect(await store.matchNative({ ...native, documentGeneration: 2, ticket: "native-a" })).toBeUndefined();
+    await store.revokeSession(ticket.reviewSessionId);
+    expect(await store.consumeForTask(first!, ticket.taskSessionId)).toBe(false);
+    expect(await store.consumeForTask(second!, ticket.taskSessionId)).toBe(false);
+  });
+
+  it("prunes expired native ticket files while retaining live peer tickets", async () => {
+    const { store, advance } = await fixture();
+    const native = { runtimeId: "runtime_a", attemptId: "attempt_a", documentGeneration: 1 };
+    await store.issue({ ...ticket, browserToken: "expired-native", native });
+    advance(100);
+    await store.issue({ ...ticket, browserToken: "live-native", native: { ...native, runtimeId: "runtime_b" } });
+    expect((await readdir(store.directory)).filter((name) => name.endsWith(".json"))).toHaveLength(1);
   });
 });

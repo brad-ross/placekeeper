@@ -145,6 +145,10 @@ export class ReviewInteractions {
     };
   }
 
+  retentionStatus(): { readonly attachments: number; readonly owners: number } {
+    return { attachments: this.#attachments.size, owners: this.#attachmentByOwner.size };
+  }
+
   held(sessionId: string): boolean {
     for (const record of this.#attachments.values()) {
       if (!record.revoked && record.sessionId === sessionId && record.holds.size > 0) return true;
@@ -337,6 +341,9 @@ export class ReviewInteractions {
     this.#retainReconnectPresence(record);
     record.revoked = true;
     this.#attachments.delete(attachmentId);
+    if (this.#attachmentByOwner.get(record.ownerKey) === attachmentId) {
+      this.#attachmentByOwner.delete(record.ownerKey);
+    }
     this.#releaseAll(record);
   }
 

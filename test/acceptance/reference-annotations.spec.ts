@@ -1546,9 +1546,18 @@ test('authors on a Reference page and preserves one focused draft through switch
   if (!trayAfter || !composerBounds) throw new Error('Reference composer geometry is unavailable.');
   await expect(composer).toHaveAttribute('data-composer-placement', floatingPlacement);
   expect(composerBounds.width).toBeLessThan(trayAfter.width);
-  expect(composerBounds.x).toBeGreaterThanOrEqual(trayAfter.x);
-  expect(composerBounds.x + composerBounds.width)
-    .toBeLessThanOrEqual(trayAfter.x + trayAfter.width);
+  // Reference editors deliberately use application space around the tray.
+  // Keep the measured card inside the same 12px visual viewport inset used by placement.
+  const viewport = await page.evaluate(() => {
+    const current = window.visualViewport;
+    return { left: current?.offsetLeft ?? 0, top: current?.offsetTop ?? 0,
+      width: current?.width ?? document.documentElement.clientWidth,
+      height: current?.height ?? document.documentElement.clientHeight };
+  });
+  expect(composerBounds.x).toBeGreaterThanOrEqual(viewport.left + 12);
+  expect(composerBounds.x + composerBounds.width).toBeLessThanOrEqual(viewport.left + viewport.width - 12);
+  expect(composerBounds.y).toBeGreaterThanOrEqual(viewport.top + 12);
+  expect(composerBounds.y + composerBounds.height).toBeLessThanOrEqual(viewport.top + viewport.height - 12);
 
   await clickWithHitEvidence(detailTab, 'Detail Reference tab');
   await expectReferenceReady(page, detailTab);

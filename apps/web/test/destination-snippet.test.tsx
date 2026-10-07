@@ -179,6 +179,39 @@ describe('engine destination snippet renderer', () => {
 });
 
 describe('destination snippet image session', () => {
+  it('uses native data images and fences a conversion that finishes after dismissal', async () => {
+    const readers: Reader[] = [];
+    class Reader {
+      readyState = 1;
+      result = 'data:image/png;base64,cGl4ZWxz';
+      onload: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      readAsDataURL = vi.fn();
+      abort = vi.fn();
+      constructor() { readers.push(this); }
+    }
+    vi.stubGlobal('FileReader', Reader);
+    try {
+      const run = session(async () => ({ blob: new Blob(['png']), region: rect(0, 0, 100, 40), nativeImage: true }));
+      run.controller.load(description());
+      await vi.waitFor(() => expect(readers).toHaveLength(1));
+      readers[0]!.onload!();
+      expect(run.states.at(-1)).toMatchObject({ status: 'ready', url: readers[0]!.result });
+      run.controller.load(description({ targetIdentity: 'next' }));
+      await vi.waitFor(() => expect(readers).toHaveLength(2));
+      const late = readers[1]!.onload!;
+      run.controller.dispose(); late();
+      expect(run.states.at(-1)).toEqual({ status: 'loading' });
+      expect(readers[1]!.abort).toHaveBeenCalledOnce();
+      expect(run.createObjectURL).not.toHaveBeenCalled();
+      expect(run.revokeObjectURL).not.toHaveBeenCalled();
+      run.controller.load(description({ targetIdentity: 'failed' }));
+      await vi.waitFor(() => expect(readers).toHaveLength(3));
+      readers[2]!.onerror!();
+      expect(run.states.at(-1)).toEqual({ status: 'failed' });
+      run.controller.dispose();
+    } finally { vi.unstubAllGlobals(); }
+  });
   function session(render: Parameters<typeof createDestinationSnippetSession>[0]['render']) {
     const states: DestinationSnippetImageState[] = [];
     let next = 0;

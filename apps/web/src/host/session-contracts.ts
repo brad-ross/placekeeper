@@ -1,3 +1,4 @@
+import type { PlacekeeperLinkLocation } from "../../../../packages/core/src/placekeeper-link.js";
 import type {
   ReadingLocationResolutionRequestV1,
   ReadingLocationResolutionV1,
@@ -87,6 +88,7 @@ export interface ProductionSessionApi extends Partial<ReviewInteractionTransport
   locateSave(): Promise<SaveStatus>;
   resolveReadingLocation?(input: ReadingLocationResolutionRequestV1): Promise<ReadingLocationResolutionV1>;
   exportReviewedCopy?(confirmPossiblyStale?: true, fence?: ReviewExportFence): Promise<ProductionExportResult>;
+  createLink?(location: PlacekeeperLinkLocation): Promise<string>;
   scope(signal?: AbortSignal): Promise<ProductionScope>;
 }
 

@@ -324,7 +324,8 @@ export class LiveContextService {
     if (binding === undefined) {
       const reason = this.#broker.taskBindings.unavailableReasonForTask(input.taskSessionId);
       this.discardTask(input.taskSessionId);
-      return createUnavailableLiveContextObservation({ checkedAt, reason });
+      const reconnect = reason === "pending" ? undefined : this.#broker.taskBindings.nativeReconnectForTask(input.taskSessionId);
+      return createUnavailableLiveContextObservation({ checkedAt, reason, ...(reconnect === undefined ? {} : { reconnect }) });
     }
     const previous = previousRecord?.reviewSessionId === binding.reviewSessionId &&
       previousRecord.documentGeneration === binding.documentGeneration

@@ -22,7 +22,7 @@ interface StoredOperation {
 export interface RuntimeJournalScope {
   /** Existing broker-owned recovery directory; journal writes never recreate it. */
   readonly directory: string;
-  readonly prefix: "chrome" | "macos";
+  readonly prefix: "chrome" | "macos" | "codex";
   readonly legacyCanonicalKey?: string;
 }
 

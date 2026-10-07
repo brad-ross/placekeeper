@@ -2,6 +2,8 @@
 
 Read when the user requests changes to the reviewed source or a clean rebuild. Use [live-evidence.md](live-evidence.md) for required Review Items and evidence. Continue through the requested edits, relevant validation, and final disposition without a separate prepared-delivery approval. Stop dependent writes when freshness or reconciliation fails; report the unresolved work.
 
+Native review uses this same CLI workflow and authorization. The configured source root and relative hints come from the current bound observation; a native panel or link never grants source-writing permission. SyncTeX editor navigation remains a VS Code host feature.
+
 The ordering below protects concurrent manual edits and is required by the service protocol.
 
 - Begin source work only when the user asks for source changes or a clean rebuild. Use the opaque handle from the current context; the service resolves its task binding internally and never asks for a task id:

@@ -1,8 +1,11 @@
+import type { NativeQualificationObserver } from "../codex/native-qualification.js";
 import { randomBytes } from "node:crypto";
+import { isAbsolute } from "node:path";
 
 import type {
   LiveContextBindingStatus,
   LiveObservationIdentity,
+  NativeReconnectGuidance,
 } from "../../../../packages/core/src/live-context.js";
 import { digestSecretHex } from "../../../../packages/core/src/session-security.js";
 
@@ -12,6 +15,7 @@ const MAX_ID_LENGTH = 512;
 
 interface BindProofRecord {
   readonly proofHash: string;
+  readonly native?: boolean;
   readonly browserCapabilityHash: string;
   readonly reviewSessionId: string;
   readonly documentGeneration: number;
@@ -35,7 +39,19 @@ interface ActiveBinding {
   lastVerified?: LiveObservationIdentity;
 }
 
+export interface TaskBindingAuthorityCheck {
+  readonly isCurrent: () => boolean;
+  readonly release: () => void;
+}
+
+interface InFlightAuthorityCheck {
+  readonly taskSessionId: string;
+  readonly reviewSessionId: string;
+  readonly documentGeneration: number;
+}
+
 export interface TaskBindingRegistryOptions {
+  readonly qualification?: NativeQualificationObserver;
   readonly now?: () => Date;
   readonly pendingTtlMs?: number;
   readonly activeLeaseTtlMs?: number;
@@ -92,18 +108,24 @@ function iso(milliseconds: number): string {
  */
 export class TaskBindingRegistry {
   readonly #now: () => Date;
+  readonly #qualification: NativeQualificationObserver | undefined;
   readonly #pendingTtlMs: number;
   readonly #activeLeaseTtlMs: number;
   readonly #randomProof: () => string;
   readonly #proofsByHash = new Map<string, BindProofRecord>();
   readonly #proofHashByBrowserCapabilityHash = new Map<string, string>();
+  readonly #authorityChecks = new Set<InFlightAuthorityCheck>();
+  readonly #nativePending = new Map<string, PendingBinding>();
   readonly #pendingByTask = new Map<string, PendingBinding>();
   readonly #pendingByReview = new Map<string, PendingBinding>();
   readonly #activeByTask = new Map<string, ActiveBinding>();
   readonly #activeByReview = new Map<string, ActiveBinding>();
   readonly #expiredTasks = new Map<string, number>();
+  // Advisory, daemon-local history. Not consulted by ownership or authority checks.
+  readonly #nativeReconnectHints = new Map<string, { reviewSessionId: string; pdfPath: string; expiresAtMs: number }>();
 
   constructor(options: TaskBindingRegistryOptions = {}) {
+    this.#qualification = options.qualification;
     this.#now = options.now ?? (() => new Date());
     this.#pendingTtlMs = options.pendingTtlMs ?? DEFAULT_PENDING_TTL_MS;
     this.#activeLeaseTtlMs = options.activeLeaseTtlMs ?? DEFAULT_ACTIVE_LEASE_TTL_MS;
@@ -120,6 +142,7 @@ export class TaskBindingRegistry {
     readonly reviewSessionId: string;
     readonly documentGeneration: number;
     readonly browserCapability: string;
+    readonly native?: boolean;
   }): string {
     this.#sweep();
     if (
@@ -137,6 +160,7 @@ export class TaskBindingRegistry {
     const browserCapabilityHash = digestSecretHex(input.browserCapability);
     const record: BindProofRecord = {
       proofHash,
+      ...(input.native === true ? { native: true } : {}),
       browserCapabilityHash,
       reviewSessionId: input.reviewSessionId,
       documentGeneration: input.documentGeneration,
@@ -164,7 +188,7 @@ export class TaskBindingRegistry {
     const proofHash = digestSecretHex(input.bindProof);
     this.#expiredTasks.delete(input.taskSessionId);
     const proof = this.#proofsByHash.get(proofHash);
-    if (proof === undefined) return { status: "denied" };
+    if (proof === undefined || proof.native === true) return { status: "denied" };
     this.#consumeProof(proof);
     if (
       proof.reviewSessionId !== input.reviewSessionId ||
@@ -172,6 +196,8 @@ export class TaskBindingRegistry {
       proof.expiresAtMs <= this.#nowMs()
     ) return { status: "denied" };
 
+    if (!this.#associationAvailable(input)) return { status: "denied" };
+    this.#discardDifferentNativeHint(input.taskSessionId, input.reviewSessionId);
     const activeForReview = this.#activeByReview.get(input.reviewSessionId);
     const activeForTask = this.#activeByTask.get(input.taskSessionId);
     if (activeForReview !== undefined || activeForTask !== undefined) {
@@ -215,6 +241,189 @@ export class TaskBindingRegistry {
     return { status: "pending", expiresAt: iso(pending.expiresAtMs) };
   }
 
+  /** Fences asynchronous native promotion against canonical revocation. */
+  beginAuthorityCheck(input: InFlightAuthorityCheck): TaskBindingAuthorityCheck {
+    const check = { ...input };
+    this.#authorityChecks.add(check);
+    return {
+      isCurrent: () => this.#authorityChecks.has(check),
+      release: () => {
+        this.#authorityChecks.delete(check);
+      },
+    };
+  }
+
+  #invalidateAuthorityChecks(matches: (check: InFlightAuthorityCheck) => boolean): void {
+    for (const check of this.#authorityChecks) {
+      if (matches(check)) {
+        this.#authorityChecks.delete(check);
+      }
+    }
+  }
+
+  /** Native launch hooks reserve ownership but never activate a panel. */
+  claimNative(input: {
+    readonly bindProof: string;
+    readonly taskSessionId: string;
+    readonly reviewSessionId: string;
+    readonly documentGeneration: number;
+  }): TaskBindingClaimResult {
+    this.#sweep();
+    const proof = this.#proofsByHash.get(digestSecretHex(input.bindProof));
+    if (proof?.native !== true) {
+      this.#qualification?.record("claim-conflict", { taskSessionId: input.taskSessionId, reviewSessionId: input.reviewSessionId, generation: input.documentGeneration, denial: proof === undefined ? "proof-missing-or-expired" : "invalid" });
+      return {
+        status: "denied",
+      };
+    }
+    this.#consumeProof(proof);
+    if (proof.documentGeneration !== input.documentGeneration) this.#qualification?.record("claim-conflict", { taskSessionId: input.taskSessionId, reviewSessionId: input.reviewSessionId, generation: input.documentGeneration, denial: "generation-mismatch" });
+    if (
+      !validId(input.taskSessionId) ||
+      proof.reviewSessionId !== input.reviewSessionId ||
+      proof.documentGeneration !== input.documentGeneration ||
+      !this.#associationAvailable(input)
+    ) {
+      return {
+        status: "denied",
+      };
+    }
+    this.#discardDifferentNativeHint(input.taskSessionId, input.reviewSessionId);
+    this.#nativePending.set(proof.browserCapabilityHash, {
+      ...input,
+      browserCapabilityHash: proof.browserCapabilityHash,
+      expiresAtMs: proof.expiresAtMs,
+    });
+    return {
+      status: "pending",
+      expiresAt: iso(proof.expiresAtMs),
+    };
+  }
+
+  nativeClaimMatches(input: {
+    readonly taskSessionId: string;
+    readonly reviewSessionId: string;
+    readonly documentGeneration: number;
+    readonly browserCapabilityHash: string;
+  }): boolean {
+    this.#sweep();
+    const pending = this.#nativePending.get(input.browserCapabilityHash);
+    return pending !== undefined &&
+      pending.taskSessionId === input.taskSessionId &&
+      pending.reviewSessionId === input.reviewSessionId &&
+      pending.documentGeneration === input.documentGeneration;
+  }
+
+  activateNative(input: {
+    readonly taskSessionId: string;
+    readonly reviewSessionId: string;
+    readonly documentGeneration: number;
+    readonly browserCapabilityHash: string;
+  }): TaskBindingClaimResult {
+    if (!this.nativeClaimMatches(input)) {
+      return {
+        status: "denied",
+      };
+    }
+    const result = this.attachReconnectedNative(input);
+    if (result.status === "active") {
+      this.#nativePending.delete(input.browserCapabilityHash);
+    }
+    return result;
+  }
+
+  detachPresentation(capabilityHash: string): void {
+    const proofHash = this.#proofHashByBrowserCapabilityHash.get(capabilityHash);
+    const proof = proofHash === undefined ? undefined : this.#proofsByHash.get(proofHash);
+    if (proof?.native === true) {
+      this.#consumeProof(proof);
+    }
+    this.#nativePending.delete(capabilityHash);
+    for (const active of this.#activeByTask.values()) {
+      active.browserCapabilityHashes.delete(capabilityHash);
+      if (active.browserCapabilityHashes.size === 0) {
+        this.#removeActive(active);
+      }
+    }
+  }
+
+  rememberNativeReconnect(input: {
+    readonly taskSessionId: string; readonly reviewSessionId: string; readonly documentGeneration: number;
+    readonly browserCapabilityHash: string; readonly pdfPath: string;
+  }): boolean {
+    if (!this.hasPresentationAuthority(input)) return false;
+    this.#nativeReconnectHints.delete(input.taskSessionId);
+    if (!this.#validReconnectPath(input.pdfPath)) return false;
+    this.#nativeReconnectHints.set(input.taskSessionId, {
+      reviewSessionId: input.reviewSessionId, pdfPath: input.pdfPath, expiresAtMs: this.#nowMs() + 24 * 60 * 60_000,
+    });
+    while (this.#nativeReconnectHints.size > 256) this.#nativeReconnectHints.delete(this.#nativeReconnectHints.keys().next().value!);
+    return true;
+  }
+
+  relocateNativeReconnect(reviewSessionId: string, pdfPath: string): void {
+    for (const [task, hint] of this.#nativeReconnectHints) {
+      if (hint.reviewSessionId !== reviewSessionId) continue;
+      if (!this.#validReconnectPath(pdfPath)) this.#nativeReconnectHints.delete(task);
+      else hint.pdfPath = pdfPath;
+    }
+  }
+
+  nativeReconnectForTask(taskSessionId: string): NativeReconnectGuidance | undefined {
+    this.#sweep();
+    const hint = this.#nativeReconnectHints.get(taskSessionId);
+    const owner = hint === undefined ? undefined : this.#activeByReview.get(hint.reviewSessionId);
+    if (hint === undefined || (owner !== undefined && owner.taskSessionId !== taskSessionId)) return undefined;
+    return { kind: "reopen-previous-source", pdfPath: hint.pdfPath, expiresAt: iso(hint.expiresAtMs) };
+  }
+
+  #validReconnectPath(path: string): boolean {
+    return isAbsolute(path) && path.length <= 4096 && !/[\u0000-\u001f\u007f]/u.test(path);
+  }
+
+  #discardDifferentNativeHint(taskSessionId: string, reviewSessionId: string): void {
+    const hint = this.#nativeReconnectHints.get(taskSessionId);
+    if (hint !== undefined && hint.reviewSessionId !== reviewSessionId) this.#nativeReconnectHints.delete(taskSessionId);
+  }
+
+  hasPresentationAuthority(input: {
+    readonly taskSessionId: string;
+    readonly reviewSessionId: string;
+    readonly documentGeneration: number;
+    readonly browserCapabilityHash: string;
+  }): boolean {
+    this.#sweep();
+    const active = this.#activeByTask.get(input.taskSessionId);
+    return active?.reviewSessionId === input.reviewSessionId &&
+      active.documentGeneration === input.documentGeneration &&
+      active.browserCapabilityHashes.has(input.browserCapabilityHash);
+  }
+
+  #associationAvailable(input: {
+    readonly taskSessionId: string;
+    readonly reviewSessionId: string;
+    readonly documentGeneration: number;
+  }): boolean {
+    const bindings = [
+      ...this.#activeByTask.values(),
+      ...this.#pendingByTask.values(),
+      ...this.#nativePending.values(),
+    ];
+    for (const binding of bindings) {
+      const fields = { taskSessionId: input.taskSessionId, reviewSessionId: input.reviewSessionId, generation: input.documentGeneration };
+      if (binding.taskSessionId === input.taskSessionId && binding.reviewSessionId !== input.reviewSessionId) this.#qualification?.record("claim-conflict", { ...fields, denial: "task-associated-other-review" });
+      if (binding.reviewSessionId === input.reviewSessionId && binding.taskSessionId !== input.taskSessionId) this.#qualification?.record("claim-conflict", { ...fields, denial: "review-owned-other-task" });
+      if (binding.taskSessionId === input.taskSessionId && binding.reviewSessionId === input.reviewSessionId && binding.documentGeneration !== input.documentGeneration) this.#qualification?.record("claim-conflict", { ...fields, denial: "generation-mismatch" });
+    }
+    return bindings.every((binding) =>
+      (binding.taskSessionId !== input.taskSessionId && binding.reviewSessionId !== input.reviewSessionId) ||
+      (
+        binding.taskSessionId === input.taskSessionId &&
+        binding.reviewSessionId === input.reviewSessionId &&
+        binding.documentGeneration === input.documentGeneration
+      ));
+  }
+
   activateBrowser(input: {
     readonly reviewSessionId: string;
     readonly documentGeneration: number;
@@ -244,6 +453,19 @@ export class TaskBindingRegistry {
       return { status: "ignored" };
     }
 
+    const existing = this.#activeByReview.get(input.reviewSessionId);
+    if (existing !== undefined) {
+      if (
+        existing.taskSessionId !== pending.taskSessionId ||
+        existing.documentGeneration !== pending.documentGeneration
+      ) {
+        return { status: "ignored" };
+      }
+      this.#removePending(pending);
+      existing.browserCapabilityHashes.add(pending.browserCapabilityHash);
+      existing.leaseExpiresAtMs = this.#nowMs() + this.#activeLeaseTtlMs;
+      return { status: "active", leaseExpiresAt: iso(existing.leaseExpiresAtMs) };
+    }
     this.#removePending(pending);
     const active: ActiveBinding = {
       taskSessionId: pending.taskSessionId,
@@ -266,6 +488,24 @@ export class TaskBindingRegistry {
     readonly documentGeneration: number;
     readonly browserCapabilityHash: string;
   }): TaskBindingClaimResult {
+    return this.#attachReconnectedPresentation(input, false);
+  }
+
+  attachReconnectedNative(input: {
+    readonly taskSessionId: string;
+    readonly reviewSessionId: string;
+    readonly documentGeneration: number;
+    readonly browserCapabilityHash: string;
+  }): TaskBindingClaimResult {
+    return this.#attachReconnectedPresentation(input, true);
+  }
+
+  #attachReconnectedPresentation(input: {
+    readonly taskSessionId: string;
+    readonly reviewSessionId: string;
+    readonly documentGeneration: number;
+    readonly browserCapabilityHash: string;
+  }, allowSameAssociationPending: boolean): TaskBindingClaimResult {
     this.#sweep();
     if (
       !validId(input.taskSessionId) ||
@@ -274,6 +514,8 @@ export class TaskBindingRegistry {
       !validSecretHash(input.browserCapabilityHash)
     ) return { status: "denied" };
 
+    if (!this.#associationAvailable(input)) return { status: "denied" };
+    this.#discardDifferentNativeHint(input.taskSessionId, input.reviewSessionId);
     const activeForReview = this.#activeByReview.get(input.reviewSessionId);
     const activeForTask = this.#activeByTask.get(input.taskSessionId);
     if (activeForReview !== undefined || activeForTask !== undefined) {
@@ -292,7 +534,12 @@ export class TaskBindingRegistry {
 
     const pendingForReview = this.#pendingByReview.get(input.reviewSessionId);
     const pendingForTask = this.#pendingByTask.get(input.taskSessionId);
-    if (pendingForReview !== undefined || pendingForTask !== undefined) return { status: "denied" };
+    if (
+      (pendingForReview !== undefined || pendingForTask !== undefined) &&
+      !allowSameAssociationPending
+    ) {
+      return { status: "denied" };
+    }
 
     const active: ActiveBinding = {
       taskSessionId: input.taskSessionId,
@@ -380,7 +627,7 @@ export class TaskBindingRegistry {
 
   unavailableReasonForTask(taskSessionId: string): "pending" | "expired" | "unbound" {
     this.#sweep();
-    if (this.#pendingByTask.has(taskSessionId)) return "pending";
+    if (this.#pendingByTask.has(taskSessionId) || [...this.#nativePending.values()].some((pending) => pending.taskSessionId === taskSessionId)) return "pending";
     return this.#expiredTasks.has(taskSessionId) ? "expired" : "unbound";
   }
 
@@ -446,36 +693,78 @@ export class TaskBindingRegistry {
   }
 
   revokeTask(taskSessionId: string): void {
+    this.#nativeReconnectHints.delete(taskSessionId);
+    this.#invalidateAuthorityChecks((check) => check.taskSessionId === taskSessionId);
+    for (const [key, pending] of this.#nativePending) {
+      if (pending.taskSessionId === taskSessionId) {
+        this.#nativePending.delete(key);
+      }
+    }
     const pending = this.#pendingByTask.get(taskSessionId);
-    if (pending !== undefined) this.#removePending(pending);
+    if (pending !== undefined) {
+      this.#removePending(pending);
+    }
     const active = this.#activeByTask.get(taskSessionId);
-    if (active !== undefined) this.#removeActive(active);
+    if (active !== undefined) {
+      this.#removeActive(active);
+    }
     this.#expiredTasks.delete(taskSessionId);
   }
 
   revokeSession(reviewSessionId: string): void {
+    for (const [task, hint] of this.#nativeReconnectHints) if (hint.reviewSessionId === reviewSessionId) this.#nativeReconnectHints.delete(task);
+    this.#invalidateAuthorityChecks((check) => check.reviewSessionId === reviewSessionId);
+    for (const [key, pending] of this.#nativePending) {
+      if (pending.reviewSessionId === reviewSessionId) {
+        this.#nativePending.delete(key);
+      }
+    }
     for (const proof of [...this.#proofsByHash.values()]) {
-      if (proof.reviewSessionId === reviewSessionId) this.#consumeProof(proof);
+      if (proof.reviewSessionId === reviewSessionId) {
+        this.#consumeProof(proof);
+      }
     }
     const pending = this.#pendingByReview.get(reviewSessionId);
-    if (pending !== undefined) this.#removePending(pending);
+    if (pending !== undefined) {
+      this.#removePending(pending);
+    }
     const active = this.#activeByReview.get(reviewSessionId);
-    if (active !== undefined) this.#removeActive(active);
+    if (active !== undefined) {
+      this.#removeActive(active);
+    }
   }
 
   revokeGeneration(reviewSessionId: string, currentGeneration: number): void {
+    this.#invalidateAuthorityChecks((check) =>
+      check.reviewSessionId === reviewSessionId && check.documentGeneration !== currentGeneration);
+    for (const [key, pending] of this.#nativePending) {
+      if (
+        pending.reviewSessionId === reviewSessionId &&
+        pending.documentGeneration !== currentGeneration
+      ) {
+        this.#nativePending.delete(key);
+      }
+    }
     for (const proof of [...this.#proofsByHash.values()]) {
       if (
         proof.reviewSessionId === reviewSessionId &&
         proof.documentGeneration !== currentGeneration
-      ) this.#consumeProof(proof);
+      ) {
+        this.#consumeProof(proof);
+      }
     }
     const pending = this.#pendingByReview.get(reviewSessionId);
-    if (pending !== undefined && pending.documentGeneration !== currentGeneration) {
+    if (
+      pending !== undefined &&
+      pending.documentGeneration !== currentGeneration
+    ) {
       this.#removePending(pending);
     }
     const active = this.#activeByReview.get(reviewSessionId);
-    if (active !== undefined && active.documentGeneration !== currentGeneration) {
+    if (
+      active !== undefined &&
+      active.documentGeneration !== currentGeneration
+    ) {
       this.#removeActive(active);
     }
   }
@@ -488,29 +777,55 @@ export class TaskBindingRegistry {
     readonly successorGeneration: number;
   }): GenerationMigrationResult {
     this.#sweep();
+    this.#invalidateAuthorityChecks((check) => check.reviewSessionId === input.reviewSessionId);
     if (
       !validId(input.reviewSessionId) ||
       !validGeneration(input.previousGeneration) ||
       !validGeneration(input.successorGeneration) ||
       input.successorGeneration <= input.previousGeneration
-    ) return { status: "revoked" };
+    ) {
+      return {
+        status: "revoked",
+      };
+    }
     for (const proof of [...this.#proofsByHash.values()]) {
-      if (proof.reviewSessionId === input.reviewSessionId) this.#consumeProof(proof);
+      if (proof.reviewSessionId === input.reviewSessionId) {
+        this.#consumeProof(proof);
+      }
+    }
+    for (const [key, pending] of this.#nativePending) {
+      if (pending.reviewSessionId === input.reviewSessionId) {
+        this.#nativePending.delete(key);
+      }
     }
     const pending = this.#pendingByReview.get(input.reviewSessionId);
-    if (pending !== undefined) this.#removePending(pending);
+    if (pending !== undefined) {
+      this.#removePending(pending);
+    }
     const active = this.#activeByReview.get(input.reviewSessionId);
-    if (active === undefined) return { status: "unbound" };
+    if (active === undefined) {
+      return {
+        status: "unbound",
+      };
+    }
     if (active.documentGeneration !== input.previousGeneration) {
       this.#removeActive(active);
-      return { status: "revoked" };
+      return {
+        status: "revoked",
+      };
     }
     active.documentGeneration = input.successorGeneration;
     delete active.lastVerified;
-    return { status: "migrated", taskSessionId: active.taskSessionId };
+    return {
+      status: "migrated",
+      taskSessionId: active.taskSessionId,
+    };
   }
 
   revokeAll(): void {
+    this.#nativeReconnectHints.clear();
+    this.#authorityChecks.clear();
+    this.#nativePending.clear();
     this.#proofsByHash.clear();
     this.#proofHashByBrowserCapabilityHash.clear();
     this.#pendingByTask.clear();
@@ -522,7 +837,7 @@ export class TaskBindingRegistry {
 
   activityCount(): number {
     this.#sweep();
-    return this.#proofsByHash.size + this.#pendingByTask.size + this.#activeByTask.size;
+    return this.#authorityChecks.size + this.#nativePending.size + this.#proofsByHash.size + this.#pendingByTask.size + this.#activeByTask.size;
   }
 
   #nowMs(): number {
@@ -554,8 +869,16 @@ export class TaskBindingRegistry {
 
   #sweep(): void {
     const now = this.#nowMs();
+    for (const [task, hint] of this.#nativeReconnectHints) if (hint.expiresAtMs <= now) this.#nativeReconnectHints.delete(task);
+    for (const [key, pending] of this.#nativePending) {
+      if (pending.expiresAtMs <= now) {
+        this.#nativePending.delete(key);
+      }
+    }
     for (const proof of [...this.#proofsByHash.values()]) {
-      if (proof.expiresAtMs <= now) this.#consumeProof(proof);
+      if (proof.expiresAtMs <= now) {
+        this.#consumeProof(proof);
+      }
     }
     for (const pending of [...this.#pendingByTask.values()]) {
       if (pending.expiresAtMs <= now) {
@@ -571,7 +894,9 @@ export class TaskBindingRegistry {
     }
     while (this.#expiredTasks.size > 256) {
       const oldest = this.#expiredTasks.keys().next().value as string | undefined;
-      if (oldest === undefined) break;
+      if (oldest === undefined) {
+        break;
+      }
       this.#expiredTasks.delete(oldest);
     }
   }

@@ -41,7 +41,7 @@ test('host deferral is pending close-and-retry, not a false completion', async (
   assert.equal(result.exitCode, 0);
 });
 test('Codex unavailable offers the installed marketplace path without claiming enabled', async () => {
-  const result = await setupCodex({ appPath, codexPath: '/missing/codex', run: async () => { throw new Error('ENOENT'); } });
+  const result = await setupCodex({ appPath, codexPath: '/missing/codex', read: async () => JSON.stringify({ version: '0.1.0+codex.test' }), run: async () => { throw new Error('ENOENT'); } });
   assert.equal(result.status, 'pending');
   assert.match(result.message, /marketplace/);
   assert.match(result.message, /new task/);
@@ -49,20 +49,22 @@ test('Codex unavailable offers the installed marketplace path without claiming e
 });
 test('Codex probes all supported commands before mutation and preserves unrelated marketplaces', async () => {
   const calls = [];
-  const result = await setupCodex({ appPath, codexPath: '/fake/codex', run: async (_command, args) => {
+  const result = await setupCodex({ appPath, codexPath: '/fake/codex', read: async () => JSON.stringify({ version: '0.1.0+codex.test' }), run: async (_command, args) => {
     calls.push(args);
     if (args.includes('--help')) return { stdout: 'Usage: codex plugin marketplace add list --json --marketplace' };
     if (args[1] === 'marketplace' && args[2] === 'list') return { stdout: JSON.stringify({ marketplaces: [{ name: 'placekeeper-local', root: '/user/source' }] }) };
-    if (args[1] === 'list') return { stdout: JSON.stringify({ installed: [{ pluginId: 'codex-plugin@placekeeper-installed', installed: true, enabled: true }] }) };
+    if (args[1] === 'list') return { stdout: JSON.stringify({ installed: [{ pluginId: 'codex-plugin@placekeeper-installed', installed: true, enabled: true, version: '0.1.0+codex.test' }] }) };
     return { stdout: '{}' };
   } });
   assert.equal(result.status, 'pending');
   assert.equal(calls.filter((args) => args.includes('--help')).length, 4);
   assert.ok(calls.some((args) => args.includes('codex-plugin@placekeeper-installed')));
   assert.ok(!calls.some((args) => args.includes('remove')));
+  assert.match(result.message, /payload 0.1.0\+codex.test installed/);
+  assert.match(result.message, /still need verification/);
 });
 test('Codex refuses a conflicting installed-marketplace source', async () => {
-  const result = await setupCodex({ appPath, codexPath: '/fake/codex', run: async (_command, args) => {
+  const result = await setupCodex({ appPath, codexPath: '/fake/codex', read: async () => JSON.stringify({ version: '0.1.0+codex.test' }), run: async (_command, args) => {
     if (args.includes('--help')) return { stdout: 'Usage: --json --marketplace' };
     assert.equal(args[2], 'list');
     return { stdout: JSON.stringify({ marketplaces: [{ name: 'placekeeper-installed', root: '/unrelated' }] }) };
@@ -87,7 +89,7 @@ test('a coordinator success envelope alone never establishes host completion', a
 });
 test('Codex preserves an existing disabled plugin without invoking installation commands', async () => {
   const mutations = [];
-  const result = await setupCodex({ appPath, codexPath: '/fake/codex', run: async (_command, args) => {
+  const result = await setupCodex({ appPath, codexPath: '/fake/codex', read: async () => JSON.stringify({ version: '0.1.0+codex.test' }), run: async (_command, args) => {
     if (args.includes('--help')) return { stdout: 'Usage: --json --marketplace' };
     if (args.includes('add')) mutations.push(args);
     if (args[1] === 'marketplace') return { stdout: JSON.stringify({ marketplaces: [{ name: 'placekeeper-installed', marketplaceSource: { sourceType: 'local', source: `${appPath}/Contents/Resources/integrations` } }] }) };
@@ -98,7 +100,7 @@ test('Codex preserves an existing disabled plugin without invoking installation 
   assert.match(result.message, /state was preserved/);
 });
 test('Codex rejects an unverifiable plugin install rather than claiming completion', async () => {
-  await assert.rejects(setupCodex({ appPath, codexPath: '/fake/codex', run: async (_command, args) => {
+  await assert.rejects(setupCodex({ appPath, codexPath: '/fake/codex', read: async () => JSON.stringify({ version: '0.1.0+codex.test' }), run: async (_command, args) => {
     if (args.includes('--help')) return { stdout: 'Usage: --json --marketplace' };
     if (args[1] === 'marketplace' && args[2] === 'list') return { stdout: '{"marketplaces":[]}' };
     if (args[1] === 'list') return { stdout: '{"installed":[]}' };
@@ -127,4 +129,18 @@ test('bundled marketplace resolves its plugin relative to the installed source a
     assert.equal(marketplace.name, 'placekeeper-installed');
     assert.equal(plugin.name, 'codex-plugin');
   } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test.each(['0.1.0+codex.old', undefined, 42])('Codex identifies a stale or unverifiable cache version %s without claiming current discovery', async (installedVersion) => {
+  const result = await setupCodex({ appPath, codexPath: '/fake/codex', read: async () => JSON.stringify({ version: '0.1.0+codex.new' }), run: async (_command, args) => {
+    if (args.includes('--help')) return { stdout: 'Usage: --json --marketplace' };
+    if (args[1] === 'marketplace' && args[2] === 'list') return { stdout: '{"marketplaces":[]}' };
+    if (args[1] === 'list') return { stdout: JSON.stringify({ installed: [{ pluginId: 'codex-plugin@placekeeper-installed', installed: true, enabled: true, version: installedVersion }] }) };
+    return { stdout: '{}' };
+  } });
+  assert.equal(result.status, 'pending');
+  assert.match(result.message, /older|different.*version/);
+  assert.match(result.message, /update or reinstall/);
+  assert.match(result.message, /quit.*restart/i);
+  assert.match(result.message, /display_review/);
 });

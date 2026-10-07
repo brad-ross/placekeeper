@@ -33,14 +33,16 @@ async function fixtureBundle(root: string): Promise<string> {
     "app.css": ":root {}\n",
     "pdfium.wasm": Buffer.from([0, 97, 115, 109, 1, 0, 0, 0]),
     "pdfium-worker.js": 'class PdfiumEngineRunner {}\nif (message.type === "wasmInit") {}\n',
+    "pdfium-codex-worker.js": 'class PdfiumEngineRunner {}\nif (type === "wasmInit") { const wasmBinary = event.data.wasmBinary; }\n',
   } as const;
   for (const [name, bytes] of Object.entries(assets)) await writeFile(join(shared, name), bytes, { mode: 0o644 });
   await writeFile(join(shared, "asset-manifest.json"), JSON.stringify({
-    schemaVersion: 3,
+    schemaVersion: 4,
     app: "app.js",
     stylesheet: "app.css",
     pdfiumWasm: "pdfium.wasm",
     pdfiumWorker: "pdfium-worker.js",
+    pdfiumCodexWorker: "pdfium-codex-worker.js",
     integrity: Object.fromEntries(Object.entries(assets).map(([name, bytes]) => [
       name, createHash("sha256").update(bytes).digest("hex"),
     ])),
@@ -216,7 +218,7 @@ describe("Chrome distribution integration", () => {
     },
   );
 
-  it.each(["asset-manifest.json", "app.js", "app.css", "pdfium.wasm", "pdfium-worker.js"])(
+  it.each(["asset-manifest.json", "app.js", "app.css", "pdfium.wasm", "pdfium-worker.js", "pdfium-codex-worker.js"])(
     "reports an installed extension missing or corrupt shared asset %s as incomplete",
     async (asset) => {
       const root = await mkdtemp(join(tmpdir(), "placekeeper-chrome-shared-incomplete-"));

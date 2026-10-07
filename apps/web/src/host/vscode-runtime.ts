@@ -11,6 +11,7 @@ import {
   sanitizeChromeReviewRuntimeResponse,
   sanitizeMacosReviewRuntimeRequest,
   sanitizeMacosReviewRuntimeResponse,
+  sanitizeCodexReviewRuntimeResponse,
   type ReviewRuntimeHost,
   type ReviewRuntimeMethod,
 } from "../../../../packages/core/src/review-runtime-protocol.js";
@@ -39,6 +40,7 @@ export interface VscodeMessagePort {
 
 export interface MaterializedViewerResource {
   readonly url: string;
+  readonly bytes?: Uint8Array<ArrayBuffer>;
   dispose(): void;
 }
 
@@ -163,7 +165,7 @@ export function createRpcHostRuntime(
   if (host === "chrome" && options.extensionOrigin === undefined) {
     throw new Error("A Chrome extension origin is required.");
   }
-  const envelopeIdentity = host === "chrome" || host === "macos" ? { runtimeId } : { panelId: runtimeId };
+  const envelopeIdentity = host === "chrome" || host === "macos" || host === "codex" ? { runtimeId } : { panelId: runtimeId };
   const pending = new Map<string, PendingRequest>();
   const invalidations = new Set<(event: HostRuntimeInvalidation) => void>();
   const interactionReconnectListeners = new Set<(
@@ -172,6 +174,7 @@ export function createRpcHostRuntime(
   const hostCommands = new Set<(command: HostRuntimeCommand) => void>();
   let identity: HostRuntimeIdentity | undefined;
   let hydratedIdentity: HostRuntimeIdentity | undefined;
+  let codexDocumentRefresh = false;
   let interactionLifecycleNegotiated = false;
   let pendingInvalidation: HostRuntimeInvalidation | undefined;
   let deferredCommandInvalidation: HostRuntimeInvalidation | undefined;
@@ -179,6 +182,20 @@ export function createRpcHostRuntime(
   let disposed = false;
   let nativeLocationHistory: MemoryReviewLocationHistory | undefined;
   let bootstrapped = false;
+  let bootstrapEpoch = 0;
+  const committedCodexResources: Array<{ document: string; wasm: string; worker: string }> = [];
+  const retireUnpublishedCodexResources = () => {
+    const retained = {
+      document: new Set(committedCodexResources.map(value => value.document)),
+      wasm: new Set(committedCodexResources.map(value => value.wasm)),
+      worker: new Set(committedCodexResources.map(value => value.worker)),
+    };
+    for (const [cache, keys] of [[materializedDocuments, retained.document], [materializedPdfium, retained.wasm], [materializedWorkers, retained.worker]] as const) {
+      for (const [key, resource] of cache) if (!keys.has(key)) {
+        cache.delete(key); void resource.then(value => value.dispose(), () => undefined);
+      }
+    }
+  };
   const materializedPdfium = new Map<string, Promise<MaterializedViewerResource>>();
   const materializedWorkers = new Map<string, Promise<MaterializedViewerResource>>();
   const materializedDocuments = new Map<string, Promise<MaterializedViewerResource>>();
@@ -201,7 +218,7 @@ export function createRpcHostRuntime(
       resource.dispose();
       throw new Error("The review runtime is disposed.");
     }
-    while (materializedDocuments.size > 2) {
+    while (host !== "codex" && materializedDocuments.size > 2) {
       const oldest = materializedDocuments.entries().next().value as
         | [string, Promise<MaterializedViewerResource>]
         | undefined;
@@ -277,7 +294,7 @@ export function createRpcHostRuntime(
 
   const unsubscribe = port.subscribe((message) => {
     if (!isObject(message) || message.protocol !== REVIEW_RUNTIME_PROTOCOL ||
-      (host === "chrome" || host === "macos"
+      (host === "chrome" || host === "macos" || host === "codex"
         ? message.runtimeId !== runtimeId
         : message.panelId !== runtimeId)) return;
     if (message.kind === "response" && typeof message.requestId === "string" &&
@@ -332,7 +349,13 @@ export function createRpcHostRuntime(
     if (message.kind !== "response" || typeof message.requestId !== "string") return;
     const current = pending.get(message.requestId);
     if (current === undefined) return;
-    if (host === "macos" && message.method !== current.method) return;
+    if ((host === "macos" || host === "codex") && message.method !== current.method) return;
+    if (host === "codex" && message.ok === false &&
+      !(isObject(message.error) && message.error.kind === "export-conflict" && Object.keys(message.error).length === 1)) {
+      pending.delete(message.requestId); current.abort?.();
+      current.reject(new Error("The native review action or resource could not be verified."));
+      return;
+    }
     if (!validIdentity(message)) return;
     if (current.method === "bootstrap") {
       if (!isObject(message.payload) || message.payload.sessionId !== message.sessionId ||
@@ -344,11 +367,14 @@ export function createRpcHostRuntime(
     if (message.ok === true) {
       const payload = host === "chrome"
         ? sanitizeChromeReviewRuntimeResponse(current.method, message.payload)
+        : host === "codex"
+          ? sanitizeCodexReviewRuntimeResponse(current.method, message.payload)
         : host === "macos"
           ? sanitizeMacosReviewRuntimeResponse(current.method, message.payload)
           : message.payload;
       if (payload === undefined) current.reject(new Error("The trusted host returned an invalid response."));
-      else current.resolve(payload);
+      else current.resolve(host === "codex" && current.method === "bootstrap" && isObject(payload) && isObject(message.payload) && isObject(message.payload.capabilities)
+        ? { ...payload, capabilities: { localDocumentRefresh: message.payload.capabilities.localDocumentRefresh === true, interactionLifecycleVersion: message.payload.capabilities.interactionLifecycleVersion } } : payload);
     } else {
       const conflict = (isObject(message.error) && message.error.kind === "export-conflict") ||
         (isObject(message.payload) && message.payload.kind === "export-conflict");
@@ -363,7 +389,7 @@ export function createRpcHostRuntime(
     if (!isReviewRuntimeMethodForHost(host, method)) {
       return Promise.reject(new Error(`The ${method} capability is unavailable in ${host === "chrome" ? "Chrome" : "this host"}.`));
     }
-    const outboundPayload = host === "chrome"
+    const outboundPayload = host === "chrome" || host === "codex"
       ? sanitizeChromeReviewRuntimeRequest(method, payload)
       : host === "macos" ? sanitizeMacosReviewRuntimeRequest(method, payload) : payload;
     if (outboundPayload === undefined) {
@@ -457,10 +483,13 @@ export function createRpcHostRuntime(
   return {
     host,
     get capabilities() { return interactionLifecycleNegotiated
-      ? { localDocumentRefresh: true as const, interactionLifecycleVersion: 1 as const }
-      : { localDocumentRefresh: true as const }; },
+      ? { localDocumentRefresh: host !== "codex" || codexDocumentRefresh, interactionLifecycleVersion: 1 as const }
+      : { localDocumentRefresh: host !== "codex" || codexDocumentRefresh }; },
     async bootstrap(signal?: AbortSignal): Promise<HostRuntimeBootstrap> {
+      const epoch = ++bootstrapEpoch;
+      const current = () => !disposed && !signal?.aborted && epoch === bootstrapEpoch;
       const value = await invoke<Record<string, unknown>>("bootstrap", {}, signal);
+      if (!current()) throw abortError();
       if (!validIdentity(value) || !isObject(value.state) || !isObject(value.scope) ||
         !isObject(value.saveStatus) || !isObject(value.resources) ||
         typeof value.resources.document !== "string" ||
@@ -473,6 +502,7 @@ export function createRpcHostRuntime(
         revision: value.revision,
       };
       hydratedIdentity = { ...identity };
+      codexDocumentRefresh = host === "codex" && isObject(value.capabilities) && value.capabilities.localDocumentRefresh === true;
       interactionLifecycleNegotiated = isObject(value.capabilities) &&
         value.capabilities.interactionLifecycleVersion === 1;
       const reconnectIdentity = { generation: value.generation, revision: value.revision };
@@ -480,13 +510,20 @@ export function createRpcHostRuntime(
         await Promise.all([...interactionReconnectListeners].map((listener) => listener(reconnectIdentity)));
       }
       bootstrapped = true;
-      const [documentResourceValue, pdfium, worker] = await Promise.all([
-        documentResource(value.resources.document),
-        pdfiumResource(value.resources.pdfiumWasm),
-        typeof value.resources.worker === "string"
-          ? workerResource(value.resources.worker)
-          : Promise.resolve(undefined),
-      ]);
+      const transfers = [documentResource(value.resources.document), pdfiumResource(value.resources.pdfiumWasm),
+        typeof value.resources.worker === "string" ? workerResource(value.resources.worker) : Promise.resolve(undefined)] as const;
+      let resources: [MaterializedViewerResource, MaterializedViewerResource, MaterializedViewerResource | undefined];
+      if (host === "codex") {
+        const results = await Promise.allSettled(transfers);
+        const failed = results.find(result => result.status === "rejected");
+        if (failed?.status === "rejected" || !current()) {
+          if (epoch === bootstrapEpoch) retireUnpublishedCodexResources();
+          throw failed?.status === "rejected" ? failed.reason : abortError();
+        }
+        resources = results.map(result => (result as PromiseFulfilledResult<MaterializedViewerResource | undefined>).value) as typeof resources;
+      } else resources = await Promise.all(transfers);
+      const [documentResourceValue, pdfium, worker] = resources;
+      if (!current()) throw abortError();
       const issued = new Set<string>([
         value.resources.document,
         documentResourceValue.url,
@@ -495,29 +532,40 @@ export function createRpcHostRuntime(
         ...(typeof value.resources.worker === "string" ? [value.resources.worker] : []),
         ...(worker === undefined ? [] : [worker.url]),
       ]);
-      const nativeResources = (host === "chrome" || host === "macos") && typeof value.resources.worker === "string"
-        ? host === "macos"
-          ? worker === undefined ? undefined : {
-              document: documentResourceValue.url,
-              pdfiumWasm: pdfium.url,
-              worker: worker.url,
-            }
-          : {
-              document: value.resources.document,
-              pdfiumWasm: value.resources.pdfiumWasm,
-              worker: value.resources.worker,
-            }
-        : undefined;
-      if ((host === "chrome" || host === "macos") &&
+      let nativeResources: { document: string; pdfiumWasm: string; worker: string } | undefined;
+      if (typeof value.resources.worker === "string") {
+        if (host === "chrome") {
+          nativeResources = {
+            document: value.resources.document,
+            pdfiumWasm: value.resources.pdfiumWasm,
+            worker: value.resources.worker,
+          };
+        } else if ((host === "macos" || host === "codex") && worker !== undefined) {
+          nativeResources = {
+            document: documentResourceValue.url,
+            pdfiumWasm: pdfium.url,
+            worker: worker.url,
+          };
+        }
+      }
+      if ((host === "chrome" || host === "macos" || host === "codex") &&
         (nativeResources === undefined || nativeResources.worker === undefined)) {
         throw new Error("The trusted host returned incomplete packaged resources.");
       }
-      if ((host === "chrome" || host === "macos") && nativeLocationHistory === undefined) {
+      if ((host === "chrome" || host === "macos" || host === "codex") && nativeLocationHistory === undefined) {
         nativeLocationHistory = new MemoryReviewLocationHistory(
           isObject(value.location)
             ? value.location as unknown as PlacekeeperLinkLocation
             : { kind: "page", page: 1 },
         );
+      }
+      if (host === "codex" && typeof value.resources.worker === "string") {
+        const previous = committedCodexResources.at(-1);
+        if (previous?.document !== value.resources.document || previous.wasm !== value.resources.pdfiumWasm || previous.worker !== value.resources.worker) {
+          committedCodexResources.push({ document: value.resources.document, wasm: value.resources.pdfiumWasm, worker: value.resources.worker });
+        }
+        while (committedCodexResources.length > 2) committedCodexResources.shift();
+        retireUnpublishedCodexResources();
       }
       return {
         ...value,
@@ -528,8 +576,10 @@ export function createRpcHostRuntime(
         saveStatus: value.saveStatus as unknown as SaveStatus,
         viewerAssets: {
           documentUrl: documentResourceValue.url,
+          ...(host !== 'codex' || documentResourceValue.bytes === undefined ? {} : { documentBytes: documentResourceValue.bytes }),
           pdfiumWasm: pdfium.url,
           ...(worker === undefined ? {} : { workerUrl: worker.url }),
+          ...(pdfium.bytes === undefined ? {} : { pdfiumWasmBytes: pdfium.bytes }),
         },
         resourcePolicy: host === "chrome"
           ? {
@@ -537,8 +587,8 @@ export function createRpcHostRuntime(
               extensionOrigin: options.extensionOrigin!,
               resources: nativeResources!,
             }
-          : host === "macos"
-            ? { host: "macos", resources: nativeResources as {
+          : host === "macos" || host === "codex"
+            ? { host, resources: nativeResources as {
                 document: string;
                 pdfiumWasm: string;
                 worker: string;
@@ -624,11 +674,11 @@ export function createRpcHostRuntime(
       disposed = true;
       unsubscribe();
       for (const request of pending.values()) request.reject(new Error("The review runtime was disposed."));
-      for (const resource of materializedPdfium.values()) void resource.then((value) => value.dispose());
+      for (const resource of materializedPdfium.values()) void resource.then((value) => value.dispose(), () => undefined);
       materializedPdfium.clear();
-      for (const resource of materializedDocuments.values()) void resource.then((value) => value.dispose());
+      for (const resource of materializedDocuments.values()) void resource.then((value) => value.dispose(), () => undefined);
       materializedDocuments.clear();
-      for (const resource of materializedWorkers.values()) void resource.then((value) => value.dispose());
+      for (const resource of materializedWorkers.values()) void resource.then((value) => value.dispose(), () => undefined);
       materializedWorkers.clear();
       pending.clear();
       invalidations.clear();

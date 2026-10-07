@@ -348,7 +348,7 @@ export interface ReviewShellProps {
   codexContext?: LiveContextBindingStatus;
   copyLink?: CopyLinkControlProps;
   copyItemLink?: {
-    readonly getLink: (item: ReviewItem) => string;
+    readonly getLink: (item: ReviewItem) => string | Promise<string>;
     readonly disabled?: (item: ReviewItem) => boolean;
     readonly writeText: (link: string) => Promise<void>;
   };
@@ -1758,9 +1758,9 @@ export function ReviewShell(props: ReviewShellProps) {
   );
   const copyLinkForItem = (item: ReviewItem): CopyLinkControlProps | undefined => {
     if (props.copyItemLink === undefined) return undefined;
-    const link = props.copyItemLink.getLink(item);
+    const copyItemLink = props.copyItemLink;
     return {
-      getLink: () => link,
+      getLink: () => copyItemLink.getLink(item),
       writeText: props.copyItemLink.writeText,
       disabled: props.copyItemLink.disabled?.(item) ?? false,
     };

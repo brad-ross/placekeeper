@@ -11,7 +11,8 @@ import { ReviewTooltipButton } from './ReviewTooltipButton.js';
 
 export type CopyLinkStatus =
   | { readonly status: 'idle' | 'pending' | 'success' }
-  | { readonly status: 'failure'; readonly link: string };
+  | { readonly status: 'failure'; readonly link: string }
+  | { readonly status: 'unavailable' };
 
 export function buildPlacekeeperCopyLink(
   linkBase: string,
@@ -41,7 +42,7 @@ export function buildPlacekeeperCopyLink(
 }
 
 export function createCopyLinkCommand(input: {
-  readonly getLink: () => string;
+  readonly getLink: () => string | Promise<string>;
   readonly writeText: (link: string) => Promise<void>;
   readonly onStatus: (status: CopyLinkStatus) => void;
   readonly onCopySuccess?: () => void;
@@ -50,15 +51,25 @@ export function createCopyLinkCommand(input: {
   return {
     run: (linkOverride) => {
       if (pending !== null) return pending;
-      const link = linkOverride ?? input.getLink();
       input.onStatus({ status: 'pending' });
-      pending = input.writeText(link)
-        .then(() => {
-          input.onStatus({ status: 'success' });
-          input.onCopySuccess?.();
-        })
-        .catch(() => input.onStatus({ status: 'failure', link }))
-        .finally(() => { pending = null; });
+      const write = (link: string): Promise<void> => {
+        if (link.length === 0) { input.onStatus({ status: 'unavailable' }); return Promise.resolve(); }
+        // Keep synchronous hosts inside the original clipboard user gesture.
+        try {
+          return input.writeText(link).then(() => {
+            input.onStatus({ status: 'success' }); input.onCopySuccess?.();
+          }).catch(() => input.onStatus({ status: 'failure', link }));
+        } catch { input.onStatus({ status: 'failure', link }); return Promise.resolve(); }
+      };
+      try {
+        const link = linkOverride ?? input.getLink();
+        pending = (typeof link === 'string' ? write(link) : link.then(write)
+          .catch(() => input.onStatus({ status: 'unavailable' })))
+          .finally(() => { pending = null; });
+      } catch {
+        input.onStatus({ status: 'unavailable' });
+        return Promise.resolve();
+      }
       return pending;
     },
   };
@@ -189,6 +200,7 @@ export function CopyLinkControl({
       {status.status === 'success' ? (
         <span className="sr-only" role="status">Link copied.</span>
       ) : null}
+      {status.status === 'unavailable' ? <p role="alert">Link unavailable. Retry from the current review.</p> : null}
       {status.status === 'failure' ? (
         <div className="copy-link-control__fallback">
           <p role="alert">Clipboard access failed. Copy the link below.</p>

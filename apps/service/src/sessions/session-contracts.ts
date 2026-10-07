@@ -40,7 +40,7 @@ export class ReviewGenerationConflictError extends Error {
     this.name = "ReviewGenerationConflictError";
   }
 }
-export const LAUNCH_SURFACES = ["browser", "finder", "codex", "vscode", "chrome"] as const;
+export const LAUNCH_SURFACES = ["browser", "finder", "codex", "codex-native", "vscode", "chrome"] as const;
 export type LaunchSurface = typeof LAUNCH_SURFACES[number];
 export const REVIEW_PRESENTATION_SURFACES = [...LAUNCH_SURFACES, "macos"] as const;
 export type ReviewPresentationSurface = typeof REVIEW_PRESENTATION_SURFACES[number];

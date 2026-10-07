@@ -11,6 +11,7 @@ import {
   isReviewRuntimeMethod,
   sanitizeChromeReviewRuntimeRequest,
   sanitizeChromeReviewRuntimeResponse,
+  sanitizeCodexReviewRuntimeResponse,
   sanitizeMacosReviewRuntimeRequest,
   sanitizeMacosReviewRuntimeResponse,
   sanitizeReviewRuntimeDisplayString,
@@ -19,6 +20,15 @@ import { createReviewState } from "../src/review-model.js";
 import { chromeRuntimeProjectionChangeReason } from "../src/chrome-native-runtime-protocol.js";
 
 describe("shared review runtime protocol", () => {
+  it("preserves canonical never-saved revision -1 across shared native hosts", () => {
+    const status = { destination: { phase: "none", generation: 0 },
+      sync: { phase: "not-saved", desiredRevision: 1, savedRevision: -1 } };
+    for (const sanitize of [sanitizeChromeReviewRuntimeResponse, sanitizeMacosReviewRuntimeResponse, sanitizeCodexReviewRuntimeResponse]) {
+      expect(sanitize("saveStatus", status)).toMatchObject(status);
+      expect(sanitize("saveStatus", { ...status, sync: { ...status.sync, savedRevision: -2 } })).toBeUndefined();
+      expect(sanitize("saveStatus", { ...status, sync: { ...status.sync, savedRevision: -0.5 } })).toBeUndefined();
+    }
+  });
   it("detects exact authoring presence changes at an equal review revision", () => {
     const projection = { generation: 1, revision: 4, saveStatus: {}, state: {}, activeAuthoringDraftIds: [] };
     expect(chromeRuntimeProjectionChangeReason(projection, {
@@ -107,8 +117,9 @@ describe("shared review runtime protocol", () => {
   });
 
   it("defines Chrome as a reduced, compiler-visible RPC host", () => {
-    expect(REVIEW_RUNTIME_HOSTS).toEqual(["vscode", "chrome", "macos"]);
+    expect(REVIEW_RUNTIME_HOSTS).toEqual(["vscode", "chrome", "macos", "codex"]);
     expect(REVIEW_RUNTIME_HOST_METHODS.vscode).toEqual(REVIEW_RUNTIME_METHODS);
+    expect(REVIEW_RUNTIME_HOST_METHODS.codex).toEqual(REVIEW_RUNTIME_HOST_METHODS.chrome);
     expect(REVIEW_RUNTIME_HOST_METHODS.chrome).not.toContain("forwardSyncTex");
     expect(REVIEW_RUNTIME_HOST_METHODS.chrome).not.toContain("reverseSyncTex");
     expect(isReviewRuntimeMethodForHost("chrome", "command")).toBe(true);
@@ -383,4 +394,14 @@ describe("shared review runtime protocol", () => {
       warning: "stack trace with /Users/reader/private.pdf",
     })).toBeUndefined();
   });
+});
+
+it('projects only closed path-free native context status and identity', () => {
+  const identity = { placekeeperSessionId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', documentGeneration: 1, reviewRevision: 2,
+    source: { fileId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', digest: 'a'.repeat(64), byteLength: 4 }, stateDigest: 'b'.repeat(64) };
+  const scope = { documentTitle: 'Review.pdf', codexContext: { status: 'current', identity, leaseExpiresAt: '2026-10-05T12:00:00.000Z' } };
+  expect(sanitizeCodexReviewRuntimeResponse('scope', scope)).toMatchObject({ launchSurface: 'codex', codexContext: scope.codexContext });
+  for (const codexContext of [{ ...scope.codexContext, taskId: 'private' }, { ...scope.codexContext, identity: { ...identity, path: '/private/review.pdf' } }, { ...scope.codexContext, identity: { ...identity, stateDigest: 'wrong' } }]) {
+    expect(sanitizeCodexReviewRuntimeResponse('scope', { ...scope, codexContext })).toBeUndefined();
+  }
 });

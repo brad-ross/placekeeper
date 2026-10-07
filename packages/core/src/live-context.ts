@@ -216,6 +216,25 @@ export interface UnavailableLiveContextObservationV1 {
   readonly checkedAt: string;
   readonly reason: LiveContextUnavailableReason;
   readonly lastVerified?: LiveObservationIdentity;
+  readonly reconnect?: NativeReconnectGuidance;
+}
+
+/** Historical path-selection guidance only; never document or presentation authority. */
+export interface NativeReconnectGuidance {
+  readonly kind: "reopen-previous-source";
+  readonly pdfPath: string;
+  readonly expiresAt: string;
+}
+
+export function parseNativeReconnectGuidance(value: unknown): NativeReconnectGuidance | undefined {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const candidate = value as Record<string, unknown>;
+  if (Object.keys(candidate).length !== 3 || candidate.kind !== "reopen-previous-source" ||
+    typeof candidate.pdfPath !== "string" || candidate.pdfPath.length > 4096 ||
+    !candidate.pdfPath.startsWith("/") || /[\u0000-\u001f\u007f]/u.test(candidate.pdfPath) ||
+    typeof candidate.expiresAt !== "string" || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u.test(candidate.expiresAt) ||
+    !Number.isFinite(Date.parse(candidate.expiresAt)) || new Date(candidate.expiresAt).toISOString() !== candidate.expiresAt) return undefined;
+  return { kind: "reopen-previous-source", pdfPath: candidate.pdfPath, expiresAt: candidate.expiresAt };
 }
 
 export type LiveContextRefreshResult =
@@ -642,14 +661,18 @@ export function createUnavailableLiveContextObservation(input: {
   readonly checkedAt: string;
   readonly reason: LiveContextUnavailableReason;
   readonly lastVerified?: LiveObservationIdentity;
+  readonly reconnect?: NativeReconnectGuidance;
 }): UnavailableLiveContextObservationV1 {
   assertIsoDate(input.checkedAt, "checkedAt");
   if (input.lastVerified !== undefined) assertIdentity(input.lastVerified);
+  const reconnect = input.reconnect === undefined ? undefined : parseNativeReconnectGuidance(input.reconnect);
+  if (input.reconnect !== undefined && reconnect === undefined) throw new InvalidLiveContextContractError("Invalid reconnect guidance");
   return {
     schemaVersion: 1,
     status: "unavailable",
     checkedAt: input.checkedAt,
     reason: input.reason,
+    ...(reconnect === undefined ? {} : { reconnect }),
     ...(input.lastVerified === undefined
       ? {}
       : { lastVerified: { ...input.lastVerified, source: { ...input.lastVerified.source } } }),

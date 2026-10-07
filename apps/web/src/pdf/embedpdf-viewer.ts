@@ -9,7 +9,7 @@ import { SelectionPluginPackage } from '@embedpdf/plugin-selection/react';
 import { ViewportPluginPackage } from '@embedpdf/plugin-viewport/react';
 import { ZoomMode } from '@embedpdf/plugin-zoom';
 import { ZoomPluginPackage } from '@embedpdf/plugin-zoom/react';
-import type { LoadDocumentUrlOptions } from '@embedpdf/plugin-document-manager';
+import type { InitialDocumentOptions } from '@embedpdf/plugin-document-manager';
 import {
   VIEWER_ZOOM_MAX_PERCENT,
   VIEWER_ZOOM_MIN_PERCENT,
@@ -23,6 +23,10 @@ export interface ViewerAssetUrls {
   documentUrl: string;
   /** Optional packaged single-file worker fetched and launched as a blob by the host runtime. */
   workerUrl?: string;
+  /** Verified native WASM; copied into the packaged worker without a URL fetch. */
+  pdfiumWasmBytes?: Uint8Array<ArrayBuffer>;
+  /** Verified native document; copied before the engine may transfer ownership. */
+  documentBytes?: Uint8Array<ArrayBuffer>;
   /** Memory-only headers, normally the U2 document-scoped Bearer credential. */
   requestHeaders?: Readonly<Record<string, string>>;
 }
@@ -42,7 +46,7 @@ export type ViewerResourcePolicy =
       };
     }
   | {
-      readonly host: 'macos';
+      readonly host: 'macos' | 'codex';
       readonly resources: {
         readonly document: string;
         readonly pdfiumWasm: string;
@@ -82,12 +86,16 @@ export function validateViewerResourceUrl(
     }
     return rawUrl;
   }
-  if (policy.host === 'macos') {
+  if (policy.host === 'macos' || policy.host === 'codex') {
     const expected = role === 'document'
       ? policy.resources.document
       : role === 'pdfium-wasm' ? policy.resources.pdfiumWasm : policy.resources.worker;
     if (rawUrl !== expected) throw new Error('Viewer resources must match their issued role.');
     const url = new URL(rawUrl);
+    if (policy.host === 'codex') {
+      if (url.protocol !== 'blob:') throw new Error('Codex resources must be verified Blobs.');
+      return rawUrl;
+    }
     if (role === 'document') {
       const issuedScheme = url.protocol === 'placekeeper-resource:' && url.hostname === 'document';
       if (!issuedScheme && url.protocol !== 'blob:') {
@@ -104,6 +112,7 @@ export function validateViewerResourceUrl(
     }
     return rawUrl;
   }
+  if (policy.host !== 'browser') throw new Error('Unsupported resource host.');
   const origin = policy.origin;
   const url = new URL(rawUrl, origin);
   if (url.origin !== origin) throw new Error('Viewer assets must be same-origin.');
@@ -117,8 +126,10 @@ export function createTrustedPdfiumWorker(
   policy: ViewerResourcePolicy,
   workerFactory: ViewerWorkerFactory = (url, options) => new Worker(url, options),
   onWorkerError?: () => void,
+  wasmBytes?: Uint8Array<ArrayBuffer>,
 ): Worker {
   const trustedUrl = validateViewerResourceUrl(workerUrl, policy, 'pdfium-worker');
+  if (policy.host === 'codex' && wasmBytes === undefined) throw new Error('Verified native engine bytes and worker are required.');
   const worker = workerFactory(trustedUrl, { type: 'module' });
   if (onWorkerError !== undefined) {
     worker.addEventListener('error', onWorkerError, { once: true });
@@ -126,6 +137,20 @@ export function createTrustedPdfiumWorker(
       if (typeof event.data === 'object' && event.data !== null &&
         (event.data as { readonly type?: unknown }).type === 'wasmError') onWorkerError();
     });
+  }
+  if (policy.host === 'codex') {
+    // The required bytes were checked before allocating this worker.
+    const verifiedBytes = wasmBytes!;
+    const postMessage = worker.postMessage.bind(worker);
+    worker.postMessage = ((message: unknown, transfer?: Transferable[]) => {
+      const input = message as { type?: string };
+      if (input?.type !== 'wasmInit') {
+        postMessage(message, transfer ?? []);
+        return;
+      }
+      const wasmBinary = verifiedBytes.slice().buffer;
+      postMessage({ ...input, wasmBinary }, [...(transfer ?? []), wasmBinary]);
+    }) as Worker['postMessage'];
   }
   return worker;
 }
@@ -143,7 +168,8 @@ export function createLocalPdfiumViewer(
   const pdfiumWasm = validateViewerResourceUrl(assetUrls.pdfiumWasm, policy, 'pdfium-wasm');
   const worker = assetUrls.workerUrl === undefined
     ? undefined
-    : createTrustedPdfiumWorker(assetUrls.workerUrl, policy, workerFactory, onWorkerError);
+    : createTrustedPdfiumWorker(assetUrls.workerUrl, policy, workerFactory, onWorkerError, assetUrls.pdfiumWasmBytes);
+  if (policy.host === 'codex' && worker === undefined) throw new Error('Verified native worker is required.');
   const engine = createPdfiumEngine(pdfiumWasm, {
     encoderPoolSize: 1,
     fontFallback: null,
@@ -194,10 +220,15 @@ export function createLocalPdfiumViewerPlugins(
 export function buildViewerDocumentOptions(
   assetUrls: ViewerAssetUrls,
   policyOrOrigin: ViewerResourcePolicy | string,
-): LoadDocumentUrlOptions {
+): InitialDocumentOptions {
   const policy = typeof policyOrOrigin === 'string' ? browserPolicy(policyOrOrigin) : policyOrOrigin;
+  const url = validateViewerResourceUrl(assetUrls.documentUrl, policy, 'document');
+  if (policy.host === 'codex') {
+    if (assetUrls.documentBytes === undefined) throw new Error('Verified native document bytes are required.');
+    return { name: 'Local PDF', buffer: assetUrls.documentBytes.slice().buffer };
+  }
   return {
-    url: validateViewerResourceUrl(assetUrls.documentUrl, policy, 'document'),
+    url,
     name: 'Local PDF',
     mode: 'full-fetch',
     requestOptions: {

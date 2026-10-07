@@ -1,8 +1,10 @@
 import { sourceAnnotationVisualRenderers } from './PdfLinkControl.js';
 import { existingAnnotationKey } from './existing-annotations.js';
-import { PdfAnnotationName, PdfAnnotationSubtype, type PdfAnnotationObject, type PdfDocumentObject, type PdfEngine } from '@embedpdf/models';
-import { AnnotationLayer, createRenderer } from '@embedpdf/plugin-annotation/react';
-import { useId, useMemo, type CSSProperties } from 'react';
+import { PdfAnnotationName, PdfAnnotationSubtype, PdfBlendMode, type PdfAnnotationObject, type PdfDocumentObject, type PdfEngine } from '@embedpdf/models';
+import { AnnotationLayer, createRenderer, useAnnotationCapability } from '@embedpdf/plugin-annotation/react';
+import { useEffect, useId, useMemo, useState, type CSSProperties } from 'react';
+import { subscribeNativeRaster } from './HostRenderLayer.js';
+import type { ViewerResourcePolicy } from './embedpdf-viewer.js';
 import { ANNOTATION_PALETTE } from '../../../../packages/core/src/annotation-appearance.js';
 import { OwnedTextMark } from './OwnedTextMark.js';
 import { ReviewIcon } from '../review/ReviewIcon.js';
@@ -106,7 +108,38 @@ function createSourceAnnotationRenderer(
   });
 }
 
+function NativeSourceAppearance({ documentId, pageIndex, annotation, scale }: { documentId: string; pageIndex: number; annotation: PdfAnnotationObject; scale: number }) {
+  const { provides } = useAnnotationCapability();
+  const [url, setUrl] = useState<string>();
+  const unrotated = !!annotation.rotation && !!annotation.unrotatedRect;
+  useEffect(() => {
+    if (!provides) return;
+    return subscribeNativeRaster(provides.forDocument(documentId).renderAnnotation({
+      pageIndex, annotation, options: { scaleFactor: scale, dpr: window.devicePixelRatio, unrotated },
+    }), setUrl);
+  }, [provides, documentId, pageIndex, annotation, scale, unrotated]);
+  return <div data-native-source-appearance={annotation.id} data-native-source-appearance-type={annotation.type} style={{ position: 'absolute', width: '100%', height: '100%', pointerEvents: 'none' }}>
+    {url ? <img src={url} alt="" style={{ display: 'block', width: '100%', height: '100%' }} /> : null}
+  </div>;
+}
+
+/** Preserve original engine appearances, including stamps and rotated AP streams. */
+function nativeAppearanceRenderer(id: string, highlight: boolean) {
+  return createRenderer({
+    id,
+    matches: (annotation): annotation is PdfAnnotationObject => highlight
+      ? annotation.type === PdfAnnotationSubtype.HIGHLIGHT
+      : annotation.type !== PdfAnnotationSubtype.LINK,
+    // Preserve the pinned highlight renderer's layer and blend defaults.
+    ...(highlight ? { zIndex: 0, defaultBlendMode: PdfBlendMode.Multiply } : {}),
+    useAppearanceStream: false,
+    render: ({ annotation, documentId, pageIndex, scale }) => <NativeSourceAppearance documentId={documentId} pageIndex={pageIndex} annotation={annotation.object} scale={scale} />,
+  });
+}
+const nativeSourceAppearanceRenderers = [nativeAppearanceRenderer('placekeeper-native-source-highlight', true), nativeAppearanceRenderer('placekeeper-native-source-appearance', false)];
+
 export function SourceAnnotationLayer({
+  resourceHost = 'browser',
   marks,
   hidden,
   engine,
@@ -114,6 +147,7 @@ export function SourceAnnotationLayer({
   documentId,
   pageIndex,
 }: {
+  resourceHost?: ViewerResourcePolicy['host'];
   marks: ReadonlyMap<string, SourceReaderMark>;
   hidden: ReadonlySet<string>;
   engine: PdfEngine;
@@ -124,6 +158,7 @@ export function SourceAnnotationLayer({
   const renderers = useMemo(() => [
     ...sourceAnnotationVisualRenderers(hidden),
     createSourceAnnotationRenderer(marks, engine, document),
-  ], [hidden, marks, engine, document]);
+    ...(resourceHost === 'codex' ? nativeSourceAppearanceRenderers : []),
+  ], [hidden, marks, engine, document, resourceHost]);
   return <AnnotationLayer documentId={documentId} pageIndex={pageIndex} annotationRenderers={renderers} />;
 }

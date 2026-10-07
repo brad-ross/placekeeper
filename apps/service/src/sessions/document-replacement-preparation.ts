@@ -34,6 +34,7 @@ export function prepareReplacementReview(
   pages: readonly PdfAnchorPage[],
   importedItems: readonly ReviewItem[] = [],
   deletedNativeIds: ReadonlySet<string> = new Set(),
+  verifiedPredecessorNativeIds: ReadonlySet<string> = new Set(),
 ): ReviewState {
   let nextState = startReviewGeneration(state, {
     documentGeneration: successorGeneration,
@@ -61,7 +62,7 @@ export function prepareReplacementReview(
     if (deletedNativeIds.has(candidate.id)) return [];
     if (
       predecessor?.kind === "pdfAnnotation" &&
-      predecessor.payload.identityProvenance === "verified" &&
+      (predecessor.payload.identityProvenance === "verified" || verifiedPredecessorNativeIds.has(predecessor.id)) &&
       candidate.payload.identityProvenance === "verified"
     ) {
       reconciledNativeIds.add(candidate.id);

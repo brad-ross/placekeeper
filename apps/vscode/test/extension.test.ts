@@ -369,25 +369,34 @@ describe("VS Code local host adapter", () => {
   });
 
   it("accepts only the shared production asset manifest", () => {
-    expect(parseSharedAssetManifest({
-      schemaVersion: 3,
+    const valid = {
+      schemaVersion: 4,
       app: "app.js",
       stylesheet: "app.css",
       pdfiumWasm: "pdfium.wasm",
       pdfiumWorker: "pdfium-worker.js",
+      pdfiumCodexWorker: "pdfium-codex-worker.js",
       integrity: {
         "app.js": "a".repeat(64),
         "app.css": "b".repeat(64),
         "pdfium.wasm": "c".repeat(64),
         "pdfium-worker.js": "d".repeat(64),
+        "pdfium-codex-worker.js": "e".repeat(64),
       },
-    })).toMatchObject({ schemaVersion: 3, app: "app.js", pdfiumWorker: "pdfium-worker.js" });
+    };
+    expect(parseSharedAssetManifest(valid)).toMatchObject({ schemaVersion: 4, app: "app.js", pdfiumWorker: "pdfium-worker.js", pdfiumCodexWorker: "pdfium-codex-worker.js" });
+    expect(() => parseSharedAssetManifest({ ...valid, schemaVersion: 3 })).toThrow(/manifest/u);
+    expect(() => parseSharedAssetManifest({ ...valid, pdfiumCodexWorker: undefined })).toThrow(/manifest/u);
+    expect(() => parseSharedAssetManifest({ ...valid, pdfiumCodexWorker: valid.pdfiumWorker })).toThrow(/manifest/u);
+    const { "pdfium-codex-worker.js": _omitted, ...missingNativeDigest } = valid.integrity;
+    expect(() => parseSharedAssetManifest({ ...valid, integrity: missingNativeDigest })).toThrow(/manifest/u);
     expect(() => parseSharedAssetManifest({
-      schemaVersion: 3,
+      schemaVersion: 4,
       app: "../../secret.js",
       stylesheet: "app.css",
       pdfiumWasm: "pdfium.wasm",
       pdfiumWorker: "pdfium-worker.js",
+      pdfiumCodexWorker: "pdfium-codex-worker.js",
       integrity: {},
     })).toThrow(/manifest/u);
   });

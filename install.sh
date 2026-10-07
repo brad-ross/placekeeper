@@ -116,6 +116,7 @@ if [ "$install_mode" = "uninstall" ]; then
   fi
   printf '%s\n' \
     "Placekeeper Chrome registration is removed." \
+    "Codex plugin/marketplace and VS Code extension removal remain manual in their host applications." \
     "PDFs, exports, and Protected Recovery data were not deleted."
   exit 0
 fi

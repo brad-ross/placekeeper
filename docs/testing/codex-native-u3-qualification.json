@@ -1,0 +1,283 @@
+{
+  "schemaVersion": 1,
+  "status": "passed",
+  "scope": "U3 installed native transport, trusted correlation, private invocation isolation and scoped lifecycle qualification only. U4 production reader and U5-U8 acceptance remain unqualified.",
+  "consolidatedAt": "2026-10-05T17:06:50.236726+00:00",
+  "host": {
+    "codexBuild": "12947 commitb4107526316a0f152770b1306bd61cc578498c90",
+    "os": "macOS26.7 build25G229",
+    "pluginVersion": "0.1.0+codex.20260813212014",
+    "artifactDigest": "70c333f866f24564ebbf62c477292e2a196ca6423b9f433f63e75d27ece67fa6"
+  },
+  "disconnectTimeoutMs": 30000,
+  "evidencePolicy": "Sanitized summary of reviewed actual-host receipts and applicability audit. Original observed dates are retained. actualHost identifies an actual observation, including explicitly inherited observations; it does not mean every check was rerun on the current artifact. The existing verifier checks completeness, not truth of observations. Raw evidence remains private.",
+  "checks": [
+    {
+      "id": "installed-artifact",
+      "result": "passed",
+      "observedAt": "2026-10-05T17:06:50.236726+00:00",
+      "actualHost": true,
+      "evidence": "Current candidate and installed package matched across 110 entries. Installed artifact identity is the host digest below; earlier artifact comparisons are historical. observedAt records final review of the existing 110-entry exact installed comparison, not install/comparison execution time.",
+      "evidenceMode": "current-candidate-install-equality",
+      "historicalObservedAt": "2026-10-02T18:24:24.766Z"
+    },
+    {
+      "id": "launcher-hook-task",
+      "result": "passed",
+      "observedAt": "2026-10-05T14:58:37.111Z",
+      "actualHost": true,
+      "evidence": "Current canonical launch claim and genuine display attestation had equal trusted task identity. Both admission orders were observed in the same daemon; no synthetic identity or manual bind was used.",
+      "evidenceMode": "actual-current-host-current-candidate",
+      "historicalObservedAt": "2026-10-02T22:36:08.239Z"
+    },
+    {
+      "id": "display-hook-task",
+      "result": "passed",
+      "observedAt": "2026-10-05T14:58:37.111Z",
+      "actualHost": true,
+      "evidence": "Genuine current display hook correlated the closed public receipt to its trusted task identity. Readiness alone remained pending; ordinary genuine attestation and status promotion admitted the owning shell.",
+      "evidenceMode": "actual-current-host-current-candidate",
+      "historicalObservedAt": "2026-10-02T22:36:08.239Z"
+    },
+    {
+      "id": "readiness-before-attestation",
+      "result": "passed",
+      "observedAt": "2026-10-05T14:58:37.111Z",
+      "actualHost": true,
+      "evidence": "Current actual ready accepted at 2026-10-05T14:58:36.084Z (sequence 8), genuine attestation at 14:58:36.108Z (sequence 11), promotion at 14:58:37.111Z (sequence 12), in one daemon process. Owning shell subsequently verified and renewed.",
+      "evidenceMode": "actual-current-host-current-candidate",
+      "historicalObservedAt": "2026-10-05T14:58:37.111Z"
+    },
+    {
+      "id": "attestation-before-readiness",
+      "result": "passed",
+      "observedAt": "2026-10-05T15:06:16.763Z",
+      "actualHost": true,
+      "evidence": "Current normal B canonical launch/display established genuine attestation before authenticated readiness and promotion. Verified baseline preserved revision 105, clean Save Sync and accepted work. This is the separate ordinary-order witness.",
+      "evidenceMode": "actual-current-host-current-candidate",
+      "historicalObservedAt": "2026-10-02T22:36:08.239Z"
+    },
+    {
+      "id": "private-invocation-isolation",
+      "result": "passed",
+      "observedAt": "2026-10-05T15:14:20.524Z",
+      "actualHost": true,
+      "evidence": "Current genuine A/B invocations and both foreign-receipt owning shells proved mismatch denial with no review data or renewal; normal baselines remained clean. Earlier distinct own invocation observations and private metadata boundary evidence are inherited, with reviewed applicability; they were not rerun wholesale.",
+      "evidenceMode": "actual-current-host-plus-historical-normal-own-invocation-evidence",
+      "historicalObservedAt": "2026-10-03T00:11:53Z"
+    },
+    {
+      "id": "app-only-no-panels",
+      "result": "passed",
+      "observedAt": "2026-10-05T16:58:45.485Z",
+      "actualHost": true,
+      "evidence": "Current model inventory exposed display_review and excluded review_app. Exposed card count stayed 2 to 2 during ordinary authenticated renewal/data activity. See currentHostReceipts.chatSwitch; no hidden-document claim.",
+      "evidenceMode": "actual-current-host-current-candidate",
+      "historicalObservedAt": "2026-10-03T00:15:40.399Z"
+    },
+    {
+      "id": "chat-switch-renewal",
+      "result": "passed",
+      "observedAt": "2026-10-05T16:58:45.485Z",
+      "actualHost": true,
+      "evidence": "Actual current chat switch preserved the same B instance; authenticated renewal advanced by 55.081 seconds, exceeding the 30-second disconnect timeout, with revision 105 clean and own work intact. See currentHostReceipts.chatSwitch.",
+      "evidenceMode": "actual-current-host-current-candidate",
+      "historicalObservedAt": "2026-10-03T00:15:40.399Z"
+    },
+    {
+      "id": "two-chat-isolation",
+      "result": "passed",
+      "observedAt": "2026-10-04T17:32:23Z",
+      "actualHost": true,
+      "evidence": "Actual human A/B prompts on build 12947 retrieved their own current items and bounded PDF evidence after explicit sleep recovery. A had two own annotations at revision 0 clean; B later had one saved item at revision 105 clean and no A annotations. Current negative trials also preserved both baselines. Isolation was observed at respective prompt times, not simultaneous liveness.",
+      "evidenceMode": "actual-same-host-build-earlier-candidate-plus-current-scope-evidence",
+      "historicalObservedAt": "2026-10-02T18:28:24Z"
+    },
+    {
+      "id": "real-prompt-current-evidence",
+      "result": "passed",
+      "observedAt": "2026-10-05T17:00:16.769Z",
+      "actualHost": true,
+      "evidence": "Earlier actual human prompts on build 12947 obtained current own Review Items, Existing PDF Annotations, Save Sync and bounded PDF evidence through the shipped skill. Current human B prompt at 2026-10-05T17:00:16.769Z again reported current generation 1, revision/desired/saved 105, clean Save Sync. Current UI inspection alone does not establish bounded PDF retrieval.",
+      "evidenceMode": "actual-same-host-build-earlier-candidate-plus-current-scope-evidence",
+      "historicalObservedAt": "2026-10-02T18:09:41Z"
+    },
+    {
+      "id": "recovery-continuation",
+      "result": "passed",
+      "observedAt": "2026-10-05T15:06:16.763Z",
+      "actualHost": true,
+      "evidence": "Current B selected resume through the canonical launcher with scoped offer, expiry and stable operation flags; exit 0 followed by verified baseline with accepted work preserved at revision 105 clean. Qualification covers selected resume only; discard and fork were not executed.",
+      "evidenceMode": "actual-current-host-current-candidate",
+      "historicalObservedAt": "2026-10-02T17:28:26.304Z"
+    },
+    {
+      "id": "ownership-denial",
+      "result": "passed",
+      "observedAt": "2026-10-03T07:30:11.173Z",
+      "actualHost": true,
+      "evidence": "Earlier actual build-12947 focused ownership attempt was denied as owned by another task; skill offered explicit independent-review guidance and stopped without repeated launch or takeover. Both original peers renewed with clean own state. Same-build attribution used continuous desktop-process evidence; unchanged normal admission paths were reviewed for inheritance.",
+      "evidenceMode": "actual-same-host-build-earlier-candidate-with-reviewed-normal-path-inheritance",
+      "historicalObservedAt": "2026-10-03T07:30:11.173Z"
+    },
+    {
+      "id": "transport-loss-disconnect",
+      "result": "passed",
+      "observedAt": "2026-10-03T07:08:58.047Z",
+      "actualHost": true,
+      "evidence": "Earlier actual build-12947 owning App.close stopped bridge renewal; exact old presentation expired 30576 ms after its last authenticated renewal. Peer renewed with own clean state preserved. Same-build process provenance and unchanged liveness paths support inheritance. Scoped owning bridge loss is separate from stdio EOF.",
+      "evidenceMode": "actual-same-host-build-earlier-candidate-with-reviewed-normal-path-inheritance",
+      "historicalObservedAt": "2026-10-03T07:08:58.047Z"
+    },
+    {
+      "id": "independent-stdio-eof",
+      "result": "passed",
+      "observedAt": "2026-10-02T18:54:48.057Z",
+      "actualHost": true,
+      "evidence": "Earlier installed owned-client experiment initialized two stdio clients. First exited successfully on stdin EOF while second remained responsive; second then exited successfully on EOF. Actual peer continued renewing with revision 105 clean and daemon identity unchanged. Inherited transport invariant: SDK StdioServerTransport remained identical with no EOF-to-daemon-shutdown path. This was not a Codex-managed EOF trial.",
+      "evidenceMode": "owned-installed-transport-invariant-inheritance",
+      "historicalObservedAt": "2026-10-02T18:54:48.057Z"
+    },
+    {
+      "id": "hidden-renewal",
+      "result": "not-run",
+      "observedAt": "",
+      "actualHost": false,
+      "evidence": "Uninterrupted hidden renewal was not established. The separately timestamped hidden-explicit-reconnect check qualifies the approved lifecycle alternative; it does not convert this observation to a pass.",
+      "evidenceMode": "approved-same-current-host-explicit-reconnect-alternative"
+    },
+    {
+      "id": "expand-restore-renewal",
+      "result": "passed",
+      "observedAt": "2026-10-05T17:01:55.514Z",
+      "actualHost": true,
+      "evidence": "Current build 12947 Restore/reexpand preserved the same B instance and continued authenticated renewal beyond 30 seconds with accepted work and revision 105 clean. No new attempt or reconnect occurred. See currentHostReceipts.restore. Earlier build-12776 remount/admission failure remains historical.",
+      "evidenceMode": "actual-current-host-current-candidate-continuity",
+      "historicalObservedAt": "2026-10-02T16:20:35.032Z"
+    },
+    {
+      "id": "close-disconnect",
+      "result": "passed",
+      "observedAt": "2026-10-04T02:19:33Z",
+      "actualHost": true,
+      "evidence": "Earlier actual build-12947 owning teardown request made the card disappear; the exact presentation later expired, peer remained current, and explicit same-chat recovery preserved work. Expiry measured 326084 ms after click: immediate detach and a 30-second-from-click timeout were not proved. Earlier controls artifact provenance and unchanged normal paths were reviewed for inheritance.",
+      "evidenceMode": "actual-same-current-host-earlier-candidate-with-reviewed-normal-path-inheritance",
+      "historicalObservedAt": "2026-10-04T02:19:33Z"
+    },
+    {
+      "id": "old-attempt-denial",
+      "result": "passed",
+      "observedAt": "2026-10-04T06:39:00.661Z",
+      "actualHost": true,
+      "evidence": "Earlier actual build-12947 original authenticated bridge sent old renew then detach after fresh successor promotion; both were denied revoked within 120 seconds of retirement. Successor and peer subsequently renewed with clean own work. Reviewed current shell/controller bytes and unchanged runtime guards support inheritance. Public receipt replay is a separate proof.",
+      "evidenceMode": "actual-same-current-host-earlier-candidate-with-reviewed-normal-path-inheritance",
+      "historicalObservedAt": "2026-10-04T06:39:00.661Z"
+    },
+    {
+      "id": "hidden-explicit-reconnect",
+      "result": "passed",
+      "observedAt": "2026-10-04T17:32:23.000Z",
+      "actualHost": true,
+      "evidence": "Actual build-12947 sleep ended A/B participation at 2026-10-04T06:56:26.839Z/.842Z. Human A prompt at 06:56:37.576Z reported unavailable/unbound and stopped. Explicit same-chat canonical reconnect obtained genuine claim, attestation, readiness and promotion at 06:58:03.804Z through 06:58:12.980Z; current own work was recovered. B explicitly reconnected later and its actual human current prompt at 17:32:23Z recovered own saved work and bounded PDF evidence. B was after observer expiry, witnessed by actual human thread evidence. No uninterrupted hidden renewal or simultaneous peer liveness claim."
+    }
+  ],
+  "currentHostReceipts": {
+    "chatSwitch": {
+      "observedAt": [
+        "2026-10-05T16:57:51.749Z",
+        "2026-10-05T16:58:45.485Z"
+      ],
+      "sameInstance": true,
+      "renewals": [
+        "2026-10-05T16:57:46.852Z",
+        "2026-10-05T16:58:41.933Z"
+      ],
+      "renewalAdvanceMs": 55081,
+      "cardCounts": [
+        2,
+        2
+      ],
+      "modelToolVisibility": {
+        "display_review": true,
+        "review_app": false
+      },
+      "revision": 105,
+      "saveSync": "clean",
+      "ownWorkPreserved": true,
+      "pendingDrafts": false
+    },
+    "restore": {
+      "restoreStart": "2026-10-05T16:59:37.418Z",
+      "restoreEnd": "2026-10-05T16:59:37.476Z",
+      "inlineAt": "2026-10-05T16:59:37.480Z",
+      "fullscreenAt": "2026-10-05T17:00:05.503Z",
+      "instanceStartedAt": "2026-10-05T15:06:16.718Z",
+      "sameInstance": true,
+      "afterRenewals": [
+        "2026-10-05T17:00:41.860Z",
+        "2026-10-05T17:01:52.044Z"
+      ],
+      "inspectionAt": "2026-10-05T17:01:55.514Z",
+      "newCardCreated": false,
+      "reconnectPerformed": false,
+      "revision": 105,
+      "saveSync": "clean",
+      "ownWorkPreserved": true,
+      "pendingDrafts": false,
+      "lastFailure": null,
+      "humanPromptAt": "2026-10-05T17:00:16.769Z",
+      "humanPromptCurrentness": "current"
+    }
+  },
+  "outsideVerifierProofs": [
+    {
+      "id": "paired-public-result-exchange",
+      "result": "passed",
+      "actualHost": true,
+      "observedAt": "2026-10-05T15:14:20.524Z",
+      "evidence": "Both genuine unchanged hooks rejected exchanged public receipts at 15:12:37.236Z with owner mismatch. Both actual new owning shells rejected mismatched invocation data, showed no review data and never renewed; no promotion and both pending attempts expired. Existing A baseline renewed at 15:14:20.524Z with revision 0 clean; B renewed at 15:12:54.454Z with revision 105 clean. Both preserved own work. This proves actual receipt routing and own-shell rejection, beyond server delivery intent."
+    },
+    {
+      "id": "old-public-result-replay",
+      "result": "passed",
+      "actualHost": true,
+      "observedAt": "2026-10-05T15:09:43.888Z",
+      "evidence": "A genuinely issued, already-attested old receipt returned by a fresh display was denied alreadyAttested at 15:09:39.422Z. Actual fresh shell rejected mismatched invocation data with no review data or renewal; existing baseline remained clean. This is independent of authenticated old-attempt renew/detach denial."
+    },
+    {
+      "id": "chunk-validation-regression",
+      "result": "passed",
+      "actualHost": false,
+      "evidence": "Reviewed current implementation regression covered stale scope, offset, truncation and digest rejection: focused 3 files / 57 tests passed. The initial combined 36-file run had 701 passes and 65 tests blocked by socket EPERM; all 6 affected files / 107 tests then passed outside that restriction. The distinct combined suite total was 766 tests; the rerun count is not additive. Typecheck passed. These support implementation applicability and do not establish actual host identity or lifecycle."
+    }
+  ],
+  "historicalProvenance": {
+    "policy": "Earlier observations retain their original dates and results. Current host 12947 behavior is supported by current mode witnesses, not inferred from build 12776. Earlier build-12947 receipts were attributed using explicit build headers or a continuous same desktop process with an explicit later header. Inherited implementation invariants were reviewed against current package/source; no historical run is relabeled as a fresh current-artifact run.",
+    "earlierProfile": {
+      "codexBuild": "12776 commit3b98f3ba10bfa26dbb8fccdfec464a92f0e193ae",
+      "artifactDigest": "24969f546c3f0b3b2665c63749c8676efcb82c350149b5dc05e7bad1e7d7a94e",
+      "qualificationStatusAtThatStage": "failed"
+    },
+    "restoreFailure": {
+      "codexBuild": "12776",
+      "result": "failed",
+      "observedAt": "2026-10-02T16:20:35.032Z",
+      "evidence": "Controlled Restore remounted the confirmed card into a new instance; readiness was denied and it never renewed. Teardown versus 30-second expiry was unresolved."
+    },
+    "restoreRecovery": {
+      "codexBuild": "12776",
+      "result": "passed",
+      "observedAt": "2026-10-02T18:28:24Z",
+      "evidence": "Explicit same-chat fresh reconnect after unavailable context recovered accepted work and current prompt evidence. This scoped alternative did not erase the continuity failure."
+    }
+  },
+  "limitations": [
+    "Close did not prove immediate detach or a 30-second-from-click timeout. Retain measured expiry and peer/work recovery.",
+    "Hidden recovery proves the approved explicit reconnect alternative with genuine prompts, not uninterrupted hidden renewal. B recovery occurred later than A.",
+    "Protected recovery qualifies selected resume, not execution of discard or fork.",
+    "Scoped App.close means owning bridge loss, not Codex-managed stdio EOF.",
+    "Current negative trial baseline preservation is actual UI evidence; bounded current PDF evidence comes from separate real human prompt witnesses.",
+    "This audit makes no daemon restart, production reader, or U4-U8 acceptance claim."
+  ],
+  "finalState": "Root reviewed and accepted U3 evidence; no remaining U3 evidence blockers. Qualification descriptors and observer are off; no heartbeat is running. No production reader, daemon restart/client hydration or U4-U8 acceptance claim."
+}

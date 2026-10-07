@@ -1,7 +1,7 @@
 ---
 title: Diagnose an open PDF with unbound agent context
 date: "2026-09-12"
-last_updated: "2026-09-12"
+last_updated: "2026-10-06"
 category: integration-issues
 module: Live PDF Context
 problem_type: integration_issue
@@ -19,11 +19,11 @@ tags: [live-pdf-context, task-binding, hooks, diagnostics, screenshot-staging]
 
 ## Problem
 
-A clean screenshot task opened the paper successfully but could not access agent context. Two independent problems were encountered: the skill encouraged a wrapper command the hook did not recognize, and a later recognized launch reused a review still owned by an earlier staging task. The second rejection was silently ignored by the hook.
+In the September 12 browser-based screenshot investigation, a clean task opened the paper successfully but could not access agent context. Two independent problems were encountered: the skill encouraged a wrapper command the hook did not recognize, and a later recognized launch reused a review still owned by an earlier staging task. The second rejection was silently ignored by the hook.
 
 ## Symptoms
 
-The reader could be open while the prompt envelope said `unavailable` / `unbound`. Reopening the same PDF returned `focused` without restoring ownership. Fixing command recognition alone did not repair the existing review collision.
+The observations below describe that browser diagnostic, not a later native Codex qualification. The reader could be open while the prompt envelope said `unavailable` / `unbound`. Reopening the same PDF returned `focused` without restoring ownership. Fixing command recognition alone did not repair the existing review collision.
 
 | Checkpoint | What it establishes | Observed in this diagnostic run |
 | --- | --- | --- |
@@ -34,7 +34,7 @@ The reader could be open while the prompt envelope said `unavailable` / `unbound
 | Fresh current prompt envelope | This prompt has a scoped observation | Not received on delegated verification prompt |
 | Successful bounded evidence retrieval | Requested evidence was retrieved under that scope | Not verified |
 
-The claim statuses and browser currentness checks are distinct in `apps/service/src/context/task-binding-registry.ts`; do not collapse them into a single “connected” Boolean.
+The claim statuses and browser activation checks are distinct in `apps/service/src/context/task-binding-registry.ts:174`; prompt-time currentness is established separately by `apps/service/src/context/live-context-service.ts:286`. Do not collapse them into a single “connected” Boolean.
 
 ## What Didn't Work
 
@@ -45,17 +45,17 @@ The claim statuses and browser currentness checks are distinct in `apps/service/
 
 ## Solution
 
-The current skill requires the installed launcher to be the first executable in one direct shell command, with literal quoted arguments and an undecorated JSON response. It explicitly prohibits Python/Node/shell wrappers, pipes, chaining, and output decoration. See `integrations/codex-plugin/skills/placekeeper/SKILL.md:14`.
+The current skill requires the installed launcher to be the first executable in one direct shell command, with literal quoted arguments and an undecorated JSON response. It explicitly prohibits Python/Node/shell wrappers, pipes, chaining, and output decoration. See the current [Placekeeper launch workflow](../../../integrations/codex-plugin/skills/placekeeper/SKILL.md#launch-workflow). The current workflow uses the native Codex surface; the direct-command recognition constraint remains the same. After a successful native claim, trusted display attestation and authenticated panel readiness are separate activation requirements (`apps/service/src/cli/hook-command.ts:443`, `apps/service/src/codex/codex-runtime.ts:353`). The [live-context architecture](../architecture-patterns/task-scoped-prompt-refreshed-live-pdf-context.md) describes the browser and native proof sequences; this diagnostic does not prescribe browser fallback for a missing native capability.
 
-The claim branch now emits an explicit recovery message on denial rather than ignoring it (`apps/service/src/cli/hook-command.ts:403`). The message keeps both possible causes visible: another task may own the review, or the proof may have expired. A generic denial does not justify identifying another owner to the caller. The registry also denies invalid identifiers, missing or consumed proofs, mismatched scope, and competing pending claims. The warning names useful possibilities, not an exhaustive diagnosis. A proof is consumed before later ownership checks, so replay cannot repair denial. `apps/service/test/hook-contract.test.ts` checks the warning and absence of task IDs, proofs, file paths, and capability URLs.
+The claim branch now emits an explicit recovery message on denial rather than ignoring it (`apps/service/src/cli/hook-command.ts:435`). The message keeps both possible causes visible: another task may own the review, or the proof may have expired. A generic denial does not justify identifying another owner to the caller. The browser claim path also denies invalid identifiers, missing or consumed proofs, mismatched scope, and competing pending claims (`apps/service/src/context/task-binding-registry.ts:174`). The native claim path separately consumes its native proof and checks task, review, generation, and association availability (`apps/service/src/context/task-binding-registry.ts:265`). The warning names useful possibilities, not an exhaustive diagnosis. A proof is consumed before later ownership checks, so replay cannot repair denial. `apps/service/test/hook-contract.test.ts` checks the warning and absence of task IDs, proofs, file paths, and capability URLs.
 
 For the actual staging collision, an independent review was opened with `--fork` in the intended task. The hook confirmed association and the browser showed context updating. Earlier reviews remained intact. Use that option only when the user requests an independent review, following the installed skill's current recovery rules; do not steal another task's binding.
 
-The source changes are present on the working branch as of this date, with 30 targeted hook/registry tests passing. The installed hook was updated and temporary probes removed. Association was verified, but the later coordinated verification prompt received no fresh envelope, so **scoped page-text retrieval was not verified in that diagnostic run**. A user-originated follow-up was requested. Do not turn the later screenshot or its green icon into retrospective proof of an evidence retrieval that was not observed.
+The September 12 session recorded the source fix, 30 passing targeted hook/registry tests, an updated installed hook, and removal of temporary probes. Those are historical results, not a current test-run claim. Association was verified, but the later coordinated verification prompt received no fresh envelope, so **scoped page-text retrieval was not verified in that diagnostic run**. A user-originated follow-up was requested. Do not turn the later screenshot or its green icon into retrospective proof of an evidence retrieval that was not observed.
 
 ## Why This Works
 
-The registry deliberately denies competing task/review associations (`apps/service/src/context/task-binding-registry.ts`, `claim`). Preserving that exclusion is correct. The fix is truthful launch recognition and failure reporting, with an independent review when appropriate; it is not weakening task isolation. Authenticated browser bootstrap, task association, prompt observation, and evidence retrieval are separate checkpoints.
+The registry deliberately denies competing task/review associations (`apps/service/src/context/task-binding-registry.ts`, `claim`). Preserving that exclusion is correct. The fix is truthful launch recognition and failure reporting, with an independent review when appropriate; it is not weakening task isolation. Host activation, task association, prompt observation, and evidence retrieval remain separate checkpoints. Browser activation uses authenticated bootstrap; native activation requires trusted display attestation and authenticated readiness. A native attestation success message explicitly does not establish readiness or current context (`apps/service/src/cli/hook-command.ts:457`).
 
 ## Prevention
 
@@ -65,7 +65,7 @@ Investigate in this order:
 2. Confirm the hook event arrived. If instrumentation is needed, log only event name, tool name, payload key names/types, parser booleans, and result status. Do not log proof values, capability URLs, document content, or task secrets.
 3. Separate parsing failure from control-service rejection. A recognized launch plus `denied` is a different fault from a command the parser ignored.
 4. Preserve exclusivity. Explain a review conflict and offer an independent review when the user wants both tasks; don't replay proofs, guess task IDs, or borrow cached context.
-5. Verify association, browser bootstrap, a **new prompt's current envelope**, and one bounded evidence retrieval through that envelope's handle. If a delegated prompt supplies no envelope, have the user send a normal message in that task.
+5. Verify association and the applicable host activation—authenticated browser bootstrap, or native trusted display attestation plus authenticated readiness—then a **new prompt's current envelope** and one bounded evidence retrieval through that envelope's handle. If a delegated prompt supplies no envelope, have the user send a normal message in that task.
 6. Never simulate hook events or substitute a different task identity to make verification pass. Remove diagnostics, test both denied and accepted paths, and record precisely which verification checkpoints passed. Do not call the entire workflow verified after only the launcher succeeds.
 
 ## Related

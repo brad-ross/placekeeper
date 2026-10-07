@@ -575,6 +575,7 @@ describe("open command", () => {
       bindProof: expect.stringMatching(/^[A-Za-z0-9_-]{43}$/u),
     });
     if (!opened.ok || opened.kind !== "opened") throw new Error("Expected an opened exact link");
+    if (!("url" in opened)) throw new Error("Expected browser launch");
     const capability = new URL(opened.url).hash.slice("#cap=".length);
     expect(host.broker.exchangeBootstrapForHttp(opened.sessionId, capability)?.view?.locationFragment)
       .toBe("v=2&page=12&mode=fit-rectangle&params=100,200,500,700");
@@ -814,6 +815,7 @@ describe("open command", () => {
       documentGeneration: opened.documentGeneration,
       bindProof: opened.bindProof,
     })).toMatchObject({ kind: "binding", result: { status: "pending" } });
+    if (!("url" in opened)) throw new Error("Expected browser launch");
     const capability = new URL(opened.url).hash.slice("#cap=".length);
     expect(host.broker.exchangeBootstrap(opened.sessionId, capability)).toBeTypeOf("string");
     expect(host.broker.taskBindings.bindingForTask("task-a")).toMatchObject({ reviewSessionId: opened.sessionId });
@@ -823,5 +825,13 @@ describe("open command", () => {
     expect(await requestControl(socketPath, { kind: "revoke-task", taskSessionId: "task-a" }))
       .toEqual({ kind: "revoked" });
     expect(host.broker.taskBindings.bindingForTask("task-a")).toBeUndefined();
+  });
+});
+
+describe("explicit native launch surface", () => {
+  it("parses native separately from the existing Codex browser surface", () => {
+    expect(parseOpenArguments(["open", "--json", "--surface", "codex-native", "--pdf", "/tmp/paper.pdf"])).toMatchObject({ surface: "codex-native" });
+    expect(parseOpenArguments(["open", "--json", "--surface", "codex", "--pdf", "/tmp/paper.pdf"])).toMatchObject({ surface: "codex" });
+    expect(() => parseOpenArguments(["open", "--json", "--surface", "codex-native", "--surface", "codex", "--pdf", "/tmp/paper.pdf"])).toThrow();
   });
 });

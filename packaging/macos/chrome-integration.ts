@@ -214,10 +214,10 @@ async function validatePackagedSharedClient(root: string): Promise<void> {
   let value: unknown;
   try { value = JSON.parse(source) as unknown; }
   catch { throw new Error("Chrome shared client asset-manifest.json is invalid"); }
-  if (!isRecord(value) || value.schemaVersion !== 3) {
+  if (!isRecord(value) || value.schemaVersion !== 4) {
     throw new Error("Chrome shared client manifest is invalid");
   }
-  const assets = [value.app, value.stylesheet, value.pdfiumWasm, value.pdfiumWorker];
+  const assets = [value.app, value.stylesheet, value.pdfiumWasm, value.pdfiumWorker, value.pdfiumCodexWorker];
   if (assets.some((name) => typeof name !== "string" || !/^[A-Za-z0-9._-]+$/u.test(name)) ||
     new Set(assets).size !== assets.length || !isRecord(value.integrity)) {
     throw new Error("Chrome shared client manifest is invalid");

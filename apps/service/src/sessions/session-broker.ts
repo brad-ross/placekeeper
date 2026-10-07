@@ -132,11 +132,22 @@ function activeKey(path: string, digest: string): string {
 function nativeAnnotationLedger(
   state: ReviewState,
   previous?: DurableNativeAnnotationLedgerV1,
+  verifiedOriginalSaveIds: ReadonlySet<string> = new Set(),
 ): DurableNativeAnnotationLedgerV1 {
   const managed = new Map((previous?.managed ?? []).map((entry) => [entry.id, entry]));
+  // Only a checked original publication may establish persistent /NM
+  // identity for an ordinal import; semantic state and history stay unchanged.
+  for (const id of verifiedOriginalSaveIds) {
+    const entry = managed.get(id);
+    if (entry?.sourceDigest === state.source.digest && entry.documentGeneration === state.workflow.documentGeneration) {
+      managed.set(id, { ...entry, provenance: "verified" });
+    }
+  }
   for (const item of state.items) {
     if (item.kind !== "pdfAnnotation") continue;
-    const provenance = item.payload.identityProvenance;
+    const prior = managed.get(item.id);
+    const provenance = prior?.provenance === "verified" && prior.sourceDigest === state.source.digest &&
+      prior.documentGeneration === state.workflow.documentGeneration ? "verified" : item.payload.identityProvenance;
     if (provenance !== "verified" && provenance !== "generation-ordinal") continue;
     managed.set(item.id, {
       id: item.id,
@@ -165,6 +176,14 @@ function abortable<T>(operation: Promise<T>, signal: AbortSignal | undefined): P
       signal.removeEventListener("abort", onAbort);
     });
   });
+}
+
+/** Internal canonical-state notification; carries no document bytes or capabilities. */
+export interface SessionStateInvalidation {
+  readonly sessionId: string;
+  readonly documentGeneration: number;
+  readonly reviewRevision: number;
+  readonly reason: "revision" | "freshness" | "presence" | "save" | "generation" | "terminated";
 }
 
 export class SessionBroker {
@@ -197,6 +216,7 @@ export class SessionBroker {
   readonly #openingByOutputPath = new Map<string, Promise<void>>();
   readonly #presentations = new PresentationRecords();
   readonly #recovery: RecoveryDecisions;
+  readonly #stateInvalidationListeners = new Set<(event: SessionStateInvalidation) => void>();
   readonly #sessionEndListeners = new Set<(sessionId: string, reason: "ended" | "shutdown") => void>();
   readonly #snapshotStores = new Map<string, DraftSnapshotStore>();
   readonly #generationListeners = new Set<(event: DocumentGenerationEvent) => void>();
@@ -298,7 +318,7 @@ export class SessionBroker {
       onPresenceChange: (sessionId) => {
         const state = this.#activeById.get(sessionId)?.state;
         if (state === undefined) return;
-        this.controls.publishStateInvalidation(sessionId, {
+        this.#publishStateInvalidation(sessionId, {
           documentGeneration: state.workflow.documentGeneration,
           reviewRevision: state.revision,
           reason: "presence",
@@ -423,7 +443,7 @@ export class SessionBroker {
                 session.nativeAnnotationLedger = nextNativeAnnotationLedger;
                 session.interactionReceipts = interactionReceipts;
                 if (recoverReceipt) this.interactions.recoverFinalized(receipt);
-                this.controls.publishStateInvalidation(input.sessionId, {
+                this.#publishStateInvalidation(input.sessionId, {
                   documentGeneration: nextState.workflow.documentGeneration,
                   reviewRevision: nextState.revision,
                   reason: "revision",
@@ -526,6 +546,40 @@ export class SessionBroker {
     });
   }
 
+  /** Service-only observation. Public transports must authenticate their own scope. */
+  onStateInvalidation(listener: (event: SessionStateInvalidation) => void): () => void {
+    this.#stateInvalidationListeners.add(listener);
+    return () => { this.#stateInvalidationListeners.delete(listener); };
+  }
+
+  #emitStateInvalidation(event: SessionStateInvalidation): void {
+    for (const listener of this.#stateInvalidationListeners) {
+      try { listener(event); } catch { /* Canonical state remains available for rehydration. */ }
+    }
+  }
+
+  #publishStateInvalidation(
+    sessionId: string,
+    event: Omit<SessionStateInvalidation, "sessionId">,
+  ): void {
+    this.#emitStateInvalidation({ sessionId, ...event });
+    // Keep the browser protocol unchanged; Save Sync also requires a state refresh.
+    if (event.reason !== "generation" && event.reason !== "terminated") {
+      this.controls.publishStateInvalidation(sessionId, {
+        ...event,
+        reason: event.reason === "save" ? "revision" : event.reason,
+      });
+    }
+  }
+
+  #publishSaveInvalidation(session: ActiveSession): void {
+    this.#publishStateInvalidation(session.id, {
+      documentGeneration: session.state.workflow.documentGeneration,
+      reviewRevision: session.state.revision,
+      reason: "save",
+    });
+  }
+
   onSessionEnd(listener: (sessionId: string, reason: "ended" | "shutdown") => void): () => void {
     this.#sessionEndListeners.add(listener);
     return () => this.#sessionEndListeners.delete(listener);
@@ -541,6 +595,9 @@ export class SessionBroker {
     return () => this.#localObservationListeners.delete(listener);
   }
 
+  /** Register the save coordinator's pending-work resumption contract. The
+   * coordinator must be attached before opening recovery reviews so safely
+   * restored pending saves can remain durable and resume after activation. */
   onPhysicalSaveResume(listener: (sessionId: string) => void): () => void {
     this.#physicalSaveResumeListeners.add(listener);
     return () => this.#physicalSaveResumeListeners.delete(listener);
@@ -669,6 +726,13 @@ export class SessionBroker {
     surface: ReviewPresentationSurface,
     requestedLocation?: PlacekeeperLinkLocation,
   ): SessionLaunch {
+    // Native admission owns its own presentation and never uses HTTP launch authority.
+    if (surface === "codex-native") {
+      return { sessionId: session.id, fileId: session.fileId,
+        ...(session.rootId === undefined ? {} : { rootId: session.rootId }),
+        launchPath: "", fragment: "", surface,
+        documentGeneration: session.state.workflow.documentGeneration };
+    }
     const capability = this.credentials.issueBootstrap(session.id, BOOTSTRAP_TTL_MS);
     const reconnectBrowserToken = surface === "codex"
       ? randomBytes(32).toString("base64url")
@@ -1103,6 +1167,20 @@ export class SessionBroker {
           };
         }
       }
+      // A coordinator attached before recovery can resume interrupted pending
+      // work. Without that resumption contract, retain the broker-only recovery
+      // behavior above. Persist this pending state before notifying below so a
+      // second process exit before the physical write cannot lose eligibility.
+      const resumePendingSave = matchingDraft.sync.phase === "saving" &&
+        this.#physicalSaveResumeListeners.size > 0 &&
+        destination.phase === "active" && destination.capabilityId !== undefined &&
+        rewriteEligibility.eligible && resumedState.workflow.mode !== "generated-output" &&
+        !geometryMigrated && nativeMigration.length === 0 &&
+        sync.phase === "not-saved" && sync.failure === "write-failed";
+      if (resumePendingSave) {
+        const { failure: _interruptedFailure, ...pendingSync } = sync;
+        sync = { ...pendingSync, phase: "saving" };
+      }
       const recoveredSnapshotInfo = await stat(recoveredSnapshotPath);
       const recoveredGeneration = resumedState.workflow.documentGeneration;
       const generationLineage = matchingDraft.generationLineage === undefined
@@ -1162,6 +1240,8 @@ export class SessionBroker {
       this.interactions.hydrate(session.interactionReceipts);
       await session.store.persist(this.#draft(session));
       this.#activate(session);
+      this.#publishSaveInvalidation(session);
+      if (resumePendingSave) this.#publishPhysicalSaveResume(session.id);
       return {
         kind: "opened",
         launch: this.#launch(session, request.surface ?? "browser", request.requestedLocation),
@@ -1407,6 +1487,40 @@ export class SessionBroker {
     capability: string,
   ): HttpBootstrapExchange | undefined {
     return this.#exchangeBootstrap(sessionId, capability);
+  }
+
+  /** Service-only admission metadata. Never include this scope in model output. */
+  nativeAdmissionScope(sessionId: string): {
+    readonly reviewSessionId: string;
+    readonly documentGeneration: number;
+    readonly canonicalSourcePath: string;
+    readonly sourceDigest: string;
+  } | undefined {
+    const session = this.#activeById.get(sessionId);
+    return session === undefined || session.ending ? undefined : {
+      reviewSessionId: session.id,
+      documentGeneration: session.state.workflow.documentGeneration,
+      canonicalSourcePath: session.canonicalSourcePath,
+      sourceDigest: session.state.source.digest,
+    };
+  }
+
+  nativeRestartScope(
+    sourcePathHash: string,
+    sourceDigest: string,
+    reviewSessionHash: string,
+  ): ReturnType<SessionBroker["nativeAdmissionScope"]> {
+    for (const session of this.#activeById.values()) {
+      if (
+        !session.ending &&
+        digestSecretHex(session.id) === reviewSessionHash &&
+        digestSecretHex(session.canonicalSourcePath) === sourcePathHash &&
+        session.state.source.digest === sourceDigest
+      ) {
+        return this.nativeAdmissionScope(session.id);
+      }
+    }
+    return undefined;
   }
 
   async claimTaskBinding(input: {
@@ -1757,6 +1871,7 @@ export class SessionBroker {
       readonly revision: number;
       readonly stateDigest: string;
       readonly targetDigest: string;
+      readonly verifiedNativeAnnotationIds?: readonly string[];
     },
   ): {
     readonly current: boolean;
@@ -1784,8 +1899,12 @@ export class SessionBroker {
     const acceptedOriginalDigests = destination.kind === "original"
       ? [...new Set([...session.acceptedOriginalDigests, input.targetDigest])]
       : session.acceptedOriginalDigests;
+    const ledger = destination.kind === "original" && input.verifiedNativeAnnotationIds !== undefined
+      ? nativeAnnotationLedger(session.state, session.nativeAnnotationLedger, new Set(input.verifiedNativeAnnotationIds))
+      : session.nativeAnnotationLedger;
     const durableSuccessor: RecoverableDraftV3 = {
       ...this.#draft(session),
+      nativeAnnotationLedger: ledger,
       destination,
       sync,
       ...(acceptedOriginalDigests.length === 0 ? {} : { acceptedOriginalDigests }),
@@ -1797,10 +1916,12 @@ export class SessionBroker {
       apply: () => {
         session.destination = destination;
         session.sync = sync;
+        session.nativeAnnotationLedger = ledger;
         if (destination.kind === "original") {
           session.currentOriginalDigest = input.targetDigest;
           session.acceptedOriginalDigests = acceptedOriginalDigests;
         }
+        this.#publishSaveInvalidation(session);
       },
     };
   }
@@ -1823,6 +1944,12 @@ export class SessionBroker {
     return transition.current;
   }
 
+  #assertExpectedDocumentGeneration(session: ActiveSession, expected: number | undefined): void {
+    if (expected !== undefined && expected !== session.state.workflow.documentGeneration) {
+      throw new ReviewGenerationConflictError(expected, session.state.workflow.documentGeneration, session.state.revision);
+    }
+  }
+
   async establishSaveDestination(
     sessionId: string,
     input: {
@@ -1831,12 +1958,18 @@ export class SessionBroker {
       readonly capabilityId: string;
       readonly fingerprint?: string;
       readonly confirmation?: SaveDestinationConfirmation;
+      readonly expectedDocumentGeneration?: number;
+      readonly expectedDestinationGeneration?: number;
     },
   ): Promise<{ readonly destination: DurableSaveDestination; readonly sync: DurableSaveSync; readonly state: ReviewState }> {
     const session = this.#activeById.get(sessionId);
     if (session === undefined || session.ending) throw new Error("Review session is not active");
     return this.#withSessionTail(session, async () => {
       if (session.ending) throw new Error("Review session is ending");
+      this.#assertExpectedDocumentGeneration(session, input.expectedDocumentGeneration);
+      if (input.expectedDestinationGeneration !== undefined && input.expectedDestinationGeneration !== session.destination.generation) {
+        throw new Error("save-destination-conflict");
+      }
       this.#assertSaveDestinationAllowed(session, input);
       const write = this.controls.beginWrite(sessionId);
       try {
@@ -1868,7 +2001,8 @@ export class SessionBroker {
         session.state = nextState;
         session.destination = destination;
         session.sync = sync;
-        if (confirmation !== undefined) this.controls.publishStateInvalidation(sessionId, {
+        this.#publishSaveInvalidation(session);
+        if (confirmation !== undefined) this.#publishStateInvalidation(sessionId, {
           documentGeneration: nextState.workflow.documentGeneration,
           reviewRevision: nextState.revision,
           reason: "revision",
@@ -1884,18 +2018,28 @@ export class SessionBroker {
       readonly targetPath: string;
       readonly capabilityId: string;
       readonly fingerprint: string;
+      readonly expectedDocumentGeneration?: number;
+      readonly expectedDestinationGeneration?: number;
+      /** Trusted capability rebind runs under the canonical generation tail. */
+      readonly prepareTargetPath?: () => Promise<string>;
     },
   ): Promise<{ readonly destination: DurableSaveDestination; readonly sync: DurableSaveSync }> {
     const session = this.#activeById.get(sessionId);
     if (session === undefined || session.ending) throw new Error("Review session is not active");
     return this.#withSessionTail(session, async () => {
       if (session.ending) throw new Error("Review session is ending");
-      this.#assertSaveDestinationAllowed(session, { kind: "original", targetPath: input.targetPath });
+      this.#assertExpectedDocumentGeneration(session, input.expectedDocumentGeneration);
+      if (input.expectedDestinationGeneration !== undefined && input.expectedDestinationGeneration !== session.destination.generation) {
+        throw new Error("save-destination-conflict");
+      }
+      const targetPath = input.prepareTargetPath === undefined ? input.targetPath : await input.prepareTargetPath();
+      if (session.ending) throw new Error("Review session is ending");
+      this.#assertSaveDestinationAllowed(session, { kind: "original", targetPath });
       const destination: DurableSaveDestination = {
         phase: "active",
         generation: session.destination.generation + 1,
         kind: "original",
-        targetPath: input.targetPath,
+        targetPath,
         capabilityId: input.capabilityId,
         fingerprint: input.fingerprint,
       };
@@ -1910,8 +2054,8 @@ export class SessionBroker {
         session.sourceOwnership.disposition === "local"
           ? {
               ...session.sourceOwnership,
-              canonicalSourcePath: input.targetPath,
-              displayName: basename(input.targetPath),
+              canonicalSourcePath: targetPath,
+              displayName: basename(targetPath),
             }
           : session.sourceOwnership;
       await session.store.persist({
@@ -1923,11 +2067,12 @@ export class SessionBroker {
       for (const [key, owner] of this.#activeBySource) {
         if (owner === sessionId) this.#activeBySource.delete(key);
       }
-      session.canonicalSourcePath = input.targetPath;
+      session.canonicalSourcePath = targetPath;
       session.sourceOwnership = sourceOwnership;
       session.destination = destination;
       session.sync = sync;
       this.#activate(session);
+      this.#publishSaveInvalidation(session);
       return { destination, sync };
     });
   }
@@ -1958,6 +2103,8 @@ export class SessionBroker {
     readonly revision: number;
     readonly stateDigest: string;
     readonly targetDigest?: string;
+    /** Native IDs whose standard /NM identity was verified in this candidate. */
+    readonly verifiedNativeAnnotationIds?: readonly string[];
     readonly commit: (candidateIsCurrent: () => boolean) => Promise<
       | undefined
       | {
@@ -2004,6 +2151,7 @@ export class SessionBroker {
           revision: input.revision,
           stateDigest: input.stateDigest,
           targetDigest: publication.targetDigest,
+          ...(input.verifiedNativeAnnotationIds === undefined ? {} : { verifiedNativeAnnotationIds: input.verifiedNativeAnnotationIds }),
         });
         const committed = () => transition.current ? "committed-current" as const : "committed-stale" as const;
         const clearBarrier = () => {
@@ -2088,6 +2236,7 @@ export class SessionBroker {
       };
       await session.store.persist({ ...this.#draft(session), sync });
       session.sync = sync;
+      this.#publishSaveInvalidation(session);
     });
   }
 
@@ -2305,6 +2454,11 @@ export class SessionBroker {
         await session.store.persist({ ...this.#draft(session), state, sync });
         session.state = state;
         session.sync = sync;
+        this.#publishStateInvalidation(session.id, {
+          documentGeneration: state.workflow.documentGeneration,
+          reviewRevision: state.revision,
+          reason: "freshness",
+        });
       });
       return {
         // This staged candidate was inspected and proved invalid. A newer
@@ -2403,7 +2557,7 @@ export class SessionBroker {
         };
       });
       if (invalidation !== undefined) {
-        this.controls.publishStateInvalidation(session.id, {
+        this.#publishStateInvalidation(session.id, {
           documentGeneration: invalidation.documentGeneration,
           reviewRevision: invalidation.reviewRevision,
           reason: "freshness",
@@ -2540,12 +2694,16 @@ export class SessionBroker {
         // generation record. A failure here leaves the predecessor authoritative.
         await this.capabilities.refreshApprovedPdf(session.fileId, staged!.digest);
 
+        const verifiedPredecessorNativeIds = new Set(session.nativeAnnotationLedger.managed.filter(entry =>
+          entry.provenance === "verified" && entry.sourceDigest === session.state.source.digest &&
+          entry.documentGeneration === session.state.workflow.documentGeneration).map(entry => entry.id));
         let nextState = prepareReplacementReview(
           session.state, successorGeneration, session.fileId, staged!, inspected.pages,
           importedSuccessorItems,
           new Set(session.nativeAnnotationLedger.deletedIds),
+          verifiedPredecessorNativeIds,
         );
-        if (session.state.items.some((item) =>
+        if (nextState.items.some((item) =>
           item.kind === "pdfAnnotation" && item.payload.identityProvenance !== "verified")) {
           nativeInventoryReconciled = false;
         }
@@ -2683,6 +2841,7 @@ export class SessionBroker {
           };
           activatedEvent = successorEvent;
           if (publish) {
+            this.#emitStateInvalidation({ ...successorEvent, reason: "generation" });
             this.controls.publishSuccessor(session.id, successorEvent);
             for (const listener of this.#generationListeners) {
               try { listener(successorEvent); } catch { /* Rehydrate through the successor handshake. */ }
@@ -2778,6 +2937,7 @@ export class SessionBroker {
       return markInvalid(error instanceof Error ? error.message : "generation-commit-failed");
     }
     if (event !== undefined) {
+      this.#emitStateInvalidation({ ...event, reason: "generation" });
       this.controls.publishSuccessor(event.sessionId, event);
       for (const listener of this.#generationListeners) {
         try {
@@ -3012,7 +3172,7 @@ export class SessionBroker {
       };
     });
     if (invalidation !== undefined) {
-      this.controls.publishStateInvalidation(session.id, {
+      this.#publishStateInvalidation(session.id, {
         documentGeneration: invalidation.documentGeneration,
         reviewRevision: invalidation.reviewRevision,
         reason: "freshness",
@@ -3089,7 +3249,7 @@ export class SessionBroker {
       };
     });
     if (invalidation !== undefined) {
-      this.controls.publishStateInvalidation(session.id, {
+      this.#publishStateInvalidation(session.id, {
         documentGeneration: invalidation.documentGeneration,
         reviewRevision: invalidation.reviewRevision,
         reason: "freshness",
@@ -3351,8 +3511,8 @@ export class SessionBroker {
     };
   }
 
-  async freezeDelivery(sessionId: string, fence?: ReviewExportFence): Promise<FrozenReviewDelivery> {
-    return this.#freezeDelivery(sessionId, fence, false);
+  async freezeDelivery(sessionId: string, fence?: ReviewExportFence, expectedDocumentGeneration?: number): Promise<FrozenReviewDelivery> {
+    return this.#freezeDelivery(sessionId, fence, false, expectedDocumentGeneration);
   }
 
   /** Freeze the semantic PDF target rather than draft-only review revisions. */
@@ -3364,6 +3524,7 @@ export class SessionBroker {
     sessionId: string,
     fence: ReviewExportFence | undefined,
     saveTarget: boolean,
+    expectedDocumentGeneration?: number,
   ): Promise<FrozenReviewDelivery> {
     const session = this.#activeById.get(sessionId);
     if (session === undefined || session.ending) {
@@ -3376,6 +3537,7 @@ export class SessionBroker {
     try {
       await this.#assertReplacementCommitSettled(session);
       if (session.ending) throw new Error("Review session is ending");
+      this.#assertExpectedDocumentGeneration(session, expectedDocumentGeneration);
       if (fence && (fence.expectedRevision !== session.state.revision || fence.documentGeneration !== session.state.workflow.documentGeneration)) {
         throw new ReviewExportConflictError();
       }
@@ -3495,7 +3657,7 @@ export class SessionBroker {
       session.state = nextState;
       session.sync = nextSync;
       session.nativeAnnotationLedger = nextNativeAnnotationLedger;
-      this.controls.publishStateInvalidation(sessionId, {
+      this.#publishStateInvalidation(sessionId, {
         documentGeneration: nextState.workflow.documentGeneration,
         reviewRevision: nextState.revision,
         reason: "revision",
@@ -3656,6 +3818,8 @@ export class SessionBroker {
       this.taskBindings.revokeSession(session.id);
       this.controls.cancel(session.id);
       this.interactions.revokeSession(session.id);
+      this.#emitStateInvalidation({ sessionId: session.id, documentGeneration: session.state.workflow.documentGeneration,
+        reviewRevision: session.state.revision, reason: "terminated" });
       for (const listener of this.#sessionEndListeners) listener(session.id, "shutdown");
     }
     this.#snapshotStores.clear();
@@ -3727,6 +3891,8 @@ export class SessionBroker {
       await session.store.remove();
     } finally {
       this.#snapshotStores.delete(sessionId);
+      this.#emitStateInvalidation({ sessionId, documentGeneration: session.state.workflow.documentGeneration,
+        reviewRevision: session.state.revision, reason: "terminated" });
       for (const listener of this.#sessionEndListeners) listener(sessionId, "ended");
     }
   }

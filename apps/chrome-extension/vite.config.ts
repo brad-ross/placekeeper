@@ -37,6 +37,7 @@ function sharedClientAssets(): Plugin {
         readonly stylesheet?: unknown;
         readonly pdfiumWasm?: unknown;
         readonly pdfiumWorker?: unknown;
+        readonly pdfiumCodexWorker?: unknown;
         readonly integrity?: unknown;
       };
       try {
@@ -44,8 +45,8 @@ function sharedClientAssets(): Plugin {
       } catch {
         throw new Error("Chrome build requires the shared production client; run build:web first");
       }
-      const assets = [manifest.app, manifest.stylesheet, manifest.pdfiumWasm, manifest.pdfiumWorker];
-      if (manifest.schemaVersion !== 3 ||
+      const assets = [manifest.app, manifest.stylesheet, manifest.pdfiumWasm, manifest.pdfiumWorker, manifest.pdfiumCodexWorker];
+      if (manifest.schemaVersion !== 4 ||
         assets.some((name) => typeof name !== "string" || !/^[A-Za-z0-9._-]+$/u.test(name)) ||
         new Set(assets).size !== assets.length || typeof manifest.integrity !== "object" ||
         manifest.integrity === null) {

@@ -93,11 +93,12 @@ export interface ReviewWebviewHtmlOptions {
 }
 
 export interface SharedAssetManifest {
-  readonly schemaVersion: 3;
+  readonly schemaVersion: 4;
   readonly app: string;
   readonly stylesheet: string;
   readonly pdfiumWasm: string;
   readonly pdfiumWorker: string;
+  readonly pdfiumCodexWorker: string;
   readonly integrity: Readonly<Record<string, string>>;
 }
 
@@ -105,12 +106,12 @@ export function parseSharedAssetManifest(value: unknown): SharedAssetManifest {
   if (typeof value !== "object" || value === null) throw new Error("The shared asset manifest is invalid");
   const candidate = value as Partial<SharedAssetManifest>;
   const safeAsset = (asset: unknown) => typeof asset === "string" && /^[A-Za-z0-9._-]+$/u.test(asset);
-  if (candidate.schemaVersion !== 3 || !safeAsset(candidate.app) ||
+  if (candidate.schemaVersion !== 4 || !safeAsset(candidate.app) ||
     !safeAsset(candidate.stylesheet) || !safeAsset(candidate.pdfiumWasm) ||
-    !safeAsset(candidate.pdfiumWorker)) {
+    !safeAsset(candidate.pdfiumWorker) || !safeAsset(candidate.pdfiumCodexWorker)) {
     throw new Error("The shared asset manifest is invalid");
   }
-  const assets = [candidate.app, candidate.stylesheet, candidate.pdfiumWasm, candidate.pdfiumWorker] as string[];
+  const assets = [candidate.app, candidate.stylesheet, candidate.pdfiumWasm, candidate.pdfiumWorker, candidate.pdfiumCodexWorker] as string[];
   if (new Set(assets).size !== assets.length || typeof candidate.integrity !== "object" ||
     candidate.integrity === null || Object.keys(candidate.integrity).sort().join("\n") !== assets.sort().join("\n") ||
     Object.values(candidate.integrity).some((digest) => !/^[0-9a-f]{64}$/u.test(digest))) {

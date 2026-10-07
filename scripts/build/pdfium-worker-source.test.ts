@@ -65,3 +65,13 @@ describe("PDFium asset mechanisms", () => {
     expect(emitFile.mock.calls[1]?.[0]).toEqual({ type: "asset", ...workerName, source: worker });
   });
 });
+
+it('builds a dedicated Codex worker with byte initialization while leaving generic worker bytes intact', async () => {
+  const { buildCodexPdfiumWorkerSource } = await import('./pdfium-worker-source.js');
+  const raw = extractPinnedPdfiumWorkerSource(readFileSync('node_modules/@embedpdf/engines/dist/lib/pdfium/web/worker-engine.js', 'utf8'));
+  const native = buildCodexPdfiumWorkerSource(raw);
+  expect(native).toContain('const wasmBinary = event.data.wasmBinary;');
+  expect(native).not.toContain('const response = await fetch(wasmUrl);');
+  expect(raw).toContain('const response = await fetch(wasmUrl);');
+  expect(() => buildCodexPdfiumWorkerSource('different worker')).toThrow('Pinned PDFium WASM initialization changed');
+});

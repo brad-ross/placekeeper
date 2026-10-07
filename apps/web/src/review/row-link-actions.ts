@@ -1,3 +1,4 @@
+import type { PlacekeeperLinkLocation } from "../../../../packages/core/src/placekeeper-link.js";
 import type { PdfOutlineItem } from '../pdf/pdf-outline.js';
 import {
   placekeeperLocationFromPdfNavigationTarget,
@@ -9,10 +10,17 @@ import { buildPlacekeeperCopyLink } from './CopyLinkControl.js';
 import type { CopyLinkActionData, PdfDestinationCopyLink } from './copy-link-model.js';
 
 export interface PdfTargetCopyLinkContext {
-  readonly appLinkBase: string;
+  readonly appLinkBase?: string;
+  readonly createLink?: (location: PlacekeeperLinkLocation) => Promise<string>;
   readonly document: PdfNavigationTargetContext;
   readonly currentDocumentGeneration: () => number;
   readonly writeText: (link: string) => Promise<void>;
+}
+
+function linkForLocation(context: PdfTargetCopyLinkContext, location: PlacekeeperLinkLocation): string | Promise<string> {
+  if (context.createLink !== undefined) return context.createLink(location);
+  if (context.appLinkBase === undefined) throw new Error('Link unavailable.');
+  return buildPlacekeeperCopyLink(context.appLinkBase, location);
 }
 
 function generationCheckedWriter(
@@ -35,7 +43,7 @@ export function createPdfTargetCopyLink(
   if (location === null) return undefined;
   return {
     precision: location.kind === 'destination' ? 'exact' : 'page',
-    getLink: () => buildPlacekeeperCopyLink(context.appLinkBase, location),
+    getLink: () => linkForLocation(context, location),
     writeText: generationCheckedWriter(context.document.documentGeneration, context),
   };
 }
@@ -59,7 +67,7 @@ export function createSearchResultRowCopyLink(
   ) return undefined;
   const location = { kind: 'page' as const, page: result.pageIndex + 1 };
   return {
-    getLink: () => buildPlacekeeperCopyLink(context.appLinkBase, location),
+    getLink: () => linkForLocation(context, location),
     writeText: generationCheckedWriter(context.document.documentGeneration, context),
   };
 }

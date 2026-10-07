@@ -1,6 +1,8 @@
 import type { DocumentState } from '@embedpdf/core';
 import type {
   LoadDocumentUrlOptions,
+  LoadDocumentBufferOptions,
+  InitialDocumentOptions,
 } from '@embedpdf/plugin-document-manager';
 
 import {
@@ -24,6 +26,7 @@ interface ReferenceOpenResponse {
 
 export interface ReferenceDocumentManager {
   openDocumentUrl(options: LoadDocumentUrlOptions): PromiseTask<ReferenceOpenResponse>;
+  openDocumentBuffer?(options: LoadDocumentBufferOptions): PromiseTask<ReferenceOpenResponse>;
   retryDocument(documentId: string): PromiseTask<ReferenceOpenResponse>;
   closeDocument(documentId: string): PromiseTask<void>;
   getActiveDocumentId(): string | null;
@@ -50,7 +53,7 @@ const DEFAULT_REFERENCE_OPEN_TIMEOUT_MS = 5_000;
 export function buildReferenceDocumentOptions(
   assetUrls: ViewerAssetUrls,
   policyOrOrigin: ViewerResourcePolicy | string,
-): LoadDocumentUrlOptions {
+): InitialDocumentOptions {
   return {
     ...buildViewerDocumentOptions(assetUrls, policyOrOrigin),
     documentId: REFERENCE_PDF_DOCUMENT_ID,
@@ -148,11 +151,16 @@ export function createReferenceDocumentController(input: {
           status = 'loaded';
           return true;
         }
+        const open = () => {
+          const options = buildReferenceDocumentOptions(input.assetUrls, input.resourcePolicy ?? input.origin);
+          if ('buffer' in options) {
+            if (!input.documentManager.openDocumentBuffer) throw new Error('Native Reference buffer loading is unavailable.');
+            return input.documentManager.openDocumentBuffer(options);
+          }
+          return input.documentManager.openDocumentUrl(options);
+        };
         const task = kind === 'retry' && documentStatus === 'error'
-          ? input.documentManager.retryDocument(REFERENCE_PDF_DOCUMENT_ID)
-          : input.documentManager.openDocumentUrl(buildReferenceDocumentOptions(
-              input.assetUrls, input.resourcePolicy ?? input.origin,
-            ));
+          ? input.documentManager.retryDocument(REFERENCE_PDF_DOCUMENT_ID) : open();
         await waitForOpen(task, timeoutMs);
         if (operation !== operationGeneration || startedGeneration !== documentGeneration) return false;
         if (input.documentManager.getActiveDocumentId() !== MAIN_PDF_DOCUMENT_ID) {

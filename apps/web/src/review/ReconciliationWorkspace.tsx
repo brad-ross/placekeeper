@@ -708,7 +708,9 @@ export function ReconciliationWorkspace(props: ReconciliationWorkspaceProps) {
           baseGeneration: props.state.workflow.documentGeneration,
           revision: existingDraft?.revision ?? 0,
           kind: record.kind,
-          ...(record.target.kind === 'item' ? { targetItemId: record.target.id } : {}),
+          ...(record.target.kind === 'item'
+            ? { targetItemId: record.target.id }
+            : existingDraft?.targetItemId === undefined ? {} : { targetItemId: existingDraft.targetItemId }),
           pageIndex: anchor.pageIndex,
           text: record.authoredText,
           anchor,

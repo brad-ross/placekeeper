@@ -1,7 +1,7 @@
 ---
 title: Task-scoped, prompt-refreshed live PDF context
 date: 2026-08-12
-last_updated: 2026-09-10
+last_updated: 2026-10-06
 category: architecture-patterns
 module: Live PDF Context
 problem_type: architecture_pattern
@@ -35,7 +35,7 @@ tags:
 
 ## Context
 
-An agent cannot safely learn a changing PDF review from an open browser tab, a file path, or a snapshot captured at launch. Those signals do not identify which task owns the review, whether its browser completed the same authenticated launch, or whether annotations changed before the next user prompt.
+An agent cannot safely learn a changing PDF review from an open browser tab, a file path, or a snapshot captured at launch. Those signals do not identify which task owns the review, whether its review surface completed the same authenticated launch, or whether annotations changed before the next user prompt.
 
 Earlier approaches centered on autosave or a visible handoff action, but the need was different: the agent task had to know which review it owned and receive fresh PDF and annotation state without a button (session history). Pointing the agent at raw PDF bytes likewise provided no ambient awareness of later annotations, while scraping the browser DOM would have made presentation state compete with canonical Review Items (session history).
 
@@ -47,9 +47,11 @@ An authorized Document Generation transition may migrate the active task associa
 
 ### Bind one review generation to one agent task
 
+The following handshake describes browser admission. Native Codex preserves the same task association and prompt-time freshness rules through the separate proof sequence below.
+
 Use a two-sided handshake instead of inferring ownership from the active application window. A launch creates a one-time proof scoped to the review session, document generation, and browser capability (`apps/service/src/context/task-binding-registry.ts`). The agent hook claims that proof for its task, producing a pending binding; the authenticated browser must then activate the same review generation with its matching capability (`apps/service/src/context/task-binding-registry.ts`).
 
-Keep the association exclusive. Existing bindings are reusable only when task, review, and generation all match; competing claims are denied without disclosing the current owner. Each accepted repeat claim adds only that launch's browser-capability hash to the existing binding (`apps/service/src/context/task-binding-registry.ts`). Browser heartbeats and status reads must present a capability hash already owned by that binding, so another task's later projection cannot borrow the first projection's scope (`apps/service/src/context/task-binding-registry.ts`). The packaged hook recognizes only the documented successful launcher command rather than inspecting transcript text or browser state (`apps/service/src/cli/hook-command.ts`).
+Keep the association exclusive. Existing bindings are reusable only when task, review, and generation all match; competing claims are denied without disclosing the current owner. Each accepted repeat claim adds only that launch's browser-capability hash to the existing binding (`apps/service/src/context/task-binding-registry.ts`). Browser heartbeats and status reads must present a capability hash already owned by that binding, so another task's later projection cannot borrow the first projection's scope (`apps/service/src/context/task-binding-registry.ts`). For launch claims, the packaged hook recognizes only the documented successful launcher command rather than inspecting transcript text or browser state; native display attestation is parsed separately from its genuine host event (`apps/service/src/cli/hook-command.ts`).
 
 This handshake was preceded by a compatibility gate proving that the packaged hook actually received the necessary launch and prompt events. That spike avoided building task correlation on assumed host behavior (session history).
 
@@ -58,6 +60,22 @@ This handshake was preceded by a compatibility gate proving that the packaged ho
 A hard browser refresh must resume the projection that completed the handshake, not reconstruct task ownership from the PDF path. The first authenticated bootstrap associates its credential with the original launch scope and creates a random readable view route. Reloading that route returns the same credential only when its view ID, pathname, scoped cookie, live session, document generation, and credential still match (`apps/service/src/sessions/session-broker.ts`). Scope polling then uses that credential's retained browser-capability discriminator, preserving the original task binding without exposing its task ID to the browser (`apps/service/src/sessions/session-broker.ts`).
 
 The credential continuity is intentionally process-local. A copied route without its cookie, an ended view, or a route answered by a successor daemon cannot recreate the credential or infer Codex scope. Post-restart recovery opens a fresh browser credential. It may reattach automatically on the owning task's next prompt only through a separate two-sided ticket: a path-scoped opaque browser token must match the same canonical source path and digest, and `UserPromptSubmit` must independently supply the exact task session ID. The ticket stores only hashes, expires, is consumed and rotated after success, and rejects foreign tasks. [Authority boundaries for reloadable local-review URLs](reloadable-local-review-url-authority-boundaries.md) defines the full live-resume versus successor-reopen contract.
+
+### Admit a native Codex panel through independent proofs
+
+Native Codex admission extends the same task-binding principle across two host events and a private app channel. The launcher claim establishes the task; the exact display receipt must be attested by a genuine host hook for that task; authenticated panel readiness is a separate fact. Neither receipt output nor a visible card proves that the other facts occurred. `attestDisplay` only records attestation, while pending promotion requires both readiness and attestation (`apps/service/src/codex/codex-runtime.ts:296`, `apps/service/src/codex/codex-runtime.ts:353`). The success hook deliberately says that readiness and current context still need separate verification (`apps/service/src/cli/hook-command.ts:454`).
+
+In the native investigation, assuming a fixed callback order made a host-scheduling problem look like a broken authority protocol. Merely delaying a hook or changing it to asynchronous execution did not establish that readiness had actually arrived first. The useful experiment kept the genuine trusted hook event and normal attestation path, observed private readiness, and recorded the order at the service. This is why both event orders must be proven with actual events rather than manufactured receipts (session history).
+
+Native readiness before attestation remains pending; attestation before readiness also remains pending. Only their conjunction can issue presentation authority. Wrong-task, replayed, revoked and old-generation events cannot borrow authority from another successful presentation (`apps/service/test/codex-runtime.test.ts:107`, `apps/service/test/codex-runtime.test.ts:155`). A real user prompt then establishes fresh model context independently of panel activation.
+
+### Preserve reopening intent without preserving native authority
+
+Restore/reexpand may retain an existing live shell or construct a new JavaScript instance. The observed behavior changed across host builds during qualification, so neither the control name nor a later successful build justifies treating an old invocation as fresh admission. Historical remount failures remain in the installed qualification record alongside later same-instance continuity (`docs/testing/codex-native.md:21`).
+
+After ordinary live participation ends, the advisory reconnect-hint flow requires the normal launch, trusted claim, display and readiness steps. A separate successor-daemon path can reattach an already reopened or recovered source using an actual restart ticket plus an independent trusted prompt from the owning task; a hint cannot substitute for either proof (`apps/service/src/codex/codex-runtime.ts:513`, `apps/service/src/codex/codex-runtime.ts:600`). A same-chat native reconnect hint only remembers where to request that fresh launch. It is recorded after valid presentation authority, expires independently, and does not reserve ownership. Another task's live ownership suppresses that guidance (`apps/service/src/context/task-binding-registry.ts:350`, `apps/service/src/context/task-binding-registry.ts:372`). Missing live binding can therefore return unavailable context with historical reopen guidance, never cached Review Items or current evidence (`apps/service/src/context/live-context-service.ts:327`). The hint is process-local convenience; durable accepted work and Protected Draft recovery have separate lifetimes.
+
+The failed alternative was to treat remembered document identity, a cached card, or an earlier successful display as enough to reconnect. Those facts explain user intent but cannot authenticate a new attempt. Keep prompt freshness, presentation liveness, durable work and reopening intent separate even when the user experiences them as one review.
 
 ### Refresh at prompt consumption
 
@@ -69,7 +87,7 @@ Publish one coherent observation. The service reads a session projection, inspec
 
 Separate refresh from delivery acknowledgement. Refresh retains its snapshot as a pending delivery but does not immediately replace the task's acknowledged baseline (`apps/service/src/context/live-context-service.ts`). The hook writes the context first and sends `ack-context` only afterward (`apps/service/src/cli/hook-command.ts`).
 
-If prompt output or acknowledgement fails, leaving the prior baseline in place is correct. The next prompt replays every change since the last acknowledged baseline—or a full observation when no baseline was acknowledged—instead of silently skipping work. An arbitrary caller-provided cursor cannot select the baseline: deltas use the server-owned acknowledged snapshot for the same review generation. A valid pending-delivery cursor may explicitly acknowledge that delivery on the next refresh (`apps/service/src/context/live-context-service.ts`). An unknown cursor cannot advance the acknowledged baseline; refresh remains based on the last acknowledged snapshot, or returns a full observation when none exists for this generation (`apps/service/src/context/live-context-service.ts`).
+If prompt output or acknowledgement fails, leaving the prior baseline in place is correct. The next prompt replays every change since the last acknowledged baseline—or a full observation when no baseline was acknowledged—instead of silently skipping work. An arbitrary caller-provided cursor cannot select the baseline: deltas use the server-owned acknowledged snapshot for the same review generation. A valid pending-delivery cursor may explicitly acknowledge that delivery on the next refresh (`apps/service/src/context/live-context-service.ts`). An unknown cursor cannot advance the acknowledged baseline; the service retains that baseline but returns a full observation marked `unknown-cursor`, even when an acknowledged snapshot exists (`apps/service/src/context/live-context-service.ts`).
 
 ### Diff semantic records explicitly
 
@@ -127,7 +145,7 @@ A one-shot file read is sufficient when input is immutable for the task, has no 
 
 ## Examples
 
-### Launch binding
+### Browser launch binding
 
 ```text
 agent task launches PDF
@@ -158,6 +176,8 @@ If writing fails, acknowledgement does not run (`apps/service/test/hook-contract
 The prompt carries currentness, document generation, revision, digest, Review Item counts, change mode, Save Sync, and an opaque handle. The agent can then page through canonical Review Items or request page-specific text and layout. Authorization fails when task binding, generation, observed digest, or expiry no longer match; an invalid or oversized retrieval is rejected for that request and may be retried within valid bounds (`apps/service/src/context/pdf-evidence-service.ts`).
 
 ## Related
+
+- [Native host qualification](../../testing/codex-native.md) records the actual event-ordering procedures and dated host behavior; the [U8 closeout](../../testing/codex-native-u8-qualification.md) preserves functional evidence and deferred measurement limits.
 
 - [Truthful compact status for live agent context](../design-patterns/truthful-compact-agent-context-status.md) covers the passive presentation of this freshness contract.
 - [Authority boundaries for reloadable local-review URLs](reloadable-local-review-url-authority-boundaries.md) explains why a live hard refresh may preserve this binding while a successor-daemon reopen may not.

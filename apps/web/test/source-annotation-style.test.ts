@@ -6,6 +6,19 @@ import { PDFDocument } from 'pdf-lib';
 import { fetchSourceAnnotationStyles, readSourceAnnotationStyles } from '../src/pdf/source-annotation-style.js';
 
 describe('source annotation reader styling', () => {
+  it('reads verified native buffer styling without fetching a Blob URL', async () => {
+    const pdf = await PDFDocument.create();
+    pdf.addPage();
+    const bytes = await pdf.save();
+    const fetch = vi.fn(() => { throw new Error('Connection denied'); });
+    vi.stubGlobal('fetch', fetch);
+    try {
+      const styles = await fetchSourceAnnotationStyles({ buffer: bytes.slice().buffer });
+      expect(styles.pageAnnotationCounts).toEqual([0]);
+      expect(bytes.byteLength).toBeGreaterThan(0);
+      expect(fetch).not.toHaveBeenCalled();
+    } finally { vi.unstubAllGlobals(); }
+  });
   it('uses reader defaults only where the PDF leaves styling unspecified', async () => {
     const pdf = await PDFDocument.create();
     const page = pdf.addPage();

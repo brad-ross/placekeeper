@@ -9,7 +9,10 @@ const control = [...typography, ...surface, 'minHeight', 'gap'];
 async function canonical(browser: Browser, baseURL: string | undefined, scene: string) {
   const page = await browser.newPage({ viewport: { width: 1400, height: 1050 } });
   await page.goto(`${baseURL}/docs/plans/assets/neutral-soft-design/index.html`);
-  const frame = page.frames().find((frame) => frame.url() === 'about:srcdoc')!;
+  // Chrome can report an empty URL for this sandboxed srcdoc frame.
+  const iframe = page.locator('iframe[title="Review"]');
+  await expect(iframe.contentFrame().locator('#pk-review-scene')).toBeVisible();
+  const frame = (await (await iframe.elementHandle())!.contentFrame())!;
   // Follow-up row refinements landed after the original approved scene.
   await frame.addStyleTag({ content: `
     #pk-canonical .pk-row { padding: 8px 8px 8px 12px !important; }
@@ -61,7 +64,9 @@ test('toolbar controls match canonical rest, hover, keyboard, and open-menu stat
     await match(copy, copyMock, control);
     for (const [owner, button] of [[page, copy], [mock.page, copyMock]] as const) {
       await button.focus(); await owner.keyboard.press('Tab'); await owner.keyboard.press('Shift+Tab');
-      await owner.mouse.move(0, 0);
+      // Moving outside the sandboxed frame can leave its hover state active.
+      if (owner === mock.page) await mock.frame.locator('#pk-review-scene').hover();
+      else await owner.mouse.move(0, 0);
     }
     await match(copy, copyMock, [...control, 'outlineWidth', 'outlineColor', 'outlineOffset']);
     const zoom = visible(page, '.review-chrome__zoom-disclosure');

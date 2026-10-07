@@ -1260,6 +1260,14 @@ test.describe('canonical review workflow', () => {
     expect(longTitleGeometry.truncated).toBe(true);
     // A 320px identity cap: 8px padding each side, the 16px icon, and a 7px gap.
     expect(longTitleGeometry.width).toBeLessThanOrEqual(281.5);
+    // Truncation must also constrain the grid track, not just the painted title.
+    const identityGap = await chrome.evaluate((element) => {
+      const identity = element.querySelector<HTMLElement>(':scope > .review-chrome__identity')!;
+      const children = [...identity.children].filter((child) => child.getClientRects().length > 0);
+      const contentRight = Math.max(...children.map((child) => child.getBoundingClientRect().right));
+      return identity.getBoundingClientRect().right - contentRight;
+    });
+    expect(identityGap).toBeLessThanOrEqual(1);
     const shortTitleGeometry = await longTitle.evaluate((element) => {
       element.textContent = 'A.pdf';
       return {

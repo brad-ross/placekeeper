@@ -135,3 +135,10 @@ globalThis.postMessage = (message, transfer) => {
 export function buildPackagedPdfiumWorkerSource(workerSource: string): string {
   return `${privilegeBootstrap}\n${workerSource}\n`;
 }
+
+/** Codex cannot fetch a blob WASM URL: initialize only from verified app-transferred bytes. */
+export function buildCodexPdfiumWorkerSource(workerSource: string): string {
+  const fetchBytes = 'const response = await fetch(wasmUrl);\n      const wasmBinary = await response.arrayBuffer();';
+  if (workerSource.split(fetchBytes).length !== 2) throw new Error('Pinned PDFium WASM initialization changed.');
+  return workerSource.replace(fetchBytes, 'const wasmBinary = event.data.wasmBinary;\n      if (!(wasmBinary instanceof ArrayBuffer)) throw new Error("Verified native WASM bytes are required");');
+}

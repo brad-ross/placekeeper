@@ -1,0 +1,75 @@
+{
+  "schemaVersion": 1,
+  "unit": "U4",
+  "status": "passed",
+  "qualifiedAt": "2026-10-05T19:57:13Z",
+  "scope": "Production native reader gate only; full U5\u2013U8 parity acceptance remains outstanding.",
+  "host": {
+    "surface": "Actual installed Codex native MCP app, expanded presentation",
+    "os": "macOS 26.7 (25G229)",
+    "previousU3RuntimeBuild": "12947",
+    "installedHostBundleObservedAfterQualification": {
+      "path": "/Applications/ChatGPT.app",
+      "version": "26.930.51102",
+      "build": "13100"
+    },
+    "versionCaveat": "The application bundle version is a filesystem observation; the running process build was not re-read during U4."
+  },
+  "artifact": {
+    "pluginVersion": "0.1.0+codex.20260813212014",
+    "daemonIdentity": "035cdef1c2add5c136acb8d45fd424b18e2a7bba32c424051a084dd3e60e4b88",
+    "installArtifactIdentity": "08a18650fb15d110aacddadc1cfd58a740d9657e2c85b284145a275e50f9089d",
+    "nativeHtmlSha256": "45576a874d746c57bc41c55429d75b816d1926d572a2c893bf3eda66ed8e08f8",
+    "sourceEquivalence": "After removing the test-only export, a write:false production build matched the installed native HTML byte-for-byte."
+  },
+  "actualHostChecks": [
+    {
+      "check": "Fresh installed launch, trusted display and actual production rendering",
+      "result": "passed",
+      "observation": "Fresh launch and one display followed by expansion. Production DOM ready with four pages; screenshot showed readable PDF text and yellow source highlight."
+    },
+    {
+      "check": "Decoded main document and source appearance images",
+      "result": "passed",
+      "observation": "All six observed data PNG images decoded. Main page 805\u00d71042; source appearance 195\u00d724; expanded viewport 910\u00d71362."
+    },
+    {
+      "check": "Reference preview and nested references",
+      "result": "passed",
+      "observation": "Primary-link preview decoded at 280\u00d7112. Reference reader displayed four pages, decoded page 625\u00d7809 and appearance 152\u00d719. Nested target opened page 3 in a second reference tab."
+    },
+    {
+      "check": "Search and result navigation",
+      "result": "passed",
+      "observation": "Searching primary found one exact result on page 2; selecting it navigated the main reader to page 2."
+    },
+    {
+      "check": "Text selection, clipboard, reading history and keyboard focus",
+      "result": "passed",
+      "evidenceKind": "User manual confirmation",
+      "observation": "User confirmed selecting words and Cmd+C, hovering to reveal Back and returning page 2 to page 1, and tabbing through controls all worked."
+    }
+  ],
+  "automatedChecks": {
+    "sharedReviewAndHostRegression": "32 files, 696 tests passed before later native image specialization.",
+    "packagingRegression": "3 files, 139 tests passed.",
+    "pdfConformance": "2 files, 44 tests passed.",
+    "nativeImageRegression": "7 files, 57 tests passed before removal of one internal-only assertion.",
+    "strictCspBrowser": "Actual shared main/reference components, packaged worker/WASM, source stamp appearance and destination snippet decoded; connect-src none and img-src self data with no Blob image allowance; no CSP violations.",
+    "typecheck": "Passed after native image specialization.",
+    "browserRegression": "Initial full run: 347 passed, 4 failed. After reviewed test corrections, all 4 original failures and 2 intermittent follow-up failures passed in a bounded 6-test root run. Thus all 351 distinct cases have passing evidence, not a single clean full-suite run.",
+    "finalCleanup": "Root strict-CSP browser case passed after private export cleanup: actual Normal and Multiply source-highlight containers preserve zIndex 0. Root typecheck and diff check passed."
+  },
+  "resolvedFailures": [
+    "Missing inline production CSS: package after CSS emission.",
+    "Host connect-src blocked Blob document fetch: pass verified PDF and WASM buffers to the existing engine.",
+    "Host img-src blocked Blob raster URLs: convert native page, source appearance and snippet images to data URLs with cancellation and disposal.",
+    "Expired panel after interrupted display: fresh installed launch/display established a new admitted presentation; old authority was not revived."
+  ],
+  "limits": [
+    "This is not complete AE1 or full U8 acceptance: annotation mutations, save/export dialogs, source actions and broad shortcut coverage remain later-unit work.",
+    "Panel context badge still showed unavailable despite trusted prompt context; U6 must resolve the shared UI context adapter.",
+    "Performance corpus and native/browser comparisons remain U8.",
+    "U3 correlation and lifecycle evidence remains separately recorded."
+  ]
+}

@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { existsSync, realpathSync } from 'node:fs';
-import { open } from 'node:fs/promises';
+import { open, readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -48,7 +48,7 @@ export async function promptFromTerminal(host) {
   } finally { await terminal.close(); }
 }
 
-export async function setupCodex({ appPath, codexPath, run = execute }) {
+export async function setupCodex({ appPath, codexPath, run = execute, read = readFile }) {
   const marketplace = resolve(appPath, 'Contents/Resources/integrations');
   const guidance = (installed) => [
     'Finish setup in Codex:',
@@ -62,12 +62,17 @@ export async function setupCodex({ appPath, codexPath, run = execute }) {
       '  3. Find codex-plugin in placekeeper-installed and choose Install.',
     ]),
     `  ${installed ? 3 : 4}. Review any trust or permission prompt, then enable the plugin if you approve.`,
-    `  ${installed ? 4 : 5}. Start a new task and ask Codex to open a local PDF with Placekeeper.`,
+    `  ${installed ? 4 : 5}. Fully quit and restart Codex, then start a new task and ask it to open a local PDF with $placekeeper.`,
+    '  Confirm the Placekeeper skill and mcp__placekeeper__display_review tool are available; opening and fresh prompt context require trusted hooks too.',
+    '  If the skill is old or the tool is missing, update or reinstall codex-plugin from placekeeper-installed in Codex, review trust and enablement, then fully quit and restart again.',
     '  If local marketplace controls are unavailable, update Codex and rerun the installer.',
   ].join('\n');
   const pending = (message, installed = false) => ({ status: 'pending', path: marketplace, message: `${message}\n${guidance(installed)}` });
   codexPath ??= [
     ...(process.env.PLACEKEEPER_HOST_PATH ?? process.env.PATH ?? '').split(':').filter(Boolean).map((directory) => resolve(directory, 'codex')),
+    resolve(homedir(), 'Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex'),
+    '/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex',
+    '/Applications/Codex.app/Contents/Resources/codex-cli/bin/codex',
     resolve(homedir(), 'Applications/ChatGPT.app/Contents/Resources/codex'),
     '/Applications/ChatGPT.app/Contents/Resources/codex',
     '/Applications/Codex.app/Contents/Resources/codex',
@@ -94,13 +99,19 @@ export async function setupCodex({ appPath, codexPath, run = execute }) {
   if (previous && previous.enabled !== true) {
     return pending('The existing Codex plugin is disabled or its enablement is unknown; its state was preserved. To refresh it, update or reinstall it in Codex and choose enablement explicitly.', true);
   }
+  const manifest = JSON.parse(await read(resolve(marketplace, 'codex-plugin/.codex-plugin/plugin.json'), 'utf8'));
+  if (typeof manifest.version !== 'string' || !manifest.version) throw new Error('Packaged Codex plugin has no version');
   await run(codexPath, ['plugin', 'marketplace', 'add', marketplace, '--json']);
   await run(codexPath, ['plugin', 'add', `codex-plugin@${marketplaceName}`, '--json']);
   const plugins = JSON.parse((await run(codexPath, ['plugin', 'list', '--marketplace', marketplaceName, '--json'])).stdout);
   if (!Array.isArray(plugins.installed) || !plugins.installed.some((plugin) => plugin.pluginId === `codex-plugin@${marketplaceName}` && plugin.installed === true)) {
     throw new Error('Codex did not confirm the plugin payload after installation');
   }
-  return pending('Codex plugin payload installed. Finish trust and enablement in Codex.', true);
+  const installedPlugin = plugins.installed.find((plugin) => plugin.pluginId === `codex-plugin@${marketplaceName}` && plugin.installed === true);
+  if (installedPlugin.version !== manifest.version) {
+    return pending(`Codex reports a different plugin version than the packaged ${manifest.version}; update or reinstall codex-plugin in Codex. Current skill/tool discovery and hook trust are not verified.`, true);
+  }
+  return pending(`Codex reports plugin payload ${manifest.version} installed. Skill/tool discovery, trust, enablement, and reload still need verification in Codex.`, true);
 }
 
 export async function setupHost({ appPath, host, run = execute }) {

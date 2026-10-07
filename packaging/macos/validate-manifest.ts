@@ -628,22 +628,30 @@ export function validateAppBundleManifest(value: unknown): AppBundleManifest {
 export const CODEX_SKILL_NAME = "placekeeper";
 
 const CODEX_HOOK_SPECS = {
-  PostToolUse: {
-    timeout: 8,
-    additionalContextLimit: 131072,
-    statusMessage: "Connecting Placekeeper context",
-    matcher: "^Bash$",
-  },
-  UserPromptSubmit: {
+  PostToolUse: [
+    {
+      timeout: 8,
+      additionalContextLimit: 131072,
+      statusMessage: "Connecting Placekeeper context",
+      matcher: "^Bash$",
+    },
+    {
+      timeout: 55,
+      additionalContextLimit: 131072,
+      statusMessage: "Verifying Placekeeper native presentation",
+      matcher: "^mcp__placekeeper__display_review$",
+    },
+  ],
+  UserPromptSubmit: [{
     timeout: 8,
     additionalContextLimit: 131072,
     statusMessage: "Refreshing Placekeeper context",
-  },
-  SessionEnd: {
+  }],
+  SessionEnd: [{
     timeout: 3,
     additionalContextLimit: 256,
     statusMessage: "Disconnecting Placekeeper context",
-  },
+  }],
 } as const;
 type CodexHookEvent = keyof typeof CODEX_HOOK_SPECS;
 
@@ -697,6 +705,7 @@ async function requiredSkill(pluginRoot: string): Promise<string> {
 }
 
 function validatePluginIdentity(pluginManifest: Record<string, unknown>): void {
+  if (pluginManifest.mcpServers !== "./.mcp.json") throw new Error("The Codex plugin must register its native MCP transport");
   if (pluginManifest.skills !== "./skills/") throw new Error("The Codex plugin must expose its installed skill directory");
   const pluginAuthor = record(pluginManifest.author, "Codex plugin author");
   const pluginInterface = record(pluginManifest.interface, "Codex plugin interface");
@@ -731,37 +740,39 @@ function validateHookContract(hookManifest: Record<string, unknown>): void {
   }
   for (const event of Object.keys(CODEX_HOOK_SPECS) as CodexHookEvent[]) {
     const declarations = hooksRoot[event];
-    if (!Array.isArray(declarations) || declarations.length !== 1) {
-      throw new Error(`The packaged Codex plugin must declare exactly one ${event} hook`);
+    const expectedDeclarations = CODEX_HOOK_SPECS[event];
+    if (!Array.isArray(declarations) || declarations.length !== expectedDeclarations.length) {
+      throw new Error(`The packaged Codex plugin must declare exactly ${expectedDeclarations.length} ${event} hooks`);
     }
 
-    const declaration = record(declarations[0], `${event} hook declaration`);
-    const expected = CODEX_HOOK_SPECS[event];
-    const expectedMatcher = "matcher" in expected
-      ? expected.matcher
-      : undefined;
-    if (declaration.matcher !== expectedMatcher) {
-      throw new Error(`The packaged ${event} hook matcher changed`);
-    }
-    if (!Array.isArray(declaration.hooks) || declaration.hooks.length !== 1) {
-      throw new Error(`The packaged Codex plugin must declare exactly one ${event} handler`);
-    }
-    const handler = record(declaration.hooks[0], `${event} hook handler`);
-    const expectedCommand = `${CODEX_INSTALLED_LAUNCHER_COMMAND} hook --event`;
-    if (handler.type !== "command" || handler.command !== expectedCommand) {
-      throw new Error(`The packaged ${event} hook must use the canonical installed launcher command`);
-    }
-    if (
-      handler.timeout !== expected.timeout ||
-      handler.additionalContextLimit !== expected.additionalContextLimit ||
-      handler.statusMessage !== expected.statusMessage
-    ) {
-      throw new Error(`The packaged ${event} hook timeout, context limit, or status changed`);
-    }
-    if (event !== "SessionEnd" && expected.timeout <= CONTROL_REQUEST_TIMEOUT_SECONDS) {
-      throw new Error(
-        `The packaged ${event} hook timeout must exceed the ${CONTROL_REQUEST_TIMEOUT_SECONDS}-second control client timeout`,
-      );
+    for (const [index, expected] of expectedDeclarations.entries()) {
+      const declaration = record(declarations[index], `${event} hook declaration`);
+      const expectedMatcher = "matcher" in expected
+        ? expected.matcher
+        : undefined;
+      if (declaration.matcher !== expectedMatcher) {
+        throw new Error(`The packaged ${event} hook matcher changed`);
+      }
+      if (!Array.isArray(declaration.hooks) || declaration.hooks.length !== 1) {
+        throw new Error(`The packaged Codex plugin must declare exactly one ${event} handler`);
+      }
+      const handler = record(declaration.hooks[0], `${event} hook handler`);
+      const expectedCommand = `${CODEX_INSTALLED_LAUNCHER_COMMAND} hook --event`;
+      if (handler.type !== "command" || handler.command !== expectedCommand) {
+        throw new Error(`The packaged ${event} hook must use the canonical installed launcher command`);
+      }
+      if (
+        handler.timeout !== expected.timeout ||
+        handler.additionalContextLimit !== expected.additionalContextLimit ||
+        handler.statusMessage !== expected.statusMessage
+      ) {
+        throw new Error(`The packaged ${event} hook timeout, context limit, or status changed`);
+      }
+      if (event !== "SessionEnd" && expected.timeout <= CONTROL_REQUEST_TIMEOUT_SECONDS) {
+        throw new Error(
+          `The packaged ${event} hook timeout must exceed the ${CONTROL_REQUEST_TIMEOUT_SECONDS}-second control client timeout`,
+        );
+      }
     }
   }
 }
@@ -779,7 +790,7 @@ async function validateSkillContract(pluginRoot: string): Promise<void> {
   }));
   const canonicalContract = [entrypoint, ...referenceContents].join("\n");
   const requiredContractFragments = [
-    `${CODEX_INSTALLED_LAUNCHER_COMMAND} open --json --surface codex --pdf <absolute-local-pdf-path>`,
+    `${CODEX_INSTALLED_LAUNCHER_COMMAND} open --json --surface codex-native --pdf <absolute-local-pdf-path>`,
     "recovery-offered",
     "placekeeper-live-context",
     "context items --handle",
@@ -793,7 +804,10 @@ async function validateSkillContract(pluginRoot: string): Promise<void> {
     "context source rebuild-verify --handle",
     "context source complete --handle",
     "A failed refresh blocks completion.",
-    "Do not print, summarize, save, or copy the capability URL elsewhere.",
+    "Do not print, summarize, save, or copy the handoff, bind proof, or any private capability elsewhere.",
+    "mcp__placekeeper__display_review",
+    "trusted display",
+    "Do not claim successful native activation or current context",
     "Do not bypass ordinary permission prompts",
     "Do not submit, create, or monitor another Codex task.",
   ];
@@ -837,6 +851,12 @@ export async function validateCodexPlugin(pluginRoot: string): Promise<void> {
   }
   validatePluginIdentity(record(JSON.parse(pluginSource) as unknown, "Codex plugin manifest"));
   validateHookContract(record(JSON.parse(hookSource) as unknown, "Codex hook manifest"));
+  const mcp = record(JSON.parse(await readFile(resolve(pluginRoot, ".mcp.json"), "utf8")), "Codex MCP configuration");
+  const servers = record(mcp.mcpServers, "Codex MCP servers");
+  const native = record(servers.placekeeper, "Placekeeper native MCP server");
+  if (Object.keys(servers).join() !== "placekeeper" || native.command !== "/bin/sh" || JSON.stringify(native.args) !== JSON.stringify(["-c", 'exec /bin/sh "$HOME/Applications/Placekeeper.app/Contents/Resources/integrations/codex-plugin/scripts/mcp.sh"']) || Object.keys(native).sort().join() !== "args,command") throw new Error("The native MCP registration must use the packaged local adapter");
+  const script = await readFile(resolve(pluginRoot, "scripts/mcp.sh"), "utf8");
+  if (!script.includes('exec "$node" "$server"') || !script.includes("Contents/Resources/codex-mcp/server.js") || !script.includes("Contents/Resources/node/bin/node")) throw new Error("The native MCP entry must use installed bundled assets");
   await Promise.all([
     validateSkillContract(pluginRoot),
     validateAgentMetadata(pluginRoot),
@@ -898,11 +918,12 @@ interface DistributionValidationOptions {
 }
 
 export interface SharedWebAssetManifest {
-  readonly schemaVersion: 3;
+  readonly schemaVersion: 4;
   readonly app: string;
   readonly stylesheet: string;
   readonly pdfiumWasm: string;
   readonly pdfiumWorker: string;
+  readonly pdfiumCodexWorker: string;
   readonly integrity: Readonly<Record<string, string>>;
 }
 
@@ -918,15 +939,16 @@ export async function validateSharedWebDistribution(webRoot: string): Promise<Sh
   try { value = JSON.parse(manifestSource) as unknown; }
   catch { throw new Error("The shared web asset-manifest.json is invalid JSON"); }
   const manifest = record(value, "Shared web asset manifest");
-  const exactManifestKeys = ["app", "integrity", "pdfiumWasm", "pdfiumWorker", "schemaVersion", "stylesheet"];
-  if (Object.keys(manifest).sort().join("\n") !== exactManifestKeys.join("\n") || manifest.schemaVersion !== 3) {
+  const exactManifestKeys = ["app", "integrity", "pdfiumCodexWorker", "pdfiumWasm", "pdfiumWorker", "schemaVersion", "stylesheet"];
+  if (Object.keys(manifest).sort().join("\n") !== exactManifestKeys.join("\n") || manifest.schemaVersion !== 4) {
     throw new Error("The shared web asset manifest has an unsupported shape");
   }
   const app = boundedString(manifest.app, "Shared web app asset");
   const stylesheet = boundedString(manifest.stylesheet, "Shared web stylesheet asset");
   const pdfiumWasm = boundedString(manifest.pdfiumWasm, "Shared web PDFium asset");
   const pdfiumWorker = boundedString(manifest.pdfiumWorker, "Shared web PDFium worker asset");
-  const assets = [app, stylesheet, pdfiumWasm, pdfiumWorker];
+  const pdfiumCodexWorker = boundedString(manifest.pdfiumCodexWorker, "Shared web Codex PDFium worker asset");
+  const assets = [app, stylesheet, pdfiumWasm, pdfiumWorker, pdfiumCodexWorker];
   if (assets.some((name) => !/^[A-Za-z0-9._-]+$/u.test(name))) {
     throw new Error("Shared web assets must be local filenames");
   }
@@ -958,12 +980,18 @@ export async function validateSharedWebDistribution(webRoot: string): Promise<Sh
     !workerSource.includes('type === "wasmInit"')) {
     throw new Error(`The packaged PDFium worker contract is invalid: ${pdfiumWorker}`);
   }
+  const codexWorkerSource = bytes.get(pdfiumCodexWorker)!.toString("utf8");
+  if (!codexWorkerSource.includes("class PdfiumEngineRunner") || !codexWorkerSource.includes('type === "wasmInit"') ||
+    !codexWorkerSource.includes("const wasmBinary = event.data.wasmBinary;") || codexWorkerSource.includes("await fetch(wasmUrl)")) {
+    throw new Error(`The packaged Codex PDFium worker contract is invalid: ${pdfiumCodexWorker}`);
+  }
   return {
-    schemaVersion: 3,
+    schemaVersion: 4,
     app,
     stylesheet,
     pdfiumWasm,
     pdfiumWorker,
+    pdfiumCodexWorker,
     integrity: Object.freeze({ ...integrity }) as Readonly<Record<string, string>>,
   };
 }
