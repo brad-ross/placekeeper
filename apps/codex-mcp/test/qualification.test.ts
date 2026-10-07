@@ -65,12 +65,12 @@ afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); vi.doUnmock("@model
 async function qualificationShellFixture(withControl: boolean, action: "bridge-close" | "request-teardown" = "bridge-close", oldControl = false, realRuntime = false) {
   vi.resetModules(); vi.useFakeTimers({ now: new Date("2026-10-02T12:00:00.000Z") });
   class Element {
-    textContent = ""; removed = false; disabled = true; onclick: (() => void | Promise<void>) | undefined;
+    textContent = ""; hidden = false; removed = false; disabled = true; onclick: (() => void | Promise<void>) | undefined;
     before() {} setAttribute() {} remove() { this.removed = true; }
   }
-  const status = new Element(), detail = new Element(), renewal = new Element(), expand = new Element(), restore = new Element(), closeReview = new Element(), root = new Element();
+  const status = new Element(), detail = new Element(), renewal = new Element(), root = new Element();
   const created: { tag: string; element: Element }[] = [];
-  vi.stubGlobal("document", { hidden: false, querySelector: (selector: string) => ({ "#status": status, "#detail": detail, "#renewal": renewal, "#expand": expand, "#restore": restore, "#close": closeReview, "#root": root } as Record<string, Element>)[selector], createElement: (tag: string) => { const element = new Element(); created.push({ tag, element }); return element; } });
+  vi.stubGlobal("document", { hidden: false, querySelector: (selector: string) => ({ "#status": status, "#detail": detail, "#renewal": renewal, "#root": root } as Record<string, Element>)[selector], createElement: (tag: string) => { const element = new Element(); created.push({ tag, element }); return element; } });
   vi.stubGlobal("window", {});
   const clear = vi.fn();
   const runtimeDispose = vi.fn();
@@ -123,7 +123,7 @@ async function qualificationShellFixture(withControl: boolean, action: "bridge-c
   await import("../src/shell.js");
   app.ontoolresult!({ structuredContent: { protocolVersion: 1, status: "pending", receiptId: "receipt-1", attemptId: "attempt-1", generation: 1 }, _meta: { "placekeeper/pending": { protocolVersion: 1, runtimeId: fixtureRuntimeId, attemptId: "attempt-1", generation: 1, receiptId: "receipt-1", pendingCapability: "p".repeat(43) }, "placekeeper/qualification": { runId: own.runId, invocationNonce: own.invocationNonce, expiresAt: new Date(Date.now() + 60_000).toISOString() } } });
   await vi.advanceTimersByTimeAsync(0);
-  return { app, calls, created, status, detail, renewal, root, clear, mount, runtimeDispose, port, closeReview };
+  return { app, calls, created, status, detail, renewal, root, clear, mount, runtimeDispose, port };
 }
 it("normal shell has no qualification button and continues ordinary renewal without a descriptor grant", async () => {
   const f = await qualificationShellFixture(false);
@@ -137,12 +137,12 @@ it("the actual shell bridge button clears current UI and stops renew/poll before
   const f = await qualificationShellFixture(true), button = f.created.find(item => item.tag === "button")!.element;
   expect(f.app.close).not.toHaveBeenCalled(); expect(f.root.textContent).not.toBe("");
   await button.onclick!(); expect(f.app.close).toHaveBeenCalledOnce(); expect(f.detail.textContent).toBe(""); expect(f.root.textContent).toBe(""); expect(f.clear).toHaveBeenCalled(); expect(f.runtimeDispose).toHaveBeenCalledOnce(); expect(f.calls).not.toContain("detach");
-  const count = f.calls.length; await vi.advanceTimersByTimeAsync(10_000); expect(f.calls).toHaveLength(count); expect(f.status.textContent).toContain("this panel bridge was closed"); expect(f.renewal.textContent).toBe("Authenticated panel renewal stopped.");
+  const count = f.calls.length; await vi.advanceTimersByTimeAsync(10_000); expect(f.calls).toHaveLength(count); expect(f.status.textContent).toContain("this panel bridge was closed"); expect(f.status.hidden).toBe(false); expect(f.renewal.textContent).toBe("Authenticated panel renewal stopped.");
   expect(f.created.filter(item => item.tag === "pre").map(item => item.element.textContent).join(" ")).not.toMatch(/presentationCapability|pendingCapability|reconnectTicket|pppppppp/);
 });
 it("an expired actual shell grant removes its button and cannot close the bridge", async () => {
   const f = await qualificationShellFixture(true), button = f.created.find(item => item.tag === "button")!.element;
-  await vi.advanceTimersByTimeAsync(1001); expect(button.removed).toBe(true); await button.onclick!(); expect(f.app.close).not.toHaveBeenCalled(); expect(f.status.textContent).toContain("review ready");
+  await vi.advanceTimersByTimeAsync(1001); expect(button.removed).toBe(true); await button.onclick!(); expect(f.app.close).not.toHaveBeenCalled(); expect(f.status.hidden).toBe(true);
 });
 
 it("the actual shell teardown button only requests the host; normal host teardown detaches its own presentation", async () => {
@@ -372,42 +372,7 @@ it('U8 CLI binds its inherited transport gate to the exact report digest and sti
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
 
-it("normal Close review retires local authority before its authenticated detach completes", async () => {
-  const f = await qualificationShellFixture(false);
-  const gate = Promise.withResolvers<{ content: never[]; _meta: Record<string, unknown> }>();
-  f.app.callServerTool.mockImplementationOnce(() => gate.promise);
-  expect(f.closeReview.disabled).toBe(false);
-  const closing = f.closeReview.onclick!();
-  expect(f.root.textContent).toBe(""); expect(f.runtimeDispose).toHaveBeenCalledOnce();
-  expect(f.closeReview.disabled).toBe(true);
-  const call = f.app.callServerTool.mock.calls.at(-1)![0];
-  expect(call.arguments.request).toMatchObject({ method: "detach", runtimeId: "runtime-1", attemptId: "attempt-1", authority: "presentation", generation: 1, capability: "p".repeat(43) });
-  const count = f.app.callServerTool.mock.calls.length;
-  await vi.advanceTimersByTimeAsync(10_000);
-  expect(f.app.callServerTool).toHaveBeenCalledTimes(count);
-  gate.resolve({ content: [], _meta: { "placekeeper/response": { status: "ok", payload: {} } } });
-  await closing; expect(f.status.textContent).toContain("Review closed.");
-  expect(f.app.close).not.toHaveBeenCalled(); expect(f.app.requestTeardown).not.toHaveBeenCalled();
-});
-it("normal Close review reports unconfirmed detach truthfully and never resumes renewal", async () => {
-  const f = await qualificationShellFixture(false);
-  f.app.callServerTool.mockRejectedValueOnce(new Error("transport failure"));
-  await f.closeReview.onclick!();
-  expect(f.status.textContent).toContain("service closure could not be confirmed");
-  const count = f.app.callServerTool.mock.calls.length; await vi.advanceTimersByTimeAsync(30_000);
-  expect(f.app.callServerTool).toHaveBeenCalledTimes(count); expect(f.root.textContent).toBe("");
-});
-
-it("normal Close discards an old-attempt grant and gives normal reopen wording on reused invocation", async () => {
-  const f = await qualificationShellFixture(true, "bridge-close", true);
-  const oldButton = f.created.find(item => item.tag === "button")!.element;
-  await f.closeReview.onclick!(); expect(oldButton.removed).toBe(true);
-  const count = f.app.callServerTool.mock.calls.length; f.app.ontoolresult!({});
-  expect(f.status.textContent).toContain("Review closed. Reopen Placekeeper");
-  expect(f.status.textContent).not.toContain("Qualification"); expect(f.app.callServerTool).toHaveBeenCalledTimes(count);
-});
-
-it.each(["renew", "watermark"])("late normal %s success after Close cannot restore UI, authority, grants or scheduling", async (method) => {
+it.each(["renew", "watermark"])("late normal %s success after bridge disconnect cannot restore UI, authority, grants or scheduling", async (method) => {
   const f = await qualificationShellFixture(false);
   const gate = Promise.withResolvers<{ content: never[]; _meta: Record<string, unknown> }>();
   const reached = vi.fn();
@@ -418,7 +383,7 @@ it.each(["renew", "watermark"])("late normal %s success after Close cannot resto
   });
   await vi.advanceTimersByTimeAsync(method === "renew" ? 5_000 : 1_000);
   expect(reached).toHaveBeenCalledOnce();
-  await f.closeReview.onclick!();
+  f.app.onclose!();
   const closed = f.status.textContent;
   const calls = f.app.callServerTool.mock.calls.length;
   gate.resolve({ content: [], _meta: {
@@ -431,7 +396,7 @@ it.each(["renew", "watermark"])("late normal %s success after Close cannot resto
   expect(f.status.textContent).toBe(closed);
   expect(f.created.filter(item => item.tag === "button")).toHaveLength(0);
   await vi.advanceTimersByTimeAsync(30_000);
-  expect(f.root.textContent).toBe(""); expect(f.closeReview.disabled).toBe(true);
+  expect(f.root.textContent).toBe("");
   expect(f.status.textContent).toBe(closed); expect(f.mount).toHaveBeenCalledOnce();
   expect(f.runtimeDispose).toHaveBeenCalledOnce();
   expect(f.created.filter(item => item.tag === "button")).toHaveLength(0);
@@ -441,7 +406,7 @@ it.each(["renew", "watermark"])("late normal %s success after Close cannot resto
 });
 
 import { createReviewState } from "../../../packages/core/src/review-model.js";
-it("normal Close owns the sole detach when real Codex runtime presence cleans up during unmount", async () => {
+it("host teardown owns the sole detach when real Codex runtime presence cleans up during unmount", async () => {
   const f = await qualificationShellFixture(false, "bridge-close", false, true);
   await vi.waitFor(() => expect(f.calls).toContain("presence"));
   let detached = false;
@@ -451,10 +416,9 @@ it("normal Close owns the sole detach when real Codex runtime presence cleans up
     const response = detached ? { status: "denied", reason: "revoked" } : { status: "ok", payload: {} }; detached = true;
     return { content: [], _meta: { "placekeeper/response": response } };
   });
-  await f.closeReview.onclick!();
+  await f.app.onteardown!();
   expect(f.app.callServerTool.mock.calls.filter(([input]) => input.arguments.request.method === "detach")).toHaveLength(1);
-  expect(f.status.textContent).toContain("Review closed.");
-  expect(f.root.textContent).toBe(""); expect(f.closeReview.disabled).toBe(true);
+  expect(f.root.textContent).toBe("");
   const count = f.app.callServerTool.mock.calls.length; await vi.advanceTimersByTimeAsync(30_000);
   expect(f.app.callServerTool).toHaveBeenCalledTimes(count);
   await expect(f.port.call("bootstrap", {})).rejects.toThrow("No native presentation");
@@ -478,19 +442,19 @@ it("applies bounded SDK picker deadlines and propagates only closed export confl
     "placekeeper/qualification-controls": { ...grant, target: { ...grant.target, runtimeId: f.port.runtimeId } },
   } });
   await expect(f.port.call("exportReviewedCopy", { fence: { expectedRevision: 0, documentGeneration: 1 } })).rejects.toMatchObject({ name: "NativeOperationError", reason: "export-conflict" });
-  expect(f.status.textContent).toContain("review ready");
+  expect(f.status.hidden).toBe(true);
   expect(f.created.filter(item => item.tag === "button")).toHaveLength(0);
 });
 
-it("a picker SDK response after normal Close cannot resurrect authority", async () => {
+it("a picker SDK response after bridge disconnect cannot resurrect authority", async () => {
   const f = await qualificationShellFixture(false);
   const reply = Promise.withResolvers<Awaited<ReturnType<typeof f.app.callServerTool>>>();
   f.app.callServerTool.mockImplementationOnce(() => reply.promise);
   const pending = f.port.call("chooseFolder", {}).catch(error => error);
-  await f.closeReview.onclick!();
+  f.app.onclose!();
   const closed = f.status.textContent;
   reply.resolve({ content: [], _meta: { "placekeeper/response": { status: "ok", payload: { cancelled: false, selectionId: "late_picker_1234" } } } });
   expect(await pending).toMatchObject({ category: "stale-reply" });
-  expect(f.status.textContent).toBe(closed); expect(f.closeReview.disabled).toBe(true);
+  expect(f.status.textContent).toBe(closed);
   await expect(f.port.call("bootstrap", {})).rejects.toThrow("No native presentation");
 });
