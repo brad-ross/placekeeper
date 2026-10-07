@@ -18,7 +18,7 @@ import { createServiceClient, type NativeServiceClient } from "./service-client.
 import { APP_TOOL, PENDING_META_KEY, RESPONSE_META_KEY, QUALIFICATION_META_KEY } from "./transport-contract.js";
 const unavailable = (): CallToolResult => ({ isError: true, content: [{ type: "text", text: "Placekeeper native integration is unavailable. Check that the installed app and plugin versions match, enable the plugin MCP server and hooks, reload Codex, then reopen the PDF." }] });
 export const nativeTools: Tool[] = [
-  { name: "display_review", description: "Open the native Placekeeper panel for an installed launch handoff. Returns pending display correlation only; trusted hooks establish chat authority.", inputSchema: { type: "object", additionalProperties: false, required: ["handoff"], properties: { handoff: { type: "string", pattern: "^[A-Za-z0-9_-]{43}$" } } }, _meta: { ui: { resourceUri: CODEX_REVIEW_UI_RESOURCE, visibility: ["model"] } } },
+  { name: "display_review", description: "Open a PDF in Placekeeper.", inputSchema: { type: "object", additionalProperties: false, required: ["handoff"], properties: { handoff: { type: "string", pattern: "^[A-Za-z0-9_-]{43}$" } } }, _meta: { ui: { resourceUri: CODEX_REVIEW_UI_RESOURCE, visibility: ["model"] } } },
   { name: APP_TOOL, description: "Private native panel protocol. No independent document or task selection.", inputSchema: { type: "object", additionalProperties: false, required: ["request"], properties: { request: { type: "object" } } }, _meta: { ui: { visibility: ["app"] } } },
 ];
 export interface NativeQualificationDependencies {
