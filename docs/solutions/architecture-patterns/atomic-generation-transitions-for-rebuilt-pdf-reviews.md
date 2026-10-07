@@ -1,7 +1,7 @@
 ---
 title: Atomic generation transitions for local PDF replacement
 date: 2026-09-02
-last_updated: 2026-09-18
+last_updated: 2026-10-06
 category: architecture-patterns
 module: Automatic local PDF replacement lifecycle
 problem_type: architecture_pattern
@@ -43,6 +43,16 @@ Observe the owned local PDF through the service's `LocalDocumentObserver`. Its p
 
 A source save can mark generated output possibly stale without proving that a successor PDF exists. A file event, same-path replacement, or reconnect must lead to validation rather than a blind viewer reload. The broker rechecks the observation epoch and current source bytes under its serialized session tail before committing (`apps/service/src/sessions/session-broker.ts:2473`).
 
+### Preserve inspection progress without trusting metadata as content
+
+Ordering every timer wakeup as a newer candidate can starve an inspection that takes longer than the timer interval. The same mistake can let notifications caused by reading a file revoke the very explicit replacement being inspected. The prevention rule is narrower than ignoring repeated events: separate immediate save protection from authority to supersede useful inspection.
+
+When an explicit candidate is active, a matching-file watcher notification immediately admits a physical-save barrier, then waits for the candidate's initial identity and compares device, inode, byte length, and modification time. An unchanged identity settles that notification without advancing authoritative observation order; changed identity can supersede it. Anonymous directory noise takes the cheap identity-check path (`apps/service/src/sessions/local-document-observer.ts:290`, `apps/service/src/sessions/local-document-observer.ts:312`). This fast path is scoped to the active explicit candidate; it is not permission to suppress all future notifications sharing old metadata.
+
+Timer wakeups likewise wait for the in-flight candidate's identity read. If identity remains unchanged, they preserve its sequence instead of revoking it. A full audit requested during inspection remains deferred; a queued full audit must not be downgraded to an identity-only check. After inspection, deferred dispatch rechecks sequence ownership and the absence of a newer explicit candidate before ordering its audit (`apps/service/src/sessions/local-document-observer.ts:347`, `apps/service/src/sessions/local-document-observer.ts:512`).
+
+Keep the full audit: matching metadata does not prove identical bytes. The identity shortcut applies only to identity observations with no unvalidated watcher; audits still reach full inspection, and unreadable candidates retain bounded retry (`apps/service/src/sessions/local-document-observer.ts:475`). Tests cover slow inspection across unchanged wakeups, a delayed initial identity read, an unchanged shortcut followed by full audit, and a stale deferred audit racing a genuine successor (`apps/service/test/local-document-observer.test.ts:414`). A test that checks only the final generation misses a loop that continually discards useful work.
+
 ### Validate a stable private copy
 
 Prove that one complete regular file was observed. Candidate staging rejects symlinks, non-files, empty files, and files beyond the generation limit; captures device, inode, size, and modification time; opens without following symlinks; and compares file identity around the complete read (`apps/service/src/recovery/source-snapshot.ts`). It rejects partial reads, hashes the copied bytes, and writes and syncs them in a private generation directory before interpretation (`apps/service/src/recovery/source-snapshot.ts`).
@@ -82,6 +92,8 @@ For a new digest, start the new review generation before publishing anything. Ge
 Run Rebuild Reconciliation against the inspected successor. Preserve Review Item identity and semantic payload, but update anchor evidence only for one unique semantic match. Ambiguous, missing, and unsupported anchors retain predecessor evidence and explicit unresolved dispositions (`apps/service/src/reconciliation/pdf-anchor-reconciler.ts`). Geometry alone must never silently retarget an item.
 
 Within one broker-owned transition, commit the private PDF snapshot and persist source ownership, reconciled review state, reset Save Sync, lineage, latest epoch, and any source-work interruption before changing in-memory indexes or notifying clients (`apps/service/src/sessions/session-broker.ts`). Durable snapshot persistence writes and syncs a temporary state, rotates the prior snapshot, atomically renames the replacement, and syncs the directory (`apps/service/src/recovery/draft-snapshot.ts`). Recovery can therefore choose a complete current or previous state rather than a mixture (`apps/service/src/recovery/draft-snapshot.ts`).
+
+A recovered edit must also retain its semantic target while the user supplies a new anchor. Reattachment keeps the existing draft ID and its `targetItemId`; changing only geometry must not convert an edit of an existing annotation into creation of another one (`apps/web/src/review/ReconciliationWorkspace.tsx:699`). The reducer distinguishes targeted edits from untargeted creation and requires the draft to be resolved in the current generation before Apply (`packages/core/src/review-reducer.ts:250`). The mounted reattachment regression exercises both cases; preserve that distinction even when draft ownership moves to a fresh editor (`test/acceptance/codex-native-lifecycle.spec.ts:150`).
 
 ### Publish a wake-up, then rebootstrap canonical state
 
@@ -143,4 +155,4 @@ The recovery test injects failure before the final durable-state rename and obse
 - [Reject stale viewer selection snapshots before creating annotation anchors](../ui-bugs/reject-stale-viewer-selection-snapshots.md)
 - [PR #68: Fully embedded VS Code LaTeX review](https://github.com/brad-ross/placekeeper/pull/68)
 
-- [PR #117: Automatic local PDF refresh](https://github.com/brad-ross/placekeeper/pull/117) — implementation and follow-up fixes; open at documentation time, 2026-09-18.
+- [PR #117: Automatic local PDF refresh](https://github.com/brad-ross/placekeeper/pull/117) — earlier implementation and follow-up fixes; subsequent native-host work extends the observer safeguards described above.
