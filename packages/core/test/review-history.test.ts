@@ -86,6 +86,31 @@ describe('compact review history', () => {
     expect(appendReviewHistory([], 0, 0, entry).history).toEqual([]);
   });
 
+  it('bounds cumulative bytes by trimming applied entries before farthest redo and preserves replay order', () => {
+    const budget = 4 * 1024 * 1024;
+    const items = Array.from({ length: 6 }, (_, index) => item(String(index), '🙂'.repeat(275_000)));
+    const entries = items.map((_, index) => delta(items.slice(0, index), items.slice(0, index + 1)));
+    expect(entries.every(entry => serializedReviewHistoryBytes([entry]) < budget)).toBe(true);
+    expect(serializedReviewHistoryBytes(entries)).toBeGreaterThan(budget);
+
+    const imported = item('native');
+    const checkpoint = state([...items.slice(0, 2), imported]);
+    const bounded = boundReviewHistory(entries, 2, 1);
+    // Removing both applied entries still leaves four redo entries above the byte cap.
+    expect(serializedReviewHistoryBytes(entries.slice(2))).toBeGreaterThan(budget);
+    expect(bounded.history).toEqual(entries.slice(2, 5));
+    expect(bounded.historyCursor).toBe(0);
+    expect(bounded.historyBoundary).toBe(0);
+    expect(serializedReviewHistoryBytes(bounded.history)).toBeLessThanOrEqual(budget);
+
+    let replayed = checkpoint;
+    for (const entry of bounded.history) replayed = replayReviewHistoryEntry(replayed, entry, 'redo');
+    expect(replayed.items.map(item => item.id)).toEqual(['0', '1', '2', '3', '4', 'native']);
+    for (const entry of [...bounded.history].reverse()) replayed = replayReviewHistoryEntry(replayed, entry, 'undo');
+    expect(replayed).toEqual(checkpoint);
+    expect(checkpoint.items.map(item => item.id)).toEqual(['0', '1', 'native']);
+  });
+
   it('rejects malformed versioned history and invalid cursors while accepting legacy snapshots', () => {
     const valid = delta([], [item('a')]);
     for (const bad of [{ ...valid, schemaVersion: 2 }, { ...valid, itemChanges: null }, { ...valid, itemChanges: [{ id: 'a', before: null, after: { item: item('b'), index: -1 } }] }, { ...valid, auditChanges: [{ identity: 'wrong', before: null, after: { audit: audit('draft', 'draft'), index: 0 } }] }]) {
