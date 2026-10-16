@@ -42,7 +42,6 @@ import {
   type ReferenceDocumentController,
 } from '../pdf/reference-document.js';
 import { createViewerFramingControls } from '../pdf/viewer-framing-adapter.js';
-import { VIEWER_READING_FIT_MAX_PERCENT } from '../pdf/viewer-controls.js';
 import {
   LatestFrameRequest,
   type ViewerFramingControls,
@@ -1090,7 +1089,6 @@ export function App({
         documentId: MAIN_PDF_DOCUMENT_ID,
         documentGeneration,
         runway: () => viewerRunwayRef.current,
-        maxFitWidthZoom: VIEWER_READING_FIT_MAX_PERCENT / 100,
         fitWidthMargins: () => {
           const stage = workspaceElementRef.current?.closest<HTMLElement>('[data-review-stage]');
           if (stage?.dataset.rightSurfaceOpen === 'true') {

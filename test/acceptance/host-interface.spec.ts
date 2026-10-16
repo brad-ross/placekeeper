@@ -284,8 +284,6 @@ async function openAnimatedHostReview(page: Page, width = 1280) {
 }
 
 test('normal-motion workspace opening fits once after the tray settles', async ({ page }) => {
-  // Narrow enough that the fitted page stays below the reading-zoom cap both
-  // before and after the tray opens, so the refit visibly narrows the page.
   await openAnimatedHostReview(page, 960);
   const samples = await page.evaluate(() => new Promise<{ width: number; trayX: number }[]>((resolve) => {
     const pdf = document.querySelector<HTMLElement>('[data-page-index="0"]')!;
