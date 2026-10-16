@@ -1,5 +1,5 @@
 import type { ReviewRect } from '../../../../packages/core/src/review-commands.js';
-import type { ReviewCommand, ReviewState } from '../../../../packages/core/src/review-model.js';
+import type { ReviewCommand, ReviewStateView } from '../../../../packages/core/src/review-model.js';
 import type { ReviewAnnotation } from '../../../../packages/core/src/pdf-writer.js';
 import type { PdfTargetVisibility, PdfViewportQuery } from '../pdf/viewer-navigation.js';
 import type { ContextPlacement } from './ContextActionPalette.js';
@@ -56,7 +56,7 @@ export interface ReviewShellAuthoringModel {
   onCommand(
     command: ReviewCommand,
     authority?: AuthoringAuthority,
-  ): Promise<ReviewState | RejectedReviewCommand>;
+  ): Promise<ReviewStateView | RejectedReviewCommand>;
   authoringSessionResolution?: {
     readonly token: number;
     readonly outcome: 'accepted' | 'source-replaced';

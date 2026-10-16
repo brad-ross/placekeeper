@@ -179,7 +179,7 @@ function runtimePort(options: {
       const message = value as unknown as Record<string, unknown>;
       sent.push(message);
       if (message.type === "hello") {
-        reply({ type: "hello-ack", reviewRuntimeVersion: 3, protocol: "placekeeper.chrome-runtime", leaseMs: 90_000 });
+        reply({ type: "hello-ack", reviewRuntimeVersion: 4, protocol: "placekeeper.chrome-runtime", leaseMs: 90_000 });
       } else if (message.type === "claim-owner") {
         reply(options.ownerProofUnsupported === true
           ? { type: "failure", lane: "lifecycle", requestId: message.requestId, reason: "invalid-message" }
@@ -498,7 +498,7 @@ describe("embedded Chrome review runtime", () => {
     session.runtimePort.subscribe((message) => responses.push(message));
     session.runtimePort.postMessage({
       protocol: "placekeeper.review-runtime",
-      version: 3,
+      version: 4,
       kind: "request",
       runtimeId: connectionId,
       requestId: "review-bootstrap-1",
@@ -606,7 +606,7 @@ describe("embedded Chrome review runtime", () => {
         sent.push(message);
         if (message.type === "hello") {
           queueMicrotask(() => onMessage.emit({
-            type: "hello-ack", reviewRuntimeVersion: 3,
+            type: "hello-ack", reviewRuntimeVersion: 4,
             protocol: "placekeeper.chrome-runtime",
             protocolVersion: 2,
             connectionId,
@@ -663,7 +663,7 @@ describe("embedded Chrome review runtime", () => {
     session.runtimePort.subscribe((message) => messages.push(message as Record<string, unknown>));
     session.runtimePort.postMessage({
       protocol: "placekeeper.review-runtime",
-      version: 3,
+      version: 4,
       kind: "request",
       runtimeId: connectionId,
       requestId: "review-scope-1",
@@ -702,7 +702,7 @@ describe("embedded Chrome review runtime", () => {
 
     session.runtimePort.postMessage({
       protocol: "placekeeper.review-runtime",
-      version: 3,
+      version: 4,
       kind: "request",
       runtimeId: connectionId,
       requestId: "review-bootstrap-successor",
@@ -936,7 +936,7 @@ describe("embedded Chrome review runtime", () => {
       expect(port.sent.filter(({ type }) => type === "refresh")).toHaveLength(1);
 
       session.runtimePort.postMessage({
-        protocol: "placekeeper.review-runtime", version: 3, kind: "request",
+        protocol: "placekeeper.review-runtime", version: 4, kind: "request",
         runtimeId: connectionId, requestId: "review-finalize-queued", sessionId,
         generation: 1, revision: 0, method: "finalizeInteraction",
         payload: {
@@ -1171,7 +1171,7 @@ describe("embedded Chrome review runtime", () => {
     expect(revokeObjectURL).toHaveBeenCalledExactlyOnceWith(`blob:${extensionOrigin}/document-1`);
 
     session.runtimePort.postMessage({
-      protocol: "placekeeper.review-runtime", version: 3, kind: "request",
+      protocol: "placekeeper.review-runtime", version: 4, kind: "request",
       runtimeId: connectionId, requestId: "review-bootstrap-generation-3",
       method: "bootstrap", payload: {},
     });
@@ -1217,7 +1217,7 @@ describe("embedded Chrome review runtime", () => {
     })));
     expect(createObjectURL).toHaveBeenCalledOnce();
     session.runtimePort.postMessage({
-      protocol: "placekeeper.review-runtime", version: 3, kind: "request",
+      protocol: "placekeeper.review-runtime", version: 4, kind: "request",
       runtimeId: connectionId, requestId: "review-bootstrap-presence",
       method: "bootstrap", payload: {},
     });
@@ -1238,7 +1238,7 @@ describe("embedded Chrome review runtime", () => {
     session.runtimePort.subscribe((message) => responses.push(message as Record<string, unknown>));
     session.runtimePort.postMessage({
       protocol: "placekeeper.review-runtime",
-      version: 3,
+      version: 4,
       kind: "request",
       runtimeId: connectionId,
       requestId: "review-export-protected",
@@ -1265,7 +1265,7 @@ describe("embedded Chrome review runtime", () => {
     const responses: Array<Record<string, unknown>> = [];
     session.runtimePort.subscribe((message) => responses.push(message as Record<string, unknown>));
     const send = (requestId: string) => session.runtimePort.postMessage({
-      protocol: "placekeeper.review-runtime", version: 3, kind: "request",
+      protocol: "placekeeper.review-runtime", version: 4, kind: "request",
       runtimeId: connectionId, requestId, sessionId, generation: 1, revision: 0,
       method: "exportReviewedCopy", payload: {},
     });
@@ -1308,7 +1308,7 @@ describe("embedded Chrome review runtime", () => {
     const messages: Array<Record<string, unknown>> = [];
     session.runtimePort.subscribe((message) => messages.push(message as Record<string, unknown>));
     session.runtimePort.postMessage({
-      protocol: "placekeeper.review-runtime", version: 3, kind: "request",
+      protocol: "placekeeper.review-runtime", version: 4, kind: "request",
       runtimeId: connectionId, requestId: `review-${method}`, sessionId,
       generation: 1, revision: 0, method, payload,
     });

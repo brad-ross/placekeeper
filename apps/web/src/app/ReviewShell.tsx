@@ -40,7 +40,7 @@ import {
   undoReview,
   type ReviewRect,
 } from '../../../../packages/core/src/review-commands.js';
-import type { ReviewItem, ReviewItemKind, ReviewState } from '../../../../packages/core/src/review-model.js';
+import type { ReviewItem, ReviewItemKind, ReviewStateView } from '../../../../packages/core/src/review-model.js';
 import type { PdfDocumentOrderLocation } from '../pdf/document-order-location.js';
 import type { CaretAnchor } from '../pdf/selection-anchor.js';
 import {
@@ -323,7 +323,7 @@ export interface ReviewShellProps {
   authoring: ReviewShellAuthoringModel;
   viewer: ReviewShellViewerModel;
   workspace: ReviewShellWorkspaceModel;
-  state: ReviewState;
+  state: ReviewStateView;
   readonly activeAuthoringDraftIds?: readonly string[];
   documentTitle?: string;
   /** The PDF's own title when it has one; the chrome shows it with the filename as its tooltip. */

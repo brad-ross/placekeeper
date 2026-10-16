@@ -79,6 +79,8 @@ describe('automatic refresh interaction lifecycle', () => {
         expectedDraftRevision: -1, draft,
       });
 
+      expect(state.history).toEqual([]);
+      expect(state.historyCursor).toBe(0);
       const receipt = await interaction.finalize('applied', draft.id, draft.revision);
       expect(held).toBe(false);
       expect(acknowledged).toBe(false);
@@ -88,8 +90,16 @@ describe('automatic refresh interaction lifecycle', () => {
         payload: { comment: 'latest acknowledged comment' },
         reconciliation: { ownerViewId: 'attachment-main' },
       });
+      expect(state.history).toHaveLength(1);
+      expect(state.historyCursor).toBe(1);
       await interaction.acknowledge(receipt);
       expect(acknowledged).toBe(true);
+      state = reduceReview(state, { type: 'undo', expectedRevision: state.revision });
+      expect(state.items).toEqual([]);
+      expect(state.pendingDrafts).toEqual([]);
+      state = reduceReview(state, { type: 'redo', expectedRevision: state.revision });
+      expect(state.items[0]?.payload.comment).toBe('latest acknowledged comment');
+      expect(state.pendingDrafts).toEqual([]);
     },
   );
 });

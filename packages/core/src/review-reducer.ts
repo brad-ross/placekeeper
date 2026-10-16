@@ -1,3 +1,4 @@
+import { appendReviewHistory, createReviewHistoryEntry, normalizeReviewHistory, replayReviewHistoryEntry } from './review-history.js';
 import { hasSafePortableAnnotationShape } from "./portable-annotation-shape.js";
 import { projectReviewItems } from "./annotation-projection.js";
 import { assertPortableAnnotationWritable, PORTABLE_ANNOTATION_MAX_BYTES } from "./portable-annotation.js";
@@ -171,23 +172,20 @@ export function reduceReview(
     return { ...state, annotationName, revision: state.revision + 1 };
   }
 
-  const history = state.history;
-  const historyCursor = state.historyCursor;
+  const draftOnly = command.type === 'put-draft' || (command.type === 'discard-reconciliation' && command.target === 'draft');
+  const normalized = draftOnly ? null : normalizeReviewHistory(state.history, state.historyCursor, state.workflow.historyBoundary);
+  const history = normalized?.history ?? [];
+  const historyCursor = normalized?.historyCursor ?? state.historyCursor;
 
   if (command.type === "undo") {
-    if (historyCursor <= state.workflow.historyBoundary) {
-      if (state.workflow.historyBoundary > 0) {
-        throw new InvalidReviewCommandError("Undo cannot cross the rebuild history boundary");
-      }
+    if (historyCursor <= normalized!.historyBoundary) {
       throw new InvalidReviewCommandError("There is no review command to undo");
     }
     const entry = history[historyCursor - 1]!;
     return {
-      ...state,
+      ...replayReviewHistoryEntry(state, entry, 'undo'),
       revision: state.revision + 1,
-      items: entry.beforeItems,
-      pendingDrafts: entry.beforePendingDrafts ?? state.pendingDrafts,
-      discardAudit: entry.beforeDiscardAudit ?? state.discardAudit,
+      workflow: { ...state.workflow, historyBoundary: normalized!.historyBoundary },
       history,
       historyCursor: historyCursor - 1,
     };
@@ -196,13 +194,10 @@ export function reduceReview(
     if (historyCursor >= history.length) {
       throw new InvalidReviewCommandError("There is no review command to redo");
     }
-    const entry = history[historyCursor]!;
     return {
-      ...state,
+      ...replayReviewHistoryEntry(state, history[historyCursor]!, 'redo'),
       revision: state.revision + 1,
-      items: entry.afterItems,
-      pendingDrafts: entry.afterPendingDrafts ?? state.pendingDrafts,
-      discardAudit: entry.afterDiscardAudit ?? state.discardAudit,
+      workflow: { ...state.workflow, historyBoundary: normalized!.historyBoundary },
       history,
       historyCursor: historyCursor + 1,
     };
@@ -434,22 +429,14 @@ export function reduceReview(
       throw new InvalidReviewCommandError("Review command type is not supported");
   }
 
-  const retainedHistory = history.slice(0, historyCursor);
+  const next = { ...state, revision: state.revision + 1, items, pendingDrafts, discardAudit };
+  if (draftOnly) return next;
+  const appended = appendReviewHistory(history, historyCursor, normalized!.historyBoundary,
+    createReviewHistoryEntry(state, next, state.workflow.documentGeneration));
   return {
-    ...state,
-    revision: state.revision + 1,
-    items,
-    pendingDrafts,
-    discardAudit,
-    history: [...retainedHistory, {
-      beforeItems: state.items,
-      afterItems: items,
-      generation: state.workflow.documentGeneration,
-      beforePendingDrafts: state.pendingDrafts,
-      afterPendingDrafts: pendingDrafts,
-      beforeDiscardAudit: state.discardAudit,
-      afterDiscardAudit: discardAudit,
-    }],
-    historyCursor: retainedHistory.length + 1,
+    ...next,
+    workflow: { ...state.workflow, historyBoundary: appended.historyBoundary },
+    history: appended.history,
+    historyCursor: appended.historyCursor,
   };
 }

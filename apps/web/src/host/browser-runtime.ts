@@ -1,6 +1,6 @@
 import type { ReviewExportFence } from "../../../../packages/core/src/review-runtime-protocol.js";
 import type { SaveStatus } from "../../../../packages/core/src/save-status.js";
-import type { ReviewCommand, ReviewState, SaveDestinationConfirmation } from "../../../../packages/core/src/review-model.js";
+import type { ReviewCommand, ReviewStateView, SaveDestinationConfirmation } from "../../../../packages/core/src/review-model.js";
 import type {
   ProductionExportResult,
   ProductionScope,
@@ -161,7 +161,7 @@ export function createBrowserHostRuntime(session: ProductionSession): HostRuntim
     });
   };
 
-  const browserViewerAssets = (currentSession: ProductionSession, state: ReviewState) => ({
+  const browserViewerAssets = (currentSession: ProductionSession, state: ReviewStateView) => ({
     pdfiumWasm: currentSession.appLinkBase === undefined
       ? `/s/${currentSession.sessionId}/assets/pdfium.wasm`
       : "/assets/pdfium.wasm",
@@ -219,7 +219,7 @@ export function createBrowserHostRuntime(session: ProductionSession): HostRuntim
       connectInvalidations();
       return () => undefined;
     },
-    async command(command: ReviewCommand): Promise<ReviewState | RejectedReviewCommand> {
+    async command(command: ReviewCommand): Promise<ReviewStateView | RejectedReviewCommand> {
       const api = (await ensureLoaded()).api;
       if (!interactionOwnerCommand(command)) return api.command(command);
       connectInvalidations();

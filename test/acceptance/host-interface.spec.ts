@@ -117,7 +117,7 @@ async function chromePage(page: Page, entry: 'handler' | 'popup') {
             const reply = (body: Record<string, unknown>) => queueMicrotask(() => {
               for (const listener of messages) listener({ protocolVersion: 2, connectionId: message.connectionId, ...body });
             });
-            if (message.type === 'hello') reply({ type: 'hello-ack', protocol: 'placekeeper.chrome-runtime', reviewRuntimeVersion: 3, leaseMs: 90_000 });
+            if (message.type === 'hello') reply({ type: 'hello-ack', protocol: 'placekeeper.chrome-runtime', reviewRuntimeVersion: 4, leaseMs: 90_000 });
             // The handler proves interaction ownership before sending the PDF.
             if (message.type === 'claim-owner') reply({ type: 'ack', lane: 'lifecycle', requestId: message.requestId });
             if (message.type === 'begin') reply({ type: 'ack', lane: 'acquisition', requestId: message.requestId });

@@ -34,6 +34,7 @@ describe("shared semantic review command surface", () => {
 
   it("preserves Cocoa text ownership for undo and redo in editable focus", () => {
     const undo = vi.fn();
+    const redo = vi.fn();
     const surface = createReviewCommandSurface({
       focusContext: "editable",
       canUndo: true,
@@ -45,11 +46,14 @@ describe("shared semantic review command surface", () => {
       canOpenSaveOptions: true,
       canFitWidth: true,
       canZoom: true,
-      handlers: { undo },
+      handlers: { undo, redo },
     });
     expect(surface.snapshot.commands.find(({ id }) => id === "undo")?.enabled).toBe(false);
+    expect(surface.snapshot.commands.find(({ id }) => id === "redo")?.enabled).toBe(false);
     expect(surface.invoke("undo")).toBe(false);
+    expect(surface.invoke("redo")).toBe(false);
     expect(undo).not.toHaveBeenCalled();
+    expect(redo).not.toHaveBeenCalled();
   });
 });
 

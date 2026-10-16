@@ -16,10 +16,63 @@ import {
   sanitizeMacosReviewRuntimeResponse,
   sanitizeReviewRuntimeDisplayString,
 } from "../src/review-runtime-protocol.js";
+import { addPageNote } from "../src/review-commands.js";
+import { reduceReview } from "../src/review-reducer.js";
 import { createReviewState } from "../src/review-model.js";
 import { chromeRuntimeProjectionChangeReason } from "../src/chrome-native-runtime-protocol.js";
 
 describe("shared review runtime protocol", () => {
+  it("keeps long editing histories out of native state transport without losing undo/redo positions", () => {
+    const items = Array.from({ length: 10 }, (_, index) => ({
+      id: `annotation-${index}`, kind: "highlight", pageIndex: 0,
+      createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z",
+      payload: { quote: "Selected text", comment: "Review comment", reliable: true,
+        rect: { x: 10, y: 10, width: 100, height: 10 },
+        segmentRects: [{ x: 10, y: 10, width: 100, height: 10 }] },
+    }));
+    const history = Array.from({ length: 300 }, () => ({ beforeItems: items, afterItems: items }));
+    const state = { ...createReviewState({
+      sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      source: { fileId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", digest: "a".repeat(64), byteLength: 100 },
+    }), items, history, historyCursor: 299, revision: 300 };
+    for (const sanitize of [sanitizeChromeReviewRuntimeResponse, sanitizeMacosReviewRuntimeResponse]) {
+      const projected = sanitize("command", state);
+      expect(projected).toMatchObject({ items, history: { length: 300 }, historyCursor: 299 });
+      expect(JSON.stringify(projected).length).toBeLessThan(10_000);
+      // Both the service and client validate responses. A second pass must preserve the summary.
+      expect(sanitize("command", projected)).toEqual(projected);
+      expect(sanitize("command", { accepted: false, state, message: "Revision conflict" }))
+        .toMatchObject({ accepted: false, state: projected });
+      expect(sanitize("command", { ...state, items: [{ ...items[0], credential: "must-not-cross" }] }))
+        .toBeUndefined();
+    }
+    expect(state.history).toBe(history);
+    expect(state.history[299]!.beforeItems).toBe(items);
+    // The response fix must not relax the incoming-command budget.
+    for (const sanitize of [sanitizeChromeReviewRuntimeRequest, sanitizeMacosReviewRuntimeRequest]) {
+      expect(sanitize("command", { type: "edit", expectedRevision: 300, id: "annotation-0",
+        updatedAt: "2026-01-01T00:00:00Z", payload: { history } })).toBeUndefined();
+    }
+  });
+
+  it('projects compact command history while retaining canonical undo and redo', () => {
+    let state = createReviewState({ sessionId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      source: { fileId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', digest: 'a'.repeat(64), byteLength: 100 } });
+    state = reduceReview(state, addPageNote(state, 0, { x: 10, y: 10, width: 18, height: 18 }, 'Keep', {
+      createId: () => 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', now: () => '2026-08-07T12:00:00.000Z',
+    }));
+    expect(state.history[0]).toMatchObject({ schemaVersion: 1, itemChanges: [{ before: null }] });
+    state = reduceReview(state, { type: 'undo', expectedRevision: state.revision });
+    for (const sanitize of [sanitizeChromeReviewRuntimeResponse, sanitizeMacosReviewRuntimeResponse]) {
+      const view = sanitize('command', state);
+      expect(view).toMatchObject({ items: [], history: { length: 1 }, historyCursor: 0 });
+      expect(sanitize('command', view)).toEqual(view);
+      expect(JSON.stringify(view)).not.toContain('itemChanges');
+    }
+    state = reduceReview(state, { type: 'redo', expectedRevision: state.revision });
+    expect(state.items[0]?.payload.comment).toBe('Keep');
+  });
+
   it("preserves canonical never-saved revision -1 across shared native hosts", () => {
     const status = { destination: { phase: "none", generation: 0 },
       sync: { phase: "not-saved", desiredRevision: 1, savedRevision: -1 } };
@@ -78,7 +131,7 @@ describe("shared review runtime protocol", () => {
 
   it("defines the complete versioned method vocabulary for both hosts", () => {
     expect(REVIEW_RUNTIME_PROTOCOL).toBe("placekeeper.review-runtime");
-    expect(REVIEW_RUNTIME_VERSION).toBe(3);
+    expect(REVIEW_RUNTIME_VERSION).toBe(4);
     expect(REVIEW_RUNTIME_METHODS).toEqual([
       "bootstrap",
       "presence",

@@ -1,7 +1,7 @@
 ---
 title: Recoverable autosave for editable PDF annotations
 date: 2026-08-11
-last_updated: 2026-10-06
+last_updated: 2026-10-16
 category: architecture-patterns
 module: PDF annotation persistence
 problem_type: architecture_pattern
@@ -123,7 +123,7 @@ For native annotations, change the original PDF dictionaries in place. Keep geom
 
 Use the visible annotation as the fallback when private portable metadata no longer validates. Import recovers independently valid portable groups and treats the remainder as foreign, then imports supported native marks (`packages/core/src/portable-annotation.ts`; `packages/pdf-backends/src/embedpdf-adapter.ts`). An external edit must not disappear or revert merely because it invalidates an older Placekeeper projection. When saving such a native annotation, preserve unrelated or malformed `/EPDFCustom` bytes; native provenance uses the versioned `/NM` namespace (`packages/pdf-backends/src/native-annotations.ts:273`). Strict portable-only reading remains a separate mode; do not weaken validation globally to accommodate external edits.
 
-Treat an empty imported inventory and an unsuccessful import as different states. Absence from the requested list authorizes deletion only after a successful native import of these exact source bytes. The broker records `nativeAnnotationImportDigest`, and enables native inventory management only when it matches `state.source.digest` (`apps/service/src/sessions/session-broker.ts`). Recovery retries an unproven import; on failure it preserves source annotations. On success it adds newly imported marks to both current items and every undo snapshot so an unrelated undo cannot silently turn them into deletions (`apps/service/src/sessions/session-broker.ts`).
+Treat an empty imported inventory and an unsuccessful import as different states. Absence from the requested list authorizes deletion only after a successful native import of these exact source bytes. The broker records `nativeAnnotationImportDigest`, and enables native inventory management only when it matches `state.source.digest` (`apps/service/src/sessions/session-broker.ts`). Recovery retries an unproven import; on failure it preserves source annotations. On success it adds newly imported marks to current items and legacy before/after snapshots. Compact history entries remain unchanged because their replay preserves unrelated current items; an unrelated undo must not silently turn newly imported marks into deletions (`apps/service/src/sessions/recovered-review-preparation.ts:41`; `packages/core/src/review-history.ts:66`). See [compact document undo with independent protected drafts](compact-document-undo-with-independent-protected-drafts.md) for the replay and migration contract.
 
 Use standard `/NM` for identity across readers, including readers that strip private metadata. Unverified marks receive fresh identities scoped to their imported generation; page and enumeration index correlate a source object but do not establish continuity across replacements. Only verified persistent identity can carry edits or deletion intent into a successor. Duplicate persistent identities are excluded because ambiguity cannot authorize an edit or deletion (`packages/core/src/native-pdf-annotation.ts`; `packages/pdf-backends/src/native-annotations.ts`). Distinguish comment locks from deletion locks; the importer records both and the writer enforces each operation (`packages/pdf-backends/src/native-annotations.ts`).
 

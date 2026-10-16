@@ -1,6 +1,6 @@
 import type { ReviewAnchorEvidenceV1, SaveDestinationConfirmation } from "./review-model.js";
 export const REVIEW_RUNTIME_PROTOCOL = "placekeeper.review-runtime" as const;
-export const REVIEW_RUNTIME_VERSION = 3 as const;
+export const REVIEW_RUNTIME_VERSION = 4 as const;
 
 export const REVIEW_RUNTIME_HOSTS = ["vscode", "chrome", "macos", "codex"] as const;
 export type ReviewRuntimeHost = typeof REVIEW_RUNTIME_HOSTS[number];
@@ -271,7 +271,12 @@ function safeChromeState(value: unknown): unknown | undefined {
         !SHA256.test(candidate.nativeAnnotationImportDigest))) ||
     !safeInteger(candidate.historyCursor) || !record(candidate.source) || !record(candidate.workflow) ||
     !Array.isArray(candidate.items) || !Array.isArray(candidate.pendingDrafts) ||
-    !Array.isArray(candidate.discardAudit) || !Array.isArray(candidate.history)) return undefined;
+    !Array.isArray(candidate.discardAudit)) return undefined;
+  const history = candidate.history;
+  if (!Array.isArray(history) &&
+    (!record(history) || !hasOnlyKeys(history, ["length"]) || !safeInteger(history.length))) return undefined;
+  const historyLength = history.length as number;
+  if ((candidate.historyCursor as number) > historyLength) return undefined;
   if (!hasOnlyKeys(candidate.source, ["fileId", "digest", "byteLength"]) ||
     !SESSION_ID.test(String(candidate.source.fileId)) || !SHA256.test(String(candidate.source.digest)) ||
     !safeInteger(candidate.source.byteLength) || candidate.source.byteLength === 0) return undefined;
@@ -286,7 +291,7 @@ function safeChromeState(value: unknown): unknown | undefined {
     (candidate.lifecycle !== "active" && candidate.lifecycle !== "finished" && candidate.lifecycle !== "discarded")) {
     return undefined;
   }
-  return closedJsonClone(candidate);
+  return closedJsonClone({ ...candidate, history: { length: historyLength } });
 }
 
 function safeChromeScope(value: unknown): unknown | undefined {

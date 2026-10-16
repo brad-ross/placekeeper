@@ -2,7 +2,7 @@ import type {
   JsonValue,
   PendingReviewDraftV1,
   ReviewItem,
-  ReviewState,
+  ReviewStateView,
 } from '../../../../packages/core/src/review-model.js';
 import {
   anchorEvidenceFromReviewItem,
@@ -535,13 +535,13 @@ export interface AuthoringAnchorSnapshot {
 }
 
 export function reviewSourceIdentity(
-  state: Pick<ReviewState, 'sessionId' | 'source'>,
+  state: Pick<ReviewStateView, 'sessionId' | 'source'>,
 ): string {
   return JSON.stringify([state.sessionId, state.source.fileId, state.source.digest]);
 }
 
 export function authoringAuthorityFor(
-  state: Pick<ReviewState, 'sessionId' | 'source'>,
+  state: Pick<ReviewStateView, 'sessionId' | 'source'>,
   documentGeneration: number,
 ): AuthoringAuthority {
   return Object.freeze({

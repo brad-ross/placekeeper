@@ -1577,6 +1577,29 @@ describe("one production review tree", () => {
     })).toBe(false);
   });
 
+  it("enables undo and redo from compact native history without receiving snapshots", () => {
+    const state = {
+      ...createReviewState({
+        sessionId: "00000000-0000-4000-8000-000000000001",
+        source: { fileId: "00000000-0000-4000-8000-000000000002", digest: "a".repeat(64), byteLength: 12 },
+      }),
+      history: { length: 300 }, historyCursor: 299, revision: 301,
+    };
+    const html = renderToStaticMarkup(<ProductionReviewApp
+      session={{ sessionId: state.sessionId, credential: "secret" }}
+      initialState={state}
+      scope={{ documentTitle: "paper.pdf" }}
+      api={{ command: vi.fn(), saveStatus: vi.fn(), saveProposal: vi.fn(), chooseCopy: vi.fn(),
+        chooseFolder: vi.fn(), chooseOriginal: vi.fn(), retrySave: vi.fn(), locateSave: vi.fn(), scope: vi.fn() }}
+      viewer={<div role="application">PDF viewer</div>}
+    />);
+    for (const action of ["Undo", "Redo"]) {
+      const button = html.match(new RegExp(`<button[^>]*aria-label="${action}"[^>]*>`))?.[0];
+      expect(button).toBeDefined();
+      expect(button).not.toContain('disabled=""');
+    }
+  });
+
   it("keeps the ordinary-browser review free of Codex controls or ambient status", () => {
     const state = {
       ...createReviewState({

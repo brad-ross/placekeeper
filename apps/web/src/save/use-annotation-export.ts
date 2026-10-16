@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type Dispatch, type RefObject, type SetStateAction } from 'react';
 import { setAnnotationName } from '../../../../packages/core/src/review-commands.js';
-import type { ReviewState } from '../../../../packages/core/src/review-model.js';
+import type { ReviewStateView } from '../../../../packages/core/src/review-model.js';
 import { createReviewStateSummary } from '../../../../packages/core/src/live-context.js';
 import type { ProductionSessionApi } from '../host/session-contracts.js';
 import type { GenerationRefreshStatus } from '../generation-status.js';
@@ -13,9 +13,9 @@ interface ExportRequest {
   readonly resolve: (result: ReviewExportResult) => void;
 }
 
-export function useAnnotationExport(api: ProductionSessionApi, state: ReviewState,
-  stateRef: RefObject<ReviewState>, generationRef: RefObject<number>,
-  setState: Dispatch<SetStateAction<ReviewState>>, refreshStatus: GenerationRefreshStatus) {
+export function useAnnotationExport(api: ProductionSessionApi, state: ReviewStateView,
+  stateRef: RefObject<ReviewStateView>, generationRef: RefObject<number>,
+  setState: Dispatch<SetStateAction<ReviewStateView>>, refreshStatus: GenerationRefreshStatus) {
   const [request, setRequest] = useState<ExportRequest | null>(null);
   const activeRef = useRef<ExportRequest | null>(null);
   const busyRef = useRef(false);

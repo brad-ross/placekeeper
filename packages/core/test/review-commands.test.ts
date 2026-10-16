@@ -16,6 +16,7 @@ import {
   createReviewState,
   normalizeReviewSelectionAnchor,
   startReviewGeneration,
+  type PendingReviewDraftV1,
   type ReviewCommand,
   type ReviewState,
 } from '../src/review-model.js';
@@ -88,7 +89,98 @@ function setup(): { state: ReviewState; commands: ReviewCommandFactory } {
   };
 }
 
+function protectedDraft(state: ReviewState, text: string): PendingReviewDraftV1 {
+  return { id: '00000000-0000-4000-8000-000000000999', ownerViewId: 'panel-a',
+    baseGeneration: state.workflow.documentGeneration, revision: 0, kind: 'highlight', pageIndex: 0, text,
+    anchor: { kind: 'selection', ...selection }, disposition: { kind: 'resolved', generation: state.workflow.documentGeneration },
+    status: 'protected', createdAt: '2026-08-07T12:00:00.000Z', updatedAt: '2026-08-07T12:00:00.000Z' };
+}
+
 describe('canonical review commands', () => {
+  it('keeps hundreds of durable draft updates outside semantic history and Apply consumes the draft permanently', () => {
+    let { state } = setup();
+    for (let index = 0; index < 300; index++) {
+      state = reduceReview(state, { type: 'put-draft', expectedRevision: state.revision,
+        expectedDraftRevision: index - 1, draft: protectedDraft(state, `text ${index}`) });
+    }
+    expect(state.revision).toBe(300);
+    expect(state.pendingDrafts[0]?.revision).toBe(299);
+    expect(state.history).toHaveLength(0);
+    state = reduceReview(state, { type: 'apply-draft', expectedRevision: state.revision,
+      id: state.pendingDrafts[0]!.id, expectedDraftRevision: 299, ownerViewId: 'panel-a', updatedAt: '2026-08-07T12:01:00.000Z' });
+    expect(state.history).toHaveLength(1);
+    expect(state.history[0]).toMatchObject({ schemaVersion: 1, itemChanges: [{ before: null }] });
+    state = reduceReview(state, { type: 'undo', expectedRevision: state.revision });
+    expect(state.items).toEqual([]);
+    expect(state.pendingDrafts).toEqual([]);
+  });
+
+  it('undoes an applied edit to its previous item without reopening its consumed draft', () => {
+    let { state, commands } = setup();
+    state = reduceReview(state, addHighlight(state, selection, 'Original', commands));
+    const original = state.items[0]!;
+    state = reduceReview(state, { type: 'put-draft', expectedRevision: state.revision, expectedDraftRevision: -1,
+      draft: { ...protectedDraft(state, 'Revised'), targetItemId: original.id } });
+    state = reduceReview(state, { type: 'apply-draft', expectedRevision: state.revision, id: state.pendingDrafts[0]!.id,
+      expectedDraftRevision: 0, ownerViewId: 'panel-a', updatedAt: '2026-08-07T12:01:00.000Z' });
+    expect(state.items[0]?.payload.comment).toBe('Revised');
+    expect(state.history).toHaveLength(2);
+    state = reduceReview(state, { type: 'undo', expectedRevision: state.revision });
+    expect(state.items).toEqual([original]);
+    expect(state.pendingDrafts).toEqual([]);
+    state = reduceReview(state, { type: 'redo', expectedRevision: state.revision });
+    expect(state.items[0]?.payload.comment).toBe('Revised');
+    expect(state.pendingDrafts).toEqual([]);
+  });
+
+  it('preserves redo and other current drafts and their audit through document undo', () => {
+    let { state, commands } = setup();
+    state = reduceReview(state, addHighlight(state, selection, 'Keep', commands));
+    state = reduceReview(state, { type: 'undo', expectedRevision: state.revision });
+    state = reduceReview(state, { type: 'put-draft', expectedRevision: state.revision,
+      expectedDraftRevision: -1, draft: protectedDraft(state, 'other view text') });
+    expect(state.historyCursor).toBe(0);
+    expect(state.history).toHaveLength(1);
+    state = reduceReview(state, { type: 'discard-reconciliation', target: 'draft', id: state.pendingDrafts[0]!.id,
+      expectedRevision: state.revision, expectedTargetRevision: 0, ownerViewId: 'panel-a', reason: 'discard draft', discardedAt: '2026-08-07T12:02:00.000Z' });
+    expect(state.historyCursor).toBe(0);
+    state = reduceReview(state, { type: 'redo', expectedRevision: state.revision });
+    state = reduceReview(state, { type: 'discard-reconciliation', target: 'item', id: state.items[0]!.id,
+      expectedRevision: state.revision, expectedTargetRevision: 0, ownerViewId: 'panel-a', reason: 'discard item', discardedAt: '2026-08-07T12:03:00.000Z' });
+    state = reduceReview(state, { type: 'put-draft', expectedRevision: state.revision,
+      expectedDraftRevision: -1, draft: protectedDraft(state, 'latest other view text') });
+    state = reduceReview(state, { type: 'discard-reconciliation', target: 'draft', id: state.pendingDrafts[0]!.id,
+      expectedRevision: state.revision, expectedTargetRevision: 0, ownerViewId: 'panel-a', reason: 'later draft discard', discardedAt: '2026-08-07T12:04:00.000Z' });
+    state = reduceReview(state, { type: 'put-draft', expectedRevision: state.revision,
+      expectedDraftRevision: -1, draft: protectedDraft(state, 'latest other view text') });
+    const drafts = state.pendingDrafts;
+    state = reduceReview(state, { type: 'undo', expectedRevision: state.revision });
+    expect(state.items).toHaveLength(1);
+    expect(state.pendingDrafts).toEqual(drafts);
+    expect(state.discardAudit.map(({ target, reason }) => ({ target, reason }))).toEqual([
+      { target: 'draft', reason: 'discard draft' }, { target: 'draft', reason: 'later draft discard' },
+    ]);
+    state = startReviewGeneration(state, { documentGeneration: 2 });
+    expect(state.history).toEqual([]);
+    expect(state.historyCursor).toBe(0);
+    expect(state.items).toHaveLength(1);
+    expect(state.pendingDrafts[0]).toMatchObject({ text: 'latest other view text', status: 'frozen' });
+  });
+
+  it('dispatches legacy snapshot undo without restoring consumed or unrelated draft snapshots', () => {
+    let { state, commands } = setup();
+    state = reduceReview(state, addHighlight(state, selection, 'Keep', commands));
+    const draft = protectedDraft(state, 'current draft');
+    state = { ...state, pendingDrafts: [draft], history: [{ beforeItems: [], afterItems: state.items,
+      beforePendingDrafts: [], afterPendingDrafts: [] }], historyCursor: 1 };
+    state = reduceReview(state, { type: 'undo', expectedRevision: state.revision });
+    expect(state.items).toEqual([]);
+    expect(state.pendingDrafts).toEqual([draft]);
+    state = reduceReview(state, { type: 'redo', expectedRevision: state.revision });
+    expect(state.items).toHaveLength(1);
+    expect(state.pendingDrafts).toEqual([draft]);
+  });
+
   it.each([
     ['replace', (state: ReviewState, commands: ReviewCommandFactory) => addReplace(state, crossPageSelection, 'revised', commands)],
     ['delete', (state: ReviewState, commands: ReviewCommandFactory) => addDelete(state, crossPageSelection, commands)],
@@ -354,9 +446,9 @@ describe('canonical review commands', () => {
     });
 
     state = startReviewGeneration(state, { documentGeneration: 2 });
-    expect(state.workflow).toMatchObject({ documentGeneration: 2, historyBoundary: 1 });
+    expect(state.workflow).toMatchObject({ documentGeneration: 2, historyBoundary: 0 });
     expect(() => reduceReview(state, { type: 'undo', expectedRevision: state.revision }))
-      .toThrow(/cannot cross the rebuild history boundary/iu);
+      .toThrow(/no review command to undo/iu);
   });
 
   it('applies an acknowledged protected draft in an ordinary review', () => {
@@ -436,7 +528,7 @@ describe('canonical review commands', () => {
     state = reduceReview(state, { type: 'undo', expectedRevision: state.revision });
     expect(state.items[0]?.reconciliation?.disposition.kind).toBe('missing');
     expect(() => reduceReview(state, { type: 'undo', expectedRevision: state.revision }))
-      .toThrow(/rebuild history boundary/iu);
+      .toThrow(/no review command to undo/iu);
   });
 
   it('reattaches a complete cross-page anchor and synchronizes its payload in one history entry', () => {

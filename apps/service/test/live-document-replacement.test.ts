@@ -12,7 +12,7 @@ import {
   REVIEW_RUNTIME_PROTOCOL,
   REVIEW_RUNTIME_VERSION,
 } from "../../../packages/core/src/review-runtime-protocol.js";
-import type { ReviewCommand, ReviewItem, ReviewState } from "../../../packages/core/src/review-model.js";
+import type { ReviewCommand, ReviewItem } from "../../../packages/core/src/review-model.js";
 import { reviewSemanticDigest } from "../../../packages/core/src/live-context.js";
 import {
   anchorEvidenceFromReviewItem,
@@ -1041,13 +1041,14 @@ describe("atomic live document replacement", () => {
     expect(restarted.interactions.held(resumed.launch.sessionId)).toBe(false);
     const resumedState = restarted.state(resumed.launch.sessionId)!;
     expect(resumedState).toMatchObject({
-      workflow: { mode: "standard", documentGeneration: 2, historyBoundary: 2 },
+      workflow: { mode: "standard", documentGeneration: 2, historyBoundary: 0 },
+      history: [], historyCursor: 0,
       items: [{ id: ITEM_IDS.stable }],
       pendingDrafts: [{ baseGeneration: 2, status: "protected", text: "protected ordinary draft" }],
     });
     await expect(restarted.acceptMutation(resumed.launch.sessionId, {
       type: "undo", expectedRevision: resumedState.revision,
-    })).rejects.toThrow(/cannot cross the rebuild history boundary/iu);
+    })).rejects.toThrow(/There is no review command to undo/iu);
   });
 
   it("keeps every shared view on the predecessor until the last interaction owner releases", async () => {
@@ -1519,7 +1520,7 @@ describe("atomic live document replacement", () => {
       },
     });
     const bootstrap = await runtime.bootstrap();
-    let pageState: ReviewState = bootstrap.state;
+    let pageState = bootstrap.state;
     runtime.subscribeInvalidations(() => {
       pageState = structuredClone(value.broker.state(sessionId)!);
     });

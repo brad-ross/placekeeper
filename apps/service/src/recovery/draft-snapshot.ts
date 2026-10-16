@@ -10,6 +10,7 @@ import {
 } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { normalizeReviewState, type ReviewState } from "../../../../packages/core/src/review-model.js";
+import { normalizeReviewHistory } from "../../../../packages/core/src/review-history.js";
 import { canonicalSha256 } from "../../../../packages/core/src/live-context.js";
 import type { NativePdfAnnotationIdentityProvenance } from "../../../../packages/core/src/native-pdf-annotation.js";
 import type {
@@ -192,14 +193,25 @@ export function reviewStateDigest(
 }
 
 export function migrateRecoverableDraft(draft: RecoverableDraft): RecoverableDraftV3 {
-  const state = normalizeReviewState(draft.state);
-  if (draft.schemaVersion === 3) return { ...draft, state };
+  const previousDigest = reviewStateDigest(draft.state);
+  const normalized = normalizeReviewState(draft.state);
+  const { history, historyCursor, historyBoundary } = normalizeReviewHistory(
+    normalized.history, normalized.historyCursor, normalized.workflow.historyBoundary,
+  );
+  const state: ReviewState = { ...normalized, history, historyCursor,
+    workflow: { ...normalized.workflow, historyBoundary } };
   const desiredDigest = reviewStateDigest(state);
+  const sync = draft.schemaVersion === 1 ? undefined : {
+    ...draft.sync,
+    ...(draft.sync.desiredDigest === previousDigest ? { desiredDigest } : {}),
+    ...(draft.sync.savedDigest === previousDigest ? { savedDigest: desiredDigest } : {}),
+  };
+  if (draft.schemaVersion === 3) return { ...draft, state, sync: sync! };
   const v2: RecoverableDraftV2 = draft.schemaVersion === 2
     ? {
         ...draft,
         state,
-        sync: { ...draft.sync, desiredDigest },
+        sync: sync!,
       }
     : {
         ...draft,

@@ -10,7 +10,7 @@ import type {
   ReviewCommand,
   ReviewItem,
   ReviewItemKind,
-  ReviewState,
+  ReviewStateView,
 } from "../../../../packages/core/src/review-model.js";
 import type { GenerationRefreshStatus } from "../generation-status.js";
 import {
@@ -219,7 +219,7 @@ export function reattachmentInstruction(
 }
 
 export interface ReconciliationWorkspaceProps {
-  readonly state: ReviewState;
+  readonly state: ReviewStateView;
   readonly activeAuthoringDraftId?: string;
   readonly activeAuthoringDraftIds?: readonly string[];
   readonly selectionUpdate: SelectionUpdate;
@@ -722,7 +722,7 @@ export function ReconciliationWorkspace(props: ReconciliationWorkspaceProps) {
       });
       const rejection = reconciliationCommandRejectionMessage(result);
       if (rejection !== null) throw new Error(rejection);
-      const next = result as ReviewState;
+      const next = result as ReviewStateView;
       const protectedDraft = next.pendingDrafts.find(({ id }) => id === draftId);
       if (protectedDraft === undefined) throw new Error('The reattachment draft was not acknowledged.');
       acceptedFocusKeyRef.current = reconciliationFocusKeyAfterRemoval(

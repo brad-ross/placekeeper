@@ -1,5 +1,12 @@
 import { createHash } from "node:crypto";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
+import { reduceReview } from "../../../packages/core/src/review-reducer.js";
+import type { PendingReviewDraftV1, ReviewCommand, ReviewState } from "../../../packages/core/src/review-model.js";
+
+import { DraftSnapshotStore } from "../src/recovery/draft-snapshot.js";
 
 import {
   MacosRuntimeManager,
@@ -128,6 +135,114 @@ async function admit(manager: MacosRuntimeManager): Promise<void> {
 }
 
 describe("macOS canonical review runtime", () => {
+  it("keeps protected typing durable through restart and bounds native semantic history", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "placekeeper-native-history-"));
+    let manager: MacosRuntimeManager | undefined;
+    try {
+      let state = projection().state as ReviewState;
+      let store = new DraftSnapshotStore(directory);
+      const current = () => ({ ...projection(state.revision), state });
+      const service = backend();
+      vi.mocked(service.begin).mockResolvedValue({
+        append: vi.fn(), cancel: vi.fn(),
+        finish: async () => ({ canonicalKey: "canonical_review_1234", projection: current() }),
+      });
+      vi.mocked(service.activate).mockImplementation(async () => current());
+      vi.mocked(service.current).mockImplementation(async () => current());
+      vi.mocked(service.invoke).mockImplementation(async (_key, method, payload) => {
+        expect(method).toBe("command");
+        const next = reduceReview(state, payload as ReviewCommand);
+        await store.persist({
+          schemaVersion: 3,
+          source: { disposition: "local", canonicalSourcePath: "/private/tmp/Paper.pdf",
+            sourceSnapshotPath: "/private/tmp/source.pdf", displayName: "Paper.pdf" },
+          state: next, acknowledgedAt: "2026-10-16T12:00:00Z",
+          destination: { phase: "none", generation: 0 },
+          sync: { phase: "not-saved", desiredRevision: next.revision, desiredDigest: digest, savedRevision: 0 },
+        });
+        state = next;
+        return state;
+      });
+      let request = 0;
+      const activate = async () => {
+        manager = new MacosRuntimeManager(service);
+        await admit(manager);
+        const response = await manager.handle("helper_12345678", {
+          ...envelope, requestId: `request_activate_${++request}`, type: "activate", documentValidated: true,
+        });
+        expect(response).toMatchObject({ type: "active", projection: {
+          state: { revision: state.revision, history: { length: state.history.length }, historyCursor: state.historyCursor },
+        } });
+        expect(response).toHaveProperty("projection.state.history", { length: state.history.length });
+      };
+      const command = async (payload: ReviewCommand) => {
+        const response = await manager!.handle("helper_12345678", {
+          ...envelope, requestId: `request_command_${++request}`, type: "invoke", generation: 1,
+          revision: state.revision, method: "command", payload, idempotencyKey: `operation_command_${request}`,
+        });
+        expect(response).toMatchObject({ type: "result", method: "command",
+          payload: { history: { length: state.history.length }, historyCursor: state.historyCursor } });
+        expect(response).toHaveProperty("payload.history", { length: state.history.length });
+        expect(state.history.length).toBeLessThanOrEqual(200);
+        expect(Buffer.byteLength(JSON.stringify(state.history), "utf8")).toBeLessThanOrEqual(4 * 1024 * 1024);
+      };
+      await activate();
+      const draft: PendingReviewDraftV1 = {
+        id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", ownerViewId: "attachment_native_1234",
+        baseGeneration: 1, revision: 0, kind: "highlight", pageIndex: 0,
+        text: "", anchor: {
+          kind: "selection", pageIndex: 0, quote: "A long selection", prefix: "", suffix: "",
+          rect: { x: 10, y: 10, width: 100, height: 600 },
+          segmentRects: Array.from({ length: 60 }, (_, index) => ({ x: 10, y: 10 + index * 10, width: 100, height: 10 })),
+        },
+        disposition: { kind: "resolved", generation: 1 }, status: "protected",
+        createdAt: "2026-10-16T12:00:00Z", updatedAt: "2026-10-16T12:00:00Z",
+      };
+      for (let index = 0; index < 250; index++) {
+        await command({ type: "put-draft", expectedRevision: state.revision,
+          expectedDraftRevision: index - 1, draft: { ...draft, text: `Protected comment ${index}` } });
+      }
+      expect(state.revision).toBe(250);
+      expect(state.history).toEqual([]);
+      await manager!.detach("helper_12345678");
+      store = new DraftSnapshotStore(directory);
+      const recovered = await store.recover();
+      expect(recovered?.state).toMatchObject({ revision: 250, history: [], historyCursor: 0,
+        pendingDrafts: [{ id: draft.id, text: "Protected comment 249", revision: 249 }] });
+      state = recovered!.state;
+      await activate();
+      await command({ type: "apply-draft", expectedRevision: state.revision,
+        id: draft.id, expectedDraftRevision: 249, ownerViewId: draft.ownerViewId, updatedAt: draft.updatedAt });
+      expect(state.history).toHaveLength(1);
+      expect(state.items[0]?.payload.comment).toBe("Protected comment 249");
+      await command({ type: "undo", expectedRevision: state.revision });
+      expect(state.items).toEqual([]);
+      expect(state.pendingDrafts).toEqual([]);
+      await command({ type: "redo", expectedRevision: state.revision });
+      expect(state.items[0]?.payload.comment).toBe("Protected comment 249");
+      for (let index = 0; index < 220; index++) {
+        await command({ type: "edit", expectedRevision: state.revision, id: draft.id,
+          updatedAt: draft.updatedAt, payload: { comment: `Applied comment ${index}` } });
+      }
+      expect(state.history).toHaveLength(200);
+      expect(state.historyCursor).toBe(200);
+      await command({ type: "undo", expectedRevision: state.revision });
+      expect(state.items[0]?.payload.comment).toBe("Applied comment 218");
+      await command({ type: "redo", expectedRevision: state.revision });
+      expect(state.items[0]?.payload.comment).toBe("Applied comment 219");
+      await manager!.detach("helper_12345678");
+      state = (await new DraftSnapshotStore(directory).recover())!.state;
+      await activate();
+      expect(state.history).toHaveLength(200);
+      await command({ type: "undo", expectedRevision: state.revision });
+      expect(state.items[0]?.payload.comment).toBe("Applied comment 218");
+      expect(state.pendingDrafts).toEqual([]);
+    } finally {
+      await manager?.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  }, 60_000);
+
   it("validates a confirmed Placekeeper link and projects only its safe location", async () => {
     const service = backend();
     const manager = new MacosRuntimeManager(service);

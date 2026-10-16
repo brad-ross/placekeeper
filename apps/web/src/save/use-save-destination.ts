@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type Dispatch, type SetStateAction, type RefObject } from 'react';
 import { setAnnotationName } from '../../../../packages/core/src/review-commands.js';
 import { authoringAuthorityFor, type AuthoringAuthority } from '../review/authoring-session.js';
-import type { ReviewState } from '../../../../packages/core/src/review-model.js';
+import type { ReviewStateView } from '../../../../packages/core/src/review-model.js';
 import type { SaveStatus } from '../../../../packages/core/src/save-status.js';
 import type { SaveCopyProposal, ProductionScope, ProductionSessionApi } from '../host/session-contracts.js';
 import { pendingDestinationDisposition, pendingDestinationIsCurrent, pendingDestinationAttemptIsCurrent,
@@ -10,8 +10,8 @@ import { pendingDestinationDisposition, pendingDestinationIsCurrent, pendingDest
 /** Destination choice is a prerequisite; the authoring shell retains the draft.
  * Invalidation is called after the application's ordered generation reset. */
 export function useSaveDestination(props: { api: ProductionSessionApi }, scope: ProductionScope,
-  state: ReviewState, stateRef: RefObject<ReviewState>, documentGenerationRef: RefObject<number>,
-  setState: Dispatch<SetStateAction<ReviewState>>, setSaveStatus: Dispatch<SetStateAction<SaveStatus>>,
+  state: ReviewStateView, stateRef: RefObject<ReviewStateView>, documentGenerationRef: RefObject<number>,
+  setState: Dispatch<SetStateAction<ReviewStateView>>, setSaveStatus: Dispatch<SetStateAction<SaveStatus>>,
   setCommandError: (error: string | null) => void) {
   const [destinationDialog, setDestinationDialog] = useState<{
     readonly authority: AuthoringAuthority;

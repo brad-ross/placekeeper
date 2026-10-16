@@ -1,8 +1,8 @@
-import type { ReviewState } from '../../../../packages/core/src/review-model.js';
+import type { ReviewStateView } from '../../../../packages/core/src/review-model.js';
 import type { SaveStatus } from '../../../../packages/core/src/save-status.js';
 
 export function initiallyPortableItemIds(
-  state: ReviewState,
+  state: ReviewStateView,
   saveStatus: SaveStatus | undefined,
 ): Set<string> {
   return saveStatusIsCleanCurrent(state, saveStatus)
@@ -11,7 +11,7 @@ export function initiallyPortableItemIds(
 }
 
 export function saveStatusIsCleanCurrent(
-  state: ReviewState,
+  state: ReviewStateView,
   saveStatus: SaveStatus | undefined,
 ): boolean {
   return saveStatus?.sync.phase === 'clean'

@@ -1,5 +1,5 @@
 import type { SaveStatus } from "../../../../packages/core/src/save-status.js";
-import type { ReviewCommand, ReviewState } from "../../../../packages/core/src/review-model.js";
+import type { ReviewCommand, ReviewStateView } from "../../../../packages/core/src/review-model.js";
 
 export type SaveGatedCommand =
   | { readonly kind: "submit"; readonly command: ReviewCommand }
@@ -7,7 +7,7 @@ export type SaveGatedCommand =
   | { readonly kind: "choose-destination"; readonly pending: ReviewCommand };
 
 export function gateReviewCommand(
-  state: Pick<ReviewState, "workflow">,
+  state: Pick<ReviewStateView, "workflow">,
   status: SaveStatus,
   command: ReviewCommand,
   sourceDisposition: "local" | "remote-temporary" | "ephemeral" = "local",
@@ -24,8 +24,8 @@ export function gateReviewCommand(
 /** Save completion can advance without a review revision. Only adopt it for
  * the current document, and never replace newer locally observed progress. */
 export function canonicalSaveStatusCanApply(
-  currentState: ReviewState,
-  canonicalState: ReviewState,
+  currentState: ReviewStateView,
+  canonicalState: ReviewStateView,
   currentStatus: SaveStatus,
   canonicalStatus: SaveStatus,
 ): boolean {

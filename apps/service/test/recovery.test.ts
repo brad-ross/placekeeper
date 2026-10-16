@@ -25,7 +25,9 @@ import { setAnnotationName } from "../../../packages/core/src/review-commands.js
 import {
   DraftSnapshotStore,
   reviewStateDigest,
+  migrateRecoverableDraft,
   type RecoverableDraft,
+  type LegacyRecoverableDraft,
 } from "../src/recovery/draft-snapshot.js";
 import { assessGenerationRetention, enforceRetention } from "../src/recovery/retention.js";
 import { trackRecoveryTemporaryPath } from "../src/recovery/temporary-path-registry.js";
@@ -34,6 +36,8 @@ import {
   RecoveryOfferUnavailableError,
   SessionBroker as RawSessionBroker,
 } from "../src/sessions/session-broker.js";
+import { reduceReview } from "../../../packages/core/src/review-reducer.js";
+import { prepareRecoveredReview } from "../src/sessions/recovered-review-preparation.js";
 import { hashFile } from "../src/files/file-capabilities.js";
 
 const temporaryDirectories: string[] = [];
@@ -123,7 +127,7 @@ describe("source snapshot creation", () => {
   });
 });
 
-function draft(revision: number): RecoverableDraft {
+function draft(revision: number): LegacyRecoverableDraft {
   const base = createReviewState({
     sessionId: "a011ee5d-5e5c-4f34-929d-41f49256f427",
     source: {
@@ -141,6 +145,123 @@ function draft(revision: number): RecoverableDraft {
     acknowledgedAt: new Date(revision * 1_000).toISOString(),
   };
 }
+
+describe("compact recovery history", () => {
+  function legacyState(): ReviewState {
+    const command = addCommand(0);
+    if (command.type !== "add") throw new Error("Expected add");
+    const added = reduceReview(draft(0).state, command).items[0]!;
+    const edited = { ...added, payload: { ...added.payload, comment: "later edit" } };
+    const pendingDrafts: ReviewState["pendingDrafts"] = [{
+      id: randomUUID(), ownerViewId: "panel-a", baseGeneration: 1, revision: 20,
+      kind: "pageNote", pageIndex: 0, text: "latest protected text",
+      anchor: { kind: "page", pageIndex: 0, rect: { x: 1, y: 2, width: 3, height: 4 } },
+      disposition: { kind: "resolved", generation: 1 }, status: "protected",
+      createdAt: "2026-10-16T12:00:00.000Z", updatedAt: "2026-10-16T12:01:00.000Z",
+    }];
+    const base = draft(21).state;
+    const noops = Array.from({ length: 20 }, () => ({ beforeItems: [added], afterItems: [added],
+      beforePendingDrafts: [], afterPendingDrafts: pendingDrafts, generation: 1 }));
+    return { ...base, items: [added], pendingDrafts,
+      discardAudit: [{ target: "draft", id: randomUUID(), generation: 1, revision: 20,
+        ownerViewId: "panel-a", reason: "explicit-discard", discardedAt: "2026-10-16T12:00:00.000Z" }],
+      workflow: { ...base.workflow, historyBoundary: 1 },
+      history: [{ beforeItems: [], afterItems: [added], generation: 1 }, ...noops,
+        { beforeItems: [added], afterItems: [edited], generation: 1 }], historyCursor: 21 };
+  }
+
+  it.each([2, 3] as const)("compacts schema %i legacy history without changing current state or clean save identity", (schemaVersion) => {
+    const state = legacyState();
+    const priorDigest = reviewStateDigest(state);
+    const migrated = migrateRecoverableDraft({ ...draft(0), schemaVersion, state,
+      source: { disposition: "local", canonicalSourcePath: "/private/example/paper.pdf",
+        sourceSnapshotPath: "/private/example/source.pdf", displayName: "paper.pdf" },
+      destination: { phase: "none", generation: 0 },
+      sync: { phase: "clean", desiredRevision: state.revision, savedRevision: state.revision,
+        desiredDigest: priorDigest, savedDigest: priorDigest } });
+    expect(migrated.state).toMatchObject({ revision: 21, items: state.items,
+      pendingDrafts: state.pendingDrafts, discardAudit: state.discardAudit, historyCursor: 0,
+      workflow: { historyBoundary: 0 } });
+    expect(migrated.state.history).toHaveLength(1);
+    expect(migrated.state.history[0]).toMatchObject({ schemaVersion: 1 });
+    expect(migrated.sync).toEqual({ phase: "clean", desiredRevision: 21, savedRevision: 21,
+      desiredDigest: reviewStateDigest(migrated.state), savedDigest: reviewStateDigest(migrated.state) });
+    const redone = reduceReview(migrated.state, { type: "redo", expectedRevision: 21 });
+    expect(redone.items[0]?.payload.comment).toBe("later edit");
+    expect(redone.pendingDrafts).toEqual(state.pendingDrafts);
+    expect(redone.discardAudit).toEqual(state.discardAudit);
+  });
+
+  it("translates only matching pre-migration digests and leaves dirty saves dirty", () => {
+    const state = legacyState();
+    const migrated = migrateRecoverableDraft({ ...draft(0), schemaVersion: 2, state,
+      destination: { phase: "none", generation: 0 },
+      sync: { phase: "not-saved", desiredRevision: 21, savedRevision: 19,
+        desiredDigest: reviewStateDigest(state), savedDigest: "f".repeat(64) } });
+    expect(migrated.sync).toMatchObject({ phase: "not-saved", desiredRevision: 21, savedRevision: 19,
+      desiredDigest: reviewStateDigest(migrated.state), savedDigest: "f".repeat(64) });
+    const unmatched = migrateRecoverableDraft({ ...migrated, state,
+      sync: { ...migrated.sync, desiredDigest: "e".repeat(64) } });
+    expect(unmatched.sync.desiredDigest).toBe("e".repeat(64));
+    expect(unmatched.sync.savedDigest).toBe("f".repeat(64));
+  });
+
+  it("roundtrips compact JSON checksums and falls back from malformed versioned history", async () => {
+    const store = new DraftSnapshotStore(await temporaryDirectory());
+    const migrated = migrateRecoverableDraft({ ...draft(0), state: legacyState() });
+    await store.persist(migrated);
+    expect(await store.recover()).toEqual(migrated);
+    const malformed = { ...migrated, state: { ...migrated.state, revision: 22,
+      history: [{ schemaVersion: 99, itemChanges: [], auditChanges: [] }] } };
+    await store.persist(malformed as unknown as RecoverableDraft);
+    expect(await store.recover()).toEqual(migrated);
+  });
+
+  it("normalizes schema-1 history before CropBox geometry migration and preserves both replay sides", async () => {
+    const path = join(process.cwd(), "test/fixtures/pdfs/text-native.pdf");
+    const command = addCommand(0);
+    if (command.type !== "add") throw new Error("Expected add");
+    const before = { ...command.item, payload: { ...command.item.payload,
+      rect: { x: 72, y: 884, width: 90, height: 16 },
+      segmentRects: [{ x: 72, y: 884, width: 90, height: 16 }] } };
+    const after = { ...before, payload: { ...before.payload, comment: "later edit" } };
+    const state: ReviewState = { ...draft(0).state, schemaVersion: 1, revision: 2,
+      source: { ...draft(0).state.source, digest: await hashFile(path), byteLength: (await stat(path)).size },
+      items: [after], history: [{ beforeItems: [before], afterItems: [after], generation: 1 }], historyCursor: 1 };
+    const store = new DraftSnapshotStore(await temporaryDirectory());
+    await store.persist({ ...draft(0), state });
+    const matchingDraft = (await store.recover())!;
+    expect(matchingDraft.state.history[0]).toMatchObject({ schemaVersion: 1 });
+    const { resumedState, geometryMigrated } = await prepareRecoveredReview({
+      matchingDraft, recoveredSnapshotPath: path, approvedFile: { id: state.source.fileId },
+      approvedRoot: undefined, request: { pdfPath: path }, portableReader: async () => [],
+    });
+    expect(geometryMigrated).toBe(true);
+    const undone = reduceReview(resumedState, { type: "undo", expectedRevision: 2 });
+    expect(undone.items[0]?.payload).toMatchObject({ comment: "remember this",
+      rect: { x: 72, y: 92, width: 90, height: 16 } });
+    const redone = reduceReview(undone, { type: "redo", expectedRevision: 3 });
+    expect(redone.items[0]?.payload).toMatchObject({ comment: "later edit",
+      rect: { x: 72, y: 92, width: 90, height: 16 } });
+  });
+
+  it("preserves newly imported native marks through recovered compact undo", async () => {
+    const directory = await temporaryDirectory();
+    const path = join(directory, "source.pdf");
+    await writeFile(path, "%PDF synthetic source");
+    const command = addCommand(0);
+    if (command.type !== "add") throw new Error("Expected add");
+    const state = reduceReview(draft(0).state, command);
+    const native = { ...state.items[0]!, id: randomUUID(), kind: "pdfAnnotation" as const };
+    const matchingDraft = migrateRecoverableDraft({ ...draft(0), state: { ...state,
+      source: { ...state.source, digest: await hashFile(path), byteLength: (await stat(path)).size } } });
+    const { resumedState } = await prepareRecoveredReview({ matchingDraft, recoveredSnapshotPath: path,
+      approvedFile: { id: state.source.fileId }, approvedRoot: undefined, request: { pdfPath: path },
+      portableReader: async () => [native] });
+    const undone = reduceReview(resumedState, { type: "undo", expectedRevision: resumedState.revision });
+    expect(undone.items.map(({ id }) => id)).toEqual([native.id]);
+  });
+});
 
 describe("atomic recovery generations", () => {
   it("infers only unanimous owned authors and preserves mixed names until confirmation", () => {

@@ -1,3 +1,4 @@
+import type { CompactReviewHistoryEntry } from './review-history.js';
 export type JsonPrimitive = boolean | number | string | null;
 export type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue };
 
@@ -298,7 +299,17 @@ export interface ReviewState {
   readonly historyCursor: number;
 }
 
-export interface ReviewHistoryEntry {
+/** Read-only client state. Undo snapshots remain with the canonical state owner;
+ * a renderer only needs the history length and cursor to enable Undo and Redo.
+ * Full ReviewState is also a valid view (for browser/static hosts).
+ */
+export type ReviewStateView = Omit<ReviewState, "history"> & {
+  readonly history: { readonly length: number };
+};
+
+export type ReviewHistoryEntry = LegacyReviewHistoryEntry | CompactReviewHistoryEntry;
+
+export interface LegacyReviewHistoryEntry {
   readonly beforeItems: readonly ReviewItem[];
   readonly afterItems: readonly ReviewItem[];
   readonly generation?: number;
@@ -585,7 +596,6 @@ export function startReviewGeneration(
       },
     };
   });
-  const history = state.history.slice(0, state.historyCursor);
   return {
     ...state,
     revision: state.revision + 1,
@@ -600,10 +610,10 @@ export function startReviewGeneration(
       ...state.workflow,
       documentGeneration: input.documentGeneration,
       freshness: input.freshness ?? "current",
-      historyBoundary: history.length,
+      historyBoundary: 0,
     },
-    history,
-    historyCursor: history.length,
+    history: [],
+    historyCursor: 0,
   };
 }
 

@@ -11,7 +11,7 @@ struct MacPageRuntimeRequest {
     static func parse(_ value: Any, runtimeID: String) -> MacPageRuntimeRequest? {
         guard let value = value as? [String: Any],
               value["protocol"] as? String == "placekeeper.review-runtime",
-              value["version"] as? Int == 3,
+              value["version"] as? Int == 4,
               value["kind"] as? String == "request",
               value["runtimeId"] as? String == runtimeID,
               let requestID = safeID(value["requestId"]),
@@ -317,7 +317,7 @@ final class ReviewBridge {
         ]
         if next.generation != previous.generation { payload["previousGeneration"] = previous.generation }
         return [
-            "protocol": "placekeeper.review-runtime", "version": 3, "kind": "event",
+            "protocol": "placekeeper.review-runtime", "version": 4, "kind": "event",
             "runtimeId": runtimeID, "event": "session-invalidated",
             "payload": payload,
         ]
@@ -388,7 +388,7 @@ final class ReviewBridge {
     ) -> [String: Any] {
         [
             "protocol": "placekeeper.review-runtime",
-            "version": 3,
+            "version": 4,
             "kind": "response",
             "runtimeId": runtimeID,
             "sessionId": sessionID,
@@ -420,7 +420,7 @@ final class ReviewBridge {
     ) -> [String: Any] {
         [
             "protocol": "placekeeper.review-runtime",
-            "version": 3,
+            "version": 4,
             "kind": "response",
             "runtimeId": runtimeID,
             "sessionId": sessionID,

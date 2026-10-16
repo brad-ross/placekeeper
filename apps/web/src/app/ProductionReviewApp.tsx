@@ -23,7 +23,7 @@ import {
   viewerResourcePoliciesEqual,
 } from "../host/viewer-resource-equivalence.js";
 import { visibleCodexContext } from "../host/context-projection.js";
-import type { ReviewItem, ReviewState } from "../../../../packages/core/src/review-model.js";
+import type { ReviewItem, ReviewStateView } from "../../../../packages/core/src/review-model.js";
 import type { ReviewAnnotation } from '../../../../packages/core/src/pdf-writer.js';
 import type { SaveStatus } from "../../../../packages/core/src/save-status.js";
 import {
@@ -527,7 +527,7 @@ export function authoringReferenceTarget(
 
 export interface ProductionReviewAppProps {
   readonly session: ProductionSession;
-  readonly initialState: ReviewState;
+  readonly initialState: ReviewStateView;
   readonly activeAuthoringDraftIds?: readonly string[];
   readonly initialSaveStatus?: SaveStatus;
   readonly scope: ProductionScope;
@@ -562,7 +562,7 @@ export interface ProductionReviewAppProps {
 }
 
 export function acceptedAuthoringCommandRequiresPersistence(
-  state: ReviewState,
+  state: ReviewStateView,
   status: SaveStatus,
   authoringPersistenceRequired: boolean,
 ): boolean {

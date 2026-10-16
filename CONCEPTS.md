@@ -13,7 +13,7 @@ The identity boundary separating successive document versions within a Review Se
 ### Review Revision
 The version of a Review Session's canonical review state, ordering accepted changes independently of its Document Generation.
 
-A new revision can update annotations without replacing PDF bytes; transient presence can change without a new revision.
+A new revision can update annotations or protect unfinished text without replacing PDF bytes. A revision does not necessarily add a document undo step; transient presence can change without a new revision.
 
 ### Task Binding
 The exclusive association between an agent task and a Review Session's Document Generation, established through a correlated launch and authenticated host activation.
@@ -64,7 +64,7 @@ Groups collapse in a fixed priority order, with edit history first and document 
 ### Protected Draft
 Durably accepted annotation work that remains recoverable before its final application or discard, even if its editing window disconnects.
 
-A draft's existence does not mean an editor is still active or that it should block a Document Generation change.
+A draft's existence does not mean an editor is still active or that it should block a Document Generation change. Updating or discarding it does not create a document undo step; applying it creates an annotation action whose undo does not reopen the consumed draft.
 
 ### Interaction Hold
 Temporary authority for an admitted source-dependent interaction to finish against the displayed Document Generation before the shared Review Session advances.

@@ -1,7 +1,7 @@
 import { REVIEW_COMMAND_IDS } from "../review/review-command-surface.js";
 import type { SaveDestinationResult } from "./session-contracts.js";
 import type { SaveStatus } from "../../../../packages/core/src/save-status.js";
-import type { ReviewCommand, ReviewState } from "../../../../packages/core/src/review-model.js";
+import type { ReviewCommand, ReviewStateView } from "../../../../packages/core/src/review-model.js";
 import type { PlacekeeperLinkLocation } from "../../../../packages/core/src/placekeeper-link.js";
 import {
   REVIEW_RUNTIME_PROTOCOL,
@@ -571,7 +571,7 @@ export function createRpcHostRuntime(
         ...value,
         activeAuthoringDraftIds: activeAuthoringDraftIds(value.activeAuthoringDraftIds),
         session: { sessionId: value.sessionId },
-        state: value.state as unknown as ReviewState,
+        state: value.state as unknown as ReviewStateView,
         scope: value.scope as unknown as ProductionScope,
         saveStatus: value.saveStatus as unknown as SaveStatus,
         viewerAssets: {
@@ -604,9 +604,9 @@ export function createRpcHostRuntime(
       void invoke("presence").catch(() => undefined);
       return () => { void invoke("detach").catch(() => undefined); };
     },
-    async command(command: ReviewCommand): Promise<ReviewState | RejectedReviewCommand> {
+    async command(command: ReviewCommand): Promise<ReviewStateView | RejectedReviewCommand> {
       try {
-        const value = await invoke<ReviewState | RejectedReviewCommand>("command", command);
+        const value = await invoke<ReviewStateView | RejectedReviewCommand>("command", command);
         const conflictInvalidation = updateIdentityFromState(value);
         if (conflictInvalidation !== undefined) {
           publishInvalidation(conflictInvalidation);

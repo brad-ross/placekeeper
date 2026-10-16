@@ -629,7 +629,7 @@ describe('EmbedPDF writer gate', () => {
     ).rejects.toMatchObject({ code: 'invalid-annotation-geometry' });
   });
 
-  it('migrates legacy draft items and undo history from CropBox-offset geometry', async () => {
+  it.each(['legacy', 'compact'] as const)('migrates legacy draft items and %s undo history from CropBox-offset geometry', async (format) => {
     const sourcePdf = new Uint8Array(await readFile(resolve(fixtures, 'text-native.pdf')));
     const legacyItem: ReviewItem = {
       id: '78888888-8888-4888-8888-888888888888',
@@ -657,7 +657,11 @@ describe('EmbedPDF writer gate', () => {
       workflow: { schemaVersion: 1, mode: 'standard', documentRole: 'source-pdf', documentGeneration: 1, freshness: 'current', historyBoundary: 0 },
       pendingDrafts: [],
       discardAudit: [],
-      history: [{ beforeItems: [], afterItems: [legacyItem] }],
+      history: [format === 'legacy'
+        ? { beforeItems: [], afterItems: [legacyItem], generation: 1, beforePendingDrafts: [], afterPendingDrafts: [] }
+        : { schemaVersion: 1, generation: 1, auditChanges: [], itemChanges: [{ id: legacyItem.id,
+          before: { index: 0, item: { ...legacyItem, payload: { ...legacyItem.payload, comment: 'earlier' } } },
+          after: { index: 0, item: legacyItem } }] }],
       historyCursor: 1,
     };
 
@@ -668,7 +672,18 @@ describe('EmbedPDF writer gate', () => {
     expect(migrated.items[0]?.payload.segmentRects).toEqual([
       { x: 72, y: 92, width: 90, height: 16 },
     ]);
-    expect(migrated.history[0]?.afterItems[0]?.payload.rect).toEqual({
+    const entry = migrated.history[0]!;
+    expect(entry.generation).toBe(1);
+    if ('schemaVersion' in entry) {
+      expect(entry.itemChanges[0]?.before?.item.payload.rect).toEqual({ x: 72, y: 92, width: 90, height: 16 });
+      expect(entry.itemChanges[0]?.after?.index).toBe(0);
+      expect(entry.auditChanges).toEqual([]);
+    } else {
+      expect(entry.beforePendingDrafts).toEqual([]);
+      expect(entry.afterPendingDrafts).toEqual([]);
+    }
+    const afterItem = 'schemaVersion' in entry ? entry.itemChanges[0]?.after?.item : entry.afterItems[0];
+    expect(afterItem?.payload.rect).toEqual({
       x: 72,
       y: 92,
       width: 90,
