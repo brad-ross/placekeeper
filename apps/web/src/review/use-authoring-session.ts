@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
 import { addHighlight, addInsert, addPageNote, addReplace, editReviewItem } from '../../../../packages/core/src/review-commands.js';
-import type { ReviewCommand, ReviewState } from '../../../../packages/core/src/review-model.js';
+import type { ReviewCommand, ReviewStateView } from '../../../../packages/core/src/review-model.js';
 import type { ReviewShellAuthoringModel } from './authoring-model.js';
 import type { RejectedReviewCommand } from './review-command-result.js';
 import { isVisibleFocusTarget } from './focus-target.js';
@@ -35,7 +35,7 @@ export type AuthoringSessionInvalidReason = 'document' | 'edit-target';
 export function authoringSessionInvalidReason(
   session: AuthoringSession,
   currentAuthority: AuthoringAuthority,
-  items: readonly ReviewState['items'][number][],
+  items: readonly ReviewStateView['items'][number][],
 ): AuthoringSessionInvalidReason | null {
   if (!authoringSessionIsCurrent(session, currentAuthority)) return 'document';
   if (session.source.kind === 'edit') {
@@ -46,7 +46,7 @@ export function authoringSessionInvalidReason(
 }
 
 export function authoringCommandDisposition(
-  result: ReviewState | RejectedReviewCommand,
+  result: ReviewStateView | RejectedReviewCommand,
 ): 'accepted' | 'rejected' | 'persistence-pending' {
   if (!('accepted' in result)) return 'accepted';
   return result.reason === 'persistence-pending' ? 'persistence-pending' : 'rejected';
@@ -68,7 +68,7 @@ export function authoringPersistenceCanClose(input: {
   readonly session: AuthoringSession;
   readonly pending: AuthoringPendingPersistence | null;
   readonly currentAuthority: AuthoringAuthority;
-  readonly items: readonly ReviewState['items'][number][];
+  readonly items: readonly ReviewStateView['items'][number][];
   readonly forcedInvalidToken: number | null;
   readonly persistedRevision: number | undefined;
 }): boolean {
@@ -107,7 +107,7 @@ export function interactionReceiptRequiresPersistence(input: {
 }
 
 interface AuthoringOptions {
-  state: ReviewState;
+  state: ReviewStateView;
   authoring: ReviewShellAuthoringModel;
   documentGeneration: number;
   saveOptionsOpen: boolean | undefined;
@@ -120,7 +120,7 @@ interface AuthoringOptions {
   clearInputDraft(): void;
   openNested(): void;
   closeNestedSurface(): void;
-  restoreReaderAfterAuthoring(session: AuthoringSession, reason: 'accepted' | 'cancelled' | 'source-replaced', state?: ReviewState): boolean;
+  restoreReaderAfterAuthoring(session: AuthoringSession, reason: 'accepted' | 'cancelled' | 'source-replaced', state?: ReviewStateView): boolean;
 }
 
 interface PendingAcknowledgement {
@@ -229,11 +229,11 @@ export async function finalizeReacquiredInteraction(
 
 /** A finalization receipt may paint from its exact revision or authoritative session successor. */
 export function canonicalStateForFinalizedInteraction(
-  state: ReviewState,
+  state: ReviewStateView,
   documentGeneration: number,
   receipt: ReviewInteractionReceipt,
   authority: AuthoringAuthority,
-): ReviewState | undefined {
+): ReviewStateView | undefined {
   if (state.sessionId !== authority.sessionId) return undefined;
   const canonicalGeneration = state.workflow.documentGeneration;
   // The finalized receipt authorizes an already-published successor even when
@@ -252,13 +252,13 @@ export function canonicalStateForFinalizedInteraction(
 }
 
 export function consumeFinalizedInteractionState(input: {
-  readonly state: ReviewState;
+  readonly state: ReviewStateView;
   readonly documentGeneration: number;
   readonly receipt: ReviewInteractionReceipt;
   readonly authority: AuthoringAuthority;
   readonly outcome: 'applied' | 'discarded';
   readonly announce: (message: string) => void;
-  readonly close: (reason: 'accepted' | 'cancelled' | 'source-replaced', state?: ReviewState) => void;
+  readonly close: (reason: 'accepted' | 'cancelled' | 'source-replaced', state?: ReviewStateView) => void;
 }): boolean {
   const canonical = canonicalStateForFinalizedInteraction(
     input.state,
@@ -421,7 +421,7 @@ export function useAuthoringSession({
     };
   }, [authoringSurfaceElement, authoring.onAuthoringViewportChange]);
   const acknowledgedRef = useRef(state);
-  const commandTailRef = useRef<Promise<ReviewState>>(Promise.resolve(state));
+  const commandTailRef = useRef<Promise<ReviewStateView>>(Promise.resolve(state));
   const acknowledgedAuthority = authoringAuthorityFor(
     acknowledgedRef.current,
     documentGeneration,
@@ -434,14 +434,14 @@ export function useAuthoringSession({
   }
 
   const submit = (
-    build: (state: ReviewState) => ReviewCommand,
+    build: (state: ReviewStateView) => ReviewCommand,
     options?: {
       readonly authority?: AuthoringAuthority;
       readonly onAccepted?: () => void;
       readonly onPersistencePending?: (revision: number) => void;
       readonly onStale?: () => void;
     },
-  ): Promise<ReviewState> => {
+  ): Promise<ReviewStateView> => {
     const result = commandTailRef.current.then(async () => {
       if (
         options?.authority !== undefined
@@ -463,7 +463,7 @@ export function useAuthoringSession({
       }
       const disposition = authoringCommandDisposition(result);
       const accepted = disposition === 'accepted';
-      const next = accepted ? result as ReviewState : (result as RejectedReviewCommand).state;
+      const next = accepted ? result as ReviewStateView : (result as RejectedReviewCommand).state;
       acknowledgedRef.current = next;
       setAnnouncement(accepted
         ? `Review revision ${next.revision} saved.`
@@ -559,7 +559,7 @@ export function useAuthoringSession({
   const closeAuthoringSession = (
     token: number,
     reason: 'accepted' | 'cancelled' | 'source-replaced',
-    acceptedState?: ReviewState,
+    acceptedState?: ReviewStateView,
   ) => {
     const current = authoringSessionRef.current;
     if (current === null || current.token !== token) return;
@@ -613,7 +613,7 @@ export function useAuthoringSession({
     session: AuthoringSession,
     receipt: ReviewInteractionReceipt,
     outcome: 'applied' | 'discarded',
-    canonical: ReviewState,
+    canonical: ReviewStateView,
   ) => {
     if (interactionReceiptRequiresPersistence({
       outcome,
@@ -839,7 +839,7 @@ export function useAuthoringSession({
   }, [authoring.persistedRevision, forcedInvalidToken, pendingPersistence, state.items]);
   const submitAuthoring = async (
     session: AuthoringSession,
-    build: (state: ReviewState) => ReviewCommand,
+    build: (state: ReviewStateView) => ReviewCommand,
     onAccepted?: () => void,
   ) => {
     let accepted = false;
@@ -862,7 +862,7 @@ export function useAuthoringSession({
   const protectAuthoringDraft = (
     session: AuthoringSession,
     value: string,
-  ): Promise<ReviewState> => {
+  ): Promise<ReviewStateView> => {
     if (authoringValueRef.current?.token === session.token) authoringValueRef.current.value = value;
     return submit((state) => {
       const existing = state.pendingDrafts.find(({ id }) => id === session.draftId);

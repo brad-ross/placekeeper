@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
+import { reduceReview } from "../../../packages/core/src/review-reducer.js";
+import type { ReviewCommand, ReviewState } from "../../../packages/core/src/review-model.js";
 
 import {
   MacosRuntimeManager,
@@ -128,6 +130,51 @@ async function admit(manager: MacosRuntimeManager): Promise<void> {
 }
 
 describe("macOS canonical review runtime", () => {
+  it("reopens a long editing session and executes undo/redo against its retained server history", async () => {
+    let state = projection().state as ReviewState;
+    const item = {
+      id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", kind: "highlight" as const, pageIndex: 0,
+      createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z",
+      payload: { quote: "A long selection", prefix: "", suffix: "", comment: "Initial comment", reliable: true,
+        rect: { x: 10, y: 10, width: 100, height: 600 },
+        segmentRects: Array.from({ length: 60 }, (_, i) => ({ x: 10, y: 10 + i * 10, width: 100, height: 10 })) },
+    };
+    state = reduceReview(state, { type: "add", expectedRevision: 0, item });
+    for (let i = 0; i < 200; i++) {
+      state = reduceReview(state, { type: "edit", expectedRevision: state.revision, id: item.id,
+        updatedAt: item.updatedAt, payload: { comment: `Comment ${i}` } });
+    }
+    const current = () => ({ ...projection(state.revision), state });
+    const service = backend();
+    vi.mocked(service.begin).mockResolvedValue({
+      append: vi.fn(), cancel: vi.fn(),
+      finish: async () => ({ canonicalKey: "canonical_review_1234", projection: current() }),
+    });
+    vi.mocked(service.activate).mockImplementation(async () => current());
+    vi.mocked(service.current).mockImplementation(async () => current());
+    vi.mocked(service.invoke).mockImplementation(async (_key, _method, payload) => {
+      state = reduceReview(state, payload as ReviewCommand);
+      return state;
+    });
+    const manager = new MacosRuntimeManager(service);
+    await admit(manager);
+    await expect(manager.handle("helper_12345678", {
+      ...envelope, requestId: "request_activate_long", type: "activate", documentValidated: true,
+    })).resolves.toMatchObject({ type: "active", projection: {
+      state: { history: { length: 201 }, historyCursor: 201 },
+    } });
+    for (const type of ["undo", "redo"] as const) {
+      await expect(manager.handle("helper_12345678", {
+        ...envelope, requestId: `request_long_${type}`, type: "invoke", generation: 1,
+        revision: state.revision, method: "command",
+        payload: { type, expectedRevision: state.revision }, idempotencyKey: `operation_long_${type}`,
+      })).resolves.toMatchObject({ type: "result", method: "command" });
+      expect(state.items[0]!.payload.comment).toBe(type === "undo" ? "Comment 198" : "Comment 199");
+    }
+    expect(state.history).toHaveLength(201);
+    await manager.detach("helper_12345678");
+  });
+
   it("validates a confirmed Placekeeper link and projects only its safe location", async () => {
     const service = backend();
     const manager = new MacosRuntimeManager(service);

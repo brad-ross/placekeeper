@@ -1,6 +1,6 @@
 import type { ReviewExportFence } from "../../../../packages/core/src/review-runtime-protocol.js";
 import type { SaveStatus } from "../../../../packages/core/src/save-status.js";
-import type { ReviewState } from "../../../../packages/core/src/review-model.js";
+import type { ReviewStateView } from "../../../../packages/core/src/review-model.js";
 import type {
   ForwardSyncTexRequest,
   ProductionExportResult,
@@ -21,7 +21,7 @@ export interface HostRuntimeBootstrap extends HostRuntimeIdentity {
   /** Ephemeral broker presence; absent on older hosts and never persisted in ReviewState. */
   readonly activeAuthoringDraftIds?: readonly string[];
   readonly session: ProductionSession;
-  readonly state: ReviewState;
+  readonly state: ReviewStateView;
   readonly scope: ProductionScope;
   readonly saveStatus: SaveStatus;
   readonly viewerAssets: ViewerAssetUrls;

@@ -1,6 +1,6 @@
 import type { SaveDestinationResult } from "../host/session-contracts.js";
 import type { SaveStatus } from "../../../../packages/core/src/save-status.js";
-import type { ReviewCommand, ReviewState } from "../../../../packages/core/src/review-model.js";
+import type { ReviewCommand, ReviewStateView } from "../../../../packages/core/src/review-model.js";
 import type {
   ProductionSession,
   ProductionSessionApi,
@@ -217,7 +217,7 @@ function maintainPresence(session: ProductionSession): () => void {
 }
 
 export async function loadProductionSession(session: ProductionSession): Promise<{
-  readonly state: ReviewState;
+  readonly state: ReviewStateView;
   readonly activeAuthoringDraftIds: readonly string[];
   readonly scope: ProductionScope;
   readonly api: ProductionSessionApi;
@@ -225,10 +225,10 @@ export async function loadProductionSession(session: ProductionSession): Promise
 }> {
   const { request, post } = client(session);
   const [runtimeState, scope, saveStatus] = await Promise.all([
-    request<{ readonly state: ReviewState; readonly activeAuthoringDraftIds?: unknown }>("/runtime-state")
+    request<{ readonly state: ReviewStateView; readonly activeAuthoringDraftIds?: unknown }>("/runtime-state")
       .catch(async (error: unknown) => {
         if (!(error instanceof LocalReviewRequestError) || error.status !== 404) throw error;
-        return { state: await request<ReviewState>("/state"), activeAuthoringDraftIds: undefined };
+        return { state: await request<ReviewStateView>("/state"), activeAuthoringDraftIds: undefined };
       }),
     request<ProductionScope>("/scope"),
     request<SaveStatus>("/save/status"),
@@ -246,7 +246,7 @@ export async function loadProductionSession(session: ProductionSession): Promise
       command: async (
         command: ReviewCommand,
         attachment?: ReviewInteractionAttachment,
-      ): Promise<ReviewState | RejectedReviewCommand> => {
+      ): Promise<ReviewStateView | RejectedReviewCommand> => {
         const response = await fetch(`/s/${session.sessionId}/commands`, {
           method: "POST",
           headers: {
@@ -260,7 +260,7 @@ export async function loadProductionSession(session: ProductionSession): Promise
           const rejected: unknown = await response.json().catch(() => undefined);
           const generationConflict = isObject(rejected) && rejected.ok === false &&
             isObject(rejected.error) && rejected.error.kind === "generation-conflict";
-          const currentState = await request<ReviewState>("/state");
+          const currentState = await request<ReviewStateView>("/state");
           commandGeneration = currentState.workflow.documentGeneration;
           return {
             accepted: false,
@@ -282,14 +282,14 @@ export async function loadProductionSession(session: ProductionSession): Promise
           ) {
             return {
               accepted: false,
-              state: await request<ReviewState>("/state"),
+              state: await request<ReviewStateView>("/state"),
               message: rejected.error.message,
               reason: "rejected",
             };
           }
         }
         if (!response.ok) throw new Error(`The local review action failed safely (${response.status}).`);
-        const nextState = await response.json() as ReviewState;
+        const nextState = await response.json() as ReviewStateView;
         commandGeneration = nextState.workflow.documentGeneration;
         return nextState;
       },

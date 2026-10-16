@@ -12,7 +12,7 @@ import {
   REVIEW_RUNTIME_PROTOCOL,
   REVIEW_RUNTIME_VERSION,
 } from "../../../packages/core/src/review-runtime-protocol.js";
-import type { ReviewCommand, ReviewItem, ReviewState } from "../../../packages/core/src/review-model.js";
+import type { ReviewCommand, ReviewItem } from "../../../packages/core/src/review-model.js";
 import { reviewSemanticDigest } from "../../../packages/core/src/live-context.js";
 import {
   anchorEvidenceFromReviewItem,
@@ -1519,7 +1519,7 @@ describe("atomic live document replacement", () => {
       },
     });
     const bootstrap = await runtime.bootstrap();
-    let pageState: ReviewState = bootstrap.state;
+    let pageState = bootstrap.state;
     runtime.subscribeInvalidations(() => {
       pageState = structuredClone(value.broker.state(sessionId)!);
     });

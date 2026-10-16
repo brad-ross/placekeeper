@@ -4,7 +4,7 @@ import type {
   ReadingLocationResolutionV1,
   ReviewExportFence,
 } from "../../../../packages/core/src/review-runtime-protocol.js";
-import type { ReviewCommand, ReviewState, SaveDestinationConfirmation } from "../../../../packages/core/src/review-model.js";
+import type { ReviewCommand, ReviewStateView, SaveDestinationConfirmation } from "../../../../packages/core/src/review-model.js";
 import type { SaveStatus } from "../../../../packages/core/src/save-status.js";
 import type { LiveContextBindingStatus } from "../../../../packages/core/src/live-context.js";
 import type { RejectedReviewCommand } from "../review/review-command-result.js";
@@ -54,7 +54,7 @@ export interface ProductionExportResult {
 }
 
 export type SaveDestinationResult = SaveStatus & {
-  readonly nameResult?: ReviewState | RejectedReviewCommand;
+  readonly nameResult?: ReviewStateView | RejectedReviewCommand;
 };
 
 export interface ReviewInteractionAttachment {
@@ -78,7 +78,7 @@ export interface ProductionSessionApi extends Partial<ReviewInteractionTransport
   command(
     command: ReviewCommand,
     attachment?: ReviewInteractionAttachment,
-  ): Promise<ReviewState | RejectedReviewCommand>;
+  ): Promise<ReviewStateView | RejectedReviewCommand>;
   saveStatus(): Promise<SaveStatus>;
   saveProposal(): Promise<SaveCopyProposal>;
   chooseCopy(filename?: string, folderSelectionId?: string, confirmation?: SaveDestinationConfirmation): Promise<SaveDestinationResult>;

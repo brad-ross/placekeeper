@@ -1,5 +1,5 @@
 import { useEffect, useState, type Dispatch, type SetStateAction, type RefObject } from 'react';
-import type { ReviewState } from '../../../../packages/core/src/review-model.js';
+import type { ReviewStateView } from '../../../../packages/core/src/review-model.js';
 import type { LiveContextBindingStatus } from '../../../../packages/core/src/live-context.js';
 import type { ProductionScope, ProductionSessionApi } from './session-contracts.js';
 import { visibleCodexContext, reviewStateRequestKey, updateProductionScope, updateCodexContext } from './context-projection.js';
@@ -12,7 +12,7 @@ const CODEX_SCOPE_POLL_MS = 1_500;
 const CODEX_SCOPE_TIMEOUT_MS = 4_000;
 
 export function useCodexContext(props: { api: ProductionSessionApi }, scope: ProductionScope,
-  setScope: Dispatch<SetStateAction<ProductionScope>>, stateRef: RefObject<ReviewState>) {
+  setScope: Dispatch<SetStateAction<ProductionScope>>, stateRef: RefObject<ReviewStateView>) {
   const [codexContext, setCodexContext] = useState(scope.codexContext);
   useEffect(() => {
     if (scope.launchSurface !== 'codex' && scope.reconnectPending !== true) return;

@@ -298,6 +298,14 @@ export interface ReviewState {
   readonly historyCursor: number;
 }
 
+/** Read-only client state. Undo snapshots remain with the canonical state owner;
+ * a renderer only needs the history length and cursor to enable Undo and Redo.
+ * Full ReviewState is also a valid view (for browser/static hosts).
+ */
+export type ReviewStateView = Omit<ReviewState, "history"> & {
+  readonly history: { readonly length: number };
+};
+
 export interface ReviewHistoryEntry {
   readonly beforeItems: readonly ReviewItem[];
   readonly afterItems: readonly ReviewItem[];

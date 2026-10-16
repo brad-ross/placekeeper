@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
 import { isVisibleFocusTarget } from './focus-target.js';
-import type { ReviewItem, ReviewState } from '../../../../packages/core/src/review-model.js';
+import type { ReviewItem, ReviewStateView } from '../../../../packages/core/src/review-model.js';
 import { existingAnnotationKey, type ExistingAnnotation, type ExistingAnnotationsDiscovery } from '../pdf/existing-annotations.js';
 import type { PdfViewerNavigation } from '../pdf/viewer-navigation-adapter.js';
 import type { PdfTargetVisibility } from '../pdf/viewer-navigation.js';
@@ -20,7 +20,7 @@ interface FullAnnotationReaderSession {
 }
 
 interface AnnotationReaderOptions {
-  state: ReviewState;
+  state: ReviewStateView;
   items: readonly ReviewItem[];
   existingAnnotations: ExistingAnnotationsDiscovery;
   documentGeneration: number;
@@ -502,7 +502,7 @@ export function useAnnotationReader({
   const restoreReaderAfterAuthoring = (
     current: AuthoringSession,
     reason: 'accepted' | 'cancelled' | 'source-replaced',
-    acceptedState?: ReviewState,
+    acceptedState?: ReviewStateView,
   ): boolean => {
     const readerOrigin = current.origin.kind === 'reader-edit'
       && current.origin.surface?.kind !== 'reference'

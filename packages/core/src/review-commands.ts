@@ -42,7 +42,7 @@ function selectionPayload(anchor: ReviewSelectionAnchor): Record<string, JsonVal
 }
 
 function add(
-  state: ReviewState,
+  state: Pick<ReviewState, "revision">,
   kind: ReviewItemKind,
   pageIndex: number,
   payload: Record<string, JsonValue>,
@@ -61,7 +61,7 @@ function add(
 }
 
 export function addReplace(
-  state: ReviewState,
+  state: Pick<ReviewState, "revision">,
   anchor: ReviewSelectionAnchor,
   proposedText: string,
   factory: ReviewCommandFactory = defaultFactory,
@@ -73,7 +73,7 @@ export function addReplace(
 }
 
 export function addDelete(
-  state: ReviewState,
+  state: Pick<ReviewState, "revision">,
   anchor: ReviewSelectionAnchor,
   factory: ReviewCommandFactory = defaultFactory,
 ): ReviewCommand {
@@ -81,7 +81,7 @@ export function addDelete(
 }
 
 export function addInsert(
-  state: ReviewState,
+  state: Pick<ReviewState, "revision">,
   anchor: ReviewCaretAnchor,
   proposedText: string,
   factory: ReviewCommandFactory = defaultFactory,
@@ -96,7 +96,7 @@ export function addInsert(
 }
 
 export function addHighlight(
-  state: ReviewState,
+  state: Pick<ReviewState, "revision">,
   anchor: ReviewSelectionAnchor,
   comment?: string,
   factory: ReviewCommandFactory = defaultFactory,
@@ -108,7 +108,7 @@ export function addHighlight(
 }
 
 export function addPageNote(
-  state: ReviewState,
+  state: Pick<ReviewState, "revision">,
   pageIndex: number,
   position: ReviewRect,
   comment: string,
@@ -123,7 +123,7 @@ export function addPageNote(
 }
 
 export function editReviewItem(
-  state: ReviewState,
+  state: Pick<ReviewState, "revision">,
   id: string,
   payload: Readonly<Record<string, JsonValue>>,
   factory: Pick<ReviewCommandFactory, 'now'> = defaultFactory,
@@ -131,18 +131,18 @@ export function editReviewItem(
   return { type: 'edit', expectedRevision: state.revision, id, payload, updatedAt: factory.now() };
 }
 
-export function removeReviewItem(state: ReviewState, id: string): ReviewCommand {
+export function removeReviewItem(state: Pick<ReviewState, "revision">, id: string): ReviewCommand {
   return { type: 'remove', expectedRevision: state.revision, id };
 }
 
-export function undoReview(state: ReviewState): ReviewCommand {
+export function undoReview(state: Pick<ReviewState, "revision">): ReviewCommand {
   return { type: 'undo', expectedRevision: state.revision };
 }
 
-export function redoReview(state: ReviewState): ReviewCommand {
+export function redoReview(state: Pick<ReviewState, "revision">): ReviewCommand {
   return { type: 'redo', expectedRevision: state.revision };
 }
 
-export function setAnnotationName(state: ReviewState, annotationName: string): Extract<ReviewCommand, { type: 'set-annotation-name' }> {
+export function setAnnotationName(state: Pick<ReviewState, "revision">, annotationName: string): Extract<ReviewCommand, { type: 'set-annotation-name' }> {
   return { type: 'set-annotation-name', expectedRevision: state.revision, annotationName };
 }

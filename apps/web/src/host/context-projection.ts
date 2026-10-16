@@ -1,9 +1,9 @@
-import type { ReviewState } from '../../../../packages/core/src/review-model.js';
+import type { ReviewStateView } from '../../../../packages/core/src/review-model.js';
 import type { LiveContextBindingStatus } from '../../../../packages/core/src/live-context.js';
 import type { ProductionScope } from './session-contracts.js';
 function contextMatchesReviewState(
   status: Extract<LiveContextBindingStatus, { readonly status: "current" }>,
-  state: ReviewState,
+  state: ReviewStateView,
 ): boolean {
   return status.identity.placekeeperSessionId === state.sessionId &&
     status.identity.reviewRevision === state.revision &&
@@ -13,7 +13,7 @@ function contextMatchesReviewState(
 
 export function visibleCodexContext(
   status: LiveContextBindingStatus | undefined,
-  state: ReviewState,
+  state: ReviewStateView,
 ): LiveContextBindingStatus | undefined {
   if (status?.status !== "current" || contextMatchesReviewState(status, state)) return status;
   return {
@@ -24,7 +24,7 @@ export function visibleCodexContext(
   };
 }
 
-export function reviewStateRequestKey(state: ReviewState): string {
+export function reviewStateRequestKey(state: ReviewStateView): string {
   return JSON.stringify([
     state.sessionId,
     state.source.fileId,
