@@ -264,15 +264,19 @@ html, body, #root {
     grid-template-columns: 1fr;
     padding: 44px 0;
     gap: 30px;
+    text-align: center;
   }
+  .landing-hero :is(.static-launcher__brand, .landing-hero__actions) { justify-content: center; }
   .static-launcher h1 { font-size: clamp(38px, 8vw, 54px); letter-spacing: -1.8px; }
   .static-launcher__mark { width: 64px; height: 64px; }
   .landing-hero__description {
     max-width: 540px;
+    margin-inline: auto;
     font-size: 15px;
   }
   .static-launcher__card {
     max-width: 540px;
+    justify-self: center;
     padding: 23px;
   }
   .landing-showcase__switcher {
@@ -496,7 +500,7 @@ html, body, #root {
   .landing-surfaces { grid-template-columns: 1fr; gap: 36px; padding: 35px 0; }
   .landing-host__editor, .landing-host__conversation { display: none; }
   .landing-host--vscode .landing-host__body > img, .landing-host--chatgpt .landing-host__body > img { width: 100%; }
-  .landing-invitations { grid-template-columns: 1fr; gap: 35px; padding: 35px 0 45px; }
+  .landing-invitations { padding: 35px 0 45px; }
 }
 
 .landing-hero__actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 24px; }
