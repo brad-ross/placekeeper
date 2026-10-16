@@ -229,10 +229,17 @@ function migrateLegacyStateWithPages(
     ...state,
     schemaVersion: 2,
     items: state.items.map(migrate),
-    history: state.history.map((entry) => ({
+    history: state.history.map((entry) => 'schemaVersion' in entry ? {
+      ...entry,
+      itemChanges: entry.itemChanges.map((change) => ({ ...change,
+        before: change.before === null ? null : { ...change.before, item: migrate(change.before.item) },
+        after: change.after === null ? null : { ...change.after, item: migrate(change.after.item) },
+      })),
+    } : {
+      ...entry,
       beforeItems: entry.beforeItems.map(migrate),
       afterItems: entry.afterItems.map(migrate),
-    })),
+    }),
   };
 }
 

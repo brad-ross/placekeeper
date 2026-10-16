@@ -44,7 +44,7 @@ export async function prepareRecoveredReview(input: {
     ...migratedState,
     ...(nativeImportSucceeded ? { nativeAnnotationImportDigest: migratedState.source.digest } : {}),
     items: mergeNative(migratedState.items),
-    history: migratedState.history.map((entry) => ({ ...entry,
+    history: migratedState.history.map((entry) => 'schemaVersion' in entry ? entry : ({ ...entry,
       beforeItems: mergeNative(entry.beforeItems), afterItems: mergeNative(entry.afterItems),
     })),
     source: { ...migratedState.source, fileId: approvedFile.id },

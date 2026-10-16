@@ -1,4 +1,4 @@
-import type { ReviewDiscardAuditV1, ReviewHistoryEntry, ReviewItem } from './review-model.js';
+import type { ReviewDiscardAuditV1, LegacyReviewHistoryEntry, ReviewItem } from './review-model.js';
 
 export interface ReviewHistoryItemValue { readonly item: ReviewItem; readonly index: number }
 export interface ReviewHistoryAuditValue { readonly audit: ReviewDiscardAuditV1; readonly index: number }
@@ -8,7 +8,7 @@ export interface CompactReviewHistoryEntry {
   readonly itemChanges: readonly { readonly id: string; readonly before: ReviewHistoryItemValue | null; readonly after: ReviewHistoryItemValue | null }[];
   readonly auditChanges: readonly { readonly identity: string; readonly before: ReviewHistoryAuditValue | null; readonly after: ReviewHistoryAuditValue | null }[];
 }
-export type ReviewHistoryInput = ReviewHistoryEntry | CompactReviewHistoryEntry;
+export type ReviewHistoryInput = LegacyReviewHistoryEntry | CompactReviewHistoryEntry;
 export interface ReviewHistoryContent { readonly items: readonly ReviewItem[]; readonly discardAudit: readonly ReviewDiscardAuditV1[] }
 export interface NormalizedReviewHistory {
   readonly history: readonly CompactReviewHistoryEntry[];

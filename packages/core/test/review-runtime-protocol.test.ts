@@ -16,6 +16,8 @@ import {
   sanitizeMacosReviewRuntimeResponse,
   sanitizeReviewRuntimeDisplayString,
 } from "../src/review-runtime-protocol.js";
+import { addPageNote } from "../src/review-commands.js";
+import { reduceReview } from "../src/review-reducer.js";
 import { createReviewState } from "../src/review-model.js";
 import { chromeRuntimeProjectionChangeReason } from "../src/chrome-native-runtime-protocol.js";
 
@@ -51,6 +53,24 @@ describe("shared review runtime protocol", () => {
       expect(sanitize("command", { type: "edit", expectedRevision: 300, id: "annotation-0",
         updatedAt: "2026-01-01T00:00:00Z", payload: { history } })).toBeUndefined();
     }
+  });
+
+  it('projects compact command history while retaining canonical undo and redo', () => {
+    let state = createReviewState({ sessionId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      source: { fileId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', digest: 'a'.repeat(64), byteLength: 100 } });
+    state = reduceReview(state, addPageNote(state, 0, { x: 10, y: 10, width: 18, height: 18 }, 'Keep', {
+      createId: () => 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', now: () => '2026-08-07T12:00:00.000Z',
+    }));
+    expect(state.history[0]).toMatchObject({ schemaVersion: 1, itemChanges: [{ before: null }] });
+    state = reduceReview(state, { type: 'undo', expectedRevision: state.revision });
+    for (const sanitize of [sanitizeChromeReviewRuntimeResponse, sanitizeMacosReviewRuntimeResponse]) {
+      const view = sanitize('command', state);
+      expect(view).toMatchObject({ items: [], history: { length: 1 }, historyCursor: 0 });
+      expect(sanitize('command', view)).toEqual(view);
+      expect(JSON.stringify(view)).not.toContain('itemChanges');
+    }
+    state = reduceReview(state, { type: 'redo', expectedRevision: state.revision });
+    expect(state.items[0]?.payload.comment).toBe('Keep');
   });
 
   it("preserves canonical never-saved revision -1 across shared native hosts", () => {
