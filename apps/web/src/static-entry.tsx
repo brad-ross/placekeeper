@@ -237,7 +237,7 @@ export function StaticLauncher(props: {
     <section id="install" className="landing-invitations" aria-label="Get started with Placekeeper">
       <div>
         <h2>Make Placekeeper yours.</h2>
-        <p>Get the Mac app and optional integrations.</p>
+        <p>Get the Mac app and integrations.</p>
         <button type="button" className="landing-invitations__download" title="Install Placekeeper" aria-haspopup="dialog" onClick={(event) => showInstall(event.currentTarget)}><ReviewIcon name="download" size={16} /> Install</button>
       </div>
       <div>
