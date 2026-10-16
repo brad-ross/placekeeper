@@ -56,7 +56,6 @@ export function createReviewHistoryEntry(before: ReviewHistoryContent, after: Re
   }));
   const auditChanges = changedEntities(before.discardAudit.filter(audit => audit.target === 'item'), after.discardAudit.filter(audit => audit.target === 'item'), reviewHistoryAuditIdentity).map(change => ({
     identity: change.id,
-    // Store positions in the complete audit list, including unrelated draft records.
     before: change.before && { audit: change.before.value, index: before.discardAudit.indexOf(change.before.value) },
     after: change.after && { audit: change.after.value, index: after.discardAudit.indexOf(change.after.value) },
   }));
@@ -137,7 +136,6 @@ export function normalizeReviewHistory(history: readonly ReviewHistoryInput[], h
       if (position < historyBoundary) boundary++;
     }
   });
-  // The current state is the checkpoint; predecessor-generation entries are unreachable.
   return boundReviewHistory(compact.slice(boundary), cursor - boundary, 0);
 }
 

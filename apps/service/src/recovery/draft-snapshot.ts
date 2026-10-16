@@ -195,8 +195,6 @@ export function reviewStateDigest(
 export function migrateRecoverableDraft(draft: RecoverableDraft): RecoverableDraftV3 {
   const previousDigest = reviewStateDigest(draft.state);
   const normalized = normalizeReviewState(draft.state);
-  // Validate versioned entries even when they precede the generation boundary.
-  // Current items, protected drafts and audit remain the recovery checkpoint.
   const { history, historyCursor, historyBoundary } = normalizeReviewHistory(
     normalized.history, normalized.historyCursor, normalized.workflow.historyBoundary,
   );
@@ -205,8 +203,6 @@ export function migrateRecoverableDraft(draft: RecoverableDraft): RecoverableDra
   const desiredDigest = reviewStateDigest(state);
   const sync = draft.schemaVersion === 1 ? undefined : {
     ...draft.sync,
-    // History bookkeeping is included in the digest. Translate only identities
-    // that actually described this checkpoint, never a genuinely older save.
     ...(draft.sync.desiredDigest === previousDigest ? { desiredDigest } : {}),
     ...(draft.sync.savedDigest === previousDigest ? { savedDigest: desiredDigest } : {}),
   };
