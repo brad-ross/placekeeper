@@ -2245,8 +2245,7 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
   await expect(toolsWorkspace).toHaveAttribute("data-tools-workspace-open", "true");
   await expect(workspace).toHaveAttribute("data-workspace-presentation", "bottom");
   // The default fit-width scale refits when the tools tray occupies reading
-  // space. At the reading-zoom cap the page may already fit beside the tray,
-  // so the scale never grows and the page must stay clear of the tray.
+  // space. The scale never grows and the page must stay clear of the tray.
   await expect.poll(async () => Number.parseInt(await currentZoomText(page), 10))
     .toBeLessThanOrEqual(Number.parseInt(zoomBeforeDocking, 10));
   await expect.poll(async () => {
@@ -5511,16 +5510,10 @@ test('defaults a real PDF to fit width and refits bottom and resizable right rea
     const rightGap = rightEdge === undefined ? 0 : standardGap;
     await expect.poll(async () => {
       const geometry = await horizontalGeometry(rightEdge);
-      // At the reading-zoom cap the page stops growing and is centered, so the
-      // unused width splits evenly between both gaps.
-      const capped = await zoomValue().inputValue() === '150';
-      const extra = capped
-        ? Math.max(0, (geometry.intervalWidth - standardGap - rightGap - geometry.pageWidth) / 2)
-        : 0;
       return Math.max(
-        Math.abs(geometry.pageWidth - (geometry.intervalWidth - standardGap - rightGap - 2 * extra)),
-        Math.abs(geometry.leftGap - standardGap - extra),
-        Math.abs(geometry.rightGap - rightGap - extra),
+        Math.abs(geometry.pageWidth - (geometry.intervalWidth - standardGap - rightGap)),
+        Math.abs(geometry.leftGap - standardGap),
+        Math.abs(geometry.rightGap - rightGap),
       );
     }).toBeLessThan(3);
     const geometry = await horizontalGeometry(rightEdge);
@@ -5533,7 +5526,7 @@ test('defaults a real PDF to fit width and refits bottom and resizable right rea
   const closedGeometry = await expectFitted(standardGap);
   const expectScrollbarAtWindowEdge = async () => {
     if (await fitWidth.isVisible()) {
-      await page.keyboard.press('Escape');
+      await page.getByRole('button', { name: 'Open zoom controls' }).press('Escape');
       await expect(fitWidth).toBeHidden();
     }
     const stageBounds = (await page.locator('[data-review-stage]').boundingBox())!;
@@ -5588,7 +5581,7 @@ test('defaults a real PDF to fit width and refits bottom and resizable right rea
   expect(bottomGeometry.pageWidth).toBeCloseTo(closedGeometry.pageWidth, 0);
   await expect(page.getByRole('textbox', { name: /Current page 1 of 4/u })).toHaveValue('1');
 
-  // A fitted page follows window resizes, returning to the capped zoom when wide again.
+  // A fitted page follows window resizes, returning to its prior zoom when wide again.
   await page.setViewportSize({ width: 760, height: 900 });
   await expect(page.locator('[data-review-stage]')).toHaveAttribute('data-annotation-presentation', 'bottom');
   await expect.poll(() => zoomValue().inputValue()).not.toBe(closedZoom);
@@ -5610,12 +5603,11 @@ test('defaults a real PDF to fit width and refits bottom and resizable right rea
     const bounds = (await mainWorkspace.boundingBox())!;
     return Math.abs(bounds.x + bounds.width - rightWorkspaceBounds.x);
   }).toBeLessThan(1);
-  // The capped page still fits the right-docked reading width without a new fit.
-  await waitForStageMotion();
+  // Docking preserves the current scale; explicitly fit the narrower reading width.
+  await fitAndWait();
   const initialRightGeometry = await expectFitted(24, rightWorkspaceBounds.x);
   await expectScrollbarAtWindowEdge();
-  // A right dock still leaves room for the capped page at this window width.
-  expect(initialRightGeometry.pageWidth).toBeLessThanOrEqual(bottomGeometry.pageWidth + 1);
+  expect(initialRightGeometry.pageWidth).toBeLessThan(bottomGeometry.pageWidth);
   const rightFitZoom = await zoomValue().inputValue();
 
   const rightSplitter = page.getByRole('separator', { name: 'Resize References' });
@@ -5751,8 +5743,6 @@ test('refits opening workspaces only from fit width and preserves manual reading
     }).toBeLessThan(3);
   };
   await expectOpeningFit();
-  // Here the tray-open fit lands at about the 150% reading cap, so the page
-  // may keep its width; it must never grow.
   expect((await pdfPage.boundingBox())!.width).toBeLessThanOrEqual(initialWidth + 0.5);
   const fittedZoom = await currentZoomText(page);
   await toggleWorkspace(page);
