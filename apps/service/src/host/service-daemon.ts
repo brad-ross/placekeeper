@@ -1,3 +1,5 @@
+import { parseElectronAppControlResponse, type ElectronAppControlMessage, type ElectronAppControlResponse } from "../../../../packages/core/src/electron-app-control-protocol.js";
+import { validElectronReviewHelperResponse, type ElectronReviewHelperMessage, type ElectronReviewHelperResponse } from "../../../../packages/core/src/electron-helper-protocol.js";
 import { closeWindowsNativeWorker } from "../platform/windows-native-worker.js";
 import { readControlDiscovery } from "../platform/control-transport.js";
 import { platformPath, resolvePlatformLocations } from "../platform/locations.js";
@@ -349,6 +351,57 @@ export async function macosAppControlThroughDaemon(
         ...(signal === undefined ? {} : { signal }),
       });
   if (response.kind !== "macos-app-control" || parseMacosAppControlResponse(response.response) === undefined) {
+    throw new DaemonUpgradeRequiredError("malformed");
+  }
+  return response.response;
+}
+
+export async function electronRuntimeThroughDaemon(
+  appInstanceId: string,
+  helperId: string,
+  message: ElectronReviewHelperMessage,
+  signal?: AbortSignal,
+  paths = defaultDaemonPaths(),
+): Promise<ElectronReviewHelperResponse> {
+  const request = { kind: "electron-runtime" as const, appInstanceId, helperId, message };
+  const response = message.type === "admit" || message.type === "admit-link"
+    ? await demandStartedControl(request, paths, signal)
+    : await requestControl(paths.socketPath, request, {
+        timeoutMs: 10 * 60_000,
+        ...(signal === undefined ? {} : { signal }),
+      });
+  if (response.kind !== "electron-runtime" || !validElectronReviewHelperResponse(response.response)) {
+    throw new DaemonUpgradeRequiredError("malformed");
+  }
+  return response.response;
+}
+
+export async function detachElectronRuntimeThroughDaemon(
+  appInstanceId: string,
+  helperId: string,
+  paths = defaultDaemonPaths(),
+): Promise<void> {
+  const response = await requestControl(
+    paths.socketPath,
+    { kind: "electron-runtime-detach", appInstanceId, helperId },
+    { timeoutMs: 15_000 },
+  );
+  if (response.kind !== "electron-runtime-detached") throw new DaemonUpgradeRequiredError("malformed");
+}
+
+export async function electronAppControlThroughDaemon(
+  message: ElectronAppControlMessage,
+  signal?: AbortSignal,
+  paths = defaultDaemonPaths(),
+): Promise<ElectronAppControlResponse> {
+  const request = { kind: "electron-app-control" as const, message };
+  const response = message.type === "register-app"
+    ? await demandStartedControl(request, paths, signal)
+    : await requestControl(paths.socketPath, request, {
+        timeoutMs: 15_000,
+        ...(signal === undefined ? {} : { signal }),
+      });
+  if (response.kind !== "electron-app-control" || parseElectronAppControlResponse(response.response) === undefined) {
     throw new DaemonUpgradeRequiredError("malformed");
   }
   return response.response;

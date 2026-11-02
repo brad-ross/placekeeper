@@ -34,6 +34,8 @@ import { ChromeTransferStore } from "../browser/chrome-handoff.js";
 import { validatePdfInSubprocess } from "../browser/chrome-pdf-validator.js";
 import { ChromeRuntimeManager } from "../browser/chrome-runtime.js";
 import { ChromeServiceRuntimeBackend } from "../browser/chrome-runtime-backend.js";
+import { NativeRuntimeManager } from "../desktop/native-runtime.js";
+import { NativeAppLifecycleManager } from "../desktop/app-lifecycle.js";
 import { MacosRuntimeManager } from "../macos/macos-runtime.js";
 import { MacosAppLifecycleManager } from "../macos/app-lifecycle.js";
 
@@ -176,6 +178,8 @@ export class PlacekeeperHost {
   readonly lifecycle: DaemonLifecycleCoordinator;
   readonly browserSources: BrowserSourceStore;
   readonly chromeRuntime: ChromeRuntimeManager;
+  readonly electronRuntime: NativeRuntimeManager;
+  readonly electronLifecycle: NativeAppLifecycleManager;
   readonly macosRuntime: MacosRuntimeManager;
   readonly macosLifecycle: MacosAppLifecycleManager;
   readonly codexRuntime: CodexRuntimeManager;
@@ -192,6 +196,8 @@ export class PlacekeeperHost {
     lifecycle: DaemonLifecycleCoordinator,
     browserSources: BrowserSourceStore,
     chromeRuntime: ChromeRuntimeManager,
+    electronRuntime: NativeRuntimeManager,
+    electronLifecycle: NativeAppLifecycleManager,
     macosRuntime: MacosRuntimeManager,
     macosLifecycle: MacosAppLifecycleManager,
     codexRuntime: CodexRuntimeManager,
@@ -206,6 +212,8 @@ export class PlacekeeperHost {
     this.lifecycle = lifecycle;
     this.browserSources = browserSources;
     this.chromeRuntime = chromeRuntime;
+    this.electronRuntime = electronRuntime;
+    this.electronLifecycle = electronLifecycle;
     this.macosRuntime = macosRuntime;
     this.macosLifecycle = macosLifecycle;
     this.codexRuntime = codexRuntime;
@@ -255,6 +263,12 @@ export class PlacekeeperHost {
     });
     const macosRuntime = new MacosRuntimeManager(macosRuntimeBackend.authority());
     const macosLifecycle = new MacosAppLifecycleManager(macosRuntime);
+    const electronRuntimeBackend = new ChromeServiceRuntimeBackend({
+      broker, browserSources, transferStore: chromeTransferStore, saving, exporting,
+      runtimeHost: "electron",
+    });
+    const electronRuntime = new NativeRuntimeManager("electron", electronRuntimeBackend.authority());
+    const electronLifecycle = new NativeAppLifecycleManager(electronRuntime);
     const codexRuntime = new CodexRuntimeManager(broker, {
       ...(options.nativeQualification === undefined ? {} : { qualification: options.nativeQualification }),
       ...(options.nativeQualificationExperiments === undefined ? {} : { experiments: options.nativeQualificationExperiments }),
@@ -266,12 +280,14 @@ export class PlacekeeperHost {
       activity: () => {
         const activity = broker.activity();
         const chromeActivity = chromeRuntime.activity();
+        const electronActivity = electronRuntime.activity();
+        const electronAppActivity = electronLifecycle.activity();
         const macosActivity = macosRuntime.activity();
         const macosAppActivity = macosLifecycle.activity();
         return {
           ...activity,
           reviewPresence: activity.reviewPresence + chromeActivity.connections
-            + macosActivity.helpers + macosAppActivity.appInstances + codexRuntime.activityCount(),
+            + electronActivity.helpers + electronAppActivity.appInstances + macosActivity.helpers + macosAppActivity.appInstances + codexRuntime.activityCount(),
           transientWork: activity.transientWork + saving.activityCount(),
         };
       },
@@ -309,6 +325,8 @@ export class PlacekeeperHost {
       lifecycle,
       browserSources,
       chromeRuntime,
+      electronRuntime,
+      electronLifecycle,
       macosRuntime,
       macosLifecycle,
       codexRuntime,
@@ -480,6 +498,8 @@ export class PlacekeeperHost {
       this.context.discardAll();
       await this.server.close();
       await this.chromeRuntime.close();
+      await this.electronLifecycle.close();
+      await this.electronRuntime.close();
       await this.macosLifecycle.close();
       await this.macosRuntime.close();
       await this.saving.drain();

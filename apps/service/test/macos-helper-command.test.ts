@@ -1,3 +1,4 @@
+import { runNativeLifecycleControlCommand } from "../src/desktop/lifecycle-control-command.js";
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -215,11 +216,11 @@ describe("macOS process helpers", () => {
     expect(diagnostic).toHaveBeenCalledWith("input-eof");
   });
 
-  it("turns lifecycle pipe EOF into app-instance detachment", async () => {
+  it.each([runMacosLifecycleControlCommand, runNativeLifecycleControlCommand])("turns lifecycle pipe EOF into app-instance detachment", async (runLifecycle) => {
     const appInstanceId = "app_instance_5678";
     const exchanged: unknown[] = [];
     const output: Buffer[] = [];
-    await expect(runMacosLifecycleControlCommand({
+    await expect(runLifecycle({
       input: splitFrames([
         {
           protocolVersion: 1,
@@ -250,6 +251,19 @@ describe("macOS process helpers", () => {
       { type: "activity" },
       { type: "detach", reason: "eof" },
     ]);
+  });
+
+  it.each([runMacosLifecycleControlCommand, runNativeLifecycleControlCommand])("detaches registration if writing its ACK fails", async (runLifecycle) => {
+    const appInstanceId = "app_instance_ack_5678";
+    const exchange = vi.fn(async () => ({ protocolVersion: 1 as const, type: "ack" as const, appInstanceId }));
+    await expect(runLifecycle({
+      input: splitFrames([{ protocolVersion: 1, type: "register-app", appInstanceId,
+        processId: 123, startIdentity: "start_identity_5678", buildIdentity: "build_identity_5678" }]),
+      write: async () => { throw new Error("pipe closed"); },
+      appInstanceId,
+      exchange,
+    })).resolves.toBe(2);
+    expect(exchange).toHaveBeenLastCalledWith({ protocolVersion: 1, type: "detach", appInstanceId, reason: "eof" });
   });
 
   it("requires every process identity before starting", () => {

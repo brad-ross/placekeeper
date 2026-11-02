@@ -39,6 +39,7 @@ import type {
 } from "./placekeeper-host.js";
 import type { ConditionalShutdownResult } from "./daemon-lifecycle.js";
 
+import { parseElectronReviewHelperMessage } from "../../../../packages/core/src/electron-helper-protocol.js";
 import { parseMacosReviewHelperMessage } from "../../../../packages/core/src/macos-helper-protocol.js";
 
 // Both directions are explicitly bounded. Evidence requests use a stricter
@@ -165,18 +166,21 @@ async function dispatch(
     await host.chromeRuntime.detach(request.portId);
     return { kind: "chrome-runtime-detached" };
   }
-  if (request.kind === "macos-app-control") {
-    return { kind: "macos-app-control", response: await host.macosLifecycle.handle(request.message) };
+  if (request.kind === "macos-app-control" || request.kind === "electron-app-control") {
+    const lifecycle = request.kind === "macos-app-control" ? host.macosLifecycle : host.electronLifecycle;
+    return { kind: request.kind, response: await lifecycle.handle(request.message) };
   }
-  if (request.kind === "macos-runtime") {
-    const message = parseMacosReviewHelperMessage(request.message)!;
+  if (request.kind === "macos-runtime" || request.kind === "electron-runtime") {
+    const lifecycle = request.kind === "macos-runtime" ? host.macosLifecycle : host.electronLifecycle;
+    const runtime = request.kind === "macos-runtime" ? host.macosRuntime : host.electronRuntime;
+    const message = (request.kind === "macos-runtime" ? parseMacosReviewHelperMessage : parseElectronReviewHelperMessage)(request.message)!;
     const isAdmission = message.type === "admit" || message.type === "admit-link";
-    const alreadyOwned = host.macosLifecycle.ownsHelper(request.appInstanceId, request.helperId);
+    const alreadyOwned = lifecycle.ownsHelper(request.appInstanceId, request.helperId);
     const attached = alreadyOwned || (isAdmission
-      && host.macosLifecycle.attachHelper(request.appInstanceId, request.helperId));
+      && lifecycle.attachHelper(request.appInstanceId, request.helperId));
     if (!attached) {
       return {
-        kind: "macos-runtime",
+        kind: request.kind,
         response: {
           protocolVersion: 1,
           windowId: message.windowId,
@@ -187,14 +191,14 @@ async function dispatch(
         },
       };
     }
-    const response = await host.macosRuntime.handle(request.helperId, message);
+    const response = await runtime.handle(request.helperId, message);
     // A lifecycle detach can race an admission after ownership was attached
     // but before the runtime installed its provisional record. Reconcile after
     // the await so the late result cannot recreate authority for a dead helper.
-    if (!host.macosLifecycle.ownsHelper(request.appInstanceId, request.helperId)) {
-      await host.macosRuntime.detach(request.helperId);
+    if (!lifecycle.ownsHelper(request.appInstanceId, request.helperId)) {
+      await runtime.detach(request.helperId);
       return {
-        kind: "macos-runtime",
+        kind: request.kind,
         response: {
           protocolVersion: 1,
           windowId: message.windowId,
@@ -206,16 +210,18 @@ async function dispatch(
       };
     }
     if (response.type === "released" || (isAdmission && response.type === "failure")) {
-      host.macosLifecycle.releaseHelper(request.appInstanceId, request.helperId);
+      lifecycle.releaseHelper(request.appInstanceId, request.helperId);
     }
-    return { kind: "macos-runtime", response };
+    return { kind: request.kind, response };
   }
-  if (request.kind === "macos-runtime-detach") {
-    if (host.macosLifecycle.ownsHelper(request.appInstanceId, request.helperId)) {
-      await host.macosRuntime.detach(request.helperId);
-      host.macosLifecycle.releaseHelper(request.appInstanceId, request.helperId);
+  if (request.kind === "macos-runtime-detach" || request.kind === "electron-runtime-detach") {
+    const lifecycle = request.kind === "macos-runtime-detach" ? host.macosLifecycle : host.electronLifecycle;
+    const runtime = request.kind === "macos-runtime-detach" ? host.macosRuntime : host.electronRuntime;
+    if (lifecycle.ownsHelper(request.appInstanceId, request.helperId)) {
+      await runtime.detach(request.helperId);
+      lifecycle.releaseHelper(request.appInstanceId, request.helperId);
     }
-    return { kind: "macos-runtime-detached" };
+    return { kind: request.kind === "macos-runtime-detach" ? "macos-runtime-detached" : "electron-runtime-detached" };
   }
   if (request.kind === "link-preflight") {
     return { kind: "link-preflight", response: await host.preflightLink(request.link) };

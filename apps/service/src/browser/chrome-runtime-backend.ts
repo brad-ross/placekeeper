@@ -39,7 +39,7 @@ export interface ChromeServiceRuntimeBackendOptions {
   readonly saving: PdfSaveCoordinator;
   readonly exporting: ExportCoordinator;
   readonly quota?: ChromeRuntimeAggregateQuota;
-  readonly runtimeHost?: "chrome" | "macos";
+  readonly runtimeHost?: "chrome" | "macos" | "electron";
   readonly downloadFolder?: () => Promise<string | undefined>;
 }
 
@@ -57,7 +57,7 @@ export class ChromeServiceRuntimeBackend implements ChromeRuntimeBackend {
   readonly #presentations = new Map<string, Set<string>>();
   readonly #provisionals = new Map<string, number>();
   readonly #activated = new Set<string>();
-  readonly #runtimeHost: "chrome" | "macos";
+  readonly #runtimeHost: "chrome" | "macos" | "electron";
   readonly #downloadFolder: () => Promise<string | undefined>;
   readonly #journal: ChromeRuntimeOperationJournal;
 

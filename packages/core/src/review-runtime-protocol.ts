@@ -2,7 +2,7 @@ import type { ReviewAnchorEvidenceV1, SaveDestinationConfirmation } from "./revi
 export const REVIEW_RUNTIME_PROTOCOL = "placekeeper.review-runtime" as const;
 export const REVIEW_RUNTIME_VERSION = 4 as const;
 
-export const REVIEW_RUNTIME_HOSTS = ["vscode", "chrome", "macos", "codex"] as const;
+export const REVIEW_RUNTIME_HOSTS = ["vscode", "chrome", "macos", "electron", "codex"] as const;
 export type ReviewRuntimeHost = typeof REVIEW_RUNTIME_HOSTS[number];
 
 export const REVIEW_RUNTIME_METHODS = [
@@ -102,6 +102,9 @@ export const REVIEW_RUNTIME_HOST_METHODS = {
     method !== "forwardSyncTex" && method !== "reverseSyncTex"
   )),
   codex: REVIEW_RUNTIME_METHODS.filter((method) => (
+    method !== "forwardSyncTex" && method !== "reverseSyncTex"
+  )),
+  electron: REVIEW_RUNTIME_METHODS.filter((method) => (
     method !== "forwardSyncTex" && method !== "reverseSyncTex"
   )),
   macos: REVIEW_RUNTIME_METHODS.filter((method) => (
@@ -312,7 +315,7 @@ function safeChromeScope(value: unknown): unknown | undefined {
   };
 }
 
-function safeMacosScope(value: unknown): unknown | undefined {
+function safeNativeScope(host: NativeRuntimeHost, value: unknown): unknown | undefined {
   if (!record(value)) return undefined;
   const candidate = { ...value };
   for (const key of Object.keys(candidate)) {
@@ -320,7 +323,7 @@ function safeMacosScope(value: unknown): unknown | undefined {
   }
   const projected = safeChromeScope({ ...candidate, launchSurface: "chrome" });
   if (!record(projected)) return undefined;
-  return { ...projected, launchSurface: "macos" };
+  return { ...projected, launchSurface: host };
 }
 
 function safeChromeSaveStatus(value: unknown): unknown | undefined {
@@ -443,12 +446,15 @@ export function sanitizeChromeReviewRuntimeRequest(
   return undefined;
 }
 
-/** Returns a fresh, closed payload for the packaged macOS page/runtime lane. */
-export function sanitizeMacosReviewRuntimeRequest(
+/** Hosts that use the private desktop helper contract. */
+export type NativeRuntimeHost = "macos" | "electron";
+
+export function sanitizeNativeReviewRuntimeRequest(
+  host: NativeRuntimeHost,
   method: ReviewRuntimeMethod,
   payload: unknown,
 ): unknown | undefined {
-  if (!isReviewRuntimeMethodForHost("macos", method)) return undefined;
+  if (!isReviewRuntimeMethodForHost(host, method)) return undefined;
   return sanitizeChromeReviewRuntimeRequest(method, payload);
 }
 
@@ -570,24 +576,25 @@ export function sanitizeChromeReviewRuntimeResponse(
 
 /** Projects trusted service output without paths, capabilities, or link bases.
  * Link construction stays on the trusted helper/native host-action lane. */
-export function sanitizeMacosReviewRuntimeResponse(
+export function sanitizeNativeReviewRuntimeResponse(
+  host: NativeRuntimeHost,
   method: ReviewRuntimeMethod,
   value: unknown,
 ): unknown | undefined {
-  if (!isReviewRuntimeMethodForHost("macos", method)) return undefined;
-  if (method === "scope") return safeMacosScope(value);
+  if (!isReviewRuntimeMethodForHost(host, method)) return undefined;
+  if (method === "scope") return safeNativeScope(host, value);
   if (method === "bootstrap") {
     if (!record(value) || !record(value.scope)) return undefined;
     const projected = sanitizeChromeReviewRuntimeResponse("bootstrap", {
       ...value,
       scope: { ...value.scope, launchSurface: "chrome" },
-      // The Mac page never receives or supplies the path-bearing link base.
+      // The desktop page never receives or supplies the path-bearing link base.
       // A fixed inert placeholder lets us reuse the remainder of Chrome's
       // closed bootstrap validator before removing this field below.
       canonicalLinkBase: "placekeeper:///Redacted.pdf",
     });
     if (!record(projected)) return undefined;
-    const scope = safeMacosScope(value.scope);
+    const scope = safeNativeScope(host, value.scope);
     if (scope === undefined) return undefined;
     const { canonicalLinkBase: _canonicalLinkBase, ...withoutLinkBase } = projected;
     return { ...withoutLinkBase, scope };
@@ -668,4 +675,12 @@ export function sanitizeCodexReviewRuntimeResponse(
     return { ...projected, scope: { ...projected.scope, launchSurface: "codex", ...(codexContext === undefined ? {} : { codexContext }) } };
   }
   return projected;
+}
+
+/** Compatibility projections for the existing Mac host. */
+export function sanitizeMacosReviewRuntimeRequest(method: ReviewRuntimeMethod, value: unknown): unknown | undefined {
+  return sanitizeNativeReviewRuntimeRequest("macos", method, value);
+}
+export function sanitizeMacosReviewRuntimeResponse(method: ReviewRuntimeMethod, value: unknown): unknown | undefined {
+  return sanitizeNativeReviewRuntimeResponse("macos", method, value);
 }

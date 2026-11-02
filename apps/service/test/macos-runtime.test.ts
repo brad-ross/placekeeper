@@ -9,10 +9,12 @@ import type { PendingReviewDraftV1, ReviewCommand, ReviewState } from "../../../
 import { DraftSnapshotStore } from "../src/recovery/draft-snapshot.js";
 
 import {
-  MacosRuntimeManager,
+  MacosRuntimeManager as ExistingMacosRuntimeManager,
   type MacosRuntimeBackend,
   type MacosRuntimeTrustedProjection,
 } from "../src/macos/macos-runtime.js";
+
+import { NativeRuntimeManager } from "../src/desktop/native-runtime.js";
 
 const sourceBytes = Buffer.from("%PDF-1.7\nmacos-runtime\n%%EOF");
 const digest = createHash("sha256").update(sourceBytes).digest("hex");
@@ -120,7 +122,7 @@ function backend(): MacosRuntimeBackend {
   };
 }
 
-async function admit(manager: MacosRuntimeManager): Promise<void> {
+async function admit(manager: NativeRuntimeManager, host: "macos" | "electron"): Promise<void> {
   await expect(manager.handle("helper_12345678", {
     ...envelope,
     requestId: "request_admit_1",
@@ -130,14 +132,19 @@ async function admit(manager: MacosRuntimeManager): Promise<void> {
     type: "admitted",
     displayName: "Paper.pdf",
     resourceId: expect.stringMatching(/^resource_/u),
-    projection: { scope: { launchSurface: "macos" } },
+    projection: { scope: { launchSurface: host } },
   });
 }
 
-describe("macOS canonical review runtime", () => {
+describe.each(["macos", "electron"] as const)("%s canonical review runtime", (host) => {
+  const RuntimeManager = host === "macos" ? ExistingMacosRuntimeManager : class extends NativeRuntimeManager {
+    constructor(backend: MacosRuntimeBackend, options: import("../src/desktop/native-runtime.js").NativeRuntimeManagerOptions = {}) {
+      super("electron", backend, options);
+    }
+  };
   it("keeps protected typing durable through restart and bounds native semantic history", async () => {
     const directory = await mkdtemp(join(tmpdir(), "placekeeper-native-history-"));
-    let manager: MacosRuntimeManager | undefined;
+    let manager: NativeRuntimeManager | undefined;
     try {
       let state = projection().state as ReviewState;
       let store = new DraftSnapshotStore(directory);
@@ -165,8 +172,8 @@ describe("macOS canonical review runtime", () => {
       });
       let request = 0;
       const activate = async () => {
-        manager = new MacosRuntimeManager(service);
-        await admit(manager);
+        manager = new RuntimeManager(service);
+        await admit(manager, host);
         const response = await manager.handle("helper_12345678", {
           ...envelope, requestId: `request_activate_${++request}`, type: "activate", documentValidated: true,
         });
@@ -245,7 +252,7 @@ describe("macOS canonical review runtime", () => {
 
   it("validates a confirmed Placekeeper link and projects only its safe location", async () => {
     const service = backend();
-    const manager = new MacosRuntimeManager(service);
+    const manager = new RuntimeManager(service);
     await expect(manager.handle("helper_12345678", {
       ...envelope,
       requestId: "request_link_admit_1",
@@ -265,8 +272,8 @@ describe("macOS canonical review runtime", () => {
 
   it("admits, activates, mutates, reads, builds a link, and detaches one window", async () => {
     const service = backend();
-    const manager = new MacosRuntimeManager(service);
-    await admit(manager);
+    const manager = new RuntimeManager(service);
+    await admit(manager, host);
     await expect(manager.handle("helper_12345678", {
       ...envelope,
       requestId: "request_activate_1",
@@ -312,8 +319,8 @@ describe("macOS canonical review runtime", () => {
 
   it("binds interaction operations to the native helper incarnation and revokes it on detach", async () => {
     const service = backend();
-    const manager = new MacosRuntimeManager(service);
-    await admit(manager);
+    const manager = new RuntimeManager(service);
+    await admit(manager, host);
     await manager.handle("helper_12345678", {
       ...envelope, requestId: "request_activate_interaction", type: "activate", documentValidated: true,
     });
@@ -341,8 +348,8 @@ describe("macOS canonical review runtime", () => {
   });
 
   it("rejects stale, cross-window, path-bearing, and non-idempotent replay shapes", async () => {
-    const manager = new MacosRuntimeManager(backend());
-    await admit(manager);
+    const manager = new RuntimeManager(backend());
+    await admit(manager, host);
     await expect(manager.handle("helper_12345678", {
       ...envelope,
       windowId: "window_abcdefgh",
@@ -374,8 +381,8 @@ describe("macOS canonical review runtime", () => {
 
   it("isolates helper death and enforces aggregate helper limits", async () => {
     const service = backend();
-    const manager = new MacosRuntimeManager(service, { maxHelpers: 1 });
-    await admit(manager);
+    const manager = new RuntimeManager(service, { maxHelpers: 1 });
+    await admit(manager, host);
     await expect(manager.handle("helper_abcdefgh", {
       ...envelope,
       windowId: "window_abcdefgh",
@@ -397,7 +404,7 @@ describe("macOS canonical review runtime", () => {
       finish: vi.fn(async () => ({ choices: ["resume", "discard", "fork"] as const, offer, choose })),
       cancel: vi.fn(async () => undefined),
     });
-    const manager = new MacosRuntimeManager(service);
+    const manager = new RuntimeManager(service);
     await expect(manager.handle("helper_12345678", {
       ...envelope,
       requestId: "request_admit_3",
@@ -427,8 +434,8 @@ describe("macOS canonical review runtime", () => {
   it("returns ordered generation and revision invalidations without exposing authority", async () => {
     const service = backend();
     vi.mocked(service.current).mockResolvedValue(projection(2));
-    const manager = new MacosRuntimeManager(service);
-    await admit(manager);
+    const manager = new RuntimeManager(service);
+    await admit(manager, host);
     await manager.handle("helper_12345678", {
       ...envelope,
       requestId: "request_activate_3",
@@ -460,8 +467,8 @@ describe("macOS canonical review runtime", () => {
     vi.mocked(service.current).mockImplementation(async () => current);
     vi.mocked(service.readDocument).mockImplementation(async (_key, generation, offset, length) =>
       bytes.get(generation)!.subarray(offset, offset + length));
-    const manager = new MacosRuntimeManager(service);
-    await admit(manager);
+    const manager = new RuntimeManager(service);
+    await admit(manager, host);
     await manager.handle("helper_12345678", {
       ...envelope, requestId: "request_activate_resources", type: "activate", documentValidated: true,
     });
@@ -509,12 +516,12 @@ describe("macOS canonical review runtime", () => {
       currentCalls += 1;
       return currentCalls === 1 ? blocked.promise : projection();
     });
-    const manager = new MacosRuntimeManager(service, {
+    const manager = new RuntimeManager(service, {
       maxHelpers: 2,
       maxConcurrentRequests: 2,
       maxConcurrentRequestsPerHelper: 1,
     });
-    await admit(manager);
+    await admit(manager, host);
     const secondEnvelope = {
       protocolVersion: 1 as const,
       windowId: "window_abcdefgh",
@@ -549,8 +556,8 @@ describe("macOS canonical review runtime", () => {
 
   it("bounds completed replay responses without imposing a helper request lifetime", async () => {
     const service = backend();
-    const manager = new MacosRuntimeManager(service, { maxRetainedRequestsPerHelper: 2 });
-    await admit(manager);
+    const manager = new RuntimeManager(service, { maxRetainedRequestsPerHelper: 2 });
+    await admit(manager, host);
 
     for (let index = 0; index < 8; index += 1) {
       await expect(manager.handle("helper_12345678", {
@@ -593,8 +600,8 @@ describe("macOS canonical review runtime", () => {
       durable.set(idempotencyKey, { digest: operation.payloadDigest, result });
       return result;
     });
-    const manager = new MacosRuntimeManager(service, { maxRetainedRequestsPerHelper: 1 });
-    await admit(manager);
+    const manager = new RuntimeManager(service, { maxRetainedRequestsPerHelper: 1 });
+    await admit(manager, host);
     await manager.handle("helper_12345678", {
       ...envelope,
       requestId: "request_activate_replay_1",
@@ -642,12 +649,12 @@ describe("macOS canonical review runtime", () => {
       currentCalls += 1;
       return currentCalls === 1 ? blocked.promise : projection();
     });
-    const manager = new MacosRuntimeManager(service, {
+    const manager = new RuntimeManager(service, {
       maxHelpers: 2,
       maxConcurrentRequests: 1,
       maxConcurrentRequestsPerHelper: 1,
     });
-    await admit(manager);
+    await admit(manager, host);
     const secondEnvelope = {
       protocolVersion: 1 as const,
       windowId: "window_abcdefgh",
@@ -693,13 +700,13 @@ describe("macOS canonical review runtime", () => {
       readCalls += 1;
       return readCalls === 1 ? blocked.promise : sourceBytes.subarray(offset, offset + length);
     });
-    const manager = new MacosRuntimeManager(service, {
+    const manager = new RuntimeManager(service, {
       maxHelpers: 2,
       maxConcurrentRequests: 2,
       maxResources: 1,
       maxResourcesPerHelper: 1,
     });
-    await admit(manager);
+    await admit(manager, host);
     const firstResourceId = manager.resourceId("helper_12345678");
     if (firstResourceId === undefined) throw new Error("Expected a document resource");
     const secondEnvelope = {
@@ -748,8 +755,8 @@ describe("macOS canonical review runtime", () => {
 
   it("does not retain completed document chunks in the replay budget", async () => {
     const service = backend();
-    const manager = new MacosRuntimeManager(service, { maxRetainedRequestsPerHelper: 3 });
-    await admit(manager);
+    const manager = new RuntimeManager(service, { maxRetainedRequestsPerHelper: 3 });
+    await admit(manager, host);
     await manager.handle("helper_12345678", {
       ...envelope,
       requestId: "request_activate_4",

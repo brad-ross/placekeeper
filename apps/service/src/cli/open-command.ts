@@ -1,3 +1,5 @@
+import { runNativeLifecycleControlCommand } from "../desktop/lifecycle-control-command.js";
+import { electronAppControlThroughDaemon } from "../host/service-daemon.js";
 import { isAbsolute } from "node:path";
 import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -390,6 +392,14 @@ async function main(): Promise<number> {
       write: writeStdoutFrame,
       identity,
       diagnostic: (stage) => process.stderr.write(`[PlacekeeperHelper] failed: ${stage}\n`),
+    });
+  }
+  if (process.argv[2] === "electron-lifecycle-control") {
+    return runNativeLifecycleControlCommand({
+      input: process.stdin,
+      write: writeStdoutFrame,
+      appInstanceId: process.env.PLACEKEEPER_APP_INSTANCE_ID ?? "",
+      exchange: electronAppControlThroughDaemon,
     });
   }
   if (process.argv[2] === "macos-lifecycle-control") {

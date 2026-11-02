@@ -23,6 +23,9 @@ import { type ChromeRuntimeHostMessage } from "../../../../packages/core/src/chr
 import { parseMacosReviewHelperMessage, type MacosReviewHelperResponse } from "../../../../packages/core/src/macos-helper-protocol.js";
 import { parseMacosAppControlMessage, type MacosAppControlResponse } from "../../../../packages/core/src/macos-app-control-protocol.js";
 
+import { parseElectronReviewHelperMessage, type ElectronReviewHelperResponse } from "../../../../packages/core/src/electron-helper-protocol.js";
+import { parseElectronAppControlMessage, type ElectronAppControlResponse } from "../../../../packages/core/src/electron-app-control-protocol.js";
+
 export const MANAGEMENT_PROTOCOL_VERSION = 1;
 
 export type DaemonLifecycleState = "accepting" | "draining" | "shutdown-committed";
@@ -85,6 +88,18 @@ export type PlacekeeperControlRequest =
       readonly helperId: string;
     }
   | { readonly kind: "macos-app-control"; readonly message: unknown }
+  | {
+      readonly kind: "electron-runtime";
+      readonly appInstanceId: string;
+      readonly helperId: string;
+      readonly message: unknown;
+    }
+  | {
+      readonly kind: "electron-runtime-detach";
+      readonly appInstanceId: string;
+      readonly helperId: string;
+    }
+  | { readonly kind: "electron-app-control"; readonly message: unknown }
   | { readonly kind: "link-preflight"; readonly link: string }
   | { readonly kind: "link-open"; readonly request: LinkOpenRequest }
   | {
@@ -190,6 +205,9 @@ export type PlacekeeperControlResponse =
   | { readonly kind: "macos-runtime"; readonly response: MacosReviewHelperResponse }
   | { readonly kind: "macos-runtime-detached" }
   | { readonly kind: "macos-app-control"; readonly response: MacosAppControlResponse }
+  | { readonly kind: "electron-runtime"; readonly response: ElectronReviewHelperResponse }
+  | { readonly kind: "electron-runtime-detached" }
+  | { readonly kind: "electron-app-control"; readonly response: ElectronAppControlResponse }
   | { readonly kind: "link-preflight"; readonly response: LinkPreflightResponse }
   | { readonly kind: "link-open"; readonly response: LinkLaunchResponse }
   | { readonly kind: "binding"; readonly result: TaskBindingClaimResult }
@@ -296,6 +314,20 @@ export function isControlRequest(value: unknown): value is PlacekeeperControlReq
   }
   if (value.kind === "macos-app-control") {
     return Object.keys(value).length === 2 && parseMacosAppControlMessage(value.message) !== undefined;
+  }
+  if (value.kind === "electron-runtime") {
+    return Object.keys(value).length === 4 && typeof value.appInstanceId === "string"
+      && /^[A-Za-z0-9_-]{8,128}$/u.test(value.appInstanceId)
+      && typeof value.helperId === "string" && /^[A-Za-z0-9_-]{8,128}$/u.test(value.helperId)
+      && parseElectronReviewHelperMessage(value.message) !== undefined;
+  }
+  if (value.kind === "electron-runtime-detach") {
+    return Object.keys(value).length === 3 && typeof value.appInstanceId === "string"
+      && /^[A-Za-z0-9_-]{8,128}$/u.test(value.appInstanceId)
+      && typeof value.helperId === "string" && /^[A-Za-z0-9_-]{8,128}$/u.test(value.helperId);
+  }
+  if (value.kind === "electron-app-control") {
+    return Object.keys(value).length === 2 && parseElectronAppControlMessage(value.message) !== undefined;
   }
   if (value.kind === "link-preflight") {
     return typeof value.link === "string" && value.link.length <= PLACEKEEPER_LINK_MAX_LENGTH;
