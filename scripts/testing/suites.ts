@@ -423,6 +423,7 @@ export const suites: Record<string, TestStage[]> = {
         "apps/web/test/host-runtime.test.ts",
         "apps/web/test/production-review-app.test.tsx",
         "apps/vscode/test/extension.test.ts",
+        "packaging/macos/editor-integrations.test.ts",
         "packaging/macos/packaging.test.ts"
       ]
     },
