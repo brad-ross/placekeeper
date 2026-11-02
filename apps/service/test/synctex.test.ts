@@ -138,6 +138,12 @@ describe("generation-bound SyncTeX navigation", () => {
       .toBe("/usr/local/bin:/usr/bin");
   });
 
+  it("retains Windows PATH drive separators and spaces", () => {
+    expect(syncTexProcessPath("win32", "C:\\TeX bin;D:\\Tools"))
+      .toBe("C:\\TeX bin;D:\\Tools");
+    expect(syncTexProcessPath("win32", "")).toBe("");
+  });
+
   it("enforces subprocess timeout, output, and unavailable-tool bounds", async () => {
     const root = await fixture();
     const [timedOut, oversized, unavailable] = await Promise.all([

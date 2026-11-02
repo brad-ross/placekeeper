@@ -1,10 +1,11 @@
+import { platformPath, resolvePlatformLocations } from "../platform/locations.js";
+import { resolvePackagedRuntime, type PackagedRuntimeInstallation } from "../platform/runtime-layout.js";
 import { NativeQualificationExperiments } from "../codex/native-qualification-experiments.js";
 import { NativeQualificationObserver } from "../codex/native-qualification.js";
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { lstat, unlink, writeFile } from "node:fs/promises";
+import { lstat, realpath, unlink, writeFile } from "node:fs/promises";
 import { createConnection } from "node:net";
-import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
 import {
@@ -47,6 +48,7 @@ export interface DaemonPaths {
   readonly socketPath: string;
   readonly webAssetsRoot: string;
   readonly httpPort?: number;
+  readonly packagedRuntime?: PackagedRuntimeInstallation;
   readonly lifecycleLockPath?: string;
 }
 
@@ -72,16 +74,11 @@ function currentDaemonIdentity(): string {
 }
 
 export function defaultDaemonPaths(): DaemonPaths {
-  const fixedAppSupportRoot = join(
-    homedir(),
-    "Library",
-    "Application Support",
-    "Placekeeper",
-  );
+  const fixedAppSupportRoot = resolvePlatformLocations().appSupportRoot;
   const developmentRoot = currentDaemonIdentity() === "development"
     ? process.env[MACOS_DEVELOPMENT_ROOT_ENV]
     : undefined;
-  const appSupportRoot = developmentRoot !== undefined && developmentRoot.startsWith("/")
+  const appSupportRoot = developmentRoot !== undefined && platformPath(process.platform).isAbsolute(developmentRoot)
     && developmentRoot.length <= 16_384 && !developmentRoot.includes("\0")
     ? resolve(developmentRoot)
     : fixedAppSupportRoot;
@@ -193,15 +190,24 @@ export function daemonUnavailable(error: unknown): boolean {
   return code === "ENOENT" || code === "ECONNREFUSED" || code === "ECONNRESET";
 }
 
-function spawnServiceDaemon(
+async function spawnServiceDaemon(
   entry: string,
   paths: DaemonPaths,
   lifecycleToken: string,
   readinessToken?: string,
-): ChildProcess {
+): Promise<ChildProcess> {
+  if (paths.packagedRuntime === undefined && process.versions.electron !== undefined) {
+    throw new Error("The desktop launcher requires an independent packaged Node runtime");
+  }
+  const runtime = paths.packagedRuntime === undefined ? undefined : await resolvePackagedRuntime(
+    paths.packagedRuntime.root, paths.packagedRuntime.manifest, paths.packagedRuntime.expectedIdentity,
+  );
+  if (runtime !== undefined && await realpath(paths.webAssetsRoot) !== runtime.webAssetsRoot) {
+    throw new Error("Packaged runtime web assets do not match daemon paths");
+  }
   const httpPort = paths.httpPort ?? PLACEKEEPER_HTTP_PORT;
-  const child = spawn(process.execPath, [
-    entry,
+  const child = spawn(runtime?.nodeExecutable ?? process.execPath, [
+    runtime?.serviceEntry ?? entry,
     "daemon",
     ...(httpPort === PLACEKEEPER_HTTP_PORT
       ? []
@@ -211,6 +217,7 @@ function spawnServiceDaemon(
     stdio: "ignore",
     env: {
       ...process.env,
+      ...(runtime === undefined ? {} : { [DAEMON_IDENTITY_ENV]: runtime.daemonIdentity, [INSTALL_ARTIFACT_IDENTITY_ENV]: runtime.installArtifactIdentity }),
       PLACEKEEPER_WEB_ASSETS: paths.webAssetsRoot,
       [LIFECYCLE_LOCK_TOKEN_ENV]: lifecycleToken,
       [LIFECYCLE_LOCK_PATH_ENV]: paths.lifecycleLockPath ?? join(paths.appSupportRoot, "lifecycle.lock"),
@@ -373,7 +380,7 @@ async function controlWhileLocked(
   signal?: AbortSignal,
 ): Promise<PlacekeeperControlResponse> {
   try {
-    const compatibility = await waitForAcceptingCompatibility(paths.socketPath, currentDaemonIdentity());
+    const compatibility = await waitForAcceptingCompatibility(paths.socketPath, paths.packagedRuntime?.expectedIdentity.daemonIdentity ?? currentDaemonIdentity());
     if (compatibility.kind !== "exact") {
       throw new DaemonUpgradeRequiredError(
         compatibility.kind === "incompatible"
@@ -387,12 +394,12 @@ async function controlWhileLocked(
   }
   const entry = process.argv[1];
   if (entry === undefined) throw new Error("The placekeeper launcher entry point is unavailable");
-  spawnServiceDaemon(entry, paths, lifecycleToken);
+  await spawnServiceDaemon(entry, paths, lifecycleToken);
   for (let attempt = 0; attempt < 60; attempt += 1) {
     signal?.throwIfAborted();
     await new Promise((resolveDelay) => setTimeout(resolveDelay, 50));
     try {
-      const compatibility = await waitForAcceptingCompatibility(paths.socketPath, currentDaemonIdentity());
+      const compatibility = await waitForAcceptingCompatibility(paths.socketPath, paths.packagedRuntime?.expectedIdentity.daemonIdentity ?? currentDaemonIdentity());
       if (compatibility.kind !== "exact") {
         throw new DaemonUpgradeRequiredError(
           compatibility.kind === "incompatible"
@@ -421,12 +428,12 @@ export async function ensureServiceDaemonReady(
   const entry = process.argv[1];
   if (entry === undefined) throw new Error("The placekeeper launcher entry point is unavailable");
   const readinessToken = randomBytes(24).toString("base64url");
-  const child = spawnServiceDaemon(entry, paths, lifecycleToken, readinessToken);
+  const child = await spawnServiceDaemon(entry, paths, lifecycleToken, readinessToken);
   if (child.pid === undefined) throw new Error("Candidate daemon did not expose its process identity");
   const receipt: CandidateDaemonReceipt = {
     version: 1,
     pid: child.pid,
-    daemonIdentity: currentDaemonIdentity(),
+    daemonIdentity: paths.packagedRuntime?.expectedIdentity.daemonIdentity ?? currentDaemonIdentity(),
     readinessToken,
   };
   let spawnError: Error | undefined;
@@ -440,7 +447,7 @@ export async function ensureServiceDaemonReady(
       if (spawnError !== undefined) throw spawnError;
       if (child.exitCode !== null) throw new Error(`Candidate daemon exited ${child.exitCode}`);
       try {
-        const compatibility = await inspectDaemonCompatibility(paths.socketPath, currentDaemonIdentity());
+        const compatibility = await inspectDaemonCompatibility(paths.socketPath, paths.packagedRuntime?.expectedIdentity.daemonIdentity ?? currentDaemonIdentity());
         if (
           compatibility.kind === "exact" &&
           compatibility.status.lifecycle === "accepting" &&
