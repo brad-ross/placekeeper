@@ -1,3 +1,5 @@
+import { closeWindowsNativeWorker } from "../platform/windows-native-worker.js";
+import { readControlDiscovery } from "../platform/control-transport.js";
 import { platformPath, resolvePlatformLocations } from "../platform/locations.js";
 import { resolvePackagedRuntime, type PackagedRuntimeInstallation } from "../platform/runtime-layout.js";
 import { NativeQualificationExperiments } from "../codex/native-qualification-experiments.js";
@@ -123,18 +125,33 @@ export function installedSmokeDaemonPaths(args: readonly string[]): DaemonPaths 
 }
 
 async function removeConfirmedStaleSocket(socketPath: string): Promise<void> {
-  const info = await lstat(socketPath).catch(() => undefined);
-  if (info?.isSocket() !== true) return;
-  await new Promise<void>((resolveConnection) => {
+  const info = await lstat(socketPath).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === "ENOENT") return undefined;
+    throw error;
+  });
+  if (info === undefined) return;
+  if (process.platform === "win32") {
+    const discovery = await readControlDiscovery(socketPath);
+    try { process.kill(discovery.pid, 0); }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+      const current = await lstat(socketPath);
+      if (current.ino === info.ino && current.dev === info.dev && (await readControlDiscovery(socketPath)).epoch === discovery.epoch) await unlink(socketPath);
+      return;
+    }
+    throw new Error("Placekeeper service is already running");
+  }
+  if (!info.isSocket()) return;
+  await new Promise<void>((resolveConnection, reject) => {
     const socket = createConnection(socketPath);
-    let connected = false;
-    socket.once("connect", () => {
-      connected = true;
-      socket.destroy();
-      resolveConnection();
-    });
-    socket.once("error", () => {
-      if (!connected) void unlink(socketPath).finally(resolveConnection);
+    socket.setTimeout(1000, () => { socket.destroy(); reject(new Error("Cannot inspect existing control socket")); });
+    socket.once("connect", () => { socket.destroy(); reject(new Error("Placekeeper service is already running")); });
+    socket.once("error", (error: NodeJS.ErrnoException) => {
+      if (error.code !== "ECONNREFUSED" && error.code !== "ENOENT") { reject(error); return; }
+      void (async () => {
+        const current = await lstat(socketPath).catch(() => undefined);
+        if (current?.ino === info.ino && current.dev === info.dev) await unlink(socketPath);
+      })().then(resolveConnection, reject);
     });
   });
 }
@@ -176,6 +193,7 @@ export async function startServiceDaemon(paths = defaultDaemonPaths()): Promise<
       close: async () => {
         await startedHost.close();
         await control.close();
+        await closeWindowsNativeWorker();
       },
     };
   } catch (error) {
@@ -223,6 +241,10 @@ async function spawnServiceDaemon(
       [LIFECYCLE_LOCK_PATH_ENV]: paths.lifecycleLockPath ?? join(paths.appSupportRoot, "lifecycle.lock"),
       ...(readinessToken === undefined ? {} : { [READINESS_TOKEN_ENV]: readinessToken }),
     },
+  });
+  await new Promise<void>((resolveSpawn, reject) => {
+    child.once("spawn", resolveSpawn);
+    child.once("error", reject);
   });
   child.unref();
   return child;
@@ -464,7 +486,7 @@ export async function ensureServiceDaemonReady(
     }
   } catch (error) {
     if (child.pid !== undefined) {
-      try { process.kill(-child.pid, "SIGTERM"); } catch { /* already stopped */ }
+      try { process.kill(process.platform === "win32" ? child.pid : -child.pid, "SIGTERM"); } catch { /* already stopped */ }
     }
     await Promise.race([
       child.exitCode !== null

@@ -1,10 +1,10 @@
+import { writePrivateFile } from "../platform/private-storage.js";
+import { publishFile, syncPublishedFile } from "../platform/file-publication.js";
 import { createHash, randomUUID } from "node:crypto";
 import {
   chmod,
-  open,
   readdir,
   readFile,
-  rename,
   rm,
   stat,
 } from "node:fs/promises";
@@ -394,18 +394,12 @@ export class DraftSnapshotStore {
     const temporaryPath = join(this.directory, `.draft-${randomUUID()}.tmp`);
     const stopTracking = trackRecoveryTemporaryPath(temporaryPath);
     try {
-      const handle = await open(temporaryPath, "wx", 0o600);
-      try {
-        await handle.chmod(0o600);
-        await handle.writeFile(serialize(draft), "utf8");
-        await handle.sync();
-      } finally {
-        await handle.close();
-      }
+      await writePrivateFile(temporaryPath, serialize(draft));
       await this.#hooks.afterTemporarySync?.();
       signal?.throwIfAborted();
       try {
-        await rename(this.currentPath, this.previousPath);
+        const previous = await publishFile(this.currentPath, this.previousPath);
+        await syncPublishedFile(previous);
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
           throw error;
@@ -413,15 +407,10 @@ export class DraftSnapshotStore {
       }
       await this.#hooks.beforeFinalRename?.();
       signal?.throwIfAborted();
-      await rename(temporaryPath, this.currentPath);
+      const publication = await publishFile(temporaryPath, this.currentPath);
       await this.#hooks.afterFinalRename?.();
       await chmod(this.currentPath, 0o600);
-      const directoryHandle = await open(this.directory, "r");
-      try {
-        await directoryHandle.sync();
-      } finally {
-        await directoryHandle.close();
-      }
+      await syncPublishedFile(publication);
     } catch (error) {
       this.#cleanedDirectoryIdentity = undefined;
       await rm(temporaryPath, { force: true });

@@ -466,7 +466,7 @@ describe("reviewed PDF export transaction", () => {
     expect(result.warning).toContain("reviewed copy was created");
     expect(await readFile(result.path)).toEqual(fixture.reviewed);
     expect(await readFile(fixture.originalPath)).toEqual(fixture.original);
-    expect(recorded).toBe(1);
+    expect(recorded).toBe(0);
   });
 
   it("returns a committed warning when reviewed-copy bookkeeping fails after the link", async () => {

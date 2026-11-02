@@ -209,7 +209,7 @@ describe("explicit original replacement", () => {
 
     expect(result.warning).toContain("original was replaced");
     expect(await readFile(fixture.originalPath)).toEqual(fixture.reviewed);
-    expect(recorded).toBe(1);
+    expect(recorded).toBe(0);
   });
 
   it.each([

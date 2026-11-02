@@ -1,3 +1,4 @@
+import { ensurePrivateDirectory, establishPrivateDirectory, writePrivateFile } from "../platform/private-storage.js";
 import { randomBytes } from "node:crypto";
 import { lstat, mkdir, readFile, readdir, rmdir, unlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
@@ -97,6 +98,7 @@ async function removeStaleRecord(
 ): Promise<void> {
   const record = observation.record;
   if (record !== undefined && processExists(record.pid)) return;
+  if (await borrowersAreBusy(lockPath, now)) return;
   if (record === undefined) {
     const inspectedPath = observation.markerPath ?? lockPath;
     const info = await lstat(inspectedPath).catch(() => undefined);
@@ -118,8 +120,58 @@ async function removeStaleRecord(
   });
 }
 
+type MarkerIdentity = Awaited<ReturnType<typeof lstat>>;
+async function unlinkObservedMarker(path: string, identity: MarkerIdentity): Promise<void> {
+  const current = await lstat(path).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === "ENOENT") return undefined;
+    throw error;
+  });
+  if (current?.ino === identity.ino && current.dev === identity.dev) await unlink(path).catch((error: NodeJS.ErrnoException) => {
+    if (error.code !== "ENOENT") throw error;
+  });
+}
+async function releaseMarker(lockPath: string, markerPath: string, identity: MarkerIdentity): Promise<void> {
+  await unlinkObservedMarker(markerPath, identity);
+  await rmdir(lockPath).catch((error: NodeJS.ErrnoException) => {
+    if (error.code !== "ENOENT" && error.code !== "ENOTEMPTY") throw error;
+  });
+}
+async function writeMarker(path: string, record: LifecycleLockRecord): Promise<MarkerIdentity> {
+  if (process.platform === "win32") await writePrivateFile(path, `${JSON.stringify(record)}\n`);
+  else await writeFile(path, `${JSON.stringify(record)}\n`, { flag: "wx", mode: 0o600 });
+  return await lstat(path);
+}
+async function borrowersAreBusy(lockPath: string, now: () => number): Promise<boolean> {
+  const entries = await readdir(lockPath, { withFileTypes: true }).catch(() => []);
+  let busy = false;
+  for (const entry of entries.filter((entry) => entry.name.startsWith("borrower-"))) {
+    const path = join(lockPath, entry.name);
+    const identity = await lstat(path).catch(() => undefined);
+    if (identity === undefined) continue;
+    if (!identity.isFile()) { busy = true; continue; }
+    const match = /^borrower-([A-Za-z0-9_-]{32})-([A-Za-z0-9_-]{32})\.json$/u.exec(entry.name);
+    const record = match === null ? undefined : parseRecord(await readFile(path, "utf8").catch(() => ""), match[1]!);
+    if (record === undefined ? now() - identity.mtimeMs < 1000 : processExists(record.pid)) { busy = true; continue; }
+    await unlinkObservedMarker(path, identity);
+  }
+  return busy;
+}
+
 function delay(milliseconds: number): Promise<void> {
   return new Promise((resolveDelay) => setTimeout(resolveDelay, milliseconds));
+}
+
+function markerLease(token: string, borrowed: boolean, lockPath: string, markerPath: string, identity: MarkerIdentity): LifecycleLockLease {
+  let released = false;
+  return {
+    token,
+    borrowed,
+    release: async () => {
+      if (released) return;
+      released = true;
+      await releaseMarker(lockPath, markerPath, identity);
+    },
+  };
 }
 
 /** A small cross-process lease used to linearize install, launch, and startup.
@@ -132,42 +184,41 @@ export async function acquireLifecycleLock(
   const pollMs = options.pollMs ?? 25;
   const now = options.now ?? Date.now;
   const deadline = now() + timeoutMs;
-  await mkdir(dirname(lockPath), { recursive: true, mode: 0o700 });
+  if (process.platform === "win32") await ensurePrivateDirectory(dirname(lockPath));
+  else await mkdir(dirname(lockPath), { recursive: true, mode: 0o700 });
 
   while (true) {
     const inherited = options.inheritedToken;
     if (inherited !== undefined) {
       const observation = await inspectLock(lockPath);
-      if (observation.record?.token === inherited) {
-        return { token: inherited, borrowed: true, release: async () => {} };
+      if (observation.record?.token === inherited && processExists(observation.record.pid)) {
+        const markerPath = join(lockPath, `borrower-${inherited}-${randomBytes(24).toString("base64url")}.json`);
+        let identity: MarkerIdentity | undefined;
+        try { identity = await writeMarker(markerPath, { version: 1, pid: process.pid, token: inherited }); }
+        catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+        if (identity !== undefined) {
+          const confirmed = await inspectLock(lockPath);
+          if (confirmed.record?.token === inherited && processExists(confirmed.record.pid)) {
+            return markerLease(inherited, true, lockPath, markerPath, identity);
+          }
+          await releaseMarker(lockPath, markerPath, identity);
+        }
       }
     } else {
       const token = randomBytes(24).toString("base64url");
       const record: LifecycleLockRecord = { version: 1, pid: process.pid, token };
       try {
         await mkdir(lockPath, { mode: 0o700 });
+        if (process.platform === "win32") await establishPrivateDirectory(lockPath);
         const markerPath = join(lockPath, ownerFilename(token));
+        let identity: MarkerIdentity;
         try {
-          await writeFile(markerPath, `${JSON.stringify(record)}\n`, { flag: "wx", mode: 0o600 });
+          identity = await writeMarker(markerPath, record);
         } catch (error) {
           await rmdir(lockPath).catch(() => undefined);
           throw error;
         }
-        let released = false;
-        return {
-          token,
-          borrowed: false,
-          release: async () => {
-            if (released) return;
-            released = true;
-            await unlink(markerPath).catch((error: NodeJS.ErrnoException) => {
-              if (error.code !== "ENOENT") throw error;
-            });
-            await rmdir(lockPath).catch((error: NodeJS.ErrnoException) => {
-              if (error.code !== "ENOENT" && error.code !== "ENOTEMPTY") throw error;
-            });
-          },
-        };
+        return markerLease(token, false, lockPath, markerPath, identity);
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
       }

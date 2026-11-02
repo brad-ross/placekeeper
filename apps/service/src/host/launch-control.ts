@@ -1,3 +1,4 @@
+import { PrivateControlError, requestPrivateControl, startPrivateControlServer } from "../platform/control-transport.js";
 import {
   MANAGEMENT_PROTOCOL_VERSION,
   isControlRequest,
@@ -23,7 +24,7 @@ export {
 import { CONTROL_REQUEST_TIMEOUT_MS } from "./control-constants.js";
 export { CONTROL_REQUEST_TIMEOUT_MS } from "./control-constants.js";
 
-import { chmod, mkdir, unlink } from "node:fs/promises";
+import { chmod, lstat, mkdir, unlink } from "node:fs/promises";
 import { createConnection, createServer, type Server, type Socket } from "node:net";
 import { dirname } from "node:path";
 
@@ -393,6 +394,20 @@ function writeResponse(socket: Socket, response: PlacekeeperControlResponse): Pr
   });
 }
 
+function openedBrowserSessionId(
+  request: PlacekeeperControlRequest,
+  response: PlacekeeperControlResponse,
+): string | undefined {
+  if (response.kind === "chrome-open" && response.response.ok && response.response.kind !== "recovery-offered") {
+    return response.response.sessionId;
+  }
+  if (response.kind === "launch" && response.response.ok && response.response.kind === "opened"
+    && request.kind === "launch" && request.request.surface === "browser") {
+    return response.response.sessionId;
+  }
+  return undefined;
+}
+
 export async function startLaunchControlServer(
   host: PlacekeeperHost,
   socketPath: string,
@@ -400,9 +415,29 @@ export async function startLaunchControlServer(
     daemonIdentity: "development",
   },
 ): Promise<LaunchControlServer> {
+  if (process.platform === "win32") {
+    let control: LaunchControlServer;
+    control = await startPrivateControlServer(socketPath, async (parsed, signal) => {
+      if (!isControlRequest(parsed)) return { kind: "error", reason: "invalid-request" };
+      try { return await dispatch(host, parsed, management, signal); }
+      catch { return { kind: "error", reason: "unavailable" }; }
+    }, async (value) => {
+      const response = value as PlacekeeperControlResponse;
+      if (response.kind === "management" && response.operation === "shutdown-if-idle" && response.result.status === "accepted") {
+        await host.close(); await control.close();
+      }
+    }, async (value, input) => {
+      const response = value as PlacekeeperControlResponse;
+      const parsed = input as PlacekeeperControlRequest;
+      const openedSessionId = openedBrowserSessionId(parsed, response);
+      if (openedSessionId !== undefined) await host.broker.discard(openedSessionId);
+    });
+    return control;
+  }
   await mkdir(dirname(socketPath), { recursive: true, mode: 0o700 });
   const closed = Promise.withResolvers<void>();
   let closePromise: Promise<void> | undefined;
+  let socketIdentity: Awaited<ReturnType<typeof lstat>> | undefined;
   const server = createServer((socket) => {
     const requestLifetime = new AbortController();
     socket.once("close", () => requestLifetime.abort(new Error("control-client-closed")));
@@ -434,14 +469,7 @@ export async function startLaunchControlServer(
             requestLifetime.signal.throwIfAborted();
             await writeResponse(socket, response);
           } catch {
-            const openedSessionId = response.kind === "chrome-open" && response.response.ok &&
-                response.response.kind !== "recovery-offered"
-              ? response.response.sessionId
-              : response.kind === "launch" && response.response.ok &&
-                  response.response.kind === "opened" && parsed.kind === "launch" &&
-                  parsed.request.surface === "browser"
-                ? response.response.sessionId
-                : undefined;
+            const openedSessionId = openedBrowserSessionId(parsed, response);
             if (openedSessionId !== undefined) await host.broker.discard(openedSessionId);
             return;
           }
@@ -462,7 +490,8 @@ export async function startLaunchControlServer(
     closePromise ??= (async () => {
       try {
         await closeServer(server);
-        await unlink(socketPath).catch((error: NodeJS.ErrnoException) => {
+        const current = await lstat(socketPath).catch(() => undefined);
+        if (socketIdentity !== undefined && current?.ino === socketIdentity.ino && current.dev === socketIdentity.dev) await unlink(socketPath).catch((error: NodeJS.ErrnoException) => {
           if (error.code !== "ENOENT") throw error;
         });
         closed.resolve();
@@ -474,6 +503,7 @@ export async function startLaunchControlServer(
     return closePromise;
   };
   await listen(server, socketPath);
+  socketIdentity = await lstat(socketPath);
   await chmod(socketPath, 0o600);
   return {
     socketPath,
@@ -507,6 +537,14 @@ export function requestControl(
     readonly signal?: AbortSignal;
   } = {},
 ): Promise<PlacekeeperControlResponse> {
+  if (process.platform === "win32") return requestPrivateControl(socketPath, request, options).then(
+    (response) => response as PlacekeeperControlResponse,
+    (error: unknown) => {
+      if (error instanceof PrivateControlError) throw error.reason === "timeout"
+        ? new PlacekeeperControlTimeoutError() : new PlacekeeperControlProtocolError(error.reason);
+      throw error;
+    },
+  );
   return new Promise((resolve, reject) => {
     const socket = createConnection(socketPath);
     const onAbort = (): void => { socket.destroy(options.signal?.reason); };

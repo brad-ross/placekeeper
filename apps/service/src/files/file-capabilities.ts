@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { lstat, open, realpath, stat } from "node:fs/promises";
-import { basename, dirname, isAbsolute, relative, resolve } from "node:path";
+import { basename, dirname, isAbsolute, relative, resolve, sep } from "node:path";
 
 export class FileCapabilityError extends Error {
   readonly code:
@@ -44,7 +44,9 @@ export function validatePdfFilename(filename: string): string {
     normalized.includes("/") ||
     normalized.includes("\\") ||
     /[\u0000-\u001f\u007f]/u.test(normalized) ||
-    !normalized.toLowerCase().endsWith(".pdf")
+    !normalized.toLowerCase().endsWith(".pdf") ||
+    (process.platform === "win32" && (/[<>:"|?*]/u.test(normalized) ||
+      /^(?:con|prn|aux|nul|com[1-9¹²³]|lpt[1-9¹²³])(?:\.|$)/iu.test(normalized)))
   ) {
     throw new FileCapabilityError("INVALID_PATH", "Use one PDF filename without folders");
   }
@@ -63,6 +65,9 @@ function rejectPathSyntax(value: string): void {
 }
 
 function isContained(root: string, candidate: string): boolean {
+  // These callers use canonical paths. Exact casing also respects Windows
+  // directories that explicitly enable case-sensitive lookup.
+  if (process.platform === "win32") return candidate === root || candidate.startsWith(root.endsWith(sep) ? root : `${root}${sep}`);
   const suffix = relative(root, candidate);
   return suffix === "" || (!suffix.startsWith("..") && !isAbsolute(suffix));
 }
@@ -165,9 +170,12 @@ export class FileCapabilityRegistry {
       throw new FileCapabilityError("INVALID_PATH", "Destination parent is not a directory");
     }
     let existingTarget: ApprovedFile | undefined;
+    let expectedDigest: string | undefined;
     try {
       const targetPath = await realpath(path);
       const targetInfo = await stat(targetPath);
+      if (!targetInfo.isFile()) throw new FileCapabilityError("NOT_PDF", "Destination must be a regular PDF");
+      expectedDigest = await hashFile(targetPath);
       existingTarget = {
         path: targetPath,
         device: targetInfo.dev,
@@ -186,6 +194,7 @@ export class FileCapabilityRegistry {
       parentDevice: parentInfo.dev,
       parentInode: parentInfo.ino,
       ...(existingTarget === undefined ? {} : { existingTarget }),
+      ...(expectedDigest === undefined ? {} : { expectedDigest }),
     };
     this.#destinations.set(capability.id, capability);
     return capability;
@@ -240,7 +249,12 @@ export class FileCapabilityRegistry {
     if (capability === undefined) {
       throw new FileCapabilityError("INVALID_PATH", "Unknown destination capability");
     }
-    const target = resolve(capability.parentPath, capability.filename);
+    const parentPath = await realpath(capability.parentPath);
+    const parentInfo = await stat(parentPath);
+    if (parentPath !== capability.parentPath || parentInfo.dev !== capability.parentDevice || parentInfo.ino !== capability.parentInode) {
+      throw new FileCapabilityError("TARGET_CHANGED", "Destination parent changed before re-approval");
+    }
+    const target = resolve(parentPath, capability.filename);
     const canonicalPath = await realpath(target);
     const info = await stat(canonicalPath);
     if (!info.isFile() || (await hashFile(canonicalPath)) !== expectedDigest) {

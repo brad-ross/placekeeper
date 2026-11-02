@@ -112,7 +112,7 @@ async function waitForProcessRetirement(pid: number): Promise<void> {
 async function terminateCandidateProcess(pid: number): Promise<void> {
   if (processExists(pid)) {
     try {
-      process.kill(-pid, "SIGTERM");
+      process.kill(process.platform === "win32" ? pid : -pid, "SIGTERM");
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
     }

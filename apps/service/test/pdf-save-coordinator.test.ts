@@ -1,4 +1,6 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { EventEmitter } from "node:events";
+import { watch } from "node:fs";
 import { chmod, mkdir, mkdtemp, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -22,6 +24,23 @@ import {
 const roots: string[] = [];
 const brokers = new Set<SessionBroker>();
 const sha = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
+
+vi.mock("node:fs", async (importOriginal) => {
+  const fs = await importOriginal<typeof import("node:fs")>();
+  return { ...fs, watch: vi.fn(fs.watch) };
+});
+
+function ownPublicationObservations(): void {
+  // These tests explicitly order observations around publication. A native
+  // watcher can independently supersede those observations at any await.
+  // The adjacent actual-watcher test covers the filesystem notification path.
+  class PublicationWatcher extends EventEmitter {
+    close(): void {}
+    ref(): this { return this; }
+    unref(): this { return this; }
+  }
+  vi.mocked(watch).mockImplementationOnce(() => new PublicationWatcher());
+}
 
 afterEach(async () => {
   await Promise.allSettled([...brokers].map((broker) => broker.quiesceForShutdown()));
@@ -1205,6 +1224,7 @@ describe("coalescing PDF autosave", () => {
   });
 
   it("classifies an observed in-flight original publication as the current save", async () => {
+    ownPublicationObservations();
     const observedPublication = Promise.withResolvers<void>();
     let observeAfterRename: (() => void) | undefined;
     let observation: Promise<unknown> | undefined;
@@ -1278,11 +1298,14 @@ describe("coalescing PDF autosave", () => {
   });
 
   it("retries one observation until different bytes replacing an in-flight original publication win", async () => {
+    ownPublicationObservations();
     const { source, broker, coordinator, sessionId } = await setup(undefined, {
       inspectGeneration: async () => ({ pageCount: 1, pages: [] }),
     });
     await coordinator.chooseOriginal(sessionId);
     await broker.acceptMutation(sessionId, add(0));
+    await broker.settlePhysicalSaveBarrier(sessionId);
+    await coordinator.drain();
     await broker.settlePhysicalSaveBarrier(sessionId);
     const state = broker.state(sessionId)!;
     const status = broker.saveStatus(sessionId)!;
@@ -1329,6 +1352,7 @@ describe("coalescing PDF autosave", () => {
   });
 
   it("clears the in-flight publication marker when original publication throws", async () => {
+    ownPublicationObservations();
     const { source, broker, coordinator, sessionId } = await setup(undefined, {
       inspectGeneration: async () => ({ pageCount: 1, pages: [] }),
     });

@@ -2,7 +2,7 @@ import { InvalidReviewCommandError, ReviewConflictError, ReviewDraftConflictErro
 import { ReviewGenerationConflictError } from "../sessions/session-broker.js";
 import type { ReviewState, SaveDestinationConfirmation } from "../../../../packages/core/src/review-model.js";
 import { randomUUID } from "node:crypto";
-import { chmod, open, readFile, rename, rm, stat } from "node:fs/promises";
+import { readFile, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
 import type { PdfWriter } from "../../../../packages/core/src/pdf-writer.js";
@@ -18,7 +18,7 @@ import {
   hashFile,
   validatePdfFilename,
 } from "../files/file-capabilities.js";
-import { syncDirectory } from "../files/durability.js";
+import { preserveReplacementPermissions, publishFile, stagePublication, syncPublishedFile } from "../platform/file-publication.js";
 import { verifyReviewedPdf, type PdfExportVerifier } from "../export/pdf-verifier.js";
 import { reviewStateDigest, type SaveFailureReason } from "../recovery/draft-snapshot.js";
 import type { SessionBroker } from "../sessions/session-broker.js";
@@ -104,7 +104,7 @@ export class PdfSaveCoordinator {
   readonly #verify: PdfExportVerifier;
   readonly #backend: Omit<PdfBackendRunOptions, "signal">;
   readonly #picker: DestinationPicker | undefined;
-  readonly #syncDirectory: (path: string) => Promise<void>;
+  readonly #syncDirectory: ((path: string) => Promise<void>) | undefined;
   readonly #reuseBackendInspection: boolean;
   readonly #folderSelections = new Map<string, { readonly sessionId: string; readonly path: string }>();
   readonly #queues = new Map<string, QueueState>();
@@ -117,7 +117,7 @@ export class PdfSaveCoordinator {
     this.#verify = options.verify ?? verifyReviewedPdf;
     this.#backend = options.backend ?? {};
     this.#picker = options.picker;
-    this.#syncDirectory = options.syncDirectory ?? syncDirectory;
+    this.#syncDirectory = options.syncDirectory;
     this.#reuseBackendInspection = options.verify === undefined;
     this.#broker.onPhysicalSaveResume((sessionId) => {
       if (
@@ -450,23 +450,7 @@ export class PdfSaveCoordinator {
           });
 
           const target = destination.targetPath;
-          const targetDirectory = dirname(target);
-          const privateDirectory = dirname(delivery.sourceSnapshotPath);
-          const [targetDirectoryInfo, privateDirectoryInfo] = await Promise.all([
-            stat(targetDirectory),
-            stat(privateDirectory),
-          ]);
-          const temporary = join(
-            targetDirectoryInfo.dev === privateDirectoryInfo.dev ? privateDirectory : targetDirectory,
-            `.placekeeper-${randomUUID()}.tmp`,
-          );
-          const handle = await open(temporary, "wx", 0o600);
-          try {
-            await handle.writeFile(written.pdfBytes);
-            await handle.sync();
-          } finally {
-            await handle.close();
-          }
+          const temporary = await stagePublication(target, written.pdfBytes);
           try {
             if (
               this.#broker.physicalSaveBarrierPending(sessionId) &&
@@ -510,26 +494,27 @@ export class PdfSaveCoordinator {
                 if (validatedTarget !== target) {
                   throw new FileCapabilityError("TARGET_CHANGED", "Save target identity changed");
                 }
-                if (destination.kind === "original") {
-                  const originalMode = (await stat(validatedTarget)).mode & 0o777;
-                  await chmod(temporary, originalMode);
+                if (destination.kind === "original" || destination.fingerprint !== undefined) {
+                  await preserveReplacementPermissions(temporary, validatedTarget);
                 }
                 // Observation admission is synchronous and can raise the
                 // physical-save barrier while target validation is awaiting
                 // filesystem work. Recheck every broker-owned fence at the
                 // last JavaScript boundary before publishing the rename.
                 if (!candidateIsCurrent()) return undefined;
-                await rename(temporary, target);
+                const publication = await publishFile(temporary, target);
                 return {
                   targetDigest: written.evidence.outputSha256,
                   settle: async () => {
+                    if (!publication.confirmed) return "uncertain" as const;
                     const observedDigest = await hashFile(target).catch(() => undefined);
                     if (observedDigest === undefined) return "uncertain" as const;
                     if (observedDigest !== written.evidence.outputSha256) {
                       return "superseded" as const;
                     }
                     try {
-                      await this.#syncDirectory(dirname(target));
+                      if (this.#syncDirectory === undefined) await syncPublishedFile(publication);
+                      else await this.#syncDirectory(dirname(target));
                       if (destination.kind === "original") {
                         await this.#capabilities.refreshApprovedPdf(
                           destination.capabilityId!,

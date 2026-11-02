@@ -1,5 +1,4 @@
-import { createHash } from "node:crypto";
-import { createReadStream } from "node:fs";
+import { hashFile } from "../files/file-capabilities.js";
 import { readdir, realpath, stat } from "node:fs/promises";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
 
@@ -51,9 +50,7 @@ export async function resolvePackagedRuntime(
   async function verify(base: string, file: RuntimeFile) {
     const path = await containedPath(base, file.path);
     if (!(await stat(path)).isFile()) throw new Error(`Packaged runtime is not a file: ${file.path}`);
-    const hash = createHash("sha256");
-    for await (const chunk of createReadStream(path)) hash.update(chunk);
-    if (hash.digest("hex") !== file.sha256) throw new Error(`Packaged runtime digest mismatch: ${file.path}`);
+    if (await hashFile(path) !== file.sha256) throw new Error(`Packaged runtime digest mismatch: ${file.path}`);
     return path;
   }
   if (!manifest.node.version || !manifest.service.version || manifest.webAssets.files.length === 0) {
