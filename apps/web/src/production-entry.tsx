@@ -615,6 +615,7 @@ export function RuntimeProductionReviewApp(props: {
     }
     setHostForwardSyncTexRequest({
       token: ++forwardNavigationToken.current,
+      ...(command.explicitSequence === undefined ? {} : { explicitSequence: command.explicitSequence }),
       documentGeneration: command.documentGeneration,
       pageIndex: command.pageIndex,
       point: command.point,
@@ -674,6 +675,10 @@ export function RuntimeProductionReviewApp(props: {
     onHostForwardSyncTexHandled={(request, outcome) => {
       if (request.nativeSequence !== undefined) void props.runtime?.forwardSyncTex({ action: "ack",
         sequence: request.nativeSequence, generation: request.documentGeneration, outcome }).catch(() => {});
+      else if (request.explicitSequence !== undefined && props.runtime?.host === "vscode") {
+        void props.runtime.forwardSyncTex({ action: "ack", sequence: request.explicitSequence,
+          generation: request.documentGeneration, outcome }).catch(() => {});
+      }
     }}
     {...(props.runtime?.host === "vscode" || props.runtime?.host === "macos"
       ? { onReverseSyncTex: (input: unknown) => props.runtime!.reverseSyncTex(input) }

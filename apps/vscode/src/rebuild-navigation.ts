@@ -44,9 +44,11 @@ export class RebuildNavigationCoordinator {
   #nextId = 0;
   #association = 0;
   #explicitPending = false;
+  #acknowledgement: { association: number; generation: number; timer: ReturnType<typeof setTimeout> } | undefined;
   constructor(readonly options: { followEnabled?: () => boolean } = {}) {}
 
   beginExplicit(): number {
+    this.#clearAcknowledgement();
     this.#association++;
     this.cancelFollowing();
     this.#explicitPending = true;
@@ -54,7 +56,36 @@ export class RebuildNavigationCoordinator {
   }
   isExplicitCurrent(association: number): boolean { return association === this.#association; }
   finishExplicit(association: number): void {
-    if (this.isExplicitCurrent(association)) this.#explicitPending = false;
+    if (this.isExplicitCurrent(association)) {
+      this.#clearAcknowledgement();
+      this.#explicitPending = false;
+    }
+  }
+  awaitExplicitAcknowledgement(association: number, generation: number, onTimeout: () => void): void {
+    if (!this.isExplicitCurrent(association) || !this.#explicitPending) return;
+    this.#clearAcknowledgement();
+    const timer = setTimeout(() => {
+      if (this.#acknowledgement?.association !== association) return;
+      this.finishExplicit(association);
+      onTimeout();
+    }, 60_000);
+    timer.unref?.();
+    this.#acknowledgement = { association, generation, timer };
+  }
+  acknowledgeExplicit(association: number, generation: number): void {
+    if (this.#acknowledgement?.association === association && this.#acknowledgement.generation === generation) {
+      this.finishExplicit(association);
+    }
+  }
+  dispose(): void {
+    this.#clearAcknowledgement();
+    this.#association++;
+    this.#explicitPending = false;
+    this.cancelFollowing();
+  }
+  #clearAcknowledgement(): void {
+    if (this.#acknowledgement !== undefined) clearTimeout(this.#acknowledgement.timer);
+    this.#acknowledgement = undefined;
   }
   cancelFollowing(): void {
     this.#pending = undefined;

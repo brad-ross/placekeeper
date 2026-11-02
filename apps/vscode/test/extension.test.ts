@@ -961,6 +961,42 @@ describe("VS Code local host adapter", () => {
     expect(forwardSyncTexStatus({ status: "other" })).toBeUndefined();
   });
 
+  it("accepts only the matching closed viewer acknowledgement without a broker request", async () => {
+    const coordinator = new RebuildNavigationCoordinator({ followEnabled: () => true });
+    const sequence = coordinator.beginExplicit();
+    coordinator.awaitExplicitAcknowledgement(sequence, 4, vi.fn());
+    const fetch = vi.fn();
+    const acknowledgeForwardNavigation = vi.fn(({ sequence, generation }) => coordinator.acknowledgeExplicit(sequence, generation));
+    const client = createLoopbackRuntimeClient({
+      panelId: "panel_identifier_1234",
+      launch: { origin: "http://127.0.0.1:49152", sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", credential: "c".repeat(43) },
+      assets: { pdfiumWasm: "vscode-webview://authority/pdfium.wasm" },
+      materializeDocument: async () => "vscode-webview://authority/paper.pdf", fetch, acknowledgeForwardNavigation,
+    });
+    const bridge = new VersionedWebviewBridge(client, vi.fn());
+    let requestNumber = 0;
+    const send = async (payload: unknown) => bridge.receive({
+      protocol: REVIEW_RUNTIME_PROTOCOL, version: REVIEW_RUNTIME_VERSION, kind: "request", ...client.identity,
+      requestId: `request_identifier_${++requestNumber}`, method: "forwardSyncTex", payload,
+    });
+    for (const payload of [
+      { action: "ack", sequence, generation: 4, outcome: "applied", sourcePath: "/private/source.tex" },
+      { action: "ack", sequence, generation: 4, outcome: "other" },
+      { action: "poll" },
+    ]) await send(payload);
+    expect(acknowledgeForwardNavigation).not.toHaveBeenCalled();
+    await send({ action: "ack", sequence: sequence + 1, generation: 4, outcome: "applied" });
+    await send({ action: "ack", sequence, generation: 3, outcome: "applied" });
+    coordinator.noteSourceSaved({ sourcePath: "/work/paper.tex", line: 5 });
+    expect(coordinator.hasPending).toBe(false);
+    await send({ action: "ack", sequence, generation: 4, outcome: "applied" });
+    coordinator.noteSourceSaved({ sourcePath: "/work/paper.tex", line: 5 });
+    expect(coordinator.hasPending).toBe(true);
+    expect(fetch).not.toHaveBeenCalled();
+    coordinator.dispose();
+    bridge.dispose();
+  });
+
   it("retires saved-cursor following when an inverse gesture starts and fences its late result", async () => {
     const navigation = new RebuildNavigationCoordinator({ followEnabled: () => true });
     navigation.noteSourceSaved({ sourcePath: "/work/paper.tex", line: 5 });

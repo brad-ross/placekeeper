@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test';
 import type { HostRuntimeCommand } from '../../apps/web/src/host/runtime.js';
 
 declare global {
-  interface Window { runtimeFixture: { send(command: HostRuntimeCommand): void; reverseCalls(): number }; synctexFixture: {
+  interface Window { runtimeFixture: { send(command: HostRuntimeCommand): void; reverseCalls(): number; forwardAcks(): unknown[] }; synctexFixture: {
     observations: { calls: number; cancellations: number; focuses: number[]; acknowledgements: string[]; errors: (string | null)[] };
     render(token?: number, ready?: boolean): void; reverse(): Promise<unknown>; unmount(): void; settle(index: number, result: boolean): void;
   } }
@@ -84,3 +84,15 @@ for (const ready of [false, true]) {
     expect(await page.evaluate(() => window.synctexFixture.observations)).toMatchObject({ calls: ready ? 1 : 0, focuses: [], acknowledgements: ['1:superseded'] });
   });
 }
+
+test('acknowledges explicit VS Code navigation after the rendered page changes', async ({ page }) => {
+  await page.goto(`${fixture}?runtime`);
+  const currentPage = page.getByRole('textbox', { name: /Current page/ });
+  await expect(currentPage).toHaveValue('1');
+  await page.evaluate(() => window.runtimeFixture.send({ command: 'forward-synctex', documentGeneration: 1,
+    explicitSequence: 7, pageIndex: 1, point: { x: 72, y: 150 } }));
+  await expect(currentPage).toHaveValue('2');
+  await expect.poll(() => page.evaluate(() => window.runtimeFixture.forwardAcks())).toEqual([
+    { action: 'ack', sequence: 7, generation: 1, outcome: 'applied' },
+  ]);
+});

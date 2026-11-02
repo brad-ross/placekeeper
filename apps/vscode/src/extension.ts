@@ -282,6 +282,7 @@ async function revealForwardSyncTexTarget(
   panel: vscode.WebviewPanel,
   runtime: PanelRuntime,
   isCurrent: () => boolean = () => true,
+  explicitSequence?: number,
 ): Promise<ForwardSyncTexStatus> {
   for (let attempt = 0; attempt < 6; attempt += 1) {
     if (!isCurrent()) return "stale";
@@ -289,15 +290,25 @@ async function revealForwardSyncTexTarget(
     if (!isCurrent()) return "stale";
     const target = forwardSyncTexTarget(result);
     if (target !== undefined) {
-      await panel.webview.postMessage({
+      if (explicitSequence !== undefined) runtime.rebuildNavigation.awaitExplicitAcknowledgement(
+        explicitSequence, target.documentGeneration, () => {
+          void panel.webview.postMessage({
+            protocol: REVIEW_RUNTIME_PROTOCOL, version: REVIEW_RUNTIME_VERSION, kind: "event", event: "host-command",
+            panelId: runtime.client.identity.panelId, payload: { command: "cancel-synctex" },
+          });
+        },
+      );
+      const posted = await panel.webview.postMessage({
         protocol: REVIEW_RUNTIME_PROTOCOL,
         version: REVIEW_RUNTIME_VERSION,
         kind: "event",
         event: "host-command",
         panelId: runtime.client.identity.panelId,
-        payload: { command: "forward-synctex", ...target },
+        payload: { command: "forward-synctex", ...target,
+          ...(explicitSequence === undefined ? {} : { explicitSequence }) },
       });
-      return "ok";
+      if (!isCurrent()) return "stale";
+      return posted ? "ok" : "failed";
     }
     const status = forwardSyncTexStatus(result) ?? "failed";
     if (!forwardSyncTexRetryable(result) || attempt === 5) return status;
@@ -308,13 +319,17 @@ async function revealForwardSyncTexTarget(
 
 async function revealExplicitForwardSyncTexTarget(panel: vscode.WebviewPanel, runtime: PanelRuntime): Promise<ForwardSyncTexStatus> {
   const association = runtime.rebuildNavigation.beginExplicit();
+  let status: ForwardSyncTexStatus = "failed";
   try {
     await panel.webview.postMessage({
       protocol: REVIEW_RUNTIME_PROTOCOL, version: REVIEW_RUNTIME_VERSION, kind: "event", event: "host-command",
       panelId: runtime.client.identity.panelId, payload: { command: "cancel-synctex" },
     });
-    return await revealForwardSyncTexTarget(panel, runtime, () => runtime.rebuildNavigation.isExplicitCurrent(association));
-  } finally { runtime.rebuildNavigation.finishExplicit(association); }
+    status = await revealForwardSyncTexTarget(panel, runtime, () => runtime.rebuildNavigation.isExplicitCurrent(association), association);
+    return status;
+  } finally {
+    if (status !== "ok") runtime.rebuildNavigation.finishExplicit(association);
+  }
 }
 
 export function activate(context: vscode.ExtensionContext): void {
@@ -416,6 +431,7 @@ export function activate(context: vscode.ExtensionContext): void {
       },
       forwardSourceLocation: () => rebuildNavigation.forwardSourceLocation(() => sourceLocation(binding)),
       sourceNavigationAllowed: () => vscode.workspace.isTrusted,
+      acknowledgeForwardNavigation: ({ sequence, generation }) => rebuildNavigation.acknowledgeExplicit(sequence, generation),
       beginReverseNavigation: () => {
         const association = rebuildNavigation.beginExplicit();
         void panel.webview.postMessage({
@@ -506,6 +522,7 @@ export function activate(context: vscode.ExtensionContext): void {
     panel.onDidDispose(() => {
       panelDisposed = true;
       observer.dispose();
+      rebuildNavigation.dispose();
       bridge.dispose();
       if (runtime.flushTimer !== undefined) clearTimeout(runtime.flushTimer);
       for (const disposable of disposables) disposable.dispose();

@@ -1,3 +1,4 @@
+import { nativeSyncTexRequest } from "../../../packages/core/src/native-synctex-protocol.js";
 import {
   ReviewExportConflictError,
   isReadingLocationResolutionRequest,
@@ -135,9 +136,11 @@ function validPayload(method: ReviewRuntimeMethod, payload: unknown): boolean {
   if (!isObject(payload) || containsCapabilityPrimitive(payload)) return false;
   const keys = Object.keys(payload);
   if (["bootstrap", "presence", "detach", "saveStatus", "saveProposal", "chooseFolder",
-    "retrySave", "locateSave", "scope", "forwardSyncTex"].includes(method)) {
+    "retrySave", "locateSave", "scope"].includes(method)) {
     return keys.length === 0;
   }
+  if (method === "forwardSyncTex") return keys.length === 0 ||
+    (payload.action === "ack" && nativeSyncTexRequest("forwardSyncTex", payload) !== undefined);
   if (method === "chooseOriginal") {
     return keys.every((key) => key === "confirmation") &&
       (payload.confirmation === undefined || isSaveDestinationConfirmation(payload.confirmation));
@@ -328,6 +331,8 @@ export interface LoopbackRuntimeClientOptions {
     readonly column?: number;
   } | undefined;
   readonly sourceNavigationAllowed?: () => boolean;
+  readonly acknowledgeForwardNavigation?: (ack: { readonly sequence: number; readonly generation: number;
+    readonly outcome: "applied" | "superseded" | "failed" }) => void;
   readonly beginReverseNavigation?: () => {
     readonly isCurrent: () => boolean;
     readonly finish: () => void;
@@ -530,6 +535,11 @@ export function createLoopbackRuntimeClient(options: LoopbackRuntimeClientOption
     async invoke(method, payload, signal) {
       if (method === "presence") { connectInvalidations(); return {}; }
       if (method === "detach") return {};
+      if (method === "forwardSyncTex" && isObject(payload) && payload.action === "ack") {
+        if (nativeSyncTexRequest("forwardSyncTex", payload) === undefined) throw new Error("Invalid navigation acknowledgement");
+        options.acknowledgeForwardNavigation?.(payload as { sequence: number; generation: number; outcome: "applied" | "superseded" | "failed" });
+        return {};
+      }
       const route = routes[method];
       if (route === undefined) throw new Error("Runtime method is not allowlisted");
       let reverseNavigation: ReturnType<NonNullable<LoopbackRuntimeClientOptions["beginReverseNavigation"]>> | undefined;

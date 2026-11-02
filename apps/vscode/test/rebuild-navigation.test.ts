@@ -23,6 +23,47 @@ const latestLocation: SourceCursorLocation = {
 };
 
 describe("rebuild navigation coordinator", () => {
+  it("holds explicit precedence until the matching viewer acknowledgement", async () => {
+    const coordinator = new RebuildNavigationCoordinator({ followEnabled: () => true });
+    const sequence = coordinator.beginExplicit();
+    coordinator.awaitExplicitAcknowledgement(sequence, 4, vi.fn());
+    coordinator.noteSourceSaved(firstLocation);
+    expect(await coordinator.revealAfterRebuild(async () => "revealed")).toBe("idle");
+    coordinator.acknowledgeExplicit(sequence + 1, 4);
+    coordinator.acknowledgeExplicit(sequence, 3);
+    coordinator.noteSourceSaved(firstLocation);
+    expect(coordinator.hasPending).toBe(false);
+    coordinator.acknowledgeExplicit(sequence, 4);
+    coordinator.noteSourceSaved(firstLocation);
+    expect(await coordinator.revealAfterRebuild(async () => "revealed")).toBe("revealed");
+    coordinator.dispose();
+  });
+
+  it("retires acknowledgement waits on replacement, timeout, and disposal", () => {
+    vi.useFakeTimers();
+    const coordinator = new RebuildNavigationCoordinator({ followEnabled: () => true });
+    const timeout = vi.fn();
+    try {
+      const first = coordinator.beginExplicit();
+      coordinator.awaitExplicitAcknowledgement(first, 4, timeout);
+      const replacement = coordinator.beginExplicit();
+      vi.advanceTimersByTime(60_000);
+      expect(timeout).not.toHaveBeenCalled();
+      coordinator.noteSourceSaved(firstLocation);
+      expect(coordinator.hasPending).toBe(false);
+      coordinator.awaitExplicitAcknowledgement(replacement, 4, timeout);
+      vi.advanceTimersByTime(60_000);
+      expect(timeout).toHaveBeenCalledOnce();
+      coordinator.noteSourceSaved(firstLocation);
+      expect(coordinator.hasPending).toBe(true);
+      const final = coordinator.beginExplicit();
+      coordinator.awaitExplicitAcknowledgement(final, 4, timeout);
+      coordinator.dispose();
+      vi.advanceTimersByTime(60_000);
+      expect(timeout).toHaveBeenCalledOnce();
+      expect(coordinator.isExplicitCurrent(final)).toBe(false);
+    } finally { coordinator.dispose(); vi.useRealTimers(); }
+  });
   it("preserves reading by default even after source saves and matching rebuilds", async () => {
     const coordinator = new RebuildNavigationCoordinator();
     coordinator.noteSourceSaved(firstLocation);

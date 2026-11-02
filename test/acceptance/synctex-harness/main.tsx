@@ -46,6 +46,7 @@ if (new URLSearchParams(location.search).has('runtime')) {
     resourcePolicy: { host: 'browser', origin: location.origin }, locationHistory: new MemoryReviewLocationHistory() };
   let listener: ((command: HostRuntimeCommand) => void) | undefined;
   let reverseCalls = 0;
+  const forwardAcks: unknown[] = [];
   const unavailable = async (): Promise<never> => { throw new Error('Unused navigation fixture operation'); };
   const runtime: HostRuntime = { host: 'vscode', bootstrap: async () => bootstrap,
     subscribeInvalidations: () => () => undefined,
@@ -53,7 +54,7 @@ if (new URLSearchParams(location.search).has('runtime')) {
     scope: async () => scope, saveStatus: async () => saveStatus,
     command: unavailable, saveProposal: unavailable, chooseCopy: unavailable, chooseFolder: unavailable,
     chooseOriginal: unavailable, retrySave: unavailable, locateSave: unavailable, exportReviewedCopy: unavailable,
-    forwardSyncTex: unavailable, reverseSyncTex: async () => { reverseCalls++; return { status: 'ok' }; }, dispose: () => undefined };
-  Object.assign(window, { runtimeFixture: { send: (command: HostRuntimeCommand) => listener!(command), reverseCalls: () => reverseCalls } });
+    forwardSyncTex: async input => { forwardAcks.push(input); return { status: "ok" }; }, reverseSyncTex: async () => { reverseCalls++; return { status: 'ok' }; }, dispose: () => undefined };
+  Object.assign(window, { runtimeFixture: { send: (command: HostRuntimeCommand) => listener!(command), reverseCalls: () => reverseCalls, forwardAcks: () => forwardAcks } });
   root.render(<RuntimeProductionReviewApp runtime={runtime} />);
 } else render();

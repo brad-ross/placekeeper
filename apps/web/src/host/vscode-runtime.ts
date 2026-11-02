@@ -143,7 +143,9 @@ function validHostCommand(value: unknown): value is HostRuntimeCommand {
     || value.command === "reverse-synctex" || value.command === "cancel-synctex") {
     return Object.keys(value).length === 1;
   }
-  return value.command === "forward-synctex" && Object.keys(value).length === 4 &&
+  return value.command === "forward-synctex" &&
+    Object.keys(value).length === (value.explicitSequence === undefined ? 4 : 5) &&
+    (value.explicitSequence === undefined || (Number.isSafeInteger(value.explicitSequence) && (value.explicitSequence as number) > 0)) &&
     Number.isSafeInteger(value.documentGeneration) && (value.documentGeneration as number) >= 0 &&
     Number.isSafeInteger(value.pageIndex) && (value.pageIndex as number) >= 0 &&
     isObject(value.point) && Object.keys(value.point).length === 2 &&
