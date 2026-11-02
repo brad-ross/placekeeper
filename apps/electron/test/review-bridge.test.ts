@@ -66,7 +66,7 @@ test('real RPC renderer client bootstraps through bridge and rejects bounded tra
     const bridge = new ReviewBridge(async (message) => (message.type === 'invoke' ? { ...message, type: 'result', method: message.method, payload: p.saveStatus } : { ...message, type: 'refreshed', projection: p }), generation => `placekeeper-resource://document/attempt123/${generation}`);
     bridge.projection = p;
     const identity = { windowId: bridge.windowId, attemptId: bridge.attemptId };
-    const runtime = createElectronHostRuntime({ identity: async () => identity, request: (_id, value) => bridge.request(value), documentReady: async () => { }, visible: async () => { }, subscribe: () => () => { } }, identity);
+    const runtime = createElectronHostRuntime({ identity: async () => identity, request: (_id, value) => bridge.request(value), requestClose: async () => {}, readyToSettle: async () => {}, documentReady: async () => { }, visible: async () => { }, commandSurface: async () => {}, presentation: async () => {}, closeSettled: async () => {}, writeClipboard: async () => {}, createLink: async () => 'placekeeper:///paper.pdf#page=1', focusFailed: async () => {}, subscribeShell: () => () => {}, subscribe: () => () => { } }, identity);
     const bootstrap = await runtime.bootstrap();
     assert.equal(bootstrap.sessionId, p.sessionId);
     assert.equal(bootstrap.scope.launchSurface, 'electron');
@@ -102,4 +102,110 @@ test('document stream verifies length and digest before adoption and rejects sta
     bridge.projection = { ...p, document: { ...p.document, sha256: '0'.repeat(64) } };
     await assert.rejects(documentResponse(bridge, 1).arrayBuffer());
     assert.equal(adopted, false);
+});
+test('recovery admission requires a native choice and keeps the current offer fence', async () => {
+    const p = { ...projection(), activeAuthoringDraftIds: [] };
+    const offer = { id: 'offer12345678', expiresAt: new Date(Date.now() + 10000).toISOString() };
+    const bridge = new ReviewBridge(async message => {
+        if (message.type === 'admit') return { ...message, type: 'recovery-offered', choices: ['resume', 'discard', 'fork'], offer };
+        assert.equal(message.type, 'recover');
+        if (message.type !== 'recover') throw new Error('Unexpected operation');
+        assert.deepEqual(message.offer, offer); assert.equal(message.decision, 'resume');
+        return { ...message, type: 'admitted', provisionalId: 'provisional123', resourceId: 'resource123', generation: 1, byteLength: sourceBytes.length, digest, displayName: 'Paper.pdf', projection: p };
+    }, () => 'unused');
+    await bridge.admit('/paper.pdf', async () => 'resume');
+    assert.equal(bridge.projection, p);
+    assert.equal(bridge.resourceId, 'resource123');
+});
+test('native destination dialog captures the invoking generation and revision before waiting', async () => {
+    const p = { ...projection(), activeAuthoringDraftIds: [] };
+    const bridge = new ReviewBridge(async message => {
+        assert.equal(message.type, 'destination-selection');
+        if (message.type !== 'destination-selection') throw new Error('Unexpected operation');
+        assert.equal(message.generation, 1); assert.equal(message.revision, 0); assert.equal(message.selectedPath, '/chosen');
+        return { ...message, type: 'result', method: message.method, payload: { canceled: true } };
+    }, () => 'unused');
+    bridge.projection = p; bridge.active = true;
+    let resolveDialog!: (path: string) => void;
+    bridge.chooseDestination = () => new Promise(resolve => { resolveDialog = resolve; });
+    const pending = bridge.request({ protocol: 'placekeeper.review-runtime', version: 4, kind: 'request', runtimeId: bridge.windowId, requestId: 'request1234567890', method: 'chooseFolder', payload: {}, sessionId: p.sessionId, generation: 1, revision: 0 });
+    let settled = false; const closing = bridge.settle().then(() => { settled = true; });
+    await Promise.resolve(); assert.equal(settled, false);
+    bridge.projection = { ...p, revision: 1 };
+    resolveDialog('/chosen');
+    // The mocked payload can be rejected by the public result sanitizer; either
+    // way close waits for this request rather than retiring it during the dialog.
+    await pending.catch(() => undefined); await closing.catch(() => undefined);
+    assert.equal(bridge.pendingRequests.size, 0);
+});
+test('focused task attachment keeps resources and emits exact launch identity on fresh activation', async () => {
+    const p = { ...projection(), activeAuthoringDraftIds: [] };
+    const launchId = 'a'.repeat(43);
+    const operations: unknown[] = [];
+    const bridge = new ReviewBridge(async message => {
+        operations.push(message);
+        return { ...message, type: message.type === 'activate' ? 'active' : 'refreshed', projection: p };
+    }, () => 'unused');
+    bridge.projection = p; bridge.active = true;
+    bridge.resourceId = 'retained-resource'; bridge.validatedGeneration = 1; bridge.paintedGeneration = 1;
+    await bridge.attachLaunch(launchId);
+    await bridge.activate();
+    assert.equal(bridge.resourceId, 'retained-resource');
+    assert.equal(bridge.pendingLaunchId, undefined);
+    assert.equal((operations[1] as { launchId: string }).launchId, launchId);
+});
+
+test('discarded interaction publishes its canonical revision after the receipt without a save event', async () => {
+    const initial = { ...projection(), activeAuthoringDraftIds: ['draft_cancel_1234'] };
+    const next = { ...projection(1), activeAuthoringDraftIds: [] };
+    const delivery: string[] = [];
+    const events: unknown[] = [];
+    const bridge = new ReviewBridge(async message => {
+        if (message.type === 'refresh') return { ...message, type: 'refreshed', projection: next };
+        assert.equal(message.type, 'invoke');
+        if (message.type !== 'invoke') throw new Error('Unexpected operation');
+        assert.equal(message.method, 'finalizeInteraction');
+        return { ...message, type: 'result', method: message.method, payload: {
+            status: 'finalized', interactionToken: 'interaction_cancel_1234', generation: 1,
+            outcome: 'discarded', reviewRevision: 1,
+        } };
+    }, () => 'unused');
+    bridge.projection = initial; bridge.active = true;
+    bridge.onInvalidation = event => { delivery.push('invalidation'); events.push(event); };
+    const receipt = await bridge.request({ protocol: 'placekeeper.review-runtime', version: 4,
+        kind: 'request', runtimeId: bridge.windowId, requestId: 'cancel_request_1234',
+        sessionId: initial.sessionId, generation: 1, revision: 0, method: 'finalizeInteraction',
+        payload: { interactionToken: 'interaction_cancel_1234', order: 2, outcome: 'discarded',
+            draftId: 'draft_cancel_1234', expectedDraftRevision: 0 } });
+    delivery.push('receipt');
+    assert.equal((receipt as { payload: { reviewRevision: number } }).payload.reviewRevision, 1);
+    assert.deepEqual(delivery, ['receipt']);
+    await bridge.settle();
+    assert.deepEqual(delivery, ['receipt', 'invalidation']);
+    assert.equal(bridge.projection, next);
+    assert.deepEqual(events, [{ protocol: 'placekeeper.review-runtime', version: 4, kind: 'event',
+        runtimeId: bridge.windowId, event: 'session-invalidated',
+        payload: { sessionId: initial.sessionId, generation: 1, revision: 1, reason: 'revision' } }]);
+});
+
+test('interaction release publishes same-revision authoring changes and ignores retired refreshes', async () => {
+    const initial = { ...projection(), activeAuthoringDraftIds: ['draft_cancel_1234'] };
+    const next = { ...initial, activeAuthoringDraftIds: [] };
+    const events: unknown[] = [];
+    let refreshes = 0;
+    const bridge = new ReviewBridge(async message => {
+        if (message.type === 'refresh') { refreshes++; return { ...message, type: 'refreshed', projection: next }; }
+        if (message.type !== 'invoke') throw new Error('Unexpected operation');
+        return { ...message, type: 'result', method: message.method, payload: { status: 'released' } };
+    }, () => 'unused');
+    bridge.projection = initial; bridge.active = true; bridge.onInvalidation = event => events.push(event);
+    const request = { protocol: 'placekeeper.review-runtime', version: 4, kind: 'request',
+        runtimeId: bridge.windowId, requestId: 'release_request_1234', sessionId: initial.sessionId,
+        generation: 1, revision: 0, method: 'releaseInteraction', payload: { interactionToken: 'interaction_cancel_1234', order: 3 } };
+    await bridge.request(request); await bridge.settle();
+    assert.equal((events[0] as { payload: { reason: string } }).payload.reason, 'freshness');
+    await bridge.request({ ...request, requestId: 'release_request_5678' });
+    bridge.retired = true;
+    await bridge.settle();
+    assert.equal(refreshes, 1); assert.equal(events.length, 1);
 });

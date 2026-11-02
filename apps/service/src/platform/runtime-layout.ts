@@ -12,6 +12,7 @@ interface RuntimeFile {
 }
 export interface PackagedRuntimeManifest extends RuntimeIdentity {
   readonly schemaVersion: 1;
+  readonly recovery?: { readonly readableDraftSchemaVersions: readonly number[]; readonly writtenDraftSchemaVersion: number };
   readonly target: { readonly platform: NodeJS.Platform; readonly arch: string };
   readonly node: RuntimeFile & { readonly version: string };
   readonly service: RuntimeFile & { readonly version: string };

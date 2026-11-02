@@ -1,5 +1,5 @@
 import { defineConfig } from "@playwright/test";
-import { browserDefaults, browserUseDefaults, serverDefaults } from '../browser-config';
+import { browserDefaults, browserUseDefaults, serverDefaults, browserTestOrigin, browserTestServerCommand } from '../browser-config';
 
 export default defineConfig({
   ...browserDefaults,
@@ -8,11 +8,11 @@ export default defineConfig({
     ...browserUseDefaults,
     browserName: "webkit",
     viewport: { width: 760, height: 900 },
-    baseURL: "http://127.0.0.1:4173",
+    baseURL: browserTestOrigin,
   },
   webServer: {
-    command: "pnpm exec vite --host 127.0.0.1 --port 4173",
-    url: "http://127.0.0.1:4173/test/acceptance/review-harness/index.html",
+    command: browserTestServerCommand,
+    url: `${browserTestOrigin}/test/acceptance/review-harness/index.html`,
     ...serverDefaults,
   },
 });

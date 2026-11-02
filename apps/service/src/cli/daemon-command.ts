@@ -1,3 +1,4 @@
+import { switchDesktopService } from "./desktop-service-switch.js";
 import { execFile } from "node:child_process";
 import { lstat, readFile, unlink } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
@@ -286,6 +287,22 @@ export async function runDaemonCommand(
   write: (text: string) => void = (text) => process.stdout.write(text),
 ): Promise<number> {
   const paths = installedSmokeDaemonPaths(args) ?? defaultDaemonPaths();
+  if (args[0] === "switch-service") {
+    if (args.length !== 7) throw new Error("Use daemon switch-service --resources <root> --backup <new-path> --receipt <new-path>");
+    try {
+      await switchDesktopService({ resources: takeFlag(args, "--resources"), backup: takeFlag(args, "--backup"), receipt: takeFlag(args, "--receipt"), paths });
+      write(`${JSON.stringify({ ok: true, status: "ready" })}\n`);
+      return 0;
+    } catch (failure) {
+      const error = failure instanceof LifecycleLockTimeoutError ? new DaemonUpgradeRequiredError("transient-busy") : failure;
+      write(`${JSON.stringify({ ok: false, error: {
+        kind: error instanceof DaemonUpgradeRequiredError ? "upgrade-required" : "input-unavailable",
+        message: error instanceof Error ? error.message : "The selected service did not become ready. Recovery was retained.",
+        recoveryAction: error instanceof DaemonUpgradeRequiredError ? error.recoveryAction : "Inspect the selected installation and retained recovery backup, then retry service selection",
+      } })}\n`);
+      return 2;
+    }
+  }
   if (args[0] === "ensure-ready") {
     const receiptPath = takeFlag(args, "--receipt");
     await ensureServiceDaemonReady(paths, process.env[LIFECYCLE_LOCK_TOKEN_ENV], receiptPath);

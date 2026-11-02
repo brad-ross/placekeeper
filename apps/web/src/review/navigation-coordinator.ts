@@ -456,11 +456,12 @@ export class NavigationCoordinator {
     if (this.locationHistoryStarted || this.dependencies.locationHistory === undefined) return;
     this.locationHistoryStarted = true;
     this.dependencies.locationHistory.start(async (direction) => {
-      await this.restoreCurrentLocation(direction);
+      const restored = await this.restoreCurrentLocation(direction);
       // Browser history mutates before React commits the coordinator reducer.
       // Keep the opposite traversal unavailable through the settled-layout
       // boundary so a rapid Back/Forward pair cannot read the previous index.
       await this.dependencies.layout.settle();
+      return restored;
     });
   }
 

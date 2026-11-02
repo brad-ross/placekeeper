@@ -727,7 +727,7 @@ export class SessionBroker {
     requestedLocation?: PlacekeeperLinkLocation,
   ): SessionLaunch {
     // Native admission owns its own presentation and never uses HTTP launch authority.
-    if (surface === "codex-native") {
+    if (surface === "codex-native" || surface === "macos" || surface === "electron") {
       return { sessionId: session.id, fileId: session.fileId,
         ...(session.rootId === undefined ? {} : { rootId: session.rootId }),
         launchPath: "", fragment: "", surface,

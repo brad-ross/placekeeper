@@ -1,3 +1,4 @@
+import type { NativeTaskLaunchAdmission, NativeTaskLaunchClaim, NativeTaskLaunchStage } from "./native-task-launches.js";
 import { createHash, randomBytes } from "node:crypto";
 import { basename } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -57,6 +58,8 @@ interface StagedRuntimeRecord extends RuntimeRecordBase {
   projection: NativeRuntimeProjection;
   readonly documents: Map<number, { readonly byteLength: number; readonly digest: string }>;
   adoptedResourceGeneration: number;
+  taskLaunch?: NativeTaskLaunchAdmission;
+  taskLaunchAwaitingActivation?: boolean;
   interactionAttachment?: import("../sessions/review-interactions.js").ReviewInteractionAttachment;
 }
 
@@ -116,6 +119,7 @@ export class NativeRuntimeManager {
   readonly #limits: Required<NativeRuntimeManagerOptions>;
   readonly #records = new Map<string, RuntimeRecord>();
   readonly #requests = new Map<string, RequestRecord>();
+  readonly #pendingResultsByHelper = new Map<string, Set<Promise<NativeReviewHelperResponse>>>();
   readonly #completedRequestKeysByHelper = new Map<string, string[]>();
   readonly #activeRequestsByHelper = new Map<string, number>();
   readonly #activeResourcesByHelper = new Map<string, number>();
@@ -133,6 +137,22 @@ export class NativeRuntimeManager {
       maxResourcesPerHelper: options.maxResourcesPerHelper ?? 1,
       maxRetainedRequestsPerHelper: Math.max(0, options.maxRetainedRequestsPerHelper ?? 256),
     };
+  }
+
+  stageLaunch(input: NativeTaskLaunchStage) {
+    return this.#host === "electron" ? this.#backend.nativeTaskLaunches?.stageLaunch(input) : undefined;
+  }
+
+  resolveLaunch(launchId: string) {
+    return this.#host === "electron" ? this.#backend.nativeTaskLaunches?.resolveLaunch(launchId) : undefined;
+  }
+
+  claimLaunch(input: NativeTaskLaunchClaim): boolean {
+    return this.#host === "electron" && (this.#backend.nativeTaskLaunches?.claimLaunch(input) ?? false);
+  }
+
+  cancelLaunch(launchId: string): boolean {
+    return this.#host === "electron" && (this.#backend.nativeTaskLaunches?.cancelLaunch(launchId) ?? false);
   }
 
   activity(): { readonly helpers: number; readonly activeHelpers: number; readonly resources: number } {
@@ -183,6 +203,14 @@ export class NativeRuntimeManager {
       else this.#retainCompletedRequest(helperId, requestKey, request);
     });
     request.result = result;
+    const pending = this.#pendingResultsByHelper.get(helperId) ?? new Set<Promise<NativeReviewHelperResponse>>();
+    this.#pendingResultsByHelper.set(helperId, pending);
+    pending.add(result);
+    const settled = () => {
+      pending.delete(result);
+      if (pending.size === 0 && this.#pendingResultsByHelper.get(helperId) === pending) this.#pendingResultsByHelper.delete(helperId);
+    };
+    void result.then(settled, settled);
     return result;
   }
 
@@ -194,6 +222,7 @@ export class NativeRuntimeManager {
   ): Promise<NativeReviewHelperResponse> {
     const existing = this.#records.get(helperId);
     if (existing === undefined) {
+      if (message.type === "admit-launch") return this.#admitLaunch(helperId, message, signal);
       return message.type === "admit" || message.type === "admit-link"
         ? this.#admit(helperId, message, signal)
         : this.#failure(message, "invalid");
@@ -202,6 +231,7 @@ export class NativeRuntimeManager {
       || message.type === "admit" || message.type === "admit-link") {
       return this.#failure(message, "invalid");
     }
+    if (message.type === "admit-launch") return this.#admitLaunch(helperId, message, signal, existing);
     if (message.type === "release") {
       await this.detach(helperId);
       return { ...this.#envelope(message), type: "released" };
@@ -222,6 +252,56 @@ export class NativeRuntimeManager {
     if (message.type === "adopt-resource") return this.#adoptResource(existing, message);
     if (message.type === "copy-link") return this.#copyLink(existing, message);
     return this.#failure(message, "invalid");
+  }
+
+  async #admitLaunch(
+    helperId: string,
+    message: Extract<NativeReviewHelperMessage, { readonly type: "admit-launch" }>,
+    signal: AbortSignal,
+    existing?: RuntimeRecord,
+  ): Promise<NativeReviewHelperResponse> {
+    const launches = this.#backend.nativeTaskLaunches;
+    const admission = launches?.reserve(message.launchId);
+    if (admission === undefined || launches === undefined) return this.#failure(message, "invalid");
+    try {
+      if (existing !== undefined) {
+        if (existing.phase !== "active") throw new Error("native-window-not-active");
+        const trusted = await this.#backend.current(existing.canonicalKey, signal);
+        throwIfAborted(signal);
+        if (this.#records.get(helperId) !== existing ||
+          !launches.matches(admission, trusted.sessionId, trusted.generation)) throw new Error("native-launch-target-mismatch");
+        const located = admission.location === undefined ? trusted : { ...trusted, location: admission.location };
+        const projection = sanitizeNativeRuntimeProjection(this.#host, located);
+        if (projection === undefined) throw new Error("invalid-projection");
+        if (existing.taskLaunch !== undefined) launches.detach(existing.taskLaunch);
+        existing.taskLaunch = admission;
+        existing.taskLaunchAwaitingActivation = true;
+        existing.trustedProjection = located;
+        existing.projection = projection;
+        return { ...this.#envelope(message), type: "refreshed", projection };
+      }
+      const result = await this.#admit(helperId, { ...message, type: "admit", sourcePath: admission.sourcePath }, signal);
+      throwIfAborted(signal);
+      const record = this.#records.get(helperId);
+      if (result.type !== "admitted" || record === undefined || record.phase !== "provisional" ||
+        !launches.matches(admission, record.projection.sessionId, record.projection.generation)) {
+        if (record !== undefined) await this.detach(helperId);
+        throw new Error("native-launch-target-mismatch");
+      }
+      record.taskLaunch = admission;
+      record.taskLaunchAwaitingActivation = true;
+      if (admission.location !== undefined) {
+        record.trustedProjection = { ...record.trustedProjection, location: admission.location };
+        const projection = sanitizeNativeRuntimeProjection(this.#host, record.trustedProjection);
+        if (projection === undefined) throw new Error("invalid-projection");
+        record.projection = projection;
+        return { ...result, projection };
+      }
+      return result;
+    } catch {
+      launches.detach(admission);
+      return this.#failure(message, "unavailable");
+    }
   }
 
   async #admit(
@@ -350,27 +430,51 @@ export class NativeRuntimeManager {
     message: Extract<NativeReviewHelperMessage, { readonly type: "activate" }>,
     signal: AbortSignal,
   ): Promise<NativeReviewHelperResponse> {
-    if (record.phase !== "provisional") return this.#failure(message, "invalid");
+    if (record.phase !== "provisional" && !record.taskLaunchAwaitingActivation) return this.#failure(message, "invalid");
+    const taskLaunch = record.taskLaunch;
+    if (record.taskLaunchAwaitingActivation) {
+      if (taskLaunch === undefined || !this.#backend.nativeTaskLaunches?.matchesActivation(taskLaunch, message.launchId)) {
+        return this.#failure(message, "invalid");
+      }
+    } else if (message.launchId !== undefined) return this.#failure(message, "invalid");
+    const wasActive = record.phase === "active";
     try {
-      const trusted = await this.#backend.activate(record.canonicalKey, record.presentationLease, signal);
+      const current = wasActive ? await this.#backend.current(record.canonicalKey, signal)
+        : await this.#backend.activate(record.canonicalKey, record.presentationLease, signal);
+      const trusted = taskLaunch?.location === undefined ? current : { ...current, location: taskLaunch.location };
       if (signal.aborted) {
         await this.#backend.detach(record.canonicalKey, record.presentationLease).catch(() => undefined);
         return this.#failure(message, "unavailable");
       }
+      if (this.#records.get(record.helperId) !== record) throw new Error("native-window-detached");
+      if (record.taskLaunch !== taskLaunch) return this.#failure(message, "stale");
+      // Backend activation has acquired a presentation lease. Any subsequent
+      // launch-fence failure must detach that lease rather than release admission.
+      record.phase = "active";
       const projection = sanitizeNativeRuntimeProjection(this.#host, trusted);
       if (projection === undefined) throw new Error("invalid-projection");
-      record.phase = "active";
-      const interactionAttachment = this.#backend.registerInteraction?.(
+      if (record.taskLaunch !== undefined && !this.#backend.nativeTaskLaunches?.matches(
+        record.taskLaunch, trusted.sessionId, trusted.generation,
+      )) throw new Error("stale-native-launch");
+      const interactionAttachment = wasActive ? undefined : this.#backend.registerInteraction?.(
         record.canonicalKey, `${this.#host}:${record.helperId}:${record.attemptId}`,
       );
       if (interactionAttachment !== undefined) record.interactionAttachment = interactionAttachment;
       record.trustedProjection = trusted;
       record.projection = projection;
       this.#rememberDocument(record, projection);
+      if (record.taskLaunch !== undefined && !this.#backend.nativeTaskLaunches?.visible(record.taskLaunch,
+        () => this.#records.get(record.helperId) === record && record.phase === "active" && record.taskLaunch === taskLaunch)) {
+        throw new Error("stale-native-launch");
+      }
+      delete record.taskLaunchAwaitingActivation;
       return { ...this.#envelope(message), type: "active", projection };
     } catch {
-      await this.#backend.release(record.canonicalKey).catch(() => undefined);
-      if (this.#records.get(record.helperId) === record) this.#records.delete(record.helperId);
+      if (wasActive && record.taskLaunch === taskLaunch) {
+        if (record.taskLaunch !== undefined) this.#backend.nativeTaskLaunches?.detach(record.taskLaunch);
+        delete record.taskLaunch;
+        delete record.taskLaunchAwaitingActivation;
+      } else if (!wasActive && this.#records.get(record.helperId) === record) await this.detach(record.helperId);
       return this.#failure(message, "unavailable");
     }
   }
@@ -409,6 +513,7 @@ export class NativeRuntimeManager {
       record.trustedProjection = trusted;
       record.projection = projection;
       this.#rememberDocument(record, projection);
+      if (record.taskLaunch !== undefined) this.#backend.nativeTaskLaunches?.renew(record.taskLaunch);
       const saveChanged = canonicalJson(previous.saveStatus) !== canonicalJson(projection.saveStatus);
       const recoveryChanged = previous.protected !== projection.protected;
       if (projection.generation !== previous.generation || projection.revision !== previous.revision
@@ -588,6 +693,14 @@ export class NativeRuntimeManager {
     await this.detach(helperId);
   }
 
+  /** App retirement keeps its activity reservation until accepted work settles.
+   * Direct detach remains nonblocking for release requests and renderer failure. */
+  async detachAndSettle(helperId: string): Promise<void> {
+    const pending = [...(this.#pendingResultsByHelper.get(helperId) ?? [])];
+    await this.detach(helperId);
+    await Promise.allSettled(pending);
+  }
+
   async detach(helperId: string): Promise<void> {
     const record = this.#records.get(helperId);
     if (record !== undefined) this.#records.delete(helperId);
@@ -603,6 +716,7 @@ export class NativeRuntimeManager {
     this.#activeRequestsByHelper.delete(helperId);
     this.#activeResourcesByHelper.delete(helperId);
     if (record === undefined) return;
+    if (record.phase !== "recovery" && record.taskLaunch !== undefined) this.#backend.nativeTaskLaunches?.detach(record.taskLaunch);
     if (record.phase === "active") {
       if (record.interactionAttachment !== undefined) {
         this.#backend.disconnectInteraction?.(record.canonicalKey, record.interactionAttachment);
@@ -619,6 +733,7 @@ export class NativeRuntimeManager {
       ...[...this.#requests.keys()].map((key) => key.slice(0, key.indexOf("\0"))),
     ]);
     await Promise.all([...helperIds].map((helperId) => this.detach(helperId)));
+    this.#backend.nativeTaskLaunches?.close();
   }
 
   #reserveRequest(helperId: string): () => void {

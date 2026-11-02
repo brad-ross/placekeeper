@@ -22,7 +22,9 @@ export const UNSUPPORTED_CONTEXT: LaunchErrorPresentation = Object.freeze({
 export function resolveLauncherPath(
   configured: string | undefined,
   homeDirectory: string,
+  platform: NodeJS.Platform = process.platform,
 ): string {
+  if (!configured && platform !== "darwin") throw new Error("Select the installed Placekeeper candidate launcher in placekeeper.launcherPath");
   return configured && configured.length > 0
     ? configured
     : join(
@@ -34,7 +36,9 @@ export function resolveLauncherPath(
 export function resolveExternalLauncherPath(
   configured: string | undefined,
   homeDirectory: string,
+  platform: NodeJS.Platform = process.platform,
 ): string {
+  if (!configured && platform !== "darwin") throw new Error("Select the installed Placekeeper external launcher explicitly");
   return configured && configured.length > 0
     ? configured
     : join(

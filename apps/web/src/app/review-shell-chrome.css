@@ -496,3 +496,10 @@
   color: var(--review-ink-muted);
 }
 
+
+.electron-review-shell {
+  position: absolute;
+  inset: 0;
+  min-width: 0;
+  min-height: 0;
+}

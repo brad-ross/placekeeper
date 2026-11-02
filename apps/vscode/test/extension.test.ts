@@ -404,12 +404,18 @@ describe("VS Code local host adapter", () => {
   it("uses an existing configured launcher first and otherwise the user-local Placekeeper path", () => {
     expect(resolveLauncherPath("/custom/Placekeeper.app/placekeeper", "/Users/reader"))
       .toBe("/custom/Placekeeper.app/placekeeper");
-    expect(resolveLauncherPath(undefined, "/Users/reader")).toBe(
+    expect(resolveLauncherPath(undefined, "/Users/reader", "darwin")).toBe(
       "/Users/reader/Applications/Placekeeper.app/Contents/MacOS/placekeeper",
     );
-    expect(resolveExternalLauncherPath(undefined, "/Users/reader")).toBe(
+    expect(resolveExternalLauncherPath(undefined, "/Users/reader", "darwin")).toBe(
       "/Users/reader/Applications/Placekeeper.app/Contents/MacOS/placekeeper-vscode",
     );
+  });
+
+  it("requires explicit candidate selection on other desktop platforms", () => {
+    expect(() => resolveLauncherPath(undefined, "/home/reader", "linux")).toThrow("Select");
+    expect(() => resolveLauncherPath(undefined, "C:\\Users\\reader", "win32")).toThrow("Select");
+    expect(resolveLauncherPath("/opt/candidate/bin/placekeeper", "/home/reader", "linux")).toBe("/opt/candidate/bin/placekeeper");
   });
 
   it("rejects remote, web, virtual, and non-file workspaces", () => {

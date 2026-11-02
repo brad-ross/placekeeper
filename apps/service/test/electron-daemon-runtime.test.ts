@@ -1,6 +1,7 @@
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { SessionBroker } from "../src/sessions/session-broker.js";
+import { copyFile, mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { expect, it, vi } from "vitest";
 import { PlacekeeperHost } from "../src/host/placekeeper-host.js";
 import { requestControl, startLaunchControlServer } from "../src/host/launch-control.js";
@@ -83,4 +84,107 @@ it("admits Electron through registered app ownership with bounded resources and 
     await host.close();
     await rm(root, { recursive: true, force: true });
   }
+});
+
+it("attaches a fresh helper through a staged desktop launch over private control", async () => {
+  const root = await mkdtemp(join(tmpdir(), "placekeeper-electron-staged-control-"));
+  const assets = join(root, "assets"); await mkdir(assets); await writeFile(join(assets, "app.js"), "export {}\n");
+  const sourcePath = join(root, "paper.pdf"); await writeFile(sourcePath, "%PDF-1.7\nstaged desktop launch\n%%EOF");
+  const host = await PlacekeeperHost.start({ recoveryRoot: join(root, "recovery"), webAssets: { root: assets }, port: 0 });
+  const socket = join(root, "control.sock"); const control = await startLaunchControlServer(host, socket);
+  try {
+    const staged = await requestControl(socket, { kind: "launch", request: { pdfPath: sourcePath, desktop: "electron" } });
+    if (staged.kind !== "launch" || !staged.response.ok || !("launchId" in staged.response)) throw new Error("missing native launch receipt");
+    expect(staged.response).not.toHaveProperty("url");
+    const appInstanceId = "app_fresh_launch_1234"; const helperId = "helper_fresh_launch_1234";
+    await requestControl(socket, { kind: "electron-app-control", message: { protocolVersion: 1, type: "register-app", appInstanceId,
+      processId: process.pid, startIdentity: "start_fresh_launch_1234", buildIdentity: "build_fresh_launch_1234" } });
+    expect(host.electronLifecycle.ownsHelper(appInstanceId, helperId)).toBe(false);
+    await expect(requestControl(socket, { kind: "electron-runtime", appInstanceId, helperId, message: {
+      protocolVersion: 1, windowId: "window_fresh_launch_1234", attemptId: "attempt_fresh_launch_1234", requestId: "request_fresh_launch_1234", type: "admit-launch", launchId: staged.response.launchId,
+    } })).resolves.toMatchObject({ kind: "electron-runtime", response: { type: "admitted" } });
+    expect(host.electronLifecycle.ownsHelper(appInstanceId, helperId)).toBe(true);
+  } finally { await control.close(); await host.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+
+it.each(["electron", "macos"] as const)("releases recovered %s admission without leaking browser presence", async (runtimeHost) => {
+  const root = await mkdtemp(join(tmpdir(), "pk-native-recovery-"));
+  const recoveryRoot = join(root, "recovery"); const sourcePath = join(root, "paper.pdf");
+  await copyFile(resolve("test/fixtures/pdfs/multi-page-text.pdf"), sourcePath);
+  const seed = new SessionBroker({ recoveryRoot });
+  let sessionId = "";
+  try {
+    const opened = await seed.openReview({ pdfPath: sourcePath, surface: "codex-native" });
+    if (opened.kind !== "opened") throw new Error("Expected disposable review");
+    sessionId = opened.launch.sessionId;
+    await seed.acceptMutation(sessionId, { type: "set-annotation-name", expectedRevision: 0, annotationName: "Acknowledged before native recovery" });
+  } finally { await seed.quiesceForShutdown(); }
+  const assets = join(root, "assets"); await mkdir(assets); await writeFile(join(assets, "app.js"), "export {}\n");
+  const host = await PlacekeeperHost.start({ recoveryRoot, webAssets: { root: assets }, port: 0 });
+  const socket = join(root, "control.sock"); const control = await startLaunchControlServer(host, socket);
+  const runtimeKind = runtimeHost === "electron" ? "electron-runtime" : "macos-runtime";
+  const appControlKind = runtimeHost === "electron" ? "electron-app-control" : "macos-app-control";
+  const appInstanceId = "app_native_recovery_1234"; const helperId = "helper_native_recovery_1234";
+  const envelope = { protocolVersion: 1, windowId: "window_native_recovery_1234", attemptId: "attempt_native_recovery_1234" };
+  const browserExchanges = vi.spyOn(host.broker, "exchangeBootstrap");
+  const authenticatedPages = vi.spyOn(host.broker.controls, "noteAuthenticatedPage");
+  try {
+    await requestControl(socket, { kind: appControlKind, message: { protocolVersion: 1, type: "register-app", appInstanceId,
+      processId: process.pid, startIdentity: "start_native_recovery_1234", buildIdentity: "build_native_recovery_1234" } });
+    const offer = await requestControl(socket, { kind: runtimeKind, appInstanceId, helperId,
+      message: { ...envelope, type: "admit", requestId: "request_native_recovery_offer", sourcePath } });
+    if ((offer.kind !== "electron-runtime" && offer.kind !== "macos-runtime") || offer.response.type !== "recovery-offered") throw new Error("Expected native recovery offer");
+    const recovered = await requestControl(socket, { kind: runtimeKind, appInstanceId, helperId, message: { ...envelope,
+      type: "recover", requestId: "request_native_recovery_resume", decision: "resume", offer: offer.response.offer, idempotencyKey: "operation_native_recovery_1234" } });
+    expect(recovered).toMatchObject({ kind: runtimeKind, response: { type: "admitted", projection: { sessionId, revision: 1 } } });
+    await expect(requestControl(socket, { kind: runtimeKind, appInstanceId, helperId,
+      message: { ...envelope, type: "release", requestId: "request_native_recovery_release" } })).resolves.toMatchObject({ response: { type: "released" } });
+    await expect(requestControl(socket, { kind: appControlKind, message: { protocolVersion: 1, type: "detach", appInstanceId, reason: "controlled-exit" } })).resolves.toMatchObject({ response: { type: "ack" } });
+    expect(host.lifecycle.status().activity).toEqual({ reviewPresence: 0, codexTasks: 0, transientWork: 0 });
+    expect(browserExchanges).not.toHaveBeenCalled();
+    expect(authenticatedPages).not.toHaveBeenCalled();
+    const retained = JSON.parse(await readFile(join(recoveryRoot, sessionId, "draft.json"), "utf8")) as { payload: { state: { annotationName: string } } };
+    expect(retained.payload.state.annotationName).toBe("Acknowledged before native recovery");
+  } finally { await control.close(); await host.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+it("keeps the first provisional review activatable when a focused task admission is rejected", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pk-focus-admission-"));
+  const assets = join(root, "assets"); await mkdir(assets); await writeFile(join(assets, "app.js"), "export {}\n");
+  const sourcePath = join(root, "paper.pdf"); await writeFile(sourcePath, "%PDF-1.7\nprovisional duplicate\n%%EOF");
+  const host = await PlacekeeperHost.start({ recoveryRoot: join(root, "recovery"), webAssets: { root: assets }, port: 0 });
+  const socket = join(root, "control.sock"); const control = await startLaunchControlServer(host, socket);
+  const appInstanceId = "app_provisional_focus_1234"; const helperId = "helper_provisional_focus_1234";
+  const envelope = { protocolVersion: 1, windowId: "window_provisional_focus_1234", attemptId: "attempt_provisional_focus_1234" };
+  const stage = async () => {
+    const result = await requestControl(socket, { kind: "launch", request: { pdfPath: sourcePath, desktop: "electron" } });
+    if (result.kind !== "launch" || !result.response.ok || !("launchId" in result.response)) throw new Error("Expected staged native launch");
+    return result.response;
+  };
+  try {
+    await requestControl(socket, { kind: "electron-app-control", message: { protocolVersion: 1, type: "register-app", appInstanceId,
+      processId: process.pid, startIdentity: "start_provisional_focus_1234", buildIdentity: "build_provisional_focus_1234" } });
+    const first = await stage();
+    await expect(requestControl(socket, { kind: "electron-runtime", appInstanceId, helperId,
+      message: { ...envelope, type: "admit-launch", launchId: first.launchId, requestId: "request_provisional_first" } })).resolves.toMatchObject({ response: { type: "admitted" } });
+    expect(host.electronRuntime.activity()).toMatchObject({ helpers: 1, activeHelpers: 0 });
+    const duplicate = await stage();
+    await expect(requestControl(socket, { kind: "electron-runtime", appInstanceId, helperId,
+      message: { ...envelope, type: "admit-launch", launchId: duplicate.launchId, requestId: "request_provisional_duplicate" } })).resolves.toMatchObject({ response: { type: "failure", code: "unavailable" } });
+    expect(host.electronLifecycle.ownsHelper(appInstanceId, helperId)).toBe(true);
+    expect(host.electronRuntime.activity()).toMatchObject({ helpers: 1, activeHelpers: 0 });
+    await expect(requestControl(socket, { kind: "electron-runtime", appInstanceId, helperId,
+      message: { ...envelope, type: "activate", launchId: first.launchId, documentValidated: true, requestId: "request_provisional_activate" } })).resolves.toMatchObject({ response: { type: "active", projection: { sessionId: first.sessionId } } });
+    expect(host.electronRuntime.activity()).toMatchObject({ helpers: 1, activeHelpers: 1 });
+
+    const failedHelper = "helper_failed_initial_1234";
+    const failedEnvelope = { protocolVersion: 1, windowId: "window_failed_initial_1234", attemptId: "attempt_failed_initial_1234" };
+    await expect(requestControl(socket, { kind: "electron-runtime", appInstanceId, helperId: failedHelper,
+      message: { ...failedEnvelope, type: "admit-launch", launchId: "x".repeat(43), requestId: "request_failed_initial_1234" } })).resolves.toMatchObject({ response: { type: "failure", code: "invalid" } });
+    expect(host.electronLifecycle.ownsHelper(appInstanceId, failedHelper)).toBe(false);
+    expect(host.electronRuntime.activity()).toMatchObject({ helpers: 1, activeHelpers: 1 });
+    await expect(requestControl(socket, { kind: "electron-runtime", appInstanceId, helperId: failedHelper,
+      message: { ...failedEnvelope, type: "admit", sourcePath, requestId: "request_failed_retry_1234" } })).resolves.toMatchObject({ response: { type: "failure", code: "invalid" } });
+  } finally { await control.close(); await host.close(); await rm(root, { recursive: true, force: true }); }
 });

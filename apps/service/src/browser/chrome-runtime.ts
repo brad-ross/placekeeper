@@ -1,3 +1,4 @@
+import type { NativeTaskLaunchRegistry } from "../desktop/native-task-launches.js";
 import { createHash, randomBytes } from "node:crypto";
 
 import {
@@ -90,6 +91,7 @@ export interface RuntimeOperation {
 }
 
 export interface ChromeRuntimeBackend {
+  readonly nativeTaskLaunches?: NativeTaskLaunchRegistry | undefined;
   readonly quota?: ChromeRuntimeAggregateQuota;
   begin(request: ChromeRuntimeStageRequest, signal?: AbortSignal): Promise<ChromeRuntimeSourceSink>;
   activate(canonicalKey: string, presentationLease: string, signal?: AbortSignal): Promise<ChromeRuntimeProjection>;
@@ -182,6 +184,8 @@ export class ChromeRuntimeServiceAuthority implements ChromeRuntimeBackend {
     this.quota = options.quota ?? new ChromeRuntimeAggregateQuota();
     this.#journal = options.journal ?? new ChromeRuntimeOperationJournal();
   }
+
+  get nativeTaskLaunches(): NativeTaskLaunchRegistry | undefined { return this.#delegate.nativeTaskLaunches; }
 
   begin(request: ChromeRuntimeStageRequest, signal?: AbortSignal): Promise<ChromeRuntimeSourceSink> {
     return this.#delegate.begin(request, signal);

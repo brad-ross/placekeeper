@@ -15,16 +15,37 @@ interface AppRecord {
   readonly buildIdentity: string;
   readonly helpers: Set<string>;
   readonly retiredHelpers: Set<string>;
+  readonly pendingHelpers: Map<string, Promise<void>>;
+  retiring: boolean;
+  retirement?: Promise<void>;
   activeWindows: number;
   bootstrappingWindows: number;
 }
 
 export class NativeAppLifecycleManager {
   readonly #runtime: RuntimeDetacher;
+  readonly #probeProcess: (processId: number) => void;
   readonly #apps = new Map<string, AppRecord>();
 
-  constructor(runtime: RuntimeDetacher) {
+  constructor(runtime: RuntimeDetacher, options: { readonly probeProcess?: (processId: number) => void } = {}) {
     this.#runtime = runtime;
+    this.#probeProcess = options.probeProcess ?? ((processId) => { process.kill(processId, 0); });
+  }
+
+  async sweepDeadParents(): Promise<void> {
+    const retirements: Promise<void>[] = [];
+    for (const app of this.#apps.values()) {
+      if (app.retiring) { retirements.push(this.#detach(app.appInstanceId)); continue; }
+      try { this.#probeProcess(app.processId); }
+      catch (error) {
+        // Permission denial, unavailable inspection, and PID reuse never prove
+        // this registered parent dead. Only the OS's missing-process result does.
+        if ((error as NodeJS.ErrnoException | undefined)?.code === "ESRCH") {
+          retirements.push(this.#detach(app.appInstanceId));
+        }
+      }
+    }
+    await Promise.allSettled(retirements);
   }
 
   activity(): {
@@ -45,6 +66,7 @@ export class NativeAppLifecycleManager {
     if (message.type === "register-app") return this.#register(message);
     const app = this.#apps.get(message.appInstanceId);
     if (app === undefined) return this.#failure(message, "unregistered");
+    if (app.retiring) return this.#failure(message, "busy");
     if (message.type === "activity") {
       if (message.activeWindows < app.helpers.size) return this.#failure(message, "invalid");
       app.activeWindows = message.activeWindows;
@@ -71,19 +93,21 @@ export class NativeAppLifecycleManager {
 
   attachHelper(appInstanceId: string, helperId: string): boolean {
     const app = this.#apps.get(appInstanceId);
-    if (app === undefined || !/^[A-Za-z0-9_-]{8,128}$/u.test(helperId)
+    if (app === undefined || app.retiring || !/^[A-Za-z0-9_-]{8,128}$/u.test(helperId)
       || app.retiredHelpers.has(helperId)) return false;
     for (const owner of this.#apps.values()) if (owner.helpers.has(helperId)) return false;
     app.helpers.add(helperId);
     return true;
   }
 
-  releaseHelper(appInstanceId: string, helperId: string): void {
-    this.#apps.get(appInstanceId)?.helpers.delete(helperId);
+  releaseHelper(appInstanceId: string, helperId: string): Promise<void> {
+    const app = this.#apps.get(appInstanceId);
+    return app === undefined ? Promise.resolve() : this.#detachHelper(app, helperId);
   }
 
   ownsHelper(appInstanceId: string, helperId: string): boolean {
-    return this.#apps.get(appInstanceId)?.helpers.has(helperId) === true;
+    const app = this.#apps.get(appInstanceId);
+    return app !== undefined && !app.retiring && !app.retiredHelpers.has(helperId) && app.helpers.has(helperId);
   }
 
   eof(appInstanceId: string): Promise<void> {
@@ -109,26 +133,40 @@ export class NativeAppLifecycleManager {
       buildIdentity: message.buildIdentity,
       helpers: new Set(),
       retiredHelpers: new Set(),
+      pendingHelpers: new Map(),
+      retiring: false,
       activeWindows: 0,
       bootstrappingWindows: 0,
     });
     return this.#ack(message.appInstanceId);
   }
 
-  async #detach(appInstanceId: string): Promise<void> {
+  #detach(appInstanceId: string): Promise<void> {
     const app = this.#apps.get(appInstanceId);
-    if (app === undefined) return;
-    this.#apps.delete(appInstanceId);
-    await Promise.all([...app.helpers].map((helperId) => this.#runtime.detach(helperId)));
+    if (app === undefined) return Promise.resolve();
+    if (app.retirement !== undefined) return app.retirement;
+    app.retiring = true;
+    const retirement = Promise.all([...new Set([...app.helpers, ...app.pendingHelpers.keys()])]
+      .map((helperId) => this.#detachHelper(app, helperId)))
+      .then(() => {
+        if (this.#apps.get(appInstanceId) === app) this.#apps.delete(appInstanceId);
+      }).finally(() => { delete app.retirement; });
+    app.retirement = retirement;
+    return retirement;
   }
 
-  async #detachHelper(app: AppRecord, helperId: string): Promise<void> {
-    // Helper IDs are single-use random capabilities. Keep their tombstones for
-    // this app registration so a detach that wins the socket race cannot be
-    // undone by a delayed first admission. App detachment drops the whole set.
+  #detachHelper(app: AppRecord, helperId: string): Promise<void> {
+    // Retire identity before awaiting cleanup so delayed admissions cannot
+    // reacquire it. Keep the app counted until every accepted operation settles.
     app.retiredHelpers.add(helperId);
-    if (!app.helpers.delete(helperId)) return;
-    await this.#runtime.detach(helperId);
+    const existing = app.pendingHelpers.get(helperId);
+    if (existing !== undefined) return existing;
+    if (!app.helpers.has(helperId)) return Promise.resolve();
+    const retiring = Promise.resolve().then(() => this.#runtime.detach(helperId))
+      .then(() => { app.helpers.delete(helperId); })
+      .finally(() => { app.pendingHelpers.delete(helperId); });
+    app.pendingHelpers.set(helperId, retiring);
+    return retiring;
   }
 
   #ack(appInstanceId: string): NativeAppControlResponse {

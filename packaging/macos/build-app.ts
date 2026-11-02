@@ -151,6 +151,7 @@ export async function computePackagedBuildIdentity(
   const artifactHash = createHash("sha256");
   await hashTree(artifactHash, options.contentsRoot, "Contents", (relativePath) =>
     relativePath === `Resources/${BUILD_IDENTITY_FILENAME}` ||
+    relativePath === "Resources/runtime-manifest.json" ||
     relativePath === "_CodeSignature" || relativePath.startsWith("_CodeSignature/") ||
     relativePath.endsWith("/CodeResources"));
   return {

@@ -54,3 +54,16 @@ it("admits only trusted Electron native destination results while renderer metho
       idempotencyKey: "operation_destination_test", method, payload: { selectedPath: "/tmp/private" } })).toBeUndefined();
   }
 });
+
+it("keeps task launch admission and visible correlation in the trusted Electron helper schema", () => {
+  const launchId = "l".repeat(43);
+  const admit = { ...base, type: "admit-launch", launchId };
+  expect(parseElectronReviewHelperMessage(admit)).toBeDefined();
+  expect(parseMacosReviewHelperMessage(admit)).toBeUndefined();
+  expect(parseElectronReviewHelperMessage({ ...admit, launchId: "short" })).toBeUndefined();
+  expect(parseElectronReviewHelperMessage({ ...admit, sourcePath: "/tmp/other.pdf" })).toBeUndefined();
+  const activate = { ...base, type: "activate", documentValidated: true, launchId };
+  expect(parseElectronReviewHelperMessage(activate)).toBeDefined();
+  expect(parseMacosReviewHelperMessage(activate)).toBeUndefined();
+  expect(parseElectronReviewHelperMessage({ ...activate, launchId: "invalid" })).toBeUndefined();
+});

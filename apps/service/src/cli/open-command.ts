@@ -1,3 +1,4 @@
+import { runIntegrationRegistrationCommand } from "./integration-registration-command.js";
 import { runNativeLifecycleControlCommand } from "../desktop/lifecycle-control-command.js";
 import { electronAppControlThroughDaemon } from "../host/service-daemon.js";
 import { isAbsolute } from "node:path";
@@ -13,6 +14,7 @@ import type {
 } from "../host/placekeeper-host.js";
 import { DaemonUpgradeRequiredError } from "../host/launch-control.js";
 import {
+  controlThroughDaemon,
   defaultDaemonPaths,
   installedSmokeDaemonPaths,
   INSTALLED_SMOKE_DAEMON_FLAG,
@@ -54,6 +56,7 @@ export type ParsedOpenLinkRequest =
   | { readonly operation: "preflight"; readonly link: string }
   | {
       readonly operation: "open";
+      readonly desktop?: "electron";
       readonly link: string;
       readonly confirmed?: true;
       readonly recovery?: RecoveryDecision;
@@ -107,6 +110,7 @@ export function parseOpenArguments(args: readonly string[]): LaunchRequest {
   if (args[0] !== "open" || !args.includes("--json")) {
     throw new Error("Use: placekeeper open --json --pdf <absolute-path>");
   }
+  let desktop: "electron" | undefined;
   let pdfPath: string | undefined;
   let sourceRootPath: string | undefined;
   let fork = false;
@@ -119,6 +123,10 @@ export function parseOpenArguments(args: readonly string[]): LaunchRequest {
   for (let index = 1; index < args.length; index += 1) {
     const argument = args[index]!;
     if (argument === "--json") continue;
+    if (argument === "--desktop") {
+      if (desktop !== undefined || takeValue(args, index, argument) !== "electron") throw new Error("Select the electron desktop explicitly");
+      desktop = "electron"; index += 1; continue;
+    }
     if (argument === "--fork") {
       if (fork) throw new Error("--fork may be specified once");
       fork = true;
@@ -203,6 +211,7 @@ export function parseOpenArguments(args: readonly string[]): LaunchRequest {
   }
   return {
     pdfPath,
+    ...(desktop === undefined ? {} : { desktop }),
     ...(sourceRootPath === undefined ? {} : { sourceRootPath }),
     ...(fork ? { fork: true } : {}),
     ...(recovery === undefined ? {} : { recovery }),
@@ -219,6 +228,7 @@ export function parseOpenLinkArguments(args: readonly string[]): ParsedOpenLinkR
   if (args[0] !== "open-link" || !args.includes("--json")) {
     throw new Error("Use: placekeeper open-link --json --preflight|--confirmed --link <placekeeper-url>");
   }
+  let desktop: "electron" | undefined;
   let link: string | undefined;
   let preflight = false;
   let confirmed = false;
@@ -230,6 +240,10 @@ export function parseOpenLinkArguments(args: readonly string[]): ParsedOpenLinkR
   for (let index = 1; index < args.length; index += 1) {
     const argument = args[index]!;
     if (argument === "--json") continue;
+    if (argument === "--desktop") {
+      if (desktop !== undefined || takeValue(args, index, argument) !== "electron") throw new Error("Select the electron desktop explicitly");
+      desktop = "electron"; index += 1; continue;
+    }
     if (argument === "--preflight") {
       if (preflight) throw new Error("--preflight may be specified once");
       preflight = true;
@@ -303,7 +317,7 @@ export function parseOpenLinkArguments(args: readonly string[]): ParsedOpenLinkR
   ) {
     throw new Error("Recovery requires one valid offer and operation identity");
   }
-  if (preflight && (confirmed || recovery !== undefined || recoveryIdentityPresent || surface !== undefined)) {
+  if (preflight && (confirmed || recovery !== undefined || recoveryIdentityPresent || surface !== undefined || desktop !== undefined)) {
     throw new Error("Link preflight cannot be confirmed or choose recovery");
   }
   return preflight
@@ -311,6 +325,7 @@ export function parseOpenLinkArguments(args: readonly string[]): ParsedOpenLinkR
     : {
         operation: "open",
         link,
+        ...(desktop === undefined ? {} : { desktop }),
         ...(confirmed ? { confirmed: true } : {}),
         ...(recovery === undefined ? {} : { recovery }),
         ...(recoveryOfferId === undefined || recoveryOfferExpiresAt === undefined
@@ -410,6 +425,16 @@ async function main(): Promise<number> {
       appInstanceId: process.env.PLACEKEEPER_APP_INSTANCE_ID ?? "",
     });
   }
+  if (process.argv[2] === "electron-cancel-launch") {
+    const launchId = process.argv[3];
+    if (process.argv.length !== 4 || launchId === undefined || !/^[A-Za-z0-9_-]{43}$/u.test(launchId)) return 2;
+    const response = await controlThroughDaemon({ kind: "electron-cancel-launch", launchId });
+    process.stdout.write(`${JSON.stringify(response)}\n`);
+    return response.kind === "electron-cancel-launch" ? 0 : 2;
+  }
+  if (process.argv[2] === "integration-registration") {
+    return runIntegrationRegistrationCommand(process.argv.slice(2));
+  }
   if (process.argv[2] === "chrome-registration") {
     return runChromeRegistrationCommand(process.argv.slice(2));
   }
@@ -428,6 +453,7 @@ async function main(): Promise<number> {
         ? preflightLinkThroughDaemon(request.link)
         : openLinkThroughDaemon({
             link: request.link,
+            ...(request.desktop === undefined ? {} : { desktop: request.desktop }),
             ...(request.confirmed === true ? { confirmed: true } : {}),
             ...(request.recovery === undefined ? {} : { recovery: request.recovery }),
             ...(request.recoveryOffer === undefined ? {} : { recoveryOffer: request.recoveryOffer }),

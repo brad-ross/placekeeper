@@ -48,8 +48,9 @@ export interface NativeRuntimeProjection {
 
 export type NativeReviewHelperMessage = ReviewEnvelope & (
   | { readonly type: "admit"; readonly sourcePath: string }
+  | { readonly type: "admit-launch"; readonly launchId: string }
   | { readonly type: "admit-link"; readonly link: string; readonly confirmed: true }
-  | { readonly type: "activate"; readonly documentValidated: true }
+  | { readonly type: "activate"; readonly documentValidated: true; readonly launchId?: string }
   | { readonly type: "refresh" }
   | { readonly type: "keepalive" }
   | {
@@ -158,6 +159,11 @@ function safeLocation(value: unknown): value is PlacekeeperLinkLocation {
 export function parseNativeReviewHelperMessage(host: NativeRuntimeHost, value: unknown): NativeReviewHelperMessage | undefined {
   if (!record(value) || !reviewEnvelope(value)) return undefined;
   const base = ["protocolVersion", "windowId", "attemptId", "requestId", "type"];
+  if (value.type === "admit-launch") {
+    return host === "electron" && exact(value, [...base, "launchId"])
+      && typeof value.launchId === "string" && /^[A-Za-z0-9_-]{43}$/u.test(value.launchId)
+      ? value as unknown as NativeReviewHelperMessage : undefined;
+  }
   if (value.type === "admit") {
     return exact(value, [...base, "sourcePath"]) && typeof value.sourcePath === "string"
       && (value.sourcePath.startsWith("/") || (host === "electron" && /^(?:[A-Za-z]:[\\/]|\\\\[^\\]+\\[^\\]+)/u.test(value.sourcePath))) && value.sourcePath.length <= 16_384 && !value.sourcePath.includes("\0")
@@ -174,7 +180,9 @@ export function parseNativeReviewHelperMessage(host: NativeRuntimeHost, value: u
     }
   }
   if (value.type === "activate") {
-    return exact(value, [...base, "documentValidated"]) && value.documentValidated === true
+    const keys = value.launchId === undefined ? [...base, "documentValidated"] : [...base, "documentValidated", "launchId"];
+    return exact(value, keys) && value.documentValidated === true
+      && (value.launchId === undefined || (host === "electron" && typeof value.launchId === "string" && /^[A-Za-z0-9_-]{43}$/u.test(value.launchId)))
       ? value as unknown as NativeReviewHelperMessage : undefined;
   }
   if (value.type === "refresh" || value.type === "keepalive" || value.type === "release") {

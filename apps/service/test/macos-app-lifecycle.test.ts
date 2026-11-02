@@ -52,7 +52,7 @@ describe("macOS app lifecycle ownership", () => {
       type: "prepare-replacement",
       appInstanceId,
     })).resolves.toMatchObject({ type: "failure", code: "busy" });
-    manager.releaseHelper(appInstanceId, "helper_12345678");
+    await manager.releaseHelper(appInstanceId, "helper_12345678");
     await manager.handle({
       protocolVersion: 1,
       type: "activity",
@@ -106,4 +106,51 @@ describe("macOS app lifecycle ownership", () => {
     expect(manager.attachHelper(appInstanceId, "helper_late_12345678")).toBe(false);
     expect(detach).not.toHaveBeenCalled();
   });
+});
+
+it("keeps retiring native parents busy until their accepted helper work settles", async () => {
+  const release = Promise.withResolvers<void>();
+  const manager = new MacosAppLifecycleManager({ detach: async () => release.promise });
+  await register(manager);
+  manager.attachHelper(appInstanceId, "helper_pending_work");
+  const retiring = manager.parentDied(appInstanceId);
+  expect(manager.activity().appInstances).toBe(1);
+  expect(manager.attachHelper(appInstanceId, "helper_late_during_retire")).toBe(false);
+  expect(await manager.handle({ protocolVersion: 1, type: "prepare-replacement", appInstanceId }))
+    .toMatchObject({ type: "failure", code: "busy" });
+  release.resolve();
+  await retiring;
+  expect(manager.activity().appInstances).toBe(0);
+});
+
+it.each(["EPERM", "EACCES", "EINVAL", "unknown", "live-or-reused"])(
+  "keeps native parents busy when process inspection is %s",
+  async (outcome) => {
+    const manager = new MacosAppLifecycleManager({ detach: async () => undefined }, { probeProcess: () => {
+      if (outcome === "live-or-reused") return;
+      if (outcome === "unknown") throw new Error("inspection unavailable");
+      throw Object.assign(new Error(outcome), { code: outcome });
+    } });
+    await register(manager);
+    manager.attachHelper(appInstanceId, "helper_probe_alive");
+    await manager.sweepDeadParents();
+    expect(manager.activity().appInstances).toBe(1);
+    expect(manager.ownsHelper(appInstanceId, "helper_probe_alive")).toBe(true);
+    await manager.close();
+  },
+);
+
+it("waits for an existing helper retirement before reporting its parent detached", async () => {
+  const release = Promise.withResolvers<void>();
+  const started = Promise.withResolvers<void>();
+  const manager = new MacosAppLifecycleManager({ detach: async () => { started.resolve(); await release.promise; } });
+  await register(manager);
+  manager.attachHelper(appInstanceId, "helper_retiring_before_parent");
+  const helper = manager.handle({ protocolVersion: 1, type: "detach-helper", appInstanceId, helperId: "helper_retiring_before_parent" });
+  await started.promise;
+  const parent = manager.parentDied(appInstanceId);
+  expect(manager.activity().appInstances).toBe(1);
+  release.resolve();
+  await Promise.all([helper, parent]);
+  expect(manager.activity().appInstances).toBe(0);
 });

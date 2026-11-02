@@ -1,3 +1,4 @@
+import { resolvePlatformLocations } from "../../apps/service/src/platform/locations.js";
 import { createHash } from "node:crypto";
 import { chmod, copyFile, cp, mkdir, mkdtemp, readFile, readdir, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { execFile } from "node:child_process";
@@ -447,7 +448,7 @@ describe("macOS distribution manifests", () => {
   });
 
   it("pins the Placekeeper runtime identity without pinning the content-derived daemon hash", async () => {
-    const [installer, smoke, serviceDaemon, launchControl, controlProtocol, hookCommand, pdfInspector, exportCoordinator, vscodePackage, vscodeExtension] =
+    const [installer, smoke, serviceDaemon, launchControl, controlProtocol, hookCommand, pdfInspector, filePublication, vscodePackage, vscodeExtension] =
       await Promise.all([
         readFile(resolve("install.sh"), "utf8"),
         readFile(resolve("packaging/macos/smoke-installed.ts"), "utf8"),
@@ -456,7 +457,7 @@ describe("macOS distribution manifests", () => {
         readFile(resolve("apps/service/src/host/control-protocol.ts"), "utf8"),
         readFile(resolve("apps/service/src/cli/hook-command.ts"), "utf8"),
         readFile(resolve("apps/service/src/pdf/inspect-pdf.ts"), "utf8"),
-        readFile(resolve("apps/service/src/export/export-coordinator.ts"), "utf8"),
+        readFile(resolve("apps/service/src/platform/file-publication.ts"), "utf8"),
         readFile(resolve("apps/vscode/package.json"), "utf8"),
         readFile(resolve("apps/vscode/src/extension.ts"), "utf8"),
       ]);
@@ -478,7 +479,7 @@ describe("macOS distribution manifests", () => {
     expect(launchControl).toMatch(/export\s*\{[^}]*\bMANAGEMENT_PROTOCOL_VERSION\b[^}]*\btype DaemonCompatibilityResult\b[^}]*\} from "\.\/control-protocol\.js";/u);
     expect(hookCommand).toContain('kind: "placekeeper-live-context"');
     expect(pdfInspector).toContain('"application/vnd.placekeeper.rgba+json"');
-    expect(exportCoordinator).toContain('`.placekeeper-${randomUUID()}.tmp`');
+    expect(filePublication).toContain('`.placekeeper-${randomUUID()}.tmp`');
     expect(JSON.parse(vscodePackage)).toMatchObject({
       name: "placekeeper-vscode",
       publisher: "placekeeper-local",
@@ -508,7 +509,8 @@ describe("macOS distribution manifests", () => {
     expect(installer).toContain("Placekeeper.app");
     expect(hookCommand).toContain("Placekeeper.app/Contents/MacOS/placekeeper");
     expect(smoke).toContain('"Applications/Placekeeper.app"');
-    expect(serviceDaemon).toContain('"Application Support",\n    "Placekeeper"');
+    expect(resolvePlatformLocations({ platform: "darwin", homeDirectory: "/Users/reviewer", env: {} }).appSupportRoot)
+      .toBe("/Users/reviewer/Library/Application Support/Placekeeper");
   });
 
   it("pins one offline runtime for the Apple-silicon source-first build", async () => {

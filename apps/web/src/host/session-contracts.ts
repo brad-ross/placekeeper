@@ -23,7 +23,7 @@ export interface ProductionScope {
   readonly sourceDisposition?: 'local' | 'remote-temporary';
   readonly sourceDisplayName?: string;
   readonly sourceRootPath?: string;
-  readonly launchSurface?: 'browser' | 'finder' | 'codex' | 'vscode' | 'chrome' | 'macos' | 'static';
+  readonly launchSurface?: 'browser' | 'finder' | 'codex' | 'vscode' | 'chrome' | 'macos' | 'electron' | 'static';
   /** Static hosting keeps review state only in this tab and offers explicit PDF export. */
   readonly persistenceMode?: 'export-only';
   /** A restarted browser is awaiting task-scoped Codex reattachment. */

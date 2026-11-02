@@ -523,6 +523,7 @@ export function RuntimeProductionReviewApp(props: {
   readonly onDocumentReady?: (generation: number) => void;
   readonly onDocumentTitleChange?: (title: string, generation: number) => void;
   readonly onRuntimeError?: (error: Error) => void;
+  readonly registerCloseSettlement?: (settle: (() => Promise<void>) | undefined) => void;
   readonly onCommandSurfaceChange?: (snapshot: ReviewCommandSurfaceSnapshot) => void;
   readonly commandInvocation?: ReviewCommandInvocation;
   readonly transitionAttemptId?: string;
@@ -660,6 +661,7 @@ export function RuntimeProductionReviewApp(props: {
     {...(props.onDocumentTitleChange === undefined
       ? {}
       : { onDocumentTitleChange: props.onDocumentTitleChange })}
+    {...(props.registerCloseSettlement === undefined ? {} : { registerCloseSettlement: props.registerCloseSettlement })}
     {...(props.onCommandSurfaceChange === undefined
       ? {}
       : { onCommandSurfaceChange: props.onCommandSurfaceChange })}

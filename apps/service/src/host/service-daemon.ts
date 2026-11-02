@@ -252,6 +252,9 @@ async function spawnServiceDaemon(
   if (runtime !== undefined && await realpath(paths.webAssetsRoot) !== runtime.webAssetsRoot) {
     throw new Error("Packaged runtime web assets do not match daemon paths");
   }
+  if (runtime !== undefined && !paths.packagedRuntime!.manifest.webAssets.files.some(file => file.path === "pdfium.wasm")) {
+    throw new Error("The packaged service PDFium runtime is missing from verified web assets");
+  }
   const child = spawn(runtime?.nodeExecutable ?? process.execPath, [
     runtime?.serviceEntry ?? entry,
     "daemon",
@@ -261,7 +264,11 @@ async function spawnServiceDaemon(
     stdio: "ignore",
     env: {
       ...process.env,
-      ...(runtime === undefined ? {} : { [DAEMON_IDENTITY_ENV]: runtime.daemonIdentity, [INSTALL_ARTIFACT_IDENTITY_ENV]: runtime.installArtifactIdentity }),
+      ...(runtime === undefined ? {} : {
+        [DAEMON_IDENTITY_ENV]: runtime.daemonIdentity,
+        [INSTALL_ARTIFACT_IDENTITY_ENV]: runtime.installArtifactIdentity,
+        PLACEKEEPER_PDFIUM_WASM: join(runtime.webAssetsRoot, "pdfium.wasm"),
+      }),
       PLACEKEEPER_WEB_ASSETS: paths.webAssetsRoot,
       [LIFECYCLE_LOCK_TOKEN_ENV]: lifecycleToken,
       [LIFECYCLE_LOCK_PATH_ENV]: paths.lifecycleLockPath ?? join(paths.appSupportRoot, "lifecycle.lock"),
@@ -612,4 +619,11 @@ export async function runServiceDaemon(paths = defaultDaemonPaths()): Promise<vo
     process.off("SIGINT", resolveSignal);
     process.off("SIGTERM", resolveSignal);
   }
+}
+
+/** Trusted main-only launch resolution; this never crosses a renderer bridge. */
+export async function resolveElectronLaunchThroughDaemon(launchId: string, paths = defaultDaemonPaths()): Promise<{ sourcePath: string; sessionId: string; documentGeneration: number } | undefined> {
+  const response = await controlThroughDaemon({ kind: "electron-resolve-launch", launchId }, paths);
+  if (response.kind !== "electron-resolve-launch") throw new DaemonUpgradeRequiredError("malformed");
+  return response.target;
 }

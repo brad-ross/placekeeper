@@ -1,3 +1,4 @@
+import type { NativeTaskLaunchReceipt } from "../desktop/native-task-launches.js";
 import type { NativeQualificationExperiments } from "../codex/native-qualification-experiments.js";
 import type { NativeQualificationObserver } from "../codex/native-qualification.js";
 import type { CodexNativeLaunchSuccess } from "../../../../packages/core/src/codex-mcp-protocol.js";
@@ -46,6 +47,7 @@ export type LaunchSurface = BrokerLaunchSurface;
 
 export interface LaunchRequest {
   readonly pdfPath: string;
+  readonly desktop?: "electron";
   readonly sourceRootPath?: string;
   readonly fork?: boolean;
   readonly recovery?: RecoveryDecision;
@@ -62,6 +64,7 @@ export interface LaunchFailure {
 }
 
 export interface LinkOpenRequest {
+  readonly desktop?: "electron";
   readonly link: string;
   readonly confirmed?: boolean;
   readonly recovery?: RecoveryDecision;
@@ -85,7 +88,9 @@ export type LinkLaunchResponse = LaunchResponse | {
   readonly path: string;
 };
 
-export type LaunchResponse = BrowserLaunchResponse | CodexNativeLaunchSuccess;
+export type ElectronLaunchSuccess = NativeTaskLaunchReceipt;
+
+export type LaunchResponse = BrowserLaunchResponse | CodexNativeLaunchSuccess | ElectronLaunchSuccess;
 
 export type BrowserLaunchResponse =
   | {
@@ -185,6 +190,8 @@ export class PlacekeeperHost {
   readonly codexRuntime: CodexRuntimeManager;
   #closePromise?: Promise<void>;
 
+  readonly #nativeParentSweep: ReturnType<typeof setInterval>;
+
   private constructor(
     broker: SessionBroker,
     server: LocalHttpServer,
@@ -217,6 +224,10 @@ export class PlacekeeperHost {
     this.macosRuntime = macosRuntime;
     this.macosLifecycle = macosLifecycle;
     this.codexRuntime = codexRuntime;
+    this.#nativeParentSweep = setInterval(() => {
+      void Promise.allSettled([electronLifecycle.sweepDeadParents(), macosLifecycle.sweepDeadParents()]);
+    }, 5_000);
+    this.#nativeParentSweep.unref();
   }
 
   static async start(options: PlacekeeperHostOptions): Promise<PlacekeeperHost> {
@@ -262,13 +273,13 @@ export class PlacekeeperHost {
       runtimeHost: "macos",
     });
     const macosRuntime = new MacosRuntimeManager(macosRuntimeBackend.authority());
-    const macosLifecycle = new MacosAppLifecycleManager(macosRuntime);
+    const macosLifecycle = new MacosAppLifecycleManager({ detach: (helperId) => macosRuntime.detachAndSettle(helperId) });
     const electronRuntimeBackend = new ChromeServiceRuntimeBackend({
       broker, browserSources, transferStore: chromeTransferStore, saving, exporting,
       runtimeHost: "electron",
     });
     const electronRuntime = new NativeRuntimeManager("electron", electronRuntimeBackend.authority());
-    const electronLifecycle = new NativeAppLifecycleManager(electronRuntime);
+    const electronLifecycle = new NativeAppLifecycleManager({ detach: (helperId) => electronRuntime.detachAndSettle(helperId) });
     const codexRuntime = new CodexRuntimeManager(broker, {
       ...(options.nativeQualification === undefined ? {} : { qualification: options.nativeQualification }),
       ...(options.nativeQualificationExperiments === undefined ? {} : { experiments: options.nativeQualificationExperiments }),
@@ -333,7 +344,7 @@ export class PlacekeeperHost {
     );
   }
 
-  async open(request: LaunchRequest & { readonly surface?: Exclude<LaunchSurface, "codex-native"> }): Promise<BrowserLaunchResponse>;
+  async open(request: LaunchRequest & { readonly desktop?: never; readonly surface?: Exclude<LaunchSurface, "codex-native"> }): Promise<BrowserLaunchResponse>;
   async open(request: LaunchRequest): Promise<LaunchResponse>;
   async open(request: LaunchRequest): Promise<LaunchResponse> {
     const response = await this.lifecycle.runActivity(() => this.#open(request));
@@ -384,7 +395,7 @@ export class PlacekeeperHost {
     return response ?? upgradeFailure();
   }
 
-  async openLink(request: LinkOpenRequest & { readonly surface?: Exclude<LaunchSurface, "codex-native"> }): Promise<Exclude<LinkLaunchResponse, CodexNativeLaunchSuccess>>;
+  async openLink(request: LinkOpenRequest & { readonly desktop?: never; readonly surface?: Exclude<LaunchSurface, "codex-native"> }): Promise<Exclude<LinkLaunchResponse, CodexNativeLaunchSuccess | ElectronLaunchSuccess>>;
   async openLink(request: LinkOpenRequest): Promise<LinkLaunchResponse>;
   async openLink(request: LinkOpenRequest): Promise<LinkLaunchResponse> {
     const response = await this.lifecycle.runActivity(() => this.#openLink(request));
@@ -393,7 +404,7 @@ export class PlacekeeperHost {
 
   async #openLink(request: LinkOpenRequest): Promise<LinkLaunchResponse> {
     try {
-      const surface = trustedSurface(request.surface);
+      const surface = request.desktop === "electron" ? "codex-native" : trustedSurface(request.surface);
       const opened = await openPlacekeeperLink(this.broker, {
         link: request.link,
         ...(request.confirmed === undefined ? {} : { confirmed: request.confirmed }),
@@ -415,6 +426,10 @@ export class PlacekeeperHost {
           choices: opened.choices,
           recoveryOffer: opened.recoveryOffer,
         };
+      }
+      if (request.desktop === "electron") {
+        return this.electronRuntime.stageLaunch({ sessionId: opened.launch.sessionId, kind: opened.kind,
+          requestedLocation: decodePlacekeeperLink(request.link).location }) ?? upgradeFailure();
       }
       if (surface === "codex-native") {
         return this.codexRuntime.stageLaunch({ sessionId: opened.launch.sessionId, kind: opened.kind,
@@ -448,7 +463,7 @@ export class PlacekeeperHost {
     const recoveryDecision: RecoveryDecision | undefined =
       request.fork === true ? "fork" : request.recovery;
     try {
-      const surface = trustedSurface(request.surface);
+      const surface = request.desktop === "electron" ? "codex-native" : trustedSurface(request.surface);
       const opened = await this.broker.openReview({
         pdfPath: request.pdfPath,
         ...(request.sourceRootPath === undefined
@@ -470,6 +485,9 @@ export class PlacekeeperHost {
           choices: opened.choices,
           recoveryOffer: opened.recoveryOffer,
         };
+      }
+      if (request.desktop === "electron") {
+        return this.electronRuntime.stageLaunch({ sessionId: opened.launch.sessionId, kind: opened.kind }) ?? upgradeFailure();
       }
       if (surface === "codex-native") {
         return this.codexRuntime.stageLaunch({ sessionId: opened.launch.sessionId, kind: opened.kind })
@@ -494,6 +512,7 @@ export class PlacekeeperHost {
 
   async close(): Promise<void> {
     this.#closePromise ??= (async () => {
+      clearInterval(this.#nativeParentSweep);
       await this.codexRuntime.close();
       this.context.discardAll();
       await this.server.close();

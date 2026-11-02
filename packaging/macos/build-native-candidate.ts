@@ -1,3 +1,5 @@
+import { resolvePackagedRuntime, type PackagedRuntimeManifest } from "../../apps/service/src/platform/runtime-layout.js";
+import { writeRetainedMacRuntimeManifest } from "./runtime-manifest.js";
 import { spawn } from "node:child_process";
 import { createReadStream } from "node:fs";
 import {
@@ -303,6 +305,8 @@ export async function validateNativeCandidateBundle(
     resolve(resources, "MacWeb/assets/pdfium.wasm"),
     resolve(resources, "MacWeb/assets/pdfium-worker.js"),
     resolve(resources, BUILD_IDENTITY_FILENAME),
+    resolve(resources, "runtime-manifest.json"),
+    resolve(resources, "service/recovery-capabilities.json"),
     resolve(resources, "installer/setup-integrations.mjs"),
     resolve(resources, "installer/setup-chrome.mjs"),
     resolve(resources, "installer/update-vscode.mjs"),
@@ -330,6 +334,9 @@ export async function validateNativeCandidateBundle(
     throw new Error("Public CLI launcher is not bundle-relative");
   }
   await validateNoExternalLinksOrCheckoutReferences(appPath, repoRoot);
+  const runtimeManifest = JSON.parse(await readFile(resolve(resources, "runtime-manifest.json"), "utf8")) as PackagedRuntimeManifest;
+  const buildIdentity = JSON.parse(await readFile(resolve(resources, BUILD_IDENTITY_FILENAME), "utf8")) as { daemonIdentity: string; installArtifactIdentity: string };
+  await resolvePackagedRuntime(resources, runtimeManifest, buildIdentity);
   await smokeBundledLifecycleHelper(appPath, scratchRoot);
   await run("/usr/bin/codesign", ["--verify", "--deep", "--strict", appPath]);
 }
@@ -355,6 +362,7 @@ export async function buildNativeCandidate(options: NativeCandidateOptions): Pro
     });
     const contents = resolve(stagedAppPath, "Contents");
     const resources = resolve(contents, "Resources");
+    await copyFile(resolve(options.serviceDist, "recovery-capabilities.json"), resolve(resources, "service/recovery-capabilities.json"));
     const nativeExecutable = resolve(contents, `MacOS/${NATIVE_CANDIDATE_EXECUTABLE}`);
     await copyFile(swiftExecutable, nativeExecutable);
     await chmod(nativeExecutable, 0o755);
@@ -374,6 +382,15 @@ export async function buildNativeCandidate(options: NativeCandidateOptions): Pro
     });
     await writeFile(resolve(resources, BUILD_IDENTITY_FILENAME), `${JSON.stringify(buildIdentity)}\n`, { mode: 0o644 });
     await run("/usr/bin/codesign", ["--force", "--deep", "--sign", "-", stagedAppPath]);
+    // Capture final signed runtime bytes; sealing the outer bundle again does
+    // not rewrite the nested Node executable after its digest is recorded.
+    const manifest = JSON.parse(await readFile(resolve(repoRoot, "packaging/macos/app-bundle.json"), "utf8")) as { bundleVersion: string };
+    await writeRetainedMacRuntimeManifest({
+      resources, identity: buildIdentity, arch: options.arch,
+      nodeVersion: (await run(resolve(resources, "node/bin/node"), ["--version"])).replace(/^v/u, ""),
+      serviceVersion: manifest.bundleVersion,
+    });
+    await run("/usr/bin/codesign", ["--force", "--sign", "-", stagedAppPath]);
     await validateNativeCandidateBundle(stagedAppPath, repoRoot, resolve(scratchPath, "independence-smoke"));
     const appPath = resolve(options.outputDirectory, basename(stagedAppPath));
     if (await lstat(appPath).catch(() => undefined) !== undefined) {

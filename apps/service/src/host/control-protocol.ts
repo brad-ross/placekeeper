@@ -59,6 +59,8 @@ export type DaemonCompatibilityResult =
   | { readonly kind: "uninspectable"; readonly reason: DaemonUninspectableReason };
 
 export type PlacekeeperControlRequest =
+  | { readonly kind: "electron-resolve-launch"; readonly launchId: string }
+  | { readonly kind: "electron-cancel-launch"; readonly launchId: string }
   | { readonly kind: "codex-display"; readonly request: CodexDisplayRequest }
   | { readonly kind: "codex-attest"; readonly taskSessionId: string; readonly receipt: CodexDisplayReceipt }
   | { readonly kind: "codex-app"; readonly request: CodexAppRequest }
@@ -178,6 +180,8 @@ export type PlacekeeperControlRequest =
     };
 
 export type PlacekeeperControlResponse =
+  | { readonly kind: "electron-resolve-launch"; readonly target?: { readonly sourcePath: string; readonly sessionId: string; readonly documentGeneration: number } }
+  | { readonly kind: "electron-cancel-launch"; readonly canceled: boolean }
   | { readonly kind: "codex-display"; readonly receipt: CodexDisplayReceipt; readonly pending: CodexPendingPresentation }
   | { readonly kind: "codex-attestation"; readonly status: "accepted" | "denied"; readonly reason?: CodexAdmissionFailure }
   | { readonly kind: "codex-app"; readonly response: CodexAppResponse }
@@ -287,7 +291,8 @@ export function isControlRequest(value: unknown): value is PlacekeeperControlReq
       (value.operation === "status" ||
         value.operation === "shutdown-if-idle");
   }
-  if (value.kind === "launch") return isObject(value.request);
+  if (value.kind === "electron-resolve-launch" || value.kind === "electron-cancel-launch") return typeof value.launchId === "string" && /^[A-Za-z0-9_-]{43}$/u.test(value.launchId);
+  if (value.kind === "launch") return isObject(value.request) && (value.request.desktop === undefined || value.request.desktop === "electron");
   if (value.kind === "chrome-open") {
     return Object.keys(value).length === 2 && Object.hasOwn(value, "request") &&
       isChromeBrowserSourceOpenRequest(value.request);
@@ -338,7 +343,8 @@ export function isControlRequest(value: unknown): value is PlacekeeperControlReq
       value.request.link.length <= PLACEKEEPER_LINK_MAX_LENGTH &&
       (value.request.confirmed === undefined || typeof value.request.confirmed === "boolean") &&
       (value.request.recovery === undefined || isRecoveryDecision(value.request.recovery)) &&
-      (value.request.surface === undefined || isLaunchSurface(value.request.surface));
+      (value.request.surface === undefined || isLaunchSurface(value.request.surface)) &&
+      (value.request.desktop === undefined || value.request.desktop === "electron");
   }
   if (value.kind === "refresh-context" || value.kind === "revoke-task") {
     return typeof value.taskSessionId === "string" &&

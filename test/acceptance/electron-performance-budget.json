@@ -1,0 +1,14 @@
+{
+  "launchSamplesPerCondition": 20,
+  "firstVisibleShellP95Ms": 1500,
+  "textFirstUsablePageP95Ms": 6000,
+  "imageFirstUsablePageP95Ms": 12000,
+  "visibleInputResponseP95Ms": 100,
+  "repeatableStallInvestigationMs": 250,
+  "frameIntervalP95Ms": 33,
+  "idleCpuWindowMs": 60000,
+  "idleCpuPercentOfOneCoreExclusiveMax": 2,
+  "memoryCloseReopenCycles": 12,
+  "memorySettlingMs": 5000,
+  "postCloseResidentGrowthMaxRatio": 1.15
+}

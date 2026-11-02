@@ -32,7 +32,9 @@ export const CODEX_INSTALLED_LAUNCHER_COMMAND =
   '"$HOME/Applications/Placekeeper.app/Contents/MacOS/placekeeper"';
 
 export function installedLauncherPath(homeDirectory = homedir()): string {
-  return join(homeDirectory, INSTALLED_LAUNCHER_RELATIVE_PATH);
+  const candidate = process.env.PLACEKEEPER_CANDIDATE_LAUNCHER;
+  return candidate !== undefined && isAbsolute(candidate) && !/[\0\r\n]/u.test(candidate)
+    ? candidate : join(homeDirectory, INSTALLED_LAUNCHER_RELATIVE_PATH);
 }
 
 interface JsonObject {
@@ -47,6 +49,7 @@ export type HookLifecycleEvent =
       readonly documentGeneration: number;
       readonly bindProof: string;
       readonly native?: true;
+      readonly desktop?: true;
     }
   | { readonly kind: "attest"; readonly taskSessionId: string; readonly receipt: CodexDisplayReceipt }
   | { readonly kind: "refresh"; readonly taskSessionId: string }
@@ -120,10 +123,10 @@ function tokenizeCodexOpenCommand(command: string): readonly string[] | undefine
   const remainder = command.slice(CODEX_INSTALLED_LAUNCHER_COMMAND.length);
   if (remainder.length === 0 || !/^[ \t]/u.test(remainder)) return undefined;
   const args = tokenizeSimpleCommand(remainder.replace(/^[ \t]+/u, ""));
-  return args === undefined ? undefined : [installedLauncherPath(), ...args];
+  return args === undefined ? undefined : [join(homedir(), INSTALLED_LAUNCHER_RELATIVE_PATH), ...args];
 }
 
-function codexOpenSurface(value: unknown): "codex" | "codex-native" | undefined {
+function codexOpenSurface(value: unknown): "codex" | "codex-native" | "electron" | undefined {
   if (!isObject(value) || typeof value.command !== "string") return undefined;
   const tokens = tokenizeCodexOpenCommand(value.command);
   if (
@@ -133,22 +136,31 @@ function codexOpenSurface(value: unknown): "codex" | "codex-native" | undefined 
   try {
     if (tokens[1] === "open-link") {
       const request = parseOpenLinkArguments(tokens.slice(1));
+      if (request.operation === "open" && request.desktop === "electron") return "electron";
       return request.operation === "open" && (request.surface === "codex" || request.surface === "codex-native") ? request.surface : undefined;
     }
     const request = parseOpenArguments(tokens.slice(1));
+    if (request.desktop === "electron" && isAbsolute(request.pdfPath)) return "electron";
     return (request.surface === "codex" || request.surface === "codex-native") && isAbsolute(request.pdfPath) ? request.surface : undefined;
   } catch {
     return undefined;
   }
 }
 
-function launchResponse(value: unknown, surface: "codex" | "codex-native"): Omit<Extract<HookLifecycleEvent, { kind: "claim" }>, "kind" | "taskSessionId"> | undefined {
+function launchResponse(value: unknown, surface: "codex" | "codex-native" | "electron"): Omit<Extract<HookLifecycleEvent, { kind: "claim" }>, "kind" | "taskSessionId"> | undefined {
   const output = typeof value === "string" ? value : undefined;
   if (output === undefined) return undefined;
   const serialized = output.trim();
   if (serialized.length === 0 || Buffer.byteLength(serialized) > 65_536) return undefined;
   let parsed: unknown;
   try { parsed = JSON.parse(serialized) as unknown; } catch { return undefined; }
+  if (surface === "electron") {
+    if (!isObject(parsed) || parsed.ok !== true || parsed.surface !== "electron" || parsed.native !== true ||
+        !["opened", "focused"].includes(String(parsed.kind)) || typeof parsed.sessionId !== "string" || !REVIEW_IDENTIFIER.test(parsed.sessionId) ||
+        !Number.isSafeInteger(parsed.documentGeneration) || (parsed.documentGeneration as number) < 1 || typeof parsed.bindProof !== "string" || !SECRET.test(parsed.bindProof) ||
+        typeof parsed.launchId !== "string" || !SECRET.test(parsed.launchId) || typeof parsed.expiresAt !== "string" || !Number.isFinite(Date.parse(parsed.expiresAt))) return undefined;
+    return { reviewSessionId: parsed.sessionId, documentGeneration: parsed.documentGeneration as number, bindProof: parsed.bindProof, native: true, desktop: true };
+  }
   if (surface === "codex-native") {
     const native = parseCodexNativeLaunchSuccess(parsed);
     return native === undefined ? undefined : { reviewSessionId: native.sessionId, documentGeneration: native.documentGeneration, bindProof: native.bindProof, native: true };
@@ -439,7 +451,9 @@ export async function runHookCommand(
       } else if (response.kind === "binding" || response.kind === "codex-binding") {
         await write(`${JSON.stringify(hookOutput(
           "PostToolUse",
-          event.native === true
+          event.desktop === true
+            ? "Placekeeper associated this launch with the current task. Live context becomes current only after the correlated desktop window is visible and its document is authenticated."
+            : event.native === true
             ? "Placekeeper associated this launch with the current task. Display the handoff in the native panel; live context becomes current after trusted display attestation and authenticated readiness."
             : "Placekeeper associated this launch with the current task. Live context will become current after the in-app browser completes its authenticated bootstrap.",
         ))}\n`);

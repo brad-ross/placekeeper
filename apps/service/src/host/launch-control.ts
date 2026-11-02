@@ -153,6 +153,11 @@ async function dispatch(
       return { kind: "codex-app", response: await host.codexRuntime.handle(request.request) };
     }) ?? { kind: "error", reason: "unavailable" };
   }
+  if (request.kind === "electron-resolve-launch") {
+    const target = host.electronRuntime.resolveLaunch(request.launchId);
+    return { kind: request.kind, ...(target === undefined ? {} : { target }) };
+  }
+  if (request.kind === "electron-cancel-launch") return { kind: request.kind, canceled: host.electronRuntime.cancelLaunch(request.launchId) };
   if (request.kind === "launch") {
     return { kind: "launch", response: await host.open(request.request) };
   }
@@ -174,7 +179,7 @@ async function dispatch(
     const lifecycle = request.kind === "macos-runtime" ? host.macosLifecycle : host.electronLifecycle;
     const runtime = request.kind === "macos-runtime" ? host.macosRuntime : host.electronRuntime;
     const message = (request.kind === "macos-runtime" ? parseMacosReviewHelperMessage : parseElectronReviewHelperMessage)(request.message)!;
-    const isAdmission = message.type === "admit" || message.type === "admit-link";
+    const isAdmission = message.type === "admit" || message.type === "admit-link" || (request.kind === "electron-runtime" && message.type === "admit-launch");
     const alreadyOwned = lifecycle.ownsHelper(request.appInstanceId, request.helperId);
     const attached = alreadyOwned || (isAdmission
       && lifecycle.attachHelper(request.appInstanceId, request.helperId));
@@ -209,8 +214,8 @@ async function dispatch(
         },
       };
     }
-    if (response.type === "released" || (isAdmission && response.type === "failure")) {
-      lifecycle.releaseHelper(request.appInstanceId, request.helperId);
+    if (response.type === "released" || (isAdmission && !alreadyOwned && response.type === "failure")) {
+      await lifecycle.releaseHelper(request.appInstanceId, request.helperId);
     }
     return { kind: request.kind, response };
   }
@@ -219,7 +224,7 @@ async function dispatch(
     const runtime = request.kind === "macos-runtime-detach" ? host.macosRuntime : host.electronRuntime;
     if (lifecycle.ownsHelper(request.appInstanceId, request.helperId)) {
       await runtime.detach(request.helperId);
-      lifecycle.releaseHelper(request.appInstanceId, request.helperId);
+      await lifecycle.releaseHelper(request.appInstanceId, request.helperId);
     }
     return { kind: request.kind === "macos-runtime-detach" ? "macos-runtime-detached" : "electron-runtime-detached" };
   }
@@ -234,7 +239,7 @@ async function dispatch(
     response = await host.lifecycle.runActivity<PlacekeeperControlResponse>(async () => {
     if (request.kind === "claim-binding") {
       if (request.native === true) {
-        return { kind: "codex-binding", status: host.codexRuntime.claimLaunch(request) ? "accepted" : "denied" };
+        return { kind: "codex-binding", status: (host.electronRuntime.claimLaunch(request) || host.codexRuntime.claimLaunch(request)) ? "accepted" : "denied" };
       }
       return {
         kind: "binding",

@@ -72,7 +72,7 @@ test('test MCP bridge retains nested references and returns to the main reading 
   } finally { await bridge.dispose(); }
 });
 
-test('test MCP bridge production authoring preserves protected draft, edit, delete and history', async ({ page }, info) => {
+for (const deferRemovalReply of [false, true]) test('test MCP bridge production authoring preserves protected draft, edit, delete and history' + (deferRemovalReply ? ' while a delete reply is pending' : ''), async ({ page }, info) => {
   info.setTimeout(60_000);
   const bridge = await nativeBridge('text-native.pdf');
   try {
@@ -107,10 +107,36 @@ test('test MCP bridge production authoring preserves protected draft, edit, dele
     await page.getByRole('button', { name: 'Redo', exact: true }).focus();
     await page.keyboard.press('Enter');
     await expect(row).toContainText('Edited through production UI');
+    if (deferRemovalReply) {
+      // A broker mutation may become visible before its reply finishes. Keep that
+      // reply pending while the user deliberately moves focus to the toolbar.
+      await page.evaluate(() => {
+        const bridge = window as any;
+        const call = bridge.nativeAcceptanceCall;
+        bridge.nativeAcceptanceCall = async (method: string, payload: any) => {
+          const result = await call(method, payload);
+          if (method === 'command' && payload?.type === 'remove') {
+            bridge.nativeDeleteReplyReady = true;
+            await new Promise<void>(resolve => { bridge.nativeReleaseDeleteReply = resolve; });
+            bridge.nativeDeleteReplyReleased = true;
+          } else if (method === 'saveStatus' && bridge.nativeDeleteReplyReleased) {
+            bridge.nativeDeleteCompletionObserved = true;
+          }
+          return result;
+        };
+      });
+    }
     await row.hover(); await row.getByRole('button', { name: 'Remove Page Note annotation on page 1' }).click();
     await expect.poll(() => bridge.broker.state(bridge.sessionId)?.items.length).toBe(0);
     await expect(page.getByRole('button', { name: 'Undo', exact: true })).toBeEnabled();
     await page.getByRole('button', { name: 'Undo', exact: true }).focus();
+    if (deferRemovalReply) {
+      await page.waitForFunction(() => (window as any).nativeDeleteReplyReady === true);
+      await page.evaluate(() => (window as any).nativeReleaseDeleteReply());
+      await page.waitForFunction(() => (window as any).nativeDeleteCompletionObserved === true);
+      await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+      await expect(page.getByRole('button', { name: 'Undo', exact: true })).toBeFocused();
+    }
     await page.keyboard.press('Enter');
     await expect(row).toContainText('Edited through production UI');
     await bridge.saving.drain();

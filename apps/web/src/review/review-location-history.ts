@@ -9,8 +9,10 @@ export interface ReviewLocationHistorySnapshot {
   readonly canForward: boolean;
 }
 
+export type ReviewLocationRestore = (direction: 'back' | 'forward' | 'unknown') => void | boolean | Promise<void | boolean>;
+
 export interface ReviewLocationHistoryPort {
-  start(onPop: (direction: 'back' | 'forward' | 'unknown') => void | Promise<void>): void;
+  start(onPop: ReviewLocationRestore): void;
   read(): PlacekeeperLinkLocation;
   replace(location: PlacekeeperLinkLocation): void;
   push(location: PlacekeeperLinkLocation): void;
@@ -31,7 +33,7 @@ export interface ReviewLocationHistoryEnvironment {
 export class MemoryReviewLocationHistory implements ReviewLocationHistoryPort {
   private readonly entries: PlacekeeperLinkLocation[];
   private index = 0;
-  private onPop: ((direction: 'back' | 'forward' | 'unknown') => void | Promise<void>) | null = null;
+  private onPop: ReviewLocationRestore | null = null;
   private readonly listeners = new Set<(snapshot: ReviewLocationHistorySnapshot) => void>();
   private lastPublishedSnapshot: ReviewLocationHistorySnapshot = {
     canBack: false,
@@ -42,7 +44,7 @@ export class MemoryReviewLocationHistory implements ReviewLocationHistoryPort {
     this.entries = [structuredClone(initial)];
   }
 
-  start(onPop: (direction: 'back' | 'forward' | 'unknown') => void | Promise<void>): void {
+  start(onPop: ReviewLocationRestore): void {
     this.onPop = onPop;
     this.publish();
   }
@@ -58,6 +60,17 @@ export class MemoryReviewLocationHistory implements ReviewLocationHistoryPort {
   push(location: PlacekeeperLinkLocation): void {
     this.entries.splice(this.index + 1, Infinity, structuredClone(location));
     this.index += 1;
+    this.publish();
+  }
+
+  /** Native focused opens use the same settled restoration as Back/Forward. */
+  async navigate(location: PlacekeeperLinkLocation): Promise<void> {
+    const restore = this.onPop;
+    if (restore === null) throw new Error('Reader navigation is not ready.');
+    this.entries.splice(this.index + 1, Infinity, structuredClone(location));
+    this.index += 1;
+    const restored = await restore('unknown');
+    if (this.onPop !== restore || restored === false) throw new Error('Reader navigation was superseded.');
     this.publish();
   }
 
@@ -90,7 +103,7 @@ export class MemoryReviewLocationHistory implements ReviewLocationHistoryPort {
     this.index = next;
     const restoring = this.onPop?.(direction);
     if (restoring === undefined) this.publish();
-    else void restoring.then(
+    else void Promise.resolve(restoring).then(
       () => this.publish(),
       () => this.publish(),
     );
@@ -130,7 +143,7 @@ export class BrowserReviewLocationHistory implements ReviewLocationHistoryPort {
   private index = 0;
   private maximumIndex = 0;
   private baseline = 0;
-  private onPop: ((direction: 'back' | 'forward' | 'unknown') => void | Promise<void>) | null = null;
+  private onPop: ReviewLocationRestore | null = null;
   private readonly listeners = new Set<(snapshot: ReviewLocationHistorySnapshot) => void>();
   private lastPublishedSnapshot: ReviewLocationHistorySnapshot = {
     canBack: false,
@@ -140,7 +153,7 @@ export class BrowserReviewLocationHistory implements ReviewLocationHistoryPort {
 
   constructor(private readonly environment: ReviewLocationHistoryEnvironment) {}
 
-  start(onPop: (direction: 'back' | 'forward' | 'unknown') => void | Promise<void>): void {
+  start(onPop: ReviewLocationRestore): void {
     this.onPop = onPop;
     if (this.started) return;
     this.started = true;
@@ -231,7 +244,7 @@ export class BrowserReviewLocationHistory implements ReviewLocationHistoryPort {
     // can race the coordinator's live geometry mirror and degrade to a coarse
     // page-top restore.
     if (restoring === undefined) this.publish();
-    else void restoring.then(
+    else void Promise.resolve(restoring).then(
       () => this.publish(),
       () => this.publish(),
     );

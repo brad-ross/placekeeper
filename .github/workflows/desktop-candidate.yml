@@ -1,0 +1,119 @@
+name: Desktop personal candidates
+
+on:
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            target: darwin-arm64
+            platform: darwin
+            arch: arm64
+          - runner: macos-15-intel
+            target: darwin-x64
+            platform: darwin
+            arch: x64
+          - runner: windows-2025
+            target: win32-x64
+            platform: win32
+            arch: x64
+          - runner: ubuntu-24.04
+            target: linux-x64
+            platform: linux
+            arch: x64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 40
+    env:
+      PLACEKEEPER_DESKTOP_TARGET: ${{ matrix.target }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.16.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.22.1
+          cache: pnpm
+      - name: Set up Windows native compiler
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+      - name: Linux Debian maker tools
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y fakeroot dpkg xvfb build-essential
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Check catalog
+        run: pnpm catalog:check
+      - name: Check packaging
+        run: pnpm exec vitest run packaging/desktop/packaging.test.ts packaging/desktop/native-launcher.test.ts
+      - name: Generate PDF fixtures
+        run: pnpm fixtures:pdf
+      - name: Install platform browser test dependencies
+        run: pnpm exec playwright install --with-deps chromium
+      - name: Test native platform behavior
+        run: pnpm test:desktop-platform
+      - name: Build standalone payload
+        run: node --import tsx packaging/desktop/build.ts --target ${{ matrix.target }}
+      - name: Make personal installer
+        id: make
+        run: pnpm --dir apps/electron make --platform=${{ matrix.platform }} --arch=${{ matrix.arch }}
+      - name: Test packaged candidate on Linux
+        if: runner.os == 'Linux'
+        run: xvfb-run -a pnpm test:desktop-installed
+      - name: Test packaged candidate on macOS or Windows
+        if: runner.os != 'Linux'
+        run: pnpm test:desktop-installed
+      - name: Upload installed-test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: placekeeper-native-tests-${{ matrix.target }}
+          path: |
+            test-results/
+            playwright-report/
+          if-no-files-found: ignore
+          retention-days: 14
+      - name: Hash installers
+        if: ${{ always() && steps.make.outcome == 'success' }}
+        shell: bash
+        run: |
+          node --input-type=module <<'JS'
+          import { createHash } from 'node:crypto';
+          import { createReadStream } from 'node:fs';
+          import { readdir, writeFile } from 'node:fs/promises';
+          import { join } from 'node:path';
+          const root = 'dist/desktop-artifacts/make';
+          const files = await readdir(root, { recursive: true, withFileTypes: true });
+          const hashes = [];
+          for (const file of files) {
+            if (file.isFile()) {
+              const path = join(file.parentPath, file.name);
+              const digest = createHash('sha256');
+              for await (const chunk of createReadStream(path)) digest.update(chunk);
+              hashes.push(`${digest.digest('hex')}  ${path}`);
+            }
+          }
+          await writeFile('dist/desktop-artifacts/SHA256SUMS', hashes.sort().join('\n') + '\n');
+          JS
+      - name: Upload artifacts and payload evidence
+        if: ${{ always() && steps.make.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: placekeeper-candidate-${{ matrix.target }}
+          path: |
+            dist/desktop-artifacts/make/
+            dist/desktop-artifacts/SHA256SUMS
+            dist/desktop-runtime/${{ matrix.target }}/desktop/build-evidence.json
+            dist/desktop-runtime/${{ matrix.target }}/desktop/runtime-manifest.json
+          if-no-files-found: error
+          retention-days: 14

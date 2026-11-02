@@ -3,6 +3,12 @@ name: CI
 # Temporarily manual-only. Restore the pull_request and push triggers to re-enable CI.
 on:
   workflow_dispatch:
+    inputs:
+      desktop_candidate:
+        description: Build desktop personal candidates instead of the usual CI suite
+        required: false
+        type: boolean
+        default: false
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -12,7 +18,11 @@ permissions:
   contents: read
 
 jobs:
+  desktop-candidate:
+    if: inputs.desktop_candidate
+    uses: ./.github/workflows/desktop-candidate.yml
   test:
+    if: ${{ !inputs.desktop_candidate }}
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:

@@ -93,8 +93,9 @@ test.describe('EmbedPDF browser-worker viewer gate', () => {
 
   test('keeps active content inert and bounds malformed worker failures', async ({ page }) => {
     const remoteRequests: string[] = [];
+    const localOrigin = new URL(page.url()).origin;
     page.on('request', (request) => {
-      if (!request.url().startsWith('http://127.0.0.1:4173/')) remoteRequests.push(request.url());
+      if (!request.url().startsWith(`${localOrigin}/`)) remoteRequests.push(request.url());
     });
     const hostile = await page.evaluate(() =>
       window.viewerGate.inspect('/test/fixtures/pdfs/hostile-actions.pdf'),
@@ -112,8 +113,9 @@ test.describe('EmbedPDF browser-worker viewer gate', () => {
 
   test('exposes only embedded reference metadata without requesting rejected targets', async ({ page }) => {
     const remoteRequests: string[] = [];
+    const localOrigin = new URL(page.url()).origin;
     page.on('request', (request) => {
-      if (!request.url().startsWith('http://127.0.0.1:4173/')) remoteRequests.push(request.url());
+      if (!request.url().startsWith(`${localOrigin}/`)) remoteRequests.push(request.url());
     });
 
     const result = await page.evaluate(() =>

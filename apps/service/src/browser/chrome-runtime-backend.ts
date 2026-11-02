@@ -1,3 +1,4 @@
+import { NativeTaskLaunchRegistry } from "../desktop/native-task-launches.js";
 import { LocalReviewBackend } from "../runtime/local-review-backend.js";
 import { chromeDownloadFolder } from "./chrome-download-folder.js";
 import { join } from "node:path";
@@ -48,6 +49,7 @@ export interface ChromeServiceRuntimeBackendOptions {
  * authority. It retains credentials, paths, source URLs, and presentation
  * leases exclusively on the trusted side. */
 export class ChromeServiceRuntimeBackend implements ChromeRuntimeBackend {
+  readonly nativeTaskLaunches?: NativeTaskLaunchRegistry;
   readonly #broker: SessionBroker;
   readonly #browserSources: BrowserSourceStore;
   readonly #transferStore: ChromeTransferStore;
@@ -69,6 +71,7 @@ export class ChromeServiceRuntimeBackend implements ChromeRuntimeBackend {
     this.#saving = options.saving;
     this.#review = new LocalReviewBackend(options);
     this.#runtimeHost = options.runtimeHost ?? "chrome";
+    if (this.#runtimeHost === "electron") this.nativeTaskLaunches = new NativeTaskLaunchRegistry(this.#broker);
     this.#downloadFolder = options.downloadFolder ?? chromeDownloadFolder;
     this.#journal = new ChromeRuntimeOperationJournal({
       root: join(this.#broker.recoveryRoot, `.${this.#runtimeHost}-operations`),
@@ -343,11 +346,18 @@ export class ChromeServiceRuntimeBackend implements ChromeRuntimeBackend {
   }
 
   async #recordFromLaunch(launch: SessionLaunch, discardIfUnactivated: boolean): Promise<CanonicalRecord> {
-    const capability = new URLSearchParams(launch.fragment.slice(1)).get("cap");
-    const credential = capability === null ? undefined : this.#broker.exchangeBootstrap(launch.sessionId, capability);
     const state = this.#broker.state(launch.sessionId);
-    if (credential === undefined || state === undefined) throw new Error("bootstrap-unavailable");
-    this.#broker.revokePresentationCredential(launch.sessionId, credential);
+    if (state === undefined) throw new Error("review-unavailable");
+    if (this.#runtimeHost === "macos" || this.#runtimeHost === "electron") {
+      const scope = this.#broker.nativeAdmissionScope(launch.sessionId);
+      if (launch.surface !== this.#runtimeHost || launch.fragment !== "" || launch.launchPath !== "" ||
+          scope === undefined || scope.documentGeneration !== launch.documentGeneration) throw new Error("native-admission-unavailable");
+    } else {
+      const capability = new URLSearchParams(launch.fragment.slice(1)).get("cap");
+      const credential = capability === null ? undefined : this.#broker.exchangeBootstrap(launch.sessionId, capability);
+      if (credential === undefined) throw new Error("bootstrap-unavailable");
+      this.#broker.revokePresentationCredential(launch.sessionId, credential);
+    }
     return {
       indexKey: "pending", sessionId: launch.sessionId,
       generation: state.workflow.documentGeneration, sha256: state.source.digest,

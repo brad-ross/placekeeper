@@ -554,7 +554,8 @@ export interface ProductionReviewAppProps {
   readonly onViewerError?: (error: Error) => void;
   /** Host-visible title seam, already resolved through metadata then filename fallback. */
   readonly onDocumentTitleChange?: (title: string, generation: number) => void;
-  /** Safe semantic command projection for native menus and shortcuts. */
+  /** Registers the shared authoring settlement used before a native window closes. */
+  readonly registerCloseSettlement?: (settle: (() => Promise<void>) | undefined) => void;
   readonly onCommandSurfaceChange?: (snapshot: ReviewCommandSurfaceSnapshot) => void;
   /** Native commands re-enter the same handlers used by web controls and shortcuts. */
   readonly commandInvocation?: ReviewCommandInvocation;
@@ -2156,7 +2157,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     if (props.onDocumentReady === undefined
       || notifiedDocumentReadyGenerationRef.current === generation
       || mainDocumentReadyGeneration !== generation) return;
-    if (scope.launchSurface !== 'macos') {
+    if (scope.launchSurface !== 'macos' && scope.launchSurface !== 'electron') {
       notifiedDocumentReadyGenerationRef.current = generation;
       props.onDocumentReady(generation);
       return;
@@ -2573,6 +2574,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
         toolError={pdfCopyError ?? commandError}
         commandNotice={commandNotice}
         commandModalOpen={(!exportOnly && destinationDialog !== null) || annotationExport.request !== null}
+        {...(props.registerCloseSettlement === undefined ? {} : { registerCloseSettlement: props.registerCloseSettlement })}
         {...(props.onCommandSurfaceChange === undefined
           ? {}
           : { onCommandSurfaceChange: props.onCommandSurfaceChange })}

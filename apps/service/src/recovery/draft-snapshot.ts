@@ -1,3 +1,4 @@
+import { RECOVERY_CAPABILITIES } from "./recovery-capabilities.js";
 import { writePrivateFile } from "../platform/private-storage.js";
 import { publishFile, syncPublishedFile } from "../platform/file-publication.js";
 import { createHash, randomUUID } from "node:crypto";
@@ -237,7 +238,7 @@ export function migrateRecoverableDraft(draft: RecoverableDraft): RecoverableDra
   } = v2;
   return {
     ...rest,
-    schemaVersion: 3,
+    schemaVersion: RECOVERY_CAPABILITIES.writtenDraftSchemaVersion,
     source: {
       disposition: "local",
       canonicalSourcePath,
@@ -307,7 +308,7 @@ function parse(contents: string): RecoverableDraftV3 | undefined {
     const checksum = createHash("sha256").update(payload).digest("hex");
     if (
       checksum !== envelope.checksum ||
-      ![1, 2, 3].includes(envelope.payload.schemaVersion) ||
+      !(RECOVERY_CAPABILITIES.readableDraftSchemaVersions as readonly number[]).includes(envelope.payload.schemaVersion) ||
       (envelope.payload.schemaVersion === 3 && (
         !validV3Source(envelope.payload.source) ||
         !validNativeAnnotationLedger(envelope.payload.nativeAnnotationLedger) ||
