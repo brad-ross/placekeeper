@@ -72,6 +72,12 @@ function classifyFailure(error: unknown): SaveFailureReason {
   return "write-failed";
 }
 
+/** A result supplied by an authenticated native host, never by the renderer. */
+export interface TrustedDestinationSelection {
+  readonly selectedPath: string | null;
+  readonly assertAuthority?: () => void;
+}
+
 export interface PdfSaveCoordinatorOptions {
   readonly broker: SessionBroker;
   readonly writer: PdfWriter;
@@ -233,43 +239,52 @@ export class PdfSaveCoordinator {
     }
   }
 
-  async chooseFolder(sessionId: string, expectedDocumentGeneration?: number): Promise<
+  async chooseFolder(sessionId: string, expectedDocumentGeneration?: number, trusted?: TrustedDestinationSelection): Promise<
     | { readonly cancelled: true }
     | { readonly cancelled: false; readonly selectionId: string; readonly folder: string }
   > {
-    if (this.#picker === undefined) throw new Error("Native destination picker is unavailable");
+    trusted?.assertAuthority?.();
+    this.#assertExpectedDocumentGeneration(sessionId, expectedDocumentGeneration);
+    if (trusted === undefined && this.#picker === undefined) throw new Error("Native destination picker is unavailable");
     const proposal = this.proposal(sessionId);
-    const path = await this.#picker.chooseFolder(
+    const path = trusted === undefined ? await this.#picker!.chooseFolder(
       proposal.sourceDisposition === "local" ? proposal.folder : undefined,
-    );
+    ) : trusted.selectedPath ?? undefined;
+    trusted?.assertAuthority?.();
     this.#assertExpectedDocumentGeneration(sessionId, expectedDocumentGeneration);
     if (path === undefined) return { cancelled: true };
     return { cancelled: false, selectionId: this.#rememberFolder(sessionId, path), folder: path };
   }
 
-  async locate(sessionId: string, expectedDocumentGeneration?: number): Promise<void> {
-    if (this.#picker === undefined) throw new Error("Native destination picker is unavailable");
+  async locate(sessionId: string, expectedDocumentGeneration?: number, trusted?: TrustedDestinationSelection): Promise<void> {
+    trusted?.assertAuthority?.();
+    if (trusted === undefined && this.#picker === undefined) throw new Error("Native destination picker is unavailable");
     this.#assertExpectedDocumentGeneration(sessionId, expectedDocumentGeneration);
     const status = this.#broker.saveStatus(sessionId);
     if (status?.destination.phase !== "active" || status.destination.fingerprint === undefined) {
       throw new Error("There is no saved PDF identity to locate");
     }
-    const selected = await this.#picker.locatePdf(dirname(status.destination.targetPath));
+    const selected = trusted === undefined ? await this.#picker!.locatePdf(dirname(status.destination.targetPath))
+      : trusted.selectedPath ?? undefined;
+    trusted?.assertAuthority?.();
+    this.#assertExpectedDocumentGeneration(sessionId, expectedDocumentGeneration);
     if (selected === undefined) return;
     if ((await hashFile(selected)) !== status.destination.fingerprint) {
       throw new FileCapabilityError("TARGET_CHANGED", "The selected PDF is not the missing saved file");
     }
+    trusted?.assertAuthority?.();
     this.#assertExpectedDocumentGeneration(sessionId, expectedDocumentGeneration);
     if (status.destination.kind === "original") {
       const state = this.#broker.state(sessionId);
       if (state === undefined) throw new Error("Review session is not active");
       const fingerprint = status.destination.fingerprint;
-      const rebind = () => this.#capabilities.rebindApprovedPdf(state.source.fileId, selected, fingerprint);
+      const rebind = () => this.#capabilities.rebindApprovedPdf(state.source.fileId, selected, fingerprint, trusted?.assertAuthority);
       // Native's trusted fence makes capability rebind and canonical relocation
       // one ordered operation. Legacy callers retain their existing flow.
       const targetPath = expectedDocumentGeneration === undefined ? await rebind() : selected;
       await this.#broker.relocateOriginalDestination(sessionId, {
         targetPath, capabilityId: state.source.fileId, fingerprint: status.destination.fingerprint,
+        ...(trusted?.assertAuthority === undefined ? {} : { assertAuthority: trusted.assertAuthority }),
         ...(expectedDocumentGeneration === undefined ? {} : {
           expectedDocumentGeneration, expectedDestinationGeneration: status.destination.generation, prepareTargetPath: rebind,
         }),
@@ -282,6 +297,7 @@ export class PdfSaveCoordinator {
         await this.#broker.establishSaveDestination(sessionId, {
           kind: "copy", targetPath: join(capability.parentPath, capability.filename),
           capabilityId: capability.id, fingerprint: status.destination.fingerprint,
+          ...(trusted?.assertAuthority === undefined ? {} : { assertAuthority: trusted.assertAuthority }),
           ...(expectedDocumentGeneration === undefined ? {} : { expectedDocumentGeneration, expectedDestinationGeneration: status.destination.generation }),
         });
       } catch (error) { this.#capabilities.revokeDestination(capability.id); throw error; }

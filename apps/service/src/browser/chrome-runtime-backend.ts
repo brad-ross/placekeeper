@@ -13,6 +13,7 @@ import {
   ChromeRuntimeServiceAuthority,
   ChromeRuntimeOperationJournal,
   type ChromeRuntimeBackend,
+  type RuntimeOperation,
   type ChromeRuntimeProjection,
   type ChromeRuntimeRecovery,
   type ChromeRuntimeSourceSink,
@@ -170,15 +171,34 @@ export class ChromeServiceRuntimeBackend implements ChromeRuntimeBackend {
     canonicalKey: string,
     method: ReviewRuntimeBrokerMethod,
     payload: unknown,
-    _operation: { readonly idempotencyKey?: string; readonly payloadDigest: string },
+    operation: RuntimeOperation,
   ): Promise<unknown> {
     const record = this.#record(canonicalKey);
     this.#refreshRecord(record);
+    if (operation.trustedDestinationSelection !== undefined &&
+      (this.#runtimeHost !== "electron" || (method !== "chooseFolder" && method !== "locateSave"))) {
+      throw new Error("invalid-trusted-selection");
+    }
+    const assertAuthority = () => {
+      operation.assertAuthority?.();
+      const state = this.#broker.state(record.sessionId);
+      if (state === undefined || (operation.expectedDocumentGeneration !== undefined
+        && state.workflow.documentGeneration !== operation.expectedDocumentGeneration)
+        || (operation.expectedReviewRevision !== undefined && state.revision !== operation.expectedReviewRevision)) {
+        throw new Error("stale-native-selection");
+      }
+    };
+    assertAuthority();
     const result = method === "saveProposal"
       ? this.#runtimeHost === "chrome"
         ? await this.#saving.browserProposal(record.sessionId, await this.#downloadFolder())
         : this.#saving.proposal(record.sessionId)
-      : await this.#review.invoke(record.sessionId, record.generation, method, payload);
+      : await this.#review.invoke(record.sessionId, record.generation, method, payload, {
+          ...(operation.expectedDocumentGeneration === undefined ? {} : { expectedDocumentGeneration: operation.expectedDocumentGeneration }),
+          ...(operation.trustedDestinationSelection === undefined ? {} : {
+            trustedDestinationSelection: { ...operation.trustedDestinationSelection, assertAuthority },
+          }),
+        });
     this.#refreshRecord(record);
     return result;
   }

@@ -67,6 +67,15 @@ export type NativeReviewHelperMessage = ReviewEnvelope & (
       readonly idempotencyKey?: string;
     }
   | {
+      /** Trusted Electron main-process result, never a renderer RPC payload. */
+      readonly type: "destination-selection";
+      readonly generation: number;
+      readonly revision: number;
+      readonly method: "chooseFolder" | "locateSave";
+      readonly selectedPath: string | null;
+      readonly idempotencyKey: string;
+    }
+  | {
       readonly type: "read-resource";
       readonly resourceId: string;
       readonly generation: number;
@@ -178,6 +187,16 @@ export function parseNativeReviewHelperMessage(host: NativeRuntimeHost, value: u
       && typeof value.offer.id === "string" && OPERATION_ID.test(value.offer.id)
       && typeof value.offer.expiresAt === "string" && Number.isFinite(Date.parse(value.offer.expiresAt))
       && typeof value.idempotencyKey === "string" && OPERATION_ID.test(value.idempotencyKey)
+      ? value as unknown as NativeReviewHelperMessage : undefined;
+  }
+  if (value.type === "destination-selection") {
+    return host === "electron" && exact(value, [...base, "generation", "revision", "method", "selectedPath", "idempotencyKey"])
+      && integer(value.generation) && value.generation > 0 && integer(value.revision)
+      && (value.method === "chooseFolder" || value.method === "locateSave")
+      && typeof value.idempotencyKey === "string" && OPERATION_ID.test(value.idempotencyKey)
+      && (value.selectedPath === null || (typeof value.selectedPath === "string"
+        && /^(?:\/|[A-Za-z]:[\\/]|\\\\[^\\]+\\[^\\]+)/u.test(value.selectedPath)
+        && value.selectedPath.length <= 16_384 && !value.selectedPath.includes("\0")))
       ? value as unknown as NativeReviewHelperMessage : undefined;
   }
   if (value.type === "invoke") {

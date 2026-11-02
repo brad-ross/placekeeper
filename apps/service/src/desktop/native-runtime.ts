@@ -213,6 +213,10 @@ export class NativeRuntimeManager {
     if (message.type === "activate") return this.#activate(existing, message, signal);
     if (message.type === "refresh") return this.#refresh(existing, message, signal);
     if (message.type === "keepalive") return this.#keepalive(existing, message, signal);
+    if (message.type === "destination-selection") {
+      return this.#invoke(existing, { ...message, type: "invoke", payload: {} }, signal,
+        { selectedPath: message.selectedPath });
+    }
     if (message.type === "invoke") return this.#invoke(existing, message, signal);
     if (message.type === "read-resource") return this.#read(existing, message, signal, request);
     if (message.type === "adopt-resource") return this.#adoptResource(existing, message);
@@ -431,6 +435,7 @@ export class NativeRuntimeManager {
     record: StagedRuntimeRecord,
     message: Extract<NativeReviewHelperMessage, { readonly type: "invoke" }>,
     signal: AbortSignal,
+    trustedDestinationSelection?: { readonly selectedPath: string | null },
   ): Promise<NativeReviewHelperResponse> {
     if (record.phase !== "active") return this.#failure(message, "invalid");
     if (message.generation !== record.projection.generation || message.revision !== record.projection.revision) {
@@ -453,7 +458,8 @@ export class NativeRuntimeManager {
         }
       }
       const payloadDigest = createHash("sha256")
-        .update(canonicalJson({ method: message.method, payload: message.payload }))
+        .update(canonicalJson({ method: message.method, payload: message.payload,
+          ...(trustedDestinationSelection === undefined ? {} : { trustedDestinationSelection, generation: message.generation, revision: message.revision }) }))
         .digest("hex");
       const interactionAction = message.method === "beginInteraction" ? "begin"
         : message.method === "finalizeInteraction" ? "finalize"
@@ -463,6 +469,17 @@ export class NativeRuntimeManager {
         ? await this.#backend.invoke(record.canonicalKey, message.method, message.payload, {
         ...(message.idempotencyKey === undefined ? {} : { idempotencyKey: message.idempotencyKey }),
         payloadDigest,
+        expectedDocumentGeneration: message.generation,
+        ...(trustedDestinationSelection === undefined ? {} : {
+          trustedDestinationSelection,
+          expectedReviewRevision: message.revision,
+          assertAuthority: () => {
+            throwIfAborted(signal);
+            if (this.#records.get(record.helperId) !== record || record.phase !== "active") {
+              throw new Error("stale-native-window");
+            }
+          },
+        }),
       }, signal)
         : await this.#backend.interaction?.(
             record.canonicalKey,

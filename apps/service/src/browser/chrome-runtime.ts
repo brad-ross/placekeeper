@@ -79,6 +79,16 @@ export interface ChromeRuntimeSourceSink {
   cancel(): Promise<void>;
 }
 
+/** Metadata supplied by authenticated host adapters, outside renderer payloads. */
+export interface RuntimeOperation {
+  readonly idempotencyKey?: string;
+  readonly payloadDigest: string;
+  readonly expectedDocumentGeneration?: number;
+  readonly expectedReviewRevision?: number;
+  readonly trustedDestinationSelection?: { readonly selectedPath: string | null };
+  readonly assertAuthority?: () => void;
+}
+
 export interface ChromeRuntimeBackend {
   readonly quota?: ChromeRuntimeAggregateQuota;
   begin(request: ChromeRuntimeStageRequest, signal?: AbortSignal): Promise<ChromeRuntimeSourceSink>;
@@ -88,7 +98,7 @@ export interface ChromeRuntimeBackend {
     canonicalKey: string,
     method: ReviewRuntimeBrokerMethod,
     payload: unknown,
-    operation: { readonly idempotencyKey?: string; readonly payloadDigest: string },
+    operation: RuntimeOperation,
     signal?: AbortSignal,
   ): Promise<unknown>;
   readDocument(canonicalKey: string, generation: number, offset: number, length: number, signal?: AbortSignal): Promise<Buffer>;
@@ -189,7 +199,7 @@ export class ChromeRuntimeServiceAuthority implements ChromeRuntimeBackend {
     canonicalKey: string,
     method: ReviewRuntimeBrokerMethod,
     payload: unknown,
-    operation: { readonly idempotencyKey?: string; readonly payloadDigest: string },
+    operation: RuntimeOperation,
     signal?: AbortSignal,
   ): Promise<unknown> {
     const invoke = () => this.#delegate.invoke(canonicalKey, method, payload, operation, signal);

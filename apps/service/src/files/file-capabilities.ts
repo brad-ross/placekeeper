@@ -318,7 +318,7 @@ export class FileCapabilityRegistry {
     return canonicalPath;
   }
 
-  async rebindApprovedPdf(fileId: string, path: string, expectedDigest: string): Promise<string> {
+  async rebindApprovedPdf(fileId: string, path: string, expectedDigest: string, assertAuthority?: () => void): Promise<string> {
     if (!this.#files.has(fileId)) {
       throw new FileCapabilityError("INVALID_PATH", "Unknown file capability");
     }
@@ -331,6 +331,7 @@ export class FileCapabilityRegistry {
     ) {
       throw new FileCapabilityError("TARGET_CHANGED", "Located PDF does not match the saved target");
     }
+    assertAuthority?.();
     this.#files.set(fileId, { path: canonicalPath, device: info.dev, inode: info.ino });
     return canonicalPath;
   }

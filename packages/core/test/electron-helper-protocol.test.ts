@@ -34,3 +34,23 @@ it("projects an explicit Electron scope with private path and capability fields 
     sourceRootPath: "/private/Papers", capability: "private", canonicalLinkBase: "placekeeper:///private/Papers/Paper.pdf",
   })).toEqual({ documentTitle: "Paper.pdf", sourceDisplayName: "Paper.pdf", sourceDisposition: "local", launchSurface: "electron" });
 });
+
+it("admits only trusted Electron native destination results while renderer methods remain pathless", () => {
+  const selection = { ...base, type: "destination-selection", method: "chooseFolder", generation: 1, revision: 0,
+    idempotencyKey: "operation_destination_test", selectedPath: null as string | null };
+  for (const selectedPath of [null, "/tmp/Papers", "C:\\Papers", "\\\\server\\share\\Papers"]) {
+    expect(parseElectronReviewHelperMessage({ ...selection, selectedPath })).toBeDefined();
+    expect(parseMacosReviewHelperMessage({ ...selection, selectedPath })).toBeUndefined();
+  }
+  for (const patch of [
+    { selectedPath: "relative" }, { selectedPath: "C:relative" }, { selectedPath: "/tmp/bad\0path" },
+    { selectedPath: "/" + "a".repeat(16_384) }, { generation: 0 }, { revision: -1 },
+    { idempotencyKey: "short" }, { method: "chooseCopy" }, { payload: {} },
+  ]) expect(parseElectronReviewHelperMessage({ ...selection, ...patch })).toBeUndefined();
+  for (const method of ["chooseFolder", "locateSave"]) {
+    expect(parseElectronReviewHelperMessage({ ...base, type: "invoke", generation: 1, revision: 0,
+      idempotencyKey: "operation_destination_test", method, payload: {} })).toBeDefined();
+    expect(parseElectronReviewHelperMessage({ ...base, type: "invoke", generation: 1, revision: 0,
+      idempotencyKey: "operation_destination_test", method, payload: { selectedPath: "/tmp/private" } })).toBeUndefined();
+  }
+});

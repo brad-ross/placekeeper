@@ -36,7 +36,8 @@ export class LocalReviewBackend {
     generation: number,
     method: Exclude<ReviewRuntimeBrokerMethod, "saveProposal">,
     payload: unknown,
-    options: { readonly expectedDocumentGeneration?: number } = {},
+    options: { readonly expectedDocumentGeneration?: number;
+      readonly trustedDestinationSelection?: { readonly selectedPath: string | null; readonly assertAuthority: () => void } } = {},
   ): Promise<unknown> {
     if (isReviewSideEffectMethod(method)) {
       // Establish the durable recovery boundary before attempting a side
@@ -73,13 +74,13 @@ export class LocalReviewBackend {
         };
         break;
       }
-      case "chooseFolder": result = await this.#saving.chooseFolder(sessionId, options.expectedDocumentGeneration); break;
+      case "chooseFolder": result = await this.#saving.chooseFolder(sessionId, options.expectedDocumentGeneration, options.trustedDestinationSelection); break;
       case "retrySave":
         await this.#saving.retry(sessionId, options.expectedDocumentGeneration);
         result = this.#broker.saveStatus(sessionId);
         break;
       case "locateSave":
-        await this.#saving.locate(sessionId, options.expectedDocumentGeneration);
+        await this.#saving.locate(sessionId, options.expectedDocumentGeneration, options.trustedDestinationSelection);
         result = this.#broker.saveStatus(sessionId);
         break;
       case "scope": result = await this.#broker.sessionScope(sessionId); break;

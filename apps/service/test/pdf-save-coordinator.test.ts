@@ -10,6 +10,11 @@ import { setAnnotationName } from "../../../packages/core/src/review-commands.js
 import { PdfWriterError, type PdfWriter } from "../../../packages/core/src/pdf-writer.js";
 import { inspectProjectedPortableAnnotations } from "../../../packages/core/src/portable-annotation.js";
 import type { ReviewCommand, ReviewItem, ReviewState } from "../../../packages/core/src/review-model.js";
+import { NativeRuntimeManager } from "../src/desktop/native-runtime.js";
+import { ChromeServiceRuntimeBackend } from "../src/browser/chrome-runtime-backend.js";
+import { ChromeTransferStore } from "../src/browser/chrome-handoff.js";
+import { ExportCoordinator } from "../src/export/export-coordinator.js";
+import { parseNativeReviewHelperMessage } from "../../../packages/core/src/native-helper-protocol.js";
 import { PdfSaveCoordinator } from "../src/saving/pdf-save-coordinator.js";
 import { SessionBroker } from "../src/sessions/session-broker.js";
 import { BrowserSourceStore } from "../src/browser/browser-source-store.js";
@@ -135,6 +140,25 @@ async function setup(
     ...(options.syncDirectory === undefined ? {} : { syncDirectory: options.syncDirectory }),
   });
   return { root, source, original, broker, coordinator, sessionId: opened.launch.sessionId };
+}
+
+async function nativeSetup() {
+  const fixture = await setup(undefined, { inspectGeneration: async () => ({ pageCount: 1, pages: [] }) });
+  const { root, source, broker, coordinator } = fixture;
+  const browserSources = await BrowserSourceStore.create(join(root, "browser-sources"));
+  const transferStore = await ChromeTransferStore.create({ root: join(root, "transfers"), validate: async () => {} });
+  const backend = new ChromeServiceRuntimeBackend({ broker, browserSources, transferStore, saving: coordinator,
+    exporting: new ExportCoordinator({ writer: fakeWriter(), capabilities: broker.capabilities, verify: verifyIds }),
+    runtimeHost: "electron" });
+  const manager = new NativeRuntimeManager("electron", backend.authority());
+  const envelope = { protocolVersion: 1, windowId: "window_native_test", attemptId: "attempt_native_test" };
+  const helper = "helper_native_test";
+  const admitted = await manager.handle(helper, { ...envelope, type: "admit", sourcePath: source, requestId: "request_admit_test" });
+  expect(admitted.type).toBe("admitted");
+  const active = await manager.handle(helper, { ...envelope, type: "activate", documentValidated: true, requestId: "request_activate_test" });
+  if (active.type !== "active") throw new Error("expected active native review");
+  const fence = { generation: active.projection.generation, revision: active.projection.revision };
+  return { ...fixture, manager, envelope, helper, fence };
 }
 
 async function setupRemote(picker?: DestinationPicker) {
@@ -774,6 +798,152 @@ describe("coalescing PDF autosave", () => {
     await coordinator.requestSave(sessionId);
     expect(await readFile(source, "utf8")).toContain(broker.state(sessionId)!.items[0]!.id);
     expect(broker.saveStatus(sessionId)?.sync).toMatchObject({ phase: "clean", savedRevision: 1 });
+  });
+
+  it("routes authenticated native selections through the real journal, opaque token, and save coordinator", async () => {
+    const { root, broker, sessionId, manager, envelope, helper, fence } = await nativeSetup();
+    try {
+      const selection = { ...envelope, ...fence, type: "destination-selection", method: "chooseFolder",
+        selectedPath: root, requestId: "request_folder_native", idempotencyKey: "operation_folder_native" };
+      expect(parseNativeReviewHelperMessage("macos", selection)).toBeUndefined();
+      expect(parseNativeReviewHelperMessage("electron", { ...selection, selectedPath: "relative" })).toBeUndefined();
+      const selected = await manager.handle(helper, selection);
+      expect(selected).toMatchObject({ type: "result", method: "chooseFolder", payload: { cancelled: false, folder: "Local folder" } });
+      expect(JSON.stringify(selected)).not.toContain(root);
+      if (selected.type !== "result") throw new Error("expected selected folder");
+      const token = (selected.payload as { selectionId: string }).selectionId;
+      // A new transport request with the same operation returns the original opaque selection.
+      expect(await manager.handle(helper, { ...selection, requestId: "request_folder_replay" })).toMatchObject({ payload: selected.payload });
+      expect(await manager.handle(helper, { ...selection, requestId: "request_folder_changed", selectedPath: join(root, "other") })).toMatchObject({ type: "failure" });
+      const saved = await manager.handle(helper, { ...envelope, ...fence, type: "invoke", method: "chooseCopy",
+        payload: { filename: "electron-copy.pdf", folderSelectionId: token },
+        requestId: "request_native_save", idempotencyKey: "operation_native_save" });
+      expect(saved.type).toBe("result");
+      expect(await readFile(join(root, "electron-copy.pdf"), "utf8")).toContain("%PDF");
+      const publication = await stat(join(root, "electron-copy.pdf"));
+      const destination = broker.saveStatus(sessionId)!.destination;
+      expect(await manager.handle(helper, { ...envelope, ...fence, type: "invoke", method: "chooseCopy",
+        payload: { filename: "electron-copy.pdf", folderSelectionId: token },
+        requestId: "request_native_replay", idempotencyKey: "operation_native_save" })).toMatchObject({ type: "result" });
+      expect(broker.saveStatus(sessionId)!.destination).toEqual(destination);
+      expect((await stat(join(root, "electron-copy.pdf"))).mtimeMs).toBe(publication.mtimeMs);
+      const wrong = join(root, "wrong-native.pdf");
+      await writeFile(wrong, "%PDF-1.7\nwrong-native\n%%EOF");
+      expect(await manager.handle(helper, { ...selection, method: "locateSave", selectedPath: wrong,
+        requestId: "request_wrong_locate", idempotencyKey: "operation_wrong_locate" })).toMatchObject({ type: "failure" });
+      expect(broker.saveStatus(sessionId)!.destination).toEqual(destination);
+      expect(await manager.handle(helper, { ...selection, requestId: "request_folder_cancel", idempotencyKey: "operation_folder_cancel", selectedPath: null }))
+        .toMatchObject({ type: "result", payload: { cancelled: true } });
+      expect(await manager.handle(helper, { ...selection, requestId: "request_folder_stale", idempotencyKey: "operation_folder_stale", generation: fence.generation + 1 }))
+        .toMatchObject({ type: "failure", code: "stale" });
+      // Renderer requests cannot smuggle a selected path into either existing method.
+      expect(await manager.handle(helper, { ...selection, type: "invoke", requestId: "request_renderer_path", payload: { selectedPath: root } }))
+        .toMatchObject({ type: "failure", code: "invalid" });
+      await broker.acceptMutation(sessionId, add(0));
+      await manager.handle(helper, { ...envelope, type: "refresh", requestId: "request_revision_refresh" });
+      expect(await manager.handle(helper, { ...selection, revision: broker.state(sessionId)!.revision,
+        requestId: "request_changed_fence" })).toMatchObject({ type: "failure" });
+    } finally { await manager.close(); }
+  });
+
+  it("rejects native results from a dialog opened before a source generation changed", async () => {
+    ownPublicationObservations();
+    const { source, root, broker, manager, envelope, helper, fence, sessionId } = await nativeSetup();
+    try {
+      await writeFile(source, "%PDF-1.7\nnew generation\n%%EOF");
+      await broker.observeLiveDocumentHint({ sessionId, outputPath: source, hostReason: "activation" });
+      expect(broker.state(sessionId)!.workflow.documentGeneration).toBeGreaterThan(fence.generation);
+      expect(await manager.handle(helper, { ...envelope, ...fence, type: "destination-selection", method: "chooseFolder",
+        selectedPath: root, requestId: "request_dialog_old", idempotencyKey: "operation_dialog_old" }))
+        .toMatchObject({ type: "failure", code: "stale" });
+      expect(broker.saveStatus(sessionId)!.destination.phase).toBe("none");
+    } finally { await manager.close(); }
+  });
+
+  it.each(["detach", "revision"] as const)("rejects native %s invalidation inside queued relocation before rebinding the original capability", async (reason) => {
+    ownPublicationObservations();
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    let blocking = false;
+    const { root, source, broker, coordinator, sessionId } = await setup(undefined, {
+      snapshotHooks: { beforeFinalRename: async () => {
+        if (!blocking) return;
+        blocking = false;
+        entered.resolve();
+        await release.promise;
+      } },
+    });
+    const generation = broker.state(sessionId)!.workflow.documentGeneration;
+    await coordinator.chooseOriginal(sessionId, undefined, generation);
+    const moved = join(root, "moved-original.pdf");
+    const originalCapabilityPath = broker.capabilities.getFilePath(broker.state(sessionId)!.source.fileId);
+    await rename(source, moved);
+    blocking = true;
+    const mutation = broker.acceptMutation(sessionId, add(0));
+    await entered.promise;
+    const queued = Promise.withResolvers<void>();
+    const relocate = broker.relocateOriginalDestination.bind(broker);
+    vi.spyOn(broker, "relocateOriginalDestination").mockImplementation((...args) => {
+      const result = relocate(...args);
+      queued.resolve();
+      return result;
+    });
+    let active = true;
+    const expectedRevision = broker.state(sessionId)!.revision;
+    const locating = coordinator.locate(sessionId, generation, { selectedPath: moved,
+      assertAuthority: () => {
+        if (!active || broker.state(sessionId)!.revision !== expectedRevision) throw new Error("native authority expired");
+      } });
+    const rejected = expect(locating).rejects.toThrow("native authority expired");
+    await queued.promise;
+    if (reason === "detach") active = false;
+    release.resolve();
+    await mutation;
+    await rejected;
+    const state = broker.state(sessionId)!;
+    expect(broker.capabilities.getFilePath(state.source.fileId)).toBe(originalCapabilityPath);
+    expect(broker.saveStatus(sessionId)!.destination).toMatchObject({ kind: "original", targetPath: originalCapabilityPath });
+    expect(await readFile(moved, "utf8")).toContain("source");
+  });
+
+  it("does not mutate an original capability when native authority expires during rebind validation", async () => {
+    const { root, source, broker, sessionId } = await setup();
+    const state = broker.state(sessionId)!;
+    const before = broker.capabilities.getFilePath(state.source.fileId);
+    const moved = join(root, "relocated.pdf");
+    await rename(source, moved);
+    let active = true;
+    const pending = broker.capabilities.rebindApprovedPdf(state.source.fileId, moved, state.source.digest,
+      () => { if (!active) throw new Error("native window detached"); });
+    active = false;
+    await expect(pending).rejects.toThrow("native window detached");
+    expect(broker.capabilities.getFilePath(state.source.fileId)).toBe(before);
+  });
+
+  it("accepts a trusted native folder without a service picker and publishes only through its opaque selection", async () => {
+    const { root, broker, coordinator, sessionId } = await setup();
+    const generation = broker.state(sessionId)!.workflow.documentGeneration;
+    expect(await coordinator.chooseFolder(sessionId, generation, { selectedPath: null })).toEqual({ cancelled: true });
+    const selected = await coordinator.chooseFolder(sessionId, generation, { selectedPath: root });
+    if (selected.cancelled) throw new Error("expected selected folder");
+    expect(selected.selectionId).not.toContain(root);
+    await coordinator.chooseCopyFilename(sessionId, "native-copy.pdf", selected.selectionId, undefined, generation);
+    expect(await readFile(join(root, "native-copy.pdf"), "utf8")).toContain("%PDF");
+    expect(broker.saveStatus(sessionId)?.sync.phase).toBe("clean");
+  });
+
+  it("rejects stale native folder results and wrong-file locate without rebinding", async () => {
+    const { root, broker, coordinator, sessionId } = await setup();
+    const generation = broker.state(sessionId)!.workflow.documentGeneration;
+    await expect(coordinator.chooseFolder(sessionId, generation + 1, { selectedPath: root })).rejects.toThrow();
+    await coordinator.chooseCopyFilename(sessionId, "native-copy.pdf");
+    const before = broker.saveStatus(sessionId)!.destination;
+    const wrong = join(root, "wrong.pdf");
+    await writeFile(wrong, "%PDF-1.7\nwrong file\n%%EOF");
+    await expect(coordinator.locate(sessionId, generation, { selectedPath: wrong })).rejects.toThrow("not the missing saved file");
+    expect(broker.saveStatus(sessionId)!.destination).toEqual(before);
+    await coordinator.locate(sessionId, generation, { selectedPath: null });
+    expect(broker.saveStatus(sessionId)!.destination).toEqual(before);
   });
 
   it("uses opaque native-picker selections and locates a moved save target", async () => {

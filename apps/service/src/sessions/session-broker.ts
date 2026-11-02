@@ -1960,12 +1960,14 @@ export class SessionBroker {
       readonly confirmation?: SaveDestinationConfirmation;
       readonly expectedDocumentGeneration?: number;
       readonly expectedDestinationGeneration?: number;
+      readonly assertAuthority?: () => void;
     },
   ): Promise<{ readonly destination: DurableSaveDestination; readonly sync: DurableSaveSync; readonly state: ReviewState }> {
     const session = this.#activeById.get(sessionId);
     if (session === undefined || session.ending) throw new Error("Review session is not active");
     return this.#withSessionTail(session, async () => {
       if (session.ending) throw new Error("Review session is ending");
+      input.assertAuthority?.();
       this.#assertExpectedDocumentGeneration(session, input.expectedDocumentGeneration);
       if (input.expectedDestinationGeneration !== undefined && input.expectedDestinationGeneration !== session.destination.generation) {
         throw new Error("save-destination-conflict");
@@ -2020,6 +2022,7 @@ export class SessionBroker {
       readonly fingerprint: string;
       readonly expectedDocumentGeneration?: number;
       readonly expectedDestinationGeneration?: number;
+      readonly assertAuthority?: () => void;
       /** Trusted capability rebind runs under the canonical generation tail. */
       readonly prepareTargetPath?: () => Promise<string>;
     },
@@ -2028,12 +2031,15 @@ export class SessionBroker {
     if (session === undefined || session.ending) throw new Error("Review session is not active");
     return this.#withSessionTail(session, async () => {
       if (session.ending) throw new Error("Review session is ending");
+      input.assertAuthority?.();
       this.#assertExpectedDocumentGeneration(session, input.expectedDocumentGeneration);
       if (input.expectedDestinationGeneration !== undefined && input.expectedDestinationGeneration !== session.destination.generation) {
         throw new Error("save-destination-conflict");
       }
       const targetPath = input.prepareTargetPath === undefined ? input.targetPath : await input.prepareTargetPath();
       if (session.ending) throw new Error("Review session is ending");
+      input.assertAuthority?.();
+      this.#assertExpectedDocumentGeneration(session, input.expectedDocumentGeneration);
       this.#assertSaveDestinationAllowed(session, { kind: "original", targetPath });
       const destination: DurableSaveDestination = {
         phase: "active",
