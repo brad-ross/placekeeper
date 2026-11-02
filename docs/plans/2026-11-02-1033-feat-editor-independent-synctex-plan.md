@@ -17,7 +17,7 @@ execution: code
 - **Product authority:** The Product Contract below records the scope confirmed on November 2, 2026.
 - **Open blockers:** None for implementation. Personal editor acceptance remains an execution gate.
 - **Execution profile:** Three dependency-ordered PRs, grouped below; no production implementation is authorized by this planning artifact alone.
-- **Authority and ownership:** Product Contract governs scope; Planning Contract governs implementation choices. The implementing agent completes code and automated verification; the user performs the reserved personal editor acceptance. Shipping follows the subsequently authorized execution workflow.
+- **Authority and ownership:** Product Contract governs scope; Planning Contract governs implementation choices. The implementing agent completes code and automated verification; the agent performs VS Code acceptance through Computer; Zed acceptance awaits user installation. Shipping follows the subsequently authorized execution workflow.
 - **Stop conditions:** Return for a product decision if implementation would require broader viewer destinations, remote filesystem routing, or weaker generation/source containment.
 
 ---
@@ -36,7 +36,7 @@ Placekeeper's current supported source/PDF navigation is centered on VS Code, al
 
 - **General interface with optional Texlab integration.** Governs R1, R2, R16. A Texlab-only interface would exclude existing standalone Placekeeper and LaTeX Workshop workflows.
 - **Native Mac plus embedded VS Code.** Governs R3. (session-settled: user-approved — chosen over routing into every host: avoid simultaneous browser and Codex destination choices in the first release.)
-- **Three hands-on acceptance editors.** Governs R17, R18. (session-settled: user-directed — chosen over requiring personal validation of all five editors: the user will test VS Code, Zed, and Neovim, while Sublime Text and Emacs receive compatible configurations.)
+- **Two required acceptance editors.** Governs R17, R18. (User revision, November 2, 2026: the agent tests VS Code through Computer; Zed remains pending user installation. Neovim is not installed and is removed from required hands-on acceptance. Its adapter and automated coverage remain; its recipe is unverified, like Sublime Text and Emacs.)
 - **Follow the launching editor.** Governs R6, R7. (session-settled: user-directed — chosen over a global default or project preference: reverse search should return to the editor that initiated the workflow.)
 - **Reuse the native window.** Governs R4, R8. (session-settled: user-directed — chosen over separate windows per editor: the latest explicit editor navigation request sets the return destination.)
 - **Refresh and navigation are separate.** Governs R9, R10. (session-settled: user-approved — chosen over jumping after every rebuild: preserve reading position unless navigation is requested or following is enabled.)
@@ -80,7 +80,7 @@ Placekeeper's current supported source/PDF navigation is centered on VS Code, al
 
 **Setup, coverage, and failures**
 
-- R17. Provide repeatable hands-on acceptance workflows for VS Code, Zed, and Neovim covering both navigation directions, rebuilds, and return-editor routing.
+- R17. Provide repeatable hands-on acceptance workflows for VS Code and Zed covering both navigation directions, rebuilds, and return-editor routing.
 - R18. Supply Sublime Text and Emacs configuration recipes through the general interface or Texlab, identifying them as unverified until actual editor testing establishes otherwise.
 - R19. Setup documentation covers SyncTeX-enabled compilation, tool discovery, source-root association, forward invocation, and the editor command or connection used for reverse search.
 - R20. Editor launch failures and unavailable sessions produce an actionable failure rather than silently routing to a different editor.
@@ -91,7 +91,7 @@ Placekeeper's current supported source/PDF navigation is centered on VS Code, al
 - F1. **Source to PDF.** A2 submits an explicit request for A1's source position. A3 opens or reuses the destination, associates the initiating editor, resolves the matching generation, and reveals the target with a temporary location indication. **Covers R1–R5, R8, R11–R13.**
 - F2. **PDF to source.** A1 invokes reverse search at a PDF point. A3 resolves the source against the current generation and returns it to A2; a directly opened document obtains its editor choice first. **Covers R6, R7, R11, R20, R21.**
 - F3. **Rebuild while reading.** A2 or a separate build command replaces the output. A3 applies its existing safe-refresh behavior; only an explicit pending navigation or enabled following changes the source-related location. **Covers R8–R14.**
-- F4. **Switch editing applications.** After Zed establishes a native return destination, Neovim explicitly navigates into the same PDF. A3 reuses that native window and subsequent reverse search returns to Neovim. **Covers R4, R6, R8.**
+- F4. **Switch editing applications.** After Zed establishes a native return destination, a VS Code CLI profile explicitly navigates into the same PDF. A3 reuses that native window and subsequent reverse search returns through the VS Code CLI profile. **Covers R4, R6, R8.**
 
 The routing distinction in F4 is local to the native viewer; the embedded VS Code viewer retains its own host association under R3 and R6.
 
@@ -110,15 +110,15 @@ flowchart TD
 
 ### Acceptance Examples
 
-- AE1. **Covers R1–R6, R17.** With a local multi-file project compiled with SyncTeX, navigating from an included chapter in Zed or Neovim opens the PDF from its separate build directory at the corresponding passage; reverse search returns to that editor and source line.
-- AE2. **Covers R4, R8, R13.** Zed requests one location, then Neovim requests another before the first completes. One native window remains; Neovim's newer request wins and receives subsequent reverse search.
+- AE1. **Covers R1–R6, R17.** With a local multi-file project compiled with SyncTeX, navigating from an included chapter in Zed or VS Code opens the PDF from its separate build directory at the corresponding passage; reverse search returns to that editor and source line.
+- AE2. **Covers R4, R8, R13.** Zed requests one location, then VS Code requests another before the first completes. One native window remains; VS Code's newer request wins and receives subsequent reverse search.
 - AE3. **Covers R8–R10, R14.** While the author reads elsewhere in the document, a background rebuild refreshes the PDF without following the source cursor or changing the return editor. Existing review work is reconciled rather than discarded.
 - AE4. **Covers R10, R12, R13.** With follow-after-build enabled for the active editor association, saving and rebuilding can follow its captured position after matching output becomes available. A newer explicit navigation supersedes that pending follow.
 - AE5. **Covers R11, R12.** A replacement PDF arrives before its SyncTeX sidecar. Reading remains available, and a pending forward request never navigates using the old sidecar; it can complete when the matching pair becomes available.
 - AE6. **Covers R7, R20.** A PDF opened from Finder asks for an editor on the first reverse-search attempt. Cancelling leaves the PDF usable; selecting an editor establishes the destination for that open viewer. An unavailable editor produces an explanation without choosing another application.
 - AE7. **Covers R3, R6, R15, R16.** Placekeeper's embedded VS Code commands work without Texlab. Reverse search reuses the existing source group, preserves the source/PDF arrangement, and highlights the returned location. Native editor activity does not redirect this embedded viewer's reverse search.
 - AE8. **Covers R11, R12, R20, R21.** Missing tools, stale mappings, ambiguous source results, or out-of-root paths leave review available and do not open an arbitrary source file or execute text from mapping data.
-- AE9. **Covers R17–R19.** The delivered setup guide separates tested editor/version combinations from unverified recipes. It contains reproducible round-trip checks for the three hands-on targets and configurations for both additional editors.
+- AE9. **Covers R17–R19.** The delivered setup guide separates tested editor/version combinations from unverified recipes. It contains reproducible round-trip checks for the two required hands-on targets and configurations for the additional unverified editors.
 
 ### Scope Boundaries
 
@@ -358,7 +358,7 @@ Waits on: PR1, merge order only. U2–U4 land together so native entry points ne
 
 **Test scenarios:**
 
-- Covers AE1: the registered Neovim endpoint receives the resolved file and line; a second running instance receives nothing.
+- Automated Neovim adapter coverage: the registered RPC endpoint receives the resolved file and line; a second fixture endpoint receives nothing. Live Neovim qualification is optional.
 - Literal spaces, quotes, Unicode, dollar signs, backticks, newlines, and leading-dash filenames remain data in captured argv/RPC; unsupported editor location grammar reports failure.
 - Covers AE8: malformed templates, missing executables, removed sockets, denied access, and nonzero editor exits preserve reading and report the failing destination.
 - A reverse query begun under one epoch cannot dispatch after another explicit editor request replaces it.
@@ -476,13 +476,13 @@ Waits on: PR2, merge order only. U5–U7 complete the public integration and doc
 
 **Files:** `packaging/macos/build-native-candidate.ts`, `packaging/macos/validate-manifest.ts`, `packaging/macos/smoke-installed.ts`, `packaging/macos/packaging.test.ts`, `scripts/testing/suites.ts`, `test/acceptance/installed-hosts.md`, new `test/acceptance/editor-synctex.md`.
 
-**Approach:** Add integration resources to the candidate manifest, explicitly register new test files in suite lists, and extend installed qualification. Run the candidate's contained binaries with private state, a relocated bundle, and unrelated cwd. Verify the actual VSIX payload loaded by a fresh/reloaded editor window. Provide repeatable user acceptance steps for VS Code, Zed, and Neovim, with exact versions and evidence fields.
+**Approach:** Add integration resources to the candidate manifest, explicitly register new test files in suite lists, and extend installed qualification. Run the candidate's contained binaries with private state, a relocated bundle, and unrelated cwd. Verify the actual VSIX payload loaded by a fresh/reloaded editor window. Provide repeatable acceptance steps for VS Code and Zed, with exact versions and evidence fields.
 
 **Test scenarios:**
 
 - Covers AE1–AE9: execute the product examples against the installed candidate, including editor takeover, delayed sidecars, direct Finder setup, rebuild preservation, and failures.
 - Exercise Zed with multiple windows and projects; record which window its CLI chooses without promising exact targeting.
-- Exercise Neovim with two live sockets, an unavailable socket, and a modified buffer; do not discard edits to satisfy navigation.
+- Optional Neovim qualification, if installed later: two live sockets, an unavailable socket, and a modified buffer; never discard edits to satisfy navigation. This is not a required gate.
 - An active multi-PDF session survives a compatible launcher invocation; mismatched daemon/install identity follows existing upgrade policy.
 
 **Verification:** Packaging checks prove bundle contents; installed smoke and editor acceptance prove actual process delivery and return behavior. Sublime/Emacs remain unverified unless separately exercised. Record failures or unavailable environments explicitly; documentation is not a passing result.
@@ -503,13 +503,13 @@ Implementation, not planning, runs these checks. Add new test files to `scripts/
 | `pnpm validate:distribution` | U3, U6, U7 | Built assets and manifest include the installed command/resources |
 | `pnpm package:macos:native-candidate` then `pnpm run:macos:native-candidate` | U7 | Relocated candidate uses its contained assets and private qualification state |
 | `pnpm smoke:installed` with documented fixture/configuration | U7 | Actual installed launcher/app delivery succeeds outside the repo |
-| `test/acceptance/editor-synctex.md` | U7 | Actual VS Code, Zed, and Neovim results cover AE1–AE9 with versions recorded |
+| `test/acceptance/editor-synctex.md` | U7 | Actual VS Code and Zed results cover applicable AE1–AE9 with versions recorded; Neovim live testing is optional |
 
 Use fixture processes and structured RPC captures to test argument safety, then real editors to prove placement and session behavior. Preserve existing tests for overlay/multiple forward rectangles, reverse ambiguity, output budgets, delayed mapping, interaction holds, and annotation reconciliation. No `release:validate` script exists in the inspected package; distribution and native-candidate gates above are the applicable equivalents. Public release publication is outside this planning request.
 
 ### Acceptance Ownership
 
-The implementing agent completes automated and available installed-candidate checks and prepares the repeatable acceptance record. The user performs the reserved personal VS Code, Zed, and Neovim checks; an unavailable editor is an outstanding gate, not permission to mark it tested. Each result records app/extension/editor/tool versions, fixture paths, actions, observed destination, and pass/failure evidence. U7 remains incomplete until those checks are resolved.
+The implementing agent completes automated and available installed-candidate checks and prepares the repeatable acceptance record. The agent performs VS Code checks through Computer. Zed remains pending until the user installs it. At the user’s request, Neovim live testing is no longer a required gate and remains unverified. An unavailable required editor is an outstanding gate, not permission to mark it tested. Each result records app/extension/editor/tool versions, fixture paths, actions, observed destination, and pass/failure evidence. U7 remains incomplete until those checks are resolved.
 
 ---
 

@@ -2,7 +2,7 @@
 
 The native Mac app accepts source-to-PDF requests through its installed command and returns PDF locations to a locally configured editor. The embedded VS Code panel keeps its own editor association. Automatic PDF refresh preserves reading position and zoom; following a saved source cursor after a build is off by default.
 
-These are integration recipes, not completed editor acceptance results. The [acceptance record](https://github.com/brad-ross/placekeeper/blob/feat/2026-11-02-1033-feat-editor-independent-synctex-plan-pr3/test/acceptance/editor-synctex.md) separates installed-app checks from hands-on VS Code, Zed, and Neovim checks. Sublime Text and Emacs remain unverified.
+These are integration recipes, not completed editor acceptance results. The [acceptance record](https://github.com/brad-ross/placekeeper/blob/feat/2026-11-02-1033-feat-editor-independent-synctex-plan-pr3/test/acceptance/editor-synctex.md) separates installed-app checks from hands-on VS Code and Zed checks. Neovim live testing is optional at the user’s request; Neovim, Sublime Text, and Emacs remain unverified.
 
 ## Install and build
 
