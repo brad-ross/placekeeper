@@ -8,6 +8,7 @@ import {
   transformPosition,
   transformSize,
   type PdfPageObject,
+  type PdfDocumentObject,
   type Position,
 } from '@embedpdf/models';
 import { ScrollPlugin, type ScrollScope } from '@embedpdf/plugin-scroll';
@@ -17,6 +18,7 @@ import { ZoomPlugin, type ZoomChangeEvent, type ZoomScope } from '@embedpdf/plug
 import type { PdfNavigationTarget } from './pdf-navigation-target.js';
 import type { PdfDocumentOrderPage } from './document-order-location.js';
 import { combinePageRotation } from './owned-overlay.js';
+import { readingPageOffset, representativeReadingWidth, type TextFitLayout, type ReadingAlignment } from './text-fit-layout.js';
 import {
   intersectViewerRects,
   type ViewerRunway,
@@ -38,6 +40,8 @@ import {
   type PdfViewportQuery,
   type PdfViewerLocation,
   type ViewerNavigationControls,
+  type PdfFitMode,
+  type PdfFitState,
 } from './viewer-navigation.js';
 
 export interface PdfTargetLocationContext {
@@ -61,6 +65,7 @@ export interface ViewerNavigationAdapterOptions {
   /** Stable EmbedPDF document scope; it need not be the globally active document. */
   readonly documentId: string;
   readonly documentGeneration: number;
+  readonly readingLayout?: TextFitLayout;
   /** Live right/bottom area covered by trays in this viewer's DOM viewport. */
   readonly runway?: () => ViewerRunway;
   /** Optional layout-owned margin for explicit width fitting. */
@@ -112,7 +117,7 @@ export interface PdfViewerNavigation extends ViewerNavigationControls {
 interface ActiveViewer {
   readonly documentId: string;
   readonly documentGeneration: number;
-  readonly document: object;
+  readonly document: PdfDocumentObject;
   readonly pages: readonly PdfPageObject[];
   readonly documentRotation: Rotation;
   readonly scroll: ScrollScope;
@@ -130,6 +135,7 @@ interface NavigationOperation {
   readonly origin: PdfViewerLocation | null;
   geometryIsCurrent?: () => boolean;
   mutated: boolean;
+  originAlignment?: ReadingAlignment;
 }
 
 interface NativeHorizontalBoundary {
@@ -479,10 +485,25 @@ export function createViewerNavigation(
   let fittedZoom: number | null = null;
   let fittedDocument: object | null = null;
   let fitOperation: NavigationOperation | null = null;
+  let requestedFitZoom: number | null = null;
+  let pendingFit: { mode: PdfFitMode; selectedMode: PdfFitMode } | null = null;
+  let fitState: PdfFitState = { selectedMode: 'width', effectiveMode: 'width', active: false, pending: false, fallback: false };
+  const fitListeners = new Set<() => void>();
+  const publishFit = (next: PdfFitState) => {
+    fitState = next;
+    fitListeners.forEach((listener) => listener());
+  };
+  const pageOffset = (viewer: ActiveViewer, pageIndex: number, zoom: number): number => {
+    const layout = options.readingLayout?.getSnapshot();
+    const page = viewer.pages[pageIndex];
+    return page && layout?.document === viewer.document && layout.alignment === 'text'
+      ? readingPageOffset(page, layout.bounds?.[pageIndex], viewer.documentRotation, zoom) : 0;
+  };
 
   const cancelPendingOperation = (): Promise<void> | null => {
     const cancelled = activeOperation;
     cancelled?.abort.abort();
+    if (cancelled?.operation === fitOperation && fitState.pending) publishFit({ ...fitState, pending: false });
     activeOperation = null;
     operationGeneration += 1;
     if (cancelled?.operation.mutated && cancelled.operation.origin !== null) {
@@ -655,7 +676,9 @@ export function createViewerNavigation(
       );
       if (virtualRect) {
         layoutOffsetX = geometry.pageRect.left - scrollportLeft + viewportElement.scrollLeft
-          - virtualRect.origin.x - viewer.viewportGap;
+          - virtualRect.origin.x - viewer.viewportGap
+          - pageOffset(viewer, mounted.pageIndex, location.zoom)
+          + pageOffset(viewer, location.pageIndex, location.zoom);
         layoutOffsetY = geometry.pageRect.top - scrollportTop + viewportElement.scrollTop
           - virtualRect.origin.y - viewer.viewportGap;
       }
@@ -821,6 +844,9 @@ export function createViewerNavigation(
       || viewer.document !== operation.document
       || !viewerStillOwnsDocument(viewer)
     ) return;
+    if (operation.originAlignment !== undefined) {
+      flushSync(() => options.readingLayout?.setAlignment(operation.originAlignment!));
+    }
     const deadline = Date.now() + timeoutMs;
     try {
       if (Math.abs(viewer.zoom.getState().currentZoomLevel - origin.zoom) > zoomTolerance) {
@@ -1286,8 +1312,10 @@ export function createViewerNavigation(
     return {};
   }
 
-  const fitToWidth = async (
+  const fitToMode = async (
+    mode: PdfFitMode,
     waitForSettledGeometry?: WaitForSettledViewerGeometry,
+    selectedMode: PdfFitMode = mode,
   ): Promise<boolean> => {
     const viewer = activeViewer();
     if (!viewer) return false;
@@ -1295,7 +1323,19 @@ export function createViewerNavigation(
     if (operation === null) return false;
     let fitLayoutObserver: ResizeObserver | null = null;
     fitOperation = operation;
+    pendingFit = { mode, selectedMode };
+    publishFit({ ...fitState, pending: true });
     try {
+      let effectiveMode = mode;
+      let textWidth: number | null = null;
+      const readingLayout = options.readingLayout;
+      if (mode === 'text' && readingLayout) {
+        readingLayout.replaceDocument(viewer.document, viewer.documentGeneration);
+        const bounds = await readingLayout.prepare(options.registry.getEngine(), viewer.document, viewer.documentGeneration, operation.signal);
+        if (!operationIsCurrent(operation)) return false;
+        textWidth = representativeReadingWidth(viewer.pages, bounds, viewer.documentRotation);
+      }
+      if (mode === 'text' && textWidth === null) effectiveMode = 'width';
       const deadline = Date.now() + timeoutMs;
       if (waitForSettledGeometry) {
         const settlementPromise = waitForSettledGeometry(operation.signal);
@@ -1316,18 +1356,41 @@ export function createViewerNavigation(
 
       const visible = mostVisibleMountedPageIndex(viewer);
       if (visible === null) return false;
-      const geometry = pageGeometry(viewer, visible.pageIndex, visible);
+      let geometry = pageGeometry(viewer, visible.pageIndex, visible);
       if (geometry === null) return false;
       const { page, viewportRect, rotation } = geometry;
       const rotatedPage = transformSize(page.size, rotation, 1);
-      const fitMargins = fitWidthMargins(viewer);
+      const marginsForMode = () => {
+        const margins = fitWidthMargins(viewer);
+        return effectiveMode === 'text'
+          ? { left: Math.max(24, margins.left), right: Math.max(24, margins.right) }
+          : margins;
+      };
+      const fitMargins = marginsForMode();
       const fitGap = (fitMargins.left + fitMargins.right) / 2;
-      const requestedZoom = fitViewerWidthZoom({
-        viewportWidth: viewportRect.width,
-        pageWidth: rotatedPage.width,
-        viewportGap: fitGap,
-      });
+      const fitZoomFor = (rect: EffectiveViewportRect, gap: number) => {
+        const widthZoom = fitViewerWidthZoom({
+          viewportWidth: rect.width,
+          pageWidth: effectiveMode === 'text' ? textWidth! : rotatedPage.width,
+          viewportGap: gap,
+        });
+        if (effectiveMode !== 'page' || widthZoom === null) return widthZoom;
+        const heightZoom = fitViewerWidthZoom({ viewportWidth: rect.height, pageWidth: rotatedPage.height, viewportGap: viewer.viewportGap });
+        return heightZoom === null ? null : Math.min(widthZoom, heightZoom);
+      };
+      const requestedZoom = fitZoomFor(viewportRect, fitGap);
       if (requestedZoom === null || !operationIsCurrent(operation)) return false;
+
+      if (readingLayout) {
+        operation.originAlignment = readingLayout.getSnapshot().alignment;
+        operation.mutated = true;
+        flushSync(() => readingLayout.setAlignment(effectiveMode === 'text' ? 'text' : 'page'));
+        geometry = pageGeometry(viewer, visible.pageIndex);
+        if (geometry === null) {
+          await rollbackOperation(operation);
+          return false;
+        }
+      }
 
       const origin = operation.origin?.pageIndex === visible.pageIndex
         ? operation.origin
@@ -1336,15 +1399,20 @@ export function createViewerNavigation(
         x: page.size.width / 2,
         y: page.size.height / 2,
       };
-      const anchor = rotation === Rotation.Degree90 || rotation === Rotation.Degree270
-        ? { x: originAnchor.x, y: page.size.height / 2 }
-        : { x: page.size.width / 2, y: originAnchor.y };
+      const readingBounds = effectiveMode === 'text' ? readingLayout?.getSnapshot().bounds?.[visible.pageIndex] : null;
+      const center = readingBounds
+        ? { x: readingBounds.origin.x + readingBounds.size.width / 2, y: readingBounds.origin.y + readingBounds.size.height / 2 }
+        : { x: page.size.width / 2, y: page.size.height / 2 };
+      const anchor = effectiveMode === 'page' ? center
+        : rotation === Rotation.Degree90 || rotation === Rotation.Degree270
+          ? { x: originAnchor.x, y: center.y }
+          : { x: center.x, y: originAnchor.y };
       const location: PdfViewerLocation = {
         pageIndex: visible.pageIndex,
         anchor,
         alignment: {
           xPercent: 50 + 50 * (fitMargins.left - fitMargins.right) / viewportRect.width,
-          yPercent: origin?.alignment.yPercent ?? 50,
+          yPercent: effectiveMode === 'page' ? 50 : origin?.alignment.yPercent ?? 50,
         },
         zoom: requestedZoom,
       };
@@ -1376,6 +1444,7 @@ export function createViewerNavigation(
         zoomed = false;
       }
       if (!zoomed) {
+        requestedFitZoom = requestedZoom;
         // Establish the tray-aware anchor before requesting the new scale.
         // Both mutations occur in one task, so the viewer never paints this
         // preparatory position as a separate state.
@@ -1459,13 +1528,9 @@ export function createViewerNavigation(
         // observer runs. Align against each live page sample before validation.
         positionFittedPage();
         const settledGeometry = pageGeometry(viewer, visible.pageIndex);
-        const liveFitMargins = fitWidthMargins(viewer);
+        const liveFitMargins = marginsForMode();
         const liveFitGap = (liveFitMargins.left + liveFitMargins.right) / 2;
-        const liveRequestedZoom = settledGeometry === null ? null : fitViewerWidthZoom({
-          viewportWidth: settledGeometry.viewportRect.width,
-          pageWidth: rotatedPage.width,
-          viewportGap: liveFitGap,
-        });
+        const liveRequestedZoom = settledGeometry === null ? null : fitZoomFor(settledGeometry.viewportRect, liveFitGap);
         const targetMatchesLiveGeometry = liveRequestedZoom !== null
           && Math.abs(liveRequestedZoom - requestedZoom) <= zoomTolerance;
         const boundedFit = liveRequestedZoom !== null && (
@@ -1476,13 +1541,16 @@ export function createViewerNavigation(
           ? 0
           : settledGeometry.viewportRect.width - 2 * liveFitGap;
         const widthMatches = settledGeometry !== null
-          && (boundedFit || Math.abs(settledGeometry.pageRect.width - widthTarget) <= coordinateTolerance);
+          && (effectiveMode !== 'width' || boundedFit || Math.abs(settledGeometry.pageRect.width - widthTarget) <= coordinateTolerance);
         const edgesFit = settledGeometry !== null
-          && (boundedFit || (
+          && (effectiveMode === 'text' || boundedFit || (
             settledGeometry.pageRect.left
               >= settledGeometry.viewportRect.left + liveFitMargins.left - coordinateTolerance
             && settledGeometry.pageRect.right
               <= settledGeometry.viewportRect.right - liveFitMargins.right + coordinateTolerance
+          )) && (effectiveMode !== 'page' || boundedFit || (
+            settledGeometry.pageRect.top >= settledGeometry.viewportRect.top - coordinateTolerance
+            && settledGeometry.pageRect.bottom <= settledGeometry.viewportRect.bottom + coordinateTolerance
           ));
         // The native current-page indicator includes content behind trays and
         // can change after zooming in a tall viewport. Validate the fitted
@@ -1502,6 +1570,7 @@ export function createViewerNavigation(
       if (applied) {
         fittedZoom = viewer.zoom.getState().currentZoomLevel;
         fittedDocument = viewer.document;
+        publishFit({ selectedMode, effectiveMode, active: true, pending: false, fallback: selectedMode === 'text' && effectiveMode === 'width' });
       }
       return applied;
     } catch {
@@ -1511,10 +1580,13 @@ export function createViewerNavigation(
       return false;
     } finally {
       fitLayoutObserver?.disconnect();
-      if (fitOperation === operation) fitOperation = null;
+      if (fitOperation === operation && fitState.pending) publishFit({ ...fitState, pending: false });
+      if (fitOperation === operation) { fitOperation = null; requestedFitZoom = null; pendingFit = null; }
       if (activeOperation?.operation === operation) activeOperation = null;
     }
   };
+
+  const fitToWidth = (wait?: WaitForSettledViewerGeometry) => fitToMode('width', wait);
 
   const resolveTarget = (
     viewer: ActiveViewer,
@@ -1777,6 +1849,26 @@ export function createViewerNavigation(
     if (currentDocument !== operation.operation.document) operation.abort.abort();
   });
 
+  const manualZoom = () => {
+    void cancelPendingNavigation();
+    fittedZoom = null;
+    publishFit({ ...fitState, active: false, pending: false });
+  };
+  const unsubscribeZoom = activeViewer()?.zoom.onZoomChange((event) => {
+    if (event.newZoom === event.oldZoom) return;
+    if (fitOperation && (event.newZoom === requestedFitZoom || event.newZoom === fitOperation.origin?.zoom)) return;
+    // A destination operation owns its own cancellation and settlement.
+    fittedZoom = null;
+    publishFit({ ...fitState, active: false });
+    if (fitOperation) void cancelPendingNavigation();
+  });
+  const getFitState = (): PdfFitState => {
+    const viewer = activeViewer();
+    const active = fitState.active && viewer !== null && fittedDocument === viewer.document
+      && fittedZoom !== null && Math.abs(viewer.zoom.getState().currentZoomLevel - fittedZoom) <= zoomTolerance;
+    return active === fitState.active ? fitState : { ...fitState, active };
+  };
+
   return {
     captureLocation,
     clampLocation(location) {
@@ -1836,6 +1928,14 @@ export function createViewerNavigation(
     rectVisibility,
     applyLocation,
     fitToWidth,
+    fitToMode,
+    refit: (wait) => fitToMode(pendingFit?.mode ?? fitState.effectiveMode, wait, pendingFit?.selectedMode ?? fitState.selectedMode),
+    getFitState,
+    subscribeFitState(listener) {
+      fitListeners.add(listener);
+      return () => { fitListeners.delete(listener); };
+    },
+    manualZoom,
     isFitToWidth() {
       const viewer = activeViewer();
       if (!viewer) return false;
@@ -1858,7 +1958,7 @@ export function createViewerNavigation(
       // A resize during an unfinished fit must fit again at the newer width.
       if (fitOperation !== null && activeOperation?.operation === fitOperation) return true;
       // A replaced document inherits the zoom level, not the fit.
-      if (fittedZoom === null || fittedDocument !== viewer.document) return false;
+      if (!fitState.active || fitState.effectiveMode !== 'width' || fittedZoom === null || fittedDocument !== viewer.document) return false;
       try {
         return Math.abs(viewer.zoom.getState().currentZoomLevel - fittedZoom) <= zoomTolerance;
       } catch {
@@ -1877,6 +1977,11 @@ export function createViewerNavigation(
     replaceDocument(nextDocumentGeneration) {
       void cancelPendingNavigation();
       documentGeneration = nextDocumentGeneration;
+      fittedZoom = null;
+      fittedDocument = null;
+      const viewer = activeViewer();
+      options.readingLayout?.replaceDocument(viewer?.document ?? null, nextDocumentGeneration);
+      publishFit({ selectedMode: 'width', effectiveMode: 'width', active: false, pending: false, fallback: false });
     },
     focusAtDestination(pageIndex) {
       return focusViewerDestination(options.root(), pageIndex);
@@ -1886,6 +1991,8 @@ export function createViewerNavigation(
       disposed = true;
       void cancelPendingNavigation();
       unsubscribeStore();
+      unsubscribeZoom?.();
+      fitListeners.clear();
     },
   };
 }

@@ -64,6 +64,7 @@ export function createViewerControls(
     readonly viewport?: () => HTMLElement | null;
     /** Return false only when navigation is not ready and native scrolling should handle the jump. */
     readonly jumpToPage?: (pageNumber: number) => Promise<boolean> | false;
+    readonly onManualZoom?: () => void;
   } = {},
 ): InitializedViewerControls {
   const { viewport, jumpToPage } = options;
@@ -158,8 +159,8 @@ export function createViewerControls(
       if (!scroll || !Number.isSafeInteger(pageNumber) || pageNumber < 1 || pageNumber > state.totalPages) return;
       if (!requestPageJump(pageNumber)) scroll.scrollToPage({ pageNumber, behavior: 'smooth' });
     },
-    zoomOut: () => anchoredZoom(viewport?.() ?? null, () => zoom?.zoomOut(), undefined, true),
-    zoomIn: () => anchoredZoom(viewport?.() ?? null, () => zoom?.zoomIn(), undefined, true),
+    zoomOut: () => { if (zoom) options.onManualZoom?.(); anchoredZoom(viewport?.() ?? null, () => zoom?.zoomOut(), undefined, true); },
+    zoomIn: () => { if (zoom) options.onManualZoom?.(); anchoredZoom(viewport?.() ?? null, () => zoom?.zoomIn(), undefined, true); },
     zoomToPercent: (zoomPercent) => {
       if (
         !zoom
@@ -167,6 +168,7 @@ export function createViewerControls(
         || zoomPercent < VIEWER_ZOOM_MIN_PERCENT
         || zoomPercent > VIEWER_ZOOM_MAX_PERCENT
       ) return;
+      options.onManualZoom?.();
       anchoredZoom(viewport?.() ?? null, () => zoom.requestZoom(zoomPercent / 100), undefined, true);
     },
     usesAutomaticFitWidth: () => {

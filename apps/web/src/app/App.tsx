@@ -87,6 +87,7 @@ import {
   createViewerNavigation,
   type PdfViewerNavigation,
 } from '../pdf/viewer-navigation-adapter.js';
+import { createTextFitLayout } from '../pdf/text-fit-layout.js';
 import {
   MAIN_PDF_DOCUMENT_ID,
   REFERENCE_PDF_DOCUMENT_ID,
@@ -385,6 +386,7 @@ export function App({
   const workspaceElementRef = useRef<HTMLDivElement | null>(null);
   const referenceWorkspaceElementRef = useRef<HTMLDivElement | null>(null);
   const mainNavigationRef = useRef<PdfViewerNavigation | null>(null);
+  const [readingLayout] = useState(createTextFitLayout);
   const referenceNavigationRef = useRef<PdfViewerNavigation | null>(null);
   const referenceInputDocument = useRef(new ReferenceInputDocumentAuthority());
   const referenceControllerRef = useRef<ReferenceDocumentController | null>(null);
@@ -599,6 +601,7 @@ export function App({
     clearReferenceSubscriptions();
     mainNavigationRef.current?.dispose();
     mainNavigationRef.current = null;
+    readingLayout.replaceDocument(null, documentGenerationRef.current);
     onViewerNavigationInitialized?.('main', null);
     void referenceControllerRef.current?.close();
     referenceControllerRef.current = null;
@@ -1082,7 +1085,9 @@ export function App({
       currentCaretPlacement = null;
       onMainDocumentReady?.(registry.getEngine(), document);
       mainNavigationRef.current?.dispose();
+      readingLayout.replaceDocument(document, documentGeneration);
       const mainNavigation = createViewerNavigation({
+        readingLayout,
         registry,
         root: () => workspaceElementRef.current,
         readingViewport: () => workspaceElementRef.current,
@@ -1595,8 +1600,11 @@ export function App({
       y: cursor.y + (key === 'ArrowUp' ? -delta : key === 'ArrowDown' ? delta : 0),
     }), surface);
   }, [clampKeyboardCursor, emitFromSurface, publishKeyboardCursor]);
+  const manualZoom = useCallback(() => mainNavigationRef.current?.manualZoom?.(), []);
   const workspace = (
     <PdfWorkspace
+      readingLayout={readingLayout}
+      onManualZoom={manualZoom}
       resourceHost={resourcePolicy?.host ?? 'browser'}
       engine={viewer.engine}
       plugins={viewer.plugins}
