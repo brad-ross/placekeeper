@@ -289,6 +289,7 @@ function domRect(rect: RectState): DOMRect {
 
 function navigationHarness(options: {
   glyphRead?: () => Promise<PdfGlyphObject[]>;
+  quantizeZoom?: boolean;
   activeDocumentId?: string;
   classicScrollbarWidth?: number;
   constrainedHorizontal?: boolean;
@@ -311,6 +312,7 @@ function navigationHarness(options: {
   horizontalScrollLimit?: number;
   horizontalRangeOverstatement?: number;
   readingViewportWidth?: number;
+  readingViewportHeight?: number;
   staleViewportMetricsReads?: number;
   staleCurrentPageWithThirdVisible?: boolean;
   reportedPageAfterZoom?: number;
@@ -449,6 +451,7 @@ function navigationHarness(options: {
   const activityListeners = new Set<(activity: { isScrolling: boolean; isSmoothScrolling: boolean }) => void>();
 
   const emitZoom = (zoom: number) => {
+    if (options.quantizeZoom) zoom = Math.floor(zoom * 1_000) / 1_000;
     const oldZoom = currentZoom;
     const oldPageRect = { ...pageRect };
     const oldThirdPageRect = { ...thirdPageRect };
@@ -656,9 +659,10 @@ function navigationHarness(options: {
     root: () => root,
     documentId: 'doc',
     documentGeneration: 4,
-    ...(options.readingViewportWidth === undefined ? {} : {
+    ...(options.readingViewportWidth === undefined && options.readingViewportHeight === undefined ? {} : {
       readingViewport: () => ({ getBoundingClientRect: () => domRect({
-        ...viewportRect, width: options.readingViewportWidth!,
+        ...viewportRect, width: options.readingViewportWidth ?? viewportRect.width,
+        height: options.readingViewportHeight ?? viewportRect.height,
       }) }) as HTMLElement,
     }),
     runway: () => options.runway ?? { right: 0, bottom: 0 },
@@ -955,6 +959,21 @@ describe('viewer navigation adapter', () => {
     harness.resizeViewport(600, 600);
     expect(await harness.navigation.refit?.()).toBe(true);
     expect(harness.pageRect.height).toBeCloseTo(580);
+  });
+
+  it('retains fit ownership when the viewer quantizes its requested scale', async () => {
+    const harness = navigationHarness({ viewportGap: 10, quantizeZoom: true });
+    harness.resizeViewport(600, 675);
+    expect(await harness.navigation.fitToMode?.('page')).toBe(true);
+    expect(harness.navigation.getFitState?.().active).toBe(true);
+    expect(harness.pageRect.height).toBeCloseTo(654.4);
+  });
+
+  it('fits within the visible reading height when the native scrollport extends below it', async () => {
+    const harness = navigationHarness({ viewportGap: 10, readingViewportHeight: 300 });
+    expect(await harness.navigation.fitToMode?.('page')).toBe(true);
+    expect(harness.pageRect.height).toBeCloseTo(280);
+    expect(harness.pageRect.top).toBeCloseTo(10);
   });
 
   it('reports textless fallback and preserves the selected cycle entry', async () => {

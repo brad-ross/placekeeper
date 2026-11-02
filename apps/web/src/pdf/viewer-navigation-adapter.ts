@@ -624,7 +624,7 @@ export function createViewerNavigation(
     const right = Math.max(left, Math.min(
       scrollportRight, bounds.right - runway.right, readingBounds?.right ?? bounds.right,
     ));
-    const bottom = Math.max(top, Math.min(scrollportBottom, bounds.bottom - runway.bottom));
+    const bottom = Math.max(top, Math.min(scrollportBottom, bounds.bottom - runway.bottom, readingBounds?.bottom ?? bounds.bottom));
     return {
       left,
       top,
@@ -1856,7 +1856,10 @@ export function createViewerNavigation(
   };
   const unsubscribeZoom = activeViewer()?.zoom.onZoomChange((event) => {
     if (event.newZoom === event.oldZoom) return;
-    if (fitOperation && (event.newZoom === requestedFitZoom || event.newZoom === fitOperation.origin?.zoom)) return;
+    if (fitOperation && (
+      (requestedFitZoom !== null && Math.abs(event.newZoom - requestedFitZoom) <= zoomTolerance)
+      || (fitOperation.origin !== null && Math.abs(event.newZoom - fitOperation.origin.zoom) <= zoomTolerance)
+    )) return;
     // A destination operation owns its own cancellation and settlement.
     fittedZoom = null;
     publishFit({ ...fitState, active: false });

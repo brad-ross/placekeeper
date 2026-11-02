@@ -18,6 +18,7 @@ import {
 
 import { createFixturePdf } from './fixture-document.js';
 import { largeTextHeavyPdf } from './large-text-heavy.js';
+import { fitTextBookPdf } from './fit-text-book.js';
 
 import { projectReviewItem } from '../../../packages/core/src/annotation-projection.js';
 import type { ReviewItem } from '../../../packages/core/src/review-model.js';
@@ -953,6 +954,7 @@ await Promise.all([
     await readFile(resolve('node_modules/@embedpdf/pdfium/dist/pdfium.wasm')),
   ),
   writeFixture('large-text-heavy.pdf', await largeTextHeavyPdf()),
+  writeFixture('fit-text-book.pdf', await fitTextBookPdf()),
   writeFixture('text-native.pdf', await textPdf()),
   writeFixture('text-native-with-annotations.pdf', await textPdf({ annotations: true })),
   writeFixture('image-only.pdf', await imageOnlyPdf()),
