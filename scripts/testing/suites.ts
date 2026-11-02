@@ -197,6 +197,7 @@ export const suites: Record<string, TestStage[]> = {
         "apps/service/test/synctex.test.ts",
         "apps/service/test/navigation-admission.test.ts",
         "apps/service/test/editor-navigation.test.ts",
+      "apps/service/test/editor-navigation-handoff.test.ts",
         "packages/core/test/editor-navigation-protocol.test.ts",
         "apps/service/test/task-binding-registry.test.ts",
         "apps/service/test/restart-reconnect-store.test.ts",
@@ -220,6 +221,7 @@ export const suites: Record<string, TestStage[]> = {
       "options": [],
       "files": [
         "apps/service/test/editor-navigation.test.ts",
+      "apps/service/test/editor-navigation-handoff.test.ts",
         "packages/core/test/editor-navigation-protocol.test.ts",
         "apps/service/test/session-security.test.ts",
         "apps/service/test/review-interactions.test.ts",

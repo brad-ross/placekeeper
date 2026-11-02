@@ -140,6 +140,11 @@ export class MacosRuntimeManager {
     };
   }
 
+  navigationSessionId(helperId: string): string | undefined {
+    const record = this.#records.get(helperId);
+    return record === undefined || record.phase === "recovery" ? undefined : record.projection.sessionId;
+  }
+
   resourceId(helperId: string): string | undefined {
     const record = this.#records.get(helperId);
     return record?.phase === "recovery" ? undefined : record?.resourceId;

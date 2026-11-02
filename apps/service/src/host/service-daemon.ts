@@ -1,3 +1,4 @@
+import type { EditorControlRequest, EditorControlResponse } from "../../../../packages/core/src/editor-navigation-protocol.js";
 import { NativeQualificationExperiments } from "../codex/native-qualification-experiments.js";
 import { NativeQualificationObserver } from "../codex/native-qualification.js";
 import { spawn, type ChildProcess } from "node:child_process";
@@ -506,4 +507,13 @@ export async function runServiceDaemon(paths = defaultDaemonPaths()): Promise<vo
     process.off("SIGINT", resolveSignal);
     process.off("SIGTERM", resolveSignal);
   }
+}
+
+export async function editorControlThroughDaemon(request: EditorControlRequest, paths = defaultDaemonPaths()): Promise<EditorControlResponse> {
+  const identity = process.env.PLACEKEEPER_INSTALL_ARTIFACT_IDENTITY;
+  const resources = process.env.PLACEKEEPER_APP_RESOURCES;
+  const response = await demandStartedControl({ kind: "editor-control", request,
+    ...(identity === undefined || resources === undefined ? {} : { installation: { identity, resources } }) }, paths);
+  if (response.kind !== "editor-control") throw new Error("Editor service is unavailable; restart Placekeeper");
+  return response.response;
 }

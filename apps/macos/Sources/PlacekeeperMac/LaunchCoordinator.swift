@@ -2,6 +2,7 @@ import Foundation
 
 struct NativeOpenIntent: Equatable {
     enum Kind: Equatable {
+        case navigation(String)
         case document
         case placekeeperLink(String)
     }
@@ -11,6 +12,15 @@ struct NativeOpenIntent: Equatable {
 
     var routingKey: String {
         sourceURL.standardizedFileURL.resolvingSymlinksInPath().path
+    }
+
+    static func navigationTicket(_ url: URL) -> String? {
+        guard let parts = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              parts.scheme == "placekeeper-navigation", parts.host == "ticket",
+              parts.user == nil, parts.password == nil, parts.port == nil,
+              parts.query == nil, parts.fragment == nil,
+              parts.percentEncodedPath.range(of: "^/[A-Za-z0-9_-]{43}$", options: .regularExpression) != nil else { return nil }
+        return String(parts.percentEncodedPath.dropFirst())
     }
 
     static func parse(_ url: URL) -> NativeOpenIntent? {

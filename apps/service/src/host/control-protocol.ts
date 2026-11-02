@@ -1,3 +1,4 @@
+import { isEditorPath, parseEditorControlRequest, type EditorControlRequest, type EditorControlResponse } from "../../../../packages/core/src/editor-navigation-protocol.js";
 import {
   parseCodexAppRequest,
   parseCodexDisplayRequest,
@@ -56,6 +57,7 @@ export type DaemonCompatibilityResult =
   | { readonly kind: "uninspectable"; readonly reason: DaemonUninspectableReason };
 
 export type PlacekeeperControlRequest =
+  | { readonly kind: "editor-control"; readonly request: EditorControlRequest; readonly installation?: { readonly identity: string; readonly resources: string } }
   | { readonly kind: "codex-display"; readonly request: CodexDisplayRequest }
   | { readonly kind: "codex-attest"; readonly taskSessionId: string; readonly receipt: CodexDisplayReceipt }
   | { readonly kind: "codex-app"; readonly request: CodexAppRequest }
@@ -163,6 +165,7 @@ export type PlacekeeperControlRequest =
     };
 
 export type PlacekeeperControlResponse =
+  | { readonly kind: "editor-control"; readonly response: EditorControlResponse }
   | { readonly kind: "codex-display"; readonly receipt: CodexDisplayReceipt; readonly pending: CodexPendingPresentation }
   | { readonly kind: "codex-attestation"; readonly status: "accepted" | "denied"; readonly reason?: CodexAdmissionFailure }
   | { readonly kind: "codex-app"; readonly response: CodexAppResponse }
@@ -250,6 +253,9 @@ function isObject(value: unknown): value is Record<string, unknown> {
 
 export function isControlRequest(value: unknown): value is PlacekeeperControlRequest {
   if (!isObject(value) || typeof value.kind !== "string") return false;
+  if (value.kind === "editor-control") return Object.keys(value).length === (value.installation === undefined ? 2 : 3) && parseEditorControlRequest(value.request) !== undefined
+    && (value.installation === undefined || (isObject(value.installation) && Object.keys(value.installation).length === 2
+      && typeof value.installation.identity === "string" && /^[a-f0-9]{64}$/u.test(value.installation.identity) && isEditorPath(value.installation.resources)));
   if (value.kind === "codex-display") {
     return Object.keys(value).length === 2 &&
       parseCodexDisplayRequest(value.request) !== undefined;

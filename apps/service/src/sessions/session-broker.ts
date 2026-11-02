@@ -3267,6 +3267,11 @@ export class SessionBroker {
     return result;
   }
 
+  navigationSourcePath(sessionId: string): string | undefined {
+    const session = this.#activeById.get(sessionId);
+    return session === undefined || session.ending ? undefined : session.canonicalSourcePath;
+  }
+
   /** Called only by a trusted host after it has admitted its presentation. */
   async createNavigationAttachment(sessionId: string, sourceRootPath?: string): Promise<string> {
     const session = this.#activeById.get(sessionId);

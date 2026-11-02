@@ -1,8 +1,11 @@
+import { isEditorPath, isEditorToken } from "./editor-navigation-protocol.js";
 export const MACOS_APP_CONTROL_PROTOCOL_VERSION = 1 as const;
 
 const ID = /^[A-Za-z0-9_-]{8,128}$/u;
 
 export type MacosAppControlMessage =
+  | { readonly protocolVersion: 1; readonly type: "bind-navigation"; readonly appInstanceId: string; readonly helperId: string; readonly navigationHandle: string }
+  | { readonly protocolVersion: 1; readonly type: "redeem-navigation"; readonly appInstanceId: string; readonly ticket: string }
   | {
       readonly protocolVersion: 1;
       readonly type: "register-app";
@@ -10,6 +13,7 @@ export type MacosAppControlMessage =
       readonly processId: number;
       readonly startIdentity: string;
       readonly buildIdentity: string;
+      readonly installationIdentity?: string;
     }
   | {
       readonly protocolVersion: 1;
@@ -37,6 +41,8 @@ export type MacosAppControlMessage =
     };
 
 export type MacosAppControlResponse =
+  | { readonly protocolVersion: 1; readonly type: "navigation"; readonly appInstanceId: string; readonly pdfPath: string; readonly navigationHandle: string }
+  | { readonly protocolVersion: 1; readonly type: "navigation-unavailable"; readonly appInstanceId: string }
   | {
       readonly protocolVersion: 1;
       readonly type: "ack";
@@ -80,11 +86,17 @@ export function parseMacosAppControlMessage(value: unknown): MacosAppControlMess
   if (!record(value) || value.protocolVersion !== MACOS_APP_CONTROL_PROTOCOL_VERSION || !id(value.appInstanceId)) {
     return undefined;
   }
+  if (value.type === "bind-navigation") return exact(value, ["protocolVersion", "type", "appInstanceId", "helperId", "navigationHandle"])
+    && id(value.helperId) && isEditorToken(value.navigationHandle) ? value as unknown as MacosAppControlMessage : undefined;
+  if (value.type === "redeem-navigation") return exact(value, ["protocolVersion", "type", "appInstanceId", "ticket"]) && isEditorToken(value.ticket)
+    ? value as unknown as MacosAppControlMessage : undefined;
   if (value.type === "register-app") {
     return exact(value, [
       "protocolVersion", "type", "appInstanceId", "processId", "startIdentity", "buildIdentity",
+      ...(value.installationIdentity === undefined ? [] : ["installationIdentity"]),
     ]) && Number.isSafeInteger(value.processId) && (value.processId as number) > 0
       && id(value.startIdentity) && id(value.buildIdentity)
+      && (value.installationIdentity === undefined || (typeof value.installationIdentity === "string" && /^(?:[a-f0-9]{64}|development)$/u.test(value.installationIdentity)))
       ? value as unknown as MacosAppControlMessage : undefined;
   }
   if (value.type === "activity") {
@@ -115,7 +127,9 @@ export function parseMacosAppControlResponse(value: unknown): MacosAppControlRes
   if (!record(value) || value.protocolVersion !== MACOS_APP_CONTROL_PROTOCOL_VERSION || !id(value.appInstanceId)) {
     return undefined;
   }
-  if (value.type === "ack" || value.type === "update-required") {
+  if (value.type === "navigation") return exact(value, ["protocolVersion", "type", "appInstanceId", "pdfPath", "navigationHandle"])
+    && isEditorPath(value.pdfPath) && isEditorToken(value.navigationHandle) ? value as unknown as MacosAppControlResponse : undefined;
+  if (value.type === "ack" || value.type === "update-required" || value.type === "navigation-unavailable") {
     return exact(value, ["protocolVersion", "type", "appInstanceId"])
       ? value as unknown as MacosAppControlResponse : undefined;
   }

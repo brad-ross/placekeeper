@@ -25,6 +25,7 @@ final class PlacekeeperAppDelegate: NSObject, NSApplicationDelegate {
     private var recoveryAttempts: [String: RecoveryAttempt] = [:]
     private var fallbackWindows: [NSWindow] = []
     private var launchCoordinator = LaunchCoordinator()
+    private var navigationTickets: [String] = []
     private var windowRegistry = DocumentWindowRegistry()
     private let restorationStore = WindowRestorationStore()
     private let appZoomStore: AppZoomStore
@@ -118,6 +119,7 @@ final class PlacekeeperAppDelegate: NSObject, NSApplicationDelegate {
             "processId": Int(ProcessInfo.processInfo.processIdentifier),
             "startIdentity": startIdentity,
             "buildIdentity": buildIdentity,
+            "installationIdentity": helperEnvironment["PLACEKEEPER_INSTALL_ARTIFACT_IDENTITY"] ?? "development",
         ], completion: { [weak self] reply in
             Task { @MainActor in
                 guard let self else { return }
@@ -130,7 +132,9 @@ final class PlacekeeperAppDelegate: NSObject, NSApplicationDelegate {
                 self.diagnostic("lifecycle-registered")
                 let launches = self.launchCoordinator.markReady()
                 launches.forEach(self.open)
-                if launches.isEmpty, self.launchCoordinator.pending.isEmpty { self.showOpenPanel() }
+                let hasNavigation = !self.navigationTickets.isEmpty
+                self.redeemNavigationTickets()
+                if !hasNavigation, launches.isEmpty, self.launchCoordinator.pending.isEmpty { self.showOpenPanel() }
             }
         }) else {
             diagnostic("lifecycle-registration-write-failed")
@@ -177,8 +181,50 @@ final class PlacekeeperAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func enqueueLaunchURLs(_ urls: [URL]) {
+        navigationTickets.append(contentsOf: urls.compactMap(NativeOpenIntent.navigationTicket).prefix(64 - min(64, navigationTickets.count)))
+        redeemNavigationTickets()
         let intents = urls.compactMap(NativeOpenIntent.parse)
         launchCoordinator.enqueue(intents).forEach(open)
+    }
+
+    private func redeemNavigationTickets() {
+        guard lifecycleRegistered, let lifecycleControl else { return }
+        let tickets = navigationTickets
+        navigationTickets.removeAll()
+        for ticket in tickets {
+            _ = lifecycleControl.request(type: "redeem-navigation", fields: ["ticket": ticket]) { [weak self] reply in
+                Task { @MainActor in
+                    guard let self else { return }
+                    if case let .navigation(path, handle) = reply {
+                        let intent = NativeOpenIntent(sourceURL: URL(fileURLWithPath: path), kind: .navigation(handle))
+                        self.launchCoordinator.enqueue([intent]).forEach(self.open)
+                    } else { self.presentNavigationFailure() }
+                }
+            }
+        }
+    }
+
+    private func presentNavigationFailure() {
+        let alert = NSAlert()
+        alert.messageText = "Source navigation is no longer available"
+        alert.informativeText = "The request expired or was replaced by newer navigation. Run forward search from your editor again."
+        alert.runModal()
+    }
+
+    private func bindNavigation(_ intent: NativeOpenIntent, windowID: String, completion: @escaping () -> Void) {
+        guard case let .navigation(handle) = intent.kind else { completion(); return }
+        guard let helperID = helperDetachLedger.helperID(windowID: windowID), let lifecycleControl else {
+            presentNavigationFailure()
+            completion()
+            return
+        }
+        let sent = lifecycleControl.request(type: "bind-navigation", fields: ["helperId": helperID, "navigationHandle": handle]) { [weak self] reply in
+            Task { @MainActor in
+                if reply != .acknowledged { self?.presentNavigationFailure() }
+                completion()
+            }
+        }
+        if !sent { presentNavigationFailure(); completion() }
     }
 
     private func open(_ intent: NativeOpenIntent) {
@@ -255,7 +301,7 @@ final class PlacekeeperAppDelegate: NSObject, NSApplicationDelegate {
         let canonicalSource = source.standardizedFileURL.resolvingSymlinksInPath()
         let request: (type: String, fields: [String: Any])
         switch intent.kind {
-        case .document:
+        case .document, .navigation:
             request = ("admit", ["sourcePath": canonicalSource.path])
         case let .placekeeperLink(link):
             request = ("admit-link", ["link": link, "confirmed": true])
@@ -312,9 +358,11 @@ final class PlacekeeperAppDelegate: NSObject, NSApplicationDelegate {
             if let existingWindowID = windowRegistry.matchingWindow(
                 canonicalReviewID: admission.projection.sessionID
             ), let existing = controllers.first(where: { $0.windowID == existingWindowID }) {
-                releaseCandidate(helper, windowID: windowID)
-                windowRegistry.noteKey(windowID: existingWindowID)
-                existing.focus()
+                bindNavigation(intent, windowID: existingWindowID) { [weak self] in
+                    self?.releaseCandidate(helper, windowID: windowID)
+                    self?.windowRegistry.noteKey(windowID: existingWindowID)
+                    existing.focus()
+                }
                 return
             }
             installDocumentWindow(
@@ -327,6 +375,7 @@ final class PlacekeeperAppDelegate: NSObject, NSApplicationDelegate {
                 admission: admission,
                 packagedAssets: packagedAssets
             )
+            bindNavigation(intent, windowID: windowID) {}
         case let .recoveryOffered(offerID, offerExpiresAt):
             let controller = RecoveryViewController(
                 windowID: windowID,

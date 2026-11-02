@@ -187,7 +187,7 @@ export function infoPlist(manifest: ReturnType<typeof validateAppBundleManifest>
 <key>CFBundleURLTypes</key><array><dict>
   <key>CFBundleURLName</key><string>local.placekeeper.review-link</string>
   <key>CFBundleTypeRole</key><string>Viewer</string>
-  <key>CFBundleURLSchemes</key><array><string>placekeeper</string></array>
+  <key>CFBundleURLSchemes</key><array><string>placekeeper</string><string>placekeeper-navigation</string></array>
 </dict></array>
 <key>CFBundleDocumentTypes</key><array><dict>
   <key>CFBundleTypeName</key><string>PDF document</string>
