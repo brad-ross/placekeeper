@@ -446,7 +446,6 @@ export function sanitizeChromeReviewRuntimeRequest(
   return undefined;
 }
 
-/** Hosts that use the private desktop helper contract. */
 export type NativeRuntimeHost = "macos" | "electron";
 
 export function sanitizeNativeReviewRuntimeRequest(
@@ -588,9 +587,6 @@ export function sanitizeNativeReviewRuntimeResponse(
     const projected = sanitizeChromeReviewRuntimeResponse("bootstrap", {
       ...value,
       scope: { ...value.scope, launchSurface: "chrome" },
-      // The desktop page never receives or supplies the path-bearing link base.
-      // A fixed inert placeholder lets us reuse the remainder of Chrome's
-      // closed bootstrap validator before removing this field below.
       canonicalLinkBase: "placekeeper:///Redacted.pdf",
     });
     if (!record(projected)) return undefined;
@@ -677,7 +673,6 @@ export function sanitizeCodexReviewRuntimeResponse(
   return projected;
 }
 
-/** Compatibility projections for the existing Mac host. */
 export function sanitizeMacosReviewRuntimeRequest(method: ReviewRuntimeMethod, value: unknown): unknown | undefined {
   return sanitizeNativeReviewRuntimeRequest("macos", method, value);
 }

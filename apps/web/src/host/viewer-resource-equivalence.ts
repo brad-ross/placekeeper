@@ -44,7 +44,7 @@ export function viewerResourcePoliciesEqual(
       && first.resources.pdfiumWasm === second.resources.pdfiumWasm
       && first.resources.worker === second.resources.worker;
   }
-  return (first.host === 'macos' || first.host === 'codex') && (second.host === 'macos' || second.host === 'codex')
+  return (first.host === 'macos' || first.host === 'electron' || first.host === 'codex') && (second.host === 'macos' || second.host === 'electron' || second.host === 'codex')
     && first.resources.document === second.resources.document
     && first.resources.pdfiumWasm === second.resources.pdfiumWasm
     && first.resources.worker === second.resources.worker;

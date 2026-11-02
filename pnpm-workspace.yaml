@@ -2,14 +2,21 @@ packages:
   - apps/*
   - packages/*
 
+# Desktop application dependencies are bundled; only Forge tooling needs hoisting.
+publicHoistPattern:
+  - '@electron-forge/*'
+
 allowBuilds:
   electron: true
+  electron-winstaller: true
   esbuild: true
 
 onlyBuiltDependencies:
   - electron
+  - electron-winstaller
   - esbuild
 
 patchedDependencies:
+  'electron-winstaller@5.4.4': patches/electron-winstaller@5.4.4.patch
   '@embedpdf/engines@2.14.4': patches/@embedpdf__engines@2.14.4.patch
   '@embedpdf/plugin-selection@2.14.4': patches/@embedpdf__plugin-selection@2.14.4.patch

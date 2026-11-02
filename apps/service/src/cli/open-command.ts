@@ -93,7 +93,7 @@ async function writeStdoutFrame(frame: Buffer): Promise<void> {
  * HTTP port so it can run beside the real installed daemon. */
 export function pathsForDirectDaemonLaunch(args: readonly string[]): DaemonPaths | undefined {
   if (args.length === 0) return defaultDaemonPaths();
-  if (args.length === 3 && args[0] === INSTALLED_SMOKE_DAEMON_FLAG) return installedSmokeDaemonPaths(args);
+  if ((args.length === 3 || args.length === 5) && args[0] === INSTALLED_SMOKE_DAEMON_FLAG) return installedSmokeDaemonPaths(args);
   return undefined;
 }
 
@@ -395,11 +395,12 @@ async function main(): Promise<number> {
     });
   }
   if (process.argv[2] === "electron-lifecycle-control") {
+    const paths = installedSmokeDaemonPaths(process.argv.slice(3)) ?? defaultDaemonPaths();
     return runNativeLifecycleControlCommand({
       input: process.stdin,
       write: writeStdoutFrame,
       appInstanceId: process.env.PLACEKEEPER_APP_INSTANCE_ID ?? "",
-      exchange: electronAppControlThroughDaemon,
+      exchange: message => electronAppControlThroughDaemon(message, undefined, paths),
     });
   }
   if (process.argv[2] === "macos-lifecycle-control") {

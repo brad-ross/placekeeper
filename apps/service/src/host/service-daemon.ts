@@ -52,6 +52,7 @@ export interface DaemonPaths {
   readonly socketPath: string;
   readonly webAssetsRoot: string;
   readonly httpPort?: number;
+  readonly isolatedTestRoot?: string;
   readonly packagedRuntime?: PackagedRuntimeInstallation;
   readonly lifecycleLockPath?: string;
 }
@@ -65,6 +66,7 @@ export const MACOS_DEVELOPMENT_ROOT_ENV = "PLACEKEEPER_MAC_DEVELOPMENT_ROOT";
 export const MACOS_DEVELOPMENT_HTTP_PORT_ENV = "PLACEKEEPER_MAC_DEVELOPMENT_HTTP_PORT";
 export const INSTALLED_SMOKE_DAEMON_FLAG = "--isolated-installed-smoke";
 export const INSTALLED_SMOKE_HTTP_PORT_FLAG = "--http-port";
+export const INSTALLED_SMOKE_ROOT_FLAG = "--isolated-test-root";
 
 export interface CandidateDaemonReceipt {
   readonly version: 1;
@@ -113,7 +115,9 @@ export function defaultDaemonPaths(): DaemonPaths {
 export function installedSmokeDaemonPaths(args: readonly string[]): DaemonPaths | undefined {
   const smokeIndexes = args.flatMap((value, index) => value === INSTALLED_SMOKE_DAEMON_FLAG ? [index] : []);
   const portIndexes = args.flatMap((value, index) => value === INSTALLED_SMOKE_HTTP_PORT_FLAG ? [index] : []);
-  if (smokeIndexes.length === 0 && portIndexes.length === 0) return undefined;
+  const rootIndexes = args.flatMap((value, index) => value === INSTALLED_SMOKE_ROOT_FLAG ? [index] : []);
+  if (smokeIndexes.length === 0 && portIndexes.length === 0 && rootIndexes.length === 0) return undefined;
+  if (rootIndexes.length > 1) throw new Error("The isolated installed smoke requires at most one root");
   if (smokeIndexes.length !== 1 || portIndexes.length !== 1) {
     throw new Error("The isolated installed smoke requires one explicit HTTP port");
   }
@@ -123,7 +127,30 @@ export function installedSmokeDaemonPaths(args: readonly string[]): DaemonPaths 
   }
   const httpPort = Number(portText);
   if (httpPort > 65_535) throw new Error("The isolated installed smoke HTTP port is invalid");
-  return { ...defaultDaemonPaths(), httpPort };
+  const rootText = rootIndexes.length === 0 ? undefined : args[rootIndexes[0]! + 1];
+  if (rootIndexes.length !== 0 && (rootText === undefined || !platformPath(process.platform).isAbsolute(rootText)
+    || rootText.length > 16_384 || rootText.includes("\0"))) {
+    throw new Error("The isolated installed smoke root must be absolute");
+  }
+  if (rootText === undefined) return { ...defaultDaemonPaths(), httpPort };
+  const isolatedTestRoot = resolve(rootText);
+  return {
+    ...defaultDaemonPaths(), httpPort, isolatedTestRoot,
+    appSupportRoot: isolatedTestRoot,
+    recoveryRoot: join(isolatedTestRoot, "recovery"),
+    socketPath: join(isolatedTestRoot, "control.sock"),
+    lifecycleLockPath: join(isolatedTestRoot, "lifecycle.lock"),
+  };
+}
+
+/** Explicit CLI forwarding preserves isolated roots across independent Node children. */
+export function installedSmokeDaemonArgs(paths: DaemonPaths): string[] {
+  if (paths.isolatedTestRoot !== undefined) {
+    return [INSTALLED_SMOKE_DAEMON_FLAG, INSTALLED_SMOKE_HTTP_PORT_FLAG,
+      String(paths.httpPort ?? PLACEKEEPER_HTTP_PORT), INSTALLED_SMOKE_ROOT_FLAG, paths.isolatedTestRoot];
+  }
+  return paths.httpPort !== undefined && paths.httpPort !== PLACEKEEPER_HTTP_PORT
+    ? [INSTALLED_SMOKE_DAEMON_FLAG, INSTALLED_SMOKE_HTTP_PORT_FLAG, String(paths.httpPort)] : [];
 }
 
 async function removeConfirmedStaleSocket(socketPath: string): Promise<void> {
@@ -225,13 +252,10 @@ async function spawnServiceDaemon(
   if (runtime !== undefined && await realpath(paths.webAssetsRoot) !== runtime.webAssetsRoot) {
     throw new Error("Packaged runtime web assets do not match daemon paths");
   }
-  const httpPort = paths.httpPort ?? PLACEKEEPER_HTTP_PORT;
   const child = spawn(runtime?.nodeExecutable ?? process.execPath, [
     runtime?.serviceEntry ?? entry,
     "daemon",
-    ...(httpPort === PLACEKEEPER_HTTP_PORT
-      ? []
-      : [INSTALLED_SMOKE_DAEMON_FLAG, INSTALLED_SMOKE_HTTP_PORT_FLAG, String(httpPort)]),
+    ...installedSmokeDaemonArgs(paths),
   ], {
     detached: true,
     stdio: "ignore",

@@ -1,0 +1,99 @@
+import { createHash } from "node:crypto";
+import { createWriteStream } from "node:fs";
+import { chmod, copyFile, cp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { spawn } from "node:child_process";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { Readable } from "node:stream";
+import { pipeline } from "node:stream/promises";
+import type { PackagedRuntimeManifest } from "../../apps/service/src/platform/runtime-layout.js";
+import { hashFile as digest } from "../../apps/service/src/files/file-capabilities.js";
+
+const repo = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
+interface RuntimePins {
+  nodeVersion: string;
+  targets: Record<string, { archive: string; sha256: string }>;
+}
+function run(command: string, args: string[]): Promise<void> {
+  return new Promise((accept, reject) => {
+    const child = spawn(command, args, { cwd: repo, stdio: "inherit", shell: false });
+    child.once("error", reject);
+    child.once("exit", (code) => code === 0 ? accept() : reject(new Error(`${command} exited with ${code}`)));
+  });
+}
+async function inventory(root: string, directory = root): Promise<Array<{ path: string; sha256: string }>> {
+  const files: Array<{ path: string; sha256: string }> = [];
+  for (const entry of (await readdir(directory, { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name))) {
+    const path = join(directory, entry.name);
+    if (entry.isDirectory()) files.push(...await inventory(root, path));
+    else if (entry.isFile()) files.push({ path: path.slice(root.length + 1).replaceAll("\\", "/"), sha256: await digest(path) });
+    else throw new Error(`Unexpected packaged resource: ${path}`);
+  }
+  return files;
+}
+
+export async function prepareDesktopRuntime(target: string): Promise<string> {
+  const pins = JSON.parse(await readFile(join(repo, "packaging/desktop/runtime-manifest.json"), "utf8")) as RuntimePins;
+  const pin = pins.targets[target];
+  if (pin === undefined) throw new Error(`Unsupported desktop target: ${target}`);
+  const [platform, arch] = target.split("-") as [NodeJS.Platform, string];
+  const cache = join(repo, "dist/desktop-node", target);
+  await mkdir(cache, { recursive: true });
+  const archive = join(cache, pin.archive);
+  if (await digest(archive).catch(() => "") !== pin.sha256) {
+    const response = await fetch(`https://nodejs.org/dist/v${pins.nodeVersion}/${pin.archive}`);
+    if (!response.ok || response.body === null) throw new Error(`Node download failed: ${response.status}`);
+    const temporary = `${archive}.download`;
+    try {
+      await pipeline(Readable.fromWeb(response.body), createWriteStream(temporary));
+      if (await digest(temporary) !== pin.sha256) throw new Error("Node archive digest mismatch");
+      await copyFile(temporary, archive);
+    } finally { await rm(temporary, { force: true }); }
+  }
+  const unpacked = join(cache, "unpacked");
+  await rm(unpacked, { recursive: true, force: true });
+  await mkdir(unpacked);
+  await run("tar", ["-xf", archive, "-C", unpacked]);
+  const extracted = join(unpacked, pin.archive.replace(/\.(?:tar\.gz|zip)$/u, ""));
+  const root = join(repo, "dist/desktop-runtime", target, "desktop");
+  await rm(root, { recursive: true, force: true });
+  await mkdir(join(root, "node/bin"), { recursive: true });
+  await mkdir(join(root, "service"));
+  const nodePath = platform === "win32" ? "node/bin/node.exe" : "node/bin/node";
+  await copyFile(join(extracted, platform === "win32" ? "node.exe" : "bin/node"), join(root, nodePath));
+  await chmod(join(root, nodePath), 0o755);
+  await copyFile(join(extracted, "LICENSE"), join(root, "node/LICENSE"));
+  await copyFile(join(repo, "dist/service/main.js"), join(root, "service/main.js"));
+  await writeFile(join(root, "service/package.json"), '{"type":"module"}\n');
+  await cp(join(repo, "dist/web"), join(root, "web"), { recursive: true });
+  await cp(join(repo, "dist/electron-web"), join(root, "electron-web"), { recursive: true });
+  const webFiles = await inventory(join(root, "web"));
+  const nodeHash = await digest(join(root, nodePath));
+  const serviceHash = await digest(join(root, "service/main.js"));
+  const daemonIdentity = createHash("sha256").update(JSON.stringify({ node: nodeHash, service: serviceHash, webFiles })).digest("hex");
+  const shellFiles = await inventory(join(repo, "apps/electron/dist"));
+  const uiFiles = await inventory(join(root, "electron-web"));
+  const installArtifactIdentity = createHash("sha256").update(JSON.stringify({ target, daemonIdentity, shellFiles, uiFiles })).digest("hex");
+  const version = (JSON.parse(await readFile(join(repo, "apps/electron/package.json"), "utf8")) as { version: string }).version;
+  const manifest: PackagedRuntimeManifest = {
+    schemaVersion: 1, target: { platform, arch }, daemonIdentity, installArtifactIdentity,
+    node: { path: nodePath, sha256: nodeHash, version: pins.nodeVersion },
+    service: { path: "service/main.js", sha256: serviceHash, version },
+    webAssets: { path: "web", files: webFiles },
+  };
+  await writeFile(join(root, "runtime-manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
+  return root;
+}
+
+async function main(): Promise<void> {
+  const targetFlag = process.argv.indexOf("--target");
+  const target = targetFlag < 0 ? `${process.platform}-${process.arch}` : process.argv[targetFlag + 1];
+  if (target === undefined) throw new Error("--target requires a platform-architecture value");
+  for (const config of ["apps/service/vite.config.ts", "apps/web/vite.production.config.ts", "apps/web/vite.electron.config.ts", "apps/electron/vite.config.ts"]) {
+    await run(process.execPath, [join(repo, "node_modules/vite/bin/vite.js"), "build", "--config", config]);
+  }
+  process.stdout.write(`${await prepareDesktopRuntime(target)}\n`);
+}
+if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+  await main();
+}

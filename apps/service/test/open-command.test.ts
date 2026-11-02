@@ -835,3 +835,25 @@ describe("explicit native launch surface", () => {
     expect(() => parseOpenArguments(["open", "--json", "--surface", "codex-native", "--surface", "codex", "--pdf", "/tmp/paper.pdf"])).toThrow();
   });
 });
+
+it("forwards explicit isolated installed smoke roots across child daemon startup", async () => {
+  const { installedSmokeDaemonPaths, installedSmokeDaemonArgs, INSTALLED_SMOKE_ROOT_FLAG } = await import('../src/host/service-daemon.js');
+  const root = join(tmpdir(), 'placekeeper-electron-isolated');
+  const flags = [INSTALLED_SMOKE_DAEMON_FLAG, INSTALLED_SMOKE_HTTP_PORT_FLAG, '43210', INSTALLED_SMOKE_ROOT_FLAG, root];
+  const paths = installedSmokeDaemonPaths(flags)!;
+  expect(paths.appSupportRoot).toBe(root);
+  expect(paths.recoveryRoot).toBe(join(root, 'recovery'));
+  expect(paths.socketPath).toBe(join(root, 'control.sock'));
+  expect(paths.lifecycleLockPath).toBe(join(root, 'lifecycle.lock'));
+  expect(paths.isolatedTestRoot).toBe(root);
+  expect(installedSmokeDaemonArgs(paths)).toEqual(flags);
+  expect(pathsForDirectDaemonLaunch(flags)?.isolatedTestRoot).toBe(root);
+  for (const invalid of [
+    [INSTALLED_SMOKE_ROOT_FLAG, root],
+    [...flags, INSTALLED_SMOKE_ROOT_FLAG, root],
+    [...flags.slice(0, -1), 'relative'],
+    [...flags.slice(0, -1), root + '\0'],
+    flags.slice(0, -1),
+  ]) expect(() => installedSmokeDaemonPaths(invalid)).toThrow();
+  expect(installedSmokeDaemonArgs(defaultDaemonPaths())).toEqual([]);
+});
