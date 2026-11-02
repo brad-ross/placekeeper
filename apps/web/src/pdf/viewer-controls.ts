@@ -138,7 +138,7 @@ export function createViewerControls(
         if (event.documentId !== documentId) return;
         const zoomPercent = Math.round(event.newZoom * 100);
         state = { ...state, zoomPercent };
-        emit({ type: 'zoom', zoomPercent });
+        emit({ type: 'zoom', zoomPercent, oldZoom: event.oldZoom, newZoom: event.newZoom });
       }),
     );
   }

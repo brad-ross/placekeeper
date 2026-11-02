@@ -16,6 +16,7 @@ import {
 } from 'react';
 
 import type { ReviewShellAuthoringModel } from '../review/authoring-model.js';
+import type { PdfFitMode, PdfFitState } from '../pdf/viewer-navigation.js';
 export type { ReviewShellAuthoringModel } from '../review/authoring-model.js';
 
 import { isVisibleFocusTarget } from '../review/focus-target.js';
@@ -450,6 +451,19 @@ export function shouldShowRightWorkspaceRail(input: {
 export function ReviewShell(props: ReviewShellProps) {
   const shellRef = useRef<HTMLElement>(null);
   const [horizontalScrollLocked, setHorizontalScrollLocked] = useState(false);
+  const [fitState, setFitState] = useState<PdfFitState>();
+  useEffect(() => {
+    const navigation = props.viewer.viewerNavigation;
+    const refresh = () => setFitState(navigation?.getFitState?.());
+    refresh();
+    return navigation?.subscribeFitState?.(refresh);
+  }, [props.viewer.viewerNavigation]);
+  useEffect(() => props.viewer.viewerControls?.subscribe((event) => {
+    if (event.type === 'zoom' && event.oldZoom !== undefined && event.newZoom !== undefined
+      && event.oldZoom !== event.newZoom && event.surface?.kind !== 'reference') {
+      setHorizontalScrollLocked(false);
+    }
+  }), [props.viewer.viewerControls]);
   const [localReferenceLayout, dispatchLocalReferenceLayout] = useReducer(
     reduceReferenceWorkspaceLayout,
     undefined,
@@ -1535,6 +1549,10 @@ export function ReviewShell(props: ReviewShellProps) {
       ?.fitToWidth(workspaceFraming.waitForSettledGeometry)
       .then(() => undefined) ?? Promise.resolve();
   }, [props.viewer.viewerNavigation, workspaceFraming.markUserIntent, workspaceFraming.waitForSettledGeometry]);
+  const fitModeCommand = useCallback(async (mode: PdfFitMode) => {
+    workspaceFraming.markUserIntent(undefined, { captureSettledPosition: false });
+    await props.viewer.viewerNavigation?.fitToMode?.(mode, workspaceFraming.waitForSettledGeometry);
+  }, [props.viewer.viewerNavigation, workspaceFraming.markUserIntent, workspaceFraming.waitForSettledGeometry]);
   const refitCommand = useCallback(() => {
     workspaceFraming.markUserIntent(undefined, { captureSettledPosition: false });
     const navigation = props.viewer.viewerNavigation;
@@ -1993,6 +2011,9 @@ export function ReviewShell(props: ReviewShellProps) {
         viewerState={props.viewer.viewerState ?? unavailableViewerControls()}
         fitWidthReady={props.viewer.viewerNavigation?.fitToWidthReady() ?? false}
         fitWidthCurrent={overlayFrame.fitWidthCurrent}
+        {...(fitState === undefined ? {} : { fitState })}
+        {...(props.viewer.viewerNavigation?.fitToMode === undefined ? {} : { onFitMode: fitModeCommand })}
+        {...(props.viewer.viewerNavigation?.manualZoom === undefined ? {} : { onManualZoom: props.viewer.viewerNavigation.manualZoom })}
         horizontalScrollAvailable={overlayFrame.horizontalScrollAvailable}
         horizontalScrollLocked={horizontalScrollLocked}
         onToggleHorizontalScrollLock={() => setHorizontalScrollLocked((locked) => !locked)}

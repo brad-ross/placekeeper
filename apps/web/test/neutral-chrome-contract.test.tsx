@@ -1,6 +1,11 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import { VIEWER_ZOOM_MAX_PERCENT } from '../src/pdf/viewer-controls.js';
+import type { ReactNode } from 'react';
+
+vi.mock('../src/review/TopBarMenu.js', () => ({
+  TopBarMenu: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+}));
 
 import { documentIdentityLabel } from '../src/review/DocumentActionsMenu.js';
 import {
@@ -39,6 +44,33 @@ function chrome(overrides: Partial<Parameters<typeof ReviewChrome>[0]> = {}) {
 }
 
 describe('neutral toolbar contract', () => {
+  it('keeps a fitted control enabled and identifies the next mode in the cycle', () => {
+    const html = chrome({
+      onFitMode: vi.fn(),
+      fitState: { selectedMode: 'width', effectiveMode: 'width', active: true, pending: false, fallback: false },
+    });
+    expect(html).toContain('aria-label="Fit mode: Fit width. Next: Fit text"');
+    expect(html).toMatch(/<button[^>]*data-review-zoom-action="fit-width"(?![^>]*disabled)[^>]*>/u);
+    expect(html).toContain('data-fit-active="true"');
+  });
+
+  it('continues after the last selected fit when zoom is custom or text falls back', () => {
+    expect(chrome({ onFitMode: vi.fn(), fitState: {
+      selectedMode: 'text', effectiveMode: 'text', active: false, pending: false, fallback: false,
+    } })).toContain('aria-label="Fit mode: Custom zoom. Next: Fit page"');
+    expect(chrome({ onFitMode: vi.fn(), fitState: {
+      selectedMode: 'text', effectiveMode: 'width', active: true, pending: false, fallback: true,
+    } })).toContain('aria-label="Fit mode: Fit width, no reliable text bounds. Next: Fit page"');
+  });
+
+  it('announces pending fitting while leaving the control available', () => {
+    const html = chrome({ onFitMode: vi.fn(), fitState: {
+      selectedMode: 'width', effectiveMode: 'width', active: true, pending: true, fallback: false,
+    } });
+    expect(html).toContain('aria-label="Fit mode: Fitting…. Next: Fit text"');
+    expect(html).toMatch(/<button[^>]*data-review-zoom-action="fit-width"[^>]*aria-busy="true"(?![^>]*disabled)[^>]*>/u);
+  });
+
   it('clamps valid signed whole-number drafts and rejects malformed drafts', () => {
     expect(validPageNumber('0', 12)).toBe(1);
     expect(validPageNumber('+40', 12)).toBe(12);

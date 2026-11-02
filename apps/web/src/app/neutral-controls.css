@@ -373,6 +373,37 @@
 
 .top-bar-menu__surface .review-chrome__control-cluster { gap: 2px; }
 
+.review-chrome__fit-width[data-fit-active="true"] { background: var(--pk-selected); }
+.review-chrome__fit-width[data-fit-active="false"] { color: var(--pk-muted); }
+
+.review-chrome__fit-options {
+  display: flex;
+  flex-direction: column;
+  width: 0;
+  min-width: 100%;
+  margin-top: 5px;
+  padding-top: 5px;
+  border-top: 1px solid var(--pk-border);
+}
+
+.top-bar-menu__surface .review-chrome__fit-option {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 6px;
+  min-height: 32px;
+  padding: 5px 6px;
+  font: inherit;
+  white-space: nowrap;
+}
+
+.review-chrome__fit-option[aria-checked="true"] { background: var(--pk-selected); }
+.review-chrome__fit-status {
+  margin: 4px 6px 2px;
+  color: var(--pk-muted);
+  font: 400 11px/1.4 var(--pk-font-ui);
+}
+
 .top-bar-menu__surface [data-review-horizontal-lock][aria-checked="true"] {
   background: var(--pk-selected);
 }
