@@ -544,6 +544,28 @@ describe("VS Code local host adapter", () => {
     });
   });
 
+  it("waits for the webview listener before sending first-open navigation and retires on disposal", async () => {
+    const panelId = "panel_identifier_1234";
+    const makeBridge = () => new VersionedWebviewBridge({
+      identity: { panelId, sessionId: "session_identifier_1234", generation: 1, revision: 1 },
+      bootstrap: async () => ({}), invoke: async () => ({}), dispose() {},
+    }, vi.fn());
+    const bridge = makeBridge();
+    const ready = vi.fn();
+    const waiting = bridge.whenReady().then(ready);
+    await Promise.resolve();
+    expect(ready).not.toHaveBeenCalled();
+    await bridge.receive({ protocol: REVIEW_RUNTIME_PROTOCOL, version: REVIEW_RUNTIME_VERSION,
+      kind: "request", panelId, requestId: "request_identifier_1234", method: "bootstrap", payload: {} });
+    await waiting;
+    expect(ready).toHaveBeenCalledWith(true);
+    bridge.dispose();
+    const closed = makeBridge();
+    const closedWait = closed.whenReady();
+    closed.dispose();
+    expect(await closedWait).toBe(false);
+  });
+
   it("rejects old webviews with update guidance before invoking the broker", async () => {
     const bootstrap = vi.fn();
     const invoke = vi.fn();

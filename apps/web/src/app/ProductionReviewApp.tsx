@@ -653,7 +653,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   const [pdfCopyError, setPdfCopyError] = useState<string | null>(null);
   const [commandError, setCommandError] = useState<string | null>(null);
   const [commandNotice, setCommandNotice] = useState<string | null>(null);
-  const [locationRestoreStatus, setLocationRestoreStatus] = useState<LocationRestoreStatus>('idle');
+  const [locationRestoreStatus, setLocationRestoreStatus] = useState<LocationRestoreStatus>('restoring');
   const stateRef = useRef(state);
   stateRef.current = state;
   const [selectionPlacement, setSelectionPlacement] = useState<ContextPlacement | null>(null);

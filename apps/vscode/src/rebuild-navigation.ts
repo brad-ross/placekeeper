@@ -44,14 +44,16 @@ export class RebuildNavigationCoordinator {
   #nextId = 0;
   #association = 0;
   #explicitPending = false;
+  #explicitLocation: SourceCursorLocation | undefined;
   #acknowledgement: { association: number; generation: number; timer: ReturnType<typeof setTimeout> } | undefined;
   constructor(readonly options: { followEnabled?: () => boolean } = {}) {}
 
-  beginExplicit(): number {
+  beginExplicit(location?: SourceCursorLocation): number {
     this.#clearAcknowledgement();
     this.#association++;
     this.cancelFollowing();
     this.#explicitPending = true;
+    this.#explicitLocation = location === undefined ? undefined : { ...location };
     return this.#association;
   }
   isExplicitCurrent(association: number): boolean { return association === this.#association; }
@@ -59,6 +61,7 @@ export class RebuildNavigationCoordinator {
     if (this.isExplicitCurrent(association)) {
       this.#clearAcknowledgement();
       this.#explicitPending = false;
+      this.#explicitLocation = undefined;
     }
   }
   awaitExplicitAcknowledgement(association: number, generation: number, onTimeout: () => void): void {
@@ -81,6 +84,7 @@ export class RebuildNavigationCoordinator {
     this.#clearAcknowledgement();
     this.#association++;
     this.#explicitPending = false;
+    this.#explicitLocation = undefined;
     this.cancelFollowing();
   }
   #clearAcknowledgement(): void {
@@ -115,7 +119,7 @@ export class RebuildNavigationCoordinator {
   forwardSourceLocation(
     fallback?: () => SourceCursorLocation | undefined,
   ): SourceCursorLocation | undefined {
-    return this.#active?.location ?? fallback?.();
+    return this.#explicitLocation ?? this.#active?.location ?? fallback?.();
   }
 
   revealAfterRebuild(

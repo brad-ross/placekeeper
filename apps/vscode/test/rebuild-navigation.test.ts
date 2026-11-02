@@ -23,6 +23,18 @@ const latestLocation: SourceCursorLocation = {
 };
 
 describe("rebuild navigation coordinator", () => {
+  it("retains the explicit source cursor when opening a PDF removes editor focus", () => {
+    const coordinator = new RebuildNavigationCoordinator();
+    const sequence = coordinator.beginExplicit(firstLocation);
+    expect(coordinator.forwardSourceLocation(() => undefined)).toEqual(firstLocation);
+    coordinator.finishExplicit(sequence);
+    expect(coordinator.forwardSourceLocation(() => undefined)).toBeUndefined();
+    coordinator.beginExplicit(latestLocation);
+    coordinator.beginExplicit(); // Inverse navigation must retire the old source.
+    expect(coordinator.forwardSourceLocation(() => undefined)).toBeUndefined();
+    coordinator.dispose();
+  });
+
   it("holds explicit precedence until the matching viewer acknowledgement", async () => {
     const coordinator = new RebuildNavigationCoordinator({ followEnabled: () => true });
     const sequence = coordinator.beginExplicit();

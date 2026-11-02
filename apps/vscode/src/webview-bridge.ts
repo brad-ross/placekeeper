@@ -230,6 +230,10 @@ export class VersionedWebviewBridge {
   readonly #active = new Map<string, AbortController>();
   readonly #unsubscribeInvalidations: () => void;
   #disposed = false;
+  #markReady!: (ready: boolean) => void;
+  readonly #ready = new Promise<boolean>((resolve) => { this.#markReady = resolve; });
+
+  whenReady(): Promise<boolean> { return this.#ready; }
 
   constructor(client: TrustedRuntimeClient, postMessage: (message: unknown) => unknown) {
     this.#client = client;
@@ -261,6 +265,8 @@ export class VersionedWebviewBridge {
     if (cancelled !== undefined) { this.#active.get(cancelled.requestId)?.abort(); return; }
     const request = parseWebviewRequest(value, this.#client.identity, this.#seen);
     if (request === undefined) return;
+    // A valid bootstrap proves the runtime message listener is installed.
+    if (request.method === "bootstrap") this.#markReady(true);
     this.#seen.add(request.requestId);
     if (this.#seen.size > 512) {
       const oldest = this.#seen.values().next().value;
@@ -300,6 +306,7 @@ export class VersionedWebviewBridge {
   dispose(): void {
     if (this.#disposed) return;
     this.#disposed = true;
+    this.#markReady(false);
     this.#unsubscribeInvalidations();
     for (const controller of this.#active.values()) controller.abort();
     this.#active.clear();
