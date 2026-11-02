@@ -1,3 +1,4 @@
+import { followNavigationIsCurrent } from "../../../packages/core/src/source-navigation-intent.js";
 export interface SourceCursorLocation {
   readonly sourcePath: string;
   readonly line: number;
@@ -35,11 +36,33 @@ export function rebuildNavigationAction(
 interface NavigationIntent {
   readonly id: number;
   readonly location: SourceCursorLocation;
+  readonly association: number;
 }
 
 /** Keeps a saved source cursor stable until its rebuilt PDF can be revealed. */
 export class RebuildNavigationCoordinator {
   #nextId = 0;
+  #association = 0;
+  #explicitPending = false;
+  constructor(readonly options: { followEnabled?: () => boolean } = {}) {}
+
+  beginExplicit(): number {
+    this.#association++;
+    this.cancelFollowing();
+    this.#explicitPending = true;
+    return this.#association;
+  }
+  isExplicitCurrent(association: number): boolean { return association === this.#association; }
+  finishExplicit(association: number): void {
+    if (this.isExplicitCurrent(association)) this.#explicitPending = false;
+  }
+  cancelFollowing(): void {
+    this.#pending = undefined;
+    this.#active = undefined;
+    this.#retryIntentId = undefined;
+    this.#ready = false;
+  }
+
   #pending: NavigationIntent | undefined;
   #active: NavigationIntent | undefined;
   #retryIntentId: number | undefined;
@@ -52,8 +75,9 @@ export class RebuildNavigationCoordinator {
   }
 
   noteSourceSaved(location: SourceCursorLocation): void {
+    if (this.options.followEnabled?.() !== true || this.#explicitPending) return;
     this.#nextId += 1;
-    this.#pending = { id: this.#nextId, location };
+    this.#pending = { id: this.#nextId, location, association: this.#association };
     this.#retryIntentId = undefined;
   }
 
@@ -64,8 +88,9 @@ export class RebuildNavigationCoordinator {
   }
 
   revealAfterRebuild(
-    reveal: () => Promise<NavigationRevealOutcome>,
+    reveal: (isCurrent: () => boolean) => Promise<NavigationRevealOutcome>,
   ): Promise<RebuildNavigationOutcome> {
+    if (this.options.followEnabled?.() !== true) this.cancelFollowing();
     if (this.#pending === undefined) return Promise.resolve("idle");
     this.#ready = true;
     if (this.#draining !== undefined) return this.#draining;
@@ -73,14 +98,15 @@ export class RebuildNavigationCoordinator {
     return this.#draining;
   }
 
-  async #drain(reveal: () => Promise<NavigationRevealOutcome>): Promise<RebuildNavigationOutcome> {
+  async #drain(reveal: (isCurrent: () => boolean) => Promise<NavigationRevealOutcome>): Promise<RebuildNavigationOutcome> {
     let result: RebuildNavigationOutcome = "idle";
     while (this.#ready && this.#pending !== undefined) {
       this.#ready = false;
       const intent = this.#pending;
       this.#active = intent;
       try {
-        result = await reveal();
+        result = await reveal(() => this.options.followEnabled?.() === true && this.#pending?.id === intent.id &&
+          followNavigationIsCurrent({ captured: intent.association, current: this.#association, explicitPending: this.#explicitPending }));
         if (this.#pending?.id !== intent.id) continue;
         if (result === "retry") this.#retryIntentId = intent.id;
         else {

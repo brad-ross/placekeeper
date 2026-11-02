@@ -1605,6 +1605,9 @@ describe("host-neutral review runtime", () => {
     const commands: unknown[] = [];
     runtime.subscribeHostCommands?.((command) => commands.push(command));
     expect(commands).toEqual([{ command: "reverse-synctex" }]);
+    for (const listener of listeners) listener({ protocol: REVIEW_RUNTIME_PROTOCOL, version: REVIEW_RUNTIME_VERSION,
+      kind: "event", event: "host-command", panelId: "panel_identifier_1234", payload: { command: "cancel-synctex" } });
+    expect(commands.at(-1)).toEqual({ command: "cancel-synctex" });
     runtime.dispose();
   });
 });

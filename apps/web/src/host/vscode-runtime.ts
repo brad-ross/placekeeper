@@ -140,7 +140,7 @@ function validHostCommand(value: unknown): value is HostRuntimeCommand {
       && (REVIEW_COMMAND_IDS as readonly string[]).includes(value.id);
   }
   if (value.command === "reattach" || value.command === "export-reviewed-pdf"
-    || value.command === "reverse-synctex") {
+    || value.command === "reverse-synctex" || value.command === "cancel-synctex") {
     return Object.keys(value).length === 1;
   }
   return value.command === "forward-synctex" && Object.keys(value).length === 4 &&

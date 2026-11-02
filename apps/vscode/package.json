@@ -170,6 +170,11 @@
     "configuration": {
       "title": "Placekeeper",
       "properties": {
+        "placekeeper.followAfterBuild": {
+          "type": "boolean",
+          "default": false,
+          "description": "Follow the saved LaTeX cursor after a rebuild. When off, PDF refresh preserves the reading location; explicit SyncTeX commands remain available."
+        },
         "placekeeper.launcherPath": {
           "type": "string",
           "description": "Absolute path to the installed Placekeeper launcher."

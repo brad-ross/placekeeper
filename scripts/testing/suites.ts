@@ -326,6 +326,7 @@ export const suites: Record<string, TestStage[]> = {
         "apps/vscode/test/latex-workshop-bridge.test.ts",
         "apps/vscode/test/external-launch-registration.test.ts",
         "apps/vscode/test/rebuild-observer.test.ts",
+        "apps/vscode/test/rebuild-navigation.test.ts",
         "apps/service/test/local-document-observer.test.ts",
         "test/conformance/reviewed-pdf.test.ts"
       ]

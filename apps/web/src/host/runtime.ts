@@ -41,6 +41,7 @@ export type HostRuntimeCommand =
   | { readonly command: "reattach" }
   | { readonly command: "export-reviewed-pdf" }
   | { readonly command: "reverse-synctex" }
+  | { readonly command: "cancel-synctex" }
   | ({ readonly command: "forward-synctex" } & ForwardSyncTexRequest);
 
 export interface HostRuntime extends ProductionSessionApi {

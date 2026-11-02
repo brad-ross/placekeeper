@@ -129,6 +129,7 @@ interface PanelRuntime {
   readonly binding: ReviewBinding;
   readonly client: TrustedRuntimeClient;
   readonly registrationId: string;
+  readonly rebuildNavigation: RebuildNavigationCoordinator;
   flushTimer?: ReturnType<typeof setTimeout>;
 }
 
@@ -226,6 +227,7 @@ async function openSourceLocation(
   location: { readonly sourcePath: string; readonly line: number; readonly column?: number },
   highlight: SourceHighlightState,
   avoidViewColumn?: number,
+  isCurrent: () => boolean = () => true,
 ): Promise<void> {
   const sourcePath = binding.sourceRoot === undefined
     ? undefined
@@ -241,8 +243,10 @@ async function openSourceLocation(
     ...(avoidViewColumn === undefined ? {} : { avoidViewColumn }),
     tabResourceUri,
     openTextDocument: () => vscode.workspace.openTextDocument(sourceUri),
+    isCurrent,
     showTextDocument: (document, options) => vscode.window.showTextDocument(document, options),
   });
+  if (editor === undefined || !isCurrent()) return;
   const lineNumber = sourceLineNumber(editor.document.lineCount, location.line);
   if (lineNumber === undefined) {
     void vscode.window.showWarningMessage(
@@ -277,9 +281,12 @@ async function openSourceLocation(
 async function revealForwardSyncTexTarget(
   panel: vscode.WebviewPanel,
   runtime: PanelRuntime,
+  isCurrent: () => boolean = () => true,
 ): Promise<ForwardSyncTexStatus> {
   for (let attempt = 0; attempt < 6; attempt += 1) {
+    if (!isCurrent()) return "stale";
     const result = await runtime.client.invoke("forwardSyncTex", {}, new AbortController().signal);
+    if (!isCurrent()) return "stale";
     const target = forwardSyncTexTarget(result);
     if (target !== undefined) {
       await panel.webview.postMessage({
@@ -297,6 +304,17 @@ async function revealForwardSyncTexTarget(
     await new Promise((resolveWait) => setTimeout(resolveWait, 250));
   }
   return "failed";
+}
+
+async function revealExplicitForwardSyncTexTarget(panel: vscode.WebviewPanel, runtime: PanelRuntime): Promise<ForwardSyncTexStatus> {
+  const association = runtime.rebuildNavigation.beginExplicit();
+  try {
+    await panel.webview.postMessage({
+      protocol: REVIEW_RUNTIME_PROTOCOL, version: REVIEW_RUNTIME_VERSION, kind: "event", event: "host-command",
+      panelId: runtime.client.identity.panelId, payload: { command: "cancel-synctex" },
+    });
+    return await revealForwardSyncTexTarget(panel, runtime, () => runtime.rebuildNavigation.isExplicitCurrent(association));
+  } finally { runtime.rebuildNavigation.finishExplicit(association); }
 }
 
 export function activate(context: vscode.ExtensionContext): void {
@@ -383,7 +401,8 @@ export function activate(context: vscode.ExtensionContext): void {
     const resourceUri = (name: string) => panel.webview.asWebviewUri(vscode.Uri.file(resolve(webRoot, name))).toString();
     const panelId = randomBytes(18).toString("base64url");
     let runtime: PanelRuntime;
-    const rebuildNavigation = new RebuildNavigationCoordinator();
+    const rebuildNavigation = new RebuildNavigationCoordinator({ followEnabled: () =>
+      vscode.workspace.getConfiguration("placekeeper", vscode.Uri.file(binding.outputPath)).get<boolean>("followAfterBuild", false) === true });
     const client = await attachStage("runtime", () => createLoopbackRuntimeClient({
       panelId,
       launch: exchanged,
@@ -397,8 +416,19 @@ export function activate(context: vscode.ExtensionContext): void {
       },
       forwardSourceLocation: () => rebuildNavigation.forwardSourceLocation(() => sourceLocation(binding)),
       sourceNavigationAllowed: () => vscode.workspace.isTrusted,
-      openSourceLocation: async (location) =>
-        openSourceLocation(binding, location, sourceHighlight, panel.viewColumn),
+      beginReverseNavigation: () => {
+        const association = rebuildNavigation.beginExplicit();
+        void panel.webview.postMessage({
+          protocol: REVIEW_RUNTIME_PROTOCOL, version: REVIEW_RUNTIME_VERSION, kind: "event", event: "host-command",
+          panelId, payload: { command: "cancel-synctex" },
+        });
+        return {
+          isCurrent: () => rebuildNavigation.isExplicitCurrent(association),
+          finish: () => rebuildNavigation.finishExplicit(association),
+        };
+      },
+      openSourceLocation: async (location, isCurrent) =>
+        openSourceLocation(binding, location, sourceHighlight, panel.viewColumn, isCurrent),
     }));
     if (panelDisposed) {
       client.dispose();
@@ -419,9 +449,9 @@ export function activate(context: vscode.ExtensionContext): void {
         const action = rebuildNavigationAction(status, input.reason, rebuildNavigation.canRetryCurrent);
         if (action === "ignore") return;
         if (!rebuildNavigation.hasPending) { observer.noteCurrent(); return; }
-        void rebuildNavigation.revealAfterRebuild(async () => {
-          const navigationStatus = await revealForwardSyncTexTarget(panel, runtime);
-          if (navigationStatus === "ok") {
+        void rebuildNavigation.revealAfterRebuild(async isCurrent => {
+          const navigationStatus = await revealForwardSyncTexTarget(panel, runtime, isCurrent);
+          if (navigationStatus === "ok" && isCurrent()) {
             panel.reveal(panel.viewColumn, false);
             activePanel = panel;
             return "revealed";
@@ -456,6 +486,9 @@ export function activate(context: vscode.ExtensionContext): void {
           void observer.noteSourceSaved();
         }
       }),
+      vscode.workspace.onDidChangeConfiguration(event => {
+        if (event.affectsConfiguration("placekeeper.followAfterBuild", vscode.Uri.file(binding.outputPath))) rebuildNavigation.cancelFollowing();
+      }),
       panel.webview.onDidReceiveMessage((message) => bridge.receive(message)),
       panel.onDidChangeViewState(({ webviewPanel }) => {
         if (webviewPanel.active) void observer.revalidate("activation");
@@ -466,7 +499,7 @@ export function activate(context: vscode.ExtensionContext): void {
     const interval = setInterval(() => { void observer.tick(); }, REVALIDATE_INTERVAL_MS);
     interval.unref?.();
     disposables.push({ dispose: () => clearInterval(interval) });
-    runtime = { binding, client, registrationId };
+    runtime = { binding, client, registrationId, rebuildNavigation };
     runtimes.set(panel, runtime);
     activePanel = panel;
     earlyDispose.dispose();
@@ -593,7 +626,7 @@ export function activate(context: vscode.ExtensionContext): void {
       const runtime = panel === undefined ? undefined : runtimes.get(panel);
       if (panel === undefined || runtime === undefined) return false;
       try {
-        const status = await revealForwardSyncTexTarget(panel, runtime);
+        const status = await revealExplicitForwardSyncTexTarget(panel, runtime);
         if (status !== "ok") {
           void vscode.window.showWarningMessage("Forward SyncTeX could not find this source location. PDF review remains available.");
           return status;
@@ -614,14 +647,13 @@ export function activate(context: vscode.ExtensionContext): void {
         await vscode.window.showInformationMessage("Open a generated PDF in Placekeeper first.");
         return;
       }
-      await activePanel.webview.postMessage({
-        protocol: REVIEW_RUNTIME_PROTOCOL,
-        version: REVIEW_RUNTIME_VERSION,
-        kind: "event",
-        event: "host-command",
-        panelId: runtime.client.identity.panelId,
-        payload: { command: "reverse-synctex" },
-      });
+      const association = runtime.rebuildNavigation.beginExplicit();
+      try {
+        await activePanel.webview.postMessage({
+          protocol: REVIEW_RUNTIME_PROTOCOL, version: REVIEW_RUNTIME_VERSION, kind: "event", event: "host-command",
+          panelId: runtime.client.identity.panelId, payload: { command: "reverse-synctex" },
+        });
+      } finally { runtime.rebuildNavigation.finishExplicit(association); }
     }),
     vscode.commands.registerCommand("placekeeper.reattach", async () => {
       if (activePanel === undefined) {
@@ -721,7 +753,7 @@ export function activate(context: vscode.ExtensionContext): void {
           panel.reveal(panel.viewColumn, false);
           activePanel = panel;
           if (sourceLocation(runtime.binding) !== undefined) {
-            if (await revealForwardSyncTexTarget(panel, runtime) !== "ok") {
+            if (await revealExplicitForwardSyncTexTarget(panel, runtime) !== "ok") {
               throw new Error("Forward SyncTeX did not return a target");
             }
           }

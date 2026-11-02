@@ -118,6 +118,21 @@ describe("private native navigation handoff", () => {
     const next = await f.accept();
     expect(next.association).not.toBe(first.association);
   });
+  it("rejects an old captured follow token after an A-to-B-to-A takeover", async () => {
+    const f = await fixture();
+    const complete = (ticket: string) => {
+      const redeemed = f.navigation.redeem(ticket, "app_one", "development")!;
+      const intent = f.navigation.claim(redeemed.navigationHandle, "app_one", "helper_one", f.request.pdfPath)!;
+      f.navigation.complete(intent);
+    };
+    const firstA = await f.accept(); complete(firstA.ticket);
+    const editorB = await f.navigation.profiles.register({ profile: "editor", sourceRoot: f.root });
+    const b = await f.accept({ ...f.request, session: editorB.handle }); complete(b.ticket);
+    const nextA = await f.accept(); complete(nextA.ticket);
+    expect((await f.navigation.control({ ...f.request, intent: "follow", association: firstA.association })).ok).toBe(false);
+    expect((await f.navigation.control({ ...f.request, intent: "follow", association: nextA.association })).ok).toBe(true);
+  });
+
   it("requires lifecycle registration and makes failed redemption nonfatal", async () => {
     const f = await fixture(); const accepted = await f.accept();
     const lifecycle = new MacosAppLifecycleManager({ detach: async () => {} }, f.navigation);

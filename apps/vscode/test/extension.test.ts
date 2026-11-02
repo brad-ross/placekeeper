@@ -1,3 +1,4 @@
+import { RebuildNavigationCoordinator } from "../src/rebuild-navigation.js";
 import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -63,6 +64,14 @@ import {
 } from "../src/source-navigation.js";
 
 describe("VS Code local host adapter", () => {
+  it("defaults following off while keeping manual navigation commands available", async () => {
+    const manifest = JSON.parse(await readFile(resolve("apps/vscode/package.json"), "utf8"));
+    expect(manifest.contributes.configuration.properties["placekeeper.followAfterBuild"]).toMatchObject({ type: "boolean", default: false });
+    const commands = manifest.contributes.commands.map((command: { command: string }) => command.command);
+    expect(commands).toContain("placekeeper.forwardSyncTex");
+    expect(commands).toContain("placekeeper.goToSource");
+  });
+
   it("validates a restored panel before its webview starts without needing another focus event", async () => {
     const directory = await realpath(await mkdtemp(resolve(tmpdir(), "placekeeper-restored-panel-")));
     const outputPath = resolve(directory, "paper.pdf");
@@ -102,6 +111,7 @@ describe("VS Code local host adapter", () => {
         workspaceFolders: [],
         getConfiguration: () => ({ get: () => undefined }),
         onDidSaveTextDocument: disposable,
+        onDidChangeConfiguration: disposable,
         createFileSystemWatcher: () => ({ dispose() {}, onDidCreate: disposable, onDidChange: disposable, onDidDelete: disposable }),
       },
       window: {
@@ -188,7 +198,24 @@ describe("VS Code local host adapter", () => {
       preview: true,
       preserveFocus: false,
     });
-    expect(editor.viewColumn).toBe(1);
+    expect(editor?.viewColumn).toBe(1);
+  });
+
+  it("does not focus a deferred source open after newer navigation", async () => {
+    const sourceDocument = { uri: { toString: () => "file:///work/paper.tex" } };
+    const document = Promise.withResolvers<typeof sourceDocument>();
+    const navigation = new RebuildNavigationCoordinator();
+    const association = navigation.beginExplicit();
+    const showTextDocument = vi.fn(async value => ({ document: value, viewColumn: 1 }));
+    const opened = openSourceEditor({
+      sourceUri: sourceDocument.uri, visibleEditors: [], tabGroups: [], tabResourceUri: () => undefined,
+      openTextDocument: () => document.promise, showTextDocument,
+      isCurrent: () => navigation.isExplicitCurrent(association),
+    });
+    navigation.beginExplicit();
+    document.resolve(sourceDocument);
+    expect(await opened).toBeUndefined();
+    expect(showTextDocument).not.toHaveBeenCalled();
   });
 
   it("does not reopen a source document that is already visible", async () => {
@@ -911,7 +938,7 @@ describe("VS Code local host adapter", () => {
     const reverse = await client.invoke("reverseSyncTex", { pageIndex: 0, point: { x: 1, y: 2 } }, new AbortController().signal);
     expect(reverse).toMatchObject({ target: { line: 12, column: 4 } });
     expect(reverse).not.toHaveProperty("target.path");
-    expect(opened).toHaveBeenCalledWith({ sourcePath: "/work/paper.tex", line: 12, column: 4 });
+    expect(opened).toHaveBeenCalledWith({ sourcePath: "/work/paper.tex", line: 12, column: 4 }, expect.any(Function));
     expect(forwardSyncTexTarget({ status: "ok", documentGeneration: 4, target: { pageIndex: 2, x: 10, y: 20 } }))
       .toEqual({ documentGeneration: 4, pageIndex: 2, point: { x: 10, y: 20 } });
     expect(forwardSyncTexTarget({ status: "ok", target: { pageIndex: 2, x: 10, y: 20 } }))
@@ -932,6 +959,41 @@ describe("VS Code local host adapter", () => {
     expect(forwardSyncTexStatus({ status: "ok", target: { pageIndex: 2, x: 10, y: 20 } }))
       .toBeUndefined();
     expect(forwardSyncTexStatus({ status: "other" })).toBeUndefined();
+  });
+
+  it("retires saved-cursor following when an inverse gesture starts and fences its late result", async () => {
+    const navigation = new RebuildNavigationCoordinator({ followEnabled: () => true });
+    navigation.noteSourceSaved({ sourcePath: "/work/paper.tex", line: 5 });
+    const result = Promise.withResolvers<Response>();
+    const opened = vi.fn(async () => undefined);
+    const client = createLoopbackRuntimeClient({
+      panelId: "panel_identifier_1234",
+      launch: { origin: "http://127.0.0.1:49152", sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", credential: "c".repeat(43) },
+      assets: { pdfiumWasm: "vscode-webview://authority/pdfium.wasm" },
+      materializeDocument: async () => "vscode-webview://authority/paper.pdf",
+      beginReverseNavigation: () => {
+        const association = navigation.beginExplicit();
+        return { isCurrent: () => navigation.isExplicitCurrent(association), finish: () => navigation.finishExplicit(association) };
+      },
+      openSourceLocation: opened,
+      fetch: vi.fn(async url => String(url).endsWith("/synctex/detach") ? new Response("{}") : result.promise),
+    });
+    const pending = client.invoke("reverseSyncTex", { pageIndex: 0, point: { x: 1, y: 2 } }, new AbortController().signal);
+    const reveal = vi.fn(async () => "revealed" as const);
+    expect(await navigation.revealAfterRebuild(reveal)).toBe("idle");
+    expect(reveal).not.toHaveBeenCalled();
+    navigation.noteSourceSaved({ sourcePath: "/work/paper.tex", line: 9 });
+    expect(navigation.hasPending).toBe(false);
+    const newer = navigation.beginExplicit();
+    result.resolve(new Response(JSON.stringify({ status: "ok", target: { path: "/work/paper.tex", line: 12 } })));
+    expect(await pending).toMatchObject({ status: "stale" });
+    expect(opened).not.toHaveBeenCalled();
+    navigation.noteSourceSaved({ sourcePath: "/work/paper.tex", line: 10 });
+    expect(navigation.hasPending).toBe(false);
+    navigation.finishExplicit(newer);
+    navigation.noteSourceSaved({ sourcePath: "/work/paper.tex", line: 11 });
+    expect(navigation.hasPending).toBe(true);
+    client.dispose();
   });
 
   it("does not open a late reverse-search result after its panel closes", async () => {

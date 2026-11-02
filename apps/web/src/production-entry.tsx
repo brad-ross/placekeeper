@@ -604,7 +604,12 @@ export function RuntimeProductionReviewApp(props: {
       setHostExportRequest({ token: ++hostExportSequenceRef.current });
       return;
     }
+    if (command.command === "cancel-synctex") {
+      setHostForwardSyncTexRequest(undefined);
+      return;
+    }
     if (command.command === "reverse-synctex") {
+      setHostForwardSyncTexRequest(undefined);
       setHostReverseSyncTexRequestToken((token) => token + 1);
       return;
     }

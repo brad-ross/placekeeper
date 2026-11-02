@@ -1,3 +1,4 @@
+import { followNavigationIsCurrent } from "../../../../packages/core/src/source-navigation-intent.js";
 import { randomBytes } from "node:crypto";
 import { realpath, stat } from "node:fs/promises";
 import { parseEditorControlRequest, type EditorControlResponse, type EditorForwardRequest } from "../../../../packages/core/src/editor-navigation-protocol.js";
@@ -71,8 +72,8 @@ export class EditorNavigation {
     }
     const previous = this.#destinations.get(pdfPath);
     if (previous !== undefined && previous.intent.sequence > sequence) throw new Error("Navigation was superseded by a newer request");
-    if (request.intent === "follow" && (previous === undefined || previous.pending || previous.followBlocked === true ||
-      previous.intent.registration.handle !== registration.handle || previous.intent.association !== request.association)) {
+    if (request.intent === "follow" && (previous?.followBlocked === true || previous?.intent.registration.handle !== registration.handle ||
+      !followNavigationIsCurrent({ captured: request.association, current: previous?.intent.association, explicitPending: previous?.pending ?? false }))) {
       throw new Error("Follow request is stale or an explicit navigation is still pending");
     }
     const association = request.intent === "follow" ? previous!.intent.association : token();
