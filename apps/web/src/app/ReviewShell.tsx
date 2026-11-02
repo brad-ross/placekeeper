@@ -1575,7 +1575,7 @@ export function ReviewShell(props: ReviewShellProps) {
     return () => cancelAnimationFrame(frame);
   }, [workspacePresentation?.mode, workspacePresentation?.open, workspacePresentation?.referenceDock, refitCommand]);
   // A docked right surface overlays the stage, so its width also sets the
-  // reading width. Opening or closing it fits through the disclosure path.
+  // reading width. Opening fits through the disclosure path.
   const stageWidth = workspaceFraming.stageSize.width;
   const stageHeight = workspaceFraming.stageSize.height;
   const bottomDockHeight = referenceSurfaceOpen && referenceLayout.referenceDock === 'bottom' ? effectiveReferenceLayout.bottomHeight : 0;
@@ -1592,9 +1592,8 @@ export function ReviewShell(props: ReviewShellProps) {
     if (previous === null || stageWidth === 0) return;
     const stageResized = Math.abs(stageWidth - previous.stage) >= 1;
     const heightResized = Math.abs(stageHeight - previous.height) >= 1 || Math.abs(bottomDockHeight - previous.bottom) >= 1;
-    const dockResized = dockedRightWidth !== null
-      && previous.dock !== null
-      && Math.abs(dockedRightWidth - previous.dock) >= 1;
+    const dockResized = previous.dock !== null
+      && Math.abs((dockedRightWidth ?? 0) - previous.dock) >= 1;
     if (!stageResized && !dockResized && !heightResized) return;
     const navigation = props.viewer.viewerNavigation;
     const follows = () => navigation?.getFitState?.().active || navigation?.getFitState?.().pending || navigation?.followsFitWidth?.() || false;

@@ -1019,6 +1019,47 @@ describe('viewer navigation adapter', () => {
     expect(harness.readingLayout.getSnapshot().alignment).toBe('text');
   });
 
+  it('lets manual zoom retain the visible baseline while an unfinished fit is cancelled', async () => {
+    let manualScale: number | null = null;
+    const harness = navigationHarness({
+      viewportGap: 10,
+      onNextFrame: () => {
+        if (manualScale !== null || !harness.log.some((entry) => entry.startsWith('zoom:'))) return;
+        manualScale = harness.navigation.captureLocation()!.zoom * 1.1;
+        harness.navigation.manualZoom?.();
+        harness.completeZoom(manualScale);
+      },
+    });
+    expect(await harness.navigation.fitToMode?.('page')).toBe(false);
+    await harness.navigation.cancelPendingNavigation();
+    expect(manualScale).not.toBeNull();
+    expect(harness.navigation.captureLocation()?.zoom).toBeCloseTo(manualScale!);
+    expect(harness.navigation.getFitState?.()).toMatchObject({ active: false, pending: false });
+  });
+
+  it('restores a prior text fit when a page fit is cancelled after its zoom commits', async () => {
+    const glyphs = Array.from({ length: 12 }, (_, row) => Array.from({ length: 60 }, (_, column) => ({
+      origin: { x: 100 + column * 5, y: 100 + row * 20 }, size: { width: 5, height: 10 },
+    }))).flat();
+    let cancelPageFit = false;
+    const harness = navigationHarness({
+      glyphRead: async () => glyphs,
+      onNextFrame: () => {
+        if (!cancelPageFit || harness.readingLayout.getSnapshot().alignment !== 'page') return;
+        cancelPageFit = false;
+        void harness.navigation.cancelPendingNavigation();
+      },
+    });
+    expect(await harness.navigation.fitToMode?.('text')).toBe(true);
+    const prior = harness.navigation.captureLocation()!;
+    cancelPageFit = true;
+    expect(await harness.navigation.fitToMode?.('page')).toBe(false);
+    await harness.navigation.cancelPendingNavigation();
+    expect(harness.readingLayout.getSnapshot().alignment).toBe('text');
+    expect(harness.navigation.captureLocation()?.zoom).toBeCloseTo(prior.zoom);
+    expect(harness.navigation.getFitState?.()).toMatchObject({ selectedMode: 'text', active: true, pending: false });
+  });
+
   it('fills a wide viewport beyond 150 percent and centers the page', async () => {
     const harness = navigationHarness({ viewportGap: 10, viewportWidth: 1_400 });
 

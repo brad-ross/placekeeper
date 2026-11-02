@@ -1,5 +1,6 @@
 import {
   PdfErrorCode,
+  boundingRect,
   transformRect,
   transformSize,
   type PdfDocumentObject,
@@ -39,7 +40,6 @@ function quantile(values: readonly number[], fraction: number): number {
   return ordered[Math.floor((ordered.length - 1) * fraction)] ?? 0;
 }
 
-/** Identify repeated body lines without letting isolated page furniture set their width. */
 export function detectReadingBounds(glyphs: readonly PdfGlyphObject[], pageSize: Size): Rect | null {
   if (!Number.isFinite(pageSize.width) || !Number.isFinite(pageSize.height)
     || pageSize.width <= 0 || pageSize.height <= 0) return null;
@@ -56,15 +56,7 @@ export function detectReadingBounds(glyphs: readonly PdfGlyphObject[], pageSize:
   )).sort((a, b) => a.origin.y - b.origin.y || a.origin.x - b.origin.x)) {
     const previous = rows.at(-1);
     if (previous && Math.abs(previous.origin.y - segment.origin.y) <= bodyHeight * 0.5) {
-      const left = Math.min(previous.origin.x, segment.origin.x);
-      const top = Math.min(previous.origin.y, segment.origin.y);
-      rows[rows.length - 1] = {
-        origin: { x: left, y: top },
-        size: {
-          width: Math.max(previous.origin.x + previous.size.width, segment.origin.x + segment.size.width) - left,
-          height: Math.max(previous.origin.y + previous.size.height, segment.origin.y + segment.size.height) - top,
-        },
-      };
+      rows[rows.length - 1] = boundingRect([previous, segment])!;
     } else {
       rows.push(segment);
     }
@@ -82,7 +74,6 @@ export function detectReadingBounds(glyphs: readonly PdfGlyphObject[], pageSize:
   return { origin: { x: left, y: top }, size: { width: right - left, height: bottom - top } };
 }
 
-/** Translate the complete page subtree, including its pointer coordinate provider. */
 export function readingPageOffset(page: PdfPageObject, bounds: Rect | null | undefined, documentRotation: Rotation, zoom = 1): number {
   if (!bounds) return 0;
   const rotation = combinePageRotation(page.rotation, documentRotation);
@@ -97,7 +88,6 @@ export function readingLayoutPadding(pages: readonly PdfPageObject[], bounds: Re
   ), 0);
 }
 
-/** One robust document-wide width keeps scrolling from changing reading size. */
 export function representativeReadingWidth(pages: readonly PdfPageObject[], bounds: ReadingBounds, documentRotation: Rotation): number | null {
   const widths: number[] = [];
   pages.forEach((page, index) => {
@@ -151,7 +141,7 @@ export function createTextFitLayout(): TextFitLayout {
             const cancel = () => {
               reject(cancelled());
               try { task.abort({ code: PdfErrorCode.Cancelled, message: 'Text fitting cancelled' }); }
-              catch { /* The task may already have settled. */ }
+              catch {}
             };
             controller.signal.addEventListener('abort', cancel, { once: true });
             if (controller.signal.aborted) cancel();

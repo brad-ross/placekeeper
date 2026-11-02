@@ -500,13 +500,13 @@ export function createViewerNavigation(
       ? readingPageOffset(page, layout.bounds?.[pageIndex], viewer.documentRotation, zoom) : 0;
   };
 
-  const cancelPendingOperation = (): Promise<void> | null => {
+  const cancelPendingOperation = (restoreOrigin = true): Promise<void> | null => {
     const cancelled = activeOperation;
     cancelled?.abort.abort();
     if (cancelled?.operation === fitOperation && fitState.pending) publishFit({ ...fitState, pending: false });
     activeOperation = null;
     operationGeneration += 1;
-    if (cancelled?.operation.mutated && cancelled.operation.origin !== null) {
+    if (restoreOrigin && cancelled?.operation.mutated && cancelled.operation.origin !== null) {
       rollbackBarrier = (rollbackBarrier ?? Promise.resolve()).then(
         () => rollbackOperation(cancelled.operation),
         () => rollbackOperation(cancelled.operation),
@@ -1850,7 +1850,8 @@ export function createViewerNavigation(
   });
 
   const manualZoom = () => {
-    void cancelPendingNavigation();
+    // Gestures capture the currently painted frame synchronously; keep it as their baseline.
+    void cancelPendingOperation(false);
     fittedZoom = null;
     publishFit({ ...fitState, active: false, pending: false });
   };
@@ -1860,7 +1861,6 @@ export function createViewerNavigation(
       (requestedFitZoom !== null && Math.abs(event.newZoom - requestedFitZoom) <= zoomTolerance)
       || (fitOperation.origin !== null && Math.abs(event.newZoom - fitOperation.origin.zoom) <= zoomTolerance)
     )) return;
-    // A destination operation owns its own cancellation and settlement.
     fittedZoom = null;
     publishFit({ ...fitState, active: false });
     if (fitOperation) void cancelPendingNavigation();

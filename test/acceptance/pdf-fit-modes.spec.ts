@@ -145,17 +145,55 @@ test('selection, page notes, and distant destinations follow shifted page geomet
   await page.mouse.move(first!.x + 270 * initialScale, first!.y + 116 * initialScale, { steps: 12 });
   await page.mouse.up();
   await expect(page.getByRole('toolbar', { name: 'Selection review actions' })).toBeVisible();
+  await expect(page.locator('[data-pdf-native-selection-bridge="main"]')).toHaveText(/^Body page 01 line 03: selectab/u);
   await page.keyboard.press('Escape');
   await addStaticKeyboardPageNote(page, 'A note on the aligned page');
   const mark = page.locator('[data-owned-mark="pageNote"]');
   const parentIndex = await mark.evaluate((element) => element.closest('[data-page-index]')?.getAttribute('data-page-index'));
   expect(parentIndex).toBe('0');
+  const notePosition = () => mark.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    const pdf = element.closest('.pdf-workspace__page')!.getBoundingClientRect();
+    const zoom = pdf.width / 600;
+    return { x: (rect.left - pdf.left) / zoom, y: (rect.top - pdf.top) / zoom };
+  });
+  expect(Math.abs((await notePosition()).x - 304)).toBeLessThan(0.25);
+  expect(Math.abs((await notePosition()).y - 400)).toBeLessThan(0.25);
+  await fit(page, 'width');
+  expect(Math.abs((await notePosition()).x - 304)).toBeLessThan(0.25);
+  expect(Math.abs((await notePosition()).y - 400)).toBeLessThan(0.25);
+  await fit(page, 'text');
   await goToPage(page, 1);
   const link = page.getByRole('button', { name: /Open PDF link.*Page 12/iu }).first();
   await link.scrollIntoViewIfNeeded();
   await link.focus();
   await link.press('Enter');
-  await page.getByRole('menuitem', { name: 'Open in main document', exact: true }).click();
+  const destinationFrames = await page.getByRole('menuitem', { name: 'Open in main document', exact: true })
+    .evaluate((button) => new Promise<{ x: number; y: number; width: number; height: number }[]>((resolve) => {
+      const samples: { x: number; y: number; width: number; height: number }[] = [];
+      let frames = 0;
+      const sample = () => {
+        const target = document.querySelector('.review-document .pdf-workspace__page[data-page-index="11"]');
+        const viewport = document.querySelector('.review-document [data-viewer-framing-viewport]')!;
+        const rect = target?.getBoundingClientRect();
+        const frame = viewport.getBoundingClientRect();
+        if (rect && rect.bottom > frame.top && rect.top < frame.bottom) {
+          const zoom = rect.width / 600;
+          samples.push({ x: rect.left + 210 * zoom - frame.left, y: rect.top + 80 * zoom - frame.top, width: frame.width, height: frame.height });
+        }
+        if (++frames < 40) requestAnimationFrame(sample);
+        else resolve(samples);
+      };
+      (button as HTMLElement).click();
+      requestAnimationFrame(sample);
+    }));
+  expect(destinationFrames.length).toBeGreaterThan(0);
+  for (const frame of destinationFrames) {
+    expect(frame.x).toBeGreaterThanOrEqual(-2);
+    expect(frame.x).toBeLessThan(frame.width);
+    expect(frame.y).toBeGreaterThanOrEqual(-2);
+    expect(frame.y).toBeLessThan(frame.height);
+  }
   await expect(mainPage(page, 11)).toBeVisible();
   expect(await scale(page, 11)).toBeCloseTo(initialScale, 3);
   const destination = await mainPage(page, 11).boundingBox();
@@ -166,4 +204,40 @@ test('selection, page notes, and distant destinations follow shifted page geomet
   expect(targetX).toBeLessThan(frame!.x + frame!.width);
   expect(targetY).toBeGreaterThanOrEqual(frame!.y - 2);
   expect(targetY).toBeLessThan(frame!.y + frame!.height);
+});
+
+test('active text fitting follows right workspace closure while custom zoom stays fixed', async ({ page }) => {
+  await openBook(page);
+  await page.setViewportSize({ width: 1400, height: 1100 });
+  const workspace = page.locator('#review-tools-workspace');
+  await page.getByRole('button', { name: 'Show workspace', exact: true }).click();
+  await expect(workspace).toHaveAttribute('data-tools-workspace-open', 'true');
+  await fit(page, 'text');
+  const dockedScale = await scale(page);
+  await page.getByRole('button', { name: 'Hide workspace', exact: true }).click();
+  await expect(workspace).toHaveAttribute('data-tools-workspace-open', 'false');
+  await expect.poll(() => scale(page)).toBeGreaterThan(dockedScale + 0.1);
+  await openZoom(page);
+  await expect(fitButton(page)).toHaveAttribute('data-fit-active', 'true');
+  await page.keyboard.press('Escape');
+  await page.getByRole('button', { name: 'Show workspace', exact: true }).click();
+  await expect(workspace).toHaveAttribute('data-tools-workspace-open', 'true');
+  const zoom = page.getByRole('textbox', { name: /^Current zoom/u });
+  await zoom.fill('150');
+  await zoom.press('Enter');
+  await expect.poll(() => scale(page)).toBeCloseTo(1.5, 3);
+  await page.getByRole('button', { name: 'Hide workspace', exact: true }).click();
+  await expect(workspace).toHaveAttribute('data-tools-workspace-open', 'false');
+  // Read beyond the resize debounce and CSS transition to detect an unwanted refit.
+  const samples = await mainPage(page).evaluate((element) => new Promise<number[]>((resolve) => {
+    const values: number[] = [];
+    const start = performance.now();
+    const sample = () => {
+      values.push(element.getBoundingClientRect().width / 600);
+      if (performance.now() - start < 700) requestAnimationFrame(sample);
+      else resolve(values);
+    };
+    sample();
+  }));
+  for (const value of samples) expect(value).toBeCloseTo(1.5, 3);
 });

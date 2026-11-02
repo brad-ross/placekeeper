@@ -191,8 +191,8 @@ export function ReviewChrome({
   const [editingZoom, setEditingZoom] = useState(false);
   const [zoomDraft, setZoomDraft] = useState('');
   const [zoomInvalid, setZoomInvalid] = useState(false);
-  const [fitWidthPending, setFitWidthPending] = useState(false);
-  const fitWidthRequestRef = useRef(0);
+  const [fitRequestPending, setFitRequestPending] = useState(false);
+  const fitRequestRef = useRef(0);
   const [fitOptionsOpen, setFitOptionsOpen] = useState(false);
   const fitButtonRef = useRef<HTMLButtonElement | null>(null);
   const fitOptionsRef = useRef<HTMLDivElement | null>(null);
@@ -243,7 +243,7 @@ export function ReviewChrome({
   const selectedFit = fitState?.selectedMode ?? 'width';
   const nextFit = FIT_MODES[(FIT_MODES.indexOf(selectedFit) + 1) % FIT_MODES.length]!;
   const fitActive = fitState?.active ?? fitWidthCurrent;
-  const fitPending = fitState?.pending || fitWidthPending;
+  const fitPending = fitState?.pending || fitRequestPending;
   const fitStatus = fitPending ? 'Fitting…'
     : !fitActive ? 'Custom zoom'
     : fitState?.fallback ? 'Fit width, no reliable text bounds'
@@ -512,22 +512,25 @@ export function ReviewChrome({
     if (editingZoom) closeZoomEdit(false);
     runViewerAction(action);
   };
+  const focusFitChoice = (position: 'first' | 'last') => {
+    const choices = fitOptionsRef.current?.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]');
+    (position === 'last' ? choices?.item(choices.length - 1) : choices?.item(0))?.focus({ preventScroll: true });
+  };
   useLayoutEffect(() => {
     const focus = fitChoiceFocusRef.current;
     if (!fitOptionsOpen || focus === null) return;
     fitChoiceFocusRef.current = null;
-    const choices = fitOptionsRef.current?.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]');
-    (focus === 'last' ? choices?.item(choices.length - 1) : choices?.item(0))?.focus({ preventScroll: true });
+    focusFitChoice(focus);
   }, [fitOptionsOpen]);
 
   const runFit = (button: HTMLButtonElement, mode: PdfFitMode) => {
     clearZoomActionIntent();
     button.focus({ preventScroll: true });
     if (editingZoom) closeZoomEdit(false);
-    const request = ++fitWidthRequestRef.current;
-    setFitWidthPending(true);
+    const request = ++fitRequestRef.current;
+    setFitRequestPending(true);
     void runViewerActionAsync(() => onFitMode ? onFitMode(mode) : onFitWidth()).finally(() => {
-      if (fitWidthRequestRef.current === request) setFitWidthPending(false);
+      if (fitRequestRef.current === request) setFitRequestPending(false);
     });
   };
 
@@ -787,8 +790,7 @@ export function ReviewChrome({
             event.stopPropagation();
             const focus = event.key === 'ArrowUp' ? 'last' : 'first';
             if (fitOptionsOpen) {
-              const choices = fitOptionsRef.current?.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]');
-              (focus === 'last' ? choices?.item(choices.length - 1) : choices?.item(0))?.focus({ preventScroll: true });
+              focusFitChoice(focus);
             } else {
               fitChoiceFocusRef.current = focus;
               setFitOptionsOpen(true);
