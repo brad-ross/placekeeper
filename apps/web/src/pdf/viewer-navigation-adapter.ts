@@ -70,6 +70,8 @@ export interface ViewerNavigationAdapterOptions {
   readonly runway?: () => ViewerRunway;
   /** Optional layout-owned margin for explicit width fitting. */
   readonly fitWidthMargins?: () => { left: number; right: number } | undefined;
+  /** Text clearance inside the reading viewport, including decorative edge fades. */
+  readonly fitTextMargins?: () => { left: number; right: number };
   readonly timeoutMs?: number;
   readonly coordinateTolerancePixels?: number;
   readonly zoomTolerance?: number;
@@ -1364,10 +1366,10 @@ export function createViewerNavigation(
       const scrollbarWidth = Math.max(0, scrollportBounds.width - geometry.viewportElement.clientWidth - 2 * (geometry.viewportElement.clientLeft ?? 0));
       const rotatedPage = transformSize(page.size, rotation, 1);
       const marginsForMode = () => {
-        const margins = fitWidthMargins(viewer);
-        return effectiveMode === 'text'
-          ? { left: Math.max(24, margins.left), right: Math.max(24, margins.right) }
-          : margins;
+        if (effectiveMode === 'text') {
+          return options.fitTextMargins?.() ?? { left: 36, right: 36 };
+        }
+        return fitWidthMargins(viewer);
       };
       const fitMargins = marginsForMode();
       const fitGap = (fitMargins.left + fitMargins.right) / 2;
@@ -1922,8 +1924,11 @@ export function createViewerNavigation(
       const originRotation = combinePageRotation(origin.rotation, viewer.documentRotation);
       const visualAnchor = transformPosition(origin.size, current.anchor, originRotation, 1);
       const rotatedSize = transformSize(page.size, rotation, 1);
+      // Adjacent reading blocks may sit at different natural page positions.
+      // Preserve the anchor in their shared, shifted visual coordinate frame.
+      const readingOffset = pageOffset(viewer, current.pageIndex, 1) - pageOffset(viewer, pageIndex, 1);
       const anchor = restorePosition(rotatedSize, {
-        x: clamp(visualAnchor.x, 0, rotatedSize.width), y: 0,
+        x: clamp(visualAnchor.x + readingOffset, 0, rotatedSize.width), y: 0,
       }, rotation, 1);
       return {
         pageIndex,

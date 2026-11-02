@@ -1094,6 +1094,15 @@ export function App({
         documentId: MAIN_PDF_DOCUMENT_ID,
         documentGeneration,
         runway: () => viewerRunwayRef.current,
+        fitTextMargins: () => {
+          const stage = workspaceElementRef.current?.closest<HTMLElement>('[data-review-stage]');
+          const rightFade = stage?.dataset.rightSurfaceOpen === 'true'
+            ? REVIEW_OVERLAY_INSET + REVIEW_OVERLAY_FADE_SIZE
+            : stage?.dataset.rightRailPresent === 'true' ? REVIEW_OVERLAY_FADE_SIZE : 0;
+          // The rail or dock is already outside the reading viewport. Balance
+          // text against its clear area, before the remaining decorative fade.
+          return { left: 36, right: 36 + rightFade };
+        },
         fitWidthMargins: () => {
           const stage = workspaceElementRef.current?.closest<HTMLElement>('[data-review-stage]');
           if (stage?.dataset.rightSurfaceOpen === 'true') {

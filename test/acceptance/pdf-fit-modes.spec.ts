@@ -40,6 +40,89 @@ async function scale(page: Page, index = 0, width = 600) {
   return mainPage(page, index).evaluate((element, naturalWidth) => element.getBoundingClientRect().width / naturalWidth, width);
 }
 
+test('keeps fit choices within their hover region and preserves deliberate keyboard access', async ({ page }) => {
+  await openBook(page);
+  await openZoom(page);
+  const choices = page.getByRole('menu', { name: 'PDF fit modes', exact: true });
+  const zoomIn = page.getByRole('menuitem', { name: 'Zoom in', exact: true });
+  await fitButton(page).hover();
+  await expect(choices).toBeVisible();
+  const hoverBackground = await fitButton(page).evaluate((button) => {
+    const color = document.createElement('span');
+    color.style.color = getComputedStyle(button).getPropertyValue('--pk-hover');
+    return color.style.color;
+  });
+  await expect(fitButton(page)).toHaveCSS('background-color', hoverBackground);
+  expect(hoverBackground).not.toBe('rgba(0, 0, 0, 0)');
+  await zoomIn.hover();
+  await expect(choices).toBeHidden();
+  await expect(fitButton(page)).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+
+  await fitButton(page).hover();
+  await choices.hover();
+  await expect(choices).toBeVisible();
+  await expect(fitButton(page)).toHaveAttribute('aria-expanded', 'true');
+  await expect(fitButton(page)).toHaveCSS('background-color', hoverBackground);
+  await zoomIn.hover();
+  await expect(choices).toBeHidden();
+
+  await fitButton(page).hover();
+  await page.getByRole('menuitemradio', { name: 'Fit page', exact: true }).click();
+  await expect(fitButton(page)).toHaveAttribute('data-fit-active', 'true');
+  await expect(choices).toBeHidden();
+  await zoomIn.hover();
+  await expect(choices).toBeHidden();
+  await expect(fitButton(page)).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+
+  await fitButton(page).focus();
+  await fitButton(page).press('ArrowDown');
+  const fitPage = page.getByRole('menuitemradio', { name: 'Fit page', exact: true });
+  await expect(fitPage).toBeFocused();
+  await expect(fitPage).toHaveCSS('outline-style', 'solid');
+  await choices.hover();
+  await zoomIn.hover();
+  await expect(choices).toBeVisible();
+  await expect(fitButton(page)).toHaveCSS('background-color', hoverBackground);
+  await expect(fitPage).toBeFocused();
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('Enter');
+  await expect(fitButton(page)).toHaveAttribute('data-fit-mode', 'width');
+  await expect(choices).toBeHidden();
+});
+
+test('keeps a fit icon throughout fit mode changes', async ({ page }) => {
+  await openBook(page);
+  await openZoom(page);
+  for (const mode of ['text', 'page', 'width']) {
+    const displayedLoadingIcon = await fitButton(page).evaluate((button) => new Promise<boolean>((resolve) => {
+      let loading = false;
+      const inspect = (node: Node) => {
+        if (node instanceof Element && (node.matches('.lucide-loader-circle') || node.querySelector('.lucide-loader-circle'))) loading = true;
+      };
+      const observer = new MutationObserver((records) => {
+        inspect(button);
+        for (const record of records) for (const node of record.addedNodes) inspect(node);
+      });
+      observer.observe(button, { childList: true, subtree: true });
+      inspect(button);
+      (button as HTMLButtonElement).click();
+      const sample = () => {
+        inspect(button);
+        if (button.getAttribute('aria-busy') === 'true') requestAnimationFrame(sample);
+        else requestAnimationFrame(() => {
+          observer.disconnect();
+          resolve(loading);
+        });
+      };
+      requestAnimationFrame(sample);
+    }));
+    expect(displayedLoadingIcon).toBe(false);
+    await expect(fitButton(page)).toHaveAttribute('data-fit-mode', mode);
+    await expect(fitButton(page)).toHaveAttribute('aria-busy', 'false');
+    await expect(fitButton(page).locator('svg')).toBeVisible();
+  }
+});
+
 test('cycles fit modes, supports keyboard choices, and releases horizontal lock only when zoom changes', async ({ page }) => {
   await openBook(page);
   await fit(page, 'width');
@@ -67,8 +150,45 @@ test('cycles fit modes, supports keyboard choices, and releases horizontal lock 
   await page.getByRole('menuitem', { name: 'Zoom in', exact: true }).click();
   await expect(stage).not.toHaveAttribute('data-horizontal-scroll-locked', 'true');
   await fitButton(page).click();
+  await expect(fitButton(page)).toHaveAttribute('data-fit-mode', 'text');
+  await expect(fitButton(page)).toHaveAttribute('data-fit-active', 'true');
+  await expect(fitButton(page)).toHaveAttribute('aria-busy', 'false');
+  await fitButton(page).click();
   await expect(fitButton(page)).toHaveAttribute('data-fit-mode', 'page');
 });
+
+for (const { mode, next, scan } of [
+  { mode: 'page', next: 'width', scan: false },
+  { mode: 'width', next: 'text', scan: false },
+  { mode: 'text', next: 'page', scan: false },
+  { mode: 'text', next: 'page', scan: true },
+] as const) {
+  test(`reapplies inactive ${mode} fitting before cycling${scan ? ' with text fallback' : ''}`, async ({ page }) => {
+    await openBook(page, scan);
+    await fit(page, mode);
+    const currentScale = () => scale(page, 0, scan ? 612 : 600);
+    const fittedScale = await currentScale();
+    const zoom = page.getByRole('textbox', { name: /^Current zoom/u });
+    await zoom.fill('150');
+    await zoom.press('Enter');
+    await expect.poll(currentScale).toBeCloseTo(1.5, 3);
+    await openZoom(page);
+    await expect(fitButton(page)).toHaveAttribute('data-fit-active', 'false');
+    await expect(fitButton(page)).toHaveAccessibleName(`Fit mode: Custom zoom. Apply: Fit ${mode}`);
+    await fitButton(page).click();
+    await expect(fitButton(page)).toHaveAttribute('data-fit-mode', mode);
+    await expect(fitButton(page)).toHaveAttribute('data-fit-active', 'true');
+    await expect(fitButton(page)).toHaveAttribute('aria-busy', 'false');
+    await expect.poll(currentScale).toBeCloseTo(fittedScale, 3);
+    await expect(fitButton(page)).toHaveAccessibleName(
+      `Fit mode: ${scan ? 'Fit width, no reliable text bounds' : `Fit ${mode}`}. Next: Fit ${next}`,
+    );
+    await fitButton(page).click();
+    await expect(fitButton(page)).toHaveAttribute('data-fit-mode', next);
+    await expect(fitButton(page)).toHaveAttribute('data-fit-active', 'true');
+    await expect(fitButton(page)).toHaveAttribute('aria-busy', 'false');
+  });
+}
 
 test('aligns adjacent book text simultaneously and keeps one scale through columns and textless pages', async ({ page }) => {
   await openBook(page);
@@ -251,4 +371,40 @@ test('active text fitting follows right workspace closure while custom zoom stay
     sample();
   }));
   for (const value of samples) expect(value).toBeCloseTo(1.5, 3);
+});
+
+test('balances text margins within the clear reading area beside the workspace rail and tray', async ({ page }) => {
+  await openBook(page);
+  await fit(page, 'text');
+  const expectBalancedMargins = async (index = 0) => {
+    await expect.poll(() => mainPage(page, index).evaluate((element, pageIndex) => {
+      const bounds = element.getBoundingClientRect();
+      const zoom = bounds.width / 600;
+      const textLeft = bounds.left + (pageIndex % 2 === 0 ? 90 : 210) * zoom;
+      const textRight = textLeft + 300 * zoom;
+      const viewport = element.closest('.review-document')!.getBoundingClientRect();
+      const fade = document.querySelector('.review-overlay-frame__right-fade')!;
+      const clearRight = getComputedStyle(fade).display === 'none'
+        ? viewport.right : fade.getBoundingClientRect().left;
+      return Math.abs((textLeft - viewport.left) - (clearRight - textRight));
+    }, index)).toBeLessThan(1);
+  };
+  await expectBalancedMargins();
+  await viewport(page).evaluate((element) => {
+    const next = element.querySelector('[data-page-index="1"]')!.getBoundingClientRect();
+    element.scrollTop += next.top - element.getBoundingClientRect().top;
+  });
+  await expectBalancedMargins(1);
+  await goToPage(page, 1);
+  await expectBalancedMargins();
+  await goToPage(page, 2);
+  await expectBalancedMargins(1);
+  await page.setViewportSize({ width: 1400, height: 1100 });
+  await expectBalancedMargins(1);
+  await page.getByRole('button', { name: 'Show workspace', exact: true }).click();
+  await expect(page.locator('#review-tools-workspace')).toHaveAttribute('data-tools-workspace-open', 'true');
+  await expectBalancedMargins(1);
+  await page.getByRole('button', { name: 'Hide workspace', exact: true }).click();
+  await expect(page.locator('#review-tools-workspace')).toHaveAttribute('data-tools-workspace-open', 'false');
+  await expectBalancedMargins(1);
 });

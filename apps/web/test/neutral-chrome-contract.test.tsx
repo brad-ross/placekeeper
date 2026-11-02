@@ -54,21 +54,27 @@ describe('neutral toolbar contract', () => {
     expect(html).toContain('data-fit-active="true"');
   });
 
-  it('continues after the last selected fit when zoom is custom or text falls back', () => {
+  it('reapplies the selected fit when zoom is custom and cycles from the selection when text falls back', () => {
     expect(chrome({ onFitMode: vi.fn(), fitState: {
       selectedMode: 'text', effectiveMode: 'text', active: false, pending: false, fallback: false,
-    } })).toContain('aria-label="Fit mode: Custom zoom. Next: Fit page"');
+    } })).toContain('aria-label="Fit mode: Custom zoom. Apply: Fit text"');
+    expect(chrome({ onFitMode: vi.fn(), fitState: {
+      selectedMode: 'text', effectiveMode: 'width', active: false, pending: false, fallback: true,
+    } })).toContain('aria-label="Fit mode: Custom zoom. Apply: Fit text"');
     expect(chrome({ onFitMode: vi.fn(), fitState: {
       selectedMode: 'text', effectiveMode: 'width', active: true, pending: false, fallback: true,
     } })).toContain('aria-label="Fit mode: Fit width, no reliable text bounds. Next: Fit page"');
   });
 
-  it('announces pending fitting while leaving the control available', () => {
+  it('announces pending fitting while keeping the mode icon and control available', () => {
     const html = chrome({ onFitMode: vi.fn(), fitState: {
       selectedMode: 'width', effectiveMode: 'width', active: true, pending: true, fallback: false,
     } });
     expect(html).toContain('aria-label="Fit mode: Fitting…. Next: Fit text"');
     expect(html).toMatch(/<button[^>]*data-review-zoom-action="fit-width"[^>]*aria-busy="true"(?![^>]*disabled)[^>]*>/u);
+    const fitButton = html.match(/<button[^>]*data-review-zoom-action="fit-width"[^>]*>[\s\S]*?<\/button>/u)?.[0];
+    expect(fitButton).toContain('lucide-move-horizontal');
+    expect(fitButton).not.toContain('lucide-loader-circle');
   });
 
   it('clamps valid signed whole-number drafts and rejects malformed drafts', () => {

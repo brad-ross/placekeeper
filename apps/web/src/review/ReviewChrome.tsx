@@ -1,4 +1,4 @@
-import { useId, useLayoutEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react';
+import { useId, useLayoutEffect, useRef, useState, type MouseEvent, type PointerEvent, type ReactNode } from 'react';
 
 import {
   VIEWER_ZOOM_MAX_PERCENT,
@@ -196,6 +196,8 @@ export function ReviewChrome({
   const [fitOptionsOpen, setFitOptionsOpen] = useState(false);
   const fitButtonRef = useRef<HTMLButtonElement | null>(null);
   const fitOptionsRef = useRef<HTMLDivElement | null>(null);
+  const fitOptionsKeyboardOpenRef = useRef(false);
+  const fitOptionsDismissTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const fitChoiceFocusRef = useRef<'first' | 'last' | null>(null);
   const fitOptionsId = `review-fit-options-${useId().replaceAll(':', '')}`;
   const zoomInputRef = useRef<HTMLInputElement>(null);
@@ -243,12 +245,13 @@ export function ReviewChrome({
   const selectedFit = fitState?.selectedMode ?? 'width';
   const nextFit = FIT_MODES[(FIT_MODES.indexOf(selectedFit) + 1) % FIT_MODES.length]!;
   const fitActive = fitState?.active ?? fitWidthCurrent;
+  const fitAction = fitActive ? nextFit : selectedFit;
   const fitPending = fitState?.pending || fitRequestPending;
   const fitStatus = fitPending ? 'Fitting…'
     : !fitActive ? 'Custom zoom'
     : fitState?.fallback ? 'Fit width, no reliable text bounds'
     : FIT_LABELS[fitState?.effectiveMode ?? 'width'];
-  const fitLabel = onFitMode ? `Fit mode: ${fitStatus}. Next: ${FIT_LABELS[nextFit]}` : 'Fit width';
+  const fitLabel = onFitMode ? `Fit mode: ${fitStatus}. ${fitActive ? 'Next' : 'Apply'}: ${FIT_LABELS[fitAction]}` : 'Fit width';
   const runViewerActionAsync = async (action: () => void | Promise<void>) => {
     await beforeViewerAction?.();
     await action();
@@ -516,6 +519,19 @@ export function ReviewChrome({
     const choices = fitOptionsRef.current?.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]');
     (position === 'last' ? choices?.item(choices.length - 1) : choices?.item(0))?.focus({ preventScroll: true });
   };
+  const cancelFitOptionsDismiss = () => clearTimeout(fitOptionsDismissTimerRef.current);
+  const leaveFitOptions = (event: PointerEvent<HTMLElement>) => {
+    if (event.pointerType !== 'mouse' || fitOptionsKeyboardOpenRef.current) return;
+    const next = event.relatedTarget;
+    if (next instanceof Node && (fitButtonRef.current?.contains(next) || fitOptionsRef.current?.contains(next))) return;
+    cancelFitOptionsDismiss();
+    // Allow crossing the small gap between the button and its choices.
+    fitOptionsDismissTimerRef.current = setTimeout(() => setFitOptionsOpen(false), 140);
+  };
+  useLayoutEffect(() => {
+    if (!fitOptionsOpen) fitOptionsKeyboardOpenRef.current = false;
+    return cancelFitOptionsDismiss;
+  }, [fitOptionsOpen]);
   useLayoutEffect(() => {
     const focus = fitChoiceFocusRef.current;
     if (!fitOptionsOpen || focus === null) return;
@@ -783,11 +799,18 @@ export function ReviewChrome({
           aria-busy={fitPending ? 'true' : 'false'}
           aria-describedby={zoomUnavailable ?? (!fitWidthReady ? fitWidthUnavailableId : undefined)}
           disabled={!viewerState.zoomReady || !fitWidthReady}
-          onPointerEnter={(event) => { if (onFitMode && event.pointerType === 'mouse') setFitOptionsOpen(true); }}
+          onPointerEnter={(event) => {
+            if (!onFitMode || event.pointerType !== 'mouse') return;
+            cancelFitOptionsDismiss();
+            setFitOptionsOpen(true);
+          }}
+          onPointerLeave={leaveFitOptions}
           onKeyDown={(event) => {
             if (!onFitMode || !['ArrowDown', 'ArrowUp'].includes(event.key)) return;
             event.preventDefault();
             event.stopPropagation();
+            fitOptionsKeyboardOpenRef.current = true;
+            cancelFitOptionsDismiss();
             const focus = event.key === 'ArrowUp' ? 'last' : 'first';
             if (fitOptionsOpen) {
               focusFitChoice(focus);
@@ -799,8 +822,8 @@ export function ReviewChrome({
           onPointerDown={prepareZoomAction}
           onPointerUp={clearZoomActionIntent}
           onPointerCancel={clearZoomActionIntent}
-          onClick={(event) => runFit(event.currentTarget, nextFit)}
-        ><ReviewIcon name={fitPending ? 'loading' : FIT_ICONS[fitActive ? fitState?.effectiveMode ?? selectedFit : selectedFit]} /></ReviewTooltipButton>
+          onClick={(event) => runFit(event.currentTarget, fitAction)}
+        ><ReviewIcon name={FIT_ICONS[fitActive ? fitState?.effectiveMode ?? selectedFit : selectedFit]} /></ReviewTooltipButton>
         <ReviewTooltipButton label="Zoom out" type="button" role="menuitem" className="review-chrome__icon-control" data-review-zoom-action="out" aria-describedby={zoomUnavailable} disabled={!viewerState.zoomReady} onPointerDown={prepareZoomAction} onPointerUp={clearZoomActionIntent} onPointerCancel={clearZoomActionIntent} onClick={(event) => runZoomAction(event.currentTarget, () => controls?.zoomOut())}><ReviewIcon name="minus" /></ReviewTooltipButton>
         <ReviewTooltipButton label="Zoom in" type="button" role="menuitem" className="review-chrome__icon-control" data-review-zoom-action="in" aria-describedby={zoomUnavailable} disabled={!viewerState.zoomReady} onPointerDown={prepareZoomAction} onPointerUp={clearZoomActionIntent} onPointerCancel={clearZoomActionIntent} onClick={(event) => runZoomAction(event.currentTarget, () => controls?.zoomIn())}><ReviewIcon name="plus" /></ReviewTooltipButton>
       </div>
@@ -810,6 +833,18 @@ export function ReviewChrome({
         className="review-chrome__fit-options"
         role="menu"
         aria-label="PDF fit modes"
+        onPointerEnter={cancelFitOptionsDismiss}
+        onPointerLeave={leaveFitOptions}
+        onKeyDown={() => {
+          fitOptionsKeyboardOpenRef.current = true;
+          cancelFitOptionsDismiss();
+        }}
+        onBlur={(event) => {
+          const next = event.relatedTarget;
+          if (next instanceof Node && !event.currentTarget.contains(next) && !fitButtonRef.current?.contains(next)) {
+            setFitOptionsOpen(false);
+          }
+        }}
       >
         {FIT_MODES.map((mode) => <button
           key={mode}
@@ -827,7 +862,6 @@ export function ReviewChrome({
             setFitOptionsOpen(false);
           }}
         ><ReviewIcon name={FIT_ICONS[mode]} /><span>{FIT_LABELS[mode]}</span></button>)}
-        <p className="review-chrome__fit-status" role="status">{fitStatus}</p>
       </div> : null}
     </TopBarMenu>
   </span>;
