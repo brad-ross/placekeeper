@@ -4,7 +4,7 @@ import type { HostRuntimeCommand } from '../../apps/web/src/host/runtime.js';
 declare global {
   interface Window { runtimeFixture: { send(command: HostRuntimeCommand): void; reverseCalls(): number }; synctexFixture: {
     observations: { calls: number; cancellations: number; focuses: number[]; acknowledgements: string[]; errors: (string | null)[] };
-    render(token?: number): void; unmount(): void; settle(index: number, result: boolean): void;
+    render(token?: number, ready?: boolean): void; reverse(): Promise<unknown>; unmount(): void; settle(index: number, result: boolean): void;
   } }
 }
 const fixture = '/test/acceptance/synctex-harness/index.html';
@@ -68,3 +68,19 @@ test('accepts repeated forward commands after cancellation and inverse search', 
   await forward(1);
   await expect(currentPage).toHaveValue('2');
 });
+
+for (const ready of [false, true]) {
+  test(`point inverse retires ${ready ? 'in-flight' : 'queued'} forward navigation`, async ({ page }) => {
+    await page.goto(fixture);
+    await page.getByText('Hook mounted').waitFor();
+    await page.evaluate(isReady => window.synctexFixture.render(1, isReady), ready);
+    if (ready) await expect.poll(() => page.evaluate(() => window.synctexFixture.observations.calls)).toBe(1);
+    else await expect(page.getByText('Hook mounted')).toHaveAttribute('data-token', '1');
+    await page.evaluate(() => window.synctexFixture.reverse());
+    await expect.poll(() => page.evaluate(() => window.synctexFixture.observations.acknowledgements)).toEqual(['1:superseded']);
+    if (ready) await page.evaluate(() => window.synctexFixture.settle(0, true));
+    await page.evaluate(() => window.synctexFixture.render(1, true));
+    await page.evaluate(() => window.synctexFixture.unmount());
+    expect(await page.evaluate(() => window.synctexFixture.observations)).toMatchObject({ calls: ready ? 1 : 0, focuses: [], acknowledgements: ['1:superseded'] });
+  });
+}

@@ -20,18 +20,20 @@ const navigation = {
   focusAtDestination: (pageIndex: number) => { observations.focuses.push(pageIndex); },
   cancelPendingNavigation: async () => { observations.cancellations++; },
 } as unknown as PdfViewerNavigation;
-function Fixture({ request }: { request?: HostForwardSyncTexRequest }) {
+let reversePoint: (() => Promise<unknown>) | undefined;
+function Fixture({ request, ready }: { request?: HostForwardSyncTexRequest; ready: boolean }) {
   const stateRef = useRef(state), navigationRef = useRef(navigation);
-  useHostSyncTex({ hostForwardSyncTexRequest: request, onHostForwardSyncTexHandled: (value, outcome) => {
+  const reverse = useHostSyncTex({ hostForwardSyncTexRequest: request, onHostForwardSyncTexHandled: (value, outcome) => {
     observations.acknowledgements.push(`${value.token}:${outcome}`);
-  }, hostReverseSyncTexRequestToken: undefined, onReverseSyncTex: undefined }, state, stateRef,
-  navigation, navigationRef, 1, 1, 'idle', error => { observations.errors.push(error); });
-  return <p>Hook mounted</p>;
+  }, hostReverseSyncTexRequestToken: undefined, onReverseSyncTex: async () => ({ status: "opened" }) }, state, stateRef,
+  navigation, navigationRef, ready ? 1 : null, ready ? 1 : null, 'idle', error => { observations.errors.push(error); });
+  reversePoint = () => reverse({ pageIndex: 0, point: { x: 0, y: 0 } });
+  return <p data-token={request?.token}>Hook mounted</p>;
 }
-const render = (token?: number) => root.render(<Fixture {...(token === undefined ? {} : { request: {
+const render = (token?: number, ready = true) => root.render(<Fixture ready={ready} {...(token === undefined ? {} : { request: {
   token, documentGeneration: 1, pageIndex: token, point: { x: 10, y: 20 }, nativeSequence: token,
 } })} />);
-Object.assign(window, { synctexFixture: { observations, render, unmount: () => root.unmount(),
+Object.assign(window, { synctexFixture: { observations, render, reverse: () => reversePoint!(), unmount: () => root.unmount(),
   settle: (index: number, result: boolean) => pending[index]!(result) } });
 if (new URLSearchParams(location.search).has('runtime')) {
   const scope = { documentTitle: 'multi-page-text.pdf', launchSurface: 'vscode' as const };
