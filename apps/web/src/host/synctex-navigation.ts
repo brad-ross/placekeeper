@@ -32,7 +32,9 @@ export async function applyHostForwardSyncTex(
     readonly pageIndex: number;
     readonly point: { readonly x: number; readonly y: number };
   },
+  isCurrent: () => boolean = () => true,
 ): Promise<boolean> {
+  if (!isCurrent()) return false;
   if (!Number.isSafeInteger(request.pageIndex) || request.pageIndex < 0 ||
     !Number.isFinite(request.point.x) || request.point.x < 0 ||
     !Number.isFinite(request.point.y) || request.point.y < 0) return false;
@@ -44,7 +46,7 @@ export async function applyHostForwardSyncTex(
     anchor: request.point,
     alignment: { xPercent: 50, yPercent: 50 },
   });
-  if (applied) navigation.focusAtDestination(request.pageIndex);
+  if (applied && isCurrent()) navigation.focusAtDestination(request.pageIndex);
   return applied;
 }
 
@@ -56,7 +58,7 @@ export async function runHostForwardSyncTexRequest(
 ): Promise<void> {
   let applied = false;
   try {
-    applied = await applyHostForwardSyncTex(navigation, request);
+    applied = await applyHostForwardSyncTex(navigation, request, isCurrent);
   } catch {
     // A rejected viewer navigation is the same user-visible failure as a false result.
   }
@@ -65,7 +67,7 @@ export async function runHostForwardSyncTexRequest(
 
 function reverseSyncTexSucceeded(value: unknown): boolean {
   return typeof value === 'object' && value !== null &&
-    (value as { readonly status?: unknown }).status === 'ok';
+    ["ok", "opened"].includes(String((value as { readonly status?: unknown }).status));
 }
 
 export const REVERSE_SYNCTEX_GENERIC_ERROR = 'Reverse SyncTeX could not find a LaTeX source location.';
@@ -73,11 +75,23 @@ export const REVERSE_SYNCTEX_GENERIC_ERROR = 'Reverse SyncTeX could not find a L
 export function reverseSyncTexError(value: unknown): string | null {
   if (typeof value !== 'object' || value === null) return REVERSE_SYNCTEX_GENERIC_ERROR;
   const result = value as { readonly status?: unknown; readonly reason?: unknown };
-  if (result.status === 'ok') return null;
+  if (result.status === 'ok' || result.status === 'opened') return null;
+  if (result.status === 'setup-required') return 'Choose an editor and source folder in Placekeeper to enable source navigation.';
   if (result.reason === 'workspace-untrusted') {
     return 'Trust this workspace before using Reverse SyncTeX.';
   }
+  if (result.status === 'failed' && typeof result.reason === 'string' && result.reason !== 'failed') return reverseSyncTexError({ status: result.reason });
   switch (result.status) {
+    case 'editor-unavailable':
+      return 'The return editor is unavailable. Reopen it and register its current executable or Neovim socket, then retry.';
+    case 'editor-refused':
+      return 'The editor refused navigation. Save or resolve modified buffers in the editor, then retry.';
+    case 'editor-timeout':
+      return 'The return editor did not respond in time. Check that it is running, then retry.';
+    case 'editor-location-unsupported':
+      return 'This editor profile cannot represent the source path. Use a profile that passes the file as a separate argument.';
+    case 'editor-failed':
+      return 'The return editor could not open the source location. Check its profile and source file, then retry.';
     case 'missing':
       return 'SyncTeX data is missing. Rebuild the PDF with SyncTeX enabled.';
     case 'pending':

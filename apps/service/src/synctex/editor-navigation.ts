@@ -5,7 +5,7 @@ import { resolveSyncTexSourcePath } from "../files/source-scope.js";
 import { EditorProfiles, type EditorRegistration } from "./editor-profiles.js";
 
 export interface NativeEditorIntent {
-  readonly request: EditorForwardRequest;
+  readonly request: EditorForwardRequest | { readonly operation: "associate"; readonly pdfPath: string };
   readonly registration: EditorRegistration;
   readonly association: string;
   readonly sequence: number;
@@ -14,6 +14,7 @@ interface Destination {
   intent: NativeEditorIntent;
   pending: boolean;
   claimed: boolean;
+  followBlocked?: boolean;
   helperId?: string;
   appInstanceId?: string;
 }
@@ -24,7 +25,6 @@ interface Ticket {
 }
 const token = (): string => randomBytes(32).toString("base64url");
 
-/** Private daemon authority. Neither tickets nor registrations are public review links. */
 export class EditorNavigation {
   readonly #destinations = new Map<string, Destination>();
   readonly #tickets = new Map<string, Ticket>();
@@ -63,7 +63,7 @@ export class EditorNavigation {
     if (registration === undefined) throw new Error("Editor session expired; register the editor again");
     const pdfPath = await realpath(request.pdfPath);
     if (!(await stat(pdfPath)).isFile() || !pdfPath.toLowerCase().endsWith(".pdf")) throw new Error("PDF must be a local PDF file");
-    const source = await resolveSyncTexSourcePath(registration.sourceRoot, request.sourcePath);
+    await resolveSyncTexSourcePath(registration.sourceRoot, request.sourcePath);
     let synctexDirectory: string | undefined;
     if (request.synctexDirectory !== undefined) {
       synctexDirectory = await realpath(request.synctexDirectory);
@@ -71,22 +71,32 @@ export class EditorNavigation {
     }
     const previous = this.#destinations.get(pdfPath);
     if (previous !== undefined && previous.intent.sequence > sequence) throw new Error("Navigation was superseded by a newer request");
-    if (request.intent === "follow" && (previous === undefined || previous.pending ||
+    if (request.intent === "follow" && (previous === undefined || previous.pending || previous.followBlocked === true ||
       previous.intent.registration.handle !== registration.handle || previous.intent.association !== request.association)) {
       throw new Error("Follow request is stale or an explicit navigation is still pending");
     }
     const association = request.intent === "follow" ? previous!.intent.association : token();
-    const intent: NativeEditorIntent = { request: { ...request, pdfPath, sourcePath: source.path,
+    const intent: NativeEditorIntent = { request: { ...request, pdfPath,
       ...(synctexDirectory === undefined ? {} : { synctexDirectory }) }, registration, association, sequence };
     this.#destinations.set(pdfPath, { intent, pending: true, claimed: false,
       ...(previous?.helperId === undefined ? {} : { helperId: previous.helperId }),
       ...(previous?.appInstanceId === undefined ? {} : { appInstanceId: previous.appInstanceId }) });
     this.#expire();
-    // Superseded tickets cannot be redeemed, and should not keep the daemon busy.
     for (const [key, value] of this.#tickets) if (value.intent.request.pdfPath === pdfPath) this.#tickets.delete(key);
     const ticket = token();
     this.#tickets.set(ticket, { intent, expiresAt: this.now() + this.ticketLifetimeMs });
     return { ok: true, operation: "forward", ticket, association };
+  }
+
+  async associate(helperId: string, appInstanceId: string, pdfPath: string,
+    input: { profile: string; sourceRoot: string; socket?: string }, isLive: () => boolean): Promise<boolean> {
+    const sequence = ++this.#sequence;
+    const registration = await this.profiles.captureRegistration(input);
+    if (!isLive() || (this.#destinations.get(pdfPath)?.intent.sequence ?? 0) > sequence) return false;
+    const intent: NativeEditorIntent = { request: { operation: "associate", pdfPath }, registration, sequence, association: token() };
+    this.#retire(pdfPath);
+    this.#destinations.set(pdfPath, { intent, pending: false, claimed: true, helperId, appInstanceId });
+    return true;
   }
 
   redeem(ticket: string, appInstanceId: string, installationIdentity: string): { pdfPath: string; navigationHandle: string } | undefined {
@@ -113,7 +123,8 @@ export class EditorNavigation {
   }
 
   intentForHelper(helperId: string): NativeEditorIntent | undefined {
-    return [...this.#destinations.values()].find(value => value.claimed && value.helperId === helperId)?.intent;
+    for (const value of this.#destinations.values()) if (value.claimed && value.helperId === helperId) return value.intent;
+    return undefined;
   }
   isCurrent(intent: NativeEditorIntent): boolean {
     return this.#destinations.get(intent.request.pdfPath)?.intent === intent;
@@ -121,6 +132,13 @@ export class EditorNavigation {
   complete(intent: NativeEditorIntent): void {
     const destination = this.#destinations.get(intent.request.pdfPath);
     if (destination?.intent === intent) destination.pending = false;
+  }
+  interruptFollowing(intent: NativeEditorIntent): void {
+    const destination = this.#destinations.get(intent.request.pdfPath);
+    if (destination?.intent === intent) {
+      destination.pending = false;
+      destination.followBlocked = true;
+    }
   }
   detachHelper(helperId: string): void {
     for (const [path, value] of this.#destinations) if (value.helperId === helperId) this.#retire(path);

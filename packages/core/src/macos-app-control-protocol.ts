@@ -4,6 +4,9 @@ export const MACOS_APP_CONTROL_PROTOCOL_VERSION = 1 as const;
 const ID = /^[A-Za-z0-9_-]{8,128}$/u;
 
 export type MacosAppControlMessage =
+  | { readonly protocolVersion: 1; readonly type: "editor-profiles"; readonly appInstanceId: string }
+  | { readonly protocolVersion: 1; readonly type: "associate-editor"; readonly appInstanceId: string; readonly helperId: string;
+      readonly profile: string; readonly sourceRoot: string; readonly socket?: string }
   | { readonly protocolVersion: 1; readonly type: "bind-navigation"; readonly appInstanceId: string; readonly helperId: string; readonly navigationHandle: string }
   | { readonly protocolVersion: 1; readonly type: "redeem-navigation"; readonly appInstanceId: string; readonly ticket: string }
   | {
@@ -41,6 +44,8 @@ export type MacosAppControlMessage =
     };
 
 export type MacosAppControlResponse =
+  | { readonly protocolVersion: 1; readonly type: "editor-profiles"; readonly appInstanceId: string;
+      readonly profiles: readonly { readonly name: string; readonly kind: "command" | "neovim" }[] }
   | { readonly protocolVersion: 1; readonly type: "navigation"; readonly appInstanceId: string; readonly pdfPath: string; readonly navigationHandle: string }
   | { readonly protocolVersion: 1; readonly type: "navigation-unavailable"; readonly appInstanceId: string }
   | {
@@ -86,6 +91,11 @@ export function parseMacosAppControlMessage(value: unknown): MacosAppControlMess
   if (!record(value) || value.protocolVersion !== MACOS_APP_CONTROL_PROTOCOL_VERSION || !id(value.appInstanceId)) {
     return undefined;
   }
+  if (value.type === "editor-profiles") return exact(value, ["protocolVersion", "type", "appInstanceId"])
+    ? value as unknown as MacosAppControlMessage : undefined;
+  if (value.type === "associate-editor") return exact(value, ["protocolVersion", "type", "appInstanceId", "helperId", "profile", "sourceRoot",
+    ...(value.socket === undefined ? [] : ["socket"])]) && id(value.helperId) && typeof value.profile === "string" && /^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/u.test(value.profile)
+    && isEditorPath(value.sourceRoot) && (value.socket === undefined || isEditorPath(value.socket)) ? value as unknown as MacosAppControlMessage : undefined;
   if (value.type === "bind-navigation") return exact(value, ["protocolVersion", "type", "appInstanceId", "helperId", "navigationHandle"])
     && id(value.helperId) && isEditorToken(value.navigationHandle) ? value as unknown as MacosAppControlMessage : undefined;
   if (value.type === "redeem-navigation") return exact(value, ["protocolVersion", "type", "appInstanceId", "ticket"]) && isEditorToken(value.ticket)
@@ -127,6 +137,10 @@ export function parseMacosAppControlResponse(value: unknown): MacosAppControlRes
   if (!record(value) || value.protocolVersion !== MACOS_APP_CONTROL_PROTOCOL_VERSION || !id(value.appInstanceId)) {
     return undefined;
   }
+  if (value.type === "editor-profiles") return exact(value, ["protocolVersion", "type", "appInstanceId", "profiles"]) &&
+    Array.isArray(value.profiles) && value.profiles.every(profile => record(profile) && exact(profile, ["name", "kind"]) &&
+      typeof profile.name === "string" && /^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/u.test(profile.name) && ["command", "neovim"].includes(String(profile.kind)))
+    ? value as unknown as MacosAppControlResponse : undefined;
   if (value.type === "navigation") return exact(value, ["protocolVersion", "type", "appInstanceId", "pdfPath", "navigationHandle"])
     && isEditorPath(value.pdfPath) && isEditorToken(value.navigationHandle) ? value as unknown as MacosAppControlResponse : undefined;
   if (value.type === "ack" || value.type === "update-required" || value.type === "navigation-unavailable") {

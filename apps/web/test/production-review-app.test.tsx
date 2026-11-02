@@ -778,9 +778,10 @@ describe("one production review tree", () => {
       publishResult,
     );
     current = false;
-    resolveApply(false);
+    resolveApply(true);
     await request;
     expect(publishResult).not.toHaveBeenCalled();
+    expect(navigation.focusAtDestination).not.toHaveBeenCalled();
 
     await runHostForwardSyncTexRequest(
       { ...navigation, applyLocation: vi.fn(async () => { throw new Error("viewer replaced"); }) },

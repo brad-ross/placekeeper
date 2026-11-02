@@ -1,3 +1,4 @@
+import type { NativeForwardState } from "../../../packages/core/src/native-synctex-protocol.js";
 import { createRoot } from "react-dom/client";
 import {
   Component,
@@ -44,6 +45,16 @@ import {
   AccessibilityTransitionCoordinator,
   type AccessibilityTransitionEffect,
 } from "./app/accessibility-transitions.js";
+
+function nativeNavigationMessage(state: NativeForwardState): string | undefined {
+  if (state.status === "pending") return "Waiting for SyncTeX data for this PDF…";
+  if (state.status !== "failed") return undefined;
+  switch (state.reason) {
+    case "unavailable-tool": return "Install SyncTeX, then try navigating again.";
+    case "out-of-root": return "The source location is outside the selected source folder.";
+    default: return "Source navigation could not finish. Rebuild with SyncTeX enabled and try again.";
+  }
+}
 
 export async function resume(viewId: string, pathname: string): Promise<void> {
   await start(await resumeProductionSession(viewId, pathname));
@@ -535,6 +546,8 @@ export function RuntimeProductionReviewApp(props: {
   const [hostReattachRequestToken, setHostReattachRequestToken] = useState(0);
   const hostExportSequenceRef = useRef(0);
   const [hostExportRequest, setHostExportRequest] = useState<{ readonly token: number }>();
+  const forwardNavigationToken = useRef(0);
+  const [sourceNavigationMessage, setSourceNavigationMessage] = useState<string>();
   const [hostForwardSyncTexRequest, setHostForwardSyncTexRequest] = useState<HostForwardSyncTexRequest>();
   const [hostReverseSyncTexRequestToken, setHostReverseSyncTexRequestToken] = useState(0);
   const transitionCoordinator = useRef(new AccessibilityTransitionCoordinator());
@@ -570,6 +583,15 @@ export function RuntimeProductionReviewApp(props: {
     setRefreshStatus(snapshot.refreshStatus);
   }), [props.runtime, seed]);
   useEffect(() => props.runtime?.subscribeHostCommands?.((command) => {
+    if (command.command === "source-navigation") {
+      const state = command.state;
+      setSourceNavigationMessage(nativeNavigationMessage(state));
+      setHostForwardSyncTexRequest(state.status === "ready" ? {
+        token: ++forwardNavigationToken.current, nativeSequence: state.sequence,
+        documentGeneration: state.generation, pageIndex: state.pageIndex, point: state.point,
+      } : undefined);
+      return;
+    }
     if (command.command === "review-command") {
       setHostReviewCommand((current) => ({ id: command.id, token: (current?.token ?? 0) + 1 }));
       return;
@@ -586,12 +608,12 @@ export function RuntimeProductionReviewApp(props: {
       setHostReverseSyncTexRequestToken((token) => token + 1);
       return;
     }
-    setHostForwardSyncTexRequest((current) => ({
-      token: (current?.token ?? 0) + 1,
+    setHostForwardSyncTexRequest({
+      token: ++forwardNavigationToken.current,
       documentGeneration: command.documentGeneration,
       pageIndex: command.pageIndex,
       point: command.point,
-    }));
+    });
   }), [props.runtime]);
   useEffect(() => {
     const attemptId = props.transitionAttemptId;
@@ -643,7 +665,12 @@ export function RuntimeProductionReviewApp(props: {
     })}
     hostReverseSyncTexRequestToken={hostReverseSyncTexRequestToken}
     {...(hostForwardSyncTexRequest === undefined ? {} : { hostForwardSyncTexRequest })}
-    {...(props.runtime?.host === "vscode"
+    {...(sourceNavigationMessage === undefined ? {} : { sourceNavigationMessage })}
+    onHostForwardSyncTexHandled={(request, outcome) => {
+      if (request.nativeSequence !== undefined) void props.runtime?.forwardSyncTex({ action: "ack",
+        sequence: request.nativeSequence, generation: request.documentGeneration, outcome }).catch(() => {});
+    }}
+    {...(props.runtime?.host === "vscode" || props.runtime?.host === "macos"
       ? { onReverseSyncTex: (input: unknown) => props.runtime!.reverseSyncTex(input) }
       : {})}
     {...(props.initialPresentation === undefined ? {} : { initialPresentation: props.initialPresentation })}

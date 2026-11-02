@@ -10,6 +10,7 @@ final class PlacekeeperAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private struct RecoveryAttempt {
+        let intent: NativeOpenIntent
         let controller: RecoveryViewController
         let source: URL
         let packagedRoot: URL
@@ -390,6 +391,7 @@ final class PlacekeeperAppDelegate: NSObject, NSApplicationDelegate {
                 }
             )
             recoveryAttempts[windowID] = .init(
+                intent: intent,
                 controller: controller,
                 source: source,
                 packagedRoot: packagedRoot,
@@ -436,6 +438,14 @@ final class PlacekeeperAppDelegate: NSObject, NSApplicationDelegate {
                 }
                 recovery.controller.resolve()
                 self.recoveryAttempts.removeValue(forKey: windowID)
+                if let existingWindowID = self.windowRegistry.matchingWindow(canonicalReviewID: admission.projection.sessionID),
+                   let existing = self.controllers.first(where: { $0.windowID == existingWindowID }) {
+                    self.bindNavigation(recovery.intent, windowID: existingWindowID) {
+                        self.releaseCandidate(recovery.helper, windowID: windowID)
+                        existing.focus()
+                    }
+                    return
+                }
                 self.installDocumentWindow(
                     windowID: windowID,
                     source: recovery.source,
@@ -446,6 +456,7 @@ final class PlacekeeperAppDelegate: NSObject, NSApplicationDelegate {
                     admission: admission,
                     packagedAssets: packagedAssets
                 )
+                self.bindNavigation(recovery.intent, windowID: windowID) {}
             }
         }) != nil else {
             recovery.controller.failDecision()
@@ -507,11 +518,72 @@ final class PlacekeeperAppDelegate: NSObject, NSApplicationDelegate {
             presentCatastrophicFallback(documentName: source.lastPathComponent, sourceURL: source)
             return
         }
+        controller.onSourceSetup = { [weak self] completion in
+            guard let self else { completion(false); return }
+            self.configureSourceNavigation(windowID: windowID, completion: completion)
+        }
         controllers.append(controller)
         persistRestorableWindows()
         diagnostic("document-window-starting")
         updateActivity()
         controller.start()
+    }
+
+    private var configuringSource = false
+    private func configureSourceNavigation(windowID: String, completion: @escaping (Bool) -> Void) {
+        guard !configuringSource, let lifecycleControl,
+              let helperID = helperDetachLedger.helperID(windowID: windowID) else { completion(false); return }
+        configuringSource = true
+        let finish: (Bool) -> Void = { [weak self] success in self?.configuringSource = false; completion(success) }
+        guard lifecycleControl.request(type: "editor-profiles", completion: { [weak self] reply in
+            Task { @MainActor in
+                guard let self, self.helperDetachLedger.helperID(windowID: windowID) == helperID,
+                      case let .editorProfiles(profiles)? = reply else { finish(false); return }
+                let alert = NSAlert()
+                alert.messageText = "Configure Source Navigation"
+                if profiles.isEmpty {
+                    alert.informativeText = "Add an editor profile using Placekeeper’s installed editor command, then choose Configure Source Navigation again. See the editor setup guide for your editor."
+                    alert.addButton(withTitle: "OK")
+                    alert.runModal()
+                    finish(false)
+                    return
+                }
+                alert.informativeText = "Choose the editor to open LaTeX source. For Neovim, enter its listening socket path. Next, select the folder containing your source files."
+                alert.addButton(withTitle: "Choose Source Folder…")
+                alert.addButton(withTitle: "Cancel")
+                let accessory = NSView(frame: NSRect(x: 0, y: 0, width: 360, height: 66))
+                let editors = NSPopUpButton(frame: NSRect(x: 0, y: 36, width: 360, height: 26))
+                editors.addItems(withTitles: profiles.map(\.name))
+                let socket = NSTextField(frame: NSRect(x: 0, y: 0, width: 360, height: 24))
+                socket.placeholderString = "Neovim socket path (Neovim only)"
+                accessory.addSubview(editors)
+                accessory.addSubview(socket)
+                alert.accessoryView = accessory
+                guard alert.runModal() == .alertFirstButtonReturn else { finish(false); return }
+                let profile = profiles[editors.indexOfSelectedItem]
+                let panel = NSOpenPanel()
+                panel.title = "Choose LaTeX Source Folder"
+                panel.canChooseFiles = false
+                panel.canChooseDirectories = true
+                panel.allowsMultipleSelection = false
+                guard panel.runModal() == .OK, let root = panel.url,
+                      self.helperDetachLedger.helperID(windowID: windowID) == helperID else { finish(false); return }
+                var fields: [String: Any] = ["helperId": helperID, "profile": profile.name, "sourceRoot": root.path]
+                if profile.kind == "neovim" { fields["socket"] = socket.stringValue }
+                if !lifecycleControl.request(type: "associate-editor", fields: fields, completion: { reply in
+                    Task { @MainActor in
+                        let success = reply == .acknowledged
+                        if !success {
+                            let error = NSAlert()
+                            error.messageText = "Source navigation could not be configured"
+                            error.informativeText = "Check that the editor is available and the source folder and Neovim socket, if used, still exist."
+                            error.runModal()
+                        }
+                        finish(success)
+                    }
+                }) { finish(false) }
+            }
+        }) else { finish(false); return }
     }
 
     private func finishLaunch(_ intent: NativeOpenIntent) {

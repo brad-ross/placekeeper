@@ -1,5 +1,5 @@
 import { gzipSync } from "node:zlib";
-import { mkdtemp, realpath, rm, symlink, unlink, utimes, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm, symlink, unlink, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -223,6 +223,23 @@ describe("generation-bound SyncTeX navigation", () => {
     });
   });
 
+  it("preserves an approved absolute source alias used by the compiler", async () => {
+    const value = await generatedOutputFixture();
+    const aliasRoot = await mkdtemp(join(tmpdir(), "placekeeper-source-alias-"));
+    roots.push(aliasRoot);
+    await symlink(value.root, join(aliasRoot, "project"));
+    const alias = join(aliasRoot, "project", "paper.tex");
+    const result = await value.broker.forwardSyncTex({
+      sessionId: value.launch.sessionId, navigationAttachmentId: value.navigationAttachmentId,
+      operationToken: "source-alias", sourcePath: alias, line: 3,
+      run: async request => ({
+        stdout: request.argv[2] === `3:0:${alias}` ? `Output:${request.argv[4]}\nPage:1\nx:10\ny:20\n` : "",
+        stderr: "", exitCode: 0,
+      }),
+    });
+    expect(result.status).toBe("ok");
+  });
+
   it("selects the last forward rectangle when SyncTeX returns multiple targets on one page", async () => {
     const value = await generatedOutputFixture();
     const result = await value.broker.forwardSyncTex({
@@ -357,6 +374,20 @@ describe("generation-bound SyncTeX navigation", () => {
       run: async () => runResult,
     });
     expect(result.status).toBe(status);
+  });
+
+  it("isolates an explicitly selected mapping directory from the default presentation", async () => {
+    const value = await generatedOutputFixture({ sidecar: "missing" });
+    const mapping = join(value.root, "mapping data");
+    await mkdir(mapping);
+    await writeFile(join(mapping, "paper.synctex"), value.sidecarText);
+    const alternate = await value.broker.createNavigationAttachment(value.launch.sessionId, value.root, mapping);
+    const query = (navigationAttachmentId: string) => value.broker.forwardSyncTex({
+      sessionId: value.launch.sessionId, navigationAttachmentId, operationToken: "alternate", sourcePath: "paper.tex", line: 3,
+      run: async request => ({ stdout: `SyncTeX result begin\nOutput:${request.argv[request.argv.indexOf("-o") + 1]}\nPage:1\nx:10\ny:20\nSyncTeX result end\n`, stderr: "", exitCode: 0 }),
+    });
+    expect(await query(alternate)).toMatchObject({ status: "ok", target: { pageIndex: 0 } });
+    expect(await query(value.navigationAttachmentId)).toMatchObject({ status: "missing" });
   });
 
   it("distinguishes missing, pending, stale, and out-of-root availability", async () => {

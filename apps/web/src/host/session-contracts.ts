@@ -104,5 +104,6 @@ export interface ForwardSyncTexRequest {
 }
 
 export type HostForwardSyncTexRequest = ForwardSyncTexRequest & {
+  readonly nativeSequence?: number;
   readonly token: number;
 };

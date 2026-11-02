@@ -47,6 +47,20 @@ export class MacosAppLifecycleManager {
     if (message.type === "register-app") return this.#register(message);
     const app = this.#apps.get(message.appInstanceId);
     if (app === undefined) return this.#failure(message, "unregistered");
+    if (message.type === "editor-profiles") {
+      const profiles = await this.navigation?.profiles.list() ?? [];
+      return { protocolVersion: 1, type: "editor-profiles", appInstanceId: app.appInstanceId, profiles: profiles.map(({ name, kind }) => ({ name, kind })) };
+    }
+    if (message.type === "associate-editor") {
+      const path = app.helpers.has(message.helperId) ? this.helperPdfPath?.(message.helperId) : undefined;
+      try {
+        const accepted = path !== undefined && await this.navigation?.associate(message.helperId, app.appInstanceId, path,
+          { profile: message.profile, sourceRoot: message.sourceRoot, ...(message.socket === undefined ? {} : { socket: message.socket }) },
+          () => this.#apps.get(app.appInstanceId) === app && app.helpers.has(message.helperId) && this.helperPdfPath?.(message.helperId) === path);
+        if (accepted) return this.#ack(app.appInstanceId);
+      } catch {}
+      return { protocolVersion: 1, type: "navigation-unavailable", appInstanceId: app.appInstanceId };
+    }
     if (message.type === "bind-navigation") {
       const path = app.helpers.has(message.helperId) ? this.helperPdfPath?.(message.helperId) : undefined;
       const intent = path === undefined ? undefined : this.navigation?.claim(message.navigationHandle, app.appInstanceId, message.helperId, path);

@@ -6,7 +6,7 @@ import {
   type ReviewExportFence,
 } from "../../../../packages/core/src/review-runtime-protocol.js";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { lstat, open, readdir, readFile, realpath, rm, stat } from "node:fs/promises";
+import { copyFile, chmod, lstat, open, readdir, readFile, realpath, rm, stat } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { documentOrderedItems, projectReviewItems } from "../../../../packages/core/src/annotation-projection.js";
@@ -217,6 +217,7 @@ export class SessionBroker {
   readonly #openingByOutputPath = new Map<string, Promise<void>>();
   readonly #presentations = new PresentationRecords();
   readonly #navigationAttachments = new NavigationAttachments();
+  readonly #alternateSyncTex = new Map<string, Map<string, DurableGenerationRecordV1[]>>();
   readonly #recovery: RecoveryDecisions;
   readonly #stateInvalidationListeners = new Set<(event: SessionStateInvalidation) => void>();
   readonly #sessionEndListeners = new Set<(sessionId: string, reason: "ended" | "shutdown") => void>();
@@ -3273,7 +3274,7 @@ export class SessionBroker {
   }
 
   /** Called only by a trusted host after it has admitted its presentation. */
-  async createNavigationAttachment(sessionId: string, sourceRootPath?: string): Promise<string> {
+  async createNavigationAttachment(sessionId: string, sourceRootPath?: string, sidecarDirectoryPath?: string): Promise<string> {
     const session = this.#activeById.get(sessionId);
     if (session === undefined || session.ending) throw new Error("Review session is not active");
     let sourceRoot: string | undefined;
@@ -3283,7 +3284,9 @@ export class SessionBroker {
       this.capabilities.revokeRoot(approved.id);
     }
     if (session.ending) throw new Error("Review session is ending");
-    return this.#navigationAttachments.create(sessionId, sourceRoot);
+    const sidecarDirectory = sidecarDirectoryPath === undefined ? undefined : await realpath(sidecarDirectoryPath);
+    if (sidecarDirectory !== undefined && !(await stat(sidecarDirectory)).isDirectory()) throw new Error("SyncTeX directory is unavailable");
+    return this.#navigationAttachments.create(sessionId, sourceRoot, sidecarDirectory);
   }
 
   navigationAttachmentForCredential(sessionId: string, credential: string): string | undefined {
@@ -3311,9 +3314,30 @@ export class SessionBroker {
         current.generation !== session.state.workflow.documentGeneration ||
         current.digest !== session.state.source.digest
       ) return { status: "stale", operationToken, reason: "generation-lineage-is-not-current" };
+      let mappingCurrent = current;
+      let mappingLineage = session.generationLineage;
+      if (operation.sidecarDirectory !== undefined) {
+        let directories = this.#alternateSyncTex.get(sessionId);
+        if (directories === undefined) { directories = new Map(); this.#alternateSyncTex.set(sessionId, directories); }
+        let lineage = directories.get(operation.sidecarDirectory);
+        if (lineage === undefined) { lineage = []; directories.set(operation.sidecarDirectory, lineage); }
+        let cached = lineage.find(record => record.generation === current.generation);
+        if (cached === undefined) {
+          const directoryKey = createHash("sha256").update(operation.sidecarDirectory).digest("hex");
+          const snapshotPath = join(dirname(current.snapshotPath), `mapping-${directoryKey}-${current.generation}.pdf`);
+          await copyFile(current.snapshotPath, snapshotPath);
+          await chmod(snapshotPath, 0o600);
+          const { syncTex: _defaultMapping, ...withoutMapping } = current;
+          cached = { ...withoutMapping, snapshotPath };
+          lineage.push(cached);
+        }
+        mappingCurrent = cached;
+        mappingLineage = lineage;
+      }
       const preparation = prepareGenerationSyncTexBinding({
-        current,
-        lineage: session.generationLineage,
+        current: mappingCurrent,
+        lineage: mappingLineage,
+        ...(operation.sidecarDirectory === undefined ? {} : { sidecarDirectory: operation.sidecarDirectory }),
         outputPath: session.canonicalSourcePath,
         operationToken,
         getSourceRoot: () => operation.sourceRoot,
@@ -3322,6 +3346,11 @@ export class SessionBroker {
       if (!("binding" in prepared)) return prepared;
       if (prepared.attachment !== undefined) {
         const attachedSyncTex = prepared.attachment;
+        if (operation.sidecarDirectory !== undefined) {
+          this.#alternateSyncTex.get(sessionId)!.set(operation.sidecarDirectory,
+            mappingLineage.map(record => record.generation === current.generation ? { ...record, syncTex: attachedSyncTex } : record));
+          return prepared.binding;
+        }
         const generationLineage = session.generationLineage.map((record) =>
           record.generation === current.generation ? { ...record, syncTex: attachedSyncTex } : record
         );
@@ -3339,7 +3368,9 @@ export class SessionBroker {
       !this.#navigationAttachments.isCurrent(operation)
     ) return false;
     const current = session.generationLineage.at(-1);
-    return matchesGenerationSyncTexBinding(current, operation.sourceRoot, binding);
+    const mapping = operation.sidecarDirectory === undefined ? current
+      : this.#alternateSyncTex.get(operation.sessionId)?.get(operation.sidecarDirectory)?.find(record => record.generation === current?.generation);
+    return matchesGenerationSyncTexBinding(mapping, operation.sourceRoot, binding);
   }
 
   async forwardSyncTex(input: {
@@ -3869,6 +3900,7 @@ export class SessionBroker {
     this.#chromeSourceKeyBySession.clear();
     this.#presentations.clear();
     this.#navigationAttachments.clear();
+    this.#alternateSyncTex.clear();
     this.#interactionAttachments.clear();
     this.#recovery.clear();
   }
@@ -3887,6 +3919,7 @@ export class SessionBroker {
     if (session === undefined) return;
     session.ending = true;
     this.#navigationAttachments.revokeSession(sessionId);
+    this.#alternateSyncTex.delete(sessionId);
     this.controls.cancel(sessionId);
     this.interactions.revokeSession(sessionId);
     for (const key of this.#interactionAttachments.keys()) {

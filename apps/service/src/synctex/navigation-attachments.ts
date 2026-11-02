@@ -4,12 +4,14 @@ export interface NavigationOperation {
   readonly attachmentId: string;
   readonly sessionId: string;
   readonly sourceRoot?: string;
+  readonly sidecarDirectory?: string;
   readonly operationToken: string;
 }
 
 interface Attachment {
   readonly sessionId: string;
   readonly sourceRoot?: string;
+  readonly sidecarDirectory?: string;
   operation?: NavigationOperation;
 }
 
@@ -17,9 +19,9 @@ interface Attachment {
 export class NavigationAttachments {
   readonly #attachments = new Map<string, Attachment>();
 
-  create(sessionId: string, sourceRoot?: string): string {
+  create(sessionId: string, sourceRoot?: string, sidecarDirectory?: string): string {
     const id = randomUUID();
-    this.#attachments.set(id, { sessionId, ...(sourceRoot === undefined ? {} : { sourceRoot }) });
+    this.#attachments.set(id, { sessionId, ...(sourceRoot === undefined ? {} : { sourceRoot }), ...(sidecarDirectory === undefined ? {} : { sidecarDirectory }) });
     return id;
   }
 
@@ -31,7 +33,8 @@ export class NavigationAttachments {
     const attachment = this.#attachments.get(id);
     if (attachment?.sessionId !== sessionId) return undefined;
     const operation: NavigationOperation = { attachmentId: id, sessionId, operationToken,
-      ...(attachment.sourceRoot === undefined ? {} : { sourceRoot: attachment.sourceRoot }) };
+      ...(attachment.sourceRoot === undefined ? {} : { sourceRoot: attachment.sourceRoot }),
+      ...(attachment.sidecarDirectory === undefined ? {} : { sidecarDirectory: attachment.sidecarDirectory }) };
     attachment.operation = operation;
     return operation;
   }

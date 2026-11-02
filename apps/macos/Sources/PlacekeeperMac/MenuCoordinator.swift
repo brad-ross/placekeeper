@@ -149,6 +149,7 @@ final class MenuCoordinator: NSObject, NSMenuItemValidation, NSMenuDelegate {
     func refresh() { NSApplication.shared.mainMenu?.update() }
 
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        if menuItem.action == #selector(goToSource(_:)) || menuItem.action == #selector(configureSource(_:)) { return activeWindow() != nil }
         if menuItem.action == #selector(invokeAppZoom(_:)) {
             guard hasWebBackedWindows() else { return false }
             switch menuItem.tag {
@@ -208,6 +209,9 @@ final class MenuCoordinator: NSObject, NSMenuItemValidation, NSMenuDelegate {
         }
     }
 
+    @objc private func goToSource(_ sender: Any?) { activeWindow()?.goToSource() }
+    @objc private func configureSource(_ sender: Any?) { activeWindow()?.configureSourceNavigation() }
+
     @objc private func chooseDocument(_ sender: Any?) { openDocument() }
     @objc private func openRecent(_ sender: NSMenuItem) {
         if let url = sender.representedObject as? URL { openURL(url) }
@@ -240,6 +244,13 @@ final class MenuCoordinator: NSObject, NSMenuItemValidation, NSMenuDelegate {
         recentMenu.delegate = self
         recent.submenu = recentMenu
         menu.addItem(recent)
+        menu.addItem(.separator())
+        let source = NSMenuItem(title: "Go to Source", action: #selector(goToSource(_:)), keyEquivalent: "")
+        source.target = self
+        menu.addItem(source)
+        let setup = NSMenuItem(title: "Configure Source Navigation…", action: #selector(configureSource(_:)), keyEquivalent: "")
+        setup.target = self
+        menu.addItem(setup)
         menu.addItem(.separator())
         menu.addItem(commandItem(.saveOptions, key: "s", modifiers: [.command, .option]))
         menu.addItem(.separator())

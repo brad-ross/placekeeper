@@ -1566,6 +1566,23 @@ describe("host-neutral review runtime", () => {
     runtime.dispose();
   });
 
+  it("receives native source navigation without enabling unrelated host commands", () => {
+    let receive: (message: unknown) => void = () => {};
+    const runtime = createRpcHostRuntime({ runtimeId: "runtime_native_1234", postMessage: vi.fn(),
+      subscribe(listener) { receive = listener; return () => {}; } }, { host: "macos" });
+    const state = { status: "ready", sequence: 8, generation: 3, pageIndex: 2, point: { x: 5, y: 10 } };
+    const send = (payload: unknown) => receive({ protocol: REVIEW_RUNTIME_PROTOCOL, version: REVIEW_RUNTIME_VERSION,
+      kind: "event", event: "host-command", runtimeId: "runtime_native_1234", payload });
+    send({ command: "source-navigation", state });
+    const commands: unknown[] = [];
+    runtime.subscribeHostCommands?.(command => commands.push(command));
+    send({ command: "review-command", id: "undo" });
+    send({ command: "source-navigation", state: { ...state, point: { x: Infinity, y: 10 } } });
+    send({ command: "reverse-synctex" });
+    expect(commands).toEqual([{ command: "source-navigation", state }, { command: "reverse-synctex" }]);
+    runtime.dispose();
+  });
+
   it("replays a VS Code host command that arrives before the webview subscribes", () => {
     const listeners = new Set<(message: unknown) => void>();
     const runtime = createRpcHostRuntime({

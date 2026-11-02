@@ -1,3 +1,4 @@
+import { NativeSyncTex } from "../synctex/native-synctex.js";
 import { EditorNavigation } from "../synctex/editor-navigation.js";
 import { EditorProfiles } from "../synctex/editor-profiles.js";
 import type { NativeQualificationExperiments } from "../codex/native-qualification-experiments.js";
@@ -261,6 +262,7 @@ export class PlacekeeperHost {
     const macosRuntime = new MacosRuntimeManager(macosRuntimeBackend.authority());
     const editorNavigation = new EditorNavigation(new EditorProfiles(join(dirname(options.recoveryRoot), "editor-profiles.json")),
       process.env.PLACEKEEPER_INSTALL_ARTIFACT_IDENTITY ?? "development");
+    macosRuntime.navigation = new NativeSyncTex(broker, editorNavigation);
     const macosLifecycle = new MacosAppLifecycleManager(macosRuntime, editorNavigation, helperId => {
       const sessionId = macosRuntime.navigationSessionId(helperId);
       return sessionId === undefined ? undefined : broker.navigationSourcePath(sessionId);

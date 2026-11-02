@@ -56,6 +56,12 @@ export class EditorProfiles {
   }
 
   async register(input: EditorRegistrationRequest): Promise<EditorRegistration> {
+    const registration = await this.captureRegistration(input);
+    this.#registrations.set(registration.handle, registration);
+    return registration;
+  }
+
+  async captureRegistration(input: EditorRegistrationRequest): Promise<EditorRegistration> {
     if (parseEditorControlRequest({ ...input, operation: "register" }) === undefined) throw new Error("Invalid editor registration");
     const profile = (await this.list()).find(candidate => candidate.name === input.profile);
     if (profile === undefined) throw new Error(`Editor profile '${input.profile}' is not configured`);
@@ -71,7 +77,6 @@ export class EditorProfiles {
     const registration = Object.freeze({ handle, profile: Object.freeze(profile.kind === "command"
       ? { ...profile, args: Object.freeze([...profile.args]) } : profile), sourceRoot,
       ...(input.socket === undefined ? {} : { socket: input.socket }) });
-    this.#registrations.set(handle, registration);
     return registration;
   }
 

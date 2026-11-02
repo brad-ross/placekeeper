@@ -42,7 +42,7 @@ struct MacPageRuntimeRequest {
     private static let allowedMethods = Set([
         "bootstrap", "presence", "detach", "command", "beginInteraction", "finalizeInteraction",
         "releaseInteraction", "acknowledgeInteraction", "saveStatus", "saveProposal", "chooseCopy",
-        "chooseFolder", "chooseOriginal", "retrySave", "locateSave", "scope", "resolveReadingLocation",
+        "chooseFolder", "chooseOriginal", "retrySave", "locateSave", "scope", "forwardSyncTex", "reverseSyncTex", "resolveReadingLocation",
         "exportReviewedCopy",
     ])
     private static let sessionPattern = "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
@@ -70,6 +70,7 @@ final class ReviewBridge {
     private var installationToken = 0
     private var refreshBudgetFailureReported = false
     var successorInstaller: ((MacRuntimeProjection, @escaping (Bool) -> Void) -> Void)?
+    var onSourceSetup: ((@escaping (Bool) -> Void) -> Void)?
     var onRefreshBudgetExceeded: (() -> Void)?
     private let diagnosticsEnabled = ProcessInfo.processInfo.environment["PLACEKEEPER_MAC_DIAGNOSTICS"] == "1"
 
@@ -131,6 +132,15 @@ final class ReviewBridge {
                 guard let self else { return }
                 switch reply {
                 case let .result(method, payload) where method == request.method:
+                    if method == "reverseSyncTex", (payload as? [String: Any])?["status"] as? String == "setup-required",
+                       let setup = self.onSourceSetup {
+                        setup { [weak self] accepted in
+                            guard let self else { return }
+                            if accepted { self.handle(raw, send: send) }
+                            else { send(self.response(request, identity: request, payload: payload)) }
+                        }
+                        return
+                    }
                     send(self.response(request, identity: request, payload: payload))
                     self.refreshAfterMutation(method: method, send: send)
                 case .failure, nil:
@@ -253,13 +263,40 @@ final class ReviewBridge {
         }) != nil else { finishRefresh(success: false, send: send); return }
     }
 
+    private var navigationPollInFlight = false
+    private var lastNavigationState: NSDictionary?
+
+    private func pollNavigation(send: @escaping ([String: Any]) -> Void) {
+        guard activated, !navigationPollInFlight else { return }
+        navigationPollInFlight = true
+        let fields: [String: Any] = ["generation": projection.generation, "revision": projection.revision,
+                                     "method": "forwardSyncTex", "payload": ["action": "poll"]]
+        guard helper.request(type: "invoke", fields: fields, completion: { [weak self] reply in
+            Task { @MainActor in
+                guard let self else { return }
+                self.navigationPollInFlight = false
+                guard case let .result(method, payload)? = reply, method == "forwardSyncTex",
+                      let state = payload as? [String: Any] else { return }
+                let value = state as NSDictionary
+                guard self.lastNavigationState?.isEqual(value) != true else { return }
+                self.lastNavigationState = value
+                send(["protocol": "placekeeper.review-runtime", "version": 4, "kind": "event",
+                      "runtimeId": self.runtimeID, "event": "host-command",
+                      "payload": ["command": "source-navigation", "state": state]])
+            }
+        }) != nil else { navigationPollInFlight = false; return }
+    }
+
     private func finishRefresh(
         success: Bool,
         send: @escaping ([String: Any]) -> Void,
         completion: @escaping (Bool) -> Void = { _ in }
     ) {
         refreshInFlight = false
-        if success { refreshBudgetFailureReported = false }
+        if success {
+            refreshBudgetFailureReported = false
+            pollNavigation(send: send)
+        }
         completion(success)
         guard refreshPending else { return }
         refreshPending = false

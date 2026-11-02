@@ -30,6 +30,24 @@ async function fixture() {
 }
 
 describe("private native navigation handoff", () => {
+  it("configures a direct-open presentation only while its native helper is still owned", async () => {
+    const f = await fixture();
+    const lifecycle = new MacosAppLifecycleManager({ detach: async () => {} }, f.navigation, () => f.request.pdfPath);
+    await lifecycle.handle({ protocolVersion: 1, type: "register-app", appInstanceId: "app_00001", processId: 1,
+      startIdentity: "start_001", buildIdentity: "build_001" });
+    const setup = { protocolVersion: 1, type: "associate-editor", appInstanceId: "app_00001", helperId: "helper_direct", profile: "editor", sourceRoot: f.root };
+    expect((await lifecycle.handle(setup)).type).toBe("navigation-unavailable");
+    lifecycle.attachHelper("app_00001", "helper_direct");
+    expect((await lifecycle.handle(setup)).type).toBe("ack");
+    const intent = f.navigation.intentForHelper("helper_direct")!;
+    expect(intent.request.operation).toBe("associate");
+    expect((await lifecycle.handle({ ...setup, sourceRoot: "/missing-source-folder" })).type).toBe("navigation-unavailable");
+    expect(f.navigation.intentForHelper("helper_direct")).toBe(intent);
+    await lifecycle.handle({ protocolVersion: 1, type: "detach-helper", appInstanceId: "app_00001", helperId: "helper_direct" });
+    expect((await lifecycle.handle(setup)).type).toBe("navigation-unavailable");
+    expect(f.navigation.intentForHelper("helper_direct")).toBeUndefined();
+  });
+
   it("requires the matching installation, redeems once, and binds only the intended PDF and app", async () => {
     const f = await fixture(); const accepted = await f.accept();
     expect(f.navigation.redeem(accepted.ticket, "app_one", "wrong")).toBeUndefined();
@@ -89,6 +107,16 @@ describe("private native navigation handoff", () => {
     const intent = f.navigation.claim(redeemed.navigationHandle, "app_one", "helper_one", f.request.pdfPath)!;
     f.navigation.complete(intent);
     expect((await f.accept(follow)).association).toBe(first.association);
+  });
+  it("rejects captured following after inverse search without losing the return editor", async () => {
+    const f = await fixture(); const first = await f.accept();
+    const redeemed = f.navigation.redeem(first.ticket, "app_one", "development")!;
+    const intent = f.navigation.claim(redeemed.navigationHandle, "app_one", "helper_one", f.request.pdfPath)!;
+    f.navigation.interruptFollowing(intent);
+    expect(f.navigation.intentForHelper("helper_one")).toBe(intent);
+    expect((await f.navigation.control({ ...f.request, intent: "follow", association: first.association })).ok).toBe(false);
+    const next = await f.accept();
+    expect(next.association).not.toBe(first.association);
   });
   it("requires lifecycle registration and makes failed redemption nonfatal", async () => {
     const f = await fixture(); const accepted = await f.accept();

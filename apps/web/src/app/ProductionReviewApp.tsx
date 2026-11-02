@@ -544,6 +544,8 @@ export interface ProductionReviewAppProps {
   readonly hostExportRequestToken?: number;
   readonly onHostExportRequestHandled?: (token: number) => void;
   readonly hostForwardSyncTexRequest?: HostForwardSyncTexRequest;
+  readonly sourceNavigationMessage?: string;
+  readonly onHostForwardSyncTexHandled?: (request: HostForwardSyncTexRequest, outcome: "applied" | "superseded" | "failed") => void;
   readonly hostReverseSyncTexRequestToken?: number;
   readonly onReverseSyncTex?: (input: ReverseSyncTexRequest) => Promise<unknown>;
   readonly initialPresentation?: { readonly pageIndex?: number; readonly zoom?: number };
@@ -951,6 +953,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   viewerStateRef.current = viewerState;
   const requestReverseSyncTex = useHostSyncTex({
     hostForwardSyncTexRequest: props.hostForwardSyncTexRequest,
+    onHostForwardSyncTexHandled: props.onHostForwardSyncTexHandled,
     hostReverseSyncTexRequestToken: props.hostReverseSyncTexRequestToken,
     onReverseSyncTex: props.onReverseSyncTex,
   }, state, stateRef, mainNavigation, mainNavigationRef, mainNavigationReadyGeneration,
@@ -2570,7 +2573,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
         sectionLabelAt={sectionLabelAt}
         generationRefreshStatus={props.generationRefreshStatus ?? 'idle'}
         locationRestoreStatus={locationRestoreStatus}
-        toolError={pdfCopyError ?? commandError}
+        toolError={pdfCopyError ?? commandError ?? props.sourceNavigationMessage ?? null}
         commandNotice={commandNotice}
         commandModalOpen={(!exportOnly && destinationDialog !== null) || annotationExport.request !== null}
         {...(props.onCommandSurfaceChange === undefined
