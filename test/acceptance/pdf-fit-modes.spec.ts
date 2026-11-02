@@ -132,6 +132,17 @@ test('fits the whole page after height changes and reports a textless document f
   await expect(fitButton(page)).toHaveAttribute('data-fit-mode', 'width');
 });
 
+test('switches from text to whole-page fitting in a wide short viewport', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await page.goto('/test/acceptance/review-harness/?fit-modes=book');
+  await waitForStaticPdf(page);
+  await fit(page, 'text');
+  await fit(page, 'page');
+  const bounds = await mainPage(page).boundingBox();
+  const frame = await viewport(page).boundingBox();
+  expect(bounds!.height).toBeLessThan(frame!.height);
+});
+
 test('selection, page notes, and distant destinations follow shifted page geometry', async ({ page }) => {
   await openBook(page);
   await fit(page, 'text');

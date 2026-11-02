@@ -1359,6 +1359,9 @@ export function createViewerNavigation(
       let geometry = pageGeometry(viewer, visible.pageIndex, visible);
       if (geometry === null) return false;
       const { page, viewportRect, rotation } = geometry;
+      const scrollportBounds = geometry.viewportElement.getBoundingClientRect();
+      const scrollbarHeight = Math.max(0, scrollportBounds.height - geometry.viewportElement.clientHeight - 2 * (geometry.viewportElement.clientTop ?? 0));
+      const scrollbarWidth = Math.max(0, scrollportBounds.width - geometry.viewportElement.clientWidth - 2 * (geometry.viewportElement.clientLeft ?? 0));
       const rotatedPage = transformSize(page.size, rotation, 1);
       const marginsForMode = () => {
         const margins = fitWidthMargins(viewer);
@@ -1531,8 +1534,16 @@ export function createViewerNavigation(
         const liveFitMargins = marginsForMode();
         const liveFitGap = (liveFitMargins.left + liveFitMargins.right) / 2;
         const liveRequestedZoom = settledGeometry === null ? null : fitZoomFor(settledGeometry.viewportRect, liveFitGap);
+        // Fitting the whole page can remove scrollbars and enlarge the scrollport.
+        // The committed page already fits; keep it rather than undoing that valid fit.
+        const pageFitRemovedScrollbars = effectiveMode === 'page' && settledGeometry !== null
+          && liveRequestedZoom !== null && liveRequestedZoom >= requestedZoom
+          && settledGeometry.viewportRect.height >= viewportRect.height
+          && settledGeometry.viewportRect.height - viewportRect.height <= scrollbarHeight + coordinateTolerance
+          && settledGeometry.viewportRect.width >= viewportRect.width
+          && settledGeometry.viewportRect.width - viewportRect.width <= scrollbarWidth + coordinateTolerance;
         const targetMatchesLiveGeometry = liveRequestedZoom !== null
-          && Math.abs(liveRequestedZoom - requestedZoom) <= zoomTolerance;
+          && (Math.abs(liveRequestedZoom - requestedZoom) <= zoomTolerance || pageFitRemovedScrollbars);
         const boundedFit = liveRequestedZoom !== null && (
           liveRequestedZoom <= VIEWER_ZOOM_MIN_PERCENT / 100 + zoomTolerance
           || liveRequestedZoom >= VIEWER_ZOOM_MAX_PERCENT / 100 - zoomTolerance

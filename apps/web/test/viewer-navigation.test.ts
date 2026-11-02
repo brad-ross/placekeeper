@@ -290,6 +290,7 @@ function domRect(rect: RectState): DOMRect {
 function navigationHarness(options: {
   glyphRead?: () => Promise<PdfGlyphObject[]>;
   quantizeZoom?: boolean;
+  horizontalScrollbarHeight?: number;
   activeDocumentId?: string;
   classicScrollbarWidth?: number;
   constrainedHorizontal?: boolean;
@@ -378,7 +379,7 @@ function navigationHarness(options: {
       return options.viewportClientWidth
         ?? viewportRect.width - (options.classicScrollbarWidth ?? 0);
     },
-    get clientHeight() { return viewportRect.height; },
+    get clientHeight() { return viewportRect.height - (pageRect.width >= viewportRect.width ? options.horizontalScrollbarHeight ?? 0 : 0); },
     get scrollLeft() { return viewportScrollLeft; },
     get scrollTop() { return viewportScrollTop; },
     scrollTo(position: ScrollToOptions) {
@@ -967,6 +968,13 @@ describe('viewer navigation adapter', () => {
     expect(await harness.navigation.fitToMode?.('page')).toBe(true);
     expect(harness.navigation.getFitState?.().active).toBe(true);
     expect(harness.pageRect.height).toBeCloseTo(654.4);
+  });
+
+  it('keeps a whole-page fit when its zoom removes the horizontal scrollbar', async () => {
+    const harness = navigationHarness({ viewportGap: 10, horizontalScrollbarHeight: 15 });
+    expect(await harness.navigation.fitToMode?.('page')).toBe(true);
+    expect(harness.pageRect.height).toBeCloseTo(365);
+    expect(harness.navigation.getFitState?.().active).toBe(true);
   });
 
   it('fits within the visible reading height when the native scrollport extends below it', async () => {
