@@ -376,7 +376,7 @@ export async function startHttpServer(
       const readingLocationMatch = new RegExp(`^/s/(${UUID})/reading-location$`, "u").exec(pathname);
       const observeMatch = new RegExp(`^/s/(${UUID})/observe$`, "u").exec(pathname);
       const staleMatch = new RegExp(`^/s/(${UUID})/stale$`, "u").exec(pathname);
-      const syncTexMatch = new RegExp(`^/s/(${UUID})/synctex/(forward|reverse)$`, "u").exec(pathname);
+      const syncTexMatch = new RegExp(`^/s/(${UUID})/synctex/(forward|reverse|detach)$`, "u").exec(pathname);
       const interactionMatch = new RegExp(`^/s/(${UUID})/interactions/(begin|finalize|release|acknowledge)$`, "u").exec(pathname);
       const mutates = exchangeMatch !== null || resumeMatch !== null || reopenMatch || commandMatch !== null ||
         exportMatch !== null || observeMatch !== null || staleMatch !== null || syncTexMatch !== null || interactionMatch !== null ||
@@ -843,6 +843,16 @@ export async function startHttpServer(
           send(response, 405, "Method not allowed");
           return;
         }
+        const navigationAttachmentId = broker.navigationAttachmentForCredential(syncTexMatch[1]!, bearerCredential(request)!);
+        if (navigationAttachmentId === undefined) {
+          send(response, 403, "Source navigation requires an active trusted editor presentation");
+          return;
+        }
+        if (syncTexMatch[2] === "detach") {
+          broker.revokeNavigationAttachment(navigationAttachmentId);
+          sendJson(response, 200, {});
+          return;
+        }
         const body = await readJson(request) as Record<string, unknown>;
         if (typeof body.operationToken !== "string") {
           send(response, 400, "Invalid request");
@@ -855,7 +865,7 @@ export async function startHttpServer(
             return;
           }
           sendJson(response, 200, await broker.forwardSyncTex({
-            sessionId: syncTexMatch[1]!, operationToken: body.operationToken,
+            sessionId: syncTexMatch[1]!, navigationAttachmentId, operationToken: body.operationToken,
             sourcePath: body.sourcePath, line: body.line as number,
             ...(body.column === undefined ? {} : { column: body.column as number }),
           }));
@@ -869,7 +879,7 @@ export async function startHttpServer(
           return;
         }
         sendJson(response, 200, await broker.reverseSyncTex({
-          sessionId: syncTexMatch[1]!, operationToken: body.operationToken,
+          sessionId: syncTexMatch[1]!, navigationAttachmentId, operationToken: body.operationToken,
           pageIndex: body.pageIndex as number,
           point: { x: (body.point as { x: number }).x, y: (body.point as { y: number }).y },
         }));

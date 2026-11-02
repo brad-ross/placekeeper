@@ -87,3 +87,10 @@ Its identity changes independently of semantic edits; a source Document Generati
 The durable relationship between the desired annotation state and the state last verified in the Save Destination.
 
 Recoverable work need not yet be saved in the PDF, and a successful write of older annotation state does not make newer edits saved.
+
+## Source navigation
+
+### Return Editor
+The editor associated with one Placekeeper viewer for PDF-to-source navigation.
+
+For a shared native PDF window, the latest explicit editor navigation request sets this association; background refresh and automatic following do not change it. A directly opened viewer obtains an editor choice when reverse search first needs one. An embedded VS Code viewer retains its own host association.

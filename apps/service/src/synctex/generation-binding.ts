@@ -98,7 +98,6 @@ export function prepareGenerationSyncTexBinding(input: {
   })();
 }
 
-// The broker separately checks session lifetime and its newest operation token.
 export function matchesGenerationSyncTexBinding(
   current: DurableGenerationRecordV1 | undefined,
   sourceRoot: string | undefined,

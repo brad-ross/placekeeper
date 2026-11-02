@@ -720,8 +720,24 @@ describe("loopback HTTP boundary", () => {
       sourcePath: join(dirname(pdf), "paper.tex"),
       line: 1,
     }, { authorization: `Bearer ${credential}` });
-    expect(forward.status).toBe(200);
-    expect(await forward.json()).toMatchObject({ status: "out-of-root" });
+    expect(forward.status).toBe(403);
+    const editor = await broker.openReview({ pdfPath: pdf, surface: "vscode", workflowMode: "generated-output" });
+    if (editor.kind !== "focused") throw new Error("Expected existing review");
+    const editorExchange = await postJson(`${server.origin}/s/${launch.sessionId}/exchange`, {
+      capability: editor.launch.fragment.slice("#cap=".length),
+    });
+    const editorCredential = (await editorExchange.json() as { credential: string }).credential;
+    const editorHeaders = { authorization: `Bearer ${editorCredential}` };
+    const editorForward = await postJson(forwardUrl, {
+      operationToken: "editor_operation_1234", sourcePath: join(dirname(pdf), "paper.tex"), line: 1,
+      navigationAttachmentId: "renderer-cannot-select-attachment",
+    }, editorHeaders);
+    expect(editorForward.status).toBe(200);
+    expect(await editorForward.json()).toMatchObject({ status: "out-of-root" });
+    expect((await postJson(`${server.origin}/s/${launch.sessionId}/synctex/detach`, {}, editorHeaders)).status).toBe(200);
+    expect((await postJson(forwardUrl, {
+      operationToken: "detached_operation_1234", sourcePath: "paper.tex", line: 1,
+    }, editorHeaders)).status).toBe(403);
     expect(broker.state(launch.sessionId)?.workflow.freshness).toBe("current");
   });
 

@@ -195,6 +195,7 @@ export const suites: Record<string, TestStage[]> = {
         "apps/service/test/export-transaction.test.ts",
         "apps/service/test/replace-original.test.ts",
         "apps/service/test/synctex.test.ts",
+        "apps/service/test/navigation-admission.test.ts",
         "apps/service/test/task-binding-registry.test.ts",
         "apps/service/test/restart-reconnect-store.test.ts",
         "apps/service/test/launch-host.test.ts",

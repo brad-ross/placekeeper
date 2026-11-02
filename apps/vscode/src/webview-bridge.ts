@@ -584,6 +584,9 @@ export function createLoopbackRuntimeClient(options: LoopbackRuntimeClientOption
             ? { ...(trustedPayload as object), attachment: interactionAttachment ?? await attachmentReady.promise }
             : trustedPayload, signal);
       }
+      if ((method === "forwardSyncTex" || method === "reverseSyncTex") && (disposed || signal.aborted)) {
+        return { status: "stale", reason: "navigation-presentation-is-not-active" };
+      }
       if (method === "reverseSyncTex" && isObject(value) && value.status === "ok" &&
         isObject(value.target) && typeof value.target.path === "string" &&
         Number.isSafeInteger(value.target.line)) {
@@ -614,6 +617,8 @@ export function createLoopbackRuntimeClient(options: LoopbackRuntimeClientOption
       return () => invalidationListeners.delete(listener);
     },
     dispose() {
+      if (disposed) return;
+      void post("/synctex/detach", {}, AbortSignal.timeout(2_000)).catch(() => undefined);
       disposed = true;
       if (socketRetry !== undefined) clearTimeout(socketRetry);
       socket?.close();

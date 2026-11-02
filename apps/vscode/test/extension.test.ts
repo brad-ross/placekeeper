@@ -130,7 +130,7 @@ describe("VS Code local host adapter", () => {
     const module = { exports: {} as { activate(context: unknown): void } };
     try {
       runInNewContext(await readFile(resolve("apps/vscode/dist/extension.cjs"), "utf8"), {
-        module, exports: module.exports, Buffer, process, URL, URLSearchParams, AbortController,
+        module, exports: module.exports, Buffer, process, URL, URLSearchParams, AbortController, AbortSignal,
         setTimeout, clearTimeout, setInterval, clearInterval,
         require: (id: string) => id === "vscode" ? vscode : id === "node:child_process" ? { execFile } : require(id),
         fetch: async (input: string) => {
@@ -932,6 +932,26 @@ describe("VS Code local host adapter", () => {
     expect(forwardSyncTexStatus({ status: "ok", target: { pageIndex: 2, x: 10, y: 20 } }))
       .toBeUndefined();
     expect(forwardSyncTexStatus({ status: "other" })).toBeUndefined();
+  });
+
+  it("does not open a late reverse-search result after its panel closes", async () => {
+    const result = Promise.withResolvers<Response>();
+    const opened = vi.fn(async () => undefined);
+    const fetch = vi.fn(async (url: string | URL | Request) =>
+      String(url).endsWith("/synctex/detach") ? new Response("{}") : result.promise);
+    const client = createLoopbackRuntimeClient({
+      panelId: "panel_identifier_1234",
+      launch: { origin: "http://127.0.0.1:49152", sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", credential: "c".repeat(43) },
+      assets: { pdfiumWasm: "vscode-webview://authority/pdfium.wasm" },
+      materializeDocument: async () => "vscode-webview://authority/paper.pdf",
+      openSourceLocation: opened, fetch,
+    });
+    const pending = client.invoke("reverseSyncTex", { pageIndex: 0, point: { x: 1, y: 2 } }, new AbortController().signal);
+    client.dispose();
+    result.resolve(new Response(JSON.stringify({ status: "ok", target: { path: "/work/paper.tex", line: 12 } })));
+    await pending;
+    expect(opened).not.toHaveBeenCalled();
+    expect(fetch).toHaveBeenCalledWith(expect.stringContaining("/synctex/detach"), expect.anything());
   });
 
   it("does not run reverse SyncTeX for an untrusted workspace", async () => {

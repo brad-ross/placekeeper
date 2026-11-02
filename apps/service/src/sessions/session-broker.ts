@@ -1,3 +1,4 @@
+import { NavigationAttachments, type NavigationOperation } from "../synctex/navigation-attachments.js";
 import {
   ReviewExportConflictError,
   type ReadingLocationResolutionRequestV1,
@@ -215,6 +216,7 @@ export class SessionBroker {
   readonly #chromeSourceKeyBySession = new Map<string, string>();
   readonly #openingByOutputPath = new Map<string, Promise<void>>();
   readonly #presentations = new PresentationRecords();
+  readonly #navigationAttachments = new NavigationAttachments();
   readonly #recovery: RecoveryDecisions;
   readonly #stateInvalidationListeners = new Set<(event: SessionStateInvalidation) => void>();
   readonly #sessionEndListeners = new Set<(sessionId: string, reason: "ended" | "shutdown") => void>();
@@ -725,6 +727,7 @@ export class SessionBroker {
     session: ActiveSession,
     surface: ReviewPresentationSurface,
     requestedLocation?: PlacekeeperLinkLocation,
+    navigationSourceRoot?: string,
   ): SessionLaunch {
     // Native admission owns its own presentation and never uses HTTP launch authority.
     if (surface === "codex-native") {
@@ -738,6 +741,7 @@ export class SessionBroker {
       ? randomBytes(32).toString("base64url")
       : undefined;
     const launchScope: BrowserLaunchScope = {
+      ...(surface !== "vscode" || navigationSourceRoot === undefined ? {} : { navigationSourceRoot }),
       sessionId: session.id,
       documentGeneration: session.state.workflow.documentGeneration,
       surface,
@@ -983,11 +987,13 @@ export class SessionBroker {
       if (request.workflowMode !== undefined && request.workflowMode !== session.state.workflow.mode) {
         throw new Error("A review session workflow mode cannot be downgraded or changed");
       }
-      if (request.sourceRootPath !== undefined) await this.#attachSourceRoot(session, request.sourceRootPath);
+      const navigationSourceRoot = request.sourceRootPath === undefined
+        ? session.rootId === undefined ? undefined : this.capabilities.getRootPath(session.rootId)
+        : await this.#attachSourceRoot(session, request.sourceRootPath);
       await this.#localDocumentObserver.check(session.id, "reconnect");
       return {
         kind: "focused",
-        launch: this.#launch(session, request.surface ?? "browser", request.requestedLocation),
+        launch: this.#launch(session, request.surface ?? "browser", request.requestedLocation, navigationSourceRoot),
       };
     }
     const key = activeKey(approvedFile.canonicalPath, sourceDigest);
@@ -999,13 +1005,13 @@ export class SessionBroker {
       if (request.workflowMode !== undefined && request.workflowMode !== session.state.workflow.mode) {
         throw new Error("A review session workflow mode cannot be downgraded or changed");
       }
-      if (request.sourceRootPath !== undefined) {
-        await this.#attachSourceRoot(session, request.sourceRootPath);
-      }
+      const navigationSourceRoot = request.sourceRootPath === undefined
+        ? session.rootId === undefined ? undefined : this.capabilities.getRootPath(session.rootId)
+        : await this.#attachSourceRoot(session, request.sourceRootPath);
       await this.#localDocumentObserver.check(session.id, "reconnect");
       return {
         kind: "focused",
-        launch: this.#launch(session, request.surface ?? "browser", request.requestedLocation),
+        launch: this.#launch(session, request.surface ?? "browser", request.requestedLocation, navigationSourceRoot),
       };
     }
 
@@ -1244,7 +1250,7 @@ export class SessionBroker {
       if (resumePendingSave) this.#publishPhysicalSaveResume(session.id);
       return {
         kind: "opened",
-        launch: this.#launch(session, request.surface ?? "browser", request.requestedLocation),
+        launch: this.#launch(session, request.surface ?? "browser", request.requestedLocation, approvedRoot?.canonicalPath),
       };
     }
 
@@ -1314,7 +1320,7 @@ export class SessionBroker {
     }
     return {
       kind: "opened",
-      launch: this.#launch(session, request.surface ?? "browser", request.requestedLocation),
+      launch: this.#launch(session, request.surface ?? "browser", request.requestedLocation, approvedRoot?.canonicalPath),
     };
   }
 
@@ -1340,7 +1346,7 @@ export class SessionBroker {
     }
   }
 
-  async #attachSourceRoot(session: ActiveSession, sourceRootPath: string): Promise<void> {
+  async #attachSourceRoot(session: ActiveSession, sourceRootPath: string): Promise<string> {
     const approvedRoot = await this.capabilities.approveRoot(sourceRootPath);
     const predecessor = session.writeTail;
     const { promise, resolve: release } = Promise.withResolvers<void>();
@@ -1361,8 +1367,8 @@ export class SessionBroker {
       await session.store.persist(nextDraft);
       session.rootId = approvedRoot.id;
       session.state = nextState;
-      delete session.syncTexOperationToken;
       if (previousRootId !== undefined) this.capabilities.revokeRoot(previousRootId);
+      return approvedRoot.canonicalPath;
     } catch (error) {
       this.capabilities.revokeRoot(approvedRoot.id);
       throw error;
@@ -1449,6 +1455,9 @@ export class SessionBroker {
     this.controls.noteAuthenticatedPage(sessionId);
     this.#presentations.removeBootstrap(scopeKey);
     if (scope !== undefined && scope.sessionId === sessionId) {
+      if (scope.surface === "vscode") {
+        scope.navigationAttachmentId = this.#navigationAttachments.create(sessionId, scope.navigationSourceRoot);
+      }
       this.#presentations.recordCredentialScope(digestSecretHex(credential), scope);
       this.#presentations.notifyRestartReconnectExchange(scope.browserCapabilityHash);
       if (scope.surface === "codex") {
@@ -1686,14 +1695,15 @@ export class SessionBroker {
   revokeView(viewId: string): void {
     const view = this.#presentations.removeView(viewId);
     if (view === undefined) return;
-    this.credentials.revoke(view.sessionId, view.credential);
-    this.#presentations.removeCredentialScope(digestSecretHex(view.credential));
+    this.revokePresentationCredential(view.sessionId, view.credential);
   }
 
   /** Chrome runtime presentations authenticate through their native, tab-scoped
    * lease. Bootstrap credentials are exchanged only to close the ordinary
    * launch capability and are revoked before any projection leaves service code. */
   revokePresentationCredential(sessionId: string, credential: string): void {
+    const attachmentId = this.navigationAttachmentForCredential(sessionId, credential);
+    if (attachmentId !== undefined) this.revokeNavigationAttachment(attachmentId);
     this.credentials.revoke(sessionId, credential);
     this.#presentations.removeCredentialScope(digestSecretHex(credential));
   }
@@ -2819,7 +2829,6 @@ export class SessionBroker {
             generation: successorGeneration,
             inspection: Promise.resolve(inspected),
           });
-          delete session.syncTexOperationToken;
           this.#activate(session);
           this.credentials.revokePendingBootstraps(session.id);
           this.#presentations.removeSessionBootstraps(session.id);
@@ -3258,10 +3267,34 @@ export class SessionBroker {
     return result;
   }
 
+  /** Called only by a trusted host after it has admitted its presentation. */
+  async createNavigationAttachment(sessionId: string, sourceRootPath?: string): Promise<string> {
+    const session = this.#activeById.get(sessionId);
+    if (session === undefined || session.ending) throw new Error("Review session is not active");
+    let sourceRoot: string | undefined;
+    if (sourceRootPath !== undefined) {
+      const approved = await this.capabilities.approveRoot(sourceRootPath);
+      sourceRoot = approved.canonicalPath;
+      this.capabilities.revokeRoot(approved.id);
+    }
+    if (session.ending) throw new Error("Review session is ending");
+    return this.#navigationAttachments.create(sessionId, sourceRoot);
+  }
+
+  navigationAttachmentForCredential(sessionId: string, credential: string): string | undefined {
+    if (!this.authenticateSurface(sessionId, credential, "vscode")) return undefined;
+    const id = this.#presentations.credentialScope(digestSecretHex(credential))?.navigationAttachmentId;
+    return id !== undefined && this.#navigationAttachments.owns(id, sessionId) ? id : undefined;
+  }
+
+  revokeNavigationAttachment(id: string): void {
+    this.#navigationAttachments.revoke(id);
+  }
+
   async #prepareSyncTexBinding(
-    sessionId: string,
-    operationToken: string,
+    operation: NavigationOperation,
   ): Promise<GenerationSyncTexBinding | SyncTexUnavailableResult> {
+    const { sessionId, operationToken } = operation;
     const session = this.#activeById.get(sessionId);
     if (session === undefined || session.ending) {
       return { status: "stale", operationToken, reason: "review-session-is-not-active" };
@@ -3269,7 +3302,7 @@ export class SessionBroker {
     return this.#withSessionTail(session, async () => {
       const current = session.generationLineage.at(-1);
       if (
-        session.ending || current === undefined ||
+        session.ending || !this.#navigationAttachments.isCurrent(operation) || current === undefined ||
         current.generation !== session.state.workflow.documentGeneration ||
         current.digest !== session.state.source.digest
       ) return { status: "stale", operationToken, reason: "generation-lineage-is-not-current" };
@@ -3278,9 +3311,7 @@ export class SessionBroker {
         lineage: session.generationLineage,
         outputPath: session.canonicalSourcePath,
         operationToken,
-        getSourceRoot: () => session.rootId === undefined
-          ? undefined
-          : this.capabilities.getRootPath(session.rootId),
+        getSourceRoot: () => operation.sourceRoot,
       });
       const prepared = preparation instanceof Promise ? await preparation : preparation;
       if (!("binding" in prepared)) return prepared;
@@ -3292,26 +3323,23 @@ export class SessionBroker {
         await session.store.persist({ ...this.#draft(session), generationLineage });
         session.generationLineage = generationLineage;
       }
-      session.syncTexOperationToken = operationToken;
       return prepared.binding;
     });
   }
 
-  #isSyncTexBindingCurrent(sessionId: string, binding: GenerationSyncTexBinding): boolean {
-    const session = this.#activeById.get(sessionId);
+  #isSyncTexBindingCurrent(operation: NavigationOperation, binding: GenerationSyncTexBinding): boolean {
+    const session = this.#activeById.get(operation.sessionId);
     if (
       session === undefined || session.ending ||
-      session.syncTexOperationToken !== binding.operationToken
+      !this.#navigationAttachments.isCurrent(operation)
     ) return false;
     const current = session.generationLineage.at(-1);
-    const sourceRoot = session.rootId === undefined
-      ? undefined
-      : this.capabilities.getRootPath(session.rootId);
-    return matchesGenerationSyncTexBinding(current, sourceRoot, binding);
+    return matchesGenerationSyncTexBinding(current, operation.sourceRoot, binding);
   }
 
   async forwardSyncTex(input: {
     readonly sessionId: string;
+    readonly navigationAttachmentId: string;
     readonly operationToken: string;
     readonly sourcePath: string;
     readonly line: number;
@@ -3319,7 +3347,9 @@ export class SessionBroker {
     readonly run?: SyncTexRunner;
     readonly timeoutMs?: number;
   }): Promise<BrokerForwardSyncTexResult> {
-    const binding = await this.#prepareSyncTexBinding(input.sessionId, input.operationToken);
+    const operation = this.#navigationAttachments.begin(input.navigationAttachmentId, input.sessionId, input.operationToken);
+    if (operation === undefined) return { status: "stale", operationToken: input.operationToken, reason: "navigation-presentation-is-not-active" };
+    const binding = await this.#prepareSyncTexBinding(operation);
     if (!("privatePdfPath" in binding)) return binding;
     return queryForwardSyncTex({
       binding,
@@ -3328,19 +3358,22 @@ export class SessionBroker {
       ...(input.column === undefined ? {} : { column: input.column }),
       ...(input.run === undefined ? {} : { run: input.run }),
       ...(input.timeoutMs === undefined ? {} : { timeoutMs: input.timeoutMs }),
-      isCurrent: (candidate) => this.#isSyncTexBindingCurrent(input.sessionId, candidate),
+      isCurrent: (candidate) => this.#isSyncTexBindingCurrent(operation, candidate),
     });
   }
 
   async reverseSyncTex(input: {
     readonly sessionId: string;
+    readonly navigationAttachmentId: string;
     readonly operationToken: string;
     readonly pageIndex: number;
     readonly point: { readonly x: number; readonly y: number };
     readonly run?: SyncTexRunner;
     readonly timeoutMs?: number;
   }): Promise<BrokerReverseSyncTexResult> {
-    const binding = await this.#prepareSyncTexBinding(input.sessionId, input.operationToken);
+    const operation = this.#navigationAttachments.begin(input.navigationAttachmentId, input.sessionId, input.operationToken);
+    if (operation === undefined) return { status: "stale", operationToken: input.operationToken, reason: "navigation-presentation-is-not-active" };
+    const binding = await this.#prepareSyncTexBinding(operation);
     if (!("privatePdfPath" in binding)) return binding;
     return queryReverseSyncTex({
       binding,
@@ -3348,7 +3381,7 @@ export class SessionBroker {
       point: input.point,
       ...(input.run === undefined ? {} : { run: input.run }),
       ...(input.timeoutMs === undefined ? {} : { timeoutMs: input.timeoutMs }),
-      isCurrent: (candidate) => this.#isSyncTexBindingCurrent(input.sessionId, candidate),
+      isCurrent: (candidate) => this.#isSyncTexBindingCurrent(operation, candidate),
     });
   }
 
@@ -3830,6 +3863,7 @@ export class SessionBroker {
     this.#activeChromeBySource.clear();
     this.#chromeSourceKeyBySession.clear();
     this.#presentations.clear();
+    this.#navigationAttachments.clear();
     this.#interactionAttachments.clear();
     this.#recovery.clear();
   }
@@ -3847,6 +3881,7 @@ export class SessionBroker {
     const session = this.#activeById.get(sessionId);
     if (session === undefined) return;
     session.ending = true;
+    this.#navigationAttachments.revokeSession(sessionId);
     this.controls.cancel(sessionId);
     this.interactions.revokeSession(sessionId);
     for (const key of this.#interactionAttachments.keys()) {
