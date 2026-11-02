@@ -13,7 +13,8 @@ import { Scroller } from '@embedpdf/plugin-scroll/react';
 import { SelectionLayer } from '@embedpdf/plugin-selection/react';
 import { Viewport } from '@embedpdf/plugin-viewport/react';
 import { AnchoredZoomGestureWrapper as ZoomGestureWrapper } from './AnchoredZoomGestureWrapper.js';
-import { useContext, useMemo, useRef } from 'react';
+import { useContext, useMemo, useRef, useSyncExternalStore } from 'react';
+import { readingLayoutPadding, readingPageOffset, type TextFitLayout } from './text-fit-layout.js';
 import type { ReviewAnnotation } from '../../../../packages/core/src/pdf-writer.js';
 import type { PdfSearchResult } from './pdf-search-model.js';
 import type { ReferenceScrollPosition } from './reference-manual-scroll.js';
@@ -63,6 +64,8 @@ export interface PageContextMenuRequest {
 }
 
 export interface PdfWorkspaceProps {
+  readingLayout?: TextFitLayout;
+  onManualZoom?: () => void;
   resourceHost?: ViewerResourcePolicy['host'];
   engine: PdfEngine;
   plugins: PluginBatchRegistrations;
@@ -102,6 +105,8 @@ export interface PdfWorkspaceProps {
 const PDF_TEXT_SELECTION_STYLE = {
   background: 'var(--review-pdf-selection-bg)',
 } as const;
+const noReadingLayout = () => null;
+const noReadingSubscription = () => () => undefined;
 
 function groupByPageIndex<T extends { readonly pageIndex: number }>(
   items: readonly T[],
@@ -116,6 +121,8 @@ function groupByPageIndex<T extends { readonly pageIndex: number }>(
 }
 
 export function PdfWorkspace({
+  readingLayout,
+  onManualZoom,
   resourceHost = 'browser',
   engine,
   plugins,
@@ -146,6 +153,7 @@ export function PdfWorkspace({
   mainDestinationBand = null,
   referenceDestinationBand = null,
 }: PdfWorkspaceProps) {
+  const reading = useSyncExternalStore(readingLayout?.subscribe ?? noReadingSubscription, readingLayout?.getSnapshot ?? noReadingLayout);
   const previewLimit = useContext(MainDocumentPreviewLimit);
   const pressedPrimaryPointers = useRef(new Map<number, HTMLDivElement>());
   const contextPointers = useRef(new Set<number>());
@@ -206,6 +214,9 @@ export function PdfWorkspace({
             return <div className="pdf-workspace__loading" role="status"><ReviewIcon name="loading" />Loading local PDF…</div>;
           }
           const activePdf = mainDocument.document;
+          const readingBounds = reading?.document === activePdf && reading.generation === documentGeneration && reading.alignment === 'text'
+            ? reading.bounds : null;
+          const readingPadding = readingBounds ? readingLayoutPadding(activePdf.pages, readingBounds, mainDocument.rotation, mainDocument.scale) : 0;
           const pagePointFromClient = (
             pageIndex: number,
             element: HTMLDivElement,
@@ -247,9 +258,10 @@ export function PdfWorkspace({
               data-viewer-framing-viewport
             >
               <ZoomGestureWrapper
+                {...(onManualZoom === undefined ? {} : { onManualZoom })}
                 documentId={MAIN_PDF_DOCUMENT_ID}
                 data-viewer-framing-content
-                style={{ minHeight: '100%', minWidth: '100%', position: 'relative' }}
+                style={{ minHeight: '100%', minWidth: '100%', position: 'relative', paddingInline: readingPadding }}
               >
                 <MainDocumentPreviewBoundary>
                 <Scroller
@@ -418,6 +430,7 @@ export function PdfWorkspace({
                       }}
                       style={{
                         position: 'relative',
+                        transform: readingBounds ? `translateX(${readingPageOffset(activePdf.pages[layout.pageIndex]!, readingBounds[layout.pageIndex], mainDocument.rotation, mainDocument.scale)}px)` : undefined,
                         width: layout.rotatedWidth,
                         height: layout.rotatedHeight,
                         outline: 'none',

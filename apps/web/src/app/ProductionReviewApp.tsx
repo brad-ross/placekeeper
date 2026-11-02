@@ -2042,6 +2042,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     viewerRegistry.current = registry;
     viewerControlsRef.current?.dispose();
     const controls = createViewerControls(registry, {
+      onManualZoom: () => mainNavigationRef.current?.manualZoom?.(),
       viewport: () => productionRootRef.current?.querySelector<HTMLElement>(
         '.pdf-workspace:not(.pdf-workspace--reference) [data-viewer-framing-viewport]',
       ) ?? null,

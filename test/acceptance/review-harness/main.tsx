@@ -5,6 +5,7 @@ import { ProductionReviewApp } from '../../../apps/web/src/app/ProductionReviewA
 import type { ProductionSessionApi } from '../../../apps/web/src/host/session-contracts.js';
 import { RuntimeProductionReviewApp } from '../../../apps/web/src/production-entry.js';
 import type { HostRuntime, HostRuntimeBootstrap } from '../../../apps/web/src/host/runtime.js';
+import { createStaticHostRuntime } from '../../../apps/web/src/host/static-runtime.js';
 import { MemoryReviewLocationHistory } from '../../../apps/web/src/review/review-location-history.js';
 import { createPortal } from 'react-dom';
 import { useRef, useState, useSyncExternalStore } from 'react';
@@ -404,8 +405,9 @@ function createHarnessViewerControls(): HarnessViewerControls {
   const publishZoom = (zoomPercent: number) => {
     queueMicrotask(() => {
       if (!state.zoomReady) return;
+      const oldZoom = state.zoomPercent / 100;
       state = { ...state, zoomPercent };
-      for (const listener of listeners) listener({ type: 'zoom', zoomPercent });
+      for (const listener of listeners) listener({ type: 'zoom', zoomPercent, oldZoom, newZoom: zoomPercent / 100 });
     });
   };
 
@@ -1417,5 +1419,18 @@ function DeferredHostHistoryPreview() {
   </>;
 }
 
-createRoot(root).render(previewParameters.has('host-history') ? <DeferredHostHistoryPreview />
-  : previewParameters.has('host-reattach') ? <HostReattachmentPreview /> : <Harness />);
+const reactRoot = createRoot(root);
+if (previewParameters.has('fit-modes')) {
+  root.setAttribute('data-production-root', 'true');
+  const filename = previewParameters.get('fit-modes') === 'scan' ? 'image-only.pdf' : 'fit-text-book.pdf';
+  void fetch(`/test/fixtures/pdfs/${filename}`).then(async (response) => {
+    const runtime = await createStaticHostRuntime({
+      source: { name: filename, bytes: new Uint8Array(await response.arrayBuffer()) },
+      viewerAssets: { pdfiumWasm: '/dist/web/pdfium.wasm', workerUrl: '/dist/web/pdfium-worker.js' },
+    });
+    reactRoot.render(<RuntimeProductionReviewApp runtime={runtime} />);
+  }).catch((error: unknown) => reactRoot.render(<div role="alert">{String(error)}</div>));
+} else {
+  reactRoot.render(previewParameters.has('host-history') ? <DeferredHostHistoryPreview />
+    : previewParameters.has('host-reattach') ? <HostReattachmentPreview /> : <Harness />);
+}

@@ -53,6 +53,11 @@ The same annotation can appear on multiple surfaces; shared annotation identity 
 
 ## Review toolbar
 
+### Fit Text
+A reading view that fits the body-text block to the usable viewport at a shared zoom and centers each page by its reading area rather than its page edges.
+
+Text-centered alignment can remain after manual zoom, even though the zoom percentage is then custom rather than an active fit.
+
 ### Toolbar Presentation
 One of an ordered set of compositions for the single-row review toolbar, from all control groups shown directly to groups tucked behind compact triggers, chosen by measuring what actually fits rather than by fixed breakpoints.
 *Avoid:* Responsive Toolbar Presentation, toolbar mode

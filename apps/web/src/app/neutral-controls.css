@@ -114,7 +114,7 @@
   overflow: hidden;
   font-size: 13px;
   font-weight: 400;
-  line-height: 1.2;
+  line-height: 20px;
 }
 
 .review-chrome__filename {
@@ -228,6 +228,7 @@
 
 .review-chrome button:hover:not(:disabled),
 .review-chrome__main-history-control[aria-busy="true"]:hover,
+.top-bar-menu__surface .review-chrome__fit-width[aria-expanded="true"]:not(:disabled),
 .top-bar-menu__surface button:hover:not(:disabled) {
   border-color: transparent;
   color: var(--pk-ink);
@@ -372,6 +373,31 @@
 }
 
 .top-bar-menu__surface .review-chrome__control-cluster { gap: 2px; }
+
+.review-chrome__fit-width[data-fit-active="false"] { color: var(--pk-muted); }
+
+.review-chrome__fit-options {
+  display: flex;
+  flex-direction: column;
+  width: 0;
+  min-width: 100%;
+  margin-top: 5px;
+  padding-top: 5px;
+  border-top: 1px solid var(--pk-border);
+}
+
+.top-bar-menu__surface .review-chrome__fit-option {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 6px;
+  min-height: 32px;
+  padding: 5px 8px;
+  font: inherit;
+  white-space: nowrap;
+}
+
+.review-chrome__fit-option[aria-checked="true"] { background: var(--pk-selected); }
 
 .top-bar-menu__surface [data-review-horizontal-lock][aria-checked="true"] {
   background: var(--pk-selected);
