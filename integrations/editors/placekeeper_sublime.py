@@ -1,4 +1,3 @@
-"""Unverified Sublime Text command recipe; configure the three project settings first."""
 import subprocess
 import sublime
 import sublime_plugin

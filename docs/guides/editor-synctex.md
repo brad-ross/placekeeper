@@ -2,7 +2,7 @@
 
 The native Mac app accepts source-to-PDF requests through its installed command and returns PDF locations to a locally configured editor. The embedded VS Code panel keeps its own editor association. Automatic PDF refresh preserves reading position and zoom; following a saved source cursor after a build is off by default.
 
-These are integration recipes, not completed editor acceptance results. The [acceptance record](../../test/acceptance/editor-synctex.md) separates installed-app checks from hands-on VS Code, Zed, and Neovim checks. Sublime Text and Emacs remain unverified.
+These are integration recipes, not completed editor acceptance results. The [acceptance record](https://github.com/brad-ross/placekeeper/blob/feat/2026-11-02-1033-feat-editor-independent-synctex-plan-pr3/test/acceptance/editor-synctex.md) separates installed-app checks from hands-on VS Code, Zed, and Neovim checks. Sublime Text and Emacs remain unverified.
 
 ## Install and build
 
@@ -68,7 +68,7 @@ The command prints an opaque association token when accepted. Exit status 0 mean
 
 For mapping data stored separately from the PDF, append `--synctex-directory '/absolute/mapping folder'`. The mapping must have the root PDF's stem (`main.synctex` or `main.synctex.gz`). Placekeeper snapshots the matching PDF and mapping together and isolates that choice from other presentations. Do not leave both compressed and uncompressed mappings in the selected folder.
 
-Relative CLI paths resolve against the caller's working directory. Configuration files should use absolute paths: they do not expand `~`, `$HOME`, or shell expressions. Lines and optional columns are one-based positive integers.
+SyncTeX matches the source path spelling recorded by the compiler. When a project is opened through a directory alias or symbolic link (for example `/tmp` versus `/private/tmp`), use the compiler's absolute source path, or rebuild using the path your editor supplies. Relative CLI paths resolve against the process working directory, which macOS may canonicalize. Configuration files should use absolute paths: they do not expand `~`, `$HOME`, or shell expressions. Lines and optional columns are one-based positive integers.
 
 After a service restart or app update, register again and replace the old handle in editor settings. Do not commit live handles or machine-specific paths to a shared project. A stale handle fails rather than falling back to another editor.
 

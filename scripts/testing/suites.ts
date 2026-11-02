@@ -360,7 +360,8 @@ export const suites: Record<string, TestStage[]> = {
         "test/acceptance/reference-annotation-stale-commands.spec.ts",
         "test/acceptance/reattachment-tray.spec.ts",
         "test/acceptance/automatic-pdf-refresh.spec.ts",
-        "test/acceptance/authoring-lifecycle-regressions.spec.ts"
+        "test/acceptance/authoring-lifecycle-regressions.spec.ts",
+        "test/acceptance/synctex-lifecycle.spec.ts"
       ]
     }
   ],
@@ -390,7 +391,8 @@ export const suites: Record<string, TestStage[]> = {
         "test/acceptance/reference-annotation-stale-commands.spec.ts",
         "test/acceptance/reattachment-tray.spec.ts",
         "test/acceptance/automatic-pdf-refresh.spec.ts",
-        "test/acceptance/authoring-lifecycle-regressions.spec.ts"
+        "test/acceptance/authoring-lifecycle-regressions.spec.ts",
+        "test/acceptance/synctex-lifecycle.spec.ts"
       ]
     }
   ],
@@ -529,7 +531,8 @@ export const suites: Record<string, TestStage[]> = {
         "test/acceptance/reference-annotation-stale-commands.spec.ts",
         "test/acceptance/reattachment-tray.spec.ts",
         "test/acceptance/automatic-pdf-refresh.spec.ts",
-        "test/acceptance/authoring-lifecycle-regressions.spec.ts"
+        "test/acceptance/authoring-lifecycle-regressions.spec.ts",
+        "test/acceptance/synctex-lifecycle.spec.ts"
       ]
     }
   ],
@@ -558,7 +561,8 @@ export const suites: Record<string, TestStage[]> = {
         "test/acceptance/reference-annotations.spec.ts",
         "test/acceptance/reference-annotation-stale-commands.spec.ts",
         "test/acceptance/reattachment-tray.spec.ts",
-        "test/acceptance/authoring-lifecycle-regressions.spec.ts"
+        "test/acceptance/authoring-lifecycle-regressions.spec.ts",
+        "test/acceptance/synctex-lifecycle.spec.ts"
       ]
     }
   ],

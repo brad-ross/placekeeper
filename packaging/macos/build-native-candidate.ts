@@ -307,6 +307,7 @@ export async function validateNativeCandidateBundle(
     resolve(resources, "installer/setup-chrome.mjs"),
     resolve(resources, "installer/update-vscode.mjs"),
     resolve(resources, "integrations/placekeeper.vsix"),
+    ...["texlab.json", "zed-tasks.json", "placekeeper.lua", "placekeeper.el", "placekeeper_sublime.py", "guide.md"].map(name => resolve(resources, "integrations/editors", name)),
     resolve(resources, "integrations/.agents/plugins/marketplace.json"),
   ];
   for (const path of required) await access(path);

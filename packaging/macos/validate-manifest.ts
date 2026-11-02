@@ -222,6 +222,7 @@ export interface AppBundleManifest {
     readonly vscodeExtension: string;
     readonly chromeExtension: string;
     readonly chromeNativeWrapper: string;
+    readonly editorIntegrations: string;
   };
   readonly distribution: { readonly mode: "source-first"; readonly signingRequired: false };
   readonly signing: { readonly hardenedRuntime: true; readonly secureTimestamp: true; readonly entitlements: string };
@@ -592,10 +593,11 @@ export function validateAppBundleManifest(value: unknown): AppBundleManifest {
     vscodeExtension: boundedString(rawEmbeddedArtifacts.vscodeExtension, "VS Code extension artifact"),
     chromeExtension: boundedString(rawEmbeddedArtifacts.chromeExtension, "Chrome extension artifact"),
     chromeNativeWrapper: boundedString(rawEmbeddedArtifacts.chromeNativeWrapper, "Chrome native wrapper artifact"),
+    editorIntegrations: boundedString(rawEmbeddedArtifacts.editorIntegrations, "Editor integrations artifact"),
   };
   if (Object.keys(rawEmbeddedArtifacts).some((name) =>
-    !["codexPlugin", "vscodeExtension", "chromeExtension", "chromeNativeWrapper"].includes(name))) {
-    throw new Error("Only the reviewed Codex, VS Code, and Chrome integration artifacts may be embedded");
+    !["codexPlugin", "vscodeExtension", "chromeExtension", "chromeNativeWrapper", "editorIntegrations"].includes(name))) {
+    throw new Error("Only the reviewed Codex, VS Code, Chrome, and editor integration artifacts may be embedded");
   }
   requiredValue(root.finderExecutable, "droplet", "Finder executable");
   if (Object.values(embeddedArtifacts).some((path) => path.startsWith("/") || path.split("/").includes(".."))) {

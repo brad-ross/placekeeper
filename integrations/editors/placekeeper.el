@@ -18,4 +18,3 @@
     (unless (eq status 0) (display-buffer output))))
 
 (provide 'placekeeper)
-;;; placekeeper.el ends here

@@ -5,7 +5,9 @@
   "bundleIdentifier": "local.placekeeper",
   "bundleVersion": "0.2.4",
   "minimumSystemVersion": "13.0",
-  "architectures": ["arm64"],
+  "architectures": [
+    "arm64"
+  ],
   "nodeVersion": "24.14.0",
   "executable": "placekeeper",
   "finderExecutable": "droplet",
@@ -26,7 +28,8 @@
     "codexPlugin": "integrations/codex-plugin",
     "vscodeExtension": "apps/vscode",
     "chromeExtension": "apps/chrome-extension/dist",
-    "chromeNativeWrapper": "packaging/macos/chrome-native-host.sh"
+    "chromeNativeWrapper": "packaging/macos/chrome-native-host.sh",
+    "editorIntegrations": "integrations/editors"
   },
   "distribution": {
     "mode": "source-first",

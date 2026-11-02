@@ -185,7 +185,7 @@ describe("macOS distribution manifests", () => {
     expect(plist).toContain("<key>CFBundleIconFile</key><string>Placekeeper</string>");
     expect(plist).toContain("<key>CFBundleURLTypes</key><array><dict>");
     expect(plist).toContain("<key>CFBundleURLName</key><string>local.placekeeper.review-link</string>");
-    expect(plist).toContain("<key>CFBundleURLSchemes</key><array><string>placekeeper</string></array>");
+    expect(plist).toContain("<key>CFBundleURLSchemes</key><array><string>placekeeper</string><string>placekeeper-navigation</string></array>");
     expect(infoPlistStrings(manifest)).toBe(
       '"CFBundleDisplayName" = "Placekeeper";\n"CFBundleName" = "Placekeeper";\n',
     );

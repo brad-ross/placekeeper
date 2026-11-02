@@ -281,6 +281,7 @@ export async function buildMacApp(options: BuildOptions): Promise<string> {
   const codexPlugin = resolve(repoRoot, appManifest.embeddedArtifacts.codexPlugin);
   const chromeExtension = resolve(repoRoot, appManifest.embeddedArtifacts.chromeExtension);
   const chromeNativeWrapper = resolve(repoRoot, appManifest.embeddedArtifacts.chromeNativeWrapper);
+  const editorIntegrations = resolve(repoRoot, appManifest.embeddedArtifacts.editorIntegrations);
   const iconMaster = resolve(repoRoot, appManifest.icon.master);
   const iconset = resolve(repoRoot, appManifest.icon.source);
   for (const required of [
@@ -307,6 +308,8 @@ export async function buildMacApp(options: BuildOptions): Promise<string> {
     resolve(chromeExtension, "popup.html"),
     resolve(chromeExtension, "background.js"),
     chromeNativeWrapper,
+    ...["texlab.json", "zed-tasks.json", "placekeeper.lua", "placekeeper.el", "placekeeper_sublime.py"].map(name => resolve(editorIntegrations, name)),
+    resolve(repoRoot, "docs/guides/editor-synctex.md"),
     iconMaster,
   ]) await access(required);
   await validateMacIconSet(iconset);
@@ -338,6 +341,8 @@ export async function buildMacApp(options: BuildOptions): Promise<string> {
   await cp(codexMcpDist, resolve(resources, "codex-mcp"), { recursive: true, errorOnExist: true });
   await cp(options.webDist, resolve(resources, "web"), { recursive: true, errorOnExist: true });
   await cp(codexPlugin, resolve(resources, "integrations/codex-plugin"), { recursive: true, errorOnExist: true });
+  await cp(editorIntegrations, resolve(resources, "integrations/editors"), { recursive: true, errorOnExist: true });
+  await copyFile(resolve(repoRoot, "docs/guides/editor-synctex.md"), resolve(resources, "integrations/editors/guide.md"));
   // Keep every optional setup dependency in the durable installed bundle.
   const installer = resolve(resources, "installer");
   await mkdir(installer, { recursive: true, mode: 0o755 });
