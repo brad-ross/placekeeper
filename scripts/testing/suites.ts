@@ -196,6 +196,8 @@ export const suites: Record<string, TestStage[]> = {
         "apps/service/test/replace-original.test.ts",
         "apps/service/test/synctex.test.ts",
         "apps/service/test/navigation-admission.test.ts",
+        "apps/service/test/editor-navigation.test.ts",
+        "packages/core/test/editor-navigation-protocol.test.ts",
         "apps/service/test/task-binding-registry.test.ts",
         "apps/service/test/restart-reconnect-store.test.ts",
         "apps/service/test/launch-host.test.ts",
@@ -217,6 +219,8 @@ export const suites: Record<string, TestStage[]> = {
       "runner": "vitest",
       "options": [],
       "files": [
+        "apps/service/test/editor-navigation.test.ts",
+        "packages/core/test/editor-navigation-protocol.test.ts",
         "apps/service/test/session-security.test.ts",
         "apps/service/test/review-interactions.test.ts",
         "apps/service/test/recovery.test.ts",
