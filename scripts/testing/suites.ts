@@ -231,6 +231,7 @@ export const suites: Record<string, TestStage[]> = {
       "options": [],
       "files": [
         "apps/web/test/text-reliability.test.ts",
+        "apps/web/test/text-fit-layout.test.ts",
         "apps/web/test/selection-anchor.test.ts",
         "apps/web/test/reading-location.test.ts",
         "apps/web/test/owned-overlay.test.ts",
