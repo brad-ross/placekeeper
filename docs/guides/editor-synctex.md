@@ -2,7 +2,13 @@
 
 The native Mac app accepts source-to-PDF requests through its installed command and returns PDF locations to a locally configured editor. The embedded VS Code panel keeps its own editor association. Automatic PDF refresh preserves reading position and zoom; following a saved source cursor after a build is off by default.
 
-These are integration recipes, not completed editor acceptance results. The [acceptance record](https://github.com/brad-ross/placekeeper/blob/feat/2026-11-02-1033-feat-editor-independent-synctex-plan-pr3/test/acceptance/editor-synctex.md) separates installed-app checks from hands-on VS Code and Zed checks. Neovim live testing is optional at the user’s request; Neovim, Sublime Text, and Emacs remain unverified.
+Start here for **Zed** or **VS Code** on an Apple-silicon Mac:
+
+1. From a checkout containing this integration, follow the [installation prerequisites](../installation.md) and run `./install.sh --zed=manual` for on-demand jumps, `./install.sh --zed=preview` to also jump after builds, or `./install.sh --vscode=setup` for the embedded VS Code viewer. Check the installer summary for pending steps. Zed needs its LaTeX extension; reload the VS Code window after installing its extension.
+2. From the project root, build with SyncTeX enabled (for example, `latexmk -pdf -synctex=1 -outdir=build main.tex`). Check that `build/main.pdf` and `build/main.synctex.gz` (or `.synctex`) exist. In Zed, make sure Texlab’s PDF directory matches the build directory.
+3. Put the cursor on a line of typeset text. In Zed, run **task: spawn → Placekeeper: Forward SyncTeX** and approve the project’s source folder when prompted. In a trusted local VS Code workspace, run **Placekeeper: Forward SyncTeX** from the command palette. Confirm the PDF shows that passage, then use **Go to Source** there and check that the editor returns to the corresponding source.
+
+Neither installer-managed route requires creating a profile by hand. See [Zed](#zed) and [VS Code](#vs-code) below for settings. The [acceptance record](../../test/acceptance/editor-synctex.md) lists the installed-app and live editor checks and their limits. Neovim, Sublime Text, and Emacs have manual recipes but have not been verified live.
 
 ## Install and build
 
