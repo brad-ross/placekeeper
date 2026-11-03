@@ -83,8 +83,9 @@ export async function dispatchEditorLocation(
   catch { return { status: "failed", reason: "editor-executable-unavailable" }; }
   if (!isCurrent()) return { status: "stale", reason: "editor-association-changed" };
   // A location embedded in an editor's file:line grammar cannot represent colon
-  // or newline paths unambiguously. Standalone {file} arguments remain literal.
-  if (profile.args.some(arg => arg.includes("{file}") && arg !== "{file}") && /[:\r\n]/u.test(path)) {
+  // or newline paths unambiguously, except the leading Windows drive colon.
+  // Standalone {file} arguments remain literal.
+  if (profile.args.some(arg => arg.includes("{file}") && arg !== "{file}") && /[:\r\n]/u.test(path.replace(/^[A-Za-z]:[\\/]/u, ""))) {
     return { status: "failed", reason: "unsupported-editor-location-path" };
   }
   const substitutions: Record<string, string> = { file: path, line: String(target.line), column: String(target.column ?? 1) };

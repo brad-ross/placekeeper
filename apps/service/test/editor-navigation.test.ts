@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
@@ -15,6 +16,10 @@ async function fixture() {
   return { root, profiles };
 }
 
+function neovimEndpoint(root: string): string {
+  return process.platform === "win32" ? `\\\\.\\pipe\\pk-editor-${randomUUID()}` : join(root, "nvim.sock");
+}
+
 describe("trusted editor return destinations", () => {
   it("persists profiles but captures immutable, process-local registrations", async () => {
     const { root, profiles } = await fixture();
@@ -29,7 +34,7 @@ describe("trusted editor return destinations", () => {
 
   it("passes source characters literally as argv without shell evaluation", async () => {
     const { root, profiles } = await fixture();
-    const source = "-chapter ' \" $() `touch nope` ; ü\n.tex";
+    const source = process.platform === "win32" ? "-chapter ' $() `touch nope` ; ü.tex" : "-chapter ' \" $() `touch nope` ; ü\n.tex";
     await writeFile(join(root, source), "source");
     const capture = join(root, "captured.json");
     const script = join(root, "capture.mjs");
@@ -74,7 +79,7 @@ describe("trusted editor return destinations", () => {
     const source = "chapter '$(echo x)'.tex";
     await writeFile(join(root, source), "source");
     const received: unknown[] = [];
-    const socketPath = join(root, "nvim.sock");
+    const socketPath = neovimEndpoint(root);
     const server = createServer(socket => {
       void (async () => {
         for await (const frame of decodeMultiStream(socket)) {
@@ -99,7 +104,7 @@ describe("trusted editor return destinations", () => {
       await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
     }
   });
-  it("rejects paths that cannot use a compound editor location argument", async () => {
+  it.skipIf(process.platform === "win32")("rejects paths that cannot use a compound editor location argument", async () => {
     const { root, profiles } = await fixture();
     await writeFile(join(root, "part:one.tex"), "source");
     await profiles.add({ name: "fixture", kind: "command", executable: process.execPath, args: ["{file}:{line}"] });
@@ -111,7 +116,7 @@ describe("trusted editor return destinations", () => {
   it.each(["fragmented", "oversized", "silent", "removed"] as const)("handles a %s Neovim endpoint", async mode => {
     const { root, profiles } = await fixture();
     await writeFile(join(root, "paper.tex"), "source");
-    const socketPath = join(root, "nvim.sock");
+    const socketPath = neovimEndpoint(root);
     const server = createServer(socket => {
       socket.on("error", () => undefined);
       socket.once("data", () => {
