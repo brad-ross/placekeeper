@@ -11,10 +11,11 @@ import type { PdfWriter } from "../../packages/core/src/pdf-writer.js";
 import { DraftSnapshotStore } from "../../apps/service/src/recovery/draft-snapshot.js";
 import { PdfSaveCoordinator } from "../../apps/service/src/saving/pdf-save-coordinator.js";
 import { closeWindowsNativeWorker } from "../../apps/service/src/platform/windows-native-worker.js";
+import { windowsPowerShellScript } from "../../apps/service/src/platform/windows-powershell.js";
 import { SessionBroker } from "../../apps/service/src/sessions/session-broker.js";
 
 const sha = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
-const encode = (script: string) => Buffer.from(script, "utf16le").toString("base64");
+const encode = (script: string) => Buffer.from(windowsPowerShellScript(script), "utf16le").toString("base64");
 
 // This exercises a real Windows sharing denial, not a mocked rename errno.
 // The writer is deterministic so publication/recovery is isolated from PDF IO.
@@ -96,7 +97,7 @@ try { [Console]::ReadLine() | Out-Null } finally { $handle.Dispose() }
       }
     }
     await broker.quiesceForShutdown();
-    closeWindowsNativeWorker();
+    await closeWindowsNativeWorker();
     await rm(directory, { recursive: true, force: true });
   }
 });
