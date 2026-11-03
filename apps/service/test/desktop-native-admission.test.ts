@@ -9,8 +9,11 @@ import { validElectronReviewHelperResponse } from '../../../packages/core/src/el
 import { ChromeTransferStore } from '../src/browser/chrome-handoff.js';
 import { lifecycleDiagnostic } from '../src/desktop/lifecycle-control-command.js';
 import { decodePlacekeeperLink } from '../../../packages/core/src/placekeeper-link.js';
+import { ChromeRuntimeOperationJournal } from '../src/browser/runtime-operation-journal.js';
+import type { ReviewCommand } from '../../../packages/core/src/review-model.js';
+import { DraftSnapshotStore } from '../src/recovery/draft-snapshot.js';
 
-it('admits and activates a real native document through the private daemon, then creates its link without disclosing paths', async () => {
+it('admits, activates, and durably protects native authoring through the private daemon without disclosing paths', async () => {
     const root = await createDesktopIsolatedRoot();
     const stages: unknown[] = [];
     let daemon: Awaited<ReturnType<typeof startServiceDaemon>> | undefined;
@@ -42,6 +45,18 @@ it('admits and activates a real native document through the private daemon, then
             try { const result = canonicalLink(sessionId); stages.push('canonical-link-complete'); return result; }
             catch (error) { stages.push(lifecycleDiagnostic('canonical-link', error)); throw error; }
         });
+        const commit = ChromeRuntimeOperationJournal.prototype.commit;
+        vi.spyOn(ChromeRuntimeOperationJournal.prototype, 'commit').mockImplementation(async function(this: ChromeRuntimeOperationJournal, ...args) {
+            stages.push('operation-journal');
+            try { const result = await commit.apply(this, args); stages.push('operation-journal-complete'); return result; }
+            catch (error) { stages.push(lifecycleDiagnostic('operation-journal', error)); throw error; }
+        });
+        const protect = daemon.host.broker.protectChromeReview.bind(daemon.host.broker);
+        vi.spyOn(daemon.host.broker, 'protectChromeReview').mockImplementation(async sessionId => {
+            stages.push('protect-review');
+            try { await protect(sessionId); stages.push('protect-review-complete'); }
+            catch (error) { stages.push(lifecycleDiagnostic('protect-review', error)); throw error; }
+        });
         const appInstanceId = randomUUID(); const helperId = randomUUID();
         const envelope = { protocolVersion: 1 as const, windowId: randomUUID(), attemptId: randomUUID() };
         expect(await requestControl(socket, { kind: 'electron-app-control', message: { protocolVersion: 1, type: 'register-app', appInstanceId,
@@ -68,6 +83,28 @@ it('admits and activates a real native document through the private daemon, then
             message: { ...envelope, requestId: randomUUID(), type: 'copy-link', location: { kind: 'page', page: 1 } } });
         if (link.kind !== 'electron-runtime' || link.response.type !== 'placekeeper-link') throw new Error('Native link unavailable');
         expect(decodePlacekeeperLink(link.response.link)).toEqual({ path: await realpath(source), location: { kind: 'page', page: 1 } });
+        const sessionId = admitted.response.projection.sessionId;
+        const draft = { id: randomUUID(), ownerViewId: randomUUID(), baseGeneration: generation, revision: 0,
+            kind: 'pageNote' as const, pageIndex: 0, text: 'Exact protected native textarea input',
+            anchor: { kind: 'page' as const, pageIndex: 0, nearbyText: 'source', rect: { x: 1, y: 1, width: 2, height: 2 } },
+            disposition: { kind: 'resolved' as const, generation }, status: 'protected' as const,
+            createdAt: '2026-11-02T12:00:00Z', updatedAt: '2026-11-02T12:00:00Z' };
+        const payload: ReviewCommand = { type: 'put-draft', expectedRevision: 0, expectedDraftRevision: -1, draft };
+        const idempotencyKey = randomUUID();
+        const command = (revision: number) => requestControl(socket, { kind: 'electron-runtime', appInstanceId, helperId,
+            message: { ...envelope, requestId: randomUUID(), type: 'invoke', generation, revision,
+                method: 'command', payload, idempotencyKey } });
+        const accepted = await command(0);
+        expect(accepted).toMatchObject({ response: { type: 'result', method: 'command', payload: { revision: 1,
+            pendingDrafts: [{ id: draft.id, text: draft.text, status: 'protected' }] } } });
+        // A retried request must replay the durable receipt, not run the now
+        // stale command again or create a second draft/revision.
+        expect(await command(1)).toMatchObject({ response: { type: 'result', method: 'command', payload: { revision: 1 } } });
+        expect(await requestControl(socket, { kind: 'electron-runtime', appInstanceId, helperId,
+            message: { ...envelope, requestId: randomUUID(), type: 'refresh' } })).toMatchObject({ response: {
+                type: 'refreshed', projection: { revision: 1, protected: true, state: { pendingDrafts: [{ id: draft.id, text: draft.text }] } } } });
+        const protectedSnapshot = await new DraftSnapshotStore(join(root, 'recovery', sessionId)).recover();
+        expect(protectedSnapshot).toMatchObject({ state: { revision: 1, pendingDrafts: [{ id: draft.id, text: draft.text }] } });
         expect(await requestControl(socket, { kind: 'electron-app-control', message: { protocolVersion: 1, type: 'detach-helper', appInstanceId, helperId } })).toMatchObject({ response: { type: 'ack' } });
         expect(await requestControl(socket, { kind: 'electron-app-control', message: { protocolVersion: 1, type: 'activity', appInstanceId,
             activeWindows: 0, bootstrappingWindows: 0 } })).toMatchObject({ response: { type: 'ack' } });

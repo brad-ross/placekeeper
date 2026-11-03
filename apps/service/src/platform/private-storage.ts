@@ -66,13 +66,22 @@ export async function readPrivateFile(path: string, maxBytes: number): Promise<B
   const handle = await open(path, constants.O_RDONLY | (process.platform === "win32" ? 0 : constants.O_NOFOLLOW));
   try {
     const info = await handle.stat();
+    if (!info.isFile()) throw new Error("Private storage has an unexpected file type");
     if (info.size > maxBytes) throw new Error("Private storage file is oversized");
-    const bytes = Buffer.alloc(maxBytes + 1);
-    const { bytesRead } = await handle.read(bytes);
+    const bytes = Buffer.alloc(info.size + 1);
+    let bytesRead = 0;
+    while (bytesRead < bytes.length) {
+      const next = await handle.read(bytes, bytesRead, bytes.length - bytesRead, bytesRead);
+      if (next.bytesRead === 0) break;
+      bytesRead += next.bytesRead;
+    }
     if (bytesRead > maxBytes) throw new Error("Private storage file is oversized");
+    const unchanged = (current: typeof info) => current.ino === info.ino && current.dev === info.dev &&
+      current.size === info.size && current.mtimeMs === info.mtimeMs && current.ctimeMs === info.ctimeMs;
+    if (bytesRead !== info.size || !unchanged(await handle.stat())) throw new Error("Private storage changed while reading");
     await verifyPrivatePath(path, "file");
     const current = await lstat(path);
-    if (current.ino !== info.ino || current.dev !== info.dev) throw new Error("Private storage identity changed");
+    if (!unchanged(current)) throw new Error("Private storage identity changed");
     return bytes.subarray(0, bytesRead);
   } finally { await handle.close(); }
 }

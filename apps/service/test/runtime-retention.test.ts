@@ -1,3 +1,4 @@
+import { ensurePrivateDirectory, writePrivateFile } from "../src/platform/private-storage.js";
 import { addPageNote, setAnnotationName } from "../../../packages/core/src/review-commands.js";
 import type { ReviewItem } from "../../../packages/core/src/review-model.js";
 import type { PdfWriter } from "../../../packages/core/src/pdf-writer.js";
@@ -487,7 +488,7 @@ async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "placekeeper-operation-retention-"));
   directories.push(root);
   const directory = join(root, "review-session");
-  await mkdir(directory);
+  await ensurePrivateDirectory(directory);
   let active = true;
   const scope = () => {
     if (!active) throw new Error("canonical-review-unavailable");
@@ -522,7 +523,7 @@ describe("runtime journal retention", () => {
     const data = await fixture();
     const journal = new ChromeRuntimeOperationJournal({ scope: data.scope, maxCachedOperations: 1 });
     const stem = createHash("sha256").update("canonical:session\0replay").digest("hex");
-    await writeFile(join(data.directory, `.chrome-operation-${stem}.json`), JSON.stringify({
+    await writePrivateFile(join(data.directory, `.chrome-operation-${stem}.json`), JSON.stringify({
       schemaVersion: 1,
       fingerprint: createHash("sha256").update(status === "conflict" ? "null" : "{}").digest("hex"),
       status: status === "pending" ? "pending" : "completed",
@@ -591,10 +592,10 @@ describe("runtime journal retention", () => {
   it.each(["completed", "pending"] as const)("migrates legacy %s evidence without repeating a side effect", async (status) => {
     const data = await fixture();
     const root = join(data.root, "legacy");
-    await mkdir(root);
+    await ensurePrivateDirectory(root);
     const key = "legacy-canonical\0operation";
     const legacyPath = join(root, `${createHash("sha256").update(key).digest("hex")}.json`);
-    await writeFile(legacyPath, JSON.stringify({
+    await writePrivateFile(legacyPath, JSON.stringify({
       schemaVersion: 1, fingerprint: createHash("sha256").update("{}").digest("hex"),
       status, ...(status === "completed" ? { result: { revision: 1 } } : {}),
     }));
