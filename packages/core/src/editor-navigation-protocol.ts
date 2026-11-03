@@ -15,18 +15,20 @@ export interface EditorForwardRequest {
   readonly line: number;
   readonly column?: number;
   readonly session: string;
-  readonly intent: "explicit" | "follow";
+  readonly intent: "explicit" | "follow" | "preview";
   readonly association?: string;
   readonly synctexDirectory?: string;
 }
 
 export type EditorControlRequest =
   | { readonly operation: "profile-add"; readonly profile: EditorProfile }
+  | { readonly operation: "preview-fence" }
   | { readonly operation: "profiles" }
   | ({ readonly operation: "register" } & EditorRegistrationRequest)
   | EditorForwardRequest;
 
 export type EditorControlResponse =
+  | { readonly ok: true; readonly operation: "preview-fence"; readonly fence: string }
   | { readonly ok: true; readonly operation: "profile-add" }
   | { readonly ok: true; readonly operation: "profiles"; readonly profiles: readonly { readonly name: string; readonly kind: EditorProfile["kind"] }[] }
   | { readonly ok: true; readonly operation: "register"; readonly session: string }
@@ -68,6 +70,7 @@ export function parseEditorProfile(value: unknown): EditorProfile | undefined {
 
 export function parseEditorControlRequest(value: unknown): EditorControlRequest | undefined {
   if (!record(value)) return undefined;
+  if (value.operation === "preview-fence" && keys(value, ["operation"])) return { operation: "preview-fence" };
   if (value.operation === "profiles" && keys(value, ["operation"])) return { operation: "profiles" };
   if (value.operation === "profile-add" && keys(value, ["operation", "profile"])) {
     const profile = parseEditorProfile(value.profile);
@@ -82,9 +85,9 @@ export function parseEditorControlRequest(value: unknown): EditorControlRequest 
   if (value.operation !== "forward" || !keys(value, ["operation", "pdfPath", "sourcePath", "line", "column", "session", "intent", "association", "synctexDirectory"]) ||
     !isEditorPath(value.pdfPath) || !isEditorPath(value.sourcePath) || !coordinate(value.line) ||
     (value.column !== undefined && !coordinate(value.column)) || !isEditorToken(value.session) ||
-    (value.intent !== "explicit" && value.intent !== "follow") ||
+    (value.intent !== "explicit" && value.intent !== "follow" && value.intent !== "preview") ||
     (value.association !== undefined && !isEditorToken(value.association)) ||
-    (value.intent === "follow" && value.association === undefined) ||
+    (value.intent !== "explicit" && value.association === undefined) ||
     (value.synctexDirectory !== undefined && !isEditorPath(value.synctexDirectory))) return undefined;
   return { operation: "forward", pdfPath: value.pdfPath, sourcePath: value.sourcePath, line: value.line,
     session: value.session, intent: value.intent,

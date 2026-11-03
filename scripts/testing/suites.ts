@@ -701,6 +701,8 @@ export const ciUnitFiles = [
       'packaging/macos/native-blob-install.test.ts',
       'packaging/macos/update-vscode.test.mjs',
       'packaging/macos/setup-integrations.test.mjs',
+      'packaging/macos/setup-zed.test.mjs',
+      'packaging/macos/zed-adapter.test.mjs',
     ];
 
 export const browserTestFiles = {

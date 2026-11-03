@@ -26,7 +26,7 @@ export const CATALOG_DISTRIBUTION_BASELINE = {
   artifactSha256: {
     runtime: "423428687dab0b6049a86d85f879df79f2fee251322d53ad314ae1effd616e3b",
     report: "84bda58674d8174a0a94bbaed846ce23628cbf62fcab018cef14b182d38db797",
-    thirdPartyNotices: "e93d61075ce6ff0452d9c841030d8a7125030182e324cd76ca7f640fcb244bdb",
+    thirdPartyNotices: "469845e0081b04e67f86db343a8a69f52e8488cdcd2b5da7708aec78a8647104",
   },
   // Reviewed against main in September 2026: 3.187 MB; retain a small size margin.
   productionWebJavaScriptBytes: 3_200_000,

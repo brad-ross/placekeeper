@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { createHash, type Hash } from "node:crypto";
-import { access, chmod, copyFile, cp, lstat, mkdir, mkdtemp, readFile, readdir, readlink, writeFile } from "node:fs/promises";
+import { access, chmod, copyFile, cp, lstat, mkdir, mkdtemp, readFile, readdir, realpath, readlink, writeFile } from "node:fs/promises";
 import { isBuiltin } from "node:module";
 import { tmpdir } from "node:os";
 import { basename, dirname, resolve } from "node:path";
@@ -346,9 +346,10 @@ export async function buildMacApp(options: BuildOptions): Promise<string> {
   // Keep every optional setup dependency in the durable installed bundle.
   const installer = resolve(resources, "installer");
   await mkdir(installer, { recursive: true, mode: 0o755 });
-  for (const helper of ["setup-integrations.mjs", "setup-chrome.mjs", "update-vscode.mjs"]) {
+  for (const helper of ["setup-integrations.mjs", "setup-chrome.mjs", "update-vscode.mjs", "setup-zed.mjs"]) {
     await copyFile(resolve(repoRoot, "packaging/macos", helper), resolve(installer, helper));
   }
+  await cp(await realpath(resolve(repoRoot, "node_modules/jsonc-parser")), resolve(installer, "node_modules/jsonc-parser"), { recursive: true });
   await mkdir(resolve(resources, "integrations/.agents/plugins"), { recursive: true, mode: 0o755 });
   await copyFile(resolve(repoRoot, "packaging/macos/codex-marketplace.json"), resolve(resources, "integrations/.agents/plugins/marketplace.json"));
   const vscodeInstall = resolve(resources, "integrations/vscode");

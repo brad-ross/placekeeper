@@ -16,7 +16,8 @@ export function parseEditorArguments(args: readonly string[], cwd: string): Edit
   const take = (key: string): string | undefined => { const result = options.get(key); options.delete(key); return result; };
   const path = (key: string): string | undefined => { const value = take(key); return value === undefined ? undefined : resolve(cwd, value); };
   let raw: unknown;
-  if (command === "list") raw = { operation: "profiles" };
+  if (command === "preview-fence") raw = { operation: "preview-fence" };
+  else if (command === "list") raw = { operation: "profiles" };
   else if (command === "add") {
     const name = take("--name"), adapter = take("--adapter");
     if (adapter !== undefined && adapter !== "neovim") throw new Error("Supported adapter: neovim");
@@ -33,7 +34,7 @@ export function parseEditorArguments(args: readonly string[], cwd: string): Edit
       ...(column === undefined ? {} : { column: Number(column) }),
       ...(association === undefined ? {} : { association }),
       ...(synctexDirectory === undefined ? {} : { synctexDirectory }) };
-  } else throw new Error("Expected editor add, editor list, editor register, or forward-search");
+  } else throw new Error("Expected editor add, editor list, editor register, editor preview-fence, or forward-search");
   if (options.size > 0) throw new Error(`Unknown option: ${options.keys().next().value}`);
   const request = parseEditorControlRequest(raw);
   if (request === undefined) throw new Error("Invalid editor options: use absolute executable, source/PDF paths, positive line/column, and a registered session");
@@ -49,7 +50,7 @@ export async function runEditorCommand(args: readonly string[], options: {
   try {
     const response = await (options.exchange ?? editorControlThroughDaemon)(parseEditorArguments(args, options.cwd ?? process.cwd()));
     if (!response.ok) throw new Error(response.message);
-    const output = response.operation === "register" ? response.session : response.operation === "forward" ? response.association : JSON.stringify(response);
+    const output = response.operation === "preview-fence" ? response.fence : response.operation === "register" ? response.session : response.operation === "forward" ? response.association : JSON.stringify(response);
     (options.write ?? (text => { process.stdout.write(text); }))(`${output}\n`);
     return 0;
   } catch (error) {

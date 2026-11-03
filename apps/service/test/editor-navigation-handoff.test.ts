@@ -1,7 +1,7 @@
 import { mkdtemp, writeFile, rm, realpath } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { EditorNavigation } from "../src/synctex/editor-navigation.js";
 import { EditorProfiles } from "../src/synctex/editor-profiles.js";
 import { MacosAppLifecycleManager } from "../src/macos/app-lifecycle.js";
@@ -26,7 +26,16 @@ async function fixture() {
     if (!response.ok || response.operation !== "forward") throw new Error(JSON.stringify(response));
     return response;
   };
-  return { root, navigation, request, accept, advance: () => { now += 1001; } };
+  const fence = async () => {
+    const response = await navigation.control({ operation: "preview-fence" });
+    if (!response.ok || response.operation !== "preview-fence") throw new Error("No preview fence");
+    return response.fence;
+  };
+  const claim = (ticket: string) => {
+    const redeemed = navigation.redeem(ticket, "app_one", "development")!;
+    return navigation.claim(redeemed.navigationHandle, "app_one", "helper_one", request.pdfPath)!;
+  };
+  return { root, navigation, request, accept, fence, claim, advance: () => { now += 1001; } };
 }
 
 describe("private native navigation handoff", () => {
@@ -154,6 +163,108 @@ describe("private native navigation handoff", () => {
     expect((await f.navigation.control({ ...f.request, intent: "follow", association: nextA.association })).ok).toBe(true);
   });
 
+  it("admits a cold automatic preview and preserves native ticket authority", async () => {
+    const f = await fixture();
+    const preview = await f.accept({ ...f.request, intent: "preview", association: await f.fence() });
+    const intent = f.claim(preview.ticket);
+    expect(intent.request).toMatchObject({ intent: "preview", line: 5 });
+    expect(f.navigation.intentForHelper("helper_one")).toBe(intent);
+  });
+
+  it.each(["explicit", "inverse", "associate", "detach"] as const)("rejects a delayed build after %s and permits future same-owner builds", async action => {
+    const f = await fixture();
+    const first = await f.accept();
+    const intent = f.claim(first.ticket);
+    f.navigation.complete(intent);
+    const captured = await f.fence();
+    if (action === "explicit") f.navigation.complete(f.claim((await f.accept()).ticket));
+    if (action === "inverse") f.navigation.interruptFollowing(intent);
+    if (action === "associate") await f.navigation.associate("helper_one", "app_one", f.request.pdfPath,
+      { profile: "editor", sourceRoot: f.root }, () => true);
+    if (action === "detach") f.navigation.detachHelper("helper_one");
+    expect((await f.navigation.control({ ...f.request, intent: "preview", association: captured })).ok).toBe(false);
+    // Association captures a fresh registration; the former session cannot take it over.
+    expect((await f.navigation.control({ ...f.request, intent: "preview", association: await f.fence() })).ok).toBe(action !== "associate");
+  });
+
+  it("prevents a fresh preview fence from taking over another editor registration", async () => {
+    const f = await fixture();
+    const other = await f.navigation.profiles.register({ profile: "editor", sourceRoot: f.root });
+    f.navigation.complete(f.claim((await f.accept({ ...f.request, session: other.handle })).ticket));
+    expect((await f.navigation.control({ ...f.request, intent: "preview", association: await f.fence() })).ok).toBe(false);
+  });
+
+  it("fences builds before and during asynchronous manual validation", async () => {
+    const f = await fixture();
+    const before = await f.fence();
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const capture = f.navigation.profiles.captureRegistration.bind(f.navigation.profiles);
+    vi.spyOn(f.navigation.profiles, "captureRegistration").mockImplementation(async input => { await gate; return capture(input); });
+    const pending = f.navigation.associate("helper_one", "app_one", f.request.pdfPath,
+      { profile: "editor", sourceRoot: f.root }, () => true);
+    const during = await f.fence();
+    expect(during).not.toBe(before);
+    expect((await f.navigation.control({ ...f.request, intent: "preview", association: during })).ok).toBe(false);
+    release();
+    expect(await pending).toBe(true);
+    for (const association of [before, during]) {
+      expect((await f.navigation.control({ ...f.request, intent: "preview", association })).ok).toBe(false);
+    }
+  });
+
+  it("does not let previews overtake an explicit request during filesystem validation", async () => {
+    const f = await fixture();
+    const before = await f.fence();
+    const manual = f.accept({ ...f.request, line: 9 });
+    const during = await f.fence();
+    const pendingPreview = f.navigation.control({ ...f.request, intent: "preview", association: during });
+    const accepted = await manual;
+    expect((await pendingPreview).ok).toBe(false);
+    for (const association of [before, during]) {
+      expect((await f.navigation.control({ ...f.request, intent: "preview", association })).ok).toBe(false);
+    }
+    const intent = f.claim(accepted.ticket);
+    expect(intent.request).toMatchObject({ line: 9, intent: "explicit" });
+    f.navigation.complete(intent);
+    expect((await f.navigation.control({ ...f.request, intent: "preview", association: await f.fence() })).ok).toBe(true);
+  });
+
+  it("rejects a preview invalidated while its asynchronous path validation is in flight", async () => {
+    const f = await fixture();
+    const current = f.claim((await f.accept()).ticket);
+    f.navigation.complete(current);
+    // control reaches its first filesystem await before returning this promise.
+    const pending = f.navigation.control({ ...f.request, intent: "preview", association: await f.fence() });
+    f.navigation.interruptFollowing(current);
+    expect((await pending).ok).toBe(false);
+    expect(f.navigation.isCurrent(current)).toBe(true);
+  });
+
+  it("conservatively fences builds across PDFs while preserving independent manual navigation", async () => {
+    const f = await fixture();
+    const otherPdf = join(f.root, "other.pdf");
+    await writeFile(otherPdf, "%PDF-1.7\n");
+    const captured = await f.fence();
+    const [first, other] = await Promise.all([f.accept(), f.accept({ ...f.request, pdfPath: otherPdf })]);
+    expect(first.ticket).not.toBe(other.ticket);
+    expect((await f.navigation.control({ ...f.request, pdfPath: otherPdf, intent: "preview", association: captured })).ok).toBe(false);
+    f.navigation.complete(f.claim(first.ticket));
+    expect((await f.navigation.control({ ...f.request, intent: "preview", association: await f.fence() })).ok).toBe(true);
+  });
+
+  it("does not reuse preview fences across service instances or close", async () => {
+    const f = await fixture();
+    const captured = await f.fence();
+    const restarted = new EditorNavigation(f.navigation.profiles, "development");
+    const response = await restarted.control({ operation: "preview-fence" });
+    expect(response).toMatchObject({ ok: true, operation: "preview-fence" });
+    if (response.ok && response.operation === "preview-fence") expect(response.fence).not.toBe(captured);
+    expect((await restarted.control({ ...f.request, intent: "preview", association: captured })).ok).toBe(false);
+    f.navigation.close();
+    expect(await f.fence()).not.toBe(captured);
+  });
+
   it("requires lifecycle registration and makes failed redemption nonfatal", async () => {
     const f = await fixture(); const accepted = await f.accept();
     const lifecycle = new MacosAppLifecycleManager({ detach: async () => {} }, f.navigation);
@@ -175,6 +286,19 @@ describe("installed editor CLI", () => {
       .toMatchObject({ profile: { args: ["{file}", "literal $(touch nope)"] } });
     expect(() => parseEditorArguments(["editor", "list", "--unknown", "x"], "/project")).toThrow("Unknown option");
     expect(() => parseEditorArguments(["editor", "add", "--name", "a", "--name", "b"], "/project")).toThrow("repeated");
+  });
+  it("requires a captured preview fence and prints it without wrapping", async () => {
+    expect(parseEditorArguments(["editor", "preview-fence"], "/project")).toEqual({ operation: "preview-fence" });
+    expect(() => parseEditorArguments(["editor", "preview-fence", "--session", "x"], "/project")).toThrow("Unknown option");
+    const args = ["forward-search", "--pdf", "paper.pdf", "--source", "paper.tex", "--line", "1", "--session", "s".repeat(43), "--intent", "preview"];
+    expect(() => parseEditorArguments(args, "/project")).toThrow("Invalid editor options");
+    expect(parseEditorArguments([...args, "--association", "a".repeat(43)], "/project")).toMatchObject({ intent: "preview", association: "a".repeat(43) });
+    let output = "";
+    expect(await runEditorCommand(["editor", "preview-fence"], {
+      exchange: async () => ({ ok: true, operation: "preview-fence", fence: "a".repeat(43) }),
+      write: text => { output += text; },
+    })).toBe(0);
+    expect(output).toBe("a".repeat(43) + "\n");
   });
   it("prints only the session handle on success and sends failures to stderr", async () => {
     let output = "", error = "";

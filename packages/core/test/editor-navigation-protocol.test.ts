@@ -22,4 +22,15 @@ describe("local editor command protocol", () => {
     expect(parseEditorControlRequest({ ...request, intent: "explicit", executable: "/bin/sh" })).toBeUndefined();
     expect(parseEditorControlRequest({ ...request, intent: "explicit", line: 0 })).toBeUndefined();
   });
+  it("requires bounded preview fence tokens and closed fence requests", () => {
+    expect(parseEditorControlRequest({ operation: "preview-fence" })).toEqual({ operation: "preview-fence" });
+    expect(parseEditorControlRequest({ operation: "preview-fence", session: "s".repeat(43) })).toBeUndefined();
+    const request = { operation: "forward", pdfPath: "/work/paper.pdf", sourcePath: "/work/paper.tex", line: 1,
+      session: "s".repeat(43), intent: "preview" };
+    for (const association of [undefined, "", "short", "a".repeat(200), "a".repeat(42) + "/"]) {
+      expect(parseEditorControlRequest({ ...request, association })).toBeUndefined();
+    }
+    expect(parseEditorControlRequest({ ...request, association: "a".repeat(43) })).toMatchObject(request);
+  });
+
 });

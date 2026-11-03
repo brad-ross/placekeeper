@@ -22,15 +22,17 @@ install_mode=install
 chrome_choice=ask
 vscode_choice=ask
 codex_choice=ask
+zed_choice=ask
 for argument in "$@"; do
   case "$argument" in
     --dry-run|--uninstall)
       if [ "$install_mode" != install ]; then printf 'Choose only one install mode.\n' >&2; exit 2; fi
       install_mode=${argument#--} ;;
     --chrome=setup|--chrome=skip|--chrome=ask) chrome_choice=${argument#*=} ;;
+    --zed=manual|--zed=preview|--zed=setup|--zed=skip|--zed=ask) zed_choice=${argument#*=} ;;
     --vscode=setup|--vscode=skip|--vscode=ask) vscode_choice=${argument#*=} ;;
     --codex=setup|--codex=skip|--codex=ask) codex_choice=${argument#*=} ;;
-    *) printf 'Usage: %s [--dry-run|--uninstall] [--chrome=setup|skip|ask] [--vscode=setup|skip|ask] [--codex=setup|skip|ask]\n' "$0" >&2; exit 2 ;;
+    *) printf 'Usage: %s [--dry-run|--uninstall] [--chrome=setup|skip|ask] [--vscode=setup|skip|ask] [--codex=setup|skip|ask] [--zed=manual|preview|skip|ask]\n' "$0" >&2; exit 2 ;;
   esac
 done
 prerequisite_failure() {
@@ -230,5 +232,5 @@ printf 'If macOS warns on first launch, Control-click the app in Finder and choo
 optional_status=0
 "$app_path/Contents/Resources/node/bin/node" \
   "$app_path/Contents/Resources/installer/setup-integrations.mjs" "$app_path" \
-  "--chrome=$chrome_choice" "--vscode=$vscode_choice" "--codex=$codex_choice" || optional_status=$?
+  "--chrome=$chrome_choice" "--vscode=$vscode_choice" "--codex=$codex_choice" "--zed=$zed_choice" || optional_status=$?
 exit "$optional_status"

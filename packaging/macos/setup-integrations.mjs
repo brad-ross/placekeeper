@@ -5,20 +5,21 @@ import { homedir } from 'node:os';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
+import { setupZed } from './setup-zed.mjs';
 import { updateVscode } from './update-vscode.mjs';
 import { setupChrome } from './setup-chrome.mjs';
 
 const execute = promisify(execFile);
-const hosts = ['chrome', 'vscode', 'codex'];
-const labels = { chrome: 'Chrome (experimental)', vscode: 'VS Code', codex: 'Codex' };
+const hosts = ['chrome', 'vscode', 'codex', 'zed'];
+const labels = { chrome: 'Chrome (experimental)', vscode: 'VS Code', codex: 'Codex', zed: 'Zed' };
 const marketplaceName = 'placekeeper-installed';
 
 export function parseChoices(args) {
   const choices = {};
   for (const argument of args) {
-    const match = /^--(chrome|vscode|codex)=(.*)$/u.exec(argument);
+    const match = /^--(chrome|vscode|codex|zed)=(.*)$/u.exec(argument);
     if (!match) throw new Error(`Unknown integration option: ${argument}`);
-    if (!['setup', 'skip', 'ask'].includes(match[2])) throw new Error(`${match[1]} choice must be setup, skip, or ask`);
+    if (!['setup', 'skip', 'ask'].includes(match[2]) && !(match[1] === 'zed' && ['manual', 'preview'].includes(match[2]))) throw new Error(`${match[1]} choice must be ${match[1] === 'zed' ? 'manual, preview, setup, skip, or ask' : 'setup, skip, or ask'}`);
     if (choices[match[1]]) throw new Error(`Duplicate integration option: ${match[1]}`);
     choices[match[1]] = match[2];
   }
@@ -31,7 +32,8 @@ export async function promptFromTerminal(host) {
   try { terminal = await open('/dev/tty', 'r+'); } catch { return undefined; }
   try {
     for (;;) {
-      await terminal.write(`${labels[host]} integration: set up or skip? [setup/skip, default skip] `);
+      if (host === 'zed') await terminal.write('Zed integration: jump on demand, after build, or skip? [manual/preview/skip, default skip] ');
+      else await terminal.write(`${labels[host]} integration: set up or skip? [setup/skip, default skip] `);
       let line = '';
       const byte = Buffer.alloc(1);
       for (;;) {
@@ -41,9 +43,10 @@ export async function promptFromTerminal(host) {
         line += byte.toString();
       }
       const answer = line.trim().toLowerCase();
+      if (host === 'zed' && ['manual', 'preview'].includes(answer)) return answer;
       if (['setup', 'yes', 'y'].includes(answer)) return true;
       if (['skip', 'no', 'n', ''].includes(answer)) return false;
-      await terminal.write('Enter setup or skip.\n');
+      await terminal.write(host === 'zed' ? 'Enter manual, preview, or skip.\n' : 'Enter setup or skip.\n');
     }
   } finally { await terminal.close(); }
 }
@@ -114,7 +117,8 @@ export async function setupCodex({ appPath, codexPath, run = execute, read = rea
   return pending(`Codex reports plugin payload ${manifest.version} installed. Skill/tool discovery, trust, enablement, and reload still need verification in Codex.`, true);
 }
 
-export async function setupHost({ appPath, host, run = execute }) {
+export async function setupHost({ appPath, host, zedMode, run = execute }) {
+  if (host === 'zed') return { host, ...await setupZed({ appPath, mode: zedMode }) };
   if (host === 'chrome') return { host, ...await setupChrome(appPath) };
   if (host === 'codex') return { host, ...await setupCodex({ appPath, run }) };
   if (host === 'vscode') {
@@ -133,7 +137,7 @@ export async function setupIntegrations({ appPath, choices = {}, prompt = prompt
   // independently rechecks the installed identity and active work below.
   for (const host of hosts) {
     const choice = choices[host] ?? 'ask';
-    const answer = choice === 'setup' ? true : choice === 'skip' ? false : await prompt(host);
+    const answer = choice === 'ask' ? await prompt(host) : choice === 'skip' ? false : choice;
     if (answer === undefined) noTerminal = true;
     if (!answer) { outcomes.push({ host, status: 'skipped', message: 'No setup changes requested.' }); continue; }
     write(`Setting up ${labels[host]}…`);
@@ -141,7 +145,7 @@ export async function setupIntegrations({ appPath, choices = {}, prompt = prompt
       const { stdout } = await run(resolve(appPath, 'Contents/MacOS/placekeeper'), [
         'daemon', 'coordinate-host', '--installed-app', appPath,
         '--host-helper', resolve(appPath, 'Contents/Resources/installer/setup-integrations.mjs'),
-        '--', '--host', appPath, host,
+        '--', '--host', appPath, host, ...(host === 'zed' ? [answer === 'preview' ? 'preview' : 'manual'] : []),
       ], { timeout: 330_000, maxBuffer: 1_048_576 });
       const result = stdout.split(/\r?\n/u).filter(Boolean).flatMap((line) => {
         try { return [JSON.parse(line)]; } catch { return []; }
@@ -158,8 +162,8 @@ export async function setupIntegrations({ appPath, choices = {}, prompt = prompt
   }
   write(`\nMac: ${macStatus === 'current' ? 'already current' : 'installed'}.`);
   for (const result of outcomes) write(`${labels[result.host]}: ${result.status}. ${result.message}`);
-  if (noTerminal) write('No terminal was available. Rerun in a terminal, or choose explicitly: --chrome=setup --vscode=setup --codex=setup (use =skip to decline).');
-  write(`Add or repair integrations later by rerunning the install command, or run:\n"${resolve(appPath, 'Contents/Resources/node/bin/node')}" "${resolve(appPath, 'Contents/Resources/installer/setup-integrations.mjs')}" "${appPath}" --chrome=ask --vscode=ask --codex=ask`);
+  if (noTerminal) write('No terminal was available. Rerun in a terminal, or choose explicitly: --chrome=setup --vscode=setup --codex=setup --zed=manual (use =skip to decline).');
+  write(`Add or repair integrations later by rerunning the install command, or run:\n"${resolve(appPath, 'Contents/Resources/node/bin/node')}" "${resolve(appPath, 'Contents/Resources/installer/setup-integrations.mjs')}" "${appPath}" --chrome=ask --vscode=ask --codex=ask --zed=ask`);
   return { mac: macStatus, outcomes, exitCode: outcomes.some((result) => result.status === 'failed') ? 3 : 0 };
 }
 
@@ -167,9 +171,9 @@ if (process.argv[1] && realpathSync(process.argv[1]) === realpathSync(fileURLToP
   try {
     if (process.argv[2] === '--host') {
       if (!process.env.PLACEKEEPER_LIFECYCLE_LOCK_TOKEN) throw new Error('Host setup requires daemon coordinate-host');
-      console.log(JSON.stringify(await setupHost({ appPath: process.argv[3], host: process.argv[4] })));
+      console.log(JSON.stringify(await setupHost({ appPath: process.argv[3], host: process.argv[4], zedMode: process.argv[5] })));
     } else {
-      if (!process.argv[2]) throw new Error('Usage: setup-integrations.mjs <installed-app> [--chrome=setup|skip|ask] [--vscode=setup|skip|ask] [--codex=setup|skip|ask]');
+      if (!process.argv[2]) throw new Error('Usage: setup-integrations.mjs <installed-app> [--chrome=setup|skip|ask] [--vscode=setup|skip|ask] [--codex=setup|skip|ask] [--zed=manual|preview|skip|ask]');
       const result = await setupIntegrations({ appPath: resolve(process.argv[2]), choices: parseChoices(process.argv.slice(3)) });
       process.exitCode = result.exitCode;
     }
