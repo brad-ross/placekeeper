@@ -34,7 +34,7 @@ describe("Electron daemon runtime", () => {
     const browserSourceRoot = join(root, "browser-sources");
     const assets = join(root, "assets");
     const sourcePath = join(root, "linked.pdf");
-    await Promise.all([mkdir(browserSourceRoot), mkdir(assets)]);
+    await mkdir(assets);
     await writeFile(join(assets, "app.js"), "export function start(){}\n");
     await writeFile(sourcePath, "%PDF-1.7\nlinked review\n%%EOF");
     const host = await PlacekeeperHost.start({
@@ -134,7 +134,7 @@ describe("Electron daemon runtime", () => {
     const recoveryRoot = join(root, "recovery");
     const browserSourceRoot = join(root, "browser-sources");
     const assets = join(root, "assets");
-    await Promise.all([mkdir(browserSourceRoot), mkdir(assets)]);
+    await mkdir(assets);
     await writeFile(join(assets, "app.js"), "export function start(){}\n");
     const host = await PlacekeeperHost.start({
       recoveryRoot,
@@ -249,7 +249,7 @@ describe("Electron daemon runtime", () => {
     const recoveryRoot = join(root, "recovery");
     const browserSourceRoot = join(root, "browser-sources");
     const assets = join(root, "assets");
-    await Promise.all([mkdir(browserSourceRoot), mkdir(assets)]);
+    await mkdir(assets);
     await writeFile(join(assets, "app.js"), "export function start(){}\n");
     const host = await PlacekeeperHost.start({
       recoveryRoot,
@@ -365,7 +365,7 @@ describe("Electron daemon runtime", () => {
     const recoveryRoot = join(root, "recovery");
     const browserSourceRoot = join(root, "browser-sources");
     const assets = join(root, "assets");
-    await Promise.all([mkdir(browserSourceRoot), mkdir(assets)]);
+    await mkdir(assets);
     await writeFile(join(assets, "app.js"), "export function start(){}\n");
     const host = await PlacekeeperHost.start({ recoveryRoot, browserSourceRoot, webAssets: { root: assets }, port: 0 });
     hosts.push(host);
