@@ -7,6 +7,10 @@ export interface InstallLayoutOptions {
   homeDirectory?: string;
   env?: NodeJS.ProcessEnv;
 }
+function containsPath(path: typeof posix, parent: string, child: string): boolean {
+  const relative = path.relative(parent, child);
+  return relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative));
+}
 export function resolveInstallLayout(options: InstallLayoutOptions = {}) {
   const platform = options.platform ?? process.platform;
   const path = platform === 'win32' ? win32 : posix;
@@ -34,8 +38,7 @@ export function assertSafeInstallDestination(destination: string, options: Insta
   const { protectedRoots } = resolveInstallLayout(options);
   const normalize = (value: string) => platform === 'win32' ? path.resolve(value).toLowerCase() : path.resolve(value);
   const a = normalize(destination);
-  const contains = (parent: string, child: string) => { const relative = path.relative(parent, child); return relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative)); };
-  if (protectedRoots.some(root => { const b = normalize(root); return contains(a, b) || contains(b, a); })) throw new Error('Installation destination overlaps durable user state or recovery backups');
+  if (protectedRoots.some(root => { const b = normalize(root); return containsPath(path, a, b) || containsPath(path, b, a); })) throw new Error('Installation destination overlaps durable user state or recovery backups');
 }
 /** Resolve existing ancestors too: a parent symlink must not redirect replacement into data. */
 export async function assertSafeInstallDestinationOnDisk(destination: string, options: InstallLayoutOptions = {}): Promise<void> {
@@ -46,9 +49,8 @@ export async function assertSafeInstallDestinationOnDisk(destination: string, op
   }
   const actual = await canonical(destination);
   const protectedRoots = await Promise.all(resolveInstallLayout(options).protectedRoots.map(canonical));
-  // Keep the same disjointness rule for symlink-resolved roots.
-  const relative = (parent: string, child: string) => { const p = process.platform === 'win32' ? win32 : posix; const value = p.relative(parent, child); return value === '' || (!value.startsWith(`..${p.sep}`) && value !== '..' && !p.isAbsolute(value)); };
-  if (protectedRoots.some(root => relative(actual, root) || relative(root, actual))) throw new Error('Installation destination overlaps durable user state or recovery backups');
+  const path = process.platform === 'win32' ? win32 : posix;
+  if (protectedRoots.some(root => containsPath(path, actual, root) || containsPath(path, root, actual))) throw new Error('Installation destination overlaps durable user state or recovery backups');
 }
 function ownedPath(root: string, entry: string): string {
   if (!entry || entry.includes('\\') || entry.includes('\0') || posix.isAbsolute(entry) || entry.split('/').some(part => !part || part === '.' || part === '..')) throw new Error('Unsafe installation inventory path');
@@ -84,7 +86,6 @@ export async function removeOwnedInstallationFiles(root: string, ownedFiles: rea
 export async function relocateLegacySourceInstallation({ legacyRoot, destination, ownedFiles }: { legacyRoot: string; destination: string; ownedFiles: readonly string[] }): Promise<void> {
   if (join(legacyRoot, '.') === join(destination, '.')) throw new Error('Relocation needs distinct paths');
   const files = await Promise.all(ownedFiles.map(entry => existingFile(legacyRoot, entry)));
-  // Copy exclusively before removing anything; failures retain the original usable installation.
   for (const [index, file] of files.entries()) if (file) {
     const target = ownedPath(destination, ownedFiles[index]!);
     await mkdir(dirname(target), { recursive: true });

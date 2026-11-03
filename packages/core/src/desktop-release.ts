@@ -1,4 +1,3 @@
-/** The public desktop download contract, shared by the shell and downloads page. */
 export const RELEASE_REPOSITORY = 'https://github.com/brad-ross/placekeeper';
 export const RELEASE_API_URL = 'https://api.github.com/repos/brad-ross/placekeeper/releases/latest';
 export const ALL_DOWNLOADS_URL = `${RELEASE_REPOSITORY}/releases/latest`;

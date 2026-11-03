@@ -26,9 +26,7 @@ export async function checkForDesktopUpdate(installedVersion: string, fetcher: t
                 chunks.push(value);
             }
         } finally { controller.signal.removeEventListener('abort', cancelBody); cancelBody(); }
-        const body = new Uint8Array(bytes);
-        let offset = 0;
-        for (const chunk of chunks) { body.set(chunk, offset); offset += chunk.length; }
+        const body = Buffer.concat(chunks, bytes);
         const catalog = parseDesktopRelease(JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(body)));
         const comparison = compareVersions(installedVersion, catalog.version);
         return { status: comparison < 0 ? 'newer' : comparison > 0 ? 'ahead' : 'current', catalog };
