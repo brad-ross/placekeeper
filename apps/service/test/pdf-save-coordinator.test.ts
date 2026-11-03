@@ -1339,6 +1339,7 @@ describe("coalescing PDF autosave", () => {
   });
 
   it("does not absorb a later external replacement while a published save is uncertain", async () => {
+    ownPublicationObservations();
     let failSync = false;
     const { source, broker, coordinator, sessionId } = await setup(undefined, {
       inspectGeneration: async () => ({ pageCount: 1, pages: [] }),

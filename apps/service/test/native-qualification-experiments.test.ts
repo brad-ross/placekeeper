@@ -319,47 +319,83 @@ it.each(["missing-expiry", "aged", "cancelled", "hostile-marker", "deadline", "b
 });
 it.each(["ready", "cancelled", "hostile"])("real genuine parsed hook readiness %s still sends unchanged normal attestation", async mode => {
   const f = readinessFixture(1500), controls = new NativeQualificationExperiments(f.root);
-  controls.displayIssued(receipt(1), Date.now() + 60000);
-  await controls.publicResult(receipt(1), f.invocation(1), a);
   const event = { session_id: "actual-trusted-task", hook_event_name: "PostToolUse", tool_name: "mcp__placekeeper__display_review", tool_input: { handoff: "h".repeat(43) }, tool_response: { structuredContent: receipt(1) } };
   const source = `import ${JSON.stringify(resolve("apps/service/src/cli/context-command.ts"))};
 import {runHookCommand} from ${JSON.stringify(resolve("apps/service/src/cli/hook-command.ts"))};
+const selected = new Promise(resolve => process.once('message', resolve));
+process.send('initialized');
+await selected;
+process.disconnect();
 await runHookCommand(['hook','--event'],${JSON.stringify(JSON.stringify(event))},async request=>{process.stdout.write(JSON.stringify(request));return {kind:'codex-attestation',status:'accepted'}},()=>{});`;
-  const child = spawn(process.execPath, ["--import", "tsx", "--input-type=module", "-e", source], { env: { ...process.env, PLACEKEEPER_MAC_DEVELOPMENT_ROOT: f.root }, stdio: ["ignore", "pipe", "pipe"] });
-  let output = ""; child.stdout.on("data", d => output += String(d));
+  const child = spawn(process.execPath, ["--import", "tsx", "--input-type=module", "-e", source], { env: { ...process.env, PLACEKEEPER_MAC_DEVELOPMENT_ROOT: f.root }, stdio: ["ignore", "pipe", "pipe", "ipc"], timeout: 10000 });
+  let output = "", stderr = "";
+  child.stdout!.on("data", d => output += String(d)); child.stderr!.on("data", d => stderr += String(d));
   const completed = new Promise(r => child.once("close", r));
-  // Signal after the actual hook consumed the exact selection, never from logs.
-  for (let check = 0; check < 100 && !readdirSync(f.dir).includes("hook-consumed.json"); check++) await new Promise(r => setTimeout(r, 10));
-  expect(readdirSync(f.dir)).toContain("hook-consumed.json"); expect(output).toBe("");
-  if (mode === "ready") controls.authenticatedReady(receipt(1), Date.now() + 60000);
-  if (mode === "cancelled") rmSync(f.path);
-  if (mode === "hostile") writeFileSync(join(f.dir, "ready.json"), "{}", { mode: 0o644 });
-  expect(await completed).toBe(0);
-  expect(JSON.parse(output)).toEqual({ kind: "codex-attest", taskSessionId: event.session_id, receipt: receipt(1) });
-  expect(JSON.parse(readFileSync(join(f.dir, "hook-terminal.json"), "utf8")).outcome).toBe(mode === "ready" ? "ready" : mode === "cancelled" ? "cancelled" : "unavailable");
-});
+  try {
+    // Loader/import time is outside the selected experiment's shared deadline.
+    // The child still runs the genuine parser and hook after selection.
+    await new Promise<void>((resolve, reject) => {
+      child.once("message", message => message === "initialized" ? resolve() : reject(new Error(`unexpected hook initialization: ${String(message)}`)));
+      child.once("error", reject);
+      child.once("close", code => reject(new Error(`hook exited before initialization (${code}): ${stderr}`)));
+    });
+    controls.displayIssued(receipt(1), Date.now() + 60000);
+    await controls.publicResult(receipt(1), f.invocation(1), a);
+    child.send("selected");
+    // Signal after the actual hook consumed the exact selection, never from logs.
+    for (let check = 0; check < 100 && !readdirSync(f.dir).includes("hook-consumed.json"); check++) await new Promise(r => setTimeout(r, 10));
+    expect(readdirSync(f.dir)).toContain("hook-consumed.json"); expect(output).toBe("");
+    if (mode === "ready") controls.authenticatedReady(receipt(1), Date.now() + 60000);
+    if (mode === "cancelled") rmSync(f.path);
+    if (mode === "hostile") writeFileSync(join(f.dir, "ready.json"), "{}", { mode: 0o644 });
+    expect(await completed, stderr).toBe(0);
+    expect(JSON.parse(output)).toEqual({ kind: "codex-attest", taskSessionId: event.session_id, receipt: receipt(1) });
+    expect(JSON.parse(readFileSync(join(f.dir, "hook-terminal.json"), "utf8")).outcome).toBe(mode === "ready" ? "ready" : mode === "cancelled" ? "cancelled" : "unavailable");
+  } finally {
+    if (child.exitCode === null && child.signalCode === null) child.kill();
+    await completed;
+  }
+}, 15000);
 
 it("competing real hook processes consume one selected readiness wait exclusively", async () => {
   const f = readinessFixture(2000), controls = new NativeQualificationExperiments(f.root);
-  controls.displayIssued(receipt(1), Date.now() + 60000);
-  await controls.publicResult(receipt(1), f.invocation(1), a);
   const source = `import {NativeQualificationExperiments} from ${JSON.stringify(resolve("apps/service/src/codex/native-qualification-experiments.ts"))};
+const selected = new Promise(resolve => process.once('message', resolve));
+process.send('initialized');
+await selected;
+process.disconnect();
 await new NativeQualificationExperiments(${JSON.stringify(f.root)}).delayAttestation(${JSON.stringify(receipt(1))});process.stdout.write('ordinary');`;
   const outputs: string[] = ["", ""];
   const children = [0, 1].map(index => {
-    const child = spawn(process.execPath, ["--import", "tsx", "--input-type=module", "-e", source], { stdio: ["ignore", "pipe", "pipe"] });
-    child.stdout.on("data", data => outputs[index] += String(data));
-    return { child, completed: new Promise(resolve => child.once("close", resolve)) };
+    const child = spawn(process.execPath, ["--import", "tsx", "--input-type=module", "-e", source], { stdio: ["ignore", "pipe", "pipe", "ipc"], timeout: 10000 });
+    let stderr = "";
+    child.stdout!.on("data", data => outputs[index] += String(data)); child.stderr!.on("data", data => stderr += String(data));
+    const initialized = new Promise<void>((resolve, reject) => {
+      child.once("message", message => message === "initialized" ? resolve() : reject(new Error(`unexpected hook initialization: ${String(message)}`)));
+      child.once("error", reject);
+      child.once("close", code => reject(new Error(`hook exited before initialization (${code}): ${stderr}`)));
+    });
+    return { child, initialized, completed: new Promise(resolve => child.once("close", resolve)) };
   });
-  for (let check = 0; check < 100 && outputs.filter(Boolean).length === 0; check++) await new Promise(r => setTimeout(r, 10));
-  expect(outputs.filter(Boolean)).toEqual(["ordinary"]);
-  expect(readdirSync(f.dir)).toContain("hook-consumed.json");
-  expect(readdirSync(f.dir)).not.toContain("hook-terminal.json");
-  controls.authenticatedReady(receipt(1), Date.now() + 60000);
-  expect(await Promise.all(children.map(child => child.completed))).toEqual([0, 0]);
-  expect(outputs).toEqual(["ordinary", "ordinary"]);
-  expect(JSON.parse(readFileSync(join(f.dir, "hook-terminal.json"), "utf8")).outcome).toBe("ready");
-});
+  try {
+    // Both genuine processes finish importing before the shared wait starts.
+    await Promise.all(children.map(child => child.initialized));
+    controls.displayIssued(receipt(1), Date.now() + 60000);
+    await controls.publicResult(receipt(1), f.invocation(1), a);
+    children.forEach(({ child }) => child.send("selected"));
+    for (let check = 0; check < 100 && outputs.filter(Boolean).length === 0; check++) await new Promise(r => setTimeout(r, 10));
+    expect(outputs.filter(Boolean)).toEqual(["ordinary"]);
+    expect(readdirSync(f.dir)).toContain("hook-consumed.json");
+    expect(readdirSync(f.dir)).not.toContain("hook-terminal.json");
+    controls.authenticatedReady(receipt(1), Date.now() + 60000);
+    expect(await Promise.all(children.map(child => child.completed))).toEqual([0, 0]);
+    expect(outputs).toEqual(["ordinary", "ordinary"]);
+    expect(JSON.parse(readFileSync(join(f.dir, "hook-terminal.json"), "utf8")).outcome).toBe("ready");
+  } finally {
+    children.forEach(({ child }) => { if (child.exitCode === null && child.signalCode === null) child.kill(); });
+    await Promise.all(children.map(child => child.completed));
+  }
+}, 15000);
 
 it("absent descriptor and foreign exact tuples never consume a readiness action", async () => {
   const f = readinessFixture(), controls = new NativeQualificationExperiments(f.root);
