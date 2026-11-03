@@ -8,6 +8,7 @@ test('packaged candidate renders and activates a real PDF without system Node', 
     const page = await candidate.launch();
     await expect(page.locator('img').first()).toBeVisible({ timeout: 30_000 });
     await expect(page.locator('[data-production-review]')).toHaveAttribute('data-initial-view-ready', 'true');
+    await expect.poll(() => candidate.timings().some(event => event.stage === 'visible-active')).toBe(true);
     const scope = await page.evaluate(async ({ protocol, version }) => {
       const shell = window.placekeeper;
       const identity = await shell.identity();

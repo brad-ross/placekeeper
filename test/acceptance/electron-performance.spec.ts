@@ -221,11 +221,15 @@ test('macOS isolated packaged idle CPU and twelve normal document close/reopen c
 
     for (let cycle = 0; cycle < budget.memoryCloseReopenCycles; cycle++) {
       const closed = page.waitForEvent('close');
-      await page.evaluate(async () => {
+      const closingPage = page;
+      const requested = closingPage.evaluate(async () => {
         const shell = window.placekeeper;
         await shell.requestClose(await shell.identity());
+      }).catch(error => {
+        // The acknowledged native close can destroy the CDP target before the evaluate reply arrives.
+        if (!closingPage.isClosed() || !String(error).includes('Target page, context or browser has been closed')) throw error;
       });
-      await closed;
+      await Promise.all([closed, requested]);
       await delay(budget.memorySettlingMs);
       const status = await requestControl(join(candidate.root, 'control.sock'), {
         kind: 'management', protocolVersion: MANAGEMENT_PROTOCOL_VERSION, operation: 'status',

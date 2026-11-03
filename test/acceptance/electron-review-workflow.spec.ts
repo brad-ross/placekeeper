@@ -156,7 +156,7 @@ test('packaged review edits, undoes, redoes and saves a portable page note that 
   } finally { await candidate.dispose(); }
 });
 
-test('packaged review observes an external PDF replacement and saves annotations into the successor document', async () => {
+test('packaged review observes an external PDF replacement and saves annotations into the successor document', async ({}, testInfo) => {
   test.setTimeout(90_000);
   const candidate = await InstalledCandidate.create('text-native.pdf');
   try {
@@ -164,6 +164,31 @@ test('packaged review observes an external PDF replacement and saves annotations
     await ready(page);
     await saveToOriginal(page);
     await expect(page.getByRole('textbox', { name: 'Current page 1 of 1. Enter a page number', exact: true })).toBeVisible();
+    // Record ownership before replacement so a failed Blob request can be
+    // traced to its raster and revocation, rather than broadly ignored.
+    await page.evaluate(() => {
+      const events: unknown[] = [];
+      const images = () => Array.from(document.images, image => ({
+        src: image.currentSrc || image.src, complete: image.complete,
+        width: image.naturalWidth, connected: image.isConnected,
+      }));
+      (window as Window & { refreshResourceEvents?: unknown[] }).refreshResourceEvents = events;
+      events.push({ kind: 'before-replacement', images: images() });
+      const create = URL.createObjectURL.bind(URL);
+      const revoke = URL.revokeObjectURL.bind(URL);
+      URL.createObjectURL = object => {
+        const url = create(object);
+        events.push({ kind: 'create', url, type: object instanceof Blob ? object.type : 'MediaSource', stack: new Error().stack });
+        return url;
+      };
+      URL.revokeObjectURL = url => {
+        events.push({ kind: 'revoke', url, images: images(), stack: new Error().stack });
+        revoke(url);
+      };
+      document.addEventListener('error', event => {
+        if (event.target instanceof HTMLImageElement) events.push({ kind: 'image-error', src: event.target.currentSrc || event.target.src, images: images() });
+      }, true);
+    });
     const successor = await PDFDocument.load(await readFile(candidate.source));
     successor.addPage([612, 792]).drawText('Added by an external PDF producer.');
     successor.setSubject('Packaged desktop source refresh acceptance');
@@ -179,6 +204,20 @@ test('packaged review observes an external PDF replacement and saves annotations
     expect(published.getSubject()).toBe('Packaged desktop source refresh acceptance');
     await showAnnotations(page);
     await expect(page.locator('[data-review-item]')).toContainText(comment);
+    const lifetimePath = testInfo.outputPath('source-refresh-resource-lifetime.json');
+    await writeFile(lifetimePath, JSON.stringify(await page.evaluate(() => ({
+        events: (window as Window & { refreshResourceEvents?: unknown[] }).refreshResourceEvents,
+        images: Array.from(document.images, image => ({ src: image.currentSrc || image.src, complete: image.complete, width: image.naturalWidth })),
+      }))));
+    await testInfo.attach('source-refresh-resource-lifetime', {
+      path: lifetimePath,
+      contentType: 'application/json',
+    });
+    const currentRaster = page.locator('.pdf-workspace__page[data-page-index="0"] > img').first();
+    await expect.poll(() => currentRaster.evaluate(async (image: HTMLImageElement) => {
+      try { await image.decode(); return image.complete && image.naturalWidth > 0; }
+      catch { return false; }
+    })).toBe(true);
     expect(candidate.errors).toEqual([]);
   } finally { await candidate.dispose(); }
 });

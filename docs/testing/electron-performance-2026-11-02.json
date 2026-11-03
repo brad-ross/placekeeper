@@ -1,0 +1,350 @@
+{
+  "recordedAt": "2026-11-03T00:32:51.533Z",
+  "artifact": {
+    "executableSha256": "745968f92f4dc0ccae85040a91773cc0cb02b22d92be7a612d9416edfdb9b75b",
+    "applicationAsarSha256": "a3444059c96e19c2733690a46c1772bc8a5a687f793563ef773494af7e15851a",
+    "runtimeManifestSha256": "13dbc2d807cfd73703887000068add5bc70e11c83ad7fffd43cfca102d084c2f",
+    "buildEvidenceSha256": "fdf28c3d34db1a39e2630678be4ae8c2a950e4b723fb8326501b2dc26c049bcf"
+  },
+  "hardware": {
+    "platform": "darwin",
+    "release": "25.6.0",
+    "arch": "arm64",
+    "cpu": "Apple M5",
+    "logicalCpus": 10,
+    "totalMemoryBytes": 25769803776
+  },
+  "fixtures": [
+    {
+      "fixture": "text-native.pdf",
+      "kind": "small-text",
+      "maxMs": 6000,
+      "sha256": "6cb57709b6cfad8fa36bafcf32afdc0b41c5f71f378e1e2c6a3ae9c4ab6d1b5a"
+    },
+    {
+      "fixture": "large-text-heavy.pdf",
+      "kind": "long-text",
+      "maxMs": 6000,
+      "sha256": "67cdcdabb64ddf6fb4c6ebeb43aa19f6d589fab86f0a4c28284472222cc339d6"
+    },
+    {
+      "fixture": "image-only.pdf",
+      "kind": "image",
+      "maxMs": 12000,
+      "sha256": "7017552e1ebdb4a54314a87cf56a1e2e1d9bad77d94172487dfee73c13668aac"
+    },
+    {
+      "fixture": "text-native-with-annotations.pdf",
+      "kind": "annotated",
+      "maxMs": 6000,
+      "sha256": "680647716f2336daf1bed3c4361eacd82274e30207a5d108105fcb1f70b21654"
+    }
+  ],
+  "limitations": [
+    "Debuggable packaged release build, CDP automation attached; no AppKit comparison measured by this suite.",
+    "Cold means new isolated app profile and stopped daemon; OS filesystem caches are uncontrolled.",
+    "Warm means new app process, reused profile and same verified live daemon; it is not a warm in-process open.",
+    "Usable-page timing includes CDP observation overhead after process spawn; no main-import-relative timing is substituted.",
+    "First visible shell, visible input response, frame intervals, display refresh/DPI, long-recovery and representative scanned corpus remain unmeasured.",
+    "Image-only fixture is a reproducible image smoke fixture, not evidence for a large scanned document."
+  ],
+  "budgets": {
+    "launchSamplesPerCondition": 20,
+    "firstVisibleShellP95Ms": 1500,
+    "textFirstUsablePageP95Ms": 6000,
+    "imageFirstUsablePageP95Ms": 12000,
+    "visibleInputResponseP95Ms": 100,
+    "repeatableStallInvestigationMs": 250,
+    "frameIntervalP95Ms": 33,
+    "idleCpuWindowMs": 60000,
+    "idleCpuPercentOfOneCoreExclusiveMax": 2,
+    "memoryCloseReopenCycles": 12,
+    "memorySettlingMs": 5000,
+    "postCloseResidentGrowthMaxRatio": 1.15
+  },
+  "launches": [
+    {
+      "fixture": "text-native.pdf",
+      "condition": "app-and-daemon-cold",
+      "samplesMs": [
+        2107.511375,
+        1592.96,
+        1566.969333,
+        1600.1434580000005,
+        1091.502707999999,
+        1573.4527500000004,
+        1583.9196249999986,
+        2359.7711249999993,
+        2124.3962919999976,
+        1693.2221659999996,
+        1649.5061669999996,
+        1613.771334000001,
+        1649.3633750000008,
+        1614.7395840000027,
+        1834.3085830000018,
+        1616.1657089999972,
+        1609.3118329999998,
+        1687.0644170000014,
+        1711.228458999998,
+        1683.8756670000002
+      ],
+      "p95Ms": 2124.3962919999976
+    },
+    {
+      "fixture": "text-native.pdf",
+      "condition": "app-cold-daemon-warm",
+      "samplesMs": [
+        1554.2231249999968,
+        1299.6510419999977,
+        1654.3423750000002,
+        1594.5484170000054,
+        1561.1236250000002,
+        1614.7800839999982,
+        1762.3748750000013,
+        1748.0425830000022,
+        1493.7677919999987,
+        1350.0825839999961,
+        1778.770457999999,
+        2721.6311669999996,
+        1928.930124999999,
+        1797.872624999989,
+        1625.8443750000006,
+        1784.2368750000023,
+        1677.4145839999983,
+        1660.673375000013,
+        1526.7244999999966,
+        1625.9020000000019
+      ],
+      "p95Ms": 1928.930124999999
+    },
+    {
+      "fixture": "large-text-heavy.pdf",
+      "condition": "app-and-daemon-cold",
+      "samplesMs": [
+        1720.2072909999988,
+        1731.4938750000001,
+        1810.326749999993,
+        2097.9199999999983,
+        1747.3831669999927,
+        1722.6994580000028,
+        1953.435375000001,
+        1899.028124999997,
+        1948.8037079999922,
+        1971.4922499999957,
+        1949.4205419999926,
+        1944.263500000001,
+        2060.6392500000075,
+        2021.3787500000035,
+        2079.5144169999985,
+        1962.201291999998,
+        1866.9897090000013,
+        1983.5767080000078,
+        1829.5677080000023,
+        2000.593000000008
+      ],
+      "p95Ms": 2079.5144169999985
+    },
+    {
+      "fixture": "large-text-heavy.pdf",
+      "condition": "app-cold-daemon-warm",
+      "samplesMs": [
+        1752.7217079999973,
+        1903.687666999991,
+        1660.0170419999922,
+        1748.593166000006,
+        1734.1058750000084,
+        1615.048833000008,
+        1635.3427500000107,
+        1625.4230420000094,
+        1649.0413750000007,
+        1677.0424169999897,
+        1691.7684579999768,
+        1628.1922499999928,
+        1630.7968330000003,
+        1615.0954580000252,
+        1597.5735830000194,
+        1648.6392090000154,
+        2821.1357499999867,
+        2342.376250000001,
+        3257.192417000013,
+        2897.338915999979
+      ],
+      "p95Ms": 2897.338915999979
+    },
+    {
+      "fixture": "image-only.pdf",
+      "condition": "app-and-daemon-cold",
+      "samplesMs": [
+        2797.332290999999,
+        1846.282749999984,
+        1780.9962079999968,
+        2089.8387499999953,
+        1762.0726250000007,
+        1828.6579159999965,
+        1723.369875000004,
+        1718.0097499999974,
+        2007.6812500000233,
+        3229.6452500000014,
+        2585.1984999999986,
+        1795.6974159999809,
+        1957.6010419999948,
+        1763.1261669999803,
+        1877.1572080000187,
+        1726.7079579999845,
+        1980.51783300002,
+        1712.3628749999916,
+        1767.8223329999892,
+        1713.9850840000145
+      ],
+      "p95Ms": 2797.332290999999
+    },
+    {
+      "fixture": "image-only.pdf",
+      "condition": "app-cold-daemon-warm",
+      "samplesMs": [
+        1814.3849169999885,
+        1743.5506659999955,
+        1591.548374999984,
+        1592.9587910000118,
+        1651.8130000000237,
+        1616.2548749999842,
+        1566.7568329999922,
+        1600.8115410000028,
+        1591.7017080000078,
+        1583.1155410000065,
+        1567.8671670000185,
+        1599.1224999999977,
+        1593.8195410000044,
+        1579.1965420000197,
+        1848.5696250000037,
+        1552.8708329999936,
+        1568.1040839999914,
+        1646.6794579999987,
+        1567.483041999978,
+        1486.660165999987
+      ],
+      "p95Ms": 1814.3849169999885
+    },
+    {
+      "fixture": "text-native-with-annotations.pdf",
+      "condition": "app-and-daemon-cold",
+      "samplesMs": [
+        2499.6758749999863,
+        1894.4607090000063,
+        1809.1279169999762,
+        1771.8009170000441,
+        1956.9517079999787,
+        1801.1223749999772,
+        1825.1840420000372,
+        1862.4423749999842,
+        1942.294333000027,
+        1960.3962080000201,
+        1839.2595829999773,
+        2360.898041999957,
+        1817.0586250000051,
+        2789.334499999997,
+        2185.0667500000563,
+        3276.495707999973,
+        2904.255292000016,
+        2267.184249999991,
+        2267.7393750000047,
+        2312.1758750000154
+      ],
+      "p95Ms": 2904.255292000016
+    },
+    {
+      "fixture": "text-native-with-annotations.pdf",
+      "condition": "app-cold-daemon-warm",
+      "samplesMs": [
+        1968.7889580000192,
+        2516.057999999961,
+        2205.575582999969,
+        2372.4129170000087,
+        2179.0810420000344,
+        2558.119667000021,
+        2945.7597079999978,
+        3970.881584000017,
+        3870.2561250000144,
+        2498.4812500000116,
+        2441.931749999989,
+        2494.1299589999835,
+        2653.115125000011,
+        2430.6071660000016,
+        2923.9862079999875,
+        2497.634667000035,
+        2351.2990839999984,
+        2419.108084000007,
+        2115.2925839999807,
+        2059.1427079999703
+      ],
+      "p95Ms": 3870.2561250000144
+    }
+  ],
+  "resources": {
+    "cpuPercentOfOneCore": 0.8161260987441129,
+    "postCloseGrowthRatio": 1.104529191738494,
+    "accounting": "Sum of ps RSS in KiB (shared pages can be counted more than once), cumulative user+system CPU time; Electron and daemon descendants partitioned by PID.",
+    "postClose": [
+      {
+        "electronResidentKiB": 325376,
+        "daemonResidentKiB": 68160,
+        "combinedResidentKiB": 393536
+      },
+      {
+        "electronResidentKiB": 341952,
+        "daemonResidentKiB": 67056,
+        "combinedResidentKiB": 409008
+      },
+      {
+        "electronResidentKiB": 342560,
+        "daemonResidentKiB": 65936,
+        "combinedResidentKiB": 408496
+      },
+      {
+        "electronResidentKiB": 348928,
+        "daemonResidentKiB": 66160,
+        "combinedResidentKiB": 415088
+      },
+      {
+        "electronResidentKiB": 366864,
+        "daemonResidentKiB": 67808,
+        "combinedResidentKiB": 434672
+      },
+      {
+        "electronResidentKiB": 339216,
+        "daemonResidentKiB": 73616,
+        "combinedResidentKiB": 412832
+      },
+      {
+        "electronResidentKiB": 339088,
+        "daemonResidentKiB": 71600,
+        "combinedResidentKiB": 410688
+      },
+      {
+        "electronResidentKiB": 341248,
+        "daemonResidentKiB": 74320,
+        "combinedResidentKiB": 415568
+      },
+      {
+        "electronResidentKiB": 339840,
+        "daemonResidentKiB": 66912,
+        "combinedResidentKiB": 406752
+      },
+      {
+        "electronResidentKiB": 331824,
+        "daemonResidentKiB": 63920,
+        "combinedResidentKiB": 395744
+      },
+      {
+        "electronResidentKiB": 291408,
+        "daemonResidentKiB": 31360,
+        "combinedResidentKiB": 322768
+      },
+      {
+        "electronResidentKiB": 301360,
+        "daemonResidentKiB": 31184,
+        "combinedResidentKiB": 332544
+      }
+    ]
+  }
+}

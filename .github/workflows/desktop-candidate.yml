@@ -67,6 +67,23 @@ jobs:
       - name: Make personal installer
         id: make
         run: pnpm --dir apps/electron make --platform=${{ matrix.platform }} --arch=${{ matrix.arch }}
+      - name: Install Linux candidate
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          debs=(dist/desktop-artifacts/make/deb/${{ matrix.arch }}/*.deb)
+          test "${#debs[@]}" -eq 1
+          package=$(dpkg-deb --field "${debs[0]}" Package)
+          sudo apt-get install -y "$PWD/${debs[0]}"
+          test "$(dpkg-query --show --showformat='${Status}' "$package")" = 'install ok installed'
+          mapfile -t executables < <(dpkg-query --listfiles "$package" | grep '/PlacekeeperCandidate$')
+          test "${#executables[@]}" -eq 1
+          executable=$(readlink -f "${executables[0]}")
+          test -x "$executable"
+          test "$(stat -c '%u:%g:%a' "$(dirname "$executable")/chrome-sandbox")" = '0:0:4755'
+          printf 'PLACEKEEPER_TEST_EXECUTABLE=%s\n' "$executable" >> "$GITHUB_ENV"
       - name: Test packaged candidate on Linux
         if: runner.os == 'Linux'
         run: xvfb-run -a pnpm test:desktop-installed

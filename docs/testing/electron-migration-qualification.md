@@ -52,8 +52,8 @@ AE1 is exercised in the packaged lifecycle test. AE2 native Retry after renderer
 
 | Platform | Evidence status |
 | --- | --- |
-| Local macOS arm64 | Actual packaged review tests above; no installation over the user's app |
-| macOS x64 | Native CI artifact/testing pending |
+| Local macOS arm64 | Actual packaged review tests above; native macOS 15 arm64 CI ZIP and all eight packaged tests also passed at `bfd189d`; no installation over the user's app |
+| macOS x64 | Native macOS 15 Intel CI ZIP and all eight packaged tests passed in run `41518450673` at `bfd189d` |
 | macOS 13 | Untested; compatible minimum version is not execution evidence |
 | Windows 11 x64 | Untested locally; Windows Server CI cannot establish Windows 11 installer, DPI or Narrator behavior |
 | Ubuntu 24.04 x64 | Native CI artifact/testing pending; X11/Wayland and accessibility require interactive qualification |
@@ -65,7 +65,20 @@ AE1 is exercised in the packaged lifecycle test. AE2 native Retry after renderer
 
 The macOS resource test measures cumulative CPU over at least 60 seconds and records Electron and daemon process-tree RSS separately and together over 12 normal document close/reopen cycles. Shared RSS pages can be counted more than once. Stable process inventory is required for CPU accounting. A low RSS growth ratio alone does not prove internal worker disposal.
 
-Final measurements are pending. First visible shell, visible input response, scroll/zoom frame intervals, a representative large scanned corpus, long-recovery cases, and a paired AppKit performance comparison remain unmeasured. The plan's targets are unchanged; missing measurements and target misses are not passes.
+The complete local run passed on Apple M5 / Darwin 25.6.0 arm64 (24 GiB RAM), using the packaged candidate with ASAR SHA-256 `a3444059c96e19c2733690a46c1772bc8a5a687f793563ef773494af7e15851a`. [Raw samples, artifact/fixture hashes, and memory accounting](electron-performance-2026-11-02.json) identify the measured build. This was an ordinary desktop session with other applications present, not a dedicated benchmark host.
+
+| Fixture | Cold p95 | Daemon-warm p95 | Samples per condition | Target |
+| --- | ---: | ---: | ---: | ---: |
+| Small text | 2.12 s | 1.93 s | 20 | 6 s |
+| Long text | 2.08 s | 2.90 s | 20 | 6 s |
+| Image smoke fixture | 2.80 s | 1.81 s | 20 | 12 s |
+| Annotated text | 2.90 s | 3.87 s | 20 | 6 s |
+
+Combined idle CPU averaged 0.82% of one core over 60 seconds (target below 2%). Across 12 close/reopen cycles, combined post-close RSS peaked 10.5% above the first stabilized cycle (target at most 15%). First-cycle RSS was 317.8 MiB Electron plus 66.6 MiB daemon, 384.3 MiB combined; the peak combined value was 424.5 MiB. RSS accounting can count shared pages more than once. The local arm64 ZIP is 169,950,112 bytes (162.1 MiB); the unpacked app occupies 424,252 KiB (414.3 MiB) on this filesystem.
+
+An earlier incomplete run lost the automation page target despite the renderer having initialized and remaining alive. Three bounded startup probes and the subsequent complete 160-launch run passed; no product cause was established. The harness now records raw target/disconnect diagnostics on recurrence. Another test failure was a normal-close/CDP-reply race; the corrected harness still requires the close event and idle-state checks.
+
+First visible shell, visible input response, scroll/zoom frame intervals, a representative large scanned corpus, long-recovery cases, and a paired AppKit performance comparison remain unmeasured. The plan's targets are unchanged; missing measurements and target misses are not passes.
 
 ## Running qualification
 

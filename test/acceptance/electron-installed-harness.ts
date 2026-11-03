@@ -74,13 +74,55 @@ export class InstalledCandidate {
       });
     });
     this.browser = await chromium.connectOverCDP(`http://127.0.0.1:${debugPort}`);
-    const context = this.browser.contexts()[0]!;
+    // Keep this observer separate from page admission: it must not wait for or
+    // change the existing first-context/page selection while diagnosing startup.
+    const browser = this.browser;
+    const startupEvents: unknown[] = [];
+    const recordStartup = (event: string, detail?: unknown) => {
+      if (startupEvents.length < 128) startupEvents.push({ event, atMs: performance.now() - this.launchStartedAt, detail });
+    };
+    const contextInventory = () => browser.contexts().map((context, index) => ({ index,
+      pages: context.pages().map(page => ({ url: page.url(), closed: page.isClosed() })),
+    }));
+    recordStartup('connected', { connected: browser.isConnected(), contexts: contextInventory() });
+    const disconnected = () => recordStartup('disconnected');
+    browser.on('disconnected', disconnected);
+    let observer: Awaited<ReturnType<Browser['newBrowserCDPSession']>> | undefined;
+    void browser.newBrowserCDPSession().then(async session => {
+      observer = session;
+      for (const event of ['Target.targetCreated', 'Target.targetInfoChanged', 'Target.targetDestroyed', 'Target.targetCrashed'] as const) {
+        session.on(event, detail => recordStartup(event, detail));
+      }
+      await session.send('Target.setDiscoverTargets', { discover: true });
+    }).catch(error => recordStartup('observer-failed', String(error)));
+    const startupFailure = async () => {
+      let targets: unknown;
+      try {
+        targets = await Promise.race([
+          observer?.send('Target.getTargets') ?? Promise.resolve('CDP observer not established'),
+          delay(1000).then(() => 'CDP target inventory timed out'),
+        ]);
+      } catch (error) { targets = String(error); }
+      this.log += `\n[candidate-startup-diagnostic] ${JSON.stringify({
+        connected: browser.isConnected(), contexts: contextInventory(), selectedContextIndex: 0,
+        targets, events: startupEvents,
+      })}\n`;
+    };
+    const context = browser.contexts()[0]!;
     const page = await new Promise<Page>((accept, reject) => {
       const timer = setTimeout(() => {
         context.off('page', watch);
-        reject(new Error(`No packaged review page. Targets: ${JSON.stringify(this.pages().map(page => ({ url: page.url(), closed: page.isClosed() })))}\n${this.log}`));
+        void startupFailure().catch(error => {
+          this.log += `\n[candidate-startup-diagnostic-error] ${String(error)}\n`;
+        }).then(() => {
+          reject(new Error(`No packaged review page. Targets: ${JSON.stringify(this.pages().map(page => ({ url: page.url(), closed: page.isClosed() })))}\n${this.log}`));
+        });
       }, 30_000);
       const watch = (candidate: Page) => {
+        recordStartup('page-observed', { url: candidate.url(), contextIndex: browser.contexts().indexOf(candidate.context()) });
+        candidate.once('close', () => recordStartup('page-closed', { url: candidate.url() }));
+        candidate.once('crash', () => recordStartup('page-crashed', { url: candidate.url() }));
+        candidate.on('pageerror', error => recordStartup('page-error', String(error)));
         candidate.on('dialog', dialog => {
           if (dialog.type() !== 'beforeunload') this.errors.push(`Unexpected ${dialog.type()} dialog: ${dialog.message()}`);
           void dialog.dismiss().catch(error => {
@@ -91,7 +133,7 @@ export class InstalledCandidate {
           clearTimeout(timer);
           context.off('page', watch);
           accept(candidate);
-        }).catch(() => undefined);
+        }).catch(error => recordStartup('page-url-wait-failed', { url: candidate.url(), error: String(error) }));
       };
       context.on('page', watch);
       for (const candidate of context.pages()) watch(candidate);
@@ -100,6 +142,8 @@ export class InstalledCandidate {
     page.on('requestfailed', request => this.errors.push(`${request.url()}: ${request.failure()?.errorText}`));
     page.setDefaultTimeout(10_000);
     await page.waitForLoadState('domcontentloaded');
+    browser.off('disconnected', disconnected);
+    if (observer) void observer.detach().catch(() => undefined);
     return page;
   }
 
