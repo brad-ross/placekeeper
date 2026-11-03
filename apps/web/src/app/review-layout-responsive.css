@@ -153,7 +153,7 @@
 
   .review-layout[data-bottom-overlay="false"][data-bottom-rail-present="true"]
     .review-overlay-frame__bottom-fade {
-    bottom: calc(max(56px, var(--review-overlay-inset, 12px) + var(--review-control-touch)) - var(--review-main-scrollbar-height));
+    bottom: max(56px, var(--review-overlay-inset, 12px) + var(--review-control-touch));
   }
 
   .comment-composer {

@@ -1782,7 +1782,7 @@ test.describe('canonical review workflow', () => {
       });
       expect(centered).toBeLessThanOrEqual(1);
       await expect(chrome.locator('.review-chrome__history-trigger svg')).toHaveCount(2);
-      await expect(chrome.locator('.review-chrome__page-disclosure svg')).toHaveCount(2);
+      await expect(chrome.locator('.review-chrome__page-disclosure svg')).toHaveCount(0);
 
       // The measured presentation can vary with platform font metrics; the
       // geometry and 44px touch targets above are the public contract.
