@@ -1667,6 +1667,23 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
             : await navigationCoordinator.restoreCurrentLocation();
         }
         if (cancelled || generation !== documentGenerationRef.current) return;
+        const savedPresentation = initialPresentationAppliedRef.current ? undefined : props.initialPresentation;
+        if (savedPresentation !== undefined) {
+          const navigation = mainNavigationRef.current;
+          const snapshot = viewerControlsRef.current?.snapshot();
+          const pageIndex = snapshot === undefined ? 0 : Math.max(0, Math.min(
+            savedPresentation.pageIndex ?? snapshot.currentPage - 1, snapshot.totalPages - 1,
+          ));
+          const destination = navigation?.resolvePageLocation(pageIndex);
+          restored = destination === null || destination === undefined ? false
+            : await navigationCoordinator.restorePresentationLocation({
+                ...destination, zoom: savedPresentation.zoom ?? destination.zoom,
+              }, generation);
+          if (cancelled || generation !== documentGenerationRef.current) return;
+          // A fallback must retain the saved intent instead of publishing a
+          // transient startup viewport as if restoration had succeeded.
+          initialPresentationAppliedRef.current = restored;
+        }
         if (restored) viewerControlsRef.current?.freezeCurrentZoom();
         const startingLocation = mainNavigationRef.current?.captureLocation();
         if (initialLocation && startingLocation) {
@@ -2047,7 +2064,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
         '.pdf-workspace:not(.pdf-workspace--reference) [data-viewer-framing-viewport]',
       ) ?? null,
       jumpToPage: (pageNumber) => {
-        // Startup applies page and zoom together through the native controls.
+        // Settled startup restoration owns navigation before normal page jumps.
         if (!initialPresentationAppliedRef.current) return false;
         const navigation = mainNavigationRef.current;
         const destination = navigation?.resolvePageLocation(pageNumber - 1);
@@ -2058,15 +2075,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     viewerControlsRef.current = controls;
     viewerControlsGenerationRef.current = documentGenerationRef.current;
     setViewerState(controls.snapshot());
-    if (!initialPresentationAppliedRef.current) {
-      if (props.initialPresentation?.pageIndex !== undefined) {
-        controls.goToPage(props.initialPresentation.pageIndex + 1);
-      }
-      if (props.initialPresentation?.zoom !== undefined) {
-        controls.zoomToPercent(props.initialPresentation.zoom * 100);
-      }
-      initialPresentationAppliedRef.current = true;
-    }
+    if (props.initialPresentation === undefined) initialPresentationAppliedRef.current = true;
     controls.subscribe(() => {
       if (restoringLocationGenerationRef.current !== documentGenerationRef.current) {
         viewportIdentityRef.current += 1;
@@ -2077,12 +2086,12 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     });
   }, [captureCurrentReadingLocation, mainLocationRefresh, props.initialPresentation]);
   useEffect(() => {
-    if (!viewerState.ready || props.onPresentationChange === undefined) return;
+    if (!initialViewReady || !initialPresentationAppliedRef.current || !viewerState.ready || props.onPresentationChange === undefined) return;
     props.onPresentationChange({
-      pageIndex: viewerState.currentPage,
+      pageIndex: Math.max(0, viewerState.currentPage - 1),
       zoom: viewerState.zoomPercent / 100,
     });
-  }, [props.onPresentationChange, viewerState]);
+  }, [initialViewReady, props.onPresentationChange, viewerState]);
   const onMainDocumentReady = useCallback((engine: PdfEngine, document: PdfDocumentObject) => {
     const documentGeneration = documentGenerationRef.current;
     readingPageReaderRef.current = {

@@ -46,7 +46,7 @@ export class InstalledCandidate {
     return new InstalledCandidate(root, source);
   }
 
-  async launch(): Promise<Page> {
+  async launch(options: { readonly restoreSavedWindows?: boolean } = {}): Promise<Page> {
     const debugPort = await freePort();
     const servicePort = this.servicePort ??= await freePort();
     const env = { ...process.env };
@@ -60,7 +60,7 @@ export class InstalledCandidate {
     this.launchEnvironment = env;
     this.log = '';
     this.launchStartedAt = performance.now();
-    this.child = spawn(candidateExecutable(), [...this.launchArgs, `--remote-debugging-port=${debugPort}`, this.source],
+    this.child = spawn(candidateExecutable(), [...this.launchArgs, `--remote-debugging-port=${debugPort}`, ...(options.restoreSavedWindows ? [] : [this.source])],
       { env, stdio: ['ignore', 'pipe', 'pipe'] });
     this.closed = new Promise(accept => this.child!.once('exit', () => accept()));
     this.child.stdout!.on('data', data => { this.log += String(data); });
