@@ -9,6 +9,46 @@ test('packaged candidate renders and activates a real PDF without system Node', 
     await expect(page.locator('img').first()).toBeVisible({ timeout: 30_000 });
     await expect(page.locator('[data-production-review]')).toHaveAttribute('data-initial-view-ready', 'true');
     await expect.poll(() => candidate.timings().some(event => event.stage === 'visible-active')).toBe(true);
+    const titlebarGeometry = () => page.evaluate(() => {
+      const overlay = (navigator as Navigator & { windowControlsOverlay?: {
+        visible: boolean; getTitlebarAreaRect(): DOMRect;
+      } }).windowControlsOverlay;
+      const chrome = document.querySelector<HTMLElement>('[data-review-chrome]')!;
+      const bounds = chrome.getBoundingClientRect();
+      const safe = overlay?.getTitlebarAreaRect();
+      const controls = [...chrome.querySelectorAll<HTMLElement>('button,input,[tabindex]')]
+        .filter(element => element.checkVisibility());
+      return {
+        nativeControlsVisible: overlay?.visible === true,
+        top: bounds.top, height: bounds.height,
+        nativeHeight: safe?.height ?? 0,
+        controlsInsideSafeArea: Boolean(safe) && controls.every(element => {
+          const rect = element.getBoundingClientRect();
+          return rect.left >= safe!.left && rect.right <= safe!.right;
+        }),
+        drag: getComputedStyle(chrome).getPropertyValue('-webkit-app-region'),
+        inputsClickable: controls.every(element => getComputedStyle(element).getPropertyValue('-webkit-app-region') === 'no-drag'),
+      };
+    });
+    await expect.poll(titlebarGeometry).toMatchObject({ nativeControlsVisible: true, top: 0, height: 52,
+      controlsInsideSafeArea: true, drag: 'drag', inputsClickable: true });
+    const pageInput = page.locator('[data-review-chrome] .review-chrome__page-input');
+    await pageInput.click();
+    await expect(pageInput).toBeFocused();
+    await pageInput.fill('1');
+    await pageInput.press('Enter');
+    await page.getByRole('button', { name: /Open automatic save options/ }).click();
+    const saveDialog = page.getByRole('dialog', { name: 'Choose where to save annotations' });
+    await expect(saveDialog).toBeVisible();
+    await saveDialog.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await expect(saveDialog).not.toBeVisible();
+    const zoomDisclosure = page.getByRole('button', { name: 'Open zoom controls', exact: true });
+    const zoomBounds = (await zoomDisclosure.boundingBox())!;
+    await page.mouse.move(zoomBounds.x + zoomBounds.width / 2, zoomBounds.y + zoomBounds.height / 2);
+    await expect(zoomDisclosure).toHaveCSS('pointer-events', 'auto');
+    await zoomDisclosure.click();
+    await expect(page.getByRole('menu')).toBeVisible();
+    await page.keyboard.press('Escape');
     const scope = await page.evaluate(async ({ protocol, version }) => {
       const shell = window.placekeeper;
       const identity = await shell.identity();

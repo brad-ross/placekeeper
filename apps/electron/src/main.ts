@@ -18,6 +18,7 @@ import { WindowActivityRegistry, ActivityAcknowledgements } from './window-lifec
 import { DocumentWindowRegistry } from './window-registry.js';
 import { parseWindowState, readWindowState, writeWindowState, type WindowIntent } from './window-state.js';
 import { installMenus, type WindowCommands } from './menus.js';
+import { nativeTitlebarOptions } from './titlebar.js';
 import { parseElectronLocation } from '../../../packages/core/src/electron-shell-protocol.js';
 import { decodePlacekeeperLink } from '../../../packages/core/src/placekeeper-link.js';
 import { REVIEW_COMMAND_IDS } from '../../web/src/review/review-command-surface.js';
@@ -181,7 +182,7 @@ async function start() {
     bridge = new ReviewBridge((message, signal) => electronRuntimeThroughDaemon(appInstanceId, bridge.helperId, message, signal === undefined ? retirement.signal : AbortSignal.any([signal, retirement.signal]), paths), generation => `placekeeper-resource://document/${bridge.attemptId}/${generation}`);
     const bounds = restored?.bounds ?? { width: 1200, height: 900 };
     const usable = screen.getAllDisplays().some(d => (bounds.x ?? d.workArea.x) < d.workArea.x + d.workArea.width && (bounds.y ?? d.workArea.y) < d.workArea.y + d.workArea.height && (bounds.x ?? d.workArea.x) + bounds.width > d.workArea.x && (bounds.y ?? d.workArea.y) + bounds.height > d.workArea.y);
-    const window = new BrowserWindow({ ...(usable ? bounds : { width: bounds.width, height: bounds.height }), minWidth: 600, minHeight: 400, title: basename(sourcePath), backgroundColor: '#f7f7f7', webPreferences: { preload: join(__dirname, 'preload.cjs'), session: isolated, sandbox: true, contextIsolation: true, nodeIntegration: false, webSecurity: true } });
+    const window = new BrowserWindow({ ...nativeTitlebarOptions(), ...(usable ? bounds : { width: bounds.width, height: bounds.height }), minWidth: 600, minHeight: 400, title: basename(sourcePath), backgroundColor: '#f7f7f7', webPreferences: { preload: join(__dirname, 'preload.cjs'), session: isolated, sandbox: true, contextIsolation: true, nodeIntegration: false, webSecurity: true } });
     timing('window-visible', bridge);
     const entry: Entry = { window, bridge, retirement, permitClose: false, focusedVisibility: new FocusedVisibilityGate(), rendererReady: false, failureShown: false, intent: { sourcePath, bounds, maximized: restored?.maximized ?? false, ...(restored?.presentation ? { presentation: restored.presentation } : {}) } };
     entries.set(window.webContents.id, entry); ownedWindows.register(bridge.helperId);

@@ -61,10 +61,23 @@ test('canceling a protected page note without a save destination clears the draf
       }) as { sessionId: string };
       return bootstrap.sessionId;
     }, { protocol: REVIEW_RUNTIME_PROTOCOL, version: REVIEW_RUNTIME_VERSION });
-    const snapshot = async () => JSON.parse(await readFile(join(candidate.root, 'recovery', sessionId, 'draft.json'), 'utf8')) as {
-      payload: {
-        state: { pendingDrafts: Array<{ text: string; status: string }>; items: unknown[] };
-        destination: { phase: string };
+    const snapshot = async () => {
+      const directory = join(candidate.root, 'recovery', sessionId);
+      let contents: string;
+      try { contents = await readFile(join(directory, 'draft.json'), 'utf8'); }
+      catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+        // Publication rotates current to previous before publishing its
+        // successor. Previous remains an acknowledged snapshot during that gap.
+        // If both files are absent, this read still fails instead of inventing
+        // an empty or successfully canceled review.
+        contents = await readFile(join(directory, 'draft.previous.json'), 'utf8');
+      }
+      return JSON.parse(contents) as {
+        payload: {
+          state: { pendingDrafts: Array<{ text: string; status: string }>; items: unknown[] };
+          destination: { phase: string };
+        };
       };
     };
     const composer = await openPageNote(page);

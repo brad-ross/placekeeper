@@ -503,3 +503,27 @@
   min-width: 0;
   min-height: 0;
 }
+
+.electron-review-shell .review-chrome {
+  --review-chrome-height: max(52px, env(titlebar-area-height, 52px));
+  padding-inline: 16px;
+}
+
+.electron-review-shell [data-review-chrome] {
+  -webkit-app-region: drag;
+  user-select: none;
+}
+
+.electron-review-shell[data-window-controls-overlay="true"] .review-chrome {
+  padding-left: calc(env(titlebar-area-x, 0px) + 16px);
+  padding-right: calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw) + 16px);
+}
+
+.electron-review-shell [data-review-chrome] :is(button, input, select, textarea, a, [role="button"], [tabindex], [contenteditable="true"], .copy-link-control__fallback),
+body:has(.electron-review-shell) .top-bar-menu__surface {
+  -webkit-app-region: no-drag;
+}
+
+.electron-review-shell [data-review-chrome] :is(input, textarea, [contenteditable="true"]) {
+  user-select: text;
+}
