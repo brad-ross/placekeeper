@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process';
 import { copyFile, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
@@ -20,11 +21,29 @@ async function prepare(candidate: InstalledCandidate) {
   await copyFile(join(fixture, 'main.tex'), source);
   await copyFile(join(fixture, 'baseline.pdf'), candidate.source);
   const publishMapping = async (version: 'baseline' | 'rebuilt') => {
-    const contents = (await readFile(join(fixture, `${version}.synctex`), 'utf8')).replace('PLACEKEEPER_FIXTURE_SOURCE', source);
+    // SyncTeX Input records are LF-delimited. Git's Windows CRLF conversion
+    // otherwise leaves a literal CR in the source tag and breaks real queries.
+    const contents = (await readFile(join(fixture, `${version}.synctex`), 'utf8'))
+      .replace(/\r\n?/gu, '\n').replace('PLACEKEEPER_FIXTURE_SOURCE', source);
     const temporary = `${sidecar}.next`;
     await writeFile(temporary, contents);
     await rename(temporary, sidecar);
   };
+  // Validate the genuinely compiled mapping with the host's actual query tool
+  // before testing the installed service. Restore the intended missing-sidecar
+  // starting state afterward; no service or renderer response is substituted.
+  if (!syncTexToolDirectory) throw new Error('The real SyncTeX query tool was not discovered');
+  const executable = join(syncTexToolDirectory, process.platform === 'win32' ? 'synctex.exe' : 'synctex');
+  const argv = ['view', '-i', `6:1:${source}`, '-o', candidate.source];
+  try {
+    await publishMapping('baseline');
+    const result = spawnSync(executable, argv, { cwd: candidate.root, timeout: 5000, encoding: 'utf8', maxBuffer: 1_048_576 });
+    const diagnostic = { executable, argv, source, pdf: candidate.source, status: result.status, signal: result.signal,
+      error: result.error?.message, stdout: result.stdout, stderr: result.stderr };
+    await writeFile(join(candidate.root, 'fixture-query-preflight.json'), JSON.stringify(diagnostic, null, 2));
+    expect(result.status, `Real SyncTeX fixture query: ${JSON.stringify(diagnostic)}`).toBe(0);
+    expect(result.stdout, `Real SyncTeX fixture must map line 6 to page 2: ${JSON.stringify(diagnostic)}`).toMatch(/^Page:2\r?$/mu);
+  } finally { await rm(sidecar, { force: true }); }
   return { source, sidecar, record, publishMapping };
 }
 

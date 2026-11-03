@@ -1,0 +1,2 @@
+# SyncTeX treats a CR in an Input record as part of the source filename.
+*.synctex text eol=lf
