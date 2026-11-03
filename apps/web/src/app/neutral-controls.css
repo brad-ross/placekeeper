@@ -468,6 +468,10 @@
   .review-chrome__filename {
     display: none;
   }
+
+  .review-chrome .review-chrome__save-identity {
+    justify-content: center;
+  }
 }
 
 .review-chrome[data-review-chrome-touch-compact="true"] .review-chrome__filename {
@@ -476,4 +480,16 @@
 
 .review-chrome[data-review-chrome-touch-compact="true"] .review-chrome__save-identity {
   min-width: 44px;
+  justify-content: center;
+}
+
+.review-chrome__paired-icon {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  width: 24px;
+}
+.review-chrome__paired-icon .review-icon {
+  width: 12px;
+  height: 16px;
 }

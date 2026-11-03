@@ -1774,6 +1774,16 @@ test.describe('canonical review workflow', () => {
         }
       }
 
+      const identity = chrome.locator(':scope > .review-chrome__identity .review-chrome__save-identity');
+      const centered = await identity.evaluate(el => {
+        const button = el.getBoundingClientRect();
+        const icon = el.querySelector('svg')!.getBoundingClientRect();
+        return Math.abs(button.x + button.width / 2 - icon.x - icon.width / 2);
+      });
+      expect(centered).toBeLessThanOrEqual(1);
+      await expect(chrome.locator('.review-chrome__history-trigger svg')).toHaveCount(2);
+      await expect(chrome.locator('.review-chrome__page-disclosure svg')).toHaveCount(2);
+
       // The measured presentation can vary with platform font metrics; the
       // geometry and 44px touch targets above are the public contract.
       await expect(chrome.getByRole('button', { name: 'Open zoom controls' })).toBeVisible();
@@ -1783,6 +1793,12 @@ test.describe('canonical review workflow', () => {
       }).tap();
       const menu = touchPage.getByRole('menu', { name: 'Page navigation' });
       await expect(menu).toBeVisible();
+      const menuButtons = await menu.locator('button').evaluateAll(es => es.map(e => ({
+        y: e.getBoundingClientRect().y, text: e.textContent?.trim(),
+      })));
+      expect(menuButtons).toHaveLength(4);
+      expect(new Set(menuButtons.map(b => b.y)).size).toBe(1);
+      expect(menuButtons.every(b => !b.text)).toBe(true);
       const menuButtonHeights = await menu.locator('button').evaluateAll((buttons) => (
         buttons.map((button) => button.getBoundingClientRect().height)
       ));

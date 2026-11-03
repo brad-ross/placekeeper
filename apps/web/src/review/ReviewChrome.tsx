@@ -764,7 +764,7 @@ export function ReviewChrome({
         className="review-chrome__icon-control review-chrome__history-trigger"
         aria-haspopup="menu" aria-expanded={activeTopBarMenu === 'history'} aria-controls={historyMenuId}
         onClick={(event) => activateMenu('history', event)}
-      ><ReviewIcon name="undo" /></ReviewTooltipButton>
+      ><span className="review-chrome__paired-icon"><ReviewIcon name="undo" /><ReviewIcon name="redo" /></span></ReviewTooltipButton>
       <TopBarMenu open={activeTopBarMenu === 'history'} menuId={historyMenuId} label="Edit history"
         openerRef={historyAnchorRef} onDismiss={() => requestTopBarMenu('history', false)}>
         <ReviewTooltipButton label="Undo" type="button" role="menuitem" disabled={!canUndo} onClick={(event) => runMenuHistoryAction(event.currentTarget, onUndo)}><ReviewIcon name="undo" /><span>Undo</span></ReviewTooltipButton>
@@ -783,7 +783,7 @@ export function ReviewChrome({
       label={backward ? 'Back in document history' : 'Forward in document history'}
       type="button"
       role={inMenu ? 'menuitem' : undefined}
-      className={inMenu ? 'review-chrome__main-history-control' : 'review-chrome__icon-control review-chrome__main-history-control'}
+      className="review-chrome__icon-control review-chrome__main-history-control"
       data-main-history={direction}
       aria-busy={documentNavigationPending ? 'true' : undefined}
       disabled={documentNavigationPending || !available}
@@ -792,7 +792,7 @@ export function ReviewChrome({
         if (inMenu) runMenuHistoryAction(event.currentTarget, action);
         else action();
       }}
-    ><ReviewIcon name={backward ? 'arrow-left' : 'arrow-right'} />{inMenu ? <span>{backward ? 'Back in document history' : 'Forward in document history'}</span> : null}</ReviewTooltipButton>;
+    ><ReviewIcon name={backward ? 'arrow-left' : 'arrow-right'} /></ReviewTooltipButton>;
   };
 
   const pageNavigationAvailable = viewerState.pageReady && viewerState.totalPages > 1;
@@ -825,14 +825,14 @@ export function ReviewChrome({
         aria-controls={navigationMenuId}
         disabled={!navigationMenuAvailable}
         onClick={(event) => activateMenu('navigation', event)}
-      ><span aria-hidden="true">/ {viewerState.pageReady ? viewerState.totalPages : '—'}</span></ReviewTooltipButton>
+      ><span aria-hidden="true">/ {viewerState.pageReady ? viewerState.totalPages : '—'}</span>{compactTouch ? <span className="review-chrome__paired-icon"><ReviewIcon name="arrow-left" /><ReviewIcon name="arrow-right" /></span> : null}</ReviewTooltipButton>
     </span>
       {copyLink === undefined ? null : <div className="review-chrome__link" data-review-copy-link><CopyLinkControl {...copyLink} /></div>}
     {/* Back and Forward keep fixed slots, greyed out when unavailable. */}
     {compactTouch ? null : <>{mainHistoryControl('back')}{mainHistoryControl('forward')}</>}
     <TopBarMenu hoverOpen={topBarMenuHoverOpen} hoverRegionRef={navigationHoverRef} open={activeTopBarMenu === 'navigation'} menuId={navigationMenuId} label="Page navigation" openerRef={navigationAnchorRef} focusOnOpen={topBarMenuKeyboardOpenRef.current} onDismiss={() => requestTopBarMenu('navigation', false)}>
-      {compactTouch ? <>{mainHistoryControl('back', true)}{mainHistoryControl('forward', true)}</> : null}
       <div className="review-chrome__control-cluster review-chrome__page-menu" role="group" aria-label="Page navigation controls">
+        {compactTouch ? <>{mainHistoryControl('back', true)}{mainHistoryControl('forward', true)}</> : null}
         <ReviewTooltipButton label="Previous page" type="button" role="menuitem" className="review-chrome__icon-control" data-review-page-step="previous" disabled={!viewerState.pageReady || viewerState.currentPage <= 1} onPointerDown={preparePageStep} onPointerUp={clearPageStepIntent} onPointerCancel={clearPageStepIntent} onClick={(event) => runPageStep(event.currentTarget, () => controls?.previousPage())}><ReviewIcon name="chevron-up" /></ReviewTooltipButton>
         <ReviewTooltipButton label="Next page" type="button" role="menuitem" className="review-chrome__icon-control" data-review-page-step="next" disabled={!viewerState.pageReady || viewerState.currentPage >= viewerState.totalPages} onPointerDown={preparePageStep} onPointerUp={clearPageStepIntent} onPointerCancel={clearPageStepIntent} onClick={(event) => runPageStep(event.currentTarget, () => controls?.nextPage())}><ReviewIcon name="chevron-down" /></ReviewTooltipButton>
       </div>
@@ -965,8 +965,8 @@ export function ReviewChrome({
   </>;
 
   const sizingCluster = (_candidate: ReviewChromePresentation): ReactNode => <div className="review-chrome__viewer-controls" style={{ display: 'inline-flex', gridColumn: 'auto', gridRow: 'auto', flexWrap: 'nowrap' }}>
-    <span className="review-chrome__control-cluster review-chrome__edit-cluster"><button type="button" title={compactTouch ? 'Open edit history' : 'Undo'} className="review-chrome__icon-control"><ReviewIcon name="undo" /></button>{compactTouch ? null : <button type="button" title="Redo" className="review-chrome__icon-control"><ReviewIcon name="redo" /></button>}</span>
-    <span className="review-chrome__control-cluster review-chrome__navigation-cluster">{compactTouch ? null : <><button type="button" title="Back in document history" data-main-history="back" className="review-chrome__icon-control"><ReviewIcon name="arrow-left" /></button><button type="button" title="Forward in document history" data-main-history="forward" className="review-chrome__icon-control"><ReviewIcon name="arrow-right" /></button></>}<span className="review-chrome__stat">{viewerState.pageReady ? `${viewerState.currentPage} / ${viewerState.totalPages}` : '— / —'}</span></span>
+    <span className="review-chrome__control-cluster review-chrome__edit-cluster"><button type="button" title={compactTouch ? 'Open edit history' : 'Undo'} className="review-chrome__icon-control">{compactTouch ? <span className="review-chrome__paired-icon"><ReviewIcon name="undo" /><ReviewIcon name="redo" /></span> : <ReviewIcon name="undo" />}</button>{compactTouch ? null : <button type="button" title="Redo" className="review-chrome__icon-control"><ReviewIcon name="redo" /></button>}</span>
+    <span className="review-chrome__control-cluster review-chrome__navigation-cluster">{compactTouch ? null : <><button type="button" title="Back in document history" data-main-history="back" className="review-chrome__icon-control"><ReviewIcon name="arrow-left" /></button><button type="button" title="Forward in document history" data-main-history="forward" className="review-chrome__icon-control"><ReviewIcon name="arrow-right" /></button></>}<span className="review-chrome__stat">{viewerState.pageReady ? `${viewerState.currentPage} / ${viewerState.totalPages}` : '— / —'}{compactTouch ? <span className="review-chrome__paired-icon"><ReviewIcon name="arrow-left" /><ReviewIcon name="arrow-right" /></span> : null}</span></span>
     <span className="review-chrome__control-cluster"><span className="review-chrome__stat">{viewerState.zoomReady ? `${viewerState.zoomPercent}%` : '—%'}</span></span>
     {copyLink === undefined ? null : <div className="review-chrome__link"><button type="button" title="Copy link to current location" className="review-chrome__icon-control"><ReviewIcon name="link" /></button></div>}
   </div>;

@@ -2633,64 +2633,81 @@ for (const width of [1280, 760]) {
   }
 }
 
-test("records annotation tray jumps in document history", async ({ page }) => {
-  await page.setViewportSize({ width: 1280, height: 900 });
-  const { sessionId } = await openFreshProductionFixture(
-    page,
-    referencePdf,
-    "Annotation history launch failed",
-    async (sessionId) => {
-      const initialState = host.broker.state(sessionId);
-      if (!initialState) throw new Error("Annotation history review state is missing");
-      await host.broker.acceptMutation(
-        sessionId,
-        addPageNote(
-          initialState,
-          2,
-          { x: 80, y: 160, width: 18, height: 18 },
-          "History destination.",
-        ),
+for (const mobile of [false, true]) {
+  test.describe(`annotation history ${mobile ? 'mobile' : 'desktop'}`, () => {
+    test.use({ hasTouch: mobile });
+    test(`records annotation tray jumps in document history (${mobile ? "touch" : "desktop"})`, async ({ page }) => {
+      await page.setViewportSize(mobile ? { width: 393, height: 852 } : { width: 1280, height: 900 });
+      const { sessionId } = await openFreshProductionFixture(
+        page,
+        referencePdf,
+        "Annotation history launch failed",
+        async (sessionId) => {
+          const initialState = host.broker.state(sessionId);
+          if (!initialState) throw new Error("Annotation history review state is missing");
+          await host.broker.acceptMutation(
+            sessionId,
+            addPageNote(
+              initialState,
+              2,
+              { x: 80, y: 160, width: 18, height: 18 },
+              "History destination.",
+            ),
+          );
+        },
       );
-    },
-  );
-  await expect.poll(() => currentPageText(page)).toBe("1 / 4");
-  await expect.poll(() => {
-    const state = host.broker.state(sessionId);
-    const sync = host.broker.saveStatus(sessionId)?.sync;
-    return state !== undefined && sync?.phase === 'clean'
-      && sync.desiredRevision === state.revision
-      && sync.savedRevision === state.revision;
-  }).toBe(true);
+      await expect.poll(() => currentPageText(page)).toBe("1 / 4");
+      await expect.poll(() => {
+        const state = host.broker.state(sessionId);
+        const sync = host.broker.saveStatus(sessionId)?.sync;
+        return state !== undefined && sync?.phase === 'clean'
+          && sync.desiredRevision === state.revision
+          && sync.savedRevision === state.revision;
+      }).toBe(true);
 
-  await openAnnotationsWorkspace(page);
-  const annotationsPanel = page.locator('#workspace-panel-annotations');
-  const pageThreeAnnotation = annotationsPanel.getByRole("button", {
-    name: /^Page Note · Page 3 · .*History destination\.$/u,
-  }).first();
-  await expect(pageThreeAnnotation).toBeVisible();
-  const pageThreeCopyLink = annotationsPanel.getByRole("button", {
-    name: "Copy link to Page Note annotation on page 3",
+      if (mobile) {
+        const rail = page.locator('.workspace-edge-rail');
+        await expect(rail).toBeVisible();
+        await expect.poll(() => page.evaluate(() => {
+          const rail = document.querySelector('.workspace-edge-rail')!.getBoundingClientRect();
+          const backing = document.querySelector('.review-overlay-frame__bottom-backing')!.getBoundingClientRect();
+          return backing.top <= rail.top && backing.bottom >= rail.bottom;
+        })).toBe(true);
+      }
+      await openAnnotationsWorkspace(page);
+      const annotationsPanel = page.locator('#workspace-panel-annotations');
+      const pageThreeAnnotation = annotationsPanel.getByRole("button", {
+        name: /^Page Note · Page 3 · .*History destination\.$/u,
+      }).first();
+      await expect(pageThreeAnnotation).toBeVisible();
+      const pageThreeCopyLink = annotationsPanel.getByRole("button", {
+        name: "Copy link to Page Note annotation on page 3",
+      });
+      await expect(pageThreeCopyLink).toBeVisible();
+      await expect(pageThreeCopyLink).toBeEnabled();
+      await expect(pageThreeCopyLink).not.toHaveAttribute("title");
+
+      const back = page.getByRole(mobile ? "menuitem" : "button", { name: "Back in document history" });
+      const forward = page.getByRole(mobile ? "menuitem" : "button", { name: "Forward in document history" });
+      if (!mobile) await expect(back).toBeDisabled();
+      if (mobile) await pageThreeAnnotation.tap({ position: { x: 12, y: 12 } });
+      else await pageThreeAnnotation.click();
+      await expect.poll(() => currentPageText(page)).toBe("3 / 4");
+      if (mobile) await page.getByRole("button", { name: /Open page navigation/ }).click();
+      await expect(back).toBeEnabled();
+
+      if (!mobile) await page.locator('[data-review-chrome]').hover({ position: { x: 2, y: 2 } });
+      await back.click();
+      await expect.poll(() => currentPageText(page)).toBe("1 / 4");
+      await expect(forward).toBeEnabled();
+
+      if (!mobile) await page.locator('[data-review-chrome]').hover({ position: { x: 2, y: 2 } });
+      await forward.click();
+      await expect.poll(() => currentPageText(page)).toBe("3 / 4");
+    });
+
   });
-  await expect(pageThreeCopyLink).toBeVisible();
-  await expect(pageThreeCopyLink).toBeEnabled();
-  await expect(pageThreeCopyLink).not.toHaveAttribute("title");
-
-  const back = page.getByRole("button", { name: "Back in document history" });
-  const forward = page.getByRole("button", { name: "Forward in document history" });
-  await expect(back).toBeDisabled();
-  await pageThreeAnnotation.click();
-  await expect.poll(() => currentPageText(page)).toBe("3 / 4");
-  await expect(back).toBeEnabled();
-
-  await page.locator('[data-review-chrome]').hover({ position: { x: 2, y: 2 } });
-  await back.click();
-  await expect.poll(() => currentPageText(page)).toBe("1 / 4");
-  await expect(forward).toBeEnabled();
-
-  await page.locator('[data-review-chrome]').hover({ position: { x: 2, y: 2 } });
-  await forward.click();
-  await expect.poll(() => currentPageText(page)).toBe("3 / 4");
-});
+}
 
 test("keeps unsaved annotation links disabled until the item is portable", async ({ page }) => {
   const { sessionId } = await openFreshProductionFixture(
