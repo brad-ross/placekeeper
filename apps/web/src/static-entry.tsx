@@ -231,7 +231,7 @@ export function StaticLauncher(props: {
     <section className="landing-extras" aria-labelledby="more-features-title">
       <h2 id="more-features-title">More useful features</h2>
       <article><span className="landing-symbol" aria-hidden="true">∑</span><div><h3>Symbol search</h3><p>Find mathematical symbols by name or LaTeX command.</p></div></article>
-      <article><ReviewIcon name="refresh" size={20} /><div><h3>Keep up with changes</h3><p>Keep reading as other apps or agents update your document. Placekeeper helps you reattach annotations when passages move or change.</p></div></article>
+      <article><ReviewIcon name="refresh" size={20} /><div><h3>Keep up with changes</h3><p>Keep reading as other apps or agents update your document. Reattach annotations when passages change.</p></div></article>
     </section>
     <SurfaceShowcase />
     <section id="install" className="landing-invitations" aria-label="Get started with Placekeeper">

@@ -6,7 +6,7 @@ const features = [
   {
     id: 'read', label: 'Read with focus', icon: 'file',
     description: 'Keep the document in view. Bring up the outline when you need to navigate, then put it away again.',
-    actions: ['Open and close the workspace.', 'Jump to a section in Outline.', 'Change the zoom and lock horizontal scrolling.'],
+    actions: ['Open and close the workspace.', 'Jump to a section in Outline.', 'Zoom to fit the page width or text.', 'Lock horizontal scrolling.'],
   },
   {
     id: 'reference', label: 'Follow references', icon: 'references',

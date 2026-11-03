@@ -1,9 +1,8 @@
 import { useId, useState } from 'react';
-import { Globe } from 'lucide-react';
+import { ArrowLeftRight, Globe } from 'lucide-react';
 const macIcon = new URL('../../../../packaging/macos/icon/Placekeeper.iconset/icon_128x128.png', import.meta.url).href;
 const codexIcon = new URL('./assets/chatgpt.png', import.meta.url).href;
 const chromeIcon = new URL('./assets/chrome.png', import.meta.url).href;
-const vscodeIcon = new URL('./assets/vscode.png', import.meta.url).href;
 
 const windowCaptures = {
   codex: { src: new URL('./assets/surface-codex.png', import.meta.url).href, width: 3104, height: 2024, alt: 'Codex explaining Theorem 1 beside page 15 of the paper in the native Placekeeper plugin panel' },
@@ -13,10 +12,10 @@ const windowCaptures = {
   browser: { src: new URL('./assets/surface-web.png', import.meta.url).href, width: 1152, height: 768, alt: 'Placekeeper’s web landing page in Chrome, with Upload PDF and document link controls' },
 };
 const surfaces = [
-  { id: 'mac', label: 'Mac', icon: macIcon, description: 'Make Placekeeper your everyday document reader. Open local files with autosave and recovery.' },
+  { id: 'mac', label: 'Desktop', icon: macIcon, description: 'Open local files via the desktop app for macOS, Windows, or Linux.' },
   { id: 'codex', label: 'ChatGPT / Codex', icon: codexIcon, description: 'Read and annotate PDFs beside your chat with the native Placekeeper plugin.' },
-  { id: 'chrome', label: 'Chrome Extension (experimental)', icon: chromeIcon, description: 'Open a document on the web and keep reading in its original tab, with Placekeeper’s tools at hand.' },
-  { id: 'vscode', label: 'VS Code', icon: vscodeIcon, description: 'Review LaTeX output beside the source. Follow rebuilds and jump between the document and your editor.' },
+  { id: 'chrome', label: 'Chrome Extension', icon: chromeIcon, description: 'Open a document on the web and keep reading in its original tab, with Placekeeper’s tools at hand.' },
+  { id: 'vscode', label: 'SyncTeX', icon: null, description: 'Jump between your LaTeX source and the matching passage in your PDF with SyncTeX, e.g. via the Placekeeper VS Code extension.' },
   { id: 'browser', label: 'Web', icon: null, description: 'Open a local document or a public link without installing anything. Export a copy to keep your annotations.' },
 ] as const;
 
@@ -29,7 +28,7 @@ export function SurfaceShowcase() {
     <div className="landing-surfaces__list">
       {surfaces.map((surface) => <button key={surface.id} type="button" title={`Show ${surface.label}`} aria-pressed={surface.id === selected.id}
         aria-controls={`${id}-illustration`} onClick={() => setSelected(surface)}>
-        {surface.icon ? <img className="landing-surface-icon" src={surface.icon} alt="" width="28" height="28" /> : <Globe className="landing-surface-icon" aria-hidden="true" size={28} />}
+        {surface.icon ? <img className="landing-surface-icon" src={surface.icon} alt="" width="28" height="28" /> : surface.id === 'vscode' ? <ArrowLeftRight className="landing-surface-icon" aria-hidden="true" size={28} /> : <Globe className="landing-surface-icon" aria-hidden="true" size={28} />}
         <span><strong>{surface.label}</strong><span>{surface.description}</span></span>
       </button>)}
     </div>
