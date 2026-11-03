@@ -33,11 +33,21 @@ A dense PDF toolbar must keep the document identifiable, preserve high-frequency
 
 The earlier narrow layout wrapped into a second row. Product iteration settled on moving complete semantic groups into compact menus instead, then refined the details: a generic ellipsis did not explain Undo/Redo, rearranged popup controls felt like a second interface, squeezing the filename first destroyed document identity, and stretching the title button across its reserved track made hover styling cover empty space (session history).
 
-The durable pattern is a Responsive Toolbar Presentation chosen from measured intrinsic candidates. The current toolbar defines four ordered states—`expanded`, `historyCompact`, `zoomCompact`, and `navigationCompact`—and keeps a fixed-height, non-wrapping row (`apps/web/src/review/review-chrome-layout.ts`, `apps/web/src/app/review-layout-foundation.css`). The least-collapsed fitting state preserves a useful filename allocation while moving Edit history first, Zoom second, and Document navigation last.
+The durable pattern is a Responsive Toolbar Presentation chosen from measured intrinsic candidates. The original toolbar design defined four ordered states—`expanded`, `historyCompact`, `zoomCompact`, and `navigationCompact`—and used a fixed-height, non-wrapping row (`apps/web/src/review/review-chrome-layout.ts`, `apps/web/src/app/review-layout-foundation.css`). The least-collapsed fitting state preserves a useful filename allocation while moving Edit history first, Zoom second, and Document navigation last.
+
+## Current policy and verified corrections
+
+The four-state collapse scheme described below is historical design, not the current toolbar composition. Commit `84f2099f6` removed those compact menus; the candidate labels remained, but their rendered controls were the same. The current correction preserves direct controls on fine pointers and adds only the user-approved narrow-touch composition: at coarse-pointer widths of 480px or less, one 44px history trigger opens Undo/Redo, and Back/Forward move into the existing page-navigation menu. Unavailable actions remain present and disabled in their direct slots or menu entries.
+
+The former below-760px rule hid disabled history slots: a 759px row could omit all four while the 760px row retained them. The rule is removed, and the sizing rack now reserves both complete history pairs regardless of availability. At fine-pointer widths of 360px or less, the gap is 3px and filename text yields its space; the document button retains the full accessible title. The verified 320px fine-pointer row keeps four 32px history targets and a document target of at least 32px. The verified 320px coarse-pointer row stays within the actual viewport without overlap, with a 44px document target, 44px history trigger, and menu entries at least 44 × 44px; both menus remain within the viewport.
+
+Electron must mark whole `[data-review-chrome-group]` elements as `no-drag`, including gaps between controls. Before this correction, a real native drag in the 8px Copy-to-Back seam moved the window by 60px horizontally and 40px vertically. The fresh packaged app stayed stationary for that seam drag while blank toolbar space still moved it by 60px and 40px. This was a native CGEvent check, separate from DOM geometry; the focused installed check also passed.
+
+Verification passed 82 unit checks, typechecking, 11 Chromium checks, seven WebKit checks, and all 12 installed checks against the freshly packaged macOS app (1.0 minute), including three SyncTeX checks and the group `no-drag` assertion. Back/Forward remain reachable for one-page or page-unready documents, and keyboard focus follows the natural Undo/Redo or Back/Forward order when an action becomes disabled. Focused correctness and independent adversarial reviews found no actionable issues. This is focused evidence, not a new full-suite pass.
 
 ## Guidance
 
-### Model responsiveness as ordered semantic presentations
+### Historical design: ordered semantic presentations
 
 Represent every valid toolbar composition explicitly and order it from richest to most compact:
 
@@ -52,7 +62,7 @@ This order expresses product priority. Undo/Redo gives up direct access first wh
 
 ### Measure complete rendered candidates
 
-Render an inert, hidden sizing rack containing every complete presentation. Each candidate includes the same identity footprint, controls, optional document state, and trailing status as the visible row (`apps/web/src/review/ReviewChrome.tsx`). The one deliberate exception is availability-dependent history: the rack includes only the history actions that are currently available, matching the narrow row that drops unavailable ones (see *Keep availability-dependent controls in fixed slots* below). It is `aria-hidden` and inert, so measurement does not create duplicate interaction surfaces (`apps/web/src/review/ReviewChrome.tsx`).
+Render an inert, hidden sizing rack containing every complete presentation. Each candidate includes the same identity footprint, controls, optional document state, and trailing status as the visible row (`apps/web/src/review/ReviewChrome.tsx`). History measurement must include every direct slot reserved by the current pointer/width composition, regardless of availability (see *Keep availability-dependent controls in fixed slots* below). It is `aria-hidden` and inert, so measurement does not create duplicate interaction surfaces (`apps/web/src/review/ReviewChrome.tsx`).
 
 Measure the candidates and actual toolbar after layout, feed those widths to a pure chooser, and observe both live and sizing elements with `ResizeObserver` (`apps/web/src/review/ReviewChrome.tsx`). Coalesce reads through one animation frame and remeasure after fonts settle (`apps/web/src/review/ReviewChrome.tsx`). The decision then reacts to real container and content changes rather than guessed global breakpoints.
 
@@ -76,14 +86,14 @@ The compact trigger should retain the group's essential state: current/total pag
 
 ### Keep availability-dependent controls in fixed slots
 
-Width is not the only thing that can change the row. Undo/Redo, Back/Forward, the page menu's Previous/Next, and Fit Width become available or unavailable as the reader edits, navigates, or reaches the first or last page. Mounting them only when available made the toolbar rearrange itself even though the window never resized. With the fixed-slot change (PR #130) they should keep their slot and be disabled, not removed, when unavailable. Current narrow-width CSS hides unavailable history controls below 760 px, and the sizing rack counts only available history (`apps/web/src/app/neutral-controls.css`, `apps/web/src/review/ReviewChrome.tsx`). This conflicts with the fixed-slot requirement in `CONCEPTS.md` and needs investigation as a potential regression, not acceptance as a new rule. Other controls retain their disabled presentation (`apps/web/src/review/ReviewChrome.tsx`; Fit Width marks the already-fitted state with `data-fit-width-current`).
+Width is not the only thing that can change the row. Undo/Redo, Back/Forward, the page menu's Previous/Next, and Fit Width become available or unavailable as the reader edits, navigates, or reaches the first or last page. Keep them present and disabled when unavailable so state changes do not rearrange the row or menu. On narrow touch layouts, this requirement applies inside the history and navigation menus as well as to their stable triggers. The below-760px exception was a confirmed regression and has been removed. Fit Width marks the already-fitted state with `data-fit-width-current` (`apps/web/src/review/ReviewChrome.tsx`).
 
 Four details make fixed slots work with the measured row:
 
-- **The rack measures only available history.** The sizing rack includes an Undo/Redo cluster only when `canUndo || canRedo`, and Back/Forward only when navigable (`apps/web/src/review/ReviewChrome.tsx:747-749`), while CSS below 760px hides disabled history controls (`apps/web/src/app/neutral-controls.css:429-435`). A first attempt measured every slot; every candidate grew, the chooser collapsed early, and a 320px VS Code embed stopped choosing `expanded` while the filename fell below its floor. The rack must match what the row actually occupies at the widths where the chooser is tight. At wider widths the visible row carries a few disabled slots the rack does not count; that slack was acceptable in the full acceptance suite, but it is the edge to recheck if the gaps or button sizes grow.
+- **The rack measures the complete composition.** Direct layouts reserve all four Undo/Redo and Back/Forward slots. Narrow-touch measurement instead matches its one history trigger and page-navigation trigger. Availability never changes that reserved space (`apps/web/src/review/ReviewChrome.tsx`).
 - **Scope disabled styling explicitly.** The shared `button:disabled { opacity: .35 }` under `.review-shell` (`apps/web/src/app/review-shell-chrome.css:61-66`) out-ranked the hover-reveal rule that hides Back/Forward at rest, so a disabled Back showed at 35% on an idle bar. Explicit rules set disabled history to `opacity: 0` at rest and `.35` only while the bar is revealed, inside the fine-pointer hover block (`apps/web/src/app/neutral-controls.css:169-177`).
 - **Pairs touch; groups keep their gap.** Undo/Redo and Back/Forward sit flush (`gap: 0`, and a negative margin that cancels the toolbar gap between the two history buttons) while groups keep `--pk-toolbar-gap` (`apps/web/src/app/neutral-controls.css:197-207`).
-- **Focus and hosts follow the slot, not the enabled state.** When the page step just used becomes disabled at the first or last page, focus moves to the remaining enabled step (`apps/web/src/review/ReviewChrome.tsx`). The retired AppKit host explicitly included `[data-review-chrome-group]` in its titlebar interactive selector to protect paired-button seams. Current Electron CSS marks the toolbar as draggable and individual interactive controls as `no-drag` (`apps/web/src/app/review-shell-chrome.css`). Preserve the interaction requirement and check paired-control gaps on the actual native window; the former group selector is not evidence that the current host protects those gaps.
+- **Focus and hosts follow the slot, not the enabled state.** When the page step just used becomes disabled, focus moves to the remaining enabled step (`apps/web/src/review/ReviewChrome.tsx`). Electron's `no-drag` selector includes whole `[data-review-chrome-group]` elements as well as individual interactive controls, protecting paired-button seams (`apps/web/src/app/review-shell-chrome.css`). Verify seam protection and blank-space dragging on the actual native window.
 
 Native drag regions suppress DOM pointer events, so CSS `:hover` alone cannot reveal controls across the blank draggable toolbar. Electron samples the OS cursor against the native content bounds, scales the toolbar boundary with interface zoom, and publishes changes while the window is focused and visible (`apps/electron/src/titlebar.ts`). The renderer projects that signal into the existing reveal rules (`apps/web/src/electron-entry.tsx`, `apps/web/src/app/neutral-controls.css`). Keep native hover evidence separate from DOM hit testing, and stop sampling when the window is inactive. Browser geometry and CDP hover checks do not establish native dragging; the [qualification record](../../testing/electron-migration-qualification.md) records their separate evidence.
 
@@ -105,7 +115,7 @@ Use one popup primitive. `TopBarMenu` handles initial enabled-item focus, all-di
 
 Across representative and boundary widths, assert fixed row height, no horizontal overflow, non-overlapping ordered rectangles, vertical containment, and the correct title floor (`test/acceptance/review-workflow.spec.ts`). Repeat under coarse-pointer rules with touch-sized direct and popup controls (`test/acceptance/review-workflow.spec.ts`). Visual coverage should capture the narrowest presentation with a menu open (`test/acceptance/review-visual.spec.ts`).
 
-Tests for availability-dependent controls should assert *present and disabled* rather than absent, and should cover a narrow host where disabled history is dropped (`test/acceptance/production-flow.spec.ts`, `test/acceptance/review-workflow.spec.ts`, `apps/web/test/neutral-chrome-contract.test.tsx`).
+Tests for availability-dependent controls should assert *present and disabled* rather than absent, and should cover 759px/760px availability changes plus the actual 320px fine- and coarse-pointer viewports (`test/acceptance/production-flow.spec.ts`, `test/acceptance/review-workflow.spec.ts`, `apps/web/test/neutral-chrome-contract.test.tsx`).
 
 Run the interaction flows in Chromium and WebKit because popup focus transitions differ (`scripts/testing/config/playwright.config.ts`, `scripts/testing/config/playwright.webkit.config.ts`, `apps/web/src/review/TopBarMenu.tsx`). Finally, exercise the shared production client through the embedded VS Code launch: the production test opens a narrow VS Code surface, checks the compact presentation, uses every group menu, verifies containment, and verifies focus return (`test/acceptance/production-flow.spec.ts`). Browser success alone does not prove that the packaged extension loaded current assets; manual verification should compare the built and installed bundle and use a fresh host process (session history).
 
@@ -126,7 +136,7 @@ Hysteresis and focus transfer make recomposition stable rather than twitchy. Sep
 - Compact triggers can preserve essential state while detailed controls move into a menu.
 - The same client runs in resizable browser, webview, split-pane, or editor containers.
 - Focus, touch targets, and popup placement must survive recomposition.
-- A control's availability depends on document or history state rather than width; give it a fixed, disabled slot and keep the sizing rack consistent with any width policy that hides it.
+- A control's availability depends on document or history state rather than width; give it a fixed, disabled slot or menu entry and keep the sizing rack consistent with the complete composition.
 
 Prefer simpler CSS when wrapping is acceptable, the toolbar has only one fixed group, or every item can shrink without losing meaning. Measurement adds hidden candidates, observers, transition state, and focus bookkeeping; it earns that complexity only when the one-row constraint and semantic priorities are real.
 
@@ -136,9 +146,9 @@ Prefer simpler CSS when wrapping is acceptable, the toolbar has only one fixed g
 
 Given measured widths of 800, 700, 600, and 500 pixels for the ordered presentations, available widths of 800, 799, 699, and 599 select `expanded`, `historyCompact`, `zoomCompact`, and `navigationCompact` respectively (`apps/web/test/review-chrome-layout.test.ts`). When expanding, the configured runway keeps the current compact state until the richer candidate has enough extra space (`apps/web/test/review-chrome-layout.test.ts`).
 
-### Wide-to-narrow mapping
+### Historical four-state wide-to-narrow mapping
 
-- Wide: `Undo | Redo` · `Back | Forward | Previous | 3 / 12 | Next` · `Zoom out | Zoom in | 110% | Fit Width` (every slot present; unavailable ones are disabled, and below 760px unavailable history is dropped).
+- Wide: `Undo | Redo` · `Back | Forward | Previous | 3 / 12 | Next` · `Zoom out | Zoom in | 110% | Fit Width` (every slot present; unavailable ones are disabled).
 - First collapse: paired Undo/Redo trigger; popup still shows `Undo | Redo` (`apps/web/src/review/ReviewChrome.tsx`).
 - Second collapse: `110%` trigger; popup keeps `Zoom out | Zoom in | 110% | Fit Width` (`apps/web/src/review/ReviewChrome.tsx`).
 - Last collapse: `3 / 12` trigger; popup keeps `Back | Forward | Previous | 3 / 12 | Next` (`apps/web/src/review/ReviewChrome.tsx`).

@@ -460,10 +460,20 @@
   pointer-events: none;
 }
 
-/* Narrow bars have no room for fixed history slots; unavailable history
-   actions give their space back to the page and zoom controls. */
-@media (max-width: 759px) {
-  .review-chrome :is(.review-chrome__history-control, [data-main-history]):disabled:not([aria-busy="true"]) {
+@media (max-width: 360px) {
+  .review-chrome {
+    --pk-toolbar-gap: 3px;
+  }
+
+  .review-chrome__filename {
     display: none;
   }
+}
+
+.review-chrome[data-review-chrome-touch-compact="true"] .review-chrome__filename {
+  display: none;
+}
+
+.review-chrome[data-review-chrome-touch-compact="true"] .review-chrome__save-identity {
+  min-width: 44px;
 }

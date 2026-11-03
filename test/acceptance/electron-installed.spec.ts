@@ -33,6 +33,10 @@ test('packaged candidate renders and activates a real PDF without system Node', 
         }),
         drag: getComputedStyle(chrome).getPropertyValue('-webkit-app-region'),
         inputsClickable: controls.every(element => getComputedStyle(element).getPropertyValue('-webkit-app-region') === 'no-drag'),
+        controlGroups: [...chrome.querySelectorAll<HTMLElement>('[data-review-chrome-group]')]
+          .filter(element => element.checkVisibility())
+          .map(element => ({ group: element.dataset.reviewChromeGroup,
+            region: getComputedStyle(element).getPropertyValue('-webkit-app-region') })),
       };
     });
     await expect.poll(titlebarGeometry).toMatchObject({ nativeControlsVisible: true, top: 0,
@@ -40,6 +44,12 @@ test('packaged candidate renders and activates a real PDF without system Node', 
     const spacing = await titlebarGeometry();
     expect(spacing.height).toBe(Math.max(52, spacing.nativeHeight));
     expect(spacing.leadingInset).toBe(spacing.expectedLeadingInset);
+    // Native hit testing includes the spaces between controls in each group.
+    expect(spacing.controlGroups).toEqual([
+      { group: 'navigation', region: 'no-drag' },
+      { group: 'history', region: 'no-drag' },
+      { group: 'zoom', region: 'no-drag' },
+    ]);
     const pageInput = page.locator('[data-review-chrome] .review-chrome__page-input');
     await pageInput.click();
     await expect(pageInput).toBeFocused();
