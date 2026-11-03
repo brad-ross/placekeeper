@@ -318,6 +318,10 @@ async function revealForwardSyncTexTarget(
   return "failed";
 }
 
+function forwardSyncTexCanWait(status: ForwardSyncTexStatus): boolean {
+  return status === "missing" || forwardSyncTexRetryable({ status });
+}
+
 async function revealExplicitForwardSyncTexTarget(panel: vscode.WebviewPanel, runtime: PanelRuntime, location: SourceCursorLocation | undefined): Promise<ForwardSyncTexStatus> {
   const association = runtime.rebuildNavigation.beginExplicit(location);
   let status: ForwardSyncTexStatus = "failed";
@@ -330,7 +334,8 @@ async function revealExplicitForwardSyncTexTarget(panel: vscode.WebviewPanel, ru
     status = await revealForwardSyncTexTarget(panel, runtime, () => runtime.rebuildNavigation.isExplicitCurrent(association), association);
     return status;
   } finally {
-    if (status !== "ok") runtime.rebuildNavigation.finishExplicit(association);
+    if (forwardSyncTexCanWait(status)) runtime.rebuildNavigation.deferExplicit(association);
+    else if (status !== "ok") runtime.rebuildNavigation.finishExplicit(association);
   }
 }
 
@@ -469,14 +474,14 @@ export function activate(context: vscode.ExtensionContext): void {
         const action = rebuildNavigationAction(status, input.reason, rebuildNavigation.canRetryCurrent);
         if (action === "ignore") return;
         if (!rebuildNavigation.hasPending) { observer.noteCurrent(); return; }
-        void rebuildNavigation.revealAfterRebuild(async isCurrent => {
-          const navigationStatus = await revealForwardSyncTexTarget(panel, runtime, isCurrent);
+        void rebuildNavigation.revealAfterRebuild(async (isCurrent, explicitSequence) => {
+          const navigationStatus = await revealForwardSyncTexTarget(panel, runtime, isCurrent, explicitSequence);
           if (navigationStatus === "ok" && isCurrent()) {
             panel.reveal(panel.viewColumn, false);
             activePanel = panel;
             return "revealed";
           }
-          return forwardSyncTexRetryable({ status: navigationStatus }) ? "retry" : "terminal";
+          return forwardSyncTexCanWait(navigationStatus) ? "retry" : "terminal";
         }).then((outcome) => {
           if (outcome !== "retry" && !rebuildNavigation.hasPending) observer.noteCurrent();
         }, () => {
@@ -516,7 +521,7 @@ export function activate(context: vscode.ExtensionContext): void {
         if (webviewPanel.active) activePanel = webviewPanel;
       }),
     ];
-    const interval = setInterval(() => { void observer.tick(); }, REVALIDATE_INTERVAL_MS);
+    const interval = setInterval(() => { void observer.tick(rebuildNavigation.hasPending); }, REVALIDATE_INTERVAL_MS);
     interval.unref?.();
     disposables.push({ dispose: () => clearInterval(interval) });
     runtime = { binding, client, registrationId, rebuildNavigation, bridge };
@@ -650,6 +655,12 @@ export function activate(context: vscode.ExtensionContext): void {
       if (panel === undefined || runtime === undefined) return false;
       try {
         const status = await revealExplicitForwardSyncTexTarget(panel, runtime, location);
+        if (forwardSyncTexCanWait(status)) {
+          if (runtime.rebuildNavigation.hasPending) void vscode.window.showInformationMessage(
+            "Waiting for SyncTeX data. Placekeeper will jump to the requested source location when it becomes available.",
+          );
+          return status;
+        }
         if (status !== "ok") {
           void vscode.window.showWarningMessage("Forward SyncTeX could not find this source location. PDF review remains available.");
           return status;
@@ -777,7 +788,8 @@ export function activate(context: vscode.ExtensionContext): void {
           panel.reveal(panel.viewColumn, false);
           activePanel = panel;
           if (location !== undefined) {
-            if (await revealExplicitForwardSyncTexTarget(panel, runtime, location) !== "ok") {
+            const status = await revealExplicitForwardSyncTexTarget(panel, runtime, location);
+            if (status !== "ok" && !forwardSyncTexCanWait(status)) {
               throw new Error("Forward SyncTeX did not return a target");
             }
           }

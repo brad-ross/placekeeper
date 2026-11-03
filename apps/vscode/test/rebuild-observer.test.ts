@@ -73,6 +73,21 @@ describe("rebuild observer", () => {
     expect(validate.mock.calls.map(([input]) => input.reason)).toEqual(["reveal", "interval"]);
   });
 
+  it("rechecks mapping for pending navigation even without a source save, then stops when it settles", async () => {
+    const validate = vi.fn(async () => ({ status: "same-digest" }));
+    const markPossiblyStale = vi.fn(async () => undefined);
+    const observer = new RebuildObserver({ outputPath: "/work/paper.pdf", validate, markPossiblyStale });
+    await observer.tick();
+    expect(validate).not.toHaveBeenCalled();
+    await observer.tick(true);
+    expect(validate).toHaveBeenCalledWith(expect.objectContaining({ reason: "interval" }));
+    expect(markPossiblyStale).not.toHaveBeenCalled();
+    await observer.tick(false);
+    observer.dispose();
+    await observer.tick(true);
+    expect(validate).toHaveBeenCalledOnce();
+  });
+
   it("keeps an older output observation from clearing a newer source save", async () => {
     const pending = Promise.withResolvers<{ status: "committed" }>();
     const results: unknown[] = [];

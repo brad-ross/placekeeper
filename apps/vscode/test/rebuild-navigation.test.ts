@@ -35,6 +35,47 @@ describe("rebuild navigation coordinator", () => {
     coordinator.dispose();
   });
 
+  it("resumes a deferred explicit jump from its captured source when the sidecar arrives with following off", async () => {
+    const coordinator = new RebuildNavigationCoordinator();
+    const sequence = coordinator.beginExplicit(firstLocation);
+    coordinator.deferExplicit(sequence);
+    coordinator.cancelFollowing(); // Changing the follow preference cannot cancel a manual request.
+    expect(coordinator.hasPending).toBe(true);
+    expect(coordinator.canRetryCurrent).toBe(true);
+    const reveal = vi.fn(async (isCurrent: () => boolean, explicitSequence?: number) => {
+      expect(isCurrent()).toBe(true);
+      expect(explicitSequence).toBe(sequence);
+      expect(coordinator.forwardSourceLocation(() => latestLocation)).toEqual(firstLocation);
+      return "revealed" as const;
+    });
+    expect(await coordinator.revealAfterRebuild(reveal)).toBe("revealed");
+    expect(reveal).toHaveBeenCalledOnce();
+    expect(coordinator.hasPending).toBe(false);
+    coordinator.dispose();
+  });
+
+  it("retires a deferred explicit jump on newer navigation and ignores its late retry", async () => {
+    const coordinator = new RebuildNavigationCoordinator();
+    const first = coordinator.beginExplicit(firstLocation);
+    coordinator.deferExplicit(first);
+    const completion = Promise.withResolvers<"retry">();
+    let isOldCurrent = () => true;
+    const retry = coordinator.revealAfterRebuild(async isCurrent => {
+      isOldCurrent = isCurrent;
+      return completion.promise;
+    });
+    const newer = coordinator.beginExplicit(latestLocation);
+    expect(isOldCurrent()).toBe(false);
+    coordinator.deferExplicit(first);
+    completion.resolve("retry");
+    await retry;
+    expect(coordinator.hasPending).toBe(false);
+    expect(coordinator.forwardSourceLocation()).toEqual(latestLocation);
+    coordinator.deferExplicit(newer);
+    coordinator.dispose();
+    expect(await coordinator.revealAfterRebuild(async () => "revealed")).toBe("idle");
+  });
+
   it("holds explicit precedence until the matching viewer acknowledgement", async () => {
     const coordinator = new RebuildNavigationCoordinator({ followEnabled: () => true });
     const sequence = coordinator.beginExplicit();
