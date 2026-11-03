@@ -1,9 +1,9 @@
 import { spawn, type ChildProcess } from 'node:child_process';
-import { copyFile, mkdtemp, writeFile } from 'node:fs/promises';
+import { copyFile, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
-import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
+import { createDesktopIsolatedRoot } from '../support/desktop-isolated-root.js';
 import { chromium, type Browser, type Page } from '@playwright/test';
 import { requestControl, MANAGEMENT_PROTOCOL_VERSION } from '../../apps/service/src/host/launch-control.js';
 
@@ -40,7 +40,7 @@ export class InstalledCandidate {
   private constructor(readonly root: string, readonly source: string) {}
 
   static async create(fixture = 'legible-link-destinations.pdf'): Promise<InstalledCandidate> {
-    const root = await mkdtemp(join(tmpdir(), 'placekeeper-desktop-test-'));
+    const root = await createDesktopIsolatedRoot();
     const source = join(root, 'Review with spaces.pdf');
     await copyFile(resolve('test/fixtures/pdfs', fixture), source);
     return new InstalledCandidate(root, source);

@@ -70,9 +70,11 @@ test('canceling a protected page note without a save destination clears the draf
     const composer = await openPageNote(page);
     const text = 'Cancel this protected input without accepting an annotation.';
     await composer.getByRole('textbox', { name: 'Comment', exact: true }).fill(text);
-    await expect.poll(async () => (await snapshot()).payload.state.pendingDrafts).toEqual([
-      expect.objectContaining({ text, status: 'protected' }),
-    ]);
+    await expect(async () => {
+      expect((await snapshot()).payload.state.pendingDrafts).toEqual([
+        expect.objectContaining({ text, status: 'protected' }),
+      ]);
+    }).toPass({ timeout: 10_000 });
     expect((await snapshot()).payload.destination.phase).toBe('none');
     await composer.getByRole('button', { name: 'Cancel', exact: true }).click();
     await expect(composer).toHaveCount(0);
