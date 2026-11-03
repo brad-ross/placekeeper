@@ -22,12 +22,57 @@ async function fixture() {
   return { directory, target };
 }
 
+async function windowsDescriptorOracle(original: string, candidate: string): Promise<{ equal: boolean; original: unknown; candidate: unknown }> {
+  const script = windowsPowerShellScript(`
+$ErrorActionPreference='Stop'
+$sid=[System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+$labels=@{}
+function PrincipalLabel($value) {
+ if ($value -eq $sid) { return 'current-user' }
+ if ($value -eq 'S-1-5-32-544') { return 'administrators' }
+ if ($value -eq 'S-1-5-18') { return 'system' }
+ if (-not $labels.ContainsKey($value)) { $labels[$value]='other-'+$labels.Count }
+ return $labels[$value]
+}
+function Shape($acl) {
+ $raw=New-Object System.Security.AccessControl.RawSecurityDescriptor($acl.GetSecurityDescriptorBinaryForm(),0)
+ $owner=PrincipalLabel $raw.Owner.Value
+ $group=PrincipalLabel $raw.Group.Value
+ if ($raw.DiscretionaryAcl.Count -gt 256) { throw 'Too many fixture access entries' }
+ $aces=@($raw.DiscretionaryAcl | ForEach-Object {
+  @{ type=[int]$_.AceType; flags=[int]$_.AceFlags; mask=$_.AccessMask; principal=(PrincipalLabel $_.SecurityIdentifier.Value) }
+ })
+ return @{ owner=$owner; group=$group; accessFlags=([int]$raw.ControlFlags -band 0x150c); aces=$aces }
+}
+$original=Get-Acl -LiteralPath $env:PLACEKEEPER_TEST_ORIGINAL
+$candidate=Get-Acl -LiteralPath $env:PLACEKEEPER_TEST_CANDIDATE
+$sections=[System.Security.AccessControl.AccessControlSections]::Access -bor [System.Security.AccessControl.AccessControlSections]::Owner -bor [System.Security.AccessControl.AccessControlSections]::Group
+$originalShape=Shape $original
+$candidateShape=Shape $candidate
+[Console]::Out.Write((@{ equal=($original.GetSecurityDescriptorSddlForm($sections) -eq $candidate.GetSecurityDescriptorSddlForm($sections)); original=$originalShape; candidate=$candidateShape } | ConvertTo-Json -Compress -Depth 5))
+`);
+  const { stdout } = await promisify(execFile)(join(process.env.SystemRoot!, "System32", "WindowsPowerShell", "v1.0", "powershell.exe"),
+    ["-NoProfile", "-NonInteractive", "-EncodedCommand", Buffer.from(script, "utf16le").toString("base64")],
+    { env: { ...process.env, PLACEKEEPER_TEST_ORIGINAL: original, PLACEKEEPER_TEST_CANDIDATE: candidate }, windowsHide: true });
+  return JSON.parse(stdout) as { equal: boolean; original: unknown; candidate: unknown };
+}
+
 it("stages beside the destination, preserves permissions and publishes complete bytes", async () => {
   const { directory, target } = await fixture();
   const candidate = await stagePublication(target, Buffer.from("reviewed"));
   expect(dirname(candidate)).toBe(directory);
   expect(await readFile(target, "utf8")).toBe("original");
-  await preserveReplacementPermissions(candidate, target);
+  const before = process.platform === "win32" ? await windowsDescriptorOracle(target, candidate) : undefined;
+  try { await preserveReplacementPermissions(candidate, target); }
+  catch (error) {
+    if (process.platform !== "win32") throw error;
+    throw Object.assign(new Error("Windows replacement descriptor preservation failed", { cause: error }), { descriptors: { before, after: await windowsDescriptorOracle(target, candidate) } });
+  }
+  if (before !== undefined) {
+    const after = await windowsDescriptorOracle(target, candidate);
+    expect(after.equal).toBe(true);
+    expect(after.original).toEqual(before.original);
+  }
   const publication = await publishFile(candidate, target);
   await syncPublishedFile(publication);
   expect(publication.confirmed).toBe(true);
