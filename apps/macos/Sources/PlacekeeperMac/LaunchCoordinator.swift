@@ -32,7 +32,7 @@ struct NativeOpenIntent: Equatable {
         let raw = url.absoluteString
         guard raw.utf8.count <= 16 * 1024, raw.hasPrefix("placekeeper:///"),
               let components = URLComponents(string: raw), components.scheme == "placekeeper",
-              components.host == nil, components.user == nil, components.password == nil,
+              (components.host ?? "").isEmpty, components.user == nil, components.password == nil,
               components.port == nil, components.query == nil,
               let fragment = components.fragment, validLocationFragment(fragment),
               let path = components.percentEncodedPath.removingPercentEncoding,
