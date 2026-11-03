@@ -31,7 +31,7 @@ async function openPageNote(page: Page) {
   if (!bounds) throw new Error('Rendered PDF page has no bounds');
   await pdfPage.click({ button: 'right', position: { x: bounds.width * 0.7, y: bounds.height * 0.55 } });
   await page.getByRole('menuitem', { name: 'Add Page Note' }).click();
-  const composer = page.getByRole('region', { name: 'Page Note', exact: true });
+  const composer = page.getByRole('region', { name: /^Page Note(?: · 1)?$/u });
   await expect(composer).toBeVisible();
   return composer;
 }

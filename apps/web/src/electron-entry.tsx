@@ -8,16 +8,22 @@ import type { ReviewCommandInvocation, ReviewCommandSurfaceSnapshot } from './re
 import './app/review-layout.css';
 declare global { interface Window { placekeeper: ElectronShellBridge } }
 const windowControlsOverlay = (navigator as Navigator & {
-    windowControlsOverlay?: EventTarget & { readonly visible: boolean };
+    windowControlsOverlay?: EventTarget & { readonly visible: boolean; getTitlebarAreaRect(): DOMRect };
 }).windowControlsOverlay;
 function ElectronReview({ bridge, identity }: { bridge: ElectronShellBridge; identity: ElectronShellIdentity & { presentation?: { pageIndex: number; zoom: number } } }) {
+    const [toolbarHovered, setToolbarHovered] = useState(false);
     const [overlayVisible, setOverlayVisible] = useState(() => windowControlsOverlay?.visible === true);
     useLayoutEffect(() => {
-        const update = () => setOverlayVisible(windowControlsOverlay?.visible === true);
+        const update = () => {
+            const visible = windowControlsOverlay?.visible === true;
+            setOverlayVisible(visible);
+            const height = Math.max(52, visible ? windowControlsOverlay!.getTitlebarAreaRect().height : 0);
+            void bridge.toolbarHeight(identity, height).catch(() => undefined);
+        };
         windowControlsOverlay?.addEventListener('geometrychange', update);
         update();
         return () => windowControlsOverlay?.removeEventListener('geometrychange', update);
-    }, []);
+    }, [bridge, identity]);
     const [runtime] = useState(() => createElectronHostRuntime(bridge, identity));
     const [focusedNavigation] = useState(() => new FocusedLaunchNavigation({
         navigate: (location, generation) => runtime.navigateFocused(location, generation),
@@ -42,6 +48,7 @@ function ElectronReview({ bridge, identity }: { bridge: ElectronShellBridge; ide
         return () => { document.removeEventListener('focusin', focusChanged); document.removeEventListener('focusout', focusChanged); };
     }, [publish]);
     useLayoutEffect(() => { const unsubscribe = bridge.subscribeShell(message => {
+        if (message.type === 'toolbar-hover') setToolbarHovered(message.hovered);
         if (message.type === 'command' && message.revision === revision.current) setCommand({ id: message.id, token: message.token });
         if (message.type === 'confirm-visible') void focusedNavigation.apply(message).catch(() => undefined);
         if (message.type === 'settle-close') {
@@ -62,7 +69,7 @@ function ElectronReview({ bridge, identity }: { bridge: ElectronShellBridge; ide
         return () => window.removeEventListener('beforeunload', beforeUnload);
     }, [bridge, identity]);
     useEffect(() => { const dispose = () => { focusedNavigation.dispose(); runtime.dispose(); }; window.addEventListener('pagehide', dispose, { once: true }); return () => window.removeEventListener('pagehide', dispose); }, [runtime]);
-    return <div className="electron-review-shell" data-window-controls-overlay={overlayVisible} inert={closing}>
+    return <div className="electron-review-shell" data-window-controls-overlay={overlayVisible} data-toolbar-hovered={toolbarHovered} inert={closing}>
         <RuntimeProductionReviewApp runtime={runtime} loadingDocumentTitle="Opening PDF"
             {...(identity.presentation ? { initialPresentation: identity.presentation } : {})}
             onPresentationChange={state => { void bridge.presentation(identity, state); }}

@@ -3,6 +3,7 @@ import type { ReviewCommandSurfaceSnapshot, ReviewSemanticCommand } from '../../
 /** Renderer-safe capability surface. Native paths and recovery authority stay in main. */
 export interface ElectronShellIdentity { readonly windowId: string; readonly attemptId: string }
 export type ElectronShellEvent =
+    | { readonly type: 'toolbar-hover'; readonly hovered: boolean }
     | { readonly type: 'command'; readonly id: ReviewSemanticCommand; readonly token: number; readonly revision: number }
     | { readonly type: 'confirm-visible'; readonly generation: number; readonly token: string; readonly location?: PlacekeeperLinkLocation }
     | { readonly type: 'settle-close'; readonly token: string };
@@ -17,6 +18,7 @@ export interface ElectronShellBridge {
     visible(identity: ElectronShellIdentity, generation: number, token?: string): Promise<void>;
     commandSurface(identity: ElectronShellIdentity, revision: number, snapshot: ReviewCommandSurfaceSnapshot): Promise<void>;
     presentation(identity: ElectronShellIdentity, state: { readonly pageIndex: number; readonly zoom: number }): Promise<void>;
+    toolbarHeight(identity: ElectronShellIdentity, height: number): Promise<void>;
     closeSettled(identity: ElectronShellIdentity, token: string, error?: string): Promise<void>;
     writeClipboard(identity: ElectronShellIdentity, text: string): Promise<void>;
     subscribeShell(listener: (message: ElectronShellEvent) => void): () => void;

@@ -58,7 +58,7 @@ test('ordinary Electron refresh cannot reacquire or roll back a protected editor
             }
             return response;
         }, requestClose: async () => {}, readyToSettle: async () => {}, documentReady: async () => {}, visible: async () => {},
-        commandSurface: async () => {}, presentation: async () => {}, closeSettled: async () => {}, writeClipboard: async () => {},
+        commandSurface: async () => {}, presentation: async () => {}, toolbarHeight: async () => {}, closeSettled: async () => {}, writeClipboard: async () => {},
         createLink: async () => 'placekeeper:///paper.pdf#page=1', focusFailed: async () => {}, subscribeShell: () => () => {}, subscribe: () => () => {},
     }, identity);
     try {
@@ -153,7 +153,7 @@ test('real RPC renderer client bootstraps through bridge and rejects bounded tra
     const bridge = new ReviewBridge(async (message) => (message.type === 'invoke' ? { ...message, type: 'result', method: message.method, payload: p.saveStatus } : { ...message, type: 'refreshed', projection: p }), generation => `placekeeper-resource://document/attempt123/${generation}`);
     bridge.projection = p;
     const identity = { windowId: bridge.windowId, attemptId: bridge.attemptId };
-    const runtime = createElectronHostRuntime({ identity: async () => identity, request: (_id, value) => bridge.request(value), requestClose: async () => {}, readyToSettle: async () => {}, documentReady: async () => { }, visible: async () => { }, commandSurface: async () => {}, presentation: async () => {}, closeSettled: async () => {}, writeClipboard: async () => {}, createLink: async () => 'placekeeper:///paper.pdf#page=1', focusFailed: async () => {}, subscribeShell: () => () => {}, subscribe: () => () => { } }, identity);
+    const runtime = createElectronHostRuntime({ identity: async () => identity, request: (_id, value) => bridge.request(value), requestClose: async () => {}, readyToSettle: async () => {}, documentReady: async () => { }, visible: async () => { }, commandSurface: async () => {}, presentation: async () => {}, toolbarHeight: async () => {}, closeSettled: async () => {}, writeClipboard: async () => {}, createLink: async () => 'placekeeper:///paper.pdf#page=1', focusFailed: async () => {}, subscribeShell: () => () => {}, subscribe: () => () => { } }, identity);
     const bootstrap = await runtime.bootstrap();
     assert.equal(bootstrap.sessionId, p.sessionId);
     assert.equal(bootstrap.scope.launchSurface, 'electron');

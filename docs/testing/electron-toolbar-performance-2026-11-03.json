@@ -1,0 +1,1221 @@
+{
+  "metadata": {
+    "recordedAt": "2026-11-03T14:52:08.979Z",
+    "executable": "dist/desktop-artifacts/Placekeeper Candidate-darwin-arm64/Placekeeper Candidate.app/Contents/MacOS/PlacekeeperCandidate",
+    "executableSha256": "84c2cc0fae1e6e65a235169eaf7a244cc0fea96a9edd18fed15a0c9283923691",
+    "applicationAsarSha256": "6e2ad757b93f72b30d4e2d62fceb4e237c5037e2a88d604d3a2ecebb58d84da2",
+    "runtimeManifestSha256": "1351cc692a8efa99c22a358e0f3f506c5455214e4f5658e1222afe414ff66e0c",
+    "buildEvidenceSha256": "d00dc8218426dacfdd1027e3283bcbfed5be187f508fcab1b9277599019d3a6a",
+    "hardware": {
+      "platform": "darwin",
+      "release": "25.6.0",
+      "arch": "arm64",
+      "cpu": "Apple M5",
+      "logicalCpus": 10,
+      "totalMemoryBytes": 25769803776,
+      "freeMemoryBytes": 219594752
+    },
+    "fixtures": [
+      {
+        "fixture": "text-native.pdf",
+        "kind": "small-text",
+        "maxMs": 6000,
+        "sha256": "6cb57709b6cfad8fa36bafcf32afdc0b41c5f71f378e1e2c6a3ae9c4ab6d1b5a"
+      },
+      {
+        "fixture": "large-text-heavy.pdf",
+        "kind": "long-text",
+        "maxMs": 6000,
+        "sha256": "67cdcdabb64ddf6fb4c6ebeb43aa19f6d589fab86f0a4c28284472222cc339d6"
+      },
+      {
+        "fixture": "image-only.pdf",
+        "kind": "image",
+        "maxMs": 12000,
+        "sha256": "7017552e1ebdb4a54314a87cf56a1e2e1d9bad77d94172487dfee73c13668aac"
+      },
+      {
+        "fixture": "text-native-with-annotations.pdf",
+        "kind": "annotated",
+        "maxMs": 6000,
+        "sha256": "680647716f2336daf1bed3c4361eacd82274e30207a5d108105fcb1f70b21654"
+      }
+    ],
+    "limitations": [
+      "Debuggable packaged release build, CDP automation attached; no AppKit comparison measured by this suite.",
+      "Cold means new isolated app profile and stopped daemon; OS filesystem caches are uncontrolled.",
+      "Warm means new app process, reused profile and same verified live daemon; it is not a warm in-process open.",
+      "Usable-page timing includes CDP observation overhead after process spawn; no main-import-relative timing is substituted.",
+      "First visible shell, visible input response, frame intervals, display refresh/DPI, long-recovery and representative scanned corpus remain unmeasured.",
+      "Image-only fixture is a reproducible image smoke fixture, not evidence for a large scanned document."
+    ]
+  },
+  "budgets": {
+    "launchSamplesPerCondition": 20,
+    "firstVisibleShellP95Ms": 1500,
+    "textFirstUsablePageP95Ms": 6000,
+    "imageFirstUsablePageP95Ms": 12000,
+    "visibleInputResponseP95Ms": 100,
+    "repeatableStallInvestigationMs": 250,
+    "frameIntervalP95Ms": 33,
+    "idleCpuWindowMs": 60000,
+    "idleCpuPercentOfOneCoreExclusiveMax": 2,
+    "memoryCloseReopenCycles": 12,
+    "memorySettlingMs": 5000,
+    "postCloseResidentGrowthMaxRatio": 1.15
+  },
+  "accounting": "Sum of ps RSS in KiB (shared pages can be counted more than once), cumulative user+system CPU time; Electron and daemon descendants partitioned by PID.",
+  "limitations": [
+    "RSS growth is measured; absence of retained internal document workers/resources is not proven by OS process counts.",
+    "Existing test does not log native window focus continuously; the sample measures the ordinary packaged launch/window lifecycle rather than attributing CPU cost to individual cursor-sampler callbacks."
+  ],
+  "postClose": [
+    {
+      "atMs": 75096.38125,
+      "electron": [
+        {
+          "processLabel": "process-1",
+          "parentProcessLabel": "external-parent",
+          "residentKiB": 155008,
+          "cpuSeconds": 1.35
+        },
+        {
+          "processLabel": "process-2",
+          "parentProcessLabel": "process-1",
+          "residentKiB": 74704,
+          "cpuSeconds": 0.52
+        },
+        {
+          "processLabel": "process-3",
+          "parentProcessLabel": "process-1",
+          "residentKiB": 42112,
+          "cpuSeconds": 0.12
+        },
+        {
+          "processLabel": "process-4",
+          "parentProcessLabel": "process-1",
+          "residentKiB": 52400,
+          "cpuSeconds": 0.22
+        }
+      ],
+      "daemon": [
+        {
+          "processLabel": "process-6",
+          "parentProcessLabel": "process-4",
+          "residentKiB": 65792,
+          "cpuSeconds": 0.73
+        }
+      ],
+      "electronResidentKiB": 324224,
+      "daemonResidentKiB": 65792,
+      "combinedResidentKiB": 390016
+    },
+    {
+      "atMs": 82981.294042,
+      "electron": [
+        {
+          "processLabel": "process-1",
+          "parentProcessLabel": "external-parent",
+          "residentKiB": 183584,
+          "cpuSeconds": 1.68
+        },
+        {
+          "processLabel": "process-2",
+          "parentProcessLabel": "process-1",
+          "residentKiB": 76576,
+          "cpuSeconds": 0.68
+        },
+        {
+          "processLabel": "process-3",
+          "parentProcessLabel": "process-1",
+          "residentKiB": 41840,
+          "cpuSeconds": 0.12
+        },
+        {
+          "processLabel": "process-4",
+          "parentProcessLabel": "process-1",
+          "residentKiB": 52416,
+          "cpuSeconds": 0.23
+        }
+      ],
+      "daemon": [
+        {
+          "processLabel": "process-6",
+          "parentProcessLabel": "process-4",
+          "residentKiB": 67552,
+          "cpuSeconds": 0.77
+        }
+      ],
+      "electronResidentKiB": 354416,
+      "daemonResidentKiB": 67552,
+      "combinedResidentKiB": 421968
+    },
+    {
+      "atMs": 90307.79225,
+      "electron": [
+        {
+          "processLabel": "process-1",
+          "parentProcessLabel": "external-parent",
+          "residentKiB": 189328,
+          "cpuSeconds": 2.02
+        },
+        {
+          "processLabel": "process-2",
+          "parentProcessLabel": "process-1",
+          "residentKiB": 77344,
+          "cpuSeconds": 0.82
+        },
+        {
+          "processLabel": "process-3",
+          "parentProcessLabel": "process-1",
+          "residentKiB": 41936,
+          "cpuSeconds": 0.12
+        },
+        {
+          "processLabel": "process-4",
+          "parentProcessLabel": "process-1",
+          "residentKiB": 52784,
+          "cpuSeconds": 0.24
+        }
+      ],
+      "daemon": [
+        {
+          "processLabel": "process-6",
+          "parentProcessLabel": "process-4",
+          "residentKiB": 68368,
+          "cpuSeconds": 0.8
+        }
+      ],
+      "electronResidentKiB": 361392,
+      "daemonResidentKiB": 68368,
+      "combinedResidentKiB": 429760
+    },
+    {
+      "atMs": 97613.896875,
+      "electron": [
+        {
+          "processLabel": "process-1",
+          "parentProcessLabel": "external-parent",
+          "residentKiB": 187808,
+          "cpuSeconds": 2.41
+        },
+        {
+          "processLabel": "process-2",
+          "parentProcessLabel": "process-1",
+          "residentKiB": 77088,
+          "cpuSeconds": 0.97
+        },
+        {
+          "processLabel": "process-3",
+          "parentProcessLabel": "process-1",
+          "residentKiB": 42016,
+          "cpuSeconds": 0.13
+        },
+        {
+          "processLabel": "process-4",
+          "parentProcessLabel": "process-1",
+          "residentKiB": 52992,
+          "cpuSeconds": 0.24
+        }
+      ],
+      "daemon": [
+        {
+          "processLabel": "process-6",
+          "parentProcessLabel": "process-4",
+          "residentKiB": 68880,
+          "cpuSeconds": 0.83
+        }
+      ],
+      "electronResidentKiB": 359904,
+      "daemonResidentKiB": 68880,
+      "combinedResidentKiB": 428784
+    },
+    {
+      "atMs": 104971.057833,
+      "electron": [
+        {
+          "processLabel": "process-1",
+          "parentProcessLabel": "external-parent",
+          "residentKiB": 172176,
+          "cpuSeconds": 2.75
+        },
+        {
+          "processLabel": "process-2",
+          "parentProcessLabel": "process-1",
+          "residentKiB": 77152,
+          "cpuSeconds": 1.15
+        },
+        {
+          "processLabel": "process-3",
+          "parentProcessLabel": "process-1",
+          "residentKiB": 41536,
+          "cpuSeconds": 0.13
+        },
+        {
+          "processLabel": "process-4",
+          "parentProcessLabel": "process-1",
+          "residentKiB": 52368,
+          "cpuSeconds": 0.25
+        }
+      ],
+      "daemon": [
+        {
+          "processLabel": "process-6",
+          "parentProcessLabel": "process-4",
+          "residentKiB": 66288,
+          "cpuSeconds": 0.86
+        }
+      ],
+      "electronResidentKiB": 343232,
+      "daemonResidentKiB": 66288,
+      "combinedResidentKiB": 409520
+    },
+    {
+      "atMs": 111505.661792,
+      "electron": [
+        {
+          "processLabel": "process-1",
+          "parentProcessLabel": "external-parent",
+          "residentKiB": 193248,
+          "cpuSeconds": 3.01
+        },
+        {
+          "processLabel": "process-2",
+          "parentProcessLabel": "process-1",
+          "residentKiB": 77248,
+          "cpuSeconds": 1.27
+        },
+        {
+          "processLabel": "process-3",
+          "parentProcessLabel": "process-1",
+          "residentKiB": 41936,
+          "cpuSeconds": 0.13
+        },
+        {
+          "processLabel": "process-4",
+          "parentProcessLabel": "process-1",
+          "residentKiB": 52624,
+          "cpuSeconds": 0.25
+        }
+      ],
+      "daemon": [
+        {
+          "processLabel": "process-6",
+          "parentProcessLabel": "process-4",
+          "residentKiB": 73904,
+          "cpuSeconds": 0.9
+        }
+      ],
+      "electronResidentKiB": 365056,
+      "daemonResidentKiB": 73904,
+      "combinedResidentKiB": 438960
+    },
+    {
+      "atMs": 117767.03125,
+      "electron": [
+        {
+          "processLabel": "process-1",
+          "parentProcessLabel": "external-parent",
+          "residentKiB": 190256,
+          "cpuSeconds": 3.24
+        },
+        {
+          "processLabel": "process-2",
+          "parentProcessLabel": "process-1",
+          "residentKiB": 77392,
+          "cpuSeconds": 1.4
+        },
+        {
+          "processLabel": "process-3",
+          "parentProcessLabel": "process-1",
+          "residentKiB": 42048,
+          "cpuSeconds": 0.14
+        },
+        {
+          "processLabel": "process-4",
+          "parentProcessLabel": "process-1",
+          "residentKiB": 52704,
+          "cpuSeconds": 0.26
+        }
+      ],
+      "daemon": [
+        {
+          "processLabel": "process-6",
+          "parentProcessLabel": "process-4",
+          "residentKiB": 75152,
+          "cpuSeconds": 0.93
+        }
+      ],
+      "electronResidentKiB": 362400,
+      "daemonResidentKiB": 75152,
+      "combinedResidentKiB": 437552
+    },
+    {
+      "atMs": 124666.973458,
+      "electron": [
+        {
+          "processLabel": "process-1",
+          "parentProcessLabel": "external-parent",
+          "residentKiB": 191328,
+          "cpuSeconds": 3.55
+        },
+        {
+          "processLabel": "process-2",
+          "parentProcessLabel": "process-1",
+          "residentKiB": 76592,
+          "cpuSeconds": 1.57
+        },
+        {
+          "processLabel": "process-3",
+          "parentProcessLabel": "process-1",
+          "residentKiB": 42112,
+          "cpuSeconds": 0.14
+        },
+        {
+          "processLabel": "process-4",
+          "parentProcessLabel": "process-1",
+          "residentKiB": 52880,
+          "cpuSeconds": 0.26
+        }
+      ],
+      "daemon": [
+        {
+          "processLabel": "process-6",
+          "parentProcessLabel": "process-4",
+          "residentKiB": 75520,
+          "cpuSeconds": 0.96
+        }
+      ],
+      "electronResidentKiB": 362912,
+      "daemonResidentKiB": 75520,
+      "combinedResidentKiB": 438432
+    },
+    {
+      "atMs": 131551.849833,
+      "electron": [
+        {
+          "processLabel": "process-1",
+          "parentProcessLabel": "external-parent",
+          "residentKiB": 176624,
+          "cpuSeconds": 3.87
+        },
+        {
+          "processLabel": "process-2",
+          "parentProcessLabel": "process-1",
+          "residentKiB": 76592,
+          "cpuSeconds": 1.73
+        },
+        {
+          "processLabel": "process-3",
+          "parentProcessLabel": "process-1",
+          "residentKiB": 42512,
+          "cpuSeconds": 0.14
+        },
+        {
+          "processLabel": "process-4",
+          "parentProcessLabel": "process-1",
+          "residentKiB": 52656,
+          "cpuSeconds": 0.27
+        }
+      ],
+      "daemon": [
+        {
+          "processLabel": "process-6",
+          "parentProcessLabel": "process-4",
+          "residentKiB": 75264,
+          "cpuSeconds": 0.99
+        }
+      ],
+      "electronResidentKiB": 348384,
+      "daemonResidentKiB": 75264,
+      "combinedResidentKiB": 423648
+    },
+    {
+      "atMs": 138005.755958,
+      "electron": [
+        {
+          "processLabel": "process-1",
+          "parentProcessLabel": "external-parent",
+          "residentKiB": 172128,
+          "cpuSeconds": 4.15
+        },
+        {
+          "processLabel": "process-2",
+          "parentProcessLabel": "process-1",
+          "residentKiB": 76256,
+          "cpuSeconds": 1.86
+        },
+        {
+          "processLabel": "process-3",
+          "parentProcessLabel": "process-1",
+          "residentKiB": 42544,
+          "cpuSeconds": 0.15
+        },
+        {
+          "processLabel": "process-4",
+          "parentProcessLabel": "process-1",
+          "residentKiB": 52576,
+          "cpuSeconds": 0.27
+        }
+      ],
+      "daemon": [
+        {
+          "processLabel": "process-6",
+          "parentProcessLabel": "process-4",
+          "residentKiB": 66944,
+          "cpuSeconds": 1.01
+        }
+      ],
+      "electronResidentKiB": 343504,
+      "daemonResidentKiB": 66944,
+      "combinedResidentKiB": 410448
+    },
+    {
+      "atMs": 144998.627917,
+      "electron": [
+        {
+          "processLabel": "process-1",
+          "parentProcessLabel": "external-parent",
+          "residentKiB": 170832,
+          "cpuSeconds": 4.48
+        },
+        {
+          "processLabel": "process-2",
+          "parentProcessLabel": "process-1",
+          "residentKiB": 75088,
+          "cpuSeconds": 2.01
+        },
+        {
+          "processLabel": "process-3",
+          "parentProcessLabel": "process-1",
+          "residentKiB": 41936,
+          "cpuSeconds": 0.15
+        },
+        {
+          "processLabel": "process-4",
+          "parentProcessLabel": "process-1",
+          "residentKiB": 52048,
+          "cpuSeconds": 0.28
+        }
+      ],
+      "daemon": [
+        {
+          "processLabel": "process-6",
+          "parentProcessLabel": "process-4",
+          "residentKiB": 64528,
+          "cpuSeconds": 1.04
+        }
+      ],
+      "electronResidentKiB": 339904,
+      "daemonResidentKiB": 64528,
+      "combinedResidentKiB": 404432
+    },
+    {
+      "atMs": 153047.399333,
+      "electron": [
+        {
+          "processLabel": "process-1",
+          "parentProcessLabel": "external-parent",
+          "residentKiB": 188400,
+          "cpuSeconds": 4.83
+        },
+        {
+          "processLabel": "process-2",
+          "parentProcessLabel": "process-1",
+          "residentKiB": 76624,
+          "cpuSeconds": 2.2
+        },
+        {
+          "processLabel": "process-3",
+          "parentProcessLabel": "process-1",
+          "residentKiB": 42448,
+          "cpuSeconds": 0.15
+        },
+        {
+          "processLabel": "process-4",
+          "parentProcessLabel": "process-1",
+          "residentKiB": 52576,
+          "cpuSeconds": 0.28
+        }
+      ],
+      "daemon": [
+        {
+          "processLabel": "process-6",
+          "parentProcessLabel": "process-4",
+          "residentKiB": 67968,
+          "cpuSeconds": 1.08
+        }
+      ],
+      "electronResidentKiB": 360048,
+      "daemonResidentKiB": 67968,
+      "combinedResidentKiB": 428016
+    }
+  ],
+  "idle": [
+    {
+      "atMs": 9828.85775,
+      "electron": [
+        {
+          "processLabel": "process-1",
+          "parentProcessLabel": "external-parent",
+          "residentKiB": 189888,
+          "cpuSeconds": 1.17
+        },
+        {
+          "processLabel": "process-2",
+          "parentProcessLabel": "process-1",
+          "residentKiB": 97824,
+          "cpuSeconds": 0.49
+        },
+        {
+          "processLabel": "process-3",
+          "parentProcessLabel": "process-1",
+          "residentKiB": 43024,
+          "cpuSeconds": 0.11
+        },
+        {
+          "processLabel": "process-4",
+          "parentProcessLabel": "process-1",
+          "residentKiB": 62352,
+          "cpuSeconds": 0.22
+        },
+        {
+          "processLabel": "process-5",
+          "parentProcessLabel": "process-1",
+          "residentKiB": 347824,
+          "cpuSeconds": 1.7
+        }
+      ],
+      "daemon": [
+        {
+          "processLabel": "process-6",
+          "parentProcessLabel": "process-4",
+          "residentKiB": 91520,
+          "cpuSeconds": 0.62
+        }
+      ],
+      "electronResidentKiB": 740912,
+      "daemonResidentKiB": 91520,
+      "combinedResidentKiB": 832432
+    },
+    {
+      "atMs": 14879.752417,
+      "electron": [
+        {
+          "processLabel": "process-1",
+          "parentProcessLabel": "external-parent",
+          "residentKiB": 188656,
+          "cpuSeconds": 1.18
+        },
+        {
+          "processLabel": "process-2",
+          "parentProcessLabel": "process-1",
+          "residentKiB": 96496,
+          "cpuSeconds": 0.49
+        },
+        {
+          "processLabel": "process-3",
+          "parentProcessLabel": "process-1",
+          "residentKiB": 43200,
+          "cpuSeconds": 0.11
+        },
+        {
+          "processLabel": "process-4",
+          "parentProcessLabel": "process-1",
+          "residentKiB": 62368,
+          "cpuSeconds": 0.22
+        },
+        {
+          "processLabel": "process-5",
+          "parentProcessLabel": "process-1",
+          "residentKiB": 273392,
+          "cpuSeconds": 1.71
+        }
+      ],
+      "daemon": [
+        {
+          "processLabel": "process-6",
+          "parentProcessLabel": "process-4",
+          "residentKiB": 91616,
+          "cpuSeconds": 0.63
+        }
+      ],
+      "electronResidentKiB": 664112,
+      "daemonResidentKiB": 91616,
+      "combinedResidentKiB": 755728
+    },
+    {
+      "atMs": 19923.903958,
+      "electron": [
+        {
+          "processLabel": "process-1",
+          "parentProcessLabel": "external-parent",
+          "residentKiB": 153408,
+          "cpuSeconds": 1.19
+        },
+        {
+          "processLabel": "process-2",
+          "parentProcessLabel": "process-1",
+          "residentKiB": 90944,
+          "cpuSeconds": 0.49
+        },
+        {
+          "processLabel": "process-3",
+          "parentProcessLabel": "process-1",
+          "residentKiB": 40800,
+          "cpuSeconds": 0.11
+        },
+        {
+          "processLabel": "process-4",
+          "parentProcessLabel": "process-1",
+          "residentKiB": 54592,
+          "cpuSeconds": 0.22
+        },
+        {
+          "processLabel": "process-5",
+          "parentProcessLabel": "process-1",
+          "residentKiB": 273360,
+          "cpuSeconds": 1.71
+        }
+      ],
+      "daemon": [
+        {
+          "processLabel": "process-6",
+          "parentProcessLabel": "process-4",
+          "residentKiB": 91648,
+          "cpuSeconds": 0.63
+        }
+      ],
+      "electronResidentKiB": 613104,
+      "daemonResidentKiB": 91648,
+      "combinedResidentKiB": 704752
+    },
+    {
+      "atMs": 24981.644958,
+      "electron": [
+        {
+          "processLabel": "process-1",
+          "parentProcessLabel": "external-parent",
+          "residentKiB": 143984,
+          "cpuSeconds": 1.2
+        },
+        {
+          "processLabel": "process-2",
+          "parentProcessLabel": "process-1",
+          "residentKiB": 86320,
+          "cpuSeconds": 0.49
+        },
+        {
+          "processLabel": "process-3",
+          "parentProcessLabel": "process-1",
+          "residentKiB": 40560,
+          "cpuSeconds": 0.11
+        },
+        {
+          "processLabel": "process-4",
+          "parentProcessLabel": "process-1",
+          "residentKiB": 47696,
+          "cpuSeconds": 0.22
+        },
+        {
+          "processLabel": "process-5",
+          "parentProcessLabel": "process-1",
+          "residentKiB": 233792,
+          "cpuSeconds": 1.71
+        }
+      ],
+      "daemon": [
+        {
+          "processLabel": "process-6",
+          "parentProcessLabel": "process-4",
+          "residentKiB": 63232,
+          "cpuSeconds": 0.64
+        }
+      ],
+      "electronResidentKiB": 552352,
+      "daemonResidentKiB": 63232,
+      "combinedResidentKiB": 615584
+    },
+    {
+      "atMs": 30025.599917,
+      "electron": [
+        {
+          "processLabel": "process-1",
+          "parentProcessLabel": "external-parent",
+          "residentKiB": 141632,
+          "cpuSeconds": 1.2
+        },
+        {
+          "processLabel": "process-2",
+          "parentProcessLabel": "process-1",
+          "residentKiB": 65408,
+          "cpuSeconds": 0.49
+        },
+        {
+          "processLabel": "process-3",
+          "parentProcessLabel": "process-1",
+          "residentKiB": 40416,
+          "cpuSeconds": 0.11
+        },
+        {
+          "processLabel": "process-4",
+          "parentProcessLabel": "process-1",
+          "residentKiB": 47680,
+          "cpuSeconds": 0.22
+        },
+        {
+          "processLabel": "process-5",
+          "parentProcessLabel": "process-1",
+          "residentKiB": 98256,
+          "cpuSeconds": 1.71
+        }
+      ],
+      "daemon": [
+        {
+          "processLabel": "process-6",
+          "parentProcessLabel": "process-4",
+          "residentKiB": 63328,
+          "cpuSeconds": 0.65
+        }
+      ],
+      "electronResidentKiB": 393392,
+      "daemonResidentKiB": 63328,
+      "combinedResidentKiB": 456720
+    },
+    {
+      "atMs": 35068.782958,
+      "electron": [
+        {
+          "processLabel": "process-1",
+          "parentProcessLabel": "external-parent",
+          "residentKiB": 149728,
+          "cpuSeconds": 1.25
+        },
+        {
+          "processLabel": "process-2",
+          "parentProcessLabel": "process-1",
+          "residentKiB": 68656,
+          "cpuSeconds": 0.5
+        },
+        {
+          "processLabel": "process-3",
+          "parentProcessLabel": "process-1",
+          "residentKiB": 40384,
+          "cpuSeconds": 0.11
+        },
+        {
+          "processLabel": "process-4",
+          "parentProcessLabel": "process-1",
+          "residentKiB": 47680,
+          "cpuSeconds": 0.22
+        },
+        {
+          "processLabel": "process-5",
+          "parentProcessLabel": "process-1",
+          "residentKiB": 136208,
+          "cpuSeconds": 1.82
+        }
+      ],
+      "daemon": [
+        {
+          "processLabel": "process-6",
+          "parentProcessLabel": "process-4",
+          "residentKiB": 64720,
+          "cpuSeconds": 0.66
+        }
+      ],
+      "electronResidentKiB": 442656,
+      "daemonResidentKiB": 64720,
+      "combinedResidentKiB": 507376
+    },
+    {
+      "atMs": 40130.244708,
+      "electron": [
+        {
+          "processLabel": "process-1",
+          "parentProcessLabel": "external-parent",
+          "residentKiB": 141232,
+          "cpuSeconds": 1.25
+        },
+        {
+          "processLabel": "process-2",
+          "parentProcessLabel": "process-1",
+          "residentKiB": 68752,
+          "cpuSeconds": 0.5
+        },
+        {
+          "processLabel": "process-3",
+          "parentProcessLabel": "process-1",
+          "residentKiB": 39376,
+          "cpuSeconds": 0.11
+        },
+        {
+          "processLabel": "process-4",
+          "parentProcessLabel": "process-1",
+          "residentKiB": 45680,
+          "cpuSeconds": 0.22
+        },
+        {
+          "processLabel": "process-5",
+          "parentProcessLabel": "process-1",
+          "residentKiB": 132880,
+          "cpuSeconds": 1.83
+        }
+      ],
+      "daemon": [
+        {
+          "processLabel": "process-6",
+          "parentProcessLabel": "process-4",
+          "residentKiB": 62640,
+          "cpuSeconds": 0.67
+        }
+      ],
+      "electronResidentKiB": 427920,
+      "daemonResidentKiB": 62640,
+      "combinedResidentKiB": 490560
+    },
+    {
+      "atMs": 45178.840458,
+      "electron": [
+        {
+          "processLabel": "process-1",
+          "parentProcessLabel": "external-parent",
+          "residentKiB": 135360,
+          "cpuSeconds": 1.26
+        },
+        {
+          "processLabel": "process-2",
+          "parentProcessLabel": "process-1",
+          "residentKiB": 67760,
+          "cpuSeconds": 0.5
+        },
+        {
+          "processLabel": "process-3",
+          "parentProcessLabel": "process-1",
+          "residentKiB": 39376,
+          "cpuSeconds": 0.11
+        },
+        {
+          "processLabel": "process-4",
+          "parentProcessLabel": "process-1",
+          "residentKiB": 46720,
+          "cpuSeconds": 0.22
+        },
+        {
+          "processLabel": "process-5",
+          "parentProcessLabel": "process-1",
+          "residentKiB": 124624,
+          "cpuSeconds": 1.83
+        }
+      ],
+      "daemon": [
+        {
+          "processLabel": "process-6",
+          "parentProcessLabel": "process-4",
+          "residentKiB": 66080,
+          "cpuSeconds": 0.68
+        }
+      ],
+      "electronResidentKiB": 413840,
+      "daemonResidentKiB": 66080,
+      "combinedResidentKiB": 479920
+    },
+    {
+      "atMs": 50227.486208,
+      "electron": [
+        {
+          "processLabel": "process-1",
+          "parentProcessLabel": "external-parent",
+          "residentKiB": 135792,
+          "cpuSeconds": 1.27
+        },
+        {
+          "processLabel": "process-2",
+          "parentProcessLabel": "process-1",
+          "residentKiB": 64368,
+          "cpuSeconds": 0.5
+        },
+        {
+          "processLabel": "process-3",
+          "parentProcessLabel": "process-1",
+          "residentKiB": 39376,
+          "cpuSeconds": 0.11
+        },
+        {
+          "processLabel": "process-4",
+          "parentProcessLabel": "process-1",
+          "residentKiB": 46720,
+          "cpuSeconds": 0.22
+        },
+        {
+          "processLabel": "process-5",
+          "parentProcessLabel": "process-1",
+          "residentKiB": 95168,
+          "cpuSeconds": 1.83
+        }
+      ],
+      "daemon": [
+        {
+          "processLabel": "process-6",
+          "parentProcessLabel": "process-4",
+          "residentKiB": 67488,
+          "cpuSeconds": 0.69
+        }
+      ],
+      "electronResidentKiB": 381424,
+      "daemonResidentKiB": 67488,
+      "combinedResidentKiB": 448912
+    },
+    {
+      "atMs": 55272.225792,
+      "electron": [
+        {
+          "processLabel": "process-1",
+          "parentProcessLabel": "external-parent",
+          "residentKiB": 136352,
+          "cpuSeconds": 1.27
+        },
+        {
+          "processLabel": "process-2",
+          "parentProcessLabel": "process-1",
+          "residentKiB": 65024,
+          "cpuSeconds": 0.5
+        },
+        {
+          "processLabel": "process-3",
+          "parentProcessLabel": "process-1",
+          "residentKiB": 39376,
+          "cpuSeconds": 0.11
+        },
+        {
+          "processLabel": "process-4",
+          "parentProcessLabel": "process-1",
+          "residentKiB": 46720,
+          "cpuSeconds": 0.22
+        },
+        {
+          "processLabel": "process-5",
+          "parentProcessLabel": "process-1",
+          "residentKiB": 95168,
+          "cpuSeconds": 1.83
+        }
+      ],
+      "daemon": [
+        {
+          "processLabel": "process-6",
+          "parentProcessLabel": "process-4",
+          "residentKiB": 67984,
+          "cpuSeconds": 0.69
+        }
+      ],
+      "electronResidentKiB": 382640,
+      "daemonResidentKiB": 67984,
+      "combinedResidentKiB": 450624
+    },
+    {
+      "atMs": 60314.21125,
+      "electron": [
+        {
+          "processLabel": "process-1",
+          "parentProcessLabel": "external-parent",
+          "residentKiB": 138304,
+          "cpuSeconds": 1.28
+        },
+        {
+          "processLabel": "process-2",
+          "parentProcessLabel": "process-1",
+          "residentKiB": 64992,
+          "cpuSeconds": 0.5
+        },
+        {
+          "processLabel": "process-3",
+          "parentProcessLabel": "process-1",
+          "residentKiB": 39376,
+          "cpuSeconds": 0.11
+        },
+        {
+          "processLabel": "process-4",
+          "parentProcessLabel": "process-1",
+          "residentKiB": 46720,
+          "cpuSeconds": 0.22
+        },
+        {
+          "processLabel": "process-5",
+          "parentProcessLabel": "process-1",
+          "residentKiB": 95152,
+          "cpuSeconds": 1.83
+        }
+      ],
+      "daemon": [
+        {
+          "processLabel": "process-6",
+          "parentProcessLabel": "process-4",
+          "residentKiB": 67232,
+          "cpuSeconds": 0.7
+        }
+      ],
+      "electronResidentKiB": 384544,
+      "daemonResidentKiB": 67232,
+      "combinedResidentKiB": 451776
+    },
+    {
+      "atMs": 65358.946333,
+      "electron": [
+        {
+          "processLabel": "process-1",
+          "parentProcessLabel": "external-parent",
+          "residentKiB": 146256,
+          "cpuSeconds": 1.3
+        },
+        {
+          "processLabel": "process-2",
+          "parentProcessLabel": "process-1",
+          "residentKiB": 70064,
+          "cpuSeconds": 0.5
+        },
+        {
+          "processLabel": "process-3",
+          "parentProcessLabel": "process-1",
+          "residentKiB": 41984,
+          "cpuSeconds": 0.11
+        },
+        {
+          "processLabel": "process-4",
+          "parentProcessLabel": "process-1",
+          "residentKiB": 46720,
+          "cpuSeconds": 0.22
+        },
+        {
+          "processLabel": "process-5",
+          "parentProcessLabel": "process-1",
+          "residentKiB": 99888,
+          "cpuSeconds": 1.83
+        }
+      ],
+      "daemon": [
+        {
+          "processLabel": "process-6",
+          "parentProcessLabel": "process-4",
+          "residentKiB": 68768,
+          "cpuSeconds": 0.72
+        }
+      ],
+      "electronResidentKiB": 404912,
+      "daemonResidentKiB": 68768,
+      "combinedResidentKiB": 473680
+    },
+    {
+      "atMs": 69876.658458,
+      "electron": [
+        {
+          "processLabel": "process-1",
+          "parentProcessLabel": "external-parent",
+          "residentKiB": 146416,
+          "cpuSeconds": 1.31
+        },
+        {
+          "processLabel": "process-2",
+          "parentProcessLabel": "process-1",
+          "residentKiB": 70064,
+          "cpuSeconds": 0.5
+        },
+        {
+          "processLabel": "process-3",
+          "parentProcessLabel": "process-1",
+          "residentKiB": 41984,
+          "cpuSeconds": 0.11
+        },
+        {
+          "processLabel": "process-4",
+          "parentProcessLabel": "process-1",
+          "residentKiB": 46752,
+          "cpuSeconds": 0.22
+        },
+        {
+          "processLabel": "process-5",
+          "parentProcessLabel": "process-1",
+          "residentKiB": 99552,
+          "cpuSeconds": 1.83
+        }
+      ],
+      "daemon": [
+        {
+          "processLabel": "process-6",
+          "parentProcessLabel": "process-4",
+          "residentKiB": 65744,
+          "cpuSeconds": 0.72
+        }
+      ],
+      "electronResidentKiB": 404768,
+      "daemonResidentKiB": 65744,
+      "combinedResidentKiB": 470512
+    }
+  ],
+  "cpuPercentOfOneCore": 0.6328291719589563,
+  "postCloseGrowthRatio": 1.1254922874958977,
+  "artifactIdentity": {
+    "before": {
+      "recordedAt": "2026-11-03T14:52:05.672609+00:00",
+      "hashes": {
+        "asar": "6e2ad757b93f72b30d4e2d62fceb4e237c5037e2a88d604d3a2ecebb58d84da2",
+        "service": "efc62252d1166296d3e41f04b0b14713e596c067ee5cccbc08208ab9e6d41a3a",
+        "runtimeManifest": "1351cc692a8efa99c22a358e0f3f506c5455214e4f5658e1222afe414ff66e0c",
+        "buildEvidence": "d00dc8218426dacfdd1027e3283bcbfed5be187f508fcab1b9277599019d3a6a"
+      },
+      "web": {
+        "web": {
+          "app.css": "f18410d3697931265025ade8c81642dfc1ba66e4226723ff58587c68469b5699",
+          "app.js": "89d263f3f08d41650f344e721a31513ed677c3243677d2d72f70a97c23ed5825",
+          "asset-manifest.json": "0b807ba105e560ed1f71f3e611d63c4f677de668c7a645574293045672966104",
+          "pdfium-codex-worker.js": "43bec5590978eb0a14b91ccfd3fa7b39c60833e9f2492ea5cf3e00cdb97d0d10",
+          "pdfium-worker.js": "4463487ece74309901036d06584c7296509eba9b26ff67d9154e32dfc8d04b5a",
+          "pdfium.wasm": "c0af5a6aca30d7e54a149c3a68e317116ca906d6edc28fd3318b12c7d9478ac8"
+        },
+        "electron-web": {
+          "assets/pdfium-worker.js": "4463487ece74309901036d06584c7296509eba9b26ff67d9154e32dfc8d04b5a",
+          "assets/pdfium.wasm": "c0af5a6aca30d7e54a149c3a68e317116ca906d6edc28fd3318b12c7d9478ac8",
+          "assets/shell.css": "be463bdbab20a4f13ca9cd4f6822cc037c32b3dd7764cf50fb02f75c15c45340",
+          "assets/shell.js": "a62facdc300430f82a83d342bd59f5ef9f6c825ec5e7ee76d0c227af1400373a",
+          "electron.html": "f1f23842f04cfeda9751963d5b0d01f674ba9e94f5f09a8ddb064fd8b028a36e"
+        }
+      }
+    },
+    "after": {
+      "recordedAt": "2026-11-03T14:55:05.739429+00:00",
+      "hashes": {
+        "asar": "6e2ad757b93f72b30d4e2d62fceb4e237c5037e2a88d604d3a2ecebb58d84da2",
+        "service": "efc62252d1166296d3e41f04b0b14713e596c067ee5cccbc08208ab9e6d41a3a",
+        "runtimeManifest": "1351cc692a8efa99c22a358e0f3f506c5455214e4f5658e1222afe414ff66e0c",
+        "buildEvidence": "d00dc8218426dacfdd1027e3283bcbfed5be187f508fcab1b9277599019d3a6a"
+      },
+      "web": {
+        "web": {
+          "app.css": "f18410d3697931265025ade8c81642dfc1ba66e4226723ff58587c68469b5699",
+          "app.js": "89d263f3f08d41650f344e721a31513ed677c3243677d2d72f70a97c23ed5825",
+          "asset-manifest.json": "0b807ba105e560ed1f71f3e611d63c4f677de668c7a645574293045672966104",
+          "pdfium-codex-worker.js": "43bec5590978eb0a14b91ccfd3fa7b39c60833e9f2492ea5cf3e00cdb97d0d10",
+          "pdfium-worker.js": "4463487ece74309901036d06584c7296509eba9b26ff67d9154e32dfc8d04b5a",
+          "pdfium.wasm": "c0af5a6aca30d7e54a149c3a68e317116ca906d6edc28fd3318b12c7d9478ac8"
+        },
+        "electron-web": {
+          "assets/pdfium-worker.js": "4463487ece74309901036d06584c7296509eba9b26ff67d9154e32dfc8d04b5a",
+          "assets/pdfium.wasm": "c0af5a6aca30d7e54a149c3a68e317116ca906d6edc28fd3318b12c7d9478ac8",
+          "assets/shell.css": "be463bdbab20a4f13ca9cd4f6822cc037c32b3dd7764cf50fb02f75c15c45340",
+          "assets/shell.js": "a62facdc300430f82a83d342bd59f5ef9f6c825ec5e7ee76d0c227af1400373a",
+          "electron.html": "f1f23842f04cfeda9751963d5b0d01f674ba9e94f5f09a8ddb064fd8b028a36e"
+        }
+      }
+    },
+    "unchanged": true
+  },
+  "qualificationScope": "Single existing macOS idle CPU and twelve normal document close/reopen test on the local package containing the focused-window 50 ms cursor sampler. Earlier launch matrix and unrelated preview root untouched. This is resource-regression evidence, not native Windows/Linux qualification or proof of internal worker disposal.",
+  "validation": {
+    "command": "node node_modules/@playwright/test/cli.js test --config scripts/testing/config/playwright.electron-performance.config.ts --grep \"macOS isolated packaged idle CPU\" --output test-results/electron-toolbar-performance",
+    "result": "1 passed (2.6m)",
+    "selectedTests": 1,
+    "launchMatrixRun": false,
+    "targetsUnchanged": true,
+    "disposedIsolatedAppAndDaemon": true
+  },
+  "sanitization": "Hostname omitted; OS PIDs and PPIDs replaced by stable local labels; repository absolute prefix removed."
+}

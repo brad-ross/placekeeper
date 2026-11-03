@@ -18,7 +18,7 @@ import { WindowActivityRegistry, ActivityAcknowledgements } from './window-lifec
 import { DocumentWindowRegistry } from './window-registry.js';
 import { parseWindowState, readWindowState, writeWindowState, type WindowIntent } from './window-state.js';
 import { installMenus, type WindowCommands } from './menus.js';
-import { nativeTitlebarOptions } from './titlebar.js';
+import { nativeTitlebarOptions, trackTitlebarHover } from './titlebar.js';
 import { parseElectronLocation } from '../../../packages/core/src/electron-shell-protocol.js';
 import { decodePlacekeeperLink } from '../../../packages/core/src/placekeeper-link.js';
 import { REVIEW_COMMAND_IDS } from '../../web/src/review/review-command-surface.js';
@@ -104,7 +104,7 @@ async function start() {
     lifecycle.stdin.on('error', failLifecycle);
     app.on('will-quit', () => { lifecycleStopping = true; lifecycle.stdin.end(); });
     const registry = new DocumentWindowRegistry<BrowserWindow>();
-    type Entry = { window: BrowserWindow; bridge: ReviewBridge; commands?: WindowCommands; intent: WindowIntent; closeToken?: string; focusedVisibility: FocusedVisibilityGate; permitClose: boolean; rendererReady: boolean; failureShown: boolean; retirement: AbortController; timer?: ReturnType<typeof setInterval> };
+    type Entry = { window: BrowserWindow; bridge: ReviewBridge; commands?: WindowCommands; intent: WindowIntent; closeToken?: string; focusedVisibility: FocusedVisibilityGate; permitClose: boolean; rendererReady: boolean; failureShown: boolean; retirement: AbortController; toolbarHeight: number; timer?: ReturnType<typeof setInterval> };
     const entries = new Map<number, Entry>();
     const ownedWindows = new WindowActivityRegistry();
     const statePath = join(app.getPath('userData'), 'windows.json');
@@ -149,6 +149,11 @@ async function start() {
     ipcMain.handle('review:visible', async (event, id, generation, token) => { const e = verify(event, id); if (!e.focusedVisibility.accepts(token, generation)) throw new Error('Stale activation evidence'); if (generation !== e.bridge.validatedGeneration || generation !== e.bridge.readyGeneration || !e.window.isVisible()) throw new Error('Unvalidated paint'); e.bridge.paintedGeneration = generation; await e.bridge.activate(); if (!e.focusedVisibility.commit(token, generation)) throw new Error('Superseded activation evidence'); ownedWindows.activated(e.bridge.helperId); timing('visible-active', e.bridge); activity(); });
     ipcMain.handle('review:clipboard', (event, id, text) => { verify(event, id); if (typeof text !== 'string' || text.length > 4 * 1024 * 1024) throw new Error('Invalid clipboard text'); clipboard.writeText(text); });
     ipcMain.handle('review:presentation', (event, id, presentation) => { const e = verify(event, id); const clean = parseWindowState([{ ...e.intent, presentation }])[0]; if (clean) { e.intent = clean; void persist(); } });
+    ipcMain.handle('review:toolbar-height', (event, id, height) => {
+        const e = verify(event, id);
+        if (typeof height !== 'number' || !Number.isFinite(height) || height < 32 || height > 160) throw new Error('Invalid toolbar height');
+        e.toolbarHeight = height;
+    });
     ipcMain.handle('review:commands', (event, id, revision, snapshot) => {
         const e = verify(event, id);
         if (!Number.isSafeInteger(revision) || revision <= (e.commands?.revision ?? 0) || !snapshot || !['review', 'editable', 'dialog'].includes(snapshot.focusContext) || !Array.isArray(snapshot.commands) || snapshot.commands.length !== REVIEW_COMMAND_IDS.length || snapshot.commands.some((c: { id: unknown; label: unknown; enabled: unknown }) => !REVIEW_COMMAND_IDS.includes(c.id as never) || typeof c.label !== 'string' || c.label.length > 200 || typeof c.enabled !== 'boolean')) throw new Error('Invalid commands');
@@ -184,14 +189,16 @@ async function start() {
     const usable = screen.getAllDisplays().some(d => (bounds.x ?? d.workArea.x) < d.workArea.x + d.workArea.width && (bounds.y ?? d.workArea.y) < d.workArea.y + d.workArea.height && (bounds.x ?? d.workArea.x) + bounds.width > d.workArea.x && (bounds.y ?? d.workArea.y) + bounds.height > d.workArea.y);
     const window = new BrowserWindow({ ...nativeTitlebarOptions(), ...(usable ? bounds : { width: bounds.width, height: bounds.height }), minWidth: 600, minHeight: 400, title: basename(sourcePath), backgroundColor: '#f7f7f7', webPreferences: { preload: join(__dirname, 'preload.cjs'), session: isolated, sandbox: true, contextIsolation: true, nodeIntegration: false, webSecurity: true } });
     timing('window-visible', bridge);
-    const entry: Entry = { window, bridge, retirement, permitClose: false, focusedVisibility: new FocusedVisibilityGate(), rendererReady: false, failureShown: false, intent: { sourcePath, bounds, maximized: restored?.maximized ?? false, ...(restored?.presentation ? { presentation: restored.presentation } : {}) } };
+    const entry: Entry = { window, bridge, retirement, toolbarHeight: 52, permitClose: false, focusedVisibility: new FocusedVisibilityGate(), rendererReady: false, failureShown: false, intent: { sourcePath, bounds, maximized: restored?.maximized ?? false, ...(restored?.presentation ? { presentation: restored.presentation } : {}) } };
     entries.set(window.webContents.id, entry); ownedWindows.register(bridge.helperId);
     const windowRegistration = activity();
     const contents = window.webContents;
+    const disposeTitlebarHover = trackTitlebarHover(window, () => screen.getCursorScreenPoint(), () => entry.toolbarHeight);
     let retirementPromise: Promise<void> | undefined;
     const retire = () => {
         if (retirementPromise) return retirementPromise;
         bridge.retired = true; retirement.abort();
+        disposeTitlebarHover();
         if (entry.timer) clearInterval(entry.timer);
         ownedWindows.retiring(bridge.helperId); activity();
         retirementPromise = electronAppControlThroughDaemon({ protocolVersion: 1, type: 'detach-helper', appInstanceId, helperId: bridge.helperId }, undefined, paths).then(response => {

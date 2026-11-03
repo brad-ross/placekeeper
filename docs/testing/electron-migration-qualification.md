@@ -92,7 +92,21 @@ These measurements observe renderer presentation opportunities, not physical dis
 
 The recorded launch/resource, appearance and responsiveness runs identify their exact artifacts. They preceded the local Windows-drive link correction; they are not repeat measurements of each subsequent service payload. Windows links currently support local drive-letter PDFs; UNC shares and device paths remain rejected.
 
+## Integrated native toolbar (2026-11-03)
+
+The candidate now places native window controls in the reader toolbar: macOS traffic lights on the left, and Windows/Linux controls on the right. The toolbar reserves the native overlay's safe area and removes that reservation in fullscreen. Interface-size changes reposition or resize the native controls with the toolbar.
+
+The local Mac package was visually checked at normal and increased interface size, at 600-point window width, and entering/leaving fullscreen. The user confirmed that dragging the blank toolbar moves the window normally. Automated native dragging was inconclusive; an unpackaged Electron diagnostic confirmed a native draggable region across the toolbar. Page input, save options, and the hover-revealed zoom menu work in the packaged acceptance check.
+
+At `efd9682a`, typecheck and all configured regression suites passed: 1,712 unit/integration tests, 103 browser checks, and nine packaged-app tests. The service suite initially returned a safe `superseded` result in a test racing its filesystem observer; the affected file's 42 tests and the full 585-test service suite subsequently passed without service changes. Host integration initially found stale generated web payloads; rebuilding those distributions produced 399 unit/integration and 14 browser passes. The cancellation acceptance test now reads the acknowledged previous recovery snapshot only when the current pathname is temporarily absent during rotation; all exact draft and item assertions remain unchanged.
+
+The focused titlebar review completed with no actionable findings. Native [run 41654616327](https://github.com/brad-ross/placekeeper/actions/runs/41654616327) passed on Linux but failed on Windows and both Mac architectures. The pending acceptance corrections account for the native overlay's actual height and the page-note region's optional count suffix; a fresh native run is still required for this revision.
+
+The package containing the hover tracker passed a [Mac resource regression](electron-toolbar-performance-2026-11-03.json): 0.63% idle CPU over at least 60 seconds and 12.55% peak post-close RSS growth over twelve close/reopen cycles, within the unchanged 2%/15% limits. This measurement precedes the final spacing-only correction and does not isolate individual cursor-sampler callbacks or establish Windows/Linux performance.
+
 ## Running qualification
+
+The subsequent local toolbar spacing correction was checked against the native screenshot with `Sample review.pdf`: the visible gaps between the traffic lights, filename icon/text, and page number are approximately 26 pixels on either side of the filename group. The final rebuilt package passed all nine installed-app checks. An earlier run failed to click the hover-revealed copy-link control; its focused retry and the final full suite passed. Reusing an old isolated preview root produced a lifecycle-registration alert, so the final visual check used a fresh isolated root with the earlier sample files retained.
 
 See [personal build instructions](electron-personal-builds.md). Build the exact artifact before running `pnpm test:desktop-installed`; use `PLACEKEEPER_TEST_EXECUTABLE` to select another actual installation. `pnpm test:desktop-platform` includes real Windows-only checks and skips them on other hosts.
 

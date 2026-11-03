@@ -514,8 +514,12 @@
   user-select: none;
 }
 
+.electron-review-shell .review-chrome__left-controls {
+  margin-left: 2px;
+}
+
 .electron-review-shell[data-window-controls-overlay="true"] .review-chrome {
-  padding-left: calc(env(titlebar-area-x, 0px) + 16px);
+  padding-left: max(16px, env(titlebar-area-x, 0px));
   padding-right: calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw) + 16px);
 }
 

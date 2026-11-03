@@ -16,12 +16,17 @@ test('packaged candidate renders and activates a real PDF without system Node', 
       const chrome = document.querySelector<HTMLElement>('[data-review-chrome]')!;
       const bounds = chrome.getBoundingClientRect();
       const safe = overlay?.getTitlebarAreaRect();
+      const identity = chrome.querySelector<HTMLElement>('.review-chrome__identity')!.getBoundingClientRect();
+      const navigation = chrome.querySelector<HTMLElement>('.review-chrome__left-controls')!.getBoundingClientRect();
       const controls = [...chrome.querySelectorAll<HTMLElement>('button,input,[tabindex]')]
         .filter(element => element.checkVisibility());
       return {
         nativeControlsVisible: overlay?.visible === true,
         top: bounds.top, height: bounds.height,
         nativeHeight: safe?.height ?? 0,
+        filenameGap: navigation.left - identity.right,
+        leadingInset: identity.left,
+        expectedLeadingInset: Math.max(16, safe?.left ?? 0),
         controlsInsideSafeArea: Boolean(safe) && controls.every(element => {
           const rect = element.getBoundingClientRect();
           return rect.left >= safe!.left && rect.right <= safe!.right;
@@ -30,8 +35,11 @@ test('packaged candidate renders and activates a real PDF without system Node', 
         inputsClickable: controls.every(element => getComputedStyle(element).getPropertyValue('-webkit-app-region') === 'no-drag'),
       };
     });
-    await expect.poll(titlebarGeometry).toMatchObject({ nativeControlsVisible: true, top: 0, height: 52,
-      controlsInsideSafeArea: true, drag: 'drag', inputsClickable: true });
+    await expect.poll(titlebarGeometry).toMatchObject({ nativeControlsVisible: true, top: 0,
+      filenameGap: 10, controlsInsideSafeArea: true, drag: 'drag', inputsClickable: true });
+    const spacing = await titlebarGeometry();
+    expect(spacing.height).toBe(Math.max(52, spacing.nativeHeight));
+    expect(spacing.leadingInset).toBe(spacing.expectedLeadingInset);
     const pageInput = page.locator('[data-review-chrome] .review-chrome__page-input');
     await pageInput.click();
     await expect(pageInput).toBeFocused();
@@ -71,11 +79,13 @@ test('packaged candidate renders and activates a real PDF without system Node', 
       return {
         node: 'require' in window || 'process' in window,
         wrongWindow: await rejected(() => shell.request({ ...identity, windowId: crypto.randomUUID() }, request)),
+        foreignToolbar: await rejected(() => shell.toolbarHeight({ ...identity, windowId: crypto.randomUUID() }, 52)),
+        invalidToolbar: await rejected(() => shell.toolbarHeight(identity, Number.NaN)),
         arbitraryMethod: await rejected(() => shell.request(identity, { ...request, method: 'readFile', payload: { path: '/etc/passwd' } })),
         pathInjection: await rejected(() => shell.request(identity, { ...request, path: '/etc/passwd' })),
       };
     }, { protocol: REVIEW_RUNTIME_PROTOCOL, version: REVIEW_RUNTIME_VERSION });
-    expect(isolation).toEqual({ node: false, wrongWindow: true, arbitraryMethod: true, pathInjection: true });
+    expect(isolation).toEqual({ node: false, wrongWindow: true, foreignToolbar: true, invalidToolbar: true, arbitraryMethod: true, pathInjection: true });
     await page.screenshot({ path: testInfo.outputPath('review.png') });
     await testInfo.attach('review', { path: testInfo.outputPath('review.png'), contentType: 'image/png' });
     await testInfo.attach('runtime-errors', { body: JSON.stringify(candidate.errors), contentType: 'application/json' });

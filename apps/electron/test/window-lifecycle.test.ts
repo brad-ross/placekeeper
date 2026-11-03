@@ -2,9 +2,53 @@ import assert from 'node:assert/strict';
 import { mkdtemp, writeFile, symlink, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { it as test } from 'vitest';
+import { it as test, vi } from 'vitest';
+import { EventEmitter } from 'node:events';
+import type { BrowserWindow } from 'electron';
+import { trackTitlebarHover } from '../src/titlebar.js';
 import { DocumentWindowRegistry } from '../src/window-registry.js';
 import { parseWindowState } from '../src/window-state.js';
+test('native toolbar hover follows scaled window bounds without DOM movement and stops sampling on blur or retirement', () => {
+    vi.useFakeTimers();
+    let point = { x: 500, y: 200 };
+    let scale = 1;
+    let focused = true;
+    let destroyed = false;
+    const cursor = vi.fn(() => point);
+    const send = vi.fn<(channel: string, message: { type: string; hovered: boolean }) => void>();
+    const contents = Object.assign(new EventEmitter(), { send, isDestroyed: () => destroyed, getZoomFactor: () => scale });
+    const window = Object.assign(new EventEmitter(), {
+        webContents: contents, isFocused: () => focused, isVisible: () => true, isMinimized: () => false,
+        getContentBounds: () => ({ x: 100, y: 100, width: 800, height: 600 }),
+    });
+    const dispose = trackTitlebarHover(window as unknown as BrowserWindow, cursor);
+    try {
+        assert.deepEqual(send.mock.lastCall, ['review:shell', { type: 'toolbar-hover', hovered: false }]);
+        point = { x: 500, y: 125 };
+        vi.advanceTimersByTime(50);
+        assert.deepEqual(send.mock.lastCall, ['review:shell', { type: 'toolbar-hover', hovered: true }]);
+        vi.advanceTimersByTime(1000);
+        assert.equal(send.mock.calls.length, 2);
+        point.y = 180;
+        vi.advanceTimersByTime(50);
+        assert.equal(send.mock.lastCall![1].hovered, false);
+        scale = 2;
+        vi.advanceTimersByTime(50);
+        assert.equal(send.mock.lastCall![1].hovered, true);
+        focused = false; window.emit('blur');
+        assert.equal(send.mock.lastCall![1].hovered, false);
+        const samples = cursor.mock.calls.length;
+        vi.advanceTimersByTime(1000);
+        assert.equal(cursor.mock.calls.length, samples);
+        focused = true; window.emit('focus');
+        assert.equal(send.mock.lastCall![1].hovered, true);
+        destroyed = true; dispose();
+        const retiredSamples = cursor.mock.calls.length;
+        window.emit('focus'); contents.emit('did-finish-load');
+        vi.advanceTimersByTime(1000);
+        assert.equal(cursor.mock.calls.length, retiredSamples);
+    } finally { dispose(); vi.useRealTimers(); }
+});
 test('concurrent duplicate and alias opens focus one window while distinct documents remain independent', async () => {
     const root = await mkdtemp(join(tmpdir(), 'electron-windows-'));
     try {

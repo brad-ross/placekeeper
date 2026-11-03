@@ -11,6 +11,7 @@ const bridge: ElectronShellBridge = {
     visible: (identity, generation, token) => ipcRenderer.invoke('review:visible', identity, generation, token),
     commandSurface: (identity, revision, snapshot) => ipcRenderer.invoke('review:commands', identity, revision, snapshot),
     presentation: (identity, state) => ipcRenderer.invoke('review:presentation', identity, state),
+    toolbarHeight: (identity, height) => ipcRenderer.invoke('review:toolbar-height', identity, height),
     closeSettled: (identity, token, error) => ipcRenderer.invoke('review:close-settled', identity, token, error),
     writeClipboard: (identity, text) => ipcRenderer.invoke('review:clipboard', identity, text),
     subscribeShell(listener) {
