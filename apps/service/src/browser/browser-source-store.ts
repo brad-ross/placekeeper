@@ -1,7 +1,10 @@
+import { constants, type Stats } from "node:fs";
 import { createHash, randomUUID } from "node:crypto";
-import { chmod, lstat, open, realpath, rename, rm } from "node:fs/promises";
+import { lstat, open, realpath } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 
+import { verifyPrivatePath } from '../platform/private-storage.js';
+import { adoptPrivateFile } from '../platform/private-file-adoption.js';
 import { ensurePrivateDirectory } from "../recovery/source-snapshot.js";
 import { MAX_CHROME_PDF_BYTES } from "./chrome-pdf-limits.js";
 
@@ -48,24 +51,21 @@ function safeDisplayName(value: string | undefined): string {
   return named.toLowerCase().endsWith(".pdf") ? named : `${named.slice(0, 116)}.pdf`;
 }
 
-async function hashPath(path: string): Promise<string> {
-  const handle = await open(path, "r");
-  try {
-    const digest = createHash("sha256");
-    for await (const chunk of handle.createReadStream({ autoClose: false })) digest.update(chunk);
-    return digest.digest("hex");
-  } finally {
-    await handle.close();
-  }
+function sameSource(expected: Stats, actual: Stats): boolean {
+  return actual.isFile() && actual.dev === expected.dev && actual.ino === expected.ino
+    && actual.size === expected.size && actual.mtimeMs === expected.mtimeMs && actual.ctimeMs === expected.ctimeMs;
 }
-
-async function syncDirectory(path: string): Promise<void> {
-  const handle = await open(path, "r");
+async function hashPath(path: string, expected: Stats): Promise<string> {
+  const handle = await open(path, constants.O_RDONLY | (process.platform === 'win32' ? 0 : constants.O_NOFOLLOW));
   try {
-    await handle.sync();
-  } finally {
-    await handle.close();
-  }
+    if (!sameSource(expected, await handle.stat())) throw new Error('Browser source identity changed');
+    const digest = createHash("sha256"); let bytes = 0;
+    for await (const chunk of handle.createReadStream({ autoClose: false, start: 0, end: expected.size - 1 })) {
+      bytes += chunk.byteLength; digest.update(chunk);
+    }
+    if (bytes !== expected.size || !sameSource(expected, await handle.stat())) throw new Error('Browser source identity changed');
+    return digest.digest("hex");
+  } finally { await handle.close(); }
 }
 
 /** Resolves opaque native-host handles only below one fixed private root. */
@@ -80,9 +80,10 @@ export class BrowserSourceStore {
     await ensurePrivateDirectory(resolve(root));
     const metadata = await lstat(resolve(root));
     const canonical = await realpath(resolve(root));
-    if (!metadata.isDirectory() || metadata.isSymbolicLink() || (metadata.mode & 0o077) !== 0) {
+    if (!metadata.isDirectory() || metadata.isSymbolicLink()) {
       throw new Error("Browser source root must be a secure directory");
     }
+    await verifyPrivatePath(canonical, 'directory');
     return new BrowserSourceStore(canonical);
   }
 
@@ -104,21 +105,15 @@ export class BrowserSourceStore {
     const metadata = await lstat(sourcePath);
     if (
       canonicalParent !== this.root || metadata.isSymbolicLink() || !metadata.isFile() ||
-      metadata.size !== request.byteLength || (metadata.mode & 0o077) !== 0 ||
-      await hashPath(sourcePath) !== request.sha256
+      metadata.size !== request.byteLength
     ) throw new Error("Browser source claim failed integrity validation");
 
+    await verifyPrivatePath(sourcePath, 'file');
+    if (await hashPath(sourcePath, metadata) !== request.sha256) throw new Error('Browser source claim failed integrity validation');
     await ensurePrivateDirectory(sessionDirectory);
+    if (!sameSource(metadata, await lstat(sourcePath))) throw new Error('Browser source identity changed');
     const destination = join(sessionDirectory, "source.pdf");
-    try {
-      await rename(sourcePath, destination);
-      await chmod(destination, 0o600);
-      await syncDirectory(this.root);
-      await syncDirectory(sessionDirectory);
-    } catch (error) {
-      await rm(destination, { force: true }).catch(() => undefined);
-      throw error;
-    }
+    await adoptPrivateFile(sourcePath, destination);
     return {
       path: destination,
       acquisitionId: randomUUID(),

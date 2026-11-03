@@ -480,8 +480,11 @@ async function main(): Promise<number> {
     const args = process.argv.slice(3);
     const paths = pathsForDirectDaemonLaunch(args);
     if (paths === undefined) return runDaemonCommand(args);
-    await runServiceDaemon(paths);
-    return 0;
+    try { await runServiceDaemon(paths); return 0; }
+    catch (error) {
+      if (paths.isolatedTestRoot !== undefined) process.stderr.write(`[PlacekeeperDaemon] ${JSON.stringify(lifecycleDiagnostic('start-daemon', error))}\n`);
+      throw error;
+    }
   }
   return runOpenCommand(process.argv.slice(2), launchThroughDaemon);
 }

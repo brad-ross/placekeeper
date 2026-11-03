@@ -1,5 +1,6 @@
 import { parseElectronAppControlResponse, type ElectronAppControlMessage, type ElectronAppControlResponse } from "../../../../packages/core/src/electron-app-control-protocol.js";
 import { validElectronReviewHelperResponse, type ElectronReviewHelperMessage, type ElectronReviewHelperResponse } from "../../../../packages/core/src/electron-helper-protocol.js";
+import { observeIsolatedDaemonStartup } from './daemon-startup-diagnostic.js';
 import { closeWindowsNativeWorker } from "../platform/windows-native-worker.js";
 import { readControlDiscovery } from "../platform/control-transport.js";
 import { platformPath, resolvePlatformLocations } from "../platform/locations.js";
@@ -237,6 +238,8 @@ export function daemonUnavailable(error: unknown): boolean {
   return code === "ENOENT" || code === "ECONNREFUSED" || code === "ECONNRESET";
 }
 
+const isolatedStartupDiagnostics = new WeakMap<ChildProcess, () => Promise<void>>();
+
 async function spawnServiceDaemon(
   entry: string,
   paths: DaemonPaths,
@@ -261,7 +264,7 @@ async function spawnServiceDaemon(
     ...installedSmokeDaemonArgs(paths),
   ], {
     detached: true,
-    stdio: "ignore",
+    stdio: paths.isolatedTestRoot === undefined ? "ignore" : ["ignore", "ignore", "pipe"],
     env: {
       ...process.env,
       ...(runtime === undefined ? {} : {
@@ -275,6 +278,7 @@ async function spawnServiceDaemon(
       ...(readinessToken === undefined ? {} : { [READINESS_TOKEN_ENV]: readinessToken }),
     },
   });
+  if (paths.isolatedTestRoot !== undefined) isolatedStartupDiagnostics.set(child, observeIsolatedDaemonStartup(child));
   await new Promise<void>((resolveSpawn, reject) => {
     child.once("spawn", resolveSpawn);
     child.once("error", reject);
@@ -500,9 +504,13 @@ async function controlWhileLocked(
   }
   const entry = process.argv[1];
   if (entry === undefined) throw new Error("The placekeeper launcher entry point is unavailable");
-  await spawnServiceDaemon(entry, paths, lifecycleToken);
+  const started = await spawnServiceDaemon(entry, paths, lifecycleToken);
   for (let attempt = 0; attempt < 60; attempt += 1) {
     signal?.throwIfAborted();
+    if (started.exitCode !== null || started.signalCode !== null) {
+      await isolatedStartupDiagnostics.get(started)?.();
+      throw new Error('The local placekeeper service exited before becoming ready');
+    }
     await new Promise((resolveDelay) => setTimeout(resolveDelay, 50));
     try {
       const compatibility = await waitForAcceptingCompatibility(paths.socketPath, paths.packagedRuntime?.expectedIdentity.daemonIdentity ?? currentDaemonIdentity());
@@ -518,6 +526,7 @@ async function controlWhileLocked(
       if (!daemonUnavailable(error)) throw error;
     }
   }
+  await isolatedStartupDiagnostics.get(started)?.();
   throw new Error("The local placekeeper service did not become ready");
 }
 

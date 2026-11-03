@@ -28,13 +28,15 @@ export function lifecycleDiagnostic(stage: string, error?: unknown): NativeLifec
     ['Placekeeper lifecycle coordination is busy', 'lifecycle-lock-busy'],
     ['The local placekeeper service did not become ready', 'daemon-not-ready'],
     ['The placekeeper launcher entry point is unavailable', 'launcher-entry-unavailable'],
+    ['The local placekeeper service exited before becoming ready', 'daemon-exited-before-ready'],
+    ['Browser source root must be a secure directory', 'browser-source-private-root'],
     ['Windows system directory is unavailable', 'windows-system-directory-unavailable'],
   ] as const;
   const cause = knownCauses.find(([message]) => error.message === message)?.[1]
     ?? (/^(?:Packaged |Invalid packaged |Unidentified packaged |The packaged )/u.test(error.message) ? 'packaged-runtime-validation'
       : /^(?:Private storage|Windows private storage)/u.test(error.message) ? 'private-storage'
       : error.message.startsWith('Windows native worker') ? 'windows-native-worker' : 'unclassified');
-  const code = typeof detail.code === 'string' && ['ENOENT', 'EACCES', 'EPERM', 'EEXIST', 'ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT', 'EPIPE', 'ENOTDIR', 'ENOSPC'].includes(detail.code) ? detail.code : undefined;
+  const code = typeof detail.code === 'string' && ['ENOENT', 'EACCES', 'EPERM', 'EEXIST', 'ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT', 'EPIPE', 'ENOTDIR', 'ENOSPC', 'ERR_INVALID_URL', 'ERR_MODULE_NOT_FOUND', 'MODULE_NOT_FOUND', 'ERR_DLOPEN_FAILED', 'ERR_REQUIRE_ESM', 'ERR_INVALID_ARG_TYPE'].includes(detail.code) ? detail.code : undefined;
   const reason = typeof detail.reason === 'string' && ['malformed', 'oversized', 'early-close', 'timeout', 'incompatible', 'uninspectable', 'transient-busy', 'review-presence', 'codex-task', 'operation-failed', 'reparse-point', 'owner-mismatch', 'rule-count', 'principal-mismatch', 'denied-access', 'rights-mismatch'].includes(detail.reason) ? detail.reason : undefined;
   const native = detail.diagnostic;
   const exceptionKind = typeof native?.exceptionKind === 'string' && ['UnauthorizedAccessException', 'PrivilegeNotHeldException', 'Win32Exception', 'IdentityNotMappedException', 'ArgumentException', 'InvalidOperationException', 'Other'].includes(native.exceptionKind) ? native.exceptionKind : undefined;

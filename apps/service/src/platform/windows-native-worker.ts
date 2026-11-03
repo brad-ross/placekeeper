@@ -11,6 +11,7 @@ export type WindowsNativeRequest =
   | { readonly operation: "createPrivateFile"; readonly path: string }
   | { readonly operation: "createPrivateDirectory"; readonly path: string }
   | { readonly operation: "copyAcl"; readonly candidate: string; readonly original: string }
+  | { readonly operation: "adoptPrivateFile"; readonly candidate: string; readonly target: string }
   | { readonly operation: "publish"; readonly candidate: string; readonly target: string; readonly replaceExisting: boolean };
 export type WindowsNativeResult = { readonly status: "ok" } | { readonly status: "published" } | { readonly status: "failed"; readonly nativeCode: number };
 const WINDOWS_NATIVE_FAILURE_REASONS = ["operation-failed", "reparse-point", "owner-mismatch", "rule-count", "principal-mismatch", "denied-access", "rights-mismatch", "acl-read-original", "acl-apply", "acl-read-candidate", "acl-compare", "acl-mismatch", "acl-owner-mismatch", "acl-group-mismatch", "acl-protection-mismatch", "acl-access-mismatch"] as const;
@@ -164,6 +165,11 @@ while ($null -ne ($line=[Console]::In.ReadLine())) {
     }
     $result=@{status='ok'}
    }
+   'adoptPrivateFile' {
+    $attempted=$true
+    if ([PlacekeeperFilePublication]::MoveFileEx($r.candidate,$r.target,[uint32]8)) { $result=@{status='published'} }
+    else { $result=@{status='failed';nativeCode=[Runtime.InteropServices.Marshal]::GetLastWin32Error()} }
+   }
    'publish' {
     $flags=if ($r.replaceExisting -eq $false) { [uint32]8 } else { [uint32]9 }
     $attempted=$true
@@ -220,7 +226,7 @@ function retire(current: Worker, message: string): Promise<void> {
 function finishRetirement(current: Worker): void {
   for (const pending of current.pending.values()) {
     clearTimeout(pending.timer);
-    const uncertain = current.spawned && pending.request.operation === "publish";
+    const uncertain = current.spawned && (pending.request.operation === "publish" || pending.request.operation === "adoptPrivateFile");
     pending.reject(new WindowsNativeWorkerError(current.retiringMessage ?? "Windows native worker closed without a reply", uncertain, uncertain));
   }
   current.pending.clear();
@@ -261,7 +267,7 @@ function acquireWorker(): Worker {
         if (pending === undefined) throw new Error("Unknown reply");
         if (reply.ok === true) {
           const result = reply.result as WindowsNativeResult;
-          if (typeof result !== "object" || result === null || !(pending.request.operation === "publish"
+          if (typeof result !== "object" || result === null || !((pending.request.operation === "publish" || pending.request.operation === "adoptPrivateFile")
             ? result.status === "published" || (result.status === "failed" && Number.isSafeInteger(result.nativeCode) && result.nativeCode >= 0)
             : result.status === "ok" || ((pending.request.operation === "createPrivateFile" || pending.request.operation === "createPrivateDirectory" || pending.request.operation === "registerChromeHost" || pending.request.operation === "unregisterChromeHost") && result.status === "failed" && Number.isSafeInteger(result.nativeCode) && result.nativeCode >= 0))) throw new Error("Invalid reply");
           pending.resolve(result);
@@ -272,7 +278,7 @@ function acquireWorker(): Worker {
           const message = pending.request.operation === "verify" || pending.request.operation === "protect"
             ? "Windows private storage permissions could not be verified"
             : pending.request.operation === "copyAcl" ? "Windows replacement security descriptor could not be preserved" : "Windows native publication failed";
-          pending.reject(new WindowsNativeWorkerError(`${message} (${reply.reason}; ${diagnostic.exceptionKind}; HRESULT=${diagnostic.hresult})`, reply.attempted, reply.attempted && pending.request.operation === "publish", reply.reason as WindowsNativeFailureReason, diagnostic));
+          pending.reject(new WindowsNativeWorkerError(`${message} (${reply.reason}; ${diagnostic.exceptionKind}; HRESULT=${diagnostic.hresult})`, reply.attempted, reply.attempted && (pending.request.operation === "publish" || pending.request.operation === "adoptPrivateFile"), reply.reason as WindowsNativeFailureReason, diagnostic));
         } else throw new Error("Invalid reply");
         clearTimeout(pending.timer); current.pending.delete(reply.id as string);
         if (current.pending.size === 0) {

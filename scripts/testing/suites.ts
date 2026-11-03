@@ -16,6 +16,8 @@ export const suites: Record<string, TestStage[]> = {
     "apps/service/test/desktop-daemon-lifecycle.test.ts",
     "apps/electron/test/installed-test-root.test.ts",
     "apps/service/test/native-lifecycle-diagnostic.test.ts",
+    "apps/service/test/windows-browser-source-store.test.ts", "apps/service/test/private-file-adoption.test.ts",
+    "apps/service/test/chrome-handoff-native.test.ts", "apps/service/test/daemon-startup-diagnostic.test.ts",
   ] }, { runner: "playwright", options: ["--config", "scripts/testing/config/playwright.desktop-platform.config.ts"], files: [] }],
   "test:electron": [{ runner: "vitest", options: [], files: [
     "apps/electron/test", "apps/service/test/electron-daemon-runtime.test.ts",
