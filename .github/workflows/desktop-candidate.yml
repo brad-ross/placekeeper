@@ -53,12 +53,25 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y fakeroot dpkg xvfb build-essential
       - name: Install real SyncTeX query tool
         uses: r-lib/actions/setup-tinytex@v2
-      - name: Verify SyncTeX query tool
+      - name: Verify SyncTeX query tool on macOS or Linux
+        if: runner.os != 'Windows'
         shell: bash
         run: |
+          tlmgr update --self
           tlmgr install synctex
           synctex help
           printf 'PLACEKEEPER_HOST_PATH=%s\n' "$PATH" >> "$GITHUB_ENV"
+      - name: Verify SyncTeX query tool on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          tlmgr.bat update --self
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          tlmgr.bat install synctex
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          synctex.exe help
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "PLACEKEEPER_HOST_PATH=$env:Path" >> $env:GITHUB_ENV
       - name: Install locked dependencies
         run: pnpm install --frozen-lockfile
       - name: Check catalog
