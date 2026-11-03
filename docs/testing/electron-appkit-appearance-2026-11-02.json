@@ -1,0 +1,150 @@
+{
+  "date": "2026-11-02",
+  "status": "measured-single-native-pair",
+  "scope": "Initial synthetic PDF document viewport on macOS arm64; one retained AppKit candidate and final Electron candidate, no installed application/service interaction.",
+  "fixture": {
+    "path": "test/fixtures/pdfs/legible-link-destinations.pdf",
+    "sha256": "63a501448978032a29e09263839edf54849713888644d4b4f8195dff88d48bd7",
+    "sameBytes": true,
+    "title": "Paired synthetic PDF.pdf",
+    "page": 1,
+    "pageCount": 6,
+    "zoomPercent": 179,
+    "workspace": "closed"
+  },
+  "capture": {
+    "pointViewport": [
+      1200,
+      764
+    ],
+    "pixelSize": [
+      2400,
+      1528
+    ],
+    "deviceScaleFactor": 2,
+    "appkit": "Native CUA window screenshot, JPEG; untouched initial page layout; inactive window. Requested 1200x820-point window was constrained by the current display.",
+    "electron": "Actual packaged renderer CDP screenshot, PNG; viewport emulated at matching size/scale; full page/zoom controls admitted before capture; native OS titlebar excluded.",
+    "artifacts": "docs/testing/electron-appkit-appearance-2026-11-02",
+    "appkitMetadata": "appkit-metadata.json",
+    "electronMetadata": "electron-mapping.json"
+  },
+  "electronArtifact": {
+    "daemonIdentity": "929a49efcbaeaab379880232e8d0fde79cd1d835a0398d689544e569e4dfacbb",
+    "installArtifactIdentity": "a2dcecdc89afeb12066f0407dfbf396f69eb47edf0ba86e8769db6c8c69bc2c0",
+    "appAsarSha256": "85d00880cfc7f48fda28280f6c11985a3dcf2fbc7328e04e3884ef0294d48fa7",
+    "runtimeManifestSha256": "ae09eab1caa4c70d002d2c60fb5b08ddba80d03e05a43a5585d1165e8f29e169",
+    "rendererAssetHashes": {
+      "electron.html": "f1f23842f04cfeda9751963d5b0d01f674ba9e94f5f09a8ddb064fd8b028a36e",
+      "assets/shell.js": "2260761b38488bbe8003201bd0e279920822af5f3dd6d2bdc1f89d066c1b49a8",
+      "assets/shell.css": "bd8d08c6f7d1820f0079970992ab08c1a352e5cfff01ee2f19c7c3209f70c019",
+      "assets/pdfium-worker.js": "4463487ece74309901036d06584c7296509eba9b26ff67d9154e32dfc8d04b5a",
+      "assets/pdfium.wasm": "c0af5a6aca30d7e54a149c3a68e317116ca906d6edc28fd3318b12c7d9478ac8"
+    }
+  },
+  "nativeArtifact": {
+    "executableSha256": "1c395855a1ca8d8e0322aa4b465fd734fd2d27f85d756a245b44e7425157ab6a",
+    "identity": {
+      "managementProtocolVersion": 1,
+      "daemonIdentity": "b4067d39c5ffbd391726887a54b45a999255ed792606b391e5269e8a2e237c37",
+      "installArtifactIdentity": "5e3b618184a252b6547c7f17ee76972e1143304ee6832fb6f5904a8a28d19302"
+    },
+    "rendererAssetHashes": {
+      "assets/pdfium-worker.js": "4463487ece74309901036d06584c7296509eba9b26ff67d9154e32dfc8d04b5a",
+      "assets/recovery.css": "5d8b68b19f08d4a1499844baaf47d5f505c8955daea6b4c151ba26fce33c8206",
+      "assets/recovery.js": "4a3f639a96724a260f0459fa6422ce57eef159efb3a96950d929fd01b80814c1",
+      "assets/shell.css": "bd8d08c6f7d1820f0079970992ab08c1a352e5cfff01ee2f19c7c3209f70c019",
+      "assets/shell.js": "857eb7b710f75a6c70b4c420bb48ca1e5fa4e33cffc44afd41bd5862f60e57ba",
+      "macos.html": "04dec1ddb2800bda07b7580addb4bb8b96b2871d56e280ee51abb0f335f465da",
+      "recovery.html": "724fe550c3c3efc169ef596bfdf759af21f4d2bbba8c43b54a017bc0c3c2a905"
+    }
+  },
+  "isolation": {
+    "appkit": "Copied retained bundle; unique local.placekeeper.paired-appearance.20261102b bundle identifier; URL/document handler metadata removed; original executable and resources unchanged; private HOME/service root.",
+    "electron": "InstalledCandidate harness with disposable isolated test root, isolated Electron user-data, independent test daemon and copied fixture.",
+    "cleanup": "Both test app/daemon pairs stopped before performance measurements; installed app, installed service and default handlers were not operated."
+  },
+  "observed": [
+    "Both captures show fixture page 1, the Introduction heading, and the same paragraph text, line wrapping, page width and horizontal placement.",
+    "The document raster begins 4 device pixels (2 CSS points) higher in Electron; comparison applies only that measured vertical translation and no scale/warp.",
+    "Shared shell CSS hashes match exactly; host entry JavaScript differs as expected.",
+    "Electron transport reported no runtime errors in this capture."
+  ],
+  "pixelComparison": {
+    "sizes": {
+      "appkit": [
+        2400,
+        1528
+      ],
+      "electron": [
+        2400,
+        1528
+      ]
+    },
+    "regions": [
+      {
+        "name": "whole-capture",
+        "x": 0,
+        "y": 0,
+        "w": 2400,
+        "h": 1528,
+        "totalPixels": 3667200,
+        "nonidenticalPixels": 292551,
+        "pixelsWithChannelDifferenceOver16": 118598,
+        "meanAbsoluteChannelDifference": 4.445155431937173
+      },
+      {
+        "name": "shared-document-viewport",
+        "x": 150,
+        "y": 150,
+        "w": 2100,
+        "h": 1300,
+        "totalPixels": 2730000,
+        "nonidenticalPixels": 185945,
+        "pixelsWithChannelDifferenceOver16": 112140,
+        "meanAbsoluteChannelDifference": 5.5830717948717945
+      }
+    ],
+    "translatedDocumentInkComparison": {
+      "dx": 0,
+      "dy": -4,
+      "iou": 0.8653038847117794,
+      "intersection": 55241,
+      "union": 63840,
+      "region": {
+        "x": 300,
+        "y": 200,
+        "width": 1900,
+        "height": 900
+      },
+      "threshold": 128,
+      "onePixelTolerance": {
+        "appkitInkPixels": 59627,
+        "electronInkPixels": 59454,
+        "appkitCoverage": 0.9999496872222315,
+        "electronCoverage": 1
+      }
+    }
+  },
+  "interpretation": "Within the stated document-text crop, thresholded dark-ink overlap is 86.5304% without edge tolerance after translation; with a one-device-pixel neighborhood, 99.9950% of AppKit ink and 100% of Electron ink are covered. This supports matching visible page content/layout in this case, while retaining the raw unequal pixels.",
+  "limitations": [
+    "One synthetic PDF page, initial fit-width layout, one local macOS host; no cross-platform, corpus-wide, multi-state or full native-shell appearance qualification.",
+    "AppKit capture is lossy JPEG and Electron capture is lossless PNG; no byte/pixel identity claim or visual pass threshold is asserted.",
+    "Native traffic lights, toolbar title inset, window activation and hover/focus state differ; Electron native titlebar is outside its renderer screenshot, so the whole-window pixel metric is descriptive rather than an equivalence test.",
+    "Menus, workspace-open layouts, authoring dialogs and matching toolbar-hover states were not paired.",
+    "The retained AppKit and final Electron bundles have different service/runtime versions and distinct host JavaScript; their exact identities/assets are retained in the metadata."
+  ],
+  "comparisonMethod": {
+    "decoder": "Playwright 1.61.1 bundled PNG decoder; native JPEG converted to PNG by macOS sips without resizing",
+    "rawRegions": "RGB absolute channel differences at identical coordinates; channel >16 counts shown separately.",
+    "ink": "Red channel <128 within x=300..2199,y=200..1099 device pixels; exhaustively select highest intersection-over-union from dx=-4..4,dy=-12..12; report translation, then symmetric one-pixel neighborhood coverage.",
+    "noImageWarping": true
+  },
+  "artifactsSha256": {
+    "appkit-window.jpg": "d89d37b8ceab21faacfa91fdf37a1f98a6d7303ad1da701e340bcd8c229e4bcc",
+    "electron-window.png": "6f3176a390775579c7565cf04a1feb4a95caf4c632b2c8c86e564be3822943bb",
+    "appkit-accessibility.txt": "8bd9926cd53c2f4428c0df96caaeb6c8574bfcf62c1a1b3ae5e8b76a0aa737b2",
+    "appkit-metadata.json": "a68975ae9d995a1915686902965d165b16cd64a3177d30a3fdfd359c6a656f9d",
+    "electron-mapping.json": "1d2fe9fad0701b04f438c3a3add53b4523376b72dc0697a6d9e02c2630eb8593",
+    "pixel-comparison.json": "3d69b0229b9c606f3348ec67c7c886cca51569abbeabd2c6e84eb77707ef12d8"
+  }
+}

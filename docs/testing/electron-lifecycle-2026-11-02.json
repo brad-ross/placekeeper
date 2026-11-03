@@ -1,0 +1,272 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-11-03T03:26:38.150478+00:00",
+  "platform": "darwin-arm64",
+  "artifacts": {
+    "beforeRestorationCorrection": {
+      "installArtifactIdentity": "021444f6277f4058c9d38b288b064088b435dc31c7abf1605cdcf6480ae9bc85",
+      "daemonIdentity": "b3840d89fb87d5ce401aef37d372a69ba4dc30b49204f962fb70c93ff74b41ce",
+      "executableSha256": "056ed0e75e10318d062343c5bb69830ca83db9658f06f97e122bb084406c2062",
+      "applicationAsarSha256": "ee2a37064e98bfe6feb631df2b1dd2b79ed6d8e2fbb39a5c940d877fc36f6fdd",
+      "runtimeManifestSha256": "263c922e4d0612ad4cbc9faeaec36a2fd9129f2d21f0c7998a69e5fa3d56dc81",
+      "buildEvidenceSha256": "834b9dd9a25e158ee0c79f617a0efc7172f0ea60919ad7d5bbceda31145bfca4"
+    },
+    "restorationCorrection": {
+      "installArtifactIdentity": "a2dcecdc89afeb12066f0407dfbf396f69eb47edf0ba86e8769db6c8c69bc2c0",
+      "daemonIdentity": "929a49efcbaeaab379880232e8d0fde79cd1d835a0398d689544e569e4dfacbb",
+      "executableSha256": "171ec3c45577bc62ec6fdcbf040e1dd5b6aaff22d52ee830039e04a5be9d3a9f",
+      "applicationAsarSha256": "85d00880cfc7f48fda28280f6c11985a3dcf2fbc7328e04e3884ef0294d48fa7",
+      "runtimeManifestSha256": "ae09eab1caa4c70d002d2c60fb5b08ddba80d03e05a43a5585d1165e8f29e169",
+      "buildEvidenceSha256": "0cb68c5035547f52b0007a182dbd94ac051fdd2c10f1819701f2cbdf9ccd2b32",
+      "servicePayloadSha256": "6c767ee9538a07dd57e3ad96a9e45e1c16b4cd4dd4432c714b242d9a6d767730",
+      "externalRendererPayloads": {
+        "assets/pdfium-worker.js": "4463487ece74309901036d06584c7296509eba9b26ff67d9154e32dfc8d04b5a",
+        "assets/pdfium.wasm": "c0af5a6aca30d7e54a149c3a68e317116ca906d6edc28fd3318b12c7d9478ac8",
+        "assets/shell.css": "bd8d08c6f7d1820f0079970992ab08c1a352e5cfff01ee2f19c7c3209f70c019",
+        "assets/shell.js": "2260761b38488bbe8003201bd0e279920822af5f3dd6d2bdc1f89d066c1b49a8",
+        "electron.html": "f1f23842f04cfeda9751963d5b0d01f674ba9e94f5f09a8ddb064fd8b028a36e"
+      }
+    }
+  },
+  "scenarios": [
+    {
+      "name": "Renderer failure native Close",
+      "method": "Packaged candidate, two disposable synthetic PDFs, exact editor text acknowledged before CDP Page.crash; native macOS failure sheet observed through accessibility and Close selected.",
+      "expected": {
+        "failedWindowClosedWithoutRetry": true,
+        "peerRemainsUsable": true,
+        "acknowledgedDraftRemainsProtected": true,
+        "explicitReopenUsesNewAttempt": true,
+        "reopenedDraftTextPreserved": true
+      },
+      "observed": {
+        "result": "passed",
+        "failedWindowClosedWithoutRetry": true,
+        "peerRemainsUsable": true,
+        "protectedText": "Acknowledged draft survives native Close after renderer failure.",
+        "protectedDraftStatusAfterClose": "protected",
+        "protectedDraftStatusAfterReopen": "protected",
+        "initialAttemptId": "013d7c08-145a-4fce-af00-0633ea3b7ab9",
+        "reopenAttemptId": "45ae705c-ad3d-4ac8-9879-922eb4aa3a50",
+        "reopenedDraftTextPreserved": true,
+        "recoveredDraftApplyControlVisible": true
+      },
+      "timestamps": {
+        "protectedDraftAcknowledgedAt": "2026-11-03T02:58:54.462Z"
+      },
+      "notes": [
+        "Native Close was selected, not Retry. The later document reopen was an explicit separate action.",
+        "Peer Show workspace was selected through native UI before verifying its Annotations panel.",
+        "Only temporary PDFs, userData, and daemon endpoint were used; no installed user app or integration configuration changed.",
+        "This Close scenario was not repeated after the shared presentation-restoration correction; its exact prior artifact is recorded separately."
+      ],
+      "artifactRef": "beforeRestorationCorrection"
+    },
+    {
+      "name": "Normal native Quit and saved-window restoration",
+      "method": "Navigate a disposable two-page PDF to page 2 at 125 percent, verify persisted intent, use native Cmd-Q, then reopen same isolated userData without PDF argv.",
+      "expected": {
+        "displayedPage": 2,
+        "zoomPercent": 125
+      },
+      "attempts": [
+        {
+          "recordedAt": "2026-11-03T03:05:30.121744+00:00",
+          "result": "failed",
+          "observed": {
+            "beforeQuit": {
+              "displayedPage": 2,
+              "zoomPercent": 125
+            },
+            "savedAfterNormalQuit": {
+              "bounds": {
+                "width": 1200,
+                "height": 900
+              },
+              "presentation": {
+                "pageIndex": 2,
+                "zoom": 1.25
+              }
+            },
+            "persistedAfterReopen": {
+              "bounds": {
+                "width": 1200,
+                "height": 900
+              },
+              "presentation": {
+                "pageIndex": 1,
+                "zoom": 1.79
+              }
+            },
+            "displayedZoomPercent": 179
+          },
+          "failure": "Reopened viewport used startup defaults instead of saved page/zoom.",
+          "artifactRef": "beforeRestorationCorrection"
+        },
+        {
+          "recordedAt": "2026-11-03T03:24:01.275918+00:00",
+          "artifactRef": "restorationCorrection",
+          "result": "passed",
+          "method": "Start from a verified saved window at page 2 and 125 percent, inspect actual visible state, normal native Cmd-Q, then reopen same isolated userData without PDF argv.",
+          "observed": {
+            "beforeQuit": {
+              "displayedPage": 2,
+              "zoomPercent": 125,
+              "presentation": {
+                "pageIndex": 1,
+                "zoom": 1.25
+              }
+            },
+            "savedAfterNormalQuit": {
+              "bounds": {
+                "width": 1000,
+                "height": 760,
+                "x": 40,
+                "y": 60
+              },
+              "presentation": {
+                "pageIndex": 1,
+                "zoom": 1.25
+              }
+            },
+            "afterReopen": {
+              "displayedPage": 2,
+              "zoomPercent": 125,
+              "presentation": {
+                "pageIndex": 1,
+                "zoom": 1.25
+              }
+            },
+            "newAttempt": true
+          },
+          "notes": [
+            "Initial saved state was seeded to avoid coupling restoration qualification to rapid toolbar editor setup; actual renderer state was verified before native Quit.",
+            "Earlier final-build setup attempts stopped before Quit after rapid input editing did not settle the desired page; these were not counted as restoration runs."
+          ]
+        }
+      ],
+      "sourceCorrection": "Restore saved presentation after navigation/layout readiness, publish zero-based page indices, and retain saved intent until restoration succeeds.",
+      "qualification": "Passed on the recorded restorationCorrection artifact."
+    },
+    {
+      "name": "Toolbar native pointer behavior",
+      "artifactRef": "restorationCorrection",
+      "recordedAt": "2026-11-03T03:26:38.149915+00:00",
+      "result": "passed",
+      "atRestHitTests": [
+        {
+          "selector": ".review-chrome__page-input",
+          "rect": {
+            "x": 198.546875,
+            "y": 9,
+            "width": 14.0546875,
+            "height": 32
+          },
+          "styles": {
+            "pointerEvents": "auto",
+            "visibility": "visible",
+            "opacity": "1",
+            "position": "static",
+            "zIndex": "auto"
+          },
+          "hiddenMeasurement": false,
+          "elementsAtCenter": [
+            {
+              "tag": "INPUT",
+              "class": "review-chrome__page-input",
+              "role": null
+            },
+            {
+              "tag": "SPAN",
+              "class": "review-chrome__page-editor",
+              "role": null
+            },
+            {
+              "tag": "SPAN",
+              "class": "review-chrome__page-control",
+              "role": null
+            },
+            {
+              "tag": "SPAN",
+              "class": "review-chrome__page-position",
+              "role": null
+            },
+            {
+              "tag": "SPAN",
+              "class": "review-chrome__control-cluster review-chrome__navigation-cluster",
+              "role": "group"
+            }
+          ]
+        },
+        {
+          "selector": ".review-chrome__zoom-input",
+          "rect": {
+            "x": 948.8671875,
+            "y": 9,
+            "width": 24.1796875,
+            "height": 32
+          },
+          "styles": {
+            "pointerEvents": "none",
+            "visibility": "visible",
+            "opacity": "1",
+            "position": "static",
+            "zIndex": "auto"
+          },
+          "hiddenMeasurement": false,
+          "elementsAtCenter": [
+            {
+              "tag": "HEADER",
+              "class": "review-chrome",
+              "role": null
+            },
+            {
+              "tag": "SECTION",
+              "class": "review-shell",
+              "role": null
+            },
+            {
+              "tag": "MAIN",
+              "class": "",
+              "role": null
+            },
+            {
+              "tag": "DIV",
+              "class": "electron-review-shell",
+              "role": null
+            },
+            {
+              "tag": "DIV",
+              "class": "",
+              "role": null
+            }
+          ]
+        }
+      ],
+      "nativePointerObserved": {
+        "target": "Current zoom 125 percent. Enter a zoom percentage",
+        "clickSelectedText": "125",
+        "zoomMenuOpened": true,
+        "readingZoomChanged": false
+      },
+      "interpretation": "Automated click interception targeted a hover-hidden-at-rest zoom group. Native pointer click revealed and focused the public control. Existing hover visibility rules in neutral-controls.css explain the at-rest inherited pointer-events:none; no visible-control mouse defect was established."
+    },
+    {
+      "name": "Packaged saved-window startup regression and explicit focused-link priority",
+      "artifactRef": "restorationCorrection",
+      "recordedAt": "2026-11-03T03:17:27.993253+00:00",
+      "result": "passed",
+      "command": "playwright test --config scripts/testing/config/playwright.electron.config.ts electron-restoration.spec.ts",
+      "testsPassed": 1,
+      "assertions": [
+        "Every observed startup window-state write retains saved bounds and presentation.",
+        "Visible page 2 and 125 percent zoom restore after layout/navigation readiness.",
+        "Bounds remain x40, y60, width1000, height760.",
+        "Presentation pageIndex is zero-based.",
+        "A subsequent explicit page-1 task/link open keeps the same window and overrides the initially restored page-2 destination."
+      ],
+      "restoredScreenshotSha256": "1f2b9dd919c332388b536393ff3d0bceabaf6194369ecd7bec342ff589cd639b"
+    }
+  ],
+  "scope": "Only isolated synthetic PDFs, userData, and daemon endpoints. No installed user application, default handler, or integration configuration was changed."
+}
