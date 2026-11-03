@@ -161,8 +161,10 @@ test('packaged review edits, undoes, redoes and saves a portable page note that 
 test('packaged review observes an external PDF replacement and saves annotations into the successor document', async ({}, testInfo) => {
   test.setTimeout(90_000);
   const candidate = await InstalledCandidate.create('text-native.pdf');
+  let diagnosticPage: Page | undefined;
   try {
     const page = await candidate.launch();
+    diagnosticPage = page;
     await ready(page);
     await saveToOriginal(page);
     await expect(page.getByRole('textbox', { name: 'Current page 1 of 1. Enter a page number', exact: true })).toBeVisible();
@@ -176,6 +178,21 @@ test('packaged review observes an external PDF replacement and saves annotations
       }));
       (window as Window & { refreshResourceEvents?: unknown[] }).refreshResourceEvents = events;
       events.push({ kind: 'before-replacement', images: images() });
+      window.placekeeper.subscribe(message => events.push({ kind: 'runtime-event', message }));
+      let previousUi = '';
+      const observeUi = () => {
+        const root = document.querySelector<HTMLElement>('[data-production-review]');
+        const ui = {
+          composer: document.querySelector('[data-comment-composer]') !== null,
+          locationRestore: root?.dataset.locationRestoreStatus,
+          initialReady: root?.dataset.initialViewReady,
+          announcements: Array.from(document.querySelectorAll('[role="status"], [role="alert"], [aria-live]'), element => element.textContent),
+        };
+        const next = JSON.stringify(ui);
+        if (next !== previousUi) { previousUi = next; events.push({ kind: 'ui', ...ui }); }
+      };
+      new MutationObserver(observeUi).observe(document.body, { subtree: true, childList: true, attributes: true, characterData: true });
+      observeUi();
       const create = URL.createObjectURL.bind(URL);
       const revoke = URL.revokeObjectURL.bind(URL);
       URL.createObjectURL = object => {
@@ -206,20 +223,23 @@ test('packaged review observes an external PDF replacement and saves annotations
     expect(published.getSubject()).toBe('Packaged desktop source refresh acceptance');
     await showAnnotations(page);
     await expect(page.locator('[data-review-item]')).toContainText(comment);
-    const lifetimePath = testInfo.outputPath('source-refresh-resource-lifetime.json');
-    await writeFile(lifetimePath, JSON.stringify(await page.evaluate(() => ({
-        events: (window as Window & { refreshResourceEvents?: unknown[] }).refreshResourceEvents,
-        images: Array.from(document.images, image => ({ src: image.currentSrc || image.src, complete: image.complete, width: image.naturalWidth })),
-      }))));
-    await testInfo.attach('source-refresh-resource-lifetime', {
-      path: lifetimePath,
-      contentType: 'application/json',
-    });
     const currentRaster = page.locator('.pdf-workspace__page[data-page-index="0"] > img').first();
     await expect.poll(() => currentRaster.evaluate(async (image: HTMLImageElement) => {
       try { await image.decode(); return image.complete && image.naturalWidth > 0; }
       catch { return false; }
     })).toBe(true);
     expect(candidate.errors).toEqual([]);
-  } finally { await candidate.dispose(); }
+  } finally {
+    try {
+      if (diagnosticPage && !diagnosticPage.isClosed()) {
+        const lifetimePath = testInfo.outputPath('source-refresh-resource-lifetime.json');
+        await writeFile(lifetimePath, JSON.stringify(await diagnosticPage.evaluate(() => ({
+          events: (window as Window & { refreshResourceEvents?: unknown[] }).refreshResourceEvents,
+          images: Array.from(document.images, image => ({ src: image.currentSrc || image.src, complete: image.complete, width: image.naturalWidth })),
+          body: document.body.innerText,
+        }))));
+        await testInfo.attach('source-refresh-resource-lifetime', { path: lifetimePath, contentType: 'application/json' });
+      }
+    } finally { await candidate.dispose(); }
+  }
 });
