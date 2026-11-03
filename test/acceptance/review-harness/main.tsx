@@ -1428,7 +1428,7 @@ if (previewParameters.has('fit-modes')) {
       source: { name: filename, bytes: new Uint8Array(await response.arrayBuffer()) },
       viewerAssets: { pdfiumWasm: '/dist/web/pdfium.wasm', workerUrl: '/dist/web/pdfium-worker.js' },
     });
-    reactRoot.render(<RuntimeProductionReviewApp runtime={runtime} />);
+    reactRoot.render(<RuntimeProductionReviewApp runtime={runtime} onDocumentReady={generation => root.setAttribute('data-runtime-ready-generation', String(generation))} />);
   }).catch((error: unknown) => reactRoot.render(<div role="alert">{String(error)}</div>));
 } else {
   reactRoot.render(previewParameters.has('host-history') ? <DeferredHostHistoryPreview />

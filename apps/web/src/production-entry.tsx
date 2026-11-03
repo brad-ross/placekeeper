@@ -647,7 +647,11 @@ export function RuntimeProductionReviewApp(props: {
   ]);
 
   const visible = loaded ?? pendingRuntimeBootstrap(props.loadingDocumentTitle ?? "Opening PDF");
+  // Initial preparation owns no document viewer or reading state. Mount the
+  // real session afresh so its first render cannot reuse placeholder resources.
+  // Later generations keep this instance and its predecessor reading capture.
   return <ProductionReviewApp
+    key={loaded === undefined ? 'preparing-runtime' : 'active-runtime'}
     session={visible.session}
     initialState={visible.state}
     {...(visible.activeAuthoringDraftIds === undefined ? {} : {

@@ -40,6 +40,43 @@ async function scale(page: Page, index = 0, width = 600) {
   return mainPage(page, index).evaluate((element, naturalWidth) => element.getBoundingClientRect().width / naturalWidth, width);
 }
 
+test('mounts an asynchronously bootstrapped HTTP static session without desktop worker resources', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await page.addInitScript(() => {
+    const target = window as typeof window & { __runtimeWorkerUrls?: string[] };
+    target.__runtimeWorkerUrls = [];
+    const NativeWorker = window.Worker;
+    window.Worker = class extends NativeWorker {
+      constructor(url: string | URL, options?: WorkerOptions) {
+        target.__runtimeWorkerUrls!.push(String(url));
+        super(url, options);
+      }
+    };
+  });
+  await openBook(page);
+  await expect(page.locator('#root')).toHaveAttribute('data-runtime-ready-generation', '1');
+  await expect(page.locator('[data-production-review]')).toHaveAttribute('data-launch-surface', 'static');
+  expect(errors).toEqual([]);
+  const workers = await page.evaluate(() => {
+    const urls = (window as typeof window & { __runtimeWorkerUrls?: string[] }).__runtimeWorkerUrls ?? [];
+    const engineUrl = new URL('/dist/web/pdfium-worker.js', location.origin).href;
+    const engineCount = urls.filter(url => new URL(url, location.href).href === engineUrl).length;
+    const encoderCount = urls.filter(url => {
+      const parsed = new URL(url, location.href);
+      return parsed.protocol === 'blob:' && parsed.origin === location.origin;
+    }).length;
+    return { engineCount, encoderCount, unexpectedUrls: urls.filter(url => {
+      const parsed = new URL(url, location.href);
+      return parsed.href !== engineUrl && !(parsed.protocol === 'blob:' && parsed.origin === location.origin);
+    }) };
+  });
+  // The viewer requests one Blob encoder worker per PDFium engine.
+  expect(workers.engineCount).toBeGreaterThanOrEqual(1);
+  expect(workers.encoderCount).toBe(workers.engineCount);
+  expect(workers.unexpectedUrls).toEqual([]);
+});
+
 test('keeps fit choices within their hover region and preserves deliberate keyboard access', async ({ page }) => {
   await openBook(page);
   await openZoom(page);
