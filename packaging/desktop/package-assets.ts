@@ -64,3 +64,19 @@ export async function bundleDependencyNotices(repo: string, destination: string)
   packages.sort((a, b) => `${a.name}@${a.version}`.localeCompare(`${b.name}@${b.version}`, "en"));
   await writeFile(join(destination, "dependencies.json"), `${JSON.stringify(packages, null, 2)}\n`);
 }
+
+/** Adapt the shared Mac host helper to its colocated portable payload. Fail
+ * loudly if its packaging boundary changes rather than retaining a host zip. */
+export function portableVscodePackager(source: string): string {
+  const archiveCall = "await run('/usr/bin/zip', ['-q', '-X', archive, ...entries], { cwd: staging, env: { ...process.env, TZ: 'UTC' } });";
+  if (!source.includes(archiveCall) || !source.includes("resolve(appPath, 'Contents/Resources/")) throw new Error("The shared VSIX packager changed; update its portable adapter");
+  return `import { writeZip } from './portable-zip.mjs';\n` + source
+    .replaceAll("resolve(appPath, 'Contents/Resources/", "resolve(import.meta.dirname, '../")
+    .replace(archiveCall, "await writeZip(archive, staging, entries);");
+}
+
+export function portableIntegrationSetup(source: string): string {
+  const legacy = "if (host === 'codex') return { host, ...await setupCodex({ appPath, run }) };";
+  if (!source.includes(legacy)) throw new Error("The shared Codex setup helper changed; update its portable adapter");
+  return `import { setupPortableCodex } from './setup-codex.mjs';\n${source.replace(legacy, "if (host === 'codex') return { host, ...await setupPortableCodex({ resources: resolve(import.meta.dirname, '..'), run }) };")}`;
+}

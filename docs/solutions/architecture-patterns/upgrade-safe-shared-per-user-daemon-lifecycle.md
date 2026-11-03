@@ -66,7 +66,7 @@ The unit of safety is the shared process, not the PDF that initiated installatio
 
 - authenticated review presence plus bounded reconnect/bootstrap grace;
 - pending and active agent-task bindings;
-- Chrome connections, native review helpers, and registered AppKit or Electron app instances, including a resident app with no open windows;
+- Chrome connections, review helpers, and registered Electron app instances, including a resident app with no open windows;
 - in-flight saves, broker writes, pickers, source workflows, launches, and HTTP/control routes.
 
 The broker combines browser presence and task activity; the host adds Chrome/native presence, saving, and transient work; the lifecycle coordinator includes active route leases (`apps/service/src/sessions/session-broker.ts`, `apps/service/src/host/placekeeper-host.ts`, `apps/service/src/host/daemon-lifecycle.ts`).
@@ -125,9 +125,9 @@ An uninspectable daemon cannot prove absence of work, so the installer leaves th
 
 ### Prove candidate readiness before commit
 
-Stage replacement privately, retain the prior app, and do not finalize until the installed candidate starts its exact daemon and reports the expected identity, accepting lifecycle, and unique readiness token (`packaging/macos/install-built-app.sh`, `apps/service/src/host/service-daemon.ts`).
+Stage replacement privately, retain the prior app, and do not finalize until the installed candidate starts its exact daemon and reports the expected identity, accepting lifecycle, and unique readiness token (`packaging/desktop/install-built-app.mjs`, `apps/service/src/host/service-daemon.ts`).
 
-If readiness fails, retire the exact candidate before restoring the previous bundle. If retirement cannot be proven, preserve the transaction rather than restoring old files underneath a potentially live new process (`packaging/macos/install-built-app.sh`).
+If readiness fails, retire the exact candidate before restoring the previous bundle. If retirement cannot be proven, preserve the transaction rather than restoring old files underneath a potentially live new process (`packaging/desktop/install-built-app.mjs`).
 
 The packaged daemon's numeric-loopback port is part of readiness. Production always binds the fixed Placekeeper port; the isolated installed smoke and an explicitly development-identified runtime may use a private root and port (`apps/service/src/server/http-server.ts`, `apps/service/src/host/service-daemon.ts`). A foreign listener therefore causes candidate startup and installation to fail explicitly. Never fall back to a random port or terminate an unknown process merely to make the candidate ready.
 
@@ -139,9 +139,11 @@ The user must explicitly follow that link through the normal file-confirmation a
 
 ### Test the physical installed lifecycle
 
-Unit tests cannot prove cross-process bundle-path behavior. The installed smoke must run real packaged launchers and daemons, open multiple authenticated PDFs, retain an active agent context, attempt an incompatible upgrade, and verify that the installed identity and both sessions remain usable. Only after task revocation and browser-grace expiry should replacement succeed and launch another PDF (`packaging/macos/smoke-installed.ts`). The successful-replacement phase must also prove that the successor owns the same origin while an old readable route becomes inert recovery rather than a resumed session (`packaging/macos/smoke-installed.ts`).
+Unit tests cannot prove cross-process installed-path behavior. Build the sole production Electron app with `pnpm package:desktop`, then exercise its actual launchers, independent Node runtime, daemon, active-review deferral, recovery preservation, exact readiness, and failed-transition handling. Run native platform checks on each OS; a skip on another system proves nothing about that platform. Current source installation uses `install.sh` and `install.ps1`, with the replacement helper in `packaging/desktop/install-built-app.mjs`.
 
-The work progressed from focused lifecycle tests to this installed proof because unit-level checks alone did not validate the upgrade boundary (session history).
+The Swift/AppKit app is retired. Earlier service-switch evidence that selected a retained AppKit runtime is historical compatibility evidence, not a current rollback route. A rollback must select an explicitly compatible packaged Electron runtime and repeat the writer-transition checks. Closing a GUI or finding a matching identity never waives recovery backup or proves retirement.
+
+The original installed lifecycle proof used the former `packaging/macos/smoke-installed.ts`: multiple authenticated PDFs and an active task blocked an incompatible update; replacement proceeded only after task revocation and browser-grace expiry. It also checked that the same origin returned inert recovery for an old readable route. Those historical scenarios remain useful requirements, but do not establish that the latest cross-platform installer passed. See the [migration qualification record](../../testing/electron-migration-qualification.md) for pending evidence.
 
 ## Why This Matters
 

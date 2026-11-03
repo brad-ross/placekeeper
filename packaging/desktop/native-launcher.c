@@ -35,6 +35,9 @@ int wmain(int argc, wchar_t **argv) {
   wchar_t node[32768], launcher[32768];
   if (swprintf_s(node, 32768, L"%ls\\..\\node\\bin\\node.exe", module) < 0 ||
       swprintf_s(launcher, 32768, L"%ls\\..\\launcher.mjs", module) < 0) return 2;
+  #ifdef VSCODE_EXTERNAL
+  if (swprintf_s(launcher, 32768, L"%ls\\..\\vscode-launcher.mjs", module) < 0) return 2;
+#endif
   size_t capacity = (wcslen(node) + wcslen(launcher) + 64) * 2;
   for (int i = 1; i < argc; i++) capacity += wcslen(argv[i]) * 2 + 4;
   wchar_t *command = calloc(capacity, sizeof(wchar_t));
@@ -94,6 +97,9 @@ int main(int argc, char **argv) {
   if (!node || !launcher || !arguments) { free(physical); free(node); free(launcher); free(arguments); return 2; }
   snprintf(node, capacity_paths, "%s/../node/bin/node", physical);
   snprintf(launcher, capacity_paths, "%s/../launcher.mjs", physical);
+#ifdef VSCODE_EXTERNAL
+  snprintf(launcher, capacity_paths, "%s/../vscode-launcher.mjs", physical);
+#endif
   int next = 0;
   arguments[next++] = node;
   arguments[next++] = launcher;

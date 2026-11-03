@@ -19,6 +19,7 @@ it("native entry points preserve arguments, binary streams, stderr and exit stat
       process.stderr.write('native stderr');
       process.exitCode = 37;
     `);
+    await copyFile(join(root, "launcher.mjs"), join(root, "vscode-launcher.mjs"));
     await buildNativeLaunchers(root, `${process.platform}-${process.arch}`, (command, args) => new Promise((accept, reject) => {
       const child = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"] });
       let output = "";
@@ -29,8 +30,9 @@ it("native entry points preserve arguments, binary streams, stderr and exit stat
     }));
     const args = ["", "spaces and café", 'embedded"quote', "trailing\\", "\\\\\"", "line\nbreak", "$(echo nope) & < >"];
     const bytes = Buffer.from([0, 255, 10, 13, 128, 34]);
-    for (const chrome of [false, true]) {
-      const executable = join(root, "bin", `${chrome ? "placekeeper-chrome-native-host" : "placekeeper"}${process.platform === "win32" ? ".exe" : ""}`);
+    for (const basename of ["placekeeper", "placekeeper-chrome-native-host", "placekeeper-vscode"]) {
+      const chrome = basename === "placekeeper-chrome-native-host";
+      const executable = join(root, "bin", `${basename}${process.platform === "win32" ? ".exe" : ""}`);
       const env = { ...process.env };
       for (const key of Object.keys(env)) if (key.toLowerCase() === "path") delete env[key];
       env.PATH = process.platform === "win32" ? join(process.env.SystemRoot ?? "C:\\Windows", "System32") : "/usr/bin:/bin";

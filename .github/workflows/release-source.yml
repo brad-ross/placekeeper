@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: Stable version matching packaging/macos/app-bundle.json (without v)
+        description: Stable version matching apps/electron/package.json (without v)
         required: true
         type: string
       notes:
@@ -43,7 +43,7 @@ jobs:
             const version = process.env.SOURCE_VERSION;
             if (context.ref !== 'refs/heads/main') throw new Error('Dispatch from trusted main only');
             if (!/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(version)) throw new Error('Stable numeric version required');
-            if (JSON.parse(fs.readFileSync('packaging/macos/app-bundle.json')).bundleVersion !== version) throw new Error('Version differs from canonical app manifest');
+            if (JSON.parse(fs.readFileSync('apps/electron/package.json')).version !== version) throw new Error('Version differs from canonical app manifest');
             if (!process.env.SOURCE_NOTES.trim() || process.env.SOURCE_NOTES.length > 10000) throw new Error('Brief release notes required');
             const tag = `v${version}`;
             try { await github.rest.git.getRef({ ...context.repo, ref: `tags/${tag}` }); throw new Error('Tag already exists'); }
@@ -62,12 +62,12 @@ jobs:
       - run: pnpm test:source-release
       - run: pnpm fixtures:pdf
       - name: Build unsigned candidate
-        run: pnpm package:macos -- --arch arm64 --node-runtime "$(command -v node)" --service-dist dist/service --web-dist dist/web --output artifacts/arm64
-      - run: pnpm exec vitest run packaging/macos/packaging.test.ts packaging/macos/chrome-integration.test.ts packaging/macos/setup-integrations.test.mjs packaging/macos/update-vscode.test.mjs
+        run: pnpm package:desktop
+      - run: pnpm exec vitest run packaging/shared/distribution.test.ts packaging/macos/chrome-integration.test.ts packaging/macos/setup-integrations.test.mjs packaging/macos/update-vscode.test.mjs
       - run: pnpm test:upgrade-lifecycle
       - run: pnpm exec playwright install chromium
       - run: pnpm test:chrome-handoff
-      - run: pnpm smoke:installed -- artifacts/arm64/Placekeeper.app test/fixtures/pdfs/text-native.pdf
+      - run: pnpm test:desktop-installed
       - name: Package exact tested source
         id: assets
         run: |

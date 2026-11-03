@@ -3,12 +3,14 @@ import type { ReviewCommandSurfaceSnapshot, ReviewSemanticCommand } from '../../
 /** Renderer-safe capability surface. Native paths and recovery authority stay in main. */
 export interface ElectronShellIdentity { readonly windowId: string; readonly attemptId: string }
 export type ElectronShellEvent =
+    | { readonly type: 'source-endpoint'; readonly token: string }
     | { readonly type: 'toolbar-hover'; readonly hovered: boolean }
     | { readonly type: 'command'; readonly id: ReviewSemanticCommand; readonly token: number; readonly revision: number }
     | { readonly type: 'confirm-visible'; readonly generation: number; readonly token: string; readonly location?: PlacekeeperLinkLocation }
     | { readonly type: 'settle-close'; readonly token: string };
 export interface ElectronShellBridge {
-    identity(): Promise<ElectronShellIdentity & { readonly presentation?: { readonly pageIndex: number; readonly zoom: number } }>;
+    sourceEndpoint(identity: ElectronShellIdentity, token: string, endpoint: string | null): Promise<void>;
+    identity(): Promise<ElectronShellIdentity & { readonly sourceEndpointToken?: string; readonly presentation?: { readonly pageIndex: number; readonly zoom: number } }>;
     request(identity: ElectronShellIdentity, message: unknown): Promise<unknown>;
     createLink(identity: ElectronShellIdentity, location: PlacekeeperLinkLocation): Promise<string>;
     focusFailed(identity: ElectronShellIdentity, token: string): Promise<void>;

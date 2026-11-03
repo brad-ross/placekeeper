@@ -74,13 +74,12 @@ test('explicit first installation is allowed and verified after supported CLI in
 });
 
 test('repairs selected integrations after app coordination using durable installed helpers', async () => {
-  const installer = await readFile('install.sh', 'utf8');
-  const replacement = await readFile('packaging/macos/install-built-app.sh', 'utf8');
-  const coordination = installer.indexOf(' daemon coordinate-install ');
-  const setup = installer.indexOf('/installer/setup-integrations.mjs');
+  const installer = await readFile('packaging/desktop/source-install.mjs', 'utf8');
+  const replacement = await readFile('packaging/desktop/install-built-app.mjs', 'utf8');
+  const coordination = installer.indexOf("'coordinate-install'");
+  const setup = installer.indexOf("'installer/setup-integrations.mjs'");
   assert.ok(coordination >= 0 && setup > coordination);
   assert.ok(!replacement.includes('update-vscode.mjs'));
-  assert.match(installer, /exit "\$coordination_status"/);
 });
 
 test('successful CLI exit without the installed version fails verification and removes staging', async () => {

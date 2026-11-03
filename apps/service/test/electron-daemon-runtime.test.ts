@@ -6,7 +6,7 @@ import { expect, it, vi } from "vitest";
 import { PlacekeeperHost } from "../src/host/placekeeper-host.js";
 import { requestControl, startLaunchControlServer } from "../src/host/launch-control.js";
 
-it("admits Electron through registered app ownership with bounded resources and independent Mac activity", async () => {
+it("admits Electron through registered app ownership with bounded resources and independent app activity", async () => {
   const root = await mkdtemp(join(tmpdir(), "placekeeper-electron-runtime-"));
   const assets = join(root, "assets");
   await mkdir(assets);
@@ -27,7 +27,7 @@ it("admits Electron through registered app ownership with bounded resources and 
   try {
     await expect(invoke({ type: "admit", requestId: "request_no_app_1234", sourcePath }))
       .resolves.toMatchObject({ kind: "electron-runtime", response: { type: "failure", code: "invalid" } });
-    for (const [kind, id] of [["electron-app-control", appInstanceId], ["macos-app-control", "app_macos_1234"]] as const) {
+    for (const [kind, id] of [["electron-app-control", appInstanceId], ["electron-app-control", "app_other_1234"]] as const) {
       await expect(requestControl(socket, { kind, message: { protocolVersion: 1, type: "register-app", appInstanceId: id,
         processId: process.pid, startIdentity: "start_identity_1234", buildIdentity: "build_identity_1234" } }))
         .resolves.toMatchObject({ kind, response: { type: "ack" } });
@@ -51,17 +51,19 @@ it("admits Electron through registered app ownership with bounded resources and 
     await expect(invoke({ type: "read-resource", requestId: "request_overread_1234", resourceId: admitted.response.resourceId,
       generation: 1, role: "document", offset: 0, length: Buffer.byteLength(bytes) + 1 }))
       .resolves.toMatchObject({ response: { type: "failure", code: "stale" } });
-    const macApp = "app_macos_1234";
-    const macAdmit = await requestControl(socket, { kind: "macos-runtime", appInstanceId: macApp, helperId,
-      message: { ...envelope, type: "admit", requestId: "request_mac_admit_1234", sourcePath } });
-    expect(macAdmit).toMatchObject({ response: { type: "admitted", projection: {
-      sessionId: admitted.response.projection.sessionId, scope: { launchSurface: "macos" },
+    const macApp = "app_other_1234";
+    const otherHelperId = "helper_other_app_1234";
+    const otherEnvelope = { ...envelope, attemptId: "attempt_other_app_1234" };
+    const otherAdmit = await requestControl(socket, { kind: "electron-runtime", appInstanceId: macApp, helperId: otherHelperId,
+      message: { ...otherEnvelope, type: "admit", requestId: "request_other_admit_1234", sourcePath } });
+    expect(otherAdmit).toMatchObject({ response: { type: "admitted", projection: {
+      sessionId: admitted.response.projection.sessionId, scope: { launchSurface: "electron" },
     } } });
-    await expect(requestControl(socket, { kind: "macos-runtime", appInstanceId: macApp, helperId,
-      message: { ...envelope, type: "activate", requestId: "request_mac_activate_1234", documentValidated: true } }))
+    await expect(requestControl(socket, { kind: "electron-runtime", appInstanceId: macApp, helperId: otherHelperId,
+      message: { ...otherEnvelope, type: "activate", requestId: "request_other_activate_1234", documentValidated: true } }))
       .resolves.toMatchObject({ response: { type: "active" } });
     expect(interactionOwners.mock.calls.map((call) => call[1])).toEqual([
-      `electron:${helperId}:${envelope.attemptId}`, `macos:${helperId}:${envelope.attemptId}`,
+      `electron:${helperId}:${envelope.attemptId}`, `electron:${otherHelperId}:${otherEnvelope.attemptId}`,
     ]);
     await expect(invoke({ type: "invoke", requestId: "request_mutation_1234", generation: 1, revision: 0,
       method: "command", payload: { type: "set-annotation-name", expectedRevision: 0, annotationName: "Reviewed paper" },
@@ -69,14 +71,14 @@ it("admits Electron through registered app ownership with bounded resources and 
       .resolves.toMatchObject({ response: { type: "result", payload: { revision: 1 } } });
     await expect(invoke({ type: "refresh", requestId: "request_protected_1234" }))
       .resolves.toMatchObject({ response: { type: "refreshed", projection: { revision: 1, protected: true } } });
-    expect(host.electronRuntime.activity().helpers).toBe(1);
-    expect(host.macosLifecycle.activity().appInstances).toBe(1);
+    expect(host.electronRuntime.activity().helpers).toBe(2);
+    expect(host.electronLifecycle.activity().appInstances).toBe(2);
     await requestControl(socket, { kind: "electron-runtime-detach", appInstanceId: "app_wrong_1234", helperId });
-    expect(host.electronRuntime.activity().helpers).toBe(1);
+    expect(host.electronRuntime.activity().helpers).toBe(2);
     await requestControl(socket, { kind: "electron-app-control", message: { protocolVersion: 1, type: "detach-helper", appInstanceId, helperId } });
-    expect(host.electronRuntime.activity().helpers).toBe(0);
-    expect(host.macosRuntime.activity().activeHelpers).toBe(1);
-    expect(host.macosLifecycle.activity().appInstances).toBe(1);
+    expect(host.electronRuntime.activity().helpers).toBe(1);
+    expect(host.electronRuntime.activity().activeHelpers).toBe(1);
+    expect(host.electronLifecycle.activity().appInstances).toBe(2);
     await expect(invoke({ type: "admit", requestId: "request_retired_1234", sourcePath }))
       .resolves.toMatchObject({ response: { type: "failure", code: "invalid" } });
   } finally {
@@ -108,7 +110,7 @@ it("attaches a fresh helper through a staged desktop launch over private control
 });
 
 
-it.each(["electron", "macos"] as const)("releases recovered %s admission without leaking browser presence", async (runtimeHost) => {
+it("releases recovered Electron admission without leaking browser presence", async () => {
   const root = await mkdtemp(join(tmpdir(), "pk-native-recovery-"));
   const recoveryRoot = join(root, "recovery"); const sourcePath = join(root, "paper.pdf");
   await copyFile(resolve("test/fixtures/pdfs/multi-page-text.pdf"), sourcePath);
@@ -123,8 +125,8 @@ it.each(["electron", "macos"] as const)("releases recovered %s admission without
   const assets = join(root, "assets"); await mkdir(assets); await writeFile(join(assets, "app.js"), "export {}\n");
   const host = await PlacekeeperHost.start({ recoveryRoot, webAssets: { root: assets }, port: 0 });
   const socket = join(root, "control.sock"); const control = await startLaunchControlServer(host, socket);
-  const runtimeKind = runtimeHost === "electron" ? "electron-runtime" : "macos-runtime";
-  const appControlKind = runtimeHost === "electron" ? "electron-app-control" : "macos-app-control";
+  const runtimeKind = "electron-runtime";
+  const appControlKind = "electron-app-control";
   const appInstanceId = "app_native_recovery_1234"; const helperId = "helper_native_recovery_1234";
   const envelope = { protocolVersion: 1, windowId: "window_native_recovery_1234", attemptId: "attempt_native_recovery_1234" };
   const browserExchanges = vi.spyOn(host.broker, "exchangeBootstrap");
@@ -134,7 +136,7 @@ it.each(["electron", "macos"] as const)("releases recovered %s admission without
       processId: process.pid, startIdentity: "start_native_recovery_1234", buildIdentity: "build_native_recovery_1234" } });
     const offer = await requestControl(socket, { kind: runtimeKind, appInstanceId, helperId,
       message: { ...envelope, type: "admit", requestId: "request_native_recovery_offer", sourcePath } });
-    if ((offer.kind !== "electron-runtime" && offer.kind !== "macos-runtime") || offer.response.type !== "recovery-offered") throw new Error("Expected native recovery offer");
+    if (offer.kind !== "electron-runtime" || offer.response.type !== "recovery-offered") throw new Error("Expected native recovery offer");
     const recovered = await requestControl(socket, { kind: runtimeKind, appInstanceId, helperId, message: { ...envelope,
       type: "recover", requestId: "request_native_recovery_resume", decision: "resume", offer: offer.response.offer, idempotencyKey: "operation_native_recovery_1234" } });
     expect(recovered).toMatchObject({ kind: runtimeKind, response: { type: "admitted", projection: { sessionId, revision: 1 } } });

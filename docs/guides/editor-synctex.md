@@ -1,26 +1,46 @@
 # Source and PDF navigation across editors
 
-The native Mac app accepts source-to-PDF requests through its installed command and returns PDF locations to a locally configured editor. The embedded VS Code panel keeps its own editor association. Automatic PDF refresh preserves reading position and zoom; following a saved source cursor after a build is off by default.
-
-Start here for **Zed** or **VS Code** on an Apple-silicon Mac:
-
-1. From a checkout containing this integration, follow the [installation prerequisites](https://github.com/brad-ross/placekeeper/blob/c75be6a8bcc10210b056e577b21e84a2db5bfb38/docs/installation.md) and run `./install.sh --zed=manual` for on-demand jumps, `./install.sh --zed=preview` to also jump after builds, or `./install.sh --vscode=setup` for the embedded VS Code viewer. Check the installer summary for pending steps. Zed needs its LaTeX extension; reload the VS Code window after installing its extension.
-2. From the project root, build with SyncTeX enabled (for example, `latexmk -pdf -synctex=1 -outdir=build main.tex`). Check that `build/main.pdf` and `build/main.synctex.gz` (or `.synctex`) exist. In Zed, make sure Texlab’s PDF directory matches the build directory.
-3. Put the cursor on a line of typeset text. In Zed, run **task: spawn → Placekeeper: Forward SyncTeX** and approve the project’s source folder when prompted. In a trusted local VS Code workspace, run **Placekeeper: Forward SyncTeX** from the command palette. Confirm the PDF shows that passage, then use **Go to Source** there and check that the editor returns to the corresponding source.
-
-Neither installer-managed route requires creating a profile by hand. See [Zed](#zed) and [VS Code](#vs-code) below for settings. The [acceptance record](https://github.com/brad-ross/placekeeper/blob/c75be6a8bcc10210b056e577b21e84a2db5bfb38/test/acceptance/editor-synctex.md) lists the installed-app and live editor checks and their limits. Neovim, Sublime Text, and Emacs have manual recipes but have not been verified live.
+The Electron desktop app accepts source-to-PDF requests through its installed CLI on macOS, Windows, and Linux, and returns PDF locations to a configured editor. The Swift/AppKit app is retired. The embedded VS Code panel keeps its own editor association. Automatic PDF refresh preserves reading position and zoom; following a saved source cursor after a build is off by default.
 
 ## Install and build
 
-Use the launcher inside the installed app. It includes its own Node runtime; neither the checkout nor system Node is needed:
+Follow [installation](../installation.md), then use the launcher inside the installed app. It includes its own Node runtime:
+
+| Platform | CLI |
+| --- | --- |
+| macOS | `~/Applications/Placekeeper.app/Contents/MacOS/placekeeper` |
+| Windows | `%LOCALAPPDATA%\Placekeeper\resources\desktop\bin\placekeeper.exe` |
+| Linux | `~/.local/share/placekeeper/resources/desktop/bin/placekeeper` |
+
+Set the launcher path before using the shell examples:
 
 ```sh
+# macOS
 PLACEKEEPER="$HOME/Applications/Placekeeper.app/Contents/MacOS/placekeeper"
+# Linux
+# PLACEKEEPER="$HOME/.local/share/placekeeper/resources/desktop/bin/placekeeper"
 ```
 
-Install a TeX distribution with `synctex` and build with SyncTeX enabled, for example `latexmk -pdf -synctex=1 -outdir=build main.tex`. On macOS, the service searches `/Library/TeX/texbin` as well as its inherited `PATH`. For a custom TeX location, start Placekeeper with that directory in `PATH`; quit existing Placekeeper windows and the service before changing the environment.
+```powershell
+# Windows
+$PLACEKEEPER = "$env:LOCALAPPDATA\Placekeeper\resources\desktop\bin\placekeeper.exe"
+```
+
+The shell examples below use `PLACEKEEPER` for that absolute path. On Windows, use PowerShell's `& $PLACEKEEPER` invocation syntax and capture registration output with `$SESSION = & $PLACEKEEPER ...`; use Windows absolute paths for the source, root, PDF, and editor executable.
+
+Install a native TeX distribution that supplies the **`synctex` query executable**, then build with SyncTeX enabled:
+
+```sh
+latexmk -pdf -synctex=1 -outdir=build main.tex
+```
+
+Check that `build/main.pdf` and `build/main.synctex.gz` (or `.synctex`) exist. Merely having a mapping file is insufficient without the native query tool. The installed app does not bundle a TeX distribution. On macOS, the service searches `/Library/TeX/texbin` as well as inherited `PATH`; on other systems place the TeX binaries on the app/service's `PATH`. Restart Placekeeper and its service after changing that environment.
 
 Identify the root PDF separately from the current source file: `chapters/results.tex` still navigates to `build/main.pdf`. The approved source root must contain every source file to which inverse search may return. It is not inferred from the PDF directory.
+
+For a first round trip, create a profile below, register the source root, and run `forward-search`. In the PDF, Command-click on macOS or Ctrl-click on Windows/Linux at typeset text to return to source. **Review → Go to Source** (`Cmd/Ctrl+Shift+J`) is also available. Directly opened PDFs can use **Review → Configure Source Navigation…** to choose the profile and source folder.
+
+The final local macOS arm64 package passed all 12 installed checks; all 2,184 canonical unit/integration tests and final typechecking passed. Current browser and native Windows/Linux evidence remain pending in the [qualification record](../testing/electron-migration-qualification.md). Its genuine PDF/SyncTeX fixture and real recording-editor child process check mapping and process delivery; they do not establish placement in a named editor's UI or native source-dialog qualification. Earlier editor checks in the [acceptance record](../../test/acceptance/editor-synctex.md) apply to their historical AppKit revision. Neovim, Sublime Text, and Emacs recipes remain unverified live.
 
 ## Create a local editor profile
 
@@ -106,9 +126,11 @@ If an explicit **Forward SyncTeX** request finds missing, pending, or stale mapp
 
 Waiting for mapping has no fixed one-minute expiry: it ends when delivered, superseded, canceled by reverse navigation, terminated by a terminal failure, or disposed with the panel. Once a target is sent to the viewer, a separate acknowledgement wait expires after about a minute. Pending requests are not restored after closing the panel or restarting the extension. Live overlap checks used source and PDF visible side by side; automatic delivery into a hidden PDF tab remains unqualified. LaTeX Workshop's scoped compatibility launcher remains separate and best-effort. It does not use the general native session handle.
 
-To use the native window instead, create the `vscode` command profile and use the shared viewer command or generic Texlab settings below. Native navigation does not redirect the embedded panel's return target.
+To use the desktop window instead, create the `vscode` command profile and use the shared viewer command or generic Texlab settings below. Desktop navigation does not redirect the embedded panel's return target.
 
 ## Zed
+
+Installer-managed setup below currently applies to macOS. Use a saved profile and the portable commands on Windows/Linux; their live Zed workflow is unqualified.
 
 Install or enable Zed’s existing **LaTeX** extension, then select **Zed** when installing Placekeeper. Choose **manual** for jumping from the current cursor on demand, or **preview** for jumping after successful builds. No separate Placekeeper Zed extension is needed. For an unattended install, append `--zed=manual` or `--zed=preview` to the install command; `--zed=setup` means manual. Rerun the installer to change modes or repair setup.
 
@@ -118,7 +140,7 @@ Open a TeX project and run **task: spawn → Placekeeper: Forward SyncTeX**. On 
 
 Preview keeps the `zed-build` wrapper around the LaTeX extension’s Texlab build command and invokes `view-source --editor zed --intent preview` from its forward-search callback. The wrapper captures the build fence before compilation so a delayed callback cannot overtake newer manual navigation. A failed build does not navigate; refresh continues to preserve reading position until a successful eligible build requests a jump. The extension’s own preview command also uses the configured callback. Use the Placekeeper task for a jump from the current cursor. If you bind **task: rerun**, set `reevaluate_context` to `true` so Zed does not reuse the previous cursor context.
 
-Zed chooses the return window through its CLI. In the recorded two-workspace check it returned to the existing source workspace while another workspace was active; exact originating-window routing is not guaranteed. The installed setup, first-use folder approval, manual task, and automatic preview after an app/service restart passed the isolated [acceptance check](https://github.com/brad-ross/placekeeper/blob/c75be6a8bcc10210b056e577b21e84a2db5bfb38/test/acceptance/editor-synctex.md#seamless-zed-installation-and-persistent-approval--november-2-2026). A canceled preview build wrapper can suppress further Texlab builds until the language server restarts. [Zed LaTeX preview](https://github.com/rzukic/zed-latex/wiki/Preview), [Zed task variables](https://zed.dev/docs/tasks#variables).
+Zed chooses the return window through its CLI. In the recorded two-workspace check it returned to the existing source workspace while another workspace was active; exact originating-window routing is not guaranteed. The historical AppKit setup, first-use folder approval, manual task, and automatic preview after an app/service restart passed the isolated [acceptance check](https://github.com/brad-ross/placekeeper/blob/c75be6a8bcc10210b056e577b21e84a2db5bfb38/test/acceptance/editor-synctex.md#seamless-zed-installation-and-persistent-approval--november-2-2026). A canceled preview build wrapper can suppress further Texlab builds until the language server restarts. [Zed LaTeX preview](https://github.com/rzukic/zed-latex/wiki/Preview), [Zed task variables](https://zed.dev/docs/tasks#variables).
 
 ## Other Texlab clients
 
@@ -177,11 +199,11 @@ Start a server with `M-x server-start`, configure the `emacs` profile above, and
 
 For a named server, add fixed `--socket-name` and server-name arguments to the trusted profile before registering. Do not use `--eval`, shell interpolation, or an alternate-editor command. This recipe has not completed an editor round trip. [Emacs client options](https://www.gnu.org/s/emacs/manual/html_node/emacs/emacsclient-Options.html), [Emacs process arguments](https://www.gnu.org/s/emacs/manual/html_node/elisp/Synchronous-Processes.html).
 
-## PDFs opened directly in Finder
+## PDFs opened directly in the desktop app
 
-Choose **File → Go to Source**, or use the viewer's source-navigation gesture. On first use, select a saved profile and source folder. Neovim also needs its listening socket path. Canceling leaves the PDF open and changes no association. Use **File → Configure Source Navigation…** to change the selection. If there are no profiles, create one with `editor add`, then reopen the chooser.
+Choose **Review → Go to Source**, or Command-click (macOS) / Ctrl-click (Windows/Linux) a PDF location. On first use, select a saved profile and source folder. Neovim also needs its listening socket path. Canceling leaves the PDF open and changes no association. Use **Review → Configure Source Navigation…** to change the selection. If there are no profiles, create one with `editor add`, then reopen the chooser.
 
-Setup applies only to that native window. A later explicit editor request can replace its return editor. Ordinary Finder opens and public document links do not supply editor configuration or source-root authority.
+Setup applies only to that desktop window. A later explicit editor request can replace its return editor. Ordinary Finder opens and public document links do not supply editor configuration or source-root authority.
 
 ## Recovery
 

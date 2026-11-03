@@ -448,7 +448,7 @@ const PENDING_SESSION_ID = "00000000-0000-4000-8000-000000000000";
 const PENDING_FILE_ID = "00000000-0000-4000-8000-000000000001";
 
 const pendingApi: HostRuntime = {
-  host: "macos",
+  host: "electron",
   bootstrap: async () => Promise.reject(new Error("The review is still loading.")),
   subscribeInvalidations: () => () => undefined,
   command: async () => Promise.reject(new Error("The review is still loading.")),
@@ -482,7 +482,7 @@ export function pendingRuntimeBootstrap(documentTitle: string): HostRuntimeBoots
     activeAuthoringDraftIds: [],
     session: { sessionId: PENDING_SESSION_ID },
     state,
-    scope: { documentTitle, launchSurface: "macos" },
+    scope: { documentTitle, launchSurface: "electron" },
     saveStatus: {
       destination: { phase: "none", generation: 0 },
       sync: { phase: "clean", desiredRevision: 0, savedRevision: 0 },
@@ -493,7 +493,7 @@ export function pendingRuntimeBootstrap(documentTitle: string): HostRuntimeBoots
       workerUrl: "placekeeper-app://bundle/assets/pdfium-worker.js",
     },
     resourcePolicy: {
-      host: "macos",
+      host: "electron",
       resources: {
         document: "placekeeper-resource://document/pending_resource?generation=1&role=document",
         pdfiumWasm: "placekeeper-app://bundle/assets/pdfium.wasm",
@@ -682,7 +682,7 @@ export function RuntimeProductionReviewApp(props: {
           generation: request.documentGeneration, outcome }).catch(() => {});
       }
     }}
-    {...(props.runtime?.host === "vscode" || props.runtime?.host === "macos"
+    {...(props.runtime?.host === "vscode" || props.runtime?.host === "electron"
       ? { onReverseSyncTex: (input: unknown) => props.runtime!.reverseSyncTex(input) }
       : {})}
     {...(props.initialPresentation === undefined ? {} : { initialPresentation: props.initialPresentation })}

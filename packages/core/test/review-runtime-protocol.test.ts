@@ -187,9 +187,9 @@ describe("shared review runtime protocol", () => {
     expect(REVIEW_RUNTIME_HOST_METHODS.chrome).not.toContain("reverseSyncTex");
     expect(isReviewRuntimeMethodForHost("chrome", "command")).toBe(true);
     expect(isReviewRuntimeMethodForHost("chrome", "reverseSyncTex")).toBe(false);
-    expect(REVIEW_RUNTIME_HOST_METHODS.electron).toEqual(REVIEW_RUNTIME_HOST_METHODS.chrome);
+    expect(REVIEW_RUNTIME_HOST_METHODS.electron).toEqual(REVIEW_RUNTIME_HOST_METHODS.vscode);
     expect(isReviewRuntimeMethodForHost("electron", "command")).toBe(true);
-    expect(isReviewRuntimeMethodForHost("electron", "reverseSyncTex")).toBe(false);
+    expect(isReviewRuntimeMethodForHost("electron", "reverseSyncTex")).toBe(true);
     expect(REVIEW_RUNTIME_HOST_METHODS.macos).toEqual(REVIEW_RUNTIME_HOST_METHODS.vscode);
     expect(isReviewRuntimeMethodForHost("macos", "command")).toBe(true);
     expect(isReviewRuntimeMethodForHost("macos", "reverseSyncTex")).toBe(true);

@@ -7,11 +7,13 @@ import { decodeMultiStream, encode } from "@msgpack/msgpack";
 import { afterEach, describe, expect, it } from "vitest";
 import { EditorProfiles } from "../src/synctex/editor-profiles.js";
 import { dispatchEditorLocation } from "../src/synctex/editor-dispatch.js";
+import { establishPrivateDirectory, verifyPrivatePath } from "../src/platform/private-storage.js";
 
 const roots: string[] = [];
 afterEach(async () => { await Promise.all(roots.splice(0).map(path => rm(path, { recursive: true, force: true }))); });
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "pk-editor-")); roots.push(root);
+  await establishPrivateDirectory(root);
   const profiles = new EditorProfiles(join(root, "profiles.json"));
   return { root, profiles };
 }
@@ -27,6 +29,8 @@ describe("trusted editor return destinations", () => {
     const registration = await profiles.register({ profile: "code", sourceRoot: root });
     await profiles.add({ name: "code", kind: "command", executable: process.execPath, args: ["--new", "{file}"] });
     expect(registration.profile).toMatchObject({ args: ["{file}"] });
+    await verifyPrivatePath(root, "directory");
+    await verifyPrivatePath(join(root, "profiles.json"), "file");
     const restarted = new EditorProfiles(join(root, "profiles.json"));
     expect(await restarted.list()).toMatchObject([{ name: "code", args: ["--new", "{file}"] }]);
     expect(restarted.registration(registration.handle)).toBeUndefined();

@@ -105,9 +105,7 @@ export const REVIEW_RUNTIME_HOST_METHODS = {
   codex: REVIEW_RUNTIME_METHODS.filter((method) => (
     method !== "forwardSyncTex" && method !== "reverseSyncTex"
   )),
-  electron: REVIEW_RUNTIME_METHODS.filter((method) => (
-    method !== "forwardSyncTex" && method !== "reverseSyncTex"
-  )),
+  electron: REVIEW_RUNTIME_METHODS,
   macos: REVIEW_RUNTIME_METHODS,
 } as const satisfies Readonly<Record<ReviewRuntimeHost, readonly ReviewRuntimeMethod[]>>;
 

@@ -562,9 +562,9 @@ describe("VS Code local host adapter", () => {
     );
   });
 
-  it("requires explicit candidate selection on other desktop platforms", () => {
-    expect(() => resolveLauncherPath(undefined, "/home/reader", "linux")).toThrow("Select");
-    expect(() => resolveLauncherPath(undefined, "C:\\Users\\reader", "win32")).toThrow("Select");
+  it("resolves installed launchers on every desktop platform", () => {
+    expect(resolveLauncherPath(undefined, "/home/reader", "linux")).toBe("/home/reader/.local/share/placekeeper/resources/desktop/bin/placekeeper");
+    expect(resolveLauncherPath(undefined, "C:\\Users\\reader", "win32")).toBe("C:\\Users\\reader\\AppData\\Local\\Placekeeper\\resources\\desktop\\bin\\placekeeper.exe");
     expect(resolveLauncherPath("/opt/candidate/bin/placekeeper", "/home/reader", "linux")).toBe("/opt/candidate/bin/placekeeper");
   });
 

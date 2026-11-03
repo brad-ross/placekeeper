@@ -1,4 +1,4 @@
-name: Desktop personal candidates
+name: Desktop installers
 
 on:
   workflow_dispatch:
@@ -33,6 +33,7 @@ jobs:
     timeout-minutes: 40
     env:
       PLACEKEEPER_DESKTOP_TARGET: ${{ matrix.target }}
+      REQUIRE_SYNCTEX_ACCEPTANCE: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -50,6 +51,14 @@ jobs:
       - name: Linux Debian maker tools
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y fakeroot dpkg xvfb build-essential
+      - name: Install real SyncTeX query tool
+        uses: r-lib/actions/setup-tinytex@v2
+      - name: Verify SyncTeX query tool
+        shell: bash
+        run: |
+          tlmgr install synctex
+          synctex help
+          printf 'PLACEKEEPER_HOST_PATH=%s\n' "$PATH" >> "$GITHUB_ENV"
       - name: Install locked dependencies
         run: pnpm install --frozen-lockfile
       - name: Check catalog
@@ -64,7 +73,7 @@ jobs:
         run: pnpm test:desktop-platform
       - name: Build standalone payload
         run: node --import tsx packaging/desktop/build.ts --target ${{ matrix.target }}
-      - name: Make personal installer
+      - name: Make desktop installer
         id: make
         run: pnpm --dir apps/electron make --platform=${{ matrix.platform }} --arch=${{ matrix.arch }}
       - name: Install Linux candidate
@@ -78,7 +87,7 @@ jobs:
           package=$(dpkg-deb --field "${debs[0]}" Package)
           sudo apt-get install -y "$PWD/${debs[0]}"
           test "$(dpkg-query --show --showformat='${Status}' "$package")" = 'install ok installed'
-          mapfile -t executables < <(dpkg-query --listfiles "$package" | grep '/PlacekeeperCandidate$')
+          mapfile -t executables < <(dpkg-query --listfiles "$package" | grep '/PlacekeeperDesktop$')
           test "${#executables[@]}" -eq 1
           executable=$(readlink -f "${executables[0]}")
           test -x "$executable"
@@ -126,7 +135,7 @@ jobs:
         if: ${{ always() && steps.make.outcome == 'success' }}
         uses: actions/upload-artifact@v4
         with:
-          name: placekeeper-candidate-${{ matrix.target }}
+          name: placekeeper-desktop-${{ matrix.target }}
           path: |
             dist/desktop-artifacts/make/
             dist/desktop-artifacts/SHA256SUMS

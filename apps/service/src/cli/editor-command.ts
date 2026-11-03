@@ -1,6 +1,6 @@
 import { resolve } from "node:path";
-import { parseEditorControlRequest, type EditorControlRequest, type EditorControlResponse } from "../../../../packages/core/src/editor-navigation-protocol.js";
-import { editorControlThroughDaemon } from "../host/service-daemon.js";
+import { isLocalNeovimPipe, parseEditorControlRequest, type EditorControlRequest, type EditorControlResponse } from "../../../../packages/core/src/editor-navigation-protocol.js";
+import { installedSmokeDaemonPaths, INSTALLED_SMOKE_DAEMON_FLAG, INSTALLED_SMOKE_HTTP_PORT_FLAG, INSTALLED_SMOKE_ROOT_FLAG, editorControlThroughDaemon } from "../host/service-daemon.js";
 
 export function parseEditorArguments(args: readonly string[], cwd: string): EditorControlRequest {
   const forward = args[0] === "forward-search";
@@ -14,7 +14,7 @@ export function parseEditorArguments(args: readonly string[], cwd: string): Edit
     options.set(key, value);
   }
   const take = (key: string): string | undefined => { const result = options.get(key); options.delete(key); return result; };
-  const path = (key: string): string | undefined => { const value = take(key); return value === undefined ? undefined : resolve(cwd, value); };
+  const path = (key: string): string | undefined => { const value = take(key); return value === undefined ? undefined : isLocalNeovimPipe(value) ? value : resolve(cwd, value); };
   let raw: unknown;
   if (command === "preview-fence") raw = { operation: "preview-fence" };
   else if (command === "list") raw = { operation: "profiles" };
@@ -48,7 +48,16 @@ export async function runEditorCommand(args: readonly string[], options: {
   readonly diagnostic?: (text: string) => void;
 } = {}): Promise<number> {
   try {
-    const response = await (options.exchange ?? editorControlThroughDaemon)(parseEditorArguments(args, options.cwd ?? process.cwd()));
+    const paths = installedSmokeDaemonPaths(args);
+    const editorArgs: string[] = [];
+    for (let index = 0; index < args.length; index++) {
+      const arg = args[index]!;
+      if (arg === INSTALLED_SMOKE_DAEMON_FLAG) continue;
+      if (arg === INSTALLED_SMOKE_HTTP_PORT_FLAG || arg === INSTALLED_SMOKE_ROOT_FLAG) { index++; continue; }
+      editorArgs.push(arg);
+    }
+    const request = parseEditorArguments(editorArgs, options.cwd ?? process.cwd());
+    const response = await (options.exchange === undefined ? editorControlThroughDaemon(request, paths) : options.exchange(request));
     if (!response.ok) throw new Error(response.message);
     const output = response.operation === "preview-fence" ? response.fence : response.operation === "register" ? response.session : response.operation === "forward" ? response.association : JSON.stringify(response);
     (options.write ?? (text => { process.stdout.write(text); }))(`${output}\n`);

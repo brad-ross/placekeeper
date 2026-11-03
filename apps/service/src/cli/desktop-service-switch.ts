@@ -37,6 +37,7 @@ export async function switchDesktopService(options: {
   readonly backup: string;
   readonly receipt: string;
   readonly paths?: DaemonPaths;
+  readonly replaceAndReady?: (lifecycleToken: string) => Promise<void>;
 }): Promise<void> {
   if (![options.resources, options.backup, options.receipt].every(isAbsolute)) throw new Error("Service selection requires absolute paths");
   const manifest = JSON.parse(await readFile(join(options.resources, "runtime-manifest.json"), "utf8")) as PackagedRuntimeManifest;
@@ -89,6 +90,7 @@ export async function switchDesktopService(options: {
         await backupRecoveryAndVerify(paths.recoveryRoot, options.backup);
       },
       replaceAndReady: async () => {
+        if (options.replaceAndReady !== undefined) return options.replaceAndReady(lock.token);
         await ensureServiceDaemonReady({ ...paths, webAssetsRoot: runtime.webAssetsRoot, packagedRuntime: { root: options.resources, manifest, expectedIdentity: manifest } }, lock.token, options.receipt);
       },
     });

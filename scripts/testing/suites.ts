@@ -15,16 +15,33 @@ export const suites: Record<string, TestStage[]> = {
     "apps/service/test/windows-native-worker-lifecycle.test.ts", "apps/service/test/platform-file-publication.test.ts",
     "apps/service/test/desktop-daemon-lifecycle.test.ts",
     "apps/electron/test/installed-test-root.test.ts",
+    "apps/electron/test/standalone-chooser.test.ts", "apps/electron/test/open-intent.test.ts",
+    "apps/electron/test/protocol-install.test.ts", "packaging/desktop/linux-sandbox.test.ts",
+    "apps/electron/test/open-link.test.ts", "apps/electron/test/review-bridge.test.ts", "apps/electron/test/menus.test.ts",
     "apps/service/test/native-lifecycle-diagnostic.test.ts",
     "apps/service/test/windows-browser-source-store.test.ts", "apps/service/test/private-file-adoption.test.ts",
     "apps/service/test/chrome-handoff-native.test.ts", "apps/service/test/daemon-startup-diagnostic.test.ts",
     "apps/service/test/desktop-native-admission.test.ts",
     "apps/service/test/restart-reconnect-store.test.ts",
     "apps/service/test/platform-runtime-journal.test.ts",
+    "packages/core/test/editor-navigation-protocol.test.ts",
+    "packages/core/test/native-helper-protocol.test.ts", "packages/core/test/native-app-control-protocol.test.ts",
+    "packages/core/test/electron-helper-protocol.test.ts", "packages/core/test/electron-app-control-protocol.test.ts",
+    "apps/service/test/portable-editor.test.ts", "apps/service/test/editor-navigation.test.ts",
+    "apps/service/test/editor-navigation-handoff.test.ts", "apps/service/test/editor-launch.test.ts",
+    "apps/service/test/electron-navigation-integration.test.ts",
+    "apps/service/test/desktop-app-lifecycle.test.ts", "apps/service/test/desktop-runtime.test.ts",
+    "apps/service/test/desktop-daemon-runtime.test.ts", "apps/service/test/electron-daemon-runtime.test.ts",
+    "packages/core/test/review-runtime-protocol.test.ts",
+    "packaging/desktop/setup-codex.test.ts", "packaging/desktop/integration-registration.test.ts",
+    "apps/service/test/integration-registration-command.test.ts", "apps/service/test/hook-contract.test.ts",
   ] }, { runner: "playwright", options: ["--config", "scripts/testing/config/playwright.desktop-platform.config.ts"], files: [] }],
   "test:electron": [{ runner: "vitest", options: [], files: [
     "apps/electron/test", "apps/service/test/electron-daemon-runtime.test.ts",
+    "apps/service/test/electron-navigation-integration.test.ts", "apps/service/test/portable-editor.test.ts",
+    "apps/service/test/desktop-app-lifecycle.test.ts", "apps/service/test/desktop-runtime.test.ts", "apps/service/test/desktop-daemon-runtime.test.ts",
     "packages/core/test/electron-helper-protocol.test.ts", "apps/web/test/electron-focused-navigation.test.ts",
+    "apps/web/test/electron-source-endpoint-dialog.test.tsx",
   ] }],
   "test:desktop-performance": [{ runner: "playwright", options: ["--config", "scripts/testing/config/playwright.electron-performance.config.ts"], files: [] }],
   "test:desktop-installed": [{ runner: "playwright", options: ["--config", "scripts/testing/config/playwright.electron.config.ts"], files: [] }],
@@ -357,10 +374,12 @@ export const suites: Record<string, TestStage[]> = {
   ],
   "test:e2e": [
     "pnpm build:vscode",
+    "pnpm build:electron:web",
     {
       "runner": "playwright",
       "options": ["--config", "scripts/testing/config/playwright.config.ts"],
       "files": [
+        "test/acceptance/electron-chooser.spec.ts",
         "test/acceptance/launch-surfaces.spec.ts",
         "test/acceptance/viewer.spec.ts",
         "test/acceptance/review-workflow.spec.ts",
@@ -378,7 +397,7 @@ export const suites: Record<string, TestStage[]> = {
         "test/acceptance/codex-native-lifecycle.spec.ts",
         "test/acceptance/neutral-design-conformance.spec.ts",
         "test/acceptance/host-interface.spec.ts",
-        "test/acceptance/macos-interface.spec.ts",
+        "test/acceptance/desktop-interface.spec.ts",
         "test/acceptance/annotation-behavior-followup.spec.ts",
         "test/acceptance/reference-annotations.spec.ts",
         "test/acceptance/reference-annotation-stale-commands.spec.ts",
@@ -391,6 +410,7 @@ export const suites: Record<string, TestStage[]> = {
   ],
   "test:e2e:webkit": [
     "pnpm build:vscode",
+    "pnpm build:electron:web",
     {
       "runner": "playwright",
       "options": [
@@ -410,7 +430,7 @@ export const suites: Record<string, TestStage[]> = {
         "test/acceptance/neutral-workspace-followup.spec.ts",
         "test/acceptance/workspace-row-interactions.spec.ts",
         "test/acceptance/pdf-mark-design.spec.ts",
-        "test/acceptance/macos-interface.spec.ts",
+        "test/acceptance/desktop-interface.spec.ts",
         "test/acceptance/annotation-behavior-followup.spec.ts",
         "test/acceptance/reference-annotations.spec.ts",
         "test/acceptance/reference-annotation-stale-commands.spec.ts",
@@ -451,7 +471,7 @@ export const suites: Record<string, TestStage[]> = {
         "apps/web/test/production-review-app.test.tsx",
         "apps/vscode/test/extension.test.ts",
         "packaging/macos/editor-integrations.test.ts",
-        "packaging/macos/packaging.test.ts"
+        "packaging/shared/distribution.test.ts"
       ]
     },
     {
@@ -468,13 +488,13 @@ export const suites: Record<string, TestStage[]> = {
       "runner": "vitest",
       "options": [],
       "files": [
-        "apps/service/test/macos-daemon-runtime.test.ts",
+        "apps/service/test/desktop-daemon-runtime.test.ts",
         "apps/service/test/codex-daemon-runtime.test.ts",
         "apps/service/test/open-command.test.ts",
         "apps/chrome-extension/test/native-protocol.test.ts",
         "apps/service/test/chrome-runtime.test.ts",
         "packaging/macos/chrome-integration.test.ts",
-        "packaging/macos/packaging.test.ts"
+        "packaging/shared/distribution.test.ts"
       ]
     }
   ],
@@ -490,7 +510,7 @@ export const suites: Record<string, TestStage[]> = {
         "apps/web/test/annotation-surface.test.ts",
         "apps/web/test/review-shell-reference-authoring.test.tsx",
         "apps/vscode/test/extension.test.ts",
-        "packaging/macos/packaging.test.ts"
+        "packaging/shared/distribution.test.ts"
       ]
     },
     "pnpm build",
@@ -528,10 +548,12 @@ export const suites: Record<string, TestStage[]> = {
     }
   ],
   "test:ci:chromium": [
+    "pnpm build:electron:web",
     {
       "runner": "playwright",
       "options": ["--config", "scripts/testing/config/playwright.config.ts"],
       "files": [
+        "test/acceptance/electron-chooser.spec.ts",
         "test/conformance/pdf-viewer.conformance.spec.ts",
         "test/conformance/pdf-appearance.conformance.spec.ts",
         "test/acceptance/viewer.spec.ts",
@@ -551,7 +573,7 @@ export const suites: Record<string, TestStage[]> = {
         "test/acceptance/pdf-mark-design.spec.ts",
         "test/acceptance/neutral-design-conformance.spec.ts",
         "test/acceptance/host-interface.spec.ts",
-        "test/acceptance/macos-interface.spec.ts",
+        "test/acceptance/desktop-interface.spec.ts",
         "test/acceptance/annotation-behavior-followup.spec.ts",
         "test/acceptance/reference-annotations.spec.ts",
         "test/acceptance/reference-annotation-stale-commands.spec.ts",
@@ -563,6 +585,7 @@ export const suites: Record<string, TestStage[]> = {
     }
   ],
   "test:ci:webkit": [
+    "pnpm build:electron:web",
     {
       "runner": "playwright",
       "options": [
@@ -583,7 +606,7 @@ export const suites: Record<string, TestStage[]> = {
         "test/acceptance/neutral-workspace-followup.spec.ts",
         "test/acceptance/workspace-row-interactions.spec.ts",
         "test/acceptance/pdf-mark-design.spec.ts",
-        "test/acceptance/macos-interface.spec.ts",
+        "test/acceptance/desktop-interface.spec.ts",
         "test/acceptance/annotation-behavior-followup.spec.ts",
         "test/acceptance/reference-annotations.spec.ts",
         "test/acceptance/reference-annotation-stale-commands.spec.ts",
@@ -618,27 +641,20 @@ export const suites: Record<string, TestStage[]> = {
   "test:electron-spike": [
     "pnpm --dir apps/electron-spike test"
   ],
-  "test:macos:native": [
-    "swift test --package-path apps/macos"
-  ],
-  "test:macos:gate": [
-    {
-      "runner": "vitest",
-      "options": [],
-      "files": [
-        "packages/core/test/macos-shell-protocol.test.ts",
-        "packages/core/test/macos-helper-protocol.test.ts",
-        "apps/service/test/macos-native-gate.test.ts",
-        "apps/web/test/macos-entry.test.tsx",
-        "packaging/macos/macos-native-gate.test.ts"
-      ]
-    },
-    "swift test --package-path apps/macos"
-  ]
+
 };
 
 /** Canonical CI is deliberately narrower than all repository tests; includes the updater's .mjs tests. */
 export const ciUnitFiles = [
+  "apps/electron/test/standalone-chooser.test.ts", "apps/electron/test/open-intent.test.ts",
+  "apps/electron/test/protocol-install.test.ts", "packaging/desktop/linux-sandbox.test.ts",
+  "apps/electron/test/open-link.test.ts", "apps/electron/test/review-bridge.test.ts", "apps/electron/test/menus.test.ts",
+  "packages/core/test/electron-helper-protocol.test.ts", "packages/core/test/review-runtime-protocol.test.ts",
+  "packaging/desktop/setup-codex.test.ts", "packaging/desktop/integration-registration.test.ts",
+  "apps/service/test/integration-registration-command.test.ts",
+  "apps/service/test/portable-editor.test.ts", "apps/service/test/electron-navigation-integration.test.ts",
+  "apps/service/test/desktop-app-lifecycle.test.ts",
+  "apps/web/test/electron-source-endpoint-dialog.test.tsx",
   "apps/web/test/codex-host-actions.test.tsx",
   "apps/web/test/codex-runtime.test.ts", "apps/web/test/codex-refresh.test.tsx", "apps/service/test/codex-persistence.integration.test.ts", "apps/web/test/codex-bundle.test.ts", "apps/web/test/host-render-layer.test.ts", "apps/codex-mcp/test/service-client.integration.test.ts", "apps/codex-mcp/test/server.test.ts", "apps/codex-mcp/test/resources.test.ts", "apps/codex-mcp/test/lifecycle-diagnostics.test.ts", "apps/codex-mcp/test/qualification.test.ts",
       'packages/core/test/codex-mcp-protocol.test.ts',
@@ -648,7 +664,7 @@ export const ciUnitFiles = [
       'apps/service/test/codex-backend.test.ts',
       'apps/service/test/codex-host.test.ts',
       'apps/service/test/restart-reconnect-store.test.ts',
-      'apps/service/test/macos-daemon-runtime.test.ts',
+      'apps/service/test/desktop-daemon-runtime.test.ts',
       'apps/service/test/codex-daemon-runtime.test.ts',
       'scripts/source-release.test.ts',
       'scripts/install-release.test.ts',
@@ -661,7 +677,7 @@ export const ciUnitFiles = [
       'apps/service/test/runtime-retention.test.ts',
       'apps/service/test/chrome-download-folder.test.ts',
       'apps/service/test/chrome-runtime.test.ts',
-      'apps/service/test/macos-runtime.test.ts',
+      'apps/service/test/desktop-runtime.test.ts',
       'apps/service/test/session-security.test.ts',
       'apps/service/test/review-interactions.test.ts',
       'apps/service/test/recovery.test.ts',
@@ -727,8 +743,7 @@ export const ciUnitFiles = [
       'apps/vscode/test/external-launch-registration.test.ts',
       'apps/vscode/test/rebuild-observer.test.ts',
       'apps/vscode/test/rebuild-navigation.test.ts',
-      'packaging/macos/packaging.test.ts',
-      'packaging/macos/native-blob-install.test.ts',
+      'packaging/shared/distribution.test.ts',
       'packaging/macos/update-vscode.test.mjs',
       'packaging/macos/setup-integrations.test.mjs',
       'packaging/macos/setup-zed.test.mjs',

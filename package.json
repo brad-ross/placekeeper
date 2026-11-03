@@ -7,12 +7,10 @@
     "node": ">=24.0.0"
   },
   "scripts": {
-    "build": "pnpm build:service && pnpm build:vscode && pnpm build:chrome:bundle && pnpm build:codex-mcp",
+    "build": "pnpm build:service && pnpm build:vscode && pnpm build:chrome:bundle && pnpm build:codex-mcp && pnpm build:electron:web",
     "build:service": "vite build --config apps/service/vite.config.ts",
     "prebuild:web": "pnpm catalog:check",
     "build:web": "vite build --config apps/web/vite.production.config.ts",
-    "build:macos:web": "vite build --config apps/web/vite.macos.config.ts",
-    "build:macos:gate": "pnpm build:macos:web",
     "build:static": "vite build --config apps/web/vite.static.config.ts",
     "build:static:pages": "PLACEKEEPER_STATIC_BASE=/placekeeper/ vite build --config apps/web/vite.static.config.ts",
     "validate:static": "node --import tsx scripts/validate-static-distribution.ts",
@@ -64,17 +62,11 @@
     "test:ci:webkit": "node --import tsx scripts/testing/run-suite.ts test:ci:webkit",
     "test:ci:visual": "node --import tsx scripts/testing/run-suite.ts test:ci:visual",
     "test:ci": "node --import tsx scripts/testing/run-suite.ts test:ci",
-    "validate:distribution": "pnpm build && node --check dist/service/main.js && tsx packaging/macos/validate-manifest.ts",
-    "package:macos": "pnpm build && pnpm build:macos:web && tsx packaging/macos/build-native-candidate.ts",
-    "package:macos:native-candidate": "pnpm build && pnpm build:macos:web && tsx packaging/macos/build-native-candidate.ts",
-    "run:macos:native-candidate": "tsx packaging/macos/run-native-candidate.ts",
+    "validate:distribution": "pnpm build && node --check dist/service/main.js && tsx packaging/shared/validate-distribution.ts",
+    "package:macos": "pnpm package:desktop",
     "install:local": "/bin/sh ./install.sh",
-    "notarize:macos": "tsx packaging/macos/notarize.ts",
-    "smoke:installed": "tsx packaging/macos/smoke-installed.ts",
     "spike:electron": "pnpm --dir apps/electron-spike start",
     "test:electron-spike": "node --import tsx scripts/testing/run-suite.ts test:electron-spike",
-    "test:macos:native": "node --import tsx scripts/testing/run-suite.ts test:macos:native",
-    "test:macos:gate": "node --import tsx scripts/testing/run-suite.ts test:macos:gate",
     "typecheck": "tsc -p tsconfig.base.json --noEmit",
     "lint": "tsc -p tsconfig.base.json --noEmit",
     "test:save-export": "node --import tsx scripts/testing/run-suite.ts test:save-export",
@@ -92,7 +84,8 @@
     "test:desktop-platform": "node --import tsx scripts/testing/run-suite.ts test:desktop-platform",
     "test:electron": "node --import tsx scripts/testing/run-suite.ts test:electron",
     "test:desktop-performance": "node --import tsx scripts/testing/run-suite.ts test:desktop-performance",
-    "test:desktop-installed": "node --import tsx scripts/testing/run-suite.ts test:desktop-installed"
+    "test:desktop-installed": "node --import tsx scripts/testing/run-suite.ts test:desktop-installed",
+    "build:electron:web": "vite build --config apps/web/vite.electron.config.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/ext-apps": "1.7.5",

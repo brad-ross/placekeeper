@@ -26,8 +26,8 @@ it("packages only the tested commit and produces mutually consistent immutable a
   const dir = await mkdtemp(join(tmpdir(), "placekeeper-release-fixture-"));
   try {
     const repo = join(dir, "repo"); const output = join(dir, "assets");
-    await mkdir(join(repo, "packaging/macos"), { recursive: true }); await mkdir(join(repo, "scripts"));
-    await writeFile(join(repo, "packaging/macos/app-bundle.json"), JSON.stringify({ bundleVersion: "1.2.3" }));
+    await mkdir(join(repo, "apps/electron"), { recursive: true }); await mkdir(join(repo, "scripts"));
+    await writeFile(join(repo, "apps/electron/package.json"), JSON.stringify({ version: "1.2.3" }));
     await writeFile(join(repo, "patch@1.0.patch"), "tracked dependency patch");
     await writeFile(join(repo, "install.sh"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
     await writeFile(join(repo, "scripts/install-release.sh"), await readFile(new URL("./install-release.sh", import.meta.url)));
@@ -60,9 +60,9 @@ it("accepts the actual tracked source pathname alphabet", () => {
 describe("source publication workflow", () => {
   it("builds shared app and extension assets before packaging assertions consume them", async () => {
     const source = await readFile(new URL("../.github/workflows/release-source.yml", import.meta.url), "utf8");
-    const build = source.indexOf("run: pnpm package:macos");
+    const build = source.indexOf("run: pnpm package:desktop");
     expect(build).toBeGreaterThan(0);
-    expect(build).toBeLessThan(source.indexOf("run: pnpm exec vitest run packaging/macos/packaging.test.ts"));
+    expect(build).toBeLessThan(source.indexOf("run: pnpm exec vitest run packaging/shared/distribution.test.ts"));
     expect(source.indexOf("run: pnpm fixtures:pdf")).toBeLessThan(build);
   });
   const workflow = () => readFile(new URL("../.github/workflows/release-source.yml", import.meta.url), "utf8");
@@ -78,7 +78,7 @@ describe("source publication workflow", () => {
   });
   it("requires source installation gates independently of optional Chrome validation", async () => {
     const source = await workflow();
-    for (const gate of ["pnpm typecheck", "pnpm test:source-release", "packaging/macos/packaging.test.ts", "pnpm test:upgrade-lifecycle", "pnpm package:macos", "pnpm smoke:installed", "pnpm test:chrome-handoff"]) expect(source).toContain(gate);
+    for (const gate of ["pnpm typecheck", "pnpm test:source-release", "packaging/shared/distribution.test.ts", "pnpm test:upgrade-lifecycle", "pnpm package:desktop", "pnpm test:desktop-installed", "pnpm test:chrome-handoff"]) expect(source).toContain(gate);
     expect(source).not.toContain("installed_chrome_evidence");
     expect(source).not.toContain("validate-installed-chrome-evidence.ts");
     expect(await readFile(new URL("../test/acceptance/validate-installed-chrome-evidence.ts", import.meta.url), "utf8")).toContain("validateManualEvidence");

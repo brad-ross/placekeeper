@@ -57,7 +57,7 @@ export function isLocalNeovimPipe(value: unknown): value is string {
   return typeof value === "string" && value.length <= 16_384 &&
     /^\\\\\.\\pipe\\[^\\/:\0\r\n]+$/iu.test(value) && ![".", ".."].includes(value.slice(9));
 }
-function isEditorEndpoint(value: unknown): value is string {
+export function isEditorEndpoint(value: unknown): value is string {
   return isLocalNeovimPipe(value) || (isEditorPath(value) && value.startsWith("/") && !value.startsWith("//"));
 }
 export function isEditorToken(value: unknown): value is string {

@@ -1,6 +1,6 @@
 import { mkdtemp, mkdir, readFile, readlink, rm, symlink, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
 import { archiveExtraction, bundleDependencyNotices, inventory } from "./package-assets.js";
@@ -36,6 +36,11 @@ describe("desktop package assets", () => {
 
     expect(await readlink(join(installer.stagingDir, "usr", "bin", installer.options.name)))
       .toBe(`../lib/${installer.options.name}/${forgeConfig.packagerConfig.executableName}`);
+    installer.options.desktopTemplate = join(dirname(requireMaker.resolve("electron-installer-debian")), "../resources/desktop.ejs");
+    await installer.createDesktopFile();
+    const desktop = await readFile(join(installer.stagingDir, "usr/share/applications", `${installer.appIdentifier}.desktop`), "utf8");
+    expect(desktop).toContain(`Exec=${installer.options.name} %U`);
+    expect(desktop).toContain("MimeType=application/pdf;x-scheme-handler/placekeeper;x-scheme-handler/placekeeper-navigation;");
   });
 
   it("uses native ZIP extraction on Windows and gzip tar extraction on Unix without shell interpolation", () => {
@@ -79,5 +84,36 @@ describe("desktop package assets", () => {
     expect(JSON.parse(await readFile(join(output, "dependencies.json"), "utf8"))).toHaveLength(2);
     await rm(join(transitive, "LICENSE.md"));
     await expect(bundleDependencyNotices(root, join(root, "bad"))).rejects.toThrow("No dependency license/notice");
+  });
+});
+
+describe("production desktop identity", () => {
+  it("uses the same production name, bundle id and executable on all platforms", async () => {
+    expect(forgeConfig.packagerConfig).toMatchObject({ name: "Placekeeper", executableName: "PlacekeeperDesktop", appBundleId: "local.placekeeper" });
+    const pkg = JSON.parse(await readFile(new URL("../../apps/electron/package.json", import.meta.url), "utf8"));
+    expect(pkg).toMatchObject({ productName: "Placekeeper", version: "0.2.4" });
+  });
+
+  it("advertises PDF and Placekeeper URL opening without claiming the default PDF handler", () => {
+    expect(forgeConfig.packagerConfig.extendInfo).toEqual({
+      CFBundleURLTypes: [{ CFBundleURLName: "local.placekeeper.review-link", CFBundleTypeRole: "Viewer",
+        CFBundleURLSchemes: ["placekeeper", "placekeeper-navigation"] }],
+      CFBundleDocumentTypes: [{ CFBundleTypeName: "PDF document", CFBundleTypeRole: "Viewer",
+        LSHandlerRank: "Alternate", LSItemContentTypes: ["com.adobe.pdf"] }],
+    });
+  });
+
+  it("preserves published Mac CLI paths as forwarders to this runtime", async () => {
+    const { installMacCompatibility } = await import("./macos-compatibility.js");
+    const root = await fixture();
+    const resources = join(root, "Placekeeper.app/Contents/Resources");
+    await mkdir(resources, { recursive: true });
+    await installMacCompatibility(resources);
+    const cli = await readFile(join(resources, "../MacOS/placekeeper"), "utf8");
+    expect(cli).toContain('../Resources/desktop');
+    expect(cli).toContain('exec "$resources/bin/placekeeper" "$@"');
+    expect(await readFile(join(resources, "../MacOS/placekeeper-chrome-host"), "utf8")).toContain('bin/placekeeper-chrome-native-host');
+    expect(await readlink(join(resources, "node"))).toBe("desktop/node");
+    expect(await readlink(join(resources, "integrations"))).toBe("desktop/integrations");
   });
 });

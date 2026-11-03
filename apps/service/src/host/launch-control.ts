@@ -41,7 +41,6 @@ import type {
 import type { ConditionalShutdownResult } from "./daemon-lifecycle.js";
 
 import { parseElectronReviewHelperMessage } from "../../../../packages/core/src/electron-helper-protocol.js";
-import { parseMacosReviewHelperMessage } from "../../../../packages/core/src/macos-helper-protocol.js";
 
 // Both directions are explicitly bounded. Evidence requests use a stricter
 // byte budget before base64 expansion, so a document can never turn this
@@ -115,6 +114,7 @@ async function dispatch(
   request: PlacekeeperControlRequest,
   management: { readonly daemonIdentity: string; readonly readinessToken?: string },
   signal?: AbortSignal,
+  desktopLaunchArgs: readonly string[] = [],
 ): Promise<PlacekeeperControlResponse> {
   if (request.kind === "management") {
     if (request.operation === "shutdown-if-idle") {
@@ -166,7 +166,7 @@ async function dispatch(
       }
       const response = await host.editorNavigation.control(request.request);
       if (response.ok && response.operation === "forward") {
-        try { await launchEditorNavigation(response.ticket, request.installation!.resources); }
+        try { await launchEditorNavigation(response.ticket, request.installation!.resources, request.installation!.identity, desktopLaunchArgs); }
         catch (error) {
           host.editorNavigation.cancelTicket(response.ticket);
           return { kind: "editor-control", response: { ok: false, message: error instanceof Error ? error.message : "Could not open Placekeeper" } };
@@ -188,15 +188,15 @@ async function dispatch(
     await host.chromeRuntime.detach(request.portId);
     return { kind: "chrome-runtime-detached" };
   }
-  if (request.kind === "macos-app-control" || request.kind === "electron-app-control") {
-    const lifecycle = request.kind === "macos-app-control" ? host.macosLifecycle : host.electronLifecycle;
+  if (request.kind === "electron-app-control") {
+    const lifecycle = host.electronLifecycle;
     return { kind: request.kind, response: await lifecycle.handle(request.message) };
   }
-  if (request.kind === "macos-runtime" || request.kind === "electron-runtime") {
-    const lifecycle = request.kind === "macos-runtime" ? host.macosLifecycle : host.electronLifecycle;
-    const runtime = request.kind === "macos-runtime" ? host.macosRuntime : host.electronRuntime;
-    const message = (request.kind === "macos-runtime" ? parseMacosReviewHelperMessage : parseElectronReviewHelperMessage)(request.message)!;
-    const isAdmission = message.type === "admit" || message.type === "admit-link" || (request.kind === "electron-runtime" && message.type === "admit-launch");
+  if (request.kind === "electron-runtime") {
+    const lifecycle = host.electronLifecycle;
+    const runtime = host.electronRuntime;
+    const message = parseElectronReviewHelperMessage(request.message)!;
+    const isAdmission = message.type === "admit" || message.type === "admit-link" || message.type === "admit-launch";
     const alreadyOwned = lifecycle.ownsHelper(request.appInstanceId, request.helperId);
     const attached = alreadyOwned || (isAdmission
       && lifecycle.attachHelper(request.appInstanceId, request.helperId));
@@ -236,14 +236,14 @@ async function dispatch(
     }
     return { kind: request.kind, response };
   }
-  if (request.kind === "macos-runtime-detach" || request.kind === "electron-runtime-detach") {
-    const lifecycle = request.kind === "macos-runtime-detach" ? host.macosLifecycle : host.electronLifecycle;
-    const runtime = request.kind === "macos-runtime-detach" ? host.macosRuntime : host.electronRuntime;
+  if (request.kind === "electron-runtime-detach") {
+    const lifecycle = host.electronLifecycle;
+    const runtime = host.electronRuntime;
     if (lifecycle.ownsHelper(request.appInstanceId, request.helperId)) {
       await runtime.detach(request.helperId);
       await lifecycle.releaseHelper(request.appInstanceId, request.helperId);
     }
-    return { kind: request.kind === "macos-runtime-detach" ? "macos-runtime-detached" : "electron-runtime-detached" };
+    return { kind: "electron-runtime-detached" };
   }
   if (request.kind === "link-preflight") {
     return { kind: "link-preflight", response: await host.preflightLink(request.link) };
@@ -442,12 +442,13 @@ export async function startLaunchControlServer(
   management: { readonly daemonIdentity: string; readonly readinessToken?: string } | DaemonManagementStatus = {
     daemonIdentity: "development",
   },
+  desktopLaunchArgs: readonly string[] = [],
 ): Promise<LaunchControlServer> {
   if (process.platform === "win32") {
     let control: LaunchControlServer;
     control = await startPrivateControlServer(socketPath, async (parsed, signal) => {
       if (!isControlRequest(parsed)) return { kind: "error", reason: "invalid-request" };
-      try { return await dispatch(host, parsed, management, signal); }
+      try { return await dispatch(host, parsed, management, signal, desktopLaunchArgs); }
       catch { return { kind: "error", reason: "unavailable" }; }
     }, async (value) => {
       const response = value as PlacekeeperControlResponse;
@@ -491,7 +492,7 @@ export async function startLaunchControlServer(
         void writeResponse(socket, { kind: "error", reason: "invalid-request" }).catch(() => undefined);
         return;
       }
-      void dispatch(host, parsed, management, requestLifetime.signal).then(
+      void dispatch(host, parsed, management, requestLifetime.signal, desktopLaunchArgs).then(
         async (response) => {
           try {
             requestLifetime.signal.throwIfAborted();

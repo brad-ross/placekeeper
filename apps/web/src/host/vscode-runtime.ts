@@ -12,8 +12,6 @@ import {
   sanitizeChromeReviewRuntimeResponse,
   sanitizeNativeReviewRuntimeRequest,
   sanitizeNativeReviewRuntimeResponse,
-  sanitizeMacosReviewRuntimeRequest,
-  sanitizeMacosReviewRuntimeResponse,
   sanitizeCodexReviewRuntimeResponse,
   type ReviewRuntimeHost,
   type ReviewRuntimeMethod,
@@ -171,7 +169,7 @@ export function createRpcHostRuntime(
   if (host === "chrome" && options.extensionOrigin === undefined) {
     throw new Error("A Chrome extension origin is required.");
   }
-  const envelopeIdentity = host === "chrome" || host === "macos" || host === "electron" || host === "codex" ? { runtimeId } : { panelId: runtimeId };
+  const envelopeIdentity = host === "chrome" || host === "electron" || host === "codex" ? { runtimeId } : { panelId: runtimeId };
   const pending = new Map<string, PendingRequest>();
   const invalidations = new Set<(event: HostRuntimeInvalidation) => void>();
   const interactionReconnectListeners = new Set<(
@@ -300,7 +298,7 @@ export function createRpcHostRuntime(
 
   const unsubscribe = port.subscribe((message) => {
     if (!isObject(message) || message.protocol !== REVIEW_RUNTIME_PROTOCOL ||
-      (host === "chrome" || host === "macos" || host === "electron" || host === "codex"
+      (host === "chrome" || host === "electron" || host === "codex"
         ? message.runtimeId !== runtimeId
         : message.panelId !== runtimeId)) return;
     if (message.kind === "response" && typeof message.requestId === "string" &&
@@ -316,7 +314,7 @@ export function createRpcHostRuntime(
     if (message.version !== REVIEW_RUNTIME_VERSION) return;
     if (message.kind === "event" && message.event === "host-command") {
       if (!validHostCommand(message.payload)) return;
-      if (host === "macos" ? !["source-navigation", "reverse-synctex"].includes(message.payload.command) : host !== "vscode" || message.payload.command === "source-navigation") return;
+      if (host === "electron" ? !["source-navigation", "reverse-synctex"].includes(message.payload.command) : host !== "vscode" || message.payload.command === "source-navigation") return;
       if (hostCommands.size === 0) pendingHostCommand = message.payload;
       else for (const listener of hostCommands) listener(message.payload);
       return;
@@ -356,7 +354,7 @@ export function createRpcHostRuntime(
     if (message.kind !== "response" || typeof message.requestId !== "string") return;
     const current = pending.get(message.requestId);
     if (current === undefined) return;
-    if ((host === "macos" || host === "electron" || host === "codex") && message.method !== current.method) return;
+    if ((host === "electron" || host === "codex") && message.method !== current.method) return;
     if ((host === "codex" || host === "electron") && message.ok === false &&
       !(isObject(message.error) && message.error.kind === "export-conflict" && Object.keys(message.error).length === 1)) {
       pending.delete(message.requestId); current.abort?.();
@@ -378,8 +376,6 @@ export function createRpcHostRuntime(
           ? sanitizeCodexReviewRuntimeResponse(current.method, message.payload)
         : host === "electron"
           ? sanitizeNativeReviewRuntimeResponse("electron", current.method, message.payload)
-        : host === "macos"
-          ? sanitizeMacosReviewRuntimeResponse(current.method, message.payload)
           : message.payload;
       if (payload === undefined) current.reject(new Error("The trusted host returned an invalid response."));
       else current.resolve((host === "codex" || host === "electron") && current.method === "bootstrap" && isObject(payload) && isObject(message.payload) && isObject(message.payload.capabilities)
@@ -400,7 +396,7 @@ export function createRpcHostRuntime(
     }
     const outboundPayload = host === "chrome" || host === "codex"
       ? sanitizeChromeReviewRuntimeRequest(method, payload)
-      : host === "electron" ? sanitizeNativeReviewRuntimeRequest("electron", method, payload) : host === "macos" ? sanitizeMacosReviewRuntimeRequest(method, payload) : payload;
+      : host === "electron" ? sanitizeNativeReviewRuntimeRequest("electron", method, payload) : payload;
     if (outboundPayload === undefined) {
       return Promise.reject(new Error("The review runtime request was invalid."));
     }
@@ -565,7 +561,7 @@ export function createRpcHostRuntime(
             pdfiumWasm: value.resources.pdfiumWasm,
             worker: value.resources.worker,
           };
-        } else if ((host === "macos" || host === "electron" || host === "codex") && worker !== undefined) {
+        } else if ((host === "electron" || host === "codex") && worker !== undefined) {
           nativeResources = {
             document: documentResourceValue.url,
             pdfiumWasm: pdfium.url,
@@ -573,11 +569,11 @@ export function createRpcHostRuntime(
           };
         }
       }
-      if ((host === "chrome" || host === "macos" || host === "electron" || host === "codex") &&
+      if ((host === "chrome" || host === "electron" || host === "codex") &&
         (nativeResources === undefined || nativeResources.worker === undefined)) {
         throw new Error("The trusted host returned incomplete packaged resources.");
       }
-      if ((host === "chrome" || host === "macos" || host === "electron" || host === "codex") && nativeLocationHistory === undefined) {
+      if ((host === "chrome" || host === "electron" || host === "codex") && nativeLocationHistory === undefined) {
         nativeLocationHistory = new MemoryReviewLocationHistory(
           isObject(value.location)
             ? value.location as unknown as PlacekeeperLinkLocation
@@ -612,7 +608,7 @@ export function createRpcHostRuntime(
               extensionOrigin: options.extensionOrigin!,
               resources: nativeResources!,
             }
-          : host === "macos" || host === "electron" || host === "codex"
+          : host === "electron" || host === "codex"
             ? { host, resources: nativeResources as {
                 document: string;
                 pdfiumWasm: string;

@@ -265,7 +265,8 @@ export async function validateChromeIntegrationBundle(appPath: string): Promise<
   const wrapper = await lstat(wrapperPath);
   if ((wrapper.mode & 0o111) === 0) throw new Error("Chrome native wrapper must be executable");
   if (
-    await realpath(extensionPath) !== join(canonicalAppPath, CHROME_EXTENSION_BUNDLE_PATH) ||
+    ![join(canonicalAppPath, CHROME_EXTENSION_BUNDLE_PATH),
+      join(canonicalAppPath, "Contents/Resources/desktop/integrations/chrome-extension")].includes(await realpath(extensionPath)) ||
     await realpath(wrapperPath) !== join(canonicalAppPath, CHROME_NATIVE_WRAPPER_BUNDLE_PATH)
   ) {
     throw new Error("Chrome integration endpoints must be canonical paths");

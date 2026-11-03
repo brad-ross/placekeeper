@@ -6,13 +6,11 @@ Placekeeper is a focused everyday PDF reader and annotator for serious readers. 
 
 ## Install
 
-On an Apple-silicon Mac with macOS 13+ and [Apple Command Line Tools](https://developer.apple.com/documentation/xcode/installing-the-command-line-tools) providing Swift 6+ and a macOS SDK, use the landing page's **Install** dialog to copy the tested-source-release command. A compatible build toolchain may require a newer macOS version than the app's runtime floor.
+Placekeeper uses one Electron desktop application on macOS, Windows, and Linux. The Swift/AppKit application is retired. The app uses the production name **Placekeeper**.
 
-The command pins one stable release, verifies its source archive, builds locally with a checksum-pinned Node toolchain and locked dependencies, verifies the packaged writer offline, and transactionally installs `~/Applications/Placekeeper.app`. It then offers Chrome, VS Code, and Codex setup separately; skip any integration and rerun later to add it. Host trust, enablement, and reload steps are reported as pending. No Apple Developer account or global Node installation is required.
+From a checkout, install Node.js 24+, pnpm 11.16.0, and a native C compiler, then run `./install.sh` on macOS/Linux or `./install.ps1` from Visual Studio Developer PowerShell on Windows. The source installer builds locally and installs the app with its own Node runtime; system Node is needed to build, not to run the installed app. Run with `--dry-run` to inspect the destination first.
 
-The first source release remains unavailable until a maintainer publishes it; the command fails clearly until then. To build a development checkout, run `./install.sh` from its repository folder.
-
-See [Install and uninstall](docs/installation.md) for first-launch, update, optional Codex/VS Code integration, and removal instructions. See [Privacy and recovery](docs/privacy-and-recovery.md) for local storage behavior.
+See [Install and uninstall](docs/installation.md) for platform paths, build requirements, updates, and optional integrations. Current replacement qualification is [recorded separately](docs/testing/electron-migration-qualification.md); previous candidate results do not qualify the latest replacement. See [Privacy and recovery](docs/privacy-and-recovery.md) for local storage behavior.
 
 ### Web beta (not yet published)
 
@@ -22,23 +20,25 @@ The public link is intentionally absent. Publication under the Placekeeper name 
 
 ## Use
 
-After installation, select one local PDF in Finder and choose **Open With -> Placekeeper**. You can also open `~/Applications/Placekeeper.app` and choose a PDF. PDFs open in a native Mac app window with bundled review and PDF assets. The app performs no telemetry, and leaves the original PDF unchanged unless you explicitly choose the separately confirmed Replace Original action.
+After installation, open Placekeeper and choose a local PDF. On macOS you can also choose **Open With → Placekeeper** in Finder. PDFs open in an Electron window with bundled review and PDF assets. Installation does not automatically select Placekeeper as the OS default PDF handler. The app performs no telemetry, and leaves the original PDF unchanged unless you explicitly choose the separately confirmed Replace Original action.
 
-Chrome 151 or newer can render top-level PDFs in the complete Placekeeper review client without leaving the PDF's original tab or URL. Select Chrome setup in the installer, then load the prepared **Placekeeper PDF Viewer** extension from `~/Applications/Placekeeper Chrome Extension`, then turn on **Open PDFs automatically** from its Placekeeper toolbar popup. It begins paused, offers a one-PDF **Use Chrome viewer** bypass before activation, and does not change Placekeeper's macOS PDF-handler rank. See [Install and uninstall](docs/installation.md#open-chrome-pdfs-automatically) for setup and troubleshooting.
+On macOS, Chrome 151 or newer can render top-level PDFs in the complete Placekeeper review client without leaving the PDF's original tab or URL. Select Chrome setup in the installer, then load the prepared **Placekeeper PDF Viewer** extension from `~/Applications/Placekeeper Chrome Extension`, then turn on **Open PDFs automatically** from its Placekeeper toolbar popup. It begins paused, offers a one-PDF **Use Chrome viewer** bypass before activation, and does not change Placekeeper's macOS PDF-handler rank. See [Install and uninstall](docs/installation.md#open-chrome-pdfs-automatically) for setup and troubleshooting.
 
-Finder and app launches open native windows; Codex plugin launches open the shared review in a native MCP panel. Ordinary browser launches keep readable local review addresses whose fragment records only the current page or a saved Placekeeper item. Chrome-intercepted PDFs instead retain their source URL; Placekeeper Back and Forward traverse document locations without adding browser-history entries, so browser Back returns to the page before the PDF. Chrome therefore omits the redundant document-level **Copy Link**, while precise item links still emit capability-free `placekeeper:///…` app links. A matching verified source and PDF digest rejoin the same service-owned review after reload or reopen, while every tab receives its own presentation lease.
+Desktop app launches open Electron windows; Codex plugin launches open the shared review in a native MCP panel. Ordinary browser launches keep readable local review addresses whose fragment records only the current page or a saved Placekeeper item. Chrome-intercepted PDFs instead retain their source URL; Placekeeper Back and Forward traverse document locations without adding browser-history entries, so browser Back returns to the page before the PDF. Chrome therefore omits the redundant document-level **Copy Link**, while precise item links still emit capability-free `placekeeper:///…` app links. A matching verified source and PDF digest rejoin the same service-owned review after reload or reopen, while every tab receives its own presentation lease.
 
-When another application saves or replaces an open local PDF at the same path, Placekeeper refreshes it automatically in the Mac app, Chrome, the native Codex panel, ordinary browsers, and VS Code. This also applies to ordinary PDFs with no LaTeX project. Placekeeper keeps the last valid version through a missing, partial, unreadable, or invalid write and resumes when a valid replacement appears. Identical bytes do not reload the review.
+When another application saves or replaces an open local PDF at the same path, Placekeeper refreshes it automatically in the desktop app, Chrome, the native Codex panel, ordinary browsers, and VS Code. This also applies to ordinary PDFs with no LaTeX project. Placekeeper keeps the last valid version through a missing, partial, unreadable, or invalid write and resumes when a valid replacement appears. Identical bytes do not reload the review.
 
 Automatic refresh waits while any window in the shared review is creating, editing, or manually reattaching an annotation, including a background window. It resumes after every active interaction is saved, cancelled, closed, or disconnected. Saved annotations and protected drafts are reconciled with the newest valid PDF; uncertain or missing attachments remain available for manual reattachment rather than being assigned to a guess. Each view keeps its own reading place and zoom when possible.
 
 With the bundled Codex plugin installed, ask Codex to open one explicit local PDF in Placekeeper. The hosting task is bound only after the installed launcher and native display receive matching trusted hook attestations. Each later prompt refreshes the current Review Items, Existing PDF Annotations, and save status; Codex retrieves bounded PDF text, layout, render, or annotation evidence only when needed. Finder, ordinary-browser, and VS Code launches remain unbound and show no Codex control. After an update, review plugin trust and enablement, fully quit and restart Codex, then use a new task. A remounted or disconnected panel offers **Reconnect**: explicitly ask its chat to reconnect; accepted work remains recoverable. The remembered PDF hint lasts only while the local service lives (up to 24 hours), so supply the PDF again after a service restart.
 
-### Navigate between LaTeX source and the native PDF viewer
+### Navigate between LaTeX source and the desktop PDF viewer
 
-The installed `placekeeper` command supports local editor profiles and the shared `view-source --editor NAME --source PATH --line N [--pdf PATH]` command, which handles source approval and session renewal. Low-level session registration and `forward-search` remain available. Native **Go to Source** returns through the current editor association; Finder-opened PDFs offer a native editor and source-folder chooser. See the [editor setup guide](docs/guides/editor-synctex.md) for VS Code, Zed, Neovim, Sublime Text, and Emacs recipes and their verification status.
+The installed `placekeeper` command supports local editor profiles and the shared `view-source --editor NAME --source PATH --line N [--pdf PATH]` command, which handles source approval and session renewal. Low-level session registration and `forward-search` remain available. **Review → Go to Source** returns through the current editor association; directly opened PDFs offer an editor and source-folder chooser. Command-click on macOS or Ctrl-click on Windows/Linux also returns a PDF location to source. A native TeX `synctex` executable and matching mapping file are required. See the [editor setup guide](docs/guides/editor-synctex.md) for VS Code, Zed, Neovim, Sublime Text, and Emacs recipes and their verification status.
 
-### Review LaTeX in VS Code
+### Editor integrations
+
+Installer-managed optional setup below currently applies to macOS. Windows/Linux users can use the portable editor commands and bundled VSIX described in the [installation guide](docs/installation.md#optional-integrations).
 
 Select Zed setup in the installer and choose **manual** (jump on demand) or **preview** (jump after a successful build). Placekeeper configures Zed’s existing LaTeX extension to use the shared viewer command and preserves your build command and output directories. Preview retains the build wrapper so delayed automatic requests cannot overtake manual navigation. Run **task: spawn → Placekeeper: Forward SyncTeX**, then approve the source folder on first use. Use `--zed=manual` or `--zed=preview` for explicit installation choices. See the [Zed setup guide](docs/guides/editor-synctex.md#zed).
 
@@ -50,7 +50,7 @@ LaTeX Workshop 10.18.x users may opt into **Placekeeper: Configure LaTeX Worksho
 
 ## Supported release scope
 
-The source release flow is source-first and Apple-silicon-only. Developer ID signing, notarization, Intel/x64, DMG/PKG packaging, and background auto-update are optional future work, not installation requirements.
+Source builds target macOS arm64/x64, Windows x64, and Linux x64. `pnpm package:desktop` builds the production desktop distribution. The final local macOS arm64 package passed all 12 installed checks, all 2,184 canonical unit/integration tests, and final typechecking. Current browser regressions, native Windows/Linux execution, and full interactive OS qualification of the latest replacement remain pending; see the [qualification record](docs/testing/electron-migration-qualification.md). Signing, notarization, public distribution, and automatic updates require separate release qualification.
 
 ## Development
 

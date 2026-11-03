@@ -5,14 +5,10 @@ on:
   workflow_dispatch:
     inputs:
       desktop_candidate:
-        description: Build desktop personal candidates instead of the usual CI suite
+        description: Build and qualify production desktop installers on all supported platforms
         required: false
-        default: false
+        default: true
         type: boolean
-      native_only:
-        description: Run only the native macOS Swift tests
-        type: boolean
-        default: false
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -25,22 +21,8 @@ jobs:
   desktop-candidate:
     if: inputs.desktop_candidate
     uses: ./.github/workflows/desktop-candidate.yml
-  native:
-    if: ${{ !inputs.desktop_candidate }}
-    runs-on: macos-15
-    timeout-minutes: 15
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-      - name: Record Xcode and Swift versions
-        run: |
-          xcodebuild -version
-          swift --version
-      - name: Run native macOS tests
-        run: swift test --package-path apps/macos
-
   test:
-    if: ${{ !inputs.native_only && !inputs.desktop_candidate }}
+    if: ${{ !inputs.desktop_candidate }}
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:

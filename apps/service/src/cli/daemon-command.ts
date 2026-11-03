@@ -41,9 +41,18 @@ function takeFlag(args: readonly string[], flag: string): string {
   return value;
 }
 
+function desktopResources(appPath: string): string {
+  return join(appPath, process.platform === "darwin" ? "Contents/Resources/desktop" : "resources/desktop");
+}
+function desktopLauncher(appPath: string): string {
+  return process.platform === "darwin" ? join(appPath, "Contents/MacOS/placekeeper")
+    : join(desktopResources(appPath), "bin", `placekeeper${process.platform === "win32" ? ".exe" : ""}`);
+}
+
 async function readIdentity(appPath: string): Promise<PackagedBuildIdentity | undefined> {
   try {
-    const value = JSON.parse(await readFile(join(appPath, "Contents/Resources/build-identity.json"), "utf8")) as Partial<PackagedBuildIdentity>;
+    const raw = await readFile(join(desktopResources(appPath), "runtime-manifest.json"), "utf8").catch(() => readFile(join(appPath, "Contents/Resources/build-identity.json"), "utf8"));
+    const value = JSON.parse(raw) as Partial<PackagedBuildIdentity>;
     if (
       !/^[a-f0-9]{64}$/u.test(value.daemonIdentity ?? "") ||
       !/^[a-f0-9]{64}$/u.test(value.installArtifactIdentity ?? "")
@@ -199,6 +208,23 @@ async function coordinateLifecycleMutation(
   ) throw new Error("The candidate launcher identity does not match its bundle");
 
   const smokePort = installedSmokeDaemonPaths(args)?.httpPort;
+  if (!hostSetup && await lstat(join(desktopResources(candidateApp), "runtime-manifest.json")).then(() => true, () => false)) {
+    const backupRoot = join(paths.appSupportRoot, "installer", `recovery-backup-${Date.now()}`);
+    await switchDesktopService({
+      resources: desktopResources(candidateApp), backup: backupRoot,
+      receipt: join(paths.appSupportRoot, "installer", `install-ready-${Date.now()}.json`), paths,
+      replaceAndReady: async (lifecycleToken) => {
+        if (!replaceHelper.endsWith(".mjs")) throw new Error("Desktop installation requires the portable replacement helper");
+        await execFileAsync(process.execPath, [replaceHelper, candidateApp, installedApp, desktopLauncher(installedApp),
+          ...(smokePort === undefined ? [] : [String(smokePort), ...(paths.isolatedTestRoot === undefined ? [] : [paths.isolatedTestRoot])])], { timeout: 90_000, maxBuffer: 65_536, env: { ...process.env,
+          [LIFECYCLE_LOCK_TOKEN_ENV]: lifecycleToken,
+          [LIFECYCLE_LOCK_PATH_ENV]: paths.lifecycleLockPath ?? join(paths.appSupportRoot, "lifecycle.lock"),
+        } });
+      },
+    });
+    return "installed";
+  }
+
   const lifecycleLock = await acquireLifecycleLock(
     paths.lifecycleLockPath ?? join(paths.appSupportRoot, "lifecycle.lock"),
     { timeoutMs: 5_000 },

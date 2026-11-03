@@ -1,3 +1,5 @@
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { readFile } from "node:fs/promises";
 
 import { describe, expect, it, vi } from "vitest";
@@ -120,6 +122,14 @@ const current: Extract<LiveContextRefreshResult, { status: "current" }> = {
 };
 
 describe("Codex lifecycle hook", () => {
+  it.runIf(process.platform === "darwin")("recognizes the selected desktop runtime's published Mac compatibility launcher", () => {
+    const root = join(homedir(), "Applications/Placekeeper.app/Contents/Resources/desktop");
+    vi.stubEnv("PLACEKEEPER_APP_RESOURCES", root);
+    vi.stubEnv("PLACEKEEPER_LAUNCHER", join(root, "bin/placekeeper"));
+    try { expect(inspectHookEvent(postToolUse())).toMatchObject({ kind: "claim" }); }
+    finally { vi.unstubAllEnvs(); }
+  });
+
   it("extracts the exact one-time proof and generation only from a successful Codex launch", () => {
     expect(inspectHookEvent(postToolUse())).toEqual({
       kind: "claim",
@@ -433,5 +443,60 @@ describe("unavailable native reconnect prompt projection", () => {
     const output = formatPromptContext({ schemaVersion: 1, status: "unavailable", reason: "unbound", checkedAt, reconnect: invalid });
     expect(JSON.parse(output)).not.toHaveProperty("reconnect");
     expect(output).not.toContain("PRIVATE_SENTINEL");
+  });
+});
+
+it("claims only the identified Windows launcher through direct Bash and PowerShell commands", () => {
+  const nativeProcess = process;
+  vi.stubGlobal("process", new Proxy(nativeProcess, { get(target, property) { return property === "platform" ? "win32" : Reflect.get(target, property); } }));
+  vi.stubEnv("PLACEKEEPER_LAUNCHER", "C:\\Users\\Brad\\App & $data's folder\\bin\\placekeeper.exe");
+  try {
+    const launcher = installedLauncherPath().replaceAll("\\", "/");
+    const literal = `'${launcher.replaceAll("'", "'\\''")}'`;
+    const event = postToolUse({ tool_input: { command: `${literal} open --json --surface codex-native --pdf '/tmp/paper.pdf'` }, tool_response: JSON.stringify({ ok: true, kind: "opened", surface: "codex-native", sessionId: "review-session", documentGeneration: 1, bindProof, handoff: { token: "h".repeat(43), expiresAt: "2099-01-01T00:00:00.000Z" } }) });
+    expect(inspectHookEvent(event)).toMatchObject({ kind: "claim", native: true, taskSessionId: "thr_codex_task_123" });
+    const powershellLiteral = `& '${launcher.replaceAll("'", "''")}'`;
+    expect(inspectHookEvent({ ...event, tool_input: { command: `${powershellLiteral} open --json --surface codex-native --pdf '/tmp/paper.pdf'` } })).toMatchObject({ kind: "claim", native: true });
+    expect(inspectHookEvent({ ...event, tool_input: { command: `${powershellLiteral} open --json --surface codex-native --pdf '/tmp/paper.pdf'; echo captured` } })).toEqual({ kind: "ignored" });
+    expect(inspectHookEvent({ ...event, tool_input: { command: `${powershellLiteral.replace("Brad", "Other")} open --json --surface codex-native --pdf '/tmp/paper.pdf'` } })).toEqual({ kind: "ignored" });
+    expect(inspectHookEvent({ ...event, tool_input: { command: `${literal.replace("Brad", "Other")} open --json --surface codex-native --pdf '/tmp/paper.pdf'` } })).toEqual({ kind: "ignored" });
+    expect(inspectHookEvent({ ...event, tool_input: { command: `${literal} open --json --surface codex-native --pdf '/tmp/paper.pdf' && echo captured` } })).toEqual({ kind: "ignored" });
+  } finally { vi.unstubAllGlobals(); vi.unstubAllEnvs(); }
+});
+
+describe("runtime-specific live context commands", () => {
+  it.each([
+    ["linux", "/opt/Placekeeper & $data's folder/bin/placekeeper", "'/opt/Placekeeper & $data'\\''s folder/bin/placekeeper'"],
+    ["darwin", "/Applications/Placekeeper.app/Contents/Resources/desktop/bin/placekeeper", "'/Applications/Placekeeper.app/Contents/Resources/desktop/bin/placekeeper'"],
+    ["win32", "C:\\Users\\Brad\\App & $data's folder\\bin\\placekeeper.exe", "& 'C:/Users/Brad/App & $data''s folder/bin/placekeeper.exe'"],
+  ])("uses the safely quoted %s installation in every context instruction", (platform, launcher, command) => {
+    const nativeProcess = process;
+    vi.stubGlobal("process", new Proxy(nativeProcess, { get(target, property) { return property === "platform" ? platform : Reflect.get(target, property); } }));
+    vi.stubEnv("PLACEKEEPER_LAUNCHER", launcher);
+    try {
+      const context = JSON.parse(formatPromptContext(current));
+      expect(context.evidence.reviewItemsInstruction).toContain(`${command} context items`);
+      expect(context.evidence.reviewItemsInstruction).toContain(`${command} context changes`);
+      expect(context.evidence.pdfInstruction).toContain(`${command} context evidence`);
+      expect(context.evidence.sourceWorkInstruction).toContain(`${command} context source begin`);
+      if (current.reviewItems.mode !== "delta") throw new Error("Expected the delta fixture");
+      const delta = { ...current, reviewItems: { ...current.reviewItems, added: [{ ...current.reviewItems.added[0]!, payload: { proposedText: "x".repeat(55_000) } }] } };
+      const compactDelta = JSON.parse(formatPromptContext(delta));
+      expect(compactDelta.reviewItems.retrievalCommand).toBe(`${command} context changes --handle <handle> --offset <n> --limit <1..256>`);
+      const oversized = { ...current, evidence: { ...current.evidence, descriptors: Array.from({ length: 3000 }, () => current.evidence.descriptors[0]!) } };
+      const compactEnvelope = JSON.parse(formatPromptContext(oversized));
+      expect(compactEnvelope.evidence.instruction).toContain(`${command} context items`);
+      expect(compactEnvelope.evidence.instruction).toContain(`${command} context changes`);
+      expect(JSON.stringify([context, compactDelta, compactEnvelope])).not.toContain("$HOME/Applications/Placekeeper.app");
+    } finally { vi.unstubAllGlobals(); vi.unstubAllEnvs(); }
+  });
+
+  it("preserves the published Mac fallback without configured launcher paths", () => {
+    vi.stubEnv("PLACEKEEPER_LAUNCHER", undefined);
+    vi.stubEnv("PLACEKEEPER_CANDIDATE_LAUNCHER", undefined);
+    try {
+      const context = JSON.parse(formatPromptContext(current));
+      expect(context.evidence.reviewItemsInstruction).toContain(`${CODEX_INSTALLED_LAUNCHER_COMMAND} context items`);
+    } finally { vi.unstubAllEnvs(); }
   });
 });

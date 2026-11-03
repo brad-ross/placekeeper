@@ -40,8 +40,6 @@ import { ChromeRuntimeManager } from "../browser/chrome-runtime.js";
 import { ChromeServiceRuntimeBackend } from "../browser/chrome-runtime-backend.js";
 import { NativeRuntimeManager } from "../desktop/native-runtime.js";
 import { NativeAppLifecycleManager } from "../desktop/app-lifecycle.js";
-import { MacosRuntimeManager } from "../macos/macos-runtime.js";
-import { MacosAppLifecycleManager } from "../macos/app-lifecycle.js";
 
 import { CodexRuntimeManager } from "../codex/codex-runtime.js";
 import { CodexServiceRuntimeBackend } from "../codex/codex-runtime-backend.js";
@@ -188,8 +186,6 @@ export class PlacekeeperHost {
   readonly chromeRuntime: ChromeRuntimeManager;
   readonly electronRuntime: NativeRuntimeManager;
   readonly electronLifecycle: NativeAppLifecycleManager;
-  readonly macosRuntime: MacosRuntimeManager;
-  readonly macosLifecycle: MacosAppLifecycleManager;
   readonly editorNavigation: EditorNavigation;
   readonly codexRuntime: CodexRuntimeManager;
   #closePromise?: Promise<void>;
@@ -209,8 +205,6 @@ export class PlacekeeperHost {
     chromeRuntime: ChromeRuntimeManager,
     electronRuntime: NativeRuntimeManager,
     electronLifecycle: NativeAppLifecycleManager,
-    macosRuntime: MacosRuntimeManager,
-    macosLifecycle: MacosAppLifecycleManager,
     editorNavigation: EditorNavigation,
     codexRuntime: CodexRuntimeManager,
   ) {
@@ -226,12 +220,10 @@ export class PlacekeeperHost {
     this.chromeRuntime = chromeRuntime;
     this.electronRuntime = electronRuntime;
     this.electronLifecycle = electronLifecycle;
-    this.macosRuntime = macosRuntime;
-    this.macosLifecycle = macosLifecycle;
     this.editorNavigation = editorNavigation;
     this.codexRuntime = codexRuntime;
     this.#nativeParentSweep = setInterval(() => {
-      void Promise.allSettled([electronLifecycle.sweepDeadParents(), macosLifecycle.sweepDeadParents()]);
+      void Promise.allSettled([electronLifecycle.sweepDeadParents()]);
     }, 5_000);
     this.#nativeParentSweep.unref();
   }
@@ -274,25 +266,19 @@ export class PlacekeeperHost {
       broker, browserSources, transferStore: chromeTransferStore, saving, exporting,
     });
     const chromeRuntime = new ChromeRuntimeManager(chromeRuntimeBackend.authority());
-    const macosRuntimeBackend = new ChromeServiceRuntimeBackend({
-      broker, browserSources, transferStore: chromeTransferStore, saving, exporting,
-      runtimeHost: "macos",
-    });
-    const macosRuntime = new MacosRuntimeManager(macosRuntimeBackend.authority());
     const editorNavigation = new EditorNavigation(new EditorProfiles(join(dirname(options.recoveryRoot), "editor-profiles.json")),
       process.env.PLACEKEEPER_INSTALL_ARTIFACT_IDENTITY ?? "development");
-    macosRuntime.navigation = new NativeSyncTex(broker, editorNavigation);
-    const macosLifecycle = new MacosAppLifecycleManager({ detach: helperId => macosRuntime.detachAndSettle(helperId) }, {}, editorNavigation, helperId => {
-      const sessionId = macosRuntime.navigationSessionId(helperId);
-      return sessionId === undefined ? undefined : broker.navigationSourcePath(sessionId);
-    });
-    macosRuntime.admitsNavigation = (helperId, handle, path) => macosLifecycle.admitsNavigation(helperId, handle, path);
     const electronRuntimeBackend = new ChromeServiceRuntimeBackend({
       broker, browserSources, transferStore: chromeTransferStore, saving, exporting,
       runtimeHost: "electron",
     });
     const electronRuntime = new NativeRuntimeManager("electron", electronRuntimeBackend.authority());
-    const electronLifecycle = new NativeAppLifecycleManager({ detach: (helperId) => electronRuntime.detachAndSettle(helperId) });
+    electronRuntime.navigation = new NativeSyncTex(broker, editorNavigation);
+    const electronLifecycle = new NativeAppLifecycleManager({ detach: helperId => electronRuntime.detachAndSettle(helperId) }, {}, editorNavigation, helperId => {
+      const sessionId = electronRuntime.navigationSessionId(helperId);
+      return sessionId === undefined ? undefined : broker.navigationSourcePath(sessionId);
+    });
+    electronRuntime.admitsNavigation = (helperId, handle, path) => electronLifecycle.admitsNavigation(helperId, handle, path);
     const codexRuntime = new CodexRuntimeManager(broker, {
       ...(options.nativeQualification === undefined ? {} : { qualification: options.nativeQualification }),
       ...(options.nativeQualificationExperiments === undefined ? {} : { experiments: options.nativeQualificationExperiments }),
@@ -306,12 +292,10 @@ export class PlacekeeperHost {
         const chromeActivity = chromeRuntime.activity();
         const electronActivity = electronRuntime.activity();
         const electronAppActivity = electronLifecycle.activity();
-        const macosActivity = macosRuntime.activity();
-        const macosAppActivity = macosLifecycle.activity();
         return {
           ...activity,
           reviewPresence: activity.reviewPresence + chromeActivity.connections
-            + electronActivity.helpers + electronAppActivity.appInstances + macosActivity.helpers + macosAppActivity.appInstances + codexRuntime.activityCount(),
+            + electronActivity.helpers + electronAppActivity.appInstances + codexRuntime.activityCount(),
           transientWork: activity.transientWork + saving.activityCount() + editorNavigation.activity(),
         };
       },
@@ -351,8 +335,6 @@ export class PlacekeeperHost {
       chromeRuntime,
       electronRuntime,
       electronLifecycle,
-      macosRuntime,
-      macosLifecycle,
       editorNavigation,
       codexRuntime,
     );
@@ -533,9 +515,7 @@ export class PlacekeeperHost {
       await this.chromeRuntime.close();
       await this.electronLifecycle.close();
       await this.electronRuntime.close();
-      await this.macosLifecycle.close();
       this.editorNavigation.close();
-      await this.macosRuntime.close();
       await this.saving.drain();
       await this.broker.quiesceForShutdown();
     })();

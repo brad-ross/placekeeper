@@ -21,8 +21,6 @@ import { PLACEKEEPER_LINK_MAX_LENGTH } from "../../../../packages/core/src/place
 import { isLaunchSurface, isRecoveryDecision } from "../sessions/session-broker.js";
 import { isChromeBrowserSourceOpenRequest, type ChromeBrowserSourceOpenRequest } from "../browser/browser-source-store.js";
 import { type ChromeRuntimeHostMessage } from "../../../../packages/core/src/chrome-native-runtime-protocol.js";
-import { parseMacosReviewHelperMessage, type MacosReviewHelperResponse } from "../../../../packages/core/src/macos-helper-protocol.js";
-import { parseMacosAppControlMessage, type MacosAppControlResponse } from "../../../../packages/core/src/macos-app-control-protocol.js";
 
 import { parseElectronReviewHelperMessage, type ElectronReviewHelperResponse } from "../../../../packages/core/src/electron-helper-protocol.js";
 import { parseElectronAppControlMessage, type ElectronAppControlResponse } from "../../../../packages/core/src/electron-app-control-protocol.js";
@@ -80,18 +78,6 @@ export type PlacekeeperControlRequest =
   | { readonly kind: "chrome-open"; readonly request: ChromeBrowserSourceOpenRequest }
   | { readonly kind: "chrome-runtime"; readonly portId: string; readonly message: unknown }
   | { readonly kind: "chrome-runtime-detach"; readonly portId: string }
-  | {
-      readonly kind: "macos-runtime";
-      readonly appInstanceId: string;
-      readonly helperId: string;
-      readonly message: unknown;
-    }
-  | {
-      readonly kind: "macos-runtime-detach";
-      readonly appInstanceId: string;
-      readonly helperId: string;
-    }
-  | { readonly kind: "macos-app-control"; readonly message: unknown }
   | {
       readonly kind: "electron-runtime";
       readonly appInstanceId: string;
@@ -209,9 +195,6 @@ export type PlacekeeperControlResponse =
   | { readonly kind: "chrome-open"; readonly response: LaunchResponse }
   | { readonly kind: "chrome-runtime"; readonly messages: readonly ChromeRuntimeHostMessage[] }
   | { readonly kind: "chrome-runtime-detached" }
-  | { readonly kind: "macos-runtime"; readonly response: MacosReviewHelperResponse }
-  | { readonly kind: "macos-runtime-detached" }
-  | { readonly kind: "macos-app-control"; readonly response: MacosAppControlResponse }
   | { readonly kind: "electron-runtime"; readonly response: ElectronReviewHelperResponse }
   | { readonly kind: "electron-runtime-detached" }
   | { readonly kind: "electron-app-control"; readonly response: ElectronAppControlResponse }
@@ -311,20 +294,6 @@ export function isControlRequest(value: unknown): value is PlacekeeperControlReq
   if (value.kind === "chrome-runtime-detach") {
     return Object.keys(value).length === 2 && typeof value.portId === "string" &&
       /^[A-Za-z0-9_-]{16,128}$/u.test(value.portId);
-  }
-  if (value.kind === "macos-runtime") {
-    return Object.keys(value).length === 4 && typeof value.appInstanceId === "string"
-      && /^[A-Za-z0-9_-]{8,128}$/u.test(value.appInstanceId)
-      && typeof value.helperId === "string" && /^[A-Za-z0-9_-]{8,128}$/u.test(value.helperId)
-      && parseMacosReviewHelperMessage(value.message) !== undefined;
-  }
-  if (value.kind === "macos-runtime-detach") {
-    return Object.keys(value).length === 3 && typeof value.appInstanceId === "string"
-      && /^[A-Za-z0-9_-]{8,128}$/u.test(value.appInstanceId)
-      && typeof value.helperId === "string" && /^[A-Za-z0-9_-]{8,128}$/u.test(value.helperId);
-  }
-  if (value.kind === "macos-app-control") {
-    return Object.keys(value).length === 2 && parseMacosAppControlMessage(value.message) !== undefined;
   }
   if (value.kind === "electron-runtime") {
     return Object.keys(value).length === 4 && typeof value.appInstanceId === "string"

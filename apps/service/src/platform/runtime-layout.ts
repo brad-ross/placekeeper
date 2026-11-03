@@ -16,6 +16,7 @@ export interface PackagedRuntimeManifest extends RuntimeIdentity {
   readonly target: { readonly platform: NodeJS.Platform; readonly arch: string };
   readonly node: RuntimeFile & { readonly version: string };
   readonly service: RuntimeFile & { readonly version: string };
+  readonly codexMcp?: RuntimeFile;
   readonly webAssets: { readonly path: string; readonly files: readonly RuntimeFile[] };
 }
 export interface PackagedRuntimeInstallation {

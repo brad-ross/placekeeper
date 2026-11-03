@@ -537,148 +537,45 @@ test('classifies an initial packaged-runtime bootstrap rejection as one preparat
   if (!launched.ok || launched.kind === 'recovery-offered') {
     throw new Error('Initial bootstrap rejection launch failed');
   }
-  const initialState = host.broker.state(launched.sessionId);
-  const initialSaveStatus = host.broker.saveStatus(launched.sessionId);
-  if (initialState === undefined || initialSaveStatus === undefined) {
-    throw new Error('Initial bootstrap rejection fixture state is unavailable');
-  }
-  const rejectedBootstrap = {
-    sessionId: launched.sessionId,
-    generation: initialState.workflow.documentGeneration,
-    revision: initialState.revision,
-    state: initialState,
-    scope: { documentTitle: 'Rejected bootstrap.pdf', launchSurface: 'macos' },
-    saveStatus: initialSaveStatus,
-    activeAuthoringDraftIds: [],
-    resources: {
-      document: 'placekeeper-resource://document/rejected_bootstrap?generation=1&role=document',
-      pdfiumWasm: 'placekeeper-app://bundle/assets/pdfium.wasm',
-      worker: 'placekeeper-app://bundle/assets/pdfium-worker.js',
-    },
-  };
-  const shell = await readFile(resolve('dist/macos-web/assets/shell.js'));
+  const shell = await readFile(resolve('dist/electron-web/assets/shell.js'));
   const bootstrapUrl = new URL(launched.url);
   const bootstrapDocumentUrl = new URL(bootstrapUrl.pathname, bootstrapUrl.origin).href;
-  const shellUrl = new URL('/acceptance/macos-shell.js', bootstrapUrl.origin).href;
+  const shellUrl = new URL('/acceptance/electron-shell.js', bootstrapUrl.origin).href;
   await page.addInitScript(() => {
-    const target = window as typeof window & {
-      webkit?: { messageHandlers?: { placekeeperShell?: { postMessage(value: unknown): void } } };
-      __PLACEKEEPER_MAC_RECEIVE__?: (value: unknown) => boolean | void;
-      __acceptanceNativeMessages?: unknown[];
-    };
-    target.__acceptanceNativeMessages = [];
-    target.webkit = {
-      messageHandlers: {
-        placekeeperShell: {
-          postMessage(value: unknown) {
-            target.__acceptanceNativeMessages?.push(value);
-          },
-        },
+    const target = window as typeof window & { __acceptanceElectronMessages?: Array<{ method: string }> };
+    target.__acceptanceElectronMessages = [];
+    const record = (method: string) => { target.__acceptanceElectronMessages!.push({ method }); };
+    const noop = async () => {};
+    Object.defineProperty(window, 'placekeeper', { value: Object.freeze({
+      identity: async () => ({ windowId: 'runtime_acceptance_1234', attemptId: 'attempt_acceptance_1234' }),
+      request: async (_identity: unknown, request: { method: string }) => {
+        record(request.method);
+        throw new Error('The native helper rejected initial bootstrap.');
       },
-    };
+      sourceEndpoint: noop, createLink: noop, focusFailed: noop, requestClose: noop,
+      readyToSettle: noop, commandSurface: noop, presentation: noop, toolbarHeight: noop,
+      closeSettled: noop, writeClipboard: noop,
+      documentReady: async () => { record('document-ready'); },
+      visible: async () => { record('visible'); },
+      subscribeShell: () => () => {}, subscribe: () => () => {},
+    }) });
   });
-  await page.route(shellUrl, (route) => route.fulfill({
-    status: 200,
-    contentType: 'text/javascript',
-    body: shell,
-  }));
+  await page.route(shellUrl, (route) => route.fulfill({ status: 200, contentType: 'text/javascript', body: shell }));
   await page.route(bootstrapDocumentUrl, (route) => route.fulfill({
     status: 200,
     contentType: 'text/html',
     body: `<!doctype html><html><body><div id="root"></div><script type="module" src="${shellUrl}"></script></body></html>`,
   }));
   await page.goto(bootstrapUrl.href);
-  await page.waitForFunction(() => typeof (
-    window as typeof window & { __PLACEKEEPER_MAC_RECEIVE__?: unknown }
-  ).__PLACEKEEPER_MAC_RECEIVE__ === 'function');
-  await page.evaluate(() => (
-    window as typeof window & { __PLACEKEEPER_MAC_RECEIVE__(value: unknown): boolean | void }
-  ).__PLACEKEEPER_MAC_RECEIVE__({
-    protocolVersion: 1,
-    type: 'bootstrap',
-    document: {
-      displayName: 'Rejected bootstrap.pdf',
-      resource: {
-        url: 'placekeeper-resource://document/rejected_bootstrap?generation=1&role=document',
-        generation: 1,
-        mime: 'application/pdf',
-        byteLength: 5,
-        digest: 'a'.repeat(64),
-      },
-    },
-    geometry: {
-      identity: 'geometry_acceptance_1234',
-      trafficLightInset: 76,
-      trafficLightBounds: [
-        { x: 16, y: 20, width: 14, height: 14 },
-        { x: 36, y: 20, width: 14, height: 14 },
-        { x: 56, y: 20, width: 14, height: 14 },
-      ],
-      trailingInset: 12,
-    },
-    runtimeId: 'runtime_acceptance_1234',
-    attemptId: 'attempt_acceptance_1234',
-  }));
-  await page.waitForFunction(() => (
-    window as typeof window & { __acceptanceNativeMessages?: Array<{ type?: unknown; message?: { method?: unknown } }> }
-  ).__acceptanceNativeMessages?.some(({ type, message }) => (
-    type === 'runtime-message' && message?.method === 'bootstrap'
-  )) === true);
-  await page.evaluate((payloadJson) => {
-    const payload = JSON.parse(payloadJson) as {
-      sessionId: string;
-      generation: number;
-      revision: number;
-      state: unknown;
-      scope: unknown;
-      saveStatus: unknown;
-      activeAuthoringDraftIds: unknown;
-      resources: unknown;
-    };
-    const target = window as typeof window & {
-      __acceptanceNativeMessages?: Array<{
-        type?: unknown;
-        message?: {
-          protocol?: unknown;
-          version?: unknown;
-          kind?: unknown;
-          requestId?: unknown;
-          method?: unknown;
-        };
-      }>;
-      __PLACEKEEPER_MAC_RECEIVE__(value: unknown): boolean | void;
-    };
-    const request = target.__acceptanceNativeMessages
-      ?.find(({ type, message }) => type === 'runtime-message' && message?.method === 'bootstrap')?.message;
-    if (request?.kind !== 'request' || typeof request.requestId !== 'string') {
-      throw new Error('Packaged bootstrap request was unavailable.');
-    }
-    return target.__PLACEKEEPER_MAC_RECEIVE__({
-      protocolVersion: 1,
-      type: 'runtime-message',
-      runtimeId: 'runtime_acceptance_1234',
-      attemptId: 'attempt_acceptance_1234',
-      message: {
-        protocol: request.protocol,
-        version: request.version,
-        kind: 'response',
-        runtimeId: 'runtime_acceptance_1234',
-        sessionId: payload.sessionId,
-        generation: payload.generation,
-        revision: payload.revision,
-        requestId: request.requestId,
-        method: request.method,
-        ok: true,
-        payload,
-      },
-    });
-  }, JSON.stringify(rejectedBootstrap));
   const alerts = page.getByRole('alert');
   await expect(alerts).toHaveCount(1);
   await expect(alerts).toHaveText('This review could not be prepared.');
   await expect(page.locator('[data-runtime-loading-workspace]')).toBeVisible();
   await expect(page.locator('[data-generation-status="failed"]')).toHaveCount(0);
   await expect(page.getByText(/rebuilt PDF|last successful PDF/iu)).toHaveCount(0);
+  expect(await page.evaluate(() => (
+    window as typeof window & { __acceptanceElectronMessages?: Array<{ method: string }> }
+  ).__acceptanceElectronMessages)).toEqual([{ method: 'bootstrap' }]);
 });
 
 test('imports standard annotations into the editable tray and saves comment edits and deletion', async ({ page }) => {

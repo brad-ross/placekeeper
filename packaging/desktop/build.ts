@@ -1,14 +1,14 @@
 import { RECOVERY_CAPABILITIES } from "../../apps/service/src/recovery/recovery-capabilities.js";
 import { createHash } from "node:crypto";
 import { createWriteStream } from "node:fs";
-import { chmod, copyFile, cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, copyFile, cp, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { execFileSync, spawn } from "node:child_process";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { buildNativeLaunchers } from "./native-launcher.js";
-import { archiveExtraction, bundleDependencyNotices, inventory } from "./package-assets.js";
+import { archiveExtraction, bundleDependencyNotices, inventory, portableIntegrationSetup, portableVscodePackager } from "./package-assets.js";
 import type { PackagedRuntimeManifest } from "../../apps/service/src/platform/runtime-layout.js";
 import { hashFile as digest } from "../../apps/service/src/files/file-capabilities.js";
 
@@ -17,9 +17,9 @@ interface RuntimePins {
   nodeVersion: string;
   targets: Record<string, { archive: string; sha256: string }>;
 }
-function run(command: string, args: string[]): Promise<void> {
+function run(command: string, args: string[], cwd = repo): Promise<void> {
   return new Promise((accept, reject) => {
-    const child = spawn(command, args, { cwd: repo, stdio: "inherit", shell: false });
+    const child = spawn(command, args, { cwd, stdio: "inherit", shell: false });
     child.once("error", reject);
     child.once("exit", (code) => code === 0 ? accept() : reject(new Error(`${command} exited with ${code}`)));
   });
@@ -76,9 +76,31 @@ export async function prepareDesktopRuntime(target: string): Promise<string> {
   await cp(join(repo, "dist/electron-web"), join(root, "electron-web"), { recursive: true });
   await copyFile(join(repo, "packaging/desktop/launcher.mjs"), join(root, "launcher.mjs"));
   await buildNativeLaunchers(root, target, run);
+  await copyFile(join(repo, "packaging/desktop/vscode-launcher.mjs"), join(root, "vscode-launcher.mjs"));
   await cp(join(repo, "dist/codex-mcp"), join(root, "codex-mcp"), { recursive: true });
   await cp(join(repo, "apps/chrome-extension/dist"), join(root, "integrations/chrome-extension"), { recursive: true });
   await writeFile(join(root, "codex-mcp/package.json"), '{"type":"module"}\n');
+  await cp(join(repo, "integrations/codex-plugin"), join(root, "integrations/codex-plugin-template"), { recursive: true });
+  await cp(join(repo, "integrations/editors"), join(root, "integrations/editors"), { recursive: true });
+  await copyFile(join(repo, "docs/guides/editor-synctex.md"), join(root, "integrations/editors/guide.md"));
+  const installer = join(root, "installer");
+  await mkdir(installer, { recursive: true });
+  for (const helper of ["setup-integrations.mjs", "setup-chrome.mjs", "update-vscode.mjs", "setup-zed.mjs"]) {
+    await copyFile(join(repo, "packaging/macos", helper), join(installer, helper));
+  }
+  await cp(await realpath(join(repo, "node_modules/jsonc-parser")), join(installer, "node_modules/jsonc-parser"), { recursive: true });
+  await copyFile(join(repo, "packaging/desktop/setup-codex.mjs"), join(installer, "setup-codex.mjs"));
+  const integrationHelper = join(installer, "setup-integrations.mjs");
+  await writeFile(integrationHelper, portableIntegrationSetup(await readFile(integrationHelper, "utf8")));
+  const extension = join(root, "integrations/vscode");
+  await mkdir(extension, { recursive: true });
+  await copyFile(join(repo, "apps/vscode/package.json"), join(extension, "package.json"));
+  await cp(join(repo, "apps/vscode/dist"), join(extension, "dist"), { recursive: true });
+  await cp(join(repo, "apps/vscode/assets"), join(extension, "assets"), { recursive: true });
+  const vscodeHelper = join(installer, "update-vscode.mjs");
+  await copyFile(join(repo, "packaging/desktop/portable-zip.mjs"), join(installer, "portable-zip.mjs"));
+  await writeFile(vscodeHelper, portableVscodePackager(await readFile(vscodeHelper, "utf8")));
+  await run(join(root, nodePath), [vscodeHelper, "--package", root, join(root, "integrations/placekeeper.vsix")]);
   await bundleDependencyNotices(repo, join(root, "licenses"));
   const webFiles = await inventory(join(root, "web"));
   const nodeHash = await digest(join(root, nodePath));
@@ -101,6 +123,7 @@ export async function prepareDesktopRuntime(target: string): Promise<string> {
     schemaVersion: 1, target: { platform, arch }, daemonIdentity, installArtifactIdentity,
     node: { path: nodePath, sha256: nodeHash, version: pins.nodeVersion },
     service: { path: "service/main.js", sha256: serviceHash, version },
+    codexMcp: { path: "codex-mcp/server.js", sha256: await digest(join(root, "codex-mcp/server.js")) },
     webAssets: { path: "web", files: webFiles },
     recovery: RECOVERY_CAPABILITIES,
   };
@@ -122,6 +145,9 @@ async function main(): Promise<void> {
     await run(process.execPath, [join(repo, "node_modules/vite/bin/vite.js"), "build", "--config", config]);
   }
   await run(process.execPath, [join(repo, "node_modules/vite/bin/vite.js"), "build", "--config", "apps/codex-mcp/vite.config.ts", "--mode", "server"]);
+  await run(process.execPath, [join(repo, "node_modules/typescript/bin/tsc"), "-p", join(repo, "apps/vscode/tsconfig.json"), "--noEmit"]);
+  await run(process.execPath, ["--input-type=module", "-e", 'import { build } from "esbuild"; await build({ entryPoints: ["src/extension.ts"], bundle: true, platform: "node", format: "cjs", target: "node20", external: ["vscode"], outfile: "dist/extension.cjs" });'], join(repo, "apps/vscode"));
+  await run(process.execPath, [join(repo, "apps/vscode/copy-web-assets.mjs")], join(repo, "apps/vscode"));
   await run(process.execPath, ["--experimental-strip-types", join(repo, "apps/chrome-extension/scripts/validate-manifest.ts")]);
   process.stdout.write(`${await prepareDesktopRuntime(target)}\n`);
 }

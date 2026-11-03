@@ -31,8 +31,8 @@ export async function packageSourceRelease(repo: string, output: string, version
   const identity = releaseIdentity(version, commit);
   const git = (...args: string[]) => execFileSync("git", ["-C", repo, ...args], { maxBuffer: 128 * 1024 * 1024 });
   if (git("rev-parse", `${commit}^{commit}`).toString().trim() !== commit) throw new Error("Source commit did not resolve exactly");
-  const manifest = JSON.parse(git("show", `${commit}:packaging/macos/app-bundle.json`).toString()) as { bundleVersion: string };
-  if (manifest.bundleVersion !== version) throw new Error("Release version differs from canonical app manifest");
+  const manifest = JSON.parse(git("show", `${commit}:apps/electron/package.json`).toString()) as { version: string };
+  if (manifest.version !== version) throw new Error("Release version differs from canonical app manifest");
   const entries = git("ls-tree", "-r", "--name-only", "-z", commit).toString().split("\0").filter(Boolean);
   if (entries.includes("release-descriptor.txt") || entries.some(path => !/^[A-Za-z0-9_@./-]+$/u.test(path) || path.split("/").some(part => part === ".." || part === "."))) throw new Error("Unsupported source archive path");
   if (/^(120000|160000) /mu.test(git("ls-tree", "-r", commit).toString())) throw new Error("Source releases cannot contain links or submodules");

@@ -38,11 +38,6 @@ import {
 } from "../browser/chrome-pdf-validator.js";
 import { runChromeRegistrationCommand } from "./chrome-registration-command.js";
 import {
-  macosReviewHelperIdentity,
-  runMacosReviewHelperCommand,
-} from "../macos/review-helper-command.js";
-import { runMacosLifecycleControlCommand } from "../macos/lifecycle-control-command.js";
-import {
   isLaunchSurface,
   isRecoveryDecision,
   type RecoveryDecision,
@@ -401,16 +396,6 @@ export async function runOpenCommand(
 
 async function main(): Promise<number> {
   if (process.argv[2] === "editor" || process.argv[2] === "forward-search") return runEditorCommand(process.argv.slice(2));
-  if (process.argv[2] === "macos-review-helper") {
-    const identity = macosReviewHelperIdentity(process.env);
-    if (identity === undefined) return 2;
-    return runMacosReviewHelperCommand({
-      input: process.stdin,
-      write: writeStdoutFrame,
-      identity,
-      diagnostic: (stage) => process.stderr.write(`[PlacekeeperHelper] failed: ${stage}\n`),
-    });
-  }
   if (process.argv[2] === "electron-lifecycle-control") {
     const diagnostic = (value: ReturnType<typeof lifecycleDiagnostic>) => process.stderr.write(`[PlacekeeperLifecycle] ${JSON.stringify(value)}\n`);
     try {
@@ -423,13 +408,6 @@ async function main(): Promise<number> {
         diagnostic,
       });
     } catch (error) { diagnostic(lifecycleDiagnostic('initialize', error)); return 2; }
-  }
-  if (process.argv[2] === "macos-lifecycle-control") {
-    return runMacosLifecycleControlCommand({
-      input: process.stdin,
-      write: writeStdoutFrame,
-      appInstanceId: process.env.PLACEKEEPER_APP_INSTANCE_ID ?? "",
-    });
   }
   if (process.argv[2] === "electron-cancel-launch") {
     const launchId = process.argv[3];

@@ -35,6 +35,25 @@ describe('manual CI workflow', () => {
     expect(ciUnitFiles).toContain('packaging/macos/update-vscode.test.mjs');
   });
 
+  it('defaults manual qualification to production desktop installers and retires Swift gates', async () => {
+    const workflow = await readFile('.github/workflows/ci.yml', 'utf8');
+    const desktop = await readFile('.github/workflows/desktop-candidate.yml', 'utf8');
+    const { scripts } = JSON.parse(await readFile('package.json', 'utf8'));
+    expect(workflow).toContain('workflow_dispatch:');
+    expect(workflow).toContain('default: true');
+    expect(workflow).not.toMatch(/native_only|swift test|apps\/macos/);
+    expect(workflow).not.toMatch(/^  (?:push|pull_request):/m);
+    for (const target of ['darwin-arm64', 'darwin-x64', 'win32-x64', 'linux-x64']) expect(desktop).toContain(target);
+    expect(desktop).toContain('pnpm test:desktop-installed');
+    expect(scripts['package:macos']).toBe('pnpm package:desktop');
+    expect(scripts['build:electron:web']).toBe('vite build --config apps/web/vite.electron.config.ts');
+    expect(scripts.build).toContain('&& pnpm build:electron:web');
+    expect(scripts['test:macos:native']).toBeUndefined();
+    expect(scripts['build:macos:web']).toBeUndefined();
+    expect(suiteCommand('test:electron')).toContain('portable-editor.test.ts');
+    expect(suiteCommand('test:electron')).toContain('electron-navigation-integration.test.ts');
+  });
+
   it('runs the full CI suite when dispatched manually', async () => {
     const workflow = await readFile('.github/workflows/ci.yml', 'utf8');
 

@@ -12,7 +12,7 @@ import { SessionBroker } from '../../apps/service/src/sessions/session-broker.js
 import type { RecoverableDraftV3 } from '../../apps/service/src/recovery/draft-snapshot.js';
 
 const electronResources = process.env.PLACEKEEPER_ROLLBACK_ELECTRON_RESOURCES;
-const retainedMacResources = process.env.PLACEKEEPER_ROLLBACK_MAC_RESOURCES;
+const previousDesktopResources = process.env.PLACEKEEPER_ROLLBACK_PREVIOUS_DESKTOP_RESOURCES;
 
 async function freePort(): Promise<number> {
   const server = createServer();
@@ -39,22 +39,19 @@ async function readProtectedDraft(directory: string): Promise<RecoverableDraftV3
 // No default installation discovery is allowed for this qualification. Both
 // roots are explicit, verified, newly built artifacts; all review state and
 // daemon endpoints belong to the temporary directory created below.
-test('packaged Electron to retained Mac to Electron service rollback preserves acknowledged recovery', async ({}, testInfo) => {
-  test.skip(process.platform !== 'darwin', 'Retained AppKit qualification requires a real macOS host.');
-  test.skip(!electronResources || !retainedMacResources, 'Set PLACEKEEPER_ROLLBACK_ELECTRON_RESOURCES and PLACEKEEPER_ROLLBACK_MAC_RESOURCES to newly built packaged resource roots.');
+test('packaged desktop to previous desktop to current desktop service rollback preserves acknowledged recovery', async ({}, testInfo) => {
+  test.skip(!electronResources || !previousDesktopResources, 'Set PLACEKEEPER_ROLLBACK_ELECTRON_RESOURCES and PLACEKEEPER_ROLLBACK_PREVIOUS_DESKTOP_RESOURCES to newly built packaged resource roots.');
   test.setTimeout(90_000);
   const selectedElectron = await realpath(resolve(electronResources!));
-  const selectedMac = await realpath(resolve(retainedMacResources!));
-  expect(selectedElectron).not.toBe(selectedMac);
+  const selectedPrevious = await realpath(resolve(previousDesktopResources!));
+  expect(selectedElectron).not.toBe(selectedPrevious);
   const electronManifest = await readManifest(selectedElectron);
-  const macManifest = await readManifest(selectedMac);
-  expect((await stat(join(selectedMac, '../MacOS/PlacekeeperMac'))).isFile()).toBe(true);
-  expect((await stat(join(selectedMac, 'MacWeb/macos.html'))).isFile()).toBe(true);
+  const previousManifest = await readManifest(selectedPrevious);
+  expect((await stat(join(selectedPrevious, 'electron-web/electron.html'))).isFile()).toBe(true);
   expect((await stat(join(selectedElectron, 'electron-web/electron.html'))).isFile()).toBe(true);
-  const retainedIdentity = JSON.parse(await readFile(join(selectedMac, 'build-identity.json'), 'utf8')) as { daemonIdentity: string; installArtifactIdentity: string };
-  expect(macManifest).toMatchObject({ daemonIdentity: retainedIdentity.daemonIdentity, installArtifactIdentity: retainedIdentity.installArtifactIdentity });
-  const retainedCapabilities = JSON.parse(await readFile(join(selectedMac, 'service/recovery-capabilities.json'), 'utf8')) as { service: { sha256: string } };
-  expect(retainedCapabilities.service.sha256).toBe(macManifest.service.sha256);
+  expect(previousManifest.installArtifactIdentity).not.toBe(electronManifest.installArtifactIdentity);
+  const retainedCapabilities = JSON.parse(await readFile(join(selectedPrevious, 'service/recovery-capabilities.json'), 'utf8')) as { service: { sha256: string } };
+  expect(retainedCapabilities.service.sha256).toBe(previousManifest.service.sha256);
   const root = await mkdtemp(join(tmpdir(), 'placekeeper-service-rollback-'));
   const source = join(root, 'Disposable acknowledged review.pdf');
   await copyFile(resolve('test/fixtures/pdfs/multi-page-text.pdf'), source);
@@ -109,7 +106,7 @@ test('packaged Electron to retained Mac to Electron service rollback preserves a
   try {
     for (const [index, resources, manifest, label] of [
       [0, selectedElectron, electronManifest, 'electron-before'],
-      [1, selectedMac, macManifest, 'retained-mac'],
+      [1, selectedPrevious, previousManifest, 'previous-desktop'],
       [2, selectedElectron, electronManifest, 'electron-after'],
     ] as const) {
       const backup = join(root, `recovery-backup-${index}`);
@@ -138,8 +135,8 @@ test('packaged Electron to retained Mac to Electron service rollback preserves a
         evidence.push({ event: 'selected', label, manifestIdentity: manifest.installArtifactIdentity, receipt, backup });
       });
       await test.step(`${label} reads and resumes the same protected review`, async () => {
-        const runtimeKind = label === 'retained-mac' ? 'macos-runtime' : 'electron-runtime';
-        const appControlKind = label === 'retained-mac' ? 'macos-app-control' : 'electron-app-control';
+        const runtimeKind = 'electron-runtime';
+        const appControlKind = 'electron-app-control';
         const appInstanceId = `app_rollback_reader_${index}`;
         const helperId = `helper_rollback_reader_${index}`;
         const envelope = { protocolVersion: 1, windowId: `window_rollback_reader_${index}`, attemptId: `attempt_rollback_reader_${index}` };
@@ -153,7 +150,7 @@ test('packaged Electron to retained Mac to Electron service rollback preserves a
           // would correctly keep the incumbent busy during the next switch.
           const offer = await requestControl(paths.socketPath, { kind: runtimeKind, appInstanceId, helperId,
             message: { ...envelope, type: 'admit', requestId: `request_rollback_offer_${index}`, sourcePath: source } });
-          if ((offer.kind !== 'electron-runtime' && offer.kind !== 'macos-runtime') || offer.response.type !== 'recovery-offered') throw new Error(`Expected preserved native recovery in ${label}: ${JSON.stringify(offer)}`);
+          if (offer.kind !== 'electron-runtime' || offer.response.type !== 'recovery-offered') throw new Error(`Expected preserved native recovery in ${label}: ${JSON.stringify(offer)}`);
           const resumed = await requestControl(paths.socketPath, { kind: runtimeKind, appInstanceId, helperId,
             message: { ...envelope, type: 'recover', requestId: `request_rollback_resume_${index}`,
               decision: 'resume', offer: offer.response.offer, idempotencyKey: randomUUID() } });

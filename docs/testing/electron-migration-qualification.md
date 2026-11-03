@@ -1,6 +1,31 @@
 # Electron desktop migration qualification
 
-This report records implementation and personal-build evidence. It is not approval to replace the installed AppKit application. The candidate uses the shared production review client and canonical service; AppKit remains available. Public distribution, automatic updates, signing/notarization for distribution, and changing default handlers are outside this change.
+## Current replacement status (2026-11-03)
+
+Electron is the sole current Placekeeper desktop application on macOS, Windows, and Linux. The Swift/AppKit host is retired. The product, app bundle, and distribution use **Placekeeper**; the installed CLI remains `placekeeper`. Production packaging contains an independent Node runtime rather than running the service through Electron's embedded Node.
+
+The final rebuilt local macOS arm64 package passed **all 12 installed acceptance checks** in 1.3 minutes, recorded in `electron-replacement-installed-final.log`. The earlier reviewed-package run also passed all 12 checks. This is local replacement evidence, not an immutable release or a native Windows/Linux pass. Source-install and acceptance validation used disposable destinations, private service roots, and copied PDFs; it did not replace the user's real installation or recovery.
+
+| Current replacement check | Observed local evidence |
+| --- | --- |
+| Packaged workflows | The final rebuilt package passed all 12 installed tests (1.3 minutes), including native launcher/MCP discovery, rendering, focused links, two-window lifecycle, restoration, save/reopen, and source replacement. |
+| Warm forward/inverse SyncTeX | Genuine compiler-produced PDF/mapping data and the native query tool drove repeated forward jumps and inverse delivery to a real recording-editor child process. |
+| Missing/delayed/rebuilt mapping | Missing mapping and a rebuilt PDF with a delayed sidecar resumed the latest explicit request in the same reader. |
+| Cold CLI launch | The production renderer persisted page 2, then page 1 in the same app process without a debugging endpoint. A separate manual cold-launch check visibly reached page 2. |
+| Native endpoint entry | A local CUA check submitted a synthetic Neovim endpoint in the native source-endpoint dialog; its returned JSON contained the exact submitted path (`electron-replacement-chooser-manual.json`). This checks dialog input/delivery, not a live Neovim connection or named-editor round trip. |
+| Canonical unit/integration suite | The final canonical run passed all 2,184 tests in 122 files (187.41 seconds), recorded in `electron-replacement-canonical-green.log`. Final typechecking also passed. |
+| Browser regressions | The current canonical Chromium run is pending. |
+| Windows/Linux and complete qualification | Current native results remain pending. Earlier candidate CI runs below do not qualify this replacement. |
+
+Build with `pnpm package:desktop`, then run `pnpm test:desktop-installed` against that exact package. Use `PLACEKEEPER_TEST_EXECUTABLE` to select a different actual installation. Run `pnpm test:desktop-platform` on each native platform; skips on another OS are not passes. Installed tests use private roots and copied PDFs, not the user's installation or recovery.
+
+Installed SyncTeX acceptance (`test/acceptance/electron-synctex.spec.ts`) uses genuine PDF/SyncTeX output and a native TeX `synctex` query executable. A saved editor profile launches a real recording adapter process. Process delivery does not prove a named editor's UI placement. Missing query tools must be reported as skips rather than successful round trips. The single native endpoint-entry check above does not establish complete native source-configuration qualification on every platform.
+
+The macOS external compatibility launcher is `Placekeeper.app/Contents/MacOS/placekeeper`; all platforms package launchers under `resources/desktop/bin` (`Contents/Resources` on macOS). Installation does not automatically make Placekeeper the OS default PDF handler. Interactive OS installation, native dialogs, accessibility, DPI/window-manager behavior, Chrome/Codex trust and activation, and complete release qualification remain separate work.
+
+## Historical candidate evidence
+
+The following records describe the earlier candidate revisions, with the AppKit app retained at that time. References to retained AppKit, separate candidate identity, rollback into AppKit, and personal-build commands below are historical. They are not current installation instructions or support commitments. Numeric measurements, artifact identities, and prior CI results are preserved without upgrading their scope.
 
 ## Evidence recorded on 2026-11-02
 
@@ -104,7 +129,7 @@ The focused titlebar review completed with no actionable findings. Native [run 4
 
 The package containing the hover tracker passed a [Mac resource regression](electron-toolbar-performance-2026-11-03.json): 0.63% idle CPU over at least 60 seconds and 12.55% peak post-close RSS growth over twelve close/reopen cycles, within the unchanged 2%/15% limits. This measurement precedes the final spacing-only correction and does not isolate individual cursor-sampler callbacks or establish Windows/Linux performance.
 
-## Running qualification
+## Historical qualification procedure
 
 The subsequent local toolbar spacing correction was checked against the native screenshot with `Sample review.pdf`: the visible gaps between the traffic lights, filename icon/text, and page number are approximately 26 pixels on either side of the filename group. The final rebuilt package passed all nine installed-app checks. An earlier run failed to click the hover-revealed copy-link control; its focused retry and the final full suite passed. Reusing an old isolated preview root produced a lifecycle-registration alert, so the final visual check used a fresh isolated root with the earlier sample files retained.
 

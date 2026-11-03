@@ -1,10 +1,11 @@
+import { establishPrivateDirectory } from "../src/platform/private-storage.js";
 import { mkdtemp, writeFile, rm, realpath } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { EditorNavigation } from "../src/synctex/editor-navigation.js";
 import { EditorProfiles } from "../src/synctex/editor-profiles.js";
-import { MacosAppLifecycleManager } from "../src/macos/app-lifecycle.js";
+import { NativeAppLifecycleManager } from "../src/desktop/app-lifecycle.js";
 import { parseEditorArguments, runEditorCommand } from "../src/cli/editor-command.js";
 import type { EditorForwardRequest } from "../../../packages/core/src/editor-navigation-protocol.js";
 
@@ -12,10 +13,11 @@ const temporary: string[] = [];
 afterEach(async () => { await Promise.all(temporary.splice(0).map(path => rm(path, { recursive: true, force: true }))); });
 async function fixture() {
   const root = await realpath(await mkdtemp(join(tmpdir(), "editor-handoff-"))); temporary.push(root);
+  await establishPrivateDirectory(root);
   await writeFile(join(root, "paper.pdf"), "%PDF-1.7\n");
   await writeFile(join(root, "paper.tex"), "Hello");
   const profiles = new EditorProfiles(join(root, "profiles.json"));
-  await profiles.add({ name: "editor", kind: "command", executable: "/usr/bin/true", args: ["{file}"] });
+  await profiles.add({ name: "editor", kind: "command", executable: process.execPath, args: ["{file}"] });
   const registration = await profiles.register({ profile: "editor", sourceRoot: root });
   let now = 100;
   const navigation = new EditorNavigation(profiles, "development", () => now, 1000);
@@ -41,7 +43,7 @@ async function fixture() {
 describe("private native navigation handoff", () => {
   it("authorizes admission only for a live redeemed handle, its app-owned helper, and its PDF", async () => {
     const f = await fixture();
-    const lifecycle = new MacosAppLifecycleManager({ detach: async () => {} }, {}, f.navigation);
+    const lifecycle = new NativeAppLifecycleManager({ detach: async () => {} }, {}, f.navigation);
     for (const appInstanceId of ["app_owner_1234", "app_other_1234"]) {
       await lifecycle.handle({ protocolVersion: 1, type: "register-app", appInstanceId, processId: 1,
         startIdentity: "start_1234", buildIdentity: "build_1234", installationIdentity: "development" });
@@ -62,7 +64,7 @@ describe("private native navigation handoff", () => {
 
   it("configures a direct-open presentation only while its native helper is still owned", async () => {
     const f = await fixture();
-    const lifecycle = new MacosAppLifecycleManager({ detach: async () => {} }, {}, f.navigation, () => f.request.pdfPath);
+    const lifecycle = new NativeAppLifecycleManager({ detach: async () => {} }, {}, f.navigation, () => f.request.pdfPath);
     await lifecycle.handle({ protocolVersion: 1, type: "register-app", appInstanceId: "app_00001", processId: 1,
       startIdentity: "start_001", buildIdentity: "build_001" });
     const setup = { protocolVersion: 1, type: "associate-editor", appInstanceId: "app_00001", helperId: "helper_direct", profile: "editor", sourceRoot: f.root };
@@ -114,7 +116,7 @@ describe("private native navigation handoff", () => {
   });
   it("binds only an app-owned helper and keeps the surviving helper when a candidate detaches", async () => {
     const f = await fixture(); const accepted = await f.accept();
-    const lifecycle = new MacosAppLifecycleManager({ detach: async () => {} }, {}, f.navigation, () => f.request.pdfPath);
+    const lifecycle = new NativeAppLifecycleManager({ detach: async () => {} }, {}, f.navigation, () => f.request.pdfPath);
     await lifecycle.handle({ protocolVersion: 1, type: "register-app", appInstanceId: "app_00001", processId: 1,
       startIdentity: "start_001", buildIdentity: "build_001", installationIdentity: "development" });
     const redeemed = await lifecycle.handle({ protocolVersion: 1, type: "redeem-navigation", appInstanceId: "app_00001", ticket: accepted.ticket });
@@ -267,7 +269,7 @@ describe("private native navigation handoff", () => {
 
   it("requires lifecycle registration and makes failed redemption nonfatal", async () => {
     const f = await fixture(); const accepted = await f.accept();
-    const lifecycle = new MacosAppLifecycleManager({ detach: async () => {} }, {}, f.navigation);
+    const lifecycle = new NativeAppLifecycleManager({ detach: async () => {} }, {}, f.navigation);
     const message = { protocolVersion: 1, type: "redeem-navigation", appInstanceId: "app_00001", ticket: accepted.ticket };
     expect((await lifecycle.handle(message)).type).toBe("failure");
     await lifecycle.handle({ protocolVersion: 1, type: "register-app", appInstanceId: "app_00001", processId: 1,
@@ -311,4 +313,15 @@ describe("installed editor CLI", () => {
     expect(error).toContain("Restart Placekeeper");
     expect(output).toBe("handle\n");
   });
+});
+
+it("preserves local Windows Neovim pipes and strips validated installed isolation flags", async () => {
+  expect(parseEditorArguments(["editor", "register", "--profile", "nvim", "--source-root", "/project", "--socket", "\\\\.\\pipe\\nvim-test"], "/project"))
+    .toMatchObject({ socket: "\\\\.\\pipe\\nvim-test" });
+  const exchange = vi.fn(async () => ({ ok: true as const, operation: "profiles" as const, profiles: [] }));
+  expect(await runEditorCommand(["editor", "list", "--isolated-installed-smoke", "--http-port", "43210", "--isolated-test-root", tmpdir()], { exchange, write: () => {} })).toBe(0);
+  expect(exchange).toHaveBeenCalledWith({ operation: "profiles" });
+  exchange.mockClear();
+  expect(await runEditorCommand(["editor", "list", "--isolated-installed-smoke"], { exchange, diagnostic: () => {} })).toBe(2);
+  expect(exchange).not.toHaveBeenCalled();
 });

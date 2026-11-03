@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { readFile, readdir } from 'node:fs/promises';
 import { basename, join } from 'node:path';
-import { defaultDaemonPaths, installedSmokeDaemonPaths, installedSmokeDaemonArgs, electronRuntimeThroughDaemon, electronAppControlThroughDaemon, resolveElectronLaunchThroughDaemon } from '../../service/src/host/service-daemon.js';
+import { defaultDaemonPaths, installedSmokeDaemonPaths, installedSmokeDaemonArgs, electronRuntimeThroughDaemon, electronAppControlThroughDaemon, resolveElectronLaunchThroughDaemon, preflightLinkThroughDaemon, openLinkThroughDaemon } from '../../service/src/host/service-daemon.js';
 import { resolvePackagedRuntime, type PackagedRuntimeManifest } from '../../service/src/platform/runtime-layout.js';
 import { encodeElectronHelperFrame } from '../../../packages/core/src/electron-helper-protocol.js';
 import { ReviewBridge, acceptsRenderer } from './review-bridge.js';
@@ -12,7 +12,10 @@ import { readNativeFrames } from '../../service/src/desktop/framed-input.js';
 import { parseElectronAppControlResponse } from '../../../packages/core/src/electron-app-control-protocol.js';
 import { assetResponse, documentResponse } from './resource-protocol.js';
 import { REVIEW_RUNTIME_PROTOCOL, REVIEW_RUNTIME_VERSION } from '../../../packages/core/src/review-runtime-protocol.js';
-import { parseDesktopOpenIntent, secondInstanceArguments } from './open-intent.js';
+import { handleWindowsProtocolInstall } from './protocol-install.js';
+import { parseStandaloneChooser, runStandaloneChooser } from './standalone-chooser.js';
+import { stageDesktopLink } from './open-link.js';
+import { parseDesktopOpenIntent, secondInstanceArguments, DesktopInvocationQueue } from './open-intent.js';
 import { FocusedVisibilityGate } from './focused-visibility.js';
 import { WindowActivityRegistry, ActivityAcknowledgements } from './window-lifecycle.js';
 import { DocumentWindowRegistry } from './window-registry.js';
@@ -22,7 +25,9 @@ import { nativeTitlebarOptions, trackTitlebarHover } from './titlebar.js';
 import { parseElectronLocation } from '../../../packages/core/src/electron-shell-protocol.js';
 import { decodePlacekeeperLink } from '../../../packages/core/src/placekeeper-link.js';
 import { REVIEW_COMMAND_IDS } from '../../web/src/review/review-command-surface.js';
-const installerEvent = process.argv.some(arg => /^--squirrel-(install|updated|uninstall|obsolete)$/u.test(arg));
+const standaloneChooser = parseStandaloneChooser(process.argv.slice(1));
+const installerAction = handleWindowsProtocolInstall(app, { platform: process.platform, argv: process.argv, executable: process.execPath });
+const installerEvent = installerAction.handled;
 const smokePaths = installedSmokeDaemonPaths(process.argv.slice(1));
 if (smokePaths) {
     if (!smokePaths.isolatedTestRoot) throw new Error('Electron installed smoke requires an explicit isolated test root');
@@ -31,17 +36,18 @@ if (smokePaths) {
     app.setPath('userData', smokeUserData);
 }
 const pendingOpens: string[] = [];
-const pendingInvocations: string[][] = [];
+const invocations = new DesktopInvocationQueue();
 let routeOpen: ((path: string) => void) | undefined;
-let routeInvocation: ((args: string[]) => void) | undefined;
-if (installerEvent) app.quit();
+if (installerEvent) app.exit(installerAction.exitCode);
+else if (standaloneChooser) { /* Explicit chooser processes do not own review windows. */ }
 else if (!app.requestSingleInstanceLock({ argv: process.argv.slice(1) })) app.quit();
 else {
+app.on('open-url', (event, url) => { event.preventDefault(); try { invocations.enqueue([url]); } catch (error) { dialog.showErrorBox('Placekeeper could not open', String(error)); } });
 app.on('open-file', (event, path) => { event.preventDefault(); if (routeOpen) routeOpen(path); else pendingOpens.push(path); });
 app.on('second-instance', (_event, argv, _directory, additionalData) => {
     try {
         const exactArguments = secondInstanceArguments(argv, additionalData);
-        if (routeInvocation) routeInvocation(exactArguments); else pendingInvocations.push(exactArguments);
+        invocations.enqueue(exactArguments);
     } catch (error) { console.error('Desktop invocation refused', error); dialog.showErrorBox('Placekeeper could not open', String(error)); }
 });
 }
@@ -91,7 +97,7 @@ async function start() {
             throw new Error(registered ? 'Lifecycle control channel ended' : 'Lifecycle registration ended early');
         })().catch(error => { reject(error); failLifecycle(error instanceof Error ? error : new Error(String(error))); });
     });
-    lifecycle.stdin.write(encodeElectronHelperFrame({ protocolVersion: 1, type: 'register-app', appInstanceId, processId: process.pid, startIdentity: randomUUID(), buildIdentity: manifest.installArtifactIdentity }));
+    lifecycle.stdin.write(encodeElectronHelperFrame({ protocolVersion: 1, type: 'register-app', appInstanceId, processId: process.pid, startIdentity: randomUUID(), buildIdentity: manifest.installArtifactIdentity, installationIdentity: manifest.installArtifactIdentity }));
     let registrationTimer: ReturnType<typeof setTimeout> | undefined;
     try {
         await Promise.race([registration, new Promise<never>((_resolve, reject) => { registrationTimer = setTimeout(() => reject(new Error('Lifecycle registration timeout')), 30000); })]);
@@ -104,7 +110,7 @@ async function start() {
     lifecycle.stdin.on('error', failLifecycle);
     app.on('will-quit', () => { lifecycleStopping = true; lifecycle.stdin.end(); });
     const registry = new DocumentWindowRegistry<BrowserWindow>();
-    type Entry = { window: BrowserWindow; bridge: ReviewBridge; commands?: WindowCommands; intent: WindowIntent; closeToken?: string; focusedVisibility: FocusedVisibilityGate; permitClose: boolean; rendererReady: boolean; failureShown: boolean; retirement: AbortController; toolbarHeight: number; timer?: ReturnType<typeof setInterval> };
+    type Entry = { window: BrowserWindow; bridge: ReviewBridge; commands?: WindowCommands; configureSource?: () => void; sourceEndpoint?: { token: string; resolve: (endpoint: string | null) => void }; intent: WindowIntent; closeToken?: string; focusedVisibility: FocusedVisibilityGate; permitClose: boolean; rendererReady: boolean; failureShown: boolean; retirement: AbortController; toolbarHeight: number; timer?: ReturnType<typeof setInterval> };
     const entries = new Map<number, Entry>();
     const ownedWindows = new WindowActivityRegistry();
     const statePath = join(app.getPath('userData'), 'windows.json');
@@ -128,6 +134,11 @@ async function start() {
         return entry;
     };
     ipcMain.handle('review:identity', event => { const e = verify(event, undefined, true); return { windowId: e.bridge.windowId, attemptId: e.bridge.attemptId, presentation: e.intent.presentation }; });
+    ipcMain.handle('review:source-endpoint', (event, id, token, endpoint) => {
+        const e = verify(event, id);
+        if (!e.sourceEndpoint || token !== e.sourceEndpoint.token || (endpoint !== null && (typeof endpoint !== 'string' || endpoint.length > 4096 || endpoint.includes('\0')))) throw new Error('Invalid source endpoint');
+        const pending = e.sourceEndpoint; delete e.sourceEndpoint; pending.resolve(endpoint);
+    });
     ipcMain.handle('review:create-link', async (event, id, value) => {
         const e = verify(event, id);
         const location = parseElectronLocation(value);
@@ -146,7 +157,7 @@ async function start() {
         return e.bridge.request(value);
     });
     ipcMain.handle('review:document-ready', (event, id, generation) => { const b = verify(event, id).bridge; if (generation !== b.validatedGeneration) throw new Error('Unvalidated document'); b.readyGeneration = generation; timing('document-ready', b); });
-    ipcMain.handle('review:visible', async (event, id, generation, token) => { const e = verify(event, id); if (!e.focusedVisibility.accepts(token, generation)) throw new Error('Stale activation evidence'); if (generation !== e.bridge.validatedGeneration || generation !== e.bridge.readyGeneration || !e.window.isVisible()) throw new Error('Unvalidated paint'); e.bridge.paintedGeneration = generation; await e.bridge.activate(); if (!e.focusedVisibility.commit(token, generation)) throw new Error('Superseded activation evidence'); ownedWindows.activated(e.bridge.helperId); timing('visible-active', e.bridge); activity(); });
+    ipcMain.handle('review:visible', async (event, id, generation, token) => { const e = verify(event, id); if (!e.focusedVisibility.accepts(token, generation)) throw new Error('Stale activation evidence'); if (generation !== e.bridge.validatedGeneration || generation !== e.bridge.readyGeneration || !e.window.isVisible()) throw new Error('Unvalidated paint'); e.bridge.paintedGeneration = generation; await e.bridge.activate(); if (!e.focusedVisibility.commit(token, generation)) throw new Error('Superseded activation evidence'); ownedWindows.activated(e.bridge.helperId); timing('visible-active', e.bridge); activity(); menus(); });
     ipcMain.handle('review:clipboard', (event, id, text) => { verify(event, id); if (typeof text !== 'string' || text.length > 4 * 1024 * 1024) throw new Error('Invalid clipboard text'); clipboard.writeText(text); });
     ipcMain.handle('review:presentation', (event, id, presentation) => { const e = verify(event, id); const clean = parseWindowState([{ ...e.intent, presentation }])[0]; if (clean) { e.intent = clean; void persist(); } });
     ipcMain.handle('review:toolbar-height', (event, id, height) => {
@@ -177,7 +188,7 @@ async function start() {
             inventory.add(name);
     } }
     await collect(assetRoot);
-    async function createWindow(sourcePath: string, restored?: WindowIntent, launchId?: string): Promise<BrowserWindow> {
+    async function createWindow(sourcePath: string, restored?: WindowIntent, launchId?: string, navigationHandle?: string): Promise<BrowserWindow> {
     const isolated = session.fromPartition(`review-${randomUUID()}`);
     isolated.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
     isolated.setPermissionCheckHandler(() => false);
@@ -198,6 +209,7 @@ async function start() {
     const retire = () => {
         if (retirementPromise) return retirementPromise;
         bridge.retired = true; retirement.abort();
+        entry.sourceEndpoint?.resolve(null); delete entry.sourceEndpoint;
         disposeTitlebarHover();
         if (entry.timer) clearInterval(entry.timer);
         ownedWindows.retiring(bridge.helperId); activity();
@@ -215,6 +227,7 @@ async function start() {
     const saveGeometry = () => { entry.intent = { ...entry.intent, bounds: window.getNormalBounds(), maximized: window.isMaximized() }; void persist(); };
     window.on('resize', saveGeometry); window.on('move', saveGeometry);
     window.on('close', event => {
+        entry.sourceEndpoint?.resolve(null); delete entry.sourceEndpoint;
         timing(entry.permitClose ? 'close-request-permitted' : bridge.retired ? 'close-request-retired' : !entry.rendererReady ? 'close-request-unready' : 'close-request-settle', bridge);
         if (entry.permitClose || bridge.retired) return;
         if (!entry.rendererReady) { entry.permitClose = true; void retire().catch(() => undefined); return; }
@@ -234,6 +247,40 @@ async function start() {
         registry.remove(window); window.destroy();
         if (result.response === 0) void openDocument(sourcePath, intent).catch(showFailure);
     };
+    let sourceSetup: Promise<boolean> | undefined;
+    bridge.onSourceSetup = () => {
+        if (sourceSetup) return sourceSetup;
+        const generation = bridge.projection?.generation;
+        const current = () => !bridge.retired && !window.isDestroyed() && entries.get(contents.id) === entry && bridge.projection?.generation === generation;
+        sourceSetup = (async () => {
+            const result = await electronAppControlThroughDaemon({ protocolVersion: 1, type: 'editor-profiles', appInstanceId }, undefined, paths);
+            if (!current() || result.type !== 'editor-profiles') return false;
+            if (!result.profiles.length) {
+                await dialog.showMessageBox(window, { type: 'info', title: 'Configure Source Navigation', message: 'Add an editor profile using Placekeeper’s installed editor command, then choose Configure Source Navigation again.' });
+                return false;
+            }
+            const choice = await dialog.showMessageBox(window, { type: 'question', title: 'Configure Source Navigation', message: 'Choose the editor to open LaTeX source.', buttons: [...result.profiles.map(profile => profile.name), 'Cancel'], cancelId: result.profiles.length });
+            const profile = result.profiles[choice.response];
+            if (!profile || !current()) return false;
+            let socket: string | undefined;
+            if (profile.kind === 'neovim') {
+                const endpoint = await new Promise<string | null>(resolve => {
+                    const token = randomUUID(); entry.sourceEndpoint = { token, resolve };
+                    contents.send('review:shell', { type: 'source-endpoint', token });
+                });
+                if (!endpoint || !current()) return false;
+                socket = endpoint;
+            }
+            const folder = await dialog.showOpenDialog(window, { title: 'Choose LaTeX Source Folder', properties: ['openDirectory'] });
+            if (folder.canceled || !folder.filePaths[0] || !current()) return false;
+            const associated = await electronAppControlThroughDaemon({ protocolVersion: 1, type: 'associate-editor', appInstanceId, helperId: bridge.helperId, profile: profile.name, sourceRoot: folder.filePaths[0], ...(socket ? { socket } : {}) }, undefined, paths);
+            if (!current()) return false;
+            if (associated.type !== 'ack') throw new Error('Check the editor profile, source folder, and Neovim endpoint.');
+            return true;
+        })().catch(error => { if (current()) dialog.showErrorBox('Source navigation could not be configured', String(error)); return false; }).finally(() => { sourceSetup = undefined; });
+        return sourceSetup;
+    };
+    entry.configureSource = () => { void bridge.onSourceSetup?.(); };
     bridge.onInvalidation = event => { if (!bridge.retired && !contents.isDestroyed()) contents.send('review:event', event); };
     bridge.onRefreshError = error => { if (!bridge.retired && !window.isDestroyed()) void fail(error); };
     contents.on('render-process-gone', (_event, details) => { void fail(details.reason); });
@@ -247,10 +294,11 @@ async function start() {
             const decision = offer.choices[result.response];
             if (decision === undefined) throw new Error('Recovery canceled; protected draft retained');
             return decision;
-        }, launchId);
+        }, launchId, navigationHandle);
         let checking = false;
         entry.timer = setInterval(() => { if (!bridge.active || bridge.retired || checking) return; checking = true; void bridge.send({ type: 'keepalive' }).then(result => {
             if (result.type === 'invalidation') contents.send('review:event', { protocol: REVIEW_RUNTIME_PROTOCOL, version: REVIEW_RUNTIME_VERSION, kind: 'event', event: 'session-invalidated', runtimeId: bridge.windowId, payload: { sessionId: bridge.projection!.sessionId, generation: result.generation, revision: result.revision, reason: result.reason === 'save' || result.reason === 'recovery' ? 'freshness' : result.reason } });
+            else return bridge.pollNavigation();
         }).catch(error => { void fail(error); }).finally(() => { checking = false; }); }, 1000);
         if (restored?.maximized) window.maximize();
         await window.loadURL('placekeeper-app://bundle/electron.html');
@@ -259,9 +307,15 @@ async function start() {
     } catch (error) { await retire().catch(() => undefined); window.destroy(); throw error; }
     }
     function showFailure(error: unknown) { console.error(error); dialog.showErrorBox('Placekeeper could not open', String(error)); }
-    async function openDocument(path: string, restored?: WindowIntent, launchId?: string) {
+    async function openDocument(path: string, restored?: WindowIntent, launchId?: string, navigationHandle?: string) {
         let created = false;
-        const window = await registry.open(path, canonical => { created = true; return createWindow(canonical, restored, launchId); }, window => { if (window.isMinimized()) window.restore(); window.show(); window.focus(); });
+        const window = await registry.open(path, canonical => { created = true; return createWindow(canonical, restored, launchId, navigationHandle); }, window => { if (window.isMinimized()) window.restore(); window.show(); window.focus(); });
+        if (navigationHandle) {
+            const entry = entries.get(window.webContents.id);
+            if (!entry || entry.bridge.retired) throw new Error('Source navigation review is unavailable');
+            const response = await electronAppControlThroughDaemon({ protocolVersion: 1, type: 'bind-navigation', appInstanceId, helperId: entry.bridge.helperId, navigationHandle }, undefined, paths);
+            if (response.type !== 'ack' || entry.bridge.retired) throw new Error('Source navigation is no longer available');
+        }
         if (launchId && !created) {
             const entry = entries.get(window.webContents.id);
             if (!entry || entry.bridge.retired) throw new Error('Task review is unavailable');
@@ -288,21 +342,37 @@ async function start() {
     async function chooseOpen() { const result = await dialog.showOpenDialog({ properties: ['openFile', 'multiSelections'], filters: [{ name: 'PDF', extensions: ['pdf'] }] }); for (const path of result.filePaths) await openDocument(path).catch(showFailure); }
     async function handleInvocation(args: readonly string[]) {
         const intent = parseDesktopOpenIntent(args);
-        if (intent.type === 'launch') {
+        if (intent.type === 'link') {
+            const launchId = await stageDesktopLink(intent.link, {
+                preflight: link => preflightLinkThroughDaemon(link, paths),
+                open: request => openLinkThroughDaemon(request, paths),
+                confirm: async path => (await dialog.showMessageBox({ type: 'question', title: 'Open Placekeeper link', message: `Open ${basename(path)}?`, detail: path, buttons: ['Open PDF', 'Cancel'], cancelId: 1 })).response === 0,
+                recover: async offer => {
+                    const labels = { resume: 'Resume Draft', discard: 'Use PDF', fork: 'Recover Copy' };
+                    const result = await dialog.showMessageBox({ type: 'question', title: 'Protected draft', message: 'This linked PDF has a protected review draft.', buttons: [...offer.choices.map(choice => labels[choice]), 'Cancel'], cancelId: offer.choices.length });
+                    return offer.choices[result.response];
+                },
+            });
+            if (launchId) await handleInvocation(['--placekeeper-launch', launchId]);
+        } else if (intent.type === 'navigation') {
+            const navigation = await electronAppControlThroughDaemon({ protocolVersion: 1, type: 'redeem-navigation', appInstanceId, ticket: intent.ticket }, undefined, paths);
+            if (navigation.type !== 'navigation') throw new Error('Source navigation is no longer available');
+            await openDocument(navigation.pdfPath, undefined, undefined, navigation.navigationHandle);
+        } else if (intent.type === 'launch') {
             const launch = await resolveElectronLaunchThroughDaemon(intent.launchId, paths);
             if (!launch) throw new Error('Task launch is no longer available');
             await openDocument(launch.sourcePath, undefined, intent.launchId);
         } else for (const path of intent.paths) await openDocument(path).catch(showFailure);
     }
     routeOpen = path => { void openDocument(path).catch(showFailure); };
-    routeInvocation = argv => { void handleInvocation(argv).catch(showFailure); };
+    invocations.activate(argv => { void handleInvocation(argv).catch(showFailure); });
     app.on('activate', () => { if (entries.size === 0) void chooseOpen(); });
     app.on('before-quit', event => { if (entries.size === 0) return; event.preventDefault(); quitting = true; void persist(); for (const e of entries.values()) e.window.close(); });
     menus();
     const initial = parseDesktopOpenIntent(process.argv.slice(1));
     const queuedPaths = pendingOpens.splice(0);
-    const queuedInvocations = pendingInvocations.splice(0);
-    const hasInitial = initial.type === 'launch' || initial.paths.length > 0 || queuedPaths.length > 0 || queuedInvocations.length > 0;
+    const queuedInvocations = invocations.take();
+    const hasInitial = initial.type !== 'paths' || initial.paths.length > 0 || queuedPaths.length > 0 || queuedInvocations.length > 0;
     if (hasInitial) {
         await handleInvocation(process.argv.slice(1)).catch(showFailure);
         for (const path of queuedPaths) await openDocument(path).catch(showFailure);
@@ -310,5 +380,6 @@ async function start() {
     } else { const restored = await readWindowState(statePath); for (const intent of restored) await openDocument(intent.sourcePath, intent).catch(showFailure); if (entries.size === 0) await chooseOpen(); }
 
 }
-if (!installerEvent && app.hasSingleInstanceLock()) void start().catch(error => { dialog.showErrorBox('Placekeeper could not open', String(error)); app.quit(); });
+if (standaloneChooser && !installerEvent) void runStandaloneChooser(standaloneChooser, join(__dirname, 'preload.cjs')).catch(() => app.exit(2));
+if (!standaloneChooser && !installerEvent && app.hasSingleInstanceLock()) void start().catch(error => { dialog.showErrorBox('Placekeeper could not open', String(error)); app.quit(); });
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });

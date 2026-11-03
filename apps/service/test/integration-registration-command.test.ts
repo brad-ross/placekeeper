@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
+import { cp, mkdtemp, mkdir, readFile, realpath, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -27,14 +27,18 @@ describe("explicit candidate integration command", () => {
     expect(JSON.parse(output.at(-1)!)).toMatchObject({ ok: false, status: "retained" });
     expect(await readFile(destination, "utf8")).toContain("com.placekeeper.chrome");
   });
-  it("writes actual Codex TOML against explicit bundled assets", async () => {
+  it("registers the complete Codex plugin against this identified bundled runtime", async () => {
     const root = await mkdtemp(join(tmpdir(), "pk-codex-config-cli-"));
-    const node = join(root, "node"); const server = join(root, "server.js"); const launcher = join(root, "placekeeper");
-    for (const path of [node, server, launcher]) await writeFile(path, "asset");
+    const node = join(root, `node/bin/node${process.platform === "win32" ? ".exe" : ""}`); const server = join(root, "codex-mcp/server.js"); const launcher = join(root, `bin/placekeeper${process.platform === "win32" ? ".exe" : ""}`);
+    for (const path of [node, server, launcher]) { await mkdir(dirname(path), { recursive: true }); await writeFile(path, "asset"); }
+    await cp(join(process.cwd(), "integrations/codex-plugin"), join(root, "integrations/codex-plugin-template"), { recursive: true });
+    vi.stubEnv("PLACEKEEPER_APP_RESOURCES", root);
     vi.stubEnv("PLACEKEEPER_INSTALL_ARTIFACT_IDENTITY", "a".repeat(64)); vi.stubEnv("PLACEKEEPER_DAEMON_IDENTITY", "b".repeat(64));
-    const destination = join(root, "config.toml"); const output: string[] = [];
+    const destination = join(root, "marketplace"); const output: string[] = [];
     expect(await runIntegrationRegistrationCommand(["integration-registration", "codex", "--receipt", join(root, "receipt"), "--destination", destination, "--node", node, "--server", server, "--launcher", launcher], text => output.push(text))).toBe(0);
-    expect(await readFile(destination, "utf8")).toContain("[mcp_servers.placekeeper]");
+    expect(JSON.parse(await readFile(join(destination, "codex-plugin/.mcp.json"), "utf8")).mcpServers.placekeeper).toEqual({ command: await realpath(launcher), args: ["codex-mcp"] });
+    expect(await readFile(join(destination, "codex-plugin/hooks/hooks.json"), "utf8")).toContain("Verifying Placekeeper native presentation");
+    expect(JSON.parse(output.at(-1)!)).toMatchObject({ ok: true, trust: "pending" });
     expect(native.request).not.toHaveBeenCalled();
   });
 });

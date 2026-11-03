@@ -1,11 +1,14 @@
-import { spawn, type ChildProcess } from 'node:child_process';
-import { copyFile, writeFile } from 'node:fs/promises';
+import { execFile, spawn, type ChildProcess } from 'node:child_process';
+import { access, copyFile, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
-import { join, resolve } from 'node:path';
+import { delimiter, dirname, join, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
+import { promisify } from 'node:util';
 import { createDesktopIsolatedRoot } from '../support/desktop-isolated-root.js';
 import { chromium, type Browser, type Page } from '@playwright/test';
 import { requestControl, MANAGEMENT_PROTOCOL_VERSION } from '../../apps/service/src/host/launch-control.js';
+
+const execute = promisify(execFile);
 
 async function freePort(): Promise<number> {
   const server = createServer();
@@ -20,14 +23,15 @@ async function freePort(): Promise<number> {
 
 export function candidateExecutable(): string {
   if (process.env.PLACEKEEPER_TEST_EXECUTABLE) return resolve(process.env.PLACEKEEPER_TEST_EXECUTABLE);
-  const directory = resolve(`dist/desktop-artifacts/Placekeeper Candidate-${process.platform}-${process.arch}`);
+  const directory = resolve(`dist/desktop-artifacts/Placekeeper-${process.platform}-${process.arch}`);
   return process.platform === 'darwin'
-    ? join(directory, 'Placekeeper Candidate.app/Contents/MacOS/PlacekeeperCandidate')
-    : join(directory, process.platform === 'win32' ? 'PlacekeeperCandidate.exe' : 'PlacekeeperCandidate');
+    ? join(directory, 'Placekeeper.app/Contents/MacOS/PlacekeeperDesktop')
+    : join(directory, process.platform === 'win32' ? 'PlacekeeperDesktop.exe' : 'PlacekeeperDesktop');
 }
 
 export class InstalledCandidate {
   private browser?: Browser;
+  private ownsColdApp = false;
   private child?: ChildProcess;
   private closed?: Promise<void>;
   private log = '';
@@ -46,14 +50,83 @@ export class InstalledCandidate {
     return new InstalledCandidate(root, source);
   }
 
-  async launch(options: { readonly restoreSavedWindows?: boolean } = {}): Promise<Page> {
-    const debugPort = await freePort();
-    const servicePort = this.servicePort ??= await freePort();
+  /** Exercise the shipped CLI with explicit isolation shared with this GUI. */
+  async command(args: readonly string[]): Promise<string> {
+    const port = this.servicePort ??= await freePort();
+    const executableDirectory = dirname(candidateExecutable());
+    const resources = process.platform === 'darwin' ? resolve(executableDirectory, '../Resources/desktop') : join(executableDirectory, 'resources/desktop');
+    const executable = join(resources, 'bin', `placekeeper${process.platform === 'win32' ? '.exe' : ''}`);
+    const env = Object.keys(this.launchEnvironment).length ? { ...this.launchEnvironment } : { ...process.env };
+    for (const key of Object.keys(env)) if (key.startsWith('PLACEKEEPER_') || key.startsWith('ELECTRON_') || key === 'NODE_OPTIONS') delete env[key];
+    if (!Object.keys(this.launchEnvironment).length) {
+      for (const key of Object.keys(env)) if (key.toLowerCase() === 'path') delete env[key];
+    }
+    env.PATH ??= process.platform === 'win32' ? join(process.env.SystemRoot ?? 'C:\\Windows', 'System32') : '/usr/bin:/bin';
+    const child = spawn(executable, [...args, '--isolated-installed-smoke', '--http-port', String(port), '--isolated-test-root', this.root], { env, stdio: ['ignore', 'pipe', 'pipe'] });
+    let stdout = '', stderr = '';
+    child.stdout.on('data', data => { stdout += String(data); });
+    child.stderr.on('data', data => { stderr += String(data); });
+    return new Promise((accept, reject) => {
+      const timer = setTimeout(() => { child.kill('SIGKILL'); reject(new Error(`Installed CLI timed out: ${stderr}`)); }, 30_000);
+      child.once('error', error => { clearTimeout(timer); reject(error); });
+      child.once('exit', code => {
+        clearTimeout(timer);
+        code === 0 ? accept(stdout.trimEnd()) : reject(new Error(`Installed CLI exited ${code}: ${stderr}${stdout}`));
+      });
+    });
+  }
+
+  private async configureEnvironment(toolDirectories: readonly string[]): Promise<void> {
     const env = { ...process.env };
     for (const key of Object.keys(env)) {
       if (key.toUpperCase() === 'PATH' || key.startsWith('PLACEKEEPER_') || key.startsWith('ELECTRON_') || key === 'NODE_OPTIONS') delete env[key];
     }
     env.PATH = process.platform === 'win32' ? join(process.env.SystemRoot ?? 'C:\\Windows', 'System32') : '/usr/bin:/bin';
+    for (const directory of toolDirectories) {
+      for (const name of ['node', 'node.exe', 'node.cmd']) {
+        if (await access(join(directory, name)).then(() => true, () => false)) throw new Error('SyncTeX test tool directory must not expose a host Node executable');
+      }
+    }
+    env.PATH = [...toolDirectories, env.PATH].join(delimiter);
+    this.launchEnvironment = env;
+  }
+
+  /** Prepare only the real CLI; no Electron process or debugging endpoint is started. */
+  async prepareColdCommand(toolDirectories: readonly string[] = []): Promise<void> {
+    await this.configureEnvironment(toolDirectories);
+    this.ownsColdApp = true;
+    if ((await this.ownedColdAppPids()).length) throw new Error('Cold CLI fixture already owns an Electron process');
+  }
+
+  /** Inspect only the executable and unique isolated-root pair owned by this test. */
+  async ownedColdAppPids(): Promise<number[]> {
+    if (!this.ownsColdApp) throw new Error('Cold process ownership was not established');
+    const executable = candidateExecutable();
+    if (process.platform === 'win32') {
+      const powershell = join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+      const script = '$ErrorActionPreference = "Stop"; @(Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -eq $env:PK_TEST_EXECUTABLE -and $_.CommandLine -and $_.CommandLine.Contains($env:PK_TEST_ROOT) -and $_.CommandLine -notmatch "--type=" } | Select-Object -ExpandProperty ProcessId) | ConvertTo-Json -Compress';
+      const { stdout } = await execute(powershell, ['-NoProfile', '-NonInteractive', '-Command', script], {
+        env: { ...process.env, PK_TEST_EXECUTABLE: executable, PK_TEST_ROOT: this.root }, timeout: 15_000, maxBuffer: 1_048_576,
+      });
+      const result: unknown = stdout.trim() ? JSON.parse(stdout) : [];
+      const pids = Array.isArray(result) ? result : [result];
+      if (!pids.every(pid => Number.isSafeInteger(pid) && pid > 0)) throw new Error('Windows cold-app inventory returned invalid PIDs');
+      return pids as number[];
+    }
+    const { stdout } = await execute('/bin/ps', ['-axww', '-o', 'pid=,command='], { timeout: 15_000, maxBuffer: 8_388_608 });
+    return stdout.split('\n').flatMap(line => {
+      const match = /^\s*(\d+)\s+(.+)$/u.exec(line);
+      if (!match) return [];
+      const command = match[2]!;
+      return command.startsWith(`${executable} `) && command.includes(this.root) && !command.includes('--type=') ? [Number(match[1])] : [];
+    });
+  }
+
+  async launch(options: { readonly restoreSavedWindows?: boolean; readonly toolDirectories?: readonly string[] } = {}): Promise<Page> {
+    const debugPort = await freePort();
+    const servicePort = this.servicePort ??= await freePort();
+    await this.configureEnvironment(options.toolDirectories ?? []);
+    const env = this.launchEnvironment;
     this.launchArgs = [
       '--isolated-installed-smoke', '--http-port', String(servicePort), '--isolated-test-root', this.root,
     ];
@@ -188,6 +261,15 @@ export class InstalledCandidate {
     this.child?.stdout?.destroy();
     this.child?.stderr?.destroy();
     delete this.browser;
+    if (this.ownsColdApp) {
+      const pids = await this.ownedColdAppPids();
+      for (const pid of pids) {
+        try { process.kill(pid, 'SIGTERM'); }
+        catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error; }
+      }
+      for (let attempt = 0; attempt < 20 && (await this.ownedColdAppPids()).length; attempt++) await delay(250);
+      if ((await this.ownedColdAppPids()).length) throw new Error(`Cold Electron app did not exit for isolated fixture ${this.root}`);
+    }
     await writeFile(join(this.root, 'process.log'), this.log);
   }
 

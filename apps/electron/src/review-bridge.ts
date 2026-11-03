@@ -1,3 +1,4 @@
+import { nativeSyncTexResponse } from '../../../packages/core/src/native-synctex-protocol.js';
 import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import type { ElectronReviewHelperMessage, ElectronReviewHelperResponse, ElectronRuntimeProjection } from '../../../packages/core/src/electron-helper-protocol.js';
@@ -41,8 +42,8 @@ export class ReviewBridge {
             this.projection = result.projection;
         return result;
     }
-    async admit(sourcePath: string, decide?: (offer: Extract<ElectronReviewHelperResponse, { type: 'recovery-offered' }>) => Promise<'resume' | 'discard' | 'fork'>, launchId?: string) {
-        let result = await this.send(launchId ? { type: 'admit-launch', launchId } : { type: 'admit', sourcePath });
+    async admit(sourcePath: string, decide?: (offer: Extract<ElectronReviewHelperResponse, { type: 'recovery-offered' }>) => Promise<'resume' | 'discard' | 'fork'>, launchId?: string, navigationHandle?: string) {
+        let result = await this.send(launchId ? { type: 'admit-launch', launchId } : { type: 'admit', sourcePath, ...(navigationHandle ? { navigationHandle } : {}) });
         if (result.type === 'recovery-offered' && decide) result = await this.send({ type: 'recover', decision: await decide(result), offer: result.offer, idempotencyKey: randomUUID() });
         if (result.type !== 'admitted')
             throw new Error('Recovery requires a native decision before review');
@@ -62,6 +63,22 @@ export class ReviewBridge {
         await this.send({ type: 'activate', documentValidated: true, ...(launchId ? { launchId } : {}) });
         if (this.pendingLaunchId === launchId) delete this.pendingLaunchId;
         this.active = true;
+    }
+    onSourceSetup?: () => Promise<boolean>;
+    private navigationPolling = false;
+    private lastNavigation?: unknown;
+    async pollNavigation(): Promise<void> {
+        const projection = this.projection;
+        if (!this.active || this.retired || !projection || this.navigationPolling) return;
+        this.navigationPolling = true;
+        try {
+            const response = await this.send({ type: 'invoke', generation: projection.generation, revision: projection.revision, method: 'forwardSyncTex', payload: { action: 'poll' } });
+            if (this.retired || !this.active || this.projection?.generation !== projection.generation || this.projection.sessionId !== projection.sessionId || response.type !== 'result' || response.method !== 'forwardSyncTex') return;
+            const state = nativeSyncTexResponse('forwardSyncTex', response.payload);
+            if (state === undefined || isDeepStrictEqual(state, this.lastNavigation)) return;
+            this.lastNavigation = state;
+            this.onInvalidation?.({ protocol: REVIEW_RUNTIME_PROTOCOL, version: REVIEW_RUNTIME_VERSION, kind: 'event', runtimeId: this.windowId, event: 'host-command', payload: { command: 'source-navigation', state } });
+        } catch (error) { if (!this.retired) throw error; } finally { this.navigationPolling = false; }
     }
     chooseDestination?: (method: 'chooseFolder' | 'locateSave') => Promise<string | null>;
     onInvalidation?: (event: unknown) => void;
@@ -130,11 +147,16 @@ export class ReviewBridge {
             else {
                 if (v.sessionId !== this.projection?.sessionId || !Number.isSafeInteger(v.generation) || !Number.isSafeInteger(v.revision))
                     throw new Error('Stale identity');
-                const response = (method === 'chooseFolder' || method === 'locateSave') && this.chooseDestination
+                let response = (method === 'chooseFolder' || method === 'locateSave') && this.chooseDestination
                     ? await this.send({ type: 'destination-selection', generation: v.generation as number, revision: v.revision as number, method, selectedPath: await this.chooseDestination(method), idempotencyKey: v.requestId })
                     : await this.send({ type: 'invoke', generation: v.generation as number, revision: v.revision as number, method, payload, idempotencyKey: v.requestId });
                 if (response.type !== 'result')
                     throw new Error('Unexpected review result');
+                if (method === 'reverseSyncTex' && (response.payload as { status?: unknown })?.status === 'setup-required' && await this.onSourceSetup?.()) {
+                    if (this.retired || this.projection?.generation !== v.generation) throw new Error('Source navigation was superseded');
+                    response = await this.send({ type: 'invoke', generation: v.generation as number, revision: v.revision as number, method, payload, idempotencyKey: randomUUID() });
+                    if (response.type !== 'result') throw new Error('Unexpected source navigation result');
+                }
                 result = response.payload;
             }
         }

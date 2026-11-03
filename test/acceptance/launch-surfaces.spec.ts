@@ -4,20 +4,14 @@ import { expect, test } from "@playwright/test";
 import {
   validateCodexPlugin,
   validateSharedWebDistribution,
-} from "../../packaging/macos/validate-manifest.js";
+} from "../../packaging/shared/validate-distribution.js";
 
-test("Finder Open With passes exactly one explicit path through the native document bridge", async () => {
-  const bridge = await readFile(resolve("packaging/macos/finder-bridge.applescript"), "utf8");
-  const manifest = JSON.parse(await readFile(resolve("packaging/macos/app-bundle.json"), "utf8")) as { finderExecutable: string; documentTypes: unknown[]; embeddedArtifacts: Record<string, string> };
-  expect(manifest.finderExecutable).toBe("droplet");
-  expect(manifest.documentTypes).toHaveLength(1);
-  expect(manifest.embeddedArtifacts).not.toHaveProperty("finderQuickAction");
-  expect(bridge).toContain("on open pdfItems");
-  expect(bridge).toContain("(count of pdfItems) is not 1");
-  expect(bridge).toContain("Contents/MacOS/placekeeper");
-  expect(bridge).toContain("quoted form of pdfPath");
-  expect(bridge).toContain("choose file of type");
-  expect(bridge).not.toContain("Terminal.app");
+test("desktop packages the Placekeeper application and local PDF launcher", async () => {
+  const forge = await readFile(resolve("apps/electron/forge.config.ts"), "utf8");
+  const launcher = await readFile(resolve("packaging/desktop/launcher.mjs"), "utf8");
+  expect(forge).toContain('const executableName = "PlacekeeperDesktop"');
+  expect(forge).toContain('appBundleId: "local.placekeeper"');
+  expect(launcher).toContain("'--desktop', 'electron'");
 });
 
 test("Codex plugin packages launch plus task-scoped live-context hooks", async () => {
@@ -105,13 +99,13 @@ test("VS Code review loads the shared client directly without a localhost frame"
 });
 
 test("only the Codex adapter requests the native Codex launch surface", async () => {
-  const finder = await readFile(resolve("packaging/macos/launcher.mjs"), "utf8");
+  const finder = await readFile(resolve("packaging/desktop/launcher.mjs"), "utf8");
   const vscode = await readFile(resolve("apps/vscode/src/launch-client.ts"), "utf8");
   const skill = await readFile(
     resolve("integrations/codex-plugin/skills/placekeeper/SKILL.md"),
     "utf8",
   );
-  expect(finder).toContain('["open", "--json", "--surface", "finder"');
+  expect(finder).toContain("'--desktop', 'electron'");
   expect(finder).not.toContain('"--surface", "codex"');
   expect(finder).not.toContain('"--surface", "codex-native"');
   expect(vscode).toContain('["open", "--json", "--surface", "vscode"');

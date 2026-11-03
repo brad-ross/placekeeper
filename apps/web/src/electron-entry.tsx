@@ -2,6 +2,7 @@ import { useState, useRef, useCallback, useEffect, useLayoutEffect } from 'react
 import { createRoot } from 'react-dom/client';
 import { RuntimeProductionReviewApp } from './production-entry.js';
 import { FocusedLaunchNavigation } from './host/electron-focused-navigation.js';
+import { ElectronSourceEndpointDialog } from './host/ElectronSourceEndpointDialog.js';
 import { createElectronHostRuntime } from './host/electron-runtime.js';
 import type { ElectronShellBridge, ElectronShellIdentity } from '../../../packages/core/src/electron-shell-protocol.js';
 import type { ReviewCommandInvocation, ReviewCommandSurfaceSnapshot } from './review/review-command-surface.js';
@@ -33,14 +34,16 @@ function ElectronReview({ bridge, identity }: { bridge: ElectronShellBridge; ide
     }));
     const [command, setCommand] = useState<ReviewCommandInvocation>();
     const revision = useRef(0);
+    const sourceModalOpen = useRef(false);
     const currentSurface = useRef<ReviewCommandSurfaceSnapshot | undefined>(undefined);
     const settle = useRef<(() => Promise<void>) | undefined>(undefined);
+    const [sourceEndpoint, setSourceEndpoint] = useState<{ token: string }>();
     const [closing, setClosing] = useState(false);
     const publish = useCallback((snapshot: ReviewCommandSurfaceSnapshot) => {
         currentSurface.current = snapshot;
         const active = document.activeElement;
         const editable = active instanceof HTMLElement && (active.isContentEditable || active.matches('textarea,input:not([type="button"]):not([type="submit"]):not([type="checkbox"]):not([type="radio"])'));
-        void bridge.commandSurface(identity, ++revision.current, editable ? { ...snapshot, focusContext: 'editable' } : snapshot);
+        void bridge.commandSurface(identity, ++revision.current, sourceModalOpen.current ? { ...snapshot, focusContext: 'dialog' } : editable ? { ...snapshot, focusContext: 'editable' } : snapshot);
     }, [bridge, identity]);
     useEffect(() => {
         const focusChanged = () => { if (currentSurface.current) publish(currentSurface.current); };
@@ -48,10 +51,12 @@ function ElectronReview({ bridge, identity }: { bridge: ElectronShellBridge; ide
         return () => { document.removeEventListener('focusin', focusChanged); document.removeEventListener('focusout', focusChanged); };
     }, [publish]);
     useLayoutEffect(() => { const unsubscribe = bridge.subscribeShell(message => {
+        if (message.type === 'source-endpoint') { sourceModalOpen.current = true; setSourceEndpoint({ token: message.token }); }
         if (message.type === 'toolbar-hover') setToolbarHovered(message.hovered);
         if (message.type === 'command' && message.revision === revision.current) setCommand({ id: message.id, token: message.token });
         if (message.type === 'confirm-visible') void focusedNavigation.apply(message).catch(() => undefined);
         if (message.type === 'settle-close') {
+            sourceModalOpen.current = false; setSourceEndpoint(undefined);
             setClosing(true);
             requestAnimationFrame(() => { void (async () => {
                 try { if (!settle.current) throw new Error('The review is still opening. Try closing it again after it loads.'); await settle.current(); await bridge.closeSettled(identity, message.token); }
@@ -77,6 +82,9 @@ function ElectronReview({ bridge, identity }: { bridge: ElectronShellBridge; ide
             onCommandSurfaceChange={publish} {...(command ? { commandInvocation: command } : {})}
             transitionAttemptId={identity.attemptId} transitionVisible
             onDocumentReady={generation => { void bridge.documentReady(identity, generation).then(() => requestAnimationFrame(() => requestAnimationFrame(() => { void bridge.visible(identity, generation); }))); }} />
+        {sourceEndpoint && <ElectronSourceEndpointDialog
+            onConfirm={endpoint => { void bridge.sourceEndpoint(identity, sourceEndpoint.token, endpoint).catch(() => undefined); sourceModalOpen.current = false; setSourceEndpoint(undefined); }}
+            onCancel={() => { void bridge.sourceEndpoint(identity, sourceEndpoint.token, null).catch(() => undefined); sourceModalOpen.current = false; setSourceEndpoint(undefined); }} />}
     </div>;
 }
 async function start() {
@@ -88,6 +96,11 @@ async function start() {
     const root = document.getElementById('root');
     if (!root) throw new Error('Missing review root');
     root.dataset.productionRoot = 'true';
+    if (identity.sourceEndpointToken) {
+        const token = identity.sourceEndpointToken;
+        createRoot(root).render(<ElectronSourceEndpointDialog onConfirm={endpoint => { void bridge.sourceEndpoint(identity, token, endpoint); }} onCancel={() => { void bridge.sourceEndpoint(identity, token, null); }} />);
+        return;
+    }
     createRoot(root).render(<ElectronReview bridge={bridge} identity={identity} />);
 }
 void start();

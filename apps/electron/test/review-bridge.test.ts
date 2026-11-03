@@ -50,7 +50,7 @@ test('ordinary Electron refresh cannot reacquire or roll back a protected editor
     const identity = { windowId: bridge.windowId, attemptId: bridge.attemptId };
     let delayedBootstrap = false;
     const captured = Promise.withResolvers<void>(), deliver = Promise.withResolvers<void>();
-    const runtime = createElectronHostRuntime({ identity: async () => identity,
+    const runtime = createElectronHostRuntime({ sourceEndpoint: async () => {}, identity: async () => identity,
         request: async (_id, value) => {
             const response = await bridge.request(value);
             if (delayedBootstrap && (value as { method: string }).method === 'bootstrap') {
@@ -135,7 +135,7 @@ function projection(revision = 0) {
             documentTitle: "Paper.pdf",
             sourceDisposition: "local",
             sourceDisplayName: "Paper.pdf",
-            launchSurface: "macos",
+            launchSurface: "electron",
             sourceRootPath: "/must/not/cross",
         },
         saveStatus: {
@@ -153,7 +153,7 @@ test('real RPC renderer client bootstraps through bridge and rejects bounded tra
     const bridge = new ReviewBridge(async (message) => (message.type === 'invoke' ? { ...message, type: 'result', method: message.method, payload: p.saveStatus } : { ...message, type: 'refreshed', projection: p }), generation => `placekeeper-resource://document/attempt123/${generation}`);
     bridge.projection = p;
     const identity = { windowId: bridge.windowId, attemptId: bridge.attemptId };
-    const runtime = createElectronHostRuntime({ identity: async () => identity, request: (_id, value) => bridge.request(value), requestClose: async () => {}, readyToSettle: async () => {}, documentReady: async () => { }, visible: async () => { }, commandSurface: async () => {}, presentation: async () => {}, toolbarHeight: async () => {}, closeSettled: async () => {}, writeClipboard: async () => {}, createLink: async () => 'placekeeper:///paper.pdf#page=1', focusFailed: async () => {}, subscribeShell: () => () => {}, subscribe: () => () => { } }, identity);
+    const runtime = createElectronHostRuntime({ sourceEndpoint: async () => {}, identity: async () => identity, request: (_id, value) => bridge.request(value), requestClose: async () => {}, readyToSettle: async () => {}, documentReady: async () => { }, visible: async () => { }, commandSurface: async () => {}, presentation: async () => {}, toolbarHeight: async () => {}, closeSettled: async () => {}, writeClipboard: async () => {}, createLink: async () => 'placekeeper:///paper.pdf#page=1', focusFailed: async () => {}, subscribeShell: () => () => {}, subscribe: () => () => { } }, identity);
     const bootstrap = await runtime.bootstrap();
     assert.equal(bootstrap.sessionId, p.sessionId);
     assert.equal(bootstrap.scope.launchSurface, 'electron');
@@ -295,4 +295,91 @@ test('interaction release publishes same-revision authoring changes and ignores 
     bridge.retired = true;
     await bridge.settle();
     assert.equal(refreshes, 1); assert.equal(events.length, 1);
+});
+
+test('native source navigation polls only active current generations and emits changed safe state', async () => {
+    let calls = 0;
+    let release: (() => void) | undefined;
+    const bridge = new ReviewBridge(async message => {
+        assert.equal(message.type, 'invoke'); calls++;
+        if (calls === 3) await new Promise<void>(resolve => { release = resolve; });
+        return { ...message, type: 'result', method: 'forwardSyncTex', payload: { status: 'ready', sequence: calls < 3 ? 1 : 2, generation: 2, pageIndex: 0, point: { x: 10, y: 20 }, sourcePath: '/secret.tex' } };
+    }, () => '');
+    bridge.projection = { ...projection(), activeAuthoringDraftIds: [] };
+    const events: unknown[] = [];
+    bridge.onInvalidation = event => events.push(event);
+    await bridge.pollNavigation(); assert.equal(calls, 0);
+    bridge.active = true;
+    await bridge.pollNavigation(); await bridge.pollNavigation();
+    assert.equal(events.length, 1);
+    assert.deepEqual((events[0] as { payload: unknown }).payload, { command: 'source-navigation', state: { status: 'ready', sequence: 1, generation: 2, pageIndex: 0, point: { x: 10, y: 20 } } });
+    const pending = bridge.pollNavigation();
+    await Promise.resolve(); bridge.projection = { ...bridge.projection!, generation: 3 };
+    release!(); await pending;
+    assert.equal(events.length, 1);
+    bridge.retired = true; await bridge.pollNavigation(); assert.equal(calls, 3);
+});
+
+test('reverse source setup retries only after native association and keeps the request geometry', async () => {
+    const p = { ...projection(), activeAuthoringDraftIds: [] };
+    const requests: unknown[] = [];
+    let configured = false;
+    const bridge = new ReviewBridge(async message => {
+        requests.push(message);
+        assert.equal(message.type, 'invoke');
+        return { ...message, type: 'result', method: 'reverseSyncTex', payload: { status: configured ? 'opened' : 'setup-required' } };
+    }, () => '');
+    bridge.active = true; bridge.projection = p;
+    bridge.onSourceSetup = async () => { configured = true; return true; };
+    const payload = { pageIndex: 0, point: { x: 12, y: 30 } };
+    const result = await bridge.request({ protocol: 'placekeeper.review-runtime', version: 4, kind: 'request', runtimeId: bridge.windowId, requestId: 'request1234567890', method: 'reverseSyncTex', payload, sessionId: p.sessionId, generation: p.generation, revision: p.revision });
+    assert.equal((result as { payload: { status: string } }).payload.status, 'opened');
+    assert.equal(requests.length, 2);
+    for (const request of requests) assert.deepEqual((request as { payload: unknown }).payload, payload);
+});
+
+test('navigation admission carries the opaque handle only to the helper', async () => {
+    const p = { ...projection(), activeAuthoringDraftIds: [] };
+    const handle = 'a'.repeat(43);
+    const bridge = new ReviewBridge(async message => {
+        assert.equal(message.type, 'admit');
+        assert.equal((message as { navigationHandle?: string }).navigationHandle, handle);
+        return { ...message, type: 'admitted', provisionalId: 'provisional123', resourceId: 'resource123', generation: 1, byteLength: sourceBytes.length, digest, displayName: 'Paper.pdf', projection: p };
+    }, () => '');
+    await bridge.admit('/paper.pdf', undefined, undefined, handle);
+    assert.equal(JSON.stringify(bridge.projection).includes(handle), false);
+});
+
+test('native forward acknowledgements retain the renderer generation and outcome', async () => {
+    const p = { ...projection(), activeAuthoringDraftIds: [] };
+    const payload = { action: 'ack', sequence: 5, generation: p.generation, outcome: 'applied' };
+    const bridge = new ReviewBridge(async message => {
+        assert.equal(message.type, 'invoke');
+        assert.deepEqual((message as { payload: unknown }).payload, payload);
+        return { ...message, type: 'result', method: 'forwardSyncTex', payload: { status: 'applied', sequence: 5 } };
+    }, () => '');
+    bridge.active = true; bridge.projection = p;
+    const result = await bridge.request({ protocol: 'placekeeper.review-runtime', version: 4, kind: 'request', runtimeId: bridge.windowId, requestId: 'request1234567890', method: 'forwardSyncTex', payload, sessionId: p.sessionId, generation: p.generation, revision: p.revision });
+    assert.deepEqual((result as { payload: unknown }).payload, { status: 'applied', sequence: 5 });
+});
+
+test('canceling source setup releases close settlement without retrying the editor', async () => {
+    const p = { ...projection(), activeAuthoringDraftIds: [] };
+    let calls = 0;
+    const bridge = new ReviewBridge(async message => {
+        calls++;
+        return { ...message, type: 'result', method: 'reverseSyncTex', payload: { status: 'setup-required' } };
+    }, () => '');
+    bridge.active = true; bridge.projection = p;
+    const setup = Promise.withResolvers<boolean>();
+    bridge.onSourceSetup = () => setup.promise;
+    const pending = bridge.request({ protocol: 'placekeeper.review-runtime', version: 4, kind: 'request', runtimeId: bridge.windowId, requestId: 'request1234567890', method: 'reverseSyncTex', payload: { pageIndex: 0, point: { x: 12, y: 30 } }, sessionId: p.sessionId, generation: p.generation, revision: p.revision });
+    let settled = false;
+    const close = bridge.settle().then(() => { settled = true; });
+    await Promise.resolve(); await Promise.resolve();
+    assert.equal(settled, false);
+    setup.resolve(false);
+    assert.equal((await pending as { payload: { status: string } }).payload.status, 'setup-required');
+    await close;
+    assert.equal(settled, true); assert.equal(calls, 1);
 });

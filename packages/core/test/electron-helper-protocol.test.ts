@@ -1,14 +1,12 @@
 import { expect, it } from "vitest";
 import { parseElectronReviewHelperMessage } from "../src/electron-helper-protocol.js";
-import { parseMacosReviewHelperMessage } from "../src/macos-helper-protocol.js";
 import { sanitizeNativeReviewRuntimeResponse } from "../src/review-runtime-protocol.js";
 const base = { protocolVersion: 1, windowId: "window_12345678", attemptId: "attempt_12345678", requestId: "request_12345678" };
 
-it("admits portable absolute Electron paths while preserving the Mac schema", () => {
+it("admits portable absolute Electron paths ", () => {
   for (const sourcePath of ["/tmp/paper.pdf", "C:\\Papers\\paper.pdf", "\\\\server\\share\\paper.pdf"]) {
     expect(parseElectronReviewHelperMessage({ ...base, type: "admit", sourcePath })).toBeDefined();
   }
-  expect(parseMacosReviewHelperMessage({ ...base, type: "admit", sourcePath: "C:\\Papers\\paper.pdf" })).toBeUndefined();
   for (const sourcePath of ["paper.pdf", "C:paper.pdf", "\\paper.pdf", "/tmp/bad\0.pdf"]) {
     expect(parseElectronReviewHelperMessage({ ...base, type: "admit", sourcePath })).toBeUndefined();
   }
@@ -17,7 +15,7 @@ it("admits portable absolute Electron paths while preserving the Mac schema", ()
 it("keeps the Electron method and resource request schemas closed", () => {
   const invoke = { ...base, type: "invoke", method: "scope", payload: {}, generation: 1, revision: 0 };
   expect(parseElectronReviewHelperMessage(invoke)).toBeDefined();
-  for (const method of ["bootstrap", "presence", "detach", "reverseSyncTex", "exec"]) {
+  for (const method of ["bootstrap", "presence", "detach", "exec"]) {
     expect(parseElectronReviewHelperMessage({ ...invoke, method })).toBeUndefined();
   }
   expect(parseElectronReviewHelperMessage({ ...invoke, sourcePath: "/tmp/paper.pdf" })).toBeUndefined();
@@ -40,7 +38,6 @@ it("admits only trusted Electron native destination results while renderer metho
     idempotencyKey: "operation_destination_test", selectedPath: null as string | null };
   for (const selectedPath of [null, "/tmp/Papers", "C:\\Papers", "\\\\server\\share\\Papers"]) {
     expect(parseElectronReviewHelperMessage({ ...selection, selectedPath })).toBeDefined();
-    expect(parseMacosReviewHelperMessage({ ...selection, selectedPath })).toBeUndefined();
   }
   for (const patch of [
     { selectedPath: "relative" }, { selectedPath: "C:relative" }, { selectedPath: "/tmp/bad\0path" },
@@ -59,11 +56,16 @@ it("keeps task launch admission and visible correlation in the trusted Electron 
   const launchId = "l".repeat(43);
   const admit = { ...base, type: "admit-launch", launchId };
   expect(parseElectronReviewHelperMessage(admit)).toBeDefined();
-  expect(parseMacosReviewHelperMessage(admit)).toBeUndefined();
   expect(parseElectronReviewHelperMessage({ ...admit, launchId: "short" })).toBeUndefined();
   expect(parseElectronReviewHelperMessage({ ...admit, sourcePath: "/tmp/other.pdf" })).toBeUndefined();
   const activate = { ...base, type: "activate", documentValidated: true, launchId };
   expect(parseElectronReviewHelperMessage(activate)).toBeDefined();
-  expect(parseMacosReviewHelperMessage(activate)).toBeUndefined();
   expect(parseElectronReviewHelperMessage({ ...activate, launchId: "invalid" })).toBeUndefined();
+});
+
+it("admits pathless Electron SyncTeX requests", () => {
+  const invoke = { ...base, type: "invoke", generation: 1, revision: 0 };
+  expect(parseElectronReviewHelperMessage({ ...invoke, method: "forwardSyncTex", payload: { action: "poll" } })).toBeDefined();
+  expect(parseElectronReviewHelperMessage({ ...invoke, method: "reverseSyncTex", payload: { pageIndex: 0, point: { x: 5, y: 6 } } })).toBeDefined();
+  expect(parseElectronReviewHelperMessage({ ...invoke, method: "forwardSyncTex", payload: { action: "poll", sourcePath: "/private/main.tex" } })).toBeUndefined();
 });

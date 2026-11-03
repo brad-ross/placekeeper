@@ -1,4 +1,4 @@
-import { isEditorPath, isEditorToken } from "./editor-navigation-protocol.js";
+import { isEditorEndpoint, isEditorPath, isEditorToken } from "./editor-navigation-protocol.js";
 export const NATIVE_APP_CONTROL_PROTOCOL_VERSION = 1 as const;
 
 const ID = /^[A-Za-z0-9_-]{8,128}$/u;
@@ -95,7 +95,7 @@ export function parseNativeAppControlMessage(value: unknown): NativeAppControlMe
     ? value as unknown as NativeAppControlMessage : undefined;
   if (value.type === "associate-editor") return exact(value, ["protocolVersion", "type", "appInstanceId", "helperId", "profile", "sourceRoot",
     ...(value.socket === undefined ? [] : ["socket"])]) && id(value.helperId) && typeof value.profile === "string" && /^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/u.test(value.profile)
-    && isEditorPath(value.sourceRoot) && (value.socket === undefined || isEditorPath(value.socket)) ? value as unknown as NativeAppControlMessage : undefined;
+    && isEditorPath(value.sourceRoot) && (value.socket === undefined || isEditorEndpoint(value.socket)) ? value as unknown as NativeAppControlMessage : undefined;
   if (value.type === "bind-navigation") return exact(value, ["protocolVersion", "type", "appInstanceId", "helperId", "navigationHandle"])
     && id(value.helperId) && isEditorToken(value.navigationHandle) ? value as unknown as NativeAppControlMessage : undefined;
   if (value.type === "redeem-navigation") return exact(value, ["protocolVersion", "type", "appInstanceId", "ticket"]) && isEditorToken(value.ticket)

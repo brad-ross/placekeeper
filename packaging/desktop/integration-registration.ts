@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
-import { lstat, mkdir, readFile, unlink, writeFile } from "node:fs/promises";
-import { dirname, isAbsolute } from "node:path";
+import { lstat, mkdir, readFile, readdir, unlink, writeFile } from "node:fs/promises";
+import { dirname, isAbsolute, join } from "node:path";
 
 export interface CandidateIntegrationFile {
   readonly path: string;
@@ -89,27 +89,55 @@ export function renderCandidateVscodeSettings(launcherPath: string): string {
 
 export function renderCandidateChromeManifest(nativeHostPath: string, extensionId: string): string {
   if (!isAbsolute(nativeHostPath) || !/^[a-p]{32}$/u.test(extensionId)) throw new Error("Select a native host executable and extension identity");
-  return `${JSON.stringify({ name: "com.placekeeper.chrome", description: "Placekeeper candidate native host", path: nativeHostPath, type: "stdio", allowed_origins: [`chrome-extension://${extensionId}/`] }, null, 2)}\n`;
+  return `${JSON.stringify({ name: "com.placekeeper.chrome", description: "Placekeeper native host", path: nativeHostPath, type: "stdio", allowed_origins: [`chrome-extension://${extensionId}/`] }, null, 2)}\n`;
 }
 
-export function renderCandidateCodexMcpConfig(options: {
-  readonly node: string;
-  readonly server: string;
+/** Materialize the complete plugin at setup time, after the installation has
+ * reached its final location. Codex copies plugins into a cache, so runtime
+ * paths must refer to the selected installation, never the plugin cache. */
+export async function candidateCodexPluginFiles(options: {
+  readonly template: string;
+  readonly destination: string;
   readonly launcher: string;
-  readonly daemonIdentity: string;
   readonly installationId: string;
-}): string {
-  if (![options.node, options.server, options.launcher].every(isAbsolute) || !/^[a-f0-9]{64}$/u.test(options.daemonIdentity) || !/^[a-f0-9]{64}$/u.test(options.installationId)) throw new Error("Select identified packaged Codex assets");
-  return `${JSON.stringify({ mcpServers: { placekeeper: { command: options.node, args: [options.server], env: {
-    PLACEKEEPER_DAEMON_IDENTITY: options.daemonIdentity,
-    PLACEKEEPER_INSTALL_ARTIFACT_IDENTITY: options.installationId,
-    PLACEKEEPER_CANDIDATE_LAUNCHER: options.launcher,
-  } } } }, null, 2)}\n`;
-}
-
-
-export function renderCandidateCodexToml(options: Parameters<typeof renderCandidateCodexMcpConfig>[0]): string {
-  const config = JSON.parse(renderCandidateCodexMcpConfig(options)) as { mcpServers: { placekeeper: { command: string; args: string[]; env: Record<string, string> } } };
-  const server = config.mcpServers.placekeeper;
-  return `[mcp_servers.placekeeper]\ncommand = ${JSON.stringify(server.command)}\nargs = ${JSON.stringify(server.args)}\n\n[mcp_servers.placekeeper.env]\n${Object.entries(server.env).map(([key, value]) => `${key} = ${JSON.stringify(value)}`).join("\n")}\n`;
+  readonly platform?: NodeJS.Platform;
+}): Promise<CandidateIntegrationFile[]> {
+  const { template, destination, launcher, installationId } = options;
+  if (![template, destination, launcher].every(isAbsolute) || /[\0\r\n]/u.test(launcher) || !/^[a-f0-9]{64}$/u.test(installationId)) throw new Error("Select identified packaged Codex assets");
+  const windows = (options.platform ?? process.platform) === "win32";
+  const portableLauncher = windows ? launcher.replaceAll("\\", "/") : launcher;
+  // Hooks run through the host shell. For Windows reject expansion characters
+  // rather than risk binding the hook to a different executable.
+  if (windows && /[%!"\r\n]/u.test(portableLauncher)) throw new Error("The installation path cannot be safely used by Codex hooks");
+  const literal = `'${portableLauncher.replaceAll("'", "'\\''")}'`;
+  const skillLauncher = windows ? `& '${portableLauncher.replaceAll("'", "''")}'` : literal;
+  const hookCommand = `${literal} hook --event`;
+  const files: CandidateIntegrationFile[] = [];
+  async function visit(relative = ""): Promise<void> {
+    for (const entry of await readdir(join(template, relative), { withFileTypes: true })) {
+      const suffix = join(relative, entry.name);
+      if (entry.isDirectory()) { await visit(suffix); continue; }
+      if (!entry.isFile()) throw new Error("Unexpected Codex plugin template asset");
+      if (suffix.replaceAll("\\", "/") === "scripts/mcp.sh") continue;
+      let content = await readFile(join(template, suffix), "utf8");
+      const name = suffix.replaceAll("\\", "/");
+      if (name === ".mcp.json") content = JSON.stringify({ mcpServers: { placekeeper: { command: launcher, args: ["codex-mcp"] } } }, null, 2) + "\n";
+      if (name === "hooks/hooks.json") {
+        const hooks = JSON.parse(content) as { hooks: Record<string, Array<{ hooks: Array<{ command: string; commandWindows?: string }> }>> };
+        for (const groups of Object.values(hooks.hooks)) for (const group of groups) for (const hook of group.hooks) {
+          hook.command = hookCommand;
+          if (windows) hook.commandWindows = `"${portableLauncher}" hook --event`;
+        }
+        content = JSON.stringify(hooks, null, 2) + "\n";
+      }
+      if (name.endsWith(".md")) {
+        content = content.replaceAll('"$HOME/Applications/Placekeeper.app/Contents/MacOS/placekeeper"', skillLauncher).replace("installed app-bundle launch client", "installed native launch client");
+        if (windows) content = content.replaceAll("single quotes, escaping any embedded single quote", "PowerShell single quotes, doubling any embedded single quote").replaceAll("Single-quote the path and escape embedded single quotes", "Use PowerShell single quotes and double embedded single quotes").replaceAll("through the shell execution tool:", "through the PowerShell execution tool (the leading & is PowerShell's call operator):");
+      }
+      files.push({ path: join(destination, "codex-plugin", suffix), content });
+    }
+  }
+  await visit();
+  files.push({ path: join(destination, ".agents/plugins/marketplace.json"), content: JSON.stringify({ name: `placekeeper-${installationId}`, interface: { displayName: "Placekeeper Installed" }, plugins: [{ name: "codex-plugin", source: { source: "local", path: "./codex-plugin" }, policy: { installation: "AVAILABLE", authentication: "ON_INSTALL" }, category: "Productivity" }] }, null, 2) + "\n" });
+  return files;
 }
