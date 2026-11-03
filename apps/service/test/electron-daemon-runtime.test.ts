@@ -1,3 +1,4 @@
+import { establishPrivateDirectory } from "../src/platform/private-storage.js";
 import { SessionBroker } from "../src/sessions/session-broker.js";
 import { copyFile, mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -8,6 +9,7 @@ import { requestControl, startLaunchControlServer } from "../src/host/launch-con
 
 it("admits Electron through registered app ownership with bounded resources and independent app activity", async () => {
   const root = await mkdtemp(join(tmpdir(), "placekeeper-electron-runtime-"));
+  await establishPrivateDirectory(root);
   const assets = join(root, "assets");
   await mkdir(assets);
   await writeFile(join(assets, "app.js"), "export function start(){}\n");
@@ -90,6 +92,7 @@ it("admits Electron through registered app ownership with bounded resources and 
 
 it("attaches a fresh helper through a staged desktop launch over private control", async () => {
   const root = await mkdtemp(join(tmpdir(), "placekeeper-electron-staged-control-"));
+  await establishPrivateDirectory(root);
   const assets = join(root, "assets"); await mkdir(assets); await writeFile(join(assets, "app.js"), "export {}\n");
   const sourcePath = join(root, "paper.pdf"); await writeFile(sourcePath, "%PDF-1.7\nstaged desktop launch\n%%EOF");
   const host = await PlacekeeperHost.start({ recoveryRoot: join(root, "recovery"), webAssets: { root: assets }, port: 0 });
@@ -112,6 +115,7 @@ it("attaches a fresh helper through a staged desktop launch over private control
 
 it("releases recovered Electron admission without leaking browser presence", async () => {
   const root = await mkdtemp(join(tmpdir(), "pk-native-recovery-"));
+  await establishPrivateDirectory(root);
   const recoveryRoot = join(root, "recovery"); const sourcePath = join(root, "paper.pdf");
   await copyFile(resolve("test/fixtures/pdfs/multi-page-text.pdf"), sourcePath);
   const seed = new SessionBroker({ recoveryRoot });
@@ -153,6 +157,7 @@ it("releases recovered Electron admission without leaking browser presence", asy
 
 it("keeps the first provisional review activatable when a focused task admission is rejected", async () => {
   const root = await mkdtemp(join(tmpdir(), "pk-focus-admission-"));
+  await establishPrivateDirectory(root);
   const assets = join(root, "assets"); await mkdir(assets); await writeFile(join(assets, "app.js"), "export {}\n");
   const sourcePath = join(root, "paper.pdf"); await writeFile(sourcePath, "%PDF-1.7\nprovisional duplicate\n%%EOF");
   const host = await PlacekeeperHost.start({ recoveryRoot: join(root, "recovery"), webAssets: { root: assets }, port: 0 });

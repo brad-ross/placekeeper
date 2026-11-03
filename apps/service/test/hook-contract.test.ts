@@ -154,10 +154,14 @@ describe("Codex lifecycle hook", () => {
 
   it("accepts the canonical installed path and the bare Placekeeper launcher only", () => {
     const expected = expect.objectContaining({ kind: "claim", taskSessionId: "thr_codex_task_123" });
+    const launcher = installedLauncherPath();
+    const launcherCommand = process.platform === "win32"
+      ? `& '${launcher.replaceAll("\\", "/").replaceAll("'", "''")}'`
+      : `'${launcher.replaceAll("'", "'\\''")}'`;
     expect(inspectHookEvent(postToolUse())).toEqual(expected);
     expect(inspectHookEvent(postToolUse({
       tool_input: {
-        command: `"${installedLauncherPath()}" open --json --surface codex --pdf /private/tmp/paper.pdf`,
+        command: `${launcherCommand} open --json --surface codex --pdf /private/tmp/paper.pdf`,
       },
     }))).toEqual(expected);
     expect(inspectHookEvent(postToolUse({

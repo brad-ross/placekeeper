@@ -1,3 +1,6 @@
+import { establishPrivateDirectory } from "../src/platform/private-storage.js";
+import { pathToFileURL } from "node:url";
+import { encodePlacekeeperLink } from "../../../packages/core/src/placekeeper-link.js";
 import { createHash } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -10,6 +13,8 @@ import { DraftSnapshotStore } from "../src/recovery/draft-snapshot.js";
 
 import { NativeRuntimeManager, type NativeRuntimeBackend, type NativeRuntimeTrustedProjection } from "../src/desktop/native-runtime.js";
 
+const paperPath = join(tmpdir(), "Paper.pdf");
+const otherPath = join(tmpdir(), "Other.pdf");
 const sourceBytes = Buffer.from("%PDF-1.7\ndesktop-runtime\n%%EOF");
 const digest = createHash("sha256").update(sourceBytes).digest("hex");
 const envelope = {
@@ -116,12 +121,12 @@ function backend(): NativeRuntimeBackend {
   };
 }
 
-async function admit(manager: NativeRuntimeManager, host: "electron" | "electron"): Promise<void> {
+async function admit(manager: NativeRuntimeManager, host: "electron"): Promise<void> {
   await expect(manager.handle("helper_12345678", {
     ...envelope,
     requestId: "request_admit_1",
     type: "admit",
-    sourcePath: "/private/tmp/Paper.pdf",
+    sourcePath: paperPath,
   })).resolves.toMatchObject({
     type: "admitted",
     displayName: "Paper.pdf",
@@ -138,6 +143,7 @@ describe.each(["electron"] as const)("%s canonical review runtime", (host) => {
   };
   it("keeps protected typing durable through restart and bounds native semantic history", async () => {
     const directory = await mkdtemp(join(tmpdir(), "placekeeper-native-history-"));
+    await establishPrivateDirectory(directory);
     let manager: NativeRuntimeManager | undefined;
     try {
       let state = projection().state as ReviewState;
@@ -155,8 +161,8 @@ describe.each(["electron"] as const)("%s canonical review runtime", (host) => {
         const next = reduceReview(state, payload as ReviewCommand);
         await store.persist({
           schemaVersion: 3,
-          source: { disposition: "local", canonicalSourcePath: "/private/tmp/Paper.pdf",
-            sourceSnapshotPath: "/private/tmp/source.pdf", displayName: "Paper.pdf" },
+          source: { disposition: "local", canonicalSourcePath: paperPath,
+            sourceSnapshotPath: join(tmpdir(), "source.pdf"), displayName: "Paper.pdf" },
           state: next, acknowledgedAt: "2026-10-16T12:00:00Z",
           destination: { phase: "none", generation: 0 },
           sync: { phase: "not-saved", desiredRevision: next.revision, desiredDigest: digest, savedRevision: 0 },
@@ -251,7 +257,7 @@ describe.each(["electron"] as const)("%s canonical review runtime", (host) => {
       ...envelope,
       requestId: "request_link_admit_1",
       type: "admit-link",
-      link: "placekeeper:///private/tmp/Paper.pdf#v=1&page=8",
+      link: encodePlacekeeperLink({ path: paperPath, location: { kind: "page", page: 8 } }),
       confirmed: true,
     })).resolves.toMatchObject({
       type: "admitted",
@@ -260,7 +266,7 @@ describe.each(["electron"] as const)("%s canonical review runtime", (host) => {
     });
     expect(service.begin).toHaveBeenCalledWith(expect.objectContaining({
       disposition: "local",
-      fileUrl: "file:///private/tmp/Paper.pdf",
+      fileUrl: pathToFileURL(paperPath).href,
     }), expect.any(AbortSignal));
   });
 
@@ -383,7 +389,7 @@ describe.each(["electron"] as const)("%s canonical review runtime", (host) => {
       attemptId: "attempt_abcdefgh",
       requestId: "request_admit_2",
       type: "admit",
-      sourcePath: "/private/tmp/Other.pdf",
+      sourcePath: otherPath,
     })).resolves.toMatchObject({ type: "failure", code: "budget" });
     await manager.helperDied("helper_12345678");
     expect(manager.activity()).toEqual({ helpers: 0, activeHelpers: 0, resources: 0 });
@@ -403,7 +409,7 @@ describe.each(["electron"] as const)("%s canonical review runtime", (host) => {
       ...envelope,
       requestId: "request_admit_3",
       type: "admit",
-      sourcePath: "/private/tmp/Paper.pdf",
+      sourcePath: paperPath,
     })).resolves.toMatchObject({ type: "recovery-offered", offer });
     expect(manager.resourceId("helper_12345678")).toBeUndefined();
     await expect(manager.handle("helper_12345678", {
@@ -525,7 +531,7 @@ describe.each(["electron"] as const)("%s canonical review runtime", (host) => {
       ...secondEnvelope,
       requestId: "request_admit_4",
       type: "admit",
-      sourcePath: "/private/tmp/Other.pdf",
+      sourcePath: otherPath,
     });
 
     const stalled = manager.handle("helper_12345678", {
@@ -658,7 +664,7 @@ describe.each(["electron"] as const)("%s canonical review runtime", (host) => {
       ...secondEnvelope,
       requestId: "request_admit_stall_2",
       type: "admit",
-      sourcePath: "/private/tmp/Other.pdf",
+      sourcePath: otherPath,
     });
 
     const stalled = manager.handle("helper_12345678", {
@@ -712,7 +718,7 @@ describe.each(["electron"] as const)("%s canonical review runtime", (host) => {
       ...secondEnvelope,
       requestId: "request_admit_resource_2",
       type: "admit",
-      sourcePath: "/private/tmp/Other.pdf",
+      sourcePath: otherPath,
     });
     const secondResourceId = manager.resourceId("helper_abcdefgh");
     if (secondResourceId === undefined) throw new Error("Expected a second document resource");

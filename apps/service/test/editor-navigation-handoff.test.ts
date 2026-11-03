@@ -1,7 +1,7 @@
 import { establishPrivateDirectory } from "../src/platform/private-storage.js";
 import { mkdtemp, writeFile, rm, realpath } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { EditorNavigation } from "../src/synctex/editor-navigation.js";
 import { EditorProfiles } from "../src/synctex/editor-profiles.js";
@@ -282,8 +282,10 @@ describe("private native navigation handoff", () => {
 
 describe("installed editor CLI", () => {
   it("resolves cwd-relative paths and preserves literal argument templates", () => {
-    expect(parseEditorArguments(["editor", "register", "--profile", "editor", "--source-root", "src", "--socket", "nvim.sock"], "/project"))
-      .toEqual({ operation: "register", profile: "editor", sourceRoot: "/project/src", socket: "/project/nvim.sock" });
+    const cwd = resolve(tmpdir(), "project");
+    const socket = process.platform === "win32" ? "\\\\.\\pipe\\nvim-test" : "nvim.sock";
+    expect(parseEditorArguments(["editor", "register", "--profile", "editor", "--source-root", "src", "--socket", socket], cwd))
+      .toEqual({ operation: "register", profile: "editor", sourceRoot: join(cwd, "src"), socket: process.platform === "win32" ? socket : join(cwd, socket) });
     expect(parseEditorArguments(["editor", "add", "--name", "editor", "--executable", "/usr/bin/true", "--args-json", '["{file}","literal $(touch nope)"]'], "/project"))
       .toMatchObject({ profile: { args: ["{file}", "literal $(touch nope)"] } });
     expect(() => parseEditorArguments(["editor", "list", "--unknown", "x"], "/project")).toThrow("Unknown option");

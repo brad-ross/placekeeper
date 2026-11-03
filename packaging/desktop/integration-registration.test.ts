@@ -76,8 +76,8 @@ it("materializes the complete native plugin with installation-scoped paths and r
   const skill = content("codex-plugin/skills/placekeeper/SKILL.md");
   expect(skill).toContain("trusted launch and display hooks report success");
   expect(skill).toContain(`'${launcher.replaceAll("'", "'\\''")}' open --json --surface codex-native`);
-  expect(files.some(file => file.path.endsWith("references/live-evidence.md"))).toBe(true);
-  expect(files.some(file => file.path.endsWith("scripts/mcp.sh"))).toBe(false);
+  expect(files.some(file => file.path.endsWith(join("references", "live-evidence.md")))).toBe(true);
+  expect(files.some(file => file.path.endsWith(join("scripts", "mcp.sh")))).toBe(false);
   expect(JSON.parse(content(".agents/plugins/marketplace.json")).name).toBe(`placekeeper-${"a".repeat(64)}`);
   expect(files.every(file => !file.content.includes("$HOME/Applications/Placekeeper.app"))).toBe(true);
   const receiptPath = join(root, "receipt");
@@ -90,7 +90,7 @@ it("renders Windows hooks without shell expansion and preserves the direct Bash 
   const root = await mkdtemp(join(tmpdir(), "pk-codex-windows-"));
   const launcher = join(root, "App & $data's folder", "bin/placekeeper.exe");
   const files = await candidateCodexPluginFiles({ template: join(process.cwd(), "integrations/codex-plugin"), destination: join(root, "market"), launcher, installationId: "a".repeat(64), platform: "win32" });
-  const hooks = JSON.parse(files.find(file => file.path.endsWith("hooks/hooks.json"))!.content);
+  const hooks = JSON.parse(files.find(file => file.path.endsWith(join("hooks", "hooks.json")))!.content);
   expect(hooks.hooks.UserPromptSubmit[0].hooks[0].commandWindows).toBe(`"${launcher.replaceAll("\\", "/")}" hook --event`);
   expect(files.find(file => file.path.endsWith("SKILL.md"))!.content).toContain(`& '${launcher.replaceAll("\\", "/").replaceAll("'", "''")}' open --json --surface codex-native`);
   await expect(candidateCodexPluginFiles({ template: join(process.cwd(), "integrations/codex-plugin"), destination: join(root, "market"), launcher: join(root, "%expanded%", "placekeeper.exe"), installationId: "a".repeat(64), platform: "win32" })).rejects.toThrow("safely");

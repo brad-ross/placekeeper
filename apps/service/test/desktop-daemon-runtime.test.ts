@@ -1,3 +1,4 @@
+import { establishPrivateDirectory } from "../src/platform/private-storage.js";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -27,6 +28,7 @@ afterEach(async () => {
 describe("Electron daemon runtime", () => {
   it("attaches a first-use link helper and authoritatively retires it", async () => {
     const root = await mkdtemp(join(tmpdir(), "placekeeper-desktop-link-runtime-"));
+    await establishPrivateDirectory(root);
     roots.push(root);
     const recoveryRoot = join(root, "recovery");
     const browserSourceRoot = join(root, "browser-sources");
@@ -127,6 +129,7 @@ describe("Electron daemon runtime", () => {
 
   it("reconciles an admission that completes after lifecycle detachment", async () => {
     const root = await mkdtemp(join(tmpdir(), "placekeeper-desktop-detach-race-"));
+    await establishPrivateDirectory(root);
     roots.push(root);
     const recoveryRoot = join(root, "recovery");
     const browserSourceRoot = join(root, "browser-sources");
@@ -194,6 +197,7 @@ describe("Electron daemon runtime", () => {
 
   it("releases first-use link ownership when daemon admission fails", async () => {
     const root = await mkdtemp(join(tmpdir(), "placekeeper-desktop-link-failure-"));
+    await establishPrivateDirectory(root);
     roots.push(root);
     const assets = join(root, "assets");
     await mkdir(assets);
@@ -240,6 +244,7 @@ describe("Electron daemon runtime", () => {
 
   it("keeps app lifecycle, review authority, resources, and link construction on closed private lanes", async () => {
     const root = await mkdtemp(join(tmpdir(), "placekeeper-desktop-runtime-control-"));
+    await establishPrivateDirectory(root);
     roots.push(root);
     const recoveryRoot = join(root, "recovery");
     const browserSourceRoot = join(root, "browser-sources");
@@ -355,6 +360,7 @@ describe("Electron daemon runtime", () => {
 
   it("rejects review authority before app registration and rejects cross-lane fields", async () => {
     const root = await mkdtemp(join(tmpdir(), "placekeeper-desktop-runtime-reject-"));
+    await establishPrivateDirectory(root);
     roots.push(root);
     const recoveryRoot = join(root, "recovery");
     const browserSourceRoot = join(root, "browser-sources");
