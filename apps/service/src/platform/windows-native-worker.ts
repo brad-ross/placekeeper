@@ -2,6 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { windowsPowerShellScript } from "./windows-powershell.js";
+import { WINDOWS_REPLACEMENT_SECURITY_SOURCE } from "./windows-security-descriptor.js";
 
 export type WindowsNativeRequest =
   | { readonly operation: "registerChromeHost" | "unregisterChromeHost"; readonly path: string; readonly owner: string; readonly sha256: string; readonly testRegistryId?: string }
@@ -26,6 +27,7 @@ const SCRIPT = String.raw`$ErrorActionPreference='Stop'
 Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
+${WINDOWS_REPLACEMENT_SECURITY_SOURCE}
 public static class PlacekeeperFilePublication {
  [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
  [return: MarshalAs(UnmanagedType.Bool)]
@@ -144,19 +146,20 @@ while ($null -ne ($line=[Console]::In.ReadLine())) {
    }
    'copyAcl' {
     $failureReason='acl-read-original'
-    $original=Get-Acl -LiteralPath $r.original
+    foreach ($path in @($r.original,$r.candidate)) {
+     $item=Get-Item -LiteralPath $path -Force
+     if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { $failureReason='reparse-point'; throw 'Reparse point' }
+     if ($item.PSIsContainer) { throw 'Replacement requires regular files' }
+    }
+    $sections=[System.Security.AccessControl.AccessControlSections]::Access -bor [System.Security.AccessControl.AccessControlSections]::Owner -bor [System.Security.AccessControl.AccessControlSections]::Group
+    $original=[IO.File]::GetAccessControl($r.original,$sections)
     $failureReason='acl-apply'
     Set-Acl -LiteralPath $r.candidate -AclObject $original
     $failureReason='acl-read-candidate'
-    $actual=Get-Acl -LiteralPath $r.candidate
+    $actual=[IO.File]::GetAccessControl($r.candidate,$sections)
     $failureReason='acl-compare'
-    $sections=[System.Security.AccessControl.AccessControlSections]::Access -bor [System.Security.AccessControl.AccessControlSections]::Owner -bor [System.Security.AccessControl.AccessControlSections]::Group
-    if ($original.GetSecurityDescriptorSddlForm($sections) -ne $actual.GetSecurityDescriptorSddlForm($sections)) {
+    if (-not [PlacekeeperReplacementSecurity]::Equivalent($original.GetSecurityDescriptorBinaryForm(),$actual.GetSecurityDescriptorBinaryForm())) {
      $failureReason='acl-mismatch'
-     if ($original.GetSecurityDescriptorSddlForm([System.Security.AccessControl.AccessControlSections]::Owner) -ne $actual.GetSecurityDescriptorSddlForm([System.Security.AccessControl.AccessControlSections]::Owner)) { $failureReason='acl-owner-mismatch' }
-     elseif ($original.GetSecurityDescriptorSddlForm([System.Security.AccessControl.AccessControlSections]::Group) -ne $actual.GetSecurityDescriptorSddlForm([System.Security.AccessControl.AccessControlSections]::Group)) { $failureReason='acl-group-mismatch' }
-     elseif ($original.AreAccessRulesProtected -ne $actual.AreAccessRulesProtected) { $failureReason='acl-protection-mismatch' }
-     elseif ($original.GetSecurityDescriptorSddlForm([System.Security.AccessControl.AccessControlSections]::Access) -ne $actual.GetSecurityDescriptorSddlForm([System.Security.AccessControl.AccessControlSections]::Access)) { $failureReason='acl-access-mismatch' }
      throw 'Replacement security descriptor was not preserved'
     }
     $result=@{status='ok'}

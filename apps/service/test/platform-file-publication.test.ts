@@ -22,7 +22,9 @@ async function fixture() {
   return { directory, target };
 }
 
-async function windowsDescriptorOracle(original: string, candidate: string): Promise<{ equal: boolean; original: unknown; candidate: unknown }> {
+interface WindowsDescriptorShape { readonly owner: string; readonly group: string; readonly controlFlags: number; readonly accessFlags: number; readonly aces: unknown[] }
+interface WindowsDescriptorPair { readonly rawSddlEqual: boolean; readonly original: WindowsDescriptorShape; readonly candidate: WindowsDescriptorShape }
+async function windowsDescriptorOracle(original: string, candidate: string): Promise<WindowsDescriptorPair> {
   const script = windowsPowerShellScript(`
 $ErrorActionPreference='Stop'
 $sid=[System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
@@ -42,19 +44,19 @@ function Shape($acl) {
  $aces=@($raw.DiscretionaryAcl | ForEach-Object {
   @{ type=[int]$_.AceType; flags=[int]$_.AceFlags; mask=$_.AccessMask; principal=(PrincipalLabel $_.SecurityIdentifier.Value) }
  })
- return @{ owner=$owner; group=$group; accessFlags=([int]$raw.ControlFlags -band 0x150c); aces=$aces }
+ return @{ owner=$owner; group=$group; controlFlags=[int]$raw.ControlFlags; accessFlags=([int]$raw.ControlFlags -band 0x150c); aces=$aces }
 }
 $original=Get-Acl -LiteralPath $env:PLACEKEEPER_TEST_ORIGINAL
 $candidate=Get-Acl -LiteralPath $env:PLACEKEEPER_TEST_CANDIDATE
 $sections=[System.Security.AccessControl.AccessControlSections]::Access -bor [System.Security.AccessControl.AccessControlSections]::Owner -bor [System.Security.AccessControl.AccessControlSections]::Group
 $originalShape=Shape $original
 $candidateShape=Shape $candidate
-[Console]::Out.Write((@{ equal=($original.GetSecurityDescriptorSddlForm($sections) -eq $candidate.GetSecurityDescriptorSddlForm($sections)); original=$originalShape; candidate=$candidateShape } | ConvertTo-Json -Compress -Depth 5))
+[Console]::Out.Write((@{ rawSddlEqual=($original.GetSecurityDescriptorSddlForm($sections) -eq $candidate.GetSecurityDescriptorSddlForm($sections)); original=$originalShape; candidate=$candidateShape } | ConvertTo-Json -Compress -Depth 5))
 `);
   const { stdout } = await promisify(execFile)(join(process.env.SystemRoot!, "System32", "WindowsPowerShell", "v1.0", "powershell.exe"),
     ["-NoProfile", "-NonInteractive", "-EncodedCommand", Buffer.from(script, "utf16le").toString("base64")],
     { env: { ...process.env, PLACEKEEPER_TEST_ORIGINAL: original, PLACEKEEPER_TEST_CANDIDATE: candidate }, windowsHide: true });
-  return JSON.parse(stdout) as { equal: boolean; original: unknown; candidate: unknown };
+  return JSON.parse(stdout) as WindowsDescriptorPair;
 }
 
 it("stages beside the destination, preserves permissions and publishes complete bytes", async () => {
@@ -70,7 +72,10 @@ it("stages beside the destination, preserves permissions and publishes complete 
   }
   if (before !== undefined) {
     const after = await windowsDescriptorOracle(target, candidate);
-    expect(after.equal).toBe(true);
+    // Windows may add the auto-inherited marker while copying an unchanged
+    // file DACL. Check all actual ACEs, owner/group and every other access flag.
+    expect(after.candidate).toEqual({ ...after.original, controlFlags: after.candidate.controlFlags, accessFlags: after.candidate.accessFlags });
+    expect((after.original.controlFlags ^ after.candidate.controlFlags) & ~0x400).toBe(0);
     expect(after.original).toEqual(before.original);
   }
   const publication = await publishFile(candidate, target);
@@ -79,6 +84,17 @@ it("stages beside the destination, preserves permissions and publishes complete 
   expect(await readFile(target, "utf8")).toBe("reviewed");
   if (process.platform !== "win32") expect((await stat(target)).mode & 0o777).toBe(0o640);
   expect(await readdir(directory)).toEqual(["paper.pdf"]);
+});
+
+it.skipIf(process.platform !== "win32")("refuses replacement descriptor copying for directories and reparse points", async () => {
+  const { directory, target } = await fixture();
+  await expect(requestWindowsNative({ operation: "copyAcl", original: target, candidate: directory })).rejects.toThrow();
+  await expect(requestWindowsNative({ operation: "copyAcl", original: directory, candidate: target })).rejects.toThrow();
+  const alias = `${directory}-junction`; directories.push(alias);
+  await symlink(directory, alias, "junction");
+  await expect(requestWindowsNative({ operation: "copyAcl", original: target, candidate: alias })).rejects.toMatchObject({ reason: "reparse-point" });
+  await expect(requestWindowsNative({ operation: "copyAcl", original: alias, candidate: target })).rejects.toMatchObject({ reason: "reparse-point" });
+  expect(await readFile(target, "utf8")).toBe("original");
 });
 
 it("rejects cross-directory staging before touching the original", async () => {

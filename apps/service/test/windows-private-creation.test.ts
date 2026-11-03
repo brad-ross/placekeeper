@@ -7,12 +7,59 @@ import { afterEach, expect, it, vi } from "vitest";
 import { createPrivateFile, ensurePrivateDirectory, verifyPrivatePath, writePrivateFile } from "../src/platform/private-storage.js";
 import { closeWindowsNativeWorker } from "../src/platform/windows-native-worker.js";
 import { windowsPowerShellScript } from "../src/platform/windows-powershell.js";
+import { WINDOWS_REPLACEMENT_SECURITY_SOURCE } from "../src/platform/windows-security-descriptor.js";
 const roots: string[] = [];
 afterEach(async () => {
   await closeWindowsNativeWorker();
   vi.unstubAllEnvs();
   for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true });
 });
+it.runIf(process.platform === "win32")("compares replacement descriptors ignoring only the file auto-inherited marker", async () => {
+  const script = windowsPowerShellScript(String.raw`
+$ErrorActionPreference='Stop'
+Add-Type -TypeDefinition @'
+${WINDOWS_REPLACEMENT_SECURITY_SOURCE}
+'@
+function Serialize($descriptor) {
+ $bytes=New-Object byte[]($descriptor.BinaryLength)
+ $descriptor.GetBinaryForm($bytes,0)
+ return ,$bytes
+}
+function Bytes($sddl,$flags=0) {
+ $raw=New-Object System.Security.AccessControl.RawSecurityDescriptor($sddl)
+ $raw.SetFlags($raw.ControlFlags -bor $flags)
+ return ,(Serialize $raw)
+}
+$base='O:SYG:BAD:(A;;FA;;;SY)(A;;FR;;;BA)'
+$expected=Bytes $base
+$marked=Bytes $base 0x400
+$markedBefore=[Convert]::ToBase64String($marked)
+$raw=New-Object System.Security.AccessControl.RawSecurityDescriptor($expected,0)
+$absent=[System.Security.AccessControl.RawSecurityDescriptor]::new([System.Security.AccessControl.ControlFlags]::None,$raw.Owner,$raw.Group,$null,$null)
+$nullDacl=[System.Security.AccessControl.RawSecurityDescriptor]::new([System.Security.AccessControl.ControlFlags]::DiscretionaryAclPresent,$raw.Owner,$raw.Group,$null,$null)
+$results=@{
+ identical=[PlacekeeperReplacementSecurity]::Equivalent($expected,$expected)
+ autoInherited=[PlacekeeperReplacementSecurity]::Equivalent($expected,$marked)
+ rights=[PlacekeeperReplacementSecurity]::Equivalent($expected,(Bytes 'O:SYG:BAD:(A;;FR;;;SY)(A;;FR;;;BA)'))
+ principal=[PlacekeeperReplacementSecurity]::Equivalent($expected,(Bytes 'O:SYG:BAD:(A;;FA;;;BU)(A;;FR;;;BA)'))
+ order=[PlacekeeperReplacementSecurity]::Equivalent($expected,(Bytes 'O:SYG:BAD:(A;;FR;;;BA)(A;;FA;;;SY)'))
+ aceFlags=[PlacekeeperReplacementSecurity]::Equivalent($expected,(Bytes 'O:SYG:BAD:(A;ID;FA;;;SY)(A;;FR;;;BA)'))
+ protected=[PlacekeeperReplacementSecurity]::Equivalent($expected,(Bytes $base 0x1000))
+ inheritRequest=[PlacekeeperReplacementSecurity]::Equivalent($expected,(Bytes $base 0x100))
+ defaulted=[PlacekeeperReplacementSecurity]::Equivalent($expected,(Bytes $base 0x8))
+ owner=[PlacekeeperReplacementSecurity]::Equivalent($expected,(Bytes 'O:BAG:BAD:(A;;FA;;;SY)(A;;FR;;;BA)'))
+ group=[PlacekeeperReplacementSecurity]::Equivalent($expected,(Bytes 'O:SYG:SYD:(A;;FA;;;SY)(A;;FR;;;BA)'))
+ present=[PlacekeeperReplacementSecurity]::Equivalent((Serialize $absent),(Serialize $nullDacl))
+ nullVsEmpty=[PlacekeeperReplacementSecurity]::Equivalent((Serialize $nullDacl),(Bytes 'O:SYG:BAD:'))
+ inputUnchanged=([Convert]::ToBase64String($marked) -eq $markedBefore)
+}
+[Console]::Out.Write(($results | ConvertTo-Json -Compress))
+`);
+  const { stdout } = await promisify(execFile)(join(process.env.SystemRoot!, "System32", "WindowsPowerShell", "v1.0", "powershell.exe"),
+    ["-NoProfile", "-NonInteractive", "-EncodedCommand", Buffer.from(script, "utf16le").toString("base64")], { windowsHide: true });
+  expect(JSON.parse(stdout)).toEqual({ identical: true, autoInherited: true, rights: false, principal: false, order: false, aceFlags: false,
+    protected: false, inheritRequest: false, defaulted: false, owner: false, group: false, present: false, nullVsEmpty: false, inputUnchanged: true });
+}, 15_000);
 it.runIf(process.platform === "win32")("verifies private storage despite incompatible inherited PowerShell module paths", async () => {
   const root = await mkdtemp(join(tmpdir(), "pk-private-modules-")); roots.push(root);
   const modules = join(root, "modules");
