@@ -19,7 +19,7 @@ import { parseDesktopOpenIntent, secondInstanceArguments, DesktopInvocationQueue
 import { FocusedVisibilityGate } from './focused-visibility.js';
 import { WindowActivityRegistry, ActivityAcknowledgements } from './window-lifecycle.js';
 import { DocumentWindowRegistry } from './window-registry.js';
-import { parseWindowState, readWindowState, writeWindowState, type WindowIntent } from './window-state.js';
+import { parseWindowState, readWindowState, writeWindowState, importLegacyMacPreferences, readLegacyInterfaceScale, type WindowIntent } from './window-state.js';
 import { installMenus, type WindowCommands } from './menus.js';
 import { createManualUpdateAction } from './update-check.js';
 import { nativeTitlebarOptions, trackTitlebarHover } from './titlebar.js';
@@ -59,6 +59,12 @@ protocol.registerSchemesAsPrivileged([
 const startupTime = performance.now();
 async function start() {
     await app.whenReady();
+    if (process.platform === 'darwin' && !smokePaths) {
+        await importLegacyMacPreferences({ profileRoot: app.getPath('userData') }).catch(error => {
+            dialog.showErrorBox('Previous window settings could not be imported', `Your original settings are preserved. ${String(error)}`);
+        });
+    }
+    const interfaceScale = await readLegacyInterfaceScale(app.getPath('userData'));
     const root = join(process.resourcesPath, 'desktop');
     const manifest = JSON.parse(await readFile(join(root, 'runtime-manifest.json'), 'utf8')) as PackagedRuntimeManifest;
     const expectedIdentity = { daemonIdentity: manifest.daemonIdentity, installArtifactIdentity: manifest.installArtifactIdentity };
@@ -201,6 +207,7 @@ async function start() {
     const bounds = restored?.bounds ?? { width: 1200, height: 900 };
     const usable = screen.getAllDisplays().some(d => (bounds.x ?? d.workArea.x) < d.workArea.x + d.workArea.width && (bounds.y ?? d.workArea.y) < d.workArea.y + d.workArea.height && (bounds.x ?? d.workArea.x) + bounds.width > d.workArea.x && (bounds.y ?? d.workArea.y) + bounds.height > d.workArea.y);
     const window = new BrowserWindow({ ...nativeTitlebarOptions(), ...(usable ? bounds : { width: bounds.width, height: bounds.height }), minWidth: 600, minHeight: 400, title: basename(sourcePath), backgroundColor: '#f7f7f7', webPreferences: { preload: join(__dirname, 'preload.cjs'), session: isolated, sandbox: true, contextIsolation: true, nodeIntegration: false, webSecurity: true } });
+    window.webContents.setZoomFactor(interfaceScale);
     timing('window-visible', bridge);
     const entry: Entry = { window, bridge, retirement, toolbarHeight: 52, permitClose: false, focusedVisibility: new FocusedVisibilityGate(), rendererReady: false, failureShown: false, intent: { sourcePath, bounds, maximized: restored?.maximized ?? false, ...(restored?.presentation ? { presentation: restored.presentation } : {}) } };
     entries.set(window.webContents.id, entry); ownedWindows.register(bridge.helperId);

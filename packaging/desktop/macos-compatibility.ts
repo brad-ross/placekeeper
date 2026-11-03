@@ -1,7 +1,7 @@
 import { chmod, mkdir, symlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
-/** Preserve published CLI and host paths while every invocation runs Electron's
+/** Preserve the public AppKit CLI and host paths while every invocation runs Electron's
  * exact bundled service. These aliases are created before bundle signing. */
 export async function installMacCompatibility(resources: string): Promise<void> {
   const macos = join(dirname(resources), "MacOS");

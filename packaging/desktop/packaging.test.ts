@@ -1,4 +1,6 @@
-import { mkdtemp, mkdir, readFile, readlink, rm, symlink, writeFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { chmod, mkdtemp, mkdir, readFile, readlink, rm, symlink, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
@@ -91,7 +93,7 @@ describe("production desktop identity", () => {
   it("uses the same production name, bundle id and executable on all platforms", async () => {
     expect(forgeConfig.packagerConfig).toMatchObject({ name: "Placekeeper", executableName: "PlacekeeperDesktop", appBundleId: "local.placekeeper" });
     const pkg = JSON.parse(await readFile(new URL("../../apps/electron/package.json", import.meta.url), "utf8"));
-    expect(pkg).toMatchObject({ productName: "Placekeeper", version: "0.2.4" });
+    expect(pkg).toMatchObject({ productName: "Placekeeper", version: "0.3.0" });
   });
 
   it("advertises PDF and Placekeeper URL opening without claiming the default PDF handler", () => {
@@ -115,5 +117,15 @@ describe("production desktop identity", () => {
     expect(await readFile(join(resources, "../MacOS/placekeeper-chrome-host"), "utf8")).toContain('bin/placekeeper-chrome-native-host');
     expect(await readlink(join(resources, "node"))).toBe(join("desktop", "node"));
     expect(await readlink(join(resources, "integrations"))).toBe(join("desktop", "integrations"));
+    if (process.platform !== 'win32') {
+      await mkdir(join(resources, 'desktop/bin'), { recursive: true });
+      for (const [alias, target] of [['placekeeper', 'placekeeper'], ['placekeeper-vscode', 'placekeeper-vscode'], ['placekeeper-chrome-host', 'placekeeper-chrome-native-host']]) {
+        const executable = join(resources, 'desktop/bin', target!);
+        await writeFile(executable, `#!/bin/sh\nprintf '%s\\n' '${target}' "$@"\n`);
+        await chmod(executable, 0o755);
+        const { stdout } = await promisify(execFile)(join(resources, '../MacOS', alias!), ['a PDF & notes.pdf']);
+        expect(stdout.trim().split('\n')).toEqual([target, 'a PDF & notes.pdf']);
+      }
+    }
   });
 });

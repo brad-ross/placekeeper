@@ -26,6 +26,7 @@ export function resolvePlatformLocations(options: PlatformLocationOptions = {}) 
   return {
     appSupportRoot,
     recoveryRoot: path.join(appSupportRoot, "recovery"),
+    recoveryBackupRoot: path.join(appSupportRoot, "installer"),
     windowPreferencesRoot: path.join(appSupportRoot, "electron"),
     lifecycleLockPath: path.join(appSupportRoot, "lifecycle.lock"),
     socketPath: path.join(appSupportRoot, "control.sock"),

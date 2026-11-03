@@ -7,6 +7,7 @@ import { resolveLauncherRuntime } from './launcher.mjs';
 import { assertLinuxUserSandbox } from './linux-sandbox.mjs';
 import { packageManagerInvocation } from './package-manager.mjs';
 import { runtimeRoot } from './install-built-app.mjs';
+import { resolveInstallLayout, assertSafeInstallDestinationOnDisk } from './install-layout.ts';
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const pins = await import('./runtime-manifest.json', { with: { type: 'json' } });
 const target = `${process.platform}-${process.arch}`;
@@ -21,8 +22,9 @@ for (const argument of args) {
   choices[match[1]] = match[2];
 }
 const home = process.env.PLACEKEEPER_USER_HOME ?? homedir();
-const parent = process.env.PLACEKEEPER_INSTALL_ROOT ?? (process.platform === 'darwin' ? join(home, 'Applications') : process.platform === 'win32' ? process.env.LOCALAPPDATA ?? join(home, 'AppData/Local') : join(home, '.local/share'));
-const destination = join(parent, process.platform === 'darwin' ? 'Placekeeper.app' : process.platform === 'win32' ? 'Placekeeper' : 'placekeeper');
+const layoutOptions = { homeDirectory: home };
+const { destination } = resolveInstallLayout(layoutOptions);
+await assertSafeInstallDestinationOnDisk(destination, layoutOptions);
 const packageRoot = join(repo, 'dist/desktop-artifacts', `Placekeeper-${target}`);
 const built = process.platform === 'darwin' ? join(packageRoot, 'Placekeeper.app') : packageRoot;
 const launcher = app => process.platform === 'darwin' ? join(app, 'Contents/MacOS/placekeeper') : join(runtimeRoot(app), 'bin', `placekeeper${process.platform === 'win32' ? '.exe' : ''}`);

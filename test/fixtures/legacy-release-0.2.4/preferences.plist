@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Placekeeper.AppZoom.v1</key>
+	<real>1.25</real>
+	<key>Placekeeper.RestorableDocumentWindows.v1</key>
+	<array>
+		<dict>
+			<key>frame</key>
+			<string>{{100, 120}, {1200, 900}}</string>
+			<key>page</key>
+			<integer>3</integer>
+			<key>sourcePath</key>
+			<string>/private/example/paper.pdf</string>
+			<key>zoom</key>
+			<integer>16</integer>
+		</dict>
+	</array>
+</dict>
+</plist>
