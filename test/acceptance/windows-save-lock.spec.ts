@@ -17,6 +17,20 @@ import { SessionBroker } from "../../apps/service/src/sessions/session-broker.js
 const sha = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
 const encode = (script: string) => Buffer.from(windowsPowerShellScript(script), "utf16le").toString("base64");
 
+interface FixtureWrite { readonly revision: number; readonly annotationCount: number }
+function fixtureWriter(original: Uint8Array, reviewed: Uint8Array, calls: FixtureWrite[]): PdfWriter {
+  return { write: async request => {
+    if (calls.length < 16) calls.push({ revision: request.revision, annotationCount: request.annotations.length });
+    const bytes = request.revision > 0 && request.annotations.length > 0 ? reviewed : original;
+    return {
+      pdfBytes: bytes,
+      evidence: { backend: "embedpdf", backendVersion: "test", originalSha256: request.sourceSha256,
+        outputSha256: sha(bytes), pageCount: 1, structurallyValid: true,
+        preexistingAnnotationIds: [], annotations: [] },
+    };
+  } };
+}
+
 async function probeSharingDenial(powershell: string, target: string, renameTarget: string): Promise<void> {
   const { stdout } = await promisify(execFile)(powershell, ["-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand", encode(`
 $ErrorActionPreference='Stop'
@@ -53,6 +67,7 @@ test("a Windows sharing lock preserves original bytes and accepted recovery, the
   const releasePath = join(directory, `release-${randomUUID()}`);
   const original = Buffer.from("%PDF-1.7\noriginal\n%%EOF");
   const reviewed = Buffer.from("%PDF-1.7\nreviewed note\n%%EOF");
+  const writerCalls: FixtureWrite[] = [];
   await writeFile(target, original);
   const broker = new SessionBroker({ recoveryRoot: join(directory, "recovery"), portableReader: async () => [] });
   const powershell = join(process.env.SystemRoot ?? "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
@@ -80,15 +95,11 @@ test("a Windows sharing lock preserves original bytes and accepted recovery, the
     const opened = await broker.openReview({ pdfPath: target });
     if (opened.kind !== "opened") throw new Error("Expected fresh review");
     const sessionId = opened.launch.sessionId;
-    const writer: PdfWriter = { write: async request => ({
-      pdfBytes: reviewed,
-      evidence: { backend: "embedpdf", backendVersion: "test", originalSha256: request.sourceSha256,
-        outputSha256: sha(reviewed), pageCount: 1, structurallyValid: true,
-        preexistingAnnotationIds: [], annotations: [] },
-    }) };
+    const writer = fixtureWriter(original, reviewed, writerCalls);
     const coordinator = new PdfSaveCoordinator({ broker, writer,
       verify: async ({ annotations }) => ({ pageCount: 1, annotationIds: annotations.map(item => item.id) }) });
     await coordinator.chooseOriginal(sessionId);
+    expect(await readFile(target), `writer requests after choosing original: ${JSON.stringify(writerCalls)}`).toEqual(original);
     holder = spawn(powershell, ["-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand", encode(`
 $ErrorActionPreference = 'Stop'
 $path = $env:PLACEKEEPER_LOCK_TARGET
@@ -125,7 +136,7 @@ try {
     assertHolding();
     await probeSharingDenial(powershell, target, join(directory, "probe-rename.pdf"));
     assertHolding();
-    expect(await readFile(target)).toEqual(original);
+    expect(await readFile(target), `writer requests before mutation: ${JSON.stringify(writerCalls)}`).toEqual(original);
     await broker.acceptMutation(sessionId, addPageNote(broker.state(sessionId)!, 0,
       { x: 10, y: 10, width: 20, height: 20 }, "Retain this accepted note"));
     assertHolding();
