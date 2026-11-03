@@ -10,6 +10,24 @@
   min-height: 0;
 }
 
+/* The inert boundary must not interrupt the reader's viewport sizing chain. */
+.review-upgrade-content {
+  display: contents;
+}
+
+.review-upgrade-status {
+  pointer-events: none;
+  position: fixed;
+  inset: auto 16px 16px;
+  z-index: 30;
+  padding: 10px 14px;
+  border: 1px solid var(--review-border, #ccc);
+  border-radius: 8px;
+  color: var(--review-ink-primary, #222);
+  background: var(--review-surface-canvas, #fff);
+  font: 13px/1.5 var(--review-font-ui, sans-serif);
+}
+
 [data-production-review] {
   height: 100%;
   min-height: 0;

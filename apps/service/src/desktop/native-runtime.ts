@@ -168,6 +168,12 @@ export class NativeRuntimeManager {
     };
   }
 
+  upgradeParticipantId(helperId: string): string | undefined {
+    const record = this.#records.get(helperId);
+    return record?.phase === 'active' ? `${this.#host}:${record.presentationLease}` : undefined;
+  }
+  upgradeCovered(has: (id: string) => boolean): boolean { return [...this.#records.keys()].every(id => { const participant = this.upgradeParticipantId(id); return participant !== undefined && has(participant); }); }
+
   navigationSessionId(helperId: string): string | undefined {
     const record = this.#records.get(helperId);
     return record === undefined || record.phase === "recovery" ? undefined : record.projection.sessionId;
@@ -595,6 +601,7 @@ export class NativeRuntimeManager {
         ? await this.#backend.invoke(record.canonicalKey, message.method, message.payload, {
         ...(message.idempotencyKey === undefined ? {} : { idempotencyKey: message.idempotencyKey }),
         payloadDigest,
+        presentationLease: record.presentationLease,
         expectedDocumentGeneration: message.generation,
         ...(trustedDestinationSelection === undefined ? {} : {
           trustedDestinationSelection,
@@ -612,10 +619,12 @@ export class NativeRuntimeManager {
             record.interactionAttachment!,
             interactionAction,
             message.payload,
+            record.presentationLease,
           ) ?? { status: "unauthorized" };
       throwIfAborted(signal);
       const payload = sanitizeNativeReviewRuntimeResponse(this.#host, message.method, result);
       if (payload === undefined) return this.#failure(message, "unavailable");
+      if (message.method === "upgradePoll") return { ...this.#envelope(message), type: "result", method: message.method, payload };
       const current = await this.#backend.current(record.canonicalKey, signal);
       throwIfAborted(signal);
       const projection = sanitizeNativeRuntimeProjection(this.#host, current);

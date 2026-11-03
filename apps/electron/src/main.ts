@@ -77,6 +77,7 @@ async function start() {
     const paths = { ...(smokePaths ?? defaultDaemonPaths()), webAssetsRoot: runtime.webAssetsRoot, packagedRuntime: { root, manifest, expectedIdentity } };
     const appInstanceId = randomUUID();
     const lifecycle = spawn(runtime.nodeExecutable, [runtime.serviceEntry, 'electron-lifecycle-control', ...installedSmokeDaemonArgs(paths)], { stdio: ['pipe', 'pipe', 'inherit'], env: { ...process.env, PLACEKEEPER_APP_INSTANCE_ID: appInstanceId, PLACEKEEPER_DAEMON_IDENTITY: manifest.daemonIdentity, PLACEKEEPER_INSTALL_ARTIFACT_IDENTITY: manifest.installArtifactIdentity, PLACEKEEPER_PDFIUM_WASM: join(runtime.webAssetsRoot, 'pdfium.wasm') } });
+    let handleUpgrade: ((status: import("../../../packages/core/src/upgrade-review-protocol.js").UpgradeReviewStatus) => void) | undefined;
     let lifecycleStopping = false;
     let lifecycleFailureShown = false;
     const activityAcknowledgements = new ActivityAcknowledgements();
@@ -100,11 +101,12 @@ async function start() {
                     registered = true;
                     resolve();
                 } else activityAcknowledgements.acknowledge();
+                if (response.upgrade) handleUpgrade?.(response.upgrade);
             }
             throw new Error(registered ? 'Lifecycle control channel ended' : 'Lifecycle registration ended early');
         })().catch(error => { reject(error); failLifecycle(error instanceof Error ? error : new Error(String(error))); });
     });
-    lifecycle.stdin.write(encodeElectronHelperFrame({ protocolVersion: 1, type: 'register-app', appInstanceId, processId: process.pid, startIdentity: randomUUID(), buildIdentity: manifest.installArtifactIdentity, installationIdentity: manifest.installArtifactIdentity }));
+    lifecycle.stdin.write(encodeElectronHelperFrame({ protocolVersion: 1, type: 'register-app', upgradePreparationVersion: 1, appInstanceId, processId: process.pid, startIdentity: randomUUID(), buildIdentity: manifest.installArtifactIdentity, installationIdentity: manifest.installArtifactIdentity }));
     let registrationTimer: ReturnType<typeof setTimeout> | undefined;
     try {
         await Promise.race([registration, new Promise<never>((_resolve, reject) => { registrationTimer = setTimeout(() => reject(new Error('Lifecycle registration timeout')), 30000); })]);
@@ -132,6 +134,27 @@ async function start() {
         void pending.catch(error => console.error('Electron window activity failed', error));
         return pending;
     };
+    let preparedUpgrade: string | undefined;
+    let protectingUpgrade = false;
+    handleUpgrade = status => {
+        if (status.phase === 'canceled' || status.phase === 'none' || status.phase === 'preview') { preparedUpgrade = undefined; return; }
+        if (status.phase === 'preparing' && (preparedUpgrade !== status.attemptId || status.settlementRequired === true) && !protectingUpgrade) {
+            protectingUpgrade = true; preparedUpgrade = status.attemptId;
+            void (async () => {
+                let error: string | undefined;
+                try { await persistence; await writeWindowState(statePath, [...entries.values()].map(e => e.intent)); }
+                catch (failure) { error = String(failure).slice(0, 1024); }
+                if (preparedUpgrade !== status.attemptId) return;
+                const request = { attemptId: status.attemptId!, ...(error === undefined ? {} : { error }) };
+                await activityAcknowledgements.enqueue(() => lifecycle.stdin.write(encodeElectronHelperFrame({ protocolVersion: 1, type: 'upgrade-settle', appInstanceId, request })));
+            })().catch(failLifecycle).finally(() => { protectingUpgrade = false; });
+        }
+        if (status.phase === 'committed' && status.attemptId === preparedUpgrade) { quitting = true; app.quit(); }
+    };
+    let upgradePollPending = false;
+    const upgradePollTimer = setInterval(() => { if (!lifecycleStopping && !upgradePollPending) { upgradePollPending = true; void activity().finally(() => { upgradePollPending = false; }); } }, 500);
+    upgradePollTimer.unref();
+    app.on('will-quit', () => clearInterval(upgradePollTimer));
     const focused = () => { const w = BrowserWindow.getFocusedWindow(); return w ? entries.get(w.webContents.id) : undefined; };
     const checkUpdates = createManualUpdateAction({ installedVersion: app.getVersion(), platform: process.platform, architecture: process.arch, present: async options => (await dialog.showMessageBox(options)).response, openExternal: url => shell.openExternal(url) });
     const menus = () => installMenus(() => { void chooseOpen(); }, focused, () => { void checkUpdates(); });

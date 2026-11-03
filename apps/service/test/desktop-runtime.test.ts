@@ -339,6 +339,7 @@ describe.each(["electron"] as const)("%s canonical review runtime", (host) => {
       expect.objectContaining({ attachmentId: "attachment_native_1234" }),
       "begin",
       expect.any(Object),
+      expect.any(String),
     );
     await manager.detach("helper_12345678");
     expect(service.disconnectInteraction).toHaveBeenCalledWith(

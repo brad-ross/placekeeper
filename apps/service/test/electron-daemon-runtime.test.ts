@@ -195,3 +195,31 @@ it("keeps the first provisional review activatable when a focused task admission
       message: { ...failedEnvelope, type: "admit", sourcePath, requestId: "request_failed_retry_1234" } })).resolves.toMatchObject({ response: { type: "failure", code: "invalid" } });
   } finally { await control.close(); await host.close(); await rm(root, { recursive: true, force: true }); }
 });
+
+it('blocks native menu authoring after upgrade protection while leaving every window attached until commit', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'pk-upgrade-electron-'));
+  const sourcePath = join(root, 'paper.pdf'); await copyFile('test/fixtures/pdfs/text-native.pdf', sourcePath);
+  const host = await PlacekeeperHost.start({ recoveryRoot: join(root, 'recovery'), port: 0 });
+  const appInstanceId = 'upgrade_electron_app'; const helperId = 'upgrade_electron_helper';
+  const envelope = { protocolVersion: 1, windowId: 'upgrade_electron_window', attemptId: 'upgrade_window_attempt' };
+  let sequence = 0;
+  const send = (message: object) => host.electronRuntime.handle(helperId, { ...envelope, requestId: `request_upgrade_${++sequence}`, ...message });
+  try {
+    await host.electronLifecycle.handle({ protocolVersion: 1, type: 'register-app', upgradePreparationVersion: 1, appInstanceId, processId: process.pid, startIdentity: 'upgrade_start_identity', buildIdentity: 'upgrade_build_identity' });
+    await send({ type: 'admit', sourcePath });
+    expect(host.electronLifecycle.attachHelper(appInstanceId, helperId)).toBe(true);
+    await send({ type: 'activate', documentValidated: true });
+    await host.electronLifecycle.handle({ protocolVersion: 1, type: 'activity', appInstanceId, activeWindows: 1, bootstrappingWindows: 0 });
+    const attempt = host.upgradePreparation.preview('development', { daemonIdentity: 'a'.repeat(64), installArtifactIdentity: 'b'.repeat(64) });
+    host.upgradePreparation.begin(attempt, true); await host.prepareUpgradeTasks();
+    expect(await send({ type: 'invoke', generation: 1, revision: 0, method: 'upgradeSettle', payload: { attemptId: attempt.attemptId } })).toMatchObject({ type: 'result', payload: { phase: 'preparing' } });
+    const command = { type: 'invoke', generation: 1, revision: 0, method: 'command', payload: { type: 'set-annotation-name', expectedRevision: 0, annotationName: 'Must not run from a native menu' }, idempotencyKey: 'upgrade_menu_operation_1' };
+    expect(await send(command)).toMatchObject({ type: 'failure' });
+    expect(host.electronRuntime.activity().helpers).toBe(1);
+    expect((await host.electronLifecycle.handle({ protocolVersion: 1, type: 'upgrade-settle', appInstanceId, request: { attemptId: attempt.attemptId } }))).toMatchObject({ upgrade: { phase: 'ready' } });
+    expect(await send({ ...command, idempotencyKey: 'upgrade_menu_operation_2' })).toMatchObject({ type: 'failure' });
+    expect(host.electronRuntime.activity().helpers).toBe(1);
+    host.upgradePreparation.cancel(attempt);
+    expect(await send({ ...command, idempotencyKey: 'upgrade_menu_operation_3' })).toMatchObject({ type: 'result', payload: { revision: 1 } });
+  } finally { await host.close(); await rm(root, { recursive: true, force: true }); }
+});

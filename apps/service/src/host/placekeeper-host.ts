@@ -1,3 +1,4 @@
+import { UpgradeReviewParticipants } from "./upgrade-review-participants.js";
 import { UpgradePreparationCoordinator } from "./upgrade-preparation.js";
 import type { NativeTaskLaunchReceipt } from "../desktop/native-task-launches.js";
 import { NativeSyncTex } from "../synctex/native-synctex.js";
@@ -184,6 +185,7 @@ export class PlacekeeperHost {
   readonly exporting: ExportCoordinator;
   readonly lifecycle: DaemonLifecycleCoordinator;
   readonly upgradePreparation: UpgradePreparationCoordinator;
+  readonly upgradeParticipants: UpgradeReviewParticipants;
   readonly browserSources: BrowserSourceStore;
   readonly chromeRuntime: ChromeRuntimeManager;
   readonly electronRuntime: NativeRuntimeManager;
@@ -191,6 +193,7 @@ export class PlacekeeperHost {
   readonly editorNavigation: EditorNavigation;
   readonly codexRuntime: CodexRuntimeManager;
   #closePromise?: Promise<void>;
+  #upgradeTaskPreparation: { attemptId: string; promise: Promise<void> } | undefined;
 
   readonly #nativeParentSweep: ReturnType<typeof setInterval>;
 
@@ -209,6 +212,8 @@ export class PlacekeeperHost {
     electronLifecycle: NativeAppLifecycleManager,
     editorNavigation: EditorNavigation,
     codexRuntime: CodexRuntimeManager,
+    upgradePreparation: UpgradePreparationCoordinator,
+    upgradeParticipants: UpgradeReviewParticipants,
   ) {
     this.broker = broker;
     this.server = server;
@@ -218,7 +223,8 @@ export class PlacekeeperHost {
     this.saving = saving;
     this.exporting = exporting;
     this.lifecycle = lifecycle;
-    this.upgradePreparation = new UpgradePreparationCoordinator(lifecycle);
+    this.upgradePreparation = upgradePreparation;
+    this.upgradeParticipants = upgradeParticipants;
     this.browserSources = browserSources;
     this.chromeRuntime = chromeRuntime;
     this.electronRuntime = electronRuntime;
@@ -282,12 +288,13 @@ export class PlacekeeperHost {
       return sessionId === undefined ? undefined : broker.navigationSourcePath(sessionId);
     });
     electronRuntime.admitsNavigation = (helperId, handle, path) => electronLifecycle.admitsNavigation(helperId, handle, path);
+    const codexRuntimeBackend = new CodexServiceRuntimeBackend({ broker, saving, exporting,
+      ...(options.webAssets === undefined ? {} : { assetRoot: options.webAssets.root }),
+    });
     const codexRuntime = new CodexRuntimeManager(broker, {
       ...(options.nativeQualification === undefined ? {} : { qualification: options.nativeQualification }),
       ...(options.nativeQualificationExperiments === undefined ? {} : { experiments: options.nativeQualificationExperiments }),
-      backend: new CodexServiceRuntimeBackend({ broker, saving, exporting,
-        ...(options.webAssets === undefined ? {} : { assetRoot: options.webAssets.root }),
-      }),
+      backend: codexRuntimeBackend,
     });
     const lifecycle = new DaemonLifecycleCoordinator({
       activity: () => {
@@ -307,12 +314,34 @@ export class PlacekeeperHost {
         await broker.drainWrites();
       },
     });
+    const upgradePreparation = new UpgradePreparationCoordinator(lifecycle);
+    const participants = new UpgradeReviewParticipants(upgradePreparation);
+    participants.attach('task-authority', {
+      revision: () => broker.taskBindings.upgradeRevision(),
+      protect: async () => { await lifecycle.settlementBarrier(); await saving.drain(); await broker.drainWrites(); },
+    });
+    electronLifecycle.upgradeParticipants = participants;
+    electronLifecycle.helperUpgradeCovered = helperId => { const id = electronRuntime.upgradeParticipantId(helperId); return id !== undefined && participants.has(id); };
+    upgradePreparation.setParticipantCoverage(() => broker.upgradeCovered(id => participants.has(id))
+      && chromeRuntimeBackend.upgradeCovered() && chromeRuntime.upgradeCovered(id => participants.has(id))
+      && electronRuntimeBackend.upgradeCovered() && electronRuntime.upgradeCovered(id => participants.has(id))
+      && electronLifecycle.upgradeCovered() && codexRuntime.upgradeCovered(id => participants.has(id))
+      && participants.has('task-authority'));
+    codexRuntimeBackend.upgradeParticipants = participants;
+    chromeRuntimeBackend.upgradeParticipants = participants;
+    electronRuntimeBackend.upgradeParticipants = participants;
     const server = await startHttpServer(broker, {
       ...(options.port === undefined ? {} : { port: options.port }),
       ...(options.webAssets === undefined ? {} : { webAssets: options.webAssets }),
       saving,
       exporting,
       lifecycle,
+      upgradeParticipants: participants,
+      protectUpgradeReview: async sessionId => {
+        await broker.protectChromeReview(sessionId); await saving.drain(); await broker.drainWrites();
+        const status = broker.saveStatus(sessionId);
+        if (status?.destination.phase === "active" && status.sync.phase !== "clean") throw new Error("PDF save failed");
+      },
     });
     const context = new LiveContextService({ broker });
     const reconciliation = new SourceReconciliationService({ broker });
@@ -340,6 +369,8 @@ export class PlacekeeperHost {
       electronLifecycle,
       editorNavigation,
       codexRuntime,
+      upgradePreparation,
+      participants,
     );
   }
 
@@ -507,6 +538,26 @@ export class PlacekeeperHost {
         ? failure("input-unavailable", "Open exactly one readable local PDF.")
         : failure("unsupported-context", "Choose a readable local source workspace.");
     }
+  }
+
+  async prepareUpgradeTasks(): Promise<void> {
+    const status = this.upgradeParticipants.poll('task-authority');
+    if (status.phase !== 'preparing' || !status.attemptId || !status.settlementRequired) return;
+    if (this.#upgradeTaskPreparation?.attemptId === status.attemptId) return this.#upgradeTaskPreparation.promise;
+    const promise = this.upgradeParticipants.settle('task-authority', { attemptId: status.attemptId }).then(() => {});
+    const preparation = { attemptId: status.attemptId, promise };
+    this.#upgradeTaskPreparation = preparation;
+    try { await promise; }
+    finally { if (this.#upgradeTaskPreparation === preparation) this.#upgradeTaskPreparation = undefined; }
+  }
+  async closeUpgradeAuthority(): Promise<void> {
+    await this.lifecycle.settlementBarrier();
+    this.upgradeParticipants.retireMetadata("task-authority");
+    this.electronLifecycle.retireUpgradeMetadata();
+    await this.codexRuntime.closeForUpgrade(this.upgradeParticipants.poll("task-authority"));
+    for (const task of this.broker.taskBindings.upgradeTaskIds()) this.sourceWorkflow.discardTask(task);
+    this.broker.taskBindings.revokeAll();
+    this.context.discardAll();
   }
 
   async close(): Promise<void> {

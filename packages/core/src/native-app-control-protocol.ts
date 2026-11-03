@@ -1,9 +1,11 @@
+import { isUpgradeReviewSettlement, upgradeReviewStatus, type UpgradeReviewStatus, type UpgradeReviewSettlement } from "./upgrade-review-protocol.js";
 import { isEditorEndpoint, isEditorPath, isEditorToken } from "./editor-navigation-protocol.js";
 export const NATIVE_APP_CONTROL_PROTOCOL_VERSION = 1 as const;
 
 const ID = /^[A-Za-z0-9_-]{8,128}$/u;
 
 export type NativeAppControlMessage =
+  | { readonly protocolVersion: 1; readonly type: "upgrade-settle"; readonly appInstanceId: string; readonly request: UpgradeReviewSettlement }
   | { readonly protocolVersion: 1; readonly type: "editor-profiles"; readonly appInstanceId: string }
   | { readonly protocolVersion: 1; readonly type: "associate-editor"; readonly appInstanceId: string; readonly helperId: string;
       readonly profile: string; readonly sourceRoot: string; readonly socket?: string }
@@ -17,6 +19,7 @@ export type NativeAppControlMessage =
       readonly startIdentity: string;
       readonly buildIdentity: string;
       readonly installationIdentity?: string;
+      readonly upgradePreparationVersion?: 1;
     }
   | {
       readonly protocolVersion: 1;
@@ -52,6 +55,7 @@ export type NativeAppControlResponse =
       readonly protocolVersion: 1;
       readonly type: "ack";
       readonly appInstanceId: string;
+      readonly upgrade?: UpgradeReviewStatus;
     }
   | {
       readonly protocolVersion: 1;
@@ -91,6 +95,7 @@ export function parseNativeAppControlMessage(value: unknown): NativeAppControlMe
   if (!record(value) || value.protocolVersion !== NATIVE_APP_CONTROL_PROTOCOL_VERSION || !id(value.appInstanceId)) {
     return undefined;
   }
+  if (value.type === "upgrade-settle") return exact(value, ["protocolVersion", "type", "appInstanceId", "request"]) && isUpgradeReviewSettlement(value.request) ? value as unknown as NativeAppControlMessage : undefined;
   if (value.type === "editor-profiles") return exact(value, ["protocolVersion", "type", "appInstanceId"])
     ? value as unknown as NativeAppControlMessage : undefined;
   if (value.type === "associate-editor") return exact(value, ["protocolVersion", "type", "appInstanceId", "helperId", "profile", "sourceRoot",
@@ -104,8 +109,10 @@ export function parseNativeAppControlMessage(value: unknown): NativeAppControlMe
     return exact(value, [
       "protocolVersion", "type", "appInstanceId", "processId", "startIdentity", "buildIdentity",
       ...(value.installationIdentity === undefined ? [] : ["installationIdentity"]),
+      ...(value.upgradePreparationVersion === undefined ? [] : ["upgradePreparationVersion"]),
     ]) && Number.isSafeInteger(value.processId) && (value.processId as number) > 0
       && id(value.startIdentity) && id(value.buildIdentity)
+      && (value.upgradePreparationVersion === undefined || value.upgradePreparationVersion === 1)
       && (value.installationIdentity === undefined || (typeof value.installationIdentity === "string" && /^(?:[a-f0-9]{64}|development)$/u.test(value.installationIdentity)))
       ? value as unknown as NativeAppControlMessage : undefined;
   }
@@ -144,7 +151,7 @@ export function parseNativeAppControlResponse(value: unknown): NativeAppControlR
   if (value.type === "navigation") return exact(value, ["protocolVersion", "type", "appInstanceId", "pdfPath", "navigationHandle"])
     && isEditorPath(value.pdfPath) && isEditorToken(value.navigationHandle) ? value as unknown as NativeAppControlResponse : undefined;
   if (value.type === "ack" || value.type === "update-required" || value.type === "navigation-unavailable") {
-    return exact(value, ["protocolVersion", "type", "appInstanceId"])
+    return exact(value, ["protocolVersion", "type", "appInstanceId", ...(value.upgrade === undefined ? [] : ["upgrade"])]) && (value.upgrade === undefined || (value.type === "ack" && upgradeReviewStatus(value.upgrade) !== undefined))
       ? value as unknown as NativeAppControlResponse : undefined;
   }
   if (value.type === "replacement-ready") {

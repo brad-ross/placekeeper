@@ -1,3 +1,4 @@
+import { ReviewUpgradePreparation, UpgradeCommandGate } from "./host/upgrade-preparation.js";
 import type { NativeForwardState } from "../../../packages/core/src/native-synctex-protocol.js";
 import { createRoot } from "react-dom/client";
 import {
@@ -541,6 +542,27 @@ export function RuntimeProductionReviewApp(props: {
   readonly transitionAttemptId?: string;
   readonly transitionVisible?: boolean;
 }) {
+  const [upgradeFrozen, setUpgradeFrozen] = useState(false);
+  const upgradeCommands = useRef(new UpgradeCommandGate());
+  const [upgradeMessage, setUpgradeMessage] = useState<string>();
+  const [upgradeClosed, setUpgradeClosed] = useState(false);
+  const closeSettlement = useRef<(() => Promise<void>) | undefined>(undefined);
+  useEffect(() => {
+    const runtime = props.runtime;
+    if (!runtime?.upgradePoll || !runtime.upgradeSettle) return;
+    const preparation = new ReviewUpgradePreparation({
+      poll: () => runtime.upgradePoll!(), settle: request => runtime.upgradeSettle!(request),
+      frozen: (frozen, reason) => { setUpgradeFrozen(frozen); setUpgradeMessage(reason); },
+      protectInput: async () => {
+        await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+        if (!closeSettlement.current) throw new Error('This review is still opening. Retry the upgrade after it loads.');
+        await closeSettlement.current();
+      },
+      close: async () => { await runtime.closeForUpgrade?.(); runtime.dispose(); setUpgradeClosed(true); },
+    });
+    const timer = setInterval(() => { void preparation.tick(); }, 500);
+    return () => { clearInterval(timer); preparation.stop(); };
+  }, [props.runtime]);
   const [seed, setSeed] = useState(props.initial);
   const [loaded, setLoaded] = useState(props.initial);
   const [refreshStatus, setRefreshStatus] = useState<GenerationRefreshStatus>("idle");
@@ -585,6 +607,7 @@ export function RuntimeProductionReviewApp(props: {
     setRefreshStatus(snapshot.refreshStatus);
   }), [props.runtime, seed]);
   useEffect(() => props.runtime?.subscribeHostCommands?.((command) => {
+    if (upgradeFrozen) return;
     if (command.command === "source-navigation") {
       const state = command.state;
       setSourceNavigationMessage(nativeNavigationMessage(state));
@@ -622,7 +645,7 @@ export function RuntimeProductionReviewApp(props: {
       pageIndex: command.pageIndex,
       point: command.point,
     });
-  }), [props.runtime]);
+  }), [props.runtime, upgradeFrozen]);
   useEffect(() => {
     const attemptId = props.transitionAttemptId;
     if (attemptId === undefined) return;
@@ -646,11 +669,15 @@ export function RuntimeProductionReviewApp(props: {
     refreshStatus,
   ]);
 
+  const nativeInvocation = upgradeCommands.current.filter(props.commandInvocation, upgradeFrozen, "native");
+  const hostInvocation = upgradeCommands.current.filter(hostReviewCommand, upgradeFrozen, "host");
+  const commandInvocation = props.commandInvocation === undefined ? hostInvocation : nativeInvocation;
   const visible = loaded ?? pendingRuntimeBootstrap(props.loadingDocumentTitle ?? "Opening PDF");
   // Initial preparation owns no document viewer or reading state. Mount the
   // real session afresh so its first render cannot reuse placeholder resources.
   // Later generations keep this instance and its predecessor reading capture.
-  return <ProductionReviewApp
+  if (upgradeClosed) return <div role="status">This review was protected and closed for the upgrade. Reopen it in Placekeeper after installation finishes.</div>;
+  return <>{upgradeMessage && <div className="review-upgrade-status" role="status">{upgradeMessage}</div>}<div className="review-upgrade-content" inert={upgradeFrozen}><ProductionReviewApp
     key={loaded === undefined ? 'preparing-runtime' : 'active-runtime'}
     session={visible.session}
     initialState={visible.state}
@@ -703,15 +730,13 @@ export function RuntimeProductionReviewApp(props: {
     {...(props.onDocumentTitleChange === undefined
       ? {}
       : { onDocumentTitleChange: props.onDocumentTitleChange })}
-    {...(props.registerCloseSettlement === undefined ? {} : { registerCloseSettlement: props.registerCloseSettlement })}
+    registerCloseSettlement={handler => { closeSettlement.current = handler; props.registerCloseSettlement?.(handler); }}
     {...(props.onCommandSurfaceChange === undefined
       ? {}
       : { onCommandSurfaceChange: props.onCommandSurfaceChange })}
-    {...((props.commandInvocation ?? hostReviewCommand) === undefined
-      ? {}
-      : { commandInvocation: (props.commandInvocation ?? hostReviewCommand)! })}
+    {...(commandInvocation === undefined ? {} : { commandInvocation })}
     {...(accessibilityTransition === undefined ? {} : { accessibilityTransition })}
-  />;
+  /></div></>;
 }
 
 export interface ChromeRuntimeStartResult {

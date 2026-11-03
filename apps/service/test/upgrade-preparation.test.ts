@@ -136,6 +136,7 @@ it("enforces the preparation contract over the live private control socket and H
     const next = host.upgradePreparation.preview(identity, candidate);
     const finalCredentials = { attemptId: next.attemptId, token: next.token, candidate };
     host.upgradePreparation.begin(finalCredentials, true);
+    await host.prepareUpgradeTasks();
     host.upgradePreparation.acknowledge(participant, finalCredentials, { revision: "revision-1", reviewRevisionDurable: true, protectedDraftDurable: true, pdfSaveSettled: true });
     host.upgradePreparation.commit(finalCredentials);
     expect(await requestControl(socketPath, { kind: "management", protocolVersion: 1, operation: "shutdown-if-idle" })).toMatchObject({ result: { status: "refused" } });

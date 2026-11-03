@@ -1,3 +1,4 @@
+import { isUpgradeReviewSettlement, upgradeReviewStatus } from "./upgrade-review-protocol.js";
 import { nativeSyncTexRequest, nativeSyncTexResponse } from "./native-synctex-protocol.js";
 import type { ReviewAnchorEvidenceV1, SaveDestinationConfirmation } from "./review-model.js";
 export const REVIEW_RUNTIME_PROTOCOL = "placekeeper.review-runtime" as const;
@@ -7,6 +8,8 @@ export const REVIEW_RUNTIME_HOSTS = ["vscode", "chrome", "macos", "electron", "c
 export type ReviewRuntimeHost = typeof REVIEW_RUNTIME_HOSTS[number];
 
 export const REVIEW_RUNTIME_METHODS = [
+  "upgradePoll",
+  "upgradeSettle",
   "bootstrap",
   "presence",
   "detach",
@@ -383,7 +386,8 @@ export function sanitizeChromeReviewRuntimeRequest(
   payload: unknown,
 ): unknown | undefined {
   if (!isReviewRuntimeMethodForHost("chrome", method) || !record(payload)) return undefined;
-  if (["bootstrap", "presence", "detach", "saveStatus", "saveProposal", "chooseFolder",
+  if (method === "upgradeSettle") return isUpgradeReviewSettlement(payload) ? closedJsonClone(payload) : undefined;
+  if (["upgradePoll", "bootstrap", "presence", "detach", "saveStatus", "saveProposal", "chooseFolder",
     "retrySave", "locateSave", "scope"].includes(method)) {
     return Object.keys(payload).length === 0 ? {} : undefined;
   }
@@ -461,6 +465,7 @@ export function sanitizeChromeReviewRuntimeResponse(
   value: unknown,
 ): unknown | undefined {
   if (!isReviewRuntimeMethodForHost("chrome", method)) return undefined;
+  if (method === "upgradePoll" || method === "upgradeSettle") return upgradeReviewStatus(value);
   if (method === "bootstrap") {
     if (!record(value) || !SESSION_ID.test(String(value.sessionId)) || !safeInteger(value.generation) ||
       !safeInteger(value.revision) || !record(value.scope) || !record(value.resources)) return undefined;

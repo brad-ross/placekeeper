@@ -1722,6 +1722,10 @@ export class SessionBroker {
     return scope?.sessionId === sessionId && scope.surface === surface;
   }
 
+  upgradeCovered(has: (id: string) => boolean): boolean {
+    return this.credentials.pendingBootstrapCount() === 0 && this.controls.upgradeCovered(has);
+  }
+
   activity(): {
     readonly reviewPresence: number;
     readonly codexTasks: number;

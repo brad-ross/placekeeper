@@ -123,6 +123,7 @@ async function dispatch(
   desktopLaunchArgs: readonly string[] = [],
 ): Promise<PlacekeeperControlResponse> {
   if (request.kind === "upgrade-preparation") {
+    host.upgradeParticipants.refresh();
     const preparation = host.upgradePreparation;
     const input = request.request;
     let result;
@@ -130,10 +131,10 @@ async function dispatch(
       case "preview":
         if (input.installedDaemonIdentity !== management.daemonIdentity) return { kind: "error", reason: "invalid-request" };
         result = preparation.preview(input.installedDaemonIdentity, input.candidate); break;
-      case "begin": result = preparation.begin(input.credentials, input.consent); break;
-      case "status": result = preparation.status(input.credentials); break;
+      case "begin": result = preparation.begin(input.credentials, input.consent); if (input.consent && result.phase === "preparing") { void host.prepareUpgradeTasks().catch(() => {}); result = preparation.status(input.credentials); } break;
+      case "status": void host.prepareUpgradeTasks().catch(() => {}); result = preparation.status(input.credentials); break;
       case "cancel": result = preparation.cancel(input.credentials); break;
-      case "commit": result = preparation.commit(input.credentials); break;
+      case "commit": result = preparation.commit(input.credentials); await host.closeUpgradeAuthority(); break;
       case "participant-poll": result = preparation.poll(input.participant) ?? { phase: "none" as const }; break;
       case "participant-ack": result = preparation.acknowledge(input.participant, input.credentials, input.acknowledgement); break;
     }

@@ -439,6 +439,7 @@ export function activate(context: vscode.ExtensionContext): void {
       forwardSourceLocation: () => vscode.workspace.isTrusted
         ? rebuildNavigation.forwardSourceLocation(() => sourceLocation(binding))
         : undefined,
+      closeForUpgrade: () => panel.dispose(),
       sourceNavigationAllowed: () => vscode.workspace.isTrusted,
       acknowledgeForwardNavigation: ({ sequence, generation }) => rebuildNavigation.acknowledgeExplicit(sequence, generation),
       beginReverseNavigation: () => {

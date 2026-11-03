@@ -83,6 +83,7 @@ export interface ChromeRuntimeSourceSink {
 
 /** Metadata supplied by authenticated host adapters, outside renderer payloads. */
 export interface RuntimeOperation {
+  readonly presentationLease?: string;
   readonly idempotencyKey?: string;
   readonly payloadDigest: string;
   readonly expectedDocumentGeneration?: number;
@@ -112,6 +113,7 @@ export interface ChromeRuntimeBackend {
     attachment: ReviewInteractionAttachment,
     action: "begin" | "finalize" | "release" | "acknowledge",
     payload: unknown,
+    presentationLease?: string,
   ): Promise<unknown>;
   registerInteraction?(canonicalKey: string, authenticatedOwnerKey: string): ReviewInteractionAttachment;
   disconnectInteraction?(canonicalKey: string, attachment: ReviewInteractionAttachment): void;
@@ -226,10 +228,11 @@ export class ChromeRuntimeServiceAuthority implements ChromeRuntimeBackend {
     attachment: ReviewInteractionAttachment,
     action: "begin" | "finalize" | "release" | "acknowledge",
     payload: unknown,
+    presentationLease?: string,
   ): Promise<unknown> {
     return this.#delegate.interaction === undefined
       ? Promise.resolve({ status: "unauthorized" })
-      : this.#delegate.interaction(canonicalKey, attachment, action, payload);
+      : this.#delegate.interaction(canonicalKey, attachment, action, payload, presentationLease);
   }
   registerInteraction(canonicalKey: string, authenticatedOwnerKey: string): ReviewInteractionAttachment {
     if (this.#delegate.registerInteraction === undefined) throw new Error("interaction-unavailable");
@@ -652,6 +655,7 @@ export class ChromeRuntimeConnection {
           {
             ...(message.idempotencyKey === undefined ? {} : { idempotencyKey: message.idempotencyKey }),
             payloadDigest,
+            presentationLease: this.#presentationLease,
           },
         )
         : this.#interactionAttachment === undefined || this.#backend.interaction === undefined
@@ -661,6 +665,7 @@ export class ChromeRuntimeConnection {
             this.#interactionAttachment,
             interactionAction,
             message.payload,
+            this.#presentationLease,
           );
       const payload = sanitizeChromeReviewRuntimeResponse(message.method, result);
       if (payload === undefined) return this.#failure("runtime", "invalid-service-response", message.requestId);
@@ -739,6 +744,8 @@ export class ChromeRuntimeConnection {
     }, this.#idleLeaseMs);
     this.#idleTimer.unref?.();
   }
+  upgradeCovered(has: (id: string) => boolean): boolean { return this.#phase === 'active' && has(`chrome:${this.#presentationLease}`); }
+
   #isClosed(): boolean { return this.#phase === "closed"; }
   #armAcquisitionDeadline(): void {
     const acquisition = this.#acquisition;
@@ -799,6 +806,8 @@ export class ChromeRuntimeManager {
     this.#backend = backend;
     this.#connectionOptions = options;
   }
+
+  upgradeCovered(has: (id: string) => boolean): boolean { return [...this.#connections.values()].every(connection => connection.upgradeCovered(has)); }
 
   activity(): { readonly connections: number; readonly queuedEvents: number } {
     return {

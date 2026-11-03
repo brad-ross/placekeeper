@@ -115,6 +115,7 @@ export class TaskBindingRegistry {
   readonly #proofsByHash = new Map<string, BindProofRecord>();
   readonly #proofHashByBrowserCapabilityHash = new Map<string, string>();
   readonly #authorityChecks = new Set<InFlightAuthorityCheck>();
+  #upgradeAuthorityEpoch = 0;
   readonly #nativePending = new Map<string, PendingBinding>();
   readonly #pendingByTask = new Map<string, PendingBinding>();
   readonly #pendingByReview = new Map<string, PendingBinding>();
@@ -245,10 +246,11 @@ export class TaskBindingRegistry {
   beginAuthorityCheck(input: InFlightAuthorityCheck): TaskBindingAuthorityCheck {
     const check = { ...input };
     this.#authorityChecks.add(check);
+    this.#upgradeAuthorityEpoch += 1;
     return {
       isCurrent: () => this.#authorityChecks.has(check),
       release: () => {
-        this.#authorityChecks.delete(check);
+        if (this.#authorityChecks.delete(check)) this.#upgradeAuthorityEpoch += 1;
       },
     };
   }
@@ -256,7 +258,7 @@ export class TaskBindingRegistry {
   #invalidateAuthorityChecks(matches: (check: InFlightAuthorityCheck) => boolean): void {
     for (const check of this.#authorityChecks) {
       if (matches(check)) {
-        this.#authorityChecks.delete(check);
+        if (this.#authorityChecks.delete(check)) this.#upgradeAuthorityEpoch += 1;
       }
     }
   }
@@ -833,6 +835,18 @@ export class TaskBindingRegistry {
     this.#activeByTask.clear();
     this.#activeByReview.clear();
     this.#expiredTasks.clear();
+  }
+
+  upgradeTaskIds(): readonly string[] {
+    return [...new Set([...this.#activeByTask.keys(), ...this.#pendingByTask.keys(), ...[...this.#nativePending.values()].map(binding => binding.taskSessionId)])];
+  }
+  upgradeRevision(): string {
+    this.#sweep();
+    return digestSecretHex(JSON.stringify({
+      active: [...this.#activeByTask.values()].map(binding => [binding.taskSessionId, binding.reviewSessionId, binding.documentGeneration]),
+      pending: [...this.#pendingByTask.values()].map(binding => [binding.taskSessionId, binding.reviewSessionId, binding.documentGeneration]),
+      native: [...this.#nativePending.keys()], proofs: [...this.#proofsByHash.keys()], authorityEpoch: this.#upgradeAuthorityEpoch, checks: [...this.#authorityChecks],
+    }));
   }
 
   activityCount(): number {

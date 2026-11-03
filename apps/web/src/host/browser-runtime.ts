@@ -188,6 +188,19 @@ export function createBrowserHostRuntime(session: ProductionSession): HostRuntim
 
   return {
     host: "browser",
+    closeForUpgrade: async () => { stopped = true; socket?.close(); },
+    upgradePoll: async () => {
+      const attachment = interactionAttachment ?? await attachmentReady.promise;
+      const response = await fetch(`/s/${session.sessionId}/upgrade/poll`, { method: 'POST', headers: { authorization: `Bearer ${session.credential}`, 'content-type': 'application/json' }, body: JSON.stringify({ attachment }) });
+      if (!response.ok) throw new Error('Upgrade connection unavailable');
+      return response.json();
+    },
+    upgradeSettle: async request => {
+      const attachment = interactionAttachment ?? await attachmentReady.promise;
+      const response = await fetch(`/s/${session.sessionId}/upgrade/settle`, { method: 'POST', headers: { authorization: `Bearer ${session.credential}`, 'content-type': 'application/json' }, body: JSON.stringify({ attachment, request }) });
+      if (!response.ok) throw new Error('Upgrade protection failed');
+      return response.json();
+    },
     get capabilities() { return interactionAttachment?.protocolVersion === 1
       ? { localDocumentRefresh: true as const, interactionLifecycleVersion: 1 as const }
       : { localDocumentRefresh: true as const }; },

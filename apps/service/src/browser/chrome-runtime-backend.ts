@@ -1,3 +1,5 @@
+import type { UpgradeReviewParticipants } from "../host/upgrade-review-participants.js";
+import type { UpgradeReviewSettlement } from "../../../../packages/core/src/upgrade-review-protocol.js";
 import { NativeTaskLaunchRegistry } from "../desktop/native-task-launches.js";
 import { LocalReviewBackend } from "../runtime/local-review-backend.js";
 import { chromeDownloadFolder } from "./chrome-download-folder.js";
@@ -49,6 +51,10 @@ export interface ChromeServiceRuntimeBackendOptions {
  * authority. It retains credentials, paths, source URLs, and presentation
  * leases exclusively on the trusted side. */
 export class ChromeServiceRuntimeBackend implements ChromeRuntimeBackend {
+  upgradeParticipants?: UpgradeReviewParticipants;
+  upgradeCovered(): boolean {
+    return [...this.#presentations.values()].every(leases => [...leases].every(lease => this.upgradeParticipants?.has(`${this.#runtimeHost}:${lease}`))) && this.#provisionals.size === 0;
+  }
   readonly nativeTaskLaunches?: NativeTaskLaunchRegistry;
   readonly #broker: SessionBroker;
   readonly #browserSources: BrowserSourceStore;
@@ -113,6 +119,7 @@ export class ChromeServiceRuntimeBackend implements ChromeRuntimeBackend {
   }
 
   #forgetCanonical(canonicalKey: string, record: CanonicalRecord): void {
+    for (const lease of this.#presentations.get(canonicalKey) ?? []) this.upgradeParticipants?.detach(`${this.#runtimeHost}:${lease}`);
     this.#records.delete(canonicalKey);
     this.#index.delete(record.indexKey);
     this.#presentations.delete(canonicalKey);
@@ -163,6 +170,17 @@ export class ChromeServiceRuntimeBackend implements ChromeRuntimeBackend {
     presentations.add(presentationLease);
     this.#activated.add(canonicalKey);
     this.#presentations.set(canonicalKey, presentations);
+    this.upgradeParticipants?.attach(`${this.#runtimeHost}:${presentationLease}`, {
+      generation: () => this.#broker.state(record.sessionId)?.workflow.documentGeneration ?? -1,
+      revision: () => { const state = this.#broker.state(record.sessionId); if (!state) throw new Error('Review ended'); return `${state.workflow.documentGeneration}:${state.revision}`; },
+      protect: async () => {
+        await this.#broker.protectChromeReview(record.sessionId);
+        await this.#saving.drain();
+        await this.#broker.drainWrites();
+        const status = this.#broker.saveStatus(record.sessionId);
+        if (status?.destination.phase === 'active' && status.sync.phase !== 'clean') throw new Error('PDF save failed');
+      },
+    });
     return projection;
   }
 
@@ -178,6 +196,12 @@ export class ChromeServiceRuntimeBackend implements ChromeRuntimeBackend {
   ): Promise<unknown> {
     const record = this.#record(canonicalKey);
     this.#refreshRecord(record);
+    if (method === 'upgradePoll' || method === 'upgradeSettle') {
+      if (!operation.presentationLease || !this.#presentations.get(canonicalKey)?.has(operation.presentationLease) || !this.upgradeParticipants) throw new Error('Upgrade participant unavailable');
+      const id = `${this.#runtimeHost}:${operation.presentationLease}`;
+      return method === 'upgradePoll' ? this.upgradeParticipants.poll(id) : this.upgradeParticipants.settle(id, payload as UpgradeReviewSettlement);
+    }
+    if (['command', 'chooseCopy', 'chooseOriginal', 'chooseFolder', 'retrySave', 'locateSave', 'exportReviewedCopy'].includes(method) && operation.presentationLease) this.upgradeParticipants?.assertAuthoring(`${this.#runtimeHost}:${operation.presentationLease}`);
     if (operation.trustedDestinationSelection !== undefined &&
       (this.#runtimeHost !== "electron" || (method !== "chooseFolder" && method !== "locateSave"))) {
       throw new Error("invalid-trusted-selection");
@@ -211,8 +235,10 @@ export class ChromeServiceRuntimeBackend implements ChromeRuntimeBackend {
     attachment: import("../sessions/review-interactions.js").ReviewInteractionAttachment,
     action: "begin" | "finalize" | "release" | "acknowledge",
     payload: unknown,
+    presentationLease?: string,
   ): Promise<unknown> {
     const record = this.#record(canonicalKey);
+    if ((action === 'begin' || action === 'finalize') && presentationLease) this.upgradeParticipants?.assertAuthoring(`${this.#runtimeHost}:${presentationLease}`);
     return this.#review.interaction(record.sessionId, attachment, action, payload);
   }
 
@@ -238,6 +264,7 @@ export class ChromeServiceRuntimeBackend implements ChromeRuntimeBackend {
     const presentations = this.#presentations.get(canonicalKey);
     presentations?.delete(presentationLease);
     if (presentations?.size === 0) this.#presentations.delete(canonicalKey);
+    this.upgradeParticipants?.detach(`${this.#runtimeHost}:${presentationLease}`);
   }
 
   async release(canonicalKey: string): Promise<void> {

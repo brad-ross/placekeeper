@@ -24,6 +24,8 @@ export class DaemonLifecycleCoordinator {
   readonly #drain: () => Promise<void>;
   #lifecycle: DaemonLifecycleState = "accepting";
   #activeRoutes = 0;
+  readonly #routeSettlements = new Set<Promise<void>>();
+  #frozenSettlements: readonly Promise<void>[] = [];
   #attempt = 0;
   #admissionFrozen = false;
   #preparedShutdown = false;
@@ -50,9 +52,12 @@ export class DaemonLifecycleCoordinator {
   freezeAdmission(): void {
     if (this.#lifecycle === "shutdown-committed") throw new Error("Service already retired");
     if (this.#lifecycle === "draining") { this.#lifecycle = "accepting"; this.#attempt += 1; }
+    this.#frozenSettlements = [...this.#routeSettlements];
     this.#admissionFrozen = true;
     this.#preparedShutdown = false;
   }
+
+  async settlementBarrier(): Promise<void> { await Promise.all(this.#frozenSettlements); }
 
   allowPreparedShutdown(): void { this.#preparedShutdown = true; }
 
@@ -70,12 +75,16 @@ export class DaemonLifecycleCoordinator {
       this.#attempt += 1;
     }
     this.#activeRoutes += 1;
+    const completion = Promise.withResolvers<void>();
+    this.#routeSettlements.add(completion.promise);
     let active = true;
     return {
       complete: () => {
         if (!active) return;
         active = false;
         this.#activeRoutes -= 1;
+        this.#routeSettlements.delete(completion.promise);
+        completion.resolve();
       },
     };
   }

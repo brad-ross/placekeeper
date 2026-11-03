@@ -1,3 +1,4 @@
+import { isUpgradeReviewSettlement } from "../../../packages/core/src/upgrade-review-protocol.js";
 import { nativeSyncTexRequest } from "../../../packages/core/src/native-synctex-protocol.js";
 import {
   ReviewExportConflictError,
@@ -135,7 +136,8 @@ function containsCapabilityPrimitive(value: unknown, depth = 0): boolean {
 function validPayload(method: ReviewRuntimeMethod, payload: unknown): boolean {
   if (!isObject(payload) || containsCapabilityPrimitive(payload)) return false;
   const keys = Object.keys(payload);
-  if (["bootstrap", "presence", "detach", "saveStatus", "saveProposal", "chooseFolder",
+  if (method === "upgradeSettle") return isUpgradeReviewSettlement(payload);
+  if (["upgradePoll", "bootstrap", "presence", "detach", "saveStatus", "saveProposal", "chooseFolder",
     "retrySave", "locateSave", "scope"].includes(method)) {
     return keys.length === 0;
   }
@@ -315,6 +317,7 @@ export class VersionedWebviewBridge {
 }
 
 export interface LoopbackRuntimeClientOptions {
+  readonly closeForUpgrade?: () => void;
   readonly panelId: string;
   readonly launch: {
     readonly origin: string;
@@ -395,6 +398,8 @@ function safeResult(method: ReviewRuntimeBrokerMethod, value: unknown): unknown 
     }
     case "exportReviewedCopy":
       return isObject(value) ? { ...value, path: "Reviewed PDF" } : value;
+    case "upgradePoll":
+    case "upgradeSettle":
     case "command":
     case "beginInteraction":
     case "finalizeInteraction":
@@ -462,6 +467,8 @@ export function createLoopbackRuntimeClient(options: LoopbackRuntimeClientOption
     method: "POST", body: JSON.stringify(payload),
   }, signal);
   const routes = {
+    upgradePoll: { method: "POST", path: "/upgrade/poll" },
+    upgradeSettle: { method: "POST", path: "/upgrade/settle" },
     scope: { method: "GET", path: "/scope" },
     saveStatus: { method: "GET", path: "/save/status" },
     saveProposal: { method: "GET", path: "/save/proposal" },
@@ -540,8 +547,15 @@ export function createLoopbackRuntimeClient(options: LoopbackRuntimeClientOption
       return bootstrap;
     },
     async invoke(method, payload, signal) {
+      if (method === 'upgradePoll' || method === 'upgradeSettle') return post(`/upgrade/${method === 'upgradePoll' ? 'poll' : 'settle'}`, { attachment: interactionAttachment ?? await attachmentReady.promise, ...(method === 'upgradeSettle' ? { request: payload } : {}) }, signal);
       if (method === "presence") { connectInvalidations(); return {}; }
-      if (method === "detach") return {};
+      if (method === "detach") {
+        if (interactionAttachment !== undefined) {
+          const status = await post('/upgrade/poll', { attachment: interactionAttachment }, signal) as { phase?: string };
+          if (status.phase === 'committed') { options.closeForUpgrade?.(); socket?.close(); }
+        }
+        return {};
+      }
       if (method === "forwardSyncTex" && isObject(payload) && payload.action === "ack") {
         if (nativeSyncTexRequest("forwardSyncTex", payload) === undefined) throw new Error("Invalid navigation acknowledgement");
         options.acknowledgeForwardNavigation?.(payload as { sequence: number; generation: number; outcome: "applied" | "superseded" | "failed" });

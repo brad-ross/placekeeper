@@ -487,6 +487,9 @@ export function createRpcHostRuntime(
 
   return {
     host,
+    closeForUpgrade: async () => { await invoke("detach", {}); },
+    upgradePoll: () => invoke("upgradePoll", {}),
+    upgradeSettle: request => invoke("upgradeSettle", request),
     get capabilities() { return interactionLifecycleNegotiated
       ? { localDocumentRefresh: host !== "codex" || codexDocumentRefresh, interactionLifecycleVersion: 1 as const }
       : { localDocumentRefresh: host !== "codex" || codexDocumentRefresh }; },

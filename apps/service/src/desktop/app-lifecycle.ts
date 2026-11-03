@@ -1,3 +1,4 @@
+import type { UpgradeReviewParticipants } from "../host/upgrade-review-participants.js";
 import type { EditorNavigation } from "../synctex/editor-navigation.js";
 import {
   parseNativeAppControlMessage,
@@ -25,6 +26,10 @@ interface AppRecord {
 }
 
 export class NativeAppLifecycleManager {
+  upgradeParticipants?: UpgradeReviewParticipants;
+  retireUpgradeMetadata(): void { for (const id of this.#apps.keys()) this.upgradeParticipants?.retireMetadata(`app:${id}`); }
+  upgradeCovered(): boolean { return [...this.#apps.values()].every(app => !app.retiring && app.bootstrappingWindows === 0 && app.activeWindows === app.helpers.size && this.upgradeParticipants?.has(`app:${app.appInstanceId}`) && [...app.helpers].every(id => this.helperUpgradeCovered?.(id))); }
+  helperUpgradeCovered?: (helperId: string) => boolean;
   readonly #runtime: RuntimeDetacher;
   readonly #probeProcess: (processId: number) => void;
   readonly #apps = new Map<string, AppRecord>();
@@ -69,6 +74,17 @@ export class NativeAppLifecycleManager {
     const app = this.#apps.get(message.appInstanceId);
     if (app === undefined) return this.#failure(message, "unregistered");
     if (app.retiring) return this.#failure(message, "busy");
+    if (message.type === 'upgrade-settle') {
+      if (!this.upgradeParticipants) return this.#failure(message, 'invalid');
+      const current = this.upgradeParticipants.poll(`app:${app.appInstanceId}`);
+      if (current.attemptId !== message.request.attemptId || (current.phase !== 'preparing' && current.phase !== 'ready')) return this.#ack(app.appInstanceId);
+      try { await this.upgradeParticipants.settle(`app:${app.appInstanceId}`, message.request); }
+      catch (error) {
+        const latest = this.upgradeParticipants.poll(`app:${app.appInstanceId}`);
+        if (latest.attemptId === message.request.attemptId && latest.phase !== 'canceled') throw error;
+      }
+      return this.#ack(app.appInstanceId);
+    }
     if (message.type === "editor-profiles") {
       const profiles = await this.navigation?.profiles.list() ?? [];
       return { protocolVersion: 1, type: "editor-profiles", appInstanceId: app.appInstanceId, profiles: profiles.map(({ name, kind }) => ({ name, kind })) };
@@ -172,6 +188,10 @@ export class NativeAppLifecycleManager {
       activeWindows: 0,
       bootstrappingWindows: 0,
     });
+    if (message.upgradePreparationVersion === 1) this.upgradeParticipants?.attach(`app:${message.appInstanceId}`, {
+      revision: () => { const app = this.#apps.get(message.appInstanceId); if (!app) throw new Error('App detached'); return `${app.activeWindows}:${app.bootstrappingWindows}:${[...app.helpers].sort().join(',')}`; },
+      protect: async () => { const app = this.#apps.get(message.appInstanceId); if (!app || app.bootstrappingWindows !== 0) throw new Error('A review is still opening'); },
+    });
     return this.#ack(message.appInstanceId);
   }
 
@@ -184,7 +204,7 @@ export class NativeAppLifecycleManager {
     const retirement = Promise.all([...new Set([...app.helpers, ...app.pendingHelpers.keys()])]
       .map((helperId) => this.#detachHelper(app, helperId)))
       .then(() => {
-        if (this.#apps.get(appInstanceId) === app) this.#apps.delete(appInstanceId);
+        if (this.#apps.get(appInstanceId) === app) { this.#apps.delete(appInstanceId); this.upgradeParticipants?.detach(`app:${appInstanceId}`); }
       }).finally(() => { delete app.retirement; });
     app.retirement = retirement;
     return retirement;
@@ -206,7 +226,7 @@ export class NativeAppLifecycleManager {
   }
 
   #ack(appInstanceId: string): NativeAppControlResponse {
-    return { protocolVersion: 1, type: "ack", appInstanceId };
+    return { protocolVersion: 1, type: "ack", appInstanceId, ...(this.upgradeParticipants?.has(`app:${appInstanceId}`) ? { upgrade: this.upgradeParticipants.poll(`app:${appInstanceId}`) } : {}) };
   }
 
   #failure(
