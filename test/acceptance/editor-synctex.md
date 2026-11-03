@@ -123,3 +123,11 @@ Candidate `/tmp/placekeeper-refresh-final/Placekeeper.app` uses the same isolate
 - **Regression coverage:** the delayed-capture browser case holds the actual reading capture while a real broker successor arrives; it checks that the predecessor viewer remains mounted, then restores the moved passage at 157%. A second browser case checks repeated generation replacements, page relocation, zoom and focus. Both pass on the final source. All 67 production-review-app unit tests and TypeScript pass. Focused independent correctness and adversarial review found no actionable issues.
 
 The normal-environment cold-launch check remains blocked at the user's explicit request to preserve the other service's open reviews. Live Neovim testing is optional and unverified; Sublime Text and Emacs remain unverified recipes. Earlier outstanding-check lists describe their point in the qualification sequence; the follow-up results above supersede them where explicitly tested. No release or merge is implied by these checks.
+
+### Zed Texlab qualification
+
+Zed 1.26.2, LaTeX extension 0.2.3, bundled Texlab 5.26.0, latexmk 4.88 and Placekeeper candidate 0.2.4. The two-page fixture used a project path containing spaces and a separate build directory. This run exercised the extension's opt-in build-on-save preview.
+
+- With the viewer and build settings only in the trusted project's `.zed/settings.json`, Zed started Texlab and sent the save event, but answered Texlab's configuration request with the extension's default build settings and no viewer.
+- With `lsp.texlab.settings.texlab` in Zed **user settings**, the configuration exchange included the requested build and viewer. Saving an edit on line 5 invoked latexmk, and the Texlab process launched the viewer with the correct `build/main.pdf`, `main.tex` and line 5. A fixture-only logging wrapper forwarded the arguments to the installed candidate, which opened page 2.
+- Native **File → Go to Source** returned to the existing Zed workspace at `main.tex` line 5, column 1. No Zed task was invoked. The temporary user settings were removed after testing.
