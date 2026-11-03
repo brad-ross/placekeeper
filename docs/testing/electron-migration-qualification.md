@@ -52,11 +52,11 @@ AE1 is exercised in the packaged lifecycle test. AE2 native Retry after renderer
 
 | Platform | Evidence status |
 | --- | --- |
-| Local macOS arm64 | Actual packaged review tests above; native macOS 15 arm64 CI ZIP and all eight packaged tests also passed at `bfd189d`; no installation over the user's app |
-| macOS x64 | Native macOS 15 Intel CI ZIP and all eight packaged tests passed in run `41518450673` at `bfd189d` |
+| Local macOS arm64 | Actual packaged review tests above; native macOS 15 arm64 CI ZIP and all eight packaged tests also passed at `9e7cd7d`; no installation over the user's app |
+| macOS x64 | Native macOS 15 Intel CI ZIP and all eight packaged tests passed in run `41555449177` at `9e7cd7d` |
 | macOS 13 | Untested; compatible minimum version is not execution evidence |
 | Windows 11 x64 | Untested locally; Windows Server CI cannot establish Windows 11 installer, DPI or Narrator behavior |
-| Ubuntu 24.04 x64 | Native CI artifact/testing pending; X11/Wayland and accessibility require interactive qualification |
+| Ubuntu 24.04 x64 | Native CI built and installed the deb, verified root-owned mode-4755 Chromium sandbox, and passed packaged tests under Xvfb in run `41555449177`; interactive X11/Wayland and accessibility remain unqualified |
 | VoiceOver / Narrator / Linux accessibility | Untested |
 
 ## Performance

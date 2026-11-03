@@ -1,6 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { dirname, isAbsolute, join, resolve } from "node:path";
+import { windowsPowerShellScript } from "./windows-powershell.js";
 
 export type WindowsNativeRequest =
   | { readonly operation: "registerChromeHost" | "unregisterChromeHost"; readonly path: string; readonly owner: string; readonly sha256: string; readonly testRegistryId?: string }
@@ -208,7 +209,7 @@ function acquireWorker(): Worker {
   const systemRoot = process.env.SystemRoot;
   if (systemRoot === undefined) throw new WindowsNativeWorkerError("Windows system directory is unavailable", false, false);
   const child = spawn(join(systemRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe"), [
-    "-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand", Buffer.from(SCRIPT, "utf16le").toString("base64"),
+    "-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand", Buffer.from(windowsPowerShellScript(SCRIPT), "utf16le").toString("base64"),
   ], { stdio: "pipe", windowsHide: true });
   const closed = Promise.withResolvers<void>();
   const current: Worker = { child, pending: new Map(), spawned: false, closed: closed.promise, resolveClosed: closed.resolve }; worker = current;

@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterAll, afterEach, expect, it } from "vitest";
 import { closeWindowsNativeWorker, requestWindowsNative } from "../src/platform/windows-native-worker.js";
+import { windowsPowerShellScript } from "../src/platform/windows-powershell.js";
 import { FileCapabilityRegistry, validatePdfFilename } from "../src/files/file-capabilities.js";
 import { preserveReplacementPermissions, publishFile, stagePublication, syncPublishedFile } from "../src/platform/file-publication.js";
 
@@ -93,7 +94,7 @@ $rule = [System.Security.AccessControl.FileSystemAccessRule]::new($everyone, 'Re
 $acl.AddAccessRule($rule)
 Set-Acl -LiteralPath $env:PLACEKEEPER_TEST_DIRECTORY -AclObject $acl
 `;
-  await promisify(execFile)(powershell, ["-NoProfile", "-NonInteractive", "-EncodedCommand", Buffer.from(script, "utf16le").toString("base64")],
+  await promisify(execFile)(powershell, ["-NoProfile", "-NonInteractive", "-EncodedCommand", Buffer.from(windowsPowerShellScript(script), "utf16le").toString("base64")],
     { env: { ...process.env, PLACEKEEPER_TEST_DIRECTORY: directory }, windowsHide: true });
   const candidate = await stagePublication(target, Buffer.from("sensitive accepted edits"));
   expect(await requestWindowsNative({ operation: "verify", path: candidate })).toEqual({ status: "ok" });

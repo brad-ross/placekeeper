@@ -1,16 +1,45 @@
 import { execFile } from "node:child_process";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { afterEach, expect, it } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import { createPrivateFile, ensurePrivateDirectory, verifyPrivatePath, writePrivateFile } from "../src/platform/private-storage.js";
 import { closeWindowsNativeWorker } from "../src/platform/windows-native-worker.js";
+import { windowsPowerShellScript } from "../src/platform/windows-powershell.js";
 const roots: string[] = [];
 afterEach(async () => {
   await closeWindowsNativeWorker();
+  vi.unstubAllEnvs();
   for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true });
 });
+it.runIf(process.platform === "win32")("verifies private storage despite incompatible inherited PowerShell module paths", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pk-private-modules-")); roots.push(root);
+  const modules = join(root, "modules");
+  const security = join(modules, "Microsoft.PowerShell.Security");
+  await mkdir(security, { recursive: true });
+  await writeFile(join(security, "Microsoft.PowerShell.Security.psd1"), `@{
+ModuleVersion = '99.0'
+RootModule = 'Microsoft.PowerShell.Security.psm1'
+FunctionsToExport = @('Get-Acl', 'Set-Acl')
+}`);
+  await writeFile(join(security, "Microsoft.PowerShell.Security.psm1"), "throw 'Incompatible inherited security module'");
+  // PowerShell 7 passes its module path through intermediate processes such as
+  // Node. Prove this path breaks ordinary Windows PowerShell module discovery.
+  vi.stubEnv("PSModulePath", modules);
+  const script = "$ErrorActionPreference='Stop'; Get-Acl -LiteralPath $env:PLACEKEEPER_TEST_PATH";
+  await expect(promisify(execFile)(join(process.env.SystemRoot!, "System32", "WindowsPowerShell", "v1.0", "powershell.exe"),
+    ["-NoProfile", "-NonInteractive", "-EncodedCommand", Buffer.from(script, "utf16le").toString("base64")],
+    { env: { ...process.env, PLACEKEEPER_TEST_PATH: root }, windowsHide: true })).rejects.toMatchObject({
+      stderr: expect.stringContaining("Microsoft.PowerShell.Security"),
+    });
+  const directory = join(root, "private");
+  await ensurePrivateDirectory(directory);
+  await verifyPrivatePath(directory, "directory");
+  const file = join(directory, "secret");
+  await createPrivateFile(file);
+  await verifyPrivatePath(file, "file");
+}, 15_000);
 it.runIf(process.platform === "win32")("creates private Windows files and inheritable directories without altering existing files", async () => {
   const root = await mkdtemp(join(tmpdir(), "pk-private-create-")); roots.push(root);
   const directory = join(root, "private"); await ensurePrivateDirectory(directory);
@@ -31,7 +60,7 @@ it.runIf(process.platform === "win32")("refuses an existing exposed directory wi
   await execute(join(process.env.SystemRoot!, "System32", "icacls.exe"), [root, "/grant", "*S-1-1-0:(OI)(CI)R"], { windowsHide: true });
   async function descriptor(): Promise<string> {
     const script = "[Console]::Out.Write((Get-Acl -LiteralPath $env:PLACEKEEPER_TEST_PATH).Sddl)";
-    return (await execute(join(process.env.SystemRoot!, "System32", "WindowsPowerShell", "v1.0", "powershell.exe"), ["-NoProfile", "-NonInteractive", "-EncodedCommand", Buffer.from(script, "utf16le").toString("base64")], { env: { ...process.env, PLACEKEEPER_TEST_PATH: root }, windowsHide: true })).stdout;
+    return (await execute(join(process.env.SystemRoot!, "System32", "WindowsPowerShell", "v1.0", "powershell.exe"), ["-NoProfile", "-NonInteractive", "-EncodedCommand", Buffer.from(windowsPowerShellScript(script), "utf16le").toString("base64")], { env: { ...process.env, PLACEKEEPER_TEST_PATH: root }, windowsHide: true })).stdout;
   }
   const before = await descriptor();
   await expect(ensurePrivateDirectory(root)).rejects.toThrow();
