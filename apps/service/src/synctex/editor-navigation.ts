@@ -111,6 +111,13 @@ export class EditorNavigation {
     return { pdfPath: entry.intent.request.pdfPath, navigationHandle };
   }
 
+  admissionIntent(navigationHandle: string, appInstanceId: string, canonicalPdfPath: string): NativeEditorIntent | undefined {
+    this.#expire();
+    const entry = this.#tickets.get(navigationHandle);
+    return entry?.appInstanceId === appInstanceId && entry.intent.request.pdfPath === canonicalPdfPath && this.isCurrent(entry.intent)
+      ? entry.intent : undefined;
+  }
+
   claim(navigationHandle: string, appInstanceId: string, helperId: string, canonicalPdfPath: string): NativeEditorIntent | undefined {
     this.#expire();
     const entry = this.#tickets.get(navigationHandle);

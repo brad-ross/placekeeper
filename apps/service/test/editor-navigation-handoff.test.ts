@@ -30,6 +30,27 @@ async function fixture() {
 }
 
 describe("private native navigation handoff", () => {
+  it("authorizes admission only for a live redeemed handle, its app-owned helper, and its PDF", async () => {
+    const f = await fixture();
+    const lifecycle = new MacosAppLifecycleManager({ detach: async () => {} }, f.navigation);
+    for (const appInstanceId of ["app_owner_1234", "app_other_1234"]) {
+      await lifecycle.handle({ protocolVersion: 1, type: "register-app", appInstanceId, processId: 1,
+        startIdentity: "start_1234", buildIdentity: "build_1234", installationIdentity: "development" });
+    }
+    lifecycle.attachHelper("app_owner_1234", "helper_owner_1234");
+    lifecycle.attachHelper("app_other_1234", "helper_other_1234");
+    const accepted = await f.accept();
+    expect(lifecycle.admitsNavigation("helper_owner_1234", accepted.ticket, f.request.pdfPath)).toBe(false);
+    const redeemed = f.navigation.redeem(accepted.ticket, "app_owner_1234", "development")!;
+    expect(lifecycle.admitsNavigation("helper_other_1234", redeemed.navigationHandle, f.request.pdfPath)).toBe(false);
+    expect(lifecycle.admitsNavigation("helper_owner_1234", redeemed.navigationHandle, "/wrong.pdf")).toBe(false);
+    expect(lifecycle.admitsNavigation("helper_owner_1234", redeemed.navigationHandle, f.request.pdfPath)).toBe(true);
+    // Admission leaves the handle available for binding after PDF validation.
+    expect(lifecycle.admitsNavigation("helper_owner_1234", redeemed.navigationHandle, f.request.pdfPath)).toBe(true);
+    f.advance();
+    expect(lifecycle.admitsNavigation("helper_owner_1234", redeemed.navigationHandle, f.request.pdfPath)).toBe(false);
+  });
+
   it("configures a direct-open presentation only while its native helper is still owned", async () => {
     const f = await fixture();
     const lifecycle = new MacosAppLifecycleManager({ detach: async () => {} }, f.navigation, () => f.request.pdfPath);

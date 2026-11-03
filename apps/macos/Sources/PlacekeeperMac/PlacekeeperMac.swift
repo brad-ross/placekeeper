@@ -302,8 +302,10 @@ final class PlacekeeperAppDelegate: NSObject, NSApplicationDelegate {
         let canonicalSource = source.standardizedFileURL.resolvingSymlinksInPath()
         let request: (type: String, fields: [String: Any])
         switch intent.kind {
-        case .document, .navigation:
+        case .document:
             request = ("admit", ["sourcePath": canonicalSource.path])
+        case let .navigation(handle):
+            request = ("admit", ["sourcePath": canonicalSource.path, "navigationHandle": handle])
         case let .placekeeperLink(link):
             request = ("admit-link", ["link": link, "confirmed": true])
         }

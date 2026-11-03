@@ -109,6 +109,13 @@ export class MacosAppLifecycleManager {
     this.navigation?.detachHelper(helperId);
   }
 
+  admitsNavigation(helperId: string, navigationHandle: string, canonicalPdfPath: string): boolean {
+    for (const app of this.#apps.values()) {
+      if (app.helpers.has(helperId)) return this.navigation?.admissionIntent(navigationHandle, app.appInstanceId, canonicalPdfPath) !== undefined;
+    }
+    return false;
+  }
+
   ownsHelper(appInstanceId: string, helperId: string): boolean {
     return this.#apps.get(appInstanceId)?.helpers.has(helperId) === true;
   }

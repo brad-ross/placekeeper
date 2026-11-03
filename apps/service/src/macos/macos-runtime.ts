@@ -1,5 +1,6 @@
 import type { NativeSyncTex } from "../synctex/native-synctex.js";
 import { createHash, randomBytes } from "node:crypto";
+import { realpath } from "node:fs/promises";
 import { basename } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -113,6 +114,7 @@ function rawEnvelope(raw: unknown): {
 export class MacosRuntimeManager {
   readonly #backend: MacosRuntimeBackend;
   navigation?: NativeSyncTex;
+  admitsNavigation?: (helperId: string, navigationHandle: string, canonicalPdfPath: string) => boolean;
   readonly #limits: Required<MacosRuntimeManagerOptions>;
   readonly #records = new Map<string, RuntimeRecord>();
   readonly #requests = new Map<string, RequestRecord>();
@@ -247,10 +249,17 @@ export class MacosRuntimeManager {
     let canonicalKey: string | undefined;
     let sink: ChromeRuntimeSourceSink | undefined;
     try {
+      let initialWorkflowMode: "generated-output" | undefined;
+      if (message.type === "admit" && message.navigationHandle !== undefined) {
+        const canonicalPath = await realpath(sourcePath);
+        if (this.admitsNavigation?.(helperId, message.navigationHandle, canonicalPath) !== true) return this.#failure(message, "invalid");
+        initialWorkflowMode = "generated-output";
+      }
       sink = await this.#backend.begin({
         sourceIdentity: createHash("sha256").update(fileUrl).digest("hex"),
         disposition: "local",
         fileUrl,
+        ...(initialWorkflowMode === undefined ? {} : { initialWorkflowMode }),
       }, signal);
       throwIfAborted(signal);
       const staged = await sink.finish(undefined, signal);

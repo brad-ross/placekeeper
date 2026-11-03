@@ -46,7 +46,7 @@ export interface MacosRuntimeProjection {
 }
 
 export type MacosReviewHelperMessage = ReviewEnvelope & (
-  | { readonly type: "admit"; readonly sourcePath: string }
+  | { readonly type: "admit"; readonly sourcePath: string; readonly navigationHandle?: string }
   | { readonly type: "admit-link"; readonly link: string; readonly confirmed: true }
   | { readonly type: "activate"; readonly documentValidated: true }
   | { readonly type: "refresh" }
@@ -149,7 +149,8 @@ export function parseMacosReviewHelperMessage(value: unknown): MacosReviewHelper
   if (!record(value) || !reviewEnvelope(value)) return undefined;
   const base = ["protocolVersion", "windowId", "attemptId", "requestId", "type"];
   if (value.type === "admit") {
-    return exact(value, [...base, "sourcePath"]) && typeof value.sourcePath === "string"
+    return exact(value, [...base, "sourcePath", ...(value.navigationHandle === undefined ? [] : ["navigationHandle"])])
+      && (value.navigationHandle === undefined || (typeof value.navigationHandle === "string" && /^[A-Za-z0-9_-]{43}$/u.test(value.navigationHandle))) && typeof value.sourcePath === "string"
       && value.sourcePath.startsWith("/") && value.sourcePath.length <= 16_384 && !value.sourcePath.includes("\0")
       ? value as unknown as MacosReviewHelperMessage : undefined;
   }

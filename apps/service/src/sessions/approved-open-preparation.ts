@@ -48,7 +48,8 @@ export async function prepareApprovedOpen(input: {
     byteLength: initialOutputInfo.size,
     modifiedAtMs: initialOutputInfo.mtimeMs,
   };
-  const initialSyncTex = request.workflowMode === "generated-output"
+  const workflowMode = request.workflowMode ?? request.initialWorkflowMode;
+  const initialSyncTex = workflowMode === "generated-output"
     ? await snapshotGenerationSyncTexSidecar({
         outputPath: approvedFile.canonicalPath,
         privatePdfPath: sourceSnapshot.path,
@@ -61,14 +62,14 @@ export async function prepareApprovedOpen(input: {
         sessionId,
         source,
         ...(approvedRoot === undefined ? {} : { sourceRootId: approvedRoot.id }),
-        ...(request.workflowMode === undefined ? {} : { workflowMode: request.workflowMode }),
+        ...(workflowMode === undefined ? {} : { workflowMode }),
       })
     : createImportedReviewState({
         sessionId,
         source,
         ...(approvedRoot === undefined ? {} : { sourceRootId: approvedRoot.id }),
         items: importedItems,
-        ...(request.workflowMode === undefined ? {} : { workflowMode: request.workflowMode }),
+        ...(workflowMode === undefined ? {} : { workflowMode }),
       });
   const state = { ...initialState, ...(nativeAnnotationsImported ? { nativeAnnotationImportDigest: source.digest } : {}) };
   const digest = reviewStateDigest(state);

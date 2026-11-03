@@ -267,6 +267,7 @@ export class PlacekeeperHost {
       const sessionId = macosRuntime.navigationSessionId(helperId);
       return sessionId === undefined ? undefined : broker.navigationSourcePath(sessionId);
     });
+    macosRuntime.admitsNavigation = (helperId, handle, path) => macosLifecycle.admitsNavigation(helperId, handle, path);
     const codexRuntime = new CodexRuntimeManager(broker, {
       ...(options.nativeQualification === undefined ? {} : { qualification: options.nativeQualification }),
       ...(options.nativeQualificationExperiments === undefined ? {} : { experiments: options.nativeQualificationExperiments }),
