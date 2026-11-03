@@ -3,7 +3,7 @@ import { afterEach, test } from 'vitest';
 import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, rmSync, statSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { approvedRoot, openState, runZed, takeBuild, bindOwner, chooseZedPath } from '../../integrations/editors/zed-adapter.mjs';
+import { approvedRoot, openState, runZed, takeBuild, bindOwner, chooseZedPath, runViewSource, chooseViewerPath } from '../../integrations/editors/zed-adapter.mjs';
 
 const directories = [];
 afterEach(() => { for (const path of directories.splice(0)) rmSync(path, { recursive: true, force: true }); });
@@ -343,4 +343,109 @@ test('delayed failed-build callbacks cannot borrow later successful fences', asy
   buildRow(db, 'fresh');
   assert.equal(takeBuild(db, 10), 'fresh');
   db.close();
+});
+
+
+function viewArgs(f, editor = 'custom-code', extra = []) {
+  return ['view-source', '--editor', editor, '--source', f.source, '--line', '9', ...extra];
+}
+
+test('permanent viewer uses only the configured profile and remembers first-use project/PDF choices', async () => {
+  const f = fixture();
+  writeFileSync(join(f.root, 'other.pdf'), '%PDF');
+  writeFileSync(join(f.root, 'other.synctex'), 'sync');
+  const calls = [], picks = [];
+  const run = async (_command, args) => {
+    calls.push(args);
+    assert.notEqual(args[1], 'add');
+    return { stdout: args[1] === 'register' ? 'custom-session' : '' };
+  };
+  const pick = async kind => { picks.push(kind); return kind === 'folder' ? f.root : f.pdf; };
+  await runViewSource(viewArgs(f, 'custom-code', ['--pdf-directory', 'output']), options(f, { run, pick }));
+  await runViewSource(viewArgs(f), options(f, { run, pick: () => assert.fail('remembered choices') }));
+  assert.deepEqual(picks, ['folder', 'pdf']);
+  assert.equal(arg(calls[0], '--profile'), 'custom-code');
+  assert.equal(arg(calls.at(-1), '--session'), 'custom-session');
+  assert.equal(arg(calls.at(-1), '--pdf'), f.pdf);
+});
+
+test('profile and Neovim instance scopes require separate grants and retain separate sessions', async () => {
+  const f = fixture(); seed(f, 'legacy-zed');
+  let approvals = 0;
+  const registrations = [], forwards = [];
+  const run = async (_command, args) => {
+    if (args[1] === 'register') {
+      registrations.push([arg(args, '--profile'), args.includes('--socket') ? arg(args, '--socket') : null]);
+      return { stdout: 'session-' + registrations.length };
+    }
+    forwards.push(arg(args, '--session'));
+    return { stdout: '' };
+  };
+  const invoke = (editor, socket) => runViewSource(viewArgs(f, editor, ['--pdf', f.pdf, ...(socket ? ['--socket', socket] : [])]),
+    options(f, { run, pick: async () => { approvals++; return f.root; } }));
+  await invoke('custom-code'); await invoke('nvim', '/tmp/nvim-a'); await invoke('nvim', '/tmp/nvim-b');
+  await invoke('nvim', '/tmp/nvim-a'); await invoke('custom-code');
+  assert.equal(approvals, 3);
+  assert.deepEqual(registrations, [['custom-code', null], ['nvim', '/tmp/nvim-a'], ['nvim', '/tmp/nvim-b']]);
+  assert.deepEqual(forwards, ['session-1', 'session-2', 'session-3', 'session-2', 'session-1']);
+});
+
+test('permanent viewer renews an expired generic session without prompting again', async () => {
+  const f = fixture(); let registrations = 0, attempts = 0;
+  const run = async (_command, args) => {
+    if (args[1] === 'register') return { stdout: 'session-' + (++registrations) };
+    if (++attempts === 2) throw Object.assign(new Error('PRIVATE_SESSION'), { stderr: 'Editor session expired' });
+    return { stdout: '' };
+  };
+  await runViewSource(viewArgs(f, 'custom', ['--pdf', f.pdf]), options(f, { run, pick: async () => f.root }));
+  await runViewSource(viewArgs(f, 'custom', ['--pdf', f.pdf]), options(f, { run, pick: () => assert.fail('no renewal approval') }));
+  assert.equal(registrations, 2); assert.equal(attempts, 3);
+});
+
+test('reserved zed alias reuses installed grants and build fences', async () => {
+  const f = fixture(); seed(f, 'legacy-session');
+  const db = f.db(); buildRow(db, 'captured-fence'); db.close();
+  const calls = [];
+  await runViewSource(viewArgs(f, 'zed', ['--pdf', f.pdf, '--intent', 'preview']), options(f, {
+    run: async (_command, args) => { calls.push(args); return { stdout: '' }; }, pick: () => assert.fail('existing Zed grant'),
+  }));
+  assert.equal(arg(calls[0], '--session'), 'legacy-session');
+  assert.equal(arg(calls[0], '--association'), 'captured-fence');
+  assert.equal(arg(calls[0], '--intent'), 'preview');
+});
+
+test('permanent viewer validates all arguments before making calls and sanitizes subprocess errors', async () => {
+  const f = fixture();
+  for (const extra of [ ['--executable', '/tmp/evil'], ['--editor', 'again'], ['--line', '0'], ['--pdf', 'relative'], ['--socket', 'relative'], ['--intent', 'follow'], ['--intent'], ['--unknown', 'x'] ]) {
+    await assert.rejects(runViewSource(viewArgs(f, 'custom', extra), options(f, {
+      run: () => assert.fail('invalid args must not launch'), pick: () => assert.fail('invalid args must not prompt'),
+    })), /source navigation failed/);
+  }
+  await assert.rejects(runViewSource(viewArgs(f, 'custom', ['--pdf', f.pdf]), options(f, {
+    pick: async () => f.root,
+    run: async () => { throw Object.assign(new Error('PRIVATE_SESSION_CAPABILITY'), { stderr: 'PRIVATE_SESSION_CAPABILITY' }); },
+  })), error => !String(error.stack).includes('PRIVATE_SESSION_CAPABILITY') && error.cause === undefined);
+});
+
+test('source aliases retain SyncTeX spelling while canonical containment prevents escapes', async () => {
+  const f = fixture(); seed(f);
+  const alias = join(f.root, 'alias.tex'); symlinkSync(f.source, alias);
+  const args = viewArgs({ ...f, source: alias }, 'zed', ['--pdf', f.pdf]);
+  await runViewSource(args, options(f, { pick: () => assert.fail('approved canonical source'),
+    run: async (_command, argv) => { assert.equal(arg(argv, '--source'), alias); return { stdout: '' }; } }));
+  const outside = join(f.temp, 'outside.tex'); writeFileSync(outside, 'outside');
+  const escape = join(f.root, 'escape.tex'); symlinkSync(outside, escape);
+  await assert.rejects(runViewSource(viewArgs({ ...f, source: escape }, 'zed', ['--pdf', f.pdf]), options(f, {
+    pick: async () => f.root, run: () => assert.fail('escape cannot forward'),
+  })), /source navigation failed/);
+});
+
+test('generic native picker uses generic aliases and handles cancellation quietly', async () => {
+  const f = fixture();
+  await chooseViewerPath('pdf', f.root, { executable: '/PlacekeeperMac', run: async (_command, args) => {
+    assert.deepEqual(args, ['--choose-source-pdf', f.root]); return { stdout: f.pdf + '\n' };
+  } });
+  assert.equal(await runViewSource(viewArgs(f), options(f, { run: async (_command, args) => {
+    assert.equal(args[0], '--choose-source-folder'); throw Object.assign(new Error('cancelled'), { code: 2 });
+  } })), 0);
 });

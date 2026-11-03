@@ -20,6 +20,8 @@ export function openState(directory = join(homedir(), 'Library/Application Suppo
   chmodSync(path, 0o600);
   db.exec(`PRAGMA busy_timeout=5000;
     CREATE TABLE IF NOT EXISTS roots(root TEXT PRIMARY KEY, session TEXT);
+    CREATE TABLE IF NOT EXISTS viewer_roots(scope TEXT, root TEXT, session TEXT, PRIMARY KEY(scope,root));
+    CREATE TABLE IF NOT EXISTS viewer_outputs(scope TEXT, source TEXT, pdf TEXT NOT NULL, PRIMARY KEY(scope,source));
     CREATE TABLE IF NOT EXISTS owners(owner INTEGER PRIMARY KEY, identity TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS outputs(source TEXT PRIMARY KEY, pdf TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS builds(id INTEGER PRIMARY KEY, owner INTEGER, fence TEXT, ready INTEGER DEFAULT 0, process INTEGER);`);
@@ -86,20 +88,23 @@ export async function chooseZedPath(kind, start, { executable, run = exec }) {
     throw error;
   }
 }
-export async function approvedRoot(db, source, pick) {
+export async function approvedRoot(db, source, pick, scope) {
   const canonical = realpathSync(source);
-  const roots = db.prepare('SELECT root FROM roots ORDER BY length(root) DESC').all();
+  const roots = scope === undefined ? db.prepare('SELECT root FROM roots ORDER BY length(root) DESC').all()
+    : db.prepare('SELECT root FROM viewer_roots WHERE scope=? ORDER BY length(root) DESC').all(scope);
   const existing = roots.find(({ root }) => inside(root, canonical));
   if (existing) return existing.root;
   const root = realpathSync(await pick('folder', dirname(canonical)));
   if (!statSync(root).isDirectory() || !inside(root, canonical) || root === dirname(root)) {
     throw new Error('Select the project folder containing the source file.');
   }
-  db.prepare('INSERT OR IGNORE INTO roots(root) VALUES (?)').run(root);
+  if (scope === undefined) db.prepare('INSERT OR IGNORE INTO roots(root) VALUES (?)').run(root);
+  else db.prepare('INSERT OR IGNORE INTO viewer_roots(scope,root) VALUES (?,?)').run(scope, root);
   return root;
 }
-async function manualPdf(db, source, root, pdfDirectory, pick) {
-  const previous = db.prepare('SELECT pdf FROM outputs WHERE source=?').get(source)?.pdf;
+async function manualPdf(db, source, root, pdfDirectory, pick, scope) {
+  const previous = scope === undefined ? db.prepare('SELECT pdf FROM outputs WHERE source=?').get(source)?.pdf
+    : db.prepare('SELECT pdf FROM viewer_outputs WHERE scope=? AND source=?').get(scope, source)?.pdf;
   if (previous && existsSync(previous)) return previous;
   const candidates = new Set();
   for (const directory of new Set([dirname(source), root, resolve(root, pdfDirectory || 'build')])) {
@@ -162,19 +167,41 @@ export async function runZed(args, { launcher, owner, run = exec, pick, db,
         !Number.isSafeInteger(Number(line)) || Number(line) < 1 || args.length > 5) throw new Error('Invalid Zed source location');
     const fence = mode === 'preview' ? takeBuild(db, owner, alive) : undefined;
     if (mode === 'preview' && !fence) return 0;
-    const source = realpathSync(file);
-    const root = await approvedRoot(db, source, pick);
-    const pdf = realpathSync(mode === 'preview' ? destination : await manualPdf(db, source, root, destination, pick));
-    let session = db.prepare('SELECT session FROM roots WHERE root=?').get(root).session;
+    return await navigate({ db, file, line, destination: mode === 'preview' ? destination : undefined,
+      pdfDirectory: mode === 'manual' ? destination : undefined, pick, call, configPath, fence, editor: 'zed' });
+  } catch (error) {
+    if (error instanceof SelectionCancelled) return 0;
+    // execFile errors include the entire argv (including session capabilities).
+    // Never let those errors reach the launcher's uncaught-exception output.
+    throw new Error('Placekeeper Zed integration failed. Check the source folder, compiled PDF, and Zed setup.');
+  } finally { try { db?.close(); } catch {} }
+}
+
+async function navigate({ db, file, line, destination, pdfDirectory, pick, call, configPath, fence, editor, socket }) {
+    // Keep the editor's lexical source spelling for SyncTeX, while approvedRoot
+    // resolves symlinks before checking the grant's containment.
+    const source = file;
+    const selectedProfile = editor === 'zed' ? profile : editor;
+    const scope = editor === 'zed' && !socket ? undefined : JSON.stringify([selectedProfile, socket ?? null]);
+    const currentSession = root => scope === undefined
+      ? db.prepare('SELECT session FROM roots WHERE root=?').get(root)?.session
+      : db.prepare('SELECT session FROM viewer_roots WHERE scope=? AND root=?').get(scope, root)?.session;
+    const root = await approvedRoot(db, source, pick, scope);
+    const pdf = realpathSync(destination ?? await manualPdf(db, source, root, pdfDirectory, pick, scope));
+    let session = currentSession(root);
     const register = async () => {
-      const observed = db.prepare('SELECT session FROM roots WHERE root=?').get(root).session;
-      const { cli } = JSON.parse(readFileSync(configPath, 'utf8'));
-      await call(['editor', 'add', '--name', profile, '--executable', cli, '--args-json', '["{file}:{line}:{column}"]']);
-      const value = await call(['editor', 'register', '--profile', profile, '--source-root', root]);
+      const observed = currentSession(root);
+      if (editor === 'zed') {
+        const { cli } = JSON.parse(readFileSync(configPath, 'utf8'));
+        await call(['editor', 'add', '--name', profile, '--executable', cli, '--args-json', '["{file}:{line}:{column}"]']);
+      }
+      const value = await call(['editor', 'register', '--profile', selectedProfile, '--source-root', root, ...(socket ? ['--socket', socket] : [])]);
       // Registration is asynchronous across launcher processes. Publish with
       // compare-and-swap so racing callers all forward using the winning handle.
-      const updated = db.prepare('UPDATE roots SET session=? WHERE root=? AND session IS ?').run(value, root, observed);
-      return updated.changes ? value : db.prepare('SELECT session FROM roots WHERE root=?').get(root).session;
+      const updated = scope === undefined
+        ? db.prepare('UPDATE roots SET session=? WHERE root=? AND session IS ?').run(value, root, observed)
+        : db.prepare('UPDATE viewer_roots SET session=? WHERE scope=? AND root=? AND session IS ?').run(value, scope, root, observed);
+      return updated.changes ? value : currentSession(root);
     };
     const forward = value => call(['forward-search', '--pdf', pdf, '--source', source, '--line', line, '--session', value,
       ...(fence ? ['--intent', 'preview', '--association', fence] : [])]);
@@ -182,17 +209,63 @@ export async function runZed(args, { launcher, owner, run = exec, pick, db,
     catch (error) {
       if (String(error.stderr).includes('Preview superseded')) return 0;
       if (!session || !String(error.stderr).includes('Editor session expired')) throw error;
-      const latest = db.prepare('SELECT session FROM roots WHERE root=?').get(root).session;
+      const latest = currentSession(root);
       session = latest && latest !== session ? latest : await register();
       try { await forward(session); }
       catch (retry) { if (String(retry.stderr).includes('Preview superseded')) return 0; throw retry; }
     }
-    db.prepare('INSERT OR REPLACE INTO outputs(source,pdf) VALUES (?,?)').run(source, pdf);
+    if (scope === undefined) db.prepare('INSERT OR REPLACE INTO outputs(source,pdf) VALUES (?,?)').run(source, pdf);
+    else db.prepare('INSERT OR REPLACE INTO viewer_outputs(scope,source,pdf) VALUES (?,?,?)').run(scope, source, pdf);
     return 0;
+}
+
+// Permanent installed viewer: callers can select a trusted profile, never an
+// executable or argument template. The reserved zed alias retains old grants.
+export async function runViewSource(args, options) {
+  let db = options.db;
+  try {
+    const allowed = new Set(['--editor', '--source', '--line', '--pdf', '--pdf-directory', '--socket', '--intent']);
+    const values = new Map();
+    if (args[0] !== 'view-source') throw new Error('Invalid viewer command');
+    for (let i = 1; i < args.length; i += 2) {
+      const key = args[i], value = args[i + 1];
+      if (!allowed.has(key) || values.has(key) || !value || value.includes('\0')) throw new Error('Invalid viewer option');
+      values.set(key, value);
+    }
+    const editor = values.get('--editor'), file = values.get('--source'), line = values.get('--line');
+    const destination = values.get('--pdf'), pdfDirectory = values.get('--pdf-directory'), socket = values.get('--socket');
+    const intent = values.get('--intent') ?? 'explicit';
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/u.test(editor ?? '') ||
+        !file || !isAbsolute(file) || !/^[1-9][0-9]*$/u.test(line ?? '') || !Number.isSafeInteger(Number(line)) ||
+        (destination !== undefined && !isAbsolute(destination)) || (socket !== undefined && !isAbsolute(socket)) ||
+        !['explicit', 'preview'].includes(intent) || (intent === 'preview' && (editor !== 'zed' || !destination || socket))) {
+      throw new Error('Invalid viewer source location');
+    }
+    const { launcher, run = exec, owner = process.ppid, alive = isAlive, ownerIdentity = processIdentity,
+      configPath = join(homedir(), 'Library/Application Support/Placekeeper/zed/editor.json') } = options;
+    db ??= openState();
+    const call = async argv => (await run(launcher, argv, { maxBuffer: 64 * 1024 })).stdout.trim();
+    let fence;
+    if (intent === 'preview') {
+      bindOwner(db, owner, typeof ownerIdentity === 'function' ? await ownerIdentity(owner) : ownerIdentity, alive);
+      fence = takeBuild(db, owner, alive);
+      if (!fence) return 0;
+    }
+    const pick = options.pick ?? ((kind, start) => chooseViewerPath(kind, start, {
+      executable: join(dirname(launcher), 'PlacekeeperMac'), run }));
+    return await navigate({ db, file, line, destination, pdfDirectory, socket, editor, configPath, call, pick, fence });
   } catch (error) {
     if (error instanceof SelectionCancelled) return 0;
-    // execFile errors include the entire argv (including session capabilities).
-    // Never let those errors reach the launcher's uncaught-exception output.
-    throw new Error('Placekeeper Zed integration failed. Check the source folder, compiled PDF, and Zed setup.');
+    throw new Error('Placekeeper source navigation failed. Check the source folder, compiled PDF, and configured editor profile.');
   } finally { try { db?.close(); } catch {} }
+}
+
+export async function chooseViewerPath(kind, start, { executable, run = exec }) {
+  try {
+    const result = await run(executable, [kind === 'folder' ? '--choose-source-folder' : '--choose-source-pdf', start]);
+    return realpathSync(result.stdout.replace(/\n$/u, ''));
+  } catch (error) {
+    if (error.code === 2) throw new SelectionCancelled();
+    throw error;
+  }
 }

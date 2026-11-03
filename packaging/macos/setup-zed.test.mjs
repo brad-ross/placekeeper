@@ -21,6 +21,7 @@ test('preview preserves JSONC and compiler argv, is idempotent, and restores man
   assert.match(preview.settings, /Keep my theme/);
   assert.equal(parse(preview.settings).theme, 'One Dark');
   assert.deepEqual(build(preview.settings).args, ['zed-build', '/custom/latexmk', '-pdf', '-outdir=output', '%f']);
+  assert.deepEqual(parse(preview.settings).lsp.texlab.settings.texlab.forwardSearch, { executable: launcher, args: ['view-source', '--editor', 'zed', '--source', '%f', '--line', '%l', '--pdf', '%p', '--intent', 'preview'] });
   assert.equal(build(preview.settings).pdfDirectory, 'output');
   assert.equal(build(preview.settings).auxDirectory, 'aux');
   const again = configureZed(preview.settings, preview.tasks, { launcher, mode: 'preview', previousBuild: preview.previousBuild });
@@ -30,7 +31,15 @@ test('preview preserves JSONC and compiler argv, is idempotent, and restores man
   assert.equal(parse(manual.tasks)[0].label, 'My task');
   const task = parse(manual.tasks)[1];
   assert.equal(task.env.PLACEKEEPER_PDF_DIR, 'output');
-  assert.deepEqual(task.args, ['zed-forward', 'manual', '"$PLACEKEEPER_SOURCE"', '"$PLACEKEEPER_LINE"', '"$PLACEKEEPER_PDF_DIR"']);
+  assert.deepEqual(task.args, ['view-source', '--editor', 'zed', '--source', '"$PLACEKEEPER_SOURCE"', '--line', '"$PLACEKEEPER_LINE"', '--pdf-directory', '"$PLACEKEEPER_PDF_DIR"']);
+});
+test('legacy installed tasks migrate to the shared command and preserve unrelated JSONC', () => {
+  const legacy = '[\n  // Keep my other task.\n  {"label":"Other","command":"echo"},\n  {"label":"Placekeeper: Forward SyncTeX","args":["zed-forward","manual"]}\n]';
+  const updated = configureZed(settings, legacy, { launcher, mode: 'manual' });
+  assert.match(updated.tasks, /Keep my other task/);
+  assert.deepEqual(parse(updated.tasks)[0], { label: 'Other', command: 'echo' });
+  assert.equal(parse(updated.tasks)[1].args[0], 'view-source');
+  assert.deepEqual(configureZed(updated.settings, updated.tasks, { launcher, mode: 'manual' }), updated);
 });
 test('switching default preview to manual restores absent build overrides', () => {
   const preview = configureZed('{}', '[]', { launcher, mode: 'preview' });
@@ -43,6 +52,7 @@ test('malformed JSONC, unexpected shapes and conflicting user tasks fail before 
     assert.throws(() => configureZed(text, '[]', { launcher, mode: 'manual' }));
   }
   assert.throws(() => configureZed('{}', '[{"label":"Placekeeper: Forward SyncTeX","command":"user"}]', { launcher, mode: 'manual' }), /already uses/);
+  assert.throws(() => configureZed('{}', '[{"label":"Placekeeper: Forward SyncTeX","args":["view-source","--editor","other"]}]', { launcher, mode: 'manual' }), /already uses/);
   assert.throws(() => configureZed('{}', '[]', { launcher, mode: 'bad' }), /mode/);
 });
 test('installed setup is private, works through symlinked settings, reruns and switches modes', async () => {

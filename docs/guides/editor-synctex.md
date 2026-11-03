@@ -27,7 +27,7 @@ Replace these example executable paths with the actual paths on your machine:
   --executable '/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code' \
   --args-json '["--reuse-window","--goto","{file}:{line}:{column}"]'
 
-"$PLACEKEEPER" editor add --name zed --executable /usr/local/bin/zed \
+"$PLACEKEEPER" editor add --name zed-manual --executable /usr/local/bin/zed \
   --args-json '["{file}:{line}:{column}"]'
 
 "$PLACEKEEPER" editor add --name neovim --adapter neovim
@@ -50,12 +50,26 @@ Zed's CLI accepts file locations, but this recipe has no originating-window iden
 
 Placekeeper rejects colon or newline filenames in combined `{file}:{line}` syntax rather than opening the wrong file. Separate `{file}` arguments, including Emacs and structured Neovim RPC, do not have that limitation. Missing columns default to 1; the Emacs recipe intentionally uses line-only navigation.
 
-## Register, navigate, and renew
+## View a source location
 
-Register one editor session with the folder containing the source files:
+After creating a profile, use the shared viewer command from any editor that can invoke a process:
 
 ```sh
-SESSION=$("$PLACEKEEPER" editor register --profile zed \
+"$PLACEKEEPER" view-source --editor zed-manual \
+  --source '/Users/YOU/Research/Project with spaces/chapters/results.tex' \
+  --line 42 --pdf '/Users/YOU/Research/Project with spaces/build/main.pdf'
+```
+
+`--editor` names a saved profile, such as `zed-manual` created above. The name `zed` is reserved for the installed Zed integration: that alias requires Zed setup and uses its saved CLI configuration and build fences. Use `zed-manual` for a separately configured generic Zed profile. Neovim profiles additionally require `--socket '/absolute/listening/socket'`. On first use, approve the source folder in Placekeeper. The shared command retains that approval and renews its session after service restarts. If `--pdf` is omitted, it discovers a matching PDF; `--pdf-directory '/absolute/output/folder'` narrows the search. Source and line are required, and line numbers start at 1.
+
+Manual requests default to `--intent explicit`: they establish the return editor and take precedence over older pending navigation. An automatic callback must use `--intent preview` so it cannot replace a newer manual request's return target. Preview requests need the build fence captured before compilation and are currently supported only through the installed Zed alias and its build wrapper. Generic Texlab callbacks must remain manual.
+
+## Low-level session commands
+
+The lower-level commands remain available for clients that manage their own session and build tokens. Register one editor session with the folder containing the source files:
+
+```sh
+SESSION=$("$PLACEKEEPER" editor register --profile zed-manual \
   --source-root '/Users/YOU/Research/Project with spaces')
 
 ASSOCIATION=$("$PLACEKEEPER" forward-search \
@@ -70,7 +84,7 @@ For mapping data stored separately from the PDF, append `--synctex-directory '/a
 
 SyncTeX matches the source path spelling recorded by the compiler. When a project is opened through a directory alias or symbolic link (for example `/tmp` versus `/private/tmp`), use the compiler's absolute source path, or rebuild using the path your editor supplies. Relative CLI paths resolve against the process working directory, which macOS may canonicalize. Configuration files should use absolute paths: they do not expand `~`, `$HOME`, or shell expressions. Lines and optional columns are one-based positive integers.
 
-After a service restart or app update, register again and replace the old handle in editor settings. Do not commit live handles or machine-specific paths to a shared project. A stale handle fails rather than falling back to another editor.
+Clients using the low-level commands must register again after a service restart or app update and replace the old handle in editor settings. Do not commit live handles or machine-specific paths to a shared project. A stale handle fails rather than falling back to another editor.
 
 ## VS Code
 
@@ -82,7 +96,7 @@ Use **Placekeeper: View PDF**, **Placekeeper: Forward SyncTeX**, and **Placekeep
 
 The default is `false`. Newer manual navigation cancels older pending following; refresh continues in either mode. LaTeX Workshop's scoped compatibility launcher remains separate and best-effort. It does not use the general native session handle.
 
-To use the native window instead, register the `vscode` command profile and use the generic Texlab settings below. Native navigation does not redirect the embedded panel's return target.
+To use the native window instead, create the `vscode` command profile and use the shared viewer command or generic Texlab settings below. Native navigation does not redirect the embedded panel's return target.
 
 ## Zed
 
@@ -90,15 +104,15 @@ Install or enable Zed’s existing **LaTeX** extension, then select **Zed** when
 
 Setup updates Zed’s user `settings.json` and `tasks.json`, preserving comments, unrelated settings, custom build executable and arguments, and output directories. Preview wraps the existing build command and enables build-on-save; switching back to manual restores the saved build command and on-save setting. Settings that cannot be safely parsed or a conflicting task name cause setup to stop with a diagnostic.
 
-Open a TeX project and run **task: spawn → Placekeeper: Forward SyncTeX**. On first use, approve the folder containing its source files in Placekeeper. That approval persists for future requests; installation grants no source-folder access. The adapter registers sessions as needed, including after service restarts. Build with SyncTeX enabled and configure Texlab’s `build.pdfDirectory` to match your output directory. Manual navigation uses the current source file, row, and that directory to find the matching PDF.
+Open a TeX project and run **task: spawn → Placekeeper: Forward SyncTeX**. On first use, approve the folder containing its source files in Placekeeper. That approval persists for future requests; installation grants no source-folder access. The shared `view-source --editor zed` command registers sessions as needed, including after service restarts. Build with SyncTeX enabled and configure Texlab’s `build.pdfDirectory` to match your output directory. The manual task passes the current source file and row with `--pdf-directory` to find the matching PDF. Rerunning setup migrates the previously installed `zed-forward` user task to this command. If a project-local task overrides it, update that task from [zed-tasks.json](../../integrations/editors/zed-tasks.json) or remove the override; legacy commands remain supported.
 
-Preview uses the LaTeX extension’s Texlab build and forward-search callbacks. A failed build does not navigate; refresh continues to preserve reading position until a successful eligible build requests a jump. The extension’s own preview command also uses the configured callback. Use the Placekeeper task for a jump from the current cursor. If you bind **task: rerun**, set `reevaluate_context` to `true` so Zed does not reuse the previous cursor context.
+Preview keeps the `zed-build` wrapper around the LaTeX extension’s Texlab build command and invokes `view-source --editor zed --intent preview` from its forward-search callback. The wrapper captures the build fence before compilation so a delayed callback cannot overtake newer manual navigation. A failed build does not navigate; refresh continues to preserve reading position until a successful eligible build requests a jump. The extension’s own preview command also uses the configured callback. Use the Placekeeper task for a jump from the current cursor. If you bind **task: rerun**, set `reevaluate_context` to `true` so Zed does not reuse the previous cursor context.
 
 Zed chooses the return window through its CLI. In the recorded two-workspace check it returned to the existing source workspace while another workspace was active; exact originating-window routing is not guaranteed. The installed setup, first-use folder approval, manual task, and automatic preview after an app/service restart passed the isolated [acceptance check](../../test/acceptance/editor-synctex.md#seamless-zed-installation-and-persistent-approval--november-2-2026). A canceled preview build wrapper can suppress further Texlab builds until the language server restarts. [Zed LaTeX preview](https://github.com/rzukic/zed-latex/wiki/Preview), [Zed task variables](https://zed.dev/docs/tasks#variables).
 
 ## Other Texlab clients
 
-Merge [texlab.json](../../integrations/editors/texlab.json) into your LSP client's configuration. Replace the executable and `REPLACE_WITH_SESSION`. `%f`, `%p`, and `%l` supply the source, PDF, and line. Keep `build.forwardSearchAfter` false: that generic viewer command does not distinguish manual requests from build-triggered requests. Use `build.pdfDirectory` for a separate PDF directory, matching your build configuration; top-level `auxDirectory` is deprecated. [Texlab configuration](https://github.com/latex-lsp/texlab/wiki/Configuration).
+Merge [texlab.json](../../integrations/editors/texlab.json) into your LSP client's configuration. Replace the executable and `REPLACE_WITH_PROFILE` with a profile created above. `%f`, `%p`, and `%l` supply the source, PDF, and line to `view-source`. No session token belongs in this configuration: the shared command registers and renews it. The example deliberately uses `--intent explicit` for manual forward search, which establishes the return editor. Keep `build.forwardSearchAfter` false. Enabling automatic callbacks with explicit intent would give a build completion manual precedence; automatic requests require `--intent preview` and a build fence captured before compilation. That path is currently supported only by installed Zed setup; the generic profile recipe supports explicit requests. Use `build.pdfDirectory` for a separate PDF directory, matching your build configuration; top-level `auxDirectory` is deprecated. [Texlab configuration](https://github.com/latex-lsp/texlab/wiki/Configuration).
 
 ## Neovim
 

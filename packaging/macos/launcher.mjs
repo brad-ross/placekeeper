@@ -237,6 +237,11 @@ export async function main(args = process.argv.slice(2)) {
     PLACEKEEPER_WEB_ASSETS: resolve(resources, "web"),
     PLACEKEEPER_APP_RESOURCES: resources,
   };
+  if (args[0] === "view-source") {
+    const { runViewSource } = await import("./integrations/editors/zed-adapter.mjs");
+    process.exitCode = await runViewSource(args, { owner: process.ppid, launcher: resolve(resources, "../MacOS/placekeeper") });
+    return;
+  }
   if (args[0] === "zed-forward" || args[0] === "zed-build") {
     const { runZed } = await import("./integrations/editors/zed-adapter.mjs");
     process.exitCode = await runZed(args, { owner: process.ppid, launcher: resolve(resources, "../MacOS/placekeeper") });

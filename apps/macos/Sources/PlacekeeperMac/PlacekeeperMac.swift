@@ -794,7 +794,7 @@ final class PlacekeeperAppDelegate: NSObject, NSApplicationDelegate {
 // Run separately from document windows so Texlab can await a native choice
 // without opening a PDF or joining the normal application lifecycle.
 @MainActor
-private final class ZedSelectionDelegate: NSObject, NSApplicationDelegate {
+private final class SourceSelectionDelegate: NSObject, NSApplicationDelegate {
     let folder: Bool
     let start: String
 
@@ -805,10 +805,10 @@ private final class ZedSelectionDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let panel = NSOpenPanel()
-        panel.title = folder ? "Allow Zed Source Navigation" : "Choose Compiled PDF"
+        panel.title = folder ? "Allow Source Navigation" : "Choose Compiled PDF"
         panel.message = folder
-            ? "Allow Placekeeper to return to Zed source files in this project folder."
-            : "Choose the compiled PDF for this Zed source file."
+            ? "Allow Placekeeper to return to source files in this project folder."
+            : "Choose the compiled PDF for this source file."
         panel.prompt = folder ? "Allow Folder" : "Choose PDF"
         panel.canChooseDirectories = folder
         panel.canChooseFiles = !folder
@@ -829,10 +829,10 @@ struct PlacekeeperMac {
     static func main() {
         let application = NSApplication.shared
         if let mode = CommandLine.arguments.dropFirst().first,
-           mode == "--zed-choose-folder" || mode == "--zed-choose-pdf" {
+           ["--zed-choose-folder", "--zed-choose-pdf", "--choose-source-folder", "--choose-source-pdf"].contains(mode) {
             guard CommandLine.arguments.count == 3,
                   CommandLine.arguments[2].hasPrefix("/") else { exit(64) }
-            let delegate = ZedSelectionDelegate(folder: mode == "--zed-choose-folder", start: CommandLine.arguments[2])
+            let delegate = SourceSelectionDelegate(folder: mode == "--zed-choose-folder" || mode == "--choose-source-folder", start: CommandLine.arguments[2])
             application.delegate = delegate
             application.setActivationPolicy(.regular)
             application.activate(ignoringOtherApps: true)

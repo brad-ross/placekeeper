@@ -40,7 +40,7 @@ export function configureZed(settings, tasks, { launcher, mode, previousBuild })
   if (existing.pdfDirectory !== undefined && typeof existing.pdfDirectory !== 'string') throw new Error('Invalid Texlab PDF directory');
   const savedBuild = (wrapped ? previousBuild : undefined) ?? Object.fromEntries(['executable', 'args', 'onSave', 'forwardSearchAfter'].filter(key => Object.hasOwn(existing, key)).map(key => [key, existing[key]]));
   settings = set(settings, [...texlab, 'forwardSearch', 'executable'], launcher);
-  settings = set(settings, [...texlab, 'forwardSearch', 'args'], ['zed-forward', 'preview', '%f', '%l', '%p']);
+  settings = set(settings, [...texlab, 'forwardSearch', 'args'], ['view-source', '--editor', 'zed', '--source', '%f', '--line', '%l', '--pdf', '%p', '--intent', 'preview']);
   settings = set(settings, [...build, 'forwardSearchAfter'], mode === 'preview');
   if (mode === 'preview') {
     settings = set(settings, [...build, 'onSave'], true);
@@ -55,8 +55,10 @@ export function configureZed(settings, tasks, { launcher, mode, previousBuild })
     if (previousBuild) settings = set(settings, [...build, 'onSave'], previousBuild.onSave);
   }
   const index = entries.findIndex(entry => entry?.label === taskLabel);
-  if (index >= 0 && entries[index]?.args?.[0] !== 'zed-forward') throw new Error('A Zed user task already uses the Placekeeper task name. Rename it and retry.');
-  const task = { label: taskLabel, command: '"$PLACEKEEPER_LAUNCHER"', args: ['zed-forward', 'manual', '"$PLACEKEEPER_SOURCE"', '"$PLACEKEEPER_LINE"', '"$PLACEKEEPER_PDF_DIR"'],
+  const ownedTask = entries[index]?.args?.[0] === 'zed-forward' ||
+    (entries[index]?.args?.[0] === 'view-source' && entries[index]?.args?.[1] === '--editor' && entries[index]?.args?.[2] === 'zed');
+  if (index >= 0 && !ownedTask) throw new Error('A Zed user task already uses the Placekeeper task name. Rename it and retry.');
+  const task = { label: taskLabel, command: '"$PLACEKEEPER_LAUNCHER"', args: ['view-source', '--editor', 'zed', '--source', '"$PLACEKEEPER_SOURCE"', '--line', '"$PLACEKEEPER_LINE"', '--pdf-directory', '"$PLACEKEEPER_PDF_DIR"'],
     env: { PLACEKEEPER_LAUNCHER: launcher, PLACEKEEPER_SOURCE: '$ZED_FILE', PLACEKEEPER_LINE: '$ZED_ROW', PLACEKEEPER_PDF_DIR: existing.pdfDirectory ?? '.' },
     save: 'none', reveal: 'never', hide: 'on_success' };
   tasks = set(tasks, [index >= 0 ? index : entries.length], task);
