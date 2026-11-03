@@ -4,11 +4,11 @@ The native Mac app accepts source-to-PDF requests through its installed command 
 
 Start here for **Zed** or **VS Code** on an Apple-silicon Mac:
 
-1. From a checkout containing this integration, follow the [installation prerequisites](../installation.md) and run `./install.sh --zed=manual` for on-demand jumps, `./install.sh --zed=preview` to also jump after builds, or `./install.sh --vscode=setup` for the embedded VS Code viewer. Check the installer summary for pending steps. Zed needs its LaTeX extension; reload the VS Code window after installing its extension.
+1. From a checkout containing this integration, follow the [installation prerequisites](https://github.com/brad-ross/placekeeper/blob/c75be6a8bcc10210b056e577b21e84a2db5bfb38/docs/installation.md) and run `./install.sh --zed=manual` for on-demand jumps, `./install.sh --zed=preview` to also jump after builds, or `./install.sh --vscode=setup` for the embedded VS Code viewer. Check the installer summary for pending steps. Zed needs its LaTeX extension; reload the VS Code window after installing its extension.
 2. From the project root, build with SyncTeX enabled (for example, `latexmk -pdf -synctex=1 -outdir=build main.tex`). Check that `build/main.pdf` and `build/main.synctex.gz` (or `.synctex`) exist. In Zed, make sure Texlab’s PDF directory matches the build directory.
 3. Put the cursor on a line of typeset text. In Zed, run **task: spawn → Placekeeper: Forward SyncTeX** and approve the project’s source folder when prompted. In a trusted local VS Code workspace, run **Placekeeper: Forward SyncTeX** from the command palette. Confirm the PDF shows that passage, then use **Go to Source** there and check that the editor returns to the corresponding source.
 
-Neither installer-managed route requires creating a profile by hand. See [Zed](#zed) and [VS Code](#vs-code) below for settings. The [acceptance record](../../test/acceptance/editor-synctex.md) lists the installed-app and live editor checks and their limits. Neovim, Sublime Text, and Emacs have manual recipes but have not been verified live.
+Neither installer-managed route requires creating a profile by hand. See [Zed](#zed) and [VS Code](#vs-code) below for settings. The [acceptance record](https://github.com/brad-ross/placekeeper/blob/c75be6a8bcc10210b056e577b21e84a2db5bfb38/test/acceptance/editor-synctex.md) lists the installed-app and live editor checks and their limits. Neovim, Sublime Text, and Emacs have manual recipes but have not been verified live.
 
 ## Install and build
 
@@ -100,7 +100,11 @@ Use **Placekeeper: View PDF**, **Placekeeper: Forward SyncTeX**, and **Placekeep
 { "placekeeper.followAfterBuild": true }
 ```
 
-The default is `false`. Newer manual navigation cancels older pending following; refresh continues in either mode. LaTeX Workshop's scoped compatibility launcher remains separate and best-effort. It does not use the general native session handle.
+The default is `false`. Newer manual navigation cancels older pending following; refresh continues in either mode.
+
+If an explicit **Forward SyncTeX** request finds missing, pending, or stale mapping data, VS Code shows “Waiting for SyncTeX data.” It retains the source position captured when you invoked the command and retries when output or mapping changes are observed, with periodic recovery checks while work remains pending. Moving the cursor does not retarget that request. A newer explicit jump replaces it, and an explicit jump cancels an older saved-cursor follow. This works with `placekeeper.followAfterBuild` disabled.
+
+Waiting for mapping has no fixed one-minute expiry: it ends when delivered, superseded, canceled by reverse navigation, terminated by a terminal failure, or disposed with the panel. Once a target is sent to the viewer, a separate acknowledgement wait expires after about a minute. Pending requests are not restored after closing the panel or restarting the extension. Live overlap checks used source and PDF visible side by side; automatic delivery into a hidden PDF tab remains unqualified. LaTeX Workshop's scoped compatibility launcher remains separate and best-effort. It does not use the general native session handle.
 
 To use the native window instead, create the `vscode` command profile and use the shared viewer command or generic Texlab settings below. Native navigation does not redirect the embedded panel's return target.
 
@@ -110,19 +114,19 @@ Install or enable Zed’s existing **LaTeX** extension, then select **Zed** when
 
 Setup updates Zed’s user `settings.json` and `tasks.json`, preserving comments, unrelated settings, custom build executable and arguments, and output directories. Preview wraps the existing build command and enables build-on-save; switching back to manual restores the saved build command and on-save setting. Settings that cannot be safely parsed or a conflicting task name cause setup to stop with a diagnostic.
 
-Open a TeX project and run **task: spawn → Placekeeper: Forward SyncTeX**. On first use, approve the folder containing its source files in Placekeeper. That approval persists for future requests; installation grants no source-folder access. The shared `view-source --editor zed` command registers sessions as needed, including after service restarts. Build with SyncTeX enabled and configure Texlab’s `build.pdfDirectory` to match your output directory. The manual task passes the current source file and row with `--pdf-directory` to find the matching PDF. Rerunning setup migrates the previously installed `zed-forward` user task to this command. If a project-local task overrides it, update that task from [zed-tasks.json](../../integrations/editors/zed-tasks.json) or remove the override; legacy commands remain supported.
+Open a TeX project and run **task: spawn → Placekeeper: Forward SyncTeX**. On first use, approve the folder containing its source files in Placekeeper. That approval persists for future requests; installation grants no source-folder access. The shared `view-source --editor zed` command registers sessions as needed, including after service restarts. Build with SyncTeX enabled and configure Texlab’s `build.pdfDirectory` to match your output directory. The manual task passes the current source file and row with `--pdf-directory` to find the matching PDF. Rerunning setup migrates the previously installed `zed-forward` user task to this command. If a project-local task overrides it, update that task from [zed-tasks.json](https://github.com/brad-ross/placekeeper/blob/c75be6a8bcc10210b056e577b21e84a2db5bfb38/integrations/editors/zed-tasks.json) or remove the override; legacy commands remain supported.
 
 Preview keeps the `zed-build` wrapper around the LaTeX extension’s Texlab build command and invokes `view-source --editor zed --intent preview` from its forward-search callback. The wrapper captures the build fence before compilation so a delayed callback cannot overtake newer manual navigation. A failed build does not navigate; refresh continues to preserve reading position until a successful eligible build requests a jump. The extension’s own preview command also uses the configured callback. Use the Placekeeper task for a jump from the current cursor. If you bind **task: rerun**, set `reevaluate_context` to `true` so Zed does not reuse the previous cursor context.
 
-Zed chooses the return window through its CLI. In the recorded two-workspace check it returned to the existing source workspace while another workspace was active; exact originating-window routing is not guaranteed. The installed setup, first-use folder approval, manual task, and automatic preview after an app/service restart passed the isolated [acceptance check](../../test/acceptance/editor-synctex.md#seamless-zed-installation-and-persistent-approval--november-2-2026). A canceled preview build wrapper can suppress further Texlab builds until the language server restarts. [Zed LaTeX preview](https://github.com/rzukic/zed-latex/wiki/Preview), [Zed task variables](https://zed.dev/docs/tasks#variables).
+Zed chooses the return window through its CLI. In the recorded two-workspace check it returned to the existing source workspace while another workspace was active; exact originating-window routing is not guaranteed. The installed setup, first-use folder approval, manual task, and automatic preview after an app/service restart passed the isolated [acceptance check](https://github.com/brad-ross/placekeeper/blob/c75be6a8bcc10210b056e577b21e84a2db5bfb38/test/acceptance/editor-synctex.md#seamless-zed-installation-and-persistent-approval--november-2-2026). A canceled preview build wrapper can suppress further Texlab builds until the language server restarts. [Zed LaTeX preview](https://github.com/rzukic/zed-latex/wiki/Preview), [Zed task variables](https://zed.dev/docs/tasks#variables).
 
 ## Other Texlab clients
 
-Merge [texlab.json](../../integrations/editors/texlab.json) into your LSP client's configuration. Replace the executable and `REPLACE_WITH_PROFILE` with a profile created above. `%f`, `%p`, and `%l` supply the source, PDF, and line to `view-source`. No session token belongs in this configuration: the shared command registers and renews it. The example deliberately uses `--intent explicit` for manual forward search, which establishes the return editor. Keep `build.forwardSearchAfter` false. Enabling automatic callbacks with explicit intent would give a build completion manual precedence; automatic requests require `--intent preview` and a build fence captured before compilation. That path is currently supported only by installed Zed setup; the generic profile recipe supports explicit requests. Use `build.pdfDirectory` for a separate PDF directory, matching your build configuration; top-level `auxDirectory` is deprecated. [Texlab configuration](https://github.com/latex-lsp/texlab/wiki/Configuration).
+Merge [texlab.json](https://github.com/brad-ross/placekeeper/blob/c75be6a8bcc10210b056e577b21e84a2db5bfb38/integrations/editors/texlab.json) into your LSP client's configuration. Replace the executable and `REPLACE_WITH_PROFILE` with a profile created above. `%f`, `%p`, and `%l` supply the source, PDF, and line to `view-source`. No session token belongs in this configuration: the shared command registers and renews it. The example deliberately uses `--intent explicit` for manual forward search, which establishes the return editor. Keep `build.forwardSearchAfter` false. Enabling automatic callbacks with explicit intent would give a build completion manual precedence; automatic requests require `--intent preview` and a build fence captured before compilation. That path is currently supported only by installed Zed setup; the generic profile recipe supports explicit requests. Use `build.pdfDirectory` for a separate PDF directory, matching your build configuration; top-level `auxDirectory` is deprecated. [Texlab configuration](https://github.com/latex-lsp/texlab/wiki/Configuration).
 
 ## Neovim
 
-The [Lua helper](../../integrations/editors/placekeeper.lua) uses `vim.system`, requiring Neovim 0.10 or newer. It registers a local listening socket and sends argument arrays. Source return uses structured MessagePack RPC without interpolating filenames into Lua or Ex commands. It does not activate the terminal application. [Neovim process API](https://neovim.io/doc/user/lua/#vim.system()), [Neovim RPC](https://neovim.io/doc/user/api/#rpc-connecting).
+The [Lua helper](https://github.com/brad-ross/placekeeper/blob/c75be6a8bcc10210b056e577b21e84a2db5bfb38/integrations/editors/placekeeper.lua) uses `vim.system`, requiring Neovim 0.10 or newer. It registers a local listening socket and sends argument arrays. Source return uses structured MessagePack RPC without interpolating filenames into Lua or Ex commands. It does not activate the terminal application. [Neovim process API](https://neovim.io/doc/user/lua/#vim.system()), [Neovim RPC](https://neovim.io/doc/user/api/#rpc-connecting).
 
 Create the `neovim` profile above. Start Neovim with a local socket, for example `nvim --listen '/tmp/my-project.nvim'`, then load the installed helper:
 
@@ -155,7 +159,7 @@ The helper retains the captured source, session and association; it never substi
 
 ## Sublime Text — unverified
 
-Register the `sublime` profile above. Copy [placekeeper_sublime.py](../../integrations/editors/placekeeper_sublime.py) to `Packages/User`. Add these values to the project's `settings` object:
+Register the `sublime` profile above. Copy [placekeeper_sublime.py](https://github.com/brad-ross/placekeeper/blob/c75be6a8bcc10210b056e577b21e84a2db5bfb38/integrations/editors/placekeeper_sublime.py) to `Packages/User`. Add these values to the project's `settings` object:
 
 ```json
 {
@@ -169,7 +173,7 @@ Add a user key binding such as `{ "keys": ["super+alt+j"], "command": "placekeep
 
 ## Emacs — unverified
 
-Start a server with `M-x server-start`, configure the `emacs` profile above, and register it with your source root. Load [placekeeper.el](../../integrations/editors/placekeeper.el); set `placekeeper-launcher`, `placekeeper-pdf`, and `placekeeper-session` to the absolute launcher, root PDF and registration handle. Run `M-x placekeeper-forward-sync-tex`. No automatic following is installed.
+Start a server with `M-x server-start`, configure the `emacs` profile above, and register it with your source root. Load [placekeeper.el](https://github.com/brad-ross/placekeeper/blob/c75be6a8bcc10210b056e577b21e84a2db5bfb38/integrations/editors/placekeeper.el); set `placekeeper-launcher`, `placekeeper-pdf`, and `placekeeper-session` to the absolute launcher, root PDF and registration handle. Run `M-x placekeeper-forward-sync-tex`. No automatic following is installed.
 
 For a named server, add fixed `--socket-name` and server-name arguments to the trusted profile before registering. Do not use `--eval`, shell interpolation, or an alternate-editor command. This recipe has not completed an editor round trip. [Emacs client options](https://www.gnu.org/s/emacs/manual/html_node/emacs/emacsclient-Options.html), [Emacs process arguments](https://www.gnu.org/s/emacs/manual/html_node/elisp/Synchronous-Processes.html).
 
@@ -183,8 +187,9 @@ Setup applies only to that native window. A later explicit editor request can re
 
 | Symptom | Next step |
 |---|---|
-| Session expired | Register again and update the editor's handle. |
-| Pending navigation | Finish a SyncTeX-enabled build and check both paths. Pending work times out after about a minute. |
+| Session expired | Low-level clients must register again and update their handle. The shared `view-source` command renews sessions automatically. |
+| Native pending navigation | Finish a SyncTeX-enabled build and check both paths. Native requests time out after about a minute; issue a new request afterward. |
+| VS Code waiting for SyncTeX data | Finish a build with matching PDF and sidecar. The captured explicit request resumes automatically while its panel remains live; invoke a newer jump to replace it. See [VS Code](#vs-code) for cancellation and qualification limits. |
 | Missing or stale mapping | Rebuild PDF and SyncTeX together; do not reuse a predecessor's sidecar. |
 | Ambiguous mapping | Keep one current `main.synctex` or `main.synctex.gz`, not both. |
 | Source outside the root | Select the actual source-project root or register again with it. |
