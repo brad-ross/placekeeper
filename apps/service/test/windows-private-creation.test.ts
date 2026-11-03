@@ -49,7 +49,7 @@ it.runIf(process.platform === "win32")("creates private Windows files and inheri
   await expect(createPrivateFile(file)).rejects.toMatchObject({ code: "EEXIST" });
   expect(await readFile(file, "utf8")).toBe("original");
   const inherited = join(directory, "inherited"); await writeFile(inherited, "inherited private bytes");
-  await verifyPrivatePath(inherited, "file");
+  await expect(verifyPrivatePath(inherited, "file"), "file created by Node inherits a private descriptor").resolves.toBeUndefined();
   const streamed = join(directory, "streamed");
   await writePrivateFile(streamed, (async function* () { yield Buffer.from("one"); yield Buffer.from("two"); })());
   expect(await readFile(streamed, "utf8")).toBe("onetwo"); await verifyPrivatePath(streamed, "file");

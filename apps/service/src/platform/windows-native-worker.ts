@@ -12,8 +12,10 @@ export type WindowsNativeRequest =
   | { readonly operation: "copyAcl"; readonly candidate: string; readonly original: string }
   | { readonly operation: "publish"; readonly candidate: string; readonly target: string; readonly replaceExisting: boolean };
 export type WindowsNativeResult = { readonly status: "ok" } | { readonly status: "published" } | { readonly status: "failed"; readonly nativeCode: number };
+const WINDOWS_NATIVE_FAILURE_REASONS = ["operation-failed", "reparse-point", "owner-mismatch", "rule-count", "principal-mismatch", "denied-access", "rights-mismatch"] as const;
+type WindowsNativeFailureReason = typeof WINDOWS_NATIVE_FAILURE_REASONS[number];
 export class WindowsNativeWorkerError extends Error {
-  constructor(message: string, readonly attempted: boolean, readonly uncertain: boolean) { super(message); this.name = "WindowsNativeWorkerError"; }
+  constructor(message: string, readonly attempted: boolean, readonly uncertain: boolean, readonly reason?: WindowsNativeFailureReason) { super(message); this.name = "WindowsNativeWorkerError"; }
 }
 
 const SCRIPT = String.raw`$ErrorActionPreference='Stop'
@@ -90,7 +92,7 @@ public static class PlacekeeperFilePublication {
 '@
 $sid=[System.Security.Principal.WindowsIdentity]::GetCurrent().User
 while ($null -ne ($line=[Console]::In.ReadLine())) {
- $id=$null; $attempted=$false
+ $id=$null; $attempted=$false; $failureReason='operation-failed'
  try {
   if ([Text.Encoding]::UTF8.GetByteCount($line) -gt 65536) { throw 'Oversized request' }
   $r=$line | ConvertFrom-Json
@@ -99,7 +101,7 @@ while ($null -ne ($line=[Console]::In.ReadLine())) {
   switch ($r.operation) {
    {$_ -eq 'protect' -or $_ -eq 'verify'} {
     $item=Get-Item -LiteralPath $r.path -Force
-    if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'Reparse point' }
+    if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { $failureReason='reparse-point'; throw 'Reparse point' }
     if ($r.operation -eq 'protect') {
      $acl=if ($item.PSIsContainer) { New-Object System.Security.AccessControl.DirectorySecurity } else { New-Object System.Security.AccessControl.FileSecurity }
      $acl.SetOwner($sid)
@@ -111,11 +113,13 @@ while ($null -ne ($line=[Console]::In.ReadLine())) {
      Set-Acl -LiteralPath $r.path -AclObject $acl
     }
     $a=Get-Acl -LiteralPath $r.path
-    if ($a.GetOwner([System.Security.Principal.SecurityIdentifier]).Value -ne $sid.Value) { throw 'Unprotected owner or inheritance' }
+    if ($a.GetOwner([System.Security.Principal.SecurityIdentifier]).Value -ne $sid.Value) { $failureReason='owner-mismatch'; throw 'Non-private owner' }
     $rules=$a.GetAccessRules($true,$true,[System.Security.Principal.SecurityIdentifier])
-    if ($rules.Count -ne 1) { throw 'Unexpected access rules' }
+    if ($rules.Count -ne 1) { $failureReason='rule-count'; throw 'Unexpected access rules' }
     foreach ($rule in $rules) {
-     if ($rule.IdentityReference.Value -ne $sid.Value -or $rule.AccessControlType -ne 'Allow' -or $rule.FileSystemRights -ne [System.Security.AccessControl.FileSystemRights]::FullControl) { throw 'Non-private ACL' }
+     if ($rule.IdentityReference.Value -ne $sid.Value) { $failureReason='principal-mismatch'; throw 'Non-private ACL principal' }
+     if ($rule.AccessControlType -ne 'Allow') { $failureReason='denied-access'; throw 'Non-private ACL access type' }
+     if ($rule.FileSystemRights -ne [System.Security.AccessControl.FileSystemRights]::FullControl) { $failureReason='rights-mismatch'; throw 'Non-private ACL rights' }
     }
     $result=@{status='ok'}
    }
@@ -153,7 +157,7 @@ while ($null -ne ($line=[Console]::In.ReadLine())) {
    default { throw 'Unsupported native operation' }
   }
   $reply=@{id=$id;ok=$true;result=$result}
- } catch { $reply=@{id=$id;ok=$false;attempted=$attempted;error='Windows native operation failed'} }
+ } catch { $reply=@{id=$id;ok=$false;attempted=$attempted;reason=$failureReason;error='Windows native operation failed'} }
  [Console]::Out.WriteLine(($reply | ConvertTo-Json -Compress -Depth 4))
  [Console]::Out.Flush()
 }`;
@@ -240,10 +244,11 @@ function acquireWorker(): Worker {
             : result.status === "ok" || ((pending.request.operation === "createPrivateFile" || pending.request.operation === "createPrivateDirectory" || pending.request.operation === "registerChromeHost" || pending.request.operation === "unregisterChromeHost") && result.status === "failed" && Number.isSafeInteger(result.nativeCode) && result.nativeCode >= 0))) throw new Error("Invalid reply");
           pending.resolve(result);
         } else if (reply.ok === false && typeof reply.attempted === "boolean") {
+          if (typeof reply.reason !== "string" || !WINDOWS_NATIVE_FAILURE_REASONS.includes(reply.reason as WindowsNativeFailureReason)) throw new Error("Invalid failure reason");
           const message = pending.request.operation === "verify" || pending.request.operation === "protect"
             ? "Windows private storage permissions could not be verified"
             : pending.request.operation === "copyAcl" ? "Windows replacement security descriptor could not be preserved" : "Windows native publication failed";
-          pending.reject(new WindowsNativeWorkerError(message, reply.attempted, reply.attempted && pending.request.operation === "publish"));
+          pending.reject(new WindowsNativeWorkerError(`${message} (${reply.reason})`, reply.attempted, reply.attempted && pending.request.operation === "publish", reply.reason as WindowsNativeFailureReason));
         } else throw new Error("Invalid reply");
         clearTimeout(pending.timer); current.pending.delete(reply.id as string);
         if (current.pending.size === 0) {

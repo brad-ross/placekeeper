@@ -6,7 +6,9 @@ export type TestStage = string | {
 };
 
 export const suites: Record<string, TestStage[]> = {
-  "test:desktop-platform": [{ runner: "vitest", options: [], files: [
+  // These integration tests start native helpers whose bounded operations may
+  // take 30 seconds. Let failures report before the runner tears down fixtures.
+  "test:desktop-platform": [{ runner: "vitest", options: ["--testTimeout", "45000", "--hookTimeout", "45000", "--maxWorkers", "2"], files: [
     "apps/service/test/platform-locations.test.ts", "apps/service/test/platform-control.test.ts",
     "apps/service/test/platform-private-storage.test.ts", "apps/service/test/windows-private-creation.test.ts",
     "apps/service/test/windows-chrome-registration.test.ts",
