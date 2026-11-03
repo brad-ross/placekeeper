@@ -1,5 +1,5 @@
 import { gzipSync } from "node:zlib";
-import { mkdtemp, realpath, rm, symlink, unlink, utimes, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm, symlink, unlink, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -47,7 +47,8 @@ async function generatedOutputFixture(
     workflowMode: "generated-output",
   });
   if (opened.kind !== "opened") throw new Error("Expected generated output to open");
-  return { root, pdfPath, sourcePath, broker, launch: opened.launch, sidecarText };
+  const navigationAttachmentId = await broker.createNavigationAttachment(opened.launch.sessionId, root);
+  return { root, pdfPath, sourcePath, broker, launch: opened.launch, sidecarText, navigationAttachmentId };
 }
 
 describe("SyncTeX advisory hints", () => {
@@ -177,6 +178,7 @@ describe("generation-bound SyncTeX navigation", () => {
     let privatePdfPath = "";
     const forward = await value.broker.forwardSyncTex({
       sessionId: value.launch.sessionId,
+      navigationAttachmentId: value.navigationAttachmentId,
       operationToken: "forward-panel-a-1",
       sourcePath: "paper.tex",
       line: 3,
@@ -201,6 +203,7 @@ describe("generation-bound SyncTeX navigation", () => {
 
     const reverse = await value.broker.reverseSyncTex({
       sessionId: value.launch.sessionId,
+      navigationAttachmentId: value.navigationAttachmentId,
       operationToken: "reverse-panel-a-1",
       pageIndex: 0,
       point: { x: 72, y: 144 },
@@ -220,10 +223,28 @@ describe("generation-bound SyncTeX navigation", () => {
     });
   });
 
+  it("preserves an approved absolute source alias used by the compiler", async () => {
+    const value = await generatedOutputFixture();
+    const aliasRoot = await mkdtemp(join(tmpdir(), "placekeeper-source-alias-"));
+    roots.push(aliasRoot);
+    await symlink(value.root, join(aliasRoot, "project"));
+    const alias = join(aliasRoot, "project", "paper.tex");
+    const result = await value.broker.forwardSyncTex({
+      sessionId: value.launch.sessionId, navigationAttachmentId: value.navigationAttachmentId,
+      operationToken: "source-alias", sourcePath: alias, line: 3,
+      run: async request => ({
+        stdout: request.argv[2] === `3:0:${alias}` ? `Output:${request.argv[4]}\nPage:1\nx:10\ny:20\n` : "",
+        stderr: "", exitCode: 0,
+      }),
+    });
+    expect(result.status).toBe("ok");
+  });
+
   it("selects the last forward rectangle when SyncTeX returns multiple targets on one page", async () => {
     const value = await generatedOutputFixture();
     const result = await value.broker.forwardSyncTex({
       sessionId: value.launch.sessionId,
+      navigationAttachmentId: value.navigationAttachmentId,
       operationToken: "forward-same-page-rectangles",
       sourcePath: "paper.tex",
       line: 3,
@@ -254,6 +275,7 @@ describe("generation-bound SyncTeX navigation", () => {
     const value = await generatedOutputFixture();
     const result = await value.broker.forwardSyncTex({
       sessionId: value.launch.sessionId,
+      navigationAttachmentId: value.navigationAttachmentId,
       operationToken: "forward-conflicting-pages",
       sourcePath: "paper.tex",
       line: 3,
@@ -283,6 +305,7 @@ describe("generation-bound SyncTeX navigation", () => {
     const value = await generatedOutputFixture();
     const result = await value.broker.forwardSyncTex({
       sessionId: value.launch.sessionId,
+      navigationAttachmentId: value.navigationAttachmentId,
       operationToken: "forward-tool-order",
       sourcePath: "paper.tex",
       line: 3,
@@ -303,6 +326,7 @@ describe("generation-bound SyncTeX navigation", () => {
     const value = await generatedOutputFixture();
     const result = await value.broker.forwardSyncTex({
       sessionId: value.launch.sessionId,
+      navigationAttachmentId: value.navigationAttachmentId,
       operationToken: "forward-many-rectangles",
       sourcePath: "paper.tex",
       line: 3,
@@ -321,6 +345,7 @@ describe("generation-bound SyncTeX navigation", () => {
     await writeFile(join(value.root, "other.tex"), "other");
     const result = await value.broker.reverseSyncTex({
       sessionId: value.launch.sessionId,
+      navigationAttachmentId: value.navigationAttachmentId,
       operationToken: "reverse-ambiguous",
       pageIndex: 0,
       point: { x: 1, y: 2 },
@@ -342,6 +367,7 @@ describe("generation-bound SyncTeX navigation", () => {
     const value = await generatedOutputFixture();
     const result = await value.broker.forwardSyncTex({
       sessionId: value.launch.sessionId,
+      navigationAttachmentId: value.navigationAttachmentId,
       operationToken: `forward-${status}`,
       sourcePath: "paper.tex",
       line: 3,
@@ -350,10 +376,25 @@ describe("generation-bound SyncTeX navigation", () => {
     expect(result.status).toBe(status);
   });
 
+  it("isolates an explicitly selected mapping directory from the default presentation", async () => {
+    const value = await generatedOutputFixture({ sidecar: "missing" });
+    const mapping = join(value.root, "mapping data");
+    await mkdir(mapping);
+    await writeFile(join(mapping, "paper.synctex"), value.sidecarText);
+    const alternate = await value.broker.createNavigationAttachment(value.launch.sessionId, value.root, mapping);
+    const query = (navigationAttachmentId: string) => value.broker.forwardSyncTex({
+      sessionId: value.launch.sessionId, navigationAttachmentId, operationToken: "alternate", sourcePath: "paper.tex", line: 3,
+      run: async request => ({ stdout: `SyncTeX result begin\nOutput:${request.argv[request.argv.indexOf("-o") + 1]}\nPage:1\nx:10\ny:20\nSyncTeX result end\n`, stderr: "", exitCode: 0 }),
+    });
+    expect(await query(alternate)).toMatchObject({ status: "ok", target: { pageIndex: 0 } });
+    expect(await query(value.navigationAttachmentId)).toMatchObject({ status: "missing" });
+  });
+
   it("distinguishes missing, pending, stale, and out-of-root availability", async () => {
     const missing = await generatedOutputFixture({ sidecar: "missing" });
     await expect(missing.broker.forwardSyncTex({
       sessionId: missing.launch.sessionId,
+      navigationAttachmentId: missing.navigationAttachmentId,
       operationToken: "missing-sidecar",
       sourcePath: "paper.tex",
       line: 3,
@@ -370,6 +411,7 @@ describe("generation-bound SyncTeX navigation", () => {
     })).resolves.toMatchObject({ status: "committed", documentGeneration: 2 });
     await expect(missing.broker.forwardSyncTex({
       sessionId: missing.launch.sessionId,
+      navigationAttachmentId: missing.navigationAttachmentId,
       operationToken: "pending-sidecar",
       sourcePath: "paper.tex",
       line: 3,
@@ -379,6 +421,7 @@ describe("generation-bound SyncTeX navigation", () => {
     const ambiguous = await generatedOutputFixture({ sidecar: "both" });
     await expect(ambiguous.broker.forwardSyncTex({
       sessionId: ambiguous.launch.sessionId,
+      navigationAttachmentId: ambiguous.navigationAttachmentId,
       operationToken: "ambiguous-sidecar",
       sourcePath: "paper.tex",
       line: 3,
@@ -396,6 +439,7 @@ describe("generation-bound SyncTeX navigation", () => {
     });
     await expect(stale.broker.forwardSyncTex({
       sessionId: stale.launch.sessionId,
+      navigationAttachmentId: stale.navigationAttachmentId,
       operationToken: "unchanged-old-sidecar",
       sourcePath: "paper.tex",
       line: 3,
@@ -407,6 +451,7 @@ describe("generation-bound SyncTeX navigation", () => {
     await writeFile(outside, "outside");
     await expect(unsafe.broker.forwardSyncTex({
       sessionId: unsafe.launch.sessionId,
+      navigationAttachmentId: unsafe.navigationAttachmentId,
       operationToken: "outside-source",
       sourcePath: outside,
       line: 1,
@@ -419,6 +464,7 @@ describe("generation-bound SyncTeX navigation", () => {
     const value = await generatedOutputFixture();
     await value.broker.forwardSyncTex({
       sessionId: value.launch.sessionId,
+      navigationAttachmentId: value.navigationAttachmentId,
       operationToken: "attach-generation-one",
       sourcePath: "paper.tex",
       line: 3,
@@ -441,6 +487,7 @@ describe("generation-bound SyncTeX navigation", () => {
     });
     const beforePdf = await value.broker.forwardSyncTex({
       sessionId: value.launch.sessionId,
+      navigationAttachmentId: value.navigationAttachmentId,
       operationToken: "sidecar-before-pdf",
       sourcePath: "paper.tex",
       line: 3,
@@ -459,6 +506,7 @@ describe("generation-bound SyncTeX navigation", () => {
     });
     await expect(value.broker.forwardSyncTex({
       sessionId: value.launch.sessionId,
+      navigationAttachmentId: value.navigationAttachmentId,
       operationToken: "before-sidecar-arrival",
       sourcePath: "paper.tex",
       line: 3,
@@ -468,6 +516,7 @@ describe("generation-bound SyncTeX navigation", () => {
     await writeFile(join(value.root, "paper.synctex.gz"), gzipSync(`${value.sidecarText}generation:3\n`));
     const afterPdf = await value.broker.forwardSyncTex({
       sessionId: value.launch.sessionId,
+      navigationAttachmentId: value.navigationAttachmentId,
       operationToken: "compressed-sidecar-after-pdf",
       sourcePath: "paper.tex",
       line: 3,
@@ -484,6 +533,7 @@ describe("generation-bound SyncTeX navigation", () => {
     const release = Promise.withResolvers<void>();
     const pending = value.broker.forwardSyncTex({
       sessionId: value.launch.sessionId,
+      navigationAttachmentId: value.navigationAttachmentId,
       operationToken: "old-panel-cursor",
       sourcePath: "paper.tex",
       line: 3,
@@ -511,6 +561,7 @@ describe("generation-bound SyncTeX navigation", () => {
     const release = Promise.withResolvers<void>();
     const older = value.broker.forwardSyncTex({
       sessionId: value.launch.sessionId,
+      navigationAttachmentId: value.navigationAttachmentId,
       operationToken: "panel-a-cursor-1",
       sourcePath: "paper.tex",
       line: 2,
@@ -523,6 +574,7 @@ describe("generation-bound SyncTeX navigation", () => {
     await entered.promise;
     const newer = await value.broker.forwardSyncTex({
       sessionId: value.launch.sessionId,
+      navigationAttachmentId: value.navigationAttachmentId,
       operationToken: "panel-b-cursor-2",
       sourcePath: "paper.tex",
       line: 3,
@@ -534,4 +586,78 @@ describe("generation-bound SyncTeX navigation", () => {
     release.resolve();
     await expect(older).resolves.toMatchObject({ status: "stale", operationToken: "panel-a-cursor-1" });
   });
+
+  it("keeps concurrent presentation queries and approved roots independent", async () => {
+    const value = await generatedOutputFixture();
+    const otherRoot = await fixture();
+    const first = await value.broker.createNavigationAttachment(value.launch.sessionId, value.root);
+    const second = await value.broker.createNavigationAttachment(value.launch.sessionId, otherRoot);
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const pending = value.broker.forwardSyncTex({
+      sessionId: value.launch.sessionId, navigationAttachmentId: first,
+      operationToken: "first-view", sourcePath: "paper.tex", line: 2,
+      run: async (request) => {
+        expect(request.cwd).toBe(await realpath(value.root));
+        entered.resolve();
+        await release.promise;
+        return { stdout: `Output:${request.argv.at(-1)}\nPage:1\nx:1\ny:2\n`, stderr: "", exitCode: 0 };
+      },
+    });
+    await entered.promise;
+    const other = await value.broker.forwardSyncTex({
+      sessionId: value.launch.sessionId, navigationAttachmentId: second,
+      operationToken: "second-view", sourcePath: "paper.tex", line: 3,
+      run: async (request) => {
+        expect(request.cwd).toBe(await realpath(otherRoot));
+        return { stdout: `Output:${request.argv.at(-1)}\nPage:1\nx:3\ny:4\n`, stderr: "", exitCode: 0 };
+      },
+    });
+    expect(other.status).toBe("ok");
+    release.resolve();
+    expect((await pending).status).toBe("ok");
+    expect((await value.broker.sessionScope(value.launch.sessionId))?.sourceRootPath).toBe(await realpath(value.root));
+  });
+
+  it("retires an in-flight query when its presentation detaches", async () => {
+    const value = await generatedOutputFixture();
+    const attachment = await value.broker.createNavigationAttachment(value.launch.sessionId, value.root);
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const pending = value.broker.forwardSyncTex({
+      sessionId: value.launch.sessionId, navigationAttachmentId: attachment,
+      operationToken: "detached-view", sourcePath: "paper.tex", line: 2,
+      run: async (request) => {
+        entered.resolve();
+        await release.promise;
+        return { stdout: `Output:${request.argv.at(-1)}\nPage:1\nx:1\ny:2\n`, stderr: "", exitCode: 0 };
+      },
+    });
+    await entered.promise;
+    value.broker.revokeNavigationAttachment(attachment);
+    release.resolve();
+    expect((await pending).status).toBe("stale");
+  });
+
+  it("captures a VS Code launch root independently of later source-context changes", async () => {
+    const value = await generatedOutputFixture();
+    const capability = value.launch.fragment.slice("#cap=".length);
+    const credential = value.broker.exchangeBootstrap(value.launch.sessionId, capability)!;
+    const attachment = value.broker.navigationAttachmentForCredential(value.launch.sessionId, credential)!;
+    const otherRoot = await fixture();
+    await value.broker.openReview({ pdfPath: value.pdfPath, sourceRootPath: otherRoot,
+      surface: "vscode", workflowMode: "generated-output" });
+    const result = await value.broker.forwardSyncTex({
+      sessionId: value.launch.sessionId, navigationAttachmentId: attachment,
+      operationToken: "original-view", sourcePath: "paper.tex", line: 2,
+      run: async (request) => {
+        expect(request.cwd).toBe(await realpath(value.root));
+        return { stdout: `Output:${request.argv.at(-1)}\nPage:1\nx:1\ny:2\n`, stderr: "", exitCode: 0 };
+      },
+    });
+    expect(result.status).toBe("ok");
+    value.broker.revokePresentationCredential(value.launch.sessionId, credential);
+    expect(value.broker.navigationAttachmentForCredential(value.launch.sessionId, credential)).toBeUndefined();
+  });
+
 });

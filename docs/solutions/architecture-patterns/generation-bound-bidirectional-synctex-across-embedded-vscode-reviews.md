@@ -1,7 +1,7 @@
 ---
 title: Generation-bound bidirectional SyncTeX across embedded VS Code reviews
 date: 2026-09-02
-last_updated: 2026-09-10
+last_updated: 2026-11-03
 category: architecture-patterns
 module: Embedded LaTeX source navigation
 problem_type: architecture_pattern
@@ -75,7 +75,15 @@ Validate the returned one-based line and optional column against the current doc
 
 Run SyncTeX without a shell, under controlled environment and bounded time/output (`apps/service/src/synctex/query.ts`). Preserve distinct statuses for missing, pending, stale, ambiguous, out-of-root, unavailable tool, timeout, oversized output, malformed output, and generic failure (`apps/service/src/synctex/query.ts`).
 
-Only `pending` and `stale` are retryable for forward navigation (`apps/vscode/src/webview-bridge.ts`). Bounded retries let a lagging sidecar catch up, and the saved intent remains available when a later sidecar event may succeed (`apps/vscode/src/extension.ts`, `apps/vscode/src/rebuild-navigation.ts`). Terminal outcomes retire the intent (`apps/vscode/src/rebuild-navigation.ts`). Reverse navigation maps each status to an actionable message, and request coordination prevents an older completion from overwriting the newest result (`apps/web/src/app/ProductionReviewApp.tsx`).
+Separate the lifetime of one query from the lifetime of the user's intent. Only `pending` and `stale` enter the bounded immediate retry loop (`apps/vscode/src/extension.ts:315`, `apps/vscode/src/webview-bridge.ts`). Exhausting that loop does not prove the requested location will remain unavailable. The extension's longer-lived wait policy also accepts `missing`; a later sidecar event or periodic revalidation can retry the captured intent (`apps/vscode/src/extension.ts:321`, `apps/vscode/src/extension.ts:471`). Do not broaden the immediate retry predicate just to preserve intent, and do not classify every non-immediate-retry result as terminal.
+
+For explicit navigation, capture the source before opening the panel takes focus away. Retain that exact location with its explicit association; subsequent cursor movement must not retarget it. A newer explicit request clears older pending work, reverse navigation starts a new explicit association, and disabling automatic following preserves explicit waits (`apps/vscode/src/extension.ts:650`, `apps/vscode/src/extension.ts:446`, `apps/vscode/src/rebuild-navigation.ts:52`, `apps/vscode/src/rebuild-navigation.ts:102`). A missing mapping does not authorize using an older generation's sidecar or relaxing source-root checks.
+
+Waiting for mapping has no fixed expiry in the embedded coordinator. Once a target is posted, its separate viewer-acknowledgement timer is bounded; panel disposal clears pending work. Native editor requests have their own bounded lifetime. These are different stages and hosts, not one universal “navigation timeout” (`apps/vscode/src/rebuild-navigation.ts:75`, `apps/vscode/src/rebuild-navigation.ts:91`, `apps/service/src/synctex/native-synctex.ts:50`).
+
+The installed regression exposed the distinction: publishing a PDF before its sidecar left the PDF readable, but the original explicit request warned and ended; publishing the matching sidecar did nothing until the command was repeated. The fix retains the intent instead of making the immediate query loop run longer. The [acceptance record](../../../test/acceptance/editor-synctex.md) records automatic resumption and live side-by-side ordering checks; it does not qualify automatic delivery into hidden PDF tabs.
+
+Preserve regression coverage for missing, pending, and stale mapping with automatic following disabled, captured-cursor stability, newer explicit replacement, explicit-over-saved-follow precedence, and disposal. These are covered by `apps/vscode/test/extension.test.ts:166`, `apps/vscode/test/rebuild-navigation.test.ts`, and `apps/vscode/test/rebuild-observer.test.ts`. Reverse navigation still reports actionable failures; terminal ambiguity and authority failures must not become polling loops.
 
 ### Treat ordered forward results differently from reverse ambiguity
 
@@ -113,7 +121,7 @@ Do not query a mutable PDF/sidecar pair, send paths or arbitrary open-file capab
 
 ### Source save followed by rebuild
 
-1. Saving `paper.tex` captures the cursor from the editor that owns the document and records a pending intent (`apps/vscode/src/extension.ts`).
+1. With automatic following enabled, saving `paper.tex` captures the cursor from the editor that owns the document and records a pending intent (`apps/vscode/src/extension.ts`).
 2. A committed successor activates that saved intent (`apps/vscode/src/extension.ts`).
 3. If the sidecar lags, `pending` triggers bounded retries and preserves the intent (`apps/service/src/sessions/session-broker.ts`, `apps/vscode/src/extension.ts`, `apps/vscode/src/rebuild-navigation.ts`).
 4. The shared client waits for the returned generation before centering and focusing the PDF (`apps/vscode/src/extension.ts`, `apps/web/src/app/ProductionReviewApp.tsx`).

@@ -753,18 +753,46 @@ final class MacPoliciesTests: XCTestCase {
         XCTAssertEqual(coordinator.markReady(), [first, second])
         XCTAssertEqual(coordinator.inFlightCount, 2)
 
-        let laterLink = try XCTUnwrap(NativeOpenIntent.parse(URL(
+        let laterURL = try XCTUnwrap(URL(
             string: "placekeeper:///tmp/First.pdf#v=1&page=7"
-        )))
+        ))
+        let laterLink = try XCTUnwrap(NativeOpenIntent.parse(laterURL))
         XCTAssertTrue(coordinator.enqueue([laterLink]).isEmpty)
         XCTAssertEqual(coordinator.finish(first), [laterLink])
         XCTAssertEqual(coordinator.inFlightCount, 2)
     }
 
+    func testPrivateNavigationTicketsCarryOnlyAnOpaqueToken() throws {
+        let token = String(repeating: "a", count: 43)
+        let url = try XCTUnwrap(URL(string: "placekeeper-navigation://ticket/\(token)"))
+        XCTAssertEqual(NativeOpenIntent.navigationTicket(url), token)
+        XCTAssertNil(NativeOpenIntent.parse(url))
+        for raw in ["placekeeper-navigation://ticket/\(token)?editor=x",
+                    "placekeeper-navigation://ticket/\(token)#root=x",
+                    "placekeeper-navigation://user@ticket/\(token)",
+                    "placekeeper-navigation://ticket/short",
+                    "placekeeper:///tmp/Paper.pdf#v=1&page=1"] {
+            XCTAssertNil(NativeOpenIntent.navigationTicket(try XCTUnwrap(URL(string: raw))))
+        }
+    }
+
+    func testNativeNavigationQueueRetainsOnlyNewestPendingIntentForTheSamePDF() {
+        let source = URL(fileURLWithPath: "/tmp/Paper.pdf")
+        let first = NativeOpenIntent(sourceURL: source, kind: .navigation("first"))
+        let second = NativeOpenIntent(sourceURL: source, kind: .navigation("second"))
+        let third = NativeOpenIntent(sourceURL: source, kind: .navigation("third"))
+        var coordinator = LaunchCoordinator()
+        XCTAssertTrue(coordinator.enqueue([first, second]).isEmpty)
+        XCTAssertEqual(coordinator.markReady(), [second])
+        XCTAssertTrue(coordinator.enqueue([third]).isEmpty)
+        XCTAssertEqual(coordinator.finish(second), [third])
+    }
+
     func testNativeLinkHintIsBoundedWhileServiceRetainsFinalAuthority() throws {
-        let link = try XCTUnwrap(NativeOpenIntent.parse(URL(
+        let url = try XCTUnwrap(URL(
             string: "placekeeper:///tmp/Paper%20One.pdf#v=1&page=3"
-        )))
+        ))
+        let link = try XCTUnwrap(NativeOpenIntent.parse(url))
         XCTAssertEqual(link.sourceURL.path, "/tmp/Paper One.pdf")
         guard case let .placekeeperLink(raw) = link.kind else { return XCTFail("expected a link intent") }
         XCTAssertEqual(raw, "placekeeper:///tmp/Paper%20One.pdf#v=1&page=3")

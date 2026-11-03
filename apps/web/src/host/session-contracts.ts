@@ -98,11 +98,13 @@ export interface ReverseSyncTexRequest {
 }
 
 export interface ForwardSyncTexRequest {
+  readonly explicitSequence?: number;
   readonly documentGeneration: number;
   readonly pageIndex: number;
   readonly point: { readonly x: number; readonly y: number };
 }
 
 export type HostForwardSyncTexRequest = ForwardSyncTexRequest & {
+  readonly nativeSequence?: number;
   readonly token: number;
 };

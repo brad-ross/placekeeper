@@ -1,3 +1,4 @@
+import { launchEditorNavigation } from "../synctex/editor-launch.js";
 import {
   MANAGEMENT_PROTOCOL_VERSION,
   isControlRequest,
@@ -149,6 +150,22 @@ async function dispatch(
         return { kind: "codex-attestation", status: host.codexRuntime.attestDisplay(request.receipt, request.taskSessionId) ? "accepted" : "denied" };
       }
       return { kind: "codex-app", response: await host.codexRuntime.handle(request.request) };
+    }) ?? { kind: "error", reason: "unavailable" };
+  }
+  if (request.kind === "editor-control") {
+    return await host.lifecycle.runActivity<PlacekeeperControlResponse>(async () => {
+      if (request.request.operation === "forward" && (request.installation === undefined || request.installation.identity !== host.editorNavigation.installationIdentity)) {
+        return { kind: "editor-control", response: { ok: false, message: "Run forward-search from the current installed Placekeeper app" } };
+      }
+      const response = await host.editorNavigation.control(request.request);
+      if (response.ok && response.operation === "forward") {
+        try { await launchEditorNavigation(response.ticket, request.installation!.resources); }
+        catch (error) {
+          host.editorNavigation.cancelTicket(response.ticket);
+          return { kind: "editor-control", response: { ok: false, message: error instanceof Error ? error.message : "Could not open Placekeeper" } };
+        }
+      }
+      return { kind: "editor-control", response };
     }) ?? { kind: "error", reason: "unavailable" };
   }
   if (request.kind === "launch") {

@@ -1,3 +1,4 @@
+import { nativeSyncTexResponse } from "./native-synctex-protocol.js";
 import {
   REVIEW_RUNTIME_PROTOCOL,
   REVIEW_RUNTIME_VERSION,
@@ -220,9 +221,14 @@ function validNativeRuntimeMessage(value: unknown, runtimeId: string): boolean {
   if (!record(value) || value.protocol !== REVIEW_RUNTIME_PROTOCOL || value.version !== REVIEW_RUNTIME_VERSION
     || value.runtimeId !== runtimeId) return false;
   if (value.kind === "event") {
-    if (!exact(value, ["protocol", "version", "kind", "runtimeId", "event", "payload"])
-      || value.event !== "session-invalidated" || !record(value.payload)
-      || !runtimeIdentity(value.payload)) return false;
+    if (!exact(value, ["protocol", "version", "kind", "runtimeId", "event", "payload"]) || !record(value.payload)) return false;
+    if (value.event === "host-command") {
+      if (value.payload.command === "reverse-synctex") return exact(value.payload, ["command"]);
+      if (value.payload.command !== "source-navigation" || !exact(value.payload, ["command", "state"]) || !record(value.payload.state)) return false;
+      const state = nativeSyncTexResponse("forwardSyncTex", value.payload.state);
+      return record(state) && exact(value.payload.state, Object.keys(state));
+    }
+    if (value.event !== "session-invalidated" || !runtimeIdentity(value.payload)) return false;
     return exact(value.payload, [
       "sessionId", "generation", "revision", "reason",
       ...(value.payload.previousGeneration === undefined ? [] : ["previousGeneration"]),

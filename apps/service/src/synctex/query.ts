@@ -409,12 +409,13 @@ export async function queryForwardSyncTex(input: {
   const timeoutMs = Math.max(1, Math.min(input.timeoutMs ?? 2_000, 2_000));
   // Beamer overlays can emit hundreds of rectangles for a single source line.
   const maxOutputBytes = 1024 * 1024;
+  // SyncTeX matches the compiler's path spelling, including approved root aliases.
   const result = await (input.run ?? runSyncTex)({
     executable: "synctex",
     argv: [
       "view",
       "-i",
-      `${input.line}:${input.column ?? 0}:${source.path}`,
+      `${input.line}:${input.column ?? 0}:${isAbsolute(input.sourcePath) ? resolve(input.sourcePath) : source.path}`,
       "-o",
       binding.privatePdfPath,
     ],

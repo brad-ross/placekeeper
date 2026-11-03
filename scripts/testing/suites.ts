@@ -195,6 +195,11 @@ export const suites: Record<string, TestStage[]> = {
         "apps/service/test/export-transaction.test.ts",
         "apps/service/test/replace-original.test.ts",
         "apps/service/test/synctex.test.ts",
+        "apps/service/test/navigation-admission.test.ts",
+        "apps/service/test/editor-navigation.test.ts",
+      "apps/service/test/editor-navigation-handoff.test.ts",
+      "apps/service/test/native-synctex.test.ts",
+        "packages/core/test/editor-navigation-protocol.test.ts",
         "apps/service/test/task-binding-registry.test.ts",
         "apps/service/test/restart-reconnect-store.test.ts",
         "apps/service/test/launch-host.test.ts",
@@ -216,6 +221,10 @@ export const suites: Record<string, TestStage[]> = {
       "runner": "vitest",
       "options": [],
       "files": [
+        "apps/service/test/editor-navigation.test.ts",
+      "apps/service/test/editor-navigation-handoff.test.ts",
+      "apps/service/test/native-synctex.test.ts",
+        "packages/core/test/editor-navigation-protocol.test.ts",
         "apps/service/test/session-security.test.ts",
         "apps/service/test/review-interactions.test.ts",
         "apps/service/test/recovery.test.ts",
@@ -318,6 +327,7 @@ export const suites: Record<string, TestStage[]> = {
         "apps/vscode/test/latex-workshop-bridge.test.ts",
         "apps/vscode/test/external-launch-registration.test.ts",
         "apps/vscode/test/rebuild-observer.test.ts",
+        "apps/vscode/test/rebuild-navigation.test.ts",
         "apps/service/test/local-document-observer.test.ts",
         "test/conformance/reviewed-pdf.test.ts"
       ]
@@ -352,7 +362,8 @@ export const suites: Record<string, TestStage[]> = {
         "test/acceptance/reference-annotation-stale-commands.spec.ts",
         "test/acceptance/reattachment-tray.spec.ts",
         "test/acceptance/automatic-pdf-refresh.spec.ts",
-        "test/acceptance/authoring-lifecycle-regressions.spec.ts"
+        "test/acceptance/authoring-lifecycle-regressions.spec.ts",
+        "test/acceptance/synctex-lifecycle.spec.ts"
       ]
     }
   ],
@@ -383,7 +394,8 @@ export const suites: Record<string, TestStage[]> = {
         "test/acceptance/reference-annotation-stale-commands.spec.ts",
         "test/acceptance/reattachment-tray.spec.ts",
         "test/acceptance/automatic-pdf-refresh.spec.ts",
-        "test/acceptance/authoring-lifecycle-regressions.spec.ts"
+        "test/acceptance/authoring-lifecycle-regressions.spec.ts",
+        "test/acceptance/synctex-lifecycle.spec.ts"
       ]
     }
   ],
@@ -416,6 +428,7 @@ export const suites: Record<string, TestStage[]> = {
         "apps/web/test/host-runtime.test.ts",
         "apps/web/test/production-review-app.test.tsx",
         "apps/vscode/test/extension.test.ts",
+        "packaging/macos/editor-integrations.test.ts",
         "packaging/macos/packaging.test.ts"
       ]
     },
@@ -522,7 +535,8 @@ export const suites: Record<string, TestStage[]> = {
         "test/acceptance/reference-annotation-stale-commands.spec.ts",
         "test/acceptance/reattachment-tray.spec.ts",
         "test/acceptance/automatic-pdf-refresh.spec.ts",
-        "test/acceptance/authoring-lifecycle-regressions.spec.ts"
+        "test/acceptance/authoring-lifecycle-regressions.spec.ts",
+        "test/acceptance/synctex-lifecycle.spec.ts"
       ]
     }
   ],
@@ -552,7 +566,8 @@ export const suites: Record<string, TestStage[]> = {
         "test/acceptance/reference-annotations.spec.ts",
         "test/acceptance/reference-annotation-stale-commands.spec.ts",
         "test/acceptance/reattachment-tray.spec.ts",
-        "test/acceptance/authoring-lifecycle-regressions.spec.ts"
+        "test/acceptance/authoring-lifecycle-regressions.spec.ts",
+        "test/acceptance/synctex-lifecycle.spec.ts"
       ]
     }
   ],
@@ -694,6 +709,8 @@ export const ciUnitFiles = [
       'packaging/macos/native-blob-install.test.ts',
       'packaging/macos/update-vscode.test.mjs',
       'packaging/macos/setup-integrations.test.mjs',
+      'packaging/macos/setup-zed.test.mjs',
+      'packaging/macos/zed-adapter.test.mjs',
     ];
 
 export const browserTestFiles = {

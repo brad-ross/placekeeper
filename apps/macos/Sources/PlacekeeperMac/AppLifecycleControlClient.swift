@@ -1,6 +1,11 @@
 @preconcurrency import Foundation
 
+struct NativeEditorProfile: Equatable { let name: String; let kind: String }
+
 enum AppLifecycleReply: Equatable {
+    case editorProfiles([NativeEditorProfile])
+    case navigation(pdfPath: String, handle: String)
+    case navigationUnavailable
     case acknowledged
     case replacementReady(activeWindows: Int)
     case updateRequired
@@ -123,6 +128,25 @@ final class AppLifecycleControlClient: @unchecked Sendable {
               value["appInstanceId"] as? String == appInstanceID,
               let type = value["type"] as? String else { return nil }
         let base = Set(["protocolVersion", "type", "appInstanceId"])
+        if type == "editor-profiles" {
+            guard Set(value.keys) == base.union(["profiles"]), let profiles = value["profiles"] as? [[String: String]] else { return nil }
+            var parsed: [NativeEditorProfile] = []
+            for profile in profiles {
+                guard Set(profile.keys) == Set(["name", "kind"]), let name = profile["name"], let kind = profile["kind"],
+                      name.range(of: "^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$", options: .regularExpression) != nil,
+                      ["command", "neovim"].contains(kind) else { return nil }
+                parsed.append(.init(name: name, kind: kind))
+            }
+            return .editorProfiles(parsed)
+        }
+        if type == "navigation-unavailable" { return Set(value.keys) == base ? .navigationUnavailable : nil }
+        if type == "navigation" {
+            guard Set(value.keys) == base.union(["pdfPath", "navigationHandle"]),
+                  let path = value["pdfPath"] as? String, path.hasPrefix("/"), !path.contains("\0"),
+                  let handle = value["navigationHandle"] as? String,
+                  handle.range(of: "^[A-Za-z0-9_-]{43}$", options: .regularExpression) != nil else { return nil }
+            return .navigation(pdfPath: path, handle: handle)
+        }
         if type == "ack" { return Set(value.keys) == base ? .acknowledged : nil }
         if type == "update-required" { return Set(value.keys) == base ? .updateRequired : nil }
         if type == "replacement-ready" {

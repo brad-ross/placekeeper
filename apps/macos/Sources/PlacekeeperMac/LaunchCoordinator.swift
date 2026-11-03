@@ -2,6 +2,7 @@ import Foundation
 
 struct NativeOpenIntent: Equatable {
     enum Kind: Equatable {
+        case navigation(String)
         case document
         case placekeeperLink(String)
     }
@@ -13,6 +14,15 @@ struct NativeOpenIntent: Equatable {
         sourceURL.standardizedFileURL.resolvingSymlinksInPath().path
     }
 
+    static func navigationTicket(_ url: URL) -> String? {
+        guard let parts = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              parts.scheme == "placekeeper-navigation", parts.host == "ticket",
+              parts.user == nil, parts.password == nil, parts.port == nil,
+              parts.query == nil, parts.fragment == nil,
+              parts.percentEncodedPath.range(of: "^/[A-Za-z0-9_-]{43}$", options: .regularExpression) != nil else { return nil }
+        return String(parts.percentEncodedPath.dropFirst())
+    }
+
     static func parse(_ url: URL) -> NativeOpenIntent? {
         if url.isFileURL {
             let source = url.standardizedFileURL
@@ -22,7 +32,7 @@ struct NativeOpenIntent: Equatable {
         let raw = url.absoluteString
         guard raw.utf8.count <= 16 * 1024, raw.hasPrefix("placekeeper:///"),
               let components = URLComponents(string: raw), components.scheme == "placekeeper",
-              components.host == nil, components.user == nil, components.password == nil,
+              (components.host ?? "").isEmpty, components.user == nil, components.password == nil,
               components.port == nil, components.query == nil,
               let fragment = components.fragment, validLocationFragment(fragment),
               let path = components.percentEncodedPath.removingPercentEncoding,

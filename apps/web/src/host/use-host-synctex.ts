@@ -13,6 +13,7 @@ import {
 
 export function useHostSyncTex(props: {
   hostForwardSyncTexRequest: HostForwardSyncTexRequest | undefined;
+  onHostForwardSyncTexHandled: ((request: HostForwardSyncTexRequest, outcome: "applied" | "superseded" | "failed") => void) | undefined;
   hostReverseSyncTexRequestToken: number | undefined;
   onReverseSyncTex: ((input: ReverseSyncTexRequest) => Promise<unknown>) | undefined;
 }, state: ReviewStateView, stateRef: RefObject<ReviewStateView>, mainNavigation: PdfViewerNavigation | null,
@@ -23,21 +24,29 @@ export function useHostSyncTex(props: {
   const handledForwardSyncTexTokenRef = useRef(0);
   const handledReverseSyncTexTokenRef = useRef(0);
   const reverseSyncTexCoordinatorRef = useRef(new ReverseSyncTexRequestCoordinator());
+  const forwardRequestRef = useRef(props.hostForwardSyncTexRequest);
+  forwardRequestRef.current = props.hostForwardSyncTexRequest;
+  const retireForwardRef = useRef<(() => void) | undefined>(undefined);
   const requestReverseSyncTex = useCallback((request: ReverseSyncTexRequest): Promise<unknown> => {
     const reverseSyncTex = props.onReverseSyncTex;
     if (reverseSyncTex === undefined) return Promise.resolve({ status: 'failed' });
+    latestForwardSyncTexTokenRef.current = 0;
+    const forward = forwardRequestRef.current;
+    if (retireForwardRef.current !== undefined) retireForwardRef.current();
+    else if (forward !== undefined && forward.token > handledForwardSyncTexTokenRef.current) {
+      handledForwardSyncTexTokenRef.current = forward.token;
+      props.onHostForwardSyncTexHandled?.(forward, "superseded");
+    }
     return reverseSyncTexCoordinatorRef.current.run(reverseSyncTex, request, setCommandError);
-  }, [props.onReverseSyncTex]);
-  latestForwardSyncTexTokenRef.current = Math.max(
-    latestForwardSyncTexTokenRef.current,
-    props.hostForwardSyncTexRequest?.token ?? 0,
-  );
+  }, [props.onReverseSyncTex, props.onHostForwardSyncTexHandled]);
+  latestForwardSyncTexTokenRef.current = props.hostForwardSyncTexRequest?.token ?? 0;
   useEffect(() => {
     const request = props.hostForwardSyncTexRequest;
     if (request === undefined || mainNavigation === null ||
       request.token <= handledForwardSyncTexTokenRef.current) return;
     if (request.documentGeneration < state.workflow.documentGeneration) {
       handledForwardSyncTexTokenRef.current = request.token;
+      props.onHostForwardSyncTexHandled?.(request, "superseded");
       return;
     }
     if (!forwardSyncTexRequestReady({
@@ -48,20 +57,36 @@ export function useHostSyncTex(props: {
       locationRestoreStatus,
     })) return;
     handledForwardSyncTexTokenRef.current = request.token;
+    let navigating = true;
+    let active = true;
     void runHostForwardSyncTexRequest(
       mainNavigation,
       request,
-      () => forwardSyncTexCompletionIsCurrent({
+      () => active && forwardSyncTexCompletionIsCurrent({
         requestToken: request.token,
         latestRequestToken: latestForwardSyncTexTokenRef.current,
         requestGeneration: request.documentGeneration,
         documentGeneration: stateRef.current.workflow.documentGeneration,
         navigationMatches: mainNavigationRef.current === mainNavigation,
       }),
-      (applied) => setCommandError(
-        applied ? null : 'Forward SyncTeX could not reveal this PDF location.',
-      ),
-    );
+      (applied) => {
+        setCommandError(applied ? null : 'Forward SyncTeX could not reveal this PDF location.');
+        props.onHostForwardSyncTexHandled?.(request, applied ? "applied" : "failed");
+      },
+    ).finally(() => { navigating = false; });
+    const retire = () => {
+      if (!active) return;
+      active = false;
+      if (navigating) {
+        void mainNavigation.cancelPendingNavigation();
+        props.onHostForwardSyncTexHandled?.(request, "superseded");
+      }
+    };
+    retireForwardRef.current = retire;
+    return () => {
+      retire();
+      if (retireForwardRef.current === retire) retireForwardRef.current = undefined;
+    };
   }, [
     locationRestoreStatus,
     mainDocumentReadyGeneration,

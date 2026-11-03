@@ -1,4 +1,6 @@
+import type { NativeSyncTex } from "../synctex/native-synctex.js";
 import { createHash, randomBytes } from "node:crypto";
+import { realpath } from "node:fs/promises";
 import { basename } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -111,6 +113,8 @@ function rawEnvelope(raw: unknown): {
 
 export class MacosRuntimeManager {
   readonly #backend: MacosRuntimeBackend;
+  navigation?: NativeSyncTex;
+  admitsNavigation?: (helperId: string, navigationHandle: string, canonicalPdfPath: string) => boolean;
   readonly #limits: Required<MacosRuntimeManagerOptions>;
   readonly #records = new Map<string, RuntimeRecord>();
   readonly #requests = new Map<string, RequestRecord>();
@@ -138,6 +142,11 @@ export class MacosRuntimeManager {
       activeHelpers: [...this.#records.values()].filter((record) => record.phase === "active").length,
       resources: this.#activeResources,
     };
+  }
+
+  navigationSessionId(helperId: string): string | undefined {
+    const record = this.#records.get(helperId);
+    return record === undefined || record.phase === "recovery" ? undefined : record.projection.sessionId;
   }
 
   resourceId(helperId: string): string | undefined {
@@ -240,10 +249,17 @@ export class MacosRuntimeManager {
     let canonicalKey: string | undefined;
     let sink: ChromeRuntimeSourceSink | undefined;
     try {
+      let initialWorkflowMode: "generated-output" | undefined;
+      if (message.type === "admit" && message.navigationHandle !== undefined) {
+        const canonicalPath = await realpath(sourcePath);
+        if (this.admitsNavigation?.(helperId, message.navigationHandle, canonicalPath) !== true) return this.#failure(message, "invalid");
+        initialWorkflowMode = "generated-output";
+      }
       sink = await this.#backend.begin({
         sourceIdentity: createHash("sha256").update(fileUrl).digest("hex"),
         disposition: "local",
         fileUrl,
+        ...(initialWorkflowMode === undefined ? {} : { initialWorkflowMode }),
       }, signal);
       throwIfAborted(signal);
       const staged = await sink.finish(undefined, signal);
@@ -430,7 +446,8 @@ export class MacosRuntimeManager {
     signal: AbortSignal,
   ): Promise<MacosReviewHelperResponse> {
     if (record.phase !== "active") return this.#failure(message, "invalid");
-    if (message.generation !== record.projection.generation || message.revision !== record.projection.revision) {
+    const navigation = message.method === "forwardSyncTex" || message.method === "reverseSyncTex";
+    if (message.generation !== record.projection.generation || (!navigation && message.revision !== record.projection.revision)) {
       return this.#failure(message, "stale");
     }
     if (NON_IDEMPOTENT.has(message.method) && message.idempotencyKey === undefined) {
@@ -456,7 +473,9 @@ export class MacosRuntimeManager {
         : message.method === "finalizeInteraction" ? "finalize"
           : message.method === "releaseInteraction" ? "release"
             : message.method === "acknowledgeInteraction" ? "acknowledge" : undefined;
-      const result = interactionAction === undefined
+      const result = message.method === "forwardSyncTex" || message.method === "reverseSyncTex"
+        ? await this.navigation?.invoke(record.helperId, record.trustedProjection.sessionId, message.generation, message.method, message.payload)
+        : interactionAction === undefined
         ? await this.#backend.invoke(record.canonicalKey, message.method, message.payload, {
         ...(message.idempotencyKey === undefined ? {} : { idempotencyKey: message.idempotencyKey }),
         payloadDigest,
@@ -569,6 +588,7 @@ export class MacosRuntimeManager {
   }
 
   async detach(helperId: string): Promise<void> {
+    this.navigation?.detach(helperId);
     const record = this.#records.get(helperId);
     if (record !== undefined) this.#records.delete(helperId);
     for (const [key, request] of [...this.#requests.entries()]) {

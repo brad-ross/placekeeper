@@ -1,3 +1,4 @@
+import type { EditorNavigation } from "../synctex/editor-navigation.js";
 import {
   parseMacosAppControlMessage,
   type MacosAppControlMessage,
@@ -13,6 +14,7 @@ interface AppRecord {
   readonly processId: number;
   readonly startIdentity: string;
   readonly buildIdentity: string;
+  readonly installationIdentity?: string;
   readonly helpers: Set<string>;
   readonly retiredHelpers: Set<string>;
   activeWindows: number;
@@ -23,7 +25,7 @@ export class MacosAppLifecycleManager {
   readonly #runtime: RuntimeDetacher;
   readonly #apps = new Map<string, AppRecord>();
 
-  constructor(runtime: RuntimeDetacher) {
+  constructor(runtime: RuntimeDetacher, readonly navigation?: EditorNavigation, readonly helperPdfPath?: (helperId: string) => string | undefined) {
     this.#runtime = runtime;
   }
 
@@ -45,6 +47,30 @@ export class MacosAppLifecycleManager {
     if (message.type === "register-app") return this.#register(message);
     const app = this.#apps.get(message.appInstanceId);
     if (app === undefined) return this.#failure(message, "unregistered");
+    if (message.type === "editor-profiles") {
+      const profiles = await this.navigation?.profiles.list() ?? [];
+      return { protocolVersion: 1, type: "editor-profiles", appInstanceId: app.appInstanceId, profiles: profiles.map(({ name, kind }) => ({ name, kind })) };
+    }
+    if (message.type === "associate-editor") {
+      const path = app.helpers.has(message.helperId) ? this.helperPdfPath?.(message.helperId) : undefined;
+      try {
+        const accepted = path !== undefined && await this.navigation?.associate(message.helperId, app.appInstanceId, path,
+          { profile: message.profile, sourceRoot: message.sourceRoot, ...(message.socket === undefined ? {} : { socket: message.socket }) },
+          () => this.#apps.get(app.appInstanceId) === app && app.helpers.has(message.helperId) && this.helperPdfPath?.(message.helperId) === path);
+        if (accepted) return this.#ack(app.appInstanceId);
+      } catch {}
+      return { protocolVersion: 1, type: "navigation-unavailable", appInstanceId: app.appInstanceId };
+    }
+    if (message.type === "bind-navigation") {
+      const path = app.helpers.has(message.helperId) ? this.helperPdfPath?.(message.helperId) : undefined;
+      const intent = path === undefined ? undefined : this.navigation?.claim(message.navigationHandle, app.appInstanceId, message.helperId, path);
+      return intent === undefined ? { protocolVersion: 1, type: "navigation-unavailable", appInstanceId: app.appInstanceId } : this.#ack(app.appInstanceId);
+    }
+    if (message.type === "redeem-navigation") {
+      const result = app.installationIdentity === undefined ? undefined : this.navigation?.redeem(message.ticket, app.appInstanceId, app.installationIdentity);
+      return result === undefined ? { protocolVersion: 1, type: "navigation-unavailable", appInstanceId: app.appInstanceId }
+        : { protocolVersion: 1, type: "navigation", appInstanceId: app.appInstanceId, ...result };
+    }
     if (message.type === "activity") {
       if (message.activeWindows < app.helpers.size) return this.#failure(message, "invalid");
       app.activeWindows = message.activeWindows;
@@ -80,6 +106,14 @@ export class MacosAppLifecycleManager {
 
   releaseHelper(appInstanceId: string, helperId: string): void {
     this.#apps.get(appInstanceId)?.helpers.delete(helperId);
+    this.navigation?.detachHelper(helperId);
+  }
+
+  admitsNavigation(helperId: string, navigationHandle: string, canonicalPdfPath: string): boolean {
+    for (const app of this.#apps.values()) {
+      if (app.helpers.has(helperId)) return this.navigation?.admissionIntent(navigationHandle, app.appInstanceId, canonicalPdfPath) !== undefined;
+    }
+    return false;
   }
 
   ownsHelper(appInstanceId: string, helperId: string): boolean {
@@ -107,6 +141,7 @@ export class MacosAppLifecycleManager {
       processId: message.processId,
       startIdentity: message.startIdentity,
       buildIdentity: message.buildIdentity,
+      ...(message.installationIdentity === undefined ? {} : { installationIdentity: message.installationIdentity }),
       helpers: new Set(),
       retiredHelpers: new Set(),
       activeWindows: 0,
@@ -119,6 +154,7 @@ export class MacosAppLifecycleManager {
     const app = this.#apps.get(appInstanceId);
     if (app === undefined) return;
     this.#apps.delete(appInstanceId);
+    this.navigation?.detachApp(appInstanceId);
     await Promise.all([...app.helpers].map((helperId) => this.#runtime.detach(helperId)));
   }
 
@@ -127,6 +163,7 @@ export class MacosAppLifecycleManager {
     // this app registration so a detach that wins the socket race cannot be
     // undone by a delayed first admission. App detachment drops the whole set.
     app.retiredHelpers.add(helperId);
+    this.navigation?.detachHelper(helperId);
     if (!app.helpers.delete(helperId)) return;
     await this.#runtime.detach(helperId);
   }

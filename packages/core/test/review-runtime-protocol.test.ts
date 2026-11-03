@@ -169,6 +169,16 @@ describe("shared review runtime protocol", () => {
     expect(isReviewPanelKey(undefined)).toBe(false);
   });
 
+  it("keeps native SyncTeX payloads path-free while accepting geometry and acknowledgements", () => {
+    expect(sanitizeMacosReviewRuntimeRequest("forwardSyncTex", { action: "poll" })).toEqual({ action: "poll" });
+    expect(sanitizeMacosReviewRuntimeRequest("forwardSyncTex", { action: "poll", sourcePath: "/private/main.tex" })).toBeUndefined();
+    expect(sanitizeMacosReviewRuntimeRequest("reverseSyncTex", { pageIndex: 0, point: { x: 5, y: 6 }, profile: "other" })).toBeUndefined();
+    expect(sanitizeMacosReviewRuntimeResponse("reverseSyncTex", { status: "opened", path: "/private/main.tex", session: "secret" })).toEqual({ status: "opened" });
+    expect(sanitizeMacosReviewRuntimeResponse("forwardSyncTex", { status: "ready", sequence: 1, generation: 2,
+      pageIndex: 0, point: { x: 5, y: 6 }, sourceRoot: "/private" })).toEqual({ status: "ready", sequence: 1, generation: 2, pageIndex: 0, point: { x: 5, y: 6 } });
+    expect(sanitizeChromeReviewRuntimeRequest("forwardSyncTex", { action: "poll" })).toBeUndefined();
+  });
+
   it("defines Chrome as a reduced, compiler-visible RPC host", () => {
     expect(REVIEW_RUNTIME_HOSTS).toEqual(["vscode", "chrome", "macos", "codex"]);
     expect(REVIEW_RUNTIME_HOST_METHODS.vscode).toEqual(REVIEW_RUNTIME_METHODS);
@@ -177,9 +187,9 @@ describe("shared review runtime protocol", () => {
     expect(REVIEW_RUNTIME_HOST_METHODS.chrome).not.toContain("reverseSyncTex");
     expect(isReviewRuntimeMethodForHost("chrome", "command")).toBe(true);
     expect(isReviewRuntimeMethodForHost("chrome", "reverseSyncTex")).toBe(false);
-    expect(REVIEW_RUNTIME_HOST_METHODS.macos).toEqual(REVIEW_RUNTIME_HOST_METHODS.chrome);
+    expect(REVIEW_RUNTIME_HOST_METHODS.macos).toEqual(REVIEW_RUNTIME_HOST_METHODS.vscode);
     expect(isReviewRuntimeMethodForHost("macos", "command")).toBe(true);
-    expect(isReviewRuntimeMethodForHost("macos", "reverseSyncTex")).toBe(false);
+    expect(isReviewRuntimeMethodForHost("macos", "reverseSyncTex")).toBe(true);
   });
 
   it("projects the Mac runtime without paths, capabilities, or a link base", () => {

@@ -23,6 +23,154 @@ const latestLocation: SourceCursorLocation = {
 };
 
 describe("rebuild navigation coordinator", () => {
+  it("retains the explicit source cursor when opening a PDF removes editor focus", () => {
+    const coordinator = new RebuildNavigationCoordinator();
+    const sequence = coordinator.beginExplicit(firstLocation);
+    expect(coordinator.forwardSourceLocation(() => undefined)).toEqual(firstLocation);
+    coordinator.finishExplicit(sequence);
+    expect(coordinator.forwardSourceLocation(() => undefined)).toBeUndefined();
+    coordinator.beginExplicit(latestLocation);
+    coordinator.beginExplicit(); // Inverse navigation must retire the old source.
+    expect(coordinator.forwardSourceLocation(() => undefined)).toBeUndefined();
+    coordinator.dispose();
+  });
+
+  it("resumes a deferred explicit jump from its captured source when the sidecar arrives with following off", async () => {
+    const coordinator = new RebuildNavigationCoordinator();
+    const sequence = coordinator.beginExplicit(firstLocation);
+    coordinator.deferExplicit(sequence);
+    coordinator.cancelFollowing(); // Changing the follow preference cannot cancel a manual request.
+    expect(coordinator.hasPending).toBe(true);
+    expect(coordinator.canRetryCurrent).toBe(true);
+    const reveal = vi.fn(async (isCurrent: () => boolean, explicitSequence?: number) => {
+      expect(isCurrent()).toBe(true);
+      expect(explicitSequence).toBe(sequence);
+      expect(coordinator.forwardSourceLocation(() => latestLocation)).toEqual(firstLocation);
+      return "revealed" as const;
+    });
+    expect(await coordinator.revealAfterRebuild(reveal)).toBe("revealed");
+    expect(reveal).toHaveBeenCalledOnce();
+    expect(coordinator.hasPending).toBe(false);
+    coordinator.dispose();
+  });
+
+  it("retires a deferred explicit jump on newer navigation and ignores its late retry", async () => {
+    const coordinator = new RebuildNavigationCoordinator();
+    const first = coordinator.beginExplicit(firstLocation);
+    coordinator.deferExplicit(first);
+    const completion = Promise.withResolvers<"retry">();
+    let isOldCurrent = () => true;
+    const retry = coordinator.revealAfterRebuild(async isCurrent => {
+      isOldCurrent = isCurrent;
+      return completion.promise;
+    });
+    const newer = coordinator.beginExplicit(latestLocation);
+    expect(isOldCurrent()).toBe(false);
+    coordinator.deferExplicit(first);
+    completion.resolve("retry");
+    await retry;
+    expect(coordinator.hasPending).toBe(false);
+    expect(coordinator.forwardSourceLocation()).toEqual(latestLocation);
+    coordinator.deferExplicit(newer);
+    coordinator.dispose();
+    expect(await coordinator.revealAfterRebuild(async () => "revealed")).toBe("idle");
+  });
+
+  it("holds explicit precedence until the matching viewer acknowledgement", async () => {
+    const coordinator = new RebuildNavigationCoordinator({ followEnabled: () => true });
+    const sequence = coordinator.beginExplicit();
+    coordinator.awaitExplicitAcknowledgement(sequence, 4, vi.fn());
+    coordinator.noteSourceSaved(firstLocation);
+    expect(await coordinator.revealAfterRebuild(async () => "revealed")).toBe("idle");
+    coordinator.acknowledgeExplicit(sequence + 1, 4);
+    coordinator.acknowledgeExplicit(sequence, 3);
+    coordinator.noteSourceSaved(firstLocation);
+    expect(coordinator.hasPending).toBe(false);
+    coordinator.acknowledgeExplicit(sequence, 4);
+    coordinator.noteSourceSaved(firstLocation);
+    expect(await coordinator.revealAfterRebuild(async () => "revealed")).toBe("revealed");
+    coordinator.dispose();
+  });
+
+  it("retires acknowledgement waits on replacement, timeout, and disposal", () => {
+    vi.useFakeTimers();
+    const coordinator = new RebuildNavigationCoordinator({ followEnabled: () => true });
+    const timeout = vi.fn();
+    try {
+      const first = coordinator.beginExplicit();
+      coordinator.awaitExplicitAcknowledgement(first, 4, timeout);
+      const replacement = coordinator.beginExplicit();
+      vi.advanceTimersByTime(60_000);
+      expect(timeout).not.toHaveBeenCalled();
+      coordinator.noteSourceSaved(firstLocation);
+      expect(coordinator.hasPending).toBe(false);
+      coordinator.awaitExplicitAcknowledgement(replacement, 4, timeout);
+      vi.advanceTimersByTime(60_000);
+      expect(timeout).toHaveBeenCalledOnce();
+      coordinator.noteSourceSaved(firstLocation);
+      expect(coordinator.hasPending).toBe(true);
+      const final = coordinator.beginExplicit();
+      coordinator.awaitExplicitAcknowledgement(final, 4, timeout);
+      coordinator.dispose();
+      vi.advanceTimersByTime(60_000);
+      expect(timeout).toHaveBeenCalledOnce();
+      expect(coordinator.isExplicitCurrent(final)).toBe(false);
+    } finally { coordinator.dispose(); vi.useRealTimers(); }
+  });
+  it("preserves reading by default even after source saves and matching rebuilds", async () => {
+    const coordinator = new RebuildNavigationCoordinator();
+    coordinator.noteSourceSaved(firstLocation);
+    const reveal = vi.fn(async () => "revealed" as const);
+    expect(await coordinator.revealAfterRebuild(reveal)).toBe("idle");
+    expect(reveal).not.toHaveBeenCalled();
+  });
+
+  it("supersedes an in-flight follow with an explicit request and ignores saves while it is pending", async () => {
+    const coordinator = new RebuildNavigationCoordinator({ followEnabled: () => true });
+    coordinator.noteSourceSaved(firstLocation);
+    const completion = Promise.withResolvers<"revealed">();
+    let followIsCurrent = () => false;
+    const following = coordinator.revealAfterRebuild(async isCurrent => {
+      followIsCurrent = isCurrent;
+      return completion.promise;
+    });
+    expect(followIsCurrent()).toBe(true);
+    const firstExplicit = coordinator.beginExplicit();
+    expect(followIsCurrent()).toBe(false);
+    expect(coordinator.forwardSourceLocation(() => latestLocation)).toEqual(latestLocation);
+    coordinator.noteSourceSaved(firstLocation);
+    expect(coordinator.hasPending).toBe(false);
+    const secondExplicit = coordinator.beginExplicit();
+    coordinator.finishExplicit(firstExplicit);
+    expect(coordinator.isExplicitCurrent(firstExplicit)).toBe(false);
+    expect(coordinator.isExplicitCurrent(secondExplicit)).toBe(true);
+    coordinator.noteSourceSaved(firstLocation);
+    expect(coordinator.hasPending).toBe(false);
+    coordinator.finishExplicit(secondExplicit);
+    completion.resolve("revealed");
+    await following;
+    coordinator.noteSourceSaved(latestLocation);
+    expect(await coordinator.revealAfterRebuild(async isCurrent => isCurrent() ? "revealed" : "terminal")).toBe("revealed");
+  });
+
+  it("keeps manual navigation independent of changes to the following option", () => {
+    const coordinator = new RebuildNavigationCoordinator();
+    const explicit = coordinator.beginExplicit();
+    coordinator.cancelFollowing();
+    expect(coordinator.isExplicitCurrent(explicit)).toBe(true);
+    coordinator.finishExplicit(explicit);
+  });
+
+  it("cancels captured following when the option is disabled", async () => {
+    let enabled = true;
+    const coordinator = new RebuildNavigationCoordinator({ followEnabled: () => enabled });
+    coordinator.noteSourceSaved(firstLocation);
+    enabled = false;
+    expect(await coordinator.revealAfterRebuild(async () => "revealed")).toBe("idle");
+    enabled = true;
+    expect(await coordinator.revealAfterRebuild(async () => "revealed")).toBe("idle");
+  });
+
   it("captures the saved document editor, preferring its active editor", () => {
     const active = editor("file:///work/paper.tex");
     const duplicate = editor("file:///work/paper.tex");
@@ -34,7 +182,7 @@ describe("rebuild navigation coordinator", () => {
   });
 
   it("uses the source cursor captured at save time after a rebuild becomes current", async () => {
-    const coordinator = new RebuildNavigationCoordinator();
+    const coordinator = new RebuildNavigationCoordinator({ followEnabled: () => true });
     const locations: Array<SourceCursorLocation | undefined> = [];
     const reveal = vi.fn(async () => {
       locations.push(coordinator.forwardSourceLocation());
@@ -51,7 +199,7 @@ describe("rebuild navigation coordinator", () => {
   });
 
   it("does not navigate for an external rebuild without a preceding source save", async () => {
-    const coordinator = new RebuildNavigationCoordinator();
+    const coordinator = new RebuildNavigationCoordinator({ followEnabled: () => true });
     const reveal = vi.fn(async () => "revealed" as const);
 
     await expect(coordinator.revealAfterRebuild(reveal)).resolves.toBe("idle");
@@ -59,7 +207,7 @@ describe("rebuild navigation coordinator", () => {
   });
 
   it("keeps the newest saved cursor and does not consume it with an older in-flight rebuild", async () => {
-    const coordinator = new RebuildNavigationCoordinator();
+    const coordinator = new RebuildNavigationCoordinator({ followEnabled: () => true });
     const firstReveal = Promise.withResolvers<"revealed">();
     const reveal = vi.fn(() => firstReveal.promise);
 
@@ -78,7 +226,7 @@ describe("rebuild navigation coordinator", () => {
   });
 
   it("retains the saved cursor when forward SyncTeX is not ready yet", async () => {
-    const coordinator = new RebuildNavigationCoordinator();
+    const coordinator = new RebuildNavigationCoordinator({ followEnabled: () => true });
     coordinator.noteSourceSaved(firstLocation);
 
     await expect(coordinator.revealAfterRebuild(async () => "retry")).resolves.toBe("retry");
@@ -87,14 +235,14 @@ describe("rebuild navigation coordinator", () => {
   });
 
   it("does not let an idle automatic intent override an explicit forward location", () => {
-    const coordinator = new RebuildNavigationCoordinator();
+    const coordinator = new RebuildNavigationCoordinator({ followEnabled: () => true });
     coordinator.noteSourceSaved(firstLocation);
 
     expect(coordinator.forwardSourceLocation(() => latestLocation)).toEqual(latestLocation);
   });
 
   it("drains a newer ready rebuild after the active navigation settles", async () => {
-    const coordinator = new RebuildNavigationCoordinator();
+    const coordinator = new RebuildNavigationCoordinator({ followEnabled: () => true });
     const firstReveal = Promise.withResolvers<"revealed">();
     const seen: SourceCursorLocation[] = [];
     const reveal = vi.fn(async () => {
@@ -116,7 +264,7 @@ describe("rebuild navigation coordinator", () => {
   });
 
   it("retires a terminal SyncTeX result instead of retrying forever", async () => {
-    const coordinator = new RebuildNavigationCoordinator();
+    const coordinator = new RebuildNavigationCoordinator({ followEnabled: () => true });
     coordinator.noteSourceSaved(firstLocation);
 
     await expect(coordinator.revealAfterRebuild(async () => "terminal")).resolves.toBe("terminal");

@@ -16,13 +16,13 @@ test('explicit choices are independent and reject typos before setup', () => {
 test('no terminal skips every host without mutation and gives rerun guidance', async () => {
   const messages = [];
   const result = await setupIntegrations({ appPath, prompt: async () => undefined, write: (text) => messages.push(text), run: async () => { throw new Error('must not run'); } });
-  assert.deepEqual(result.outcomes.map((item) => item.status), ['skipped', 'skipped', 'skipped']);
+  assert.deepEqual(result.outcomes.map((item) => item.status), ['skipped', 'skipped', 'skipped', 'skipped']);
   assert.equal(result.exitCode, 0);
   assert.match(messages.join('\n'), /--vscode=setup/);
 });
 test('optional failure preserves Mac success and continues to Codex through lifecycle coordination', async () => {
   const calls = [];
-  const result = await setupIntegrations({ appPath, choices: { chrome: 'skip', vscode: 'setup', codex: 'setup' }, write: () => {}, run: async (command, args) => {
+  const result = await setupIntegrations({ appPath, choices: { zed: 'skip', chrome: 'skip', vscode: 'setup', codex: 'setup' }, write: () => {}, run: async (command, args) => {
     calls.push([command, args]);
     assert.equal(command, `${appPath}/Contents/MacOS/placekeeper`);
     assert.deepEqual(args.slice(0, 2), ['daemon', 'coordinate-host']);
@@ -31,11 +31,11 @@ test('optional failure preserves Mac success and continues to Codex through life
   } });
   assert.equal(calls.length, 2);
   assert.equal(result.mac, 'installed');
-  assert.deepEqual(result.outcomes.map((item) => item.status), ['skipped', 'failed', 'pending']);
+  assert.deepEqual(result.outcomes.map((item) => item.status), ['skipped', 'failed', 'pending', 'skipped']);
   assert.equal(result.exitCode, 3);
 });
 test('host deferral is pending close-and-retry, not a false completion', async () => {
-  const result = await setupIntegrations({ appPath, choices: { chrome: 'setup', vscode: 'skip', codex: 'skip' }, write: () => {}, run: async () => { throw Object.assign(new Error('active review'), { code: 2 }); } });
+  const result = await setupIntegrations({ appPath, choices: { zed: 'skip', chrome: 'setup', vscode: 'skip', codex: 'skip' }, write: () => {}, run: async () => { throw Object.assign(new Error('active review'), { code: 2 }); } });
   assert.equal(result.outcomes[0].status, 'pending');
   assert.match(result.outcomes[0].message, /Close.*retry/);
   assert.equal(result.exitCode, 0);
@@ -74,7 +74,7 @@ test('Codex refuses a conflicting installed-marketplace source', async () => {
 });
 test('a rerun can skip Chrome and add VS Code while retaining actual current Mac status', async () => {
   const calls = [];
-  const result = await setupIntegrations({ appPath, macStatus: 'current', choices: { chrome: 'skip', vscode: 'setup', codex: 'skip' }, write: () => {}, run: async (_command, args) => {
+  const result = await setupIntegrations({ appPath, macStatus: 'current', choices: { zed: 'skip', chrome: 'skip', vscode: 'setup', codex: 'skip' }, write: () => {}, run: async (_command, args) => {
     calls.push(args.at(-1));
     return { stdout: '{"host":"vscode","status":"pending","message":"Reload VS Code"}\n{"ok":true,"status":"installed"}\n' };
   } });
@@ -83,7 +83,7 @@ test('a rerun can skip Chrome and add VS Code while retaining actual current Mac
   assert.equal(result.exitCode, 0);
 });
 test('a coordinator success envelope alone never establishes host completion', async () => {
-  const result = await setupIntegrations({ appPath, choices: { chrome: 'setup', vscode: 'skip', codex: 'skip' }, write: () => {}, run: async () => ({ stdout: '{"ok":true,"status":"installed"}\n' }) });
+  const result = await setupIntegrations({ appPath, choices: { zed: 'skip', chrome: 'setup', vscode: 'skip', codex: 'skip' }, write: () => {}, run: async () => ({ stdout: '{"ok":true,"status":"installed"}\n' }) });
   assert.equal(result.outcomes[0].status, 'failed');
   assert.equal(result.exitCode, 3);
 });
@@ -143,4 +143,15 @@ test.each(['0.1.0+codex.old', undefined, 42])('Codex identifies a stale or unver
   assert.match(result.message, /update or reinstall/);
   assert.match(result.message, /quit.*restart/i);
   assert.match(result.message, /display_review/);
+});
+
+test.each(['manual', 'preview', 'setup'])('Zed %s choice reaches the coordinated helper with its mode', async choice => {
+  assert.equal(parseChoices([`--zed=${choice}`]).zed, choice);
+  const calls = [];
+  const result = await setupIntegrations({ appPath, choices: { chrome: 'skip', vscode: 'skip', codex: 'skip', zed: choice }, write() {}, run: async (_command, args) => {
+    calls.push(args);
+    return { stdout: '{"host":"zed","status":"completed","message":"Configured"}\n' };
+  } });
+  assert.deepEqual(calls[0].slice(-3), [appPath, 'zed', choice === 'preview' ? 'preview' : 'manual']);
+  assert.equal(result.outcomes[3].status, 'completed');
 });

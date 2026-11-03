@@ -1,3 +1,4 @@
+import { runEditorCommand } from "./editor-command.js";
 import { isAbsolute } from "node:path";
 import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -382,6 +383,7 @@ export async function runOpenCommand(
 }
 
 async function main(): Promise<number> {
+  if (process.argv[2] === "editor" || process.argv[2] === "forward-search") return runEditorCommand(process.argv.slice(2));
   if (process.argv[2] === "macos-review-helper") {
     const identity = macosReviewHelperIdentity(process.env);
     if (identity === undefined) return 2;

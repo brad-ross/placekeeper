@@ -1,3 +1,4 @@
+import { followNavigationIsCurrent } from "../../../packages/core/src/source-navigation-intent.js";
 export interface SourceCursorLocation {
   readonly sourcePath: string;
   readonly line: number;
@@ -34,12 +35,80 @@ export function rebuildNavigationAction(
 
 interface NavigationIntent {
   readonly id: number;
+  readonly kind: "follow" | "explicit";
   readonly location: SourceCursorLocation;
+  readonly association: number;
 }
 
 /** Keeps a saved source cursor stable until its rebuilt PDF can be revealed. */
 export class RebuildNavigationCoordinator {
   #nextId = 0;
+  #association = 0;
+  #explicitPending = false;
+  #explicitLocation: SourceCursorLocation | undefined;
+  #acknowledgement: { association: number; generation: number; timer: ReturnType<typeof setTimeout> } | undefined;
+  constructor(readonly options: { followEnabled?: () => boolean } = {}) {}
+
+  beginExplicit(location?: SourceCursorLocation): number {
+    this.#clearAcknowledgement();
+    this.#association++;
+    this.#clearPending();
+    this.#explicitPending = true;
+    this.#explicitLocation = location === undefined ? undefined : { ...location };
+    return this.#association;
+  }
+  isExplicitCurrent(association: number): boolean { return association === this.#association; }
+  finishExplicit(association: number): void {
+    if (this.isExplicitCurrent(association)) {
+      this.#clearAcknowledgement();
+      this.#explicitPending = false;
+      this.#explicitLocation = undefined;
+      if (this.#pending?.kind === "explicit") this.#clearPending();
+    }
+  }
+  deferExplicit(association: number): void {
+    if (!this.isExplicitCurrent(association) || !this.#explicitPending || this.#explicitLocation === undefined) return;
+    this.#nextId++;
+    this.#pending = { id: this.#nextId, kind: "explicit", location: this.#explicitLocation, association };
+    this.#retryIntentId = this.#nextId;
+  }
+  awaitExplicitAcknowledgement(association: number, generation: number, onTimeout: () => void): void {
+    if (!this.isExplicitCurrent(association) || !this.#explicitPending) return;
+    this.#clearAcknowledgement();
+    const timer = setTimeout(() => {
+      if (this.#acknowledgement?.association !== association) return;
+      this.finishExplicit(association);
+      onTimeout();
+    }, 60_000);
+    timer.unref?.();
+    this.#acknowledgement = { association, generation, timer };
+  }
+  acknowledgeExplicit(association: number, generation: number): void {
+    if (this.#acknowledgement?.association === association && this.#acknowledgement.generation === generation) {
+      this.finishExplicit(association);
+    }
+  }
+  dispose(): void {
+    this.#clearAcknowledgement();
+    this.#association++;
+    this.#explicitPending = false;
+    this.#explicitLocation = undefined;
+    this.#clearPending();
+  }
+  #clearAcknowledgement(): void {
+    if (this.#acknowledgement !== undefined) clearTimeout(this.#acknowledgement.timer);
+    this.#acknowledgement = undefined;
+  }
+  cancelFollowing(): void {
+    if (this.#pending?.kind !== "explicit") this.#clearPending();
+  }
+  #clearPending(): void {
+    this.#pending = undefined;
+    this.#active = undefined;
+    this.#retryIntentId = undefined;
+    this.#ready = false;
+  }
+
   #pending: NavigationIntent | undefined;
   #active: NavigationIntent | undefined;
   #retryIntentId: number | undefined;
@@ -52,20 +121,22 @@ export class RebuildNavigationCoordinator {
   }
 
   noteSourceSaved(location: SourceCursorLocation): void {
+    if (this.options.followEnabled?.() !== true || this.#explicitPending) return;
     this.#nextId += 1;
-    this.#pending = { id: this.#nextId, location };
+    this.#pending = { id: this.#nextId, kind: "follow", location, association: this.#association };
     this.#retryIntentId = undefined;
   }
 
   forwardSourceLocation(
     fallback?: () => SourceCursorLocation | undefined,
   ): SourceCursorLocation | undefined {
-    return this.#active?.location ?? fallback?.();
+    return this.#explicitLocation ?? this.#active?.location ?? fallback?.();
   }
 
   revealAfterRebuild(
-    reveal: () => Promise<NavigationRevealOutcome>,
+    reveal: (isCurrent: () => boolean, explicitSequence?: number) => Promise<NavigationRevealOutcome>,
   ): Promise<RebuildNavigationOutcome> {
+    if (this.options.followEnabled?.() !== true) this.cancelFollowing();
     if (this.#pending === undefined) return Promise.resolve("idle");
     this.#ready = true;
     if (this.#draining !== undefined) return this.#draining;
@@ -73,19 +144,24 @@ export class RebuildNavigationCoordinator {
     return this.#draining;
   }
 
-  async #drain(reveal: () => Promise<NavigationRevealOutcome>): Promise<RebuildNavigationOutcome> {
+  async #drain(reveal: (isCurrent: () => boolean, explicitSequence?: number) => Promise<NavigationRevealOutcome>): Promise<RebuildNavigationOutcome> {
     let result: RebuildNavigationOutcome = "idle";
     while (this.#ready && this.#pending !== undefined) {
       this.#ready = false;
       const intent = this.#pending;
       this.#active = intent;
       try {
-        result = await reveal();
+        result = await reveal(() => this.#pending?.id === intent.id && (intent.kind === "explicit"
+          ? this.#explicitPending && this.isExplicitCurrent(intent.association)
+          : this.options.followEnabled?.() === true && followNavigationIsCurrent({
+            captured: intent.association, current: this.#association, explicitPending: this.#explicitPending,
+          })), intent.kind === "explicit" ? intent.association : undefined);
         if (this.#pending?.id !== intent.id) continue;
         if (result === "retry") this.#retryIntentId = intent.id;
         else {
           this.#pending = undefined;
           this.#retryIntentId = undefined;
+          if (intent.kind === "explicit" && result === "terminal") this.finishExplicit(intent.association);
         }
       } finally {
         this.#active = undefined;

@@ -1,0 +1,12 @@
+{
+  "texlab": {
+    "build": {
+      "forwardSearchAfter": false,
+      "pdfDirectory": "build"
+    },
+    "forwardSearch": {
+      "executable": "/Users/YOU/Applications/Placekeeper.app/Contents/MacOS/placekeeper",
+      "args": ["view-source", "--editor", "REPLACE_WITH_PROFILE", "--source", "%f", "--line", "%l", "--pdf", "%p", "--intent", "explicit"]
+    }
+  }
+}

@@ -211,3 +211,7 @@ These physical UI observations remain pending until recorded against the candida
 ### Source release and experimental Chrome status
 
 The short installer publishes the Mac app with independently skippable integrations. Chrome setup is explicitly experimental. Continue running the deterministic Chrome handoff tests in source-release CI, but collect the installed Chrome report separately with `pnpm test:chrome-installed` and validate it with `test/acceptance/validate-installed-chrome-evidence.ts`. A missing report must not be described as passing Chrome validation. The optional signed/prebuilt release workflow retains its existing stricter gate.
+
+## Editor-independent SyncTeX qualification
+
+The [editor acceptance record](editor-synctex.md) tracks candidate packaging, installed command delivery, source return, and the user-owned VS Code/Zed/Neovim checks. Fixture tests do not establish editor compatibility; U7 remains open until the recorded editor checks pass.

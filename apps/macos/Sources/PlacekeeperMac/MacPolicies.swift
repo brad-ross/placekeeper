@@ -365,6 +365,8 @@ struct HelperDetachLedger {
         return true
     }
 
+    func helperID(windowID: String) -> String? { helperIDsByWindow[windowID] }
+
     mutating func takeHelperID(windowID: String) -> String? {
         helperIDsByWindow.removeValue(forKey: windowID)
     }

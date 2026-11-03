@@ -3,6 +3,11 @@ name: CI
 # Temporarily manual-only. Restore the pull_request and push triggers to re-enable CI.
 on:
   workflow_dispatch:
+    inputs:
+      native_only:
+        description: Run only the native macOS Swift tests
+        type: boolean
+        default: false
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -12,7 +17,21 @@ permissions:
   contents: read
 
 jobs:
+  native:
+    runs-on: macos-15
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Record Xcode and Swift versions
+        run: |
+          xcodebuild -version
+          swift --version
+      - name: Run native macOS tests
+        run: swift test --package-path apps/macos
+
   test:
+    if: ${{ !inputs.native_only }}
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:

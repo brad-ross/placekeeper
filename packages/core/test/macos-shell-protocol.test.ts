@@ -141,6 +141,23 @@ describe("macOS packaged-shell protocol", () => {
     })).toBeUndefined();
   });
 
+  it("delivers closed native source navigation events through the outer bridge", () => {
+    const wrap = (payload: unknown) => ({ protocolVersion: 1, type: "runtime-message",
+      runtimeId: "runtime_identifier_1234", attemptId: "attempt_identifier_1234",
+      message: { protocol: "placekeeper.review-runtime", version: 4, kind: "event",
+        runtimeId: "runtime_identifier_1234", event: "host-command", payload } });
+    const state = { status: "ready", sequence: 2, generation: 1, pageIndex: 1, point: { x: 30, y: 40 } };
+    for (const payload of [{ command: "source-navigation", state }, { command: "reverse-synctex" }]) {
+      expect(parseMacosNativeMessage(wrap(payload))).toEqual(wrap(payload));
+    }
+    for (const payload of [
+      { command: "source-navigation", state: { ...state, sourcePath: "/private/source.tex" } },
+      { command: "source-navigation", state: { ...state, point: { x: Infinity, y: 40 } } },
+      { command: "reverse-synctex", executable: "/bin/sh" },
+      { command: "review-command", id: "delete" },
+    ]) expect(parseMacosNativeMessage(wrap(payload))).toBeUndefined();
+  });
+
   it("carries a complete primitive command projection and closed invocation", () => {
     expect(MACOS_REVIEW_COMMAND_IDS).toEqual(expect.arrayContaining(["zoom-in", "zoom-out"]));
     for (const command of ["zoom-in", "zoom-out", "unknown-zoom"]) {

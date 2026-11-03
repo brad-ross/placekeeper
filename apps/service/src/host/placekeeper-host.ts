@@ -1,3 +1,6 @@
+import { NativeSyncTex } from "../synctex/native-synctex.js";
+import { EditorNavigation } from "../synctex/editor-navigation.js";
+import { EditorProfiles } from "../synctex/editor-profiles.js";
 import type { NativeQualificationExperiments } from "../codex/native-qualification-experiments.js";
 import type { NativeQualificationObserver } from "../codex/native-qualification.js";
 import type { CodexNativeLaunchSuccess } from "../../../../packages/core/src/codex-mcp-protocol.js";
@@ -178,6 +181,7 @@ export class PlacekeeperHost {
   readonly chromeRuntime: ChromeRuntimeManager;
   readonly macosRuntime: MacosRuntimeManager;
   readonly macosLifecycle: MacosAppLifecycleManager;
+  readonly editorNavigation: EditorNavigation;
   readonly codexRuntime: CodexRuntimeManager;
   #closePromise?: Promise<void>;
 
@@ -194,6 +198,7 @@ export class PlacekeeperHost {
     chromeRuntime: ChromeRuntimeManager,
     macosRuntime: MacosRuntimeManager,
     macosLifecycle: MacosAppLifecycleManager,
+    editorNavigation: EditorNavigation,
     codexRuntime: CodexRuntimeManager,
   ) {
     this.broker = broker;
@@ -208,6 +213,7 @@ export class PlacekeeperHost {
     this.chromeRuntime = chromeRuntime;
     this.macosRuntime = macosRuntime;
     this.macosLifecycle = macosLifecycle;
+    this.editorNavigation = editorNavigation;
     this.codexRuntime = codexRuntime;
   }
 
@@ -254,7 +260,14 @@ export class PlacekeeperHost {
       runtimeHost: "macos",
     });
     const macosRuntime = new MacosRuntimeManager(macosRuntimeBackend.authority());
-    const macosLifecycle = new MacosAppLifecycleManager(macosRuntime);
+    const editorNavigation = new EditorNavigation(new EditorProfiles(join(dirname(options.recoveryRoot), "editor-profiles.json")),
+      process.env.PLACEKEEPER_INSTALL_ARTIFACT_IDENTITY ?? "development");
+    macosRuntime.navigation = new NativeSyncTex(broker, editorNavigation);
+    const macosLifecycle = new MacosAppLifecycleManager(macosRuntime, editorNavigation, helperId => {
+      const sessionId = macosRuntime.navigationSessionId(helperId);
+      return sessionId === undefined ? undefined : broker.navigationSourcePath(sessionId);
+    });
+    macosRuntime.admitsNavigation = (helperId, handle, path) => macosLifecycle.admitsNavigation(helperId, handle, path);
     const codexRuntime = new CodexRuntimeManager(broker, {
       ...(options.nativeQualification === undefined ? {} : { qualification: options.nativeQualification }),
       ...(options.nativeQualificationExperiments === undefined ? {} : { experiments: options.nativeQualificationExperiments }),
@@ -272,7 +285,7 @@ export class PlacekeeperHost {
           ...activity,
           reviewPresence: activity.reviewPresence + chromeActivity.connections
             + macosActivity.helpers + macosAppActivity.appInstances + codexRuntime.activityCount(),
-          transientWork: activity.transientWork + saving.activityCount(),
+          transientWork: activity.transientWork + saving.activityCount() + editorNavigation.activity(),
         };
       },
       drain: async () => {
@@ -311,6 +324,7 @@ export class PlacekeeperHost {
       chromeRuntime,
       macosRuntime,
       macosLifecycle,
+      editorNavigation,
       codexRuntime,
     );
   }
@@ -481,6 +495,7 @@ export class PlacekeeperHost {
       await this.server.close();
       await this.chromeRuntime.close();
       await this.macosLifecycle.close();
+      this.editorNavigation.close();
       await this.macosRuntime.close();
       await this.saving.drain();
       await this.broker.quiesceForShutdown();

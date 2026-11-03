@@ -252,7 +252,8 @@ export class ChromeServiceRuntimeBackend implements ChromeRuntimeBackend {
         if (finished) throw new Error("source-already-finished");
         finished = true;
         const canonicalPath = await this.#transferStore.canonicalizeLocal(fileUrl);
-        const opened = await this.#broker.openReview({ pdfPath: canonicalPath, surface: this.#runtimeHost });
+        const workflow = request.initialWorkflowMode === undefined ? {} : { initialWorkflowMode: request.initialWorkflowMode };
+        const opened = await this.#broker.openReview({ pdfPath: canonicalPath, surface: this.#runtimeHost, ...workflow });
         if (opened.kind === "recovery-offered") {
           return {
             choices: ["resume", "discard", "fork"],
@@ -261,6 +262,7 @@ export class ChromeServiceRuntimeBackend implements ChromeRuntimeBackend {
               const recovered = await this.#broker.openReview({
                 pdfPath: canonicalPath,
                 surface: this.#runtimeHost,
+                ...workflow,
                 recoveryDecision: decision,
                 recoveryOffer: opened.recoveryOffer,
                 recoveryOperationId: operationId,

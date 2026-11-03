@@ -544,6 +544,8 @@ export interface ProductionReviewAppProps {
   readonly hostExportRequestToken?: number;
   readonly onHostExportRequestHandled?: (token: number) => void;
   readonly hostForwardSyncTexRequest?: HostForwardSyncTexRequest;
+  readonly sourceNavigationMessage?: string;
+  readonly onHostForwardSyncTexHandled?: (request: HostForwardSyncTexRequest, outcome: "applied" | "superseded" | "failed") => void;
   readonly hostReverseSyncTexRequestToken?: number;
   readonly onReverseSyncTex?: (input: ReverseSyncTexRequest) => Promise<unknown>;
   readonly initialPresentation?: { readonly pageIndex?: number; readonly zoom?: number };
@@ -590,9 +592,10 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   const interactionAvailability = useRef({ authoringEnabled, referencesEnabled });
   interactionAvailability.current = { authoringEnabled, referencesEnabled };
   const [localState, setState] = useState(props.initialState);
-  // A runtime successor arrives as one state/assets render. Prefer that canonical
-  // generation immediately so the viewer URL and semantic authority never split.
-  const state = canonicalStateSupersedes(localState, props.initialState)
+  // Same-generation canonical edits can render immediately. A new document
+  // waits for the predecessor reading capture before replacing its viewer.
+  const state = props.initialState.workflow.documentGeneration === localState.workflow.documentGeneration
+    && canonicalStateSupersedes(localState, props.initialState)
     ? props.initialState
     : localState;
   // A restart successor begins as an ordinary browser view, then its next
@@ -651,7 +654,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   const [pdfCopyError, setPdfCopyError] = useState<string | null>(null);
   const [commandError, setCommandError] = useState<string | null>(null);
   const [commandNotice, setCommandNotice] = useState<string | null>(null);
-  const [locationRestoreStatus, setLocationRestoreStatus] = useState<LocationRestoreStatus>('idle');
+  const [locationRestoreStatus, setLocationRestoreStatus] = useState<LocationRestoreStatus>('restoring');
   const stateRef = useRef(state);
   stateRef.current = state;
   const [selectionPlacement, setSelectionPlacement] = useState<ContextPlacement | null>(null);
@@ -951,17 +954,23 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   viewerStateRef.current = viewerState;
   const requestReverseSyncTex = useHostSyncTex({
     hostForwardSyncTexRequest: props.hostForwardSyncTexRequest,
+    onHostForwardSyncTexHandled: props.onHostForwardSyncTexHandled,
     hostReverseSyncTexRequestToken: props.hostReverseSyncTexRequestToken,
     onReverseSyncTex: props.onReverseSyncTex,
   }, state, stateRef, mainNavigation, mainNavigationRef, mainNavigationReadyGeneration,
     mainDocumentReadyGeneration, locationRestoreStatus, setCommandError);
   const initialPresentationAppliedRef = useRef(false);
   const providedViewerAssetsRef = useRef(props.viewerAssets);
-  if (!viewerAssetUrlsEqual(providedViewerAssetsRef.current, props.viewerAssets)) {
+  // A successor state's semantic capture still needs the predecessor viewer.
+  // Commit its resources with that state, so initialization cannot run under
+  // the predecessor generation while the capture promise is settling.
+  const viewerResourcesAreCurrent = props.initialState.workflow.documentGeneration
+    === state.workflow.documentGeneration;
+  if (viewerResourcesAreCurrent && !viewerAssetUrlsEqual(providedViewerAssetsRef.current, props.viewerAssets)) {
     providedViewerAssetsRef.current = props.viewerAssets;
   }
   const resourcePolicyRef = useRef(props.resourcePolicy);
-  if (!viewerResourcePoliciesEqual(resourcePolicyRef.current, props.resourcePolicy)) {
+  if (viewerResourcesAreCurrent && !viewerResourcePoliciesEqual(resourcePolicyRef.current, props.resourcePolicy)) {
     resourcePolicyRef.current = props.resourcePolicy;
   }
   const viewerAssets = useMemo(() => providedViewerAssetsRef.current ?? ({
@@ -2571,7 +2580,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
         sectionLabelAt={sectionLabelAt}
         generationRefreshStatus={props.generationRefreshStatus ?? 'idle'}
         locationRestoreStatus={locationRestoreStatus}
-        toolError={pdfCopyError ?? commandError}
+        toolError={pdfCopyError ?? commandError ?? props.sourceNavigationMessage ?? null}
         commandNotice={commandNotice}
         commandModalOpen={(!exportOnly && destinationDialog !== null) || annotationExport.request !== null}
         {...(props.onCommandSurfaceChange === undefined

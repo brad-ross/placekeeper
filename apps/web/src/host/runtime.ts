@@ -36,10 +36,12 @@ export interface HostRuntimeInvalidation extends HostRuntimeIdentity {
 }
 
 export type HostRuntimeCommand =
+  | { readonly command: "source-navigation"; readonly state: import("../../../../packages/core/src/native-synctex-protocol.js").NativeForwardState }
   | { readonly command: "review-command"; readonly id: import("../review/review-command-surface.js").ReviewSemanticCommand }
   | { readonly command: "reattach" }
   | { readonly command: "export-reviewed-pdf" }
   | { readonly command: "reverse-synctex" }
+  | { readonly command: "cancel-synctex" }
   | ({ readonly command: "forward-synctex" } & ForwardSyncTexRequest);
 
 export interface HostRuntime extends ProductionSessionApi {

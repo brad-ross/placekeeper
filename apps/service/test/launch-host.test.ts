@@ -45,7 +45,96 @@ async function fixture(options: {
   return { root, pdf, sourceRoot, host };
 }
 
+async function admitFromEditor(host: PlacekeeperHost, root: string, pdf: string) {
+  const source = join(root, "editor.tex");
+  await writeFile(source, "Hello");
+  await host.editorNavigation.profiles.add({ name: "takeover", kind: "command", executable: "/usr/bin/true", args: ["{file}"] });
+  const registration = await host.editorNavigation.profiles.register({ profile: "takeover", sourceRoot: await realpath(root) });
+  const accepted = await host.editorNavigation.control({ operation: "forward", pdfPath: await realpath(pdf),
+    sourcePath: await realpath(source), line: 1, intent: "explicit", session: registration.handle });
+  if (!accepted.ok || accepted.operation !== "forward") throw new Error("forward failed");
+  const appInstanceId = "app_takeover_1234";
+  const helperId = "helper_takeover_1234";
+  await host.macosLifecycle.handle({ protocolVersion: 1, type: "register-app", appInstanceId, processId: process.pid,
+    startIdentity: "start_takeover_1234", buildIdentity: "build_takeover_1234", installationIdentity: "development" });
+  const redeemed = await host.macosLifecycle.handle({ protocolVersion: 1, type: "redeem-navigation", appInstanceId, ticket: accepted.ticket });
+  if (redeemed.type !== "navigation") throw new Error("redemption failed");
+  host.macosLifecycle.attachHelper(appInstanceId, helperId);
+  const envelope = { protocolVersion: 1, windowId: "window_takeover_1234", attemptId: "attempt_takeover_1234" };
+  const admitted = await host.macosRuntime.handle(helperId, { ...envelope, type: "admit", sourcePath: pdf,
+    navigationHandle: redeemed.navigationHandle, requestId: "request_takeover_1234" });
+  return { admitted, helperId, envelope, appInstanceId, navigationHandle: redeemed.navigationHandle };
+}
+
 describe("persistent launch host", () => {
+  it("retains a Finder review's workflow when an editor takes over native navigation", async () => {
+    const { root, pdf, host } = await fixture();
+    const opened = await host.open({ pdfPath: pdf });
+    if (!opened.ok || opened.kind !== "opened") throw new Error("Finder open failed");
+    const candidate = await admitFromEditor(host, root, pdf);
+    expect(candidate.admitted).toMatchObject({ type: "admitted", projection: { state: { workflow: { mode: "standard" } } } });
+    expect(host.macosRuntime.navigationSessionId(candidate.helperId)).toBe(opened.sessionId);
+    expect(await host.macosLifecycle.handle({ protocolVersion: 1, type: "bind-navigation", appInstanceId: candidate.appInstanceId,
+      helperId: candidate.helperId, navigationHandle: candidate.navigationHandle })).toMatchObject({ type: "ack" });
+    expect(host.editorNavigation.intentForHelper(candidate.helperId)).toBeDefined();
+    expect(await host.open({ pdfPath: pdf, workflowMode: "generated-output" })).toMatchObject({ ok: false });
+  });
+
+  it.each(["resume", "discard", "fork"] as const)("keeps the creation default through native protected recovery: %s", async decision => {
+    const { root, pdf, host } = await fixture();
+    const opened = await host.open({ pdfPath: pdf });
+    if (!opened.ok || opened.kind !== "opened") throw new Error("open failed");
+    await host.broker.acceptMutation(opened.sessionId, { type: "add", expectedRevision: 0, item: {
+      id: randomUUID(), kind: "pageNote", pageIndex: 0, createdAt: "2026-08-11T12:00:00.000Z", updatedAt: "2026-08-11T12:00:00.000Z",
+      payload: { position: { x: 1, y: 1, width: 18, height: 18 }, comment: "Protected work" },
+    } });
+    await host.close();
+    hosts.splice(hosts.indexOf(host), 1);
+    const restarted = await PlacekeeperHost.start({ recoveryRoot: join(root, "recovery"), webAssets: { root: join(root, "assets") } });
+    hosts.push(restarted);
+    const candidate = await admitFromEditor(restarted, root, pdf);
+    if (candidate.admitted.type !== "recovery-offered") throw new Error("Expected recovery offer");
+    const recovered = await restarted.macosRuntime.handle(candidate.helperId, { ...candidate.envelope, type: "recover",
+      requestId: "request_recovery_1234", idempotencyKey: randomUUID(), decision, offer: candidate.admitted.offer });
+    expect(recovered).toMatchObject({ type: "admitted", projection: { state: { workflow: { mode: decision === "resume" ? "standard" : "generated-output" } } } });
+  });
+
+  it("admits editor-first native reviews as generated output and shares them with VS Code", async () => {
+    const { root, pdf, host } = await fixture();
+    const canonicalRoot = await realpath(root);
+    const canonicalPdf = await realpath(pdf);
+    const source = join(root, "paper.tex");
+    await writeFile(source, "Hello");
+    await host.editorNavigation.profiles.add({ name: "editor", kind: "command", executable: "/usr/bin/true", args: ["{file}"] });
+    const registration = await host.editorNavigation.profiles.register({ profile: "editor", sourceRoot: canonicalRoot });
+    const accepted = await host.editorNavigation.control({ operation: "forward", pdfPath: canonicalPdf,
+      sourcePath: await realpath(source), line: 1, intent: "explicit", session: registration.handle });
+    if (!accepted.ok || accepted.operation !== "forward") throw new Error("forward failed");
+    const appInstanceId = "app_navigation_1234";
+    const helperId = "helper_navigation_1234";
+    await host.macosLifecycle.handle({ protocolVersion: 1, type: "register-app", appInstanceId, processId: process.pid,
+      startIdentity: "start_navigation_1234", buildIdentity: "build_navigation_1234", installationIdentity: "development" });
+    const redeemed = await host.macosLifecycle.handle({ protocolVersion: 1, type: "redeem-navigation", appInstanceId, ticket: accepted.ticket });
+    if (redeemed.type !== "navigation") throw new Error("redemption failed");
+    const envelope = { protocolVersion: 1, windowId: "window_navigation_1234", attemptId: "attempt_navigation_1234" };
+    const admission = { ...envelope, type: "admit", sourcePath: pdf, navigationHandle: redeemed.navigationHandle };
+    expect(await host.macosRuntime.handle(helperId, { ...admission, requestId: "request_unowned_1234" })).toMatchObject({ type: "failure" });
+    host.macosLifecycle.attachHelper(appInstanceId, helperId);
+    expect(await host.macosRuntime.handle(helperId, { ...admission, navigationHandle: "x".repeat(43), requestId: "request_forged_1234" })).toMatchObject({ type: "failure" });
+    const admitted = await host.macosRuntime.handle(helperId, { ...admission, requestId: "request_admit_1234" });
+    expect(admitted).toMatchObject({ type: "admitted", projection: { state: { workflow: { mode: "generated-output" } } } });
+    expect(await host.macosRuntime.handle(helperId, { ...envelope, type: "activate", documentValidated: true, requestId: "request_activate_1234" })).toMatchObject({ type: "active" });
+    expect(await host.macosLifecycle.handle({ protocolVersion: 1, type: "bind-navigation", appInstanceId, helperId, navigationHandle: redeemed.navigationHandle })).toMatchObject({ type: "ack" });
+    const nativeSession = host.macosRuntime.navigationSessionId(helperId);
+    expect(await host.open({ pdfPath: pdf, surface: "vscode", sourceRootPath: canonicalRoot, workflowMode: "generated-output" })).toMatchObject({ ok: true, sessionId: nativeSession });
+    expect(await host.open({ pdfPath: pdf, workflowMode: "standard" })).toMatchObject({ ok: false });
+
+    const finderPdf = join(root, "finder.pdf");
+    await writeFile(finderPdf, "%PDF-1.7\nFinder\n%%EOF");
+    expect(await host.macosRuntime.handle("helper_finder_1234", { ...envelope, type: "admit", sourcePath: finderPdf, requestId: "request_finder_1234" }))
+      .toMatchObject({ type: "admitted", projection: { state: { workflow: { mode: "standard" } } } });
+  });
+
   it("preflights unfamiliar links without reading the PDF or creating a session", async () => {
     const { root, host } = await fixture();
     const missing = join(root, "Long Unicode ⌘ missing.pdf");
