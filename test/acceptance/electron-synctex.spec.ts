@@ -169,6 +169,7 @@ test.describe('installed Electron editor-command SyncTeX', () => {
   test('cold CLI launch reaches renderer-persisted page 2, then page 1 in the same app process without a debugging endpoint', async ({}, testInfo) => {
     test.setTimeout(150_000);
     const candidate = await InstalledCandidate.create();
+    let primaryFailure: unknown;
     try {
       const files = await prepare(candidate);
       await files.publishMapping('baseline');
@@ -196,11 +197,24 @@ test.describe('installed Electron editor-command SyncTeX', () => {
         expect.objectContaining({ sourcePath, presentation: { pageIndex: 0, zoom: first.presentation!.zoom } }),
       ]);
       expect(await candidate.ownedColdAppPids()).toEqual(pids);
-      await testInfo.attach('cold-cli-renderer-presentation', { contentType: 'application/json', body: JSON.stringify({
+      const evidencePath = testInfo.outputPath('cold-cli-renderer-presentation.json');
+      await writeFile(evidencePath, JSON.stringify({
         evidence: 'Production renderer-persisted presentation; no screenshot or direct acknowledgement observation',
         processIds: pids, first, afterSecondCommand: await readWindowState(statePath),
-      }) });
-    } finally { await candidate.dispose(); }
+      }, null, 2));
+      await testInfo.attach('cold-cli-renderer-presentation', { contentType: 'application/json', path: evidencePath });
+    } catch (error) { primaryFailure = error; throw error; }
+    finally {
+      try { await candidate.dispose(); }
+      catch (cleanupFailure) {
+        if (primaryFailure) throw new AggregateError([primaryFailure, cleanupFailure], 'Cold CLI acceptance and scoped cleanup both failed');
+        throw cleanupFailure;
+      } finally {
+        const cleanupPath = testInfo.outputPath('cold-process-cleanup.log');
+        await copyFile(join(candidate.root, 'process.log'), cleanupPath);
+        await testInfo.attach('cold-process-cleanup', { contentType: 'text/plain', path: cleanupPath });
+      }
+    }
   });
 
 });

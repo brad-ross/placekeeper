@@ -113,7 +113,7 @@ describe("production desktop identity", () => {
     expect(cli).toContain('../Resources/desktop');
     expect(cli).toContain('exec "$resources/bin/placekeeper" "$@"');
     expect(await readFile(join(resources, "../MacOS/placekeeper-chrome-host"), "utf8")).toContain('bin/placekeeper-chrome-native-host');
-    expect(await readlink(join(resources, "node"))).toBe("desktop/node");
-    expect(await readlink(join(resources, "integrations"))).toBe("desktop/integrations");
+    expect(await readlink(join(resources, "node"))).toBe(join("desktop", "node"));
+    expect(await readlink(join(resources, "integrations"))).toBe(join("desktop", "integrations"));
   });
 });

@@ -113,12 +113,13 @@ export class InstalledCandidate {
       if (!pids.every(pid => Number.isSafeInteger(pid) && pid > 0)) throw new Error('Windows cold-app inventory returned invalid PIDs');
       return pids as number[];
     }
-    const { stdout } = await execute('/bin/ps', ['-axww', '-o', 'pid=,command='], { timeout: 15_000, maxBuffer: 8_388_608 });
+    const { stdout } = await execute('/bin/ps', ['-axww', '-o', 'pid=,stat=,command='], { timeout: 15_000, maxBuffer: 8_388_608 });
     return stdout.split('\n').flatMap(line => {
-      const match = /^\s*(\d+)\s+(.+)$/u.exec(line);
+      const match = /^\s*(\d+)\s+(\S+)\s+(.+)$/u.exec(line);
       if (!match) return [];
-      const command = match[2]!;
-      return command.startsWith(`${executable} `) && command.includes(this.root) && !command.includes('--type=') ? [Number(match[1])] : [];
+      const state = match[2]!;
+      const command = match[3]!;
+      return !state.startsWith('Z') && command.startsWith(`${executable} `) && command.includes(this.root) && !command.includes('--type=') ? [Number(match[1])] : [];
     });
   }
 
@@ -262,13 +263,33 @@ export class InstalledCandidate {
     this.child?.stderr?.destroy();
     delete this.browser;
     if (this.ownsColdApp) {
-      const pids = await this.ownedColdAppPids();
-      for (const pid of pids) {
-        try { process.kill(pid, 'SIGTERM'); }
-        catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error; }
+      const signalOwned = async (signal: 'SIGTERM' | 'SIGKILL') => {
+        const pids = await this.ownedColdAppPids();
+        this.log += `\n[cold-app-cleanup] ${JSON.stringify({ signal, pids })}\n`;
+        for (const pid of pids) {
+          // The CLI started a detached process. Recheck the executable/root pair
+          // immediately before each signal rather than trusting an earlier PID.
+          if (!(await this.ownedColdAppPids()).includes(pid)) continue;
+          try { process.kill(pid, signal); }
+          catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error; }
+        }
+      };
+      const waitForExit = async () => {
+        for (let attempt = 0; attempt < 20; attempt++) {
+          if (!(await this.ownedColdAppPids()).length) return true;
+          await delay(250);
+        }
+        return !(await this.ownedColdAppPids()).length;
+      };
+      await signalOwned('SIGTERM');
+      const graceful = await waitForExit();
+      if (!graceful) {
+        // Match the bounded force-cleanup used for directly spawned warm apps.
+        // This test verifies navigation, not graceful application shutdown.
+        await signalOwned('SIGKILL');
+        if (!await waitForExit()) throw new Error(`Cold Electron app survived scoped force cleanup for isolated fixture ${this.root}`);
       }
-      for (let attempt = 0; attempt < 20 && (await this.ownedColdAppPids()).length; attempt++) await delay(250);
-      if ((await this.ownedColdAppPids()).length) throw new Error(`Cold Electron app did not exit for isolated fixture ${this.root}`);
+      this.log += `\n[cold-app-cleanup] ${JSON.stringify({ result: graceful ? 'terminated' : 'force-terminated' })}\n`;
     }
     await writeFile(join(this.root, 'process.log'), this.log);
   }
