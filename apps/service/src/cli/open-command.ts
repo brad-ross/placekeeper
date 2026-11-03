@@ -1,5 +1,5 @@
 import { runIntegrationRegistrationCommand } from "./integration-registration-command.js";
-import { runNativeLifecycleControlCommand } from "../desktop/lifecycle-control-command.js";
+import { runNativeLifecycleControlCommand, lifecycleDiagnostic } from "../desktop/lifecycle-control-command.js";
 import { electronAppControlThroughDaemon } from "../host/service-daemon.js";
 import { isAbsolute } from "node:path";
 import { realpathSync } from "node:fs";
@@ -410,13 +410,17 @@ async function main(): Promise<number> {
     });
   }
   if (process.argv[2] === "electron-lifecycle-control") {
-    const paths = installedSmokeDaemonPaths(process.argv.slice(3)) ?? defaultDaemonPaths();
-    return runNativeLifecycleControlCommand({
-      input: process.stdin,
-      write: writeStdoutFrame,
-      appInstanceId: process.env.PLACEKEEPER_APP_INSTANCE_ID ?? "",
-      exchange: message => electronAppControlThroughDaemon(message, undefined, paths),
-    });
+    const diagnostic = (value: ReturnType<typeof lifecycleDiagnostic>) => process.stderr.write(`[PlacekeeperLifecycle] ${JSON.stringify(value)}\n`);
+    try {
+      const paths = installedSmokeDaemonPaths(process.argv.slice(3)) ?? defaultDaemonPaths();
+      return await runNativeLifecycleControlCommand({
+        input: process.stdin,
+        write: writeStdoutFrame,
+        appInstanceId: process.env.PLACEKEEPER_APP_INSTANCE_ID ?? "",
+        exchange: message => electronAppControlThroughDaemon(message, undefined, paths),
+        diagnostic,
+      });
+    } catch (error) { diagnostic(lifecycleDiagnostic('initialize', error)); return 2; }
   }
   if (process.argv[2] === "macos-lifecycle-control") {
     return runMacosLifecycleControlCommand({

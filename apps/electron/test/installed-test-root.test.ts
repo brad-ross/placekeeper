@@ -39,3 +39,19 @@ it('failed fixture privacy preparation removes only its newly created root', asy
         await expect(access(created!)).rejects.toMatchObject({ code: 'ENOENT' });
     } finally { establish.mockRestore(); if (created) await rm(created, { recursive: true, force: true }); }
 });
+
+it.runIf(process.platform === 'win32')('private control remains usable with the packaged app PATH limited to System32', async () => {
+    const { closeWindowsNativeWorker } = await import('../../service/src/platform/windows-native-worker.js');
+    await closeWindowsNativeWorker();
+    const inheritedPathKey = Object.keys(process.env).find(key => key.toUpperCase() === 'PATH') ?? 'PATH';
+    vi.stubEnv(inheritedPathKey, join(process.env.SystemRoot!, 'System32'));
+    let root: string | undefined;
+    try {
+        root = await createDesktopIsolatedRoot();
+        const path = join(root, 'control.sock');
+        await expect(readControlDiscovery(path)).rejects.toMatchObject({ code: 'ENOENT' });
+        const server = await startPrivateControlServer(path, async () => ({ type: 'registered' }));
+        try { expect(await requestPrivateControl(path, { type: 'register' })).toEqual({ type: 'registered' }); }
+        finally { await server.close(); }
+    } finally { await closeWindowsNativeWorker(); vi.unstubAllEnvs(); if (root) await rm(root, { recursive: true, force: true }); }
+}, 15_000);
