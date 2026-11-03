@@ -59,15 +59,45 @@ export function subscribeBrowserRaster(
   }, ignore);
   return () => {
     current = false;
-    release();
     task.abort({ code: PdfErrorCode.Cancelled, message: 'canceled render task' });
   };
+}
+
+/** Published rasters outlive their render task while React displays them. */
+export function createBrowserRasterOwner() {
+  let nextOrder = 0;
+  const pending = new Set<{ order: number; release: () => void }>();
+  return {
+    retain(release: () => void) {
+      const image = {
+        order: ++nextOrder,
+        release() { if (pending.delete(image)) release(); },
+      };
+      pending.add(image);
+      return image;
+    },
+    commit(order: number | undefined, visible = true) {
+      if (order === undefined) return;
+      // A newer render may have published before this commit's passive effect.
+      // Its URL still belongs to an upcoming commit and must remain valid.
+      for (const image of pending) if (image.order < order || (!visible && image.order === order)) image.release();
+    },
+    dispose() { for (const image of pending) image.release(); },
+  };
+}
+
+export function releaseDecodedRaster(
+  image: { url: string; release?: () => void },
+  element: Pick<HTMLImageElement, 'currentSrc' | 'complete' | 'naturalWidth'>,
+): void {
+  if (element.currentSrc === image.url && element.complete && element.naturalWidth > 0) image.release?.();
 }
 
 export function HostRenderLayer({ resourceHost, documentId, pageIndex, scale, dpr, style, onLoad, ...props }: RenderProps & { resourceHost: ViewerResourcePolicy['host'] }) {
   const { provides } = useRenderCapability();
   const documentState = useDocumentState(documentId);
-  const [image, setImage] = useState<{ url: string; key: string; release?: () => void }>();
+  const [image, setImage] = useState<{ url: string; key: string; release?: () => void; order?: number }>();
+  const [browserImages] = useState(createBrowserRasterOwner);
   const actualScale = scale ?? documentState?.scale ?? 1;
   const actualDpr = dpr ?? window.devicePixelRatio;
   const refreshVersion = documentState?.pageRefreshVersions[pageIndex] ?? 0;
@@ -77,6 +107,8 @@ export function HostRenderLayer({ resourceHost, documentId, pageIndex, scale, dp
   // A previous bitmap can cover a zoom render, but cannot cover a page turn or
   // rotation: its orientation would disagree with the overlays and page box.
   const key = `${resourceHost}:${documentId}:${pageIndex}:${rotation}`;
+  useEffect(() => { browserImages.commit(image?.order, image?.key === key); }, [browserImages, image, key]);
+  useEffect(() => () => browserImages.dispose(), [browserImages]);
   useEffect(() => {
     if (!provides) return;
     const task = provides.forDocument(documentId).renderPage({
@@ -84,7 +116,7 @@ export function HostRenderLayer({ resourceHost, documentId, pageIndex, scale, dp
     });
     return resourceHost === 'codex'
       ? subscribeNativeRaster(task, url => setImage({ url, key }))
-      : subscribeBrowserRaster(task, (url, release) => setImage({ url, key, release }));
-  }, [provides, documentId, pageIndex, actualScale, actualDpr, rotation, refreshVersion, resourceHost, key]);
-  return image?.key === key ? <img src={image.url} {...props} onLoad={event => { image.release?.(); onLoad?.(event); }} style={{ width: '100%', height: '100%', ...style }} /> : null;
+      : subscribeBrowserRaster(task, (url, release) => setImage({ url, key, ...browserImages.retain(release) }));
+  }, [provides, documentId, pageIndex, actualScale, actualDpr, rotation, refreshVersion, resourceHost, key, browserImages]);
+  return image?.key === key ? <img src={image.url} {...props} onLoad={event => { releaseDecodedRaster(image, event.currentTarget); onLoad?.(event); }} style={{ width: '100%', height: '100%', ...style }} /> : null;
 }
