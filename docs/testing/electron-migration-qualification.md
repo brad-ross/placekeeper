@@ -31,7 +31,7 @@ The complete shared visual suite produced the same result on this branch and a p
 
 Linux CI exposed intermittent Blob resource errors and a composer disappearing during source-refresh authoring. Deterministic regressions found two defects: decoded or temporarily hidden raster URLs were revoked while React state could reuse them; an older bootstrap response could overwrite a newer accepted draft revision and replay editor admission. Raster URLs now remain owned until replacement or unmount. Bootstrap snapshots cannot roll back accepted identity, and ordinary Electron refreshes preserve their existing interaction attachment.
 
-The corrected local package passes all nine installed workflow tests. The focused runtime, authoring and raster suite passes 80 tests, and a real Chromium/React regression verifies image remount and exact resource release. The original CI Blob UUID was not conclusively classified; the raster failure mechanism was reproduced independently. No authoring retries or console-error filters were added. Native Windows/Linux and both Mac architecture reruns of these latest fixes are pending publication approval.
+The corrected local package passes all nine installed workflow tests. The focused runtime, authoring and raster suite passes 80 tests, and a real Chromium/React regression verifies image remount and exact resource release. The original CI Blob UUID was not conclusively classified; the raster failure mechanism was reproduced independently. No authoring retries or console-error filters were added. Native run `41580676334` at `228566a3` subsequently passed all nine packaged tests on Windows Server 2025, Ubuntu 24.04, and both macOS architectures. All four candidate artifacts were produced.
 
 ### Requirement coverage and limits
 
@@ -57,12 +57,12 @@ AE1 is exercised in the packaged lifecycle test. AE2 native Retry after renderer
 
 | Platform | Evidence status |
 | --- | --- |
-| Local macOS arm64 | Actual packaged review tests above; native macOS 15 arm64 CI ZIP and all nine packaged tests passed in run `41576349478` at `815df902`; no installation over the user's app |
-| macOS x64 | Native macOS 15 Intel CI ZIP and all nine packaged tests passed in run `41576349478` at `815df902` |
+| Local macOS arm64 | Actual packaged review tests above; native macOS 15 arm64 CI ZIP and all nine packaged tests passed in run `41580676334` at `228566a3`; no installation over the user's app |
+| macOS x64 | Native macOS 15 Intel CI ZIP and all nine packaged tests passed in run `41580676334` at `228566a3` |
 | macOS 13 | Untested; compatible minimum version is not execution evidence |
-| Windows Server 2025 x64 | Native run `41576349478` at `815df902`: 85 platform unit/integration tests, locked-save/retry acceptance, installer build, and all nine packaged workflow tests passed. Setup.exe is a candidate artifact; an interactive Windows 11 install was not tested. |
+| Windows Server 2025 x64 | Native run `41580676334` at `228566a3`: 85 platform unit/integration tests, locked-save/retry acceptance, installer build, and all nine packaged workflow tests passed. Setup.exe is a candidate artifact; an interactive Windows 11 install was not tested. |
 | Windows 11 x64 | Untested locally; Windows Server CI cannot establish Windows 11 installer, DPI or Narrator behavior |
-| Ubuntu 24.04 x64 | Native CI built and installed the deb, verified root-owned mode-4755 Chromium sandbox, and passed all nine packaged tests under Xvfb in run `41574318544` at `c6779351`. Later run `41576349478` exposed the two intermittent failures discussed above; interactive X11/Wayland and accessibility remain unqualified |
+| Ubuntu 24.04 x64 | Native CI built and installed the deb, verified root-owned mode-4755 Chromium sandbox, and passed all nine packaged tests under Xvfb in run `41580676334` at `228566a3`, including the corrected refresh and raster paths. Interactive X11/Wayland and accessibility remain unqualified |
 | VoiceOver / Narrator / Linux accessibility | Untested |
 
 ## Performance
