@@ -20,7 +20,8 @@ final class ReviewRefreshTests: XCTestCase {
         func projection(_ generation: Int) -> MacRuntimeProjection {
             .init(
                 sessionID: "11111111-1111-4111-8111-111111111111", generation: generation,
-                revision: generation - 1, state: [:], scope: [:], saveStatus: [:], protected: false,
+                revision: generation - 1, activeAuthoringDraftIds: [],
+                state: [:], scope: [:], saveStatus: [:], protected: false,
                 location: nil, documentDigest: String(repeating: String(generation), count: 64),
                 documentByteLength: 100 + generation
             )

@@ -119,6 +119,7 @@ final class ReviewBridgeLifecycleTests: XCTestCase {
             sessionID: "11111111-1111-4111-8111-111111111111",
             generation: generation,
             revision: revision,
+            activeAuthoringDraftIds: [],
             state: ["workflow": ["freshness": freshness]],
             scope: ["kind": "local"],
             saveStatus: ["sync": ["phase": savePhase]],

@@ -753,9 +753,10 @@ final class MacPoliciesTests: XCTestCase {
         XCTAssertEqual(coordinator.markReady(), [first, second])
         XCTAssertEqual(coordinator.inFlightCount, 2)
 
-        let laterLink = try XCTUnwrap(NativeOpenIntent.parse(URL(
+        let laterURL = try XCTUnwrap(URL(
             string: "placekeeper:///tmp/First.pdf#v=1&page=7"
-        )))
+        ))
+        let laterLink = try XCTUnwrap(NativeOpenIntent.parse(laterURL))
         XCTAssertTrue(coordinator.enqueue([laterLink]).isEmpty)
         XCTAssertEqual(coordinator.finish(first), [laterLink])
         XCTAssertEqual(coordinator.inFlightCount, 2)
@@ -788,9 +789,10 @@ final class MacPoliciesTests: XCTestCase {
     }
 
     func testNativeLinkHintIsBoundedWhileServiceRetainsFinalAuthority() throws {
-        let link = try XCTUnwrap(NativeOpenIntent.parse(URL(
+        let url = try XCTUnwrap(URL(
             string: "placekeeper:///tmp/Paper%20One.pdf#v=1&page=3"
-        )))
+        ))
+        let link = try XCTUnwrap(NativeOpenIntent.parse(url))
         XCTAssertEqual(link.sourceURL.path, "/tmp/Paper One.pdf")
         guard case let .placekeeperLink(raw) = link.kind else { return XCTFail("expected a link intent") }
         XCTAssertEqual(raw, "placekeeper:///tmp/Paper%20One.pdf#v=1&page=3")
