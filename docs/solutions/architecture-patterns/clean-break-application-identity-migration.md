@@ -1,7 +1,7 @@
 ---
 title: Clean-break application identity migration
 date: 2026-08-13
-last_updated: 2026-09-10
+last_updated: 2026-11-03
 category: architecture-patterns
 module: Application identity migration
 problem_type: architecture_pattern
@@ -37,7 +37,7 @@ tags:
 
 A strict application rename is an identity migration, not a copy edit. Identity is repeated across the bundle manifest, runtime storage, launch commands, environment variables, transport identifiers, integrations, portable document metadata, release assets, tests, and operator documentation. If compatibility is explicitly forbidden, leaving any reader, alias, or legacy fixture behind creates two supported identities even when the visible interface shows only the new name.
 
-Placekeeper therefore treats its name and machine-facing identifiers as one contract. The canonical manifest names the product and physical bundle `Placekeeper`, uses bundle ID `local.placekeeper`, executable `placekeeper`, runtime data directory `Library/Application Support/Placekeeper`, and Placekeeper icon resources (`packaging/macos/app-bundle.json`). Distribution validation rejects drift from these values (`packaging/macos/validate-manifest.ts`). The clean-break implementation is recorded in [PR #31](https://github.com/brad-ross/placekeeper/pull/31); the current tree implements the canonical identity.
+Placekeeper therefore treats its name and machine-facing identifiers as one contract. The original clean-break implementation is recorded in [PR #31](https://github.com/brad-ross/placekeeper/pull/31). Current Electron packaging retains product and bundle name `Placekeeper` and bundle ID `local.placekeeper`; its internal GUI executable is `PlacekeeperDesktop`, while the CLI remains `placekeeper` (`apps/electron/forge.config.ts`, `packaging/desktop/build.ts`). The former macOS app-bundle manifest is historical, not the current distribution authority.
 
 An earlier compatibility-first rebrand changed visible branding while retaining the former bundle, filesystem, command, plugin, and annotation identities. That preserved upgrades and state but did not satisfy a one-identity product. Repository-only cleanup also missed live machine state: an already loaded Codex hook could continue emitting the former context envelope after source and packaged-bundle scans were clean. Plugin removal cleared its enabled registration but left cache and trust records, and a guessed `doctor` shorthand initially looked like a writer failure until the exact supported invocation was used (session history).
 
@@ -58,9 +58,9 @@ These are identity surfaces even when users never see them. Placekeeper's daemon
 
 ### Define one canonical identity contract
 
-Put authoritative values in a small manifest or typed constants, then make validation reject drift. Do not let each subsystem independently choose spelling, casing, paths, or identifiers. Here, the bundle manifest is the distribution authority, and the validator hard-fails changes to the product, bundle, identifier, executable, runtime data root, or icon (`packaging/macos/validate-manifest.ts`). A focused contract test mutates each identity field and expects rejection (`packaging/macos/packaging.test.ts`).
+Put authoritative values in a small manifest or typed constants, then make validation reject drift. Do not let each subsystem independently choose spelling, casing, paths, or identifiers. The current distribution validator enforces packaged identity and integration contracts (`packaging/shared/validate-distribution.ts`), with focused coverage in `packaging/shared/distribution.test.ts`. The former macOS bundle-manifest validator and packaging tests are historical implementation evidence.
 
-Generate platform metadata from that contract. The payload builder writes metadata from the validated manifest (`packaging/macos/build-app.ts`). The production native candidate builder then sets `CFBundleExecutable` to `PlacekeeperMac`; the bundled service CLI remains `placekeeper` (`packaging/macos/build-native-candidate.ts`). This prevents a complete-looking interface rename from shipping an old physical identity.
+Generate platform metadata from that contract. Current desktop metadata is assembled by `packaging/desktop/build.ts` and `apps/electron/forge.config.ts`, with the packaged runtime contract in `packaging/desktop/runtime-manifest.json`. The product and app bundle remain Placekeeper; the internal GUI executable is `PlacekeeperDesktop`, and the installed CLI is `placekeeper`. The former `PlacekeeperMac` executable and AppKit builders are retired. Distinguishing product identity from an internal executable name prevents a complete-looking interface rename from concealing physical identity drift.
 
 ### Remove compatibility when the decision forbids it
 
@@ -68,19 +68,19 @@ Do not retain fallback reads, dual writes, old command aliases, alternate plugin
 
 Portable annotations illustrate the difference. New annotations use author `Placekeeper` and owner `placekeeper`; single-projection envelopes use schema version 2 and grouped projections use version 3 (`packages/core/src/portable-annotation.ts`). Ingestion accepts the exact author and supported envelope schemas, rejecting a retired owner or unsupported schema (`packages/core/src/portable-annotation.ts`). Tests prove that a lookalike author is rejected and that visible author text cannot claim an annotation without owned metadata (`packages/core/test/portable-annotation.test.ts`). This is stronger than merely preferring the new identity on write.
 
-Apply the same rule to integrations. The VS Code extension uses package `placekeeper-vscode`, command `placekeeper.open`, configuration key `placekeeper.launcherPath`, and Placekeeper titles (`apps/vscode/package.json`). The distribution validator requires the canonical `placekeeper` Codex skill, exact plugin identity, and canonical installed launcher (`packaging/macos/validate-manifest.ts`). The live-context envelope is exactly `placekeeper-live-context` (`apps/service/src/cli/hook-command.ts`).
+Apply the same rule to integrations. The VS Code extension uses package `placekeeper-vscode`, command `placekeeper.open`, configuration key `placekeeper.launcherPath`, and Placekeeper titles (`apps/vscode/package.json`). The shared distribution validator checks the canonical Codex plugin and skill contract (`packaging/shared/validate-distribution.ts`), while portable registration materializes the selected installed launcher (`packaging/desktop/integration-registration.ts`). The live-context envelope is exactly `placekeeper-live-context` (`apps/service/src/cli/hook-command.ts`).
 
 ### Migrate all layers in one change set
 
 Change runtime code, packaging, filesystem paths, environment variables, protocols, temporary and media identifiers, editor and agent integrations, annotation metadata, release and signing automation, documentation, tests, and fixtures together. Splitting these layers across releases creates intermediate builds that install under one identity while launching or persisting under another.
 
-Release automation must consume the same identity as local packaging. The release workflow builds and smoke-tests `Placekeeper.app`, creates `Placekeeper-<arch>` archives, uses `PLACEKEEPER_NOTARY_PROFILE`, and uploads a Placekeeper-named artifact (`.github/workflows/release-macos.yml`). The source installer selects `~/Applications/Placekeeper.app`, builds that bundle, checks its `placekeeper` executable, smoke-tests it offline, and coordinates replacement through that executable (`install.sh`, `install.sh`).
+Release automation must consume the same identity as local packaging. Current source publication builds the Electron desktop package and runs installed acceptance before publishing the exact tested source (`.github/workflows/release-source.yml:64-74`). On macOS, the source installer selects `~/Applications/Placekeeper.app` by default, validates the packaged `placekeeper` launcher, and coordinates replacement through that launcher (`packaging/desktop/source-install.mjs:23-28`, `packaging/desktop/source-install.mjs:47-53`). The former notarized macOS release workflow and AppKit offline smoke are historical implementation evidence.
 
 ### Verify absence as well as presence
 
 Positive tests show that the new identity works; they do not show that the retired identity is gone. Add case-insensitive, separator-tolerant scans over tracked source and the packaged app. Search file contents, filenames, generated manifests, bundle contents, command registries, fixtures, and integration metadata. Under a strict clean break, the approved exception list should normally be empty.
 
-Then run the normal validation ladder. This repository exposes typecheck, distribution validation, builds, full tests, macOS packaging, and installed smoke commands (`package.json`, `package.json`). The installed smoke invokes the packaged `placekeeper` executable in offline writer mode, testing the assembled bundle rather than only source modules (`packaging/macos/smoke-installed.ts`). Identity contract tests pin the app destination, environment namespace, state path, context kind, media type, temporary prefix, VS Code identifiers, and integration launcher (`packaging/macos/packaging.test.ts`).
+Then run the normal validation ladder. This repository exposes typecheck, distribution validation, builds, full tests, desktop packaging, and installed acceptance commands (`package.json`). Build with `pnpm package:desktop`, then run `pnpm test:desktop-installed` against that exact package; `PLACEKEEPER_TEST_EXECUTABLE` selects a different actual installation (`docs/testing/electron-migration-qualification.md:26`). The former AppKit offline-writer smoke and macOS packaging identity tests are retired evidence, not current verification commands.
 
 Environmental failures need separate adjudication. During this migration, sandbox socket restrictions and a shell that lost the bundled Node runtime path initially blocked verification; neither represented a product regression. Re-run the exact contract under the required environment before changing code (session history).
 
@@ -88,7 +88,7 @@ Environmental failures need separate adjudication. During this migration, sandbo
 
 A correct repository migration does not remove an already installed retired app, its application-support data, or previously installed integrations. After code validation passes, inventory the machine separately, stop only relevant processes, and move stale bundles, state directories, plugin caches, and configuration records to a dated Trash or quarantine directory before installing the new app. Recoverable moves preserve drafts and make rollback possible.
 
-Use the repository installer for the new app rather than manually copying build output. It builds in a private temporary directory, smoke-tests before replacement, and delegates to a transactional helper (`install.sh`, `install.sh`). The installer path stages the candidate, preserves the previous bundle, requires candidate readiness, and restores the previous app after a pre-commit failure when candidate retirement is safe; otherwise it preserves the transaction and installed candidate for recovery (`packaging/macos/install-built-app.sh`, `apps/service/src/cli/daemon-command.ts`). That protects Placekeeper-to-Placekeeper updates; it does not locate artifacts left by a differently named retired product.
+Use the repository installer for the new app rather than manually copying build output. Current source installation builds the Electron package, validates its runtime and launcher, and delegates coordinated replacement to the desktop helper (`packaging/desktop/source-install.mjs:47-53`). Under the daemon lifecycle lock, that helper stages the candidate, preserves the previous bundle, requires exact candidate readiness, and restores the previous app after a pre-commit failure when candidate retirement is safe; otherwise it preserves the transaction and installed candidate for recovery (`packaging/desktop/install-built-app.mjs:13-51`). That protects Placekeeper-to-Placekeeper updates; it does not locate artifacts left by a differently named retired product. The former private-temporary-build and offline-smoke installer flow is historical.
 
 Finally, restart hosts that load integrations into process memory. A clean filesystem cannot unload an already attached hook, extension, or daemon. The running Codex process in this migration required a restart to stop the legacy hook that had been loaded before the reinstall (session history).
 
@@ -116,7 +116,7 @@ Do not apply the destructive half when compatibility is required. Instead, desig
 
 | Surface | Canonical Placekeeper value | Verification |
 | --- | --- | --- |
-| macOS bundle | `Placekeeper.app`, `local.placekeeper` | Manifest validator and built `Info.plist` |
+| macOS bundle | `Placekeeper.app`, `local.placekeeper` | Electron Forge configuration and built `Info.plist` |
 | Launcher | `Contents/MacOS/placekeeper` | Package test and installed smoke |
 | Mutable state | `~/Library/Application Support/Placekeeper` | Runtime source and isolated smoke home |
 | Environment | `PLACEKEEPER_*` | Source scan and package contract test |
@@ -124,7 +124,7 @@ Do not apply the destructive half when compatibility is required. Instead, desig
 | VS Code | `placekeeper-vscode`, `placekeeper.open`, `placekeeper.launcherPath` | Extension manifest and activation test |
 | Codex | `$placekeeper`, installed hook command, `placekeeper-live-context` | Distribution validation and hook tests |
 | PDF ownership | Author `Placekeeper`, `custom.placekeeper`, owner `placekeeper`, supported v2 single and v3 grouped envelopes | Codec tests and PDF round trip |
-| Release | `Placekeeper-<arch>.zip`, `PLACEKEEPER_NOTARY_PROFILE` | Release workflow inspection |
+| Source release | `placekeeper-source-<tag>.tar.gz`, `install-placekeeper.sh` | Source release workflow inspection |
 
 ### Zero-reference gate
 
@@ -145,11 +145,11 @@ pnpm validate:distribution
 pnpm test:ci:unit
 pnpm build
 pnpm test
-pnpm package:macos
-pnpm smoke:installed -- '<built>/Placekeeper.app' test/fixtures/pdfs/text-native.pdf
+pnpm package:desktop
+pnpm test:desktop-installed
 ```
 
-After these pass, use a separate machine checklist: inventory installed bundles and plugins, stop live processes, move retired artifacts to a dated recoverable location, install Placekeeper, verify bundle identity and signature, run the installed offline doctor or smoke path, restart integration hosts, and confirm only the new app and integrations are active.
+After these pass, use a separate machine checklist: inventory installed bundles and plugins, stop live processes, move retired artifacts to a dated recoverable location, install Placekeeper, verify bundle identity and signature, run checks against the actual packaged installation, restart integration hosts, and confirm only the new app and integrations are active. Current installed acceptance is selected with `PLACEKEEPER_TEST_EXECUTABLE`; it does not establish every interactive OS workflow.
 
 ## Related
 

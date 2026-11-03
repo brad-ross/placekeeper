@@ -1,7 +1,7 @@
 ---
 title: Refresh real app surface screenshots without rebuilding the staging workflow
 date: "2026-09-12"
-last_updated: "2026-09-12"
+last_updated: 2026-11-03
 category: workflow-issues
 module: Landing page app surface captures
 problem_type: workflow_issue
@@ -59,7 +59,7 @@ Current build entrypoints in `package.json`:
 ```sh
 pnpm build:vscode
 pnpm build:chrome
-pnpm package:macos
+pnpm package:desktop
 pnpm build:static:pages
 ```
 
@@ -107,7 +107,7 @@ Use those **same two directory flags** when installing the current extension wit
 
 ### 4. Stage each surface
 
-**Mac:** open the full paper, navigate to page 14 and Section 4.1, select Search, and enter literal `\Gamma`. Choose a zoom that leaves useful source text and search results visible. Verify traffic lights are vertically centered after showing and resizing the window. AppKit can reset their frames during native layout, so checking only the initial programmatic frames is insufficient. The current fix reapplies positioning after native layout in `apps/macos/Sources/PlacekeeperMac/PlacekeeperWindowController.swift`; regression coverage is in `apps/macos/Tests/PlacekeeperMacTests/MacPoliciesTests.swift`. Capture the actual post-layout appearance.
+**Mac:** open the full paper, navigate to page 14 and Section 4.1, select Search, and enter literal `\Gamma`. Choose a zoom that leaves useful source text and search results visible. Verify native window controls after showing, resizing, changing interface size, and entering or leaving fullscreen. Current Electron positioning and overlay sizing live in `apps/electron/src/titlebar.ts` and `apps/web/src/app/review-shell-chrome.css`. The former AppKit frame-reset workaround and Swift regression tests are historical evidence. Capture the actual post-layout appearance; browser geometry alone does not prove native control placement.
 
 **Chrome Extension:** open the real paper URL in the isolated extension browser, allow the normal Placekeeper handoff, navigate to page 14, follow Appendix A and place References on the bottom with page 31 visible. Retain the original arXiv URL in the address bar. This is the differentiator from the Web surface. Move the pointer away from reference controls so close/open actions or tooltips do not obscure the resting tabs.
 

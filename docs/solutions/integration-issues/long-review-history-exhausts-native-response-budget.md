@@ -1,6 +1,7 @@
 ---
 title: Long review history exhausts the native response budget
 date: 2026-10-16
+last_updated: 2026-11-03
 category: integration-issues
 module: Embedded review runtime
 problem_type: integration_issue
@@ -25,7 +26,7 @@ A native review can become impossible to reopen because its private editing hist
 
 In the investigated incident, two reviews appeared stuck during save and failed to reopen in Placekeeper. Both PDFs opened in Preview with saved annotations intact. Retrying did not restore the native review. These observations established that PDF corruption was not a sufficient explanation; they did not prove that the latest protected edits had reached the PDF. (Session evidence.)
 
-Disposable copies of the recovery records reproduced the projection failure at 100,003 and 100,199 visited JSON values. The response clone rejects traversal beyond 100,000 nodes or depth 32 (`packages/core/src/review-runtime-protocol.ts:175`). Native staging throws `invalid-projection` when the sanitized projection is undefined (`apps/service/src/macos/macos-runtime.ts:308`). A small current annotation set can therefore coexist with a failed bootstrap when repeated before/after snapshots amplify the response.
+Disposable copies of the recovery records reproduced the projection failure at 100,003 and 100,199 visited JSON values. The response clone rejects traversal beyond 100,000 nodes or depth 32 (`packages/core/src/review-runtime-protocol.ts:175`). Native staging throws `invalid-projection` when the sanitized projection is undefined (`apps/service/src/desktop/native-runtime.ts`). A small current annotation set can therefore coexist with a failed bootstrap when repeated before/after snapshots amplify the response.
 
 ## What Didn't Work
 
@@ -47,7 +48,7 @@ return closedJsonClone({ ...candidate, history: { length: historyLength } });
 
 The sanitizer accepts either a canonical history array or an already summarized `{ length }`, checks the cursor against that length, and then clones the projection (`packages/core/src/review-runtime-protocol.ts:275`). This allows service-side and client-side validation to run in sequence without restoring or requesting private history. The response change does not enlarge incoming-command budgets or bypass forbidden-key checks (`packages/core/test/review-runtime-protocol.test.ts:25`).
 
-The shared runtime protocol advances to version 4, with the native bridge validating and emitting that version (`packages/core/src/review-runtime-protocol.ts:3`; `apps/macos/Sources/PlacekeeperMac/ReviewBridge.swift:14`). Deploy the matching service and native client together.
+The shared runtime protocol uses version 4 (`packages/core/src/review-runtime-protocol.ts`); the current Electron bridge validates the shared protocol (`apps/electron/src/review-bridge.ts`). The version-4 correction originally shipped with a matching Swift bridge, which is now retired. Deploy matching service and desktop client contracts together.
 
 ## Why This Works
 
@@ -60,7 +61,7 @@ Transport projection and history compaction are independent protections. The for
 - When a valid PDF will not reopen, reproduce source loading, recovery decoding, and response projection separately on copies. Measure the resource the failing guard actually counts; file bytes and annotation counts are not JSON traversal counts.
 - Keep the response clone bounded. Project private history out before traversal rather than increasing limits or deleting durable state.
 - Test both initial and repeated sanitization, revision-conflict responses, unchanged canonical history, rejection of forbidden fields, and unchanged request limits. The 300-entry legacy-history fixture exercises these boundaries (`packages/core/test/review-runtime-protocol.test.ts:25`).
-- Exercise the persisted session through the native runtime as well as the pure sanitizer. The long-session regression uses accepted draft updates, application, restart, and undo against the recovery store (`apps/service/test/macos-runtime.test.ts:138`).
+- Exercise the persisted session through the native runtime as well as the pure sanitizer. The long-session regression uses accepted draft updates, application, restart, and undo against the recovery store (`apps/service/test/desktop-runtime.test.ts`).
 - Verify recovery and actual PDF output separately. In this session, cloned recovery tests checked undo/redo and saved annotation readback; the installed transport fix reopened both affected reviews, and a recovered copy saved. Those checks support the incident correction, not a promise that every possible current annotation set fits the response budget.
 
 ## Related Issues

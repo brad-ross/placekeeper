@@ -1,7 +1,7 @@
 ---
 title: Refresh independently installed VS Code payloads after app installation
 date: 2026-09-10
-last_updated: 2026-09-10
+last_updated: 2026-11-03
 category: integration-issues
 module: Application installation and VS Code integration
 problem_type: integration_issue
@@ -31,11 +31,11 @@ Matching `0.1.1` version strings did not establish freshness. The installed payl
 
 ## Solution
 
-The source installer now runs an extension updater after successful app-install coordination (`install.sh`, `install.sh`). It executes even when coordination decides the app is already current, allowing an installer retry to repair an independently stale extension. The updater checks whether Placekeeper is already registered with VS Code, builds a temporary VSIX from the installed app's bundled integration, and uses the editor's CLI with `--install-extension ... --force` (`packaging/macos/update-vscode.mjs`). It preserves opt-in by skipping an absent extension.
+On macOS, source installation runs optional integration setup after successful app-install coordination (`packaging/desktop/source-install.mjs`, `packaging/macos/setup-integrations.mjs`). The VS Code updater executes even when coordination decides the app is already current, allowing an installer retry to repair an independently stale extension. It checks whether Placekeeper is already registered with VS Code, builds a temporary VSIX from the installed app's bundled integration, and uses the editor's CLI with `--install-extension ... --force` (`packaging/macos/update-vscode.mjs`). It preserves opt-in by skipping an absent extension. Current Windows/Linux source installation instead prints manual VSIX and launcher-setting instructions; it does not run this updater.
 
 The standalone extension build also rebuilds shared web output before bundling (`apps/vscode/package.json`). This closes the upstream case where copying a coherent but outdated root build would produce a newly built extension with yesterday's UI.
 
-The updater belongs outside the app replacement helper. That helper is also used by isolated installed-app smoke and rollback workflows; putting editor-profile mutation there would let an isolated app operation change the user's real VS Code installation (`install.sh`, `install.sh`).
+The updater belongs outside the app replacement helper. That helper is also used by isolated installed-app and rollback workflows; putting editor-profile mutation there would let an isolated app operation change the user's real VS Code installation (`packaging/desktop/source-install.mjs`, `packaging/desktop/install-built-app.mjs`).
 
 ## Why This Works
 

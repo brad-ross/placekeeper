@@ -98,7 +98,7 @@ Recoverable work need not yet be saved in the PDF, and a successful write of old
 ### Return Editor
 The editor associated with one Placekeeper viewer for PDF-to-source navigation.
 
-For a shared native PDF window, the latest explicit editor navigation request sets this association; background refresh and automatic following do not change it. A directly opened viewer obtains an editor choice when reverse search first needs one. An embedded VS Code viewer retains its own host association.
+For a shared native PDF window, the latest explicit editor navigation request sets this association; background refresh and automatic following do not change it. A directly opened viewer can establish this association through explicit source-navigation setup before requesting reverse search. An embedded VS Code viewer retains its own host association.
 
 ### Source Navigation Intent
 A captured source position whose request remains associated with the user's navigation choice while Placekeeper waits for a usable PDF mapping.
