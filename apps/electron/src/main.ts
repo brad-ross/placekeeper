@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, protocol, session, clipboard, screen } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, protocol, session, clipboard, screen, shell } from 'electron';
 import { mkdirSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
@@ -21,6 +21,7 @@ import { WindowActivityRegistry, ActivityAcknowledgements } from './window-lifec
 import { DocumentWindowRegistry } from './window-registry.js';
 import { parseWindowState, readWindowState, writeWindowState, type WindowIntent } from './window-state.js';
 import { installMenus, type WindowCommands } from './menus.js';
+import { createManualUpdateAction } from './update-check.js';
 import { nativeTitlebarOptions, trackTitlebarHover } from './titlebar.js';
 import { parseElectronLocation } from '../../../packages/core/src/electron-shell-protocol.js';
 import { decodePlacekeeperLink } from '../../../packages/core/src/placekeeper-link.js';
@@ -126,7 +127,8 @@ async function start() {
         return pending;
     };
     const focused = () => { const w = BrowserWindow.getFocusedWindow(); return w ? entries.get(w.webContents.id) : undefined; };
-    const menus = () => installMenus(() => { void chooseOpen(); }, focused);
+    const checkUpdates = createManualUpdateAction({ installedVersion: app.getVersion(), platform: process.platform, architecture: process.arch, present: async options => (await dialog.showMessageBox(options)).response, openExternal: url => shell.openExternal(url) });
+    const menus = () => installMenus(() => { void chooseOpen(); }, focused, () => { void checkUpdates(); });
     const verify = (event: Electron.IpcMainInvokeEvent, identity?: unknown, identityRequest = false) => {
         const entry = entries.get(event.sender.id);
         const id = identity as { windowId?: unknown; attemptId?: unknown } | undefined;
