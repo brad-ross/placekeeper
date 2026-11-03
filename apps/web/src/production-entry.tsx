@@ -51,6 +51,7 @@ function nativeNavigationMessage(state: NativeForwardState): string | undefined 
   if (state.status !== "failed") return undefined;
   switch (state.reason) {
     case "unavailable-tool": return "Install SyncTeX, then try navigating again.";
+    case "ambiguous": return "Multiple SyncTeX sidecars were found. Keep only the matching .synctex or .synctex.gz file, then retry.";
     case "out-of-root": return "The source location is outside the selected source folder.";
     default: return "Source navigation could not finish. Rebuild with SyncTeX enabled and try again.";
   }

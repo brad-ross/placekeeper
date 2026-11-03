@@ -592,9 +592,10 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   const interactionAvailability = useRef({ authoringEnabled, referencesEnabled });
   interactionAvailability.current = { authoringEnabled, referencesEnabled };
   const [localState, setState] = useState(props.initialState);
-  // A runtime successor arrives as one state/assets render. Prefer that canonical
-  // generation immediately so the viewer URL and semantic authority never split.
-  const state = canonicalStateSupersedes(localState, props.initialState)
+  // Same-generation canonical edits can render immediately. A new document
+  // waits for the predecessor reading capture before replacing its viewer.
+  const state = props.initialState.workflow.documentGeneration === localState.workflow.documentGeneration
+    && canonicalStateSupersedes(localState, props.initialState)
     ? props.initialState
     : localState;
   // A restart successor begins as an ordinary browser view, then its next
@@ -960,11 +961,16 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     mainDocumentReadyGeneration, locationRestoreStatus, setCommandError);
   const initialPresentationAppliedRef = useRef(false);
   const providedViewerAssetsRef = useRef(props.viewerAssets);
-  if (!viewerAssetUrlsEqual(providedViewerAssetsRef.current, props.viewerAssets)) {
+  // A successor state's semantic capture still needs the predecessor viewer.
+  // Commit its resources with that state, so initialization cannot run under
+  // the predecessor generation while the capture promise is settling.
+  const viewerResourcesAreCurrent = props.initialState.workflow.documentGeneration
+    === state.workflow.documentGeneration;
+  if (viewerResourcesAreCurrent && !viewerAssetUrlsEqual(providedViewerAssetsRef.current, props.viewerAssets)) {
     providedViewerAssetsRef.current = props.viewerAssets;
   }
   const resourcePolicyRef = useRef(props.resourcePolicy);
-  if (!viewerResourcePoliciesEqual(resourcePolicyRef.current, props.resourcePolicy)) {
+  if (viewerResourcesAreCurrent && !viewerResourcePoliciesEqual(resourcePolicyRef.current, props.resourcePolicy)) {
     resourcePolicyRef.current = props.resourcePolicy;
   }
   const viewerAssets = useMemo(() => providedViewerAssetsRef.current ?? ({

@@ -203,3 +203,55 @@ for (const editsExistingItem of [true, false]) {
     if (put.type === 'put-draft') expect(put.draft.targetItemId).toBe(editsExistingItem ? '00000000-0000-4000-8000-000000000001' : undefined);
   });
 }
+
+test('keeps predecessor viewer mounted until delayed reading capture settles', async ({ page }) => {
+  const bridge = await nativeBridge('text-native.pdf', { workflowMode: 'generated-output' });
+  await page.addInitScript(() => {
+    (window as any).readingCaptureGate = new Promise<void>(resolve => {
+      (window as any).releaseReadingCapture = resolve;
+    });
+  });
+  await page.route('**/apps/web/src/pdf/reading-location.ts', async route => {
+    const response = await route.fetch();
+    const body = await response.text();
+    expect(body).toContain('page = await input.page;');
+    await route.fulfill({ response, body: body.replace('page = await input.page;',
+      'page = await input.page; await window.readingCaptureGate;') });
+  });
+  try {
+    await bridge.panel(page);
+    const zoom = page.getByRole('textbox', { name: /^Current zoom/ });
+    await zoom.fill('157');
+    await zoom.press('Enter');
+    await expect(zoom).toHaveValue('157');
+    await page.evaluate(() => {
+      const target = window as any;
+      target.predecessorImage = document.querySelector('[data-page-index="0"] > img');
+      const call = target.nativeAcceptanceCall;
+      target.nativeAcceptanceCall = async (method: string, payload: unknown) => {
+        const result = await call(method, payload);
+        if (method === 'bootstrap' && result.state?.workflow?.documentGeneration === 2) {
+          target.successorBootstrapped = true;
+        }
+        return result;
+      };
+    });
+    const original = await PDFDocument.load(await bridge.sourceBytes());
+    const replacement = await PDFDocument.create();
+    replacement.addPage([612, 792]);
+    const [retained] = await replacement.copyPages(original, [0]);
+    replacement.addPage(retained!);
+    await writeFile(bridge.pdfPath, await replacement.save());
+    await bridge.broker.replaceLiveDocument({ sessionId: bridge.sessionId, outputPath: bridge.pdfPath, observationEpoch: 1 });
+    await page.waitForFunction(() => (window as any).successorBootstrapped === true);
+    await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+    expect(await page.evaluate(() => (window as any).predecessorImage.isConnected)).toBe(true);
+    await page.evaluate(() => (window as any).releaseReadingCapture());
+    await expect(page.locator('[data-production-review]')).toHaveAttribute('data-location-restore-status', 'idle');
+    await expect(page.getByRole('textbox', { name: 'Current page 2 of 2' })).toHaveValue('2');
+    await expect(zoom).toHaveValue('157');
+  } finally {
+    await page.evaluate(() => (window as any).releaseReadingCapture?.()).catch(() => {});
+    await bridge.dispose();
+  }
+});
