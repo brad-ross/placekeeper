@@ -1,3 +1,4 @@
+import type { UpgradeAttemptCredentials } from "./upgrade-preparation.js";
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { lstat, readdir } from "node:fs/promises";
@@ -23,7 +24,9 @@ export interface CoordinateUpgradeOptions {
   readonly candidate: PackagedBuildIdentity;
   readonly installed?: PackagedBuildIdentity;
   readonly inspect: () => Promise<UpgradeDaemonInspection>;
-  readonly shutdown: () => Promise<ConditionalShutdownResult>;
+  readonly shutdown: (preparation?: UpgradeAttemptCredentials) => Promise<ConditionalShutdownResult>;
+  /** Obtains consent, protects all current hosts, commits closure and waits for their release. */
+  readonly prepare?: (status: import("./control-protocol.js").DaemonManagementStatus, candidate: PackagedBuildIdentity) => Promise<UpgradeAttemptCredentials>;
   readonly waitForRetirement: () => Promise<void>;
   readonly replaceAndReady: () => Promise<void>;
   readonly retryDurationMs?: number;
@@ -53,13 +56,18 @@ export async function coordinateUpgrade(
   }
   if (canSkipMutation && inspected.kind === "exact" && artifactIsIdentical) return { status: "noop" };
   if (inspected.kind !== "absent") {
+    let preparation: UpgradeAttemptCredentials | undefined;
     const reason = upgradeReason(inspected.status.activity);
     if (reason !== undefined && reason !== "transient-busy") {
-      throw new DaemonUpgradeRequiredError(reason);
+      if (inspected.status.upgradePreparationVersion === 1 && options.prepare) {
+        preparation = await options.prepare(inspected.status, options.candidate);
+        if (preparation.candidate.daemonIdentity !== options.candidate.daemonIdentity || preparation.candidate.installArtifactIdentity !== options.candidate.installArtifactIdentity) throw new Error("Upgrade preparation authorized a different candidate");
+      }
+      else throw new DaemonUpgradeRequiredError(inspected.status.upgradePreparationVersion === 1 ? "preparation-required" : reason, inspected.status.upgradePreparationVersion !== 1);
     }
     const deadline = Date.now() + (options.retryDurationMs ?? 5_000);
     while (true) {
-      const shutdown = await options.shutdown();
+      const shutdown = await options.shutdown(preparation);
       if (shutdown.status === "accepted") break;
       const refusedReason = upgradeReason(shutdown.activity) ?? "transient-busy";
       if (refusedReason !== "transient-busy" || Date.now() >= deadline) {
@@ -89,7 +97,7 @@ export async function coordinateServiceSwitch(options: CoordinateServiceSwitchOp
   if (inspected.kind === "uninspectable") throw new DaemonUpgradeRequiredError(inspected.reason);
   if (inspected.kind !== "absent") {
     const reason = upgradeReason(inspected.status.activity);
-    if (reason !== undefined && reason !== "transient-busy") throw new DaemonUpgradeRequiredError(reason);
+    if (reason !== undefined && reason !== "transient-busy" && !(inspected.status.upgradePreparationVersion === 1 && options.prepare)) throw new DaemonUpgradeRequiredError(inspected.status.upgradePreparationVersion === 1 ? "preparation-required" : reason, inspected.status.upgradePreparationVersion !== 1);
   }
   if (!await options.recoveryCompatible()) throw new Error("The selected service cannot read protected recovery");
   await coordinateUpgrade({
@@ -97,6 +105,7 @@ export async function coordinateServiceSwitch(options: CoordinateServiceSwitchOp
     operation: "host-setup",
     inspect: async () => inspected,
     replaceAndReady: async () => {
+      if (!await options.recoveryCompatible()) throw new Error("Protected recovery changed to an unsupported format while draining");
       await options.backupAndVerify();
       await options.replaceAndReady();
     },

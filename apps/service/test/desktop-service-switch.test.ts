@@ -108,3 +108,50 @@ it("does not treat repeated retirement EOF as proof that a surviving endpoint di
     expect(await readFile(options.paths.socketPath, "utf8")).toBe("endpoint still owned");
   } finally { clock.mockRestore(); }
 });
+
+it("does not invent consent for a preparation-capable active service", async () => {
+  mocks.inspect.mockResolvedValue({ kind: "incompatible", status: { ...status(1), upgradePreparationVersion: 1 } });
+  await expect(switchDesktopService(await fixture())).rejects.toMatchObject({ reason: "preparation-required" });
+  expect(mocks.request).not.toHaveBeenCalled(); expect(mocks.ready).not.toHaveBeenCalled();
+});
+it("passes exact incumbent and candidate identities through consent preparation before idle shutdown", async () => {
+  const options = await fixture(); const events: string[] = [];
+  const incumbent = { ...status(1), upgradePreparationVersion: 1 };
+  mocks.inspect.mockResolvedValue({ kind: "incompatible", status: incumbent });
+  const prepare = vi.fn(async (installed: import("../src/host/control-protocol.js").DaemonManagementStatus, candidate: import("../src/host/upgrade-coordinator.js").PackagedBuildIdentity) => {
+    expect(installed).toEqual(incumbent); expect(candidate.daemonIdentity).toBe("a".repeat(64));
+    events.push("prepared");
+    return { attemptId: "attempt", token: "token", candidate };
+  });
+  mocks.request.mockImplementation(async (_path, request) => {
+    if (request.operation === "shutdown-if-idle") { events.push("shutdown"); return { kind: "management", protocolVersion: 1, operation: "shutdown-if-idle", result: { status: "accepted" } }; }
+    throw Object.assign(new Error("retired"), { code: "ENOENT" });
+  });
+  mocks.ready.mockImplementation(async () => { events.push("ready"); });
+  await switchDesktopService({ ...options, prepare });
+  expect(events).toEqual(["prepared", "shutdown", "ready"]); expect(prepare).toHaveBeenCalledOnce();
+});
+it("keeps the installed service when the user refuses preparation", async () => {
+  mocks.inspect.mockResolvedValue({ kind: "incompatible", status: { ...status(1), upgradePreparationVersion: 1 } });
+  await expect(switchDesktopService({ ...await fixture(), prepare: async () => { throw new Error("User declined"); } })).rejects.toThrow("User declined");
+  expect(mocks.request).not.toHaveBeenCalled(); expect(mocks.ready).not.toHaveBeenCalled();
+});
+it("explains the actual manual legacy save, close and end-task actions", async () => {
+  mocks.inspect.mockResolvedValue({ kind: "incompatible", status: status(1) });
+  await expect(switchDesktopService(await fixture())).rejects.toMatchObject({ reason: "review-presence", recoveryAction: expect.stringMatching(/Save PDFs and drafts.*browser\/editor tabs.*end bound Codex tasks/u) });
+  expect(mocks.request).not.toHaveBeenCalled();
+});
+it("refuses replacement if drain finishes a recovery format the candidate cannot read", async () => {
+  const options = await fixture();
+  mocks.inspect.mockResolvedValue({ kind: "incompatible", status: status() });
+  mocks.request.mockImplementation(async (_path, request) => {
+    if (request.operation === "shutdown-if-idle") {
+      await writeFile(join(options.paths.recoveryRoot, "late.json"), JSON.stringify({ payload: { schemaVersion: 99 } }));
+      return { kind: "management", protocolVersion: 1, operation: "shutdown-if-idle", result: { status: "accepted" } };
+    }
+    throw Object.assign(new Error("retired"), { code: "ENOENT" });
+  });
+  await expect(switchDesktopService(options)).rejects.toThrow("unsupported format while draining");
+  expect(mocks.ready).not.toHaveBeenCalled();
+  expect(await lstat(options.backup).then(() => true, () => false)).toBe(false);
+});

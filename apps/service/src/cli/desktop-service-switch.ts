@@ -37,6 +37,7 @@ export async function switchDesktopService(options: {
   readonly backup: string;
   readonly receipt: string;
   readonly paths?: DaemonPaths;
+  readonly prepare?: import("../host/upgrade-coordinator.js").CoordinateServiceSwitchOptions["prepare"];
   readonly replaceAndReady?: (lifecycleToken: string) => Promise<void>;
 }): Promise<void> {
   if (![options.resources, options.backup, options.receipt].every(isAbsolute)) throw new Error("Service selection requires absolute paths");
@@ -47,6 +48,7 @@ export async function switchDesktopService(options: {
   try {
     await coordinateServiceSwitch({
       candidate: manifest,
+      ...(options.prepare === undefined ? {} : { prepare: options.prepare }),
       inspect: async () => {
         try { return await inspectDaemonCompatibility(paths.socketPath, manifest.daemonIdentity); }
         catch (error) {
@@ -56,8 +58,8 @@ export async function switchDesktopService(options: {
           throw error;
         }
       },
-      shutdown: async () => {
-        const result = managementShutdownResult(await requestControl(paths.socketPath, { kind: "management", protocolVersion: MANAGEMENT_PROTOCOL_VERSION, operation: "shutdown-if-idle" }));
+      shutdown: async (preparation) => {
+        const result = managementShutdownResult(await requestControl(paths.socketPath, { kind: "management", protocolVersion: MANAGEMENT_PROTOCOL_VERSION, operation: "shutdown-if-idle", ...(preparation === undefined ? {} : { preparation }) }));
         if (result === undefined) throw new DaemonUpgradeRequiredError("malformed");
         return result;
       },

@@ -25,6 +25,8 @@ export class DaemonLifecycleCoordinator {
   #lifecycle: DaemonLifecycleState = "accepting";
   #activeRoutes = 0;
   #attempt = 0;
+  #admissionFrozen = false;
+  #preparedShutdown = false;
 
   constructor(options: DaemonLifecycleCoordinatorOptions) {
     this.#activity = options.activity;
@@ -43,7 +45,25 @@ export class DaemonLifecycleCoordinator {
     };
   }
 
-  enterActivity(): ActivityLease | undefined {
+  admissionAllowed(): boolean { return !this.#admissionFrozen && this.#lifecycle !== "shutdown-committed"; }
+
+  freezeAdmission(): void {
+    if (this.#lifecycle === "shutdown-committed") throw new Error("Service already retired");
+    if (this.#lifecycle === "draining") { this.#lifecycle = "accepting"; this.#attempt += 1; }
+    this.#admissionFrozen = true;
+    this.#preparedShutdown = false;
+  }
+
+  allowPreparedShutdown(): void { this.#preparedShutdown = true; }
+
+  resumeAdmission(): void {
+    this.#admissionFrozen = false;
+    this.#preparedShutdown = false;
+    if (this.#lifecycle === "draining") { this.#lifecycle = "accepting"; this.#attempt += 1; }
+  }
+
+  enterActivity(options: { readonly settlement?: boolean } = {}): ActivityLease | undefined {
+    if (this.#admissionFrozen && !options.settlement) return undefined;
     if (this.#lifecycle === "shutdown-committed") return undefined;
     if (this.#lifecycle === "draining") {
       this.#lifecycle = "accepting";
@@ -60,8 +80,8 @@ export class DaemonLifecycleCoordinator {
     };
   }
 
-  async runActivity<T>(work: () => T | Promise<T>): Promise<T | undefined> {
-    const lease = this.enterActivity();
+  async runActivity<T>(work: () => T | Promise<T>, options: { readonly settlement?: boolean } = {}): Promise<T | undefined> {
+    const lease = this.enterActivity(options);
     if (lease === undefined) return undefined;
     try {
       return await work();
@@ -70,22 +90,31 @@ export class DaemonLifecycleCoordinator {
     }
   }
 
-  async shutdownIfIdle(): Promise<ConditionalShutdownResult> {
-    if (this.#lifecycle === "shutdown-committed") return { status: "accepted" };
+  async shutdownIfIdle(options: { readonly authorize?: () => boolean } = {}): Promise<ConditionalShutdownResult> {
+    const authorized = (): boolean => {
+      try { return options.authorize?.() !== false && (!this.#admissionFrozen || (this.#preparedShutdown && options.authorize?.() === true)); }
+      catch { return false; }
+    };
     const before = this.status().activity;
-    if (this.#lifecycle !== "accepting" || hasNonDrainableActivity(before, this.#activeRoutes)) {
+    if (!authorized()) return { status: "refused", activity: before };
+    if (this.#lifecycle === "shutdown-committed") return { status: "accepted" };
+    if (!authorized() || this.#lifecycle !== "accepting" || hasNonDrainableActivity(before, this.#activeRoutes)) {
       return { status: "refused", activity: before };
     }
 
     this.#lifecycle = "draining";
     const attempt = ++this.#attempt;
-    await this.#drain();
+    try { await this.#drain(); }
+    catch (error) {
+      if (attempt === this.#attempt) { this.#lifecycle = "accepting"; this.#attempt += 1; }
+      throw error;
+    }
     if (this.#lifecycle !== "draining" || attempt !== this.#attempt) {
       return { status: "refused", activity: this.status().activity };
     }
 
     const after = this.status().activity;
-    if (hasAnyActivity(after)) {
+    if (!authorized() || hasAnyActivity(after)) {
       this.#lifecycle = "accepting";
       this.#attempt += 1;
       return { status: "refused", activity: after };

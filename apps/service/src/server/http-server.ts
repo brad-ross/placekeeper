@@ -352,7 +352,14 @@ export async function startHttpServer(
     response.end(bytes);
   };
   const server = createServer(async (request, response) => {
-    const activity = options.lifecycle?.enterActivity();
+    // Existing session commands, save requests and draft protection must settle
+    // while admission is frozen. Only routes creating or reconnecting a review
+    // use the admission boundary.
+    let admissionPath: string;
+    try { admissionPath = new URL(request.url ?? "/", origin).pathname; }
+    catch { send(response, 400, "Invalid request URL"); return; }
+    const admitsReview = /\/(?:bootstrap|exchange|resume|reopen)$/u.test(admissionPath);
+    const activity = options.lifecycle?.enterActivity({ settlement: !admitsReview });
     if (options.lifecycle !== undefined && activity === undefined) {
       send(response, 503, "Placekeeper is restarting; retry shortly.");
       return;
@@ -1060,7 +1067,7 @@ export async function startHttpServer(
   });
 
   server.on("upgrade", (request, socket: Socket, head) => {
-    const activity = options.lifecycle?.enterActivity();
+    const activity = options.lifecycle?.enterActivity({ settlement: true });
     if (options.lifecycle !== undefined && activity === undefined) {
       socket.end("HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
       return;

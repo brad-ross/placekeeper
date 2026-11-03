@@ -1,3 +1,4 @@
+import { UpgradePreparationCoordinator } from "./upgrade-preparation.js";
 import type { NativeTaskLaunchReceipt } from "../desktop/native-task-launches.js";
 import { NativeSyncTex } from "../synctex/native-synctex.js";
 import { EditorNavigation } from "../synctex/editor-navigation.js";
@@ -182,6 +183,7 @@ export class PlacekeeperHost {
   readonly saving: PdfSaveCoordinator;
   readonly exporting: ExportCoordinator;
   readonly lifecycle: DaemonLifecycleCoordinator;
+  readonly upgradePreparation: UpgradePreparationCoordinator;
   readonly browserSources: BrowserSourceStore;
   readonly chromeRuntime: ChromeRuntimeManager;
   readonly electronRuntime: NativeRuntimeManager;
@@ -216,6 +218,7 @@ export class PlacekeeperHost {
     this.saving = saving;
     this.exporting = exporting;
     this.lifecycle = lifecycle;
+    this.upgradePreparation = new UpgradePreparationCoordinator(lifecycle);
     this.browserSources = browserSources;
     this.chromeRuntime = chromeRuntime;
     this.electronRuntime = electronRuntime;
@@ -512,6 +515,7 @@ export class PlacekeeperHost {
       await this.codexRuntime.close();
       this.context.discardAll();
       await this.server.close();
+      this.upgradePreparation.close();
       await this.chromeRuntime.close();
       await this.electronLifecycle.close();
       await this.electronRuntime.close();

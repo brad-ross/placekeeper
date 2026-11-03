@@ -65,10 +65,12 @@ export class PlacekeeperControlProtocolError extends Error {
 export class DaemonUpgradeRequiredError extends Error {
   readonly recoveryAction: string;
 
-  constructor(readonly reason: DaemonUpgradeReason) {
+  constructor(readonly reason: DaemonUpgradeReason, legacyManualAction = false) {
     const presentation = upgradePresentation(reason);
     super(presentation.message);
-    this.recoveryAction = presentation.recoveryAction;
+    this.recoveryAction = legacyManualAction
+      ? "Save PDFs and drafts, close Placekeeper windows and browser/editor tabs, then end bound Codex tasks and retry"
+      : presentation.recoveryAction;
     this.name = "DaemonUpgradeRequiredError";
   }
 }
@@ -77,6 +79,10 @@ function upgradePresentation(reason: DaemonUpgradeReason): {
   readonly message: string;
   readonly recoveryAction: string;
 } {
+  if (reason === "preparation-required") return {
+    message: "Placekeeper has active work that requires consent and durable protection before upgrade.",
+    recoveryAction: "Use the interactive installer to review and approve closing active work, or save and close it manually before retrying",
+  };
   if (reason === "review-presence") return {
     message: "Placekeeper has active reviews. The upgrade was deferred and existing work was preserved.",
     recoveryAction: "Close Placekeeper tabs or windows, then retry",
@@ -116,13 +122,30 @@ async function dispatch(
   signal?: AbortSignal,
   desktopLaunchArgs: readonly string[] = [],
 ): Promise<PlacekeeperControlResponse> {
+  if (request.kind === "upgrade-preparation") {
+    const preparation = host.upgradePreparation;
+    const input = request.request;
+    let result;
+    switch (input.operation) {
+      case "preview":
+        if (input.installedDaemonIdentity !== management.daemonIdentity) return { kind: "error", reason: "invalid-request" };
+        result = preparation.preview(input.installedDaemonIdentity, input.candidate); break;
+      case "begin": result = preparation.begin(input.credentials, input.consent); break;
+      case "status": result = preparation.status(input.credentials); break;
+      case "cancel": result = preparation.cancel(input.credentials); break;
+      case "commit": result = preparation.commit(input.credentials); break;
+      case "participant-poll": result = preparation.poll(input.participant) ?? { phase: "none" as const }; break;
+      case "participant-ack": result = preparation.acknowledge(input.participant, input.credentials, input.acknowledgement); break;
+    }
+    return { kind: "upgrade-preparation", result };
+  }
   if (request.kind === "management") {
     if (request.operation === "shutdown-if-idle") {
       return {
         kind: "management",
         protocolVersion: MANAGEMENT_PROTOCOL_VERSION,
         operation: "shutdown-if-idle",
-        result: await host.lifecycle.shutdownIfIdle(),
+        result: await host.lifecycle.shutdownIfIdle(request.preparation === undefined ? {} : { authorize: () => host.upgradePreparation.status(request.preparation!).phase === "committed" }),
       };
     }
     const live = host.lifecycle.status();
@@ -133,6 +156,7 @@ async function dispatch(
       status: {
         protocolVersion: MANAGEMENT_PROTOCOL_VERSION,
         daemonIdentity: management.daemonIdentity,
+        upgradePreparationVersion: 1,
         ...(management.readinessToken === undefined
           ? {}
           : { readinessToken: management.readinessToken }),
@@ -152,7 +176,7 @@ async function dispatch(
         return { kind: "codex-attestation", status: host.codexRuntime.attestDisplay(request.receipt, request.taskSessionId) ? "accepted" : "denied" };
       }
       return { kind: "codex-app", response: await host.codexRuntime.handle(request.request) };
-    }) ?? { kind: "error", reason: "unavailable" };
+    }, { settlement: request.kind === "codex-attest" || (request.kind === "codex-app" && request.request.authority === "presentation") }) ?? { kind: "error", reason: "unavailable" };
   }
   if (request.kind === "electron-resolve-launch") {
     const target = host.electronRuntime.resolveLaunch(request.launchId);
@@ -182,6 +206,8 @@ async function dispatch(
     return { kind: "chrome-open", response: await host.openChromeBrowserSource(request.request, signal) };
   }
   if (request.kind === "chrome-runtime") {
+    const message = request.message as { readonly type?: unknown };
+    if (["hello", "begin", "claim-owner", "recover"].includes(String(message.type)) && !host.lifecycle.admissionAllowed()) return { kind: "error", reason: "unavailable" };
     return { kind: "chrome-runtime", messages: await host.chromeRuntime.handle(request.portId, request.message) };
   }
   if (request.kind === "chrome-runtime-detach") {
@@ -198,6 +224,7 @@ async function dispatch(
     const message = parseElectronReviewHelperMessage(request.message)!;
     const isAdmission = message.type === "admit" || message.type === "admit-link" || message.type === "admit-launch";
     const alreadyOwned = lifecycle.ownsHelper(request.appInstanceId, request.helperId);
+    if (isAdmission && !host.lifecycle.admissionAllowed()) return { kind: "error", reason: "unavailable" };
     const attached = alreadyOwned || (isAdmission
       && lifecycle.attachHelper(request.appInstanceId, request.helperId));
     if (!attached) {
@@ -384,7 +411,7 @@ async function dispatch(
           },
         }
       : { kind: "evidence", result };
-    });
+    }, { settlement: request.kind !== "claim-binding" && request.kind !== "source-begin" });
   } catch (error) {
     if (error instanceof SourceWorkflowUnavailableError) {
       return { kind: "source-workflow-unavailable", reason: error.reason };
@@ -643,6 +670,7 @@ function managementStatus(response: PlacekeeperControlResponse): DaemonManagemen
     ...(response.status.readinessToken === undefined
       ? {}
       : { readinessToken: response.status.readinessToken }),
+    ...(response.status.upgradePreparationVersion === 1 ? { upgradePreparationVersion: 1 as const } : {}),
     lifecycle: response.status.lifecycle as DaemonLifecycleState,
     activity: {
       reviewPresence: response.status.activity.reviewPresence,

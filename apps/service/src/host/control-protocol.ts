@@ -1,3 +1,4 @@
+import { isUpgradePreparationRequest, type UpgradePreparationRequest, type UpgradePreparationResult, type UpgradeAttemptCredentials } from "./upgrade-preparation.js";
 import { isEditorPath, parseEditorControlRequest, type EditorControlRequest, type EditorControlResponse } from "../../../../packages/core/src/editor-navigation-protocol.js";
 import {
   parseCodexAppRequest,
@@ -39,6 +40,7 @@ export interface DaemonManagementStatus {
   readonly protocolVersion: typeof MANAGEMENT_PROTOCOL_VERSION;
   readonly daemonIdentity: string;
   readonly readinessToken?: string;
+  readonly upgradePreparationVersion?: 1;
   readonly lifecycle: DaemonLifecycleState;
   readonly activity: DaemonAggregateActivity;
 }
@@ -50,7 +52,7 @@ export type DaemonUninspectableReason =
   | "early-close";
 
 export type DaemonUpgradeReason = DaemonUninspectableReason | "incompatible" |
-  "review-presence" | "codex-task" | "transient-busy";
+  "review-presence" | "codex-task" | "transient-busy" | "preparation-required";
 
 export type DaemonCompatibilityResult =
   | { readonly kind: "exact"; readonly status: DaemonManagementStatus }
@@ -58,6 +60,7 @@ export type DaemonCompatibilityResult =
   | { readonly kind: "uninspectable"; readonly reason: DaemonUninspectableReason };
 
 export type PlacekeeperControlRequest =
+  | { readonly kind: "upgrade-preparation"; readonly request: UpgradePreparationRequest }
   | { readonly kind: "electron-resolve-launch"; readonly launchId: string }
   | { readonly kind: "electron-cancel-launch"; readonly launchId: string }
   | { readonly kind: "editor-control"; readonly request: EditorControlRequest; readonly installation?: { readonly identity: string; readonly resources: string } }
@@ -73,6 +76,7 @@ export type PlacekeeperControlRequest =
       readonly kind: "management";
       readonly protocolVersion: typeof MANAGEMENT_PROTOCOL_VERSION;
       readonly operation: "shutdown-if-idle";
+      readonly preparation?: UpgradeAttemptCredentials;
     }
   | { readonly kind: "launch"; readonly request: LaunchRequest }
   | { readonly kind: "chrome-open"; readonly request: ChromeBrowserSourceOpenRequest }
@@ -168,6 +172,7 @@ export type PlacekeeperControlRequest =
     };
 
 export type PlacekeeperControlResponse =
+  | { readonly kind: "upgrade-preparation"; readonly result: UpgradePreparationResult }
   | { readonly kind: "electron-resolve-launch"; readonly target?: { readonly sourcePath: string; readonly sessionId: string; readonly documentGeneration: number } }
   | { readonly kind: "electron-cancel-launch"; readonly canceled: boolean }
   | { readonly kind: "editor-control"; readonly response: EditorControlResponse }
@@ -258,6 +263,7 @@ function isObject(value: unknown): value is Record<string, unknown> {
 
 export function isControlRequest(value: unknown): value is PlacekeeperControlRequest {
   if (!isObject(value) || typeof value.kind !== "string") return false;
+  if (value.kind === "upgrade-preparation") return Object.keys(value).length === 2 && isUpgradePreparationRequest(value.request);
   if (value.kind === "editor-control") return Object.keys(value).length === (value.installation === undefined ? 2 : 3) && parseEditorControlRequest(value.request) !== undefined
     && (value.installation === undefined || (isObject(value.installation) && Object.keys(value.installation).length === 2
       && typeof value.installation.identity === "string" && /^[a-f0-9]{64}$/u.test(value.installation.identity) && isEditorPath(value.installation.resources)));
@@ -278,7 +284,7 @@ export function isControlRequest(value: unknown): value is PlacekeeperControlReq
   if (value.kind === "management") {
     return value.protocolVersion === MANAGEMENT_PROTOCOL_VERSION &&
       (value.operation === "status" ||
-        value.operation === "shutdown-if-idle");
+        (value.operation === "shutdown-if-idle" && (value.preparation === undefined || isUpgradePreparationRequest({ operation: "status", credentials: value.preparation }))));
   }
   if (value.kind === "electron-resolve-launch" || value.kind === "electron-cancel-launch") return typeof value.launchId === "string" && /^[A-Za-z0-9_-]{43}$/u.test(value.launchId);
   if (value.kind === "launch") return isObject(value.request) && (value.request.desktop === undefined || value.request.desktop === "electron");

@@ -253,7 +253,7 @@ async function coordinateLifecycleMutation(
         try {
           return await requestIdleShutdown(paths.socketPath);
         } catch (error) {
-          if (daemonUnavailable(error)) return { status: "accepted" };
+          if (daemonUnavailable(error)) throw new DaemonUpgradeRequiredError("early-close");
           if (error instanceof PlacekeeperControlTimeoutError) {
             throw new DaemonUpgradeRequiredError("timeout");
           }

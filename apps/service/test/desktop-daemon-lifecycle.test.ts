@@ -36,7 +36,7 @@ describe("explicit service switching", () => {
       waitForRetirement: async () => { events.push("retired"); },
       replaceAndReady: async () => { events.push("ready"); },
     });
-    expect(events).toEqual(["compatible", "backup", "ready"]);
+    expect(events).toEqual(["compatible", "compatible", "backup", "ready"]);
   });
 });
 
@@ -69,12 +69,12 @@ it("does not start the candidate without proven incumbent retirement", async () 
 it("does not start the candidate when backup verification fails", async () => {
   const events: string[] = []; const options = fixture(events);
   await expect(coordinateServiceSwitch({ ...options, backupAndVerify: async () => { throw new Error("bad backup"); } })).rejects.toThrow("bad backup");
-  expect(events).toEqual(["compatible", "shutdown", "retired"]);
+  expect(events).toEqual(["compatible", "shutdown", "retired", "compatible"]);
 });
 it("failed readiness propagates after retirement and backup without launching another writer", async () => {
   const events: string[] = []; const options = fixture(events);
   await expect(coordinateServiceSwitch({ ...options, replaceAndReady: async () => { events.push("candidate"); throw new Error("not ready"); } })).rejects.toThrow("not ready");
-  expect(events).toEqual(["compatible", "shutdown", "retired", "backup", "candidate"]);
+  expect(events).toEqual(["compatible", "shutdown", "retired", "compatible", "backup", "candidate"]);
 });
 it("copies and verifies nested recovery without altering canonical bytes", async () => {
   const root = await mkdtemp(join(tmpdir(), "pk-backup-"));
