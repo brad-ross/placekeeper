@@ -186,7 +186,7 @@ describe("macOS distribution manifests", () => {
     expect(plist).toContain("<key>CFBundleIconFile</key><string>Placekeeper</string>");
     expect(plist).toContain("<key>CFBundleURLTypes</key><array><dict>");
     expect(plist).toContain("<key>CFBundleURLName</key><string>local.placekeeper.review-link</string>");
-    expect(plist).toContain("<key>CFBundleURLSchemes</key><array><string>placekeeper</string></array>");
+    expect(plist).toContain("<key>CFBundleURLSchemes</key><array><string>placekeeper</string><string>placekeeper-navigation</string></array>");
     expect(infoPlistStrings(manifest)).toBe(
       '"CFBundleDisplayName" = "Placekeeper";\n"CFBundleName" = "Placekeeper";\n',
     );
@@ -303,7 +303,7 @@ describe("macOS distribution manifests", () => {
       artifactSha256: {
         runtime: "423428687dab0b6049a86d85f879df79f2fee251322d53ad314ae1effd616e3b",
         report: "84bda58674d8174a0a94bbaed846ce23628cbf62fcab018cef14b182d38db797",
-        thirdPartyNotices: "e93d61075ce6ff0452d9c841030d8a7125030182e324cd76ca7f640fcb244bdb",
+        thirdPartyNotices: "469845e0081b04e67f86db343a8a69f52e8488cdcd2b5da7708aec78a8647104",
       },
       productionWebJavaScriptBytes: 3_200_000,
     });
@@ -916,6 +916,32 @@ describe("macOS distribution manifests", () => {
     } finally {
       await rm(root, { recursive: true, force: true });
     }
+  });
+
+  it("ships Zed setup with its standalone JSONC runtime and license under artifact identity", async () => {
+    const root = await mkdtemp(join(tmpdir(), "placekeeper-zed-package-"));
+    const contents = join(root, "Contents");
+    const installer = join(contents, "Resources/installer");
+    const service = join(contents, "Resources/service");
+    const web = join(contents, "Resources/web");
+    try {
+      await Promise.all([mkdir(installer, { recursive: true }), mkdir(service, { recursive: true }), mkdir(web, { recursive: true })]);
+      await cp(resolve("packaging/macos/setup-zed.mjs"), join(installer, "setup-zed.mjs"));
+      await cp(resolve("node_modules/jsonc-parser"), join(installer, "node_modules/jsonc-parser"), { recursive: true, dereference: true });
+      const license = join(installer, "node_modules/jsonc-parser/LICENSE.md");
+      expect(await readFile(license, "utf8")).toContain("MIT License");
+      const { stdout } = await execFileAsync(process.execPath, ["--input-type=module", "-e",
+        `import {configureZed} from ${JSON.stringify(new URL(`file://${join(installer, "setup-zed.mjs")}`).href)}; console.log(configureZed('{}','[]',{launcher:'/Applications/Placekeeper.app/Contents/MacOS/placekeeper',mode:'manual'}).tasks);`,
+      ], { cwd: root, env: { PATH: "/usr/bin:/bin" } });
+      expect(JSON.parse(stdout)[0].label).toBe("Placekeeper: Forward SyncTeX");
+      const first = await computePackagedBuildIdentity({ contentsRoot: contents, serviceRoot: service, webRoot: web });
+      await writeFile(license, "changed runtime distribution");
+      const changed = await computePackagedBuildIdentity({ contentsRoot: contents, serviceRoot: service, webRoot: web });
+      expect(changed.installArtifactIdentity).not.toBe(first.installArtifactIdentity);
+      expect(changed.daemonIdentity).toBe(first.daemonIdentity);
+      const build = await readFile(resolve("packaging/macos/build-app.ts"), "utf8");
+      expect(build).toContain('realpath(resolve(repoRoot, "node_modules/jsonc-parser"))');
+    } finally { await rm(root, { recursive: true, force: true }); }
   });
 
   it("requires content-free installed writer evidence matching the pinned runtime", () => {

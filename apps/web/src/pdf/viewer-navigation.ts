@@ -71,12 +71,28 @@ export interface PdfViewportQuery {
 /** Read-only semantic visibility of a destination in the viewer's usable viewport. */
 export type PdfTargetVisibility = 'visible' | 'outside' | 'unavailable';
 
+export type PdfFitMode = 'page' | 'width' | 'text';
+
+export interface PdfFitState {
+  readonly selectedMode: PdfFitMode;
+  readonly effectiveMode: PdfFitMode;
+  readonly active: boolean;
+  readonly pending: boolean;
+  readonly fallback: boolean;
+}
+
 export interface ViewerNavigationControls {
   captureLocation(mode?: PdfLocationCaptureMode): PdfViewerLocation | null;
   /** Clamps a neutral location to the current document without moving the viewer. */
   clampLocation(location: PdfViewerLocation): PdfViewerLocation | null;
   applyLocation(location: PdfViewerLocation, viewport?: PdfViewportQuery): Promise<boolean>;
   fitToWidth(waitForSettledGeometry?: WaitForSettledViewerGeometry): Promise<boolean>;
+  fitToMode?(mode: PdfFitMode, waitForSettledGeometry?: WaitForSettledViewerGeometry): Promise<boolean>;
+  refit?(waitForSettledGeometry?: WaitForSettledViewerGeometry): Promise<boolean>;
+  getFitState?(): PdfFitState;
+  subscribeFitState?(listener: () => void): () => void;
+  /** Manual intent releases fit ownership even when the requested scale is unchanged. */
+  manualZoom?(): void;
   fitToWidthReady(): boolean;
   isFitToWidth?(): boolean;
   /** True while the scale from the last successful Fit Width is still current, so the fit should follow resizes. */

@@ -16,6 +16,7 @@ import {
 } from 'react';
 
 import type { ReviewShellAuthoringModel } from '../review/authoring-model.js';
+import type { PdfFitMode, PdfFitState } from '../pdf/viewer-navigation.js';
 export type { ReviewShellAuthoringModel } from '../review/authoring-model.js';
 
 import { isVisibleFocusTarget } from '../review/focus-target.js';
@@ -452,6 +453,19 @@ export function shouldShowRightWorkspaceRail(input: {
 export function ReviewShell(props: ReviewShellProps) {
   const shellRef = useRef<HTMLElement>(null);
   const [horizontalScrollLocked, setHorizontalScrollLocked] = useState(false);
+  const [fitState, setFitState] = useState<PdfFitState>();
+  useEffect(() => {
+    const navigation = props.viewer.viewerNavigation;
+    const refresh = () => setFitState(navigation?.getFitState?.());
+    refresh();
+    return navigation?.subscribeFitState?.(refresh);
+  }, [props.viewer.viewerNavigation]);
+  useEffect(() => props.viewer.viewerControls?.subscribe((event) => {
+    if (event.type === 'zoom' && event.oldZoom !== undefined && event.newZoom !== undefined
+      && event.oldZoom !== event.newZoom && event.surface?.kind !== 'reference') {
+      setHorizontalScrollLocked(false);
+    }
+  }), [props.viewer.viewerControls]);
   const [localReferenceLayout, dispatchLocalReferenceLayout] = useReducer(
     reduceReferenceWorkspaceLayout,
     undefined,
@@ -689,7 +703,8 @@ export function ReviewShell(props: ReviewShellProps) {
         ? nextLayout.narrowOpen : nextLayout.rightWorkspaceOpen;
       if (willOpen) {
         // Read the closed reading frame before the disclosure changes its width.
-        openingWasFitToWidthRef.current = props.viewer.viewerNavigation?.isFitToWidth?.() ?? false;
+        openingWasFitToWidthRef.current = props.viewer.viewerNavigation?.getFitState?.().active
+          ?? props.viewer.viewerNavigation?.isFitToWidth?.() ?? false;
       }
     }
 
@@ -846,7 +861,7 @@ export function ReviewShell(props: ReviewShellProps) {
     // Only an already-fitted page follows the new width on opening.
     // Manual zooms, docking, and closing preserve the current scale.
     workspaceFraming.markUserIntent(undefined, { captureSettledPosition: false });
-    void navigation.fitToWidth(async (signal) => {
+    void (navigation.refit ?? navigation.fitToWidth)(async (signal) => {
       const geometry = await workspaceFraming.waitForSettledGeometry(signal);
       if (!current || geometry === null) return null;
       return { revision: geometry.revision, isCurrent: () => current && geometry.isCurrent() };
@@ -1554,6 +1569,15 @@ export function ReviewShell(props: ReviewShellProps) {
       ?.fitToWidth(workspaceFraming.waitForSettledGeometry)
       .then(() => undefined) ?? Promise.resolve();
   }, [props.viewer.viewerNavigation, workspaceFraming.markUserIntent, workspaceFraming.waitForSettledGeometry]);
+  const fitModeCommand = useCallback(async (mode: PdfFitMode) => {
+    workspaceFraming.markUserIntent(undefined, { captureSettledPosition: false });
+    await props.viewer.viewerNavigation?.fitToMode?.(mode, workspaceFraming.waitForSettledGeometry);
+  }, [props.viewer.viewerNavigation, workspaceFraming.markUserIntent, workspaceFraming.waitForSettledGeometry]);
+  const refitCommand = useCallback(() => {
+    workspaceFraming.markUserIntent(undefined, { captureSettledPosition: false });
+    const navigation = props.viewer.viewerNavigation;
+    return navigation ? (navigation.refit ?? navigation.fitToWidth)(workspaceFraming.waitForSettledGeometry) : Promise.resolve(false);
+  }, [props.viewer.viewerNavigation, workspaceFraming.markUserIntent, workspaceFraming.waitForSettledGeometry]);
   useEffect(() => {
     const request = props.viewer.initialFitRequest;
     if (request === undefined) return;
@@ -1566,31 +1590,33 @@ export function ReviewShell(props: ReviewShellProps) {
   useEffect(() => {
     // Demo selectors control the layout from outside the shell. Capture the
     // current fit before that layout changes, just as a workspace disclosure does.
-    if (!workspacePresentation?.open || !props.viewer.viewerNavigation?.isFitToWidth?.()) return;
-    const frame = requestAnimationFrame(() => { void fitWidthCommand(); });
+    if (!workspacePresentation?.open || !(props.viewer.viewerNavigation?.getFitState?.().active ?? props.viewer.viewerNavigation?.isFitToWidth?.())) return;
+    const frame = requestAnimationFrame(() => { void refitCommand(); });
     return () => cancelAnimationFrame(frame);
-  }, [workspacePresentation?.mode, workspacePresentation?.open, workspacePresentation?.referenceDock, fitWidthCommand]);
+  }, [workspacePresentation?.mode, workspacePresentation?.open, workspacePresentation?.referenceDock, refitCommand]);
   // A docked right surface overlays the stage, so its width also sets the
-  // reading width. Opening or closing it fits through the disclosure path.
+  // reading width. Opening fits through the disclosure path.
   const stageWidth = workspaceFraming.stageSize.width;
+  const stageHeight = workspaceFraming.stageSize.height;
+  const bottomDockHeight = referenceSurfaceOpen && referenceLayout.referenceDock === 'bottom' ? effectiveReferenceLayout.bottomHeight : 0;
   const dockedRightWidth = effectiveReferenceLayout.kind !== 'narrow-unified' && rightSurfaceOpen
     ? effectiveReferenceLayout.rightWidth
     : null;
-  const fittedReadingFrameRef = useRef<{ stage: number; dock: number | null } | null>(null);
+  const fittedReadingFrameRef = useRef<{ stage: number; height: number; bottom: number; dock: number | null } | null>(null);
   useEffect(() => {
     // A page still at its last Fit Width scale follows window resizes and
     // docked-surface resizes. Any manual or destination zoom since that fit
     // keeps its scale instead.
     const previous = fittedReadingFrameRef.current;
-    fittedReadingFrameRef.current = { stage: stageWidth, dock: dockedRightWidth };
+    fittedReadingFrameRef.current = { stage: stageWidth, height: stageHeight, bottom: bottomDockHeight, dock: dockedRightWidth };
     if (previous === null || stageWidth === 0) return;
     const stageResized = Math.abs(stageWidth - previous.stage) >= 1;
-    const dockResized = dockedRightWidth !== null
-      && previous.dock !== null
-      && Math.abs(dockedRightWidth - previous.dock) >= 1;
-    if (!stageResized && !dockResized) return;
+    const heightResized = Math.abs(stageHeight - previous.height) >= 1 || Math.abs(bottomDockHeight - previous.bottom) >= 1;
+    const dockResized = previous.dock !== null
+      && Math.abs((dockedRightWidth ?? 0) - previous.dock) >= 1;
+    if (!stageResized && !dockResized && !heightResized) return;
     const navigation = props.viewer.viewerNavigation;
-    const follows = () => navigation?.followsFitWidth?.() ?? false;
+    const follows = () => navigation?.getFitState?.().active || navigation?.getFitState?.().pending || navigation?.followsFitWidth?.() || false;
     if (!follows()) return;
     // Fitting cancels pending navigation, so wait out a link jump in flight.
     let timer: ReturnType<typeof setTimeout>;
@@ -1598,12 +1624,12 @@ export function ReviewShell(props: ReviewShellProps) {
       if (navigation?.navigationPending?.()) {
         timer = setTimeout(refit, RESIZE_REFIT_DELAY_MS);
       } else if (follows()) {
-        void fitWidthCommand();
+        void refitCommand();
       }
     };
     timer = setTimeout(refit, RESIZE_REFIT_DELAY_MS);
     return () => clearTimeout(timer);
-  }, [stageWidth, dockedRightWidth, props.viewer.viewerNavigation, fitWidthCommand]);
+  }, [stageWidth, stageHeight, bottomDockHeight, dockedRightWidth, props.viewer.viewerNavigation, refitCommand]);
   const beforeViewerAction = async () => {
     await props.viewer.viewerNavigation?.cancelPendingNavigation();
     commitMainFramingPosition();
@@ -2004,6 +2030,9 @@ export function ReviewShell(props: ReviewShellProps) {
         viewerState={props.viewer.viewerState ?? unavailableViewerControls()}
         fitWidthReady={props.viewer.viewerNavigation?.fitToWidthReady() ?? false}
         fitWidthCurrent={overlayFrame.fitWidthCurrent}
+        {...(fitState === undefined ? {} : { fitState })}
+        {...(props.viewer.viewerNavigation?.fitToMode === undefined ? {} : { onFitMode: fitModeCommand })}
+        {...(props.viewer.viewerNavigation?.manualZoom === undefined ? {} : { onManualZoom: props.viewer.viewerNavigation.manualZoom })}
         horizontalScrollAvailable={overlayFrame.horizontalScrollAvailable}
         horizontalScrollLocked={horizontalScrollLocked}
         onToggleHorizontalScrollLock={() => setHorizontalScrollLocked((locked) => !locked)}

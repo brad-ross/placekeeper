@@ -10,6 +10,7 @@ final class PlacekeeperAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private struct RecoveryAttempt {
+        let intent: NativeOpenIntent
         let controller: RecoveryViewController
         let source: URL
         let packagedRoot: URL
@@ -25,6 +26,7 @@ final class PlacekeeperAppDelegate: NSObject, NSApplicationDelegate {
     private var recoveryAttempts: [String: RecoveryAttempt] = [:]
     private var fallbackWindows: [NSWindow] = []
     private var launchCoordinator = LaunchCoordinator()
+    private var navigationTickets: [String] = []
     private var windowRegistry = DocumentWindowRegistry()
     private let restorationStore = WindowRestorationStore()
     private let appZoomStore: AppZoomStore
@@ -118,6 +120,7 @@ final class PlacekeeperAppDelegate: NSObject, NSApplicationDelegate {
             "processId": Int(ProcessInfo.processInfo.processIdentifier),
             "startIdentity": startIdentity,
             "buildIdentity": buildIdentity,
+            "installationIdentity": helperEnvironment["PLACEKEEPER_INSTALL_ARTIFACT_IDENTITY"] ?? "development",
         ], completion: { [weak self] reply in
             Task { @MainActor in
                 guard let self else { return }
@@ -130,7 +133,9 @@ final class PlacekeeperAppDelegate: NSObject, NSApplicationDelegate {
                 self.diagnostic("lifecycle-registered")
                 let launches = self.launchCoordinator.markReady()
                 launches.forEach(self.open)
-                if launches.isEmpty, self.launchCoordinator.pending.isEmpty { self.showOpenPanel() }
+                let hasNavigation = !self.navigationTickets.isEmpty
+                self.redeemNavigationTickets()
+                if !hasNavigation, launches.isEmpty, self.launchCoordinator.pending.isEmpty { self.showOpenPanel() }
             }
         }) else {
             diagnostic("lifecycle-registration-write-failed")
@@ -177,8 +182,50 @@ final class PlacekeeperAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func enqueueLaunchURLs(_ urls: [URL]) {
+        navigationTickets.append(contentsOf: urls.compactMap(NativeOpenIntent.navigationTicket).prefix(64 - min(64, navigationTickets.count)))
+        redeemNavigationTickets()
         let intents = urls.compactMap(NativeOpenIntent.parse)
         launchCoordinator.enqueue(intents).forEach(open)
+    }
+
+    private func redeemNavigationTickets() {
+        guard lifecycleRegistered, let lifecycleControl else { return }
+        let tickets = navigationTickets
+        navigationTickets.removeAll()
+        for ticket in tickets {
+            _ = lifecycleControl.request(type: "redeem-navigation", fields: ["ticket": ticket]) { [weak self] reply in
+                Task { @MainActor in
+                    guard let self else { return }
+                    if case let .navigation(path, handle) = reply {
+                        let intent = NativeOpenIntent(sourceURL: URL(fileURLWithPath: path), kind: .navigation(handle))
+                        self.launchCoordinator.enqueue([intent]).forEach(self.open)
+                    } else { self.presentNavigationFailure() }
+                }
+            }
+        }
+    }
+
+    private func presentNavigationFailure() {
+        let alert = NSAlert()
+        alert.messageText = "Source navigation is no longer available"
+        alert.informativeText = "The request expired or was replaced by newer navigation. Run forward search from your editor again."
+        alert.runModal()
+    }
+
+    private func bindNavigation(_ intent: NativeOpenIntent, windowID: String, completion: @escaping () -> Void) {
+        guard case let .navigation(handle) = intent.kind else { completion(); return }
+        guard let helperID = helperDetachLedger.helperID(windowID: windowID), let lifecycleControl else {
+            presentNavigationFailure()
+            completion()
+            return
+        }
+        let sent = lifecycleControl.request(type: "bind-navigation", fields: ["helperId": helperID, "navigationHandle": handle]) { [weak self] reply in
+            Task { @MainActor in
+                if reply != .acknowledged { self?.presentNavigationFailure() }
+                completion()
+            }
+        }
+        if !sent { presentNavigationFailure(); completion() }
     }
 
     private func open(_ intent: NativeOpenIntent) {
@@ -257,6 +304,8 @@ final class PlacekeeperAppDelegate: NSObject, NSApplicationDelegate {
         switch intent.kind {
         case .document:
             request = ("admit", ["sourcePath": canonicalSource.path])
+        case let .navigation(handle):
+            request = ("admit", ["sourcePath": canonicalSource.path, "navigationHandle": handle])
         case let .placekeeperLink(link):
             request = ("admit-link", ["link": link, "confirmed": true])
         }
@@ -312,9 +361,11 @@ final class PlacekeeperAppDelegate: NSObject, NSApplicationDelegate {
             if let existingWindowID = windowRegistry.matchingWindow(
                 canonicalReviewID: admission.projection.sessionID
             ), let existing = controllers.first(where: { $0.windowID == existingWindowID }) {
-                releaseCandidate(helper, windowID: windowID)
-                windowRegistry.noteKey(windowID: existingWindowID)
-                existing.focus()
+                bindNavigation(intent, windowID: existingWindowID) { [weak self] in
+                    self?.releaseCandidate(helper, windowID: windowID)
+                    self?.windowRegistry.noteKey(windowID: existingWindowID)
+                    existing.focus()
+                }
                 return
             }
             installDocumentWindow(
@@ -327,6 +378,7 @@ final class PlacekeeperAppDelegate: NSObject, NSApplicationDelegate {
                 admission: admission,
                 packagedAssets: packagedAssets
             )
+            bindNavigation(intent, windowID: windowID) {}
         case let .recoveryOffered(offerID, offerExpiresAt):
             let controller = RecoveryViewController(
                 windowID: windowID,
@@ -341,6 +393,7 @@ final class PlacekeeperAppDelegate: NSObject, NSApplicationDelegate {
                 }
             )
             recoveryAttempts[windowID] = .init(
+                intent: intent,
                 controller: controller,
                 source: source,
                 packagedRoot: packagedRoot,
@@ -387,6 +440,14 @@ final class PlacekeeperAppDelegate: NSObject, NSApplicationDelegate {
                 }
                 recovery.controller.resolve()
                 self.recoveryAttempts.removeValue(forKey: windowID)
+                if let existingWindowID = self.windowRegistry.matchingWindow(canonicalReviewID: admission.projection.sessionID),
+                   let existing = self.controllers.first(where: { $0.windowID == existingWindowID }) {
+                    self.bindNavigation(recovery.intent, windowID: existingWindowID) {
+                        self.releaseCandidate(recovery.helper, windowID: windowID)
+                        existing.focus()
+                    }
+                    return
+                }
                 self.installDocumentWindow(
                     windowID: windowID,
                     source: recovery.source,
@@ -397,6 +458,7 @@ final class PlacekeeperAppDelegate: NSObject, NSApplicationDelegate {
                     admission: admission,
                     packagedAssets: packagedAssets
                 )
+                self.bindNavigation(recovery.intent, windowID: windowID) {}
             }
         }) != nil else {
             recovery.controller.failDecision()
@@ -458,11 +520,72 @@ final class PlacekeeperAppDelegate: NSObject, NSApplicationDelegate {
             presentCatastrophicFallback(documentName: source.lastPathComponent, sourceURL: source)
             return
         }
+        controller.onSourceSetup = { [weak self] completion in
+            guard let self else { completion(false); return }
+            self.configureSourceNavigation(windowID: windowID, completion: completion)
+        }
         controllers.append(controller)
         persistRestorableWindows()
         diagnostic("document-window-starting")
         updateActivity()
         controller.start()
+    }
+
+    private var configuringSource = false
+    private func configureSourceNavigation(windowID: String, completion: @escaping (Bool) -> Void) {
+        guard !configuringSource, let lifecycleControl,
+              let helperID = helperDetachLedger.helperID(windowID: windowID) else { completion(false); return }
+        configuringSource = true
+        let finish: (Bool) -> Void = { [weak self] success in self?.configuringSource = false; completion(success) }
+        guard lifecycleControl.request(type: "editor-profiles", completion: { [weak self] reply in
+            Task { @MainActor in
+                guard let self, self.helperDetachLedger.helperID(windowID: windowID) == helperID,
+                      case let .editorProfiles(profiles)? = reply else { finish(false); return }
+                let alert = NSAlert()
+                alert.messageText = "Configure Source Navigation"
+                if profiles.isEmpty {
+                    alert.informativeText = "Add an editor profile using Placekeeper’s installed editor command, then choose Configure Source Navigation again. See the editor setup guide for your editor."
+                    alert.addButton(withTitle: "OK")
+                    alert.runModal()
+                    finish(false)
+                    return
+                }
+                alert.informativeText = "Choose the editor to open LaTeX source. For Neovim, enter its listening socket path. Next, select the folder containing your source files."
+                alert.addButton(withTitle: "Choose Source Folder…")
+                alert.addButton(withTitle: "Cancel")
+                let accessory = NSView(frame: NSRect(x: 0, y: 0, width: 360, height: 66))
+                let editors = NSPopUpButton(frame: NSRect(x: 0, y: 36, width: 360, height: 26))
+                editors.addItems(withTitles: profiles.map(\.name))
+                let socket = NSTextField(frame: NSRect(x: 0, y: 0, width: 360, height: 24))
+                socket.placeholderString = "Neovim socket path (Neovim only)"
+                accessory.addSubview(editors)
+                accessory.addSubview(socket)
+                alert.accessoryView = accessory
+                guard alert.runModal() == .alertFirstButtonReturn else { finish(false); return }
+                let profile = profiles[editors.indexOfSelectedItem]
+                let panel = NSOpenPanel()
+                panel.title = "Choose LaTeX Source Folder"
+                panel.canChooseFiles = false
+                panel.canChooseDirectories = true
+                panel.allowsMultipleSelection = false
+                guard panel.runModal() == .OK, let root = panel.url,
+                      self.helperDetachLedger.helperID(windowID: windowID) == helperID else { finish(false); return }
+                var fields: [String: Any] = ["helperId": helperID, "profile": profile.name, "sourceRoot": root.path]
+                if profile.kind == "neovim" { fields["socket"] = socket.stringValue }
+                if !lifecycleControl.request(type: "associate-editor", fields: fields, completion: { reply in
+                    Task { @MainActor in
+                        let success = reply == .acknowledged
+                        if !success {
+                            let error = NSAlert()
+                            error.messageText = "Source navigation could not be configured"
+                            error.informativeText = "Check that the editor is available and the source folder and Neovim socket, if used, still exist."
+                            error.runModal()
+                        }
+                        finish(success)
+                    }
+                }) { finish(false) }
+            }
+        }) else { finish(false); return }
     }
 
     private func finishLaunch(_ intent: NativeOpenIntent) {
@@ -668,11 +791,55 @@ final class PlacekeeperAppDelegate: NSObject, NSApplicationDelegate {
     }
 }
 
+// Run separately from document windows so Texlab can await a native choice
+// without opening a PDF or joining the normal application lifecycle.
+@MainActor
+private final class SourceSelectionDelegate: NSObject, NSApplicationDelegate {
+    let folder: Bool
+    let start: String
+
+    init(folder: Bool, start: String) {
+        self.folder = folder
+        self.start = start
+    }
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        let panel = NSOpenPanel()
+        panel.title = folder ? "Allow Source Navigation" : "Choose Compiled PDF"
+        panel.message = folder
+            ? "Allow Placekeeper to return to source files in this project folder."
+            : "Choose the compiled PDF for this source file."
+        panel.prompt = folder ? "Allow Folder" : "Choose PDF"
+        panel.canChooseDirectories = folder
+        panel.canChooseFiles = !folder
+        panel.allowsMultipleSelection = false
+        panel.directoryURL = URL(fileURLWithPath: start, isDirectory: true)
+        if !folder { panel.allowedContentTypes = [.pdf] }
+        NSApplication.shared.activate(ignoringOtherApps: true)
+        panel.makeKeyAndOrderFront(nil)
+        guard panel.runModal() == .OK, let selected = panel.url else { exit(2) }
+        FileHandle.standardOutput.write(Data((selected.path + "\n").utf8))
+        exit(0)
+    }
+}
+
 @main
 @MainActor
 struct PlacekeeperMac {
     static func main() {
         let application = NSApplication.shared
+        if let mode = CommandLine.arguments.dropFirst().first,
+           ["--zed-choose-folder", "--zed-choose-pdf", "--choose-source-folder", "--choose-source-pdf"].contains(mode) {
+            guard CommandLine.arguments.count == 3,
+                  CommandLine.arguments[2].hasPrefix("/") else { exit(64) }
+            let delegate = SourceSelectionDelegate(folder: mode == "--zed-choose-folder" || mode == "--choose-source-folder", start: CommandLine.arguments[2])
+            application.delegate = delegate
+            application.setActivationPolicy(.regular)
+            application.activate(ignoringOtherApps: true)
+            application.run()
+            withExtendedLifetime(delegate) {}
+            return
+        }
         let delegate = PlacekeeperAppDelegate()
         application.delegate = delegate
         application.setActivationPolicy(.regular)

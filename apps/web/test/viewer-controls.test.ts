@@ -169,7 +169,7 @@ describe('viewer controls adapter', () => {
   });
 
   it('forwards only supported whole zoom percentages and keeps zoom state event-derived', () => {
-    let onZoom: ((event: { documentId: string; newZoom: number }) => void) | undefined;
+    let onZoom: ((event: { documentId: string; oldZoom: number; newZoom: number }) => void) | undefined;
     const zoom = {
       getState: () => ({ zoomLevel: 'fit-width', currentZoomLevel: 1.1 }),
       zoomOut: vi.fn(),
@@ -189,7 +189,11 @@ describe('viewer controls adapter', () => {
         : undefined,
     } as unknown as PluginRegistry;
 
-    const controls = createViewerControls(registry);
+    const onManualZoom = vi.fn();
+    const controls = createViewerControls(registry, { onManualZoom });
+    const listener = vi.fn();
+    controls.subscribe(listener);
+    listener.mockClear();
     expect(controls.snapshot()).toMatchObject({ zoomReady: true, zoomPercent: 110 });
 
     for (const invalidZoom of [
@@ -205,19 +209,31 @@ describe('viewer controls adapter', () => {
       controls.zoomToPercent(invalidZoom);
     }
     expect(zoom.requestZoom).not.toHaveBeenCalled();
+    expect(onManualZoom).not.toHaveBeenCalled();
 
     controls.zoomToPercent(20);
     controls.zoomToPercent(125);
     controls.zoomToPercent(6000);
     expect(zoom.requestZoom.mock.calls).toEqual([[0.2], [1.25], [60]]);
     expect(controls.snapshot()).toMatchObject({ zoomPercent: 110 });
+    expect(listener).not.toHaveBeenCalled();
+    controls.zoomToPercent(110);
+    expect(onManualZoom).toHaveBeenCalledTimes(4);
 
     expect(controls.usesAutomaticFitWidth()).toBe(true);
     expect(controls.freezeCurrentZoom()).toBe(true);
     expect(zoom.requestZoom).toHaveBeenLastCalledWith(1.1);
 
-    onZoom?.({ documentId: 'doc', newZoom: 1.25 });
+    onZoom?.({ documentId: 'doc', oldZoom: 1.1, newZoom: 1.25 });
     expect(controls.snapshot()).toMatchObject({ zoomPercent: 125 });
+    expect(listener).toHaveBeenLastCalledWith({ type: 'zoom', zoomPercent: 125, oldZoom: 1.1, newZoom: 1.25 });
+    onZoom?.({ documentId: 'doc', oldZoom: 1.25, newZoom: 1.25001 });
+    expect(listener).toHaveBeenLastCalledWith({ type: 'zoom', zoomPercent: 125, oldZoom: 1.25, newZoom: 1.25001 });
+    listener.mockClear();
+    onZoom?.({ documentId: 'reference', oldZoom: 1, newZoom: 2 });
+    expect(listener).not.toHaveBeenCalled();
+    onZoom?.({ documentId: 'doc', oldZoom: 1.25001, newZoom: 1.25001 });
+    expect(listener).toHaveBeenLastCalledWith({ type: 'zoom', zoomPercent: 125, oldZoom: 1.25001, newZoom: 1.25001 });
   });
 
   it('stays inert and explains unavailability when the document or capabilities are missing', () => {

@@ -1,4 +1,4 @@
-import { useId, useLayoutEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react';
+import { useId, useLayoutEffect, useRef, useState, type MouseEvent, type PointerEvent, type ReactNode } from 'react';
 
 import {
   VIEWER_ZOOM_MAX_PERCENT,
@@ -6,6 +6,7 @@ import {
   type ViewerControls,
   type ViewerControlsSnapshot,
 } from '../pdf/viewer-controls.js';
+import type { PdfFitMode, PdfFitState } from '../pdf/viewer-navigation.js';
 import { ReviewIcon } from './ReviewIcon.js';
 import { ReviewTooltipButton } from './ReviewTooltipButton.js';
 import type { LiveContextBindingStatus } from '../../../../packages/core/src/live-context.js';
@@ -67,6 +68,10 @@ export function zoomEditorKeyAction(
 
 export type TopBarMenuId = 'document' | 'navigation' | 'zoom' | 'history';
 
+const FIT_MODES: readonly PdfFitMode[] = ['page', 'width', 'text'];
+const FIT_LABELS: Record<PdfFitMode, string> = { page: 'Fit page', width: 'Fit width', text: 'Fit text' };
+const FIT_ICONS = { page: 'fit-page', width: 'fit-width', text: 'fit-text' } as const;
+
 export function resolveTopBarMenuRequest(input: {
   readonly activeMenu: TopBarMenuId | null;
   readonly requestedMenu: TopBarMenuId;
@@ -111,6 +116,9 @@ export interface ReviewChromeProps {
   readonly viewerState: ViewerControlsSnapshot;
   readonly fitWidthReady?: boolean;
   readonly onFitWidth?: () => void | Promise<void>;
+  readonly fitState?: PdfFitState;
+  readonly onFitMode?: (mode: PdfFitMode) => void | Promise<void>;
+  readonly onManualZoom?: () => void;
   readonly horizontalScrollLocked?: boolean;
   readonly horizontalScrollAvailable?: boolean;
   readonly fitWidthCurrent?: boolean;
@@ -144,6 +152,9 @@ export function ReviewChrome({
   viewerState,
   fitWidthReady = false,
   onFitWidth = () => undefined,
+  fitState,
+  onFitMode,
+  onManualZoom,
   horizontalScrollLocked = false,
   horizontalScrollAvailable = false,
   fitWidthCurrent = false,
@@ -180,8 +191,15 @@ export function ReviewChrome({
   const [editingZoom, setEditingZoom] = useState(false);
   const [zoomDraft, setZoomDraft] = useState('');
   const [zoomInvalid, setZoomInvalid] = useState(false);
-  const [fitWidthPending, setFitWidthPending] = useState(false);
-  const fitWidthRequestRef = useRef(0);
+  const [fitRequestPending, setFitRequestPending] = useState(false);
+  const fitRequestRef = useRef(0);
+  const [fitOptionsOpen, setFitOptionsOpen] = useState(false);
+  const fitButtonRef = useRef<HTMLButtonElement | null>(null);
+  const fitOptionsRef = useRef<HTMLDivElement | null>(null);
+  const fitOptionsKeyboardOpenRef = useRef(false);
+  const fitOptionsDismissTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const fitChoiceFocusRef = useRef<'first' | 'last' | null>(null);
+  const fitOptionsId = `review-fit-options-${useId().replaceAll(':', '')}`;
   const zoomInputRef = useRef<HTMLInputElement>(null);
   const zoomPointerActivationRef = useRef(false);
   const restoreZoomTriggerFocus = useRef(false);
@@ -224,6 +242,16 @@ export function ReviewChrome({
   const zoomUnavailableId = 'viewer-zoom-controls-readiness';
   const fitWidthUnavailableId = 'viewer-fit-width-readiness';
   const zoomUnavailable = viewerState.zoomReady ? undefined : zoomUnavailableId;
+  const selectedFit = fitState?.selectedMode ?? 'width';
+  const nextFit = FIT_MODES[(FIT_MODES.indexOf(selectedFit) + 1) % FIT_MODES.length]!;
+  const fitActive = fitState?.active ?? fitWidthCurrent;
+  const fitAction = fitActive ? nextFit : selectedFit;
+  const fitPending = fitState?.pending || fitRequestPending;
+  const fitStatus = fitPending ? 'Fitting…'
+    : !fitActive ? 'Custom zoom'
+    : fitState?.fallback ? 'Fit width, no reliable text bounds'
+    : FIT_LABELS[fitState?.effectiveMode ?? 'width'];
+  const fitLabel = onFitMode ? `Fit mode: ${fitStatus}. ${fitActive ? 'Next' : 'Apply'}: ${FIT_LABELS[fitAction]}` : 'Fit width';
   const runViewerActionAsync = async (action: () => void | Promise<void>) => {
     await beforeViewerAction?.();
     await action();
@@ -232,6 +260,7 @@ export function ReviewChrome({
     void runViewerActionAsync(action);
   };
   const requestTopBarMenu = (requestedMenu: TopBarMenuId, requestedOpen: boolean) => {
+    if (requestedMenu !== 'zoom' || !requestedOpen) setFitOptionsOpen(false);
     if (requestedOpen) deferredTopBarFocusVersionRef.current += 1;
     setActiveTopBarMenu((activeMenu) => resolveTopBarMenuRequest({
       activeMenu,
@@ -448,17 +477,19 @@ export function ReviewChrome({
     setZoomInvalid(false);
     setEditingZoom(false);
   };
-  const zoomToDraftPercent = () => {
+  const zoomToDraftPercent = (explicitSubmission = false) => {
     const resolved = resolveZoomDraft(zoomDraft, viewerState.zoomPercent);
     if (!resolved.valid) return false;
     const requestedZoom = resolved.request;
     if (requestedZoom !== undefined) {
       runViewerAction(() => controls?.zoomToPercent(requestedZoom));
+    } else if (explicitSubmission && onManualZoom) {
+      runViewerAction(onManualZoom);
     }
     return true;
   };
   const submitZoomEditOnEnter = (closeMenu = false) => {
-    if (!zoomToDraftPercent()) {
+    if (!zoomToDraftPercent(true)) {
       setZoomInvalid(true);
       return;
     }
@@ -484,18 +515,38 @@ export function ReviewChrome({
     if (editingZoom) closeZoomEdit(false);
     runViewerAction(action);
   };
-  const runFitWidth = (button: HTMLButtonElement, closeMenu = false) => {
+  const focusFitChoice = (position: 'first' | 'last') => {
+    const choices = fitOptionsRef.current?.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]');
+    (position === 'last' ? choices?.item(choices.length - 1) : choices?.item(0))?.focus({ preventScroll: true });
+  };
+  const cancelFitOptionsDismiss = () => clearTimeout(fitOptionsDismissTimerRef.current);
+  const leaveFitOptions = (event: PointerEvent<HTMLElement>) => {
+    if (event.pointerType !== 'mouse' || fitOptionsKeyboardOpenRef.current) return;
+    const next = event.relatedTarget;
+    if (next instanceof Node && (fitButtonRef.current?.contains(next) || fitOptionsRef.current?.contains(next))) return;
+    cancelFitOptionsDismiss();
+    // Allow crossing the small gap between the button and its choices.
+    fitOptionsDismissTimerRef.current = setTimeout(() => setFitOptionsOpen(false), 140);
+  };
+  useLayoutEffect(() => {
+    if (!fitOptionsOpen) fitOptionsKeyboardOpenRef.current = false;
+    return cancelFitOptionsDismiss;
+  }, [fitOptionsOpen]);
+  useLayoutEffect(() => {
+    const focus = fitChoiceFocusRef.current;
+    if (!fitOptionsOpen || focus === null) return;
+    fitChoiceFocusRef.current = null;
+    focusFitChoice(focus);
+  }, [fitOptionsOpen]);
+
+  const runFit = (button: HTMLButtonElement, mode: PdfFitMode) => {
     clearZoomActionIntent();
     button.focus({ preventScroll: true });
     if (editingZoom) closeZoomEdit(false);
-    const request = ++fitWidthRequestRef.current;
-    setFitWidthPending(true);
-    if (closeMenu) {
-      requestTopBarMenu('zoom', false);
-      restoreTopBarTriggerFocus('zoom');
-    }
-    void runViewerActionAsync(onFitWidth).finally(() => {
-      if (fitWidthRequestRef.current === request) setFitWidthPending(false);
+    const request = ++fitRequestRef.current;
+    setFitRequestPending(true);
+    void runViewerActionAsync(() => onFitMode ? onFitMode(mode) : onFitWidth()).finally(() => {
+      if (fitRequestRef.current === request) setFitRequestPending(false);
     });
   };
 
@@ -731,10 +782,87 @@ export function ReviewChrome({
           disabled={!viewerState.zoomReady || onToggleHorizontalScrollLock === undefined}
           onClick={onToggleHorizontalScrollLock}
         ><ReviewIcon name={horizontalScrollLocked ? 'lock' : 'unlock'} /></ReviewTooltipButton> : null}
-        <ReviewTooltipButton label="Fit width" type="button" role="menuitem" className="review-chrome__icon-control review-chrome__fit-width" data-review-zoom-action="fit-width" data-fit-width-current={fitWidthCurrent ? 'true' : undefined} aria-busy={fitWidthPending ? 'true' : 'false'} aria-describedby={zoomUnavailable ?? (!fitWidthReady ? fitWidthUnavailableId : undefined)} disabled={!viewerState.zoomReady || !fitWidthReady || fitWidthCurrent} onPointerDown={prepareZoomAction} onPointerUp={clearZoomActionIntent} onPointerCancel={clearZoomActionIntent} onClick={(event) => runFitWidth(event.currentTarget)}><ReviewIcon name="fit-width" /></ReviewTooltipButton>
+        <ReviewTooltipButton
+          ref={fitButtonRef}
+          label={fitLabel}
+          tooltip={onFitMode ? false : 'Fit width'}
+          type="button"
+          role="menuitem"
+          className="review-chrome__icon-control review-chrome__fit-width"
+          data-review-zoom-action="fit-width"
+          data-fit-width-current={fitWidthCurrent ? 'true' : undefined}
+          data-fit-active={fitActive ? 'true' : 'false'}
+          data-fit-mode={selectedFit}
+          aria-haspopup={onFitMode ? 'menu' : undefined}
+          aria-expanded={onFitMode ? fitOptionsOpen : undefined}
+          aria-controls={onFitMode ? fitOptionsId : undefined}
+          aria-busy={fitPending ? 'true' : 'false'}
+          aria-describedby={zoomUnavailable ?? (!fitWidthReady ? fitWidthUnavailableId : undefined)}
+          disabled={!viewerState.zoomReady || !fitWidthReady}
+          onPointerEnter={(event) => {
+            if (!onFitMode || event.pointerType !== 'mouse') return;
+            cancelFitOptionsDismiss();
+            setFitOptionsOpen(true);
+          }}
+          onPointerLeave={leaveFitOptions}
+          onKeyDown={(event) => {
+            if (!onFitMode || !['ArrowDown', 'ArrowUp'].includes(event.key)) return;
+            event.preventDefault();
+            event.stopPropagation();
+            fitOptionsKeyboardOpenRef.current = true;
+            cancelFitOptionsDismiss();
+            const focus = event.key === 'ArrowUp' ? 'last' : 'first';
+            if (fitOptionsOpen) {
+              focusFitChoice(focus);
+            } else {
+              fitChoiceFocusRef.current = focus;
+              setFitOptionsOpen(true);
+            }
+          }}
+          onPointerDown={prepareZoomAction}
+          onPointerUp={clearZoomActionIntent}
+          onPointerCancel={clearZoomActionIntent}
+          onClick={(event) => runFit(event.currentTarget, fitAction)}
+        ><ReviewIcon name={FIT_ICONS[fitActive ? fitState?.effectiveMode ?? selectedFit : selectedFit]} /></ReviewTooltipButton>
         <ReviewTooltipButton label="Zoom out" type="button" role="menuitem" className="review-chrome__icon-control" data-review-zoom-action="out" aria-describedby={zoomUnavailable} disabled={!viewerState.zoomReady} onPointerDown={prepareZoomAction} onPointerUp={clearZoomActionIntent} onPointerCancel={clearZoomActionIntent} onClick={(event) => runZoomAction(event.currentTarget, () => controls?.zoomOut())}><ReviewIcon name="minus" /></ReviewTooltipButton>
         <ReviewTooltipButton label="Zoom in" type="button" role="menuitem" className="review-chrome__icon-control" data-review-zoom-action="in" aria-describedby={zoomUnavailable} disabled={!viewerState.zoomReady} onPointerDown={prepareZoomAction} onPointerUp={clearZoomActionIntent} onPointerCancel={clearZoomActionIntent} onClick={(event) => runZoomAction(event.currentTarget, () => controls?.zoomIn())}><ReviewIcon name="plus" /></ReviewTooltipButton>
       </div>
+      {onFitMode && fitOptionsOpen ? <div
+        ref={fitOptionsRef}
+        id={fitOptionsId}
+        className="review-chrome__fit-options"
+        role="menu"
+        aria-label="PDF fit modes"
+        onPointerEnter={cancelFitOptionsDismiss}
+        onPointerLeave={leaveFitOptions}
+        onKeyDown={() => {
+          fitOptionsKeyboardOpenRef.current = true;
+          cancelFitOptionsDismiss();
+        }}
+        onBlur={(event) => {
+          const next = event.relatedTarget;
+          if (next instanceof Node && !event.currentTarget.contains(next) && !fitButtonRef.current?.contains(next)) {
+            setFitOptionsOpen(false);
+          }
+        }}
+      >
+        {FIT_MODES.map((mode) => <button
+          key={mode}
+          type="button"
+          title={FIT_LABELS[mode]}
+          role="menuitemradio"
+          aria-checked={fitActive && (fitState?.effectiveMode ?? 'width') === mode}
+          className="review-chrome__fit-option"
+          disabled={!viewerState.zoomReady || !fitWidthReady}
+          onPointerDown={prepareZoomAction}
+          onPointerUp={clearZoomActionIntent}
+          onPointerCancel={clearZoomActionIntent}
+          onClick={(event) => {
+            runFit(fitButtonRef.current ?? event.currentTarget, mode);
+            setFitOptionsOpen(false);
+          }}
+        ><ReviewIcon name={FIT_ICONS[mode]} /><span>{FIT_LABELS[mode]}</span></button>)}
+      </div> : null}
     </TopBarMenu>
   </span>;
 

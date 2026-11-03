@@ -1,3 +1,4 @@
+import { RebuildNavigationCoordinator } from "../src/rebuild-navigation.js";
 import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -63,6 +64,14 @@ import {
 } from "../src/source-navigation.js";
 
 describe("VS Code local host adapter", () => {
+  it("defaults following off while keeping manual navigation commands available", async () => {
+    const manifest = JSON.parse(await readFile(resolve("apps/vscode/package.json"), "utf8"));
+    expect(manifest.contributes.configuration.properties["placekeeper.followAfterBuild"]).toMatchObject({ type: "boolean", default: false });
+    const commands = manifest.contributes.commands.map((command: { command: string }) => command.command);
+    expect(commands).toContain("placekeeper.forwardSyncTex");
+    expect(commands).toContain("placekeeper.goToSource");
+  });
+
   it("validates a restored panel before its webview starts without needing another focus event", async () => {
     const directory = await realpath(await mkdtemp(resolve(tmpdir(), "placekeeper-restored-panel-")));
     const outputPath = resolve(directory, "paper.pdf");
@@ -102,6 +111,7 @@ describe("VS Code local host adapter", () => {
         workspaceFolders: [],
         getConfiguration: () => ({ get: () => undefined }),
         onDidSaveTextDocument: disposable,
+        onDidChangeConfiguration: disposable,
         createFileSystemWatcher: () => ({ dispose() {}, onDidCreate: disposable, onDidChange: disposable, onDidDelete: disposable }),
       },
       window: {
@@ -130,7 +140,7 @@ describe("VS Code local host adapter", () => {
     const module = { exports: {} as { activate(context: unknown): void } };
     try {
       runInNewContext(await readFile(resolve("apps/vscode/dist/extension.cjs"), "utf8"), {
-        module, exports: module.exports, Buffer, process, URL, URLSearchParams, AbortController,
+        module, exports: module.exports, Buffer, process, URL, URLSearchParams, AbortController, AbortSignal,
         setTimeout, clearTimeout, setInterval, clearInterval,
         require: (id: string) => id === "vscode" ? vscode : id === "node:child_process" ? { execFile } : require(id),
         fetch: async (input: string) => {
@@ -146,6 +156,129 @@ describe("VS Code local host adapter", () => {
       if (deserialize === undefined) throw new Error("Panel serializer was not registered");
       await deserialize(panel, { panelKey });
       expect(sequence).toEqual(["validated-output", "webview"]);
+    } finally {
+      for (const listener of [...disposeListeners]) listener();
+      for (const subscription of subscriptions) subscription.dispose();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it.each(["missing", "pending", "stale"])("resumes an explicit %s mapping on a sidecar event with following disabled", async (initialStatus) => {
+    const directory = await realpath(await mkdtemp(resolve(tmpdir(), "placekeeper-explicit-retry-")));
+    const outputPath = resolve(directory, "paper.pdf");
+    const sourcePath = resolve(directory, "chapter.tex");
+    await writeFile(outputPath, "%PDF-1.7\nfinished rebuild\n%%EOF");
+    const panelKey = "deferred_panel_key_123456";
+    const disposable = () => ({ dispose() {} });
+    const disposeListeners = new Set<() => void>();
+    const commands = new Map<string, (...args: unknown[]) => Promise<unknown>>();
+    let deserialize: ((panel: unknown, state: unknown) => Promise<void>) | undefined;
+    let receive: ((message: unknown) => Promise<void>) | undefined;
+    let changed: ((uri: { fsPath: string }) => void) | undefined;
+    let html = "";
+    let available = false;
+    const requests: Array<{ sourcePath: string; line: number; column: number }> = [];
+    const messages: Array<{ payload?: { command?: string; explicitSequence?: number; pageIndex?: number } }> = [];
+    const uri = (fsPath: string) => ({ fsPath, scheme: "file", toString: () => `file://${fsPath}` });
+    const panel = {
+      active: true, visible: true, viewColumn: 2, reveal: vi.fn(),
+      onDidDispose(listener: () => void) {
+        disposeListeners.add(listener);
+        return { dispose: () => disposeListeners.delete(listener) };
+      },
+      onDidChangeViewState: disposable,
+      webview: {
+        options: {}, cspSource: "https://*.vscode-cdn.net",
+        set html(value: string) { html = value; },
+        asWebviewUri: (value: { fsPath: string }) => ({ toString: () => `https://file.vscode-cdn.net${value.fsPath}` }),
+        onDidReceiveMessage(listener: typeof receive) { receive = listener; return disposable(); },
+        postMessage: async (message: typeof messages[number]) => { messages.push(message); return true; },
+      },
+    };
+    const warning = vi.fn();
+    const info = vi.fn();
+    const activeEditor = { document: { uri: uri(sourcePath) }, selection: { active: { line: 12, character: 3 } } };
+    const vscode = {
+      ThemeColor: class {}, RelativePattern: class {}, UIKind: { Desktop: 1 }, env: { uiKind: 1 },
+      Uri: { file: uri },
+      commands: { registerCommand(name: string, command: (...args: unknown[]) => Promise<unknown>) {
+        commands.set(name, command); return disposable();
+      } },
+      workspace: {
+        isTrusted: true, workspaceFolders: [{ uri: uri(directory) }],
+        getWorkspaceFolder: () => ({ uri: uri(directory) }),
+        getConfiguration: () => ({ get: (_key: string, fallback: unknown) => fallback }),
+        onDidSaveTextDocument: disposable, onDidChangeConfiguration: disposable,
+        createFileSystemWatcher: () => ({ dispose() {}, onDidCreate: disposable, onDidDelete: disposable,
+          onDidChange(listener: typeof changed) { changed = listener; return disposable(); } }),
+      },
+      window: {
+        activeTextEditor: activeEditor, visibleTextEditors: [activeEditor],
+        showWarningMessage: warning, showInformationMessage: info,
+        createTextEditorDecorationType: disposable, registerUriHandler: disposable,
+        registerWebviewPanelSerializer(_type: string, serializer: { deserializeWebviewPanel: typeof deserialize }) {
+          deserialize = serializer.deserializeWebviewPanel; return disposable();
+        },
+      },
+    };
+    const subscriptions: Array<{ dispose(): unknown }> = [];
+    const context = { subscriptions, globalStorageUri: { fsPath: resolve(directory, "storage") },
+      globalState: { get: () => ({ [panelKey]: { outputPath, sourceRoot: directory } }), update: async () => undefined },
+      asAbsolutePath: (path: string) => resolve("apps/vscode", path),
+    };
+    const execFile = Object.assign(() => undefined, { [promisify.custom]: async () => ({ stdout: JSON.stringify({
+      ok: true, kind: "focused",
+      url: "http://127.0.0.1:49152/s/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/bootstrap?embed=vscode#cap=test_capability",
+    }), stderr: "" }) });
+    const require = createRequire(import.meta.url);
+    const module = { exports: {} as { activate(context: unknown): void } };
+    try {
+      runInNewContext(await readFile(resolve("apps/vscode/dist/extension.cjs"), "utf8"), {
+        module, exports: module.exports, Buffer, process, URL, URLSearchParams, AbortController, AbortSignal,
+        setTimeout, clearTimeout, setInterval, clearInterval,
+        console: { error() {} }, // This adapter fixture acknowledges bootstrap without rendering a PDF.
+        require: (id: string) => id === "vscode" ? vscode : id === "node:child_process" ? { execFile } : require(id),
+        fetch: async (input: string, init?: { body?: string }) => {
+          if (input.endsWith("/exchange")) return new Response(JSON.stringify({ credential: "c".repeat(43) }));
+          if (input.endsWith("/observe")) return new Response(JSON.stringify({ status: "same-digest" }));
+          if (input.endsWith("/synctex/forward")) {
+            requests.push(JSON.parse(init!.body!));
+            return new Response(JSON.stringify(available
+              ? { status: "ok", documentGeneration: 2, target: { pageIndex: 1, x: 40, y: 60 } }
+              : { status: initialStatus }));
+          }
+          throw new Error("No renderer bootstrap in this adapter fixture");
+        },
+      });
+      module.exports.activate(context);
+      await deserialize!(panel, { panelKey });
+      const panelId = /startVscode\(\{ panelId: "([^"]+)"/u.exec(html)![1];
+      await receive!({ protocol: REVIEW_RUNTIME_PROTOCOL, version: REVIEW_RUNTIME_VERSION, kind: "request",
+        panelId, requestId: "bootstrap_request_123456", method: "bootstrap", payload: {} });
+      const forward = commands.get("placekeeper.forwardSyncTex")!;
+      await forward(uri(outputPath));
+      expect(messages.filter(message => message.payload?.command === "forward-synctex")).toHaveLength(0);
+      activeEditor.selection.active.line = 60; // Focus/cursor changes must not retarget the saved request.
+      available = true;
+      changed!({ fsPath: resolve(directory, "paper.synctex.gz") });
+      await vi.waitFor(() => expect(messages.filter(message => message.payload?.command === "forward-synctex")).toHaveLength(1));
+      expect(requests.at(-1)).toMatchObject({ sourcePath, line: 13, column: 4 });
+      expect(messages.at(-1)?.payload).toMatchObject({ command: "forward-synctex", pageIndex: 1, explicitSequence: 1 });
+      expect(warning).not.toHaveBeenCalled();
+      expect(info).toHaveBeenCalledWith(expect.stringContaining("Waiting for SyncTeX data"));
+      expect(panel.reveal).toHaveBeenCalled();
+      // A newer explicit jump must retire the old wait, even after another sidecar event.
+      available = false;
+      await forward(uri(outputPath));
+      available = true;
+      activeEditor.selection.active.line = 24;
+      await forward(uri(outputPath));
+      const requestsAfterNewerJump = requests.length;
+      changed!({ fsPath: resolve(directory, "paper.synctex.gz") });
+      await new Promise(resolveWait => setTimeout(resolveWait, 350));
+      expect(requests).toHaveLength(requestsAfterNewerJump);
+      expect(requests.at(-1)).toMatchObject({ sourcePath, line: 25 });
+      expect(messages.filter(message => message.payload?.command === "forward-synctex")).toHaveLength(2);
     } finally {
       for (const listener of [...disposeListeners]) listener();
       for (const subscription of subscriptions) subscription.dispose();
@@ -188,7 +321,24 @@ describe("VS Code local host adapter", () => {
       preview: true,
       preserveFocus: false,
     });
-    expect(editor.viewColumn).toBe(1);
+    expect(editor?.viewColumn).toBe(1);
+  });
+
+  it("does not focus a deferred source open after newer navigation", async () => {
+    const sourceDocument = { uri: { toString: () => "file:///work/paper.tex" } };
+    const document = Promise.withResolvers<typeof sourceDocument>();
+    const navigation = new RebuildNavigationCoordinator();
+    const association = navigation.beginExplicit();
+    const showTextDocument = vi.fn(async value => ({ document: value, viewColumn: 1 }));
+    const opened = openSourceEditor({
+      sourceUri: sourceDocument.uri, visibleEditors: [], tabGroups: [], tabResourceUri: () => undefined,
+      openTextDocument: () => document.promise, showTextDocument,
+      isCurrent: () => navigation.isExplicitCurrent(association),
+    });
+    navigation.beginExplicit();
+    document.resolve(sourceDocument);
+    expect(await opened).toBeUndefined();
+    expect(showTextDocument).not.toHaveBeenCalled();
   });
 
   it("does not reopen a source document that is already visible", async () => {
@@ -521,6 +671,28 @@ describe("VS Code local host adapter", () => {
       pageIndex: 4,
       zoom: 1.25,
     });
+  });
+
+  it("waits for the webview listener before sending first-open navigation and retires on disposal", async () => {
+    const panelId = "panel_identifier_1234";
+    const makeBridge = () => new VersionedWebviewBridge({
+      identity: { panelId, sessionId: "session_identifier_1234", generation: 1, revision: 1 },
+      bootstrap: async () => ({}), invoke: async () => ({}), dispose() {},
+    }, vi.fn());
+    const bridge = makeBridge();
+    const ready = vi.fn();
+    const waiting = bridge.whenReady().then(ready);
+    await Promise.resolve();
+    expect(ready).not.toHaveBeenCalled();
+    await bridge.receive({ protocol: REVIEW_RUNTIME_PROTOCOL, version: REVIEW_RUNTIME_VERSION,
+      kind: "request", panelId, requestId: "request_identifier_1234", method: "bootstrap", payload: {} });
+    await waiting;
+    expect(ready).toHaveBeenCalledWith(true);
+    bridge.dispose();
+    const closed = makeBridge();
+    const closedWait = closed.whenReady();
+    closed.dispose();
+    expect(await closedWait).toBe(false);
   });
 
   it("rejects old webviews with update guidance before invoking the broker", async () => {
@@ -917,7 +1089,7 @@ describe("VS Code local host adapter", () => {
     const reverse = await client.invoke("reverseSyncTex", { pageIndex: 0, point: { x: 1, y: 2 } }, new AbortController().signal);
     expect(reverse).toMatchObject({ target: { line: 12, column: 4 } });
     expect(reverse).not.toHaveProperty("target.path");
-    expect(opened).toHaveBeenCalledWith({ sourcePath: "/work/paper.tex", line: 12, column: 4 });
+    expect(opened).toHaveBeenCalledWith({ sourcePath: "/work/paper.tex", line: 12, column: 4 }, expect.any(Function));
     expect(forwardSyncTexTarget({ status: "ok", documentGeneration: 4, target: { pageIndex: 2, x: 10, y: 20 } }))
       .toEqual({ documentGeneration: 4, pageIndex: 2, point: { x: 10, y: 20 } });
     expect(forwardSyncTexTarget({ status: "ok", target: { pageIndex: 2, x: 10, y: 20 } }))
@@ -938,6 +1110,97 @@ describe("VS Code local host adapter", () => {
     expect(forwardSyncTexStatus({ status: "ok", target: { pageIndex: 2, x: 10, y: 20 } }))
       .toBeUndefined();
     expect(forwardSyncTexStatus({ status: "other" })).toBeUndefined();
+  });
+
+  it("accepts only the matching closed viewer acknowledgement without a broker request", async () => {
+    const coordinator = new RebuildNavigationCoordinator({ followEnabled: () => true });
+    const sequence = coordinator.beginExplicit();
+    coordinator.awaitExplicitAcknowledgement(sequence, 4, vi.fn());
+    const fetch = vi.fn();
+    const acknowledgeForwardNavigation = vi.fn(({ sequence, generation }) => coordinator.acknowledgeExplicit(sequence, generation));
+    const client = createLoopbackRuntimeClient({
+      panelId: "panel_identifier_1234",
+      launch: { origin: "http://127.0.0.1:49152", sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", credential: "c".repeat(43) },
+      assets: { pdfiumWasm: "vscode-webview://authority/pdfium.wasm" },
+      materializeDocument: async () => "vscode-webview://authority/paper.pdf", fetch, acknowledgeForwardNavigation,
+    });
+    const bridge = new VersionedWebviewBridge(client, vi.fn());
+    let requestNumber = 0;
+    const send = async (payload: unknown) => bridge.receive({
+      protocol: REVIEW_RUNTIME_PROTOCOL, version: REVIEW_RUNTIME_VERSION, kind: "request", ...client.identity,
+      requestId: `request_identifier_${++requestNumber}`, method: "forwardSyncTex", payload,
+    });
+    for (const payload of [
+      { action: "ack", sequence, generation: 4, outcome: "applied", sourcePath: "/private/source.tex" },
+      { action: "ack", sequence, generation: 4, outcome: "other" },
+      { action: "poll" },
+    ]) await send(payload);
+    expect(acknowledgeForwardNavigation).not.toHaveBeenCalled();
+    await send({ action: "ack", sequence: sequence + 1, generation: 4, outcome: "applied" });
+    await send({ action: "ack", sequence, generation: 3, outcome: "applied" });
+    coordinator.noteSourceSaved({ sourcePath: "/work/paper.tex", line: 5 });
+    expect(coordinator.hasPending).toBe(false);
+    await send({ action: "ack", sequence, generation: 4, outcome: "applied" });
+    coordinator.noteSourceSaved({ sourcePath: "/work/paper.tex", line: 5 });
+    expect(coordinator.hasPending).toBe(true);
+    expect(fetch).not.toHaveBeenCalled();
+    coordinator.dispose();
+    bridge.dispose();
+  });
+
+  it("retires saved-cursor following when an inverse gesture starts and fences its late result", async () => {
+    const navigation = new RebuildNavigationCoordinator({ followEnabled: () => true });
+    navigation.noteSourceSaved({ sourcePath: "/work/paper.tex", line: 5 });
+    const result = Promise.withResolvers<Response>();
+    const opened = vi.fn(async () => undefined);
+    const client = createLoopbackRuntimeClient({
+      panelId: "panel_identifier_1234",
+      launch: { origin: "http://127.0.0.1:49152", sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", credential: "c".repeat(43) },
+      assets: { pdfiumWasm: "vscode-webview://authority/pdfium.wasm" },
+      materializeDocument: async () => "vscode-webview://authority/paper.pdf",
+      beginReverseNavigation: () => {
+        const association = navigation.beginExplicit();
+        return { isCurrent: () => navigation.isExplicitCurrent(association), finish: () => navigation.finishExplicit(association) };
+      },
+      openSourceLocation: opened,
+      fetch: vi.fn(async url => String(url).endsWith("/synctex/detach") ? new Response("{}") : result.promise),
+    });
+    const pending = client.invoke("reverseSyncTex", { pageIndex: 0, point: { x: 1, y: 2 } }, new AbortController().signal);
+    const reveal = vi.fn(async () => "revealed" as const);
+    expect(await navigation.revealAfterRebuild(reveal)).toBe("idle");
+    expect(reveal).not.toHaveBeenCalled();
+    navigation.noteSourceSaved({ sourcePath: "/work/paper.tex", line: 9 });
+    expect(navigation.hasPending).toBe(false);
+    const newer = navigation.beginExplicit();
+    result.resolve(new Response(JSON.stringify({ status: "ok", target: { path: "/work/paper.tex", line: 12 } })));
+    expect(await pending).toMatchObject({ status: "stale" });
+    expect(opened).not.toHaveBeenCalled();
+    navigation.noteSourceSaved({ sourcePath: "/work/paper.tex", line: 10 });
+    expect(navigation.hasPending).toBe(false);
+    navigation.finishExplicit(newer);
+    navigation.noteSourceSaved({ sourcePath: "/work/paper.tex", line: 11 });
+    expect(navigation.hasPending).toBe(true);
+    client.dispose();
+  });
+
+  it("does not open a late reverse-search result after its panel closes", async () => {
+    const result = Promise.withResolvers<Response>();
+    const opened = vi.fn(async () => undefined);
+    const fetch = vi.fn(async (url: string | URL | Request) =>
+      String(url).endsWith("/synctex/detach") ? new Response("{}") : result.promise);
+    const client = createLoopbackRuntimeClient({
+      panelId: "panel_identifier_1234",
+      launch: { origin: "http://127.0.0.1:49152", sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", credential: "c".repeat(43) },
+      assets: { pdfiumWasm: "vscode-webview://authority/pdfium.wasm" },
+      materializeDocument: async () => "vscode-webview://authority/paper.pdf",
+      openSourceLocation: opened, fetch,
+    });
+    const pending = client.invoke("reverseSyncTex", { pageIndex: 0, point: { x: 1, y: 2 } }, new AbortController().signal);
+    client.dispose();
+    result.resolve(new Response(JSON.stringify({ status: "ok", target: { path: "/work/paper.tex", line: 12 } })));
+    await pending;
+    expect(opened).not.toHaveBeenCalled();
+    expect(fetch).toHaveBeenCalledWith(expect.stringContaining("/synctex/detach"), expect.anything());
   });
 
   it("does not run reverse SyncTeX for an untrusted workspace", async () => {

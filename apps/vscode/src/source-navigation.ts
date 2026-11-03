@@ -32,6 +32,7 @@ export interface OpenSourceEditorOptions<
   readonly avoidViewColumn?: number;
   readonly tabResourceUri: (input: unknown) => SourceDocumentLike["uri"] | undefined;
   readonly openTextDocument: () => Promise<Document>;
+  readonly isCurrent?: () => boolean;
   readonly showTextDocument: (
     document: Document,
     options: { readonly viewColumn?: number; readonly preview: true; readonly preserveFocus: false },
@@ -41,7 +42,8 @@ export interface OpenSourceEditorOptions<
 export async function openSourceEditor<
   Document extends SourceDocumentLike,
   Editor extends VisibleSourceEditorLike<Document>,
->(options: OpenSourceEditorOptions<Document, Editor>): Promise<Editor> {
+>(options: OpenSourceEditorOptions<Document, Editor>): Promise<Editor | undefined> {
+  if (options.isCurrent?.() === false) return undefined;
   const visibleEditor = preferredVisibleSourceEditor(options.visibleEditors, options.sourceUri);
   const targetUri = options.sourceUri.toString();
   const matchingGroups = options.tabGroups.filter((group) => group.tabs.some((tab) =>
@@ -51,6 +53,7 @@ export async function openSourceEditor<
     matchingGroups[0];
   const viewColumn = visibleEditor?.viewColumn ?? hiddenTabGroup?.viewColumn;
   const document = visibleEditor?.document ?? await options.openTextDocument();
+  if (options.isCurrent?.() === false) return undefined;
   return options.showTextDocument(document, {
     ...(viewColumn === undefined ? {} : { viewColumn }),
     preview: true,

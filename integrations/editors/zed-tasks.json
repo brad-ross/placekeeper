@@ -1,0 +1,26 @@
+[
+  {
+    "label": "Placekeeper: Forward SyncTeX",
+    "command": "\"$PLACEKEEPER_LAUNCHER\"",
+    "args": [
+      "view-source",
+      "--editor",
+      "zed",
+      "--source",
+      "\"$PLACEKEEPER_SOURCE\"",
+      "--line",
+      "\"$PLACEKEEPER_LINE\"",
+      "--pdf-directory",
+      "\"$PLACEKEEPER_PDF_DIR\""
+    ],
+    "reveal": "never",
+    "hide": "on_success",
+    "save": "none",
+    "env": {
+      "PLACEKEEPER_LAUNCHER": "/Users/YOU/Applications/Placekeeper.app/Contents/MacOS/placekeeper",
+      "PLACEKEEPER_PDF_DIR": "build",
+      "PLACEKEEPER_SOURCE": "$ZED_FILE",
+      "PLACEKEEPER_LINE": "$ZED_ROW"
+    }
+  }
+]

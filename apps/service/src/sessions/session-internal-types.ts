@@ -59,7 +59,6 @@ export interface ActiveSession {
   physicalSaveBarrierEpoch?: number;
   sourceWorkInterruptions: DurableSourceWorkInterruptionV1[];
   nativeAnnotationLedger: DurableNativeAnnotationLedgerV1;
-  syncTexOperationToken?: string;
   readonly documentGeneration: number;
   sourceOwnership: RecoverableSourceOwnership;
   chromeProtected: boolean;
@@ -72,6 +71,8 @@ export interface ActiveSession {
 }
 
 export interface BrowserLaunchScope {
+  readonly navigationSourceRoot?: string;
+  navigationAttachmentId?: string;
   readonly sessionId: string;
   documentGeneration: number;
   readonly surface: ReviewPresentationSurface;

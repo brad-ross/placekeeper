@@ -12,13 +12,13 @@ If no stable source release is available, the command fails rather than falling 
 
 For a development checkout, run `./install.sh` in the repository folder. Preview it without downloads or mutations with `./install.sh --dry-run`. The installer downloads checksum-pinned Node 24.14.0, installs pnpm 11.16.0 dependencies from the frozen lockfile, builds locally, and checks the packaged PDF writer offline before transactionally installing `~/Applications/Placekeeper.app`.
 
-After the Mac app is installed or confirmed current, Chrome, VS Code, and Codex setup are offered separately. Each can be skipped. Rerun the landing command to update or add skipped integrations; a current Mac app still offers host setup. With no terminal, optional setup is skipped and rerun guidance is printed. From a source checkout, explicit choices are available:
+After the Mac app is installed or confirmed current, Chrome, VS Code, Zed, and Codex setup are offered separately. Each can be skipped. Rerun the landing command to update or add skipped integrations; a current Mac app still offers host setup. With no terminal, optional setup is skipped and rerun guidance is printed. From a source checkout, explicit choices are available:
 
 ```sh
 ./install.sh --chrome=setup --vscode=skip --codex=ask
 ```
 
-Each host accepts `setup`, `skip`, or `ask`. A host failure does not undo the Mac installation or prevent the remaining hosts from being offered. The summary distinguishes completed, skipped, pending manual actions, and failed setup. Exit 2 means the core install was deferred; exit 3 means the Mac succeeded but optional setup failed. Pending manual actions alone are not failures.
+For SyncTeX, see the [editor quick start](guides/editor-synctex.md) for the build command and a first round trip. Zed accepts `--zed=manual` for on-demand jumps or `--zed=preview` to also follow builds; use `skip` or `ask` to decline or choose interactively. The other hosts accept `setup`, `skip`, or `ask`. A host failure does not undo the Mac installation or prevent the remaining hosts from being offered. The summary distinguishes completed, skipped, pending manual actions, and failed setup. Exit 2 means the core install was deferred; exit 3 means the Mac succeeded but optional setup failed. Pending manual actions alone are not failures.
 
 Placekeeper checks its shared service before replacing the app or mutating a selected integration. Active browser and native reviews or bound Codex tasks defer the change without discarding work: close the indicated work, allow its lease to expire, and retry. Closing an expanded Codex panel can leave its inline presentation active; fully quit Codex if that participation remains, then retry. Busy or unreadable service state also leaves the existing installation intact. A distinct candidate must report its exact build before replacement commits; failed readiness restores the previous app. Exact app reuse does not waive the independent host safety check.
 

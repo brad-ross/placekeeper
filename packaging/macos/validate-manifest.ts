@@ -26,7 +26,7 @@ export const CATALOG_DISTRIBUTION_BASELINE = {
   artifactSha256: {
     runtime: "423428687dab0b6049a86d85f879df79f2fee251322d53ad314ae1effd616e3b",
     report: "84bda58674d8174a0a94bbaed846ce23628cbf62fcab018cef14b182d38db797",
-    thirdPartyNotices: "e93d61075ce6ff0452d9c841030d8a7125030182e324cd76ca7f640fcb244bdb",
+    thirdPartyNotices: "469845e0081b04e67f86db343a8a69f52e8488cdcd2b5da7708aec78a8647104",
   },
   // Reviewed against main in September 2026: 3.187 MB; retain a small size margin.
   productionWebJavaScriptBytes: 3_200_000,
@@ -222,6 +222,7 @@ export interface AppBundleManifest {
     readonly vscodeExtension: string;
     readonly chromeExtension: string;
     readonly chromeNativeWrapper: string;
+    readonly editorIntegrations: string;
   };
   readonly distribution: { readonly mode: "source-first"; readonly signingRequired: false };
   readonly signing: { readonly hardenedRuntime: true; readonly secureTimestamp: true; readonly entitlements: string };
@@ -592,10 +593,11 @@ export function validateAppBundleManifest(value: unknown): AppBundleManifest {
     vscodeExtension: boundedString(rawEmbeddedArtifacts.vscodeExtension, "VS Code extension artifact"),
     chromeExtension: boundedString(rawEmbeddedArtifacts.chromeExtension, "Chrome extension artifact"),
     chromeNativeWrapper: boundedString(rawEmbeddedArtifacts.chromeNativeWrapper, "Chrome native wrapper artifact"),
+    editorIntegrations: boundedString(rawEmbeddedArtifacts.editorIntegrations, "Editor integrations artifact"),
   };
   if (Object.keys(rawEmbeddedArtifacts).some((name) =>
-    !["codexPlugin", "vscodeExtension", "chromeExtension", "chromeNativeWrapper"].includes(name))) {
-    throw new Error("Only the reviewed Codex, VS Code, and Chrome integration artifacts may be embedded");
+    !["codexPlugin", "vscodeExtension", "chromeExtension", "chromeNativeWrapper", "editorIntegrations"].includes(name))) {
+    throw new Error("Only the reviewed Codex, VS Code, Chrome, and editor integration artifacts may be embedded");
   }
   requiredValue(root.finderExecutable, "droplet", "Finder executable");
   if (Object.values(embeddedArtifacts).some((path) => path.startsWith("/") || path.split("/").includes(".."))) {

@@ -1,3 +1,4 @@
+import { nativeSyncTexRequest, nativeSyncTexResponse } from "./native-synctex-protocol.js";
 import type { ReviewAnchorEvidenceV1, SaveDestinationConfirmation } from "./review-model.js";
 export const REVIEW_RUNTIME_PROTOCOL = "placekeeper.review-runtime" as const;
 export const REVIEW_RUNTIME_VERSION = 4 as const;
@@ -107,9 +108,7 @@ export const REVIEW_RUNTIME_HOST_METHODS = {
   electron: REVIEW_RUNTIME_METHODS.filter((method) => (
     method !== "forwardSyncTex" && method !== "reverseSyncTex"
   )),
-  macos: REVIEW_RUNTIME_METHODS.filter((method) => (
-    method !== "forwardSyncTex" && method !== "reverseSyncTex"
-  )),
+  macos: REVIEW_RUNTIME_METHODS,
 } as const satisfies Readonly<Record<ReviewRuntimeHost, readonly ReviewRuntimeMethod[]>>;
 
 const REVIEW_RUNTIME_METHOD_SET: ReadonlySet<string> = new Set(REVIEW_RUNTIME_METHODS);
@@ -454,6 +453,7 @@ export function sanitizeNativeReviewRuntimeRequest(
   payload: unknown,
 ): unknown | undefined {
   if (!isReviewRuntimeMethodForHost(host, method)) return undefined;
+  if (method === "forwardSyncTex" || method === "reverseSyncTex") return nativeSyncTexRequest(method, payload);
   return sanitizeChromeReviewRuntimeRequest(method, payload);
 }
 
@@ -582,6 +582,7 @@ export function sanitizeNativeReviewRuntimeResponse(
 ): unknown | undefined {
   if (!isReviewRuntimeMethodForHost(host, method)) return undefined;
   if (method === "scope") return safeNativeScope(host, value);
+  if (method === "forwardSyncTex" || method === "reverseSyncTex") return nativeSyncTexResponse(method, value);
   if (method === "bootstrap") {
     if (!record(value) || !record(value.scope)) return undefined;
     const projected = sanitizeChromeReviewRuntimeResponse("bootstrap", {

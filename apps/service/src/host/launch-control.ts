@@ -1,4 +1,5 @@
 import { PrivateControlError, requestPrivateControl, startPrivateControlServer } from "../platform/control-transport.js";
+import { launchEditorNavigation } from "../synctex/editor-launch.js";
 import {
   MANAGEMENT_PROTOCOL_VERSION,
   isControlRequest,
@@ -158,6 +159,22 @@ async function dispatch(
     return { kind: request.kind, ...(target === undefined ? {} : { target }) };
   }
   if (request.kind === "electron-cancel-launch") return { kind: request.kind, canceled: host.electronRuntime.cancelLaunch(request.launchId) };
+  if (request.kind === "editor-control") {
+    return await host.lifecycle.runActivity<PlacekeeperControlResponse>(async () => {
+      if (request.request.operation === "forward" && (request.installation === undefined || request.installation.identity !== host.editorNavigation.installationIdentity)) {
+        return { kind: "editor-control", response: { ok: false, message: "Run forward-search from the current installed Placekeeper app" } };
+      }
+      const response = await host.editorNavigation.control(request.request);
+      if (response.ok && response.operation === "forward") {
+        try { await launchEditorNavigation(response.ticket, request.installation!.resources); }
+        catch (error) {
+          host.editorNavigation.cancelTicket(response.ticket);
+          return { kind: "editor-control", response: { ok: false, message: error instanceof Error ? error.message : "Could not open Placekeeper" } };
+        }
+      }
+      return { kind: "editor-control", response };
+    }) ?? { kind: "error", reason: "unavailable" };
+  }
   if (request.kind === "launch") {
     return { kind: "launch", response: await host.open(request.request) };
   }

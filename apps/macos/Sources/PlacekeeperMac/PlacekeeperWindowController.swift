@@ -66,6 +66,12 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
     private let schemeHandler: MacSchemeHandler
     private let attemptID: String
     private let runtimeID: String
+    var onSourceSetup: ((@escaping (Bool) -> Void) -> Void)?
+    func configureSourceNavigation() { onSourceSetup?({ _ in }) }
+    func goToSource() {
+        sendRuntimeMessage(["protocol": "placekeeper.review-runtime", "version": 4, "kind": "event",
+                            "runtimeId": runtimeID, "event": "host-command", "payload": ["command": "reverse-synctex"]])
+    }
     private let bridge: ReviewBridge
     private let displayName: String
     private let admission: MacReviewAdmission
@@ -180,6 +186,10 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
         super.init(window: window)
         bridge.successorInstaller = { [weak self] projection, completion in
             self?.installSuccessor(projection, completion: completion) ?? completion(false)
+        }
+        bridge.onSourceSetup = { [weak self] completion in
+            guard let self, let setup = self.onSourceSetup else { completion(false); return }
+            setup(completion)
         }
         bridge.onRefreshBudgetExceeded = { [weak self] in self?.presentRefreshBudgetAlert() }
         window.delegate = self

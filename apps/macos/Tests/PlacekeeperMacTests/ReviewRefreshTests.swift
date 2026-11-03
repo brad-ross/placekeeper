@@ -4,6 +4,11 @@ import XCTest
 private final class RefreshTestHelper: ReviewHelperRequesting {
     var requests: [(String, [String: Any], (MacReviewHelperReply?) -> Void)] = []
 
+    func reply(to type: String, with reply: MacReviewHelperReply) throws {
+        let index = try XCTUnwrap(requests.firstIndex { $0.0 == type }, "Missing \(type) request")
+        requests.remove(at: index).2(reply)
+    }
+
     func request(
         type: String,
         fields: [String: Any],
@@ -20,7 +25,8 @@ final class ReviewRefreshTests: XCTestCase {
         func projection(_ generation: Int) -> MacRuntimeProjection {
             .init(
                 sessionID: "11111111-1111-4111-8111-111111111111", generation: generation,
-                revision: generation - 1, state: [:], scope: [:], saveStatus: [:], protected: false,
+                revision: generation - 1, activeAuthoringDraftIds: [],
+                state: [:], scope: [:], saveStatus: [:], protected: false,
                 location: nil, documentDigest: String(repeating: String(generation), count: 64),
                 documentByteLength: 100 + generation
             )
@@ -100,7 +106,7 @@ final class ReviewRefreshTests: XCTestCase {
     }
 
     @MainActor
-    func testOversizedRefreshKeepsProjectionAndReportsRecoverableBudgetFailure() async {
+    func testOversizedRefreshKeepsProjectionAndReportsRecoverableBudgetFailure() async throws {
         let first = MacRuntimeProjection(
             sessionID: "11111111-1111-4111-8111-111111111111", generation: 1, revision: 0,
             activeAuthoringDraftIds: [],
@@ -144,13 +150,13 @@ final class ReviewRefreshTests: XCTestCase {
         helper.requests.removeFirst().2(.refreshed(first))
         await Task.yield()
         bridge.keepalive(send: { _ in })
-        helper.requests.removeFirst().2(.failure(code: "budget"))
+        try helper.reply(to: "keepalive", with: .failure(code: "budget"))
         await Task.yield()
         XCTAssertEqual(budgetFailures, 3, "A successful refresh clears the latch for a later failure")
     }
 
     @MainActor
-    func testConsecutiveRefreshesSerializeInstallationAndRejectRollback() async {
+    func testConsecutiveRefreshesSerializeInstallationAndRejectRollback() async throws {
         func projection(_ generation: Int) -> MacRuntimeProjection {
             .init(sessionID: "11111111-1111-4111-8111-111111111111", generation: generation,
                 revision: generation, activeAuthoringDraftIds: [],
@@ -185,8 +191,8 @@ final class ReviewRefreshTests: XCTestCase {
         installations.removeFirst().1(true)
         await Task.yield()
         XCTAssertEqual(generations, [2])
-        XCTAssertEqual(helper.requests.first?.0, "refresh")
-        helper.requests.removeFirst().2(.refreshed(projection(3)))
+        XCTAssertEqual(helper.requests.filter { $0.0 == "refresh" }.count, 1)
+        try helper.reply(to: "refresh", with: .refreshed(projection(3)))
         await Task.yield()
         XCTAssertEqual(installations.map(\.0), [3])
         installations.removeFirst().1(true)
@@ -195,7 +201,7 @@ final class ReviewRefreshTests: XCTestCase {
         XCTAssertEqual(bridge.projection.generation, 3)
 
         bridge.keepalive(send: send)
-        helper.requests.removeFirst().2(.refreshed(projection(2)))
+        try helper.reply(to: "keepalive", with: .refreshed(projection(2)))
         await Task.yield()
         XCTAssertEqual(bridge.projection.generation, 3)
         XCTAssertEqual(generations, [2, 3])

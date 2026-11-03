@@ -32,6 +32,7 @@ export function prepareGenerationSyncTexBinding(input: {
   readonly current: DurableGenerationRecordV1;
   readonly lineage: readonly DurableGenerationRecordV1[];
   readonly outputPath: string;
+  readonly sidecarDirectory?: string;
   readonly operationToken: string;
   readonly getSourceRoot: () => string | undefined;
 }): PreparedGenerationSyncTexBinding | Promise<PreparedGenerationSyncTexBinding> {
@@ -75,6 +76,7 @@ export function prepareGenerationSyncTexBinding(input: {
     try {
       sidecar = await snapshotGenerationSyncTexSidecar({
         outputPath: input.outputPath,
+        ...(input.sidecarDirectory === undefined ? {} : { sidecarDirectory: input.sidecarDirectory }),
         privatePdfPath: current.snapshotPath,
         outputIdentity: current.outputIdentity,
         pdfDigest: current.digest,
@@ -98,7 +100,6 @@ export function prepareGenerationSyncTexBinding(input: {
   })();
 }
 
-// The broker separately checks session lifetime and its newest operation token.
 export function matchesGenerationSyncTexBinding(
   current: DurableGenerationRecordV1 | undefined,
   sourceRoot: string | undefined,

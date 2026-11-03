@@ -26,6 +26,7 @@ declare module "vscode" {
   export interface WorkspaceFolder { readonly uri: Uri }
   export interface WorkspaceConfiguration {
     get<T>(key: string): T | undefined;
+    get<T>(key: string, defaultValue: T): T;
     inspect<T>(key: string): { readonly workspaceValue?: T } | undefined;
     update(key: string, value: unknown, target: ConfigurationTarget): Promise<void>;
   }
@@ -39,9 +40,10 @@ declare module "vscode" {
     readonly isTrusted: boolean;
     readonly workspaceFolders?: readonly WorkspaceFolder[];
     getWorkspaceFolder(uri: Uri): WorkspaceFolder | undefined;
-    getConfiguration(section?: string): WorkspaceConfiguration;
+    getConfiguration(section?: string, scope?: Uri): WorkspaceConfiguration;
     findFiles(include: string, exclude?: string, maxResults?: number): Promise<readonly Uri[]>;
     createFileSystemWatcher(glob: RelativePattern): FileSystemWatcher;
+    onDidChangeConfiguration(listener: (event: { affectsConfiguration(section: string, scope?: Uri): boolean }) => unknown): Disposable;
     onDidSaveTextDocument(listener: (document: TextDocument) => unknown): Disposable;
     openTextDocument(uri: Uri): Promise<TextDocument>;
   };

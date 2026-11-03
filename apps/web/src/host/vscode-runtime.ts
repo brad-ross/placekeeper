@@ -1,3 +1,4 @@
+import { nativeSyncTexResponse } from "../../../../packages/core/src/native-synctex-protocol.js";
 import { REVIEW_COMMAND_IDS } from "../review/review-command-surface.js";
 import type { SaveDestinationResult } from "./session-contracts.js";
 import type { SaveStatus } from "../../../../packages/core/src/save-status.js";
@@ -135,15 +136,18 @@ function activeAuthoringDraftIds(value: unknown): readonly string[] {
 
 function validHostCommand(value: unknown): value is HostRuntimeCommand {
   if (!isObject(value) || typeof value.command !== "string") return false;
+  if (value.command === "source-navigation") return Object.keys(value).length === 2 && nativeSyncTexResponse("forwardSyncTex", value.state) !== undefined;
   if (value.command === "review-command") {
     return Object.keys(value).length === 2 && typeof value.id === "string"
       && (REVIEW_COMMAND_IDS as readonly string[]).includes(value.id);
   }
   if (value.command === "reattach" || value.command === "export-reviewed-pdf"
-    || value.command === "reverse-synctex") {
+    || value.command === "reverse-synctex" || value.command === "cancel-synctex") {
     return Object.keys(value).length === 1;
   }
-  return value.command === "forward-synctex" && Object.keys(value).length === 4 &&
+  return value.command === "forward-synctex" &&
+    Object.keys(value).length === (value.explicitSequence === undefined ? 4 : 5) &&
+    (value.explicitSequence === undefined || (Number.isSafeInteger(value.explicitSequence) && (value.explicitSequence as number) > 0)) &&
     Number.isSafeInteger(value.documentGeneration) && (value.documentGeneration as number) >= 0 &&
     Number.isSafeInteger(value.pageIndex) && (value.pageIndex as number) >= 0 &&
     isObject(value.point) && Object.keys(value.point).length === 2 &&
@@ -311,7 +315,8 @@ export function createRpcHostRuntime(
     }
     if (message.version !== REVIEW_RUNTIME_VERSION) return;
     if (message.kind === "event" && message.event === "host-command") {
-      if (host !== "vscode" || !validHostCommand(message.payload)) return;
+      if (!validHostCommand(message.payload)) return;
+      if (host === "macos" ? !["source-navigation", "reverse-synctex"].includes(message.payload.command) : host !== "vscode" || message.payload.command === "source-navigation") return;
       if (hostCommands.size === 0) pendingHostCommand = message.payload;
       else for (const listener of hostCommands) listener(message.payload);
       return;

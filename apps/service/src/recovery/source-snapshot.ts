@@ -232,6 +232,7 @@ export async function stagedGenerationSourceIsCurrent(
  * PDF snapshot. The mutable output and sidecar are both re-fenced, so queries
  * never run against the build directory and a late/partial pair is not bound. */
 export async function snapshotGenerationSyncTexSidecar(input: {
+  readonly sidecarDirectory?: string;
   readonly outputPath: string;
   readonly privatePdfPath: string;
   readonly outputIdentity: GenerationOutputIdentity;
@@ -243,7 +244,8 @@ export async function snapshotGenerationSyncTexSidecar(input: {
   const outputStem = extension.toLowerCase() === ".pdf"
     ? input.outputPath.slice(0, -extension.length)
     : input.outputPath;
-  const candidates = [`${outputStem}.synctex`, `${outputStem}.synctex.gz`];
+  const sidecarStem = input.sidecarDirectory === undefined ? outputStem : join(input.sidecarDirectory, basename(outputStem));
+  const candidates = [`${sidecarStem}.synctex`, `${sidecarStem}.synctex.gz`];
   const present = (await Promise.all(candidates.map(async (path) => {
     const info = await lstat(path).catch((error: NodeJS.ErrnoException) => {
       if (error.code === "ENOENT") return undefined;

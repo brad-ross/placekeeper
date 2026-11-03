@@ -24,6 +24,8 @@ import {
   focusViewerDestination,
 } from '../src/pdf/viewer-navigation-adapter.js';
 import type { ViewerRunway } from '../src/pdf/viewer-framing.js';
+import { createTextFitLayout } from '../src/pdf/text-fit-layout.js';
+import type { PdfDocumentObject, PdfGlyphObject } from '@embedpdf/models';
 
 const page = { width: 600, height: 800 } as const;
 const viewport = { width: 620, height: 820, gap: 10 } as const;
@@ -286,6 +288,9 @@ function domRect(rect: RectState): DOMRect {
 }
 
 function navigationHarness(options: {
+  glyphRead?: () => Promise<PdfGlyphObject[]>;
+  quantizeZoom?: boolean;
+  horizontalScrollbarHeight?: number;
   activeDocumentId?: string;
   classicScrollbarWidth?: number;
   constrainedHorizontal?: boolean;
@@ -308,6 +313,7 @@ function navigationHarness(options: {
   horizontalScrollLimit?: number;
   horizontalRangeOverstatement?: number;
   readingViewportWidth?: number;
+  readingViewportHeight?: number;
   staleViewportMetricsReads?: number;
   staleCurrentPageWithThirdVisible?: boolean;
   reportedPageAfterZoom?: number;
@@ -373,7 +379,7 @@ function navigationHarness(options: {
       return options.viewportClientWidth
         ?? viewportRect.width - (options.classicScrollbarWidth ?? 0);
     },
-    get clientHeight() { return viewportRect.height; },
+    get clientHeight() { return viewportRect.height - (pageRect.width >= viewportRect.width ? options.horizontalScrollbarHeight ?? 0 : 0); },
     get scrollLeft() { return viewportScrollLeft; },
     get scrollTop() { return viewportScrollTop; },
     scrollTo(position: ScrollToOptions) {
@@ -446,6 +452,7 @@ function navigationHarness(options: {
   const activityListeners = new Set<(activity: { isScrolling: boolean; isSmoothScrolling: boolean }) => void>();
 
   const emitZoom = (zoom: number) => {
+    if (options.quantizeZoom) zoom = Math.floor(zoom * 1_000) / 1_000;
     const oldZoom = currentZoom;
     const oldPageRect = { ...pageRect };
     const oldThirdPageRect = { ...thirdPageRect };
@@ -629,6 +636,7 @@ function navigationHarness(options: {
     },
   });
   const registry = {
+    getEngine: () => ({ getPageGlyphs: () => ({ toPromise: options.glyphRead ?? (async () => []), abort: () => undefined }) }),
     getStore: () => ({
       getState: () => ({ core: coreState() }),
       subscribe: (listener: () => void) => {
@@ -644,14 +652,18 @@ function navigationHarness(options: {
           ? { provides: () => ({ forDocument: () => zoom }) }
           : null,
   } as unknown as PluginRegistry;
+  const readingLayout = createTextFitLayout();
+  readingLayout.replaceDocument(document as PdfDocumentObject, 4);
   const navigation = createViewerNavigation({
+    readingLayout,
     registry,
     root: () => root,
     documentId: 'doc',
     documentGeneration: 4,
-    ...(options.readingViewportWidth === undefined ? {} : {
+    ...(options.readingViewportWidth === undefined && options.readingViewportHeight === undefined ? {} : {
       readingViewport: () => ({ getBoundingClientRect: () => domRect({
-        ...viewportRect, width: options.readingViewportWidth!,
+        ...viewportRect, width: options.readingViewportWidth ?? viewportRect.width,
+        height: options.readingViewportHeight ?? viewportRect.height,
       }) }) as HTMLElement,
     }),
     runway: () => options.runway ?? { right: 0, bottom: 0 },
@@ -670,6 +682,7 @@ function navigationHarness(options: {
 
   return {
     navigation,
+    readingLayout,
     log,
     paintedPages,
     pageRect,
@@ -936,6 +949,123 @@ describe('viewer navigation adapter', () => {
 
     expect(await harness.navigation.fitToWidth()).toBe(true);
     expect(harness.log).toContain(`zoom:${580 / 600}`);
+  });
+
+  it('fits the whole page and recalculates for a height-only resize', async () => {
+    const harness = navigationHarness({ viewportGap: 10 });
+    expect(await harness.navigation.fitToMode?.('page')).toBe(true);
+    expect(harness.pageRect.height).toBeCloseTo(380);
+    expect(harness.pageRect.top).toBeCloseTo(10);
+    expect(harness.navigation.getFitState?.()).toMatchObject({ selectedMode: 'page', effectiveMode: 'page', active: true });
+    harness.resizeViewport(600, 600);
+    expect(await harness.navigation.refit?.()).toBe(true);
+    expect(harness.pageRect.height).toBeCloseTo(580);
+  });
+
+  it('retains fit ownership when the viewer quantizes its requested scale', async () => {
+    const harness = navigationHarness({ viewportGap: 10, quantizeZoom: true });
+    harness.resizeViewport(600, 675);
+    expect(await harness.navigation.fitToMode?.('page')).toBe(true);
+    expect(harness.navigation.getFitState?.().active).toBe(true);
+    expect(harness.pageRect.height).toBeCloseTo(654.4);
+  });
+
+  it('keeps a whole-page fit when its zoom removes the horizontal scrollbar', async () => {
+    const harness = navigationHarness({ viewportGap: 10, horizontalScrollbarHeight: 15 });
+    expect(await harness.navigation.fitToMode?.('page')).toBe(true);
+    expect(harness.pageRect.height).toBeCloseTo(365);
+    expect(harness.navigation.getFitState?.().active).toBe(true);
+  });
+
+  it('fits within the visible reading height when the native scrollport extends below it', async () => {
+    const harness = navigationHarness({ viewportGap: 10, readingViewportHeight: 300 });
+    expect(await harness.navigation.fitToMode?.('page')).toBe(true);
+    expect(harness.pageRect.height).toBeCloseTo(280);
+    expect(harness.pageRect.top).toBeCloseTo(10);
+  });
+
+  it('reports textless fallback and preserves the selected cycle entry', async () => {
+    const harness = navigationHarness({ viewportGap: 10 });
+    expect(await harness.navigation.fitToMode?.('text')).toBe(true);
+    expect(harness.navigation.getFitState?.()).toMatchObject({ selectedMode: 'text', effectiveMode: 'width', active: true, fallback: true });
+    expect(harness.readingLayout.getSnapshot().alignment).toBe('page');
+  });
+
+  it('fits body text, retains its alignment after manual zoom, and restores page alignment explicitly', async () => {
+    const glyphs = Array.from({ length: 12 }, (_, row) => Array.from({ length: 60 }, (_, column) => ({
+      origin: { x: 100 + column * 5, y: 100 + row * 20 }, size: { width: 5, height: 10 },
+    }))).flat();
+    const harness = navigationHarness({ glyphRead: async () => glyphs });
+    expect(await harness.navigation.fitToMode?.('text')).toBe(true);
+    expect(harness.navigation.captureLocation()?.zoom).toBeCloseTo((600 - 48) / 300);
+    expect(harness.readingLayout.getSnapshot().alignment).toBe('text');
+    harness.navigation.manualZoom?.();
+    harness.completeZoom(2);
+    expect(harness.navigation.getFitState?.()).toMatchObject({ selectedMode: 'text', active: false });
+    expect(harness.readingLayout.getSnapshot().alignment).toBe('text');
+    expect(await harness.navigation.fitToMode?.('page')).toBe(true);
+    expect(harness.readingLayout.getSnapshot().alignment).toBe('page');
+  });
+
+  it('does not turn cancelled text preparation into a width fallback', async () => {
+    const harness = navigationHarness({ glyphRead: () => new Promise(() => undefined) });
+    const preparing = harness.navigation.fitToMode?.('text');
+    await vi.waitFor(() => expect(harness.navigation.getFitState?.().pending).toBe(true));
+    await harness.navigation.cancelPendingNavigation();
+    expect(await preparing).toBe(false);
+    expect(harness.log.filter((item) => item.startsWith('zoom:'))).toEqual([]);
+    expect(harness.navigation.getFitState?.()).toMatchObject({ selectedMode: 'width', active: false, pending: false, fallback: false });
+  });
+
+  it('clears active fit on manual intent at the same scale without clearing alignment', async () => {
+    const harness = navigationHarness({ viewportGap: 10 });
+    expect(await harness.navigation.fitToWidth()).toBe(true);
+    harness.readingLayout.setAlignment('text');
+    harness.navigation.manualZoom?.();
+    expect(harness.navigation.getFitState?.()).toMatchObject({ selectedMode: 'width', active: false });
+    expect(harness.navigation.followsFitWidth?.()).toBe(false);
+    expect(harness.readingLayout.getSnapshot().alignment).toBe('text');
+  });
+
+  it('lets manual zoom retain the visible baseline while an unfinished fit is cancelled', async () => {
+    let manualScale: number | null = null;
+    const harness = navigationHarness({
+      viewportGap: 10,
+      onNextFrame: () => {
+        if (manualScale !== null || !harness.log.some((entry) => entry.startsWith('zoom:'))) return;
+        manualScale = harness.navigation.captureLocation()!.zoom * 1.1;
+        harness.navigation.manualZoom?.();
+        harness.completeZoom(manualScale);
+      },
+    });
+    expect(await harness.navigation.fitToMode?.('page')).toBe(false);
+    await harness.navigation.cancelPendingNavigation();
+    expect(manualScale).not.toBeNull();
+    expect(harness.navigation.captureLocation()?.zoom).toBeCloseTo(manualScale!);
+    expect(harness.navigation.getFitState?.()).toMatchObject({ active: false, pending: false });
+  });
+
+  it('restores a prior text fit when a page fit is cancelled after its zoom commits', async () => {
+    const glyphs = Array.from({ length: 12 }, (_, row) => Array.from({ length: 60 }, (_, column) => ({
+      origin: { x: 100 + column * 5, y: 100 + row * 20 }, size: { width: 5, height: 10 },
+    }))).flat();
+    let cancelPageFit = false;
+    const harness = navigationHarness({
+      glyphRead: async () => glyphs,
+      onNextFrame: () => {
+        if (!cancelPageFit || harness.readingLayout.getSnapshot().alignment !== 'page') return;
+        cancelPageFit = false;
+        void harness.navigation.cancelPendingNavigation();
+      },
+    });
+    expect(await harness.navigation.fitToMode?.('text')).toBe(true);
+    const prior = harness.navigation.captureLocation()!;
+    cancelPageFit = true;
+    expect(await harness.navigation.fitToMode?.('page')).toBe(false);
+    await harness.navigation.cancelPendingNavigation();
+    expect(harness.readingLayout.getSnapshot().alignment).toBe('text');
+    expect(harness.navigation.captureLocation()?.zoom).toBeCloseTo(prior.zoom);
+    expect(harness.navigation.getFitState?.()).toMatchObject({ selectedMode: 'text', active: true, pending: false });
   });
 
   it('fills a wide viewport beyond 150 percent and centers the page', async () => {

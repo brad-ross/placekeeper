@@ -77,8 +77,8 @@ export class RebuildObserver<Result> {
     await this.#run(this.#latestEpoch, reason);
   }
 
-  async tick(): Promise<void> {
-    if (this.#disposed || !this.#possiblyStale) return;
+  async tick(navigationPending = false): Promise<void> {
+    if (this.#disposed || (!this.#possiblyStale && !navigationPending)) return;
     this.#latestEpoch += 1;
     await this.#run(this.#latestEpoch, "interval");
   }

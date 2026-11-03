@@ -4,6 +4,11 @@ import XCTest
 private final class LifecycleTestHelper: ReviewHelperRequesting {
     var requests: [(String, [String: Any], (MacReviewHelperReply?) -> Void)] = []
 
+    func reply(to type: String, with reply: MacReviewHelperReply) throws {
+        let index = try XCTUnwrap(requests.firstIndex { $0.0 == type }, "Missing \(type) request")
+        requests.remove(at: index).2(reply)
+    }
+
     func request(
         type: String,
         fields: [String: Any],
@@ -63,19 +68,19 @@ final class ReviewBridgeLifecycleTests: XCTestCase {
     }
 
     @MainActor
-    func testLifecycleDifferenceCannotBypassRevisionOrGenerationRegressionFence() async {
+    func testLifecycleDifferenceCannotBypassRevisionOrGenerationRegressionFence() async throws {
         let initial = projection(freshness: "current", savePhase: "not-saved")
         let (bridge, helper) = await activatedBridge(initial: initial)
         var events: [[String: Any]] = []
 
         bridge.keepalive(send: { events.append($0) })
-        helper.requests.removeFirst().2(.refreshed(projection(
+        try helper.reply(to: "keepalive", with: .refreshed(projection(
             generation: 2, revision: 6, freshness: "possibly-stale", savePhase: "saving"
         )))
         await Task.yield()
 
         bridge.keepalive(send: { events.append($0) })
-        helper.requests.removeFirst().2(.refreshed(projection(
+        try helper.reply(to: "keepalive", with: .refreshed(projection(
             generation: 1, revision: 99, freshness: "possibly-stale", savePhase: "saving"
         )))
         await Task.yield()
@@ -119,6 +124,7 @@ final class ReviewBridgeLifecycleTests: XCTestCase {
             sessionID: "11111111-1111-4111-8111-111111111111",
             generation: generation,
             revision: revision,
+            activeAuthoringDraftIds: [],
             state: ["workflow": ["freshness": freshness]],
             scope: ["kind": "local"],
             saveStatus: ["sync": ["phase": savePhase]],

@@ -778,9 +778,10 @@ describe("one production review tree", () => {
       publishResult,
     );
     current = false;
-    resolveApply(false);
+    resolveApply(true);
     await request;
     expect(publishResult).not.toHaveBeenCalled();
+    expect(navigation.focusAtDestination).not.toHaveBeenCalled();
 
     await runHostForwardSyncTexRequest(
       { ...navigation, applyLocation: vi.fn(async () => { throw new Error("viewer replaced"); }) },
@@ -1136,6 +1137,7 @@ describe("one production review tree", () => {
     const browserHtml = renderSurface("browser");
 
     expect(html).toContain("Generation 8 viewer");
+    expect(html).toContain('data-location-restore-status="restoring"');
     expect(html).toContain('data-launch-surface="vscode"');
     expect(html).not.toContain('data-reconciliation-workspace');
     expect(html).toContain('aria-label="Annotations"');

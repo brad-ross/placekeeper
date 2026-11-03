@@ -105,7 +105,7 @@ export interface ViewerSourceMarkInteraction {
 export type ViewerInteractionEvent = (
   | { readonly type: 'readiness'; readonly ready: boolean; readonly reason?: string }
   | { readonly type: 'page'; readonly currentPage: number; readonly totalPages: number }
-  | { readonly type: 'zoom'; readonly zoomPercent: number }
+  | { readonly type: 'zoom'; readonly zoomPercent: number; readonly oldZoom?: number; readonly newZoom?: number }
   | { readonly type: 'scroll' }
   | { readonly type: 'selection-placement'; readonly value: ViewerSelectionPlacement | null }
   | { readonly type: 'caret'; readonly value: ViewerCaretUpdate }

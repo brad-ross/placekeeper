@@ -3,7 +3,7 @@ import { useZoomCapability, ZoomGestureWrapper } from '@embedpdf/plugin-zoom/rea
 import { anchoredZoom, cancelZoomAnimation, FINISH_ZOOM_GESTURE } from './anchored-zoom.js';
 
 /** Preview gestures on the compositor; rebuild PDF layout only when they settle. */
-export function AnchoredZoomGestureWrapper(props: ComponentProps<typeof ZoomGestureWrapper>) {
+export function AnchoredZoomGestureWrapper({ onManualZoom, ...props }: ComponentProps<typeof ZoomGestureWrapper> & { onManualZoom?: () => void }) {
   const marker = useRef<HTMLSpanElement>(null);
   const { provides: zoomCapability } = useZoomCapability();
   useLayoutEffect(() => {
@@ -36,6 +36,7 @@ export function AnchoredZoomGestureWrapper(props: ComponentProps<typeof ZoomGest
     };
     const preview = (factor: number, point: { x: number; y: number }) => {
       if (!gesture) {
+        onManualZoom?.();
         cancelZoomAnimation(viewport);
         const bounds = content.getBoundingClientRect();
         gesture = { initialZoom: zoom.getState().currentZoomLevel, scale: 1,
@@ -110,7 +111,7 @@ export function AnchoredZoomGestureWrapper(props: ComponentProps<typeof ZoomGest
       window.removeEventListener('blur', commit);
       window.removeEventListener('resize', commit);
     };
-  }, [zoomCapability, props.documentId]);
+  }, [zoomCapability, props.documentId, onManualZoom]);
   return <ZoomGestureWrapper {...props} data-viewer-zoom-content enableWheel={false} enablePinch={false}>
     <span ref={marker} hidden />
     {props.children}

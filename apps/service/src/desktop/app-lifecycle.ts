@@ -1,3 +1,4 @@
+import type { EditorNavigation } from "../synctex/editor-navigation.js";
 import {
   parseNativeAppControlMessage,
   type NativeAppControlMessage,
@@ -13,6 +14,7 @@ interface AppRecord {
   readonly processId: number;
   readonly startIdentity: string;
   readonly buildIdentity: string;
+  readonly installationIdentity?: string;
   readonly helpers: Set<string>;
   readonly retiredHelpers: Set<string>;
   readonly pendingHelpers: Map<string, Promise<void>>;
@@ -27,7 +29,7 @@ export class NativeAppLifecycleManager {
   readonly #probeProcess: (processId: number) => void;
   readonly #apps = new Map<string, AppRecord>();
 
-  constructor(runtime: RuntimeDetacher, options: { readonly probeProcess?: (processId: number) => void } = {}) {
+  constructor(runtime: RuntimeDetacher, options: { readonly probeProcess?: (processId: number) => void } = {}, readonly navigation?: EditorNavigation, readonly helperPdfPath?: (helperId: string) => string | undefined) {
     this.#runtime = runtime;
     this.#probeProcess = options.probeProcess ?? ((processId) => { process.kill(processId, 0); });
   }
@@ -67,6 +69,30 @@ export class NativeAppLifecycleManager {
     const app = this.#apps.get(message.appInstanceId);
     if (app === undefined) return this.#failure(message, "unregistered");
     if (app.retiring) return this.#failure(message, "busy");
+    if (message.type === "editor-profiles") {
+      const profiles = await this.navigation?.profiles.list() ?? [];
+      return { protocolVersion: 1, type: "editor-profiles", appInstanceId: app.appInstanceId, profiles: profiles.map(({ name, kind }) => ({ name, kind })) };
+    }
+    if (message.type === "associate-editor") {
+      const path = app.helpers.has(message.helperId) ? this.helperPdfPath?.(message.helperId) : undefined;
+      try {
+        const accepted = path !== undefined && await this.navigation?.associate(message.helperId, app.appInstanceId, path,
+          { profile: message.profile, sourceRoot: message.sourceRoot, ...(message.socket === undefined ? {} : { socket: message.socket }) },
+          () => this.#apps.get(app.appInstanceId) === app && app.helpers.has(message.helperId) && this.helperPdfPath?.(message.helperId) === path);
+        if (accepted) return this.#ack(app.appInstanceId);
+      } catch {}
+      return { protocolVersion: 1, type: "navigation-unavailable", appInstanceId: app.appInstanceId };
+    }
+    if (message.type === "bind-navigation") {
+      const path = app.helpers.has(message.helperId) ? this.helperPdfPath?.(message.helperId) : undefined;
+      const intent = path === undefined ? undefined : this.navigation?.claim(message.navigationHandle, app.appInstanceId, message.helperId, path);
+      return intent === undefined ? { protocolVersion: 1, type: "navigation-unavailable", appInstanceId: app.appInstanceId } : this.#ack(app.appInstanceId);
+    }
+    if (message.type === "redeem-navigation") {
+      const result = app.installationIdentity === undefined ? undefined : this.navigation?.redeem(message.ticket, app.appInstanceId, app.installationIdentity);
+      return result === undefined ? { protocolVersion: 1, type: "navigation-unavailable", appInstanceId: app.appInstanceId }
+        : { protocolVersion: 1, type: "navigation", appInstanceId: app.appInstanceId, ...result };
+    }
     if (message.type === "activity") {
       if (message.activeWindows < app.helpers.size) return this.#failure(message, "invalid");
       app.activeWindows = message.activeWindows;
@@ -105,6 +131,13 @@ export class NativeAppLifecycleManager {
     return app === undefined ? Promise.resolve() : this.#detachHelper(app, helperId);
   }
 
+  admitsNavigation(helperId: string, navigationHandle: string, canonicalPdfPath: string): boolean {
+    for (const app of this.#apps.values()) {
+      if (app.helpers.has(helperId)) return this.navigation?.admissionIntent(navigationHandle, app.appInstanceId, canonicalPdfPath) !== undefined;
+    }
+    return false;
+  }
+
   ownsHelper(appInstanceId: string, helperId: string): boolean {
     const app = this.#apps.get(appInstanceId);
     return app !== undefined && !app.retiring && !app.retiredHelpers.has(helperId) && app.helpers.has(helperId);
@@ -131,6 +164,7 @@ export class NativeAppLifecycleManager {
       processId: message.processId,
       startIdentity: message.startIdentity,
       buildIdentity: message.buildIdentity,
+      ...(message.installationIdentity === undefined ? {} : { installationIdentity: message.installationIdentity }),
       helpers: new Set(),
       retiredHelpers: new Set(),
       pendingHelpers: new Map(),
@@ -146,6 +180,7 @@ export class NativeAppLifecycleManager {
     if (app === undefined) return Promise.resolve();
     if (app.retirement !== undefined) return app.retirement;
     app.retiring = true;
+    this.navigation?.detachApp(appInstanceId);
     const retirement = Promise.all([...new Set([...app.helpers, ...app.pendingHelpers.keys()])]
       .map((helperId) => this.#detachHelper(app, helperId)))
       .then(() => {
@@ -159,6 +194,7 @@ export class NativeAppLifecycleManager {
     // Retire identity before awaiting cleanup so delayed admissions cannot
     // reacquire it. Keep the app counted until every accepted operation settles.
     app.retiredHelpers.add(helperId);
+    this.navigation?.detachHelper(helperId);
     const existing = app.pendingHelpers.get(helperId);
     if (existing !== undefined) return existing;
     if (!app.helpers.has(helperId)) return Promise.resolve();

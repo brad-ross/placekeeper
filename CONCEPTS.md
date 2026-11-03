@@ -53,6 +53,11 @@ The same annotation can appear on multiple surfaces; shared annotation identity 
 
 ## Review toolbar
 
+### Fit Text
+A reading view that fits the body-text block to the usable viewport at a shared zoom and centers each page by its reading area rather than its page edges.
+
+Text-centered alignment can remain after manual zoom, even though the zoom percentage is then custom rather than an active fit.
+
 ### Toolbar Presentation
 One of an ordered set of compositions for the single-row review toolbar, from all control groups shown directly to groups tucked behind compact triggers, chosen by measuring what actually fits rather than by fixed breakpoints.
 *Avoid:* Responsive Toolbar Presentation, toolbar mode
@@ -87,3 +92,15 @@ Its identity changes independently of semantic edits; a source Document Generati
 The durable relationship between the desired annotation state and the state last verified in the Save Destination.
 
 Recoverable work need not yet be saved in the PDF, and a successful write of older annotation state does not make newer edits saved.
+
+## Source navigation
+
+### Return Editor
+The editor associated with one Placekeeper viewer for PDF-to-source navigation.
+
+For a shared native PDF window, the latest explicit editor navigation request sets this association; background refresh and automatic following do not change it. A directly opened viewer obtains an editor choice when reverse search first needs one. An embedded VS Code viewer retains its own host association.
+
+### Source Navigation Intent
+A captured source position whose request remains associated with the user's navigation choice while Placekeeper waits for a usable PDF mapping.
+
+An explicit request retains its original position even if the editor cursor moves. Newer explicit navigation supersedes older pending navigation; automatic following cannot replace the user's newer explicit choice. The intent does not itself grant source access or establish that a particular Document Generation is ready.

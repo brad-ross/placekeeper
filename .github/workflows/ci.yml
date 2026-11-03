@@ -7,6 +7,10 @@ on:
       desktop_candidate:
         description: Build desktop personal candidates instead of the usual CI suite
         required: false
+        default: false
+        type: boolean
+      native_only:
+        description: Run only the native macOS Swift tests
         type: boolean
         default: false
 
@@ -21,8 +25,22 @@ jobs:
   desktop-candidate:
     if: inputs.desktop_candidate
     uses: ./.github/workflows/desktop-candidate.yml
-  test:
+  native:
     if: ${{ !inputs.desktop_candidate }}
+    runs-on: macos-15
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Record Xcode and Swift versions
+        run: |
+          xcodebuild -version
+          swift --version
+      - name: Run native macOS tests
+        run: swift test --package-path apps/macos
+
+  test:
+    if: ${{ !inputs.native_only && !inputs.desktop_candidate }}
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:

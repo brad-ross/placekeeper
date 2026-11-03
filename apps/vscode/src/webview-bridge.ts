@@ -1,3 +1,4 @@
+import { nativeSyncTexRequest } from "../../../packages/core/src/native-synctex-protocol.js";
 import {
   ReviewExportConflictError,
   isReadingLocationResolutionRequest,
@@ -135,9 +136,11 @@ function validPayload(method: ReviewRuntimeMethod, payload: unknown): boolean {
   if (!isObject(payload) || containsCapabilityPrimitive(payload)) return false;
   const keys = Object.keys(payload);
   if (["bootstrap", "presence", "detach", "saveStatus", "saveProposal", "chooseFolder",
-    "retrySave", "locateSave", "scope", "forwardSyncTex"].includes(method)) {
+    "retrySave", "locateSave", "scope"].includes(method)) {
     return keys.length === 0;
   }
+  if (method === "forwardSyncTex") return keys.length === 0 ||
+    (payload.action === "ack" && nativeSyncTexRequest("forwardSyncTex", payload) !== undefined);
   if (method === "chooseOriginal") {
     return keys.every((key) => key === "confirmation") &&
       (payload.confirmation === undefined || isSaveDestinationConfirmation(payload.confirmation));
@@ -227,6 +230,10 @@ export class VersionedWebviewBridge {
   readonly #active = new Map<string, AbortController>();
   readonly #unsubscribeInvalidations: () => void;
   #disposed = false;
+  #markReady!: (ready: boolean) => void;
+  readonly #ready = new Promise<boolean>((resolve) => { this.#markReady = resolve; });
+
+  whenReady(): Promise<boolean> { return this.#ready; }
 
   constructor(client: TrustedRuntimeClient, postMessage: (message: unknown) => unknown) {
     this.#client = client;
@@ -258,6 +265,8 @@ export class VersionedWebviewBridge {
     if (cancelled !== undefined) { this.#active.get(cancelled.requestId)?.abort(); return; }
     const request = parseWebviewRequest(value, this.#client.identity, this.#seen);
     if (request === undefined) return;
+    // A valid bootstrap proves the runtime message listener is installed.
+    if (request.method === "bootstrap") this.#markReady(true);
     this.#seen.add(request.requestId);
     if (this.#seen.size > 512) {
       const oldest = this.#seen.values().next().value;
@@ -297,6 +306,7 @@ export class VersionedWebviewBridge {
   dispose(): void {
     if (this.#disposed) return;
     this.#disposed = true;
+    this.#markReady(false);
     this.#unsubscribeInvalidations();
     for (const controller of this.#active.values()) controller.abort();
     this.#active.clear();
@@ -328,11 +338,17 @@ export interface LoopbackRuntimeClientOptions {
     readonly column?: number;
   } | undefined;
   readonly sourceNavigationAllowed?: () => boolean;
+  readonly acknowledgeForwardNavigation?: (ack: { readonly sequence: number; readonly generation: number;
+    readonly outcome: "applied" | "superseded" | "failed" }) => void;
+  readonly beginReverseNavigation?: () => {
+    readonly isCurrent: () => boolean;
+    readonly finish: () => void;
+  };
   readonly openSourceLocation?: (location: {
     readonly sourcePath: string;
     readonly line: number;
     readonly column?: number;
-  }) => Promise<void>;
+  }, isCurrent: () => boolean) => Promise<void>;
 }
 
 function safeScope(value: unknown): unknown {
@@ -526,94 +542,113 @@ export function createLoopbackRuntimeClient(options: LoopbackRuntimeClientOption
     async invoke(method, payload, signal) {
       if (method === "presence") { connectInvalidations(); return {}; }
       if (method === "detach") return {};
+      if (method === "forwardSyncTex" && isObject(payload) && payload.action === "ack") {
+        if (nativeSyncTexRequest("forwardSyncTex", payload) === undefined) throw new Error("Invalid navigation acknowledgement");
+        options.acknowledgeForwardNavigation?.(payload as { sequence: number; generation: number; outcome: "applied" | "superseded" | "failed" });
+        return {};
+      }
       const route = routes[method];
       if (route === undefined) throw new Error("Runtime method is not allowlisted");
-      let trustedPayload = payload;
-      if (method === "forwardSyncTex") {
-        const location = options.forwardSourceLocation?.();
-        if (location === undefined) throw new Error("An active local LaTeX source location is required");
-        trustedPayload = {
-          ...location,
-          operationToken: randomBytes(18).toString("base64url"),
-        };
-      } else if (method === "reverseSyncTex") {
-        if (options.sourceNavigationAllowed?.() === false) {
-          return { status: "failed", reason: "workspace-untrusted" };
-        }
-        trustedPayload = {
-          ...(isObject(payload) ? payload : {}),
-          operationToken: randomBytes(18).toString("base64url"),
-        };
-      }
-      let value: unknown;
-      if (method === "command") {
-        const attachment = commandRequiresAttachment(trustedPayload)
-          ? interactionAttachment ?? await attachmentReady.promise
-          : undefined;
-        const response = await request(route.path, {
-          method: "POST",
-          body: JSON.stringify(attachment === undefined
-            ? trustedPayload
-            : { command: trustedPayload, attachment }),
-          headers: { "x-placekeeper-generation": String(identity.generation) },
-        }, signal, [409]);
-        const responseText = await response.text();
-        if (Buffer.byteLength(responseText) > 1_048_576) {
-          throw new Error("Trusted broker response exceeded the limit");
-        }
-        const responseValue = JSON.parse(responseText) as unknown;
-        if (response.status === 409) {
-          const currentState = await json("/state", {}, signal);
-          const generationConflict = isObject(responseValue) && responseValue.ok === false &&
-            isObject(responseValue.error) && responseValue.error.kind === "generation-conflict";
-          value = {
-            accepted: false,
-            state: safeState(currentState),
-            message: generationConflict
-              ? "The PDF was rebuilt before this command could be applied. Review the current generation and retry explicitly."
-              : "Another review window changed this draft. Review the current revision and retry explicitly.",
-            ...(generationConflict ? { reason: "generation-conflict" } : {}),
+      let reverseNavigation: ReturnType<NonNullable<LoopbackRuntimeClientOptions["beginReverseNavigation"]>> | undefined;
+      try {
+        let trustedPayload = payload;
+        if (method === "forwardSyncTex") {
+          const location = options.forwardSourceLocation?.();
+          if (location === undefined) throw new Error("An active local LaTeX source location is required");
+          trustedPayload = {
+            ...location,
+            operationToken: randomBytes(18).toString("base64url"),
           };
+        } else if (method === "reverseSyncTex") {
+          if (options.sourceNavigationAllowed?.() === false) {
+            return { status: "failed", reason: "workspace-untrusted" };
+          }
+          reverseNavigation = options.beginReverseNavigation?.();
+          trustedPayload = {
+            ...(isObject(payload) ? payload : {}),
+            operationToken: randomBytes(18).toString("base64url"),
+          };
+        }
+        let value: unknown;
+        if (method === "command") {
+          const attachment = commandRequiresAttachment(trustedPayload)
+            ? interactionAttachment ?? await attachmentReady.promise
+            : undefined;
+          const response = await request(route.path, {
+            method: "POST",
+            body: JSON.stringify(attachment === undefined
+              ? trustedPayload
+              : { command: trustedPayload, attachment }),
+            headers: { "x-placekeeper-generation": String(identity.generation) },
+          }, signal, [409]);
+          const responseText = await response.text();
+          if (Buffer.byteLength(responseText) > 1_048_576) {
+            throw new Error("Trusted broker response exceeded the limit");
+          }
+          const responseValue = JSON.parse(responseText) as unknown;
+          if (response.status === 409) {
+            const currentState = await json("/state", {}, signal);
+            const generationConflict = isObject(responseValue) && responseValue.ok === false &&
+              isObject(responseValue.error) && responseValue.error.kind === "generation-conflict";
+            value = {
+              accepted: false,
+              state: safeState(currentState),
+              message: generationConflict
+                ? "The PDF was rebuilt before this command could be applied. Review the current generation and retry explicitly."
+                : "Another review window changed this draft. Review the current revision and retry explicitly.",
+              ...(generationConflict ? { reason: "generation-conflict" } : {}),
+            };
+          } else {
+            value = responseValue;
+          }
         } else {
-          value = responseValue;
+          value = route.method === "GET"
+            ? await json(route.path, {}, signal)
+            : await post(route.path, ["beginInteraction", "finalizeInteraction", "releaseInteraction", "acknowledgeInteraction"].includes(method)
+              ? { ...(trustedPayload as object), attachment: interactionAttachment ?? await attachmentReady.promise }
+              : trustedPayload, signal);
         }
-      } else {
-        value = route.method === "GET"
-          ? await json(route.path, {}, signal)
-          : await post(route.path, ["beginInteraction", "finalizeInteraction", "releaseInteraction", "acknowledgeInteraction"].includes(method)
-            ? { ...(trustedPayload as object), attachment: interactionAttachment ?? await attachmentReady.promise }
-            : trustedPayload, signal);
-      }
-      if (method === "reverseSyncTex" && isObject(value) && value.status === "ok" &&
-        isObject(value.target) && typeof value.target.path === "string" &&
-        Number.isSafeInteger(value.target.line)) {
-        const target = value.target;
-        const sourcePath = target.path as string;
-        await options.openSourceLocation?.({
-          sourcePath,
-          line: target.line as number,
-          ...(Number.isSafeInteger(target.column) ? { column: target.column as number } : {}),
-        });
-        const { path: _path, ...safeTarget } = target;
-        return { ...value, target: safeTarget };
-      }
-      if (["command", "chooseCopy", "chooseOriginal"].includes(method) && isObject(value)) {
-        const named = method === "command" ? value : value.nameResult;
-        const state = isObject(named) && named.accepted === false ? named.state : named;
-        if (isObject(state) && isObject(state.workflow) &&
-          Number.isSafeInteger(state.workflow.documentGeneration) &&
-          Number.isSafeInteger(state.revision)) {
-          identity.generation = state.workflow.documentGeneration as number;
-          identity.revision = state.revision as number;
+        if ((method === "forwardSyncTex" || method === "reverseSyncTex") && (disposed || signal.aborted)) {
+          return { status: "stale", reason: "navigation-presentation-is-not-active" };
         }
-      }
-      return safeResult(method, value);
+        if (method === "reverseSyncTex" && reverseNavigation?.isCurrent() === false) {
+          return { status: "stale", reason: "navigation-was-superseded" };
+        }
+        if (method === "reverseSyncTex" && isObject(value) && value.status === "ok" &&
+          isObject(value.target) && typeof value.target.path === "string" &&
+          Number.isSafeInteger(value.target.line)) {
+          const target = value.target;
+          const sourcePath = target.path as string;
+          const isCurrent = () => !disposed && !signal.aborted && reverseNavigation?.isCurrent() !== false;
+          await options.openSourceLocation?.({
+            sourcePath,
+            line: target.line as number,
+            ...(Number.isSafeInteger(target.column) ? { column: target.column as number } : {}),
+          }, isCurrent);
+          if (!isCurrent()) return { status: "stale", reason: "navigation-was-superseded" };
+          const { path: _path, ...safeTarget } = target;
+          return { ...value, target: safeTarget };
+        }
+        if (["command", "chooseCopy", "chooseOriginal"].includes(method) && isObject(value)) {
+          const named = method === "command" ? value : value.nameResult;
+          const state = isObject(named) && named.accepted === false ? named.state : named;
+          if (isObject(state) && isObject(state.workflow) &&
+            Number.isSafeInteger(state.workflow.documentGeneration) &&
+            Number.isSafeInteger(state.revision)) {
+            identity.generation = state.workflow.documentGeneration as number;
+            identity.revision = state.revision as number;
+          }
+        }
+        return safeResult(method, value);
+      } finally { reverseNavigation?.finish(); }
     },
     subscribeInvalidations(listener) {
       invalidationListeners.add(listener);
       return () => invalidationListeners.delete(listener);
     },
     dispose() {
+      if (disposed) return;
+      void post("/synctex/detach", {}, AbortSignal.timeout(2_000)).catch(() => undefined);
       disposed = true;
       if (socketRetry !== undefined) clearTimeout(socketRetry);
       socket?.close();

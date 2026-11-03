@@ -923,7 +923,8 @@ test('@critical demo starts fitted and Fit Width keeps the requested scale', asy
     // Upward scrolling must stop, never overshoot and then jump down to page 14.
     for (let i = 1; i < offsets.length; i++) expect(offsets[i]).toBeLessThanOrEqual(offsets[i - 1]! + 1);
     await demo.getByRole('button', { name: 'Open zoom controls', exact: true }).click();
-    await demo.getByRole('menuitem', { name: 'Fit width', exact: true }).click();
+    await demo.locator('[data-review-zoom-action="fit-width"]').hover();
+    await demo.getByRole('menuitemradio', { name: 'Fit width', exact: true }).click();
     await expect(zoom).toHaveValue(fitted);
     // Catch a transient successful fit followed by rollback during anchor settlement.
     await expect(zoom).toHaveJSProperty('value', fitted);

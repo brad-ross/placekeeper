@@ -58,6 +58,7 @@ export interface ChromeRuntimeStageRequest {
   readonly displayName?: string;
   readonly sourceUrl?: string;
   readonly fileUrl?: string;
+  readonly initialWorkflowMode?: "generated-output";
 }
 
 export interface ChromeRuntimeStagedReview {

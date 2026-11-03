@@ -62,6 +62,8 @@ export interface OpenReviewRequest {
   readonly surface?: ReviewPresentationSurface;
   readonly requestedLocation?: PlacekeeperLinkLocation;
   readonly workflowMode?: ReviewWorkflowMode;
+  /** Creation default only; existing live and resumed reviews retain their mode. */
+  readonly initialWorkflowMode?: ReviewWorkflowMode;
 }
 
 export interface SessionLaunch {

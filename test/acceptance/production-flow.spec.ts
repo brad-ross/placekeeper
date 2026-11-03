@@ -4841,6 +4841,7 @@ test('follows a rendered reading passage through inserted pages without changing
   await expect.poll(() => host.broker.state(launched.sessionId)?.workflow.documentGeneration).toBe(2);
   await expect.poll(() => observedResolution, { timeout: PRODUCTION_VIEWER_READY_TIMEOUT_MS }).toBeDefined();
   expect(observedResolution).toMatchObject({ status: 'resolved', generation: 2, pageIndex: 1 });
+  await expect(page.locator('[data-production-review]')).toHaveAttribute('data-location-restore-status', 'idle');
   if (observedResolution?.status !== 'resolved') throw new Error('Reading passage did not resolve.');
   const alignmentTolerance = observedResolution.rect.height * Number.parseFloat(zoomBefore) / 100;
   await expect.poll(() => currentPageText(page), { timeout: PRODUCTION_VIEWER_READY_TIMEOUT_MS }).toBe('2 / 2');
@@ -4851,6 +4852,23 @@ test('follows a rendered reading passage through inserted pages without changing
   await expect.poll(async () => Math.abs(
     await successorPage.evaluate((element) => element.getBoundingClientRect().top) - pageTopBefore,
   ), { timeout: PRODUCTION_VIEWER_READY_TIMEOUT_MS }).toBeLessThan(alignmentTolerance);
+
+  // Refresh again while reading the later page. Resource initialization must
+  // remain paired with its generation, including after the first restoration.
+  observedResolution = undefined;
+  const nextReplacement = await PDFDocument.create();
+  nextReplacement.addPage([612, 792]);
+  nextReplacement.addPage([612, 792]);
+  const [nextRetained] = await nextReplacement.copyPages(original, [0]);
+  nextReplacement.addPage(nextRetained!);
+  await writeFile(sourcePath, await nextReplacement.save({ useObjectStreams: false }));
+  await expect.poll(() => host.broker.state(launched.sessionId)?.workflow.documentGeneration).toBe(3);
+  await expect.poll(() => observedResolution, { timeout: PRODUCTION_VIEWER_READY_TIMEOUT_MS })
+    .toMatchObject({ status: 'resolved', generation: 3, pageIndex: 2 });
+  await expect(page.locator('[data-production-review]')).toHaveAttribute('data-location-restore-status', 'idle');
+  await expect.poll(() => currentPageText(page), { timeout: PRODUCTION_VIEWER_READY_TIMEOUT_MS }).toBe('3 / 3');
+  expect(await currentZoomText(page)).toBe(zoomBefore);
+  await expect(focusProbe).toBeFocused();
 });
 
 test('settles on the bounded reading fallback when the shared resolver rejects', async ({ page }) => {

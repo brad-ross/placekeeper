@@ -68,7 +68,7 @@ enum MacReviewHelperReplyParser {
     private static let methods = Set([
         "command", "beginInteraction", "finalizeInteraction", "releaseInteraction", "acknowledgeInteraction",
         "saveStatus", "saveProposal", "chooseCopy", "chooseFolder", "chooseOriginal", "retrySave", "locateSave",
-        "scope", "resolveReadingLocation", "exportReviewedCopy",
+        "scope", "forwardSyncTex", "reverseSyncTex", "resolveReadingLocation", "exportReviewedCopy",
     ])
 
     static func parse(
