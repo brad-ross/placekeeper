@@ -39,3 +39,12 @@ renderer acknowledgement. The warm CDP cases separately check acknowledgement
 and displayed toolbar page. Cold cleanup inventories only the exact packaged
 executable plus the unique isolated test root, using `ps` on POSIX and
 `Win32_Process` on Windows; inventory failures fail explicitly.
+
+SyncTeX mapping records must retain LF line endings. A CRLF conversion leaves
+a carriage return in the `Input:` source tag: the real query utility then
+reports “No tag” for the unchanged source filename. The fixture-local
+`.gitattributes` preserves LF at checkout, and materialization normalizes line
+endings before substituting the source path. Each acceptance preflights the
+real host `synctex view` query against line 6 and requires page 2 before opening
+the installed application; failures include the exact isolated paths and tool
+stdout/stderr. This preflight never supplies a service or renderer response.
