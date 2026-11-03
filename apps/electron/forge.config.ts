@@ -9,13 +9,14 @@ import { FuseV1Options, FuseVersion } from "@electron/fuses";
 
 const repo = resolve(__dirname, "../..");
 const target = process.env.PLACEKEEPER_DESKTOP_TARGET ?? `${process.platform}-${process.arch}`;
+const executableName = "PlacekeeperCandidate";
 
 export default {
   outDir: resolve(repo, "dist/desktop-artifacts"),
   packagerConfig: {
     name: "Placekeeper Candidate",
     icon: resolve(repo, "dist/desktop-icons/Placekeeper"),
-    executableName: "PlacekeeperCandidate",
+    executableName,
     appBundleId: "local.placekeeper.electron-candidate",
     appCategoryType: "public.app-category.productivity",
     asar: true,
@@ -42,7 +43,7 @@ export default {
   makers: [
     new MakerZIP({}, ["darwin"]),
     new MakerSquirrel({ setupIcon: resolve(repo, "dist/desktop-icons/Placekeeper.ico"), noMsi: true, name: "PlacekeeperCandidate", authors: "Brad Ross", description: "Placekeeper desktop personal test candidate" }),
-    new MakerDeb({ options: { maintainer: "Brad Ross", homepage: "https://github.com/brad-ross/placekeeper", icon: resolve(repo, "dist/desktop-icons/Placekeeper.png") } }),
+    new MakerDeb({ options: { bin: executableName, maintainer: "Brad Ross", homepage: "https://github.com/brad-ross/placekeeper", icon: resolve(repo, "dist/desktop-icons/Placekeeper.png") } }),
   ],
   plugins: [new FusesPlugin({
     version: FuseVersion.V1,
