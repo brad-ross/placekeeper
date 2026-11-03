@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { execFileSync, spawnSync } from "node:child_process";
 import { describe, expect, it } from "vitest";
@@ -21,11 +21,24 @@ describe("installed editor recipes", () => {
     expect(parseEditorArguments(substitute(texlab.forwardSearch.args, { "%f": source, "%p": pdf, "%l": "12", "REPLACE_WITH_SESSION": session }), "/unrelated"))
       .toMatchObject({ operation: "forward", intent: "explicit", sourcePath: source, pdfPath: pdf, line: 12, session });
   });
-  it("keeps Zed cursor variables as separate arguments and uses the root PDF for included files", async () => {
+  it("passes Zed paths with spaces and shell syntax literally through its task shell", async () => {
     const [task] = JSON.parse(await readFile(resolve(root, "zed-tasks.json"), "utf8"));
-    expect(parseEditorArguments(substitute(task.args, { "$ZED_FILE": source, "$ZED_ROW": "12", "REPLACE_WITH_SESSION": session,
-      "/ABSOLUTE/PROJECT/build/main.pdf": pdf }), "/unrelated"))
-      .toMatchObject({ sourcePath: source, pdfPath: pdf, line: 12, intent: "explicit" });
+    const directory = await mkdtemp("/tmp/placekeeper-zed-recipe-");
+    const capture = resolve(directory, "capture argv");
+    try {
+      await writeFile(capture, '#!/usr/bin/env node\nconsole.log(JSON.stringify(process.argv.slice(2)));\n');
+      await chmod(capture, 0o700);
+      const values: Record<string, string> = {
+        "$ZED_FILE": source, "$ZED_ROW": "12", "REPLACE_WITH_SESSION": session,
+        "/ABSOLUTE/PROJECT/build/main.pdf": pdf,
+        "/Users/YOU/Applications/Placekeeper.app/Contents/MacOS/placekeeper": capture,
+      };
+      const env = Object.fromEntries(Object.entries(task.env ?? {}).map(([key, value]) => [key, values[String(value)] ?? String(value)]));
+      const command = [values[task.command] ?? task.command, ...substitute(task.args, values)].join(" ");
+      const args = JSON.parse(execFileSync("/bin/sh", ["-c", command], { encoding: "utf8", env: { ...process.env, ...env } }));
+      expect(parseEditorArguments(args, "/unrelated"))
+        .toMatchObject({ sourcePath: source, pdfPath: pdf, line: 12, intent: "explicit" });
+    } finally { await rm(directory, { recursive: true, force: true }); }
   });
   it("passes the Sublime cursor and unusual filename as literal command arguments", () => {
     expect(execFileSync("python3", [resolve("packaging/macos/test-fixtures/sublime-helper.py"), resolve(root, "placekeeper_sublime.py")],

@@ -17,7 +17,7 @@ execution: code
 - **Product authority:** The Product Contract below records the scope confirmed on November 2, 2026.
 - **Open blockers:** None for implementation. Personal editor acceptance remains an execution gate.
 - **Execution profile:** Three dependency-ordered PRs, grouped below; no production implementation is authorized by this planning artifact alone.
-- **Authority and ownership:** Product Contract governs scope; Planning Contract governs implementation choices. The implementing agent completes code and automated verification; the agent performs VS Code acceptance through Computer; Zed acceptance awaits user installation. Shipping follows the subsequently authorized execution workflow.
+- **Authority and ownership:** Product Contract governs scope; Planning Contract governs implementation choices. The implementing agent completes code and automated verification; the agent performs VS Code acceptance through Computer; Zed acceptance proceeds through Computer with the installed editor. Shipping follows the subsequently authorized execution workflow.
 - **Stop conditions:** Return for a product decision if implementation would require broader viewer destinations, remote filesystem routing, or weaker generation/source containment.
 
 ---
@@ -36,7 +36,7 @@ Placekeeper's current supported source/PDF navigation is centered on VS Code, al
 
 - **General interface with optional Texlab integration.** Governs R1, R2, R16. A Texlab-only interface would exclude existing standalone Placekeeper and LaTeX Workshop workflows.
 - **Native Mac plus embedded VS Code.** Governs R3. (session-settled: user-approved — chosen over routing into every host: avoid simultaneous browser and Codex destination choices in the first release.)
-- **Two required acceptance editors.** Governs R17, R18. (User revision, November 2, 2026: the agent tests VS Code through Computer; Zed remains pending user installation. Neovim is not installed and is removed from required hands-on acceptance. Its adapter and automated coverage remain; its recipe is unverified, like Sublime Text and Emacs.)
+- **Two required acceptance editors.** Governs R17, R18. (User revision, November 2, 2026: the agent tests VS Code through Computer; Zed is installed and tested through Computer. Neovim is not installed and is removed from required hands-on acceptance. Its adapter and automated coverage remain; its recipe is unverified, like Sublime Text and Emacs.)
 - **Follow the launching editor.** Governs R6, R7. (session-settled: user-directed — chosen over a global default or project preference: reverse search should return to the editor that initiated the workflow.)
 - **Reuse the native window.** Governs R4, R8. (session-settled: user-directed — chosen over separate windows per editor: the latest explicit editor navigation request sets the return destination.)
 - **Refresh and navigation are separate.** Governs R9, R10. (session-settled: user-approved — chosen over jumping after every rebuild: preserve reading position unless navigation is requested or following is enabled.)
@@ -509,7 +509,7 @@ Use fixture processes and structured RPC captures to test argument safety, then 
 
 ### Acceptance Ownership
 
-The implementing agent completes automated and available installed-candidate checks and prepares the repeatable acceptance record. The agent performs VS Code checks through Computer. Zed remains pending until the user installs it. At the user’s request, Neovim live testing is no longer a required gate and remains unverified. An unavailable required editor is an outstanding gate, not permission to mark it tested. Each result records app/extension/editor/tool versions, fixture paths, actions, observed destination, and pass/failure evidence. U7 remains incomplete until those checks are resolved.
+The implementing agent completes automated and available installed-candidate checks and prepares the repeatable acceptance record. The agent performs VS Code checks through Computer. Zed is now installed; the agent records its Computer-driven checks in the acceptance record. At the user’s request, Neovim live testing is no longer a required gate and remains unverified. An unavailable required editor is an outstanding gate, not permission to mark it tested. Each result records app/extension/editor/tool versions, fixture paths, actions, observed destination, and pass/failure evidence. U7 remains incomplete until those checks are resolved.
 
 ---
 

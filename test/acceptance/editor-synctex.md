@@ -2,7 +2,7 @@
 
 Implementation plan: [editor-independent SyncTeX](../../docs/plans/2026-11-02-1033-feat-editor-independent-synctex-plan.md). Setup: [editor guide](../../docs/guides/editor-synctex.md).
 
-This is a qualification record, not a release claim. The agent performs VS Code checks through Computer. Zed remains pending user installation. Per the user’s November 2 revision, Neovim live testing is not required and remains unverified. U7 remains incomplete until required checks pass. Sublime Text and Emacs are supplied as unverified recipes.
+This is a qualification record, not a release claim. The agent performs VS Code checks through Computer. Zed 1.26.2 is installed; recorded Computer checks appear below. Per the user’s November 2 revision, Neovim live testing is not required and remains unverified. U7 remains incomplete until required checks pass. Sublime Text and Emacs are supplied as unverified recipes.
 
 ## Automated and candidate evidence — November 2, 2026
 
@@ -46,7 +46,7 @@ Record the app build identity, extension version, editor version, TeX distributi
 |---|---|---|---|
 | Embedded VS Code | VS Code 1.141.0 arm64; extension 0.1.1 development host; candidate 0.2.4 | Computer results below | Partial — tested checks pass; remaining qualification pending |
 | Native VS Code CLI profile | To be recorded | Editor-controlled CLI window routing; distinct from embedded precision | Outstanding — user check |
-| Zed | Awaiting user installation | Steps 1–8 as applicable, including actual multi-window behavior | Pending installation |
+| Zed | 1.26.2; native candidate 0.2.4; TeX Live 2026 | Task/round-trip, multi-window routing, refresh, follow precedence, delayed mapping below | Core checks passed; broader host qualification pending |
 | Neovim | Not installed in this qualification environment | Automated adapter/recipe coverage only; live two-socket and buffer tests optional | Unverified — not a required gate |
 | Sublime Text | Not exercised | Recipe fixture only | Unverified |
 | Emacs | Not exercised | Configuration review only | Unverified |
@@ -63,10 +63,32 @@ Isolated development host loaded the repository extension (0.1.1), using candida
 - **Passed enabled following:** enabled `placekeeper.followAfterBuild`, saved an edit with cursor on chapter line 2, then compiled. The PDF moved from page 1 to page 2 and retained 93% zoom.
 - **Passed manual precedence:** saved another chapter edit, manually navigated to `main.tex` line 3 before compilation, then compiled. The refreshed PDF remained page 1 at 93%; the older chapter follow did not retake it.
 
-These checks do not establish all steps 1–8. Native VS Code CLI routing, multi-window/native coexistence, annotation reconciliation, delayed-sidecar races, and remaining failure cases still need live qualification. Zed remains pending; Neovim is excluded from the required live gate.
+These checks do not establish all steps 1–8. Native VS Code CLI routing, multi-window/native coexistence, annotation reconciliation, delayed-sidecar races, and remaining failure cases still need live qualification. Zed results are recorded below; Neovim is excluded from the required live gate.
 
 ### First-open fix verification
 
 The extension previously read the active source cursor after creating a PDF panel, which had already cleared `activeTextEditor`. Capturing the cursor exposed two further startup gaps: delivery before the webview listener existed, and initial restoration reported idle before page geometry was available. The fix retains the explicit cursor, waits for a valid bootstrap handshake, and starts the viewer in restoring state until its existing restoration process completes. Workspace trust is rechecked when using the captured location.
 
 Computer retest with the rebuilt extension and web assets: two separate fresh-panel forward searches reached page 2 on their first invocation, with no warning or retry. Command-click returned to `chapters/result.tex` line 2, column 1. Regression checks: 145 tests passed in the VS Code adapter/coordinator/observer and production-review-app suites; TypeScript passed. This resolves the recorded first-open defect, not the remaining full editor qualification matrix.
+
+## Computer-driven Zed evidence — November 2, 2026
+
+Zed 1.26.2 from `/Applications/Zed.app`, CLI `Contents/MacOS/cli`; candidate `/tmp/placekeeper-zed-acceptance/Placekeeper.app` (0.2.4, rebuilt with the first-open fix), isolated service on loopback port 49229 and private HOME. Native process was explicitly started with that HOME; these results do not prove a cold LaunchServices launch with custom test environment. Fixture `/private/tmp/pk-zed-acceptance/project with spaces`, included chapter and separate `build/main.pdf`; task uses the corrected working-tree recipe. LaTeX extension was not installed; this tests Zed tasks, not Texlab.
+
+- **Found and fixed task quoting:** the original args array was joined by Zed into a shell command, splitting both PDF/source paths at spaces. Actual task argv and exit status 2 confirmed the failure. The corrected task passes values through environment variables and quoted shell expansions. The updated executable shell regression fails before the fix and passes with spaces, apostrophe, dollar sign, backtick and semicolon in filenames. All four editor-recipe tests pass.
+- **Task forward and inverse passed:** actual Zed task at `chapters/result.tex` line 2 opened native page 2. Command-click on the first text line returned to that file at line 2, column 1. File → Go to Source also returned to the included file (line 3 for the viewport-center query).
+- **Current cursor/window reuse passed:** spawning the task from `main.tex` line 3 passed that new source/row and moved the same native PDF window to page 1.
+- **Refresh preservation passed:** at page 1 and custom 159% zoom, rebuilding changed page images without changing page or zoom.
+- **Multi-window return observed:** with a second, unrelated Zed workspace active, native Go to Source selected the existing fixture workspace and `main.tex`. This is observed CLI behavior, not a promise of exact originating-window routing.
+- **Native follow and precedence passed:** CLI follow using the current Zed association reached the chapter on page 2 at 159%. After a newer explicit request to page 1, replaying the old association was rejected as stale and page 1 remained. This exercises the native follow protocol, not a Zed automatic-build hook.
+- **Delayed mapping passed:** published a changed PDF while withholding its sidecar. Forward search displayed “Waiting for SyncTeX data for this PDF…” and kept page 1 readable. Publishing the matching sidecar resumed the pending request to page 2 with no manual retry.
+
+Remaining live qualification: cold launch through the normal installed environment; packaged VSIX installation; native VS Code CLI routing and native/embedded coexistence/editor takeover; direct Finder setup/cancel; ambiguous mapping, unavailable editor and out-of-root errors; annotation reconciliation with moved/removed text. Existing automated coverage does not turn these remaining live checks into passes. Swift XCTest remains unavailable without full Xcode.
+
+## Final packaging and regression checks — November 2, 2026
+
+- **Passed packaged VSIX installation:** VS Code's supported CLI installed the candidate VSIX into fresh `/tmp/pk-final-vscode/user` and `/tmp/pk-final-vscode/extensions` directories and reported `placekeeper-local.placekeeper-vscode@0.1.1`. All 12 bundled files match the installed files; the manifest differs only by VS Code's added `__metadata`. Actual activation and navigation in this installed profile remain pending.
+- **Passed final native packaging:** rebuilt `/tmp/placekeeper-final-acceptance/Placekeeper.app` with the corrected Zed recipe. Candidate resource/identity validation and strict deep code-signature verification passed. Its VSIX is byte-identical to the one installed above, and its Zed recipe matches the source tree.
+- **Passed focused regressions:** 98 tests across VS Code extension/rebuild navigation, editor return adapters/handoff, and integration recipes; TypeScript passed. The initial sandboxed run could not open local test sockets; the run with socket access passed all tests.
+- **Live checks blocked:** Computer reported the Mac locked with automatic unlock paused after physical input. An unlock is required before continuing the remaining native/editor interactions. No unobserved interaction is recorded as passing.
+- **Swift test execution pending:** the manual CI workflow now includes a macOS runner with Xcode and a `native_only` input, allowing Swift XCTest to run without installing full Xcode locally. A workflow definition is not a passing test result; the run outcome must be recorded after execution.
