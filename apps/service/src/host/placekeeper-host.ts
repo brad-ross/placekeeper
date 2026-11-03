@@ -22,7 +22,7 @@ import { LiveSourceWorkflowService } from "../context/live-source-workflow-servi
 import { TaskBindingRegistry } from "../context/task-binding-registry.js";
 import { DaemonLifecycleCoordinator } from "./daemon-lifecycle.js";
 import { decodePlacekeeperLink } from "../../../../packages/core/src/placekeeper-link.js";
-import { openPlacekeeperLink } from "../links/placekeeper-link.js";
+import { decodeHostPlacekeeperLink, openPlacekeeperLink } from "../links/placekeeper-link.js";
 import type { ReviewWorkflowMode } from "../../../../packages/core/src/review-model.js";
 import { ExportCoordinator, type FrozenReviewDelivery } from "../export/export-coordinator.js";
 import {
@@ -378,7 +378,7 @@ export class PlacekeeperHost {
   async preflightLink(link: string): Promise<LinkPreflightResponse> {
     const response = await this.lifecycle.runActivity<LinkPreflightResponse>(() => {
       try {
-        const decoded = decodePlacekeeperLink(link);
+        const decoded = decodeHostPlacekeeperLink(link);
         return {
           ok: true,
           kind: "link-preflight",

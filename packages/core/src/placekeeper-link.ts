@@ -114,7 +114,23 @@ function encodeDestination(location: PlacekeeperPdfDestinationLocation): string 
   return `v=2&page=${location.page}&mode=${location.mode}&params=${params}`;
 }
 
+function encodeWindowsDrivePath(path: string): string | undefined {
+  const drive = /^([A-Za-z]):\\(.*)$/u.exec(path);
+  if (drive === null) return undefined;
+  const segments = drive[2]!.split("\\");
+  if (!path.toLowerCase().endsWith(".pdf") || segments.some(segment =>
+    segment.length === 0 || segment === "." || segment === ".." || /[ .]$/u.test(segment) ||
+    /[<>:"/\\|?*\u0000-\u001f\u007f]/u.test(segment) ||
+    /^(?:con|prn|aux|nul|com[1-9¹²³]|lpt[1-9¹²³])(?:\.|$)/iu.test(segment))) {
+    invalid("Placekeeper Windows paths require canonical local drive components");
+  }
+  try { return `/${drive[1]}:/${segments.map(segment => encodeURIComponent(segment)).join("/")}`; }
+  catch { return invalid("Placekeeper link path contains invalid Unicode"); }
+}
+
 function encodeAbsolutePath(path: string): string {
+  const windows = encodeWindowsDrivePath(path);
+  if (windows !== undefined) return windows;
   if (
     !path.startsWith("/") ||
     path === "/" ||
@@ -159,6 +175,14 @@ export function encodePlacekeeperLinkFragment(location: PlacekeeperLinkLocation)
 function decodeCanonicalPath(rawPath: string): string {
   if (!rawPath.startsWith("/") || rawPath === "/" || ENCODED_SEPARATOR.test(rawPath)) {
     invalid("Placekeeper link path is not canonical");
+  }
+  const drive = /^\/([A-Za-z]):\/(.*)$/u.exec(rawPath);
+  if (drive !== null) {
+    let windows: string;
+    try { windows = `${drive[1]}:\\${drive[2]!.split("/").map(segment => decodeURIComponent(segment)).join("\\")}`; }
+    catch { return invalid("Placekeeper link path has malformed encoding"); }
+    if (encodeAbsolutePath(windows) !== rawPath) invalid("Placekeeper link path is not canonically encoded");
+    return windows;
   }
   let path: string;
   try {

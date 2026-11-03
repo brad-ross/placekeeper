@@ -776,6 +776,16 @@ final class MacPoliciesTests: XCTestCase {
         )!))
     }
 
+    func testNativeLinkRejectsWindowsDriveWithoutReinterpretingPosixColonDirectory() throws {
+        XCTAssertNil(NativeOpenIntent.parse(URL(string: "placekeeper:///C:/Papers/Paper.pdf#v=1&page=1")!))
+        let posix = try XCTUnwrap(NativeOpenIntent.parse(URL(string: "placekeeper:///C%3A/Papers/Paper.pdf#v=1&page=1")!))
+        XCTAssertEqual(posix.sourceURL.path, "/C:/Papers/Paper.pdf")
+        for raw in ["placekeeper:/tmp/Paper.pdf#v=1&page=1", "placekeeper://host/tmp/Paper.pdf#v=1&page=1",
+                    "placekeeper://user@host/tmp/Paper.pdf#v=1&page=1", "placekeeper://host:123/tmp/Paper.pdf#v=1&page=1"] {
+            XCTAssertNil(NativeOpenIntent.parse(URL(string: raw)!))
+        }
+    }
+
     func testDocumentRegistryUsesServiceApprovedReviewIdentityAndMostRecentWindow() {
         var registry = DocumentWindowRegistry()
         let reviewID = "779e1d9d-58c1-4b12-8dc2-3449dad132c1"

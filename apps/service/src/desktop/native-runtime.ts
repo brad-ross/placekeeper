@@ -1,3 +1,4 @@
+import { assertHostLocalPath } from "../links/placekeeper-link.js";
 import type { NativeTaskLaunchAdmission, NativeTaskLaunchClaim, NativeTaskLaunchStage } from "./native-task-launches.js";
 import { createHash, randomBytes } from "node:crypto";
 import { basename } from "node:path";
@@ -320,6 +321,7 @@ export class NativeRuntimeManager {
       } else {
         sourcePath = message.sourcePath;
       }
+      assertHostLocalPath(sourcePath);
     } catch {
       return this.#failure(message, "invalid");
     }

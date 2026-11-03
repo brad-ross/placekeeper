@@ -4,6 +4,8 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+  assertHostLocalPath,
+  decodeHostPlacekeeperLink,
   createPlacekeeperLinkForPdf,
   parsePlacekeeperReadableViewRoute,
 } from "../src/links/placekeeper-link.js";
@@ -89,5 +91,35 @@ describe("Placekeeper service links", () => {
     await chmod(path, 0);
     await expect(createPlacekeeperLinkForPdf(path, { kind: "page", page: 1 }))
       .rejects.toThrow("private.pdf");
+  });
+});
+
+
+describe("host-native Placekeeper link resolution", () => {
+  it("keeps Windows drives, POSIX colon directories and virtual acquisitions distinct", () => {
+    const windows = "placekeeper:///C:/Papers/Paper.pdf#v=1&page=1";
+    const posix = "placekeeper:///C%3A/Papers/Paper.pdf#v=1&page=1";
+    expect(decodeHostPlacekeeperLink(windows, "win32").path).toBe("C:\\Papers\\Paper.pdf");
+    expect(decodeHostPlacekeeperLink(posix, "darwin").path).toBe("/C:/Papers/Paper.pdf");
+    expect(() => decodeHostPlacekeeperLink(windows, "darwin")).toThrow("not local");
+    expect(() => decodeHostPlacekeeperLink(windows, "linux")).toThrow("not local");
+    expect(() => decodeHostPlacekeeperLink(posix, "win32")).toThrow("not local");
+    expect(() => decodeHostPlacekeeperLink("placekeeper:///tmp/Paper.pdf#v=1&page=1", "win32")).toThrow("not local");
+    const virtual = "placekeeper:///Placekeeper%20Browser/acquisition/Paper.pdf#v=1&page=1";
+    expect(decodeHostPlacekeeperLink(virtual, "win32").path).toBe("/Placekeeper Browser/acquisition/Paper.pdf");
+    // An unresolved virtual identifier is never valid as a Windows IO path.
+    expect(() => assertHostLocalPath(decodeHostPlacekeeperLink(virtual, "win32").path, "win32")).toThrow("not local");
+    expect(() => assertHostLocalPath("C:\\private\\source.pdf", "win32")).not.toThrow();
+  });
+
+  it("does not mistake a POSIX filename containing a backslash for a foreign drive", () => {
+    expect(() => assertHostLocalPath("/tmp/a\\b.pdf", "darwin")).not.toThrow();
+    expect(() => assertHostLocalPath("/tmp/a\\b.pdf", "linux")).not.toThrow();
+    expect(() => assertHostLocalPath("\\\\server\\share\\Paper.pdf", "darwin")).toThrow("not local");
+  });
+
+  it("refuses a foreign path before resolving it against the current working directory", async () => {
+    const foreign = process.platform === "win32" ? "/tmp/Paper.pdf" : "C:\\Papers\\Paper.pdf";
+    await expect(createPlacekeeperLinkForPdf(foreign, { kind: "page", page: 1 })).rejects.toThrow("not local");
   });
 });
