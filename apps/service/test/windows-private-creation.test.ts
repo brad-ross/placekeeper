@@ -49,7 +49,26 @@ it.runIf(process.platform === "win32")("creates private Windows files and inheri
   await expect(createPrivateFile(file)).rejects.toMatchObject({ code: "EEXIST" });
   expect(await readFile(file, "utf8")).toBe("original");
   const inherited = join(directory, "inherited"); await writeFile(inherited, "inherited private bytes");
-  await expect(verifyPrivatePath(inherited, "file"), "file created by Node inherits a private descriptor").resolves.toBeUndefined();
+  // An elevated token may assign Administrators as the default owner. Inspect
+  // the actual descriptor independently: DACL inheritance does not imply that
+  // an ordinary Node-created file also has the required private owner.
+  const script = windowsPowerShellScript(`
+$ErrorActionPreference='Stop'
+$sid=[System.Security.Principal.WindowsIdentity]::GetCurrent().User
+$acl=Get-Acl -LiteralPath $env:PLACEKEEPER_TEST_PATH
+$rules=@($acl.GetAccessRules($true,$true,[System.Security.Principal.SecurityIdentifier]) | ForEach-Object {
+ @{ currentUser=($_.IdentityReference.Value -eq $sid.Value); rights=[int]$_.FileSystemRights; type=[int]$_.AccessControlType; inherited=$_.IsInherited; inheritance=[int]$_.InheritanceFlags; propagation=[int]$_.PropagationFlags }
+})
+[Console]::Out.Write((@{ ownerIsCurrentUser=($acl.GetOwner([System.Security.Principal.SecurityIdentifier]).Value -eq $sid.Value); rules=$rules } | ConvertTo-Json -Compress -Depth 4))
+`);
+  const { stdout } = await promisify(execFile)(join(process.env.SystemRoot!, "System32", "WindowsPowerShell", "v1.0", "powershell.exe"),
+    ["-NoProfile", "-NonInteractive", "-EncodedCommand", Buffer.from(script, "utf16le").toString("base64")],
+    { env: { ...process.env, PLACEKEEPER_TEST_PATH: inherited }, windowsHide: true });
+  const descriptor = JSON.parse(stdout) as { ownerIsCurrentUser: boolean; rules: unknown[] };
+  expect(descriptor.rules).toEqual([{ currentUser: true, rights: 0x1f01ff, type: 0, inherited: true, inheritance: 0, propagation: 0 }]);
+  expect(typeof descriptor.ownerIsCurrentUser).toBe("boolean");
+  if (descriptor.ownerIsCurrentUser) await expect(verifyPrivatePath(inherited, "file")).resolves.toBeUndefined();
+  else await expect(verifyPrivatePath(inherited, "file")).rejects.toMatchObject({ reason: "owner-mismatch" });
   const streamed = join(directory, "streamed");
   await writePrivateFile(streamed, (async function* () { yield Buffer.from("one"); yield Buffer.from("two"); })());
   expect(await readFile(streamed, "utf8")).toBe("onetwo"); await verifyPrivatePath(streamed, "file");

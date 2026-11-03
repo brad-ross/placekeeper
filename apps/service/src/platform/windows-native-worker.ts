@@ -12,10 +12,12 @@ export type WindowsNativeRequest =
   | { readonly operation: "copyAcl"; readonly candidate: string; readonly original: string }
   | { readonly operation: "publish"; readonly candidate: string; readonly target: string; readonly replaceExisting: boolean };
 export type WindowsNativeResult = { readonly status: "ok" } | { readonly status: "published" } | { readonly status: "failed"; readonly nativeCode: number };
-const WINDOWS_NATIVE_FAILURE_REASONS = ["operation-failed", "reparse-point", "owner-mismatch", "rule-count", "principal-mismatch", "denied-access", "rights-mismatch"] as const;
+const WINDOWS_NATIVE_FAILURE_REASONS = ["operation-failed", "reparse-point", "owner-mismatch", "rule-count", "principal-mismatch", "denied-access", "rights-mismatch", "acl-read-original", "acl-apply", "acl-read-candidate", "acl-compare", "acl-mismatch", "acl-owner-mismatch", "acl-group-mismatch", "acl-protection-mismatch", "acl-access-mismatch"] as const;
 type WindowsNativeFailureReason = typeof WINDOWS_NATIVE_FAILURE_REASONS[number];
+const WINDOWS_NATIVE_EXCEPTION_KINDS = ["UnauthorizedAccessException", "PrivilegeNotHeldException", "Win32Exception", "IdentityNotMappedException", "ArgumentException", "InvalidOperationException", "Other"] as const;
+type WindowsNativeDiagnostic = { readonly exceptionKind: typeof WINDOWS_NATIVE_EXCEPTION_KINDS[number]; readonly hresult: number };
 export class WindowsNativeWorkerError extends Error {
-  constructor(message: string, readonly attempted: boolean, readonly uncertain: boolean, readonly reason?: WindowsNativeFailureReason) { super(message); this.name = "WindowsNativeWorkerError"; }
+  constructor(message: string, readonly attempted: boolean, readonly uncertain: boolean, readonly reason?: WindowsNativeFailureReason, readonly diagnostic?: WindowsNativeDiagnostic) { super(message); this.name = "WindowsNativeWorkerError"; }
 }
 
 const SCRIPT = String.raw`$ErrorActionPreference='Stop'
@@ -141,11 +143,22 @@ while ($null -ne ($line=[Console]::In.ReadLine())) {
     $result=if ($nativeCode -eq 0) { @{status='ok'} } else { @{status='failed';nativeCode=$nativeCode} }
    }
    'copyAcl' {
+    $failureReason='acl-read-original'
     $original=Get-Acl -LiteralPath $r.original
+    $failureReason='acl-apply'
     Set-Acl -LiteralPath $r.candidate -AclObject $original
+    $failureReason='acl-read-candidate'
     $actual=Get-Acl -LiteralPath $r.candidate
+    $failureReason='acl-compare'
     $sections=[System.Security.AccessControl.AccessControlSections]::Access -bor [System.Security.AccessControl.AccessControlSections]::Owner -bor [System.Security.AccessControl.AccessControlSections]::Group
-    if ($original.GetSecurityDescriptorSddlForm($sections) -ne $actual.GetSecurityDescriptorSddlForm($sections)) { throw 'Replacement security descriptor was not preserved' }
+    if ($original.GetSecurityDescriptorSddlForm($sections) -ne $actual.GetSecurityDescriptorSddlForm($sections)) {
+     $failureReason='acl-mismatch'
+     if ($original.GetSecurityDescriptorSddlForm([System.Security.AccessControl.AccessControlSections]::Owner) -ne $actual.GetSecurityDescriptorSddlForm([System.Security.AccessControl.AccessControlSections]::Owner)) { $failureReason='acl-owner-mismatch' }
+     elseif ($original.GetSecurityDescriptorSddlForm([System.Security.AccessControl.AccessControlSections]::Group) -ne $actual.GetSecurityDescriptorSddlForm([System.Security.AccessControl.AccessControlSections]::Group)) { $failureReason='acl-group-mismatch' }
+     elseif ($original.AreAccessRulesProtected -ne $actual.AreAccessRulesProtected) { $failureReason='acl-protection-mismatch' }
+     elseif ($original.GetSecurityDescriptorSddlForm([System.Security.AccessControl.AccessControlSections]::Access) -ne $actual.GetSecurityDescriptorSddlForm([System.Security.AccessControl.AccessControlSections]::Access)) { $failureReason='acl-access-mismatch' }
+     throw 'Replacement security descriptor was not preserved'
+    }
     $result=@{status='ok'}
    }
    'publish' {
@@ -157,7 +170,13 @@ while ($null -ne ($line=[Console]::In.ReadLine())) {
    default { throw 'Unsupported native operation' }
   }
   $reply=@{id=$id;ok=$true;result=$result}
- } catch { $reply=@{id=$id;ok=$false;attempted=$attempted;reason=$failureReason;error='Windows native operation failed'} }
+ } catch {
+  $exception=$_.Exception
+  for ($depth=0; $depth -lt 8 -and $null -ne $exception.InnerException; $depth++) { $exception=$exception.InnerException }
+  $kind=$exception.GetType().Name
+  if (@('UnauthorizedAccessException','PrivilegeNotHeldException','Win32Exception','IdentityNotMappedException','ArgumentException','InvalidOperationException') -notcontains $kind) { $kind='Other' }
+  $reply=@{id=$id;ok=$false;attempted=$attempted;reason=$failureReason;exceptionKind=$kind;hresult=$exception.HResult;error='Windows native operation failed'}
+ }
  [Console]::Out.WriteLine(($reply | ConvertTo-Json -Compress -Depth 4))
  [Console]::Out.Flush()
 }`;
@@ -245,10 +264,12 @@ function acquireWorker(): Worker {
           pending.resolve(result);
         } else if (reply.ok === false && typeof reply.attempted === "boolean") {
           if (typeof reply.reason !== "string" || !WINDOWS_NATIVE_FAILURE_REASONS.includes(reply.reason as WindowsNativeFailureReason)) throw new Error("Invalid failure reason");
+          if (typeof reply.exceptionKind !== "string" || !WINDOWS_NATIVE_EXCEPTION_KINDS.includes(reply.exceptionKind as WindowsNativeDiagnostic["exceptionKind"]) || !Number.isInteger(reply.hresult) || (reply.hresult as number) < -0x80000000 || (reply.hresult as number) > 0x7fffffff) throw new Error("Invalid native diagnostic");
+          const diagnostic: WindowsNativeDiagnostic = { exceptionKind: reply.exceptionKind as WindowsNativeDiagnostic["exceptionKind"], hresult: reply.hresult as number };
           const message = pending.request.operation === "verify" || pending.request.operation === "protect"
             ? "Windows private storage permissions could not be verified"
             : pending.request.operation === "copyAcl" ? "Windows replacement security descriptor could not be preserved" : "Windows native publication failed";
-          pending.reject(new WindowsNativeWorkerError(`${message} (${reply.reason})`, reply.attempted, reply.attempted && pending.request.operation === "publish", reply.reason as WindowsNativeFailureReason));
+          pending.reject(new WindowsNativeWorkerError(`${message} (${reply.reason}; ${diagnostic.exceptionKind}; HRESULT=${diagnostic.hresult})`, reply.attempted, reply.attempted && pending.request.operation === "publish", reply.reason as WindowsNativeFailureReason, diagnostic));
         } else throw new Error("Invalid reply");
         clearTimeout(pending.timer); current.pending.delete(reply.id as string);
         if (current.pending.size === 0) {
