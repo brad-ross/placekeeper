@@ -1,7 +1,7 @@
 {
   "date": "2026-11-02",
   "status": "measured-single-native-pair",
-  "scope": "Initial synthetic PDF document viewport on macOS arm64; one retained AppKit candidate and final Electron candidate, no installed application/service interaction.",
+  "scope": "Initial synthetic PDF document viewport on macOS arm64; one retained AppKit candidate and recorded Electron candidate, no installed application/service interaction.",
   "fixture": {
     "path": "test/fixtures/pdfs/legible-link-destinations.pdf",
     "sha256": "63a501448978032a29e09263839edf54849713888644d4b4f8195dff88d48bd7",
@@ -131,7 +131,7 @@
     "AppKit capture is lossy JPEG and Electron capture is lossless PNG; no byte/pixel identity claim or visual pass threshold is asserted.",
     "Native traffic lights, toolbar title inset, window activation and hover/focus state differ; Electron native titlebar is outside its renderer screenshot, so the whole-window pixel metric is descriptive rather than an equivalence test.",
     "Menus, workspace-open layouts, authoring dialogs and matching toolbar-hover states were not paired.",
-    "The retained AppKit and final Electron bundles have different service/runtime versions and distinct host JavaScript; their exact identities/assets are retained in the metadata."
+    "The retained AppKit and recorded Electron bundles have different service/runtime versions and distinct host JavaScript; their exact identities/assets are retained in the metadata."
   ],
   "comparisonMethod": {
     "decoder": "Playwright 1.61.1 bundled PNG decoder; native JPEG converted to PNG by macOS sips without resizing",

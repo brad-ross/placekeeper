@@ -141,7 +141,7 @@
           },
           "notes": [
             "Initial saved state was seeded to avoid coupling restoration qualification to rapid toolbar editor setup; actual renderer state was verified before native Quit.",
-            "Earlier final-build setup attempts stopped before Quit after rapid input editing did not settle the desired page; these were not counted as restoration runs."
+            "Earlier setup attempts with the same build stopped before Quit after rapid input editing did not settle the desired page; these were not counted as restoration runs."
           ]
         }
       ],

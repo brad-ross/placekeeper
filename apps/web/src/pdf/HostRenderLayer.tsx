@@ -76,27 +76,20 @@ export function createBrowserRasterOwner() {
       pending.add(image);
       return image;
     },
-    commit(order: number | undefined, visible = true) {
+    commit(order: number | undefined) {
       if (order === undefined) return;
       // A newer render may have published before this commit's passive effect.
       // Its URL still belongs to an upcoming commit and must remain valid.
-      for (const image of pending) if (image.order < order || (!visible && image.order === order)) image.release();
+      for (const image of pending) if (image.order < order) image.release();
     },
     dispose() { for (const image of pending) image.release(); },
   };
 }
 
-export function releaseDecodedRaster(
-  image: { url: string; release?: () => void },
-  element: Pick<HTMLImageElement, 'currentSrc' | 'complete' | 'naturalWidth'>,
-): void {
-  if (element.currentSrc === image.url && element.complete && element.naturalWidth > 0) image.release?.();
-}
-
 export function HostRenderLayer({ resourceHost, documentId, pageIndex, scale, dpr, style, onLoad, ...props }: RenderProps & { resourceHost: ViewerResourcePolicy['host'] }) {
   const { provides } = useRenderCapability();
   const documentState = useDocumentState(documentId);
-  const [image, setImage] = useState<{ url: string; key: string; release?: () => void; order?: number }>();
+  const [image, setImage] = useState<{ url: string; key: string; order: number }>();
   const [browserImages] = useState(createBrowserRasterOwner);
   const actualScale = scale ?? documentState?.scale ?? 1;
   const actualDpr = dpr ?? window.devicePixelRatio;
@@ -107,7 +100,9 @@ export function HostRenderLayer({ resourceHost, documentId, pageIndex, scale, dp
   // A previous bitmap can cover a zoom render, but cannot cover a page turn or
   // rotation: its orientation would disagree with the overlays and page box.
   const key = `${resourceHost}:${documentId}:${pageIndex}:${rotation}`;
-  useEffect(() => { browserImages.commit(image?.order, image?.key === key); }, [browserImages, image, key]);
+  // State can reuse this URL after a temporary key mismatch remounts <img>.
+  // Decode or hiding the element does not retire the state's resource lease.
+  useEffect(() => { browserImages.commit(image?.order); }, [browserImages, image]);
   useEffect(() => () => browserImages.dispose(), [browserImages]);
   useEffect(() => {
     if (!provides) return;
@@ -115,8 +110,8 @@ export function HostRenderLayer({ resourceHost, documentId, pageIndex, scale, dp
       pageIndex, options: { scaleFactor: actualScale, dpr: actualDpr, rotation },
     });
     return resourceHost === 'codex'
-      ? subscribeNativeRaster(task, url => setImage({ url, key }))
-      : subscribeBrowserRaster(task, (url, release) => setImage({ url, key, ...browserImages.retain(release) }));
+      ? subscribeNativeRaster(task, url => setImage({ url, key, order: browserImages.retain(ignore).order }))
+      : subscribeBrowserRaster(task, (url, release) => setImage({ url, key, order: browserImages.retain(release).order }));
   }, [provides, documentId, pageIndex, actualScale, actualDpr, rotation, refreshVersion, resourceHost, key, browserImages]);
-  return image?.key === key ? <img src={image.url} {...props} onLoad={event => { releaseDecodedRaster(image, event.currentTarget); onLoad?.(event); }} style={{ width: '100%', height: '100%', ...style }} /> : null;
+  return image?.key === key ? <img src={image.url} {...props} onLoad={onLoad} style={{ width: '100%', height: '100%', ...style }} /> : null;
 }

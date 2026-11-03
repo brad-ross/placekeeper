@@ -12,8 +12,95 @@ test('only exact current main frame, window and attempt can act', () => {
 import { createElectronHostRuntime } from "../../web/src/host/electron-runtime.js";
 import { ReviewBridge } from "../src/review-bridge.js";
 import { createHash } from "node:crypto";
+import { createReviewState, type PendingReviewDraftV1, type ReviewCommand } from '../../../packages/core/src/review-model.js';
+import { reduceReview } from '../../../packages/core/src/review-reducer.js';
+import { ReviewInteractions } from '../../service/src/sessions/review-interactions.js';
+import { beginReviewInteraction, authoringAuthorityFor, authoringSessionIsCurrent } from '../../web/src/review/authoring-session.js';
+import { releaseDeletedAuthoringInteraction } from '../../web/src/review/use-authoring-session.js';
 const sourceBytes = Buffer.from("%PDF-1.7\n%%EOF");
 const digest = createHash("sha256").update(sourceBytes).digest("hex");
+
+test('ordinary Electron refresh cannot reacquire or roll back a protected editor while its command is accepted', async () => {
+    const initial = projection();
+    let state = createReviewState({ sessionId: initial.sessionId, source: initial.state.source, documentGeneration: 2 });
+    const interactions = new ReviewInteractions({ currentGeneration: () => state.workflow.documentGeneration });
+    const attachment = interactions.register(state.sessionId, 'electron-test');
+    const canonical = () => ({ ...projection(state.revision),
+        activeAuthoringDraftIds: interactions.activeAuthoringClaims(state.sessionId)
+            .filter(claim => claim.generation === state.workflow.documentGeneration).map(claim => claim.draftId),
+        generation: state.workflow.documentGeneration, state,
+        document: { ...initial.document, generation: state.workflow.documentGeneration } });
+    const bridge = new ReviewBridge(async message => {
+        if (message.type === 'refresh') return { ...message, type: 'refreshed', projection: canonical() };
+        if (message.type !== 'invoke') throw new Error('Unexpected helper operation');
+        if (message.generation !== state.workflow.documentGeneration || message.revision !== state.revision) throw new Error('Stale native revision');
+        let payload: unknown;
+        if (message.method === 'command') {
+            state = reduceReview(state, message.payload as ReviewCommand);
+            payload = state;
+        } else if (message.method === 'beginInteraction') {
+            payload = await interactions.begin({ ...attachment,
+                ...(message.payload as { interactionToken: string; order: number; generation: number; draftId?: string }) });
+        } else if (message.method === 'releaseInteraction') {
+            payload = await interactions.release({ ...attachment, ...(message.payload as { interactionToken: string; order: number }) });
+        } else payload = canonical().saveStatus;
+        return { ...message, type: 'result', method: message.method, payload };
+    }, generation => `placekeeper-resource://document/attempt123/${generation}`);
+    bridge.projection = canonical(); bridge.active = true;
+    const identity = { windowId: bridge.windowId, attemptId: bridge.attemptId };
+    let delayedBootstrap = false;
+    const captured = Promise.withResolvers<void>(), deliver = Promise.withResolvers<void>();
+    const runtime = createElectronHostRuntime({ identity: async () => identity,
+        request: async (_id, value) => {
+            const response = await bridge.request(value);
+            if (delayedBootstrap && (value as { method: string }).method === 'bootstrap') {
+                delayedBootstrap = false; captured.resolve(); await deliver.promise;
+            }
+            return response;
+        }, requestClose: async () => {}, readyToSettle: async () => {}, documentReady: async () => {}, visible: async () => {},
+        commandSurface: async () => {}, presentation: async () => {}, closeSettled: async () => {}, writeClipboard: async () => {},
+        createLink: async () => 'placekeeper:///paper.pdf#page=1', focusFailed: async () => {}, subscribeShell: () => () => {}, subscribe: () => () => {},
+    }, identity);
+    try {
+        await runtime.bootstrap();
+        const lifecycle = { beginInteraction: runtime.beginInteraction!, finalizeInteraction: runtime.finalizeInteraction!,
+            releaseInteraction: runtime.releaseInteraction!, acknowledgeInteraction: runtime.acknowledgeInteraction! };
+        const draftId = 'bdb2a067-72f2-4fb2-85d0-2cc67bf50274';
+        const editor = await beginReviewInteraction(lifecycle, 2, 'editor_interaction', 1, draftId);
+        const authority = authoringAuthorityFor(state, 2);
+        let editorOpen = true, reconnects = 0;
+        runtime.subscribeInteractionReconnect?.(async () => {
+            reconnects++;
+            try { await editor.reacquire(); }
+            catch { await releaseDeletedAuthoringInteraction(editor, () => { editorOpen = false; }); }
+        });
+        delayedBootstrap = true;
+        const refresh = runtime.bootstrap();
+        void refresh.catch(() => undefined);
+        await captured.promise;
+        const draft: PendingReviewDraftV1 = { id: draftId, ownerViewId: attachment.attachmentId,
+            baseGeneration: 2, revision: 0, kind: 'pageNote', pageIndex: 0, text: 'Exact text typed after source refresh.',
+            anchor: { kind: 'page', pageIndex: 0, rect: { x: 72, y: 72, width: 18, height: 18 } },
+            disposition: { kind: 'resolved', generation: 2 }, status: 'protected',
+            createdAt: '2026-11-03T00:00:00Z', updatedAt: '2026-11-03T00:00:00Z' };
+        await runtime.command({ type: 'put-draft', expectedRevision: 0, expectedDraftRevision: -1, draft });
+        await bridge.settle();
+        deliver.resolve();
+        const refreshFailure = await refresh.then(() => undefined, error => error as Error);
+        assert.equal(editorOpen, true);
+        assert.equal(refreshFailure?.name, 'AbortError');
+        assert.equal(interactions.held(state.sessionId), true);
+        assert.equal(state.pendingDrafts[0]?.text, draft.text);
+        await runtime.bootstrap();
+        assert.equal(reconnects, 0);
+        await runtime.saveStatus();
+        assert.equal(authoringSessionIsCurrent({ authority }, authoringAuthorityFor(state, 2)), true);
+        state = { ...state, workflow: { ...state.workflow, documentGeneration: 3 } };
+        await runtime.bootstrap();
+        assert.equal(authoringSessionIsCurrent({ authority }, authoringAuthorityFor(state, 3)), false);
+        await assert.rejects(beginReviewInteraction(lifecycle, 2, 'stale_interaction', 2));
+    } finally { deliver.resolve(); runtime.dispose(); bridge.retired = true; }
+});
 function projection(revision = 0) {
     const sessionId = "779e1d9d-58c1-4b12-8dc2-3449dad132c1";
     return {

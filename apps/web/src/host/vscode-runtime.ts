@@ -491,7 +491,16 @@ export function createRpcHostRuntime(
       : { localDocumentRefresh: host !== "codex" || codexDocumentRefresh }; },
     async bootstrap(signal?: AbortSignal): Promise<HostRuntimeBootstrap> {
       const epoch = ++bootstrapEpoch;
-      const current = () => !disposed && !signal?.aborted && epoch === bootstrapEpoch;
+      let candidate: HostRuntimeIdentity | undefined;
+      const current = () => !disposed && !signal?.aborted && epoch === bootstrapEpoch && (
+        candidate === undefined || identity === undefined || (
+          candidate.sessionId === identity.sessionId && (
+            candidate.generation > identity.generation || (
+              candidate.generation === identity.generation && candidate.revision >= identity.revision
+            )
+          )
+        )
+      );
       const value = await invoke<Record<string, unknown>>("bootstrap", {}, signal);
       if (!current()) throw abortError();
       if (!validIdentity(value) || !isObject(value.state) || !isObject(value.scope) ||
@@ -500,17 +509,24 @@ export function createRpcHostRuntime(
         typeof value.resources.pdfiumWasm !== "string") {
         throw new Error("The trusted host returned an invalid bootstrap.");
       }
-      identity = {
+      candidate = {
         sessionId: value.sessionId,
         generation: value.generation,
         revision: value.revision,
       };
+      // A protected edit can be accepted while a bootstrap response or its
+      // resources are in flight. It must never be rolled back by that snapshot.
+      if (!current()) throw abortError();
+      identity = candidate;
       hydratedIdentity = { ...identity };
       codexDocumentRefresh = host === "codex" && isObject(value.capabilities) && value.capabilities.localDocumentRefresh === true;
       interactionLifecycleNegotiated = isObject(value.capabilities) &&
         value.capabilities.interactionLifecycleVersion === 1;
       const reconnectIdentity = { generation: value.generation, revision: value.revision };
-      if (bootstrapped && interactionLifecycleNegotiated) {
+      // Electron's bridge and interaction attachment are fixed for this
+      // renderer attempt. Native retry creates a new runtime; ordinary save
+      // refreshes must not replay an editor admission against a moving revision.
+      if (host !== "electron" && bootstrapped && interactionLifecycleNegotiated) {
         await Promise.all([...interactionReconnectListeners].map((listener) => listener(reconnectIdentity)));
       }
       bootstrapped = true;

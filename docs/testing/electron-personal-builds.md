@@ -75,4 +75,4 @@ To roll back, close the candidate, confirm no active reviews or Task Bindings re
 
 ## Current evidence boundary
 
-Native launcher compiler/stream-forwarding tests pass on macOS arm64; Windows launcher execution still requires the native runner. A macOS arm64 package smoke has run with Node removed from PATH and explicit isolated test state. This does not establish native Windows 11, Ubuntu installed desktop, macOS x64, accessibility, full integration, or performance qualification. Record fresh evidence for the final artifact after any payload or launcher change. Unavailable native environments remain untested; cross-target configuration and mocked platform tests do not count as native passes.
+See the [qualification report](electron-migration-qualification.md) for native CI artifacts, packaged workflow results, Mac appearance and performance measurements, and outstanding checks. The Mac candidate runs alongside AppKit; use disposable documents for evaluation. Windows Server CI does not establish Windows 11 installer, DPI, or accessibility behavior; Ubuntu Xvfb does not establish interactive Wayland behavior.

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createBrowserRasterOwner, releaseDecodedRaster, subscribeBrowserRaster, subscribeNativeRaster } from '../src/pdf/HostRenderLayer.js';
+import { createBrowserRasterOwner, subscribeBrowserRaster, subscribeNativeRaster } from '../src/pdf/HostRenderLayer.js';
 
 describe('native raster image source', () => {
   it('publishes a data image only while its render is current and cancels pending conversion', () => {
@@ -36,14 +36,14 @@ describe('native raster image source', () => {
 });
 
 describe('browser raster image source', () => {
-  it('releases an image hidden by a committed key change without releasing a newer pending image', () => {
+  it('retains the state-owned image through key changes until a successor actually commits', () => {
     const owner = createBrowserRasterOwner();
     const hiddenRelease = vi.fn(), newerRelease = vi.fn();
     const hidden = owner.retain(hiddenRelease);
     owner.commit(hidden.order);
     const newer = owner.retain(newerRelease);
-    owner.commit(hidden.order, false);
-    expect(hiddenRelease).toHaveBeenCalledOnce();
+    owner.commit(hidden.order);
+    expect(hiddenRelease).not.toHaveBeenCalled();
     expect(newerRelease).not.toHaveBeenCalled();
     owner.commit(newer.order);
     owner.dispose();
@@ -51,14 +51,15 @@ describe('browser raster image source', () => {
     expect(newerRelease).toHaveBeenCalledOnce();
   });
 
-  it('does not release the current pending raster for a queued previous-source load notification', () => {
+  it('releases a browser bitmap when a data-image successor commits', () => {
+    const owner = createBrowserRasterOwner();
     const release = vi.fn();
-    const image = { url: 'blob:current', release };
-    releaseDecodedRaster(image, { currentSrc: 'blob:previous', complete: true, naturalWidth: 100 });
-    releaseDecodedRaster(image, { currentSrc: image.url, complete: false, naturalWidth: 0 });
-    releaseDecodedRaster(image, { currentSrc: image.url, complete: true, naturalWidth: 0 });
-    expect(release).not.toHaveBeenCalled();
-    releaseDecodedRaster(image, { currentSrc: image.url, complete: true, naturalWidth: 100 });
+    const browser = owner.retain(release);
+    owner.commit(browser.order);
+    const native = owner.retain(() => {});
+    owner.commit(native.order);
+    expect(release).toHaveBeenCalledOnce();
+    owner.dispose();
     expect(release).toHaveBeenCalledOnce();
   });
 
@@ -72,11 +73,10 @@ describe('browser raster image source', () => {
     expect(revoked).not.toHaveBeenCalled();
     owner.commit(successor.order);
     expect(revoked.mock.calls).toEqual([['displayed']]);
-    // Decoding releases the successor before a later passive commit; that
-    // commit must not accidentally revoke the newer pending image.
-    successor.release();
+    // A repeated passive commit cannot retire the current image or a newer
+    // publication that has not committed yet.
     owner.commit(successor.order);
-    expect(revoked.mock.calls).toEqual([['displayed'], ['successor']]);
+    expect(revoked.mock.calls).toEqual([['displayed']]);
     owner.commit(newer.order);
     owner.retain(() => revoked('uncommitted'));
     owner.dispose();
@@ -85,7 +85,7 @@ describe('browser raster image source', () => {
     expect(revoked.mock.calls).toEqual([['displayed'], ['successor'], ['newer'], ['uncommitted']]);
   });
 
-  it('releases a decoded Blob URL once and cancels the retired render', () => {
+  it('releases a published Blob URL once when its owner retires it and cancels the render', () => {
     let rendered!: (blob: Blob) => void;
     const task = { wait: vi.fn(callback => { rendered = callback; }), abort: vi.fn() };
     const urls = { createObjectURL: vi.fn(() => 'blob:page-raster'), revokeObjectURL: vi.fn() };

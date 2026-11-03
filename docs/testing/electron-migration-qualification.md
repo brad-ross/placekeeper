@@ -22,41 +22,47 @@ All local candidate tests use explicit `--isolated-installed-smoke --http-port P
 | Focused native link navigates an existing window before task activation; Copy Link remains available | Passed | `electron-focused-link.spec.ts`; same window/attempt, page 3, task unavailable before navigation and current afterward |
 | Cancel protected draft without a save destination | Passed | `electron-review-workflow.spec.ts`; composer closes, canonical draft clears and original PDF bytes remain unchanged |
 | Renderer crash followed by native Retry | Passed on local macOS arm64 | Actual CDP renderer crash after exact-text protection; native Retry restores protected draft under a new attempt and leaves the second document usable |
+| Native Close after a renderer crash; normal Quit and reopen | Passed on local macOS arm64 | [Artifact identities and observed results](electron-lifecycle-2026-11-02.json): Close left the peer interactive and the exact protected draft recoverable. Normal Quit restored page 2, 125% zoom and bounds. |
 | Electron → retained Mac → Electron recovery-compatible service switching | Passed | `desktop-service-rollback.spec.ts` |
 
 The close test initially found an empty earlier draft after current input was lost. The renderer now vetoes unload and requests main-process settlement; main destroys the window only after the current editor value and outstanding requests are acknowledged. A prior protected revision cannot satisfy the current-input check. The test continues to compare exact recovery text rather than merely checking that a draft exists.
 
-The complete shared visual suite produced the same result on this branch and a pristine `3e37ca4b` checkout: 16 passed and 33 failed. Of 62 matching captured PNGs, 50 were byte-identical; the remaining differences were tooltips, carets, animation frames and small toolbar edges. No migration-only failure was found, and baselines were not rewritten. This establishes comparison with the shared browser baseline, not paired native AppKit or cross-platform visual qualification.
+The complete shared visual suite produced the same result on this branch and a pristine `3e37ca4b` checkout: 16 passed and 33 failed. Of 62 matching captured PNGs, 50 were byte-identical; the remaining differences were tooltips, carets, animation frames and small toolbar edges. No migration-only failure was found, and baselines were not rewritten. The [paired Mac captures and comparison](electron-appkit-appearance-2026-11-02.json) add a separate test: the same PDF on page 1 at 179% zoom, at 1200 × 764 points. The layouts have the same line breaks and horizontal placement. Electron content begins two points higher; after that translation, more than 99.99% of dark ink lies within one device pixel of ink in the other capture. The captures use different image formats and exclude different parts of the native chrome. This result covers one page and state, not every toolbar, display or interaction.
+
+Linux CI exposed intermittent Blob resource errors and a composer disappearing during source-refresh authoring. Deterministic regressions found two defects: decoded or temporarily hidden raster URLs were revoked while React state could reuse them; an older bootstrap response could overwrite a newer accepted draft revision and replay editor admission. Raster URLs now remain owned until replacement or unmount. Bootstrap snapshots cannot roll back accepted identity, and ordinary Electron refreshes preserve their existing interaction attachment.
+
+The corrected local package passes all nine installed workflow tests. The focused runtime, authoring and raster suite passes 80 tests, and a real Chromium/React regression verifies image remount and exact resource release. The original CI Blob UUID was not conclusively classified; the raster failure mechanism was reproduced independently. No authoring retries or console-error filters were added. Native Windows/Linux and both Mac architecture reruns of these latest fixes are pending publication approval.
 
 ### Requirement coverage and limits
 
 | Requirement | Implemented mechanism and evidence boundary |
 | --- | --- |
 | R1 | Native Forge targets for macOS arm64/x64 ZIP, Windows x64 Setup.exe and Ubuntu x64 deb; independent Node, PDFium and service packaged. Native artifact results are recorded below. |
-| R2 | One production React review tree, shared CSS/icons, native window chrome. Existing browser appearance regression suite and packaged screenshot are separate evidence from a paired AppKit screenshot comparison. |
+| R2 | One production React review tree, shared CSS/icons, native window chrome. Paired AppKit/Electron document-layout comparison above; additional sizes, DPI settings, states and OS desktops remain unqualified. |
 | R3 | Separate candidate name/identifier; no automatic handler or integration registration. Explicit registration uses ownership receipts and refuses existing configuration. |
 | R4 | Shared navigation, authoring, source/save/export model. Actual packaged save/edit/undo/redo/source-refresh tests pass; native clipboard, dialogs and every navigation modality still need interactive OS qualification. |
-| R5 | Per-window bridges, duplicate-open registry, bounded presentation restoration, renderer failure retry. Two-window and close isolation pass; native Retry after an actual renderer crash passes; Close choice and restoration still require additional installed-app exercises. |
+| R5 | Per-window bridges, duplicate-open registry, bounded presentation restoration, renderer failure retry. Two-window and close isolation pass; native Retry and Close after real renderer crashes pass; normal Quit restores bounds, page and zoom on macOS arm64. |
 | R6 | Durable service recovery, exact-input normal-close barrier, pending-operation retirement. Service switch and crash evidence are distinguished from normal close. |
 | R7 | Explicit Electron identity and native task-launch registry reuse canonical generation, revision, interaction and task authority. Correlated visible activation is required before task binding; focused and stale launch cases have service tests. |
 | R8 | Exact service identity reuse; incompatible/uninspectable service refusal; explicit quiescent switch with verified recovery backup and exact readiness. No automatic incumbent kill or alternate writer root. |
 | R9 | Sandboxed/context-isolated renderer, per-window request fences and custom resource protocols. Windows mutual challenge/epoch authentication and private ACL creation have independent code review and platform tests; actual Windows execution is recorded separately. |
 | R10 | Sibling staging and durable publication; Windows write-through rename preserves ACLs and uncertainty. No delete-before-rename fallback. The real Windows lock test is not counted as passed on macOS. |
 | R11 | Native CLI/Chrome launchers, explicit VS Code selection, packaged MCP and opt-in registration. Service contract and packaged discovery tests do not substitute for interactive external-host qualification. |
-| R12 | Reproducible cold/warm launch and macOS CPU/memory measurement harness. Results and unmeasured metrics are recorded below; no claim of AppKit-equivalent resource use. |
+| R12 | Reproducible cold/warm launch and macOS CPU/memory measurement harness. Launch/CPU/RSS results and exploratory renderer responsiveness samples are recorded below; no claim of AppKit-equivalent resource use. |
 | R13 | Personal build/selection instructions, artifact inventories and this report. The old Mac application is retained. |
 
-AE1 is exercised in the packaged lifecycle test. AE2 native Retry after renderer crash passes with exact acknowledged draft text and an unaffected second document; the native Close branch remains untested. AE3 has a real Windows replacement-denied test and remains untested locally. AE4–AE6 have service-level authority/lifecycle tests; complete installed Chrome/AppKit/task-host scenarios remain separate qualification work.
+AE1 is exercised in the packaged lifecycle test. AE2 native Retry after renderer crash passes with exact acknowledged draft text and an unaffected second document; the native Close choice also preserved the draft for explicit reopen and kept the peer usable. AE3 passes on native Windows CI: the test independently confirms an active sharing lock, preserves the original on failure and saves after an explicit retry. AE4–AE6 have service-level authority/lifecycle tests; complete installed Chrome/AppKit/task-host scenarios remain separate qualification work.
 
 ### Platform matrix
 
 | Platform | Evidence status |
 | --- | --- |
-| Local macOS arm64 | Actual packaged review tests above; native macOS 15 arm64 CI ZIP and all eight packaged tests also passed at `9e7cd7d`; no installation over the user's app |
-| macOS x64 | Native macOS 15 Intel CI ZIP and all eight packaged tests passed in run `41555449177` at `9e7cd7d` |
+| Local macOS arm64 | Actual packaged review tests above; native macOS 15 arm64 CI ZIP and all nine packaged tests passed in run `41576349478` at `815df902`; no installation over the user's app |
+| macOS x64 | Native macOS 15 Intel CI ZIP and all nine packaged tests passed in run `41576349478` at `815df902` |
 | macOS 13 | Untested; compatible minimum version is not execution evidence |
+| Windows Server 2025 x64 | Native run `41576349478` at `815df902`: 85 platform unit/integration tests, locked-save/retry acceptance, installer build, and all nine packaged workflow tests passed. Setup.exe is a candidate artifact; an interactive Windows 11 install was not tested. |
 | Windows 11 x64 | Untested locally; Windows Server CI cannot establish Windows 11 installer, DPI or Narrator behavior |
-| Ubuntu 24.04 x64 | Native CI built and installed the deb, verified root-owned mode-4755 Chromium sandbox, and passed packaged tests under Xvfb in run `41555449177`; interactive X11/Wayland and accessibility remain unqualified |
+| Ubuntu 24.04 x64 | Native CI built and installed the deb, verified root-owned mode-4755 Chromium sandbox, and passed all nine packaged tests under Xvfb in run `41574318544` at `c6779351`. Later run `41576349478` exposed the two intermittent failures discussed above; interactive X11/Wayland and accessibility remain unqualified |
 | VoiceOver / Narrator / Linux accessibility | Untested |
 
 ## Performance
@@ -76,9 +82,15 @@ The complete local run passed on Apple M5 / Darwin 25.6.0 arm64 (24 GiB RAM), us
 
 Combined idle CPU averaged 0.82% of one core over 60 seconds (target below 2%). Across 12 close/reopen cycles, combined post-close RSS peaked 10.5% above the first stabilized cycle (target at most 15%). First-cycle RSS was 317.8 MiB Electron plus 66.6 MiB daemon, 384.3 MiB combined; the peak combined value was 424.5 MiB. RSS accounting can count shared pages more than once. The local arm64 ZIP is 169,950,112 bytes (162.1 MiB); the unpacked app occupies 424,252 KiB (414.3 MiB) on this filesystem.
 
+The corrected local renderer package also passed a [targeted resource regression](electron-resource-performance-2026-11-02-renderer-retention.json): 0.52% idle CPU over 60.04 seconds and 11.61% maximum post-close RSS growth across twelve cycles, within the same 2%/15% limits. Combined RSS was 388.7 MiB initially, 433.8 MiB at peak and 413.3 MiB finally. All recorded payload hashes matched before and after. The 160-launch matrix was not repeated for this renderer correction.
+
 An earlier incomplete run lost the automation page target despite the renderer having initialized and remaining alive. Three bounded startup probes and the subsequent complete 160-launch run passed; no product cause was established. The harness now records raw target/disconnect diagnostics on recurrence. Another test failure was a normal-close/CDP-reply race; the corrected harness still requires the close event and idle-state checks.
 
-First visible shell, visible input response, scroll/zoom frame intervals, a representative large scanned corpus, long-recovery cases, and a paired AppKit performance comparison remain unmeasured. The plan's targets are unchanged; missing measurements and target misses are not passes.
+[Responsiveness samples and screenshots](electron-responsiveness-2026-11-02.json) identify a later local package with the restoration fix. Across three cold launches, renderer first-contentful-paint ranged from 1.20 to 1.77 seconds; the first observed screenshot containing initial reader controls took 1.32 to 1.90 seconds from spawn. In one interactive session, 40 trusted keystrokes produced a p95 renderer response of 30.2 ms. The p95 animation-frame intervals were 17.5 ms while scrolling (320 intervals) and 17.6 ms while editing zoom (152 intervals).
+
+These measurements observe renderer presentation opportunities, not physical display latency. The three launches do not qualify the 1.5-second p95 first-visible-shell target. A large scanned corpus, long-recovery cases, an AppKit resource comparison and comparable measurements on Windows and Linux remain open.
+
+The recorded launch/resource, appearance and responsiveness runs identify their exact artifacts. They preceded the local Windows-drive link correction; they are not repeat measurements of each subsequent service payload. Windows links currently support local drive-letter PDFs; UNC shares and device paths remain rejected.
 
 ## Running qualification
 
