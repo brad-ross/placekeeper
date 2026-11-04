@@ -23,7 +23,7 @@ export const suites: Record<string, TestStage[]> = {
     "apps/service/test/startup-probe-lease.test.ts",
     "packaging/desktop/install-built-app.test.ts", "packaging/desktop/install-transaction.test.ts",
     "packaging/desktop/installer-entry.test.ts", "packaging/desktop/installer-entrypoint.test.ts", "packaging/desktop/debian-lifecycle.test.ts", "packaging/desktop/packaging.test.ts", "packaging/desktop/windows-registration.test.ts",
-    "apps/electron/test/installed-test-root.test.ts", "apps/electron/test/installer-routing.test.ts",
+    "apps/electron/test/installed-test-root.test.ts", "apps/electron/test/installer-routing.test.ts", "apps/electron/test/installer-ui.test.ts",
     "apps/electron/test/standalone-chooser.test.ts", "apps/electron/test/open-intent.test.ts",
     "apps/electron/test/protocol-install.test.ts", "packaging/desktop/linux-sandbox.test.ts",
     "apps/electron/test/open-link.test.ts", "apps/electron/test/review-bridge.test.ts", "apps/electron/test/menus.test.ts", "apps/electron/test/integration-setup.test.ts",

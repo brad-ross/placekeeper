@@ -33,8 +33,9 @@ export function isolateInstallerProfile(): string {
     return profile;
 }
 export async function runInstallerUI(request: InstallerRequest, profile: string): Promise<void> {
-    await app.whenReady();
+    let failed=false;
     try {
+        await app.whenReady();
         const root = join(request.candidate, process.platform === 'darwin' ? 'Contents/Resources/desktop' : 'resources/desktop');
         const { runInstaller, resolveInstallLayout } = await import(/* @vite-ignore */ pathToFileURL(join(root, 'installer/installer-entry.mjs')).href);
         request.destination ??= resolveInstallLayout().destination;
@@ -63,6 +64,13 @@ export async function runInstallerUI(request: InstallerRequest, profile: string)
         }
         const retainedDetail=result.retainedResources?.length?` Modified registrations or shortcuts were preserved: ${result.retainedResources.join('; ')}.`:'';
         await dialog.showMessageBox({ type: 'info', title: `Placekeeper ${request.uninstall?'uninstalled':'installed'}`, message: request.uninstall?'Placekeeper was uninstalled.':'Placekeeper is ready.', detail: request.uninstall && process.platform==='darwin' ? `The installed bundle was moved to a complete retained recovery app beside the installation in .placekeeper-install-transactions. The verified recovery backup remains in your Placekeeper support folder. Documents, settings and recovery data are preserved.` : request.uninstall ? `App-owned files and registrations were removed from ${result.destination}. Unknown files remain in place. A complete retained app remains beside the installation in .placekeeper-install-transactions; the verified recovery backup remains in your Placekeeper support folder. Documents, settings and recovery data are preserved. The temporary uninstall runtime at ${request.candidate} can be removed after this installer closes.${retainedDetail}` : `Installed at ${result.destination}. Previous app versions and recovery backups are retained. Optional integrations can be configured from Placekeeper.`, buttons: ['Done'] });
-    } catch (error) { console.error('[Placekeeper installer] Startup or installation failed', error); dialog.showErrorBox('Placekeeper installation stopped', String(error)); process.exitCode = 2; }
-    finally { await rm(profile, { recursive: true, force: true }).catch(error => console.error(error)); app.quit(); }
+    } catch (error) {
+        failed=true;
+        console.error('[Placekeeper installer] Startup or installation failed', error);
+        const message=error&&typeof error==='object'&&'userMessage' in error&&typeof error.userMessage==='string'?error.userMessage:error instanceof Error?error.message:String(error);
+        dialog.showErrorBox('Placekeeper installation stopped', message);
+    } finally {
+        await rm(profile, { recursive: true, force: true }).catch(error => console.error(error));
+        if(failed)app.exit(2);else app.quit();
+    }
 }

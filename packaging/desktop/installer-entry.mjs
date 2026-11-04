@@ -7,6 +7,17 @@ import { resolveInstallLayout } from './install-layout.ts';
 export { resolveInstallLayout };
 import { runtimeRoot } from './install-built-app.mjs';
 
+function coordinatorUserMessage(output) {
+  for(const line of output.trim().split('\n').reverse()) {
+    try {
+      const result=JSON.parse(line);
+      const failure=result?.ok===false?result.error:undefined;
+      if(!failure||typeof failure.message!=='string'||!failure.message.trim())continue;
+      return [failure.message,...(typeof failure.recoveryAction==='string'&&failure.recoveryAction.trim()&&failure.recoveryAction!==failure.message?[failure.recoveryAction]:[])].join('\n\n');
+    } catch {}
+  }
+}
+
 /** The complete candidate runs the coordinator. The bootstrap never mutates an
  * installed tree. Consent is requested only after the incumbent preview. */
 export async function runInstaller({ candidate, destination = resolveInstallLayout().destination, immutable = false, uninstall = false, isolatedRoot, port }, consent, invoke = spawn) {
@@ -41,7 +52,8 @@ export async function runInstaller({ candidate, destination = resolveInstallLayo
     // suppress the coordinator's actionable diagnostic on stdout.
     child.once('close', (code, signal) => {
       if(code===0&&!signal&&!processError){accept({ destination, output, retainedResources });return;}
-      reject(Error([`Installation stopped (exit code: ${code ?? 'unavailable'}; signal: ${signal ?? 'none'})`,...(processError?[`Process error: ${processError.message}`]:[]),`Standard error:\n${errors.trim() || '(empty)'}`,`Standard output:\n${output.trim() || '(empty)'}`].join('\n\n'),processError?{cause:processError}:undefined));
+      const diagnostic=Error([`Installation stopped (exit code: ${code ?? 'unavailable'}; signal: ${signal ?? 'none'})`,...(processError?[`Process error: ${processError.message}`]:[]),`Standard error:\n${errors.trim() || '(empty)'}`,`Standard output:\n${output.trim() || '(empty)'}`].join('\n\n'),processError?{cause:processError}:undefined);
+      reject(Object.assign(diagnostic,{userMessage:coordinatorUserMessage(output)??processError?.message??`The installation stopped (exit code: ${code ?? 'unavailable'}; signal: ${signal ?? 'none'}). Review the installation diagnostics before retrying.`}));
     });
   });
 }

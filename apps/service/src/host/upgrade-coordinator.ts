@@ -46,7 +46,7 @@ export function upgradeReason(activity: DaemonAggregateActivity):
  * Neither saved/clean status nor a read-only disk scan can authorize closure. */
 export function requireCoordinatedRetirement(status: Pick<import("./control-protocol.js").DaemonManagementStatus, "upgradePreparationVersion">): void {
   if (status.upgradePreparationVersion !== 1) {
-    throw new Error("This running Placekeeper version cannot safely be closed by the installer. In the current app, apply or explicitly discard unfinished drafts, save the PDFs, close review windows and browser/editor tabs, and end bound Codex tasks. Quit the current app manually, then retry after its service has stopped. The installer has not requested shutdown, copied live recovery, or changed the current app.");
+    throw new Error("This running Placekeeper version cannot safely be closed by the installer. In the current app, apply or explicitly discard unfinished drafts, save the PDFs, close review windows and browser/editor tabs, and end bound Codex tasks. Quit the current app manually, then retry after its service has stopped. Your current installation and recovery remain unchanged.");
   }
 }
 

@@ -52,6 +52,8 @@ it('preserves coordinator stdout diagnostics alongside stderr warnings and exact
   expect(error.message).toContain('exit code: 23');expect(error.message).toContain('signal: none');
   expect(error.message).toContain('Warning: inherited color configuration');
   expect(error.message).toContain('Pending draft could not be protected');expect(error.message).toContain('Keep the previous app and verified backup; retry after saving');
+  expect(error.userMessage).toBe('Pending draft could not be protected\n\nKeep the previous app and verified backup; retry after saving');
+  expect(error.userMessage).not.toContain('Warning');
   expect(await readFile(destination,'utf8')).toBe('incumbent');
 });
 it('drains and bounds both diagnostic streams before reporting a failed coordinator',async()=>{
