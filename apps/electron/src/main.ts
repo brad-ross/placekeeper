@@ -20,6 +20,7 @@ import { stageDesktopLink } from './open-link.js';
 import { parseDesktopOpenIntent, secondInstanceArguments, DesktopInvocationQueue } from './open-intent.js';
 import { FocusedVisibilityGate } from './focused-visibility.js';
 import { WindowActivityRegistry, ActivityAcknowledgements } from './window-lifecycle.js';
+import { WindowRetirementBarrier } from './window-retirement.js';
 import { DocumentWindowRegistry } from './window-registry.js';
 import { parseWindowState, readWindowState, writeWindowState, importLegacyMacPreferences, readLegacyInterfaceScale, type WindowIntent } from './window-state.js';
 import { createIntegrationSetup } from './integration-setup.js';
@@ -138,6 +139,23 @@ async function start() {
     let quitting = false;
     let persistence = Promise.resolve();
     const persist = () => { if (startupRequest) return Promise.resolve(); const windows = [...entries.values()].map(e => e.intent); persistence = persistence.then(() => writeWindowState(statePath, windows)).catch(error => { dialog.showErrorBox('Window restoration could not be saved', String(error)); }); return persistence; };
+    const windowRetirements = new WindowRetirementBarrier();
+    let quitCompletion: Promise<void> | undefined;
+    let quitReady = false;
+    let retirementFailureShown = false;
+    const retirementFailed = (error: unknown) => {
+        if (retirementFailureShown) return;
+        retirementFailureShown = true;
+        quitting = false;
+        if (startupRequest) { console.error('Startup review detach failed', error); app.exit(2); return; }
+        dialog.showErrorBox('Review detach failed', String(error));
+    };
+    const finishQuit = () => {
+        if (!quitting || entries.size > 0 || quitCompletion) return;
+        quitCompletion = windowRetirements.wait().then(() => persistence).then(() => { quitReady = true; app.quit(); })
+            .catch(retirementFailed).finally(() => { quitCompletion = undefined; });
+    };
+
     const activity = () => {
         const pending = activityAcknowledgements.enqueue(() => {
             if (lifecycle.stdin.writableEnded || lifecycle.stdin.destroyed) throw new Error('Desktop lifecycle control is unavailable');
@@ -293,7 +311,15 @@ async function start() {
         entry.closeToken = randomUUID();
         contents.send('review:shell', { type: 'settle-close', token: entry.closeToken });
     });
-    window.once('closed', () => { entries.delete(contents.id); registry.remove(window); void retire().catch(error => dialog.showErrorBox('Review detach failed', String(error))); if (!quitting) void persist(); menus(); if (quitting && entries.size === 0) { void persistence.finally(() => app.quit()); } });
+    window.once('closed', () => {
+        // Track detach before removing the last entry: window-all-closed can
+        // request quit immediately, while service ownership still exists.
+        const retired = windowRetirements.track(retire());
+        entries.delete(contents.id); registry.remove(window);
+        void retired.then(finishQuit, retirementFailed);
+        if (!quitting) void persist();
+        menus(); finishQuit();
+    });
     const fail = async (reason: unknown) => {
         if (startupRequest) { console.error(reason); app.exit(2); return; }
         if (entry.failureShown || window.isDestroyed()) return;
@@ -427,7 +453,12 @@ async function start() {
     routeOpen = path => { void openDocument(path).catch(showFailure); };
     invocations.activate(argv => { void handleInvocation(argv).catch(showFailure); });
     app.on('activate', () => { if (entries.size === 0) void chooseOpen(); });
-    app.on('before-quit', event => { if (entries.size === 0) return; event.preventDefault(); quitting = true; void persist(); for (const e of entries.values()) e.window.close(); });
+    app.on('before-quit', event => {
+        if (quitReady) return;
+        event.preventDefault(); quitting = true; void persist();
+        for (const e of entries.values()) e.window.close();
+        finishQuit();
+    });
     menus();
     if (startupRequest) { await openDocument(startupRequest.fixture); return; }
     const initial = parseDesktopOpenIntent(process.argv.slice(1));
