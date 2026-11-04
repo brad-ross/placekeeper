@@ -1,4 +1,4 @@
-import type { UpgradeReviewParticipants } from "../host/upgrade-review-participants.js";
+import { createUpgradeReviewProtection, type UpgradeReviewParticipants } from "../host/upgrade-review-participants.js";
 import type { UpgradeReviewSettlement } from "../../../../packages/core/src/upgrade-review-protocol.js";
 import { NativeTaskLaunchRegistry } from "../desktop/native-task-launches.js";
 import { LocalReviewBackend } from "../runtime/local-review-backend.js";
@@ -170,17 +170,7 @@ export class ChromeServiceRuntimeBackend implements ChromeRuntimeBackend {
     presentations.add(presentationLease);
     this.#activated.add(canonicalKey);
     this.#presentations.set(canonicalKey, presentations);
-    this.upgradeParticipants?.attach(`${this.#runtimeHost}:${presentationLease}`, {
-      generation: () => this.#broker.state(record.sessionId)?.workflow.documentGeneration ?? -1,
-      revision: () => { const state = this.#broker.state(record.sessionId); if (!state) throw new Error('Review ended'); return `${state.workflow.documentGeneration}:${state.revision}`; },
-      protect: async () => {
-        await this.#broker.protectChromeReview(record.sessionId);
-        await this.#saving.drain();
-        await this.#broker.drainWrites();
-        const status = this.#broker.saveStatus(record.sessionId);
-        if (status?.destination.phase === 'active' && status.sync.phase !== 'clean') throw new Error('PDF save failed');
-      },
-    });
+    this.upgradeParticipants?.attach(`${this.#runtimeHost}:${presentationLease}`, createUpgradeReviewProtection(this.#broker, this.#saving, record.sessionId));
     return projection;
   }
 

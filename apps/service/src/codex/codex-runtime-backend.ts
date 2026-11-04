@@ -1,4 +1,4 @@
-import type { UpgradeReviewParticipants } from "../host/upgrade-review-participants.js";
+import { createUpgradeReviewProtection, type UpgradeReviewParticipants } from "../host/upgrade-review-participants.js";
 import type { UpgradeReviewSettlement } from "../../../../packages/core/src/upgrade-review-protocol.js";
 import { createHash, randomBytes } from "node:crypto";
 import { readFile, realpath } from "node:fs/promises";
@@ -72,15 +72,7 @@ export class CodexServiceRuntimeBackend {
   attach(scope: CodexActiveScope): void {
     this.detach(scope.runtimeId);
     const ownerKey = `codex:${scope.runtimeId}`;
-    this.upgradeParticipants?.attach(ownerKey, {
-      generation: () => this.#broker.state(scope.sessionId)?.workflow.documentGeneration ?? -1,
-      revision: () => { const state = this.#broker.state(scope.sessionId); if (!state) throw new Error('Review ended'); return `${state.workflow.documentGeneration}:${state.revision}`; },
-      protect: async () => {
-        await this.#broker.protectChromeReview(scope.sessionId); await this.#saving.drain(); await this.#broker.drainWrites();
-        const status = this.#broker.saveStatus(scope.sessionId);
-        if (status?.destination.phase === 'active' && status.sync.phase !== 'clean') throw new Error('PDF save failed');
-      },
-    });
+    this.upgradeParticipants?.attach(ownerKey, createUpgradeReviewProtection(this.#broker, this.#saving, scope.sessionId));
     this.#presentations.set(scope.runtimeId, {
       scope, ownerKey,
       attachment: this.#broker.replaceInteractionAttachment(scope.sessionId, ownerKey),

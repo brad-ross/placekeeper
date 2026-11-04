@@ -357,9 +357,6 @@ export async function startHttpServer(
     response.end(bytes);
   };
   const server = createServer(async (request, response) => {
-    // Existing session commands, save requests and draft protection must settle
-    // while admission is frozen. Only routes creating or reconnecting a review
-    // use the admission boundary.
     let admissionPath: string;
     try { admissionPath = new URL(request.url ?? "/", origin).pathname; }
     catch { send(response, 400, "Invalid request URL"); return; }

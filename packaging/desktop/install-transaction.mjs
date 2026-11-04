@@ -33,8 +33,6 @@ export async function recoverInstallation(options) {
     try { await options.retire(record); }
     catch (error) { await transition(options, record, 'retirement-uncertain'); throw new Error(`Candidate retirement is uncertain. Keep both app versions, journal ${options.transactionRoot}, and recovery backup ${record.backupRoot}. Close the candidate and retry recovery.`, { cause: error }); }
   }
-  // Intent records precede renames. The locations disambiguate a crash on
-  // either side, including a crash while restoration itself is in progress.
   if (await exists(record.previous)) {
     await transition(options, record, 'restoring');
     if (await exists(record.destination)) {

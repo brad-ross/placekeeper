@@ -1,4 +1,4 @@
-import { UpgradeReviewParticipants } from "./upgrade-review-participants.js";
+import { createUpgradeReviewProtection, UpgradeReviewParticipants } from "./upgrade-review-participants.js";
 import { UpgradePreparationCoordinator } from "./upgrade-preparation.js";
 import type { NativeTaskLaunchReceipt } from "../desktop/native-task-launches.js";
 import { NativeSyncTex } from "../synctex/native-synctex.js";
@@ -337,11 +337,7 @@ export class PlacekeeperHost {
       exporting,
       lifecycle,
       upgradeParticipants: participants,
-      protectUpgradeReview: async sessionId => {
-        await broker.protectChromeReview(sessionId); await saving.drain(); await broker.drainWrites();
-        const status = broker.saveStatus(sessionId);
-        if (status?.destination.phase === "active" && status.sync.phase !== "clean") throw new Error("PDF save failed");
-      },
+      protectUpgradeReview: sessionId => createUpgradeReviewProtection(broker, saving, sessionId).protect(),
     });
     const context = new LiveContextService({ broker });
     const reconciliation = new SourceReconciliationService({ broker });

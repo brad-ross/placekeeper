@@ -1,11 +1,30 @@
 import type { UpgradeReviewSettlement, UpgradeReviewStatus } from '../../../../packages/core/src/upgrade-review-protocol.js';
 import type { UpgradeParticipantCredentials, UpgradePreparationCoordinator } from './upgrade-preparation.js';
+import type { SessionBroker } from '../sessions/session-broker.js';
+import type { PdfSaveCoordinator } from '../saving/pdf-save-coordinator.js';
 
 interface ReviewProtection {
   readonly revision: () => string;
   readonly generation?: () => number;
   /** Resolves only after recovery protection, broker writes and PDF saves are durable. */
   readonly protect: () => Promise<void>;
+}
+export function createUpgradeReviewProtection(broker: SessionBroker, saving: PdfSaveCoordinator, sessionId: string): ReviewProtection {
+  return {
+    generation: () => broker.state(sessionId)?.workflow.documentGeneration ?? -1,
+    revision: () => {
+      const state = broker.state(sessionId);
+      if (!state) throw new Error('Review ended');
+      return `${state.workflow.documentGeneration}:${state.revision}`;
+    },
+    protect: async () => {
+      await broker.protectChromeReview(sessionId);
+      await saving.drain();
+      await broker.drainWrites();
+      const status = broker.saveStatus(sessionId);
+      if (status?.destination.phase === 'active' && status.sync.phase !== 'clean') throw new Error('PDF save failed');
+    },
+  };
 }
 /** Trusted adapters key participants by admitted connection ownership, never renderer IDs. */
 export class UpgradeReviewParticipants {
@@ -37,9 +56,9 @@ export class UpgradeReviewParticipants {
     if (!view) return;
     const phase = this.coordinator.poll(view.credentials)?.phase;
     if (phase !== "committed") view.retiring = false;
-    // During preparation the frozen renderer may still flush its admitted input.
     const generation = view.protection.generation?.();
-    if ((phase !== 'preparing' || generation !== view.generation) && !view.retiring) this.coordinator.updateParticipant(view.credentials, view.protection.revision());
+    const admittedInputMayStillFlush = phase === 'preparing' && generation === view.generation;
+    if (!admittedInputMayStillFlush && !view.retiring) this.coordinator.updateParticipant(view.credentials, view.protection.revision());
     view.generation = generation;
   }
   poll(id: string): UpgradeReviewStatus {
@@ -67,7 +86,7 @@ export class UpgradeReviewParticipants {
         peer.generation = generation;
       }
       durable = true;
-    } catch { /* A failed proof cancels the entire attempt; peers stay attached. */ }
+    } catch { durable = false; }
     this.coordinator.acknowledge(view.credentials, status, { revision: view.protection.revision(),
       reviewRevisionDurable: durable, protectedDraftDurable: durable, pdfSaveSettled: durable });
     return this.poll(id);

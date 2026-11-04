@@ -23,7 +23,6 @@ export class DaemonLifecycleCoordinator {
   readonly #activity: () => DaemonAggregateActivity;
   readonly #drain: () => Promise<void>;
   #lifecycle: DaemonLifecycleState = "accepting";
-  #activeRoutes = 0;
   readonly #routeSettlements = new Set<Promise<void>>();
   #frozenSettlements: readonly Promise<void>[] = [];
   #attempt = 0;
@@ -42,7 +41,7 @@ export class DaemonLifecycleCoordinator {
       activity: {
         reviewPresence: activity.reviewPresence,
         codexTasks: activity.codexTasks,
-        transientWork: activity.transientWork + this.#activeRoutes,
+        transientWork: activity.transientWork + this.#routeSettlements.size,
       },
     };
   }
@@ -74,7 +73,6 @@ export class DaemonLifecycleCoordinator {
       this.#lifecycle = "accepting";
       this.#attempt += 1;
     }
-    this.#activeRoutes += 1;
     const completion = Promise.withResolvers<void>();
     this.#routeSettlements.add(completion.promise);
     let active = true;
@@ -82,7 +80,6 @@ export class DaemonLifecycleCoordinator {
       complete: () => {
         if (!active) return;
         active = false;
-        this.#activeRoutes -= 1;
         this.#routeSettlements.delete(completion.promise);
         completion.resolve();
       },
@@ -107,7 +104,7 @@ export class DaemonLifecycleCoordinator {
     const before = this.status().activity;
     if (!authorized()) return { status: "refused", activity: before };
     if (this.#lifecycle === "shutdown-committed") return { status: "accepted" };
-    if (!authorized() || this.#lifecycle !== "accepting" || hasNonDrainableActivity(before, this.#activeRoutes)) {
+    if (!authorized() || this.#lifecycle !== "accepting" || hasNonDrainableActivity(before, this.#routeSettlements.size)) {
       return { status: "refused", activity: before };
     }
 
