@@ -2,11 +2,17 @@ import { parseDesktopRelease, RELEASE_API_URL, type DesktopReleaseCatalog, type 
 
 export type Downloads = { readonly status: 'loading' } | { readonly status: 'unavailable' } | { readonly status: 'available'; readonly catalog: DesktopReleaseCatalog };
 
-/** Browser Mac user agents report Intel even on Apple Silicon. Leave that choice to the user. */
-export function browserDownloadTarget(userAgent: string): DesktopTarget | undefined {
-  if (/Android|iPhone|iPad|Mobile/iu.test(userAgent)) return undefined;
-  if (/Windows/iu.test(userAgent) && /Win64|WOW64|x86_64/iu.test(userAgent) && !/ARM|aarch64/iu.test(userAgent)) return 'win32-x64';
+export type BrowserDownloadHints = { readonly platform?: string; readonly maxTouchPoints?: number };
+
+/** Mac identity defaults to Apple Silicon; Intel user-agent text does not establish the chip type. */
+export function browserDownloadTarget(userAgent: string, hints: BrowserDownloadHints = {}): DesktopTarget | undefined {
+  const identity = `${userAgent} ${hints.platform ?? ''}`;
+  const isMac = /Macintosh|Mac OS/iu.test(userAgent) || /Mac/iu.test(hints.platform ?? '');
+  if (/Android|iPhone|iPad|Mobile/iu.test(identity) || (isMac && (hints.maxTouchPoints ?? 0) > 1)) return undefined;
+  if (/CrOS/iu.test(identity) || (/Windows|Linux/iu.test(identity) && /ARM|aarch64/iu.test(identity))) return undefined;
+  if (/Windows/iu.test(userAgent) && /Win64|WOW64|x86_64/iu.test(userAgent)) return 'win32-x64';
   if (/Linux/iu.test(userAgent) && /x86_64/iu.test(userAgent)) return 'linux-x64';
+  if (isMac) return 'darwin-arm64';
   return undefined;
 }
 
