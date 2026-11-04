@@ -1,4 +1,4 @@
-name: Publish desktop release
+name: Publish desktop installers
 
 on:
   workflow_dispatch:
@@ -12,7 +12,7 @@ on:
         required: true
         type: string
       candidate_run:
-        description: Successful Desktop installer candidate workflow run ID
+        description: Successful Build desktop installers workflow run ID
         required: true
         type: string
       notes:
@@ -62,7 +62,7 @@ jobs:
           const id = process.env.CANDIDATE_RUN;
           if (!/^\d+$/.test(id) || !/^[a-f0-9]{40}$/.test(process.env.COMMIT)) throw Error('Invalid candidate identity');
           const result = JSON.parse(execFileSync('gh', ['api', `repos/brad-ross/placekeeper/actions/runs/${id}`]));
-          if (result.conclusion !== 'success' || result.status !== 'completed' || result.head_sha !== process.env.COMMIT || result.head_branch !== 'main' || result.event !== 'workflow_dispatch' || result.path !== '.github/workflows/desktop-candidate.yml') throw Error('Native candidate workflow did not succeed at the approved commit');
+          if (result.conclusion !== 'success' || result.status !== 'completed' || result.head_sha !== process.env.COMMIT || result.head_branch !== 'main' || result.event !== 'workflow_dispatch' || result.path !== '.github/workflows/build-desktop.yml') throw Error('Native candidate workflow did not succeed at the approved commit');
           JS
       - uses: actions/download-artifact@v4
         with:
