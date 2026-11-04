@@ -29,7 +29,15 @@ for (const width of [1440, 390, 320]) test(`@critical desktop downloads keep arc
   await page.goto('./');
   const { root, main, toggle, panel } = controls(page);
   await expect(main).toHaveAttribute('href', /macos-arm64.dmg$/);
-  await expect(main).toHaveText('Download for macOS Apple Silicon');
+  await expect(main).toHaveText('Download (macOS, Apple Silicon)');
+  const toggleBounds = (await toggle.boundingBox())!;
+  await page.mouse.move(toggleBounds.x + toggleBounds.width / 2, toggleBounds.y + toggleBounds.height / 2);
+  await page.mouse.down();
+  await expect(toggle).toHaveCSS('background-color', 'rgb(34, 34, 34)');
+  await page.mouse.up();
+  await expect(panel).toBeVisible();
+  await page.keyboard.press('Escape');
+
   await page.screenshot({ path: testInfo.outputPath(`downloads-${width}-closed.png`), fullPage: true });
   // Native Tab activation: the primary anchor precedes the separately operable chevron.
   await main.focus();
@@ -40,10 +48,10 @@ for (const width of [1440, 390, 320]) test(`@critical desktop downloads keep arc
   await expect(panel).toBeVisible();
   await expect(toggle).toBeFocused();
   await page.keyboard.press('Tab');
-  await expect(panel.getByRole('link', { name: 'macOS Apple Silicon', exact: true })).toBeFocused();
-  await expect(panel.getByRole('link', { name: 'macOS Intel', exact: true })).toHaveAttribute('href', /macos-x64.dmg$/);
-  await expect(panel.getByRole('link', { name: 'Windows x64', exact: true })).toHaveAttribute('href', /windows-x64-Setup.exe$/);
-  await expect(panel.getByRole('link', { name: 'Linux Debian / Ubuntu x64', exact: true })).toHaveAttribute('href', /linux-x64.deb$/);
+  await expect(panel.getByRole('link', { name: 'macOS (Apple Silicon)', exact: true })).toBeFocused();
+  await expect(panel.getByRole('link', { name: 'macOS (Intel)', exact: true })).toHaveAttribute('href', /macos-x64.dmg$/);
+  await expect(panel.getByRole('link', { name: 'Windows (x64)', exact: true })).toHaveAttribute('href', /windows-x64-Setup.exe$/);
+  await expect(panel.getByRole('link', { name: 'Linux Debian / Ubuntu (x64)', exact: true })).toHaveAttribute('href', /linux-x64.deb$/);
   await footer(page);
   const bounds = (await panel.boundingBox())!;
   expect(bounds.x).toBeGreaterThanOrEqual(0);
@@ -85,8 +93,8 @@ for (const width of [1440, 390, 320]) test(`@critical desktop downloads keep arc
 });
 
 for (const [ua, label, suffix] of [
-  ['Windows NT 10.0; Win64; x64', 'Windows x64', 'windows-x64-Setup.exe'],
-  ['X11; Linux x86_64', 'Linux Debian / Ubuntu x64', 'linux-x64.deb'],
+  ['Windows NT 10.0; Win64; x64', 'Windows, x64', 'windows-x64-Setup.exe'],
+  ['X11; Linux x86_64', 'Linux Debian / Ubuntu, x64', 'linux-x64.deb'],
 ] as const) test(`@critical ${label} visitor activates a matching primary download directly`, async ({ page }) => {
   await page.route(RELEASE_API_URL, route => route.fulfill({ json: fixture() }));
   await identity(page, ua);
@@ -96,7 +104,7 @@ for (const [ua, label, suffix] of [
     return route.fulfill({ contentType: 'application/octet-stream', headers: { 'content-disposition': `attachment; filename="${suffix}"` }, body: 'mock installer' });
   });
   await page.goto('./');
-  const main = page.getByRole('link', { name: `Download for ${label}`, exact: true }).first();
+  const main = page.getByRole('link', { name: `Download (${label})`, exact: true }).first();
   await expect(main).toHaveAttribute('href', new RegExp(`${suffix.replaceAll('.', '\\.')}$`));
   const downloaded = page.waitForEvent('download');
   await main.click();

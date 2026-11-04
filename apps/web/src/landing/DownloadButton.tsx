@@ -4,10 +4,17 @@ import { ReviewIcon } from '../review/ReviewIcon.js';
 import type { Downloads } from './downloads.js';
 
 const PLATFORM_LABELS: Record<DesktopTarget, string> = {
-  'darwin-arm64': 'macOS Apple Silicon',
-  'darwin-x64': 'macOS Intel',
-  'win32-x64': 'Windows x64',
-  'linux-x64': 'Linux Debian / Ubuntu x64',
+  'darwin-arm64': 'macOS (Apple Silicon)',
+  'darwin-x64': 'macOS (Intel)',
+  'win32-x64': 'Windows (x64)',
+  'linux-x64': 'Linux Debian / Ubuntu (x64)',
+};
+
+const DOWNLOAD_LABELS: Record<DesktopTarget, string> = {
+  'darwin-arm64': 'macOS, Apple Silicon',
+  'darwin-x64': 'macOS, Intel',
+  'win32-x64': 'Windows, x64',
+  'linux-x64': 'Linux Debian / Ubuntu, x64',
 };
 
 export function DownloadButton({ downloads, target }: {
@@ -54,7 +61,7 @@ export function DownloadButton({ downloads, target }: {
     }}>
     <div className="landing-download__segments">
       {artifact && target ? <a className="landing-download__main" ref={element => { mainRef.current = element; }} href={artifact.url}>
-        <ReviewIcon name="download" size={18} /><span>Download for {PLATFORM_LABELS[target]}</span>
+        <ReviewIcon name="download" size={18} /><span>Download ({DOWNLOAD_LABELS[target]})</span>
       </a> : <button className="landing-download__main" ref={element => { mainRef.current = element; }} type="button" aria-expanded={open} aria-controls={panelId} onClick={event => toggle(event.currentTarget)}>
         <ReviewIcon name="download" size={18} /><span>Download Placekeeper</span>
       </button>}
@@ -65,7 +72,7 @@ export function DownloadButton({ downloads, target }: {
     <nav id={panelId} className="landing-download__panel" aria-label="Placekeeper downloads" hidden={!open}>
       <ul className="landing-download__platforms">
         {(Object.keys(PLATFORM_LABELS) as DesktopTarget[]).map(key => <li key={key}>
-          {downloads.status === 'available' ? <a href={downloads.catalog.downloads[key].url}>{PLATFORM_LABELS[key]}<ReviewIcon name="download" size={15} /></a> : <span aria-disabled="true">{PLATFORM_LABELS[key]}</span>}
+          {downloads.status === 'available' ? <a href={downloads.catalog.downloads[key].url}>{PLATFORM_LABELS[key]}</a> : <span aria-disabled="true">{PLATFORM_LABELS[key]}</span>}
         </li>)}
       </ul>
       {downloads.status === 'loading' && <p className="landing-download__status" role="status">Checking downloads…</p>}
