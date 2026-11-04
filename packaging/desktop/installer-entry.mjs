@@ -1,6 +1,6 @@
 import { realpath } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
-import { dirname, isAbsolute, join, resolve } from 'node:path';
+import { isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { resolveLauncherRuntime } from './launcher.mjs';
 import { resolveInstallLayout } from './install-layout.ts';
@@ -28,7 +28,7 @@ export async function runInstaller({ candidate, destination = resolveInstallLayo
       let newline;
       while ((newline = pending.indexOf('\n')) !== -1) {
         const line = pending.slice(0, newline); pending = pending.slice(newline + 1);
-        try { const notice=JSON.parse(line);if(notice.kind==='placekeeper-uninstall-retained'&&Array.isArray(notice.resources)&&notice.resources.every(value=>typeof value==='string'))retainedResources=notice.resources; } catch { /* Ordinary coordinator output is retained below. */ }
+        try { const notice=JSON.parse(line);if(notice.kind==='placekeeper-uninstall-retained'&&Array.isArray(notice.resources)&&notice.resources.every(value=>typeof value==='string'))retainedResources=notice.resources; } catch {}
         if (line === '{"kind":"placekeeper-install-consent","version":1}' && !consentPending) {
           consentPending = true;
           void Promise.resolve().then(consent).then(accepted => child.stdin.end(`${JSON.stringify({ version: 1, accepted: accepted === true })}\n`), () => child.stdin.end('{"version":1,"accepted":false}\n'));

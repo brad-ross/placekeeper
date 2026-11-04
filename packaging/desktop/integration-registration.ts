@@ -79,14 +79,11 @@ export async function repairCandidateIntegration(options: Parameters<typeof regi
     if (receipt.registry) {
       if (!options.chromeRegistry?.driver.matches) throw new Error("Chrome registry ownership could not be verified; inspect the retained receipt");
       if (!await options.chromeRegistry.driver.matches(receipt.registry.path, receipt.registry.owner, receipt.registry.sha256)) {
-        // Exclusive creation retries an absent key after interrupted setup, and
-        // still refuses an incumbent with different ownership or values.
         await options.chromeRegistry.driver.register(receipt.registry.path, receipt.registry.owner, receipt.registry.sha256);
       }
     }
     return "current";
   }
-  // Registry ownership must also match before replacing a Windows manifest.
   if (receipt.registry && (!options.chromeRegistry || !await options.chromeRegistry.driver.unregister(receipt.registry.path, receipt.registry.owner, receipt.registry.sha256))) throw new Error("Chrome registry changed; registration preserved");
   const files: RegistrationReceipt["files"][number][] = [];
   for (const file of options.files) {
@@ -94,7 +91,6 @@ export async function repairCandidateIntegration(options: Parameters<typeof regi
     await writeFile(file.path, file.content, { mode: 0o600, ...(receipt.files.some(old => old.path === file.path) ? {} : {flag:"wx"}) });
     const info = await lstat(file.path);
     files.push({ path: file.path, sha256: digest(file.content), device: info.dev, inode: info.ino });
-    // Persist progress so interruption cannot silently adopt changed payloads.
     const remaining = receipt.files.filter(old => !files.some(updated => updated.path === old.path));
     await writeFile(options.receiptPath, JSON.stringify({ ...receipt, files: [...files, ...remaining] }), { mode: 0o600 });
   }

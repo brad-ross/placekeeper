@@ -51,8 +51,8 @@ const pendingOpens: string[] = [];
 const invocations = new DesktopInvocationQueue();
 let routeOpen: ((path: string) => void) | undefined;
 if (installerEvent) app.exit(installerAction.exitCode);
-else if (nativeInstaller || standaloneChooser) { /* Explicit chooser processes do not own review windows. */ }
-else if (!app.requestSingleInstanceLock({ argv: process.argv.slice(1) })) app.quit();
+else if (!nativeInstaller && !standaloneChooser) {
+if (!app.requestSingleInstanceLock({ argv: process.argv.slice(1) })) app.quit();
 else {
 app.on('open-url', (event, url) => { event.preventDefault(); try { invocations.enqueue([url]); } catch (error) { dialog.showErrorBox('Placekeeper could not open', String(error)); } });
 app.on('open-file', (event, path) => { event.preventDefault(); if (routeOpen) routeOpen(path); else pendingOpens.push(path); });
@@ -62,6 +62,7 @@ app.on('second-instance', (_event, argv, _directory, additionalData) => {
         invocations.enqueue(exactArguments);
     } catch (error) { console.error('Desktop invocation refused', error); dialog.showErrorBox('Placekeeper could not open', String(error)); }
 });
+}
 }
 protocol.registerSchemesAsPrivileged([
     { scheme: 'placekeeper-app', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } },

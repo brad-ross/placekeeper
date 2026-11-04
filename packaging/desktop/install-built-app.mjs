@@ -84,8 +84,6 @@ export async function installBuiltApp(built, destination, readiness, port, invok
     ...readinessCallbacks({ app:destination, readiness, context, isolation, run }),
   });
 }
-/** Both copied installations and root-owned immutable selections prove the same
- * service identity, real renderer/PDF readiness, and exact process retirement. */
 function readinessCallbacks({ app, readiness, context, isolation, run }) {
   const leaseEnvironment={PLACEKEEPER_LIFECYCLE_LOCK_PATH:context.lockPath,PLACEKEEPER_LIFECYCLE_LOCK_TOKEN:context.lockToken};
   return {

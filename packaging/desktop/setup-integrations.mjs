@@ -75,7 +75,6 @@ export async function setupIntegrations({appPath, resources, choices = {}, state
       if (host === 'vscode') {
         const vsix = join(resources,'integrations/placekeeper.vsix');
         const code = codePath ?? (process.env.PLACEKEEPER_HOST_PATH ?? process.env.PATH ?? '').split(delimiter).map(path=>join(path,platform === 'win32' ? 'code.cmd' : 'code')).find(existsSync);
-        // Always use the supported installer, including equal-version payload refresh.
         const vsixSha256 = createHash('sha256').update(await readFile(vsix)).digest('hex');
         const hostReceipt = join(owned,'vscode-host.receipt.json');
         const installed = await readFile(hostReceipt,'utf8').then(JSON.parse,error=>{if(error.code==='ENOENT')return undefined;throw error;});
@@ -91,7 +90,6 @@ export async function setupIntegrations({appPath, resources, choices = {}, state
       outcomes.push({host,status:'pending',registration,hostAction:'pending',path:destination,message});
     } catch (error) { outcomes.push({host,status:'failed',message:`${error.message}. Existing edited or unowned registrations are preserved; inspect the ownership receipt before retrying.`}); }
   }
-  // Retain the published Mac source installer's optional Zed operation.
   if (choices.zed && choices.zed !== 'skip') {
     const answer = choices.zed === 'ask' ? await prompt('zed') : choices.zed;
     if (answer) {

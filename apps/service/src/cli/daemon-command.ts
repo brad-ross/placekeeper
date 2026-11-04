@@ -218,8 +218,6 @@ async function coordinateLifecycleMutation(
           let accepted = false;
           try {
             if (nativeConsent) {
-              // The separate installer profile presents the incumbent's preview;
-              // no approval is inferred from invocation or a command-line flag.
               process.stdout.write('{"kind":"placekeeper-install-consent","version":1}\n');
               const answer = await Promise.race([terminal[Symbol.asyncIterator]().next(), new Promise<never>((_, reject) => { const timer = setTimeout(() => reject(Error("Installer consent timed out")), 120_000); timer.unref(); })]);
               const decision = answer.done ? undefined : JSON.parse(answer.value) as { version?: unknown; accepted?: unknown };

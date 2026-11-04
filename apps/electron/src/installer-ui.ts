@@ -36,7 +36,6 @@ export async function runInstallerUI(request: InstallerRequest, profile: string)
     await app.whenReady();
     try {
         const root = join(request.candidate, process.platform === 'darwin' ? 'Contents/Resources/desktop' : 'resources/desktop');
-        // Keep the portable helper external: it also ships in the source route.
         const { runInstaller, resolveInstallLayout } = await import(/* @vite-ignore */ pathToFileURL(join(root, 'installer/installer-entry.mjs')).href);
         request.destination ??= resolveInstallLayout().destination;
         const existing=await lstat(request.destination!).then(value=>value.isDirectory(),(error:NodeJS.ErrnoException)=>{if(error.code==='ENOENT')return false;throw error;});

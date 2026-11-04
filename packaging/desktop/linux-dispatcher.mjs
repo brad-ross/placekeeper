@@ -63,7 +63,8 @@ export async function dispatch(args=process.argv.slice(2)) {
   if (!/^[a-f0-9]{64}$/u.test(available)) throw Error('Invalid available runtime marker');
   const resources=join(runtimeStore,available,'resources/desktop');
   await validateImmutableRuntime(resources);
-  const explicitLaunch=!args.length || /^(?:placekeeper(?:-navigation)?:|\/)/u.test(args[0]) || ['open','open-link'].includes(args[0]) || /\.pdf$/iu.test(args[0]);
+  const opensDesktop=!args.length || /^(?:placekeeper(?:-navigation)?:|\/)/u.test(args[0]) || /\.pdf$/iu.test(args[0]);
+  const explicitLaunch=opensDesktop || ['open','open-link'].includes(args[0]);
   if (!current || explicitLaunch && current.installArtifactIdentity!==available) {
     const { launchInstaller }=await import(pathToFileURL(join(resources,'installer/installer-entry.mjs')).href);
     const code=await launchInstaller(join(runtimeStore,available),['--immutable-runtime','--destination',join(runtimeStore,available)]);
@@ -72,7 +73,7 @@ export async function dispatch(args=process.argv.slice(2)) {
     if (!current) throw Error('No runtime activated; launch Placekeeper again to finish installation');
   }
   const runtime=await validateImmutableRuntime(current.resources);
-  if (!args.length || /^(?:placekeeper(?:-navigation)?:|\/)/u.test(args[0]) || /\.pdf$/iu.test(args[0])) return wait(spawn(desktopExecutable(current.resources),args,{stdio:'inherit',env:runtime.environment,shell:false}));
+  if (opensDesktop) return wait(spawn(desktopExecutable(current.resources),args,{stdio:'inherit',env:runtime.environment,shell:false}));
   const vscode=args[0]==='--vscode-launcher';
   return wait(spawn(runtime.node,[join(current.resources,vscode?'vscode-launcher.mjs':'launcher.mjs'),...(vscode?args.slice(1):args)],{stdio:'inherit',env:runtime.environment,shell:false}));
 }
