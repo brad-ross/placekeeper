@@ -1,9 +1,9 @@
 import { app, BrowserWindow, dialog, ipcMain, protocol, session, clipboard, screen, shell } from 'electron';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { readFile, readdir } from 'node:fs/promises';
-import { basename, join } from 'node:path';
+import { basename, join, resolve } from 'node:path';
 import { defaultDaemonPaths, installedSmokeDaemonPaths, installedSmokeDaemonArgs, electronRuntimeThroughDaemon, electronAppControlThroughDaemon, resolveElectronLaunchThroughDaemon, preflightLinkThroughDaemon, openLinkThroughDaemon } from '../../service/src/host/service-daemon.js';
 import { resolvePackagedRuntime, type PackagedRuntimeManifest } from '../../service/src/platform/runtime-layout.js';
 import { encodeElectronHelperFrame } from '../../../packages/core/src/electron-helper-protocol.js';
@@ -22,15 +22,19 @@ import { DocumentWindowRegistry } from './window-registry.js';
 import { parseWindowState, readWindowState, writeWindowState, importLegacyMacPreferences, readLegacyInterfaceScale, type WindowIntent } from './window-state.js';
 import { installMenus, type WindowCommands } from './menus.js';
 import { createManualUpdateAction } from './update-check.js';
+import { parseStartupRequest, writeStartupReceipt, writeStartupLoadFailure, retainedStartupRecovery } from './startup-receipt.js';
 import { nativeTitlebarOptions, trackTitlebarHover } from './titlebar.js';
 import { parseElectronLocation } from '../../../packages/core/src/electron-shell-protocol.js';
 import { decodePlacekeeperLink } from '../../../packages/core/src/placekeeper-link.js';
 import { REVIEW_COMMAND_IDS } from '../../web/src/review/review-command-surface.js';
+const startupRequest = parseStartupRequest(process.env.PLACEKEEPER_STARTUP_REQUEST);
+let startupProbePhase: 'initializing' | 'renderer-navigation' | 'shell-retirement' = 'initializing';
+if (startupRequest) { const deadline = setTimeout(() => { void (startupProbePhase === 'initializing' ? Promise.resolve() : writeStartupLoadFailure(startupRequest, 'Installed startup acknowledgement timed out', startupProbePhase === 'shell-retirement' ? 'shell-retirement-timeout' : 'renderer-ready-timeout')).catch(error => console.error(error)).finally(() => app.exit(2)); }, 20_000); deadline.unref(); writeFileSync(`${startupRequest.receipt}.started`, JSON.stringify({ attempt:startupRequest.attempt, candidateIdentity:startupRequest.candidateIdentity, pid:process.pid }), { flag:'wx', mode:0o600 }); mkdirSync(startupRequest.profile, { recursive:true }); app.setPath('userData', startupRequest.profile); }
 const standaloneChooser = parseStandaloneChooser(process.argv.slice(1));
 const installerAction = handleWindowsProtocolInstall(app, { platform: process.platform, argv: process.argv, executable: process.execPath });
 const installerEvent = installerAction.handled;
 const smokePaths = installedSmokeDaemonPaths(process.argv.slice(1));
-if (smokePaths) {
+if (smokePaths && !startupRequest) {
     if (!smokePaths.isolatedTestRoot) throw new Error('Electron installed smoke requires an explicit isolated test root');
     const smokeUserData = join(smokePaths.isolatedTestRoot, 'electron-user-data');
     mkdirSync(smokeUserData, { recursive: true });
@@ -59,7 +63,7 @@ protocol.registerSchemesAsPrivileged([
 const startupTime = performance.now();
 async function start() {
     await app.whenReady();
-    if (process.platform === 'darwin' && !smokePaths) {
+    if (process.platform === 'darwin' && !smokePaths && !startupRequest) {
         await importLegacyMacPreferences({ profileRoot: app.getPath('userData') }).catch(error => {
             dialog.showErrorBox('Previous window settings could not be imported', `Your original settings are preserved. ${String(error)}`);
         });
@@ -67,6 +71,7 @@ async function start() {
     const interfaceScale = await readLegacyInterfaceScale(app.getPath('userData'));
     const root = join(process.resourcesPath, 'desktop');
     const manifest = JSON.parse(await readFile(join(root, 'runtime-manifest.json'), 'utf8')) as PackagedRuntimeManifest;
+    if (startupRequest && startupRequest.candidateIdentity !== manifest.installArtifactIdentity) throw new Error('Installed startup candidate changed');
     const expectedIdentity = { daemonIdentity: manifest.daemonIdentity, installArtifactIdentity: manifest.installArtifactIdentity };
     const runtime = await resolvePackagedRuntime(root, manifest, expectedIdentity);
     if (smokePaths !== undefined && smokePaths.isolatedTestRoot === undefined) {
@@ -76,7 +81,7 @@ async function start() {
     timing('startup');
     const paths = { ...(smokePaths ?? defaultDaemonPaths()), webAssetsRoot: runtime.webAssetsRoot, packagedRuntime: { root, manifest, expectedIdentity } };
     const appInstanceId = randomUUID();
-    const lifecycle = spawn(runtime.nodeExecutable, [runtime.serviceEntry, 'electron-lifecycle-control', ...installedSmokeDaemonArgs(paths)], { stdio: ['pipe', 'pipe', 'inherit'], env: { ...process.env, PLACEKEEPER_APP_INSTANCE_ID: appInstanceId, PLACEKEEPER_DAEMON_IDENTITY: manifest.daemonIdentity, PLACEKEEPER_INSTALL_ARTIFACT_IDENTITY: manifest.installArtifactIdentity, PLACEKEEPER_PDFIUM_WASM: join(runtime.webAssetsRoot, 'pdfium.wasm') } });
+    const lifecycle = spawn(runtime.nodeExecutable, [runtime.serviceEntry, 'electron-lifecycle-control', ...(startupRequest ? ['--installed-startup-lease'] : []), ...installedSmokeDaemonArgs(paths)], { stdio: ['pipe', 'pipe', 'inherit'], env: { ...process.env, PLACEKEEPER_APP_INSTANCE_ID: appInstanceId, PLACEKEEPER_DAEMON_IDENTITY: manifest.daemonIdentity, PLACEKEEPER_INSTALL_ARTIFACT_IDENTITY: manifest.installArtifactIdentity, PLACEKEEPER_PDFIUM_WASM: join(runtime.webAssetsRoot, 'pdfium.wasm') } });
     let handleUpgrade: ((status: import("../../../packages/core/src/upgrade-review-protocol.js").UpgradeReviewStatus) => void) | undefined;
     let lifecycleStopping = false;
     let lifecycleFailureShown = false;
@@ -85,6 +90,7 @@ async function start() {
         activityAcknowledgements.fail(error);
         if (lifecycleStopping || lifecycleFailureShown) return;
         lifecycleFailureShown = true;
+        if (startupRequest) { console.error(error); app.exit(2); return; }
         console.error('Electron lifecycle control failed', error);
         dialog.showErrorBox('Desktop service connection ended', String(error));
         app.quit();
@@ -125,7 +131,7 @@ async function start() {
     const statePath = join(app.getPath('userData'), 'windows.json');
     let quitting = false;
     let persistence = Promise.resolve();
-    const persist = () => { const windows = [...entries.values()].map(e => e.intent); persistence = persistence.then(() => writeWindowState(statePath, windows)).catch(error => { dialog.showErrorBox('Window restoration could not be saved', String(error)); }); return persistence; };
+    const persist = () => { if (startupRequest) return Promise.resolve(); const windows = [...entries.values()].map(e => e.intent); persistence = persistence.then(() => writeWindowState(statePath, windows)).catch(error => { dialog.showErrorBox('Window restoration could not be saved', String(error)); }); return persistence; };
     const activity = () => {
         const pending = activityAcknowledgements.enqueue(() => {
             if (lifecycle.stdin.writableEnded || lifecycle.stdin.destroyed) throw new Error('Desktop lifecycle control is unavailable');
@@ -187,7 +193,16 @@ async function start() {
         if (smokePaths && value?.method === 'command' && value?.payload?.type === 'put-draft' && typeof value.payload.draft?.text === 'string') timing('draft-input-request', e.bridge, { inputLength: value.payload.draft.text.length });
         return e.bridge.request(value);
     });
-    ipcMain.handle('review:document-ready', (event, id, generation) => { const b = verify(event, id).bridge; if (generation !== b.validatedGeneration) throw new Error('Unvalidated document'); b.readyGeneration = generation; timing('document-ready', b); });
+    ipcMain.handle('review:document-ready', async (event, id, generation) => { const e = verify(event, id); const b = e.bridge; if (generation !== b.validatedGeneration) throw new Error('Unvalidated document'); b.readyGeneration = generation; timing('document-ready', b);
+        if (startupRequest) {
+            if (!e.rendererReady || e.intent.sourcePath !== startupRequest.fixture) throw new Error('Installed renderer startup was not validated');
+            await writeStartupReceipt(startupRequest, manifest.installArtifactIdentity);
+            startupProbePhase = 'shell-retirement';
+            // Normal close settlement and lifecycle detach must finish before
+            // the installer observes a successful process exit.
+            setImmediate(() => app.quit());
+        }
+    });
     ipcMain.handle('review:visible', async (event, id, generation, token) => { const e = verify(event, id); if (!e.focusedVisibility.accepts(token, generation)) throw new Error('Stale activation evidence'); if (generation !== e.bridge.validatedGeneration || generation !== e.bridge.readyGeneration || !e.window.isVisible()) throw new Error('Unvalidated paint'); e.bridge.paintedGeneration = generation; await e.bridge.activate(); if (!e.focusedVisibility.commit(token, generation)) throw new Error('Superseded activation evidence'); ownedWindows.activated(e.bridge.helperId); timing('visible-active', e.bridge); activity(); menus(); });
     ipcMain.handle('review:clipboard', (event, id, text) => { verify(event, id); if (typeof text !== 'string' || text.length > 4 * 1024 * 1024) throw new Error('Invalid clipboard text'); clipboard.writeText(text); });
     ipcMain.handle('review:presentation', (event, id, presentation) => { const e = verify(event, id); const clean = parseWindowState([{ ...e.intent, presentation }])[0]; if (clean) { e.intent = clean; void persist(); } });
@@ -226,10 +241,10 @@ async function start() {
     isolated.protocol.handle('placekeeper-app', request => assetResponse(assetRoot, inventory, request.url));
     const retirement = new AbortController();
     let bridge: ReviewBridge;
-    bridge = new ReviewBridge((message, signal) => electronRuntimeThroughDaemon(appInstanceId, bridge.helperId, message, signal === undefined ? retirement.signal : AbortSignal.any([signal, retirement.signal]), paths), generation => `placekeeper-resource://document/${bridge.attemptId}/${generation}`);
+    bridge = new ReviewBridge((message, signal) => electronRuntimeThroughDaemon(appInstanceId, bridge.helperId, message, signal === undefined ? retirement.signal : AbortSignal.any([signal, retirement.signal]), paths, startupRequest ? process.env.PLACEKEEPER_LIFECYCLE_LOCK_TOKEN : undefined), generation => `placekeeper-resource://document/${bridge.attemptId}/${generation}`);
     const bounds = restored?.bounds ?? { width: 1200, height: 900 };
     const usable = screen.getAllDisplays().some(d => (bounds.x ?? d.workArea.x) < d.workArea.x + d.workArea.width && (bounds.y ?? d.workArea.y) < d.workArea.y + d.workArea.height && (bounds.x ?? d.workArea.x) + bounds.width > d.workArea.x && (bounds.y ?? d.workArea.y) + bounds.height > d.workArea.y);
-    const window = new BrowserWindow({ ...nativeTitlebarOptions(), ...(usable ? bounds : { width: bounds.width, height: bounds.height }), minWidth: 600, minHeight: 400, title: basename(sourcePath), backgroundColor: '#f7f7f7', webPreferences: { preload: join(__dirname, 'preload.cjs'), session: isolated, sandbox: true, contextIsolation: true, nodeIntegration: false, webSecurity: true } });
+    const window = new BrowserWindow({ ...(startupRequest ? { show:false } : {}), ...nativeTitlebarOptions(), ...(usable ? bounds : { width: bounds.width, height: bounds.height }), minWidth: 600, minHeight: 400, title: basename(sourcePath), backgroundColor: '#f7f7f7', webPreferences: { preload: join(__dirname, 'preload.cjs'), session: isolated, sandbox: true, contextIsolation: true, nodeIntegration: false, webSecurity: true } });
     window.webContents.setZoomFactor(interfaceScale);
     timing('window-visible', bridge);
     const entry: Entry = { window, bridge, retirement, toolbarHeight: 52, permitClose: false, focusedVisibility: new FocusedVisibilityGate(), rendererReady: false, failureShown: false, intent: { sourcePath, bounds, maximized: restored?.maximized ?? false, ...(restored?.presentation ? { presentation: restored.presentation } : {}) } };
@@ -270,6 +285,7 @@ async function start() {
     });
     window.once('closed', () => { entries.delete(contents.id); registry.remove(window); void retire().catch(error => dialog.showErrorBox('Review detach failed', String(error))); if (!quitting) void persist(); menus(); if (quitting && entries.size === 0) { void persistence.finally(() => app.quit()); } });
     const fail = async (reason: unknown) => {
+        if (startupRequest) { console.error(reason); app.exit(2); return; }
         if (entry.failureShown || window.isDestroyed()) return;
         entry.failureShown = true;
         await retire().catch(() => undefined);
@@ -333,7 +349,9 @@ async function start() {
             else return bridge.pollNavigation();
         }).catch(error => { void fail(error); }).finally(() => { checking = false; }); }, 1000);
         if (restored?.maximized) window.maximize();
-        await window.loadURL('placekeeper-app://bundle/electron.html');
+        if (startupRequest) startupProbePhase = 'renderer-navigation';
+        try { await window.loadURL('placekeeper-app://bundle/electron.html'); }
+        catch (error) { if (startupRequest) await writeStartupLoadFailure(startupRequest, error); throw error; }
         void persist();
         return window;
     } catch (error) { await retire().catch(() => undefined); window.destroy(); throw error; }
@@ -401,6 +419,7 @@ async function start() {
     app.on('activate', () => { if (entries.size === 0) void chooseOpen(); });
     app.on('before-quit', event => { if (entries.size === 0) return; event.preventDefault(); quitting = true; void persist(); for (const e of entries.values()) e.window.close(); });
     menus();
+    if (startupRequest) { await openDocument(startupRequest.fixture); return; }
     const initial = parseDesktopOpenIntent(process.argv.slice(1));
     const queuedPaths = pendingOpens.splice(0);
     const queuedInvocations = invocations.take();
@@ -413,5 +432,5 @@ async function start() {
 
 }
 if (standaloneChooser && !installerEvent) void runStandaloneChooser(standaloneChooser, join(__dirname, 'preload.cjs')).catch(() => app.exit(2));
-if (!standaloneChooser && !installerEvent && app.hasSingleInstanceLock()) void start().catch(error => { dialog.showErrorBox('Placekeeper could not open', String(error)); app.quit(); });
-app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
+if (!standaloneChooser && !installerEvent && app.hasSingleInstanceLock()) void start().catch(async error => { if (startupRequest) { console.error(error); app.exit(2); } else { const recovery = await retainedStartupRecovery(resolve(process.resourcesPath, process.platform === 'darwin' ? '../..' : '..')); dialog.showErrorBox('Placekeeper could not open', `${String(error)}${recovery ? `\n\n${recovery}` : ''}`); app.quit(); } });
+app.on('window-all-closed', () => { if (startupRequest || process.platform !== 'darwin') app.quit(); });

@@ -14,6 +14,8 @@ export const suites: Record<string, TestStage[]> = {
     "apps/service/test/windows-chrome-registration.test.ts",
     "apps/service/test/windows-native-worker-lifecycle.test.ts", "apps/service/test/platform-file-publication.test.ts",
     "apps/service/test/desktop-daemon-lifecycle.test.ts",
+    "apps/service/test/startup-probe-lease.test.ts",
+    "packaging/desktop/install-built-app.test.ts", "packaging/desktop/install-transaction.test.ts",
     "apps/electron/test/installed-test-root.test.ts",
     "apps/electron/test/standalone-chooser.test.ts", "apps/electron/test/open-intent.test.ts",
     "apps/electron/test/protocol-install.test.ts", "packaging/desktop/linux-sandbox.test.ts",

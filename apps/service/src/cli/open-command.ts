@@ -18,6 +18,7 @@ import {
   controlThroughDaemon,
   defaultDaemonPaths,
   installedSmokeDaemonPaths,
+  LIFECYCLE_LOCK_TOKEN_ENV,
   INSTALLED_SMOKE_DAEMON_FLAG,
   INSTALLED_SMOKE_HTTP_PORT_FLAG,
   launchThroughDaemon,
@@ -404,7 +405,7 @@ async function main(): Promise<number> {
         input: process.stdin,
         write: writeStdoutFrame,
         appInstanceId: process.env.PLACEKEEPER_APP_INSTANCE_ID ?? "",
-        exchange: message => electronAppControlThroughDaemon(message, undefined, paths),
+        exchange: message => electronAppControlThroughDaemon(message, undefined, paths, process.argv.includes("--installed-startup-lease") ? process.env[LIFECYCLE_LOCK_TOKEN_ENV] : undefined),
         diagnostic,
       });
     } catch (error) { diagnostic(lifecycleDiagnostic('initialize', error)); return 2; }

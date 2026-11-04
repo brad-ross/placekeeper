@@ -337,10 +337,11 @@ export async function electronRuntimeThroughDaemon(
   message: ElectronReviewHelperMessage,
   signal?: AbortSignal,
   paths = defaultDaemonPaths(),
+  inheritedLifecycleToken?: string,
 ): Promise<ElectronReviewHelperResponse> {
   const request = { kind: "electron-runtime" as const, appInstanceId, helperId, message };
   const response = message.type === "admit" || message.type === "admit-link"
-    ? await demandStartedControl(request, paths, signal)
+    ? await demandStartedControl(request, paths, signal, inheritedLifecycleToken)
     : await requestControl(paths.socketPath, request, {
         timeoutMs: 10 * 60_000,
         ...(signal === undefined ? {} : { signal }),
@@ -368,10 +369,11 @@ export async function electronAppControlThroughDaemon(
   message: ElectronAppControlMessage,
   signal?: AbortSignal,
   paths = defaultDaemonPaths(),
+  inheritedLifecycleToken?: string,
 ): Promise<ElectronAppControlResponse> {
   const request = { kind: "electron-app-control" as const, message };
   const response = message.type === "register-app"
-    ? await demandStartedControl(request, paths, signal)
+    ? await demandStartedControl(request, paths, signal, inheritedLifecycleToken)
     : await requestControl(paths.socketPath, request, {
         timeoutMs: 15_000,
         ...(signal === undefined ? {} : { signal }),
@@ -404,12 +406,13 @@ async function demandStartedControl(
   request: PlacekeeperControlRequest,
   paths: DaemonPaths,
   signal?: AbortSignal,
+  inheritedLifecycleToken?: string,
 ): Promise<PlacekeeperControlResponse> {
   signal?.throwIfAborted();
   const lockPath = paths.lifecycleLockPath ?? join(paths.appSupportRoot, "lifecycle.lock");
   let lifecycleLock;
   try {
-    lifecycleLock = await acquireLifecycleLock(lockPath, { timeoutMs: 5_000 });
+    lifecycleLock = await acquireLifecycleLock(lockPath, { timeoutMs: 5_000, ...(inheritedLifecycleToken === undefined ? {} : { inheritedToken: inheritedLifecycleToken }) });
   } catch (error) {
     if (error instanceof LifecycleLockTimeoutError) {
       throw new DaemonUpgradeRequiredError("transient-busy");

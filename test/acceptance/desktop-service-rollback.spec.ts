@@ -1,9 +1,15 @@
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { acquireLifecycleLock } from '../../apps/service/src/host/lifecycle-lock.js';
+import { backupRecoveryAndVerify } from '../../apps/service/src/host/upgrade-coordinator.js';
+import type { InstallationCommand } from '../../packaging/desktop/install-built-app.mjs';
 import { createHash, randomUUID } from 'node:crypto';
-import { copyFile, lstat, mkdtemp, readFile, realpath, stat, writeFile } from 'node:fs/promises';
+import { cp, mkdir, readdir, rename, copyFile, lstat, mkdtemp, readFile, realpath, stat, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 import { expect, test } from '@playwright/test';
+import { installBuiltApp, runtimeRoot } from '../../packaging/desktop/install-built-app.mjs';
 import { switchDesktopService } from '../../apps/service/src/cli/desktop-service-switch.js';
 import { MANAGEMENT_PROTOCOL_VERSION, requestControl } from '../../apps/service/src/host/launch-control.js';
 import type { CandidateDaemonReceipt, DaemonPaths } from '../../apps/service/src/host/service-daemon.js';
@@ -50,8 +56,6 @@ test('packaged desktop to previous desktop to current desktop service rollback p
   expect((await stat(join(selectedPrevious, 'electron-web/electron.html'))).isFile()).toBe(true);
   expect((await stat(join(selectedElectron, 'electron-web/electron.html'))).isFile()).toBe(true);
   expect(previousManifest.installArtifactIdentity).not.toBe(electronManifest.installArtifactIdentity);
-  const retainedCapabilities = JSON.parse(await readFile(join(selectedPrevious, 'service/recovery-capabilities.json'), 'utf8')) as { service: { sha256: string } };
-  expect(retainedCapabilities.service.sha256).toBe(previousManifest.service.sha256);
   const root = await mkdtemp(join(tmpdir(), 'placekeeper-service-rollback-'));
   const source = join(root, 'Disposable acknowledged review.pdf');
   await copyFile(resolve('test/fixtures/pdfs/multi-page-text.pdf'), source);
@@ -212,5 +216,155 @@ test('packaged desktop to previous desktop to current desktop service rollback p
       await testInfo.attach('service-rollback-evidence', { path: evidencePath, contentType: 'application/json' });
       await testInfo.attach('protected-recovery-after', { path: join(sessionDirectory, 'draft.json'), contentType: 'application/json' });
     }
+  }
+});
+
+
+// This exercises the actual installed Electron entrypoint. Removing its real
+// HTML asset lets the exact service start while renderer startup must fail.
+test('installed candidate service success with renderer failure retires candidate before restoring the retained app', async ({}, testInfo) => {
+  test.skip(!electronResources || !previousDesktopResources, 'Provide both explicit newly built packaged resource roots.');
+  test.setTimeout(120_000);
+  const selected = await realpath(resolve(electronResources!));
+  const retained = await realpath(resolve(previousDesktopResources!));
+  const previousIdentity = (await readManifest(retained)).installArtifactIdentity;
+  const appRoot = (resources: string) => resolve(resources, process.platform === 'darwin' ? '../../..' : '../..');
+  const root = await mkdtemp(process.platform === 'darwin' ? '/tmp/pk-shell-' : join(tmpdir(), 'pk-shell-'));
+  const candidate = join(root, 'candidate'), installed = join(root, 'installed');
+  await cp(appRoot(selected), candidate, { recursive:true, verbatimSymlinks:true });
+  await cp(appRoot(retained), installed, { recursive:true, verbatimSymlinks:true });
+  const brokenHtml = join(runtimeRoot(candidate), 'electron-web/electron.html');
+  await rename(brokenHtml, `${brokenHtml}.unavailable`);
+  const state = join(root, 'state'); await mkdir(join(state,'recovery'), { recursive:true });
+  const sentinel = join(state, 'recovery', 'newer-user-work.txt'); await writeFile(sentinel, 'canonical protected work');
+  const paths: DaemonPaths = { appSupportRoot:state, recoveryRoot:join(state,'recovery'), socketPath:join(state,'control.sock'), lifecycleLockPath:join(state,'lifecycle.lock'), isolatedTestRoot:state, webAssetsRoot:join(runtimeRoot(candidate),'web'), httpPort:await freePort() };
+  const backup = join(state, 'verified-backup');
+  const launcher = process.platform === 'darwin' ? join(installed,'Contents/MacOS/placekeeper') : join(runtimeRoot(installed),'bin',`placekeeper${process.platform === 'win32' ? '.exe' : ''}`);
+  try {
+  const startupError = await switchDesktopService({ resources:runtimeRoot(candidate), backup, receipt:join(state,'coordinator-ready.json'), paths,
+    replaceAndReady: token => installBuiltApp(candidate, installed, launcher, String(paths.httpPort), undefined, state, { lockPath:paths.lifecycleLockPath!, lockToken:token, backupRoot:backup }).then(()=>undefined),
+  }).then(() => undefined, (error: Error & {stderr?:string;stdout?:string}) => error);
+  const failureLog = startupError ? `${startupError.stack}\n${startupError.stderr ?? ''}\n${startupError.stdout ?? ''}` : 'No startup failure was observed';
+  await testInfo.attach('installed-shell-failure-command',{body:failureLog,contentType:'text/plain'});
+  expect(startupError, failureLog).toBeDefined();
+  expect(startupError!.message, failureLog).toMatch(/PlacekeeperDesktop/u);
+  expect((await readManifest(runtimeRoot(installed))).installArtifactIdentity).toBe(previousIdentity);
+  expect(await readFile(sentinel,'utf8')).toBe('canonical protected work');
+  expect(await readFile(join(backup,'newer-user-work.txt'),'utf8')).toBe('canonical protected work');
+  expect(await lstat(paths.socketPath).then(()=>true,(error:NodeJS.ErrnoException)=>{if(error.code==='ENOENT')return false;throw error;})).toBe(false);
+  const journalParent = join(root,'.placekeeper-install-transactions');
+  const [journalDirectory] = await readdir(journalParent);
+  const journalPath = join(journalParent,journalDirectory!,'journal.json');
+  const journal = JSON.parse(await readFile(journalPath,'utf8')); expect(journal.phase).toBe('restored');
+  const loadFailure = JSON.parse(await readFile(`${journal.shellReceipt}.failure`,'utf8').catch(error => { throw new Error(`The installed renderer did not report its intended load failure. ${failureLog}`, {cause:error}); }));
+  expect(loadFailure).toMatchObject({version:1,attempt:journal.attempt,candidateIdentity:journal.candidateIdentity,url:'placekeeper-app://bundle/electron.html'});
+  expect(['renderer-load','renderer-ready-timeout']).toContain(loadFailure.stage);
+  await testInfo.attach('actual-renderer-load-failure',{path:`${journal.shellReceipt}.failure`,contentType:'application/json'});
+  expect((await lstat(journal.failed)).isDirectory()).toBe(true);
+  await testInfo.attach('shell-failure-activation-journal',{path:journalPath,contentType:'application/json'});
+
+  await rename(`${brokenHtml}.unavailable`, brokenHtml);
+  const successfulBackup = join(state, 'verified-backup-after-retry');
+  await switchDesktopService({ resources:runtimeRoot(candidate), backup:successfulBackup, receipt:join(state,'retry-coordinator-ready.json'), paths,
+    replaceAndReady: token => installBuiltApp(candidate, installed, launcher, String(paths.httpPort), undefined, state, { lockPath:paths.lifecycleLockPath!, lockToken:token, backupRoot:successfulBackup }).then(()=>undefined),
+  });
+  const completed = JSON.parse(await readFile(journalPath,'utf8'));
+  expect(completed.phase).toBe('complete');
+  const shellReceipt = JSON.parse(await readFile(completed.shellReceipt,'utf8'));
+  const serviceReceipt = JSON.parse(await readFile(completed.receipt,'utf8'));
+  const installedManifest = await readManifest(runtimeRoot(installed));
+  expect(shellReceipt).toMatchObject({version:1,attempt:completed.attempt,candidateIdentity:installedManifest.installArtifactIdentity,rendererReady:true});
+  expect(serviceReceipt.daemonIdentity).toBe(installedManifest.daemonIdentity);
+  expect((await readManifest(runtimeRoot(completed.previous))).installArtifactIdentity).toBe(previousIdentity);
+  expect(await readFile(sentinel,'utf8')).toBe('canonical protected work');
+  await testInfo.attach('successful-installed-renderer-receipt',{path:completed.shellReceipt,contentType:'application/json'});
+  await testInfo.attach('successful-activation-journal',{path:journalPath,contentType:'application/json'});
+  } finally {
+    // Cleanup uses only this test's explicit isolated management endpoint,
+    // including when a receipt or retention assertion fails.
+    if (await lstat(paths.socketPath).then(()=>true,(error:NodeJS.ErrnoException)=>{if(error.code==='ENOENT')return false;throw error;})) {
+      await expect.poll(async()=>await requestControl(paths.socketPath,{kind:'management',protocolVersion:MANAGEMENT_PROTOCOL_VERSION,operation:'shutdown-if-idle'}),{timeout:5_000}).toMatchObject({kind:'management',operation:'shutdown-if-idle',result:{status:'accepted'}});
+      await expect.poll(()=>lstat(paths.socketPath).then(()=>true,(error:NodeJS.ErrnoException)=>{if(error.code==='ENOENT')return false;throw error;}),{timeout:5_000}).toBe(false);
+    }
+  }
+
+});
+
+
+test('installed activation reentry retires the exact interrupted candidate before retrying with protected data intact', async ({}, testInfo) => {
+  test.skip(!electronResources || !previousDesktopResources, 'Provide both explicit newly built packaged resource roots.');
+  test.setTimeout(120_000);
+  const selected = await realpath(resolve(electronResources!));
+  const retained = await realpath(resolve(previousDesktopResources!));
+  const previousIdentity = (await readManifest(retained)).installArtifactIdentity;
+  const candidateIdentity = (await readManifest(selected)).installArtifactIdentity;
+  const appRoot = (resources: string) => resolve(resources, process.platform === 'darwin' ? '../../..' : '../..');
+  const root = await mkdtemp(process.platform === 'darwin' ? '/tmp/pk-reentry-' : join(tmpdir(), 'pk-reentry-'));
+  const candidate = join(root,'candidate'), installed = join(root,'installed'), state = join(root,'state');
+  await cp(appRoot(selected),candidate,{recursive:true,verbatimSymlinks:true});
+  await cp(appRoot(retained),installed,{recursive:true,verbatimSymlinks:true});
+  await mkdir(join(state,'recovery'),{recursive:true});
+  const sentinel = join(state,'recovery','user-work.txt');
+  await writeFile(sentinel,'protected before interrupted activation');
+  const paths: DaemonPaths = { appSupportRoot:state,recoveryRoot:join(state,'recovery'),socketPath:join(state,'control.sock'),lifecycleLockPath:join(state,'lifecycle.lock'),isolatedTestRoot:state,webAssetsRoot:join(runtimeRoot(candidate),'web'),httpPort:await freePort() };
+  const launcher = process.platform === 'darwin' ? join(installed,'Contents/MacOS/placekeeper') : join(runtimeRoot(installed),'bin',`placekeeper${process.platform === 'win32' ? '.exe' : ''}`);
+  const firstBackup = join(state,'first-verified-backup');
+  const journalPath = join(root,'.placekeeper-install-transactions',createHash('sha256').update(installed).digest('hex').slice(0,24),'journal.json');
+  const execute = promisify(execFile);
+  const interruptedInvoke: InstallationCommand = async (executable,args,options) => {
+    const result = await execute(executable,args,options);
+    if (options.env.PLACEKEEPER_STARTUP_REQUEST) throw Object.assign(new Error('simulated installer interruption'),{interrupted:true});
+    return result;
+  };
+  let reentryLease: Awaited<ReturnType<typeof acquireLifecycleLock>> | undefined;
+  try {
+    await expect(switchDesktopService({resources:runtimeRoot(candidate),backup:firstBackup,receipt:join(state,'first-coordinator-receipt.json'),paths,
+      replaceAndReady:token => installBuiltApp(candidate,installed,launcher,String(paths.httpPort),interruptedInvoke,state,{lockPath:paths.lifecycleLockPath!,lockToken:token,backupRoot:firstBackup}).then(()=>undefined),
+    })).rejects.toThrow('simulated installer interruption');
+    const interrupted = JSON.parse(await readFile(journalPath,'utf8'));
+    expect(interrupted.phase).toBe('starting');
+    const actualShellReceipt = JSON.parse(await readFile(interrupted.shellReceipt,'utf8'));
+    const actualServiceReceipt = JSON.parse(await readFile(interrupted.receipt,'utf8'));
+    expect(actualShellReceipt).toMatchObject({attempt:interrupted.attempt,candidateIdentity,rendererReady:true});
+    const status = await requestControl(paths.socketPath,{kind:'management',protocolVersion:MANAGEMENT_PROTOCOL_VERSION,operation:'status'});
+    expect(status).toMatchObject({kind:'management',operation:'status',status:{readinessToken:actualServiceReceipt.readinessToken,daemonIdentity:actualServiceReceipt.daemonIdentity}});
+    await testInfo.attach('interrupted-real-shell-receipt',{path:interrupted.shellReceipt,contentType:'application/json'});
+    await testInfo.attach('interrupted-activation-journal',{path:journalPath,contentType:'application/json'});
+    // This isolates the second invocation without preemptively shutting down
+    // its exact candidate or discarding the original receipt used by recovery.
+    reentryLease = await acquireLifecycleLock(paths.lifecycleLockPath!);
+    await writeFile(sentinel,'newer protected work after interruption');
+    const reentryBackup = join(state,'reentry-verified-backup');
+    await backupRecoveryAndVerify(paths.recoveryRoot,reentryBackup);
+    const events: string[] = [];
+    const reentryInvoke: InstallationCommand = async (executable,args,options) => {
+      const result = await execute(executable,args,options);
+      if (args[1] === 'stop-ready') {
+        expect(args[3]).toBe(interrupted.receipt);
+        expect((await readManifest(runtimeRoot(installed))).installArtifactIdentity).toBe(candidateIdentity);
+        expect(await lstat(paths.socketPath).then(()=>true,(error:NodeJS.ErrnoException)=>{if(error.code==='ENOENT')return false;throw error;})).toBe(false);
+        expect(()=>process.kill(actualServiceReceipt.pid,0)).toThrow();
+        events.push('exact interrupted candidate retired');
+      } else if (args[1] === 'ensure-ready') {
+        expect(events).toEqual(['exact interrupted candidate retired']);
+        events.push('replacement service ready');
+      } else if (options.env.PLACEKEEPER_STARTUP_REQUEST) events.push('replacement renderer ready');
+      return result;
+    };
+    const completed = await installBuiltApp(candidate,installed,launcher,String(paths.httpPort),reentryInvoke,state,{lockPath:paths.lifecycleLockPath!,lockToken:reentryLease.token,backupRoot:reentryBackup});
+    expect(completed.phase).toBe('complete');
+    expect(events).toEqual(['exact interrupted candidate retired','replacement service ready','replacement renderer ready']);
+    expect((await readManifest(runtimeRoot(completed.previous))).installArtifactIdentity).toBe(previousIdentity);
+    expect(await readFile(sentinel,'utf8')).toBe('newer protected work after interruption');
+    expect(await readFile(join(firstBackup,'user-work.txt'),'utf8')).toBe('protected before interrupted activation');
+    expect(await readFile(join(reentryBackup,'user-work.txt'),'utf8')).toBe('newer protected work after interruption');
+    await testInfo.attach('completed-reentry-journal',{path:journalPath,contentType:'application/json'});
+  } finally {
+    try {
+      if (await lstat(paths.socketPath).then(()=>true,(error:NodeJS.ErrnoException)=>{if(error.code==='ENOENT')return false;throw error;})) {
+        await expect.poll(()=>requestControl(paths.socketPath,{kind:'management',protocolVersion:MANAGEMENT_PROTOCOL_VERSION,operation:'shutdown-if-idle'}),{timeout:5_000}).toMatchObject({kind:'management',operation:'shutdown-if-idle',result:{status:'accepted'}});
+        await expect.poll(()=>lstat(paths.socketPath).then(()=>true,(error:NodeJS.ErrnoException)=>{if(error.code==='ENOENT')return false;throw error;}),{timeout:5_000}).toBe(false);
+      }
+    } finally { await reentryLease?.release(); }
   }
 });

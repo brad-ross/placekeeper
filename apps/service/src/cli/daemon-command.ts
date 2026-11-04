@@ -1,4 +1,6 @@
 import { switchDesktopService } from "./desktop-service-switch.js";
+import { createInterface } from "node:readline/promises";
+import type { UpgradeAttemptCredentials, UpgradePreparationRequest, UpgradePreparationStatus } from "../host/upgrade-preparation.js";
 import { execFile } from "node:child_process";
 import { lstat, readFile, unlink } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
@@ -119,17 +121,6 @@ async function waitForProcessRetirement(pid: number): Promise<void> {
   }
 }
 
-async function terminateCandidateProcess(pid: number): Promise<void> {
-  if (processExists(pid)) {
-    try {
-      process.kill(process.platform === "win32" ? pid : -pid, "SIGTERM");
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
-    }
-  }
-  await waitForProcessRetirement(pid);
-}
-
 async function requestIdleShutdown(socketPath: string) {
   const response = await requestControl(socketPath, {
     kind: "management",
@@ -169,7 +160,7 @@ async function stopReadyCandidate(receiptPath: string, paths = defaultDaemonPath
       compatibility = await inspectDaemonCompatibility(paths.socketPath, receipt.daemonIdentity);
     } catch (error) {
       if (await initialDaemonIsAbsent(error, paths.socketPath)) {
-        await terminateCandidateProcess(receipt.pid);
+        await waitForProcessRetirement(receipt.pid);
         await unlink(receiptPath).catch(() => undefined);
         return;
       }
@@ -212,12 +203,39 @@ async function coordinateLifecycleMutation(
     const backupRoot = join(paths.appSupportRoot, "installer", `recovery-backup-${Date.now()}`);
     await switchDesktopService({
       resources: desktopResources(candidateApp), backup: backupRoot,
+      prepare: async (status, selected) => {
+        const request = async (request: UpgradePreparationRequest): Promise<UpgradePreparationStatus> => {
+          const response = await requestControl(paths.socketPath, { kind: "upgrade-preparation", request });
+          if (response.kind !== "upgrade-preparation" || response.result.phase === "none" || !("token" in response.result)) throw new Error("Upgrade preparation response is invalid");
+          return response.result;
+        };
+        const preview = await request({ operation: "preview", installedDaemonIdentity: status.daemonIdentity, candidate: selected });
+        const credentials: UpgradeAttemptCredentials = { attemptId: preview.attemptId, token: preview.token, candidate: preview.candidate };
+        try {
+          if (!process.stdin.isTTY) throw new Error("Active reviews need approval to close. Run the source installer in an interactive terminal, or close reviews and retry.");
+          const terminal = createInterface({ input: process.stdin, output: process.stderr });
+          let accepted = false;
+          try { accepted = /^y(?:es)?$/iu.test((await terminal.question("Installing Placekeeper will close active reviews after protecting pending edits and drafts. Close reviews and continue? [y/N] ")).trim()); }
+          finally { terminal.close(); }
+          let preparation = await request({ operation: "begin", credentials, consent: accepted });
+          if (!accepted) throw new Error("Installation canceled; current reviews remain available");
+          const deadline = Date.now() + 120_000;
+          while (preparation.phase === "preparing" && Date.now() < deadline) {
+            await new Promise(resolve => setTimeout(resolve, 100));
+            preparation = await request({ operation: "status", credentials });
+          }
+          if (preparation.phase !== "ready") throw new Error("Pending review work could not be protected; installation stopped");
+          if ((await request({ operation: "commit", credentials })).phase !== "committed") throw new Error("Review closure was not committed");
+          return credentials;
+        } catch (error) { await request({ operation: "cancel", credentials }).catch(() => undefined); throw error; }
+      },
       receipt: join(paths.appSupportRoot, "installer", `install-ready-${Date.now()}.json`), paths,
       replaceAndReady: async (lifecycleToken) => {
         if (!replaceHelper.endsWith(".mjs")) throw new Error("Desktop installation requires the portable replacement helper");
         await execFileAsync(process.execPath, [replaceHelper, candidateApp, installedApp, desktopLauncher(installedApp),
-          ...(smokePort === undefined ? [] : [String(smokePort), ...(paths.isolatedTestRoot === undefined ? [] : [paths.isolatedTestRoot])])], { timeout: 90_000, maxBuffer: 65_536, env: { ...process.env,
+          ...(smokePort === undefined ? [] : [String(smokePort), ...(paths.isolatedTestRoot === undefined ? [] : [paths.isolatedTestRoot])])], { timeout: 300_000, maxBuffer: 65_536, env: { ...process.env,
           [LIFECYCLE_LOCK_TOKEN_ENV]: lifecycleToken,
+          PLACEKEEPER_INSTALL_BACKUP_ROOT: backupRoot,
           [LIFECYCLE_LOCK_PATH_ENV]: paths.lifecycleLockPath ?? join(paths.appSupportRoot, "lifecycle.lock"),
         } });
       },
