@@ -165,7 +165,7 @@ describe("split download link semantics", () => {
   it.each<DesktopTarget>(['darwin-arm64', 'darwin-x64', 'win32-x64', 'linux-x64'])("uses the validated %s artifact as its primary anchor", target => {
     const markup = renderToStaticMarkup(createElement(DownloadButton, { downloads: { status: 'available', catalog }, target }));
     expect(markup).toContain(`<a class="landing-download__main" href="${catalog.downloads[target].url}">`);
-    if (target === 'linux-x64') expect(markup).toContain('Download for Linux Debian / Ubuntu x64');
+    if (target === 'linux-x64') expect(markup).toContain('Download (Linux Debian / Ubuntu, x64)');
     expect(markup).toContain('aria-expanded="false"');
     expect(markup).toContain('aria-label="Placekeeper downloads" hidden=""');
     expect(markup).not.toContain('role="menu"');
