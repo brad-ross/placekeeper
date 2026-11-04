@@ -5,13 +5,40 @@ import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { desktopAssetNames } from '../packages/core/src/desktop-release.js';
 import { releaseIdentity } from './package-source-release.js';
-import { qualificationTemplate, validateQualification, type Artifact, type Qualification } from './validate-desktop-qualification.js';
+interface Artifact {
+    target: string;
+    name: string;
+    sha256: string;
+}
+interface SourceArtifact {
+    name: string;
+    sha256: string;
+}
+export interface BuildProvenance {
+    schemaVersion: number;
+    version: string;
+    commit: string;
+    candidateRun: string;
+    sources: SourceArtifact[];
+    assets: Artifact[];
+}
+export function buildProvenance(version: string, commit: string, candidateRun: string, assets: Artifact[], sources: SourceArtifact[]): BuildProvenance {
+    releaseIdentity(version, commit);
+    if (!/^\d+$/u.test(candidateRun))
+        throw Error('Candidate workflow run required');
+    const expected = desktopAssetNames(version);
+    if (assets.length !== 4 || Object.entries(expected).some(([target, name]) => assets.filter(asset => asset.target === target && asset.name === name && /^[a-f0-9]{64}$/u.test(asset.sha256)).length !== 1))
+        throw Error('Exact four desktop assets required');
+    if (sources.length !== 2 || [`placekeeper-source-v${version}.tar.gz`, 'install-placekeeper.sh'].some(name => sources.filter(source => source.name === name && /^[a-f0-9]{64}$/u.test(source.sha256)).length !== 1))
+        throw Error('Exact source assets required');
+    return { schemaVersion: 1, version, commit, candidateRun, sources, assets };
+}
 export const sha256 = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
 export function payloadNames(version: string): string[] {
     return [...Object.values(desktopAssetNames(version)), `placekeeper-source-v${version}.tar.gz`, 'install-placekeeper.sh'];
 }
 export function completeInventory(version: string): string[] {
-    return [...payloadNames(version), 'SHA256SUMS', 'desktop-qualification.json'];
+    return [...payloadNames(version), 'SHA256SUMS', 'desktop-build-provenance.json'];
 }
 export function verifyReleaseFiles(files: Record<string, Buffer>, version: string): {
     assets: Artifact[];
@@ -69,7 +96,6 @@ export async function assembleCandidate(input: string, output: string, version: 
             || matches[0].version !== version
             || matches[0].commit !== commit
             || matches[0].candidateRun !== run
-            || matches[0].nativeQualificationRun !== run
             || matches[0].name !== asset.name
             || matches[0].sha256 !== asset.sha256)
             throw Error(`Native build provenance mismatch: ${asset.target}`);
@@ -78,9 +104,9 @@ export async function assembleCandidate(input: string, output: string, version: 
     for (const [name, data] of Object.entries(files))
         await writeFile(join(output, name), data, { flag: 'wx' });
     await writeFile(join(output, 'SHA256SUMS'), result.checksums, { flag: 'wx' });
-    const qualification = qualificationTemplate(version, commit, run, result.assets, result.sources);
-    await writeFile(join(output, 'desktop-qualification.json'), JSON.stringify(qualification, null, 2) + '\n', { flag: 'wx' });
-    return qualification;
+    const provenance = buildProvenance(version, commit, run, result.assets, result.sources);
+    await writeFile(join(output, 'desktop-build-provenance.json'), JSON.stringify(provenance, null, 2) + '\n', { flag: 'wx' });
+    return provenance;
 }
 const repository = 'brad-ross/placekeeper';
 function gh(args: string[]): string {
@@ -116,33 +142,34 @@ function existingTag(tag: string): {
 function release(tag: string): Release {
     return JSON.parse(gh(['api', `repos/${repository}/releases/tags/${tag}`]));
 }
-export async function validateStagedDirectory(directory: string, qualification: Qualification) {
+export async function validateStagedDirectory(directory: string, provenance: BuildProvenance) {
     const names = await readdir(directory);
-    if (names.length !== completeInventory(qualification.version).length || completeInventory(qualification.version).some(name => !names.includes(name)))
+    if (names.length !== completeInventory(provenance.version).length || completeInventory(provenance.version).some(name => !names.includes(name)))
         throw Error('Draft inventory must contain exactly the complete release set');
     const files: Record<string, Buffer> = {};
-    for (const name of payloadNames(qualification.version))
+    for (const name of payloadNames(provenance.version))
         files[name] = await readFile(join(directory, name));
-    const result = verifyReleaseFiles(files, qualification.version);
-    const descriptor = execFileSync('tar', ['-xOf', join(directory, `placekeeper-source-v${qualification.version}.tar.gz`), 'placekeeper-source/release-descriptor.txt'], { encoding: 'utf8' });
-    if (descriptor !== releaseIdentity(qualification.version, qualification.commit).descriptor)
+    const result = verifyReleaseFiles(files, provenance.version);
+    const descriptor = execFileSync('tar', ['-xOf', join(directory, `placekeeper-source-v${provenance.version}.tar.gz`), 'placekeeper-source/release-descriptor.txt'], { encoding: 'utf8' });
+    if (descriptor !== releaseIdentity(provenance.version, provenance.commit).descriptor)
         throw Error('Source provenance changed');
     if (await readFile(join(directory, 'SHA256SUMS'), 'utf8') !== result.checksums)
         throw Error('Checksum inventory changed');
-    validateQualification(qualification, result.assets, qualification.version, qualification.commit, qualification.candidateRun, result.sources);
+    const expected = buildProvenance(provenance.version, provenance.commit, provenance.candidateRun, result.assets, result.sources);
+    assertCandidateBinding(provenance, expected);
     return result;
 }
-export function assertCandidateBinding(qualification: Qualification, original: Qualification): void {
-    const inventory = (value: Qualification) => JSON.stringify({
+export function assertCandidateBinding(provenance: BuildProvenance, original: BuildProvenance): void {
+    const inventory = (value: BuildProvenance) => JSON.stringify({
         schemaVersion: value.schemaVersion,
         version: value.version,
         commit: value.commit,
         candidateRun: value.candidateRun,
         sources: [...value.sources].sort((a, b) => a.name.localeCompare(b.name)),
-        assets: value.assets.map(({ evidence, ...asset }) => asset).sort((a, b) => a.target.localeCompare(b.target)),
+        assets: [...value.assets].sort((a, b) => a.target.localeCompare(b.target)),
     });
-    if (inventory(qualification) !== inventory(original))
-        throw Error('Approval belongs to different candidate bytes');
+    if (inventory(provenance) !== inventory(original))
+        throw Error('Build provenance belongs to different candidate bytes');
 }
 async function verifyRemoteInventory(draft: Release, directory: string, version: string) {
     const names = completeInventory(version);
@@ -167,12 +194,13 @@ async function main() {
         return;
     }
     if (operation === 'stage') {
-        const qualification = JSON.parse(await readFile(join(input, 'desktop-qualification.json'), 'utf8')) as Qualification;
-        if (qualification.version !== version || qualification.commit !== commit || qualification.candidateRun !== run)
+        const provenance = JSON.parse(await readFile(join(input, 'desktop-build-provenance.json'), 'utf8')) as BuildProvenance;
+        if (provenance.version !== version || provenance.commit !== commit || provenance.candidateRun !== run)
             throw Error('Candidate identity mismatch');
+        await validateStagedDirectory(input, provenance);
         if (existingTag(identity.tag))
             throw Error('Release tag already exists');
-        gh(['release', 'create', identity.tag, '--repo', repository, '--target', commit, '--draft', '--title', `Placekeeper ${version} candidate`, '--notes', 'Unqualified candidate. Publication requires the complete exact-artifact lifecycle evidence.']);
+        gh(['release', 'create', identity.tag, '--repo', repository, '--target', commit, '--draft', '--title', `Placekeeper ${version} candidate`, '--notes', 'Hosted builds and packaged runtime tests passed on all four targets.']);
         gh(['release', 'upload', identity.tag, '--repo', repository, ...completeInventory(version).map(name => join(input, name))]);
         const draft = release(identity.tag);
         if (!draft.draft || draft.prerelease || draft.target_commitish !== commit)
@@ -193,18 +221,18 @@ async function main() {
     const draft = release(identity.tag);
     if (!draft.draft || draft.prerelease || draft.target_commitish !== commit)
         throw Error('Only the exact unpublished candidate can be published');
-    const qualification = JSON.parse(await readFile(join(input, 'desktop-qualification.json'), 'utf8')) as Qualification;
-    if (qualification.version !== version || qualification.commit !== commit || qualification.candidateRun !== run)
-        throw Error('Stale approval');
-    await validateStagedDirectory(input, qualification);
-    const manifestAsset = draft.assets.find(asset => asset.name === 'desktop-qualification.json');
+    const provenance = JSON.parse(await readFile(join(input, 'desktop-build-provenance.json'), 'utf8')) as BuildProvenance;
+    if (provenance.version !== version || provenance.commit !== commit || provenance.candidateRun !== run)
+        throw Error('Stale build provenance');
+    await validateStagedDirectory(input, provenance);
+    const manifestAsset = draft.assets.find(asset => asset.name === 'desktop-build-provenance.json');
     if (!manifestAsset)
         throw Error('Missing candidate manifest');
-    const original = JSON.parse(execFileSync('gh', ['api', `repos/${repository}/releases/assets/${manifestAsset.id}`, '-H', 'Accept: application/octet-stream'], { encoding: 'utf8' })) as Qualification;
-    const trusted = JSON.parse(await readFile(join(output, 'desktop-qualification.json'), 'utf8')) as Qualification;
-    assertCandidateBinding(qualification, trusted);
+    const original = JSON.parse(execFileSync('gh', ['api', `repos/${repository}/releases/assets/${manifestAsset.id}`, '-H', 'Accept: application/octet-stream'], { encoding: 'utf8' })) as BuildProvenance;
+    const trusted = JSON.parse(await readFile(join(output, 'desktop-build-provenance.json'), 'utf8')) as BuildProvenance;
+    assertCandidateBinding(provenance, trusted);
     assertCandidateBinding(original, trusted);
-    const immutablePayloads = payloadNames(version).concat('SHA256SUMS');
+    const immutablePayloads = completeInventory(version);
     for (const name of immutablePayloads)
         if (sha256(await readFile(join(input, name))) !== sha256(await readFile(join(output, name))))
             throw Error(`Payload differs from trusted candidate workflow: ${name}`);
@@ -216,7 +244,6 @@ async function main() {
         if (sha256(remote) !== sha256(await readFile(join(input, name))))
             throw Error(`Changed remote payload ${name}`);
     }
-    gh(['release', 'upload', identity.tag, '--repo', repository, join(input, 'desktop-qualification.json'), '--clobber']);
     await verifyRemoteInventory(release(identity.tag), input, version);
     gh(['release', 'edit', identity.tag, '--repo', repository, '--draft=false', '--prerelease=false', '--latest', '--title', `Placekeeper ${version}`, '--notes', notes]);
     for (const name of completeInventory(version)) {

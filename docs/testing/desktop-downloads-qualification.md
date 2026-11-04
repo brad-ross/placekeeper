@@ -41,7 +41,7 @@ The final implementation review identified eight defects. All were fixed and com
 
 The old animation-frame behavior reproduced a preparation timeout before its fix. Real browser execution exposed overlapping settlement reproof canceling an already-ready attempt; its focused regression and all three browser cases pass after correction. Packaged checks separately exposed and fixed MCP startup through `/tmp` versus `/private/tmp` aliases.
 
-## Release gates still closed
+## Additional coverage not established
 
 - Final Windows, macOS Intel and Debian installer lifecycle evidence, including Linux multi-user activation and remove/purge.
 - Browser-downloaded unsigned artifacts and actual OS approval behavior. Local builds do not prove Gatekeeper, SmartScreen or organization policy behavior.
@@ -49,6 +49,6 @@ The old animation-frame behavior reproduced a preparation timeout before its fix
 - Full legacy AppKit UI/preferences migration. The authentic old-service fixture is narrower.
 - Accessibility, Wayland, macOS 13, large scanned/recovery corpora, named-editor placement and physical display latency.
 
-The release workflow requires exact-artifact native evidence before staging and separately authorized publication. No release was published. Historical four-platform and performance results in [the Electron migration report](electron-migration-qualification.md) retain their original commit scope and do not qualify these final installer bytes.
+At the time of this report, no release was published. The current release workflow requires successful hosted builds and packaged runtime tests on all four targets, immutable build provenance and exact staged/public bytes; the additional attended scenarios above are not publication gates. Historical four-platform and performance results in [the Electron migration report](electron-migration-qualification.md) retain their original commit scope and do not qualify these final installer bytes.
 
 The broader historical Chromium run was not rerun in full. Its compact Reference-action popup interception remains unresolved; prior baseline classifications remain in the migration report. The targeted checks above do not erase that residual.

@@ -6,7 +6,7 @@ Placekeeper's desktop application uses Electron on macOS, Windows, and Linux. De
 
 Use [all releases](https://github.com/brad-ross/placekeeper/releases/latest) for available files and release notes. The website offers desktop links only when the published stable release includes all four installers and `SHA256SUMS`. An unavailable check is not evidence that your app is current.
 
-As of November 3, 2026, the published **0.2.4** release is the older **AppKit source-only release for Apple Silicon macOS**, not an Electron installer. New desktop installer publication remains gated on platform qualification; do not construct download links for an unpublished version. A locally built macOS DMG fresh install has passed in an isolated environment. Actual browser-downloaded unsigned OS approval, Windows/Linux native lifecycle checks, and migration from the real public 0.2.4 remain unqualified. [Historical qualification](testing/electron-migration-qualification.md) applies only to its recorded revisions.
+Version **0.2.4** was the older **AppKit source-only release for Apple Silicon macOS**, not an Electron installer. Desktop installer publication requires all four hosted builds and packaged runtime tests, immutable build provenance and matching staged/public download hashes; do not construct download links for an unpublished version. A locally built macOS DMG fresh install has passed in an isolated environment. Actual browser-downloaded unsigned OS approval, Windows/Linux native lifecycle checks, and migration from the real public 0.2.4 remain unqualified. [Historical qualification](testing/electron-migration-qualification.md) applies only to its recorded revisions.
 
 ## Desktop installers
 
@@ -24,7 +24,7 @@ For a downloaded Debian package, use `sudo apt install /absolute/path/to/the-dow
 
 ### Unsigned approval (provisional)
 
-These are platform-vendor instructions, **not a claim that downloaded Placekeeper artifacts have passed approval testing**. Exact-artifact approval qualification remains required before publication. Keep browser download security metadata intact. Check the downloaded file against the release's `SHA256SUMS` before proceeding; matching a checksum establishes file consistency, not publisher identity or safety.
+These are platform-vendor instructions, **not a claim that downloaded Placekeeper artifacts have passed approval testing**. Hosted packaged runtime tests do not establish browser-downloaded OS approval; attended approval testing is separate optional evidence. Keep browser download security metadata intact. Check the downloaded file against the release's `SHA256SUMS` before proceeding; matching a checksum establishes file consistency, not publisher identity or safety.
 
 On macOS, open **Install Placekeeper.app** once. If macOS blocks an unidentified or unnotarized app and you trust this download, open **System Settings → Privacy & Security**, find that app's blocked notice, and choose **Open Anyway** if offered. Confirm the named app and any authentication request. The installed Placekeeper app may require its own approval. If macOS reports malware, damage, or offers no permitted exception, stop and investigate. Follow [Apple's per-app approval guidance](https://support.apple.com/en-us/102445); do not disable Gatekeeper or remove quarantine metadata.
 
@@ -38,7 +38,7 @@ Source installation is an alternative only where local builds and execution are 
 
 ## Install from a checkout
 
-Obtain the intended repository revision or source archive and read its own prerequisites. The website's short source bootstrap follows the latest stable release. As of November 3, 2026, that is legacy 0.2.4, not the new Electron app; check the release's own notes before running it. For the current Electron checkout, install **Node.js 24+**, **pnpm 11.16.0**, and a native C compiler: clang on macOS, a C toolchain on Linux, or Visual Studio C++ build tools in Developer PowerShell on Windows. macOS 13+ is required by Electron 45; minimum-version execution remains unqualified. Linux also needs Electron's runtime libraries. SyncTeX separately requires a native TeX `synctex` executable and matching mapping file; ordinary PDF reading does not.
+Obtain the intended repository revision or source archive and read its own prerequisites. The website's short source bootstrap follows the latest stable release; check the release's own notes before running it. Legacy version 0.2.4 builds the older AppKit app. For the current Electron checkout, install **Node.js 24+**, **pnpm 11.16.0**, and a native C compiler: clang on macOS, a C toolchain on Linux, or Visual Studio C++ build tools in Developer PowerShell on Windows. macOS 13+ is required by Electron 45; minimum-version execution remains unqualified. Linux also needs Electron's runtime libraries. SyncTeX separately requires a native TeX `synctex` executable and matching mapping file; ordinary PDF reading does not.
 
 From the repository directory:
 

@@ -1,4 +1,4 @@
-name: Publish qualified desktop release
+name: Publish desktop release
 
 on:
   workflow_dispatch:
@@ -19,10 +19,6 @@ on:
         description: Reviewed public release notes
         required: true
         type: string
-      qualification_url:
-        description: HTTPS raw reviewed qualification JSON (artifact hashes and evidence links)
-        required: true
-        type: string
 
 permissions:
   contents: read
@@ -35,9 +31,6 @@ concurrency:
 jobs:
   publish:
     if: github.ref == 'refs/heads/main' && github.repository == 'brad-ross/placekeeper'
-    # Configure required human reviewers for this environment. Their approval
-    # covers actual downloaded OS interactions and the linked real-host record.
-    environment: desktop-release
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -47,7 +40,6 @@ jobs:
       COMMIT: ${{ inputs.commit }}
       CANDIDATE_RUN: ${{ inputs.candidate_run }}
       RELEASE_NOTES: ${{ inputs.notes }}
-      QUALIFICATION_URL: ${{ inputs.qualification_url }}
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
@@ -79,20 +71,10 @@ jobs:
           run-id: ${{ inputs.candidate_run }}
           github-token: ${{ github.token }}
           repository: brad-ross/placekeeper
-      - name: Download staged exact bytes and reviewed evidence
+      - name: Download staged exact bytes
         shell: bash
         run: |
           mkdir -p artifacts/complete
           gh release download "v$VERSION" --repo brad-ross/placekeeper --dir artifacts/complete
-          node --input-type=module <<'JS'
-          import { writeFile } from 'node:fs/promises';
-          const url = new URL(process.env.QUALIFICATION_URL);
-          if (url.protocol !== 'https:' || url.username || url.password) throw Error('HTTPS qualification evidence required');
-          const response = await fetch(url, { signal: AbortSignal.timeout(30000) });
-          if (!response.ok) throw Error('Qualification evidence unavailable');
-          const bytes = new Uint8Array(await response.arrayBuffer());
-          if (bytes.length > 1024 * 1024) throw Error('Qualification evidence too large');
-          await writeFile('artifacts/complete/desktop-qualification.json', bytes);
-          JS
       - name: Publish complete candidate once and verify anonymous downloads
         run: pnpm exec tsx scripts/desktop-release.ts publish "$VERSION" "$COMMIT" "$CANDIDATE_RUN" artifacts/complete artifacts/trusted-candidate

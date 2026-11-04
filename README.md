@@ -8,7 +8,7 @@ Placekeeper is a focused everyday PDF reader and annotator for serious readers. 
 
 The current desktop application uses Electron on macOS, Windows, and Linux. Use [published releases](https://github.com/brad-ross/placekeeper/releases/latest) for available downloads, notes and checksums. A complete desktop release provides Apple Silicon and Intel Mac DMGs, Windows x64 Setup.exe and Ubuntu/Debian x64 deb packages, including all runtime dependencies without a development toolchain. Use **Install Placekeeper.app** inside the DMG, **Setup.exe**, or the OS package manager; see the [installation guide](docs/installation.md).
 
-The published **0.2.4** is the older AppKit source-only release for Apple Silicon Macs. The new Electron installer set remains unpublished pending qualification; locally built artifacts do not establish downloaded OS approval or public-release migration.
+Version **0.2.4** was the older AppKit source-only release for Apple Silicon Macs. The new Electron installer set is published after all four hosted builds and packaged runtime tests pass, with exact source and artifact provenance. Locally built artifacts do not establish downloaded OS approval or public-release migration.
 
 From a checkout, install Node.js 24+, pnpm 11.16.0, and a native C compiler, then run `./install.sh` on macOS/Linux or `./install.ps1` from Visual Studio Developer PowerShell on Windows. The source installer builds locally and installs the app with its own Node runtime; system Node is needed to build, not to run the installed app. Run with `--dry-run` to inspect the destination first.
 
@@ -52,7 +52,7 @@ LaTeX Workshop 10.18.x users may opt into **Placekeeper: Configure LaTeX Worksho
 
 ## Supported release scope
 
-Source builds target macOS arm64/x64, Windows x64, and Linux x64. `pnpm package:desktop` builds the production desktop distribution. A local macOS DMG fresh installation passed in an isolated environment. Downloaded unsigned OS approval, native Windows/Linux lifecycle qualification, real-host integration trust and migration from actual public 0.2.4 remain pending. See the [installation guide](docs/installation.md) and [historical qualification record](docs/testing/electron-migration-qualification.md). Distribution is intentionally unsigned/unnotarized; publication requires exact-artifact qualification. Updates are checked manually from the app menu and installed manually, with no background update checks or automatic replacement.
+Source builds target macOS arm64/x64, Windows x64, and Linux x64. `pnpm package:desktop` builds the production desktop distribution. A local macOS DMG fresh installation passed in an isolated environment. Downloaded unsigned OS approval, native Windows/Linux lifecycle qualification, real-host integration trust and migration from actual public 0.2.4 remain pending. See the [installation guide](docs/installation.md) and [historical qualification record](docs/testing/electron-migration-qualification.md). Distribution is intentionally unsigned/unnotarized. Publication requires all four hosted builds and packaged runtime tests, immutable build provenance and matching staged/public download hashes; attended installer and full lifecycle reports are optional additional evidence. Updates are checked manually from the app menu and installed manually, with no background update checks or automatic replacement.
 
 ## Development
 

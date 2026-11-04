@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
     inputs:
       desktop_candidate:
-        description: Build and qualify production desktop installers on all supported platforms
+        description: Build and test production desktop installers on all supported platforms
         required: false
         default: true
         type: boolean
