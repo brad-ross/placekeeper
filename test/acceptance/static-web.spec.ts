@@ -342,18 +342,24 @@ test("@representative places search highlights on the matched text of a cropped 
   await page.keyboard.press("Enter");
   const highlight = page.locator("[data-pdf-search-highlight]").first();
   await expect(highlight).toBeVisible();
-  // Opening the workspace refits the page; measure its current scale alongside the highlight.
-  const box = await pdfPage.boundingBox();
-  if (box === null) throw new Error("Rendered cropped page has no bounds.");
-  const hit = await highlight.boundingBox();
-  if (hit === null) throw new Error("Search highlight has no bounds.");
-  // The matched line is 14pt text on baseline y = 690 inside a crop box whose top is y = 756.
-  const scale = box.width / 540;
-  const centerY = (hit.y + hit.height / 2 - box.y) / scale;
-  expect(centerY).toBeGreaterThan(756 - 706);
-  expect(centerY).toBeLessThan(756 - 684);
-  expect(hit.x).toBeGreaterThan(box.x);
-  expect(hit.x + hit.width).toBeLessThan(box.x + box.width);
+  // Workspace refits can continue after the highlight appears; sample both rects in one layout.
+  await expect(async () => {
+    const { box, hit } = await pdfPage.evaluate((element) => {
+      const match = element.querySelector("[data-pdf-search-highlight]");
+      if (match === null) throw new Error("Search highlight disappeared before measurement.");
+      return {
+        box: element.getBoundingClientRect().toJSON(),
+        hit: match.getBoundingClientRect().toJSON(),
+      };
+    });
+    // The matched line is 14pt text on baseline y = 690 inside a crop box whose top is y = 756.
+    const scale = box.width / 540;
+    const centerY = (hit.y + hit.height / 2 - box.y) / scale;
+    expect(centerY).toBeGreaterThan(756 - 706);
+    expect(centerY).toBeLessThan(756 - 684);
+    expect(hit.x).toBeGreaterThan(box.x);
+    expect(hit.x + hit.width).toBeLessThan(box.x + box.width);
+  }).toPass({ timeout: 10_000 });
 });
 
 test("exhaustive profile exports and reopens all five editable annotation kinds", async ({
