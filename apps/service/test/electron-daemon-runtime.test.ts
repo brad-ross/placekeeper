@@ -198,6 +198,7 @@ it("keeps the first provisional review activatable when a focused task admission
 
 it('blocks native menu authoring after upgrade protection while leaving every window attached until commit', async () => {
   const root = await mkdtemp(join(tmpdir(), 'pk-upgrade-electron-'));
+  await establishPrivateDirectory(root);
   const sourcePath = join(root, 'paper.pdf'); await copyFile('test/fixtures/pdfs/text-native.pdf', sourcePath);
   const host = await PlacekeeperHost.start({ recoveryRoot: join(root, 'recovery'), port: 0 });
   const appInstanceId = 'upgrade_electron_app'; const helperId = 'upgrade_electron_helper';

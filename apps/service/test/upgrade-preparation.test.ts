@@ -1,3 +1,4 @@
+import { establishPrivateDirectory } from "../src/platform/private-storage.js";
 import { describe, expect, it, vi } from "vitest";
 import { DaemonLifecycleCoordinator } from "../src/host/daemon-lifecycle.js";
 import { UpgradePreparationCoordinator } from "../src/host/upgrade-preparation.js";
@@ -103,6 +104,7 @@ it("enforces the preparation contract over the live private control socket and H
   const { PlacekeeperHost } = await import("../src/host/placekeeper-host.js");
   const { startLaunchControlServer, requestControl, inspectDaemonCompatibility } = await import("../src/host/launch-control.js");
   const root = await mkdtemp(join(tmpdir(), "pk-preparation-"));
+  await establishPrivateDirectory(root);
   const assets = join(root, "assets"); await mkdir(assets);
   const host = await PlacekeeperHost.start({ recoveryRoot: join(root, "recovery"), webAssets: { root: assets }, port: 0 });
   const socketPath = join(root, "control.sock"); const identity = "a".repeat(64);
@@ -180,6 +182,7 @@ it("allows authenticated active Codex settlement while refusing new presentation
   const { PlacekeeperHost } = await import("../src/host/placekeeper-host.js");
   const { startLaunchControlServer, requestControl } = await import("../src/host/launch-control.js");
   const root = await mkdtemp(join(tmpdir(), "pk-codex-settlement-"));
+  await establishPrivateDirectory(root);
   const assets = join(root, "assets"); await mkdir(assets);
   const pdf = join(root, "paper.pdf");
   const { copyFile } = await import("node:fs/promises");

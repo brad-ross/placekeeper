@@ -1,3 +1,4 @@
+import { establishPrivateDirectory } from "../../apps/service/src/platform/private-storage.js";
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createHash } from "node:crypto";
@@ -23,6 +24,7 @@ async function app(path: string) {
 describe("desktop replacement transaction", () => {
   it("commits a complete installation only after exact readiness succeeds", async () => {
     const root = await mkdtemp(join(tmpdir(), "pk-install-success-"));
+    await establishPrivateDirectory(root);
     try {
       const built = join(root, "built"), installed = join(root, "installed");
       await app(built);
@@ -39,6 +41,7 @@ describe("desktop replacement transaction", () => {
 
   it("restores the prior app only after retiring a failed exact-readiness candidate", async () => {
     const root = await mkdtemp(join(tmpdir(), "pk-install-"));
+    await establishPrivateDirectory(root);
     try {
       const built = join(root, "built"), installed = join(root, "installed");
       await app(built); await app(installed); await writeFile(join(installed, "old"), "prior installation");
@@ -102,6 +105,7 @@ it.runIf(process.platform==='darwin')('guarded macOS uninstall retains the compl
 
 it('refuses to retain or rename an unrelated existing directory selected as the destination',async()=>{
   const root=await mkdtemp(join(tmpdir(),'pk-unrelated-target-'));
+  await establishPrivateDirectory(root);
   const lease=await acquireLifecycleLock(join(root,'lifecycle.lock'));
   try {
     const built=join(root,'candidate'),destination=join(root,'Documents');await app(built);await mkdir(destination);await writeFile(join(destination,'review.pdf'),'unrelated document');

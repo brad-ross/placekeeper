@@ -49,6 +49,6 @@ it('executes the installed setup entrypoint through a filesystem alias', async (
 it('ignores relative state-root overrides', async () => {
  // @ts-expect-error portable helper
  const {integrationStatePath}=await import('./setup-integrations.mjs');
- expect(integrationStatePath('/safe/home','linux',{XDG_STATE_HOME:'relative'})).toBe('/safe/home/.local/state/placekeeper/integrations/choices.json');
- expect(integrationStatePath('C:\\Users\\review','win32',{LOCALAPPDATA:'relative'})).toBe('C:\\Users\\review\\AppData\\Local\\Placekeeper/integrations/choices.json');
+ expect(integrationStatePath('/safe/home','linux',{XDG_STATE_HOME:'relative'})).toBe(join('/safe/home', '.local', 'state', 'placekeeper', 'integrations', 'choices.json'));
+ expect(integrationStatePath('C:\\Users\\review','win32',{LOCALAPPDATA:'relative'})).toBe(join('C:\\Users\\review\\AppData\\Local\\Placekeeper', 'integrations', 'choices.json'));
 });

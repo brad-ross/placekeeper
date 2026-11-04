@@ -1,3 +1,4 @@
+import { establishPrivateDirectory } from "../src/platform/private-storage.js";
 import { expect, it, vi } from 'vitest';
 import { DaemonLifecycleCoordinator } from '../src/host/daemon-lifecycle.js';
 import { UpgradePreparationCoordinator } from '../src/host/upgrade-preparation.js';
@@ -65,6 +66,7 @@ it('uses live browser and editor connection ownership, requires idle desktop app
   const WebSocket = createRequire(new URL('../../vscode/package.json', import.meta.url))('ws');
   const { PlacekeeperHost } = await import('../src/host/placekeeper-host.js');
   const root = await mkdtemp(join(tmpdir(), 'pk-upgrade-hosts-'));
+  await establishPrivateDirectory(root);
   const pdf = join(root, 'paper.pdf'); await copyFile('test/fixtures/pdfs/text-native.pdf', pdf);
   const host = await PlacekeeperHost.start({ recoveryRoot: join(root, 'recovery'), port: 0 });
   const sockets: InstanceType<typeof WebSocket>[] = [];
@@ -239,6 +241,7 @@ it('returns control preparation status while an exact admitted operation drains 
   const { PlacekeeperHost } = await import('../src/host/placekeeper-host.js');
   const { requestControl, startLaunchControlServer } = await import('../src/host/launch-control.js');
   const root = await mkdtemp(join(tmpdir(), 'pk-upgrade-drain-'));
+  await establishPrivateDirectory(root);
   const host = await PlacekeeperHost.start({ recoveryRoot: join(root, 'recovery'), port: 0 });
   const identity = 'a'.repeat(64); const socket = join(root, 'control.sock');
   const control = await startLaunchControlServer(host, socket, { daemonIdentity: identity });
@@ -255,7 +258,9 @@ it('returns control preparation status while an exact admitted operation drains 
 it('requires authenticated widget detach or an explicit trusted task end to release unknown Codex closure presence', async () => {
   const { mkdtemp, rm, copyFile } = await import('node:fs/promises'); const { join } = await import('node:path'); const { tmpdir } = await import('node:os'); const { randomUUID } = await import('node:crypto');
   const { PlacekeeperHost } = await import('../src/host/placekeeper-host.js');
-  const root = await mkdtemp(join(tmpdir(), 'pk-upgrade-task-end-')); const pdf = join(root, 'paper.pdf'); await copyFile('test/fixtures/pdfs/text-native.pdf', pdf);
+  const root = await mkdtemp(join(tmpdir(), 'pk-upgrade-task-end-'));
+  await establishPrivateDirectory(root);
+  const pdf = join(root, 'paper.pdf'); await copyFile('test/fixtures/pdfs/text-native.pdf', pdf);
   const host = await PlacekeeperHost.start({ recoveryRoot: join(root, 'recovery'), port: 0 });
   try {
     const launch = await host.open({ pdfPath: pdf, surface: 'codex-native' });
