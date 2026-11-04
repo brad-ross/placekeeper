@@ -17,7 +17,7 @@ export function createElectronHostRuntime(bridge: ElectronShellBridge, identity:
         subscribe(listener) { listeners.add(listener); const unsubscribe = bridge.subscribe(listener); return () => { listeners.delete(listener); unsubscribe(); }; },
     }, { host: 'electron' });
     return { ...runtime,
-        async closeForUpgrade() { await bridge.requestClose(identity); },
+
         get capabilities() { return runtime.capabilities!; },
         async bootstrap(signal?: AbortSignal) {
             const snapshot = await runtime.bootstrap(signal);

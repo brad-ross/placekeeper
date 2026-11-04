@@ -55,6 +55,17 @@ export async function switchDesktopService(options: {
     await coordinateServiceSwitch({
       candidate: manifest,
       ...(options.prepare === undefined ? {} : { prepare: options.prepare }),
+      validatePreparation: async credentials => {
+        const response = await requestControl(paths.socketPath, { kind:"upgrade-preparation", request:{ operation:"status", credentials } });
+        if (response.kind !== "upgrade-preparation" || response.result.phase !== "committed" || !("token" in response.result)) return false;
+        const status = response.result;
+        return status.attemptId === credentials.attemptId && status.token === credentials.token &&
+          status.candidate.daemonIdentity === credentials.candidate.daemonIdentity && status.candidate.installArtifactIdentity === credentials.candidate.installArtifactIdentity;
+      },
+      cancelPreparation: async credentials => {
+        const response = await requestControl(paths.socketPath, { kind:"upgrade-preparation", request:{ operation:"cancel", credentials } });
+        if (response.kind !== "upgrade-preparation" || response.result.phase !== "canceled" || !("token" in response.result) || response.result.attemptId !== credentials.attemptId || response.result.token !== credentials.token || response.result.candidate.daemonIdentity !== credentials.candidate.daemonIdentity || response.result.candidate.installArtifactIdentity !== credentials.candidate.installArtifactIdentity) throw new Error("Upgrade cancellation was not confirmed for this attempt");
+      },
       inspect: async () => {
         try {
           const inspected = await inspectDaemonCompatibility(paths.socketPath, manifest.daemonIdentity);

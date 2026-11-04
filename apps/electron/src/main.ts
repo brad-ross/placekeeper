@@ -20,7 +20,7 @@ import { stageDesktopLink } from './open-link.js';
 import { parseDesktopOpenIntent, secondInstanceArguments, DesktopInvocationQueue } from './open-intent.js';
 import { FocusedVisibilityGate } from './focused-visibility.js';
 import { WindowActivityRegistry, ActivityAcknowledgements } from './window-lifecycle.js';
-import { WindowRetirementBarrier } from './window-retirement.js';
+import { WindowRetirementBarrier, WindowQuitState } from './window-retirement.js';
 import { DocumentWindowRegistry } from './window-registry.js';
 import { parseWindowState, readWindowState, writeWindowState, importLegacyMacPreferences, readLegacyInterfaceScale, type WindowIntent } from './window-state.js';
 import { createIntegrationSetup } from './integration-setup.js';
@@ -137,9 +137,9 @@ async function start() {
     const entries = new Map<number, Entry>();
     const ownedWindows = new WindowActivityRegistry();
     const statePath = join(app.getPath('userData'), 'windows.json');
-    let quitting = false;
+    const quitState = new WindowQuitState();
     let persistence = Promise.resolve();
-    const persist = () => { if (startupRequest) return Promise.resolve(); const windows = [...entries.values()].map(e => e.intent); persistence = persistence.then(() => writeWindowState(statePath, windows)).catch(error => { dialog.showErrorBox('Window restoration could not be saved', String(error)); }); return persistence; };
+    const persist = () => { if (startupRequest || quitState.active) return Promise.resolve(); const windows = [...entries.values()].map(e => e.intent); persistence = persistence.then(() => writeWindowState(statePath, windows)).catch(error => { dialog.showErrorBox('Window restoration could not be saved', String(error)); }); return persistence; };
     const windowRetirements = new WindowRetirementBarrier();
     let quitCompletion: Promise<void> | undefined;
     let quitReady = false;
@@ -147,12 +147,12 @@ async function start() {
     const retirementFailed = (error: unknown) => {
         if (retirementFailureShown) return;
         retirementFailureShown = true;
-        quitting = false;
+        quitState.active = false;
         if (startupRequest) { console.error('Startup review detach failed', error); app.exit(2); return; }
         dialog.showErrorBox('Review detach failed', String(error));
     };
     const finishQuit = () => {
-        if (!quitting || entries.size > 0 || quitCompletion) return;
+        if (!quitState.active || entries.size > 0 || quitCompletion) return;
         quitCompletion = windowRetirements.wait().then(() => persistence).then(() => { quitReady = true; app.quit(); })
             .catch(retirementFailed).finally(() => { quitCompletion = undefined; });
     };
@@ -166,9 +166,10 @@ async function start() {
         return pending;
     };
     let preparedUpgrade: string | undefined;
+    let committedUpgrade = false;
     let protectingUpgrade = false;
     handleUpgrade = status => {
-        if (status.phase === 'canceled' || status.phase === 'none' || status.phase === 'preview') { preparedUpgrade = undefined; return; }
+        if (status.phase === 'canceled' || status.phase === 'none' || status.phase === 'preview') { preparedUpgrade = undefined; committedUpgrade = false; return; }
         if (status.phase === 'preparing' && (preparedUpgrade !== status.attemptId || status.settlementRequired === true) && !protectingUpgrade) {
             protectingUpgrade = true; preparedUpgrade = status.attemptId;
             void (async () => {
@@ -180,7 +181,7 @@ async function start() {
                 await activityAcknowledgements.enqueue(() => lifecycle.stdin.write(encodeElectronHelperFrame({ protocolVersion: 1, type: 'upgrade-settle', appInstanceId, request })));
             })().catch(failLifecycle).finally(() => { protectingUpgrade = false; });
         }
-        if (status.phase === 'committed' && status.attemptId === preparedUpgrade) { quitting = true; app.quit(); }
+        if (status.phase === 'committed' && status.attemptId === preparedUpgrade) { committedUpgrade = true; app.quit(); }
     };
     let upgradePollPending = false;
     const upgradePollTimer = setInterval(() => { if (!lifecycleStopping && !upgradePollPending) { upgradePollPending = true; void activity().finally(() => { upgradePollPending = false; }); } }, 500);
@@ -251,7 +252,7 @@ async function start() {
         if (typeof token !== 'string' || e.closeToken !== token) throw new Error('Stale close');
         delete e.closeToken;
         try { if (error !== undefined) throw new Error(typeof error === 'string' ? error : 'Review input could not be protected'); await e.bridge.settle(); if (e.bridge.retired || entries.get(event.sender.id) !== e) throw new Error('Retired close attempt'); e.permitClose = true; timing('close-protected', e.bridge); e.window.destroy(); }
-        catch (failure) { quitting = false; dialog.showErrorBox('Review remains open', String(failure)); throw failure; }
+        catch (failure) { quitState.active = false; dialog.showErrorBox('Review remains open', String(failure)); throw failure; }
     });
     const assetRoot = join(root, 'electron-web');
     const inventory = new Set<string>();
@@ -318,7 +319,7 @@ async function start() {
         const retired = windowRetirements.track(retire());
         entries.delete(contents.id); registry.remove(window);
         void retired.then(finishQuit, retirementFailed);
-        if (!quitting) void persist();
+        if (!quitState.active) void persist();
         menus(); finishQuit();
     });
     const fail = async (reason: unknown) => {
@@ -456,8 +457,15 @@ async function start() {
     app.on('activate', () => { if (entries.size === 0) void chooseOpen(); });
     app.on('before-quit', event => {
         if (quitReady) return;
-        event.preventDefault(); quitting = true; void persist();
-        for (const e of entries.values()) e.window.close();
+        event.preventDefault();
+        if (!quitState.begin(() => { void persist(); })) { finishQuit(); return; }
+        for (const e of entries.values()) {
+            // Only the authenticated app participant can reach this path after
+            // every renderer and the restoration snapshot were acknowledged.
+            // A second draft flush is disallowed once preparation is committed.
+            if (committedUpgrade) e.window.destroy();
+            else e.window.close();
+        }
         finishQuit();
     });
     menus();

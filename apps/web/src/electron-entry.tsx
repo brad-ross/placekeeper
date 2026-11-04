@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback, useEffect, useLayoutEffect } from 'react';
 import { createRoot } from 'react-dom/client';
+import { flushSync } from 'react-dom';
 import { RuntimeProductionReviewApp } from './production-entry.js';
 import { FocusedLaunchNavigation } from './host/electron-focused-navigation.js';
 import { ElectronSourceEndpointDialog } from './host/ElectronSourceEndpointDialog.js';
@@ -57,11 +58,11 @@ function ElectronReview({ bridge, identity }: { bridge: ElectronShellBridge; ide
         if (message.type === 'confirm-visible') void focusedNavigation.apply(message).catch(() => undefined);
         if (message.type === 'settle-close') {
             sourceModalOpen.current = false; setSourceEndpoint(undefined);
-            setClosing(true);
-            requestAnimationFrame(() => { void (async () => {
+            flushSync(() => setClosing(true));
+            void (async () => {
                 try { if (!settle.current) throw new Error('The review is still opening. Try closing it again after it loads.'); await settle.current(); await bridge.closeSettled(identity, message.token); }
                 catch (error) { setClosing(false); await bridge.closeSettled(identity, message.token, error instanceof Error ? error.message : 'Input could not be protected').catch(() => undefined); }
-            })(); });
+            })();
         }
     }); void bridge.readyToSettle(identity); return unsubscribe; }, [bridge, identity]);
     useLayoutEffect(() => {

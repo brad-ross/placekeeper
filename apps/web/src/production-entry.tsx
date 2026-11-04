@@ -1,6 +1,7 @@
 import { ReviewUpgradePreparation, UpgradeCommandGate } from "./host/upgrade-preparation.js";
 import type { NativeForwardState } from "../../../packages/core/src/native-synctex-protocol.js";
 import { createRoot } from "react-dom/client";
+import { flushSync } from "react-dom";
 import {
   Component,
   useEffect,
@@ -552,13 +553,17 @@ export function RuntimeProductionReviewApp(props: {
     if (!runtime?.upgradePoll || !runtime.upgradeSettle) return;
     const preparation = new ReviewUpgradePreparation({
       poll: () => runtime.upgradePoll!(), settle: request => runtime.upgradeSettle!(request),
-      frozen: (frozen, reason) => { setUpgradeFrozen(frozen); setUpgradeMessage(reason); },
+      frozen: (frozen, reason) => { flushSync(() => { setUpgradeFrozen(frozen); setUpgradeMessage(reason); }); },
       protectInput: async () => {
-        await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
         if (!closeSettlement.current) throw new Error('This review is still opening. Retry the upgrade after it loads.');
         await closeSettlement.current();
       },
-      close: async () => { await runtime.closeForUpgrade?.(); runtime.dispose(); setUpgradeClosed(true); },
+      close: async () => {
+        // Electron's authenticated app participant owns global quit. Its renderer
+        // remains mounted until main has observed commit and closed every window.
+        if (runtime.host === 'electron') return false;
+        await runtime.closeForUpgrade?.(); runtime.dispose(); setUpgradeClosed(true);
+      },
     });
     const timer = setInterval(() => { void preparation.tick(); }, 500);
     return () => { clearInterval(timer); preparation.stop(); };

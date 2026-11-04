@@ -25,8 +25,12 @@ export interface CoordinateUpgradeOptions {
   readonly installed?: PackagedBuildIdentity;
   readonly inspect: () => Promise<UpgradeDaemonInspection>;
   readonly shutdown: (preparation?: UpgradeAttemptCredentials) => Promise<ConditionalShutdownResult>;
-  /** Obtains consent, protects all current hosts, commits closure and waits for their release. */
+  /** Obtains consent, protects all current hosts, and commits closure. */
   readonly prepare?: (status: import("./control-protocol.js").DaemonManagementStatus, candidate: PackagedBuildIdentity) => Promise<UpgradeAttemptCredentials>;
+  /** Authenticates the exact attempt and verifies it remains committed. */
+  readonly validatePreparation?: (credentials: UpgradeAttemptCredentials) => Promise<boolean>;
+  readonly cancelPreparation?: (credentials: UpgradeAttemptCredentials) => Promise<void>;
+  readonly preparedRetryDurationMs?: number;
   readonly waitForRetirement: () => Promise<void>;
   readonly replaceAndReady: () => Promise<void>;
   readonly retryDurationMs?: number;
@@ -67,25 +71,41 @@ export async function coordinateUpgrade(
   if (inspected.kind !== "absent") {
     requireCoordinatedRetirement(inspected.status);
     let preparation: UpgradeAttemptCredentials | undefined;
-    const reason = upgradeReason(inspected.status.activity);
-    if (reason !== undefined && reason !== "transient-busy") {
-      if (options.prepare) {
-        preparation = await options.prepare(inspected.status, options.candidate);
-        if (preparation.candidate.daemonIdentity !== options.candidate.daemonIdentity || preparation.candidate.installArtifactIdentity !== options.candidate.installArtifactIdentity) throw new Error("Upgrade preparation authorized a different candidate");
+    let shutdownAccepted = false;
+    try {
+      const reason = upgradeReason(inspected.status.activity);
+      if (reason !== undefined && reason !== "transient-busy") {
+        if (options.prepare) {
+          if (!options.validatePreparation || !options.cancelPreparation) throw new Error("Prepared closure requires authenticated status and cancellation");
+          preparation = await options.prepare(inspected.status, options.candidate);
+          if (preparation.candidate.daemonIdentity !== options.candidate.daemonIdentity || preparation.candidate.installArtifactIdentity !== options.candidate.installArtifactIdentity) throw new Error("Upgrade preparation authorized a different candidate");
+        }
+        else throw new DaemonUpgradeRequiredError("preparation-required");
       }
-      else throw new DaemonUpgradeRequiredError("preparation-required");
-    }
-    const deadline = Date.now() + (options.retryDurationMs ?? 5_000);
-    while (true) {
-      const shutdown = await options.shutdown(preparation);
-      if (shutdown.status === "accepted") break;
-      const refusedReason = upgradeReason(shutdown.activity) ?? "transient-busy";
-      if (refusedReason !== "transient-busy" || Date.now() >= deadline) {
-        throw new DaemonUpgradeRequiredError(refusedReason);
+      // Committed hosts close on their next poll. Browser disconnect ownership
+      // then lasts five seconds, so prepared closure needs a longer boundary
+      // than an ordinary idle drain and must retain the same authorization.
+      const deadline = Date.now() + (preparation ? options.preparedRetryDurationMs ?? 15_000 : options.retryDurationMs ?? 5_000);
+      while (true) {
+        if (preparation && !await options.validatePreparation!(preparation)) throw new Error("Upgrade closure is no longer committed for this attempt");
+        const shutdown = await options.shutdown(preparation);
+        if (shutdown.status === "accepted") { shutdownAccepted = true; break; }
+        const refusedReason = upgradeReason(shutdown.activity) ?? "transient-busy";
+        if ((preparation === undefined && refusedReason !== "transient-busy") || Date.now() >= deadline) {
+          throw new DaemonUpgradeRequiredError(refusedReason);
+        }
+        await (options.retryDelay?.() ?? new Promise((resolveDelay) => setTimeout(resolveDelay, 50)));
       }
-      await (options.retryDelay?.() ?? new Promise((resolveDelay) => setTimeout(resolveDelay, 50)));
+      await options.waitForRetirement();
+    } catch (error) {
+      // Once shutdown is accepted, its daemon may already be gone. Cancellation
+      // cannot restore that service, and retirement uncertainty stays a failure.
+      if (preparation && !shutdownAccepted) {
+        try { await options.cancelPreparation!(preparation); }
+        catch (cancelError) { throw new AggregateError([error, cancelError], "Upgrade closure failed and cancellation could not be confirmed; keep the current installation and retry after reviewing open work"); }
+      }
+      throw error;
     }
-    await options.waitForRetirement();
   }
   if (canSkipMutation && artifactIsIdentical) return { status: "noop" };
   await options.replaceAndReady();

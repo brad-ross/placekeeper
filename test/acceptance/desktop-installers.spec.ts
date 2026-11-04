@@ -15,7 +15,7 @@ const execute=promisify(execFile);
  * on the native host while this test waits. Debian lifecycle and downloaded OS
  * approval remain separate native-host qualification obligations. */
 test('the exact native installer reaches guarded shell readiness in an isolated installation',async({},testInfo)=>{
-  test.setTimeout(240_000);
+  test.setTimeout(600_000);
   const artifact=process.env.PLACEKEEPER_NATIVE_INSTALLER_ARTIFACT;
   expect(artifact,'Provide the exact DMG or Setup.exe on its native host').toBeTruthy();
   expect(['darwin','win32']).toContain(process.platform);

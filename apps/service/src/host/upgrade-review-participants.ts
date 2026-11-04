@@ -79,7 +79,8 @@ export class UpgradeReviewParticipants {
     try {
       if (request.error !== undefined) throw new Error(request.error);
       await view.protection.protect();
-      if (this.#views.get(id) !== view || this.coordinator.poll(view.credentials)?.phase !== 'preparing') throw new Error('Preparation changed while protecting review');
+      const current = this.coordinator.poll(view.credentials);
+      if (this.#views.get(id) !== view || current?.attemptId !== request.attemptId || !['preparing', 'ready'].includes(current.phase)) throw new Error('Preparation changed while protecting review');
       for (const peer of this.#views.values()) {
         const generation = peer.protection.generation?.();
         this.coordinator.updateParticipant(peer.credentials, peer.protection.revision(), { settlement: generation === peer.generation });

@@ -54,6 +54,7 @@
     "test:e2e:webkit": "node --import tsx scripts/testing/run-suite.ts test:e2e:webkit",
     "test:visual": "node --import tsx scripts/testing/run-suite.ts test:visual",
     "test:u7-host": "pnpm test:host-integration",
+    "test:upgrade-preparation:browser": "node --import tsx scripts/testing/run-suite.ts test:upgrade-preparation:browser",
     "test:upgrade-lifecycle": "node --import tsx scripts/testing/run-suite.ts test:upgrade-lifecycle",
     "test:u7": "pnpm test:production-integration",
     "test:u8": "pnpm test:full-validation",

@@ -12,6 +12,7 @@ export const suites: Record<string, TestStage[]> = {
   "test:desktop-debian": [{ runner: "playwright", options: ["--config", "scripts/testing/config/playwright.desktop-installers.config.ts"], files: ["test/acceptance/desktop-debian.spec.ts"] }],
   "test:desktop-legacy": [{ runner: "playwright", options: ["--config", "scripts/testing/config/playwright.desktop-installers.config.ts"], files: ["test/acceptance/legacy-0.2.4-upgrade.spec.ts"] }],
   "test:desktop-platform": [{ runner: "vitest", options: ["--testTimeout", "45000", "--hookTimeout", "45000", "--maxWorkers", "2"], files: [
+    "test/support/debian-package-identity.test.ts",
     "packaging/desktop/install-layout.test.ts", "packaging/desktop/legacy-release.test.ts", "packaging/desktop/launcher.test.ts",
     "apps/service/test/desktop-service-switch.test.ts", "apps/service/test/upgrade-preparation.test.ts", "apps/service/test/upgrade-review-participants.test.ts",
     "apps/web/test/upgrade-preparation.test.ts", "apps/web/test/production-entry.test.ts",
@@ -495,6 +496,7 @@ export const suites: Record<string, TestStage[]> = {
       ]
     }
   ],
+  "test:upgrade-preparation:browser": ["pnpm build:web", { runner: "playwright", options: ["--config", "scripts/testing/config/playwright.upgrade-preparation.config.ts"], files: ["test/acceptance/upgrade-preparation.spec.ts"] }],
   "test:upgrade-lifecycle": [
     {
       "runner": "vitest",
@@ -510,7 +512,8 @@ export const suites: Record<string, TestStage[]> = {
         "packaging/macos/chrome-integration.test.ts",
         "packaging/shared/distribution.test.ts"
       ]
-    }
+    },
+    "pnpm test:upgrade-preparation:browser"
   ],
   "test:production-integration": [
     "pnpm fixtures:pdf",
@@ -596,7 +599,8 @@ export const suites: Record<string, TestStage[]> = {
         "test/acceptance/authoring-lifecycle-regressions.spec.ts",
         "test/acceptance/synctex-lifecycle.spec.ts"
       ]
-    }
+    },
+    "pnpm test:upgrade-preparation:browser"
   ],
   "test:ci:webkit": [
     "pnpm build:electron:web",
@@ -660,6 +664,7 @@ export const suites: Record<string, TestStage[]> = {
 
 /** Canonical CI is deliberately narrower than all repository tests; includes the updater's .mjs tests. */
 export const ciUnitFiles = [
+  "test/support/debian-package-identity.test.ts",
   "packages/core/test/desktop-release.test.ts", "apps/electron/test/update-check.test.ts",
   "apps/electron/test/window-retirement.test.ts",
   "packaging/desktop/install-layout.test.ts",

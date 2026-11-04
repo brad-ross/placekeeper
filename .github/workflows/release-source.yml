@@ -64,8 +64,8 @@ jobs:
       - name: Build unsigned candidate
         run: pnpm package:desktop
       - run: pnpm exec vitest run packaging/shared/distribution.test.ts packaging/macos/chrome-integration.test.ts packaging/macos/setup-integrations.test.mjs packaging/macos/update-vscode.test.mjs
-      - run: pnpm test:upgrade-lifecycle
       - run: pnpm exec playwright install chromium
+      - run: pnpm test:upgrade-lifecycle
       - run: pnpm test:chrome-handoff
       - run: pnpm test:desktop-installed
       - name: Package exact tested source

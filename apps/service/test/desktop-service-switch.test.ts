@@ -130,12 +130,18 @@ it("passes exact incumbent and candidate identities through consent preparation 
     return { attemptId: "attempt", token: "token", candidate };
   });
   mocks.request.mockImplementation(async (_path, request) => {
+    if (request.kind === "upgrade-preparation") {
+      expect(request.request.operation).toBe("status");
+      expect(request.request.credentials).toMatchObject({attemptId:"attempt",token:"token",candidate:{daemonIdentity:"a".repeat(64),installArtifactIdentity:"b".repeat(64)}});
+      events.push("validated");
+      return {kind:"upgrade-preparation",result:{...request.request.credentials,phase:"committed"}};
+    }
     if (request.operation === "shutdown-if-idle") { events.push("shutdown"); return { kind: "management", protocolVersion: 1, operation: "shutdown-if-idle", result: { status: "accepted" } }; }
     throw Object.assign(new Error("retired"), { code: "ENOENT" });
   });
   mocks.ready.mockImplementation(async () => { events.push("ready"); });
   await switchDesktopService({ ...options, prepare });
-  expect(events).toEqual(["prepared", "shutdown", "ready"]); expect(prepare).toHaveBeenCalledOnce();
+  expect(events).toEqual(["prepared", "validated", "shutdown", "ready"]); expect(prepare).toHaveBeenCalledOnce();
 });
 it("keeps the installed service when the user refuses preparation", async () => {
   mocks.inspect.mockResolvedValue({ kind: "incompatible", status: { ...status(1), upgradePreparationVersion: 1 } });
@@ -223,4 +229,20 @@ it.each([false,true])("never asks a legacy daemon to shut down even when recover
   await expect(switchDesktopService(options)).rejects.toThrow(/quit.*manually/iu);
   expect(mocks.request).not.toHaveBeenCalled();expect(mocks.ready).not.toHaveBeenCalled();
   expect(await lstat(options.backup).then(()=>true,()=>false)).toBe(false);
+});
+it.each(['attempt','token','candidate'] as const)('refuses a committed status for a different %s and cancels only the original credentials',async(mismatch)=>{
+  const options=await fixture();
+  const selected={daemonIdentity:'a'.repeat(64),installArtifactIdentity:'b'.repeat(64)};
+  const credentials={attemptId:'original-attempt',token:'original-token',candidate:selected};
+  mocks.inspect.mockResolvedValue({kind:'incompatible',status:{...status(1),upgradePreparationVersion:1}});
+  mocks.request.mockImplementation(async(_path,request)=>{
+    expect(request.kind).toBe('upgrade-preparation');
+    expect(request.request.credentials).toEqual(credentials);
+    if(request.request.operation==='cancel')return {kind:'upgrade-preparation',result:{...credentials,phase:'canceled'}};
+    const other={...credentials,...(mismatch==='attempt'?{attemptId:'another-attempt'}:mismatch==='token'?{token:'another-token'}:{candidate:{...selected,installArtifactIdentity:'e'.repeat(64)}})};
+    return {kind:'upgrade-preparation',result:{...other,phase:'committed'}};
+  });
+  await expect(switchDesktopService({...options,prepare:async()=>credentials})).rejects.toThrow('no longer committed');
+  expect(mocks.request.mock.calls.map(call=>call[1].request.operation)).toEqual(['status','cancel']);
+  expect(mocks.ready).not.toHaveBeenCalled();
 });

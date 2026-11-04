@@ -239,12 +239,14 @@ async function coordinateLifecycleMutation(
       receipt: join(paths.appSupportRoot, "installer", `install-ready-${Date.now()}.json`), paths,
       replaceAndReady: async (lifecycleToken) => {
         if (!replaceHelper.endsWith(".mjs")) throw new Error("Desktop installation requires the portable replacement helper");
-        await execFileAsync(process.execPath, [replaceHelper, ...(args.includes("--uninstall-only") ? ["--uninstall-only"] : args.includes("--immutable-runtime") ? ["--immutable-runtime"] : []), candidateApp, installedApp, desktopLauncher(installedApp),
+        const result = await execFileAsync(process.execPath, [replaceHelper, ...(args.includes("--uninstall-only") ? ["--uninstall-only"] : args.includes("--immutable-runtime") ? ["--immutable-runtime"] : []), candidateApp, installedApp, desktopLauncher(installedApp),
           ...(smokePort === undefined ? [] : [String(smokePort), ...(paths.isolatedTestRoot === undefined ? [] : [paths.isolatedTestRoot])])], { timeout: 300_000, maxBuffer: 65_536, env: { ...process.env,
           [LIFECYCLE_LOCK_TOKEN_ENV]: lifecycleToken,
           PLACEKEEPER_INSTALL_BACKUP_ROOT: backupRoot,
           [LIFECYCLE_LOCK_PATH_ENV]: paths.lifecycleLockPath ?? join(paths.appSupportRoot, "lifecycle.lock"),
         } });
+        write(result.stdout);
+        if (result.stderr) process.stderr.write(result.stderr);
       },
     });
     return "installed";

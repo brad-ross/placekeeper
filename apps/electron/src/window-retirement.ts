@@ -15,3 +15,14 @@ export class WindowRetirementBarrier {
         while (this.pending.size > 0) await Promise.all([...this.pending]);
     }
 }
+
+/** The first quit owns restoration capture, including while detach is pending. */
+export class WindowQuitState {
+    active = false;
+    begin(capture: () => void): boolean {
+        if (this.active) return false;
+        capture();
+        this.active = true;
+        return true;
+    }
+}

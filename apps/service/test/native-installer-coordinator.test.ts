@@ -32,3 +32,39 @@ it('coordinates a fresh installation with no control socket through verified bac
     await expect(readFile(marker)).rejects.toMatchObject({code:'ENOENT'});
   } finally {for(const [index,key] of keys.entries()){if(previous[index]===undefined)delete process.env[key];else process.env[key]=previous[index];}await rm(root,{recursive:true,force:true});}
 });
+
+it('forwards real replacement-helper retained-resource notices through the coordinator to installer completion',async()=>{
+  const { EventEmitter }=await import('node:events');const { PassThrough }=await import('node:stream');
+  const { vi }=await import('vitest');
+  const { runInstaller }=await import('../../../packaging/desktop/installer-entry.mjs');
+  const root=await mkdtemp(process.platform==='darwin'?'/tmp/pk-notice-':join(tmpdir(),'pk-notice-'));
+  const keys=['PLACEKEEPER_DAEMON_IDENTITY','PLACEKEEPER_INSTALL_ARTIFACT_IDENTITY'] as const;
+  const previous=keys.map(key=>process.env[key]);
+  try{
+    const candidate=join(root,'candidate.app'),resources=runtimeRoot(candidate),destination=join(root,'installed.app');
+    for(const directory of ['node/bin','service','web','installer'])await mkdir(join(resources,directory),{recursive:true});
+    const node=`node/bin/node${process.platform==='win32'?'.exe':''}`;
+    await writeFile(join(resources,node),'fixture node');await writeFile(join(resources,'service/main.js'),'fixture service');await writeFile(join(resources,'web/pdfium.wasm'),'fixture wasm');
+    await writeFile(join(resources,'runtime-manifest.json'),JSON.stringify({schemaVersion:1,target:{platform:process.platform,arch:process.arch},daemonIdentity:'a'.repeat(64),installArtifactIdentity:'b'.repeat(64),node:{path:node,sha256:hash('fixture node'),version:'24.0.0'},service:{path:'service/main.js',sha256:hash('fixture service'),version:'0.3.0'},webAssets:{path:'web',files:[{path:'pdfium.wasm',sha256:hash('fixture wasm')}]},recovery:{readableDraftSchemaVersions:[1,2,3],writtenDraftSchemaVersion:3}}));
+    process.env.PLACEKEEPER_DAEMON_IDENTITY='a'.repeat(64);process.env.PLACEKEEPER_INSTALL_ARTIFACT_IDENTITY='b'.repeat(64);
+    const retained=['modified Placekeeper shortcut','edited Chrome registration'];
+    await writeFile(join(resources,'installer/install-built-app.mjs'),`process.stdout.write(JSON.stringify({kind:'placekeeper-uninstall-retained',resources:${JSON.stringify(retained)}})+'\\n');process.stderr.write('retained registration warning\\n');`);
+    let forwardedErrors='';
+    const invoke=((_command:string,args:string[])=>{
+      const child=Object.assign(new EventEmitter(),{stdout:new PassThrough(),stderr:new PassThrough(),stdin:new PassThrough()});
+      child.stderr.on('data',data=>{forwardedErrors+=String(data);});
+      queueMicrotask(()=>{void(async()=>{
+        const errors=vi.spyOn(process.stderr,'write').mockImplementation(chunk=>{child.stderr.write(chunk);return true;});
+        try{
+          const code=await runDaemonCommand(args.slice(2),text=>{child.stdout.write(text);});
+          child.stdout.end();child.stderr.end();child.emit('close',code,null);
+        }catch(error){child.emit('error',error);child.emit('close',2,null);}
+        finally{errors.mockRestore();}
+      })();});
+      return child;
+    }) as unknown as typeof import('node:child_process').spawn;
+    const result=await runInstaller({candidate,destination,uninstall:true,isolatedRoot:join(root,'state'),port:63827},()=>{throw Error('No active reviews need consent');},invoke);
+    expect(result.retainedResources).toEqual(retained);
+    expect(result.output).toContain('placekeeper-uninstall-retained');expect(forwardedErrors).toContain('retained registration warning');
+  }finally{for(const [index,key] of keys.entries()){if(previous[index]===undefined)delete process.env[key];else process.env[key]=previous[index];}await rm(root,{recursive:true,force:true});}
+});

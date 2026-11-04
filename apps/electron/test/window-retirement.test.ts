@@ -43,3 +43,20 @@ it('reports detach failure instead of claiming an orderly lifecycle shutdown', a
     await Promise.all([trackedFailure, waitingFailure]);
     expect(barrier.hasPending).toBe(false);
 });
+
+it('captures restoration only on the first quit while later quits await delayed detach', async () => {
+    const { WindowQuitState } = await import('../src/window-retirement.js');
+    const quit = new WindowQuitState();
+    const detach = deferred(); const barrier = new WindowRetirementBarrier();
+    const entries = ['first.pdf', 'second.pdf']; const snapshots: string[][] = [];
+    const persist = () => { snapshots.push([...entries]); };
+    expect(quit.begin(persist)).toBe(true);
+    const tracked = barrier.track(detach.promise);
+    entries.pop(); expect(quit.begin(persist)).toBe(false);
+    entries.pop(); expect(quit.begin(persist)).toBe(false);
+    let finished = false; const completion = barrier.wait().then(() => { finished = true; });
+    await Promise.resolve(); expect(finished).toBe(false);
+    expect(snapshots).toEqual([['first.pdf', 'second.pdf']]);
+    detach.resolve(); await tracked; await completion;
+    expect(snapshots).toEqual([['first.pdf', 'second.pdf']]);
+});

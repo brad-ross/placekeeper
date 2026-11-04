@@ -57,3 +57,31 @@ it('drops native and host command tokens observed while frozen instead of replay
   expect(gate.filter({ ...native, token: 1 }, false, 'host')).toBeUndefined();
   expect(gate.filter({ ...native, token: 2 }, false, 'host')).toEqual({ ...native, token: 2 });
 });
+
+it('protects local input once per frozen attempt while re-proving newer shared revisions', async () => {
+  const attemptId = 'd'.repeat(43);
+  let protections = 0, settlements = 0;
+  let status: UpgradeReviewStatus = { phase: 'preparing', attemptId, settlementRequired: true };
+  const view = new ReviewUpgradePreparation({ poll: async () => status,
+    settle: async () => { settlements++; return status; },
+    protectInput: async () => { protections++; }, frozen: () => {}, close: async () => {},
+  });
+  await view.tick(); await view.tick(); await view.tick();
+  expect(settlements).toBe(3); expect(protections).toBe(1);
+  status = { phase: 'canceled', attemptId }; await view.tick();
+  status = { phase: 'preparing', attemptId, settlementRequired: true }; await view.tick();
+  expect(protections).toBe(2);
+});
+
+it('continues observing cancellation while native app closure is still pending', async () => {
+  const attemptId = 'e'.repeat(43); let frozen = false;
+  let status: UpgradeReviewStatus = { phase: 'preparing', attemptId };
+  const view = new ReviewUpgradePreparation({ poll: async () => status,
+    settle: async () => status, protectInput: async () => {},
+    frozen: value => { frozen = value; }, close: async () => false,
+  });
+  await view.tick(); status = { phase: 'committed', attemptId }; await view.tick();
+  expect(frozen).toBe(true);
+  status = { phase: 'canceled', attemptId }; await view.tick();
+  expect(frozen).toBe(false);
+});

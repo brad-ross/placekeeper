@@ -277,3 +277,20 @@ it('requires authenticated widget detach or an explicit trusted task end to rele
     expect(await host.lifecycle.shutdownIfIdle({ authorize: () => host.upgradePreparation.status(attempt).phase === 'committed' })).toEqual({ status: 'accepted' });
   } finally { await host.close(); await rm(root, { recursive: true, force: true }); }
 });
+
+it('accepts overlapping reproofs after a peer has made the same durable revision ready', async () => {
+  const lifecycle = new DaemonLifecycleCoordinator({ activity: () => ({ reviewPresence: 0, codexTasks: 0, transientWork: 0 }), drain: async () => {} });
+  const coordinator = new UpgradePreparationCoordinator(lifecycle);
+  const participants = new UpgradeReviewParticipants(coordinator);
+  const delayed = Promise.withResolvers<void>();
+  let calls = 0;
+  participants.attach('browser:only', { revision: () => '1:7', generation: () => 1,
+    protect: async () => { if (++calls === 1) await delayed.promise; } });
+  const attempt = coordinator.preview('development', { daemonIdentity: 'a'.repeat(64), installArtifactIdentity: 'b'.repeat(64) });
+  coordinator.begin(attempt, true);
+  const pending = participants.settle('browser:only', { attemptId: attempt.attemptId });
+  expect(await participants.settle('browser:only', { attemptId: attempt.attemptId })).toMatchObject({ phase: 'ready' });
+  delayed.resolve();
+  expect(await pending).toMatchObject({ phase: 'ready' });
+  expect(coordinator.status(attempt).phase).toBe('ready');
+});
