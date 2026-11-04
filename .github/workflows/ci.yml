@@ -20,6 +20,8 @@ permissions:
 jobs:
   desktop-candidate:
     if: inputs.desktop_candidate
+    permissions:
+      contents: write
     uses: ./.github/workflows/desktop-candidate.yml
   test:
     if: ${{ !inputs.desktop_candidate }}
