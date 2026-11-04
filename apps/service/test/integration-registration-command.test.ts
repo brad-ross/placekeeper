@@ -1,4 +1,4 @@
-import { cp, mkdtemp, mkdir, readFile, realpath, writeFile } from "node:fs/promises";
+import { cp, mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -36,7 +36,7 @@ describe("explicit candidate integration command", () => {
     vi.stubEnv("PLACEKEEPER_INSTALL_ARTIFACT_IDENTITY", "a".repeat(64)); vi.stubEnv("PLACEKEEPER_DAEMON_IDENTITY", "b".repeat(64));
     const destination = join(root, "marketplace"); const output: string[] = [];
     expect(await runIntegrationRegistrationCommand(["integration-registration", "codex", "--receipt", join(root, "receipt"), "--destination", destination, "--node", node, "--server", server, "--launcher", launcher], text => output.push(text))).toBe(0);
-    expect(JSON.parse(await readFile(join(destination, "codex-plugin/.mcp.json"), "utf8")).mcpServers.placekeeper).toEqual({ command: await realpath(launcher), args: ["codex-mcp"] });
+    expect(JSON.parse(await readFile(join(destination, "codex-plugin/.mcp.json"), "utf8")).mcpServers.placekeeper).toEqual({ command: launcher, args: ["codex-mcp"] });
     expect(await readFile(join(destination, "codex-plugin/hooks/hooks.json"), "utf8")).toContain("Verifying Placekeeper native presentation");
     expect(JSON.parse(output.at(-1)!)).toMatchObject({ ok: true, trust: "pending" });
     expect(native.request).not.toHaveBeenCalled();

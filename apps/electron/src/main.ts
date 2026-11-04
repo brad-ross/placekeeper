@@ -1,3 +1,4 @@
+import { resolvePlatformLocations } from '../../service/src/platform/locations.js';
 import { app, BrowserWindow, dialog, ipcMain, protocol, session, clipboard, screen, shell } from 'electron';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
@@ -21,6 +22,8 @@ import { FocusedVisibilityGate } from './focused-visibility.js';
 import { WindowActivityRegistry, ActivityAcknowledgements } from './window-lifecycle.js';
 import { DocumentWindowRegistry } from './window-registry.js';
 import { parseWindowState, readWindowState, writeWindowState, importLegacyMacPreferences, readLegacyInterfaceScale, type WindowIntent } from './window-state.js';
+import { createIntegrationSetup } from './integration-setup.js';
+import { pathToFileURL } from 'node:url';
 import { installMenus, type WindowCommands } from './menus.js';
 import { createManualUpdateAction } from './update-check.js';
 import { parseStartupRequest, writeStartupReceipt, writeStartupLoadFailure, retainedStartupRecovery } from './startup-receipt.js';
@@ -166,7 +169,11 @@ async function start() {
     app.on('will-quit', () => clearInterval(upgradePollTimer));
     const focused = () => { const w = BrowserWindow.getFocusedWindow(); return w ? entries.get(w.webContents.id) : undefined; };
     const checkUpdates = createManualUpdateAction({ installedVersion: app.getVersion(), platform: process.platform, architecture: process.arch, present: async options => (await dialog.showMessageBox(options)).response, openExternal: url => shell.openExternal(url) });
-    const menus = () => installMenus(() => { void chooseOpen(); }, focused, () => { void checkUpdates(); });
+    const integrationHelper = () => import(/* @vite-ignore */ pathToFileURL(join(root, 'installer/setup-integrations.mjs')).href);
+    const integrations = createIntegrationSetup({ statePath: join(resolvePlatformLocations().appSupportRoot, 'integrations/choices.json'), isolated: !!smokePaths || !!startupRequest,
+        present: async options => (await dialog.showMessageBox(options)).response,
+        setup: async choices => (await integrationHelper()).setupIntegrations({ resources: root, choices }) });
+    const menus = () => installMenus(() => { void chooseOpen(); }, focused, () => { void checkUpdates(); }, () => { void integrations.open(); });
     const verify = (event: Electron.IpcMainInvokeEvent, identity?: unknown, identityRequest = false) => {
         const entry = entries.get(event.sender.id);
         const id = identity as { windowId?: unknown; attemptId?: unknown } | undefined;
@@ -432,6 +439,7 @@ async function start() {
         for (const path of queuedPaths) await openDocument(path).catch(showFailure);
         for (const args of queuedInvocations) await handleInvocation(args).catch(showFailure);
     } else { const restored = await readWindowState(statePath); for (const intent of restored) await openDocument(intent.sourcePath, intent).catch(showFailure); if (entries.size === 0) await chooseOpen(); }
+    void integrations.firstLaunch().catch(error => console.error('Optional integration offer unavailable', error));
 
 }
 if (nativeInstaller && installerProfile && !installerEvent) void runInstallerUI(nativeInstaller, installerProfile);

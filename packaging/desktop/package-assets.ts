@@ -74,9 +74,3 @@ export function portableVscodePackager(source: string): string {
     .replaceAll("resolve(appPath, 'Contents/Resources/", "resolve(import.meta.dirname, '../")
     .replace(archiveCall, "await writeZip(archive, staging, entries);");
 }
-
-export function portableIntegrationSetup(source: string): string {
-  const legacy = "if (host === 'codex') return { host, ...await setupCodex({ appPath, run }) };";
-  if (!source.includes(legacy)) throw new Error("The shared Codex setup helper changed; update its portable adapter");
-  return `import { setupPortableCodex } from './setup-codex.mjs';\n${source.replace(legacy, "if (host === 'codex') return { host, ...await setupPortableCodex({ resources: resolve(import.meta.dirname, '..'), run }) };")}`;
-}

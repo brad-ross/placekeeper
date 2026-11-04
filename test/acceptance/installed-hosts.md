@@ -215,3 +215,18 @@ The short installer publishes the Mac app with independently skippable integrati
 ## Editor-independent SyncTeX qualification
 
 The [editor acceptance record](editor-synctex.md) tracks candidate packaging, installed command delivery, source return, and the user-owned VS Code/Zed/Neovim checks. Fixture tests do not establish editor compatibility; U7 remains open until the recorded editor checks pass.
+
+## Portable optional integration qualification
+
+The Electron installer and the first ordinary launch offer Chrome, VS Code and Codex independently with Skip selected by default. Help → Set Up Integrations reopens those choices. Source installation invokes the same packaged `installer/setup-integrations.mjs` operations on macOS, Windows and Linux. Isolated installed smoke and startup-readiness probes suppress the offer and all host registration.
+
+Use disposable OS accounts or isolated host profiles for each exact downloaded installer. Record the artifact hash, platform, host version, selected choices, registered entrypoint, remaining host action, and observed PDF handoff. Unit tests prove ownership and result classification; they do not establish host activation. These physical observations remain pending:
+
+1. Skip all three integrations, open and annotate a PDF, then revisit Help → Set Up Integrations and select only one. Confirm the other hosts remain untouched and a setup failure leaves PDF reading available.
+2. VS Code: install the bundled VSIX through its supported installer, apply the prepared `placekeeper.launcherPath` setting, reload the extension host and open a PDF. Change the packaged VSIX bytes without changing its version and confirm a subsequent setup refresh submits the new payload once, while unchanged launches do not reinstall it. User-edited host settings must remain intact.
+3. Chrome: register the bundled native host; load the indicated unpacked extension, approve its permissions and reload Chrome. Exercise a real PDF handoff through that extension and the registered native entrypoint. On Debian, confirm the manifest uses `/usr/bin/placekeeper-chrome-native-host` and follows the selected per-user runtime after an upgrade.
+4. Codex: add the prepared local marketplace, install or update its plugin, explicitly review trust and enablement, fully restart Codex, then verify `$placekeeper`, the display tool, and trusted launch/display hooks with a real local PDF. Files in the plugin cache or a matching version string alone do not establish activation.
+5. Upgrade an opted-in installation, then launch it normally. Confirm unchanged owned registrations remain untouched, stale owned registrations refresh, and edited or replaced registrations are retained with an actionable failure. VS Code, Chrome and Codex continue to report host action pending until the actual host checks above complete.
+6. Migrate a real public 0.2.4 macOS installation. Exercise its original `Contents/MacOS/placekeeper`, `placekeeper-vscode` and `placekeeper-chrome-host` entrypoints after replacement. Reload Chrome from the new indicated extension folder; update/reinstall the Codex plugin, review trust and fully restart Codex; reload VS Code and verify the launcher setting. Retain old configuration and explicitly resolve any unowned registration conflict.
+
+No current setup operation grants host trust or claims completed host verification. Receipts and choices live under the established durable support root; payloads bind to the stable installed launcher rather than an extraction directory. Setup never changes the default PDF reader.

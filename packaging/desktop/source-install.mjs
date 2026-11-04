@@ -54,11 +54,9 @@ if (args.includes('--dry-run')) {
   await run(launcher(built), ['daemon', 'coordinate-install', '--candidate-app', built, '--installed-app', destination,
     '--replace-helper', join(repo, 'packaging/desktop/install-built-app.mjs')]);
   console.log(`Placekeeper installed successfully.\nApp: ${destination}\nCLI: ${launcher(destination)}`);
-  if (process.platform === 'darwin') {
-    const root = runtimeRoot(destination);
-    await run(join(root, 'node/bin/node'), [join(root, 'installer/setup-integrations.mjs'), destination,
+  const root = runtimeRoot(destination);
+  try {
+    await run(join(root, `node/bin/node${process.platform === 'win32' ? '.exe' : ''}`), [join(root, 'installer/setup-integrations.mjs'), destination,
       ...Object.entries(choices).map(([key, value]) => `--${key}=${value}`)]);
-  } else {
-    console.log(`Editor integrations: ${join(runtimeRoot(destination), 'integrations')}\nInstall placekeeper.vsix with VS Code's Extensions: Install from VSIX command; point placekeeper.launcherPath at the CLI printed above.\nChrome and Codex host registrations use the bundled integration-registration CLI; run the CLI with integration-registration for command usage.`);
-  }
+  } catch (error) { console.log(`Placekeeper is installed. Optional integration setup needs attention: ${error.message}. Revisit Help → Set Up Integrations in Placekeeper.`); }
 }

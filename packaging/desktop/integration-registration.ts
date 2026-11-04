@@ -9,6 +9,7 @@ export interface CandidateIntegrationFile {
 export interface ChromeRegistryDriver {
   register(path: string, owner: string, sha256: string): Promise<void>;
   unregister(path: string, owner: string, sha256: string): Promise<boolean>;
+  matches?(path: string, owner: string, sha256: string): Promise<boolean>;
 }
 interface ChromeRegistryReceipt { readonly path: string; readonly owner: string; readonly sha256: string }
 interface RegistrationReceipt {
@@ -54,6 +55,56 @@ export async function registerCandidateIntegration(options: {
   }
   if (registry !== undefined) await options.chromeRegistry!.driver.register(registry.path, registry.owner, registry.sha256);
 
+}
+
+/** Refresh only registrations whose complete ownership receipt still matches.
+ * Validate the whole set before any writes so a user edit preserves every file. */
+export async function repairCandidateIntegration(options: Parameters<typeof registerCandidateIntegration>[0]): Promise<"registered" | "current" | "repaired"> {
+  const previous = await readFile(options.receiptPath, "utf8").catch((error: NodeJS.ErrnoException) => { if (error.code === "ENOENT") return undefined; throw error; });
+  if (previous === undefined) { await registerCandidateIntegration(options); return "registered"; }
+  const receipt = JSON.parse(previous) as RegistrationReceipt;
+  if (receipt.schemaVersion !== 1 || !/^[a-f0-9]{64}$/u.test(receipt.installationId) || !Array.isArray(receipt.files) || receipt.files.length === 0) throw new Error("Invalid retained registration receipt");
+  validatePaths(options.receiptPath, options.files);
+  if (!/^[a-f0-9]{64}$/u.test(options.installationId) || options.files.length === 0) throw new Error("Invalid candidate registration");
+  validatePaths(options.receiptPath, receipt.files.map(file => ({path:file.path,content:""})));
+  for (const file of options.files.filter(candidate => !receipt.files.some(old => old.path === candidate.path))) {
+    const exists = await lstat(file.path).then(() => true, (error:NodeJS.ErrnoException) => {if(error.code === "ENOENT") return false; throw error;});
+    if(exists) throw new Error("New registration path already belongs to another file; existing files were preserved");
+  }
+  for (const file of receipt.files) {
+    const info = await lstat(file.path);
+    if (!info.isFile() || info.dev !== file.device || info.ino !== file.inode || digest(await readFile(file.path, "utf8")) !== file.sha256) throw new Error("Registration changed; existing files were preserved");
+  }
+  if (receipt.installationId === options.installationId && receipt.files.length === options.files.length && options.files.every(file => receipt.files.some(old => old.path === file.path && old.sha256 === digest(file.content)))) {
+    if (receipt.registry) {
+      if (!options.chromeRegistry?.driver.matches) throw new Error("Chrome registry ownership could not be verified; inspect the retained receipt");
+      if (!await options.chromeRegistry.driver.matches(receipt.registry.path, receipt.registry.owner, receipt.registry.sha256)) {
+        // Exclusive creation retries an absent key after interrupted setup, and
+        // still refuses an incumbent with different ownership or values.
+        await options.chromeRegistry.driver.register(receipt.registry.path, receipt.registry.owner, receipt.registry.sha256);
+      }
+    }
+    return "current";
+  }
+  // Registry ownership must also match before replacing a Windows manifest.
+  if (receipt.registry && (!options.chromeRegistry || !await options.chromeRegistry.driver.unregister(receipt.registry.path, receipt.registry.owner, receipt.registry.sha256))) throw new Error("Chrome registry changed; registration preserved");
+  const files: RegistrationReceipt["files"][number][] = [];
+  for (const file of options.files) {
+    await mkdir(dirname(file.path), {recursive:true,mode:0o700});
+    await writeFile(file.path, file.content, { mode: 0o600, ...(receipt.files.some(old => old.path === file.path) ? {} : {flag:"wx"}) });
+    const info = await lstat(file.path);
+    files.push({ path: file.path, sha256: digest(file.content), device: info.dev, inode: info.ino });
+    // Persist progress so interruption cannot silently adopt changed payloads.
+    const remaining = receipt.files.filter(old => !files.some(updated => updated.path === old.path));
+    await writeFile(options.receiptPath, JSON.stringify({ ...receipt, files: [...files, ...remaining] }), { mode: 0o600 });
+  }
+  for(const old of receipt.files.filter(file => !options.files.some(candidate => candidate.path === file.path))) {
+    await unlink(old.path);
+  }
+  const registry = options.chromeRegistry ? { path: options.chromeRegistry.path, owner: `${options.installationId}:${randomUUID()}`, sha256: digest(options.files.find(file => file.path === options.chromeRegistry!.path)!.content) } : undefined;
+  await writeFile(options.receiptPath, JSON.stringify({ schemaVersion: 1, installationId: options.installationId, files, ...(registry ? {registry} : {}) }), { mode: 0o600 });
+  if (registry) await options.chromeRegistry!.driver.register(registry.path, registry.owner, registry.sha256);
+  return "repaired";
 }
 
 /** Remove only byte-identical files recorded by this installation. User edits,

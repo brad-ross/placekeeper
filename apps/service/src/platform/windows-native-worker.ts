@@ -5,7 +5,7 @@ import { windowsPowerShellScript } from "./windows-powershell.js";
 import { WINDOWS_REPLACEMENT_SECURITY_SOURCE } from "./windows-security-descriptor.js";
 
 export type WindowsNativeRequest =
-  | { readonly operation: "registerChromeHost" | "unregisterChromeHost"; readonly path: string; readonly owner: string; readonly sha256: string; readonly testRegistryId?: string }
+  | { readonly operation: "registerChromeHost" | "unregisterChromeHost" | "matchChromeHost"; readonly path: string; readonly owner: string; readonly sha256: string; readonly testRegistryId?: string }
   | { readonly operation: "verify"; readonly path: string }
   | { readonly operation: "protect"; readonly path: string }
   | { readonly operation: "createPrivateFile"; readonly path: string }
@@ -43,14 +43,14 @@ public static class PlacekeeperFilePublication {
  private const string ChromeHostKey = "Software\\Google\\Chrome\\NativeMessagingHosts\\com.placekeeper.chrome";
  [DllImport("advapi32.dll", CharSet = CharSet.Unicode)]
  private static extern int RegCreateKeyEx(IntPtr hive, string key, uint reserved, string keyClass, uint options, int access, IntPtr security, out Microsoft.Win32.SafeHandles.SafeRegistryHandle handle, out uint disposition);
- public static int ChromeHost(bool remove, string manifest, string owner, string digest, string testRegistryId) {
+ public static int ChromeHost(bool remove, bool inspect, string manifest, string owner, string digest, string testRegistryId) {
   string keyPath = ChromeHostKey;
   if (!String.IsNullOrEmpty(testRegistryId)) {
    if (!System.Text.RegularExpressions.Regex.IsMatch(testRegistryId, "^[a-f0-9-]{36}$")) return 87;
    keyPath = "Software\\Placekeeper\\InstalledSmoke\\" + testRegistryId + "\\NativeMessagingHosts\\com.placekeeper.chrome";
   }
   if (!System.IO.Path.IsPathRooted(manifest) || !System.Text.RegularExpressions.Regex.IsMatch(owner, "^[a-f0-9]{64}:[a-f0-9-]{36}$") || !System.Text.RegularExpressions.Regex.IsMatch(digest, "^[a-f0-9]{64}$")) return 87;
-  if (!remove) {
+  if (!remove && !inspect) {
    Microsoft.Win32.SafeHandles.SafeRegistryHandle handle; uint disposition;
    int result = RegCreateKeyEx(new IntPtr(unchecked((int)0x80000001)), keyPath, 0, null, 0, 0x2001F, IntPtr.Zero, out handle, out disposition);
    if (result != 0) return result;
@@ -66,10 +66,11 @@ public static class PlacekeeperFilePublication {
    return 0;
   }
   using (var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(keyPath, false)) {
-   if (key == null) return 0;
+   if (key == null) return inspect ? 2 : 0;
    if (key.SubKeyCount != 0 || key.ValueCount != 3 || !String.Equals(key.GetValue("") as string, manifest, StringComparison.Ordinal) || !String.Equals(key.GetValue("PlacekeeperCandidateOwner") as string, owner, StringComparison.Ordinal) || !String.Equals(key.GetValue("PlacekeeperManifestSha256") as string, digest, StringComparison.Ordinal)) return 183;
    foreach (var name in key.GetValueNames()) if (key.GetValueKind(name) != Microsoft.Win32.RegistryValueKind.String) return 183;
   }
+  if (inspect) return 0;
   Microsoft.Win32.Registry.CurrentUser.DeleteSubKey(keyPath, false);
   if (!String.IsNullOrEmpty(testRegistryId)) {
    string smokeRoot = "Software\\Placekeeper\\InstalledSmoke\\" + testRegistryId;
@@ -140,9 +141,9 @@ while ($null -ne ($line=[Console]::In.ReadLine())) {
     $nativeCode=[PlacekeeperFilePublication]::CreatePrivate($r.path,$directory,$acl.GetSecurityDescriptorBinaryForm())
     $result=if ($nativeCode -eq 0) { @{status='ok'} } else { @{status='failed';nativeCode=$nativeCode} }
    }
-   {$_ -eq 'registerChromeHost' -or $_ -eq 'unregisterChromeHost'} {
+   {$_ -eq 'registerChromeHost' -or $_ -eq 'unregisterChromeHost' -or $_ -eq 'matchChromeHost'} {
     $attempted=$true
-    $nativeCode=[PlacekeeperFilePublication]::ChromeHost(($r.operation -eq 'unregisterChromeHost'),$r.path,$r.owner,$r.sha256,$r.testRegistryId)
+    $nativeCode=[PlacekeeperFilePublication]::ChromeHost(($r.operation -eq 'unregisterChromeHost'),($r.operation -eq 'matchChromeHost'),$r.path,$r.owner,$r.sha256,$r.testRegistryId)
     $result=if ($nativeCode -eq 0) { @{status='ok'} } else { @{status='failed';nativeCode=$nativeCode} }
    }
    'copyAcl' {
@@ -269,7 +270,7 @@ function acquireWorker(): Worker {
           const result = reply.result as WindowsNativeResult;
           if (typeof result !== "object" || result === null || !((pending.request.operation === "publish" || pending.request.operation === "adoptPrivateFile")
             ? result.status === "published" || (result.status === "failed" && Number.isSafeInteger(result.nativeCode) && result.nativeCode >= 0)
-            : result.status === "ok" || ((pending.request.operation === "createPrivateFile" || pending.request.operation === "createPrivateDirectory" || pending.request.operation === "registerChromeHost" || pending.request.operation === "unregisterChromeHost") && result.status === "failed" && Number.isSafeInteger(result.nativeCode) && result.nativeCode >= 0))) throw new Error("Invalid reply");
+            : result.status === "ok" || ((pending.request.operation === "createPrivateFile" || pending.request.operation === "createPrivateDirectory" || pending.request.operation === "registerChromeHost" || pending.request.operation === "unregisterChromeHost" || pending.request.operation === "matchChromeHost") && result.status === "failed" && Number.isSafeInteger(result.nativeCode) && result.nativeCode >= 0))) throw new Error("Invalid reply");
           pending.resolve(result);
         } else if (reply.ok === false && typeof reply.attempted === "boolean") {
           if (typeof reply.reason !== "string" || !WINDOWS_NATIVE_FAILURE_REASONS.includes(reply.reason as WindowsNativeFailureReason)) throw new Error("Invalid failure reason");
@@ -298,7 +299,7 @@ export async function requestWindowsNative(request: WindowsNativeRequest): Promi
   const paths = "path" in request ? [request.path]
     : request.operation === "copyAcl" ? [request.candidate, request.original] : [request.candidate, request.target];
   if (paths.some((path) => typeof path !== "string" || !isAbsolute(path) || path.includes("\0")) || Buffer.byteLength(serialized) > 65536) throw new WindowsNativeWorkerError("Invalid Windows native request", false, false);
-  if ((request.operation === "registerChromeHost" || request.operation === "unregisterChromeHost") &&
+  if ((request.operation === "registerChromeHost" || request.operation === "unregisterChromeHost" || request.operation === "matchChromeHost") &&
       (!/^[a-f0-9]{64}:[a-f0-9-]{36}$/u.test(request.owner) || !/^[a-f0-9]{64}$/u.test(request.sha256) || (request.testRegistryId !== undefined && !/^[a-f0-9-]{36}$/u.test(request.testRegistryId)))) throw new WindowsNativeWorkerError("Invalid Chrome registry ownership", false, false);
   if (request.operation === "publish" && resolve(dirname(request.candidate)) !== resolve(dirname(request.target))) throw new WindowsNativeWorkerError("Publication requires sibling paths", false, false);
   const current = acquireWorker();

@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rename, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { registerCandidateIntegration, unregisterCandidateIntegration, renderCandidateChromeManifest } from "./integration-registration.js";
+import { registerCandidateIntegration, repairCandidateIntegration, unregisterCandidateIntegration, renderCandidateChromeManifest } from "./integration-registration.js";
 
 describe("explicit candidate registrations", () => {
   it("refuses incumbent files and retains only its own completed writes", async () => {
@@ -94,4 +94,45 @@ it("renders Windows hooks without shell expansion and preserves the direct Bash 
   expect(hooks.hooks.UserPromptSubmit[0].hooks[0].commandWindows).toBe(`"${launcher.replaceAll("\\", "/")}" hook --event`);
   expect(files.find(file => file.path.endsWith("SKILL.md"))!.content).toContain(`& '${launcher.replaceAll("\\", "/").replaceAll("'", "''")}' open --json --surface codex-native`);
   await expect(candidateCodexPluginFiles({ template: join(process.cwd(), "integrations/codex-plugin"), destination: join(root, "market"), launcher: join(root, "%expanded%", "placekeeper.exe"), installationId: "a".repeat(64), platform: "win32" })).rejects.toThrow("safely");
+});
+
+it("repairs an owned previous artifact but refuses edited registrations", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pk-repair-"));
+  const receiptPath = join(root, "receipt"); const path = join(root, "host");
+  await registerCandidateIntegration({ installationId: "a".repeat(64), receiptPath, files: [{ path, content: "old" }] });
+  expect(await repairCandidateIntegration({ installationId: "b".repeat(64), receiptPath, files: [{ path, content: "new" }] })).toBe("repaired");
+  expect(await readFile(path, "utf8")).toBe("new");
+  expect(await repairCandidateIntegration({ installationId: "b".repeat(64), receiptPath, files: [{ path, content: "new" }] })).toBe("current");
+  await writeFile(path, "user edit");
+  await expect(repairCandidateIntegration({ installationId: "c".repeat(64), receiptPath, files: [{ path, content: "replacement" }] })).rejects.toThrow("changed");
+  expect(await readFile(path, "utf8")).toBe("user edit");
+});
+it('checks an unchanged Windows registry receipt without removing its host registration', async () => {
+ const root=await mkdtemp(join(tmpdir(),'pk-chrome-current-'));const path=join(root,'host');const receiptPath=join(root,'receipt');
+ let writes=0;let removals=0;let inspections=0;
+ const driver={async register(){writes++;},async unregister(){removals++;return true;},async matches(){inspections++;return true;}};
+ const options={installationId:'a'.repeat(64),receiptPath,files:[{path,content:'manifest'}],chromeRegistry:{path,driver}};
+ await registerCandidateIntegration(options);
+ expect(await repairCandidateIntegration(options)).toBe('current');
+ expect({writes,removals,inspections}).toEqual({writes:1,removals:0,inspections:1});
+});
+it('refreshes a changed plugin inventory while preserving unowned additions', async () => {
+ const root=await mkdtemp(join(tmpdir(),'pk-inventory-'));const receiptPath=join(root,'receipt');const old=join(root,'old');const added=join(root,'added');
+ await registerCandidateIntegration({installationId:'a'.repeat(64),receiptPath,files:[{path:old,content:'owned'}]});
+ await writeFile(added,'user file');
+ await expect(repairCandidateIntegration({installationId:'b'.repeat(64),receiptPath,files:[{path:added,content:'new'}]})).rejects.toThrow();
+ expect(await readFile(old,'utf8')).toBe('owned');expect(await readFile(added,'utf8')).toBe('user file');
+ const next=join(root,'next');
+ expect(await repairCandidateIntegration({installationId:'b'.repeat(64),receiptPath,files:[{path:next,content:'new'}]})).toBe('repaired');
+ await expect(readFile(old)).rejects.toMatchObject({code:'ENOENT'});expect(await readFile(next,'utf8')).toBe('new');expect(await readFile(added,'utf8')).toBe('user file');
+});
+it('retries an absent Chrome key after failed registration without removing an incumbent', async () => {
+ const root=await mkdtemp(join(tmpdir(),'pk-chrome-retry-'));const path=join(root,'host');const receiptPath=join(root,'receipt');
+ let attempts=0;let present=false;let removals=0;
+ const driver={async register(){attempts++;if(attempts===1)throw Error('Temporary registration failure');if(present)throw Error('Incumbent key');present=true;},async unregister(){removals++;return false;},async matches(){return present;}};
+ const options={installationId:'a'.repeat(64),receiptPath,files:[{path,content:'manifest'}],chromeRegistry:{path,driver}};
+ await expect(repairCandidateIntegration(options)).rejects.toThrow('Temporary registration failure');
+ expect(await repairCandidateIntegration(options)).toBe('current');
+ expect({attempts,present,removals}).toEqual({attempts:2,present:true,removals:0});
+ expect(await repairCandidateIntegration(options)).toBe('current');expect(attempts).toBe(2);
 });

@@ -7,7 +7,7 @@ export function commandEnabled(state: WindowCommands | undefined, id: ReviewSema
     return state?.snapshot.focusContext !== 'dialog' && state?.snapshot.commands.find(command => command.id === id)?.enabled === true;
 }
 let commandToken = 0;
-export function installMenus(open: () => void, focused: () => { window: BrowserWindow; commands?: WindowCommands; bridge?: { active: boolean; retired: boolean; windowId: string }; configureSource?: () => void } | undefined, checkUpdates: () => void): void {
+export function installMenus(open: () => void, focused: () => { window: BrowserWindow; commands?: WindowCommands; bridge?: { active: boolean; retired: boolean; windowId: string }; configureSource?: () => void } | undefined, checkUpdates: () => void, setupIntegrations: () => void): void {
     const command = (id: ReviewSemanticCommand, accelerator?: string): MenuItemConstructorOptions => {
         const current = focused();
         const editable = current?.commands?.snapshot.focusContext === 'editable';
@@ -25,7 +25,7 @@ export function installMenus(open: () => void, focused: () => { window: BrowserW
         { label: 'Review', submenu: [...REVIEW_COMMAND_IDS.filter(id => id !== 'undo' && id !== 'redo').map(id => command(id, accelerators[id])), { type: 'separator' }, { label: 'Go to Source', accelerator: 'CommandOrControl+Shift+J', enabled: focused()?.bridge?.active === true, click: () => { const e = focused(); if (e?.bridge?.active && !e.bridge.retired) e.window.webContents.send('review:event', { protocol: REVIEW_RUNTIME_PROTOCOL, version: REVIEW_RUNTIME_VERSION, kind: 'event', runtimeId: e.bridge.windowId, event: 'host-command', payload: { command: 'reverse-synctex' } }); } }, { label: 'Configure Source Navigation…', enabled: focused()?.bridge?.active === true, click: () => { const e = focused(); if (e?.bridge?.active && !e.bridge.retired) e.configureSource?.(); } }] },
         { label: 'View', submenu: [{ label: 'Increase Interface Size', accelerator: 'CommandOrControl+Alt+=', click: () => { const w = focused()?.window; if (w) setInterfaceZoom(w, Math.min(3, w.webContents.getZoomLevel() + 0.5)); } }, { label: 'Decrease Interface Size', accelerator: 'CommandOrControl+Alt+-', click: () => { const w = focused()?.window; if (w) setInterfaceZoom(w, Math.max(-2, w.webContents.getZoomLevel() - 0.5)); } }, { label: 'Actual Interface Size', click: () => { const w = focused()?.window; if (w) setInterfaceZoom(w, 0); } }, { role: 'togglefullscreen' }] },
         { role: 'windowMenu' },
-        { label: 'Help', submenu: [{ label: 'Check for Updates…', click: checkUpdates }] },
+        { label: 'Help', submenu: [{ label: 'Set Up Integrations…', click: setupIntegrations }, { label: 'Check for Updates…', click: checkUpdates }] },
     ];
     Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }

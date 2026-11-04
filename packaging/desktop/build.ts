@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { buildNativeLaunchers } from "./native-launcher.js";
-import { archiveExtraction, bundleDependencyNotices, inventory, portableIntegrationSetup, portableVscodePackager } from "./package-assets.js";
+import { archiveExtraction, bundleDependencyNotices, inventory, portableVscodePackager } from "./package-assets.js";
 import type { PackagedRuntimeManifest } from "../../apps/service/src/platform/runtime-layout.js";
 import { hashFile as digest } from "../../apps/service/src/files/file-capabilities.js";
 
@@ -88,13 +88,14 @@ export async function prepareDesktopRuntime(target: string): Promise<string> {
   for (const helper of ["installer-entry.mjs", "install-built-app.mjs", "install-transaction.mjs", "install-layout.ts", "launcher.mjs", "linux-dispatcher.mjs", "windows-registration.mjs", "stage-uninstall.mjs"]) {
     await copyFile(join(repo, "packaging/desktop", helper), join(installer, helper));
   }
-  for (const helper of ["setup-integrations.mjs", "setup-chrome.mjs", "update-vscode.mjs", "setup-zed.mjs"]) {
+  for (const helper of ["setup-chrome.mjs", "update-vscode.mjs", "setup-zed.mjs"]) {
     await copyFile(join(repo, "packaging/macos", helper), join(installer, helper));
   }
   await cp(await realpath(join(repo, "node_modules/jsonc-parser")), join(installer, "node_modules/jsonc-parser"), { recursive: true });
   await copyFile(join(repo, "packaging/desktop/setup-codex.mjs"), join(installer, "setup-codex.mjs"));
   const integrationHelper = join(installer, "setup-integrations.mjs");
-  await writeFile(integrationHelper, portableIntegrationSetup(await readFile(integrationHelper, "utf8")));
+  await copyFile(join(repo, "packaging/desktop/setup-integrations.mjs"), integrationHelper);
+  await copyFile(join(repo, "packaging/desktop/launcher.mjs"), join(installer, "launcher.mjs"));
   const extension = join(root, "integrations/vscode");
   await mkdir(extension, { recursive: true });
   await copyFile(join(repo, "apps/vscode/package.json"), join(extension, "package.json"));

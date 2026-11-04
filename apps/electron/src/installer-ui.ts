@@ -3,6 +3,7 @@ import { lstat, rm } from 'node:fs/promises';
 import { mkdirSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
+import { createIntegrationSetup } from './integration-setup.js';
 import { pathToFileURL } from 'node:url';
 
 export interface InstallerRequest { candidate: string; uninstall: boolean; destination?: string; immutable: boolean; isolatedRoot?: string; port?: number }
@@ -51,6 +52,15 @@ export async function runInstallerUI(request: InstallerRequest, profile: string)
         if (process.platform === 'win32' && !request.uninstall && request.port === undefined) {
             const { registerWindowsInstallation }=await import(/* @vite-ignore */ pathToFileURL(join(root, 'installer/windows-registration.mjs')).href);
             await registerWindowsInstallation(result.destination, (path: string, options: Electron.ShortcutDetails) => shell.writeShortcutLink(path, 'create', options));
+        }
+        if (!request.uninstall && !request.isolatedRoot) {
+          try {
+            const installedRoot = request.immutable ? root : join(result.destination, process.platform === 'darwin' ? 'Contents/Resources/desktop' : 'resources/desktop');
+            const helper = await import(/* @vite-ignore */ pathToFileURL(join(installedRoot, 'installer/setup-integrations.mjs')).href);
+            await createIntegrationSetup({statePath:helper.integrationStatePath(),isolated:false,
+                present: async options => (await dialog.showMessageBox(options)).response,
+                setup: choices => helper.setupIntegrations({resources:installedRoot,choices})}).open();
+          } catch(error) { await dialog.showMessageBox({type:'warning',title:'Optional integration setup',message:'Placekeeper is installed. Optional integration setup needs attention.',detail:`${String(error)}. Revisit Help → Set Up Integrations after opening Placekeeper.`,buttons:['Continue']}); }
         }
         const retainedDetail=result.retainedResources?.length?` Modified registrations or shortcuts were preserved: ${result.retainedResources.join('; ')}.`:'';
         await dialog.showMessageBox({ type: 'info', title: `Placekeeper ${request.uninstall?'uninstalled':'installed'}`, message: request.uninstall?'Placekeeper was uninstalled.':'Placekeeper is ready.', detail: request.uninstall && process.platform==='darwin' ? `The installed bundle was moved to a complete retained recovery app beside the installation in .placekeeper-install-transactions. The verified recovery backup remains in your Placekeeper support folder. Documents, settings and recovery data are preserved.` : request.uninstall ? `App-owned files and registrations were removed from ${result.destination}. Unknown files remain in place. A complete retained app remains beside the installation in .placekeeper-install-transactions; the verified recovery backup remains in your Placekeeper support folder. Documents, settings and recovery data are preserved. The temporary uninstall runtime at ${request.candidate} can be removed after this installer closes.${retainedDetail}` : `Installed at ${result.destination}. Previous app versions and recovery backups are retained. Optional integrations can be configured from Placekeeper.`, buttons: ['Done'] });

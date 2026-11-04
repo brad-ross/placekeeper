@@ -13,6 +13,8 @@ it.skipIf(process.platform !== "win32")("creates an exclusive HKCU native host r
   const fields = { path, owner: `${"a".repeat(64)}:${randomUUID()}`, sha256: "b".repeat(64), testRegistryId: randomUUID() };
   try {
     expect(await requestWindowsNative({ operation: "registerChromeHost", ...fields })).toEqual({ status: "ok" });
+    expect(await requestWindowsNative({ operation: "matchChromeHost", ...fields })).toEqual({ status: "ok" });
+    expect(await requestWindowsNative({ operation: "matchChromeHost", ...fields, sha256: "c".repeat(64) })).toEqual({ status: "failed", nativeCode: 183 });
     expect(await requestWindowsNative({ operation: "registerChromeHost", ...fields })).toEqual({ status: "failed", nativeCode: 183 });
     expect(await requestWindowsNative({ operation: "unregisterChromeHost", ...fields, owner: `${"c".repeat(64)}:${randomUUID()}` })).toEqual({ status: "failed", nativeCode: 183 });
     expect(await requestWindowsNative({ operation: "unregisterChromeHost", ...fields })).toEqual({ status: "ok" });
