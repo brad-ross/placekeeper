@@ -409,11 +409,11 @@ describe("independent host coordination", () => {
     await expect(coordinateUpgrade({
       candidate: identity, installed: identity, operation: "host-setup",
       inspect: async () => ({ kind: "exact", status: {
-        protocolVersion: 1, daemonIdentity: identity.daemonIdentity, lifecycle: "accepting",
+        protocolVersion: 1, upgradePreparationVersion: 1, daemonIdentity: identity.daemonIdentity, lifecycle: "accepting",
         activity: { reviewPresence: 0, codexTasks: 0, transientWork: 0, [blocker]: 1 },
       } }),
       shutdown: vi.fn(), waitForRetirement: vi.fn(), replaceAndReady: mutate,
-    })).rejects.toMatchObject({ reason: blocker === "reviewPresence" ? "review-presence" : "codex-task" });
+    })).rejects.toMatchObject({ reason: "preparation-required" });
     expect(mutate).not.toHaveBeenCalled();
   });
   it("retires the exact idle daemon before mutating a current app's hosts", async () => {
@@ -422,7 +422,7 @@ describe("independent host coordination", () => {
     await coordinateUpgrade({
       candidate: identity, installed: identity, operation: "host-setup",
       inspect: async () => ({ kind: "exact", status: {
-        protocolVersion: 1, daemonIdentity: identity.daemonIdentity, lifecycle: "accepting",
+        protocolVersion: 1, upgradePreparationVersion: 1, daemonIdentity: identity.daemonIdentity, lifecycle: "accepting",
         activity: { reviewPresence: 0, codexTasks: 0, transientWork: 0 },
       } }),
       shutdown: async () => { order.push("shutdown"); return { status: "accepted" }; },

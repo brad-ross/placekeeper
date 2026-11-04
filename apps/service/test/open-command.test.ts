@@ -403,6 +403,7 @@ describe("open command", () => {
         kind: "incompatible",
         status: {
           protocolVersion: MANAGEMENT_PROTOCOL_VERSION,
+          upgradePreparationVersion: 1,
           daemonIdentity: "a".repeat(64),
           lifecycle: "accepting",
           activity: { reviewPresence: 0, codexTasks: 0, transientWork: 0 },
@@ -427,6 +428,7 @@ describe("open command", () => {
         kind: "incompatible",
         status: {
           protocolVersion: MANAGEMENT_PROTOCOL_VERSION,
+          upgradePreparationVersion: 1,
           daemonIdentity: "a".repeat(64),
           lifecycle: "accepting",
           activity: { reviewPresence: 1, codexTasks: 0, transientWork: 0 },
@@ -435,7 +437,7 @@ describe("open command", () => {
       shutdown: vi.fn(),
       waitForRetirement: vi.fn(),
       replaceAndReady,
-    })).rejects.toMatchObject({ reason: "review-presence" });
+    })).rejects.toMatchObject({ reason: "preparation-required" });
     expect(replaceAndReady).not.toHaveBeenCalled();
 
     const order: string[] = [];
@@ -446,6 +448,7 @@ describe("open command", () => {
         kind: "incompatible",
         status: {
           protocolVersion: MANAGEMENT_PROTOCOL_VERSION,
+          upgradePreparationVersion: 1,
           daemonIdentity: "a".repeat(64),
           lifecycle: "accepting",
           activity: { reviewPresence: 0, codexTasks: 0, transientWork: 0 },
@@ -483,6 +486,7 @@ describe("open command", () => {
         kind: "incompatible",
         status: {
           protocolVersion: MANAGEMENT_PROTOCOL_VERSION,
+          upgradePreparationVersion: 1,
           daemonIdentity: "a".repeat(64),
           lifecycle: "accepting",
           activity: { reviewPresence: 0, codexTasks: 0, transientWork: 1 },
@@ -856,4 +860,18 @@ it("forwards explicit isolated installed smoke roots across child daemon startup
     flags.slice(0, -1),
   ]) expect(() => installedSmokeDaemonPaths(invalid)).toThrow();
   expect(installedSmokeDaemonArgs(defaultDaemonPaths())).toEqual([]);
+});
+
+describe("legacy installer retirement authority", () => {
+  it.each(["app-install", "host-setup"] as const)("refuses legacy retirement for %s before any shutdown or mutation", async operation => {
+    const candidate = { daemonIdentity: "a".repeat(64), installArtifactIdentity: "b".repeat(64) };
+    const installed = { ...candidate, installArtifactIdentity: operation === "host-setup" ? candidate.installArtifactIdentity : "c".repeat(64) };
+    const shutdown = vi.fn(async () => ({status:"accepted" as const}));
+    const retired = vi.fn(async () => {}), mutate = vi.fn(async () => {});
+    await expect(coordinateUpgrade({ operation, candidate, installed,
+      inspect:async()=>({kind:"exact",status:{protocolVersion:1,daemonIdentity:candidate.daemonIdentity,lifecycle:"accepting",activity:{reviewPresence:0,codexTasks:0,transientWork:0}}}),
+      shutdown,waitForRetirement:retired,replaceAndReady:mutate,
+    })).rejects.toThrow(/Quit the current app manually/u);
+    expect(shutdown).not.toHaveBeenCalled();expect(retired).not.toHaveBeenCalled();expect(mutate).not.toHaveBeenCalled();
+  });
 });

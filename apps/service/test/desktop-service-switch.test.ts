@@ -1,3 +1,6 @@
+import { createHash, randomUUID } from "node:crypto";
+import { createReviewState } from "../../../packages/core/src/review-model.js";
+import { DraftSnapshotStore, reviewStateDigest, type RecoverableDraftV3 } from "../src/recovery/draft-snapshot.js";
 import { createServer } from "node:net";
 import { lstat, mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -17,17 +20,18 @@ async function fixture() {
   await writeFile(join(resources, "runtime-manifest.json"), JSON.stringify({ daemonIdentity: "a".repeat(64), installArtifactIdentity: "b".repeat(64), recovery: { readableDraftSchemaVersions: [1, 2, 3], writtenDraftSchemaVersion: 3 } }));
   return { resources, backup: join(root, "backup"), receipt: join(root, "receipt"), paths: { appSupportRoot: root, recoveryRoot, socketPath: join(root, "control.sock"), webAssetsRoot: join(root, "web") } };
 }
-const status = (reviewPresence = 0) => ({ protocolVersion: 1, daemonIdentity: "c".repeat(64), lifecycle: "accepting", activity: { reviewPresence, codexTasks: 0, transientWork: 0 } });
+const status = (reviewPresence = 0) => ({ upgradePreparationVersion: 1 as const, protocolVersion: 1, daemonIdentity: "c".repeat(64), lifecycle: "accepting", activity: { reviewPresence, codexTasks: 0, transientWork: 0 } });
 beforeEach(() => vi.clearAllMocks());
 describe("explicit candidate service switching and rollback", () => {
   it("does not retire an incumbent with a live review", async () => {
     mocks.inspect.mockResolvedValue({ kind: "incompatible", status: status(1) });
-    await expect(switchDesktopService(await fixture())).rejects.toThrow("active reviews");
+    await expect(switchDesktopService(await fixture())).rejects.toMatchObject({ reason: "preparation-required" });
     expect(mocks.request).not.toHaveBeenCalled(); expect(mocks.ready).not.toHaveBeenCalled(); expect(mocks.release).toHaveBeenCalled();
   });
   it("backs up exact recovery before starting the selected service under the same lease", async () => {
-    const options = await fixture(); const snapshot = JSON.stringify({ payload: { schemaVersion: 3 } });
-    await writeFile(join(options.paths.recoveryRoot, "draft.json"), snapshot);
+    const options = await fixture();
+    await new DraftSnapshotStore(options.paths.recoveryRoot).persist(protectedSnapshot(false));
+    const snapshot = await readFile(join(options.paths.recoveryRoot, "draft.json"), "utf8");
     mocks.inspect.mockResolvedValue({ kind: "incompatible", status: status() });
     mocks.request.mockImplementation(async (_path, request) => {
       if (request.operation === "shutdown-if-idle") return { kind: "management", protocolVersion: 1, operation: "shutdown-if-idle", result: { status: "accepted" } };
@@ -40,9 +44,11 @@ describe("explicit candidate service switching and rollback", () => {
     expect(mocks.ready).toHaveBeenCalledOnce(); expect(mocks.release).toHaveBeenCalledOnce();
   });
   it("refuses rollback to a reader that cannot preserve a newer protected draft", async () => {
-    const options = await fixture(); await writeFile(join(options.paths.recoveryRoot, "draft.json"), JSON.stringify({ payload: { schemaVersion: 99 } }));
+    const options = await fixture();
+    const payload = { ...protectedSnapshot(false), schemaVersion:99 };
+    await writeFile(join(options.paths.recoveryRoot, "draft.json"), JSON.stringify({ payload, checksum:createHash("sha256").update(JSON.stringify(payload)).digest("hex") }));
     mocks.inspect.mockResolvedValue({ kind: "incompatible", status: status() });
-    await expect(switchDesktopService(options)).rejects.toThrow("cannot read protected recovery");
+    await expect(switchDesktopService(options)).rejects.toThrow("Unsupported protected recovery format");
     expect(mocks.request).not.toHaveBeenCalled(); expect(mocks.ready).not.toHaveBeenCalled();
   });
 });
@@ -137,8 +143,9 @@ it("keeps the installed service when the user refuses preparation", async () => 
   expect(mocks.request).not.toHaveBeenCalled(); expect(mocks.ready).not.toHaveBeenCalled();
 });
 it("explains the actual manual legacy save, close and end-task actions", async () => {
-  mocks.inspect.mockResolvedValue({ kind: "incompatible", status: status(1) });
-  await expect(switchDesktopService(await fixture())).rejects.toMatchObject({ reason: "review-presence", recoveryAction: expect.stringMatching(/Save PDFs and drafts.*browser\/editor tabs.*end bound Codex tasks/u) });
+  const { upgradePreparationVersion: _version, ...legacy } = status(1);
+  mocks.inspect.mockResolvedValue({ kind: "incompatible", status: legacy });
+  await expect(switchDesktopService(await fixture())).rejects.toThrow(/discard unfinished drafts.*save the PDFs.*close review.*end bound Codex tasks.*Quit the current app manually/u);
   expect(mocks.request).not.toHaveBeenCalled();
 });
 it("refuses replacement if drain finishes a recovery format the candidate cannot read", async () => {
@@ -154,4 +161,66 @@ it("refuses replacement if drain finishes a recovery format the candidate cannot
   await expect(switchDesktopService(options)).rejects.toThrow("unsupported format while draining");
   expect(mocks.ready).not.toHaveBeenCalled();
   expect(await lstat(options.backup).then(() => true, () => false)).toBe(false);
+});
+
+
+function protectedSnapshot(pending: boolean, revision = 1): RecoverableDraftV3 {
+  const initial = createReviewState({sessionId:randomUUID(),source:{fileId:"file_legacy_guard",digest:"d".repeat(64),byteLength:10}});
+  const now = new Date().toISOString();
+  const state = {...initial,revision,pendingDrafts:pending ? [{id:randomUUID(),ownerViewId:"view_legacy_guard",baseGeneration:1,revision:0,kind:"pageNote" as const,pageIndex:0,text:"unfinished protected input",anchor:{kind:"page" as const,pageIndex:0,rect:{x:1,y:1,width:2,height:2}},disposition:{kind:"resolved" as const,generation:1},status:"protected" as const,createdAt:now,updatedAt:now}] : []};
+  return {schemaVersion:3,source:{disposition:"local",canonicalSourcePath:"/fixture/paper.pdf",sourceSnapshotPath:"/fixture/source.pdf",displayName:"paper.pdf"},state,acknowledgedAt:now,destination:{phase:"none",generation:0},sync:{phase:"clean",desiredRevision:revision,savedRevision:revision,desiredDigest:reviewStateDigest(state),savedDigest:reviewStateDigest(state)}};
+}
+function idleLegacyTransport() {
+  const { upgradePreparationVersion: _version, ...legacy } = status();
+  mocks.inspect.mockResolvedValue({kind:"incompatible",status:legacy});
+  mocks.request.mockImplementation(async (_path,request)=>{
+    if(request.operation==="shutdown-if-idle")return {kind:"management",protocolVersion:1,operation:"shutdown-if-idle",result:{status:"accepted"}};
+    throw Object.assign(Error("retired"),{code:"ENOENT"});
+  });
+}
+it("refuses legacy shutdown before sending control when clean recovery holds protected unfinished input",async()=>{
+  const options=await fixture(),directory=join(options.paths.recoveryRoot,"legacy-session"),store=new DraftSnapshotStore(directory);
+  await store.persist(protectedSnapshot(true));await writeFile(join(directory,".draft-live.tmp"),"live legacy staging");
+  const before=await readFile(store.currentPath,"utf8");idleLegacyTransport();
+  await expect(switchDesktopService(options)).rejects.toThrow(/unfinished drafts/u);
+  expect(mocks.request).not.toHaveBeenCalled();expect(mocks.ready).not.toHaveBeenCalled();
+  expect(await readFile(store.currentPath,"utf8")).toBe(before);expect(await readFile(join(directory,".draft-live.tmp"),"utf8")).toBe("live legacy staging");
+});
+it("allows saved current state even when its stale previous snapshot contains a draft",async()=>{
+  const options=await fixture(),store=new DraftSnapshotStore(join(options.paths.recoveryRoot,"legacy-session"));
+  await store.persist(protectedSnapshot(true,1));await store.persist(protectedSnapshot(false,2));idleLegacyTransport();
+  mocks.inspect.mockResolvedValue({kind:"incompatible",status:status()});
+  await switchDesktopService(options);expect(mocks.ready).toHaveBeenCalledOnce();
+});
+it("uses valid previous recovery when current is corrupt without cleaning or changing its records",async()=>{
+  const options=await fixture(),store=new DraftSnapshotStore(join(options.paths.recoveryRoot,"legacy-session"));
+  await store.persist(protectedSnapshot(true,1));await store.persist(protectedSnapshot(false,2));await writeFile(store.currentPath,"{torn");idleLegacyTransport();
+  mocks.inspect.mockResolvedValue({kind:"incompatible",status:status()});
+  await switchDesktopService(options);expect(mocks.ready).toHaveBeenCalledOnce();
+  expect(await readFile(store.currentPath,"utf8")).toBe("{torn");
+  expect(await readFile(join(options.backup,"legacy-session","draft.previous.json"),"utf8")).toBe(await readFile(store.previousPath,"utf8"));
+});
+it("refuses corrupt current and previous recovery records before selecting an absent service",async()=>{
+  const options=await fixture(),store=new DraftSnapshotStore(join(options.paths.recoveryRoot,"legacy-session"));
+  await store.persist(protectedSnapshot(false));await writeFile(store.currentPath,"{torn");await writeFile(store.previousPath,"{also torn");mocks.inspect.mockRejectedValue(Object.assign(Error("absent"),{code:"ENOENT"}));
+  await expect(switchDesktopService(options)).rejects.toThrow(/recovery.*invalid/iu);expect(mocks.request).not.toHaveBeenCalled();
+});
+it("refuses unknown checksum-valid current recovery even with a valid older snapshot",async()=>{
+  const options=await fixture(),store=new DraftSnapshotStore(join(options.paths.recoveryRoot,"legacy-session"));
+  await store.persist(protectedSnapshot(false));await store.persist(protectedSnapshot(false,2));
+  const payload={...protectedSnapshot(false,3),schemaVersion:99};await writeFile(store.currentPath,JSON.stringify({payload,checksum:createHash("sha256").update(JSON.stringify(payload)).digest("hex")}));mocks.inspect.mockRejectedValue(Object.assign(Error("absent"),{code:"ENOENT"}));
+  await expect(switchDesktopService(options)).rejects.toThrow(/unsupported.*recovery/iu);expect(mocks.request).not.toHaveBeenCalled();
+});
+it("fails closed on the missing-current rotation interval rather than guessing from an older record",async()=>{
+  const options=await fixture(),store=new DraftSnapshotStore(join(options.paths.recoveryRoot,"legacy-session"));
+  await store.persist(protectedSnapshot(false));await import('node:fs/promises').then(fs=>fs.rename(store.currentPath,store.previousPath));mocks.inspect.mockRejectedValue(Object.assign(Error("absent"),{code:"ENOENT"}));
+  await expect(switchDesktopService(options)).rejects.toThrow(/recovery.*changed/iu);expect(mocks.request).not.toHaveBeenCalled();
+});
+it.each([false,true])("never asks a legacy daemon to shut down even when recovery is clean (snapshot exists: %s)",async(hasSnapshot)=>{
+  const options=await fixture();
+  if(hasSnapshot)await new DraftSnapshotStore(join(options.paths.recoveryRoot,"legacy-session")).persist(protectedSnapshot(false));
+  idleLegacyTransport();
+  await expect(switchDesktopService(options)).rejects.toThrow(/quit.*manually/iu);
+  expect(mocks.request).not.toHaveBeenCalled();expect(mocks.ready).not.toHaveBeenCalled();
+  expect(await lstat(options.backup).then(()=>true,()=>false)).toBe(false);
 });

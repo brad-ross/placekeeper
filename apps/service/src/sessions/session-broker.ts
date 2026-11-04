@@ -883,7 +883,7 @@ export class SessionBroker {
       if (adopted.sourceIdentity !== undefined) {
         const drafts = await this.#recoverableDrafts();
         const matches = drafts.filter((draft) =>
-          (draft.sync.phase !== "clean" || draft.chromeProtected === true || (draft.interactionReceipts?.length ?? 0) > 0) &&
+          (draft.state.pendingDrafts.length > 0 || draft.sync.phase !== "clean" || draft.chromeProtected === true || (draft.interactionReceipts?.length ?? 0) > 0) &&
           draft.source.disposition === "remote-temporary" &&
           draft.source.sourceIdentity === adopted.sourceIdentity &&
           draft.source.digest === adopted.sha256 &&
@@ -1023,7 +1023,7 @@ export class SessionBroker {
     const drafts = await this.#recoverableDrafts();
     const identityMatches = drafts.filter(
       (draft) =>
-        (draft.sync.phase !== "clean" || draft.chromeProtected === true || (draft.interactionReceipts?.length ?? 0) > 0) &&
+        (draft.state.pendingDrafts.length > 0 || draft.sync.phase !== "clean" || draft.chromeProtected === true || (draft.interactionReceipts?.length ?? 0) > 0) &&
         ((draft.state.workflow.mode === "generated-output" &&
           this.#draftCanonicalPath(draft) === approvedFile.canonicalPath) ||
           ((draft.source.disposition === "local" ||
@@ -1764,7 +1764,7 @@ export class SessionBroker {
       const hasView = this.#presentations.hasView(sessionId);
       if (
         session?.sourceOwnership.disposition === "remote-temporary" &&
-        session.sync.phase === "clean" && session.interactionReceipts.length === 0 && !stillScoped && !hasView
+        session.sync.phase === "clean" && session.state.pendingDrafts.length === 0 && session.interactionReceipts.length === 0 && !stillScoped && !hasView
       ) void this.#end(sessionId).catch(() => undefined);
     }
     this.#presentations.expireReconnects(now);
@@ -3888,7 +3888,7 @@ export class SessionBroker {
       const clean = session.sync.phase === "clean" &&
         session.sync.savedRevision === session.sync.desiredRevision &&
         session.sync.savedDigest === session.sync.desiredDigest;
-      if (clean && !session.chromeProtected && session.interactionReceipts.length === 0) await session.store.remove();
+      if (clean && session.state.pendingDrafts.length === 0 && !session.chromeProtected && session.interactionReceipts.length === 0) await session.store.remove();
     }));
     for (const session of sessions) {
       this.capabilities.revokeFile(session.fileId);

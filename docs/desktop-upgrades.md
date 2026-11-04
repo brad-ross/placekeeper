@@ -16,9 +16,9 @@ The Debian package stages immutable root-owned versions. Each user switches on t
 
 The public app's identity is **Placekeeper**, bundle ID `local.placekeeper`, executable `PlacekeeperMac`; it is not an Electron build with an old version label. Before retrying its upgrade:
 
-1. Save/export the review work you want to keep and resolve open edits or dialogs.
+1. Apply each unfinished annotation you want to keep, then save/export the PDF. Explicitly discard only edits you do not want. A saved PDF indicator does not establish that unfinished annotation text is saved: public 0.2.4 can delete that text during shutdown.
 2. Close Placekeeper windows and browser/editor review surfaces. End bound Codex tasks; closing a panel alone can leave an active task, so fully quit the host if necessary.
-3. Quit the old Mac app and wait for its review/task leases to drain. Retry the supported installer when the old protocol can establish idle retirement.
+3. Quit the old Mac app after those steps and wait for its service to retire. The new installer refuses to shut down a running legacy service; retry after the old service has exited.
 
 The legacy native close path cannot acknowledge renderer settlement, so automatic safe closure is not claimed. If the installer still reports active or unknown work, follow the diagnostic and preserve the old installation. Its support root `~/Library/Application Support/Placekeeper` and compatibility launchers are preserved. Validated window-restoration and interface-zoom preferences are imported once without replacing existing Electron preferences; the original preference file remains.
 

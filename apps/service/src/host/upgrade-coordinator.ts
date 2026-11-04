@@ -41,6 +41,15 @@ export function upgradeReason(activity: DaemonAggregateActivity):
   return undefined;
 }
 
+/** Legacy put-draft can finish after any snapshot inspection but before its
+ * shutdown GC, which deletes clean snapshots without checking unfinished input.
+ * Neither saved/clean status nor a read-only disk scan can authorize closure. */
+export function requireCoordinatedRetirement(status: Pick<import("./control-protocol.js").DaemonManagementStatus, "upgradePreparationVersion">): void {
+  if (status.upgradePreparationVersion !== 1) {
+    throw new Error("This running Placekeeper version cannot safely be closed by the installer. In the current app, apply or explicitly discard unfinished drafts, save the PDFs, close review windows and browser/editor tabs, and end bound Codex tasks. Quit the current app manually, then retry after its service has stopped. The installer has not requested shutdown, copied live recovery, or changed the current app.");
+  }
+}
+
 /** Pure ordering boundary shared by the source installer and its tests. */
 export async function coordinateUpgrade(
   options: CoordinateUpgradeOptions,
@@ -56,14 +65,15 @@ export async function coordinateUpgrade(
   }
   if (canSkipMutation && inspected.kind === "exact" && artifactIsIdentical) return { status: "noop" };
   if (inspected.kind !== "absent") {
+    requireCoordinatedRetirement(inspected.status);
     let preparation: UpgradeAttemptCredentials | undefined;
     const reason = upgradeReason(inspected.status.activity);
     if (reason !== undefined && reason !== "transient-busy") {
-      if (inspected.status.upgradePreparationVersion === 1 && options.prepare) {
+      if (options.prepare) {
         preparation = await options.prepare(inspected.status, options.candidate);
         if (preparation.candidate.daemonIdentity !== options.candidate.daemonIdentity || preparation.candidate.installArtifactIdentity !== options.candidate.installArtifactIdentity) throw new Error("Upgrade preparation authorized a different candidate");
       }
-      else throw new DaemonUpgradeRequiredError(inspected.status.upgradePreparationVersion === 1 ? "preparation-required" : reason, inspected.status.upgradePreparationVersion !== 1);
+      else throw new DaemonUpgradeRequiredError("preparation-required");
     }
     const deadline = Date.now() + (options.retryDurationMs ?? 5_000);
     while (true) {
@@ -96,8 +106,9 @@ export async function coordinateServiceSwitch(options: CoordinateServiceSwitchOp
   const inspected = await options.inspect();
   if (inspected.kind === "uninspectable") throw new DaemonUpgradeRequiredError(inspected.reason);
   if (inspected.kind !== "absent") {
+    requireCoordinatedRetirement(inspected.status);
     const reason = upgradeReason(inspected.status.activity);
-    if (reason !== undefined && reason !== "transient-busy" && !(inspected.status.upgradePreparationVersion === 1 && options.prepare)) throw new DaemonUpgradeRequiredError(inspected.status.upgradePreparationVersion === 1 ? "preparation-required" : reason, inspected.status.upgradePreparationVersion !== 1);
+    if (reason !== undefined && reason !== "transient-busy" && !options.prepare) throw new DaemonUpgradeRequiredError("preparation-required");
   }
   if (!await options.recoveryCompatible()) throw new Error("The selected service cannot read protected recovery");
   await coordinateUpgrade({

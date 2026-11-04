@@ -1,8 +1,9 @@
+import { inspectProtectedDraft } from "../recovery/draft-snapshot.js";
 import { ensurePrivateDirectory } from '../platform/private-storage.js';
 import { readFile, readdir, lstat } from "node:fs/promises";
 import { dirname, join, isAbsolute } from "node:path";
 import { acquireLifecycleLock } from "../host/lifecycle-lock.js";
-import { backupRecoveryAndVerify, coordinateServiceSwitch } from "../host/upgrade-coordinator.js";
+import { backupRecoveryAndVerify, coordinateServiceSwitch, requireCoordinatedRetirement } from "../host/upgrade-coordinator.js";
 import { defaultDaemonPaths, daemonUnavailable, ensureServiceDaemonReady, type DaemonPaths } from "../host/service-daemon.js";
 import { inspectDaemonCompatibility, managementShutdownResult, requestControl, MANAGEMENT_PROTOCOL_VERSION, DaemonUpgradeRequiredError, PlacekeeperControlProtocolError } from "../host/launch-control.js";
 import { resolvePackagedRuntime, type PackagedRuntimeManifest } from "../platform/runtime-layout.js";
@@ -13,13 +14,17 @@ async function recoveryVersions(root: string): Promise<Set<number>> {
     const info = await lstat(path).catch((error: NodeJS.ErrnoException) => { if (error.code === "ENOENT") return undefined; throw error; });
     if (info === undefined) return;
     if (!info.isDirectory()) throw new Error("Recovery inspection refuses links and special files");
+    const snapshot = await inspectProtectedDraft(path);
+    if (snapshot) {
+      versions.add(snapshot.schemaVersion);
+    }
     for (const entry of await readdir(path, { withFileTypes: true })) {
       const child = join(path, entry.name);
       if (entry.isDirectory()) await walk(child);
       else if (entry.isFile()) {
         // Every recovery snapshot has a checksummed payload. Companion data is
         // copied too; unknown snapshot versions must prevent a writer switch.
-        if (!entry.name.endsWith(".json")) continue;
+        if (!entry.name.endsWith(".json") || entry.name === "draft.json" || entry.name === "draft.previous.json") continue;
         const value = JSON.parse(await readFile(child, "utf8")) as { payload?: { schemaVersion?: unknown } };
         if (value.payload !== undefined) {
           if (!Number.isSafeInteger(value.payload.schemaVersion)) throw new Error("Unknown protected recovery format");
@@ -51,7 +56,11 @@ export async function switchDesktopService(options: {
       candidate: manifest,
       ...(options.prepare === undefined ? {} : { prepare: options.prepare }),
       inspect: async () => {
-        try { return await inspectDaemonCompatibility(paths.socketPath, manifest.daemonIdentity); }
+        try {
+          const inspected = await inspectDaemonCompatibility(paths.socketPath, manifest.daemonIdentity);
+          if (inspected.kind === "exact" || inspected.kind === "incompatible") requireCoordinatedRetirement(inspected.status);
+          return inspected;
+        }
         catch (error) {
           // ECONNREFUSED with an existing endpoint is not proof of retirement.
           if ((error as NodeJS.ErrnoException).code === "ENOENT") return { kind: "absent" };

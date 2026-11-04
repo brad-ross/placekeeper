@@ -4,6 +4,7 @@ import { publishFile, syncPublishedFile } from "../platform/file-publication.js"
 import { createHash, randomUUID } from "node:crypto";
 import {
   chmod,
+  lstat,
   readdir,
   readFile,
   rm,
@@ -301,14 +302,24 @@ function validInteractionReceipts(value: unknown): boolean {
     ((entry as { reviewRevision: number }).reviewRevision >= 0));
 }
 
-function parse(contents: string): RecoverableDraftV3 | undefined {
+export interface InspectedRecoverySnapshot {
+  readonly schemaVersion: number;
+  readonly draft: RecoverableDraftV3;
+}
+class UnsupportedRecoveryFormatError extends Error {}
+
+function parse(contents: string, rejectUnsupported = false): InspectedRecoverySnapshot | undefined {
   try {
     const envelope = JSON.parse(contents) as SnapshotEnvelope;
     const payload = JSON.stringify(envelope.payload);
     const checksum = createHash("sha256").update(payload).digest("hex");
+    if (checksum !== envelope.checksum) return undefined;
+    if (!(RECOVERY_CAPABILITIES.readableDraftSchemaVersions as readonly number[]).includes(envelope.payload.schemaVersion)) {
+      if (rejectUnsupported) throw new UnsupportedRecoveryFormatError("Unsupported protected recovery format; keep the current app and recovery unchanged");
+      return undefined;
+    }
     if (
-      checksum !== envelope.checksum ||
-      !(RECOVERY_CAPABILITIES.readableDraftSchemaVersions as readonly number[]).includes(envelope.payload.schemaVersion) ||
+      (envelope.payload.state.pendingDrafts !== undefined && !Array.isArray(envelope.payload.state.pendingDrafts)) ||
       (envelope.payload.schemaVersion === 3 && (
         !validV3Source(envelope.payload.source) ||
         !validNativeAnnotationLedger(envelope.payload.nativeAnnotationLedger) ||
@@ -322,15 +333,50 @@ function parse(contents: string): RecoverableDraftV3 | undefined {
     ) {
       return undefined;
     }
-    return migrateRecoverableDraft(envelope.payload);
-  } catch {
+    return { schemaVersion: envelope.payload.schemaVersion, draft: migrateRecoverableDraft(envelope.payload) };
+  } catch (error) {
+    if (error instanceof UnsupportedRecoveryFormatError) throw error;
     return undefined;
   }
 }
 
+/** Inspect live legacy recovery without initializing, migrating files, changing
+ * permissions, or collecting its temporary writes. Current wins when valid;
+ * a corrupt current record falls back to the valid previous generation. */
+export async function inspectProtectedDraft(directory: string): Promise<InspectedRecoverySnapshot | undefined> {
+  async function readRecord(name: string): Promise<{ snapshot?: InspectedRecoverySnapshot } | undefined> {
+    const path = join(directory, name);
+    const before = await lstat(path).catch((error: NodeJS.ErrnoException) => {
+      if (error.code === "ENOENT") return undefined;
+      throw error;
+    });
+    if (!before) return undefined;
+    if (!before.isFile() || before.isSymbolicLink()) throw new Error("Protected recovery inspection refuses links and special files");
+    let contents: string;
+    let after: Awaited<ReturnType<typeof lstat>>;
+    try { contents = await readFile(path, "utf8"); after = await lstat(path); }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") throw new Error("Protected recovery changed during inspection; let the current app settle and retry", { cause:error });
+      throw error;
+    }
+    if (before.dev !== after.dev || before.ino !== after.ino || before.size !== after.size || before.mtimeMs !== after.mtimeMs) throw new Error("Protected recovery changed during inspection; let the current app settle and retry");
+    const snapshot = parse(contents, true);
+    return snapshot ? { snapshot } : {};
+  }
+  const current = await readRecord("draft.json");
+  if (current?.snapshot) return current.snapshot;
+  const previous = await readRecord("draft.previous.json");
+  // A live writer rotates current to previous before publishing its successor.
+  // An absent current cannot prove that older state is safe to close.
+  if (!current && previous) throw new Error("Protected recovery changed or has no current record; let the current app settle and retry");
+  if (previous?.snapshot) return previous.snapshot;
+  if (current || previous) throw new Error("Protected recovery records are invalid; keep the current app and recovery unchanged");
+  return undefined;
+}
+
 async function readValid(path: string): Promise<RecoverableDraftV3 | undefined> {
   try {
-    return parse(await readFile(path, "utf8"));
+    return parse(await readFile(path, "utf8"))?.draft;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
       return undefined;
