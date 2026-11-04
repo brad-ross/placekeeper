@@ -5,7 +5,7 @@ import { NativeQualificationControls } from "../../service/src/codex/native-qual
 import { QUALIFICATION_CONTROLS_META_KEY, type QualificationControlGrant } from "./qualification-controls-contract.js";
 import { NativeQualificationObserver } from "../../service/src/codex/native-qualification.js";
 import { defaultDaemonPaths } from "../../service/src/host/service-daemon.js";
-import { readFile } from "node:fs/promises";
+import { readFile, realpath } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
@@ -84,6 +84,6 @@ export async function startStdioServer(): Promise<void> {
     experiments: new NativeQualificationExperiments(defaultDaemonPaths().appSupportRoot),
   }).connect(new StdioServerTransport());
 }
-if (process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (process.argv[1] !== undefined && await realpath(process.argv[1]).catch(() => undefined) === await realpath(fileURLToPath(import.meta.url))) {
   await startStdioServer().catch(() => { process.stderr.write("Placekeeper MCP failed to initialize; reinstall the matching app and plugin.\n"); process.exitCode = 1; });
 }

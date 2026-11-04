@@ -1,5 +1,5 @@
 import { execFile, spawn, type ChildProcess } from 'node:child_process';
-import { access, copyFile, writeFile } from 'node:fs/promises';
+import { access, copyFile, realpath, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { delimiter, dirname, join, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -101,7 +101,7 @@ export class InstalledCandidate {
   /** Inspect only the executable and unique isolated-root pair owned by this test. */
   async ownedColdAppPids(): Promise<number[]> {
     if (!this.ownsColdApp) throw new Error('Cold process ownership was not established');
-    const executable = candidateExecutable();
+    const executable = await realpath(candidateExecutable());
     if (process.platform === 'win32') {
       const powershell = join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
       const script = '$ErrorActionPreference = "Stop"; @(Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -eq $env:PK_TEST_EXECUTABLE -and $_.CommandLine -and $_.CommandLine.Contains($env:PK_TEST_ROOT) -and $_.CommandLine -notmatch "--type=" } | Select-Object -ExpandProperty ProcessId) | ConvertTo-Json -Compress';
