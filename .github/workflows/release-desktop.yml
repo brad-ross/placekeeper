@@ -1,0 +1,80 @@
+name: Publish desktop release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Stable candidate version without v
+        required: true
+        type: string
+      commit:
+        description: Full candidate source commit
+        required: true
+        type: string
+      candidate_run:
+        description: Successful Desktop installer candidate workflow run ID
+        required: true
+        type: string
+      notes:
+        description: Reviewed public release notes
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: placekeeper-release-publication
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.ref == 'refs/heads/main' && github.repository == 'brad-ross/placekeeper'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      actions: read
+    env:
+      VERSION: ${{ inputs.version }}
+      COMMIT: ${{ inputs.commit }}
+      CANDIDATE_RUN: ${{ inputs.candidate_run }}
+      RELEASE_NOTES: ${{ inputs.notes }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.16.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.22.1
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Verify trusted complete candidate provenance
+        shell: bash
+        run: |
+          node --input-type=module <<'JS'
+          import { execFileSync } from 'node:child_process';
+          const id = process.env.CANDIDATE_RUN;
+          if (!/^\d+$/.test(id) || !/^[a-f0-9]{40}$/.test(process.env.COMMIT)) throw Error('Invalid candidate identity');
+          const result = JSON.parse(execFileSync('gh', ['api', `repos/brad-ross/placekeeper/actions/runs/${id}`]));
+          if (result.conclusion !== 'success' || result.status !== 'completed' || result.head_sha !== process.env.COMMIT || result.head_branch !== 'main' || result.event !== 'workflow_dispatch' || result.path !== '.github/workflows/desktop-candidate.yml') throw Error('Native candidate workflow did not succeed at the approved commit');
+          JS
+      - uses: actions/download-artifact@v4
+        with:
+          name: placekeeper-complete-candidate
+          path: artifacts/trusted-candidate
+          run-id: ${{ inputs.candidate_run }}
+          github-token: ${{ github.token }}
+          repository: brad-ross/placekeeper
+      - name: Download staged exact bytes
+        shell: bash
+        run: |
+          mkdir -p artifacts/complete
+          gh release download "v$VERSION" --repo brad-ross/placekeeper --dir artifacts/complete
+      - name: Publish complete candidate once and verify anonymous downloads
+        run: pnpm exec tsx scripts/desktop-release.ts publish "$VERSION" "$COMMIT" "$CANDIDATE_RUN" artifacts/complete artifacts/trusted-candidate

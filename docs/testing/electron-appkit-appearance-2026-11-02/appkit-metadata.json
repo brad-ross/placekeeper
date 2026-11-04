@@ -1,0 +1,36 @@
+{
+  "app": "Paired Appearance.app",
+  "source": "Paired synthetic PDF.pdf",
+  "fixtureSha256": "63a501448978032a29e09263839edf54849713888644d4b4f8195dff88d48bd7",
+  "identity": {
+    "managementProtocolVersion": 1,
+    "daemonIdentity": "b4067d39c5ffbd391726887a54b45a999255ed792606b391e5269e8a2e237c37",
+    "installArtifactIdentity": "5e3b618184a252b6547c7f17ee76972e1143304ee6832fb6f5904a8a28d19302"
+  },
+  "executableSha256": "1c395855a1ca8d8e0322aa4b465fd734fd2d27f85d756a245b44e7425157ab6a",
+  "originalExecutable": "dist/retained-mac-qualification-final/Placekeeper.app/Contents/MacOS/PlacekeeperMac",
+  "changes": "Only copied bundle identifier and URL/document registration metadata changed; executable/resources unchanged; private HOME and service root.",
+  "rendererAssetHashes": {
+    "assets/pdfium-worker.js": "4463487ece74309901036d06584c7296509eba9b26ff67d9154e32dfc8d04b5a",
+    "assets/recovery.css": "5d8b68b19f08d4a1499844baaf47d5f505c8955daea6b4c151ba26fce33c8206",
+    "assets/recovery.js": "4a3f639a96724a260f0459fa6422ce57eef159efb3a96950d929fd01b80814c1",
+    "assets/shell.css": "bd8d08c6f7d1820f0079970992ab08c1a352e5cfff01ee2f19c7c3209f70c019",
+    "assets/shell.js": "857eb7b710f75a6c70b4c420bb48ca1e5fa4e33cffc44afd41bd5862f60e57ba",
+    "macos.html": "04dec1ddb2800bda07b7580addb4bb8b96b2871d56e280ee51abb0f335f465da",
+    "recovery.html": "724fe550c3c3efc169ef596bfdf759af21f4d2bbba8c43b54a017bc0c3c2a905"
+  },
+  "capture": {
+    "format": "JPEG",
+    "pixelWidth": 2400,
+    "pixelHeight": 1528,
+    "pointWidth": 1200,
+    "pointHeight": 764,
+    "scale": 2,
+    "page": 1,
+    "pageCount": 6,
+    "zoomPercent": 179,
+    "workspace": "closed",
+    "interaction": "untouched initial layout",
+    "windowState": "inactive"
+  }
+}

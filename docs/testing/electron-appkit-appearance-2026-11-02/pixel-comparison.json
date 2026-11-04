@@ -1,0 +1,56 @@
+{
+  "sizes": {
+    "appkit": [
+      2400,
+      1528
+    ],
+    "electron": [
+      2400,
+      1528
+    ]
+  },
+  "regions": [
+    {
+      "name": "whole-capture",
+      "x": 0,
+      "y": 0,
+      "w": 2400,
+      "h": 1528,
+      "totalPixels": 3667200,
+      "nonidenticalPixels": 292551,
+      "pixelsWithChannelDifferenceOver16": 118598,
+      "meanAbsoluteChannelDifference": 4.445155431937173
+    },
+    {
+      "name": "shared-document-viewport",
+      "x": 150,
+      "y": 150,
+      "w": 2100,
+      "h": 1300,
+      "totalPixels": 2730000,
+      "nonidenticalPixels": 185945,
+      "pixelsWithChannelDifferenceOver16": 112140,
+      "meanAbsoluteChannelDifference": 5.5830717948717945
+    }
+  ],
+  "translatedDocumentInkComparison": {
+    "dx": 0,
+    "dy": -4,
+    "iou": 0.8653038847117794,
+    "intersection": 55241,
+    "union": 63840,
+    "region": {
+      "x": 300,
+      "y": 200,
+      "width": 1900,
+      "height": 900
+    },
+    "threshold": 128,
+    "onePixelTolerance": {
+      "appkitInkPixels": 59627,
+      "electronInkPixels": 59454,
+      "appkitCoverage": 0.9999496872222315,
+      "electronCoverage": 1
+    }
+  }
+}

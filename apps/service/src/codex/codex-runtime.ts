@@ -1,3 +1,4 @@
+import type { UpgradeReviewStatus } from "../../../../packages/core/src/upgrade-review-protocol.js";
 import { ReviewExportConflictError } from "../../../../packages/core/src/review-runtime-protocol.js";
 import type { NativeQualificationExperiments } from "./native-qualification-experiments.js";
 import type { NativeQualificationObserver } from "./native-qualification.js";
@@ -66,6 +67,7 @@ export class CodexRuntimeManager {
   #closing = false;
   readonly #launches = new Map<string, Launch>();
   readonly #panels = new Map<string, Panel>();
+  readonly #upgradeClosures = new Map<string, { attemptId: string; generation: number; capabilityHash: string; taskHash: string; status: UpgradeReviewStatus }>();
   // A restart ticket cannot revive a detached/expired panel in its issuing process.
   readonly #seenRuntimes = new Map<string, number>();
   readonly #prompts = new Map<string, {
@@ -434,6 +436,12 @@ export class CodexRuntimeManager {
     if (request === undefined) return denied("invalid");
     if (request.authority === "pending") return this.pending(request);
     if (request.authority === "reconnect") return this.stageReconnect(request);
+    const closure = this.#upgradeClosures.get(request.runtimeId);
+    if (closure && request.authority === 'presentation' && request.attemptId === closure.attemptId && request.generation === closure.generation && digestSecretHex(request.capability) === closure.capabilityHash) {
+      if (request.method === 'upgradePoll') return { status: 'ok', payload: closure.status };
+      if (request.method === 'detach') { this.#upgradeClosures.delete(request.runtimeId); return { status: 'ok', payload: {} }; }
+      return denied('revoked');
+    }
     const scope = this.resolveActive(request);
     if (scope === undefined) return denied("revoked");
     const panel = this.#panels.get(scope.runtimeId)!;
@@ -695,6 +703,7 @@ export class CodexRuntimeManager {
   revokeTask(taskSessionId: string): Promise<void> {
     return this.#serialize(async () => {
       this.#prompts.delete(digestSecretHex(taskSessionId));
+      for (const [id, closure] of this.#upgradeClosures) if (closure.taskHash === digestSecretHex(taskSessionId)) this.#upgradeClosures.delete(id);
       this.#broker.taskBindings.revokeTask(taskSessionId);
       for (const [id, panel] of this.#panels) {
         if (
@@ -744,6 +753,7 @@ export class CodexRuntimeManager {
   }
 
   dispose(): void {
+    this.#upgradeClosures.clear();
     this.#disposed = true;
     clearInterval(this.#leaseTimer);
     this.#unsubscribe();
@@ -759,9 +769,25 @@ export class CodexRuntimeManager {
     this.#seenRuntimes.clear();
   }
 
+  upgradeCovered(has: (id: string) => boolean): boolean {
+    return this.#upgradeClosures.size === 0 && this.#launches.size === 0 && [...this.#panels.entries()].every(([id, panel]) => panel.attested && panel.ready && has(`codex:${id}`));
+  }
+
+  async closeForUpgrade(status: UpgradeReviewStatus): Promise<void> {
+    if (status.phase !== 'committed') throw new Error('Global preparation must commit before retiring task authority');
+    await Promise.all([...this.#requests]);
+    for (const [id, panel] of this.#panels) if (panel.active) this.#upgradeClosures.set(id, {
+      attemptId: panel.active.attemptId, generation: panel.active.generation,
+      capabilityHash: digestSecretHex(panel.active.presentationCapability), taskHash: digestSecretHex(panel.launch.owner!), status,
+    });
+    await Promise.all([...this.#panels.keys()].map(id => this.detach(id)));
+    this.#launches.clear();
+    this.#prompts.clear();
+  }
+
   activityCount(): number {
     this.#sweep();
-    return this.#panels.size + this.#launches.size;
+    return this.#panels.size + this.#launches.size + this.#upgradeClosures.size;
   }
 
   #binding(panel: Panel) {

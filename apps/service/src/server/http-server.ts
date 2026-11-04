@@ -1,3 +1,5 @@
+import type { UpgradeReviewParticipants } from "../host/upgrade-review-participants.js";
+import { isUpgradeReviewSettlement } from "../../../../packages/core/src/upgrade-review-protocol.js";
 import {
   ReviewExportConflictError,
   isReadingLocationResolutionRequest,
@@ -304,6 +306,8 @@ export interface WebAssetOptions {
 }
 
 export interface LocalHttpServerOptions {
+  readonly upgradeParticipants?: UpgradeReviewParticipants;
+  readonly protectUpgradeReview?: (sessionId: string) => Promise<void>;
   readonly port?: number;
   readonly webAssets?: WebAssetOptions;
   readonly saving?: Pick<
@@ -311,7 +315,7 @@ export interface LocalHttpServerOptions {
     "proposal" | "chooseCopyFilename" | "chooseFolder" | "chooseOriginal" | "requestSave" | "retry" | "locate"
   >;
   readonly exporting?: Pick<ExportCoordinator, "exportReviewedCopy">;
-  readonly lifecycle?: Pick<DaemonLifecycleCoordinator, "enterActivity">;
+  readonly lifecycle?: Pick<DaemonLifecycleCoordinator, "enterActivity" | "admissionAllowed">;
 }
 
 export interface LocalHttpServer {
@@ -329,6 +333,7 @@ export async function startHttpServer(
   const webAssetRoot = options.webAssets === undefined
     ? undefined
     : await realpath(options.webAssets.root);
+  const upgradeAttachments = new Map<string, { sessionId: string; credential: string; attachment: ReviewInteractionAttachment }>();
   const assetCapabilities = new Map<string, Set<string>>();
   const serveWebAsset = async (response: ServerResponse, assetName: string): Promise<void> => {
     if (webAssetRoot === undefined) {
@@ -352,7 +357,11 @@ export async function startHttpServer(
     response.end(bytes);
   };
   const server = createServer(async (request, response) => {
-    const activity = options.lifecycle?.enterActivity();
+    let admissionPath: string;
+    try { admissionPath = new URL(request.url ?? "/", origin).pathname; }
+    catch { send(response, 400, "Invalid request URL"); return; }
+    const admitsReview = /\/(?:bootstrap|exchange|resume|reopen)$/u.test(admissionPath);
+    const activity = options.lifecycle?.enterActivity({ settlement: !admitsReview });
     if (options.lifecycle !== undefined && activity === undefined) {
       send(response, 503, "Placekeeper is restarting; retry shortly.");
       return;
@@ -656,12 +665,13 @@ export async function startHttpServer(
         return;
       }
 
+      const upgradeMatch = new RegExp(`^/s/(${UUID})/upgrade/(poll|settle)$`, "u").exec(pathname);
       const stateMatch = new RegExp(`^/s/(${UUID})/state$`, "u").exec(pathname);
       const runtimeStateMatch = new RegExp(`^/s/(${UUID})/runtime-state$`, "u").exec(pathname);
       const scopeMatch = new RegExp(`^/s/(${UUID})/scope$`, "u").exec(pathname);
       const documentMatch = new RegExp(`^/s/(${UUID})/document/(${UUID})$`, "u").exec(pathname);
       const authenticatedSessionId =
-        stateMatch?.[1] ?? runtimeStateMatch?.[1] ?? scopeMatch?.[1] ?? documentMatch?.[1] ?? commandMatch?.[1] ??
+        upgradeMatch?.[1] ?? stateMatch?.[1] ?? runtimeStateMatch?.[1] ?? scopeMatch?.[1] ?? documentMatch?.[1] ?? commandMatch?.[1] ??
         saveMatch?.[1] ?? exportMatch?.[1] ?? readingLocationMatch?.[1] ?? observeMatch?.[1] ?? staleMatch?.[1] ?? syncTexMatch?.[1] ?? interactionMatch?.[1];
       if (authenticatedSessionId !== undefined) {
         const credential = bearerCredential(request);
@@ -674,6 +684,22 @@ export async function startHttpServer(
         }
       }
 
+      if (authenticatedSessionId !== undefined && request.method === 'POST' && /\/(?:commands|export|save\/(?:copy|original|folder|retry|locate)|interactions\/(?:begin|finalize))$/u.test(pathname)) {
+        const owners = [...upgradeAttachments.entries()].filter(([, owner]) => owner.sessionId === authenticatedSessionId && owner.credential === bearerCredential(request));
+        if (owners.length === 0 && options.lifecycle?.admissionAllowed() === false) { send(response, 409, 'Review authoring is frozen for upgrade'); return; }
+        for (const [incarnation] of owners) options.upgradeParticipants?.assertAuthoring(`control:${incarnation}`);
+      }
+      if (upgradeMatch !== null) {
+        if (request.method !== 'POST' || !options.upgradeParticipants) { send(response, 405, 'Upgrade preparation unavailable'); return; }
+        const body = await readJson(request) as { attachment?: unknown; request?: unknown };
+        const attachment = interactionAttachment(body.attachment, upgradeMatch[1]!);
+        const owned = attachment === undefined ? undefined : upgradeAttachments.get(attachment.incarnationId);
+        if (!attachment || !owned || owned.sessionId !== upgradeMatch[1] || owned.credential !== bearerCredential(request) || JSON.stringify(owned.attachment) !== JSON.stringify(attachment)) { send(response, 403, 'Upgrade connection unavailable'); return; }
+        const id = `control:${attachment.incarnationId}`;
+        if (upgradeMatch[2] === 'settle' && !isUpgradeReviewSettlement(body.request)) { send(response, 400, 'Invalid upgrade settlement'); return; }
+        sendJson(response, 200, upgradeMatch[2] === 'poll' ? options.upgradeParticipants.poll(id) : await options.upgradeParticipants.settle(id, body.request as import('../../../../packages/core/src/upgrade-review-protocol.js').UpgradeReviewSettlement));
+        return;
+      }
       if (stateMatch !== null && request.method === "GET") {
         sendJson(response, 200, broker.state(stateMatch[1]!));
         return;
@@ -1060,7 +1086,7 @@ export async function startHttpServer(
   });
 
   server.on("upgrade", (request, socket: Socket, head) => {
-    const activity = options.lifecycle?.enterActivity();
+    const activity = options.lifecycle?.enterActivity({ settlement: true });
     if (options.lifecycle !== undefined && activity === undefined) {
       socket.end("HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
       return;
@@ -1135,11 +1161,23 @@ export async function startHttpServer(
       socket.write(
         `HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\nSec-WebSocket-Protocol: placekeeper\r\n\r\n`,
       );
+      const upgradeId = `control:${interactionAttachment.incarnationId}`;
+      if (options.upgradeParticipants && options.protectUpgradeReview) {
+        upgradeAttachments.set(interactionAttachment.incarnationId, { sessionId: match[1]!, credential, attachment: interactionAttachment });
+        options.upgradeParticipants.attach(upgradeId, {
+          generation: () => broker.state(match[1]!)?.workflow.documentGeneration ?? -1,
+          revision: () => { const state = broker.state(match[1]!); if (!state) throw new Error('Review ended'); return `${state.workflow.documentGeneration}:${state.revision}`; },
+          protect: () => options.protectUpgradeReview!(match[1]!),
+        });
+      }
       broker.controls.registerSocket(match[1]!, socket, head, {
         readyEvent: { kind: "interaction-attachment", attachment: interactionAttachment },
-        onDisconnect: () => broker.disconnectInteractionIncarnation(
-          match[1]!, interactionOwnerKey, interactionAttachment,
-        ),
+        upgradeParticipantId: upgradeId,
+        onDisconnect: () => {
+          broker.disconnectInteractionIncarnation(match[1]!, interactionOwnerKey, interactionAttachment);
+          upgradeAttachments.delete(interactionAttachment.incarnationId);
+          options.upgradeParticipants?.detach(upgradeId);
+        },
       });
       activity?.complete();
     } catch {

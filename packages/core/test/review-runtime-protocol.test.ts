@@ -133,6 +133,8 @@ describe("shared review runtime protocol", () => {
     expect(REVIEW_RUNTIME_PROTOCOL).toBe("placekeeper.review-runtime");
     expect(REVIEW_RUNTIME_VERSION).toBe(4);
     expect(REVIEW_RUNTIME_METHODS).toEqual([
+      "upgradePoll",
+      "upgradeSettle",
       "bootstrap",
       "presence",
       "detach",
@@ -180,13 +182,16 @@ describe("shared review runtime protocol", () => {
   });
 
   it("defines Chrome as a reduced, compiler-visible RPC host", () => {
-    expect(REVIEW_RUNTIME_HOSTS).toEqual(["vscode", "chrome", "macos", "codex"]);
+    expect(REVIEW_RUNTIME_HOSTS).toEqual(["vscode", "chrome", "macos", "electron", "codex"]);
     expect(REVIEW_RUNTIME_HOST_METHODS.vscode).toEqual(REVIEW_RUNTIME_METHODS);
     expect(REVIEW_RUNTIME_HOST_METHODS.codex).toEqual(REVIEW_RUNTIME_HOST_METHODS.chrome);
     expect(REVIEW_RUNTIME_HOST_METHODS.chrome).not.toContain("forwardSyncTex");
     expect(REVIEW_RUNTIME_HOST_METHODS.chrome).not.toContain("reverseSyncTex");
     expect(isReviewRuntimeMethodForHost("chrome", "command")).toBe(true);
     expect(isReviewRuntimeMethodForHost("chrome", "reverseSyncTex")).toBe(false);
+    expect(REVIEW_RUNTIME_HOST_METHODS.electron).toEqual(REVIEW_RUNTIME_HOST_METHODS.vscode);
+    expect(isReviewRuntimeMethodForHost("electron", "command")).toBe(true);
+    expect(isReviewRuntimeMethodForHost("electron", "reverseSyncTex")).toBe(true);
     expect(REVIEW_RUNTIME_HOST_METHODS.macos).toEqual(REVIEW_RUNTIME_HOST_METHODS.vscode);
     expect(isReviewRuntimeMethodForHost("macos", "command")).toBe(true);
     expect(isReviewRuntimeMethodForHost("macos", "reverseSyncTex")).toBe(true);
@@ -467,4 +472,16 @@ it('projects only closed path-free native context status and identity', () => {
   for (const codexContext of [{ ...scope.codexContext, taskId: 'private' }, { ...scope.codexContext, identity: { ...identity, path: '/private/review.pdf' } }, { ...scope.codexContext, identity: { ...identity, stateDigest: 'wrong' } }]) {
     expect(sanitizeCodexReviewRuntimeResponse('scope', { ...scope, codexContext })).toBeUndefined();
   }
+});
+
+it('keeps upgrade settlement credentials and durability authority off renderer transports', () => {
+  const request = { attemptId: 'a'.repeat(43) };
+  for (const method of ['upgradePoll', 'upgradeSettle'] as const) {
+    expect(sanitizeChromeReviewRuntimeResponse(method, { phase: 'preparing', attemptId: request.attemptId, settlementRequired: true })).toEqual({ phase: 'preparing', attemptId: request.attemptId, settlementRequired: true });
+    expect(sanitizeChromeReviewRuntimeResponse(method, { phase: 'preparing', attemptId: request.attemptId, token: 'b'.repeat(43) })).toBeUndefined();
+  }
+  expect(sanitizeChromeReviewRuntimeRequest('upgradeSettle', request)).toEqual(request);
+  expect(sanitizeChromeReviewRuntimeRequest('upgradeSettle', { ...request, reviewRevisionDurable: true })).toBeUndefined();
+  expect(sanitizeChromeReviewRuntimeRequest('upgradeSettle', { ...request, participantToken: 'b'.repeat(43) })).toBeUndefined();
+  expect(sanitizeChromeReviewRuntimeRequest('upgradePoll', { token: 'b'.repeat(43) })).toBeUndefined();
 });

@@ -46,7 +46,7 @@ export type ViewerResourcePolicy =
       };
     }
   | {
-      readonly host: 'macos' | 'codex';
+      readonly host: 'macos' | 'electron' | 'codex';
       readonly resources: {
         readonly document: string;
         readonly pdfiumWasm: string;
@@ -86,7 +86,7 @@ export function validateViewerResourceUrl(
     }
     return rawUrl;
   }
-  if (policy.host === 'macos' || policy.host === 'codex') {
+  if (policy.host === 'macos' || policy.host === 'electron' || policy.host === 'codex') {
     const expected = role === 'document'
       ? policy.resources.document
       : role === 'pdfium-wasm' ? policy.resources.pdfiumWasm : policy.resources.worker;

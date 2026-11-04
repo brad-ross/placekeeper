@@ -24,6 +24,7 @@ import {
   referenceAnnotationScrollportSelector,
   referenceAnnotationTargetSelector,
   useAuthoringSession,
+  settleAuthoringBeforeClose,
 } from '../review/use-authoring-session.js';
 import { useAnnotationReader } from '../review/use-annotation-reader.js';
 
@@ -355,6 +356,7 @@ export interface ReviewShellProps {
   };
   documentActionsRequestToken?: number;
   onDocumentActionsRequestHandled?: (token: number) => void;
+  registerCloseSettlement?(settle: (() => Promise<void>) | undefined): void;
   onCommandSurfaceChange?(snapshot: ReviewCommandSurfaceSnapshot): void;
   commandInvocation?: ReviewCommandInvocation;
   accessibilityTransition?: AccessibilityTransitionEffect;
@@ -530,6 +532,7 @@ export function ReviewShell(props: ReviewShellProps) {
     dismissAuthoring,
     closeNested,
     protectAuthoringDraft,
+    settleForClose,
     currentAuthoringValue,
     saveAuthoring,
     authoringSaveDisabled,
@@ -554,6 +557,23 @@ export function ReviewShell(props: ReviewShellProps) {
     openNested: () => dispatchSurface({ type: 'open-nested' }),
     closeNestedSurface: () => dispatchSurface({ type: 'close-nested' }),
     restoreReaderAfterAuthoring: (session, reason, state) => restoreReaderAfterAuthoring(session, reason, state),
+  });
+  useEffect(() => {
+    props.registerCloseSettlement?.(() => settleAuthoringBeforeClose({
+      settle: settleForClose,
+      current: () => {
+        const session = authoringSessionRef.current;
+        if (session === null) return undefined;
+        return { protect: async () => {
+          // A legacy editor has no protected-draft authority: keep it visible.
+          if (props.state.workflow.mode !== 'generated-output' && session.interaction === undefined) {
+            throw new Error('Finish or cancel the open annotation before closing this document.');
+          }
+          await protectAuthoringDraft(session, authoringEditorRef.current?.value ?? currentAuthoringValue(session));
+        } };
+      },
+    }));
+    return () => props.registerCloseSettlement?.(undefined);
   });
   const presentedActiveItemId = authoringSession === null
     ? activeItemId

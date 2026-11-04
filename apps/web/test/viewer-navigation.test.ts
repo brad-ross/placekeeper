@@ -997,7 +997,7 @@ describe('viewer navigation adapter', () => {
     }))).flat();
     const harness = navigationHarness({ glyphRead: async () => glyphs });
     expect(await harness.navigation.fitToMode?.('text')).toBe(true);
-    expect(harness.navigation.captureLocation()?.zoom).toBeCloseTo((600 - 48) / 300);
+    expect(harness.navigation.captureLocation()?.zoom).toBeCloseTo((600 - 2 * 36) / 300);
     expect(harness.readingLayout.getSnapshot().alignment).toBe('text');
     harness.navigation.manualZoom?.();
     harness.completeZoom(2);

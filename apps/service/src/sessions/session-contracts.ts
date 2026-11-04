@@ -42,7 +42,7 @@ export class ReviewGenerationConflictError extends Error {
 }
 export const LAUNCH_SURFACES = ["browser", "finder", "codex", "codex-native", "vscode", "chrome"] as const;
 export type LaunchSurface = typeof LAUNCH_SURFACES[number];
-export const REVIEW_PRESENTATION_SURFACES = [...LAUNCH_SURFACES, "macos"] as const;
+export const REVIEW_PRESENTATION_SURFACES = [...LAUNCH_SURFACES, "macos", "electron"] as const;
 export type ReviewPresentationSurface = typeof REVIEW_PRESENTATION_SURFACES[number];
 
 export function isRecoveryDecision(value: unknown): value is RecoveryDecision {

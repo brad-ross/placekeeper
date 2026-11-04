@@ -239,3 +239,40 @@ describe("Placekeeper link codec", () => {
     expect(encoded).not.toMatch(/zoom|scroll|selection|search|panel|generation|task|credential/iu);
   });
 });
+
+describe("Windows drive Placekeeper links", () => {
+  it.each(["C:\\Papers\\Paper.pdf", "d:\\Papers # %\\论文 # 100%.pdf", "E:\\Papers\\literal %2F # 论文.pdf"])("round-trips a native drive path: %s", path => {
+    const link = encodePlacekeeperLink({ path, location: { kind: "page", page: 2 } });
+    expect(link).toMatch(/^placekeeper:\/\/\/[A-Za-z]:\//u);
+    expect(decodePlacekeeperLink(link)).toEqual({ path, location: { kind: "page", page: 2 } });
+    const route = encodePlacekeeperReadableViewPathname({ viewId, path });
+    expect(decodePlacekeeperReadableViewPathname(route)).toEqual({ viewId, path });
+  });
+
+  it("keeps the existing POSIX colon directory distinct from a Windows drive", () => {
+    const posix = "/C:/Papers/Paper.pdf";
+    const windows = "C:\\Papers\\Paper.pdf";
+    expect(placekeeperLinkBase(posix)).toBe("placekeeper:///C%3A/Papers/Paper.pdf");
+    expect(placekeeperLinkBase(windows)).toBe("placekeeper:///C:/Papers/Paper.pdf");
+    expect(decodePlacekeeperLink(`${placekeeperLinkBase(posix)}#v=1&page=1`).path).toBe(posix);
+    expect(decodePlacekeeperLink(`${placekeeperLinkBase(windows)}#v=1&page=1`).path).toBe(windows);
+  });
+
+  it.each([
+    "C:relative.pdf", "C:\\Papers\\..\\Paper.pdf", "C:\\Papers\\.\\Paper.pdf", "C:\\Papers\\\\Paper.pdf",
+    "C:\\Papers.\\Paper.pdf", "C:\\Papers \\Paper.pdf", "C:\\Papers:stream\\Paper.pdf", "C:\\CON\\Paper.pdf",
+    "C:\\Papers\\NUL.pdf", "C:\\Papers\\bad?.pdf", "\\\\server\\share\\Paper.pdf", "\\\\?\\C:\\Paper.pdf", "\\\\.\\C:\\Paper.pdf",
+  ])("rejects an unsafe or nonlocal Windows path: %s", path => {
+    expect(() => placekeeperLinkBase(path)).toThrow();
+  });
+
+  it.each([
+    "placekeeper:///C:/Papers%2FPaper.pdf#v=1&page=1", "placekeeper:///C:/Papers%5CPaper.pdf#v=1&page=1",
+    "placekeeper:///C:/Papers/../Paper.pdf#v=1&page=1", "placekeeper:///C:/Papers/%2E%2E/Paper.pdf#v=1&page=1",
+    "placekeeper:///C:/Papers%3Astream/Paper.pdf#v=1&page=1", "placekeeper:///C:/Papers%20/Paper.pdf#v=1&page=1",
+    "placekeeper:///C:/CON/Paper.pdf#v=1&page=1", "placekeeper:////server/share/Paper.pdf#v=1&page=1",
+    "placekeeper://server/share/Paper.pdf#v=1&page=1",
+  ])("rejects an unsafe Windows link encoding: %s", link => {
+    expect(() => decodePlacekeeperLink(link)).toThrow();
+  });
+});

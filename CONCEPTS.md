@@ -59,10 +59,10 @@ A reading view that fits the body-text block to the usable viewport at a shared 
 Text-centered alignment can remain after manual zoom, even though the zoom percentage is then custom rather than an active fit.
 
 ### Toolbar Presentation
-One of an ordered set of compositions for the single-row review toolbar, from all control groups shown directly to groups tucked behind compact triggers, chosen by measuring what actually fits rather than by fixed breakpoints.
+The composition of the single-row review toolbar, determining which controls appear directly and which are reached through menus for the available space and input method.
 *Avoid:* Responsive Toolbar Presentation, toolbar mode
 
-Groups collapse in a fixed priority order, with edit history first and document navigation last, and a compact trigger still shows its group's essential state. Controls whose availability depends on history or page position keep their place and are disabled rather than removed, so availability alone never changes the composition.
+Moving controls into a menu preserves their actions, availability, and keyboard access. Unavailable actions retain their slots or menu entries in a disabled state, so availability alone never changes the composition.
 
 ## Annotation authoring and recovery
 
@@ -98,7 +98,7 @@ Recoverable work need not yet be saved in the PDF, and a successful write of old
 ### Return Editor
 The editor associated with one Placekeeper viewer for PDF-to-source navigation.
 
-For a shared native PDF window, the latest explicit editor navigation request sets this association; background refresh and automatic following do not change it. A directly opened viewer obtains an editor choice when reverse search first needs one. An embedded VS Code viewer retains its own host association.
+For a shared native PDF window, the latest explicit editor navigation request sets this association; background refresh and automatic following do not change it. A directly opened viewer can establish this association through explicit source-navigation setup before requesting reverse search. An embedded VS Code viewer retains its own host association.
 
 ### Source Navigation Intent
 A captured source position whose request remains associated with the user's navigation choice while Placekeeper waits for a usable PDF mapping.

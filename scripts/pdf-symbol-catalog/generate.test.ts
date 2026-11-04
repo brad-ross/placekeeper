@@ -271,6 +271,8 @@ describe('PDF symbol catalog artifact generation', { timeout: 15_000 }, () => {
   });
 
   it('writes a local audit while checking only the committed runtime and report', async () => {
+    // Six complete pinned-corpus compilations exercise publication and drift
+    // checks; this integration deadline is not a catalog performance target.
     const root = await temporaryRepository();
     const written = await generateCatalogArtifacts({ repositoryRoot: root });
     await expect(checkCatalogArtifacts({ repositoryRoot: root })).resolves.toEqual(written);
@@ -295,7 +297,7 @@ describe('PDF symbol catalog artifact generation', { timeout: 15_000 }, () => {
     await writeFile(reportPath, `${report} `, 'utf8');
     await expect(checkCatalogArtifacts({ repositoryRoot: root }))
       .rejects.toThrow(/catalog artifact drift.*update-report\.json.*catalog:generate/isu);
-  }, 15_000);
+  }, 30_000);
 
   it('can generate only the downloadable full audit for CI', async () => {
     const root = await temporaryRepository();

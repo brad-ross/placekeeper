@@ -37,7 +37,7 @@ async function native(host: PlacekeeperHost, pdf: string) {
 const identity = { daemonIdentity: "a".repeat(64), installArtifactIdentity: "b".repeat(64) };
 function upgrade(host: PlacekeeperHost, mutate: () => Promise<void>) {
   return coordinateUpgrade({ candidate: { ...identity, installArtifactIdentity: "c".repeat(64) }, installed: identity,
-    inspect: async () => ({ kind: "exact", status: { protocolVersion: 1, daemonIdentity: identity.daemonIdentity, ...host.lifecycle.status() } }),
+    inspect: async () => ({ kind: "exact", status: { protocolVersion: 1, upgradePreparationVersion: 1, daemonIdentity: identity.daemonIdentity, ...host.lifecycle.status() } }),
     shutdown: () => host.lifecycle.shutdownIfIdle(), waitForRetirement: async () => {}, replaceAndReady: mutate });
 }
 it("defers a mixed native/browser upgrade until both presentations end, while hints stay advisory", async () => {
@@ -54,11 +54,11 @@ it("defers a mixed native/browser upgrade until both presentations end, while hi
   expect(exchange.status).toBe(200);
   const releaseBrowser = host.broker.controls.registerSocket(browser.sessionId, new PassThrough());
   const mutate = vi.fn(async () => {});
-  await expect(upgrade(host, mutate)).rejects.toMatchObject({ reason: "review-presence" });
+  await expect(upgrade(host, mutate)).rejects.toMatchObject({ reason: "preparation-required" });
   await host.codexRuntime.detach(active.runtimeId);
   expect(host.broker.taskBindings.nativeReconnectForTask("daemon-native-task")).toBeDefined();
   expect(host.broker.taskBindings.bindingForTask("daemon-native-task")).toBeUndefined();
-  await expect(upgrade(host, mutate)).rejects.toMatchObject({ reason: "review-presence" });
+  await expect(upgrade(host, mutate)).rejects.toMatchObject({ reason: "preparation-required" });
   expect(mutate).not.toHaveBeenCalled();
   releaseBrowser();
   // Explicit control retirement removes the browser disconnect grace; the

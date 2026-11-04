@@ -1,3 +1,4 @@
+import { isUpgradePreparationRequest, type UpgradePreparationRequest, type UpgradePreparationResult, type UpgradeAttemptCredentials } from "./upgrade-preparation.js";
 import { isEditorPath, parseEditorControlRequest, type EditorControlRequest, type EditorControlResponse } from "../../../../packages/core/src/editor-navigation-protocol.js";
 import {
   parseCodexAppRequest,
@@ -21,8 +22,9 @@ import { PLACEKEEPER_LINK_MAX_LENGTH } from "../../../../packages/core/src/place
 import { isLaunchSurface, isRecoveryDecision } from "../sessions/session-broker.js";
 import { isChromeBrowserSourceOpenRequest, type ChromeBrowserSourceOpenRequest } from "../browser/browser-source-store.js";
 import { type ChromeRuntimeHostMessage } from "../../../../packages/core/src/chrome-native-runtime-protocol.js";
-import { parseMacosReviewHelperMessage, type MacosReviewHelperResponse } from "../../../../packages/core/src/macos-helper-protocol.js";
-import { parseMacosAppControlMessage, type MacosAppControlResponse } from "../../../../packages/core/src/macos-app-control-protocol.js";
+
+import { parseElectronReviewHelperMessage, type ElectronReviewHelperResponse } from "../../../../packages/core/src/electron-helper-protocol.js";
+import { parseElectronAppControlMessage, type ElectronAppControlResponse } from "../../../../packages/core/src/electron-app-control-protocol.js";
 
 export const MANAGEMENT_PROTOCOL_VERSION = 1;
 
@@ -38,6 +40,7 @@ export interface DaemonManagementStatus {
   readonly protocolVersion: typeof MANAGEMENT_PROTOCOL_VERSION;
   readonly daemonIdentity: string;
   readonly readinessToken?: string;
+  readonly upgradePreparationVersion?: 1;
   readonly lifecycle: DaemonLifecycleState;
   readonly activity: DaemonAggregateActivity;
 }
@@ -49,7 +52,7 @@ export type DaemonUninspectableReason =
   | "early-close";
 
 export type DaemonUpgradeReason = DaemonUninspectableReason | "incompatible" |
-  "review-presence" | "codex-task" | "transient-busy";
+  "review-presence" | "codex-task" | "transient-busy" | "preparation-required";
 
 export type DaemonCompatibilityResult =
   | { readonly kind: "exact"; readonly status: DaemonManagementStatus }
@@ -57,6 +60,9 @@ export type DaemonCompatibilityResult =
   | { readonly kind: "uninspectable"; readonly reason: DaemonUninspectableReason };
 
 export type PlacekeeperControlRequest =
+  | { readonly kind: "upgrade-preparation"; readonly request: UpgradePreparationRequest }
+  | { readonly kind: "electron-resolve-launch"; readonly launchId: string }
+  | { readonly kind: "electron-cancel-launch"; readonly launchId: string }
   | { readonly kind: "editor-control"; readonly request: EditorControlRequest; readonly installation?: { readonly identity: string; readonly resources: string } }
   | { readonly kind: "codex-display"; readonly request: CodexDisplayRequest }
   | { readonly kind: "codex-attest"; readonly taskSessionId: string; readonly receipt: CodexDisplayReceipt }
@@ -70,23 +76,24 @@ export type PlacekeeperControlRequest =
       readonly kind: "management";
       readonly protocolVersion: typeof MANAGEMENT_PROTOCOL_VERSION;
       readonly operation: "shutdown-if-idle";
+      readonly preparation?: UpgradeAttemptCredentials;
     }
   | { readonly kind: "launch"; readonly request: LaunchRequest }
   | { readonly kind: "chrome-open"; readonly request: ChromeBrowserSourceOpenRequest }
   | { readonly kind: "chrome-runtime"; readonly portId: string; readonly message: unknown }
   | { readonly kind: "chrome-runtime-detach"; readonly portId: string }
   | {
-      readonly kind: "macos-runtime";
+      readonly kind: "electron-runtime";
       readonly appInstanceId: string;
       readonly helperId: string;
       readonly message: unknown;
     }
   | {
-      readonly kind: "macos-runtime-detach";
+      readonly kind: "electron-runtime-detach";
       readonly appInstanceId: string;
       readonly helperId: string;
     }
-  | { readonly kind: "macos-app-control"; readonly message: unknown }
+  | { readonly kind: "electron-app-control"; readonly message: unknown }
   | { readonly kind: "link-preflight"; readonly link: string }
   | { readonly kind: "link-open"; readonly request: LinkOpenRequest }
   | {
@@ -165,6 +172,9 @@ export type PlacekeeperControlRequest =
     };
 
 export type PlacekeeperControlResponse =
+  | { readonly kind: "upgrade-preparation"; readonly result: UpgradePreparationResult }
+  | { readonly kind: "electron-resolve-launch"; readonly target?: { readonly sourcePath: string; readonly sessionId: string; readonly documentGeneration: number } }
+  | { readonly kind: "electron-cancel-launch"; readonly canceled: boolean }
   | { readonly kind: "editor-control"; readonly response: EditorControlResponse }
   | { readonly kind: "codex-display"; readonly receipt: CodexDisplayReceipt; readonly pending: CodexPendingPresentation }
   | { readonly kind: "codex-attestation"; readonly status: "accepted" | "denied"; readonly reason?: CodexAdmissionFailure }
@@ -190,9 +200,9 @@ export type PlacekeeperControlResponse =
   | { readonly kind: "chrome-open"; readonly response: LaunchResponse }
   | { readonly kind: "chrome-runtime"; readonly messages: readonly ChromeRuntimeHostMessage[] }
   | { readonly kind: "chrome-runtime-detached" }
-  | { readonly kind: "macos-runtime"; readonly response: MacosReviewHelperResponse }
-  | { readonly kind: "macos-runtime-detached" }
-  | { readonly kind: "macos-app-control"; readonly response: MacosAppControlResponse }
+  | { readonly kind: "electron-runtime"; readonly response: ElectronReviewHelperResponse }
+  | { readonly kind: "electron-runtime-detached" }
+  | { readonly kind: "electron-app-control"; readonly response: ElectronAppControlResponse }
   | { readonly kind: "link-preflight"; readonly response: LinkPreflightResponse }
   | { readonly kind: "link-open"; readonly response: LinkLaunchResponse }
   | { readonly kind: "binding"; readonly result: TaskBindingClaimResult }
@@ -253,6 +263,7 @@ function isObject(value: unknown): value is Record<string, unknown> {
 
 export function isControlRequest(value: unknown): value is PlacekeeperControlRequest {
   if (!isObject(value) || typeof value.kind !== "string") return false;
+  if (value.kind === "upgrade-preparation") return Object.keys(value).length === 2 && isUpgradePreparationRequest(value.request);
   if (value.kind === "editor-control") return Object.keys(value).length === (value.installation === undefined ? 2 : 3) && parseEditorControlRequest(value.request) !== undefined
     && (value.installation === undefined || (isObject(value.installation) && Object.keys(value.installation).length === 2
       && typeof value.installation.identity === "string" && /^[a-f0-9]{64}$/u.test(value.installation.identity) && isEditorPath(value.installation.resources)));
@@ -273,9 +284,10 @@ export function isControlRequest(value: unknown): value is PlacekeeperControlReq
   if (value.kind === "management") {
     return value.protocolVersion === MANAGEMENT_PROTOCOL_VERSION &&
       (value.operation === "status" ||
-        value.operation === "shutdown-if-idle");
+        (value.operation === "shutdown-if-idle" && (value.preparation === undefined || isUpgradePreparationRequest({ operation: "status", credentials: value.preparation }))));
   }
-  if (value.kind === "launch") return isObject(value.request);
+  if (value.kind === "electron-resolve-launch" || value.kind === "electron-cancel-launch") return typeof value.launchId === "string" && /^[A-Za-z0-9_-]{43}$/u.test(value.launchId);
+  if (value.kind === "launch") return isObject(value.request) && (value.request.desktop === undefined || value.request.desktop === "electron");
   if (value.kind === "chrome-open") {
     return Object.keys(value).length === 2 && Object.hasOwn(value, "request") &&
       isChromeBrowserSourceOpenRequest(value.request);
@@ -289,19 +301,19 @@ export function isControlRequest(value: unknown): value is PlacekeeperControlReq
     return Object.keys(value).length === 2 && typeof value.portId === "string" &&
       /^[A-Za-z0-9_-]{16,128}$/u.test(value.portId);
   }
-  if (value.kind === "macos-runtime") {
+  if (value.kind === "electron-runtime") {
     return Object.keys(value).length === 4 && typeof value.appInstanceId === "string"
       && /^[A-Za-z0-9_-]{8,128}$/u.test(value.appInstanceId)
       && typeof value.helperId === "string" && /^[A-Za-z0-9_-]{8,128}$/u.test(value.helperId)
-      && parseMacosReviewHelperMessage(value.message) !== undefined;
+      && parseElectronReviewHelperMessage(value.message) !== undefined;
   }
-  if (value.kind === "macos-runtime-detach") {
+  if (value.kind === "electron-runtime-detach") {
     return Object.keys(value).length === 3 && typeof value.appInstanceId === "string"
       && /^[A-Za-z0-9_-]{8,128}$/u.test(value.appInstanceId)
       && typeof value.helperId === "string" && /^[A-Za-z0-9_-]{8,128}$/u.test(value.helperId);
   }
-  if (value.kind === "macos-app-control") {
-    return Object.keys(value).length === 2 && parseMacosAppControlMessage(value.message) !== undefined;
+  if (value.kind === "electron-app-control") {
+    return Object.keys(value).length === 2 && parseElectronAppControlMessage(value.message) !== undefined;
   }
   if (value.kind === "link-preflight") {
     return typeof value.link === "string" && value.link.length <= PLACEKEEPER_LINK_MAX_LENGTH;
@@ -312,7 +324,8 @@ export function isControlRequest(value: unknown): value is PlacekeeperControlReq
       value.request.link.length <= PLACEKEEPER_LINK_MAX_LENGTH &&
       (value.request.confirmed === undefined || typeof value.request.confirmed === "boolean") &&
       (value.request.recovery === undefined || isRecoveryDecision(value.request.recovery)) &&
-      (value.request.surface === undefined || isLaunchSurface(value.request.surface));
+      (value.request.surface === undefined || isLaunchSurface(value.request.surface)) &&
+      (value.request.desktop === undefined || value.request.desktop === "electron");
   }
   if (value.kind === "refresh-context" || value.kind === "revoke-task") {
     return typeof value.taskSessionId === "string" &&

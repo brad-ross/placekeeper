@@ -1,10 +1,6 @@
-import { randomUUID } from "node:crypto";
 import {
-  chmod,
   link,
-  open,
   readFile,
-  rename,
   rm,
   stat,
   unlink,
@@ -30,6 +26,7 @@ import {
   hashFile,
 } from "../files/file-capabilities.js";
 import { syncDirectory } from "../files/durability.js";
+import { preserveReplacementPermissions, publishFile, stagePublication, syncPublishedFile, type FilePublication } from "../platform/file-publication.js";
 import { SessionControlRegistry } from "../sessions/control-socket.js";
 import { reviewedPdfFilename } from "./output-names.js";
 import {
@@ -118,9 +115,7 @@ export class ExportCoordinatorError extends Error {
   }
 }
 
-function temporaryOutputPath(originalPath: string): string {
-  return join(dirname(originalPath), `.placekeeper-${randomUUID()}.tmp`);
-}
+const unconfirmedWarning = "The PDF publication could not be confirmed. Keep the retained recovery draft until the saved artifact can be verified.";
 
 function committedWarning(kind: PdfExportResult["kind"]): string {
   return kind === "reviewed-copy"
@@ -327,14 +322,7 @@ export class ExportCoordinator {
     );
     signal.throwIfAborted();
 
-    const path = temporaryOutputPath(originalPath);
-    const handle = await open(path, "wx", 0o600);
-    try {
-      await handle.writeFile(written.pdfBytes);
-      await handle.sync();
-    } finally {
-      await handle.close();
-    }
+    const path = await stagePublication(originalPath, written.pdfBytes);
 
     try {
       await this.#hooks.afterCandidateSync?.();
@@ -373,6 +361,7 @@ export class ExportCoordinator {
       const directory = dirname(originalPath);
       let collisionIndex = 0;
       let outputPath: string;
+      let publication: FilePublication | undefined;
       for (;;) {
         outputPath = join(
           directory,
@@ -380,31 +369,34 @@ export class ExportCoordinator {
         );
         try {
           lease.signal.throwIfAborted();
-          await link(candidatePath, outputPath);
+          if (process.platform === "win32") {
+            publication = await publishFile(candidatePath, outputPath, { replaceExisting: false });
+          } else await link(candidatePath, outputPath);
           break;
         } catch (error) {
           if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
           collisionIndex += 1;
         }
       }
-      let warning: string | undefined;
+      let warning: string | undefined = publication?.confirmed === false ? unconfirmedWarning : undefined;
       try {
-        await unlink(candidatePath);
+        if (publication === undefined) await unlink(candidatePath);
       } catch {
-        warning = committedWarning("reviewed-copy");
+        warning ??= committedWarning("reviewed-copy");
         await rm(candidatePath, { force: true }).catch(() => undefined);
       }
-      candidatePath = undefined;
+      if (publication?.confirmed !== false) candidatePath = undefined;
       try {
         await this.#hooks.beforeCommittedDirectorySync?.("reviewed-copy");
-        await syncDirectory(directory);
+        if (publication === undefined) await syncDirectory(directory);
+        else await syncPublishedFile(publication);
       } catch {
-        warning = committedWarning("reviewed-copy");
+        warning ??= committedWarning("reviewed-copy");
       }
       try {
-        await this.#recordSuccessfulExport(delivery.sessionId);
+        if (warning === undefined) await this.#recordSuccessfulExport(delivery.sessionId);
       } catch {
-        warning = committedWarning("reviewed-copy");
+        warning ??= committedWarning("reviewed-copy");
       }
       return {
         kind: "reviewed-copy",
@@ -462,8 +454,7 @@ export class ExportCoordinator {
           "The original PDF or its containing folder is not writable.",
         );
       }
-      const originalMode = originalInfo.mode & 0o777;
-      await chmod(candidatePath, originalMode);
+      await preserveReplacementPermissions(candidatePath, validatedPath);
       await this.#prepareReplacement(delivery.sessionId, candidate.digest);
       lease.signal.throwIfAborted();
       await this.#hooks.afterOriginalValidation?.();
@@ -475,14 +466,15 @@ export class ExportCoordinator {
       );
       lease.signal.throwIfAborted();
 
-      await rename(candidatePath, originalPath);
-      candidatePath = undefined;
-      let warning: string | undefined;
+      const publication = await publishFile(candidatePath, originalPath);
+      if (publication.confirmed) candidatePath = undefined;
+      let warning: string | undefined = publication.confirmed ? undefined
+        : unconfirmedWarning;
       try {
         await this.#hooks.beforeCommittedDirectorySync?.("original-replacement");
-        await syncDirectory(dirname(originalPath));
+        await syncPublishedFile(publication);
       } catch {
-        warning = committedWarning("original-replacement");
+        warning ??= committedWarning("original-replacement");
       }
       try {
         await this.#capabilities.refreshApprovedPdf(
@@ -490,15 +482,15 @@ export class ExportCoordinator {
           candidate.digest,
         );
       } catch {
-        warning = committedWarning("original-replacement");
+        warning ??= committedWarning("original-replacement");
       }
       try {
-        await this.#recordSuccessfulReplacement(
+        if (warning === undefined) await this.#recordSuccessfulReplacement(
           delivery.sessionId,
           candidate.digest,
         );
       } catch {
-        warning = committedWarning("original-replacement");
+        warning ??= committedWarning("original-replacement");
       }
       return {
         kind: "original-replacement",

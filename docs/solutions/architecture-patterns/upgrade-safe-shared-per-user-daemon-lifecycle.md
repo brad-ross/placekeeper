@@ -1,7 +1,7 @@
 ---
 title: Upgrade-safe lifecycle for a shared per-user daemon
 date: 2026-08-12
-last_updated: 2026-09-10
+last_updated: 2026-11-03
 category: architecture-patterns
 module: Shared daemon lifecycle
 problem_type: architecture_pattern
@@ -36,7 +36,7 @@ tags:
 
 ## Context
 
-A desktop app may use one long-lived daemon for several PDF windows and agent tasks. Replacing the application bundle while that daemon is running is not equivalent to restarting a stateless helper: the process owns review sessions, browser credentials, pending saves, task leases, a fixed-origin HTTP server, and a Unix control socket. Killing it for one upgrade can interrupt unrelated PDFs; replacing files beneath it can mix old process code with new installed assets.
+A desktop app may use one long-lived daemon for several PDF windows and agent tasks. Replacing the application bundle while that daemon is running is not equivalent to restarting a stateless helper: the process owns review sessions, browser credentials, pending saves, task leases, a fixed-origin HTTP server, and a private control endpoint. Killing it for one upgrade can interrupt unrelated PDFs; replacing files beneath it can mix old process code with new installed assets.
 
 The triggering failure was an installed launcher reaching an older daemon that still owned the shared socket and receiving “Launch service returned an invalid response” (session history). The safe response is neither to trust reachability nor to stop the process blindly. Upgrade must inspect compatibility and aggregate activity, defer while any review remains active, cooperatively drain an idle daemon, replace transactionally, and commit only after the exact candidate proves readiness.
 
@@ -54,13 +54,19 @@ Unknown does not mean idle. An uninspectable listener blocks automatic replaceme
 
 Keep daemon compatibility identity separate from complete install-artifact identity. An exact daemon plus an identical complete artifact justifies a no-op; matching service identity alone does not prove that every bundled asset is identical (`apps/service/src/host/upgrade-coordinator.ts`).
 
+### Preserve the lifecycle contract across control transports
+
+macOS and Linux use Unix sockets; Windows uses loopback control authenticated through a private discovery record. The Windows handshake authenticates the server before sending the privileged request and binds messages to a fresh connection challenge and daemon epoch. Loopback reachability alone is not authority, and Unix mode bits do not establish Windows file privacy (`apps/service/src/platform/control-transport.ts`, `apps/service/src/platform/private-storage.ts`, `apps/service/src/host/launch-control.ts`). The transport changes; exact/incompatible/uninspectable classification and compare-and-drain decisions do not.
+
+An existing endpoint that refuses a connection is not proof of retirement. Initial inspection fails closed. After an acknowledged shutdown, an early EOF may be tolerated while waiting for endpoint disappearance, but must not itself authorize the successor writer (`apps/service/src/cli/desktop-service-switch.ts`, `apps/service/test/desktop-service-switch.test.ts`).
+
 ### Measure process-wide activity
 
 The unit of safety is the shared process, not the PDF that initiated installation. Aggregate:
 
 - authenticated review presence plus bounded reconnect/bootstrap grace;
 - pending and active agent-task bindings;
-- Chrome connections, Mac review helpers, and registered Mac app instances, including a resident app with no open windows;
+- Chrome connections, review helpers, and registered Electron app instances, including a resident app with no open windows;
 - in-flight saves, broker writes, pickers, source workflows, launches, and HTTP/control routes.
 
 The broker combines browser presence and task activity; the host adds Chrome/native presence, saving, and transient work; the lifecycle coordinator includes active route leases (`apps/service/src/sessions/session-broker.ts`, `apps/service/src/host/placekeeper-host.ts`, `apps/service/src/host/daemon-lifecycle.ts`).
@@ -96,6 +102,14 @@ Use one per-user filesystem lifecycle lock across installer coordination, ordina
 
 Reclaim stale locks conservatively. Never let an earlier reclaimer delete a newer owner's lock (`apps/service/src/host/lifecycle-lock.ts`). Launch and candidate startup share the inherited token, while installation holds the same transaction across inspection and readiness (`apps/service/src/host/service-daemon.ts`, `apps/service/src/cli/daemon-command.ts`).
 
+### Treat service selection as a writer transition
+
+Selecting a candidate service differs from replacing an application bundle. Even an exactly compatible service must go through the explicit switch transaction; matching identity does not bypass recovery preservation. The switch holds the lifecycle lock through inspection, retirement, backup, and exact candidate readiness (`apps/service/src/cli/desktop-service-switch.ts`, `apps/service/src/host/upgrade-coordinator.ts`). Closing the GUI is not sufficient: native app activity stays counted until asynchronous helper retirement completes, and retired helper identities cannot be reacquired by delayed admissions (`apps/service/src/desktop/app-lifecycle.ts`).
+
+Check that the selected reader supports the protected recovery formats before retiring the incumbent, then check again after drain because accepted writes may have completed in between. Before starting the candidate, copy recovery to a new private destination outside canonical recovery, reject links and special files, and verify both the copied inventory/digests and the canonical source inventory/digests. Verifying only the destination would miss source changes during backup (`apps/service/src/host/upgrade-coordinator.ts`).
+
+Rollback is another writer transition: prove the candidate retired and the previous reader can preserve the resulting recovery before using it. The switch command does not automatically restore an earlier service on failure. Retain the backup and report the failed transition; do not infer safe rollback from a closed window or failed readiness probe. Tests exercise active-review deferral, backup ordering, incompatible recovery refusal, and ambiguous retirement (`apps/service/test/desktop-service-switch.test.ts`, `test/acceptance/desktop-service-rollback.spec.ts`).
+
 ### Make each installer outcome explicit
 
 Four common coordinator paths are:
@@ -111,9 +125,9 @@ An uninspectable daemon cannot prove absence of work, so the installer leaves th
 
 ### Prove candidate readiness before commit
 
-Stage replacement privately, retain the prior app, and do not finalize until the installed candidate starts its exact daemon and reports the expected identity, accepting lifecycle, and unique readiness token (`packaging/macos/install-built-app.sh`, `apps/service/src/host/service-daemon.ts`).
+Stage replacement privately, retain the prior app, and do not finalize until the installed candidate starts its exact daemon and reports the expected identity, accepting lifecycle, and unique readiness token (`packaging/desktop/install-built-app.mjs`, `apps/service/src/host/service-daemon.ts`).
 
-If readiness fails, retire the exact candidate before restoring the previous bundle. If retirement cannot be proven, preserve the transaction rather than restoring old files underneath a potentially live new process (`packaging/macos/install-built-app.sh`).
+If readiness fails, retire the exact candidate before restoring the previous bundle. If retirement cannot be proven, preserve the transaction rather than restoring old files underneath a potentially live new process (`packaging/desktop/install-built-app.mjs`).
 
 The packaged daemon's numeric-loopback port is part of readiness. Production always binds the fixed Placekeeper port; the isolated installed smoke and an explicitly development-identified runtime may use a private root and port (`apps/service/src/server/http-server.ts`, `apps/service/src/host/service-daemon.ts`). A foreign listener therefore causes candidate startup and installation to fail explicitly. Never fall back to a random port or terminate an unknown process merely to make the candidate ready.
 
@@ -125,9 +139,11 @@ The user must explicitly follow that link through the normal file-confirmation a
 
 ### Test the physical installed lifecycle
 
-Unit tests cannot prove cross-process bundle-path behavior. The installed smoke must run real packaged launchers and daemons, open multiple authenticated PDFs, retain an active agent context, attempt an incompatible upgrade, and verify that the installed identity and both sessions remain usable. Only after task revocation and browser-grace expiry should replacement succeed and launch another PDF (`packaging/macos/smoke-installed.ts`). The successful-replacement phase must also prove that the successor owns the same origin while an old readable route becomes inert recovery rather than a resumed session (`packaging/macos/smoke-installed.ts`).
+Unit tests cannot prove cross-process installed-path behavior. Build the sole production Electron app with `pnpm package:desktop`, then exercise its actual launchers, independent Node runtime, daemon, active-review deferral, recovery preservation, exact readiness, and failed-transition handling. Run native platform checks on each OS; a skip on another system proves nothing about that platform. Current source installation uses `install.sh` and `install.ps1`, with the replacement helper in `packaging/desktop/install-built-app.mjs`.
 
-The work progressed from focused lifecycle tests to this installed proof because unit-level checks alone did not validate the upgrade boundary (session history).
+The Swift/AppKit app is retired. Earlier service-switch evidence that selected a retained AppKit runtime is historical compatibility evidence, not a current rollback route. A rollback must select an explicitly compatible packaged Electron runtime and repeat the writer-transition checks. Closing a GUI or finding a matching identity never waives recovery backup or proves retirement.
+
+The original installed lifecycle proof used the former `packaging/macos/smoke-installed.ts`: multiple authenticated PDFs and an active task blocked an incompatible update; replacement proceeded only after task revocation and browser-grace expiry. It also checked that the same origin returned inert recovery for an old readable route. Those historical scenarios remain useful requirements, but do not establish that the latest cross-platform installer passed. See the [migration qualification record](../../testing/electron-migration-qualification.md) for pending evidence.
 
 ## Why This Matters
 

@@ -6,10 +6,6 @@ import {
   REVIEW_RUNTIME_PROTOCOL,
   REVIEW_RUNTIME_VERSION,
 } from "../../../packages/core/src/review-runtime-protocol.js";
-import {
-  parseMacosNativeMessage,
-  type MacosPageMessage,
-} from "../../../packages/core/src/macos-shell-protocol.js";
 import { createBrowserHostRuntime } from "../src/host/browser-runtime.js";
 import {
   subscribeRuntimeDocumentSource,
@@ -25,7 +21,7 @@ import {
   materializeVscodeWorkerResource,
   materializeVscodeWasmResource,
 } from "../src/host/vscode-runtime.js";
-import { createMacosHostRuntime } from "../src/host/macos-runtime.js";
+import { createElectronHostRuntime } from "../src/host/electron-runtime.js";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -44,119 +40,27 @@ describe("host-neutral review runtime", () => {
     await expect(runtime.bootstrap()).rejects.toThrow("Update Placekeeper and its host extension");
     runtime.dispose();
   });
-  it("bootstraps the packaged Mac runtime through an attempt-fenced native bridge", async () => {
-    const runtimeId = "runtime_identifier_1234";
-    const attemptId = "attempt_identifier_1234";
+  it("bootstraps the packaged Electron runtime without exposing native paths", async () => {
     const sessionId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
-    const state = createReviewState({
-      sessionId,
-      source: {
-        fileId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
-        digest: "a".repeat(64),
-        byteLength: 100,
-      },
-    });
-    const documentBlob = "blob:placekeeper-document-resource";
-    const pdfiumBlob = "blob:placekeeper-pdfium-resource";
-    const workerBlob = "blob:placekeeper-worker-resource";
-    vi.stubGlobal("__PLACEKEEPER_MAC_DOCUMENT_RESOURCE__", {
-      source: "placekeeper-resource://document/resource_12345678?generation=1&role=document",
-      url: documentBlob,
-    });
-    vi.stubGlobal("__PLACEKEEPER_MAC_PDFIUM_URL__", pdfiumBlob);
-    vi.stubGlobal("__PLACEKEEPER_MAC_WORKER_URL__", workerBlob);
-    const revokeObjectURL = vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => undefined);
-    const nativeListeners = new Set<(message: NonNullable<ReturnType<typeof parseMacosNativeMessage>>) => void>();
-    const postToNative = vi.fn((wrapped: MacosPageMessage) => {
-      if (wrapped.type !== "runtime-message") throw new Error("Expected a runtime request");
-      const request = wrapped.message as { readonly requestId: string; readonly method: string };
-      queueMicrotask(() => {
-        const message = parseMacosNativeMessage({
-          protocolVersion: 1,
-          type: "runtime-message",
-          runtimeId,
-          attemptId,
-          message: {
-            protocol: REVIEW_RUNTIME_PROTOCOL,
-            version: REVIEW_RUNTIME_VERSION,
-            kind: "response",
-            runtimeId,
-            sessionId,
-            generation: 1,
-            revision: 0,
-            requestId: request.requestId,
-            method: request.method,
-            ok: true,
-            payload: {
-              sessionId,
-              generation: 1,
-              revision: 0,
-              activeAuthoringDraftIds: ["draft_macos_live_1234"],
-              state,
-              scope: {
-                documentTitle: "Paper.pdf",
-                launchSurface: "macos",
-                sourceRootPath: "/must/not/cross",
-              },
-              saveStatus: {
-                destination: { phase: "none", generation: 0 },
-                sync: { phase: "clean", desiredRevision: 0, savedRevision: 0 },
-              },
-              resources: {
-                document: "placekeeper-resource://document/resource_12345678?generation=1&role=document",
-                pdfiumWasm: "placekeeper-app://bundle/assets/pdfium.wasm",
-                worker: "placekeeper-app://bundle/assets/pdfium-worker.js",
-              },
-              location: { kind: "page", page: 4 },
-            },
-          },
-        });
-        if (message === undefined) throw new Error("Expected a valid native response");
-        for (const listener of nativeListeners) listener(message);
-      });
-    });
-    const runtime = createMacosHostRuntime({
-      runtimeId,
-      attemptId,
-      postToNative,
-      subscribeNative(listener) {
-        nativeListeners.add(listener);
-        return () => nativeListeners.delete(listener);
-      },
-    });
-
+    const identity = { windowId: "runtime_identifier_1234", attemptId: "attempt_identifier_1234" };
+    const state = createReviewState({ sessionId, source: { fileId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", digest: "a".repeat(64), byteLength: 100 } });
+    const resources = { document: "placekeeper-resource://document/resource_12345678/1", pdfiumWasm: "placekeeper-app://bundle/assets/pdfium.wasm", worker: "placekeeper-app://bundle/assets/pdfium-worker.js" };
+    const runtime = createElectronHostRuntime({
+      identity: async () => identity, sourceEndpoint: async () => {},
+      request: async (_identity, raw) => ({ ...(raw as object), kind: "response", ok: true, sessionId, generation: 1, revision: 0,
+        payload: { sessionId, generation: 1, revision: 0, activeAuthoringDraftIds: ["draft_electron_live_1234"], state,
+          scope: { documentTitle: "Paper.pdf", launchSurface: "electron", sourceRootPath: "/must/not/cross" },
+          saveStatus: { destination: { phase: "none", generation: 0 }, sync: { phase: "clean", desiredRevision: 0, savedRevision: 0 } },
+          resources, location: { kind: "page", page: 4 } } }),
+      requestClose: async () => {}, readyToSettle: async () => {}, documentReady: async () => {}, visible: async () => {},
+      commandSurface: async () => {}, presentation: async () => {}, toolbarHeight: async () => {}, closeSettled: async () => {}, writeClipboard: async () => {},
+      createLink: async () => "placekeeper:///paper.pdf#page=1", focusFailed: async () => {}, subscribeShell: () => () => {}, subscribe: () => () => {},
+    }, identity);
     const bootstrap = await runtime.bootstrap();
-    expect(bootstrap).toMatchObject({
-      activeAuthoringDraftIds: ["draft_macos_live_1234"],
-      scope: { documentTitle: "Paper.pdf", launchSurface: "macos" },
-      resourcePolicy: {
-        host: "macos",
-        resources: {
-          document: documentBlob,
-          pdfiumWasm: pdfiumBlob,
-          worker: workerBlob,
-        },
-      },
-      viewerAssets: {
-        documentUrl: documentBlob,
-        pdfiumWasm: pdfiumBlob,
-        workerUrl: workerBlob,
-      },
-    });
+    expect(bootstrap).toMatchObject({ activeAuthoringDraftIds: ["draft_electron_live_1234"], scope: { documentTitle: "Paper.pdf", launchSurface: "electron" }, resourcePolicy: { host: "electron", resources } });
     expect(JSON.stringify(bootstrap)).not.toMatch(/must\/not\/cross|credential|canonicalLinkBase/u);
     expect(bootstrap.locationHistory?.read()).toEqual({ kind: "page", page: 4 });
-    expect(postToNative).toHaveBeenCalledWith(expect.objectContaining({
-      type: "runtime-message",
-      runtimeId,
-      attemptId,
-    }));
     runtime.dispose();
-    await Promise.resolve();
-    expect(revokeObjectURL.mock.calls.map(([url]) => url).sort()).toEqual([
-      documentBlob,
-      pdfiumBlob,
-      workerBlob,
-    ].sort());
   });
 
   it("materializes extension-issued PDFium bytes into a worker-readable blob", async () => {
@@ -1566,10 +1470,10 @@ describe("host-neutral review runtime", () => {
     runtime.dispose();
   });
 
-  it("receives native source navigation without enabling unrelated host commands", () => {
+  it("Electron receives native source navigation without enabling unrelated host commands", () => {
     let receive: (message: unknown) => void = () => {};
     const runtime = createRpcHostRuntime({ runtimeId: "runtime_native_1234", postMessage: vi.fn(),
-      subscribe(listener) { receive = listener; return () => {}; } }, { host: "macos" });
+      subscribe(listener) { receive = listener; return () => {}; } }, { host: "electron" });
     const state = { status: "ready", sequence: 8, generation: 3, pageIndex: 2, point: { x: 5, y: 10 } };
     const send = (payload: unknown) => receive({ protocol: REVIEW_RUNTIME_PROTOCOL, version: REVIEW_RUNTIME_VERSION,
       kind: "event", event: "host-command", runtimeId: "runtime_native_1234", payload });

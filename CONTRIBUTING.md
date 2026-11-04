@@ -6,9 +6,9 @@ Read [Concepts](docs/concepts.md) for domain vocabulary and the [documentation i
 
 | Area | Responsibility |
 | --- | --- |
-| `apps/web` | Shared production review client, PDF interaction adapters, host runtimes, static entry, and native web entry. |
+| `apps/web` | Shared production review client, PDF interaction adapters, host runtimes, static entry, and desktop web entry. |
 | `apps/service` | Local review authority: file capabilities, session lifecycle, durable recovery, PDF saves, source reconciliation, and host transports. |
-| `apps/macos` | Native AppKit windows, lifecycle, menus, and the embedded web bridge. |
+| `apps/electron` | Production desktop windows, lifecycle, menus, sandboxed preload bridge, and platform packaging. |
 | `apps/vscode` | Trusted-workspace review panel, rebuild observation, editor navigation, and packaged web assets. |
 | `apps/chrome-extension` | PDF interception, browser source acquisition, and the Chrome runtime bridge. |
 | `apps/electron-spike` | Preserved decision probe; not an adopted production host. See its [README](apps/electron-spike/README.md). |
@@ -17,7 +17,7 @@ Read [Concepts](docs/concepts.md) for domain vocabulary and the [documentation i
 | `scripts/build` | Pinned PDFium worker extraction and shared asset loading/emission. Host Vite configs retain host policy. |
 | `scripts/testing` | Explicit suite membership and ordered stages, thin command adapter, and shared browser/static configuration. |
 | `scripts/pdf-symbol-catalog` | Deterministic generation and audited updates from pinned standards inputs. |
-| `packaging/macos` | Bundle validation, isolated candidates, transactional installation, and installed-consumer integration updates. |
+| `packaging/desktop` | Bundled independent Node runtime, native launchers, manifest validation, and transactional source installation. |
 | `test` | Cross-package conformance, browser acceptance, fixtures, and shared test support. |
 
 ## Ownership within the review client
@@ -42,7 +42,7 @@ Read [Concepts](docs/concepts.md) for domain vocabulary and the [documentation i
 | `neutral-context-status.css`, `neutral-annotation-rows-reader.css`, `neutral-workspace-interactions.css` | Status, annotation hierarchy, and deliberately late interaction refinements. |
 | `review-design-tokens.css`, `review-modal-surface.css` | Scoped shared tokens and modal/control grammar, including recovery, static launcher, and Chrome handler consumers. |
 
-Global `--pk-*` and scoped `--review-*` properties are not interchangeable aliases. Keep portal and non-production-root consumers in view. The native drawer overflow exception requires actual native first-paint evidence; browser layout bounds alone cannot prove that WKWebView painted its contents.
+Global `--pk-*` and scoped `--review-*` properties are not interchangeable aliases. Keep portal and non-production-root consumers in view. Desktop layout changes require evidence from the packaged Electron app; browser layout bounds alone cannot prove native-window behavior.
 
 ## Build and test
 
@@ -55,10 +55,10 @@ pnpm build
 pnpm typecheck
 ```
 
-The root build orders service, VS Code, and Chrome. The VS Code build first rebuilds the shared production web bundle, then packages it into the extension; copying an old web directory is not a freshness check. `build:web` checks the mathematical-symbol catalog before bundling. Native web and static profiles have separate builds:
+The root build orders service, VS Code, and Chrome. The VS Code build first rebuilds the shared production web bundle, then packages it into the extension; copying an old web directory is not a freshness check. `build:web` checks the mathematical-symbol catalog before bundling. Desktop and static profiles have separate builds:
 
 ```sh
-pnpm build:macos:web
+pnpm package:desktop
 pnpm verify:static:distribution
 ```
 
@@ -79,7 +79,9 @@ Use canonical aliases for the affected boundary:
 
 The authoritative ordered membership is in `scripts/testing/suites.ts`; `run-suite.ts` executes it. Aliases overlap intentionally. `pnpm test` is its declared sequence, not an automatic union of every repository test. When adding coverage, choose its suite deliberately and preserve prerequisite order. Focused characterization tests outside default suites can be run explicitly with `pnpm exec vitest run <paths>`.
 
-For a native candidate, `pnpm package:macos:native-candidate` builds into an isolated output; `packaging/macos/run-native-candidate.ts` supplies private runtime state. User installation and installed-extension updates are separate operations described in [installation](docs/installation.md).
+The Electron app is the sole current desktop host on macOS, Windows, and Linux; the Swift/AppKit host is retired. `pnpm build:desktop` stages its independent Node runtime and shared assets, and `pnpm package:desktop` produces Forge distributions. Installed apps never depend on a checkout or system Node. Use `pnpm test:desktop-installed` against a freshly built package and `pnpm test:desktop-platform` for native platform checks. The installed SyncTeX acceptance needs a native `synctex` query tool; its recording editor adapter proves process delivery rather than named-editor UI behavior. See the [qualification record](docs/testing/electron-migration-qualification.md) for the final local macOS 12-test installed pass, 2,184 canonical unit/integration passes, and final typecheck pass; current browser and native Windows/Linux evidence remain pending.
+
+Source installation uses `./install.sh` on macOS/Linux and `./install.ps1` on Windows. See [installation](docs/installation.md) for prerequisites and installed paths.
 
 ## Verification and documentation
 

@@ -43,6 +43,29 @@ function fixture() {
 }
 
 describe('admitted Codex production runtime', () => {
+  it('rejects a snapshot overtaken by an accepted edit during resource transfer and retires its unpublished resources', async () => {
+    const f = fixture();
+    const transfer = Promise.withResolvers<void>();
+    let resourceRequests = 0;
+    const original = f.call.getMockImplementation()!;
+    f.call.mockImplementation(async (method, payload) => {
+      if (method === 'resource') { resourceRequests++; await transfer.promise; }
+      return original(method, payload);
+    });
+    try {
+      const bootstrap = f.runtime.bootstrap();
+      void bootstrap.catch(() => undefined);
+      await vi.waitFor(() => expect(resourceRequests).toBe(3));
+      await expect(f.runtime.command(setAnnotationName(state, 'Accepted during transfer'))).resolves.toMatchObject({ revision: 1 });
+      transfer.resolve();
+      await expect(bootstrap).rejects.toMatchObject({ name: 'AbortError' });
+      await vi.waitFor(() => expect(f.revokeObjectURL).toHaveBeenCalledTimes(3));
+      expect((await f.runtime.bootstrap()).revision).toBe(1);
+      expect(f.created).toHaveLength(6);
+    } finally { transfer.resolve(); f.runtime.dispose(); }
+    await vi.waitFor(() => expect(f.revokeObjectURL).toHaveBeenCalledTimes(6));
+  });
+
   it('materializes verified assets once, negotiates authoring and preserves native location history', async () => {
     const f = fixture();
     const initial = await f.runtime.bootstrap();

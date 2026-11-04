@@ -1,0 +1,1200 @@
+{
+  "metadata": {
+    "recordedAt": "2026-11-03T04:30:19.189Z",
+    "executable": "dist/desktop-artifacts/Placekeeper Candidate-darwin-arm64/Placekeeper Candidate.app/Contents/MacOS/PlacekeeperCandidate",
+    "executableSha256": "986ad7d24e42d21b985572dd3237bb4c48d47c3c34d963d417ebb0367e54d2ce",
+    "applicationAsarSha256": "1e3d4a13a4b27cddedc570faf65ee1ef46600d057e604ab40e1c0f1783ad88c9",
+    "runtimeManifestSha256": "354b51e18857e47f342c304757bb44b594e30a975103ff3b9996e14827fa634b",
+    "buildEvidenceSha256": "1e3ae7de123515de2f8a691cda419d25d1e61e6792b532dba2962dc7943d91fc",
+    "hardware": {
+      "platform": "darwin",
+      "release": "25.6.0",
+      "arch": "arm64",
+      "cpu": "Apple M5",
+      "logicalCpus": 10,
+      "totalMemoryBytes": 25769803776,
+      "freeMemoryBytes": 580747264
+    },
+    "fixtures": [
+      {
+        "fixture": "text-native.pdf",
+        "kind": "small-text",
+        "maxMs": 6000,
+        "sha256": "6cb57709b6cfad8fa36bafcf32afdc0b41c5f71f378e1e2c6a3ae9c4ab6d1b5a"
+      },
+      {
+        "fixture": "large-text-heavy.pdf",
+        "kind": "long-text",
+        "maxMs": 6000,
+        "sha256": "67cdcdabb64ddf6fb4c6ebeb43aa19f6d589fab86f0a4c28284472222cc339d6"
+      },
+      {
+        "fixture": "image-only.pdf",
+        "kind": "image",
+        "maxMs": 12000,
+        "sha256": "7017552e1ebdb4a54314a87cf56a1e2e1d9bad77d94172487dfee73c13668aac"
+      },
+      {
+        "fixture": "text-native-with-annotations.pdf",
+        "kind": "annotated",
+        "maxMs": 6000,
+        "sha256": "680647716f2336daf1bed3c4361eacd82274e30207a5d108105fcb1f70b21654"
+      }
+    ],
+    "limitations": [
+      "Debuggable packaged release build, CDP automation attached; no AppKit comparison measured by this suite.",
+      "Cold means new isolated app profile and stopped daemon; OS filesystem caches are uncontrolled.",
+      "Warm means new app process, reused profile and same verified live daemon; it is not a warm in-process open.",
+      "Usable-page timing includes CDP observation overhead after process spawn; no main-import-relative timing is substituted.",
+      "First visible shell, visible input response, frame intervals, display refresh/DPI, long-recovery and representative scanned corpus remain unmeasured.",
+      "Image-only fixture is a reproducible image smoke fixture, not evidence for a large scanned document."
+    ]
+  },
+  "budgets": {
+    "launchSamplesPerCondition": 20,
+    "firstVisibleShellP95Ms": 1500,
+    "textFirstUsablePageP95Ms": 6000,
+    "imageFirstUsablePageP95Ms": 12000,
+    "visibleInputResponseP95Ms": 100,
+    "repeatableStallInvestigationMs": 250,
+    "frameIntervalP95Ms": 33,
+    "idleCpuWindowMs": 60000,
+    "idleCpuPercentOfOneCoreExclusiveMax": 2,
+    "memoryCloseReopenCycles": 12,
+    "memorySettlingMs": 5000,
+    "postCloseResidentGrowthMaxRatio": 1.15
+  },
+  "accounting": "Sum of ps RSS in KiB (shared pages can be counted more than once), cumulative user+system CPU time; Electron and daemon descendants partitioned by PID. Process identifiers are replaced by stable surrogate integers; hostname omitted.",
+  "limitations": [
+    "RSS growth is measured; absence of retained internal document workers/resources is not proven by OS process counts."
+  ],
+  "postClose": [
+    {
+      "atMs": 75051.119291,
+      "electron": [
+        {
+          "pid": 1,
+          "parent": 2,
+          "residentKiB": 159488,
+          "cpuSeconds": 1.42
+        },
+        {
+          "pid": 3,
+          "parent": 1,
+          "residentKiB": 75424,
+          "cpuSeconds": 0.66
+        },
+        {
+          "pid": 4,
+          "parent": 1,
+          "residentKiB": 42176,
+          "cpuSeconds": 0.14
+        },
+        {
+          "pid": 5,
+          "parent": 1,
+          "residentKiB": 52480,
+          "cpuSeconds": 0.23
+        }
+      ],
+      "daemon": [
+        {
+          "pid": 6,
+          "parent": 5,
+          "residentKiB": 68464,
+          "cpuSeconds": 0.84
+        }
+      ],
+      "electronResidentKiB": 329568,
+      "daemonResidentKiB": 68464,
+      "combinedResidentKiB": 398032
+    },
+    {
+      "atMs": 81348.830125,
+      "electron": [
+        {
+          "pid": 1,
+          "parent": 2,
+          "residentKiB": 171936,
+          "cpuSeconds": 1.59
+        },
+        {
+          "pid": 3,
+          "parent": 1,
+          "residentKiB": 78960,
+          "cpuSeconds": 0.76
+        },
+        {
+          "pid": 4,
+          "parent": 1,
+          "residentKiB": 42432,
+          "cpuSeconds": 0.14
+        },
+        {
+          "pid": 5,
+          "parent": 1,
+          "residentKiB": 52688,
+          "cpuSeconds": 0.24
+        }
+      ],
+      "daemon": [
+        {
+          "pid": 6,
+          "parent": 5,
+          "residentKiB": 69776,
+          "cpuSeconds": 0.86
+        }
+      ],
+      "electronResidentKiB": 346016,
+      "daemonResidentKiB": 69776,
+      "combinedResidentKiB": 415792
+    },
+    {
+      "atMs": 87269.601083,
+      "electron": [
+        {
+          "pid": 1,
+          "parent": 2,
+          "residentKiB": 192208,
+          "cpuSeconds": 1.73
+        },
+        {
+          "pid": 3,
+          "parent": 1,
+          "residentKiB": 79056,
+          "cpuSeconds": 0.86
+        },
+        {
+          "pid": 4,
+          "parent": 1,
+          "residentKiB": 42512,
+          "cpuSeconds": 0.14
+        },
+        {
+          "pid": 5,
+          "parent": 1,
+          "residentKiB": 52992,
+          "cpuSeconds": 0.24
+        }
+      ],
+      "daemon": [
+        {
+          "pid": 6,
+          "parent": 5,
+          "residentKiB": 71536,
+          "cpuSeconds": 0.87
+        }
+      ],
+      "electronResidentKiB": 366768,
+      "daemonResidentKiB": 71536,
+      "combinedResidentKiB": 438304
+    },
+    {
+      "atMs": 93515.936833,
+      "electron": [
+        {
+          "pid": 1,
+          "parent": 2,
+          "residentKiB": 185088,
+          "cpuSeconds": 1.88
+        },
+        {
+          "pid": 3,
+          "parent": 1,
+          "residentKiB": 79040,
+          "cpuSeconds": 0.96
+        },
+        {
+          "pid": 4,
+          "parent": 1,
+          "residentKiB": 42560,
+          "cpuSeconds": 0.15
+        },
+        {
+          "pid": 5,
+          "parent": 1,
+          "residentKiB": 53232,
+          "cpuSeconds": 0.24
+        }
+      ],
+      "daemon": [
+        {
+          "pid": 6,
+          "parent": 5,
+          "residentKiB": 69776,
+          "cpuSeconds": 0.89
+        }
+      ],
+      "electronResidentKiB": 359920,
+      "daemonResidentKiB": 69776,
+      "combinedResidentKiB": 429696
+    },
+    {
+      "atMs": 99734.329541,
+      "electron": [
+        {
+          "pid": 1,
+          "parent": 2,
+          "residentKiB": 194864,
+          "cpuSeconds": 2.03
+        },
+        {
+          "pid": 3,
+          "parent": 1,
+          "residentKiB": 79168,
+          "cpuSeconds": 1.06
+        },
+        {
+          "pid": 4,
+          "parent": 1,
+          "residentKiB": 42624,
+          "cpuSeconds": 0.15
+        },
+        {
+          "pid": 5,
+          "parent": 1,
+          "residentKiB": 53392,
+          "cpuSeconds": 0.24
+        }
+      ],
+      "daemon": [
+        {
+          "pid": 6,
+          "parent": 5,
+          "residentKiB": 70048,
+          "cpuSeconds": 0.9
+        }
+      ],
+      "electronResidentKiB": 370048,
+      "daemonResidentKiB": 70048,
+      "combinedResidentKiB": 440096
+    },
+    {
+      "atMs": 105983.6405,
+      "electron": [
+        {
+          "pid": 1,
+          "parent": 2,
+          "residentKiB": 196336,
+          "cpuSeconds": 2.2
+        },
+        {
+          "pid": 3,
+          "parent": 1,
+          "residentKiB": 79200,
+          "cpuSeconds": 1.16
+        },
+        {
+          "pid": 4,
+          "parent": 1,
+          "residentKiB": 42768,
+          "cpuSeconds": 0.15
+        },
+        {
+          "pid": 5,
+          "parent": 1,
+          "residentKiB": 53568,
+          "cpuSeconds": 0.25
+        }
+      ],
+      "daemon": [
+        {
+          "pid": 6,
+          "parent": 5,
+          "residentKiB": 71488,
+          "cpuSeconds": 0.92
+        }
+      ],
+      "electronResidentKiB": 371872,
+      "daemonResidentKiB": 71488,
+      "combinedResidentKiB": 443360
+    },
+    {
+      "atMs": 111901.174041,
+      "electron": [
+        {
+          "pid": 1,
+          "parent": 2,
+          "residentKiB": 196736,
+          "cpuSeconds": 2.34
+        },
+        {
+          "pid": 3,
+          "parent": 1,
+          "residentKiB": 79312,
+          "cpuSeconds": 1.25
+        },
+        {
+          "pid": 4,
+          "parent": 1,
+          "residentKiB": 42880,
+          "cpuSeconds": 0.15
+        },
+        {
+          "pid": 5,
+          "parent": 1,
+          "residentKiB": 53664,
+          "cpuSeconds": 0.25
+        }
+      ],
+      "daemon": [
+        {
+          "pid": 6,
+          "parent": 5,
+          "residentKiB": 71664,
+          "cpuSeconds": 0.93
+        }
+      ],
+      "electronResidentKiB": 372592,
+      "daemonResidentKiB": 71664,
+      "combinedResidentKiB": 444256
+    },
+    {
+      "atMs": 118174.7975,
+      "electron": [
+        {
+          "pid": 1,
+          "parent": 2,
+          "residentKiB": 168160,
+          "cpuSeconds": 2.51
+        },
+        {
+          "pid": 3,
+          "parent": 1,
+          "residentKiB": 74288,
+          "cpuSeconds": 1.34
+        },
+        {
+          "pid": 4,
+          "parent": 1,
+          "residentKiB": 41744,
+          "cpuSeconds": 0.15
+        },
+        {
+          "pid": 5,
+          "parent": 1,
+          "residentKiB": 52416,
+          "cpuSeconds": 0.25
+        }
+      ],
+      "daemon": [
+        {
+          "pid": 6,
+          "parent": 5,
+          "residentKiB": 72880,
+          "cpuSeconds": 0.98
+        }
+      ],
+      "electronResidentKiB": 336608,
+      "daemonResidentKiB": 72880,
+      "combinedResidentKiB": 409488
+    },
+    {
+      "atMs": 124809.821791,
+      "electron": [
+        {
+          "pid": 1,
+          "parent": 2,
+          "residentKiB": 185408,
+          "cpuSeconds": 2.76
+        },
+        {
+          "pid": 3,
+          "parent": 1,
+          "residentKiB": 76672,
+          "cpuSeconds": 1.52
+        },
+        {
+          "pid": 4,
+          "parent": 1,
+          "residentKiB": 41296,
+          "cpuSeconds": 0.16
+        },
+        {
+          "pid": 5,
+          "parent": 1,
+          "residentKiB": 51648,
+          "cpuSeconds": 0.26
+        }
+      ],
+      "daemon": [
+        {
+          "pid": 6,
+          "parent": 5,
+          "residentKiB": 72560,
+          "cpuSeconds": 1.01
+        }
+      ],
+      "electronResidentKiB": 355024,
+      "daemonResidentKiB": 72560,
+      "combinedResidentKiB": 427584
+    },
+    {
+      "atMs": 131134.812125,
+      "electron": [
+        {
+          "pid": 1,
+          "parent": 2,
+          "residentKiB": 195024,
+          "cpuSeconds": 2.96
+        },
+        {
+          "pid": 3,
+          "parent": 1,
+          "residentKiB": 76896,
+          "cpuSeconds": 1.65
+        },
+        {
+          "pid": 4,
+          "parent": 1,
+          "residentKiB": 41584,
+          "cpuSeconds": 0.16
+        },
+        {
+          "pid": 5,
+          "parent": 1,
+          "residentKiB": 51920,
+          "cpuSeconds": 0.26
+        }
+      ],
+      "daemon": [
+        {
+          "pid": 6,
+          "parent": 5,
+          "residentKiB": 73312,
+          "cpuSeconds": 1.03
+        }
+      ],
+      "electronResidentKiB": 365424,
+      "daemonResidentKiB": 73312,
+      "combinedResidentKiB": 438736
+    },
+    {
+      "atMs": 137435.924666,
+      "electron": [
+        {
+          "pid": 1,
+          "parent": 2,
+          "residentKiB": 191040,
+          "cpuSeconds": 3.15
+        },
+        {
+          "pid": 3,
+          "parent": 1,
+          "residentKiB": 76976,
+          "cpuSeconds": 1.75
+        },
+        {
+          "pid": 4,
+          "parent": 1,
+          "residentKiB": 41744,
+          "cpuSeconds": 0.16
+        },
+        {
+          "pid": 5,
+          "parent": 1,
+          "residentKiB": 51968,
+          "cpuSeconds": 0.26
+        }
+      ],
+      "daemon": [
+        {
+          "pid": 6,
+          "parent": 5,
+          "residentKiB": 68016,
+          "cpuSeconds": 1.05
+        }
+      ],
+      "electronResidentKiB": 361728,
+      "daemonResidentKiB": 68016,
+      "combinedResidentKiB": 429744
+    },
+    {
+      "atMs": 143657.9,
+      "electron": [
+        {
+          "pid": 1,
+          "parent": 2,
+          "residentKiB": 183584,
+          "cpuSeconds": 3.29
+        },
+        {
+          "pid": 3,
+          "parent": 1,
+          "residentKiB": 77360,
+          "cpuSeconds": 1.84
+        },
+        {
+          "pid": 4,
+          "parent": 1,
+          "residentKiB": 41888,
+          "cpuSeconds": 0.16
+        },
+        {
+          "pid": 5,
+          "parent": 1,
+          "residentKiB": 52272,
+          "cpuSeconds": 0.26
+        }
+      ],
+      "daemon": [
+        {
+          "pid": 6,
+          "parent": 5,
+          "residentKiB": 68128,
+          "cpuSeconds": 1.06
+        }
+      ],
+      "electronResidentKiB": 355104,
+      "daemonResidentKiB": 68128,
+      "combinedResidentKiB": 423232
+    }
+  ],
+  "idle": [
+    {
+      "atMs": 9851.783625,
+      "electron": [
+        {
+          "pid": 1,
+          "parent": 2,
+          "residentKiB": 173248,
+          "cpuSeconds": 1.27
+        },
+        {
+          "pid": 3,
+          "parent": 1,
+          "residentKiB": 153904,
+          "cpuSeconds": 0.64
+        },
+        {
+          "pid": 4,
+          "parent": 1,
+          "residentKiB": 42800,
+          "cpuSeconds": 0.14
+        },
+        {
+          "pid": 5,
+          "parent": 1,
+          "residentKiB": 64976,
+          "cpuSeconds": 0.23
+        },
+        {
+          "pid": 7,
+          "parent": 1,
+          "residentKiB": 700400,
+          "cpuSeconds": 2.86
+        }
+      ],
+      "daemon": [
+        {
+          "pid": 6,
+          "parent": 5,
+          "residentKiB": 94336,
+          "cpuSeconds": 0.74
+        }
+      ],
+      "electronResidentKiB": 1135328,
+      "daemonResidentKiB": 94336,
+      "combinedResidentKiB": 1229664
+    },
+    {
+      "atMs": 14894.092208,
+      "electron": [
+        {
+          "pid": 1,
+          "parent": 2,
+          "residentKiB": 170960,
+          "cpuSeconds": 1.28
+        },
+        {
+          "pid": 3,
+          "parent": 1,
+          "residentKiB": 152592,
+          "cpuSeconds": 0.64
+        },
+        {
+          "pid": 4,
+          "parent": 1,
+          "residentKiB": 42944,
+          "cpuSeconds": 0.14
+        },
+        {
+          "pid": 5,
+          "parent": 1,
+          "residentKiB": 64944,
+          "cpuSeconds": 0.23
+        },
+        {
+          "pid": 7,
+          "parent": 1,
+          "residentKiB": 647568,
+          "cpuSeconds": 2.87
+        }
+      ],
+      "daemon": [
+        {
+          "pid": 6,
+          "parent": 5,
+          "residentKiB": 95248,
+          "cpuSeconds": 0.76
+        }
+      ],
+      "electronResidentKiB": 1079008,
+      "daemonResidentKiB": 95248,
+      "combinedResidentKiB": 1174256
+    },
+    {
+      "atMs": 19935.594041,
+      "electron": [
+        {
+          "pid": 1,
+          "parent": 2,
+          "residentKiB": 170944,
+          "cpuSeconds": 1.29
+        },
+        {
+          "pid": 3,
+          "parent": 1,
+          "residentKiB": 152592,
+          "cpuSeconds": 0.64
+        },
+        {
+          "pid": 4,
+          "parent": 1,
+          "residentKiB": 42944,
+          "cpuSeconds": 0.14
+        },
+        {
+          "pid": 5,
+          "parent": 1,
+          "residentKiB": 64960,
+          "cpuSeconds": 0.23
+        },
+        {
+          "pid": 7,
+          "parent": 1,
+          "residentKiB": 647568,
+          "cpuSeconds": 2.87
+        }
+      ],
+      "daemon": [
+        {
+          "pid": 6,
+          "parent": 5,
+          "residentKiB": 95312,
+          "cpuSeconds": 0.77
+        }
+      ],
+      "electronResidentKiB": 1079008,
+      "daemonResidentKiB": 95312,
+      "combinedResidentKiB": 1174320
+    },
+    {
+      "atMs": 24974.307708,
+      "electron": [
+        {
+          "pid": 1,
+          "parent": 2,
+          "residentKiB": 170960,
+          "cpuSeconds": 1.29
+        },
+        {
+          "pid": 3,
+          "parent": 1,
+          "residentKiB": 152592,
+          "cpuSeconds": 0.64
+        },
+        {
+          "pid": 4,
+          "parent": 1,
+          "residentKiB": 42944,
+          "cpuSeconds": 0.14
+        },
+        {
+          "pid": 5,
+          "parent": 1,
+          "residentKiB": 64560,
+          "cpuSeconds": 0.23
+        },
+        {
+          "pid": 7,
+          "parent": 1,
+          "residentKiB": 647568,
+          "cpuSeconds": 2.87
+        }
+      ],
+      "daemon": [
+        {
+          "pid": 6,
+          "parent": 5,
+          "residentKiB": 95504,
+          "cpuSeconds": 0.78
+        }
+      ],
+      "electronResidentKiB": 1078624,
+      "daemonResidentKiB": 95504,
+      "combinedResidentKiB": 1174128
+    },
+    {
+      "atMs": 30011.777208,
+      "electron": [
+        {
+          "pid": 1,
+          "parent": 2,
+          "residentKiB": 170976,
+          "cpuSeconds": 1.3
+        },
+        {
+          "pid": 3,
+          "parent": 1,
+          "residentKiB": 152640,
+          "cpuSeconds": 0.64
+        },
+        {
+          "pid": 4,
+          "parent": 1,
+          "residentKiB": 42944,
+          "cpuSeconds": 0.14
+        },
+        {
+          "pid": 5,
+          "parent": 1,
+          "residentKiB": 64560,
+          "cpuSeconds": 0.23
+        },
+        {
+          "pid": 7,
+          "parent": 1,
+          "residentKiB": 647568,
+          "cpuSeconds": 2.87
+        }
+      ],
+      "daemon": [
+        {
+          "pid": 6,
+          "parent": 5,
+          "residentKiB": 95664,
+          "cpuSeconds": 0.78
+        }
+      ],
+      "electronResidentKiB": 1078688,
+      "daemonResidentKiB": 95664,
+      "combinedResidentKiB": 1174352
+    },
+    {
+      "atMs": 35052.412458,
+      "electron": [
+        {
+          "pid": 1,
+          "parent": 2,
+          "residentKiB": 169792,
+          "cpuSeconds": 1.34
+        },
+        {
+          "pid": 3,
+          "parent": 1,
+          "residentKiB": 152640,
+          "cpuSeconds": 0.64
+        },
+        {
+          "pid": 4,
+          "parent": 1,
+          "residentKiB": 42944,
+          "cpuSeconds": 0.14
+        },
+        {
+          "pid": 5,
+          "parent": 1,
+          "residentKiB": 64560,
+          "cpuSeconds": 0.23
+        },
+        {
+          "pid": 7,
+          "parent": 1,
+          "residentKiB": 397056,
+          "cpuSeconds": 2.97
+        }
+      ],
+      "daemon": [
+        {
+          "pid": 6,
+          "parent": 5,
+          "residentKiB": 95904,
+          "cpuSeconds": 0.79
+        }
+      ],
+      "electronResidentKiB": 826992,
+      "daemonResidentKiB": 95904,
+      "combinedResidentKiB": 922896
+    },
+    {
+      "atMs": 40090.329375,
+      "electron": [
+        {
+          "pid": 1,
+          "parent": 2,
+          "residentKiB": 169856,
+          "cpuSeconds": 1.35
+        },
+        {
+          "pid": 3,
+          "parent": 1,
+          "residentKiB": 152640,
+          "cpuSeconds": 0.64
+        },
+        {
+          "pid": 4,
+          "parent": 1,
+          "residentKiB": 42944,
+          "cpuSeconds": 0.14
+        },
+        {
+          "pid": 5,
+          "parent": 1,
+          "residentKiB": 64560,
+          "cpuSeconds": 0.23
+        },
+        {
+          "pid": 7,
+          "parent": 1,
+          "residentKiB": 397120,
+          "cpuSeconds": 2.97
+        }
+      ],
+      "daemon": [
+        {
+          "pid": 6,
+          "parent": 5,
+          "residentKiB": 95488,
+          "cpuSeconds": 0.8
+        }
+      ],
+      "electronResidentKiB": 827120,
+      "daemonResidentKiB": 95488,
+      "combinedResidentKiB": 922608
+    },
+    {
+      "atMs": 45124.505125,
+      "electron": [
+        {
+          "pid": 1,
+          "parent": 2,
+          "residentKiB": 169984,
+          "cpuSeconds": 1.35
+        },
+        {
+          "pid": 3,
+          "parent": 1,
+          "residentKiB": 152608,
+          "cpuSeconds": 0.64
+        },
+        {
+          "pid": 4,
+          "parent": 1,
+          "residentKiB": 42944,
+          "cpuSeconds": 0.14
+        },
+        {
+          "pid": 5,
+          "parent": 1,
+          "residentKiB": 64528,
+          "cpuSeconds": 0.23
+        },
+        {
+          "pid": 7,
+          "parent": 1,
+          "residentKiB": 396576,
+          "cpuSeconds": 2.97
+        }
+      ],
+      "daemon": [
+        {
+          "pid": 6,
+          "parent": 5,
+          "residentKiB": 95440,
+          "cpuSeconds": 0.8
+        }
+      ],
+      "electronResidentKiB": 826640,
+      "daemonResidentKiB": 95440,
+      "combinedResidentKiB": 922080
+    },
+    {
+      "atMs": 50156.907125,
+      "electron": [
+        {
+          "pid": 1,
+          "parent": 2,
+          "residentKiB": 149664,
+          "cpuSeconds": 1.36
+        },
+        {
+          "pid": 3,
+          "parent": 1,
+          "residentKiB": 145440,
+          "cpuSeconds": 0.64
+        },
+        {
+          "pid": 4,
+          "parent": 1,
+          "residentKiB": 39648,
+          "cpuSeconds": 0.14
+        },
+        {
+          "pid": 5,
+          "parent": 1,
+          "residentKiB": 47632,
+          "cpuSeconds": 0.23
+        },
+        {
+          "pid": 7,
+          "parent": 1,
+          "residentKiB": 396144,
+          "cpuSeconds": 2.97
+        }
+      ],
+      "daemon": [
+        {
+          "pid": 6,
+          "parent": 5,
+          "residentKiB": 69600,
+          "cpuSeconds": 0.81
+        }
+      ],
+      "electronResidentKiB": 778528,
+      "daemonResidentKiB": 69600,
+      "combinedResidentKiB": 848128
+    },
+    {
+      "atMs": 55194.949875,
+      "electron": [
+        {
+          "pid": 1,
+          "parent": 2,
+          "residentKiB": 147168,
+          "cpuSeconds": 1.36
+        },
+        {
+          "pid": 3,
+          "parent": 1,
+          "residentKiB": 140992,
+          "cpuSeconds": 0.64
+        },
+        {
+          "pid": 4,
+          "parent": 1,
+          "residentKiB": 39504,
+          "cpuSeconds": 0.14
+        },
+        {
+          "pid": 5,
+          "parent": 1,
+          "residentKiB": 47632,
+          "cpuSeconds": 0.23
+        },
+        {
+          "pid": 7,
+          "parent": 1,
+          "residentKiB": 359408,
+          "cpuSeconds": 2.97
+        }
+      ],
+      "daemon": [
+        {
+          "pid": 6,
+          "parent": 5,
+          "residentKiB": 66800,
+          "cpuSeconds": 0.82
+        }
+      ],
+      "electronResidentKiB": 734704,
+      "daemonResidentKiB": 66800,
+      "combinedResidentKiB": 801504
+    },
+    {
+      "atMs": 60242.135125,
+      "electron": [
+        {
+          "pid": 1,
+          "parent": 2,
+          "residentKiB": 146768,
+          "cpuSeconds": 1.37
+        },
+        {
+          "pid": 3,
+          "parent": 1,
+          "residentKiB": 139344,
+          "cpuSeconds": 0.64
+        },
+        {
+          "pid": 4,
+          "parent": 1,
+          "residentKiB": 39504,
+          "cpuSeconds": 0.14
+        },
+        {
+          "pid": 5,
+          "parent": 1,
+          "residentKiB": 47632,
+          "cpuSeconds": 0.23
+        },
+        {
+          "pid": 7,
+          "parent": 1,
+          "residentKiB": 315264,
+          "cpuSeconds": 2.97
+        }
+      ],
+      "daemon": [
+        {
+          "pid": 6,
+          "parent": 5,
+          "residentKiB": 66624,
+          "cpuSeconds": 0.82
+        }
+      ],
+      "electronResidentKiB": 688512,
+      "daemonResidentKiB": 66624,
+      "combinedResidentKiB": 755136
+    },
+    {
+      "atMs": 65276.570625,
+      "electron": [
+        {
+          "pid": 1,
+          "parent": 2,
+          "residentKiB": 152544,
+          "cpuSeconds": 1.38
+        },
+        {
+          "pid": 3,
+          "parent": 1,
+          "residentKiB": 93984,
+          "cpuSeconds": 0.64
+        },
+        {
+          "pid": 4,
+          "parent": 1,
+          "residentKiB": 42144,
+          "cpuSeconds": 0.14
+        },
+        {
+          "pid": 5,
+          "parent": 1,
+          "residentKiB": 46752,
+          "cpuSeconds": 0.23
+        },
+        {
+          "pid": 7,
+          "parent": 1,
+          "residentKiB": 182080,
+          "cpuSeconds": 2.97
+        }
+      ],
+      "daemon": [
+        {
+          "pid": 6,
+          "parent": 5,
+          "residentKiB": 68128,
+          "cpuSeconds": 0.83
+        }
+      ],
+      "electronResidentKiB": 517504,
+      "daemonResidentKiB": 68128,
+      "combinedResidentKiB": 585632
+    },
+    {
+      "atMs": 69892.881333,
+      "electron": [
+        {
+          "pid": 1,
+          "parent": 2,
+          "residentKiB": 151680,
+          "cpuSeconds": 1.38
+        },
+        {
+          "pid": 3,
+          "parent": 1,
+          "residentKiB": 70624,
+          "cpuSeconds": 0.64
+        },
+        {
+          "pid": 4,
+          "parent": 1,
+          "residentKiB": 42160,
+          "cpuSeconds": 0.14
+        },
+        {
+          "pid": 5,
+          "parent": 1,
+          "residentKiB": 46752,
+          "cpuSeconds": 0.23
+        },
+        {
+          "pid": 7,
+          "parent": 1,
+          "residentKiB": 130896,
+          "cpuSeconds": 2.97
+        }
+      ],
+      "daemon": [
+        {
+          "pid": 6,
+          "parent": 5,
+          "residentKiB": 68128,
+          "cpuSeconds": 0.83
+        }
+      ],
+      "electronResidentKiB": 442112,
+      "daemonResidentKiB": 68128,
+      "combinedResidentKiB": 510240
+    }
+  ],
+  "cpuPercentOfOneCore": 0.516313011976619,
+  "postCloseGrowthRatio": 1.1161313663223058,
+  "artifactIdentity": {
+    "before": {
+      "recordedAt": "2026-11-03T04:30:17.637414+00:00",
+      "hashes": {
+        "executable": "986ad7d24e42d21b985572dd3237bb4c48d47c3c34d963d417ebb0367e54d2ce",
+        "asar": "1e3d4a13a4b27cddedc570faf65ee1ef46600d057e604ab40e1c0f1783ad88c9",
+        "manifest": "354b51e18857e47f342c304757bb44b594e30a975103ff3b9996e14827fa634b",
+        "buildEvidence": "1e3ae7de123515de2f8a691cda419d25d1e61e6792b532dba2962dc7943d91fc",
+        "service": "efc62252d1166296d3e41f04b0b14713e596c067ee5cccbc08208ab9e6d41a3a"
+      },
+      "renderer": {
+        "assets/pdfium-worker.js": "4463487ece74309901036d06584c7296509eba9b26ff67d9154e32dfc8d04b5a",
+        "assets/pdfium.wasm": "c0af5a6aca30d7e54a149c3a68e317116ca906d6edc28fd3318b12c7d9478ac8",
+        "assets/shell.css": "bd8d08c6f7d1820f0079970992ab08c1a352e5cfff01ee2f19c7c3209f70c019",
+        "assets/shell.js": "2b0c30f9d81094d07426963075bb4d3f402ab0c3de08297dbc2e6119eee3b7c8",
+        "electron.html": "f1f23842f04cfeda9751963d5b0d01f674ba9e94f5f09a8ddb064fd8b028a36e"
+      }
+    },
+    "after": {
+      "recordedAt": "2026-11-03T04:33:41.568336+00:00",
+      "hashes": {
+        "executable": "986ad7d24e42d21b985572dd3237bb4c48d47c3c34d963d417ebb0367e54d2ce",
+        "asar": "1e3d4a13a4b27cddedc570faf65ee1ef46600d057e604ab40e1c0f1783ad88c9",
+        "manifest": "354b51e18857e47f342c304757bb44b594e30a975103ff3b9996e14827fa634b",
+        "buildEvidence": "1e3ae7de123515de2f8a691cda419d25d1e61e6792b532dba2962dc7943d91fc",
+        "service": "efc62252d1166296d3e41f04b0b14713e596c067ee5cccbc08208ab9e6d41a3a"
+      },
+      "renderer": {
+        "assets/pdfium-worker.js": "4463487ece74309901036d06584c7296509eba9b26ff67d9154e32dfc8d04b5a",
+        "assets/pdfium.wasm": "c0af5a6aca30d7e54a149c3a68e317116ca906d6edc28fd3318b12c7d9478ac8",
+        "assets/shell.css": "bd8d08c6f7d1820f0079970992ab08c1a352e5cfff01ee2f19c7c3209f70c019",
+        "assets/shell.js": "2b0c30f9d81094d07426963075bb4d3f402ab0c3de08297dbc2e6119eee3b7c8",
+        "electron.html": "f1f23842f04cfeda9751963d5b0d01f674ba9e94f5f09a8ddb064fd8b028a36e"
+      }
+    },
+    "unchanged": true
+  },
+  "qualificationScope": "Corrected local packaged payload with retained raster Blob URLs until replacement/unmount and source-refresh dispatch correction. Targeted resource regression only; this does not rerun or supersede the earlier 160-launch evidence and does not establish native Windows/Linux qualification.",
+  "validation": {
+    "command": "node node_modules/@playwright/test/cli.js test --config scripts/testing/config/playwright.electron-performance.config.ts --grep \"macOS isolated packaged idle CPU and twelve normal document close/reopen cycles\" --output test-results/electron-resource-retention",
+    "result": "1 passed (2.4m)",
+    "selectedTests": 1,
+    "launchMatrixRun": false,
+    "targetsUnchanged": true
+  }
+}

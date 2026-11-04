@@ -226,3 +226,14 @@ describe("temporary browser source ownership", () => {
     expect(broker.state(opened.launch.sessionId)).toBeUndefined();
   });
 });
+
+it('retains a sealed source and avoids creating a destination when content integrity fails', async () => {
+  const value = await fixture();
+  const request = await value.request();
+  const source = join(value.browserRoot, `${request.sourceHandle}.pdf`);
+  await writeFile(source, Buffer.alloc(request.byteLength, 65));
+  const destination = join(value.recoveryRoot, randomUUID());
+  await expect(value.store.adopt(request, destination)).rejects.toThrow('integrity');
+  expect((await readFile(source)).byteLength).toBe(request.byteLength);
+  await expect(access(join(destination, 'source.pdf'))).rejects.toMatchObject({ code: 'ENOENT' });
+});

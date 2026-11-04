@@ -1,0 +1,18 @@
+{
+  "name": "@placekeeper/desktop",
+  "version": "0.3.0",
+  "private": true,
+  "productName": "Placekeeper",
+  "author": "Brad Ross",
+  "description": "Placekeeper PDF review",
+  "main": "dist/main.cjs",
+  "config": { "forge": "./forge.config.ts" },
+  "scripts": { "package": "electron-forge package", "make": "electron-forge make" },
+  "devDependencies": {
+    "@electron-forge/cli": "8.0.1",
+    "@electron-forge/maker-zip": "8.0.1",
+    "@electron-forge/plugin-fuses": "8.0.1",
+    "@electron/fuses": "2.1.3",
+    "electron": "45.2.1"
+  }
+}

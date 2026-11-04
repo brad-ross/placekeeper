@@ -1,12 +1,15 @@
+import { isUpgradeReviewSettlement, upgradeReviewStatus } from "./upgrade-review-protocol.js";
 import { nativeSyncTexRequest, nativeSyncTexResponse } from "./native-synctex-protocol.js";
 import type { ReviewAnchorEvidenceV1, SaveDestinationConfirmation } from "./review-model.js";
 export const REVIEW_RUNTIME_PROTOCOL = "placekeeper.review-runtime" as const;
 export const REVIEW_RUNTIME_VERSION = 4 as const;
 
-export const REVIEW_RUNTIME_HOSTS = ["vscode", "chrome", "macos", "codex"] as const;
+export const REVIEW_RUNTIME_HOSTS = ["vscode", "chrome", "macos", "electron", "codex"] as const;
 export type ReviewRuntimeHost = typeof REVIEW_RUNTIME_HOSTS[number];
 
 export const REVIEW_RUNTIME_METHODS = [
+  "upgradePoll",
+  "upgradeSettle",
   "bootstrap",
   "presence",
   "detach",
@@ -105,6 +108,7 @@ export const REVIEW_RUNTIME_HOST_METHODS = {
   codex: REVIEW_RUNTIME_METHODS.filter((method) => (
     method !== "forwardSyncTex" && method !== "reverseSyncTex"
   )),
+  electron: REVIEW_RUNTIME_METHODS,
   macos: REVIEW_RUNTIME_METHODS,
 } as const satisfies Readonly<Record<ReviewRuntimeHost, readonly ReviewRuntimeMethod[]>>;
 
@@ -311,7 +315,7 @@ function safeChromeScope(value: unknown): unknown | undefined {
   };
 }
 
-function safeMacosScope(value: unknown): unknown | undefined {
+function safeNativeScope(host: NativeRuntimeHost, value: unknown): unknown | undefined {
   if (!record(value)) return undefined;
   const candidate = { ...value };
   for (const key of Object.keys(candidate)) {
@@ -319,7 +323,7 @@ function safeMacosScope(value: unknown): unknown | undefined {
   }
   const projected = safeChromeScope({ ...candidate, launchSurface: "chrome" });
   if (!record(projected)) return undefined;
-  return { ...projected, launchSurface: "macos" };
+  return { ...projected, launchSurface: host };
 }
 
 function safeChromeSaveStatus(value: unknown): unknown | undefined {
@@ -382,7 +386,8 @@ export function sanitizeChromeReviewRuntimeRequest(
   payload: unknown,
 ): unknown | undefined {
   if (!isReviewRuntimeMethodForHost("chrome", method) || !record(payload)) return undefined;
-  if (["bootstrap", "presence", "detach", "saveStatus", "saveProposal", "chooseFolder",
+  if (method === "upgradeSettle") return isUpgradeReviewSettlement(payload) ? closedJsonClone(payload) : undefined;
+  if (["upgradePoll", "bootstrap", "presence", "detach", "saveStatus", "saveProposal", "chooseFolder",
     "retrySave", "locateSave", "scope"].includes(method)) {
     return Object.keys(payload).length === 0 ? {} : undefined;
   }
@@ -442,12 +447,14 @@ export function sanitizeChromeReviewRuntimeRequest(
   return undefined;
 }
 
-/** Returns a fresh, closed payload for the packaged macOS page/runtime lane. */
-export function sanitizeMacosReviewRuntimeRequest(
+export type NativeRuntimeHost = "macos" | "electron";
+
+export function sanitizeNativeReviewRuntimeRequest(
+  host: NativeRuntimeHost,
   method: ReviewRuntimeMethod,
   payload: unknown,
 ): unknown | undefined {
-  if (!isReviewRuntimeMethodForHost("macos", method)) return undefined;
+  if (!isReviewRuntimeMethodForHost(host, method)) return undefined;
   if (method === "forwardSyncTex" || method === "reverseSyncTex") return nativeSyncTexRequest(method, payload);
   return sanitizeChromeReviewRuntimeRequest(method, payload);
 }
@@ -458,6 +465,7 @@ export function sanitizeChromeReviewRuntimeResponse(
   value: unknown,
 ): unknown | undefined {
   if (!isReviewRuntimeMethodForHost("chrome", method)) return undefined;
+  if (method === "upgradePoll" || method === "upgradeSettle") return upgradeReviewStatus(value);
   if (method === "bootstrap") {
     if (!record(value) || !SESSION_ID.test(String(value.sessionId)) || !safeInteger(value.generation) ||
       !safeInteger(value.revision) || !record(value.scope) || !record(value.resources)) return undefined;
@@ -570,25 +578,23 @@ export function sanitizeChromeReviewRuntimeResponse(
 
 /** Projects trusted service output without paths, capabilities, or link bases.
  * Link construction stays on the trusted helper/native host-action lane. */
-export function sanitizeMacosReviewRuntimeResponse(
+export function sanitizeNativeReviewRuntimeResponse(
+  host: NativeRuntimeHost,
   method: ReviewRuntimeMethod,
   value: unknown,
 ): unknown | undefined {
-  if (!isReviewRuntimeMethodForHost("macos", method)) return undefined;
+  if (!isReviewRuntimeMethodForHost(host, method)) return undefined;
+  if (method === "scope") return safeNativeScope(host, value);
   if (method === "forwardSyncTex" || method === "reverseSyncTex") return nativeSyncTexResponse(method, value);
-  if (method === "scope") return safeMacosScope(value);
   if (method === "bootstrap") {
     if (!record(value) || !record(value.scope)) return undefined;
     const projected = sanitizeChromeReviewRuntimeResponse("bootstrap", {
       ...value,
       scope: { ...value.scope, launchSurface: "chrome" },
-      // The Mac page never receives or supplies the path-bearing link base.
-      // A fixed inert placeholder lets us reuse the remainder of Chrome's
-      // closed bootstrap validator before removing this field below.
       canonicalLinkBase: "placekeeper:///Redacted.pdf",
     });
     if (!record(projected)) return undefined;
-    const scope = safeMacosScope(value.scope);
+    const scope = safeNativeScope(host, value.scope);
     if (scope === undefined) return undefined;
     const { canonicalLinkBase: _canonicalLinkBase, ...withoutLinkBase } = projected;
     return { ...withoutLinkBase, scope };
@@ -669,4 +675,11 @@ export function sanitizeCodexReviewRuntimeResponse(
     return { ...projected, scope: { ...projected.scope, launchSurface: "codex", ...(codexContext === undefined ? {} : { codexContext }) } };
   }
   return projected;
+}
+
+export function sanitizeMacosReviewRuntimeRequest(method: ReviewRuntimeMethod, value: unknown): unknown | undefined {
+  return sanitizeNativeReviewRuntimeRequest("macos", method, value);
+}
+export function sanitizeMacosReviewRuntimeResponse(method: ReviewRuntimeMethod, value: unknown): unknown | undefined {
+  return sanitizeNativeReviewRuntimeResponse("macos", method, value);
 }

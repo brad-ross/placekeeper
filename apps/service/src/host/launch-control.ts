@@ -1,3 +1,4 @@
+import { PrivateControlError, requestPrivateControl, startPrivateControlServer } from "../platform/control-transport.js";
 import { launchEditorNavigation } from "../synctex/editor-launch.js";
 import {
   MANAGEMENT_PROTOCOL_VERSION,
@@ -24,7 +25,7 @@ export {
 import { CONTROL_REQUEST_TIMEOUT_MS } from "./control-constants.js";
 export { CONTROL_REQUEST_TIMEOUT_MS } from "./control-constants.js";
 
-import { chmod, mkdir, unlink } from "node:fs/promises";
+import { chmod, lstat, mkdir, unlink } from "node:fs/promises";
 import { createConnection, createServer, type Server, type Socket } from "node:net";
 import { dirname } from "node:path";
 
@@ -39,7 +40,7 @@ import type {
 } from "./placekeeper-host.js";
 import type { ConditionalShutdownResult } from "./daemon-lifecycle.js";
 
-import { parseMacosReviewHelperMessage } from "../../../../packages/core/src/macos-helper-protocol.js";
+import { parseElectronReviewHelperMessage } from "../../../../packages/core/src/electron-helper-protocol.js";
 
 // Both directions are explicitly bounded. Evidence requests use a stricter
 // byte budget before base64 expansion, so a document can never turn this
@@ -64,10 +65,12 @@ export class PlacekeeperControlProtocolError extends Error {
 export class DaemonUpgradeRequiredError extends Error {
   readonly recoveryAction: string;
 
-  constructor(readonly reason: DaemonUpgradeReason) {
+  constructor(readonly reason: DaemonUpgradeReason, legacyManualAction = false) {
     const presentation = upgradePresentation(reason);
     super(presentation.message);
-    this.recoveryAction = presentation.recoveryAction;
+    this.recoveryAction = legacyManualAction
+      ? "Save PDFs and drafts, close Placekeeper windows and browser/editor tabs, then end bound Codex tasks and retry"
+      : presentation.recoveryAction;
     this.name = "DaemonUpgradeRequiredError";
   }
 }
@@ -76,6 +79,10 @@ function upgradePresentation(reason: DaemonUpgradeReason): {
   readonly message: string;
   readonly recoveryAction: string;
 } {
+  if (reason === "preparation-required") return {
+    message: "Placekeeper has active work that requires consent and durable protection before upgrade.",
+    recoveryAction: "Use the interactive installer to review and approve closing active work, or save and close it manually before retrying",
+  };
   if (reason === "review-presence") return {
     message: "Placekeeper has active reviews. The upgrade was deferred and existing work was preserved.",
     recoveryAction: "Close Placekeeper tabs or windows, then retry",
@@ -113,14 +120,33 @@ async function dispatch(
   request: PlacekeeperControlRequest,
   management: { readonly daemonIdentity: string; readonly readinessToken?: string },
   signal?: AbortSignal,
+  desktopLaunchArgs: readonly string[] = [],
 ): Promise<PlacekeeperControlResponse> {
+  if (request.kind === "upgrade-preparation") {
+    host.upgradeParticipants.refresh();
+    const preparation = host.upgradePreparation;
+    const input = request.request;
+    let result;
+    switch (input.operation) {
+      case "preview":
+        if (input.installedDaemonIdentity !== management.daemonIdentity) return { kind: "error", reason: "invalid-request" };
+        result = preparation.preview(input.installedDaemonIdentity, input.candidate); break;
+      case "begin": result = preparation.begin(input.credentials, input.consent); if (input.consent && result.phase === "preparing") { void host.prepareUpgradeTasks().catch(() => {}); result = preparation.status(input.credentials); } break;
+      case "status": void host.prepareUpgradeTasks().catch(() => {}); result = preparation.status(input.credentials); break;
+      case "cancel": result = preparation.cancel(input.credentials); break;
+      case "commit": result = preparation.commit(input.credentials); await host.closeUpgradeAuthority(); break;
+      case "participant-poll": result = preparation.poll(input.participant) ?? { phase: "none" as const }; break;
+      case "participant-ack": result = preparation.acknowledge(input.participant, input.credentials, input.acknowledgement); break;
+    }
+    return { kind: "upgrade-preparation", result };
+  }
   if (request.kind === "management") {
     if (request.operation === "shutdown-if-idle") {
       return {
         kind: "management",
         protocolVersion: MANAGEMENT_PROTOCOL_VERSION,
         operation: "shutdown-if-idle",
-        result: await host.lifecycle.shutdownIfIdle(),
+        result: await host.lifecycle.shutdownIfIdle(request.preparation === undefined ? {} : { authorize: () => host.upgradePreparation.status(request.preparation!).phase === "committed" }),
       };
     }
     const live = host.lifecycle.status();
@@ -131,6 +157,7 @@ async function dispatch(
       status: {
         protocolVersion: MANAGEMENT_PROTOCOL_VERSION,
         daemonIdentity: management.daemonIdentity,
+        upgradePreparationVersion: 1,
         ...(management.readinessToken === undefined
           ? {}
           : { readinessToken: management.readinessToken }),
@@ -150,8 +177,13 @@ async function dispatch(
         return { kind: "codex-attestation", status: host.codexRuntime.attestDisplay(request.receipt, request.taskSessionId) ? "accepted" : "denied" };
       }
       return { kind: "codex-app", response: await host.codexRuntime.handle(request.request) };
-    }) ?? { kind: "error", reason: "unavailable" };
+    }, { settlement: request.kind === "codex-attest" || (request.kind === "codex-app" && request.request.authority === "presentation") }) ?? { kind: "error", reason: "unavailable" };
   }
+  if (request.kind === "electron-resolve-launch") {
+    const target = host.electronRuntime.resolveLaunch(request.launchId);
+    return { kind: request.kind, ...(target === undefined ? {} : { target }) };
+  }
+  if (request.kind === "electron-cancel-launch") return { kind: request.kind, canceled: host.electronRuntime.cancelLaunch(request.launchId) };
   if (request.kind === "editor-control") {
     return await host.lifecycle.runActivity<PlacekeeperControlResponse>(async () => {
       if (request.request.operation === "forward" && (request.installation === undefined || request.installation.identity !== host.editorNavigation.installationIdentity)) {
@@ -159,7 +191,7 @@ async function dispatch(
       }
       const response = await host.editorNavigation.control(request.request);
       if (response.ok && response.operation === "forward") {
-        try { await launchEditorNavigation(response.ticket, request.installation!.resources); }
+        try { await launchEditorNavigation(response.ticket, request.installation!.resources, request.installation!.identity, desktopLaunchArgs); }
         catch (error) {
           host.editorNavigation.cancelTicket(response.ticket);
           return { kind: "editor-control", response: { ok: false, message: error instanceof Error ? error.message : "Could not open Placekeeper" } };
@@ -175,24 +207,30 @@ async function dispatch(
     return { kind: "chrome-open", response: await host.openChromeBrowserSource(request.request, signal) };
   }
   if (request.kind === "chrome-runtime") {
+    const message = request.message as { readonly type?: unknown };
+    if (["hello", "begin", "claim-owner", "recover"].includes(String(message.type)) && !host.lifecycle.admissionAllowed()) return { kind: "error", reason: "unavailable" };
     return { kind: "chrome-runtime", messages: await host.chromeRuntime.handle(request.portId, request.message) };
   }
   if (request.kind === "chrome-runtime-detach") {
     await host.chromeRuntime.detach(request.portId);
     return { kind: "chrome-runtime-detached" };
   }
-  if (request.kind === "macos-app-control") {
-    return { kind: "macos-app-control", response: await host.macosLifecycle.handle(request.message) };
+  if (request.kind === "electron-app-control") {
+    const lifecycle = host.electronLifecycle;
+    return { kind: request.kind, response: await lifecycle.handle(request.message) };
   }
-  if (request.kind === "macos-runtime") {
-    const message = parseMacosReviewHelperMessage(request.message)!;
-    const isAdmission = message.type === "admit" || message.type === "admit-link";
-    const alreadyOwned = host.macosLifecycle.ownsHelper(request.appInstanceId, request.helperId);
+  if (request.kind === "electron-runtime") {
+    const lifecycle = host.electronLifecycle;
+    const runtime = host.electronRuntime;
+    const message = parseElectronReviewHelperMessage(request.message)!;
+    const isAdmission = message.type === "admit" || message.type === "admit-link" || message.type === "admit-launch";
+    const alreadyOwned = lifecycle.ownsHelper(request.appInstanceId, request.helperId);
+    if (isAdmission && !host.lifecycle.admissionAllowed()) return { kind: "error", reason: "unavailable" };
     const attached = alreadyOwned || (isAdmission
-      && host.macosLifecycle.attachHelper(request.appInstanceId, request.helperId));
+      && lifecycle.attachHelper(request.appInstanceId, request.helperId));
     if (!attached) {
       return {
-        kind: "macos-runtime",
+        kind: request.kind,
         response: {
           protocolVersion: 1,
           windowId: message.windowId,
@@ -203,14 +241,14 @@ async function dispatch(
         },
       };
     }
-    const response = await host.macosRuntime.handle(request.helperId, message);
+    const response = await runtime.handle(request.helperId, message);
     // A lifecycle detach can race an admission after ownership was attached
     // but before the runtime installed its provisional record. Reconcile after
     // the await so the late result cannot recreate authority for a dead helper.
-    if (!host.macosLifecycle.ownsHelper(request.appInstanceId, request.helperId)) {
-      await host.macosRuntime.detach(request.helperId);
+    if (!lifecycle.ownsHelper(request.appInstanceId, request.helperId)) {
+      await runtime.detach(request.helperId);
       return {
-        kind: "macos-runtime",
+        kind: request.kind,
         response: {
           protocolVersion: 1,
           windowId: message.windowId,
@@ -221,17 +259,19 @@ async function dispatch(
         },
       };
     }
-    if (response.type === "released" || (isAdmission && response.type === "failure")) {
-      host.macosLifecycle.releaseHelper(request.appInstanceId, request.helperId);
+    if (response.type === "released" || (isAdmission && !alreadyOwned && response.type === "failure")) {
+      await lifecycle.releaseHelper(request.appInstanceId, request.helperId);
     }
-    return { kind: "macos-runtime", response };
+    return { kind: request.kind, response };
   }
-  if (request.kind === "macos-runtime-detach") {
-    if (host.macosLifecycle.ownsHelper(request.appInstanceId, request.helperId)) {
-      await host.macosRuntime.detach(request.helperId);
-      host.macosLifecycle.releaseHelper(request.appInstanceId, request.helperId);
+  if (request.kind === "electron-runtime-detach") {
+    const lifecycle = host.electronLifecycle;
+    const runtime = host.electronRuntime;
+    if (lifecycle.ownsHelper(request.appInstanceId, request.helperId)) {
+      await runtime.detach(request.helperId);
+      await lifecycle.releaseHelper(request.appInstanceId, request.helperId);
     }
-    return { kind: "macos-runtime-detached" };
+    return { kind: "electron-runtime-detached" };
   }
   if (request.kind === "link-preflight") {
     return { kind: "link-preflight", response: await host.preflightLink(request.link) };
@@ -244,7 +284,7 @@ async function dispatch(
     response = await host.lifecycle.runActivity<PlacekeeperControlResponse>(async () => {
     if (request.kind === "claim-binding") {
       if (request.native === true) {
-        return { kind: "codex-binding", status: host.codexRuntime.claimLaunch(request) ? "accepted" : "denied" };
+        return { kind: "codex-binding", status: (host.electronRuntime.claimLaunch(request) || host.codexRuntime.claimLaunch(request)) ? "accepted" : "denied" };
       }
       return {
         kind: "binding",
@@ -372,7 +412,7 @@ async function dispatch(
           },
         }
       : { kind: "evidence", result };
-    });
+    }, { settlement: request.kind !== "claim-binding" && request.kind !== "source-begin" });
   } catch (error) {
     if (error instanceof SourceWorkflowUnavailableError) {
       return { kind: "source-workflow-unavailable", reason: error.reason };
@@ -410,16 +450,51 @@ function writeResponse(socket: Socket, response: PlacekeeperControlResponse): Pr
   });
 }
 
+function openedBrowserSessionId(
+  request: PlacekeeperControlRequest,
+  response: PlacekeeperControlResponse,
+): string | undefined {
+  if (response.kind === "chrome-open" && response.response.ok && response.response.kind !== "recovery-offered") {
+    return response.response.sessionId;
+  }
+  if (response.kind === "launch" && response.response.ok && response.response.kind === "opened"
+    && request.kind === "launch" && request.request.surface === "browser") {
+    return response.response.sessionId;
+  }
+  return undefined;
+}
+
 export async function startLaunchControlServer(
   host: PlacekeeperHost,
   socketPath: string,
   management: { readonly daemonIdentity: string; readonly readinessToken?: string } | DaemonManagementStatus = {
     daemonIdentity: "development",
   },
+  desktopLaunchArgs: readonly string[] = [],
 ): Promise<LaunchControlServer> {
+  if (process.platform === "win32") {
+    let control: LaunchControlServer;
+    control = await startPrivateControlServer(socketPath, async (parsed, signal) => {
+      if (!isControlRequest(parsed)) return { kind: "error", reason: "invalid-request" };
+      try { return await dispatch(host, parsed, management, signal, desktopLaunchArgs); }
+      catch { return { kind: "error", reason: "unavailable" }; }
+    }, async (value) => {
+      const response = value as PlacekeeperControlResponse;
+      if (response.kind === "management" && response.operation === "shutdown-if-idle" && response.result.status === "accepted") {
+        await host.close(); await control.close();
+      }
+    }, async (value, input) => {
+      const response = value as PlacekeeperControlResponse;
+      const parsed = input as PlacekeeperControlRequest;
+      const openedSessionId = openedBrowserSessionId(parsed, response);
+      if (openedSessionId !== undefined) await host.broker.discard(openedSessionId);
+    });
+    return control;
+  }
   await mkdir(dirname(socketPath), { recursive: true, mode: 0o700 });
   const closed = Promise.withResolvers<void>();
   let closePromise: Promise<void> | undefined;
+  let socketIdentity: Awaited<ReturnType<typeof lstat>> | undefined;
   const server = createServer((socket) => {
     const requestLifetime = new AbortController();
     socket.once("close", () => requestLifetime.abort(new Error("control-client-closed")));
@@ -445,20 +520,13 @@ export async function startLaunchControlServer(
         void writeResponse(socket, { kind: "error", reason: "invalid-request" }).catch(() => undefined);
         return;
       }
-      void dispatch(host, parsed, management, requestLifetime.signal).then(
+      void dispatch(host, parsed, management, requestLifetime.signal, desktopLaunchArgs).then(
         async (response) => {
           try {
             requestLifetime.signal.throwIfAborted();
             await writeResponse(socket, response);
           } catch {
-            const openedSessionId = response.kind === "chrome-open" && response.response.ok &&
-                response.response.kind !== "recovery-offered"
-              ? response.response.sessionId
-              : response.kind === "launch" && response.response.ok &&
-                  response.response.kind === "opened" && parsed.kind === "launch" &&
-                  parsed.request.surface === "browser"
-                ? response.response.sessionId
-                : undefined;
+            const openedSessionId = openedBrowserSessionId(parsed, response);
             if (openedSessionId !== undefined) await host.broker.discard(openedSessionId);
             return;
           }
@@ -479,7 +547,8 @@ export async function startLaunchControlServer(
     closePromise ??= (async () => {
       try {
         await closeServer(server);
-        await unlink(socketPath).catch((error: NodeJS.ErrnoException) => {
+        const current = await lstat(socketPath).catch(() => undefined);
+        if (socketIdentity !== undefined && current?.ino === socketIdentity.ino && current.dev === socketIdentity.dev) await unlink(socketPath).catch((error: NodeJS.ErrnoException) => {
           if (error.code !== "ENOENT") throw error;
         });
         closed.resolve();
@@ -491,6 +560,7 @@ export async function startLaunchControlServer(
     return closePromise;
   };
   await listen(server, socketPath);
+  socketIdentity = await lstat(socketPath);
   await chmod(socketPath, 0o600);
   return {
     socketPath,
@@ -524,6 +594,14 @@ export function requestControl(
     readonly signal?: AbortSignal;
   } = {},
 ): Promise<PlacekeeperControlResponse> {
+  if (process.platform === "win32") return requestPrivateControl(socketPath, request, options).then(
+    (response) => response as PlacekeeperControlResponse,
+    (error: unknown) => {
+      if (error instanceof PrivateControlError) throw error.reason === "timeout"
+        ? new PlacekeeperControlTimeoutError() : new PlacekeeperControlProtocolError(error.reason);
+      throw error;
+    },
+  );
   return new Promise((resolve, reject) => {
     const socket = createConnection(socketPath);
     const onAbort = (): void => { socket.destroy(options.signal?.reason); };
@@ -593,6 +671,7 @@ function managementStatus(response: PlacekeeperControlResponse): DaemonManagemen
     ...(response.status.readinessToken === undefined
       ? {}
       : { readinessToken: response.status.readinessToken }),
+    ...(response.status.upgradePreparationVersion === 1 ? { upgradePreparationVersion: 1 as const } : {}),
     lifecycle: response.status.lifecycle as DaemonLifecycleState,
     activity: {
       reviewPresence: response.status.activity.reviewPresence,

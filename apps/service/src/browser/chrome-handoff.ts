@@ -1,7 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 import {
   constants,
-  link,
   lstat,
   mkdir,
   open,
@@ -12,7 +11,7 @@ import {
   unlink,
   type FileHandle,
 } from "node:fs/promises";
-import { basename, resolve } from "node:path";
+import { basename, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
@@ -25,6 +24,9 @@ import {
   MAX_CHROME_PDF_BYTES,
   MAX_CHROME_STAGING_BYTES,
 } from "./chrome-pdf-limits.js";
+
+import { createPrivateFile, ensurePrivateDirectory, establishPrivateDirectory, verifyPrivatePath } from "../platform/private-storage.js";
+import { publishFile, syncPublishedFile } from "../platform/file-publication.js";
 
 export const CHROME_EXTENSION_ID = "cgegjjjhbhnfgcoipeffhogoojfoekgg";
 export const CHROME_EXTENSION_ORIGIN = `chrome-extension://${CHROME_EXTENSION_ID}/`;
@@ -52,6 +54,7 @@ export interface SealedBrowserSourceInspection {
 interface StagedTransfer {
   readonly path: string;
   readonly file: FileHandle;
+  readonly identity: { readonly device: number; readonly inode: number };
   readonly digest: ReturnType<typeof createHash>;
   readonly displayName?: string;
   byteLength: number;
@@ -101,13 +104,14 @@ export class ChromeTransferStore {
 
   static async create(options: ChromeTransferStoreOptions): Promise<ChromeTransferStore> {
     const root = resolve(options.root);
-    await mkdir(root, { recursive: true, mode: 0o700 });
-    const metadata = await lstat(root);
+    // Chrome may run before the daemon creates its app support directory.
+    // Create only that immediate app-owned parent on Windows, never walk or
+    // adopt unrelated profile ancestors.
+    if (process.platform === "win32") await ensurePrivateDirectory(dirname(root));
+    else await mkdir(dirname(root), { recursive: true, mode: 0o700 });
+    try { await ensurePrivateDirectory(root); }
+    catch (error) { throw new Error("Browser source root must be a secure directory", { cause: error }); }
     const canonical = await realpath(root);
-    if (
-      !metadata.isDirectory() || metadata.isSymbolicLink() ||
-      (metadata.mode & 0o077) !== 0
-    ) throw new Error("Browser source root must be a secure directory");
     const store = new ChromeTransferStore({ ...options, root: canonical });
     await store.#withAdmissionLock(() => store.#reconcileStaleSources());
     return store;
@@ -115,7 +119,7 @@ export class ChromeTransferStore {
 
   async begin(displayName?: string): Promise<StagedTransfer> {
     const safeDisplayName = sanitizedDisplayName(displayName);
-    const { path, file } = await this.#withAdmissionLock(async () => {
+    const { path, file, identity } = await this.#withAdmissionLock(async () => {
       await this.#reconcileStaleSources();
       const sources = await this.#ownedSources();
       const partials = sources.filter((source) => source.kind === "partial");
@@ -128,16 +132,35 @@ export class ChromeTransferStore {
         throw new Error("host-byte-budget");
       }
       const path = resolve(this.root, `.${randomBytes(24).toString("base64url")}.partial`);
-      const file = await open(
-        path,
-        constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | constants.O_NOFOLLOW,
-        0o600,
-      );
-      return { path, file };
+      let file: FileHandle | undefined;
+      let identity: { readonly device: number; readonly inode: number } | undefined;
+      try {
+        if (process.platform === "win32") {
+          await createPrivateFile(path);
+          const created = await lstat(path);
+          identity = { device: created.dev, inode: created.ino };
+          file = await open(path, constants.O_WRONLY);
+        } else {
+          file = await open(path, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | constants.O_NOFOLLOW, 0o600);
+        }
+        const opened = await file.stat();
+        identity ??= { device: opened.dev, inode: opened.ino };
+        await verifyPrivatePath(path, "file");
+        const current = await lstat(path);
+        if (!opened.isFile() || opened.size !== 0 || current.isSymbolicLink() ||
+          opened.dev !== identity.device || opened.ino !== identity.inode ||
+          current.dev !== opened.dev || current.ino !== opened.ino) throw new Error("Private transfer identity changed");
+        return { path, file, identity };
+      } catch (error) {
+        await file?.close().catch(() => undefined);
+        if (identity !== undefined) await this.#removeOwnedPath(path, identity);
+        throw error;
+      }
     });
     return {
       path,
       file,
+      identity,
       digest: createHash("sha256"),
       ...(safeDisplayName === undefined ? {} : { displayName: safeDisplayName }),
       byteLength: 0,
@@ -162,7 +185,7 @@ export class ChromeTransferStore {
       staged.closed = true;
       await staged.file.close().catch(() => undefined);
     }
-    await unlink(staged.path).catch(() => undefined);
+    await this.#removeOwnedPath(staged.path, staged.identity);
   }
 
   async seal(staged: StagedTransfer): Promise<SealedBrowserSourceHandle> {
@@ -175,11 +198,17 @@ export class ChromeTransferStore {
       await this.#validate(staged.path);
       const handle = randomBytes(24).toString("base64url") as SealedBrowserSourceHandle;
       const sealedPath = resolve(this.root, `${handle}.pdf`);
-      // link() is the no-clobber commit; unlinking the partial name leaves the
-      // same durable inode owned by the opaque handle.
-      await link(staged.path, sealedPath);
-      committedPath = sealedPath;
-      await unlink(staged.path);
+      await verifyPrivatePath(staged.path, "file");
+      const current = await lstat(staged.path);
+      if (current.dev !== staged.identity.device || current.ino !== staged.identity.inode || current.size !== staged.byteLength) {
+        throw new Error("Private transfer identity changed");
+      }
+      const publication = await publishFile(staged.path, sealedPath, { replaceExisting: false });
+      // An inconclusive native outcome must not expose a handle or authorize
+      // deletion of an unconfirmed target. Existing stale-source cleanup owns it.
+      if (publication.confirmed) committedPath = sealedPath;
+      await syncPublishedFile(publication);
+      await verifyPrivatePath(sealedPath, "file");
       this.#sealed.set(handle, {
         disposition: "remote-temporary",
         path: sealedPath,
@@ -190,8 +219,8 @@ export class ChromeTransferStore {
       return handle;
     } catch (error) {
       await staged.file.close().catch(() => undefined);
-      await unlink(staged.path).catch(() => undefined);
-      if (committedPath !== undefined) await unlink(committedPath).catch(() => undefined);
+      await this.#removeOwnedPath(staged.path, staged.identity);
+      if (committedPath !== undefined) await this.#removeOwnedPath(committedPath, staged.identity);
       throw error;
     }
   }
@@ -247,6 +276,13 @@ export class ChromeTransferStore {
     }
   }
 
+  async #removeOwnedPath(path: string, identity: { readonly device: number; readonly inode: number }): Promise<void> {
+    const current = await lstat(path).catch(() => undefined);
+    if (current?.isFile() && !current.isSymbolicLink() && current.dev === identity.device && current.ino === identity.inode) {
+      await unlink(path).catch(() => undefined);
+    }
+  }
+
   async #ownedSources(): Promise<Array<{
     readonly kind: "partial" | "sealed";
     readonly path: string;
@@ -268,9 +304,10 @@ export class ChromeTransferStore {
       const path = resolve(this.root, name);
       const metadata = await lstat(path);
       if (
-        !metadata.isFile() || metadata.isSymbolicLink() ||
-        (metadata.mode & 0o077) !== 0 || metadata.size > this.#maxTransferBytes
+        !metadata.isFile() || metadata.isSymbolicLink() || metadata.size > this.#maxTransferBytes
       ) throw new Error("host-byte-budget");
+      try { await verifyPrivatePath(path, "file"); }
+      catch { throw new Error("host-byte-budget"); }
       sources.push({ kind, path, size: metadata.size, mtimeMs: metadata.mtimeMs });
     }
     return sources;
@@ -293,6 +330,9 @@ export class ChromeTransferStore {
       try {
         await mkdir(lockPath, { mode: 0o700 });
         try {
+          // The exclusive lock directory is still empty while native privacy
+          // is established; no PDF bytes are written before this succeeds.
+          await establishPrivateDirectory(lockPath);
           return await operation();
         } finally {
           await rm(lockPath, { recursive: true, force: true });

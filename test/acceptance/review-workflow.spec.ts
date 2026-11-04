@@ -1510,6 +1510,11 @@ test.describe('canonical review workflow', () => {
         };
       });
 
+      if (width === 320) {
+        const documentAction = chrome.getByRole('button', { name: /Local PDF.*Open automatic save options/u });
+        await expect(documentAction).toHaveAccessibleName(/Local PDF/u);
+        expect((await documentAction.boundingBox())!.width).toBeGreaterThanOrEqual(32);
+      }
       expect(geometry.height).toBe(50);
       expect(geometry.scrollWidth).toBeLessThanOrEqual(geometry.clientWidth + 1);
       const visibleColumns = [geometry.identity, geometry.navigation, geometry.controls]
@@ -1534,6 +1539,169 @@ test.describe('canonical review workflow', () => {
     }
   });
 
+  test('keeps disabled history slots at narrow widths and stable through undo and redo', async ({ page }) => {
+    const chrome = page.locator('[data-review-chrome]');
+    const history = chrome.locator(':scope > .review-chrome__left-controls [data-main-history], :scope > .review-chrome__viewer-controls .review-chrome__history-control');
+    await expect(history).toHaveCount(4);
+    for (const width of [760, 759, 640, 480, 320]) {
+      await page.setViewportSize({ width, height: 720 });
+      await expect.poll(() => history.evaluateAll((buttons) => buttons.every((button) => button.getBoundingClientRect().width >= 32)), { message: `History slots retain their width at ${width}px` }).toBe(true);
+    }
+
+    await page.setViewportSize({ width: 640, height: 720 });
+    const positions = async () => ({
+      history: await history.evaluateAll((buttons) => buttons.map((button) => ({
+        x: button.getBoundingClientRect().x,
+        width: button.getBoundingClientRect().width,
+      }))),
+      candidates: await chrome.locator('[data-review-chrome-candidate]').evaluateAll((candidates) => (
+        candidates.map((candidate) => candidate.getBoundingClientRect().width)
+      )),
+    });
+    const initialPositions = await positions();
+    await page.getByRole('application', { name: 'PDF review canvas' }).focus();
+    await page.keyboard.press('r');
+    await page.getByRole('textbox', { name: 'Replacement' }).fill('History slot regression');
+    await page.getByRole('button', { name: 'Apply', exact: true }).click();
+    const undo = chrome.getByRole('button', { name: 'Undo', exact: true });
+    const redo = chrome.getByRole('button', { name: 'Redo', exact: true });
+    await expect(undo).toBeEnabled();
+    await expect(redo).toBeDisabled();
+    expect(await positions()).toEqual(initialPositions);
+    await chrome.hover({ position: { x: 2, y: 2 } });
+    await undo.click();
+    await expect(undo).toBeDisabled();
+    await expect(redo).toBeEnabled();
+    expect(await positions()).toEqual(initialPositions);
+    await redo.click();
+    await expect(undo).toBeEnabled();
+    await expect(redo).toBeDisabled();
+    expect(await positions()).toEqual(initialPositions);
+  });
+
+  test('keeps narrow touch history in stable menus within the viewport', async ({ browser }) => {
+    const context = await browser.newContext({ hasTouch: true, viewport: { width: 320, height: 720 } });
+    const page = await context.newPage();
+    try {
+      await page.goto('/test/acceptance/review-harness/index.html?responsive=full');
+      await page.locator('#root').evaluate((element) => element.setAttribute('data-production-root', 'true'));
+      const chrome = page.locator('[data-review-chrome]');
+      const historyTrigger = chrome.getByRole('button', { name: 'Open edit history', exact: true });
+      await expect(historyTrigger).toBeVisible();
+      const geometry = async () => chrome.evaluate((element) => {
+        const bounds = element.getBoundingClientRect();
+        const groups = [...element.children].slice(0, 3).map((group) => group.getBoundingClientRect());
+        return {
+          width: bounds.width, right: bounds.right,
+          overlap: groups.slice(1).some((group, index) => groups[index]!.right > group.left + 0.5),
+          history: element.querySelector<HTMLElement>('.review-chrome__history-trigger')!.getBoundingClientRect().toJSON(),
+        };
+      });
+      const expectContained = async () => {
+        const bounds = await geometry();
+        expect(bounds.width).toBeLessThanOrEqual(320);
+        expect(bounds.right).toBeLessThanOrEqual(320);
+        expect(bounds.overlap).toBe(false);
+        expect(bounds.history.width).toBeGreaterThanOrEqual(44);
+        expect(bounds.history.height).toBeGreaterThanOrEqual(44);
+        const documentAction = chrome.getByRole('button', { name: /Local PDF.*Open automatic save options/u });
+        expect((await documentAction.boundingBox())!.width).toBeGreaterThanOrEqual(44);
+      };
+      await expectContained();
+      const expectMenuContained = async (menu: Locator) => {
+        const bounds = (await menu.boundingBox())!;
+        expect(bounds.x).toBeGreaterThanOrEqual(0);
+        expect(bounds.x + bounds.width).toBeLessThanOrEqual(320);
+        for (const entry of await menu.getByRole('menuitem').all()) {
+          const target = (await entry.boundingBox())!;
+          expect(target.width).toBeGreaterThanOrEqual(44);
+          expect(target.height).toBeGreaterThanOrEqual(44);
+        }
+      };
+      const initial = await geometry();
+      await historyTrigger.focus();
+      await historyTrigger.press('Enter');
+      const historyMenu = page.getByRole('menu', { name: 'Edit history', exact: true });
+      await expect(historyMenu).toBeFocused();
+      await expectMenuContained(historyMenu);
+      await expect(historyMenu.getByRole('menuitem', { name: 'Undo', exact: true })).toBeDisabled();
+      await expect(historyMenu.getByRole('menuitem', { name: 'Redo', exact: true })).toBeDisabled();
+      await page.keyboard.press('Escape');
+      await expect(historyTrigger).toBeFocused();
+
+      const pageTrigger = chrome.getByRole('button', { name: 'Page 3 of 12. Open page navigation', exact: true });
+      await pageTrigger.click();
+      const navigationMenu = page.getByRole('menu', { name: 'Page navigation', exact: true });
+      await expectMenuContained(navigationMenu);
+      await expect(navigationMenu.getByRole('menuitem', { name: 'Back in document history', exact: true })).toBeDisabled();
+      await expect(navigationMenu.getByRole('menuitem', { name: 'Forward in document history', exact: true })).toBeDisabled();
+      await page.keyboard.press('Escape');
+      await page.getByRole('application', { name: 'PDF review canvas' }).focus();
+      await page.keyboard.press('r');
+      await page.getByRole('textbox', { name: 'Replacement' }).fill('Touch history regression');
+      await page.getByRole('button', { name: 'Apply', exact: true }).click();
+      await historyTrigger.focus();
+      await historyTrigger.press('Enter');
+      const undo = historyMenu.getByRole('menuitem', { name: 'Undo', exact: true });
+      const redo = historyMenu.getByRole('menuitem', { name: 'Redo', exact: true });
+      await expect(undo).toBeFocused();
+      await undo.press('Enter');
+      await expect(redo).toBeEnabled();
+      await page.keyboard.press('ArrowDown');
+      await expect(redo).toBeFocused();
+      await redo.press('Enter');
+      await expect(undo).toBeEnabled();
+      expect(await geometry()).toEqual(initial);
+      await expectContained();
+      await page.setViewportSize({ width: 760, height: 720 });
+      await expect(historyMenu).toHaveCount(0);
+      await expect(chrome.getByRole('button', { name: 'Undo', exact: true })).toBeFocused();
+      await page.setViewportSize({ width: 320, height: 720 });
+      await expect(historyTrigger).toBeFocused();
+      await expectContained();
+    } finally {
+      await context.close();
+    }
+  });
+
+  for (const pageReady of [true, false]) test(`keeps touch document history reachable for a single page with page readiness ${pageReady}`, async ({ browser }) => {
+    const context = await browser.newContext({ hasTouch: true, viewport: { width: 320, height: 720 } });
+    const page = await context.newPage();
+    try {
+      await page.goto('/test/acceptance/review-harness/index.html?responsive=full&history=single-page');
+      if (!pageReady) await page.getByRole('button', { name: 'Make page controls unavailable' }).click();
+      const chrome = page.locator('[data-review-chrome]');
+      const trigger = chrome.getByRole('button', { name: pageReady
+        ? 'Page 1 of 1. Open page navigation' : 'Open document navigation', exact: true });
+      await expect(trigger).toBeEnabled();
+      await trigger.click();
+      const menu = page.getByRole('menu', { name: 'Page navigation', exact: true });
+      const back = menu.getByRole('menuitem', { name: 'Back in document history', exact: true });
+      const forward = menu.getByRole('menuitem', { name: 'Forward in document history', exact: true });
+      await expect(menu.getByRole('menuitem', { name: 'Previous page', exact: true })).toBeDisabled();
+      await expect(menu.getByRole('menuitem', { name: 'Next page', exact: true })).toBeDisabled();
+      await expect(back).toBeEnabled();
+      await expect(forward).toBeDisabled();
+      await back.press('Enter');
+      const commands = page.locator('[data-document-history-commands]');
+      await expect(commands).toHaveAttribute('data-document-history-commands', 'back');
+      await expect(back).toBeDisabled();
+      await expect(forward).toBeEnabled();
+      await page.keyboard.press('ArrowDown');
+      await expect(forward).toBeFocused();
+      await forward.press('Enter');
+      await expect(commands).toHaveAttribute('data-document-history-commands', 'back,forward');
+      await page.keyboard.press('Escape');
+      await page.setViewportSize({ width: 760, height: 720 });
+      const directBack = chrome.getByRole('button', { name: 'Back in document history', exact: true });
+      await expect(directBack).toBeEnabled();
+      await directBack.click();
+      await expect(commands).toHaveAttribute('data-document-history-commands', 'back,forward,back');
+    } finally {
+      await context.close();
+    }
+  });
+
   test('keeps compact top-bar controls touch-sized on coarse pointers', async ({ browser }) => {
     const context = await browser.newContext({
       hasTouch: true,
@@ -1554,7 +1722,7 @@ test.describe('canonical review workflow', () => {
           requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
         }));
         const chromeButtons = chrome.locator(':scope > .review-chrome__identity button, :scope > .review-chrome__left-controls button, :scope > .review-chrome__viewer-controls button');
-        // Narrow bars drop unavailable history actions (display: none).
+        // Unavailable history actions keep their touch-sized slots.
         const chromeButtonHeights = await chromeButtons.evaluateAll((buttons) => (
           buttons.filter((button) => button.getClientRects().length > 0)
             .map((button) => button.getBoundingClientRect().height)
@@ -1585,6 +1753,8 @@ test.describe('canonical review workflow', () => {
           };
         });
         expect(geometry.scrollWidth).toBeLessThanOrEqual(geometry.clientWidth + 1);
+        expect(geometry.chrome.x).toBeGreaterThanOrEqual(0);
+        expect(geometry.chrome.x + geometry.chrome.width).toBeLessThanOrEqual(width + 0.5);
         expect(geometry.identity).toBeDefined();
         expect(geometry.controls).toBeDefined();
         expect(geometry.saveIdentity).toBeDefined();
@@ -1604,6 +1774,16 @@ test.describe('canonical review workflow', () => {
         }
       }
 
+      const identity = chrome.locator(':scope > .review-chrome__identity .review-chrome__save-identity');
+      const centered = await identity.evaluate(el => {
+        const button = el.getBoundingClientRect();
+        const icon = el.querySelector('svg')!.getBoundingClientRect();
+        return Math.abs(button.x + button.width / 2 - icon.x - icon.width / 2);
+      });
+      expect(centered).toBeLessThanOrEqual(1);
+      await expect(chrome.locator('.review-chrome__history-trigger svg')).toHaveCount(2);
+      await expect(chrome.locator('.review-chrome__page-disclosure svg')).toHaveCount(0);
+
       // The measured presentation can vary with platform font metrics; the
       // geometry and 44px touch targets above are the public contract.
       await expect(chrome.getByRole('button', { name: 'Open zoom controls' })).toBeVisible();
@@ -1613,6 +1793,12 @@ test.describe('canonical review workflow', () => {
       }).tap();
       const menu = touchPage.getByRole('menu', { name: 'Page navigation' });
       await expect(menu).toBeVisible();
+      const menuButtons = await menu.locator('button').evaluateAll(es => es.map(e => ({
+        y: e.getBoundingClientRect().y, text: e.textContent?.trim(),
+      })));
+      expect(menuButtons).toHaveLength(4);
+      expect(new Set(menuButtons.map(b => b.y)).size).toBe(1);
+      expect(menuButtons.every(b => !b.text)).toBe(true);
       const menuButtonHeights = await menu.locator('button').evaluateAll((buttons) => (
         buttons.map((button) => button.getBoundingClientRect().height)
       ));

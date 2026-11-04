@@ -1,5 +1,5 @@
 import { stat } from "node:fs/promises";
-import { basename, dirname, extname, join } from "node:path";
+import { basename, dirname, extname, join, win32 } from "node:path";
 
 export interface LaunchErrorPresentation {
   readonly kind: "input-unavailable" | "unsupported-context" | "upgrade-required";
@@ -22,25 +22,24 @@ export const UNSUPPORTED_CONTEXT: LaunchErrorPresentation = Object.freeze({
 export function resolveLauncherPath(
   configured: string | undefined,
   homeDirectory: string,
+  platform: NodeJS.Platform = process.platform,
 ): string {
-  return configured && configured.length > 0
-    ? configured
-    : join(
-        homeDirectory,
-        "Applications/Placekeeper.app/Contents/MacOS/placekeeper",
-      );
+  return configured && configured.length > 0 ? configured : installedLauncher(homeDirectory, platform, "placekeeper");
+}
+
+function installedLauncher(homeDirectory: string, platform: NodeJS.Platform, name: string): string {
+  if (platform === "win32") return win32.join(homeDirectory, "AppData", "Local", "Placekeeper", "resources", "desktop", "bin", `${name}.exe`);
+  return platform === "darwin"
+    ? join(homeDirectory, "Applications/Placekeeper.app/Contents/MacOS", name)
+    : join(homeDirectory, ".local/share/placekeeper/resources/desktop/bin", name);
 }
 
 export function resolveExternalLauncherPath(
   configured: string | undefined,
   homeDirectory: string,
+  platform: NodeJS.Platform = process.platform,
 ): string {
-  return configured && configured.length > 0
-    ? configured
-    : join(
-        homeDirectory,
-        "Applications/Placekeeper.app/Contents/MacOS/placekeeper-vscode",
-      );
+  return configured && configured.length > 0 ? configured : installedLauncher(homeDirectory, platform, "placekeeper-vscode");
 }
 
 export interface WorkspaceContext {

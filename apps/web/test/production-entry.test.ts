@@ -67,3 +67,11 @@ describe('VS Code presentation restoration', () => {
     expect(parseVscodePresentationState({ pageIndex: 1, zoom: 100 })).toBeUndefined();
   });
 });
+
+it('renders the runtime review through a layout-neutral inert boundary without an empty upgrade announcement', async () => {
+  const { RuntimeProductionReviewApp } = await import('../src/production-entry.js');
+  const html = renderToStaticMarkup(createElement(RuntimeProductionReviewApp));
+  expect(html).toContain('class="review-upgrade-content"');
+  expect(html).not.toContain('class="review-upgrade-status"');
+  expect(html).not.toContain('role="status"></div>');
+});

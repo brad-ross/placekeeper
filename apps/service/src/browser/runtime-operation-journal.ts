@@ -1,7 +1,8 @@
 import { createHash, randomBytes } from "node:crypto";
-import { chmod, open, readFile, rename, rm, type FileHandle } from "node:fs/promises";
+import { rm } from "node:fs/promises";
 import { join } from "node:path";
-import { syncDirectory } from "../files/durability.js";
+import { publishFile, syncPublishedFile } from "../platform/file-publication.js";
+import { readPrivateFile, verifyPrivatePath, writePrivateFile } from "../platform/private-storage.js";
 import { ensurePrivateDirectory } from "../recovery/source-snapshot.js";
 import { trackRecoveryTemporaryPath } from "../recovery/temporary-path-registry.js";
 import { canonicalJson } from "../runtime/canonical-json.js";
@@ -22,7 +23,7 @@ interface StoredOperation {
 export interface RuntimeJournalScope {
   /** Existing broker-owned recovery directory; journal writes never recreate it. */
   readonly directory: string;
-  readonly prefix: "chrome" | "macos" | "codex";
+  readonly prefix: "chrome" | "macos" | "electron" | "codex";
   readonly legacyCanonicalKey?: string;
 }
 
@@ -172,7 +173,7 @@ export class ChromeRuntimeOperationJournal {
 
   async #read(path: string): Promise<StoredOperation | undefined> {
     try {
-      const bytes = await readFile(path);
+      const bytes = await readPrivateFile(path, 8 * 1024 * 1024);
       if (bytes.byteLength > 8 * 1024 * 1024) throw new Error("operation-journal-invalid");
       const value = JSON.parse(bytes.toString("utf8")) as Partial<StoredOperation>;
       if (value.schemaVersion !== 1 || typeof value.fingerprint !== "string" || !/^[a-f0-9]{64}$/u.test(value.fingerprint) ||
@@ -189,25 +190,18 @@ export class ChromeRuntimeOperationJournal {
   async #persist(canonicalKey: string, location: JournalLocation, value: StoredOperation): Promise<void> {
     this.#assertScope(canonicalKey, location);
     if (location.scope === undefined) await ensurePrivateDirectory(location.directory);
-    else await chmod(location.directory, 0o700);
+    else await verifyPrivatePath(location.directory, "directory");
     const temporary = join(location.directory, `.runtime-operation-${randomBytes(12).toString("hex")}.tmp`);
     const body = Buffer.from(JSON.stringify(value), "utf8");
     if (body.byteLength > 8 * 1024 * 1024) throw new Error("operation-result-too-large");
     const stopTracking = trackRecoveryTemporaryPath(temporary);
-    let handle: FileHandle | undefined;
     try {
       this.#assertScope(canonicalKey, location);
-      handle = await open(temporary, "wx", 0o600);
-      await handle.writeFile(body);
-      await handle.sync();
-      await handle.close();
-      handle = undefined;
+      await writePrivateFile(temporary, body);
       this.#assertScope(canonicalKey, location);
-      await rename(temporary, location.path);
-      await chmod(location.path, 0o600);
-      await syncDirectory(location.directory);
+      const publication = await publishFile(temporary, location.path);
+      await syncPublishedFile(publication);
     } catch (error) {
-      await handle?.close().catch(() => undefined);
       await rm(temporary, { force: true }).catch(() => undefined);
       throw error;
     } finally {

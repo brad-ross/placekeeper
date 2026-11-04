@@ -10,6 +10,23 @@
   min-height: 0;
 }
 
+.review-upgrade-content {
+  display: contents;
+}
+
+.review-upgrade-status {
+  pointer-events: none;
+  position: fixed;
+  inset: auto 16px 16px;
+  z-index: 30;
+  padding: 10px 14px;
+  border: 1px solid var(--review-border, #ccc);
+  border-radius: 8px;
+  color: var(--review-ink-primary, #222);
+  background: var(--review-surface-canvas, #fff);
+  font: 13px/1.5 var(--review-font-ui, sans-serif);
+}
+
 [data-production-review] {
   height: 100%;
   min-height: 0;
@@ -496,3 +513,38 @@
   color: var(--review-ink-muted);
 }
 
+
+.electron-review-shell {
+  position: absolute;
+  inset: 0;
+  min-width: 0;
+  min-height: 0;
+}
+
+.electron-review-shell .review-chrome {
+  --review-chrome-height: max(52px, env(titlebar-area-height, 52px));
+  padding-inline: 16px;
+}
+
+.electron-review-shell [data-review-chrome] {
+  -webkit-app-region: drag;
+  user-select: none;
+}
+
+.electron-review-shell .review-chrome__left-controls {
+  margin-left: 2px;
+}
+
+.electron-review-shell[data-window-controls-overlay="true"] .review-chrome {
+  padding-left: max(16px, env(titlebar-area-x, 0px));
+  padding-right: calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw) + 16px);
+}
+
+.electron-review-shell [data-review-chrome] :is([data-review-chrome-group], button, input, select, textarea, a, [role="button"], [tabindex], [contenteditable="true"], .copy-link-control__fallback),
+body:has(.electron-review-shell) .top-bar-menu__surface {
+  -webkit-app-region: no-drag;
+}
+
+.electron-review-shell [data-review-chrome] :is(input, textarea, [contenteditable="true"]) {
+  user-select: text;
+}

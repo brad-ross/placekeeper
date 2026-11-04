@@ -528,7 +528,7 @@ if (invokedPath === fileURLToPath(import.meta.url)) {
       ? generateCatalogAudit
       : generateCatalogArtifacts)({ repositoryRoot });
   if (check) {
-    const { validateCatalogSourceBaseline } = await import('../../packaging/macos/validate-manifest.js');
+    const { validateCatalogSourceBaseline } = await import('../../packaging/shared/validate-distribution.js');
     await validateCatalogSourceBaseline(repositoryRoot);
   }
   const report = JSON.parse(artifacts.report) as {

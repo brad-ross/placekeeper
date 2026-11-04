@@ -63,7 +63,25 @@ function namedFailure(error: unknown, filename: string): never {
   throw new PlacekeeperPdfLinkError("UNREADABLE", filename);
 }
 
+/** Foreign links are data, never paths relative to this host's working directory. */
+export function assertHostLocalPath(path: string, platform: NodeJS.Platform = process.platform): void {
+  const native = platform === "win32" ? /^[A-Za-z]:[\\/]/u.test(path)
+    : path.startsWith("/");
+  if (!native) throw new Error("The Placekeeper link path is not local to this platform");
+}
+
+export function decodeHostPlacekeeperLink(link: string, platform: NodeJS.Platform = process.platform) {
+  const decoded = decodePlacekeeperLink(link);
+  // This established namespace denotes a broker-owned browser acquisition,
+  // not a filesystem root. The broker must map it to a native path before IO.
+  if (!(platform === "win32" && decoded.path.startsWith("/Placekeeper Browser/"))) {
+    assertHostLocalPath(decoded.path, platform);
+  }
+  return decoded;
+}
+
 async function approveLinkedPdf(path: string): Promise<string> {
+  assertHostLocalPath(path);
   const filename = basename(path) || path;
   if (!isAbsolute(path)) throw new PlacekeeperPdfLinkError("MISSING", filename);
 
@@ -113,7 +131,7 @@ export async function openPlacekeeperLink(
   broker: SessionBroker,
   request: OpenPlacekeeperLinkRequest,
 ): Promise<OpenPlacekeeperLinkResult> {
-  const decoded = decodePlacekeeperLink(request.link);
+  const decoded = decodeHostPlacekeeperLink(request.link);
   // Keep this check synchronous with the first linked file operation. If an
   // ownership exemption vanished, no PDF is resolved, opened, or substituted.
   if (request.confirmed !== true && !broker.activeReviewOwnsPath(decoded.path)) {

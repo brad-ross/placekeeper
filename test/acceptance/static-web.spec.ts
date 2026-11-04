@@ -592,7 +592,7 @@ for (const width of [390, 1280]) test(`@critical landing showcase and PDF contro
   await expect(demo.getByRole('tab', { name: 'Search', exact: true })).toBeDisabled();
   await expect(demo.getByRole('tab', { name: 'Annotations', exact: true })).toBeDisabled();
   await page.getByRole('button', { name: /^Chrome/ }).click();
-  await expect(page.getByRole('figure', { name: 'Chrome Extension (experimental) window screenshot' })).toBeVisible();
+  await expect(page.getByRole('figure', { name: 'Chrome Extension window screenshot' })).toBeVisible();
   await page.getByRole('link', { name: 'Try it', exact: true }).click();
   await expect(upload).toBeInViewport();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
@@ -946,16 +946,16 @@ test('@critical demo starts fitted and Fit Width keeps the requested scale', asy
 });
 
 
-for (const width of [1440, 390]) test(`@critical installation dialog preserves the demo and equal divider spacing at ${width}px`, async ({ page }) => {
+for (const width of [1440, 390]) test(`@critical download alternatives preserve the demo and equal divider spacing at ${width}px`, async ({ page }) => {
   await page.setViewportSize({ width, height: 1000 });
+  await page.route('https://api.github.com/repos/brad-ross/placekeeper/releases/latest', route => route.fulfill({ json: {} }));
   await page.goto('./');
   const demo = page.frameLocator('iframe[aria-hidden="false"]');
   await demo.locator('[data-initial-view-ready="true"]').waitFor({ state: 'attached' });
   await page.getByRole('tab', { name: 'Make comments', exact: true }).click();
   await expect(demo.locator('[data-owned-mark]')).toHaveCount(5);
   const identity = await demo.locator('body').evaluate(() => performance.timeOrigin);
-  const separator = page.locator('.static-launcher__separator');
-  const spacing = await separator.evaluate((element) => {
+  const spacing = await page.locator('.static-launcher__separator').evaluate((element) => {
     const bounds = element.getBoundingClientRect();
     return {
       above: bounds.top - element.previousElementSibling!.getBoundingClientRect().bottom,
@@ -964,98 +964,21 @@ for (const width of [1440, 390]) test(`@critical installation dialog preserves t
   });
   expect(spacing.above).toBeGreaterThan(0);
   expect(Math.abs(spacing.above - spacing.below)).toBeLessThan(1);
-  const triggers = page.getByRole('button', { name: 'Install', exact: true });
+  const triggers = page.getByRole('button', { name: 'Other download options', exact: true });
   await expect(triggers).toHaveCount(2);
-  const dialog = page.getByRole('dialog', { name: 'Install Placekeeper', exact: true });
   for (const index of [0, 1]) {
     await triggers.nth(index).click();
-    await expect(dialog).toBeVisible();
-    await expect(page.locator('dialog')).toHaveCount(1);
-    const copy = dialog.getByRole('button', { name: 'Copy command', exact: true });
-    await expect(copy).toBeFocused();
-    await page.keyboard.press('Shift+Tab');
-    await expect(copy).toBeFocused();
-    await page.keyboard.press('Tab');
-    await expect(copy).toBeFocused();
-    for (let step = 0; step < 6; step += 1) {
-      await page.keyboard.press('Tab');
-      expect(await dialog.evaluate((element) => element.contains(document.activeElement))).toBe(true);
-    }
-    expect(await dialog.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
-    const bounds = (await dialog.boundingBox())!;
+    const panel = page.locator('.landing-download').nth(index).getByRole('navigation');
+    await expect(panel).toBeVisible();
+    await expect(page.getByRole('navigation', { name: 'Placekeeper downloads' })).toHaveCount(1);
+    const bounds = (await panel.boundingBox())!;
     expect(bounds.x).toBeGreaterThanOrEqual(0);
     expect(bounds.x + bounds.width).toBeLessThanOrEqual(width);
-    if (index === 0) await page.keyboard.press('Escape');
-    else await page.mouse.click(2, 2);
-    await expect(dialog).toBeHidden();
+    await page.keyboard.press('Escape');
+    await expect(panel).toBeHidden();
     await expect(triggers.nth(index)).toBeFocused();
     expect(await demo.locator('body').evaluate(() => performance.timeOrigin)).toBe(identity);
     await expect(page.getByRole('tab', { name: 'Make comments', exact: true })).toHaveAttribute('aria-selected', 'true');
     await expect(demo.locator('[data-owned-mark]')).toHaveCount(5);
   }
-  await triggers.first().click();
-  await page.mouse.click(2, 2);
-  await expect(dialog).toBeHidden();
-  await expect(triggers.first()).toBeFocused();
-});
-
-test('@critical dismissing installation preserves a pending document open', async ({ page }) => {
-  let finishRequest!: () => void;
-  const pending = new Promise<void>((resolve) => { finishRequest = resolve; });
-  await page.route('https://example.org/paper.pdf', async (route) => {
-    await pending;
-    await route.fulfill({ status: 404, headers: { 'access-control-allow-origin': '*' }, body: 'Not found' });
-  });
-  try {
-    await page.goto('./');
-    await page.getByRole('textbox', { name: 'Document URL' }).fill('https://example.org/paper.pdf');
-    await page.getByRole('button', { name: 'Open', exact: true }).click();
-    const spinner = page.locator('.static-launcher__url button .static-launcher__spinner');
-    await expect(spinner).toBeVisible();
-    await page.getByRole('button', { name: 'Install', exact: true }).first().click();
-    const dialog = page.getByRole('dialog', { name: 'Install Placekeeper', exact: true });
-    await expect(dialog).toBeVisible();
-    await page.keyboard.press('Escape');
-    await expect(dialog).toBeHidden();
-    await expect(spinner).toBeVisible();
-    finishRequest();
-    await expect(page.locator('.static-launcher__toasts [role="alert"]')).toContainText('404');
-    await expect(spinner).toHaveCount(0);
-  } finally {
-    finishRequest();
-  }
-});
-
-test('@critical installation command reports clipboard success and remains selectable on failure', async ({ page }) => {
-  await page.goto('./');
-  await page.evaluate(() => {
-    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: {
-      writeText: async (text: string) => { document.body.dataset.copiedInstallCommand = text; },
-    } });
-  });
-  await page.getByRole('button', { name: 'Install', exact: true }).first().click();
-  const dialog = page.getByRole('dialog', { name: 'Install Placekeeper', exact: true });
-  const command = dialog.getByLabel('Install command', { exact: true });
-  const text = await command.textContent();
-  await dialog.getByRole('button', { name: 'Copy command', exact: true }).click();
-  await expect(dialog.getByRole('status')).toHaveText('Command copied.');
-  await expect(page.locator('body')).toHaveAttribute('data-copied-install-command', text!);
-  await page.evaluate(() => {
-    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: {
-      writeText: async () => { throw new DOMException('Denied', 'NotAllowedError'); },
-    } });
-  });
-  await dialog.getByRole('button', { name: 'Copy command', exact: true }).click();
-  await expect(dialog.getByRole('status')).toHaveText('Couldn’t copy. Select the command and copy it manually.');
-  expect(await command.evaluate((element) => {
-    const range = document.createRange();
-    range.selectNodeContents(element);
-    const selection = getSelection()!;
-    selection.removeAllRanges();
-    selection.addRange(range);
-    return selection.toString();
-  })).toBe(text);
-  await page.keyboard.press('Escape');
-  await page.getByRole('button', { name: 'Install', exact: true }).first().click();
-  await expect(dialog.getByRole('status')).toBeEmpty();
 });

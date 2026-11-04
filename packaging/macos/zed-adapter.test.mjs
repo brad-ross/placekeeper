@@ -3,7 +3,7 @@ import { afterEach, test } from 'vitest';
 import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, rmSync, statSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { approvedRoot, openState, runZed, takeBuild, bindOwner, chooseZedPath, runViewSource, chooseViewerPath } from '../../integrations/editors/zed-adapter.mjs';
+import { approvedRoot, openState, runZed, takeBuild, bindOwner, chooseZedPath, runViewSource, chooseViewerPath, editorStateRoot, processIdentity } from '../../integrations/editors/zed-adapter.mjs';
 
 const directories = [];
 afterEach(() => { for (const path of directories.splice(0)) rmSync(path, { recursive: true, force: true }); });
@@ -310,17 +310,17 @@ test('owner start identity clears reused PID state and removes dead Texlab owner
 
 test('native picker invokes the app executable with literal paths and cancellation stays quiet', async () => {
   const f = fixture();
-  const executable = '/Placekeeper.app/Contents/MacOS/PlacekeeperMac';
+  const executable = '/Placekeeper.app/Contents/MacOS/placekeeper';
   assert.equal(await chooseZedPath('folder', f.root, { executable, run: async (command, args) => {
     assert.equal(command, executable);
-    assert.deepEqual(args, ['--zed-choose-folder', f.root]);
-    return { stdout: f.root + '\n' };
+    assert.deepEqual(args, ['choose-source-folder', f.root]);
+    return { stdout: JSON.stringify({ selected: f.root }) };
   } }), f.root);
   assert.equal(await runZed(['zed-forward', 'manual', f.source, '2', 'output'], options(f, {
     run: async (command, args) => {
       assert.equal(command, executable);
-      assert.deepEqual(args, ['--zed-choose-folder', join(f.root, 'chapters')]);
-      throw Object.assign(new Error('user cancelled'), { code: 2 });
+      assert.deepEqual(args, ['choose-source-folder', join(f.root, 'chapters')]);
+      return { stdout: JSON.stringify({ selected: null }) };
     },
   })), 0);
 });
@@ -442,10 +442,44 @@ test('source aliases retain SyncTeX spelling while canonical containment prevent
 
 test('generic native picker uses generic aliases and handles cancellation quietly', async () => {
   const f = fixture();
-  await chooseViewerPath('pdf', f.root, { executable: '/PlacekeeperMac', run: async (_command, args) => {
-    assert.deepEqual(args, ['--choose-source-pdf', f.root]); return { stdout: f.pdf + '\n' };
+  await chooseViewerPath('pdf', f.root, { executable: '/installed/placekeeper', run: async (_command, args) => {
+    assert.deepEqual(args, ['choose-source-pdf', f.root]); return { stdout: JSON.stringify({ selected: f.pdf }) };
   } });
   assert.equal(await runViewSource(viewArgs(f), options(f, { run: async (_command, args) => {
-    assert.equal(args[0], '--choose-source-folder'); throw Object.assign(new Error('cancelled'), { code: 2 });
+    assert.equal(args[0], 'choose-source-folder'); return { stdout: JSON.stringify({ selected: null }) };
   } })), 0);
+});
+
+test('chooser responses are bounded structured selections rather than raw authority', async () => {
+  const f = fixture();
+  await chooseViewerPath('folder', f.root, { executable: '/installed/placekeeper', run: async (_command, _args, options) => {
+    assert.equal(options.timeout, 125000); assert.equal(options.maxBuffer, 16 * 1024);
+    return { stdout: JSON.stringify({ selected: f.root }) };
+  } });
+  for (const stdout of [f.root, JSON.stringify({ selected: 'relative' }), JSON.stringify({ selected: f.root, executable: '/bin/sh' })]) {
+    await assert.rejects(chooseViewerPath('folder', f.root, { executable: '/installed/placekeeper', run: async () => ({ stdout }) }));
+  }
+});
+
+test('editor state follows each platform user-private application state location', () => {
+  assert.equal(editorStateRoot({ platform: 'darwin', home: '/Users/brad', env: {} }), '/Users/brad/Library/Application Support/Placekeeper/zed');
+  assert.equal(editorStateRoot({ platform: 'linux', home: '/home/brad', env: { XDG_STATE_HOME: '/state' } }), '/state/placekeeper/zed');
+  assert.equal(editorStateRoot({ platform: 'linux', home: '/home/brad', env: { XDG_STATE_HOME: 'relative' } }), '/home/brad/.local/state/placekeeper/zed');
+  assert.equal(editorStateRoot({ platform: 'win32', home: 'C:\\Users\\brad', env: { LOCALAPPDATA: 'C:\\Users\\brad\\AppData\\Local' } }), 'C:\\Users\\brad\\AppData\\Local\\Placekeeper\\zed');
+});
+
+test('preview owner identities use native process start identities with bounded commands', async () => {
+  assert.equal(await processIdentity(123, { platform: 'linux', read: path => path.endsWith('boot_id') ? 'boot\n' : '123 (texlab process) ' + ['S', ...Array(18).fill('0'), '987'].join(' ') }), 'boot:987');
+  assert.equal(await processIdentity(123, { platform: 'win32', env: { SystemRoot: 'C:\\Windows' }, run: async (command, args, options) => {
+    assert.equal(command, 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe');
+    assert.match(args.at(-1), /Get-Process -Id 123/u); assert.equal(options.timeout, 5000);
+    return { stdout: '12345678' };
+  } }), '12345678');
+});
+
+test('unidentifiable preview owners cannot jump while manual navigation remains usable', async () => {
+  const f = fixture(); seed(f);
+  const unavailable = async () => { throw new Error('process start unavailable'); };
+  assert.equal(await runZed(['zed-forward', 'preview', f.source, '2', f.pdf], options(f, { ownerIdentity: unavailable, run: () => assert.fail('uncertain preview cannot forward') })), 0);
+  assert.equal(await runZed(['zed-forward', 'manual', f.source, '2', 'output'], options(f, { ownerIdentity: unavailable, run: async () => ({ stdout: '' }), pick: () => assert.fail('approved project does not prompt') })), 0);
 });

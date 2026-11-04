@@ -9,6 +9,7 @@ const MAX_BUFFERED_FRAME_BYTES = MAX_APPLICATION_FRAME_BYTES + 32;
 
 interface ControlClient {
   readonly socket: Duplex;
+  readonly upgradeParticipantId?: string;
   buffer: Buffer;
   lastPongAt: number;
   lastApplicationFrameAt?: number;
@@ -65,6 +66,7 @@ export class SessionControlRegistry {
     socket: Duplex,
     initialData?: Buffer,
     lifecycle: {
+      readonly upgradeParticipantId?: string;
       readonly onDisconnect?: () => void;
       readonly readyEvent?: Readonly<Record<string, unknown>>;
     } = {},
@@ -73,6 +75,7 @@ export class SessionControlRegistry {
     this.#graceExpiresAt.delete(sessionId);
     const client: ControlClient = {
       socket,
+      ...(lifecycle.upgradeParticipantId === undefined ? {} : { upgradeParticipantId: lifecycle.upgradeParticipantId }),
       buffer: Buffer.alloc(0),
       lastPongAt: this.#now(),
     };
@@ -184,6 +187,11 @@ export class SessionControlRegistry {
         if (writes.size === 0) this.#writes.delete(sessionId);
       },
     };
+  }
+
+  upgradeCovered(has: (id: string) => boolean): boolean {
+    this.activity();
+    return this.#graceExpiresAt.size === 0 && [...this.#clients.values()].every(clients => [...clients].every(client => client.upgradeParticipantId !== undefined && has(client.upgradeParticipantId)));
   }
 
   activity(): { readonly reviewPresence: number; readonly transientWork: number } {

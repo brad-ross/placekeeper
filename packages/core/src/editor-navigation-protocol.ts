@@ -44,7 +44,21 @@ function keys(value: Record<string, unknown>, allowed: readonly string[]): boole
   return Object.keys(value).every(key => allowed.includes(key));
 }
 export function isEditorPath(value: unknown): value is string {
-  return typeof value === "string" && value.startsWith("/") && value.length <= 16_384 && !value.includes("\0");
+  if (typeof value !== "string" || value.length > 16_384 || value.includes("\0")) return false;
+  // Device namespaces are endpoints, never document or executable paths.
+  if (/^[\\/]{2}/u.test(value)) {
+    const parts = value.slice(2).split(/[\\/]/u);
+    return parts.length >= 2 && parts[0] !== "" && parts[0] !== "." && parts[0] !== ".." && parts[0] !== "?" &&
+      parts[1] !== "" && parts[1] !== "." && parts[1] !== "..";
+  }
+  return value.startsWith("/") || /^[A-Za-z]:[\\/]/u.test(value);
+}
+export function isLocalNeovimPipe(value: unknown): value is string {
+  return typeof value === "string" && value.length <= 16_384 &&
+    /^\\\\\.\\pipe\\[^\\/:\0\r\n]+$/iu.test(value) && ![".", ".."].includes(value.slice(9));
+}
+export function isEditorEndpoint(value: unknown): value is string {
+  return isLocalNeovimPipe(value) || (isEditorPath(value) && value.startsWith("/") && !value.startsWith("//"));
 }
 export function isEditorToken(value: unknown): value is string {
   return typeof value === "string" && TOKEN.test(value);
@@ -78,7 +92,7 @@ export function parseEditorControlRequest(value: unknown): EditorControlRequest 
   }
   if (value.operation === "register" && keys(value, ["operation", "profile", "sourceRoot", "socket"]) &&
     typeof value.profile === "string" && NAME.test(value.profile) && isEditorPath(value.sourceRoot) &&
-    (value.socket === undefined || isEditorPath(value.socket))) {
+    (value.socket === undefined || isEditorEndpoint(value.socket))) {
     return { operation: "register", profile: value.profile, sourceRoot: value.sourceRoot,
       ...(value.socket === undefined ? {} : { socket: value.socket }) };
   }

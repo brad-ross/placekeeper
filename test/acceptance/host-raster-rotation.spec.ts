@@ -232,3 +232,61 @@ for (const resourceHost of ['codex', 'browser'] as const) {
     });
   }
 }
+
+test('decoded host raster survives a key-return image remount and releases only on replacement or unmount', async ({ page }) => {
+  await page.route('**/host-raster-lifetime', route => route.fulfill({ contentType: 'text/html', body: '<!doctype html><div id="root"></div>' }));
+  await page.goto('/host-raster-lifetime');
+  const initial = await page.evaluate(async () => {
+    const { default: React } = await import(/* @vite-ignore */ ('/@id/react' as string)) as { default: typeof import('react') };
+    const { default: ReactDOM } = await import(/* @vite-ignore */ ('/@id/react-dom/client' as string)) as { default: typeof import('react-dom/client') };
+    const { default: { flushSync } } = await import(/* @vite-ignore */ ('/@id/react-dom' as string)) as { default: typeof import('react-dom') };
+    const { PDFContext } = await import(/* @vite-ignore */ ('/@id/@embedpdf/core/react' as string)) as { PDFContext: import('react').Context<unknown> };
+    const { HostRenderLayer } = await import(/* @vite-ignore */ ('/apps/web/src/pdf/HostRenderLayer.tsx' as string)) as typeof import('../../apps/web/src/pdf/HostRenderLayer.js');
+    const renders: Array<{ publish?: (blob: Blob) => void }> = [];
+    const revoked: string[] = [];
+    const revoke = URL.revokeObjectURL.bind(URL);
+    URL.revokeObjectURL = url => { revoked.push(url); revoke(url); };
+    const provides = { forDocument: () => ({ renderPage: () => {
+      const render: typeof renders[number] = {}; renders.push(render);
+      return { wait(publish: (blob: Blob) => void) { render.publish = publish; }, abort() {} };
+    } }) };
+    const registry = { getPlugin: () => ({ provides: () => provides, ready: () => Promise.resolve() }) };
+    const documentState = { scale: 1, rotation: 0, pageRefreshVersions: {}, document: { pages: [{ rotation: 0 }] } };
+    const context = { registry, coreState: { documents: { first: documentState, second: documentState } }, isInitializing: false };
+    const root = ReactDOM.createRoot(document.getElementById('root')!);
+    const render = (documentId: string) => flushSync(() => root.render(React.createElement(PDFContext.Provider, { value: context },
+      React.createElement(HostRenderLayer, { resourceHost: 'browser', documentId, pageIndex: 0, scale: 1, dpr: 1 }))));
+    const publish = () => renders.at(-1)!.publish!(new Blob(['<svg xmlns="http://www.w3.org/2000/svg" width="2" height="2"><rect width="2" height="2" fill="red"/></svg>'], { type: 'image/svg+xml' }));
+    const waitFor = async (predicate: () => boolean) => {
+      const deadline = performance.now() + 10_000;
+      while (!predicate()) { if (performance.now() >= deadline) throw new Error('Raster fixture did not settle'); await new Promise(requestAnimationFrame); }
+    };
+    render('first'); await waitFor(() => renders.at(-1)?.publish !== undefined); publish();
+    await waitFor(() => { const image = document.querySelector('img'); return image !== null && image.complete && image.naturalWidth > 0; });
+    const firstElement = document.querySelector('img')!;
+    const driver = { render, publish, revoked, firstElement, unmount: () => flushSync(() => root.unmount()) };
+    (window as unknown as { rasterDriver: typeof driver }).rasterDriver = driver;
+    return { url: firstElement.src, revoked: [...revoked] };
+  });
+  const readBlob = (url: string) => page.evaluate(async source => {
+    try { return (await fetch(source)).ok; } catch { return false; }
+  }, url);
+  // Decode completion does not retire a URL still referenced by React state.
+  expect(await readBlob(initial.url)).toBe(true);
+  expect(initial.revoked).toEqual([]);
+  await page.evaluate(documentId => (window as unknown as { rasterDriver: { render(id: string): void } }).rasterDriver.render(documentId), 'second');
+  await expect(page.locator('img')).toHaveCount(0);
+  expect(await readBlob(initial.url)).toBe(true);
+  await page.evaluate(() => (window as unknown as { rasterDriver: { render(id: string): void } }).rasterDriver.render('first'));
+  await expect(page.locator('img')).toHaveAttribute('src', initial.url);
+  await expect.poll(() => page.locator('img').evaluate(image => (image as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
+  expect(await page.evaluate(() => document.querySelector('img') !== (window as unknown as { rasterDriver: { firstElement: HTMLImageElement } }).rasterDriver.firstElement)).toBe(true);
+  await page.evaluate(() => (window as unknown as { rasterDriver: { publish(): void } }).rasterDriver.publish());
+  await expect.poll(() => page.locator('img').getAttribute('src')).not.toBe(initial.url);
+  const replacement = (await page.locator('img').getAttribute('src'))!;
+  await expect.poll(() => page.locator('img').evaluate(image => (image as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
+  expect(await readBlob(replacement)).toBe(true);
+  expect(await page.evaluate(() => (window as unknown as { rasterDriver: { revoked: string[] } }).rasterDriver.revoked)).toEqual([initial.url]);
+  await page.evaluate(() => (window as unknown as { rasterDriver: { unmount(): void } }).rasterDriver.unmount());
+  expect(await page.evaluate(() => (window as unknown as { rasterDriver: { revoked: string[] } }).rasterDriver.revoked)).toEqual([initial.url, replacement]);
+});

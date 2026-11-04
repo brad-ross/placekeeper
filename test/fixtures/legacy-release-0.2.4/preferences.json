@@ -1,0 +1,11 @@
+{
+  "Placekeeper.RestorableDocumentWindows.v1": [
+    {
+      "sourcePath": "/private/example/paper.pdf",
+      "frame": "{{100, 120}, {1200, 900}}",
+      "page": 3,
+      "zoom": 16
+    }
+  ],
+  "Placekeeper.AppZoom.v1": 1.25
+}

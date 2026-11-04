@@ -1,0 +1,348 @@
+{
+  "capturedAt": "2026-11-03T03:24:32.788Z",
+  "artifactIdentity": {
+    "daemonIdentity": "929a49efcbaeaab379880232e8d0fde79cd1d835a0398d689544e569e4dfacbb",
+    "installArtifactIdentity": "a2dcecdc89afeb12066f0407dfbf396f69eb47edf0ba86e8769db6c8c69bc2c0",
+    "appAsarSha256": "85d00880cfc7f48fda28280f6c11985a3dcf2fbc7328e04e3884ef0294d48fa7",
+    "runtimeManifestSha256": "ae09eab1caa4c70d002d2c60fb5b08ddba80d03e05a43a5585d1165e8f29e169",
+    "rendererAssetHashes": {
+      "electron.html": "f1f23842f04cfeda9751963d5b0d01f674ba9e94f5f09a8ddb064fd8b028a36e",
+      "assets/shell.js": "2260761b38488bbe8003201bd0e279920822af5f3dd6d2bdc1f89d066c1b49a8",
+      "assets/shell.css": "bd8d08c6f7d1820f0079970992ab08c1a352e5cfff01ee2f19c7c3209f70c019",
+      "assets/pdfium-worker.js": "4463487ece74309901036d06584c7296509eba9b26ff67d9154e32dfc8d04b5a",
+      "assets/pdfium.wasm": "c0af5a6aca30d7e54a149c3a68e317116ca906d6edc28fd3318b12c7d9478ac8"
+    }
+  },
+  "executable": "dist/desktop-artifacts/Placekeeper Candidate-darwin-arm64/Placekeeper Candidate.app/Contents/MacOS/PlacekeeperCandidate",
+  "source": "Paired synthetic PDF.pdf",
+  "isolatedRoot": "<disposable test root>",
+  "fixtureSha256": "63a501448978032a29e09263839edf54849713888644d4b4f8195dff88d48bd7",
+  "executableSha256": "171ec3c45577bc62ec6fdcbf040e1dd5b6aaff22d52ee830039e04a5be9d3a9f",
+  "devicePixelRatio": 2,
+  "viewport": {
+    "width": 1200,
+    "height": 764
+  },
+  "title": "Paired synthetic PDF.pdf",
+  "fields": [
+    {
+      "label": "Current page 1 of 6. Enter a page number",
+      "value": "1"
+    },
+    {
+      "label": "Current zoom 179 percent. Enter a zoom percentage",
+      "value": "179"
+    },
+    {
+      "label": null,
+      "value": ""
+    },
+    {
+      "label": null,
+      "value": ""
+    },
+    {
+      "label": null,
+      "value": ""
+    },
+    {
+      "label": null,
+      "value": ""
+    },
+    {
+      "label": null,
+      "value": ""
+    },
+    {
+      "label": null,
+      "value": ""
+    },
+    {
+      "label": null,
+      "value": ""
+    },
+    {
+      "label": null,
+      "value": ""
+    },
+    {
+      "label": null,
+      "value": ""
+    },
+    {
+      "label": null,
+      "value": ""
+    },
+    {
+      "label": null,
+      "value": ""
+    },
+    {
+      "label": "Search this PDF",
+      "value": ""
+    }
+  ],
+  "buttons": [
+    {
+      "label": "Paired synthetic PDF.pdf, Saved. Open automatic save options",
+      "title": "",
+      "text": "Paired synthetic PDF.pdfSaved"
+    },
+    {
+      "label": "Page 1 of 6. Open page navigation",
+      "title": "",
+      "text": "/ 6"
+    },
+    {
+      "label": "Copy link to current PDF location",
+      "title": "",
+      "text": ""
+    },
+    {
+      "label": "Back in document history",
+      "title": "Back in document history",
+      "text": ""
+    },
+    {
+      "label": "Forward in document history",
+      "title": "Forward in document history",
+      "text": ""
+    },
+    {
+      "label": "Undo",
+      "title": "Undo",
+      "text": ""
+    },
+    {
+      "label": "Redo",
+      "title": "Redo",
+      "text": ""
+    },
+    {
+      "label": "Open zoom controls",
+      "title": "",
+      "text": "%"
+    },
+    {
+      "label": null,
+      "title": "Open automatic save options",
+      "text": "Paired synthetic PDF.pdf"
+    },
+    {
+      "label": null,
+      "title": "Copy link to current location",
+      "text": ""
+    },
+    {
+      "label": null,
+      "title": "Open automatic save options",
+      "text": "Paired synthetic PDF.pdf"
+    },
+    {
+      "label": null,
+      "title": "Copy link to current location",
+      "text": ""
+    },
+    {
+      "label": null,
+      "title": "Open automatic save options",
+      "text": "Paired synthetic PDF.pdf"
+    },
+    {
+      "label": null,
+      "title": "Copy link to current location",
+      "text": ""
+    },
+    {
+      "label": null,
+      "title": "Open automatic save options",
+      "text": "Paired synthetic PDF.pdf"
+    },
+    {
+      "label": null,
+      "title": "Copy link to current location",
+      "text": ""
+    },
+    {
+      "label": "Open PDF link to Page 4",
+      "title": "Open link actions",
+      "text": ""
+    },
+    {
+      "label": "Open PDF link to Page 4",
+      "title": "Open link actions",
+      "text": ""
+    },
+    {
+      "label": "Open PDF link to Page 2",
+      "title": "Open link actions",
+      "text": ""
+    },
+    {
+      "label": "Open PDF link to Page 3",
+      "title": "Open link actions",
+      "text": ""
+    },
+    {
+      "label": "Open PDF link to Page 5",
+      "title": "Open link actions",
+      "text": ""
+    },
+    {
+      "label": "Open PDF link to Page 4",
+      "title": "Open link actions",
+      "text": ""
+    },
+    {
+      "label": "Open PDF link to Page 4",
+      "title": "Open link actions",
+      "text": ""
+    },
+    {
+      "label": "Show workspace",
+      "title": "",
+      "text": ""
+    },
+    {
+      "label": "Hide workspace",
+      "title": "",
+      "text": ""
+    },
+    {
+      "label": "Outline",
+      "title": "",
+      "text": "Outline"
+    },
+    {
+      "label": "Search",
+      "title": "",
+      "text": ""
+    },
+    {
+      "label": "Annotations",
+      "title": "",
+      "text": ""
+    },
+    {
+      "label": "Clear search",
+      "title": "Clear search",
+      "text": ""
+    },
+    {
+      "label": "1 Introduction, Page 1",
+      "title": "Go to 1 Introduction, Page 1",
+      "text": "1 Introduction1"
+    },
+    {
+      "label": "Open 1 Introduction, Page 1 in References",
+      "title": "",
+      "text": ""
+    },
+    {
+      "label": "Copy exact destination link for 1 Introduction, Page 1",
+      "title": "",
+      "text": ""
+    },
+    {
+      "label": "Secondary actions for 1 Introduction, Page 1",
+      "title": "",
+      "text": ""
+    },
+    {
+      "label": "2.3 The Aggregated Projection Matrix, Page 2",
+      "title": "Go to 2.3 The Aggregated Projection Matrix, Page 2",
+      "text": "2.3 The Aggregated Projection Matrix2"
+    },
+    {
+      "label": "Open 2.3 The Aggregated Projection Matrix, Page 2 in References",
+      "title": "",
+      "text": ""
+    },
+    {
+      "label": "Copy exact destination link for 2.3 The Aggregated Projection Matrix, Page 2",
+      "title": "",
+      "text": ""
+    },
+    {
+      "label": "Secondary actions for 2.3 The Aggregated Projection Matrix, Page 2",
+      "title": "",
+      "text": ""
+    },
+    {
+      "label": "3 Estimation, Page 3",
+      "title": "Go to 3 Estimation, Page 3",
+      "text": "3 Estimation3"
+    },
+    {
+      "label": "Open 3 Estimation, Page 3 in References",
+      "title": "",
+      "text": ""
+    },
+    {
+      "label": "Copy exact destination link for 3 Estimation, Page 3",
+      "title": "",
+      "text": ""
+    },
+    {
+      "label": "Secondary actions for 3 Estimation, Page 3",
+      "title": "",
+      "text": ""
+    },
+    {
+      "label": "References, Page 4",
+      "title": "Go to References, Page 4",
+      "text": "References4"
+    },
+    {
+      "label": "Open References, Page 4 in References",
+      "title": "",
+      "text": ""
+    },
+    {
+      "label": "Copy exact destination link for References, Page 4",
+      "title": "",
+      "text": ""
+    },
+    {
+      "label": "Secondary actions for References, Page 4",
+      "title": "",
+      "text": ""
+    },
+    {
+      "label": "Appendix A. Supplementary derivations, Page 5",
+      "title": "Go to Appendix A. Supplementary derivations, Page 5",
+      "text": "Appendix A. Supplementary derivations5"
+    },
+    {
+      "label": "Open Appendix A. Supplementary derivations, Page 5 in References",
+      "title": "",
+      "text": ""
+    },
+    {
+      "label": "Copy exact destination link for Appendix A. Supplementary derivations, Page 5",
+      "title": "",
+      "text": ""
+    },
+    {
+      "label": "Secondary actions for Appendix A. Supplementary derivations, Page 5",
+      "title": "",
+      "text": ""
+    }
+  ],
+  "image": {
+    "rect": {
+      "x": 52.2578125,
+      "y": 62,
+      "width": 1095.4765625,
+      "height": 1417.6796875,
+      "top": 62,
+      "right": 1147.734375,
+      "bottom": 1479.6796875,
+      "left": 52.2578125
+    },
+    "width": 2191,
+    "height": 2835
+  },
+  "pageText": "The document is ready.\n\nPaired synthetic PDF.pdf\nSaved\n/ 6\n%",
+  "errors": []
+}

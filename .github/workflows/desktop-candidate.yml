@@ -1,0 +1,217 @@
+name: Desktop installer candidate
+
+on:
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            target: darwin-arm64
+            platform: darwin
+            arch: arm64
+          - runner: macos-15-intel
+            target: darwin-x64
+            platform: darwin
+            arch: x64
+          - runner: windows-2025
+            target: win32-x64
+            platform: win32
+            arch: x64
+          - runner: ubuntu-24.04
+            target: linux-x64
+            platform: linux
+            arch: x64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 40
+    env:
+      PLACEKEEPER_DESKTOP_TARGET: ${{ matrix.target }}
+      REQUIRE_SYNCTEX_ACCEPTANCE: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.16.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.22.1
+          cache: pnpm
+      - name: Set up Windows native compiler
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+      - name: Install pinned NSIS bootstrap compiler
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          choco install nsis --version=3.11 -y --no-progress
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "PLACEKEEPER_MAKENSIS=C:\Program Files (x86)\NSIS\makensis.exe" >> $env:GITHUB_ENV
+      - name: Linux Debian maker tools
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y fakeroot dpkg xvfb build-essential
+      - name: Install real SyncTeX query tool
+        uses: r-lib/actions/setup-tinytex@v2
+      - name: Verify SyncTeX query tool on macOS or Linux
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          tlmgr update --self
+          tlmgr install synctex
+          synctex help
+          printf 'PLACEKEEPER_HOST_PATH=%s\n' "$PATH" >> "$GITHUB_ENV"
+      - name: Verify SyncTeX query tool on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          tlmgr.bat update --self
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          tlmgr.bat install synctex
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          synctex.exe help
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "PLACEKEEPER_HOST_PATH=$env:Path" >> $env:GITHUB_ENV
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Check catalog
+        run: pnpm catalog:check
+      - name: Check packaging
+        run: pnpm exec vitest run packaging/desktop/packaging.test.ts packaging/desktop/native-launcher.test.ts
+      - name: Generate PDF fixtures
+        run: pnpm fixtures:pdf
+      - name: Install platform browser test dependencies
+        run: pnpm exec playwright install --with-deps chromium
+      - name: Test native platform behavior
+        run: pnpm test:desktop-platform
+      - name: Build standalone payload
+        run: node --import tsx packaging/desktop/build.ts --target ${{ matrix.target }}
+      - name: Make desktop installer
+        id: make
+        run: pnpm --dir apps/electron make --platform=${{ matrix.platform }} --arch=${{ matrix.arch }}
+      - name: Locate the exact guarded artifact
+        shell: bash
+        run: |
+          node --input-type=module <<'JS'
+          import { appendFileSync, readdirSync } from 'node:fs';
+          import { resolve } from 'node:path';
+          const root = `dist/desktop-artifacts/make/guarded/${process.platform}/${process.arch}`;
+          const matches = readdirSync(root).filter(name => /\.(?:dmg|exe|deb)$/.test(name));
+          if (matches.length !== 1) throw Error('Expected one controlled installer');
+          appendFileSync(process.env.GITHUB_ENV, `PLACEKEEPER_NATIVE_INSTALLER_ARTIFACT=${resolve(root, matches[0])}\nPLACEKEEPER_NATIVE_INSTALLER_PORT=63828\n`);
+          JS
+      - name: Prepare packaged Linux sandbox ownership
+        if: runner.os == 'Linux'
+        run: |
+          sudo chown root:root dist/desktop-artifacts/Placekeeper-linux-x64/chrome-sandbox
+          sudo chmod 4755 dist/desktop-artifacts/Placekeeper-linux-x64/chrome-sandbox
+      - name: Test packaged candidate on Linux
+        if: runner.os == 'Linux'
+        run: xvfb-run -a pnpm test:desktop-installed
+      - name: Test packaged candidate on macOS or Windows
+        if: runner.os != 'Linux'
+        run: pnpm test:desktop-installed
+      - name: Upload installed-test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: placekeeper-native-tests-${{ matrix.target }}
+          path: |
+            test-results/
+            playwright-report/
+          if-no-files-found: ignore
+          retention-days: 14
+      - name: Record exact native build provenance
+        shell: bash
+        run: |
+          node --input-type=module <<'JS'
+          import { readFileSync, writeFileSync, mkdirSync, copyFileSync } from 'node:fs';
+          import { basename } from 'node:path';
+          import { createHash } from 'node:crypto';
+          const file = process.env.PLACEKEEPER_NATIVE_INSTALLER_ARTIFACT;
+          const bytes = readFileSync(file);
+          mkdirSync('artifacts/native', { recursive: true });
+          copyFileSync(file, `artifacts/native/${basename(file)}`);
+          writeFileSync('artifacts/native/build-result.json', JSON.stringify({
+            version: JSON.parse(readFileSync('apps/electron/package.json')).version,
+            commit: process.env.GITHUB_SHA, candidateRun: process.env.GITHUB_RUN_ID,
+            target: process.env.PLACEKEEPER_DESKTOP_TARGET, status: 'passed',
+            name: basename(file), sha256: createHash('sha256').update(bytes).digest('hex'),
+            scope: 'Hosted native build and packaged runtime tests only. Attended installer operation and full lifecycle testing are not claimed.'
+          }));
+          JS
+      - name: Upload tested built bytes
+        uses: actions/upload-artifact@v4
+        with:
+          name: placekeeper-desktop-${{ matrix.target }}
+          path: artifacts/native/
+          if-no-files-found: error
+          retention-days: 30
+
+  assemble:
+    needs: package
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.16.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.22.1
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test:desktop-release
+      - run: pnpm test:source-release
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: placekeeper-desktop-*
+          path: artifacts/input
+      - name: Assemble complete candidate with source fallback
+        shell: bash
+        run: |
+          version=$(node -p "require('./apps/electron/package.json').version")
+          pnpm exec tsx scripts/package-source-release.ts "$version" "$GITHUB_SHA" artifacts/input/source
+          pnpm exec tsx scripts/desktop-release.ts assemble "$version" "$GITHUB_SHA" "$GITHUB_RUN_ID" artifacts/input artifacts/complete
+      - uses: actions/upload-artifact@v4
+        with:
+          name: placekeeper-complete-candidate
+          path: artifacts/complete/
+          if-no-files-found: error
+          retention-days: 30
+
+  stage:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'brad-ross/placekeeper'
+    needs: assemble
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    concurrency:
+      group: placekeeper-release-publication
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.22.1
+      - uses: actions/download-artifact@v4
+        with:
+          name: placekeeper-complete-candidate
+          path: artifacts/complete
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.16.0
+      - run: pnpm install --frozen-lockfile
+      - name: Stage complete tested draft only
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(node -p "require('./apps/electron/package.json').version")
+          pnpm exec tsx scripts/desktop-release.ts stage "$version" "$GITHUB_SHA" "$GITHUB_RUN_ID" artifacts/complete

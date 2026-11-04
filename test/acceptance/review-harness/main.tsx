@@ -48,6 +48,7 @@ const rootElement = root;
 rootElement.setAttribute('data-authoring-preview-updates', '0');
 const visualScenario = resolveVisualScenario(window.location.search);
 const previewParameters = new URLSearchParams(window.location.search);
+const singlePageHistoryPreview = previewParameters.get('history') === 'single-page';
 const responsiveFullChrome = previewParameters.get('responsive') === 'full';
 const saveEstablishing = previewParameters.has('establishing');
 const reconciliationPreview = previewParameters.get('reconciliation');
@@ -388,8 +389,8 @@ function createHarnessViewerControls(): HarnessViewerControls {
     ready: true,
     pageReady: true,
     zoomReady: true,
-    currentPage: 3,
-    totalPages: 12,
+    currentPage: singlePageHistoryPreview ? 1 : 3,
+    totalPages: singlePageHistoryPreview ? 1 : 12,
     zoomPercent: 110,
   };
 
@@ -615,6 +616,8 @@ function Harness() {
   const [holdNextCommand, setHoldNextCommand] = useState(false);
   const commandReleaseRef = useRef<(() => void) | null>(null);
   const [navigated, setNavigated] = useState('none');
+  const [documentHistoryPosition, setDocumentHistoryPosition] = useState(1);
+  const [documentHistoryCommands, setDocumentHistoryCommands] = useState<string[]>([]);
   const [existingAnnotationGeneration, setExistingAnnotationGeneration] = useState(1);
   const [pageMenuOpen, setPageMenuOpen] = useState(visualScenario?.pageMenuOpen ?? false);
   const [keyboardPageNoteActive, setKeyboardPageNoteActive] = useState(false);
@@ -961,6 +964,18 @@ function Harness() {
         viewerNavigation: viewerNavigationRef.current,
       }}
       workspace={{
+        ...(singlePageHistoryPreview ? {
+          canNavigateBack: documentHistoryPosition > 0,
+          canNavigateForward: documentHistoryPosition < 1,
+          onNavigateBack: () => {
+            setDocumentHistoryPosition(0);
+            setDocumentHistoryCommands((commands) => [...commands, 'back']);
+          },
+          onNavigateForward: () => {
+            setDocumentHistoryPosition(1);
+            setDocumentHistoryCommands((commands) => [...commands, 'forward']);
+          },
+        } : {}),
         ...(visualScenario ? {
           ...(visualScenario.name === 'outline' ? {
             copyLinkForOutlineItem: (item) => (
@@ -1244,6 +1259,7 @@ function Harness() {
           data-kinds={state.items.map(({ kind }) => kind).join(',')}
           data-navigated={navigated}
           data-anchor-kind={anchorKind}
+          data-document-history-commands={documentHistoryCommands.join(',')}
           data-viewer-page-commands={viewerControls.pageCommands.join(',')}
           data-viewer-page-requests={directPageRequests}
           data-viewer-zoom-requests={zoomRequests}
@@ -1428,7 +1444,7 @@ if (previewParameters.has('fit-modes')) {
       source: { name: filename, bytes: new Uint8Array(await response.arrayBuffer()) },
       viewerAssets: { pdfiumWasm: '/dist/web/pdfium.wasm', workerUrl: '/dist/web/pdfium-worker.js' },
     });
-    reactRoot.render(<RuntimeProductionReviewApp runtime={runtime} />);
+    reactRoot.render(<RuntimeProductionReviewApp runtime={runtime} onDocumentReady={generation => root.setAttribute('data-runtime-ready-generation', String(generation))} />);
   }).catch((error: unknown) => reactRoot.render(<div role="alert">{String(error)}</div>));
 } else {
   reactRoot.render(previewParameters.has('host-history') ? <DeferredHostHistoryPreview />

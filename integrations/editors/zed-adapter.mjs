@@ -3,7 +3,7 @@
 import { execFile, spawn } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, realpathSync, readFileSync, statSync, readdirSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve, sep, win32 } from 'node:path';
 import { promisify } from 'node:util';
 import { DatabaseSync } from 'node:sqlite';
 
@@ -13,7 +13,15 @@ const inside = (root, path) => {
   const rel = relative(root, path);
   return rel !== '' && !isAbsolute(rel) && rel !== '..' && !rel.startsWith('..' + sep);
 };
-export function openState(directory = join(homedir(), 'Library/Application Support/Placekeeper/zed')) {
+export function editorStateRoot({ platform = process.platform, env = process.env, home = homedir() } = {}) {
+  const path = platform === 'win32' ? win32 : { join, isAbsolute };
+  const override = value => value && path.isAbsolute(value) && !value.includes('\0') ? value : undefined;
+  const root = platform === 'darwin' ? path.join(home, 'Library', 'Application Support', 'Placekeeper')
+    : platform === 'win32' ? path.join(override(env.LOCALAPPDATA) ?? path.join(home, 'AppData', 'Local'), 'Placekeeper')
+    : path.join(override(env.XDG_STATE_HOME) ?? path.join(home, '.local', 'state'), 'placekeeper');
+  return path.join(root, 'zed');
+}
+export function openState(directory = editorStateRoot()) {
   mkdirSync(directory, { recursive: true, mode: 0o700 });
   const path = join(directory, 'navigation.sqlite');
   const db = new DatabaseSync(path);
@@ -72,21 +80,30 @@ export function bindOwner(db, owner, identity, alive = isAlive) {
     db.exec('COMMIT');
   } catch (error) { db.exec('ROLLBACK'); throw error; }
 }
-async function processIdentity(owner) {
-  const value = (await exec('/bin/ps', ['-p', String(owner), '-o', 'lstart='])).stdout.trim();
+export async function processIdentity(owner, { platform = process.platform, run = exec, read = readFileSync, env = process.env } = {}) {
+  if (!Number.isSafeInteger(owner) || owner < 1) throw new Error('Texlab owner process is unavailable');
+  let value;
+  if (platform === 'linux') {
+    const stat = read(`/proc/${owner}/stat`, 'utf8');
+    const fields = stat.slice(stat.lastIndexOf(')') + 1).trim().split(/\s+/u);
+    if (!/^[0-9]+$/u.test(fields[19] ?? '')) throw new Error('Texlab owner process is unavailable');
+    value = read('/proc/sys/kernel/random/boot_id', 'utf8').trim() + ':' + fields[19];
+  } else if (platform === 'win32') {
+    if (!env.SystemRoot || !win32.isAbsolute(env.SystemRoot)) throw new Error('Texlab owner process is unavailable');
+    value = (await run(win32.join(env.SystemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
+      ['-NoProfile', '-NonInteractive', '-Command', `[Console]::Write((Get-Process -Id ${owner} -ErrorAction Stop).StartTime.ToUniversalTime().Ticks)`],
+      { timeout: 5000, maxBuffer: 4096, windowsHide: true })).stdout.trim();
+    if (!/^[0-9]+$/u.test(value)) throw new Error('Texlab owner process is unavailable');
+  } else {
+    value = (await run('/bin/ps', ['-p', String(owner), '-o', 'lstart='], { timeout: 5000, maxBuffer: 4096 })).stdout.trim();
+  }
   if (!value) throw new Error('Texlab owner process is unavailable');
   return value;
 }
 
 class SelectionCancelled extends Error {}
-export async function chooseZedPath(kind, start, { executable, run = exec }) {
-  try {
-    const result = await run(executable, [kind === 'folder' ? '--zed-choose-folder' : '--zed-choose-pdf', start]);
-    return realpathSync(result.stdout.replace(/\n$/u, ''));
-  } catch (error) {
-    if (error.code === 2) throw new SelectionCancelled();
-    throw error;
-  }
+export async function chooseZedPath(kind, start, options) {
+  return chooseViewerPath(kind, start, options);
 }
 export async function approvedRoot(db, source, pick, scope) {
   const canonical = realpathSync(source);
@@ -127,9 +144,9 @@ async function compile(executable, argv) {
   });
 }
 export async function runZed(args, { launcher, owner, run = exec, pick, db,
-  build = compile, alive = isAlive, ownerIdentity = processIdentity, configPath = join(homedir(), 'Library/Application Support/Placekeeper/zed/editor.json') }) {
+  build = compile, alive = isAlive, ownerIdentity = processIdentity, configPath = join(editorStateRoot(), 'editor.json') }) {
   try {
-    pick ??= (kind, start) => chooseZedPath(kind, start, { executable: join(dirname(launcher), 'PlacekeeperMac'), run });
+    pick ??= (kind, start) => chooseZedPath(kind, start, { executable: launcher, run });
     try { db ??= openState(); } catch (error) {
       if (args[0] !== 'zed-build') throw error;
       const [, executable, ...argv] = args;
@@ -137,8 +154,10 @@ export async function runZed(args, { launcher, owner, run = exec, pick, db,
       return await build(executable, argv);
     }
     let tracked = true;
-    try { bindOwner(db, owner, typeof ownerIdentity === 'function' ? await ownerIdentity(owner) : ownerIdentity, alive); }
-    catch (error) { if (args[0] !== 'zed-build') throw error; tracked = false; }
+    if (args[0] === 'zed-build' || args[1] === 'preview') {
+      try { bindOwner(db, owner, typeof ownerIdentity === 'function' ? await ownerIdentity(owner) : ownerIdentity, alive); }
+      catch { if (args[0] !== 'zed-build') return 0; tracked = false; }
+    }
     const call = async argv => (await run(launcher, argv, { maxBuffer: 64 * 1024 })).stdout.trim();
     if (args[0] === 'zed-build') {
       const [, executable, ...argv] = args;
@@ -242,17 +261,17 @@ export async function runViewSource(args, options) {
       throw new Error('Invalid viewer source location');
     }
     const { launcher, run = exec, owner = process.ppid, alive = isAlive, ownerIdentity = processIdentity,
-      configPath = join(homedir(), 'Library/Application Support/Placekeeper/zed/editor.json') } = options;
+      configPath = join(editorStateRoot(), 'editor.json') } = options;
     db ??= openState();
     const call = async argv => (await run(launcher, argv, { maxBuffer: 64 * 1024 })).stdout.trim();
     let fence;
     if (intent === 'preview') {
-      bindOwner(db, owner, typeof ownerIdentity === 'function' ? await ownerIdentity(owner) : ownerIdentity, alive);
+      try { bindOwner(db, owner, typeof ownerIdentity === 'function' ? await ownerIdentity(owner) : ownerIdentity, alive); } catch { return 0; }
       fence = takeBuild(db, owner, alive);
       if (!fence) return 0;
     }
     const pick = options.pick ?? ((kind, start) => chooseViewerPath(kind, start, {
-      executable: join(dirname(launcher), 'PlacekeeperMac'), run }));
+      executable: launcher, run }));
     return await navigate({ db, file, line, destination, pdfDirectory, socket, editor, configPath, call, pick, fence });
   } catch (error) {
     if (error instanceof SelectionCancelled) return 0;
@@ -261,11 +280,13 @@ export async function runViewSource(args, options) {
 }
 
 export async function chooseViewerPath(kind, start, { executable, run = exec }) {
-  try {
-    const result = await run(executable, [kind === 'folder' ? '--choose-source-folder' : '--choose-source-pdf', start]);
-    return realpathSync(result.stdout.replace(/\n$/u, ''));
-  } catch (error) {
-    if (error.code === 2) throw new SelectionCancelled();
-    throw error;
-  }
+  if (!['folder', 'pdf'].includes(kind) || !isAbsolute(start) || start.includes('\0')) throw new Error('Invalid native chooser request');
+  const result = await run(executable, [kind === 'folder' ? 'choose-source-folder' : 'choose-source-pdf', start], {
+    timeout: 125000, maxBuffer: 16 * 1024, windowsHide: true,
+  });
+  const response = JSON.parse(result.stdout);
+  if (!response || typeof response !== 'object' || Array.isArray(response) || Object.keys(response).length !== 1 ||
+      !Object.hasOwn(response, 'selected') || (response.selected !== null && (typeof response.selected !== 'string' || !isAbsolute(response.selected) || response.selected.includes('\0')))) throw new Error('Invalid native chooser response');
+  if (response.selected === null) throw new SelectionCancelled();
+  return realpathSync(response.selected);
 }

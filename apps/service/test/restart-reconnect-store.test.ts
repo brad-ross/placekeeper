@@ -1,19 +1,26 @@
-import { mkdtemp, readdir, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 
 import { RestartReconnectStore } from "../src/context/restart-reconnect-store.js";
+import { establishPrivateDirectory, verifyPrivatePath } from "../src/platform/private-storage.js";
+import { closeWindowsNativeWorker } from "../src/platform/windows-native-worker.js";
+import { digestSecretHex } from "../../../packages/core/src/session-security.js";
+import * as publication from "../src/platform/file-publication.js";
 
 const roots: string[] = [];
+afterAll(() => closeWindowsNativeWorker());
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "placekeeper-reconnect-"));
   roots.push(root);
+  await establishPrivateDirectory(root);
   let now = 1_000;
   const store = new RestartReconnectStore(join(root, "tickets"), {
     now: () => new Date(now),
@@ -172,6 +179,68 @@ describe("restart reconnect tickets", () => {
 });
 
 describe("native reconnect ticket purpose and peer scope", () => {
+  it("durably reopens private tickets with idempotent issuance and preserves native scope through rejection and one-shot consumption", async () => {
+    const { store, advance } = await fixture();
+    const native = { runtimeId: "runtime_a", attemptId: "attempt_a", documentGeneration: 3 };
+    const issued = { ...ticket, browserToken: "native-persisted", native };
+    await store.issue(issued);
+    const path = join(store.directory, `${digestSecretHex(issued.browserToken)}.json`);
+    await verifyPrivatePath(path, "file");
+    const bytes = await readFile(path);
+    const restarted = new RestartReconnectStore(store.directory, { now: () => new Date(1_000), ttlMs: 100 });
+    await restarted.initialize();
+    await restarted.issue(issued);
+    expect(await readFile(path)).toEqual(bytes);
+    const matched = await restarted.matchNative({ ...native, ticket: issued.browserToken });
+    expect(matched).toMatchObject({ native, sourceDigest: ticket.sourceDigest });
+    for (const wrong of [
+      { ...native, runtimeId: "other-runtime" },
+      { ...native, attemptId: "other-attempt" },
+      { ...native, documentGeneration: 4 },
+    ]) {
+      expect(await restarted.matchNative({ ...wrong, ticket: issued.browserToken })).toBeUndefined();
+    }
+    expect(await restarted.matchNative({ ...native, ticket: "other-ticket" })).toBeUndefined();
+    expect(await restarted.consumeForTask(matched!, "other-task")).toBe(false);
+    expect(await readFile(path)).toEqual(bytes);
+    expect(await restarted.consumeForTask(matched!, ticket.taskSessionId)).toBe(true);
+    expect(await restarted.consumeForTask(matched!, ticket.taskSessionId)).toBe(false);
+    expect(await restarted.matchNative({ ...native, ticket: issued.browserToken })).toBeUndefined();
+    await store.issue(issued);
+    const staged = await store.matchNative({ ...native, ticket: issued.browserToken });
+    advance(100);
+    expect(await store.matchNative({ ...native, ticket: issued.browserToken })).toBeUndefined();
+    expect(await store.consumeForTask(staged!, ticket.taskSessionId)).toBe(false);
+    await store.initialize();
+    expect(await readdir(store.directory)).toEqual([]);
+  });
+
+  it("cleans failed publication staging, preserves a peer ticket and recovers the serialized writer for retry", async () => {
+    const { store } = await fixture();
+    await store.issue(ticket);
+    const originalPath = join(store.directory, `${digestSecretHex(ticket.browserToken)}.json`);
+    const original = await readFile(originalPath);
+    const blocked = { ...ticket, browserToken: "blocked-ticket", native: { runtimeId: "runtime", attemptId: "attempt", documentGeneration: 1 } };
+    const blockedPath = join(store.directory, `${digestSecretHex(blocked.browserToken)}.json`);
+    // Establish the collision after the ticket lookup, immediately before the
+    // actual OS publication. The real native publisher must reject it.
+    const publish = publication.publishFile;
+    const racingPublication = vi.spyOn(publication, "publishFile").mockImplementationOnce(async (candidate, target, options) => {
+      await mkdir(target);
+      return publish(candidate, target, options);
+    });
+    await expect(store.issue(blocked)).rejects.toThrow();
+    expect(racingPublication).toHaveBeenCalledOnce();
+    racingPublication.mockRestore();
+    expect(await readFile(originalPath)).toEqual(original);
+    expect((await readdir(store.directory)).filter(name => name.endsWith(".tmp"))).toEqual([]);
+    await rm(blockedPath, { recursive: true });
+    await store.issue(blocked);
+    await verifyPrivatePath(blockedPath, "file");
+    expect(await store.matchNative({ ...blocked.native, ticket: blocked.browserToken })).toBeDefined();
+    expect(await store.matchBrowser(ticket)).toBeDefined();
+  });
+
   it("retains both native peer tickets while preserving browser single-ticket replacement", async () => {
     const { store } = await fixture();
     const native = { runtimeId: "runtime_a", attemptId: "attempt_a", documentGeneration: 1 };

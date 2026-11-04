@@ -1,5 +1,5 @@
 import { defineConfig } from '@playwright/test';
-import { browserDefaults, browserUseDefaults, serverDefaults } from '../browser-config';
+import { browserDefaults, browserUseDefaults, serverDefaults, browserTestOrigin, browserTestServerCommand } from '../browser-config';
 import { browserTestFiles } from '../suites';
 
 export default defineConfig({
@@ -8,12 +8,12 @@ export default defineConfig({
   testMatch: browserTestFiles.default,
   use: {
     ...browserUseDefaults,
-    baseURL: 'http://127.0.0.1:4173',
+    baseURL: browserTestOrigin,
     browserName: 'chromium',
   },
   webServer: {
-    command: 'pnpm exec vite --host 127.0.0.1 --port 4173',
-    url: 'http://127.0.0.1:4173/test/conformance/viewer-harness/index.html',
+    command: browserTestServerCommand,
+    url: `${browserTestOrigin}/test/conformance/viewer-harness/index.html`,
     ...serverDefaults,
   },
 });

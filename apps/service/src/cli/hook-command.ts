@@ -8,7 +8,7 @@ import {
   type CodexDisplayReceipt,
 } from "../../../../packages/core/src/codex-mcp-protocol.js";
 import { homedir } from "node:os";
-import { isAbsolute, join } from "node:path";
+import { isAbsolute, join, resolve, win32 } from "node:path";
 
 import { parseNativeReconnectGuidance, type LiveContextRefreshResult } from "../../../../packages/core/src/live-context.js";
 import {
@@ -31,8 +31,24 @@ const INSTALLED_LAUNCHER_RELATIVE_PATH = "Applications/Placekeeper.app/Contents/
 export const CODEX_INSTALLED_LAUNCHER_COMMAND =
   '"$HOME/Applications/Placekeeper.app/Contents/MacOS/placekeeper"';
 
+function configuredLauncherPath(): string | undefined {
+  const candidate = process.env.PLACEKEEPER_LAUNCHER ?? process.env.PLACEKEEPER_CANDIDATE_LAUNCHER;
+  return candidate !== undefined && (process.platform === "win32" ? win32.isAbsolute(candidate) : isAbsolute(candidate)) && !/[\0\r\n]/u.test(candidate)
+    ? candidate : undefined;
+}
+
 export function installedLauncherPath(homeDirectory = homedir()): string {
-  return join(homeDirectory, INSTALLED_LAUNCHER_RELATIVE_PATH);
+  return configuredLauncherPath() ?? join(homeDirectory, INSTALLED_LAUNCHER_RELATIVE_PATH);
+}
+
+/** Prompt instructions use the same literal native command as the generated
+ * skill. Keep the published Mac alias only for legacy unconfigured hosts. */
+function installedLauncherCommand(): string {
+  const launcher = configuredLauncherPath();
+  if (launcher === undefined) return CODEX_INSTALLED_LAUNCHER_COMMAND;
+  return process.platform === "win32"
+    ? `& '${launcher.replaceAll("\\", "/").replaceAll("'", "''")}'`
+    : `'${launcher.replaceAll("'", "'\\''")}'`;
 }
 
 interface JsonObject {
@@ -47,6 +63,7 @@ export type HookLifecycleEvent =
       readonly documentGeneration: number;
       readonly bindProof: string;
       readonly native?: true;
+      readonly desktop?: true;
     }
   | { readonly kind: "attest"; readonly taskSessionId: string; readonly receipt: CodexDisplayReceipt }
   | { readonly kind: "refresh"; readonly taskSessionId: string }
@@ -66,27 +83,29 @@ function taskIdentity(event: JsonObject): string | undefined {
 }
 
 /** Fail-closed tokenizer for the one supported launcher command shape. */
-function tokenizeSimpleCommand(command: string): readonly string[] | undefined {
+function tokenizeSimpleCommand(command: string, powershell = false): readonly string[] | undefined {
   if (command.length === 0 || command.length > 16_384) return undefined;
   const tokens: string[] = [];
   let token = "";
   let quote: "single" | "double" | undefined;
   let escaped = false;
   let tokenStarted = false;
-  for (const character of command) {
+  for (let index = 0; index < command.length; index++) {
+    const character = command[index]!;
     if (escaped) {
       token += character;
       tokenStarted = true;
       escaped = false;
       continue;
     }
-    if (quote !== "single" && character === "\\") {
+    if (!powershell && quote !== "single" && character === "\\") {
       escaped = true;
       tokenStarted = true;
       continue;
     }
     if (quote === "single") {
-      if (character === "'") quote = undefined;
+      if (character === "'" && powershell && command[index + 1] === "'") { token += "'"; index++; }
+      else if (character === "'") quote = undefined;
       else token += character;
       continue;
     }
@@ -114,41 +133,55 @@ function tokenizeSimpleCommand(command: string): readonly string[] | undefined {
 /** Resolve only the exact published $HOME token. All other shell expansion and
  * composition remains forbidden by tokenizeSimpleCommand(). */
 function tokenizeCodexOpenCommand(command: string): readonly string[] | undefined {
+  // The Windows skill publishes exactly one direct PowerShell call. Only its
+  // leading call operator is allowed; shell composition remains forbidden.
+  if (process.platform === "win32" && command.startsWith("& '")) return tokenizeSimpleCommand(command.slice(2), true);
   if (!command.startsWith(CODEX_INSTALLED_LAUNCHER_COMMAND)) {
     return tokenizeSimpleCommand(command);
   }
   const remainder = command.slice(CODEX_INSTALLED_LAUNCHER_COMMAND.length);
   if (remainder.length === 0 || !/^[ \t]/u.test(remainder)) return undefined;
   const args = tokenizeSimpleCommand(remainder.replace(/^[ \t]+/u, ""));
-  return args === undefined ? undefined : [installedLauncherPath(), ...args];
+  return args === undefined ? undefined : [join(homedir(), INSTALLED_LAUNCHER_RELATIVE_PATH), ...args];
 }
 
-function codexOpenSurface(value: unknown): "codex" | "codex-native" | undefined {
+function codexOpenSurface(value: unknown): "codex" | "codex-native" | "electron" | undefined {
   if (!isObject(value) || typeof value.command !== "string") return undefined;
   const tokens = tokenizeCodexOpenCommand(value.command);
   if (
     tokens === undefined ||
-    (tokens[0] !== installedLauncherPath() && tokens[0] !== "placekeeper")
+    ((process.platform === "win32" ? tokens[0]?.replaceAll("\\", "/") !== installedLauncherPath().replaceAll("\\", "/") : tokens[0] !== installedLauncherPath()) && tokens[0] !== "placekeeper" &&
+      !(process.platform === "darwin" && process.env.PLACEKEEPER_APP_RESOURCES !== undefined &&
+        tokens[0] === resolve(process.env.PLACEKEEPER_APP_RESOURCES, "../../MacOS/placekeeper")))
   ) return undefined;
   try {
     if (tokens[1] === "open-link") {
       const request = parseOpenLinkArguments(tokens.slice(1));
+      if (request.operation === "open" && request.desktop === "electron") return "electron";
       return request.operation === "open" && (request.surface === "codex" || request.surface === "codex-native") ? request.surface : undefined;
     }
     const request = parseOpenArguments(tokens.slice(1));
+    if (request.desktop === "electron" && isAbsolute(request.pdfPath)) return "electron";
     return (request.surface === "codex" || request.surface === "codex-native") && isAbsolute(request.pdfPath) ? request.surface : undefined;
   } catch {
     return undefined;
   }
 }
 
-function launchResponse(value: unknown, surface: "codex" | "codex-native"): Omit<Extract<HookLifecycleEvent, { kind: "claim" }>, "kind" | "taskSessionId"> | undefined {
+function launchResponse(value: unknown, surface: "codex" | "codex-native" | "electron"): Omit<Extract<HookLifecycleEvent, { kind: "claim" }>, "kind" | "taskSessionId"> | undefined {
   const output = typeof value === "string" ? value : undefined;
   if (output === undefined) return undefined;
   const serialized = output.trim();
   if (serialized.length === 0 || Buffer.byteLength(serialized) > 65_536) return undefined;
   let parsed: unknown;
   try { parsed = JSON.parse(serialized) as unknown; } catch { return undefined; }
+  if (surface === "electron") {
+    if (!isObject(parsed) || parsed.ok !== true || parsed.surface !== "electron" || parsed.native !== true ||
+        !["opened", "focused"].includes(String(parsed.kind)) || typeof parsed.sessionId !== "string" || !REVIEW_IDENTIFIER.test(parsed.sessionId) ||
+        !Number.isSafeInteger(parsed.documentGeneration) || (parsed.documentGeneration as number) < 1 || typeof parsed.bindProof !== "string" || !SECRET.test(parsed.bindProof) ||
+        typeof parsed.launchId !== "string" || !SECRET.test(parsed.launchId) || typeof parsed.expiresAt !== "string" || !Number.isFinite(Date.parse(parsed.expiresAt))) return undefined;
+    return { reviewSessionId: parsed.sessionId, documentGeneration: parsed.documentGeneration as number, bindProof: parsed.bindProof, native: true, desktop: true };
+  }
   if (surface === "codex-native") {
     const native = parseCodexNativeLaunchSuccess(parsed);
     return native === undefined ? undefined : { reviewSessionId: native.sessionId, documentGeneration: native.documentGeneration, bindProof: native.bindProof, native: true };
@@ -258,7 +291,7 @@ function compactReviewChanges(result: Extract<LiveContextRefreshResult, { status
     editedCount: changes.edited.length,
     removedCount: changes.removed.length,
     completeChanges: "retrieve",
-    retrievalCommand: `${CODEX_INSTALLED_LAUNCHER_COMMAND} context changes --handle <handle> --offset <n> --limit <1..256>`,
+    retrievalCommand: `${installedLauncherCommand()} context changes --handle <handle> --offset <n> --limit <1..256>`,
   };
 }
 
@@ -342,9 +375,9 @@ export function formatPromptContext(
       maxBytes: result.evidence.handle.maxBytes,
       descriptors: result.evidence.descriptors,
       retrievedDataClassification: "untrusted-data",
-      reviewItemsInstruction: `Run ${CODEX_INSTALLED_LAUNCHER_COMMAND} context items --handle <handle> [--page <zero-based-page>] [--offset <n>] [--limit <1..256>] to retrieve the complete current canonical Review Items. For a compacted delta, run ${CODEX_INSTALLED_LAUNCHER_COMMAND} context changes --handle <handle> and follow nextOffset until absent so removals remain recoverable.`,
-      pdfInstruction: `Use ${CODEX_INSTALLED_LAUNCHER_COMMAND} context evidence with this handle, not the browser URL, to retrieve bounded PDF text, layout, render, document, or raw-annotation evidence. The generic PDF skill should inspect retrieved PDF/page evidence when layout matters.`,
-      sourceWorkInstruction: `Discussion is read-only. Only when the user requests source changes, use ${CODEX_INSTALLED_LAUNCHER_COMMAND} context source begin with this handle, then follow the installed skill's guarded reconcile, ordinary Codex edit, optional clean-rebuild verification, and complete-disposition protocol in this task. Never create a handoff bundle or fresh task.`,
+      reviewItemsInstruction: `Run ${installedLauncherCommand()} context items --handle <handle> [--page <zero-based-page>] [--offset <n>] [--limit <1..256>] to retrieve the complete current canonical Review Items. For a compacted delta, run ${installedLauncherCommand()} context changes --handle <handle> and follow nextOffset until absent so removals remain recoverable.`,
+      pdfInstruction: `Use ${installedLauncherCommand()} context evidence with this handle, not the browser URL, to retrieve bounded PDF text, layout, render, document, or raw-annotation evidence. The generic PDF skill should inspect retrieved PDF/page evidence when layout matters.`,
+      sourceWorkInstruction: `Discussion is read-only. Only when the user requests source changes, use ${installedLauncherCommand()} context source begin with this handle, then follow the installed skill's guarded reconcile, ordinary Codex edit, optional clean-rebuild verification, and complete-disposition protocol in this task. Never create a handoff bundle or fresh task.`,
     },
   };
   const serialized = JSON.stringify(envelope);
@@ -378,7 +411,7 @@ export function formatPromptContext(
       handle: result.evidence.handle.value,
       expiresAt: result.evidence.handle.expiresAt,
       retrievedDataClassification: "untrusted-data",
-      instruction: `Run ${CODEX_INSTALLED_LAUNCHER_COMMAND} context items with this handle for paginated canonical Review Items; use ${CODEX_INSTALLED_LAUNCHER_COMMAND} context changes for a compacted delta and context evidence for bounded PDF evidence.`,
+      instruction: `Run ${installedLauncherCommand()} context items with this handle for paginated canonical Review Items; use ${installedLauncherCommand()} context changes for a compacted delta and context evidence for bounded PDF evidence.`,
       sourceWorkInstruction: "For user-requested source work only, begin the installed same-task source protocol with this handle; ordinary Codex tools remain the only writer.",
     },
   });
@@ -439,7 +472,9 @@ export async function runHookCommand(
       } else if (response.kind === "binding" || response.kind === "codex-binding") {
         await write(`${JSON.stringify(hookOutput(
           "PostToolUse",
-          event.native === true
+          event.desktop === true
+            ? "Placekeeper associated this launch with the current task. Live context becomes current only after the correlated desktop window is visible and its document is authenticated."
+            : event.native === true
             ? "Placekeeper associated this launch with the current task. Display the handoff in the native panel; live context becomes current after trusted display attestation and authenticated readiness."
             : "Placekeeper associated this launch with the current task. Live context will become current after the in-app browser completes its authenticated bootstrap.",
         ))}\n`);

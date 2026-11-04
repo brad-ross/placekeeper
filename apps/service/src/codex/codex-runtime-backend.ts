@@ -1,3 +1,5 @@
+import { createUpgradeReviewProtection, type UpgradeReviewParticipants } from "../host/upgrade-review-participants.js";
+import type { UpgradeReviewSettlement } from "../../../../packages/core/src/upgrade-review-protocol.js";
 import { createHash, randomBytes } from "node:crypto";
 import { readFile, realpath } from "node:fs/promises";
 import { join, sep } from "node:path";
@@ -42,6 +44,7 @@ interface Presentation {
 /** Trusted native effects and immutable resource handles. No path or service
  * credential crosses this boundary; the caller fences authority around awaits. */
 export class CodexServiceRuntimeBackend {
+  upgradeParticipants?: UpgradeReviewParticipants;
   readonly #broker: SessionBroker;
   readonly #saving: PdfSaveCoordinator;
   readonly #review: LocalReviewBackend;
@@ -69,6 +72,7 @@ export class CodexServiceRuntimeBackend {
   attach(scope: CodexActiveScope): void {
     this.detach(scope.runtimeId);
     const ownerKey = `codex:${scope.runtimeId}`;
+    this.upgradeParticipants?.attach(ownerKey, createUpgradeReviewProtection(this.#broker, this.#saving, scope.sessionId));
     this.#presentations.set(scope.runtimeId, {
       scope, ownerKey,
       attachment: this.#broker.replaceInteractionAttachment(scope.sessionId, ownerKey),
@@ -79,6 +83,7 @@ export class CodexServiceRuntimeBackend {
     const record = this.#presentations.get(runtimeId);
     if (record === undefined) return;
     this.#presentations.delete(runtimeId);
+    this.upgradeParticipants?.detach(`codex:${runtimeId}`);
     this.#broker.disconnectInteractionIncarnation(record.scope.sessionId, record.ownerKey, record.attachment);
     this.#releaseInactiveJournal(record.scope.sessionId);
   }
@@ -114,6 +119,11 @@ export class CodexServiceRuntimeBackend {
   async #handle(scope: CodexActiveScope, request: Extract<CodexAppRequest, { authority: "presentation" }>, current: () => boolean): Promise<unknown> {
     const record = this.#presentations.get(scope.runtimeId);
     if (record === undefined || record.scope.attemptId !== scope.attemptId || record.scope.generation !== scope.generation) throw new Error("presentation-unavailable");
+    if (request.method === 'upgradePoll' || request.method === 'upgradeSettle') {
+      if (!this.upgradeParticipants) throw new Error('Upgrade preparation unavailable');
+      return request.method === 'upgradePoll' ? this.upgradeParticipants.poll(`codex:${scope.runtimeId}`) : this.upgradeParticipants.settle(`codex:${scope.runtimeId}`, request.payload as UpgradeReviewSettlement);
+    }
+    if (['command', 'beginInteraction', 'finalizeInteraction', 'chooseCopy', 'chooseOriginal', 'chooseFolder', 'retrySave', 'locateSave', 'exportReviewedCopy'].includes(request.method)) this.upgradeParticipants?.assertAuthoring(`codex:${scope.runtimeId}`);
     if (request.method === "bootstrap") {
       const resources = await this.#resources(record);
       if (!current()) throw new Error("presentation-unavailable");

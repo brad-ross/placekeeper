@@ -119,7 +119,7 @@
   right: var(--review-main-scrollbar-width);
   bottom: var(--review-main-scrollbar-height);
   left: 0;
-  height: calc(var(--review-collapsed-rail-size, 40px) - var(--review-main-scrollbar-height));
+  height: calc(max(var(--review-collapsed-rail-size, 40px), var(--review-overlay-inset, 12px) + max(32px, var(--review-control-default))) - var(--review-main-scrollbar-height));
   min-height: 0;
   background: var(--review-surface-canvas);
 }
@@ -128,7 +128,7 @@
   .review-overlay-frame__bottom-fade {
   display: block;
   right: var(--review-main-scrollbar-width);
-  bottom: calc(var(--review-collapsed-rail-size, 40px) - var(--review-main-scrollbar-height));
+  bottom: max(var(--review-collapsed-rail-size, 40px), var(--review-overlay-inset, 12px) + max(32px, var(--review-control-default)));
   left: 0;
   height: var(--review-overlay-fade-size);
   background: linear-gradient(transparent, var(--review-surface-canvas));

@@ -2,8 +2,13 @@ packages:
   - apps/*
   - packages/*
 
+# Desktop application dependencies are bundled; only Forge tooling needs hoisting.
+publicHoistPattern:
+  - '@electron-forge/*'
+
 allowBuilds:
   electron: true
+  electron-winstaller: set this to true or false
   esbuild: true
 
 onlyBuiltDependencies:

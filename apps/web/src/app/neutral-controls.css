@@ -165,7 +165,9 @@
   [data-review-chrome]:is(:hover, :has(:focus-visible, [aria-expanded="true"]))
     > .review-chrome__viewer-controls,
   [data-review-chrome]:is(:hover, :has(:focus-visible, [aria-expanded="true"]))
-    :is([data-review-copy-link], [data-main-history]) {
+    :is([data-review-copy-link], [data-main-history]),
+  .electron-review-shell[data-toolbar-hovered="true"] [data-review-chrome] > .review-chrome__viewer-controls,
+  .electron-review-shell[data-toolbar-hovered="true"] [data-review-chrome] :is([data-review-copy-link], [data-main-history]) {
     opacity: 1;
     pointer-events: auto;
   }
@@ -176,7 +178,8 @@
     opacity: 0;
   }
 
-  [data-review-chrome]:is(:hover, :has(:focus-visible, [aria-expanded="true"])) [data-main-history]:disabled {
+  [data-review-chrome]:is(:hover, :has(:focus-visible, [aria-expanded="true"])) [data-main-history]:disabled,
+  .electron-review-shell[data-toolbar-hovered="true"] [data-review-chrome] [data-main-history]:disabled {
     opacity: .35;
   }
 
@@ -186,7 +189,8 @@
     clip-path: inset(50%);
   }
 
-  [data-review-chrome]:is(:hover, :has(:focus-visible, [aria-expanded="true"])) [data-main-history] {
+  [data-review-chrome]:is(:hover, :has(:focus-visible, [aria-expanded="true"])) [data-main-history],
+  .electron-review-shell[data-toolbar-hovered="true"] [data-review-chrome] [data-main-history] {
     clip-path: none;
   }
 }
@@ -456,10 +460,36 @@
   pointer-events: none;
 }
 
-/* Narrow bars have no room for fixed history slots; unavailable history
-   actions give their space back to the page and zoom controls. */
-@media (max-width: 759px) {
-  .review-chrome :is(.review-chrome__history-control, [data-main-history]):disabled:not([aria-busy="true"]) {
+@media (max-width: 360px) {
+  .review-chrome {
+    --pk-toolbar-gap: 3px;
+  }
+
+  .review-chrome__filename {
     display: none;
   }
+
+  .review-chrome .review-chrome__save-identity {
+    justify-content: center;
+  }
+}
+
+.review-chrome[data-review-chrome-touch-compact="true"] .review-chrome__filename {
+  display: none;
+}
+
+.review-chrome[data-review-chrome-touch-compact="true"] .review-chrome__save-identity {
+  min-width: 44px;
+  justify-content: center;
+}
+
+.review-chrome__paired-icon {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  width: 24px;
+}
+.review-chrome__paired-icon .review-icon {
+  width: 12px;
+  height: 16px;
 }

@@ -284,7 +284,7 @@ describe("Chrome distribution integration", () => {
 
   it("never carries installer state that can enable interception", async () => {
     const installer = await readFile(resolve("install.sh"), "utf8");
-    const helper = await readFile(resolve("packaging/macos/install-built-app.sh"), "utf8");
+    const helper = await readFile(resolve("packaging/desktop/install-built-app.mjs"), "utf8");
     for (const source of [installer, helper]) {
       expect(source).not.toContain("chrome.storage");
       expect(source).not.toContain("setDefault");

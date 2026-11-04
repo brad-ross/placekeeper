@@ -342,11 +342,15 @@ export function AnnotationList({
   }, [activationRequest?.id, activationRequest?.token]);
 
   const remove = async (item: ReviewItem) => {
+    const owner = listRef.current?.ownerDocument;
+    const focusAtRemoval = owner?.activeElement;
     const index = combined.findIndex((entry) => entry.origin === 'owned' && entry.item.id === item.id);
     const nextKey = combined[index + 1] === undefined ? undefined : entryFocusKey(combined[index + 1]!);
     const previousKey = combined[index - 1] === undefined ? undefined : entryFocusKey(combined[index - 1]!);
     await onDelete(item);
     queueMicrotask(() => {
+      const currentFocus = owner?.activeElement;
+      if (currentFocus !== owner?.body && currentFocus !== focusAtRemoval) return;
       if (nextKey) entryRefs.current.get(nextKey)?.focus();
       else if (previousKey) entryRefs.current.get(previousKey)?.focus();
       else listRef.current?.focus();

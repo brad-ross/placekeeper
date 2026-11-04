@@ -42,6 +42,22 @@ describe("explicit suite contracts", () => {
     expect(ciUnitFiles).toContain("packaging/macos/update-vscode.test.mjs");
   });
 
+  it("runs portable editor, real navigation transports, and desktop lifecycle in the platform matrix", () => {
+    const command = suiteCommand("test:desktop-platform");
+    for (const file of [
+      "packages/core/test/editor-navigation-protocol.test.ts",
+      "apps/service/test/portable-editor.test.ts", "apps/service/test/editor-navigation.test.ts",
+      "apps/service/test/editor-navigation-handoff.test.ts", "apps/service/test/editor-launch.test.ts",
+      "apps/service/test/electron-navigation-integration.test.ts",
+      "packages/core/test/native-helper-protocol.test.ts", "packages/core/test/native-app-control-protocol.test.ts",
+      "packages/core/test/electron-helper-protocol.test.ts", "packages/core/test/electron-app-control-protocol.test.ts",
+      "apps/service/test/desktop-app-lifecycle.test.ts", "apps/service/test/desktop-runtime.test.ts",
+      "apps/service/test/desktop-daemon-runtime.test.ts", "apps/service/test/electron-daemon-runtime.test.ts",
+    ]) expect(command).toContain(file);
+    expect(ciUnitFiles).toContain("apps/web/test/electron-source-endpoint-dialog.test.tsx");
+    expect(suiteCommand("test:electron")).toContain("apps/web/test/electron-source-endpoint-dialog.test.tsx");
+  });
+
   it("runs all native corpus/lifecycle/resource acceptance in the native and canonical Chromium gates", () => {
     for (const suite of ["test:codex-native", "test:e2e", "test:ci:chromium"]) {
       for (const file of ["codex-native-review.spec.ts", "codex-native-lifecycle.spec.ts", "codex-native-resources.spec.ts"]) expect(suiteCommand(suite)).toContain(file);
@@ -49,6 +65,34 @@ describe("explicit suite contracts", () => {
     expect(suiteCommand("test:codex-native")).toContain("pnpm fixtures:pdf");
     expect(suiteCommand("test:codex-native")).toContain("pnpm build:codex");
     expect(ciUnitFiles).toContain("apps/codex-mcp/test/qualification.test.ts");
+  });
+
+  it("builds the packaged chooser renderer before its canonical browser checks", async () => {
+    const chooser = "test/acceptance/electron-chooser.spec.ts";
+    for (const name of ["test:e2e", "test:ci:chromium"]) {
+      const stages = suites[name]!;
+      const browser = stages.findIndex(stage => typeof stage !== "string" && stage.runner === "playwright" && stage.files.includes(chooser));
+      expect(browser).toBeGreaterThan(0);
+      expect(stages.slice(0, browser)).toContain("pnpm build:electron:web");
+    }
+    // This test stubs the renderer bridge and needs the browser baseURL; it
+    // does not qualify native dialogs or belong to installed-app acceptance.
+    const installed = (await import("./config/playwright.electron.config.js")).default;
+    expect(installed.testMatch).not.toContain("electron-chooser.spec.ts");
+  });
+
+  it("keeps standalone chooser, public-link and portable Codex contracts in canonical unit and native gates", () => {
+    for (const file of [
+      "apps/electron/test/standalone-chooser.test.ts", "apps/electron/test/open-intent.test.ts",
+      "apps/electron/test/protocol-install.test.ts", "packaging/desktop/linux-sandbox.test.ts",
+      "apps/electron/test/open-link.test.ts", "apps/electron/test/review-bridge.test.ts", "apps/electron/test/menus.test.ts",
+      "packages/core/test/electron-helper-protocol.test.ts", "packages/core/test/review-runtime-protocol.test.ts",
+      "packaging/desktop/setup-codex.test.ts", "packaging/desktop/integration-registration.test.ts",
+      "apps/service/test/integration-registration-command.test.ts", "apps/service/test/hook-contract.test.ts",
+    ]) {
+      expect(ciUnitFiles).toContain(file);
+      expect(suiteCommand("test:desktop-platform")).toContain(file);
+    }
   });
 
   it("checks shared host raster geometry in native, host, production and browser gates", () => {
@@ -84,7 +128,6 @@ describe("explicit suite contracts", () => {
     for (const file of [
       "apps/service/test/local-document-observer.test.ts",
       "apps/web/test/refresh-interaction-lifecycle.test.tsx",
-      "packaging/macos/native-blob-install.test.ts",
     ]) expect(ciUnitFiles).toContain(file);
 
     expect(suiteCommand("test:ci:chromium")).toContain(
@@ -107,6 +150,20 @@ describe("explicit suite contracts", () => {
       "test:ci:chromium",
       "test:ci:webkit",
     ]) expect(suiteCommand(suite)).toContain(browser);
+  });
+
+  it.skipIf(process.platform === "win32")("routes native installer suites to only their intended platform fixture", async () => {
+    for (const [name,file] of [
+      ["test:desktop-installers","test/acceptance/desktop-installers.spec.ts"],
+      ["test:desktop-debian","test/acceptance/desktop-debian.spec.ts"],
+      ["test:desktop-legacy","test/acceptance/legacy-0.2.4-upgrade.spec.ts"],
+    ] as const) {
+      await withRunners(async (_directory,env) => {
+        const result=invoke(name,env);expect(result.status,result.stderr).toBe(0);
+        const calls=(await readFile(env.SUITE_LOG!,"utf8")).trim().split("\n").map(line=>JSON.parse(line));
+        expect(calls).toEqual([{command:"playwright",args:["test","--config","scripts/testing/config/playwright.desktop-installers.config.ts",file]}]);
+      });
+    }
   });
 
   it.skipIf(process.platform === "win32")("stops on prerequisite failure with the original exit result", async () => {

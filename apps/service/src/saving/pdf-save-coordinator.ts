@@ -2,7 +2,7 @@ import { InvalidReviewCommandError, ReviewConflictError, ReviewDraftConflictErro
 import { ReviewGenerationConflictError } from "../sessions/session-broker.js";
 import type { ReviewState, SaveDestinationConfirmation } from "../../../../packages/core/src/review-model.js";
 import { randomUUID } from "node:crypto";
-import { chmod, open, readFile, rename, rm, stat } from "node:fs/promises";
+import { readFile, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
 import type { PdfWriter } from "../../../../packages/core/src/pdf-writer.js";
@@ -18,7 +18,7 @@ import {
   hashFile,
   validatePdfFilename,
 } from "../files/file-capabilities.js";
-import { syncDirectory } from "../files/durability.js";
+import { preserveReplacementPermissions, publishFile, stagePublication, syncPublishedFile } from "../platform/file-publication.js";
 import { verifyReviewedPdf, type PdfExportVerifier } from "../export/pdf-verifier.js";
 import { reviewStateDigest, type SaveFailureReason } from "../recovery/draft-snapshot.js";
 import type { SessionBroker } from "../sessions/session-broker.js";
@@ -72,6 +72,12 @@ function classifyFailure(error: unknown): SaveFailureReason {
   return "write-failed";
 }
 
+/** A result supplied by an authenticated native host, never by the renderer. */
+export interface TrustedDestinationSelection {
+  readonly selectedPath: string | null;
+  readonly assertAuthority?: () => void;
+}
+
 export interface PdfSaveCoordinatorOptions {
   readonly broker: SessionBroker;
   readonly writer: PdfWriter;
@@ -104,7 +110,7 @@ export class PdfSaveCoordinator {
   readonly #verify: PdfExportVerifier;
   readonly #backend: Omit<PdfBackendRunOptions, "signal">;
   readonly #picker: DestinationPicker | undefined;
-  readonly #syncDirectory: (path: string) => Promise<void>;
+  readonly #syncDirectory: ((path: string) => Promise<void>) | undefined;
   readonly #reuseBackendInspection: boolean;
   readonly #folderSelections = new Map<string, { readonly sessionId: string; readonly path: string }>();
   readonly #queues = new Map<string, QueueState>();
@@ -117,7 +123,7 @@ export class PdfSaveCoordinator {
     this.#verify = options.verify ?? verifyReviewedPdf;
     this.#backend = options.backend ?? {};
     this.#picker = options.picker;
-    this.#syncDirectory = options.syncDirectory ?? syncDirectory;
+    this.#syncDirectory = options.syncDirectory;
     this.#reuseBackendInspection = options.verify === undefined;
     this.#broker.onPhysicalSaveResume((sessionId) => {
       if (
@@ -233,43 +239,52 @@ export class PdfSaveCoordinator {
     }
   }
 
-  async chooseFolder(sessionId: string, expectedDocumentGeneration?: number): Promise<
+  async chooseFolder(sessionId: string, expectedDocumentGeneration?: number, trusted?: TrustedDestinationSelection): Promise<
     | { readonly cancelled: true }
     | { readonly cancelled: false; readonly selectionId: string; readonly folder: string }
   > {
-    if (this.#picker === undefined) throw new Error("Native destination picker is unavailable");
+    trusted?.assertAuthority?.();
+    this.#assertExpectedDocumentGeneration(sessionId, expectedDocumentGeneration);
+    if (trusted === undefined && this.#picker === undefined) throw new Error("Native destination picker is unavailable");
     const proposal = this.proposal(sessionId);
-    const path = await this.#picker.chooseFolder(
+    const path = trusted === undefined ? await this.#picker!.chooseFolder(
       proposal.sourceDisposition === "local" ? proposal.folder : undefined,
-    );
+    ) : trusted.selectedPath ?? undefined;
+    trusted?.assertAuthority?.();
     this.#assertExpectedDocumentGeneration(sessionId, expectedDocumentGeneration);
     if (path === undefined) return { cancelled: true };
     return { cancelled: false, selectionId: this.#rememberFolder(sessionId, path), folder: path };
   }
 
-  async locate(sessionId: string, expectedDocumentGeneration?: number): Promise<void> {
-    if (this.#picker === undefined) throw new Error("Native destination picker is unavailable");
+  async locate(sessionId: string, expectedDocumentGeneration?: number, trusted?: TrustedDestinationSelection): Promise<void> {
+    trusted?.assertAuthority?.();
+    if (trusted === undefined && this.#picker === undefined) throw new Error("Native destination picker is unavailable");
     this.#assertExpectedDocumentGeneration(sessionId, expectedDocumentGeneration);
     const status = this.#broker.saveStatus(sessionId);
     if (status?.destination.phase !== "active" || status.destination.fingerprint === undefined) {
       throw new Error("There is no saved PDF identity to locate");
     }
-    const selected = await this.#picker.locatePdf(dirname(status.destination.targetPath));
+    const selected = trusted === undefined ? await this.#picker!.locatePdf(dirname(status.destination.targetPath))
+      : trusted.selectedPath ?? undefined;
+    trusted?.assertAuthority?.();
+    this.#assertExpectedDocumentGeneration(sessionId, expectedDocumentGeneration);
     if (selected === undefined) return;
     if ((await hashFile(selected)) !== status.destination.fingerprint) {
       throw new FileCapabilityError("TARGET_CHANGED", "The selected PDF is not the missing saved file");
     }
+    trusted?.assertAuthority?.();
     this.#assertExpectedDocumentGeneration(sessionId, expectedDocumentGeneration);
     if (status.destination.kind === "original") {
       const state = this.#broker.state(sessionId);
       if (state === undefined) throw new Error("Review session is not active");
       const fingerprint = status.destination.fingerprint;
-      const rebind = () => this.#capabilities.rebindApprovedPdf(state.source.fileId, selected, fingerprint);
+      const rebind = () => this.#capabilities.rebindApprovedPdf(state.source.fileId, selected, fingerprint, trusted?.assertAuthority);
       // Native's trusted fence makes capability rebind and canonical relocation
       // one ordered operation. Legacy callers retain their existing flow.
       const targetPath = expectedDocumentGeneration === undefined ? await rebind() : selected;
       await this.#broker.relocateOriginalDestination(sessionId, {
         targetPath, capabilityId: state.source.fileId, fingerprint: status.destination.fingerprint,
+        ...(trusted?.assertAuthority === undefined ? {} : { assertAuthority: trusted.assertAuthority }),
         ...(expectedDocumentGeneration === undefined ? {} : {
           expectedDocumentGeneration, expectedDestinationGeneration: status.destination.generation, prepareTargetPath: rebind,
         }),
@@ -282,6 +297,7 @@ export class PdfSaveCoordinator {
         await this.#broker.establishSaveDestination(sessionId, {
           kind: "copy", targetPath: join(capability.parentPath, capability.filename),
           capabilityId: capability.id, fingerprint: status.destination.fingerprint,
+          ...(trusted?.assertAuthority === undefined ? {} : { assertAuthority: trusted.assertAuthority }),
           ...(expectedDocumentGeneration === undefined ? {} : { expectedDocumentGeneration, expectedDestinationGeneration: status.destination.generation }),
         });
       } catch (error) { this.#capabilities.revokeDestination(capability.id); throw error; }
@@ -450,23 +466,7 @@ export class PdfSaveCoordinator {
           });
 
           const target = destination.targetPath;
-          const targetDirectory = dirname(target);
-          const privateDirectory = dirname(delivery.sourceSnapshotPath);
-          const [targetDirectoryInfo, privateDirectoryInfo] = await Promise.all([
-            stat(targetDirectory),
-            stat(privateDirectory),
-          ]);
-          const temporary = join(
-            targetDirectoryInfo.dev === privateDirectoryInfo.dev ? privateDirectory : targetDirectory,
-            `.placekeeper-${randomUUID()}.tmp`,
-          );
-          const handle = await open(temporary, "wx", 0o600);
-          try {
-            await handle.writeFile(written.pdfBytes);
-            await handle.sync();
-          } finally {
-            await handle.close();
-          }
+          const temporary = await stagePublication(target, written.pdfBytes);
           try {
             if (
               this.#broker.physicalSaveBarrierPending(sessionId) &&
@@ -510,26 +510,27 @@ export class PdfSaveCoordinator {
                 if (validatedTarget !== target) {
                   throw new FileCapabilityError("TARGET_CHANGED", "Save target identity changed");
                 }
-                if (destination.kind === "original") {
-                  const originalMode = (await stat(validatedTarget)).mode & 0o777;
-                  await chmod(temporary, originalMode);
+                if (destination.kind === "original" || destination.fingerprint !== undefined) {
+                  await preserveReplacementPermissions(temporary, validatedTarget);
                 }
                 // Observation admission is synchronous and can raise the
                 // physical-save barrier while target validation is awaiting
                 // filesystem work. Recheck every broker-owned fence at the
                 // last JavaScript boundary before publishing the rename.
                 if (!candidateIsCurrent()) return undefined;
-                await rename(temporary, target);
+                const publication = await publishFile(temporary, target);
                 return {
                   targetDigest: written.evidence.outputSha256,
                   settle: async () => {
+                    if (!publication.confirmed) return "uncertain" as const;
                     const observedDigest = await hashFile(target).catch(() => undefined);
                     if (observedDigest === undefined) return "uncertain" as const;
                     if (observedDigest !== written.evidence.outputSha256) {
                       return "superseded" as const;
                     }
                     try {
-                      await this.#syncDirectory(dirname(target));
+                      if (this.#syncDirectory === undefined) await syncPublishedFile(publication);
+                      else await this.#syncDirectory(dirname(target));
                       if (destination.kind === "original") {
                         await this.#capabilities.refreshApprovedPdf(
                           destination.capabilityId!,

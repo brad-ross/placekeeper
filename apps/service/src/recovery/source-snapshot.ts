@@ -1,7 +1,9 @@
+import { ensurePrivateDirectory as ensurePlatformPrivateDirectory, writePrivateFile } from "../platform/private-storage.js";
+import { publishFile, syncPublishedFile } from "../platform/file-publication.js";
 import { constants } from "node:fs";
 import type { Stats } from "node:fs";
 import { createHash, randomUUID } from "node:crypto";
-import { chmod, lstat, mkdir, open, readFile, rename, rm, stat } from "node:fs/promises";
+import { chmod, lstat, mkdir, open, readFile, rm, stat } from "node:fs/promises";
 import { basename, dirname, extname, join } from "node:path";
 import { trackRecoveryTemporaryPath } from "./temporary-path-registry.js";
 
@@ -43,8 +45,19 @@ export type GenerationSyncTexSnapshotResult =
   | { readonly status: "missing" | "ambiguous" | "stale"; readonly reason: string };
 
 export async function ensurePrivateDirectory(path: string): Promise<void> {
-  await mkdir(path, { recursive: true, mode: 0o700 });
-  await chmod(path, 0o700);
+  if (process.platform !== "win32") {
+    await mkdir(path, { recursive: true, mode: 0o700 });
+    await chmod(path, 0o700);
+    await ensurePlatformPrivateDirectory(path);
+    return;
+  }
+  try {
+    await ensurePlatformPrivateDirectory(path);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT" || dirname(path) === path) throw error;
+    await ensurePrivateDirectory(dirname(path));
+    await ensurePlatformPrivateDirectory(path);
+  }
 }
 
 export async function createSourceSnapshot(
@@ -61,22 +74,10 @@ export async function createSourceSnapshot(
   const temporaryPath = join(sessionDirectory, `.source-${randomUUID()}.tmp`);
   const stopTracking = trackRecoveryTemporaryPath(temporaryPath);
   try {
-    const handle = await open(temporaryPath, "wx", 0o600);
-    try {
-      await handle.chmod(0o600);
-      await handle.writeFile(bytes);
-      await handle.sync();
-    } finally {
-      await handle.close();
-    }
-    await rename(temporaryPath, finalPath);
+    await writePrivateFile(temporaryPath, bytes);
+    const publication = await publishFile(temporaryPath, finalPath);
     await chmod(finalPath, 0o600);
-    const directoryHandle = await open(sessionDirectory, "r");
-    try {
-      await directoryHandle.sync();
-    } finally {
-      await directoryHandle.close();
-    }
+    await syncPublishedFile(publication);
     const info = await stat(finalPath);
     return { path: finalPath, digest, byteLength: info.size };
   } catch (error) {
@@ -160,14 +161,7 @@ export async function stageGenerationSnapshot(input: {
   const finalPath = join(generationDirectory, `${digest}.pdf`);
   const stopTracking = trackRecoveryTemporaryPath(temporaryPath);
   try {
-    const target = await open(temporaryPath, "wx", 0o600);
-    try {
-      await target.chmod(0o600);
-      await target.writeFile(bytes);
-      await target.sync();
-    } finally {
-      await target.close();
-    }
+    await writePrivateFile(temporaryPath, bytes);
     return {
       path: temporaryPath,
       finalPath,
@@ -184,16 +178,9 @@ export async function stageGenerationSnapshot(input: {
 }
 
 export async function commitGenerationSnapshot(snapshot: StagedGenerationSnapshot): Promise<string> {
-  await rename(snapshot.path, snapshot.finalPath);
+  const publication = await publishFile(snapshot.path, snapshot.finalPath);
   await chmod(snapshot.finalPath, 0o600);
-  const directoryHandle = await open(dirname(snapshot.finalPath), "r").catch(() => undefined);
-  if (directoryHandle !== undefined) {
-    try {
-      await directoryHandle.sync();
-    } finally {
-      await directoryHandle.close();
-    }
-  }
+  await syncPublishedFile(publication);
   return snapshot.finalPath;
 }
 
@@ -331,16 +318,10 @@ export async function snapshotGenerationSyncTexSidecar(input: {
   const temporaryPath = join(dirname(input.privatePdfPath), `.synctex-${randomUUID()}.tmp`);
   const stopTracking = trackRecoveryTemporaryPath(temporaryPath);
   try {
-    const target = await open(temporaryPath, "wx", 0o600);
-    try {
-      await target.chmod(0o600);
-      await target.writeFile(bytes);
-      await target.sync();
-    } finally {
-      await target.close();
-    }
-    await rename(temporaryPath, targetPath);
+    await writePrivateFile(temporaryPath, bytes);
+    const publication = await publishFile(temporaryPath, targetPath);
     await chmod(targetPath, 0o600);
+    await syncPublishedFile(publication);
     return { status: "ready", snapshot: { snapshotPath: targetPath, fingerprint } };
   } catch (error) {
     await rm(temporaryPath, { force: true });

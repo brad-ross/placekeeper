@@ -22,3 +22,10 @@ export const serverDefaults = {
   reuseExistingServer: false,
   timeout: 30_000,
 };
+
+const testPort = Number(process.env.PLACEKEEPER_BROWSER_TEST_PORT ?? '4173');
+if (!Number.isInteger(testPort) || testPort < 1024 || testPort > 65535) {
+  throw new Error('PLACEKEEPER_BROWSER_TEST_PORT must be an unprivileged TCP port.');
+}
+export const browserTestOrigin = `http://127.0.0.1:${testPort}`;
+export const browserTestServerCommand = `pnpm exec vite --host 127.0.0.1 --port ${testPort} --strictPort`;

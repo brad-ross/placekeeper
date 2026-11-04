@@ -1,11 +1,17 @@
+import { parseElectronAppControlResponse, type ElectronAppControlMessage, type ElectronAppControlResponse } from "../../../../packages/core/src/electron-app-control-protocol.js";
+import { validElectronReviewHelperResponse, type ElectronReviewHelperMessage, type ElectronReviewHelperResponse } from "../../../../packages/core/src/electron-helper-protocol.js";
+import { observeIsolatedDaemonStartup } from './daemon-startup-diagnostic.js';
+import { closeWindowsNativeWorker } from "../platform/windows-native-worker.js";
+import { readControlDiscovery } from "../platform/control-transport.js";
+import { platformPath, resolvePlatformLocations } from "../platform/locations.js";
+import { resolvePackagedRuntime, type PackagedRuntimeInstallation } from "../platform/runtime-layout.js";
 import type { EditorControlRequest, EditorControlResponse } from "../../../../packages/core/src/editor-navigation-protocol.js";
 import { NativeQualificationExperiments } from "../codex/native-qualification-experiments.js";
 import { NativeQualificationObserver } from "../codex/native-qualification.js";
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { lstat, unlink, writeFile } from "node:fs/promises";
+import { lstat, realpath, unlink, writeFile } from "node:fs/promises";
 import { createConnection } from "node:net";
-import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
 import {
@@ -31,16 +37,6 @@ import type {
   ChromeRuntimeExtensionMessage,
   ChromeRuntimeHostMessage,
 } from "../../../../packages/core/src/chrome-native-runtime-protocol.js";
-import type {
-  MacosReviewHelperMessage,
-  MacosReviewHelperResponse,
-} from "../../../../packages/core/src/macos-helper-protocol.js";
-import { validMacosReviewHelperResponse } from "../../../../packages/core/src/macos-helper-protocol.js";
-import type {
-  MacosAppControlMessage,
-  MacosAppControlResponse,
-} from "../../../../packages/core/src/macos-app-control-protocol.js";
-import { parseMacosAppControlResponse } from "../../../../packages/core/src/macos-app-control-protocol.js";
 
 export interface DaemonPaths {
   readonly appSupportRoot: string;
@@ -48,6 +44,8 @@ export interface DaemonPaths {
   readonly socketPath: string;
   readonly webAssetsRoot: string;
   readonly httpPort?: number;
+  readonly isolatedTestRoot?: string;
+  readonly packagedRuntime?: PackagedRuntimeInstallation;
   readonly lifecycleLockPath?: string;
 }
 
@@ -60,6 +58,7 @@ export const MACOS_DEVELOPMENT_ROOT_ENV = "PLACEKEEPER_MAC_DEVELOPMENT_ROOT";
 export const MACOS_DEVELOPMENT_HTTP_PORT_ENV = "PLACEKEEPER_MAC_DEVELOPMENT_HTTP_PORT";
 export const INSTALLED_SMOKE_DAEMON_FLAG = "--isolated-installed-smoke";
 export const INSTALLED_SMOKE_HTTP_PORT_FLAG = "--http-port";
+export const INSTALLED_SMOKE_ROOT_FLAG = "--isolated-test-root";
 
 export interface CandidateDaemonReceipt {
   readonly version: 1;
@@ -73,16 +72,11 @@ function currentDaemonIdentity(): string {
 }
 
 export function defaultDaemonPaths(): DaemonPaths {
-  const fixedAppSupportRoot = join(
-    homedir(),
-    "Library",
-    "Application Support",
-    "Placekeeper",
-  );
+  const fixedAppSupportRoot = resolvePlatformLocations().appSupportRoot;
   const developmentRoot = currentDaemonIdentity() === "development"
     ? process.env[MACOS_DEVELOPMENT_ROOT_ENV]
     : undefined;
-  const appSupportRoot = developmentRoot !== undefined && developmentRoot.startsWith("/")
+  const appSupportRoot = developmentRoot !== undefined && platformPath(process.platform).isAbsolute(developmentRoot)
     && developmentRoot.length <= 16_384 && !developmentRoot.includes("\0")
     ? resolve(developmentRoot)
     : fixedAppSupportRoot;
@@ -113,7 +107,9 @@ export function defaultDaemonPaths(): DaemonPaths {
 export function installedSmokeDaemonPaths(args: readonly string[]): DaemonPaths | undefined {
   const smokeIndexes = args.flatMap((value, index) => value === INSTALLED_SMOKE_DAEMON_FLAG ? [index] : []);
   const portIndexes = args.flatMap((value, index) => value === INSTALLED_SMOKE_HTTP_PORT_FLAG ? [index] : []);
-  if (smokeIndexes.length === 0 && portIndexes.length === 0) return undefined;
+  const rootIndexes = args.flatMap((value, index) => value === INSTALLED_SMOKE_ROOT_FLAG ? [index] : []);
+  if (smokeIndexes.length === 0 && portIndexes.length === 0 && rootIndexes.length === 0) return undefined;
+  if (rootIndexes.length > 1) throw new Error("The isolated installed smoke requires at most one root");
   if (smokeIndexes.length !== 1 || portIndexes.length !== 1) {
     throw new Error("The isolated installed smoke requires one explicit HTTP port");
   }
@@ -123,22 +119,60 @@ export function installedSmokeDaemonPaths(args: readonly string[]): DaemonPaths 
   }
   const httpPort = Number(portText);
   if (httpPort > 65_535) throw new Error("The isolated installed smoke HTTP port is invalid");
-  return { ...defaultDaemonPaths(), httpPort };
+  const rootText = rootIndexes.length === 0 ? undefined : args[rootIndexes[0]! + 1];
+  if (rootIndexes.length !== 0 && (rootText === undefined || !platformPath(process.platform).isAbsolute(rootText)
+    || rootText.length > 16_384 || rootText.includes("\0"))) {
+    throw new Error("The isolated installed smoke root must be absolute");
+  }
+  if (rootText === undefined) return { ...defaultDaemonPaths(), httpPort };
+  const isolatedTestRoot = resolve(rootText);
+  return {
+    ...defaultDaemonPaths(), httpPort, isolatedTestRoot,
+    appSupportRoot: isolatedTestRoot,
+    recoveryRoot: join(isolatedTestRoot, "recovery"),
+    socketPath: join(isolatedTestRoot, "control.sock"),
+    lifecycleLockPath: join(isolatedTestRoot, "lifecycle.lock"),
+  };
+}
+
+/** Explicit CLI forwarding preserves isolated roots across independent Node children. */
+export function installedSmokeDaemonArgs(paths: DaemonPaths): string[] {
+  if (paths.isolatedTestRoot !== undefined) {
+    return [INSTALLED_SMOKE_DAEMON_FLAG, INSTALLED_SMOKE_HTTP_PORT_FLAG,
+      String(paths.httpPort ?? PLACEKEEPER_HTTP_PORT), INSTALLED_SMOKE_ROOT_FLAG, paths.isolatedTestRoot];
+  }
+  return paths.httpPort !== undefined && paths.httpPort !== PLACEKEEPER_HTTP_PORT
+    ? [INSTALLED_SMOKE_DAEMON_FLAG, INSTALLED_SMOKE_HTTP_PORT_FLAG, String(paths.httpPort)] : [];
 }
 
 async function removeConfirmedStaleSocket(socketPath: string): Promise<void> {
-  const info = await lstat(socketPath).catch(() => undefined);
-  if (info?.isSocket() !== true) return;
-  await new Promise<void>((resolveConnection) => {
+  const info = await lstat(socketPath).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === "ENOENT") return undefined;
+    throw error;
+  });
+  if (info === undefined) return;
+  if (process.platform === "win32") {
+    const discovery = await readControlDiscovery(socketPath);
+    try { process.kill(discovery.pid, 0); }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+      const current = await lstat(socketPath);
+      if (current.ino === info.ino && current.dev === info.dev && (await readControlDiscovery(socketPath)).epoch === discovery.epoch) await unlink(socketPath);
+      return;
+    }
+    throw new Error("Placekeeper service is already running");
+  }
+  if (!info.isSocket()) return;
+  await new Promise<void>((resolveConnection, reject) => {
     const socket = createConnection(socketPath);
-    let connected = false;
-    socket.once("connect", () => {
-      connected = true;
-      socket.destroy();
-      resolveConnection();
-    });
-    socket.once("error", () => {
-      if (!connected) void unlink(socketPath).finally(resolveConnection);
+    socket.setTimeout(1000, () => { socket.destroy(); reject(new Error("Cannot inspect existing control socket")); });
+    socket.once("connect", () => { socket.destroy(); reject(new Error("Placekeeper service is already running")); });
+    socket.once("error", (error: NodeJS.ErrnoException) => {
+      if (error.code !== "ECONNREFUSED" && error.code !== "ENOENT") { reject(error); return; }
+      void (async () => {
+        const current = await lstat(socketPath).catch(() => undefined);
+        if (current?.ino === info.ino && current.dev === info.dev) await unlink(socketPath);
+      })().then(resolveConnection, reject);
     });
   });
 }
@@ -172,7 +206,7 @@ export async function startServiceDaemon(paths = defaultDaemonPaths()): Promise<
       ...(process.env[READINESS_TOKEN_ENV] === undefined
         ? {}
         : { readinessToken: process.env[READINESS_TOKEN_ENV] }),
-    });
+    }, installedSmokeDaemonArgs(paths));
     await lifecycleLock.release();
     return {
       host: startedHost,
@@ -180,6 +214,7 @@ export async function startServiceDaemon(paths = defaultDaemonPaths()): Promise<
       close: async () => {
         await startedHost.close();
         await control.close();
+        await closeWindowsNativeWorker();
       },
     };
   } catch (error) {
@@ -194,29 +229,50 @@ export function daemonUnavailable(error: unknown): boolean {
   return code === "ENOENT" || code === "ECONNREFUSED" || code === "ECONNRESET";
 }
 
-function spawnServiceDaemon(
+const isolatedStartupDiagnostics = new WeakMap<ChildProcess, () => Promise<void>>();
+
+async function spawnServiceDaemon(
   entry: string,
   paths: DaemonPaths,
   lifecycleToken: string,
   readinessToken?: string,
-): ChildProcess {
-  const httpPort = paths.httpPort ?? PLACEKEEPER_HTTP_PORT;
-  const child = spawn(process.execPath, [
-    entry,
+): Promise<ChildProcess> {
+  if (paths.packagedRuntime === undefined && process.versions.electron !== undefined) {
+    throw new Error("The desktop launcher requires an independent packaged Node runtime");
+  }
+  const runtime = paths.packagedRuntime === undefined ? undefined : await resolvePackagedRuntime(
+    paths.packagedRuntime.root, paths.packagedRuntime.manifest, paths.packagedRuntime.expectedIdentity,
+  );
+  if (runtime !== undefined && await realpath(paths.webAssetsRoot) !== runtime.webAssetsRoot) {
+    throw new Error("Packaged runtime web assets do not match daemon paths");
+  }
+  if (runtime !== undefined && !paths.packagedRuntime!.manifest.webAssets.files.some(file => file.path === "pdfium.wasm")) {
+    throw new Error("The packaged service PDFium runtime is missing from verified web assets");
+  }
+  const child = spawn(runtime?.nodeExecutable ?? process.execPath, [
+    runtime?.serviceEntry ?? entry,
     "daemon",
-    ...(httpPort === PLACEKEEPER_HTTP_PORT
-      ? []
-      : [INSTALLED_SMOKE_DAEMON_FLAG, INSTALLED_SMOKE_HTTP_PORT_FLAG, String(httpPort)]),
+    ...installedSmokeDaemonArgs(paths),
   ], {
     detached: true,
-    stdio: "ignore",
+    stdio: paths.isolatedTestRoot === undefined ? "ignore" : ["ignore", "ignore", "pipe"],
     env: {
       ...process.env,
+      ...(runtime === undefined ? {} : {
+        [DAEMON_IDENTITY_ENV]: runtime.daemonIdentity,
+        [INSTALL_ARTIFACT_IDENTITY_ENV]: runtime.installArtifactIdentity,
+        PLACEKEEPER_PDFIUM_WASM: join(runtime.webAssetsRoot, "pdfium.wasm"),
+      }),
       PLACEKEEPER_WEB_ASSETS: paths.webAssetsRoot,
       [LIFECYCLE_LOCK_TOKEN_ENV]: lifecycleToken,
       [LIFECYCLE_LOCK_PATH_ENV]: paths.lifecycleLockPath ?? join(paths.appSupportRoot, "lifecycle.lock"),
       ...(readinessToken === undefined ? {} : { [READINESS_TOKEN_ENV]: readinessToken }),
     },
+  });
+  if (paths.isolatedTestRoot !== undefined) isolatedStartupDiagnostics.set(child, observeIsolatedDaemonStartup(child));
+  await new Promise<void>((resolveSpawn, reject) => {
+    child.once("spawn", resolveSpawn);
+    child.once("error", reject);
   });
   child.unref();
   return child;
@@ -275,52 +331,54 @@ export async function detachChromeRuntimeThroughDaemon(
   if (response.kind !== "chrome-runtime-detached") throw new DaemonUpgradeRequiredError("malformed");
 }
 
-export async function macosRuntimeThroughDaemon(
+export async function electronRuntimeThroughDaemon(
   appInstanceId: string,
   helperId: string,
-  message: MacosReviewHelperMessage,
+  message: ElectronReviewHelperMessage,
   signal?: AbortSignal,
   paths = defaultDaemonPaths(),
-): Promise<MacosReviewHelperResponse> {
-  const request = { kind: "macos-runtime" as const, appInstanceId, helperId, message };
+  inheritedLifecycleToken?: string,
+): Promise<ElectronReviewHelperResponse> {
+  const request = { kind: "electron-runtime" as const, appInstanceId, helperId, message };
   const response = message.type === "admit" || message.type === "admit-link"
-    ? await demandStartedControl(request, paths, signal)
+    ? await demandStartedControl(request, paths, signal, inheritedLifecycleToken)
     : await requestControl(paths.socketPath, request, {
         timeoutMs: 10 * 60_000,
         ...(signal === undefined ? {} : { signal }),
       });
-  if (response.kind !== "macos-runtime" || !validMacosReviewHelperResponse(response.response)) {
+  if (response.kind !== "electron-runtime" || !validElectronReviewHelperResponse(response.response)) {
     throw new DaemonUpgradeRequiredError("malformed");
   }
   return response.response;
 }
 
-export async function detachMacosRuntimeThroughDaemon(
+export async function detachElectronRuntimeThroughDaemon(
   appInstanceId: string,
   helperId: string,
   paths = defaultDaemonPaths(),
 ): Promise<void> {
   const response = await requestControl(
     paths.socketPath,
-    { kind: "macos-runtime-detach", appInstanceId, helperId },
+    { kind: "electron-runtime-detach", appInstanceId, helperId },
     { timeoutMs: 15_000 },
   );
-  if (response.kind !== "macos-runtime-detached") throw new DaemonUpgradeRequiredError("malformed");
+  if (response.kind !== "electron-runtime-detached") throw new DaemonUpgradeRequiredError("malformed");
 }
 
-export async function macosAppControlThroughDaemon(
-  message: MacosAppControlMessage,
+export async function electronAppControlThroughDaemon(
+  message: ElectronAppControlMessage,
   signal?: AbortSignal,
   paths = defaultDaemonPaths(),
-): Promise<MacosAppControlResponse> {
-  const request = { kind: "macos-app-control" as const, message };
+  inheritedLifecycleToken?: string,
+): Promise<ElectronAppControlResponse> {
+  const request = { kind: "electron-app-control" as const, message };
   const response = message.type === "register-app"
-    ? await demandStartedControl(request, paths, signal)
+    ? await demandStartedControl(request, paths, signal, inheritedLifecycleToken)
     : await requestControl(paths.socketPath, request, {
         timeoutMs: 15_000,
         ...(signal === undefined ? {} : { signal }),
       });
-  if (response.kind !== "macos-app-control" || parseMacosAppControlResponse(response.response) === undefined) {
+  if (response.kind !== "electron-app-control" || parseElectronAppControlResponse(response.response) === undefined) {
     throw new DaemonUpgradeRequiredError("malformed");
   }
   return response.response;
@@ -348,12 +406,13 @@ async function demandStartedControl(
   request: PlacekeeperControlRequest,
   paths: DaemonPaths,
   signal?: AbortSignal,
+  inheritedLifecycleToken?: string,
 ): Promise<PlacekeeperControlResponse> {
   signal?.throwIfAborted();
   const lockPath = paths.lifecycleLockPath ?? join(paths.appSupportRoot, "lifecycle.lock");
   let lifecycleLock;
   try {
-    lifecycleLock = await acquireLifecycleLock(lockPath, { timeoutMs: 5_000 });
+    lifecycleLock = await acquireLifecycleLock(lockPath, { timeoutMs: 5_000, ...(inheritedLifecycleToken === undefined ? {} : { inheritedToken: inheritedLifecycleToken }) });
   } catch (error) {
     if (error instanceof LifecycleLockTimeoutError) {
       throw new DaemonUpgradeRequiredError("transient-busy");
@@ -374,7 +433,7 @@ async function controlWhileLocked(
   signal?: AbortSignal,
 ): Promise<PlacekeeperControlResponse> {
   try {
-    const compatibility = await waitForAcceptingCompatibility(paths.socketPath, currentDaemonIdentity());
+    const compatibility = await waitForAcceptingCompatibility(paths.socketPath, paths.packagedRuntime?.expectedIdentity.daemonIdentity ?? currentDaemonIdentity());
     if (compatibility.kind !== "exact") {
       throw new DaemonUpgradeRequiredError(
         compatibility.kind === "incompatible"
@@ -388,12 +447,16 @@ async function controlWhileLocked(
   }
   const entry = process.argv[1];
   if (entry === undefined) throw new Error("The placekeeper launcher entry point is unavailable");
-  spawnServiceDaemon(entry, paths, lifecycleToken);
+  const started = await spawnServiceDaemon(entry, paths, lifecycleToken);
   for (let attempt = 0; attempt < 60; attempt += 1) {
     signal?.throwIfAborted();
+    if (started.exitCode !== null || started.signalCode !== null) {
+      await isolatedStartupDiagnostics.get(started)?.();
+      throw new Error('The local placekeeper service exited before becoming ready');
+    }
     await new Promise((resolveDelay) => setTimeout(resolveDelay, 50));
     try {
-      const compatibility = await waitForAcceptingCompatibility(paths.socketPath, currentDaemonIdentity());
+      const compatibility = await waitForAcceptingCompatibility(paths.socketPath, paths.packagedRuntime?.expectedIdentity.daemonIdentity ?? currentDaemonIdentity());
       if (compatibility.kind !== "exact") {
         throw new DaemonUpgradeRequiredError(
           compatibility.kind === "incompatible"
@@ -406,6 +469,7 @@ async function controlWhileLocked(
       if (!daemonUnavailable(error)) throw error;
     }
   }
+  await isolatedStartupDiagnostics.get(started)?.();
   throw new Error("The local placekeeper service did not become ready");
 }
 
@@ -422,12 +486,12 @@ export async function ensureServiceDaemonReady(
   const entry = process.argv[1];
   if (entry === undefined) throw new Error("The placekeeper launcher entry point is unavailable");
   const readinessToken = randomBytes(24).toString("base64url");
-  const child = spawnServiceDaemon(entry, paths, lifecycleToken, readinessToken);
+  const child = await spawnServiceDaemon(entry, paths, lifecycleToken, readinessToken);
   if (child.pid === undefined) throw new Error("Candidate daemon did not expose its process identity");
   const receipt: CandidateDaemonReceipt = {
     version: 1,
     pid: child.pid,
-    daemonIdentity: currentDaemonIdentity(),
+    daemonIdentity: paths.packagedRuntime?.expectedIdentity.daemonIdentity ?? currentDaemonIdentity(),
     readinessToken,
   };
   let spawnError: Error | undefined;
@@ -441,7 +505,7 @@ export async function ensureServiceDaemonReady(
       if (spawnError !== undefined) throw spawnError;
       if (child.exitCode !== null) throw new Error(`Candidate daemon exited ${child.exitCode}`);
       try {
-        const compatibility = await inspectDaemonCompatibility(paths.socketPath, currentDaemonIdentity());
+        const compatibility = await inspectDaemonCompatibility(paths.socketPath, paths.packagedRuntime?.expectedIdentity.daemonIdentity ?? currentDaemonIdentity());
         if (
           compatibility.kind === "exact" &&
           compatibility.status.lifecycle === "accepting" &&
@@ -458,7 +522,7 @@ export async function ensureServiceDaemonReady(
     }
   } catch (error) {
     if (child.pid !== undefined) {
-      try { process.kill(-child.pid, "SIGTERM"); } catch { /* already stopped */ }
+      try { process.kill(process.platform === "win32" ? child.pid : -child.pid, "SIGTERM"); } catch { /* already stopped */ }
     }
     await Promise.race([
       child.exitCode !== null
@@ -507,6 +571,13 @@ export async function runServiceDaemon(paths = defaultDaemonPaths()): Promise<vo
     process.off("SIGINT", resolveSignal);
     process.off("SIGTERM", resolveSignal);
   }
+}
+
+/** Trusted main-only launch resolution; this never crosses a renderer bridge. */
+export async function resolveElectronLaunchThroughDaemon(launchId: string, paths = defaultDaemonPaths()): Promise<{ sourcePath: string; sessionId: string; documentGeneration: number } | undefined> {
+  const response = await controlThroughDaemon({ kind: "electron-resolve-launch", launchId }, paths);
+  if (response.kind !== "electron-resolve-launch") throw new DaemonUpgradeRequiredError("malformed");
+  return response.target;
 }
 
 export async function editorControlThroughDaemon(request: EditorControlRequest, paths = defaultDaemonPaths()): Promise<EditorControlResponse> {

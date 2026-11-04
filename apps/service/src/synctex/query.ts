@@ -1,3 +1,4 @@
+import { inheritedProcessPath, subprocessEnvironment } from "../platform/locations.js";
 import { spawn } from "node:child_process";
 import { constants } from "node:fs";
 import { createHash } from "node:crypto";
@@ -43,13 +44,14 @@ export type SyncTexRunner = (request: SyncTexRunRequest) => Promise<SyncTexRunRe
 
 export function syncTexProcessPath(
   platform: NodeJS.Platform = process.platform,
-  inheritedPath: string | undefined = process.env.PATH,
+  inheritedPath: string | undefined = inheritedProcessPath(platform, process.env),
 ): string {
-  const entries = (inheritedPath ?? "/usr/bin:/bin").split(":").filter(Boolean);
+  const separator = platform === "win32" ? ";" : ":";
+  const entries = (inheritedPath ?? (platform === "win32" ? "" : "/usr/bin:/bin")).split(separator).filter(Boolean);
   if (platform === "darwin" && !entries.includes("/Library/TeX/texbin")) {
     entries.unshift("/Library/TeX/texbin");
   }
-  return entries.join(":");
+  return entries.join(separator);
 }
 
 export const runSyncTex: SyncTexRunner = (request) =>
@@ -58,7 +60,7 @@ export const runSyncTex: SyncTexRunner = (request) =>
       cwd: request.cwd,
       shell: false,
       stdio: ["ignore", "pipe", "pipe"],
-      env: { PATH: syncTexProcessPath(), LC_ALL: "C", LANG: "C" },
+      env: { ...subprocessEnvironment(), PATH: syncTexProcessPath() },
     });
     const stdout: Buffer[] = [];
     const stderr: Buffer[] = [];

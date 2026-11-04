@@ -1,10 +1,12 @@
+import { RECOVERY_CAPABILITIES } from "./recovery-capabilities.js";
+import { writePrivateFile } from "../platform/private-storage.js";
+import { publishFile, syncPublishedFile } from "../platform/file-publication.js";
 import { createHash, randomUUID } from "node:crypto";
 import {
   chmod,
-  open,
+  lstat,
   readdir,
   readFile,
-  rename,
   rm,
   stat,
 } from "node:fs/promises";
@@ -237,7 +239,7 @@ export function migrateRecoverableDraft(draft: RecoverableDraft): RecoverableDra
   } = v2;
   return {
     ...rest,
-    schemaVersion: 3,
+    schemaVersion: RECOVERY_CAPABILITIES.writtenDraftSchemaVersion,
     source: {
       disposition: "local",
       canonicalSourcePath,
@@ -300,14 +302,24 @@ function validInteractionReceipts(value: unknown): boolean {
     ((entry as { reviewRevision: number }).reviewRevision >= 0));
 }
 
-function parse(contents: string): RecoverableDraftV3 | undefined {
+export interface InspectedRecoverySnapshot {
+  readonly schemaVersion: number;
+  readonly draft: RecoverableDraftV3;
+}
+class UnsupportedRecoveryFormatError extends Error {}
+
+function parse(contents: string, rejectUnsupported = false): InspectedRecoverySnapshot | undefined {
   try {
     const envelope = JSON.parse(contents) as SnapshotEnvelope;
     const payload = JSON.stringify(envelope.payload);
     const checksum = createHash("sha256").update(payload).digest("hex");
+    if (checksum !== envelope.checksum) return undefined;
+    if (!(RECOVERY_CAPABILITIES.readableDraftSchemaVersions as readonly number[]).includes(envelope.payload.schemaVersion)) {
+      if (rejectUnsupported) throw new UnsupportedRecoveryFormatError("Unsupported protected recovery format; keep the current app and recovery unchanged");
+      return undefined;
+    }
     if (
-      checksum !== envelope.checksum ||
-      ![1, 2, 3].includes(envelope.payload.schemaVersion) ||
+      (envelope.payload.state.pendingDrafts !== undefined && !Array.isArray(envelope.payload.state.pendingDrafts)) ||
       (envelope.payload.schemaVersion === 3 && (
         !validV3Source(envelope.payload.source) ||
         !validNativeAnnotationLedger(envelope.payload.nativeAnnotationLedger) ||
@@ -321,15 +333,50 @@ function parse(contents: string): RecoverableDraftV3 | undefined {
     ) {
       return undefined;
     }
-    return migrateRecoverableDraft(envelope.payload);
-  } catch {
+    return { schemaVersion: envelope.payload.schemaVersion, draft: migrateRecoverableDraft(envelope.payload) };
+  } catch (error) {
+    if (error instanceof UnsupportedRecoveryFormatError) throw error;
     return undefined;
   }
 }
 
+/** Inspect live legacy recovery without initializing, migrating files, changing
+ * permissions, or collecting its temporary writes. Current wins when valid;
+ * a corrupt current record falls back to the valid previous generation. */
+export async function inspectProtectedDraft(directory: string): Promise<InspectedRecoverySnapshot | undefined> {
+  async function readRecord(name: string): Promise<{ snapshot?: InspectedRecoverySnapshot } | undefined> {
+    const path = join(directory, name);
+    const before = await lstat(path).catch((error: NodeJS.ErrnoException) => {
+      if (error.code === "ENOENT") return undefined;
+      throw error;
+    });
+    if (!before) return undefined;
+    if (!before.isFile() || before.isSymbolicLink()) throw new Error("Protected recovery inspection refuses links and special files");
+    let contents: string;
+    let after: Awaited<ReturnType<typeof lstat>>;
+    try { contents = await readFile(path, "utf8"); after = await lstat(path); }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") throw new Error("Protected recovery changed during inspection; let the current app settle and retry", { cause:error });
+      throw error;
+    }
+    if (before.dev !== after.dev || before.ino !== after.ino || before.size !== after.size || before.mtimeMs !== after.mtimeMs) throw new Error("Protected recovery changed during inspection; let the current app settle and retry");
+    const snapshot = parse(contents, true);
+    return snapshot ? { snapshot } : {};
+  }
+  const current = await readRecord("draft.json");
+  if (current?.snapshot) return current.snapshot;
+  const previous = await readRecord("draft.previous.json");
+  // A live writer rotates current to previous before publishing its successor.
+  // An absent current cannot prove that older state is safe to close.
+  if (!current && previous) throw new Error("Protected recovery changed or has no current record; let the current app settle and retry");
+  if (previous?.snapshot) return previous.snapshot;
+  if (current || previous) throw new Error("Protected recovery records are invalid; keep the current app and recovery unchanged");
+  return undefined;
+}
+
 async function readValid(path: string): Promise<RecoverableDraftV3 | undefined> {
   try {
-    return parse(await readFile(path, "utf8"));
+    return parse(await readFile(path, "utf8"))?.draft;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
       return undefined;
@@ -394,18 +441,12 @@ export class DraftSnapshotStore {
     const temporaryPath = join(this.directory, `.draft-${randomUUID()}.tmp`);
     const stopTracking = trackRecoveryTemporaryPath(temporaryPath);
     try {
-      const handle = await open(temporaryPath, "wx", 0o600);
-      try {
-        await handle.chmod(0o600);
-        await handle.writeFile(serialize(draft), "utf8");
-        await handle.sync();
-      } finally {
-        await handle.close();
-      }
+      await writePrivateFile(temporaryPath, serialize(draft));
       await this.#hooks.afterTemporarySync?.();
       signal?.throwIfAborted();
       try {
-        await rename(this.currentPath, this.previousPath);
+        const previous = await publishFile(this.currentPath, this.previousPath);
+        await syncPublishedFile(previous);
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
           throw error;
@@ -413,15 +454,10 @@ export class DraftSnapshotStore {
       }
       await this.#hooks.beforeFinalRename?.();
       signal?.throwIfAborted();
-      await rename(temporaryPath, this.currentPath);
+      const publication = await publishFile(temporaryPath, this.currentPath);
       await this.#hooks.afterFinalRename?.();
       await chmod(this.currentPath, 0o600);
-      const directoryHandle = await open(this.directory, "r");
-      try {
-        await directoryHandle.sync();
-      } finally {
-        await directoryHandle.close();
-      }
+      await syncPublishedFile(publication);
     } catch (error) {
       this.#cleanedDirectoryIdentity = undefined;
       await rm(temporaryPath, { force: true });

@@ -22,7 +22,6 @@ import {
   validateChromeIntegrationBundle,
 } from "../../packaging/macos/chrome-integration.js";
 import { AUTO_OPEN_SENTINEL_KEY, PDF_MIME_TYPE } from "../../apps/chrome-extension/src/opt-in.js";
-import { BUILD_IDENTITY_FILENAME } from "../../packaging/macos/build-app.js";
 import { startChromePdfFixtureServer, type ChromePdfFixtureServer } from "./chrome-pdf-fixture-server.js";
 
 const execFileAsync = promisify(execFile);
@@ -235,7 +234,7 @@ async function installedPrerequisites(appPath: string): Promise<InstalledPrerequ
     throw new Error("Installed Chrome native-host registration does not match this Placekeeper app. Reinstall Placekeeper before running the gate.");
   }
   const identity = JSON.parse(await readFile(
-    join(appPath, `Contents/Resources/${BUILD_IDENTITY_FILENAME}`),
+    join(appPath, "Contents/Resources/desktop/runtime-manifest.json"),
     "utf8",
   )) as { installArtifactIdentity?: unknown };
   if (typeof identity.installArtifactIdentity !== "string" || !/^[0-9a-f]{64}$/u.test(identity.installArtifactIdentity)) {

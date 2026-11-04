@@ -1,8 +1,12 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { constants } from "node:fs";
-import { access, chmod, lstat, mkdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
+import { access, lstat, realpath, rm, stat } from "node:fs/promises";
 import { dirname } from "node:path";
-import { parseEditorControlRequest, parseEditorProfile, type EditorProfile, type EditorRegistrationRequest } from "../../../../packages/core/src/editor-navigation-protocol.js";
+import { isLocalNeovimPipe, parseEditorControlRequest, parseEditorProfile, type EditorProfile, type EditorRegistrationRequest } from "../../../../packages/core/src/editor-navigation-protocol.js";
+
+import { readPrivateFile, writePrivateFile } from "../platform/private-storage.js";
+import { ensurePrivateDirectory } from "../recovery/source-snapshot.js";
+import { publishFile, syncPublishedFile } from "../platform/file-publication.js";
 
 export interface EditorRegistration {
   readonly handle: string;
@@ -23,7 +27,7 @@ export class EditorProfiles {
 
   async list(): Promise<EditorProfile[]> {
     let bytes: Buffer;
-    try { bytes = await readFile(this.path); }
+    try { bytes = await readPrivateFile(this.path, 1_048_576); }
     catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
       throw error;
@@ -43,12 +47,12 @@ export class EditorProfiles {
     const write = this.#writeTail.then(async () => {
       const profiles = (await this.list()).filter(candidate => candidate.name !== profile.name);
       profiles.push(profile);
-      await mkdir(dirname(this.path), { recursive: true, mode: 0o700 });
+      await ensurePrivateDirectory(dirname(this.path));
       const temporary = `${this.path}.${randomUUID()}.tmp`;
       try {
-        await writeFile(temporary, JSON.stringify({ version: 1, profiles }) + "\n", { flag: "wx", mode: 0o600 });
-        await rename(temporary, this.path);
-        await chmod(this.path, 0o600);
+        await writePrivateFile(temporary, JSON.stringify({ version: 1, profiles }) + "\n");
+        const publication = await publishFile(temporary, this.path);
+        await syncPublishedFile(publication);
       } finally { await rm(temporary, { force: true }); }
     });
     this.#writeTail = write.catch(() => undefined);
@@ -70,8 +74,10 @@ export class EditorProfiles {
     if (profile.kind === "command") {
       if (input.socket !== undefined) throw new Error("A command profile cannot use a Neovim socket");
       await validateEditorExecutable(profile.executable);
-    } else if (input.socket === undefined || !(await lstat(input.socket)).isSocket()) {
-      throw new Error("Start Neovim with a local listen socket and register that socket");
+    } else if (input.socket === undefined || (process.platform === "win32"
+      ? !isLocalNeovimPipe(input.socket)
+      : isLocalNeovimPipe(input.socket) || !(await lstat(input.socket)).isSocket())) {
+      throw new Error("Start Neovim with a local listen socket or named pipe and register that endpoint");
     }
     const handle = randomBytes(32).toString("base64url");
     const registration = Object.freeze({ handle, profile: Object.freeze(profile.kind === "command"

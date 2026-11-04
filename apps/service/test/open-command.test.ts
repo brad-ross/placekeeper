@@ -403,6 +403,7 @@ describe("open command", () => {
         kind: "incompatible",
         status: {
           protocolVersion: MANAGEMENT_PROTOCOL_VERSION,
+          upgradePreparationVersion: 1,
           daemonIdentity: "a".repeat(64),
           lifecycle: "accepting",
           activity: { reviewPresence: 0, codexTasks: 0, transientWork: 0 },
@@ -427,6 +428,7 @@ describe("open command", () => {
         kind: "incompatible",
         status: {
           protocolVersion: MANAGEMENT_PROTOCOL_VERSION,
+          upgradePreparationVersion: 1,
           daemonIdentity: "a".repeat(64),
           lifecycle: "accepting",
           activity: { reviewPresence: 1, codexTasks: 0, transientWork: 0 },
@@ -435,7 +437,7 @@ describe("open command", () => {
       shutdown: vi.fn(),
       waitForRetirement: vi.fn(),
       replaceAndReady,
-    })).rejects.toMatchObject({ reason: "review-presence" });
+    })).rejects.toMatchObject({ reason: "preparation-required" });
     expect(replaceAndReady).not.toHaveBeenCalled();
 
     const order: string[] = [];
@@ -446,6 +448,7 @@ describe("open command", () => {
         kind: "incompatible",
         status: {
           protocolVersion: MANAGEMENT_PROTOCOL_VERSION,
+          upgradePreparationVersion: 1,
           daemonIdentity: "a".repeat(64),
           lifecycle: "accepting",
           activity: { reviewPresence: 0, codexTasks: 0, transientWork: 0 },
@@ -483,6 +486,7 @@ describe("open command", () => {
         kind: "incompatible",
         status: {
           protocolVersion: MANAGEMENT_PROTOCOL_VERSION,
+          upgradePreparationVersion: 1,
           daemonIdentity: "a".repeat(64),
           lifecycle: "accepting",
           activity: { reviewPresence: 0, codexTasks: 0, transientWork: 1 },
@@ -834,4 +838,129 @@ describe("explicit native launch surface", () => {
     expect(parseOpenArguments(["open", "--json", "--surface", "codex", "--pdf", "/tmp/paper.pdf"])).toMatchObject({ surface: "codex" });
     expect(() => parseOpenArguments(["open", "--json", "--surface", "codex-native", "--surface", "codex", "--pdf", "/tmp/paper.pdf"])).toThrow();
   });
+});
+
+it("forwards explicit isolated installed smoke roots across child daemon startup", async () => {
+  const { installedSmokeDaemonPaths, installedSmokeDaemonArgs, INSTALLED_SMOKE_ROOT_FLAG } = await import('../src/host/service-daemon.js');
+  const root = join(tmpdir(), 'placekeeper-electron-isolated');
+  const flags = [INSTALLED_SMOKE_DAEMON_FLAG, INSTALLED_SMOKE_HTTP_PORT_FLAG, '43210', INSTALLED_SMOKE_ROOT_FLAG, root];
+  const paths = installedSmokeDaemonPaths(flags)!;
+  expect(paths.appSupportRoot).toBe(root);
+  expect(paths.recoveryRoot).toBe(join(root, 'recovery'));
+  expect(paths.socketPath).toBe(join(root, 'control.sock'));
+  expect(paths.lifecycleLockPath).toBe(join(root, 'lifecycle.lock'));
+  expect(paths.isolatedTestRoot).toBe(root);
+  expect(installedSmokeDaemonArgs(paths)).toEqual(flags);
+  expect(pathsForDirectDaemonLaunch(flags)?.isolatedTestRoot).toBe(root);
+  for (const invalid of [
+    [INSTALLED_SMOKE_ROOT_FLAG, root],
+    [...flags, INSTALLED_SMOKE_ROOT_FLAG, root],
+    [...flags.slice(0, -1), 'relative'],
+    [...flags.slice(0, -1), root + '\0'],
+    flags.slice(0, -1),
+  ]) expect(() => installedSmokeDaemonPaths(invalid)).toThrow();
+  expect(installedSmokeDaemonArgs(defaultDaemonPaths())).toEqual([]);
+});
+
+describe("legacy installer retirement authority", () => {
+  it.each(["app-install", "host-setup"] as const)("refuses legacy retirement for %s before any shutdown or mutation", async operation => {
+    const candidate = { daemonIdentity: "a".repeat(64), installArtifactIdentity: "b".repeat(64) };
+    const installed = { ...candidate, installArtifactIdentity: operation === "host-setup" ? candidate.installArtifactIdentity : "c".repeat(64) };
+    const shutdown = vi.fn(async () => ({status:"accepted" as const}));
+    const retired = vi.fn(async () => {}), mutate = vi.fn(async () => {});
+    await expect(coordinateUpgrade({ operation, candidate, installed,
+      inspect:async()=>({kind:"exact",status:{protocolVersion:1,daemonIdentity:candidate.daemonIdentity,lifecycle:"accepting",activity:{reviewPresence:0,codexTasks:0,transientWork:0}}}),
+      shutdown,waitForRetirement:retired,replaceAndReady:mutate,
+    })).rejects.toThrow(/Quit the current app manually/u);
+    expect(shutdown).not.toHaveBeenCalled();expect(retired).not.toHaveBeenCalled();expect(mutate).not.toHaveBeenCalled();
+  });
+});
+
+describe("committed upgrade closure orchestration", () => {
+  it("waits for the host's next committed poll and real disconnect grace before replacing", async () => {
+    const { PassThrough } = await import('node:stream');
+    const { SessionControlRegistry } = await import('../src/sessions/control-socket.js');
+    const { UpgradePreparationCoordinator } = await import('../src/host/upgrade-preparation.js');
+    const controls = new SessionControlRegistry({heartbeat:false});
+    const lifecycle = new DaemonLifecycleCoordinator({activity:()=>({...controls.activity(),codexTasks:0}),drain:async()=>{}});
+    const preparation = new UpgradePreparationCoordinator(lifecycle);
+    const participant = preparation.registerParticipant({id:'browser:polling-review',revision:'1'});
+    preparation.setParticipantCoverage(()=>true);
+    const socket = new PassThrough();
+    controls.registerSocket('review',socket,undefined,{onDisconnect:()=>preparation.unregisterParticipant(participant)});
+    const candidate = {daemonIdentity:'a'.repeat(64),installArtifactIdentity:'b'.repeat(64)};
+    const shutdown = vi.fn((credentials?: import('../src/host/upgrade-preparation.js').UpgradeAttemptCredentials)=>lifecycle.shutdownIfIdle({authorize:()=>credentials!==undefined&&preparation.status(credentials).phase==='committed'}));
+    const replaced = vi.fn(async()=>{});
+    let poll:ReturnType<typeof setTimeout>|undefined;
+    const started=Date.now();
+    try {
+      await coordinateUpgrade({candidate,
+        inspect:async()=>({kind:'exact',status:{protocolVersion:1,upgradePreparationVersion:1,daemonIdentity:candidate.daemonIdentity,...lifecycle.status()}}),
+        prepare:async()=>{
+          const attempt=preparation.preview(candidate.daemonIdentity,candidate);preparation.begin(attempt,true);
+          preparation.acknowledge(participant,attempt,{revision:'1',reviewRevisionDurable:true,protectedDraftDurable:true,pdfSaveSettled:true});preparation.commit(attempt);
+          // The installer starts shutdown immediately; this host has not yet
+          // polled committed status and its five-second grace has not begun.
+          poll=setTimeout(()=>{expect(preparation.poll(participant)?.phase).toBe('committed');socket.destroy();},100);
+          return attempt;
+        },
+        validatePreparation:async credentials=>preparation.status(credentials).phase==='committed',
+        cancelPreparation:async credentials=>{preparation.cancel(credentials);},
+        shutdown,waitForRetirement:async()=>{expect(lifecycle.status().lifecycle).toBe('shutdown-committed');},replaceAndReady:replaced,
+      });
+      expect(Date.now()-started).toBeGreaterThanOrEqual(5_000);
+      expect(shutdown.mock.calls.length).toBeGreaterThan(1);expect(replaced).toHaveBeenCalledOnce();
+    }finally{clearTimeout(poll);socket.destroy();preparation.close();}
+  },15_000);
+  it("cancels a committed attempt on bounded closure failure so surviving hosts regain admission",async()=>{
+    const { UpgradePreparationCoordinator } = await import('../src/host/upgrade-preparation.js');
+    const lifecycle=new DaemonLifecycleCoordinator({activity:()=>({reviewPresence:1,codexTasks:0,transientWork:0}),drain:async()=>{}});
+    const preparation=new UpgradePreparationCoordinator(lifecycle);preparation.setParticipantCoverage(()=>true);
+    const candidate={daemonIdentity:'a'.repeat(64),installArtifactIdentity:'b'.repeat(64)};
+    const cancel=vi.fn(async(credentials:import('../src/host/upgrade-preparation.js').UpgradeAttemptCredentials)=>{preparation.cancel(credentials);});
+    const replaced=vi.fn();
+    try{
+      await expect(coordinateUpgrade({candidate,preparedRetryDurationMs:20,
+        inspect:async()=>({kind:'exact',status:{protocolVersion:1,upgradePreparationVersion:1,daemonIdentity:candidate.daemonIdentity,...lifecycle.status()}}),
+        prepare:async()=>{const attempt=preparation.preview(candidate.daemonIdentity,candidate);preparation.begin(attempt,true);preparation.commit(attempt);return attempt;},
+        validatePreparation:async credentials=>preparation.status(credentials).phase==='committed',cancelPreparation:cancel,
+        shutdown:credentials=>lifecycle.shutdownIfIdle({authorize:()=>credentials!==undefined&&preparation.status(credentials).phase==='committed'}),waitForRetirement:vi.fn(),replaceAndReady:replaced,
+      })).rejects.toThrow();
+      expect(cancel).toHaveBeenCalledOnce();expect(lifecycle.admissionAllowed()).toBe(true);expect(replaced).not.toHaveBeenCalled();
+    }finally{preparation.close();}
+  });
+});
+
+it('revalidates committed credentials after every refused prepared shutdown and cancels if authorization changes',async()=>{
+  const candidate={daemonIdentity:'a'.repeat(64),installArtifactIdentity:'b'.repeat(64)};
+  const credentials={attemptId:'attempt',token:'token',candidate};
+  let committed=true;
+  const shutdown=vi.fn(async()=>({status:'refused' as const,activity:{reviewPresence:1,codexTasks:0,transientWork:0}}));
+  const cancel=vi.fn(async()=>{}),replace=vi.fn();
+  await expect(coordinateUpgrade({candidate,
+    inspect:async()=>({kind:'exact',status:{protocolVersion:1,upgradePreparationVersion:1,daemonIdentity:candidate.daemonIdentity,lifecycle:'accepting',activity:{reviewPresence:1,codexTasks:0,transientWork:0}}}),
+    prepare:async()=>credentials,validatePreparation:async value=>{expect(value).toBe(credentials);return committed;},cancelPreparation:cancel,
+    retryDelay:async()=>{committed=false;},shutdown,waitForRetirement:vi.fn(),replaceAndReady:replace,
+  })).rejects.toThrow('no longer committed');
+  expect(shutdown).toHaveBeenCalledOnce();expect(cancel).toHaveBeenCalledWith(credentials);expect(replace).not.toHaveBeenCalled();
+});
+it('does not cancel a service after accepted prepared shutdown when process retirement remains uncertain',async()=>{
+  const candidate={daemonIdentity:'a'.repeat(64),installArtifactIdentity:'b'.repeat(64)};
+  const cancel=vi.fn(),replace=vi.fn();
+  await expect(coordinateUpgrade({candidate,
+    inspect:async()=>({kind:'exact',status:{protocolVersion:1,upgradePreparationVersion:1,daemonIdentity:candidate.daemonIdentity,lifecycle:'accepting',activity:{reviewPresence:1,codexTasks:0,transientWork:0}}}),
+    prepare:async()=>({attemptId:'attempt',token:'token',candidate}),validatePreparation:async()=>true,cancelPreparation:cancel,
+    shutdown:async()=>({status:'accepted'}),waitForRetirement:async()=>{throw Error('retirement uncertain');},replaceAndReady:replace,
+  })).rejects.toThrow('retirement uncertain');
+  expect(cancel).not.toHaveBeenCalled();expect(replace).not.toHaveBeenCalled();
+});
+it('reports failed cancellation along with the original closure failure',async()=>{
+  const candidate={daemonIdentity:'a'.repeat(64),installArtifactIdentity:'b'.repeat(64)};
+  const failure=await coordinateUpgrade({candidate,
+    inspect:async()=>({kind:'exact',status:{protocolVersion:1,upgradePreparationVersion:1,daemonIdentity:candidate.daemonIdentity,lifecycle:'accepting',activity:{reviewPresence:1,codexTasks:0,transientWork:0}}}),
+    prepare:async()=>({attemptId:'attempt',token:'token',candidate}),validatePreparation:async()=>true,cancelPreparation:async()=>{throw Error('cancel unavailable');},
+    shutdown:async()=>{throw Error('shutdown unavailable');},waitForRetirement:vi.fn(),replaceAndReady:vi.fn(),
+  }).then(()=>undefined,error=>error);
+  expect(failure).toBeInstanceOf(AggregateError);expect(failure.message).toContain('cancellation could not be confirmed');
+  expect(failure.errors.map((error:Error)=>error.message)).toEqual(['shutdown unavailable','cancel unavailable']);
 });

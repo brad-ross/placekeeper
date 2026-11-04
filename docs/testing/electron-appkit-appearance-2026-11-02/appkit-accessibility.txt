@@ -1,0 +1,57 @@
+Window: "Paired synthetic PDF.pdf", App: Placekeeper.
+0 standard window Paired synthetic PDF.pdf, Secondary Actions: Raise
+	1 scroll area
+		2 HTML content Description: Paired synthetic PDF.pdf, URL: placekeeper-app://bundle/macos.html
+			3 container
+				4 pop up button Paired synthetic PDF.pdf, Saved. Open automatic save options
+				5 container PDF navigation and links
+					6 container Document navigation
+						7 text field (settable) Current page 1 of 6. Enter a page number, Help: Page number, Value: 1
+						8 pop up button Page 1 of 6. Open page navigation
+						9 button (disabled) Back in document history
+						10 button (disabled) Forward in document history
+				11 container PDF editing and zoom
+					12 container Edit history
+						13 button (disabled) Undo
+						14 button (disabled) Redo
+					15 container PDF zoom
+						16 container Zoom level
+							17 text field (settable) Current zoom 179 percent. Enter a zoom percentage, Help: Zoom percentage, Value: 179
+						18 pop up button Open zoom controls
+				19 container Paired synthetic PDF.pdf
+					20 container
+						21 container Page 1
+							22 image
+							23 container
+								24 pop up button Open PDF link to Page 4, Help: Open link actions
+							25 container
+								26 pop up button Open PDF link to Page 4, Help: Open link actions
+							27 container
+								28 pop up button Open PDF link to Page 2, Help: Open link actions
+							29 container
+								30 pop up button Open PDF link to Page 3, Help: Open link actions
+							31 container
+								32 pop up button Open PDF link to Page 5, Help: Open link actions
+							33 container
+								34 pop up button Open PDF link to Page 4, Help: Open link actions
+							35 container
+								36 pop up button Open PDF link to Page 4, Help: Open link actions
+						37 container Page 2
+							38 image
+						39 container Page 3
+							40 image
+						41 container Page 4
+							42 image
+						43 container Page 5
+							44 image
+				45 button (collapsed) Show workspace, Secondary Actions: Expand
+	46 close button
+	47 full screen button Help: this button also has an action to zoom the window, Secondary Actions: zoom the window
+	48 minimize button
+49 menu bar
+	50 Placekeeper
+	51 File
+	52 Edit
+	53 View
+	54 Window
+	55 Help

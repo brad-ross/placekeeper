@@ -26,8 +26,8 @@ it("packages only the tested commit and produces mutually consistent immutable a
   const dir = await mkdtemp(join(tmpdir(), "placekeeper-release-fixture-"));
   try {
     const repo = join(dir, "repo"); const output = join(dir, "assets");
-    await mkdir(join(repo, "packaging/macos"), { recursive: true }); await mkdir(join(repo, "scripts"));
-    await writeFile(join(repo, "packaging/macos/app-bundle.json"), JSON.stringify({ bundleVersion: "1.2.3" }));
+    await mkdir(join(repo, "apps/electron"), { recursive: true }); await mkdir(join(repo, "scripts"));
+    await writeFile(join(repo, "apps/electron/package.json"), JSON.stringify({ version: "1.2.3" }));
     await writeFile(join(repo, "patch@1.0.patch"), "tracked dependency patch");
     await writeFile(join(repo, "install.sh"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
     await writeFile(join(repo, "scripts/install-release.sh"), await readFile(new URL("./install-release.sh", import.meta.url)));
@@ -60,60 +60,20 @@ it("accepts the actual tracked source pathname alphabet", () => {
 describe("source publication workflow", () => {
   it("builds shared app and extension assets before packaging assertions consume them", async () => {
     const source = await readFile(new URL("../.github/workflows/release-source.yml", import.meta.url), "utf8");
-    const build = source.indexOf("run: pnpm package:macos");
+    const build = source.indexOf("run: pnpm package:desktop");
     expect(build).toBeGreaterThan(0);
-    expect(build).toBeLessThan(source.indexOf("run: pnpm exec vitest run packaging/macos/packaging.test.ts"));
+    expect(build).toBeLessThan(source.indexOf("run: pnpm exec vitest run packaging/shared/distribution.test.ts"));
     expect(source.indexOf("run: pnpm fixtures:pdf")).toBeLessThan(build);
   });
   const workflow = () => readFile(new URL("../.github/workflows/release-source.yml", import.meta.url), "utf8");
-  it("restricts dispatch to trusted main and isolates release write permission", async () => {
+  it("retains source gates and cannot publish a partial desktop release", async () => {
     const source = await workflow();
     expect(source).toContain("github.ref == 'refs/heads/main'");
     expect(source).toContain("ref: ${{ github.sha }}");
-    expect(source.match(/contents: write/g)).toHaveLength(1);
-    expect(source).toContain("needs: validate");
-    expect(source).toContain("cancel-in-progress: false");
-    expect(source).not.toMatch(/secrets\.MACOS|sign-identity|notarize/);
+    for (const gate of ["pnpm typecheck", "pnpm test:source-release", "packaging/shared/distribution.test.ts", "pnpm test:upgrade-lifecycle", "pnpm package:desktop", "pnpm test:desktop-installed", "pnpm test:chrome-handoff"]) expect(source).toContain(gate);
+    expect(source).toContain("path: artifacts/source/");
+    expect(source).not.toMatch(/contents: write|createRelease|updateRelease|release edit/);
     for (const action of source.matchAll(/uses: ([^\s]+)/g)) expect(action[1]).toMatch(/@[a-f0-9]{40}$/);
-  });
-  it("requires source installation gates independently of optional Chrome validation", async () => {
-    const source = await workflow();
-    for (const gate of ["pnpm typecheck", "pnpm test:source-release", "packaging/macos/packaging.test.ts", "pnpm test:upgrade-lifecycle", "pnpm package:macos", "pnpm smoke:installed", "pnpm test:chrome-handoff"]) expect(source).toContain(gate);
-    expect(source).not.toContain("installed_chrome_evidence");
-    expect(source).not.toContain("validate-installed-chrome-evidence.ts");
-    expect(await readFile(new URL("../test/acceptance/validate-installed-chrome-evidence.ts", import.meta.url), "utf8")).toContain("validateManualEvidence");
-    expect(source).not.toContain("release:validate");
-  });
-  it("rejects duplicates before gates and publication and completes a draft before stable promotion", async () => {
-    const source = await workflow();
-    expect(source.match(/getRef\(/g)).toHaveLength(2);
-    expect(source.match(/repos.listReleases/g)).toHaveLength(2);
-    expect(source).toContain("canonical app manifest");
-    expect(source).toContain("draft: true");
-    expect(source.indexOf("uploadReleaseAsset(")).toBeLessThan(source.indexOf("updateRelease("));
-    expect(source).toContain("make_latest: 'true'");
-    expect(source).not.toMatch(/deleteRelease|deleteReleaseAsset|--clobber/);
-    expect(source).toContain("SOURCE_VERSION: ${{ inputs.version }}");
-    expect(source).toContain("SOURCE_NOTES: ${{ inputs.notes }}");
   });
 });
 
-it("keeps publication private on duplicates, missing assets, or upload failure", async () => {
-  const workflow = await readFile(new URL("../.github/workflows/release-source.yml", import.meta.url), "utf8");
-  const script = workflow.split("      - name: Publish complete source release\n")[1]!.split("          script: |\n")[1]!.split("\n").map(line => line.replace(/^            /, "")).join("\n");
-  const run = new Function("github", "context", "require", "process", `return (async () => {${script}\n})();`) as (...args: unknown[]) => Promise<void>;
-  for (const failure of ["branch", "tag", "draft", "missing", "upload", "incomplete", "digest", "none"]) {
-    const calls: string[] = [];
-    const assets: { name: string; size: number }[] = [];
-    const github = { rest: { git: { getRef: async () => { if (failure === "tag") return {}; throw Object.assign(new Error("Not found"), { status: 404 }); } }, repos: {
-      listReleases: "releases", listReleaseAssets: "assets",
-      createRelease: async (request: { draft: boolean }) => { expect(request.draft).toBe(true); calls.push("draft"); return { data: { id: 1 } }; },
-      uploadReleaseAsset: async (asset: { name: string; data: Buffer }) => { if (failure === "upload") throw new Error("Upload failed"); assets.push({ name: asset.name, size: asset.data.length }); },
-      updateRelease: async (request: { draft: boolean; make_latest: string }) => { expect(request).toMatchObject({ draft: false, make_latest: "true" }); calls.push("public"); },
-    } }, paginate: async (method: string) => method === "releases" ? failure === "draft" ? [{ tag_name: "v0.1.0" }] : [] : failure === "incomplete" ? [] : assets };
-    const fs = { readFileSync: () => { if (failure === "missing") throw new Error("Missing asset"); return Buffer.from("asset"); } };
-    const promise = run(github, { ref: failure === "branch" ? "refs/heads/untrusted" : "refs/heads/main", repo: {}, sha: "a".repeat(40) }, (name: string) => name === "node:crypto" ? { createHash } : fs, { env: { SOURCE_VERSION: "0.1.0", SOURCE_NOTES: "Release notes", EXPECTED_ARCHIVE_SHA256: failure === "digest" ? "wrong" : createHash("sha256").update("asset").digest("hex"), EXPECTED_BOOTSTRAP_SHA256: createHash("sha256").update("asset").digest("hex") } });
-    if (failure === "none") { await promise; expect(calls).toEqual(["draft", "public"]); }
-    else { await expect(promise).rejects.toThrow(); expect(calls).not.toContain("public"); if (["branch", "tag", "draft", "missing"].includes(failure)) expect(calls).toEqual([]); }
-  }
-});

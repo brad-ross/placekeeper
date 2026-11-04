@@ -1,3 +1,6 @@
+import { switchDesktopService } from "./desktop-service-switch.js";
+import { createInterface } from "node:readline/promises";
+import type { UpgradeAttemptCredentials, UpgradePreparationRequest, UpgradePreparationStatus } from "../host/upgrade-preparation.js";
 import { execFile } from "node:child_process";
 import { lstat, readFile, unlink } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
@@ -40,9 +43,18 @@ function takeFlag(args: readonly string[], flag: string): string {
   return value;
 }
 
+function desktopResources(appPath: string): string {
+  return join(appPath, process.platform === "darwin" ? "Contents/Resources/desktop" : "resources/desktop");
+}
+function desktopLauncher(appPath: string): string {
+  return process.platform === "darwin" ? join(appPath, "Contents/MacOS/placekeeper")
+    : join(desktopResources(appPath), "bin", `placekeeper${process.platform === "win32" ? ".exe" : ""}`);
+}
+
 async function readIdentity(appPath: string): Promise<PackagedBuildIdentity | undefined> {
   try {
-    const value = JSON.parse(await readFile(join(appPath, "Contents/Resources/build-identity.json"), "utf8")) as Partial<PackagedBuildIdentity>;
+    const raw = await readFile(join(desktopResources(appPath), "runtime-manifest.json"), "utf8").catch(() => readFile(join(appPath, "Contents/Resources/build-identity.json"), "utf8"));
+    const value = JSON.parse(raw) as Partial<PackagedBuildIdentity>;
     if (
       !/^[a-f0-9]{64}$/u.test(value.daemonIdentity ?? "") ||
       !/^[a-f0-9]{64}$/u.test(value.installArtifactIdentity ?? "")
@@ -109,17 +121,6 @@ async function waitForProcessRetirement(pid: number): Promise<void> {
   }
 }
 
-async function terminateCandidateProcess(pid: number): Promise<void> {
-  if (processExists(pid)) {
-    try {
-      process.kill(-pid, "SIGTERM");
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
-    }
-  }
-  await waitForProcessRetirement(pid);
-}
-
 async function requestIdleShutdown(socketPath: string) {
   const response = await requestControl(socketPath, {
     kind: "management",
@@ -159,7 +160,7 @@ async function stopReadyCandidate(receiptPath: string, paths = defaultDaemonPath
       compatibility = await inspectDaemonCompatibility(paths.socketPath, receipt.daemonIdentity);
     } catch (error) {
       if (await initialDaemonIsAbsent(error, paths.socketPath)) {
-        await terminateCandidateProcess(receipt.pid);
+        await waitForProcessRetirement(receipt.pid);
         await unlink(receiptPath).catch(() => undefined);
         return;
       }
@@ -198,6 +199,59 @@ async function coordinateLifecycleMutation(
   ) throw new Error("The candidate launcher identity does not match its bundle");
 
   const smokePort = installedSmokeDaemonPaths(args)?.httpPort;
+  if (!hostSetup && await lstat(join(desktopResources(candidateApp), "runtime-manifest.json")).then(() => true, () => false)) {
+    const backupRoot = join(paths.appSupportRoot, "installer", `recovery-backup-${Date.now()}`);
+    await switchDesktopService({
+      resources: desktopResources(candidateApp), backup: backupRoot,
+      prepare: async (status, selected) => {
+        const request = async (request: UpgradePreparationRequest): Promise<UpgradePreparationStatus> => {
+          const response = await requestControl(paths.socketPath, { kind: "upgrade-preparation", request });
+          if (response.kind !== "upgrade-preparation" || response.result.phase === "none" || !("token" in response.result)) throw new Error("Upgrade preparation response is invalid");
+          return response.result;
+        };
+        const preview = await request({ operation: "preview", installedDaemonIdentity: status.daemonIdentity, candidate: selected });
+        const credentials: UpgradeAttemptCredentials = { attemptId: preview.attemptId, token: preview.token, candidate: preview.candidate };
+        try {
+          const nativeConsent = args.includes("--native-installer-consent");
+          if (!nativeConsent && !process.stdin.isTTY) throw new Error("Active reviews need approval to close. Run the source installer in an interactive terminal, or close reviews and retry.");
+          const terminal = createInterface({ input: process.stdin, output: process.stderr });
+          let accepted = false;
+          try {
+            if (nativeConsent) {
+              process.stdout.write('{"kind":"placekeeper-install-consent","version":1}\n');
+              const answer = await Promise.race([terminal[Symbol.asyncIterator]().next(), new Promise<never>((_, reject) => { const timer = setTimeout(() => reject(Error("Installer consent timed out")), 120_000); timer.unref(); })]);
+              const decision = answer.done ? undefined : JSON.parse(answer.value) as { version?: unknown; accepted?: unknown };
+              accepted = decision?.version === 1 && decision.accepted === true;
+            } else accepted = /^y(?:es)?$/iu.test((await terminal.question(`This Placekeeper change will close active reviews after protecting pending edits and drafts. Close reviews and continue? [y/N] `)).trim());
+          } finally { terminal.close(); }
+          let preparation = await request({ operation: "begin", credentials, consent: accepted });
+          if (!accepted) throw new Error("Installation canceled; current reviews remain available");
+          const deadline = Date.now() + 120_000;
+          while (preparation.phase === "preparing" && Date.now() < deadline) {
+            await new Promise(resolve => setTimeout(resolve, 100));
+            preparation = await request({ operation: "status", credentials });
+          }
+          if (preparation.phase !== "ready") throw new Error("Pending review work could not be protected; installation stopped");
+          if ((await request({ operation: "commit", credentials })).phase !== "committed") throw new Error("Review closure was not committed");
+          return credentials;
+        } catch (error) { await request({ operation: "cancel", credentials }).catch(() => undefined); throw error; }
+      },
+      receipt: join(paths.appSupportRoot, "installer", `install-ready-${Date.now()}.json`), paths,
+      replaceAndReady: async (lifecycleToken) => {
+        if (!replaceHelper.endsWith(".mjs")) throw new Error("Desktop installation requires the portable replacement helper");
+        const result = await execFileAsync(process.execPath, [replaceHelper, ...(args.includes("--uninstall-only") ? ["--uninstall-only"] : args.includes("--immutable-runtime") ? ["--immutable-runtime"] : []), candidateApp, installedApp, desktopLauncher(installedApp),
+          ...(smokePort === undefined ? [] : [String(smokePort), ...(paths.isolatedTestRoot === undefined ? [] : [paths.isolatedTestRoot])])], { timeout: 300_000, maxBuffer: 65_536, env: { ...process.env,
+          [LIFECYCLE_LOCK_TOKEN_ENV]: lifecycleToken,
+          PLACEKEEPER_INSTALL_BACKUP_ROOT: backupRoot,
+          [LIFECYCLE_LOCK_PATH_ENV]: paths.lifecycleLockPath ?? join(paths.appSupportRoot, "lifecycle.lock"),
+        } });
+        write(result.stdout);
+        if (result.stderr) process.stderr.write(result.stderr);
+      },
+    });
+    return "installed";
+  }
+
   const lifecycleLock = await acquireLifecycleLock(
     paths.lifecycleLockPath ?? join(paths.appSupportRoot, "lifecycle.lock"),
     { timeoutMs: 5_000 },
@@ -226,7 +280,7 @@ async function coordinateLifecycleMutation(
         try {
           return await requestIdleShutdown(paths.socketPath);
         } catch (error) {
-          if (daemonUnavailable(error)) return { status: "accepted" };
+          if (daemonUnavailable(error)) throw new DaemonUpgradeRequiredError("early-close");
           if (error instanceof PlacekeeperControlTimeoutError) {
             throw new DaemonUpgradeRequiredError("timeout");
           }
@@ -286,6 +340,22 @@ export async function runDaemonCommand(
   write: (text: string) => void = (text) => process.stdout.write(text),
 ): Promise<number> {
   const paths = installedSmokeDaemonPaths(args) ?? defaultDaemonPaths();
+  if (args[0] === "switch-service") {
+    if (args.length !== 7) throw new Error("Use daemon switch-service --resources <root> --backup <new-path> --receipt <new-path>");
+    try {
+      await switchDesktopService({ resources: takeFlag(args, "--resources"), backup: takeFlag(args, "--backup"), receipt: takeFlag(args, "--receipt"), paths });
+      write(`${JSON.stringify({ ok: true, status: "ready" })}\n`);
+      return 0;
+    } catch (failure) {
+      const error = failure instanceof LifecycleLockTimeoutError ? new DaemonUpgradeRequiredError("transient-busy") : failure;
+      write(`${JSON.stringify({ ok: false, error: {
+        kind: error instanceof DaemonUpgradeRequiredError ? "upgrade-required" : "input-unavailable",
+        message: error instanceof Error ? error.message : "The selected service did not become ready. Recovery was retained.",
+        recoveryAction: error instanceof DaemonUpgradeRequiredError ? error.recoveryAction : "Inspect the selected installation and retained recovery backup, then retry service selection",
+      } })}\n`);
+      return 2;
+    }
+  }
   if (args[0] === "ensure-ready") {
     const receiptPath = takeFlag(args, "--receipt");
     await ensureServiceDaemonReady(paths, process.env[LIFECYCLE_LOCK_TOKEN_ENV], receiptPath);
@@ -306,13 +376,12 @@ export async function runDaemonCommand(
     if (error instanceof LifecycleLockTimeoutError) {
       error = new DaemonUpgradeRequiredError("transient-busy");
     }
-    if (!(error instanceof DaemonUpgradeRequiredError)) throw error;
     write(`${JSON.stringify({
       ok: false,
       error: {
-        kind: "upgrade-required",
-        message: error.message,
-        recoveryAction: error.recoveryAction,
+        kind: error instanceof DaemonUpgradeRequiredError ? "upgrade-required" : "input-unavailable",
+        message: error instanceof Error ? error.message : "The coordinated installation could not finish",
+        recoveryAction: error instanceof DaemonUpgradeRequiredError ? error.recoveryAction : "Keep the current app, retained app versions and verified recovery backup. Resolve the reported installation error, then retry.",
       },
     })}\n`);
     return 2;

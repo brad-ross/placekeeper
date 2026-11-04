@@ -1,7 +1,7 @@
 ---
 title: "Pointer-anchored zoom across custom viewer geometry"
 date: "2026-09-07"
-last_updated: 2026-09-11
+last_updated: 2026-11-03
 category: "ui-bugs"
 module: "PDF viewer zoom and framing"
 problem_type: "ui_bug"
@@ -51,17 +51,17 @@ Measured page geometry is the common coordinate system across custom padding, do
 
 ### Native app zoom ends the old coordinate system
 
-Native menu handling can bypass the DOM key events that normally finish a gesture. [PR #103](https://github.com/brad-ross/placekeeper/pull/103), open as of 2026-09-11, adds explicit native-to-web preparation before changing `WKWebView.pageZoom` for ready content. A successful synchronous JavaScript return acknowledges preparation; the native controller then validates the transition ticket before applying the scale (`apps/macos/Sources/PlacekeeperMac/PlacekeeperWindowController.swift`; `apps/web/src/macos-entry.tsx`).
+Native menu handling can bypass the DOM key events that normally finish a gesture. The historical AppKit implementation in [PR #103](https://github.com/brad-ross/placekeeper/pull/103) used explicit native-to-web preparation before changing `WKWebView.pageZoom` for ready content. A synchronous JavaScript acknowledgement and native transition-ticket validation guarded that scale change. Its Swift controller and `macos-entry.tsx` are now retired; this mechanism is historical evidence, not a description of current Electron interface zoom.
 
-For each mounted viewer, preparation marks the presentation transition and synchronously dispatches the finish-gesture event, committing any preview against the old layout. **After finishing**, it cancels the pending anchor-restoration frame and any zoom animation (`apps/web/src/pdf/anchored-zoom.ts`). The order matters: committing a preview can itself schedule a restoration frame, so canceling only before the commit would leave a stale correction alive. That delayed correction captures old focus coordinates and must not combine them with page geometry measured after the host changes scale.
+In the historical host handoff, preparation marked each mounted viewer's presentation transition and synchronously dispatched the finish-gesture event, committing any preview against the old layout. **After finishing**, it canceled the pending anchor-restoration frame and any zoom animation. The order matters: committing a preview can itself schedule a restoration frame, so canceling only before the commit would leave a stale correction alive. That delayed correction captures old focus coordinates and must not combine them with page geometry measured after the host changes scale. The shared cancellation primitives remain in `apps/web/src/pdf/anchored-zoom.ts`; the former host preparation wiring is retired.
 
-The gesture wrapper blocks new wheel/touch zoom previews while the marker is present. Geometry publication invokes resume only when it is no longer transitioning, and resume clears the marker only when the published geometry identity differs from the one recorded at preparation. Republishing the old layout therefore does not reopen gesture input (`apps/web/src/pdf/AnchoredZoomGestureWrapper.tsx`; `apps/web/src/macos-entry.tsx`; `apps/web/src/pdf/anchored-zoom.ts`). Finish the old presentation's work, revoke its delayed effects, then admit gestures under the changed presentation.
+In that AppKit handoff, the gesture wrapper blocked new wheel/touch zoom previews while the marker was present. Geometry publication invoked resume only when it was no longer transitioning, and resume cleared the marker only after the published geometry identity changed. Republishing the old layout therefore did not reopen gesture input. The durable ordering is to finish the old presentation's work, revoke its delayed effects, then admit gestures under the changed presentation; the former host wiring is retired.
 
 ## Prevention
 
 Verify both transient and settled geometry. A test that checks only the final zoom percentage can pass while all intermediate frames jump or rebuild layout. The production acceptance test samples 30 animation frames, measures the same normalized point, uses a MutationObserver to count distinct inline page-width values, and requires meaningful retained scale (`test/acceptance/production-flow.spec.ts`). It requires at most two additional distinct widths, <3 px preview drift, <2 px final drift, and scale >1.25. Test interruptions separately (`test/acceptance/production-flow.spec.ts`) so delayed commits cannot undo page navigation. The counter is the number of distinct sampled widths minus one. Treat it as a proxy for layout commits during monotonic zoom, not as a general browser layout profiler or a count of repeated transitions between the same widths.
 
-The native app-zoom handoff has separate coverage in `apps/web/test/macos-app-zoom-transition.test.ts`: synchronous finish dispatch to mounted viewers, cancellation of deferred correction, stale runtime/attempt/geometry rejection, and retaining the marker when the old identity republishes. All six tests passed during the September 11 documentation review. These isolated checks do not establish physical trackpad-pinch behavior; that verification remains unconfirmed in PR #103's recorded acceptance evidence.
+The retired AppKit app-zoom handoff had six isolated tests covering synchronous finish dispatch, deferred-correction cancellation, stale runtime/attempt/geometry rejection, and retaining the marker when the old identity republishes. All six passed during the September 11 documentation review. Those tests and their `macos-app-zoom-transition.test.ts` file are historical evidence; they neither establish current Electron interface-zoom behavior nor physical trackpad-pinch qualification.
 
 The original pointer-zoom implementation and performance measurements describe verified local work submitted in [PR #84](https://github.com/brad-ross/placekeeper/pull/84), merged on 2026-09-07. The measurements above are retained from the local performance experiment on 2026-09-07.
 

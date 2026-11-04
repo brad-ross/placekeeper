@@ -1,0 +1,82 @@
+{
+  "version": "0.2.4",
+  "commit": "3e37ca4b84dde61725b8e03d87dbc3023f1d1f4f",
+  "publishedAt": "2026-10-16",
+  "sourceAsset": {
+    "url": "https://github.com/brad-ross/placekeeper/releases/download/v0.2.4/placekeeper-source-v0.2.4.tar.gz",
+    "sha256": "d67be517bf191966ea4d380d00f75cca3b7804e4920d007adf20bbb927d62a41"
+  },
+  "identity": {
+    "name": "Placekeeper",
+    "bundleId": "local.placekeeper",
+    "executable": "PlacekeeperMac",
+    "cli": "Contents/MacOS/placekeeper",
+    "supportRoot": "~/Library/Application Support/Placekeeper"
+  },
+  "preferenceFile": "~/Library/Preferences/local.placekeeper.plist",
+  "preferenceKeys": [
+    "Placekeeper.RestorableDocumentWindows.v1",
+    "Placekeeper.AppZoom.v1"
+  ],
+  "recovery": {
+    "draftVersions": [
+      1,
+      2,
+      3
+    ],
+    "envelope": "JSON checksum SHA-256 of JSON.stringify(payload), plus payload",
+    "schemaEvidence": "apps/service/src/recovery/draft-snapshot.ts"
+  },
+  "evidence": [
+    {
+      "path": "apps/macos/Sources/PlacekeeperMac/WindowRestoration.swift",
+      "sha256": "f7696473d783b69324c40933cfe221d70d2292da696fa57675a27de2d9c52eb5",
+      "storedPath": "source/apps/macos/Sources/PlacekeeperMac/WindowRestoration.swift.txt"
+    },
+    {
+      "path": "apps/macos/Sources/PlacekeeperMac/AppZoomPolicy.swift",
+      "sha256": "b1334eb95f3e629909caed92e930d725fe02fe11b82c545c23445b617ac9f787",
+      "storedPath": "source/apps/macos/Sources/PlacekeeperMac/AppZoomPolicy.swift.txt"
+    },
+    {
+      "path": "apps/service/src/recovery/draft-snapshot.ts",
+      "sha256": "8a5c7fda226db07a029f8eca5b7c425a7cbf60f2ace15794e9455b8852137a45",
+      "storedPath": "source/apps/service/src/recovery/draft-snapshot.ts.txt"
+    },
+    {
+      "path": "apps/service/test/recovery.test.ts",
+      "sha256": "498430fd540ef810d4928b7d00b91f455c98a7cf70538003a126451da33f677f",
+      "storedPath": "source/apps/service/test/recovery.test.ts.txt"
+    },
+    {
+      "path": "packages/core/src/review-model.ts",
+      "sha256": "30780b1e6f793f13d3c0203790b24c1dadbf3096d9a5ede55d3231bf3386dfc0",
+      "storedPath": "source/packages/core/src/review-model.ts.txt"
+    },
+    {
+      "path": "packaging/macos/build-native-candidate.ts",
+      "sha256": "ae8ebb1adfb3f347a7778b9f18e37d87ea9244fa7e718e5075e6808966a79225",
+      "storedPath": "source/packaging/macos/build-native-candidate.ts.txt"
+    },
+    {
+      "path": "packaging/macos/launcher.mjs",
+      "sha256": "0d60de08d85cea05f14bea02a388cc7359c21ece2c5b9aede982d96c21242d33",
+      "storedPath": "source/packaging/macos/launcher.mjs.txt"
+    },
+    {
+      "path": "packaging/macos/build-app.ts",
+      "storedPath": "source/packaging/macos/build-app.ts.txt",
+      "sha256": "0637ba2acb36d0aa5c6d4e664385dd8a5a09689ccb2e4ce1b357b9c365c88245"
+    },
+    {
+      "path": "packaging/macos/chrome-integration.ts",
+      "storedPath": "source/packaging/macos/chrome-integration.ts.txt",
+      "sha256": "73e1fddfe1cf705478c0e51466c77bc52b1c2ef6c90b9ee4dcc5cb7c4a3f059e"
+    }
+  ],
+  "compatibilityLaunchers": [
+    "Contents/MacOS/placekeeper",
+    "Contents/MacOS/placekeeper-vscode",
+    "Contents/MacOS/placekeeper-chrome-host"
+  ]
+}

@@ -2,7 +2,6 @@ import { readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 
 import { CHROME_EXTENSION_BUNDLE_PATH, CHROME_EXTENSION_ID } from "../../packaging/macos/chrome-integration.js";
-import { BUILD_IDENTITY_FILENAME } from "../../packaging/macos/build-app.js";
 import {
   extensionRuntimeIdentity,
   parseChromeMajor,
@@ -32,7 +31,7 @@ async function main(): Promise<void> {
     throw new Error("Installed Chrome release evidence is incomplete or failed.");
   }
   const identity = JSON.parse(await readFile(
-    join(appPath, `Contents/Resources/${BUILD_IDENTITY_FILENAME}`), "utf8",
+    join(appPath, "Contents/Resources/desktop/runtime-manifest.json"), "utf8",
   )) as { installArtifactIdentity?: unknown };
   const runtimeIdentity = await extensionRuntimeIdentity(join(appPath, CHROME_EXTENSION_BUNDLE_PATH));
   if (typeof identity.installArtifactIdentity !== "string" ||

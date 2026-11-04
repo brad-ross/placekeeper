@@ -125,7 +125,8 @@ describe("static browser review runtime", () => {
     expect(markup).toContain('title="Read with focus interactive demo"');
     expect(markup).toContain('sandbox="allow-scripts allow-same-origin allow-forms"');
     expect(markup).toContain('aria-label="Placekeeper app surfaces"');
-    expect(markup).toContain('Install');
+    expect(markup).toContain('Download Placekeeper');
+    expect(markup).toContain('Other download options');
     expect(markup).not.toContain('Follow the thought.');
     expect(markup).toContain("Symbol search");
     expect(markup).not.toContain("Reset demo");

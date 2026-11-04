@@ -1,6 +1,7 @@
 ---
 title: Prove temporal UI stability across stateful lifecycle seams
 date: 2026-09-18
+last_updated: 2026-11-03
 category: workflow-issues
 module: Production browser lifecycle verification
 problem_type: workflow_issue
@@ -75,7 +76,7 @@ A test requiring no generation notice during ordinary Apply could pass if all no
 
 Endpoint checks prove convergence; temporal checks prove that the observed transition preserves its presentation contract. The full lifecycle establishes the relevant state, the peer helps locate shared causes, and independent terminal assertions prevent a visually quiet but unsaved result from passing.
 
-An animation-frame DOM trace is bounded evidence. It samples browser layout and computed visibility; it does not prove every compositor pixel or every packaged native-window frame. Swift lifecycle tests separately verify that equal-generation changes avoid successor document installation (`apps/macos/Tests/PlacekeeperMacTests/ReviewBridgeLifecycleTests.swift:17`). Native smoke and shared-client browser coverage must not be reported as native frame capture.
+An animation-frame DOM trace is bounded evidence. It samples browser layout and computed visibility; it does not prove every compositor pixel or every packaged native-window frame. Historical Swift lifecycle tests separately verified that equal-generation changes avoided successor document installation; those AppKit tests are now retired. Native packaged checks and shared-client browser coverage must not be reported as native frame capture.
 
 ## When to Apply
 

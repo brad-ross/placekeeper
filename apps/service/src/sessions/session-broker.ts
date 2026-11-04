@@ -731,7 +731,7 @@ export class SessionBroker {
     navigationSourceRoot?: string,
   ): SessionLaunch {
     // Native admission owns its own presentation and never uses HTTP launch authority.
-    if (surface === "codex-native") {
+    if (surface === "codex-native" || surface === "macos" || surface === "electron") {
       return { sessionId: session.id, fileId: session.fileId,
         ...(session.rootId === undefined ? {} : { rootId: session.rootId }),
         launchPath: "", fragment: "", surface,
@@ -883,7 +883,7 @@ export class SessionBroker {
       if (adopted.sourceIdentity !== undefined) {
         const drafts = await this.#recoverableDrafts();
         const matches = drafts.filter((draft) =>
-          (draft.sync.phase !== "clean" || draft.chromeProtected === true || (draft.interactionReceipts?.length ?? 0) > 0) &&
+          (draft.state.pendingDrafts.length > 0 || draft.sync.phase !== "clean" || draft.chromeProtected === true || (draft.interactionReceipts?.length ?? 0) > 0) &&
           draft.source.disposition === "remote-temporary" &&
           draft.source.sourceIdentity === adopted.sourceIdentity &&
           draft.source.digest === adopted.sha256 &&
@@ -1023,7 +1023,7 @@ export class SessionBroker {
     const drafts = await this.#recoverableDrafts();
     const identityMatches = drafts.filter(
       (draft) =>
-        (draft.sync.phase !== "clean" || draft.chromeProtected === true || (draft.interactionReceipts?.length ?? 0) > 0) &&
+        (draft.state.pendingDrafts.length > 0 || draft.sync.phase !== "clean" || draft.chromeProtected === true || (draft.interactionReceipts?.length ?? 0) > 0) &&
         ((draft.state.workflow.mode === "generated-output" &&
           this.#draftCanonicalPath(draft) === approvedFile.canonicalPath) ||
           ((draft.source.disposition === "local" ||
@@ -1722,6 +1722,10 @@ export class SessionBroker {
     return scope?.sessionId === sessionId && scope.surface === surface;
   }
 
+  upgradeCovered(has: (id: string) => boolean): boolean {
+    return this.credentials.pendingBootstrapCount() === 0 && this.controls.upgradeCovered(has);
+  }
+
   activity(): {
     readonly reviewPresence: number;
     readonly codexTasks: number;
@@ -1760,7 +1764,7 @@ export class SessionBroker {
       const hasView = this.#presentations.hasView(sessionId);
       if (
         session?.sourceOwnership.disposition === "remote-temporary" &&
-        session.sync.phase === "clean" && session.interactionReceipts.length === 0 && !stillScoped && !hasView
+        session.sync.phase === "clean" && session.state.pendingDrafts.length === 0 && session.interactionReceipts.length === 0 && !stillScoped && !hasView
       ) void this.#end(sessionId).catch(() => undefined);
     }
     this.#presentations.expireReconnects(now);
@@ -1971,12 +1975,14 @@ export class SessionBroker {
       readonly confirmation?: SaveDestinationConfirmation;
       readonly expectedDocumentGeneration?: number;
       readonly expectedDestinationGeneration?: number;
+      readonly assertAuthority?: () => void;
     },
   ): Promise<{ readonly destination: DurableSaveDestination; readonly sync: DurableSaveSync; readonly state: ReviewState }> {
     const session = this.#activeById.get(sessionId);
     if (session === undefined || session.ending) throw new Error("Review session is not active");
     return this.#withSessionTail(session, async () => {
       if (session.ending) throw new Error("Review session is ending");
+      input.assertAuthority?.();
       this.#assertExpectedDocumentGeneration(session, input.expectedDocumentGeneration);
       if (input.expectedDestinationGeneration !== undefined && input.expectedDestinationGeneration !== session.destination.generation) {
         throw new Error("save-destination-conflict");
@@ -2031,6 +2037,7 @@ export class SessionBroker {
       readonly fingerprint: string;
       readonly expectedDocumentGeneration?: number;
       readonly expectedDestinationGeneration?: number;
+      readonly assertAuthority?: () => void;
       /** Trusted capability rebind runs under the canonical generation tail. */
       readonly prepareTargetPath?: () => Promise<string>;
     },
@@ -2039,12 +2046,15 @@ export class SessionBroker {
     if (session === undefined || session.ending) throw new Error("Review session is not active");
     return this.#withSessionTail(session, async () => {
       if (session.ending) throw new Error("Review session is ending");
+      input.assertAuthority?.();
       this.#assertExpectedDocumentGeneration(session, input.expectedDocumentGeneration);
       if (input.expectedDestinationGeneration !== undefined && input.expectedDestinationGeneration !== session.destination.generation) {
         throw new Error("save-destination-conflict");
       }
       const targetPath = input.prepareTargetPath === undefined ? input.targetPath : await input.prepareTargetPath();
       if (session.ending) throw new Error("Review session is ending");
+      input.assertAuthority?.();
+      this.#assertExpectedDocumentGeneration(session, input.expectedDocumentGeneration);
       this.#assertSaveDestinationAllowed(session, { kind: "original", targetPath });
       const destination: DurableSaveDestination = {
         phase: "active",
@@ -3878,7 +3888,7 @@ export class SessionBroker {
       const clean = session.sync.phase === "clean" &&
         session.sync.savedRevision === session.sync.desiredRevision &&
         session.sync.savedDigest === session.sync.desiredDigest;
-      if (clean && !session.chromeProtected && session.interactionReceipts.length === 0) await session.store.remove();
+      if (clean && session.state.pendingDrafts.length === 0 && !session.chromeProtected && session.interactionReceipts.length === 0) await session.store.remove();
     }));
     for (const session of sessions) {
       this.capabilities.revokeFile(session.fileId);

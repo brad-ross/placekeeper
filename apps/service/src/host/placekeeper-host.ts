@@ -1,3 +1,6 @@
+import { createUpgradeReviewProtection, UpgradeReviewParticipants } from "./upgrade-review-participants.js";
+import { UpgradePreparationCoordinator } from "./upgrade-preparation.js";
+import type { NativeTaskLaunchReceipt } from "../desktop/native-task-launches.js";
 import { NativeSyncTex } from "../synctex/native-synctex.js";
 import { EditorNavigation } from "../synctex/editor-navigation.js";
 import { EditorProfiles } from "../synctex/editor-profiles.js";
@@ -24,7 +27,7 @@ import { LiveSourceWorkflowService } from "../context/live-source-workflow-servi
 import { TaskBindingRegistry } from "../context/task-binding-registry.js";
 import { DaemonLifecycleCoordinator } from "./daemon-lifecycle.js";
 import { decodePlacekeeperLink } from "../../../../packages/core/src/placekeeper-link.js";
-import { openPlacekeeperLink } from "../links/placekeeper-link.js";
+import { decodeHostPlacekeeperLink, openPlacekeeperLink } from "../links/placekeeper-link.js";
 import type { ReviewWorkflowMode } from "../../../../packages/core/src/review-model.js";
 import { ExportCoordinator, type FrozenReviewDelivery } from "../export/export-coordinator.js";
 import {
@@ -37,8 +40,8 @@ import { ChromeTransferStore } from "../browser/chrome-handoff.js";
 import { validatePdfInSubprocess } from "../browser/chrome-pdf-validator.js";
 import { ChromeRuntimeManager } from "../browser/chrome-runtime.js";
 import { ChromeServiceRuntimeBackend } from "../browser/chrome-runtime-backend.js";
-import { MacosRuntimeManager } from "../macos/macos-runtime.js";
-import { MacosAppLifecycleManager } from "../macos/app-lifecycle.js";
+import { NativeRuntimeManager } from "../desktop/native-runtime.js";
+import { NativeAppLifecycleManager } from "../desktop/app-lifecycle.js";
 
 import { CodexRuntimeManager } from "../codex/codex-runtime.js";
 import { CodexServiceRuntimeBackend } from "../codex/codex-runtime-backend.js";
@@ -47,6 +50,7 @@ export type LaunchSurface = BrokerLaunchSurface;
 
 export interface LaunchRequest {
   readonly pdfPath: string;
+  readonly desktop?: "electron";
   readonly sourceRootPath?: string;
   readonly fork?: boolean;
   readonly recovery?: RecoveryDecision;
@@ -63,6 +67,7 @@ export interface LaunchFailure {
 }
 
 export interface LinkOpenRequest {
+  readonly desktop?: "electron";
   readonly link: string;
   readonly confirmed?: boolean;
   readonly recovery?: RecoveryDecision;
@@ -86,7 +91,9 @@ export type LinkLaunchResponse = LaunchResponse | {
   readonly path: string;
 };
 
-export type LaunchResponse = BrowserLaunchResponse | CodexNativeLaunchSuccess;
+export type ElectronLaunchSuccess = NativeTaskLaunchReceipt;
+
+export type LaunchResponse = BrowserLaunchResponse | CodexNativeLaunchSuccess | ElectronLaunchSuccess;
 
 export type BrowserLaunchResponse =
   | {
@@ -177,13 +184,18 @@ export class PlacekeeperHost {
   readonly saving: PdfSaveCoordinator;
   readonly exporting: ExportCoordinator;
   readonly lifecycle: DaemonLifecycleCoordinator;
+  readonly upgradePreparation: UpgradePreparationCoordinator;
+  readonly upgradeParticipants: UpgradeReviewParticipants;
   readonly browserSources: BrowserSourceStore;
   readonly chromeRuntime: ChromeRuntimeManager;
-  readonly macosRuntime: MacosRuntimeManager;
-  readonly macosLifecycle: MacosAppLifecycleManager;
+  readonly electronRuntime: NativeRuntimeManager;
+  readonly electronLifecycle: NativeAppLifecycleManager;
   readonly editorNavigation: EditorNavigation;
   readonly codexRuntime: CodexRuntimeManager;
   #closePromise?: Promise<void>;
+  #upgradeTaskPreparation: { attemptId: string; promise: Promise<void> } | undefined;
+
+  readonly #nativeParentSweep: ReturnType<typeof setInterval>;
 
   private constructor(
     broker: SessionBroker,
@@ -196,10 +208,12 @@ export class PlacekeeperHost {
     lifecycle: DaemonLifecycleCoordinator,
     browserSources: BrowserSourceStore,
     chromeRuntime: ChromeRuntimeManager,
-    macosRuntime: MacosRuntimeManager,
-    macosLifecycle: MacosAppLifecycleManager,
+    electronRuntime: NativeRuntimeManager,
+    electronLifecycle: NativeAppLifecycleManager,
     editorNavigation: EditorNavigation,
     codexRuntime: CodexRuntimeManager,
+    upgradePreparation: UpgradePreparationCoordinator,
+    upgradeParticipants: UpgradeReviewParticipants,
   ) {
     this.broker = broker;
     this.server = server;
@@ -209,12 +223,18 @@ export class PlacekeeperHost {
     this.saving = saving;
     this.exporting = exporting;
     this.lifecycle = lifecycle;
+    this.upgradePreparation = upgradePreparation;
+    this.upgradeParticipants = upgradeParticipants;
     this.browserSources = browserSources;
     this.chromeRuntime = chromeRuntime;
-    this.macosRuntime = macosRuntime;
-    this.macosLifecycle = macosLifecycle;
+    this.electronRuntime = electronRuntime;
+    this.electronLifecycle = electronLifecycle;
     this.editorNavigation = editorNavigation;
     this.codexRuntime = codexRuntime;
+    this.#nativeParentSweep = setInterval(() => {
+      void Promise.allSettled([electronLifecycle.sweepDeadParents()]);
+    }, 5_000);
+    this.#nativeParentSweep.unref();
   }
 
   static async start(options: PlacekeeperHostOptions): Promise<PlacekeeperHost> {
@@ -255,36 +275,37 @@ export class PlacekeeperHost {
       broker, browserSources, transferStore: chromeTransferStore, saving, exporting,
     });
     const chromeRuntime = new ChromeRuntimeManager(chromeRuntimeBackend.authority());
-    const macosRuntimeBackend = new ChromeServiceRuntimeBackend({
-      broker, browserSources, transferStore: chromeTransferStore, saving, exporting,
-      runtimeHost: "macos",
-    });
-    const macosRuntime = new MacosRuntimeManager(macosRuntimeBackend.authority());
     const editorNavigation = new EditorNavigation(new EditorProfiles(join(dirname(options.recoveryRoot), "editor-profiles.json")),
       process.env.PLACEKEEPER_INSTALL_ARTIFACT_IDENTITY ?? "development");
-    macosRuntime.navigation = new NativeSyncTex(broker, editorNavigation);
-    const macosLifecycle = new MacosAppLifecycleManager(macosRuntime, editorNavigation, helperId => {
-      const sessionId = macosRuntime.navigationSessionId(helperId);
+    const electronRuntimeBackend = new ChromeServiceRuntimeBackend({
+      broker, browserSources, transferStore: chromeTransferStore, saving, exporting,
+      runtimeHost: "electron",
+    });
+    const electronRuntime = new NativeRuntimeManager("electron", electronRuntimeBackend.authority());
+    electronRuntime.navigation = new NativeSyncTex(broker, editorNavigation);
+    const electronLifecycle = new NativeAppLifecycleManager({ detach: helperId => electronRuntime.detachAndSettle(helperId) }, {}, editorNavigation, helperId => {
+      const sessionId = electronRuntime.navigationSessionId(helperId);
       return sessionId === undefined ? undefined : broker.navigationSourcePath(sessionId);
     });
-    macosRuntime.admitsNavigation = (helperId, handle, path) => macosLifecycle.admitsNavigation(helperId, handle, path);
+    electronRuntime.admitsNavigation = (helperId, handle, path) => electronLifecycle.admitsNavigation(helperId, handle, path);
+    const codexRuntimeBackend = new CodexServiceRuntimeBackend({ broker, saving, exporting,
+      ...(options.webAssets === undefined ? {} : { assetRoot: options.webAssets.root }),
+    });
     const codexRuntime = new CodexRuntimeManager(broker, {
       ...(options.nativeQualification === undefined ? {} : { qualification: options.nativeQualification }),
       ...(options.nativeQualificationExperiments === undefined ? {} : { experiments: options.nativeQualificationExperiments }),
-      backend: new CodexServiceRuntimeBackend({ broker, saving, exporting,
-        ...(options.webAssets === undefined ? {} : { assetRoot: options.webAssets.root }),
-      }),
+      backend: codexRuntimeBackend,
     });
     const lifecycle = new DaemonLifecycleCoordinator({
       activity: () => {
         const activity = broker.activity();
         const chromeActivity = chromeRuntime.activity();
-        const macosActivity = macosRuntime.activity();
-        const macosAppActivity = macosLifecycle.activity();
+        const electronActivity = electronRuntime.activity();
+        const electronAppActivity = electronLifecycle.activity();
         return {
           ...activity,
           reviewPresence: activity.reviewPresence + chromeActivity.connections
-            + macosActivity.helpers + macosAppActivity.appInstances + codexRuntime.activityCount(),
+            + electronActivity.helpers + electronAppActivity.appInstances + codexRuntime.activityCount(),
           transientWork: activity.transientWork + saving.activityCount() + editorNavigation.activity(),
         };
       },
@@ -293,12 +314,30 @@ export class PlacekeeperHost {
         await broker.drainWrites();
       },
     });
+    const upgradePreparation = new UpgradePreparationCoordinator(lifecycle);
+    const participants = new UpgradeReviewParticipants(upgradePreparation);
+    participants.attach('task-authority', {
+      revision: () => broker.taskBindings.upgradeRevision(),
+      protect: async () => { await lifecycle.settlementBarrier(); await saving.drain(); await broker.drainWrites(); },
+    });
+    electronLifecycle.upgradeParticipants = participants;
+    electronLifecycle.helperUpgradeCovered = helperId => { const id = electronRuntime.upgradeParticipantId(helperId); return id !== undefined && participants.has(id); };
+    upgradePreparation.setParticipantCoverage(() => broker.upgradeCovered(id => participants.has(id))
+      && chromeRuntimeBackend.upgradeCovered() && chromeRuntime.upgradeCovered(id => participants.has(id))
+      && electronRuntimeBackend.upgradeCovered() && electronRuntime.upgradeCovered(id => participants.has(id))
+      && electronLifecycle.upgradeCovered() && codexRuntime.upgradeCovered(id => participants.has(id))
+      && participants.has('task-authority'));
+    codexRuntimeBackend.upgradeParticipants = participants;
+    chromeRuntimeBackend.upgradeParticipants = participants;
+    electronRuntimeBackend.upgradeParticipants = participants;
     const server = await startHttpServer(broker, {
       ...(options.port === undefined ? {} : { port: options.port }),
       ...(options.webAssets === undefined ? {} : { webAssets: options.webAssets }),
       saving,
       exporting,
       lifecycle,
+      upgradeParticipants: participants,
+      protectUpgradeReview: sessionId => createUpgradeReviewProtection(broker, saving, sessionId).protect(),
     });
     const context = new LiveContextService({ broker });
     const reconciliation = new SourceReconciliationService({ broker });
@@ -322,14 +361,16 @@ export class PlacekeeperHost {
       lifecycle,
       browserSources,
       chromeRuntime,
-      macosRuntime,
-      macosLifecycle,
+      electronRuntime,
+      electronLifecycle,
       editorNavigation,
       codexRuntime,
+      upgradePreparation,
+      participants,
     );
   }
 
-  async open(request: LaunchRequest & { readonly surface?: Exclude<LaunchSurface, "codex-native"> }): Promise<BrowserLaunchResponse>;
+  async open(request: LaunchRequest & { readonly desktop?: never; readonly surface?: Exclude<LaunchSurface, "codex-native"> }): Promise<BrowserLaunchResponse>;
   async open(request: LaunchRequest): Promise<LaunchResponse>;
   async open(request: LaunchRequest): Promise<LaunchResponse> {
     const response = await this.lifecycle.runActivity(() => this.#open(request));
@@ -363,7 +404,7 @@ export class PlacekeeperHost {
   async preflightLink(link: string): Promise<LinkPreflightResponse> {
     const response = await this.lifecycle.runActivity<LinkPreflightResponse>(() => {
       try {
-        const decoded = decodePlacekeeperLink(link);
+        const decoded = decodeHostPlacekeeperLink(link);
         return {
           ok: true,
           kind: "link-preflight",
@@ -380,7 +421,7 @@ export class PlacekeeperHost {
     return response ?? upgradeFailure();
   }
 
-  async openLink(request: LinkOpenRequest & { readonly surface?: Exclude<LaunchSurface, "codex-native"> }): Promise<Exclude<LinkLaunchResponse, CodexNativeLaunchSuccess>>;
+  async openLink(request: LinkOpenRequest & { readonly desktop?: never; readonly surface?: Exclude<LaunchSurface, "codex-native"> }): Promise<Exclude<LinkLaunchResponse, CodexNativeLaunchSuccess | ElectronLaunchSuccess>>;
   async openLink(request: LinkOpenRequest): Promise<LinkLaunchResponse>;
   async openLink(request: LinkOpenRequest): Promise<LinkLaunchResponse> {
     const response = await this.lifecycle.runActivity(() => this.#openLink(request));
@@ -389,7 +430,7 @@ export class PlacekeeperHost {
 
   async #openLink(request: LinkOpenRequest): Promise<LinkLaunchResponse> {
     try {
-      const surface = trustedSurface(request.surface);
+      const surface = request.desktop === "electron" ? "codex-native" : trustedSurface(request.surface);
       const opened = await openPlacekeeperLink(this.broker, {
         link: request.link,
         ...(request.confirmed === undefined ? {} : { confirmed: request.confirmed }),
@@ -411,6 +452,10 @@ export class PlacekeeperHost {
           choices: opened.choices,
           recoveryOffer: opened.recoveryOffer,
         };
+      }
+      if (request.desktop === "electron") {
+        return this.electronRuntime.stageLaunch({ sessionId: opened.launch.sessionId, kind: opened.kind,
+          requestedLocation: decodePlacekeeperLink(request.link).location }) ?? upgradeFailure();
       }
       if (surface === "codex-native") {
         return this.codexRuntime.stageLaunch({ sessionId: opened.launch.sessionId, kind: opened.kind,
@@ -444,7 +489,7 @@ export class PlacekeeperHost {
     const recoveryDecision: RecoveryDecision | undefined =
       request.fork === true ? "fork" : request.recovery;
     try {
-      const surface = trustedSurface(request.surface);
+      const surface = request.desktop === "electron" ? "codex-native" : trustedSurface(request.surface);
       const opened = await this.broker.openReview({
         pdfPath: request.pdfPath,
         ...(request.sourceRootPath === undefined
@@ -467,6 +512,9 @@ export class PlacekeeperHost {
           recoveryOffer: opened.recoveryOffer,
         };
       }
+      if (request.desktop === "electron") {
+        return this.electronRuntime.stageLaunch({ sessionId: opened.launch.sessionId, kind: opened.kind }) ?? upgradeFailure();
+      }
       if (surface === "codex-native") {
         return this.codexRuntime.stageLaunch({ sessionId: opened.launch.sessionId, kind: opened.kind })
           ?? upgradeFailure();
@@ -488,15 +536,37 @@ export class PlacekeeperHost {
     }
   }
 
+  async prepareUpgradeTasks(): Promise<void> {
+    const status = this.upgradeParticipants.poll('task-authority');
+    if (status.phase !== 'preparing' || !status.attemptId || !status.settlementRequired) return;
+    if (this.#upgradeTaskPreparation?.attemptId === status.attemptId) return this.#upgradeTaskPreparation.promise;
+    const promise = this.upgradeParticipants.settle('task-authority', { attemptId: status.attemptId }).then(() => {});
+    const preparation = { attemptId: status.attemptId, promise };
+    this.#upgradeTaskPreparation = preparation;
+    try { await promise; }
+    finally { if (this.#upgradeTaskPreparation === preparation) this.#upgradeTaskPreparation = undefined; }
+  }
+  async closeUpgradeAuthority(): Promise<void> {
+    await this.lifecycle.settlementBarrier();
+    this.upgradeParticipants.retireMetadata("task-authority");
+    this.electronLifecycle.retireUpgradeMetadata();
+    await this.codexRuntime.closeForUpgrade(this.upgradeParticipants.poll("task-authority"));
+    for (const task of this.broker.taskBindings.upgradeTaskIds()) this.sourceWorkflow.discardTask(task);
+    this.broker.taskBindings.revokeAll();
+    this.context.discardAll();
+  }
+
   async close(): Promise<void> {
     this.#closePromise ??= (async () => {
+      clearInterval(this.#nativeParentSweep);
       await this.codexRuntime.close();
       this.context.discardAll();
       await this.server.close();
+      this.upgradePreparation.close();
       await this.chromeRuntime.close();
-      await this.macosLifecycle.close();
+      await this.electronLifecycle.close();
+      await this.electronRuntime.close();
       this.editorNavigation.close();
-      await this.macosRuntime.close();
       await this.saving.drain();
       await this.broker.quiesceForShutdown();
     })();

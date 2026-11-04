@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   access,
   chmod,
@@ -20,6 +20,7 @@ import {
   type ReviewState,
 } from "../../../packages/core/src/review-model.js";
 import { createImportedReviewState } from "../../../packages/core/src/portable-annotation.js";
+import { createSelectedPdfWriter } from "../../../packages/pdf-backends/src/selected-writer.js";
 import { projectReviewItems } from "../../../packages/core/src/annotation-projection.js";
 import { setAnnotationName } from "../../../packages/core/src/review-commands.js";
 import {
@@ -525,6 +526,44 @@ describe("atomic recovery generations", () => {
 });
 
 describe("broker acknowledgement and restart recovery", () => {
+  async function cleanPdfWithUnfinishedDraft() {
+    const directory = await temporaryDirectory();
+    const pdf = join(directory, "saved-review.pdf");
+    const command = addCommand(0, "annotation already saved in the PDF");
+    if (command.type !== "add") throw new Error("Expected annotation command");
+    const source = new Uint8Array(await readFile("test/fixtures/pdfs/text-native.pdf"));
+    const writer = await createSelectedPdfWriter();
+    const saved = await writer.write({ sourcePdf: source, sourceSha256: createHash("sha256").update(source).digest("hex"), revision:1, annotations:projectReviewItems([command.item]) });
+    await writeFile(pdf,saved.pdfBytes);
+    const recoveryRoot = join(directory,"recovery");
+    const broker = new SessionBroker({recoveryRoot});
+    const opened = await broker.openReview({pdfPath:pdf,surface:"electron"});
+    if (opened.kind !== "opened") throw new Error("Expected saved PDF to open");
+    expect(broker.state(opened.launch.sessionId)?.items[0]?.payload.comment).toBe("annotation already saved in the PDF");
+    const now = new Date().toISOString();
+    await broker.acceptMutation(opened.launch.sessionId,{type:"put-draft",expectedRevision:0,expectedDraftRevision:-1,draft:{id:randomUUID(),ownerViewId:"view_pending_recovery",baseGeneration:1,revision:0,kind:"pageNote",pageIndex:0,text:"unfinished protected typing",anchor:{kind:"page",pageIndex:0,rect:{x:10,y:10,width:20,height:20}},disposition:{kind:"resolved",generation:1},status:"protected",createdAt:now,updatedAt:now}});
+    expect(broker.saveStatus(opened.launch.sessionId)?.sync.phase).toBe("clean");
+    return {pdf,recoveryRoot,broker,sessionId:opened.launch.sessionId};
+  }
+  it("preserves clean saved-PDF sessions with unfinished drafts through shutdown and recovery",async()=>{
+    const {pdf,recoveryRoot,broker,sessionId}=await cleanPdfWithUnfinishedDraft();
+    await broker.quiesceForShutdown();
+    const snapshot=await new DraftSnapshotStore(join(recoveryRoot,sessionId)).recover();
+    expect(snapshot?.state.pendingDrafts[0]?.text).toBe("unfinished protected typing");
+    const restarted=new SessionBroker({recoveryRoot});
+    const offered=await restarted.openReview({pdfPath:pdf,surface:"electron"});
+    if(offered.kind!=="recovery-offered")throw new Error("Expected unfinished draft recovery offer");
+    const resumed=await restarted.openReview({pdfPath:pdf,surface:"electron",recoveryDecision:"resume",recoveryOffer:offered.recoveryOffer,recoveryOperationId:randomUUID()});
+    if(resumed.kind!=="opened")throw new Error("Expected unfinished draft recovery");
+    expect(restarted.state(resumed.launch.sessionId)?.pendingDrafts[0]?.text).toBe("unfinished protected typing");
+    expect(restarted.state(resumed.launch.sessionId)?.items[0]?.payload.comment).toBe("annotation already saved in the PDF");
+  },20_000);
+  it("offers an already retained clean snapshot with unfinished drafts on reopening",async()=>{
+    const {pdf,recoveryRoot}=await cleanPdfWithUnfinishedDraft();
+    const restarted=new SessionBroker({recoveryRoot});
+    expect((await restarted.openReview({pdfPath:pdf,surface:"electron"})).kind).toBe("recovery-offered");
+  },20_000);
+
   it("persists verified native deletion ownership across restart recovery", async () => {
     const directory = await temporaryDirectory();
     const pdf = join(directory, "paper.pdf");

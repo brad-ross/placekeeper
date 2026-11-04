@@ -280,6 +280,22 @@ export function consumeFinalizedInteractionState(input: {
   return false;
 }
 
+/** A prior protected draft is not evidence that the latest input was accepted. */
+export function requireProtectedAuthoringInput(state: ReviewStateView, draftId: string, text: string, accepted: boolean): ReviewStateView {
+  if (!accepted || !state.pendingDrafts.some(draft => draft.id === draftId && draft.text === text)) {
+    throw new Error('The protected authoring draft was not acknowledged.');
+  }
+  return state;
+}
+
+export async function settleAuthoringBeforeClose(input: {
+  readonly settle: () => Promise<void>;
+  readonly current: () => { readonly protect: () => Promise<unknown> } | undefined;
+}): Promise<void> {
+  await input.settle();
+  await input.current()?.protect();
+}
+
 /** Owns frozen authoring authority, protected drafts, and the acknowledged command tail.
  * Workspace and reader callbacks run only when an interaction starts or settles.
  */
@@ -864,6 +880,7 @@ export function useAuthoringSession({
     value: string,
   ): Promise<ReviewStateView> => {
     if (authoringValueRef.current?.token === session.token) authoringValueRef.current.value = value;
+    let accepted = false;
     return submit((state) => {
       const existing = state.pendingDrafts.find(({ id }) => id === session.draftId);
       const updatedAt = new Date().toISOString();
@@ -883,12 +900,8 @@ export function useAuthoringSession({
     }, {
       authority: session.authority,
       onStale: () => invalidateAuthoringSession(session.token),
-    }).then((next) => {
-      if (!next.pendingDrafts.some(({ id }) => id === session.draftId)) {
-        throw new Error('The protected authoring draft was not acknowledged.');
-      }
-      return next;
-    });
+      onAccepted: () => { accepted = true; },
+    }).then(next => requireProtectedAuthoringInput(next, session.draftId, value, accepted));
   };
 
   const discardProtectedAuthoringDraft = async (session: AuthoringSession): Promise<void> => {
@@ -1232,6 +1245,11 @@ export function useAuthoringSession({
     authoringEditorRef,
     authoringSurfaceElement,
     setAuthoringSurfaceElement,
+    settleForClose: async () => {
+      if (authoringAdmissionPendingRef.current) throw new Error('An annotation is still opening. Try closing again after it opens.');
+      await commandTailRef.current;
+      await retryPendingAcknowledgements();
+    },
     currentAuthoringAuthority,
     currentAuthoringAuthorityRef,
     submit,

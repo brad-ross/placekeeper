@@ -275,3 +275,24 @@ describe('authoring interaction lifecycle ownership', () => {
     await active.acknowledge(finalized);
   });
 });
+
+import { requireProtectedAuthoringInput, settleAuthoringBeforeClose } from '../src/review/use-authoring-session.js';
+it('close rejects a rejected new put-draft even if its prior protected draft remains', () => {
+  const state = { ...reviewState(4), pendingDrafts: [{ id: 'draft-1', text: 'old acknowledged input' }] } as unknown as ReturnType<typeof reviewState>;
+  expect(() => requireProtectedAuthoringInput(state, 'draft-1', 'latest input', false)).toThrow('not acknowledged');
+  expect(() => requireProtectedAuthoringInput(state, 'draft-1', 'old acknowledged input', false)).toThrow('not acknowledged');
+});
+it('close waits acknowledgment then protects exact live input and blocks on protection failure', async () => {
+  let acknowledge!: () => void;
+  let liveText = 'old';
+  const protectedTexts: string[] = [];
+  const closing = settleAuthoringBeforeClose({
+    settle: () => new Promise(resolve => { acknowledge = resolve; }),
+    current: () => ({ protect: async () => { protectedTexts.push(liveText); } }),
+  });
+  liveText = 'latest textarea input';
+  expect(protectedTexts).toEqual([]);
+  acknowledge(); await closing;
+  expect(protectedTexts).toEqual(['latest textarea input']);
+  await expect(settleAuthoringBeforeClose({ settle: async () => {}, current: () => ({ protect: async () => { throw new Error('disk full'); } }) })).rejects.toThrow('disk full');
+});

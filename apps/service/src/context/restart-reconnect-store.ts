@@ -1,9 +1,11 @@
 import { randomUUID } from "node:crypto";
-import { chmod, open, readdir, readFile, rename, rm } from "node:fs/promises";
+import { readdir, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 
 import { digestSecretHex } from "../../../../packages/core/src/session-security.js";
 import { ensurePrivateDirectory } from "../recovery/source-snapshot.js";
+import { writePrivateFile } from "../platform/private-storage.js";
+import { publishFile, syncPublishedFile } from "../platform/file-publication.js";
 
 const DEFAULT_TTL_MS = 15 * 60_000;
 export interface NativeRestartScope {
@@ -293,23 +295,10 @@ export class RestartReconnectStore {
 
   async #write(record: RestartReconnectRecord): Promise<void> {
     const temporaryPath = join(this.directory, `.ticket-${randomUUID()}.tmp`);
-    const handle = await open(temporaryPath, "wx", 0o600);
     try {
-      await handle.chmod(0o600);
-      await handle.writeFile(serialize(record), "utf8");
-      await handle.sync();
-    } finally {
-      await handle.close();
-    }
-    try {
-      await rename(temporaryPath, this.#path(record.browserTokenHash));
-      await chmod(this.#path(record.browserTokenHash), 0o600);
-      const directoryHandle = await open(this.directory, "r");
-      try {
-        await directoryHandle.sync();
-      } finally {
-        await directoryHandle.close();
-      }
+      await writePrivateFile(temporaryPath, serialize(record));
+      const publication = await publishFile(temporaryPath, this.#path(record.browserTokenHash));
+      await syncPublishedFile(publication);
     } catch (error) {
       await rm(temporaryPath, { force: true });
       throw error;
