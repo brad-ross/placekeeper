@@ -1,4 +1,4 @@
-name: Desktop installer candidate
+name: Build desktop installers
 
 on:
   workflow_dispatch:

@@ -37,7 +37,7 @@ describe('manual CI workflow', () => {
 
   it('defaults manual qualification to production desktop installers and retires Swift gates', async () => {
     const workflow = await readFile('.github/workflows/ci.yml', 'utf8');
-    const desktop = await readFile('.github/workflows/desktop-candidate.yml', 'utf8');
+    const desktop = await readFile('.github/workflows/build-desktop.yml', 'utf8');
     const { scripts } = JSON.parse(await readFile('package.json', 'utf8'));
     expect(workflow).toContain('workflow_dispatch:');
     expect(workflow).toContain('default: true');

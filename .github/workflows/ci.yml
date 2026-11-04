@@ -22,7 +22,7 @@ jobs:
     if: inputs.desktop_candidate
     permissions:
       contents: write
-    uses: ./.github/workflows/desktop-candidate.yml
+    uses: ./.github/workflows/build-desktop.yml
   test:
     if: ${{ !inputs.desktop_candidate }}
     runs-on: ubuntu-24.04
