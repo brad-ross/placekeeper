@@ -10,8 +10,7 @@ import {
 import { startRuntime } from "./production-entry.js";
 import { ReviewIcon } from "./review/ReviewIcon.js";
 import { browserDownloadTarget, loadDownloads, type Downloads } from "./landing/downloads.js";
-import { DESKTOP_TARGETS } from "../../../packages/core/src/desktop-release.js";
-import { InstallDialog } from "./landing/InstallDialog.js";
+import { DownloadButton } from "./landing/DownloadButton.js";
 import { ProductShowcase } from "./landing/ProductShowcase.js";
 import { SurfaceShowcase } from "./landing/SurfaceShowcase.js";
 import "./static-entry.css";
@@ -87,19 +86,15 @@ export function StaticLauncher(props: {
   ) => Promise<void>;
 }) {
   const [downloads, setDownloads] = useState<Downloads>({ status: 'loading' });
-  const target = browserDownloadTarget(typeof navigator === 'undefined' ? '' : navigator.userAgent);
+  const target = typeof navigator === 'undefined' ? undefined : browserDownloadTarget(navigator.userAgent, {
+    platform: navigator.platform,
+    maxTouchPoints: navigator.maxTouchPoints,
+  });
   useEffect(() => {
     let active = true;
     void loadDownloads().then(result => { if (active) setDownloads(result); });
     return () => { active = false; };
   }, []);
-  const downloadLabel = downloads.status === 'available' && target ? `Download for ${DESKTOP_TARGETS[target].label}` : 'Install';
-  const installDialogRef = useRef<HTMLDialogElement>(null);
-  const installTriggerRef = useRef<HTMLButtonElement | null>(null);
-  const showInstall = (trigger: HTMLButtonElement) => {
-    installTriggerRef.current = trigger;
-    installDialogRef.current?.showModal();
-  };
   const inputId = useId();
   const inputRef = useRef<HTMLInputElement>(null);
   const chooseButtonRef = useRef<HTMLButtonElement>(null);
@@ -173,7 +168,7 @@ export function StaticLauncher(props: {
         </div>
         <p className="landing-hero__description">A focused document reader for following references and making comments.</p>
         <div className="landing-hero__actions">
-        <button type="button" className="landing-download" title="Install Placekeeper" aria-haspopup="dialog" onClick={(event) => showInstall(event.currentTarget)}><ReviewIcon name="download" size={18} /> {downloadLabel}</button>
+        <DownloadButton downloads={downloads} target={target} />
         <a className="landing-github" href={REPOSITORY_URL} target="_blank" rel="noreferrer noopener">
           <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 .3a12 12 0 0 0-3.8 23.4c.6.1.8-.3.8-.6v-2.3c-3.3.7-4-1.4-4-1.4-.5-1.4-1.3-1.8-1.3-1.8-1.1-.8.1-.8.1-.8 1.2.1 1.8 1.2 1.8 1.2 1.1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.8-1.6-2.7-.3-5.5-1.3-5.5-5.9 0-1.3.5-2.4 1.2-3.2-.1-.3-.5-1.5.1-3.2 0 0 1-.3 3.3 1.2a11.5 11.5 0 0 1 6 0C17.3 4.8 18.3 5 18.3 5c.6 1.7.2 2.9.1 3.2.8.8 1.2 1.9 1.2 3.2 0 4.6-2.8 5.6-5.5 5.9.4.4.8 1.1.8 2.2v3.6c0 .3.2.7.8.6A12 12 0 0 0 12 .3Z" /></svg>
           GitHub
@@ -248,7 +243,7 @@ export function StaticLauncher(props: {
       <div>
         <h2>Make Placekeeper yours.</h2>
         <p>Desktop downloads, source builds, and optional integrations.</p>
-        <button type="button" className="landing-invitations__download" title="Install Placekeeper" aria-haspopup="dialog" onClick={(event) => showInstall(event.currentTarget)}><ReviewIcon name="download" size={16} /> {downloadLabel}</button>
+        <DownloadButton downloads={downloads} target={target} />
       </div>
       <div>
         <h2>Or try your own document.</h2>
@@ -256,7 +251,6 @@ export function StaticLauncher(props: {
         <a href="#try">Try it <ReviewIcon name="arrow-right" size={16} /></a>
       </div>
     </section>
-    <InstallDialog downloads={downloads} target={target} dialogRef={installDialogRef} onClose={() => installTriggerRef.current?.focus({ preventScroll: true })} />
   </main>;
 }
 

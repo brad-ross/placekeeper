@@ -6,8 +6,8 @@ vi.mock("react-dom/client", () => ({ createRoot }));
 
 import { renderToStaticMarkup } from "react-dom/server";
 import { createElement } from "react";
-import { SOURCE_INSTALL_COMMAND as RELEASE_INSTALL_COMMAND } from "../../../scripts/package-source-release.js";
-import { SOURCE_INSTALL_COMMAND } from "../src/landing/InstallDialog.js";
+import { desktopAssetNames, parseDesktopRelease, RELEASE_REPOSITORY, type DesktopTarget } from "../../../packages/core/src/desktop-release.js";
+import { DownloadButton } from "../src/landing/DownloadButton.js";
 
 import { StaticLauncher, mountStaticBrowserApp } from "../src/static-entry.js";
 
@@ -129,21 +129,72 @@ describe("static browser startup guards", () => {
 });
 
 
-describe("landing installation contract", () => {
-  it("separates desktop downloads from qualified source instructions in one mounted dialog", () => {
-    expect(SOURCE_INSTALL_COMMAND).toBe(RELEASE_INSTALL_COMMAND);
-    const markup = renderToStaticMarkup(createElement(StaticLauncher, { onOpen: async () => {} }));
-    expect(markup.match(/<dialog\b/g)).toHaveLength(1);
-    expect(markup.match(/aria-haspopup="dialog"/g)).toHaveLength(2);
-    expect(markup).not.toContain("archive/refs/heads/main.zip");
-    expect(markup).toContain('aria-label="Desktop downloads"');
-    expect(markup).toContain("Checking published desktop downloads");
-    expect(markup).toContain('aria-label="Source installation"');
-    expect(markup).toContain("source prerequisites and sandbox requirements");
-    expect(markup).toContain("The source bootstrap below follows the latest published stable release.");
-    expect(markup).toContain("it is not an Electron desktop installer.");
-    expect(markup).toContain(`<code aria-label="Install command">${SOURCE_INSTALL_COMMAND}</code>`);
-    expect(markup).not.toContain("Close installation dialog");
-    expect(markup).not.toContain("Apple silicon");
+describe("landing download contract", () => {
+  it("renders two independent download disclosures without browser globals or installation instructions", () => {
+    vi.stubGlobal("navigator", undefined);
+    try {
+      const markup = renderToStaticMarkup(createElement(StaticLauncher, { onOpen: async () => {} }));
+      expect(markup.match(/aria-label="Other download options"/g)).toHaveLength(2);
+      expect(markup.match(/>Download Placekeeper<\/span>/g)).toHaveLength(2);
+      const panelIds = [...markup.matchAll(/<nav id="([^"]+)" class="landing-download__panel"/g)].map(match => match[1]);
+      expect(new Set(panelIds).size).toBe(2);
+      expect(markup).not.toContain("<dialog");
+      expect(markup).not.toContain('aria-haspopup="dialog"');
+      for (const copy of ["curl -fsSL", "Copy command", "source prerequisites", "unsigned", "Upgrades and recovery", "Install Placekeeper"]) {
+        expect(markup).not.toContain(copy);
+      }
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});
+
+const releaseVersion = '1.2.3';
+const catalog = parseDesktopRelease({
+  draft: false,
+  prerelease: false,
+  tag_name: `v${releaseVersion}`,
+  html_url: `${RELEASE_REPOSITORY}/releases/tag/v${releaseVersion}`,
+  assets: [...Object.values(desktopAssetNames(releaseVersion)), 'SHA256SUMS'].map(name => ({
+    name, state: 'uploaded', size: 123,
+    browser_download_url: `${RELEASE_REPOSITORY}/releases/download/v${releaseVersion}/${name}`,
+  })),
+});
+
+describe("split download link semantics", () => {
+  it.each<DesktopTarget>(['darwin-arm64', 'darwin-x64', 'win32-x64', 'linux-x64'])("uses the validated %s artifact as its primary anchor", target => {
+    const markup = renderToStaticMarkup(createElement(DownloadButton, { downloads: { status: 'available', catalog }, target }));
+    expect(markup).toContain(`<a class="landing-download__main" href="${catalog.downloads[target].url}">`);
+    if (target === 'linux-x64') expect(markup).toContain('Download for Linux Debian / Ubuntu x64');
+    expect(markup).toContain('aria-expanded="false"');
+    expect(markup).toContain('aria-label="Placekeeper downloads" hidden=""');
+    expect(markup).not.toContain('role="menu"');
+  });
+
+  it("offers alternatives from the main button for an unidentified device", () => {
+    const markup = renderToStaticMarkup(createElement(DownloadButton, { downloads: { status: 'available', catalog }, target: undefined }));
+    expect(markup).toContain('<button class="landing-download__main" type="button"');
+    expect(markup).toContain('Download Placekeeper');
+    for (const artifact of Object.values(catalog.downloads)) expect(markup).toContain(`href="${artifact.url}"`);
+    expect(markup).toContain(`href="${RELEASE_REPOSITORY}/blob/main/docs/installation.md">Build from source`);
+    expect(markup).toContain(`href="${RELEASE_REPOSITORY}/releases">All releases`);
+    expect(markup).not.toContain('/releases/latest');
+    expect(markup.match(/<a /g)).toHaveLength(6);
+  });
+
+  it.each([
+    ['loading', 'Checking downloads…'],
+    ['unavailable', 'Downloads unavailable'],
+  ] as const)("keeps %s platform rows noninteractive and status inside the panel", (status, message) => {
+    const markup = renderToStaticMarkup(createElement(DownloadButton, { downloads: { status }, target: 'win32-x64' }));
+    expect(markup).toContain('<button class="landing-download__main" type="button"');
+    expect(markup.match(/<span aria-disabled="true">/g)).toHaveLength(4);
+    expect(markup.match(/<a /g)).toHaveLength(2);
+    expect(markup).not.toContain('/releases/download/');
+    expect(markup.indexOf(message)).toBeGreaterThan(markup.indexOf('<nav'));
+    expect(markup.indexOf(message)).toBeLessThan(markup.indexOf('</nav>'));
+    expect(markup).not.toContain('curl');
+    expect(markup).not.toContain('unsigned');
+    expect(markup).not.toContain('prerequisites');
   });
 });
