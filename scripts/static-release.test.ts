@@ -186,3 +186,9 @@ describe("static live smoke inputs", () => {
     expect(annotation.lookup(PDFName.of("NM"), PDFString).decodeText()).toBe("smoke-foreign-highlight");
   });
 });
+
+it('includes desktop download coverage in the static distribution and browser gates', async () => {
+  const { suites, browserTestFiles } = await import('./testing/suites.js');
+  expect(JSON.stringify(suites['test:static:distribution'])).toContain('apps/web/src/landing/downloads.test.ts');
+  expect(browserTestFiles.static).toContain('desktop-downloads.spec.ts');
+});

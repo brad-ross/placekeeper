@@ -948,6 +948,7 @@ test('@critical demo starts fitted and Fit Width keeps the requested scale', asy
 
 for (const width of [1440, 390]) test(`@critical installation dialog preserves the demo and equal divider spacing at ${width}px`, async ({ page }) => {
   await page.setViewportSize({ width, height: 1000 });
+  await page.route('https://api.github.com/repos/brad-ross/placekeeper/releases/latest', route => route.fulfill({ json: {} }));
   await page.goto('./');
   const demo = page.frameLocator('iframe[aria-hidden="false"]');
   await demo.locator('[data-initial-view-ready="true"]').waitFor({ state: 'attached' });
@@ -971,12 +972,12 @@ for (const width of [1440, 390]) test(`@critical installation dialog preserves t
     await triggers.nth(index).click();
     await expect(dialog).toBeVisible();
     await expect(page.locator('dialog')).toHaveCount(1);
-    const copy = dialog.getByRole('button', { name: 'Copy command', exact: true });
-    await expect(copy).toBeFocused();
+    const close = dialog.getByRole('button', { name: 'Close', exact: true });
+    await expect(close).toBeFocused();
     await page.keyboard.press('Shift+Tab');
-    await expect(copy).toBeFocused();
+    expect(await dialog.evaluate((element) => element.contains(document.activeElement))).toBe(true);
     await page.keyboard.press('Tab');
-    await expect(copy).toBeFocused();
+    await expect(close).toBeFocused();
     for (let step = 0; step < 6; step += 1) {
       await page.keyboard.press('Tab');
       expect(await dialog.evaluate((element) => element.contains(document.activeElement))).toBe(true);
@@ -1000,6 +1001,7 @@ for (const width of [1440, 390]) test(`@critical installation dialog preserves t
 });
 
 test('@critical dismissing installation preserves a pending document open', async ({ page }) => {
+  await page.route('https://api.github.com/repos/brad-ross/placekeeper/releases/latest', route => route.fulfill({ json: {} }));
   let finishRequest!: () => void;
   const pending = new Promise<void>((resolve) => { finishRequest = resolve; });
   await page.route('https://example.org/paper.pdf', async (route) => {
@@ -1027,6 +1029,7 @@ test('@critical dismissing installation preserves a pending document open', asyn
 });
 
 test('@critical installation command reports clipboard success and remains selectable on failure', async ({ page }) => {
+  await page.route('https://api.github.com/repos/brad-ross/placekeeper/releases/latest', route => route.fulfill({ json: {} }));
   await page.goto('./');
   await page.evaluate(() => {
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: {

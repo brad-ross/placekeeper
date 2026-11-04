@@ -56,7 +56,9 @@ export const suites: Record<string, TestStage[]> = {
       "runner": "vitest",
       "options": [],
       "files": [
-        "scripts/validate-static-distribution.test.ts"
+        "scripts/validate-static-distribution.test.ts",
+        "scripts/static-release.test.ts",
+        "apps/web/src/landing/downloads.test.ts"
       ]
     }
   ],
@@ -650,6 +652,7 @@ export const suites: Record<string, TestStage[]> = {
 
 /** Canonical CI is deliberately narrower than all repository tests; includes the updater's .mjs tests. */
 export const ciUnitFiles = [
+  "apps/web/src/landing/downloads.test.ts",
   "apps/electron/test/standalone-chooser.test.ts", "apps/electron/test/open-intent.test.ts",
   "apps/electron/test/protocol-install.test.ts", "packaging/desktop/linux-sandbox.test.ts",
   "apps/electron/test/open-link.test.ts", "apps/electron/test/review-bridge.test.ts", "apps/electron/test/menus.test.ts", "apps/electron/test/integration-setup.test.ts",
@@ -758,7 +761,7 @@ export const browserTestFiles = {
   default: '**/*.spec.ts',
   visual: 'review-visual.spec.ts',
   chromeHandoff: 'chrome-pdf-handoff.spec.ts',
-  static: ['static-web.spec.ts', 'static-web-url.spec.ts'],
+  static: ['static-web.spec.ts', 'static-web-url.spec.ts', 'desktop-downloads.spec.ts'],
 };
 
 export function suiteCommand(name: string): string {

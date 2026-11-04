@@ -117,3 +117,8 @@ it("keeps publication private on duplicates, missing assets, or upload failure",
     else { await expect(promise).rejects.toThrow(); expect(calls).not.toContain("public"); if (["branch", "tag", "draft", "missing"].includes(failure)) expect(calls).toEqual([]); }
   }
 });
+
+it('keeps the website source bootstrap identical to the published release command', async () => {
+  const { SOURCE_INSTALL_COMMAND: websiteCommand } = await import('../apps/web/src/landing/InstallDialog.js');
+  expect(websiteCommand).toBe(SOURCE_INSTALL_COMMAND);
+});
