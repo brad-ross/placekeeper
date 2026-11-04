@@ -1,3 +1,4 @@
+import { ensurePrivateDirectory, establishPrivateDirectory } from "../src/platform/private-storage.js";
 import { createHash, randomUUID } from "node:crypto";
 import { createReviewState } from "../../../packages/core/src/review-model.js";
 import { DraftSnapshotStore, reviewStateDigest, type RecoverableDraftV3 } from "../src/recovery/draft-snapshot.js";
@@ -15,8 +16,9 @@ import { switchDesktopService } from "../src/cli/desktop-service-switch.js";
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "pk-switch-"));
+  await establishPrivateDirectory(root);
   const resources = join(root, "candidate"); const recoveryRoot = join(root, "recovery");
-  await mkdir(resources); await mkdir(recoveryRoot);
+  await mkdir(resources); await ensurePrivateDirectory(recoveryRoot);
   await writeFile(join(resources, "runtime-manifest.json"), JSON.stringify({ daemonIdentity: "a".repeat(64), installArtifactIdentity: "b".repeat(64), recovery: { readableDraftSchemaVersions: [1, 2, 3], writtenDraftSchemaVersion: 3 } }));
   return { resources, backup: join(root, "backup"), receipt: join(root, "receipt"), paths: { appSupportRoot: root, recoveryRoot, socketPath: join(root, "control.sock"), webAssetsRoot: join(root, "web") } };
 }

@@ -3,7 +3,7 @@ import { PassThrough } from "node:stream";
 import { createHash } from "node:crypto";
 import { mkdtemp, mkdir, readFile, realpath, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { resolveLauncherRuntime, integrationLauncher, main, desktopExecutable } from "./launcher.mjs";
 const sha = (value: string) => createHash("sha256").update(value).digest("hex");
@@ -68,9 +68,10 @@ describe("portable headless launcher", () => {
     } finally { output.mockRestore(); }
   });
   it("resolves the production executable on each supported OS", () => {
-    expect(desktopExecutable("/app/Contents/Resources/desktop", "darwin")).toBe("/app/Contents/MacOS/PlacekeeperDesktop");
-    expect(desktopExecutable("/app/resources/desktop", "linux")).toBe("/app/PlacekeeperDesktop");
-    expect(desktopExecutable("/app/resources/desktop", "win32")).toBe("/app/PlacekeeperDesktop.exe");
+    const app = resolve("/app");
+    expect(desktopExecutable(join(app, "Contents", "Resources", "desktop"), "darwin")).toBe(join(app, "Contents", "MacOS", "PlacekeeperDesktop"));
+    expect(desktopExecutable(join(app, "resources", "desktop"), "linux")).toBe(join(app, "PlacekeeperDesktop"));
+    expect(desktopExecutable(join(app, "resources", "desktop"), "win32")).toBe(join(app, "PlacekeeperDesktop.exe"));
   });
   it("defaults ordinary opens to desktop and preserves an explicit browser surface", async () => {
     const root = await fixture();

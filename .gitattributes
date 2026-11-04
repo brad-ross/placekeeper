@@ -1,3 +1,6 @@
 # Catalog artifacts are checked byte-for-byte against generated UTF-8 LF output.
 /apps/web/src/pdf/pdf-symbol-catalog.generated.ts text eol=lf
 /scripts/pdf-symbol-catalog/generated/update-report.json text eol=lf
+
+# Released source evidence is hashed byte-for-byte against its checksum ledger.
+/test/fixtures/legacy-release-0.2.4/source/** text eol=lf

@@ -1,3 +1,4 @@
+import { establishPrivateDirectory } from "../src/platform/private-storage.js";
 import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -9,6 +10,7 @@ import { electronAppControlThroughDaemon, electronRuntimeThroughDaemon } from '.
 const registration = {protocolVersion:1 as const,type:'register-app' as const,appInstanceId:'app_probe_1234',processId:process.pid,startIdentity:'start_probe_1234',buildIdentity:'build_probe_1234'};
 async function fixture() {
  const root = await mkdtemp(join(tmpdir(),'pk-probe-lease-'));
+ await establishPrivateDirectory(root);
  const paths = {appSupportRoot:root,recoveryRoot:join(root,'recovery'),socketPath:join(root,'control.sock'),lifecycleLockPath:join(root,'lease'),webAssetsRoot:join(root,'web')};
  const owner = await acquireLifecycleLock(paths.lifecycleLockPath);
  return {root,paths,owner};
