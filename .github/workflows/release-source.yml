@@ -1,4 +1,4 @@
-name: Release source
+name: Validate source release fallback
 
 on:
   workflow_dispatch:
@@ -75,51 +75,10 @@ jobs:
           printf 'archive_sha256=%s\n' "$(shasum -a 256 "artifacts/source/placekeeper-source-v$SOURCE_VERSION.tar.gz" | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
           printf 'bootstrap_sha256=%s\n' "$(shasum -a 256 artifacts/source/install-placekeeper.sh | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
 
-  publish:
-    needs: validate
-    if: github.ref == 'refs/heads/main' && github.repository == 'brad-ross/placekeeper'
-    runs-on: macos-15
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      - name: Retain validated source for complete desktop release assembly
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          ref: ${{ github.sha }}
-          persist-credentials: false
-      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
-        with:
-          node-version: 24.14.0
-      # Regenerate deterministic assets from the same commit, never from workspace changes.
-      - run: node --experimental-strip-types scripts/package-source-release.ts "$SOURCE_VERSION" "$GITHUB_SHA" artifacts/source
-      - name: Publish complete source release
-        env:
-          EXPECTED_ARCHIVE_SHA256: ${{ needs.validate.outputs.archive_sha256 }}
-          EXPECTED_BOOTSTRAP_SHA256: ${{ needs.validate.outputs.bootstrap_sha256 }}
-        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd
-        with:
-          script: |
-            const fs = require('node:fs');
-            const version = process.env.SOURCE_VERSION;
-            const tag = `v${version}`;
-            if (context.ref !== 'refs/heads/main') throw new Error('Dispatch from trusted main only');
-            try { await github.rest.git.getRef({ ...context.repo, ref: `tags/${tag}` }); throw new Error('Tag already exists'); }
-            catch (error) { if (error.status !== 404) throw error; }
-            const releases = await github.paginate(github.rest.repos.listReleases, { ...context.repo, per_page: 100 });
-            if (releases.some(release => release.tag_name === tag)) throw new Error('Release already exists, including drafts');
-            const names = [`placekeeper-source-${tag}.tar.gz`, 'install-placekeeper.sh'];
-            const assets = names.map(name => ({ name, data: fs.readFileSync(`artifacts/source/${name}`) }));
-            if (assets.some(asset => asset.data.length === 0)) throw new Error('Incomplete source assets');
-            const expected = [process.env.EXPECTED_ARCHIVE_SHA256, process.env.EXPECTED_BOOTSTRAP_SHA256];
-            const crypto = require('node:crypto');
-            if (assets.some((asset, index) => crypto.createHash('sha256').update(asset.data).digest('hex') !== expected[index])) throw new Error('Assets differ from validated source');
-            const { data: release } = await github.rest.repos.createRelease({ ...context.repo,
-              tag_name: tag, target_commitish: context.sha, name: `Placekeeper ${version}`,
-              body: process.env.SOURCE_NOTES, draft: true, prerelease: false });
-            for (const asset of assets) {
-              await github.rest.repos.uploadReleaseAsset({ ...context.repo, release_id: release.id,
-                name: asset.name, data: asset.data });
-            }
-            const uploaded = await github.paginate(github.rest.repos.listReleaseAssets, { ...context.repo, release_id: release.id });
-            if (uploaded.length !== assets.length || assets.some(asset => !uploaded.some(remote => remote.name === asset.name && remote.size === asset.data.length))) throw new Error('Draft asset completeness check failed');
-            await github.rest.repos.updateRelease({ ...context.repo, release_id: release.id,
-              draft: false, prerelease: false, make_latest: 'true' });
+          name: placekeeper-validated-source
+          path: artifacts/source/
+          if-no-files-found: error
+          retention-days: 30

@@ -86,7 +86,11 @@
     "test:desktop-performance": "node --import tsx scripts/testing/run-suite.ts test:desktop-performance",
     "test:desktop-installed": "node --import tsx scripts/testing/run-suite.ts test:desktop-installed",
     "test:desktop-installers": "node --import tsx scripts/testing/run-suite.ts test:desktop-installers",
-    "build:electron:web": "vite build --config apps/web/vite.electron.config.ts"
+    "build:electron:web": "vite build --config apps/web/vite.electron.config.ts",
+    "test:desktop-release": "node --import tsx scripts/testing/run-suite.ts test:desktop-release",
+    "test:desktop-legacy": "node --import tsx scripts/testing/run-suite.ts test:desktop-legacy",
+    "validate:desktop-qualification": "node --import tsx scripts/validate-desktop-qualification.ts",
+    "test:desktop-debian": "node --import tsx scripts/testing/run-suite.ts test:desktop-debian"
   },
   "dependencies": {
     "@modelcontextprotocol/ext-apps": "1.7.5",

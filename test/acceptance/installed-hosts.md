@@ -230,3 +230,9 @@ Use disposable OS accounts or isolated host profiles for each exact downloaded i
 6. Migrate a real public 0.2.4 macOS installation. Exercise its original `Contents/MacOS/placekeeper`, `placekeeper-vscode` and `placekeeper-chrome-host` entrypoints after replacement. Reload Chrome from the new indicated extension folder; update/reinstall the Codex plugin, review trust and fully restart Codex; reload VS Code and verify the launcher setting. Retain old configuration and explicitly resolve any unowned registration conflict.
 
 No current setup operation grants host trust or claims completed host verification. Receipts and choices live under the established durable support root; payloads bind to the stable installed launcher rather than an extraction directory. Setup never changes the default PDF reader.
+
+## Exact release qualification
+
+Host smoke results apply only to the installer filename, SHA-256, source commit and candidate run recorded with them. Follow [desktop installer qualification](desktop-installers.md) before marking a release's real-host integration scenario passed. Keep VS Code, Chrome and Codex results separate in the linked record, including host versions, isolated profile locations, opt-in/skip choices, trust/permission/restart actions and a real annotation/Protected Draft exercise. Registration preparation alone does not establish that a host loaded or trusted the integration.
+
+Exercise accepted and declined upgrade with simultaneous reviews in the selected hosts. Retain the pending-write and failed-protection outcomes, then verify each opted-in integration after the actual installer finishes. Edited or foreign host registrations must survive receipt-aware repair and uninstall. Do not register anything against a person's real profile to obtain a green test. When a host cannot be isolated or is unavailable, leave its release scenario unsatisfied.

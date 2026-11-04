@@ -1,0 +1,12 @@
+import { describe, expect, it } from 'vitest';
+import { qualificationTemplate, validateQualification, requiredScenarios } from './validate-desktop-qualification.js';
+import { desktopAssetNames } from '../packages/core/src/desktop-release.js';
+const sources=[{name:'placekeeper-source-v0.3.0.tar.gz',sha256:'e'.repeat(64)},{name:'install-placekeeper.sh',sha256:'f'.repeat(64)}];
+const commit='a'.repeat(40), hash='b'.repeat(64);
+const assets=Object.entries(desktopAssetNames('0.3.0')).map(([target,name])=>({target,name,sha256:hash}));
+function qualified(){ const value=qualificationTemplate('0.3.0',commit,'123',assets,sources.map(source=>({...source}))); for(const asset of value.assets)for(const scenario of requiredScenarios(asset.target))asset.evidence.push({scenario,status:'passed',category:['downloaded-os-approval','legacy-0.2.4-migration'].includes(scenario)?'interactive':scenario==='real-host-integrations'?'real-host':'automated',reference:'https://github.com/brad-ross/placekeeper/issues/1',sha256:asset.sha256,commit,candidateRun:'123'});return value; }
+describe('exact desktop qualification',()=>{
+ it('leaves every candidate closed until all required evidence is supplied',()=>expect(()=>validateQualification(qualificationTemplate('0.3.0',commit,'123',assets,sources.map(source=>({...source}))),assets,'0.3.0',commit,'123',sources)).toThrow(/evidence/));
+ it('accepts the complete exact inventory',()=>expect(()=>validateQualification(qualified(),assets,'0.3.0',commit,'123',sources)).not.toThrow());
+ it.each(['missing','duplicate','hash','commit','run','cancelled','skipped','category','source','bootstrap','version','filename'])('refuses %s qualification',kind=>{const value=qualified();if(kind==='version')value.version='0.3.1';if(kind==='filename')value.assets[0]!.name='wrong.dmg';if(kind==='source')value.sources[0]!.sha256='1'.repeat(64);if(kind==='bootstrap')value.sources[1]!.sha256='2'.repeat(64);if(kind==='missing')value.assets.pop();if(kind==='duplicate')value.assets.push(value.assets[0]!);if(kind==='hash')value.assets[0]!.sha256='c'.repeat(64);if(kind==='commit')value.commit='d'.repeat(40);if(kind==='run')value.assets[0]!.evidence[0]!.candidateRun='122';if(kind==='cancelled'||kind==='skipped')value.assets[0]!.evidence[0]!.status=kind;if(kind==='category')value.assets[0]!.evidence.find(e=>e.scenario==='downloaded-os-approval')!.category='automated';expect(()=>validateQualification(value,assets,'0.3.0',commit,'123',sources)).toThrow();});
+});

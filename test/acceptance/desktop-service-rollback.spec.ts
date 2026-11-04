@@ -235,7 +235,7 @@ test('installed candidate service success with renderer failure retires candidat
   await cp(appRoot(retained), installed, { recursive:true, verbatimSymlinks:true });
   const brokenHtml = join(runtimeRoot(candidate), 'electron-web/electron.html');
   await rename(brokenHtml, `${brokenHtml}.unavailable`);
-  const state = join(root, 'state'); await mkdir(join(state,'recovery'), { recursive:true });
+  const state = join(root, 'state'); await mkdir(state, { recursive:true, mode:0o700 }); await mkdir(join(state,'recovery'), { recursive:true, mode:0o700 });
   const sentinel = join(state, 'recovery', 'newer-user-work.txt'); await writeFile(sentinel, 'canonical protected work');
   const paths: DaemonPaths = { appSupportRoot:state, recoveryRoot:join(state,'recovery'), socketPath:join(state,'control.sock'), lifecycleLockPath:join(state,'lifecycle.lock'), isolatedTestRoot:state, webAssetsRoot:join(runtimeRoot(candidate),'web'), httpPort:await freePort() };
   const backup = join(state, 'verified-backup');
@@ -303,7 +303,7 @@ test('installed activation reentry retires the exact interrupted candidate befor
   const candidate = join(root,'candidate'), installed = join(root,'installed'), state = join(root,'state');
   await cp(appRoot(selected),candidate,{recursive:true,verbatimSymlinks:true});
   await cp(appRoot(retained),installed,{recursive:true,verbatimSymlinks:true});
-  await mkdir(join(state,'recovery'),{recursive:true});
+  await mkdir(state,{recursive:true,mode:0o700}); await mkdir(join(state,'recovery'),{recursive:true,mode:0o700});
   const sentinel = join(state,'recovery','user-work.txt');
   await writeFile(sentinel,'protected before interrupted activation');
   const paths: DaemonPaths = { appSupportRoot:state,recoveryRoot:join(state,'recovery'),socketPath:join(state,'control.sock'),lifecycleLockPath:join(state,'lifecycle.lock'),isolatedTestRoot:state,webAssetsRoot:join(runtimeRoot(candidate),'web'),httpPort:await freePort() };

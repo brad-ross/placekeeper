@@ -152,6 +152,20 @@ describe("explicit suite contracts", () => {
     ]) expect(suiteCommand(suite)).toContain(browser);
   });
 
+  it.skipIf(process.platform === "win32")("routes native installer suites to only their intended platform fixture", async () => {
+    for (const [name,file] of [
+      ["test:desktop-installers","test/acceptance/desktop-installers.spec.ts"],
+      ["test:desktop-debian","test/acceptance/desktop-debian.spec.ts"],
+      ["test:desktop-legacy","test/acceptance/legacy-0.2.4-upgrade.spec.ts"],
+    ] as const) {
+      await withRunners(async (_directory,env) => {
+        const result=invoke(name,env);expect(result.status,result.stderr).toBe(0);
+        const calls=(await readFile(env.SUITE_LOG!,"utf8")).trim().split("\n").map(line=>JSON.parse(line));
+        expect(calls).toEqual([{command:"playwright",args:["test","--config","scripts/testing/config/playwright.desktop-installers.config.ts",file]}]);
+      });
+    }
+  });
+
   it.skipIf(process.platform === "win32")("stops on prerequisite failure with the original exit result", async () => {
     await withRunners(async (directory, env) => {
       const result = invoke("test:web", { ...env, SUITE_FIXTURE_EXIT: "27" });

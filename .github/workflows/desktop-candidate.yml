@@ -1,4 +1,4 @@
-name: Desktop installers
+name: Desktop installer candidate
 
 on:
   workflow_dispatch:
@@ -48,6 +48,13 @@ jobs:
         uses: ilammy/msvc-dev-cmd@v1
         with:
           arch: x64
+      - name: Install pinned NSIS bootstrap compiler
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          choco install nsis --version=3.11 -y --no-progress
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "PLACEKEEPER_MAKENSIS=C:\Program Files (x86)\NSIS\makensis.exe" >> $env:GITHUB_ENV
       - name: Linux Debian maker tools
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y fakeroot dpkg xvfb build-essential
@@ -89,23 +96,22 @@ jobs:
       - name: Make desktop installer
         id: make
         run: pnpm --dir apps/electron make --platform=${{ matrix.platform }} --arch=${{ matrix.arch }}
-      - name: Install Linux candidate
-        if: runner.os == 'Linux'
+      - name: Locate the exact guarded artifact
         shell: bash
         run: |
-          set -euo pipefail
-          shopt -s nullglob
-          debs=(dist/desktop-artifacts/make/deb/${{ matrix.arch }}/*.deb)
-          test "${#debs[@]}" -eq 1
-          package=$(dpkg-deb --field "${debs[0]}" Package)
-          sudo apt-get install -y "$PWD/${debs[0]}"
-          test "$(dpkg-query --show --showformat='${Status}' "$package")" = 'install ok installed'
-          mapfile -t executables < <(dpkg-query --listfiles "$package" | grep '/PlacekeeperDesktop$')
-          test "${#executables[@]}" -eq 1
-          executable=$(readlink -f "${executables[0]}")
-          test -x "$executable"
-          test "$(stat -c '%u:%g:%a' "$(dirname "$executable")/chrome-sandbox")" = '0:0:4755'
-          printf 'PLACEKEEPER_TEST_EXECUTABLE=%s\n' "$executable" >> "$GITHUB_ENV"
+          node --input-type=module <<'JS'
+          import { appendFileSync, readdirSync } from 'node:fs';
+          import { resolve } from 'node:path';
+          const root = `dist/desktop-artifacts/make/guarded/${process.platform}/${process.arch}`;
+          const matches = readdirSync(root).filter(name => /\.(?:dmg|exe|deb)$/.test(name));
+          if (matches.length !== 1) throw Error('Expected one controlled installer');
+          appendFileSync(process.env.GITHUB_ENV, `PLACEKEEPER_NATIVE_INSTALLER_ARTIFACT=${resolve(root, matches[0])}\nPLACEKEEPER_NATIVE_INSTALLER_PORT=63828\n`);
+          JS
+      - name: Prepare packaged Linux sandbox ownership
+        if: runner.os == 'Linux'
+        run: |
+          sudo chown root:root dist/desktop-artifacts/Placekeeper-linux-x64/chrome-sandbox
+          sudo chmod 4755 dist/desktop-artifacts/Placekeeper-linux-x64/chrome-sandbox
       - name: Test packaged candidate on Linux
         if: runner.os == 'Linux'
         run: xvfb-run -a pnpm test:desktop-installed
@@ -122,37 +128,168 @@ jobs:
             playwright-report/
           if-no-files-found: ignore
           retention-days: 14
-      - name: Hash installers
-        if: ${{ always() && steps.make.outcome == 'success' }}
+      - name: Record exact native build provenance
         shell: bash
         run: |
           node --input-type=module <<'JS'
+          import { readFileSync, writeFileSync, mkdirSync, copyFileSync } from 'node:fs';
+          import { basename } from 'node:path';
           import { createHash } from 'node:crypto';
-          import { createReadStream } from 'node:fs';
-          import { readdir, writeFile } from 'node:fs/promises';
-          import { join } from 'node:path';
-          const root = 'dist/desktop-artifacts/make';
-          const files = await readdir(root, { recursive: true, withFileTypes: true });
-          const hashes = [];
-          for (const file of files) {
-            if (file.isFile()) {
-              const path = join(file.parentPath, file.name);
-              const digest = createHash('sha256');
-              for await (const chunk of createReadStream(path)) digest.update(chunk);
-              hashes.push(`${digest.digest('hex')}  ${path}`);
-            }
-          }
-          await writeFile('dist/desktop-artifacts/SHA256SUMS', hashes.sort().join('\n') + '\n');
+          const file = process.env.PLACEKEEPER_NATIVE_INSTALLER_ARTIFACT;
+          const bytes = readFileSync(file);
+          mkdirSync('artifacts/native', { recursive: true });
+          copyFileSync(file, `artifacts/native/${basename(file)}`);
+          writeFileSync('artifacts/native/build-result.json', JSON.stringify({
+            version: JSON.parse(readFileSync('apps/electron/package.json')).version,
+            commit: process.env.GITHUB_SHA, candidateRun: process.env.GITHUB_RUN_ID,
+            target: process.env.PLACEKEEPER_DESKTOP_TARGET, status: 'built',
+            name: basename(file), sha256: createHash('sha256').update(bytes).digest('hex'),
+            scope: 'Hosted native build and packaged runtime tests only. Actual installer operation remains unqualified.'
+          }));
           JS
-      - name: Upload artifacts and payload evidence
-        if: ${{ always() && steps.make.outcome == 'success' }}
+      - name: Upload unqualified built bytes
         uses: actions/upload-artifact@v4
         with:
           name: placekeeper-desktop-${{ matrix.target }}
-          path: |
-            dist/desktop-artifacts/make/
-            dist/desktop-artifacts/SHA256SUMS
-            dist/desktop-runtime/${{ matrix.target }}/desktop/build-evidence.json
-            dist/desktop-runtime/${{ matrix.target }}/desktop/runtime-manifest.json
+          path: artifacts/native/
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 30
+
+  native-qualification:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'brad-ross/placekeeper'
+    needs: package
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [darwin-arm64, darwin-x64, win32-x64, linux-x64]
+    runs-on: [self-hosted, placekeeper-qualification, '${{ matrix.target }}']
+    environment: desktop-native-qualification
+    timeout-minutes: 40
+    env:
+      PLACEKEEPER_NATIVE_INSTALLER_PORT: "63828"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.16.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.22.1
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm fixtures:pdf
+      - run: pnpm exec playwright install chromium
+      - uses: actions/download-artifact@v4
+        with:
+          name: placekeeper-desktop-${{ matrix.target }}
+          path: artifacts/native
+      - name: Verify original hosted build provenance and exact bytes
+        shell: bash
+        run: |
+          node --input-type=module <<'JS'
+          import { readFileSync, appendFileSync } from 'node:fs';
+          import { createHash } from 'node:crypto';
+          import { resolve } from 'node:path';
+          const record = JSON.parse(readFileSync('artifacts/native/build-result.json'));
+          const file = resolve('artifacts/native', record.name);
+          if (record.status !== 'built' || record.commit !== process.env.GITHUB_SHA || record.candidateRun !== process.env.GITHUB_RUN_ID || record.target !== '${{ matrix.target }}' || record.sha256 !== createHash('sha256').update(readFileSync(file)).digest('hex')) throw Error('Stale or changed native build');
+          appendFileSync(process.env.GITHUB_ENV, `PLACEKEEPER_NATIVE_INSTALLER_ARTIFACT=${file}\n`);
+          JS
+      - name: Operator-attended DMG or Setup installation and identical reinstall
+        if: runner.os != 'Linux'
+        run: pnpm exec playwright test --config scripts/testing/config/playwright.desktop-installers.config.ts desktop-installers.spec.ts
+      - name: Operator-attended Debian installation and dispatcher activation
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get install -y "$PLACEKEEPER_NATIVE_INSTALLER_ARTIFACT"
+          pnpm exec playwright test --config scripts/testing/config/playwright.desktop-installers.config.ts desktop-debian.spec.ts
+      - name: Test the runtime installed from those exact bytes
+        run: pnpm test:desktop-installed
+      - name: Record successful actual native entrypoint verification
+        shell: bash
+        run: |
+          node --input-type=module <<'JS'
+          import { readFileSync, writeFileSync } from 'node:fs';
+          const file = 'artifacts/native/build-result.json';
+          const record = JSON.parse(readFileSync(file));
+          record.status = 'passed';
+          record.nativeQualificationRun = process.env.GITHUB_RUN_ID;
+          record.scope = 'Operator-attended actual installer and installed runtime. Full lifecycle, browser OS, public legacy and real-host evidence remain required.';
+          writeFileSync(file, JSON.stringify(record));
+          JS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: placekeeper-qualified-${{ matrix.target }}
+          path: artifacts/native/
+          if-no-files-found: error
+          retention-days: 30
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: placekeeper-native-qualification-evidence-${{ matrix.target }}
+          path: test-results/
+          retention-days: 30
+
+
+  assemble:
+    needs: native-qualification
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.16.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.22.1
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test:desktop-release
+      - run: pnpm test:source-release
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: placekeeper-qualified-*
+          path: artifacts/input
+      - name: Assemble complete candidate with source fallback
+        shell: bash
+        run: |
+          version=$(node -p "require('./apps/electron/package.json').version")
+          pnpm exec tsx scripts/package-source-release.ts "$version" "$GITHUB_SHA" artifacts/input/source
+          pnpm exec tsx scripts/desktop-release.ts assemble "$version" "$GITHUB_SHA" "$GITHUB_RUN_ID" artifacts/input artifacts/complete
+      - uses: actions/upload-artifact@v4
+        with:
+          name: placekeeper-complete-candidate
+          path: artifacts/complete/
+          if-no-files-found: error
+          retention-days: 30
+
+  stage:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'brad-ross/placekeeper'
+    needs: assemble
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    concurrency:
+      group: placekeeper-release-publication
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.22.1
+      - uses: actions/download-artifact@v4
+        with:
+          name: placekeeper-complete-candidate
+          path: artifacts/complete
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.16.0
+      - run: pnpm install --frozen-lockfile
+      - name: Stage complete unqualified draft only
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(node -p "require('./apps/electron/package.json').version")
+          pnpm exec tsx scripts/desktop-release.ts stage "$version" "$GITHUB_SHA" "$GITHUB_RUN_ID" artifacts/complete

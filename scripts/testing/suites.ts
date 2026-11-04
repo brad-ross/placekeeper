@@ -8,7 +8,13 @@ export type TestStage = string | {
 export const suites: Record<string, TestStage[]> = {
   // These integration tests start native helpers whose bounded operations may
   // take 30 seconds. Let failures report before the runner tears down fixtures.
+  "test:desktop-release": [{ runner: "vitest", options: [], files: ["scripts/desktop-release.test.ts", "scripts/validate-desktop-qualification.test.ts", "packages/core/test/desktop-release.test.ts", "apps/electron/test/update-check.test.ts"] }],
+  "test:desktop-debian": [{ runner: "playwright", options: ["--config", "scripts/testing/config/playwright.desktop-installers.config.ts"], files: ["test/acceptance/desktop-debian.spec.ts"] }],
+  "test:desktop-legacy": [{ runner: "playwright", options: ["--config", "scripts/testing/config/playwright.desktop-installers.config.ts"], files: ["test/acceptance/legacy-0.2.4-upgrade.spec.ts"] }],
   "test:desktop-platform": [{ runner: "vitest", options: ["--testTimeout", "45000", "--hookTimeout", "45000", "--maxWorkers", "2"], files: [
+    "packaging/desktop/install-layout.test.ts", "packaging/desktop/legacy-release.test.ts", "packaging/desktop/launcher.test.ts",
+    "apps/service/test/desktop-service-switch.test.ts", "apps/service/test/upgrade-preparation.test.ts", "apps/service/test/upgrade-review-participants.test.ts",
+    "apps/web/test/upgrade-preparation.test.ts", "apps/web/test/production-entry.test.ts",
     "apps/service/test/platform-locations.test.ts", "apps/service/test/platform-control.test.ts",
     "apps/service/test/platform-private-storage.test.ts", "apps/service/test/windows-private-creation.test.ts",
     "apps/service/test/windows-chrome-registration.test.ts",
@@ -48,9 +54,9 @@ export const suites: Record<string, TestStage[]> = {
   ] }],
   "test:desktop-performance": [{ runner: "playwright", options: ["--config", "scripts/testing/config/playwright.electron-performance.config.ts"], files: [] }],
   "test:desktop-installed": [{ runner: "playwright", options: ["--config", "scripts/testing/config/playwright.electron.config.ts"], files: [] }],
-  "test:desktop-installers": [{ runner: "playwright", options: ["--config", "scripts/testing/config/playwright.desktop-installers.config.ts"], files: [] }],
+  "test:desktop-installers": [{ runner: "playwright", options: ["--config", "scripts/testing/config/playwright.desktop-installers.config.ts"], files: ["test/acceptance/desktop-installers.spec.ts"] }],
   "test:codex-native": [{ runner: "vitest", options: [], files: ["apps/service/test/codex-daemon-runtime.test.ts", "apps/web/test/codex-host-actions.test.tsx", "apps/web/test/codex-runtime.test.ts", "apps/web/test/codex-refresh.test.tsx", "apps/service/test/codex-persistence.integration.test.ts", "apps/web/test/codex-bundle.test.ts", "apps/web/test/host-render-layer.test.ts", "apps/codex-mcp/test/service-client.integration.test.ts", "apps/codex-mcp/test/server.test.ts", "apps/codex-mcp/test/resources.test.ts", "apps/codex-mcp/test/lifecycle-diagnostics.test.ts", "apps/codex-mcp/test/qualification.test.ts", "apps/service/test/codex-live-context.integration.test.ts", "apps/service/test/hook-contract.test.ts", "packages/core/test/codex-mcp-protocol.test.ts", "apps/service/test/codex-runtime.test.ts", "apps/service/test/native-qualification.test.ts", "apps/service/test/native-qualification-experiments.test.ts", "apps/service/test/codex-backend.test.ts", "apps/service/test/codex-host.test.ts", "apps/service/test/task-binding-registry.test.ts", "apps/service/test/restart-reconnect-store.test.ts"] }, "pnpm fixtures:pdf", "pnpm build:codex", { runner: "playwright", options: ["--config", "scripts/testing/config/playwright.config.ts"], files: ["test/acceptance/codex-native-review.spec.ts", "test/acceptance/codex-native-lifecycle.spec.ts", "test/acceptance/codex-native-resources.spec.ts", "test/acceptance/host-raster-rotation.spec.ts"] }],
-  "test:source-release": [{ runner: "vitest", options: [], files: ["scripts/source-release.test.ts", "scripts/install-release.test.ts"] }],
+  "test:source-release": [{ runner: "vitest", options: [], files: ["scripts/source-release.test.ts", "scripts/install-release.test.ts", "scripts/desktop-release.test.ts", "scripts/validate-desktop-qualification.test.ts"] }],
   "test:static:distribution": [
     {
       "runner": "vitest",
@@ -494,6 +500,8 @@ export const suites: Record<string, TestStage[]> = {
       "runner": "vitest",
       "options": [],
       "files": [
+        "apps/service/test/upgrade-preparation.test.ts", "apps/service/test/upgrade-review-participants.test.ts",
+        "apps/web/test/upgrade-preparation.test.ts", "apps/service/test/desktop-service-switch.test.ts",
         "apps/service/test/desktop-daemon-runtime.test.ts",
         "apps/service/test/codex-daemon-runtime.test.ts",
         "apps/service/test/open-command.test.ts",
@@ -652,6 +660,33 @@ export const suites: Record<string, TestStage[]> = {
 
 /** Canonical CI is deliberately narrower than all repository tests; includes the updater's .mjs tests. */
 export const ciUnitFiles = [
+  "packages/core/test/desktop-release.test.ts", "apps/electron/test/update-check.test.ts",
+  "apps/electron/test/window-retirement.test.ts",
+  "packaging/desktop/install-layout.test.ts",
+  "packaging/desktop/legacy-release.test.ts",
+  "packaging/desktop/launcher.test.ts",
+  "apps/service/test/desktop-service-switch.test.ts",
+  "apps/service/test/upgrade-preparation.test.ts",
+  "apps/service/test/upgrade-review-participants.test.ts",
+  "apps/web/test/upgrade-preparation.test.ts",
+  "apps/web/test/production-entry.test.ts",
+  "apps/electron/test/startup-receipt.test.ts",
+  "apps/electron/test/window-state.test.ts",
+  "apps/electron/test/installer-routing.test.ts",
+  "apps/service/test/native-installer-coordinator.test.ts",
+  "apps/service/test/startup-probe-lease.test.ts",
+  "apps/service/test/desktop-daemon-lifecycle.test.ts",
+  "packaging/desktop/debian-lifecycle.test.ts",
+  "packaging/desktop/install-built-app.test.ts",
+  "packaging/desktop/install-transaction.test.ts",
+  "packaging/desktop/installer-entry.test.ts",
+  "packaging/desktop/installer-entrypoint.test.ts",
+  "packaging/desktop/packaging.test.ts",
+  "packaging/desktop/windows-registration.test.ts",
+  "scripts/static-release.test.ts",
+  "scripts/desktop-release.test.ts",
+  "scripts/validate-desktop-qualification.test.ts",
+
   "apps/web/src/landing/downloads.test.ts",
   "apps/electron/test/standalone-chooser.test.ts", "apps/electron/test/open-intent.test.ts",
   "apps/electron/test/protocol-install.test.ts", "packaging/desktop/linux-sandbox.test.ts",
