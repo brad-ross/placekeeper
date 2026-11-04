@@ -1,9 +1,6 @@
 name: Build desktop installers
 
 on:
-  push:
-    branches: [main]
-    paths: [.github/workflows/build-desktop.yml]
   workflow_dispatch:
   workflow_call:
 
@@ -12,7 +9,6 @@ permissions:
 
 jobs:
   package:
-    if: github.event_name != 'push'
     strategy:
       fail-fast: false
       matrix:
