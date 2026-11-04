@@ -130,13 +130,19 @@ describe("static browser startup guards", () => {
 
 
 describe("landing installation contract", () => {
-  it("shows the short release command and concise instructions in one mounted dialog", () => {
+  it("separates desktop downloads from qualified source instructions in one mounted dialog", () => {
     expect(SOURCE_INSTALL_COMMAND).toBe(RELEASE_INSTALL_COMMAND);
     const markup = renderToStaticMarkup(createElement(StaticLauncher, { onOpen: async () => {} }));
     expect(markup.match(/<dialog\b/g)).toHaveLength(1);
     expect(markup.match(/aria-haspopup="dialog"/g)).toHaveLength(2);
     expect(markup).not.toContain("archive/refs/heads/main.zip");
-    expect(markup).toContain("Run the command below");
+    expect(markup).toContain('aria-label="Desktop downloads"');
+    expect(markup).toContain("Checking published desktop downloads");
+    expect(markup).toContain('aria-label="Source installation"');
+    expect(markup).toContain("source prerequisites and sandbox requirements");
+    expect(markup).toContain("The source bootstrap below follows the latest published stable release.");
+    expect(markup).toContain("it is not an Electron desktop installer.");
+    expect(markup).toContain(`<code aria-label="Install command">${SOURCE_INSTALL_COMMAND}</code>`);
     expect(markup).not.toContain("Close installation dialog");
     expect(markup).not.toContain("Apple silicon");
   });
