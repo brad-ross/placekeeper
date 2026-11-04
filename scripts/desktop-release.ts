@@ -140,7 +140,8 @@ function existingTag(tag: string): {
     }
 }
 function release(tag: string): Release {
-    return JSON.parse(gh(['api', `repos/${repository}/releases/tags/${tag}`]));
+    const { databaseId } = JSON.parse(gh(['release', 'view', tag, '--repo', repository, '--json', 'databaseId']));
+    return JSON.parse(gh(['api', `repos/${repository}/releases/${databaseId}`]));
 }
 export async function validateStagedDirectory(directory: string, provenance: BuildProvenance) {
     const names = await readdir(directory);
