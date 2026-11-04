@@ -212,11 +212,20 @@ async function coordinateLifecycleMutation(
         const preview = await request({ operation: "preview", installedDaemonIdentity: status.daemonIdentity, candidate: selected });
         const credentials: UpgradeAttemptCredentials = { attemptId: preview.attemptId, token: preview.token, candidate: preview.candidate };
         try {
-          if (!process.stdin.isTTY) throw new Error("Active reviews need approval to close. Run the source installer in an interactive terminal, or close reviews and retry.");
+          const nativeConsent = args.includes("--native-installer-consent");
+          if (!nativeConsent && !process.stdin.isTTY) throw new Error("Active reviews need approval to close. Run the source installer in an interactive terminal, or close reviews and retry.");
           const terminal = createInterface({ input: process.stdin, output: process.stderr });
           let accepted = false;
-          try { accepted = /^y(?:es)?$/iu.test((await terminal.question("Installing Placekeeper will close active reviews after protecting pending edits and drafts. Close reviews and continue? [y/N] ")).trim()); }
-          finally { terminal.close(); }
+          try {
+            if (nativeConsent) {
+              // The separate installer profile presents the incumbent's preview;
+              // no approval is inferred from invocation or a command-line flag.
+              process.stdout.write('{"kind":"placekeeper-install-consent","version":1}\n');
+              const answer = await Promise.race([terminal[Symbol.asyncIterator]().next(), new Promise<never>((_, reject) => { const timer = setTimeout(() => reject(Error("Installer consent timed out")), 120_000); timer.unref(); })]);
+              const decision = answer.done ? undefined : JSON.parse(answer.value) as { version?: unknown; accepted?: unknown };
+              accepted = decision?.version === 1 && decision.accepted === true;
+            } else accepted = /^y(?:es)?$/iu.test((await terminal.question(`This Placekeeper change will close active reviews after protecting pending edits and drafts. Close reviews and continue? [y/N] `)).trim());
+          } finally { terminal.close(); }
           let preparation = await request({ operation: "begin", credentials, consent: accepted });
           if (!accepted) throw new Error("Installation canceled; current reviews remain available");
           const deadline = Date.now() + 120_000;
@@ -232,7 +241,7 @@ async function coordinateLifecycleMutation(
       receipt: join(paths.appSupportRoot, "installer", `install-ready-${Date.now()}.json`), paths,
       replaceAndReady: async (lifecycleToken) => {
         if (!replaceHelper.endsWith(".mjs")) throw new Error("Desktop installation requires the portable replacement helper");
-        await execFileAsync(process.execPath, [replaceHelper, candidateApp, installedApp, desktopLauncher(installedApp),
+        await execFileAsync(process.execPath, [replaceHelper, ...(args.includes("--uninstall-only") ? ["--uninstall-only"] : args.includes("--immutable-runtime") ? ["--immutable-runtime"] : []), candidateApp, installedApp, desktopLauncher(installedApp),
           ...(smokePort === undefined ? [] : [String(smokePort), ...(paths.isolatedTestRoot === undefined ? [] : [paths.isolatedTestRoot])])], { timeout: 300_000, maxBuffer: 65_536, env: { ...process.env,
           [LIFECYCLE_LOCK_TOKEN_ENV]: lifecycleToken,
           PLACEKEEPER_INSTALL_BACKUP_ROOT: backupRoot,
@@ -367,13 +376,12 @@ export async function runDaemonCommand(
     if (error instanceof LifecycleLockTimeoutError) {
       error = new DaemonUpgradeRequiredError("transient-busy");
     }
-    if (!(error instanceof DaemonUpgradeRequiredError)) throw error;
     write(`${JSON.stringify({
       ok: false,
       error: {
-        kind: "upgrade-required",
-        message: error.message,
-        recoveryAction: error.recoveryAction,
+        kind: error instanceof DaemonUpgradeRequiredError ? "upgrade-required" : "input-unavailable",
+        message: error instanceof Error ? error.message : "The coordinated installation could not finish",
+        recoveryAction: error instanceof DaemonUpgradeRequiredError ? error.recoveryAction : "Keep the current app, retained app versions and verified recovery backup. Resolve the reported installation error, then retry.",
       },
     })}\n`);
     return 2;

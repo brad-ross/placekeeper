@@ -1,13 +1,14 @@
+import { desktopAssetNames } from '../../packages/core/src/desktop-release.js';
+import { makeMacInstaller } from './macos-installer.js';
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { chmod, mkdtemp, mkdir, readFile, readlink, rm, symlink, writeFile } from "node:fs/promises";
-import { createRequire } from "node:module";
-import { dirname, join } from "node:path";
+import { chmod, cp, mkdtemp, mkdir, readFile, readlink, rm, symlink, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
 import { archiveExtraction, bundleDependencyNotices, inventory } from "./package-assets.js";
 import forgeConfig from "../../apps/electron/forge.config.js";
-import { MakerDeb } from "@electron-forge/maker-deb";
+import { GuardedInstallerMaker, makeDebian } from "./makers.js";
 
 const temporary: string[] = [];
 async function fixture() {
@@ -18,31 +19,37 @@ async function fixture() {
 afterEach(async () => { await Promise.all(temporary.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
 
 describe("desktop package assets", () => {
-  it.skipIf(process.platform === "win32")("links the Debian launcher to the packaged executable when the npm name is scoped", async () => {
-    const root = await fixture();
-    const maker = forgeConfig.makers.find((candidate): candidate is MakerDeb => candidate instanceof MakerDeb);
-    expect(maker).toBeDefined();
-    await maker!.prepareConfig("x64");
-    const require = createRequire(import.meta.url);
-    const requireMaker = createRequire(require.resolve("@electron-forge/maker-deb"));
-    const requireInstaller = createRequire(requireMaker.resolve("electron-installer-debian"));
-    const { ElectronInstaller, getDefaultsFromPackageJSON, sanitizeName } = requireInstaller("electron-installer-common");
-    const pkg = JSON.parse(await readFile(new URL("../../apps/electron/package.json", import.meta.url), "utf8"));
-    const installer = new ElectronInstaller({});
-    installer.options = { ...getDefaultsFromPackageJSON(pkg), ...maker!.config.options, src: root };
-    installer.options.name = sanitizeName(installer.options.name.toLowerCase(), "-+.a-z0-9");
-    installer.stagingDir = join(root, "staging");
-    await writeFile(join(root, forgeConfig.packagerConfig.executableName), "packaged executable");
+  it("assembles a Debian payload and stable dispatcher without owning materialized versions", async () => {
+    const root=await fixture();
+    const candidate=join(root,'candidate'), runtime=join(candidate,'resources/desktop');
+    for(const dir of ['node/bin','bin'])await mkdir(join(runtime,dir),{recursive:true});
+    await writeFile(join(runtime,'runtime-manifest.json'),JSON.stringify({installArtifactIdentity:'a'.repeat(64)}));
+    await writeFile(join(runtime,'node/bin/node'),'bundled node');
+    for(const name of ['placekeeper-dispatcher','placekeeper-chrome-dispatcher','placekeeper-vscode-dispatcher'])await writeFile(join(runtime,'bin',name),name);
+    const output=join(root,'output');await mkdir(output);
+    const calls: string[][]=[];
+    const artifact=await makeDebian(candidate,output,'0.3.0','x64',async(command,args)=>{
+      calls.push([command,...args]);
+      if(command==='tar')await writeFile(args[1]!,'compressed complete candidate');
+    });
+    expect(artifact).toBe(join(output,desktopAssetNames('0.3.0')['linux-x64']));
+    expect(forgeConfig.makers[0]).toBeInstanceOf(GuardedInstallerMaker);
+    const stage=join(output,'deb-staging');
+    expect(await readFile(join(stage,'usr/bin/placekeeper'),'utf8')).toBe('placekeeper-dispatcher');
+    expect(await readFile(join(stage,'usr/lib/placekeeper/bootstrap/node'),'utf8')).toBe('bundled node');
+    expect(await readFile(join(stage,'usr/share/applications/placekeeper.desktop'),'utf8')).toContain('Exec=/usr/bin/placekeeper %U');
+    expect(await readFile(join(stage,'usr/lib/placekeeper/payload/identity'),'utf8')).toBe('a'.repeat(64)+'\n');
+    expect(calls[1]).toEqual(['dpkg-deb','--root-owner-group','--build',stage,join(output,'Placekeeper-0.3.0-linux-x64.deb')]);
+  });
 
-    await installer.createBinarySymlink();
-
-    expect(await readlink(join(installer.stagingDir, "usr", "bin", installer.options.name)))
-      .toBe(`../lib/${installer.options.name}/${forgeConfig.packagerConfig.executableName}`);
-    installer.options.desktopTemplate = join(dirname(requireMaker.resolve("electron-installer-debian")), "../resources/desktop.ejs");
-    await installer.createDesktopFile();
-    const desktop = await readFile(join(installer.stagingDir, "usr/share/applications", `${installer.appIdentifier}.desktop`), "utf8");
-    expect(desktop).toContain(`Exec=${installer.options.name} %U`);
-    expect(desktop).toContain("MimeType=application/pdf;x-scheme-handler/placekeeper;x-scheme-handler/placekeeper-navigation;");
+  it.each(['arm64','x64'])('returns the catalog macOS asset name for %s',async arch=>{
+    const root=await fixture();const candidate=join(root,'candidate.app'),output=join(root,'output');await mkdir(candidate);await mkdir(output);
+    await writeFile(join(candidate,'candidate-bytes'),'complete candidate fixture');
+    const artifact=await makeMacInstaller(candidate,output,'0.3.0',arch,async(command,args)=>{
+      if(command==='/usr/bin/ditto')await cp(args[args.length-2]!,args[args.length-1]!,{recursive:true});
+    });
+    expect(artifact).toBe(join(output,desktopAssetNames('0.3.0')[arch==='arm64'?'darwin-arm64':'darwin-x64']));
+    expect(await readFile(join(output,'dmg-contents/Install Placekeeper.app/Contents/Resources/Placekeeper.app/candidate-bytes'),'utf8')).toBe('complete candidate fixture');
   });
 
   it("uses native ZIP extraction on Windows and gzip tar extraction on Unix without shell interpolation", () => {

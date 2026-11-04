@@ -5,7 +5,7 @@ import { mkdtemp, mkdir, readFile, realpath, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { resolveLauncherRuntime, main, desktopExecutable } from "./launcher.mjs";
+import { resolveLauncherRuntime, integrationLauncher, main, desktopExecutable } from "./launcher.mjs";
 const sha = (value: string) => createHash("sha256").update(value).digest("hex");
 async function fixture() {
   const outer = await mkdtemp(join(tmpdir(), "pk-launcher-"));
@@ -34,6 +34,14 @@ describe("portable headless launcher", () => {
       await writeFile(join(root, "web/pdfium.wasm"), "tampered wasm");
       await expect(resolveLauncherRuntime(root)).rejects.toThrow("changed");
     } finally { vi.unstubAllEnvs(); }
+  });
+  it("never lets inherited dispatcher claims redirect a user-owned installation",async()=>{
+    const root=await fixture();vi.stubEnv('PLACEKEEPER_LAUNCHER','/usr/bin/placekeeper');
+    try {
+      const runtime=await resolveLauncherRuntime(root);
+      expect(runtime.environment.PLACEKEEPER_LAUNCHER).toBe(join(await realpath(root),'bin',process.platform==='win32'?'placekeeper.exe':'placekeeper'));
+      expect(await integrationLauncher(root,'b'.repeat(64),'linux')).toBe(join(root,'bin/placekeeper'));
+    } finally {vi.unstubAllEnvs();}
   });
   it("fails instead of falling back when packaged runtime bytes change", async () => {
     const root = await fixture(); await writeFile(join(root, `node/bin/node${process.platform === "win32" ? ".exe" : ""}`), "changed");

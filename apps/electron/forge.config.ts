@@ -2,9 +2,7 @@ import { readFile } from "node:fs/promises";
 import { installMacCompatibility } from "../../packaging/desktop/macos-compatibility";
 import { inventory } from "../../packaging/desktop/package-assets";
 import { resolve } from "node:path";
-import { MakerZIP } from "@electron-forge/maker-zip";
-import { MakerSquirrel } from "@electron-forge/maker-squirrel";
-import { MakerDeb } from "@electron-forge/maker-deb";
+import { GuardedInstallerMaker } from "../../packaging/desktop/makers";
 import { FusesPlugin } from "@electron-forge/plugin-fuses";
 import { FuseV1Options, FuseVersion } from "@electron/fuses";
 
@@ -50,11 +48,7 @@ export default {
       }
     },
   },
-  makers: [
-    new MakerZIP({}, ["darwin"]),
-    new MakerSquirrel({ setupIcon: resolve(repo, "dist/desktop-icons/Placekeeper.ico"), noMsi: true, name: "Placekeeper", authors: "Brad Ross", description: "Placekeeper PDF review" }),
-    new MakerDeb({ options: { bin: executableName, mimeType: ["application/pdf", "x-scheme-handler/placekeeper", "x-scheme-handler/placekeeper-navigation"], maintainer: "Brad Ross", homepage: "https://github.com/brad-ross/placekeeper", icon: resolve(repo, "dist/desktop-icons/Placekeeper.png") } }),
-  ],
+  makers: [new GuardedInstallerMaker({})],
   plugins: [new FusesPlugin({
     version: FuseVersion.V1,
     [FuseV1Options.RunAsNode]: false,

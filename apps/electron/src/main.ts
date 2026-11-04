@@ -13,6 +13,7 @@ import { parseElectronAppControlResponse } from '../../../packages/core/src/elec
 import { assetResponse, documentResponse } from './resource-protocol.js';
 import { REVIEW_RUNTIME_PROTOCOL, REVIEW_RUNTIME_VERSION } from '../../../packages/core/src/review-runtime-protocol.js';
 import { handleWindowsProtocolInstall } from './protocol-install.js';
+import { parseInstallerRequest, isolateInstallerProfile, runInstallerUI } from './installer-ui.js';
 import { parseStandaloneChooser, runStandaloneChooser } from './standalone-chooser.js';
 import { stageDesktopLink } from './open-link.js';
 import { parseDesktopOpenIntent, secondInstanceArguments, DesktopInvocationQueue } from './open-intent.js';
@@ -27,13 +28,15 @@ import { nativeTitlebarOptions, trackTitlebarHover } from './titlebar.js';
 import { parseElectronLocation } from '../../../packages/core/src/electron-shell-protocol.js';
 import { decodePlacekeeperLink } from '../../../packages/core/src/placekeeper-link.js';
 import { REVIEW_COMMAND_IDS } from '../../web/src/review/review-command-surface.js';
+const nativeInstaller = parseInstallerRequest(process.argv.slice(1));
+const installerProfile = nativeInstaller ? isolateInstallerProfile() : undefined;
 const startupRequest = parseStartupRequest(process.env.PLACEKEEPER_STARTUP_REQUEST);
 let startupProbePhase: 'initializing' | 'renderer-navigation' | 'shell-retirement' = 'initializing';
 if (startupRequest) { const deadline = setTimeout(() => { void (startupProbePhase === 'initializing' ? Promise.resolve() : writeStartupLoadFailure(startupRequest, 'Installed startup acknowledgement timed out', startupProbePhase === 'shell-retirement' ? 'shell-retirement-timeout' : 'renderer-ready-timeout')).catch(error => console.error(error)).finally(() => app.exit(2)); }, 20_000); deadline.unref(); writeFileSync(`${startupRequest.receipt}.started`, JSON.stringify({ attempt:startupRequest.attempt, candidateIdentity:startupRequest.candidateIdentity, pid:process.pid }), { flag:'wx', mode:0o600 }); mkdirSync(startupRequest.profile, { recursive:true }); app.setPath('userData', startupRequest.profile); }
 const standaloneChooser = parseStandaloneChooser(process.argv.slice(1));
 const installerAction = handleWindowsProtocolInstall(app, { platform: process.platform, argv: process.argv, executable: process.execPath });
 const installerEvent = installerAction.handled;
-const smokePaths = installedSmokeDaemonPaths(process.argv.slice(1));
+const smokePaths = nativeInstaller ? undefined : installedSmokeDaemonPaths(process.argv.slice(1));
 if (smokePaths && !startupRequest) {
     if (!smokePaths.isolatedTestRoot) throw new Error('Electron installed smoke requires an explicit isolated test root');
     const smokeUserData = join(smokePaths.isolatedTestRoot, 'electron-user-data');
@@ -44,7 +47,7 @@ const pendingOpens: string[] = [];
 const invocations = new DesktopInvocationQueue();
 let routeOpen: ((path: string) => void) | undefined;
 if (installerEvent) app.exit(installerAction.exitCode);
-else if (standaloneChooser) { /* Explicit chooser processes do not own review windows. */ }
+else if (nativeInstaller || standaloneChooser) { /* Explicit chooser processes do not own review windows. */ }
 else if (!app.requestSingleInstanceLock({ argv: process.argv.slice(1) })) app.quit();
 else {
 app.on('open-url', (event, url) => { event.preventDefault(); try { invocations.enqueue([url]); } catch (error) { dialog.showErrorBox('Placekeeper could not open', String(error)); } });
@@ -431,6 +434,7 @@ async function start() {
     } else { const restored = await readWindowState(statePath); for (const intent of restored) await openDocument(intent.sourcePath, intent).catch(showFailure); if (entries.size === 0) await chooseOpen(); }
 
 }
-if (standaloneChooser && !installerEvent) void runStandaloneChooser(standaloneChooser, join(__dirname, 'preload.cjs')).catch(() => app.exit(2));
-if (!standaloneChooser && !installerEvent && app.hasSingleInstanceLock()) void start().catch(async error => { if (startupRequest) { console.error(error); app.exit(2); } else { const recovery = await retainedStartupRecovery(resolve(process.resourcesPath, process.platform === 'darwin' ? '../..' : '..')); dialog.showErrorBox('Placekeeper could not open', `${String(error)}${recovery ? `\n\n${recovery}` : ''}`); app.quit(); } });
+if (nativeInstaller && installerProfile && !installerEvent) void runInstallerUI(nativeInstaller, installerProfile);
+if (standaloneChooser && !nativeInstaller && !installerEvent) void runStandaloneChooser(standaloneChooser, join(__dirname, 'preload.cjs')).catch(() => app.exit(2));
+if (!nativeInstaller && !standaloneChooser && !installerEvent && app.hasSingleInstanceLock()) void start().catch(async error => { if (startupRequest) { console.error(error); app.exit(2); } else { const recovery = await retainedStartupRecovery(resolve(process.resourcesPath, process.platform === 'darwin' ? '../..' : '..')); dialog.showErrorBox('Placekeeper could not open', `${String(error)}${recovery ? `\n\n${recovery}` : ''}`); app.quit(); } });
 app.on('window-all-closed', () => { if (startupRequest || process.platform !== 'darwin') app.quit(); });

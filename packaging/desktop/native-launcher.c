@@ -95,14 +95,24 @@ int main(int argc, char **argv) {
   char *node = malloc(capacity_paths), *launcher = malloc(capacity_paths);
   char **arguments = calloc((size_t)argc + 4, sizeof(char *));
   if (!node || !launcher || !arguments) { free(physical); free(node); free(launcher); free(arguments); return 2; }
+#ifdef LINUX_DISPATCHER
+  free(node); free(launcher);
+  node = strdup("/usr/lib/placekeeper/bootstrap/node");
+  launcher = strdup("/usr/lib/placekeeper/bootstrap/linux-dispatcher.mjs");
+  if (!node || !launcher) return 2;
+#else
   snprintf(node, capacity_paths, "%s/../node/bin/node", physical);
   snprintf(launcher, capacity_paths, "%s/../launcher.mjs", physical);
 #ifdef VSCODE_EXTERNAL
   snprintf(launcher, capacity_paths, "%s/../vscode-launcher.mjs", physical);
 #endif
+#endif
   int next = 0;
   arguments[next++] = node;
   arguments[next++] = launcher;
+#if defined(LINUX_DISPATCHER) && defined(VSCODE_EXTERNAL)
+  arguments[next++] = "--vscode-launcher";
+#endif
 #ifdef CHROME_NATIVE_HOST
   arguments[next++] = "chrome-native-host";
 #endif

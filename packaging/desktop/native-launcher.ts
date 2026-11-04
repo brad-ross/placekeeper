@@ -12,8 +12,8 @@ export async function buildNativeLaunchers(
   if (platform !== process.platform) throw new Error("Native launchers require their target OS compiler");
   const bin = join(root, "bin");
   await mkdir(bin, { recursive: true });
-  for (const basename of ["placekeeper", "placekeeper-chrome-native-host", "placekeeper-vscode"]) {
-    const defines = basename === "placekeeper-chrome-native-host" ? ["CHROME_NATIVE_HOST=1"] : basename === "placekeeper-vscode" ? ["VSCODE_EXTERNAL=1"] : [];
+  for (const basename of ["placekeeper", "placekeeper-chrome-native-host", "placekeeper-vscode", ...(platform === "linux" ? ["placekeeper-dispatcher", "placekeeper-chrome-dispatcher", "placekeeper-vscode-dispatcher"] : [])]) {
+    const defines = [...(basename.includes("chrome") ? ["CHROME_NATIVE_HOST=1"] : basename.includes("vscode") ? ["VSCODE_EXTERNAL=1"] : []), ...(basename.endsWith("dispatcher") ? ["LINUX_DISPATCHER=1"] : [])];
     const output = join(bin, `${basename}${platform === "win32" ? ".exe" : ""}`);
     if (platform === "win32") {
       await run("cl.exe", ["/nologo", "/W4", "/WX", "/O2", "/MT", ...defines.map(value => `/D${value}`), source, `/Fe:${output}`, `/Fo:${join(bin, `${basename}.obj`)}`]);

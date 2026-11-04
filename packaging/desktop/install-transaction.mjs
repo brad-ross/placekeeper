@@ -55,7 +55,8 @@ export async function activateInstallation(options) {
   await mkdir(base, { recursive: true, mode: 0o700 });
   try {
     await transition(options, record, 'staging');
-    await cp(options.built, record.staged, { recursive: true, verbatimSymlinks: true });
+    if (options.copy) await options.copy(options.built, record.staged);
+    else await cp(options.built, record.staged, { recursive: true, verbatimSymlinks: true });
     await options.validate(record.staged);
     await transition(options, record, 'retaining');
     if (record.hadPrevious) await rename(record.destination, record.previous);
@@ -89,7 +90,8 @@ export async function activateRuntimeSelection(options) {
   await options.validate(resources);
   const attempt=randomBytes(24).toString('hex');
   const previous=await readFile(selectionPath,'utf8').then(JSON.parse,error=>{if(error.code==='ENOENT')return null;throw error;});
-  const record={version:1,kind:'runtime-selection',attempt,selectionPath,resources,candidateIdentity,backupRoot,previous,phase:'selecting'};
+  const record={version:1,kind:'runtime-selection',attempt,selectionPath,resources,candidateIdentity,backupRoot,previous,receipt:join(transactionRoot,attempt,'service-ready.json'),shellReceipt:join(transactionRoot,attempt,'shell-ready.json'),phase:'selecting'};
+  await mkdir(join(transactionRoot,attempt),{recursive:true,mode:0o700});
   try{
     await transition(options,record,'selecting');
     await atomicSelection(selectionPath,{version:1,resources,installArtifactIdentity:candidateIdentity,attempt});
@@ -100,11 +102,11 @@ export async function activateRuntimeSelection(options) {
 export async function recoverRuntimeSelection(options) {
   const record=await readFile(join(options.transactionRoot,'journal.json'),'utf8').then(JSON.parse,error=>{if(error.code==='ENOENT')return undefined;throw error;});
   if(!record)return;
-  if(record.version!==1||record.kind!=='runtime-selection'||record.selectionPath!==options.selectionPath||!isAbsolute(record.resources)||! /^[a-f0-9]{48}$/u.test(record.attempt)||!['selecting','starting','committing','complete','retiring','retirement-uncertain','restoring','restored'].includes(record.phase))throw Error('Invalid runtime activation journal; preserve for manual recovery');
+  if(record.version!==1||record.kind!=='runtime-selection'||record.selectionPath!==options.selectionPath||!isAbsolute(record.resources)||!isAbsolute(record.backupRoot??'')||! /^[a-f0-9]{64}$/u.test(record.candidateIdentity??'')||! /^[a-f0-9]{48}$/u.test(record.attempt)||record.receipt!==join(options.transactionRoot,record.attempt,'service-ready.json')||record.shellReceipt!==join(options.transactionRoot,record.attempt,'shell-ready.json')||!['selecting','starting','committing','complete','retiring','retirement-uncertain','restoring','restored'].includes(record.phase))throw Error('Invalid runtime activation journal; preserve for manual recovery');
   if(['complete','restored'].includes(record.phase))return record;
   if(['starting','committing','retiring','retirement-uncertain'].includes(record.phase)){
     await transition(options,record,'retiring');
-    try{await options.retire(record);}catch(error){await transition(options,record,'retirement-uncertain');throw Error(`Candidate retirement uncertain; preserve runtime selections and backup ${record.backupRoot}`,{cause:error});}
+    try{await options.validate(record.resources);await options.retire(record);}catch(error){await transition(options,record,'retirement-uncertain');throw Error(`Candidate retirement uncertain; preserve runtime selections and backup ${record.backupRoot}`,{cause:error});}
   }
   await transition(options,record,'restoring');
   // A null selection explicitly means no selected runtime; the dispatcher must

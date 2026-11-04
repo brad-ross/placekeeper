@@ -85,6 +85,7 @@
     "test:electron": "node --import tsx scripts/testing/run-suite.ts test:electron",
     "test:desktop-performance": "node --import tsx scripts/testing/run-suite.ts test:desktop-performance",
     "test:desktop-installed": "node --import tsx scripts/testing/run-suite.ts test:desktop-installed",
+    "test:desktop-installers": "node --import tsx scripts/testing/run-suite.ts test:desktop-installers",
     "build:electron:web": "vite build --config apps/web/vite.electron.config.ts"
   },
   "dependencies": {

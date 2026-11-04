@@ -1,9 +1,23 @@
 import { createReadStream } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { readFile, readdir, realpath, stat } from 'node:fs/promises';
+import { lstat, readFile, readdir, realpath, stat } from 'node:fs/promises';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+
+/** OS-managed immutable runtimes publish integration commands through the
+ * installed dispatcher. Derive that path from the verified layout and ownership,
+ * never from an inherited launcher environment variable. */
+export async function integrationLauncher(root, artifactIdentity, platform = process.platform) {
+  const local=resolve(root, `bin/placekeeper${platform === 'win32' ? '.exe' : ''}`);
+  if(platform!=='linux'||! /^[a-f0-9]{64}$/u.test(artifactIdentity)||root!==`/opt/placekeeper/runtimes/${artifactIdentity}/resources/desktop`)return local;
+  const directories=['/opt','/opt/placekeeper','/opt/placekeeper/runtimes',`/opt/placekeeper/runtimes/${artifactIdentity}`,`/opt/placekeeper/runtimes/${artifactIdentity}/resources`,root,'/usr','/usr/bin'];
+  for(const path of [...directories,'/usr/bin/placekeeper']) {
+    const info=await lstat(path).catch(error=>{if(error.code==='ENOENT')return undefined;throw error;});
+    if(!info||info.isSymbolicLink()||info.uid!==0||(info.mode&0o022)||(path==='/usr/bin/placekeeper'?!info.isFile()||!(info.mode&0o111):!info.isDirectory()))return local;
+  }
+  return '/usr/bin/placekeeper';
+}
 
 /** Resolve this installation only. The launcher never falls back to PATH
  * or a different installation. This also works while its GUI is closed. */
@@ -48,7 +62,7 @@ export async function resolveLauncherRuntime(root, target = { platform: process.
   return { node, service, codexMcp, environment: {
     ...process.env,
     PLACEKEEPER_APP_RESOURCES: physicalRoot,
-    PLACEKEEPER_LAUNCHER: resolve(physicalRoot, `bin/placekeeper${target.platform === 'win32' ? '.exe' : ''}`),
+    PLACEKEEPER_LAUNCHER: await integrationLauncher(physicalRoot, manifest.installArtifactIdentity, target.platform),
     PLACEKEEPER_PDFIUM_WASM: resolve(physicalRoot, 'web/pdfium.wasm'),
     PLACEKEEPER_DAEMON_IDENTITY: manifest.daemonIdentity,
     PLACEKEEPER_INSTALL_ARTIFACT_IDENTITY: manifest.installArtifactIdentity,

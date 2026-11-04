@@ -4,7 +4,7 @@ import { createWriteStream } from "node:fs";
 import { chmod, copyFile, cp, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { execFileSync, spawn } from "node:child_process";
 import { dirname, join, resolve } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { buildNativeLaunchers } from "./native-launcher.js";
@@ -85,6 +85,9 @@ export async function prepareDesktopRuntime(target: string): Promise<string> {
   await copyFile(join(repo, "docs/guides/editor-synctex.md"), join(root, "integrations/editors/guide.md"));
   const installer = join(root, "installer");
   await mkdir(installer, { recursive: true });
+  for (const helper of ["installer-entry.mjs", "install-built-app.mjs", "install-transaction.mjs", "install-layout.ts", "launcher.mjs", "linux-dispatcher.mjs", "windows-registration.mjs", "stage-uninstall.mjs"]) {
+    await copyFile(join(repo, "packaging/desktop", helper), join(installer, helper));
+  }
   for (const helper of ["setup-integrations.mjs", "setup-chrome.mjs", "update-vscode.mjs", "setup-zed.mjs"]) {
     await copyFile(join(repo, "packaging/macos", helper), join(installer, helper));
   }
@@ -151,6 +154,6 @@ async function main(): Promise<void> {
   await run(process.execPath, ["--experimental-strip-types", join(repo, "apps/chrome-extension/scripts/validate-manifest.ts")]);
   process.stdout.write(`${await prepareDesktopRuntime(target)}\n`);
 }
-if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+if (process.argv[1] !== undefined && await realpath(process.argv[1]).catch(()=>undefined) === await realpath(fileURLToPath(import.meta.url))) {
   await main();
 }

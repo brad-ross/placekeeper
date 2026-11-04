@@ -1,5 +1,6 @@
+import { ensurePrivateDirectory } from '../platform/private-storage.js';
 import { readFile, readdir, lstat } from "node:fs/promises";
-import { join, isAbsolute } from "node:path";
+import { dirname, join, isAbsolute } from "node:path";
 import { acquireLifecycleLock } from "../host/lifecycle-lock.js";
 import { backupRecoveryAndVerify, coordinateServiceSwitch } from "../host/upgrade-coordinator.js";
 import { defaultDaemonPaths, daemonUnavailable, ensureServiceDaemonReady, type DaemonPaths } from "../host/service-daemon.js";
@@ -89,6 +90,7 @@ export async function switchDesktopService(options: {
         // The incumbent may have finished a recovery write while draining.
         const versions = await recoveryVersions(paths.recoveryRoot);
         if (![...versions].every(version => manifest.recovery!.readableDraftSchemaVersions.includes(version))) throw new Error("Protected recovery changed to an unsupported format while draining");
+        await ensurePrivateDirectory(dirname(options.backup));
         await backupRecoveryAndVerify(paths.recoveryRoot, options.backup);
       },
       replaceAndReady: async () => {
