@@ -50,7 +50,8 @@ for (const width of [1440, 390, 320]) test(`@critical desktop downloads keep arc
   expect(bounds.x + bounds.width).toBeLessThanOrEqual(width);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   const segments = await root.locator('.landing-download__segments').evaluate(element => {
-    const [main, toggle] = [...element.children].map(child => child.getBoundingClientRect());
+    const main = element.children[0]!.getBoundingClientRect();
+    const toggle = element.children[1]!.getBoundingClientRect();
     return { gap: toggle.left - main.right, top: toggle.top - main.top, height: toggle.height - main.height };
   });
   expect(Math.abs(segments.gap)).toBeLessThan(1);
@@ -86,7 +87,7 @@ for (const width of [1440, 390, 320]) test(`@critical desktop downloads keep arc
 for (const [ua, label, suffix] of [
   ['Windows NT 10.0; Win64; x64', 'Windows x64', 'windows-x64-Setup.exe'],
   ['X11; Linux x86_64', 'Linux Debian / Ubuntu x64', 'linux-x64.deb'],
-]) test(`@critical ${label} visitor activates a matching primary download directly`, async ({ page }) => {
+] as const) test(`@critical ${label} visitor activates a matching primary download directly`, async ({ page }) => {
   await page.route(RELEASE_API_URL, route => route.fulfill({ json: fixture() }));
   await identity(page, ua);
   let requested = false;
