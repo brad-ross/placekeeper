@@ -184,15 +184,18 @@ describe("split download link semantics", () => {
 
   it.each([
     ['loading', 'Checking downloads…'],
-    ['unavailable', 'Downloads unavailable'],
-  ] as const)("keeps %s platform rows noninteractive and status inside the panel", (status, message) => {
+    ['unavailable', null],
+  ] as const)("keeps %s platform rows noninteractive", (status, message) => {
     const markup = renderToStaticMarkup(createElement(DownloadButton, { downloads: { status }, target: 'win32-x64' }));
     expect(markup).toContain('<button class="landing-download__main" type="button"');
     expect(markup.match(/<span aria-disabled="true">/g)).toHaveLength(4);
     expect(markup.match(/<a /g)).toHaveLength(2);
     expect(markup).not.toContain('/releases/download/');
-    expect(markup.indexOf(message)).toBeGreaterThan(markup.indexOf('<nav'));
-    expect(markup.indexOf(message)).toBeLessThan(markup.indexOf('</nav>'));
+    if (message) {
+      expect(markup).toContain(message);
+    } else {
+      expect(markup).not.toContain('role="status"');
+    }
     expect(markup).not.toContain('curl');
     expect(markup).not.toContain('unsigned');
     expect(markup).not.toContain('prerequisites');

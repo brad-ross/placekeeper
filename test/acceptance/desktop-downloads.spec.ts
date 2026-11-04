@@ -183,7 +183,7 @@ for (const state of ['failed', 'incomplete', 'source-only'] as const) test(`@cri
   await page.goto('./');
   const { main, panel } = controls(page);
   await main.click();
-  await expect(panel.getByRole('status')).toHaveText('Downloads unavailable');
+  await expect(panel.getByRole('status')).toHaveCount(0);
   await expect(panel.locator('[aria-disabled="true"]')).toHaveCount(4);
   await expect(panel.locator('a[href*="/releases/download/"]')).toHaveCount(0);
   await expect(main).not.toHaveAttribute('href');

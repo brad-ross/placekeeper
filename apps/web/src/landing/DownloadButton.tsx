@@ -68,7 +68,7 @@ export function DownloadButton({ downloads, target }: {
           {downloads.status === 'available' ? <a href={downloads.catalog.downloads[key].url}>{PLATFORM_LABELS[key]}<ReviewIcon name="download" size={15} /></a> : <span aria-disabled="true">{PLATFORM_LABELS[key]}</span>}
         </li>)}
       </ul>
-      {downloads.status === 'available' ? null : <p className="landing-download__status" role="status">{downloads.status === 'loading' ? 'Checking downloads…' : 'Downloads unavailable'}</p>}
+      {downloads.status === 'loading' && <p className="landing-download__status" role="status">Checking downloads…</p>}
       <ul className="landing-download__more">
         <li><a href={`${RELEASE_REPOSITORY}/blob/main/docs/installation.md`}>Build from source<ReviewIcon name="arrow-right" size={15} /></a></li>
         <li><a href={`${RELEASE_REPOSITORY}/releases`}>All releases<ReviewIcon name="arrow-right" size={15} /></a></li>
