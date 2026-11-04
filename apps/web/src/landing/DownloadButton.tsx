@@ -25,7 +25,6 @@ export function DownloadButton({ downloads, target }: {
     setOpen(value => !value);
   };
 
-  // Catalog arrival can replace the invoking button with its download anchor.
   useLayoutEffect(() => {
     const invoker = invokerRef.current;
     if (!open || !invoker || invoker.isConnected) return;

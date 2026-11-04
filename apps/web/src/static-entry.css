@@ -614,7 +614,6 @@ body[data-landing-demo] :is(button, input, textarea, [contenteditable="true"]):n
 
 body[data-landing-demo] .pdf-workspace:not(.pdf-workspace--reference) [data-viewer-framing-viewport] { overscroll-behavior-y: none; }
 
-/* Joined download actions share one compact, nonmodal alternatives panel. */
 .landing-download { position: relative; display: inline-block; max-width: 100%; text-align: left; }
 .landing-download__segments { display: flex; max-width: 100%; }
 .static-launcher .landing-download__segments > :is(a, button) {
