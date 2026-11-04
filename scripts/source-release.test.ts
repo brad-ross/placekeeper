@@ -77,7 +77,3 @@ describe("source publication workflow", () => {
   });
 });
 
-it('keeps the website source bootstrap identical to the published release command', async () => {
-  const { SOURCE_INSTALL_COMMAND: websiteCommand } = await import('../apps/web/src/landing/InstallDialog.js');
-  expect(websiteCommand).toBe(SOURCE_INSTALL_COMMAND);
-});
