@@ -3,12 +3,89 @@ import { LiveReaderTools } from '../src/live-reader-tools.js';
 import type { ReviewAgentActions } from '../../web/src/host/review-agent-bridge.js';
 import type { DocumentModelContext } from '../src/live-reader-tools.js';
 const snapshot = { documentGeneration: 4, reviewRevision: 2, title: 'PDF', source: { fileId: 'file', digest: 'digest' }, page: 1, pageCount: 3, selection: null, annotations: [] };
-it('diagnoses a missing unregister method without attempting registration', () => {
+it('registers tools when the host has no unregister method', () => {
   let attempts = 0;
   const bridge = new LiveReaderTools({ registerTool: () => { attempts++; } } as unknown as DocumentModelContext, { ensureVisible: async () => true, available: () => true });
-  expect(bridge.supported).toBe(false);
-  expect(attempts).toBe(0);
-  expect(bridge.diagnostic).toEqual({ apiPresent: true, registerTool: true, unregisterTool: false, successCount: 0 });
+  expect(bridge.supported).toBe(true);
+  expect(attempts).toBe(5);
+  expect(bridge.diagnostic).toEqual({ apiPresent: true, registerTool: true, unregisterTool: false, attemptedName: 'reveal_annotation', successCount: 5 });
+});
+
+it.each([false, true])('reuses register-only names across remounts and retires the previous reader (dispose first: %s)', async disposeFirst => {
+  const tools = new Map<string, any>();
+  const api = { registerTool: (tool: any) => { if (tools.has(tool.name)) throw Error('duplicate'); tools.set(tool.name, tool); } };
+  const host = { ensureVisible: async () => true, available: () => true };
+  let finish!: (value: boolean) => void;
+  let moves = 0;
+  const oldBridge = new LiveReaderTools(api, host);
+  oldBridge.attach({ snapshot: () => snapshot, search: async () => { throw Error('unused'); }, navigate: async () => new Promise(resolve => { finish = resolve; }) });
+  const pending = tools.get('navigate_page').execute({ page: 2, documentGeneration: 4, source: snapshot.source });
+  await Promise.resolve(); await Promise.resolve();
+  if (disposeFirst) oldBridge.dispose();
+  const replacement = new LiveReaderTools(api, host);
+  replacement.attach({ snapshot: () => ({ ...snapshot, source: { fileId: 'replacement', digest: 'new' } }), search: async () => { throw Error('unused'); }, navigate: async () => { moves++; return true; } });
+  oldBridge.dispose();
+  finish(true);
+  expect(JSON.parse(await pending).status).toBe('unavailable');
+  expect(replacement.supported).toBe(true);
+  expect(tools.size).toBe(5);
+  expect(JSON.parse(await tools.get('navigate_page').execute({ page: 2, documentGeneration: 4, source: snapshot.source })).reason).toBe('stale-source');
+  expect(moves).toBe(0);
+  expect(JSON.parse(await tools.get('inspect_review').execute({})).source.fileId).toBe('replacement');
+  replacement.dispose();
+  expect(JSON.parse(await tools.get('inspect_review').execute({})).status).toBe('unavailable');
+});
+
+it('rejects inspection waiting on a retired register-only reader', async () => {
+  const tools = new Map<string, any>();
+  const api = { registerTool: (tool: any) => { tools.set(tool.name, tool); } };
+  let visible!: (value: boolean) => void;
+  const old = new LiveReaderTools(api, { ensureVisible: () => new Promise(resolve => { visible = resolve; }), available: () => true });
+  const actions = { snapshot: () => snapshot, search: async () => { throw Error('unused'); }, navigate: async () => true };
+  old.attach(actions);
+  const pending = tools.get('inspect_review').execute({});
+  const replacement = new LiveReaderTools(api, { ensureVisible: async () => true, available: () => true });
+  replacement.attach(actions);
+  visible(true);
+  expect(JSON.parse(await pending).status).toBe('unavailable');
+  expect(JSON.parse(await tools.get('inspect_review').execute({})).status).toBe('current');
+});
+
+it('recovers partial registration on a register-only host without duplicate names or active leftovers', async () => {
+  const tools = new Map<string, any>();
+  let fail = true;
+  const api = { registerTool: (tool: any) => {
+    if (tools.has(tool.name)) throw Error('duplicate');
+    if (fail && tool.name === 'search_document') throw Error('host failure');
+    tools.set(tool.name, tool);
+  } };
+  const host = { ensureVisible: async () => true, available: () => true };
+  const failed = new LiveReaderTools(api, host);
+  expect(failed.supported).toBe(false);
+  expect(failed.diagnostic).toMatchObject({ successCount: 1, failureName: 'Error' });
+  expect(JSON.parse(await tools.get('inspect_review').execute({})).status).toBe('unavailable');
+  fail = false;
+  const recovered = new LiveReaderTools(api, host);
+  recovered.attach({ snapshot: () => snapshot, search: async () => { throw Error('unused'); }, navigate: async () => true });
+  failed.dispose();
+  expect(recovered.supported).toBe(true);
+  expect(tools.size).toBe(5);
+  expect(JSON.parse(await tools.get('inspect_review').execute({})).status).toBe('current');
+});
+
+it('does not let a retired full-API bridge unregister its replacement', async () => {
+  const tools = new Map<string, any>();
+  const api = { registerTool: (tool: any) => { if (tools.has(tool.name)) throw Error('duplicate'); tools.set(tool.name, tool); }, unregisterTool: (name: string) => { tools.delete(name); } };
+  const host = { ensureVisible: async () => true, available: () => true };
+  const old = new LiveReaderTools(api, host);
+  const oldExecute = tools.get('inspect_review').execute;
+  const replacement = new LiveReaderTools(api, host);
+  replacement.attach({ snapshot: () => snapshot, search: async () => { throw Error('unused'); }, navigate: async () => true });
+  old.dispose();
+  expect(replacement.supported).toBe(true);
+  expect(tools.size).toBe(5);
+  expect(JSON.parse(await oldExecute({})).status).toBe('unavailable');
+  expect(JSON.parse(await tools.get('inspect_review').execute({})).status).toBe('current');
 });
 it.each(['TypeError', 'Error', 'DOMException', 'PrivateError'])('bounds registration failure diagnostics for %s and still cleans up', name => {
   const removed: string[] = [];
