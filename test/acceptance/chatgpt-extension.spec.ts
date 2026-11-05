@@ -42,21 +42,49 @@ test('extension activation waits for preferences, then real tools, drafts and pa
     await expect(page.getByRole('button', { name: 'Update included snapshot', exact: true })).toBeVisible();
     await page.getByRole('button', { name: 'Remove this review from mentions', exact: true }).click();
     await expect(page.getByRole('button', { name: 'Include this review snapshot', exact: true })).toBeVisible();
-    await page.evaluate(() => (window as any).extensionAcceptance.shell.hostContextChanged({ displayMode: 'inline' }));
+    // Let the PDF viewer observe the inline layout before the tool expands it.
+    await page.locator('[data-viewer-framing-viewport]').evaluate(viewport => new Promise<void>(resolve => {
+      const observer = new ResizeObserver(entries => {
+        if (entries[0]?.contentRect.width !== 0) return;
+        observer.disconnect();
+        requestAnimationFrame(() => resolve());
+      });
+      observer.observe(viewport);
+      (window as any).extensionAcceptance.shell.hostContextChanged({ displayMode: 'inline' });
+    }));
     await expect(page.locator('#root')).toBeHidden();
     expect(await reader.tool('navigate_page', { page: 1, documentGeneration: 1, source: snapshot.source })).toMatchObject({ status: 'navigated', page: 1 });
     await expect(page.locator('#root')).toBeVisible();
     expect(await page.evaluate(() => (window as any).extensionAcceptance.expansionRequests)).toBe(1);
+    const supersededReveal = await page.locator('[data-viewer-framing-viewport]').evaluate(async (viewport: HTMLElement, { resultId, source }) => {
+      const { tools } = (window as any).extensionAcceptance;
+      const input = { documentGeneration: 1, source };
+      const display = viewport.style.display;
+      viewport.style.display = 'none';
+      const reveal = tools.get('reveal_search_result').execute({ ...input, resultId });
+      try {
+        // Keep the reveal waiting for geometry until a new query supersedes it.
+        await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+        const replacement = JSON.parse(await tools.get('search_document').execute({ ...input, query: 'unmatchedreplacementquery' }));
+        if (replacement.results?.length !== 0) throw Error('Expected an empty replacement search');
+      } finally {
+        viewport.style.display = display;
+      }
+      return JSON.parse(await reveal);
+    }, { resultId: search.results[0].id, source: search.source });
+    expect(supersededReveal).toMatchObject({ status: 'unavailable', reason: 'stale-or-unavailable-result' });
     await info.attach('extension-boundary-evidence', { body: JSON.stringify({ actualHost: false, sessionId: reader.bridge.sessionId, generation: snapshot.documentGeneration, annotationIds: snapshot.annotations.map((a: any) => a.id), requests: reader.requests, draftSend: false }), contentType: 'application/json' });
   } finally { await reader.dispose(); }
 });
 
-for (const width of [1440, 375]) test(`extension sharing and discussion layout at ${width}px`, async ({ page }, info) => {
+for (const width of [1440, 1120, 375]) test(`extension sharing and discussion layout at ${width}px`, async ({ page }, info) => {
   await page.setViewportSize({ width, height: 1000 });
   const reader = await extensionReader(page);
   try {
     await reader.ready();
     await page.locator('#controls summary').click();
+    const showWorkspace = page.getByRole('button', { name: 'Show workspace', exact: true });
+    await showWorkspace.click({ trial: true, timeout: 3000 });
     await page.locator('.review-discussion-actions summary').click();
     await expect(page.getByRole('checkbox', { name: 'Share background review context', exact: true })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Discuss these annotations', exact: true })).toBeVisible();
@@ -81,8 +109,10 @@ for (const width of [1440, 375]) test(`extension sharing and discussion layout a
     });
     expect(raster.inkPixels).toBeGreaterThan(100);
     await info.attach(`extension-${width}px`, { body: await page.screenshot({ fullPage: true }), contentType: 'image/png' });
-    // At narrow widths this short fixture's text is beneath the open chooser.
-    // A second view distinguishes that expected overlay from a blank PDF raster.
+    await showWorkspace.click({ timeout: 3000 });
+    await page.getByRole('tab', { name: 'Annotations', exact: true }).click({ timeout: 3000 });
+    await expect(page.getByRole('tab', { name: 'Annotations', exact: true })).toHaveAttribute('aria-selected', 'true');
+    await page.getByRole('button', { name: 'Hide workspace', exact: true }).click();
     await page.locator('.review-discussion-actions summary').click();
     await info.attach(`extension-${width}px-reader`, { body: await page.screenshot({ fullPage: true }), contentType: 'image/png' });
     await info.attach('layout-boundary', { body: JSON.stringify({ actualHost: false, ...geometry, raster }), contentType: 'application/json' });

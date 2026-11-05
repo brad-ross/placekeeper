@@ -2006,7 +2006,6 @@ export function ReviewShell(props: ReviewShellProps) {
       <p className="review-transition-announcement" aria-live="polite" aria-atomic="true">
         {transitionAnnouncement}
       </p>
-      {props.discussionActions}
       <ReviewChrome
         showSaveStatusDot={!props.save.exportOnly}
         documentTitle={props.documentTitle ?? 'Local PDF'}
@@ -2058,6 +2057,7 @@ export function ReviewShell(props: ReviewShellProps) {
         onNavigateBack={() => { commandSurface.invoke('navigate-back'); }}
         onNavigateForward={() => { commandSurface.invoke('navigate-forward'); }}
       />
+      {props.discussionActions}
       <div
         ref={workspaceFraming.stageRef}
         className="review-layout"

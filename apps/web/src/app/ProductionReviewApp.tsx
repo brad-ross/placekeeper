@@ -2,7 +2,7 @@ import { ReviewDiscussionActions } from '../review/ReviewDiscussionActions.js';
 import { reviewAgentSearchResult, type ReviewAgentBridge, type ReviewAgentActions } from '../host/review-agent-bridge.js';
 import { reviewContextSnapshot, type ReviewContextSnapshot } from '../host/review-context-snapshot.js';
 import type { PlacekeeperLinkLocation } from "../../../../packages/core/src/placekeeper-link.js";
-import { pdfNavigationTargetFromPlacekeeperLocation } from '../pdf/pdf-navigation-target.js';
+import { pdfNavigationTargetFromPlacekeeperLocation, type PdfNavigationTarget } from '../pdf/pdf-navigation-target.js';
 import { useContext, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, type ReactNode } from "react";
 import type { PluginRegistry } from "@embedpdf/core";
 import type { PdfDocumentObject, PdfEngine } from '@embedpdf/models';
@@ -1518,8 +1518,38 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       return reviewAgentSearchResult(result, generation);
     },
     navigate: async target => {
-      if (!agentReady || target.documentGeneration !== documentGenerationRef.current || mainNavigationRef.current === null) return false;
-      const settle = async (navigate: () => Promise<boolean>) => {
+      const navigation = mainNavigationRef.current;
+      const root = productionRootRef.current;
+      if (!agentReady || target.documentGeneration !== documentGenerationRef.current || navigation === null || root === null) return false;
+      const settle = async (navigate: () => Promise<boolean>, destination?: PdfNavigationTarget) => {
+        // The host can acknowledge fullscreen before the PDF viewport has
+        // measured its new bounds and mounted the visible pages.
+        const originOperation = navigationCoordinator.operationIdentity();
+        const current = () => target.documentGeneration === documentGenerationRef.current
+          && navigation === mainNavigationRef.current && root.isConnected
+          && !root.ownerDocument.hidden && root.closest('[hidden], [inert]') === null
+          && originOperation === navigationCoordinator.operationIdentity();
+        const hasGeometry = () => navigation.captureLocation() !== null
+          && (destination === undefined || navigation.resolveTarget(destination) !== null);
+        if (!current()) return false;
+        if (!hasGeometry()) {
+          const ready = await new Promise<boolean>(resolve => {
+            let frame: number;
+            const finish = (value: boolean) => {
+              cancelAnimationFrame(frame);
+              clearTimeout(timeout);
+              resolve(value);
+            };
+            const probe = () => {
+              if (!current()) finish(false);
+              else if (hasGeometry()) finish(true);
+              else frame = requestAnimationFrame(probe);
+            };
+            const timeout = setTimeout(() => finish(false), 1500);
+            frame = requestAnimationFrame(probe);
+          });
+          if (!ready || !current()) return false;
+        }
         const pending = navigate();
         const operation = navigationCoordinator.operationIdentity();
         const reached = await pending;
@@ -1529,19 +1559,26 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       if ('page' in target) {
         if (!Number.isSafeInteger(target.page) || target.page < 1 || target.page > viewerState.totalPages) return false;
         const destination = pdfNavigationTargetFromPlacekeeperLocation({ kind: 'page', page: target.page }, { documentGeneration: target.documentGeneration, pageCount: viewerState.totalPages });
-        return destination !== null && settle(() => navigationCoordinator.navigateMainTarget(destination, 'direct'));
+        return destination !== null && settle(() => navigationCoordinator.navigateMainTarget(destination, 'direct'), destination);
       }
       if ('resultId' in target) {
-        const result = search.getState()?.groups.flatMap(group => group.results).find(result => result.id === target.resultId);
-        if (!result) return false;
-        const destination = pdfSearchResultTarget(result, target.documentGeneration);
-        if (destination === null) return false;
-        search.selectResult(result.id);
-        return settle(() => navigationCoordinator.navigateMainTarget(destination, 'search'));
+        const findDestination = () => {
+          const result = search.getState()?.groups.flatMap(group => group.results).find(result => result.id === target.resultId);
+          return result ? pdfSearchResultTarget(result, target.documentGeneration) : null;
+        };
+        const destination = findDestination();
+        return destination !== null && settle(async () => {
+          const currentDestination = findDestination();
+          if (currentDestination === null) return false;
+          search.selectResult(target.resultId);
+          return navigationCoordinator.navigateMainTarget(currentDestination, 'search');
+        }, destination);
       }
-      const item = stateRef.current.items.find(item => item.id === target.annotationId);
-      const destination = item && reviewItemNavigationTarget(item);
-      return !!destination && settle(() => navigationCoordinator.navigateMainAnnotation(destination));
+      return settle(async () => {
+        const item = stateRef.current.items.find(item => item.id === target.annotationId);
+        const destination = item && reviewItemNavigationTarget(item);
+        return !!destination && navigationCoordinator.navigateMainAnnotation(destination);
+      });
     },
   };
   useEffect(() => {
