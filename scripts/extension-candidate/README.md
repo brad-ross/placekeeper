@@ -21,3 +21,23 @@ Register the local marketplace at `dist/extension-candidate` through the support
 Open that fixture through its native file-menu extension action. For recovery, explicitly close and reopen through the file action; the earlier probe's browser-page reload experiment failed on this host. Once the user opens the app, its embedded MCP Apps surface can inspect the reader and invoke tools. Installation, host restart, and native file-menu controls require supported native host access or the user's assistance.
 
 Record actual-host results separately from browser stubs in `docs/testing/chatgpt-extension-qualification.md`. Verify direct conversation entry, context removal, exact search/reveal, collapsed expansion, editable discussion drafts, sharing and mention controls, resource updates, conditional writes/conflicts, reconnect and protected recovery. Stop the candidate daemon and remove its marketplace/plugin through the supported host flow after qualification; retain needed evidence first. Do not remove the earlier compatibility probe until its evidence is no longer needed.
+
+## Opaque-resource qualification route
+
+When the host supplies a trusted local path for native file-menu entry, use the separate opaque candidate to qualify the production host-resource path:
+
+```sh
+pnpm exec tsx scripts/extension-candidate/build.ts --opaque-resource
+```
+
+This reuses the existing production service and reader builds and bundles the production MCP server with a candidate-only import alias. Only the server's `./extension-server.js` import is redirected to `opaque-extension-server.ts`; that wrapper imports and delegates to the real production extension module without an alias loop. For `open_pdf` alone, it discards optional entrypoint metadata so production admission uses the host's original file resource URI. It changes the file-menu label to **Placekeeper Opaque Test**. Other entrypoints and private operations keep their original metadata. No resource URI, private grant, task identity, host read/write response, or capability is synthesized. Production files and builds remain untouched.
+
+The output is `dist/extension-candidate-opaque`, marketplace/plugin selection is `placekeeper-extension-candidate-opaque@placekeeper-extension-candidate-opaque-test`, MCP server name is `placekeeper-extension-candidate-opaque`, and daemon port is **48764**. Its recovery/control root is distinct from the default candidate. Both candidates can coexist; the opaque build does not replace or stop the default candidate, touch its fixture, or modify installed plugins. Stop an opaque daemon before rebuilding its own artifact.
+
+Record `build.json`'s `sourceRoute`, `qualificationWrapper` source identity/policy, `productionAssets` reader/service hashes, full file digests, and bundle digest. The reader/service hashes can be compared directly to the default candidate and original production outputs. This route establishes opaque-resource behavior with the real host APIs, while the ordinary candidate separately qualifies host-selected routing. It does not establish that the host naturally omits path metadata. Install and start this artifact only as a separate explicit qualification step, using its own disposable fixture.
+
+Focused infrastructure checks:
+
+```sh
+pnpm exec vitest run scripts/extension-candidate/candidate.test.ts
+```

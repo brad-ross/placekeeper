@@ -65,6 +65,8 @@ describe("explicit suite contracts", () => {
     expect(suiteCommand("test:codex-native")).toContain("pnpm fixtures:pdf");
     expect(suiteCommand("test:codex-native")).toContain("pnpm build:codex");
     expect(ciUnitFiles).toContain("apps/codex-mcp/test/qualification.test.ts");
+    expect(ciUnitFiles).toContain("scripts/extension-candidate/candidate.test.ts");
+    expect(suiteCommand("test:codex-native")).toContain("scripts/extension-candidate/candidate.test.ts");
   });
 
   it("builds the packaged chooser renderer before its canonical browser checks", async () => {
