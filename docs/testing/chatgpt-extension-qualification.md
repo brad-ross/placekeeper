@@ -138,3 +138,15 @@ A separate deterministic regression confirmed the review's cross-source tool con
 Post-fix verification: the combined 109-file unit selection passed 1,838 of 1,839 tests initially; the sole failure was an `ENOTEMPTY` temporary-directory teardown in SyncTeX. That entire 32-test file passed on focused rerun. Production builds and full TypeScript checking passed. All new review regressions passed, including actual service-client socket integration in the combined run. Installed production qualification remains pending.
 
 The final post-review rebuilt reader run passed all 36 production-extension and legacy native-reader browser cases in 1.6 minutes, including context/drafts/settings, lifecycle, resource release, and rotated main/reference rendering.
+
+### Installed production candidate — 2026-11-04, 21:55 Eastern
+
+Installed and enabled `placekeeper-extension-candidate@placekeeper-extension-candidate-test` version `0.0.1` through the supported plugin CLI. This is a separate test plugin; the installed release and compatibility probe remain unchanged.
+
+- Build: `2026-11-05T02:54:43.933Z`, clean revision `a0a10c285f86a1eec74e99bbd7dc12ad089df806`.
+- Bundle SHA256: `9397833309d2dc4747b25d96539e56558fb302aecc9ccbd0ba502913e357306f`.
+- Installed registration and all 13 installed plugin files match the candidate metadata.
+- Isolated service: development identity, accepting on port `48763`, private root `/private/tmp/pk-extension-c4e7735a7eab`. All six served web assets match the build hashes.
+- Requested opening `dist/extension-candidate/disposable-test.pdf` through the supported panel tool; host returned `queued`. MCP Apps still lists only the prior compatibility probe. No production invocation is observed yet.
+
+Next action requires native host controls unavailable to the automation tools: reload plugins or restart the host, then choose **Placekeeper Extension Candidate** from the disposable PDF's file menu. Do not use the old probe's reload button. Once the production panel is open, continue its actual-host checklist above. The isolated daemon is intentionally running for this qualification session; stop it and remove the test candidate at the end, after retaining evidence.
