@@ -181,3 +181,38 @@ it('keeps context publication intent with its app grant across rotation and isol
   const otherPath = join(f.pdfPath, '..', 'other.pdf'); await writeFile(otherPath, '%PDF-1.7\nother\n%%EOF');
   const other = await opened(f.manager, { pdfPath: otherPath }); expect(other.contextPublished).toBe(false);
 });
+
+it('catalogues only an explicit active grant and exposes snapshots without review authority',async()=>{
+ const f=await fixture();
+ expect(await f.manager.dispatch({action:'mention-search',query:''})).toEqual({status:'mention-results',items:[]});
+ const a=await opened(f.manager,{pdfPath:f.pdfPath});
+ expect(await f.manager.dispatch({action:'catalogue',grant:a.grant,operation:'capture'})).toEqual({status:'unavailable'});
+ expect(await f.manager.dispatch({action:'settings-update',set:{mentions:true}})).toMatchObject({status:'settings',revision:1});
+ expect(await f.manager.dispatch({action:'catalogue',grant:'x'.repeat(43),operation:'capture'})).toEqual({status:'unavailable'});
+ expect(await f.manager.dispatch({action:'catalogue',grant:a.grant,operation:'capture'})).toMatchObject({status:'catalogue',included:true,snapshot:{generation:1,revision:0}});
+ const results=await f.manager.dispatch({action:'mention-search',query:'next'});
+ if(results.status!=='mention-results')throw Error('Expected mentions');
+ expect(results.items).toHaveLength(1);const uri=results.items[0]!.resourceUri;
+ const resource=await f.manager.dispatch({action:'mention-read',uri});
+ expect(resource.status).toBe('mention-resource');
+ const text=JSON.stringify(resource);expect(text).toContain('untrusted-document-snapshot');expect(text).toContain('[Page 1]');
+ for(const privateValue of [f.pdfPath,a.grant,a.presentation.presentationCapability,a.presentation.runtimeId])expect(text).not.toContain(privateValue);
+ expect(await f.manager.resume(uri,randomUUID())).toEqual({status:'unavailable'});
+ expect(f.broker.taskBindings.activityCount()).toBe(0);
+ await f.manager.dispatch({action:'catalogue',grant:a.grant,operation:'remove'});
+ expect(await f.manager.dispatch({action:'mention-read',uri})).toEqual({status:'unavailable'});
+});
+
+it('rejects capture when the app grant retires during document extraction',async()=>{
+ const f=await fixture(),a=await opened(f.manager,{pdfPath:f.pdfPath});
+ await f.manager.dispatch({action:'settings-update',set:{mentions:true}});
+ let release!:(value:string)=>void;const delayed=new Promise<string>(resolve=>{release=resolve});
+ let entered!:()=>void;const started=new Promise<void>(resolve=>{entered=resolve});
+ vi.spyOn(f.broker,'documentSnapshotSummary').mockImplementation(async()=>{entered();return delayed;});
+ const capture=f.manager.dispatch({action:'catalogue',grant:a.grant,operation:'capture'});
+ await started;
+ await f.manager.handle(request(a.presentation,'detach'));
+ release('snapshot text');
+ expect(await capture).toEqual({status:'unavailable'});
+ expect(await f.manager.dispatch({action:'mention-search',query:''})).toEqual({status:'mention-results',items:[]});
+});

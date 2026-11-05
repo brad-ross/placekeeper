@@ -1,3 +1,5 @@
+import { anchorEvidenceFromReviewItem } from '../../../../packages/core/src/review-model.js';
+import { ExtensionPreferences } from './extension-preferences.js';
 import { HostResourcePersistence } from './host-resource-persistence.js';
 import type { HostResourceRequest, HostResourceFile } from '../../../../packages/core/src/host-resource-protocol.js';
 import { reconcileNativeSource } from "./reconcile-native-source.js";
@@ -19,6 +21,7 @@ type Offer = { path:string;hostSessionId?:string; expires:number; recoveryOffer?
 
 /** App ownership is independent of trusted chat bindings. Grants never enter browser storage. */
 export class ExtensionRuntimeManager {
+  readonly preferences:ExtensionPreferences;
   readonly #hostTickets=new Map<string,{file:HostResourceFile;expires:number}>();
   readonly #hostSessions=new Set<string>();
   readonly #host:HostResourcePersistence;
@@ -38,7 +41,7 @@ export class ExtensionRuntimeManager {
   #tail:Promise<unknown>=Promise.resolve();
   #closing=false;
   constructor(readonly broker:SessionBroker,options:{backend:CodexServiceRuntimeBackend;now?:()=>number;panelLeaseMs?:number;grantIdleMs?:number;pickPdf?:()=>Promise<string|undefined>}) {
-    this.#backend=options.backend;this.#host=new HostResourcePersistence(broker,options.backend);this.#now=options.now??Date.now;this.#lease=options.panelLeaseMs??30_000;this.#idle=options.grantIdleMs??30*60_000;this.#pick=options.pickPdf;
+    this.preferences=new ExtensionPreferences(broker.recoveryRoot);this.#backend=options.backend;this.#host=new HostResourcePersistence(broker,options.backend);this.#now=options.now??Date.now;this.#lease=options.panelLeaseMs??30_000;this.#idle=options.grantIdleMs??30*60_000;this.#pick=options.pickPdf;
     if(!Number.isSafeInteger(this.#lease)||this.#lease<=0||!Number.isSafeInteger(this.#idle)||this.#idle<=this.#lease)throw Error('Invalid extension lifetimes');
     this.#timer=setInterval(()=>this.#sweep(),Math.min(this.#lease,1000));this.#timer.unref();
     this.#unsubscribe=broker.onStateInvalidation(event=>{for(const r of this.#records.values())if(r.sessionId===event.sessionId){r.watermark++;if(event.reason==='generation')this.#suspend(r);}});
@@ -47,6 +50,24 @@ export class ExtensionRuntimeManager {
   #serial<T>(work:()=>Promise<T>):Promise<T>{const result=this.#tail.then(work,work);this.#tail=result.catch(()=>undefined);return result;}
   async dispatch(raw:unknown):Promise<ExtensionResult|CodexAppResponse>{
     const r=parseExtensionRequest(raw);if(!r||this.#closing)return unavailable();
+    if(r.action==='settings-read')return {status:'settings',...await this.preferences.settings()};
+    if(r.action==='settings-update'){await this.preferences.update(r.set);return {status:'settings',...await this.preferences.settings()};}
+    if(r.action==='mention-search')return {status:'mention-results',items:await this.preferences.search(r.query)};
+    if(r.action==='mention-read'){const text=await this.preferences.read(r.uri);return text===undefined?unavailable():{status:'mention-resource',text};}
+    if(r.action==='catalogue')return this.#serial<ExtensionResult>(async()=>{
+      this.#sweep();const record=this.#records.get(digestSecretHex(r.grant));
+      const current=()=>!this.#closing&&record!==undefined&&!record.provisional&&record.active!==undefined&&record.lease!>this.#now()&&record.expires>this.#now()&&this.#records.get(digestSecretHex(r.grant))===record&&this.broker.nativeAdmissionScope(record.sessionId)?.documentGeneration===record.active.generation&&this.broker.taskBindings.taskForGeneration(record.sessionId,record.active.generation)===undefined;
+      if(!current()||!record)return unavailable();const source=record.sessionId;
+      if(r.operation==='status')return {status:'catalogue',...await this.preferences.status(source)};
+      if(r.operation==='remove')return {status:'catalogue',...await this.preferences.remove(source)};
+      return {status:'catalogue',...await this.preferences.capture(source,async()=>{
+        const state=this.broker.state(record.sessionId);if(!state)throw Error('Review unavailable');
+        const summary=await this.broker.documentSnapshotSummary(record.sessionId,state.workflow.documentGeneration);
+        const scope=await this.broker.sessionScope(record.sessionId);
+        if(!scope||!current()||this.broker.state(record.sessionId)?.revision!==state.revision)throw Error('Review changed');
+        return {title:scope.sourceDisplayName,generation:state.workflow.documentGeneration,revision:state.revision,sourceDigest:state.source.digest,summary,annotations:state.items.map(item=>{const anchor=anchorEvidenceFromReviewItem(item);const quote=anchor.kind==='selection'?anchor.quote:anchor.kind==='page'?anchor.nearbyText??'':`${anchor.leftContext}${anchor.rightContext}`;return {page:anchor.pageIndex+1,text:[quote,...['text','comment','proposedText','contents'].flatMap(k=>typeof item.payload[k]==='string'?[item.payload[k] as string]:[])].filter(Boolean).join('\n')};})};
+      })};
+    }).catch(()=>unavailable());
     if(r.action==='host-open')return this.#serial(async()=>{const ticket=secret();this.#hostTickets.set(digestSecretHex(ticket),{file:r.file,expires:this.#now()+120000});return {status:'host-resource',ticket,file:r.file};});
     if(r.action==='host-resource')return this.#serial(()=>this.#hostRequest(r)).catch(()=>unavailable());
     if(r.action==='app')return this.handle(r.request);

@@ -3540,6 +3540,13 @@ export class SessionBroker {
     });
   }
 
+  async documentSnapshotSummary(sessionId:string,generation:number):Promise<string> {
+    const bytes=await this.documentBytes(sessionId,generation);if(!bytes)throw Error('Document unavailable');
+    const inspected=await this.#inspectGeneration(bytes);
+    if(this.state(sessionId)?.workflow.documentGeneration!==generation)throw Error('Document changed');
+    return inspected.pages.map(page=>`[Page ${page.pageIndex+1}]\n${page.text}`).join('\n');
+  }
+
   async documentBytes(sessionId: string, generation?: number): Promise<Buffer | undefined> {
     const session = this.#activeById.get(sessionId);
     if (session === undefined) return undefined;
