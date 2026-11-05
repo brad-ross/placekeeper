@@ -121,6 +121,9 @@ export class CodexServiceRuntimeBackend {
   async #handle(scope: CodexActiveScope, request: Extract<CodexAppRequest, { authority: "presentation" }>, current: () => boolean): Promise<unknown> {
     const record = this.#presentations.get(scope.runtimeId);
     if (record === undefined || record.scope.attemptId !== scope.attemptId || record.scope.generation !== scope.generation) throw new Error("presentation-unavailable");
+    const assertAuthority = () => {
+      if (!current() || this.#presentations.get(scope.runtimeId) !== record) throw new Error("presentation-unavailable");
+    };
     if (request.method === 'upgradePoll' || request.method === 'upgradeSettle') {
       if (!this.upgradeParticipants) throw new Error('Upgrade preparation unavailable');
       return request.method === 'upgradePoll' ? this.upgradeParticipants.poll(`codex:${scope.runtimeId}`) : this.upgradeParticipants.settle(`codex:${scope.runtimeId}`, request.payload as UpgradeReviewSettlement);
@@ -174,16 +177,19 @@ export class CodexServiceRuntimeBackend {
     }
     const interactionAction = interactionActions[method];
     const invoke = async () => {
-      if (!current()) throw new Error("presentation-unavailable");
+      assertAuthority();
       let result: unknown;
       if (interactionAction !== undefined) {
-        result = await this.#review.interaction(scope.sessionId, record.attachment, interactionAction, request.payload);
+        result = await this.#review.interaction(scope.sessionId, record.attachment, interactionAction, request.payload, assertAuthority);
       } else if (method === "scope") {
         result = await this.#scope(scope, current);
       } else if (method === "saveProposal") {
         result = this.#saving.proposal(scope.sessionId);
       } else {
-        result = await this.#review.invoke(scope.sessionId, scope.generation, method as Exclude<ReviewRuntimeBrokerMethod, "saveProposal">, request.payload, { expectedDocumentGeneration: scope.generation });
+        result = await this.#review.invoke(scope.sessionId, scope.generation, method as Exclude<ReviewRuntimeBrokerMethod, "saveProposal">, request.payload, {
+          expectedDocumentGeneration: scope.generation,
+          assertAuthority,
+        });
       }
       const projected = sanitizeCodexReviewRuntimeResponse(method, result);
       if (projected === undefined) throw new Error("invalid-service-response");

@@ -393,6 +393,7 @@ export class SessionBroker {
     readonly outcome: ReviewInteractionOutcome;
     readonly draftId: string;
     readonly expectedDraftRevision: number;
+    readonly assertAuthority?: () => void;
   }): Promise<unknown> {
     const session = this.#activeById.get(input.sessionId);
     if (session === undefined || session.ending) return { status: "unauthorized" };
@@ -405,6 +406,7 @@ export class SessionBroker {
         outcome: input.outcome,
         draftId: input.draftId,
         commit: async () => {
+          input.assertAuthority?.();
           const draft = session.state.pendingDrafts.find((candidate) => candidate.id === input.draftId);
           if (draft === undefined || draft.revision !== input.expectedDraftRevision || draft.status !== "protected") {
             throw new Error("The protected draft revision is no longer current");
@@ -468,7 +470,7 @@ export class SessionBroker {
                 },
               };
               try {
-                await session.store.persist(durableSuccessor);
+                await session.store.persist(durableSuccessor, undefined, input.assertAuthority);
               } catch (error) {
                 session.replacementCommitBarrier = barrier;
                 const settled = await barrier.resolve();
@@ -2052,7 +2054,7 @@ export class SessionBroker {
         };
         await session.store.persist({ ...this.#draft(session), state: nextState, destination, sync,
           acknowledgedAt: this.#now().toISOString(),
-        }, write.signal);
+        }, write.signal, input.assertAuthority);
         write.signal.throwIfAborted();
         session.state = nextState;
         session.destination = destination;
@@ -2123,7 +2125,7 @@ export class SessionBroker {
         source: sourceOwnership,
         destination,
         sync,
-      });
+      }, undefined, input.assertAuthority);
       for (const [key, owner] of this.#activeBySource) {
         if (owner === sessionId) this.#activeBySource.delete(key);
       }
@@ -3812,7 +3814,7 @@ export class SessionBroker {
   async acceptMutation(
     sessionId: string,
     command: ReviewCommand,
-    options: { readonly expectedGeneration?: number } = {},
+    options: { readonly expectedGeneration?: number; readonly assertAuthority?: () => void } = {},
   ): Promise<ReviewState> {
     const session = this.#activeById.get(sessionId);
     if (session === undefined || session.ending) {
@@ -3834,6 +3836,7 @@ export class SessionBroker {
     const write = this.controls.beginWrite(sessionId);
     try {
       write.signal.throwIfAborted();
+      options.assertAuthority?.();
       const nextState = this.#reduceMutation(session, command, options.expectedGeneration);
       const nextNativeAnnotationLedger = nativeAnnotationLedger(
         nextState,
@@ -3847,7 +3850,7 @@ export class SessionBroker {
         nativeAnnotationLedger: nextNativeAnnotationLedger,
         acknowledgedAt: this.#now().toISOString(),
       };
-      await session.store.persist(nextDraft, write.signal);
+      await session.store.persist(nextDraft, write.signal, options.assertAuthority);
       write.signal.throwIfAborted();
       session.state = nextState;
       session.sync = nextSync;

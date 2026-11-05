@@ -1,3 +1,4 @@
+import { extensionPickerTimeouts } from '../../../../packages/core/src/extension-protocol.js';
 import { PrivateControlError, requestPrivateControl, startPrivateControlServer } from "../platform/control-transport.js";
 import { launchEditorNavigation } from "../synctex/editor-launch.js";
 import {
@@ -599,6 +600,10 @@ export function requestControl(
     readonly signal?: AbortSignal;
   } = {},
 ): Promise<PlacekeeperControlResponse> {
+  if (options.timeoutMs === undefined && request.kind === "extension-app") {
+    const picker = extensionPickerTimeouts(request.request);
+    if (picker) options = { ...options, timeoutMs: picker.socketMs };
+  }
   if (process.platform === "win32") return requestPrivateControl(socketPath, request, options).then(
     (response) => response as PlacekeeperControlResponse,
     (error: unknown) => {

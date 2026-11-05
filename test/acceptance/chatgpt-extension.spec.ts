@@ -13,11 +13,11 @@ test('extension activation waits for preferences, then real tools, drafts and pa
     const snapshot = await reader.tool('inspect_review', {});
     expect(snapshot).toMatchObject({ status: 'current', documentGeneration: 1 });
     expect(snapshot.annotations.map((a: any) => a.id)).toEqual(reader.bridge.broker.state(reader.bridge.sessionId)!.items.map(a => a.id));
-    const search = await reader.tool('search_document', { query: 'equilibrium', documentGeneration: 1 });
+    const search = await reader.tool('search_document', { query: 'equilibrium', documentGeneration: 1, source: snapshot.source });
     expect(search.results.length).toBeGreaterThan(0);
-    const revealed = await reader.tool('reveal_search_result', { resultId: search.results[0].id, documentGeneration: 1 });
+    const revealed = await reader.tool('reveal_search_result', { resultId: search.results[0].id, documentGeneration: 1, source: search.source });
     expect(revealed, JSON.stringify(revealed)).toMatchObject({ status: 'navigated', page: 1 });
-    expect(await reader.tool('navigate_page', { page: 1, documentGeneration: 2 })).toMatchObject({ status: 'unavailable', reason: 'stale-generation' });
+    expect(await reader.tool('navigate_page', { page: 1, documentGeneration: 2, source: snapshot.source })).toMatchObject({ status: 'unavailable', reason: 'stale-generation' });
     const chooser = page.locator('.review-discussion-actions');
     await chooser.locator('summary').click();
     await chooser.getByRole('checkbox').first().check();
@@ -44,7 +44,7 @@ test('extension activation waits for preferences, then real tools, drafts and pa
     await expect(page.getByRole('button', { name: 'Include this review snapshot', exact: true })).toBeVisible();
     await page.evaluate(() => (window as any).extensionAcceptance.shell.hostContextChanged({ displayMode: 'inline' }));
     await expect(page.locator('#root')).toBeHidden();
-    expect(await reader.tool('navigate_page', { page: 1, documentGeneration: 1 })).toMatchObject({ status: 'navigated', page: 1 });
+    expect(await reader.tool('navigate_page', { page: 1, documentGeneration: 1, source: snapshot.source })).toMatchObject({ status: 'navigated', page: 1 });
     await expect(page.locator('#root')).toBeVisible();
     expect(await page.evaluate(() => (window as any).extensionAcceptance.expansionRequests)).toBe(1);
     await info.attach('extension-boundary-evidence', { body: JSON.stringify({ actualHost: false, sessionId: reader.bridge.sessionId, generation: snapshot.documentGeneration, annotationIds: snapshot.annotations.map((a: any) => a.id), requests: reader.requests, draftSend: false }), contentType: 'application/json' });

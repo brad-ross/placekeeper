@@ -11,7 +11,7 @@ import { createCodexHostRuntime } from '../../web/src/host/codex-runtime.js';
 import { mountCodexProductionReview } from '../../web/src/codex-entry.js';
 import type { HostRuntimeInvalidation } from '../../web/src/host/runtime.js';
 import { NativeOperationError, parseCodexAppResponse, type CodexAppRequest, type CodexAppResponse } from '../../../packages/core/src/codex-mcp-protocol.js';
-import { EXTENSION_META_KEY, EXTENSION_TOOL, parseExtensionResult, type ExtensionRequest, type ExtensionResult, type ExtensionPresentation } from '../../../packages/core/src/extension-protocol.js';
+import { EXTENSION_META_KEY, EXTENSION_TOOL, extensionPickerTimeouts, parseExtensionResult, type ExtensionRequest, type ExtensionResult, type ExtensionPresentation } from '../../../packages/core/src/extension-protocol.js';
 import { PanelLiveness } from './panel-liveness.js';
 import { NativeDiagnosticError, diagnosticFailure } from './lifecycle-diagnostics.js';
 /** Memory-only app grants. A new host invocation never inherits an old panel's authority. */
@@ -53,6 +53,8 @@ export class ExtensionShell {
     #connected = false;
     #resume: Promise<void> | undefined;
     #resumeOperation: string | undefined;
+    #resumeRefreshed: string | undefined;
+    #choiceEpoch = 0;
     #watermark: number | undefined;
     readonly #listeners = new Set<(event: HostRuntimeInvalidation) => void>();
     constructor(readonly app: App, readonly root: HTMLElement, readonly status: HTMLElement, readonly controls: HTMLElement, readonly resources: () => OpenAIResources | undefined = () => undefined, readonly modelContext: () => OpenAIModelContext | undefined = () => undefined, readonly message: () => OpenAIMessage | undefined = () => undefined) { }
@@ -75,7 +77,8 @@ export class ExtensionShell {
     async #request(request: ExtensionRequest): Promise<ExtensionResult | CodexAppResponse> {
         let result;
         try {
-            result = await this.app.callServerTool({ name: EXTENSION_TOOL, arguments: { request } }, { timeout: request.action === 'open' ? 315000 : 8000 });
+            const picker = extensionPickerTimeouts(request);
+            result = await this.app.callServerTool({ name: EXTENSION_TOOL, arguments: { request } }, { timeout: picker?.sdkMs ?? 8000, ...(picker ? { maxTotalTimeout: picker.sdkMs } : {}) });
         }
         catch {
             throw new NativeDiagnosticError('transport');
@@ -136,7 +139,7 @@ export class ExtensionShell {
         } : undefined, () => this.#contextStatus(), { freshInvocation });
         this.#context.setPreferences(this.#preferences);
     }
-    #button(label: string, action: () => Promise<void>) { const button = document.createElement('button'); button.textContent = label; button.onclick = () => { if (this.#closed)
+    #button(label: string, action: () => Promise<void>) { const button = document.createElement('button'); button.textContent = label; button.onclick = () => { if (this.#closed || button.disabled)
         return; button.disabled = true; void action().catch(() => this.#show('Placekeeper could not complete that action. Your protected work is retained.')).finally(() => { button.disabled = false; }); }; this.controls.append(button); return button; }
     async #apply(result: ExtensionResult) {
         if (this.#closed) {
@@ -175,6 +178,7 @@ export class ExtensionShell {
             return;
         }
         if (result.status === 'active') {
+            this.#choiceEpoch++;
             this.#grant = result.grant;
             this.#active = result.presentation;
             await this.#refreshSettings().catch(() => { this.#settingsNotice = 'Sharing preferences are unavailable. Sharing stays disabled until they can be loaded.'; this.#preferences = { backgroundContext: false, selectionSharing: false, mentions: false }; this.#context?.setPreferences(this.#preferences); });
@@ -212,12 +216,24 @@ export class ExtensionShell {
         if (result.status === 'busy') {
             this.#show(result.canResume ? 'Protected review work is available. Choose how to open it.' : 'This PDF already has a review. Open an independent review without taking over the existing one.');
             this.controls.replaceChildren();
+            const epoch = ++this.#choiceEpoch;
+            let pending = false;
+            const buttons: HTMLButtonElement[] = [];
+            const current = () => !this.#closed && epoch === this.#choiceEpoch;
+            const begin = () => { if (!current() || pending) return false; pending = true; for (const button of buttons) button.disabled = true; return true; };
             for (const choice of result.canResume ? ['resume', 'fork'] as const : ['fork'] as const) {
                 const operationId = crypto.randomUUID();
-                this.#button(choice === 'resume' ? 'Resume protected review' : 'Open independent review', async () => { const next = await this.#request({ action: 'choose', recoveryToken: result.recoveryToken, choice, operationId }); const parsed = parseExtensionResult(next); if (parsed)
-                    await this.#apply(parsed); });
+                buttons.push(this.#button(choice === 'resume' ? 'Resume protected review' : 'Open independent review', async () => {
+                    if (!begin()) return;
+                    try {
+                        const parsed = parseExtensionResult(await this.#request({ action: 'choose', recoveryToken: result.recoveryToken, choice, operationId }));
+                        if (parsed && current()) await this.#apply(parsed);
+                        else if (parsed) await this.#discardObsolete(parsed);
+                    } catch (error) { if (current()) throw error; }
+                    finally { pending = false; if (current()) for (const button of buttons) button.disabled = false; }
+                }));
             }
-            this.#button('Cancel', async () => { this.#chooser(); });
+            buttons.push(this.#button('Cancel', async () => { if (!begin()) return; this.#choiceEpoch++; if (this.#active && this.#grant) await this.#apply({ status: 'active', grant: this.#grant, presentation: this.#active }); else this.#chooser(); }));
             return;
         }
         if (result.status === 'host-resource') {
@@ -289,11 +305,27 @@ export class ExtensionShell {
         }
     }
     #resetHost() { const host = this.#host; this.#host = undefined; this.#hostEpoch++; this.#hostNotice = ''; this.#hostRefreshPending = false; this.#hostUpdateRevision = 0; this.#saveRequested = false; this.#hostSave = undefined; void host?.dispose().catch(() => undefined); }
-    #chooser() { this.#resetHost(); this.#show('Open a PDF to begin reviewing.'); this.controls.replaceChildren(); this.#button('Choose PDF', async () => { const result = await this.#request({ action: 'open' }); const parsed = parseExtensionResult(result); if (parsed?.status === 'chooser') {
-        this.#show('Use the PDF’s file menu to open it in Placekeeper on this host.');
-        return;
-    } if (parsed)
-        await this.#apply(parsed); }); }
+    async #discardObsolete(result: ExtensionResult) {
+        if ('grant' in result && (this.#closed || result.grant !== this.#grant))
+            await this.#request({ action: 'revoke', grant: result.grant }).catch(() => undefined);
+    }
+    #chooser() {
+        const epoch = ++this.#choiceEpoch;
+        this.#resetHost(); this.#show('Open a PDF to begin reviewing.'); this.controls.replaceChildren();
+        const current = () => !this.#closed && epoch === this.#choiceEpoch;
+        this.#button('Choose PDF', async () => {
+            if (!current()) return;
+            try {
+                const parsed = parseExtensionResult(await this.#request({ action: 'open' }));
+                if (!current()) { if (parsed) await this.#discardObsolete(parsed); return; }
+                if (parsed?.status === 'chooser') {
+                    this.#show('Use the PDF’s file menu to open it in Placekeeper on this host.');
+                    return;
+                }
+                if (parsed) await this.#apply(parsed);
+            } catch (error) { if (current()) throw error; }
+        });
+    }
     #mount() {
         const active = this.#active;
         if (!active || this.#closed)
@@ -465,24 +497,39 @@ export class ExtensionShell {
             this.#connected = false;
             this.#show('Reconnecting to Placekeeper… Editing is paused.');
         }
-        this.#resumeOperation ??= crypto.randomUUID();
-        const grant = this.#grant, operationId = this.#resumeOperation;
         let completed = false;
         this.#resume = (async () => {
-            if (this.#host) {
-                do {
-                    const revision = this.#hostUpdateRevision;
-                    const refreshed = await this.#host.refresh(grant);
-                    this.#hostRefreshPending = revision !== this.#hostUpdateRevision;
-                    if (refreshed.status === 'host-status' && refreshed.outcome === 'conflict') this.#hostNotice = 'The host PDF changed before saving. Your review is protected; export a reviewed copy before reopening the newer PDF.';
-                } while (this.#hostRefreshPending && !this.#closed);
+            while (true) {
+                this.#resumeOperation ??= crypto.randomUUID();
+                const grant = this.#grant!, operationId = this.#resumeOperation;
+                if (this.#host && this.#resumeRefreshed !== operationId) {
+                    do {
+                        const revision = this.#hostUpdateRevision;
+                        const refreshed = await this.#host.refresh(grant);
+                        this.#hostRefreshPending = revision !== this.#hostUpdateRevision;
+                        if (refreshed.status === 'host-status' && refreshed.outcome === 'conflict') this.#hostNotice = 'The host PDF changed before saving. Your review is protected; export a reviewed copy before reopening the newer PDF.';
+                    } while (this.#hostRefreshPending && !this.#closed);
+                    this.#resumeRefreshed = operationId;
+                }
+                this.root.inert = true;
+                this.#connected = false;
+                let result;
+                try { result = await this.#request({ action: 'resume', grant, operationId }); }
+                catch (error) { if (this.#host) this.#hostRefreshPending = true; throw error; }
+                if (result.status !== 'active' || !('presentation' in result)) {
+                    this.#ended();
+                    throw new NativeDiagnosticError('service-denied-unavailable');
+                }
+                this.#resumeOperation = undefined; this.#resumeRefreshed = undefined;
+                // A lost response may have rotated the grant. Replay its receipt first, then
+                // validate the host again under the returned authority before mounting.
+                if (this.#host && this.#hostRefreshPending && !this.#closed) {
+                    this.#grant = result.grant;
+                    continue;
+                }
+                await this.#apply(result); completed = true; return;
             }
-            this.root.inert = true;
-            this.#connected = false;
-            const result = await this.#request({ action: 'resume', grant, operationId }); if (result.status !== 'active' || !('presentation' in result)) {
-            this.#ended();
-            throw new NativeDiagnosticError('service-denied-unavailable');
-        } this.#resumeOperation = undefined; await this.#apply(result); completed = true; })().finally(() => { this.#resume = undefined; if (completed && this.#hostRefreshPending && !this.#closed) queueMicrotask(() => { void this.#continue().catch(() => undefined); }); });
+        })().finally(() => { this.#resume = undefined; if (completed && this.#hostRefreshPending && !this.#closed) queueMicrotask(() => { void this.#continue().catch(() => undefined); }); });
         return this.#resume;
     }
     #ended() { if (this.#closed)

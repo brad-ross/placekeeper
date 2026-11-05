@@ -9,11 +9,13 @@ import { CodexServiceRuntimeBackend } from "../src/codex/codex-runtime-backend.j
 import { PdfSaveCoordinator } from "../src/saving/pdf-save-coordinator.js";
 import { ExportCoordinator } from "../src/export/export-coordinator.js";
 import type { CodexAppRequest, CodexAppResponse } from "../../../packages/core/src/codex-mcp-protocol.js";
+import { DraftSnapshotStore, type SnapshotHooks } from "../src/recovery/draft-snapshot.js";
+import type { DestinationPicker } from "../src/host/destination-picker.js";
 
 type Active = Extract<CodexAppResponse, { status: "active" }>;
 const cleanups: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); });
-async function fixture() {
+async function fixture(snapshotHooks?: SnapshotHooks, picker?: DestinationPicker) {
   const root = await mkdtemp(join(tmpdir(), "placekeeper-extension-"));
   const pdfPath = join(root, "paper.pdf");
   await writeFile(pdfPath, "%PDF-1.7\nextension fixture\n%%EOF");
@@ -22,9 +24,10 @@ async function fixture() {
   await writeFile(join(assets, "pdfium-codex-worker.js"), "worker");
   let time = Date.now();
   const broker = new SessionBroker({ recoveryRoot: join(root, "recovery"), portableReader: async () => [],
+    ...(snapshotHooks === undefined ? {} : { snapshotHooks }),
     inspectGeneration: async () => ({ pageCount: 1, pages: [{ pageIndex: 0, text: "next" }] }) });
   const writer = { write: async (): Promise<never> => { throw new Error("unexpected write"); } };
-  const saving = new PdfSaveCoordinator({ broker, writer });
+  const saving = new PdfSaveCoordinator({ broker, writer, ...(picker === undefined ? {} : { picker }) });
   const exporting = new ExportCoordinator({ writer, capabilities: broker.capabilities });
   const backend = new CodexServiceRuntimeBackend({ broker, saving, exporting, assetRoot: assets });
   const manager = new ExtensionRuntimeManager(broker, { backend, now: () => time, panelLeaseMs: 100, grantIdleMs: 1000,
@@ -52,6 +55,127 @@ async function opened(manager: ExtensionRuntimeManager, input: {pdfPath?:string}
 }
 
 describe("app-owned extension presentations", () => {
+  it("rejects a folder picker result when its presentation retires while the picker is open", async () => {
+    const entered = Promise.withResolvers<void>(), selection = Promise.withResolvers<string>();
+    const f = await fixture(undefined, { chooseFolder: async () => { entered.resolve(); return selection.promise; }, locatePdf: async () => undefined });
+    const panel = await opened(f.manager, {});
+    const pending = f.manager.handle(request(panel.presentation, "chooseFolder"));
+    await entered.promise;
+    await f.manager.handle(request(panel.presentation, "detach"));
+    selection.resolve("/tmp");
+    expect(await pending).toMatchObject({ status: "denied" });
+  });
+
+  it("keeps a protected draft when its finalization presentation retires before publication", async () => {
+    let gate = false;
+    const entered = Promise.withResolvers<void>(), release = Promise.withResolvers<void>();
+    const f = await fixture({ beforeFinalRename: async () => {
+      if (gate) { gate = false; entered.resolve(); await release.promise; }
+    } });
+    const panel = await opened(f.manager, {});
+    const initial = payload(await f.manager.handle(request(panel.presentation, "bootstrap")));
+    const draftId = randomUUID(), interactionToken = randomUUID(), timestamp = new Date().toISOString();
+    expect(await f.manager.handle(request(panel.presentation, "beginInteraction", { interactionToken, order: 1, generation: 1, draftId }))).toMatchObject({ status: "ok" });
+    expect(await f.manager.handle(request(panel.presentation, "command", { type: "put-draft", expectedRevision: 0, expectedDraftRevision: -1, draft: {
+      id: draftId, ownerViewId: initial.interaction.attachmentId, baseGeneration: 1, revision: 0, kind: "pageNote", pageIndex: 0,
+      text: "protected note", anchor: { kind: "page", pageIndex: 0, nearbyText: "next", rect: { x: 1, y: 1, width: 1, height: 1 } },
+      disposition: { kind: "resolved", generation: 1 }, status: "protected", createdAt: timestamp, updatedAt: timestamp,
+    } }))).toMatchObject({ status: "ok" });
+    gate = true;
+    const pending = f.manager.handle(request(panel.presentation, "finalizeInteraction", {
+      interactionToken, order: 2, outcome: "applied", draftId, expectedDraftRevision: 0,
+    }));
+    await entered.promise;
+    await f.manager.handle(request(panel.presentation, "detach"));
+    release.resolve();
+    expect(await pending).toMatchObject({ status: "denied" });
+    expect(f.broker.state(initial.sessionId)?.revision).toBe(1);
+    expect(f.broker.state(initial.sessionId)?.pendingDrafts).toHaveLength(1);
+    expect(f.broker.state(initial.sessionId)?.items).toHaveLength(0);
+    const recovered = await new DraftSnapshotStore(join(f.broker.recoveryRoot, initial.sessionId)).recover();
+    expect(recovered?.state.pendingDrafts).toHaveLength(1);
+    expect(recovered?.interactionReceipts ?? []).toHaveLength(0);
+  });
+
+  it.each(["detach", "resume"] as const)("rejects a command after %s retires authority while protection is pending", async (retirement) => {
+    const f = await fixture(), panel = await opened(f.manager, {});
+    const initial = payload(await f.manager.handle(request(panel.presentation, "bootstrap")));
+    const entered = Promise.withResolvers<void>(), release = Promise.withResolvers<void>();
+    const protect = f.broker.protectChromeReview.bind(f.broker);
+    vi.spyOn(f.broker, "protectChromeReview").mockImplementationOnce(async (id) => {
+      await protect(id); entered.resolve(); await release.promise;
+    });
+    const command = { type: "set-annotation-name", expectedRevision: 0, annotationName: "retired" };
+    const pending = f.manager.handle(request(panel.presentation, "command", command));
+    await entered.promise;
+    const fresh = retirement === "resume" ? active(await f.manager.resume(panel.grant, randomUUID())) : undefined;
+    if (retirement === "detach") await f.manager.handle(request(panel.presentation, "detach"));
+    release.resolve();
+    expect(await pending).toMatchObject({ status: "denied" });
+    expect(f.broker.state(initial.sessionId)?.revision).toBe(0);
+    const recovered = await new DraftSnapshotStore(join(f.broker.recoveryRoot, initial.sessionId)).recover();
+    expect(recovered?.state.revision).toBe(0);
+    expect(f.broker.chromeProtected(initial.sessionId)).toBe(true);
+    if (fresh) {
+      expect(await f.manager.handle(request(fresh.presentation, "command", { ...command, annotationName: "current" }))).toMatchObject({ status: "ok" });
+      expect(f.broker.state(initial.sessionId)?.annotationName).toBe("current");
+    }
+  });
+
+  it.each(["predecessor", "publication"] as const)("rejects retired command authority at the %s boundary", async (boundary) => {
+    let gate = false;
+    const entered = Promise.withResolvers<void>(), release = Promise.withResolvers<void>();
+    const f = await fixture({ beforeFinalRename: async () => {
+      if (gate) { gate = false; entered.resolve(); await release.promise; }
+    } });
+    const panel = await opened(f.manager, {});
+    const initial = payload(await f.manager.handle(request(panel.presentation, "bootstrap")));
+    await f.broker.protectChromeReview(initial.sessionId);
+    gate = true;
+    const predecessor = boundary === "predecessor" ? f.broker.acceptMutation(initial.sessionId, {
+      type: "set-annotation-name", expectedRevision: 0, annotationName: "predecessor",
+    }) : undefined;
+    if (predecessor) await entered.promise;
+    const queued = Promise.withResolvers<void>();
+    const accept = f.broker.acceptMutation.bind(f.broker);
+    vi.spyOn(f.broker, "acceptMutation").mockImplementationOnce((...args) => { queued.resolve(); return accept(...args); });
+    const expectedRevision = predecessor ? 1 : 0;
+    const pending = f.manager.handle(request(panel.presentation, "command", {
+      type: "set-annotation-name", expectedRevision, annotationName: "retired",
+    }));
+    await queued.promise;
+    if (!predecessor) await entered.promise;
+    await f.manager.handle(request(panel.presentation, "detach"));
+    release.resolve();
+    await predecessor;
+    expect(await pending).toMatchObject({ status: "denied" });
+    expect(f.broker.state(initial.sessionId)?.revision).toBe(expectedRevision);
+    const recovered = await new DraftSnapshotStore(join(f.broker.recoveryRoot, initial.sessionId)).recover();
+    expect(recovered?.state.revision).toBe(expectedRevision);
+    expect(recovered?.state.annotationName).not.toBe("retired");
+  });
+
+  it.each(["chooseCopy", "chooseOriginal"] as const)("rejects %s publication after the presentation detaches", async (method) => {
+    let gate = false;
+    const entered = Promise.withResolvers<void>(), release = Promise.withResolvers<void>();
+    const f = await fixture({ beforeFinalRename: async () => {
+      if (gate) { gate = false; entered.resolve(); await release.promise; }
+    } });
+    const panel = await opened(f.manager, {});
+    const initial = payload(await f.manager.handle(request(panel.presentation, "bootstrap")));
+    await f.broker.protectChromeReview(initial.sessionId);
+    const before = f.broker.saveStatus(initial.sessionId);
+    gate = true;
+    const pending = f.manager.handle(request(panel.presentation, method, method === "chooseCopy" ? { filename: "reviewed.pdf" } : {}));
+    await entered.promise;
+    await f.manager.handle(request(panel.presentation, "detach"));
+    release.resolve();
+    expect(await pending).toMatchObject({ status: "denied" });
+    expect(f.broker.saveStatus(initial.sessionId)).toEqual(before);
+    const recovered = await new DraftSnapshotStore(join(f.broker.recoveryRoot, initial.sessionId)).recover();
+    expect(recovered?.destination).toEqual(before?.destination);
+  });
+
   it("opens via a user picker without a task binding and serves the canonical reader", async () => {
     const f = await fixture();
     const initialOpen = await opened(f.manager, {});

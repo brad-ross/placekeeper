@@ -15,23 +15,78 @@ function fixture() {
 }
 it('expands before navigation and waits for the reader settlement', async () => {
   const f = fixture(); let settled = false;
-  const pending = f.tools.get('navigate_page').execute({ page: 2, documentGeneration: 4 }).then((v: string) => { settled = true; return JSON.parse(v); });
+  const pending = f.tools.get('navigate_page').execute({ page: 2, documentGeneration: 4, source: snapshot.source }).then((v: string) => { settled = true; return JSON.parse(v); });
   await Promise.resolve(); await Promise.resolve(); expect(f.moved()).toBe(true); expect(settled).toBe(false);
-  f.finish(true); expect(await pending).toMatchObject({ status: 'navigated', documentGeneration: 4 });
+  f.finish(true); expect(await pending).toMatchObject({ status: 'navigated', documentGeneration: 4, source: snapshot.source });
 });
 it('rejects invalid pages, stale generations, missing annotations, and detached readers', async () => {
   const f = fixture();
-  for (const args of [{ page: 0, documentGeneration: 4 }, { page: 4, documentGeneration: 4 }, { page: 2, documentGeneration: 3 }]) expect(JSON.parse(await f.tools.get('navigate_page').execute(args)).status).toBe('unavailable');
-  expect(JSON.parse(await f.tools.get('reveal_annotation').execute({ annotationId: 'missing', documentGeneration: 4 })).status).toBe('unavailable');
+  for (const args of [{ page: 0, documentGeneration: 4, source: snapshot.source }, { page: 4, documentGeneration: 4, source: snapshot.source }, { page: 2, documentGeneration: 3, source: snapshot.source }]) expect(JSON.parse(await f.tools.get('navigate_page').execute(args)).status).toBe('unavailable');
+  expect(JSON.parse(await f.tools.get('reveal_annotation').execute({ annotationId: 'missing', documentGeneration: 4, source: snapshot.source })).status).toBe('unavailable');
   expect(f.moved()).toBe(false); f.detach();
   expect(JSON.parse(await f.tools.get('inspect_review').execute({})).status).toBe('unavailable');
   f.bridge.dispose(); expect(f.tools.size).toBe(0);
 });
 it('never acknowledges a reader detached while navigation is pending', async () => {
-  const f = fixture(); const pending = f.tools.get('navigate_page').execute({ page: 2, documentGeneration: 4 });
+  const f = fixture(); const pending = f.tools.get('navigate_page').execute({ page: 2, documentGeneration: 4, source: snapshot.source });
   await Promise.resolve(); await Promise.resolve(); f.detach(); f.finish(true);
   expect(JSON.parse(await pending).status).toBe('unavailable');
 });
 it('reports an interrupted search without document content', async () => {
-  const f = fixture(); expect(JSON.parse(await f.tools.get('search_document').execute({ query: 'word', documentGeneration: 4 }))).toMatchObject({ status: 'unavailable' });
+  const f = fixture(); expect(JSON.parse(await f.tools.get('search_document').execute({ query: 'word', documentGeneration: 4, source: snapshot.source }))).toMatchObject({ status: 'unavailable' });
+});
+
+it('rejects old-source intent dispatched by name to a replacement registry with the same generation', async () => {
+  const tools = new Map<string, any>();
+  const api = { registerTool: (tool: any) => { tools.set(tool.name, tool); }, unregisterTool: (name: string) => { tools.delete(name); } };
+  const host = { ensureVisible: async () => true, available: () => true };
+  const oldSnapshot = { ...snapshot, documentGeneration: 1 };
+  const oldBridge = new LiveReaderTools(api, host);
+  oldBridge.attach({ snapshot: () => oldSnapshot, search: async () => { throw Error('unused'); }, navigate: async () => true });
+  const inspected = JSON.parse(await tools.get('inspect_review').execute({}));
+  const queued = { page: 2, documentGeneration: inspected.documentGeneration, source: inspected.source };
+  oldBridge.dispose();
+  const replacement = new LiveReaderTools(api, host);
+  let moves = 0;
+  replacement.attach({ snapshot: () => ({ ...oldSnapshot, source: { fileId: 'other-file', digest: 'other-digest' } }), search: async () => { throw Error('unused'); }, navigate: async () => { moves++; return true; } });
+  expect(JSON.parse(await tools.get('navigate_page').execute(queued))).toMatchObject({ status: 'unavailable', reason: 'stale-source' });
+  expect(moves).toBe(0);
+});
+
+it.each([
+  ['search_document', { query: 'word' }],
+  ['navigate_page', { page: 2 }],
+  ['reveal_search_result', { resultId: 'same-result-id' }],
+  ['reveal_annotation', { annotationId: 'same-annotation-id' }],
+])('fences %s against missing, malformed, and changed source identity before dispatch', async (name, args) => {
+  const f = fixture(); let calls = 0;
+  f.bridge.attach({ snapshot: () => ({ ...snapshot, annotations: [{ id: 'same-annotation-id', page: 1, kind: 'note', text: '' }] }), search: async () => { calls++; throw Error('must not dispatch'); }, navigate: async () => { calls++; return true; } });
+  for (const source of [undefined, {}, { fileId: 'x'.repeat(4097), digest: 'd' }, { fileId: 'f', digest: 'x'.repeat(513) }, { ...snapshot.source, grant: 'extra' }]) {
+    expect(JSON.parse(await f.tools.get(name).execute({ ...args, documentGeneration: 4, source }))).toMatchObject({ status: 'unavailable', reason: 'invalid-source' });
+  }
+  for (const source of [{ ...snapshot.source, fileId: 'other' }, { ...snapshot.source, digest: 'other' }]) {
+    expect(JSON.parse(await f.tools.get(name).execute({ ...args, documentGeneration: 4, source }))).toMatchObject({ status: 'unavailable', reason: 'stale-source' });
+  }
+  expect(calls).toBe(0);
+});
+
+it.each(['navigate_page', 'search_document'])('does not acknowledge %s after source changes at the same generation while pending', async name => {
+  const f = fixture(); let current = snapshot;
+  let finish!: () => void;
+  const gate = new Promise<void>(resolve => { finish = resolve; });
+  f.bridge.attach({ snapshot: () => current, navigate: async () => { await gate; return true; }, search: async () => { await gate; return { documentGeneration: 4, status: 'no-results', coverage: { totalPages: 3, searchedPages: 3, unsearchablePages: [], limitedPages: [] }, results: [], totalResults: 0, truncated: false, message: '' }; } });
+  const pending = f.tools.get(name).execute({ page: 2, query: 'word', documentGeneration: 4, source: snapshot.source });
+  await Promise.resolve(); await Promise.resolve();
+  current = { ...snapshot, source: { ...snapshot.source, digest: 'changed-bytes' } }; finish();
+  expect(JSON.parse(await pending)).toMatchObject({ status: 'unavailable' });
+});
+
+it('returns source with exact search results and passes the query unchanged', async () => {
+  const f = fixture(); let received: string | undefined;
+  const result = { documentGeneration: 4, status: 'partial' as const, coverage: { totalPages: 3, searchedPages: 2, unsearchablePages: [3], limitedPages: [] }, results: [{ id: 'match', page: 2, excerpt: 'word', matchKind: 'exact' as const }], totalResults: 1, truncated: false, message: 'partial' };
+  f.bridge.attach({ snapshot: () => snapshot, navigate: async () => true, search: async query => { received = query; return result; } });
+  const query = '  equilibrium α  ';
+  expect(JSON.parse(await f.tools.get('search_document').execute({ query, documentGeneration: 4, source: snapshot.source }))).toEqual({ ...result, source: snapshot.source });
+  expect(received).toBe(query);
+  expect(f.tools.get('inspect_review').inputSchema.required).toEqual([]);
 });

@@ -1,6 +1,6 @@
 import { parsePreferenceSet, type PreferenceRequest, type PreferenceResult } from './extension-preferences.js';
 import { parseHostResourceRequest, parseHostResourceResult, type HostResourceRequest, type HostResourceResult } from './host-resource-protocol.js';
-import { isCodexCapability, parseCodexAppRequest, parseCodexAppResponse, type CodexAppRequest, type CodexAppResponse } from './codex-mcp-protocol.js';
+import { codexPickerTimeouts, isCodexCapability, parseCodexAppRequest, parseCodexAppResponse, type CodexAppRequest, type CodexAppResponse } from './codex-mcp-protocol.js';
 
 export const EXTENSION_TOOL = 'extension_app';
 export const EXTENSION_META_KEY = 'placekeeper/extension';
@@ -24,6 +24,12 @@ export type ExtensionRequest =
   | { action: 'app'; request: CodexAppRequest };
 const object = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 const operation = (v: unknown): v is string => typeof v === 'string' && /^[A-Za-z0-9_-]{8,128}$/.test(v);
+/** Preserve the native picker budget through the extension envelope. */
+export function extensionPickerTimeouts(request: ExtensionRequest): { socketMs: number; sdkMs: number } | undefined {
+  return request.action === 'app' ? codexPickerTimeouts(request.request)
+    : request.action === 'open' && request.pdfPath === undefined ? { socketMs: 310_000, sdkMs: 315_000 } : undefined;
+}
+
 export function parseExtensionRequest(v: unknown): ExtensionRequest | undefined {
   const host = parseHostResourceRequest(v); if (host) return host;
   if (!object(v)) return;

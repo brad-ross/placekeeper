@@ -1,4 +1,4 @@
-import { parseExtensionRequest, parseExtensionResult, type ExtensionRequest, type ExtensionResult } from "../../../packages/core/src/extension-protocol.js";
+import { extensionPickerTimeouts, parseExtensionRequest, parseExtensionResult, type ExtensionRequest, type ExtensionResult } from "../../../packages/core/src/extension-protocol.js";
 import { requestControl } from "../../service/src/host/launch-control.js";
 import { defaultDaemonPaths } from "../../service/src/host/service-daemon.js";
 import { CODEX_MAX_ENCODED_RESPONSE_BYTES, codexPickerTimeouts, parseCodexAppRequest, parseCodexAppResponse, parseCodexDisplayRequest, parseCodexDisplayReceipt, parseCodexPendingPresentation, type CodexAppRequest, type CodexAppResponse, type CodexDisplayRequest, type CodexDisplayReceipt, type CodexPendingPresentation } from "../../../packages/core/src/codex-mcp-protocol.js";
@@ -19,7 +19,8 @@ export function createServiceClient(socketPath = defaultDaemonPaths().socketPath
     async extension(raw) {
       const request = parseExtensionRequest(raw);
       if (!request) throw new Error('invalid-extension');
-      const result = await requestControl(socketPath, {kind:'extension-app',request}, {maxMessageBytes:CODEX_MAX_ENCODED_RESPONSE_BYTES, ...(request.action==='open' && request.pdfPath===undefined ? {timeoutMs:310_000} : {})});
+      const picker = extensionPickerTimeouts(request);
+      const result = await requestControl(socketPath, {kind:'extension-app',request}, {maxMessageBytes:CODEX_MAX_ENCODED_RESPONSE_BYTES, ...(picker ? {timeoutMs:picker.socketMs} : {})});
       if(result.kind!=='extension-app') throw Error('extension-unavailable');
       const response=request.action==='app'?parseCodexAppResponse(result.response):parseExtensionResult(result.response);
       if(!response)throw Error('invalid-extension-response');

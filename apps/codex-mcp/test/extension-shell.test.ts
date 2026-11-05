@@ -11,7 +11,7 @@ const reply = (value: unknown) => ({ _meta: { [EXTENSION_META_KEY]: value } });
 function deferred() { let resolve!: (value: any) => void; const promise = new Promise<any>(done => { resolve = done; }); return { promise, resolve }; }
 function fixture(handler: (request: any) => Promise<any> = async () => reply({ status: 'ok', payload: {} }), resources: () => any = () => undefined, modelContext: () => any = () => undefined, preferences?: (request: any) => Promise<any>, message: () => any = () => undefined) {
     const calls: any[] = [];
-    const app = { getHostContext: () => ({ displayMode: 'fullscreen' }), callServerTool: vi.fn(async (input: any) => { calls.push(input.arguments.request); const request = input.arguments.request; if (preferences && ['settings-read', 'settings-update', 'catalogue'].includes(request.action)) return preferences(request); if (request.action === 'settings-read') return reply({ status: 'settings', values: { backgroundContext: true, selectionSharing: true, mentions: false }, revision: 0 }); if (request.action === 'catalogue') return reply({ status: 'catalogue', included: false }); return handler(request); }) };
+    const app = { getHostContext: () => ({ displayMode: 'fullscreen' }), callServerTool: vi.fn(async (input: any, _options?: { timeout: number; maxTotalTimeout?: number }) => { calls.push(input.arguments.request); const request = input.arguments.request; if (preferences && ['settings-read', 'settings-update', 'catalogue'].includes(request.action)) return preferences(request); if (request.action === 'settings-read') return reply({ status: 'settings', values: { backgroundContext: true, selectionSharing: true, mentions: false }, revision: 0 }); if (request.action === 'catalogue') return reply({ status: 'catalogue', included: false }); return handler(request); }) };
     const element = () => ({ inert: false, hidden: false, textContent: '', replaceChildren: vi.fn(), append: vi.fn() });
     const root = element(), status = element(), controls = element();
     return { app, shell: new ExtensionShell(app as unknown as App, root as unknown as HTMLElement, status as unknown as HTMLElement, controls as unknown as HTMLElement, resources, modelContext, message), root, status, controls, calls };
@@ -238,7 +238,7 @@ it('waits for actual host visibility after expansion before completing live navi
     const navigate = vi.fn(async () => true);
     host.mounts[0][4].attach({ snapshot: () => snapshot, navigate, search: vi.fn() });
     (document as any).hidden = true; f.shell.visibilityChanged(true);
-    const pending = tools.get('navigate_page').execute({ page: 2, documentGeneration: 1 });
+    const pending = tools.get('navigate_page').execute({ page: 2, documentGeneration: 1, source: { fileId: 'file', digest: 'digest' } });
     await vi.advanceTimersByTimeAsync(0); expect(navigate).not.toHaveBeenCalled();
     (document as any).hidden = false; f.shell.visibilityChanged(false);
     expect(JSON.parse(await pending).status).toBe('navigated'); expect(navigate).toHaveBeenCalledTimes(1);
@@ -251,7 +251,7 @@ it('reports live navigation unavailable if host expansion never reveals the read
     await f.shell.receive(active()); await vi.advanceTimersByTimeAsync(0);
     const navigate = vi.fn(); host.mounts[0][4].attach({ snapshot: vi.fn(), navigate, search: vi.fn() });
     (document as any).hidden = true; f.shell.visibilityChanged(true);
-    const pending = tools.get('navigate_page').execute({ page: 2, documentGeneration: 1 });
+    const pending = tools.get('navigate_page').execute({ page: 2, documentGeneration: 1, source: { fileId: 'file', digest: 'digest' } });
     await vi.advanceTimersByTimeAsync(1500);
     expect(JSON.parse(await pending).status).toBe('unavailable'); expect(navigate).not.toHaveBeenCalled();
     await f.shell.teardown();
@@ -315,4 +315,124 @@ it('requires explicit global opt-in and explicit include, update and remove choi
  const click = async (label: string) => { nodes(f.controls).filter(n => n.textContent === label).at(-1).onclick(); await vi.advanceTimersByTimeAsync(0); };
  await click('Include this review snapshot'); await click('Update included snapshot'); await click('Remove this review from mentions');
  expect(f.calls.filter(c => c.action === 'catalogue').map(c => c.operation)).toEqual(['status', 'capture', 'capture', 'remove']); await f.shell.teardown();
+});
+
+it.each([false, true])('replays a lost host resume receipt before refreshing rotated authority (host update: %s)', async updateDuringReplay => {
+    const bytes = btoa('%PDF-1.7\nresume fixture\n%%EOF');
+    let update!: (event: any) => void;
+    const resources = { read: vi.fn(async () => ({ contents: [{ uri: 'opaque:host', blob: bytes }] })), subscribe: vi.fn(async () => ({})), unsubscribe: vi.fn(async () => ({})), addUpdateHandler: vi.fn(listener => { update = listener; return vi.fn(); }) };
+    const rotated = 'e'.repeat(43), finalGrant = 'f'.repeat(43);
+    let imported = false, expired = false, rotatedAway = false, delivered = false, attempts = 0;
+    const f = fixture(async request => {
+        if (request.action === 'host-resource') {
+            if (request.operation === 'begin') {
+                if (rotatedAway && request.grant === nextGrant) return reply({ status: 'unavailable' });
+                return reply({ status: 'host-transfer', transfer: 't'.repeat(43), offset: 0 });
+            }
+            if (request.operation === 'chunk') return reply({ status: 'host-transfer', transfer: 't'.repeat(43), offset: request.offset + atob(request.dataBase64).length });
+            if (request.operation === 'finish') { if (!imported) { imported = true; return reply({ status: 'provisional', grant }); } return reply({ status: 'host-ready', generation: 1 }); }
+            if (request.operation === 'save') return reply({ status: 'host-status', outcome: 'read-only' });
+        }
+        if (request.action === 'activate') return reply(active(nextGrant));
+        if (request.action === 'resume') {
+            attempts++;
+            if (attempts === 1) {
+                rotatedAway = true;
+                if (updateDuringReplay) update({ params: { uri: 'opaque:host' } });
+                throw Error('successful response dropped');
+            }
+            delivered = true;
+            return reply(active(request.grant === rotated ? finalGrant : rotated));
+        }
+        if (request.action === 'app') return reply(expired && !delivered ? { status: 'denied', reason: 'expired' } : { status: 'ok', payload: {} });
+        return reply({ status: 'closed' });
+    }, () => resources);
+    await f.shell.receive({ status: 'host-resource', file: { name: 'host.pdf', resourceUri: 'opaque:host' }, ticket: 'p'.repeat(43) });
+    await vi.advanceTimersByTimeAsync(0);
+    expired = true; f.shell.wake();
+    await vi.waitFor(() => expect(attempts).toBe(1));
+    expect(f.root.inert).toBe(true);
+    await vi.waitFor(() => expect(host.mounts).toHaveLength(2), { timeout: 3000 });
+    const resumes = f.calls.filter(c => c.action === 'resume');
+    expect(resumes).toHaveLength(3);
+    expect(resumes[1]).toEqual(resumes[0]);
+    const refreshGrants = f.calls.filter(c => c.action === 'host-resource' && c.operation === 'begin' && c.grant).map(c => c.grant);
+    expect(refreshGrants.filter(g => g === nextGrant)).toHaveLength(1);
+    expect(refreshGrants).toContain(rotated);
+    expect(resumes[2].grant).toBe(rotated);
+    expect(host.mounts).toHaveLength(2);
+    expect(f.root.inert).toBe(false);
+    await f.shell.teardown();
+});
+
+it.each(['Open independent review', 'Cancel'])('keeps %s fenced while a recovery resume is pending', async competing => {
+    const pending = deferred();
+    const f = fixture(async request => request.action === 'choose' ? pending.promise : reply({ status: 'closed' }));
+    await f.shell.receive({ status: 'busy', recoveryToken: 'r'.repeat(43), canResume: true });
+    const buttons = f.controls.append.mock.calls.map(([button]) => button);
+    const resume = buttons.find(button => button.textContent === 'Resume protected review');
+    resume.onclick();
+    expect(buttons.every(button => button.disabled)).toBe(true);
+    buttons.find(button => button.textContent === competing).onclick();
+    expect(f.calls.filter(c => c.action === 'choose')).toHaveLength(1);
+    pending.resolve(reply(active(nextGrant))); await vi.advanceTimersByTimeAsync(0);
+    expect(host.mounts).toHaveLength(1);
+    expect(f.status.textContent).not.toContain('connection ended');
+    expect(f.controls.append.mock.calls.some(([button]) => button.textContent === 'Choose PDF')).toBe(false);
+    await f.shell.teardown();
+});
+
+it('fences retained recovery callbacks after cancel', async () => {
+    const f = fixture(async () => reply({ status: 'cancelled' }));
+    await f.shell.receive({ status: 'busy', recoveryToken: 'r'.repeat(43), canResume: true });
+    const buttons = f.controls.append.mock.calls.map(([button]) => button);
+    buttons.find(button => button.textContent === 'Cancel').onclick(); await vi.advanceTimersByTimeAsync(0);
+    buttons.find(button => button.textContent === 'Resume protected review').onclick(); await vi.advanceTimersByTimeAsync(0);
+    expect(f.calls.filter(c => c.action === 'choose')).toHaveLength(0);
+    expect(host.mounts).toHaveLength(0);
+    await f.shell.teardown();
+});
+
+it.each(['chooseFolder', 'locateSave'])('preserves the canonical SDK budget for nested %s', async method => {
+    const f = fixture();
+    await f.shell.receive(active()); await vi.advanceTimersByTimeAsync(0);
+    await host.options[0].call(method, {});
+    const call = f.app.callServerTool.mock.calls.find(([input]) => input.arguments.request.action === 'app' && input.arguments.request.request.method === method);
+    expect(call?.[1]).toEqual({ timeout: 315_000, maxTotalTimeout: 315_000 });
+    await f.shell.teardown();
+});
+
+it('revokes a late recovery choice grant after teardown', async () => {
+    const pending = deferred();
+    const f = fixture(async request => request.action === 'choose' ? pending.promise : reply({ status: 'closed' }));
+    await f.shell.receive({ status: 'busy', recoveryToken: 'r'.repeat(43), canResume: true });
+    f.controls.append.mock.calls.map(([button]) => button).find(button => button.textContent === 'Resume protected review').onclick();
+    await f.shell.teardown(); pending.resolve(reply(active(nextGrant))); await vi.advanceTimersByTimeAsync(0);
+    expect(f.calls.filter(c => c.action === 'revoke').map(c => c.grant)).toEqual([nextGrant]);
+    expect(host.mounts).toHaveLength(0);
+});
+
+it('restores the recovery button group after a failed choice and retries its operation identity', async () => {
+    let attempts = 0;
+    const f = fixture(async request => { if (request.action === 'choose') { if (++attempts === 1) throw Error('offline'); return reply(active(nextGrant)); } return reply({ status: 'closed' }); });
+    await f.shell.receive({ status: 'busy', recoveryToken: 'r'.repeat(43), canResume: true });
+    const buttons = f.controls.append.mock.calls.map(([button]) => button), resume = buttons.find(button => button.textContent === 'Resume protected review');
+    resume.onclick(); await vi.advanceTimersByTimeAsync(0);
+    expect(buttons.every(button => button.disabled === false)).toBe(true);
+    resume.onclick(); await vi.advanceTimersByTimeAsync(0);
+    const choices = f.calls.filter(c => c.action === 'choose'); expect(choices[1]).toEqual(choices[0]);
+    expect(host.mounts).toHaveLength(1); await f.shell.teardown();
+});
+
+it('revokes a late chooser result after teardown and fences the retained picker callback', async () => {
+    const pending = deferred();
+    const f = fixture(async request => request.action === 'open' ? pending.promise : reply({ status: 'closed' }));
+    await f.shell.receive({ status: 'chooser' });
+    const choose = f.controls.append.mock.calls.map(([button]) => button).find(button => button.textContent === 'Choose PDF');
+    choose.onclick(); await f.shell.teardown();
+    pending.resolve(reply(active(nextGrant))); await vi.advanceTimersByTimeAsync(0);
+    choose.onclick(); await vi.advanceTimersByTimeAsync(0);
+    expect(f.calls.filter(c => c.action === 'open')).toHaveLength(1);
+    expect(f.calls.filter(c => c.action === 'revoke').map(c => c.grant)).toEqual([nextGrant]);
+    expect(host.mounts).toHaveLength(0);
 });
