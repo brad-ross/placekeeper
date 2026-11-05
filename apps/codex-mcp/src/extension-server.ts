@@ -16,7 +16,7 @@ export async function callExtensionTool(client:NativeServiceClient,name:string,a
     let response;
     if(name==='open_pdf'){
       const input=OpenAIFileEntrypointInputSchema.parse(args),path=getResourcePath(meta);
-      response=path===undefined?{status:'host-resource',file:input.file}:await client.extension({action:'open',pdfPath:path});
+      response=path===undefined?await client.extension({action:'host-open',file:input.file}):await client.extension({action:'open',pdfPath:path});
     }else if(name==='open_placekeeper'){
       if(args!==undefined&&(typeof args!=='object'||args===null||Object.keys(args).length))return unavailable;
       response={status:'chooser'};
@@ -24,7 +24,7 @@ export async function callExtensionTool(client:NativeServiceClient,name:string,a
       if(typeof args!=='object'||args===null||Object.keys(args).length!==1||!('request'in args))return unavailable;
       const request=parseExtensionRequest(args.request);
       // Paths are accepted only from the host's entrypoint metadata, never from app arguments.
-      if(!request||request.action==='open'&&request.pdfPath!==undefined)return unavailable;
+      if(!request||request.action==='host-open'||request.action==='open'&&request.pdfPath!==undefined)return unavailable;
       response=await client.extension(request);
     }else return unavailable;
     const result:CallToolResult={content:[],_meta:{[EXTENSION_META_KEY]:response}};

@@ -2696,7 +2696,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
           });
         }}
         save={{
-          savedLabel: exportOnly
+          savedLabel: saveStatus.destination.phase === 'host' && !saveStatus.destination.writable ? 'Protected review state' : exportOnly
             ? 'Export to keep your annotations'
             : state.workflow.mode === 'generated-output' ? 'Protected review state' : 'Saved',
           savePhase: exportOnly
@@ -2721,7 +2721,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
           saveOptionsOpen: state.workflow.mode === 'generated-output' || exportOnly
             ? false
             : destinationDialog !== null,
-          ...(state.workflow.mode === 'generated-output' || exportOnly
+          ...(state.workflow.mode === 'generated-output' || exportOnly || saveStatus.destination.phase === 'host'
             ? {}
             : { onSaveOptions: () => openCopyDialog("menu") }),
           onExportReviewedCopy: annotationExport.open,

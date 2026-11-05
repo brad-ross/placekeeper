@@ -1,3 +1,4 @@
+import { OpenAIExtensions } from '@openai/mcp-extensions/app';
 import { ExtensionShell } from "./extension-shell.js";
 import { EXTENSION_META_KEY } from "../../../packages/core/src/extension-protocol.js";
 import { createCodexHostRuntime } from "../../web/src/host/codex-runtime.js";
@@ -15,12 +16,13 @@ import { deniedFailure, diagnosticFailure, LifecycleDiagnostics, NativeDiagnosti
 import { PanelLiveness, type PanelConnectionState } from "./panel-liveness.js";
 
 const app = new App({ name: "Placekeeper", version: "1.0.0" });
+const extensions = new OpenAIExtensions(app);
 const status = document.querySelector<HTMLElement>("#status")!;
 const detail = document.querySelector<HTMLElement>("#detail")!;
 const reviewRoot = document.querySelector<HTMLElement>("#root")!;
 const extensionControls = document.createElement("div");
 detail.after(extensionControls);
-const extensionShell = new ExtensionShell(app, reviewRoot, status, extensionControls);
+const extensionShell = new ExtensionShell(app, reviewRoot, status, extensionControls, () => extensions.resources);
 status.setAttribute("role", "status");
 status.setAttribute("aria-live", "polite");
 let traceStorage: Storage | undefined;

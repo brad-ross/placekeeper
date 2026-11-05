@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { PENDING_META_KEY, RESPONSE_META_KEY } from '../src/transport-contract.js';
 const host = vi.hoisted(() => ({ app: undefined as any, handler: undefined as any, options: [] as any[], mounts: [] as any[], unmount: vi.fn() }));
-vi.mock('@modelcontextprotocol/ext-apps', () => ({ App: class { constructor() { host.app = this; } connect() { return Promise.resolve(); } callServerTool(input: any) { return host.handler(input.arguments.request); } } }));
+vi.mock('@modelcontextprotocol/ext-apps', () => ({ App: class { constructor() { host.app = this; } addEventListener() {} getHostContext() { return undefined; } getHostCapabilities() { return undefined; } connect() { return Promise.resolve(); } callServerTool(input: any) { return host.handler(input.arguments.request); } } }));
 vi.mock('../src/extension-shell.js', () => ({ ExtensionShell: class { ownsPanel = false; wake() {} } }));
 vi.mock('../../web/src/host/codex-runtime.js', () => ({ createCodexHostRuntime: (options: any) => { host.options.push(options); return options; } }));
 vi.mock('../../web/src/codex-entry.js', () => ({ mountCodexProductionReview: (...args: any[]) => { host.mounts.push(args); return host.unmount; } }));
@@ -18,7 +18,7 @@ async function start(handler: (request: any) => Promise<any>) {
 beforeEach(() => {
   vi.resetModules(); vi.useFakeTimers(); host.options.length = 0; host.mounts.length = 0; host.unmount.mockClear(); elements.clear();
   for (const id of ['#root', '#status', '#detail', '#renewal']) elements.set(id, element());
-  vi.stubGlobal('document', { hidden: false, querySelector: (id: string) => elements.get(id), createElement: element, addEventListener: vi.fn() });
+  vi.stubGlobal('document', { documentElement: { style: { setProperty: vi.fn() } }, hidden: false, querySelector: (id: string) => elements.get(id), createElement: element, addEventListener: vi.fn() });
   vi.stubGlobal('window', { addEventListener: vi.fn() });
 });
 afterEach(async () => { await host.app?.onteardown(); vi.useRealTimers(); vi.unstubAllGlobals(); });

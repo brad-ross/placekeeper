@@ -375,6 +375,19 @@ export class PdfSaveCoordinator {
     return confirmation === undefined ? undefined : status.state;
   }
 
+  /** Produces the same verified PDF target as local saves, without publishing a filesystem destination. */
+  async materializeImportedSave(sessionId: string, exportFence?: { expectedRevision: number; documentGeneration: number }) {
+    if (this.#broker.sourceDisposition(sessionId) !== "remote-temporary") throw new Error("Host saves require an imported source");
+    this.#assertRewriteEligible(sessionId);
+    const delivery = exportFence ? await this.#broker.freezeDelivery(sessionId, exportFence, exportFence.documentGeneration) : await this.#broker.freezeSaveDelivery(sessionId);
+    const sourcePdf = new Uint8Array(await readFile(delivery.sourceSnapshotPath));
+    const written = await runPdfBackend(this.#writer, { sourcePdf, sourceSha256: delivery.source.digest,
+      revision: delivery.revision, annotations: delivery.annotations, manageNativeAnnotations: delivery.manageNativeAnnotations ?? false }, this.#backend);
+    await this.#verify({ sourcePdf, candidatePdf: written.pdfBytes, evidence: written.evidence,
+      annotations: delivery.annotations, manageNativeAnnotations: delivery.manageNativeAnnotations ?? false });
+    return { delivery, bytes: written.pdfBytes, sha256: written.evidence.outputSha256 };
+  }
+
   requestSave(sessionId: string): Promise<void> {
     if (this.#broker.state(sessionId)?.workflow.mode === "generated-output") {
       return Promise.resolve();

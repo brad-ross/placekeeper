@@ -184,6 +184,7 @@ export interface PdfEvidenceCatalog {
 export interface LiveSaveStatus {
   readonly destination:
     | { readonly phase: "none"; readonly generation: 0 }
+    | { readonly phase: "host"; readonly generation: number; readonly writable: boolean }
     | { readonly phase: "establishing"; readonly generation: number }
     | {
         readonly phase: "active";

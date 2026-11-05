@@ -13,7 +13,8 @@ describe('extension entrypoint admission',()=>{
     expect(client.extension).toHaveBeenCalledOnce();
   });
   it('preserves an opaque resource for the host adapter instead of interpreting it as a path',async()=>{
-    const client=fixture();expect(await callExtensionTool(client,'open_pdf',{file},undefined)).toMatchObject({_meta:{[EXTENSION_META_KEY]:{status:'host-resource',file}}});expect(client.extension).not.toHaveBeenCalled();
+    const client=fixture();await callExtensionTool(client,'open_pdf',{file},undefined);expect(client.extension).toHaveBeenCalledWith({action:'host-open',file});
+    expect(await callExtensionTool(client,EXTENSION_TOOL,{request:{action:'host-open',file}},undefined)).toMatchObject({isError:true});
   });
   it('opens a chooser without selecting another conversation’s active review',async()=>{
     const client=fixture();expect(await callExtensionTool(client,'open_placekeeper',{},undefined)).toMatchObject({_meta:{[EXTENSION_META_KEY]:{status:'chooser'}}});expect(client.extension).not.toHaveBeenCalled();

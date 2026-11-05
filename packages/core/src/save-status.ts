@@ -1,4 +1,7 @@
 export type SaveFailureReason =
+  | "host-conflict"
+  | "host-write-unknown"
+  | "host-read-only"
   | "destination-unconfigured"
   | "missing"
   | "invalid-annotation-geometry"
@@ -9,6 +12,7 @@ export type SaveFailureReason =
 
 export type SaveDestination =
   | { readonly phase: "none"; readonly generation: 0 }
+  | { readonly phase: "host"; readonly generation: number; readonly writable: boolean }
   | { readonly phase: "establishing"; readonly generation: number }
   | {
       readonly phase: "active";

@@ -1,3 +1,5 @@
+import type { OpenAIResources } from '@openai/mcp-extensions/app';
+import { HostResourceAdapter } from './host-resource-adapter.js';
 import type { App } from '@modelcontextprotocol/ext-apps';
 import { createCodexHostRuntime } from '../../web/src/host/codex-runtime.js';
 import { mountCodexProductionReview } from '../../web/src/codex-entry.js';
@@ -8,6 +10,13 @@ import { PanelLiveness } from './panel-liveness.js';
 import { NativeDiagnosticError, diagnosticFailure } from './lifecycle-diagnostics.js';
 /** Memory-only app grants. A new host invocation never inherits an old panel's authority. */
 export class ExtensionShell {
+    #host: HostResourceAdapter | undefined;
+    #hostNotice = '';
+    #hostEpoch = 0;
+    #hostRefreshPending = false;
+    #hostUpdateRevision = 0;
+    #hostSave: Promise<void> | undefined;
+    #saveRequested = false;
     #grant: string | undefined;
     #active: ExtensionPresentation | undefined;
     #unmount: (() => void) | undefined;
@@ -22,7 +31,7 @@ export class ExtensionShell {
     #resumeOperation: string | undefined;
     #watermark: number | undefined;
     readonly #listeners = new Set<(event: HostRuntimeInvalidation) => void>();
-    constructor(readonly app: App, readonly root: HTMLElement, readonly status: HTMLElement, readonly controls: HTMLElement) { }
+    constructor(readonly app: App, readonly root: HTMLElement, readonly status: HTMLElement, readonly controls: HTMLElement, readonly resources: () => OpenAIResources | undefined = () => undefined) { }
     get ownsPanel() { return this.#received; }
     async receive(raw: unknown): Promise<boolean> {
         const result = parseExtensionResult(raw);
@@ -66,6 +75,7 @@ export class ExtensionShell {
         if (result.status === 'provisional') {
             this.#grant = result.grant;
             this.#resumeOperation = crypto.randomUUID();
+            if (this.#host) { const refreshed = await this.#host.refresh(result.grant); if (refreshed.status === 'host-status' && refreshed.outcome === 'conflict') this.#hostNotice = 'The host PDF changed before saving. Your review is protected; export a reviewed copy before reopening the newer PDF.'; }
             let activated: ExtensionResult | CodexAppResponse | undefined;
             for (let attempt = 0; attempt < 3; attempt++) {
                 if (this.#closed)
@@ -97,6 +107,7 @@ export class ExtensionShell {
             this.#active = result.presentation;
             this.controls.replaceChildren();
             this.#mount();
+            if (this.#host) { this.#button('Refresh PDF', () => this.#continue()); this.#button('Save now', () => this.#saveHost()); void this.#saveHost(); if (this.#hostRefreshPending) queueMicrotask(() => { void this.#continue().catch(() => undefined); }); }
             return;
         }
         if (result.status === 'cancelled') {
@@ -121,12 +132,16 @@ export class ExtensionShell {
             return;
         }
         if (result.status === 'host-resource') {
-            this.#show('This PDF is supplied as a host resource. This build cannot yet open that source; keep the original file and protected reviews intact.');
+            this.#show('Reading host PDF…');
+            const hostEpoch = ++this.#hostEpoch;
+            this.#host = new HostResourceAdapter({ resources: this.resources, request: async request => { const response = await this.#request(request); const parsed = parseExtensionResult(response); if (!parsed) throw Error('Host resource unavailable'); return parsed; }, current: () => !this.#closed && hostEpoch === this.#hostEpoch, onUpdate: () => { this.#hostRefreshPending = true; this.#hostUpdateRevision++; if (this.#active) void this.#continue().catch(() => this.#show('The host PDF could not be refreshed. Finish any current edit, then refresh; your protected review is retained.')); } });
+            await this.#apply(await this.#host.open(result));
             return;
         }
         this.#ended();
     }
-    #chooser() { this.#show('Open a PDF to begin reviewing.'); this.controls.replaceChildren(); this.#button('Choose PDF', async () => { const result = await this.#request({ action: 'open' }); const parsed = parseExtensionResult(result); if (parsed?.status === 'chooser') {
+    #resetHost() { const host = this.#host; this.#host = undefined; this.#hostEpoch++; this.#hostNotice = ''; this.#hostRefreshPending = false; this.#hostUpdateRevision = 0; this.#saveRequested = false; this.#hostSave = undefined; void host?.dispose().catch(() => undefined); }
+    #chooser() { this.#resetHost(); this.#show('Open a PDF to begin reviewing.'); this.controls.replaceChildren(); this.#button('Choose PDF', async () => { const result = await this.#request({ action: 'open' }); const parsed = parseExtensionResult(result); if (parsed?.status === 'chooser') {
         this.#show('Use the PDF’s file menu to open it in Placekeeper on this host.');
         return;
     } if (parsed)
@@ -146,7 +161,7 @@ export class ExtensionShell {
         this.#show('Opening PDF…');
         this.#unmount = mountCodexProductionReview(this.root, runtime, () => { if (epoch === this.#epoch)
             this.#show('The PDF could not be loaded. Reopen it through the file menu; protected work is retained.'); }, () => { if (epoch === this.#epoch && this.#connected)
-            this.#show(''); });
+            this.#show(this.#hostNotice); });
         this.#liveness?.stop();
         this.#liveness = new PanelLiveness({ renew: async () => { await this.#probe('renew'); }, poll: async () => { await this.#probe('watermark'); }, pollInterval: () => document.hidden ? 5000 : 1000, onState: state => { if (epoch !== this.#epoch || this.#closed)
                 return; if (state === 'reconnecting')
@@ -181,7 +196,7 @@ export class ExtensionShell {
                 if (this.#verified.size === 2) {
                     this.#connected = true;
                     this.root.inert = false;
-                    this.#show('');
+                    this.#show(this.#hostNotice);
                 }
             }
             if (method === 'watermark' && value.sessionId) {
@@ -207,6 +222,11 @@ export class ExtensionShell {
         const active = this.#active;
         if (!active || this.#closed || epoch !== this.#epoch)
             throw new NativeDiagnosticError('stale-reply');
+        if (method === 'exportReviewedCopy' && this.#host && this.#grant) {
+            const value = payload as { fence?: { expectedRevision: number; documentGeneration: number } };
+            if (!value.fence) throw Error('Refresh the review before exporting.');
+            return this.#host.export(this.#grant, value.fence);
+        }
         const probe = method === 'renew' || method === 'watermark';
         if (!probe && !this.#connected)
             throw new NativeDiagnosticError('transport');
@@ -238,7 +258,29 @@ export class ExtensionShell {
             throw new NativeOperationError();
         if (response.status !== 'ok')
             throw new NativeDiagnosticError('unexpected-status');
+        if (this.#host && (method === 'command' || method === 'finalizeInteraction')) void this.#saveHost();
+        if (this.#hostRefreshPending && ['finalizeInteraction', 'releaseInteraction', 'acknowledgeInteraction'].includes(method)) void this.#continue().catch(() => undefined);
         return response.payload;
+    }
+    async #saveHost() {
+        this.#saveRequested = true;
+        if (this.#hostSave) return this.#hostSave;
+        const hostEpoch = this.#hostEpoch;
+        const running = (async () => {
+            while (this.#saveRequested && this.#host && this.#grant && !this.#closed) {
+                this.#saveRequested = false;
+                const result = await this.#host.save(this.#grant);
+                if (hostEpoch !== this.#hostEpoch || this.#closed) return;
+                if (result.status === 'host-status') {
+                    if (result.outcome === 'saved') { this.#hostNotice = ''; this.#show(''); }
+                    else if (result.outcome === 'read-only') { this.#hostNotice = 'This host PDF is read-only. Your review is protected; use Export reviewed PDF to keep a copy.'; this.#show(this.#hostNotice); }
+                    else if (result.outcome === 'conflict') { this.#hostNotice = 'The host PDF changed before saving. Your review is protected. Export a reviewed copy before reopening the newer PDF.'; this.#show(this.#hostNotice); }
+                    else if (result.outcome === 'protected') { this.#hostNotice = 'The host save was not completed. Your review is protected; choose Save now or export a reviewed copy.'; this.#show(this.#hostNotice); }
+                    else if (result.outcome === 'unknown') { this.#hostNotice = 'The host save could not be confirmed. Your review is protected; refresh to check the current PDF.'; this.#show(this.#hostNotice); }
+                }
+            }
+        })().catch(() => { if (hostEpoch === this.#hostEpoch) this.#show('Host save could not be completed. Your review is protected; refresh or export a reviewed copy.'); }).finally(() => { if (this.#hostSave === running) this.#hostSave = undefined; });
+        this.#hostSave = running; return running;
     }
     async #continue() {
         if (this.#closed)
@@ -247,22 +289,36 @@ export class ExtensionShell {
             return this.#resume;
         if (!this.#grant)
             throw new NativeDiagnosticError('service-denied-unavailable');
-        this.root.inert = true;
-        this.#connected = false;
-        this.#show('Reconnecting to Placekeeper… Editing is paused.');
+        if (!this.#host || !this.#connected) {
+            this.root.inert = true;
+            this.#connected = false;
+            this.#show('Reconnecting to Placekeeper… Editing is paused.');
+        }
         this.#resumeOperation ??= crypto.randomUUID();
         const grant = this.#grant, operationId = this.#resumeOperation;
-        this.#resume = (async () => { const result = await this.#request({ action: 'resume', grant, operationId }); if (result.status !== 'active' || !('presentation' in result)) {
+        let completed = false;
+        this.#resume = (async () => {
+            if (this.#host) {
+                do {
+                    const revision = this.#hostUpdateRevision;
+                    const refreshed = await this.#host.refresh(grant);
+                    this.#hostRefreshPending = revision !== this.#hostUpdateRevision;
+                    if (refreshed.status === 'host-status' && refreshed.outcome === 'conflict') this.#hostNotice = 'The host PDF changed before saving. Your review is protected; export a reviewed copy before reopening the newer PDF.';
+                } while (this.#hostRefreshPending && !this.#closed);
+            }
+            this.root.inert = true;
+            this.#connected = false;
+            const result = await this.#request({ action: 'resume', grant, operationId }); if (result.status !== 'active' || !('presentation' in result)) {
             this.#ended();
             throw new NativeDiagnosticError('service-denied-unavailable');
-        } this.#resumeOperation = undefined; await this.#apply(result); })().finally(() => { this.#resume = undefined; });
+        } this.#resumeOperation = undefined; await this.#apply(result); completed = true; })().finally(() => { this.#resume = undefined; if (completed && this.#hostRefreshPending && !this.#closed) queueMicrotask(() => { void this.#continue().catch(() => undefined); }); });
         return this.#resume;
     }
     #ended() { if (this.#closed)
-        return; this.#connected = false; this.#liveness?.stop(); this.root.inert = true; this.#show('This connection ended. Reopen the PDF through its file menu; accepted annotations and protected drafts are retained.'); this.#closed = true; this.#epoch++; }
+        return; this.#connected = false; this.#liveness?.stop(); void this.#host?.dispose().catch(() => undefined); this.root.inert = true; this.#show('This connection ended. Reopen the PDF through its file menu; accepted annotations and protected drafts are retained.'); this.#closed = true; this.#epoch++; }
     wake() { this.#liveness?.wake(); }
     disconnected() { if (this.ownsPanel)
         this.#ended(); }
-    async teardown() { this.#closed = true; this.#connected = false; this.root.inert = true; const grant = this.#grant; this.#epoch++; this.#grant = undefined; this.#active = undefined; this.#liveness?.stop(); this.#unmount?.(); this.#listeners.clear(); if (grant)
+    async teardown() { this.#closed = true; this.#connected = false; this.root.inert = true; const grant = this.#grant; this.#epoch++; this.#grant = undefined; this.#active = undefined; this.#liveness?.stop(); this.#unmount?.(); this.#listeners.clear(); await this.#host?.dispose(); if (grant)
         await this.#request({ action: 'revoke', grant }).catch(() => undefined); }
 }

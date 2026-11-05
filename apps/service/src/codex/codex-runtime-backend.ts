@@ -69,6 +69,8 @@ export class CodexServiceRuntimeBackend {
     } });
   }
 
+  materializeImportedSave(sessionId: string, fence?: { expectedRevision: number; documentGeneration: number }) { return this.#saving.materializeImportedSave(sessionId, fence); }
+
   attach(scope: CodexActiveScope): void {
     this.detach(scope.runtimeId);
     const ownerKey = `codex:${scope.runtimeId}`;
@@ -166,6 +168,10 @@ export class CodexServiceRuntimeBackend {
     }
     if (request.method === "presence") return {};
     const method = request.method as ReviewRuntimeBrokerMethod;
+    if (this.#broker.saveStatus(scope.sessionId)?.destination.phase === "host" &&
+      ["chooseCopy", "chooseFolder", "chooseOriginal", "retrySave", "locateSave", "exportReviewedCopy"].includes(method)) {
+      throw new Error("Host resources use their conditional save and export protocol");
+    }
     const interactionAction = interactionActions[method];
     const invoke = async () => {
       if (!current()) throw new Error("presentation-unavailable");
