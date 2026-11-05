@@ -227,12 +227,14 @@ it('publishes fresh initial null context automatically while respecting a later 
     f.app.getHostContext = () => ({ displayMode: 'fullscreen', 'openai/modelContext': null });
     await f.shell.receive({ ...active(), contextPublished: false });
     const snapshot = { title: 'Paper', documentGeneration: 1, reviewRevision: 0, source: { fileId: 'file', digest: 'd' }, page: 1, pageCount: 2, annotations: [], selection: null };
+    expect(host.options[0].contextOwner).toBe('app');
     host.mounts[0][5](snapshot); await vi.advanceTimersByTimeAsync(0);
     expect(api.update).toHaveBeenCalledOnce();
     expect(api.update.mock.calls[0]?.[0].content[0].resource.uri).toBe('placekeeper-context:///background');
     f.shell.hostContextChanged({ 'openai/modelContext': null }); await vi.advanceTimersByTimeAsync(0);
     host.mounts[0][5]({ ...snapshot, page: 2 }); await vi.advanceTimersByTimeAsync(0);
     expect(api.update).toHaveBeenCalledTimes(2); expect(api.update.mock.calls[1]?.[0].content).toEqual([]);
+    expect(f.controls.append.mock.calls.flat().some(element => element.textContent === 'Background context is paused for this app.')).toBe(true);
     await f.shell.teardown();
 });
 it('waits for actual host visibility after expansion before completing live navigation', async () => {

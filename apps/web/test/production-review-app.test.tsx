@@ -1754,6 +1754,28 @@ describe("one production review tree", () => {
     expect(finder).not.toContain("Codex");
   });
 
+  it('omits the legacy task-binding badge only for an app-owned Codex reader', () => {
+    const state = createReviewState({
+      sessionId: '00000000-0000-4000-8000-000000000011',
+      source: { fileId: '00000000-0000-4000-8000-000000000012', digest: 'a'.repeat(64), byteLength: 12 },
+    });
+    const renderReader = (contextOwner?: 'app') => renderToStaticMarkup(<ProductionReviewApp
+      session={{ sessionId: state.sessionId }}
+      initialState={state}
+      scope={{ documentTitle: 'paper.pdf', launchSurface: 'codex', ...(contextOwner === undefined ? {} : { contextOwner }) }}
+      api={{
+        command: vi.fn(), saveStatus: vi.fn(), saveProposal: vi.fn(), chooseCopy: vi.fn(),
+        chooseFolder: vi.fn(), chooseOriginal: vi.fn(), retrySave: vi.fn(), locateSave: vi.fn(), scope: vi.fn(),
+      }}
+      viewer={<div>Viewer</div>}
+    />);
+
+    expect(renderReader()).toContain('Agent context unavailable');
+    const app = renderReader('app');
+    expect(app).not.toContain('data-codex-context');
+    expect(app).not.toContain('Reopen this PDF from your agent');
+  });
+
   it("renders a previously current Codex identity as refreshing as soon as local review state advances", () => {
     const initial = createReviewState({
       sessionId: "00000000-0000-4000-8000-000000000021",

@@ -28,6 +28,8 @@ export interface ProductionScope {
   readonly persistenceMode?: 'export-only';
   /** A restarted browser is awaiting task-scoped Codex reattachment. */
   readonly reconnectPending?: true;
+  /** App-owned extensions publish context separately from legacy task bindings. */
+  readonly contextOwner?: 'app';
   readonly codexContext?: LiveContextBindingStatus;
 }
 

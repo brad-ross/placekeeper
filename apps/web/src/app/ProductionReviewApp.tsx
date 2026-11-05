@@ -2677,7 +2677,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
         {...(props.onHostExportRequestHandled === undefined ? {} : {
           onDocumentActionsRequestHandled: props.onHostExportRequestHandled,
         })}
-        {...(scope.launchSurface === 'codex'
+        {...(scope.launchSurface === 'codex' && scope.contextOwner !== 'app'
           ? { codexContext: visibleCodexContext(codexContext, state) ?? UNAVAILABLE_CODEX_CONTEXT }
           : {})}
         {...((copyLinkBase === undefined && props.api.createLink === undefined) || locationHistory === undefined ? {} : {
