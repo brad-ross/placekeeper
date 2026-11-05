@@ -1,3 +1,4 @@
+import type { App } from '@modelcontextprotocol/ext-apps';
 import type { OpenAIResources } from '@openai/mcp-extensions/app';
 import { HOST_RESOURCE_CHUNK_BYTES, HOST_RESOURCE_MAX_BYTES, type HostResourceIntent } from '../../../packages/core/src/host-resource-protocol.js';
 import type { ExtensionRequest, ExtensionResult } from '../../../packages/core/src/extension-protocol.js';
@@ -20,7 +21,7 @@ export class HostResourceAdapter {
         current: () => boolean;
         onUpdate: () => void;
         digest?: (b: Uint8Array<ArrayBuffer>) => Promise<string>;
-        download?: (bytes: Uint8Array<ArrayBuffer>, filename: string) => void;
+        downloadFile?: App['downloadFile'];
     }) { }
     #current(epoch: number) { return epoch === this.#epoch && this.options.current(); }
     #assert(epoch: number) { if (!this.#current(epoch))
@@ -169,21 +170,13 @@ export class HostResourceAdapter {
                 throw Error('Reviewed export unavailable');
             const bytes = await this.#download(grant, result.intent, epoch);
             const filename = (this.#file?.name ?? 'review.pdf').replace(/[\\/\u0000-\u001f]/g, '_').replace(/\.pdf$/i, '') + '-reviewed.pdf';
-            if (this.options.download)
-                this.options.download(bytes, filename);
-            else {
-                const url = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));
-                try {
-                    const anchor = document.createElement('a');
-                    anchor.href = url;
-                    anchor.download = filename;
-                    anchor.click();
-                }
-                finally {
-                    setTimeout(() => URL.revokeObjectURL(url), 30000);
-                }
-            }
-            return { kind: 'reviewed-copy' as const, path: filename, revision: result.intent.revision, digest: result.intent.sha256, warning: 'The browser was asked to download the reviewed copy. Verify the downloaded file before closing your protected review.' };
+            if (!this.options.downloadFile) throw Error('This host does not support PDF downloads. Your review is still protected.');
+            const resultDownload = await this.options.downloadFile({ contents: [{ type: 'resource', resource: {
+                uri: `file:///${encodeURIComponent(filename)}`, mimeType: 'application/pdf', blob: encode(bytes),
+            } }] }, { timeout: 300000 });
+            this.#assert(epoch);
+            if (resultDownload.isError) return { kind: 'cancelled' as const };
+            return { kind: 'reviewed-copy' as const, path: filename, revision: result.intent.revision, digest: result.intent.sha256, warning: 'The host accepted the reviewed-copy download. Verify the saved file before closing your protected review.' };
         });
     }
     async dispose() { this.#epoch++; for (const read of this.#reads) read.abort(); this.#reads.clear(); this.#unsubscribe?.(); this.#unsubscribe = undefined; const file = this.#file; this.#file = undefined; if (file && this.#subscribed)

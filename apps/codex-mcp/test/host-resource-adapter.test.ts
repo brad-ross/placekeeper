@@ -47,14 +47,14 @@ it('cleans up a subscription that arrives after disposal',async()=>{
  await f.adapter.dispose();resolve({});await expect(opening).rejects.toThrow();expect(f.resources.unsubscribe).toHaveBeenCalledWith({uri:'opaque:x'});
 });
 it('exports a verified reviewed copy explicitly without writing to the host or acknowledging Saved',async()=>{
- const f=fixture(),download=vi.fn();
+ const f=fixture(),downloadFile=vi.fn(async()=>({}));
  const adapter=new HostResourceAdapter({resources:()=>f.resources as any,request:async(r:any)=>{
   if(r.operation==='export')return {status:'host-save',intent:{id:'e'.repeat(43),purpose:'export',generation:1,revision:2,sourceDigest:sha(pdf),stateDigest:'a'.repeat(64),sha256:sha(pdf),byteLength:pdf.length,ifMatch:''}};
   return f.request(r) as any;
- },current:()=>true,onUpdate:()=>{},digest:async b=>sha(b),download});
+ },current:()=>true,onUpdate:()=>{},digest:async b=>sha(b),downloadFile});
  await adapter.open({status:'host-resource',ticket,file:{name:'x.pdf',resourceUri:'opaque:x'}});
  expect(await adapter.export(grant,{expectedRevision:2,documentGeneration:1})).toMatchObject({kind:'reviewed-copy',revision:2,path:'x-reviewed.pdf'});
- expect(download).toHaveBeenCalledOnce();expect(f.resources.write).not.toHaveBeenCalled();expect(f.requests.some(r=>r.operation==='receipt')).toBe(false);
+ expect(downloadFile).toHaveBeenCalledWith({contents:[{type:"resource",resource:{uri:"file:///x-reviewed.pdf",mimeType:"application/pdf",blob:pdf.toString("base64")}}]},expect.objectContaining({timeout:300000}));expect(f.resources.write).not.toHaveBeenCalled();expect(f.requests.some(r=>r.operation==='receipt')).toBe(false);
  await adapter.dispose();
 });
 it('rejects a malformed grant refresh result instead of accepting a stale source',async()=>{
@@ -62,4 +62,17 @@ it('rejects a malformed grant refresh result instead of accepting a stale source
  f.request.mockResolvedValueOnce({status:'host-transfer',transfer,offset:0}).mockResolvedValueOnce({status:'host-transfer',transfer,offset:pdf.length}).mockResolvedValueOnce({status:'chooser'});
  await expect(f.adapter.refresh(grant)).rejects.toThrow('invalid source admission result');
  await f.adapter.dispose();
+});
+
+it.each(['denied', 'failed', 'unavailable'])('does not report a reviewed copy when the host download is %s',async(outcome)=>{
+ const f=fixture();
+ const adapter=new HostResourceAdapter({resources:()=>f.resources as any,request:async(r:any)=>{
+  if(r.operation==='export')return {status:'host-save',intent:{id:'e'.repeat(43),purpose:'export',generation:1,revision:2,sourceDigest:sha(pdf),stateDigest:'a'.repeat(64),sha256:sha(pdf),byteLength:pdf.length,ifMatch:''}};
+  return f.request(r) as any;
+ },current:()=>true,onUpdate:()=>{},digest:async b=>sha(b),...(outcome==='unavailable'?{}:{downloadFile:async()=>{if(outcome==='failed')throw Error('download failed');return {isError:true};}})});
+ await adapter.open({status:'host-resource',ticket,file:{name:'x.pdf',resourceUri:'opaque:x'}});
+ if(outcome==='denied')await expect(adapter.export(grant,{expectedRevision:2,documentGeneration:1})).resolves.toEqual({kind:'cancelled'});
+ else await expect(adapter.export(grant,{expectedRevision:2,documentGeneration:1})).rejects.toThrow(/download/i);
+ expect(f.resources.write).not.toHaveBeenCalled();
+ await adapter.dispose();
 });

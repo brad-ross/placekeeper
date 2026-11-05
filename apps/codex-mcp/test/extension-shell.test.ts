@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type { App } from '@modelcontextprotocol/ext-apps';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { ExtensionShell } from '../src/extension-shell.js';
@@ -12,7 +13,7 @@ const reply = (value: unknown) => ({ _meta: { [EXTENSION_META_KEY]: value } });
 function deferred() { let resolve!: (value: any) => void; const promise = new Promise<any>(done => { resolve = done; }); return { promise, resolve }; }
 function fixture(handler: (request: any) => Promise<any> = async () => reply({ status: 'ok', payload: {} }), resources: () => any = () => undefined, modelContext: () => any = () => undefined, preferences?: (request: any) => Promise<any>, message: () => any = () => undefined) {
     const calls: any[] = [];
-    const app = { getHostContext: () => ({ displayMode: 'fullscreen' }), callServerTool: vi.fn(async (input: any, _options?: { timeout: number; maxTotalTimeout?: number }) => { calls.push(input.arguments.request); const request = input.arguments.request; if (preferences && ['settings-read', 'settings-update', 'catalogue'].includes(request.action)) return preferences(request); if (request.action === 'settings-read') return reply({ status: 'settings', values: { backgroundContext: true, selectionSharing: true, mentions: false }, revision: 0 }); if (request.action === 'catalogue') return reply({ status: 'catalogue', included: false }); return handler(request); }) };
+    const app = { downloadFile: vi.fn(async () => ({})), getHostContext: () => ({ displayMode: 'fullscreen' }), callServerTool: vi.fn(async (input: any, _options?: { timeout: number; maxTotalTimeout?: number }) => { calls.push(input.arguments.request); const request = input.arguments.request; if (preferences && ['settings-read', 'settings-update', 'catalogue'].includes(request.action)) return preferences(request); if (request.action === 'settings-read') return reply({ status: 'settings', values: { backgroundContext: true, selectionSharing: true, mentions: false }, revision: 0 }); if (request.action === 'catalogue') return reply({ status: 'catalogue', included: false }); return handler(request); }) };
     const element = () => ({ inert: false, hidden: false, textContent: '', dataset: {} as Record<string, string>, replaceChildren: vi.fn(), append: vi.fn() });
     const root = element(), status = element(), controls = element();
     return { app, shell: new ExtensionShell(app as unknown as App, root as unknown as HTMLElement, status as unknown as HTMLElement, controls as unknown as HTMLElement, resources, modelContext, message), root, status, controls, calls };
@@ -124,12 +125,16 @@ it('opens opaque host bytes in the canonical reader, routes reviewed export, and
     expect(host.mounts).toHaveLength(1); expect(f.status.textContent).toContain('read-only'); expect(resources.subscribe).toHaveBeenCalledOnce();
     const fence = { expectedRevision: 2, documentGeneration: 1 };
     const exported = { kind: 'reviewed-copy' as const, path: 'host-reviewed.pdf', revision: 2, digest: 'a'.repeat(64), warning: 'Verify the downloaded file.' };
-    const exportCopy = vi.spyOn(HostResourceAdapter.prototype, 'export').mockResolvedValue(exported);
+    const exportCopy = vi.spyOn(HostResourceAdapter.prototype, 'export').mockImplementation(async function(this: HostResourceAdapter) {
+        await this.options.downloadFile!({ contents: [] });
+        return exported;
+    });
     try {
         await expect(host.options[0].call('exportReviewedCopy', {})).rejects.toThrow('Refresh the review before exporting.');
         expect(exportCopy).not.toHaveBeenCalled();
         await expect(host.options[0].call('exportReviewedCopy', { fence })).resolves.toEqual(exported);
         expect(exportCopy).toHaveBeenCalledWith(nextGrant, fence);
+        expect(f.app.downloadFile).toHaveBeenCalledWith({ contents: [] }, undefined);
         expect(f.calls.some(c => c.action === 'app' && c.request.method === 'exportReviewedCopy')).toBe(false);
     } finally { exportCopy.mockRestore(); }
     const old = host.options[0]; generation = 2; update({ params: { uri: 'opaque:host' } });
@@ -523,4 +528,43 @@ it('revokes a late chooser result after teardown and fences the retained picker 
     expect(f.calls.filter(c => c.action === 'open')).toHaveLength(1);
     expect(f.calls.filter(c => c.action === 'revoke').map(c => c.grant)).toEqual([nextGrant]);
     expect(host.mounts).toHaveLength(0);
+});
+
+it('own-save notification does not retire a changed-name export before host download finishes', async () => {
+ const bytes=Buffer.from('%PDF-1.7\nsource\n%%EOF'), saved=Buffer.from('%PDF-1.7\nchanged-author\n%%EOF');
+ const sha=(b:Buffer)=>createHash('sha256').update(b).digest('hex');
+ let update:(event:any)=>void=()=>{}, imported=false, dirty=false, acknowledged=false;
+ const download=deferred();
+ const resources={read:vi.fn(async()=>({contents:[{uri:'opaque:host',blob:(acknowledged?saved:bytes).toString('base64'),openaiMetadata:{writable:true,etag:acknowledged?'v2':'v1'}}]})),subscribe:vi.fn(async()=>({})),unsubscribe:vi.fn(async()=>({})),addUpdateHandler:vi.fn((fn:any)=>{update=fn;return vi.fn();}),write:vi.fn(async()=>{update({params:{uri:'opaque:host'}});return {outcome:'saved',etag:'v2'};})};
+ const f=fixture(async r=>{
+  if(r.action==='host-resource'){
+   if(r.operation==='begin')return reply({status:'host-transfer',transfer:'t'.repeat(43),offset:0});
+   if(r.operation==='chunk')return reply({status:'host-transfer',transfer:'t'.repeat(43),offset:atob(r.dataBase64).length+r.offset});
+   if(r.operation==='finish'){if(!imported){imported=true;return reply({status:'provisional',grant});}return reply({status:'host-ready',generation:1});}
+   if(r.operation==='save'&&!dirty)return reply({status:'host-status',outcome:'saved'});
+   if(r.operation==='save'||r.operation==='export')return reply({status:'host-save',intent:{id:'i'.repeat(43),purpose:r.operation,generation:1,revision:1,stateDigest:'a'.repeat(64),sourceDigest:sha(bytes),sha256:sha(saved),byteLength:saved.length,ifMatch:r.operation==='save'?'v1':''}});
+   if(r.operation==='save-chunk')return reply({status:'host-chunk',dataBase64:saved.toString('base64'),done:true});
+   if(r.operation==='receipt'){acknowledged=true;dirty=false;return reply({status:'host-status',outcome:'saved'});}
+  }
+  if(r.action==='activate'||r.action==='resume')return reply(active(nextGrant));
+  if(r.action==='app'&&r.request.method==='command'){dirty=true;return reply({status:'ok',payload:{revision:1,workflow:{documentGeneration:1}}});}
+  return reply({status:'ok',payload:{}});
+ },()=>resources);
+ f.app.downloadFile.mockImplementation(()=>download.promise);
+ await f.shell.receive({status:'host-resource',file:{name:'host.pdf',resourceUri:'opaque:host'},ticket:'p'.repeat(43)});
+ await vi.advanceTimersByTimeAsync(0);
+ const port=host.options[0];
+ const named=await port.call('command',{type:'set-annotation-name',expectedRevision:0,annotationName:'New Author'});
+ const exported=port.call('exportReviewedCopy',{fence:{expectedRevision:named.revision,documentGeneration:named.workflow.documentGeneration}});
+ await vi.advanceTimersByTimeAsync(0);
+ expect(resources.write).toHaveBeenCalledOnce();
+ await vi.waitFor(()=>expect(f.app.downloadFile).toHaveBeenCalledOnce());
+ expect(host.mounts).toHaveLength(1);
+ expect(f.calls.filter(c=>c.action==='resume')).toHaveLength(0);
+ download.resolve({});
+ await expect(exported).resolves.toMatchObject({kind:'reviewed-copy',revision:1});
+ await vi.advanceTimersByTimeAsync(0);
+ expect(host.mounts).toHaveLength(2);
+ expect(resources.write).toHaveBeenCalledOnce();
+ await f.shell.teardown();
 });

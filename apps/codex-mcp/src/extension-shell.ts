@@ -240,7 +240,7 @@ export class ExtensionShell {
         if (result.status === 'host-resource') {
             this.#show('Reading host PDF…');
             const hostEpoch = ++this.#hostEpoch;
-            this.#host = new HostResourceAdapter({ resources: this.resources, request: async request => { const response = await this.#request(request); const parsed = parseExtensionResult(response); if (!parsed) throw Error('Host resource unavailable'); return parsed; }, current: () => !this.#closed && hostEpoch === this.#hostEpoch, onUpdate: () => { this.#hostRefreshPending = true; this.#hostUpdateRevision++; if (this.#active) void this.#continue().catch(() => this.#show('The host PDF could not be refreshed. Finish any current edit, then refresh; your protected review is retained.')); } });
+            this.#host = new HostResourceAdapter({ downloadFile: (params, options) => this.app.downloadFile(params, options), resources: this.resources, request: async request => { const response = await this.#request(request); const parsed = parseExtensionResult(response); if (!parsed) throw Error('Host resource unavailable'); return parsed; }, current: () => !this.#closed && hostEpoch === this.#hostEpoch, onUpdate: () => { this.#hostRefreshPending = true; this.#hostUpdateRevision++; if (this.#active) void this.#continue().catch(() => this.#show('The host PDF could not be refreshed. Finish any current edit, then refresh; your protected review is retained.')); } });
             await this.#apply(await this.#host.open(result));
             return;
         }
