@@ -50,7 +50,7 @@ export class ExtensionContextCoordinator {
   enableBackground() { this.#paused = false; this.#removed.delete(backgroundContextUri); this.#change(); }
   setAttachment(attachment: ExtensionContextAttachment) {
     const id = attachmentPrefix + encodeURIComponent(attachment.id);
-    this.#removed.delete(id); this.#attachments.set(id, resource(id, attachment.title.slice(0, 160), attachment.text.slice(0, 6000))); this.#change();
+    this.#removed.delete(id); this.#attachments.set(id, { ...resource(id, attachment.title.slice(0, 160), attachment.text.length <= 6000 ? attachment.text : `${attachment.text.slice(0, 5600)}\n[Truncated attachment: showing 5600 of ${attachment.text.length} characters. Full text is in the editable or copyable discussion draft.]`), _meta: { 'openai/group': { title: attachment.title.slice(0, 160) } } }); this.#change();
   }
   removeAttachment(id: string) { const key = attachmentPrefix + encodeURIComponent(id); this.#attachments.delete(key); this.#removed.add(key); this.#change(); }
   /** Call only for actual context notifications, not unrelated host theme/mode events. */

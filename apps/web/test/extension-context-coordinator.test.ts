@@ -79,3 +79,14 @@ it('retries one failed same-state publication on an explicit recovery wake witho
  expect(update.mock.calls[1]?.[0].content[0].resource.text).toContain('"documentDigest":"digest"');
  coordinator.reconcile(null); await tick(); coordinator.retry(); await tick(); expect(update.mock.calls.at(-1)?.[0].content).toEqual([]);
 });
+
+it('keeps independently named groups through background updates and partial removal', async () => {
+ const f = setup(); f.coordinator.setAttachment({ id: 'one', title: 'First selection', text: 'first' }); f.coordinator.setAttachment({ id: 'two', title: 'Chosen notes', text: 'second' }); f.coordinator.publish(snapshot()); await tick();
+ expect(f.calls[0].content.filter((b: any) => b._meta?.['openai/group']).map((b: any) => b._meta['openai/group'].title)).toEqual(['First selection', 'Chosen notes']);
+ f.ack(); await tick(); f.coordinator.reconcile({ updateId: 'partial', content: f.calls[0].content.filter((b: any) => b._meta?.['openai/group']?.title !== 'First selection') }); f.coordinator.publish(snapshot(4)); await tick();
+ expect(f.coordinator.attachments).toEqual(['two']); expect(JSON.stringify(f.calls.at(-1))).toContain('Chosen notes'); expect(JSON.stringify(f.calls.at(-1))).not.toContain('First selection');
+});
+it('labels bounded explicit attachment excerpts while retaining complete draft text in its caller', async () => {
+ const f = setup(); const text = 'e'.repeat(9000); f.coordinator.setAttachment({ id: 'large', title: 'Full discussion', text }); await tick();
+ const body = f.calls[0].content[0].resource.text; expect(body.length).toBeLessThan(6200); expect(body).toContain('5600 of 9000'); expect(body).toContain('Full text is in the editable or copyable discussion draft'); expect(text).toHaveLength(9000);
+});

@@ -23,7 +23,7 @@ const detail = document.querySelector<HTMLElement>("#detail")!;
 const reviewRoot = document.querySelector<HTMLElement>("#root")!;
 const extensionControls = document.createElement("div");
 detail.after(extensionControls);
-const extensionShell = new ExtensionShell(app, reviewRoot, status, extensionControls, () => extensions.resources, () => extensions.modelContext);
+const extensionShell = new ExtensionShell(app, reviewRoot, status, extensionControls, () => extensions.resources, () => extensions.modelContext, () => extensions.message);
 status.setAttribute("role", "status");
 status.setAttribute("aria-live", "polite");
 let traceStorage: Storage | undefined;

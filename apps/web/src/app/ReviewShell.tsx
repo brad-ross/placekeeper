@@ -239,6 +239,7 @@ export interface ReviewShellSaveModel {
 export interface ReviewShellSelectionModel {
   onSelectionPageLimitExceeded?(): void;
   onCopySelection?(): void;
+  onDiscussSelection?(): void;
   selectionUpdate: SelectionUpdate;
   pdfCopyOwner?: PdfCopyOwner;
   pdfCopySnapshots?: PdfCopySnapshots;
@@ -320,6 +321,7 @@ export interface ReviewShellReferenceInspection {
 }
 
 export interface ReviewShellProps {
+  discussionActions?: ReactNode;
   save: ReviewShellSaveModel;
   selection: ReviewShellSelectionModel;
   authoring: ReviewShellAuthoringModel;
@@ -2002,6 +2004,7 @@ export function ReviewShell(props: ReviewShellProps) {
       <p className="review-transition-announcement" aria-live="polite" aria-atomic="true">
         {transitionAnnouncement}
       </p>
+      {props.discussionActions}
       <ReviewChrome
         showSaveStatusDot={!props.save.exportOnly}
         documentTitle={props.documentTitle ?? 'Local PDF'}
@@ -2216,6 +2219,7 @@ export function ReviewShell(props: ReviewShellProps) {
               placement={props.selection.selectionPlacement}
               hidden={!annotationPeeksEnabled || surface.nestedLayer !== 'none'}
               {...(props.selection.onCopySelection === undefined ? {} : { onCopy: props.selection.onCopySelection })}
+              {...(props.selection.onDiscussSelection === undefined ? {} : { onDiscuss: props.selection.onDiscussSelection })}
               onReplace={startReplacement}
               onDelete={deleteSelection}
               onHighlight={startHighlight}

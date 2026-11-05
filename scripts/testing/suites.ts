@@ -56,7 +56,7 @@ export const suites: Record<string, TestStage[]> = {
   "test:desktop-performance": [{ runner: "playwright", options: ["--config", "scripts/testing/config/playwright.electron-performance.config.ts"], files: [] }],
   "test:desktop-installed": [{ runner: "playwright", options: ["--config", "scripts/testing/config/playwright.electron.config.ts"], files: [] }],
   "test:desktop-installers": [{ runner: "playwright", options: ["--config", "scripts/testing/config/playwright.desktop-installers.config.ts"], files: ["test/acceptance/desktop-installers.spec.ts"] }],
-  "test:codex-native": [{ runner: "vitest", options: [], files: ["apps/codex-mcp/test/extension-preferences.test.ts", "apps/service/test/extension-preferences.test.ts", "apps/codex-mcp/test/shell.test.ts", "apps/codex-mcp/test/extension-shell.test.ts", "apps/codex-mcp/test/live-reader-tools.test.ts", "apps/web/test/review-agent-bridge.test.ts", "apps/web/test/use-pdf-search.test.ts", "apps/web/test/extension-context-coordinator.test.ts", "apps/codex-mcp/test/host-resource-adapter.test.ts", "apps/service/test/extension-host-resource.test.ts","apps/service/test/extension-runtime.test.ts", "apps/codex-mcp/test/extension-server.test.ts", "apps/codex-mcp/test/panel-liveness.test.ts", "apps/service/test/codex-daemon-runtime.test.ts", "apps/web/test/codex-host-actions.test.tsx", "apps/web/test/codex-runtime.test.ts", "apps/web/test/codex-refresh.test.tsx", "apps/service/test/codex-persistence.integration.test.ts", "apps/web/test/codex-bundle.test.ts", "apps/web/test/host-render-layer.test.ts", "apps/codex-mcp/test/service-client.integration.test.ts", "apps/codex-mcp/test/server.test.ts", "apps/codex-mcp/test/server-entrypoint.test.ts", "apps/codex-mcp/test/resources.test.ts", "apps/codex-mcp/test/lifecycle-diagnostics.test.ts", "apps/codex-mcp/test/qualification.test.ts", "apps/service/test/codex-live-context.integration.test.ts", "apps/service/test/hook-contract.test.ts", "packages/core/test/codex-mcp-protocol.test.ts", "apps/service/test/codex-runtime.test.ts", "apps/service/test/native-qualification.test.ts", "apps/service/test/native-qualification-experiments.test.ts", "apps/service/test/codex-backend.test.ts", "apps/service/test/codex-host.test.ts", "apps/service/test/task-binding-registry.test.ts", "apps/service/test/restart-reconnect-store.test.ts"] }, "pnpm fixtures:pdf", "pnpm build:codex", { runner: "playwright", options: ["--config", "scripts/testing/config/playwright.config.ts"], files: ["test/acceptance/codex-native-review.spec.ts", "test/acceptance/codex-native-lifecycle.spec.ts", "test/acceptance/codex-native-resources.spec.ts", "test/acceptance/host-raster-rotation.spec.ts"] }],
+  "test:codex-native": [{ runner: "vitest", options: [], files: ["apps/codex-mcp/test/extension-preferences.test.ts", "apps/service/test/extension-preferences.test.ts", "apps/codex-mcp/test/shell.test.ts", "apps/codex-mcp/test/extension-shell.test.ts", "apps/codex-mcp/test/review-drafts.test.ts", "apps/codex-mcp/test/live-reader-tools.test.ts", "apps/web/test/review-agent-bridge.test.ts", "apps/web/test/use-pdf-search.test.ts", "apps/web/test/extension-context-coordinator.test.ts", "apps/codex-mcp/test/host-resource-adapter.test.ts", "apps/service/test/extension-host-resource.test.ts","apps/service/test/extension-runtime.test.ts", "apps/codex-mcp/test/extension-server.test.ts", "apps/codex-mcp/test/panel-liveness.test.ts", "apps/service/test/codex-daemon-runtime.test.ts", "apps/web/test/codex-host-actions.test.tsx", "apps/web/test/codex-runtime.test.ts", "apps/web/test/codex-refresh.test.tsx", "apps/service/test/codex-persistence.integration.test.ts", "apps/web/test/codex-bundle.test.ts", "apps/web/test/host-render-layer.test.ts", "apps/codex-mcp/test/service-client.integration.test.ts", "apps/codex-mcp/test/server.test.ts", "apps/codex-mcp/test/server-entrypoint.test.ts", "apps/codex-mcp/test/resources.test.ts", "apps/codex-mcp/test/lifecycle-diagnostics.test.ts", "apps/codex-mcp/test/qualification.test.ts", "apps/service/test/codex-live-context.integration.test.ts", "apps/service/test/hook-contract.test.ts", "packages/core/test/codex-mcp-protocol.test.ts", "apps/service/test/codex-runtime.test.ts", "apps/service/test/native-qualification.test.ts", "apps/service/test/native-qualification-experiments.test.ts", "apps/service/test/codex-backend.test.ts", "apps/service/test/codex-host.test.ts", "apps/service/test/task-binding-registry.test.ts", "apps/service/test/restart-reconnect-store.test.ts"] }, "pnpm fixtures:pdf", "pnpm build:codex", { runner: "playwright", options: ["--config", "scripts/testing/config/playwright.config.ts"], files: ["test/acceptance/codex-native-review.spec.ts", "test/acceptance/codex-native-lifecycle.spec.ts", "test/acceptance/codex-native-resources.spec.ts", "test/acceptance/host-raster-rotation.spec.ts"] }],
   "test:source-release": [{ runner: "vitest", options: [], files: ["scripts/source-release.test.ts", "scripts/install-release.test.ts", "scripts/desktop-release.test.ts", "scripts/validate-desktop-qualification.test.ts"] }],
   "test:static:distribution": [
     {
@@ -96,7 +96,7 @@ export const suites: Record<string, TestStage[]> = {
     }
   ],
   "test:pdf-viewer": [
-    { runner: "vitest", options: [], files: ["apps/web/test/review-agent-bridge.test.ts", "apps/web/test/use-pdf-search.test.ts", "apps/codex-mcp/test/live-reader-tools.test.ts"] },
+    { runner: "vitest", options: [], files: ["apps/codex-mcp/test/review-drafts.test.ts", "apps/web/test/review-agent-bridge.test.ts", "apps/web/test/use-pdf-search.test.ts", "apps/codex-mcp/test/live-reader-tools.test.ts"] },
     "pnpm fixtures:pdf",
     {
       "runner": "playwright",
@@ -340,6 +340,7 @@ export const suites: Record<string, TestStage[]> = {
         "apps/web/test/use-authoring-session-lifecycle.test.ts",
         "apps/web/test/codex-context-status.test.tsx",
         "apps/web/test/extension-context-coordinator.test.ts",
+        "apps/codex-mcp/test/review-drafts.test.ts",
         "apps/web/test/review-agent-bridge.test.ts",
         "apps/web/test/use-pdf-search.test.ts",
         "apps/web/test/codex-host-actions.test.tsx",
@@ -490,6 +491,7 @@ export const suites: Record<string, TestStage[]> = {
         "apps/service/test/recovery.test.ts",
         "apps/web/test/codex-context-status.test.tsx",
         "apps/web/test/extension-context-coordinator.test.ts",
+        "apps/codex-mcp/test/review-drafts.test.ts",
         "apps/web/test/review-agent-bridge.test.ts",
         "apps/web/test/use-pdf-search.test.ts",
         "apps/web/test/codex-host-actions.test.tsx",
@@ -783,6 +785,7 @@ export const ciUnitFiles = [
       'apps/web/test/codex-context-status.test.tsx',
       'apps/web/test/extension-context-coordinator.test.ts',
       'apps/codex-mcp/test/extension-shell.test.ts',
+      'apps/codex-mcp/test/review-drafts.test.ts',
       'apps/codex-mcp/test/live-reader-tools.test.ts',
       'apps/web/test/review-agent-bridge.test.ts',
       'apps/web/test/use-pdf-search.test.ts',

@@ -9,14 +9,14 @@ const grant = 'a'.repeat(43), nextGrant = 'b'.repeat(43);
 const active = (g = grant) => ({ status: 'active', grant: g, presentation: { status: 'active', runtimeId: 'runtime_123', attemptId: 'attempt_123', generation: 1, presentationCapability: 'c'.repeat(43), reconnectTicket: 'd'.repeat(43) } });
 const reply = (value: unknown) => ({ _meta: { [EXTENSION_META_KEY]: value } });
 function deferred() { let resolve!: (value: any) => void; const promise = new Promise<any>(done => { resolve = done; }); return { promise, resolve }; }
-function fixture(handler: (request: any) => Promise<any> = async () => reply({ status: 'ok', payload: {} }), resources: () => any = () => undefined, modelContext: () => any = () => undefined) {
+function fixture(handler: (request: any) => Promise<any> = async () => reply({ status: 'ok', payload: {} }), resources: () => any = () => undefined, modelContext: () => any = () => undefined, preferences?: (request: any) => Promise<any>, message: () => any = () => undefined) {
     const calls: any[] = [];
-    const app = { getHostContext: () => ({ displayMode: 'fullscreen' }), callServerTool: vi.fn(async (input: any) => { calls.push(input.arguments.request); return handler(input.arguments.request); }) };
+    const app = { getHostContext: () => ({ displayMode: 'fullscreen' }), callServerTool: vi.fn(async (input: any) => { calls.push(input.arguments.request); const request = input.arguments.request; if (preferences && ['settings-read', 'settings-update', 'catalogue'].includes(request.action)) return preferences(request); if (request.action === 'settings-read') return reply({ status: 'settings', values: { backgroundContext: true, selectionSharing: true, mentions: false }, revision: 0 }); if (request.action === 'catalogue') return reply({ status: 'catalogue', included: false }); return handler(request); }) };
     const element = () => ({ inert: false, hidden: false, textContent: '', replaceChildren: vi.fn(), append: vi.fn() });
     const root = element(), status = element(), controls = element();
-    return { app, shell: new ExtensionShell(app as unknown as App, root as unknown as HTMLElement, status as unknown as HTMLElement, controls as unknown as HTMLElement, resources, modelContext), root, status, controls, calls };
+    return { app, shell: new ExtensionShell(app as unknown as App, root as unknown as HTMLElement, status as unknown as HTMLElement, controls as unknown as HTMLElement, resources, modelContext, message), root, status, controls, calls };
 }
-beforeEach(() => { vi.useFakeTimers(); vi.stubGlobal('document', { hidden: false, createElement: () => ({}) }); host.options.length = 0; host.mounts.length = 0; host.unmount.mockClear(); });
+beforeEach(() => { vi.useFakeTimers(); vi.stubGlobal('document', { hidden: false, createElement: () => ({ append: vi.fn(), replaceChildren: vi.fn(), setAttribute: vi.fn() }), createTextNode: (value: string) => ({ textContent: value }) }); host.options.length = 0; host.mounts.length = 0; host.unmount.mockClear(); });
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 it('revokes a late activation grant without mounting after teardown', async () => {
     const pending = deferred();
@@ -170,7 +170,7 @@ it('keeps a transport-paused host reader paused when explicit refresh cannot val
 
 it('shows a compact open-reader view, applies host theme and safe areas, and expands through the host', async () => {
     const html = { dataset: {} as Record<string, string>, style: { colorScheme: '', setProperty: vi.fn() } };
-    vi.stubGlobal('document', { hidden: false, documentElement: html, createElement: () => ({}) });
+    vi.stubGlobal('document', { hidden: false, documentElement: html, createElement: () => ({ append: vi.fn(), replaceChildren: vi.fn(), setAttribute: vi.fn() }), createTextNode: (value: string) => ({ textContent: value }) });
     const f = fixture();
     f.app.getHostContext = () => ({ displayMode: 'inline', theme: 'dark', safeAreaInsets: { top: 12, bottom: 8, left: 0, right: 0 } });
     const expand = vi.fn(async () => ({ mode: 'fullscreen' })); Object.assign(f.app, { requestDisplayMode: expand });
@@ -255,4 +255,64 @@ it('reports live navigation unavailable if host expansion never reveals the read
     await vi.advanceTimersByTimeAsync(1500);
     expect(JSON.parse(await pending).status).toBe('unavailable'); expect(navigate).not.toHaveBeenCalled();
     await f.shell.teardown();
+});
+
+it('loads global preferences before mounting and keeps disabled selection out of first context', async () => {
+    const settings = deferred(); const update = vi.fn(async () => ({ updateId: 'first' }));
+    const f = fixture(async request => reply(request.action === 'context-published' ? { status: 'context-ready' } : { status: 'ok', payload: {} }), undefined, () => ({ getCurrent: () => undefined, update }), async request => request.action === 'settings-read' ? settings.promise : reply({ status: 'catalogue', included: false }));
+    const receiving = f.shell.receive({ ...active(), contextPublished: false });
+    expect(host.mounts).toHaveLength(0); expect(update).not.toHaveBeenCalled();
+    settings.resolve(reply({ status: 'settings', revision: 3, values: { backgroundContext: true, selectionSharing: false, mentions: false } })); await receiving;
+    host.mounts[0][5]({ documentGeneration: 1, reviewRevision: 2, title: 'PDF', source: { digest: 'd', fileId: 'f' }, page: 1, pageCount: 2, selection: { text: 'private selection', pages: [1] }, annotations: [] }); await vi.advanceTimersByTimeAsync(0);
+    expect(update).toHaveBeenCalledOnce(); expect(JSON.stringify(update.mock.calls)).not.toContain('private selection'); await f.shell.teardown();
+});
+it('ignores stale preference replies and corrects publication waiting on its intent acknowledgement', async () => {
+    const marked = deferred(), stale = deferred(); let reads = 0;
+    const update = vi.fn(async (_params: any) => ({ updateId: 'published' }));
+    const settings = (revision: number, backgroundContext: boolean) => reply({ status: 'settings', revision, values: { backgroundContext, selectionSharing: false, mentions: false } });
+    const f = fixture(async request => request.action === 'context-published' ? marked.promise : reply({ status: 'ok', payload: {} }), undefined, () => ({ getCurrent: () => undefined, update }), async request => request.action === 'catalogue' ? reply({ status: 'catalogue', included: false }) : ++reads === 1 ? settings(1, true) : reads === 2 ? stale.promise : settings(3, false));
+    await f.shell.receive({ ...active(), contextPublished: false });
+    host.mounts[0][5]({ documentGeneration: 1, reviewRevision: 2, title: 'PDF', source: { digest: 'd', fileId: 'f' }, page: 1, pageCount: 2, selection: null, annotations: [] });
+    await Promise.resolve(); await Promise.resolve(); f.shell.wake(); f.shell.wake(); await Promise.resolve(); await Promise.resolve();
+    stale.resolve(settings(2, true)); marked.resolve(reply({ status: 'context-ready' })); await vi.advanceTimersByTimeAsync(0);
+    expect(update.mock.calls.every(([params]) => params.content.length === 0)).toBe(true); await f.shell.teardown();
+});
+it('prepares captured editable drafts from the mounted bridge without submitting a turn', async () => {
+    const pending = deferred(); const send = vi.fn((_params: any) => pending.promise);
+    const f = fixture(undefined, undefined, undefined, undefined, () => ({ send })); await f.shell.receive(active());
+    const snapshot = { documentGeneration: 1, reviewRevision: 2, title: 'Original', source: { digest: 'original', fileId: 'f' }, page: 1, pageCount: 2, selection: { text: 'captured', pages: [1] }, annotations: [] };
+    const preparing = host.mounts[0][4].draft({ kind: 'selection', snapshot }); snapshot.selection.text = 'changed'; snapshot.source.digest = 'changed';
+    expect(send.mock.calls[0]![0]).toMatchObject({ _meta: { 'openai/message': { target: 'active', send: false } } }); expect(JSON.stringify(send.mock.calls)).toContain('captured'); expect(JSON.stringify(send.mock.calls)).not.toContain('changed');
+    pending.resolve({}); await preparing; await f.shell.teardown();
+});
+it('keeps reading usable when initial preference and catalogue services are unavailable', async () => {
+ const update = vi.fn();
+ const f = fixture(undefined, undefined, () => ({ getCurrent: () => undefined, update }), async () => reply({ status: 'unavailable' }));
+ await f.shell.receive({ ...active(), contextPublished: false }); expect(host.mounts).toHaveLength(1); expect(f.root.inert).toBe(false);
+ host.mounts[0][5]({ documentGeneration: 1, reviewRevision: 2, title: 'PDF', source: { digest: 'd', fileId: 'f' }, page: 1, pageCount: 2, selection: { text: 'private', pages: [1] }, annotations: [] }); await vi.advanceTimersByTimeAsync(0);
+ expect(update).not.toHaveBeenCalled(); await f.shell.teardown();
+});
+it('does not rebuild preference controls for equal-revision background refreshes', async () => {
+ const f = fixture(); await f.shell.receive(active());
+ const sharing = f.controls.append.mock.calls.map(([node]) => node).find(node => node.append?.mock.calls.some(([child]: any[]) => child.textContent === 'Sharing settings'));
+ const fieldset = sharing.append.mock.calls.map(([node]: any[]) => node).find((node: any) => node.replaceChildren?.mock.calls.length);
+ const before = fieldset.replaceChildren.mock.calls.length; f.shell.wake(); await vi.advanceTimersByTimeAsync(0);
+ expect(fieldset.replaceChildren).toHaveBeenCalledTimes(before); await f.shell.teardown();
+});
+it('requires explicit global opt-in and explicit include, update and remove choices for mention snapshots', async () => {
+ let mentions = false, included = false, revision = 0;
+ const f = fixture(undefined, undefined, undefined, async request => {
+  if (request.action === 'settings-update') { mentions = request.set.mentions; revision++; }
+  if (request.action.startsWith('settings-')) return reply({ status: 'settings', revision, values: { backgroundContext: false, selectionSharing: false, mentions } });
+  if (request.operation === 'capture') included = true; if (request.operation === 'remove') included = false;
+  return reply({ status: 'catalogue', included, ...(included ? { snapshot: { generation: 1, revision: 2, capturedAt: '2026-11-04' } } : {}) });
+ });
+ await f.shell.receive(active()); await Promise.resolve();
+ const nodes = (node: any): any[] => [node, ...(node.append?.mock.calls.flatMap((call: any[]) => call.flatMap(nodes)) ?? [])];
+ expect(f.calls.filter(c => c.action === 'catalogue' && c.operation === 'capture')).toHaveLength(0);
+ const input = nodes(f.controls).filter(n => n.type === 'checkbox').at(-1); input.checked = true; input.onchange(); await vi.advanceTimersByTimeAsync(0);
+ expect(f.calls.some(c => c.action === 'settings-update' && c.set.mentions === true)).toBe(true);
+ const click = async (label: string) => { nodes(f.controls).filter(n => n.textContent === label).at(-1).onclick(); await vi.advanceTimersByTimeAsync(0); };
+ await click('Include this review snapshot'); await click('Update included snapshot'); await click('Remove this review from mentions');
+ expect(f.calls.filter(c => c.action === 'catalogue').map(c => c.operation)).toEqual(['status', 'capture', 'capture', 'remove']); await f.shell.teardown();
 });

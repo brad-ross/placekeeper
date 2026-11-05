@@ -1,3 +1,4 @@
+import { ReviewDiscussionActions } from '../review/ReviewDiscussionActions.js';
 import { reviewAgentSearchResult, type ReviewAgentBridge, type ReviewAgentActions } from '../host/review-agent-bridge.js';
 import { reviewContextSnapshot, type ReviewContextSnapshot } from '../host/review-context-snapshot.js';
 import type { PlacekeeperLinkLocation } from "../../../../packages/core/src/placekeeper-link.js";
@@ -2647,6 +2648,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     >
       <NativePdfSelectionBridge owner={pdfCopyOwner} snapshots={pdfCopySnapshots} />
       <ReviewShell
+        {...(props.agentBridge?.draft === undefined || !agentReady ? {} : { discussionActions: <ReviewDiscussionActions key={state.workflow.documentGeneration} annotations={reviewContextSnapshot({ state, title: pageTitle, page: viewerState.currentPage, pageCount: viewerState.totalPages, selection: selectionUpdate, selectionIsCurrent: false }).annotations} {...(activeItemId === undefined ? {} : { activeId: activeItemId })} onDiscuss={ids => { try { const snapshot = liveAgentActions.current!.snapshot(); void props.agentBridge!.draft!({ kind: 'annotations', snapshot, annotationIds: [...ids] }).catch(() => setCommandError('The discussion draft could not be prepared.')); } catch { setCommandError('Wait for the current PDF before discussing annotations.'); } }} /> })}
         state={state}
         {...(props.activeAuthoringDraftIds === undefined ? {} : {
           activeAuthoringDraftIds: props.activeAuthoringDraftIds,
@@ -2795,6 +2797,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
         selection={{
           onSelectionPageLimitExceeded: () => setCommandError(PDF_SELECTION_PAGE_LIMIT_MESSAGE),
           onCopySelection: copyMainSelectionFromPalette,
+          ...(props.agentBridge?.draft === undefined || !agentReady ? {} : { onDiscussSelection: () => { try { const snapshot = liveAgentActions.current!.snapshot(); void props.agentBridge!.draft!({ kind: 'selection', snapshot }).catch(() => setCommandError('The discussion draft could not be prepared.')); } catch { setCommandError('Select text in the current PDF first.'); } } }),
           pdfCopyOwner,
           pdfCopySnapshots,
           pdfCopyOwnerIndicatorVisible,

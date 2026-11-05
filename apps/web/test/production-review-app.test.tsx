@@ -1,3 +1,4 @@
+import { ReviewDiscussionActions } from '../src/review/ReviewDiscussionActions.js';
 import { renderToStaticMarkup } from "react-dom/server";
 import { PdfZoomMode } from "@embedpdf/models";
 import { describe, expect, it, vi } from "vitest";
@@ -1921,4 +1922,10 @@ describe("one production review tree", () => {
     expect(html).toContain('class="lucide lucide-arrow-left review-icon"');
     expect(html).not.toContain(">Retry</button>");
   });
+});
+
+it('offers an explicit annotation choice before preparing a discussion draft', () => {
+ const onDiscuss = vi.fn();
+ const html = renderToStaticMarkup(<ReviewDiscussionActions annotations={[{ id: 'a', page: 3, kind: 'note', text: 'First note' }, { id: 'b', page: 5, kind: 'highlight', text: 'Second note' }]} activeId="a" onDiscuss={onDiscuss} />);
+ expect(html.match(/type="checkbox"/g)).toHaveLength(2); expect(html).not.toContain('checked=""'); expect(html).toContain('Choose active annotation'); expect(html).toContain('disabled=""'); expect(html).toContain('Page 3'); expect(onDiscuss).not.toHaveBeenCalled();
 });

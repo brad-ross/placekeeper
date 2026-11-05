@@ -47,6 +47,7 @@ export type ContextPlacement = ViewerClientPlacement & {
 export interface ContextActionPaletteProps {
   readonly placement: ContextPlacement;
   readonly hidden?: boolean;
+  onDiscuss?(): void;
   onCopy?(): void;
   onReplace?(): void;
   onDelete?(): void;
@@ -244,6 +245,7 @@ export function ContextActionPalette(props: ContextActionPaletteProps) {
       inert={props.hidden}
       style={boundedStyle ?? style}
     >
+      {props.onDiscuss ? <button type="button" onClick={props.onDiscuss}>Ask about this selection</button> : null}
       <ContextActionButton kind="replace" iconOnly onAction={props.onReplace} />
       <ContextActionButton kind="delete" iconOnly onAction={props.onDelete} />
       <ContextActionButton kind="highlight" iconOnly onAction={props.onHighlight} />

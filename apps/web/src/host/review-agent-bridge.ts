@@ -22,7 +22,7 @@ export type ReviewAgentDraft =
 export interface ReviewAgentBridge {
   attach(actions: ReviewAgentActions): () => void;
   publish(snapshot: ReviewAgentSnapshot): void;
-  /** Omitted when the host cannot create editable drafts. */
+  /** Explicit draft workflow, including copy and attachment fallback when needed. */
   draft?(input: ReviewAgentDraft): Promise<void>;
 }
 
