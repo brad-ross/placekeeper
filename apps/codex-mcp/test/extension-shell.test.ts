@@ -13,7 +13,7 @@ const reply = (value: unknown) => ({ _meta: { [EXTENSION_META_KEY]: value } });
 function deferred() { let resolve!: (value: any) => void; const promise = new Promise<any>(done => { resolve = done; }); return { promise, resolve }; }
 function fixture(handler: (request: any) => Promise<any> = async () => reply({ status: 'ok', payload: {} }), resources: () => any = () => undefined, modelContext: () => any = () => undefined, preferences?: (request: any) => Promise<any>, message: () => any = () => undefined) {
     const calls: any[] = [];
-    const app = { downloadFile: vi.fn(async () => ({})), getHostContext: () => ({ displayMode: 'fullscreen' }), callServerTool: vi.fn(async (input: any, _options?: { timeout: number; maxTotalTimeout?: number }) => { calls.push(input.arguments.request); const request = input.arguments.request; if (preferences && ['settings-read', 'settings-update', 'catalogue'].includes(request.action)) return preferences(request); if (request.action === 'settings-read') return reply({ status: 'settings', values: { backgroundContext: true, selectionSharing: true, mentions: false }, revision: 0 }); if (request.action === 'catalogue') return reply({ status: 'catalogue', included: false }); return handler(request); }) };
+    const app = { getHostCapabilities: () => ({ downloadFile: {} }), downloadFile: vi.fn(async () => ({})), getHostContext: () => ({ displayMode: 'fullscreen' }), callServerTool: vi.fn(async (input: any, _options?: { timeout: number; maxTotalTimeout?: number }) => { calls.push(input.arguments.request); const request = input.arguments.request; if (preferences && ['settings-read', 'settings-update', 'catalogue'].includes(request.action)) return preferences(request); if (request.action === 'settings-read') return reply({ status: 'settings', values: { backgroundContext: true, selectionSharing: true, mentions: false }, revision: 0 }); if (request.action === 'catalogue') return reply({ status: 'catalogue', included: false }); return handler(request); }) };
     const element = () => ({ inert: false, hidden: false, textContent: '', dataset: {} as Record<string, string>, replaceChildren: vi.fn(), append: vi.fn() });
     const root = element(), status = element(), controls = element();
     return { app, shell: new ExtensionShell(app as unknown as App, root as unknown as HTMLElement, status as unknown as HTMLElement, controls as unknown as HTMLElement, resources, modelContext, message), root, status, controls, calls };
@@ -135,6 +135,16 @@ it('opens opaque host bytes in the canonical reader, routes reviewed export, and
         await expect(host.options[0].call('exportReviewedCopy', { fence })).resolves.toEqual(exported);
         expect(exportCopy).toHaveBeenCalledWith(nextGrant, fence);
         expect(f.app.downloadFile).toHaveBeenCalledWith({ contents: [] }, undefined);
+        expect(JSON.parse(f.root.dataset.hostExportDiagnostic!)).toMatchObject({ phase: 'host-accepted', downloadAdvertised: true });
+        expect(f.status.textContent).toContain('host accepted the download');
+        f.app.downloadFile.mockResolvedValueOnce({ isError: true });
+        await host.options[0].call('exportReviewedCopy', { fence });
+        expect(JSON.parse(f.root.dataset.hostExportDiagnostic!)).toMatchObject({ phase: 'host-declined' });
+        expect(f.status.textContent).toContain('cancelled or declined');
+        f.app.downloadFile.mockRejectedValueOnce(Error('private host details'));
+        await expect(host.options[0].call('exportReviewedCopy', { fence })).rejects.toThrow();
+        expect(JSON.parse(f.root.dataset.hostExportDiagnostic!)).toMatchObject({ phase: 'failed', previousPhase: 'host-requested' });
+        expect(f.root.dataset.hostExportDiagnostic).not.toContain('private host details');
         expect(f.calls.some(c => c.action === 'app' && c.request.method === 'exportReviewedCopy')).toBe(false);
     } finally { exportCopy.mockRestore(); }
     const old = host.options[0]; generation = 2; update({ params: { uri: 'opaque:host' } });
@@ -557,7 +567,7 @@ it('own-save notification does not retire a changed-name export before host down
  const named=await port.call('command',{type:'set-annotation-name',expectedRevision:0,annotationName:'New Author'});
  const exported=port.call('exportReviewedCopy',{fence:{expectedRevision:named.revision,documentGeneration:named.workflow.documentGeneration}});
  await vi.advanceTimersByTimeAsync(0);
- expect(resources.write).toHaveBeenCalledOnce();
+ await vi.waitFor(()=>expect(resources.write).toHaveBeenCalledOnce());
  await vi.waitFor(()=>expect(f.app.downloadFile).toHaveBeenCalledOnce());
  expect(host.mounts).toHaveLength(1);
  expect(f.calls.filter(c=>c.action==='resume')).toHaveLength(0);
@@ -565,6 +575,8 @@ it('own-save notification does not retire a changed-name export before host down
  await expect(exported).resolves.toMatchObject({kind:'reviewed-copy',revision:1});
  await vi.advanceTimersByTimeAsync(0);
  expect(host.mounts).toHaveLength(2);
+ expect(f.status.textContent).toContain('host accepted the download');
+ expect(JSON.parse(f.root.dataset.hostExportDiagnostic!)).toMatchObject({ phase: 'host-accepted' });
  expect(resources.write).toHaveBeenCalledOnce();
  await f.shell.teardown();
 });

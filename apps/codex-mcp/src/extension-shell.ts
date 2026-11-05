@@ -36,6 +36,8 @@ export class ExtensionShell {
     #draftView: HTMLElement | undefined;
     #host: HostResourceAdapter | undefined;
     #hostNotice = '';
+    #exportNotice = '';
+    #exportPhase: 'preparing' | 'host-requested' | 'host-accepted' | 'host-declined' | 'failed' | undefined;
     #hostEpoch = 0;
     #hostRefreshPending = false;
     #hostUpdateRevision = 0;
@@ -94,8 +96,18 @@ export class ExtensionShell {
         this.#message = text;
         const compact = this.#active && this.#displayMode !== 'fullscreen';
         const summary = compact ? `${this.#snapshot?.title ?? this.#title ?? 'Placekeeper PDF'}${this.#snapshot ? ` · Page ${this.#snapshot.page} of ${this.#snapshot.pageCount}` : ''}. Open the reader to edit.` : '';
-        this.status.textContent = [summary, this.#readerTools && !this.#readerTools.supported ? 'Live reader tools are unavailable on this host. Open the reader to search and navigate.' : '', text || (document.hidden && this.#active ? 'Reader suspended while the app is hidden. Protected work is retained.' : '')].filter(Boolean).join(' ');
+        this.status.textContent = [summary, this.#readerTools && !this.#readerTools.supported ? 'Live reader tools are unavailable on this host. Open the reader to search and navigate.' : '', text || (document.hidden && this.#active ? 'Reader suspended while the app is hidden. Protected work is retained.' : ''), this.#exportNotice].filter(Boolean).join(' ');
         this.status.hidden = !this.status.textContent;
+    }
+    #exportProgress(phase: 'preparing' | 'host-requested' | 'host-accepted' | 'host-declined' | 'failed') {
+        if (this.#closed) return;
+        const previousPhase = this.#exportPhase;
+        this.#exportPhase = phase;
+        this.root.dataset.hostExportDiagnostic = JSON.stringify({ phase, previousPhase, downloadAdvertised: this.app.getHostCapabilities?.()?.downloadFile !== undefined });
+        this.#exportNotice = phase === 'host-accepted' ? 'The host accepted the download. Check the saved PDF before closing this review.'
+            : phase === 'host-declined' ? 'The download was cancelled or declined by the host. Your review is still available.'
+            : phase === 'failed' ? 'Export did not complete. Your review is still available.' : '';
+        this.#show(this.#message);
     }
     #contextStatus() {
         if (!this.#contextView) return;
@@ -238,9 +250,15 @@ export class ExtensionShell {
             return;
         }
         if (result.status === 'host-resource') {
+            this.#exportNotice = ''; this.#exportPhase = undefined; delete this.root.dataset.hostExportDiagnostic;
             this.#show('Reading host PDF…');
             const hostEpoch = ++this.#hostEpoch;
-            this.#host = new HostResourceAdapter({ downloadFile: (params, options) => this.app.downloadFile(params, options), resources: this.resources, request: async request => { const response = await this.#request(request); const parsed = parseExtensionResult(response); if (!parsed) throw Error('Host resource unavailable'); return parsed; }, current: () => !this.#closed && hostEpoch === this.#hostEpoch, onUpdate: () => { this.#hostRefreshPending = true; this.#hostUpdateRevision++; if (this.#active) void this.#continue().catch(() => this.#show('The host PDF could not be refreshed. Finish any current edit, then refresh; your protected review is retained.')); } });
+            this.#host = new HostResourceAdapter({ downloadFile: async (params, options) => {
+                if (hostEpoch === this.#hostEpoch) this.#exportProgress('host-requested');
+                const downloaded = await this.app.downloadFile(params, options);
+                if (hostEpoch === this.#hostEpoch) this.#exportProgress(downloaded.isError ? 'host-declined' : 'host-accepted');
+                return downloaded;
+            }, resources: this.resources, request: async request => { const response = await this.#request(request); const parsed = parseExtensionResult(response); if (!parsed) throw Error('Host resource unavailable'); return parsed; }, current: () => !this.#closed && hostEpoch === this.#hostEpoch, onUpdate: () => { this.#hostRefreshPending = true; this.#hostUpdateRevision++; if (this.#active) void this.#continue().catch(() => this.#show('The host PDF could not be refreshed. Finish any current edit, then refresh; your protected review is retained.')); } });
             await this.#apply(await this.#host.open(result));
             return;
         }
@@ -439,7 +457,10 @@ export class ExtensionShell {
         if (method === 'exportReviewedCopy' && this.#host && this.#grant) {
             const value = payload as { fence?: { expectedRevision: number; documentGeneration: number } };
             if (!value.fence) throw Error('Refresh the review before exporting.');
-            return this.#host.export(this.#grant, value.fence);
+            const hostEpoch = this.#hostEpoch;
+            this.#exportProgress('preparing');
+            try { return await this.#host.export(this.#grant, value.fence); }
+            catch (error) { if (hostEpoch === this.#hostEpoch) this.#exportProgress('failed'); throw error; }
         }
         const probe = method === 'renew' || method === 'watermark';
         if (!probe && !this.#connected)
