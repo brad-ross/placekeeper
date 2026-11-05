@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { copyFile, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -46,14 +47,16 @@ describe("packaged native MCP transport", () => {
     try { expect((await client.callTool({ name: "display_review", arguments: { handoff: "h".repeat(43) } })).isError).toBe(true); expect(service.display).not.toHaveBeenCalled(); }
     finally { await client.close(); await server.close(); }
   });
-  it("SDK lists one cached credential-free HTML shell and app calls add no UI resources", async () => {
+  it("SDK lists one content-addressed credential-free HTML shell and app calls add no UI resources", async () => {
     const service = fixture(), server = createNativeServer(service, "<html>credential-free</html>");
     const client = new Client({ name: "qualification-test", version: "1" }, { capabilities: { extensions: { "io.modelcontextprotocol/ui": { mimeTypes: [RESOURCE_MIME_TYPE] } } } });
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
     await server.connect(serverTransport); await client.connect(clientTransport);
     try {
-      expect((await client.listResources()).resources.map((resource) => resource.uri)).toEqual([CODEX_REVIEW_UI_RESOURCE]);
-      const resource = await client.readResource({ uri: CODEX_REVIEW_UI_RESOURCE });
+      const uri = `ui://placekeeper/review-v1-${createHash("sha256").update("<html>credential-free</html>").digest("hex")}.html`;
+      expect((await client.listResources()).resources.map((resource) => resource.uri)).toEqual([uri]);
+      const resource = await client.readResource({ uri });
+      expect(resource.contents[0]).toMatchObject({ uri, text: "<html>credential-free</html>" });
       expect(JSON.stringify(resource)).not.toContain(pending.pendingCapability);
       const result = await client.callTool({ name: "display_review", arguments: { handoff: "h".repeat(43) } });
       expect(result.structuredContent).toEqual(receipt);
@@ -61,6 +64,37 @@ describe("packaged native MCP transport", () => {
     } finally { await client.close(); await server.close(); }
     expect(service.app).toHaveBeenCalledOnce();
   });
+  it("binds every launch to its exact shell bytes without changing private tools or other server instances", async () => {
+    const clients: Client[] = [], servers: ReturnType<typeof createNativeServer>[] = [];
+    const connect = async (shell: string) => {
+      const server = createNativeServer(fixture(), shell), client = new Client({ name: "shell-version-test", version: "1" });
+      servers.push(server); clients.push(client);
+      const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+      await server.connect(serverTransport); await client.connect(clientTransport);
+      return client;
+    };
+    try {
+      const oldShell = "<html>first shell</html>", newShell = "<html>updated shell</html>";
+      const first = await connect(oldShell), repeated = await connect(oldShell), updated = await connect(newShell);
+      const uriFor = async (client: Client) => (await client.listResources()).resources[0]!.uri;
+      const firstUri = await uriFor(first), repeatedUri = await uriFor(repeated), updatedUri = await uriFor(updated);
+      expect(firstUri).toBe(repeatedUri); expect(updatedUri).not.toBe(firstUri);
+      for (const [client, shell, uri] of [[first, oldShell, firstUri], [updated, newShell, updatedUri]] as const) {
+        expect(uri).toBe(`ui://placekeeper/review-v1-${createHash("sha256").update(shell).digest("hex")}.html`);
+        const tools = (await client.listTools()).tools;
+        const launches = tools.filter(tool => ["display_review", "open_pdf", "open_placekeeper"].includes(tool.name));
+        expect(launches).toHaveLength(3);
+        for (const tool of launches) expect(tool._meta).toHaveProperty("ui.resourceUri", uri);
+        for (const tool of tools.filter(tool => !launches.includes(tool))) expect(tool._meta ?? {}).not.toHaveProperty("ui.resourceUri");
+        expect((await client.readResource({ uri })).contents[0]).toMatchObject({ uri, text: shell });
+        expect((await client.readResource({ uri: CODEX_REVIEW_UI_RESOURCE })).contents[0]).toMatchObject({ uri: CODEX_REVIEW_UI_RESOURCE, text: shell });
+        await expect(client.readResource({ uri: uri.replace(/[a-f0-9]{64}/, "0".repeat(64)) })).rejects.toThrow("Unknown resource");
+        expect(JSON.stringify({ tools, uri })).not.toContain(pending.pendingCapability);
+      }
+      await expect(updated.readResource({ uri: firstUri })).rejects.toThrow("Unknown resource");
+    } finally { await Promise.all(clients.map(client => client.close())); await Promise.all(servers.map(server => server.close())); }
+  });
+
 });
 
 
