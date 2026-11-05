@@ -139,6 +139,11 @@ export class HostResourcePersistence {
                     throw Error('Host source unavailable');
                 let classifiedNotSaved = false;
                 let retiredIntentId: string | undefined;
+                if (this.broker.saveStatus(t.sessionId)?.destination.phase !== 'host') {
+                    retiredIntentId = previous.pending?.id;
+                    delete previous.pending;
+                    delete previous.outcome;
+                }
                 if (previous.pending) {
                     if (previous.pending.sha256 === t.input.sha256 && t.input.etag) {
                         const writable = previous.forked !== true && t.input.writable;
@@ -223,6 +228,7 @@ export class HostResourcePersistence {
         const state = await this.state(id);
         if (!state)
             throw Error('Host source unavailable');
+        if (this.broker.saveStatus(id)?.destination.phase === 'active') return { status: 'host-status', outcome: 'local-copy' };
         if (this.broker.saveStatus(id)?.sync.phase === 'clean')
             return { status: 'host-status', outcome: 'saved' };
         if (!state.writable || !state.etag)
@@ -233,6 +239,7 @@ export class HostResourcePersistence {
         const state = await this.state(id);
         if (!state)
             throw Error('Host source unavailable');
+        if (this.broker.saveStatus(id)?.destination.phase !== 'host') return this.status(id);
         if (!state.writable || !state.etag) {
             await this.broker.markImportedSaveState(id, 'host-read-only', assertAuthority);
             return { status: 'host-status', outcome: 'read-only' };
@@ -248,6 +255,7 @@ export class HostResourcePersistence {
         assertAuthority();
         if (materialized.bytes.length === 0 || materialized.bytes.length > HOST_RESOURCE_MAX_BYTES)
             throw Error('Host save too large');
+        if (this.broker.saveStatus(id)?.destination.phase !== 'host') return this.status(id);
         const current = this.broker.nativeAdmissionScope(id);
         if (current?.documentGeneration !== delivery.documentGeneration || current.sourceDigest !== delivery.source.digest)
             throw Error('Host save generation changed');
@@ -257,6 +265,7 @@ export class HostResourcePersistence {
         assertAuthority();
         await this.#persist(id, { ...state, pending: intent, outcome: 'unknown' });
         await this.broker.configureImportedDestination(id, true, assertAuthority);
+        if (this.broker.saveStatus(id)?.destination.phase !== 'host') return this.status(id);
         return { status: 'host-save', intent };
     }
     async export(id: string, expectedRevision: number, generation: number, assertAuthority: () => void = () => undefined): Promise<HostResourceResult> {
@@ -280,7 +289,7 @@ export class HostResourcePersistence {
     }
     async saveChunk(id: string, intentId: string, offset: number): Promise<HostResourceResult> {
         const state = await this.state(id), intent = state?.pending?.id === intentId ? state.pending : state?.exported;
-        if (!intent || intent.id !== intentId || offset >= intent.byteLength)
+        if (!intent || intent.id !== intentId || offset >= intent.byteLength || intent.purpose === 'save' && this.broker.saveStatus(id)?.destination.phase !== 'host')
             throw Error('Host intent unavailable');
         const { bytes, fileSize } = await readPrivateFileRange(join(this.#directory(id), `host-save-${intent.id}.pdf`), HOST_RESOURCE_MAX_BYTES, offset, HOST_RESOURCE_CHUNK_BYTES);
         return { status: 'host-chunk', dataBase64: bytes.toString('base64'), done: offset + bytes.length === fileSize };
@@ -295,6 +304,7 @@ export class HostResourcePersistence {
     async receipt(id: string, intentId: string, outcome: 'saved' | 'conflict' | 'unknown', etag?: string, assertAuthority: () => void = () => undefined): Promise<HostResourceResult> {
         const state = await this.state(id), intent = state?.pending;
         assertAuthority();
+        if (this.broker.saveStatus(id)?.destination.phase !== 'host') throw Error('Host save destination retired');
         if (state?.lastReceipt?.id === intentId && outcome === 'saved' && state.lastReceipt.etag === etag)
             return { status: 'host-status', outcome: 'saved' };
         if (!state || !intent || intent.id !== intentId)

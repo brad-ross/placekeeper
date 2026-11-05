@@ -2771,6 +2771,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
             ? 'not-saved'
             : state.workflow.mode === 'generated-output' ? 'clean' : saveStatus.sync.phase,
           exportOnly,
+          showExportAction: scope.launchSurface === 'codex' && scope.sourceDisposition === 'remote-temporary' && props.api.capabilities?.reviewedCopyExport !== false,
           ...(!exportOnly && state.workflow.mode !== 'generated-output'
             && saveStatus.sync.phase === 'not-saved' && saveStatus.destination.phase === 'active'
             ? {
@@ -2789,10 +2790,10 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
           saveOptionsOpen: state.workflow.mode === 'generated-output' || exportOnly
             ? false
             : destinationDialog !== null,
-          ...(state.workflow.mode === 'generated-output' || exportOnly || saveStatus.destination.phase === 'host'
+          ...(state.workflow.mode === 'generated-output' || exportOnly
             ? {}
             : { onSaveOptions: () => openCopyDialog("menu") }),
-          onExportReviewedCopy: annotationExport.open,
+          ...(props.api.capabilities?.reviewedCopyExport === false ? {} : { onExportReviewedCopy: annotationExport.open }),
         }}
         selection={{
           onSelectionPageLimitExceeded: () => setCommandError(PDF_SELECTION_PAGE_LIMIT_MESSAGE),

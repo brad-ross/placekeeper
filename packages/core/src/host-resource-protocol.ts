@@ -90,7 +90,7 @@ export type HostResourceResult = {
     done: boolean;
 } | {
     status: 'host-status';
-    outcome: 'saved' | 'protected' | 'conflict' | 'unknown' | 'read-only';
+    outcome: 'saved' | 'protected' | 'conflict' | 'unknown' | 'read-only' | 'local-copy';
 };
 const object = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 const token = (v: unknown): v is string => typeof v === 'string' && /^[A-Za-z0-9_-]{16,128}$/.test(v);
@@ -131,7 +131,7 @@ export function parseHostResourceResult(v: unknown): HostResourceResult | undefi
         return v as HostResourceResult;
     if (v.status === 'host-chunk' && typeof v.dataBase64 === 'string' && v.dataBase64.length <= HOST_RESOURCE_CHUNK_BYTES / 3 * 4 && typeof v.done === 'boolean')
         return v as HostResourceResult;
-    if (v.status === 'host-status' && ['saved', 'protected', 'conflict', 'unknown', 'read-only'].includes(v.outcome as string))
+    if (v.status === 'host-status' && ['saved', 'protected', 'conflict', 'unknown', 'read-only', 'local-copy'].includes(v.outcome as string))
         return v as HostResourceResult;
     if (v.status === 'host-save' && object(v.intent) && token(v.intent.id) && Number.isSafeInteger(v.intent.generation) && (v.intent.generation as number) > 0 && Number.isSafeInteger(v.intent.revision) && (v.intent.revision as number) >= 0 && digest(v.intent.stateDigest) && digest(v.intent.sourceDigest) && digest(v.intent.sha256) && offset(v.intent.byteLength) && (v.intent.byteLength as number) > 0 && (v.intent.purpose === 'save' && etag(v.intent.ifMatch) || v.intent.purpose === 'export' && v.intent.ifMatch === ''))
         return v as HostResourceResult;

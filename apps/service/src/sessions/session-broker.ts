@@ -1868,7 +1868,6 @@ export class SessionBroker {
     input: { readonly kind: "original" | "copy"; readonly targetPath: string },
   ): void {
     if (session.sourceOwnership.disposition !== "remote-temporary") return;
-    if (session.destination.phase === "host") throw new Error("Host resources save through their conditional host destination");
     if (input.kind === "original") {
       throw new Error("A remote browser PDF cannot modify its private temporary source");
     }
@@ -2144,6 +2143,7 @@ export class SessionBroker {
     if (!session || session.ending || session.sourceOwnership.disposition !== "remote-temporary") throw new Error("Host source unavailable");
     await this.#withSessionTail(session, async () => {
       assertAuthority();
+      if (session.destination.phase === "active") return;
       const destination = { phase: "host" as const, generation: session.destination.phase === "host" ? session.destination.generation : session.destination.generation + 1, writable };
       const clean = session.sync.savedRevision === session.sync.desiredRevision && session.sync.savedDigest === session.sync.desiredDigest;
       const sync: DurableSaveSync = { ...session.sync, phase: clean ? "clean" : writable ? "saving" : "not-saved",
@@ -2159,6 +2159,7 @@ export class SessionBroker {
     if (!session || session.ending || session.destination.phase !== "host") throw new Error("Host source unavailable");
     await this.#withSessionTail(session, async () => {
       assertAuthority();
+      if (session.destination.phase !== "host") throw new Error("Host save destination retired");
       const sync: DurableSaveSync = { ...session.sync, phase: "not-saved", failure };
       await session.store.persist({ ...this.#draft(session), sync });
       session.sync = sync; this.#publishSaveInvalidation(session);
@@ -2170,7 +2171,7 @@ export class SessionBroker {
     if (!session || session.ending || session.sourceOwnership.disposition !== "remote-temporary") return false;
     return this.#withSessionTail(session, async () => {
       input.assertAuthority?.();
-      if (session.state.workflow.documentGeneration !== input.documentGeneration || session.state.source.digest !== input.sourceDigest) return false;
+      if (session.destination.phase !== "host" || session.state.workflow.documentGeneration !== input.documentGeneration || session.state.source.digest !== input.sourceDigest) return false;
       const current = session.sync.desiredRevision === input.revision && session.sync.desiredDigest === input.stateDigest;
       const sync: DurableSaveSync = { phase: current ? "clean" : "saving", desiredRevision: session.sync.desiredRevision,
         desiredDigest: session.sync.desiredDigest, savedRevision: input.revision, savedDigest: input.stateDigest,

@@ -19,7 +19,7 @@ import { setAnnotationName } from '../../../packages/core/src/review-commands.js
 
 const sessionId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const state = createReviewState({ sessionId, source: { fileId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', digest: 'a'.repeat(64), byteLength: 3 } });
-function fixture(contextOwner?: 'app') {
+function fixture(contextOwner?: 'app', reviewedCopyExport?: boolean) {
   let revision = 0;
   let generation = 1;
   let invalidate: ((event: any) => void) | undefined;
@@ -39,11 +39,20 @@ function fixture(contextOwner?: 'app') {
   const revokeObjectURL = vi.fn();
   let urlIndex = 0;
   const created: string[] = [];
-  const runtime = createCodexHostRuntime({ runtimeId: 'runtime_identifier_1234', ...(contextOwner === undefined ? {} : { contextOwner }), call, subscribeInvalidations: listener => { invalidate = listener; return () => { invalidate = undefined; }; } }, { digest: async bytes => String.fromCharCode(bytes[0]!).repeat(64), createObjectURL: () => { const url = `blob:https://native/${++urlIndex}`; created.push(url); return url; }, revokeObjectURL });
+  const runtime = createCodexHostRuntime({ runtimeId: 'runtime_identifier_1234', ...(reviewedCopyExport === undefined ? {} : { reviewedCopyExport }), ...(contextOwner === undefined ? {} : { contextOwner }), call, subscribeInvalidations: listener => { invalidate = listener; return () => { invalidate = undefined; }; } }, { digest: async bytes => String.fromCharCode(bytes[0]!).repeat(64), createObjectURL: () => { const url = `blob:https://native/${++urlIndex}`; created.push(url); return url; }, revokeObjectURL });
   return { runtime, call, revokeObjectURL, created, replace() { generation++; invalidate?.({ sessionId, generation, revision, reason: "generation" }); }, changeEngine(digest: string) { engineDigest = digest; }, failWorker() { failResource = 'worker'; }, changeDocument(digest = 'b') { documentDigest = digest; nextHandle = `document_handle_${digest.repeat(8)}`; }, fail() { failResource = true; }, recover() { failResource = false; } };
 }
 
 describe('admitted Codex production runtime', () => {
+  it('keeps unsupported host downloads disabled through bootstrap', async () => {
+    const f = fixture('app', false);
+    try {
+      expect(f.runtime.capabilities?.reviewedCopyExport).toBe(false);
+      await f.runtime.bootstrap();
+      expect(f.runtime.capabilities?.reviewedCopyExport).toBe(false);
+      expect(f.runtime.capabilities?.interactionLifecycleVersion).toBe(1);
+    } finally { f.runtime.dispose(); }
+  });
   it.each([undefined, 'app'] as const)('preserves context ownership through bootstrap and scope refresh for %s', async contextOwner => {
     const f = fixture(contextOwner);
     try {

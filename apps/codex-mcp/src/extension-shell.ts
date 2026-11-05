@@ -43,6 +43,7 @@ export class ExtensionShell {
     #hostUpdateRevision = 0;
     #hostSave: Promise<void> | undefined;
     #saveRequested = false;
+    #manualSaveRequested = false;
     #grant: string | undefined;
     #active: ExtensionPresentation | undefined;
     #unmount: (() => void) | undefined;
@@ -162,7 +163,7 @@ export class ExtensionShell {
         if (result.status === 'provisional') {
             this.#grant = result.grant;
             this.#resumeOperation = crypto.randomUUID();
-            if (this.#host) { const refreshed = await this.#host.refresh(result.grant); if (refreshed.status === 'host-status' && refreshed.outcome === 'conflict') this.#hostNotice = 'The host PDF changed before saving. Your review is protected; export a reviewed copy before reopening the newer PDF.'; }
+            if (this.#host) { const refreshed = await this.#host.refresh(result.grant); if (refreshed.status === 'host-status' && refreshed.outcome === 'conflict') this.#hostNotice = 'The host PDF changed before saving. Your review is protected; use Save options to keep your work in a separate copy.'; }
             let activated: ExtensionResult | CodexAppResponse | undefined;
             for (let attempt = 0; attempt < 3; attempt++) {
                 if (this.#closed)
@@ -212,7 +213,7 @@ export class ExtensionShell {
             });
             this.hostContextChanged(this.app.getHostContext?.() ?? {}, false);
             this.#mount();
-            if (this.#host) { this.#button('Refresh PDF', () => this.#continue()); this.#button('Save now', () => this.#saveHost()); void this.#saveHost(); if (this.#hostRefreshPending) queueMicrotask(() => { void this.#continue().catch(() => undefined); }); }
+            if (this.#host) { this.#button('Refresh PDF', () => this.#continue()); this.#button('Save now', () => this.#saveHost(true)); void this.#saveHost(); if (this.#hostRefreshPending) queueMicrotask(() => { void this.#continue().catch(() => undefined); }); }
             return;
         }
         if (result.status === 'cancelled') {
@@ -387,7 +388,7 @@ export class ExtensionShell {
         if (!this.#readerTools.supported) this.#show('Live reader tools are unavailable on this host. Open the reader to search and navigate.');
         this.#listeners.clear();
         this.#watermark = undefined;
-        const runtime = createCodexHostRuntime({ runtimeId: active.runtimeId, contextOwner: 'app', call: (method, payload) => this.#payload(method, payload, epoch), subscribeInvalidations: listener => { this.#listeners.add(listener); return () => this.#listeners.delete(listener); } });
+        const runtime = createCodexHostRuntime({ runtimeId: active.runtimeId, contextOwner: 'app', ...(this.#host ? { reviewedCopyExport: this.app.getHostCapabilities?.()?.downloadFile !== undefined } : {}), call: (method, payload) => this.#payload(method, payload, epoch), subscribeInvalidations: listener => { this.#listeners.add(listener); return () => this.#listeners.delete(listener); } });
         this.#show('Opening PDF…');
         this.#unmount = mountCodexProductionReview(this.root, runtime, () => { if (epoch === this.#epoch)
             this.#show('The PDF could not be loaded. Reopen it through the file menu; protected work is retained.'); }, () => { if (epoch === this.#epoch && this.#connected)
@@ -451,10 +452,17 @@ export class ExtensionShell {
     async #payload(method: Extract<CodexAppRequest, {
         authority: 'presentation';
     }>['method'], payload: unknown, epoch: number): Promise<unknown> {
+        if (method === 'chooseCopy' && this.#host) return this.#host.withSaveBarrier(() => this.#dispatchPayload(method, payload, epoch));
+        return this.#dispatchPayload(method, payload, epoch);
+    }
+    async #dispatchPayload(method: Extract<CodexAppRequest, {
+        authority: 'presentation';
+    }>['method'], payload: unknown, epoch: number): Promise<unknown> {
         const active = this.#active;
         if (!active || this.#closed || epoch !== this.#epoch)
             throw new NativeDiagnosticError('stale-reply');
         if (method === 'exportReviewedCopy' && this.#host && this.#grant) {
+            if (this.app.getHostCapabilities?.()?.downloadFile === undefined) throw Error('PDF download is unavailable. Use Save options to save an annotated copy.');
             const value = payload as { fence?: { expectedRevision: number; documentGeneration: number } };
             if (!value.fence) throw Error('Refresh the review before exporting.');
             const hostEpoch = this.#hostEpoch;
@@ -493,28 +501,36 @@ export class ExtensionShell {
             throw new NativeOperationError();
         if (response.status !== 'ok')
             throw new NativeDiagnosticError('unexpected-status');
+        if (method === 'chooseCopy' && (response.payload as { destination?: { phase?: string; kind?: string } })?.destination?.phase === 'active' && (response.payload as { destination?: { kind?: string } }).destination?.kind === 'copy') { this.#hostNotice = ''; this.#exportNotice = ''; this.#show(''); }
         if (this.#host && (method === 'command' || method === 'finalizeInteraction')) void this.#saveHost();
         if (this.#hostRefreshPending && ['finalizeInteraction', 'releaseInteraction', 'acknowledgeInteraction'].includes(method)) void this.#continue().catch(() => undefined);
         return response.payload;
     }
-    async #saveHost() {
+    async #saveHost(manual = false) {
         this.#saveRequested = true;
+        this.#manualSaveRequested ||= manual;
         if (this.#hostSave) return this.#hostSave;
         const hostEpoch = this.#hostEpoch;
         const running = (async () => {
             while (this.#saveRequested && this.#host && this.#grant && !this.#closed) {
                 this.#saveRequested = false;
+                const retryLocalCopy = this.#manualSaveRequested;
+                this.#manualSaveRequested = false;
                 const result = await this.#host.save(this.#grant);
                 if (hostEpoch !== this.#hostEpoch || this.#closed) return;
                 if (result.status === 'host-status') {
-                    if (result.outcome === 'saved') { this.#hostNotice = ''; this.#show(''); }
-                    else if (result.outcome === 'read-only') { this.#hostNotice = 'This host PDF is read-only. Your review is protected; use Export reviewed PDF to keep a copy.'; this.#show(this.#hostNotice); }
-                    else if (result.outcome === 'conflict') { this.#hostNotice = 'The host PDF changed before saving. Your review is protected. Export a reviewed copy before reopening the newer PDF.'; this.#show(this.#hostNotice); }
-                    else if (result.outcome === 'protected') { this.#hostNotice = 'The host save was not completed. Your review is protected; choose Save now or export a reviewed copy.'; this.#show(this.#hostNotice); }
+                    if (result.outcome === 'local-copy') {
+                        if (retryLocalCopy) await this.#payload('retrySave', {}, this.#epoch);
+                        this.#hostNotice = ''; this.#show('');
+                    }
+                    else if (result.outcome === 'saved') { this.#hostNotice = ''; this.#show(''); }
+                    else if (result.outcome === 'read-only') { this.#hostNotice = 'This host PDF is read-only. Your review is protected; use Save options to autosave to a copy.'; this.#show(this.#hostNotice); }
+                    else if (result.outcome === 'conflict') { this.#hostNotice = 'The host PDF changed before saving. Your review is protected. Use Save options to keep your work in a separate copy.'; this.#show(this.#hostNotice); }
+                    else if (result.outcome === 'protected') { this.#hostNotice = 'The host save was not completed. Your review is protected; choose Save now or use Save options to save a copy.'; this.#show(this.#hostNotice); }
                     else if (result.outcome === 'unknown') { this.#hostNotice = 'The host save could not be confirmed. Your review is protected; refresh to check the current PDF.'; this.#show(this.#hostNotice); }
                 }
             }
-        })().catch(() => { if (hostEpoch === this.#hostEpoch) this.#show('Host save could not be completed. Your review is protected; refresh or export a reviewed copy.'); }).finally(() => { if (this.#hostSave === running) this.#hostSave = undefined; });
+        })().catch(() => { if (hostEpoch === this.#hostEpoch) this.#show('Host save could not be completed. Your review is protected; refresh or use Save options to save a copy.'); }).finally(() => { if (this.#hostSave === running) this.#hostSave = undefined; });
         this.#hostSave = running; return running;
     }
     async #continue() {
@@ -539,7 +555,7 @@ export class ExtensionShell {
                         const revision = this.#hostUpdateRevision;
                         const refreshed = await this.#host.refresh(grant);
                         this.#hostRefreshPending = revision !== this.#hostUpdateRevision;
-                        if (refreshed.status === 'host-status' && refreshed.outcome === 'conflict') this.#hostNotice = 'The host PDF changed before saving. Your review is protected; export a reviewed copy before reopening the newer PDF.';
+                        if (refreshed.status === 'host-status' && refreshed.outcome === 'conflict') this.#hostNotice = 'The host PDF changed before saving. Your review is protected; use Save options to keep your work in a separate copy.';
                     } while (this.#hostRefreshPending && !this.#closed);
                     this.#resumeRefreshed = operationId;
                 }

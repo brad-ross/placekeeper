@@ -75,6 +75,7 @@ export interface DocumentActionsMenuProps {
   readonly presentation: ReviewExportPresentation;
   readonly onExport: (confirmPossiblyStale?: true) => Promise<ReviewExportResult | void>;
   readonly onOpenAnnotations?: () => void;
+  readonly onSaveOptions?: () => void;
   readonly open?: boolean;
   readonly onOpenChange?: (open: boolean) => void;
   readonly onPendingChange?: (pending: boolean) => void;
@@ -117,6 +118,7 @@ export function DocumentActionsMenu({
   presentation,
   onExport,
   onOpenAnnotations,
+  onSaveOptions,
   open: controlledOpen,
   onOpenChange,
   onPendingChange,
@@ -136,6 +138,7 @@ export function DocumentActionsMenu({
   const rootRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const exportRef = useRef<HTMLButtonElement>(null);
+  const saveOptionsRef = useRef<HTMLButtonElement>(null);
   const annotationActionRef = useRef<HTMLButtonElement>(null);
   const confirmationRef = useRef<HTMLButtonElement>(null);
   const pendingRef = useRef(false);
@@ -168,9 +171,9 @@ export function DocumentActionsMenu({
     if (!open) return;
     const target = staleConfirmation
       ? confirmationRef.current
-      : presentation.canExport
-        ? exportRef.current
-        : annotationActionRef.current ?? exportRef.current;
+      : !presentation.canExport && annotationActionRef.current !== null
+        ? annotationActionRef.current
+        : saveOptionsRef.current ?? exportRef.current;
     target?.focus({ preventScroll: true });
   }, [open, presentation.canExport, staleConfirmation]);
 
@@ -346,6 +349,7 @@ export function DocumentActionsMenu({
           data-export-result={outcome}
         >{resultMessage}</p> : null}
       </> : <>
+        {onSaveOptions === undefined ? null : <button ref={saveOptionsRef} type="button" role="menuitem" title="Open automatic save options" aria-disabled={pending} onClick={() => { if (pending) return; closeForAction(); onSaveOptions(); }}><ReviewIcon name="file" /><span>Save options</span></button>}
         <button
           ref={exportRef}
           type="button"

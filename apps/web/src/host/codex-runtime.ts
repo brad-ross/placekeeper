@@ -8,6 +8,7 @@ import type { ProductionScope } from './session-contracts.js';
 export interface CodexRuntimePort {
   readonly runtimeId: string;
   readonly contextOwner?: 'app';
+  readonly reviewedCopyExport?: boolean;
   call(method: ReviewRuntimeMethod | 'resource' | 'createLink', payload: unknown): Promise<unknown>;
   subscribeInvalidations(listener: (event: HostRuntimeInvalidation) => void): () => void;
 }
@@ -81,7 +82,7 @@ export function createCodexHostRuntime(port: CodexRuntimePort, environment: {
   // Context ownership belongs to the admitted shell, outside the wire scope projection.
   const ownedScope = (scope: ProductionScope): ProductionScope => port.contextOwner === 'app'
     ? { ...scope, contextOwner: 'app' } : scope;
-  return { ...runtime, get capabilities() { return runtime.capabilities!; }, async bootstrap(signal) {
+  return { ...runtime, get capabilities() { return { ...runtime.capabilities!, ...(port.reviewedCopyExport === undefined ? {} : { reviewedCopyExport: port.reviewedCopyExport }) }; }, async bootstrap(signal) {
     const initial = await runtime.bootstrap(signal);
     return { ...initial, scope: ownedScope(initial.scope) };
   }, async scope(signal) {

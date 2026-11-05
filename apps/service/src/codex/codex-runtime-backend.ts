@@ -11,6 +11,7 @@ import { ChromeRuntimeOperationJournal } from "../browser/runtime-operation-jour
 import { isReviewSideEffectMethod, LocalReviewBackend } from "../runtime/local-review-backend.js";
 import type { SessionBroker } from "../sessions/session-broker.js";
 import type { ReviewInteractionAttachment } from "../sessions/review-interactions.js";
+import { defaultAnnotatedFilename } from "../saving/save-destination.js";
 import type { PdfSaveCoordinator } from "../saving/pdf-save-coordinator.js";
 import type { ExportCoordinator } from "../export/export-coordinator.js";
 
@@ -171,8 +172,9 @@ export class CodexServiceRuntimeBackend {
     }
     if (request.method === "presence") return {};
     const method = request.method as ReviewRuntimeBrokerMethod;
-    if (this.#broker.saveStatus(scope.sessionId)?.destination.phase === "host" &&
-      ["chooseCopy", "chooseFolder", "chooseOriginal", "retrySave", "locateSave", "exportReviewedCopy"].includes(method)) {
+    if ((method === "exportReviewedCopy" && this.#broker.sourceDisposition(scope.sessionId) === "remote-temporary") ||
+      (this.#broker.saveStatus(scope.sessionId)?.destination.phase === "host" &&
+      ["chooseOriginal", "retrySave", "locateSave"].includes(method))) {
       throw new Error("Host resources use their conditional save and export protocol");
     }
     const interactionAction = interactionActions[method];
@@ -185,6 +187,11 @@ export class CodexServiceRuntimeBackend {
         result = await this.#scope(scope, current);
       } else if (method === "saveProposal") {
         result = this.#saving.proposal(scope.sessionId);
+        if (this.#broker.sourceDisposition(scope.sessionId) === 'remote-temporary') {
+          const source = await this.#broker.sessionScope(scope.sessionId);
+          assertAuthority();
+          result = { sourceDisposition: 'remote-temporary', filename: defaultAnnotatedFilename(source?.sourceDisplayName ?? 'review.pdf') };
+        }
       } else {
         result = await this.#review.invoke(scope.sessionId, scope.generation, method as Exclude<ReviewRuntimeBrokerMethod, "saveProposal">, request.payload, {
           expectedDocumentGeneration: scope.generation,

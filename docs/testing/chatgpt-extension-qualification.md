@@ -283,3 +283,26 @@ A bounded export diagnostic and persistent user-facing outcome were added to the
 The user restarted and reopened `export-and-fork-test.pdf` through Placekeeper Opaque Test. The panel contained the new persistent-outcome code. A native Export attempt completed with the visible message “Export did not complete. Your review is still available.” The retained diagnostic was `{"phase":"failed","previousPhase":"host-requested","downloadAdvertised":false}`. Thus preparation reached the host download callback, the callback failed, and this Codex host did not advertise the MCP Apps `downloadFile` capability. This was not the `isError` cancellation/denial branch. The precise exception is deliberately not captured by these bounded diagnostics, so no exact RPC error or host-side cause is claimed.
 
 The installed MCP Apps SDK documents host-mediated `downloadFile` as the export mechanism for sandboxed apps; its host-capability type makes support optional. The installed OpenAI extension SDK exposes reading/writing already supplied resources and opening a local path, but no new-file destination picker in those APIs. Writing over the source is not a substitute for exporting a separate reviewed copy. Native export remains blocked/unqualified on this host. Repeating the same restart/open procedure is not a useful next test without a supported download capability or a separately designed export route. Background context remained paused; no sharing settings were changed.
+
+
+### Autosave-to-copy qualification amendment
+
+The user chose desktop-style autosave to a local copy as the core persistence route for host-managed PDFs. Missing host download support no longer blocks that route. The updated plan requires the existing native folder picker and save coordinator, one active destination, and durable destination recovery.
+
+Pending installed-host checks for the new implementation:
+
+- Open the disposable PDF through Opaque Test and use the filename/save-options control. Cancel a folder selection and verify the prior destination/work remain intact.
+- Choose a unique local copy in a temporary qualification folder. Verify the destination is shown, then change two annotations in sequence. Inspect the actual saved PDF after each edit and verify the original source bytes remain unchanged after the copy is selected.
+- Refresh and close/reopen the protected review, then make another edit. Verify the same copy is updated and the original still is not written.
+- Repeat with a read-only host source. No Codex download call or dialog is required.
+
+These are pending checks, not claims of native success.
+
+
+The autosave-to-copy implementation passes 287 tests across the host-resource, Codex persistence, save coordinator, extension shell/adapter, production reader, Codex runtime, and layout suites. Both writable and read-only copy cases use real PDFs, the real writer, and parsed destination annotations after successive edits and a source successor. Recovery tests retain the destination across service restart and persist a later edit. A deferred host-write test proves copy selection waits for the old write, and that later saves/retries use the local destination. Late host receipts and chunk reads cannot affect the copy’s Save Sync. Unsupported host downloads are hidden independently of Save options.
+
+The first combined run exposed two fake-clock tests assuming real Web Crypto work completed after a timer flush/default polling budget. Explicit promises now await the observable write/download/remount boundaries; ordering and exact write-count assertions are unchanged. The parent rerun passed all 287 tests. Typecheck and web, service, and Codex client/server production builds pass. Five browser checks passed at desktop/mobile widths, covering the extension layout and shared save dialog’s save/cancel/name behavior; the local test server required normal local-network execution after the restricted run timed out. These browser checks simulate host integration and do not qualify the native picker. Installed-host checks above remain pending.
+
+Code review completed (`20261105-copy-autosave`) with three confirmed findings, all applied: rejected copy selection retains warnings; download-capable Codex hosts retain both Save options and Export; opaque sources cannot enter generic filesystem export after selecting a copy. The export-boundary regression was verified failing with its guard removed. The final parent run passed 211 tests across five affected suites, typecheck, and all four production builds. Native qualification remains pending.
+
+The post-review browser check found a focus regression introduced while exposing Save options beside Export. Restored blocked-export focus to Open Annotations; both unchanged browser tests now pass, covering stale confirmation, blocked export, pending export, and retry. Rebuilt the web reader and Codex client/server after the correction.

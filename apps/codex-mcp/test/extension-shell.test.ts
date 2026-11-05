@@ -4,9 +4,9 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { ExtensionShell } from '../src/extension-shell.js';
 import { HostResourceAdapter } from '../src/host-resource-adapter.js';
 import { EXTENSION_META_KEY } from '../../../packages/core/src/extension-protocol.js';
-const host = vi.hoisted(() => ({ options: [] as any[], mounts: [] as any[], unmount: vi.fn() }));
+const host = vi.hoisted(() => ({ options: [] as any[], mounts: [] as any[], unmount: vi.fn(), onMount: undefined as (() => void) | undefined }));
 vi.mock('../../web/src/host/codex-runtime.js', () => ({ createCodexHostRuntime: (options: any) => { host.options.push(options); return options; } }));
-vi.mock('../../web/src/codex-entry.js', () => ({ mountCodexProductionReview: (...args: any[]) => { host.mounts.push(args); return host.unmount; } }));
+vi.mock('../../web/src/codex-entry.js', () => ({ mountCodexProductionReview: (...args: any[]) => { host.mounts.push(args); host.onMount?.(); return host.unmount; } }));
 const grant = 'a'.repeat(43), nextGrant = 'b'.repeat(43);
 const active = (g = grant) => ({ status: 'active', grant: g, presentation: { status: 'active', runtimeId: 'runtime_123', attemptId: 'attempt_123', generation: 1, presentationCapability: 'c'.repeat(43), reconnectTicket: 'd'.repeat(43) } });
 const reply = (value: unknown) => ({ _meta: { [EXTENSION_META_KEY]: value } });
@@ -18,7 +18,7 @@ function fixture(handler: (request: any) => Promise<any> = async () => reply({ s
     const root = element(), status = element(), controls = element();
     return { app, shell: new ExtensionShell(app as unknown as App, root as unknown as HTMLElement, status as unknown as HTMLElement, controls as unknown as HTMLElement, resources, modelContext, message), root, status, controls, calls };
 }
-beforeEach(() => { vi.useFakeTimers(); vi.stubGlobal('document', { hidden: false, createElement: () => ({ append: vi.fn(), replaceChildren: vi.fn(), setAttribute: vi.fn() }), createTextNode: (value: string) => ({ textContent: value }) }); host.options.length = 0; host.mounts.length = 0; host.unmount.mockClear(); });
+beforeEach(() => { vi.useFakeTimers(); vi.stubGlobal('document', { hidden: false, createElement: () => ({ append: vi.fn(), replaceChildren: vi.fn(), setAttribute: vi.fn() }), createTextNode: (value: string) => ({ textContent: value }) }); host.options.length = 0; host.mounts.length = 0; host.onMount = undefined; host.unmount.mockClear(); });
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 it('exposes only bounded live-tool registration diagnostics on the reader root', async () => {
     (document as any).modelContext = { registerTool: () => { throw new TypeError('private document details'); }, unregisterTool: vi.fn() };
@@ -107,7 +107,7 @@ it('retries continuation with one operation identity and fences the old mounted 
 
 it('opens opaque host bytes in the canonical reader, routes reviewed export, and refreshes on a resource notification', async () => {
     const bytes = btoa('%PDF-1.7\nhost shell fixture\n%%EOF');
-    let update!: (event: any) => void, imported = false, generation = 1;
+    let update!: (event: any) => void, imported = false, generation = 1, copyEstablished = false;
     const resources = { read: vi.fn(async () => ({ contents: [{ uri: 'opaque:host', blob: bytes, openaiMetadata: { writable: false, etag: 'v1' } }] })),
         subscribe: vi.fn(async () => ({})), unsubscribe: vi.fn(async () => ({})), addUpdateHandler: vi.fn((listener: any) => { update = listener; return vi.fn(); }), write: vi.fn() };
     const f = fixture(async request => {
@@ -118,11 +118,17 @@ it('opens opaque host bytes in the canonical reader, routes reviewed export, and
             if (request.operation === 'save') return reply({ status: 'host-status', outcome: 'read-only' });
         }
         if (request.action === 'activate' || request.action === 'resume') return reply({ ...active(nextGrant), presentation: { ...active(nextGrant).presentation, generation } });
+        if (request.action === 'app' && request.request.method === 'chooseCopy') return reply({ status: 'ok', payload: { destination: copyEstablished ? { phase: 'active', kind: 'copy' } : { phase: 'host' }, sync: { phase: 'not-saved' } } });
         return reply({ status: 'ok', payload: {} });
     }, () => resources);
     await f.shell.receive({ status: 'host-resource', file: { name: 'host.pdf', resourceUri: 'opaque:host' }, ticket: 'p'.repeat(43) });
     await vi.advanceTimersByTimeAsync(0);
     expect(host.mounts).toHaveLength(1); expect(f.status.textContent).toContain('read-only'); expect(resources.subscribe).toHaveBeenCalledOnce();
+    await host.options[0].call('chooseCopy', {});
+    expect(f.status.textContent).toContain('read-only');
+    copyEstablished = true;
+    await host.options[0].call('chooseCopy', {});
+    expect(f.status.textContent).not.toContain('read-only');
     const fence = { expectedRevision: 2, documentGeneration: 1 };
     const exported = { kind: 'reviewed-copy' as const, path: 'host-reviewed.pdf', revision: 2, digest: 'a'.repeat(64), warning: 'Verify the downloaded file.' };
     const exportCopy = vi.spyOn(HostResourceAdapter.prototype, 'export').mockImplementation(async function(this: HostResourceAdapter) {
@@ -147,9 +153,12 @@ it('opens opaque host bytes in the canonical reader, routes reviewed export, and
         expect(f.root.dataset.hostExportDiagnostic).not.toContain('private host details');
         expect(f.calls.some(c => c.action === 'app' && c.request.method === 'exportReviewedCopy')).toBe(false);
     } finally { exportCopy.mockRestore(); }
+    f.app.getHostCapabilities = () => ({}) as any;
+    await expect(host.options[0].call('exportReviewedCopy', { fence })).rejects.toThrow('Use Save options');
     const old = host.options[0]; generation = 2; update({ params: { uri: 'opaque:host' } });
     await vi.waitFor(() => expect(host.mounts).toHaveLength(2));
     expect(f.calls.some(c => c.action === 'resume')).toBe(true);
+    expect(host.options[1].reviewedCopyExport).toBe(false);
     await expect(old.call('command', {})).rejects.toThrow('stale-reply');
     await f.shell.teardown(); expect(resources.unsubscribe).toHaveBeenCalledOnce(); expect(resources.write).not.toHaveBeenCalled();
 });
@@ -544,8 +553,8 @@ it('own-save notification does not retire a changed-name export before host down
  const bytes=Buffer.from('%PDF-1.7\nsource\n%%EOF'), saved=Buffer.from('%PDF-1.7\nchanged-author\n%%EOF');
  const sha=(b:Buffer)=>createHash('sha256').update(b).digest('hex');
  let update:(event:any)=>void=()=>{}, imported=false, dirty=false, acknowledged=false;
- const download=deferred();
- const resources={read:vi.fn(async()=>({contents:[{uri:'opaque:host',blob:(acknowledged?saved:bytes).toString('base64'),openaiMetadata:{writable:true,etag:acknowledged?'v2':'v1'}}]})),subscribe:vi.fn(async()=>({})),unsubscribe:vi.fn(async()=>({})),addUpdateHandler:vi.fn((fn:any)=>{update=fn;return vi.fn();}),write:vi.fn(async()=>{update({params:{uri:'opaque:host'}});return {outcome:'saved',etag:'v2'};})};
+ const download=deferred(), writeStarted=deferred(), downloadStarted=deferred(), remounted=deferred();
+ const resources={read:vi.fn(async()=>({contents:[{uri:'opaque:host',blob:(acknowledged?saved:bytes).toString('base64'),openaiMetadata:{writable:true,etag:acknowledged?'v2':'v1'}}]})),subscribe:vi.fn(async()=>({})),unsubscribe:vi.fn(async()=>({})),addUpdateHandler:vi.fn((fn:any)=>{update=fn;return vi.fn();}),write:vi.fn(async()=>{writeStarted.resolve(undefined);update({params:{uri:'opaque:host'}});return {outcome:'saved',etag:'v2'};})};
  const f=fixture(async r=>{
   if(r.action==='host-resource'){
    if(r.operation==='begin')return reply({status:'host-transfer',transfer:'t'.repeat(43),offset:0});
@@ -560,23 +569,68 @@ it('own-save notification does not retire a changed-name export before host down
   if(r.action==='app'&&r.request.method==='command'){dirty=true;return reply({status:'ok',payload:{revision:1,workflow:{documentGeneration:1}}});}
   return reply({status:'ok',payload:{}});
  },()=>resources);
- f.app.downloadFile.mockImplementation(()=>download.promise);
+ f.app.downloadFile.mockImplementation(()=>{downloadStarted.resolve(undefined);return download.promise;});
  await f.shell.receive({status:'host-resource',file:{name:'host.pdf',resourceUri:'opaque:host'},ticket:'p'.repeat(43)});
  await vi.advanceTimersByTimeAsync(0);
  const port=host.options[0];
  const named=await port.call('command',{type:'set-annotation-name',expectedRevision:0,annotationName:'New Author'});
  const exported=port.call('exportReviewedCopy',{fence:{expectedRevision:named.revision,documentGeneration:named.workflow.documentGeneration}});
  await vi.advanceTimersByTimeAsync(0);
- await vi.waitFor(()=>expect(resources.write).toHaveBeenCalledOnce());
- await vi.waitFor(()=>expect(f.app.downloadFile).toHaveBeenCalledOnce());
+ await writeStarted.promise;
+ await downloadStarted.promise;
+ expect(resources.write).toHaveBeenCalledOnce();
+ expect(f.app.downloadFile).toHaveBeenCalledOnce();
  expect(host.mounts).toHaveLength(1);
  expect(f.calls.filter(c=>c.action==='resume')).toHaveLength(0);
+ host.onMount=()=>{if(host.mounts.length===2)remounted.resolve(undefined);};
  download.resolve({});
  await expect(exported).resolves.toMatchObject({kind:'reviewed-copy',revision:1});
- await vi.advanceTimersByTimeAsync(0);
+ await remounted.promise;
  expect(host.mounts).toHaveLength(2);
  expect(f.status.textContent).toContain('host accepted the download');
  expect(JSON.parse(f.root.dataset.hostExportDiagnostic!)).toMatchObject({ phase: 'host-accepted' });
+ expect(resources.write).toHaveBeenCalledOnce();
+ await f.shell.teardown();
+});
+
+
+it('waits for the in-flight host write before choosing a local copy, then saves only the copy',async()=>{
+ const pdf=Buffer.from('%PDF-1.7\ncopy-switch fixture\n%%EOF'),sha=createHash('sha256').update(pdf).digest('hex');
+ const pendingWrite=deferred(), writeStarted=deferred(), localSaveChecked=deferred(), localRetried=deferred();let imported=false,dirty=false,local=false;
+ const resources={read:vi.fn(async()=>({contents:[{uri:'opaque:host',blob:pdf.toString('base64'),openaiMetadata:{writable:true,etag:'v1'}}]})),subscribe:vi.fn(async()=>({})),unsubscribe:vi.fn(async()=>({})),addUpdateHandler:vi.fn(()=>vi.fn()),write:vi.fn(()=>{writeStarted.resolve(undefined);return pendingWrite.promise;})};
+ const f=fixture(async r=>{
+  if(r.action==='activate'||r.action==='resume')return reply(active());
+  if(r.action==='host-resource'){
+   if(r.operation==='begin')return reply({status:'host-transfer',transfer:'t'.repeat(43),offset:0});
+   if(r.operation==='chunk')return reply({status:'host-transfer',transfer:'t'.repeat(43),offset:pdf.length});
+   if(r.operation==='finish'){if(imported)return reply({status:'host-ready',generation:1});imported=true;return reply({status:'provisional',grant});}
+   if(r.operation==='save'&&local)localSaveChecked.resolve(undefined);
+   if(r.operation==='save')return reply(local?{status:'host-status',outcome:'local-copy'}:dirty?{status:'host-save',intent:{id:'i'.repeat(43),generation:1,revision:1,stateDigest:'a'.repeat(64),sourceDigest:sha,sha256:sha,byteLength:pdf.length,ifMatch:'v1',purpose:'save'}}:{status:'host-status',outcome:'saved'});
+   if(r.operation==='save-chunk')return reply({status:'host-chunk',dataBase64:pdf.toString('base64'),done:true});
+   if(r.operation==='receipt'){dirty=false;return reply({status:'host-status',outcome:'saved'});}
+  }
+  if(r.action==='app'){
+   if(r.request.method==='saveStatus')return reply({status:'ok',payload:{destination:{phase:local?'active':'host'},sync:{phase:'clean'}}});
+   if(r.request.method==='chooseCopy'){local=true;return reply({status:'ok',payload:{destination:{phase:'active'},sync:{phase:'clean'}}});}
+   if(r.request.method==='command')dirty=true;
+   if(r.request.method==='retrySave')localRetried.resolve(undefined);
+  }
+  return reply({status:'ok',payload:{}});
+ },()=>resources);
+ await f.shell.receive({status:'host-resource',file:{name:'host.pdf',resourceUri:'opaque:host'},ticket:'p'.repeat(43)});
+ await vi.advanceTimersByTimeAsync(0);
+ const port=host.options[0];await port.call('command',{});
+ await writeStarted.promise;
+ expect(resources.write).toHaveBeenCalledOnce();
+ const selecting=port.call('chooseCopy',{filename:'copy.pdf',folderSelectionId:'opaque-selection'});
+ await vi.advanceTimersByTimeAsync(0);
+ expect(local).toBe(false);
+ pendingWrite.resolve({outcome:'saved',etag:'v2'});await selecting;
+ expect(local).toBe(true);
+ await port.call('command',{});await localSaveChecked.promise;
+ expect(resources.write).toHaveBeenCalledOnce();
+ f.controls.append.mock.calls.map(([button])=>button).find(button=>button.textContent==='Save now').onclick();await localRetried.promise;
+ expect(f.calls.some(r=>r.action==='app'&&r.request.method==='retrySave')).toBe(true);
  expect(resources.write).toHaveBeenCalledOnce();
  await f.shell.teardown();
 });

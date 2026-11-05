@@ -54,6 +54,10 @@ export class HostResourceAdapter {
         this.#assert(epoch);
         return imported;
     }
+    withSaveBarrier<T>(work: () => Promise<T>): Promise<T> {
+        const epoch = this.#epoch;
+        return this.#serial(async () => { this.#assert(epoch); return work(); });
+    }
     refresh(grant: string) { return this.#serial(() => this.#read({ grant })); }
     async #read(authority: {
         ticket: string;

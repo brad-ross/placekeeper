@@ -1690,28 +1690,35 @@ describe("one production review tree", () => {
     { writable: true, phase: 'saving' as const },
     { writable: true, phase: 'not-saved' as const },
     { writable: false, phase: 'not-saved' as const },
-  ])('keeps reviewed export reachable for a host destination ($writable, $phase)', ({ writable, phase }) => {
+    { writable: false, phase: 'not-saved' as const, download: false },
+  ])('offers automatic save options for a host destination ($writable, $phase)', ({ writable, phase, download }) => {
     const state = createReviewState({
       sessionId: '00000000-0000-4000-8000-000000000103',
       source: { fileId: '00000000-0000-4000-8000-000000000104', digest: 'a'.repeat(64), byteLength: 12 },
     });
     const html = renderToStaticMarkup(<ProductionReviewApp
       session={{ sessionId: state.sessionId }} initialState={state}
-      scope={{ documentTitle: 'host.pdf', launchSurface: 'codex' }}
+      scope={{ documentTitle: 'host.pdf', launchSurface: 'codex', sourceDisposition: 'remote-temporary' }}
       initialSaveStatus={{
         destination: { phase: 'host', generation: 1, writable },
         sync: { phase, desiredRevision: 1, savedRevision: 0 },
       }}
       api={{
+        capabilities: { localDocumentRefresh: true, ...(download === false ? { reviewedCopyExport: false } : {}) },
         command: vi.fn(), saveStatus: vi.fn(), saveProposal: vi.fn(), chooseCopy: vi.fn(),
         chooseFolder: vi.fn(), chooseOriginal: vi.fn(), retrySave: vi.fn(), locateSave: vi.fn(),
         exportReviewedCopy: vi.fn(), scope: vi.fn(),
       }}
       viewer={<div>Host PDF reader</div>}
     />);
-    expect(html).toContain('data-document-actions-trigger');
-    expect(html).toContain('aria-haspopup="menu"');
-    expect(html).not.toContain('Open automatic save options');
+    if (download === false) {
+      expect(html).toContain('aria-haspopup="dialog"');
+      expect(html).toContain('Open automatic save options');
+      expect(html).not.toContain('data-document-actions-trigger');
+    } else {
+      expect(html).toContain('data-document-actions-trigger');
+      expect(html).toContain('aria-haspopup="menu"');
+    }
     const status = phase === 'not-saved' ? 'Not saved' : phase === 'saving' ? 'Saving changes' : 'Saved';
     expect(html).toContain(`data-review-saved-status="true">${status}</span>`);
   });

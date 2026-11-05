@@ -1,7 +1,7 @@
 import { PDFDocument } from 'pdf-lib';
 import { createEmbedPdfWriter, readEditableReviewItems } from '../../../packages/pdf-backends/src/embedpdf-adapter.js';
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdtemp, rm, readFile, readdir, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm, readFile, readdir, writeFile, realpath } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
@@ -22,11 +22,13 @@ async function fixture(options: {writer?:PdfWriter;realVerification?:boolean} = 
  const root=await mkdtemp(join(tmpdir(),'placekeeper-host-resource-'));
  const broker=new SessionBroker({recoveryRoot:join(root,'recovery'),portableReader:async()=>[],rewriteAssessor:async()=>({eligible:true}),browserSourceInspector:async()=>({rewriteEligibility:{eligible:true},importedItems:[]}),inspectGeneration:async()=>({pageCount:1,pages:[{pageIndex:0,text:'paper'}]})});
  const writer=options.writer??{write:async()=>{throw Error('unexpected local write');}};
- const saving=new PdfSaveCoordinator({broker,writer,...(options.realVerification?{}:{verify:async({annotations}:{annotations:readonly {id:string}[]})=>({pageCount:1,annotationIds:annotations.map(a=>a.id)})})});
- const backend=new CodexServiceRuntimeBackend({broker,saving,exporting:new ExportCoordinator({writer,capabilities:broker.capabilities})});
+ const picker={chooseFolder:vi.fn(async ():Promise<string|undefined>=>root),locatePdf:vi.fn(async ():Promise<string|undefined>=>undefined)};
+ const saving=new PdfSaveCoordinator({broker,writer,picker,...(options.realVerification?{}:{verify:async({annotations}:{annotations:readonly {id:string}[]})=>({pageCount:1,annotationIds:annotations.map(a=>a.id)})})});
+ const exporting=new ExportCoordinator({writer,capabilities:broker.capabilities});
+ const backend=new CodexServiceRuntimeBackend({broker,saving,exporting});
  const manager=new ExtensionRuntimeManager(broker,{backend});
  cleanups.push(async()=>{await manager.close();await saving.drain();await broker.quiesceForShutdown();await rm(root,{recursive:true,force:true});});
- return {root,broker,manager};
+ return {root,broker,manager,saving,picker,exporting};
 }
 const bytes=Buffer.from('%PDF-1.7\nopaque fixture\n%%EOF');
 async function upload(manager:ExtensionRuntimeManager, authority:{ticket:string}|{grant:string}, input=bytes, writable=false, etag='v1') {
@@ -64,9 +66,9 @@ it('rejects empty, corrupt and oversized transfers before admission',async()=>{
  expect(await f.manager.dispatch({action:'host-resource',operation:'finish',transfer:s.transfer})).toEqual({status:'unavailable'});
 });
 
-async function openHost(f:Awaited<ReturnType<typeof fixture>>,writable=false) {
+async function openHost(f:Awaited<ReturnType<typeof fixture>>,writable=false,input=bytes) {
  const descriptor:any=await f.manager.dispatch({action:'host-open',file:{name:'host.pdf',resourceUri:'opaque:fixture'}});
- const provisional:any=await upload(f.manager,{ticket:descriptor.ticket},bytes,writable);
+ const provisional:any=await upload(f.manager,{ticket:descriptor.ticket},input,writable);
  const active:any=await f.manager.resume(provisional.grant,randomUUID(),'activate');
  const call=(method:string,payload:unknown={},requestId=randomUUID())=>f.manager.handle({protocolVersion:1,authority:'presentation',requestId,runtimeId:active.presentation.runtimeId,attemptId:active.presentation.attemptId,generation:active.presentation.generation,capability:active.presentation.presentationCapability,method,payload});
  const watermark:any=await call('watermark');return {active,call,sessionId:watermark.payload.sessionId};
@@ -167,17 +169,19 @@ it('serializes and verifies a real reviewed PDF before issuing a conditional hos
  expect(createHash('sha256').update(pdf).digest('hex')).toBe(saved.intent.sha256);
  const annotations=await readEditableReviewItems(pdf);expect(annotations).toHaveLength(1);expect(JSON.stringify(annotations)).toContain('actual PDF annotation');
 });
-it('reopens protected host work after restart through an explicit recovery choice',async()=>{
- const f=await fixture(),h=await openHost(f);
+it.each([false,true])('reopens protected host work and its chosen destination after restart (copy=%s)',async(copy)=>{
+ const f=await fixture({writer:writerFixture()}),h=await openHost(f);
+ if(copy){const folder:any=await h.call('chooseFolder');expect(await h.call('chooseCopy',{filename:'restart-copy.pdf',folderSelectionId:folder.payload.selectionId})).toMatchObject({status:'ok'});}
  await h.call('command',addPageNote(f.broker.state(h.sessionId)!,0,{x:20,y:20,width:20,height:20},'survive restart'));
  const updated=Buffer.from('%PDF-1.7\nupdated before restart\n%%EOF');
  await upload(f.manager,{grant:h.active.grant},updated);
  expect((await new DraftSnapshotStore(join(f.root,'recovery',h.sessionId)).recover())?.source).toMatchObject({disposition:'remote-temporary'});
- await f.manager.close();await f.broker.quiesceForShutdown();
+ await f.manager.close();await f.saving.drain();await f.broker.quiesceForShutdown();
  expect((await new DraftSnapshotStore(join(f.root,'recovery',h.sessionId)).recover())?.state.workflow.documentGeneration).toBe(2);
  const broker=new SessionBroker({recoveryRoot:join(f.root,'recovery'),portableReader:async()=>[],rewriteAssessor:async()=>({eligible:true}),browserSourceInspector:async()=>({rewriteEligibility:{eligible:true},importedItems:[]}),inspectGeneration:async()=>({pageCount:1,pages:[{pageIndex:0,text:'paper'}]})});
  const writer=writerFixture(),saving=new PdfSaveCoordinator({broker,writer,verify:async({annotations})=>({pageCount:1,annotationIds:annotations.map(a=>a.id)})});
- const backend=new CodexServiceRuntimeBackend({broker,saving,exporting:new ExportCoordinator({writer,capabilities:broker.capabilities})});
+ const exporting=new ExportCoordinator({writer,capabilities:broker.capabilities});
+ const backend=new CodexServiceRuntimeBackend({broker,saving,exporting});
  const manager=new ExtensionRuntimeManager(broker,{backend});
  cleanups.push(async()=>{await manager.close();await saving.drain();await broker.quiesceForShutdown();});
  const descriptor:any=await manager.dispatch({action:'host-open',file:{name:'host.pdf',resourceUri:'opaque:fixture'}});
@@ -186,6 +190,11 @@ it('reopens protected host work after restart through an explicit recovery choic
  expect(await upload(manager,{grant:selected.grant},updated)).toMatchObject({status:'host-ready',generation:2});
  const active:any=await manager.resume(selected.grant,randomUUID(),'activate');expect(active.status).toBe('active');
  expect(broker.state(h.sessionId)?.items[0]?.payload.comment).toBe('survive restart');expect(await broker.documentBytes(h.sessionId)).toEqual(updated);
+ if(copy){
+  expect(broker.saveStatus(h.sessionId)?.destination).toMatchObject({phase:'active',targetPath:await realpath(join(f.root,'restart-copy.pdf'))});
+  expect(await manager.handle({protocolVersion:1,authority:'presentation',requestId:randomUUID(),runtimeId:active.presentation.runtimeId,attemptId:active.presentation.attemptId,generation:active.presentation.generation,capability:active.presentation.presentationCapability,method:'command',payload:addPageNote(broker.state(h.sessionId)!,0,{x:20,y:20,width:20,height:20},'after restart')})).toMatchObject({status:'ok'});
+  await saving.drain();expect((await readFile(join(f.root,'restart-copy.pdf'))).toString()).toContain('after restart');
+ }
 });
 it('fences in-progress transfers when their app grant rotates',async()=>{
  const f=await fixture(),h=await openHost(f);
@@ -195,9 +204,9 @@ it('fences in-progress transfers when their app grant rotates',async()=>{
  expect(await f.manager.dispatch({action:'host-resource',operation:'finish',transfer:started.transfer})).toEqual({status:'unavailable'});
  expect(f.broker.state(h.sessionId)?.workflow.documentGeneration).toBe(1);
 });
-it('host grants cannot enter the local destination or filesystem-export routes',async()=>{
+it('host grants cannot overwrite private sources or use filesystem export without a chosen copy',async()=>{
  const f=await fixture(),h=await openHost(f,true);
- for(const method of ['chooseOriginal','chooseFolder','retrySave','locateSave','exportReviewedCopy'])expect(await h.call(method)).toMatchObject({status:'denied'});
+ for(const method of ['chooseOriginal','retrySave','locateSave','exportReviewedCopy'])expect(await h.call(method)).toMatchObject({status:'denied'});
  expect(f.broker.saveStatus(h.sessionId)?.destination).toMatchObject({phase:'host'});
 });
 it('a receipt for older work cannot mark a newer semantic revision Saved even when its marks match',async()=>{
@@ -241,4 +250,57 @@ it.each(['pending', 'exported'] as const)('streams %s host-save bytes in bounded
   expect(Buffer.concat(received)).toEqual(output);
   await expect(persistence.saveChunk(h.sessionId, intent.id, output.length)).rejects.toThrow('Host intent unavailable');
  } finally { allocations.mockRestore(); }
+});
+
+
+it.each([false, true])('autosaves opaque PDFs to a chosen local copy and preserves that destination on refresh (writable=%s)', async writable => {
+ const document=await PDFDocument.create();document.addPage([400,500]);const original=Buffer.from(await document.save());
+ const writer=await createEmbedPdfWriter(),f=await fixture({writer,realVerification:true}),h=await openHost(f,writable,original);
+ const source=f.broker.nativeAdmissionScope(h.sessionId)!.canonicalSourcePath;
+ expect(await h.call('saveProposal')).toMatchObject({status:'ok',payload:{sourceDisposition:'remote-temporary',filename:'host-annotated.pdf'}});
+ f.picker.chooseFolder.mockResolvedValueOnce(undefined);
+ expect(await h.call('chooseFolder')).toMatchObject({status:'ok',payload:{cancelled:true}});
+ expect(f.broker.saveStatus(h.sessionId)?.destination.phase).toBe('host');
+ expect(await h.call('chooseCopy',{filename:'copy.pdf'})).toMatchObject({status:'denied'});
+ const folder:any=await h.call('chooseFolder');
+ expect(folder).toMatchObject({status:'ok',payload:{cancelled:false,folder:'Local folder'}});
+ expect(await h.call('chooseCopy',{filename:'copy.pdf',folderSelectionId:folder.payload.selectionId})).toMatchObject({status:'ok',payload:{destination:{phase:'active',kind:'copy'}}});
+ const genericExport=vi.spyOn(f.exporting,'exportReviewedCopy');
+ expect(await h.call('exportReviewedCopy',{fence:{expectedRevision:f.broker.state(h.sessionId)!.revision,documentGeneration:1}})).toMatchObject({status:'denied'});
+ expect(genericExport).not.toHaveBeenCalled();
+ for(const comment of ['first copy note','second copy note']) {
+  expect(await h.call('command',addPageNote(f.broker.state(h.sessionId)!,0,{x:20,y:20,width:20,height:20},comment))).toMatchObject({status:'ok'});
+  await f.saving.drain();
+  expect(JSON.stringify(await readEditableReviewItems(await readFile(join(f.root,'copy.pdf'))))).toContain(comment);
+  expect(f.broker.saveStatus(h.sessionId)?.sync.phase).toBe('clean');
+  expect(await f.manager.dispatch({action:'host-resource',operation:'save',grant:h.active.grant})).not.toHaveProperty('intent');
+ }
+ expect(await readFile(source)).toEqual(original);
+ expect(await upload(f.manager,{grant:h.active.grant},original,writable)).toMatchObject({status:'host-ready'});
+ expect(f.broker.saveStatus(h.sessionId)?.destination).toMatchObject({phase:'active',targetPath:await realpath(join(f.root,'copy.pdf'))});
+ const durable=await new DraftSnapshotStore(join(f.root,'recovery',h.sessionId)).recover();
+ expect(durable?.destination).toMatchObject({phase:'active',targetPath:await realpath(join(f.root,'copy.pdf'))});
+ expect(durable?.state.items).toHaveLength(2);
+ document.setTitle('changed original');const successor=Buffer.from(await document.save());
+ expect(await upload(f.manager,{grant:h.active.grant},successor,writable)).toMatchObject({status:'host-ready',generation:2});
+ expect(f.broker.saveStatus(h.sessionId)?.destination).toMatchObject({phase:'active',targetPath:await realpath(join(f.root,'copy.pdf'))});
+ await f.saving.drain();
+ expect(JSON.stringify(await readEditableReviewItems(await readFile(join(f.root,'copy.pdf'))))).toContain('second copy note');
+});
+
+it('a retired host write cannot mark a local copy saved or restore its host destination',async()=>{
+ const f=await fixture({writer:writerFixture()}),h=await openHost(f,true);
+ await h.call('command',addPageNote(f.broker.state(h.sessionId)!,0,{x:20,y:20,width:20,height:20},'keep this'));
+ const saved:any=await f.manager.dispatch({action:'host-resource',operation:'save',grant:h.active.grant});
+ const folder:any=await h.call('chooseFolder');
+ expect(folder.status).toBe('ok');
+ expect(await h.call('chooseCopy',{filename:'copy.pdf',folderSelectionId:folder.payload.selectionId})).toMatchObject({status:'ok'});
+ await f.saving.drain();
+ const before=f.broker.saveStatus(h.sessionId);
+ expect(await f.manager.dispatch({action:'host-resource',operation:'receipt',grant:h.active.grant,intentId:saved.intent.id,outcome:'saved',etag:'late'})).toMatchObject({status:'unavailable'});
+ expect(await f.manager.dispatch({action:'host-resource',operation:'save-chunk',grant:h.active.grant,intentId:saved.intent.id,offset:0})).toMatchObject({status:'unavailable'});
+ await f.broker.configureImportedDestination(h.sessionId,true);
+ expect(f.broker.saveStatus(h.sessionId)).toEqual(before);
+ expect(await upload(f.manager,{grant:h.active.grant},bytes,true)).toMatchObject({status:'host-ready'});
+ expect(f.broker.saveStatus(h.sessionId)).toEqual(before);
 });
