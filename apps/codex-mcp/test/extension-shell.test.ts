@@ -91,7 +91,7 @@ it('retries continuation with one operation identity and fences the old mounted 
     host.mounts[1][3]();
     oldFailure();
     oldReady();
-    expect(f.status.textContent).toBe('');
+    expect(f.status.textContent).toContain('Live reader tools are unavailable');
     await expect(host.options[0].call('review', {})).rejects.toThrow('stale-reply');
     await f.shell.teardown();
 });
@@ -226,5 +226,33 @@ it('publishes fresh initial null context automatically while respecting a later 
     f.shell.hostContextChanged({ 'openai/modelContext': null }); await vi.advanceTimersByTimeAsync(0);
     host.mounts[0][5]({ ...snapshot, page: 2 }); await vi.advanceTimersByTimeAsync(0);
     expect(api.update).toHaveBeenCalledTimes(2); expect(api.update.mock.calls[1]?.[0].content).toEqual([]);
+    await f.shell.teardown();
+});
+it('waits for actual host visibility after expansion before completing live navigation', async () => {
+    const tools = new Map<string, any>();
+    (document as any).modelContext = { registerTool: (tool: any) => tools.set(tool.name, tool), unregisterTool: (name: string) => tools.delete(name) };
+    const f = fixture();
+    (f.app as any).requestDisplayMode = vi.fn(async () => ({ mode: 'fullscreen' }));
+    await f.shell.receive(active()); await vi.advanceTimersByTimeAsync(0);
+    const snapshot = { documentGeneration: 1, reviewRevision: 2, title: 'Paper', source: { fileId: 'file', digest: 'digest' }, page: 1, pageCount: 3, selection: null, annotations: [] };
+    const navigate = vi.fn(async () => true);
+    host.mounts[0][4].attach({ snapshot: () => snapshot, navigate, search: vi.fn() });
+    (document as any).hidden = true; f.shell.visibilityChanged(true);
+    const pending = tools.get('navigate_page').execute({ page: 2, documentGeneration: 1 });
+    await vi.advanceTimersByTimeAsync(0); expect(navigate).not.toHaveBeenCalled();
+    (document as any).hidden = false; f.shell.visibilityChanged(false);
+    expect(JSON.parse(await pending).status).toBe('navigated'); expect(navigate).toHaveBeenCalledTimes(1);
+    await f.shell.teardown(); expect(tools.size).toBe(0);
+});
+it('reports live navigation unavailable if host expansion never reveals the reader', async () => {
+    const tools = new Map<string, any>();
+    (document as any).modelContext = { registerTool: (tool: any) => tools.set(tool.name, tool), unregisterTool: (name: string) => tools.delete(name) };
+    const f = fixture(); (f.app as any).requestDisplayMode = vi.fn(async () => ({ mode: 'fullscreen' }));
+    await f.shell.receive(active()); await vi.advanceTimersByTimeAsync(0);
+    const navigate = vi.fn(); host.mounts[0][4].attach({ snapshot: vi.fn(), navigate, search: vi.fn() });
+    (document as any).hidden = true; f.shell.visibilityChanged(true);
+    const pending = tools.get('navigate_page').execute({ page: 2, documentGeneration: 1 });
+    await vi.advanceTimersByTimeAsync(1500);
+    expect(JSON.parse(await pending).status).toBe('unavailable'); expect(navigate).not.toHaveBeenCalled();
     await f.shell.teardown();
 });

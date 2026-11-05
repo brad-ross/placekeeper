@@ -75,7 +75,7 @@ async function qualificationShellFixture(withControl: boolean, action: "bridge-c
   const status = new Element(), detail = new Element(), renewal = new Element(), root = new Element();
   const created: { tag: string; element: Element }[] = [];
   const documentEvents = new Map<string, EventListener>(), windowEvents = new Map<string, EventListener>();
-  vi.stubGlobal("document", { hidden: false, addEventListener: (type: string, listener: EventListener) => documentEvents.set(type, listener), querySelector: (selector: string) => ({ "#status": status, "#detail": detail, "#renewal": renewal, "#root": root } as Record<string, Element>)[selector], createElement: (tag: string) => { const element = new Element(); created.push({ tag, element }); return element; } });
+  vi.stubGlobal("document", { documentElement: { style: { setProperty: vi.fn() } }, hidden: false, addEventListener: (type: string, listener: EventListener) => documentEvents.set(type, listener), querySelector: (selector: string) => ({ "#status": status, "#detail": detail, "#renewal": renewal, "#root": root } as Record<string, Element>)[selector], createElement: (tag: string) => { const element = new Element(); created.push({ tag, element }); return element; } });
   vi.stubGlobal("window", { addEventListener: (type: string, listener: EventListener) => windowEvents.set(type, listener) });
   const clear = vi.fn();
   const runtimeDispose = vi.fn();
@@ -101,7 +101,9 @@ async function qualificationShellFixture(withControl: boolean, action: "bridge-c
   const fixtureRuntimeId = realRuntime ? "runtime_1234567890" : "runtime-1";
   let grantSent = false;
   const calls: string[] = [];
-  class MockApp {
+  class MockApp extends EventTarget {
+    getHostContext = () => ({});
+    getHostCapabilities = () => ({});
     ontoolresult: ((result: unknown) => void) | undefined;
     onteardown: (() => Promise<unknown>) | undefined;
     onhostcontextchanged: unknown;

@@ -1,3 +1,4 @@
+import { LiveReaderTools, type DocumentModelContext } from './live-reader-tools.js';
 import { ExtensionContextCoordinator, type ExtensionContextPreferences } from '../../web/src/host/extension-context-coordinator.js';
 import type { ReviewContextSnapshot } from '../../web/src/host/review-context-snapshot.js';
 import type { OpenAIModelContext, OpenAIResources } from '@openai/mcp-extensions/app';
@@ -13,6 +14,8 @@ import { NativeDiagnosticError, diagnosticFailure } from './lifecycle-diagnostic
 /** Memory-only app grants. A new host invocation never inherits an old panel's authority. */
 export class ExtensionShell {
     #context: ExtensionContextCoordinator | undefined;
+    #readerTools: LiveReaderTools | undefined;
+    readonly #readerVisibilityListeners = new Set<() => void>();
     #contextView: HTMLElement | undefined;
     #contextEnable: HTMLElement | undefined;
     #openReader: HTMLElement | undefined;
@@ -78,7 +81,7 @@ export class ExtensionShell {
         this.#message = text;
         const compact = this.#active && this.#displayMode !== 'fullscreen';
         const summary = compact ? `${this.#snapshot?.title ?? this.#title ?? 'Placekeeper PDF'}${this.#snapshot ? ` · Page ${this.#snapshot.page} of ${this.#snapshot.pageCount}` : ''}. Open the reader to edit.` : '';
-        this.status.textContent = [summary, text || (document.hidden && this.#active ? 'Reader suspended while the app is hidden. Protected work is retained.' : '')].filter(Boolean).join(' ');
+        this.status.textContent = [summary, this.#readerTools && !this.#readerTools.supported ? 'Live reader tools are unavailable on this host. Open the reader to search and navigate.' : '', text || (document.hidden && this.#active ? 'Reader suspended while the app is hidden. Protected work is retained.' : '')].filter(Boolean).join(' ');
         this.status.hidden = !this.status.textContent;
     }
     #contextStatus() {
@@ -105,6 +108,7 @@ export class ExtensionShell {
             if (this.#openReader) this.#openReader.hidden = !this.root.hidden;
             this.#show(this.#message);
         }
+        for (const listener of this.#readerVisibilityListeners) listener();
         if (reconcileContext && Object.hasOwn(context, 'openai/modelContext')) this.#context?.reconcile(this.modelContext()?.getCurrent());
     }
     #setupContext(freshInvocation: boolean) {
@@ -221,14 +225,35 @@ export class ExtensionShell {
         this.#connected = true;
         this.#verified.clear();
         this.root.inert = document.hidden;
+        this.#readerTools?.dispose();
         this.#unmount?.();
+        this.#readerTools = new LiveReaderTools((document as Document & { modelContext?: DocumentModelContext }).modelContext, {
+            available: () => epoch === this.#epoch && this.#connected && !this.#closed && !document.hidden && !this.root.hidden && !this.root.inert,
+            ensureVisible: async () => {
+                if (epoch !== this.#epoch || !this.#connected || this.#closed) return false;
+                if (this.#displayMode !== 'fullscreen' || document.hidden || this.root.hidden) {
+                    try { const result = await this.app.requestDisplayMode({ mode: 'fullscreen' }); if (epoch !== this.#epoch) return false; this.hostContextChanged({ displayMode: result.mode }); }
+                    catch { return false; }
+                }
+                const visible = () => epoch === this.#epoch && this.#connected && !this.#closed && !document.hidden && !this.root.hidden && !this.root.inert;
+                if (visible()) return true;
+                return new Promise<boolean>(resolve => {
+                    const finish = (value: boolean) => { clearTimeout(timer); this.#readerVisibilityListeners.delete(check); resolve(value); };
+                    const check = () => { if (visible()) finish(true); else if (epoch !== this.#epoch || !this.#connected || this.#closed) finish(false); };
+                    const timer = setTimeout(() => finish(false), 1500);
+                    this.#readerVisibilityListeners.add(check);
+                    check();
+                });
+            },
+        });
+        if (!this.#readerTools.supported) this.#show('Live reader tools are unavailable on this host. Open the reader to search and navigate.');
         this.#listeners.clear();
         this.#watermark = undefined;
         const runtime = createCodexHostRuntime({ runtimeId: active.runtimeId, call: (method, payload) => this.#payload(method, payload, epoch), subscribeInvalidations: listener => { this.#listeners.add(listener); return () => this.#listeners.delete(listener); } });
         this.#show('Opening PDF…');
         this.#unmount = mountCodexProductionReview(this.root, runtime, () => { if (epoch === this.#epoch)
             this.#show('The PDF could not be loaded. Reopen it through the file menu; protected work is retained.'); }, () => { if (epoch === this.#epoch && this.#connected)
-            this.#show(this.#hostNotice); }, undefined, snapshot => { if (epoch !== this.#epoch || this.#closed || !this.#connected || snapshot.documentGeneration !== this.#active?.generation) return; this.#snapshot = snapshot; this.#context?.publish(snapshot); this.#show(this.#message); }, (title, generation) => { if (epoch !== this.#epoch || this.#closed || generation !== this.#active?.generation) return; this.#title = title; this.#show(this.#message); });
+            this.#show(this.#hostNotice); }, this.#readerTools, snapshot => { if (epoch !== this.#epoch || this.#closed || !this.#connected || snapshot.documentGeneration !== this.#active?.generation) return; this.#snapshot = snapshot; this.#context?.publish(snapshot); this.#show(this.#message); }, (title, generation) => { if (epoch !== this.#epoch || this.#closed || generation !== this.#active?.generation) return; this.#title = title; this.#show(this.#message); });
         this.#liveness?.stop();
         this.#liveness = new PanelLiveness({ renew: async () => { await this.#probe('renew'); }, poll: async () => { await this.#probe('watermark'); }, pollInterval: () => document.hidden ? 5000 : 1000, onState: state => { if (epoch !== this.#epoch || this.#closed)
                 return; if (state === 'reconnecting')
@@ -383,16 +408,17 @@ export class ExtensionShell {
         return this.#resume;
     }
     #ended() { if (this.#closed)
-        return; this.#connected = false; this.#context?.dispose(); this.#liveness?.stop(); void this.#host?.dispose().catch(() => undefined); this.root.inert = true; this.#show('This connection ended. Reopen the PDF through its file menu; accepted annotations and protected drafts are retained.'); this.#closed = true; this.#epoch++; }
+        return; this.#connected = false; this.#readerTools?.dispose(); this.#context?.dispose(); this.#liveness?.stop(); void this.#host?.dispose().catch(() => undefined); this.root.inert = true; this.#show('This connection ended. Reopen the PDF through its file menu; accepted annotations and protected drafts are retained.'); this.#closed = true; this.#epoch++; }
     visibilityChanged(hidden: boolean) {
         if (!this.#active || this.#closed) return;
         this.root.inert = hidden || !this.#connected;
+        for (const listener of this.#readerVisibilityListeners) listener();
         if (hidden) this.#show('Reader suspended while the app is hidden. Protected work is retained.');
         else { this.#show(this.#connected ? this.#hostNotice : 'Reconnecting to Placekeeper… Editing is paused.'); this.wake(); }
     }
     wake() { if (this.#connected && !document.hidden) this.#context?.retry(); this.#liveness?.wake(); }
     disconnected() { if (this.ownsPanel)
         this.#ended(); }
-    async teardown() { this.#context?.dispose(); this.#closed = true; this.#connected = false; this.root.inert = true; const grant = this.#grant; this.#epoch++; this.#grant = undefined; this.#active = undefined; this.#liveness?.stop(); this.#unmount?.(); this.#listeners.clear(); await this.#host?.dispose(); if (grant)
+    async teardown() { this.#readerTools?.dispose(); this.#context?.dispose(); this.#closed = true; this.#connected = false; this.root.inert = true; const grant = this.#grant; this.#epoch++; this.#grant = undefined; this.#active = undefined; this.#liveness?.stop(); this.#unmount?.(); this.#listeners.clear(); await this.#host?.dispose(); if (grant)
         await this.#request({ action: 'revoke', grant }).catch(() => undefined); }
 }

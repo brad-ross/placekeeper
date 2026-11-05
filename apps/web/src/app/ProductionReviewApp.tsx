@@ -1,3 +1,4 @@
+import { reviewAgentSearchResult, type ReviewAgentBridge, type ReviewAgentActions } from '../host/review-agent-bridge.js';
 import { reviewContextSnapshot, type ReviewContextSnapshot } from '../host/review-context-snapshot.js';
 import type { PlacekeeperLinkLocation } from "../../../../packages/core/src/placekeeper-link.js";
 import { pdfNavigationTargetFromPlacekeeperLocation } from '../pdf/pdf-navigation-target.js';
@@ -527,6 +528,7 @@ export function authoringReferenceTarget(
 }
 
 export interface ProductionReviewAppProps {
+  readonly agentBridge?: ReviewAgentBridge;
   readonly onContextSnapshot?: (snapshot: ReviewContextSnapshot) => void;
   readonly session: ProductionSession;
   readonly initialState: ReviewStateView;
@@ -1493,9 +1495,63 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     if (!initialViewReady || !viewerState.ready || !viewerResourcesAreCurrent || mainDocumentReadyGeneration !== state.workflow.documentGeneration || documentGenerationRef.current !== state.workflow.documentGeneration) return;
     props.onContextSnapshot?.(reviewContextSnapshot({ state, title: pageTitle,
       page: viewerState.currentPage, pageCount: viewerState.totalPages,
+      ...(activeItemId === undefined ? {} : { activeAnnotationId: activeItemId }),
       selection: selectionUpdate, selectionIsCurrent: selectionUpdate.kind === 'reliable' && currentAnnotationSurface(selectionUpdate.surface) !== null,
     }));
-  }, [props.onContextSnapshot, state, pageTitle, initialViewReady, viewerState, viewerResourcesAreCurrent, mainDocumentReadyGeneration, selectionUpdate, currentAnnotationSurface]);
+  }, [props.onContextSnapshot, state, pageTitle, initialViewReady, viewerState, viewerResourcesAreCurrent, mainDocumentReadyGeneration, selectionUpdate, currentAnnotationSurface, activeItemId]);
+  const liveAgentActions = useRef<ReviewAgentActions | null>(null);
+  const agentReady = initialViewReady && viewerState.ready && viewerResourcesAreCurrent
+    && mainDocumentReadyGeneration === state.workflow.documentGeneration;
+  liveAgentActions.current = {
+    snapshot: () => {
+      if (!agentReady || documentGenerationRef.current !== state.workflow.documentGeneration || mainNavigationRef.current === null) throw Error('Reader unavailable');
+      return reviewContextSnapshot({ state: stateRef.current, title: pageTitle,
+        page: (mainNavigationRef.current.captureLocation()?.pageIndex ?? viewerState.currentPage - 1) + 1,
+        pageCount: viewerState.totalPages, selection: selectionUpdate,
+        selectionIsCurrent: selectionUpdate.kind === 'reliable' && currentAnnotationSurface(selectionUpdate.surface) !== null, ...(activeItemId === undefined ? {} : { activeAnnotationId: activeItemId }) });
+    },
+    search: async query => {
+      const generation = documentGenerationRef.current;
+      const result = await search.searchQuery(query);
+      if (generation !== documentGenerationRef.current) throw Error('Document changed');
+      return reviewAgentSearchResult(result, generation);
+    },
+    navigate: async target => {
+      if (!agentReady || target.documentGeneration !== documentGenerationRef.current || mainNavigationRef.current === null) return false;
+      const settle = async (navigate: () => Promise<boolean>) => {
+        const pending = navigate();
+        const operation = navigationCoordinator.operationIdentity();
+        const reached = await pending;
+        return reached && operation === navigationCoordinator.operationIdentity()
+          && target.documentGeneration === documentGenerationRef.current;
+      };
+      if ('page' in target) {
+        if (!Number.isSafeInteger(target.page) || target.page < 1 || target.page > viewerState.totalPages) return false;
+        const destination = pdfNavigationTargetFromPlacekeeperLocation({ kind: 'page', page: target.page }, { documentGeneration: target.documentGeneration, pageCount: viewerState.totalPages });
+        return destination !== null && settle(() => navigationCoordinator.navigateMainTarget(destination, 'direct'));
+      }
+      if ('resultId' in target) {
+        const result = search.getState()?.groups.flatMap(group => group.results).find(result => result.id === target.resultId);
+        if (!result) return false;
+        const destination = pdfSearchResultTarget(result, target.documentGeneration);
+        if (destination === null) return false;
+        search.selectResult(result.id);
+        return settle(() => navigationCoordinator.navigateMainTarget(destination, 'search'));
+      }
+      const item = stateRef.current.items.find(item => item.id === target.annotationId);
+      const destination = item && reviewItemNavigationTarget(item);
+      return !!destination && settle(() => navigationCoordinator.navigateMainAnnotation(destination));
+    },
+  };
+  useEffect(() => {
+    if (!props.agentBridge || !agentReady) return;
+    const generation = state.workflow.documentGeneration;
+    const actions = () => {
+      if (generation !== documentGenerationRef.current || liveAgentActions.current === null) throw Error('Document changed');
+      return liveAgentActions.current;
+    };
+    return props.agentBridge.attach({ snapshot: () => actions().snapshot(), search: query => actions().search(query), navigate: target => actions().navigate(target) });
+  }, [props.agentBridge, agentReady, state.workflow.documentGeneration]);
   useEffect(() => {
     document.title = pageTitle;
     props.onDocumentTitleChange?.(pageTitle, documentGenerationRef.current);

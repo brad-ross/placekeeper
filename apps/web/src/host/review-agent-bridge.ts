@@ -5,7 +5,7 @@ export type { ReviewContextSnapshot as ReviewAgentSnapshot } from './review-cont
 import type { ReviewContextSnapshot as ReviewAgentSnapshot } from './review-context-snapshot.js';
 
 export type ReviewAgentTarget =
-  | { readonly page: number }
+  | { readonly page: number; readonly documentGeneration: number }
   | { readonly resultId: string; readonly documentGeneration: number }
   | { readonly annotationId: string; readonly documentGeneration: number };
 
@@ -35,9 +35,9 @@ export function reviewAgentSearchResult(state: PdfSearchState, documentGeneratio
     coverage: { ...state.coverage,
       unsearchablePages: state.coverage.unsearchablePages.map(page => page + 1),
       limitedPages: state.coverage.limitedPages.map(page => page + 1) },
-    results: results.slice(0, 100).map(result => ({ id: result.id, page: result.pageIndex + 1, excerpt: result.excerpt, matchKind: result.kind })),
+    results: results.slice(0, 100).map(result => ({ id: result.id, page: result.pageIndex + 1, excerpt: result.excerpt.slice(0, 512), matchKind: result.kind })),
     totalResults: results.length,
-    truncated: results.length > 100,
+    truncated: results.length > 100 || results.some(result => result.excerpt.length > 512),
     message: state.message,
   };
 }

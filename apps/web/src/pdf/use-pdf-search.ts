@@ -10,10 +10,12 @@ export function usePdfSearch() {
   const searchDocumentRef = useRef<PdfDocumentObject | null>(null);
   const pendingSearchQueryRef = useRef('');
   const submittedSearchQueryRef = useRef('');
+  const queryRevisionRef = useRef(0);
   const searchSubmitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const searchRequestedRef = useRef(false);
   const [searchState, setSearchState] = useState(() => initialPdfSearchState());
   const submitSearchQuery = (query: string, immediate = false) => {
+    queryRevisionRef.current++;
     pendingSearchQueryRef.current = query;
     const search = searchControllerRef.current;
     setSearchState((current) => ({
@@ -34,6 +36,19 @@ export function usePdfSearch() {
     };
     if (immediate) run();
     else searchSubmitTimerRef.current = setTimeout(run, 180);
+  };
+  const searchQuery = async (query: string) => {
+    const revision = ++queryRevisionRef.current;
+    const controller = searchControllerRef.current;
+    if (controller === null) throw new Error('The PDF is not ready to search.');
+    if (searchSubmitTimerRef.current !== null) clearTimeout(searchSubmitTimerRef.current);
+    searchSubmitTimerRef.current = null;
+    pendingSearchQueryRef.current = query;
+    submittedSearchQueryRef.current = query;
+    const result = await controller.search(query);
+    if (revision !== queryRevisionRef.current || controller !== searchControllerRef.current || submittedSearchQueryRef.current !== query
+      || pendingSearchQueryRef.current !== query) throw new Error('The document or search changed. Search again.');
+    return result;
   };
   const initialize = (engine: PdfEngine, document: PdfDocumentObject, documentGeneration: number,
     onDocumentReady: () => void, onSearchDocumentReady: () => void) => {
@@ -73,6 +88,7 @@ export function usePdfSearch() {
     else if (searchRequestedRef.current) void search.prepare();
   };
   const reset = () => {
+    queryRevisionRef.current++;
     searchControllerRef.current?.dispose();
     searchControllerRef.current = null;
     searchDocumentRef.current = null;
@@ -88,7 +104,8 @@ export function usePdfSearch() {
     searchControllerRef.current?.dispose();
   };
   return {
-    searchState, submitSearchQuery, initialize, reset, dispose,
+    searchState, submitSearchQuery, searchQuery, initialize, reset, dispose,
+    getState: () => pendingSearchQueryRef.current === submittedSearchQueryRef.current ? searchControllerRef.current?.getState() : undefined,
     getPageCount: () => searchDocumentRef.current?.pages.length ?? 0,
     isCurrentDocument: (document: PdfDocumentObject) => searchDocumentRef.current === document,
     selectResult: (id: string) => searchControllerRef.current?.selectResult(id),
