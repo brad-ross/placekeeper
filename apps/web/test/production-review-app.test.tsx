@@ -1685,6 +1685,37 @@ describe("one production review tree", () => {
     expect(renderSurface("chrome")).not.toContain('data-review-copy-link');
   });
 
+  it.each([
+    { writable: true, phase: 'clean' as const },
+    { writable: true, phase: 'saving' as const },
+    { writable: true, phase: 'not-saved' as const },
+    { writable: false, phase: 'not-saved' as const },
+  ])('keeps reviewed export reachable for a host destination ($writable, $phase)', ({ writable, phase }) => {
+    const state = createReviewState({
+      sessionId: '00000000-0000-4000-8000-000000000103',
+      source: { fileId: '00000000-0000-4000-8000-000000000104', digest: 'a'.repeat(64), byteLength: 12 },
+    });
+    const html = renderToStaticMarkup(<ProductionReviewApp
+      session={{ sessionId: state.sessionId }} initialState={state}
+      scope={{ documentTitle: 'host.pdf', launchSurface: 'codex' }}
+      initialSaveStatus={{
+        destination: { phase: 'host', generation: 1, writable },
+        sync: { phase, desiredRevision: 1, savedRevision: 0 },
+      }}
+      api={{
+        command: vi.fn(), saveStatus: vi.fn(), saveProposal: vi.fn(), chooseCopy: vi.fn(),
+        chooseFolder: vi.fn(), chooseOriginal: vi.fn(), retrySave: vi.fn(), locateSave: vi.fn(),
+        exportReviewedCopy: vi.fn(), scope: vi.fn(),
+      }}
+      viewer={<div>Host PDF reader</div>}
+    />);
+    expect(html).toContain('data-document-actions-trigger');
+    expect(html).toContain('aria-haspopup="menu"');
+    expect(html).not.toContain('Open automatic save options');
+    const status = phase === 'not-saved' ? 'Not saved' : phase === 'saving' ? 'Saving changes' : 'Saved';
+    expect(html).toContain(`data-review-saved-status="true">${status}</span>`);
+  });
+
   it('shows actionable save failure only for an established local save destination', () => {
     const state = createReviewState({
       sessionId: '00000000-0000-4000-8000-000000000101',

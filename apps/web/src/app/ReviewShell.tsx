@@ -674,12 +674,13 @@ export function ReviewShell(props: ReviewShellProps) {
   );
   const documentActionsPresentation = useMemo(() => (
     props.state.workflow.mode === 'generated-output' || props.save.exportOnly === true
+      || (props.save.onSaveOptions === undefined && props.save.onExportReviewedCopy !== undefined)
       ? reviewExportPresentation({
           refreshStatus: props.generationRefreshStatus ?? 'idle',
           summary: createReviewStateSummary(props.state),
         })
       : undefined
-  ), [props.save.exportOnly, props.generationRefreshStatus, props.state]);
+  ), [props.save.exportOnly, props.save.onSaveOptions, props.save.onExportReviewedCopy, props.generationRefreshStatus, props.state]);
   const requestedRightWorkspaceMode: RightWorkspaceMode = props.workspace.rightWorkspaceMode
     ?? (workspaceMode === 'references' ? 'outline' : workspaceMode);
   const rightWorkspaceMode: RightWorkspaceMode = visibleRightWorkspaceModes.includes(

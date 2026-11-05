@@ -989,7 +989,7 @@ export function ReviewChrome({
         {...documentActions}
         documentTitle={documentTitle}
         displayTitle={displayTitle}
-        savedLabel={savedLabel}
+        savedLabel={showSaveStatusDot ? saveStatusDisplay : savedLabel}
         savePhase={savePhase}
         showSaveStatusDot={showSaveStatusDot}
         open={activeTopBarMenu === 'document'}

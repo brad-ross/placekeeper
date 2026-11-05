@@ -230,3 +230,19 @@ The native peer-chat check exposed an expired ownership offer: selecting an inde
 The combined live-reader, extension-shell, extension-runtime, host-resource adapter and host-resource service tests passed; the full TypeScript check and diff check passed. The throwing-unregister regression also verifies that retained tool names remain inert until assigned to the replacement reader. These changes are locally verified; native retesting requires rebuilding and reopening the candidate.
 
 The completed incremental code review at `b996943e` found no actionable defects (receipt: `20261104-increment-96289e15`). Its verdict covers that code increment, not the outstanding native qualification. The recovery fix above follows the later native failure.
+
+### Native opaque-resource checks after refreshed registration
+
+On November 5, the restarted host exposed a separate **Placekeeper Opaque Test** panel and server. Its reader showed **Refresh PDF** and **Save now**, confirming the host-resource route. The test opened the ordinary candidate’s disposable PDF through that opaque entrypoint; the starting digest was `7f9e2e588113cf469c83337e0fe68f1c365ee2c08cdd65adc7cd5076c274c6ce`. No user PDF was used.
+
+- Host read and admission succeeded with three existing annotations and all five live reader tools.
+- Editing the supported highlight to “Existing supported highlight — opaque resource save check” completed through the real host write API. The underlying disposable PDF changed to `2426373caeb48a12f070e1d22c99948b83c7cbbfe125da1488855cf54271d459`; the new comment was verified in its bytes.
+- While a second comment edit was open, an external PDF comment changed the source to `7481f1ecf1945d8edcc9e1c1a7ac628fc82c16c0f064e918db615758d627d204`. A host update notification triggered the finish-edit/refresh notice and preserved the editor. Applying “Protected opaque conflict draft” produced the conflict/protected-review notice and **Not saved** status. The external PDF digest remained unchanged and contained no conflicting draft text.
+- The conflict notice exposed a missing export control in this native route. Export itself is not yet qualified; the UI wiring is being corrected before retest.
+- After restart, the user still found no Placekeeper source in the native composer mention menu. Working server catalogue searches do not qualify native mention discovery.
+
+Both refreshed candidates were packaged from `667ad7e01207f1a24aff368a2c75ca5bbcd2ffd8`. Normal bundle: `69836b652b0bf2d813d224131d07126a0ad05420073340bea17f05dc193037d2`; opaque bundle: `dfe652aaee212f594f74e8ddb8a7e9a16affb0a2de5126c6f1b6e3f2fe3296e1`. All 13 installed plugin-file hashes were checked for each. Disposable fixture edits were preserved across packaging, so the runtime digests identify the candidate while the source digests above identify the tested PDF.
+
+The missing host-resource export menu was traced to presentation gating: automatic-save controls were suppressed for host destinations, while document actions only appeared for generated/export-only reviews. The reader now offers its existing document-actions menu when reviewed export is available without automatic-save options. The menu reuses the existing save-status mapping so a conflicted review still says **Not saved**. Four production-render cases and the existing fenced adapter-route test passed with the relevant layout/adapter suites (190 tests); the full TypeScript check passed. Native export remains pending the refreshed reader.
+
+A restored ordinary panel after restart was found to retain older inline HTML: the fixed expired-choice message was absent from its script. The newly opened opaque panel contained the fixed message. Therefore restored-panel behavior does not qualify the refreshed artifact; fresh file-menu invocation and a loaded-version check are required.

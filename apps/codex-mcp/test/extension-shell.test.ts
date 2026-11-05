@@ -1,6 +1,7 @@
 import type { App } from '@modelcontextprotocol/ext-apps';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { ExtensionShell } from '../src/extension-shell.js';
+import { HostResourceAdapter } from '../src/host-resource-adapter.js';
 import { EXTENSION_META_KEY } from '../../../packages/core/src/extension-protocol.js';
 const host = vi.hoisted(() => ({ options: [] as any[], mounts: [] as any[], unmount: vi.fn() }));
 vi.mock('../../web/src/host/codex-runtime.js', () => ({ createCodexHostRuntime: (options: any) => { host.options.push(options); return options; } }));
@@ -103,7 +104,7 @@ it('retries continuation with one operation identity and fences the old mounted 
     await f.shell.teardown();
 });
 
-it('opens opaque host bytes in the canonical reader and refreshes its presentation on a resource notification', async () => {
+it('opens opaque host bytes in the canonical reader, routes reviewed export, and refreshes on a resource notification', async () => {
     const bytes = btoa('%PDF-1.7\nhost shell fixture\n%%EOF');
     let update!: (event: any) => void, imported = false, generation = 1;
     const resources = { read: vi.fn(async () => ({ contents: [{ uri: 'opaque:host', blob: bytes, openaiMetadata: { writable: false, etag: 'v1' } }] })),
@@ -121,6 +122,16 @@ it('opens opaque host bytes in the canonical reader and refreshes its presentati
     await f.shell.receive({ status: 'host-resource', file: { name: 'host.pdf', resourceUri: 'opaque:host' }, ticket: 'p'.repeat(43) });
     await vi.advanceTimersByTimeAsync(0);
     expect(host.mounts).toHaveLength(1); expect(f.status.textContent).toContain('read-only'); expect(resources.subscribe).toHaveBeenCalledOnce();
+    const fence = { expectedRevision: 2, documentGeneration: 1 };
+    const exported = { kind: 'reviewed-copy' as const, path: 'host-reviewed.pdf', revision: 2, digest: 'a'.repeat(64), warning: 'Verify the downloaded file.' };
+    const exportCopy = vi.spyOn(HostResourceAdapter.prototype, 'export').mockResolvedValue(exported);
+    try {
+        await expect(host.options[0].call('exportReviewedCopy', {})).rejects.toThrow('Refresh the review before exporting.');
+        expect(exportCopy).not.toHaveBeenCalled();
+        await expect(host.options[0].call('exportReviewedCopy', { fence })).resolves.toEqual(exported);
+        expect(exportCopy).toHaveBeenCalledWith(nextGrant, fence);
+        expect(f.calls.some(c => c.action === 'app' && c.request.method === 'exportReviewedCopy')).toBe(false);
+    } finally { exportCopy.mockRestore(); }
     const old = host.options[0]; generation = 2; update({ params: { uri: 'opaque:host' } });
     await vi.waitFor(() => expect(host.mounts).toHaveLength(2));
     expect(f.calls.some(c => c.action === 'resume')).toBe(true);
