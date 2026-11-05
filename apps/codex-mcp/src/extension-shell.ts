@@ -318,9 +318,10 @@ export class ExtensionShell {
     #renderCatalogue() {
         if (!this.#catalogueView) return;
         this.#catalogueView.replaceChildren();
-        const text = document.createElement('p'); text.textContent = !this.#preferences.mentions ? 'This review is excluded from mentions. Enable the global preference to include a snapshot.' : this.#catalogue.included ? `This review has an included snapshot${this.#catalogue.snapshot ? ` from ${this.#catalogue.snapshot.capturedAt}, revision ${this.#catalogue.snapshot.revision}` : ''}. Other chats can access this snapshot. Changes require an explicit update.` : 'This review is excluded from mentions. Include a snapshot to make it available to other chats.';
+        const text = document.createElement('p'); text.textContent = !this.#preferences.mentions ? 'This review is excluded from mentions. Enable the global preference to include a snapshot.' : this.#catalogue.included ? `This review has an included snapshot${this.#catalogue.snapshot ? ` from ${this.#catalogue.snapshot.capturedAt}, revision ${this.#catalogue.snapshot.revision}` : ''}. Hosts with Placekeeper composer mentions can retrieve it in other chats. Changes require an explicit update.` : 'This review is excluded from mentions. Include a snapshot to make it available on hosts with Placekeeper composer mentions.';
         this.#catalogueView.append(text);
         if (!this.#preferences.mentions) return;
+        const availability = document.createElement('p'); availability.textContent = 'If Placekeeper is missing from your composer’s mention menu, use Discuss annotations or Ask about this selection to prepare an editable draft in this chat.'; this.#catalogueView.append(availability);
         const refresh = document.createElement('button'); refresh.textContent = 'Refresh snapshot status'; refresh.onclick = () => { void this.#catalogueAction('status').catch(() => this.#show('Mention snapshot status is unavailable.')); }; this.#catalogueView.append(refresh);
         const add = (label: string, operation: 'capture' | 'remove') => { const button = document.createElement('button'); button.textContent = label; button.onclick = () => { button.disabled = true; void this.#catalogueAction(operation).catch(() => { button.disabled = false; this.#show('The mention snapshot could not be updated.'); }); }; this.#catalogueView!.append(button); };
         add(this.#catalogue.included ? 'Update included snapshot' : 'Include this review snapshot', 'capture');
@@ -617,6 +618,27 @@ export class ExtensionShell {
     wake() { void this.#refreshSettings().catch(() => undefined); if (this.#connected && !document.hidden) this.#context?.retry(); this.#liveness?.wake(); }
     disconnected() { if (this.ownsPanel)
         this.#ended(); }
-    async teardown() { this.#readerTools?.dispose(); this.#context?.dispose(); this.#closed = true; this.#connected = false; this.root.inert = true; const grant = this.#grant; this.#epoch++; this.#grant = undefined; this.#active = undefined; this.#liveness?.stop(); this.#unmount?.(); this.#listeners.clear(); await this.#host?.dispose(); if (grant)
-        await this.#request({ action: 'revoke', grant }).catch(() => undefined); }
+    async teardown() {
+        this.#closed = true;
+        this.#connected = false;
+        this.root.inert = true;
+        const grant = this.#grant, host = this.#host;
+        this.#epoch++;
+        this.#grant = undefined;
+        this.#active = undefined;
+        this.#host = undefined;
+        // Release ownership while the host still accepts requests. Resource
+        // unsubscribe may never reply once the host starts removing the panel.
+        const revoked = grant ? this.#request({ action: 'revoke', grant }).catch(() => undefined) : Promise.resolve();
+        try {
+            this.#liveness?.stop();
+            this.#readerTools?.dispose();
+            this.#context?.dispose();
+            this.#unmount?.();
+            this.#listeners.clear();
+        } finally {
+            void host?.dispose().catch(() => undefined);
+            await revoked;
+        }
+    }
 }

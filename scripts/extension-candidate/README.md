@@ -20,7 +20,7 @@ Register the local marketplace at `dist/extension-candidate` through the support
 
 Open that fixture through its native file-menu extension action. For recovery, explicitly close and reopen through the file action; the earlier probe's browser-page reload experiment failed on this host. Once the user opens the app, its embedded MCP Apps surface can inspect the reader and invoke tools. Installation, host restart, and native file-menu controls require supported native host access or the user's assistance.
 
-Record actual-host results separately from browser stubs in `docs/testing/chatgpt-extension-qualification.md`. Verify direct conversation entry, context removal, exact search/reveal, collapsed expansion, editable discussion drafts, sharing and mention controls, resource updates, conditional writes/conflicts, reconnect and protected recovery. Stop the candidate daemon and remove its marketplace/plugin through the supported host flow after qualification; retain needed evidence first. Do not remove the earlier compatibility probe until its evidence is no longer needed.
+Record actual-host results separately from browser stubs in `docs/testing/chatgpt-extension-qualification.md`. Verify direct conversation entry, context removal, exact search/reveal, collapsed expansion, editable discussion drafts, sharing and mention controls, resource updates, conditional writes/conflicts, reconnect and protected recovery. Stop the candidate daemon and remove its marketplace/plugin through the supported host flow after qualification; retain needed evidence first. The earlier compatibility probe has been removed; its observations remain in the qualification record.
 
 ## Opaque-resource qualification route
 

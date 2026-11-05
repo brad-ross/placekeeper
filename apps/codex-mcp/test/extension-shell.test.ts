@@ -38,6 +38,42 @@ it('revokes a late activation grant without mounting after teardown', async () =
     expect(f.calls.filter(c => c.action === 'revoke').map(c => c.grant)).toEqual([grant, nextGrant]);
     expect(f.root.inert).toBe(true);
 });
+it('releases ownership on teardown without waiting for host unsubscribe', async () => {
+    const pending = deferred();
+    let imported = false;
+    const resources = {
+        read: async () => ({ contents: [{ uri: 'opaque:host', blob: btoa('%PDF-1.7\nfixture\n%%EOF') }] }),
+        subscribe: async () => ({}), unsubscribe: vi.fn(() => pending.promise),
+        addUpdateHandler: () => () => undefined,
+    };
+    const f = fixture(async request => {
+        if (request.action === 'host-resource') {
+            if (request.operation === 'begin') return reply({ status: 'host-transfer', transfer: 't'.repeat(43), offset: 0 });
+            if (request.operation === 'chunk') return reply({ status: 'host-transfer', transfer: 't'.repeat(43), offset: atob(request.dataBase64).length + request.offset });
+            if (request.operation === 'finish') {
+                if (!imported) { imported = true; return reply({ status: 'provisional', grant }); }
+                return reply({ status: 'host-ready', generation: 1 });
+            }
+            if (request.operation === 'save') return reply({ status: 'host-status', outcome: 'read-only' });
+        }
+        if (request.action === 'activate') return reply(active(nextGrant));
+        if (request.action === 'revoke') return reply({ status: 'closed' });
+        return reply({ status: 'ok', payload: {} });
+    }, () => resources);
+    await f.shell.receive({ status: 'host-resource', file: { name: 'host.pdf', resourceUri: 'opaque:host' }, ticket: 'p'.repeat(43) });
+    let finished = false;
+    const closing = f.shell.teardown().then(() => { finished = true; });
+    try {
+        await vi.advanceTimersByTimeAsync(0);
+        expect(resources.unsubscribe).toHaveBeenCalledOnce();
+        expect(f.calls.filter(c => c.action === 'revoke').map(c => c.grant)).toEqual([nextGrant]);
+        expect(finished).toBe(true);
+        await expect(host.options[0].call('command', {})).rejects.toThrow('stale-reply');
+    } finally {
+        pending.resolve({});
+        await closing;
+    }
+});
 it('revokes a late resume grant and fences callbacks after teardown', async () => {
     const pending = deferred();
     let resumeCalls = 0;
