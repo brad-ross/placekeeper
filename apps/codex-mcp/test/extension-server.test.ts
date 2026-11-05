@@ -5,6 +5,12 @@ import type { NativeServiceClient } from '../src/service-client.js';
 const file={name:'test.pdf',resourceUri:'opaque:host-file'};
 function fixture(){return {extension:vi.fn(async()=>({status:'provisional' as const,grant:'p'.repeat(43)}))} as unknown as NativeServiceClient;}
 describe('extension entrypoint admission',()=>{
+  it('labels both host entrypoints Placekeeper instead of exposing internal tool names',()=>{
+    expect(extensionTools.filter(tool=>tool.name==='open_pdf'||tool.name==='open_placekeeper').map(tool=>({name:tool.name,title:tool.title}))).toEqual([
+      {name:'open_pdf',title:'Placekeeper'},
+      {name:'open_placekeeper',title:'Placekeeper'},
+    ]);
+  });
   it('takes a local path only from host metadata and keeps authority private',async()=>{
     const client=fixture();const result=await callExtensionTool(client,'open_pdf',{file,pdfPath:'/forged.pdf'},{'openai/resource':{path:'/authorized.pdf'}});
     expect(client.extension).toHaveBeenCalledWith({action:'open',pdfPath:'/authorized.pdf'});

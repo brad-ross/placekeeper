@@ -5,8 +5,8 @@ import { EXTENSION_META_KEY, EXTENSION_TOOL, parseExtensionRequest } from '../..
 import type { NativeServiceClient } from './service-client.js';
 
 export const extensionTools:Tool[]=[
-  {name:'open_pdf',description:'Open the selected PDF in Placekeeper.',inputSchema:{type:'object',required:['file'],properties:{file:{type:'object',required:['name','resourceUri'],properties:{name:{type:'string'},resourceUri:{type:'string'}}}}},_meta:{ui:{resourceUri:CODEX_REVIEW_UI_RESOURCE,visibility:['app']},'openai/ui':{entrypoints:[{type:'file',extensions:['.pdf']}]}}},
-  {name:'open_placekeeper',description:'Open Placekeeper and choose a PDF.',inputSchema:{type:'object',properties:{},additionalProperties:false},_meta:{ui:{resourceUri:CODEX_REVIEW_UI_RESOURCE,visibility:['app']},'openai/ui':{entrypoints:[{type:'thread'}]}}},
+  {name:'open_pdf',title:'Placekeeper',description:'Open the selected PDF in Placekeeper.',inputSchema:{type:'object',required:['file'],properties:{file:{type:'object',required:['name','resourceUri'],properties:{name:{type:'string'},resourceUri:{type:'string'}}}}},_meta:{ui:{resourceUri:CODEX_REVIEW_UI_RESOURCE,visibility:['app']},'openai/ui':{entrypoints:[{type:'file',extensions:['.pdf']}]}}},
+  {name:'open_placekeeper',title:'Placekeeper',description:'Open Placekeeper and choose a PDF.',inputSchema:{type:'object',properties:{},additionalProperties:false},_meta:{ui:{resourceUri:CODEX_REVIEW_UI_RESOURCE,visibility:['app']},'openai/ui':{entrypoints:[{type:'thread'}]}}},
   {name:EXTENSION_TOOL,description:'Private app-owned review operations.',inputSchema:{type:'object',required:['request'],properties:{request:{type:'object'}},additionalProperties:false},_meta:{ui:{visibility:['app']}}},
 ];
 export async function callExtensionTool(client:NativeServiceClient,name:string,args:unknown,meta:unknown):Promise<CallToolResult>{

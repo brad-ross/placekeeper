@@ -355,6 +355,7 @@ export class ExtensionShell {
                 });
             },
         });
+        this.root.dataset.liveReaderToolsDiagnostic = JSON.stringify(this.#readerTools.diagnostic);
         if (!this.#readerTools.supported) this.#show('Live reader tools are unavailable on this host. Open the reader to search and navigate.');
         this.#listeners.clear();
         this.#watermark = undefined;

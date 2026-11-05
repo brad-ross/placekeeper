@@ -1,7 +1,23 @@
 import { expect, it } from 'vitest';
 import { LiveReaderTools } from '../src/live-reader-tools.js';
 import type { ReviewAgentActions } from '../../web/src/host/review-agent-bridge.js';
+import type { DocumentModelContext } from '../src/live-reader-tools.js';
 const snapshot = { documentGeneration: 4, reviewRevision: 2, title: 'PDF', source: { fileId: 'file', digest: 'digest' }, page: 1, pageCount: 3, selection: null, annotations: [] };
+it('diagnoses a missing unregister method without attempting registration', () => {
+  let attempts = 0;
+  const bridge = new LiveReaderTools({ registerTool: () => { attempts++; } } as unknown as DocumentModelContext, { ensureVisible: async () => true, available: () => true });
+  expect(bridge.supported).toBe(false);
+  expect(attempts).toBe(0);
+  expect(bridge.diagnostic).toEqual({ apiPresent: true, registerTool: true, unregisterTool: false, successCount: 0 });
+});
+it.each(['TypeError', 'Error', 'DOMException', 'PrivateError'])('bounds registration failure diagnostics for %s and still cleans up', name => {
+  const removed: string[] = [];
+  const bridge = new LiveReaderTools({ registerTool: tool => { if (tool.name === 'search_document') throw { name, message: 'private grant and document details', grant: 'secret' }; }, unregisterTool: toolName => { removed.push(toolName); } }, { ensureVisible: async () => true, available: () => true });
+  expect(bridge.supported).toBe(false);
+  expect(removed).toEqual(['inspect_review']);
+  expect(bridge.diagnostic).toEqual({ apiPresent: true, registerTool: true, unregisterTool: true, attemptedName: 'search_document', successCount: 1, failureName: name === 'PrivateError' ? 'Other' : name });
+  expect(JSON.stringify(bridge.diagnostic)).not.toContain('private');
+});
 function fixture() {
   const tools = new Map<string, any>();
   let visible = false, moved = false;

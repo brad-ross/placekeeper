@@ -12,12 +12,19 @@ function deferred() { let resolve!: (value: any) => void; const promise = new Pr
 function fixture(handler: (request: any) => Promise<any> = async () => reply({ status: 'ok', payload: {} }), resources: () => any = () => undefined, modelContext: () => any = () => undefined, preferences?: (request: any) => Promise<any>, message: () => any = () => undefined) {
     const calls: any[] = [];
     const app = { getHostContext: () => ({ displayMode: 'fullscreen' }), callServerTool: vi.fn(async (input: any, _options?: { timeout: number; maxTotalTimeout?: number }) => { calls.push(input.arguments.request); const request = input.arguments.request; if (preferences && ['settings-read', 'settings-update', 'catalogue'].includes(request.action)) return preferences(request); if (request.action === 'settings-read') return reply({ status: 'settings', values: { backgroundContext: true, selectionSharing: true, mentions: false }, revision: 0 }); if (request.action === 'catalogue') return reply({ status: 'catalogue', included: false }); return handler(request); }) };
-    const element = () => ({ inert: false, hidden: false, textContent: '', replaceChildren: vi.fn(), append: vi.fn() });
+    const element = () => ({ inert: false, hidden: false, textContent: '', dataset: {} as Record<string, string>, replaceChildren: vi.fn(), append: vi.fn() });
     const root = element(), status = element(), controls = element();
     return { app, shell: new ExtensionShell(app as unknown as App, root as unknown as HTMLElement, status as unknown as HTMLElement, controls as unknown as HTMLElement, resources, modelContext, message), root, status, controls, calls };
 }
 beforeEach(() => { vi.useFakeTimers(); vi.stubGlobal('document', { hidden: false, createElement: () => ({ append: vi.fn(), replaceChildren: vi.fn(), setAttribute: vi.fn() }), createTextNode: (value: string) => ({ textContent: value }) }); host.options.length = 0; host.mounts.length = 0; host.unmount.mockClear(); });
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
+it('exposes only bounded live-tool registration diagnostics on the reader root', async () => {
+    (document as any).modelContext = { registerTool: () => { throw new TypeError('private document details'); }, unregisterTool: vi.fn() };
+    const f = fixture(); await f.shell.receive(active());
+    expect(JSON.parse(f.root.dataset.liveReaderToolsDiagnostic!)).toEqual({ apiPresent: true, registerTool: true, unregisterTool: true, attemptedName: 'inspect_review', successCount: 0, failureName: 'TypeError' });
+    expect(f.root.dataset.liveReaderToolsDiagnostic).not.toContain('private');
+    await f.shell.teardown();
+});
 it('revokes a late activation grant without mounting after teardown', async () => {
     const pending = deferred();
     const f = fixture(async (request) => request.action === 'activate' ? pending.promise : reply({ status: 'closed' }));
