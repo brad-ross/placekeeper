@@ -1,7 +1,7 @@
 import { PDFDocument } from 'pdf-lib';
 import { createEmbedPdfWriter, readEditableReviewItems } from '../../../packages/pdf-backends/src/embedpdf-adapter.js';
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdtemp, rm, readFile, readdir, writeFile, realpath } from 'node:fs/promises';
+import { mkdtemp, rm, readFile, readdir, writeFile, realpath, mkdir, rename, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
@@ -66,8 +66,8 @@ it('rejects empty, corrupt and oversized transfers before admission',async()=>{
  expect(await f.manager.dispatch({action:'host-resource',operation:'finish',transfer:s.transfer})).toEqual({status:'unavailable'});
 });
 
-async function openHost(f:Awaited<ReturnType<typeof fixture>>,writable=false,input=bytes) {
- const descriptor:any=await f.manager.dispatch({action:'host-open',file:{name:'host.pdf',resourceUri:'opaque:fixture'}});
+async function openHost(f:Awaited<ReturnType<typeof fixture>>,writable=false,input=bytes,resourceUri='opaque:fixture') {
+ const descriptor:any=await f.manager.dispatch({action:'host-open',file:{name:'host.pdf',resourceUri}});
  const provisional:any=await upload(f.manager,{ticket:descriptor.ticket},input,writable);
  const active:any=await f.manager.resume(provisional.grant,randomUUID(),'activate');
  const call=(method:string,payload:unknown={},requestId=randomUUID())=>f.manager.handle({protocolVersion:1,authority:'presentation',requestId,runtimeId:active.presentation.runtimeId,attemptId:active.presentation.attemptId,generation:active.presentation.generation,capability:active.presentation.presentationCapability,method,payload});
@@ -169,14 +169,39 @@ it('serializes and verifies a real reviewed PDF before issuing a conditional hos
  expect(createHash('sha256').update(pdf).digest('hex')).toBe(saved.intent.sha256);
  const annotations=await readEditableReviewItems(pdf);expect(annotations).toHaveLength(1);expect(JSON.stringify(annotations)).toContain('actual PDF annotation');
 });
-it.each([false,true])('reopens protected host work and its chosen destination after restart (copy=%s)',async(copy)=>{
+it.each([
+ { copy: false, changedUri: false, changedCopy: false },
+ { copy: true, changedUri: false, changedCopy: false },
+ { copy: true, changedUri: true, changedCopy: false },
+ { copy: true, changedUri: true, changedCopy: 'edited' },
+ { copy: true, changedUri: true, changedCopy: 'redirected parent' },
+])('reopens protected host work after restart (copy=$copy, changed URI=$changedUri, changed copy=$changedCopy)', async ({ copy, changedUri, changedCopy }) => {
  const f=await fixture({writer:writerFixture()}),h=await openHost(f);
- if(copy){const folder:any=await h.call('chooseFolder');expect(await h.call('chooseCopy',{filename:'restart-copy.pdf',folderSelectionId:folder.payload.selectionId})).toMatchObject({status:'ok'});}
+ const copyFolder = join(f.root, 'copy-folder');
+ const copyPath = join(copyFolder, 'restart-copy.pdf');
+ if (copy) {
+  await mkdir(copyFolder);
+  f.picker.chooseFolder.mockResolvedValueOnce(copyFolder);
+  const folder: any = await h.call('chooseFolder');
+  expect(await h.call('chooseCopy', { filename: 'restart-copy.pdf', folderSelectionId: folder.payload.selectionId })).toMatchObject({ status: 'ok' });
+ }
  await h.call('command',addPageNote(f.broker.state(h.sessionId)!,0,{x:20,y:20,width:20,height:20},'survive restart'));
  const updated=Buffer.from('%PDF-1.7\nupdated before restart\n%%EOF');
  await upload(f.manager,{grant:h.active.grant},updated);
  expect((await new DraftSnapshotStore(join(f.root,'recovery',h.sessionId)).recover())?.source).toMatchObject({disposition:'remote-temporary'});
  await f.manager.close();await f.saving.drain();await f.broker.quiesceForShutdown();
+ let externalBytes: Buffer | undefined;
+ if (changedCopy === 'edited') {
+  externalBytes = Buffer.from('%PDF-1.7\nmodified externally while closed\n%%EOF');
+  await writeFile(copyPath, externalBytes);
+ } else if (changedCopy === 'redirected parent') {
+  externalBytes = await readFile(copyPath);
+  await rename(copyFolder, join(f.root, 'original-folder'));
+  const otherFolder = join(f.root, 'other-folder');
+  await mkdir(otherFolder);
+  await writeFile(join(otherFolder, 'restart-copy.pdf'), externalBytes);
+  await symlink(otherFolder, copyFolder, 'dir');
+ }
  expect((await new DraftSnapshotStore(join(f.root,'recovery',h.sessionId)).recover())?.state.workflow.documentGeneration).toBe(2);
  const broker=new SessionBroker({recoveryRoot:join(f.root,'recovery'),portableReader:async()=>[],rewriteAssessor:async()=>({eligible:true}),browserSourceInspector:async()=>({rewriteEligibility:{eligible:true},importedItems:[]}),inspectGeneration:async()=>({pageCount:1,pages:[{pageIndex:0,text:'paper'}]})});
  const writer=writerFixture(),saving=new PdfSaveCoordinator({broker,writer,verify:async({annotations})=>({pageCount:1,annotationIds:annotations.map(a=>a.id)})});
@@ -184,18 +209,179 @@ it.each([false,true])('reopens protected host work and its chosen destination af
  const backend=new CodexServiceRuntimeBackend({broker,saving,exporting});
  const manager=new ExtensionRuntimeManager(broker,{backend});
  cleanups.push(async()=>{await manager.close();await saving.drain();await broker.quiesceForShutdown();});
- const descriptor:any=await manager.dispatch({action:'host-open',file:{name:'host.pdf',resourceUri:'opaque:fixture'}});
- const offered:any=await upload(manager,{ticket:descriptor.ticket},updated);expect(offered).toMatchObject({status:'busy',canResume:true});
+ const descriptor:any=await manager.dispatch({action:'host-open',file:{name:'host.pdf',resourceUri:changedUri?'opaque:replacement-uri':'opaque:fixture'}});
+ const offered:any=await upload(manager,{ticket:descriptor.ticket},updated);expect(offered).toMatchObject({status:'busy',canResume:true,...(changedUri?{matchingCopy:true}:{})});
  const selected:any=await manager.choose({action:'choose',recoveryToken:offered.recoveryToken,choice:'resume',operationId:randomUUID()});expect(selected.status).toBe('provisional');
  expect(await upload(manager,{grant:selected.grant},updated)).toMatchObject({status:'host-ready',generation:2});
  const active:any=await manager.resume(selected.grant,randomUUID(),'activate');expect(active.status).toBe('active');
  expect(broker.state(h.sessionId)?.items[0]?.payload.comment).toBe('survive restart');expect(await broker.documentBytes(h.sessionId)).toEqual(updated);
- if(copy){
-  expect(broker.saveStatus(h.sessionId)?.destination).toMatchObject({phase:'active',targetPath:await realpath(join(f.root,'restart-copy.pdf'))});
-  expect(await manager.handle({protocolVersion:1,authority:'presentation',requestId:randomUUID(),runtimeId:active.presentation.runtimeId,attemptId:active.presentation.attemptId,generation:active.presentation.generation,capability:active.presentation.presentationCapability,method:'command',payload:addPageNote(broker.state(h.sessionId)!,0,{x:20,y:20,width:20,height:20},'after restart')})).toMatchObject({status:'ok'});
-  await saving.drain();expect((await readFile(join(f.root,'restart-copy.pdf'))).toString()).toContain('after restart');
+ if (copy) {
+  const call = (method: string, payload: unknown = {}) => manager.handle({
+   protocolVersion: 1, authority: 'presentation', requestId: randomUUID(),
+   runtimeId: active.presentation.runtimeId, attemptId: active.presentation.attemptId,
+   generation: active.presentation.generation, capability: active.presentation.presentationCapability, method, payload,
+  });
+  expect(broker.saveStatus(h.sessionId)?.destination).toMatchObject({ phase: 'active', targetPath: join(await realpath(f.root), 'copy-folder', 'restart-copy.pdf') });
+  const changedStatus = { status: 'ok', payload: { sync: { phase: 'not-saved', failure: 'target-changed' } } };
+  if (changedCopy) {
+   expect(broker.saveStatus(h.sessionId)?.destination).not.toHaveProperty('capabilityId');
+   expect(await call('saveStatus')).toMatchObject(changedStatus);
+  }
+  expect(await call('command', addPageNote(broker.state(h.sessionId)!, 0, { x: 20, y: 20, width: 20, height: 20 }, 'after restart'))).toMatchObject({ status: 'ok' });
+  await saving.drain();
+  if (changedCopy) {
+   expect(await call('saveStatus')).toMatchObject(changedStatus);
+   expect(await call('retrySave')).toMatchObject(changedStatus);
+   expect(await readFile(copyPath)).toEqual(externalBytes);
+   const durable = await new DraftSnapshotStore(join(f.root, 'recovery', h.sessionId)).recover();
+   expect(durable?.state.items.map(item => item.payload.comment)).toEqual(['survive restart', 'after restart']);
+  } else {
+   expect((await readFile(copyPath)).toString()).toContain('after restart');
+  }
  }
 });
+async function saveHostCopy(
+ f: Awaited<ReturnType<typeof fixture>>,
+ host: Awaited<ReturnType<typeof openHost>>,
+ filename: string,
+ comment: string,
+) {
+ const folder: any = await host.call('chooseFolder');
+ expect(await host.call('chooseCopy', { filename, folderSelectionId: folder.payload.selectionId })).toMatchObject({ status: 'ok' });
+ expect(await host.call('command', addPageNote(f.broker.state(host.sessionId)!, 0, { x: 20, y: 20, width: 20, height: 20 }, comment))).toMatchObject({ status: 'ok' });
+ await f.saving.drain();
+}
+
+it('offers an explicit saved-copy choice after a new opaque URI and respects existing app ownership', async () => {
+ const f = await fixture({ writer: writerFixture() });
+ const original = await openHost(f, true);
+ await saveHostCopy(f, original, 'local-review.pdf', 'before closing');
+ const descriptor: any = await f.manager.dispatch({ action: 'host-open', file: { name: 'host.pdf', resourceUri: 'opaque:second' } });
+ const busy: any = await upload(f.manager, { ticket: descriptor.ticket }, bytes, true);
+ expect(busy).toEqual({ status: 'busy', canResume: false, recoveryToken: expect.any(String), matchingCopy: true });
+ const choose = (offer: { recoveryToken: string }) => f.manager.choose({ action: 'choose', recoveryToken: offer.recoveryToken, choice: 'resume', operationId: randomUUID() });
+ expect(await choose(busy)).toEqual({ status: 'unavailable' });
+ expect(await original.call('watermark')).toMatchObject({ status: 'ok' });
+ const priorExport: any = await f.manager.dispatch({ action: 'host-resource', operation: 'export', grant: original.active.grant, expectedRevision: f.broker.state(original.sessionId)!.revision, generation: 1 });
+ expect(priorExport).toMatchObject({ status: 'host-save', intent: { purpose: 'export' } });
+
+ expect(await f.manager.revoke(original.active.grant)).toBe(true);
+ expect(await original.call('watermark')).toMatchObject({ status: 'denied' });
+ const offered: any = await upload(f.manager, { ticket: descriptor.ticket }, bytes, true);
+ expect(offered).toEqual({ status: 'busy', canResume: true, recoveryToken: expect.any(String), matchingCopy: true });
+ const provisional: any = await choose(offered);
+ expect(provisional).toMatchObject({ status: 'provisional' });
+ expect(await f.manager.resume(provisional.grant, randomUUID(), 'activate')).toEqual({ status: 'unavailable' });
+ expect(await f.manager.dispatch({ action: 'host-resource', operation: 'export', grant: provisional.grant, expectedRevision: f.broker.state(original.sessionId)!.revision, generation: 1 })).toEqual({ status: 'unavailable' });
+ expect(await f.manager.dispatch({ action: 'host-resource', operation: 'save-chunk', grant: provisional.grant, intentId: priorExport.intent.id, offset: 0 })).toEqual({ status: 'unavailable' });
+ const started: any = await f.manager.dispatch({ action: 'host-resource', operation: 'begin', grant: provisional.grant, byteLength: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex'), writable: true, etag: 'v1' });
+ expect(started.status).toBe('host-transfer');
+ expect(await f.manager.dispatch({ action: 'host-resource', operation: 'chunk', transfer: started.transfer, offset: 0, dataBase64: bytes.toString('base64') })).toMatchObject({ status: 'host-transfer', offset: bytes.length });
+ expect(await f.manager.resume(provisional.grant, randomUUID(), 'activate')).toEqual({ status: 'unavailable' });
+ expect(await f.manager.dispatch({ action: 'host-resource', operation: 'finish', transfer: started.transfer })).toMatchObject({ status: 'host-ready', generation: 1 });
+ const active: any = await f.manager.resume(provisional.grant, randomUUID(), 'activate');
+ expect(active.status).toBe('active');
+ expect(f.broker.state(original.sessionId)?.items[0]?.payload.comment).toBe('before closing');
+ expect(await f.manager.dispatch({ action: 'host-resource', operation: 'save', grant: active.grant })).toEqual({ status: 'host-status', outcome: 'local-copy' });
+ expect(await f.manager.handle({ protocolVersion: 1, authority: 'presentation', requestId: randomUUID(), runtimeId: active.presentation.runtimeId, attemptId: active.presentation.attemptId, generation: active.presentation.generation, capability: active.presentation.presentationCapability, method: 'command', payload: addPageNote(f.broker.state(original.sessionId)!, 0, { x: 20, y: 20, width: 20, height: 20 }, 'after reopening') })).toMatchObject({ status: 'ok' });
+ await f.saving.drain();
+ expect((await readFile(join(f.root, 'local-review.pdf'))).toString()).toContain('after reopening');
+ const durable = await new DraftSnapshotStore(join(f.root, 'recovery', original.sessionId)).recover();
+ expect(durable?.source).toMatchObject({ sourceIdentity: createHash('sha256').update('opaque:second').digest('hex') });
+ await f.manager.revoke(active.grant);
+ const changed = Buffer.from('%PDF-1.7\nchanged while closed\n%%EOF');
+ const exact: any = await upload(f.manager, { ticket: descriptor.ticket }, changed, true);
+ expect(exact).toEqual({ status: 'busy', canResume: true, recoveryToken: expect.any(String) });
+ const exactChoice: any = await choose(exact);
+ expect(exactChoice.status).toBe('provisional');
+ expect(await upload(f.manager, { grant: exactChoice.grant }, changed, true)).toMatchObject({ status: 'host-ready', generation: 2 });
+ expect(await f.manager.resume(exactChoice.grant, randomUUID(), 'activate')).toMatchObject({ status: 'active' });
+ expect(f.broker.state(original.sessionId)?.items.map(item => item.payload.comment)).toContain('after reopening');
+});
+
+it('retires a recovery grant and reopens the selected host PDF when its reread differs', async () => {
+ const f = await fixture({ writer: writerFixture() });
+ const original = await openHost(f);
+ await saveHostCopy(f, original, 'local-review.pdf', 'private prior work');
+ await f.manager.revoke(original.active.grant);
+ const descriptor: any = await f.manager.dispatch({ action: 'host-open', file: { name: 'host.pdf', resourceUri: 'opaque:changed' } });
+ const offered: any = await upload(f.manager, { ticket: descriptor.ticket });
+ const choice = { action: 'choose', choice: 'resume', recoveryToken: offered.recoveryToken, operationId: randomUUID() } as const;
+ const provisional: any = await f.manager.choose(choice);
+ expect(provisional.status).toBe('provisional');
+ const changed = Buffer.from('%PDF-1.7\nchanged during recovery\n%%EOF');
+ const replacement: any = await f.manager.dispatch({ action: 'host-resource', operation: 'begin', grant: provisional.grant, byteLength: changed.length, sha256: createHash('sha256').update(changed).digest('hex'), writable: false });
+ expect(replacement).toEqual({ status: 'host-resource', ticket: expect.any(String), file: descriptor.file });
+ expect(await f.manager.resume(provisional.grant, randomUUID(), 'activate')).toEqual({ status: 'unavailable' });
+ expect(await f.manager.choose(choice)).toEqual(replacement);
+ const independent: any = await upload(f.manager, { ticket: replacement.ticket }, changed);
+ expect(independent.status).toBe('provisional');
+ expect(f.broker.state(original.sessionId)?.items[0]?.payload.comment).toBe('private prior work');
+});
+
+it('does not adopt an opaque URI acquired by another review after the recovery offer', async () => {
+ const f = await fixture({ writer: writerFixture() });
+ const original = await openHost(f);
+ await saveHostCopy(f, original, 'local-review.pdf', 'private prior work');
+ await f.manager.revoke(original.active.grant);
+ const resourceUri = 'opaque:claimed';
+ const descriptor: any = await f.manager.dispatch({ action: 'host-open', file: { name: 'host.pdf', resourceUri } });
+ const offered: any = await upload(f.manager, { ticket: descriptor.ticket });
+ const provisional: any = await f.manager.choose({ action: 'choose', choice: 'resume', recoveryToken: offered.recoveryToken, operationId: randomUUID() });
+ expect(provisional.status).toBe('provisional');
+ const differentBytes = Buffer.from('%PDF-1.7\nindependently acquired\n%%EOF');
+ const other = await openHost(f, false, differentBytes, resourceUri);
+ expect(other.sessionId).not.toBe(original.sessionId);
+ expect(await upload(f.manager, { grant: provisional.grant })).toMatchObject({ status: 'host-ready', generation: 1 });
+ expect(await f.manager.resume(provisional.grant, randomUUID(), 'activate')).toEqual({ status: 'unavailable' });
+ expect(await other.call('watermark')).toMatchObject({ status: 'ok' });
+});
+
+it('does not select one saved-copy review when another matching sidecar cannot be read', async () => {
+ const f = await fixture({ writer: writerFixture() });
+ const first = await openHost(f);
+ const second = await openHost(f, false, bytes, 'opaque:unreadable');
+ await saveHostCopy(f, first, 'first.pdf', 'first private review');
+ await saveHostCopy(f, second, 'second.pdf', 'second private review');
+ await f.manager.revoke(first.active.grant);
+ await f.manager.revoke(second.active.grant);
+ await writeFile(join(f.root, 'recovery', second.sessionId, 'host-resource.json'), '{invalid JSON');
+ const descriptor: any = await f.manager.dispatch({ action: 'host-open', file: { name: 'host.pdf', resourceUri: 'opaque:third' } });
+ expect(await upload(f.manager, { ticket: descriptor.ticket })).toEqual({ status: 'unavailable' });
+});
+
+it('opens independently when byte-identical names match multiple saved-copy reviews', async () => {
+ const f = await fixture({ writer: writerFixture() });
+ const first = await openHost(f);
+ const second = await openHost(f, false, bytes, 'opaque:another');
+ await saveHostCopy(f, first, 'first.pdf', 'first private review');
+ await saveHostCopy(f, second, 'second.pdf', 'second private review');
+ await f.manager.revoke(first.active.grant);
+ await f.manager.revoke(second.active.grant);
+ const descriptor: any = await f.manager.dispatch({ action: 'host-open', file: { name: 'host.pdf', resourceUri: 'opaque:third' } });
+ const independent: any = await upload(f.manager, { ticket: descriptor.ticket });
+ expect(independent).toEqual({ status: 'provisional', grant: expect.any(String) });
+ const active: any = await f.manager.resume(independent.grant, randomUUID(), 'activate');
+ const watermark: any = await f.manager.handle({ protocolVersion: 1, authority: 'presentation', requestId: randomUUID(), runtimeId: active.presentation.runtimeId, attemptId: active.presentation.attemptId, generation: 1, capability: active.presentation.presentationCapability, method: 'watermark', payload: {} });
+ expect(watermark.payload.sessionId).not.toBe(first.sessionId);
+ expect(watermark.payload.sessionId).not.toBe(second.sessionId);
+ expect(f.broker.state(watermark.payload.sessionId)?.items).toEqual([]);
+});
+
+it('does not readmit a live saved-copy destination changed after the recovery choice was offered', async () => {
+ const f = await fixture({ writer: writerFixture() });
+ const original = await openHost(f);
+ await saveHostCopy(f, original, 'stale.pdf', 'prior work');
+ await f.manager.revoke(original.active.grant);
+ const descriptor: any = await f.manager.dispatch({ action: 'host-open', file: { name: 'host.pdf', resourceUri: 'opaque:changed-target' } });
+ const offered: any = await upload(f.manager, { ticket: descriptor.ticket });
+ expect(offered).toMatchObject({ status: 'busy', canResume: true, matchingCopy: true });
+ await writeFile(join(f.root, 'stale.pdf'), 'modified externally');
+ expect(await f.manager.choose({ action: 'choose', recoveryToken: offered.recoveryToken, choice: 'resume', operationId: randomUUID() })).toEqual({ status: 'unavailable' });
+ expect(await readFile(join(f.root, 'stale.pdf'), 'utf8')).toBe('modified externally');
+ expect(f.broker.state(original.sessionId)?.items[0]?.payload.comment).toBe('prior work');
+});
+
 it('fences in-progress transfers when their app grant rotates',async()=>{
  const f=await fixture(),h=await openHost(f);
  const started:any=await f.manager.dispatch({action:'host-resource',operation:'begin',grant:h.active.grant,byteLength:bytes.length,sha256:createHash('sha256').update(bytes).digest('hex'),writable:false});

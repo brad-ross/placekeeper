@@ -1,6 +1,6 @@
 import { anchorEvidenceFromReviewItem } from '../../../../packages/core/src/review-model.js';
 import { ExtensionPreferences } from './extension-preferences.js';
-import { HostResourcePersistence } from './host-resource-persistence.js';
+import { HostResourcePersistence, type HostCopyRecoveryMatch } from './host-resource-persistence.js';
 import type { HostResourceRequest, HostResourceFile } from '../../../../packages/core/src/host-resource-protocol.js';
 import { reconcileNativeSource } from "./reconcile-native-source.js";
 import { randomBytes } from 'node:crypto';
@@ -16,8 +16,11 @@ import type { CodexActiveScope, CodexServiceRuntimeBackend } from './codex-runti
 const secret = () => randomBytes(32).toString('base64url');
 const opaque = () => randomBytes(16).toString('base64url');
 const unavailable = (): ExtensionResult => ({status:'unavailable'});
-type RecordState = { sessionId:string; grant:string; expires:number; provisional:boolean; watermark:number; contextPublished:boolean; active?:ExtensionPresentation; lease?:number };
-type Offer = { path:string;hostSessionId?:string; expires:number; recoveryOffer?:RecoveryOfferIdentity; result?:{operationId:string;choice:string;value:ExtensionResult} };
+type RecordState = { sessionId:string; grant:string; expires:number; provisional:boolean; watermark:number; contextPublished:boolean; copyAdmission?:{match:HostCopyRecoveryMatch;verified:boolean;offer:Offer}; active?:ExtensionPresentation; lease?:number };
+type Offer = ({ path: string; hostSessionId?: string; resumeLiveHostCopy?: true; recoveryOffer?: RecoveryOfferIdentity } | { copyRecovery: HostCopyRecoveryMatch }) & {
+  expires: number;
+  result?: { operationId: string; choice: string; value: ExtensionResult };
+};
 
 /** App ownership is independent of trusted chat bindings. Grants never enter browser storage. */
 export class ExtensionRuntimeManager {
@@ -68,7 +71,7 @@ export class ExtensionRuntimeManager {
         return {title:scope.sourceDisplayName,generation:state.workflow.documentGeneration,revision:state.revision,sourceDigest:state.source.digest,summary,annotations:state.items.map(item=>{const anchor=anchorEvidenceFromReviewItem(item);const quote=anchor.kind==='selection'?anchor.quote:anchor.kind==='page'?anchor.nearbyText??'':`${anchor.leftContext}${anchor.rightContext}`;return {page:anchor.pageIndex+1,text:[quote,...['text','comment','proposedText','contents'].flatMap(k=>typeof item.payload[k]==='string'?[item.payload[k] as string]:[])].filter(Boolean).join('\n')};})};
       })};
     }).catch(()=>unavailable());
-    if(r.action==='host-open')return this.#serial(async()=>{const ticket=secret();this.#hostTickets.set(digestSecretHex(ticket),{file:r.file,expires:this.#now()+120000});return {status:'host-resource',ticket,file:r.file};});
+    if(r.action==='host-open')return this.#serial(async()=>this.#issueHostTicket(r.file));
     if(r.action==='host-resource')return this.#serial(()=>this.#hostRequest(r)).catch(()=>unavailable());
     if(r.action==='app')return this.handle(r.request);
     if(r.action==='open')return this.open(r);
@@ -77,6 +80,11 @@ export class ExtensionRuntimeManager {
     if(r.action==='revoke')return await this.revoke(r.grant)?{status:'closed'}:unavailable();
     return this.resume(r.grant,r.operationId,r.action);
   }
+  #issueHostTicket(file: HostResourceFile): ExtensionResult {
+    const ticket = secret();
+    this.#hostTickets.set(digestSecretHex(ticket), { file, expires: this.#now() + 120000 });
+    return { status: 'host-resource', ticket, file };
+  }
   // Dispatch serializes transfers, intents, receipts, refresh and grant rotation together.
   async #hostRequest(r:Extract<HostResourceRequest,{action:'host-resource'}>):Promise<ExtensionResult>{
     this.#sweep();if(this.#closing)return unavailable();
@@ -84,12 +92,28 @@ export class ExtensionRuntimeManager {
       if(r.ticket){const key=digestSecretHex(r.ticket),ticket=this.#hostTickets.get(key);if(!ticket)return unavailable();
         return this.#host.begin(r,{file:ticket.file,current:()=>!this.#closing&&this.#hostTickets.get(key)===ticket&&ticket.expires>this.#now()});}
       const key=digestSecretHex(r.grant!),record=this.#records.get(key);if(!record||!this.#hostSessions.has(record.sessionId))return unavailable();
-      return this.#host.begin(r,{sessionId:record.sessionId,current:()=>!this.#closing&&this.#records.get(key)===record});
+      const admission = record.copyAdmission;
+      if (admission && r.sha256 !== admission.match.sha256) {
+        const result = this.#issueHostTicket(admission.match.file);
+        this.#remove(record);
+        if (admission.offer.result) admission.offer.result.value = result;
+        return result;
+      }
+      return this.#host.begin(r, {
+        sessionId: record.sessionId,
+        current: () => !this.#closing && this.#records.get(key) === record,
+        ...(admission ? { onVerified: () => { admission.verified = true; } } : {}),
+      });
     }
     if(r.operation==='chunk')return this.#host.chunk(r.transfer,r.offset,r.dataBase64);
     if(r.operation==='cancel'){await this.#host.cancel(r.transfer);return {status:'cancelled'};}
     if(r.operation==='finish'){
       const result=await this.#host.finish(r.transfer);
+      if ('copyRecovery' in result) {
+        const token = secret();
+        this.#offers.set(digestSecretHex(token), { copyRecovery: result.copyRecovery, expires: this.#now() + 60000 });
+        return { status: 'busy', recoveryToken: token, canResume: !this.#hasReviewGrant(result.copyRecovery.sessionId), matchingCopy: true };
+      }
       if(!('opened' in result))return result;
       const opened=result.opened;
       if(opened.kind==='recovery-offered'){
@@ -99,12 +123,18 @@ export class ExtensionRuntimeManager {
       }
       if(opened.kind==='focused'){
         const token=secret(),scope=this.broker.nativeAdmissionScope(opened.launch.sessionId);if(!scope)return unavailable();
-        this.#offers.set(digestSecretHex(token),{path:scope.canonicalSourcePath,hostSessionId:opened.launch.sessionId,expires:this.#now()+60000});return {status:'busy',recoveryToken:token,canResume:false};
+        const sessionId = opened.launch.sessionId;
+        const destination = this.broker.saveStatus(sessionId)?.destination;
+        const canResume = destination?.phase === 'active' && destination.kind === 'copy' &&
+          !this.#hasReviewGrant(sessionId) && await this.#host.state(sessionId) !== undefined;
+        this.#offers.set(digestSecretHex(token), { path: scope.canonicalSourcePath, hostSessionId: sessionId, expires: this.#now() + 60000, ...(canResume ? { resumeLiveHostCopy: true } : {}) });
+        return { status: 'busy', recoveryToken: token, canResume };
       }
       this.#hostSessions.add(opened.launch.sessionId);return this.#provisional(opened);
     }
     const key=digestSecretHex(r.grant),record=this.#records.get(key);if(!record||!this.#hostSessions.has(record.sessionId))return unavailable();
     const assertAuthority=()=>{if(this.#closing||this.#records.get(key)!==record||record.expires<=this.#now())throw Error('Host authority retired');};
+    if (record.copyAdmission) return unavailable();
     let result:ExtensionResult;
     if(r.operation==='status')result=await this.#host.status(record.sessionId);
     else if(r.operation==='export')result=await this.#host.export(record.sessionId,r.expectedRevision,r.generation,assertAuthority);
@@ -128,16 +158,55 @@ export class ExtensionRuntimeManager {
   });}
   choose(input:Extract<ExtensionRequest,{action:'choose'}>):Promise<ExtensionResult>{return this.#serial(async()=>{
     this.#sweep();const offer=this.#offers.get(digestSecretHex(input.recoveryToken));
-    if(!offer||this.#closing||input.choice==='resume'&&!offer.recoveryOffer)return unavailable();
+    if(!offer||this.#closing)return unavailable();
     if(offer.result)return offer.result.operationId===input.operationId&&offer.result.choice===input.choice?offer.result.value:unavailable();
-    const result=offer.hostSessionId&&input.choice==='fork'?await this.#host.fork(offer.hostSessionId):await this.broker.openReview({pdfPath:offer.path,surface:'codex-native',recoveryDecision:input.choice,...(offer.recoveryOffer?{recoveryOffer:offer.recoveryOffer,recoveryOperationId:input.operationId}:{})});
-    if(this.#closing)return unavailable();
-    if(offer.hostSessionId&&result.kind!=='recovery-offered')this.#hostSessions.add(result.launch.sessionId);
-    const value=result.kind==='recovery-offered'?unavailable():this.#provisional(result);
+    let result: OpenReviewResult | undefined;
+    let hostSessionId: string | undefined;
+    if ('copyRecovery' in offer) {
+      hostSessionId = offer.copyRecovery.sessionId;
+      if (!await this.#host.matchesCopyRecovery(offer.copyRecovery)) return unavailable();
+      result = input.choice === 'fork'
+        ? await this.#host.fork(hostSessionId, offer.copyRecovery.sha256)
+        : await this.#resumeMatchingCopy(hostSessionId, input.operationId);
+    } else {
+      if (input.choice === 'resume' && !offer.recoveryOffer && !offer.resumeLiveHostCopy) return unavailable();
+      hostSessionId = offer.hostSessionId;
+      result = hostSessionId && input.choice === 'fork'
+        ? await this.#host.fork(hostSessionId)
+        : hostSessionId && offer.resumeLiveHostCopy
+          ? await this.#resumeMatchingCopy(hostSessionId, input.operationId)
+          : await this.broker.openReview({pdfPath:offer.path,surface:'codex-native',recoveryDecision:input.choice,...(offer.recoveryOffer?{recoveryOffer:offer.recoveryOffer,recoveryOperationId:input.operationId}:{})});
+    }
+    if(this.#closing||!result||result.kind==='recovery-offered')return unavailable();
+    if(hostSessionId)this.#hostSessions.add(result.launch.sessionId);
+    const admission = 'copyRecovery' in offer && input.choice === 'resume'
+      ? { match: offer.copyRecovery, verified: false, offer }
+      : undefined;
+    const value = this.#provisional(result, admission);
     offer.result={operationId:input.operationId,choice:input.choice,value};return value;
   });}
-  #provisional(result:Exclude<OpenReviewResult,{kind:'recovery-offered'}>):ExtensionResult{
-    const grant=secret();const record:RecordState={sessionId:result.launch.sessionId,grant,expires:this.#now()+Math.min(60_000,this.#idle),provisional:true,watermark:0,contextPublished:false};
+  #hasReviewGrant(sessionId: string): boolean {
+    for (const record of this.#records.values()) {
+      if (record.sessionId === sessionId) return true;
+    }
+    return false;
+  }
+  async #resumeMatchingCopy(sessionId: string, operationId: string): Promise<OpenReviewResult | undefined> {
+    if (this.#hasReviewGrant(sessionId)) return;
+    if (this.broker.nativeAdmissionScope(sessionId)) {
+      return this.broker.reopenLiveHostCopy(sessionId).catch(() => undefined);
+    }
+    const path = await this.broker.importedRecoveryPath(sessionId);
+    if (!path) return;
+    const offered = await this.broker.openReview({ pdfPath: path, surface: 'codex-native' });
+    if (offered.kind !== 'recovery-offered' || offered.recoverySessionId !== sessionId) return;
+    return this.broker.openReview({
+      pdfPath: path, surface: 'codex-native', recoveryDecision: 'resume',
+      recoveryOffer: offered.recoveryOffer, recoveryOperationId: operationId,
+    });
+  }
+  #provisional(result:Exclude<OpenReviewResult,{kind:'recovery-offered'}>, copyAdmission?: RecordState['copyAdmission']):ExtensionResult{
+    const grant=secret();const record:RecordState={sessionId:result.launch.sessionId,grant,expires:this.#now()+Math.min(60_000,this.#idle),provisional:true,watermark:0,contextPublished:false,...(copyAdmission ? { copyAdmission } : {})};
     this.#records.set(digestSecretHex(grant),record);return {status:'provisional',grant};
   }
   resume(grant:string,operationId:string,action:'activate'|'resume'='resume'):Promise<ExtensionResult>{return this.#serial(async()=>{
@@ -149,6 +218,16 @@ export class ExtensionRuntimeManager {
     if(!this.#hostSessions.has(record.sessionId)&&!await reconcileNativeSource(this.broker,record.sessionId,scope.canonicalSourcePath))return unavailable();
     if(this.#closing||this.#records.get(key)!==record)return unavailable();
     const current=this.broker.nativeAdmissionScope(record.sessionId);if(!current||this.broker.taskBindings.taskForGeneration(record.sessionId,current.documentGeneration)!==undefined)return unavailable();
+    const admission = record.copyAdmission;
+    if (admission) {
+      if (!admission.verified || admission.match.sha256 !== current.sourceDigest) return unavailable();
+      const adopted = await this.broker.adoptHostCopySourceIdentity(
+        record.sessionId, digestSecretHex(admission.match.file.resourceUri), current.sourceDigest,
+        () => !this.#closing && this.#records.get(key) === record,
+      );
+      if (!adopted || this.#closing || this.#records.get(key) !== record) return unavailable();
+      delete record.copyAdmission;
+    }
     this.#suspend(record);this.#records.delete(key);record.grant=secret();record.provisional=false;record.expires=this.#now()+this.#idle;
     const presentation:ExtensionPresentation={status:'active',runtimeId:opaque(),attemptId:opaque(),generation:current.documentGeneration,presentationCapability:secret(),reconnectTicket:secret()};
     record.active=presentation;record.lease=this.#now()+this.#lease;this.#records.set(digestSecretHex(record.grant),record);this.#panels.set(presentation.runtimeId,record);

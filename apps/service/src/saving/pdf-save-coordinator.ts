@@ -442,6 +442,12 @@ export class PdfSaveCoordinator {
       ) return;
       const destination = status.destination;
       const generation = destination.generation;
+      if (destination.capabilityId === undefined) {
+        if (status.sync.phase !== "not-saved" || status.sync.failure === undefined) {
+          await this.#broker.markSaveFailed(sessionId, generation, "missing");
+        }
+        return;
+      }
       try {
         const delivery = await this.#broker.freezeSaveDelivery(sessionId);
         const stateDigest = delivery.stateDigest ?? reviewStateDigest({ items: delivery.items ?? [] });

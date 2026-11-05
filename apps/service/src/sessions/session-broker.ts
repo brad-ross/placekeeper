@@ -843,8 +843,84 @@ export class SessionBroker {
     }
   }
 
+  async findHostCopyRecovery(
+    source: { readonly displayName?: string; readonly sha256: string },
+    isHostReview: (sessionId: string) => Promise<boolean>,
+  ): Promise<string | undefined> {
+    return this.#matchHostCopyRecovery(await this.#recoverableDrafts(), source, isHostReview);
+  }
+
+  async #matchHostCopyRecovery(
+    drafts: readonly RecoverableDraftV3[],
+    source: { readonly displayName?: string; readonly sha256: string },
+    isHostReview: (sessionId: string) => Promise<boolean>,
+  ): Promise<string | undefined> {
+    const candidates = drafts.filter(draft =>
+      draft.source.disposition === "remote-temporary" && draft.chromeProtected === true &&
+      draft.source.displayName === source.displayName && draft.state.source.digest === source.sha256 &&
+      draft.destination.phase === "active" && draft.destination.kind === "copy" &&
+      draft.destination.fingerprint !== undefined
+    );
+    const matches = (await Promise.all(candidates.map(async draft =>
+      await isHostReview(draft.state.sessionId) ? draft.state.sessionId : undefined
+    ))).filter(id => id !== undefined);
+    return matches.length === 1 ? matches[0] : undefined;
+  }
+
+  /** Validate a prior copy before explicitly re-admitting an unowned live review. */
+  async reopenLiveHostCopy(sessionId: string): Promise<OpenReviewResult | undefined> {
+    const session = this.#activeById.get(sessionId);
+    if (!session || session.ending) return;
+    return this.#withSessionTail(session, async () => {
+      const { destination } = session;
+      if (session.ending || session.sourceOwnership.disposition !== "remote-temporary" ||
+          destination.phase !== "active" || destination.kind !== "copy" ||
+          !destination.capabilityId || !destination.fingerprint ||
+          this.taskBindings.taskForGeneration(sessionId, session.state.workflow.documentGeneration)) return;
+      if (await this.capabilities.validateDestination(destination.capabilityId) !== destination.targetPath ||
+          await hashFile(destination.targetPath) !== destination.fingerprint || session.ending) return;
+      return { kind: "focused", launch: this.#launch(session, "codex-native") };
+    });
+  }
+
+  /** Bind a user-selected host URI only after the recovery reread verified the admitted bytes. */
+  async adoptHostCopySourceIdentity(
+    sessionId: string,
+    sourceIdentity: string,
+    sourceDigest: string,
+    current: () => boolean,
+  ): Promise<boolean> {
+    const session = this.#activeById.get(sessionId);
+    if (!session) return false;
+    return this.#withSessionTail(session, async () => {
+      const source = session.sourceOwnership;
+      const stillEligible = () => current() && !session.ending &&
+        session.state.source.digest === sourceDigest &&
+        session.destination.phase === "active" && session.destination.kind === "copy" &&
+        this.taskBindings.taskForGeneration(sessionId, session.state.workflow.documentGeneration) === undefined;
+      if (source.disposition !== "remote-temporary" || !stillEligible()) return false;
+      const drafts = await this.#recoverableDrafts();
+      const occupied = (candidate: RecoverableSourceOwnership) =>
+        candidate.disposition === "remote-temporary" && candidate.sourceIdentity === sourceIdentity;
+      if (!stillEligible() ||
+          drafts.some(draft => draft.state.sessionId !== sessionId && occupied(draft.source)) ||
+          [...this.#activeById.values()].some(other => other.id !== sessionId && occupied(other.sourceOwnership))) return false;
+      const updatedSource = { ...source, sourceIdentity };
+      const assertAuthority = () => { if (!stillEligible()) throw new Error("Host recovery authority retired"); };
+      await session.store.persist({ ...this.#draft(session), source: updatedSource }, undefined, assertAuthority);
+      session.sourceOwnership = updatedSource;
+      this.#activate(session);
+      return true;
+    });
+  }
+
   /** Host identity gives conflict/recovery discovery, never permission to borrow an app grant. */
-  async openHostResourceSource(request: ChromeBrowserSourceOpenRequest, sources: BrowserSourceStore, signal?: AbortSignal): Promise<OpenReviewResult> {
+  async openHostResourceSource(
+    request: ChromeBrowserSourceOpenRequest,
+    sources: BrowserSourceStore,
+    signal?: AbortSignal,
+    isHostReview?: (sessionId: string) => Promise<boolean>,
+  ): Promise<OpenReviewResult | { kind: "host-copy-recovery"; sessionId: string }> {
     signal?.throwIfAborted();
     await this.initialize();
     if (request.protocolVersion === 2) {
@@ -854,11 +930,17 @@ export class SessionBroker {
           return { kind: "focused", launch: this.#launch(session, "codex-native") };
         }
       }
-      const drafts = (await this.#recoverableDrafts()).filter(draft => draft.source.disposition === "remote-temporary" && draft.source.sourceIdentity === request.sourceIdentity && draft.chromeProtected === true);
-      if (drafts.length > 1) throw new Error("Host recovery target is ambiguous");
-      if (drafts[0]) {
+      const drafts = await this.#recoverableDrafts();
+      const exact = drafts.filter(draft => draft.source.disposition === "remote-temporary" && draft.source.sourceIdentity === request.sourceIdentity && draft.chromeProtected === true);
+      if (exact.length > 1) throw new Error("Host recovery target is ambiguous");
+      if (exact[0]) {
         signal?.throwIfAborted();
-        return this.openReview({ pdfPath: this.#draftSnapshotPath(drafts[0]), surface: "codex-native" });
+        return this.openReview({ pdfPath: this.#draftSnapshotPath(exact[0]), surface: "codex-native" });
+      }
+      if (isHostReview) {
+        const sessionId = await this.#matchHostCopyRecovery(drafts, request, isHostReview);
+        signal?.throwIfAborted();
+        if (sessionId) return { kind: "host-copy-recovery", sessionId };
       }
     }
     return this.#openBrowserSource(request, sources, signal, "codex-native");
@@ -1179,26 +1261,34 @@ export class SessionBroker {
           fingerprint: sourceDigest,
         };
       } else if (destination.phase === "active" && destination.kind === "copy") {
+        let capabilityId: string | undefined;
         try {
-          const capability = await this.capabilities.preauthorizeDestination(
-            destination.targetPath,
-          );
+          const capability = await this.capabilities.preauthorizeDestination(destination.targetPath);
+          capabilityId = capability.id;
+          const canonicalTarget = join(capability.parentPath, capability.filename);
+          // Imported-copy selections persist a canonical path. Older local
+          // reviews may have stored a stable filesystem alias.
+          const requireCanonicalTarget = matchingDraft.source.disposition === "remote-temporary";
+          if (requireCanonicalTarget && canonicalTarget !== destination.targetPath) {
+            throw new Error("Saved copy parent moved");
+          }
           if (destination.fingerprint === undefined) {
             if (capability.existingTarget !== undefined) {
               throw new Error("Unidentified recovery target already exists");
             }
           } else {
-            await this.capabilities.refreshDestination(
-              capability.id,
-              destination.fingerprint,
-            );
+            const resolvedTarget = await this.capabilities.refreshDestination(capability.id, destination.fingerprint);
+            if (requireCanonicalTarget && resolvedTarget !== destination.targetPath) {
+              throw new Error("Saved copy path changed");
+            }
           }
           destination = {
             ...destination,
-            targetPath: join(capability.parentPath, capability.filename),
+            targetPath: canonicalTarget,
             capabilityId: capability.id,
           };
         } catch (error) {
+          if (capabilityId !== undefined) this.capabilities.revokeDestination(capabilityId);
           const missing = (error as NodeJS.ErrnoException).code === "ENOENT";
           const { capabilityId: _staleCapabilityId, ...unboundDestination } = destination;
           destination = unboundDestination;
@@ -3800,15 +3890,19 @@ export class SessionBroker {
         ? { ...session.sync, desiredRevision: nextState.revision, savedRevision: nextState.revision }
         : session.sync;
     }
+    const { destination, sync } = session;
+    const failure = destination.phase === "active"
+      ? destination.capabilityId === undefined ? sync.failure ?? "missing" : undefined
+      : destination.phase === "host"
+        ? destination.writable ? undefined : "host-read-only"
+        : "destination-unconfigured";
     return {
-      phase: session.destination.phase === "active" || session.destination.phase === "host" && session.destination.writable ? "saving" : "not-saved",
+      phase: failure === undefined ? "saving" : "not-saved",
       desiredRevision: nextState.revision,
       desiredDigest: reviewStateDigest(nextState),
-      savedRevision: session.sync.savedRevision,
-      ...(session.sync.savedDigest === undefined ? {} : { savedDigest: session.sync.savedDigest }),
-      ...(session.destination.phase === "active" || session.destination.phase === "host" && session.destination.writable
-        ? {}
-        : { failure: session.destination.phase === "host" ? "host-read-only" as const : "destination-unconfigured" as const }),
+      savedRevision: sync.savedRevision,
+      ...(sync.savedDigest === undefined ? {} : { savedDigest: sync.savedDigest }),
+      ...(failure === undefined ? {} : { failure }),
     };
   }
 

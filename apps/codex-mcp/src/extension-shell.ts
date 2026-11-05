@@ -163,7 +163,15 @@ export class ExtensionShell {
         if (result.status === 'provisional') {
             this.#grant = result.grant;
             this.#resumeOperation = crypto.randomUUID();
-            if (this.#host) { const refreshed = await this.#host.refresh(result.grant); if (refreshed.status === 'host-status' && refreshed.outcome === 'conflict') this.#hostNotice = 'The host PDF changed before saving. Your review is protected; use Save options to keep your work in a separate copy.'; }
+            if (this.#host) {
+                const refreshed = await this.#host.refresh(result.grant);
+                if (refreshed.status === 'host-resource') {
+                    if (this.#closed || this.#grant !== result.grant) return;
+                    await this.#restartHost(refreshed);
+                    return;
+                }
+                if (refreshed.status === 'host-status' && refreshed.outcome === 'conflict') this.#hostNotice = 'The host PDF changed before saving. Your review is protected; use Save options to keep your work in a separate copy.';
+            }
             let activated: ExtensionResult | CodexAppResponse | undefined;
             for (let attempt = 0; attempt < 3; attempt++) {
                 if (this.#closed)
@@ -227,7 +235,15 @@ export class ExtensionShell {
             return;
         }
         if (result.status === 'busy') {
-            this.#show(result.canResume ? 'Protected review work is available. Choose how to open it.' : 'This PDF already has a review. Open an independent review without taking over the existing one.');
+            if (result.matchingCopy) {
+                this.#show(result.canResume
+                    ? 'A saved-copy review has matching PDF contents and a similar filename. Resume that review or open an independent review.'
+                    : 'A saved-copy review with matching PDF contents and a similar filename is already open. You can open an independent review.');
+            } else {
+                this.#show(result.canResume
+                    ? 'Protected review work is available. Choose how to open it.'
+                    : 'This PDF already has a review. Open an independent review without taking over the existing one.');
+            }
             this.controls.replaceChildren();
             const epoch = ++this.#choiceEpoch;
             let pending = false;
@@ -241,7 +257,10 @@ export class ExtensionShell {
                     try {
                         const parsed = parseExtensionResult(await this.#request({ action: 'choose', recoveryToken: result.recoveryToken, choice, operationId }));
                         if (parsed?.status === 'unavailable' && current()) this.#chooser('This review choice is no longer available. Choose the PDF again; protected work is retained.', 'Choose PDF again', true);
-                        else if (parsed && current()) await this.#apply(parsed);
+                        else if (parsed && current()) {
+                            if (parsed.status === 'host-resource') await this.#restartHost(parsed);
+                            else await this.#apply(parsed);
+                        }
                         else if (parsed) await this.#discardObsolete(parsed);
                     } catch (error) { if (current()) throw error; }
                     finally { pending = false; if (current()) for (const button of buttons) button.disabled = false; }
@@ -324,7 +343,13 @@ export class ExtensionShell {
             const button = document.createElement('button'); button.textContent = 'Attach captured evidence'; button.onclick = attach; this.#draftView.append(button);
         }
     }
-    #resetHost() { const host = this.#host; this.#host = undefined; this.#hostEpoch++; this.#hostNotice = ''; this.#hostRefreshPending = false; this.#hostUpdateRevision = 0; this.#saveRequested = false; this.#hostSave = undefined; void host?.dispose().catch(() => undefined); }
+    #resetHost() { const host = this.#host; this.#host = undefined; this.#hostEpoch++; this.#hostNotice = ''; this.#hostRefreshPending = false; this.#hostUpdateRevision = 0; this.#saveRequested = false; this.#hostSave = undefined; return host?.dispose().catch(() => undefined); }
+    async #restartHost(result: Extract<ExtensionResult, { status: 'host-resource' }>) {
+        this.#grant = undefined;
+        this.#resumeOperation = undefined;
+        await this.#resetHost();
+        await this.#apply(result);
+    }
     async #discardObsolete(result: ExtensionResult) {
         if ('grant' in result && (this.#closed || result.grant !== this.#grant))
             await this.#request({ action: 'revoke', grant: result.grant }).catch(() => undefined);

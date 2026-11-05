@@ -163,6 +163,58 @@ it('opens opaque host bytes in the canonical reader, routes reviewed export, and
     await f.shell.teardown(); expect(resources.unsubscribe).toHaveBeenCalledOnce(); expect(resources.write).not.toHaveBeenCalled();
 });
 
+it.each([false, true])('reopens the selected host PDF after recovery bytes change (lost response=%s)', async lostResponse => {
+    const file = { name: 'host.pdf', resourceUri: 'opaque:host' };
+    const replacement = { status: 'host-resource', ticket: 'q'.repeat(43), file };
+    const first = btoa('%PDF-1.7\ninitial PDF\n%%EOF');
+    const changed = btoa('%PDF-1.7\nupdated PDF\n%%EOF');
+    const read = vi.fn(async () => ({ contents: [{ uri: file.resourceUri, blob: changed }] }))
+        .mockResolvedValueOnce({ contents: [{ uri: file.resourceUri, blob: first }] });
+    const resources = { read, subscribe: vi.fn(async () => ({})), unsubscribe: vi.fn(async () => ({})), addUpdateHandler: vi.fn(() => vi.fn()) };
+    const independentGrant = 'z'.repeat(43);
+    let uploaded = 0, choices = 0;
+    const f = fixture(async request => {
+        if (request.action === 'choose') {
+            choices++;
+            return reply(lostResponse && choices > 1 ? replacement : { status: 'provisional', grant });
+        }
+        if (request.action === 'activate') return reply(active(nextGrant));
+        if (request.action === 'host-resource') {
+            if (request.operation === 'begin' && request.grant === grant) {
+                if (lostResponse) throw Error('transport failed');
+                return reply(replacement);
+            }
+            if (request.operation === 'begin') return reply({ status: 'host-transfer', transfer: 't'.repeat(43), offset: 0 });
+            if (request.operation === 'chunk') return reply({ status: 'host-transfer', transfer: 't'.repeat(43), offset: atob(request.dataBase64).length });
+            if (request.operation === 'finish') {
+                return reply(++uploaded === 1
+                    ? { status: 'busy', recoveryToken: 'r'.repeat(43), canResume: true, matchingCopy: true }
+                    : uploaded === 2 ? { status: 'provisional', grant: independentGrant } : { status: 'host-ready', generation: 1 });
+            }
+        }
+        return reply({ status: 'ok', payload: {} });
+    }, () => resources);
+    await f.shell.receive({ status: 'host-resource', file, ticket: 'p'.repeat(43) });
+    expect(f.status.textContent).toContain('a similar filename');
+    const resume = f.controls.append.mock.calls.map(([button]) => button).find(button => button.textContent === 'Resume protected review');
+    resume.onclick();
+    if (lostResponse) {
+        await vi.waitFor(() => expect(f.status.textContent).toContain('protected work is retained'));
+        expect(host.mounts).toHaveLength(0);
+        resume.onclick();
+    }
+    await vi.waitFor(() => expect(host.mounts).toHaveLength(1));
+    if (lostResponse) {
+        const attemptedChoices = f.calls.filter(call => call.action === 'choose');
+        expect(attemptedChoices).toHaveLength(2);
+        expect(attemptedChoices[0].operationId).toBe(attemptedChoices[1].operationId);
+    }
+    expect(f.calls.filter(call => call.action === 'activate').map(call => call.grant)).toEqual([independentGrant]);
+    expect(f.calls.some(call => call.operation === 'begin' && call.ticket === replacement.ticket)).toBe(true);
+    expect(resources.unsubscribe).toHaveBeenCalledOnce();
+    await f.shell.teardown();
+});
+
 it('disposes the host route when a busy resource is canceled before choosing a local PDF', async () => {
     const bytes = btoa('%PDF-1.7\nhost chooser fixture\n%%EOF');
     const resources = { read: vi.fn(async () => ({ contents: [{ uri: 'opaque:host', blob: bytes }] })), subscribe: vi.fn(async () => ({})), unsubscribe: vi.fn(async () => ({})), addUpdateHandler: vi.fn(() => vi.fn()), write: vi.fn() };

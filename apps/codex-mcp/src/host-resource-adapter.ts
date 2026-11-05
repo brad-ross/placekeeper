@@ -83,6 +83,10 @@ export class HostResourceAdapter {
             this.#assert(epoch);
             const metadata = content.openaiMetadata;
             const started = await this.options.request({ action: 'host-resource', operation: 'begin', ...authority, byteLength: bytes.length, sha256, writable: metadata?.writable === true, ...(metadata?.etag ? { etag: metadata.etag } : {}) });
+            if ('grant' in authority && started.status === 'host-resource') {
+                this.#assert(epoch);
+                return started;
+            }
             if (started.status !== 'host-transfer' || started.offset !== 0)
                 throw Error('Host PDF admission unavailable');
             transfer = started.transfer;

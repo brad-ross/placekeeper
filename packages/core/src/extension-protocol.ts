@@ -10,7 +10,7 @@ export type ExtensionResult =
   | { status: 'provisional'; grant: string }
   | { status: 'active'; grant: string; presentation: ExtensionPresentation; contextPublished?: boolean }
   | { status: 'context-ready' }
-  | { status: 'busy'; recoveryToken: string; canResume: boolean }
+  | { status: 'busy'; recoveryToken: string; canResume: boolean; matchingCopy?: true }
   | { status: 'cancelled' | 'unavailable' | 'chooser' | 'closed' }
   | HostResourceResult;
 export type ExtensionRequest =
@@ -65,7 +65,7 @@ export function parseExtensionResult(value: unknown): ExtensionResult | undefine
   if(value.status==='mention-resource'&&typeof value.text==='string')return {status:'mention-resource',text:value.text};
   if(value.status==='provisional'&&isCodexCapability(value.grant))return {status:'provisional',grant:value.grant};
   if(value.status==='active'&&isCodexCapability(value.grant)) {const presentation=parseCodexAppResponse(value.presentation);if(presentation?.status==='active')return {status:'active',grant:value.grant,presentation,...(typeof value.contextPublished==='boolean'?{contextPublished:value.contextPublished}:{})};}
-  if(value.status==='busy'&&isCodexCapability(value.recoveryToken)&&typeof value.canResume==='boolean')return {status:'busy',recoveryToken:value.recoveryToken,canResume:value.canResume};
+  if(value.status==='busy'&&isCodexCapability(value.recoveryToken)&&typeof value.canResume==='boolean')return {status:'busy',recoveryToken:value.recoveryToken,canResume:value.canResume,...(value.matchingCopy===true?{matchingCopy:true}:{})};
   if(value.status==='context-ready')return {status:'context-ready'};
   if(value.status==='cancelled'||value.status==='unavailable'||value.status==='chooser'||value.status==='closed')return {status:value.status};
 }

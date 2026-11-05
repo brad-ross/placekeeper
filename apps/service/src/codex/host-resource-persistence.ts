@@ -2,7 +2,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { open, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { HOST_RESOURCE_CHUNK_BYTES, HOST_RESOURCE_MAX_BYTES, type HostResourceFile, type HostResourceIntent, type HostResourceRequest, type HostResourceResult, parseHostResourceResult } from '../../../../packages/core/src/host-resource-protocol.js';
-import { BrowserSourceStore } from '../browser/browser-source-store.js';
+import { BrowserSourceStore, normalizeBrowserSourceDisplayName } from '../browser/browser-source-store.js';
 import { writePrivateFile, readPrivateFile, readPrivateFileRange } from '../platform/private-storage.js';
 import { publishFile, stagePublication, syncPublishedFile } from '../platform/file-publication.js';
 import type { SessionBroker } from '../sessions/session-broker.js';
@@ -21,7 +21,14 @@ type Transfer = {
     current: () => boolean;
     controller: AbortController;
     file?: HostResourceFile;
+    onVerified?: () => void;
     sessionId?: string;
+};
+export type HostCopyRecoveryMatch = {
+    sessionId: string;
+    displayName: string;
+    sha256: string;
+    file: HostResourceFile;
 };
 type HostState = {
     schemaVersion: 1;
@@ -67,6 +74,7 @@ export class HostResourcePersistence {
     } }
     async begin(input: Begin, context: {
         file?: HostResourceFile;
+        onVerified?: () => void;
         sessionId?: string;
         current: () => boolean;
     }): Promise<HostResourceResult> {
@@ -115,9 +123,16 @@ export class HostResourcePersistence {
         t.controller.abort();
         await rm(t.path, { force: true });
     } }
+    #isCopyRecoveryHost = async (sessionId: string) => {
+        const state = await this.state(sessionId);
+        return state !== undefined && state.forked !== true;
+    };
+    async matchesCopyRecovery(match: HostCopyRecoveryMatch): Promise<boolean> {
+        return await this.broker.findHostCopyRecovery(match, this.#isCopyRecoveryHost) === match.sessionId;
+    }
     async finish(transfer: string): Promise<{
         opened: OpenReviewResult;
-    } | HostResourceResult> {
+    } | { copyRecovery: HostCopyRecoveryMatch } | HostResourceResult> {
         const t = this.#transfers.get(transfer);
         if (!t || !t.current() || t.offset !== t.input.byteLength)
             throw Error('Host transfer incomplete');
@@ -130,7 +145,7 @@ export class HostResourcePersistence {
             const sources = await this.#sources();
             if (!t.current())
                 throw Error('Host authority retired');
-            const request = { protocolVersion: 2 as const, sourceHandle: t.handle, byteLength: bytes.length, sha256: t.input.sha256, ...(t.file ? { displayName: t.file.name, sourceIdentity: createHash('sha256').update(t.file.resourceUri).digest('hex') } : { sourceIdentity: createHash('sha256').update(t.sessionId!).digest('hex') }) };
+            const request = { protocolVersion: 2 as const, sourceHandle: t.handle, byteLength: bytes.length, sha256: t.input.sha256, ...(t.file ? { displayName: normalizeBrowserSourceDisplayName(t.file.name), sourceIdentity: createHash('sha256').update(t.file.resourceUri).digest('hex') } : { sourceIdentity: createHash('sha256').update(t.sessionId!).digest('hex') }) };
             if (t.sessionId) {
                 const previous = await this.state(t.sessionId);
                 if (!t.current())
@@ -177,9 +192,15 @@ export class HostResourcePersistence {
                 await this.broker.configureImportedDestination(t.sessionId, previous.forked !== true && t.input.writable && !!t.input.etag, () => { if (!t.current()) throw Error('Host authority retired'); });
                 if (classifiedNotSaved)
                     await this.broker.markImportedSaveState(t.sessionId, 'write-failed');
+                if (!t.current()) throw Error('Host authority retired');
+                t.onVerified?.();
                 return { status: 'host-ready', generation: this.broker.state(t.sessionId)!.workflow.documentGeneration };
             }
-            const opened = await this.broker.openHostResourceSource(request, sources, t.controller.signal);
+            const opened = await this.broker.openHostResourceSource(request, sources, t.controller.signal, this.#isCopyRecoveryHost);
+            if (opened.kind === 'host-copy-recovery') {
+                if (!t.file || !('displayName' in request)) throw Error('Host recovery source unavailable');
+                return { copyRecovery: { sessionId: opened.sessionId, displayName: request.displayName, sha256: request.sha256, file: t.file } };
+            }
             if (opened.kind === 'opened') {
                 try {
                     if (!t.current())
@@ -202,7 +223,7 @@ export class HostResourcePersistence {
             await rm(t.path, { force: true });
         }
     }
-    async fork(id: string): Promise<OpenReviewResult> {
+    async fork(id: string, expectedDigest?: string): Promise<OpenReviewResult> {
         const state = await this.state(id), activeBytes = await this.broker.documentBytes(id), scope = await this.broker.sessionScope(id);
         const recoveryPath = activeBytes ? undefined : await this.broker.importedRecoveryPath(id);
         const bytes = activeBytes ?? (recoveryPath ? await readPrivateFile(recoveryPath, HOST_RESOURCE_MAX_BYTES) : undefined);
@@ -212,6 +233,7 @@ export class HostResourcePersistence {
         try {
             await writePrivateFile(path, bytes);
             const digest = createHash('sha256').update(bytes).digest('hex');
+            if (expectedDigest !== undefined && digest !== expectedDigest) throw Error('Host recovery source changed');
             const opened = await this.broker.openHostResourceSource({ protocolVersion: 1, sourceHandle: handle, displayName: scope?.sourceDisplayName ?? 'Independent review.pdf', byteLength: bytes.length, sha256: digest }, sources);
             if (opened.kind !== 'opened')
                 throw Error('Independent host review unavailable');
