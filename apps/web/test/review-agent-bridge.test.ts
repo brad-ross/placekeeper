@@ -24,6 +24,16 @@ describe('review agent context', () => {
     expect(snapshot.selection).toBeNull();
   });
 
+  it('does not share a reliable selection when its surface is no longer current', () => {
+    const state = createReviewState({ sessionId: 'review', source: { fileId: 'file', digest: 'digest', byteLength: 10 } });
+    const snapshot = reviewAgentSnapshot({
+      state, title: 'Paper', page: 1, pageCount: 3,
+      selection: { kind: 'reliable', generation: 1, anchor: { reliable: true, pageIndex: 0, quote: 'Retired selection', prefix: '', suffix: '', rect: { x: 0, y: 0, width: 1, height: 1 }, segmentRects: [] } },
+      selectionIsCurrent: false,
+    });
+    expect(snapshot.selection).toBeNull();
+  });
+
   it('reports incomplete coverage and bounded results without claiming a full search', () => {
     const results = Array.from({ length: 105 }, (_, index) => ({ id: String(index), pageIndex: 1, charIndex: index, charCount: 1, navigationPoint: { x: 0, y: 0 }, rects: [], excerpt: 'match', excerptMatch: { start: 0, length: 5 }, kind: 'exact' as const, matchedForm: 'match' }));
     const result = reviewAgentSearchResult({ ...initialPdfSearchState(4), status: 'partial', message: 'One page could not be read', coverage: { totalPages: 4, searchedPages: 3, unsearchablePages: [2], limitedPages: [3] }, groups: [{ id: 'exact', label: 'Exact', results }] }, 9);

@@ -1,5 +1,4 @@
 import type { ReviewAgentActions, ReviewAgentBridge, ReviewAgentTarget } from '../../web/src/host/review-agent-bridge.js';
-import type { ReviewContextSnapshot } from '../../web/src/host/review-context-snapshot.js';
 
 /** The document-scoped WebMCP surface exercised by the installed host probe. */
 export interface DocumentModelContext {
@@ -31,7 +30,6 @@ export class LiveReaderTools implements ReviewAgentBridge {
   }
   get supported() { return this.#registered.length === 5 && !this.#disposed; }
   attach(actions: ReviewAgentActions) { if (this.#disposed) return () => {}; this.#actions = actions; return () => { if (this.#actions === actions) this.#actions = undefined; }; }
-  publish(_snapshot: ReviewContextSnapshot) { /* Inspection reads the accepted live snapshot on demand. */ }
   dispose() { this.#disposed = true; this.#actions = undefined; for (const name of this.#registered.splice(0)) { try { this.api?.unregisterTool(name); } catch { /* Connection already ended. */ } } }
   async #execute(name: string, input: unknown): Promise<string> {
     const fail = (reason = 'reader-unavailable') => JSON.stringify({ ...unavailable(), reason });

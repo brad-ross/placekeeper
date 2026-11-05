@@ -3,7 +3,7 @@ import { open, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { HOST_RESOURCE_CHUNK_BYTES, HOST_RESOURCE_MAX_BYTES, type HostResourceFile, type HostResourceIntent, type HostResourceRequest, type HostResourceResult, parseHostResourceResult } from '../../../../packages/core/src/host-resource-protocol.js';
 import { BrowserSourceStore } from '../browser/browser-source-store.js';
-import { writePrivateFile, readPrivateFile } from '../platform/private-storage.js';
+import { writePrivateFile, readPrivateFile, readPrivateFileRange } from '../platform/private-storage.js';
 import { publishFile, stagePublication, syncPublishedFile } from '../platform/file-publication.js';
 import type { SessionBroker } from '../sessions/session-broker.js';
 import type { PdfSaveCoordinator } from '../saving/pdf-save-coordinator.js';
@@ -206,10 +206,11 @@ export class HostResourcePersistence {
         const sources = await this.#sources(), handle = randomBytes(24).toString('base64url'), path = join(sources.root, `${handle}.pdf`);
         try {
             await writePrivateFile(path, bytes);
-            const opened = await this.broker.openHostResourceSource({ protocolVersion: 1, sourceHandle: handle, displayName: scope?.sourceDisplayName ?? 'Independent review.pdf', byteLength: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') }, sources);
+            const digest = createHash('sha256').update(bytes).digest('hex');
+            const opened = await this.broker.openHostResourceSource({ protocolVersion: 1, sourceHandle: handle, displayName: scope?.sourceDisplayName ?? 'Independent review.pdf', byteLength: bytes.length, sha256: digest }, sources);
             if (opened.kind !== 'opened')
                 throw Error('Independent host review unavailable');
-            await this.#persist(opened.launch.sessionId, { schemaVersion: 1, writable: false, digest: createHash('sha256').update(bytes).digest('hex'), forked: true });
+            await this.#persist(opened.launch.sessionId, { schemaVersion: 1, writable: false, digest, forked: true });
             await this.broker.configureImportedDestination(opened.launch.sessionId, false);
             await this.broker.protectChromeReview(opened.launch.sessionId);
             return opened;
@@ -281,9 +282,8 @@ export class HostResourcePersistence {
         const state = await this.state(id), intent = state?.pending?.id === intentId ? state.pending : state?.exported;
         if (!intent || intent.id !== intentId || offset >= intent.byteLength)
             throw Error('Host intent unavailable');
-        const bytes = await readPrivateFile(join(this.#directory(id), `host-save-${intent.id}.pdf`), HOST_RESOURCE_MAX_BYTES);
-        const chunk = bytes.subarray(offset, offset + HOST_RESOURCE_CHUNK_BYTES);
-        return { status: 'host-chunk', dataBase64: chunk.toString('base64'), done: offset + chunk.length === bytes.length };
+        const { bytes, fileSize } = await readPrivateFileRange(join(this.#directory(id), `host-save-${intent.id}.pdf`), HOST_RESOURCE_MAX_BYTES, offset, HOST_RESOURCE_CHUNK_BYTES);
+        return { status: 'host-chunk', dataBase64: bytes.toString('base64'), done: offset + bytes.length === fileSize };
     }
     async #ack(id: string, state: HostState, intent: HostResourceIntent, etag: string, assertAuthority: () => void = () => undefined) {
         const accepted = await this.broker.acknowledgeImportedSave({ sessionId: id, documentGeneration: intent.generation, sourceDigest: intent.sourceDigest, revision: intent.revision, stateDigest: intent.stateDigest, assertAuthority });

@@ -21,7 +21,6 @@ export type ReviewAgentDraft =
 
 export interface ReviewAgentBridge {
   attach(actions: ReviewAgentActions): () => void;
-  publish(snapshot: ReviewAgentSnapshot): void;
   /** Explicit draft workflow, including copy and attachment fallback when needed. */
   draft?(input: ReviewAgentDraft): Promise<void>;
 }

@@ -272,7 +272,7 @@ export class ExtensionShell {
         if (this.#catalogue.included) add('Remove this review from mentions', 'remove');
     }
     #draftBridge(tools: LiveReaderTools, epoch: number): ReviewAgentBridge {
-        return { attach: actions => tools.attach(actions), publish: snapshot => tools.publish(snapshot), draft: input => this.#prepareDraft(input, epoch) };
+        return { attach: actions => tools.attach(actions), draft: input => this.#prepareDraft(input, epoch) };
     }
     async #prepareDraft(input: ReviewAgentDraft, epoch: number) {
         const draft = prepareReviewDraft(input), grant = this.#grant;

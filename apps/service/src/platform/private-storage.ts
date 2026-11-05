@@ -61,6 +61,16 @@ export async function writePrivateFile(path: string, bytes: string | Uint8Array 
 }
 
 export async function readPrivateFile(path: string, maxBytes: number): Promise<Buffer> {
+  return (await readPrivateBytes(path, maxBytes)).bytes;
+}
+
+export async function readPrivateFileRange(path: string, maxBytes: number, offset: number, length: number): Promise<{ bytes: Buffer; fileSize: number }> {
+  if (!Number.isSafeInteger(offset) || offset < 0 || !Number.isSafeInteger(length) || length <= 0)
+    throw new Error("Private storage range is invalid");
+  return readPrivateBytes(path, maxBytes, { offset, length });
+}
+
+async function readPrivateBytes(path: string, maxBytes: number, range?: { offset: number; length: number }): Promise<{ bytes: Buffer; fileSize: number }> {
   await verifyPrivatePath(dirname(path), "directory");
   await verifyPrivatePath(path, "file");
   const handle = await open(path, constants.O_RDONLY | (process.platform === "win32" ? 0 : constants.O_NOFOLLOW));
@@ -68,21 +78,22 @@ export async function readPrivateFile(path: string, maxBytes: number): Promise<B
     const info = await handle.stat();
     if (!info.isFile()) throw new Error("Private storage has an unexpected file type");
     if (info.size > maxBytes) throw new Error("Private storage file is oversized");
-    const bytes = Buffer.alloc(info.size + 1);
+    const offset = range?.offset ?? 0;
+    const bytes = Buffer.alloc(range ? Math.min(range.length, Math.max(0, info.size - offset)) : info.size + 1);
     let bytesRead = 0;
     while (bytesRead < bytes.length) {
-      const next = await handle.read(bytes, bytesRead, bytes.length - bytesRead, bytesRead);
+      const next = await handle.read(bytes, bytesRead, bytes.length - bytesRead, offset + bytesRead);
       if (next.bytesRead === 0) break;
       bytesRead += next.bytesRead;
     }
     if (bytesRead > maxBytes) throw new Error("Private storage file is oversized");
     const unchanged = (current: typeof info) => current.ino === info.ino && current.dev === info.dev &&
       current.size === info.size && current.mtimeMs === info.mtimeMs && current.ctimeMs === info.ctimeMs;
-    if (bytesRead !== info.size || !unchanged(await handle.stat())) throw new Error("Private storage changed while reading");
+    if (bytesRead !== (range ? bytes.length : info.size) || !unchanged(await handle.stat())) throw new Error("Private storage changed while reading");
     await verifyPrivatePath(path, "file");
     const current = await lstat(path);
     if (!unchanged(current)) throw new Error("Private storage identity changed");
-    return bytes.subarray(0, bytesRead);
+    return { bytes: bytes.subarray(0, bytesRead), fileSize: info.size };
   } finally { await handle.close(); }
 }
 

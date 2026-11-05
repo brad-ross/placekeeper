@@ -1,7 +1,7 @@
 import { PDFDocument } from 'pdf-lib';
 import { createEmbedPdfWriter, readEditableReviewItems } from '../../../packages/pdf-backends/src/embedpdf-adapter.js';
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdtemp, rm, readFile, readdir } from 'node:fs/promises';
+import { mkdtemp, rm, readFile, readdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
@@ -10,6 +10,9 @@ import { ExtensionRuntimeManager } from '../src/codex/extension-runtime.js';
 import { CodexServiceRuntimeBackend } from '../src/codex/codex-runtime-backend.js';
 import { PdfSaveCoordinator } from '../src/saving/pdf-save-coordinator.js';
 import { ExportCoordinator } from '../src/export/export-coordinator.js';
+import { HostResourcePersistence } from '../src/codex/host-resource-persistence.js';
+import { HOST_RESOURCE_CHUNK_BYTES } from '../../../packages/core/src/host-resource-protocol.js';
+import { writePrivateFile } from '../src/platform/private-storage.js';
 import { DraftSnapshotStore } from '../src/recovery/draft-snapshot.js';
 import type { PdfWriter } from '../../../packages/core/src/pdf-writer.js';
 import { addPageNote } from '../../../packages/core/src/review-commands.js';
@@ -210,4 +213,32 @@ it('a receipt for older work cannot mark a newer semantic revision Saved even wh
  expect(f.broker.saveStatus(h.sessionId)?.sync).toMatchObject({phase:'saving',desiredRevision:3,savedRevision:1});
  await upload(f.manager,{grant:h.active.grant},output,true,'v2');
  expect(f.broker.saveStatus(h.sessionId)?.sync).toMatchObject({phase:'saving',desiredRevision:3,savedRevision:1});
+});
+
+
+it.each(['pending', 'exported'] as const)('streams %s host-save bytes in bounded chunks with an exact final marker', async (slot) => {
+ const f = await fixture(), h = await openHost(f, true);
+ const persistence = new HostResourcePersistence(f.broker, { materializeImportedSave: vi.fn() });
+ const directory = join(f.root, 'recovery', h.sessionId), statePath = join(directory, 'host-resource.json');
+ const state = JSON.parse(await readFile(statePath, 'utf8'));
+ const output = Buffer.alloc(HOST_RESOURCE_CHUNK_BYTES * 2 + 17, 0xa5);
+ output.set(Buffer.from('final saved bytes'), output.length - 17);
+ const intent = { id: 'bounded_chunk_intent', generation: 1, revision: 0, stateDigest: 'a'.repeat(64), sourceDigest: state.digest, sha256: createHash('sha256').update(output).digest('hex'), byteLength: output.length, ifMatch: slot === 'pending' ? 'v1' : '', purpose: slot === 'pending' ? 'save' : 'export' };
+ await writePrivateFile(join(directory, `host-save-${intent.id}.pdf`), output);
+ await writeFile(statePath, JSON.stringify({ ...state, [slot]: intent }));
+ const allocations = vi.spyOn(Buffer, 'alloc');
+ const received: Buffer[] = [];
+ try {
+  for (let offset = 0; offset < output.length; offset += HOST_RESOURCE_CHUNK_BYTES) {
+   const result = await persistence.saveChunk(h.sessionId, intent.id, offset);
+   if (result.status !== 'host-chunk') throw Error('Expected host chunk');
+   const chunk = Buffer.from(result.dataBase64, 'base64');
+   expect(chunk.length).toBe(Math.min(HOST_RESOURCE_CHUNK_BYTES, output.length - offset));
+   expect(result.done).toBe(offset + chunk.length === output.length);
+   received.push(chunk);
+  }
+  expect(allocations.mock.calls.every(([size]) => size <= HOST_RESOURCE_CHUNK_BYTES)).toBe(true);
+  expect(Buffer.concat(received)).toEqual(output);
+  await expect(persistence.saveChunk(h.sessionId, intent.id, output.length)).rejects.toThrow('Host intent unavailable');
+ } finally { allocations.mockRestore(); }
 });
