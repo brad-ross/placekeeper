@@ -2,19 +2,19 @@
 
 ## Current result
 
-Production extension native-host qualification is **awaiting candidate installation and host actions**, not passed (updated 2026-11-04). The compatibility probe has bounded native evidence recorded below; it does not qualify the production reader.
+Production implementation and automated verification are complete; native qualification is in progress (updated 2026-11-04, 23:25 Eastern). The installed production candidate is revision `0fe7457352b41f95f8acd470858542356800f76b`, bundle SHA256 `fb6bafa98179cb0af9a4d49f3616a3c2c21f700325d2fed1b6425a82fa9e40d1`. All 13 installed files match the recorded build. Later commits record evidence only.
 
-A standalone candidate is built at `dist/extension-probe`, with instructions in `scripts/extension-probe/README.md`. Local verification passed: three SDK transport/packaged-startup tests; scoped TypeScript checking; simulated-host Chromium checks for PDF resource reading, explicit context attachment, and 375/1440px layouts. The fixture is `dist/extension-probe/disposable-test.pdf`. These checks do not establish real host behavior.
+Verified in the actual production panel: native file entry, all five live tools, exact search and destination navigation, automatic expansion from collapse, annotation and selection editable drafts without automatic send, saved PDF annotation changes, protected review recovery with stable item identities, clean external source refresh, stale source/generation rejection, context removal remaining paused, and explicit mention snapshot include/remove plus native preference reads. These observations are detailed chronologically below.
 
-The reviewed implementation plan is `docs/plans/2026-11-02-feat-chatgpt-extension-experience-plan.md`. Subsequent production implementation covers direct entry, admission and reconnect, host resources, background context, live reader tools, editable drafts, sharing preferences and explicit mention snapshots. Those features require qualification against their exact production candidate.
+**Route qualification matters:** this native file-menu invocation supplies trusted local-path metadata. The production server therefore selects local persistence, and the panel has no opaque-route Refresh PDF / Save now controls. Its saves and source refreshes qualify the trusted local-path route, not HostResourceAdapter reads, subscriptions, ETag writes or conflicts. Earlier chronological descriptions of these checks as host-backed/resource-notification evidence must be read with this correction. A separately identified qualification candidate is being prepared to discard only the optional path hint while retaining the real host file URI and unchanged production reader/service, so the opaque branch can be exercised without mocked host APIs.
 
-The available computer-use tool refused access to `com.openai.codex` with: `Computer Use is not allowed to use the app 'com.openai.codex' for safety reasons.` No attempt was made to bypass that restriction. The app's dedicated panel tool can open files but does not expose plugin installation/reload, native file-menu extension selection, or host lifecycle controls. The MCP Apps inventory contained no active app panel. The installed Placekeeper tool surface currently exposes `display_review`, the legacy hook-based entry.
+Still pending: independent conversation chooser/cancel, actual sleep beyond the presentation lease, peer-chat mention retrieval and ownership/fork, opaque-resource conditional conflict/read-only export, and the remaining named-group/remount interactions. Automated evidence for these behaviors is not a substitute for the native observations required by the plan.
 
-These observations do not establish that extension APIs are unsupported. They establish that this session cannot autonomously exercise the necessary native-host controls. No installed-host behavior or new package qualification is claimed. The probe was subsequently installed through the supported CLI on 2026-11-04; no host restart or native UI qualification has been performed.
+The available computer-use tool refused access to the native Codex shell. No bypass was attempted. Supported plugin CLI operations and MCP Apps panel inspection work; file/conversation menus, OS sleep and peer-chat composer controls need human assistance. The earlier standalone compatibility probe is historical evidence, not the production reader, and is now being retired.
 
-## Resume prerequisite
+## Active qualification setup
 
-Use an environment with supported access to the native host's plugin development and lifecycle controls, or arrange a human-assisted qualification session. Install/reload the prepared standalone probe through the supported plugin flow and identify the exact active build before testing. Keep the existing installed release intact until a candidate is ready. A generated HTML preview or in-memory transport test cannot substitute for this step.
+Use the existing human-assisted session and the production packaging instructions in `scripts/extension-candidate/README.md`. Keep the installed release intact. Record the exact route and candidate artifact for each test. Fresh file-entry invocation is the supported reopening path; the earlier browser reload experiment is not a qualified recovery mechanism.
 
 ## Required evidence
 
@@ -182,3 +182,11 @@ Closing and reopening offered protected work; Resume completed. Live inspection 
 Appended a harmless PDF comment to the disposable source externally. The native resource notification refreshed the live reader automatically to generation 2/revision 5 and digest 5468d66c6886941add8c2111d9f774d7468a57713d4a6bb9e0c83476880da54b. Both annotation IDs and contents were preserved. This qualifies the clean external-resource refresh path; no save conflict race was induced.
 
 The user removed the current context attachment; the panel changed to Background context is paused for this app. A successful generation-2 navigation left that state paused. Mention opt-in controls were exercised with only the disposable review: global enable appeared in native settings_read, explicit include displayed revision 5 and its capture time, and explicit remove returned the review to excluded. Restored global mentions=false and verified via settings_read. Cross-chat mention lookup itself remains untested.
+
+### Completion work and route correction — 2026-11-04, 23:25 Eastern
+
+The user confirmed the selection action prepared an editable, page-referenced composer draft without sending it. A later native source refresh rejected a generation-1 result with stale-generation at generation 3. The pending replacement draft was retained through local-path source reconciliation and saved as a review annotation; this was not an opaque ETag conflict test.
+
+The trusted-path route was confirmed from the production active panel lacking the Refresh PDF / Save now controls that ExtensionShell adds unconditionally for HostResourceAdapter. The file entrypoint prefers the host-provided trusted path when present. Therefore all preceding production save/refresh observations qualify local persistence only; opaque resource behavior requires a separate native test. No mock API evidence is relabeled as native.
+
+The obsolete compatibility probe was uninstalled through the supported plugin tool, its marketplace was removed through the supported CLI, and its eight source files were removed after checking for surviving code references. Its build identity and 426 allowlisted observations are retained under evidence/extension-probe-2026-11-04. Generated probe files were moved out of the checkout to a temporary archive. Reusable production-candidate packaging remains.
