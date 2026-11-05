@@ -24,6 +24,10 @@ async function osascript(script: string, argument?: string): Promise<string | un
 }
 
 export class MacOsDestinationPicker implements DestinationPicker {
+  openPdf(): Promise<string | undefined> {
+    return osascript('set chosen to choose file with prompt "Open a PDF in Placekeeper" of type {"com.adobe.pdf"}\nreturn POSIX path of chosen');
+  }
+
   chooseFolder(defaultFolder?: string): Promise<string | undefined> {
     return osascript(
       defaultFolder === undefined

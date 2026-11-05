@@ -1,0 +1,22 @@
+import { build } from 'vite';
+import { createHash } from 'node:crypto';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { resolve, join } from 'node:path';
+import { PDFDocument, StandardFonts } from 'pdf-lib';
+const output=resolve('dist/extension-probe'), plugin=join(output,'extension-probe');
+await mkdir(join(output,'.agents','plugins'),{recursive:true});
+await mkdir(join(plugin,'.codex-plugin'),{recursive:true});
+await build({configFile:false,logLevel:'warn',define:{'process.env.NODE_ENV':'"production"'},build:{outDir:plugin,emptyOutDir:false,target:'es2022',lib:{entry:resolve('scripts/extension-probe/app.ts'),name:'ExtensionProbe',formats:['iife'],fileName:()=> 'app.js'},rollupOptions:{output:{inlineDynamicImports:true}}}});
+const script=await readFile(join(plugin,'app.js'),'utf8');
+await writeFile(join(plugin,'probe.html'),`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Placekeeper extension probe</title><style>body{font:15px system-ui;margin:24px;color:var(--color-text-primary,#222);background:var(--color-background-primary,#fff)}button{font:inherit;padding:8px;margin:4px}pre{white-space:pre-wrap;overflow-wrap:anywhere}p{max-width:70ch}</style></head><body><h1>Placekeeper extension probe</h1><p>This is a compatibility test, not the PDF reader. Open the supplied disposable PDF through the file entrypoint to test resource access. No PDF writes or production review access.</p><button id="read">Read PDF again</button><button id="context">Attach test context marker</button><button id="reload">Reload this probe</button><pre id="report" role="status" aria-live="polite">Connecting…</pre><script>${script.replaceAll('</script','<\\/script')}</script></body></html>`);
+await build({configFile:false,logLevel:'warn',ssr:{noExternal:true},build:{outDir:plugin,emptyOutDir:false,target:'node24',minify:false,ssr:resolve('scripts/extension-probe/main.ts'),rollupOptions:{output:{entryFileNames:'server.mjs',inlineDynamicImports:true}}}});
+const json=(path:string,value:unknown)=>writeFile(path,JSON.stringify(value,null,2)+'\n');
+await json(join(output,'.agents','plugins','marketplace.json'),{name:'placekeeper-extension-test',interface:{displayName:'Placekeeper Extension Test'},plugins:[{name:'extension-probe',source:{source:'local',path:'./extension-probe'},policy:{installation:'AVAILABLE',authentication:'ON_INSTALL'},category:'Productivity'}]});
+await json(join(plugin,'.codex-plugin','plugin.json'),{name:'extension-probe',version:'0.0.1',description:'Disposable host compatibility probe for Placekeeper extension entrypoints.',mcpServers:'./.mcp.json',interface:{displayName:'Placekeeper Extension Probe',shortDescription:'Test PDF entrypoints and panel lifecycle.'}});
+await json(join(plugin,'.mcp.json'),{mcpServers:{'placekeeper-extension-probe':{command:process.execPath,args:[join(plugin,'server.mjs')],env:{PLACEKEEPER_PROBE_LOG:join(output,'observations.jsonl')}}}});
+const pdf=await PDFDocument.create();const font=await pdf.embedFont(StandardFonts.Helvetica);
+for(let n=1;n<=2;n++){const page=pdf.addPage();page.drawText(`Placekeeper disposable extension test - page ${n}`,{x:50,y:740,size:18,font});page.drawText('No private information. This fixture may be replaced during testing.',{x:50,y:700,size:12,font});}
+await writeFile(join(output,'disposable-test.pdf'),await pdf.save());
+const digests:Record<string,string>={};for(const file of ['server.mjs','probe.html'])digests[file]=createHash('sha256').update(await readFile(join(plugin,file))).digest('hex');
+await json(join(output,'build.json'),{builtAt:new Date().toISOString(),node:process.version,sdk:'@openai/mcp-extensions@0.2.1',digests});
+console.log(`Marketplace: ${output}\nFixture: ${join(output,'disposable-test.pdf')}\nObservations: ${join(output,'observations.jsonl')}`);

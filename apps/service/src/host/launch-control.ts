@@ -166,6 +166,11 @@ async function dispatch(
       },
     };
   }
+  if (request.kind === "extension-app") {
+    return await host.lifecycle.runActivity(async (): Promise<PlacekeeperControlResponse> => ({
+      kind: "extension-app", response: await host.extensionRuntime.dispatch(request.request),
+    }), { settlement: request.request.action === "app" }) ?? { kind: "error", reason: "unavailable" };
+  }
   if (request.kind === "codex-display" || request.kind === "codex-attest" || request.kind === "codex-app") {
     return await host.lifecycle.runActivity<PlacekeeperControlResponse>(async () => {
       if (request.kind === "codex-display") {

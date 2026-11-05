@@ -1,3 +1,5 @@
+import { ExtensionShell } from "./extension-shell.js";
+import { EXTENSION_META_KEY } from "../../../packages/core/src/extension-protocol.js";
 import { createCodexHostRuntime } from "../../web/src/host/codex-runtime.js";
 import { mountCodexProductionReview } from "../../web/src/codex-entry.js";
 import type { HostRuntimeInvalidation } from "../../web/src/host/runtime.js";
@@ -10,10 +12,17 @@ import { codexPickerTimeouts, NativeOperationError, parseCodexDisplayReceipt, pa
 import { APP_TOOL, PENDING_META_KEY, QUALIFICATION_META_KEY } from "./transport-contract.js";
 import { ResourceAllocationError } from "./resources.js";
 import { deniedFailure, diagnosticFailure, LifecycleDiagnostics, NativeDiagnosticError, verifiedAppReply } from "./lifecycle-diagnostics.js";
+import { PanelLiveness, type PanelConnectionState } from "./panel-liveness.js";
 
 const app = new App({ name: "Placekeeper", version: "1.0.0" });
 const status = document.querySelector<HTMLElement>("#status")!;
 const detail = document.querySelector<HTMLElement>("#detail")!;
+const reviewRoot = document.querySelector<HTMLElement>("#root")!;
+const extensionControls = document.createElement("div");
+detail.after(extensionControls);
+const extensionShell = new ExtensionShell(app, reviewRoot, status, extensionControls);
+status.setAttribute("role", "status");
+status.setAttribute("aria-live", "polite");
 let traceStorage: Storage | undefined;
 try { traceStorage = window.sessionStorage; } catch { /* Sandboxed hosts may disable storage. */ }
 const qualificationControls = new ShellQualificationControls();
@@ -37,8 +46,11 @@ const runtimeInvalidations = new Set<(event: HostRuntimeInvalidation) => void>()
 let pending: CodexPendingPresentation | undefined;
 let active: Extract<CodexAppResponse, { status: "active" }> | undefined;
 let timer: ReturnType<typeof setTimeout> | undefined;
-let renewal: ReturnType<typeof setTimeout> | undefined;
+let liveness: PanelLiveness | undefined;
+let connectionState: PanelConnectionState = "connected";
 let lastRenewal = "never";
+let connectionEpoch = 0;
+const verifiedProbes = new Set<string>();
 function stop(preserveRetirement = false) {
   if (!preserveRetirement) { oldAttempt.clear(); admissionOldGrant = undefined; }
   else { retiredOwnInvocation = true; pending = undefined; admissionOldGrant = undefined; }
@@ -49,20 +61,35 @@ function stop(preserveRetirement = false) {
   incarnation++; active = undefined;
   unmountProduction?.(); unmountProduction = undefined; runtimeInvalidations.clear();
   if (timer !== undefined) clearTimeout(timer);
-  if (renewal !== undefined) clearTimeout(renewal);
+  liveness?.stop(); liveness = undefined;
+  reviewRoot.inert = true;
+  reviewRoot.dataset.connectionState = "ended";
   productionSessionId = undefined; detail.textContent = "";
 }
 function display(text: string) { status.textContent = text; status.hidden = text.length === 0; }
+function setConnectionState(state: PanelConnectionState) {
+  if (state === "reconnecting" && connectionState === "connected") { connectionEpoch++; verifiedProbes.clear(); }
+  connectionState = state;
+  reviewRoot.inert = state !== "connected";
+  reviewRoot.dataset.connectionState = state;
+  reviewRoot.setAttribute("aria-busy", String(state !== "connected"));
+  display(state === "connected" ? "" : "Reconnecting to Placekeeper… The displayed review may be out of date. Editing is paused until the connection is verified.");
+}
 async function call(request: CodexAppRequest, attempt: number): Promise<CodexAppResponse> {
   let result;
   try {
     const picker = codexPickerTimeouts(request);
+    const livenessProbe = request.authority === "presentation" && (request.method === "renew" || request.method === "watermark");
     result = await app.callServerTool({ name: APP_TOOL, arguments: { request } },
-      picker === undefined ? undefined : { timeout: picker.sdkMs, maxTotalTimeout: picker.sdkMs });
+      picker !== undefined ? { timeout: picker.sdkMs, maxTotalTimeout: picker.sdkMs }
+        : livenessProbe || request.authority === "continuation" ? { timeout: 8_000, maxTotalTimeout: 8_000 } : undefined);
   }
   catch { throw new NativeDiagnosticError("transport"); }
-  if (attempt !== incarnation) throw new NativeDiagnosticError("stale-reply");
   const response = verifiedAppReply(result);
+  if (attempt !== incarnation) {
+    if (request.authority === "continuation" && response.status === "active") void retirePresentation(response);
+    throw new NativeDiagnosticError("stale-reply");
+  }
   if (response.status !== "denied" && response.status !== "operation-error") armQualificationControl(result._meta?.[QUALIFICATION_CONTROLS_META_KEY]);
   if (response.status === "active") admissionOldGrant = result._meta?.[OLD_ATTEMPT_META_KEY];
   else if (request.authority === "presentation" && request.method === "renew" && response.status === "ok") armOldAttempt(result._meta?.[OLD_ATTEMPT_META_KEY]);
@@ -83,28 +110,43 @@ function presentationEnvelope(method: PresentationRequest["method"], value: unkn
 }
 function staleGenerationReply(): Error { const error = new Error("Obsolete native generation reply"); error.name = "AbortError"; return error; }
 async function payload(method: PresentationRequest["method"], value: unknown = {}, attempt = incarnation): Promise<unknown> {
+  if (attempt !== incarnation || active === undefined) throw new NativeDiagnosticError("stale-reply");
+  const probe = method === "renew" || method === "watermark";
+  if (!probe && connectionState !== "connected") throw new NativeDiagnosticError("transport");
+  const epoch = connectionEpoch;
   const request = presentationEnvelope(method, value);
   let response: CodexAppResponse;
   try { response = await call(request, attempt); }
   catch (error) {
     if (attempt === incarnation && active !== undefined && (request.generation !== active.generation || request.capability !== active.presentationCapability)) throw staleGenerationReply();
+    if (attempt === incarnation && diagnosticFailure(error) === "transport") {
+      setConnectionState("reconnecting"); if (!probe) liveness?.wake();
+    }
     throw error;
   }
   if (active !== undefined && (request.generation !== active.generation || request.capability !== active.presentationCapability)) throw staleGenerationReply();
-  if (response.status === "denied") throw deniedFailure(response.reason);
+  if (response.status === "denied") {
+    if (attempt === incarnation) { setConnectionState("reconnecting"); if (!probe) liveness?.wake(); }
+    throw deniedFailure(response.reason);
+  }
   if (response.status === "operation-error") throw new NativeOperationError();
   if (response.status !== "ok") throw new Error(`Native request ${response.status}`);
+  if (probe && epoch === connectionEpoch) {
+    verifiedProbes.add(method);
+    if (verifiedProbes.has("renew") && verifiedProbes.has("watermark")) setConnectionState("connected");
+  }
   if (method === "bootstrap" && typeof response.payload === "object" && response.payload !== null) productionSessionId = (response.payload as { sessionId: string }).sessionId;
   return response.payload;
 }
 /** Runs regardless of visibility. Actual hidden-panel delivery is an installed-host gate. */
 async function renew(attempt: number) {
-  try { await payload("renew", {}, attempt); if (attempt !== incarnation) return; lastRenewal = new Date().toISOString(); document.querySelector<HTMLElement>("#renewal")!.textContent = `Last authenticated panel renewal: ${lastRenewal}`; recordDiagnostic("renewed"); }
-  catch (error) { if (attempt === incarnation && error instanceof Error && error.name === "AbortError") { renewal = setTimeout(() => void renew(attempt), 5_000); return; } if (attempt === incarnation) { recordDiagnostic("failed", { failure: diagnosticFailure(error) }); stop(); display("Reconnect: the native connection ended. Accepted work remains recoverable. Ask this chat to reconnect Placekeeper using a fresh native launch."); } return; }
-  if (attempt === incarnation) renewal = setTimeout(() => void renew(attempt), 5_000);
+  await payload("renew", {}, attempt);
+  if (attempt !== incarnation) return;
+  lastRenewal = new Date().toISOString();
+  document.querySelector<HTMLElement>("#renewal")!.textContent = `Last authenticated panel renewal: ${lastRenewal}`;
+  recordDiagnostic("renewed");
 }
 async function poll(attempt: number, previous?: number) {
-  try {
     const response = await payload("watermark", {}, attempt) as { watermark: number; sessionId?: string; documentGeneration: number; reviewRevision: number; presentation?: Extract<CodexAppResponse, { status: "active" }> };
     if (response.sessionId !== undefined) {
       if (productionSessionId !== undefined && productionSessionId !== response.sessionId) throw new NativeDiagnosticError("incarnation-mismatch");
@@ -120,8 +162,7 @@ async function poll(attempt: number, previous?: number) {
       const event: HostRuntimeInvalidation = { sessionId: productionSessionId, generation: response.documentGeneration, revision: response.reviewRevision, reason: response.documentGeneration === previousGeneration ? "freshness" : "generation" };
       for (const listener of runtimeInvalidations) listener(event);
     }
-    if (attempt === incarnation) timer = setTimeout(() => void poll(attempt, response.watermark), document.hidden ? 5_000 : 1_000);
-  } catch (error) { if (attempt === incarnation && error instanceof Error && error.name === "AbortError") { timer = setTimeout(() => void poll(attempt, previous), 1_000); return; } if (attempt === incarnation) { recordDiagnostic("failed", { failure: diagnosticFailure(error) }); stop(); display(error instanceof ResourceAllocationError ? "The host could not allocate memory for this document. Close other panels and reopen the PDF; accepted work remains recoverable." : "Reconnect: current review cannot be verified. Accepted work remains recoverable. Ask this chat to reconnect Placekeeper using a fresh native launch."); } }
+    return response.watermark;
 }
 async function admit(attempt: number, method: PendingRequest["method"] = "ready") {
   try {
@@ -132,18 +173,63 @@ async function admit(attempt: number, method: PendingRequest["method"] = "ready"
   if (response.status === "operation-error") throw new NativeOperationError();
     if (response.status !== "active") throw new NativeDiagnosticError("unexpected-status");
     if (response.runtimeId !== pending?.runtimeId || response.attemptId !== pending.attemptId || response.generation !== pending.generation) throw new NativeDiagnosticError("incarnation-mismatch");
-    active = response; armOldAttempt(admissionOldGrant); admissionOldGrant = undefined; recordDiagnostic("active");
+    mountPresentation(response, attempt);
+  } catch (error) { if (attempt === incarnation) { recordDiagnostic("failed", { failure: diagnosticFailure(error) }); stop(); display("Reconnect: this invocation can no longer establish a native connection. Accepted work remains recoverable. Ask this chat to reconnect Placekeeper using a fresh native launch. If a fresh launch also fails, check the matching plugin hooks and MCP server."); } }
+}
+function mountPresentation(response: Extract<CodexAppResponse, { status: "active" }>, attempt: number) {
+    active = response;
+    unmountProduction?.(); unmountProduction = undefined; runtimeInvalidations.clear();
+    verifiedProbes.clear(); armOldAttempt(admissionOldGrant); admissionOldGrant = undefined; recordDiagnostic("active");
     const runtime = createCodexHostRuntime({ runtimeId: active.runtimeId,
       call: (method, value) => payload(method, value, attempt),
       subscribeInvalidations(listener) { runtimeInvalidations.add(listener); return () => runtimeInvalidations.delete(listener); },
     });
-    unmountProduction = mountCodexProductionReview(document.querySelector<HTMLElement>("#root")!, runtime, (error) => {
+    setConnectionState("connected");
+    unmountProduction = mountCodexProductionReview(reviewRoot, runtime, (error) => {
       if (attempt !== incarnation) return;
       display(error instanceof ResourceAllocationError ? "The host could not allocate memory for this document. Close other panels and reopen the PDF; accepted work remains recoverable." : "The PDF could not be loaded. Retry opening this review through a fresh native launch; accepted work remains recoverable.");
-    }, () => { if (attempt === incarnation) { recordDiagnostic("verified"); display(""); } });
-    display("Placekeeper review connected."); void renew(attempt); void poll(attempt);
-  } catch (error) { if (attempt === incarnation) { recordDiagnostic("failed", { failure: diagnosticFailure(error) }); stop(); display("Reconnect: this invocation can no longer establish a native connection. Accepted work remains recoverable. Ask this chat to reconnect Placekeeper using a fresh native launch. If a fresh launch also fails, check the matching plugin hooks and MCP server."); } }
+    }, () => { if (attempt === incarnation) { recordDiagnostic("verified"); if (connectionState === "connected") display(""); } });
+    let watermark: number | undefined;
+    liveness = new PanelLiveness({
+      renew: () => renew(attempt),
+      poll: async () => { watermark = await poll(attempt, watermark); },
+      pollInterval: () => document.hidden ? 5_000 : 1_000,
+      onState(state) { if (attempt === incarnation) setConnectionState(state); },
+      onTerminal(error) {
+        if (attempt !== incarnation) return;
+        recordDiagnostic("failed", { failure: diagnosticFailure(error) });
+        void resumePresentation();
+      },
+    });
+    display("Placekeeper review connected."); liveness.start();
 }
+
+async function retirePresentation(presentation: Extract<CodexAppResponse, { status: "active" }>) {
+  await app.callServerTool({ name: APP_TOOL, arguments: { request: { ...envelopeIdentity(presentation), authority: "presentation", method: "detach", payload: {}, capability: presentation.presentationCapability } } }, { timeout: 8_000, maxTotalTimeout: 8_000 }).catch(() => undefined);
+}
+
+async function resumePresentation() {
+  const previous = active;
+  if (previous?.continuationCapability === undefined) { stop(); display("Reconnect: reopen Placekeeper in this chat. Accepted work remains recoverable."); return; }
+  const attempt = ++incarnation;
+  liveness?.stop(); liveness = undefined;
+  setConnectionState("reconnecting");
+  const request: CodexAppRequest = { ...envelopeIdentity(previous), authority: "continuation", method: "resume", payload: {}, capability: previous.continuationCapability };
+  const retry = async (remaining: number): Promise<void> => {
+    try {
+      const response = await call(request, attempt);
+      if (response.status !== "active") throw new NativeDiagnosticError("unexpected-status");
+      if (response.runtimeId === previous.runtimeId || response.attemptId === previous.attemptId) throw new NativeDiagnosticError("incarnation-mismatch");
+      mountPresentation(response, attempt);
+    } catch (error) {
+      if (attempt !== incarnation) return;
+      if (diagnosticFailure(error) === "transport" && remaining > 0) { timer = setTimeout(() => { void retry(remaining - 1); }, 1_000); return; }
+      stop(); display("Reconnect: reopen Placekeeper in this chat. Accepted work remains recoverable.");
+    }
+  };
+  await retry(2);
+}
+
 function ownQualificationTarget() {
   const correlation = diagnostics.snapshot().qualification;
   return pending === undefined || correlation === undefined ? undefined : { runId: correlation.runId, invocationNonce: correlation.invocationNonce, runtimeId: pending.runtimeId, attemptId: pending.attemptId };
@@ -196,6 +282,8 @@ function renderOldAttemptButton() {
   };
 }
 app.ontoolresult = (result) => {
+  if (result._meta?.[EXTENSION_META_KEY] !== undefined) { void extensionShell.receive(result._meta[EXTENSION_META_KEY]); return; }
+  if (extensionShell.ownsPanel) return;
   if (retiredOwnInvocation) {
     oldAttempt.clear("unsupported");
     display("Qualification unsupported: the host reused the retired shell for another invocation. Its old authority was discarded; reopen through a fresh owning shell.");
@@ -207,8 +295,10 @@ app.ontoolresult = (result) => {
   diagnostics.observeInvocation(result._meta?.[QUALIFICATION_META_KEY]);
   pending = next; recordDiagnostic("invocation"); const attempt = ++incarnation; void admit(attempt);
 };
-app.onteardown = async () => { oldAttempt.clear("unsupported"); recordDiagnostic("teardown"); const previous = active, attempt = incarnation; if (previous !== undefined) await payload("detach", {}, attempt).catch(() => undefined); stop(); return {}; };
+app.onteardown = async () => { if (extensionShell.ownsPanel) { await extensionShell.teardown(); return {}; } oldAttempt.clear("unsupported"); recordDiagnostic("teardown"); const previous = active; stop(); if (previous !== undefined) await retirePresentation(previous); return {}; };
 app.onhostcontextchanged = (context) => { if (context.displayMode !== undefined) { recordDiagnostic("mode-confirmed", { mode: context.displayMode }); } };
-app.onclose = () => { oldAttempt.clear("unsupported"); stop(); display("Reconnect: the original native bridge disconnected. The old-attempt probe is unsupported; accepted work remains recoverable."); };
+app.onclose = () => { if (extensionShell.ownsPanel) { extensionShell.disconnected(); return; } oldAttempt.clear("unsupported"); stop(); display("Reconnect: the original native bridge disconnected. The old-attempt probe is unsupported; accepted work remains recoverable."); };
 app.onerror = () => { if (!["armed", "retiring", "retired", "probing"].includes(oldAttempt.snapshot()?.phase ?? "")) return; oldAttempt.clear("unsupported"); stop(); display("Reconnect: the native bridge cannot be verified. The old-attempt probe is unsupported; accepted work remains recoverable."); };
+window.addEventListener("online", () => { extensionShell.wake(); liveness?.wake(); });
+document.addEventListener("visibilitychange", () => { if (!document.hidden) { extensionShell.wake(); liveness?.wake(); } });
 void app.connect().then(() => { recordDiagnostic("connected"); }).catch(() => { oldAttempt.clear("unsupported"); recordDiagnostic("failed", { failure: "transport" }); display("This host cannot connect the Placekeeper native app. Enable the plugin, reload Codex, and reopen the PDF."); });

@@ -23,7 +23,7 @@ const interactionActions: Partial<Record<ReviewRuntimeBrokerMethod, Parameters<L
 
 export interface CodexActiveScope {
   readonly sessionId: string;
-  readonly taskSessionId: string;
+  readonly taskSessionId?: string;
   readonly runtimeId: string;
   readonly attemptId: string;
   readonly generation: number;
@@ -194,6 +194,7 @@ export class CodexServiceRuntimeBackend {
     const value = await this.#broker.sessionScope(scope.sessionId);
     const state = this.#broker.state(scope.sessionId);
     if (!current() || state?.workflow.documentGeneration !== scope.generation) throw new Error("presentation-unavailable");
+    if (scope.taskSessionId === undefined) return { ...value as object, launchSurface: "codex" };
     const binding = this.#broker.taskBindings.bindingForTask(scope.taskSessionId);
     let codexContext: LiveContextBindingStatus = { status: "unavailable", reason: "unbound" };
     if (binding?.reviewSessionId === scope.sessionId && binding.documentGeneration === scope.generation &&

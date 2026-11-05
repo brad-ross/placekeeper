@@ -158,6 +158,10 @@ export type CodexAppRequest = AppEnvelope & ({
   readonly method: ReviewRuntimeMethod | "resource" | "watermark" | "renew" | "createLink";
   readonly payload: unknown;
 } | {
+  readonly authority: "continuation";
+  readonly method: "resume";
+  readonly payload: Record<string, never>;
+} | {
   readonly authority: "reconnect";
   readonly method: "reconnect";
   readonly payload: Record<string, never>;
@@ -187,6 +191,8 @@ export function parseCodexAppRequest(value: unknown): CodexAppRequest | undefine
       value.method === "status") &&
     Object.keys(value.payload).length === 0)
     return { ...envelope, authority: "pending", method: value.method, payload: {} };
+  if (value.authority === "continuation" && value.method === "resume" && Object.keys(value.payload).length === 0)
+    return { ...envelope, authority: "continuation", method: "resume", payload: {} };
   if (value.authority === "reconnect" &&
     value.method === "reconnect" &&
     Object.keys(value.payload).length === 0)
@@ -259,6 +265,7 @@ export type CodexAppResponse = {
   readonly status: "active";
   readonly presentationCapability: string;
   readonly reconnectTicket: string;
+  readonly continuationCapability?: string;
   readonly runtimeId: string;
   readonly attemptId: string;
   readonly generation: number;
@@ -344,9 +351,10 @@ export function parseCodexAppResponse(value: unknown): CodexAppResponse | undefi
       reason: value.reason as CodexAdmissionFailure
     };
   if (value.status === "active" &&
-    closed(value, ["status", "presentationCapability", "reconnectTicket", "runtimeId", "attemptId", "generation"]) &&
+    closed(value, ["status", "presentationCapability", "reconnectTicket", "continuationCapability", "runtimeId", "attemptId", "generation"]) &&
     isCodexCapability(value.presentationCapability) &&
     isCodexCapability(value.reconnectTicket) &&
+    (value.continuationCapability === undefined || isCodexCapability(value.continuationCapability)) &&
     id(value.runtimeId) &&
     id(value.attemptId) &&
     generation(value.generation))
@@ -354,6 +362,7 @@ export function parseCodexAppResponse(value: unknown): CodexAppResponse | undefi
       status: "active",
       presentationCapability: value.presentationCapability,
       reconnectTicket: value.reconnectTicket,
+      ...(value.continuationCapability === undefined ? {} : { continuationCapability: value.continuationCapability }),
       runtimeId: value.runtimeId,
       attemptId: value.attemptId,
       generation: value.generation
