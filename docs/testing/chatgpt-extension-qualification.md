@@ -2,11 +2,11 @@
 
 ## Current result
 
-Native-host qualification is **awaiting human-assisted host actions**, not passed (updated 2026-11-04).
+Production extension native-host qualification is **awaiting candidate installation and host actions**, not passed (updated 2026-11-04). The compatibility probe has bounded native evidence recorded below; it does not qualify the production reader.
 
 A standalone candidate is built at `dist/extension-probe`, with instructions in `scripts/extension-probe/README.md`. Local verification passed: three SDK transport/packaged-startup tests; scoped TypeScript checking; simulated-host Chromium checks for PDF resource reading, explicit context attachment, and 375/1440px layouts. The fixture is `dist/extension-probe/disposable-test.pdf`. These checks do not establish real host behavior.
 
-The reviewed implementation plan is `docs/plans/2026-11-02-feat-chatgpt-extension-experience-plan.md`. Its first implementation gate requires actual host evidence before dependent admission and recovery changes.
+The reviewed implementation plan is `docs/plans/2026-11-02-feat-chatgpt-extension-experience-plan.md`. Subsequent production implementation covers direct entry, admission and reconnect, host resources, background context, live reader tools, editable drafts, sharing preferences and explicit mention snapshots. Those features require qualification against their exact production candidate.
 
 The available computer-use tool refused access to `com.openai.codex` with: `Computer Use is not allowed to use the app 'com.openai.codex' for safety reasons.` No attempt was made to bypass that restriction. The app's dedicated panel tool can open files but does not expose plugin installation/reload, native file-menu extension selection, or host lifecycle controls. The MCP Apps inventory contained no active app panel. The installed Placekeeper tool surface currently exposes `display_review`, the legacy hook-based entry.
 
@@ -35,7 +35,7 @@ Automatic recovery cannot be claimed until continuation delivery and incarnation
 
 ## Local work state
 
-The implementation edits that preceded planning remain uncommitted and unverified. They are inventoried in the plan and must be reassessed before inclusion. The planning pass added documentation only. The subsequent qualification preparation added the isolated probe under `scripts/extension-probe/` and ran the local checks above; it did not resume the production feature changes. No production feature completion or release is asserted.
+The initial preparation used the isolated probe under `scripts/extension-probe/`. Production feature implementation followed the probe observations. Automated service, reader, shell and preference checks are distinct from actual host checks. No production release or complete native-host qualification is asserted.
 
 ## Installed candidate — 2026-11-04
 
@@ -75,3 +75,46 @@ After the user confirmed collapsing the panel, the MCP Apps tab remained discove
 ### Collapse-to-tool expansion confirmed
 
 The user confirmed that the panel automatically expanded during the 23:44:53Z live inspection call. The log records hidden:true before the call, tool-invoked, and hidden:false afterward; the tool returned the original mount ID. On this tested host, a tool call discovered from the collapsed panel restores its visible presentation without a new invocation. This qualifies the probe's collapse-to-inspect workflow, not production search/scroll completion or arbitrary unmount recovery. No further manual expansion is needed.
+
+## Production reader qualification preparation
+
+The focused browser suite is `test/acceptance/chatgpt-extension.spec.ts`, registered in the native and Chromium CI suites. It instantiates the actual `ExtensionShell`, canonical production reader, PDF search/navigation and service review backend. The host entry grant, preferences, model-context, mention-catalogue and draft-message APIs are simulated at the boundary. Each evidence attachment explicitly reports `actualHost: false`.
+
+The suite checks preference loading before reader/context publication; accepted annotation identities; exact search and result reveal; stale generation rejection; editable annotation discussion draft with `send: false`; partial context removal followed by another publication; explicit mention include/update/remove controls; compact-to-fullscreen tool navigation; real pointer selection into a captured discussion draft without annotation mutation; external sharing-off while publication is pending; and desktop/narrow screenshots with sharing and discussion controls open. Browser tests do not establish native composer delivery, host resource conditional writes, or native settings event ordering. Existing service/shell and lifecycle tests provide separate coverage for save/conflict/recovery and preference races.
+
+Local browser evidence on 2026-11-04: all five cases passed in the final combined authoritative run (11.8 seconds). The initial failures identified fixture defects: missing production frame CSS/cascade ordering and an omitted daemon installer poll endpoint retired the simulated panel. The harness now preserves the built production HTML frame and models only the installer coordinator's idle response. The pointer-selection check waits for the requested zoom's real page geometry. No production feature source change was needed. Both 1440px and 375px screenshots were inspected: sharing controls and discussion chooser are readable, remain within the viewport, and do not overlap each other. Actual-host checks remain separate evidence.
+
+The narrow open-chooser screenshot covers this short fixture's text with the discussion palette. A follow-up 375px check passed (4.0 seconds), verifying nonwhite ink in the decoded page raster, waiting through animation-frame paint boundaries, and capturing both open-chooser and closed-chooser views. The closed-chooser screenshot visibly contains the PDF text and imported highlights. The white area in the earlier screenshot was the remainder of the short PDF beneath its open palette, not a blank raster.
+
+Run the focused suite after building the current artifacts:
+
+```sh
+PLACEKEEPER_BROWSER_TEST_PORT=4179 pnpm exec playwright test --config scripts/testing/config/playwright.config.ts test/acceptance/chatgpt-extension.spec.ts
+```
+
+Production artifact preparation is in `scripts/extension-candidate/build.ts`, with instructions in `scripts/extension-candidate/README.md`. It copies the built MCP server/reader, service and web assets, creates a distinct local development marketplace and plugin, copies a disposable fixture, and records SHA256 file and bundle digests. The generated daemon launcher uses development identity, isolated recovery/control storage, and port 48763. It does not launch, install or replace an installed plugin during packaging.
+
+### Candidate identity and evidence to complete
+
+| Field | Production candidate evidence |
+|---|---|
+| Marketplace | `placekeeper-extension-candidate-test` |
+| Plugin / MCP server | `placekeeper-extension-candidate` |
+| Source artifact | `dist/extension-candidate/build.json` |
+| Build timestamp / revision / modified status | Record from build metadata after canonical builds |
+| Bundle / server / reader / service SHA256 | Record from build metadata and verify installed registration points to that candidate |
+| Host / OS / SDK version | Record from actual opened host and pinned lockfile |
+| Focused browser result and screenshot inspection | Final combined run: five passed in 11.8 seconds; 1440px/375px screenshots inspected |
+| Native production reader result | Pending installation, fresh invocation and host checks |
+
+### Remaining actual-host checklist
+
+- Open only a disposable fixture through the native PDF file-menu entry; verify the production candidate identity and readable PDF. Open the conversation entry independently and verify current-review/chooser/cancel behavior.
+- Confirm private activation and explicit fresh reopen. Exercise reconnect with protected annotation/draft identities, and verify old authority cannot mutate after continuation. Do not use browser-page reload as a recovery shortcut.
+- Inspect and search the accepted live PDF; reveal an exact search result, navigate to a page, and repeat from a user-collapsed panel. Record visible completion, not merely a successful tool response.
+- Select text and prepare a discussion draft; choose a subset of annotations and prepare another. Verify editable native composer text, chosen evidence and no automatic send.
+- Remove one context group, then change page/selection and verify it remains absent; remove all groups and verify background sharing stays paused until explicitly resumed.
+- Change global sharing settings through native controls while publication is pending; verify off remains effective. Enable mention snapshots, explicitly include/update/remove one review and inspect the captured revision from another chat.
+- Exercise resource notification refresh, read-only export, conditional save, conflict and protected recovery using disposable copies only. Verify source bytes and accepted item identities at each boundary.
+- Inspect desktop and narrow layouts for horizontal overflow, clipped controls, discussion-palette overlap and keyboard access in the actual host.
+- Recheck the existing trusted local-PDF workflow, then stop the isolated daemon and remove the candidate through the supported plugin flow after retaining evidence.

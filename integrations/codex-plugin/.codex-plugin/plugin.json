@@ -1,15 +1,15 @@
 {
   "name": "codex-plugin",
   "version": "0.2.0",
-  "description": "Open a local PDF in Placekeeper and keep its content and annotations current in the hosting Codex task.",
+  "description": "Open PDFs directly from file actions or the conversation, review and search them in Placekeeper, and control the context shared with chat.",
   "author": {
     "name": "Placekeeper"
   },
   "skills": "./skills/",
   "interface": {
     "displayName": "Placekeeper",
-    "shortDescription": "Review a local PDF with live task context.",
-    "longDescription": "Launches one explicitly referenced local PDF in the native Codex panel and uses trusted lifecycle hooks to provide task-scoped PDF and annotation context on every prompt.",
+    "shortDescription": "Review PDFs, search, and discuss chosen evidence.",
+    "longDescription": "Open a PDF from its file action or open the current review or chooser from the conversation. Search and navigate the live reader, prepare editable discussion drafts from selected text or chosen annotations, and manage background context and explicitly included mention snapshots. Supported hosts provide direct extension entrypoints; trusted lifecycle hooks remain available for existing local-PDF workflows.",
     "developerName": "Placekeeper",
     "category": "Productivity",
     "capabilities": [],
