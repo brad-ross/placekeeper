@@ -234,7 +234,9 @@ test.describe('shared viewer foundation', () => {
     await expect(pdfPage).toHaveAttribute('data-pointerdown-target', 'page');
     await expect(pdfPage).toHaveAttribute('data-pointerup-target', 'page');
     await expect.poll(() => page.evaluate(() => window.viewerAcceptance.selectionRectCount())).toBeGreaterThan(0);
-    const visibleSelection = pdfPage.locator(':scope > div[style*="mix-blend-mode"]');
+    // The permanent rotation/blend wrapper remains after clearing selection.
+    // Assert the plugin's transient painted selection inside that wrapper.
+    const visibleSelection = pdfPage.locator(':scope > div[style*="mix-blend-mode"] > div[style*="isolation: isolate"]');
     await expect(visibleSelection).toBeVisible();
     await expect(visibleSelection).toHaveCSS('pointer-events', 'none');
     await expect

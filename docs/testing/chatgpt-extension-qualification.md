@@ -94,6 +94,10 @@ PLACEKEEPER_BROWSER_TEST_PORT=4179 pnpm exec playwright test --config scripts/te
 
 Production artifact preparation is in `scripts/extension-candidate/build.ts`, with instructions in `scripts/extension-candidate/README.md`. It copies the built MCP server/reader, service and web assets, creates a distinct local development marketplace and plugin, copies a disposable fixture, and records SHA256 file and bundle digests. The generated daemon launcher uses development identity, isolated recovery/control storage, and port 48763. It does not launch, install or replace an installed plugin during packaging.
 
+The production candidate packaged successfully after the canonical builds at revision `0e96aca1`. Packaging checks the asset-only production web layout rather than requiring an `index.html`, and the generated launcher sets the native engine's WASM path to the copied web asset. A direct isolated daemon smoke check passed: management identity was `development`; all six web assets were served on port 48763 with SHA256 matching `build.json`; extension open/activate/bootstrap of the disposable PDF returned generation 1 and two imported annotations; worker and WASM resource descriptors matched the copied assets. The grant was revoked and shutdown-if-idle was accepted; the daemon exited successfully. This is direct service/control/HTTP evidence, with no native host or installed-plugin claim. The isolated recovery root retains this disposable smoke review.
+
+The tested bundle SHA256 is `cbe66248ab63712021e6ae05f02dac0f92bec2d3fa5e5a85c0e5507544dffd7e`; individual file digests and build timestamp are in `dist/extension-candidate/build.json`. Repackaging changes the artifact identity; record any later bundle separately.
+
 ### Candidate identity and evidence to complete
 
 | Field | Production candidate evidence |
@@ -118,3 +122,9 @@ Production artifact preparation is in `scripts/extension-candidate/build.ts`, wi
 - Exercise resource notification refresh, read-only export, conditional save, conflict and protected recovery using disposable copies only. Verify source bytes and accepted item identities at each boundary.
 - Inspect desktop and narrow layouts for horizontal overflow, clipped controls, discussion-palette overlap and keyboard access in the actual host.
 - Recheck the existing trusted local-PDF workflow, then stop the isolated daemon and remove the candidate through the supported plugin flow after retaining evidence.
+
+### Combined local verification — 2026-11-04
+
+After the bounded host-save range-read cleanup, the combined service, security, web, PDF viewer, save/export, source rebuild, host integration, source release, native and review unit suites passed: 107 distinct files, 1,807 tests. Production service, web and MCP client/server builds and full TypeScript checking passed.
+
+The combined browser run covered 154 tests: 150 initially passed. The four failures were resolved and passed together in a focused authoritative rerun (22.8 seconds): the resource lifecycle check now waits for the current image across replacement during decoding; the plugin description retains its legacy per-prompt context guarantee; the VS Code build asset-copy step supplied the missing generated distribution; and the viewer selection check targets transient selection paint rather than the permanent rotation wrapper introduced before this branch. No production reader change was needed for these failures. This evidence remains browser/service evidence, not installed-host qualification.

@@ -11,7 +11,11 @@ const runtime = join(plugin, 'runtime');
 const daemonRoot = join('/private/tmp', `pk-extension-${createHash('sha256').update(output).digest('hex').slice(0, 12)}`);
 const port = 48763;
 const json = (path: string, value: unknown) => writeFile(path, JSON.stringify(value, null, 2) + '\n');
-for (const file of ['dist/service/main.js', 'dist/codex-mcp/server.js', 'dist/codex-mcp/review-v1.html', 'dist/web/index.html']) await readFile(file);
+// Production serves its HTML from the service; the web build contains assets only.
+// The native reader uses the Codex worker/WASM, while service routes use app/CSS and the browser worker.
+for (const file of ['dist/service/main.js', 'dist/codex-mcp/server.js', 'dist/codex-mcp/review-v1.html',
+  'dist/web/asset-manifest.json', 'dist/web/app.js', 'dist/web/app.css',
+  'dist/web/pdfium.wasm', 'dist/web/pdfium-worker.js', 'dist/web/pdfium-codex-worker.js']) await readFile(file);
 await mkdir(join(output, '.agents/plugins'), { recursive: true });
 await mkdir(join(plugin, '.codex-plugin'), { recursive: true });
 await rm(runtime, { recursive: true, force: true });
@@ -21,7 +25,7 @@ for (const tree of ['service', 'codex-mcp', 'web']) {
   await cp(resolve('dist', tree), join(runtime, tree), { recursive: true, force: true });
 }
 await json(join(runtime, 'package.json'), { type: 'module', private: true });
-const env = { PLACEKEEPER_DAEMON_IDENTITY: 'development', PLACEKEEPER_MAC_DEVELOPMENT_ROOT: daemonRoot, PLACEKEEPER_MAC_DEVELOPMENT_HTTP_PORT: String(port) };
+const env = { PLACEKEEPER_DAEMON_IDENTITY: 'development', PLACEKEEPER_MAC_DEVELOPMENT_ROOT: daemonRoot, PLACEKEEPER_MAC_DEVELOPMENT_HTTP_PORT: String(port), PLACEKEEPER_PDFIUM_WASM: join(runtime, 'web/pdfium.wasm') };
 await json(join(plugin, '.mcp.json'), { mcpServers: { 'placekeeper-extension-candidate': { command: process.execPath, args: [join(runtime, 'codex-mcp/server.js')], env } } });
 await json(join(plugin, '.codex-plugin/plugin.json'), { name: 'placekeeper-extension-candidate', version: '0.0.1', description: 'Isolated production Placekeeper PDF extension candidate for development qualification.', mcpServers: './.mcp.json', interface: { displayName: 'Placekeeper Extension Candidate', shortDescription: 'Test the production PDF reader with isolated review storage.' } });
 await json(join(output, '.agents/plugins/marketplace.json'), { name: 'placekeeper-extension-candidate-test', interface: { displayName: 'Placekeeper Extension Candidate Test' }, plugins: [{ name: 'placekeeper-extension-candidate', source: { source: 'local', path: './placekeeper-extension-candidate' }, policy: { installation: 'AVAILABLE', authentication: 'ON_INSTALL' }, category: 'Productivity' }] });
