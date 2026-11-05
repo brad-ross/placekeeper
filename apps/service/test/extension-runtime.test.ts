@@ -270,6 +270,23 @@ describe("app-owned extension presentations", () => {
     const stateB = payload(await f.manager.handle(request(b.presentation, "watermark")));
     expect(stateB.sessionId).not.toBe(stateA.sessionId);
   });
+  it("rejects a delayed recovery choice without reopening its source or allocating authority", async () => {
+    const f = await fixture();
+    await opened(f.manager, { pdfPath: f.pdfPath });
+    const busy = await f.manager.open({ pdfPath: f.pdfPath });
+    if (busy.status !== "busy") throw Error("Expected busy");
+    const reopen = vi.spyOn(f.broker, "openReview");
+    f.advance(95_000);
+    expect(await f.manager.choose({ action: "choose", recoveryToken: busy.recoveryToken, choice: "fork", operationId: randomUUID() })).toEqual({ status: "unavailable" });
+    expect(reopen).not.toHaveBeenCalled();
+    expect(f.manager.activityCount()).toBe(0);
+    const fresh = await f.manager.open({ pdfPath: f.pdfPath });
+    expect(fresh.status).toBe("busy");
+    if (fresh.status !== "busy") throw Error("Expected fresh choice");
+    expect(fresh.recoveryToken).not.toBe(busy.recoveryToken);
+    expect(await f.manager.choose({ action: "choose", recoveryToken: fresh.recoveryToken, choice: "fork", operationId: randomUUID() })).toMatchObject({ status: "provisional" });
+  });
+
   it("replays a lost activation response but rejects competing reuse and retired presentations", async () => {
     const f=await fixture(), provisional=await f.manager.open({pdfPath:f.pdfPath});
     if(provisional.status!=='provisional')throw Error('Expected provisional');

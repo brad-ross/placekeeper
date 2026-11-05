@@ -87,6 +87,39 @@ it('does not let a retired full-API bridge unregister its replacement', async ()
   expect(JSON.parse(await oldExecute({})).status).toBe('unavailable');
   expect(JSON.parse(await tools.get('inspect_review').execute({})).status).toBe('current');
 });
+
+it('retires and reuses retained tool names when the host throws during unregister', async () => {
+  const tools = new Map<string, any>();
+  let registrations = 0, oldReads = 0, replacementReads = 0;
+  const api = {
+    registerTool: (tool: any) => {
+      registrations++;
+      if (tools.has(tool.name)) throw Error('duplicate');
+      tools.set(tool.name, tool);
+    },
+    unregisterTool: () => { throw Error('host cannot unregister'); },
+  };
+  const host = { ensureVisible: async () => true, available: () => true };
+  const old = new LiveReaderTools(api, host);
+  old.attach({ snapshot: () => { oldReads++; return snapshot; }, search: async () => { throw Error('unused'); }, navigate: async () => true });
+  expect(JSON.parse(await tools.get('inspect_review').execute({})).status).toBe('current');
+  old.dispose();
+  expect(tools.size).toBe(5);
+  for (const tool of tools.values()) expect(JSON.parse(await tool.execute({})).status).toBe('unavailable');
+
+  const replacement = new LiveReaderTools(api, host);
+  const replacementSource = { fileId: 'replacement', digest: 'new' };
+  replacement.attach({ snapshot: () => { replacementReads++; return { ...snapshot, source: replacementSource }; }, search: async () => { throw Error('unused'); }, navigate: async () => true });
+  old.dispose();
+  expect(replacement.supported).toBe(true);
+  expect(registrations).toBe(5);
+  expect(JSON.parse(await tools.get('inspect_review').execute({}))).toMatchObject({ status: 'current', source: replacementSource });
+  expect(oldReads).toBe(1);
+  expect(replacementReads).toBe(1);
+  replacement.dispose();
+  for (const tool of tools.values()) expect(JSON.parse(await tool.execute({})).status).toBe('unavailable');
+});
+
 it.each(['TypeError', 'Error', 'DOMException', 'PrivateError'])('bounds registration failure diagnostics for %s and still cleans up', name => {
   const removed: string[] = [];
   const bridge = new LiveReaderTools({ registerTool: tool => { if (tool.name === 'search_document') throw { name, message: 'private grant and document details', grant: 'secret' }; }, unregisterTool: toolName => { removed.push(toolName); } }, { ensureVisible: async () => true, available: () => true });

@@ -227,7 +227,8 @@ export class ExtensionShell {
                     if (!begin()) return;
                     try {
                         const parsed = parseExtensionResult(await this.#request({ action: 'choose', recoveryToken: result.recoveryToken, choice, operationId }));
-                        if (parsed && current()) await this.#apply(parsed);
+                        if (parsed?.status === 'unavailable' && current()) this.#chooser('This review choice is no longer available. Choose the PDF again; protected work is retained.', 'Choose PDF again', true);
+                        else if (parsed && current()) await this.#apply(parsed);
                         else if (parsed) await this.#discardObsolete(parsed);
                     } catch (error) { if (current()) throw error; }
                     finally { pending = false; if (current()) for (const button of buttons) button.disabled = false; }
@@ -309,11 +310,12 @@ export class ExtensionShell {
         if ('grant' in result && (this.#closed || result.grant !== this.#grant))
             await this.#request({ action: 'revoke', grant: result.grant }).catch(() => undefined);
     }
-    #chooser() {
+    #chooser(notice = 'Open a PDF to begin reviewing.', label = 'Choose PDF', cancellable = false) {
         const epoch = ++this.#choiceEpoch;
-        this.#resetHost(); this.#show('Open a PDF to begin reviewing.'); this.controls.replaceChildren();
+        if (!this.#active) this.#resetHost();
+        this.#show(notice); this.controls.replaceChildren();
         const current = () => !this.#closed && epoch === this.#choiceEpoch;
-        this.#button('Choose PDF', async () => {
+        this.#button(label, async () => {
             if (!current()) return;
             try {
                 const parsed = parseExtensionResult(await this.#request({ action: 'open' }));
@@ -322,8 +324,16 @@ export class ExtensionShell {
                     this.#show('Use the PDF’s file menu to open it in Placekeeper on this host.');
                     return;
                 }
+                // A successful local picker selection changes the source route. Cancel
+                // retains the current host adapter until the user selects another PDF.
+                if (parsed?.status === 'provisional' || parsed?.status === 'busy') this.#resetHost();
                 if (parsed) await this.#apply(parsed);
             } catch (error) { if (current()) throw error; }
+        });
+        if (cancellable) this.#button('Cancel', async () => {
+            if (!current()) return;
+            if (this.#active && this.#grant) await this.#apply({ status: 'active', grant: this.#grant, presentation: this.#active });
+            else this.#chooser();
         });
     }
     #mount() {

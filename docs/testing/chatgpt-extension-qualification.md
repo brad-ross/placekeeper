@@ -105,11 +105,11 @@ The tested bundle SHA256 is `cbe66248ab63712021e6ae05f02dac0f92bec2d3fa5e5a85c0e
 | Marketplace | `placekeeper-extension-candidate-test` |
 | Plugin / MCP server | `placekeeper-extension-candidate` |
 | Source artifact | `dist/extension-candidate/build.json` |
-| Build timestamp / revision / modified status | Record from build metadata after canonical builds |
-| Bundle / server / reader / service SHA256 | Record from build metadata and verify installed registration points to that candidate |
-| Host / OS / SDK version | Record from actual opened host and pinned lockfile |
+| Build timestamp / revision / modified status | `2026-11-05T04:05:22.135Z`, `0fe7457352b41f95f8acd470858542356800f76b`, clean |
+| Bundle / server / reader / service SHA256 | Bundle `fb6bafa98179cb0af9a4d49f3616a3c2c21f700325d2fed1b6425a82fa9e40d1`; all 13 installed hashes verified against build.json |
+| Host / OS / SDK version | Native host last observed `26.1027.61615` on macOS; pinned extension SDK `0.2.1`, ext-apps `1.7.5` |
 | Focused browser result and screenshot inspection | Final combined run: five passed in 11.8 seconds; 1440px/375px screenshots inspected |
-| Native production reader result | Pending installation, fresh invocation and host checks |
+| Native production reader result | Core trusted-path workflows passed; opaque and remaining lifecycle/peer cases tracked separately below |
 
 ### Remaining actual-host checklist
 
@@ -190,3 +190,43 @@ The user confirmed the selection action prepared an editable, page-referenced co
 The trusted-path route was confirmed from the production active panel lacking the Refresh PDF / Save now controls that ExtensionShell adds unconditionally for HostResourceAdapter. The file entrypoint prefers the host-provided trusted path when present. Therefore all preceding production save/refresh observations qualify local persistence only; opaque resource behavior requires a separate native test. No mock API evidence is relabeled as native.
 
 The obsolete compatibility probe was uninstalled through the supported plugin tool, its marketplace was removed through the supported CLI, and its eight source files were removed after checking for surviving code references. Its build identity and 426 allowlisted observations are retained under evidence/extension-probe-2026-11-04. Generated probe files were moved out of the checkout to a temporary archive. Reusable production-candidate packaging remains.
+
+### Requirement evidence matrix — completion audit
+
+All requirements have implementation and focused automated coverage. “Pending” below means native evidence is not yet established, not that a mocked result is being substituted.
+
+| Requirement | Native observations established | Outstanding native boundary |
+|---|---|---|
+| R1 | File-menu activation with trusted local path, readable PDF, no chat message | Conversation chooser/cancel; opaque route candidate |
+| R2 | Collapse continuity, fresh protected reopen retaining item IDs | Actual sleep beyond lease; same-invocation remount |
+| R3 | Expanded production reader; collapsed navigation reopens and completes | Keyboard/narrow-host inspection beyond existing browser tests |
+| R4 | Local saved bytes, unsupported stamp preservation, protected reopen and external generation refresh | Opaque conditional save/conflict/read-only export |
+| R5 | Whole-context removal pauses sharing through successful navigation | Named-group removal and remount/racing-publication host observations |
+| R6 | All five tools; exact search; visible result/page/annotation destinations; stale source and stale generation rejected | None for the tested trusted-path reader workflow |
+| R7 | Selection and annotation-subset editable drafts; user confirms no automatic send | Selection/source-switch and named-group persistence at native boundary |
+| R8 | Explicit snapshot include/remove, revision labels, default exclusion | Peer-chat composer retrieval and known-URI opt-out |
+| R9 | Native settings read/update plus equivalent panel controls; original settings restored after first test | Pending-publication native race |
+| R10 | Separate app context without legacy binding claims; stale source rejection | Peer ownership/fork and exact installed legacy hook launch |
+
+AE1 and AE6 have native production evidence. AE4 now has native stale-generation rejection after source refresh. AE2, AE3, AE5, AE7, AE8 and AE9 retain their deterministic automated coverage and still need their listed native boundary observations.
+
+### Isolated opaque-route candidate ready
+
+The separate qualification wrapper drops optional file-entry metadata only for open_pdf, retaining the actual host-selected resource URI and all production admission, private grant, resource, reader and persistence behavior. It does not fabricate resource metadata or mock the host. Other operations pass through unchanged. The importer-specific alias affects only the isolated candidate build; normal production builds retain their original route selection.
+
+- Source revision: b996943e79bf37ac8fb908e9ac46b7479e9bc0e4; built 2026-11-05T04:30:23.550Z.
+- Route: opaque-resource; bundle SHA256 c4815c290b99968fd516ea82539e2fad73dd6e0c2c44e191c43ffe995f07e5b7.
+- Plugin/marketplace: placekeeper-extension-candidate-opaque@placekeeper-extension-candidate-opaque-test.
+- Isolated port: 48764; the existing trusted-path candidate remains on 48763.
+- All 13 installed files and all six served web assets match their build hashes. Reader HTML, service and web app bytes match the normal production candidate exactly.
+- The wrapper, packaging/default-route preservation and suite registration checks passed 21 tests; full TypeScript checking passed.
+- A separate read-only-test.pdf fixture has actual filesystem mode 0444.
+- Native invocation is pending. Installation and direct asset checks alone do not qualify host-resource behavior.
+
+### Delayed recovery choice regression
+
+The native peer-chat check exposed an expired ownership offer: selecting an independent review after the one-minute offer lifetime ended the panel. The shell now explains that the choice expired and offers fresh PDF selection or cancel. It never renews the expired capability implicitly. Regression coverage checks the 95-second delay, stale button callbacks, canceled picker responses, and transition from a host resource to a newly selected local source. Service coverage confirms the expired offer cannot allocate authority and a fresh explicit open can issue a new choice.
+
+The combined live-reader, extension-shell, extension-runtime, host-resource adapter and host-resource service tests passed; the full TypeScript check and diff check passed. The throwing-unregister regression also verifies that retained tool names remain inert until assigned to the replacement reader. These changes are locally verified; native retesting requires rebuilding and reopening the candidate.
+
+The completed incremental code review at `b996943e` found no actionable defects (receipt: `20261104-increment-96289e15`). Its verdict covers that code increment, not the outstanding native qualification. The recovery fix above follows the later native failure.

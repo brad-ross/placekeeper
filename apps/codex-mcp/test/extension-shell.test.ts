@@ -150,6 +150,34 @@ it('disposes the host route when a busy resource is canceled before choosing a l
     expect(f.calls.some(c => c.action === 'host-resource' && c.grant === grant)).toBe(false);
     await f.shell.teardown();
 });
+it.each(['provisional', 'busy'] as const)('uses the local source route after an expired host choice and a %s picker result', async pickerStatus => {
+    const bytes = btoa('%PDF-1.7\nhost chooser fixture\n%%EOF');
+    const resources = { read: vi.fn(async () => ({ contents: [{ uri: 'opaque:host', blob: bytes }] })), subscribe: vi.fn(async () => ({})), unsubscribe: vi.fn(async () => ({})), addUpdateHandler: vi.fn(() => vi.fn()) };
+    let choices = 0;
+    const f = fixture(async request => {
+        if (request.action === 'host-resource') {
+            if (request.operation === 'begin') return reply({ status: 'host-transfer', transfer: 't'.repeat(43), offset: 0 });
+            if (request.operation === 'chunk') return reply({ status: 'host-transfer', transfer: 't'.repeat(43), offset: atob(request.dataBase64).length });
+            if (request.operation === 'finish') return reply({ status: 'busy', recoveryToken: 'r'.repeat(43), canResume: true });
+        }
+        if (request.action === 'choose') return reply(++choices === 1 ? { status: 'unavailable' } : { status: 'provisional', grant });
+        if (request.action === 'open') return reply(pickerStatus === 'busy' ? { status: 'busy', recoveryToken: 's'.repeat(43), canResume: false } : { status: 'provisional', grant });
+        if (request.action === 'activate') return reply(active(nextGrant));
+        return reply({ status: 'ok', payload: {} });
+    }, () => resources);
+    const button = (text: string) => f.controls.append.mock.calls.map(([button]) => button).filter(button => button.textContent === text).at(-1);
+    await f.shell.receive({ status: 'host-resource', file: { name: 'host.pdf', resourceUri: 'opaque:host' }, ticket: 'p'.repeat(43) });
+    await vi.advanceTimersByTimeAsync(95_000);
+    button('Open independent review').onclick(); await vi.advanceTimersByTimeAsync(0);
+    button('Choose PDF again').onclick(); await vi.advanceTimersByTimeAsync(0);
+    if (pickerStatus === 'busy') { button('Open independent review').onclick(); await vi.advanceTimersByTimeAsync(0); }
+    expect(host.mounts).toHaveLength(1);
+    expect(resources.read).toHaveBeenCalledOnce();
+    expect(resources.unsubscribe).toHaveBeenCalledOnce();
+    expect(f.calls.some(c => c.action === 'host-resource' && c.grant === grant)).toBe(false);
+    await f.shell.teardown();
+});
+
 it('keeps a transport-paused host reader paused when explicit refresh cannot validate the source', async () => {
     const bytes = btoa('%PDF-1.7\nhost paused fixture\n%%EOF');
     const resources = { read: vi.fn(async () => ({ contents: [{ uri: 'opaque:host', blob: bytes }] })), subscribe: vi.fn(async () => ({})), unsubscribe: vi.fn(async () => ({})), addUpdateHandler: vi.fn(() => vi.fn()), write: vi.fn() };
@@ -391,6 +419,27 @@ it.each(['Open independent review', 'Cancel'])('keeps %s fenced while a recovery
     await f.shell.teardown();
 });
 
+it('offers fresh source selection after an expired recovery choice without ending the panel', async () => {
+    const f = fixture(async request => reply(request.action === 'choose' ? { status: 'unavailable' } : request.action === 'open' ? { status: 'busy', recoveryToken: 's'.repeat(43), canResume: true } : { status: 'closed' }));
+    await f.shell.receive({ status: 'busy', recoveryToken: 'r'.repeat(43), canResume: true });
+    const oldButtons = f.controls.append.mock.calls.map(([button]) => button);
+    await vi.advanceTimersByTimeAsync(95_000);
+    oldButtons.find(button => button.textContent === 'Open independent review').onclick();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(f.status.textContent).toContain('Choose the PDF again');
+    expect(f.status.textContent).not.toContain('connection ended');
+    expect(host.mounts).toHaveLength(0);
+    oldButtons.find(button => button.textContent === 'Resume protected review').onclick();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(f.calls.filter(c => c.action === 'choose')).toHaveLength(1);
+    f.controls.append.mock.calls.map(([button]) => button).find(button => button.textContent === 'Choose PDF again').onclick();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(f.calls.filter(c => c.action === 'open')).toEqual([{ action: 'open' }]);
+    expect(f.status.textContent).toContain('Protected review work is available');
+    expect(f.calls.filter(c => c.action === 'choose')).toHaveLength(1);
+    await f.shell.teardown();
+});
+
 it('fences retained recovery callbacks after cancel', async () => {
     const f = fixture(async () => reply({ status: 'cancelled' }));
     await f.shell.receive({ status: 'busy', recoveryToken: 'r'.repeat(43), canResume: true });
@@ -398,6 +447,25 @@ it('fences retained recovery callbacks after cancel', async () => {
     buttons.find(button => button.textContent === 'Cancel').onclick(); await vi.advanceTimersByTimeAsync(0);
     buttons.find(button => button.textContent === 'Resume protected review').onclick(); await vi.advanceTimersByTimeAsync(0);
     expect(f.calls.filter(c => c.action === 'choose')).toHaveLength(0);
+    expect(host.mounts).toHaveLength(0);
+    await f.shell.teardown();
+});
+
+it('fences an expired-choice picker and revokes its late grant after cancel', async () => {
+    const pending = deferred();
+    const f = fixture(async request => request.action === 'open' ? pending.promise : reply(request.action === 'choose' ? { status: 'unavailable' } : { status: 'closed' }));
+    await f.shell.receive({ status: 'busy', recoveryToken: 'r'.repeat(43), canResume: true });
+    f.controls.append.mock.calls.map(([button]) => button).find(button => button.textContent === 'Open independent review').onclick();
+    await vi.advanceTimersByTimeAsync(0);
+    const buttons = f.controls.append.mock.calls.map(([button]) => button);
+    const choose = buttons.find(button => button.textContent === 'Choose PDF again');
+    choose.onclick();
+    buttons.filter(button => button.textContent === 'Cancel').at(-1).onclick();
+    await vi.advanceTimersByTimeAsync(0);
+    pending.resolve(reply(active(nextGrant))); await vi.advanceTimersByTimeAsync(0);
+    choose.onclick(); await vi.advanceTimersByTimeAsync(0);
+    expect(f.calls.filter(c => c.action === 'open')).toHaveLength(1);
+    expect(f.calls.filter(c => c.action === 'revoke').map(c => c.grant)).toEqual([nextGrant]);
     expect(host.mounts).toHaveLength(0);
     await f.shell.teardown();
 });
