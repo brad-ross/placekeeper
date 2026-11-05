@@ -170,3 +170,14 @@ describe("app-owned extension presentations", () => {
   });
 
 });
+
+it('keeps context publication intent with its app grant across rotation and isolates fresh invocations', async () => {
+  const f = await fixture(), first = await opened(f.manager, { pdfPath: f.pdfPath });
+  expect(first.contextPublished).toBe(false);
+  expect(await f.manager.dispatch({ action: 'context-published', grant: first.grant })).toEqual({ status: 'context-ready' });
+  const resumed = active(await f.manager.resume(first.grant, randomUUID()));
+  expect(resumed.contextPublished).toBe(true);
+  expect(await f.manager.dispatch({ action: 'context-published', grant: first.grant })).toEqual({ status: 'unavailable' });
+  const otherPath = join(f.pdfPath, '..', 'other.pdf'); await writeFile(otherPath, '%PDF-1.7\nother\n%%EOF');
+  const other = await opened(f.manager, { pdfPath: otherPath }); expect(other.contextPublished).toBe(false);
+});

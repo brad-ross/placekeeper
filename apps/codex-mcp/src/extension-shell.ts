@@ -1,4 +1,6 @@
-import type { OpenAIResources } from '@openai/mcp-extensions/app';
+import { ExtensionContextCoordinator, type ExtensionContextPreferences } from '../../web/src/host/extension-context-coordinator.js';
+import type { ReviewContextSnapshot } from '../../web/src/host/review-context-snapshot.js';
+import type { OpenAIModelContext, OpenAIResources } from '@openai/mcp-extensions/app';
 import { HostResourceAdapter } from './host-resource-adapter.js';
 import type { App } from '@modelcontextprotocol/ext-apps';
 import { createCodexHostRuntime } from '../../web/src/host/codex-runtime.js';
@@ -10,6 +12,15 @@ import { PanelLiveness } from './panel-liveness.js';
 import { NativeDiagnosticError, diagnosticFailure } from './lifecycle-diagnostics.js';
 /** Memory-only app grants. A new host invocation never inherits an old panel's authority. */
 export class ExtensionShell {
+    #context: ExtensionContextCoordinator | undefined;
+    #contextView: HTMLElement | undefined;
+    #contextEnable: HTMLElement | undefined;
+    #openReader: HTMLElement | undefined;
+    #snapshot: ReviewContextSnapshot | undefined;
+    #title: string | undefined;
+    #displayMode: string | undefined;
+    #message = '';
+    #preferences: ExtensionContextPreferences = { backgroundContext: true, selectionSharing: true };
     #host: HostResourceAdapter | undefined;
     #hostNotice = '';
     #hostEpoch = 0;
@@ -31,7 +42,7 @@ export class ExtensionShell {
     #resumeOperation: string | undefined;
     #watermark: number | undefined;
     readonly #listeners = new Set<(event: HostRuntimeInvalidation) => void>();
-    constructor(readonly app: App, readonly root: HTMLElement, readonly status: HTMLElement, readonly controls: HTMLElement, readonly resources: () => OpenAIResources | undefined = () => undefined) { }
+    constructor(readonly app: App, readonly root: HTMLElement, readonly status: HTMLElement, readonly controls: HTMLElement, readonly resources: () => OpenAIResources | undefined = () => undefined, readonly modelContext: () => OpenAIModelContext | undefined = () => undefined) { }
     get ownsPanel() { return this.#received; }
     async receive(raw: unknown): Promise<boolean> {
         const result = parseExtensionResult(raw);
@@ -62,10 +73,57 @@ export class ExtensionShell {
             throw new NativeDiagnosticError('transport');
         return parsed;
     }
-    #show(text: string) { if (this.#closed)
-        return; this.status.textContent = text; this.status.hidden = !text; }
+    #show(text: string) {
+        if (this.#closed) return;
+        this.#message = text;
+        const compact = this.#active && this.#displayMode !== 'fullscreen';
+        const summary = compact ? `${this.#snapshot?.title ?? this.#title ?? 'Placekeeper PDF'}${this.#snapshot ? ` · Page ${this.#snapshot.page} of ${this.#snapshot.pageCount}` : ''}. Open the reader to edit.` : '';
+        this.status.textContent = [summary, text || (document.hidden && this.#active ? 'Reader suspended while the app is hidden. Protected work is retained.' : '')].filter(Boolean).join(' ');
+        this.status.hidden = !this.status.textContent;
+    }
+    #contextStatus() {
+        if (!this.#contextView) return;
+        const status = this.#context?.status ?? 'unsupported';
+        this.#contextView.textContent = status === 'available' ? 'Context available to chat. This does not confirm that a model has read it.'
+            : status === 'publishing' ? 'Updating context for chat…'
+            : status === 'paused' ? 'Background context is paused for this app.'
+            : status === 'unsupported' ? 'This host does not support background context.' : 'Context could not be confirmed as available to chat.';
+        if (this.#contextEnable) this.#contextEnable.hidden = status !== 'paused' || !this.#preferences.backgroundContext;
+    }
+    setContextPreferences(preferences: ExtensionContextPreferences) { this.#preferences = preferences; this.#context?.setPreferences(preferences); }
+    hostContextChanged(context: NonNullable<ReturnType<App['getHostContext']>>, reconcileContext = true) {
+        if (context.displayMode !== undefined) this.#displayMode = context.displayMode;
+        if (this.#received) {
+            const html = document.documentElement;
+            if (html) {
+                html.dataset.placekeeperExtension = 'true';
+                if (context.theme) { html.dataset.theme = context.theme; html.style.colorScheme = context.theme; }
+                for (const [name, value] of Object.entries(context.styles?.variables ?? {})) { if (value !== undefined) html.style.setProperty(name, value); }
+                if (context.safeAreaInsets) for (const edge of ['top', 'right', 'bottom', 'left'] as const) html.style.setProperty(`--placekeeper-safe-${edge}`, `${context.safeAreaInsets[edge]}px`);
+            }
+            this.root.hidden = this.#displayMode !== 'fullscreen';
+            if (this.#openReader) this.#openReader.hidden = !this.root.hidden;
+            this.#show(this.#message);
+        }
+        if (reconcileContext && Object.hasOwn(context, 'openai/modelContext')) this.#context?.reconcile(this.modelContext()?.getCurrent());
+    }
+    #setupContext(freshInvocation: boolean) {
+        if (this.#context) return;
+        const api = this.modelContext();
+        this.#context = new ExtensionContextCoordinator(api ? {
+            getCurrent: () => api.getCurrent(),
+            update: async (params, options) => {
+                const grant = this.#grant;
+                if (!grant || this.#closed) throw Error('Context connection unavailable');
+                const marked = await this.#request({ action: 'context-published', grant });
+                if (marked.status !== 'context-ready' || this.#closed || grant !== this.#grant) throw Error('Context connection unavailable');
+                return api.update(params, options);
+            },
+        } : undefined, () => this.#contextStatus(), { freshInvocation });
+        this.#context.setPreferences(this.#preferences);
+    }
     #button(label: string, action: () => Promise<void>) { const button = document.createElement('button'); button.textContent = label; button.onclick = () => { if (this.#closed)
-        return; button.disabled = true; void action().catch(() => this.#show('Placekeeper could not complete that action. Your protected work is retained.')).finally(() => { button.disabled = false; }); }; this.controls.append(button); }
+        return; button.disabled = true; void action().catch(() => this.#show('Placekeeper could not complete that action. Your protected work is retained.')).finally(() => { button.disabled = false; }); }; this.controls.append(button); return button; }
     async #apply(result: ExtensionResult) {
         if (this.#closed) {
             if ('grant' in result)
@@ -105,7 +163,16 @@ export class ExtensionShell {
         if (result.status === 'active') {
             this.#grant = result.grant;
             this.#active = result.presentation;
+            this.#setupContext(result.contextPublished === false);
             this.controls.replaceChildren();
+            this.#contextView = document.createElement('p'); this.controls.append(this.#contextView);
+            const enable = document.createElement('button'); enable.textContent = 'Enable background context'; enable.onclick = () => this.#context?.enableBackground(); this.#contextEnable = enable; this.controls.append(enable);
+            this.#contextStatus();
+            this.#openReader = this.#button('Open reader', async () => {
+                try { const result = await this.app.requestDisplayMode({ mode: 'fullscreen' }); this.hostContextChanged({ displayMode: result.mode }); }
+                catch { this.#show('This host could not expand the reader. Open Placekeeper in the conversation panel to edit.'); }
+            });
+            this.hostContextChanged(this.app.getHostContext?.() ?? {}, false);
             this.#mount();
             if (this.#host) { this.#button('Refresh PDF', () => this.#continue()); this.#button('Save now', () => this.#saveHost()); void this.#saveHost(); if (this.#hostRefreshPending) queueMicrotask(() => { void this.#continue().catch(() => undefined); }); }
             return;
@@ -153,7 +220,7 @@ export class ExtensionShell {
         const epoch = ++this.#epoch;
         this.#connected = true;
         this.#verified.clear();
-        this.root.inert = false;
+        this.root.inert = document.hidden;
         this.#unmount?.();
         this.#listeners.clear();
         this.#watermark = undefined;
@@ -161,7 +228,7 @@ export class ExtensionShell {
         this.#show('Opening PDF…');
         this.#unmount = mountCodexProductionReview(this.root, runtime, () => { if (epoch === this.#epoch)
             this.#show('The PDF could not be loaded. Reopen it through the file menu; protected work is retained.'); }, () => { if (epoch === this.#epoch && this.#connected)
-            this.#show(this.#hostNotice); });
+            this.#show(this.#hostNotice); }, undefined, snapshot => { if (epoch !== this.#epoch || this.#closed || !this.#connected || snapshot.documentGeneration !== this.#active?.generation) return; this.#snapshot = snapshot; this.#context?.publish(snapshot); this.#show(this.#message); }, (title, generation) => { if (epoch !== this.#epoch || this.#closed || generation !== this.#active?.generation) return; this.#title = title; this.#show(this.#message); });
         this.#liveness?.stop();
         this.#liveness = new PanelLiveness({ renew: async () => { await this.#probe('renew'); }, poll: async () => { await this.#probe('watermark'); }, pollInterval: () => document.hidden ? 5000 : 1000, onState: state => { if (epoch !== this.#epoch || this.#closed)
                 return; if (state === 'reconnecting')
@@ -195,8 +262,9 @@ export class ExtensionShell {
                 this.#verified.add(method);
                 if (this.#verified.size === 2) {
                     this.#connected = true;
-                    this.root.inert = false;
+                    this.root.inert = document.hidden;
                     this.#show(this.#hostNotice);
+                    this.#context?.retry();
                 }
             }
             if (method === 'watermark' && value.sessionId) {
@@ -315,10 +383,16 @@ export class ExtensionShell {
         return this.#resume;
     }
     #ended() { if (this.#closed)
-        return; this.#connected = false; this.#liveness?.stop(); void this.#host?.dispose().catch(() => undefined); this.root.inert = true; this.#show('This connection ended. Reopen the PDF through its file menu; accepted annotations and protected drafts are retained.'); this.#closed = true; this.#epoch++; }
-    wake() { this.#liveness?.wake(); }
+        return; this.#connected = false; this.#context?.dispose(); this.#liveness?.stop(); void this.#host?.dispose().catch(() => undefined); this.root.inert = true; this.#show('This connection ended. Reopen the PDF through its file menu; accepted annotations and protected drafts are retained.'); this.#closed = true; this.#epoch++; }
+    visibilityChanged(hidden: boolean) {
+        if (!this.#active || this.#closed) return;
+        this.root.inert = hidden || !this.#connected;
+        if (hidden) this.#show('Reader suspended while the app is hidden. Protected work is retained.');
+        else { this.#show(this.#connected ? this.#hostNotice : 'Reconnecting to Placekeeper… Editing is paused.'); this.wake(); }
+    }
+    wake() { if (this.#connected && !document.hidden) this.#context?.retry(); this.#liveness?.wake(); }
     disconnected() { if (this.ownsPanel)
         this.#ended(); }
-    async teardown() { this.#closed = true; this.#connected = false; this.root.inert = true; const grant = this.#grant; this.#epoch++; this.#grant = undefined; this.#active = undefined; this.#liveness?.stop(); this.#unmount?.(); this.#listeners.clear(); await this.#host?.dispose(); if (grant)
+    async teardown() { this.#context?.dispose(); this.#closed = true; this.#connected = false; this.root.inert = true; const grant = this.#grant; this.#epoch++; this.#grant = undefined; this.#active = undefined; this.#liveness?.stop(); this.#unmount?.(); this.#listeners.clear(); await this.#host?.dispose(); if (grant)
         await this.#request({ action: 'revoke', grant }).catch(() => undefined); }
 }

@@ -1,3 +1,4 @@
+import { reviewContextSnapshot, type ReviewContextSnapshot } from '../host/review-context-snapshot.js';
 import type { PlacekeeperLinkLocation } from "../../../../packages/core/src/placekeeper-link.js";
 import { pdfNavigationTargetFromPlacekeeperLocation } from '../pdf/pdf-navigation-target.js';
 import { useContext, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, type ReactNode } from "react";
@@ -526,6 +527,7 @@ export function authoringReferenceTarget(
 }
 
 export interface ProductionReviewAppProps {
+  readonly onContextSnapshot?: (snapshot: ReviewContextSnapshot) => void;
   readonly session: ProductionSession;
   readonly initialState: ReviewStateView;
   readonly activeAuthoringDraftIds?: readonly string[];
@@ -1486,6 +1488,14 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   const pageTitle = scope.launchSurface === 'chrome'
     ? sanitizeReviewRuntimeDisplayString(resolvedPageTitle) ?? scope.documentTitle
     : resolvedPageTitle;
+  useEffect(() => {
+    // Publish only after the active main viewer has accepted this canonical generation.
+    if (!initialViewReady || !viewerState.ready || !viewerResourcesAreCurrent || mainDocumentReadyGeneration !== state.workflow.documentGeneration || documentGenerationRef.current !== state.workflow.documentGeneration) return;
+    props.onContextSnapshot?.(reviewContextSnapshot({ state, title: pageTitle,
+      page: viewerState.currentPage, pageCount: viewerState.totalPages,
+      selection: selectionUpdate, selectionIsCurrent: selectionUpdate.kind === 'reliable' && currentAnnotationSurface(selectionUpdate.surface) !== null,
+    }));
+  }, [props.onContextSnapshot, state, pageTitle, initialViewReady, viewerState, viewerResourcesAreCurrent, mainDocumentReadyGeneration, selectionUpdate, currentAnnotationSurface]);
   useEffect(() => {
     document.title = pageTitle;
     props.onDocumentTitleChange?.(pageTitle, documentGenerationRef.current);

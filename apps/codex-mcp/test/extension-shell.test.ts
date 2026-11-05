@@ -9,12 +9,12 @@ const grant = 'a'.repeat(43), nextGrant = 'b'.repeat(43);
 const active = (g = grant) => ({ status: 'active', grant: g, presentation: { status: 'active', runtimeId: 'runtime_123', attemptId: 'attempt_123', generation: 1, presentationCapability: 'c'.repeat(43), reconnectTicket: 'd'.repeat(43) } });
 const reply = (value: unknown) => ({ _meta: { [EXTENSION_META_KEY]: value } });
 function deferred() { let resolve!: (value: any) => void; const promise = new Promise<any>(done => { resolve = done; }); return { promise, resolve }; }
-function fixture(handler: (request: any) => Promise<any> = async () => reply({ status: 'ok', payload: {} }), resources: () => any = () => undefined) {
+function fixture(handler: (request: any) => Promise<any> = async () => reply({ status: 'ok', payload: {} }), resources: () => any = () => undefined, modelContext: () => any = () => undefined) {
     const calls: any[] = [];
-    const app = { callServerTool: vi.fn(async (input: any) => { calls.push(input.arguments.request); return handler(input.arguments.request); }) };
+    const app = { getHostContext: () => ({ displayMode: 'fullscreen' }), callServerTool: vi.fn(async (input: any) => { calls.push(input.arguments.request); return handler(input.arguments.request); }) };
     const element = () => ({ inert: false, hidden: false, textContent: '', replaceChildren: vi.fn(), append: vi.fn() });
     const root = element(), status = element(), controls = element();
-    return { shell: new ExtensionShell(app as unknown as App, root as unknown as HTMLElement, status as unknown as HTMLElement, controls as unknown as HTMLElement, resources), root, status, controls, calls };
+    return { app, shell: new ExtensionShell(app as unknown as App, root as unknown as HTMLElement, status as unknown as HTMLElement, controls as unknown as HTMLElement, resources, modelContext), root, status, controls, calls };
 }
 beforeEach(() => { vi.useFakeTimers(); vi.stubGlobal('document', { hidden: false, createElement: () => ({}) }); host.options.length = 0; host.mounts.length = 0; host.unmount.mockClear(); });
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
@@ -165,5 +165,66 @@ it('keeps a transport-paused host reader paused when explicit refresh cannot val
     const refresh = f.controls.append.mock.calls.map(([button]) => button).find(button => button.textContent === 'Refresh PDF'); refresh.onclick();
     await vi.waitFor(() => expect(f.status.textContent).toContain('could not complete'));
     expect(f.root.inert).toBe(true); expect(host.mounts).toHaveLength(1); expect(f.calls.some(c => c.action === 'resume')).toBe(false);
+    await f.shell.teardown();
+});
+
+it('shows a compact open-reader view, applies host theme and safe areas, and expands through the host', async () => {
+    const html = { dataset: {} as Record<string, string>, style: { colorScheme: '', setProperty: vi.fn() } };
+    vi.stubGlobal('document', { hidden: false, documentElement: html, createElement: () => ({}) });
+    const f = fixture();
+    f.app.getHostContext = () => ({ displayMode: 'inline', theme: 'dark', safeAreaInsets: { top: 12, bottom: 8, left: 0, right: 0 } });
+    const expand = vi.fn(async () => ({ mode: 'fullscreen' })); Object.assign(f.app, { requestDisplayMode: expand });
+    await f.shell.receive(active());
+    expect(f.root.hidden).toBe(true); expect(f.status.textContent).toContain('Open the reader to edit');
+    host.mounts[0][6]('Paper.pdf', 1); expect(f.status.textContent).toContain('Paper.pdf');
+    expect(html.dataset.theme).toBe('dark'); expect(html.style.setProperty).toHaveBeenCalledWith('--placekeeper-safe-top', '12px');
+    const button = f.controls.append.mock.calls.map(([button]) => button).find(button => button.textContent === 'Open reader');
+    button.onclick(); await vi.advanceTimersByTimeAsync(0);
+    expect(expand).toHaveBeenCalledWith({ mode: 'fullscreen' }); expect(f.root.hidden).toBe(false);
+    await f.shell.teardown();
+});
+
+it('marks publication intent before sharing, rejects stale generations and retains clear-all intent across reader updates', async () => {
+    const marking = deferred(); let current: any = null;
+    const api = { getCurrent: () => current, update: vi.fn(async (_params: any) => ({ updateId: 'published' })) };
+    const f = fixture(async request => request.action === 'context-published' ? marking.promise : reply({ status: 'ok', payload: {} }), undefined, () => api);
+    await f.shell.receive({ ...active(), contextPublished: false });
+    const snapshot = { title: 'Paper', documentGeneration: 1, reviewRevision: 0, source: { fileId: 'secret', digest: 'd' }, page: 2, pageCount: 5, annotations: [], selection: null };
+    host.mounts[0][5]({ ...snapshot, documentGeneration: 2 }); await vi.advanceTimersByTimeAsync(0); expect(api.update).not.toHaveBeenCalled();
+    host.mounts[0][5](snapshot); await vi.advanceTimersByTimeAsync(0); expect(api.update).not.toHaveBeenCalled();
+    marking.resolve(reply({ status: 'context-ready' })); await vi.advanceTimersByTimeAsync(0); expect(api.update).toHaveBeenCalledOnce();
+    f.shell.hostContextChanged({ 'openai/modelContext': null }); await vi.advanceTimersByTimeAsync(0);
+    host.mounts[0][5]({ ...snapshot, page: 3 }); await vi.advanceTimersByTimeAsync(0);
+    expect(api.update.mock.calls.at(-1)?.[0]).toEqual({ content: [], structuredContent: {} });
+    await f.shell.teardown();
+});
+
+it('does not publish when the grant publication-intent acknowledgement fails', async () => {
+    const api = { getCurrent: () => null, update: vi.fn() };
+    const f = fixture(async request => reply(request.action === 'context-published' ? { status: 'unavailable' } : { status: 'ok', payload: {} }), undefined, () => api);
+    await f.shell.receive({ ...active(), contextPublished: false });
+    host.mounts[0][5]({ title: 'Paper', documentGeneration: 1, reviewRevision: 0, source: { fileId: 'file', digest: 'd' }, page: 1, pageCount: 2, annotations: [], selection: null });
+    await vi.advanceTimersByTimeAsync(0); expect(api.update).not.toHaveBeenCalled();
+    expect(f.controls.append.mock.calls.map(([element]) => element.textContent).join(' ')).toContain('could not be confirmed');
+    await f.shell.teardown();
+});
+it('reports suspension and restores verified editing on visibility return', async () => {
+    const f = fixture(); await f.shell.receive(active());
+    f.shell.visibilityChanged(true); expect(f.status.textContent).toContain('suspended'); expect(f.root.inert).toBe(true);
+    f.shell.visibilityChanged(false); expect(f.root.inert).toBe(false); await f.shell.teardown();
+});
+
+it('publishes fresh initial null context automatically while respecting a later null removal', async () => {
+    const api = { getCurrent: () => null, update: vi.fn(async (_params: any) => ({ updateId: 'initial-context' })) };
+    const f = fixture(async request => reply(request.action === 'context-published' ? { status: 'context-ready' } : { status: 'ok', payload: {} }), undefined, () => api);
+    f.app.getHostContext = () => ({ displayMode: 'fullscreen', 'openai/modelContext': null });
+    await f.shell.receive({ ...active(), contextPublished: false });
+    const snapshot = { title: 'Paper', documentGeneration: 1, reviewRevision: 0, source: { fileId: 'file', digest: 'd' }, page: 1, pageCount: 2, annotations: [], selection: null };
+    host.mounts[0][5](snapshot); await vi.advanceTimersByTimeAsync(0);
+    expect(api.update).toHaveBeenCalledOnce();
+    expect(api.update.mock.calls[0]?.[0].content[0].resource.uri).toBe('placekeeper-context:///background');
+    f.shell.hostContextChanged({ 'openai/modelContext': null }); await vi.advanceTimersByTimeAsync(0);
+    host.mounts[0][5]({ ...snapshot, page: 2 }); await vi.advanceTimersByTimeAsync(0);
+    expect(api.update).toHaveBeenCalledTimes(2); expect(api.update.mock.calls[1]?.[0].content).toEqual([]);
     await f.shell.teardown();
 });

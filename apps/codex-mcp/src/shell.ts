@@ -1,3 +1,4 @@
+import './extension-presentation.css';
 import { OpenAIExtensions } from '@openai/mcp-extensions/app';
 import { ExtensionShell } from "./extension-shell.js";
 import { EXTENSION_META_KEY } from "../../../packages/core/src/extension-protocol.js";
@@ -22,7 +23,7 @@ const detail = document.querySelector<HTMLElement>("#detail")!;
 const reviewRoot = document.querySelector<HTMLElement>("#root")!;
 const extensionControls = document.createElement("div");
 detail.after(extensionControls);
-const extensionShell = new ExtensionShell(app, reviewRoot, status, extensionControls, () => extensions.resources);
+const extensionShell = new ExtensionShell(app, reviewRoot, status, extensionControls, () => extensions.resources, () => extensions.modelContext);
 status.setAttribute("role", "status");
 status.setAttribute("aria-live", "polite");
 let traceStorage: Storage | undefined;
@@ -298,9 +299,9 @@ app.ontoolresult = (result) => {
   pending = next; recordDiagnostic("invocation"); const attempt = ++incarnation; void admit(attempt);
 };
 app.onteardown = async () => { if (extensionShell.ownsPanel) { await extensionShell.teardown(); return {}; } oldAttempt.clear("unsupported"); recordDiagnostic("teardown"); const previous = active; stop(); if (previous !== undefined) await retirePresentation(previous); return {}; };
-app.onhostcontextchanged = (context) => { if (context.displayMode !== undefined) { recordDiagnostic("mode-confirmed", { mode: context.displayMode }); } };
+app.onhostcontextchanged = (context) => { extensionShell.hostContextChanged?.(context); if (context.displayMode !== undefined) { recordDiagnostic("mode-confirmed", { mode: context.displayMode }); } };
 app.onclose = () => { if (extensionShell.ownsPanel) { extensionShell.disconnected(); return; } oldAttempt.clear("unsupported"); stop(); display("Reconnect: the original native bridge disconnected. The old-attempt probe is unsupported; accepted work remains recoverable."); };
 app.onerror = () => { if (!["armed", "retiring", "retired", "probing"].includes(oldAttempt.snapshot()?.phase ?? "")) return; oldAttempt.clear("unsupported"); stop(); display("Reconnect: the native bridge cannot be verified. The old-attempt probe is unsupported; accepted work remains recoverable."); };
 window.addEventListener("online", () => { extensionShell.wake(); liveness?.wake(); });
-document.addEventListener("visibilitychange", () => { if (!document.hidden) { extensionShell.wake(); liveness?.wake(); } });
-void app.connect().then(() => { recordDiagnostic("connected"); }).catch(() => { oldAttempt.clear("unsupported"); recordDiagnostic("failed", { failure: "transport" }); display("This host cannot connect the Placekeeper native app. Enable the plugin, reload Codex, and reopen the PDF."); });
+document.addEventListener("visibilitychange", () => { extensionShell.visibilityChanged?.(document.hidden); if (!document.hidden) { extensionShell.wake(); liveness?.wake(); } });
+void app.connect().then(() => { recordDiagnostic("connected"); extensionShell.hostContextChanged?.(app.getHostContext() ?? {}, false); }).catch(() => { oldAttempt.clear("unsupported"); recordDiagnostic("failed", { failure: "transport" }); display("This host cannot connect the Placekeeper native app. Enable the plugin, reload Codex, and reopen the PDF."); });

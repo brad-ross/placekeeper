@@ -14,7 +14,7 @@ import type { CodexActiveScope, CodexServiceRuntimeBackend } from './codex-runti
 const secret = () => randomBytes(32).toString('base64url');
 const opaque = () => randomBytes(16).toString('base64url');
 const unavailable = (): ExtensionResult => ({status:'unavailable'});
-type RecordState = { sessionId:string; grant:string; expires:number; provisional:boolean; watermark:number; active?:ExtensionPresentation; lease?:number };
+type RecordState = { sessionId:string; grant:string; expires:number; provisional:boolean; watermark:number; contextPublished:boolean; active?:ExtensionPresentation; lease?:number };
 type Offer = { path:string;hostSessionId?:string; expires:number; recoveryOffer?:RecoveryOfferIdentity; result?:{operationId:string;choice:string;value:ExtensionResult} };
 
 /** App ownership is independent of trusted chat bindings. Grants never enter browser storage. */
@@ -52,6 +52,7 @@ export class ExtensionRuntimeManager {
     if(r.action==='app')return this.handle(r.request);
     if(r.action==='open')return this.open(r);
     if(r.action==='choose')return this.choose(r);
+    if(r.action==='context-published')return this.#serial(async()=>{this.#sweep();const record=this.#records.get(digestSecretHex(r.grant));if(!record||record.provisional||this.#closing)return unavailable();record.contextPublished=true;return {status:'context-ready'};});
     if(r.action==='revoke')return await this.revoke(r.grant)?{status:'closed'}:unavailable();
     return this.resume(r.grant,r.operationId,r.action);
   }
@@ -115,12 +116,12 @@ export class ExtensionRuntimeManager {
     offer.result={operationId:input.operationId,choice:input.choice,value};return value;
   });}
   #provisional(result:Exclude<OpenReviewResult,{kind:'recovery-offered'}>):ExtensionResult{
-    const grant=secret();const record:RecordState={sessionId:result.launch.sessionId,grant,expires:this.#now()+Math.min(60_000,this.#idle),provisional:true,watermark:0};
+    const grant=secret();const record:RecordState={sessionId:result.launch.sessionId,grant,expires:this.#now()+Math.min(60_000,this.#idle),provisional:true,watermark:0,contextPublished:false};
     this.#records.set(digestSecretHex(grant),record);return {status:'provisional',grant};
   }
   resume(grant:string,operationId:string,action:'activate'|'resume'='resume'):Promise<ExtensionResult>{return this.#serial(async()=>{
     this.#sweep();if(this.#closing)return unavailable();const key=digestSecretHex(grant),receipt=this.#receipts.get(key);
-    if(receipt)return receipt.operationId===operationId&&receipt.action===action&&receipt.result.status==='active'&&receipt.result.presentation===receipt.record.active&&receipt.result.grant===receipt.record.grant&&this.#records.get(digestSecretHex(receipt.record.grant))===receipt.record?receipt.result:unavailable();
+    if(receipt)return receipt.operationId===operationId&&receipt.action===action&&receipt.result.status==='active'&&receipt.result.presentation===receipt.record.active&&receipt.result.grant===receipt.record.grant&&this.#records.get(digestSecretHex(receipt.record.grant))===receipt.record?{...receipt.result,contextPublished:receipt.record.contextPublished}:unavailable();
     const record=this.#records.get(key);if(!record||record.provisional!==(action==='activate'))return unavailable();
     const scope=this.broker.nativeAdmissionScope(record.sessionId);if(!scope)return unavailable();
     // Revalidate local source through the canonical broker before exposing another incarnation.
@@ -131,7 +132,7 @@ export class ExtensionRuntimeManager {
     const presentation:ExtensionPresentation={status:'active',runtimeId:opaque(),attemptId:opaque(),generation:current.documentGeneration,presentationCapability:secret(),reconnectTicket:secret()};
     record.active=presentation;record.lease=this.#now()+this.#lease;this.#records.set(digestSecretHex(record.grant),record);this.#panels.set(presentation.runtimeId,record);
     this.#backend.attach(this.#scope(record));
-    const result:ExtensionResult={status:'active',grant:record.grant,presentation};
+    const result:ExtensionResult={status:'active',grant:record.grant,presentation,contextPublished:record.contextPublished};
     this.#receipts.set(key,{operationId,action,expires:this.#now()+30_000,record,result});return result;
   });}
   #scope(r:RecordState):CodexActiveScope{return {sessionId:r.sessionId,runtimeId:r.active!.runtimeId,attemptId:r.active!.attemptId,generation:r.active!.generation};}

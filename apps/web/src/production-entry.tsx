@@ -529,6 +529,8 @@ export function RuntimeLoadingWorkspace(props: {
 }
 
 export function RuntimeProductionReviewApp(props: {
+  readonly onContextSnapshot?: (snapshot: import('./host/review-context-snapshot.js').ReviewContextSnapshot) => void;
+  readonly agentBridge?: import('./host/review-agent-bridge.js').ReviewAgentBridge;
   readonly runtime?: HostRuntime;
   readonly initial?: HostRuntimeBootstrap;
   readonly loadingDocumentTitle?: string;
@@ -684,6 +686,8 @@ export function RuntimeProductionReviewApp(props: {
   if (upgradeClosed) return <div role="status">This review was protected and closed for the upgrade. Reopen it in Placekeeper after installation finishes.</div>;
   return <>{upgradeMessage && <div className="review-upgrade-status" role="status">{upgradeMessage}</div>}<div className="review-upgrade-content" inert={upgradeFrozen}><ProductionReviewApp
     key={loaded === undefined ? 'preparing-runtime' : 'active-runtime'}
+    {...(props.onContextSnapshot === undefined ? {} : { onContextSnapshot: props.onContextSnapshot })}
+    {...(props.agentBridge === undefined ? {} : { agentBridge: props.agentBridge })}
     session={visible.session}
     initialState={visible.state}
     {...(visible.activeAuthoringDraftIds === undefined ? {} : {

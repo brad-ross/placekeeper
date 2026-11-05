@@ -1,0 +1,22 @@
+html[data-placekeeper-extension="true"] body {
+  box-sizing: border-box;
+  padding: var(--placekeeper-safe-top, 0px) var(--placekeeper-safe-right, 0px) var(--placekeeper-safe-bottom, 0px) var(--placekeeper-safe-left, 0px);
+  color: var(--color-text-primary, #333);
+  background: var(--color-background-primary, #fff);
+}
+html[data-placekeeper-extension="true"][data-theme="dark"] :is(#root[data-production-root="true"], .terminal-recovery, .top-bar-menu__surface) {
+  color-scheme: dark;
+  --review-ink-primary: var(--color-text-primary, #eee);
+  --review-ink-muted: var(--color-text-secondary, #bbb);
+  --review-ink-quiet: #aaa;
+  --review-surface-canvas: var(--color-background-secondary, #202020);
+  --review-surface-panel: var(--color-background-primary, #292929);
+  --review-surface-subtle: #333;
+  --review-surface-interactive: #444;
+  --review-surface-tray: #333;
+  --review-border: #555;
+  --review-border-subtle: #444;
+  --review-border-strong: #777;
+  --review-selection-bg: #444;
+  --review-selection-ink: #eee;
+}
