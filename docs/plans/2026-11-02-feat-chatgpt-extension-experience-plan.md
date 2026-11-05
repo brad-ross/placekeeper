@@ -34,6 +34,8 @@ Placekeeper should behave as a persistent PDF review app in the conversation pan
 - **Include all proposed interactions now**, including composer mentions and native preferences (session-settled: user-directed — chosen over deferring the richer interactions: the user explicitly requested every addition). Governs R7, R8, R9.
 - **Provide document search and reader navigation to chat** (session-settled: user-directed — chosen over relying only on generic PDF tools: the user requested search and scrolling within the open review). Governs R6.
 
+- **Offer desktop-style autosave to a chosen local copy in the extension**, including opaque host resources (session-settled: user-directed — November 5: use Placekeeper’s local save machinery rather than requiring a Codex download). Choose the destination once; later accepted edits autosave to that copy. Governs R4.
+
 ### Requirements
 
 **Opening and continuity**
@@ -44,7 +46,7 @@ Placekeeper should behave as a persistent PDF review app in the conversation pan
 
 **Document and context correctness**
 
-- R4. Host resource changes refresh the reader through document-generation reconciliation. Writable resources save conditionally and expose conflicts; read-only sources offer an explicit reviewed-copy/export outcome. Accepted review work is protected before acknowledgement, and Protected versus Saved status remains truthful.
+- R4. Host resource changes refresh the reader through document-generation reconciliation. Writable resources can save conditionally to their host source and expose conflicts. Both writable and read-only sources offer desktop-style autosave to a user-chosen local copy. A destination is selected once through Placekeeper’s native picker and subsequent accepted edits save there without a Codex download. Cancel preserves the current destination and accepted work. Download/export is optional when the host supports it, not a prerequisite for core persistence. Accepted review work is protected before acknowledgement, and Protected versus Saved status remains truthful.
 - R5. Publish bounded current document/page/selection/review context without sending a message or starting an agent turn. Keep explicit attachments distinct from background state. Respect host removal, including racing updates and remount. Clearing the whole app context pauses background sharing until explicitly re-enabled. Distinguish context available to chat from context actually observed by an agent turn.
 - R6. Chat can inspect the current view and selection, search the PDF, and navigate to a page, search result, or annotation. Results identify document generation, coverage, and truncation. Stale results cannot target newer bytes. A collapsed/unmounted reader must never report successful scrolling; the supported workflow reopens/expands the app before live navigation and search tools are used. If that host interaction is unavailable, return an actionable unavailable result, not guessed content.
 
@@ -70,6 +72,7 @@ Placekeeper should behave as a persistent PDF review app in the conversation pan
 | AE6 | Ask chat to scroll while collapsed: reopen the reader through the supported host path, then acknowledge only after the destination is reached; unavailable hosts report that limitation. | R3, R6 |
 | AE7 | Prepare a selection draft while another PDF opens: draft retains the original explicit selection and reference, with no automatic send. | R7 |
 | AE8 | Disable mentions, then read a previously known mention URI: return unavailable rather than its old content. | R8, R9 |
+| AE10 | Open an opaque PDF, choose Save to a new copy and a local folder, annotate twice: the chosen copy updates automatically, the source remains unchanged, and reopening preserves the destination. Canceling the picker changes nothing. | R4, R10 |
 | AE9 | Open the same PDF in a second chat: ownership is not transferred silently; a chosen independent fork does not become an unchecked competing writer. | R10 |
 
 ### Scope boundaries
@@ -85,7 +88,7 @@ All six original proposals and the search/scroll additions are included. This wo
 - KTD1. **Reuse the shared production reader and canonical backend.** Put host differences behind `ReviewHostRuntime` and transport adapters. Preserve SessionBroker, operation journaling, Protected Drafts, generation transitions, and save scheduling. The static runtime's in-memory/export-only behavior is insufficient for the host-resource route. Sources: `apps/web/src/host/runtime.ts`, `apps/web/src/host/static-runtime.ts`, `apps/service/src/sessions/session-broker.ts`, and `docs/solutions/architecture-patterns/shared-production-review-client-host-runtime-boundaries.md`.
 - KTD2. **Separate app-session continuation from presentation leases and Task Bindings.** Admit file authority from host-provided metadata/resource APIs, never synthetic chat IDs or a URI parsed as a path. A private app grant scopes access to one admitted review; it does not prove chat identity. Use short-lived presentation incarnations and serialized resume with rotation, bounded idempotent retry, and stale-incarnation rejection. Store protected work independently of these credentials. Legacy panels need a new explicitly authorized continuation path; the existing restart reconnect ticket still requires a trusted prompt. U1 must establish a private host channel for continuation before relying on it. Sources: `apps/service/src/codex/codex-runtime.ts`, `apps/service/src/context/restart-reconnect-store.ts`, `apps/codex-mcp/src/server.ts`.
 - KTD3. **Use SDK1-compatible metadata and the extension app APIs.** Keep the existing MCP SDK1 server and ext-apps integration. Pin the chosen extension package after compatibility verification; use shared schemas/metadata instead of importing SDK2-only server helpers. Declare separate file and conversation entrypoints, `.pdf` with its leading dot, preferred fullscreen, and supported modes. Capability-detect resources, context, editable drafts, settings, and WebMCP. Source: [extension specification](https://github.com/openai/mcp-extensions/blob/main/docs/spec.md) and [TypeScript guide](https://github.com/openai/mcp-extensions/blob/main/typescript/README.md).
-- KTD4. **One save authority per admitted source.** Trusted local files keep the local save coordinator. Opaque host sources use a host-resource adapter backed by private recovery state in the service; the app brokers host reads/writes. Reuse PDF serialization and canonical save obligations, but commit host saves with writable metadata and conditional ETags. A service-side save intent identifies exact generation/revision/digest; receipt acknowledges that intent only after the host confirms it. Persist before acknowledging accepted work. On remount reconcile the current host digest/ETag before replaying uncertain saves; never blindly repeat an ambiguous write. Read-only sources retain protected work and export explicitly. Sources: `docs/solutions/architecture-patterns/recoverable-editable-pdf-annotation-autosave.md` and [resource APIs](https://github.com/openai/mcp-extensions/blob/main/typescript/README.md#file-extension-handlers).
+- KTD4. **One save authority per admitted source.** Trusted local files keep the local save coordinator. Opaque host sources use a host-resource adapter backed by private recovery state in the service; the app brokers host reads/writes. Reuse PDF serialization and canonical save obligations, but commit host saves with writable metadata and conditional ETags. A service-side save intent identifies exact generation/revision/digest; receipt acknowledges that intent only after the host confirms it. Persist before acknowledging accepted work. On remount reconcile the current host digest/ETag before replaying uncertain saves; never blindly repeat an ambiguous write. Opaque sources may transition explicitly to a selected local copy through the existing native destination picker and PdfSaveCoordinator. Preserve source identity separately from destination authority; never derive a filesystem path from a host URI or use the private transfer directory as a default output folder. Stop/drain conditional host writes before activating the copy, reject stale host save receipts after the switch, and retain the local destination across refresh and recovery. Preserve accepted work and cancellation behavior; reuse existing collision/overwrite confirmation and save-status semantics. Read-only sources use this same copy workflow. Host download remains optional. Sources: `docs/solutions/architecture-patterns/recoverable-editable-pdf-annotation-autosave.md` and [resource APIs](https://github.com/openai/mcp-extensions/blob/main/typescript/README.md#file-extension-handlers).
 - KTD5. **A serialized context coordinator owns publication.** Separate background snapshot, explicit attachment membership, and host removal state. Reconcile initial/remount host context before publishing; serialize desired revisions with update IDs, coalesce navigation, and apply removals to pending publications. A stale acknowledgement cannot restore removed content. Publish only accepted document generations and bounded text. Preserve the existing hook context route for legacy Task Bindings without falsely labeling app publication as agent observation. Sources: `apps/web/src/host/context-projection.ts`, `use-codex-context.ts`, and [context notifications](https://github.com/openai/mcp-extensions/blob/main/docs/spec.md#context-changed-notifications).
 - KTD6. **Use live reader tools for exact search and navigation.** Reuse `PdfSearchController` and the navigation coordinator behind a disposable app bridge. Tool responses include review/generation and stable result handles scoped to that generation; bound count and snippet size. Expose inspect, search, and navigation through WebMCP where supported. The host contract makes these expanded-app tools; qualify the reopen/expand workflow rather than adding a second unscoped server search service. Inspection returns snapshots, and navigation resolves only after the actual reader moves. This implements R6's user-directed decision. Sources: `apps/web/src/pdf/pdf-search-controller.ts`, `apps/web/src/review/navigation-coordinator.ts`, [interaction patterns](https://github.com/openai/mcp-extensions/blob/main/docs/patterns.md).
 - KTD7. **Explicit drafts, bounded mention snapshots, and durable preferences.** Reuse selection/review-item state for R7; never use an auto-send fallback. Use host-supported settings plus a versioned service preference store. Catalog only explicit opt-ins, authorize every read against current membership, and invalidate entries when opted out. Settings and mentions implement the user-directed R7–R9 decision. Source: [extension changelog](https://github.com/openai/mcp-extensions/blob/main/CHANGELOG.md).
@@ -152,7 +155,9 @@ flowchart TB
   Read -->|no| Error[Retry or actionable error]
   Read -->|yes| Write{Host resource writable?}
   Write -->|yes| Conditional[Conditional host save]
-  Write -->|no| Export[Protected review and explicit export]
+  Write -->|no| Copy[Choose local copy and autosave]
+  Conditional -->|Choose a copy| Copy
+  Copy --> LocalSave[Existing local save coordinator]
   Conditional --> Conflict{ETag still current?}
   Conflict -->|no| Preserve[Preserve work and reconcile conflict]
   Conflict -->|yes| Saved[Acknowledge exact saved revision]
@@ -188,7 +193,8 @@ Capability behavior:
 |---|---|---|
 | File resource reads | Open via host URI | Actionable read failure, never treat URI as path |
 | Resource subscription | Subscribe and reconcile | Revalidate on activation and explicit refresh |
-| Writable resources | ETag-conditional save | Protected work plus explicit export |
+| Writable resources | ETag-conditional source save or chosen local copy | Chosen local copy via native picker; protected work until selected |
+| Host downloads | Optional reviewed-copy download | Core autosave-to-copy remains available through Placekeeper |
 | Editable drafts | Prepare composer draft | Copyable draft and explicit attachment fallback |
 | WebMCP | Live inspect/search/navigation | Explain how to open supported panel; do not claim tool completion |
 | Native settings | Host settings surface | Equivalent in-app controls |
@@ -232,8 +238,17 @@ Implementation began before the user requested this plan and was stopped. These 
 - **Goal / requirements:** R1, R4, R10.
 - **Files:** New host-resource runtime adapter under `apps/web/src/host/`; resource/save protocol in `packages/core/src/`; service recovery/save integration; `apps/web/src/production-entry.tsx`; relevant service and web tests.
 - **Approach:** Implement KTD1 and KTD4. Import authorized host bytes into canonical review/recovery storage, preserve source identity and ETag, subscribe where available, and reconcile through existing generation machinery. Fence transfers by attempt. Local and host writes remain mutually exclusive. Persist exact save intents/receipts and handle unknown write outcomes by rereading source identity.
-- **Test scenarios:** Opaque URI with no path; read-only export; successful conditional save; concurrent remote edit; pending save interrupted by remount; draft cancellation without PDF rewrite; duplicate mutation without duplicate save; same-revision Save Sync update; corrupt/empty bytes; old read fails after newer activation; generation change while interaction is held.
+- **Test scenarios:** Opaque URI with no path; read-only source saved to a chosen local copy; successful conditional save; concurrent remote edit; pending save interrupted by remount; draft cancellation without PDF rewrite; duplicate mutation without duplicate save; same-revision Save Sync update; corrupt/empty bytes; old read fails after newer activation; generation change while interaction is held.
 - **Verification:** `pnpm test:save-export`, `pnpm test:source-rebuild`, `pnpm test:service`, `pnpm test:web`, plus real host read/change/write/conflict cases.
+
+### U3a. Reuse desktop save options for host-managed PDFs
+
+- **Dependencies:** U3.
+- **Goal / requirements:** R4 and R10; implement the November 5 user-directed autosave-to-copy decision without depending on Codex download support.
+- **Files:** `apps/service/src/codex/codex-runtime-backend.ts`, `host-resource-persistence.ts`, `extension-runtime.ts`; existing save coordinator and session recovery integration as needed; `apps/codex-mcp/src/extension-shell.ts`, `host-resource-adapter.ts`; shared save controls under `apps/web/src/`; focused service, shell, and reader tests.
+- **Approach:** Reuse the shared save-destination dialog, native folder picker, validated folder selection, and local save coordinator. For an opaque source, require an explicit folder and suggest a readable annotated-copy filename. Expose current host-source saving and the local-copy choice truthfully. Coordinate the destination switch with pending host writes, and make the persisted local destination authoritative after the switch. Source refresh must not reset it or resume host writes. Preserve existing local-path behavior, copy collision confirmation, annotation identities, protected drafts, and source-generation checks. Do not add a second PDF serializer, arbitrary path API, or a separate export-only storage mechanism. Capability-gate the optional host-download action.
+- **Test scenarios:** Read-only and writable opaque sources each save two successive edits to a chosen copy while source bytes stay unchanged; cancel folder/destination selection; filename collision; stale picker result after source replacement; pending host save at switch; stale host receipt after switch; refresh/remount/service recovery retains destination and continues saving; local save failure remains protected and retryable; existing local-path original/copy behavior stays intact.
+- **Verification:** Start with failing behavior tests through the existing runtime/save boundary; run the relevant service, saving, shell and reader suites, typecheck and production builds. Qualify a real native picker plus two persisted annotation edits, close/reopen and another edit; inspect the actual destination and unchanged source. Missing Codex download support is not a failure of this flow.
 
 ### U4. Build panel presentation and context synchronization
 
@@ -264,11 +279,11 @@ Implementation began before the user requested this plan and was stopped. These 
 
 ### U7. Qualify the complete experience and clean up
 
-- **Dependencies:** U1–U6.
+- **Dependencies:** U1–U6, including U3a.
 - **Goal / requirements:** Demonstrate R1–R10 together and preserve existing supported hosts.
 - **Files:** Qualification record, integration tests, user/plugin documentation, release/build metadata only as required by repository conventions.
 - **Approach:** Run the entire lifecycle on one semantic review/item, include a peer chat, and inspect both transient UI and canonical saved state. Record exact package/build and host capabilities. Remove abandoned partial approaches, duplicate runtime paths, unused dependencies, and temporary probes.
-- **Test scenarios:** Direct open → select/draft → annotate/save → collapse → sleep → resume → ask/search/scroll → external PDF update → remove context → remount; repeat for host-resource and local-path sources. Exercise existing hook launch and explicit revoke, read-only export, and two-chat ownership.
+- **Test scenarios:** Direct open → select/draft → annotate/save → collapse → sleep → resume → ask/search/scroll → external PDF update → remove context → remount; repeat for host-resource and local-path sources. Exercise existing hook launch and explicit revoke, read-only autosave to a chosen local copy, and two-chat ownership. A separate host download is optional and qualified only on hosts advertising it.
 - **Verification:** Verification Contract below; no broad success claim while installed-host cases remain unverified.
 
 ---
@@ -298,6 +313,7 @@ Use the existing temporal UI test approach: observe from before the transition t
 
 - Every R-ID and AE-ID is implemented and covered by the unit tests and host evidence appropriate to it.
 - Each unit passes its listed verification and satisfies its dependencies; unsupported host cases have tested truthful fallbacks.
+- Desktop-style autosave to a chosen copy works for opaque resources without a Codex download; destination selection, cancellation, refresh, and recovery are verified.
 - Direct entry works for opaque resources as well as trusted local paths, with durable accepted work and exact save/conflict status.
 - Automatic recovery is demonstrated where supported; explicit reopen preserves work elsewhere. Stale authority and cross-chat ownership tests pass.
 - Context removal, generation changes, search, navigation, drafts, groups, mentions, and settings work together without automatic message submission.
