@@ -73,7 +73,7 @@ export async function prepareApprovedOpen(input: {
       });
   const state = { ...initialState, ...(nativeAnnotationsImported ? { nativeAnnotationImportDigest: source.digest } : {}) };
   const digest = reviewStateDigest(state);
-  const destination: DurableSaveDestination = state.workflow.mode === "generated-output" || importedItems.length === 0 || !rewriteEligibility.eligible
+  const destination: DurableSaveDestination = request.recoveryDecision === "fork" || state.workflow.mode === "generated-output" || importedItems.length === 0 || !rewriteEligibility.eligible
     ? { phase: "none", generation: 0 }
     : {
         phase: "active",
