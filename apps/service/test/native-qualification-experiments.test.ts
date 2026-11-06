@@ -1,13 +1,19 @@
 import { mkdtempSync, writeFileSync, readFileSync, rmSync, chmodSync, symlinkSync, linkSync, readdirSync, mkdirSync, renameSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { spawn, execFileSync } from "node:child_process";
+import { spawn, execFileSync, type ChildProcess } from "node:child_process";
 import { afterEach, expect, it, vi } from "vitest";
 import { NativeQualificationExperiments, QualificationExperimentIncomplete } from "../src/codex/native-qualification-experiments.js";
 import { parseQualificationExperiment } from "../../codex-mcp/src/qualification-experiments-contract.js";
 import { createQualificationRecord } from "../src/codex/native-qualification-files.js";
 const roots: string[] = [];
-afterEach(() => { vi.restoreAllMocks(); roots.splice(0).forEach(root => rmSync(root, { recursive: true, force: true })); });
+const workers: { child: ChildProcess; completed: Promise<unknown> }[] = [];
+async function stopWorkers() {
+  const pending = workers.splice(0);
+  for (const { child } of pending) if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+  await Promise.allSettled(pending.map(({ completed }) => completed));
+}
+afterEach(async () => { vi.restoreAllMocks(); await stopWorkers(); roots.splice(0).forEach(root => rmSync(root, { recursive: true, force: true })); });
 const runId = "a".repeat(32), a = "b".repeat(32), b = "c".repeat(32);
 const receipt = (index: number) => ({ protocolVersion: 1 as const, status: "pending" as const, receiptId: `receipt_${index}`, attemptId: `attempt_${index}`, generation: 1 });
 function fixture(action = "paired-public-result-exchange", budget = 300) {
@@ -18,7 +24,7 @@ function fixture(action = "paired-public-result-exchange", budget = 300) {
   const invocation = (index: number) => ({ runId, invocationNonce: String(index).repeat(32), expiresAt: base.expiresAt });
   return { root, descriptor, path, invocation, dir: join(root, "native-qualification-experiments", runId) };
 }
-function worker(root: string, index: number, delay = 0, terminalReadFault = false) {
+function worker(root: string, index: number, delay = 0, terminalReadFault = false, gate?: "selected" | "run-write" | "start") {
   const fault = terminalReadFault ? `import fs from "node:fs"; import {syncBuiltinESMExports} from "node:module";
 const originalOpen=fs.openSync, decisionPath=${JSON.stringify(join(root, "native-qualification-experiments", runId, "decision.json"))};
 fs.openSync=function(path,flags,...args){
@@ -29,17 +35,53 @@ fs.openSync=function(path,flags,...args){
   }
   return originalOpen.call(fs,path,flags,...args);
 };syncBuiltinESMExports();` : "";
-  const source = `${fault}
-const {NativeQualificationExperiments}=await import(${JSON.stringify(resolve("apps/service/src/codex/native-qualification-experiments.ts"))});
+  const barrier = gate ? `import barrierFs from "node:fs"; import {syncBuiltinESMExports as syncBarrierExports} from "node:module";
+function barrier(event) {
+  process.send(event);
+  const until=Date.now()+3000, release=${JSON.stringify(join(root, `release-${index}`))};
+  while(!barrierFs.existsSync(release)) {
+    if(Date.now()>=until) throw new Error('fixture-barrier-timeout: '+event);
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,5);
+  }
+}
+${gate === "run-write" ? `const originalOpen=barrierFs.openSync;
+barrierFs.openSync=function(path,flags,...args) {
+  const fd=originalOpen.call(barrierFs,path,flags,...args);
+  if(path===${JSON.stringify(join(root, "native-qualification-experiments", runId, "run.json"))} && typeof flags==='number' && (flags & barrierFs.constants.O_EXCL)!==0) barrier('run-reserved');
+  return fd;
+}; syncBarrierExports();` : ""}` : "";
+  const source = `${fault}\n${barrier}
+const {NativeQualificationExperiments,QualificationExperimentIncomplete}=await import(${JSON.stringify(resolve("apps/service/src/codex/native-qualification-experiments.ts"))});
+${gate ? "await new Promise((resolve,reject)=>{const timeout=setTimeout(()=>reject(new Error('fixture-start-timeout')),3000);process.once('message',()=>{clearTimeout(timeout);resolve();});process.send('ready');});" : ""}
 await new Promise(r=>setTimeout(r,${delay}));
-try { const result=await new NativeQualificationExperiments(${JSON.stringify(root)}).publicResult(${JSON.stringify(receipt(index))},${JSON.stringify({ runId, invocationNonce: String(index).repeat(32), expiresAt: new Date(Date.now() + 60000).toISOString() })},${JSON.stringify(index === 1 ? a : b)}); process.stdout.write(JSON.stringify({result})); } catch { process.stdout.write(JSON.stringify({incomplete:true})); }`;
-  const child = spawn(process.execPath, ["--import", "tsx", "--input-type=module", "-e", source], { stdio: ["ignore", "pipe", "pipe"] });
-  let output = "", stderr = ""; child.stdout.on("data", d => output += String(d)); child.stderr.on("data", d => stderr += String(d));
+try { const result=await new NativeQualificationExperiments(${JSON.stringify(root)}).publicResult(${JSON.stringify(receipt(index))},${JSON.stringify({ runId, invocationNonce: String(index).repeat(32), expiresAt: new Date(Date.now() + 60000).toISOString() })},${JSON.stringify(index === 1 ? a : b)}, {record(event){if(event==='experiment-selected') {process.send('selected'); ${gate === "selected" ? "barrier('selection-paused');" : ""}}}}); process.stdout.write(JSON.stringify({result})); } catch(error) { if(!(error instanceof QualificationExperimentIncomplete)) throw error; process.stdout.write(JSON.stringify({incomplete:true})); } finally {process.disconnect();}`;
+  const child = spawn(process.execPath, ["--import", "tsx", "--input-type=module", "-e", source], { stdio: ["ignore", "pipe", "pipe", "ipc"] });
+  let output = "", stderr = ""; child.stdout!.on("data", d => output += String(d)); child.stderr!.on("data", d => stderr += String(d));
   const completed = new Promise<{ result?: ReturnType<typeof receipt>; incomplete?: true }>((resolve, reject) => child.once("close", code => {
     if (code !== 0) reject(new Error(`worker failed ${code}: ${stderr}`)); else { try { resolve(JSON.parse(output)); } catch { reject(new Error("invalid worker output")); } }
   }));
-  return { child, completed };
+  // A fixture may fail before awaiting its peer. Keep its rejection handled,
+  // while preserving the original rejecting promise for assertions and teardown.
+  void completed.catch(() => {});
+  workers.push({ child, completed });
+  const events = new Set<string>();
+  child.on("message", event => events.add(String(event)));
+  const milestone = (event: string) => events.has(event) ? Promise.resolve() : Promise.race([
+    new Promise<void>(resolve => { const listener = (value: unknown) => { if (value === event) { child.off("message", listener); resolve(); } }; child.on("message", listener); }),
+    completed.then(() => { throw new Error(`worker exited before ${event}`); })
+  ]);
+  return { child, completed, milestone, start: () => child.send("start"), release: () => writeFileSync(join(root, `release-${index}`), "") };
 }
+it("fixture cleanup reaps workers waiting for startup and paused during publication", async () => {
+  const f = fixture(), one = worker(f.root, 1, 0, false, "run-write"), two = worker(f.root, 2, 0, false, "start");
+  await Promise.all([one.milestone("ready"), two.milestone("ready")]);
+  one.start(); await one.milestone("run-reserved");
+  await stopWorkers();
+  for (const participant of [one, two]) {
+    await expect(participant.completed).rejects.toThrow("worker failed");
+    expect(participant.child.signalCode).toBe("SIGKILL");
+  }
+});
 it("rejects unknown fields, excess bounds, task identities, duplicate process targets and expiry", () => {
   const f = fixture(); expect(parseQualificationExperiment(f.descriptor, Date.now())).toBeDefined();
   for (const value of [{ ...f.descriptor, taskSessionId: "private" }, { ...f.descriptor, rendezvousMs: 5001 }, { ...f.descriptor, targets: [{ runId, processNonce: a }, { runId, processNonce: a }] }, { ...f.descriptor, expiresAt: new Date(Date.now() + 31 * 60000).toISOString() }]) expect(parseQualificationExperiment(value, Date.now())).toBeUndefined();
@@ -58,13 +100,35 @@ it("disabled and hostile descriptors leave original public output unchanged with
   expect(await controls.publicResult(receipt(1), f.invocation(6), a)).toEqual(receipt(1));
 });
 it("commits actual concurrent processes to opposite public receipts", async () => {
-  const f = fixture(undefined, 1000), one = worker(f.root, 1), two = worker(f.root, 2);
+  const f = fixture(undefined, 1000), one = worker(f.root, 1, 0, false, "selected"), two = worker(f.root, 2, 0, false, "selected");
+  await Promise.all([one.milestone("ready"), two.milestone("ready")]);
+  // Finish initialization before admitting the peer, then finish both slots
+  // before either participant starts the immutable decision election.
+  one.start(); await one.milestone("selection-paused");
+  two.start(); await two.milestone("selection-paused");
+  one.release(); two.release();
   const results = await Promise.all([one.completed, two.completed]);
   expect(results).toEqual([{ result: receipt(2) }, { result: receipt(1) }]);
   expect(JSON.parse(readFileSync(join(f.dir, "decision.json"), "utf8"))).toEqual({ outcome: "commit", receipts: [receipt(1), receipt(2)] });
   expect(readdirSync(f.dir).filter(v => v.startsWith("delivery-"))).toHaveLength(2);
   const all = readdirSync(f.dir).map(file => readFileSync(join(f.dir, file), "utf8")).join(" ");
   expect(all).not.toMatch(/capability|taskSession|pendingCapability|_meta|handoff/);
+});
+it("a peer reading the reserved but unwritten run is incomplete while the survivor aborts normally", async () => {
+  const f = fixture(undefined, 100), one = worker(f.root, 1, 0, false, "run-write"), two = worker(f.root, 2, 0, false, "start");
+  await Promise.all([one.milestone("ready"), two.milestone("ready")]);
+  one.start(); await one.milestone("run-reserved");
+  expect(readFileSync(join(f.dir, "run.json"), "utf8")).toBe("");
+  two.start();
+  try {
+    expect(await two.completed).toEqual({ incomplete: true });
+    expect(readdirSync(f.dir)).not.toContain("slot-1.json");
+    // Manifest uncertainty precedes the selected-participant diagnostic path.
+    expect(readdirSync(f.dir)).not.toContain("incomplete-1.json");
+  } finally { one.release(); }
+  expect(await one.completed).toEqual({ result: receipt(1) });
+  expect(JSON.parse(readFileSync(join(f.dir, "decision.json"), "utf8"))).toEqual({ outcome: "abort" });
+  expect(readdirSync(f.dir).filter(file => file.startsWith("delivery-"))).toHaveLength(0);
 });
 it("timeout commits one immutable abort; a late process returns normal, never one swapped outcome", async () => {
   const f = fixture(undefined, 80), results = await Promise.all([worker(f.root, 1).completed, worker(f.root, 2, 250).completed]);
@@ -74,7 +138,11 @@ it("timeout commits one immutable abort; a late process returns normal, never on
 });
 it("real commit/abort boundary races never mix swapped and normal results", async () => {
   for (const delay of [25, 50, 75]) {
-    const f = fixture(undefined, 60), results = await Promise.all([worker(f.root, 1).completed, worker(f.root, 2, delay).completed]);
+    const f = fixture(undefined, 60), one = worker(f.root, 1, 0, false, "start"), two = worker(f.root, 2, delay, false, "start");
+    await Promise.all([one.milestone("ready"), two.milestone("ready")]);
+    // Race the decision deadline, not process startup or manifest publication.
+    one.start(); await one.milestone("selected"); two.start();
+    const results = await Promise.all([one.completed, two.completed]);
     const decision = JSON.parse(readFileSync(join(f.dir, "decision.json"), "utf8"));
     expect(["abort", "commit"]).toContain(decision.outcome);
     results.forEach((result, slot) => {
@@ -341,13 +409,17 @@ await runHookCommand(['hook','--event'],${JSON.stringify(JSON.stringify(event))}
     });
     controls.displayIssued(receipt(1), Date.now() + 60000);
     await controls.publicResult(receipt(1), f.invocation(1), a);
-    child.send("selected");
-    // Signal after the actual hook consumed the exact selection, never from logs.
-    for (let check = 0; check < 100 && !readdirSync(f.dir).includes("hook-consumed.json"); check++) await new Promise(r => setTimeout(r, 10));
-    expect(readdirSync(f.dir)).toContain("hook-consumed.json"); expect(output).toBe("");
+    // This case proves a genuine hook consumes a completed ready marker. A
+    // simultaneous partial marker publication is intentionally unavailable.
     if (mode === "ready") controls.authenticatedReady(receipt(1), Date.now() + 60000);
-    if (mode === "cancelled") rmSync(f.path);
-    if (mode === "hostile") writeFileSync(join(f.dir, "ready.json"), "{}", { mode: 0o644 });
+    child.send("selected");
+    if (mode !== "ready") {
+      // Interrupt only after the actual hook consumed the exact selection.
+      for (let check = 0; check < 100 && !readdirSync(f.dir).includes("hook-consumed.json"); check++) await new Promise(r => setTimeout(r, 10));
+      expect(readdirSync(f.dir)).toContain("hook-consumed.json"); expect(output).toBe("");
+      if (mode === "cancelled") rmSync(f.path);
+      if (mode === "hostile") writeFileSync(join(f.dir, "ready.json"), "{}", { mode: 0o644 });
+    }
     expect(await completed, stderr).toBe(0);
     expect(JSON.parse(output)).toEqual({ kind: "codex-attest", taskSessionId: event.session_id, receipt: receipt(1) });
     expect(JSON.parse(readFileSync(join(f.dir, "hook-terminal.json"), "utf8")).outcome).toBe(mode === "ready" ? "ready" : mode === "cancelled" ? "cancelled" : "unavailable");
