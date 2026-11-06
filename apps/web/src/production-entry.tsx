@@ -752,6 +752,7 @@ export interface ChromeRuntimeStartResult {
 /** Mounts the shared production client for a Chrome handler without granting
  * it access to native messaging or service credentials. */
 export async function startChromeRuntime(options: {
+  readonly openExternalUrl?: (url: string) => Promise<void>;
   readonly runtimeId: string;
   readonly extensionOrigin: string;
   readonly port: {
@@ -769,6 +770,7 @@ export async function startChromeRuntime(options: {
   }, {
     host: "chrome",
     extensionOrigin: options.extensionOrigin,
+    ...(options.openExternalUrl === undefined ? {} : { openExternalUrl: options.openExternalUrl }),
   });
   const ready = Promise.withResolvers<number>();
   let settled = false;
