@@ -23,8 +23,10 @@ export async function extensionRecoveryReader(page: Page) {
   const manager = new ExtensionRuntimeManager(broker, { backend, now: () => clock, pickPdf: async () => path });
   const requests: any[] = [];
   let suppressRelease = false;
+  let bootstrapGate: Promise<void> | undefined;
   await page.exposeFunction('recoveryAcceptanceRequest', async (request: any) => {
     requests.push(request);
+    if (request.action === 'app' && request.request.method === 'bootstrap') await bootstrapGate;
     if (request.action === 'revoke' && suppressRelease) return { status: 'unavailable' };
     if (request.action === 'app' && request.request.method === 'upgradePoll') return { status: 'ok', payload: { phase: 'none' } };
     return manager.dispatch(request);
@@ -51,6 +53,11 @@ export async function extensionRecoveryReader(page: Page) {
     }, chooser);
   }
   return { broker, manager, requests, mount,
+    holdBootstrap() {
+      const gate = Promise.withResolvers<void>();
+      bootstrapGate = gate.promise;
+      return () => { bootstrapGate = undefined; gate.resolve(); };
+    },
     suppressRelease(value: boolean) { suppressRelease = value; },
     advance(ms: number) { clock += ms; },
     async ready() { await expect(page.locator('[data-production-review]')).toHaveAttribute('data-initial-view-ready', 'true', { timeout: 20000 }); },

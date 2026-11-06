@@ -878,3 +878,44 @@ it('opens web links through the host only while the extension reader is current'
     await expect(port.openExternalUrl('https://example.com/paper')).rejects.toThrow('unavailable');
     expect(openLink).toHaveBeenCalledTimes(2);
 });
+
+it('keeps one loading surface until the initial reader is ready and exposes failures', async () => {
+    const f = fixture();
+    await f.shell.receive(active());
+    expect(f.root.dataset.extensionLoading).toBe('true');
+    expect(f.status.hidden).toBe(true);
+    expect(descendants(f.controls).some(node => node.className === 'extension-loading')).toBe(true);
+    host.mounts.at(-1)![3](1);
+    expect(f.root.dataset.extensionLoading).toBeUndefined();
+    await f.shell.teardown();
+
+    const failed = fixture();
+    await failed.shell.receive(active());
+    host.mounts.at(-1)![2](new Error('fixture load failure'));
+    expect(failed.root.dataset.extensionLoading).toBeUndefined();
+    expect(failed.status.hidden).toBe(false);
+    expect(failed.status.textContent).toContain('could not be loaded');
+    await failed.shell.teardown();
+});
+
+it('reveals a ready reader while reconnecting without losing the paused state', async () => {
+    let interrupted = true;
+    const f = fixture(async request => {
+        if (interrupted && request.action === 'app' && ['renew', 'watermark'].includes(request.request.method)) throw new Error('temporary transport failure');
+        return reply(request.action === 'revoke' ? { status: 'closed' } : { status: 'ok', payload: {} });
+    });
+    await f.shell.receive(active());
+    await vi.advanceTimersByTimeAsync(0);
+    expect(f.root.inert).toBe(true);
+    host.mounts.at(-1)![3](1);
+    expect(f.root.dataset.extensionLoading).toBeUndefined();
+    expect(f.root.inert).toBe(true);
+    expect(f.status.hidden).toBe(false);
+    expect(f.status.textContent).toContain('Reconnecting');
+    interrupted = false;
+    f.shell.wake();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(f.root.inert).toBe(false);
+    expect(host.mounts).toHaveLength(1);
+    await f.shell.teardown();
+});

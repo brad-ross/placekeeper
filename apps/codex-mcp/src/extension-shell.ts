@@ -38,6 +38,7 @@ export class ExtensionShell {
     #grant: string | undefined;
     #active: ExtensionPresentation | undefined;
     #unmount: (() => void) | undefined;
+    #loading: HTMLElement | undefined;
     #liveness: PanelLiveness | undefined;
     #epoch = 0;
     #received = false;
@@ -99,7 +100,31 @@ export class ExtensionShell {
         const summary = compact ? `${this.#snapshot?.title ?? this.#title ?? 'Placekeeper PDF'}${this.#snapshot ? ` · Page ${this.#snapshot.page} of ${this.#snapshot.pageCount}` : ''}. Open the reader to edit.` : '';
         this.status.textContent = [summary, text, this.#exportNotice].filter(Boolean).join(' ');
         this.controls.dataset.displayMode = compact ? 'inline' : 'fullscreen';
-        this.status.hidden = !this.status.textContent;
+        this.status.hidden = !this.status.textContent || (this.#loading !== undefined && !compact);
+    }
+    #beginLoading() {
+        this.#clearLoading();
+        this.root.dataset.extensionLoading = 'true';
+        const loading = document.createElement('div');
+        loading.className = 'extension-loading';
+        loading.setAttribute('role', 'status');
+        loading.setAttribute('aria-label', 'Opening document');
+        const content = document.createElement('div');
+        content.className = 'extension-loading__content';
+        const indicator = document.createElement('span');
+        indicator.className = 'extension-loading__indicator';
+        indicator.setAttribute('aria-hidden', 'true');
+        const label = document.createElement('span');
+        label.textContent = 'Opening document…';
+        content.append(indicator, label);
+        loading.append(content);
+        this.#loading = loading;
+        this.controls.append(loading);
+    }
+    #clearLoading() {
+        this.#loading?.remove();
+        this.#loading = undefined;
+        delete this.root.dataset.extensionLoading;
     }
     #exportProgress(phase: 'preparing' | 'host-requested' | 'host-accepted' | 'host-declined' | 'failed') {
         if (this.#closed) return;
@@ -264,6 +289,7 @@ export class ExtensionShell {
         this.#recoveryDialog = undefined;
     }
     #offerRecovery(offer: Extract<ExtensionResult, { status: 'busy' }>) {
+        this.#clearLoading();
         this.#closeRecovery();
         this.#show('');
         this.hostContextChanged(this.app.getHostContext?.() ?? {}, false);
@@ -398,6 +424,7 @@ export class ExtensionShell {
             await this.#request({ action: 'revoke', grant: result.grant }).catch(() => undefined);
     }
     #chooser(notice = '', label = 'New Document', cancellable = false, restoreFocus = false) {
+        this.#clearLoading();
         const epoch = ++this.#choiceEpoch;
         this.controls.className = 'extension-controls'; this.controls.dataset.mode = 'chooser'; this.status.dataset.extensionMode = 'chooser';
         if (!this.#active) this.#resetHost();
@@ -536,10 +563,13 @@ export class ExtensionShell {
             const result = await this.app.openLink({ url });
             if (result.isError === true) throw new Error('The host could not open this web link.');
         }, subscribeInvalidations: listener => { this.#listeners.add(listener); return () => this.#listeners.delete(listener); } });
-        this.#show('Opening PDF…');
-        this.#unmount = mountCodexProductionReview(this.root, runtime, () => { if (epoch === this.#epoch)
-            this.#show('The PDF could not be loaded. Reopen it through the file menu; protected work is retained.'); }, () => { if (epoch === this.#epoch && this.#connected)
-            this.#show(this.#hostNotice); }, this.#contextBridge(this.#readerTools, epoch), snapshot => { if (epoch !== this.#epoch || this.#closed || !this.#connected || snapshot.documentGeneration !== this.#active?.generation) return; this.#snapshot = snapshot; this.#rememberPage(snapshot); this.#context?.publish(snapshot); this.#show(this.#message); }, (title, generation) => { if (epoch !== this.#epoch || this.#closed || generation !== this.#active?.generation) return; this.#title = title; this.#show(this.#message); });
+        this.#beginLoading();
+        this.#show('');
+        this.#unmount = mountCodexProductionReview(this.root, runtime, () => { if (epoch === this.#epoch) {
+            this.#clearLoading();
+            this.#show('The PDF could not be loaded. Reopen it through the file menu; protected work is retained.'); } }, () => { if (epoch === this.#epoch) {
+            this.#clearLoading();
+            this.#show(this.#connected ? this.#hostNotice : this.#message); } }, this.#contextBridge(this.#readerTools, epoch), snapshot => { if (epoch !== this.#epoch || this.#closed || !this.#connected || snapshot.documentGeneration !== this.#active?.generation) return; this.#snapshot = snapshot; this.#rememberPage(snapshot); this.#context?.publish(snapshot); this.#show(this.#message); }, (title, generation) => { if (epoch !== this.#epoch || this.#closed || generation !== this.#active?.generation) return; this.#title = title; this.#show(this.#message); });
         this.#liveness?.stop();
         this.#liveness = new PanelLiveness({ renew: async () => { await this.#probe('renew'); }, poll: async () => { await this.#probe('watermark'); }, pollInterval: () => document.hidden ? 5000 : 1000, onState: state => { if (epoch !== this.#epoch || this.#closed)
                 return; if (state === 'reconnecting')
@@ -748,7 +778,7 @@ export class ExtensionShell {
         return this.#resume;
     }
     #ended() { if (this.#closed)
-        return; this.#connected = false; this.#readerTools?.dispose(); this.#closeRecovery(); this.#context?.dispose(); this.#liveness?.stop(); void this.#host?.dispose().catch(() => undefined); this.root.inert = true; this.#show('This connection ended. Reopen the PDF through its file menu; accepted annotations and protected drafts are retained.'); this.#closed = true; this.#epoch++; }
+        return; this.#clearLoading(); this.#connected = false; this.#readerTools?.dispose(); this.#closeRecovery(); this.#context?.dispose(); this.#liveness?.stop(); void this.#host?.dispose().catch(() => undefined); this.root.inert = true; this.#show('This connection ended. Reopen the PDF through its file menu; accepted annotations and protected drafts are retained.'); this.#closed = true; this.#epoch++; }
     visibilityChanged(hidden: boolean) {
         if (!this.#active || this.#closed) return;
         this.root.inert = hidden || !this.#connected;
@@ -764,6 +794,7 @@ export class ExtensionShell {
     }
     async #release() {
         document.defaultView?.removeEventListener('pagehide', this.#pageHidden);
+        this.#clearLoading();
         this.#closed = true;
         this.#connected = false;
         this.root.inert = true;

@@ -226,3 +226,34 @@ test('removing host context cancels a pending automatic publication without expo
     expect(await reader.tool('inspect_review', {})).toMatchObject({ status: 'current', documentGeneration: 1 });
   } finally { await reader.dispose(); }
 });
+
+for (const width of [1120, 375]) test(`Resume keeps a calm loading surface until the reader is ready at ${width}px`, async ({ page }, info) => {
+  await page.setViewportSize({ width, height: 800 });
+  const reader = await extensionRecoveryReader(page);
+  let release: (() => void) | undefined;
+  try {
+    await reader.mount(false); await reader.ready();
+    await page.evaluate(() => (window as any).recoveryAcceptance.shell.teardown());
+    await reader.mount(true);
+    release = reader.holdBootstrap();
+    await page.locator('.extension-recent-card').hover();
+    await page.getByRole('button', { name: 'Resume Recent paper.pdf', exact: true }).click();
+    const loading = page.getByRole('status', { name: 'Opening document', exact: true });
+    await expect(loading).toBeVisible();
+    await expect(page.locator('#root')).toHaveCSS('visibility', 'hidden');
+    await expect(page.locator('#status')).toBeHidden();
+    await expect(loading.locator('.extension-loading__content')).toHaveCSS('opacity', '1');
+    await expect.poll(() => loading.evaluate(element => {
+      const bounds = element.getBoundingClientRect();
+      return { width: bounds.width, height: bounds.height };
+    })).toEqual({ width, height: 800 });
+    await info.attach(`resume-loading-${width}px`, { body: await page.screenshot(), contentType: 'image/png' });
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await expect(loading.locator('.extension-loading__indicator')).toHaveCSS('animation-name', 'none');
+    release(); release = undefined;
+    await reader.ready();
+    await expect(loading).toHaveCount(0);
+    await expect(page.locator('#root')).toHaveCSS('visibility', 'visible');
+    await expect(page.locator('#status')).toBeHidden();
+  } finally { release?.(); await reader.dispose(); }
+});
