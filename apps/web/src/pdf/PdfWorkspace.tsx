@@ -1,3 +1,4 @@
+import { DocumentLoading } from "../app/DocumentLoading.js";
 import { MainDocumentPreviewBoundary, MainDocumentPreviewLimit } from './MainDocumentPreviewBoundary.js';
 import type { ExistingAnnotation, SourceNativeAnnotation } from './existing-annotations.js';
 import { ANNOTATION_CSS_VARIABLES } from '../../../../packages/core/src/annotation-appearance.js';
@@ -18,7 +19,6 @@ import { readingLayoutPadding, readingPageOffset, type TextFitLayout } from './t
 import type { ReviewAnnotation } from '../../../../packages/core/src/pdf-writer.js';
 import type { PdfSearchResult } from './pdf-search-model.js';
 import type { ReferenceScrollPosition } from './reference-manual-scroll.js';
-import { ReviewIcon } from '../review/ReviewIcon.js';
 import { combinePageRotation, positionOwnedRect, selectionLayerStyle } from './owned-overlay.js';
 import { groupOwnedMarkGeometryByPage, hitTestOwnedMark } from './owned-mark-hit-test.js';
 import {
@@ -211,7 +211,7 @@ export function PdfWorkspace({
             </div>;
           }
           if (!pluginsReady || !mainDocument?.document) {
-            return <div className="pdf-workspace__loading" role="status"><ReviewIcon name="loading" />Loading local PDF…</div>;
+            return <DocumentLoading />;
           }
           const activePdf = mainDocument.document;
           const readingBounds = reading?.document === activePdf && reading.generation === documentGeneration && reading.alignment === 'text'

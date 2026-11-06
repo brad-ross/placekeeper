@@ -1,3 +1,4 @@
+import { DocumentLoading } from "./app/DocumentLoading.js";
 import { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { HostRuntime, HostRuntimeBootstrap } from './host/runtime.js';
@@ -20,7 +21,7 @@ function CodexProductionReview({ runtime, onError, onReady, agentBridge, onConte
   }, [runtime, initial, attempt, onError]);
   if (initial !== undefined) return <RuntimeProductionReviewApp runtime={runtime} initial={initial} onRuntimeError={onError} onDocumentReady={onReady} {...(onDocumentTitleChange === undefined ? {} : { onDocumentTitleChange })} {...(onContextSnapshot === undefined ? {} : { onContextSnapshot })} {...(agentBridge === undefined ? {} : { agentBridge })} />;
   if (failed) return <div role="alert">The PDF resources could not be verified. <button onClick={() => setAttempt(value => value + 1)}>Retry</button></div>;
-  return <div role="status">Loading PDF…</div>;
+  return <DocumentLoading />;
 }
 
 /** The admitted MCP shell owns lifetime; this is the same reader mounted by other hosts. */

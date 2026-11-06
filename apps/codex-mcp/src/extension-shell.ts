@@ -106,13 +106,13 @@ export class ExtensionShell {
         this.#clearLoading();
         this.root.dataset.extensionLoading = 'true';
         const loading = document.createElement('div');
-        loading.className = 'extension-loading';
+        loading.className = 'extension-loading document-loading';
         loading.setAttribute('role', 'status');
         loading.setAttribute('aria-label', 'Opening document');
         const content = document.createElement('div');
-        content.className = 'extension-loading__content';
+        content.className = 'document-loading__content';
         const indicator = document.createElement('span');
-        indicator.className = 'extension-loading__indicator';
+        indicator.className = 'document-loading__indicator';
         indicator.setAttribute('aria-hidden', 'true');
         const label = document.createElement('span');
         label.textContent = 'Opening document…';

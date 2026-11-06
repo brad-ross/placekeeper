@@ -1,3 +1,4 @@
+import { DocumentLoading } from "./app/DocumentLoading.js";
 import { ReviewUpgradePreparation, UpgradeCommandGate } from "./host/upgrade-preparation.js";
 import type { NativeForwardState } from "../../../packages/core/src/native-synctex-protocol.js";
 import { createRoot } from "react-dom/client";
@@ -518,13 +519,13 @@ export function RuntimeLoadingWorkspace(props: {
   readonly refreshStatus: GenerationRefreshStatus;
 }) {
   return <section
-    className="macos-loading-shell__workspace"
+    className="runtime-loading-workspace"
     data-runtime-loading-workspace
     aria-busy="true"
   >
-    <p role={props.refreshStatus === "failed" ? "alert" : "status"}>
-      {props.refreshStatus === "failed" ? "This review could not be prepared." : "Preparing this review…"}
-    </p>
+    {props.refreshStatus === "failed"
+      ? <p role="alert">This review could not be prepared.</p>
+      : <DocumentLoading />}
   </section>;
 }
 

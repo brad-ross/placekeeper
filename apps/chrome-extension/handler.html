@@ -7,7 +7,7 @@
     <link rel="icon" type="image/png" sizes="32x32" href="./assets/icon32.png">
     <link rel="stylesheet" href="/src/extension.css">
   </head>
-  <body class="handler">
+  <body class="handler" data-document-loading="true">
     <div id="root" aria-label="Placekeeper PDF review" inert></div>
     <main
       id="launch-shell"
@@ -17,6 +17,12 @@
       aria-labelledby="title"
       aria-describedby="status"
     >
+      <div class="document-loading" role="status" aria-label="Opening document">
+        <div class="document-loading__content">
+          <span class="document-loading__indicator" aria-hidden="true"></span>
+          <span>Opening document…</span>
+        </div>
+      </div>
       <header class="handler-dialog__header compact-editorial-modal__header">
         <h2 id="title" tabindex="-1">Opening in Placekeeper</h2>
       </header>

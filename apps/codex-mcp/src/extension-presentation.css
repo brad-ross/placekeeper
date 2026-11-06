@@ -116,37 +116,5 @@ html[data-placekeeper-extension="true"] body:has(.extension-controls[data-mode="
 /* Keep bootstrap text and the unfinished reader behind one stable surface.
    Visibility preserves viewport measurement while the first page is prepared. */
 #root[data-extension-loading="true"] { visibility: hidden; }
-.extension-loading {
-  position: fixed;
-  inset: 0;
-  display: grid;
-  place-items: center;
-  padding: 24px;
-  background: var(--review-surface-canvas);
-  color: var(--review-ink-muted);
-  font: 400 13px/1.5 var(--review-font-ui);
-}
+.extension-loading { position: fixed; inset: 0; }
 .extension-controls[data-display-mode="inline"] .extension-loading { display: none; }
-.extension-loading__content {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  animation: extension-loading-appear 160ms ease-out 180ms both;
-}
-.extension-loading__indicator {
-  box-sizing: border-box;
-  width: 16px;
-  height: 16px;
-  border: 1.5px solid var(--review-border-subtle);
-  border-top-color: currentColor;
-  border-radius: 50%;
-  animation: terminal-recovery-spin 900ms linear infinite;
-}
-@keyframes extension-loading-appear {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-@media (prefers-reduced-motion: reduce) {
-  .extension-loading__content { animation: none; }
-  .extension-loading__indicator { animation: none; }
-}

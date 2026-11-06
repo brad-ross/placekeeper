@@ -884,7 +884,7 @@ it('keeps one loading surface until the initial reader is ready and exposes fail
     await f.shell.receive(active());
     expect(f.root.dataset.extensionLoading).toBe('true');
     expect(f.status.hidden).toBe(true);
-    expect(descendants(f.controls).some(node => node.className === 'extension-loading')).toBe(true);
+    expect(descendants(f.controls).some(node => node.className === 'extension-loading document-loading')).toBe(true);
     host.mounts.at(-1)![3](1);
     expect(f.root.dataset.extensionLoading).toBeUndefined();
     await f.shell.teardown();

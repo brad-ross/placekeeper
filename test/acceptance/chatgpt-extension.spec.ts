@@ -242,14 +242,14 @@ for (const width of [1120, 375]) test(`Resume keeps a calm loading surface until
     await expect(loading).toBeVisible();
     await expect(page.locator('#root')).toHaveCSS('visibility', 'hidden');
     await expect(page.locator('#status')).toBeHidden();
-    await expect(loading.locator('.extension-loading__content')).toHaveCSS('opacity', '1');
+    await expect(loading.locator('.document-loading__content')).toHaveCSS('opacity', '1');
     await expect.poll(() => loading.evaluate(element => {
       const bounds = element.getBoundingClientRect();
       return { width: bounds.width, height: bounds.height };
     })).toEqual({ width, height: 800 });
     await info.attach(`resume-loading-${width}px`, { body: await page.screenshot(), contentType: 'image/png' });
     await page.emulateMedia({ reducedMotion: 'reduce' });
-    await expect(loading.locator('.extension-loading__indicator')).toHaveCSS('animation-name', 'none');
+    await expect(loading.locator('.document-loading__indicator')).toHaveCSS('animation-name', 'none');
     release(); release = undefined;
     await reader.ready();
     await expect(loading).toHaveCount(0);

@@ -600,5 +600,5 @@ test('reports an unreadable PDF instead of leaving the local loading screen fore
     route.fulfill({ status: 200, contentType: 'application/pdf', body: '' }));
   await page.goto('/test/acceptance/viewer-harness/index.html');
   await expect(page.getByRole('alert').filter({ hasText: 'This PDF could not be loaded.' })).toBeVisible();
-  await expect(page.getByText('Loading local PDF…', { exact: true })).toHaveCount(0);
+  await expect(page.getByRole('status', { name: 'Opening document', exact: true })).toHaveCount(0);
 });
