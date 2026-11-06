@@ -132,6 +132,7 @@ export class HostResourcePersistence {
     }
     async finish(transfer: string): Promise<{
         opened: OpenReviewResult;
+        file?: HostResourceFile;
     } | { copyRecovery: HostCopyRecoveryMatch } | HostResourceResult> {
         const t = this.#transfers.get(transfer);
         if (!t || !t.current() || t.offset !== t.input.byteLength)
@@ -216,7 +217,7 @@ export class HostResourcePersistence {
                     throw error;
                 }
             }
-            return { opened };
+            return { opened, ...(t.file ? {file:t.file} : {}) };
         }
         finally {
             this.#transfers.delete(transfer);

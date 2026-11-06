@@ -33,7 +33,7 @@ async function fixture(snapshotHooks?: SnapshotHooks, picker?: DestinationPicker
   const manager = new ExtensionRuntimeManager(broker, { backend, now: () => time, panelLeaseMs: 100, grantIdleMs: 1000,
     pickPdf: async () => pdfPath });
   cleanups.push(async () => { await manager.close(); await saving.drain(); await broker.quiesceForShutdown(); await rm(root, { recursive: true, force: true }); });
-  return { broker, backend, manager, pdfPath, advance(ms: number) { time += ms; } };
+  return { root, broker, backend, manager, saving, pdfPath, advance(ms: number) { time += ms; } };
 }
 function request(active: Active, method: string, payload: unknown = {}): CodexAppRequest {
   return { protocolVersion: 1, runtimeId: active.runtimeId, attemptId: active.attemptId, generation: active.generation,
@@ -208,6 +208,120 @@ describe("app-owned extension presentations", () => {
     expect(resumed.presentation.presentationCapability).not.toBe(initialOpen.presentation.presentationCapability);
     expect(payload(await f.manager.handle(request(resumed.presentation, "bootstrap"))).state.items[0].payload.comment).toBe("accepted");
     expect(await f.manager.handle(request(initialOpen.presentation, "bootstrap"))).toMatchObject({ status: "denied" });
+  });
+
+  it("explicitly recovers a disconnected local review and retires every old authority", async () => {
+    const f = await fixture(), before = await opened(f.manager, { pdfPath: f.pdfPath });
+    const original = payload(await f.manager.handle(request(before.presentation, 'bootstrap')));
+    await f.broker.acceptMutation(original.sessionId, { type: 'set-annotation-name', expectedRevision: 0, annotationName: 'retained work' });
+    f.advance(101);
+    const offer = await f.manager.open({ pdfPath: f.pdfPath });
+    expect(offer).toMatchObject({ status: 'busy', canResume: false, canRecover: true });
+    if (offer.status !== 'busy') throw Error('Expected choice');
+    const input = { action: 'choose', recoveryToken: offer.recoveryToken, choice: 'recover', operationId: randomUUID() } as const;
+    const chosen = await f.manager.dispatch(input);
+    expect(chosen.status).toBe('provisional');
+    if (chosen.status !== 'provisional') throw Error('Expected provisional');
+    expect(await f.manager.dispatch(input)).toEqual(chosen);
+    const after = active(await f.manager.resume(chosen.grant, randomUUID(), 'activate'));
+    const restored = payload(await f.manager.handle(request(after.presentation, 'bootstrap')));
+    expect(restored.sessionId).toBe(original.sessionId);
+    expect(restored.state.annotationName).toBe('retained work');
+    expect(await f.manager.resume(before.grant, randomUUID())).toEqual({ status: 'unavailable' });
+    expect(await f.manager.handle(request(before.presentation, 'command', { type: 'set-annotation-name', expectedRevision: 1, annotationName: 'stale' }))).toMatchObject({ status: 'denied' });
+    expect(f.broker.state(original.sessionId)?.annotationName).toBe('retained work');
+  });
+  it("rejects disconnected recovery after the old panel reconnects and loses its next lease", async () => {
+    const f = await fixture(), before = await opened(f.manager, {});
+    const liveOffer = await f.manager.open({ pdfPath: f.pdfPath });
+    expect(liveOffer).not.toHaveProperty('canRecover', true);
+    f.advance(101);
+    const offer = await f.manager.open({ pdfPath: f.pdfPath });
+    expect(offer).toMatchObject({ canRecover: true });
+    if (offer.status !== 'busy') throw Error('Expected choice');
+    const resumed = active(await f.manager.resume(before.grant, randomUUID()));
+    expect(await f.manager.dispatch({ action: 'choose', recoveryToken: offer.recoveryToken, choice: 'recover', operationId: randomUUID() })).toEqual({ status: 'unavailable' });
+    expect((await f.manager.handle(request(resumed.presentation, 'renew'))).status).toBe('ok');
+    f.advance(101);
+    expect(await f.manager.dispatch({ action: 'choose', recoveryToken: offer.recoveryToken, choice: 'recover', operationId: randomUUID() })).toEqual({ status: 'unavailable' });
+    expect((await f.manager.resume(resumed.grant, randomUUID())).status).toBe('active');
+  });
+
+  it("activates and reconnects protected work when the optional recent index is malformed", async () => {
+    const f = await fixture(), provisional = await f.manager.open({ pdfPath: f.pdfPath });
+    if (provisional.status !== 'provisional') throw Error('Expected provisional');
+    await writeFile(join(f.broker.recoveryRoot, 'extension-recent-reviews.json'), '{invalid', { mode: 0o600 });
+    const first = active(await f.manager.resume(provisional.grant, randomUUID(), 'activate'));
+    const state = payload(await f.manager.handle(request(first.presentation, 'bootstrap')));
+    expect(f.broker.chromeProtected(state.sessionId)).toBe(true);
+    await expect(f.manager.dispatch({ action: 'recent-list' })).rejects.toThrow();
+    f.advance(101);
+    const next = active(await f.manager.resume(first.grant, randomUUID()));
+    expect(payload(await f.manager.handle(request(next.presentation, 'bootstrap'))).sessionId).toBe(state.sessionId);
+  });
+
+  it("opens an independent review of an exact clean browser session without changing that session", async () => {
+    const f = await fixture(), original = await f.broker.openReview({ pdfPath: f.pdfPath });
+    if (original.kind === 'recovery-offered') throw Error('Expected clean review');
+    const state = f.broker.state(original.launch.sessionId);
+    expect(f.broker.chromeProtected(original.launch.sessionId)).toBe(false);
+    const offered = await f.manager.open({ pdfPath: f.pdfPath });
+    expect(offered).toMatchObject({ status: 'busy', canResume: false });
+    if (offered.status !== 'busy') throw Error('Expected choice');
+    const fork = await f.manager.choose({ action: 'choose', recoveryToken: offered.recoveryToken, choice: 'fork', operationId: randomUUID() });
+    expect(fork.status).toBe('provisional');
+    if (fork.status !== 'provisional') throw Error('Expected fork');
+    const after = active(await f.manager.resume(fork.grant, randomUUID(), 'activate'));
+    expect(payload(await f.manager.handle(request(after.presentation, 'bootstrap'))).sessionId).not.toBe(original.launch.sessionId);
+    expect(f.broker.state(original.launch.sessionId)).toEqual(state);
+    expect(f.broker.chromeProtected(original.launch.sessionId)).toBe(false);
+  });
+
+  it("lists private recent reviews and resumes the selected review at its retained page", async () => {
+    const f = await fixture(), before = await opened(f.manager, {});
+    const original = payload(await f.manager.handle(request(before.presentation, 'watermark')));
+    expect(await f.manager.dispatch({ action: 'reading-position', grant: before.grant, page: 1 })).toEqual({ status: 'position-saved' });
+    const list: any = await f.manager.dispatch({ action: 'recent-list' });
+    expect(list).toMatchObject({ status: 'recent-reviews', items: [{ title: 'paper.pdf', page: 1 }] });
+    expect(JSON.stringify(list)).not.toContain(f.pdfPath);
+    expect(JSON.stringify(list)).not.toContain(original.sessionId);
+    expect(JSON.stringify(list)).not.toContain(before.grant);
+    await f.manager.revoke(before.grant);
+    const offered: any = await f.manager.dispatch({ action: 'recent-open', id: list.items[0].id });
+    expect(offered).toMatchObject({ status: 'busy', canResume: true });
+    const chosen: any = await f.manager.choose({ action: 'choose', recoveryToken: offered.recoveryToken, choice: 'resume', operationId: randomUUID() });
+    const after = active(await f.manager.resume(chosen.grant, randomUUID(), 'activate'));
+    const boot = payload(await f.manager.handle(request(after.presentation, 'bootstrap')));
+    expect(boot.sessionId).toBe(original.sessionId);
+    expect(boot.location).toEqual({ kind: 'page', page: 1 });
+    expect(await f.manager.dispatch({ action: 'recent-open', id: f.pdfPath })).toEqual({ status: 'unavailable' });
+    expect(await f.manager.dispatch({ action: 'reading-position', grant: before.grant, page: 2 })).toEqual({ status: 'unavailable' });
+  });
+
+  it("resumes the exact independent recent review after a service restart", async () => {
+    const f = await fixture(), first = await opened(f.manager, {});
+    const firstState = payload(await f.manager.handle(request(first.presentation, 'watermark')));
+    const offer = await f.manager.open({pdfPath:f.pdfPath});if(offer.status!=='busy')throw Error('Expected choice');
+    const fork=await f.manager.choose({action:'choose',recoveryToken:offer.recoveryToken,choice:'fork',operationId:randomUUID()});if(fork.status!=='provisional')throw Error('Expected fork');
+    const second=active(await f.manager.resume(fork.grant,randomUUID(),'activate'));
+    const secondState=payload(await f.manager.handle(request(second.presentation,'watermark')));
+    await f.broker.acceptMutation(firstState.sessionId,{type:'set-annotation-name',expectedRevision:0,annotationName:'first'});
+    await f.broker.acceptMutation(secondState.sessionId,{type:'set-annotation-name',expectedRevision:0,annotationName:'independent'});
+    await f.manager.dispatch({action:'reading-position',grant:second.grant,page:1});
+    const list:any=await f.manager.dispatch({action:'recent-list'});expect(list.items).toHaveLength(2);
+    const id=list.items[0].id;
+    await f.manager.close();await f.saving.drain();await f.broker.quiesceForShutdown();
+    const broker=new SessionBroker({recoveryRoot:join(f.root,'recovery'),portableReader:async()=>[],inspectGeneration:async()=>({pageCount:1,pages:[{pageIndex:0,text:'next'}]})});
+    const writer={write:async():Promise<never>=>{throw Error('unexpected write');}};
+    const saving=new PdfSaveCoordinator({broker,writer}),exporting=new ExportCoordinator({writer,capabilities:broker.capabilities});
+    const backend=new CodexServiceRuntimeBackend({broker,saving,exporting,assetRoot:join(f.root,'assets')});
+    const manager=new ExtensionRuntimeManager(broker,{backend});
+    cleanups.push(async()=>{await manager.close();await saving.drain();await broker.quiesceForShutdown();});
+    const selected:any=await manager.dispatch({action:'recent-open',id});expect(selected).toMatchObject({status:'busy',canResume:true});
+    const chosen:any=await manager.choose({action:'choose',recoveryToken:selected.recoveryToken,choice:'resume',operationId:randomUUID()});
+    const resumed=active(await manager.resume(chosen.grant,randomUUID(),'activate'));
+    const boot=payload(await manager.handle(request(resumed.presentation,'bootstrap')));
+    expect(boot.sessionId).toBe(secondState.sessionId);expect(boot.state.annotationName).toBe('independent');expect(boot.location).toEqual({kind:'page',page:1});
   });
 
   it("reobserves a superseded canonical check before exposing a new source generation", async () => {

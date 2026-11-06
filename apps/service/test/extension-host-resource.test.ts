@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
 import { SessionBroker } from '../src/sessions/session-broker.js';
 import { ExtensionRuntimeManager } from '../src/codex/extension-runtime.js';
+import { ExtensionRecentReviews } from '../src/codex/extension-recent-reviews.js';
 import { CodexServiceRuntimeBackend } from '../src/codex/codex-runtime-backend.js';
 import { PdfSaveCoordinator } from '../src/saving/pdf-save-coordinator.js';
 import { ExportCoordinator } from '../src/export/export-coordinator.js';
@@ -18,7 +19,7 @@ import type { PdfWriter } from '../../../packages/core/src/pdf-writer.js';
 import { addPageNote } from '../../../packages/core/src/review-commands.js';
 const cleanups: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); });
-async function fixture(options: {writer?:PdfWriter;realVerification?:boolean} = {}) {
+async function fixture(options: {writer?:PdfWriter;realVerification?:boolean;now?:()=>number} = {}) {
  const root=await mkdtemp(join(tmpdir(),'placekeeper-host-resource-'));
  const broker=new SessionBroker({recoveryRoot:join(root,'recovery'),portableReader:async()=>[],rewriteAssessor:async()=>({eligible:true}),browserSourceInspector:async()=>({rewriteEligibility:{eligible:true},importedItems:[]}),inspectGeneration:async()=>({pageCount:1,pages:[{pageIndex:0,text:'paper'}]})});
  const writer=options.writer??{write:async()=>{throw Error('unexpected local write');}};
@@ -26,7 +27,7 @@ async function fixture(options: {writer?:PdfWriter;realVerification?:boolean} = 
  const saving=new PdfSaveCoordinator({broker,writer,picker,...(options.realVerification?{}:{verify:async({annotations}:{annotations:readonly {id:string}[]})=>({pageCount:1,annotationIds:annotations.map(a=>a.id)})})});
  const exporting=new ExportCoordinator({writer,capabilities:broker.capabilities});
  const backend=new CodexServiceRuntimeBackend({broker,saving,exporting});
- const manager=new ExtensionRuntimeManager(broker,{backend});
+ const manager=new ExtensionRuntimeManager(broker,{backend,...(options.now?{now:options.now,panelLeaseMs:100,grantIdleMs:1000}:{})});
  cleanups.push(async()=>{await manager.close();await saving.drain();await broker.quiesceForShutdown();await rm(root,{recursive:true,force:true});});
  return {root,broker,manager,saving,picker,exporting};
 }
@@ -76,6 +77,44 @@ async function openHost(f:Awaited<ReturnType<typeof fixture>>,writable=false,inp
 function writerFixture(){
  const write=vi.fn(async(request:any)=>{const pdfBytes=Buffer.from('%PDF-1.7\n'+JSON.stringify(request.annotations)+'\n%%EOF');return {pdfBytes,evidence:{backend:'embedpdf' as const,backendVersion:'test',originalSha256:request.sourceSha256,outputSha256:createHash('sha256').update(pdfBytes).digest('hex'),pageCount:1,structurallyValid:true,preexistingAnnotationIds:[],annotations:request.annotations.map((a:any)=>({id:a.id,subtype:'text',contents:a.contents,author:a.author,flags:['print'],hasNormalAppearance:true}))}};});return {write};
 }
+it.each([false, true])('recovers disconnected host review with old authority retired (copy=%s)',async copy=>{
+ let time=Date.now();const f=await fixture({writer:writerFixture(),now:()=>time}),h=await openHost(f,true);
+ if(copy){const folder:any=await h.call('chooseFolder');await h.call('chooseCopy',{filename:'recover.pdf',folderSelectionId:folder.payload.selectionId});}
+ await h.call('command',addPageNote(f.broker.state(h.sessionId)!,0,{x:20,y:20,width:20,height:20},'retained'));
+ await f.saving.drain();
+ time+=101;
+ const a:any=await f.manager.dispatch({action:'host-open',file:{name:'host.pdf',resourceUri:copy?'opaque:new-handle':'opaque:fixture'}});
+ const offer:any=await upload(f.manager,{ticket:a.ticket},bytes,true);
+ expect(offer).toMatchObject({status:'busy',canRecover:true});
+ const chosen:any=await f.manager.dispatch({action:'choose',recoveryToken:offer.recoveryToken,choice:'recover',operationId:randomUUID()});
+ expect(chosen.status).toBe('provisional');
+ expect(await upload(f.manager,{grant:chosen.grant},bytes,true)).toMatchObject({status:'host-ready'});
+ const recovered:any=await f.manager.resume(chosen.grant,randomUUID(),'activate');expect(recovered.status).toBe('active');
+ expect(await f.manager.resume(h.active.grant,randomUUID())).toEqual({status:'unavailable'});
+ expect(await h.call('command',addPageNote(f.broker.state(h.sessionId)!,0,{x:20,y:20,width:20,height:20},'stale'))).toMatchObject({status:'denied'});
+ expect(f.broker.state(h.sessionId)?.items).toHaveLength(1);
+ if(copy)expect(f.broker.saveStatus(h.sessionId)?.destination).toMatchObject({phase:'active',kind:'copy'});
+});
+it('resumes a recent host review through its retained host file after restart',async()=>{
+ const f=await fixture({writer:writerFixture()}),h=await openHost(f);
+ const folder:any=await h.call('chooseFolder');await h.call('chooseCopy',{filename:'recent-copy.pdf',folderSelectionId:folder.payload.selectionId});
+ await h.call('command',addPageNote(f.broker.state(h.sessionId)!,0,{x:20,y:20,width:20,height:20},'recent protected'));
+ await f.manager.dispatch({action:'reading-position',grant:h.active.grant,page:1});
+ const list:any=await f.manager.dispatch({action:'recent-list'});expect(list.items).toHaveLength(1);expect(JSON.stringify(list)).not.toContain('opaque:fixture');
+ await f.manager.close();await f.saving.drain();await f.broker.quiesceForShutdown();
+ const broker=new SessionBroker({recoveryRoot:join(f.root,'recovery'),portableReader:async()=>[],rewriteAssessor:async()=>({eligible:true}),browserSourceInspector:async()=>({rewriteEligibility:{eligible:true},importedItems:[]}),inspectGeneration:async()=>({pageCount:1,pages:[{pageIndex:0,text:'paper'}]})});
+ const writer=writerFixture(),saving=new PdfSaveCoordinator({broker,writer,verify:async({annotations})=>({pageCount:1,annotationIds:annotations.map(a=>a.id)})});
+ const exporting=new ExportCoordinator({writer,capabilities:broker.capabilities});
+ const manager=new ExtensionRuntimeManager(broker,{backend:new CodexServiceRuntimeBackend({broker,saving,exporting})});
+ cleanups.push(async()=>{await manager.close();await saving.drain();await broker.quiesceForShutdown();});
+ const offer:any=await manager.dispatch({action:'recent-open',id:list.items[0].id});expect(offer).toMatchObject({status:'busy',canResume:true});
+ const selected:any=await manager.choose({action:'choose',recoveryToken:offer.recoveryToken,choice:'resume',operationId:randomUUID()});
+ expect(selected).toMatchObject({status:'provisional',hostFile:{name:'host.pdf',resourceUri:'opaque:fixture'}});
+ expect(await upload(manager,{grant:selected.grant})).toMatchObject({status:'host-ready'});
+ const active:any=await manager.resume(selected.grant,randomUUID(),'activate');expect(active.status).toBe('active');
+ expect(broker.state(h.sessionId)?.items[0]?.payload.comment).toBe('recent protected');
+ expect(broker.saveStatus(h.sessionId)?.destination).toMatchObject({phase:'active',kind:'copy',targetPath:join(await realpath(f.root),'recent-copy.pdf')});
+});
 it('commits a host update as a successor generation while preserving predecessor bytes',async()=>{
  const f=await fixture(),h=await openHost(f);
  const source=f.broker.nativeAdmissionScope(h.sessionId)!.canonicalSourcePath;
@@ -251,6 +290,48 @@ async function saveHostCopy(
  expect(await host.call('command', addPageNote(f.broker.state(host.sessionId)!, 0, { x: 20, y: 20, width: 20, height: 20 }, comment))).toMatchObject({ status: 'ok' });
  await f.saving.drain();
 }
+
+it('keeps ignored matching host files out of the original recent identity and uses the selected file for a fork', async () => {
+ const f = await fixture({ writer: writerFixture() }), original = await openHost(f, true);
+ await saveHostCopy(f, original, 'identity-copy.pdf', 'retained');
+ const descriptor: any = await f.manager.dispatch({ action: 'host-open', file: { name: 'host.pdf', resourceUri: 'opaque:other' } });
+ const ignored: any = await upload(f.manager, { ticket: descriptor.ticket }, bytes, true);
+ expect(ignored).toMatchObject({ status: 'busy', matchingCopy: true });
+ const resumed: any = await f.manager.resume(original.active.grant, randomUUID());
+ expect(resumed.status).toBe('active');
+ const list: any = await f.manager.dispatch({ action: 'recent-list' });
+ await f.manager.revoke(resumed.grant);
+ const recent: any = await f.manager.dispatch({ action: 'recent-open', id: list.items[0].id });
+ const chosen: any = await f.manager.choose({ action: 'choose', recoveryToken: recent.recoveryToken, choice: 'resume', operationId: randomUUID() });
+ expect(chosen).toMatchObject({ status: 'provisional', hostFile: { resourceUri: 'opaque:fixture' } });
+ expect(await upload(f.manager, { grant: chosen.grant }, bytes, true)).toMatchObject({ status: 'host-ready' });
+ expect((await f.manager.resume(chosen.grant, randomUUID(), 'activate')).status).toBe('active');
+ const fork: any = await f.manager.choose({ action: 'choose', recoveryToken: ignored.recoveryToken, choice: 'fork', operationId: randomUUID() });
+ expect(fork).toMatchObject({ status: 'provisional', hostFile: { resourceUri: 'opaque:other' } });
+});
+
+it('keeps admitted host identity when a stale recent entry is opened after an index write failure', async () => {
+ const f = await fixture({ writer: writerFixture() }), original = await openHost(f, true);
+ await saveHostCopy(f, original, 'identity-copy.pdf', 'retained');
+ const list: any = await f.manager.dispatch({ action: 'recent-list' });
+ await f.manager.revoke(original.active.grant);
+ const descriptor: any = await f.manager.dispatch({ action: 'host-open', file: { name: 'host.pdf', resourceUri: 'opaque:adopted' } });
+ const offered: any = await upload(f.manager, { ticket: descriptor.ticket }, bytes, true);
+ const chosen: any = await f.manager.choose({ action: 'choose', recoveryToken: offered.recoveryToken, choice: 'resume', operationId: randomUUID() });
+ expect(await upload(f.manager, { grant: chosen.grant }, bytes, true)).toMatchObject({ status: 'host-ready' });
+ const remember = vi.spyOn(ExtensionRecentReviews.prototype, 'remember').mockRejectedValueOnce(Error('Index write unavailable'));
+ let admitted: any;
+ try { admitted = await f.manager.resume(chosen.grant, randomUUID(), 'activate'); }
+ finally { remember.mockRestore(); }
+ expect(admitted.status).toBe('active');
+ expect((await f.manager.dispatch({ action: 'recent-open', id: list.items[0].id })).status).toBe('busy');
+ const reconnected: any = await f.manager.resume(admitted.grant, randomUUID());
+ expect(reconnected.status).toBe('active');
+ await f.manager.revoke(reconnected.grant);
+ const recent: any = await f.manager.dispatch({ action: 'recent-open', id: list.items[0].id });
+ const selected: any = await f.manager.choose({ action: 'choose', recoveryToken: recent.recoveryToken, choice: 'resume', operationId: randomUUID() });
+ expect(selected).toMatchObject({ status: 'provisional', hostFile: { resourceUri: 'opaque:adopted' } });
+});
 
 it('offers an explicit saved-copy choice after a new opaque URI and respects existing app ownership', async () => {
  const f = await fixture({ writer: writerFixture() });

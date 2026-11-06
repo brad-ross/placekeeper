@@ -20,3 +20,7 @@ html[data-placekeeper-extension="true"][data-theme="dark"] :is(#root[data-produc
   --review-selection-bg: #444;
   --review-selection-ink: #eee;
 }
+
+.snapshot-context-picker[open] { max-height: min(40vh, 320px); overflow: auto; padding: 6px; overflow-wrap: anywhere; }
+.snapshot-context-picker input { box-sizing: border-box; max-width: 100%; }
+.snapshot-context-picker form { display: flex; flex-wrap: wrap; gap: 6px; align-items: end; }

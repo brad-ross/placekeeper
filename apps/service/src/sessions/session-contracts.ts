@@ -56,6 +56,8 @@ export function isLaunchSurface(value: unknown): value is LaunchSurface {
 export interface OpenReviewRequest {
   readonly pdfPath: string;
   readonly sourceRootPath?: string;
+  /** Service-only selection from the private recent-review index. */
+  readonly recoveryTargetSessionId?: string;
   readonly recoveryDecision?: RecoveryDecision;
   readonly recoveryOffer?: RecoveryOfferIdentity;
   readonly recoveryOperationId?: string;

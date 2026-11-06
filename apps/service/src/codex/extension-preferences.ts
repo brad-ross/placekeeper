@@ -87,7 +87,7 @@ export class ExtensionPreferences {
                 return [];
             const q = query.toLocaleLowerCase();
             return state.snapshots.flatMap(s => {
-                const subtitle = `Snapshot · generation ${s.generation} · revision ${s.revision}`;
+                const subtitle = `Captured ${s.capturedAt} · generation ${s.generation} · revision ${s.revision}`;
                 const items: MentionItem[] = [];
                 if (`${s.title} ${s.summary}`.toLocaleLowerCase().includes(q))
                     items.push({ type: 'resource', resourceUri: uri(s), title: s.title, subtitle });

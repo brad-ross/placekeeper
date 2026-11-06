@@ -30,19 +30,20 @@ export class HostResourceAdapter {
     #serial<T>(work: () => Promise<T>): Promise<T> { const result = this.#tail.then(work, work); this.#tail = result.catch(() => undefined); return result; }
     async open(result: Extract<ExtensionResult, {
         status: 'host-resource';
-    }>): Promise<ExtensionResult> {
+    }> | {status:'provisional';grant:string;hostFile:{name:string;resourceUri:string}}): Promise<ExtensionResult> {
+        const file=result.status==='host-resource'?result.file:result.hostFile;
         const epoch = this.#epoch, resources = this.options.resources();
         if (!resources)
             throw Error('This host cannot read the selected PDF. Open a local PDF through its file menu.');
-        this.#file = result.file;
+        this.#file = file;
         this.#unsubscribe = resources.addUpdateHandler(event => { if (event.params.uri === this.#file?.resourceUri && this.options.current())
             this.options.onUpdate(); });
-        const imported = await this.#serial(() => this.#read({ ticket: result.ticket }));
+        const imported = await this.#serial(() => this.#read(result.status==='host-resource'?{ ticket: result.ticket }:{grant:result.grant}));
         this.#assert(epoch);
         try {
-            await resources.subscribe({ uri: result.file.resourceUri });
+            await resources.subscribe({ uri: file.resourceUri });
             if (!this.#current(epoch)) {
-                await resources.unsubscribe({ uri: result.file.resourceUri }).catch(() => undefined);
+                await resources.unsubscribe({ uri: file.resourceUri }).catch(() => undefined);
                 throw Error('Host resource attempt retired');
             }
             this.#subscribed = true;
@@ -52,7 +53,7 @@ export class HostResourceAdapter {
                 throw error;
         }
         this.#assert(epoch);
-        return imported;
+        return result.status==='provisional' && (imported.status==='host-ready'||imported.status==='host-status') ? {status:'provisional',grant:result.grant} : imported;
     }
     withSaveBarrier<T>(work: () => Promise<T>): Promise<T> {
         const epoch = this.#epoch;

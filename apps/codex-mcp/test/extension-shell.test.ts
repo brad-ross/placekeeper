@@ -18,7 +18,7 @@ function fixture(handler: (request: any) => Promise<any> = async () => reply({ s
     const root = element(), status = element(), controls = element();
     return { app, shell: new ExtensionShell(app as unknown as App, root as unknown as HTMLElement, status as unknown as HTMLElement, controls as unknown as HTMLElement, resources, modelContext, message), root, status, controls, calls };
 }
-beforeEach(() => { vi.useFakeTimers(); vi.stubGlobal('document', { hidden: false, createElement: () => ({ append: vi.fn(), replaceChildren: vi.fn(), setAttribute: vi.fn() }), createTextNode: (value: string) => ({ textContent: value }) }); host.options.length = 0; host.mounts.length = 0; host.onMount = undefined; host.unmount.mockClear(); });
+beforeEach(() => { vi.useFakeTimers(); vi.stubGlobal('document', { hidden: false, createElement: () => ({ value: '', append: vi.fn(), replaceChildren: vi.fn(), setAttribute: vi.fn(), remove: vi.fn() }), createTextNode: (value: string) => ({ textContent: value }) }); host.options.length = 0; host.mounts.length = 0; host.onMount = undefined; host.unmount.mockClear(); });
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 it('does not close with an unresolved grant rotation after a lost resume reply', async () => {
     const f = fixture(async request => {
@@ -370,7 +370,7 @@ it('keeps a transport-paused host reader paused when explicit refresh cannot val
 
 it('shows a compact open-reader view, applies host theme and safe areas, and expands through the host', async () => {
     const html = { dataset: {} as Record<string, string>, style: { colorScheme: '', setProperty: vi.fn() } };
-    vi.stubGlobal('document', { hidden: false, documentElement: html, createElement: () => ({ append: vi.fn(), replaceChildren: vi.fn(), setAttribute: vi.fn() }), createTextNode: (value: string) => ({ textContent: value }) });
+    vi.stubGlobal('document', { hidden: false, documentElement: html, createElement: () => ({ value: '', append: vi.fn(), replaceChildren: vi.fn(), setAttribute: vi.fn(), remove: vi.fn() }), createTextNode: (value: string) => ({ textContent: value }) });
     const f = fixture();
     f.app.getHostContext = () => ({ displayMode: 'inline', theme: 'dark', safeAreaInsets: { top: 12, bottom: 8, left: 0, right: 0 } });
     const expand = vi.fn(async () => ({ mode: 'fullscreen' })); Object.assign(f.app, { requestDisplayMode: expand });
@@ -763,4 +763,56 @@ it('waits for the in-flight host write before choosing a local copy, then saves 
  expect(f.calls.some(r=>r.action==='app'&&r.request.method==='retrySave')).toBe(true);
  expect(resources.write).toHaveBeenCalledOnce();
  await f.shell.teardown();
+});
+
+it('offers explicit disconnected recovery without silently choosing it', async () => {
+ const f=fixture(async r=>reply(r.action==='choose'?{status:'provisional',grant}:r.action==='activate'?active():{status:'ok',payload:{}}));
+ await f.shell.receive({status:'busy',recoveryToken:'r'.repeat(43),canResume:false,canRecover:true});
+ expect(f.calls.some(r=>r.action==='choose')).toBe(false);
+ const recover=f.controls.append.mock.calls.map(([b])=>b).find(b=>b.textContent==='Recover disconnected review');
+ expect(recover).toBeDefined();recover.onclick();await vi.advanceTimersByTimeAsync(0);
+ expect(f.calls.find(r=>r.action==='choose')).toMatchObject({choice:'recover'});
+ expect(host.mounts).toHaveLength(1);await f.shell.teardown();
+});
+it('lists recent reviews in the conversation chooser and opens only the selected opaque ID', async () => {
+ const id='z'.repeat(32);
+ const f=fixture(async r=>reply(r.action==='recent-list'?{status:'recent-reviews',items:[{id,title:'Recent.pdf',updatedAt:'2026-11-05T12:00:00.000Z',page:3}]}:r.action==='recent-open'?{status:'busy',recoveryToken:'r'.repeat(43),canResume:true}:{status:'closed'}));
+ await f.shell.receive({status:'chooser'});await vi.advanceTimersByTimeAsync(0);
+ expect(f.calls.some(r=>r.action==='recent-open')).toBe(false);
+ const resume=f.controls.append.mock.calls.map(([b])=>b).find(b=>b.textContent==='Resume Recent.pdf');
+ expect(resume).toBeDefined();resume.onclick();await vi.advanceTimersByTimeAsync(0);
+ expect(f.calls.find(r=>r.action==='recent-open')).toEqual({action:'recent-open',id});
+ expect(f.controls.append.mock.calls.map(([b])=>b.textContent)).toContain('Resume protected review');
+ await f.shell.teardown();
+});
+
+it('includes authorized snapshot context from the empty conversation chooser without opening a PDF', async () => {
+ const uri=`placekeeper-mention://${'s'.repeat(32)}`;
+ let current:any=null;
+ const updates:any[]=[];
+ const f=fixture(async r=>reply(r.action==='recent-list'?{status:'recent-reviews',items:[]}:r.action==='mention-search'?{status:'mention-results',items:[{type:'resource',resourceUri:uri,title:'Shared.pdf',subtitle:'Captured snapshot'}]}:r.action==='mention-read'?{status:'mention-resource',text:'captured authorized text'}:{status:'closed'}),()=>undefined,()=>({getCurrent:()=>current,update:async(params:any)=>{updates.push(params);current={...params,updateId:'chooser-context'};return {updateId:'chooser-context'};}}));
+ await f.shell.receive({status:'chooser'});await vi.advanceTimersByTimeAsync(0);
+ const all=(node:any):any[]=>[node,...(node.append?.mock.calls.flatMap((args:any[])=>args.flatMap(all))??[])];
+ const nodes=()=>f.controls.append.mock.calls.flatMap(([node])=>all(node));
+ const picker=nodes().find(n=>n.className==='snapshot-context-picker');expect(picker).toBeDefined();picker.open=true;picker.ontoggle();await vi.advanceTimersByTimeAsync(0);
+ nodes().find(n=>n.textContent==='Include snapshot').onclick();await vi.advanceTimersByTimeAsync(0);
+ expect(updates.at(-1).content[0].resource.text).toContain('captured authorized text');
+ expect(f.calls.some(r=>r.action==='open'||r.action==='activate'||r.action==='context-published')).toBe(false);
+ expect(host.mounts).toHaveLength(0);await f.shell.teardown();
+});
+
+it.each(['picker', 'recent'] as const)('serializes %s opening against the other chooser actions through activation', async first => {
+ const opening=deferred(), activation=deferred(), id='z'.repeat(32);
+ const f=fixture(async r=>r.action==='recent-list'?reply({status:'recent-reviews',items:[{id,title:'Recent.pdf',updatedAt:'2026-11-05T12:00:00.000Z'}]}):r.action==='open'||r.action==='recent-open'?opening.promise:r.action==='activate'?activation.promise:reply({status:'closed'}));
+ await f.shell.receive({status:'chooser'});await vi.advanceTimersByTimeAsync(0);
+ const buttons=f.controls.append.mock.calls.map(([b])=>b);
+ const picker=buttons.find(b=>b.textContent==='Choose PDF'), recent=buttons.find(b=>b.textContent==='Resume Recent.pdf');
+ const chosen=first==='picker'?picker:recent, other=first==='picker'?recent:picker;
+ chosen.onclick();other.onclick();await vi.advanceTimersByTimeAsync(0);
+ expect(f.calls.filter(r=>r.action==='open'||r.action==='recent-open')).toHaveLength(1);
+ opening.resolve(reply({status:'provisional',grant}));await vi.advanceTimersByTimeAsync(0);
+ other.onclick();await vi.advanceTimersByTimeAsync(0);
+ expect(f.calls.filter(r=>r.action==='open'||r.action==='recent-open')).toHaveLength(1);
+ activation.resolve(reply(active(nextGrant)));await vi.advanceTimersByTimeAsync(0);
+ expect(host.mounts).toHaveLength(1);await f.shell.teardown();
 });

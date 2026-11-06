@@ -1,4 +1,5 @@
 import { anchorEvidenceFromReviewItem } from '../../../../packages/core/src/review-model.js';
+import { ExtensionRecentReviews } from './extension-recent-reviews.js';
 import { ExtensionPreferences } from './extension-preferences.js';
 import { HostResourcePersistence, type HostCopyRecoveryMatch } from './host-resource-persistence.js';
 import type { HostResourceRequest, HostResourceFile } from '../../../../packages/core/src/host-resource-protocol.js';
@@ -16,15 +17,20 @@ import type { CodexActiveScope, CodexServiceRuntimeBackend } from './codex-runti
 const secret = () => randomBytes(32).toString('base64url');
 const opaque = () => randomBytes(16).toString('base64url');
 const unavailable = (): ExtensionResult => ({status:'unavailable'});
-type RecordState = { sessionId:string; grant:string; expires:number; provisional:boolean; watermark:number; contextPublished:boolean; copyAdmission?:{match:HostCopyRecoveryMatch;verified:boolean;offer:Offer}; active?:ExtensionPresentation; lease?:number };
-type Offer = ({ path: string; hostSessionId?: string; resumeLiveHostCopy?: true; releasedLocalSessionId?: string; recoveryOffer?: RecoveryOfferIdentity } | { copyRecovery: HostCopyRecoveryMatch }) & {
+type RecordState = { sessionId:string; grant:string; expires:number; provisional:boolean; watermark:number; contextPublished:boolean; copyAdmission?:{match:HostCopyRecoveryMatch;verified:boolean;offer:Offer}; active?:ExtensionPresentation; lease?:number; disconnected?:true; page?:number };
+type Offer = ({ path: string; hostSessionId?: string; resumeLiveHostReview?: true; releasedLocalSessionId?: string; recoveryOffer?: RecoveryOfferIdentity } | { copyRecovery: HostCopyRecoveryMatch }) & {
   expires: number;
+  targetSessionId?: string;
+  hostFile?: HostResourceFile;
+  disconnected?: { sessionId: string; records: { record: RecordState; grantDigest: string }[] };
   result?: { operationId: string; choice: string; value: ExtensionResult };
 };
 
 /** App ownership is independent of trusted chat bindings. Grants never enter browser storage. */
 export class ExtensionRuntimeManager {
   readonly preferences:ExtensionPreferences;
+  readonly #recent:ExtensionRecentReviews;
+  readonly #hostFiles=new Map<string,HostResourceFile>();
   readonly #hostTickets=new Map<string,{file:HostResourceFile;expires:number}>();
   readonly #hostSessions=new Set<string>();
   readonly #host:HostResourcePersistence;
@@ -46,15 +52,22 @@ export class ExtensionRuntimeManager {
   #tail:Promise<unknown>=Promise.resolve();
   #closing=false;
   constructor(readonly broker:SessionBroker,options:{backend:CodexServiceRuntimeBackend;now?:()=>number;panelLeaseMs?:number;grantIdleMs?:number;pickPdf?:()=>Promise<string|undefined>}) {
-    this.preferences=new ExtensionPreferences(broker.recoveryRoot);this.#backend=options.backend;this.#host=new HostResourcePersistence(broker,options.backend);this.#now=options.now??Date.now;this.#lease=options.panelLeaseMs??30_000;this.#idle=options.grantIdleMs??30*60_000;this.#pick=options.pickPdf;
+    this.preferences=new ExtensionPreferences(broker.recoveryRoot);this.#recent=new ExtensionRecentReviews(broker.recoveryRoot,options.now);this.#backend=options.backend;this.#host=new HostResourcePersistence(broker,options.backend);this.#now=options.now??Date.now;this.#lease=options.panelLeaseMs??30_000;this.#idle=options.grantIdleMs??30*60_000;this.#pick=options.pickPdf;
     if(!Number.isSafeInteger(this.#lease)||this.#lease<=0||!Number.isSafeInteger(this.#idle)||this.#idle<=this.#lease)throw Error('Invalid extension lifetimes');
     this.#timer=setInterval(()=>this.#sweep(),Math.min(this.#lease,1000));this.#timer.unref();
     this.#unsubscribe=broker.onStateInvalidation(event=>{for(const r of this.#records.values())if(r.sessionId===event.sessionId){r.watermark++;if(event.reason==='generation')this.#suspend(r);}});
-    this.#unsubscribeEnd=broker.onSessionEnd(id=>{this.#releasedLocalSessions.delete(id);for(const r of this.#records.values())if(r.sessionId===id)this.#remove(r);});
+    this.#unsubscribeEnd=broker.onSessionEnd(id=>{this.#hostFiles.delete(id);this.#releasedLocalSessions.delete(id);for(const r of this.#records.values())if(r.sessionId===id)this.#remove(r);});
   }
   #serial<T>(work:()=>Promise<T>):Promise<T>{const result=this.#tail.then(work,work);this.#tail=result.catch(()=>undefined);return result;}
   async dispatch(raw:unknown):Promise<ExtensionResult|CodexAppResponse>{
     const r=parseExtensionRequest(raw);if(!r||this.#closing)return unavailable();
+    if(r.action==='recent-list')return {status:'recent-reviews',items:(await this.#recent.list()).map(({id,title,updatedAt,page})=>({id,title,updatedAt,...(page===undefined?{}:{page})}))};
+    if(r.action==='recent-open')return this.#serial(()=>this.#openRecent(r.id)).catch(()=>unavailable());
+    if(r.action==='reading-position')return this.#serial<ExtensionResult>(async()=>{
+      this.#sweep();const record=this.#records.get(digestSecretHex(r.grant));
+      if(!record?.active||record.provisional||this.#closing||this.broker.nativeAdmissionScope(record.sessionId)?.documentGeneration!==record.active.generation||this.broker.taskBindings.taskForGeneration(record.sessionId,record.active.generation))return unavailable();
+      await this.#recent.position(record.sessionId,r.page);record.page=r.page;return {status:'position-saved'};
+    });
     if(r.action==='settings-read')return {status:'settings',...await this.preferences.settings()};
     if(r.action==='settings-update'){await this.preferences.update(r.set);return {status:'settings',...await this.preferences.settings()};}
     if(r.action==='mention-search')return {status:'mention-results',items:await this.preferences.search(r.query)};
@@ -112,12 +125,13 @@ export class ExtensionRuntimeManager {
     if(r.operation==='finish'){
       const result=await this.#host.finish(r.transfer);
       if ('copyRecovery' in result) {
-        const token = secret();
-        this.#offers.set(digestSecretHex(token), { copyRecovery: result.copyRecovery, expires: this.#now() + 60000 });
-        return { status: 'busy', recoveryToken: token, canResume: !this.#hasReviewGrant(result.copyRecovery.sessionId), matchingCopy: true };
+        const token = secret(), disconnected = this.#disconnected(result.copyRecovery.sessionId);
+        this.#offers.set(digestSecretHex(token), { copyRecovery: result.copyRecovery, ...(disconnected ? {disconnected} : {}), expires: this.#now() + 60000 });
+        return { status: 'busy', recoveryToken: token, canResume: !this.#hasReviewGrant(result.copyRecovery.sessionId), matchingCopy: true, ...(disconnected ? {canRecover:true} : {}) };
       }
       if(!('opened' in result))return result;
       const opened=result.opened;
+      if(result.file)this.#hostFiles.set(opened.kind==='recovery-offered'?opened.recoverySessionId:opened.launch.sessionId,result.file);
       if(opened.kind==='recovery-offered'){
         const token=secret(),path=await this.broker.importedRecoveryPath(opened.recoverySessionId);
         if(!path)return unavailable();
@@ -126,11 +140,10 @@ export class ExtensionRuntimeManager {
       if(opened.kind==='focused'){
         const token=secret(),scope=this.broker.nativeAdmissionScope(opened.launch.sessionId);if(!scope)return unavailable();
         const sessionId = opened.launch.sessionId;
-        const destination = this.broker.saveStatus(sessionId)?.destination;
-        const canResume = destination?.phase === 'active' && destination.kind === 'copy' &&
-          !this.#hasReviewGrant(sessionId) && await this.#host.state(sessionId) !== undefined;
-        this.#offers.set(digestSecretHex(token), { path: scope.canonicalSourcePath, hostSessionId: sessionId, expires: this.#now() + 60000, ...(canResume ? { resumeLiveHostCopy: true } : {}) });
-        return { status: 'busy', recoveryToken: token, canResume };
+        const canResume = !this.#hasReviewGrant(sessionId) && await this.#host.state(sessionId) !== undefined;
+        const disconnected = this.#disconnected(sessionId);
+        this.#offers.set(digestSecretHex(token), { path: scope.canonicalSourcePath, hostSessionId: sessionId, ...(disconnected ? {disconnected} : {}), expires: this.#now() + 60000, ...(canResume ? { resumeLiveHostReview: true } : {}) });
+        return { status: 'busy', recoveryToken: token, canResume, ...(disconnected ? {canRecover:true} : {}) };
       }
       this.#hostSessions.add(opened.launch.sessionId);return this.#provisional(opened);
     }
@@ -154,8 +167,9 @@ export class ExtensionRuntimeManager {
     if(this.#closing)return unavailable();
     if(opened.kind==='focused'||opened.kind==='recovery-offered') {
       const releasedLocalSessionId = opened.kind === 'focused' && this.#canResumeReleasedLocal(opened.launch.sessionId) ? opened.launch.sessionId : undefined;
-      const token=secret();this.#offers.set(digestSecretHex(token),{path,expires:this.#now()+60_000,...(opened.kind==='recovery-offered'?{recoveryOffer:opened.recoveryOffer}:{}),...(releasedLocalSessionId ? { releasedLocalSessionId } : {})});
-      return {status:'busy',recoveryToken:token,canResume:opened.kind==='recovery-offered'||releasedLocalSessionId!==undefined};
+      const disconnected = opened.kind === 'focused' ? this.#disconnected(opened.launch.sessionId) : undefined;
+      const token=secret();this.#offers.set(digestSecretHex(token),{path,targetSessionId:opened.kind==='recovery-offered'?opened.recoverySessionId:opened.launch.sessionId,...(disconnected ? {disconnected} : {}),expires:this.#now()+60_000,...(opened.kind==='recovery-offered'?{recoveryOffer:opened.recoveryOffer}:{}),...(releasedLocalSessionId ? { releasedLocalSessionId } : {})});
+      return {status:'busy',recoveryToken:token,canResume:opened.kind==='recovery-offered'||releasedLocalSessionId!==undefined,...(disconnected ? {canRecover:true} : {})};
     }
     return this.#provisional(opened);
   });}
@@ -164,6 +178,20 @@ export class ExtensionRuntimeManager {
     if(!offer||this.#closing)return unavailable();
     if(offer.result)return offer.result.operationId===input.operationId&&offer.result.choice===input.choice?offer.result.value:unavailable();
     let result: OpenReviewResult | undefined;
+    if (input.choice === 'recover') {
+      const disconnected = offer.disconnected;
+      if (!disconnected || !this.#stillDisconnected(disconnected)) return unavailable();
+      if ('copyRecovery' in offer && !await this.#host.matchesCopyRecovery(offer.copyRecovery)) return unavailable();
+      const host = 'copyRecovery' in offer || offer.hostSessionId !== undefined;
+      const reopened = host
+        ? await this.broker.reopenLiveHostReview(disconnected.sessionId)
+        : await this.broker.reopenLiveLocal(disconnected.sessionId, offer.path);
+      if (!reopened || reopened.kind !== 'focused' || !this.#stillDisconnected(disconnected)) return unavailable();
+      for (const { record } of disconnected.records) this.#remove(record);
+      const value = this.#provisional(reopened, 'copyRecovery' in offer ? {match:offer.copyRecovery,verified:false,offer} : undefined, 'copyRecovery' in offer ? offer.copyRecovery.file : offer.hostFile);
+      offer.result = { operationId: input.operationId, choice: input.choice, value };
+      return value;
+    }
     let hostSessionId: string | undefined;
     if ('copyRecovery' in offer) {
       hostSessionId = offer.copyRecovery.sessionId;
@@ -172,8 +200,13 @@ export class ExtensionRuntimeManager {
         ? await this.#host.fork(hostSessionId, offer.copyRecovery.sha256)
         : await this.#resumeMatchingCopy(hostSessionId, input.operationId);
     } else {
-      if (input.choice === 'resume' && !offer.recoveryOffer && !offer.resumeLiveHostCopy && !offer.releasedLocalSessionId) return unavailable();
+      if (input.choice === 'resume' && !offer.recoveryOffer && !offer.resumeLiveHostReview && !offer.releasedLocalSessionId) return unavailable();
       hostSessionId = offer.hostSessionId;
+      if(input.choice==='fork'&&!hostSessionId&&!offer.recoveryOffer&&offer.targetSessionId){
+        const exact=await this.broker.openReview({pdfPath:offer.path,surface:'codex-native',recoveryTargetSessionId:offer.targetSessionId});
+        if(exact.kind!=='recovery-offered'||exact.recoverySessionId!==offer.targetSessionId)return unavailable();
+        offer.recoveryOffer=exact.recoveryOffer;
+      }
       if (input.choice === 'resume' && offer.releasedLocalSessionId) {
         if (!this.#canResumeReleasedLocal(offer.releasedLocalSessionId)) return unavailable();
         const reopened = await this.broker.reopenLiveLocal(offer.releasedLocalSessionId, offer.path);
@@ -182,18 +215,52 @@ export class ExtensionRuntimeManager {
         result = reopened;
       } else result = hostSessionId && input.choice === 'fork'
         ? await this.#host.fork(hostSessionId)
-        : hostSessionId && offer.resumeLiveHostCopy
+        : hostSessionId && offer.resumeLiveHostReview
           ? await this.#resumeMatchingCopy(hostSessionId, input.operationId)
-          : await this.broker.openReview({pdfPath:offer.path,surface:'codex-native',recoveryDecision:input.choice,...(offer.recoveryOffer?{recoveryOffer:offer.recoveryOffer,recoveryOperationId:input.operationId}:{})});
+          : await this.broker.openReview({pdfPath:offer.path,surface:'codex-native',recoveryDecision:input.choice,...(offer.targetSessionId?{recoveryTargetSessionId:offer.targetSessionId}:{}),...(offer.recoveryOffer?{recoveryOffer:offer.recoveryOffer,recoveryOperationId:input.operationId}:{})});
     }
     if(this.#closing||!result||result.kind==='recovery-offered')return unavailable();
-    if(hostSessionId)this.#hostSessions.add(result.launch.sessionId);
     const admission = 'copyRecovery' in offer && input.choice === 'resume'
       ? { match: offer.copyRecovery, verified: false, offer }
       : undefined;
-    const value = this.#provisional(result, admission);
+    const hostFile = 'copyRecovery' in offer ? offer.copyRecovery.file : offer.hostFile;
+    if(hostSessionId){this.#hostSessions.add(result.launch.sessionId);const file=hostFile??this.#hostFiles.get(hostSessionId);if(file&&!admission)this.#hostFiles.set(result.launch.sessionId,file);}
+    const value = this.#provisional(result, admission, hostFile);
     offer.result={operationId:input.operationId,choice:input.choice,value};return value;
   });}
+  async #openRecent(id: string): Promise<ExtensionResult> {
+    this.#sweep();const entry=await this.#recent.get(id);if(!entry||this.#closing)return unavailable();
+    const live=this.broker.nativeAdmissionScope(entry.sessionId);
+    const hostFile=entry.source.kind==='host'?this.#hostFiles.get(entry.sessionId)??entry.source.file:undefined;
+    const host=hostFile!==undefined;
+    const path=entry.source.kind==='local'?entry.source.path:await this.broker.importedRecoveryPath(entry.sessionId);
+    if(!path)return unavailable();
+    if(live){
+      const scope=await this.broker.sessionScope(entry.sessionId);
+      if(!scope || this.broker.taskBindings.taskForGeneration(entry.sessionId,live.documentGeneration))return unavailable();
+      const disconnected=this.#disconnected(entry.sessionId),unowned=!this.#hasReviewGrant(entry.sessionId);
+      if(unowned&&!host)this.#releasedLocalSessions.add(entry.sessionId);
+      const token=secret();this.#offers.set(digestSecretHex(token),{path,expires:this.#now()+60000,targetSessionId:entry.sessionId,
+        ...(hostFile?{hostSessionId:entry.sessionId,hostFile,...(unowned?{resumeLiveHostReview:true as const}:{})}:unowned?{releasedLocalSessionId:entry.sessionId}:{}),
+        ...(disconnected?{disconnected}:{})});
+      return {status:'busy',recoveryToken:token,canResume:unowned,...(disconnected?{canRecover:true}:{})};
+    }
+    const opened=await this.broker.openReview({pdfPath:path,surface:'codex-native',recoveryTargetSessionId:entry.sessionId});
+    if(opened.kind!=='recovery-offered'||opened.recoverySessionId!==entry.sessionId)return unavailable();
+    const token=secret();this.#offers.set(digestSecretHex(token),{path,expires:this.#now()+60000,targetSessionId:entry.sessionId,recoveryOffer:opened.recoveryOffer,
+      ...(hostFile?{hostSessionId:entry.sessionId,hostFile}:{})});
+    return {status:'busy',recoveryToken:token,canResume:true};
+  }
+  #disconnected(sessionId: string): Offer['disconnected'] {
+    const scope = this.broker.nativeAdmissionScope(sessionId);
+    if (!scope || this.broker.taskBindings.taskForGeneration(sessionId, scope.documentGeneration)) return;
+    const records = [...this.#records.values()].filter(record => record.sessionId === sessionId);
+    if (records.length && records.every(record => !record.provisional && record.disconnected && !record.active)) return { sessionId, records: records.map(record => ({record,grantDigest:digestSecretHex(record.grant)})) };
+  }
+  #stillDisconnected(offer: NonNullable<Offer['disconnected']>): boolean {
+    const current = this.#disconnected(offer.sessionId);
+    return current !== undefined && current.records.length === offer.records.length && current.records.every(currentRecord => offer.records.some(previous => previous.record === currentRecord.record && previous.grantDigest === currentRecord.grantDigest));
+  }
   #canResumeReleasedLocal(sessionId: string): boolean {
     const scope = this.broker.nativeAdmissionScope(sessionId);
     return this.#releasedLocalSessions.has(sessionId) && !this.#hasReviewGrant(sessionId) &&
@@ -208,7 +275,7 @@ export class ExtensionRuntimeManager {
   async #resumeMatchingCopy(sessionId: string, operationId: string): Promise<OpenReviewResult | undefined> {
     if (this.#hasReviewGrant(sessionId)) return;
     if (this.broker.nativeAdmissionScope(sessionId)) {
-      return this.broker.reopenLiveHostCopy(sessionId).catch(() => undefined);
+      return this.broker.reopenLiveHostReview(sessionId).catch(() => undefined);
     }
     const path = await this.broker.importedRecoveryPath(sessionId);
     if (!path) return;
@@ -219,10 +286,10 @@ export class ExtensionRuntimeManager {
       recoveryOffer: offered.recoveryOffer, recoveryOperationId: operationId,
     });
   }
-  #provisional(result:Exclude<OpenReviewResult,{kind:'recovery-offered'}>, copyAdmission?: RecordState['copyAdmission']):ExtensionResult{
+  #provisional(result:Exclude<OpenReviewResult,{kind:'recovery-offered'}>, copyAdmission?: RecordState['copyAdmission'], hostFile?:HostResourceFile):ExtensionResult{
     this.#releasedLocalSessions.delete(result.launch.sessionId);
     const grant=secret();const record:RecordState={sessionId:result.launch.sessionId,grant,expires:this.#now()+Math.min(60_000,this.#idle),provisional:true,watermark:0,contextPublished:false,...(copyAdmission ? { copyAdmission } : {})};
-    this.#records.set(digestSecretHex(grant),record);return {status:'provisional',grant};
+    this.#records.set(digestSecretHex(grant),record);return {status:'provisional',grant,...(hostFile?{hostFile}:{})};
   }
   resume(grant:string,operationId:string,action:'activate'|'resume'='resume'):Promise<ExtensionResult>{return this.#serial(async()=>{
     this.#sweep();if(this.#closing)return unavailable();const key=digestSecretHex(grant),receipt=this.#receipts.get(key);
@@ -241,19 +308,30 @@ export class ExtensionRuntimeManager {
         () => !this.#closing && this.#records.get(key) === record,
       );
       if (!adopted || this.#closing || this.#records.get(key) !== record) return unavailable();
+      this.#hostFiles.set(record.sessionId, admission.match.file);
       delete record.copyAdmission;
     }
-    this.#suspend(record);this.#records.delete(key);record.grant=secret();record.provisional=false;record.expires=this.#now()+this.#idle;
+    const sourceScope=await this.broker.sessionScope(record.sessionId);
+    const hostFile=this.#hostFiles.get(record.sessionId);
+    if(sourceScope && (!this.#hostSessions.has(record.sessionId)||hostFile)){
+      await this.broker.protectChromeReview(record.sessionId);
+      const recent=await this.#recent.remember({sessionId:record.sessionId,title:sourceScope.sourceDisplayName,
+        source:hostFile?{kind:'host',file:hostFile}:{kind:'local',path:current.canonicalSourcePath}}).catch(()=>undefined);
+      // Reopen hints are optional; durable review protection above is not.
+      if(recent?.page!==undefined)record.page=recent.page;
+    }
+    if(this.#closing||this.#records.get(key)!==record||this.broker.nativeAdmissionScope(record.sessionId)?.documentGeneration!==current.documentGeneration)return unavailable();
+    this.#suspend(record);delete record.disconnected;this.#records.delete(key);record.grant=secret();record.provisional=false;record.expires=this.#now()+this.#idle;
     const presentation:ExtensionPresentation={status:'active',runtimeId:opaque(),attemptId:opaque(),generation:current.documentGeneration,presentationCapability:secret(),reconnectTicket:secret()};
     record.active=presentation;record.lease=this.#now()+this.#lease;this.#records.set(digestSecretHex(record.grant),record);this.#panels.set(presentation.runtimeId,record);
     this.#backend.attach(this.#scope(record));
     const result:ExtensionResult={status:'active',grant:record.grant,presentation,contextPublished:record.contextPublished};
     this.#receipts.set(key,{operationId,action,expires:this.#now()+30_000,record,result});return result;
   });}
-  #scope(r:RecordState):CodexActiveScope{return {sessionId:r.sessionId,runtimeId:r.active!.runtimeId,attemptId:r.active!.attemptId,generation:r.active!.generation};}
-  #suspend(r:RecordState){if(r.active){this.#backend.detach(r.active.runtimeId);this.#panels.delete(r.active.runtimeId);}delete r.active;delete r.lease;}
+  #scope(r:RecordState):CodexActiveScope{return {sessionId:r.sessionId,runtimeId:r.active!.runtimeId,attemptId:r.active!.attemptId,generation:r.active!.generation,...(r.page?{requestedLocation:{kind:'page' as const,page:r.page}}:{})};}
+  #suspend(r:RecordState){if(r.active){this.#backend.detach(r.active.runtimeId);this.#panels.delete(r.active.runtimeId);}delete r.active;}
   #remove(r:RecordState){this.#suspend(r);this.#records.delete(digestSecretHex(r.grant));for(const [key,receipt]of this.#receipts)if(receipt.record===r)this.#receipts.delete(key);}
-  #sweep(){const now=this.#now();for(const [key,expires]of this.#revoked)if(expires<=now)this.#revoked.delete(key);for(const [key,t]of this.#hostTickets)if(t.expires<=now)this.#hostTickets.delete(key);void this.#host.sweep();for(const r of this.#records.values()){if(r.expires<=now)this.#remove(r);else if(r.lease!==undefined&&r.lease<=now)this.#suspend(r);}for(const [key,o]of this.#offers)if(o.expires<=now)this.#offers.delete(key);for(const [key,r]of this.#receipts)if(r.expires<=now)this.#receipts.delete(key);}
+  #sweep(){const now=this.#now();for(const [key,expires]of this.#revoked)if(expires<=now)this.#revoked.delete(key);for(const [key,t]of this.#hostTickets)if(t.expires<=now)this.#hostTickets.delete(key);void this.#host.sweep();for(const r of this.#records.values()){if(r.expires<=now){this.#releasedLocalSessions.add(r.sessionId);this.#remove(r);}else if(r.lease!==undefined&&r.lease<=now){this.#suspend(r);delete r.lease;r.disconnected=true;}}for(const [key,o]of this.#offers)if(o.expires<=now)this.#offers.delete(key);for(const [key,r]of this.#receipts)if(r.expires<=now)this.#receipts.delete(key);}
   async revoke(grant:string):Promise<boolean>{return this.#serial(async()=>{this.#sweep();const key=digestSecretHex(grant);if(this.#revoked.has(key))return true;const r=this.#records.get(key);if(!r)return false;const scope=await this.broker.sessionScope(r.sessionId);this.#remove(r);if(scope?.sourceDisposition==='local')this.#releasedLocalSessions.add(r.sessionId);this.#revoked.set(key,this.#now()+5*60_000);return true;});}
   handle(raw:unknown):Promise<CodexAppResponse>{const result=this.#handle(raw).catch(()=>({status:'denied',reason:'unavailable'} as const));this.#requests.add(result);void result.finally(()=>this.#requests.delete(result));return result;}
   async #handle(raw:unknown):Promise<CodexAppResponse>{
@@ -270,5 +348,5 @@ export class ExtensionRuntimeManager {
   activityCount(){this.#sweep();return this.#panels.size;}
   upgradeCovered(has:(id:string)=>boolean){return [...this.#panels.keys()].every(id=>has(`codex:${id}`));}
   async closeForUpgrade(_status:UpgradeReviewStatus){await this.close();}
-  async close(){this.#closing=true;await this.#host.close();await this.#tail;await Promise.allSettled([...this.#requests]);await this.#host.close();this.#hostTickets.clear();this.#hostSessions.clear();clearInterval(this.#timer);this.#unsubscribe();this.#unsubscribeEnd();for(const r of this.#records.values())this.#remove(r);this.#offers.clear();this.#receipts.clear();this.#revoked.clear();this.#releasedLocalSessions.clear();}
+  async close(){this.#closing=true;await this.#host.close();await this.#tail;await Promise.allSettled([...this.#requests]);await this.#host.close();this.#hostTickets.clear();this.#hostSessions.clear();this.#hostFiles.clear();clearInterval(this.#timer);this.#unsubscribe();this.#unsubscribeEnd();for(const r of this.#records.values())this.#remove(r);this.#offers.clear();this.#receipts.clear();this.#revoked.clear();this.#releasedLocalSessions.clear();}
 }

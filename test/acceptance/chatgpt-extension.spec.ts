@@ -1,5 +1,57 @@
 import { expect, test } from '@playwright/test';
 import { extensionReader } from '../support/extension-reader.js';
+import { extensionRecoveryReader } from '../support/extension-recovery-reader.js';
+
+test('recent review recovers a removed panel, restores its page, and attaches an included snapshot', async ({ page }, info) => {
+  info.setTimeout(60000);
+  const reader = await extensionRecoveryReader(page);
+  try {
+    await reader.mount(false); await reader.ready();
+    const before = await reader.tool('inspect_review', {});
+    expect(await reader.tool('navigate_page', { page: 2, documentGeneration: before.documentGeneration, source: before.source })).toMatchObject({ status: 'navigated', page: 2 });
+    await expect.poll(async () => (await reader.manager.dispatch({ action: 'recent-list' }) as any).items[0]?.page).toBe(2);
+    await page.locator('#controls summary').filter({ hasText: /^Sharing settings$/ }).click();
+    await page.getByRole('checkbox', { name: 'Allow explicitly included review snapshots in other chats', exact: true }).check();
+    await page.getByRole('button', { name: 'Include this review snapshot', exact: true }).click();
+    await expect(page.getByRole('button', { name: 'Update included snapshot', exact: true })).toBeVisible();
+    // Destroy the old document without invoking app teardown, as a cancelled host close does.
+    await page.goto('about:blank'); reader.advance(30001);
+    await reader.mount(true);
+    await page.locator('summary').filter({ hasText: /^Include review context$/ }).click();
+    await page.getByRole('button', { name: 'Include snapshot', exact: true }).first().click();
+    await expect.poll(() => page.evaluate(() => (window as any).recoveryAcceptance.context?.content?.some((block: any) => block.resource.uri.includes('/attachment/')))).toBe(true);
+    await expect(page.locator('[data-production-review]')).toHaveCount(0);
+    await page.getByRole('button', { name: 'Resume Recent paper.pdf', exact: true }).click();
+    await expect(page.getByRole('button', { name: 'Recover disconnected review', exact: true })).toBeVisible();
+    await page.getByRole('button', { name: 'Recover disconnected review', exact: true }).click();
+    await reader.ready();
+    await expect.poll(async () => (await reader.tool('inspect_review', {})).page).toBe(2);
+    const after = await reader.tool('inspect_review', {});
+    expect(after.source).toEqual(before.source);
+    const activeSelection = await page.evaluate(() => {
+      const state = (window as any).recoveryAcceptance;
+      const uri = state.context.content.find((block: any) => block.resource.uri.includes('/attachment/')).resource.uri;
+      state.context = { ...state.context, updateId: 'remove-chooser-attachment', content: state.context.content.filter((block: any) => block.resource.uri !== uri) };
+      state.shell.hostContextChanged({ 'openai/modelContext': state.context });
+      return { uri, publicationCount: state.publications.length };
+    });
+    await expect.poll(() => page.evaluate(uri => (window as any).recoveryAcceptance.context.content.some((block: any) => block.resource.uri === uri), activeSelection.uri)).toBe(false);
+    await page.locator('summary').filter({ hasText: /^Include review context$/ }).click();
+    await page.getByRole('button', { name: 'Include snapshot', exact: true }).first().click();
+    await expect.poll(() => page.evaluate(({ uri, publicationCount }) => (window as any).recoveryAcceptance.publications.slice(publicationCount).some((publication: any) => publication.content.some((block: any) => block.resource.uri === uri)), activeSelection)).toBe(true);
+    expect(await page.evaluate(() => (window as any).recoveryAcceptance.messages)).toEqual([]);
+    const removed = await page.evaluate(() => {
+      const state = (window as any).recoveryAcceptance;
+      const removed = state.context.content.find((block: any) => block.resource.uri.includes('/attachment/')).resource.uri;
+      state.context = { ...state.context, updateId: 'human-removal', content: state.context.content.filter((block: any) => block.resource.uri !== removed) };
+      state.shell.hostContextChanged({ 'openai/modelContext': state.context });
+      return removed;
+    });
+    expect(await reader.tool('navigate_page', { page: 1, documentGeneration: after.documentGeneration, source: after.source })).toMatchObject({ status: 'navigated' });
+    await expect.poll(() => page.evaluate(uri => (window as any).recoveryAcceptance.context.content.some((block: any) => block.resource.uri === uri), removed)).toBe(false);
+    await info.attach('recovery-and-context', { body: await page.screenshot({ fullPage: true }), contentType: 'image/png' });
+  } finally { await reader.dispose(); }
+});
 
 test('extension activation waits for preferences, then real tools, drafts and partial context removal compose', async ({ page }, info) => {
   info.setTimeout(60_000);
@@ -34,7 +86,7 @@ test('extension activation waits for preferences, then real tools, drafts and pa
       state.shell.hostContextChanged({ 'openai/modelContext': state.context });
       return removed;
     });
-    await page.locator('#controls summary').click();
+    await page.locator('#controls summary').filter({ hasText: /^Sharing settings$/ }).click();
     await page.getByRole('checkbox', { name: 'Share current selection in background context', exact: true }).uncheck();
     await expect.poll(() => page.evaluate(uri => (window as any).extensionAcceptance.context.content.some((b: any) => b.resource.uri === uri), removed)).toBe(false);
     await page.getByRole('checkbox', { name: 'Allow explicitly included review snapshots in other chats', exact: true }).check();
@@ -82,7 +134,7 @@ for (const width of [1440, 1120, 375]) test(`extension sharing and discussion la
   const reader = await extensionReader(page);
   try {
     await reader.ready();
-    await page.locator('#controls summary').click();
+    await page.locator('#controls summary').filter({ hasText: /^Sharing settings$/ }).click();
     const showWorkspace = page.getByRole('button', { name: 'Show workspace', exact: true });
     await showWorkspace.click({ trial: true, timeout: 3000 });
     await page.locator('.review-discussion-actions summary').click();
@@ -158,7 +210,7 @@ test('extension observes external sharing-off before a pending publication can r
       state.settings = { backgroundContext: false, selectionSharing: false, mentions: false }; state.revision++;
       state.shell.wake();
     });
-    await page.locator('#controls summary').click();
+    await page.locator('#controls summary').filter({ hasText: /^Sharing settings$/ }).click();
     await expect(page.getByRole('checkbox', { name: 'Share background review context', exact: true })).not.toBeChecked();
     await page.evaluate(() => (window as any).extensionAcceptance.releasePublication());
     await expect(page.getByText('Background context is paused for this app.', { exact: true })).toBeVisible();

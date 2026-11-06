@@ -820,6 +820,7 @@ export class SessionBroker {
       request.recoveryOffer!.id,
       request.recoveryOffer!.expiresAt,
       request.recoveryDecision,
+      request.recoveryTargetSessionId ?? "",
       approvedFile.canonicalPath,
       sourceDigest,
     ].join("\0");
@@ -880,18 +881,18 @@ export class SessionBroker {
     });
   }
 
-  /** Validate a prior copy before explicitly re-admitting an unowned live review. */
-  async reopenLiveHostCopy(sessionId: string): Promise<OpenReviewResult | undefined> {
+  /** Re-admit an unowned host review; validate a chosen local copy before reuse. */
+  async reopenLiveHostReview(sessionId: string): Promise<OpenReviewResult | undefined> {
     const session = this.#activeById.get(sessionId);
     if (!session || session.ending) return;
     return this.#withSessionTail(session, async () => {
       const { destination } = session;
       if (session.ending || session.sourceOwnership.disposition !== "remote-temporary" ||
-          destination.phase !== "active" || destination.kind !== "copy" ||
-          !destination.capabilityId || !destination.fingerprint ||
           this.taskBindings.taskForGeneration(sessionId, session.state.workflow.documentGeneration)) return;
-      if (await this.capabilities.validateDestination(destination.capabilityId) !== destination.targetPath ||
-          await hashFile(destination.targetPath) !== destination.fingerprint || session.ending) return;
+      if (destination.phase === "active" && destination.kind === "copy" &&
+          (!destination.capabilityId || !destination.fingerprint ||
+          await this.capabilities.validateDestination(destination.capabilityId) !== destination.targetPath ||
+          await hashFile(destination.targetPath) !== destination.fingerprint || session.ending)) return;
       return { kind: "focused", launch: this.#launch(session, "codex-native") };
     });
   }
@@ -1111,7 +1112,7 @@ export class SessionBroker {
     sourceDigest: string,
   ): Promise<OpenReviewResult> {
     const existingLineageSessionId = this.#activeByOutputPath.get(approvedFile.canonicalPath);
-    if (existingLineageSessionId !== undefined && request.recoveryDecision === undefined) {
+    if (existingLineageSessionId !== undefined && request.recoveryDecision === undefined && request.recoveryTargetSessionId === undefined) {
       this.capabilities.revokeFile(approvedFile.id);
       const session = this.#activeById.get(existingLineageSessionId);
       if (session === undefined) throw new Error("Active output lineage index is inconsistent");
@@ -1129,7 +1130,7 @@ export class SessionBroker {
     }
     const key = activeKey(approvedFile.canonicalPath, sourceDigest);
     const existingSessionId = this.#activeBySource.get(key);
-    if (existingSessionId !== undefined && request.recoveryDecision === undefined) {
+    if (existingSessionId !== undefined && request.recoveryDecision === undefined && request.recoveryTargetSessionId === undefined) {
       this.capabilities.revokeFile(approvedFile.id);
       const session = this.#activeById.get(existingSessionId);
       if (session === undefined) throw new Error("Active session index is inconsistent");
@@ -1151,9 +1152,12 @@ export class SessionBroker {
     );
 
     const drafts = await this.#recoverableDrafts();
+    const liveForkTarget = request.recoveryTargetSessionId !== undefined && request.recoveryDecision !== "resume" &&
+      this.#activeById.has(request.recoveryTargetSessionId) ? request.recoveryTargetSessionId : undefined;
     const identityMatches = drafts.filter(
       (draft) =>
-        (draft.state.pendingDrafts.length > 0 || draft.sync.phase !== "clean" || draft.chromeProtected === true || (draft.interactionReceipts?.length ?? 0) > 0) &&
+        (request.recoveryTargetSessionId === undefined || request.recoveryTargetSessionId === draft.state.sessionId) &&
+        (draft.state.sessionId === liveForkTarget || draft.state.pendingDrafts.length > 0 || draft.sync.phase !== "clean" || draft.chromeProtected === true || (draft.interactionReceipts?.length ?? 0) > 0) &&
         ((draft.state.workflow.mode === "generated-output" &&
           this.#draftCanonicalPath(draft) === approvedFile.canonicalPath) ||
           ((draft.source.disposition === "local" ||
@@ -1178,6 +1182,10 @@ export class SessionBroker {
       throw new Error("Recovery target is ambiguous; protected work was left unchanged");
     }
     const matchingDraft = pathMatches[0] ?? movedOriginalMatches[0];
+    if (request.recoveryTargetSessionId !== undefined && (matchingDraft === undefined || request.recoveryDecision === 'resume' && this.#activeById.has(request.recoveryTargetSessionId))) {
+      this.capabilities.revokeFile(approvedFile.id);
+      throw new Error("Selected recent review is unavailable; protected work was left unchanged");
+    }
 
     if (matchingDraft !== undefined && request.recoveryDecision === undefined) {
       this.capabilities.revokeFile(approvedFile.id);

@@ -393,7 +393,7 @@ test.describe('canonical review workflow', () => {
     await documentActionsTrigger.click();
     await expect(exportAction).toHaveAttribute('aria-disabled', 'false');
     const eligibleMenu = page.getByRole('menu', { name: /Actions for/u });
-    await expect(eligibleMenu.locator(':scope > *')).toHaveCount(1);
+    await expect(eligibleMenu.getByRole('menuitem')).toHaveText(['Save options', 'Export']);
     await exportAction.click();
     await expect(page.locator('[data-export-count]')).toHaveAttribute('data-export-count', '1');
     await expect(page.getByText('Reviewed PDF exported.')).toBeVisible();

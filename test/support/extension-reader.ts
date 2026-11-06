@@ -19,6 +19,7 @@ export async function extensionReader(page: Page, fixture = 'text-native-with-an
       return response;
     }
     if (request.action === 'activate') return { status: 'active', grant: 'a'.repeat(43), presentation: panel.state.active, contextPublished: false };
+    if (request.action === 'reading-position') return { status: 'position-saved' };
     if (request.action === 'context-published') return { status: 'context-ready' };
     if (request.action === 'revoke') return { status: 'closed' };
     throw Error(`Unexpected host request: ${request.action}`);

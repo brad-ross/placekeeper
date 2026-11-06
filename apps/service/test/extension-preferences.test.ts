@@ -12,6 +12,7 @@ it('persists defaults and serializes disabling against reads and capture', async
         await store.capture('private-source', () => ({ title: 'Paper', generation: 2, revision: 3, sourceDigest: 'a'.repeat(64), summary: 'Document snapshot', annotations: [{ page: 1, text: 'Evidence' }] }));
         const items = await store.search('Evidence');
         expect(items).toHaveLength(1);
+        expect(items[0]!.subtitle).toContain('Captured ');
         const uri = items[0]!.resourceUri;
         await store.update({ selectionSharing: false, backgroundContext: true });
         expect(await store.read(uri)).toContain('Evidence');
