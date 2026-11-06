@@ -494,7 +494,7 @@
   height: 16px;
 }
 
-/* A quiet notice, using the same surface and icon controls as review menus. */
+/* Match the annotation composer and peek card surface. */
 .external-link-recovery {
   position: fixed;
   z-index: 1000;
@@ -502,9 +502,9 @@
   bottom: 16px;
   width: min(360px, calc(100vw - 32px));
   box-sizing: border-box;
-  padding: 10px 12px;
-  border: 1px solid var(--pk-border);
-  border-radius: 12px;
+  padding: 12px;
+  border: 1px solid #dedede;
+  border-radius: 16px;
   background: var(--pk-raised);
   color: var(--pk-ink);
   box-shadow: var(--pk-shadow-raised);
