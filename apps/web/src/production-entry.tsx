@@ -700,7 +700,6 @@ export function RuntimeProductionReviewApp(props: {
       viewer: <RuntimeLoadingWorkspace refreshStatus={refreshStatus} />,
     } : {})}
     {...(visible.locationHistory === undefined ? {} : { locationHistory: visible.locationHistory })}
-    {...(visible.canonicalLinkBase === undefined ? {} : { copyLinkBase: visible.canonicalLinkBase })}
     generationRefreshStatus={runtimeGenerationRefreshStatus(loaded !== undefined, refreshStatus)}
     hostReattachRequestToken={hostReattachRequestToken}
     {...(hostExportRequest === undefined ? {} : {

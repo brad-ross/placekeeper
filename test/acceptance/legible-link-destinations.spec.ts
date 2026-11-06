@@ -211,14 +211,14 @@ test("Covers AE1. a split citation previews its bibliography entry, names its ta
   // outside the review root.
   await expect(extent.first()).toHaveCSS("background-color", "rgba(56, 132, 230, 0.24)");
   const items = menu.getByRole("menuitem");
-  await expect(items).toHaveCount(3);
+  await expect(items).toHaveCount(2);
   await expect(items.nth(0)).toHaveAttribute("aria-label", "Open in References");
   await expect(items.nth(1)).toHaveAttribute("aria-label", "Open in main document");
-  await expect(items.nth(2)).toHaveAttribute("aria-label", /^Copy link/u);
+  await expect(menu.locator(".copy-link-control")).toHaveCount(0);
   await expect(items.first()).toBeFocused();
   const snippetBox = await snippet.boundingBox();
   const firstItemBox = await items.first().boundingBox();
-  const lastItemBox = await items.nth(2).boundingBox();
+  const lastItemBox = await items.last().boundingBox();
   expect(snippetBox!.y + snippetBox!.height).toBeLessThanOrEqual(firstItemBox!.y + 1);
   // Icon actions share one row, left-aligned, and the page sits at its right end.
   expect(Math.abs(lastItemBox!.y - firstItemBox!.y)).toBeLessThan(1);

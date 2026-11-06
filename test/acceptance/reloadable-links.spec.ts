@@ -1,9 +1,10 @@
 import { randomUUID } from "node:crypto";
-import { copyFile, mkdtemp, rm } from "node:fs/promises";
+import { copyFile, mkdtemp, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 
+import { placekeeperLinkBase } from "../../packages/core/src/placekeeper-link.js";
 import { addPageNote } from "../../packages/core/src/review-commands.js";
 import { PlacekeeperHost } from "../../apps/service/src/host/placekeeper-host.js";
 
@@ -45,7 +46,7 @@ test.afterAll(async () => {
   if (root) await rm(root, { recursive: true, force: true });
 });
 
-test("a live Codex review copies a browser-safe URL, survives refresh, and reopens in place", async ({ page }) => {
+test("a live Codex review has no copy-link button, survives refresh, and reopens in place", async ({ page }) => {
   await page.addInitScript(() => {
     Object.defineProperty(navigator, "clipboard", {
       configurable: true,
@@ -135,18 +136,8 @@ test("a live Codex review copies a browser-safe URL, survives refresh, and reope
   await expectCurrentPage(page, "1 / 4");
   await expect(page).toHaveURL(/#v=1&page=1$/u);
 
-  await page.getByRole("button", { name: "Copy link to current PDF location" }).click();
-  await expect(page.locator('[data-copy-link-status="success"]').getByRole("status"))
-    .toHaveText("Link copied.");
-  await expect(page.locator('[data-copy-link-status="success"]').getByRole("status"))
-    .toHaveClass("sr-only");
-  await expect(page.locator(".copy-link-control__status")).toHaveCount(0);
-  const copiedLink = await page.evaluate(() => (
-    globalThis as typeof globalThis & { __copiedPlacekeeperLink?: string }
-  ).__copiedPlacekeeperLink);
-  expect(copiedLink).toMatch(
-    /^http:\/\/127\.0\.0\.1:\d+\/r\/[0-9a-f-]{36}\/.*Paper%20One\.pdf#v=1&page=1$/u,
-  );
+  await expect(page.getByRole("button", { name: "Copy link to current PDF location" })).toHaveCount(0);
+  const copiedLink = page.url();
   const pasted = await page.context().newPage();
   await pasted.goto(copiedLink!);
   await expect(pasted.locator("#root")).toHaveAttribute("data-production-root", "true");
@@ -246,7 +237,7 @@ test("a pending restarted browser is promoted to Codex without remounting", asyn
   }
 });
 
-test("copies canonical PDF destinations and reopens them without source UI state", async ({ page }) => {
+test("omits destination copy controls and reopens canonical links without source UI state", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 });
   const reloadAtFragment = async (fragment: string) => {
     // Keep the synthetic URL edit and reload in one browser turn: live viewport
@@ -282,30 +273,8 @@ test("copies canonical PDF destinations and reopens them without source UI state
   await expect(outline).toBeVisible();
   const overview = outline.getByRole("button", { name: "Overview, Page 2", exact: true });
   await overview.focus();
-  const outlineCopy = outline.getByRole("button", {
-    name: "Copy exact destination link for Overview, Page 2",
-  });
-  expect(await outlineCopy.getAttribute("title")).toBeNull();
-  await expect(outlineCopy.locator(".lucide-link")).toBeVisible();
-  await outlineCopy.focus();
-  await expect(outlineCopy).toBeFocused();
-  // Activate from the keyboard focus it already has, like the search row below.
-  await outlineCopy.press("Enter");
-  const outlineLink = await copiedPlacekeeperLink(page);
-  expect(outlineLink).toMatch(/#v=2&page=2&mode=xyz&params=72,640,0$/u);
-
-  const pageOnly = outline.getByRole("button", {
-    name: "Page-only appendix, Page 4",
-    exact: true,
-  });
-  await pageOnly.focus();
-  const pageOnlyCopy = outline.getByRole("button", {
-    name: "Copy page link for Page-only appendix, Page 4",
-  });
-  await pageOnlyCopy.focus();
-  await expect(pageOnlyCopy).toBeFocused();
-  await pageOnlyCopy.press("Enter");
-  expect(await copiedPlacekeeperLink(page)).toMatch(/#v=1&page=4$/u);
+  await expect(outline.locator('.copy-link-control')).toHaveCount(0);
+  const outlineLink = `${placekeeperLinkBase(await realpath(pdf))}#v=2&page=2&mode=xyz&params=72,640,0`;
 
   await page.getByRole("tab", { name: "Search", exact: true }).click();
   const search = page.getByRole("searchbox", { name: "Search this PDF" });
@@ -315,16 +284,7 @@ test("copies canonical PDF destinations and reopens them without source UI state
   await expect(result.locator(".pdf-search__result-match").first()).toHaveCSS("font-weight", "400");
   await expect(result.locator(".pdf-search__result-context")).toHaveCSS("font-weight", "400");
   await result.getByRole("button").first().focus();
-  const secondaryActions = result.locator("[data-row-secondary-actions]");
-  if (await secondaryActions.isVisible()) await secondaryActions.click();
-  const searchCopy = result.getByRole(
-    await secondaryActions.isVisible() ? "menuitem" : "button",
-    { name: /Copy page link for Search result on page/u },
-  );
-  await searchCopy.focus();
-  await expect(searchCopy).toBeFocused();
-  await searchCopy.press("Enter");
-  await expect.poll(() => copiedPlacekeeperLink(page)).toMatch(/#v=1&page=3$/u);
+  await expect(result.locator('.copy-link-control')).toHaveCount(0);
 
   await page.getByRole("button", { name: "Hide workspace" }).click();
   await page.locator("[data-review-stage]").evaluate(async element => {
@@ -334,18 +294,15 @@ test("copies canonical PDF destinations and reopens them without source UI state
     "button",
     { name: "Open PDF link to Primary result, Page 2" },
   );
-  await primaryLink.click();
+  await primaryLink.focus();
+  await primaryLink.press("Enter");
   const linkMenu = page.getByRole("menu", { name: "Open Primary result, Page 2" });
-  const popoverCopy = linkMenu.getByRole("menuitem", {
-    name: "Copy link to exact destination on page 2",
-  });
-  await expect(popoverCopy.locator(".lucide-link")).toBeVisible();
-  await popoverCopy.click();
-  expect(await copiedPlacekeeperLink(page)).toBe(outlineLink);
+  await expect(linkMenu.getByRole('menuitem')).toHaveCount(2);
+  await expect(linkMenu.locator('.copy-link-control')).toHaveCount(0);
 
   const reopened = await host.openLink({ link: outlineLink });
   if (!reopened.ok || reopened.kind === "confirmation-required" || reopened.kind === "recovery-offered") {
-    throw new Error("Expected the copied exact destination to reopen");
+    throw new Error(`Expected the canonical exact destination to reopen: ${JSON.stringify(reopened)}`);
   }
   await page.goto(reopened.url);
   await expect(page.locator("[data-production-review]")).toHaveAttribute("data-initial-view-ready", "true");

@@ -1658,7 +1658,7 @@ describe("one production review tree", () => {
     expect(html).not.toContain('aria-modal="true" aria-labelledby="finish-review-heading"');
   });
 
-  it("omits the redundant document link from Chrome while retaining it on app-hosted surfaces", () => {
+  it("omits copy-link buttons on app-hosted and Chrome surfaces", () => {
     const state = createReviewState({
       sessionId: "00000000-0000-4000-8000-000000000101",
       source: { fileId: "00000000-0000-4000-8000-000000000102", digest: "a".repeat(64), byteLength: 12 },
@@ -1668,20 +1668,22 @@ describe("one production review tree", () => {
       chooseFolder: vi.fn(), chooseOriginal: vi.fn(), retrySave: vi.fn(), locateSave: vi.fn(),
       scope: vi.fn(),
     };
-    const renderSurface = (launchSurface: "browser" | "chrome") => renderToStaticMarkup(
+    const renderSurface = (launchSurface: NonNullable<ProductionScope["launchSurface"]>) => renderToStaticMarkup(
       <ProductionReviewApp
-        session={{ sessionId: state.sessionId }}
+        session={{ sessionId: state.sessionId, appLinkBase: "placekeeper:///tmp/paper.pdf" }}
         initialState={state}
         scope={{ documentTitle: "paper.pdf", launchSurface }}
         api={api}
-        copyLinkBase="placekeeper:///tmp/paper.pdf"
         locationHistory={new MemoryReviewLocationHistory()}
         viewer={<div>Viewer</div>}
       />,
     );
 
-    expect(renderSurface("browser")).toContain('data-review-copy-link');
-    expect(renderSurface("chrome")).not.toContain('data-review-copy-link');
+    for (const surface of ["browser", "chrome", "codex", "electron", "vscode", "finder", "macos", "static"] as const) {
+      const html = renderSurface(surface);
+      expect(html).not.toContain('data-review-copy-link');
+      expect(html).not.toContain('copy-link-control');
+    }
   });
 
   it('shows actionable save failure only for an established local save destination', () => {
