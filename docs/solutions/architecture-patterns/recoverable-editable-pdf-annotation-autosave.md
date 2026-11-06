@@ -1,7 +1,7 @@
 ---
 title: Recoverable autosave for editable PDF annotations
 date: 2026-08-11
-last_updated: 2026-10-16
+last_updated: 2026-11-06
 category: architecture-patterns
 module: PDF annotation persistence
 problem_type: architecture_pattern
@@ -33,7 +33,7 @@ tags:
 
 ## Context
 
-Routine PDF annotation is ongoing document editing, not a terminal export event. A one-shot Finish flow can protect a private draft while leaving the PDF itself unchanged, and an EmbedPDF commit changes only the in-memory document until the application writes the resulting bytes to a filesystem target.
+Routine PDF annotation is ongoing document editing, not a terminal export event. A one-shot Finish flow can protect a private draft while leaving the PDF itself unchanged, and an EmbedPDF commit changes only the in-memory document until the application delivers the resulting bytes to an authorized destination. The local-file flow uses filesystem publication; opaque host resources use conditional host writes and matching receipts.
 
 The implementation merged in PR #19 therefore separates three authorities:
 
@@ -103,6 +103,18 @@ Destination selection is itself durable state. Establishing or relocating one in
 
 Each physical save is a full-state projection. The coordinator reads the private immutable source snapshot and writes that canonical base plus all current projected annotations (`apps/service/src/saving/pdf-save-coordinator.ts`, `apps/service/src/recovery/source-snapshot.ts`). It does not incrementally patch the previous target. Edit, delete, undo, retry, and destination switching therefore converge to exactly the latest Review Item set rather than accumulating rewrite history.
 
+### Separate opaque source access from save destination authority
+
+The extension work exposed an assumption in the local flow: a readable PDF was also an owned local source. An opaque host resource instead supplies bytes through the host API. A private imported snapshot protects the review but does not authorize overwriting the host resource, and a read-only host source must not prevent the user from choosing an independently authorized local copy. Do not invent a local path from the resource URI or weaken the local-source replacement checks to accommodate this case.
+
+Keep the transport proofs distinct. Host save materialization persists the exact candidate bytes and pending intent before offering a write; the adapter requires an ETag and calls the host with `ifMatch`. An absent ETag never becomes an unconditional write (`apps/service/src/codex/host-resource-persistence.ts:261`, `apps/codex-mcp/src/host-resource-adapter.ts:140`). An uncertain outcome requires rereading and classification before another attempt; a network exception is neither proof of failure nor permission to overwrite again. Receipts remain tied to the pending intent and its document generation, source digest, revision, and state digest (`apps/service/src/codex/host-resource-persistence.ts:135`, `apps/service/src/codex/host-resource-persistence.ts:319`).
+
+Switching to a local copy changes the write authority, not just the label in the save UI. The shell routes `chooseCopy` through the adapter's serial save barrier so earlier host operations settle before destination selection runs. The service rejects host receipts once that destination is retired; otherwise a late successful host write could falsely mark the new copy saved (`apps/codex-mcp/src/extension-shell.ts:631`, `apps/codex-mcp/src/host-resource-adapter.ts:59`, `apps/service/src/codex/host-resource-persistence.ts:327`). The local writer revalidates an owned local source only when the source disposition is local; independently authorized copy output from imported bytes still uses the target and generation checks (`apps/service/src/saving/pdf-save-coordinator.ts:515`).
+
+Recovery discovery is not write permission. Matching display name and content digest identify a unique protected copy-recovery candidate; reusing a live copy separately validates its target capability and fingerprint. Rebinding source identity requires current admitted bytes and checks that the identity is not occupied elsewhere. An independent fork starts non-writable and cannot acquire original-host write permission merely by refreshing (`apps/service/src/sessions/session-broker.ts:847`, `apps/service/src/sessions/session-broker.ts:884`, `apps/service/src/sessions/session-broker.ts:901`, `apps/service/src/codex/host-resource-persistence.ts:227`, `apps/service/src/codex/host-resource-persistence.ts:200`).
+
+The [extension guide](../../guides/chatgpt-extension.md) owns the user-facing save and recovery flow. Preserve the distinction in future tests: protected edits, confirmed host delivery, and confirmed local-copy delivery are separate outcomes. Exercising a trusted local-file route does not establish any of the opaque-host guarantees.
+
 ### Make ownership annotation-local and fail closed
 
 Every app annotation carries ordinary visible PDF properties plus a namespaced, versioned `placekeeper` envelope containing the stable item ID, the semantic Review Item, and redundant visible projection evidence (`packages/core/src/annotation-projection.ts`, `packages/core/src/portable-annotation.ts`). The pinned EmbedPDF path persists the annotation ID through `/NM` and custom metadata through `/EPDFCustom`; the checked-in engine patch bounds custom metadata before parsing (`packages/pdf-backends/src/embedpdf-adapter.ts`, `patches/@embedpdf__engines@2.14.4.patch:7-32`).
@@ -160,7 +172,7 @@ otherwise discard a structurally stale candidate or queue newer semantic state
 
 For an original destination, source and target alias the same owned PDF. During publication the broker records the exact candidate digest as a transient self-save identity; a matching trustworthy observation can recognize that write. Historical accepted digests do not authorize suppressing a later external replacement (`apps/service/src/sessions/session-broker.ts:1991`, `apps/service/src/sessions/session-broker.ts:2848`).
 
-A copy needs **two proofs**: its independently authorized target still matches, and the owned local source used to render it still has the expected digest. An unchanged copy path alone says nothing about whether its source was replaced. After awaited capability checks, the coordinator rechecks broker currentness at the last JavaScript boundary before rename (`apps/service/src/saving/pdf-save-coordinator.ts:466`).
+A copy derived from an owned local source needs **two proofs**: its independently authorized target still matches, and the owned local source used to render it still has the expected digest. An unchanged copy path alone says nothing about whether its source was replaced. After awaited capability checks, the coordinator rechecks broker currentness at the last JavaScript boundary before rename (`apps/service/src/saving/pdf-save-coordinator.ts:466`).
 
 A committed Document Generation advances the active destination generation. An original rebases its fingerprint to the validated successor source; a copy retains its independent target fingerprint until a verified save replaces it (`apps/service/src/sessions/session-broker.ts:2598`).
 
@@ -193,11 +205,11 @@ Use this pattern when:
 - Crash recovery must retain accepted work without claiming that the user-visible file is current.
 - Retrying after a moved, missing, changed, or unwritable target should converge idempotently to the newest complete state.
 
-Do not substitute a revision-only marker, an in-memory viewer commit event, the prior output bytes, or a visible object ID for this design. Each signal covers only one dimension of truth. Durable correctness requires semantic digest, target generation and identity, verified bytes, atomic replacement, and recovery evidence to agree.
+Do not substitute a revision-only marker, an in-memory viewer commit event, the prior output bytes, or a visible object ID for this design. Each signal covers only one dimension of truth. Durable correctness requires semantic digest, target generation and identity, verified bytes, transport-specific delivery evidence (atomic replacement for local targets or a matching conditional-write receipt for host targets), and recovery evidence to agree.
 
 ## Examples
 
-### First annotation saved to a copy
+### First local annotation saved to a copy
 
 1. The user opens and reads the PDF without a save prompt.
 2. The first annotation command is held pending and the dialog proposes an annotated-copy filename (`apps/web/src/save/save-state-controller.ts`, `apps/service/src/saving/save-destination.ts`).
