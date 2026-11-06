@@ -17,10 +17,20 @@ export function nativeTitlebarOptions(platform = process.platform): BrowserWindo
     };
 }
 
+export function alignNativeWindowButtons(window: BrowserWindow, height = toolbarHeight, platform = process.platform): void {
+    if (platform !== 'darwin' || window.isDestroyed()) return;
+    const scale = window.webContents.getZoomFactor();
+    const next = { x: Math.round(16 * scale), y: Math.round(height * scale / 2 - trafficLightRadius) };
+    const current = window.getWindowButtonPosition();
+    // Updating native buttons republishes titlebar geometry to the renderer.
+    // Do not feed identical geometry back into another native layout pass.
+    if (current?.x !== next.x || current?.y !== next.y) window.setWindowButtonPosition(next);
+}
+
 export function setInterfaceZoom(window: BrowserWindow, level: number, platform = process.platform): void {
     window.webContents.setZoomLevel(level);
     const scale = window.webContents.getZoomFactor();
-    if (platform === 'darwin') window.setWindowButtonPosition(trafficLightPosition(scale));
+    if (platform === 'darwin') alignNativeWindowButtons(window, toolbarHeight, platform);
     else window.setTitleBarOverlay({ height: Math.round(toolbarHeight * scale) });
 }
 

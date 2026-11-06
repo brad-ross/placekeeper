@@ -257,6 +257,7 @@ export function PdfWorkspace({
               className="pdf-workspace__viewport"
               data-viewer-framing-viewport
             >
+              <div className="pdf-workspace__scrollbar-backing" aria-hidden="true" />
               <ZoomGestureWrapper
                 {...(onManualZoom === undefined ? {} : { onManualZoom })}
                 documentId={MAIN_PDF_DOCUMENT_ID}
@@ -534,7 +535,7 @@ export function PdfWorkspace({
                     left: 0,
                     top: 0,
                     width: `calc(100% + ${(previewLimit === null ? runway.right : 0)}px)`,
-                    height: `calc(100% + ${(previewLimit === null ? runway.bottom : 0)}px)`,
+                    height: `calc(100% + ${(previewLimit === null ? runway.bottom : 0)}px + ${previewLimit === null && runway.bottom > 0 ? 'var(--review-page-bottom-clearance, 64px)' : '0px'})`,
                     pointerEvents: 'none',
                     visibility: 'hidden',
                   }}
