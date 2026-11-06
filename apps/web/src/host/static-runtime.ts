@@ -1,3 +1,4 @@
+import { externalWebUrl } from "../../../../packages/core/src/external-web-url.js";
 import { ReviewExportConflictError, type ReviewExportFence } from "../../../../packages/core/src/review-runtime-protocol.js";
 import type { SaveStatus } from "../../../../packages/core/src/save-status.js";
 import { projectReviewItems } from "../../../../packages/core/src/annotation-projection.js";
@@ -474,6 +475,11 @@ export async function createStaticHostRuntime(
 
   const runtime: HostRuntime = {
     host: "static",
+    async openExternalUrl(value) {
+      const url = externalWebUrl(value);
+      if (disposed || url === null) throw new Error("Web link opening is unavailable.");
+      window.open(url, "_blank", "noopener,noreferrer");
+    },
     capabilities: { localDocumentRefresh: false },
     async bootstrap() {
       return {

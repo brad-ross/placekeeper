@@ -1,3 +1,4 @@
+import { externalWebUrl } from "../../../packages/core/src/external-web-url.js";
 import { chromeAutoOpenPorts, connectPlacekeeper } from "./chrome-api.js";
 import {
   createHandlerController,
@@ -37,6 +38,7 @@ interface SharedChromeClient {
 interface SharedClientModule {
   startChromeRuntime(options: {
     readonly runtimeId: string;
+    readonly openExternalUrl?: (url: string) => Promise<void>;
     readonly extensionOrigin: string;
     readonly port: {
       postMessage(message: unknown): unknown;
@@ -252,6 +254,11 @@ async function openEmbeddedReview(
           runtimeId: native.runtimePort.runtimeId,
           extensionOrigin: globalThis.location.origin,
           port: native.runtimePort,
+          async openExternalUrl(value: string) {
+            const url = externalWebUrl(value);
+            if (url === null || mountSignal.aborted || chrome.tabs.create === undefined) throw new Error("Web link opening is unavailable.");
+            await chrome.tabs.create({ url });
+          },
           onDocumentTitleChange(nextTitle) {
             document.title = nextTitle;
           },

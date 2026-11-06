@@ -1,3 +1,4 @@
+import { externalWebUrl } from '../../../packages/core/src/external-web-url.js';
 import { resolvePlatformLocations } from '../../service/src/platform/locations.js';
 import { app, BrowserWindow, dialog, ipcMain, protocol, session, clipboard, screen, shell } from 'electron';
 import { mkdirSync, writeFileSync } from 'node:fs';
@@ -205,6 +206,12 @@ async function start() {
         const e = verify(event, id);
         if (!e.sourceEndpoint || token !== e.sourceEndpoint.token || (endpoint !== null && (typeof endpoint !== 'string' || endpoint.length > 4096 || endpoint.includes('\0')))) throw new Error('Invalid source endpoint');
         const pending = e.sourceEndpoint; delete e.sourceEndpoint; pending.resolve(endpoint);
+    });
+    ipcMain.handle('review:open-external-url', async (event, id, value) => {
+        const e = verify(event, id);
+        const url = externalWebUrl(value);
+        if (url === null || !e.bridge.active) throw new Error('Invalid web link request');
+        await shell.openExternal(url);
     });
     ipcMain.handle('review:create-link', async (event, id, value) => {
         const e = verify(event, id);

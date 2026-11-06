@@ -95,7 +95,7 @@ describe('installed EmbedPDF link renderer replacement', () => {
 
   it.each([
     ['missing', undefined],
-    ['external', { type: 'action', action: { type: PdfActionType.URI, uri: 'https://example.invalid' } }],
+    ['non-web', { type: 'action', action: { type: PdfActionType.URI, uri: 'file:///tmp/paper.pdf' } }],
   ] as const)('rejects %s targets before chooser or navigation', (_name, target) => {
     const onInteraction = vi.fn();
     const renderer = createPdfLinkAnnotationRenderer({
@@ -223,5 +223,24 @@ describe('PDF link source geometry', () => {
       type: 'pdf-link-unavailable',
       value: { sourceScope: 'main', sourcePageIndex: 0 },
     });
+  });
+});
+
+
+describe('embedded web links', () => {
+  it.each(['main', 'reference'] as const)('exposes the URL and emits only on activation in %s', sourceScope => {
+    const onInteraction = vi.fn();
+    const button = PdfLinkControl({ annotation: link({ type: 'action', action: { type: PdfActionType.URI, uri: 'https://example.com/paper?q=1#abstract' } }), sourceScope, documentGeneration: 4, pageCount: 3, onInteraction });
+    expect(button.props.tooltip).toBe('https://example.com/paper?q=1#abstract');
+    expect(button.props['aria-label']).toBe('Open web link: https://example.com/paper?q=1#abstract');
+    expect(button.props['aria-haspopup']).toBeUndefined();
+    expect(onInteraction).not.toHaveBeenCalled();
+    const event = { currentTarget: {}, preventDefault: vi.fn(), stopPropagation: vi.fn() };
+    button.props.onClick(event);
+    expect(event.preventDefault).toHaveBeenCalledOnce();
+    expect(event.stopPropagation).toHaveBeenCalledOnce();
+    expect(onInteraction).toHaveBeenCalledExactlyOnceWith({ type: 'pdf-external-link', value: {
+      sourceScope, sourcePageIndex: 0, documentGeneration: 4, url: 'https://example.com/paper?q=1#abstract',
+    } });
   });
 });

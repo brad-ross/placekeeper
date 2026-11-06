@@ -2,7 +2,7 @@ declare module "vscode" {
   export enum UIKind { Desktop = 1, Web = 2 }
   export enum ConfigurationTarget { Global = 1, Workspace = 2, WorkspaceFolder = 3 }
   export interface Uri { readonly scheme: string; readonly fsPath: string; readonly path: string; readonly query: string; toString(): string }
-  export const Uri: { file(path: string): Uri; joinPath(base: Uri, ...segments: string[]): Uri };
+  export const Uri: { parse(value: string): Uri; file(path: string): Uri; joinPath(base: Uri, ...segments: string[]): Uri };
   export interface Disposable { dispose(): unknown }
   export interface Memento { get<T>(key: string): T | undefined; update(key: string, value: unknown): Promise<void> }
   export interface ExtensionContext {
@@ -12,7 +12,7 @@ declare module "vscode" {
     readonly workspaceState: Memento;
     asAbsolutePath(path: string): string;
   }
-  export const env: { readonly remoteName?: string; readonly uiKind: UIKind };
+  export const env: { openExternal(uri: Uri): Promise<boolean>; readonly remoteName?: string; readonly uiKind: UIKind };
   export interface TextLine { readonly text: string; readonly range: Range }
   export interface TextDocument { readonly uri: Uri; readonly languageId: string; readonly lineCount: number; lineAt(line: number): TextLine }
   export interface Position { readonly line: number; readonly character: number }

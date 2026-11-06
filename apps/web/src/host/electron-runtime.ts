@@ -1,3 +1,4 @@
+import { externalWebUrl } from '../../../../packages/core/src/external-web-url.js';
 import type { ElectronShellBridge, ElectronShellIdentity } from '../../../../packages/core/src/electron-shell-protocol.js';
 import { decodePlacekeeperLink, type PlacekeeperLinkLocation } from '../../../../packages/core/src/placekeeper-link.js';
 import { MemoryReviewLocationHistory } from '../review/review-location-history.js';
@@ -30,6 +31,13 @@ export function createElectronHostRuntime(bridge: ElectronShellBridge, identity:
             if (disposed || expectedGeneration !== generation || !history) throw new Error('Focused reader generation is unavailable');
             await history.navigate(location);
             if (disposed || expectedGeneration !== generation) throw new Error('Focused reader was replaced');
+        },
+        async openExternalUrl(value: string): Promise<void> {
+            if (disposed) throw new Error('Retired reader');
+            const url = externalWebUrl(value);
+            if (url === null || bridge.openExternalUrl === undefined) throw new Error('Web link opening is unavailable.');
+            await bridge.openExternalUrl(identity, url);
+            if (disposed) throw new Error('Retired reader');
         },
         async createLink(location: PlacekeeperLinkLocation) {
             if (disposed) throw new Error('Retired reader');

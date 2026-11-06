@@ -359,7 +359,7 @@ async function referenceNavigationPdf() {
     size: 11,
     font,
   });
-  hostilePage.drawText('Rejected URI, RemoteGoto, Launch, malformed, missing, and out-of-bounds links.', {
+  hostilePage.drawText('Web URI and rejected RemoteGoto, Launch, malformed, missing, and out-of-bounds links.', {
     x: 72,
     y: 690,
     size: 10,

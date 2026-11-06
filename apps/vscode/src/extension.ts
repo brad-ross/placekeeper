@@ -461,7 +461,10 @@ export function activate(context: vscode.ExtensionContext): void {
       await rm(snapshotRoot, { recursive: true, force: true });
       requireOpenPanel();
     }
-    const bridge = new VersionedWebviewBridge(client, (message) => panel.webview.postMessage(message));
+    const bridge = new VersionedWebviewBridge(client, (message) => panel.webview.postMessage(message), async (url) => {
+      requireOpenPanel();
+      if (!await vscode.env.openExternal(vscode.Uri.parse(url))) throw new Error("The browser could not open this link.");
+    });
     const observer = new RebuildObserver({
       outputPath: binding.outputPath,
       hostHintPrefix: `${windowId}:${panelId}`,

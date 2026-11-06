@@ -1,3 +1,5 @@
+import { ExternalLinkRecovery } from '../review/ExternalLinkRecovery.js';
+import { externalWebUrl } from '../../../../packages/core/src/external-web-url.js';
 import type { PlacekeeperLinkLocation } from "../../../../packages/core/src/placekeeper-link.js";
 import { pdfNavigationTargetFromPlacekeeperLocation } from '../pdf/pdf-navigation-target.js';
 import { useContext, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, type ReactNode } from "react";
@@ -532,6 +534,7 @@ export interface ProductionReviewAppProps {
   readonly initialSaveStatus?: SaveStatus;
   readonly scope: ProductionScope;
   readonly api: ProductionSessionApi;
+  readonly onOpenExternalUrl?: (url: string) => Promise<void>;
   readonly viewerAssets?: ViewerAssetUrls;
   readonly resourcePolicy?: ViewerResourcePolicy;
   /** Host-owned semantic history. `null` explicitly disables address-bar history. */
@@ -653,6 +656,9 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   const [pdfCopyOwnerIndicatorVisible, setPdfCopyOwnerIndicatorVisible] = useState(false);
   const [pdfCopyAnnouncement, setPdfCopyAnnouncement] = useState('');
   const [pdfCopyError, setPdfCopyError] = useState<string | null>(null);
+  const [externalLinkFailure, setExternalLinkFailure] = useState<{ url: string; generation: number } | null>(null);
+  const externalLinkAttempt = useRef(0);
+  useEffect(() => () => { externalLinkAttempt.current += 1; }, []);
   const [commandError, setCommandError] = useState<string | null>(null);
   const [commandNotice, setCommandNotice] = useState<string | null>(null);
   const [locationRestoreStatus, setLocationRestoreStatus] = useState<LocationRestoreStatus>('restoring');
@@ -1751,7 +1757,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     portableItemIdsRef.current = new Set(state.items.map((item) => item.id));
   }, [navigationCoordinator, saveStatus, state]);
   const onViewerInteraction = useCallback((event: ViewerInteractionEvent) => {
-    if (!interactionAvailability.current.referencesEnabled && (event.type === 'pdf-link' || event.type === 'pdf-link-unavailable')) return;
+    if (!interactionAvailability.current.referencesEnabled && (event.type === 'pdf-link' || event.type === 'pdf-link-unavailable' || event.type === 'pdf-external-link')) return;
     if (!interactionAvailability.current.authoringEnabled && ['caret', 'page-menu', 'page-note-cursor', 'page-note-commit'].includes(event.type)) return;
     const surface = currentAnnotationSurface(event.surface);
     if ([
@@ -1766,6 +1772,25 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     ].includes(event.type) && surface === null) return;
     if (event.type === 'reverse-synctex') {
       requestReverseSyncTex(event.value);
+      return;
+    }
+    if (event.type === 'pdf-external-link') {
+      const { documentGeneration, sourceScope } = event.value;
+      const url = externalWebUrl(event.value.url);
+      if (url === null || documentGeneration !== documentGenerationRef.current || surface === null
+        || surface.kind !== sourceScope) return;
+      const attempt = ++externalLinkAttempt.current;
+      setExternalLinkFailure(null);
+      const failed = () => {
+        if (attempt === externalLinkAttempt.current && documentGeneration === documentGenerationRef.current) {
+          setExternalLinkFailure({ url, generation: documentGeneration });
+        }
+      };
+      // Call before awaiting so browser popup activation stays attached to the click.
+      try {
+        if (props.onOpenExternalUrl === undefined) failed();
+        else void props.onOpenExternalUrl(url).catch(failed);
+      } catch { failed(); }
       return;
     }
     if (event.type === 'pdf-link') {
@@ -1971,6 +1996,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       });
     }
   }, [
+    props.onOpenExternalUrl,
     authoringAnchorRefresh,
     cancelReferenceInspectionDismiss,
     captureCurrentReadingLocation,
@@ -2579,6 +2605,12 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
         setPdfCopyOwner(surface === 'main' || surface === 'reference' ? surface : null);
       }}
     >
+      {externalLinkFailure !== null && externalLinkFailure.generation === state.workflow.documentGeneration && (
+        <ExternalLinkRecovery key={externalLinkFailure.url} url={externalLinkFailure.url} onDismiss={() => {
+          externalLinkAttempt.current += 1;
+          setExternalLinkFailure(null);
+        }} />
+      )}
       <NativePdfSelectionBridge owner={pdfCopyOwner} snapshots={pdfCopySnapshots} />
       <ReviewShell
         state={state}
