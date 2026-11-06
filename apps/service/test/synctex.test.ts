@@ -11,7 +11,11 @@ import { querySyncTex, runSyncTex, syncTexProcessPath } from "../src/synctex/que
 import { SessionBroker } from "../src/sessions/session-broker.js";
 
 const roots: string[] = [];
-afterEach(async () => Promise.all(roots.splice(0).map((path) => rm(path, { recursive: true, force: true }))));
+const brokers: SessionBroker[] = [];
+afterEach(async () => {
+  await Promise.all(brokers.splice(0).map(broker => broker.quiesceForShutdown()));
+  await Promise.all(roots.splice(0).map(path => rm(path, { recursive: true, force: true })));
+});
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "placekeeper-synctex-"));
@@ -40,6 +44,7 @@ async function generatedOutputFixture(
     )));
   }
   const broker = new SessionBroker({ recoveryRoot: join(root, "recovery") });
+  brokers.push(broker);
   const opened = await broker.openReview({
     pdfPath,
     sourceRootPath: root,

@@ -107,6 +107,30 @@ async function exportFixture() {
 }
 
 describe("reviewed PDF export transaction", () => {
+  it("does not publish a reviewed copy after its caller authority retires during preparation", async () => {
+    const fixture = await exportFixture();
+    let authorized = true;
+    const entered = Promise.withResolvers<void>(), release = Promise.withResolvers<void>();
+    const recorded = vi.fn(async () => undefined);
+    const coordinator = new ExportCoordinator({
+      writer: { write: async () => fixture.result }, capabilities: fixture.capabilities,
+      verify: async () => ({ pageCount: 1, annotationIds: [fixture.item.id] }),
+      hooks: { beforeFinalize: async () => { entered.resolve(); await release.promise; } },
+      recordSuccessfulExport: recorded,
+    });
+    const pending = coordinator.exportReviewedCopy(fixture.delivery(), () => {
+      if (!authorized) throw new Error("presentation-unavailable");
+    });
+    const rejected = expect(pending).rejects.toThrow("presentation-unavailable");
+    await entered.promise;
+    authorized = false;
+    release.resolve();
+    await rejected;
+    expect(await readFile(fixture.originalPath)).toEqual(fixture.original);
+    expect((await readdir(fixture.directory)).filter(name => name.includes("reviewed") || name.endsWith(".tmp"))).toEqual([]);
+    expect(recorded).not.toHaveBeenCalled();
+  });
+
   it("releases terminal-session export results without changing active retry semantics", async () => {
     const fixture = await exportFixture();
     const write = vi.fn(async () => fixture.result);

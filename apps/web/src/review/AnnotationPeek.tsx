@@ -21,6 +21,7 @@ export interface AnnotationPeekProps {
   onHoldChange(held: boolean): void;
   onSelect?(): void;
   copyLink?: CopyLinkControlProps;
+  onAddContext?(): void;
   onNavigate?(): void;
   onOpenReference?(): void;
   showSourceReturn?: boolean;
@@ -67,6 +68,7 @@ export function AnnotationPeek({
   onHoldChange,
   onSelect,
   copyLink,
+  onAddContext,
   onNavigate,
   onOpenReference,
   showSourceReturn = false,
@@ -114,6 +116,7 @@ export function AnnotationPeek({
         {...(readerRecord === undefined ? {} : { readerRecord })}
         showSourceReturn={showSourceReturn}
         {...(copyLink ? { copyLink } : {})}
+        {...(onAddContext ? { onAddContext } : {})}
         {...(onNavigate ? { onNavigate } : {})}
         {...(onOpenReference ? { onOpenReference } : {})}
         {...(onReadFull ? { onReadFull } : {})}

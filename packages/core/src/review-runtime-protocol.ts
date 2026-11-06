@@ -138,6 +138,7 @@ const SHA256 = /^[0-9a-f]{64}$/u;
 const FORBIDDEN_CHROME_KEY = /(?:authorization|bindProof|capability|commandId|credential|executable|headers|originalUrl|presentationId|sourceRoot|sourceUrl|syncTex|taskId)/iu;
 const BIDI_OR_CONTROL = /[\u0000-\u001f\u007f-\u009f\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/gu;
 const SAVE_FAILURE_REASONS = new Set([
+  "host-conflict", "host-write-unknown", "host-read-only",
   "destination-unconfigured",
   "missing",
   "invalid-annotation-geometry",
@@ -332,6 +333,8 @@ function safeChromeSaveStatus(value: unknown): unknown | undefined {
   let safeDestination: unknown;
   if (destination.phase === "none" && destination.generation === 0) {
     safeDestination = { phase: "none", generation: 0 };
+  } else if (destination.phase === "host" && safeInteger(destination.generation) && typeof destination.writable === "boolean") {
+    safeDestination = { phase: "host", generation: destination.generation, writable: destination.writable };
   } else if (destination.phase === "establishing" && safeInteger(destination.generation)) {
     safeDestination = { phase: "establishing", generation: destination.generation };
   } else if (destination.phase === "active" && safeInteger(destination.generation) &&

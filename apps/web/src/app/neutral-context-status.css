@@ -175,6 +175,25 @@
 .codex-context-status:hover { background: var(--pk-hover); }
 .codex-context-status:focus-visible { box-shadow: none; }
 
+.review-chrome__context.review-chrome__context--document {
+  display: block;
+  flex: none;
+}
+
+.document-context-button { padding: 0; }
+.document-context-button .review-icon { color: var(--codex-context-accent); }
+.document-context-button[data-document-context="idle"] { --codex-context-accent: var(--pk-muted); }
+.document-context-button:not([aria-disabled="true"]) { cursor: pointer; }
+.document-context-button[data-document-context="publishing"] { cursor: progress; }
+
+@media (prefers-reduced-motion: reduce) {
+  .document-context-button,
+  .document-context-button.codex-context-status--connecting .review-icon {
+    animation: none;
+    transition: none;
+  }
+}
+
 .codex-context-status__tooltip {
   position: fixed;
   right: auto;

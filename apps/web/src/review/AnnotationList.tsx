@@ -49,6 +49,7 @@ export interface AnnotationListProps {
   onReaderOverflowChangeExisting?(record: AnnotationReaderRecord, overflowing: boolean): void;
   onCorrespondenceChange?(id: string | undefined): void;
   copyLinkForItem?(item: ReviewItem): CopyLinkControlProps | undefined;
+  onAddContext?(item: ReviewItem): void;
   onEdit(item: ReviewItem, trigger: HTMLButtonElement): void;
   onDelete(item: ReviewItem): Promise<void> | void;
   attention?: AnnotationAttentionPresentation;
@@ -134,6 +135,7 @@ export interface AnnotationRowContentProps {
   readonly lastPageNumber?: number;
   readonly sectionLabel?: string;
   readonly copyLink?: CopyLinkControlProps;
+  readonly onAddContext?: () => void;
   readonly readerRecord?: AnnotationReaderRecord | null;
   readonly navigationRef?: (node: HTMLButtonElement | null) => void;
   readonly onNavigate?: () => void;
@@ -163,6 +165,7 @@ export function AnnotationRowContent({
   lastPageNumber: suppliedLastPageNumber,
   sectionLabel,
   copyLink,
+  onAddContext,
   readerRecord = projectOwnedAnnotationReader(item),
   navigationRef,
   onNavigate,
@@ -212,7 +215,12 @@ export function AnnotationRowContent({
     label: `Edit ${kindLabel} annotation on ${pageDescription}`,
     title: 'Edit annotation', onInvoke: onEdit,
   });
-  if (copyLink) actions.push({
+  if (onAddContext) actions.push({
+    id: 'add-context', kind: 'command', icon: 'agent',
+    label: `Add ${kindLabel} annotation on ${pageDescription} to chat`,
+    title: 'Add annotation to chat', onInvoke: onAddContext,
+  });
+  else if (copyLink) actions.push({
     id: 'copy-link', kind: 'copy-link',
     label: `Copy link to ${kindLabel} annotation on ${pageDescription}`,
     title: copyLink.disabled ? 'Save annotation before copying its link' : 'Copy annotation link',
@@ -293,6 +301,7 @@ export function AnnotationList({
   onReaderOverflowChangeExisting,
   onCorrespondenceChange,
   copyLinkForItem,
+  onAddContext,
   onEdit,
   onDelete,
   attention,
@@ -436,7 +445,7 @@ export function AnnotationList({
           const { item } = entry;
           const active = activeId === item.id;
           const corresponding = correspondingId === item.id;
-          const copyLink = copyLinkForItem?.(item);
+          const copyLink = onAddContext === undefined ? copyLinkForItem?.(item) : undefined;
           const readerRecord = projectOwnedAnnotationReader(item);
           const sectionLabel = entrySectionLabel(entry, sectionLabelAt);
           return (
@@ -475,6 +484,7 @@ export function AnnotationList({
                 item={item}
                 {...(sectionLabel ? { sectionLabel } : {})}
                 {...(copyLink ? { copyLink } : {})}
+                {...(onAddContext ? { onAddContext: () => onAddContext(item) } : {})}
                 readerRecord={readerRecord}
                 navigationRef={(node) => {
                   const focusKey = `owned:${item.id}`;

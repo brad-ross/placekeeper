@@ -19,6 +19,7 @@ export interface FullAnnotationReaderProps {
   readonly onDelete?: (trigger: HTMLButtonElement) => void | Promise<void>;
   readonly onOpenReference?: () => void;
   readonly sourceNavigation?: FullAnnotationReaderSourceNavigation;
+  readonly onAddContext?: () => void;
 }
 
 export interface FullAnnotationReaderActionsProps {
@@ -167,6 +168,7 @@ export function FullAnnotationReader({
   onDelete,
   onOpenReference,
   sourceNavigation,
+  onAddContext,
 }: FullAnnotationReaderProps) {
   const pageDescription = record.lastPageNumber === undefined
     ? `page ${record.pageNumber}`
@@ -199,6 +201,14 @@ export function FullAnnotationReader({
         </div>
         <FullAnnotationReaderMetadata record={record} readonly={record.origin === 'source'} />
         <div className="full-annotation-reader__header-actions">
+          {onAddContext === undefined ? null : <ReviewTooltipButton
+            type="button"
+            className="full-annotation-reader__add-context"
+            data-full-annotation-action="add-context"
+            label="Add annotation to chat"
+            aria-haspopup="dialog"
+            onClick={onAddContext}
+          ><ReviewIcon name="agent" size={16} /></ReviewTooltipButton>}
           {onOpenReference === undefined ? null : <ReviewTooltipButton
             type="button"
             className="full-annotation-reader__open-reference"

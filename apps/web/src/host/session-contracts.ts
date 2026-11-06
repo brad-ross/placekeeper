@@ -28,6 +28,8 @@ export interface ProductionScope {
   readonly persistenceMode?: 'export-only';
   /** A restarted browser is awaiting task-scoped Codex reattachment. */
   readonly reconnectPending?: true;
+  /** App-owned extensions publish context separately from legacy task bindings. */
+  readonly contextOwner?: 'app';
   readonly codexContext?: LiveContextBindingStatus;
 }
 
@@ -70,6 +72,7 @@ export interface ProductionSessionApi extends Partial<ReviewInteractionTransport
   readonly capabilities?: {
     readonly localDocumentRefresh: boolean;
     readonly interactionLifecycleVersion?: 1;
+    readonly reviewedCopyExport?: boolean;
   };
   subscribeInteractionReconnect?(
     listener: (identity: { readonly generation: number; readonly revision: number }) => Promise<void>,

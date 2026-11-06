@@ -90,19 +90,25 @@ test('bundled independent Node serves MCP tools and the packaged review resource
     transport.stderr!.on('data', chunk => { stderr += String(chunk); });
     await client.connect(transport, { timeout: 10_000 });
     const tools = await client.listTools(undefined, { timeout: 10_000 });
-    expect(tools.tools.map(tool => tool.name).sort()).toEqual(['display_review', 'review_app']);
-    const listing = await client.listResources(undefined, { timeout: 10_000 });
-    expect(listing.resources).toEqual([expect.objectContaining({ uri: CODEX_REVIEW_UI_RESOURCE, mimeType: RESOURCE_MIME_TYPE })]);
-    const resource = await client.readResource({ uri: CODEX_REVIEW_UI_RESOURCE }, { timeout: 10_000 });
-    expect(resource.contents).toHaveLength(1);
+    expect(tools.tools.map(tool => tool.name).sort()).toEqual(['display_review', 'extension_app', 'open_pdf', 'open_placekeeper', 'review_app']);
     const html = await readFile(join(resources, 'codex-mcp/review-v1.html'), 'utf8');
-    expect(resource.contents[0]).toMatchObject({ uri: CODEX_REVIEW_UI_RESOURCE, mimeType: RESOURCE_MIME_TYPE, text: html });
+    const uri = `ui://placekeeper/review-v1-${createHash('sha256').update(html).digest('hex')}.html`;
+    const listing = await client.listResources(undefined, { timeout: 10_000 });
+    expect(listing.resources).toEqual([expect.objectContaining({ uri, mimeType: RESOURCE_MIME_TYPE })]);
+    const resource = await client.readResource({ uri }, { timeout: 10_000 });
+    expect(resource.contents).toHaveLength(1);
+    expect(resource.contents[0]).toMatchObject({ uri, mimeType: RESOURCE_MIME_TYPE, text: html });
+    for (const name of ['display_review', 'open_pdf', 'open_placekeeper']) {
+      expect(tools.tools.find(tool => tool.name === name)?._meta).toHaveProperty('ui.resourceUri', uri);
+    }
+    const legacy = await client.readResource({ uri: CODEX_REVIEW_UI_RESOURCE }, { timeout: 10_000 });
+    expect(legacy.contents[0]).toMatchObject({ uri: CODEX_REVIEW_UI_RESOURCE, text: html });
     expect(html).toContain('<!doctype html>');
     await client.close();
     await expect(stat(appSupportRoot(env))).rejects.toMatchObject({ code: 'ENOENT' });
     expect(stderr).toBe('');
     await testInfo.attach('packaged-mcp-results', {
-      body: JSON.stringify({ resources, tools: tools.tools.map(tool => tool.name), uri: CODEX_REVIEW_UI_RESOURCE,
+      body: JSON.stringify({ resources, tools: tools.tools.map(tool => tool.name), uri,
         reviewHtmlSha256: createHash('sha256').update(html).digest('hex'), reviewHtmlBytes: Buffer.byteLength(html), systemNodeInPath: false }),
       contentType: 'application/json',
     });

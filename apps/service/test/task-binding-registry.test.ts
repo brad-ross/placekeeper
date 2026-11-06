@@ -626,3 +626,29 @@ describe("advisory native reconnect hints", () => {
     expect(registry.activateBrowser({ reviewSessionId: "browser-review", documentGeneration: 1, browserCapability: "browser-new" }).status).toBe("active");
   });
 });
+
+describe("daemon continuation authority snapshots", () => {
+  it("survives ordinary lease expiry without retaining activity, but records later revocation", () => {
+    const { registry, advance } = registryFixture();
+    const input = { taskSessionId: "task-a", reviewSessionId: "review-a", documentGeneration: 1, browserCapabilityHash: digestSecretHex(BROWSER_CAPABILITY) };
+    expect(registry.attachReconnectedNative(input).status).toBe("active");
+    const snapshot = registry.captureAuthoritySnapshot(input);
+    advance(1001);
+    expect(registry.activityCount()).toBe(0);
+    expect(snapshot.isCurrent()).toBe(true);
+    registry.revokeTask("task-a");
+    expect(snapshot.isCurrent()).toBe(false);
+    expect(registry.attachReconnectedNative(input).status).toBe("active");
+    expect(snapshot.isCurrent()).toBe(false);
+  });
+  it("invalidates a previous owner even if a conflicting successor is later detached", () => {
+    const { registry } = registryFixture();
+    const input = { taskSessionId: "task-a", reviewSessionId: "review-a", documentGeneration: 1 };
+    const snapshot = registry.captureAuthoritySnapshot(input);
+    const browserCapabilityHash = digestSecretHex(BROWSER_CAPABILITY);
+    expect(registry.attachReconnectedNative({ ...input, taskSessionId: "task-b", browserCapabilityHash }).status).toBe("active");
+    registry.detachPresentation(browserCapabilityHash);
+    expect(snapshot.isCurrent()).toBe(false);
+    expect(registry.activityCount()).toBe(0);
+  });
+});

@@ -1451,6 +1451,38 @@ describe("save-aware recovery migration", () => {
     });
   });
 
+  it("keeps an independent annotated-PDF fork unconfigured instead of making it a competing original writer", async () => {
+    const directory = await temporaryDirectory();
+    const pdf = join(directory, "portable.pdf");
+    const bytes = "%PDF-1.7\nportable\n%%EOF";
+    await writeFile(pdf, bytes);
+    const command = addCommand(0, "Already embedded");
+    if (command.type !== "add") throw new Error("Expected add command");
+    const broker = new SessionBroker({
+      recoveryRoot: join(directory, "recovery"),
+      rewriteAssessor: async () => ({ eligible: true }),
+      portableReader: async () => [command.item],
+    });
+    const original = await broker.openReview({ pdfPath: pdf });
+    if (original.kind !== "opened") throw new Error("Expected original");
+    const originalStatus = broker.saveStatus(original.launch.sessionId);
+    expect(originalStatus?.destination).toMatchObject({ phase: "active", kind: "original" });
+    const fork = await broker.openReview({ pdfPath: pdf, recoveryDecision: "fork" });
+    if (fork.kind !== "opened") throw new Error("Expected independent fork");
+    expect(fork.launch.sessionId).not.toBe(original.launch.sessionId);
+    expect(broker.state(fork.launch.sessionId)?.items).toEqual([command.item]);
+    expect(broker.saveStatus(fork.launch.sessionId)?.destination).toEqual({ phase: "none", generation: 0 });
+    await broker.acceptMutation(fork.launch.sessionId, addCommand(0, "Fork-only edit"));
+    expect(broker.saveStatus(fork.launch.sessionId)).toMatchObject({
+      destination: { phase: "none", generation: 0 },
+      sync: { phase: "not-saved", failure: "destination-unconfigured" },
+    });
+    expect(broker.saveStatus(original.launch.sessionId)).toEqual(originalStatus);
+    expect(await readFile(pdf, "utf8")).toBe(bytes);
+    const recovered = await new DraftSnapshotStore(join(directory, "recovery", fork.launch.sessionId)).recover();
+    expect(recovered?.destination).toEqual({ phase: "none", generation: 0 });
+  });
+
   it("keeps portable marks visible but offers no destination for a restricted PDF", async () => {
     const directory = await temporaryDirectory();
     const pdf = join(directory, "restricted.pdf");

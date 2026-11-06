@@ -42,7 +42,7 @@ export interface AdoptedBrowserSource {
   readonly sourceIdentity?: string;
 }
 
-function safeDisplayName(value: string | undefined): string {
+export function normalizeBrowserSourceDisplayName(value: string | undefined): string {
   const candidate = basename((value ?? "Browser PDF.pdf").replace(/\\/gu, "/"))
     .replace(/[\u0000-\u001f\u007f]/gu, "")
     .trim()
@@ -121,7 +121,7 @@ export class BrowserSourceStore {
       disposition: "remote-temporary",
       byteLength: request.byteLength,
       sha256: request.sha256,
-      displayName: safeDisplayName(request.displayName),
+      displayName: normalizeBrowserSourceDisplayName(request.displayName),
       ...(request.protocolVersion === CHROME_RUNTIME_SOURCE_PROTOCOL_VERSION
         ? { sourceIdentity: request.sourceIdentity }
         : {}),

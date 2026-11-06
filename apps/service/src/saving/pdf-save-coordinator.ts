@@ -201,6 +201,7 @@ export class PdfSaveCoordinator {
     folderSelectionId?: string,
     confirmation?: SaveDestinationConfirmation,
     expectedDocumentGeneration?: number,
+    assertAuthority?: () => void,
   ): Promise<ReviewState | void> {
     const state = this.#broker.state(sessionId);
     if (state === undefined) throw new Error("Review session is not active");
@@ -230,7 +231,7 @@ export class PdfSaveCoordinator {
     // the dialog can preserve the user's location while they correct input.
     if (folderSelectionId !== undefined) this.#folderSelections.delete(folderSelectionId);
     try {
-      return await this.chooseCopy(sessionId, target, confirmation, expectedDocumentGeneration);
+      return await this.chooseCopy(sessionId, target, confirmation, expectedDocumentGeneration, assertAuthority);
     } catch (error) {
       if (folderSelectionId !== undefined && selected !== undefined) {
         this.#folderSelections.set(folderSelectionId, selected);
@@ -239,10 +240,11 @@ export class PdfSaveCoordinator {
     }
   }
 
-  async chooseFolder(sessionId: string, expectedDocumentGeneration?: number, trusted?: TrustedDestinationSelection): Promise<
+  async chooseFolder(sessionId: string, expectedDocumentGeneration?: number, trusted?: TrustedDestinationSelection, assertAuthority?: () => void): Promise<
     | { readonly cancelled: true }
     | { readonly cancelled: false; readonly selectionId: string; readonly folder: string }
   > {
+    assertAuthority?.();
     trusted?.assertAuthority?.();
     this.#assertExpectedDocumentGeneration(sessionId, expectedDocumentGeneration);
     if (trusted === undefined && this.#picker === undefined) throw new Error("Native destination picker is unavailable");
@@ -250,13 +252,15 @@ export class PdfSaveCoordinator {
     const path = trusted === undefined ? await this.#picker!.chooseFolder(
       proposal.sourceDisposition === "local" ? proposal.folder : undefined,
     ) : trusted.selectedPath ?? undefined;
+    assertAuthority?.();
     trusted?.assertAuthority?.();
     this.#assertExpectedDocumentGeneration(sessionId, expectedDocumentGeneration);
     if (path === undefined) return { cancelled: true };
     return { cancelled: false, selectionId: this.#rememberFolder(sessionId, path), folder: path };
   }
 
-  async locate(sessionId: string, expectedDocumentGeneration?: number, trusted?: TrustedDestinationSelection): Promise<void> {
+  async locate(sessionId: string, expectedDocumentGeneration?: number, trusted?: TrustedDestinationSelection, assertAuthority?: () => void): Promise<void> {
+    assertAuthority?.();
     trusted?.assertAuthority?.();
     if (trusted === undefined && this.#picker === undefined) throw new Error("Native destination picker is unavailable");
     this.#assertExpectedDocumentGeneration(sessionId, expectedDocumentGeneration);
@@ -266,25 +270,28 @@ export class PdfSaveCoordinator {
     }
     const selected = trusted === undefined ? await this.#picker!.locatePdf(dirname(status.destination.targetPath))
       : trusted.selectedPath ?? undefined;
+    assertAuthority?.();
     trusted?.assertAuthority?.();
     this.#assertExpectedDocumentGeneration(sessionId, expectedDocumentGeneration);
     if (selected === undefined) return;
     if ((await hashFile(selected)) !== status.destination.fingerprint) {
       throw new FileCapabilityError("TARGET_CHANGED", "The selected PDF is not the missing saved file");
     }
+    assertAuthority?.();
     trusted?.assertAuthority?.();
     this.#assertExpectedDocumentGeneration(sessionId, expectedDocumentGeneration);
     if (status.destination.kind === "original") {
       const state = this.#broker.state(sessionId);
       if (state === undefined) throw new Error("Review session is not active");
       const fingerprint = status.destination.fingerprint;
-      const rebind = () => this.#capabilities.rebindApprovedPdf(state.source.fileId, selected, fingerprint, trusted?.assertAuthority);
+      const checkAuthority = () => { assertAuthority?.(); trusted?.assertAuthority?.(); };
+      const rebind = () => this.#capabilities.rebindApprovedPdf(state.source.fileId, selected, fingerprint, checkAuthority);
       // Native's trusted fence makes capability rebind and canonical relocation
       // one ordered operation. Legacy callers retain their existing flow.
       const targetPath = expectedDocumentGeneration === undefined ? await rebind() : selected;
       await this.#broker.relocateOriginalDestination(sessionId, {
         targetPath, capabilityId: state.source.fileId, fingerprint: status.destination.fingerprint,
-        ...(trusted?.assertAuthority === undefined ? {} : { assertAuthority: trusted.assertAuthority }),
+        assertAuthority: () => { assertAuthority?.(); trusted?.assertAuthority?.(); },
         ...(expectedDocumentGeneration === undefined ? {} : {
           expectedDocumentGeneration, expectedDestinationGeneration: status.destination.generation, prepareTargetPath: rebind,
         }),
@@ -297,7 +304,7 @@ export class PdfSaveCoordinator {
         await this.#broker.establishSaveDestination(sessionId, {
           kind: "copy", targetPath: join(capability.parentPath, capability.filename),
           capabilityId: capability.id, fingerprint: status.destination.fingerprint,
-          ...(trusted?.assertAuthority === undefined ? {} : { assertAuthority: trusted.assertAuthority }),
+          assertAuthority: () => { assertAuthority?.(); trusted?.assertAuthority?.(); },
           ...(expectedDocumentGeneration === undefined ? {} : { expectedDocumentGeneration, expectedDestinationGeneration: status.destination.generation }),
         });
       } catch (error) { this.#capabilities.revokeDestination(capability.id); throw error; }
@@ -314,7 +321,7 @@ export class PdfSaveCoordinator {
     await this.requestSave(sessionId);
   }
 
-  async chooseCopy(sessionId: string, targetPath: string, confirmation?: SaveDestinationConfirmation, expectedDocumentGeneration?: number): Promise<ReviewState | void> {
+  async chooseCopy(sessionId: string, targetPath: string, confirmation?: SaveDestinationConfirmation, expectedDocumentGeneration?: number, assertAuthority?: () => void): Promise<ReviewState | void> {
     this.#assertExpectedDocumentGeneration(sessionId, expectedDocumentGeneration);
     this.#assertRewriteEligible(sessionId);
     const capability = await this.#capabilities.preauthorizeDestination(targetPath);
@@ -327,6 +334,7 @@ export class PdfSaveCoordinator {
         kind: "copy",
         targetPath: join(capability.parentPath, capability.filename),
         capabilityId: capability.id,
+        ...(assertAuthority === undefined ? {} : { assertAuthority }),
         ...(confirmation === undefined ? {} : { confirmation }),
         ...(expectedDocumentGeneration === undefined ? {} : { expectedDocumentGeneration }),
       });
@@ -339,7 +347,7 @@ export class PdfSaveCoordinator {
     return confirmation === undefined ? undefined : acceptedState;
   }
 
-  async chooseOriginal(sessionId: string, confirmation?: SaveDestinationConfirmation, expectedDocumentGeneration?: number): Promise<ReviewState | void> {
+  async chooseOriginal(sessionId: string, confirmation?: SaveDestinationConfirmation, expectedDocumentGeneration?: number, assertAuthority?: () => void): Promise<ReviewState | void> {
     this.#assertExpectedDocumentGeneration(sessionId, expectedDocumentGeneration);
     this.#assertRewriteEligible(sessionId);
     if (this.#broker.sourceDisposition(sessionId) === "remote-temporary") {
@@ -354,6 +362,7 @@ export class PdfSaveCoordinator {
       targetPath,
       capabilityId: state.source.fileId,
       fingerprint: state.source.digest,
+      ...(assertAuthority === undefined ? {} : { assertAuthority }),
       ...(confirmation === undefined ? {} : { confirmation }),
       ...(expectedDocumentGeneration === undefined ? {} : { expectedDocumentGeneration }),
     });
@@ -373,6 +382,19 @@ export class PdfSaveCoordinator {
     }
     await this.requestSave(sessionId);
     return confirmation === undefined ? undefined : status.state;
+  }
+
+  /** Produces the same verified PDF target as local saves, without publishing a filesystem destination. */
+  async materializeImportedSave(sessionId: string, exportFence?: { expectedRevision: number; documentGeneration: number }) {
+    if (this.#broker.sourceDisposition(sessionId) !== "remote-temporary") throw new Error("Host saves require an imported source");
+    this.#assertRewriteEligible(sessionId);
+    const delivery = exportFence ? await this.#broker.freezeDelivery(sessionId, exportFence, exportFence.documentGeneration) : await this.#broker.freezeSaveDelivery(sessionId);
+    const sourcePdf = new Uint8Array(await readFile(delivery.sourceSnapshotPath));
+    const written = await runPdfBackend(this.#writer, { sourcePdf, sourceSha256: delivery.source.digest,
+      revision: delivery.revision, annotations: delivery.annotations, manageNativeAnnotations: delivery.manageNativeAnnotations ?? false }, this.#backend);
+    await this.#verify({ sourcePdf, candidatePdf: written.pdfBytes, evidence: written.evidence,
+      annotations: delivery.annotations, manageNativeAnnotations: delivery.manageNativeAnnotations ?? false });
+    return { delivery, bytes: written.pdfBytes, sha256: written.evidence.outputSha256 };
   }
 
   requestSave(sessionId: string): Promise<void> {
@@ -420,6 +442,12 @@ export class PdfSaveCoordinator {
       ) return;
       const destination = status.destination;
       const generation = destination.generation;
+      if (destination.capabilityId === undefined) {
+        if (status.sync.phase !== "not-saved" || status.sync.failure === undefined) {
+          await this.#broker.markSaveFailed(sessionId, generation, "missing");
+        }
+        return;
+      }
       try {
         const delivery = await this.#broker.freezeSaveDelivery(sessionId);
         const stateDigest = delivery.stateDigest ?? reviewStateDigest({ items: delivery.items ?? [] });

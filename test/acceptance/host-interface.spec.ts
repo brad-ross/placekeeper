@@ -4,6 +4,18 @@ import { expect, test, type Page } from '@playwright/test';
 
 test('host bootstrap loads the outline for a resumed document generation', async ({ page }) => {
   await page.goto('/test/acceptance/review-harness/?host-history=1&host-resumed=1');
+  await page.locator('#root').evaluate(root => { root.dataset.productionRoot = 'true'; });
+  const loading = page.getByRole('status', { name: 'Opening document', exact: true });
+  for (const width of [1280, 375]) {
+    await page.setViewportSize({ width, height: 800 });
+    await expect(loading).toBeVisible();
+    await expect(loading.locator('.document-loading__content')).toHaveCSS('opacity', '1');
+    const surface = (await page.locator('[data-runtime-loading-workspace]').boundingBox())!;
+    const content = (await loading.locator('.document-loading__content').boundingBox())!;
+    expect(surface.height).toBeGreaterThan(100);
+    expect(Math.abs(content.y + content.height / 2 - surface.y - surface.height / 2)).toBeLessThan(1);
+    await page.screenshot({ path: test.info().outputPath(`shared-loading-${width}.png`) });
+  }
   await page.getByRole('button', { name: 'Finish host bootstrap' }).click();
   await expect(page.getByRole('textbox', { name: /^Current page \d+ of 4/u })).toBeVisible();
   const show = page.getByRole('button', { name: 'Show workspace', exact: true });
@@ -165,14 +177,33 @@ test('Chrome disconnect dims the review and Reopen reloads the owning tab with r
   await page.route('**/shared/app.css', (route) => route.fulfill({
     contentType: 'text/css', path: resolve('dist/web/app.css'),
   }));
-  await page.route('**/shared/app.js', (route) => route.fulfill({
-    contentType: 'text/javascript', body: `export async function startChromeRuntime() {
+  await page.route('**/shared/app.js', async (route) => {
+    await new Promise<void>(resolve => { releaseReader = resolve; });
+    await route.fulfill({ contentType: 'text/javascript', body: `export async function startChromeRuntime() {
       document.querySelector('#root').innerHTML = '<button style="position:fixed;inset:0;z-index:1000;background:white">PDF content</button>';
       return { ready: Promise.resolve(1), dispose() {} };
-    }`,
-  }));
+    }` });
+  });
+  let releaseReader!: () => void;
   await chromePage(page, 'handler');
+  const loading = page.getByRole('status', { name: 'Opening document', exact: true });
+  await expect(loading).toBeVisible();
+  await expect(page.locator('#root')).toHaveCSS('visibility', 'hidden');
+  for (const width of [1280, 375]) {
+    await page.setViewportSize({ width, height: 800 });
+    await expect(loading.locator('.document-loading__content')).toHaveCSS('opacity', '1');
+    const bounds = (await loading.locator('.document-loading__content').boundingBox())!;
+    expect(Math.abs(bounds.x + bounds.width / 2 - width / 2)).toBeLessThan(1);
+    expect(Math.abs(bounds.y + bounds.height / 2 - 400)).toBeLessThan(1);
+    await expect(page.getByRole('button', { name: 'Default', exact: true })).toBeVisible();
+    await page.screenshot({ path: test.info().outputPath(`chrome-loading-${width}.png`) });
+  }
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await expect(loading.locator('.document-loading__indicator')).toHaveCSS('animation-name', 'none');
+  releaseReader();
   await expect(page.locator('#launch-shell')).toBeHidden();
+  await expect(loading).toBeHidden();
+  await expect(page.locator('#root')).toHaveCSS('visibility', 'visible');
   expect(await page.locator('body').evaluate((body) => getComputedStyle(body, '::before').content)).toBe('none');
   await page.evaluate(() => (window as typeof window & { disconnectReview(): void }).disconnectReview());
   const reopen = page.getByRole('button', { name: 'Reopen PDF', exact: true });
@@ -218,7 +249,7 @@ test('Chrome protected recovery uses the shared neutral dialog language and rema
     await page.screenshot({ path: test.info().outputPath(`chrome-recovery-${viewport.width}.png`) });
   }
   await page.getByRole('button', { name: 'Resume', exact: true }).click();
-  await expect(page.getByRole('status')).toHaveText('Opening the protected review…');
+  await expect(page.getByRole('status', { name: 'Opening document', exact: true })).toBeVisible();
   const choices = await page.evaluate(() => (window as typeof window & {
     __chromeUiAudit: { sent: Record<string, unknown>[] };
   }).__chromeUiAudit.sent.filter(({ type }) => type === 'recover'));

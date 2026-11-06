@@ -1,3 +1,4 @@
+import { ContextNoteComposer } from '../src/review/ContextNoteComposer.js';
 import { renderToStaticMarkup } from "react-dom/server";
 import { PdfZoomMode } from "@embedpdf/models";
 import { describe, expect, it, vi } from "vitest";
@@ -1686,6 +1687,44 @@ describe("one production review tree", () => {
     }
   });
 
+  it.each([
+    { writable: true, phase: 'clean' as const },
+    { writable: true, phase: 'saving' as const },
+    { writable: true, phase: 'not-saved' as const },
+    { writable: false, phase: 'not-saved' as const },
+    { writable: false, phase: 'not-saved' as const, download: false },
+  ])('offers automatic save options for a host destination ($writable, $phase)', ({ writable, phase, download }) => {
+    const state = createReviewState({
+      sessionId: '00000000-0000-4000-8000-000000000103',
+      source: { fileId: '00000000-0000-4000-8000-000000000104', digest: 'a'.repeat(64), byteLength: 12 },
+    });
+    const html = renderToStaticMarkup(<ProductionReviewApp
+      session={{ sessionId: state.sessionId }} initialState={state}
+      scope={{ documentTitle: 'host.pdf', launchSurface: 'codex', sourceDisposition: 'remote-temporary' }}
+      initialSaveStatus={{
+        destination: { phase: 'host', generation: 1, writable },
+        sync: { phase, desiredRevision: 1, savedRevision: 0 },
+      }}
+      api={{
+        capabilities: { localDocumentRefresh: true, ...(download === false ? { reviewedCopyExport: false } : {}) },
+        command: vi.fn(), saveStatus: vi.fn(), saveProposal: vi.fn(), chooseCopy: vi.fn(),
+        chooseFolder: vi.fn(), chooseOriginal: vi.fn(), retrySave: vi.fn(), locateSave: vi.fn(),
+        exportReviewedCopy: vi.fn(), scope: vi.fn(),
+      }}
+      viewer={<div>Host PDF reader</div>}
+    />);
+    if (download === false) {
+      expect(html).toContain('aria-haspopup="dialog"');
+      expect(html).toContain('Open automatic save options');
+      expect(html).not.toContain('data-document-actions-trigger');
+    } else {
+      expect(html).toContain('data-document-actions-trigger');
+      expect(html).toContain('aria-haspopup="menu"');
+    }
+    const status = phase === 'not-saved' ? 'Not saved' : phase === 'saving' ? 'Saving changes' : 'Saved';
+    expect(html).toContain(`data-review-saved-status="true">${status}</span>`);
+  });
+
   it('shows actionable save failure only for an established local save destination', () => {
     const state = createReviewState({
       sessionId: '00000000-0000-4000-8000-000000000101',
@@ -1753,6 +1792,28 @@ describe("one production review tree", () => {
     expect(codex).not.toContain("button>Codex");
     expect(finder).not.toContain('data-codex-context');
     expect(finder).not.toContain("Codex");
+  });
+
+  it('omits the legacy task-binding badge only for an app-owned Codex reader', () => {
+    const state = createReviewState({
+      sessionId: '00000000-0000-4000-8000-000000000011',
+      source: { fileId: '00000000-0000-4000-8000-000000000012', digest: 'a'.repeat(64), byteLength: 12 },
+    });
+    const renderReader = (contextOwner?: 'app') => renderToStaticMarkup(<ProductionReviewApp
+      session={{ sessionId: state.sessionId }}
+      initialState={state}
+      scope={{ documentTitle: 'paper.pdf', launchSurface: 'codex', ...(contextOwner === undefined ? {} : { contextOwner }) }}
+      api={{
+        command: vi.fn(), saveStatus: vi.fn(), saveProposal: vi.fn(), chooseCopy: vi.fn(),
+        chooseFolder: vi.fn(), chooseOriginal: vi.fn(), retrySave: vi.fn(), locateSave: vi.fn(), scope: vi.fn(),
+      }}
+      viewer={<div>Viewer</div>}
+    />);
+
+    expect(renderReader()).toContain('Agent context unavailable');
+    const app = renderReader('app');
+    expect(app).not.toContain('data-codex-context');
+    expect(app).not.toContain('Reopen this PDF from your agent');
   });
 
   it("renders a previously current Codex identity as refreshing as soon as local review state advances", () => {
@@ -1923,4 +1984,57 @@ describe("one production review tree", () => {
     expect(html).toContain('class="lucide lucide-arrow-left review-icon"');
     expect(html).not.toContain(">Retry</button>");
   });
+});
+
+it('renders captured evidence and an editable note before offering to add context', () => {
+  const onAdd = vi.fn();
+  const html = renderToStaticMarkup(<ContextNoteComposer
+    kind="annotations"
+    excerpt="Captured annotation"
+    note="Earlier note"
+    onNoteChange={vi.fn()}
+    onCancel={vi.fn()}
+    onAdd={onAdd}
+  />);
+  expect(html).toContain('Add annotation to chat');
+  expect(html).toContain('Captured annotation');
+  expect(html).toMatch(/<textarea[^>]*>Earlier note<\/textarea>/u);
+  expect(html).toContain('>Cancel</button>');
+  expect(html).toContain('>Add to chat</button>');
+  expect(html).not.toContain('Discuss annotations in chat');
+  expect(onAdd).not.toHaveBeenCalled();
+});
+
+it('projects a pending PDF status only for the same displayed source', () => {
+  const state = createReviewState({
+    sessionId: '00000000-0000-4000-8000-000000000011',
+    source: { fileId: '00000000-0000-4000-8000-000000000012', digest: 'a'.repeat(64), byteLength: 12 },
+  });
+  const renderReader = (fileId: string) => renderToStaticMarkup(<ProductionReviewApp
+    session={{ sessionId: state.sessionId }}
+    initialState={state}
+    scope={{ documentTitle: 'paper.pdf', launchSurface: 'codex', contextOwner: 'app' }}
+    api={{
+      command: vi.fn(), saveStatus: vi.fn(), saveProposal: vi.fn(), chooseCopy: vi.fn(),
+      chooseFolder: vi.fn(), chooseOriginal: vi.fn(), retrySave: vi.fn(), locateSave: vi.fn(), scope: vi.fn(),
+    }}
+    agentBridge={{
+      attach: vi.fn(),
+      documentContext: {
+        getState: () => ({
+          status: 'available', canActivate: false,
+          version: { sourceKey: `${state.sessionId}/${fileId}`, generation: 0, digest: 'b'.repeat(64) },
+        }),
+        setSource: vi.fn(), subscribe: () => () => {}, activate: vi.fn(),
+      },
+    }}
+    viewer={<div>Viewer</div>}
+  />);
+
+  const sameSource = renderReader(state.source.fileId);
+  expect(sameSource).toContain('data-document-context="publishing"');
+  expect(sameSource).not.toContain('data-document-context="available"');
+  const otherSource = renderReader('other');
+  expect(otherSource).toContain('data-document-context="idle"');
+  expect(otherSource).not.toContain('data-document-context="available"');
 });

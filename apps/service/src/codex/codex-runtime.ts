@@ -1,3 +1,4 @@
+import { reconcileNativeSource } from "./reconcile-native-source.js";
 import type { UpgradeReviewStatus } from "../../../../packages/core/src/upgrade-review-protocol.js";
 import { ReviewExportConflictError } from "../../../../packages/core/src/review-runtime-protocol.js";
 import type { NativeQualificationExperiments } from "./native-qualification-experiments.js";
@@ -22,6 +23,8 @@ import type { SessionBroker } from "../sessions/session-broker.js";
 
 const secret = (): string => randomBytes(32).toString("base64url");
 const opaque = (): string => randomBytes(16).toString("base64url");
+const CONTINUATION_IDLE_MS = 30 * 60_000;
+const RESUME_RECEIPT_MS = 30_000;
 
 type Scope = NonNullable<ReturnType<SessionBroker["nativeAdmissionScope"]>>;
 
@@ -47,6 +50,13 @@ interface Panel {
   restart?: MatchedRestartReconnectTicket;
 }
 
+interface Continuation {
+  readonly panel: Panel;
+  readonly issuedGeneration: number;
+  readonly authority: { readonly isCurrent: () => boolean };
+  expiresAtMs: number;
+}
+
 const denied = (reason: Extract<CodexAppResponse, { status: "denied" }>["reason"]): CodexAppResponse => ({
   status: "denied",
   reason,
@@ -67,6 +77,8 @@ export class CodexRuntimeManager {
   #closing = false;
   readonly #launches = new Map<string, Launch>();
   readonly #panels = new Map<string, Panel>();
+  readonly #continuations = new Map<string, Continuation>();
+  readonly #resumeReceipts = new Map<string, { requestId: string; generation: number; continuation: Continuation; active: Extract<CodexAppResponse, { status: "active" }>; expiresAtMs: number }>();
   readonly #upgradeClosures = new Map<string, { attemptId: string; generation: number; capabilityHash: string; taskHash: string; status: UpgradeReviewStatus }>();
   // A restart ticket cannot revive a detached/expired panel in its issuing process.
   readonly #seenRuntimes = new Map<string, number>();
@@ -160,6 +172,7 @@ export class CodexRuntimeManager {
       }
     });
     this.#unsubscribe = broker.onSessionEnd((sessionId) => {
+      for (const [key, value] of this.#continuations) if (value.panel.launch.scope.reviewSessionId === sessionId) this.#continuations.delete(key);
       for (const [id, panel] of this.#panels) {
         if (panel.launch.scope.reviewSessionId === sessionId) {
           this.#removePanel(id);
@@ -436,11 +449,19 @@ export class CodexRuntimeManager {
     if (request === undefined) return denied("invalid");
     if (request.authority === "pending") return this.pending(request);
     if (request.authority === "reconnect") return this.stageReconnect(request);
+    if (request.authority === "continuation") return this.#resume(request);
     const closure = this.#upgradeClosures.get(request.runtimeId);
     if (closure && request.authority === 'presentation' && request.attemptId === closure.attemptId && request.generation === closure.generation && digestSecretHex(request.capability) === closure.capabilityHash) {
       if (request.method === 'upgradePoll') return { status: 'ok', payload: closure.status };
       if (request.method === 'detach') { this.#upgradeClosures.delete(request.runtimeId); return { status: 'ok', payload: {} }; }
       return denied('revoked');
+    }
+    if (request.method === "detach") {
+      // Expiry retires document authority but the same private channel may still close its continuation.
+      const continuation = [...this.#continuations.values()].find((value) =>
+        value.panel.meta.runtimeId === request.runtimeId && value.panel.active !== undefined &&
+        this.#envelope(value.panel, request, value.panel.active.presentationCapability));
+      if (continuation !== undefined) { await this.detach(request.runtimeId); return { status: "ok", payload: {} }; }
     }
     const scope = this.resolveActive(request);
     if (scope === undefined) return denied("revoked");
@@ -455,6 +476,9 @@ export class CodexRuntimeManager {
       const renewed = this.#broker.taskBindings.renew(this.#binding(panel));
       if (renewed.status !== "active") return denied("revoked");
       panel.leaseExpiresAtMs = this.#now().getTime() + this.#panelLeaseMs;
+      const continuation = panel.active?.continuationCapability;
+      const stored = continuation === undefined ? undefined : this.#continuations.get(digestSecretHex(continuation));
+      if (stored !== undefined) stored.expiresAtMs = this.#now().getTime() + CONTINUATION_IDLE_MS;
       return { status: "ok", payload: { leaseExpiresAt: new Date(panel.leaseExpiresAtMs).toISOString() } };
     }
     if (request.method === "watermark") {
@@ -636,6 +660,60 @@ export class CodexRuntimeManager {
     }
   }
 
+  #resume(request: Extract<CodexAppRequest, { authority: "continuation" }>): Promise<CodexAppResponse> {
+    return this.#serialize(async () => {
+      this.#sweep();
+      if (this.#closing || this.#disposed) return denied("unavailable");
+      const key = digestSecretHex(request.capability);
+      const receipt = this.#resumeReceipts.get(key);
+      if (receipt !== undefined) {
+        const current = this.#continuations.get(digestSecretHex(receipt.active.continuationCapability!));
+        return receipt.requestId === request.requestId && receipt.generation === request.generation && this.#continuationEnvelope(receipt.continuation, request) &&
+          current?.authority.isCurrent() && this.#panels.get(receipt.active.runtimeId)?.active === receipt.active
+          ? receipt.active : denied("replayed");
+      }
+      const continuation = this.#continuations.get(key);
+      if (continuation === undefined || !this.#continuationEnvelope(continuation, request) || !continuation.authority.isCurrent()) return denied("revoked");
+      const previous = continuation.panel;
+      const sessionId = previous.launch.scope.reviewSessionId;
+      let check: TaskBindingAuthorityCheck | undefined;
+      let replacement: Panel | undefined;
+      try {
+        if (!await reconcileNativeSource(this.#broker, sessionId, previous.launch.scope.canonicalSourcePath)) return denied("unavailable");
+        if (this.#closing || this.#disposed || !continuation.authority.isCurrent() || this.#continuations.get(key) !== continuation) return denied("revoked");
+        const scope = this.#broker.nativeAdmissionScope(sessionId);
+        if (scope === undefined) return denied("unavailable");
+        check = this.#broker.taskBindings.beginAuthorityCheck({ taskSessionId: previous.launch.owner!, ...scope });
+        const launch: Launch = { ...previous.launch, scope, admissionKey: secret(), expiresAtMs: this.#now().getTime() + this.#ttlMs };
+        replacement = { launch, meta: { protocolVersion: 1, runtimeId: opaque(), attemptId: opaque(), generation: scope.documentGeneration, receiptId: opaque(), pendingCapability: secret() }, handoffs: new Map(), watermark: 0, ready: true, attested: true };
+        const attached = this.#broker.taskBindings.attachReconnectedNative(this.#binding(replacement));
+        if (attached.status !== "active") return denied("owner-mismatch");
+        // Retirement happens before issuing new authority; only this exact resume operation can replay its receipt.
+        this.#removePanel(previous.meta.runtimeId, true);
+        this.#continuations.delete(key);
+        this.#panels.set(replacement.meta.runtimeId, replacement);
+        if (previous.active !== undefined) await this.#broker.restartReconnects.revokeToken(previous.active.reconnectTicket);
+        if (this.#closing || !check.isCurrent() || !continuation.authority.isCurrent() || !this.#panelCurrent(replacement)) {
+          this.#removePanel(replacement.meta.runtimeId); return denied("revoked");
+        }
+        const active = await this.#activate(replacement, check);
+        if (active.status === "active") this.#resumeReceipts.set(key, { requestId: request.requestId, generation: request.generation, continuation, active, expiresAtMs: this.#now().getTime() + RESUME_RECEIPT_MS });
+        return active;
+      } catch (error) {
+        if (replacement !== undefined) {
+          this.#broker.taskBindings.detachPresentation(digestSecretHex(replacement.launch.admissionKey));
+          this.#removePanel(replacement.meta.runtimeId);
+        }
+        throw error;
+      } finally { check?.release(); }
+    });
+  }
+
+  #continuationEnvelope(continuation: Continuation, request: CodexAppRequest): boolean {
+    const active = continuation.panel.active;
+    return active !== undefined && active.runtimeId === request.runtimeId && active.attemptId === request.attemptId && (continuation.issuedGeneration === request.generation || active.generation === request.generation);
+  }
+
   async #activate(panel: Panel, check: TaskBindingAuthorityCheck): Promise<CodexAppResponse> {
     const active: Extract<CodexAppResponse, { status: "active" }> = {
       status: "active",
@@ -644,6 +722,7 @@ export class CodexRuntimeManager {
       generation: panel.meta.generation,
       presentationCapability: secret(),
       reconnectTicket: secret(),
+      continuationCapability: secret(),
     };
     try {
       await this.#broker.restartReconnects.issue({
@@ -661,7 +740,7 @@ export class CodexRuntimeManager {
       throw error;
     }
     if (
-      !check.isCurrent() ||
+      this.#closing || !check.isCurrent() ||
       !this.#panelCurrent(panel) ||
       !this.#authorizedBinding(panel)
     ) {
@@ -671,6 +750,10 @@ export class CodexRuntimeManager {
     }
     this.#seenRuntimes.set(active.runtimeId, this.#now().getTime() + this.#broker.restartReconnects.ticketLifetimeMs);
     panel.active = active;
+    this.#continuations.set(digestSecretHex(active.continuationCapability!), {
+      panel, issuedGeneration: active.generation, authority: this.#broker.taskBindings.captureAuthoritySnapshot(this.#binding(panel)),
+      expiresAtMs: this.#now().getTime() + CONTINUATION_IDLE_MS,
+    });
     this.#qualification?.record("promotion-accepted", { runtimeId: panel.meta.runtimeId, attemptId: panel.meta.attemptId, receiptId: panel.meta.receiptId, generation: panel.meta.generation, taskSessionId: panel.launch.owner, reviewSessionId: panel.launch.scope.reviewSessionId });
     panel.leaseExpiresAtMs = this.#now().getTime() + this.#panelLeaseMs;
     this.#backend?.attach({ sessionId: panel.launch.scope.reviewSessionId, taskSessionId: panel.launch.owner!,
@@ -741,7 +824,7 @@ export class CodexRuntimeManager {
 
   detach(runtimeId: string): Promise<void> {
     return this.#serialize(async () => {
-      const panel = this.#panels.get(runtimeId);
+      const panel = this.#panels.get(runtimeId) ?? [...this.#continuations.values()].find((value) => value.panel.meta.runtimeId === runtimeId)?.panel;
       this.#removePanel(runtimeId);
       if (panel?.active !== undefined) {
         await this.#broker.restartReconnects.revokeToken(panel.active.reconnectTicket);
@@ -753,6 +836,8 @@ export class CodexRuntimeManager {
   }
 
   dispose(): void {
+    this.#continuations.clear();
+    this.#resumeReceipts.clear();
     this.#upgradeClosures.clear();
     this.#disposed = true;
     clearInterval(this.#leaseTimer);
@@ -775,6 +860,8 @@ export class CodexRuntimeManager {
 
   async closeForUpgrade(status: UpgradeReviewStatus): Promise<void> {
     if (status.phase !== 'committed') throw new Error('Global preparation must commit before retiring task authority');
+    this.#continuations.clear();
+    this.#resumeReceipts.clear();
     await Promise.all([...this.#requests]);
     for (const [id, panel] of this.#panels) if (panel.active) this.#upgradeClosures.set(id, {
       attemptId: panel.active.attemptId, generation: panel.active.generation,
@@ -837,7 +924,11 @@ export class CodexRuntimeManager {
       panel.meta.attemptId === request.attemptId && handoff.expiresAtMs > this.#now().getTime();
   }
 
-  #removePanel(id: string): void {
+  #removePanel(id: string, preserveContinuation = false): void {
+    if (!preserveContinuation) {
+      for (const [key, value] of this.#continuations) if (value.panel.meta.runtimeId === id) this.#continuations.delete(key);
+      for (const [key, receipt] of this.#resumeReceipts) if (receipt.active.runtimeId === id || receipt.continuation.panel.meta.runtimeId === id) this.#resumeReceipts.delete(key);
+    }
     const panel = this.#panels.get(id);
     if (panel !== undefined) {
       this.#broker.taskBindings.detachPresentation(digestSecretHex(panel.launch.admissionKey));
@@ -865,9 +956,12 @@ export class CodexRuntimeManager {
           panel.leaseExpiresAtMs! <= now || !this.#authorized(panel))
       ) {
         this.#qualification?.record((panel.active === undefined ? panel.launch.expiresAtMs <= now : panel.leaseExpiresAtMs! <= now) ? "panel-expired" : "panel-ended", { runtimeId: panel.meta.runtimeId, attemptId: panel.meta.attemptId, receiptId: panel.meta.receiptId, generation: panel.meta.generation, taskSessionId: panel.launch.owner, reviewSessionId: panel.launch.scope.reviewSessionId });
-        this.#removePanel(id);
+        this.#removePanel(id, panel.active !== undefined && this.#current(panel.launch) &&
+          [...this.#continuations.values()].some((value) => value.panel === panel && value.authority.isCurrent()));
       }
     }
+    for (const [key, value] of this.#continuations) if (value.expiresAtMs <= now || !value.authority.isCurrent()) this.#continuations.delete(key);
+    for (const [key, receipt] of this.#resumeReceipts) if (receipt.expiresAtMs <= now || !receipt.continuation.authority.isCurrent()) this.#resumeReceipts.delete(key);
     for (const [id, expiresAt] of this.#seenRuntimes) {
       if (expiresAt <= now) {
         this.#seenRuntimes.delete(id);

@@ -71,6 +71,116 @@ function reconnect(active: Extract<CodexAppResponse, { status: "active" }>) {
   return { ...activeRequest(active), authority: "reconnect", method: "reconnect", capability: active.reconnectTicket };
 }
 
+function continuation(active: Extract<CodexAppResponse, { status: "active" }>, requestId = "resume_request_123") {
+  return { ...activeRequest(active), requestId, authority: "continuation", method: "resume", capability: (active as typeof active & { continuationCapability?: string }).continuationCapability };
+}
+
+describe("trusted native continuation", () => {
+  it("resumes expired presentation authority with fresh identity and preserves accepted work", async () => {
+    const { manager, broker, sessionId, advance } = await fixture();
+    const { active } = await activate(manager, sessionId);
+    await protectWork(broker, sessionId);
+    const draftId = randomUUID();
+    const timestamp = new Date().toISOString();
+    await broker.acceptMutation(sessionId, { type: "put-draft", expectedRevision: 1, expectedDraftRevision: -1, draft: {
+      id: draftId, ownerViewId: "suspended_view", baseGeneration: 1, revision: 0, kind: "pageNote", pageIndex: 0,
+      text: "protected unfinished note", anchor: { kind: "page", pageIndex: 0, nearbyText: "source", rect: { x: 1, y: 1, width: 1, height: 1 } },
+      disposition: { kind: "resolved", generation: 1 }, status: "protected", createdAt: timestamp, updatedAt: timestamp,
+    } });
+    const revision = broker.state(sessionId)!.revision;
+    advance(1_001);
+    expect(await manager.handle(activeRequest(active))).toEqual({ status: "denied", reason: "revoked" });
+    const resumed = await manager.handle(continuation(active));
+    expect(resumed.status).toBe("active");
+    if (resumed.status !== "active") throw new Error("Expected resumed presentation");
+    expect(resumed.runtimeId).not.toBe(active.runtimeId);
+    expect(resumed.attemptId).not.toBe(active.attemptId);
+    expect(resumed.presentationCapability).not.toBe(active.presentationCapability);
+    expect(manager.resolveActive(activeRequest(resumed))).toMatchObject({ taskSessionId: "task-a", sessionId });
+    expect(broker.state(sessionId)!.revision).toBe(revision);
+    expect(broker.state(sessionId)!.pendingDrafts).toMatchObject([{ id: draftId, text: "protected unfinished note", status: "protected" }]);
+    expect(await manager.handle(continuation(active))).toEqual(resumed);
+    expect(await manager.handle(continuation(active, "different_request_123"))).toMatchObject({ status: "denied" });
+    const next = await manager.handle(continuation(resumed));
+    expect(next.status).toBe("active");
+    expect(await manager.handle(continuation(active))).toMatchObject({ status: "denied" });
+    expect(await manager.handle(activeRequest(resumed))).toMatchObject({ status: "denied" });
+  });
+
+  it.each(["manager-task", "registry-task", "registry-session", "detach", "channel-detach", "upgrade"])("ends continuation on %s revocation after expiry", async (kind) => {
+    const { manager, broker, sessionId, advance } = await fixture();
+    const { active } = await activate(manager, sessionId);
+    advance(30_001);
+    await manager.handle(activeRequest(active));
+    if (kind === "manager-task") await manager.revokeTask("task-a");
+    if (kind === "registry-task") broker.taskBindings.revokeTask("task-a");
+    if (kind === "registry-session") broker.taskBindings.revokeSession(sessionId);
+    if (kind === "detach") await manager.detach(active.runtimeId);
+    if (kind === "channel-detach") expect(await manager.handle({ ...activeRequest(active), method: "detach" })).toMatchObject({ status: "ok" });
+    if (kind === "upgrade") await manager.closeForUpgrade({ phase: "committed" } as never);
+    expect(await manager.handle(continuation(active))).toMatchObject({ status: "denied" });
+  });
+
+  it("reconciles a changed source while suspended and resumes the trusted owner at the fresh generation", async () => {
+    const { manager, broker, sessionId, pdf, advance } = await fixture(true);
+    const { active } = await activate(manager, sessionId);
+    await protectWork(broker, sessionId);
+    advance(30_001); await manager.handle(activeRequest(active));
+    await writeFile(pdf, "%PDF-1.7\nsuccessor after suspension\n%%EOF");
+    const observe = broker.observeLiveDocumentHint.bind(broker);
+    const observation = vi.spyOn(broker, "observeLiveDocumentHint").mockResolvedValueOnce({ status: "superseded", sessionId, documentGeneration: 1, reason: "observation-hint-was-coalesced-or-session-ended" });
+    observation.mockImplementation(observe);
+    const resumed = await manager.handle(continuation(active));
+    expect(resumed).toMatchObject({ status: "active", generation: 2 });
+    expect(observation.mock.calls.length).toBeGreaterThanOrEqual(2);
+    if (resumed.status !== "active") throw new Error("Expected resumed presentation");
+    expect(manager.resolveActive(activeRequest(resumed))).toMatchObject({ taskSessionId: "task-a", generation: 2 });
+    expect(broker.state(sessionId)!.revision).toBeGreaterThanOrEqual(1);
+  });
+
+  it("removes the new association when retiring the old restart ticket fails", async () => {
+    const { manager, broker, sessionId, advance } = await fixture();
+    const { active } = await activate(manager, sessionId);
+    advance(30_001); await manager.handle(activeRequest(active));
+    vi.spyOn(broker.restartReconnects, "revokeToken").mockRejectedValueOnce(new Error("ticket store unavailable"));
+    expect(await manager.handle(continuation(active))).toMatchObject({ status: "denied" });
+    expect(broker.taskBindings.bindingForTask("task-a")).toBeUndefined();
+    expect(manager.activityCount()).toBe(0);
+  });
+
+  it.each(["shutdown", "direct-revoke"])("fences a late canonical observation during %s", async (kind) => {
+    const { manager, broker, sessionId, advance } = await fixture();
+    const { active } = await activate(manager, sessionId);
+    advance(30_001); await manager.handle(activeRequest(active));
+    let release!: () => void;
+    let entered!: () => void;
+    const started = new Promise<void>(resolve => { entered = resolve; });
+    const barrier = new Promise<void>(resolve => { release = resolve; });
+    const observe = broker.observeLiveDocumentHint.bind(broker);
+    vi.spyOn(broker, "observeLiveDocumentHint").mockImplementation(async input => { entered(); await barrier; return observe(input); });
+    const resuming = manager.handle(continuation(active));
+    await started;
+    const closing = kind === "shutdown" ? manager.close() : undefined;
+    if (kind === "direct-revoke") broker.taskBindings.revokeTask("task-a");
+    release();
+    expect(await resuming).toMatchObject({ status: "denied" });
+    await closing;
+    expect(broker.taskBindings.bindingForTask("task-a")).toBeUndefined();
+  });
+
+  it("does not replace a different trusted owner or revive after shutdown", async () => {
+    const { manager, sessionId, advance } = await fixture();
+    const { active } = await activate(manager, sessionId);
+    advance(30_001); await manager.handle(activeRequest(active));
+    const replacement = stage(manager, sessionId, "task-b");
+    expect(manager.attestDisplay(replacement.receipt, "task-b")).toBe(true);
+    expect((await manager.pending(request(replacement.privateMeta))).status).toBe("active");
+    expect(await manager.handle(continuation(active))).toMatchObject({ status: "denied" });
+    await manager.close();
+    expect(await manager.handle(continuation(active))).toMatchObject({ status: "denied" });
+  });
+});
+
 describe("native two-hook admission with real broker authority", () => {
   it("remembers an activated source without current context, then uses fresh hooks to reconnect durable work", async () => {
     const { broker, manager, sessionId, pdf } = await fixture();

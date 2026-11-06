@@ -1,3 +1,4 @@
+import { ExtensionRuntimeManager } from "../codex/extension-runtime.js";
 import { createUpgradeReviewProtection, UpgradeReviewParticipants } from "./upgrade-review-participants.js";
 import { UpgradePreparationCoordinator } from "./upgrade-preparation.js";
 import type { NativeTaskLaunchReceipt } from "../desktop/native-task-launches.js";
@@ -192,6 +193,7 @@ export class PlacekeeperHost {
   readonly electronLifecycle: NativeAppLifecycleManager;
   readonly editorNavigation: EditorNavigation;
   readonly codexRuntime: CodexRuntimeManager;
+  readonly extensionRuntime: ExtensionRuntimeManager;
   #closePromise?: Promise<void>;
   #upgradeTaskPreparation: { attemptId: string; promise: Promise<void> } | undefined;
 
@@ -212,6 +214,7 @@ export class PlacekeeperHost {
     electronLifecycle: NativeAppLifecycleManager,
     editorNavigation: EditorNavigation,
     codexRuntime: CodexRuntimeManager,
+    extensionRuntime: ExtensionRuntimeManager,
     upgradePreparation: UpgradePreparationCoordinator,
     upgradeParticipants: UpgradeReviewParticipants,
   ) {
@@ -231,6 +234,7 @@ export class PlacekeeperHost {
     this.electronLifecycle = electronLifecycle;
     this.editorNavigation = editorNavigation;
     this.codexRuntime = codexRuntime;
+    this.extensionRuntime = extensionRuntime;
     this.#nativeParentSweep = setInterval(() => {
       void Promise.allSettled([electronLifecycle.sweepDeadParents()]);
     }, 5_000);
@@ -296,6 +300,7 @@ export class PlacekeeperHost {
       ...(options.nativeQualificationExperiments === undefined ? {} : { experiments: options.nativeQualificationExperiments }),
       backend: codexRuntimeBackend,
     });
+    const extensionRuntime = new ExtensionRuntimeManager(broker, { backend: codexRuntimeBackend, ...(process.platform === "darwin" ? { pickPdf: () => new MacOsDestinationPicker().openPdf() } : {}) });
     const lifecycle = new DaemonLifecycleCoordinator({
       activity: () => {
         const activity = broker.activity();
@@ -305,7 +310,7 @@ export class PlacekeeperHost {
         return {
           ...activity,
           reviewPresence: activity.reviewPresence + chromeActivity.connections
-            + electronActivity.helpers + electronAppActivity.appInstances + codexRuntime.activityCount(),
+            + electronActivity.helpers + electronAppActivity.appInstances + codexRuntime.activityCount() + extensionRuntime.activityCount(),
           transientWork: activity.transientWork + saving.activityCount() + editorNavigation.activity(),
         };
       },
@@ -326,6 +331,7 @@ export class PlacekeeperHost {
       && chromeRuntimeBackend.upgradeCovered() && chromeRuntime.upgradeCovered(id => participants.has(id))
       && electronRuntimeBackend.upgradeCovered() && electronRuntime.upgradeCovered(id => participants.has(id))
       && electronLifecycle.upgradeCovered() && codexRuntime.upgradeCovered(id => participants.has(id))
+      && extensionRuntime.upgradeCovered(id => participants.has(id))
       && participants.has('task-authority'));
     codexRuntimeBackend.upgradeParticipants = participants;
     chromeRuntimeBackend.upgradeParticipants = participants;
@@ -365,6 +371,7 @@ export class PlacekeeperHost {
       electronLifecycle,
       editorNavigation,
       codexRuntime,
+      extensionRuntime,
       upgradePreparation,
       participants,
     );
@@ -550,6 +557,7 @@ export class PlacekeeperHost {
     await this.lifecycle.settlementBarrier();
     this.upgradeParticipants.retireMetadata("task-authority");
     this.electronLifecycle.retireUpgradeMetadata();
+    await this.extensionRuntime.closeForUpgrade(this.upgradeParticipants.poll("task-authority"));
     await this.codexRuntime.closeForUpgrade(this.upgradeParticipants.poll("task-authority"));
     for (const task of this.broker.taskBindings.upgradeTaskIds()) this.sourceWorkflow.discardTask(task);
     this.broker.taskBindings.revokeAll();
@@ -559,6 +567,7 @@ export class PlacekeeperHost {
   async close(): Promise<void> {
     this.#closePromise ??= (async () => {
       clearInterval(this.#nativeParentSweep);
+      await this.extensionRuntime.close();
       await this.codexRuntime.close();
       this.context.discardAll();
       await this.server.close();

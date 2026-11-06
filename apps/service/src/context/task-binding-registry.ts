@@ -50,6 +50,8 @@ interface InFlightAuthorityCheck {
   readonly documentGeneration: number;
 }
 
+type OwnershipSnapshot = Pick<InFlightAuthorityCheck, "taskSessionId" | "reviewSessionId"> & { current: boolean };
+
 export interface TaskBindingRegistryOptions {
   readonly qualification?: NativeQualificationObserver;
   readonly now?: () => Date;
@@ -115,6 +117,8 @@ export class TaskBindingRegistry {
   readonly #proofsByHash = new Map<string, BindProofRecord>();
   readonly #proofHashByBrowserCapabilityHash = new Map<string, string>();
   readonly #authorityChecks = new Set<InFlightAuthorityCheck>();
+  readonly #authoritySnapshots = new Set<WeakRef<OwnershipSnapshot>>();
+  readonly #authoritySnapshotCleanup = new FinalizationRegistry<WeakRef<OwnershipSnapshot>>((reference) => { this.#authoritySnapshots.delete(reference); });
   #upgradeAuthorityEpoch = 0;
   readonly #nativePending = new Map<string, PendingBinding>();
   readonly #pendingByTask = new Map<string, PendingBinding>();
@@ -198,6 +202,7 @@ export class TaskBindingRegistry {
     ) return { status: "denied" };
 
     if (!this.#associationAvailable(input)) return { status: "denied" };
+    this.#invalidateReplacedSnapshots(input);
     this.#discardDifferentNativeHint(input.taskSessionId, input.reviewSessionId);
     const activeForReview = this.#activeByReview.get(input.reviewSessionId);
     const activeForTask = this.#activeByTask.get(input.taskSessionId);
@@ -240,6 +245,34 @@ export class TaskBindingRegistry {
     this.#pendingByTask.set(input.taskSessionId, pending);
     this.#pendingByReview.set(input.reviewSessionId, pending);
     return { status: "pending", expiresAt: iso(pending.expiresAtMs) };
+  }
+
+  /** Ownership revocation fence for daemon-local continuation; document generation is reconciled on resume.
+   * Does not retain a binding or in-flight activity. */
+  captureAuthoritySnapshot(input: Pick<InFlightAuthorityCheck, "taskSessionId" | "reviewSessionId">): { readonly isCurrent: () => boolean } {
+    for (const reference of this.#authoritySnapshots) if (reference.deref() === undefined) this.#authoritySnapshots.delete(reference);
+    const snapshot = { taskSessionId: input.taskSessionId, reviewSessionId: input.reviewSessionId, current: true };
+    const reference = new WeakRef(snapshot);
+    this.#authoritySnapshots.add(reference);
+    this.#authoritySnapshotCleanup.register(snapshot, reference, reference);
+    return { isCurrent: () => snapshot.current };
+  }
+
+  #invalidateReplacedSnapshots(input: { taskSessionId: string; reviewSessionId: string }): void {
+    this.#invalidateAuthoritySnapshots((snapshot) =>
+      (snapshot.taskSessionId === input.taskSessionId || snapshot.reviewSessionId === input.reviewSessionId) &&
+      (snapshot.taskSessionId !== input.taskSessionId || snapshot.reviewSessionId !== input.reviewSessionId));
+  }
+
+  #invalidateAuthoritySnapshots(matches: (check: Pick<InFlightAuthorityCheck, "taskSessionId" | "reviewSessionId">) => boolean): void {
+    for (const reference of this.#authoritySnapshots) {
+      const snapshot = reference.deref();
+      if (snapshot === undefined || matches(snapshot)) {
+        if (snapshot !== undefined) snapshot.current = false;
+        this.#authoritySnapshots.delete(reference);
+        this.#authoritySnapshotCleanup.unregister(reference);
+      }
+    }
   }
 
   /** Fences asynchronous native promotion against canonical revocation. */
@@ -290,6 +323,7 @@ export class TaskBindingRegistry {
         status: "denied",
       };
     }
+    this.#invalidateReplacedSnapshots(input);
     this.#discardDifferentNativeHint(input.taskSessionId, input.reviewSessionId);
     this.#nativePending.set(proof.browserCapabilityHash, {
       ...input,
@@ -517,6 +551,7 @@ export class TaskBindingRegistry {
     ) return { status: "denied" };
 
     if (!this.#associationAvailable(input)) return { status: "denied" };
+    this.#invalidateReplacedSnapshots(input);
     this.#discardDifferentNativeHint(input.taskSessionId, input.reviewSessionId);
     const activeForReview = this.#activeByReview.get(input.reviewSessionId);
     const activeForTask = this.#activeByTask.get(input.taskSessionId);
@@ -696,6 +731,7 @@ export class TaskBindingRegistry {
 
   revokeTask(taskSessionId: string): void {
     this.#nativeReconnectHints.delete(taskSessionId);
+    this.#invalidateAuthoritySnapshots((check) => check.taskSessionId === taskSessionId);
     this.#invalidateAuthorityChecks((check) => check.taskSessionId === taskSessionId);
     for (const [key, pending] of this.#nativePending) {
       if (pending.taskSessionId === taskSessionId) {
@@ -715,6 +751,7 @@ export class TaskBindingRegistry {
 
   revokeSession(reviewSessionId: string): void {
     for (const [task, hint] of this.#nativeReconnectHints) if (hint.reviewSessionId === reviewSessionId) this.#nativeReconnectHints.delete(task);
+    this.#invalidateAuthoritySnapshots((check) => check.reviewSessionId === reviewSessionId);
     this.#invalidateAuthorityChecks((check) => check.reviewSessionId === reviewSessionId);
     for (const [key, pending] of this.#nativePending) {
       if (pending.reviewSessionId === reviewSessionId) {
@@ -825,6 +862,7 @@ export class TaskBindingRegistry {
   }
 
   revokeAll(): void {
+    this.#invalidateAuthoritySnapshots(() => true);
     this.#nativeReconnectHints.clear();
     this.#authorityChecks.clear();
     this.#nativePending.clear();

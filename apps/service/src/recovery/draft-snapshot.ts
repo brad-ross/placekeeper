@@ -435,7 +435,7 @@ export class DraftSnapshotStore {
     }
   }
 
-  async persist(draft: RecoverableDraft, signal?: AbortSignal): Promise<void> {
+  async persist(draft: RecoverableDraft, signal?: AbortSignal, assertAuthority?: () => void): Promise<void> {
     await this.initialize();
     signal?.throwIfAborted();
     const temporaryPath = join(this.directory, `.draft-${randomUUID()}.tmp`);
@@ -454,6 +454,9 @@ export class DraftSnapshotStore {
       }
       await this.#hooks.beforeFinalRename?.();
       signal?.throwIfAborted();
+      // Preparation can await disk I/O while a presentation retires. Admit the
+      // canonical publication only while its caller still has authority.
+      assertAuthority?.();
       const publication = await publishFile(temporaryPath, this.currentPath);
       await this.#hooks.afterFinalRename?.();
       await chmod(this.currentPath, 0o600);

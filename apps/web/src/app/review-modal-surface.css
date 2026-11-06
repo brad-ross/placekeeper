@@ -195,3 +195,34 @@
   cursor: default;
   opacity: .35;
 }
+
+.context-note-composer {
+  width: min(340px, calc(100vw - 24px));
+  max-height: calc(100dvh - 24px);
+  padding: 0;
+  border: 0;
+  border-radius: 16px;
+  background: transparent;
+  overflow: visible;
+}
+
+.context-note-composer::backdrop {
+  background: #0003;
+}
+
+.context-note-composer .comment-composer {
+  width: 100%;
+  max-height: calc(100dvh - 24px);
+}
+
+.context-note-composer__excerpt {
+  margin: 0;
+  color: var(--pk-muted);
+  font: 400 12px/1.5 var(--pk-font-ui);
+  overflow-wrap: anywhere;
+}
+
+.context-note-composer [role="alert"] {
+  margin: 0;
+  font: 400 12px/1.5 var(--pk-font-ui);
+}

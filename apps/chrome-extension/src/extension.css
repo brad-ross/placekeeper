@@ -1,3 +1,4 @@
+@import '../../web/src/app/document-loading.css';
 @import '../../web/src/app/review-design-tokens.css';
 @import '../../web/src/app/review-modal-surface.css';
 
@@ -226,4 +227,33 @@ button:disabled {
   .switch__thumb {
     transition: none;
   }
+}
+
+/* Keep the native fallback available while the reader prepares behind the surface. */
+.handler #launch-shell > .document-loading { display: none; }
+.handler[data-document-loading="true"] #root { visibility: hidden; }
+.handler[data-document-loading="true"]::before { display: none; }
+.handler[data-document-loading="true"] #launch-shell {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  max-width: none;
+  height: 100%;
+  max-height: none;
+  grid-template-rows: 1fr;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  background: var(--review-surface-canvas);
+}
+.handler[data-document-loading="true"] #launch-shell > .document-loading { display: grid; }
+.handler[data-document-loading="true"] .handler-dialog__header,
+.handler[data-document-loading="true"] .handler-dialog__body { display: none; }
+.handler[data-document-loading="true"] .handler-dialog__footer {
+  position: absolute;
+  right: 24px;
+  bottom: 24px;
+  padding: 0;
+  border: 0;
 }

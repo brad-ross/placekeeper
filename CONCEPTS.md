@@ -36,6 +36,21 @@ An opaque, expiring authorization to retrieve bounded document evidence for a ve
 
 Evidence access is rechecked against the live association; an old handle cannot make cached document content current.
 
+### App-owned Review
+A Review Session opened through a chat host's direct app entrypoint, whose presentation and context publication are authorized independently of a Task Binding.
+
+Its live presentation can expire without discarding protected review work. Host acceptance of published context establishes availability, not that an agent consumed it.
+
+### Document in Context
+The full-document status indicating that the chat host has accepted the current PDF version supplied by Placekeeper.
+
+It establishes host acceptance, not that an assistant has read the PDF. Lightweight review context alone does not establish this status.
+
+### Captured Review Context
+The selection or annotations from a particular Document Generation and Review Revision that a reviewer explicitly attaches to chat, optionally with a note.
+
+Later reading or selection changes do not retarget the captured evidence. It is distinct from automatically updated review context, and attaching it does not send a chat message.
+
 ## PDF annotation presentation
 
 ### Reference Tab
@@ -84,7 +99,7 @@ Presence and durable recovery have separate lifetimes; reconnect continuity must
 ## PDF persistence
 
 ### Save Destination
-The authorized original PDF or independent copy selected to receive a Review Session's annotation changes.
+The authorized original PDF, host resource, or independent copy selected to receive a Review Session's annotation changes.
 
 Its identity changes independently of semantic edits; a source Document Generation change must preserve the distinction between the original and a separate copy.
 

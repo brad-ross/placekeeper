@@ -11,6 +11,7 @@ import { ChromeRuntimeOperationJournal } from "../browser/runtime-operation-jour
 import { isReviewSideEffectMethod, LocalReviewBackend } from "../runtime/local-review-backend.js";
 import type { SessionBroker } from "../sessions/session-broker.js";
 import type { ReviewInteractionAttachment } from "../sessions/review-interactions.js";
+import { defaultAnnotatedFilename } from "../saving/save-destination.js";
 import type { PdfSaveCoordinator } from "../saving/pdf-save-coordinator.js";
 import type { ExportCoordinator } from "../export/export-coordinator.js";
 
@@ -23,7 +24,7 @@ const interactionActions: Partial<Record<ReviewRuntimeBrokerMethod, Parameters<L
 
 export interface CodexActiveScope {
   readonly sessionId: string;
-  readonly taskSessionId: string;
+  readonly taskSessionId?: string;
   readonly runtimeId: string;
   readonly attemptId: string;
   readonly generation: number;
@@ -68,6 +69,8 @@ export class CodexServiceRuntimeBackend {
       return { directory: join(this.#broker.recoveryRoot, sessionId), prefix: "codex" };
     } });
   }
+
+  materializeImportedSave(sessionId: string, fence?: { expectedRevision: number; documentGeneration: number }) { return this.#saving.materializeImportedSave(sessionId, fence); }
 
   attach(scope: CodexActiveScope): void {
     this.detach(scope.runtimeId);
@@ -119,6 +122,9 @@ export class CodexServiceRuntimeBackend {
   async #handle(scope: CodexActiveScope, request: Extract<CodexAppRequest, { authority: "presentation" }>, current: () => boolean): Promise<unknown> {
     const record = this.#presentations.get(scope.runtimeId);
     if (record === undefined || record.scope.attemptId !== scope.attemptId || record.scope.generation !== scope.generation) throw new Error("presentation-unavailable");
+    const assertAuthority = () => {
+      if (!current() || this.#presentations.get(scope.runtimeId) !== record) throw new Error("presentation-unavailable");
+    };
     if (request.method === 'upgradePoll' || request.method === 'upgradeSettle') {
       if (!this.upgradeParticipants) throw new Error('Upgrade preparation unavailable');
       return request.method === 'upgradePoll' ? this.upgradeParticipants.poll(`codex:${scope.runtimeId}`) : this.upgradeParticipants.settle(`codex:${scope.runtimeId}`, request.payload as UpgradeReviewSettlement);
@@ -166,18 +172,31 @@ export class CodexServiceRuntimeBackend {
     }
     if (request.method === "presence") return {};
     const method = request.method as ReviewRuntimeBrokerMethod;
+    if ((method === "exportReviewedCopy" && this.#broker.sourceDisposition(scope.sessionId) === "remote-temporary") ||
+      (this.#broker.saveStatus(scope.sessionId)?.destination.phase === "host" &&
+      ["chooseOriginal", "retrySave", "locateSave"].includes(method))) {
+      throw new Error("Host resources use their conditional save and export protocol");
+    }
     const interactionAction = interactionActions[method];
     const invoke = async () => {
-      if (!current()) throw new Error("presentation-unavailable");
+      assertAuthority();
       let result: unknown;
       if (interactionAction !== undefined) {
-        result = await this.#review.interaction(scope.sessionId, record.attachment, interactionAction, request.payload);
+        result = await this.#review.interaction(scope.sessionId, record.attachment, interactionAction, request.payload, assertAuthority);
       } else if (method === "scope") {
         result = await this.#scope(scope, current);
       } else if (method === "saveProposal") {
         result = this.#saving.proposal(scope.sessionId);
+        if (this.#broker.sourceDisposition(scope.sessionId) === 'remote-temporary') {
+          const source = await this.#broker.sessionScope(scope.sessionId);
+          assertAuthority();
+          result = { sourceDisposition: 'remote-temporary', filename: defaultAnnotatedFilename(source?.sourceDisplayName ?? 'review.pdf') };
+        }
       } else {
-        result = await this.#review.invoke(scope.sessionId, scope.generation, method as Exclude<ReviewRuntimeBrokerMethod, "saveProposal">, request.payload, { expectedDocumentGeneration: scope.generation });
+        result = await this.#review.invoke(scope.sessionId, scope.generation, method as Exclude<ReviewRuntimeBrokerMethod, "saveProposal">, request.payload, {
+          expectedDocumentGeneration: scope.generation,
+          assertAuthority,
+        });
       }
       const projected = sanitizeCodexReviewRuntimeResponse(method, result);
       if (projected === undefined) throw new Error("invalid-service-response");
@@ -194,6 +213,7 @@ export class CodexServiceRuntimeBackend {
     const value = await this.#broker.sessionScope(scope.sessionId);
     const state = this.#broker.state(scope.sessionId);
     if (!current() || state?.workflow.documentGeneration !== scope.generation) throw new Error("presentation-unavailable");
+    if (scope.taskSessionId === undefined) return { ...value as object, launchSurface: "codex" };
     const binding = this.#broker.taskBindings.bindingForTask(scope.taskSessionId);
     let codexContext: LiveContextBindingStatus = { status: "unavailable", reason: "unbound" };
     if (binding?.reviewSessionId === scope.sessionId && binding.documentGeneration === scope.generation &&

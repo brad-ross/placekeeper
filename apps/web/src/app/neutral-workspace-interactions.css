@@ -305,6 +305,7 @@ li[data-search-result] .pdf-search__result-heading > .pdf-search__result-page {
     .full-annotation-reader__edit,
     .full-annotation-reader__delete,
     .full-annotation-reader__open-reference,
+    .full-annotation-reader__add-context,
     .full-annotation-reader__locate
   ) {
     width: 44px;

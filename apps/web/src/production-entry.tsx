@@ -1,3 +1,4 @@
+import { DocumentLoading } from "./app/DocumentLoading.js";
 import { ReviewUpgradePreparation, UpgradeCommandGate } from "./host/upgrade-preparation.js";
 import type { NativeForwardState } from "../../../packages/core/src/native-synctex-protocol.js";
 import { createRoot } from "react-dom/client";
@@ -518,17 +519,19 @@ export function RuntimeLoadingWorkspace(props: {
   readonly refreshStatus: GenerationRefreshStatus;
 }) {
   return <section
-    className="macos-loading-shell__workspace"
+    className="runtime-loading-workspace"
     data-runtime-loading-workspace
     aria-busy="true"
   >
-    <p role={props.refreshStatus === "failed" ? "alert" : "status"}>
-      {props.refreshStatus === "failed" ? "This review could not be prepared." : "Preparing this review…"}
-    </p>
+    {props.refreshStatus === "failed"
+      ? <p role="alert">This review could not be prepared.</p>
+      : <DocumentLoading />}
   </section>;
 }
 
 export function RuntimeProductionReviewApp(props: {
+  readonly onContextSnapshot?: (snapshot: import('./host/review-context-snapshot.js').ReviewContextSnapshot) => void;
+  readonly agentBridge?: import('./host/review-agent-bridge.js').ReviewAgentBridge;
   readonly runtime?: HostRuntime;
   readonly initial?: HostRuntimeBootstrap;
   readonly loadingDocumentTitle?: string;
@@ -684,6 +687,8 @@ export function RuntimeProductionReviewApp(props: {
   if (upgradeClosed) return <div role="status">This review was protected and closed for the upgrade. Reopen it in Placekeeper after installation finishes.</div>;
   return <>{upgradeMessage && <div className="review-upgrade-status" role="status">{upgradeMessage}</div>}<div className="review-upgrade-content" inert={upgradeFrozen}><ProductionReviewApp
     key={loaded === undefined ? 'preparing-runtime' : 'active-runtime'}
+    {...(props.onContextSnapshot === undefined ? {} : { onContextSnapshot: props.onContextSnapshot })}
+    {...(props.agentBridge === undefined ? {} : { agentBridge: props.agentBridge })}
     session={visible.session}
     initialState={visible.state}
     {...(visible.activeAuthoringDraftIds === undefined ? {} : {

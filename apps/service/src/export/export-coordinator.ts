@@ -168,9 +168,10 @@ export class ExportCoordinator {
     this.#validateFrozenDelivery = options.validateFrozenDelivery ?? (() => true);
   }
 
-  exportReviewedCopy(delivery: FrozenPdfDelivery): Promise<PdfExportResult> {
+  exportReviewedCopy(delivery: FrozenPdfDelivery, assertAuthority?: () => void): Promise<PdfExportResult> {
+    assertAuthority?.();
     this.#assertDeliverable(delivery);
-    return this.#runOnce(delivery, "copy", () => this.#runCopy(delivery));
+    return this.#runOnce(delivery, "copy", () => this.#runCopy(delivery, assertAuthority));
   }
 
   replaceOriginal(delivery: FrozenPdfDelivery): Promise<PdfExportResult> {
@@ -343,7 +344,7 @@ export class ExportCoordinator {
     }
   }
 
-  async #runCopy(delivery: FrozenPdfDelivery): Promise<PdfExportResult> {
+  async #runCopy(delivery: FrozenPdfDelivery, assertAuthority?: () => void): Promise<PdfExportResult> {
     const originalPath = this.#originalPath(delivery);
     const lease = this.#controls.beginWrite(delivery.sessionId);
     let candidatePath: string | undefined;
@@ -369,6 +370,7 @@ export class ExportCoordinator {
         );
         try {
           lease.signal.throwIfAborted();
+          assertAuthority?.();
           if (process.platform === "win32") {
             publication = await publishFile(candidatePath, outputPath, { replaceExisting: false });
           } else await link(candidatePath, outputPath);

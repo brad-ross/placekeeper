@@ -36,7 +36,7 @@ export class LocalReviewBackend {
     generation: number,
     method: Exclude<ReviewRuntimeBrokerMethod, "saveProposal">,
     payload: unknown,
-    options: { readonly expectedDocumentGeneration?: number;
+    options: { readonly expectedDocumentGeneration?: number; readonly assertAuthority?: () => void;
       readonly trustedDestinationSelection?: { readonly selectedPath: string | null; readonly assertAuthority: () => void } } = {},
   ): Promise<unknown> {
     if (isReviewSideEffectMethod(method)) {
@@ -45,10 +45,14 @@ export class LocalReviewBackend {
       // a committed operation can never lose its protection marker.
       await this.#broker.protectChromeReview(sessionId);
     }
+    options.assertAuthority?.();
     let result: unknown;
     switch (method) {
       case "command":
-        result = await this.#broker.acceptMutation(sessionId, payload as ReviewCommand, { expectedGeneration: generation });
+        result = await this.#broker.acceptMutation(sessionId, payload as ReviewCommand, {
+          expectedGeneration: generation,
+          ...(options.assertAuthority === undefined ? {} : { assertAuthority: options.assertAuthority }),
+        });
         if ((payload as ReviewCommand).type !== "put-draft" && this.#broker.saveStatus(sessionId)?.destination.phase === "active") {
           void this.#saving.requestSave(sessionId);
         }
@@ -61,8 +65,8 @@ export class LocalReviewBackend {
         let nameResult;
         try {
           const state = method === "chooseCopy"
-            ? await this.#saving.chooseCopyFilename(sessionId, value.filename, value.folderSelectionId, value.confirmation, options.expectedDocumentGeneration)
-            : await this.#saving.chooseOriginal(sessionId, value.confirmation, options.expectedDocumentGeneration);
+            ? await this.#saving.chooseCopyFilename(sessionId, value.filename, value.folderSelectionId, value.confirmation, options.expectedDocumentGeneration, options.assertAuthority)
+            : await this.#saving.chooseOriginal(sessionId, value.confirmation, options.expectedDocumentGeneration, options.assertAuthority);
           if (value.confirmation !== undefined) nameResult = state;
         } catch (error) {
           if (value.confirmation === undefined) throw error;
@@ -74,13 +78,13 @@ export class LocalReviewBackend {
         };
         break;
       }
-      case "chooseFolder": result = await this.#saving.chooseFolder(sessionId, options.expectedDocumentGeneration, options.trustedDestinationSelection); break;
+      case "chooseFolder": result = await this.#saving.chooseFolder(sessionId, options.expectedDocumentGeneration, options.trustedDestinationSelection, options.assertAuthority); break;
       case "retrySave":
         await this.#saving.retry(sessionId, options.expectedDocumentGeneration);
         result = this.#broker.saveStatus(sessionId);
         break;
       case "locateSave":
-        await this.#saving.locate(sessionId, options.expectedDocumentGeneration, options.trustedDestinationSelection);
+        await this.#saving.locate(sessionId, options.expectedDocumentGeneration, options.trustedDestinationSelection, options.assertAuthority);
         result = this.#broker.saveStatus(sessionId);
         break;
       case "scope": result = await this.#broker.sessionScope(sessionId); break;
@@ -90,10 +94,11 @@ export class LocalReviewBackend {
       case "exportReviewedCopy": {
         const value = payload as { readonly confirmPossiblyStale?: true; readonly fence?: ReviewExportFence };
         const frozen = await this.#broker.freezeDelivery(sessionId, value.fence, options.expectedDocumentGeneration);
+        options.assertAuthority?.();
         result = await this.#exporting.exportReviewedCopy({
           ...frozen,
           ...(value.confirmPossiblyStale === true ? { staleConfirmed: true as const } : {}),
-        });
+        }, options.assertAuthority);
         break;
       }
       default: throw new Error("review-method-forbidden");
@@ -106,6 +111,7 @@ export class LocalReviewBackend {
     attachment: ReviewInteractionAttachment,
     action: "begin" | "finalize" | "release" | "acknowledge",
     payload: unknown,
+    assertAuthority?: () => void,
   ): Promise<unknown> {
     const value = payload as Record<string, unknown>;
     const common = {
@@ -125,6 +131,7 @@ export class LocalReviewBackend {
       outcome: value.outcome as "applied" | "discarded",
       draftId: value.draftId as string,
       expectedDraftRevision: value.expectedDraftRevision as number,
+      ...(assertAuthority === undefined ? {} : { assertAuthority }),
     });
     // Durable finalization receipts replay their recorded outcome, even when
     // a retry requests another outcome. Rejections and discarded receipts do

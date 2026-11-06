@@ -1,0 +1,9 @@
+{
+  "builtAt": "2026-11-04T23:23:52.046Z",
+  "node": "v26.8.2",
+  "sdk": "@openai/mcp-extensions@0.2.1",
+  "digests": {
+    "server.mjs": "22f6d106b42c50721770593b3a3ecec0cccc5297ef292143a83da3bd8c69e131",
+    "probe.html": "b0ac7655d10f77aadacd9d767bcfd0e53942d99ceba25df34ff38d7716427b66"
+  }
+}

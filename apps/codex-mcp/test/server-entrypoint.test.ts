@@ -8,7 +8,7 @@ import { build } from 'vite';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { expect, it } from 'vitest';
-import { CODEX_REVIEW_UI_RESOURCE } from '../../../packages/core/src/codex-mcp-protocol.js';
+import { createHash } from 'node:crypto';
 
 it.skipIf(process.platform === 'win32')('initializes the actual server through an aliased parent while imports remain inert', async () => {
   const root = await mkdtemp(join(tmpdir(), 'pk-mcp-entry-'));
@@ -29,7 +29,7 @@ it.skipIf(process.platform === 'win32')('initializes the actual server through a
       await client.connect(transport);
       expect(client.getServerVersion(), errors).toEqual({ name: 'placekeeper', version: '1.0.0' });
       expect((await client.listTools()).tools.map(tool => tool.name)).toContain('display_review');
-      expect((await client.listResources()).resources.map(resource => resource.uri)).toEqual([CODEX_REVIEW_UI_RESOURCE]);
+      expect((await client.listResources()).resources.map(resource => resource.uri)).toEqual([`ui://placekeeper/review-v1-${createHash('sha256').update('<html>entrypoint fixture</html>').digest('hex')}.html`]);
       expect(errors).toBe('');
     } finally { await client.close(); }
     const imported = await promisify(execFile)(process.execPath, ['--input-type=module', '--eval', `await import(${JSON.stringify(pathToFileURL(entry).href)});process.stdout.write('import remained inert');`], { cwd: root });

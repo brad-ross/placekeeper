@@ -194,12 +194,15 @@ describe('review shell layout and accessibility contract', () => {
           message: '',
         }}
         onExport={async () => undefined}
+        onSaveOptions={() => undefined}
       />,
     );
 
     expect(html).toContain('aria-expanded="true"');
     expect(html).toContain('role="menu"');
     expect(html).toContain('data-document-actions-open="true"');
+    expect(html).toContain('Save options');
+    expect(html).toContain('>Export</span>');
     expect(html).toContain('lucide-file-text');
     expect(html).toContain('class="review-chrome__filename"');
     expect(html).not.toContain('<strong>paper.pdf</strong>');

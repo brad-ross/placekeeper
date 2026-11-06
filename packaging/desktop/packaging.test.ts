@@ -93,6 +93,13 @@ describe("desktop package assets", () => {
     expect(JSON.parse(await readFile(join(output, "dependencies.json"), "utf8"))).toHaveLength(2);
     await rm(join(transitive, "LICENSE.md"));
     await expect(bundleDependencyNotices(root, join(root, "bad"))).rejects.toThrow("No dependency license/notice");
+    const recovered = join(root, "packaging/dependency-notices/two@2.0.0");
+    await mkdir(recovered, { recursive: true });
+    await writeFile(join(recovered, "LICENSE.md"), "exact upstream two license");
+    await bundleDependencyNotices(root, join(root, "recovered"));
+    expect(await readFile(join(root, "recovered/two@2.0.0/LICENSE.md"), "utf8")).toBe("exact upstream two license");
+    await writeFile(join(transitive, "package.json"), JSON.stringify({ name: "two", version: "2.0.1", license: "MIT" }));
+    await expect(bundleDependencyNotices(root, join(root, "other-version"))).rejects.toThrow("No dependency license/notice");
   });
 });
 

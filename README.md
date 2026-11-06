@@ -1,5 +1,7 @@
 # Placekeeper
 
+For supported chat hosts, see [PDF review in chat](docs/guides/chatgpt-extension.md) for direct file and conversation entry, exact reader tools, editable discussion drafts, sharing controls, and explicit mention snapshots. Extension availability depends on the installed build and host capabilities.
+
 Placekeeper is a focused everyday PDF reader and annotator for serious readers. It preserves your place and train of thought across annotation, search, and nested reference lookup, produces a portable reviewed PDF from a recoverable session, and can supply task-scoped live PDF and annotation context to its Codex plugin.
 
 <img src="packaging/macos/icon/Placekeeper.svg" alt="Placekeeper's two-page reference-and-return app icon" width="128">

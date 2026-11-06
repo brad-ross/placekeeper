@@ -234,7 +234,9 @@ test.describe('shared viewer foundation', () => {
     await expect(pdfPage).toHaveAttribute('data-pointerdown-target', 'page');
     await expect(pdfPage).toHaveAttribute('data-pointerup-target', 'page');
     await expect.poll(() => page.evaluate(() => window.viewerAcceptance.selectionRectCount())).toBeGreaterThan(0);
-    const visibleSelection = pdfPage.locator(':scope > div[style*="mix-blend-mode"]');
+    // The permanent rotation/blend wrapper remains after clearing selection.
+    // Assert the plugin's transient painted selection inside that wrapper.
+    const visibleSelection = pdfPage.locator(':scope > div[style*="mix-blend-mode"] > div[style*="isolation: isolate"]');
     await expect(visibleSelection).toBeVisible();
     await expect(visibleSelection).toHaveCSS('pointer-events', 'none');
     await expect
@@ -583,9 +585,9 @@ test('stops the PDF loading indicator animation under reduced motion', async ({ 
 
   try {
     await page.goto('/test/acceptance/viewer-harness/index.html', { waitUntil: 'domcontentloaded' });
-    const loader = page.locator('.pdf-workspace__loading');
+    const loader = page.getByRole('status', { name: 'Opening document', exact: true });
     await expect(loader).toBeVisible();
-    await expect(loader.locator('.review-icon')).toHaveCSS('animation-name', 'none');
+    await expect(loader.locator('.document-loading__indicator')).toHaveCSS('animation-name', 'none');
   } finally {
     releaseDocument?.();
     await page.unrouteAll({ behavior: 'wait' });
@@ -598,5 +600,5 @@ test('reports an unreadable PDF instead of leaving the local loading screen fore
     route.fulfill({ status: 200, contentType: 'application/pdf', body: '' }));
   await page.goto('/test/acceptance/viewer-harness/index.html');
   await expect(page.getByRole('alert').filter({ hasText: 'This PDF could not be loaded.' })).toBeVisible();
-  await expect(page.getByText('Loading local PDF…', { exact: true })).toHaveCount(0);
+  await expect(page.getByRole('status', { name: 'Opening document', exact: true })).toHaveCount(0);
 });

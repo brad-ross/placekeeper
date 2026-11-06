@@ -1,7 +1,7 @@
 ---
 title: Task-scoped, prompt-refreshed live PDF context
 date: 2026-08-12
-last_updated: 2026-10-06
+last_updated: 2026-11-06
 category: architecture-patterns
 module: Live PDF Context
 problem_type: architecture_pattern
@@ -35,6 +35,8 @@ tags:
 
 ## Context
 
+This learning distinguishes two authority paths. The launcher/hook path below establishes a Task Binding and refreshes context at prompt consumption. Direct file/conversation extension entrypoints instead create an app-owned review and publish through the host's model-context API. A native panel can use either path; the host name or an open PDF does not select the protocol.
+
 An agent cannot safely learn a changing PDF review from an open browser tab, a file path, or a snapshot captured at launch. Those signals do not identify which task owns the review, whether its review surface completed the same authenticated launch, or whether annotations changed before the next user prompt.
 
 Earlier approaches centered on autosave or a visible handoff action, but the need was different: the agent task had to know which review it owned and receive fresh PDF and annotation state without a button (session history). Pointing the agent at raw PDF bytes likewise provided no ambient awareness of later annotations, while scraping the browser DOM would have made presentation state compete with canonical Review Items (session history).
@@ -47,7 +49,7 @@ An authorized Document Generation transition may migrate the active task associa
 
 ### Bind one review generation to one agent task
 
-The following handshake describes browser admission. Native Codex preserves the same task association and prompt-time freshness rules through the separate proof sequence below.
+The following handshake describes browser admission. The launcher/hook native Codex path preserves the same task association and prompt-time freshness rules through the separate proof sequence below.
 
 Use a two-sided handshake instead of inferring ownership from the active application window. A launch creates a one-time proof scoped to the review session, document generation, and browser capability (`apps/service/src/context/task-binding-registry.ts`). The agent hook claims that proof for its task, producing a pending binding; the authenticated browser must then activate the same review generation with its matching capability (`apps/service/src/context/task-binding-registry.ts`).
 
@@ -61,7 +63,7 @@ A hard browser refresh must resume the projection that completed the handshake, 
 
 The credential continuity is intentionally process-local. A copied route without its cookie, an ended view, or a route answered by a successor daemon cannot recreate the credential or infer Codex scope. Post-restart recovery opens a fresh browser credential. It may reattach automatically on the owning task's next prompt only through a separate two-sided ticket: a path-scoped opaque browser token must match the same canonical source path and digest, and `UserPromptSubmit` must independently supply the exact task session ID. The ticket stores only hashes, expires, is consumed and rotated after success, and rejects foreign tasks. [Authority boundaries for reloadable local-review URLs](reloadable-local-review-url-authority-boundaries.md) defines the full live-resume versus successor-reopen contract.
 
-### Admit a native Codex panel through independent proofs
+### Admit a launcher-owned native Codex panel through independent proofs
 
 Native Codex admission extends the same task-binding principle across two host events and a private app channel. The launcher claim establishes the task; the exact display receipt must be attested by a genuine host hook for that task; authenticated panel readiness is a separate fact. Neither receipt output nor a visible card proves that the other facts occurred. `attestDisplay` only records attestation, while pending promotion requires both readiness and attestation (`apps/service/src/codex/codex-runtime.ts:296`, `apps/service/src/codex/codex-runtime.ts:353`). The success hook deliberately says that readiness and current context still need separate verification (`apps/service/src/cli/hook-command.ts:454`).
 
@@ -76,6 +78,26 @@ Restore/reexpand may retain an existing live shell or construct a new JavaScript
 After ordinary live participation ends, the advisory reconnect-hint flow requires the normal launch, trusted claim, display and readiness steps. A separate successor-daemon path can reattach an already reopened or recovered source using an actual restart ticket plus an independent trusted prompt from the owning task; a hint cannot substitute for either proof (`apps/service/src/codex/codex-runtime.ts:513`, `apps/service/src/codex/codex-runtime.ts:600`). A same-chat native reconnect hint only remembers where to request that fresh launch. It is recorded after valid presentation authority, expires independently, and does not reserve ownership. Another task's live ownership suppresses that guidance (`apps/service/src/context/task-binding-registry.ts:350`, `apps/service/src/context/task-binding-registry.ts:372`). Missing live binding can therefore return unavailable context with historical reopen guidance, never cached Review Items or current evidence (`apps/service/src/context/live-context-service.ts:327`). The hint is process-local convenience; durable accepted work and Protected Draft recovery have separate lifetimes.
 
 The failed alternative was to treat remembered document identity, a cached card, or an earlier successful display as enough to reconnect. Those facts explain user intent but cannot authenticate a new attempt. Keep prompt freshness, presentation liveness, durable work and reopening intent separate even when the user experiences them as one review.
+
+### Keep app-owned review context separate from Task Binding
+
+Direct extension opening must not be repaired by manufacturing a task ID, replaying hook attestation, or displaying the legacy task-binding badge. The file/conversation entrypoints return private app metadata; the service creates a separate presentation with an attempt, generation, lease and capability. It rejects app requests when the generation has a Task Binding (`apps/codex-mcp/src/extension-server.ts:7`, `apps/service/src/codex/extension-runtime.ts:390`, `apps/service/src/codex/extension-runtime.ts:422`). The admitted shell marks its runtime as app-owned, and the shared reader suppresses only that legacy badge (`apps/codex-mcp/src/extension-shell.ts:560`, `apps/web/src/host/codex-runtime.ts:85`, `apps/web/src/app/ProductionReviewApp.tsx:2741`).
+
+This distinction emerged during native qualification: a functioning extension reader still showed the unrelated legacy status, while the new host context and live tools had separate availability. The service review remains canonical in both paths; successful extension publication does not establish the prompt-hook observation or evidence handle described below. Likewise, a host accepting context does not prove the model read it. The verified behavior and its limits are recorded in the [extension qualification record](../../testing/chatgpt-extension-qualification.md).
+
+Treat model context as shared host state, not an app-owned text buffer. The coordinator preserves foreign blocks and structured data, reconciles only actual context notifications, and retains host removals while subsequent review changes arrive. Removing the background group pauses automatic publication; an explicit attachment remains a separate user action. Remount initialization distinguishes a proven fresh invocation from a previous one with missing context. This prevents reopening from silently undoing the user's removal (`apps/web/src/host/extension-context-coordinator.ts:34`, `apps/web/src/host/extension-context-coordinator.ts:95`, `apps/codex-mcp/src/extension-shell.ts:154`).
+
+A bot action captures its evidence before asynchronous work, then attaches that captured revision with an optional note. It does not follow later selection changes or edit/send the user's prompt. Publication is revalidated, and explicit attachment success waits for host acceptance (`apps/codex-mcp/src/review-context-attachment.ts:5`, `apps/codex-mcp/src/extension-shell.ts:407`, `apps/web/src/host/extension-context-coordinator.ts:60`). The [chat reader guide](../../guides/chatgpt-extension.md) owns the interaction details. Regression coverage in `apps/web/test/extension-context-coordinator.test.ts` already protects removal, remount, late echoes and rejected inclusion; do not introduce a second publisher to bypass those rules.
+
+### Keep full-document acceptance subordinate to removal and source consent
+
+The toolbox's full-PDF action uses that same coordinator, but its consent and status have different lifetimes. Consent follows the selected source so an updated version can publish automatically; acceptance belongs only to the exact source, generation and digest. Switching sources requires another click. Preparing bytes, finishing a host call, and retaining an older receipt cannot by themselves make the displayed version current (`apps/codex-mcp/src/extension-shell.ts:462`, `apps/codex-mcp/src/extension-shell.ts:495`, `apps/codex-mcp/src/extension-shell.ts:530`).
+
+The subtle failure was checking removal only against the desired version. While A1 awaited its receipt, A2 of the same source could become desired. A host notification omitting A1, correlated with A1's eventual receipt, then failed to revoke A2's inherited consent (session history). Correlate removal with the submitted publication, and cancel the same source's retained choice even when its next version is queued or still preparing. Preserve an independent click for a different source. This is why receipt history is evidence about a write, not authority to restore membership after removal (`apps/web/src/host/extension-context-coordinator.ts:326`, `apps/codex-mcp/src/extension-shell.ts:530`). The superseded-publication cases in `apps/web/test/extension-context-coordinator.test.ts:468` and `apps/codex-mcp/test/extension-shell.test.ts:1172` protect this distinction.
+
+Teardown must obey the same write ordering. A parallel PDF-free cleanup could finish first and then be overwritten by the older PDF-bearing write. The coordinator therefore queues cleanup behind a submitted write, retains only host-observed surrounding context, and bounds the wait. If the host write hangs beyond that bound, disposal completes without racing it with a second write; cleanup is best effort, not proof of removal (`apps/web/src/host/extension-context-coordinator.ts:379`).
+
+Keep delivery verification separate from model-reading qualification. The mounted replacement test changes the actual file, checks the newly rendered version and exact submitted bytes, and withholds acceptance to check the pending status (`test/acceptance/chatgpt-extension.spec.ts:91`). It verifies the application path against a simulated host; it does not establish that a native assistant consumed the replacement. The [qualification record](../../testing/chatgpt-extension-qualification.md#document-in-context-pdf-handoff-evidence--november-6-2026) owns that separate evidence and its limits.
 
 ### Refresh at prompt consumption
 

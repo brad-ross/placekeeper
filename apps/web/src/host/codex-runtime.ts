@@ -4,9 +4,12 @@ import { NativeOperationError, type CodexResourceDescriptor } from '../../../../
 import { VerifiedResourceMaterializer, resourceDescriptors } from '../../../codex-mcp/src/resources.js';
 import { createRpcHostRuntime, type MaterializedViewerResource } from './vscode-runtime.js';
 import type { HostRuntime, HostRuntimeInvalidation } from './runtime.js';
+import type { ProductionScope } from './session-contracts.js';
 
 export interface CodexRuntimePort {
   readonly runtimeId: string;
+  readonly contextOwner?: 'app';
+  readonly reviewedCopyExport?: boolean;
   openExternalUrl?(url: string): Promise<void>;
   call(method: ReviewRuntimeMethod | 'resource' | 'createLink', payload: unknown): Promise<unknown>;
   subscribeInvalidations(listener: (event: HostRuntimeInvalidation) => void): () => void;
@@ -78,11 +81,19 @@ export function createCodexHostRuntime(port: CodexRuntimePort, environment: {
       }).catch(error => publish({ protocol: REVIEW_RUNTIME_PROTOCOL, version: REVIEW_RUNTIME_VERSION, kind: 'response', runtimeId: port.runtimeId, requestId: message.requestId, method: message.method, sessionId: message.sessionId, generation: message.generation, revision: message.revision, ok: false, error: { kind: error instanceof NativeOperationError ? 'export-conflict' : 'native-resource-or-command-failed' } }));
     },
   }, { host: 'codex', materializeDocument: materialize('document'), materializePdfiumWasm: materialize('pdfiumWasm'), materializePdfiumWorker: materialize('worker') });
+  // Context ownership belongs to the admitted shell, outside the wire scope projection.
+  const ownedScope = (scope: ProductionScope): ProductionScope => port.contextOwner === 'app'
+    ? { ...scope, contextOwner: 'app' } : scope;
   return { ...runtime, async openExternalUrl(value: string) {
     const url = externalWebUrl(value);
     if (disposed || url === null || port.openExternalUrl === undefined) throw new Error('Host link opening is unavailable.');
     await port.openExternalUrl(url);
-  }, get capabilities() { return runtime.capabilities!; }, async createLink(location) {
+  }, get capabilities() { return { ...runtime.capabilities!, ...(port.reviewedCopyExport === undefined ? {} : { reviewedCopyExport: port.reviewedCopyExport }) }; }, async bootstrap(signal) {
+    const initial = await runtime.bootstrap(signal);
+    return { ...initial, scope: ownedScope(initial.scope) };
+  }, async scope(signal) {
+    return ownedScope(await runtime.scope(signal));
+  }, async createLink(location) {
     if (disposed) throw new Error('Native review disconnected.');
     const value = await port.call('createLink', { location });
     if (disposed || typeof value !== 'object' || value === null || !('link' in value) || typeof value.link !== 'string' || !value.link.startsWith('placekeeper:///')) throw new Error('Native link unavailable.');

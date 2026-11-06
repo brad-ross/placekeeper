@@ -1,3 +1,4 @@
+import { parseExtensionRequest, type ExtensionRequest, type ExtensionResult } from "../../../../packages/core/src/extension-protocol.js";
 import { isUpgradePreparationRequest, type UpgradePreparationRequest, type UpgradePreparationResult, type UpgradeAttemptCredentials } from "./upgrade-preparation.js";
 import { isEditorPath, parseEditorControlRequest, type EditorControlRequest, type EditorControlResponse } from "../../../../packages/core/src/editor-navigation-protocol.js";
 import {
@@ -60,6 +61,7 @@ export type DaemonCompatibilityResult =
   | { readonly kind: "uninspectable"; readonly reason: DaemonUninspectableReason };
 
 export type PlacekeeperControlRequest =
+  | { readonly kind: "extension-app"; readonly request: ExtensionRequest }
   | { readonly kind: "upgrade-preparation"; readonly request: UpgradePreparationRequest }
   | { readonly kind: "electron-resolve-launch"; readonly launchId: string }
   | { readonly kind: "electron-cancel-launch"; readonly launchId: string }
@@ -172,6 +174,7 @@ export type PlacekeeperControlRequest =
     };
 
 export type PlacekeeperControlResponse =
+  | { readonly kind: "extension-app"; readonly response: ExtensionResult | CodexAppResponse }
   | { readonly kind: "upgrade-preparation"; readonly result: UpgradePreparationResult }
   | { readonly kind: "electron-resolve-launch"; readonly target?: { readonly sourcePath: string; readonly sessionId: string; readonly documentGeneration: number } }
   | { readonly kind: "electron-cancel-launch"; readonly canceled: boolean }
@@ -271,6 +274,7 @@ export function isControlRequest(value: unknown): value is PlacekeeperControlReq
     return Object.keys(value).length === 2 &&
       parseCodexDisplayRequest(value.request) !== undefined;
   }
+  if (value.kind === "extension-app") return Object.keys(value).length === 2 && parseExtensionRequest(value.request) !== undefined;
   if (value.kind === "codex-app") {
     return Object.keys(value).length === 2 &&
       parseCodexAppRequest(value.request) !== undefined;

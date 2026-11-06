@@ -197,7 +197,9 @@ export async function inspectLivePdf(
 }
 
 function liveSaveStatus(snapshot: AtomicSessionProjection): LiveSaveStatus {
-  const destination: LiveSaveStatus["destination"] = snapshot.destination.phase === "none"
+  const destination: LiveSaveStatus["destination"] = snapshot.destination.phase === "host"
+    ? { phase: "host", generation: snapshot.destination.generation, writable: snapshot.destination.writable }
+    : snapshot.destination.phase === "none"
     ? { phase: "none", generation: 0 }
     : snapshot.destination.phase === "establishing"
       ? { phase: "establishing", generation: snapshot.destination.generation }

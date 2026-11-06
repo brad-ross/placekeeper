@@ -152,6 +152,7 @@ async function chooseProtectedRecovery(
   signal?: AbortSignal,
 ): Promise<"resume" | "discard" | "fork"> {
   if (signal?.aborted === true) throw signal.reason;
+  document.body.dataset.documentLoading = "false";
   title!.textContent = "Existing review recovered";
   status!.textContent = "Choose how Placekeeper should reopen your unfinished review.";
   handlerActions!.setAttribute("aria-label", "Protected recovery choices");
@@ -168,7 +169,7 @@ async function chooseProtectedRecovery(
       handlerActions!.setAttribute("aria-label", "Handler actions");
       handlerActions!.replaceChildren(bypass!);
       signal?.removeEventListener("abort", onAbort);
-      if (opening) status!.textContent = "Opening the protected review…";
+      if (opening) document.body.dataset.documentLoading = "true";
     };
     const onAbort = () => {
       if (settled) return;
@@ -300,11 +301,13 @@ const controller = createHandlerController({
   status: (message) => {
     status.textContent = message;
     if (message === "Review ready.") {
+      document.body.dataset.documentLoading = "false";
       reviewRoot.inert = false;
       launchShell.hidden = true;
       return;
     }
     if (message.includes("disconnected") || message.includes("updated")) {
+      document.body.dataset.documentLoading = "false";
       reviewRoot.inert = true;
       launchShell.hidden = false;
       reopen.hidden = false;

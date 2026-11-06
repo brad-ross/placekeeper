@@ -66,12 +66,17 @@ async function qualificationShellFixture(withControl: boolean, action: "bridge-c
   vi.resetModules(); vi.useFakeTimers({ now: new Date("2026-10-02T12:00:00.000Z") });
   class Element {
     textContent = ""; hidden = false; removed = false; disabled = true; onclick: (() => void | Promise<void>) | undefined;
-    before() {} setAttribute() {} remove() { this.removed = true; }
+    inert = false; dataset: Record<string, string> = {};
+    following: Element[] = []; preceding: Element[] = [];
+    before(...elements: Element[]) { this.preceding.push(...elements); }
+    after(...elements: Element[]) { this.following.push(...elements); }
+    setAttribute() {} remove() { this.removed = true; }
   }
   const status = new Element(), detail = new Element(), renewal = new Element(), root = new Element();
   const created: { tag: string; element: Element }[] = [];
-  vi.stubGlobal("document", { hidden: false, querySelector: (selector: string) => ({ "#status": status, "#detail": detail, "#renewal": renewal, "#root": root } as Record<string, Element>)[selector], createElement: (tag: string) => { const element = new Element(); created.push({ tag, element }); return element; } });
-  vi.stubGlobal("window", {});
+  const documentEvents = new Map<string, EventListener>(), windowEvents = new Map<string, EventListener>();
+  vi.stubGlobal("document", { documentElement: { style: { setProperty: vi.fn() } }, hidden: false, addEventListener: (type: string, listener: EventListener) => documentEvents.set(type, listener), querySelector: (selector: string) => ({ "#status": status, "#detail": detail, "#renewal": renewal, "#root": root } as Record<string, Element>)[selector], createElement: (tag: string) => { const element = new Element(); created.push({ tag, element }); return element; } });
+  vi.stubGlobal("window", { addEventListener: (type: string, listener: EventListener) => windowEvents.set(type, listener) });
   const clear = vi.fn();
   const runtimeDispose = vi.fn();
   const runtime = { dispose: runtimeDispose };
@@ -96,7 +101,8 @@ async function qualificationShellFixture(withControl: boolean, action: "bridge-c
   const fixtureRuntimeId = realRuntime ? "runtime_1234567890" : "runtime-1";
   let grantSent = false;
   const calls: string[] = [];
-  class MockApp {
+  class MockApp extends EventTarget {
+    getHostContext = () => ({});
     getHostCapabilities = vi.fn<() => { openLinks?: object }>(() => ({ openLinks: {} }));
     openLink = vi.fn(async (_input: { url: string }): Promise<{ isError?: boolean }> => ({}));
     ontoolresult: ((result: unknown) => void) | undefined;
@@ -125,11 +131,14 @@ async function qualificationShellFixture(withControl: boolean, action: "bridge-c
   await import("../src/shell.js");
   app.ontoolresult!({ structuredContent: { protocolVersion: 1, status: "pending", receiptId: "receipt-1", attemptId: "attempt-1", generation: 1 }, _meta: { "placekeeper/pending": { protocolVersion: 1, runtimeId: fixtureRuntimeId, attemptId: "attempt-1", generation: 1, receiptId: "receipt-1", pendingCapability: "p".repeat(43) }, "placekeeper/qualification": { runId: own.runId, invocationNonce: own.invocationNonce, expiresAt: new Date(Date.now() + 60_000).toISOString() } } });
   await vi.advanceTimersByTimeAsync(0);
-  return { app, calls, created, status, detail, renewal, root, clear, mount, runtimeDispose, port };
+  return { app, calls, created, status, detail, renewal, root, clear, mount, runtimeDispose, port, documentEvents, windowEvents };
 }
 it("normal shell has no qualification button and continues ordinary renewal without a descriptor grant", async () => {
   const f = await qualificationShellFixture(false);
   expect(f.created.filter(item => item.tag === "button")).toHaveLength(0);
+  expect(f.detail.following).toHaveLength(1);
+  expect(f.windowEvents.has("online")).toBe(true);
+  expect(f.documentEvents.has("visibilitychange")).toBe(true);
   expect(f.mount).toHaveBeenCalledOnce(); expect(f.root.textContent).toBe("Shared production review mounted"); expect(f.runtimeDispose).not.toHaveBeenCalled();
   expect(f.calls).toContain("ready"); expect(f.calls).toContain("renew");
   await vi.advanceTimersByTimeAsync(5000); expect(f.calls.filter(method => method === "renew")).toHaveLength(2);
@@ -403,7 +412,7 @@ it.each(["renew", "watermark"])("late normal %s success after bridge disconnect 
   expect(f.runtimeDispose).toHaveBeenCalledOnce();
   expect(f.created.filter(item => item.tag === "button")).toHaveLength(0);
   expect(f.app.callServerTool).toHaveBeenCalledTimes(calls);
-  await expect(f.port.call("bootstrap", {})).rejects.toThrow("No native presentation");
+  await expect(f.port.call("bootstrap", {})).rejects.toMatchObject({ category: "stale-reply" });
   expect(f.app.callServerTool).toHaveBeenCalledTimes(calls);
 });
 
@@ -423,7 +432,7 @@ it("host teardown owns the sole detach when real Codex runtime presence cleans u
   expect(f.root.textContent).toBe("");
   const count = f.app.callServerTool.mock.calls.length; await vi.advanceTimersByTimeAsync(30_000);
   expect(f.app.callServerTool).toHaveBeenCalledTimes(count);
-  await expect(f.port.call("bootstrap", {})).rejects.toThrow("No native presentation");
+  await expect(f.port.call("bootstrap", {})).rejects.toMatchObject({ category: "stale-reply" });
 });
 
 
@@ -458,7 +467,7 @@ it("a picker SDK response after bridge disconnect cannot resurrect authority", a
   reply.resolve({ content: [], _meta: { "placekeeper/response": { status: "ok", payload: { cancelled: false, selectionId: "late_picker_1234" } } } });
   expect(await pending).toMatchObject({ category: "stale-reply" });
   expect(f.status.textContent).toBe(closed);
-  await expect(f.port.call("bootstrap", {})).rejects.toThrow("No native presentation");
+  await expect(f.port.call("bootstrap", {})).rejects.toMatchObject({ category: "stale-reply" });
 });
 
 it("opens web URLs through the current shell host capability and exposes denial", async () => {

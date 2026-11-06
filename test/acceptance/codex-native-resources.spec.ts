@@ -194,8 +194,18 @@ test('test MCP bridge releases obsolete large-document resources across replacem
         // These alternating fixtures have distinct page counts, so wait for the new document.
         const pages = fixture === 'text-native.pdf' ? 1 : 120;
         await expect(page.getByRole('textbox', { name: new RegExp(`Current page \\d+ of ${pages}\\.`) })).toBeVisible();
-        await expect.poll(() => page.locator('[data-page-index="0"] > img').first().getAttribute('src')).not.toBe(before);
-        await page.locator('[data-page-index="0"] > img').first().evaluate((image: HTMLImageElement) => image.decode());
+        await expect.poll(() => page.locator('[data-page-index="0"] > img').first().evaluate(async (image: HTMLImageElement, previousSource) => {
+          const source = image.src;
+          if (!source || source === previousSource) return false;
+          try { await image.decode(); }
+          catch (error) {
+            // Replacement/zoom may retire this particular image while decode is pending.
+            // A stable current source that cannot decode remains a real failure.
+            if (!image.isConnected || image.src !== source) return false;
+            throw error;
+          }
+          return image.isConnected && image.src === source && image.complete && image.naturalWidth > 0;
+        }, before), { timeout: 20_000 }).toBe(true);
         samples.push({ cycle, fixture, actualHost: false, refreshMs: performance.now() - started,
           retention: await page.evaluate(() => (window as any).nativeAcceptanceRetention()) });
         expect(await page.evaluate(() => (window as any).nativeAcceptanceErrors)).toEqual([]);

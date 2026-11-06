@@ -67,3 +67,13 @@ it("accepts only the closed native export-conflict operation error", () => {
   for (const reason of ["/private/path", "unknown", "unavailable"]) expect(parseCodexAppResponse({ ...response, reason })).toBeUndefined();
   expect(parseCodexAppResponse({ ...response, message: "/private/path" })).toBeUndefined();
 });
+
+it("admits continuation only as an empty resume request and validates its private capability", () => {
+  const request = { ...base, authority: "continuation", capability, method: "resume", payload: {} };
+  expect(parseCodexAppRequest(request)).toEqual(request);
+  expect(parseCodexAppRequest({ ...request, method: "review" })).toBeUndefined();
+  expect(parseCodexAppRequest({ ...request, payload: { taskSessionId: "forged" } })).toBeUndefined();
+  const response = { status: "active", runtimeId: id, attemptId: id, generation: 1, presentationCapability: capability, reconnectTicket: capability, continuationCapability: capability };
+  expect(parseCodexAppResponse(response)).toEqual(response);
+  expect(parseCodexAppResponse({ ...response, continuationCapability: "bad" })).toBeUndefined();
+});
