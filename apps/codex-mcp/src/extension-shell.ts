@@ -1,3 +1,4 @@
+import { externalWebUrl } from '../../../packages/core/src/external-web-url.js';
 import { LiveReaderTools, type DocumentModelContext } from './live-reader-tools.js';
 import { ExtensionContextCoordinator } from '../../web/src/host/extension-context-coordinator.js';
 import type { ReviewContextSnapshot } from '../../web/src/host/review-context-snapshot.js';
@@ -529,7 +530,12 @@ export class ExtensionShell {
         if (!this.#readerTools.supported) this.#show('Live reader tools are unavailable on this host. Open the reader to search and navigate.');
         this.#listeners.clear();
         this.#watermark = undefined;
-        const runtime = createCodexHostRuntime({ runtimeId: active.runtimeId, contextOwner: 'app', ...(this.#host ? { reviewedCopyExport: this.app.getHostCapabilities?.()?.downloadFile !== undefined } : {}), call: (method, payload) => this.#payload(method, payload, epoch), subscribeInvalidations: listener => { this.#listeners.add(listener); return () => this.#listeners.delete(listener); } });
+        const runtime = createCodexHostRuntime({ runtimeId: active.runtimeId, contextOwner: 'app', ...(this.#host ? { reviewedCopyExport: this.app.getHostCapabilities?.()?.downloadFile !== undefined } : {}), call: (method, payload) => this.#payload(method, payload, epoch), openExternalUrl: async value => {
+            const url = externalWebUrl(value);
+            if (epoch !== this.#epoch || this.#closed || !this.#connected || url === null || this.app.getHostCapabilities?.()?.openLinks === undefined) throw new Error('Host link opening is unavailable.');
+            const result = await this.app.openLink({ url });
+            if (result.isError === true) throw new Error('The host could not open this web link.');
+        }, subscribeInvalidations: listener => { this.#listeners.add(listener); return () => this.#listeners.delete(listener); } });
         this.#show('Opening PDF…');
         this.#unmount = mountCodexProductionReview(this.root, runtime, () => { if (epoch === this.#epoch)
             this.#show('The PDF could not be loaded. Reopen it through the file menu; protected work is retained.'); }, () => { if (epoch === this.#epoch && this.#connected)

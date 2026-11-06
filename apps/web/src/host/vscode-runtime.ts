@@ -1,3 +1,4 @@
+import { externalWebUrl } from "../../../../packages/core/src/external-web-url.js";
 import { nativeSyncTexResponse } from "../../../../packages/core/src/native-synctex-protocol.js";
 import { REVIEW_COMMAND_IDS } from "../review/review-command-surface.js";
 import type { SaveDestinationResult } from "./session-contracts.js";
@@ -46,6 +47,7 @@ export interface MaterializedViewerResource {
 }
 
 export interface RpcHostRuntimeOptions {
+  readonly openExternalUrl?: (url: string) => Promise<void>;
   readonly host?: ReviewRuntimeHost;
   readonly extensionOrigin?: string;
   readonly materializeDocument?: (sourceUrl: string) => Promise<MaterializedViewerResource>;
@@ -171,6 +173,7 @@ export function createRpcHostRuntime(
   }
   const envelopeIdentity = host === "chrome" || host === "electron" || host === "codex" ? { runtimeId } : { panelId: runtimeId };
   const pending = new Map<string, PendingRequest>();
+  const externalRequests = new Map<string, { identity: HostRuntimeIdentity; resolve(): void; reject(error: Error): void; timer: ReturnType<typeof setTimeout> }>();
   const invalidations = new Set<(event: HostRuntimeInvalidation) => void>();
   const interactionReconnectListeners = new Set<(
     identity: { readonly generation: number; readonly revision: number },
@@ -309,6 +312,18 @@ export function createRpcHostRuntime(
         current.abort?.();
         current.reject(new Error("Update Placekeeper and its host extension, then close and reopen this review."));
       }
+      return;
+    }
+    if (message.kind === "external-link-response" && typeof message.requestId === "string") {
+      const request = externalRequests.get(message.requestId);
+      if (request === undefined) return;
+      externalRequests.delete(message.requestId);
+      clearTimeout(request.timer);
+      if (message.version === REVIEW_RUNTIME_VERSION && message.ok === true &&
+        message.sessionId === request.identity.sessionId && message.generation === request.identity.generation &&
+        message.revision === request.identity.revision && identity?.sessionId === request.identity.sessionId &&
+        identity.generation === request.identity.generation) request.resolve();
+      else request.reject(new Error("The host could not open this web link."));
       return;
     }
     if (message.version !== REVIEW_RUNTIME_VERSION) return;
@@ -487,6 +502,27 @@ export function createRpcHostRuntime(
 
   return {
     host,
+    async openExternalUrl(value) {
+      const url = externalWebUrl(value);
+      if (disposed || url === null) throw new Error("Web link opening is unavailable.");
+      if (options.openExternalUrl !== undefined) return options.openExternalUrl(url);
+      if (host !== "vscode" || identity === undefined) throw new Error("Host link opening is unavailable.");
+      const id = requestId();
+      const requestIdentity = { ...identity };
+      return new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(() => {
+          externalRequests.delete(id);
+          reject(new Error("The host did not accept this web link."));
+        }, 10_000);
+        externalRequests.set(id, { identity: requestIdentity, resolve, reject, timer });
+        try {
+          port.postMessage({ protocol: REVIEW_RUNTIME_PROTOCOL, version: REVIEW_RUNTIME_VERSION,
+            kind: "external-link-request", panelId: runtimeId, requestId: id, ...requestIdentity, url });
+        } catch (error) {
+          clearTimeout(timer); externalRequests.delete(id); reject(error);
+        }
+      });
+    },
     closeForUpgrade: async () => { await invoke("detach", {}); },
     upgradePoll: () => invoke("upgradePoll", {}),
     upgradeSettle: request => invoke("upgradeSettle", request),
@@ -704,6 +740,11 @@ export function createRpcHostRuntime(
       materializedDocuments.clear();
       for (const resource of materializedWorkers.values()) void resource.then((value) => value.dispose(), () => undefined);
       materializedWorkers.clear();
+      for (const request of externalRequests.values()) {
+        clearTimeout(request.timer);
+        request.reject(new Error("The review runtime was disposed."));
+      }
+      externalRequests.clear();
       pending.clear();
       invalidations.clear();
       interactionReconnectListeners.clear();

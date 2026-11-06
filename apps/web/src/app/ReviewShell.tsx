@@ -2066,6 +2066,7 @@ export function ReviewShell(props: ReviewShellProps) {
         data-review-stage
         data-horizontal-scroll-locked={horizontalScrollLocked ? 'true' : undefined}
         data-reference-layout={effectiveReferenceLayout.kind}
+        data-references-available={referencesAvailable ? 'true' : 'false'}
         data-workspace-presentation={workspaceFraming.presentation}
         data-annotation-presentation={workspaceFraming.presentation}
         data-right-surface-open={rightSurfaceOpen ? 'true' : 'false'}

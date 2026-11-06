@@ -1,3 +1,4 @@
+import { externalWebUrl } from "../../../../packages/core/src/external-web-url.js";
 import { REVIEW_RUNTIME_PROTOCOL, REVIEW_RUNTIME_VERSION, type ReviewRuntimeMethod } from '../../../../packages/core/src/review-runtime-protocol.js';
 import { NativeOperationError, type CodexResourceDescriptor } from '../../../../packages/core/src/codex-mcp-protocol.js';
 import { VerifiedResourceMaterializer, resourceDescriptors } from '../../../codex-mcp/src/resources.js';
@@ -9,6 +10,7 @@ export interface CodexRuntimePort {
   readonly runtimeId: string;
   readonly contextOwner?: 'app';
   readonly reviewedCopyExport?: boolean;
+  openExternalUrl?(url: string): Promise<void>;
   call(method: ReviewRuntimeMethod | 'resource' | 'createLink', payload: unknown): Promise<unknown>;
   subscribeInvalidations(listener: (event: HostRuntimeInvalidation) => void): () => void;
 }
@@ -82,7 +84,11 @@ export function createCodexHostRuntime(port: CodexRuntimePort, environment: {
   // Context ownership belongs to the admitted shell, outside the wire scope projection.
   const ownedScope = (scope: ProductionScope): ProductionScope => port.contextOwner === 'app'
     ? { ...scope, contextOwner: 'app' } : scope;
-  return { ...runtime, get capabilities() { return { ...runtime.capabilities!, ...(port.reviewedCopyExport === undefined ? {} : { reviewedCopyExport: port.reviewedCopyExport }) }; }, async bootstrap(signal) {
+  return { ...runtime, async openExternalUrl(value: string) {
+    const url = externalWebUrl(value);
+    if (disposed || url === null || port.openExternalUrl === undefined) throw new Error('Host link opening is unavailable.');
+    await port.openExternalUrl(url);
+  }, get capabilities() { return { ...runtime.capabilities!, ...(port.reviewedCopyExport === undefined ? {} : { reviewedCopyExport: port.reviewedCopyExport }) }; }, async bootstrap(signal) {
     const initial = await runtime.bootstrap(signal);
     return { ...initial, scope: ownedScope(initial.scope) };
   }, async scope(signal) {

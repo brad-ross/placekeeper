@@ -45,6 +45,7 @@ export type HostRuntimeCommand =
   | ({ readonly command: "forward-synctex" } & ForwardSyncTexRequest);
 
 export interface HostRuntime extends ProductionSessionApi {
+  openExternalUrl?(url: string): Promise<void>;
   readonly host: "browser" | "vscode" | "chrome" | "macos" | "electron" | "codex" | "static";
   closeForUpgrade?(): Promise<void>;
   upgradePoll?(): Promise<import("../../../../packages/core/src/upgrade-review-protocol.js").UpgradeReviewStatus>;

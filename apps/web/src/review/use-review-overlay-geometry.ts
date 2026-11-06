@@ -9,6 +9,23 @@ import {
 import { LatestFrameRequest } from '../pdf/viewer-framing.js';
 import { isZoomAnimationActive } from '../pdf/anchored-zoom.js';
 
+// The sticky backing scrolls on the compositor with the viewport. Only resize
+// changes its dimensions; scrolling must not rewrite PDF clipping geometry.
+export function protectNativeScrollbarBacking(scrollport: HTMLElement): void {
+  const style = getComputedStyle(scrollport);
+  const values = {
+    '--scrollbar-backing-width': `${scrollport.clientWidth}px`,
+    '--scrollbar-backing-height': `${scrollport.clientHeight}px`,
+    '--scrollbar-backing-padding-top': style.paddingTop,
+    '--scrollbar-backing-padding-left': style.paddingLeft,
+    '--scrollbar-backing-right': `${Math.max(0, 16 - (scrollport.offsetWidth - scrollport.clientWidth))}px`,
+    '--scrollbar-backing-bottom': `${Math.max(0, 16 - (scrollport.offsetHeight - scrollport.clientHeight))}px`,
+  };
+  for (const [key, value] of Object.entries(values)) {
+    if (scrollport.style.getPropertyValue(key) !== value) scrollport.style.setProperty(key, value);
+  }
+}
+
 export const REVIEW_OVERLAY_INSET = 12;
 export const REVIEW_OVERLAY_FADE_SIZE = 12;
 export const REVIEW_COLLAPSED_RAIL_SIZE = 40;
@@ -147,6 +164,7 @@ export function useReviewOverlayGeometry(input: {
           if (scrollport !== null) resizeObserver?.observe(scrollport);
           observedScrollport = scrollport;
         }
+        if (scrollport !== null) protectNativeScrollbarBacking(scrollport);
         const stageBounds = stage.getBoundingClientRect();
         const next = measureReviewOverlayGeometry({
           stage: stageBounds,

@@ -1508,28 +1508,6 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
   browserName,
 }) => {
   await page.setViewportSize({ width: 1280, height: 900 });
-  await page.addInitScript(() => {
-    Object.defineProperty(navigator, "clipboard", {
-      configurable: true,
-      value: {
-        writeText: async (value: string) => {
-          const state = globalThis as typeof globalThis & {
-            __copiedPdfTargetLink?: string;
-            __rejectPdfTargetCopy?: boolean;
-            __holdPdfTargetCopy?: boolean;
-            __releasePdfTargetCopy?: () => void;
-            __pdfTargetCopyCount?: number;
-          };
-          state.__pdfTargetCopyCount = (state.__pdfTargetCopyCount ?? 0) + 1;
-          if (state.__rejectPdfTargetCopy) throw new Error("denied");
-          if (state.__holdPdfTargetCopy) {
-            await new Promise<void>((resolve) => { state.__releasePdfTargetCopy = resolve; });
-          }
-          state.__copiedPdfTargetLink = value;
-        },
-      },
-    });
-  });
   const documentRequests: Array<{ url: string; authorization?: string; cookie?: string }> = [];
   page.on("request", (request) => {
     if (!/\/document\//u.test(new URL(request.url()).pathname)) return;
@@ -1559,18 +1537,18 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
   const primaryMenu = page.getByRole("menu", { name: "Open Primary result, Page 2" });
   await expect(primaryMenu).toBeVisible();
   await expect(primaryMenu.getByRole("menuitem", { name: /Open in References/u })).toBeFocused();
-  await expect(primaryMenu.getByRole("menuitem")).toHaveCount(3);
+  await expect(primaryMenu.getByRole("menuitem")).toHaveCount(2);
   // R3/R4: a fixed-height destination snippet sits above text-labeled actions.
   const primarySnippet = primaryMenu.locator("[data-destination-snippet]");
   await expect(primarySnippet).toHaveCount(1);
   await expect(primarySnippet).toHaveAttribute("aria-hidden", "true");
-  await expect(primaryMenu.locator("[role='menuitem'] svg")).toHaveCount(3);
+  await expect(primaryMenu.locator("[role='menuitem'] svg")).toHaveCount(2);
   await expect(primaryMenu.getByRole("menuitem").first()).toHaveAttribute("aria-label", "Open in References");
   await expect(primaryMenu.getByRole("menuitem").nth(1)).toHaveAttribute("aria-label", "Open in main document");
   const copyTargetLink = primaryMenu.getByRole("menuitem", {
     name: "Copy link to exact destination on page 2",
   });
-  await expect(copyTargetLink).not.toHaveAttribute("title", "Copy exact destination link");
+  await expect(copyTargetLink).toHaveCount(0);
   await expect(primaryMenu.locator(".link-action-popover__page")).toHaveText("2");
   const firstMenuItemBounds = await primaryMenu.getByRole("menuitem").first().boundingBox();
   expect(firstMenuItemBounds).not.toBeNull();
@@ -1598,69 +1576,11 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
   expect(menuBounds!.y).toBeGreaterThanOrEqual(0);
   expect(menuBounds!.x + menuBounds!.width).toBeLessThanOrEqual(1280);
   expect(menuBounds!.y + menuBounds!.height).toBeLessThanOrEqual(900);
-  await page.evaluate(() => {
-    (globalThis as typeof globalThis & { __holdPdfTargetCopy?: boolean })
-      .__holdPdfTargetCopy = true;
-  });
-  await copyTargetLink.click();
-  await expect(copyTargetLink).toHaveAttribute("aria-busy", "true");
-  await copyTargetLink.click();
-  expect(await page.evaluate(() => (
-    globalThis as typeof globalThis & { __pdfTargetCopyCount?: number }
-  ).__pdfTargetCopyCount)).toBe(1);
-  await page.evaluate(() => {
-    const state = globalThis as typeof globalThis & {
-      __holdPdfTargetCopy?: boolean;
-      __releasePdfTargetCopy?: () => void;
-    };
-    state.__holdPdfTargetCopy = false;
-    state.__releasePdfTargetCopy?.();
-  });
-  await expect(primaryMenu).toHaveCount(0);
-  await expect(primaryLink).toBeFocused();
-  await expect.poll(() => currentPageText(page)).toBe("1 / 4");
-  expect(await page.evaluate(() => (
-    globalThis as typeof globalThis & { __copiedPdfTargetLink?: string }
-  ).__copiedPdfTargetLink)).toMatch(/#v=2&page=2&mode=/u);
-  await page.keyboard.press("Enter");
-  await expect(primaryMenu.getByRole("menuitem", { name: /Open in References/u })).toBeFocused();
   await page.keyboard.press("Tab");
   await expect(primaryMenu.getByRole("menuitem", { name: "Open in main document" })).toBeFocused();
-  await expect(primaryMenu).toBeVisible();
-  await page.keyboard.press("Tab");
-  await expect(copyTargetLink).toBeFocused();
-  await expect(primaryMenu).toBeVisible();
-  await page.evaluate(() => {
-    (globalThis as typeof globalThis & { __rejectPdfTargetCopy?: boolean })
-      .__rejectPdfTargetCopy = true;
-  });
-  await page.keyboard.press("Enter");
-  const fallbackLink = primaryMenu.getByRole("textbox", { name: "Placekeeper link" });
-  await expect(fallbackLink).toHaveValue(/#v=2&page=2&mode=/u);
-  await expect(copyTargetLink).toBeFocused();
-  const failedPopoverBounds = await page.locator("[data-link-action-popover]").boundingBox();
-  expect(failedPopoverBounds).not.toBeNull();
-  expect(failedPopoverBounds!.x).toBeGreaterThanOrEqual(0);
-  expect(failedPopoverBounds!.y).toBeGreaterThanOrEqual(0);
-  expect(failedPopoverBounds!.x + failedPopoverBounds!.width).toBeLessThanOrEqual(1280);
-  expect(failedPopoverBounds!.y + failedPopoverBounds!.height).toBeLessThanOrEqual(900);
-  await page.keyboard.press("Tab");
-  await expect(fallbackLink).toBeFocused();
-  await page.keyboard.press("Tab");
-  const retryCopy = primaryMenu.getByRole("button", { name: "Retry" });
-  await expect(retryCopy).toBeFocused();
-  await expect(primaryMenu).toBeVisible();
-  const failedTargetLink = await fallbackLink.inputValue();
-  await page.evaluate(() => {
-    (globalThis as typeof globalThis & { __rejectPdfTargetCopy?: boolean })
-      .__rejectPdfTargetCopy = false;
-  });
-  await retryCopy.click();
+  await page.keyboard.press("Escape");
   await expect(primaryMenu).toHaveCount(0);
   await expect(primaryLink).toBeFocused();
-  expect(await page.evaluate(() => (
-    globalThis as typeof globalThis & { __copiedPdfTargetLink?: string }
-  ).__copiedPdfTargetLink)).toBe(failedTargetLink);
 
   await openLinkInReferences(page, primaryLink);
   const workspace = page.locator("[data-review-workspace]");
@@ -1754,6 +1674,7 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
   await expect(primaryTab).toHaveAttribute("aria-selected", "true");
   await expect(primaryTab).toBeFocused();
   await expect(page.getByRole("tablist", { name: "Open references" }).getByRole("tab")).toHaveCount(2);
+  await expectReferenceReady(page, primaryTab);
   const referencePositionBeforeReflow = await Promise.all([
     referenceViewport.boundingBox(),
     primaryReferencePage.boundingBox(),
@@ -2683,9 +2604,7 @@ for (const mobile of [false, true]) {
       const pageThreeCopyLink = annotationsPanel.getByRole("button", {
         name: "Copy link to Page Note annotation on page 3",
       });
-      await expect(pageThreeCopyLink).toBeVisible();
-      await expect(pageThreeCopyLink).toBeEnabled();
-      await expect(pageThreeCopyLink).not.toHaveAttribute("title");
+      await expect(pageThreeCopyLink).toHaveCount(0);
 
       const back = page.getByRole(mobile ? "menuitem" : "button", { name: "Back in document history" });
       const forward = page.getByRole(mobile ? "menuitem" : "button", { name: "Forward in document history" });
@@ -2709,7 +2628,7 @@ for (const mobile of [false, true]) {
   });
 }
 
-test("keeps unsaved annotation links disabled until the item is portable", async ({ page }) => {
+test("omits copy-link controls for unsaved annotations", async ({ page }) => {
   const { sessionId } = await openFreshProductionFixture(
     page,
     plainTextPdf,
@@ -2737,12 +2656,7 @@ test("keeps unsaved annotation links disabled until the item is portable", async
   const copyLink = page.locator('#workspace-panel-annotations').getByRole("button", {
     name: "Copy link to Page Note annotation on page 1",
   });
-  await expect(copyLink).toBeVisible();
-  await expect(copyLink).toBeDisabled();
-  await expect(copyLink).toHaveAttribute(
-    "title",
-    "Save annotation before copying its link",
-  );
+  await expect(copyLink).toHaveCount(0);
 });
 
 for (const seededAnnotation of [false, true]) {
@@ -2809,62 +2723,16 @@ for (const seededAnnotation of [false, true]) {
   });
 }
 
-test("settles tray copy actions without selection or tooltip flashes", async ({ page }) => {
-  await page.addInitScript(() => {
-    const copyState = globalThis as typeof globalThis & {
-      __holdTrayCopy?: boolean;
-      __releaseTrayCopy?: () => void;
-    };
-    copyState.__holdTrayCopy = true;
-    Object.defineProperty(navigator, "clipboard", {
-      configurable: true,
-      value: {
-        writeText: async () => {
-          if (!copyState.__holdTrayCopy) return;
-          await new Promise<void>((resolve) => { copyState.__releaseTrayCopy = resolve; });
-        },
-      },
-    });
-  });
+test("keeps annotation selection and outline focus without copy-link controls", async ({ page }) => {
   await openFreshProductionFixture(
     page,
     annotatedReferencePdf,
-    "Tray copy focus launch failed",
+    "Tray selection launch failed",
   );
 
   await openAnnotationsWorkspace(page);
   const annotationRow = page.locator('[data-review-item]').first();
-  const annotationId = await annotationRow.getAttribute('data-review-item');
-  if (!annotationId) throw new Error('Owned annotation row has no stable id.');
-  const annotationMark = page.locator(`[data-owned-mark][data-review-id="${annotationId}"]`);
-  const annotationCopy = annotationRow.getByRole('button', {
-    name: 'Copy link to Delete annotation on page 1',
-  });
-  await expect(annotationCopy).toBeEnabled();
-  await expect(annotationCopy).not.toHaveAttribute('title');
-  await annotationRow.hover();
-  await annotationCopy.click();
-  await expect(annotationCopy.locator('..')).toHaveAttribute('data-copy-link-status', 'pending');
-  await expect(annotationCopy).toBeEnabled();
-  await expect(annotationCopy).toBeFocused();
-  await page.mouse.move(0, 0);
-  await expect(annotationCopy).toBeFocused();
-  await expect(annotationRow).not.toHaveAttribute('data-active', 'true');
-  await expect(annotationRow).toHaveAttribute('data-corresponding', 'false');
-  await expect(annotationMark).not.toHaveAttribute('data-corresponding', 'true');
-  await expect(annotationRow).toHaveCSS('outline-style', 'none');
-  await page.evaluate(() => {
-    const copyState = globalThis as typeof globalThis & {
-      __holdTrayCopy?: boolean;
-      __releaseTrayCopy?: () => void;
-    };
-    copyState.__holdTrayCopy = false;
-    copyState.__releaseTrayCopy?.();
-  });
-  await expect(annotationCopy.locator('..')).toHaveAttribute('data-copy-link-status', 'success');
-  await expect(annotationCopy).not.toBeFocused();
-  await expect(annotationCopy.locator('.row-action-group__direct')).toHaveCount(0);
-  await expect(annotationRow.locator('.row-action-group__direct')).toHaveCSS('opacity', '0');
+  await expect(annotationRow.locator('.copy-link-control')).toHaveCount(0);
 
   await annotationRow.locator('.annotation-item__content').click();
   await page.getByLabel('Current page').hover();
@@ -2892,45 +2760,8 @@ test("settles tray copy actions without selection or tooltip flashes", async ({ 
   const overview = page.getByRole('button', { name: 'Overview, Page 2', exact: true });
   const outlineRow = overview.locator('..');
   await overview.focus();
-  const outlineCopy = outlineRow.getByRole('button', {
-    name: 'Copy exact destination link for Overview, Page 2',
-  });
-  await expect(outlineCopy).not.toHaveAttribute('title');
-  await page.evaluate(() => {
-    const copyState = globalThis as typeof globalThis & {
-      __holdTrayCopy?: boolean;
-      __releaseTrayCopy?: () => void;
-    };
-    copyState.__holdTrayCopy = true;
-    delete copyState.__releaseTrayCopy;
-  });
-  await outlineRow.hover();
-  await outlineCopy.click();
-  await expect(outlineCopy.locator('..')).toHaveAttribute('data-copy-link-status', 'pending');
-  await expect(outlineCopy).toBeEnabled();
-  await expect(outlineCopy).toBeFocused();
-  await page.mouse.move(0, 0);
-  await expect(outlineCopy).toBeFocused();
-  await page.evaluate(() => {
-    const copyState = globalThis as typeof globalThis & {
-      __holdTrayCopy?: boolean;
-      __releaseTrayCopy?: () => void;
-    };
-    copyState.__holdTrayCopy = false;
-    copyState.__releaseTrayCopy?.();
-  });
-  await expect(outlineCopy.locator('..')).toHaveAttribute('data-copy-link-status', 'success');
-  await expect(outlineCopy).not.toBeFocused();
-  await expect(outlineRow).not.toHaveAttribute('data-current', 'true');
-  await expect(outlineRow).toHaveCSS('outline-style', 'none');
-  const outlineActions = outlineRow.locator('.row-action-group__direct');
-  await expect(outlineActions).toHaveCSS('opacity', '0');
-
-  await outlineCopy.focus();
-  await outlineCopy.press('Enter');
-  await expect(outlineCopy.locator('..')).toHaveAttribute('data-copy-link-status', 'success');
-  await expect(outlineCopy).toBeFocused();
-  await expect(outlineActions).toHaveCSS('opacity', '1');
+  await expect(outlineRow.locator('.copy-link-control')).toHaveCount(0);
+  await expect(overview).toBeFocused();
 });
 
 test("switches and sends references from the right-docked workspace", async ({ page }) => {
@@ -3191,10 +3022,10 @@ test("keeps compound reference actions touch sized for coarse pointers", async (
     await expect(outlineActions).toHaveAttribute("aria-expanded", "true");
     const outlineMenu = page.getByRole("menu", { name: "Actions for Details, Page 3" });
     await expect(outlineMenu).toHaveAttribute("id", controlledMenuId ?? "");
-    await expect(outlineMenu.getByRole("menuitem")).toHaveCount(2);
+    await expect(outlineMenu.getByRole("menuitem")).toHaveCount(1);
     await expect(outlineMenu.getByRole("menuitem", {
       name: "Copy exact destination link for Details, Page 3",
-    }).locator(".lucide-link")).toBeVisible();
+    })).toHaveCount(0);
     const openDetails = outlineMenu.getByRole("menuitem", {
       name: "Open Details, Page 3 in References",
     });
@@ -3485,7 +3316,7 @@ test("keeps outline and rejected link metadata inert inside the installed local 
   const hostileDirectActions = hostileRow.locator(".row-action-group__direct");
   await expect(hostileDirectActions).toHaveCSS("display", "flex");
   await expect(hostileDirectActions).toHaveCSS("opacity", "1");
-  await expect(hostileDirectActions.getByRole("button")).toHaveCount(2);
+  await expect(hostileDirectActions.getByRole("button")).toHaveCount(1);
   await expect(hostileRow.locator(".row-action-group__secondary")).toHaveCSS("display", "none");
 
   const nestedLongLabelGeometry = await hostileRow.evaluate((row) => {
@@ -3538,8 +3369,8 @@ test("keeps outline and rejected link metadata inert inside the installed local 
     };
   });
   expect(nestedLongLabelGeometry.actionRightInset).toBeCloseTo(4, 0);
-  // Two 26px outline actions with a 2px gap.
-  expect(nestedLongLabelGeometry.actionWidth).toBe(54);
+  // The remaining Open in References action is 26px wide.
+  expect(nestedLongLabelGeometry.actionWidth).toBe(26);
   expect(nestedLongLabelGeometry).toMatchObject({
     contained: true,
     noHorizontalOverflow: true,

@@ -5,7 +5,7 @@ import { InstalledCandidate } from './electron-installed-harness.js';
 import { requestControl } from '../../apps/service/src/host/launch-control.js';
 import { decodePlacekeeperLink, encodePlacekeeperLink } from '../../packages/core/src/placekeeper-link.js';
 
-test('focused native links settle in the existing reader before task activation and preserve public copy controls', async () => {
+test('focused native links settle in the existing reader before task activation without showing copy-link controls', async () => {
     test.setTimeout(90_000);
     const candidate = await InstalledCandidate.create('reference-navigation.pdf');
     const socket = join(candidate.root, 'control.sock');
@@ -40,13 +40,12 @@ test('focused native links settle in the existing reader before task activation 
             return result.kind === 'context' ? result.result.status : 'unexpected';
         }).toBe('current');
         await page.locator('[data-review-chrome]').hover();
-        await expect(page.getByRole('button', { name: 'Copy link to current PDF location', exact: true })).toBeVisible();
+        await expect(page.getByRole('button', { name: 'Copy link to current PDF location', exact: true })).toHaveCount(0);
         const copied = await page.evaluate(async () => {
             const shell = window.placekeeper;
             return shell.createLink(await shell.identity(), { kind: 'page', page: 3 });
         });
         expect(decodePlacekeeperLink(copied).location).toEqual(location);
-        await page.getByRole('button', { name: 'Copy link to current PDF location', exact: true }).click();
         await expect(page.getByRole('button', { name: 'Back in document history', exact: true })).toBeEnabled();
     } catch (error) { primaryFailed = true; throw error; }
     finally {

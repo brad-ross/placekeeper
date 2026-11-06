@@ -862,3 +862,19 @@ it('applies host layout when the chooser arrives after initial host context', as
     expect(f.controls.dataset.mode).toBe('chooser');
     await f.shell.teardown();
 });
+
+it('opens web links through the host only while the extension reader is current', async () => {
+    const f = fixture();
+    const openLink = vi.fn(async (_input: { url: string }): Promise<{ isError?: boolean }> => ({}));
+    Object.assign(f.app, { getHostCapabilities: () => ({ openLinks: {} }), openLink });
+    await f.shell.receive(active());
+    const port = host.options.at(-1)!;
+    await port.openExternalUrl('https://EXAMPLE.COM/paper');
+    expect(openLink).toHaveBeenCalledWith({ url: 'https://example.com/paper' });
+    await expect(port.openExternalUrl('file:///tmp/paper.pdf')).rejects.toThrow('unavailable');
+    openLink.mockResolvedValueOnce({ isError: true });
+    await expect(port.openExternalUrl('https://example.com/paper')).rejects.toThrow('could not open');
+    await f.shell.teardown();
+    await expect(port.openExternalUrl('https://example.com/paper')).rejects.toThrow('unavailable');
+    expect(openLink).toHaveBeenCalledTimes(2);
+});

@@ -1,9 +1,11 @@
-import { contextBridge, ipcRenderer } from 'electron';
+import { contextBridge, ipcRenderer, webFrame } from 'electron';
 import type { ElectronShellBridge } from '../../../packages/core/src/electron-shell-protocol.js';
 const bridge: ElectronShellBridge = {
+    windowChromeMetrics: () => ({ platform: process.platform, scale: webFrame.getZoomFactor() }),
     sourceEndpoint: (identity, token, endpoint) => ipcRenderer.invoke('review:source-endpoint', identity, token, endpoint),
     identity: () => ipcRenderer.invoke('review:identity'),
     request: (identity, message) => ipcRenderer.invoke('review:request', identity, message),
+    openExternalUrl: (identity, url) => ipcRenderer.invoke('review:open-external-url', identity, url),
     createLink: (identity, location) => ipcRenderer.invoke('review:create-link', identity, location),
     focusFailed: (identity, token) => ipcRenderer.invoke('review:focus-failed', identity, token),
     requestClose: identity => ipcRenderer.invoke('review:request-close', identity),

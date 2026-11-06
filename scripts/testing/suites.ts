@@ -306,6 +306,9 @@ export const suites: Record<string, TestStage[]> = {
         "apps/web/test/owned-mark-hit-test.test.ts",
         "apps/web/test/reference-pdf-viewport.test.ts",
         "apps/web/test/viewer-interaction-events.test.ts",
+        "apps/web/test/pdf-external-link.test.ts",
+        "apps/web/test/pdf-link-control.test.tsx",
+        "apps/web/test/external-url-runtime.test.ts",
         "apps/web/test/app-interactions.test.ts",
         "apps/web/test/existing-annotations.test.ts"
       ]
@@ -412,6 +415,7 @@ export const suites: Record<string, TestStage[]> = {
         "test/acceptance/host-raster-rotation.spec.ts",
         "test/acceptance/reloadable-links.spec.ts",
         "test/acceptance/legible-link-destinations.spec.ts",
+        "test/acceptance/external-pdf-links.spec.ts",
         "test/acceptance/interface-followup.spec.ts",
         "test/acceptance/neutral-workspace-followup.spec.ts",
         "test/acceptance/workspace-row-interactions.spec.ts",
@@ -451,6 +455,7 @@ export const suites: Record<string, TestStage[]> = {
         "test/acceptance/host-raster-rotation.spec.ts",
         "test/acceptance/reloadable-links.spec.ts",
         "test/acceptance/legible-link-destinations.spec.ts",
+        "test/acceptance/external-pdf-links.spec.ts",
         "test/acceptance/interface-followup.spec.ts",
         "test/acceptance/neutral-workspace-followup.spec.ts",
         "test/acceptance/workspace-row-interactions.spec.ts",
@@ -601,6 +606,7 @@ export const suites: Record<string, TestStage[]> = {
         "test/acceptance/host-raster-rotation.spec.ts",
         "test/acceptance/reloadable-links.spec.ts",
         "test/acceptance/legible-link-destinations.spec.ts",
+        "test/acceptance/external-pdf-links.spec.ts",
         "test/acceptance/interface-followup.spec.ts",
         "test/acceptance/neutral-workspace-followup.spec.ts",
         "test/acceptance/workspace-row-interactions.spec.ts",
@@ -637,6 +643,7 @@ export const suites: Record<string, TestStage[]> = {
         "test/acceptance/host-raster-rotation.spec.ts",
         "test/acceptance/reloadable-links.spec.ts",
         "test/acceptance/legible-link-destinations.spec.ts",
+        "test/acceptance/external-pdf-links.spec.ts",
         "test/acceptance/interface-followup.spec.ts",
         "test/acceptance/neutral-workspace-followup.spec.ts",
         "test/acceptance/workspace-row-interactions.spec.ts",
@@ -682,6 +689,11 @@ export const suites: Record<string, TestStage[]> = {
 /** Canonical CI is deliberately narrower than all repository tests; includes the updater's .mjs tests. */
 export const ciUnitFiles = [
   "scripts/extension-candidate/candidate.test.ts",
+  "packages/core/test/external-web-url.test.ts",
+  "apps/web/test/pdf-external-link.test.ts",
+  "apps/web/test/pdf-link-control.test.tsx",
+  "apps/web/test/external-url-runtime.test.ts",
+  "apps/vscode/test/external-link.test.ts",
   "test/support/debian-package-identity.test.ts",
   "packages/core/test/desktop-release.test.ts", "apps/electron/test/update-check.test.ts",
   "apps/electron/test/window-retirement.test.ts",

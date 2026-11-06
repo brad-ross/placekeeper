@@ -526,3 +526,10 @@
 .review-workspace__panel--search {
   overflow: hidden;
 }
+
+/* With no reference tray to reserve, the workspace and reference opener share
+   the same bottom inset. */
+.review-layout[data-bottom-surface-open="false"]
+  .review-tools-workspace[data-workspace-presentation="right"] {
+  bottom: var(--review-overlay-inset, 12px);
+}

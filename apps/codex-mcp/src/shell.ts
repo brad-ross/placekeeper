@@ -2,6 +2,7 @@ import './extension-presentation.css';
 import { OpenAIExtensions } from '@openai/mcp-extensions/app';
 import { ExtensionShell } from "./extension-shell.js";
 import { EXTENSION_META_KEY } from "../../../packages/core/src/extension-protocol.js";
+import { externalWebUrl } from "../../../packages/core/src/external-web-url.js";
 import { createCodexHostRuntime } from "../../web/src/host/codex-runtime.js";
 import { mountCodexProductionReview } from "../../web/src/codex-entry.js";
 import type { HostRuntimeInvalidation } from "../../web/src/host/runtime.js";
@@ -185,6 +186,12 @@ function mountPresentation(response: Extract<CodexAppResponse, { status: "active
     verifiedProbes.clear(); armOldAttempt(admissionOldGrant); admissionOldGrant = undefined; recordDiagnostic("active");
     const runtime = createCodexHostRuntime({ runtimeId: active.runtimeId,
       call: (method, value) => payload(method, value, attempt),
+      async openExternalUrl(value) {
+        const url = externalWebUrl(value);
+        if (attempt !== incarnation || active === undefined || url === null || app.getHostCapabilities()?.openLinks === undefined) throw new Error("Host link opening is unavailable.");
+        const result = await app.openLink({ url });
+        if (result.isError === true) throw new Error("The host could not open this web link.");
+      },
       subscribeInvalidations(listener) { runtimeInvalidations.add(listener); return () => runtimeInvalidations.delete(listener); },
     });
     setConnectionState("connected");

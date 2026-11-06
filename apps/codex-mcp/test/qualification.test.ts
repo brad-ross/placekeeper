@@ -103,7 +103,8 @@ async function qualificationShellFixture(withControl: boolean, action: "bridge-c
   const calls: string[] = [];
   class MockApp extends EventTarget {
     getHostContext = () => ({});
-    getHostCapabilities = () => ({});
+    getHostCapabilities = vi.fn<() => { openLinks?: object }>(() => ({ openLinks: {} }));
+    openLink = vi.fn(async (_input: { url: string }): Promise<{ isError?: boolean }> => ({}));
     ontoolresult: ((result: unknown) => void) | undefined;
     onteardown: (() => Promise<unknown>) | undefined;
     onhostcontextchanged: unknown;
@@ -467,4 +468,22 @@ it("a picker SDK response after bridge disconnect cannot resurrect authority", a
   expect(await pending).toMatchObject({ category: "stale-reply" });
   expect(f.status.textContent).toBe(closed);
   await expect(f.port.call("bootstrap", {})).rejects.toMatchObject({ category: "stale-reply" });
+});
+
+it("opens web URLs through the current shell host capability and exposes denial", async () => {
+  const f = await qualificationShellFixture(false);
+  expect(f.app.openLink).not.toHaveBeenCalled();
+  await f.port.openExternalUrl!("https://EXAMPLE.COM/a?q=1#part");
+  expect(f.app.openLink).toHaveBeenCalledWith({ url: "https://example.com/a?q=1#part" });
+  await expect(f.port.openExternalUrl!("file:///tmp/a")).rejects.toThrow();
+  f.app.getHostCapabilities.mockReturnValueOnce({});
+  await expect(f.port.openExternalUrl!("https://example.com")).rejects.toThrow("unavailable");
+  expect(f.app.openLink).toHaveBeenCalledTimes(1);
+  f.app.openLink.mockResolvedValueOnce({ isError: true });
+  await expect(f.port.openExternalUrl!("https://example.com")).rejects.toThrow("could not open");
+  f.app.openLink.mockRejectedValueOnce(new Error("transport failed"));
+  await expect(f.port.openExternalUrl!("https://example.com")).rejects.toThrow("transport failed");
+  await f.app.onteardown!();
+  await expect(f.port.openExternalUrl!("https://example.com")).rejects.toThrow("unavailable");
+  expect(f.calls).not.toContain("openExternalUrl");
 });
