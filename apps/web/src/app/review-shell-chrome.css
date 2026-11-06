@@ -548,3 +548,11 @@ body:has(.electron-review-shell) .top-bar-menu__surface {
 .electron-review-shell [data-review-chrome] :is(input, textarea, [contenteditable="true"]) {
   user-select: text;
 }
+
+/* macOS native controls have fixed physical widths. Reserve their space from
+   interface scale, not asynchronously changing titlebar-area env rectangles. */
+.electron-review-shell[data-native-platform="darwin"] .review-chrome {
+  --review-chrome-height: 52px;
+  padding-left: calc(32px + 60px / var(--electron-interface-scale, 1));
+  padding-right: 16px;
+}

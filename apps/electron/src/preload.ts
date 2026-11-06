@@ -1,6 +1,7 @@
-import { contextBridge, ipcRenderer } from 'electron';
+import { contextBridge, ipcRenderer, webFrame } from 'electron';
 import type { ElectronShellBridge } from '../../../packages/core/src/electron-shell-protocol.js';
 const bridge: ElectronShellBridge = {
+    windowChromeMetrics: () => ({ platform: process.platform, scale: webFrame.getZoomFactor() }),
     sourceEndpoint: (identity, token, endpoint) => ipcRenderer.invoke('review:source-endpoint', identity, token, endpoint),
     identity: () => ipcRenderer.invoke('review:identity'),
     request: (identity, message) => ipcRenderer.invoke('review:request', identity, message),

@@ -13,6 +13,15 @@ const windowControlsOverlay = (navigator as Navigator & {
     windowControlsOverlay?: EventTarget & { readonly visible: boolean; getTitlebarAreaRect(): DOMRect };
 }).windowControlsOverlay;
 function ElectronReview({ bridge, identity }: { bridge: ElectronShellBridge; identity: ElectronShellIdentity & { presentation?: { pageIndex: number; zoom: number } } }) {
+    const [chromeMetrics, setChromeMetrics] = useState(() => bridge.windowChromeMetrics?.());
+    useLayoutEffect(() => {
+        const update = () => {
+            const next = bridge.windowChromeMetrics?.();
+            setChromeMetrics(current => current?.scale === next?.scale && current?.platform === next?.platform ? current : next);
+        };
+        window.addEventListener('resize', update);
+        return () => window.removeEventListener('resize', update);
+    }, [bridge]);
     const [toolbarHovered, setToolbarHovered] = useState(false);
     const [overlayVisible, setOverlayVisible] = useState(() => windowControlsOverlay?.visible === true);
     useLayoutEffect(() => {
@@ -75,7 +84,7 @@ function ElectronReview({ bridge, identity }: { bridge: ElectronShellBridge; ide
         return () => window.removeEventListener('beforeunload', beforeUnload);
     }, [bridge, identity]);
     useEffect(() => { const dispose = () => { focusedNavigation.dispose(); runtime.dispose(); }; window.addEventListener('pagehide', dispose, { once: true }); return () => window.removeEventListener('pagehide', dispose); }, [runtime]);
-    return <div className="electron-review-shell" data-window-controls-overlay={overlayVisible} data-toolbar-hovered={toolbarHovered} inert={closing}>
+    return <div className="electron-review-shell" data-native-platform={chromeMetrics?.platform} style={{ '--electron-interface-scale': chromeMetrics?.scale ?? 1 } as React.CSSProperties} data-window-controls-overlay={overlayVisible} data-toolbar-hovered={toolbarHovered} inert={closing}>
         <RuntimeProductionReviewApp runtime={runtime} loadingDocumentTitle="Opening PDF"
             {...(identity.presentation ? { initialPresentation: identity.presentation } : {})}
             onPresentationChange={state => { void bridge.presentation(identity, state); }}
