@@ -283,6 +283,7 @@ Implementation began before the user requested this plan and was stopped. These 
 - **Goal / requirements:** Demonstrate R1–R10 together and preserve existing supported hosts.
 - **Files:** Qualification record, integration tests, user/plugin documentation, release/build metadata only as required by repository conventions.
 - **Approach:** Run the entire lifecycle on one semantic review/item, include a peer chat, and inspect both transient UI and canonical saved state. Record exact package/build and host capabilities. Remove abandoned partial approaches, duplicate runtime paths, unused dependencies, and temporary probes.
+- **Installed-host close fallback (November 5):** Native panel removal cancels outgoing teardown requests before ownership release. Provide an explicit in-reader Close review action that confirms release before requesting host teardown; preserve ownership guards and document the native-close limitation. Qualify both the fallback and the failed native-close case separately.
 - **Test scenarios:** Direct open → select/draft → annotate/save → collapse → sleep → resume → ask/search/scroll → external PDF update → remove context → remount; repeat for host-resource and local-path sources. Exercise existing hook launch and explicit revoke, read-only autosave to a chosen local copy, and two-chat ownership. A separate host download is optional and qualified only on hosts advertising it.
 - **Verification:** Verification Contract below; no broad success claim while installed-host cases remain unverified.
 

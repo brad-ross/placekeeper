@@ -245,6 +245,18 @@ describe("app-owned extension presentations", () => {
     expect(await f.manager.handle({ ...request(a.presentation, "bootstrap"), capability: "x".repeat(43) })).toMatchObject({ status: "denied" });
   });
 
+  it("acknowledges a lost revoke reply without granting access or revoking a rotated owner", async () => {
+    const f = await fixture(), first = await opened(f.manager, {});
+    const second = active(await f.manager.resume(first.grant, randomUUID()));
+    expect(await f.manager.dispatch({ action: 'revoke', grant: first.grant })).toEqual({ status: 'unavailable' });
+    expect((await f.manager.handle(request(second.presentation, 'renew'))).status).toBe('ok');
+    expect(await f.manager.dispatch({ action: 'revoke', grant: second.grant })).toEqual({ status: 'closed' });
+    f.advance(10_000);
+    expect(await f.manager.dispatch({ action: 'revoke', grant: second.grant })).toEqual({ status: 'closed' });
+    expect(await f.manager.resume(second.grant, randomUUID())).toEqual({ status: 'unavailable' });
+    f.advance(290_001);
+    expect(await f.manager.dispatch({ action: 'revoke', grant: second.grant })).toEqual({ status: 'unavailable' });
+  });
   it("explicit close revokes resumption while idle grant expiry releases suspended records", async () => {
     const f = await fixture(), a = await opened(f.manager, { pdfPath: f.pdfPath });
     expect(await f.manager.revoke(a.grant)).toBe(true);

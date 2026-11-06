@@ -219,6 +219,7 @@ export class ExtensionShell {
                 try { const result = await this.app.requestDisplayMode({ mode: 'fullscreen' }); this.hostContextChanged({ displayMode: result.mode }); }
                 catch { this.#show('This host could not expand the reader. Open Placekeeper in the conversation panel to edit.'); }
             });
+            this.#closeControl();
             this.hostContextChanged(this.app.getHostContext?.() ?? {}, false);
             this.#mount();
             if (this.#host) { this.#button('Refresh PDF', () => this.#continue()); this.#button('Save now', () => this.#saveHost(true)); void this.#saveHost(); if (this.#hostRefreshPending) queueMicrotask(() => { void this.#continue().catch(() => undefined); }); }
@@ -618,6 +619,31 @@ export class ExtensionShell {
     wake() { void this.#refreshSettings().catch(() => undefined); if (this.#connected && !document.hidden) this.#context?.retry(); this.#liveness?.wake(); }
     disconnected() { if (this.ownsPanel)
         this.#ended(); }
+    #closeControl() {
+        const button = document.createElement('button');
+        button.textContent = 'Close review';
+        let closingGrant: string | undefined;
+        const notice = (text: string) => { this.status.textContent = text; this.status.hidden = false; };
+        button.onclick = () => {
+            if (button.disabled) return;
+            if (this.#resume || this.#resumeOperation) { this.#show('Reconnecting to Placekeeper. Try Close review again when the connection settles.'); return; }
+            if (this.#closed && !closingGrant) return;
+            closingGrant ??= this.#grant;
+            button.disabled = true;
+            void (async () => {
+                const released = this.#closed
+                    ? closingGrant && (await this.#request({ action: 'revoke', grant: closingGrant })).status === 'closed'
+                    : await this.teardown();
+                if (!released) throw Error('Release not confirmed');
+                closingGrant = undefined;
+                this.controls.replaceChildren();
+                notice('Review closed. Your protected work is retained. Reopen the PDF to continue.');
+                await this.app.requestTeardown().catch(() => undefined);
+            })().catch(() => notice('Placekeeper could not confirm that the review was released. Keep this panel open and try Close review again. Your protected work is retained.'))
+                .finally(() => { button.disabled = false; });
+        };
+        this.controls.append(button);
+    }
     async teardown() {
         this.#closed = true;
         this.#connected = false;
@@ -629,7 +655,7 @@ export class ExtensionShell {
         this.#host = undefined;
         // Release ownership while the host still accepts requests. Resource
         // unsubscribe may never reply once the host starts removing the panel.
-        const revoked = grant ? this.#request({ action: 'revoke', grant }).catch(() => undefined) : Promise.resolve();
+        const revoked = grant ? this.#request({ action: 'revoke', grant }).then(result => result.status === 'closed', () => false) : Promise.resolve(true);
         try {
             this.#liveness?.stop();
             this.#readerTools?.dispose();
@@ -640,5 +666,6 @@ export class ExtensionShell {
             void host?.dispose().catch(() => undefined);
             await revoked;
         }
+        return revoked;
     }
 }

@@ -29,6 +29,7 @@ export class ExtensionRuntimeManager {
   readonly #hostSessions=new Set<string>();
   readonly #host:HostResourcePersistence;
   readonly #records=new Map<string,RecordState>();
+  readonly #revoked=new Map<string,number>();
   readonly #panels=new Map<string,RecordState>();
   readonly #offers=new Map<string,Offer>();
   readonly #receipts=new Map<string,{operationId:string;action:string;expires:number;record:RecordState;result:ExtensionResult}>();
@@ -238,8 +239,8 @@ export class ExtensionRuntimeManager {
   #scope(r:RecordState):CodexActiveScope{return {sessionId:r.sessionId,runtimeId:r.active!.runtimeId,attemptId:r.active!.attemptId,generation:r.active!.generation};}
   #suspend(r:RecordState){if(r.active){this.#backend.detach(r.active.runtimeId);this.#panels.delete(r.active.runtimeId);}delete r.active;delete r.lease;}
   #remove(r:RecordState){this.#suspend(r);this.#records.delete(digestSecretHex(r.grant));for(const [key,receipt]of this.#receipts)if(receipt.record===r)this.#receipts.delete(key);}
-  #sweep(){const now=this.#now();for(const [key,t]of this.#hostTickets)if(t.expires<=now)this.#hostTickets.delete(key);void this.#host.sweep();for(const r of this.#records.values()){if(r.expires<=now)this.#remove(r);else if(r.lease!==undefined&&r.lease<=now)this.#suspend(r);}for(const [key,o]of this.#offers)if(o.expires<=now)this.#offers.delete(key);for(const [key,r]of this.#receipts)if(r.expires<=now)this.#receipts.delete(key);}
-  async revoke(grant:string):Promise<boolean>{return this.#serial(async()=>{this.#sweep();const r=this.#records.get(digestSecretHex(grant));if(!r)return false;this.#remove(r);return true;});}
+  #sweep(){const now=this.#now();for(const [key,expires]of this.#revoked)if(expires<=now)this.#revoked.delete(key);for(const [key,t]of this.#hostTickets)if(t.expires<=now)this.#hostTickets.delete(key);void this.#host.sweep();for(const r of this.#records.values()){if(r.expires<=now)this.#remove(r);else if(r.lease!==undefined&&r.lease<=now)this.#suspend(r);}for(const [key,o]of this.#offers)if(o.expires<=now)this.#offers.delete(key);for(const [key,r]of this.#receipts)if(r.expires<=now)this.#receipts.delete(key);}
+  async revoke(grant:string):Promise<boolean>{return this.#serial(async()=>{this.#sweep();const key=digestSecretHex(grant);if(this.#revoked.has(key))return true;const r=this.#records.get(key);if(!r)return false;this.#remove(r);this.#revoked.set(key,this.#now()+5*60_000);return true;});}
   handle(raw:unknown):Promise<CodexAppResponse>{const result=this.#handle(raw).catch(()=>({status:'denied',reason:'unavailable'} as const));this.#requests.add(result);void result.finally(()=>this.#requests.delete(result));return result;}
   async #handle(raw:unknown):Promise<CodexAppResponse>{
     this.#sweep();const request=parseCodexAppRequest(raw);if(!request||request.authority!=='presentation')return {status:'denied',reason:'invalid'};
@@ -255,5 +256,5 @@ export class ExtensionRuntimeManager {
   activityCount(){this.#sweep();return this.#panels.size;}
   upgradeCovered(has:(id:string)=>boolean){return [...this.#panels.keys()].every(id=>has(`codex:${id}`));}
   async closeForUpgrade(_status:UpgradeReviewStatus){await this.close();}
-  async close(){this.#closing=true;await this.#host.close();await this.#tail;await Promise.allSettled([...this.#requests]);await this.#host.close();this.#hostTickets.clear();this.#hostSessions.clear();clearInterval(this.#timer);this.#unsubscribe();this.#unsubscribeEnd();for(const r of this.#records.values())this.#remove(r);this.#offers.clear();this.#receipts.clear();}
+  async close(){this.#closing=true;await this.#host.close();await this.#tail;await Promise.allSettled([...this.#requests]);await this.#host.close();this.#hostTickets.clear();this.#hostSessions.clear();clearInterval(this.#timer);this.#unsubscribe();this.#unsubscribeEnd();for(const r of this.#records.values())this.#remove(r);this.#offers.clear();this.#receipts.clear();this.#revoked.clear();}
 }

@@ -20,6 +20,48 @@ function fixture(handler: (request: any) => Promise<any> = async () => reply({ s
 }
 beforeEach(() => { vi.useFakeTimers(); vi.stubGlobal('document', { hidden: false, createElement: () => ({ append: vi.fn(), replaceChildren: vi.fn(), setAttribute: vi.fn() }), createTextNode: (value: string) => ({ textContent: value }) }); host.options.length = 0; host.mounts.length = 0; host.onMount = undefined; host.unmount.mockClear(); });
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
+it('does not close with an unresolved grant rotation after a lost resume reply', async () => {
+    const f = fixture(async request => {
+        if (request.action === 'resume') throw Error('lost rotation reply');
+        if (request.action === 'app') return reply({ status: 'denied', reason: 'expired' });
+        return reply({ status: 'closed' });
+    });
+    await f.shell.receive(active()); await vi.advanceTimersByTimeAsync(0);
+    const close = f.controls.append.mock.calls.map(([button]) => button).find(button => button.textContent === 'Close review');
+    close.onclick(); await vi.advanceTimersByTimeAsync(0);
+    expect(f.calls.filter(c => c.action === 'revoke')).toHaveLength(0);
+    expect(f.status.textContent).toContain('connection settles');
+    await f.shell.teardown();
+});
+it('closes the host panel only after ownership release is acknowledged', async () => {
+    const released = deferred();
+    const f = fixture(async request => request.action === 'revoke' ? released.promise : reply({ status: 'ok', payload: {} }));
+    const requestTeardown = vi.fn(async () => {});
+    Object.assign(f.app, { requestTeardown });
+    await f.shell.receive(active());
+    const close = f.controls.append.mock.calls.map(([button]) => button).find(button => button.textContent === 'Close review');
+    expect(close).toBeDefined();
+    close.onclick(); await vi.advanceTimersByTimeAsync(0);
+    expect(f.root.inert).toBe(true);
+    expect(requestTeardown).not.toHaveBeenCalled();
+    released.resolve(reply({ status: 'closed' })); await vi.advanceTimersByTimeAsync(0);
+    expect(requestTeardown).toHaveBeenCalledOnce();
+    expect(f.calls.filter(c => c.action === 'revoke')).toHaveLength(1);
+});
+it('keeps the panel open and permits retry when explicit ownership release fails', async () => {
+    let attempts = 0;
+    const f = fixture(async request => { if (request.action === 'revoke') { if (++attempts === 1) throw Error('offline'); return reply({ status: 'closed' }); } return reply({ status: 'ok', payload: {} }); });
+    const requestTeardown = vi.fn(async () => {});
+    Object.assign(f.app, { requestTeardown });
+    await f.shell.receive(active());
+    const close = f.controls.append.mock.calls.map(([button]) => button).find(button => button.textContent === 'Close review');
+    expect(close).toBeDefined();
+    close.onclick(); await vi.advanceTimersByTimeAsync(0);
+    expect(requestTeardown).not.toHaveBeenCalled();
+    expect(f.status.textContent).toContain('could not confirm');
+    close.onclick(); await vi.advanceTimersByTimeAsync(0);
+    expect(requestTeardown).toHaveBeenCalledOnce();
+});
 it('exposes only bounded live-tool registration diagnostics on the reader root', async () => {
     (document as any).modelContext = { registerTool: () => { throw new TypeError('private document details'); }, unregisterTool: vi.fn() };
     const f = fixture(); await f.shell.receive(active());
