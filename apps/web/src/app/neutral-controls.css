@@ -494,6 +494,7 @@
   height: 16px;
 }
 
+/* A quiet notice, using the same surface and icon controls as review menus. */
 .external-link-recovery {
   position: fixed;
   z-index: 1000;
@@ -501,14 +502,33 @@
   bottom: 16px;
   width: min(360px, calc(100vw - 32px));
   box-sizing: border-box;
-  padding: 12px;
-  border: 1px solid var(--pk-border, #bbb);
-  border-radius: 8px;
-  background: var(--pk-surface, #fff);
-  color: var(--pk-ink, #222);
-  box-shadow: 0 4px 20px #0002;
+  padding: 10px 12px;
+  border: 1px solid var(--pk-border);
+  border-radius: 12px;
+  background: var(--pk-raised);
+  color: var(--pk-ink);
+  box-shadow: var(--pk-shadow-raised);
+  font: 400 13px/20px var(--pk-font-ui);
 }
-.external-link-recovery p { margin: 0 0 8px; font-size: 13px; }
-.external-link-recovery input { box-sizing: border-box; width: 100%; margin-bottom: 8px; user-select: text; }
-.external-link-recovery > div { display: flex; gap: 8px; }
-.external-link-recovery [role='status'] { margin: 8px 0 0; }
+.external-link-recovery__heading,
+.external-link-recovery__destination { display: flex; align-items: center; gap: 8px; }
+.external-link-recovery__heading p { flex: 1; margin: 0; color: var(--pk-muted); }
+.external-link-recovery__url { flex: 1; min-width: 0; overflow-wrap: anywhere; user-select: text; cursor: text; }
+.external-link-recovery__button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 28px;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--pk-radius-control);
+  background: transparent;
+  color: var(--pk-muted);
+  cursor: pointer;
+}
+.external-link-recovery__button:hover { background: var(--pk-hover); color: var(--pk-ink); }
+.external-link-recovery__button:focus-visible,
+.external-link-recovery__url:focus-visible { outline: 2px solid var(--pk-focus); outline-offset: 2px; }
+.external-link-recovery__hint { display: block; margin-top: 4px; color: var(--pk-muted); font-size: 12px; }

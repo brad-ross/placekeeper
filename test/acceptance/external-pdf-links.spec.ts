@@ -98,13 +98,13 @@ test('rejected opening keeps a selectable URL and handles clipboard denial', asy
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async () => { throw new Error('Denied'); } } });
   });
   await main.getByRole('button', { name: `Open web link: ${destination}`, exact: true }).first().click();
-  await expect(page.getByRole('alert')).toHaveText('Couldn’t open this web link.');
-  const url = page.getByRole('textbox', { name: 'Web link URL' });
-  await expect(url).toHaveValue(destination);
+  await expect(page.getByRole('alert')).toHaveText('Couldn’t open this link');
+  const url = page.getByLabel('Web link URL', { exact: true });
+  await expect(url).toHaveText(destination);
   await page.getByRole('button', { name: 'Copy URL', exact: true }).click();
-  await expect(page.getByRole('status').filter({ hasText: 'Select the URL above' })).toBeVisible();
+  await expect(page.getByRole('status').filter({ hasText: 'Select the link to copy it manually.' })).toBeVisible();
   await url.focus();
-  expect(await url.evaluate(el => (el as HTMLInputElement).selectionEnd)).toBe(destination.length);
+  expect(await url.evaluate(el => getComputedStyle(el).userSelect)).toBe('text');
   await page.screenshot({ path: '/tmp/placekeeper-link-recovery-desktop.png' });
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(url).toBeVisible();
@@ -114,7 +114,7 @@ test('rejected opening keeps a selectable URL and handles clipboard denial', asy
   await page.getByRole('button', { name: 'Copy URL', exact: true }).click();
   await expect(page.getByRole('status').filter({ hasText: 'URL copied.' })).toBeVisible();
   expect(await page.evaluate(() => (window as unknown as { copied: string }).copied)).toBe(destination);
-  await page.getByRole('button', { name: 'Dismiss', exact: true }).click();
+  await page.getByRole('button', { name: 'Dismiss link error', exact: true }).click();
   await expect(url).toHaveCount(0);
 });
 
@@ -123,5 +123,5 @@ test('printed URLs and non-web actions never call the opener', async ({ page }) 
   await page.evaluate(() => { window.open = () => { throw new Error('Unexpected opening'); }; });
   await expect(main.getByRole('button', { name: /printed.example/ })).toHaveCount(0);
   await main.getByRole('button', { name: 'PDF link target unavailable', exact: true }).first().click();
-  await expect(page.getByRole('textbox', { name: 'Web link URL' })).toHaveCount(0);
+  await expect(page.getByLabel('Web link URL', { exact: true })).toHaveCount(0);
 });
