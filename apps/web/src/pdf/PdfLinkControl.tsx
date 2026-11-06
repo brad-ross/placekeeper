@@ -242,7 +242,7 @@ export function PdfLinkControl({
       ...linkBorderStyle(annotation),
     },
   };
-  return externalUrl === null ? <button {...buttonProps} /> : <ReviewTooltipButton {...buttonProps}
+  return externalUrl === null ? <button {...buttonProps} title={buttonProps.title} /> : <ReviewTooltipButton {...buttonProps}
     label={`Open web link: ${externalUrl}`} tooltip={externalUrl} />;
 }
 
