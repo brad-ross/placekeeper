@@ -1,4 +1,3 @@
-import type { PlacekeeperLinkLocation } from "../../../../packages/core/src/placekeeper-link.js";
 import { pdfNavigationTargetFromPlacekeeperLocation } from '../pdf/pdf-navigation-target.js';
 import { useContext, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, type ReactNode } from "react";
 import type { PluginRegistry } from "@embedpdf/core";
@@ -115,7 +114,6 @@ import type {
   ViewerClientPlacement,
   ViewerInteractionEvent,
   ViewerPageMenuInvocation,
-  ViewerPdfLinkInvocation,
 } from "../pdf/viewer-interaction-events.js";
 import { annotationReaderIdentityMatches, type AnnotationReaderIdentity } from '../review/annotation-reader.js';
 import { PageNotePlacementAuthority } from "../review/review-surface-state.js";
@@ -145,7 +143,6 @@ import {
   type ReviewLocationHistoryPort,
   type ReviewLocationHistorySnapshot,
 } from '../review/review-location-history.js';
-import { buildPlacekeeperCopyLink } from '../review/CopyLinkControl.js';
 import {
   createReferenceNavigationState,
   reduceReferenceNavigation,
@@ -154,12 +151,6 @@ import {
 } from "../review/reference-navigation-state.js";
 import type { PendingReferencePanel } from "../review/ReferenceWorkspace.js";
 import { PdfSearchWorkspace } from '../review/PdfSearchWorkspace.js';
-import {
-  createOutlineRowCopyLink,
-  createPdfTargetCopyLink,
-  createSearchResultRowCopyLink,
-  type PdfTargetCopyLinkContext,
-} from '../review/row-link-actions.js';
 import {
   createTrailingTaskScheduler,
   waitForReviewNavigationReady,
@@ -536,8 +527,6 @@ export interface ProductionReviewAppProps {
   readonly resourcePolicy?: ViewerResourcePolicy;
   /** Host-owned semantic history. `null` explicitly disables address-bar history. */
   readonly locationHistory?: ReviewLocationHistoryPort | null;
-  /** Host-issued capability-free canonical link base, independent of history. */
-  readonly copyLinkBase?: string | null;
   readonly viewer?: ReactNode;
   readonly generationRefreshStatus?: GenerationRefreshStatus;
   readonly hostReattachRequestToken?: number;
@@ -924,14 +913,6 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   }, [props.locationHistory, props.session.appLinkBase]);
   const locationHistoryRef = useRef(locationHistory);
   locationHistoryRef.current = locationHistory;
-  const copyLinkBase = useMemo(() => {
-    if (props.copyLinkBase !== undefined) return props.copyLinkBase ?? undefined;
-    if (props.session.appLinkBase === undefined) return undefined;
-    if (scope.launchSurface !== 'codex' || typeof window === 'undefined') {
-      return props.session.appLinkBase;
-    }
-    return `${window.location.origin}${window.location.pathname}`;
-  }, [props.copyLinkBase, props.session.appLinkBase, scope.launchSurface]);
   const [locationHistorySnapshot, setLocationHistorySnapshot] = useState<ReviewLocationHistorySnapshot>({
     canBack: false,
     canForward: false,
@@ -2360,53 +2341,6 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       }, selectedTarget);
     }, 0);
   };
-  const writePlacekeeperLink = async (link: string) => {
-    if (navigator.clipboard?.writeText === undefined) {
-      throw new Error('Clipboard API unavailable');
-    }
-    await navigator.clipboard.writeText(link);
-  };
-  const createLink = useMemo(() => props.api.createLink?.bind(props.api), [props.api]);
-  const linkForLocation = (location: PlacekeeperLinkLocation): string | Promise<string> => {
-    if (createLink !== undefined) return createLink(location);
-    if (copyLinkBase === undefined) throw new Error('Link unavailable.');
-    return buildPlacekeeperCopyLink(copyLinkBase, location);
-  };
-  const pdfTargetCopyLinkContext: PdfTargetCopyLinkContext | undefined =
-    props.session.appLinkBase === undefined && props.api.createLink === undefined ? undefined : {
-      ...(props.session.appLinkBase === undefined ? {} : { appLinkBase: props.session.appLinkBase }),
-      ...(createLink === undefined ? {} : { createLink }),
-      document: {
-        documentGeneration: documentGenerationRef.current,
-        pageCount: viewerState.totalPages,
-      },
-      currentDocumentGeneration: () => documentGenerationRef.current,
-      writeText: writePlacekeeperLink,
-    };
-  const copyLinkForSearchResult = pdfTargetCopyLinkContext === undefined
-    ? undefined
-    : (result: PdfSearchResult) => createSearchResultRowCopyLink(result, pdfTargetCopyLinkContext);
-  const copyLinkForOutlineItem = pdfTargetCopyLinkContext === undefined
-    ? undefined
-    : (item: Parameters<typeof createOutlineRowCopyLink>[0]) => (
-      createOutlineRowCopyLink(item, pdfTargetCopyLinkContext)
-    );
-  const copyLinkForLinkAction = pdfTargetCopyLinkContext === undefined
-    ? undefined
-    : (request: ViewerPdfLinkInvocation) => {
-      const copyLink = createPdfTargetCopyLink(request.target, pdfTargetCopyLinkContext);
-      if (copyLink === undefined) return undefined;
-      const page = request.target.pageIndex + 1;
-      return {
-        ...copyLink,
-        ariaLabel: copyLink.precision === 'exact'
-          ? `Copy link to exact destination on page ${page}`
-          : `Copy link to target page ${page}`,
-        title: copyLink.precision === 'exact'
-          ? 'Copy exact destination link'
-          : 'Copy target page link',
-      };
-    };
   const sectionLabelAt = useCallback((location: PdfDocumentOrderLocation): string | null => {
     const resolver = sectionResolverRef.current;
     if (resolver === null || resolver.generation !== documentGenerationRef.current) return null;
@@ -2424,7 +2358,6 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       onQueryChange={submitSearchQuery}
       onResultActivate={activateSearchResult}
       onResultOpenReference={openSearchResultReference}
-      {...(copyLinkForSearchResult === undefined ? {} : { copyLinkForResult: copyLinkForSearchResult })}
       onAlternativeActivate={(alternative) => submitSearchQuery(alternative.query, true)}
     />
   );
@@ -2612,33 +2545,6 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
         {...(scope.launchSurface === 'codex'
           ? { codexContext: visibleCodexContext(codexContext, state) ?? UNAVAILABLE_CODEX_CONTEXT }
           : {})}
-        {...((copyLinkBase === undefined && props.api.createLink === undefined) || locationHistory === undefined ? {} : {
-          ...(scope.launchSurface === 'chrome' ? {} : {
-            copyLink: {
-              disabled: navigationState.pendingMainNavigation !== null
-                || navigationState.pendingSendToMain !== null,
-              getLink: () => {
-                mainLocationRefresh.flush();
-                const location = navigationCoordinator.currentLinkLocation();
-                return linkForLocation(location);
-              },
-              writeText: writePlacekeeperLink,
-            },
-          }),
-          copyItemLink: {
-            getLink: (item: ReviewItem) => {
-              const location: PlacekeeperLinkLocation = {
-                kind: 'item',
-                page: item.pageIndex + 1,
-                itemId: item.id,
-              };
-              return linkForLocation(location);
-            },
-            disabled: (item: ReviewItem) => !portableItemIdsRef.current.has(item.id)
-              || !saveStatusIsCleanCurrent(state, saveStatus),
-            writeText: writePlacekeeperLink,
-          },
-        })}
         existingAnnotations={existingAnnotations}
         onOpenAnnotationReference={openAnnotationReference}
         referenceInspection={referenceInspection}
@@ -2987,7 +2893,6 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
             });
           },
           onLinkActionDismiss: (request) => navigationCoordinator.dismissLink(request),
-          ...(copyLinkForLinkAction === undefined ? {} : { copyLinkForLinkAction }),
           onNavigateBack: () => {
             void navigationCoordinator.historyBack(
               authoringActiveRef.current ? authoringViewportRef.current ?? undefined : undefined,
@@ -3049,7 +2954,6 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
               pageContext: item.pageContext ?? `Page ${item.target.pageIndex + 1}`,
             });
           },
-          ...(copyLinkForOutlineItem === undefined ? {} : { copyLinkForOutlineItem }),
           onReferenceViewportHost: setReferenceViewportHost,
           onWorkspaceModeFocusTokenChange: (mode, token) => {
             const current = navigationStateRef.current.workspace.modes[mode];
