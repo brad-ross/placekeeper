@@ -41,6 +41,11 @@ A Review Session opened through a chat host's direct app entrypoint, whose prese
 
 Its live presentation can expire without discarding protected review work. Host acceptance of published context establishes availability, not that an agent consumed it.
 
+### Document in Context
+The full-document status indicating that the chat host has accepted the current PDF version supplied by Placekeeper.
+
+It establishes host acceptance, not that an assistant has read the PDF. Lightweight review context alone does not establish this status.
+
 ### Captured Review Context
 The selection or annotations from a particular Document Generation and Review Revision that a reviewer explicitly attaches to chat, optionally with a note.
 
