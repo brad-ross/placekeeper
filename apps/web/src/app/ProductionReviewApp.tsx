@@ -1,10 +1,11 @@
 import { ContextNoteComposer } from '../review/ContextNoteComposer.js';
 import { reviewAgentSearchResult, type ReviewAgentBridge, type ReviewAgentActions, type ReviewAgentContextInput } from '../host/review-agent-bridge.js';
+import { documentContextSourceKey, INACTIVE_DOCUMENT_CONTEXT, sameDocumentContextVersion, type DocumentContextSource, type DocumentContextState } from '../host/document-in-context.js';
 import { reviewContextSnapshot, type ReviewContextSnapshot } from '../host/review-context-snapshot.js';
 import { pdfNavigationTargetFromPlacekeeperLocation, type PdfNavigationTarget } from '../pdf/pdf-navigation-target.js';
 import { ExternalLinkRecovery } from '../review/ExternalLinkRecovery.js';
 import { externalWebUrl } from '../../../../packages/core/src/external-web-url.js';
-import { useContext, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, type ReactNode } from "react";
+import { useContext, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import type { PluginRegistry } from "@embedpdf/core";
 import type { PdfDocumentObject, PdfEngine } from '@embedpdf/models';
 import { SelectionPlugin } from "@embedpdf/plugin-selection";
@@ -579,6 +580,9 @@ export function initialWorkspaceLocationForGeneration(
   return currentGeneration === initialGeneration ? location : undefined;
 }
 
+
+const noDocumentContextSubscription = () => () => {};
+const inactiveDocumentContext = () => INACTIVE_DOCUMENT_CONTEXT;
 
 export function ProductionReviewApp(props: ProductionReviewAppProps) {
   const availableModes = useContext(WorkspaceModeAvailability);
@@ -1490,6 +1494,43 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   const liveAgentActions = useRef<ReviewAgentActions | null>(null);
   const agentReady = initialViewReady && viewerState.ready && viewerResourcesAreCurrent
     && mainDocumentReadyGeneration === state.workflow.documentGeneration;
+  const documentController = props.agentBridge?.documentContext;
+  const documentContextState = useSyncExternalStore(
+    documentController?.subscribe ?? noDocumentContextSubscription,
+    documentController?.getState ?? inactiveDocumentContext,
+    documentController?.getState ?? inactiveDocumentContext,
+  );
+  const contextVersion = useMemo(() => ({
+    sourceKey: documentContextSourceKey(props.session.sessionId, state.source.fileId),
+    generation: state.workflow.documentGeneration,
+    digest: state.source.digest,
+  }), [props.session.sessionId, state.source.fileId, state.workflow.documentGeneration, state.source.digest]);
+  const contextSourceReady = agentReady && documentGenerationRef.current === contextVersion.generation
+    && props.initialState.source.fileId === state.source.fileId
+    && props.initialState.source.digest === state.source.digest;
+  const contextBytes = viewerAssets.documentBytes;
+  const documentContextSource = useRef<DocumentContextSource | undefined>(undefined);
+  useLayoutEffect(() => {
+    if (!documentController) return;
+    const source: DocumentContextSource | undefined = contextSourceReady ? {
+      ...contextVersion,
+      title: scope.documentTitle,
+      readBytes: () => documentContextSource.current === source ? contextBytes : undefined,
+    } : undefined;
+    documentContextSource.current = source;
+    documentController.setSource(source);
+  }, [documentController, contextVersion, contextSourceReady, contextBytes, scope.documentTitle]);
+  useLayoutEffect(() => () => {
+    documentContextSource.current = undefined;
+    documentController?.setSource(undefined);
+  }, [documentController]);
+  const displayedDocumentContext: DocumentContextState = documentContextState.status === 'unsupported'
+    || contextSourceReady && sameDocumentContextVersion(documentContextState.version, contextVersion)
+    ? documentContextState
+    : documentContextState.version?.sourceKey === contextVersion.sourceKey
+      && (documentContextState.status === 'publishing' || documentContextState.status === 'available')
+      ? { status: 'publishing', canActivate: false }
+      : INACTIVE_DOCUMENT_CONTEXT;
   liveAgentActions.current = {
     snapshot: () => {
       if (!agentReady || documentGenerationRef.current !== state.workflow.documentGeneration || mainNavigationRef.current === null) throw Error('Reader unavailable');
@@ -2709,6 +2750,16 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       )}
       <NativePdfSelectionBridge owner={pdfCopyOwner} snapshots={pdfCopySnapshots} />
       <ReviewShell
+        {...(documentController === undefined ? {} : {
+          documentContext: {
+            state: displayedDocumentContext,
+            onActivate: () => {
+              const current = documentController.getState();
+              if (displayedDocumentContext.canActivate && current.canActivate
+                && sameDocumentContextVersion(current.version, contextVersion)) documentController.activate();
+            },
+          },
+        })}
         {...(addContext === undefined || !agentReady ? {} : { onAddAnnotationContext: openContextComposer })}
         state={state}
         {...(props.activeAuthoringDraftIds === undefined ? {} : {

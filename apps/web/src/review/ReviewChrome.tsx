@@ -11,6 +11,7 @@ import { ReviewIcon } from './ReviewIcon.js';
 import { ReviewTooltipButton } from './ReviewTooltipButton.js';
 import type { LiveContextBindingStatus } from '../../../../packages/core/src/live-context.js';
 import { CodexContextStatus } from './CodexContextStatus.js';
+import { DocumentContextButton, type DocumentContextButtonProps } from './DocumentContextButton.js';
 import { CopyLinkControl, type CopyLinkControlProps } from './CopyLinkControl.js';
 import {
   DocumentActionsMenu,
@@ -130,6 +131,7 @@ export interface ReviewChromeProps {
   readonly canNavigateForward?: boolean;
   readonly documentNavigationPending?: boolean;
   readonly codexContext?: LiveContextBindingStatus;
+  readonly documentContext?: DocumentContextButtonProps;
   readonly copyLink?: CopyLinkControlProps;
   readonly onUndo: () => void;
   readonly onRedo: () => void;
@@ -166,6 +168,7 @@ export function ReviewChrome({
   canNavigateForward = false,
   documentNavigationPending = false,
   codexContext,
+  documentContext,
   copyLink,
   onUndo,
   onRedo,
@@ -971,9 +974,15 @@ export function ReviewChrome({
     {copyLink === undefined ? null : <div className="review-chrome__link"><button type="button" title="Copy link to current location" className="review-chrome__icon-control"><ReviewIcon name="link" /></button></div>}
   </div>;
 
+  const contextControl = documentContext !== undefined ? <DocumentContextButton {...documentContext} />
+    : codexContext === undefined ? null : <CodexContextStatus status={codexContext} />;
+  const contextSlotClass = documentContext === undefined
+    ? 'review-chrome__context'
+    : 'review-chrome__context review-chrome__context--document';
   const sizingIdentity = <div className="review-chrome__identity">
     {documentActions !== undefined ? <div className="document-actions"><button type="button" className="review-chrome__save-identity document-actions__trigger" title="Open document actions"><ReviewIcon name="file" size={16} /><span className="review-chrome__filename">{displayTitle}</span>{!showSaveStatusDot || savePhase === 'clean' ? null : <span className="review-chrome__save-dot" data-save-phase={savePhase} />}</button></div> : saveOptionsAvailable ? <button type="button" className="review-chrome__save-identity" title="Open automatic save options"><ReviewIcon name="file" size={16} /><span className="review-chrome__filename">{displayTitle}</span>{!showSaveStatusDot || savePhase === 'clean' ? null : <span className="review-chrome__save-dot" data-save-phase={savePhase} />}</button> : <div className="review-chrome__save-identity"><ReviewIcon name="file" size={16} /><span className="review-chrome__filename">{displayTitle}</span>{!showSaveStatusDot || savePhase === 'clean' ? null : <span className="review-chrome__save-dot" data-save-phase={savePhase} />}</div>}
-    {codexContext === undefined ? null : <div className="review-chrome__context"><div className="codex-context-status"><ReviewIcon name="agent" size={16} /></div></div>}
+    {contextControl === null ? null :
+      <div className={contextSlotClass}><div className="codex-context-status"><ReviewIcon name="agent" size={16} /></div></div>}
   </div>;
 
   return <header
@@ -1009,7 +1018,7 @@ export function ReviewChrome({
         {!showSaveStatusDot || savePhase === 'clean' ? null : <span className="review-chrome__save-dot" data-save-phase={savePhase} aria-hidden="true" />}
         <span className="sr-only" data-review-saved-status>{saveStatusDisplay}</span>
       </div>}
-      {codexContext === undefined ? null : <div className="review-chrome__context" data-review-context-status><CodexContextStatus status={codexContext} /></div>}
+      {contextControl === null ? null : <div className={contextSlotClass} data-review-context-status>{contextControl}</div>}
     </div>
     <div className="review-chrome__left-controls" role="group" aria-label="PDF navigation and links">
       {navigationControls}

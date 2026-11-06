@@ -4,7 +4,11 @@ import { nativeBridge } from './codex-native-bridge.js';
 
 /** Real extension shell, reader and service; host entry/context/message APIs are simulated.
  * This does not qualify native entrypoints, host focus, conditional resource writes or lifecycle. */
-export async function extensionReader(page: Page, fixture = 'text-native-with-annotations.pdf', options: { holdPublication?: boolean } = {}) {
+export async function extensionReader(page: Page, fixture = 'text-native-with-annotations.pdf', options: {
+  holdPublication?: boolean;
+  documentPublication?: 'hold-first' | 'hold-and-decline-first';
+  theme?: 'light' | 'dark';
+} = {}) {
   const bridge = await nativeBridge(fixture);
   const panel = await bridge.panel();
   const requests: string[] = [];
@@ -30,7 +34,7 @@ export async function extensionReader(page: Page, fixture = 'text-native-with-an
   const frame = production.replace(/<script>[\s\S]*?<\/script>/gu, '').replace('<div id="root">', '<div id="controls"></div><div id="root">');
   await page.route('**/extension-reader-acceptance', route => route.fulfill({ contentType: 'text/html', body: frame }));
   await page.goto('/extension-reader-acceptance');
-  await page.evaluate(async holdPublication => {
+  await page.evaluate(async ({ holdPublication, documentPublication, theme = 'light' }) => {
     const { ExtensionShell } = await import(/* @vite-ignore */ ('/apps/codex-mcp/src/extension-shell.ts' as string));
     await import(/* @vite-ignore */ ('/apps/codex-mcp/src/extension-presentation.css' as string));
     // Vite injects imported reader CSS after the inline production frame style.
@@ -43,15 +47,19 @@ export async function extensionReader(page: Page, fixture = 'text-native-with-an
       shell: undefined as any, tools, context: null as any, publications: [] as any[], messages: [] as any[], promptText: 'Keep my typed question',
       expansionRequests: 0, preflightStarted: 0, preflightFinished: 0,
       publicationGate: undefined as Promise<void> | undefined, releasePublication: undefined as (() => void) | undefined,
+      documentPublications: [] as any[], releaseDocumentPublication: undefined as (() => void) | undefined,
       receiving: undefined as Promise<boolean> | undefined,
     };
     if (holdPublication) state.publicationGate = new Promise<void>(resolve => { state.releasePublication = resolve; });
+    const documentPublicationGate = documentPublication === undefined ? undefined
+      : new Promise<void>(resolve => { state.releaseDocumentPublication = resolve; });
     // The protocol metadata key is imported so the harness uses the production envelope.
     const { EXTENSION_META_KEY } = await import(/* @vite-ignore */ ('/packages/core/src/extension-protocol.ts' as string));
     const envelope = (value: unknown) => ({ _meta: { [EXTENSION_META_KEY]: value } });
     const app = {
       sendMessage: async (params: any) => { state.messages.push(params); state.promptText = JSON.stringify(params); return {}; },
-      getHostContext: () => ({ displayMode: 'fullscreen', theme: 'light' }),
+      getHostContext: () => ({ displayMode: 'fullscreen', theme }),
+      getHostCapabilities: () => documentPublication === undefined ? {} : { updateModelContext: { resource: {} } },
       requestDisplayMode: async () => { state.expansionRequests++; return { mode: 'fullscreen' }; },
       callServerTool: async ({ arguments: { request } }: any) => {
         if (request.action === 'context-published') { state.preflightStarted++; if (state.publicationGate) await state.publicationGate; state.preflightFinished++; }
@@ -59,9 +67,26 @@ export async function extensionReader(page: Page, fixture = 'text-native-with-an
       },
     };
     state.shell = new ExtensionShell(app, document.getElementById('root')!, document.getElementById('status')!, document.getElementById('controls')!, () => undefined,
-      () => ({ getCurrent: () => state.context, update: async (params: any) => { const updateId = `host-${state.publications.length}`; state.publications.push(params); state.context = { ...params, updateId }; return { updateId }; } }));
+      () => ({
+        getCurrent: () => state.context,
+        update: async (params: any) => {
+          const updateId = `host-${state.publications.length}`;
+          state.publications.push(params);
+          const pdfs = params.content.filter((block: any) => block.type === 'resource' && block.resource?.mimeType === 'application/pdf');
+          if (pdfs.length > 0) {
+            const first = state.documentPublications.length === 0;
+            state.documentPublications.push(pdfs);
+            if (first) {
+              await documentPublicationGate;
+              if (documentPublication === 'hold-and-decline-first') throw Error('Host declined the PDF');
+            }
+          }
+          state.context = { ...params, updateId };
+          return { updateId };
+        },
+      }));
     state.receiving = state.shell.receive({ status: 'provisional', grant: 'a'.repeat(43) });
-  }, options.holdPublication === true);
+  }, options);
   return { bridge, panel, requests,
     async ready() {
       await expect(page.locator('[data-production-review]')).toHaveAttribute('data-initial-view-ready', 'true', { timeout: 20_000 });
@@ -72,6 +97,13 @@ export async function extensionReader(page: Page, fixture = 'text-native-with-an
       if (!tool) throw Error(`Live tool ${name} is not registered`);
       return JSON.parse(await tool.execute(input));
     }, { name, input }); },
-    async dispose() { await page.evaluate(() => (window as any).extensionAcceptance?.shell.teardown()).catch(() => {}); await bridge.dispose(); },
+    async dispose() {
+      await page.evaluate(() => {
+        const state = (window as any).extensionAcceptance;
+        state?.releaseDocumentPublication?.();
+        return state?.shell.teardown();
+      }).catch(() => {});
+      await bridge.dispose();
+    },
   };
 }

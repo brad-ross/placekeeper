@@ -1,3 +1,4 @@
+import type { DocumentContextController } from './document-in-context.js';
 import type { PdfSearchState } from '../pdf/pdf-search-model.js';
 
 export { reviewContextSnapshot as reviewAgentSnapshot } from './review-context-snapshot.js';
@@ -23,6 +24,7 @@ export type ReviewAgentContextInput = (
 export const MAX_REVIEW_CONTEXT_NOTE_LENGTH = 2000;
 
 export interface ReviewAgentBridge {
+  readonly documentContext?: DocumentContextController;
   attach(actions: ReviewAgentActions): () => void;
   /** Publish the captured evidence and optional user note as chat context. */
   addContext?(input: ReviewAgentContextInput): Promise<void>;

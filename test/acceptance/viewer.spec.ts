@@ -585,9 +585,9 @@ test('stops the PDF loading indicator animation under reduced motion', async ({ 
 
   try {
     await page.goto('/test/acceptance/viewer-harness/index.html', { waitUntil: 'domcontentloaded' });
-    const loader = page.locator('.pdf-workspace__loading');
+    const loader = page.getByRole('status', { name: 'Opening document', exact: true });
     await expect(loader).toBeVisible();
-    await expect(loader.locator('.review-icon')).toHaveCSS('animation-name', 'none');
+    await expect(loader.locator('.document-loading__indicator')).toHaveCSS('animation-name', 'none');
   } finally {
     releaseDocument?.();
     await page.unrouteAll({ behavior: 'wait' });

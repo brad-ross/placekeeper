@@ -1,6 +1,92 @@
 import { expect, test, type Page } from '@playwright/test';
+import { readFile } from 'node:fs/promises';
 import { extensionReader } from '../support/extension-reader.js';
 import { extensionRecoveryReader } from '../support/extension-recovery-reader.js';
+
+for (const scenario of [
+  { width: 1120, theme: 'light', keyboard: true },
+  { width: 375, theme: 'dark', keyboard: false },
+] as const) test(`toolbox document context in the ${scenario.theme} ${scenario.width}px reader`, async ({ page }, info) => {
+  await page.setViewportSize({ width: scenario.width, height: 800 });
+  if (!scenario.keyboard) await page.emulateMedia({ reducedMotion: 'reduce' });
+  const fixture = 'text-native.pdf';
+  const reader = await extensionReader(page, fixture, {
+    theme: scenario.theme,
+    documentPublication: scenario.keyboard ? 'hold-first' : 'hold-and-decline-first',
+  });
+  try {
+    await reader.ready();
+    const bot = page.locator('[data-review-context-status] button[data-document-context]');
+    const icon = bot.locator('svg');
+    const tooltip = page.getByRole('tooltip');
+    const documentPublications = () => page.evaluate(() =>
+      (window as any).extensionAcceptance.documentPublications.map((pdfs: any[]) => pdfs.map(pdf => pdf.resource.blob)));
+    await expect(page.locator('html')).toHaveAttribute('data-theme', scenario.theme);
+    if (scenario.theme === 'dark') await expect(page.locator('#root')).toHaveCSS('color-scheme', 'dark');
+    await expect(bot).toBeVisible();
+    await expect(bot).toHaveAttribute('data-document-context', 'idle');
+    await expect(bot).toHaveAccessibleName('Put document in context');
+    const idle = await bot.boundingBox();
+    expect(idle).toMatchObject({ width: 32, height: 32 });
+    expect(idle!.x).toBeGreaterThanOrEqual(0);
+    expect(idle!.x + idle!.width).toBeLessThanOrEqual(scenario.width);
+    expect(await documentPublications()).toEqual([]);
+
+    if (scenario.keyboard) {
+      // Reach the bot using keyboard input so the shared focus tooltip opens.
+      for (let step = 0; step < 12; step += 1) {
+        await page.keyboard.press('Tab');
+        if (await bot.evaluate(element => document.activeElement === element)) break;
+      }
+      await expect(bot).toBeFocused();
+      await expect(tooltip).toHaveText('Put document in context');
+      await page.keyboard.press('Enter');
+      await expect(tooltip).toHaveText('Putting document in context…');
+    } else {
+      await bot.click();
+    }
+
+    await expect(bot).toHaveAttribute('data-document-context', 'publishing');
+    await expect(bot).toHaveAttribute('aria-disabled', 'true');
+    expect(await bot.boundingBox()).toEqual(idle);
+    await expect(icon).toHaveCSS('animation-name', scenario.keyboard ? 'review-save-pulse' : 'none');
+    await expect(icon).toHaveCSS('color', 'rgb(217, 173, 43)');
+    await expect.poll(async () => (await documentPublications()).length).toBe(1);
+    await bot.press('Enter');
+    await page.evaluate(() => (window as any).extensionAcceptance.releaseDocumentPublication());
+
+    if (!scenario.keyboard) {
+      await expect(bot).toHaveAttribute('data-document-context', 'unavailable');
+      await expect(bot).toHaveAccessibleName(/Document not in context.*Try again/u);
+      await page.mouse.move(0, 0);
+      await bot.hover();
+      await expect(tooltip).toHaveText(/Document not in context.*Try again/u);
+      await expect(icon).toHaveCSS('color', 'rgb(154, 61, 52)');
+      expect(await bot.boundingBox()).toEqual(idle);
+      await bot.click();
+    }
+    await expect(bot).toHaveAttribute('data-document-context', 'available');
+    if (scenario.keyboard) {
+      await expect(bot).toBeFocused();
+    } else {
+      await page.mouse.move(0, 0);
+      await bot.hover();
+    }
+    await expect(tooltip).toHaveText('Document in context');
+    await expect(icon).toHaveCSS('color', 'rgb(45, 104, 77)');
+    const screenshot = info.outputPath(`document-context-${scenario.theme}-${scenario.width}.png`);
+    await page.screenshot({ path: screenshot });
+    await info.attach('accepted document context', { path: screenshot, contentType: 'image/png' });
+    expect(await bot.boundingBox()).toEqual(idle);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(scenario.width + 1);
+    const pdf = (await readFile(`test/fixtures/pdfs/${fixture}`)).toString('base64');
+    expect(await documentPublications()).toEqual(scenario.keyboard ? [[pdf]] : [[pdf], [pdf]]);
+    expect(await page.evaluate(() => {
+      const { messages, promptText } = (window as any).extensionAcceptance;
+      return { messages, promptText };
+    })).toEqual({ messages: [], promptText: 'Keep my typed question' });
+  } finally { await reader.dispose(); }
+});
 
 async function openAnnotationContext(page: Page, id: string) {
   const mark=page.locator(`[data-owned-native-geometry][data-review-id="${id}"], [data-owned-mark][data-review-id="${id}"]`).first();

@@ -4,6 +4,7 @@ import { ExtensionContextCoordinator } from '../../web/src/host/extension-contex
 import type { ReviewContextSnapshot } from '../../web/src/host/review-context-snapshot.js';
 import { prepareReviewContext } from './review-context-attachment.js';
 import type { ReviewAgentBridge, ReviewAgentContextInput } from '../../web/src/host/review-agent-bridge.js';
+import { documentContextSourceKey, INACTIVE_DOCUMENT_CONTEXT, sameDocumentContextVersion, type DocumentContextMember, type DocumentContextPublicationStatus, type DocumentContextSource, type DocumentContextState } from '../../web/src/host/document-in-context.js';
 import type { OpenAIModelContext, OpenAIResources } from '@openai/mcp-extensions/app';
 import { HostResourceAdapter } from './host-resource-adapter.js';
 import type { App } from '@modelcontextprotocol/ext-apps';
@@ -14,9 +15,26 @@ import { NativeOperationError, parseCodexAppResponse, type CodexAppRequest, type
 import { EXTENSION_META_KEY, EXTENSION_TOOL, extensionPickerTimeouts, parseExtensionResult, type ExtensionRequest, type ExtensionResult, type ExtensionPresentation } from '../../../packages/core/src/extension-protocol.js';
 import { PanelLiveness } from './panel-liveness.js';
 import { NativeDiagnosticError, diagnosticFailure } from './lifecycle-diagnostics.js';
+
+function encodeDocument(bytes: Uint8Array): string {
+    const chunks: string[] = [];
+    // Each chunk except the last must end on a base64 triple boundary.
+    const chunkSize = 24 * 1024;
+    for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+        chunks.push(btoa(String.fromCharCode(...bytes.subarray(offset, offset + chunkSize))));
+    }
+    return chunks.join('');
+}
+
 /** Memory-only app grants. A new host invocation never inherits an old panel's authority. */
 export class ExtensionShell {
     #context: ExtensionContextCoordinator | undefined;
+    #documentSource: DocumentContextSource | undefined;
+    #documentChoice: string | undefined;
+    #documentMember: DocumentContextMember | undefined;
+    #documentAttempt = 0;
+    #documentState: DocumentContextState = INACTIVE_DOCUMENT_CONTEXT;
+    readonly #documentListeners = new Set<() => void>();
     #readingPage: number | undefined;
     #readerTools: LiveReaderTools | undefined;
     readonly #readerVisibilityListeners = new Set<() => void>();
@@ -158,6 +176,7 @@ export class ExtensionShell {
         const api = this.modelContext();
         this.#context = new ExtensionContextCoordinator(api, undefined, {
             freshInvocation,
+            onDocumentStatus: (member, status) => this.#documentPublished(member, status),
             beforeUpdate: async () => {
                 const grant = this.#grant;
                 if (!grant || this.#closed) throw Error('Context connection unavailable');
@@ -175,6 +194,7 @@ export class ExtensionShell {
             return;
         }
         if (result.status === 'provisional') {
+            if (this.#active && this.#grant !== result.grant) this.#pause();
             const epoch = this.#choiceEpoch;
             this.#grant = result.grant;
             const current = () => !this.#closed && epoch === this.#choiceEpoch && this.#grant === result.grant;
@@ -280,7 +300,10 @@ export class ExtensionShell {
                 if (hostEpoch === this.#hostEpoch) this.#exportProgress(downloaded.isError ? 'host-declined' : 'host-accepted');
                 return downloaded;
             }, resources: this.resources, request: async request => { const response = await this.#request(request); const parsed = parseExtensionResult(response); if (!parsed) throw Error('Host resource unavailable'); return parsed; }, current: () => !this.#closed && hostEpoch === this.#hostEpoch, onProvisional: grant => {
-                if (!this.#closed && hostEpoch === this.#hostEpoch) this.#grant = grant;
+                if (!this.#closed && hostEpoch === this.#hostEpoch) {
+                    if (this.#active && this.#grant !== grant) this.#pause();
+                    this.#grant = grant;
+                }
             }, onUpdate: () => { this.#hostRefreshPending = true; this.#hostUpdateRevision++; if (this.#active) void this.#refreshHost(); } });
     }
     #closeRecovery() {
@@ -402,7 +425,104 @@ export class ExtensionShell {
         dialog.showModal();
     }
     #contextBridge(tools: LiveReaderTools, epoch: number): ReviewAgentBridge {
-        return { attach: actions => tools.attach(actions), addContext: input => this.#addContext(input, epoch) };
+        const grant = this.#grant;
+        const mounted = () => epoch === this.#epoch && grant === this.#grant && !this.#closed;
+        return {
+            attach: actions => tools.attach(actions),
+            addContext: input => this.#addContext(input, epoch),
+            documentContext: {
+                setSource: source => {
+                    if (mounted() && (source === undefined || source.generation === this.#active?.generation)) {
+                        this.#setDocumentSource(source);
+                    }
+                },
+                getState: () => mounted() ? this.#documentState : INACTIVE_DOCUMENT_CONTEXT,
+                subscribe: listener => {
+                    this.#documentListeners.add(listener);
+                    return () => this.#documentListeners.delete(listener);
+                },
+                activate: () => {
+                    const source = this.#documentSource;
+                    if (!mounted() || !source || !this.#documentState.canActivate) return;
+                    this.#documentChoice = source.sourceKey;
+                    this.#syncDocument();
+                },
+            },
+        };
+    }
+    #setDocumentSource(source: DocumentContextSource | undefined) {
+        const previous = this.#documentSource;
+        this.#documentSource = source;
+        if (source === previous || sameDocumentContextVersion(source, previous)) return;
+        if (source && this.#documentChoice !== source.sourceKey) this.#documentChoice = undefined;
+        this.#clearDocument();
+        this.#syncDocument();
+    }
+    #clearDocument() {
+        this.#documentAttempt++;
+        this.#documentMember = undefined;
+        this.#context?.clearDocument();
+    }
+    #setDocumentState(state: DocumentContextState) {
+        this.#documentState = state;
+        for (const listener of this.#documentListeners) listener();
+    }
+    #syncDocument() {
+        const source = this.#documentSource;
+        const version = source
+            ? { sourceKey: source.sourceKey, generation: source.generation, digest: source.digest }
+            : this.#documentState.version;
+        const identity = version === undefined ? {} : { version };
+        if (!this.modelContext() || !this.app.getHostCapabilities?.()?.updateModelContext?.resource) {
+            this.#setDocumentState({ ...identity, status: 'unsupported', reason: 'This host cannot receive a PDF in chat context.', canActivate: false });
+        } else if (!this.#connected || this.#closed) {
+            this.#setDocumentState({ ...identity, status: 'unavailable', reason: 'The reader connection is unavailable.', canActivate: false });
+        } else if (this.#documentChoice !== undefined && this.#documentChoice === version?.sourceKey) {
+            this.#setDocumentState({ ...identity, status: 'publishing', canActivate: false });
+            if (source && version && !this.#hostRefreshPending) void this.#prepareDocument(source, version);
+        } else {
+            this.#setDocumentState({ ...identity, status: 'idle', canActivate: source !== undefined && !this.#hostRefreshPending });
+        }
+    }
+    async #prepareDocument(source: DocumentContextSource, version: NonNullable<DocumentContextState['version']>) {
+        const grant = this.#grant, epoch = this.#epoch, connection = this.#connectionEpoch;
+        const attempt = ++this.#documentAttempt;
+        const current = () => grant !== undefined && grant === this.#grant && epoch === this.#epoch
+            && connection === this.#connectionEpoch && this.#connected && !this.#closed && !this.#hostRefreshPending
+            && attempt === this.#documentAttempt && sameDocumentContextVersion(version, this.#documentSource);
+        try {
+            if (!current()) return;
+            const bytes = await source.readBytes();
+            if (!current()) return;
+            if (!bytes?.length) throw Error('Verified PDF bytes unavailable');
+            const member: DocumentContextMember = {
+                ...version, title: source.title, blob: encodeDocument(bytes),
+                beforeSubmit: async () => {
+                    if (!current()) throw Error('Document changed');
+                    const proof = await this.#payload('watermark', {}, epoch) as { sessionId?: string; documentGeneration?: number };
+                    if (!current() || !proof.sessionId || !version.sourceKey.startsWith(documentContextSourceKey(proof.sessionId, ''))
+                        || proof.documentGeneration !== version.generation) throw Error('Document presentation changed');
+                },
+            };
+            this.#documentMember = member;
+            this.#context?.setDocument(member);
+        } catch {
+            if (current()) this.#setDocumentState({ version, status: 'unavailable', reason: 'Could not prepare the verified PDF.', canActivate: true });
+        }
+    }
+    #documentPublished(member: DocumentContextMember, status: DocumentContextPublicationStatus) {
+        if (this.#documentMember !== member || !this.#connected || this.#closed || !sameDocumentContextVersion(member, this.#documentSource)) return;
+        const version = this.#documentState.version!;
+        if (status === 'removed') {
+            this.#documentChoice = undefined;
+            this.#clearDocument();
+            this.#syncDocument();
+        } else if (status === 'unavailable') {
+            this.#documentMember = undefined;
+            this.#setDocumentState({ version, status, reason: 'The PDF could not be added to chat context.', canActivate: true });
+        } else {
+            this.#setDocumentState({ version, status, canActivate: false });
+        }
     }
     async #addContext(input: ReviewAgentContextInput, epoch: number) {
         const grant = this.#grant;
@@ -414,6 +534,7 @@ export class ExtensionShell {
     }
     #resetHost() { const host = this.#host; this.#host = undefined; this.#hostEpoch++; this.#hostNotice = ''; this.#hostRefreshPending = false; this.#hostUpdateRevision = 0; this.#saveRequested = false; this.#hostSave = undefined; return host?.dispose().catch(() => undefined); }
     async #restartHost(result: Extract<ExtensionResult, { status: 'host-resource' }>) {
+        if (this.#active) this.#pause();
         this.#grant = undefined;
         this.#resumeOperation = undefined;
         await this.#resetHost();
@@ -530,6 +651,9 @@ export class ExtensionShell {
             return;
         const epoch = ++this.#epoch;
         this.#connected = true;
+        this.#documentSource = undefined;
+        this.#clearDocument();
+        this.#syncDocument();
         this.#verified.clear();
         this.root.inert = document.hidden;
         this.#readerTools?.dispose();
@@ -583,8 +707,10 @@ export class ExtensionShell {
         if (this.#connected) {
             this.#verified.clear();
             this.#connectionEpoch++;
+            this.#connected = false;
+            this.#clearDocument();
+            this.#syncDocument();
         }
-        this.#connected = false;
         this.root.inert = true;
         this.#show('Reconnecting to Placekeeper… Editing is paused.');
     }
@@ -606,6 +732,7 @@ export class ExtensionShell {
                     this.root.inert = document.hidden;
                     this.#show(this.#hostNotice);
                     this.#context?.retry();
+                    this.#syncDocument();
                 }
             }
             if (method === 'watermark' && value.sessionId) {
@@ -692,9 +819,16 @@ export class ExtensionShell {
     }
     async #refreshHost() {
         const epoch = this.#hostEpoch;
+        if (this.#hostRefreshPending) {
+            this.#clearDocument();
+            this.#syncDocument();
+        }
         try { await this.#continue(); }
         catch {
             if (this.#closed || this.#hostEpoch !== epoch) return;
+            if (this.#documentState.status === 'publishing') {
+                this.#setDocumentState({ ...this.#documentState, status: 'unavailable', reason: 'The host PDF could not be refreshed.' });
+            }
             this.#show('The host PDF could not be refreshed. Finish any current edit, then retry; your protected review is retained.');
             this.#offerHostRetry('refresh');
         }
@@ -737,11 +871,7 @@ export class ExtensionShell {
             return this.#resume;
         if (!this.#grant)
             throw new NativeDiagnosticError('service-denied-unavailable');
-        if (!this.#host || !this.#connected) {
-            this.root.inert = true;
-            this.#connected = false;
-            this.#show('Reconnecting to Placekeeper… Editing is paused.');
-        }
+        if (!this.#host || !this.#connected) this.#pause();
         let completed = false;
         this.#resume = (async () => {
             while (true) {
@@ -756,8 +886,7 @@ export class ExtensionShell {
                     } while (this.#hostRefreshPending && !this.#closed);
                     this.#resumeRefreshed = operationId;
                 }
-                this.root.inert = true;
-                this.#connected = false;
+                this.#pause();
                 let result;
                 try { result = await this.#request({ action: 'resume', grant, operationId }); }
                 catch (error) { if (this.#host) this.#hostRefreshPending = true; throw error; }
@@ -778,7 +907,14 @@ export class ExtensionShell {
         return this.#resume;
     }
     #ended() { if (this.#closed)
-        return; this.#clearLoading(); this.#connected = false; this.#readerTools?.dispose(); this.#closeRecovery(); this.#context?.dispose(); this.#liveness?.stop(); void this.#host?.dispose().catch(() => undefined); this.root.inert = true; this.#show('This connection ended. Reopen the PDF through its file menu; accepted annotations and protected drafts are retained.'); this.#closed = true; this.#epoch++; }
+        return; this.#clearLoading(); this.#connected = false; this.#endDocumentContext(); this.#readerTools?.dispose(); this.#closeRecovery(); this.#context?.dispose(); this.#liveness?.stop(); void this.#host?.dispose().catch(() => undefined); this.root.inert = true; this.#show('This connection ended. Reopen the PDF through its file menu; accepted annotations and protected drafts are retained.'); this.#closed = true; this.#epoch++; }
+    #endDocumentContext() {
+        this.#documentChoice = undefined;
+        this.#documentSource = undefined;
+        this.#clearDocument();
+        this.#syncDocument();
+        this.#documentListeners.clear();
+    }
     visibilityChanged(hidden: boolean) {
         if (!this.#active || this.#closed) return;
         this.root.inert = hidden || !this.#connected;
@@ -797,6 +933,7 @@ export class ExtensionShell {
         this.#clearLoading();
         this.#closed = true;
         this.#connected = false;
+        this.#endDocumentContext();
         this.root.inert = true;
         const grant = this.#grant, host = this.#host, operationId = this.#resumeOperation;
         this.#epoch++;

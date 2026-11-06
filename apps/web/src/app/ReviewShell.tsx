@@ -95,6 +95,7 @@ import {
   type ReferenceWorkspaceTab,
 } from '../review/ReferenceWorkspace.js';
 import { ReviewChrome } from '../review/ReviewChrome.js';
+import type { DocumentContextButtonProps } from '../review/DocumentContextButton.js';
 import { ReviewIcon } from '../review/ReviewIcon.js';
 import { OutlineAnnotationsWorkspace } from '../review/OutlineAnnotationsWorkspace.js';
 import {
@@ -351,6 +352,7 @@ export interface ReviewShellProps {
   onItemCorrespondenceChange?(id: string | undefined): void;
   onActiveItemChange?(id: string | undefined): void;
   codexContext?: LiveContextBindingStatus;
+  documentContext?: DocumentContextButtonProps;
   copyLink?: CopyLinkControlProps;
   copyItemLink?: {
     readonly getLink: (item: ReviewItem) => string | Promise<string>;
@@ -2054,6 +2056,7 @@ export function ReviewShell(props: ReviewShellProps) {
         canNavigateForward={props.workspace.canNavigateForward ?? false}
         documentNavigationPending={props.workspace.documentNavigationPending ?? false}
         {...(props.codexContext === undefined ? {} : { codexContext: props.codexContext })}
+        {...(props.documentContext === undefined ? {} : { documentContext: props.documentContext })}
         {...(props.copyLink === undefined ? {} : { copyLink: props.copyLink })}
         onUndo={() => { commandSurface.invoke('undo'); }}
         onRedo={() => { commandSurface.invoke('redo'); }}

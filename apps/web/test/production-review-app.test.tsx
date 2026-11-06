@@ -2004,3 +2004,37 @@ it('renders captured evidence and an editable note before offering to add contex
   expect(html).not.toContain('Discuss annotations in chat');
   expect(onAdd).not.toHaveBeenCalled();
 });
+
+it('projects a pending PDF status only for the same displayed source', () => {
+  const state = createReviewState({
+    sessionId: '00000000-0000-4000-8000-000000000011',
+    source: { fileId: '00000000-0000-4000-8000-000000000012', digest: 'a'.repeat(64), byteLength: 12 },
+  });
+  const renderReader = (fileId: string) => renderToStaticMarkup(<ProductionReviewApp
+    session={{ sessionId: state.sessionId }}
+    initialState={state}
+    scope={{ documentTitle: 'paper.pdf', launchSurface: 'codex', contextOwner: 'app' }}
+    api={{
+      command: vi.fn(), saveStatus: vi.fn(), saveProposal: vi.fn(), chooseCopy: vi.fn(),
+      chooseFolder: vi.fn(), chooseOriginal: vi.fn(), retrySave: vi.fn(), locateSave: vi.fn(), scope: vi.fn(),
+    }}
+    agentBridge={{
+      attach: vi.fn(),
+      documentContext: {
+        getState: () => ({
+          status: 'available', canActivate: false,
+          version: { sourceKey: `${state.sessionId}/${fileId}`, generation: 0, digest: 'b'.repeat(64) },
+        }),
+        setSource: vi.fn(), subscribe: () => () => {}, activate: vi.fn(),
+      },
+    }}
+    viewer={<div>Viewer</div>}
+  />);
+
+  const sameSource = renderReader(state.source.fileId);
+  expect(sameSource).toContain('data-document-context="publishing"');
+  expect(sameSource).not.toContain('data-document-context="available"');
+  const otherSource = renderReader('other');
+  expect(otherSource).toContain('data-document-context="idle"');
+  expect(otherSource).not.toContain('data-document-context="available"');
+});

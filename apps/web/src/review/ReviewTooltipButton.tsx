@@ -55,6 +55,7 @@ export interface ReviewTooltipButtonProps extends ButtonHTMLAttributes<HTMLButto
   readonly label: string;
   readonly tooltip?: string | false;
   readonly tooltipOnFocus?: boolean;
+  readonly keepTooltipOnKeyboardActivation?: boolean;
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -75,6 +76,7 @@ export const ReviewTooltipButton = forwardRef<HTMLButtonElement, ReviewTooltipBu
     label,
     tooltip = label,
     tooltipOnFocus = true,
+    keepTooltipOnKeyboardActivation = false,
     onMouseEnter,
     onMouseLeave,
     onFocus,
@@ -185,7 +187,9 @@ export const ReviewTooltipButton = forwardRef<HTMLButtonElement, ReviewTooltipBu
         }}
         onClick={(event) => {
           pointerActivation.current = false;
-          hide();
+          if (keepTooltipOnKeyboardActivation && event.detail === 0
+            && event.currentTarget.matches(':focus-visible')) clearHoverTimer();
+          else hide();
           onClick?.(event);
         }}
         onPointerDown={(event: PointerEvent<HTMLButtonElement>) => {

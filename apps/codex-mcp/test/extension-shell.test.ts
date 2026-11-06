@@ -919,3 +919,173 @@ it('reveals a ready reader while reconnecting without losing the paused state', 
     expect(host.mounts).toHaveLength(1);
     await f.shell.teardown();
 });
+
+function pdfContextFixture() {
+    let current: any = null;
+    const api = { getCurrent: () => current, update: vi.fn(async (_params: any) => ({ updateId: crypto.randomUUID() })) };
+    let expired = false;
+    const successor = active(nextGrant);
+    successor.presentation.generation = 2;
+    const f = fixture(async request => {
+        if (request.action === 'revoke') return reply({ status: 'closed' });
+        if (request.action === 'resume') { expired = false; return reply(successor); }
+        if (request.action === 'context-published') return reply({ status: 'context-ready' });
+        if (expired) return reply({ status: 'denied', reason: 'expired' });
+        return reply({ status: 'ok', payload: { sessionId: 'session', documentGeneration: request.request.generation, watermark: 0 } });
+    }, undefined, () => api);
+    Object.assign(f.app, { getHostCapabilities: () => ({ updateModelContext: { resource: {} } }), sendMessage: vi.fn() });
+    return {
+        ...f, api,
+        expire: () => { expired = true; },
+        reconcile: (value: any) => {
+            current = value;
+            f.shell.hostContextChanged({ 'openai/modelContext': null });
+        },
+        documents: () => api.update.mock.calls.flatMap(([params]) => params.content.filter((block: any) => block.resource?.mimeType === 'application/pdf')),
+    };
+}
+const paperSource = (generation = 1, fileId = 'paper', readBytes = vi.fn(() => Uint8Array.of(1, 2, generation))) =>
+    ({ sourceKey: `session/${fileId}`, digest: 'a'.repeat(64), generation, title: 'Paper.pdf', readBytes });
+
+it('shares the complete verified PDF on click and follows an authenticated successor without a new click', async () => {
+    const f = pdfContextFixture();
+    await f.shell.receive({ ...active(), contextPublished: false });
+    const controller = host.mounts[0][4].documentContext;
+    const bytes = Uint8Array.from({ length: 75_013 }, (_, index) => index % 251);
+    const first = paperSource(1, 'paper', vi.fn(() => bytes));
+    controller.setSource(first);
+    const snapshot = { title: first.title, documentGeneration: 1, reviewRevision: 0, source: { fileId: 'paper', digest: first.digest }, page: 1, pageCount: 2, annotations: [], selection: null };
+    host.mounts[0][5](snapshot);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(f.documents()).toEqual([]);
+    expect(first.readBytes).not.toHaveBeenCalled();
+    controller.activate();
+    expect(controller.getState().status).toBe('publishing');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(f.documents().at(-1)?.resource.blob).toBe(Buffer.from(bytes).toString('base64'));
+    expect(controller.getState().status).toBe('available');
+    host.mounts[0][5]({ ...snapshot, reviewRevision: 1 });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(first.readBytes).toHaveBeenCalledOnce();
+    expect(controller.getState().status).toBe('available');
+
+    f.expire();
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(controller.getState().status).not.toBe('available');
+    const next = host.mounts[1][4].documentContext;
+    const successor = paperSource(2);
+    controller.setSource(first);
+    controller.activate();
+    next.setSource(successor);
+    expect(next.getState().status).toBe('publishing');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(f.documents().at(-1)?.resource.blob).toBe('AQIC');
+    expect(next.getState()).toMatchObject({ status: 'available', version: { generation: 2 } });
+    expect(first.readBytes).toHaveBeenCalledOnce();
+    expect((f.app as any).sendMessage).not.toHaveBeenCalled();
+    await f.shell.teardown();
+});
+
+it('ignores a late receipt for a different same-named paper and retries only the current PDF', async () => {
+    const f = pdfContextFixture();
+    await f.shell.receive({ ...active(), contextPublished: false });
+    const controller = host.mounts[0][4].documentContext;
+    const pending = deferred();
+    f.api.update.mockImplementationOnce(() => pending.promise);
+    controller.setSource(paperSource());
+    controller.activate();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(f.documents()).toHaveLength(1);
+    const other = paperSource(1, 'other', vi.fn(() => Uint8Array.of(8)));
+    controller.setSource(other);
+    expect(controller.getState()).toMatchObject({ status: 'idle', canActivate: true });
+    pending.resolve({ updateId: 'old-paper' });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(controller.getState().status).toBe('idle');
+    expect(other.readBytes).not.toHaveBeenCalled();
+
+    other.readBytes.mockReturnValueOnce(new Uint8Array());
+    controller.activate();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(controller.getState()).toMatchObject({ status: 'unavailable', canActivate: true });
+    f.api.update.mockRejectedValueOnce(new Error('declined'));
+    controller.activate();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(controller.getState()).toMatchObject({ status: 'unavailable', canActivate: true });
+    controller.activate();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(f.documents().at(-1)?.resource.blob).toBe('CA==');
+    expect(controller.getState().status).toBe('available');
+    f.reconcile(null);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(controller.getState().status).toBe('idle');
+    await f.shell.teardown();
+});
+
+it('explains missing PDF capability without reading bytes or disabling capture', async () => {
+    const f = pdfContextFixture();
+    Object.assign(f.app, { getHostCapabilities: () => ({ updateModelContext: { resourceLink: {} } }) });
+    await f.shell.receive({ ...active(), contextPublished: false });
+    const bridge = host.mounts[0][4];
+    const source = paperSource();
+    bridge.documentContext.setSource(source);
+    expect(bridge.documentContext.getState()).toMatchObject({ status: 'unsupported', canActivate: false, reason: expect.any(String) });
+    bridge.documentContext.activate();
+    expect(source.readBytes).not.toHaveBeenCalled();
+    expect(bridge.addContext).toBeTypeOf('function');
+    await f.shell.teardown();
+});
+
+it('does not publish PDF bytes when the presentation authenticates another session', async () => {
+    const f = pdfContextFixture();
+    await f.shell.receive({ ...active(), contextPublished: false });
+    const controller = host.mounts[0][4].documentContext;
+    controller.setSource({ ...paperSource(), sourceKey: 'another-session/paper' });
+    controller.activate();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(f.documents()).toEqual([]);
+    expect(controller.getState()).toMatchObject({ status: 'unavailable', canActivate: true });
+    await f.shell.teardown();
+});
+
+it('invalidates accepted PDF context while a changed host file is still being verified', async () => {
+    const pdf = { contents: [{ uri: 'opaque:host', blob: btoa('%PDF-1.7\nimport fixture\n%%EOF') }] };
+    const resourceRead = deferred();
+    let imported = false;
+    let onUpdate!: (event: any) => void;
+    const resources = {
+        read: vi.fn(async () => pdf),
+        subscribe: vi.fn(async () => ({})), unsubscribe: vi.fn(async () => ({})),
+        addUpdateHandler: (listener: (event: any) => void) => { onUpdate = listener; return vi.fn(); },
+    };
+    const api = { getCurrent: () => null, update: vi.fn(async () => ({ updateId: 'accepted' })) };
+    const f = fixture(async request => {
+        if (request.action === 'host-resource') {
+            if (request.operation === 'begin') return reply({ status: 'host-transfer', transfer: 't'.repeat(43), offset: 0 });
+            if (request.operation === 'chunk') return reply({ status: 'host-transfer', transfer: 't'.repeat(43), offset: atob(request.dataBase64).length });
+            if (request.operation === 'finish') {
+                if (imported) return reply({ status: 'host-ready', generation: 1 });
+                imported = true;
+                return reply({ status: 'provisional', grant });
+            }
+            if (request.operation === 'save') return reply({ status: 'host-status', outcome: 'read-only' });
+        }
+        if (request.action === 'activate') return reply({ ...active(nextGrant), contextPublished: false });
+        if (request.action === 'context-published') return reply({ status: 'context-ready' });
+        if (request.action === 'revoke') return reply({ status: 'closed' });
+        return reply({ status: 'ok', payload: { sessionId: 'session', documentGeneration: 1, watermark: 0 } });
+    }, () => resources, () => api);
+    Object.assign(f.app, { getHostCapabilities: () => ({ updateModelContext: { resource: {} } }) });
+    await f.shell.receive({ status: 'host-resource', file: { name: 'Paper.pdf', resourceUri: 'opaque:host' }, ticket: 'p'.repeat(43) });
+    const controller = host.mounts[0][4].documentContext;
+    controller.setSource(paperSource());
+    controller.activate();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(controller.getState().status).toBe('available');
+
+    resources.read.mockImplementationOnce(() => resourceRead.promise);
+    onUpdate({ params: { uri: 'opaque:host' } });
+    expect(controller.getState()).toMatchObject({ status: 'publishing', canActivate: false });
+    await f.shell.teardown();
+    resourceRead.resolve(pdf);
+});

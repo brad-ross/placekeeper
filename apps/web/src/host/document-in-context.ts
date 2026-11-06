@@ -18,6 +18,8 @@ export type DocumentContextState = {
   | { readonly status: 'unsupported' | 'unavailable'; readonly reason: string }
 );
 
+export const INACTIVE_DOCUMENT_CONTEXT: DocumentContextState = { status: 'idle', canActivate: false };
+
 export interface DocumentContextController {
   setSource(source: DocumentContextSource | undefined): void;
   getState(): DocumentContextState;
@@ -33,3 +35,15 @@ export interface DocumentContextMember extends DocumentContextVersion {
 }
 
 export type DocumentContextPublicationStatus = 'publishing' | 'available' | 'unavailable' | 'removed';
+
+export function documentContextSourceKey(sessionId: string, fileId: string): string {
+  return `${sessionId}/${fileId}`;
+}
+
+export function sameDocumentContextVersion(
+  left: DocumentContextVersion | undefined,
+  right: DocumentContextVersion | undefined,
+): boolean {
+  return left !== undefined && right !== undefined && left.sourceKey === right.sourceKey
+    && left.generation === right.generation && left.digest === right.digest;
+}
