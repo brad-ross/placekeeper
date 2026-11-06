@@ -43,12 +43,20 @@ export async function bundleDependencyNotices(repo: string, destination: string)
     const metadata = JSON.parse(await readFile(join(directory, "package.json"), "utf8")) as PackageMetadata;
     const id = `${metadata.name.replaceAll("/", "_")}@${metadata.version}`;
     const notices: string[] = [];
-    for (const entry of await readdir(directory, { withFileTypes: true })) {
-      if (!entry.isFile() || !/^(?:licen[cs]e|copying|notice|copyright)(?:[.-].*)?$/iu.test(entry.name)) continue;
-      const output = join(destination, id, entry.name);
-      await mkdir(dirname(output), { recursive: true });
-      await copyFile(join(directory, entry.name), output);
-      notices.push(`${id}/${entry.name}`);
+    // Some npm releases omit their upstream notice; vendored notices are pinned to name and version.
+    for (const noticeRoot of [directory, join(repo, "packaging/dependency-notices", id)]) {
+      const entries = await readdir(noticeRoot, { withFileTypes: true }).catch((error: NodeJS.ErrnoException) => {
+        if (error.code === "ENOENT" && noticeRoot !== directory) return [];
+        throw error;
+      });
+      for (const entry of entries) {
+        if (!entry.isFile() || !/^(?:licen[cs]e|copying|notice|copyright)(?:[.-].*)?$/iu.test(entry.name)) continue;
+        const output = join(destination, id, entry.name);
+        await mkdir(dirname(output), { recursive: true });
+        await copyFile(join(noticeRoot, entry.name), output);
+        notices.push(`${id}/${entry.name}`);
+      }
+      if (notices.length > 0) break;
     }
     if (notices.length === 0) throw new Error(`No dependency license/notice file found for ${id}`);
     packages.push({ name: metadata.name, version: metadata.version, license: metadata.license ?? null, notices: notices.sort() });
