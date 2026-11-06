@@ -414,3 +414,10 @@ Validation: 111 tests across runtime, recovery, and host-resource suites passed;
 - extension-candidate: `39ca37adf7b73829bb28079fb07c37863c398d47aecffd94a30e1c2a1f3ecf5b`
 
 - extension-candidate-opaque: `3e040da1c5aefcc4848a1435a180de0295892bea69b7ff42fd0e94d1d5e9e0a0`
+
+
+### Local Close review / Resume and fresh navigation passed
+
+After installing `19d9297a` without restarting Codex, the existing chooser opened the local disposable fixture at Saved. That reused app panel still produced stale WebMCP registration errors. Close review successfully removed it. The user reopened the same PDF through Placekeeper without a Codex restart: fresh tab 5 offered Resume protected review, and selecting it restored the three existing annotation identities and unchanged source digest `e0b616880dd5f933dd4555dcfee502e2456fd465816e8707adb6b5c124dc6f94`. Fresh live inspection returned file ID `617af449-8745-4add-8a43-248e76701130`, generation 1/revision 0. The file ID differs from the pre-service-restart review and is not evidence of uninterrupted service identity.
+
+Fresh navigate_page to page 1 returned navigated and the reader announced Main document destination opened. This establishes the previously missing before-sleep navigation baseline. Sleep/wake navigation is still pending; no PDF contents were changed during this cycle.
