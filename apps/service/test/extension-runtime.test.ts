@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, symlink, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -256,6 +256,45 @@ describe("app-owned extension presentations", () => {
     expect(await f.manager.resume(second.grant, randomUUID())).toEqual({ status: 'unavailable' });
     f.advance(290_001);
     expect(await f.manager.dispatch({ action: 'revoke', grant: second.grant })).toEqual({ status: 'unavailable' });
+  });
+  it("offers explicit recovery of a local review after its app owner closes", async () => {
+    const f = await fixture(), before = await opened(f.manager, { pdfPath: f.pdfPath });
+    const original = payload(await f.manager.handle(request(before.presentation, 'watermark')));
+    await f.manager.revoke(before.grant);
+    const offer = await f.manager.open({ pdfPath: f.pdfPath });
+    expect(offer).toMatchObject({ status: 'busy', canResume: true });
+    if (offer.status !== 'busy') throw Error('Expected recovery choice');
+    const chosen = await f.manager.choose({ action: 'choose', recoveryToken: offer.recoveryToken, choice: 'resume', operationId: randomUUID() });
+    if (chosen.status !== 'provisional') throw Error('Expected provisional');
+    const after = active(await f.manager.resume(chosen.grant, randomUUID(), 'activate'));
+    expect(payload(await f.manager.handle(request(after.presentation, 'watermark'))).sessionId).toBe(original.sessionId);
+    expect(await f.manager.handle(request(before.presentation, 'bootstrap'))).toMatchObject({ status: 'denied' });
+  });
+  it("rejects a stale local recovery choice once another app resumes", async () => {
+    const f = await fixture(), before = await opened(f.manager, { pdfPath: f.pdfPath });
+    await f.manager.revoke(before.grant);
+    const first = await f.manager.open({ pdfPath: f.pdfPath });
+    const second = await f.manager.open({ pdfPath: f.pdfPath });
+    if (first.status !== 'busy' || second.status !== 'busy') throw Error('Expected recovery choices');
+    expect(first.canResume && second.canResume).toBe(true);
+    const chosen = await f.manager.choose({ action: 'choose', recoveryToken: first.recoveryToken, choice: 'resume', operationId: randomUUID() });
+    expect(chosen.status).toBe('provisional');
+    expect(await f.manager.choose({ action: 'choose', recoveryToken: second.recoveryToken, choice: 'resume', operationId: randomUUID() })).toEqual({ status: 'unavailable' });
+    expect(await f.manager.open({ pdfPath: f.pdfPath })).toMatchObject({ status: 'busy', canResume: false });
+  });
+  it("does not create an ownerless review when a recovery path is retargeted", async () => {
+    const f = await fixture();
+    const alias = `${f.pdfPath}.link.pdf`, other = `${f.pdfPath}.other.pdf`;
+    await symlink(f.pdfPath, alias);
+    await writeFile(other, "%PDF-1.7\nother source\n%%EOF");
+    const before = await opened(f.manager, { pdfPath: alias });
+    await f.manager.revoke(before.grant);
+    const offer = await f.manager.open({ pdfPath: alias });
+    if (offer.status !== 'busy' || !offer.canResume) throw Error('Expected recovery');
+    await unlink(alias);
+    await symlink(other, alias);
+    expect(await f.manager.choose({ action: 'choose', recoveryToken: offer.recoveryToken, choice: 'resume', operationId: randomUUID() })).toEqual({ status: 'unavailable' });
+    expect(await f.manager.open({ pdfPath: other })).toMatchObject({ status: 'provisional' });
   });
   it("explicit close revokes resumption while idle grant expiry releases suspended records", async () => {
     const f = await fixture(), a = await opened(f.manager, { pdfPath: f.pdfPath });

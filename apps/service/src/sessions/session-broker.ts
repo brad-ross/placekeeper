@@ -867,6 +867,19 @@ export class SessionBroker {
     return matches.length === 1 ? matches[0] : undefined;
   }
 
+  /** Re-admit only the offered live local review, without allocating a replacement. */
+  async reopenLiveLocal(sessionId: string, offeredPath: string): Promise<OpenReviewResult | undefined> {
+    const session = this.#activeById.get(sessionId);
+    if (!session || session.ending) return;
+    return this.#withSessionTail(session, async () => {
+      const canonicalPath = await realpath(offeredPath).catch(() => undefined);
+      if (session.ending || session.sourceOwnership.disposition !== "local" ||
+          canonicalPath !== session.canonicalSourcePath ||
+          this.taskBindings.taskForGeneration(sessionId, session.state.workflow.documentGeneration)) return;
+      return { kind: "focused", launch: this.#launch(session, "codex-native") };
+    });
+  }
+
   /** Validate a prior copy before explicitly re-admitting an unowned live review. */
   async reopenLiveHostCopy(sessionId: string): Promise<OpenReviewResult | undefined> {
     const session = this.#activeById.get(sessionId);
