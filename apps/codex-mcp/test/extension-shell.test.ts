@@ -295,7 +295,7 @@ it.each([false, true])('reopens the selected host PDF after recovery bytes chang
     }, () => resources);
     await f.shell.receive({ status: 'host-resource', file, ticket: 'p'.repeat(43) });
     expect(descendants(f.controls).map(node => node.textContent).join(' ')).toContain('a similar filename');
-    const resume = descendants(f.controls).find(button => button.textContent === 'Resume review');
+    const resume = descendants(f.controls).find(button => button.textContent === 'Continue');
     resume.onclick();
     if (lostResponse) {
         await vi.waitFor(() => expect(descendants(f.controls).map(node => node.textContent).join(' ')).toContain('protected work is retained'));
@@ -330,7 +330,7 @@ it('disposes the host route when a busy resource is canceled before choosing a l
     await f.shell.receive({ status: 'host-resource', file: { name: 'host.pdf', resourceUri: 'opaque:host' }, ticket: 'p'.repeat(43) });
     const button = (text: string) => descendants(f.controls).find(button => button.textContent === text);
     button('Cancel').onclick(); await vi.advanceTimersByTimeAsync(0);
-    button('Choose PDF').onclick();
+    button('New Document').onclick();
     await vi.waitFor(() => expect(host.mounts).toHaveLength(1));
     expect(resources.read).toHaveBeenCalledOnce(); expect(resources.unsubscribe).toHaveBeenCalledOnce();
     expect(f.calls.some(c => c.action === 'host-resource' && c.grant === grant)).toBe(false);
@@ -354,9 +354,9 @@ it.each(['provisional', 'busy'] as const)('uses the local source route after an 
     const button = (text: string) => descendants(f.controls).filter(button => button.textContent === text).at(-1);
     await f.shell.receive({ status: 'host-resource', file: { name: 'host.pdf', resourceUri: 'opaque:host' }, ticket: 'p'.repeat(43) });
     await vi.advanceTimersByTimeAsync(95_000);
-    button('Open separate copy').onclick(); await vi.advanceTimersByTimeAsync(0);
+    button('Open Copy').onclick(); await vi.advanceTimersByTimeAsync(0);
     button('Choose PDF again').onclick(); await vi.advanceTimersByTimeAsync(0);
-    if (pickerStatus === 'busy') { button('Open separate copy').onclick(); await vi.advanceTimersByTimeAsync(0); }
+    if (pickerStatus === 'busy') { button('Open Copy').onclick(); await vi.advanceTimersByTimeAsync(0); }
     expect(host.mounts).toHaveLength(1);
     expect(resources.read).toHaveBeenCalledOnce();
     expect(resources.unsubscribe).toHaveBeenCalledOnce();
@@ -557,14 +557,14 @@ it.each([false, true])('replays a lost host resume receipt before refreshing rot
     await f.shell.teardown();
 });
 
-it.each(['Open separate copy', 'Cancel'])('keeps %s fenced while a recovery resume is pending', async competing => {
+it.each(['Open Copy', 'Cancel'])('keeps %s fenced while a recovery resume is pending', async competing => {
     const pending = deferred();
     const f = fixture(async request => request.action === 'choose' ? pending.promise : reply({ status: 'closed' }));
     await f.shell.receive({ status: 'busy', recoveryToken: 'r'.repeat(43), canResume: true });
     const dialog = descendants(f.controls).find(node => node.tagName === 'DIALOG');
     expect(dialog?.showModal).toHaveBeenCalledOnce();
     const buttons = descendants(dialog).filter(node => node.tagName === 'BUTTON');
-    const resume = buttons.find(button => button.textContent === 'Resume review');
+    const resume = buttons.find(button => button.textContent === 'Continue');
     resume.onclick();
     expect(buttons.every(button => button.disabled)).toBe(true);
     buttons.find(button => button.textContent === competing).onclick();
@@ -572,7 +572,7 @@ it.each(['Open separate copy', 'Cancel'])('keeps %s fenced while a recovery resu
     pending.resolve(reply(active(nextGrant))); await vi.advanceTimersByTimeAsync(0);
     expect(host.mounts).toHaveLength(1);
     expect(f.status.textContent).not.toContain('connection ended');
-    expect(f.controls.append.mock.calls.some(([button]) => button.textContent === 'Choose PDF')).toBe(false);
+    expect(f.controls.append.mock.calls.some(([button]) => button.textContent === 'New Document')).toBe(false);
     await f.shell.teardown();
 });
 
@@ -581,18 +581,18 @@ it('offers fresh source selection after an expired recovery choice without endin
     await f.shell.receive({ status: 'busy', recoveryToken: 'r'.repeat(43), canResume: true });
     const oldButtons = descendants(f.controls);
     await vi.advanceTimersByTimeAsync(95_000);
-    oldButtons.find(button => button.textContent === 'Open separate copy').onclick();
+    oldButtons.find(button => button.textContent === 'Open Copy').onclick();
     await vi.advanceTimersByTimeAsync(0);
     expect(f.status.textContent).toContain('Choose the PDF again');
     expect(f.status.textContent).not.toContain('connection ended');
     expect(host.mounts).toHaveLength(0);
-    oldButtons.find(button => button.textContent === 'Resume review').onclick();
+    oldButtons.find(button => button.textContent === 'Continue').onclick();
     await vi.advanceTimersByTimeAsync(0);
     expect(f.calls.filter(c => c.action === 'choose')).toHaveLength(1);
     descendants(f.controls).find(button => button.textContent === 'Choose PDF again').onclick();
     await vi.advanceTimersByTimeAsync(0);
     expect(f.calls.filter(c => c.action === 'open')).toEqual([{ action: 'open' }]);
-    expect(descendants(f.controls).map(node => node.textContent).join(' ')).toContain('Protected review work is available');
+    expect(descendants(f.controls).map(node => node.textContent).join(' ')).toContain('Reopen Document');
     expect(f.calls.filter(c => c.action === 'choose')).toHaveLength(1);
     await f.shell.teardown();
 });
@@ -602,7 +602,7 @@ it('fences retained recovery callbacks after cancel', async () => {
     await f.shell.receive({ status: 'busy', recoveryToken: 'r'.repeat(43), canResume: true });
     const buttons = descendants(f.controls);
     buttons.find(button => button.textContent === 'Cancel').onclick(); await vi.advanceTimersByTimeAsync(0);
-    buttons.find(button => button.textContent === 'Resume review').onclick(); await vi.advanceTimersByTimeAsync(0);
+    buttons.find(button => button.textContent === 'Continue').onclick(); await vi.advanceTimersByTimeAsync(0);
     expect(f.calls.filter(c => c.action === 'choose')).toHaveLength(0);
     expect(host.mounts).toHaveLength(0);
     await f.shell.teardown();
@@ -612,7 +612,7 @@ it('fences an expired-choice picker and revokes its late grant after cancel', as
     const pending = deferred();
     const f = fixture(async request => request.action === 'open' ? pending.promise : reply(request.action === 'choose' ? { status: 'unavailable' } : { status: 'closed' }));
     await f.shell.receive({ status: 'busy', recoveryToken: 'r'.repeat(43), canResume: true });
-    descendants(f.controls).find(button => button.textContent === 'Open separate copy').onclick();
+    descendants(f.controls).find(button => button.textContent === 'Open Copy').onclick();
     await vi.advanceTimersByTimeAsync(0);
     const buttons = descendants(f.controls);
     const choose = buttons.find(button => button.textContent === 'Choose PDF again');
@@ -640,7 +640,7 @@ it('revokes a late recovery choice grant after teardown', async () => {
     const pending = deferred();
     const f = fixture(async request => request.action === 'choose' ? pending.promise : reply({ status: 'closed' }));
     await f.shell.receive({ status: 'busy', recoveryToken: 'r'.repeat(43), canResume: true });
-    descendants(f.controls).find(button => button.textContent === 'Resume review').onclick();
+    descendants(f.controls).find(button => button.textContent === 'Continue').onclick();
     await f.shell.teardown(); pending.resolve(reply(active(nextGrant))); await vi.advanceTimersByTimeAsync(0);
     expect(f.calls.filter(c => c.action === 'revoke').map(c => c.grant)).toEqual([nextGrant]);
     expect(host.mounts).toHaveLength(0);
@@ -650,7 +650,7 @@ it('restores the recovery button group after a failed choice and retries its ope
     let attempts = 0;
     const f = fixture(async request => { if (request.action === 'choose') { if (++attempts === 1) throw Error('offline'); return reply(active(nextGrant)); } return reply({ status: 'closed' }); });
     await f.shell.receive({ status: 'busy', recoveryToken: 'r'.repeat(43), canResume: true });
-    const buttons = descendants(f.controls).filter(node => node.tagName === 'BUTTON'), resume = buttons.find(button => button.textContent === 'Resume review');
+    const buttons = descendants(f.controls).filter(node => node.tagName === 'BUTTON'), resume = buttons.find(button => button.textContent === 'Continue');
     resume.onclick(); await vi.advanceTimersByTimeAsync(0);
     expect(buttons.every(button => button.disabled === false)).toBe(true);
     resume.onclick(); await vi.advanceTimersByTimeAsync(0);
@@ -662,7 +662,7 @@ it('revokes a late chooser result after teardown and fences the retained picker 
     const pending = deferred();
     const f = fixture(async request => request.action === 'open' ? pending.promise : reply({ status: 'closed' }));
     await f.shell.receive({ status: 'chooser' });
-    const choose = descendants(f.controls).find(button => button.textContent === 'Choose PDF');
+    const choose = descendants(f.controls).find(button => button.textContent === 'New Document');
     choose.onclick(); await f.shell.teardown();
     pending.resolve(reply(active(nextGrant))); await vi.advanceTimersByTimeAsync(0);
     choose.onclick(); await vi.advanceTimersByTimeAsync(0);
@@ -767,12 +767,12 @@ it('rechecks a live review and waits for a separate user choice before resuming'
     });
     await f.shell.receive({ status: 'busy', recoveryToken: liveToken, canResume: false });
     const nodes = () => descendants(f.controls);
-    expect(nodes().some(node => node.textContent === 'Resume review')).toBe(false);
+    expect(nodes().some(node => node.textContent === 'Continue')).toBe(false);
     nodes().find(node => node.textContent === 'Check again').onclick();
     await vi.advanceTimersByTimeAsync(0);
     expect(f.calls).toEqual([{ action: 'recheck', recoveryToken: liveToken }]);
     expect(host.mounts).toHaveLength(0);
-    nodes().find(node => node.textContent === 'Resume review').onclick();
+    nodes().find(node => node.textContent === 'Continue').onclick();
     await vi.advanceTimersByTimeAsync(0);
     expect(f.calls.find(c => c.action === 'choose')).toMatchObject({ choice: 'recover', recoveryToken: recoveredToken });
     expect(host.mounts).toHaveLength(1);
@@ -782,7 +782,7 @@ it('offers explicit disconnected recovery without silently choosing it', async (
  const f=fixture(async r=>reply(r.action==='choose'?{status:'provisional',grant}:r.action==='activate'?active():{status:'ok',payload:{}}));
  await f.shell.receive({status:'busy',recoveryToken:'r'.repeat(43),canResume:false,canRecover:true});
  expect(f.calls.some(r=>r.action==='choose')).toBe(false);
- const recover=descendants(f.controls).find(b=>b.textContent==='Resume review');
+ const recover=descendants(f.controls).find(b=>b.textContent==='Continue');
  expect(recover).toBeDefined();recover.onclick();await vi.advanceTimersByTimeAsync(0);
  expect(f.calls.find(r=>r.action==='choose')).toMatchObject({choice:'recover'});
  expect(host.mounts).toHaveLength(1);await f.shell.teardown();
@@ -792,17 +792,17 @@ it('lists recent reviews in the conversation chooser and opens only the selected
  const f=fixture(async r=>reply(r.action==='recent-list'?{status:'recent-reviews',items:[{id,title:'Recent.pdf',updatedAt:'2026-11-05T12:00:00.000Z',page:3}]}:r.action==='recent-open'?{status:'busy',recoveryToken:'r'.repeat(43),canResume:true}:{status:'closed'}));
  await f.shell.receive({status:'chooser'});await vi.advanceTimersByTimeAsync(0);
  expect(f.calls.some(r=>r.action==='recent-open')).toBe(false);
- const resume=f.controls.append.mock.calls.map(([b])=>b).find(b=>b.textContent==='Resume Recent.pdf');
+ const resume=descendants(f.controls).find(b=>b.textContent==='Resume');
  expect(resume).toBeDefined();resume.onclick();await vi.advanceTimersByTimeAsync(0);
  expect(f.calls.find(r=>r.action==='recent-open')).toEqual({action:'recent-open',id});
- expect(descendants(f.controls).map(node=>node.textContent)).toContain('Resume review');
+ expect(f.calls.find(r=>r.action==='choose')).toMatchObject({choice:'resume'});
  await f.shell.teardown();
 });
 
 it('offers recent reviews without a cross-chat snapshot picker in the empty chooser', async () => {
     const f = fixture(async request => reply(request.action === 'recent-list' ? { status: 'recent-reviews', items: [] } : { status: 'closed' }));
     await f.shell.receive({ status: 'chooser' }); await vi.advanceTimersByTimeAsync(0);
-    expect(descendants(f.controls).map(node => node.textContent)).toContain('Recent reviews');
+    expect(descendants(f.controls).map(node => node.textContent)).toContain('Recent Documents');
     expect(descendants(f.controls).some(node => node.className === 'snapshot-context-picker')).toBe(false);
     expect(f.calls).toEqual([{ action: 'recent-list' }]);
     await f.shell.teardown();
@@ -812,8 +812,8 @@ it.each(['picker', 'recent'] as const)('serializes %s opening against the other 
  const opening=deferred(), activation=deferred(), id='z'.repeat(32);
  const f=fixture(async r=>r.action==='recent-list'?reply({status:'recent-reviews',items:[{id,title:'Recent.pdf',updatedAt:'2026-11-05T12:00:00.000Z'}]}):r.action==='open'||r.action==='recent-open'?opening.promise:r.action==='activate'?activation.promise:reply({status:'closed'}));
  await f.shell.receive({status:'chooser'});await vi.advanceTimersByTimeAsync(0);
- const buttons=f.controls.append.mock.calls.map(([b])=>b);
- const picker=buttons.find(b=>b.textContent==='Choose PDF'), recent=buttons.find(b=>b.textContent==='Resume Recent.pdf');
+ const buttons=descendants(f.controls);
+ const picker=buttons.find(b=>b.textContent==='New Document'), recent=buttons.find(b=>b.textContent==='Resume');
  const chosen=first==='picker'?picker:recent, other=first==='picker'?recent:picker;
  chosen.onclick();other.onclick();await vi.advanceTimersByTimeAsync(0);
  expect(f.calls.filter(r=>r.action==='open'||r.action==='recent-open')).toHaveLength(1);
@@ -822,4 +822,32 @@ it.each(['picker', 'recent'] as const)('serializes %s opening against the other 
  expect(f.calls.filter(r=>r.action==='open'||r.action==='recent-open')).toHaveLength(1);
  activation.resolve(reply(active(nextGrant)));await vi.advanceTimersByTimeAsync(0);
  expect(host.mounts).toHaveLength(1);await f.shell.teardown();
+});
+
+it.each(['resume', 'fork'] as const)('runs recent %s directly and retries a lost choice response with the same operation', async choice => {
+ const id='z'.repeat(32); let attempts=0;
+ const f=fixture(async r => {
+  if(r.action==='recent-list') return reply({status:'recent-reviews',items:[{id,title:'Recent.pdf',updatedAt:'2026-11-05T12:00:00Z'}]});
+  if(r.action==='recent-open') return reply({status:'busy',recoveryToken:'r'.repeat(43),canResume:true});
+  if(r.action==='choose') { if(++attempts===1) throw Error('lost response'); return reply({status:'cancelled'}); }
+  return reply({status:'closed'});
+ });
+ await f.shell.receive({status:'chooser'});await vi.advanceTimersByTimeAsync(0);
+ const button=descendants(f.controls).find(b=>b.textContent===(choice==='resume'?'Resume':'Open Copy'));
+ button.onclick();await vi.advanceTimersByTimeAsync(0);
+ expect(descendants(f.controls).some(b=>b.tagName==='DIALOG')).toBe(false);
+ button.onclick();await vi.advanceTimersByTimeAsync(0);
+ const calls=f.calls.filter(r=>r.action==='choose');
+ expect(calls).toHaveLength(2);expect(calls[1]).toEqual(calls[0]);expect(calls[0]).toMatchObject({choice});
+ expect(f.calls.filter(r=>r.action==='recent-open')).toHaveLength(1);
+ await f.shell.teardown();
+});
+it('leaves a still-owned recent document in its card without taking over or opening a dialog', async () => {
+ const f=fixture(async r=>reply(r.action==='recent-list'?{status:'recent-reviews',items:[{id:'z'.repeat(32),title:'Recent.pdf',updatedAt:'2026-11-05T12:00:00Z'}]}:r.action==='recent-open'?{status:'busy',recoveryToken:'r'.repeat(43),canResume:false}:{status:'closed'}));
+ await f.shell.receive({status:'chooser'});await vi.advanceTimersByTimeAsync(0);
+ descendants(f.controls).find(b=>b.textContent==='Resume').onclick();await vi.advanceTimersByTimeAsync(0);
+ expect(f.calls.some(r=>r.action==='choose')).toBe(false);
+ expect(descendants(f.controls).some(b=>b.tagName==='DIALOG')).toBe(false);
+ expect(descendants(f.controls).map(b=>b.textContent).join(' ')).toContain('Still open elsewhere');
+ await f.shell.teardown();
 });

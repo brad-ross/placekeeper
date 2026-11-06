@@ -72,10 +72,33 @@ dialog.extension-recovery {
   background: var(--review-surface-panel);
   box-shadow: var(--review-shadow-float);
 }
-.extension-controls[data-mode="chooser"] > button { min-height: 36px; text-align: left; overflow-wrap: anywhere; }
-.extension-controls[data-mode="chooser"] > button:first-child { justify-self: start; padding-inline: 12px; color: #fff; background: #333; }
-.extension-controls[data-mode="chooser"] > button:first-child:hover:not(:disabled) { background: #222; }
-.extension-controls[data-mode="chooser"] h3 { margin: 14px 0 0; font: 500 13px/1.4 var(--review-font-ui); }
+.extension-controls[data-mode="chooser"] h3 { margin: 0 0 6px; font: 500 13px/1.4 var(--review-font-ui); }
 .extension-controls[data-mode="chooser"] p:not(.terminal-recovery p) { margin: 0; color: var(--review-ink-muted); font: 400 12px/1.5 var(--review-font-ui); overflow-wrap: anywhere; }
+.extension-recent-list { display: grid; gap: 6px; }
+.extension-controls .extension-recent-list > .extension-recent-card { width: 100%; box-sizing: border-box; text-align: left; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 6px 12px; padding: 12px; border-radius: var(--review-radius-row); background: var(--review-surface-canvas); }
+
+.extension-recent-card__details { display: grid; min-width: 0; gap: 4px; }
+.extension-recent-card__title { color: var(--review-ink-primary); font: 400 13px/1.45 var(--review-font-ui); overflow-wrap: anywhere; }
+.extension-recent-card__date { color: var(--review-ink-muted); font: 400 12px/1.4 var(--review-font-ui); }
+.extension-chooser-footer { display: flex; justify-content: flex-end; gap: 6px; margin-top: 10px; }
+.extension-controls .extension-chooser-footer .extension-choose-pdf { padding-inline: 12px; color: #fff; background: #333; }
+.extension-controls .extension-chooser-footer .extension-choose-pdf:hover:not(:disabled) { background: #222; }
+@media (pointer: coarse) {
+  .extension-controls[data-mode="chooser"] :is(.extension-recent-card__actions, .extension-chooser-footer) > button { min-height: 44px; }
+}
 #status[data-extension-mode="review"]:not([hidden]) { position: absolute; top: 44px; left: 12px; right: 12px; z-index: 49; border-radius: 8px; border: 1px solid var(--color-border-primary, #deded9); background: var(--color-background-primary, #fff); box-shadow: 0 2px 12px #0000000d; padding: 8px 12px; font-size: 12px; }
 #status[data-extension-mode="chooser"] { padding: 24px 24px 0; color: var(--review-ink-muted); text-align: center; font: 400 13px/1.5 var(--review-font-ui); }
+
+.extension-recent-card__actions { display: flex; align-items: center; gap: 2px; }
+.extension-recent-card__feedback { grid-column: 1 / -1; }
+.extension-recent-card__feedback:empty { display: none; }
+.extension-recovery .terminal-recovery__actions { justify-content: flex-start; }
+@media (max-width: 480px) {
+  .extension-controls .extension-recent-list > .extension-recent-card { grid-template-columns: minmax(0, 1fr); }
+  .extension-recent-card__actions { justify-content: flex-end; }
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .extension-recent-card__actions { opacity: 0; pointer-events: none; }
+  .extension-recent-card:is(:hover, :focus-within) .extension-recent-card__actions { opacity: 1; pointer-events: auto; }
+}

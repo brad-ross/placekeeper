@@ -27,22 +27,19 @@ for (const width of [1120, 375]) test(`reopening recovers a disconnected review 
     await page.goto('about:blank');
     await reader.mount(true);
     await expect(page.getByText('Include review context', { exact: true })).toHaveCount(0);
+    await page.locator('.extension-recent-card').hover();
     await page.getByRole('button', { name: 'Resume Recent paper.pdf', exact: true }).click();
-    const dialog = page.getByRole('dialog', { name: 'Reopen review', exact: true });
-    await expect(dialog).toBeVisible();
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    await expect(page.getByText('Still open elsewhere. Try Resume again shortly.')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Close review', exact: true })).toHaveCount(0);
-    await expect(dialog.getByRole('button', { name: 'Resume review', exact: true })).toHaveCount(0);
-    await dialog.getByRole('button', { name: 'Check again', exact: true }).click();
-    await expect(dialog.getByRole('button', { name: 'Resume review', exact: true })).toHaveCount(0);
-    reader.advance(30001);
-    await dialog.getByRole('button', { name: 'Check again', exact: true }).click();
-    await expect(dialog.getByRole('button', { name: 'Resume review', exact: true })).toBeVisible();
-    const bounds = await dialog.boundingBox();
+    const bounds = await page.locator('.extension-recent-card').boundingBox();
     expect(bounds!.x).toBeGreaterThanOrEqual(0); expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(width);
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
     await info.attach(`recovery-${width}px`, { body: await page.screenshot({ fullPage: true }), contentType: 'image/png' });
+    reader.advance(30001);
     reader.suppressRelease(false);
-    await dialog.getByRole('button', { name: 'Resume review', exact: true }).click();
+    await page.locator('.extension-recent-card').hover();
+    await page.getByRole('button', { name: 'Resume Recent paper.pdf', exact: true }).click();
     await reader.ready();
     await expect.poll(async () => (await reader.tool('inspect_review', {})).page).toBe(2);
     expect((await reader.tool('inspect_review', {})).source).toEqual(before.source);
@@ -57,11 +54,27 @@ test('leaving the reader releases ownership without a Close review button', asyn
     await page.goto('about:blank');
     await expect.poll(() => reader.requests.some(request => request.action === 'revoke')).toBe(true);
     await reader.mount(true);
+    await page.locator('.extension-recent-card').hover();
     await page.getByRole('button', { name: 'Resume Recent paper.pdf', exact: true }).click();
-    const dialog = page.getByRole('dialog', { name: 'Reopen review', exact: true });
-    await expect(dialog.getByRole('button', { name: 'Resume review', exact: true })).toBeVisible();
-    await dialog.getByRole('button', { name: 'Resume review', exact: true }).click();
+    await expect(page.getByRole('dialog')).toHaveCount(0);
     await reader.ready();
+  } finally { await reader.dispose(); }
+});
+
+test('recent document Open Copy opens a separate review without a recovery dialog', async ({ page }) => {
+  const reader = await extensionRecoveryReader(page);
+  try {
+    await reader.mount(false); await reader.ready();
+    reader.suppressRelease(true);
+    await page.goto('about:blank');
+    await reader.mount(true);
+    await page.locator('.extension-recent-card').hover();
+    await page.getByRole('button', { name: 'Open copy of Recent paper.pdf', exact: true }).click();
+    await reader.ready();
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    expect(reader.requests.some(request => request.action === 'choose' && request.choice === 'fork')).toBe(true);
+    await expect.poll(async () => (await reader.manager.dispatch({ action: 'recent-list' }) as any).items.length).toBe(2);
+    reader.suppressRelease(false);
   } finally { await reader.dispose(); }
 });
 

@@ -271,7 +271,6 @@ export class ExtensionShell {
         this.#recoveryDialog = dialog;
         dialog.className = 'extension-recovery terminal-recovery';
         dialog.setAttribute('aria-labelledby', 'extension-recovery-title');
-        dialog.setAttribute('aria-describedby', 'extension-recovery-description');
         const header = document.createElement('header');
         header.className = 'terminal-recovery__header';
         const body = document.createElement('div');
@@ -279,7 +278,7 @@ export class ExtensionShell {
         const title = document.createElement('h1');
         title.id = 'extension-recovery-title';
         const available = offer.canRecover || offer.canResume;
-        title.textContent = 'Reopen review';
+        title.textContent = 'Reopen Document';
         const description = document.createElement('p');
         description.id = 'extension-recovery-description';
         description.textContent = offer.canRecover
@@ -298,7 +297,11 @@ export class ExtensionShell {
         const footerActions = document.createElement('div');
         footerActions.className = 'terminal-recovery__footer-actions';
         header.append(title);
-        body.append(description, choices, feedback);
+        if (!available || offer.matchingCopy) {
+            body.append(description);
+            dialog.setAttribute('aria-describedby', description.id);
+        }
+        body.append(choices, feedback);
         footer.append(footerActions);
         dialog.append(header, body, footer);
         const buttons: HTMLButtonElement[] = [];
@@ -345,21 +348,16 @@ export class ExtensionShell {
         };
         const addChoice = (choice: 'recover' | 'resume' | 'fork', label: string, consequence: string) => {
             const row = document.createElement('div');
-            row.className = 'terminal-recovery__choice';
             const operationId = crypto.randomUUID();
             const request = { action: 'choose', recoveryToken: offer.recoveryToken, choice, operationId } as const;
             const button = action(label, row, () => { void run(request, 'Opening review…'); });
             if (choice !== 'fork') button.className = 'terminal-recovery__primary';
-            const note = document.createElement('p');
-            note.id = `extension-recovery-${choice}`;
-            note.textContent = consequence;
-            button.setAttribute('aria-describedby', note.id);
-            row.append(note);
+            button.title = consequence;
             choices.append(row);
         };
-        if (offer.canRecover) addChoice('recover', 'Resume review', 'Transfer this review here and prevent the previous reader from making further changes.');
-        else if (offer.canResume) addChoice('resume', 'Resume review', 'Continue with your existing annotations and protected draft.');
-        addChoice('fork', 'Open separate copy', 'Start a separate review and keep the existing work in place.');
+        if (offer.canRecover) addChoice('recover', 'Continue', 'Transfer this review here and prevent the previous reader from making further changes.');
+        else if (offer.canResume) addChoice('resume', 'Continue', 'Continue with your existing annotations and protected draft.');
+        addChoice('fork', 'Open Copy', 'Start a separate review and keep the existing work in place.');
         if (!available) action('Check again', footerActions, () => {
             void run({ action: 'recheck', recoveryToken: offer.recoveryToken }, 'Checking the previous connection…');
         });
@@ -397,54 +395,98 @@ export class ExtensionShell {
         if ('grant' in result && (this.#closed || result.grant !== this.#grant))
             await this.#request({ action: 'revoke', grant: result.grant }).catch(() => undefined);
     }
-    #chooser(notice = 'Open a PDF to begin reviewing.', label = 'Choose PDF', cancellable = false, restoreFocus = false) {
+    #chooser(notice = '', label = 'New Document', cancellable = false, restoreFocus = false) {
         const epoch = ++this.#choiceEpoch;
         this.controls.className = 'extension-controls'; this.controls.dataset.mode = 'chooser'; this.status.dataset.extensionMode = 'chooser';
         if (!this.#active) this.#resetHost();
         this.#closeRecovery();
         this.#show(notice); this.controls.replaceChildren();
+        const heading = document.createElement('h3');
+        heading.textContent = 'Recent Documents';
+        const list = document.createElement('div');
+        list.className = 'extension-recent-list';
+        const footer = document.createElement('div');
+        footer.className = 'extension-chooser-footer';
+        this.controls.append(heading, list, footer);
         const current = () => !this.#closed && epoch === this.#choiceEpoch;
         let opening = false;
         const buttons: HTMLButtonElement[] = [];
-        const addOpenButton = (text: string, request: Extract<ExtensionRequest, { action: 'open' | 'recent-open' }>) => {
+        const addOpenButton = (text: string, request: Extract<ExtensionRequest, { action: 'open' | 'recent-open' }>, container: HTMLElement, recentChoice?: 'resume' | 'fork', feedback?: HTMLElement) => {
+            let retryChoice: Extract<ExtensionRequest, { action: 'choose' }> | undefined;
             const button = this.#button(text, async () => {
                 if (!current() || opening) return;
                 opening = true; for (const control of buttons) control.disabled = true;
                 try {
-                    const parsed = parseExtensionResult(await this.#request(request));
+                    if (feedback) feedback.textContent = '';
+                    let parsed = parseExtensionResult(await this.#request(retryChoice ?? request));
+                    if (!current()) { if (parsed) await this.#discardObsolete(parsed); return; }
+                    if (request.action === 'recent-open' && recentChoice && parsed?.status === 'busy') {
+                        if (recentChoice === 'resume' && !parsed.canResume && !parsed.canRecover) {
+                            if (feedback) feedback.textContent = 'Still open elsewhere. Try Resume again shortly.';
+                            return;
+                        }
+                        retryChoice = { action: 'choose', recoveryToken: parsed.recoveryToken, choice: recentChoice === 'fork' ? 'fork' : parsed.canRecover ? 'recover' : 'resume', operationId: crypto.randomUUID() };
+                        parsed = parseExtensionResult(await this.#request(retryChoice));
+                    }
+                    retryChoice = undefined;
                     if (!current()) { if (parsed) await this.#discardObsolete(parsed); return; }
                     if (parsed?.status === 'chooser') { this.#show('Use the PDF’s file menu to open it in Placekeeper on this host.'); return; }
-                    if (parsed?.status === 'unavailable' && request.action === 'recent-open') { this.#show('This review could not be resumed. Reopen its PDF through the file menu; protected work is retained.'); return; }
+                    if (parsed?.status === 'unavailable' && request.action === 'recent-open') { if (feedback) feedback.textContent = 'Could not open this document. Try again.'; return; }
                     // A local picker selection changes the source route; cancellation retains it.
                     if (request.action === 'open' && (parsed?.status === 'provisional' || parsed?.status === 'busy')) this.#resetHost();
                     if (parsed?.status === 'provisional' || parsed?.status === 'host-resource') this.#choiceEpoch++;
                     if (parsed) await this.#apply(parsed);
-                } catch (error) { if (current()) throw error; }
+                } catch (error) { if (current()) { if (feedback) feedback.textContent = 'Could not open this document. Try again.'; else throw error; } }
                 finally { opening = false; if (current()) for (const control of buttons) control.disabled = false; }
-            });
+            }, container);
             button.disabled = opening; buttons.push(button);
             return button;
         };
-        const choose = addOpenButton(label, { action: 'open' });
+        const choose = addOpenButton(label, { action: 'open' }, footer);
+        choose.className = 'extension-choose-pdf';
         if (restoreFocus) choose.focus();
-        void this.#showRecent(current, addOpenButton);
+        void this.#showRecent(current, addOpenButton, list);
         if (cancellable) this.#button('Cancel', async () => {
             if (!current()) return;
             if (this.#active && this.#grant) await this.#apply({ status: 'active', grant: this.#grant, presentation: this.#active });
             else this.#chooser();
-        });
+        }, footer);
     }
-    async #showRecent(current: () => boolean, addOpenButton: (label: string, request: Extract<ExtensionRequest, { action: 'open' | 'recent-open' }>) => void) {
+    async #showRecent(current: () => boolean, addOpenButton: (label: string, request: Extract<ExtensionRequest, { action: 'open' | 'recent-open' }>, container: HTMLElement, recentChoice?: 'resume' | 'fork', feedback?: HTMLElement) => HTMLButtonElement, list: HTMLElement) {
         try {
-            const result=await this.#request({action:'recent-list'});
-            if(!current()||result.status!=='recent-reviews')return;
-            const heading=document.createElement('h3');heading.textContent='Recent reviews';this.controls.append(heading);
-            if(result.items.length===0){const empty=document.createElement('p');empty.textContent='Reviews you open here will appear here for easy resuming.';this.controls.append(empty);return;}
-            for(const item of result.items){
-                const details=document.createElement('p');details.textContent=`${item.title}${item.page?` · Page ${item.page}`:''} · ${new Date(item.updatedAt).toLocaleString()}`;this.controls.append(details);
-                addOpenButton(`Resume ${item.title}`, { action: 'recent-open', id: item.id });
+            const result = await this.#request({ action: 'recent-list' });
+            if (!current() || result.status !== 'recent-reviews') return;
+            if (result.items.length === 0) {
+                const empty = document.createElement('p');
+                empty.textContent = 'No recent documents yet.';
+                list.append(empty);
+                return;
             }
-        }catch{if(current())this.#show('Recent reviews are unavailable. You can still choose a PDF.');}
+            for (const item of result.items) {
+                const row = document.createElement('div');
+                row.className = 'extension-recent-card';
+                const details = document.createElement('span');
+                details.className = 'extension-recent-card__details';
+                const title = document.createElement('span');
+                title.className = 'extension-recent-card__title';
+                title.textContent = item.title;
+                const date = document.createElement('span');
+                date.className = 'extension-recent-card__date';
+                date.textContent = new Date(item.updatedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+                details.append(title, date);
+                const actions = document.createElement('div');
+                actions.className = 'extension-recent-card__actions';
+                const feedback = document.createElement('p');
+                feedback.className = 'extension-recent-card__feedback';
+                feedback.setAttribute('role', 'status');
+                const resume = addOpenButton('Resume', { action: 'recent-open', id: item.id }, actions, 'resume', feedback);
+                resume.setAttribute('aria-label', `Resume ${item.title}`);
+                const copy = addOpenButton('Open Copy', { action: 'recent-open', id: item.id }, actions, 'fork', feedback);
+                copy.setAttribute('aria-label', `Open copy of ${item.title}`);
+                row.append(details, actions, feedback);
+                list.append(row);
+            }
+        } catch { if (current()) this.#show('Recent reviews are unavailable. You can still choose a PDF.'); }
     }
     #rememberPage(snapshot: ReviewContextSnapshot) {
         if(!this.#grant||!this.#connected||this.#readingPage===snapshot.page)return;
