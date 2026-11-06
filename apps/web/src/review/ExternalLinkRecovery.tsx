@@ -1,6 +1,5 @@
 import { useState } from 'react';
 
-/** A failed host handoff never takes focus away from the PDF. */
 export function ExternalLinkRecovery({ url, onDismiss }: {
   readonly url: string;
   readonly onDismiss: () => void;
