@@ -692,6 +692,8 @@ export function RuntimeProductionReviewApp(props: {
     initialSaveStatus={visible.saveStatus}
     scope={visible.scope}
     api={loaded === undefined ? pendingApi : props.runtime ?? pendingApi}
+    {...(loaded !== undefined && props.runtime?.openExternalUrl !== undefined
+      ? { onOpenExternalUrl: (url: string) => props.runtime!.openExternalUrl!(url) } : {})}
     viewerAssets={visible.viewerAssets}
     resourcePolicy={visible.resourcePolicy}
     {...(loaded === undefined ? {

@@ -122,6 +122,7 @@ export type ViewerInteractionEvent = (
   | { readonly type: 'owned-mark'; readonly value: ViewerOwnedMarkInteraction }
   | { readonly type: 'owned-mark-clear' }
   | { readonly type: 'source-mark'; readonly value: ViewerSourceMarkInteraction }
+  | { readonly type: 'pdf-external-link'; readonly value: { readonly sourceScope: ViewerPdfLinkSourceScope; readonly sourcePageIndex: number; readonly documentGeneration: number; readonly url: string } }
   | { readonly type: 'pdf-link'; readonly value: ViewerPdfLinkInvocation }
   | { readonly type: 'pdf-link-unavailable'; readonly value: ViewerPdfLinkUnavailable }
 ) & { readonly surface?: PdfAnnotationSurface };

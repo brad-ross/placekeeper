@@ -1,3 +1,5 @@
+import { ReviewTooltipButton } from '../review/ReviewTooltipButton.js';
+import { classifyPdfExternalLink } from './pdf-external-link.js';
 import {
   PdfAnnotationBorderStyle,
   PdfAnnotationSubtype,
@@ -152,6 +154,7 @@ export function PdfLinkControl({
   pageLinkAnnotations,
   onInteraction,
 }: PdfLinkControlProps) {
+  const externalUrl = classifyPdfExternalLink(annotation.target);
   const classification = classifyPdfNavigationTarget(annotation.target, {
     documentGeneration,
     pageCount,
@@ -176,6 +179,13 @@ export function PdfLinkControl({
     event.stopPropagation();
     // Reclassify the raw activation-time target so no malformed value can cross
     // the neutral viewer-event boundary after a renderer update.
+    const url = classifyPdfExternalLink(rawTarget);
+    if (url !== null) {
+      onInteraction?.({ type: 'pdf-external-link', value: {
+        sourceScope, sourcePageIndex: annotation.pageIndex, documentGeneration, url,
+      } });
+      return;
+    }
     const current = classifyPdfNavigationTarget(rawTarget, { documentGeneration, pageCount });
     if (!current.ok) {
       onInteraction?.({
@@ -208,18 +218,18 @@ export function PdfLinkControl({
     });
   };
 
-  return (
+  const button = (
     <button
       type="button"
       {...{ [PDF_LINK_INTERACTION_ATTRIBUTE]: '' }}
       className="pdf-link-control"
-      aria-label={metadata === null
+      aria-label={externalUrl !== null ? `Open web link: ${externalUrl}` : metadata === null
         ? 'PDF link target unavailable'
         : accessibleLinkName(metadata.label, metadata.pageContext)}
       title={metadata === null ? 'PDF link target unavailable' : 'Open link actions'}
-      aria-haspopup="menu"
-      aria-controls={PDF_LINK_ACTION_MENU_ID}
-      aria-expanded={false}
+      {...(externalUrl === null ? {
+        'aria-haspopup': 'menu' as const, 'aria-controls': PDF_LINK_ACTION_MENU_ID, 'aria-expanded': false,
+      } : {})}
       onPointerDown={stopPointerFallthrough}
       onPointerUp={stopPointerFallthrough}
       onClick={(event) => activate(annotation.target, event)}
@@ -231,7 +241,7 @@ export function PdfLinkControl({
         padding: 0,
         border: 0,
         background: 'transparent',
-        cursor: classification.ok ? 'pointer' : 'not-allowed',
+        cursor: classification.ok || externalUrl !== null ? 'pointer' : 'not-allowed',
         // EmbedPDF's annotation container disables pointer events by default;
         // the project-owned native control is the intentional hit target.
         pointerEvents: 'auto',
@@ -239,6 +249,8 @@ export function PdfLinkControl({
       }}
     />
   );
+  return externalUrl === null ? button : <ReviewTooltipButton {...button.props}
+    label={`Open web link: ${externalUrl}`} tooltip={externalUrl} />;
 }
 
 export function createPdfLinkAnnotationRenderer(
