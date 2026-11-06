@@ -408,3 +408,9 @@ The automated navigate_page request for page 1 returned navigation-unavailable, 
 ### Local close/reopen recovery correction
 
 The fresh local-path open after Close review offered only an independent review, unlike the saved-copy route. Revocation had removed the app grant but retained the broker session without recording that explicit release. The runtime now records explicitly released local sessions and offers Resume only while no app grant or legacy task owns them. Choice rechecks ownership and focuses only the offered existing local session. A changed symlink is rejected without allocating another review. Old presentation credentials remain denied. Native verification of this correction is pending.
+
+Validation: 111 tests across runtime, recovery, and host-resource suites passed; full TypeScript check and service build passed. Independent review confirmed its one path-retargeting finding resolved, with no open actionable findings. Both test plugins installed from `19d9297a`; all 13 installed files per plugin matched their packages. Fixtures were restored byte-for-byte with original permissions, and existing recovery roots retained.
+
+- extension-candidate: `39ca37adf7b73829bb28079fb07c37863c398d47aecffd94a30e1c2a1f3ecf5b`
+
+- extension-candidate-opaque: `3e040da1c5aefcc4848a1435a180de0295892bea69b7ff42fd0e94d1d5e9e0a0`
