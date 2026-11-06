@@ -6,7 +6,7 @@ import { nativeBridge } from './codex-native-bridge.js';
  * This does not qualify native entrypoints, host focus, conditional resource writes or lifecycle. */
 export async function extensionReader(page: Page, fixture = 'text-native-with-annotations.pdf', options: {
   holdPublication?: boolean;
-  documentPublication?: 'hold-first' | 'hold-and-decline-first';
+  documentPublication?: 'hold-first' | 'hold-and-decline-first' | 'hold-second';
   theme?: 'light' | 'dark';
 } = {}) {
   const bridge = await nativeBridge(fixture);
@@ -18,11 +18,19 @@ export async function extensionReader(page: Page, fixture = 'text-native-with-an
       // The shared reader bridge omits the daemon's installer coordinator.
       // Model its idle response so an unrelated optional poll cannot retire this panel.
       if (request.request.method === 'upgradePoll') return { status: 'ok', payload: { phase: 'none' } };
+      if (request.request.generation !== bridge.broker.state(bridge.sessionId)?.workflow.documentGeneration) {
+        return { status: 'denied', reason: 'stale-generation' };
+      }
       const response = await panel.raw(request.request.method, request.request.payload);
       if (response.status === 'denied') console.log('Extension test transport denial', request.request.method, response.reason);
       return response;
     }
     if (request.action === 'activate') return { status: 'active', grant: 'a'.repeat(43), presentation: panel.state.active, contextPublished: false };
+    if (request.action === 'resume') {
+      // Translate the native test bridge's successor handoff into the extension's resume reply.
+      await panel.call('watermark');
+      return { status: 'active', grant: 'b'.repeat(43), presentation: panel.state.active, contextPublished: true };
+    }
     if (request.action === 'reading-position') return { status: 'position-saved' };
     if (request.action === 'context-published') return { status: 'context-ready' };
     if (request.action === 'revoke') return { status: 'closed' };
@@ -74,9 +82,8 @@ export async function extensionReader(page: Page, fixture = 'text-native-with-an
           state.publications.push(params);
           const pdfs = params.content.filter((block: any) => block.type === 'resource' && block.resource?.mimeType === 'application/pdf');
           if (pdfs.length > 0) {
-            const first = state.documentPublications.length === 0;
             state.documentPublications.push(pdfs);
-            if (first) {
+            if (state.documentPublications.length === (documentPublication === 'hold-second' ? 2 : 1)) {
               await documentPublicationGate;
               if (documentPublication === 'hold-and-decline-first') throw Error('Host declined the PDF');
             }

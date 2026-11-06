@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { readFile } from 'node:fs/promises';
+import { readFile, rename, writeFile } from 'node:fs/promises';
 import { extensionReader } from '../support/extension-reader.js';
 import { extensionRecoveryReader } from '../support/extension-recovery-reader.js';
 
@@ -85,6 +85,42 @@ for (const scenario of [
       const { messages, promptText } = (window as any).extensionAcceptance;
       return { messages, promptText };
     })).toEqual({ messages: [], promptText: 'Keep my typed question' });
+  } finally { await reader.dispose(); }
+});
+
+test('toolbox document context waits for the replacement PDF receipt', async ({ page }) => {
+  const reader = await extensionReader(page, 'text-native.pdf', { documentPublication: 'hold-second' });
+  try {
+    await reader.ready();
+    const bot = page.locator('[data-review-context-status] button[data-document-context]');
+    const before = await reader.tool('inspect_review', {});
+    await bot.click();
+    await expect(bot).toHaveAttribute('data-document-context', 'available');
+
+    const replacement = await readFile('test/fixtures/pdfs/multi-page-text.pdf');
+    const { bridge } = reader;
+    await writeFile(`${bridge.pdfPath}.next`, replacement);
+    await rename(`${bridge.pdfPath}.next`, bridge.pdfPath);
+    await bridge.broker.replaceLiveDocument({
+      sessionId: bridge.sessionId, outputPath: bridge.pdfPath, observationEpoch: before.documentGeneration,
+    });
+    await expect.poll(() => bridge.broker.state(bridge.sessionId)?.workflow.documentGeneration).toBe(before.documentGeneration + 1);
+    await expect.poll(async () => (await reader.tool('inspect_review', {})).documentGeneration).toBe(before.documentGeneration + 1);
+    const after = await reader.tool('inspect_review', {});
+    expect(after.source.fileId).toBe(before.source.fileId);
+    expect(after.source.digest).not.toBe(before.source.digest);
+    await reader.ready();
+
+    // The replacement is rendered and its complete PDF submitted, but the host has not accepted it.
+    await expect.poll(() => page.evaluate(() => {
+      const { documentPublications } = (window as any).extensionAcceptance;
+      return documentPublications[1]?.map((pdf: any) => pdf.resource.blob);
+    })).toEqual([replacement.toString('base64')]);
+    await expect(bot).toHaveAttribute('data-document-context', 'publishing');
+    await expect(bot.locator('svg')).toHaveCSS('color', 'rgb(217, 173, 43)');
+    await page.evaluate(() => (window as any).extensionAcceptance.releaseDocumentPublication());
+    await expect(bot).toHaveAttribute('data-document-context', 'available');
+    await expect(bot.locator('svg')).toHaveCSS('color', 'rgb(45, 104, 77)');
   } finally { await reader.dispose(); }
 });
 

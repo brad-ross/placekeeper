@@ -16,12 +16,20 @@ import { EXTENSION_META_KEY, EXTENSION_TOOL, extensionPickerTimeouts, parseExten
 import { PanelLiveness } from './panel-liveness.js';
 import { NativeDiagnosticError, diagnosticFailure } from './lifecycle-diagnostics.js';
 
-function encodeDocument(bytes: Uint8Array): string {
+async function encodeDocument(bytes: Uint8Array, current: () => boolean): Promise<string | undefined> {
+    const { toBase64 } = bytes as Uint8Array & { toBase64?: () => string };
+    if (typeof toBase64 === 'function') return toBase64.call(bytes);
+
     const chunks: string[] = [];
-    // Each chunk except the last must end on a base64 triple boundary.
+    // Keep the spread bounded and each chunk aligned to a base64 triple boundary.
     const chunkSize = 24 * 1024;
+    const chunksPerTurn = 8;
     for (let offset = 0; offset < bytes.length; offset += chunkSize) {
         chunks.push(btoa(String.fromCharCode(...bytes.subarray(offset, offset + chunkSize))));
+        if (chunks.length % chunksPerTurn === 0 && offset + chunkSize < bytes.length) {
+            await new Promise<void>(resolve => setTimeout(resolve, 0));
+            if (!current()) return undefined;
+        }
     }
     return chunks.join('');
 }
@@ -177,6 +185,7 @@ export class ExtensionShell {
         this.#context = new ExtensionContextCoordinator(api, undefined, {
             freshInvocation,
             onDocumentStatus: (member, status) => this.#documentPublished(member, status),
+            onContextCleared: () => this.#cancelDocumentChoice(),
             beforeUpdate: async () => {
                 const grant = this.#grant;
                 if (!grant || this.#closed) throw Error('Context connection unavailable');
@@ -495,8 +504,10 @@ export class ExtensionShell {
             const bytes = await source.readBytes();
             if (!current()) return;
             if (!bytes?.length) throw Error('Verified PDF bytes unavailable');
+            const blob = await encodeDocument(bytes, current);
+            if (!current() || blob === undefined) return;
             const member: DocumentContextMember = {
-                ...version, title: source.title, blob: encodeDocument(bytes),
+                ...version, title: source.title, blob,
                 beforeSubmit: async () => {
                     if (!current()) throw Error('Document changed');
                     const proof = await this.#payload('watermark', {}, epoch) as { sessionId?: string; documentGeneration?: number };
@@ -510,14 +521,20 @@ export class ExtensionShell {
             if (current()) this.#setDocumentState({ version, status: 'unavailable', reason: 'Could not prepare the verified PDF.', canActivate: true });
         }
     }
+    #cancelDocumentChoice() {
+        if (this.#documentChoice === undefined) return;
+        this.#documentChoice = undefined;
+        this.#clearDocument();
+        this.#syncDocument();
+    }
     #documentPublished(member: DocumentContextMember, status: DocumentContextPublicationStatus) {
+        if (status === 'removed') {
+            if (member.sourceKey === this.#documentChoice) this.#cancelDocumentChoice();
+            return;
+        }
         if (this.#documentMember !== member || !this.#connected || this.#closed || !sameDocumentContextVersion(member, this.#documentSource)) return;
         const version = this.#documentState.version!;
-        if (status === 'removed') {
-            this.#documentChoice = undefined;
-            this.#clearDocument();
-            this.#syncDocument();
-        } else if (status === 'unavailable') {
+        if (status === 'unavailable') {
             this.#documentMember = undefined;
             this.#setDocumentState({ version, status, reason: 'The PDF could not be added to chat context.', canActivate: true });
         } else {
@@ -933,6 +950,7 @@ export class ExtensionShell {
         this.#clearLoading();
         this.#closed = true;
         this.#connected = false;
+        const contextShutdown = this.#context?.shutdown();
         this.#endDocumentContext();
         this.root.inert = true;
         const grant = this.#grant, host = this.#host, operationId = this.#resumeOperation;
@@ -949,13 +967,12 @@ export class ExtensionShell {
         try {
             this.#liveness?.stop();
             this.#readerTools?.dispose();
-            this.#context?.dispose();
             this.#closeRecovery();
             this.#unmount?.();
             this.#listeners.clear();
         } finally {
             void host?.dispose().catch(() => undefined);
-            await revoked;
+            await Promise.all([revoked, contextShutdown]);
         }
         return revoked;
     }

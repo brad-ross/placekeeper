@@ -6,6 +6,8 @@ type Block = NonNullable<NonNullable<OpenAIModelContextHostState>['content']>[nu
 export const backgroundContextUri = 'placekeeper-context:///background';
 const attachmentPrefix = 'placekeeper-context:///attachment/';
 const documentPrefix = 'placekeeper-context:///document/';
+const contextHistoryLimit = 32;
+const shutdownTimeoutMs = 500;
 interface DocumentPublication {
   readonly member: DocumentContextMember;
   readonly id: string;
@@ -38,12 +40,18 @@ export class ExtensionContextCoordinator {
   #attachments = new Map<string, Block>();
   #confirmedAttachments = new Map<string, Block>();
   #submitted: Map<string, Block> | undefined;
+  #submittedEmpty = false;
+  #submissionNoticeIds = new Set<string>();
+  #submissionNoticeOverflow = false;
+  #latestNoticeDeferred = false;
   #document: DocumentPublication | undefined;
   #submittedDocument: DocumentPublication | undefined;
   #hasObservedDocument = false;
   #needsDocumentCleanup = false;
   #retainedBackground: Block | undefined;
+  #hostBackground: Block | undefined;
   #onDocumentStatus: ((member: DocumentContextMember, status: DocumentContextPublicationStatus) => void) | undefined;
+  #onContextCleared: (() => void) | undefined;
   #beforeUpdate: (() => Promise<void>) | undefined;
   #removed = new Set<string>();
   #foreign: Block[] = [];
@@ -55,6 +63,9 @@ export class ExtensionContextCoordinator {
   #running = false;
   #scheduled = false;
   #disposed = false;
+  #shuttingDown = false;
+  #shutdownPromise: Promise<void> | undefined;
+  #writeShutdownCleanup: (() => void) | undefined;
   #acknowledged = new Map<string, string>();
   #status: ExtensionContextStatus;
   #inclusions: { revision: number; id: string; block: Block; resolve(): void; reject(error: Error): void }[] = [];
@@ -62,19 +73,22 @@ export class ExtensionContextCoordinator {
     readonly freshInvocation?: boolean;
     readonly beforeUpdate?: () => Promise<void>;
     readonly onDocumentStatus?: (member: DocumentContextMember, status: DocumentContextPublicationStatus) => void;
+    readonly onContextCleared?: () => void;
   } = {}) {
     this.#beforeUpdate = options.beforeUpdate;
     this.#onDocumentStatus = options.onDocumentStatus;
+    this.#onContextCleared = options.onContextCleared;
     this.#status = api ? 'paused' : 'unsupported';
     const initial = api?.getCurrent();
     this.#paused = initial == null && options.freshInvocation !== true;
     if (initial) {
+      this.#hostBackground = initial.content?.find(block => uri(block) === backgroundContextUri);
       this.#foreign = (initial.content ?? []).filter(block => !managed(block) && !documentBlock(block));
       this.#structured = initial.structuredContent ?? {};
       for (const block of initial.content ?? []) { const id = uri(block); if (!id || !managed(block)) continue; this.#known.add(id); if (id.startsWith(attachmentPrefix)) { this.#attachments.set(id, block); this.#confirmedAttachments.set(id, block); } }
       this.#paused = options.freshInvocation !== true && !this.#known.has(backgroundContextUri);
       if (initial.content?.some(documentBlock)) {
-        this.#retainedBackground = initial.content.find(block => uri(block) === backgroundContextUri);
+        this.#retainedBackground = this.#hostBackground;
         this.#needsDocumentCleanup = true;
         this.#change();
       }
@@ -87,7 +101,7 @@ export class ExtensionContextCoordinator {
   retry() { if (this.#status === 'unavailable') this.#change(true); }
   setDocument(member: DocumentContextMember) {
     if (this.#document?.member === member) return;
-    if (!this.api || this.#disposed || !member.blob) {
+    if (!this.api || this.#disposed || this.#shuttingDown || !member.blob) {
       this.clearDocument();
       this.#onDocumentStatus?.(member, 'unavailable');
       return;
@@ -118,7 +132,7 @@ export class ExtensionContextCoordinator {
     this.#change();
   }
   includeAttachment(attachment: ExtensionContextAttachment): Promise<void> {
-    if (!this.api || this.#disposed) return Promise.reject(Error('Context attachments are unavailable in this host.'));
+    if (!this.api || this.#disposed || this.#shuttingDown) return Promise.reject(Error('Context attachments are unavailable in this host.'));
     this.setAttachment(attachment);
     if (this.#status === 'unavailable') this.#change(true);
     if (this.#sentRevision >= this.#revision && this.#status === 'available') return Promise.resolve();
@@ -163,7 +177,24 @@ export class ExtensionContextCoordinator {
     // An echo of an old app publication cannot restore host-removed membership.
     if (state && this.#acknowledged.get(state.updateId) === contextFingerprint(state.content ?? [], state.structuredContent ?? {})) return;
     const blocks = state?.content ?? [];
+    const cleared = state === null || blocks.length === 0 && Object.keys(state.structuredContent ?? {}).length === 0;
     const present = new Set(blocks.map(uri).filter((id): id is string => id !== undefined));
+    const omitsSubmittedDocument = this.#submittedDocument !== undefined && !present.has(this.#submittedDocument.id);
+    // An empty app write can echo before its receipt. A receipt matching a
+    // partial notification can also prove that the host removed a new PDF.
+    if (state && (omitsSubmittedDocument || cleared && this.#submittedEmpty)) {
+      this.#submissionNoticeIds.add(state.updateId);
+      if (this.#submissionNoticeIds.size > contextHistoryLimit) {
+        this.#submissionNoticeOverflow = true;
+        this.#submissionNoticeIds.delete(this.#submissionNoticeIds.values().next().value!);
+      }
+      if (cleared && this.#submittedEmpty) {
+        this.#latestNoticeDeferred = true;
+        return;
+      }
+    }
+    this.#latestNoticeDeferred = false;
+    this.#hostBackground = blocks.find(block => uri(block) === backgroundContextUri);
     // A notification showing a newly submitted group can carry removals from
     // that same write. A notification about previously known groups alone
     // cannot establish that the host ever saw the newly submitted groups.
@@ -173,9 +204,9 @@ export class ExtensionContextCoordinator {
       for (const id of this.#submitted.keys()) this.#known.add(id);
     }
     for (const id of this.#known) if (!present.has(id)) { this.#remove(id); if (id === backgroundContextUri) this.#paused = true; }
-    const cleared = state === null || blocks.length === 0 && Object.keys(state.structuredContent ?? {}).length === 0;
     if (cleared) {
       this.#paused = true;
+      this.#hasObservedDocument = false;
       this.#attachments.clear();
       this.#confirmedAttachments.clear();
       this.#submitted?.clear();
@@ -184,11 +215,8 @@ export class ExtensionContextCoordinator {
     const document = this.#document;
     const removedDocument = document && !hasDocument && (cleared || this.#hasObservedDocument
       || showsSubmission && this.#submittedDocument === document);
-    if (removedDocument) {
-      this.#document = undefined;
-      this.#hasObservedDocument = false;
-      this.#submittedDocument = undefined;
-    } else if (document && present.has(document.id)) {
+    if (removedDocument) this.#forgetDocument();
+    else if (document && present.has(document.id)) {
       this.#hasObservedDocument = true;
     }
     const staleDocument = blocks.some(block => documentBlock(block) && uri(block) !== document?.id);
@@ -200,6 +228,31 @@ export class ExtensionContextCoordinator {
     const desiredIds = new Set(this.#blocks().map(uri));
     this.#change(staleDocument || blocks.some(block => managed(block) && !desiredIds.has(uri(block))));
     if (removedDocument) this.#onDocumentStatus?.(document.member, 'removed');
+    else if (cleared) this.#onContextCleared?.();
+  }
+  #forgetDocument() {
+    this.#document = undefined;
+    this.#hasObservedDocument = false;
+    this.#submittedDocument = undefined;
+  }
+  #applyDeferredClear(updateId?: string) {
+    if (!this.#submittedEmpty) return;
+    this.#submittedEmpty = false;
+    for (const id of this.#submissionNoticeIds) {
+      if (id === updateId) continue;
+      if (this.#latestNoticeDeferred) this.reconcile({ updateId: id, content: [] });
+      else {
+        // A newer host state supplies current context, but the earlier clear
+        // still cancels any retained PDF consent.
+        const document = this.#document;
+        if (document) {
+          this.#forgetDocument();
+          this.#change();
+          this.#onDocumentStatus?.(document.member, 'removed');
+        } else this.#onContextCleared?.();
+      }
+      break;
+    }
   }
   #blocks(): Block[] {
     const blocks = [...this.#foreign];
@@ -222,7 +275,7 @@ export class ExtensionContextCoordinator {
     if (!force && key === this.#desiredKey) return;
     this.#desiredKey = key;
     this.#revision++;
-    if (!this.api || this.#disposed) return;
+    if (!this.api || this.#disposed || this.#shuttingDown) return;
     const active = !this.#paused && this.#snapshot !== undefined || this.#attachments.size > 0;
     if (!active) this.#notify('paused');
     if (this.#running || this.#scheduled) return;
@@ -232,7 +285,7 @@ export class ExtensionContextCoordinator {
     queueMicrotask(() => { this.#scheduled = false; void this.#flush(); });
   }
   async #flush() {
-    if (!this.api || this.#disposed || this.#running || this.#sentRevision === this.#revision) return;
+    if (!this.api || this.#disposed || this.#shuttingDown || this.#running || this.#sentRevision === this.#revision) return;
     const revision = this.#revision, blocks = this.#blocks(), structuredContent = this.#structured, document = this.#document;
     const sharing = blocks.some(managed);
     if (this.#sentRevision < 0 && !sharing && this.#known.size === 0 && !document && !this.#needsDocumentCleanup) return;
@@ -241,12 +294,12 @@ export class ExtensionContextCoordinator {
     let validatingDocument = false;
     try {
       if (this.#beforeUpdate) await this.#beforeUpdate();
-      if (this.#disposed || revision !== this.#revision) return;
+      if (this.#disposed || this.#shuttingDown || revision !== this.#revision) return;
       if (document?.member.beforeSubmit) {
         validatingDocument = true;
         await document.member.beforeSubmit();
         validatingDocument = false;
-        if (this.#disposed || revision !== this.#revision) return;
+        if (this.#disposed || this.#shuttingDown || revision !== this.#revision) return;
       }
       this.#submitted = new Map();
       for (const block of blocks) {
@@ -254,29 +307,48 @@ export class ExtensionContextCoordinator {
         if (id && managed(block)) this.#submitted.set(id, block);
       }
       this.#submittedDocument = document;
+      this.#submittedEmpty = blocks.length === 0 && Object.keys(structuredContent).length === 0;
+      if (document) this.#needsDocumentCleanup = true;
       const result = await this.api.update({ content: blocks, structuredContent });
       if (this.#disposed) return;
       const updateId = result?.updateId;
+      this.#applyDeferredClear(updateId);
       if (updateId) {
+        this.#hostBackground = this.#submitted.get(backgroundContextUri);
         for (const [id, block] of this.#submitted) {
           this.#known.add(id);
           if (id.startsWith(attachmentPrefix)) this.#confirmedAttachments.set(id, block);
         }
         this.#acknowledged.set(updateId, contextFingerprint(blocks, structuredContent));
-        if (this.#acknowledged.size > 32) this.#acknowledged.delete(this.#acknowledged.keys().next().value!);
-        if (revision === this.#revision) this.#needsDocumentCleanup = false;
-        if (this.#submittedDocument === document) this.#hasObservedDocument = document !== undefined;
-        if (document && this.#document === document && !document.accepted) {
-          document.accepted = true;
-          this.#onDocumentStatus?.(document.member, 'available');
+        if (this.#acknowledged.size > contextHistoryLimit) this.#acknowledged.delete(this.#acknowledged.keys().next().value!);
+        if (!document && revision === this.#revision) this.#needsDocumentCleanup = false;
+        if (this.#submittedDocument === document) {
+          const removed = document !== undefined && this.#submissionNoticeIds.has(updateId);
+          this.#hasObservedDocument = document !== undefined && !removed;
+          if (removed) {
+            // A removal applies to the submitted source even if its desired
+            // version changed while the write was pending.
+            if (this.#document?.member.sourceKey === document.member.sourceKey) this.clearDocument();
+            this.#onDocumentStatus?.(document.member, 'removed');
+          } else if (document && this.#document === document && this.#submissionNoticeOverflow) {
+            // An evicted notice could have matched this receipt.
+            this.clearDocument();
+            this.#onDocumentStatus?.(document.member, 'unavailable');
+          } else if (document && this.#document === document && !document.accepted) {
+            document.accepted = true;
+            this.#onDocumentStatus?.(document.member, 'available');
+          }
         }
       }
       this.#sentRevision = revision;
       if (!updateId && this.#recoverFailedDocument(document, revision)) return;
       this.#settleInclusions(revision, !!updateId);
-      if (revision === this.#revision) this.#notify(sharing ? updateId ? 'available' : 'unavailable' : 'paused');
+      if (revision === this.#revision) {
+        this.#notify(!updateId && (sharing || this.#needsDocumentCleanup) ? 'unavailable' : sharing ? 'available' : 'paused');
+      }
     } catch {
       if (this.#disposed || this.#submitted === undefined && revision !== this.#revision) return;
+      this.#applyDeferredClear();
       this.#sentRevision = revision;
       if (this.#recoverFailedDocument(document, revision, validatingDocument)) return;
       this.#settleInclusions(revision, false);
@@ -284,8 +356,13 @@ export class ExtensionContextCoordinator {
     } finally {
       this.#submitted = undefined;
       this.#submittedDocument = undefined;
+      this.#submittedEmpty = false;
+      this.#submissionNoticeIds.clear();
+      this.#submissionNoticeOverflow = false;
+      this.#latestNoticeDeferred = false;
       this.#running = false;
-      if (!this.#disposed && revision !== this.#revision) {
+      if (this.#shuttingDown) this.#writeShutdownCleanup?.();
+      else if (!this.#disposed && revision !== this.#revision) {
         this.#scheduled = true;
         queueMicrotask(() => { this.#scheduled = false; void this.#flush(); });
       }
@@ -298,6 +375,40 @@ export class ExtensionContextCoordinator {
     this.clearDocument();
     this.#onDocumentStatus?.(document.member, 'unavailable');
     return true;
+  }
+  shutdown(): Promise<void> {
+    if (this.#shutdownPromise) return this.#shutdownPromise;
+    const api = this.api;
+    if (!api || this.#disposed || !this.#needsDocumentCleanup) {
+      this.dispose();
+      return Promise.resolve();
+    }
+    this.#shuttingDown = true;
+    this.#document = undefined;
+    this.#shutdownPromise = new Promise<void>(resolve => {
+      let finished = false;
+      const finish = () => {
+        if (finished) return;
+        finished = true;
+        clearTimeout(timeout);
+        this.#writeShutdownCleanup = undefined;
+        this.dispose();
+        resolve();
+      };
+      const timeout = setTimeout(finish, shutdownTimeoutMs);
+      this.#writeShutdownCleanup = () => {
+        this.#writeShutdownCleanup = undefined;
+        if (this.#disposed || !this.#needsDocumentCleanup) { finish(); return; }
+        // Only carry forward host-observed content. New publication still
+        // requires the normal preflight, which is unavailable during release.
+        const content = [...this.#foreign];
+        if (this.#hostBackground) content.push(this.#hostBackground);
+        content.push(...this.#confirmedAttachments.values());
+        void Promise.resolve().then(() => api.update({ content, structuredContent: this.#structured })).then(finish, finish);
+      };
+      if (!this.#submitted) this.#writeShutdownCleanup();
+    });
+    return this.#shutdownPromise;
   }
   dispose() { this.#disposed = true; this.#document = undefined; this.#settleInclusions(-1, false); }
 }

@@ -1048,7 +1048,7 @@ it('does not publish PDF bytes when the presentation authenticates another sessi
     await f.shell.teardown();
 });
 
-it('invalidates accepted PDF context while a changed host file is still being verified', async () => {
+it('invalidates accepted PDF context during host refresh and honors clear-all before the successor is verified', async () => {
     const pdf = { contents: [{ uri: 'opaque:host', blob: btoa('%PDF-1.7\nimport fixture\n%%EOF') }] };
     const resourceRead = deferred();
     let imported = false;
@@ -1058,7 +1058,8 @@ it('invalidates accepted PDF context while a changed host file is still being ve
         subscribe: vi.fn(async () => ({})), unsubscribe: vi.fn(async () => ({})),
         addUpdateHandler: (listener: (event: any) => void) => { onUpdate = listener; return vi.fn(); },
     };
-    const api = { getCurrent: () => null, update: vi.fn(async () => ({ updateId: 'accepted' })) };
+    let current: unknown = null;
+    const api = { getCurrent: () => current, update: vi.fn(async () => ({ updateId: 'accepted' })) };
     const f = fixture(async request => {
         if (request.action === 'host-resource') {
             if (request.operation === 'begin') return reply({ status: 'host-transfer', transfer: 't'.repeat(43), offset: 0 });
@@ -1071,9 +1072,14 @@ it('invalidates accepted PDF context while a changed host file is still being ve
             if (request.operation === 'save') return reply({ status: 'host-status', outcome: 'read-only' });
         }
         if (request.action === 'activate') return reply({ ...active(nextGrant), contextPublished: false });
+        if (request.action === 'resume') {
+            const result = active(nextGrant);
+            result.presentation.generation = 2;
+            return reply(result);
+        }
         if (request.action === 'context-published') return reply({ status: 'context-ready' });
         if (request.action === 'revoke') return reply({ status: 'closed' });
-        return reply({ status: 'ok', payload: { sessionId: 'session', documentGeneration: 1, watermark: 0 } });
+        return reply({ status: 'ok', payload: { sessionId: 'session', documentGeneration: request.request.generation, watermark: 0 } });
     }, () => resources, () => api);
     Object.assign(f.app, { getHostCapabilities: () => ({ updateModelContext: { resource: {} } }) });
     await f.shell.receive({ status: 'host-resource', file: { name: 'Paper.pdf', resourceUri: 'opaque:host' }, ticket: 'p'.repeat(43) });
@@ -1086,6 +1092,113 @@ it('invalidates accepted PDF context while a changed host file is still being ve
     resources.read.mockImplementationOnce(() => resourceRead.promise);
     onUpdate({ params: { uri: 'opaque:host' } });
     expect(controller.getState()).toMatchObject({ status: 'publishing', canActivate: false });
-    await f.shell.teardown();
+    current = { updateId: 'host-clear', content: [], structuredContent: {} };
+    f.shell.hostContextChanged({ 'openai/modelContext': null });
     resourceRead.resolve(pdf);
+    await vi.advanceTimersByTimeAsync(0);
+    const next = host.mounts[1][4].documentContext;
+    const successor = paperSource(2);
+    next.setSource(successor);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(next.getState()).toMatchObject({ status: 'idle', canActivate: true });
+    expect(successor.readBytes).not.toHaveBeenCalled();
+    await f.shell.teardown();
+});
+
+it.each([false, true])('removes the PDF during graceful teardown with an in-flight write %s', async inFlight => {
+    const f = pdfContextFixture();
+    await f.shell.receive({ ...active(), contextPublished: false });
+    const controller = host.mounts[0][4].documentContext;
+    const pending = deferred();
+    if (inFlight) f.api.update.mockImplementationOnce(() => pending.promise);
+    controller.setSource(paperSource());
+    controller.activate();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(f.documents()).toHaveLength(1);
+    const cleanup = deferred();
+    f.api.update.mockImplementationOnce(() => cleanup.promise);
+    let closed = false;
+    const closing = f.shell.teardown().then(() => { closed = true; });
+    expect(f.calls).toContainEqual({ action: 'revoke', grant });
+    expect(controller.getState().status).not.toBe('available');
+    if (inFlight) {
+        await vi.advanceTimersByTimeAsync(0);
+        expect(f.api.update).toHaveBeenCalledTimes(1);
+        pending.resolve({ updateId: 'old-paper' });
+    }
+    await vi.advanceTimersByTimeAsync(0);
+    expect(closed).toBe(false);
+    expect(f.api.update).toHaveBeenCalledTimes(2);
+    expect(f.api.update.mock.calls.at(-1)?.[0]).toEqual({ content: [], structuredContent: {} });
+    expect(f.calls.filter(request => request.action === 'context-published')).toHaveLength(1);
+    cleanup.resolve({ updateId: 'cleanup' });
+    await closing;
+});
+
+it('yields during fallback PDF encoding, stops on clear-all and retries with the complete bytes', async () => {
+    const f = pdfContextFixture();
+    await f.shell.receive({ ...active(), contextPublished: false });
+    const controller = host.mounts[0][4].documentContext;
+    const bytes = Uint8Array.from({ length: 700_013 }, (_, index) => index % 251);
+    Object.defineProperty(bytes, 'toBase64', { value: undefined });
+    const encodeChunk = vi.spyOn(globalThis, 'btoa');
+    try {
+        controller.setSource(paperSource(1, 'paper', vi.fn(() => bytes)));
+        controller.activate();
+        await Promise.resolve();
+        const chunksBeforeYield = encodeChunk.mock.calls.length;
+        expect(chunksBeforeYield).toBeGreaterThan(0);
+        expect(encodeChunk.mock.calls.reduce((total, [chunk]) => total + chunk.length, 0)).toBeLessThan(bytes.length);
+
+        f.reconcile({ updateId: 'host-clear', content: [], structuredContent: {} });
+        await vi.advanceTimersByTimeAsync(20);
+        expect(encodeChunk).toHaveBeenCalledTimes(chunksBeforeYield);
+        expect(f.documents()).toEqual([]);
+        expect(controller.getState()).toMatchObject({ status: 'idle', canActivate: true });
+
+        controller.activate();
+        await vi.advanceTimersByTimeAsync(20);
+        expect(f.documents().at(-1)?.resource.blob).toBe(Buffer.from(bytes).toString('base64'));
+        expect(controller.getState().status).toBe('available');
+    } finally {
+        encodeChunk.mockRestore();
+        await f.shell.teardown();
+    }
+});
+
+it.each([
+    { fileId: 'paper', outcome: 'idle', pdfWrites: 1 },
+    { fileId: 'other', outcome: 'available', pdfWrites: 2 },
+])('honors a removed older PDF without revoking consent for a different source ($fileId)', async ({ fileId, outcome, pdfWrites }) => {
+    const f = pdfContextFixture();
+    await f.shell.receive({ ...active(), contextPublished: false });
+    const first = paperSource();
+    const controller = host.mounts[0][4].documentContext;
+    controller.setSource(first);
+    host.mounts[0][5]({
+        title: first.title, documentGeneration: 1, reviewRevision: 0, source: { fileId: 'paper', digest: first.digest },
+        page: 1, pageCount: 2, annotations: [], selection: null,
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    const background = f.api.update.mock.calls[0]![0];
+    const olderWrite = deferred();
+    f.api.update.mockImplementationOnce(() => olderWrite.promise);
+    controller.activate();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(f.documents()).toHaveLength(1);
+
+    f.expire();
+    await vi.advanceTimersByTimeAsync(1_000);
+    const successor = host.mounts[1][4].documentContext;
+    successor.setSource(paperSource(2, fileId));
+    if (fileId !== 'paper') successor.activate();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(successor.getState().status).toBe('publishing');
+
+    f.reconcile({ ...background, updateId: 'older-write' });
+    olderWrite.resolve({ updateId: 'older-write' });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(successor.getState().status).toBe(outcome);
+    expect(f.documents()).toHaveLength(pdfWrites);
+    await f.shell.teardown();
 });

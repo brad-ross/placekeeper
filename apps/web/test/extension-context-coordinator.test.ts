@@ -4,13 +4,13 @@ import { ExtensionContextCoordinator, backgroundContextUri } from '../src/host/e
 import type { ReviewContextSnapshot } from '../src/host/review-context-snapshot.js';
 const snapshot = (page = 1, generation = 1): ReviewContextSnapshot => ({ documentGeneration: generation, reviewRevision: 2, title: 'PDF', source: { fileId: '/private/secret.pdf', digest: 'digest' }, page, pageCount: 10, selection: null, annotations: [] });
 const tick = async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); };
-function setup(initial?: any, freshInvocation = initial === undefined, onDocumentStatus?: (member: DocumentContextMember, status: DocumentContextPublicationStatus) => void) {
+function setup(initial?: any, freshInvocation = initial === undefined, onDocumentStatus?: (member: DocumentContextMember, status: DocumentContextPublicationStatus) => void, options: NonNullable<ConstructorParameters<typeof ExtensionContextCoordinator>[2]> = {}) {
  let resolve!: (value: any) => void;
  let reject!: (reason: Error) => void;
  const calls: any[] = [];
  const api = { getCurrent: () => initial, update: vi.fn((value: any) => { calls.push(value); return new Promise<any>((done, fail) => { resolve = done; reject = fail; }); }) };
  const coordinator = new ExtensionContextCoordinator(api, undefined, {
-   freshInvocation, ...(onDocumentStatus === undefined ? {} : { onDocumentStatus }),
+   ...options, freshInvocation, ...(onDocumentStatus === undefined ? {} : { onDocumentStatus }),
  });
  return { coordinator, calls, ack: (updateId = 'ack') => resolve({ updateId }), reject: () => reject(Error('offline')), noAck: () => resolve(null) };
 }
@@ -355,4 +355,135 @@ it('omits an accepted PDF once its submission guard finds it no longer current',
  expect(f.calls).toHaveLength(2);
  expect(pdfBlocks(f.calls.at(-1))).toEqual([]);
  expect(onDocumentStatus).toHaveBeenLastCalledWith(member, 'unavailable');
+});
+
+it('uses a matching receipt to recognize PDF removal among previously accepted groups', async () => {
+ const observer = vi.fn();
+ const f = setup(undefined, true, observer);
+ f.coordinator.publish(snapshot());
+ await tick(); f.ack('background'); await tick();
+ const member = documentMember();
+ f.coordinator.setDocument(member);
+ await tick();
+ const submission = f.calls[1];
+ f.coordinator.reconcile({ ...f.calls[0], updateId: 'unrelated' });
+ f.coordinator.reconcile({ ...f.calls[0], updateId: 'pdf-removed' });
+ f.ack('pdf-removed'); await tick();
+ expect(observer.mock.calls).toEqual([[member, 'publishing'], [member, 'removed']]);
+ f.coordinator.reconcile({ ...submission, updateId: 'pdf-removed' });
+ f.coordinator.publish(snapshot(2));
+ await tick();
+ expect(pdfBlocks(f.calls.at(-1))).toEqual([]);
+});
+
+it.each([false, true])('distinguishes an empty replacement echo from host clear-all during refresh (clear: %s)', async hostCleared => {
+ const onContextCleared = vi.fn();
+ const f = setup(undefined, true, undefined, { onContextCleared });
+ f.coordinator.setDocument(documentMember());
+ await tick(); f.ack('initial-pdf'); await tick();
+ f.coordinator.clearDocument();
+ await tick();
+ expect(f.calls.at(-1).content).toEqual([]);
+ f.coordinator.reconcile({ updateId: 'own-empty', ...f.calls.at(-1) });
+ expect(onContextCleared).not.toHaveBeenCalled();
+ if (hostCleared) f.coordinator.reconcile({ updateId: 'host-cleared', content: [] });
+ f.ack('own-empty'); await tick();
+ expect(onContextCleared).toHaveBeenCalledTimes(hostCleared ? 1 : 0);
+ f.coordinator.reconcile({ updateId: 'own-empty', ...f.calls.at(-1) });
+ expect(onContextCleared).toHaveBeenCalledTimes(hostCleared ? 1 : 0);
+});
+
+it.each(['remount', 'accepted', 'in flight'] as const)('retries PDF-only cleanup after a missing receipt (%s)', async stage => {
+ const stalePdf = { type: 'resource', resource: {
+   uri: 'placekeeper-context:///document/stale', mimeType: 'application/pdf', blob: documentMember().blob,
+ } };
+ const f = setup(stage === 'remount' ? { updateId: 'stale', content: [stalePdf] } : undefined);
+ if (stage !== 'remount') {
+   f.coordinator.setDocument(documentMember());
+   await tick();
+   if (stage === 'accepted') { f.ack('accepted'); await tick(); }
+   f.coordinator.clearDocument();
+   if (stage === 'in flight') f.noAck();
+ }
+ await tick();
+ expect(f.calls.at(-1).content).toEqual([]);
+ f.noAck(); await tick();
+ expect(f.coordinator.status).toBe('unavailable');
+ const calls = f.calls.length;
+ f.coordinator.retry();
+ await tick();
+ expect(f.calls).toHaveLength(calls + 1);
+ expect(f.calls.at(-1).content).toEqual([]);
+ f.ack('removed'); await tick();
+ expect(f.coordinator.status).toBe('paused');
+});
+
+it.each(['accepted', 'in flight'] as const)('serializes shutdown cleanup with %s PDF and preserves confirmed groups', async stage => {
+ const beforeUpdate = vi.fn(async () => {});
+ const foreign = { type: 'text', text: 'foreign' };
+ const structuredContent = { keep: true };
+ const f = setup({ updateId: 'foreign', content: [foreign], structuredContent }, true, undefined, { beforeUpdate });
+ f.coordinator.publish(snapshot());
+ f.coordinator.setAttachment({ id: 'saved', title: 'Saved', text: 'Saved note' });
+ f.coordinator.setDocument(documentMember());
+ await tick();
+ if (stage === 'accepted') { f.ack('pdf'); await tick(); }
+ f.coordinator.setAttachment({ id: 'queued', title: 'Queued', text: 'Queued note' });
+ const stopping = f.coordinator.shutdown();
+ if (stage === 'in flight') {
+   await tick();
+   expect(f.calls).toHaveLength(1);
+   f.ack('pdf');
+ }
+ await tick();
+ expect(f.calls).toHaveLength(2);
+ expect(f.calls[1]).toEqual({ content: f.calls[0].content.filter((block: any) => block.resource?.mimeType !== 'application/pdf'), structuredContent });
+ expect(beforeUpdate).toHaveBeenCalledOnce();
+ f.ack('shutdown');
+ await stopping;
+ f.coordinator.publish(snapshot(2));
+ await tick();
+ expect(f.calls).toHaveLength(2);
+});
+
+it.each(['submitted PDF', 'cleanup'] as const)('bounds shutdown when the host never settles the %s', async stalled => {
+ vi.useFakeTimers();
+ try {
+   const f = setup();
+   f.coordinator.setDocument(documentMember());
+   await tick();
+   if (stalled === 'cleanup') { f.ack('pdf'); await tick(); }
+   const stopping = f.coordinator.shutdown();
+   await vi.runAllTimersAsync();
+   await stopping;
+   expect(f.calls).toHaveLength(stalled === 'cleanup' ? 2 : 1);
+   f.ack('late');
+   await tick();
+   expect(f.calls).toHaveLength(stalled === 'cleanup' ? 2 : 1);
+ } finally {
+   vi.useRealTimers();
+ }
+});
+
+it.each(['same-source', 'preparing', 'different-source'] as const)('honors a matching removal after the submitted PDF was superseded (%s)', async stage => {
+ const observer = vi.fn();
+ const f = setup(undefined, true, observer);
+ f.coordinator.publish(snapshot());
+ await tick(); f.ack('background'); await tick();
+ const first = documentMember();
+ f.coordinator.setDocument(first);
+ await tick();
+ f.coordinator.clearDocument();
+ const next = { ...documentMember(2), sourceKey: stage === 'different-source' ? 'new-source' : first.sourceKey };
+ if (stage !== 'preparing') f.coordinator.setDocument(next);
+
+ f.coordinator.reconcile({ ...f.calls[0], updateId: 'first-removed' });
+ f.ack('first-removed'); await tick();
+
+ expect(observer).toHaveBeenLastCalledWith(first, 'removed');
+ const remaining = pdfBlocks(f.calls.at(-1));
+ if (stage === 'different-source') {
+   expect(remaining).toHaveLength(1);
+   expect(remaining[0].resource.blob).toBe(next.blob);
+ } else expect(remaining).toEqual([]);
 });
