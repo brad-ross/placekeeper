@@ -57,3 +57,7 @@ Source builds target macOS arm64/x64, Windows x64, and Linux x64. `pnpm package:
 ## Development
 
 See [Contributing](CONTRIBUTING.md) for the repository map, build prerequisites, test aliases, and style ownership. The [documentation index](docs/README.md) separates operating instructions, current learnings, and historical plans.
+
+### Web links in PDFs
+
+Embedded HTTP and HTTPS hyperlinks open with a click or keyboard activation in the main PDF and Reference Tabs. Hover or focus a link to inspect its destination. Desktop and VS Code hand it to the OS default browser; Chrome opens another tab; Codex uses its host's browser preference and presentation rules. The PDF keeps its reading position. If opening fails, the message offers a copy button and a selectable URL. Printed URLs without hyperlink annotations and non-web protocols are not enabled.

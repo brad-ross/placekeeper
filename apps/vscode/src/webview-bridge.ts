@@ -1,3 +1,4 @@
+import { externalWebUrl } from '../../../packages/core/src/external-web-url.js';
 import { isUpgradeReviewSettlement } from "../../../packages/core/src/upgrade-review-protocol.js";
 import { nativeSyncTexRequest } from "../../../packages/core/src/native-synctex-protocol.js";
 import {
@@ -237,7 +238,8 @@ export class VersionedWebviewBridge {
 
   whenReady(): Promise<boolean> { return this.#ready; }
 
-  constructor(client: TrustedRuntimeClient, postMessage: (message: unknown) => unknown) {
+  constructor(client: TrustedRuntimeClient, postMessage: (message: unknown) => unknown,
+    readonly openExternalUrl?: (url: string) => Promise<void>) {
     this.#client = client;
     this.#postMessage = postMessage;
     this.#unsubscribeInvalidations = client.subscribeInvalidations?.((payload) => {
@@ -265,6 +267,10 @@ export class VersionedWebviewBridge {
     }
     const cancelled = parseWebviewCancel(value, this.#client.identity.panelId);
     if (cancelled !== undefined) { this.#active.get(cancelled.requestId)?.abort(); return; }
+    if (isObject(value) && value.kind === "external-link-request") {
+      await this.#openExternalLink(value);
+      return;
+    }
     const request = parseWebviewRequest(value, this.#client.identity, this.#seen);
     if (request === undefined) return;
     // A valid bootstrap proves the runtime message listener is installed.
@@ -303,6 +309,34 @@ export class VersionedWebviewBridge {
         error: { kind: error instanceof ReviewExportConflictError ? "export-conflict" : "rejected" },
       });
     } finally { this.#active.delete(request.requestId); }
+  }
+
+  async #openExternalLink(value: Record<string, unknown>): Promise<void> {
+    const identity = this.#client.identity;
+    if (!bounded(value) || value.protocol !== REVIEW_RUNTIME_PROTOCOL || value.version !== REVIEW_RUNTIME_VERSION ||
+      value.panelId !== identity.panelId || value.sessionId !== identity.sessionId ||
+      value.generation !== identity.generation || value.revision !== identity.revision ||
+      typeof value.requestId !== 'string' || !SAFE_ID.test(value.requestId) || this.#seen.has(value.requestId)) return;
+    this.#seen.add(value.requestId);
+    if (this.#seen.size > 512) {
+      const oldest = this.#seen.values().next().value;
+      if (oldest !== undefined) this.#seen.delete(oldest);
+    }
+    const controller = new AbortController();
+    this.#active.set(value.requestId, controller);
+    const response = { protocol: REVIEW_RUNTIME_PROTOCOL, version: REVIEW_RUNTIME_VERSION,
+      kind: 'external-link-response', ...identity, requestId: value.requestId };
+    try {
+      const url = externalWebUrl(value.url);
+      if (url === null || this.openExternalUrl === undefined || Object.keys(value).some(key =>
+        !['protocol', 'version', 'kind', 'panelId', 'sessionId', 'generation', 'revision', 'requestId', 'url'].includes(key))) {
+        throw new Error('External link unavailable.');
+      }
+      await this.openExternalUrl(url);
+      if (!controller.signal.aborted) this.#postMessage({ ...response, ok: true });
+    } catch {
+      if (!controller.signal.aborted) this.#postMessage({ ...response, ok: false, error: { kind: 'rejected' } });
+    } finally { this.#active.delete(value.requestId); }
   }
 
   dispose(): void {

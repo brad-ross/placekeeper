@@ -214,7 +214,7 @@ for (const width of [1280, 620]) {
   });
 }
 
-test('collapsed narrow workspace matches the bottom References rail backing and fade', async ({ page }) => {
+test('collapsed narrow workspace matches the References rail and hides obsolete backing layers', async ({ page }) => {
   const appearance = () => page.locator('[data-review-stage]').evaluate((stage) => {
     const rail = stage.querySelector<HTMLElement>('[data-workspace-edge-rail="bottom"]')!;
     const backing = stage.querySelector<HTMLElement>('.review-overlay-frame__bottom-backing')!;
@@ -240,8 +240,8 @@ test('collapsed narrow workspace matches the bottom References rail backing and 
   await page.goto('/test/acceptance/review-harness/index.html?visual=reference-layout');
   await expect(page.getByRole('button', { name: 'Show References', exact: true })).toBeVisible();
   const reference = await appearance();
-  expect(reference.backingDisplay).toBe('block');
-  expect(reference.fadeDisplay).toBe('block');
+  expect(reference.backingDisplay).toBe('none');
+  expect(reference.fadeDisplay).toBe('none');
   expect(reference.fadeBackground).toContain('linear-gradient');
   for (const width of [760, 620, 390]) {
     await page.setViewportSize({ width, height: 900 });
@@ -468,4 +468,242 @@ test('touch reference tabs expose actions instead of page metadata only on the a
   } finally {
     await context.close();
   }
+});
+
+
+test('decorative backing leaves zero-width native overlay scrollbars exposed', async ({ page }) => {
+  await page.goto('/test/acceptance/review-harness/index.html?visual=outline');
+  await page.locator('.review-layout').evaluate(element => {
+    (element as HTMLElement).style.setProperty('--review-main-scrollbar-width', '0px');
+    (element as HTMLElement).style.setProperty('--review-main-scrollbar-height', '0px');
+  });
+  await expect(page.locator('.review-overlay-frame')).toHaveCSS('clip-path', 'inset(0px 16px 16px 0px)');
+});
+
+test('native scrollbar backing stays stationary without changing document scroll extents', async ({ page }) => {
+  await page.goto('/test/acceptance/review-harness/index.html?visual=outline');
+  const result = await page.evaluate(async () => {
+    const modulePath = '/apps/web/src/review/use-review-overlay-geometry.ts';
+    const { protectNativeScrollbarBacking } = await import(modulePath);
+    const viewport = document.createElement('div');
+    viewport.style.cssText = 'position:fixed;inset:0 auto auto 0;width:300px;height:200px;box-sizing:border-box;padding:12px 20px;overflow:auto;scrollbar-width:none;--review-surface-canvas:rgb(240,240,240)';
+    viewport.innerHTML = '<div class="pdf-workspace__scrollbar-backing"></div><div data-viewer-framing-content style="width:600px;height:800px;background:red"></div>';
+    document.body.append(viewport);
+    protectNativeScrollbarBacking(viewport);
+    const backing = viewport.firstElementChild as HTMLElement;
+    const snapshots = [];
+    for (const [left, top] of [[0, 0], [50, 100], [10000, 10000], [0, 0]]) {
+      viewport.scrollLeft = left!;
+      viewport.scrollTop = top!;
+      await new Promise(requestAnimationFrame);
+      const bounds = backing.getBoundingClientRect();
+      snapshots.push({ x: bounds.x, y: bounds.y, width: bounds.width,
+        scrollWidth: viewport.scrollWidth, scrollHeight: viewport.scrollHeight });
+    }
+    let changes = 0;
+    const observer = new MutationObserver(records => { changes += records.length; });
+    observer.observe(viewport, { attributes: true, subtree: true });
+    for (let frame = 0; frame < 10; frame++) {
+      protectNativeScrollbarBacking(viewport);
+      await new Promise(requestAnimationFrame);
+    }
+    observer.disconnect();
+    viewport.remove();
+    return { snapshots, changes };
+  });
+  expect(result.changes).toBe(0);
+  for (const snapshot of result.snapshots) expect(snapshot).toEqual(result.snapshots[0]);
+  expect(result.snapshots[0]).toMatchObject({ x: 0, y: 0, width: 0 });
+});
+
+for (const presentation of ['right', 'bottom']) {
+  test(`document shadow clears the bottom backing with a ${presentation} workspace`, async ({ page }) => {
+    await page.goto('/test/acceptance/review-harness/index.html?visual=outline');
+    const clearance = await page.evaluate(presentation => {
+      const host = document.createElement('div');
+      host.className = 'review-document';
+      host.style.cssText = 'position:fixed;inset:0 auto auto 0;width:600px;height:400px';
+      const runway = presentation === 'bottom' ? 180 : 0;
+      host.innerHTML = `<div class="pdf-workspace__viewport" style="box-sizing:border-box;scrollbar-width:none"><div style="position:relative;height:800px"><div data-last-page style="height:800px;background:white"></div><div style="position:absolute;top:0;height:calc(${800 + runway}px + ${runway > 0 ? 'var(--review-page-bottom-clearance)' : '0px'});width:1px;visibility:hidden"></div></div></div>`;
+      document.body.append(host);
+      const viewport = host.firstElementChild as HTMLElement;
+      viewport.scrollTop = viewport.scrollHeight;
+      const page = host.querySelector('[data-last-page]')!;
+      const gap = viewport.getBoundingClientRect().bottom - runway - page.getBoundingClientRect().bottom;
+      host.remove();
+      return gap;
+    }, presentation);
+    expect(clearance).toBeGreaterThanOrEqual(64);
+  });
+}
+
+test('scrollbar backing follows workspace docking without changing native scrollbar styling', async ({ page }) => {
+  await page.goto('/test/acceptance/review-harness/index.html?visual=outline');
+  const result = await page.evaluate(() => {
+    const layout = document.createElement('div');
+    layout.className = 'review-layout';
+    layout.innerHTML = '<div class="pdf-workspace__scrollbar-backing"></div>';
+    document.body.append(layout);
+    const backing = layout.firstElementChild!;
+    layout.dataset.workspacePresentation = 'bottom';
+    const bottom = getComputedStyle(backing, '::after').display;
+    layout.dataset.workspacePresentation = 'right';
+    const right = getComputedStyle(backing, '::after').display;
+    layout.remove();
+    return { bottom, right };
+  });
+  expect(result.bottom).toBe('none');
+  expect(result.right).not.toBe('none');
+});
+
+test('tray margins and reference opener alignment survive scrollbar backing changes', async ({ page }) => {
+  await page.goto('/test/acceptance/review-harness/index.html?visual=outline');
+  const result = await page.evaluate(() => {
+    const layout = document.createElement('div');
+    layout.className = 'review-layout';
+    layout.style.cssText = 'position:fixed;width:800px;height:600px;--review-overlay-inset:12px;--reference-bottom-height:40px;--review-main-scrollbar-width:0px;--review-main-scrollbar-height:0px';
+    layout.dataset.referenceLayout = 'wide-split';
+    layout.dataset.bottomSurfaceOpen = 'false';
+    layout.dataset.referencesAvailable = 'false';
+    layout.dataset.workspacePresentation = 'right';
+    layout.innerHTML = '<div class="review-overlay-frame"></div><div class="pdf-workspace__scrollbar-backing"></div><div class="review-tools-workspace" data-workspace-presentation="right" data-tools-workspace-open="true"></div><button class="workspace-edge-rail" data-workspace-edge-rail="bottom"></button>';
+    document.body.append(layout);
+    const tray = layout.querySelector('.review-tools-workspace')!;
+    const button = layout.querySelector('button')!;
+    const rightClip = getComputedStyle(layout.querySelector('.review-overlay-frame')!).clipPath;
+    const aligned = Math.abs(tray.getBoundingClientRect().bottom - button.getBoundingClientRect().bottom) < .5;
+    const background = getComputedStyle(layout.querySelector('.pdf-workspace__scrollbar-backing')!, '::after').backgroundImage;
+    layout.dataset.workspacePresentation = 'bottom';
+    tray.setAttribute('data-workspace-presentation', 'bottom');
+    const margins = { right: getComputedStyle(tray).right, bottom: getComputedStyle(tray).bottom };
+    const clip = getComputedStyle(layout.querySelector('.review-overlay-frame')!).clipPath;
+    layout.remove();
+    return { aligned, background, margins, clip, rightClip };
+  });
+  expect(result.aligned).toBe(true);
+  expect(result.rightClip).toBe('inset(0px 16px 16px 0px)');
+  expect(result.background).not.toContain('to top');
+  expect(result.margins).toEqual({ right: '12px', bottom: '12px' });
+  expect(result.clip).toBe('inset(0px 16px 16px 0px)');
+});
+
+test('empty references do not paint a bottom edge fade', async ({ page }) => {
+  await page.goto('/test/acceptance/review-harness/index.html?visual=outline');
+  const display = await page.evaluate(() => {
+    const layout = document.createElement('div');
+    layout.className = 'review-layout';
+    layout.dataset.referencesAvailable = 'false';
+    layout.dataset.scrollBottomFade = 'true';
+    layout.dataset.bottomOverlay = 'false';
+    layout.innerHTML = '<div class="review-overlay-frame"><span class="review-overlay-frame__outer-bottom-fade"></span></div>';
+    document.body.append(layout);
+    const fade = layout.querySelector('span')!;
+    const empty = getComputedStyle(fade).display;
+    layout.dataset.referencesAvailable = 'true';
+    const populated = getComputedStyle(fade).display;
+    layout.remove();
+    return { empty, populated };
+  });
+  expect(display).toEqual({ empty: 'none', populated: 'block' });
+});
+
+test('bottom workspace margins leave both native scrollbars above their backing', async ({ page }) => {
+  await page.goto('/test/acceptance/review-harness/index.html?visual=outline');
+  const styles = await page.evaluate(() => {
+    const layout = document.createElement('div');
+    layout.className = 'review-layout';
+    Object.assign(layout.dataset, { workspacePresentation: 'bottom', bottomOverlay: 'true', rightOverlay: 'false', scrollRightFade: 'true' });
+    layout.style.cssText = '--review-surface-canvas:#f7f7f7;--review-main-scrollbar-width:0px;--review-main-scrollbar-height:0px;--review-overlay-bottom-start:200px;--scrollbar-backing-right:16px;--scrollbar-backing-bottom:16px;--scrollbar-backing-width:600px;--scrollbar-backing-height:400px';
+    layout.innerHTML = '<div class="review-overlay-frame"><span class="review-overlay-frame__outer-right-fade"></span></div><div class="pdf-workspace__scrollbar-backing"></div>';
+    document.body.append(layout);
+    const frame = layout.firstElementChild!;
+    const backing = getComputedStyle(layout.lastElementChild!, '::after');
+    const result = { clip: getComputedStyle(frame).clipPath, fade: getComputedStyle(frame.firstElementChild!).display,
+      display: backing.display, size: backing.backgroundSize };
+    layout.remove();
+    return result;
+  });
+  expect(styles.clip).toBe('inset(0px 16px 16px 0px)');
+  expect(styles.fade).toBe('none');
+  expect(styles.display).not.toBe('none');
+  expect(styles.size).toBe('auto, auto');
+});
+
+test('right edge fade uses one full-height layer even below the horizontal scrollbar', async ({ page }) => {
+  await page.goto('/test/acceptance/review-harness/index.html?visual=outline');
+  const result = await page.evaluate(() => {
+    const layout = document.createElement('div');
+    layout.className = 'review-layout';
+    Object.assign(layout.dataset, { workspacePresentation: 'right', referencesAvailable: 'false', rightOverlay: 'false', rightRailPresent: 'true' });
+    layout.style.cssText = '--review-surface-canvas:#f7f7f7;--review-document-right-space:40px;--review-overlay-fade-size:12px;--scrollbar-backing-width:600px;--scrollbar-backing-height:400px';
+    layout.innerHTML = '<div class="review-overlay-frame"><span class="review-overlay-frame__right-backing"></span><span class="review-overlay-frame__right-fade"></span></div><div class="pdf-workspace__scrollbar-backing"></div>';
+    document.body.append(layout);
+    const backing = getComputedStyle(layout.lastElementChild!, '::after');
+    const result = { background: backing.backgroundImage, height: backing.height,
+      oldLayers: [...layout.querySelectorAll('span')].map(element => getComputedStyle(element).display) };
+    layout.remove();
+    return result;
+  });
+  expect(result.height).toBe('400px');
+  expect(result.background).toContain('40px');
+  expect(result.background).toContain('52px');
+  expect(result.oldLayers).toEqual(['none', 'none']);
+});
+
+test('top fade spans the complete scrollport beneath native scrollbars', async ({ page }) => {
+  await page.goto('/test/acceptance/review-harness/index.html?visual=outline');
+  const result = await page.evaluate(() => {
+    const layout = document.createElement('div');
+    layout.className = 'review-layout';
+    layout.dataset.scrollTopFade = 'true';
+    layout.style.cssText = '--review-surface-canvas:#f7f7f7;--scrollbar-backing-width:600px;--review-overlay-fade-size:12px';
+    layout.innerHTML = '<div class="review-overlay-frame"><span class="review-overlay-frame__top-fade"></span></div><div class="pdf-workspace__scrollbar-backing"></div>';
+    document.body.append(layout);
+    const fade = getComputedStyle(layout.lastElementChild!, '::before');
+    const result = { width: fade.width, height: fade.height, oldLayer: getComputedStyle(layout.querySelector('span')!).display };
+    layout.remove();
+    return result;
+  });
+  expect(result).toEqual({ width: '600px', height: '12px', oldLayer: 'none' });
+});
+
+test('macOS toolbar keeps its native-control clearance during resize and overlay geometry changes', async ({ page }) => {
+  await page.goto('/test/acceptance/review-harness/index.html?visual=outline');
+  const positions = await page.evaluate(() => {
+    const shell = document.createElement('div');
+    shell.className = 'electron-review-shell';
+    shell.dataset.nativePlatform = 'darwin';
+    shell.innerHTML = '<header class="review-chrome"><div data-title>Title and page</div><div>Zoom</div></header>';
+    document.body.append(shell);
+    const positions = [];
+    for (const width of [1200, 900, 700, 1100, 600]) {
+      shell.style.width = `${width}px`;
+      for (const visible of ['true', 'false']) {
+        shell.dataset.windowControlsOverlay = visible;
+        positions.push(shell.querySelector('[data-title]')!.getBoundingClientRect().left);
+      }
+    }
+    shell.remove();
+    return positions;
+  });
+  expect(new Set(positions).size).toBe(1);
+  expect(positions[0]).toBeGreaterThanOrEqual(92);
+});
+
+test('collapsed bottom rail paints full width and height under native scrollbars', async ({ page }) => {
+  await page.goto('/test/acceptance/review-harness/index.html?visual=outline');
+  const result = await page.evaluate(() => {
+    const layout = document.createElement('div');
+    layout.className = 'review-layout';
+    Object.assign(layout.dataset, { workspacePresentation: 'bottom', bottomOverlay: 'false', bottomRailPresent: 'true' });
+    layout.style.cssText = '--review-surface-canvas:#f7f7f7;--review-control-default:32px;--scrollbar-backing-width:600px;--scrollbar-backing-height:400px';
+    layout.innerHTML = '<div class="review-overlay-frame"><span class="review-overlay-frame__bottom-backing"></span><span class="review-overlay-frame__bottom-fade"></span></div><div class="pdf-workspace__scrollbar-backing"></div>';
+    document.body.append(layout);
+    const backing = getComputedStyle(layout.lastElementChild!, '::after');
+    const result = { width: backing.width, height: backing.height, display: backing.display,
+      old: [...layout.querySelectorAll('span')].map(element => getComputedStyle(element).display) };
+    layout.remove();
+    return result;
+  });
+  expect(result).toEqual({ width: '600px', height: '400px', display: 'block', old: ['none', 'none'] });
 });

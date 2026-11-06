@@ -11,6 +11,7 @@ import {
 
 export interface ChromeApi {
   readonly tabs: {
+    create?(options: { readonly url: string }): Promise<unknown>;
     reload(tabId: number): Promise<void>;
   };
   readonly storage: {

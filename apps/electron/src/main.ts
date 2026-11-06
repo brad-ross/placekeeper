@@ -1,3 +1,4 @@
+import { externalWebUrl } from '../../../packages/core/src/external-web-url.js';
 import { resolvePlatformLocations } from '../../service/src/platform/locations.js';
 import { app, BrowserWindow, dialog, ipcMain, protocol, session, clipboard, screen, shell } from 'electron';
 import { mkdirSync, writeFileSync } from 'node:fs';
@@ -28,7 +29,7 @@ import { pathToFileURL } from 'node:url';
 import { installMenus, type WindowCommands } from './menus.js';
 import { createManualUpdateAction } from './update-check.js';
 import { parseStartupRequest, writeStartupReceipt, writeStartupLoadFailure, retainedStartupRecovery } from './startup-receipt.js';
-import { nativeTitlebarOptions, trackTitlebarHover } from './titlebar.js';
+import { alignNativeWindowButtons, nativeTitlebarOptions, trackTitlebarHover } from './titlebar.js';
 import { parseElectronLocation } from '../../../packages/core/src/electron-shell-protocol.js';
 import { decodePlacekeeperLink } from '../../../packages/core/src/placekeeper-link.js';
 import { REVIEW_COMMAND_IDS } from '../../web/src/review/review-command-surface.js';
@@ -206,6 +207,12 @@ async function start() {
         if (!e.sourceEndpoint || token !== e.sourceEndpoint.token || (endpoint !== null && (typeof endpoint !== 'string' || endpoint.length > 4096 || endpoint.includes('\0')))) throw new Error('Invalid source endpoint');
         const pending = e.sourceEndpoint; delete e.sourceEndpoint; pending.resolve(endpoint);
     });
+    ipcMain.handle('review:open-external-url', async (event, id, value) => {
+        const e = verify(event, id);
+        const url = externalWebUrl(value);
+        if (url === null || !e.bridge.active) throw new Error('Invalid web link request');
+        await shell.openExternal(url);
+    });
     ipcMain.handle('review:create-link', async (event, id, value) => {
         const e = verify(event, id);
         const location = parseElectronLocation(value);
@@ -240,6 +247,7 @@ async function start() {
         const e = verify(event, id);
         if (typeof height !== 'number' || !Number.isFinite(height) || height < 32 || height > 160) throw new Error('Invalid toolbar height');
         e.toolbarHeight = height;
+        alignNativeWindowButtons(e.window, height);
     });
     ipcMain.handle('review:commands', (event, id, revision, snapshot) => {
         const e = verify(event, id);
@@ -281,6 +289,10 @@ async function start() {
     entries.set(window.webContents.id, entry); ownedWindows.register(bridge.helperId);
     const windowRegistration = activity();
     const contents = window.webContents;
+    const alignButtons = () => alignNativeWindowButtons(window, entry.toolbarHeight);
+    window.on('leave-full-screen', alignButtons);
+    window.on('show', alignButtons);
+    alignButtons();
     const disposeTitlebarHover = trackTitlebarHover(window, () => screen.getCursorScreenPoint(), () => entry.toolbarHeight);
     let retirementPromise: Promise<void> | undefined;
     const retire = () => {
@@ -288,6 +300,8 @@ async function start() {
         bridge.retired = true; retirement.abort();
         entry.sourceEndpoint?.resolve(null); delete entry.sourceEndpoint;
         disposeTitlebarHover();
+        window.removeListener('leave-full-screen', alignButtons);
+        window.removeListener('show', alignButtons);
         if (entry.timer) clearInterval(entry.timer);
         ownedWindows.retiring(bridge.helperId); activity();
         retirementPromise = electronAppControlThroughDaemon({ protocolVersion: 1, type: 'detach-helper', appInstanceId, helperId: bridge.helperId }, undefined, paths).then(response => {

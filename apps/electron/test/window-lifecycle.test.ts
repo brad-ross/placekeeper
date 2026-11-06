@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { it as test, vi } from 'vitest';
 import { EventEmitter } from 'node:events';
 import type { BrowserWindow } from 'electron';
-import { trackTitlebarHover } from '../src/titlebar.js';
+import { alignNativeWindowButtons, trackTitlebarHover } from '../src/titlebar.js';
 import { DocumentWindowRegistry } from '../src/window-registry.js';
 import { parseWindowState } from '../src/window-state.js';
 test('native toolbar hover follows scaled window bounds without DOM movement and stops sampling on blur or retirement', () => {
@@ -141,4 +141,16 @@ test('lifecycle EOF rejects all queued activity barriers and future admissions',
     acknowledgements.fail(new Error('channel ended'));
     await failures;
     await assert.rejects(acknowledgements.enqueue(() => {}), /channel ended/);
+});
+
+test('native buttons align to the measured toolbar height and interface scale', () => {
+    const positions: unknown[] = [];
+    const window = { isDestroyed: () => false, webContents: { getZoomFactor: () => 1.25 },
+        getWindowButtonPosition: () => positions.at(-1),
+        setWindowButtonPosition: (position: unknown) => positions.push(position) };
+    alignNativeWindowButtons(window as unknown as BrowserWindow, 52, 'darwin');
+    alignNativeWindowButtons(window as unknown as BrowserWindow, 52, 'darwin');
+    alignNativeWindowButtons(window as unknown as BrowserWindow, 60, 'darwin');
+    alignNativeWindowButtons(window as unknown as BrowserWindow, 60, 'darwin');
+    assert.deepEqual(positions, [{ x: 20, y: 26 }, { x: 20, y: 31 }]);
 });

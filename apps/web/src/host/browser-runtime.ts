@@ -1,3 +1,4 @@
+import { externalWebUrl } from "../../../../packages/core/src/external-web-url.js";
 import type { ReviewExportFence } from "../../../../packages/core/src/review-runtime-protocol.js";
 import type { SaveStatus } from "../../../../packages/core/src/save-status.js";
 import type { ReviewCommand, ReviewStateView, SaveDestinationConfirmation } from "../../../../packages/core/src/review-model.js";
@@ -188,6 +189,11 @@ export function createBrowserHostRuntime(session: ProductionSession): HostRuntim
 
   return {
     host: "browser",
+    async openExternalUrl(value) {
+      const url = externalWebUrl(value);
+      if (stopped || url === null) throw new Error("Web link opening is unavailable.");
+      window.open(url, "_blank", "noopener,noreferrer");
+    },
     closeForUpgrade: async () => { stopped = true; socket?.close(); },
     upgradePoll: async () => {
       const attachment = interactionAttachment ?? await attachmentReady.promise;

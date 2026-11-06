@@ -9,9 +9,11 @@ export type ElectronShellEvent =
     | { readonly type: 'confirm-visible'; readonly generation: number; readonly token: string; readonly location?: PlacekeeperLinkLocation }
     | { readonly type: 'settle-close'; readonly token: string };
 export interface ElectronShellBridge {
+    windowChromeMetrics?(): { platform: string; scale: number };
     sourceEndpoint(identity: ElectronShellIdentity, token: string, endpoint: string | null): Promise<void>;
     identity(): Promise<ElectronShellIdentity & { readonly sourceEndpointToken?: string; readonly presentation?: { readonly pageIndex: number; readonly zoom: number } }>;
     request(identity: ElectronShellIdentity, message: unknown): Promise<unknown>;
+    openExternalUrl?(identity: ElectronShellIdentity, url: string): Promise<void>;
     createLink(identity: ElectronShellIdentity, location: PlacekeeperLinkLocation): Promise<string>;
     focusFailed(identity: ElectronShellIdentity, token: string): Promise<void>;
     requestClose(identity: ElectronShellIdentity): Promise<void>;
