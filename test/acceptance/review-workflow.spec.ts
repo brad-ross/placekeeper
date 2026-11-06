@@ -1015,7 +1015,7 @@ test.describe('canonical review workflow', () => {
     })).toBeLessThan(1);
   });
 
-  test('backs tray margins while excluding only actual scrollbar tracks', async ({ page }) => {
+  test('backs tray margins while preserving classic and overlay scrollbar edges', async ({ page }) => {
     await page.setViewportSize({ width: 760, height: 720 });
     const viewport = await installRuntimeClassicScrollport(page);
     await viewport.evaluate((element) => {
@@ -1027,8 +1027,8 @@ test.describe('canonical review workflow', () => {
     const backing = page.locator('.review-overlay-frame');
     const expectedClip = () => viewport.evaluate((element) => {
       const scrollport = element as HTMLElement;
-      const width = scrollport.offsetWidth - scrollport.clientWidth;
-      const height = scrollport.offsetHeight - scrollport.clientHeight;
+      const width = Math.max(16, scrollport.offsetWidth - scrollport.clientWidth);
+      const height = Math.max(16, scrollport.offsetHeight - scrollport.clientHeight);
       return `inset(0px ${width}px ${height}px 0px)`;
     });
     await expect(backing).toHaveCSS('clip-path', await expectedClip());
@@ -1042,8 +1042,8 @@ test.describe('canonical review workflow', () => {
       element.style.setProperty('--test-scrollbar-size', '0px');
       element.dispatchEvent(new Event('scroll'));
     });
-    await expect.poll(expectedClip).toBe('inset(0px 0px 0px 0px)');
-    await expect(backing).toHaveCSS('clip-path', 'inset(0px)');
+    await expect.poll(expectedClip).toBe('inset(0px 16px 16px 0px)');
+    await expect(backing).toHaveCSS('clip-path', 'inset(0px 16px 16px 0px)');
   });
 
   test('includes an actual wide classic scrollbar track in the common outside tray inset', async ({ page, browserName }) => {

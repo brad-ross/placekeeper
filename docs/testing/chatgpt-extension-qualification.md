@@ -512,3 +512,11 @@ The focused extension browser run passed all 10 scenarios, including recovery at
 The integrated service run exposed an asynchronous test-setup race: a filesystem watcher may supersede an explicit document observation before generation advancement finishes. The two recovery-generation checks now wait for generation 2 before testing rejection/cleanup of old authority. All 750 service tests passed after this test-only correction; no production recovery behavior changed.
 
 Repeated native New Document / Cancel latency is explicitly deferred. Earlier timing samples did not establish a root cause or a verified fix. This PR preparation does not claim a production release or complete native-host qualification.
+
+### Integration with current main and final checks
+
+Merged main `7264297c` into the feature branch, preserving embedded web-link handling and the removal of copy-link buttons. Extension-owned readers now pass validated HTTP/S URLs to the host's link-opening API while their presentation remains current. Its regression failed before the callback was connected and passed afterward. Correctness and independent local adversarial review of the merge (`/tmp/placekeeper-final-extension-review/merge-review.json`) found no actionable defects.
+
+On the integrated source, TypeScript checking and service/shared-reader/MCP client/MCP server/VS Code builds passed. The focused integration selection passed 186 tests. The combined extension, external-link and launch-surface browser run passed all 18 checks, and its desktop/narrow screenshots were inspected.
+
+All default-suite stages passed: 750 service, 503 review, 128 save/export, 204 source/rebuild, and 434 host-integration tests; 93 review browser cases and 14 host browser cases. The review browser run initially passed 92 of 93: main's intentional 16-pixel native-overlay-scrollbar reserve had left one old zero-inset expectation. Updating that test to preserve both classic and overlay scrollbar edges passed alongside the adjacent scrollbar case (2/2); no production scrollbar code changed. The earlier VS Code hash mismatch cleared after refreshing its shared assets. This is a combined stage/rerun result, not a claim of one uninterrupted green command.
