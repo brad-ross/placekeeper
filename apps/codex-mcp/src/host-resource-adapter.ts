@@ -20,6 +20,7 @@ export class HostResourceAdapter {
         request: (r: ExtensionRequest) => Promise<ExtensionResult>;
         current: () => boolean;
         onUpdate: () => void;
+        onProvisional?: (grant: string) => void;
         digest?: (b: Uint8Array<ArrayBuffer>) => Promise<string>;
         downloadFile?: App['downloadFile'];
     }) { }
@@ -105,6 +106,9 @@ export class HostResourceAdapter {
             this.#assert(epoch);
             if ('grant' in authority && finished.status !== 'host-ready' && !(finished.status === 'host-status' && finished.outcome === 'conflict') || 'ticket' in authority && finished.status !== 'provisional' && finished.status !== 'busy')
                 throw Error('The host returned an invalid source admission result.');
+            // The shell owns cleanup as soon as the service allocates a grant.
+            // Subscribing to host updates may outlive the panel.
+            if (finished.status === 'provisional') this.options.onProvisional?.(finished.grant);
             return finished;
         }
         catch (error) {

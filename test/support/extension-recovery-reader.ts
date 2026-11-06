@@ -22,8 +22,10 @@ export async function extensionRecoveryReader(page: Page) {
   let clock = Date.now();
   const manager = new ExtensionRuntimeManager(broker, { backend, now: () => clock, pickPdf: async () => path });
   const requests: any[] = [];
+  let suppressRelease = false;
   await page.exposeFunction('recoveryAcceptanceRequest', async (request: any) => {
     requests.push(request);
+    if (request.action === 'revoke' && suppressRelease) return { status: 'unavailable' };
     if (request.action === 'app' && request.request.method === 'upgradePoll') return { status: 'ok', payload: { phase: 'none' } };
     return manager.dispatch(request);
   });
@@ -49,6 +51,7 @@ export async function extensionRecoveryReader(page: Page) {
     }, chooser);
   }
   return { broker, manager, requests, mount,
+    suppressRelease(value: boolean) { suppressRelease = value; },
     advance(ms: number) { clock += ms; },
     async ready() { await expect(page.locator('[data-production-review]')).toHaveAttribute('data-initial-view-ready', 'true', { timeout: 20000 }); },
     async tool(name: string, input: unknown) { return page.evaluate(async ({ name, input }) => JSON.parse(await (window as any).recoveryAcceptance.tools.get(name).execute(input)), { name, input }); },

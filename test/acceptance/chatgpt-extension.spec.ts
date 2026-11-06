@@ -2,14 +2,6 @@ import { expect, test, type Page } from '@playwright/test';
 import { extensionReader } from '../support/extension-reader.js';
 import { extensionRecoveryReader } from '../support/extension-recovery-reader.js';
 
-async function openOptions(page: Page) {
-  if (!await page.locator('.extension-menu').evaluate((element: HTMLDetailsElement) => element.open)) await page.locator('summary[aria-label="Review options"]').click();
-}
-async function openSharing(page: Page) {
-  await openOptions(page);
-  const summary = page.locator('#controls summary').filter({ hasText: /^Sharing settings$/ });
-  if (!await summary.evaluate(element => (element.parentElement as HTMLDetailsElement).open)) await summary.click();
-}
 async function openAnnotationContext(page: Page, id: string) {
   const mark=page.locator(`[data-owned-native-geometry][data-review-id="${id}"], [data-owned-mark][data-review-id="${id}"]`).first();
   await mark.scrollIntoViewIfNeeded();
@@ -22,55 +14,54 @@ async function openAnnotationContext(page: Page, id: string) {
   await peek.locator('[data-row-action="add-context"]').click();
   await expect(page.getByRole('dialog',{name:'Add annotation to chat',exact:true})).toBeVisible();
 }
-test('recent review recovers a removed panel, restores its page, and attaches an included snapshot', async ({ page }, info) => {
-  info.setTimeout(60000);
+for (const width of [1120, 375]) test(`reopening recovers a disconnected review at ${width}px without manual close`, async ({ page }, info) => {
+  await page.setViewportSize({ width, height: 800 });
   const reader = await extensionRecoveryReader(page);
   try {
     await reader.mount(false); await reader.ready();
     const before = await reader.tool('inspect_review', {});
     expect(await reader.tool('navigate_page', { page: 2, documentGeneration: before.documentGeneration, source: before.source })).toMatchObject({ status: 'navigated', page: 2 });
     await expect.poll(async () => (await reader.manager.dispatch({ action: 'recent-list' }) as any).items[0]?.page).toBe(2);
-    await openSharing(page);
-    await page.getByRole('checkbox', { name: 'Allow explicitly included review snapshots in other chats', exact: true }).check();
-    await page.getByRole('button', { name: 'Include this review snapshot', exact: true }).click();
-    await expect(page.getByRole('button', { name: 'Update included snapshot', exact: true })).toBeVisible();
-    // Destroy the old document without invoking app teardown, as a cancelled host close does.
-    await page.goto('about:blank'); reader.advance(30001);
+    // Emulate a host that disappears before its cleanup request can arrive.
+    reader.suppressRelease(true);
+    await page.goto('about:blank');
     await reader.mount(true);
-    await page.locator('summary').filter({ hasText: /^Include review context$/ }).click();
-    await page.getByRole('button', { name: 'Include snapshot', exact: true }).first().click();
-    await expect.poll(() => page.evaluate(() => (window as any).recoveryAcceptance.context?.content?.some((block: any) => block.resource.uri.includes('/attachment/')))).toBe(true);
-    await expect(page.locator('[data-production-review]')).toHaveCount(0);
+    await expect(page.getByText('Include review context', { exact: true })).toHaveCount(0);
     await page.getByRole('button', { name: 'Resume Recent paper.pdf', exact: true }).click();
-    await expect(page.getByRole('button', { name: 'Recover disconnected review', exact: true })).toBeVisible();
-    await page.getByRole('button', { name: 'Recover disconnected review', exact: true }).click();
+    const dialog = page.getByRole('dialog', { name: 'Reopen review', exact: true });
+    await expect(dialog).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Close review', exact: true })).toHaveCount(0);
+    await expect(dialog.getByRole('button', { name: 'Resume review', exact: true })).toHaveCount(0);
+    await dialog.getByRole('button', { name: 'Check again', exact: true }).click();
+    await expect(dialog.getByRole('button', { name: 'Resume review', exact: true })).toHaveCount(0);
+    reader.advance(30001);
+    await dialog.getByRole('button', { name: 'Check again', exact: true }).click();
+    await expect(dialog.getByRole('button', { name: 'Resume review', exact: true })).toBeVisible();
+    const bounds = await dialog.boundingBox();
+    expect(bounds!.x).toBeGreaterThanOrEqual(0); expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(width);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+    await info.attach(`recovery-${width}px`, { body: await page.screenshot({ fullPage: true }), contentType: 'image/png' });
+    reader.suppressRelease(false);
+    await dialog.getByRole('button', { name: 'Resume review', exact: true }).click();
     await reader.ready();
     await expect.poll(async () => (await reader.tool('inspect_review', {})).page).toBe(2);
-    const after = await reader.tool('inspect_review', {});
-    expect(after.source).toEqual(before.source);
-    const activeSelection = await page.evaluate(() => {
-      const state = (window as any).recoveryAcceptance;
-      const uri = state.context.content.find((block: any) => block.resource.uri.includes('/attachment/')).resource.uri;
-      state.context = { ...state.context, updateId: 'remove-chooser-attachment', content: state.context.content.filter((block: any) => block.resource.uri !== uri) };
-      state.shell.hostContextChanged({ 'openai/modelContext': state.context });
-      return { uri, publicationCount: state.publications.length };
-    });
-    await expect.poll(() => page.evaluate(uri => (window as any).recoveryAcceptance.context.content.some((block: any) => block.resource.uri === uri), activeSelection.uri)).toBe(false);
-    await openOptions(page);
-    await page.locator('summary').filter({ hasText: /^Include review context$/ }).click();
-    await page.getByRole('button', { name: 'Include snapshot', exact: true }).first().click();
-    await expect.poll(() => page.evaluate(({ uri, publicationCount }) => (window as any).recoveryAcceptance.publications.slice(publicationCount).some((publication: any) => publication.content.some((block: any) => block.resource.uri === uri)), activeSelection)).toBe(true);
+    expect((await reader.tool('inspect_review', {})).source).toEqual(before.source);
     expect(await page.evaluate(() => (window as any).recoveryAcceptance.messages)).toEqual([]);
-    const removed = await page.evaluate(() => {
-      const state = (window as any).recoveryAcceptance;
-      const removed = state.context.content.find((block: any) => block.resource.uri.includes('/attachment/')).resource.uri;
-      state.context = { ...state.context, updateId: 'human-removal', content: state.context.content.filter((block: any) => block.resource.uri !== removed) };
-      state.shell.hostContextChanged({ 'openai/modelContext': state.context });
-      return removed;
-    });
-    expect(await reader.tool('navigate_page', { page: 1, documentGeneration: after.documentGeneration, source: after.source })).toMatchObject({ status: 'navigated' });
-    await expect.poll(() => page.evaluate(uri => (window as any).recoveryAcceptance.context.content.some((block: any) => block.resource.uri === uri), removed)).toBe(false);
-    await info.attach('recovery-and-context', { body: await page.screenshot({ fullPage: true }), contentType: 'image/png' });
+  } finally { await reader.dispose(); }
+});
+
+test('leaving the reader releases ownership without a Close review button', async ({ page }) => {
+  const reader = await extensionRecoveryReader(page);
+  try {
+    await reader.mount(false); await reader.ready();
+    await page.goto('about:blank');
+    await expect.poll(() => reader.requests.some(request => request.action === 'revoke')).toBe(true);
+    await reader.mount(true);
+    await page.getByRole('button', { name: 'Resume Recent paper.pdf', exact: true }).click();
+    const dialog = page.getByRole('dialog', { name: 'Reopen review', exact: true });
+    await expect(dialog.getByRole('button', { name: 'Resume review', exact: true })).toBeVisible();
+    await dialog.getByRole('button', { name: 'Resume review', exact: true }).click();
+    await reader.ready();
   } finally { await reader.dispose(); }
 });
 
@@ -78,11 +69,10 @@ test('extension bot attaches annotation notes without editing the prompt and res
   info.setTimeout(60_000);
   const reader = await extensionReader(page);
   try {
-    await expect(page.locator('[data-production-review]')).toHaveCount(0);
-    expect(await page.evaluate(() => (window as any).extensionAcceptance.publications)).toEqual([]);
     await reader.ready();
     await expect.poll(() => page.evaluate(() => (window as any).extensionAcceptance.publications.length)).toBeGreaterThan(0);
-    expect(await page.evaluate(() => (window as any).extensionAcceptance.publications.every((p: any) => p.settingsLoaded))).toBe(true);
+    expect(reader.requests).not.toContain('settings-read');
+    expect(reader.requests).not.toContain('catalogue');
     const snapshot = await reader.tool('inspect_review', {});
     expect(snapshot).toMatchObject({ status: 'current', documentGeneration: 1 });
     expect(snapshot.annotations.map((a: any) => a.id)).toEqual(reader.bridge.broker.state(reader.bridge.sessionId)!.items.map(a => a.id));
@@ -118,14 +108,8 @@ test('extension bot attaches annotation notes without editing the prompt and res
       state.shell.hostContextChanged({ 'openai/modelContext': state.context });
       return removed;
     });
-    await openSharing(page);
-    await page.getByRole('checkbox', { name: 'Share current selection in background context', exact: true }).uncheck();
+    expect(await reader.tool('navigate_page', { page: 1, documentGeneration: 1, source: snapshot.source })).toMatchObject({ status: 'navigated' });
     await expect.poll(() => page.evaluate(uri => (window as any).extensionAcceptance.context.content.some((b: any) => b.resource.uri === uri), removed)).toBe(false);
-    await page.getByRole('checkbox', { name: 'Allow explicitly included review snapshots in other chats', exact: true }).check();
-    await page.getByRole('button', { name: 'Include this review snapshot', exact: true }).click();
-    await expect(page.getByRole('button', { name: 'Update included snapshot', exact: true })).toBeVisible();
-    await page.getByRole('button', { name: 'Remove this review from mentions', exact: true }).click();
-    await expect(page.getByRole('button', { name: 'Include this review snapshot', exact: true })).toBeVisible();
     // Let the PDF viewer observe the inline layout before the tool expands it.
     await page.locator('[data-viewer-framing-viewport]').evaluate(viewport => new Promise<void>(resolve => {
       const observer = new ResizeObserver(entries => {
@@ -166,16 +150,12 @@ for (const width of [1440, 1120, 375]) test(`extension reader and bot note layou
   const reader = await extensionReader(page);
   try {
     await reader.ready();
-    await expect(page.locator('.extension-menu')).not.toHaveAttribute('open','');
+    await expect(page.locator('.extension-menu')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Close review', exact: true })).toHaveCount(0);
     await expect(page.locator('.review-discussion-actions')).toHaveCount(0);
     const initial=await page.locator('#root').boundingBox();expect(initial!.y).toBeLessThan(2);
     await page.getByRole('button', { name: 'Show workspace', exact: true }).click({ trial: true });
     await info.attach(`extension-${width}px-reader`, { body: await page.screenshot({ fullPage: true }), contentType: 'image/png' });
-    await openSharing(page);
-    await expect(page.getByRole('checkbox', { name: 'Share background review context', exact: true })).toBeVisible();
-    const panel=await page.locator('.extension-menu__panel').boundingBox();expect(panel!.x).toBeGreaterThanOrEqual(0);expect(panel!.x+panel!.width).toBeLessThanOrEqual(width);
-    await info.attach(`extension-${width}px-options`, { body: await page.screenshot({ fullPage: true }), contentType: 'image/png' });
-    await page.locator('summary[aria-label="Review options"]').click();
     const snapshot=await reader.tool('inspect_review',{});await openAnnotationContext(page,snapshot.annotations[0].id);
     await page.getByRole('textbox',{name:'Note (optional)',exact:true}).fill('Why does this matter?');
     const dialog=await page.getByRole('dialog').boundingBox();expect(dialog!.x).toBeGreaterThanOrEqual(0);expect(dialog!.x+dialog!.width).toBeLessThanOrEqual(width);
@@ -202,6 +182,7 @@ test('extension selection bot attaches a captured note without changing the prom
     await expect(page.getByRole('button', { name: 'Add selection to chat', exact: true })).toBeVisible();
     const snapshot = await reader.tool('inspect_review', {});
     expect(snapshot.selection.text.length).toBeGreaterThan(0);
+    await expect.poll(() => page.evaluate(text => (window as any).extensionAcceptance.context?.content?.some((block: any) => block.resource.uri.endsWith('/background') && block.resource.text.includes(text)), snapshot.selection.text)).toBe(true);
     await page.getByRole('button', { name: 'Add selection to chat', exact: true }).click();
     await expect(page.getByRole('dialog',{name:'Add selection to chat',exact:true})).toBeVisible();
     await page.getByRole('textbox',{name:'Note (optional)',exact:true}).fill('Explain this passage.');
@@ -215,26 +196,20 @@ test('extension selection bot attaches a captured note without changing the prom
   } finally { await reader.dispose(); }
 });
 
-test('extension observes external sharing-off before a pending publication can reach the host', async ({ page }) => {
-  const reader = await extensionReader(page);
+test('removing host context cancels a pending automatic publication without exposing settings', async ({ page }) => {
+  const reader = await extensionReader(page, 'text-native-with-annotations.pdf', { holdPublication: true });
   try {
-    await page.evaluate(() => {
-      const state = (window as any).extensionAcceptance;
-      state.publicationGate = new Promise<void>(resolve => { state.releasePublication = resolve; });
-    });
     await reader.ready();
-    await openOptions(page);
-    await expect(page.getByText('Attaching context…', { exact: true })).toBeVisible();
+    await expect.poll(() => page.evaluate(() => (window as any).extensionAcceptance.preflightStarted)).toBeGreaterThan(0);
     await page.evaluate(() => {
       const state = (window as any).extensionAcceptance;
-      state.settings = { backgroundContext: false, selectionSharing: false, mentions: false }; state.revision++;
-      state.shell.wake();
+      state.context = null;
+      state.shell.hostContextChanged({ 'openai/modelContext': null });
+      state.releasePublication();
     });
-    await openSharing(page);
-    await expect(page.getByRole('checkbox', { name: 'Share background review context', exact: true })).not.toBeChecked();
-    await page.evaluate(() => (window as any).extensionAcceptance.releasePublication());
-    await expect(page.getByText('Background sharing paused', { exact: true })).toBeVisible();
+    await expect.poll(() => page.evaluate(() => (window as any).extensionAcceptance.preflightFinished)).toBeGreaterThan(0);
     expect(await page.evaluate(() => (window as any).extensionAcceptance.publications.some((p: any) => p.content.length > 0))).toBe(false);
+    await expect(page.locator('.extension-menu')).toHaveCount(0);
     expect(await reader.tool('inspect_review', {})).toMatchObject({ status: 'current', documentGeneration: 1 });
   } finally { await reader.dispose(); }
 });

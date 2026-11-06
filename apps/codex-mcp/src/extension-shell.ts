@@ -1,10 +1,8 @@
-import { mountSnapshotContextPicker } from './snapshot-context-picker.js';
 import { LiveReaderTools, type DocumentModelContext } from './live-reader-tools.js';
-import { ExtensionContextCoordinator, type ExtensionContextPreferences } from '../../web/src/host/extension-context-coordinator.js';
+import { ExtensionContextCoordinator } from '../../web/src/host/extension-context-coordinator.js';
 import type { ReviewContextSnapshot } from '../../web/src/host/review-context-snapshot.js';
 import { prepareReviewContext } from './review-context-attachment.js';
 import type { ReviewAgentBridge, ReviewAgentContextInput } from '../../web/src/host/review-agent-bridge.js';
-import type { ExtensionPreferenceValues, SnapshotLabel } from '../../../packages/core/src/extension-preferences.js';
 import type { OpenAIModelContext, OpenAIResources } from '@openai/mcp-extensions/app';
 import { HostResourceAdapter } from './host-resource-adapter.js';
 import type { App } from '@modelcontextprotocol/ext-apps';
@@ -18,25 +16,14 @@ import { NativeDiagnosticError, diagnosticFailure } from './lifecycle-diagnostic
 /** Memory-only app grants. A new host invocation never inherits an old panel's authority. */
 export class ExtensionShell {
     #context: ExtensionContextCoordinator | undefined;
-    #contextScope: 'chooser' | 'review' | undefined;
-    #disposeContextPicker: (() => void) | undefined;
     #readingPage: number | undefined;
     #readerTools: LiveReaderTools | undefined;
     readonly #readerVisibilityListeners = new Set<() => void>();
-    #contextView: HTMLElement | undefined;
-    #contextEnable: HTMLElement | undefined;
     #openReader: HTMLElement | undefined;
     #snapshot: ReviewContextSnapshot | undefined;
     #title: string | undefined;
     #displayMode: string | undefined;
     #message = '';
-    #preferences: ExtensionPreferenceValues = { backgroundContext: false, selectionSharing: false, mentions: false };
-    #settingsRevision = -1;
-    #settingsNotice = '';
-    #settingsView: HTMLElement | undefined;
-    #catalogue: { included: boolean; snapshot?: SnapshotLabel } = { included: false };
-    #catalogueView: HTMLElement | undefined;
-    #catalogueRequest = 0;
     #host: HostResourceAdapter | undefined;
     #hostNotice = '';
     #exportNotice = '';
@@ -46,7 +33,7 @@ export class ExtensionShell {
     #hostUpdateRevision = 0;
     #hostSave: Promise<void> | undefined;
     #saveRequested = false;
-    #manualSaveRequested = false;
+    #hostRetry: { kind: 'save' | 'refresh'; button: HTMLButtonElement } | undefined;
     #grant: string | undefined;
     #active: ExtensionPresentation | undefined;
     #unmount: (() => void) | undefined;
@@ -61,6 +48,11 @@ export class ExtensionShell {
     #resumeOperation: string | undefined;
     #resumeRefreshed: string | undefined;
     #choiceEpoch = 0;
+    #recoveryDialog: HTMLDialogElement | undefined;
+    #teardown: Promise<boolean> | undefined;
+    readonly #pageHidden = (event: PageTransitionEvent) => {
+        if (!event.persisted) void this.teardown();
+    };
     #watermark: number | undefined;
     readonly #listeners = new Set<(event: HostRuntimeInvalidation) => void>();
     constructor(readonly app: App, readonly root: HTMLElement, readonly status: HTMLElement, readonly controls: HTMLElement, readonly resources: () => OpenAIResources | undefined = () => undefined, readonly modelContext: () => OpenAIModelContext | undefined = () => undefined) { }
@@ -72,6 +64,7 @@ export class ExtensionShell {
         if (this.#received || this.#closed)
             return true;
         this.#received = true;
+        document.defaultView?.addEventListener('pagehide', this.#pageHidden);
         try {
             await this.#apply(result);
         }
@@ -80,6 +73,8 @@ export class ExtensionShell {
         }
         return true;
     }
+    #request(request: Exclude<ExtensionRequest, { action: 'app' }>): Promise<ExtensionResult>;
+    #request(request: ExtensionRequest): Promise<ExtensionResult | CodexAppResponse>;
     async #request(request: ExtensionRequest): Promise<ExtensionResult | CodexAppResponse> {
         let result;
         try {
@@ -114,16 +109,6 @@ export class ExtensionShell {
             : phase === 'failed' ? 'Export did not complete. Your review is still available.' : '';
         this.#show(this.#message);
     }
-    #contextStatus() {
-        if (!this.#contextView) return;
-        const status = this.#context?.status ?? 'unsupported';
-        this.#contextView.textContent = status === 'available' ? 'Context attached'
-            : status === 'publishing' ? 'Attaching context…'
-            : status === 'paused' ? 'Background sharing paused'
-            : status === 'unsupported' ? 'Context sharing unavailable' : 'Context could not be attached. Try again.';
-        if (this.#contextEnable) this.#contextEnable.hidden = status !== 'paused' || !this.#preferences.backgroundContext;
-    }
-    setContextPreferences(preferences: ExtensionContextPreferences) { this.#preferences = { ...this.#preferences, ...preferences }; this.#context?.setPreferences(preferences); }
     hostContextChanged(context: NonNullable<ReturnType<App['getHostContext']>>, reconcileContext = true) {
         if (context.displayMode !== undefined) this.#displayMode = context.displayMode;
         if (this.#received) {
@@ -142,19 +127,17 @@ export class ExtensionShell {
         if (reconcileContext && Object.hasOwn(context, 'openai/modelContext')) this.#context?.reconcile(this.modelContext()?.getCurrent());
     }
     #setupContext(freshInvocation: boolean) {
-        if (this.#context && this.#contextScope==='review') return;
-        this.#context?.dispose();this.#contextScope='review';
+        if (this.#context) return;
         const api = this.modelContext();
-        this.#context = new ExtensionContextCoordinator(api, () => this.#contextStatus(), {
+        this.#context = new ExtensionContextCoordinator(api, undefined, {
             freshInvocation,
             beforeUpdate: async () => {
-                const grant = this.#grant, settingsRevision = this.#settingsRevision;
+                const grant = this.#grant;
                 if (!grant || this.#closed) throw Error('Context connection unavailable');
                 const marked = await this.#request({ action: 'context-published', grant });
-                if (marked.status !== 'context-ready' || this.#closed || grant !== this.#grant || settingsRevision !== this.#settingsRevision) throw Error('Context connection unavailable');
+                if (marked.status !== 'context-ready' || this.#closed || grant !== this.#grant) throw Error('Context connection unavailable');
             },
         });
-        this.#context.setPreferences(this.#preferences);
     }
     #button(label: string, action: () => Promise<void>, container = this.controls) { const button = document.createElement('button'); button.textContent = label; button.onclick = () => { if (this.#closed || button.disabled)
         return; button.disabled = true; void action().catch(() => this.#show('Placekeeper could not complete that action. Your protected work is retained.')).finally(() => { button.disabled = false; }); }; container.append(button); return button; }
@@ -220,42 +203,23 @@ export class ExtensionShell {
             this.#choiceEpoch++;
             this.#grant = result.grant;
             this.#active = result.presentation;
-            await this.#refreshSettings().catch(() => { this.#settingsNotice = 'Sharing preferences are unavailable. Sharing stays disabled until they can be loaded.'; this.#preferences = { backgroundContext: false, selectionSharing: false, mentions: false }; this.#context?.setPreferences(this.#preferences); });
-            if (this.#closed || this.#grant !== result.grant) return;
             this.#setupContext(result.contextPublished === false);
-            this.#disposeContextPicker?.();
+            this.#closeRecovery();
             this.controls.replaceChildren();
+            this.#hostRetry = undefined;
             this.controls.className = 'extension-controls';
             this.controls.dataset.mode = 'review';
             this.status.dataset.extensionMode = 'review';
-            const menu = document.createElement('details'); menu.className = 'extension-menu';
-            const summary = document.createElement('summary'); summary.textContent = '⋯'; summary.setAttribute('aria-label', 'Review options'); summary.title = 'Review options';
-            const panel = document.createElement('div'); panel.className = 'extension-menu__panel';
-            menu.append(summary, panel); this.controls.append(menu);
-            menu.onkeydown = event => { if (event.key === 'Escape') { menu.open = false; summary.focus(); } };
-            this.#contextView = document.createElement('p'); this.#contextView.className = 'extension-menu__status'; panel.append(this.#contextView);
-            const enable = document.createElement('button'); enable.textContent = 'Resume background sharing'; enable.onclick = () => this.#context?.enableBackground(); this.#contextEnable = enable; panel.append(enable);
-            this.#contextStatus();
-            const sharing = document.createElement('details'), sharingSummary = document.createElement('summary'); sharingSummary.textContent = 'Sharing settings'; sharing.append(sharingSummary); panel.append(sharing);
-            this.#settingsView = document.createElement('fieldset'); sharing.append(this.#settingsView); this.#renderSettings();
-            this.#catalogueView = document.createElement('div'); sharing.append(this.#catalogueView);
-            this.#disposeContextPicker = mountSnapshotContextPicker(panel, {
-                request: request => this.#request(request),
-                include: attachment => {
-                    if(this.#closed || !this.#connected || !this.#grant || !this.modelContext() || !this.#context)throw Error('Context connection unavailable');
-                    return this.#context.includeAttachment(attachment);
-                },
-            });
-            this.#renderCatalogue();
-            void this.#catalogueAction('status').catch(() => { if (this.#catalogueView) this.#catalogueView.textContent = 'Saved snapshots are unavailable. Try again from Sharing settings.'; });
             this.#openReader = this.#button('Open reader', async () => {
                 try { const result = await this.app.requestDisplayMode({ mode: 'fullscreen' }); this.hostContextChanged({ displayMode: result.mode }); }
                 catch { this.#show('This host could not expand the reader. Open Placekeeper in the conversation panel to edit.'); }
             });
-            this.#closeControl(panel);
             this.hostContextChanged(this.app.getHostContext?.() ?? {}, false);
             this.#mount();
-            if (this.#host) { this.#button('Refresh PDF', () => this.#continue(), panel); this.#button('Save now', () => this.#saveHost(true), panel); void this.#saveHost(); if (this.#hostRefreshPending) queueMicrotask(() => { void this.#continue().catch(() => undefined); }); }
+            if (this.#host) {
+                void this.#saveHost();
+                if (this.#hostRefreshPending) queueMicrotask(() => { void this.#refreshHost(); });
+            }
             return;
         }
         if (result.status === 'cancelled') {
@@ -269,40 +233,7 @@ export class ExtensionShell {
             return;
         }
         if (result.status === 'busy') {
-            if (result.canRecover) {
-                this.#show('The previous reader is disconnected. Recovering transfers this review here and prevents the old reader from making further changes.');
-            } else if (result.matchingCopy) {
-                this.#show(result.canResume
-                    ? 'A saved-copy review has matching PDF contents and a similar filename. Resume that review or open an independent review.'
-                    : 'A saved-copy review with matching PDF contents and a similar filename is already open. You can open an independent review.');
-            } else {
-                this.#show(result.canResume
-                    ? 'Protected review work is available. Choose how to open it.'
-                    : 'This PDF already has a review. Open an independent review without taking over the existing one.');
-            }
-            this.controls.replaceChildren();
-            const epoch = ++this.#choiceEpoch;
-            let pending = false;
-            const buttons: HTMLButtonElement[] = [];
-            const current = () => !this.#closed && epoch === this.#choiceEpoch;
-            const begin = () => { if (!current() || pending) return false; pending = true; for (const button of buttons) button.disabled = true; return true; };
-            for (const choice of result.canRecover ? ['recover', 'fork'] as const : result.canResume ? ['resume', 'fork'] as const : ['fork'] as const) {
-                const operationId = crypto.randomUUID();
-                buttons.push(this.#button(choice === 'recover' ? 'Recover disconnected review' : choice === 'resume' ? 'Resume protected review' : 'Open independent review', async () => {
-                    if (!begin()) return;
-                    try {
-                        const parsed = parseExtensionResult(await this.#request({ action: 'choose', recoveryToken: result.recoveryToken, choice, operationId }));
-                        if (parsed?.status === 'unavailable' && current()) this.#chooser('This review choice is no longer available. Choose the PDF again; protected work is retained.', 'Choose PDF again', true);
-                        else if (parsed && current()) {
-                            if (parsed.status === 'host-resource') await this.#restartHost(parsed);
-                            else await this.#apply(parsed);
-                        }
-                        else if (parsed) await this.#discardObsolete(parsed);
-                    } catch (error) { if (current()) throw error; }
-                    finally { pending = false; if (current()) for (const button of buttons) button.disabled = false; }
-                }));
-            }
-            buttons.push(this.#button('Cancel', async () => { if (!begin()) return; this.#choiceEpoch++; if (this.#active && this.#grant) await this.#apply({ status: 'active', grant: this.#grant, presentation: this.#active }); else this.#chooser(); }));
+            this.#offerRecovery(result);
             return;
         }
         if (result.status === 'host-resource') {
@@ -321,49 +252,119 @@ export class ExtensionShell {
                 const downloaded = await this.app.downloadFile(params, options);
                 if (hostEpoch === this.#hostEpoch) this.#exportProgress(downloaded.isError ? 'host-declined' : 'host-accepted');
                 return downloaded;
-            }, resources: this.resources, request: async request => { const response = await this.#request(request); const parsed = parseExtensionResult(response); if (!parsed) throw Error('Host resource unavailable'); return parsed; }, current: () => !this.#closed && hostEpoch === this.#hostEpoch, onUpdate: () => { this.#hostRefreshPending = true; this.#hostUpdateRevision++; if (this.#active) void this.#continue().catch(() => this.#show('The host PDF could not be refreshed. Finish any current edit, then refresh; your protected review is retained.')); } });
+            }, resources: this.resources, request: async request => { const response = await this.#request(request); const parsed = parseExtensionResult(response); if (!parsed) throw Error('Host resource unavailable'); return parsed; }, current: () => !this.#closed && hostEpoch === this.#hostEpoch, onProvisional: grant => {
+                if (!this.#closed && hostEpoch === this.#hostEpoch) this.#grant = grant;
+            }, onUpdate: () => { this.#hostRefreshPending = true; this.#hostUpdateRevision++; if (this.#active) void this.#refreshHost(); } });
     }
-    async #refreshSettings(set?: Partial<ExtensionPreferenceValues>) {
-        const result = await this.#request(set ? { action: 'settings-update', set } : { action: 'settings-read' });
-        if (this.#closed) return;
-        if (result.status !== 'settings') throw Error('Settings unavailable');
-        if (result.revision < this.#settingsRevision) return;
-        if (result.revision === this.#settingsRevision && !set && !this.#settingsNotice) return;
-        this.#settingsNotice = '';
-        this.#settingsRevision = result.revision;
-        this.#preferences = result.values;
-        this.#context?.setPreferences(result.values);
-        if (!result.values.mentions) this.#catalogue = { included: false };
-        this.#renderSettings(); this.#renderCatalogue(); this.#contextStatus();
+    #closeRecovery() {
+        this.#recoveryDialog?.close();
+        this.#recoveryDialog?.remove();
+        this.#recoveryDialog = undefined;
     }
-    #renderSettings() {
-        if (!this.#settingsView) return;
-        this.#settingsView.replaceChildren();
-        const legend = document.createElement('legend'); legend.textContent = 'Share with chat'; this.#settingsView.append(legend);
-        if (this.#settingsNotice) { const notice = document.createElement('p'); notice.textContent = this.#settingsNotice; this.#settingsView.append(notice); const retry = document.createElement('button'); retry.textContent = 'Retry sharing preferences'; retry.onclick = () => { void this.#refreshSettings().catch(() => this.#show('Sharing preferences are still unavailable.')); }; this.#settingsView.append(retry); }
-        for (const [key, text] of Object.entries({ backgroundContext: 'Share background review context', selectionSharing: 'Share current selection in background context', mentions: 'Allow explicitly included review snapshots in other chats' }) as [keyof ExtensionPreferenceValues, string][]) {
-            const label = document.createElement('label'), input = document.createElement('input'); input.type = 'checkbox'; input.checked = this.#preferences[key];
-            input.onchange = () => { input.disabled = true; void this.#refreshSettings({ [key]: input.checked }).catch(() => { this.#show('Sharing preferences could not be saved.'); this.#renderSettings(); }); };
-            label.append(input, document.createTextNode(text)); this.#settingsView.append(label);
-        }
-    }
-    async #catalogueAction(operation: 'status' | 'capture' | 'remove') {
-        const grant = this.#grant, request = ++this.#catalogueRequest; if (!grant || this.#closed) return;
-        const result = await this.#request({ action: 'catalogue', grant, operation });
-        if (this.#closed || grant !== this.#grant || request !== this.#catalogueRequest) return;
-        if (result.status !== 'catalogue') throw Error('Mention snapshot unavailable');
-        this.#catalogue = this.#preferences.mentions ? result : { included: false }; this.#renderCatalogue();
-    }
-    #renderCatalogue() {
-        if (!this.#catalogueView) return;
-        this.#catalogueView.replaceChildren();
-        const text = document.createElement('p'); text.textContent = !this.#preferences.mentions ? 'This review is excluded from mentions. Enable the global preference to include a snapshot.' : this.#catalogue.included ? `This review has an included snapshot${this.#catalogue.snapshot ? ` from ${this.#catalogue.snapshot.capturedAt}, revision ${this.#catalogue.snapshot.revision}` : ''}. Hosts with Placekeeper composer mentions can retrieve it in other chats. Changes require an explicit update.` : 'This review is excluded from mentions. Include a snapshot to make it available on hosts with Placekeeper composer mentions.';
-        this.#catalogueView.append(text);
-        if (!this.#preferences.mentions) return;
-        const refresh = document.createElement('button'); refresh.textContent = 'Refresh snapshot status'; refresh.onclick = () => { void this.#catalogueAction('status').catch(() => this.#show('Mention snapshot status is unavailable.')); }; this.#catalogueView.append(refresh);
-        const add = (label: string, operation: 'capture' | 'remove') => { const button = document.createElement('button'); button.textContent = label; button.onclick = () => { button.disabled = true; void this.#catalogueAction(operation).catch(() => { button.disabled = false; this.#show('The mention snapshot could not be updated.'); }); }; this.#catalogueView!.append(button); };
-        add(this.#catalogue.included ? 'Update included snapshot' : 'Include this review snapshot', 'capture');
-        if (this.#catalogue.included) add('Remove this review from mentions', 'remove');
+    #offerRecovery(offer: Extract<ExtensionResult, { status: 'busy' }>) {
+        this.#closeRecovery();
+        this.#show('');
+        this.hostContextChanged(this.app.getHostContext?.() ?? {}, false);
+        const epoch = ++this.#choiceEpoch;
+        const current = () => !this.#closed && epoch === this.#choiceEpoch;
+        const dialog = document.createElement('dialog');
+        this.#recoveryDialog = dialog;
+        dialog.className = 'extension-recovery';
+        dialog.setAttribute('aria-labelledby', 'extension-recovery-title');
+        dialog.setAttribute('aria-describedby', 'extension-recovery-description');
+        const title = document.createElement('h2');
+        title.id = 'extension-recovery-title';
+        const available = offer.canRecover || offer.canResume;
+        title.textContent = 'Reopen review';
+        const description = document.createElement('p');
+        description.id = 'extension-recovery-description';
+        description.textContent = offer.canRecover
+            ? 'The previous reader is disconnected. You can resume its protected work here.'
+            : offer.matchingCopy
+                ? 'A saved-copy review has matching PDF contents and a similar filename.'
+                : available ? 'Protected review work is available for this PDF.'
+                    : 'This review is still open elsewhere. Return to the previous reader or check again after its connection ends.';
+        const feedback = document.createElement('p');
+        feedback.className = 'extension-recovery__feedback';
+        feedback.setAttribute('role', 'status');
+        const choices = document.createElement('div');
+        choices.className = 'extension-recovery__choices';
+        const footer = document.createElement('div');
+        footer.className = 'extension-recovery__footer';
+        dialog.append(title, description, choices, feedback, footer);
+        const buttons: HTMLButtonElement[] = [];
+        let pending = false;
+        const run = async (request: Extract<ExtensionRequest, { action: 'choose' | 'recheck' }>, progress: string) => {
+            if (!current() || pending) return;
+            pending = true;
+            const focused = buttons.find(button => button === document.activeElement);
+            feedback.textContent = progress;
+            for (const button of buttons) button.disabled = true;
+            try {
+                const result = await this.#request(request);
+                if (!current()) {
+                    await this.#discardObsolete(result);
+                    return;
+                }
+                if (result.status === 'unavailable') {
+                    this.#chooser('This review choice is no longer available. Choose the PDF again or reopen it from its file menu. Protected work is retained.', 'Choose PDF again', true, true);
+                } else if (result.status === 'host-resource') {
+                    await this.#restartHost(result);
+                } else {
+                    await this.#apply(result);
+                }
+            } catch {
+                if (current()) feedback.textContent = request.action === 'recheck'
+                    ? 'Placekeeper could not check the previous connection. Try again.'
+                    : 'Placekeeper could not open this review. Try again. Your protected work is retained.';
+            } finally {
+                pending = false;
+                if (current()) {
+                    for (const button of buttons) button.disabled = false;
+                    focused?.focus();
+                }
+            }
+        };
+        const action = (label: string, parent: HTMLElement, onClick: () => void) => {
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.textContent = label;
+            button.onclick = onClick;
+            buttons.push(button);
+            parent.append(button);
+            return button;
+        };
+        const addChoice = (choice: 'recover' | 'resume' | 'fork', label: string, consequence: string) => {
+            const row = document.createElement('div');
+            row.className = 'extension-recovery__choice';
+            const operationId = crypto.randomUUID();
+            const request = { action: 'choose', recoveryToken: offer.recoveryToken, choice, operationId } as const;
+            const button = action(label, row, () => { void run(request, 'Opening review…'); });
+            if (choice !== 'fork') button.className = 'extension-recovery__primary';
+            const note = document.createElement('p');
+            note.id = `extension-recovery-${choice}`;
+            note.textContent = consequence;
+            button.setAttribute('aria-describedby', note.id);
+            row.append(note);
+            choices.append(row);
+        };
+        if (offer.canRecover) addChoice('recover', 'Resume review', 'Transfer this review here and prevent the previous reader from making further changes.');
+        else if (offer.canResume) addChoice('resume', 'Resume review', 'Continue with your existing annotations and protected draft.');
+        addChoice('fork', 'Open separate copy', 'Start a separate review and keep the existing work in place.');
+        if (!available) action('Check again', footer, () => {
+            void run({ action: 'recheck', recoveryToken: offer.recoveryToken }, 'Checking the previous connection…');
+        });
+        const cancel = () => {
+            if (!current() || pending) return;
+            this.#closeRecovery();
+            if (this.#active && this.#grant) void this.#apply({ status: 'active', grant: this.#grant, presentation: this.#active });
+            else this.#chooser(undefined, undefined, false, true);
+        };
+        const cancelButton = action('Cancel', footer, cancel);
+        cancelButton.autofocus = true;
+        dialog.oncancel = event => { event.preventDefault(); cancel(); };
+        this.controls.append(dialog);
+        dialog.showModal();
     }
     #contextBridge(tools: LiveReaderTools, epoch: number): ReviewAgentBridge {
         return { attach: actions => tools.attach(actions), addContext: input => this.#addContext(input, epoch) };
@@ -387,11 +388,11 @@ export class ExtensionShell {
         if ('grant' in result && (this.#closed || result.grant !== this.#grant))
             await this.#request({ action: 'revoke', grant: result.grant }).catch(() => undefined);
     }
-    #chooser(notice = 'Open a PDF to begin reviewing.', label = 'Choose PDF', cancellable = false) {
+    #chooser(notice = 'Open a PDF to begin reviewing.', label = 'Choose PDF', cancellable = false, restoreFocus = false) {
         const epoch = ++this.#choiceEpoch;
         this.controls.className = 'extension-controls'; this.controls.dataset.mode = 'chooser'; this.status.dataset.extensionMode = 'chooser';
         if (!this.#active) this.#resetHost();
-        this.#disposeContextPicker?.();this.#disposeContextPicker=undefined;
+        this.#closeRecovery();
         this.#show(notice); this.controls.replaceChildren();
         const current = () => !this.#closed && epoch === this.#choiceEpoch;
         let opening = false;
@@ -413,22 +414,10 @@ export class ExtensionShell {
                 finally { opening = false; if (current()) for (const control of buttons) control.disabled = false; }
             });
             button.disabled = opening; buttons.push(button);
+            return button;
         };
-        addOpenButton(label, { action: 'open' });
-        if(!this.#active){
-            this.#context?.dispose();this.#contextScope='chooser';
-            const api=this.modelContext();
-            this.#context=new ExtensionContextCoordinator(api?{
-                getCurrent:()=>api.getCurrent(),
-                update:async(params,options)=>{if(!current()||this.#active)throw Error('Context connection unavailable');return api.update(params,options);},
-            }:undefined,()=>this.#contextStatus());
-            this.#context.setPreferences({backgroundContext:false,selectionSharing:false});
-            this.#contextView=document.createElement('p');this.controls.append(this.#contextView);this.#contextStatus();
-            this.#disposeContextPicker=mountSnapshotContextPicker(this.controls,{
-                request:request=>this.#request(request),
-                include:attachment=>{if(!current()||this.#active||!api||!this.#context)throw Error('Context connection unavailable');return this.#context.includeAttachment(attachment);},
-            });
-        }
+        const choose = addOpenButton(label, { action: 'open' });
+        if (restoreFocus) choose.focus();
         void this.#showRecent(current, addOpenButton);
         if (cancellable) this.#button('Cancel', async () => {
             if (!current()) return;
@@ -531,7 +520,6 @@ export class ExtensionShell {
                     this.#context?.retry();
                 }
             }
-            if (method === 'watermark') await this.#refreshSettings().catch(() => undefined);
             if (method === 'watermark' && value.sessionId) {
                 if (this.#watermark !== undefined && value.watermark !== this.#watermark)
                     for (const listener of this.#listeners)
@@ -606,31 +594,52 @@ export class ExtensionShell {
         if (this.#hostRefreshPending && ['finalizeInteraction', 'releaseInteraction', 'acknowledgeInteraction'].includes(method)) void this.#continue().catch(() => undefined);
         return response.payload;
     }
-    async #saveHost(manual = false) {
+    #offerHostRetry(kind: 'save' | 'refresh') {
+        if (this.#hostRetry?.kind === kind) return;
+        this.#hostRetry?.button.remove();
+        const button = kind === 'save'
+            ? this.#button('Retry host save', () => this.#saveHost())
+            : this.#button('Retry refresh', () => this.#refreshHost());
+        this.#hostRetry = { kind, button };
+    }
+    async #refreshHost() {
+        const epoch = this.#hostEpoch;
+        try { await this.#continue(); }
+        catch {
+            if (this.#closed || this.#hostEpoch !== epoch) return;
+            this.#show('The host PDF could not be refreshed. Finish any current edit, then retry; your protected review is retained.');
+            this.#offerHostRetry('refresh');
+        }
+    }
+    async #saveHost() {
         this.#saveRequested = true;
-        this.#manualSaveRequested ||= manual;
         if (this.#hostSave) return this.#hostSave;
         const hostEpoch = this.#hostEpoch;
         const running = (async () => {
             while (this.#saveRequested && this.#host && this.#grant && !this.#closed) {
                 this.#saveRequested = false;
-                const retryLocalCopy = this.#manualSaveRequested;
-                this.#manualSaveRequested = false;
                 const result = await this.#host.save(this.#grant);
                 if (hostEpoch !== this.#hostEpoch || this.#closed) return;
                 if (result.status === 'host-status') {
-                    if (result.outcome === 'local-copy') {
-                        if (retryLocalCopy) await this.#payload('retrySave', {}, this.#epoch);
-                        this.#hostNotice = ''; this.#show('');
+                    if (result.outcome === 'local-copy' || result.outcome === 'saved') {
+                        if (this.#hostRetry?.kind === 'save') {
+                            this.#hostRetry.button.remove();
+                            this.#hostRetry = undefined;
+                        }
+                        this.#hostNotice = '';
+                        this.#show('');
                     }
-                    else if (result.outcome === 'saved') { this.#hostNotice = ''; this.#show(''); }
                     else if (result.outcome === 'read-only') { this.#hostNotice = 'This host PDF is read-only. Your review is protected; use Save options to autosave to a copy.'; this.#show(this.#hostNotice); }
                     else if (result.outcome === 'conflict') { this.#hostNotice = 'The host PDF changed before saving. Your review is protected. Use Save options to keep your work in a separate copy.'; this.#show(this.#hostNotice); }
-                    else if (result.outcome === 'protected') { this.#hostNotice = 'The host save was not completed. Your review is protected; choose Save now or use Save options to save a copy.'; this.#show(this.#hostNotice); }
-                    else if (result.outcome === 'unknown') { this.#hostNotice = 'The host save could not be confirmed. Your review is protected; refresh to check the current PDF.'; this.#show(this.#hostNotice); }
+                    else if (result.outcome === 'protected') { this.#hostNotice = 'The host save was not completed. Your review is protected; retry the save or use Save options to save a copy.'; this.#show(this.#hostNotice); this.#offerHostRetry('save'); }
+                    else if (result.outcome === 'unknown') { this.#hostNotice = 'The host save could not be confirmed. Your review is protected; refresh to check the current PDF.'; this.#show(this.#hostNotice); this.#offerHostRetry('refresh'); }
                 }
             }
-        })().catch(() => { if (hostEpoch === this.#hostEpoch) this.#show('Host save could not be completed. Your review is protected; refresh or use Save options to save a copy.'); }).finally(() => { if (this.#hostSave === running) this.#hostSave = undefined; });
+        })().catch(() => {
+            if (this.#closed || hostEpoch !== this.#hostEpoch) return;
+            this.#show('Host save could not be completed. Your review is protected; retry the save or use Save options to save a copy.');
+            this.#offerHostRetry('save');
+        }).finally(() => { if (this.#hostSave === running) this.#hostSave = undefined; });
         this.#hostSave = running; return running;
     }
     async #continue() {
@@ -681,7 +690,7 @@ export class ExtensionShell {
         return this.#resume;
     }
     #ended() { if (this.#closed)
-        return; this.#connected = false; this.#readerTools?.dispose(); this.#disposeContextPicker?.(); this.#context?.dispose(); this.#liveness?.stop(); void this.#host?.dispose().catch(() => undefined); this.root.inert = true; this.#show('This connection ended. Reopen the PDF through its file menu; accepted annotations and protected drafts are retained.'); this.#closed = true; this.#epoch++; }
+        return; this.#connected = false; this.#readerTools?.dispose(); this.#closeRecovery(); this.#context?.dispose(); this.#liveness?.stop(); void this.#host?.dispose().catch(() => undefined); this.root.inert = true; this.#show('This connection ended. Reopen the PDF through its file menu; accepted annotations and protected drafts are retained.'); this.#closed = true; this.#epoch++; }
     visibilityChanged(hidden: boolean) {
         if (!this.#active || this.#closed) return;
         this.root.inert = hidden || !this.#connected;
@@ -689,51 +698,33 @@ export class ExtensionShell {
         if (hidden) this.#show('Reader suspended while the app is hidden. Protected work is retained.');
         else { this.#show(this.#connected ? this.#hostNotice : 'Reconnecting to Placekeeper… Editing is paused.'); this.wake(); }
     }
-    wake() { void this.#refreshSettings().catch(() => undefined); if (this.#connected && !document.hidden) this.#context?.retry(); this.#liveness?.wake(); }
+    wake() { if (this.#connected && !document.hidden) this.#context?.retry(); this.#liveness?.wake(); }
     disconnected() { if (this.ownsPanel)
         this.#ended(); }
-    #closeControl(container = this.controls) {
-        const button = document.createElement('button');
-        button.textContent = 'Close review';
-        let closingGrant: string | undefined;
-        const notice = (text: string) => { this.status.textContent = text; this.status.hidden = false; };
-        button.onclick = () => {
-            if (button.disabled) return;
-            if (this.#resume || this.#resumeOperation) { this.#show('Reconnecting to Placekeeper. Try Close review again when the connection settles.'); return; }
-            if (this.#closed && !closingGrant) return;
-            closingGrant ??= this.#grant;
-            button.disabled = true;
-            void (async () => {
-                const released = this.#closed
-                    ? closingGrant && (await this.#request({ action: 'revoke', grant: closingGrant })).status === 'closed'
-                    : await this.teardown();
-                if (!released) throw Error('Release not confirmed');
-                closingGrant = undefined;
-                this.controls.replaceChildren();
-                notice('Review closed. Your protected work is retained. Reopen the PDF to continue.');
-                await this.app.requestTeardown().catch(() => undefined);
-            })().catch(() => notice('Placekeeper could not confirm that the review was released. Keep this panel open and try Close review again. Your protected work is retained.'))
-                .finally(() => { button.disabled = false; });
-        };
-        container.append(button);
+    teardown() {
+        return this.#teardown ??= this.#release();
     }
-    async teardown() {
+    async #release() {
+        document.defaultView?.removeEventListener('pagehide', this.#pageHidden);
         this.#closed = true;
         this.#connected = false;
         this.root.inert = true;
-        const grant = this.#grant, host = this.#host;
+        const grant = this.#grant, host = this.#host, operationId = this.#resumeOperation;
         this.#epoch++;
         this.#grant = undefined;
         this.#active = undefined;
         this.#host = undefined;
-        // Release ownership while the host still accepts requests. Resource
-        // unsubscribe may never reply once the host starts removing the panel.
-        const revoked = grant ? this.#request({ action: 'revoke', grant }).then(result => result.status === 'closed', () => false) : Promise.resolve(true);
+        // Release ownership while the host still accepts requests. An in-flight
+        // activation or resume may have rotated the grant before its reply arrives.
+        const revoked = grant
+            ? this.#request({ action: 'revoke', grant, ...(operationId === undefined ? {} : { operationId }) })
+                .then(result => result.status === 'closed', () => false)
+            : Promise.resolve(true);
         try {
             this.#liveness?.stop();
             this.#readerTools?.dispose();
             this.#context?.dispose();
-            this.#disposeContextPicker?.();
+            this.#closeRecovery();
             this.#unmount?.();
             this.#listeners.clear();
         } finally {

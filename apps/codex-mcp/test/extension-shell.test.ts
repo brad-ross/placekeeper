@@ -12,56 +12,39 @@ const active = (g = grant) => ({ status: 'active', grant: g, presentation: { sta
 const reply = (value: unknown) => ({ _meta: { [EXTENSION_META_KEY]: value } });
 function deferred() { let resolve!: (value: any) => void; const promise = new Promise<any>(done => { resolve = done; }); return { promise, resolve }; }
 function descendants(node: any): any[] { return (node.append?.mock.calls ?? []).flatMap((args: any[]) => args.flatMap(child => [child, ...descendants(child)])); }
-function fixture(handler: (request: any) => Promise<any> = async () => reply({ status: 'ok', payload: {} }), resources: () => any = () => undefined, modelContext: () => any = () => undefined, preferences?: (request: any) => Promise<any>) {
+function fixture(handler: (request: any) => Promise<any> = async () => reply({ status: 'ok', payload: {} }), resources: () => any = () => undefined, modelContext: () => any = () => undefined) {
     const calls: any[] = [];
-    const app = { getHostCapabilities: () => ({ downloadFile: {} }), downloadFile: vi.fn(async () => ({})), getHostContext: () => ({ displayMode: 'fullscreen' }), callServerTool: vi.fn(async (input: any, _options?: { timeout: number; maxTotalTimeout?: number }) => { calls.push(input.arguments.request); const request = input.arguments.request; if (preferences && ['settings-read', 'settings-update', 'catalogue'].includes(request.action)) return preferences(request); if (request.action === 'settings-read') return reply({ status: 'settings', values: { backgroundContext: true, selectionSharing: true, mentions: false }, revision: 0 }); if (request.action === 'catalogue') return reply({ status: 'catalogue', included: false }); return handler(request); }) };
+    const app = { getHostCapabilities: () => ({ downloadFile: {} }), downloadFile: vi.fn(async () => ({})), getHostContext: () => ({ displayMode: 'fullscreen' }), callServerTool: vi.fn(async (input: any, _options?: { timeout: number; maxTotalTimeout?: number }) => { calls.push(input.arguments.request); const request = input.arguments.request; return handler(request); }) };
     const element = () => ({ inert: false, hidden: false, textContent: '', dataset: {} as Record<string, string>, replaceChildren: vi.fn(), append: vi.fn() });
     const root = element(), status = element(), controls = element();
     return { app, shell: new ExtensionShell(app as unknown as App, root as unknown as HTMLElement, status as unknown as HTMLElement, controls as unknown as HTMLElement, resources, modelContext), root, status, controls, calls };
 }
-beforeEach(() => { vi.useFakeTimers(); vi.stubGlobal('document', { hidden: false, createElement: () => ({ value: '', append: vi.fn(), replaceChildren: vi.fn(), setAttribute: vi.fn(), remove: vi.fn() }), createTextNode: (value: string) => ({ textContent: value }) }); host.options.length = 0; host.mounts.length = 0; host.onMount = undefined; host.unmount.mockClear(); });
+beforeEach(() => { vi.useFakeTimers(); vi.stubGlobal('document', { defaultView: new EventTarget(), hidden: false, createElement: (tag: string) => ({ tagName: tag.toUpperCase(), focus: vi.fn(), showModal: vi.fn(), close: vi.fn(), value: '', append: vi.fn(), replaceChildren: vi.fn(), setAttribute: vi.fn(), remove: vi.fn() }), createTextNode: (value: string) => ({ textContent: value }) }); host.options.length = 0; host.mounts.length = 0; host.onMount = undefined; host.unmount.mockClear(); });
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
-it('does not close with an unresolved grant rotation after a lost resume reply', async () => {
-    const f = fixture(async request => {
-        if (request.action === 'resume') throw Error('lost rotation reply');
-        if (request.action === 'app') return reply({ status: 'denied', reason: 'expired' });
-        return reply({ status: 'closed' });
-    });
-    await f.shell.receive(active()); await vi.advanceTimersByTimeAsync(0);
-    const close = descendants(f.controls).find(button => button.textContent === 'Close review');
-    close.onclick(); await vi.advanceTimersByTimeAsync(0);
-    expect(f.calls.filter(c => c.action === 'revoke')).toHaveLength(0);
-    expect(f.status.textContent).toContain('connection settles');
-    await f.shell.teardown();
-});
-it('closes the host panel only after ownership release is acknowledged', async () => {
+it('omits manual close and releases ownership automatically when the host tears down', async () => {
     const released = deferred();
     const f = fixture(async request => request.action === 'revoke' ? released.promise : reply({ status: 'ok', payload: {} }));
-    const requestTeardown = vi.fn(async () => {});
-    Object.assign(f.app, { requestTeardown });
     await f.shell.receive(active());
-    const close = descendants(f.controls).find(button => button.textContent === 'Close review');
-    expect(close).toBeDefined();
-    close.onclick(); await vi.advanceTimersByTimeAsync(0);
+    expect(descendants(f.controls).map(node => node.textContent)).not.toContain('Close review');
+    f.shell.visibilityChanged(true);
+    f.shell.hostContextChanged({ displayMode: 'inline' });
+    expect(f.calls.filter(c => c.action === 'revoke')).toHaveLength(0);
+
+    const closing = f.shell.teardown();
+    const secondTeardown = f.shell.teardown();
     expect(f.root.inert).toBe(true);
-    expect(requestTeardown).not.toHaveBeenCalled();
-    released.resolve(reply({ status: 'closed' })); await vi.advanceTimersByTimeAsync(0);
-    expect(requestTeardown).toHaveBeenCalledOnce();
-    expect(f.calls.filter(c => c.action === 'revoke')).toHaveLength(1);
+    expect(f.calls.filter(c => c.action === 'revoke')).toEqual([{ action: 'revoke', grant }]);
+    released.resolve(reply({ status: 'closed' }));
+    await Promise.all([closing, secondTeardown]);
 });
-it('keeps the panel open and permits retry when explicit ownership release fails', async () => {
-    let attempts = 0;
-    const f = fixture(async request => { if (request.action === 'revoke') { if (++attempts === 1) throw Error('offline'); return reply({ status: 'closed' }); } return reply({ status: 'ok', payload: {} }); });
-    const requestTeardown = vi.fn(async () => {});
-    Object.assign(f.app, { requestTeardown });
+it('keeps a cached page connected and releases its grant when the page is discarded', async () => {
+    const f = fixture(async request => reply(request.action === 'revoke' ? { status: 'closed' } : { status: 'ok', payload: {} }));
     await f.shell.receive(active());
-    const close = descendants(f.controls).find(button => button.textContent === 'Close review');
-    expect(close).toBeDefined();
-    close.onclick(); await vi.advanceTimersByTimeAsync(0);
-    expect(requestTeardown).not.toHaveBeenCalled();
-    expect(f.status.textContent).toContain('could not confirm');
-    close.onclick(); await vi.advanceTimersByTimeAsync(0);
-    expect(requestTeardown).toHaveBeenCalledOnce();
+    document.defaultView!.dispatchEvent(Object.assign(new Event('pagehide'), { persisted: true }));
+    expect(f.calls.some(c => c.action === 'revoke')).toBe(false);
+    document.defaultView!.dispatchEvent(Object.assign(new Event('pagehide'), { persisted: false }));
+    await f.shell.teardown();
+    expect(f.calls.filter(c => c.action === 'revoke')).toEqual([{ action: 'revoke', grant }]);
 });
 it('exposes only bounded live-tool registration diagnostics on the reader root', async () => {
     (document as any).modelContext = { registerTool: () => { throw new TypeError('private document details'); }, unregisterTool: vi.fn() };
@@ -74,12 +57,46 @@ it('revokes a late activation grant without mounting after teardown', async () =
     const pending = deferred();
     const f = fixture(async (request) => request.action === 'activate' ? pending.promise : reply({ status: 'closed' }));
     const receiving = f.shell.receive({ status: 'provisional', grant });
-    await f.shell.teardown();
+    const activation = f.calls.find(c => c.action === 'activate');
+    expect(activation?.operationId).toEqual(expect.any(String));
+    document.defaultView!.dispatchEvent(Object.assign(new Event('pagehide'), { persisted: false }));
+    expect(f.calls.filter(c => c.action === 'revoke')).toEqual([{ action: 'revoke', grant, operationId: activation.operationId }]);
     pending.resolve(reply(active(nextGrant)));
     await receiving;
     expect(host.mounts).toHaveLength(0);
     expect(f.calls.filter(c => c.action === 'revoke').map(c => c.grant)).toEqual([grant, nextGrant]);
     expect(f.root.inert).toBe(true);
+});
+it('releases the imported grant on page discard while host subscription is pending', async () => {
+    const started = deferred(), subscribed = deferred();
+    const file = { name: 'host.pdf', resourceUri: 'opaque:host' };
+    const resources = {
+        read: async () => ({ contents: [{ uri: file.resourceUri, blob: btoa('%PDF-1.7\nfixture\n%%EOF') }] }),
+        subscribe: () => { started.resolve(undefined); return subscribed.promise; },
+        unsubscribe: vi.fn(async () => ({})),
+        addUpdateHandler: () => () => undefined,
+    };
+    const f = fixture(async request => {
+        if (request.action === 'revoke') return reply({ status: 'closed' });
+        const transfer = 't'.repeat(43);
+        if (request.operation === 'begin') return reply({ status: 'host-transfer', transfer, offset: 0 });
+        if (request.operation === 'chunk') return reply({ status: 'host-transfer', transfer, offset: atob(request.dataBase64).length });
+        if (request.operation === 'finish') return reply({ status: 'provisional', grant });
+        throw Error('Unexpected request');
+    }, () => resources);
+    const receiving = f.shell.receive({ status: 'host-resource', file, ticket: 'p'.repeat(43) });
+    await started.promise;
+    try {
+        document.defaultView!.dispatchEvent(Object.assign(new Event('pagehide'), { persisted: false }));
+        await f.shell.teardown();
+        expect(f.calls.filter(c => c.action === 'revoke')).toEqual([{ action: 'revoke', grant }]);
+        expect(f.calls.some(c => c.action === 'activate')).toBe(false);
+    } finally {
+        subscribed.resolve({});
+        await receiving;
+    }
+    expect(host.mounts).toHaveLength(0);
+    expect(resources.unsubscribe).toHaveBeenCalledOnce();
 });
 it('releases ownership on teardown without waiting for host unsubscribe', async () => {
     const pending = deferred();
@@ -125,7 +142,10 @@ it('revokes a late resume grant and fences callbacks after teardown', async () =
     await vi.advanceTimersByTimeAsync(0);
     expect(f.calls.filter(c => c.action === 'resume')).toHaveLength(1);
     const oldReady = host.mounts[0][3];
-    await f.shell.teardown();
+    const resume = f.calls.find(c => c.action === 'resume');
+    expect(resume?.operationId).toEqual(expect.any(String));
+    document.defaultView!.dispatchEvent(Object.assign(new Event('pagehide'), { persisted: false }));
+    expect(f.calls.filter(c => c.action === 'revoke')).toEqual([{ action: 'revoke', grant, operationId: resume.operationId }]);
     pending.resolve(reply(active(nextGrant)));
     await vi.advanceTimersByTimeAsync(0);
     oldReady();
@@ -274,11 +294,11 @@ it.each([false, true])('reopens the selected host PDF after recovery bytes chang
         return reply({ status: 'ok', payload: {} });
     }, () => resources);
     await f.shell.receive({ status: 'host-resource', file, ticket: 'p'.repeat(43) });
-    expect(f.status.textContent).toContain('a similar filename');
-    const resume = descendants(f.controls).find(button => button.textContent === 'Resume protected review');
+    expect(descendants(f.controls).map(node => node.textContent).join(' ')).toContain('a similar filename');
+    const resume = descendants(f.controls).find(button => button.textContent === 'Resume review');
     resume.onclick();
     if (lostResponse) {
-        await vi.waitFor(() => expect(f.status.textContent).toContain('protected work is retained'));
+        await vi.waitFor(() => expect(descendants(f.controls).map(node => node.textContent).join(' ')).toContain('protected work is retained'));
         expect(host.mounts).toHaveLength(0);
         resume.onclick();
     }
@@ -334,9 +354,9 @@ it.each(['provisional', 'busy'] as const)('uses the local source route after an 
     const button = (text: string) => descendants(f.controls).filter(button => button.textContent === text).at(-1);
     await f.shell.receive({ status: 'host-resource', file: { name: 'host.pdf', resourceUri: 'opaque:host' }, ticket: 'p'.repeat(43) });
     await vi.advanceTimersByTimeAsync(95_000);
-    button('Open independent review').onclick(); await vi.advanceTimersByTimeAsync(0);
+    button('Open separate copy').onclick(); await vi.advanceTimersByTimeAsync(0);
     button('Choose PDF again').onclick(); await vi.advanceTimersByTimeAsync(0);
-    if (pickerStatus === 'busy') { button('Open independent review').onclick(); await vi.advanceTimersByTimeAsync(0); }
+    if (pickerStatus === 'busy') { button('Open separate copy').onclick(); await vi.advanceTimersByTimeAsync(0); }
     expect(host.mounts).toHaveLength(1);
     expect(resources.read).toHaveBeenCalledOnce();
     expect(resources.unsubscribe).toHaveBeenCalledOnce();
@@ -348,6 +368,8 @@ it('keeps a transport-paused host reader paused when explicit refresh cannot val
     const bytes = btoa('%PDF-1.7\nhost paused fixture\n%%EOF');
     const resources = { read: vi.fn(async () => ({ contents: [{ uri: 'opaque:host', blob: bytes }] })), subscribe: vi.fn(async () => ({})), unsubscribe: vi.fn(async () => ({})), addUpdateHandler: vi.fn(() => vi.fn()), write: vi.fn() };
     let imported = false, offline = false;
+    let onUpdate!: (event: any) => void;
+    resources.addUpdateHandler.mockImplementation(((listener: (event: any) => void) => { onUpdate = listener; return vi.fn(); }) as any);
     const f = fixture(async request => {
         if (request.action === 'host-resource') {
             if (request.operation === 'begin') return reply({ status: 'host-transfer', transfer: 't'.repeat(43), offset: 0 });
@@ -362,16 +384,22 @@ it('keeps a transport-paused host reader paused when explicit refresh cannot val
     await f.shell.receive({ status: 'host-resource', file: { name: 'host.pdf', resourceUri: 'opaque:host' }, ticket: 'p'.repeat(43) });
     await vi.advanceTimersByTimeAsync(0); offline = true;
     await expect(host.options[0].call('command', {})).rejects.toThrow();
+    expect(descendants(f.controls).map(node => node.textContent)).not.toContain('Refresh PDF');
     resources.read.mockRejectedValueOnce(Error('resource unavailable'));
-    const refresh = descendants(f.controls).find(button => button.textContent === 'Refresh PDF'); refresh.onclick();
-    await vi.waitFor(() => expect(f.status.textContent).toContain('could not complete'));
+    onUpdate({ params: { uri: 'opaque:host' } });
+    await vi.waitFor(() => expect(f.status.textContent).toContain('could not be refreshed'));
+    const retry = descendants(f.controls).find(button => button.textContent === 'Retry refresh');
+    const reads = resources.read.mock.calls.length;
+    resources.read.mockRejectedValueOnce(Error('resource still unavailable'));
+    retry.onclick(); await vi.advanceTimersByTimeAsync(0);
+    expect(resources.read).toHaveBeenCalledTimes(reads + 1);
     expect(f.root.inert).toBe(true); expect(host.mounts).toHaveLength(1); expect(f.calls.some(c => c.action === 'resume')).toBe(false);
     await f.shell.teardown();
 });
 
 it('shows a compact open-reader view, applies host theme and safe areas, and expands through the host', async () => {
     const html = { dataset: {} as Record<string, string>, style: { colorScheme: '', setProperty: vi.fn() } };
-    vi.stubGlobal('document', { hidden: false, documentElement: html, createElement: () => ({ value: '', append: vi.fn(), replaceChildren: vi.fn(), setAttribute: vi.fn(), remove: vi.fn() }), createTextNode: (value: string) => ({ textContent: value }) });
+    vi.stubGlobal('document', { defaultView: new EventTarget(), hidden: false, documentElement: html, createElement: (tag: string) => ({ tagName: tag.toUpperCase(), focus: vi.fn(), showModal: vi.fn(), close: vi.fn(), value: '', append: vi.fn(), replaceChildren: vi.fn(), setAttribute: vi.fn(), remove: vi.fn() }), createTextNode: (value: string) => ({ textContent: value }) });
     const f = fixture();
     f.app.getHostContext = () => ({ displayMode: 'inline', theme: 'dark', safeAreaInsets: { top: 12, bottom: 8, left: 0, right: 0 } });
     const expand = vi.fn(async () => ({ mode: 'fullscreen' })); Object.assign(f.app, { requestDisplayMode: expand });
@@ -406,7 +434,6 @@ it('does not publish when the grant publication-intent acknowledgement fails', a
     await f.shell.receive({ ...active(), contextPublished: false });
     host.mounts[0][5]({ title: 'Paper', documentGeneration: 1, reviewRevision: 0, source: { fileId: 'file', digest: 'd' }, page: 1, pageCount: 2, annotations: [], selection: null });
     await vi.advanceTimersByTimeAsync(0); expect(api.update).not.toHaveBeenCalled();
-    expect(descendants(f.controls).map(element => element.textContent).join(' ')).toContain('could not be attached');
     await f.shell.teardown();
 });
 it('reports suspension and restores verified editing on visibility return', async () => {
@@ -428,7 +455,6 @@ it('publishes fresh initial null context automatically while respecting a later 
     f.shell.hostContextChanged({ 'openai/modelContext': null }); await vi.advanceTimersByTimeAsync(0);
     host.mounts[0][5]({ ...snapshot, page: 2 }); await vi.advanceTimersByTimeAsync(0);
     expect(api.update).toHaveBeenCalledTimes(2); expect(api.update.mock.calls[1]?.[0].content).toEqual([]);
-    expect(descendants(f.controls).some(element => element.textContent === 'Background sharing paused')).toBe(true);
     await f.shell.teardown();
 });
 it('waits for actual host visibility after expansion before completing live navigation', async () => {
@@ -460,25 +486,20 @@ it('reports live navigation unavailable if host expansion never reveals the read
     await f.shell.teardown();
 });
 
-it('loads global preferences before mounting and keeps disabled selection out of first context', async () => {
-    const settings = deferred(); const update = vi.fn(async () => ({ updateId: 'first' }));
-    const f = fixture(async request => reply(request.action === 'context-published' ? { status: 'context-ready' } : { status: 'ok', payload: {} }), undefined, () => ({ getCurrent: () => undefined, update }), async request => request.action === 'settings-read' ? settings.promise : reply({ status: 'catalogue', included: false }));
-    const receiving = f.shell.receive({ ...active(), contextPublished: false });
-    expect(host.mounts).toHaveLength(0); expect(update).not.toHaveBeenCalled();
-    settings.resolve(reply({ status: 'settings', revision: 3, values: { backgroundContext: true, selectionSharing: false, mentions: false } })); await receiving;
-    host.mounts[0][5]({ documentGeneration: 1, reviewRevision: 2, title: 'PDF', source: { digest: 'd', fileId: 'f' }, page: 1, pageCount: 2, selection: { text: 'private selection', pages: [1] }, annotations: [] }); await vi.advanceTimersByTimeAsync(0);
-    expect(update).toHaveBeenCalledOnce(); expect(JSON.stringify(update.mock.calls)).not.toContain('private selection'); await f.shell.teardown();
-});
-it('ignores stale preference replies and corrects publication waiting on its intent acknowledgement', async () => {
-    const marked = deferred(), stale = deferred(); let reads = 0;
-    const update = vi.fn(async (_params: any) => ({ updateId: 'published' }));
-    const settings = (revision: number, backgroundContext: boolean) => reply({ status: 'settings', revision, values: { backgroundContext, selectionSharing: false, mentions: false } });
-    const f = fixture(async request => request.action === 'context-published' ? marked.promise : reply({ status: 'ok', payload: {} }), undefined, () => ({ getCurrent: () => undefined, update }), async request => request.action === 'catalogue' ? reply({ status: 'catalogue', included: false }) : ++reads === 1 ? settings(1, true) : reads === 2 ? stale.promise : settings(3, false));
+it('automatically shares the current review and selection despite stale saved preferences', async () => {
+    const update = vi.fn(async (_params: any) => ({ updateId: 'first' }));
+    const f = fixture(async request => {
+        if (request.action === 'settings-read') return reply({ status: 'settings', revision: 3, values: { backgroundContext: false, selectionSharing: false, mentions: false } });
+        return reply(request.action === 'context-published' ? { status: 'context-ready' } : { status: 'ok', payload: {} });
+    }, undefined, () => ({ getCurrent: () => null, update }));
     await f.shell.receive({ ...active(), contextPublished: false });
-    host.mounts[0][5]({ documentGeneration: 1, reviewRevision: 2, title: 'PDF', source: { digest: 'd', fileId: 'f' }, page: 1, pageCount: 2, selection: null, annotations: [] });
-    await Promise.resolve(); await Promise.resolve(); f.shell.wake(); f.shell.wake(); await Promise.resolve(); await Promise.resolve();
-    stale.resolve(settings(2, true)); marked.resolve(reply({ status: 'context-ready' })); await vi.advanceTimersByTimeAsync(0);
-    expect(update.mock.calls.every(([params]) => params.content.length === 0)).toBe(true); await f.shell.teardown();
+    host.mounts[0][5]({ documentGeneration: 1, reviewRevision: 2, title: 'PDF', source: { digest: 'd', fileId: 'f' }, page: 1, pageCount: 2, selection: { text: 'selected passage', pages: [1] }, annotations: [] });
+    f.shell.wake(); await vi.advanceTimersByTimeAsync(0);
+    expect(update).toHaveBeenCalledOnce();
+    expect(JSON.parse(update.mock.calls[0]![0].content[0].resource.text.split('\n').at(-1))).toMatchObject({ title: 'PDF', selection: { text: 'selected passage', pages: [1] } });
+    expect(f.calls.some(c => /^(settings-|catalogue|mention-)/.test(c.action))).toBe(false);
+    expect(descendants(f.controls).some(node => node.className === 'extension-menu')).toBe(false);
+    await f.shell.teardown();
 });
 it('attaches a captured note through model context without using the prompt composer', async () => {
  const send=vi.fn();const update=vi.fn(async (_params:any)=>({updateId:'attached'}));
@@ -488,45 +509,6 @@ it('attaches a captured note through model context without using the prompt comp
  await vi.advanceTimersByTimeAsync(0);await preparing;
  expect(send).not.toHaveBeenCalled();expect(JSON.stringify(update.mock.calls)).toContain('captured');expect(JSON.stringify(update.mock.calls)).toContain('My question');expect(JSON.stringify(update.mock.calls)).not.toContain('changed');await f.shell.teardown();
 });
-it('keeps sharing status inside a collapsed review-options menu',async()=>{
- const f=fixture();await f.shell.receive(active());
- const menu=f.controls.append.mock.calls.map(([node])=>node).find(node=>node.className==='extension-menu');
- expect(menu).toBeDefined();expect(menu.open).not.toBe(true);
- expect(f.controls.append.mock.calls.map(([node])=>node.textContent).join(' ')).not.toContain('Background context');
- await f.shell.teardown();
-});
-it('keeps reading usable when initial preference and catalogue services are unavailable', async () => {
- const update = vi.fn();
- const f = fixture(undefined, undefined, () => ({ getCurrent: () => undefined, update }), async () => reply({ status: 'unavailable' }));
- await f.shell.receive({ ...active(), contextPublished: false }); expect(host.mounts).toHaveLength(1); expect(f.root.inert).toBe(false);
- host.mounts[0][5]({ documentGeneration: 1, reviewRevision: 2, title: 'PDF', source: { digest: 'd', fileId: 'f' }, page: 1, pageCount: 2, selection: { text: 'private', pages: [1] }, annotations: [] }); await vi.advanceTimersByTimeAsync(0);
- expect(update).not.toHaveBeenCalled(); await f.shell.teardown();
-});
-it('does not rebuild preference controls for equal-revision background refreshes', async () => {
- const f = fixture(); await f.shell.receive(active());
- const sharing = descendants(f.controls).find(node => node.append?.mock.calls.some(([child]: any[]) => child.textContent === 'Sharing settings'));
- const fieldset = sharing.append.mock.calls.map(([node]: any[]) => node).find((node: any) => node.replaceChildren?.mock.calls.length);
- const before = fieldset.replaceChildren.mock.calls.length; f.shell.wake(); await vi.advanceTimersByTimeAsync(0);
- expect(fieldset.replaceChildren).toHaveBeenCalledTimes(before); await f.shell.teardown();
-});
-it('requires explicit global opt-in and explicit include, update and remove choices for mention snapshots', async () => {
- let mentions = false, included = false, revision = 0;
- const f = fixture(undefined, undefined, undefined, async request => {
-  if (request.action === 'settings-update') { mentions = request.set.mentions; revision++; }
-  if (request.action.startsWith('settings-')) return reply({ status: 'settings', revision, values: { backgroundContext: false, selectionSharing: false, mentions } });
-  if (request.operation === 'capture') included = true; if (request.operation === 'remove') included = false;
-  return reply({ status: 'catalogue', included, ...(included ? { snapshot: { generation: 1, revision: 2, capturedAt: '2026-11-04' } } : {}) });
- });
- await f.shell.receive(active()); await Promise.resolve();
- const nodes = (node: any): any[] => [node, ...(node.append?.mock.calls.flatMap((call: any[]) => call.flatMap(nodes)) ?? [])];
- expect(f.calls.filter(c => c.action === 'catalogue' && c.operation === 'capture')).toHaveLength(0);
- const input = nodes(f.controls).filter(n => n.type === 'checkbox').at(-1); input.checked = true; input.onchange(); await vi.advanceTimersByTimeAsync(0);
- expect(f.calls.some(c => c.action === 'settings-update' && c.set.mentions === true)).toBe(true);
- const click = async (label: string) => { nodes(f.controls).filter(n => n.textContent === label).at(-1).onclick(); await vi.advanceTimersByTimeAsync(0); };
- await click('Include this review snapshot'); await click('Update included snapshot'); await click('Remove this review from mentions');
- expect(f.calls.filter(c => c.action === 'catalogue').map(c => c.operation)).toEqual(['status', 'capture', 'capture', 'remove']); await f.shell.teardown();
-});
-
 it.each([false, true])('replays a lost host resume receipt before refreshing rotated authority (host update: %s)', async updateDuringReplay => {
     const bytes = btoa('%PDF-1.7\nresume fixture\n%%EOF');
     let update!: (event: any) => void;
@@ -575,12 +557,14 @@ it.each([false, true])('replays a lost host resume receipt before refreshing rot
     await f.shell.teardown();
 });
 
-it.each(['Open independent review', 'Cancel'])('keeps %s fenced while a recovery resume is pending', async competing => {
+it.each(['Open separate copy', 'Cancel'])('keeps %s fenced while a recovery resume is pending', async competing => {
     const pending = deferred();
     const f = fixture(async request => request.action === 'choose' ? pending.promise : reply({ status: 'closed' }));
     await f.shell.receive({ status: 'busy', recoveryToken: 'r'.repeat(43), canResume: true });
-    const buttons = descendants(f.controls);
-    const resume = buttons.find(button => button.textContent === 'Resume protected review');
+    const dialog = descendants(f.controls).find(node => node.tagName === 'DIALOG');
+    expect(dialog?.showModal).toHaveBeenCalledOnce();
+    const buttons = descendants(dialog).filter(node => node.tagName === 'BUTTON');
+    const resume = buttons.find(button => button.textContent === 'Resume review');
     resume.onclick();
     expect(buttons.every(button => button.disabled)).toBe(true);
     buttons.find(button => button.textContent === competing).onclick();
@@ -597,18 +581,18 @@ it('offers fresh source selection after an expired recovery choice without endin
     await f.shell.receive({ status: 'busy', recoveryToken: 'r'.repeat(43), canResume: true });
     const oldButtons = descendants(f.controls);
     await vi.advanceTimersByTimeAsync(95_000);
-    oldButtons.find(button => button.textContent === 'Open independent review').onclick();
+    oldButtons.find(button => button.textContent === 'Open separate copy').onclick();
     await vi.advanceTimersByTimeAsync(0);
     expect(f.status.textContent).toContain('Choose the PDF again');
     expect(f.status.textContent).not.toContain('connection ended');
     expect(host.mounts).toHaveLength(0);
-    oldButtons.find(button => button.textContent === 'Resume protected review').onclick();
+    oldButtons.find(button => button.textContent === 'Resume review').onclick();
     await vi.advanceTimersByTimeAsync(0);
     expect(f.calls.filter(c => c.action === 'choose')).toHaveLength(1);
     descendants(f.controls).find(button => button.textContent === 'Choose PDF again').onclick();
     await vi.advanceTimersByTimeAsync(0);
     expect(f.calls.filter(c => c.action === 'open')).toEqual([{ action: 'open' }]);
-    expect(f.status.textContent).toContain('Protected review work is available');
+    expect(descendants(f.controls).map(node => node.textContent).join(' ')).toContain('Protected review work is available');
     expect(f.calls.filter(c => c.action === 'choose')).toHaveLength(1);
     await f.shell.teardown();
 });
@@ -618,7 +602,7 @@ it('fences retained recovery callbacks after cancel', async () => {
     await f.shell.receive({ status: 'busy', recoveryToken: 'r'.repeat(43), canResume: true });
     const buttons = descendants(f.controls);
     buttons.find(button => button.textContent === 'Cancel').onclick(); await vi.advanceTimersByTimeAsync(0);
-    buttons.find(button => button.textContent === 'Resume protected review').onclick(); await vi.advanceTimersByTimeAsync(0);
+    buttons.find(button => button.textContent === 'Resume review').onclick(); await vi.advanceTimersByTimeAsync(0);
     expect(f.calls.filter(c => c.action === 'choose')).toHaveLength(0);
     expect(host.mounts).toHaveLength(0);
     await f.shell.teardown();
@@ -628,7 +612,7 @@ it('fences an expired-choice picker and revokes its late grant after cancel', as
     const pending = deferred();
     const f = fixture(async request => request.action === 'open' ? pending.promise : reply(request.action === 'choose' ? { status: 'unavailable' } : { status: 'closed' }));
     await f.shell.receive({ status: 'busy', recoveryToken: 'r'.repeat(43), canResume: true });
-    descendants(f.controls).find(button => button.textContent === 'Open independent review').onclick();
+    descendants(f.controls).find(button => button.textContent === 'Open separate copy').onclick();
     await vi.advanceTimersByTimeAsync(0);
     const buttons = descendants(f.controls);
     const choose = buttons.find(button => button.textContent === 'Choose PDF again');
@@ -656,7 +640,7 @@ it('revokes a late recovery choice grant after teardown', async () => {
     const pending = deferred();
     const f = fixture(async request => request.action === 'choose' ? pending.promise : reply({ status: 'closed' }));
     await f.shell.receive({ status: 'busy', recoveryToken: 'r'.repeat(43), canResume: true });
-    descendants(f.controls).find(button => button.textContent === 'Resume protected review').onclick();
+    descendants(f.controls).find(button => button.textContent === 'Resume review').onclick();
     await f.shell.teardown(); pending.resolve(reply(active(nextGrant))); await vi.advanceTimersByTimeAsync(0);
     expect(f.calls.filter(c => c.action === 'revoke').map(c => c.grant)).toEqual([nextGrant]);
     expect(host.mounts).toHaveLength(0);
@@ -666,7 +650,7 @@ it('restores the recovery button group after a failed choice and retries its ope
     let attempts = 0;
     const f = fixture(async request => { if (request.action === 'choose') { if (++attempts === 1) throw Error('offline'); return reply(active(nextGrant)); } return reply({ status: 'closed' }); });
     await f.shell.receive({ status: 'busy', recoveryToken: 'r'.repeat(43), canResume: true });
-    const buttons = descendants(f.controls), resume = buttons.find(button => button.textContent === 'Resume protected review');
+    const buttons = descendants(f.controls).filter(node => node.tagName === 'BUTTON'), resume = buttons.find(button => button.textContent === 'Resume review');
     resume.onclick(); await vi.advanceTimersByTimeAsync(0);
     expect(buttons.every(button => button.disabled === false)).toBe(true);
     resume.onclick(); await vi.advanceTimersByTimeAsync(0);
@@ -767,17 +751,38 @@ it('waits for the in-flight host write before choosing a local copy, then saves 
  expect(local).toBe(true);
  await port.call('command',{});await localSaveChecked.promise;
  expect(resources.write).toHaveBeenCalledOnce();
- descendants(f.controls).find(button=>button.textContent==='Save now').onclick();await localRetried.promise;
+ expect(descendants(f.controls).map(node => node.textContent)).not.toContain('Save now');
+ await port.call('retrySave', {});await localRetried.promise;
  expect(f.calls.some(r=>r.action==='app'&&r.request.method==='retrySave')).toBe(true);
  expect(resources.write).toHaveBeenCalledOnce();
  await f.shell.teardown();
 });
 
+it('rechecks a live review and waits for a separate user choice before resuming', async () => {
+    const liveToken = 'l'.repeat(43), recoveredToken = 'r'.repeat(43);
+    const f = fixture(async request => {
+        if (request.action === 'recheck') return reply({ status: 'busy', recoveryToken: recoveredToken, canResume: false, canRecover: true });
+        if (request.action === 'choose') return reply(active());
+        return reply({ status: 'closed' });
+    });
+    await f.shell.receive({ status: 'busy', recoveryToken: liveToken, canResume: false });
+    const nodes = () => descendants(f.controls);
+    expect(nodes().some(node => node.textContent === 'Resume review')).toBe(false);
+    nodes().find(node => node.textContent === 'Check again').onclick();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(f.calls).toEqual([{ action: 'recheck', recoveryToken: liveToken }]);
+    expect(host.mounts).toHaveLength(0);
+    nodes().find(node => node.textContent === 'Resume review').onclick();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(f.calls.find(c => c.action === 'choose')).toMatchObject({ choice: 'recover', recoveryToken: recoveredToken });
+    expect(host.mounts).toHaveLength(1);
+    await f.shell.teardown();
+});
 it('offers explicit disconnected recovery without silently choosing it', async () => {
  const f=fixture(async r=>reply(r.action==='choose'?{status:'provisional',grant}:r.action==='activate'?active():{status:'ok',payload:{}}));
  await f.shell.receive({status:'busy',recoveryToken:'r'.repeat(43),canResume:false,canRecover:true});
  expect(f.calls.some(r=>r.action==='choose')).toBe(false);
- const recover=f.controls.append.mock.calls.map(([b])=>b).find(b=>b.textContent==='Recover disconnected review');
+ const recover=descendants(f.controls).find(b=>b.textContent==='Resume review');
  expect(recover).toBeDefined();recover.onclick();await vi.advanceTimersByTimeAsync(0);
  expect(f.calls.find(r=>r.action==='choose')).toMatchObject({choice:'recover'});
  expect(host.mounts).toHaveLength(1);await f.shell.teardown();
@@ -790,23 +795,17 @@ it('lists recent reviews in the conversation chooser and opens only the selected
  const resume=f.controls.append.mock.calls.map(([b])=>b).find(b=>b.textContent==='Resume Recent.pdf');
  expect(resume).toBeDefined();resume.onclick();await vi.advanceTimersByTimeAsync(0);
  expect(f.calls.find(r=>r.action==='recent-open')).toEqual({action:'recent-open',id});
- expect(f.controls.append.mock.calls.map(([b])=>b.textContent)).toContain('Resume protected review');
+ expect(descendants(f.controls).map(node=>node.textContent)).toContain('Resume review');
  await f.shell.teardown();
 });
 
-it('includes authorized snapshot context from the empty conversation chooser without opening a PDF', async () => {
- const uri=`placekeeper-mention://${'s'.repeat(32)}`;
- let current:any=null;
- const updates:any[]=[];
- const f=fixture(async r=>reply(r.action==='recent-list'?{status:'recent-reviews',items:[]}:r.action==='mention-search'?{status:'mention-results',items:[{type:'resource',resourceUri:uri,title:'Shared.pdf',subtitle:'Captured snapshot'}]}:r.action==='mention-read'?{status:'mention-resource',text:'captured authorized text'}:{status:'closed'}),()=>undefined,()=>({getCurrent:()=>current,update:async(params:any)=>{updates.push(params);current={...params,updateId:'chooser-context'};return {updateId:'chooser-context'};}}));
- await f.shell.receive({status:'chooser'});await vi.advanceTimersByTimeAsync(0);
- const all=(node:any):any[]=>[node,...(node.append?.mock.calls.flatMap((args:any[])=>args.flatMap(all))??[])];
- const nodes=()=>f.controls.append.mock.calls.flatMap(([node])=>all(node));
- const picker=nodes().find(n=>n.className==='snapshot-context-picker');expect(picker).toBeDefined();picker.open=true;picker.ontoggle();await vi.advanceTimersByTimeAsync(0);
- nodes().find(n=>n.textContent==='Include snapshot').onclick();await vi.advanceTimersByTimeAsync(0);
- expect(updates.at(-1).content[0].resource.text).toContain('captured authorized text');
- expect(f.calls.some(r=>r.action==='open'||r.action==='activate'||r.action==='context-published')).toBe(false);
- expect(host.mounts).toHaveLength(0);await f.shell.teardown();
+it('offers recent reviews without a cross-chat snapshot picker in the empty chooser', async () => {
+    const f = fixture(async request => reply(request.action === 'recent-list' ? { status: 'recent-reviews', items: [] } : { status: 'closed' }));
+    await f.shell.receive({ status: 'chooser' }); await vi.advanceTimersByTimeAsync(0);
+    expect(descendants(f.controls).map(node => node.textContent)).toContain('Recent reviews');
+    expect(descendants(f.controls).some(node => node.className === 'snapshot-context-picker')).toBe(false);
+    expect(f.calls).toEqual([{ action: 'recent-list' }]);
+    await f.shell.teardown();
 });
 
 it.each(['picker', 'recent'] as const)('serializes %s opening against the other chooser actions through activation', async first => {

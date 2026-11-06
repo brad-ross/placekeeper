@@ -214,9 +214,25 @@ describe("app-owned extension presentations", () => {
     const f = await fixture(), before = await opened(f.manager, { pdfPath: f.pdfPath });
     const original = payload(await f.manager.handle(request(before.presentation, 'bootstrap')));
     await f.broker.acceptMutation(original.sessionId, { type: 'set-annotation-name', expectedRevision: 0, annotationName: 'retained work' });
-    f.advance(101);
-    const offer = await f.manager.open({ pdfPath: f.pdfPath });
+    const initialOffer = await f.manager.open({ pdfPath: f.pdfPath });
+    if (initialOffer.status !== 'busy') throw Error('Expected choice');
+    const pending = await f.manager.dispatch({ action: 'recheck', recoveryToken: initialOffer.recoveryToken });
+    expect(pending).toMatchObject({ status: 'busy', canResume: false });
+    expect(pending).not.toHaveProperty('canRecover');
+    if (pending.status !== 'busy') throw Error('Expected refreshed choice');
+    expect(await f.manager.dispatch({ action: 'recheck', recoveryToken: initialOffer.recoveryToken })).toEqual(pending);
+    f.advance(60);
+    expect((await f.manager.handle(request(before.presentation, 'renew'))).status).toBe('ok');
+    f.advance(41);
+    const renewed = await f.manager.dispatch({ action: 'recheck', recoveryToken: pending.recoveryToken });
+    expect(renewed).toMatchObject({ status: 'busy', canResume: false });
+    expect(renewed).not.toHaveProperty('canRecover');
+    if (renewed.status !== 'busy') throw Error('Expected renewed choice');
+    expect(f.manager.activityCount()).toBe(1);
+    f.advance(60);
+    const offer = await f.manager.dispatch({ action: 'recheck', recoveryToken: renewed.recoveryToken });
     expect(offer).toMatchObject({ status: 'busy', canResume: false, canRecover: true });
+    expect(f.manager.activityCount()).toBe(0);
     if (offer.status !== 'busy') throw Error('Expected choice');
     const input = { action: 'choose', recoveryToken: offer.recoveryToken, choice: 'recover', operationId: randomUUID() } as const;
     const chosen = await f.manager.dispatch(input);
@@ -231,20 +247,73 @@ describe("app-owned extension presentations", () => {
     expect(await f.manager.handle(request(before.presentation, 'command', { type: 'set-annotation-name', expectedRevision: 1, annotationName: 'stale' }))).toMatchObject({ status: 'denied' });
     expect(f.broker.state(original.sessionId)?.annotationName).toBe('retained work');
   });
+  it("rechecks a released review and offers explicit resume without acquiring it", async () => {
+    const f = await fixture(), panel = await opened(f.manager, { pdfPath: f.pdfPath });
+    const original = payload(await f.manager.handle(request(panel.presentation, 'bootstrap')));
+    const busy = await f.manager.open({ pdfPath: f.pdfPath });
+    if (busy.status !== 'busy') throw Error('Expected choice');
+    expect(busy.canResume).toBe(false);
+    await f.manager.revoke(panel.grant);
+    const offer = await f.manager.dispatch({ action: 'recheck', recoveryToken: busy.recoveryToken });
+    expect(offer).toMatchObject({ status: 'busy', canResume: true });
+    expect(offer).not.toHaveProperty('canRecover');
+    expect(f.manager.activityCount()).toBe(0);
+    if (offer.status !== 'busy') throw Error('Expected refreshed choice');
+    const chosen = await f.manager.choose({ action: 'choose', recoveryToken: offer.recoveryToken, choice: 'resume', operationId: randomUUID() });
+    if (chosen.status !== 'provisional') throw Error('Expected resumed review');
+    const resumed = active(await f.manager.resume(chosen.grant, randomUUID(), 'activate'));
+    expect(payload(await f.manager.handle(request(resumed.presentation, 'bootstrap'))).sessionId).toBe(original.sessionId);
+  });
+
   it("rejects disconnected recovery after the old panel reconnects and loses its next lease", async () => {
     const f = await fixture(), before = await opened(f.manager, {});
     const liveOffer = await f.manager.open({ pdfPath: f.pdfPath });
     expect(liveOffer).not.toHaveProperty('canRecover', true);
+    if (liveOffer.status !== 'busy') throw Error('Expected choice');
     f.advance(101);
     const offer = await f.manager.open({ pdfPath: f.pdfPath });
     expect(offer).toMatchObject({ canRecover: true });
     if (offer.status !== 'busy') throw Error('Expected choice');
     const resumed = active(await f.manager.resume(before.grant, randomUUID()));
+    expect(await f.manager.dispatch({ action: 'recheck', recoveryToken: liveOffer.recoveryToken })).toEqual({ status: 'unavailable' });
     expect(await f.manager.dispatch({ action: 'choose', recoveryToken: offer.recoveryToken, choice: 'recover', operationId: randomUUID() })).toEqual({ status: 'unavailable' });
     expect((await f.manager.handle(request(resumed.presentation, 'renew'))).status).toBe('ok');
     f.advance(101);
     expect(await f.manager.dispatch({ action: 'choose', recoveryToken: offer.recoveryToken, choice: 'recover', operationId: randomUUID() })).toEqual({ status: 'unavailable' });
     expect((await f.manager.resume(resumed.grant, randomUUID())).status).toBe('active');
+  });
+
+  it("rejects an old offer after the owner rotates and releases its replacement grant", async () => {
+    const f = await fixture(), panel = await opened(f.manager, { pdfPath: f.pdfPath });
+    const busy = await f.manager.open({ pdfPath: f.pdfPath });
+    if (busy.status !== 'busy') throw Error('Expected choice');
+    const replacement = active(await f.manager.resume(panel.grant, randomUUID()));
+    expect(await f.manager.revoke(replacement.grant)).toBe(true);
+    expect(await f.manager.dispatch({ action: 'recheck', recoveryToken: busy.recoveryToken })).toEqual({ status: 'unavailable' });
+    expect(await f.manager.open({ pdfPath: f.pdfPath })).toMatchObject({ status: 'busy', canResume: true });
+  });
+
+  it("rejects an older unowned resume offer after an intervening owner releases", async () => {
+    const f = await fixture(), panel = await opened(f.manager, { pdfPath: f.pdfPath });
+    expect(await f.manager.revoke(panel.grant)).toBe(true);
+    const older = await f.manager.open({ pdfPath: f.pdfPath });
+    const newer = await f.manager.open({ pdfPath: f.pdfPath });
+    if (older.status !== 'busy' || newer.status !== 'busy') throw Error('Expected choices');
+    const next = await f.manager.choose({ action: 'choose', recoveryToken: newer.recoveryToken, choice: 'resume', operationId: randomUUID() });
+    if (next.status !== 'provisional') throw Error('Expected grant');
+    expect(await f.manager.revoke(next.grant)).toBe(true);
+    expect(await f.manager.choose({ action: 'choose', recoveryToken: older.recoveryToken, choice: 'resume', operationId: randomUUID() })).toEqual({ status: 'unavailable' });
+  });
+
+  it("rejects rechecking an older document generation under the same grant", async () => {
+    const f = await fixture(), panel = await opened(f.manager, { pdfPath: f.pdfPath });
+    const original = payload(await f.manager.handle(request(panel.presentation, 'bootstrap')));
+    const busy = await f.manager.open({ pdfPath: f.pdfPath });
+    if (busy.status !== 'busy') throw Error('Expected choice');
+    await writeFile(f.pdfPath, "%PDF-1.7\nnew extension source generation\n%%EOF");
+    await f.broker.observeLiveDocumentHint({ sessionId: original.sessionId, outputPath: f.pdfPath, hostReason: 'activation' });
+    expect(f.broker.nativeAdmissionScope(original.sessionId)?.documentGeneration).toBe(2);
+    expect(await f.manager.dispatch({ action: 'recheck', recoveryToken: busy.recoveryToken })).toEqual({ status: 'unavailable' });
   });
 
   it("activates and reconnects protected work when the optional recent index is malformed", async () => {
@@ -407,6 +476,7 @@ describe("app-owned extension presentations", () => {
     if (offer.status !== 'busy' || !offer.canResume) throw Error('Expected recovery');
     await unlink(alias);
     await symlink(other, alias);
+    expect(await f.manager.dispatch({ action: 'recheck', recoveryToken: offer.recoveryToken })).toEqual({ status: 'unavailable' });
     expect(await f.manager.choose({ action: 'choose', recoveryToken: offer.recoveryToken, choice: 'resume', operationId: randomUUID() })).toEqual({ status: 'unavailable' });
     expect(await f.manager.open({ pdfPath: other })).toMatchObject({ status: 'provisional' });
   });
@@ -442,6 +512,7 @@ describe("app-owned extension presentations", () => {
     if (busy.status !== "busy") throw Error("Expected busy");
     const reopen = vi.spyOn(f.broker, "openReview");
     f.advance(95_000);
+    expect(await f.manager.dispatch({ action: "recheck", recoveryToken: busy.recoveryToken })).toEqual({ status: "unavailable" });
     expect(await f.manager.choose({ action: "choose", recoveryToken: busy.recoveryToken, choice: "fork", operationId: randomUUID() })).toEqual({ status: "unavailable" });
     expect(reopen).not.toHaveBeenCalled();
     expect(f.manager.activityCount()).toBe(0);
@@ -450,6 +521,53 @@ describe("app-owned extension presentations", () => {
     if (fresh.status !== "busy") throw Error("Expected fresh choice");
     expect(fresh.recoveryToken).not.toBe(busy.recoveryToken);
     expect(await f.manager.choose({ action: "choose", recoveryToken: fresh.recoveryToken, choice: "fork", operationId: randomUUID() })).toMatchObject({ status: "provisional" });
+  });
+
+  it.each(['activate', 'resume'] as const)("revokes a pending %s whose rotated grant is still current", async action => {
+    const f = await fixture();
+    const previous = action === 'activate'
+      ? await f.manager.open({ pdfPath: f.pdfPath })
+      : await opened(f.manager, { pdfPath: f.pdfPath });
+    if (!('grant' in previous)) throw Error('Expected grant');
+    const operationId = randomUUID();
+    const result = active(await f.manager.resume(previous.grant, operationId, action));
+    const revoke = { action: 'revoke', grant: previous.grant, operationId };
+    expect(await f.manager.dispatch({ ...revoke, operationId: randomUUID() })).toEqual({ status: 'unavailable' });
+    expect(await f.manager.dispatch({ action: 'revoke', grant: previous.grant })).toEqual({ status: 'unavailable' });
+    expect(f.manager.activityCount()).toBe(1);
+    expect(await f.manager.dispatch(revoke)).toEqual({ status: 'closed' });
+    expect(await f.manager.handle(request(result.presentation, 'bootstrap'))).toMatchObject({ status: 'denied' });
+    const offer = await f.manager.open({ pdfPath: f.pdfPath });
+    if (offer.status !== 'busy') throw Error('Expected resume offer');
+    const chosen = await f.manager.choose({ action: 'choose', recoveryToken: offer.recoveryToken, choice: 'resume', operationId: randomUUID() });
+    if (chosen.status !== 'provisional') throw Error('Expected grant');
+    const next = active(await f.manager.resume(chosen.grant, randomUUID(), 'activate'));
+    expect(await f.manager.dispatch(revoke)).toEqual({ status: 'closed' });
+    expect(await f.manager.dispatch({ ...revoke, operationId: randomUUID() })).toEqual({ status: 'unavailable' });
+    expect((await f.manager.handle(request(next.presentation, 'renew'))).status).toBe('ok');
+  });
+
+  it("revokes a pending rotation after a document generation change suspends its presentation", async () => {
+    const f = await fixture(), previous = await opened(f.manager, { pdfPath: f.pdfPath });
+    const original = payload(await f.manager.handle(request(previous.presentation, 'bootstrap')));
+    const operationId = randomUUID();
+    const rotated = active(await f.manager.resume(previous.grant, operationId));
+    await writeFile(f.pdfPath, "%PDF-1.7\nnew extension source generation\n%%EOF");
+    await f.broker.observeLiveDocumentHint({ sessionId: original.sessionId, outputPath: f.pdfPath, hostReason: 'activation' });
+    expect(f.broker.nativeAdmissionScope(original.sessionId)?.documentGeneration).toBe(2);
+    expect(f.manager.activityCount()).toBe(0);
+    expect(await f.manager.resume(previous.grant, operationId)).toEqual({ status: 'unavailable' });
+    expect(await f.manager.dispatch({ action: 'revoke', grant: previous.grant, operationId })).toEqual({ status: 'closed' });
+    expect(await f.manager.resume(rotated.grant, randomUUID())).toEqual({ status: 'unavailable' });
+  });
+
+  it("does not revoke a grant after a later rotation supersedes the pending operation", async () => {
+    const f = await fixture(), first = await opened(f.manager, { pdfPath: f.pdfPath });
+    const operationId = randomUUID();
+    const second = active(await f.manager.resume(first.grant, operationId));
+    const third = active(await f.manager.resume(second.grant, randomUUID()));
+    expect(await f.manager.dispatch({ action: 'revoke', grant: first.grant, operationId })).toEqual({ status: 'unavailable' });
+    expect((await f.manager.handle(request(third.presentation, 'renew'))).status).toBe('ok');
   });
 
   it("replays a lost activation response but rejects competing reuse and retired presentations", async () => {
@@ -488,37 +606,13 @@ it('keeps context publication intent with its app grant across rotation and isol
   const other = await opened(f.manager, { pdfPath: otherPath }); expect(other.contextPublished).toBe(false);
 });
 
-it('catalogues only an explicit active grant and exposes snapshots without review authority',async()=>{
- const f=await fixture();
- expect(await f.manager.dispatch({action:'mention-search',query:''})).toEqual({status:'mention-results',items:[]});
- const a=await opened(f.manager,{pdfPath:f.pdfPath});
- expect(await f.manager.dispatch({action:'catalogue',grant:a.grant,operation:'capture'})).toEqual({status:'unavailable'});
- expect(await f.manager.dispatch({action:'settings-update',set:{mentions:true}})).toMatchObject({status:'settings',revision:1});
- expect(await f.manager.dispatch({action:'catalogue',grant:'x'.repeat(43),operation:'capture'})).toEqual({status:'unavailable'});
- expect(await f.manager.dispatch({action:'catalogue',grant:a.grant,operation:'capture'})).toMatchObject({status:'catalogue',included:true,snapshot:{generation:1,revision:0}});
- const results=await f.manager.dispatch({action:'mention-search',query:'next'});
- if(results.status!=='mention-results')throw Error('Expected mentions');
- expect(results.items).toHaveLength(1);const uri=results.items[0]!.resourceUri;
- const resource=await f.manager.dispatch({action:'mention-read',uri});
- expect(resource.status).toBe('mention-resource');
- const text=JSON.stringify(resource);expect(text).toContain('untrusted-document-snapshot');expect(text).toContain('[Page 1]');
- for(const privateValue of [f.pdfPath,a.grant,a.presentation.presentationCapability,a.presentation.runtimeId])expect(text).not.toContain(privateValue);
- expect(await f.manager.resume(uri,randomUUID())).toEqual({status:'unavailable'});
- expect(f.broker.taskBindings.activityCount()).toBe(0);
- await f.manager.dispatch({action:'catalogue',grant:a.grant,operation:'remove'});
- expect(await f.manager.dispatch({action:'mention-read',uri})).toEqual({status:'unavailable'});
-});
-
-it('rejects capture when the app grant retires during document extraction',async()=>{
- const f=await fixture(),a=await opened(f.manager,{pdfPath:f.pdfPath});
- await f.manager.dispatch({action:'settings-update',set:{mentions:true}});
- let release!:(value:string)=>void;const delayed=new Promise<string>(resolve=>{release=resolve});
- let entered!:()=>void;const started=new Promise<void>(resolve=>{entered=resolve});
- vi.spyOn(f.broker,'documentSnapshotSummary').mockImplementation(async()=>{entered();return delayed;});
- const capture=f.manager.dispatch({action:'catalogue',grant:a.grant,operation:'capture'});
- await started;
- await f.manager.handle(request(a.presentation,'detach'));
- release('snapshot text');
- expect(await capture).toEqual({status:'unavailable'});
- expect(await f.manager.dispatch({action:'mention-search',query:''})).toEqual({status:'mention-results',items:[]});
+it('rejects retired settings and mention requests even with a live grant', async () => {
+  const f = await fixture(), panel = await opened(f.manager, { pdfPath: f.pdfPath });
+  for (const request of [
+    { action: 'settings-read' },
+    { action: 'settings-update', set: { mentions: true } },
+    { action: 'catalogue', grant: panel.grant, operation: 'capture' },
+    { action: 'mention-search', query: '' },
+    { action: 'mention-read', uri: 'placekeeper-mention://' + 'a'.repeat(32) },
+  ]) expect(await f.manager.dispatch(request)).toEqual({ status: 'unavailable' });
 });

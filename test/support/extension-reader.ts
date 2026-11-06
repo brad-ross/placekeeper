@@ -2,9 +2,9 @@ import { expect, type Page } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
 import { nativeBridge } from './codex-native-bridge.js';
 
-/** Real extension shell, reader and service; host entry/settings/context/message APIs are simulated.
+/** Real extension shell, reader and service; host entry/context/message APIs are simulated.
  * This does not qualify native entrypoints, host focus, conditional resource writes or lifecycle. */
-export async function extensionReader(page: Page, fixture = 'text-native-with-annotations.pdf') {
+export async function extensionReader(page: Page, fixture = 'text-native-with-annotations.pdf', options: { holdPublication?: boolean } = {}) {
   const bridge = await nativeBridge(fixture);
   const panel = await bridge.panel();
   const requests: string[] = [];
@@ -30,7 +30,7 @@ export async function extensionReader(page: Page, fixture = 'text-native-with-an
   const frame = production.replace(/<script>[\s\S]*?<\/script>/gu, '').replace('<div id="root">', '<div id="controls"></div><div id="root">');
   await page.route('**/extension-reader-acceptance', route => route.fulfill({ contentType: 'text/html', body: frame }));
   await page.goto('/extension-reader-acceptance');
-  await page.evaluate(async () => {
+  await page.evaluate(async holdPublication => {
     const { ExtensionShell } = await import(/* @vite-ignore */ ('/apps/codex-mcp/src/extension-shell.ts' as string));
     await import(/* @vite-ignore */ ('/apps/codex-mcp/src/extension-presentation.css' as string));
     // Vite injects imported reader CSS after the inline production frame style.
@@ -39,15 +39,13 @@ export async function extensionReader(page: Page, fixture = 'text-native-with-an
     const w = window as any;
     const tools = new Map();
     Object.defineProperty(document, 'modelContext', { configurable: true, value: { registerTool: (tool: any) => tools.set(tool.name, tool), unregisterTool: (name: string) => tools.delete(name) } });
-    let releaseSettings!: () => void;
-    const settingsGate = new Promise<void>(resolve => { releaseSettings = resolve; });
     const state = w.extensionAcceptance = {
       shell: undefined as any, tools, context: null as any, publications: [] as any[], messages: [] as any[], promptText: 'Keep my typed question',
-      settings: { backgroundContext: true, selectionSharing: true, mentions: false }, revision: 0,
-      settingsLoaded: false, releaseSettings, expansionRequests: 0, included: false,
+      expansionRequests: 0, preflightStarted: 0, preflightFinished: 0,
       publicationGate: undefined as Promise<void> | undefined, releasePublication: undefined as (() => void) | undefined,
       receiving: undefined as Promise<boolean> | undefined,
     };
+    if (holdPublication) state.publicationGate = new Promise<void>(resolve => { state.releasePublication = resolve; });
     // The protocol metadata key is imported so the harness uses the production envelope.
     const { EXTENSION_META_KEY } = await import(/* @vite-ignore */ ('/packages/core/src/extension-protocol.ts' as string));
     const envelope = (value: unknown) => ({ _meta: { [EXTENSION_META_KEY]: value } });
@@ -56,20 +54,16 @@ export async function extensionReader(page: Page, fixture = 'text-native-with-an
       getHostContext: () => ({ displayMode: 'fullscreen', theme: 'light' }),
       requestDisplayMode: async () => { state.expansionRequests++; return { mode: 'fullscreen' }; },
       callServerTool: async ({ arguments: { request } }: any) => {
-        if (request.action === 'settings-read') { await settingsGate; state.settingsLoaded = true; return envelope({ status: 'settings', values: state.settings, revision: state.revision }); }
-        if (request.action === 'settings-update') { Object.assign(state.settings, request.set); state.revision++; return envelope({ status: 'settings', values: state.settings, revision: state.revision }); }
-        if (request.action === 'catalogue') { if (request.operation === 'capture') state.included = true; if (request.operation === 'remove') state.included = false; return envelope({ status: 'catalogue', included: state.included }); }
-        if (request.action === 'context-published' && state.publicationGate) await state.publicationGate;
+        if (request.action === 'context-published') { state.preflightStarted++; if (state.publicationGate) await state.publicationGate; state.preflightFinished++; }
         return envelope(await w.extensionAcceptanceRequest(request));
       },
     };
     state.shell = new ExtensionShell(app, document.getElementById('root')!, document.getElementById('status')!, document.getElementById('controls')!, () => undefined,
-      () => ({ getCurrent: () => state.context, update: async (params: any) => { const updateId = `host-${state.publications.length}`; state.publications.push({ ...params, settingsLoaded: state.settingsLoaded }); state.context = { ...params, updateId }; return { updateId }; } }));
+      () => ({ getCurrent: () => state.context, update: async (params: any) => { const updateId = `host-${state.publications.length}`; state.publications.push(params); state.context = { ...params, updateId }; return { updateId }; } }));
     state.receiving = state.shell.receive({ status: 'provisional', grant: 'a'.repeat(43) });
-  });
+  }, options.holdPublication === true);
   return { bridge, panel, requests,
     async ready() {
-      await page.evaluate(() => (window as any).extensionAcceptance.releaseSettings());
       await expect(page.locator('[data-production-review]')).toHaveAttribute('data-initial-view-ready', 'true', { timeout: 20_000 });
       await page.locator('[data-page-index="0"] > img').first().evaluate((image: HTMLImageElement) => image.decode());
     },

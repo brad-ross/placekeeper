@@ -3,12 +3,12 @@ import { ExtensionContextCoordinator, backgroundContextUri } from '../src/host/e
 import type { ReviewContextSnapshot } from '../src/host/review-context-snapshot.js';
 const snapshot = (page = 1, generation = 1): ReviewContextSnapshot => ({ documentGeneration: generation, reviewRevision: 2, title: 'PDF', source: { fileId: '/private/secret.pdf', digest: 'digest' }, page, pageCount: 10, selection: null, annotations: [] });
 const tick = async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); };
-function setup(initial?: any) {
+function setup(initial?: any, freshInvocation = initial === undefined) {
  let resolve!: (value: any) => void;
  let reject!: (reason: Error) => void;
  const calls: any[] = [];
  const api = { getCurrent: () => initial, update: vi.fn((value: any) => { calls.push(value); return new Promise<any>((done, fail) => { resolve = done; reject = fail; }); }) };
- const coordinator = new ExtensionContextCoordinator(api, undefined, { freshInvocation: initial === undefined });
+ const coordinator = new ExtensionContextCoordinator(api, undefined, { freshInvocation });
  return { coordinator, calls, ack: (updateId = 'ack') => resolve({ updateId }), reject: () => reject(Error('offline')), noAck: () => resolve(null) };
 }
 it('coalesces rapid pages and bounds untrusted accepted snapshots without source paths', async () => {
@@ -23,21 +23,20 @@ it('host removal wins over an in-flight acknowledgement and later navigation', a
  expect(f.calls).toHaveLength(2); expect(JSON.stringify(f.calls[1])).not.toContain('one');
  f.ack('new'); await tick(); expect(f.coordinator.status).toBe('available');
 });
-it('clear all pauses pending background, including same-instance reader remount', async () => {
+it('clear all pauses pending background and later review and selection updates', async () => {
  const f = setup(); f.coordinator.publish(snapshot()); await tick(); f.coordinator.reconcile(null); f.ack('late'); await tick();
- f.coordinator.publish(snapshot(4)); await tick(); expect(f.coordinator.status).toBe('paused');
  expect(f.calls.at(-1).content).toEqual([]); f.ack(); await tick();
- f.coordinator.enableBackground(); await tick(); expect(f.calls.at(-1).content[0].resource.text).toContain('"page":4');
+ f.coordinator.publish({ ...snapshot(4), selection: { text: 'New selection', pages: [4] } }); await tick();
+ expect(f.coordinator.status).toBe('paused'); expect(f.calls).toHaveLength(2);
 });
-it('reconciles initial context before publishing and preserves unknown host blocks', async () => {
+it('keeps a remount paused when initial context lacks the background group', async () => {
  const unknown = { type: 'text', text: 'another attachment' };
  const f = setup({ updateId: 'existing', content: [unknown] }); f.coordinator.publish(snapshot()); await tick(); expect(f.calls).toHaveLength(0);
- f.coordinator.enableBackground(); await tick(); expect(f.calls[0].content[0]).toEqual(unknown);
+ expect(f.coordinator.status).toBe('paused');
  const remount = setup(null); remount.coordinator.publish(snapshot()); await tick(); expect(remount.calls).toHaveLength(0); expect(remount.coordinator.status).toBe('paused');
 });
-it('reports unavailable capability and preferences do not undo local removal intent', async () => {
+it('reports unsupported context when the host provides no capability', () => {
  const unavailable = new ExtensionContextCoordinator(undefined); unavailable.publish(snapshot()); expect(unavailable.status).toBe('unsupported');
- const f = setup(); f.coordinator.publish(snapshot()); await tick(); f.coordinator.reconcile(null); f.coordinator.setPreferences({ backgroundContext: true, selectionSharing: true }); f.ack(); await tick(); expect(f.coordinator.status).toBe('paused');
 });
 
 it('recognizes removal with an unchanged host update ID and ignores its later stale echo', async () => {
@@ -52,11 +51,11 @@ it('keeps a previously published app paused when initial host state is unavailab
  const update = vi.fn(); const coordinator = new ExtensionContextCoordinator({ getCurrent: () => undefined, update });
  coordinator.publish(snapshot()); await tick(); expect(update).not.toHaveBeenCalled(); expect(coordinator.status).toBe('paused');
 });
-it('bounds selection and review evidence and honors selection preferences separately', async () => {
+it('automatically shares bounded selection and review evidence', async () => {
  const f = setup(); f.coordinator.publish({ ...snapshot(), selection: { text: 'x'.repeat(10000), pages: [1,2,3,4,5,6,7,8,9] }, annotations: Array.from({length: 100}, (_, i) => ({ id: String(i), page: 1, kind: 'note', text: 'y'.repeat(1000) })) }); await tick();
  const body = JSON.parse(f.calls[0].content[0].resource.text.split('\n').at(-1));
  expect(body.selection.text).toHaveLength(1600); expect(body.selection.pages).toHaveLength(8); expect(body.annotations).toHaveLength(20); expect(body.annotations[0].text).toHaveLength(240); expect(body.totalAnnotations).toBe(100); expect(body.truncated).toBe(true);
- f.ack(); await tick(); f.coordinator.setPreferences({ backgroundContext: true, selectionSharing: false }); await tick(); expect(f.calls.at(-1).content[0].resource.text).toContain('"selection":null');
+ f.ack(); await tick(); f.coordinator.publish(snapshot()); await tick(); expect(f.calls.at(-1).content[0].resource.text).toContain('"selection":null');
 });
 it('removes a late predecessor publication after remount instead of restoring cleared groups', async () => {
  const previous = setup(); previous.coordinator.setAttachment({ id: 'notes', title: 'Annotations', text: 'removed notes' }); previous.coordinator.publish(snapshot()); await tick();
@@ -94,8 +93,7 @@ it('keeps independently named groups through background updates and partial remo
 it('retains partial group removal through disposal, host-state remount and a late predecessor publication', async () => {
  const foreign = { type: 'resource', resource: { uri: 'other-app:///attachment', mimeType: 'text/plain', text: 'Unrelated context' }, _meta: { 'openai/group': { title: 'Other app' } } };
  const structuredContent = { unrelated: { selected: 'keep' } };
- const previous = setup({ updateId: 'initial', content: [foreign], structuredContent });
- previous.coordinator.enableBackground();
+ const previous = setup({ updateId: 'initial', content: [foreign], structuredContent }, true);
  previous.coordinator.setAttachment({ id: 'removed', title: 'Annotations to remove', text: 'removed evidence' });
  previous.coordinator.setAttachment({ id: 'retained', title: 'Annotations to keep', text: 'retained evidence' });
  previous.coordinator.publish(snapshot()); await tick();
@@ -125,28 +123,6 @@ it('retains partial group removal through disposal, host-state remount and a lat
 it('labels bounded explicit attachment excerpts without claiming omitted content is available', async () => {
  const f = setup(); const text = 'e'.repeat(9000); f.coordinator.setAttachment({ id: 'large', title: 'Full discussion', text }); await tick();
  const body = f.calls[0].content[0].resource.text; expect(body.length).toBeLessThan(6200); expect(body).toContain('5600 of 9000'); expect(body).toContain('Omitted content is not attached'); expect(text).toHaveLength(9000);
-});
-
-it('keeps large captured snapshot attachments valid and truthfully bounded without referring to a nonexistent draft', async () => {
- const f=setup();
- const text=JSON.stringify({kind:'untrusted-document-snapshot',title:'Large.pdf',capturedAt:'2026-11-05T12:00:00Z',generation:2,revision:4,sourceDigest:'digest',summary:'S'.repeat(8000),annotations:Array.from({length:100},(_,i)=>({page:i+1,text:'A'.repeat(2000)})),truncated:false});
- f.coordinator.setAttachment({kind:'snapshot',id:'snapshot',title:'Large.pdf',text});await tick();
- const published=f.calls[0].content[0].resource.text;
- expect(published).not.toContain('discussion draft');
- const body=JSON.parse(published.split('\n').at(-1));
- expect(body).toMatchObject({kind:'untrusted-document-snapshot',generation:2,revision:4,capturedAt:'2026-11-05T12:00:00Z',sourceDigest:'digest',truncated:true,attachmentTruncation:{originalCharacters:text.length}});
- expect(JSON.stringify(body).length).toBeLessThanOrEqual(6000);
- expect(body.summary.length).toBeGreaterThan(0);
- expect(body.annotations.length).toBeGreaterThan(0);
-});
-
-it('bounds escaped snapshot content by encoded size and keeps a small snapshot intact', async () => {
- const small=setup(), text=JSON.stringify({kind:'untrusted-document-snapshot',summary:'Exact captured text',revision:2});
- small.coordinator.setAttachment({kind:'snapshot',id:'small',title:'Small',text});await tick();
- expect(small.calls[0].content[0].resource.text.split('\n').at(-1)).toBe(text);
- const large=setup();large.coordinator.setAttachment({kind:'snapshot',id:'escaped',title:'Escaped',text:JSON.stringify({summary:'\u0000'.repeat(8000),annotations:[{page:1,text:'\u0001'.repeat(2000)}]})});await tick();
- const body=large.calls[0].content[0].resource.text.split('\n').at(-1);
- expect(body.length).toBeLessThanOrEqual(6000);expect(JSON.parse(body).truncated).toBe(true);
 });
 
 it('explicit inclusion waits for host acknowledgement and rejects failed delivery',async()=>{

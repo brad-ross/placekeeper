@@ -82,10 +82,16 @@ it.each([false, true])('recovers disconnected host review with old authority ret
  if(copy){const folder:any=await h.call('chooseFolder');await h.call('chooseCopy',{filename:'recover.pdf',folderSelectionId:folder.payload.selectionId});}
  await h.call('command',addPageNote(f.broker.state(h.sessionId)!,0,{x:20,y:20,width:20,height:20},'retained'));
  await f.saving.drain();
- time+=101;
  const a:any=await f.manager.dispatch({action:'host-open',file:{name:'host.pdf',resourceUri:copy?'opaque:new-handle':'opaque:fixture'}});
- const offer:any=await upload(f.manager,{ticket:a.ticket},bytes,true);
- expect(offer).toMatchObject({status:'busy',canRecover:true});
+ const pending=await upload(f.manager,{ticket:a.ticket},bytes,true);
+ expect(pending).toMatchObject({status:'busy',canResume:false});
+ expect(pending).not.toHaveProperty('canRecover');
+ if(pending.status!=='busy')throw Error('Expected choice');
+ time+=101;
+ const offer=await f.manager.dispatch({action:'recheck',recoveryToken:pending.recoveryToken});
+ expect(offer).toMatchObject({status:'busy',canResume:false,canRecover:true});
+ if(offer.status!=='busy')throw Error('Expected refreshed choice');
+ expect(offer.matchingCopy).toBe(copy?true:undefined);
  const chosen:any=await f.manager.dispatch({action:'choose',recoveryToken:offer.recoveryToken,choice:'recover',operationId:randomUUID()});
  expect(chosen.status).toBe('provisional');
  expect(await upload(f.manager,{grant:chosen.grant},bytes,true)).toMatchObject({status:'host-ready'});

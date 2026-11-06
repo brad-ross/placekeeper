@@ -1,5 +1,4 @@
 import { createHash } from "node:crypto";
-import { preferenceTools, preferenceCapabilities, callPreferenceTool } from './extension-preferences.js';
 import { callExtensionTool, extensionTools } from "./extension-server.js";
 import { NativeQualificationOldAttempt } from "../../service/src/codex/native-qualification-old-attempt.js";
 import { OLD_ATTEMPT_META_KEY, type OldAttemptGrant } from "./old-attempt-contract.js";
@@ -67,23 +66,21 @@ export async function callNativeTool(client: NativeServiceClient, name: string, 
 export function createNativeServer(client: NativeServiceClient, shell: string, dependencies: NativeQualificationDependencies = {}): Server {
   // Host caches may outlive an MCP process. New shell bytes need a new address.
   const shellUri = `ui://placekeeper/review-v1-${createHash("sha256").update(shell).digest("hex")}.html`;
-  const tools = [...nativeTools, ...extensionTools, ...preferenceTools].map((tool): Tool => {
+  const tools = [...nativeTools, ...extensionTools].map((tool): Tool => {
     const ui = tool._meta?.ui;
     return typeof ui === "object" && ui !== null && "resourceUri" in ui && ui.resourceUri === CODEX_REVIEW_UI_RESOURCE
       ? { ...tool, _meta: { ...tool._meta, ui: { ...ui, resourceUri: shellUri } } }
       : tool;
   });
-  const server = new Server({ name: "placekeeper", version: "1.0.0" }, { capabilities: { tools: {}, resources: {}, extensions:preferenceCapabilities,experimental:preferenceCapabilities } });
+  const server = new Server({ name: "placekeeper", version: "1.0.0" }, { capabilities: { tools: {}, resources: {} } });
   server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools }));
   server.setRequestHandler(CallToolRequestSchema, async ({ params }) => {
-    if(preferenceTools.some(t=>t.name===params.name))return callPreferenceTool(client,params.name,params.arguments??{});
     if (!getUiCapability({ extensions: server.getClientCapabilities()?.extensions ?? {} })?.mimeTypes?.includes(RESOURCE_MIME_TYPE)) return unavailable();
     if (extensionTools.some(tool => tool.name === params.name)) return callExtensionTool(client, params.name, params.arguments, params._meta);
     return callNativeTool(client, params.name, params.arguments, dependencies);
   });
   server.setRequestHandler(ListResourcesRequestSchema, async () => ({ resources: [{ uri: shellUri, name: "Placekeeper review v1", mimeType: RESOURCE_MIME_TYPE }] }));
   server.setRequestHandler(ReadResourceRequestSchema, async ({ params }) => {
-    if(params.uri.startsWith('placekeeper-mention://')){const response=await client.extension?.({action:'mention-read',uri:params.uri});if(response?.status!=='mention-resource')throw Error('Mention snapshot unavailable');return {contents:[{uri:params.uri,mimeType:'application/json',text:response.text}]};}
     if (params.uri !== shellUri && params.uri !== CODEX_REVIEW_UI_RESOURCE) throw new Error("Unknown resource");
     return { contents: [{ uri: params.uri, mimeType: RESOURCE_MIME_TYPE, text: shell, _meta: { ui: { csp: { connectDomains: [], resourceDomains: [] }, prefersBorder: true }, "openai/ui": { preferredDisplayMode: "fullscreen", availableDisplayModes: ["fullscreen", "inline"] } } }] };
   });

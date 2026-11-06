@@ -55,6 +55,12 @@ describe("packaged native MCP transport", () => {
     try {
       const uri = `ui://placekeeper/review-v1-${createHash("sha256").update("<html>credential-free</html>").digest("hex")}.html`;
       expect((await client.listResources()).resources.map((resource) => resource.uri)).toEqual([uri]);
+      expect((await client.listTools()).tools.map(tool => tool.name).sort()).toEqual([
+        "display_review", "extension_app", "open_pdf", "open_placekeeper", "review_app",
+      ]);
+      expect(client.getServerCapabilities()).not.toHaveProperty("extensions");
+      expect(client.getServerCapabilities()).not.toHaveProperty("experimental");
+      await expect(client.readResource({ uri: "placekeeper-mention://" + "a".repeat(32) })).rejects.toThrow("Unknown resource");
       const resource = await client.readResource({ uri });
       expect(resource.contents[0]).toMatchObject({ uri, text: "<html>credential-free</html>" });
       expect(JSON.stringify(resource)).not.toContain(pending.pendingCapability);

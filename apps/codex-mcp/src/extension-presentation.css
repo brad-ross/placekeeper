@@ -4,7 +4,7 @@ html[data-placekeeper-extension="true"] body {
   color: var(--color-text-primary, #333);
   background: var(--color-background-primary, #fff);
 }
-html[data-placekeeper-extension="true"][data-theme="dark"] :is(#root[data-production-root="true"], .terminal-recovery, .top-bar-menu__surface) {
+html[data-placekeeper-extension="true"][data-theme="dark"] :is(#root[data-production-root="true"], .extension-recovery, .top-bar-menu__surface) {
   color-scheme: dark;
   --review-ink-primary: var(--color-text-primary, #eee);
   --review-ink-muted: var(--color-text-secondary, #bbb);
@@ -21,12 +21,6 @@ html[data-placekeeper-extension="true"][data-theme="dark"] :is(#root[data-produc
   --review-selection-ink: #eee;
 }
 
-.snapshot-context-picker[open] { max-height: min(40vh, 320px); overflow: auto; padding: 6px; overflow-wrap: anywhere; }
-.snapshot-context-picker input { box-sizing: border-box; max-width: 100%; }
-.snapshot-context-picker form { display: flex; flex-wrap: wrap; gap: 6px; align-items: end; }
-
-
-/* Keep host controls out of the document's reading area until requested. */
 .extension-controls[data-mode="review"] {
   position: absolute;
   z-index: 50;
@@ -37,60 +31,65 @@ html[data-placekeeper-extension="true"][data-theme="dark"] :is(#root[data-produc
   gap: 6px;
 }
 .extension-controls[data-mode="review"][data-display-mode="inline"] { position: relative; inset: auto; align-self: flex-end; margin: 4px 12px; }
-.extension-menu { position: relative; }
-.extension-menu > summary {
-  display: grid;
-  place-items: center;
-  width: 30px;
-  height: 30px;
-  box-sizing: border-box;
-  list-style: none;
-  border-radius: 7px;
-  color: var(--color-text-secondary, #676762);
-  background: transparent;
+.extension-controls button, .extension-recovery button {
+  min-height: 32px;
+  padding: 6px 10px;
+  border: 1px solid var(--color-border-primary, #ddddd7);
+  border-radius: 8px;
+  color: inherit;
+  background: var(--color-background-secondary, #f5f5f2);
+  font: inherit;
   cursor: pointer;
-  font-size: 24px;
-  line-height: 1;
 }
-.extension-menu > summary::-webkit-details-marker { display: none; }
-.extension-menu > summary:hover, .extension-menu[open] > summary { background: var(--color-background-secondary, #eaeae7); }
-.extension-menu > summary:focus-visible { outline: 2px solid var(--color-text-primary, #454540); outline-offset: 2px; }
-.extension-menu__panel {
-  position: absolute;
-  right: 0;
-  top: 36px;
-  width: min(310px, calc(100vw - 32px));
-  max-height: calc(100dvh - 68px);
-  overflow: auto;
+.extension-controls button:hover:not(:disabled) { background: var(--color-background-tertiary, #eaeae5); }
+.extension-controls button:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
+.extension-controls button:disabled { opacity: .5; cursor: default; }
+
+/* An inline host sizes the iframe from its contents. Reserve room for the modal. */
+.extension-controls:has(.extension-recovery[open]) { min-height: 360px; }
+.extension-recovery {
   box-sizing: border-box;
-  padding: 14px;
-  display: grid;
-  gap: 12px;
-  background: var(--color-background-primary, #fff);
-  color: var(--color-text-primary, #30302d);
+  width: min(34rem, calc(100% - 2rem));
+  max-height: calc(100dvh - 2rem);
+  padding: 23px;
+  overflow: auto;
+  overscroll-behavior: contain;
   border: 1px solid var(--color-border-primary, #deded9);
-  border-radius: 12px;
-  box-shadow: 0 12px 32px #00000018;
-  font-size: 12px;
-  line-height: 1.5;
+  border-radius: 17px;
+  color: var(--review-ink-primary, var(--color-text-primary, #282824));
+  background: var(--review-surface-panel, var(--color-background-primary, #fff));
+  box-shadow: 0 12px 48px #00000026;
+  font: 400 13px/1.5 system-ui, sans-serif;
 }
-.extension-menu__panel p { margin: 0; }
-.extension-menu__status { color: var(--color-text-secondary, #777770); font-size: 11px; }
-.extension-menu__panel details > summary { cursor: pointer; font-weight: 550; }
-.extension-menu__panel fieldset { display: grid; gap: 10px; margin: 12px 0; padding: 0; border: 0; }
-.extension-menu__panel legend { display: none; }
-.extension-menu__panel label { display: flex; align-items: flex-start; gap: 7px; }
-.extension-menu__panel input[type="checkbox"] { flex-shrink: 0; margin: 3px 0 0; accent-color: #55584d; }
-.extension-menu__panel button, .extension-controls[data-mode="chooser"] button {
-  font: inherit; color: inherit; background: var(--color-background-secondary, #f5f5f2); border: 1px solid var(--color-border-primary, #ddddd7); border-radius: 6px; padding: 6px 9px; cursor: pointer;
+.extension-recovery::backdrop { background: #0005; }
+.extension-recovery h2 { margin: 0 0 8px; font-size: 16px; font-weight: 600; }
+.extension-recovery p { margin: 0; color: var(--review-ink-muted, var(--color-text-secondary, #555550)); }
+.extension-recovery__choices { display: grid; gap: 8px; margin-top: 16px; }
+.extension-recovery__choice {
+  display: grid;
+  grid-template-columns: minmax(0, 10rem) minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  padding: 10px;
+  border-radius: 10px;
+  background: var(--review-surface-subtle, var(--color-background-secondary, #f5f5f2));
 }
-.extension-menu__panel button:hover, .extension-controls[data-mode="chooser"] button:hover { background: var(--color-background-tertiary, #eaeae5); }
-.extension-menu__panel button:disabled { opacity: .5; cursor: default; }
-.extension-menu__panel .snapshot-context-picker { padding: 0; max-height: none; }
-.extension-menu__panel .snapshot-context-picker p { margin: 8px 0; }
-.extension-menu__panel .snapshot-context-picker label { display: grid; gap: 4px; }
-.extension-menu__panel .snapshot-context-picker input { border: 1px solid var(--color-border-primary, #ddddd7); border-radius: 5px; padding: 6px; background: transparent; color: inherit; }
-.extension-menu__panel .snapshot-context-picker form { margin-top: 10px; }
+.extension-recovery .extension-recovery__primary { background: #333; color: #fff; }
+.extension-recovery .extension-recovery__primary:hover:not(:disabled) { background: #222; }
+.extension-recovery .extension-recovery__feedback:not(:empty) {
+  margin-top: 12px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--review-surface-subtle, var(--color-background-secondary, #f5f5f2));
+}
+.extension-recovery__footer { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+@media (max-width: 420px) {
+  .extension-recovery { padding: 16px; }
+  .extension-recovery__choice { grid-template-columns: minmax(0, 1fr); gap: 6px; }
+}
+@media (pointer: coarse) {
+  .extension-recovery button { min-height: 44px; }
+}
 .extension-controls[data-mode="chooser"] { width: min(500px, calc(100% - 40px)); margin: 24px auto; display: grid; gap: 10px; }
 .extension-controls[data-mode="chooser"] h3 { margin: 20px 0 0; font-size: 14px; }
 .extension-controls[data-mode="chooser"] p { margin: 0; color: var(--color-text-secondary, #777770); }

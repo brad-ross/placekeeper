@@ -11,7 +11,7 @@ it.each(['chooseFolder', 'locateSave'] as const)('preserves the canonical socket
 });
 
 it('retains the ordinary socket deadline for non-picker extension calls', async () => {
-    control.mockResolvedValueOnce({ kind: 'extension-app', response: { status: 'closed' } });
-    await createServiceClient('/test.sock').extension!({ action: 'settings-read' });
+    control.mockResolvedValueOnce({ kind: 'extension-app', response: { status: 'recent-reviews', items: [] } });
+    expect(await createServiceClient('/test.sock').extension!({ action: 'recent-list' })).toEqual({ status: 'recent-reviews', items: [] });
     expect(control.mock.calls.at(-1)?.[2]).not.toHaveProperty('timeoutMs');
 });
