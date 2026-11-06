@@ -47,7 +47,7 @@ export type ContextPlacement = ViewerClientPlacement & {
 export interface ContextActionPaletteProps {
   readonly placement: ContextPlacement;
   readonly hidden?: boolean;
-  onDiscuss?(): void;
+  onAddContext?(): void;
   onCopy?(): void;
   onReplace?(): void;
   onDelete?(): void;
@@ -245,7 +245,14 @@ export function ContextActionPalette(props: ContextActionPaletteProps) {
       inert={props.hidden}
       style={boundedStyle ?? style}
     >
-      {props.onDiscuss ? <button type="button" onClick={props.onDiscuss}>Ask about this selection</button> : null}
+      {props.onAddContext ? <ReviewTooltipButton
+        type="button"
+        className="review-action-button review-action-button--icon"
+        label="Add selection to chat"
+        aria-haspopup="dialog"
+        onMouseDown={(event) => event.preventDefault()}
+        onClick={props.onAddContext}
+      ><ReviewIcon name="agent" /></ReviewTooltipButton> : null}
       <ContextActionButton kind="replace" iconOnly onAction={props.onReplace} />
       <ContextActionButton kind="delete" iconOnly onAction={props.onDelete} />
       <ContextActionButton kind="highlight" iconOnly onAction={props.onHighlight} />

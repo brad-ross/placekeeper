@@ -44,8 +44,7 @@ export async function extensionRecoveryReader(page: Page) {
         callServerTool: async ({ arguments: { request } }: any) => ({ _meta: { 'placekeeper/extension': await (window as any).recoveryAcceptanceRequest(request) } }),
       };
       state.shell = new ExtensionShell(app, document.getElementById('root')!, document.getElementById('status')!, document.getElementById('controls')!, () => undefined,
-        () => ({ getCurrent: () => state.context, update: async (params: any) => { const updateId = `context-${state.publications.length}`; state.publications.push(params); state.context = { ...params, updateId }; return { updateId }; } }),
-        () => ({ send: async (message: any) => { state.messages.push(message); return {}; } }));
+        () => ({ getCurrent: () => state.context, update: async (params: any) => { const updateId = `context-${state.publications.length}`; state.publications.push(params); state.context = { ...params, updateId }; return { updateId }; } }));
       await state.shell.receive(chooser ? { status: 'chooser' } : await (window as any).recoveryAcceptanceRequest({ action: 'open' }));
     }, chooser);
   }

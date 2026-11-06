@@ -5,10 +5,11 @@ const snapshot = (page = 1, generation = 1): ReviewContextSnapshot => ({ documen
 const tick = async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); };
 function setup(initial?: any) {
  let resolve!: (value: any) => void;
+ let reject!: (reason: Error) => void;
  const calls: any[] = [];
- const api = { getCurrent: () => initial, update: vi.fn((value: any) => { calls.push(value); return new Promise<any>(done => { resolve = done; }); }) };
+ const api = { getCurrent: () => initial, update: vi.fn((value: any) => { calls.push(value); return new Promise<any>((done, fail) => { resolve = done; reject = fail; }); }) };
  const coordinator = new ExtensionContextCoordinator(api, undefined, { freshInvocation: initial === undefined });
- return { coordinator, calls, ack: (updateId = 'ack') => resolve({ updateId }) };
+ return { coordinator, calls, ack: (updateId = 'ack') => resolve({ updateId }), reject: () => reject(Error('offline')), noAck: () => resolve(null) };
 }
 it('coalesces rapid pages and bounds untrusted accepted snapshots without source paths', async () => {
  const f = setup(); f.coordinator.publish(snapshot()); f.coordinator.publish(snapshot(2)); f.coordinator.publish(snapshot(3, 2)); await tick();
@@ -121,9 +122,9 @@ it('retains partial group removal through disposal, host-state remount and a lat
  expect(remount.calls.at(-1).content.find((block: any) => block.resource?.uri === backgroundContextUri).resource.text).toContain('"page":3');
  expect(JSON.stringify(remount.calls.at(-1))).not.toContain('removed evidence');
 });
-it('labels bounded explicit attachment excerpts while retaining complete draft text in its caller', async () => {
+it('labels bounded explicit attachment excerpts without claiming omitted content is available', async () => {
  const f = setup(); const text = 'e'.repeat(9000); f.coordinator.setAttachment({ id: 'large', title: 'Full discussion', text }); await tick();
- const body = f.calls[0].content[0].resource.text; expect(body.length).toBeLessThan(6200); expect(body).toContain('5600 of 9000'); expect(body).toContain('Full text is in the editable or copyable discussion draft'); expect(text).toHaveLength(9000);
+ const body = f.calls[0].content[0].resource.text; expect(body.length).toBeLessThan(6200); expect(body).toContain('5600 of 9000'); expect(body).toContain('Omitted content is not attached'); expect(text).toHaveLength(9000);
 });
 
 it('keeps large captured snapshot attachments valid and truthfully bounded without referring to a nonexistent draft', async () => {
@@ -146,4 +147,111 @@ it('bounds escaped snapshot content by encoded size and keeps a small snapshot i
  const large=setup();large.coordinator.setAttachment({kind:'snapshot',id:'escaped',title:'Escaped',text:JSON.stringify({summary:'\u0000'.repeat(8000),annotations:[{page:1,text:'\u0001'.repeat(2000)}]})});await tick();
  const body=large.calls[0].content[0].resource.text.split('\n').at(-1);
  expect(body.length).toBeLessThanOrEqual(6000);expect(JSON.parse(body).truncated).toBe(true);
+});
+
+it('explicit inclusion waits for host acknowledgement and rejects failed delivery',async()=>{
+ const f=setup();let complete=false;const attaching=f.coordinator.includeAttachment({id:'note',title:'Note',text:'evidence'}).then(()=>{complete=true;});
+ await tick();expect(complete).toBe(false);f.ack('included');await attaching;expect(complete).toBe(true);
+ const broken=new ExtensionContextCoordinator({getCurrent:()=>null,update:async()=>{throw Error('offline');}});
+ await expect(broken.includeAttachment({id:'note',title:'Note',text:'evidence'})).rejects.toThrow('could not be attached');
+});
+it('explicit inclusion does not report success after host removal or disposal',async()=>{
+ const f=setup();const attaching=f.coordinator.includeAttachment({id:'note',title:'Note',text:'evidence'});const rejection=expect(attaching).rejects.toThrow();await tick();f.coordinator.reconcile(null);f.ack('late');await rejection;
+ const g=setup();const pending=g.coordinator.includeAttachment({id:'note',title:'Note',text:'evidence'});const disposed=expect(pending).rejects.toThrow();g.coordinator.dispose();await disposed;
+});
+
+it('discards a rejected explicit note before publishing a queued background update', async () => {
+ const f = setup();
+ f.coordinator.publish(snapshot()); await tick(); f.ack('initial'); await tick();
+ const note = f.coordinator.includeAttachment({ id: 'note', title: 'Note', text: 'unsent note' });
+ const rejection = expect(note).rejects.toThrow('could not be attached');
+ await tick();
+ expect(JSON.stringify(f.calls.at(-1))).toContain('unsent note');
+ f.coordinator.publish(snapshot(2));
+ f.reject(); await rejection; await tick();
+ expect(f.coordinator.attachments).toEqual([]);
+ expect(f.calls.at(-1).content[0].resource.text).toContain('"page":2');
+ expect(JSON.stringify(f.calls.at(-1))).not.toContain('unsent note');
+});
+
+it('restores the confirmed note after edits fail, including a null acknowledgement', async () => {
+ const f = setup();
+ const original = f.coordinator.includeAttachment({ id: 'note', title: 'Note', text: 'confirmed note' });
+ await tick(); f.ack('original'); await original;
+ const edit = f.coordinator.includeAttachment({ id: 'note', title: 'Note', text: 'failed edit' });
+ const rejection = expect(edit).rejects.toThrow('could not be attached');
+ await tick(); f.noAck(); await rejection;
+ f.coordinator.publish(snapshot(2)); await tick();
+ expect(f.coordinator.attachments).toEqual(['note']);
+ expect(JSON.stringify(f.calls.at(-1))).toContain('confirmed note');
+ expect(JSON.stringify(f.calls.at(-1))).not.toContain('failed edit');
+});
+
+it('preserves a newer staged edit when the previous update rejects', async () => {
+ const f = setup();
+ const previous = f.coordinator.includeAttachment({ id: 'note', title: 'Note', text: 'previous edit' });
+ const rejection = expect(previous).rejects.toThrow('could not be attached');
+ await tick();
+ const newer = f.coordinator.includeAttachment({ id: 'note', title: 'Note', text: 'newer edit' });
+ f.reject(); await rejection; await tick();
+ expect(JSON.stringify(f.calls.at(-1))).toContain('newer edit');
+ f.ack('newer'); await newer;
+});
+
+it('does not restore a confirmed note after the host removes it during a failed edit', async () => {
+ const f = setup();
+ const original = f.coordinator.includeAttachment({ id: 'note', title: 'Note', text: 'confirmed note' });
+ await tick(); f.ack('original'); await original;
+ const edit = f.coordinator.includeAttachment({ id: 'note', title: 'Note', text: 'failed edit' });
+ const rejection = expect(edit).rejects.toThrow('could not be attached');
+ await tick(); f.coordinator.reconcile(null); f.reject(); await rejection; await tick();
+ expect(f.coordinator.attachments).toEqual([]);
+ expect(f.calls.at(-1).content).toEqual([]);
+});
+
+it('rebuilds a prepared write when the host updates before publication starts', async () => {
+ let ready!: () => void;
+ const beforeUpdate = vi.fn(() => new Promise<void>(resolve => { ready = resolve; }));
+ const background = { type: 'resource' as const, resource: { uri: backgroundContextUri, mimeType: 'text/plain', text: 'Previous background' } };
+ const foreign = { type: 'text' as const, text: 'New foreign context' };
+ const update = vi.fn(async (_value: unknown) => ({ updateId: 'published' }));
+ const coordinator = new ExtensionContextCoordinator({
+   getCurrent: () => ({ updateId: 'initial', content: [background] }), update,
+ }, undefined, { beforeUpdate });
+ const note = coordinator.includeAttachment({ id: 'note', title: 'Note', text: 'new note' });
+ await tick();
+ expect(update).not.toHaveBeenCalled();
+ coordinator.reconcile({ updateId: 'foreign-change', content: [background, foreign] });
+ ready(); await tick();
+ expect(update).not.toHaveBeenCalled();
+ ready(); await note;
+ expect(update).toHaveBeenCalledOnce();
+ expect(JSON.stringify(update.mock.calls[0])).toContain('New foreign context');
+ expect(JSON.stringify(update.mock.calls[0])).toContain('new note');
+});
+
+it('does not transmit a prepared note after the host clears context', async () => {
+ let ready!: () => void;
+ const beforeUpdate = () => new Promise<void>(resolve => { ready = resolve; });
+ const update = vi.fn(async (_value: unknown) => ({ updateId: 'published' }));
+ const coordinator = new ExtensionContextCoordinator({ getCurrent: () => undefined, update }, undefined, { freshInvocation: true, beforeUpdate });
+ const note = coordinator.includeAttachment({ id: 'note', title: 'Note', text: 'cleared note' });
+ const rejection = expect(note).rejects.toThrow('could not be attached');
+ await tick();
+ coordinator.reconcile(null);
+ ready(); await rejection; await tick();
+ expect(update).not.toHaveBeenCalled();
+});
+
+it('retains a submitted note when a host notification only shows previously known groups', async () => {
+ const f = setup();
+ f.coordinator.publish(snapshot()); await tick(); f.ack('initial'); await tick();
+ const note = f.coordinator.includeAttachment({ id: 'note', title: 'Note', text: 'pending note' });
+ await tick();
+ const foreign = { type: 'text', text: 'Updated foreign context' };
+ f.coordinator.reconcile({ updateId: 'foreign-change', content: [...f.calls[0].content, foreign] });
+ f.ack('included'); await note; await tick();
+ expect(f.coordinator.attachments).toEqual(['note']);
+ expect(f.calls.at(-1).content[0]).toEqual(foreign);
+ expect(JSON.stringify(f.calls.at(-1))).toContain('pending note');
 });

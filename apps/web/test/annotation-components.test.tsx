@@ -366,6 +366,28 @@ describe('annotation row and reader presentation', () => {
     expect(html).toContain('<p>First paragraph.</p><p>Second paragraph.</p>');
   });
 
+  it('shows an icon-only chat context action in the selection palette', () => {
+    const palette = renderToStaticMarkup(<ContextActionPalette
+      placement={{ left: 10, top: 20 }}
+      onAddContext={vi.fn()}
+    />);
+    expect(palette).toMatch(/aria-label="Add selection to chat"[\s\S]*?lucide-bot/u);
+    expect(palette).not.toContain('Ask about this selection');
+  });
+
+  it('replaces the link with a bot for annotation context and keeps links elsewhere', () => {
+    const copyLink = { getLink: () => 'placekeeper:///a', writeText: vi.fn() };
+    const peek = (onAddContext?: () => void) => renderToStaticMarkup(<AnnotationPeek
+      item={replacement}
+      onHoldChange={vi.fn()}
+      copyLink={copyLink}
+      {...(onAddContext === undefined ? {} : { onAddContext })}
+    />);
+    expect(peek()).toContain('Copy link to');
+    expect(peek(vi.fn())).toContain('lucide-bot');
+    expect(peek(vi.fn())).not.toContain('Copy link to');
+  });
+
   it('uses a trash can for annotation deletion while retaining the zoom minus glyph', () => {
     const palette = renderToStaticMarkup(<ContextActionPalette
       placement={{ left: 10, top: 20 }}

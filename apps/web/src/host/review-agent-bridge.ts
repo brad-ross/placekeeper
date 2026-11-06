@@ -15,14 +15,17 @@ export interface ReviewAgentActions {
   navigate(target: ReviewAgentTarget): Promise<boolean>;
 }
 
-export type ReviewAgentDraft =
+export type ReviewAgentContextInput = (
   | { readonly kind: 'selection'; readonly snapshot: ReviewAgentSnapshot }
-  | { readonly kind: 'annotations'; readonly snapshot: ReviewAgentSnapshot; readonly annotationIds: readonly string[] };
+  | { readonly kind: 'annotations'; readonly snapshot: ReviewAgentSnapshot; readonly annotationIds: readonly string[] }
+) & { readonly note?: string };
+
+export const MAX_REVIEW_CONTEXT_NOTE_LENGTH = 2000;
 
 export interface ReviewAgentBridge {
   attach(actions: ReviewAgentActions): () => void;
-  /** Explicit draft workflow, including copy and attachment fallback when needed. */
-  draft?(input: ReviewAgentDraft): Promise<void>;
+  /** Publish the captured evidence and optional user note as chat context. */
+  addContext?(input: ReviewAgentContextInput): Promise<void>;
 }
 
 /** The reader retains every match for navigation; chat receives a bounded page with coverage. */

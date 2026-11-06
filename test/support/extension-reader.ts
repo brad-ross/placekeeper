@@ -42,7 +42,7 @@ export async function extensionReader(page: Page, fixture = 'text-native-with-an
     let releaseSettings!: () => void;
     const settingsGate = new Promise<void>(resolve => { releaseSettings = resolve; });
     const state = w.extensionAcceptance = {
-      shell: undefined as any, tools, context: null as any, publications: [] as any[], messages: [] as any[],
+      shell: undefined as any, tools, context: null as any, publications: [] as any[], messages: [] as any[], promptText: 'Keep my typed question',
       settings: { backgroundContext: true, selectionSharing: true, mentions: false }, revision: 0,
       settingsLoaded: false, releaseSettings, expansionRequests: 0, included: false,
       publicationGate: undefined as Promise<void> | undefined, releasePublication: undefined as (() => void) | undefined,
@@ -52,6 +52,7 @@ export async function extensionReader(page: Page, fixture = 'text-native-with-an
     const { EXTENSION_META_KEY } = await import(/* @vite-ignore */ ('/packages/core/src/extension-protocol.ts' as string));
     const envelope = (value: unknown) => ({ _meta: { [EXTENSION_META_KEY]: value } });
     const app = {
+      sendMessage: async (params: any) => { state.messages.push(params); state.promptText = JSON.stringify(params); return {}; },
       getHostContext: () => ({ displayMode: 'fullscreen', theme: 'light' }),
       requestDisplayMode: async () => { state.expansionRequests++; return { mode: 'fullscreen' }; },
       callServerTool: async ({ arguments: { request } }: any) => {
@@ -63,8 +64,7 @@ export async function extensionReader(page: Page, fixture = 'text-native-with-an
       },
     };
     state.shell = new ExtensionShell(app, document.getElementById('root')!, document.getElementById('status')!, document.getElementById('controls')!, () => undefined,
-      () => ({ getCurrent: () => state.context, update: async (params: any) => { const updateId = `host-${state.publications.length}`; state.publications.push({ ...params, settingsLoaded: state.settingsLoaded }); state.context = { ...params, updateId }; return { updateId }; } }),
-      () => ({ send: async (message: any) => { state.messages.push(message); return {}; } }));
+      () => ({ getCurrent: () => state.context, update: async (params: any) => { const updateId = `host-${state.publications.length}`; state.publications.push({ ...params, settingsLoaded: state.settingsLoaded }); state.context = { ...params, updateId }; return { updateId }; } }));
     state.receiving = state.shell.receive({ status: 'provisional', grant: 'a'.repeat(43) });
   });
   return { bridge, panel, requests,

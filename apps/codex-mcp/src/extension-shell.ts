@@ -2,10 +2,10 @@ import { mountSnapshotContextPicker } from './snapshot-context-picker.js';
 import { LiveReaderTools, type DocumentModelContext } from './live-reader-tools.js';
 import { ExtensionContextCoordinator, type ExtensionContextPreferences } from '../../web/src/host/extension-context-coordinator.js';
 import type { ReviewContextSnapshot } from '../../web/src/host/review-context-snapshot.js';
-import { prepareReviewDraft, publishReviewDraft } from './review-drafts.js';
-import type { ReviewAgentBridge, ReviewAgentDraft } from '../../web/src/host/review-agent-bridge.js';
+import { prepareReviewContext } from './review-context-attachment.js';
+import type { ReviewAgentBridge, ReviewAgentContextInput } from '../../web/src/host/review-agent-bridge.js';
 import type { ExtensionPreferenceValues, SnapshotLabel } from '../../../packages/core/src/extension-preferences.js';
-import type { OpenAIMessage, OpenAIModelContext, OpenAIResources } from '@openai/mcp-extensions/app';
+import type { OpenAIModelContext, OpenAIResources } from '@openai/mcp-extensions/app';
 import { HostResourceAdapter } from './host-resource-adapter.js';
 import type { App } from '@modelcontextprotocol/ext-apps';
 import { createCodexHostRuntime } from '../../web/src/host/codex-runtime.js';
@@ -37,7 +37,6 @@ export class ExtensionShell {
     #catalogue: { included: boolean; snapshot?: SnapshotLabel } = { included: false };
     #catalogueView: HTMLElement | undefined;
     #catalogueRequest = 0;
-    #draftView: HTMLElement | undefined;
     #host: HostResourceAdapter | undefined;
     #hostNotice = '';
     #exportNotice = '';
@@ -64,7 +63,7 @@ export class ExtensionShell {
     #choiceEpoch = 0;
     #watermark: number | undefined;
     readonly #listeners = new Set<(event: HostRuntimeInvalidation) => void>();
-    constructor(readonly app: App, readonly root: HTMLElement, readonly status: HTMLElement, readonly controls: HTMLElement, readonly resources: () => OpenAIResources | undefined = () => undefined, readonly modelContext: () => OpenAIModelContext | undefined = () => undefined, readonly message: () => OpenAIMessage | undefined = () => undefined) { }
+    constructor(readonly app: App, readonly root: HTMLElement, readonly status: HTMLElement, readonly controls: HTMLElement, readonly resources: () => OpenAIResources | undefined = () => undefined, readonly modelContext: () => OpenAIModelContext | undefined = () => undefined) { }
     get ownsPanel() { return this.#received; }
     async receive(raw: unknown): Promise<boolean> {
         const result = parseExtensionResult(raw);
@@ -101,7 +100,8 @@ export class ExtensionShell {
         this.#message = text;
         const compact = this.#active && this.#displayMode !== 'fullscreen';
         const summary = compact ? `${this.#snapshot?.title ?? this.#title ?? 'Placekeeper PDF'}${this.#snapshot ? ` · Page ${this.#snapshot.page} of ${this.#snapshot.pageCount}` : ''}. Open the reader to edit.` : '';
-        this.status.textContent = [summary, this.#readerTools && !this.#readerTools.supported ? 'Live reader tools are unavailable on this host. Open the reader to search and navigate.' : '', text || (document.hidden && this.#active ? 'Reader suspended while the app is hidden. Protected work is retained.' : ''), this.#exportNotice].filter(Boolean).join(' ');
+        this.status.textContent = [summary, text, this.#exportNotice].filter(Boolean).join(' ');
+        this.controls.dataset.displayMode = compact ? 'inline' : 'fullscreen';
         this.status.hidden = !this.status.textContent;
     }
     #exportProgress(phase: 'preparing' | 'host-requested' | 'host-accepted' | 'host-declined' | 'failed') {
@@ -117,10 +117,10 @@ export class ExtensionShell {
     #contextStatus() {
         if (!this.#contextView) return;
         const status = this.#context?.status ?? 'unsupported';
-        this.#contextView.textContent = status === 'available' ? 'Context available to chat. This does not confirm that a model has read it.'
-            : status === 'publishing' ? 'Updating context for chat…'
-            : status === 'paused' ? 'Background context is paused for this app.'
-            : status === 'unsupported' ? 'This host does not support background context.' : 'Context could not be confirmed as available to chat.';
+        this.#contextView.textContent = status === 'available' ? 'Context attached'
+            : status === 'publishing' ? 'Attaching context…'
+            : status === 'paused' ? 'Background sharing paused'
+            : status === 'unsupported' ? 'Context sharing unavailable' : 'Context could not be attached. Try again.';
         if (this.#contextEnable) this.#contextEnable.hidden = status !== 'paused' || !this.#preferences.backgroundContext;
     }
     setContextPreferences(preferences: ExtensionContextPreferences) { this.#preferences = { ...this.#preferences, ...preferences }; this.#context?.setPreferences(preferences); }
@@ -145,20 +145,19 @@ export class ExtensionShell {
         if (this.#context && this.#contextScope==='review') return;
         this.#context?.dispose();this.#contextScope='review';
         const api = this.modelContext();
-        this.#context = new ExtensionContextCoordinator(api ? {
-            getCurrent: () => api.getCurrent(),
-            update: async (params, options) => {
+        this.#context = new ExtensionContextCoordinator(api, () => this.#contextStatus(), {
+            freshInvocation,
+            beforeUpdate: async () => {
                 const grant = this.#grant, settingsRevision = this.#settingsRevision;
                 if (!grant || this.#closed) throw Error('Context connection unavailable');
                 const marked = await this.#request({ action: 'context-published', grant });
                 if (marked.status !== 'context-ready' || this.#closed || grant !== this.#grant || settingsRevision !== this.#settingsRevision) throw Error('Context connection unavailable');
-                return api.update(params, options);
             },
-        } : undefined, () => this.#contextStatus(), { freshInvocation });
+        });
         this.#context.setPreferences(this.#preferences);
     }
-    #button(label: string, action: () => Promise<void>) { const button = document.createElement('button'); button.textContent = label; button.onclick = () => { if (this.#closed || button.disabled)
-        return; button.disabled = true; void action().catch(() => this.#show('Placekeeper could not complete that action. Your protected work is retained.')).finally(() => { button.disabled = false; }); }; this.controls.append(button); return button; }
+    #button(label: string, action: () => Promise<void>, container = this.controls) { const button = document.createElement('button'); button.textContent = label; button.onclick = () => { if (this.#closed || button.disabled)
+        return; button.disabled = true; void action().catch(() => this.#show('Placekeeper could not complete that action. Your protected work is retained.')).finally(() => { button.disabled = false; }); }; container.append(button); return button; }
     async #apply(result: ExtensionResult) {
         if (this.#closed) {
             if ('grant' in result)
@@ -226,30 +225,37 @@ export class ExtensionShell {
             this.#setupContext(result.contextPublished === false);
             this.#disposeContextPicker?.();
             this.controls.replaceChildren();
-            this.#contextView = document.createElement('p'); this.controls.append(this.#contextView);
-            const enable = document.createElement('button'); enable.textContent = 'Enable background context'; enable.onclick = () => this.#context?.enableBackground(); this.#contextEnable = enable; this.controls.append(enable);
+            this.controls.className = 'extension-controls';
+            this.controls.dataset.mode = 'review';
+            this.status.dataset.extensionMode = 'review';
+            const menu = document.createElement('details'); menu.className = 'extension-menu';
+            const summary = document.createElement('summary'); summary.textContent = '⋯'; summary.setAttribute('aria-label', 'Review options'); summary.title = 'Review options';
+            const panel = document.createElement('div'); panel.className = 'extension-menu__panel';
+            menu.append(summary, panel); this.controls.append(menu);
+            menu.onkeydown = event => { if (event.key === 'Escape') { menu.open = false; summary.focus(); } };
+            this.#contextView = document.createElement('p'); this.#contextView.className = 'extension-menu__status'; panel.append(this.#contextView);
+            const enable = document.createElement('button'); enable.textContent = 'Resume background sharing'; enable.onclick = () => this.#context?.enableBackground(); this.#contextEnable = enable; panel.append(enable);
             this.#contextStatus();
-            const sharing = document.createElement('details'), summary = document.createElement('summary'); summary.textContent = 'Sharing settings'; sharing.append(summary); this.controls.append(sharing);
+            const sharing = document.createElement('details'), sharingSummary = document.createElement('summary'); sharingSummary.textContent = 'Sharing settings'; sharing.append(sharingSummary); panel.append(sharing);
             this.#settingsView = document.createElement('fieldset'); sharing.append(this.#settingsView); this.#renderSettings();
             this.#catalogueView = document.createElement('div'); sharing.append(this.#catalogueView);
-            this.#disposeContextPicker = mountSnapshotContextPicker(this.controls, {
+            this.#disposeContextPicker = mountSnapshotContextPicker(panel, {
                 request: request => this.#request(request),
                 include: attachment => {
-                    if(this.#closed || !this.#connected || !this.#grant || !this.modelContext())throw Error('Context connection unavailable');
-                    this.#context?.setAttachment(attachment);
+                    if(this.#closed || !this.#connected || !this.#grant || !this.modelContext() || !this.#context)throw Error('Context connection unavailable');
+                    return this.#context.includeAttachment(attachment);
                 },
             });
-            this.#draftView = document.createElement('div'); this.controls.append(this.#draftView);
             this.#renderCatalogue();
-            void this.#catalogueAction('status').catch(() => this.#show('Mention snapshot status is unavailable. Try refreshing its status.'));
+            void this.#catalogueAction('status').catch(() => { if (this.#catalogueView) this.#catalogueView.textContent = 'Saved snapshots are unavailable. Try again from Sharing settings.'; });
             this.#openReader = this.#button('Open reader', async () => {
                 try { const result = await this.app.requestDisplayMode({ mode: 'fullscreen' }); this.hostContextChanged({ displayMode: result.mode }); }
                 catch { this.#show('This host could not expand the reader. Open Placekeeper in the conversation panel to edit.'); }
             });
-            this.#closeControl();
+            this.#closeControl(panel);
             this.hostContextChanged(this.app.getHostContext?.() ?? {}, false);
             this.#mount();
-            if (this.#host) { this.#button('Refresh PDF', () => this.#continue()); this.#button('Save now', () => this.#saveHost(true)); void this.#saveHost(); if (this.#hostRefreshPending) queueMicrotask(() => { void this.#continue().catch(() => undefined); }); }
+            if (this.#host) { this.#button('Refresh PDF', () => this.#continue(), panel); this.#button('Save now', () => this.#saveHost(true), panel); void this.#saveHost(); if (this.#hostRefreshPending) queueMicrotask(() => { void this.#continue().catch(() => undefined); }); }
             return;
         }
         if (result.status === 'cancelled') {
@@ -333,7 +339,7 @@ export class ExtensionShell {
     #renderSettings() {
         if (!this.#settingsView) return;
         this.#settingsView.replaceChildren();
-        const legend = document.createElement('legend'); legend.textContent = 'Global sharing preferences'; this.#settingsView.append(legend);
+        const legend = document.createElement('legend'); legend.textContent = 'Share with chat'; this.#settingsView.append(legend);
         if (this.#settingsNotice) { const notice = document.createElement('p'); notice.textContent = this.#settingsNotice; this.#settingsView.append(notice); const retry = document.createElement('button'); retry.textContent = 'Retry sharing preferences'; retry.onclick = () => { void this.#refreshSettings().catch(() => this.#show('Sharing preferences are still unavailable.')); }; this.#settingsView.append(retry); }
         for (const [key, text] of Object.entries({ backgroundContext: 'Share background review context', selectionSharing: 'Share current selection in background context', mentions: 'Allow explicitly included review snapshots in other chats' }) as [keyof ExtensionPreferenceValues, string][]) {
             const label = document.createElement('label'), input = document.createElement('input'); input.type = 'checkbox'; input.checked = this.#preferences[key];
@@ -354,28 +360,21 @@ export class ExtensionShell {
         const text = document.createElement('p'); text.textContent = !this.#preferences.mentions ? 'This review is excluded from mentions. Enable the global preference to include a snapshot.' : this.#catalogue.included ? `This review has an included snapshot${this.#catalogue.snapshot ? ` from ${this.#catalogue.snapshot.capturedAt}, revision ${this.#catalogue.snapshot.revision}` : ''}. Hosts with Placekeeper composer mentions can retrieve it in other chats. Changes require an explicit update.` : 'This review is excluded from mentions. Include a snapshot to make it available on hosts with Placekeeper composer mentions.';
         this.#catalogueView.append(text);
         if (!this.#preferences.mentions) return;
-        const availability = document.createElement('p'); availability.textContent = 'If Placekeeper is missing from your composer’s mention menu, use Discuss annotations or Ask about this selection to prepare an editable draft in this chat.'; this.#catalogueView.append(availability);
         const refresh = document.createElement('button'); refresh.textContent = 'Refresh snapshot status'; refresh.onclick = () => { void this.#catalogueAction('status').catch(() => this.#show('Mention snapshot status is unavailable.')); }; this.#catalogueView.append(refresh);
         const add = (label: string, operation: 'capture' | 'remove') => { const button = document.createElement('button'); button.textContent = label; button.onclick = () => { button.disabled = true; void this.#catalogueAction(operation).catch(() => { button.disabled = false; this.#show('The mention snapshot could not be updated.'); }); }; this.#catalogueView!.append(button); };
         add(this.#catalogue.included ? 'Update included snapshot' : 'Include this review snapshot', 'capture');
         if (this.#catalogue.included) add('Remove this review from mentions', 'remove');
     }
-    #draftBridge(tools: LiveReaderTools, epoch: number): ReviewAgentBridge {
-        return { attach: actions => tools.attach(actions), draft: input => this.#prepareDraft(input, epoch) };
+    #contextBridge(tools: LiveReaderTools, epoch: number): ReviewAgentBridge {
+        return { attach: actions => tools.attach(actions), addContext: input => this.#addContext(input, epoch) };
     }
-    async #prepareDraft(input: ReviewAgentDraft, epoch: number) {
-        const draft = prepareReviewDraft(input), grant = this.#grant;
-        if (!grant || epoch !== this.#epoch || this.#closed || !this.#connected) return;
-        // Capture before waiting. Never attach captured evidence under a replacement grant.
-        const attach = () => { if (grant !== this.#grant || epoch !== this.#epoch || this.#closed) return; this.#context?.setAttachment(draft); };
-        const prepared = await publishReviewDraft(draft, this.message(), attach);
-        if (grant !== this.#grant || epoch !== this.#epoch || this.#closed || !this.#draftView) return;
-        this.#draftView.replaceChildren();
-        const notice = document.createElement('p'); notice.textContent = prepared ? 'An editable draft is ready in chat. Review it before sending.' : 'Copy this draft into chat. You can also attach this captured evidence explicitly.'; this.#draftView.append(notice);
-        if (!prepared) {
-            const text = document.createElement('textarea'); text.value = draft.text; text.setAttribute('aria-label', 'Review discussion draft'); this.#draftView.append(text);
-            const button = document.createElement('button'); button.textContent = 'Attach captured evidence'; button.onclick = attach; this.#draftView.append(button);
-        }
+    async #addContext(input: ReviewAgentContextInput, epoch: number) {
+        const grant = this.#grant;
+        const current = () => grant && grant === this.#grant && epoch === this.#epoch && !this.#closed && this.#connected && input.snapshot.documentGeneration === this.#active?.generation;
+        if (!current() || !this.#context || !this.modelContext()) throw Error('Context sharing is unavailable. Reconnect and try again.');
+        const attachment = await prepareReviewContext(input);
+        if (!current()) throw Error('The review changed. Select the evidence again.');
+        await this.#context.includeAttachment(attachment);
     }
     #resetHost() { const host = this.#host; this.#host = undefined; this.#hostEpoch++; this.#hostNotice = ''; this.#hostRefreshPending = false; this.#hostUpdateRevision = 0; this.#saveRequested = false; this.#hostSave = undefined; return host?.dispose().catch(() => undefined); }
     async #restartHost(result: Extract<ExtensionResult, { status: 'host-resource' }>) {
@@ -390,6 +389,7 @@ export class ExtensionShell {
     }
     #chooser(notice = 'Open a PDF to begin reviewing.', label = 'Choose PDF', cancellable = false) {
         const epoch = ++this.#choiceEpoch;
+        this.controls.className = 'extension-controls'; this.controls.dataset.mode = 'chooser'; this.status.dataset.extensionMode = 'chooser';
         if (!this.#active) this.#resetHost();
         this.#disposeContextPicker?.();this.#disposeContextPicker=undefined;
         this.#show(notice); this.controls.replaceChildren();
@@ -426,7 +426,7 @@ export class ExtensionShell {
             this.#contextView=document.createElement('p');this.controls.append(this.#contextView);this.#contextStatus();
             this.#disposeContextPicker=mountSnapshotContextPicker(this.controls,{
                 request:request=>this.#request(request),
-                include:attachment=>{if(!current()||this.#active||!api)throw Error('Context connection unavailable');this.#context?.setAttachment(attachment);},
+                include:attachment=>{if(!current()||this.#active||!api||!this.#context)throw Error('Context connection unavailable');return this.#context.includeAttachment(attachment);},
             });
         }
         void this.#showRecent(current, addOpenButton);
@@ -492,7 +492,7 @@ export class ExtensionShell {
         this.#show('Opening PDF…');
         this.#unmount = mountCodexProductionReview(this.root, runtime, () => { if (epoch === this.#epoch)
             this.#show('The PDF could not be loaded. Reopen it through the file menu; protected work is retained.'); }, () => { if (epoch === this.#epoch && this.#connected)
-            this.#show(this.#hostNotice); }, this.#draftBridge(this.#readerTools, epoch), snapshot => { if (epoch !== this.#epoch || this.#closed || !this.#connected || snapshot.documentGeneration !== this.#active?.generation) return; this.#snapshot = snapshot; this.#rememberPage(snapshot); this.#context?.publish(snapshot); this.#show(this.#message); }, (title, generation) => { if (epoch !== this.#epoch || this.#closed || generation !== this.#active?.generation) return; this.#title = title; this.#show(this.#message); });
+            this.#show(this.#hostNotice); }, this.#contextBridge(this.#readerTools, epoch), snapshot => { if (epoch !== this.#epoch || this.#closed || !this.#connected || snapshot.documentGeneration !== this.#active?.generation) return; this.#snapshot = snapshot; this.#rememberPage(snapshot); this.#context?.publish(snapshot); this.#show(this.#message); }, (title, generation) => { if (epoch !== this.#epoch || this.#closed || generation !== this.#active?.generation) return; this.#title = title; this.#show(this.#message); });
         this.#liveness?.stop();
         this.#liveness = new PanelLiveness({ renew: async () => { await this.#probe('renew'); }, poll: async () => { await this.#probe('watermark'); }, pollInterval: () => document.hidden ? 5000 : 1000, onState: state => { if (epoch !== this.#epoch || this.#closed)
                 return; if (state === 'reconnecting')
@@ -692,7 +692,7 @@ export class ExtensionShell {
     wake() { void this.#refreshSettings().catch(() => undefined); if (this.#connected && !document.hidden) this.#context?.retry(); this.#liveness?.wake(); }
     disconnected() { if (this.ownsPanel)
         this.#ended(); }
-    #closeControl() {
+    #closeControl(container = this.controls) {
         const button = document.createElement('button');
         button.textContent = 'Close review';
         let closingGrant: string | undefined;
@@ -715,7 +715,7 @@ export class ExtensionShell {
             })().catch(() => notice('Placekeeper could not confirm that the review was released. Keep this panel open and try Close review again. Your protected work is retained.'))
                 .finally(() => { button.disabled = false; });
         };
-        this.controls.append(button);
+        container.append(button);
     }
     async teardown() {
         this.#closed = true;

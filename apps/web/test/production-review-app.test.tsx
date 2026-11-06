@@ -1,4 +1,4 @@
-import { ReviewDiscussionActions } from '../src/review/ReviewDiscussionActions.js';
+import { ContextNoteComposer } from '../src/review/ContextNoteComposer.js';
 import { renderToStaticMarkup } from "react-dom/server";
 import { PdfZoomMode } from "@embedpdf/models";
 import { describe, expect, it, vi } from "vitest";
@@ -1984,8 +1984,21 @@ describe("one production review tree", () => {
   });
 });
 
-it('offers an explicit annotation choice before preparing a discussion draft', () => {
- const onDiscuss = vi.fn();
- const html = renderToStaticMarkup(<ReviewDiscussionActions annotations={[{ id: 'a', page: 3, kind: 'note', text: 'First note' }, { id: 'b', page: 5, kind: 'highlight', text: 'Second note' }]} activeId="a" onDiscuss={onDiscuss} />);
- expect(html.match(/type="checkbox"/g)).toHaveLength(2); expect(html).not.toContain('checked=""'); expect(html).toContain('Choose active annotation'); expect(html).toContain('disabled=""'); expect(html).toContain('Page 3'); expect(onDiscuss).not.toHaveBeenCalled();
+it('renders captured evidence and an editable note before offering to add context', () => {
+  const onAdd = vi.fn();
+  const html = renderToStaticMarkup(<ContextNoteComposer
+    kind="annotations"
+    excerpt="Captured annotation"
+    note="Earlier note"
+    onNoteChange={vi.fn()}
+    onCancel={vi.fn()}
+    onAdd={onAdd}
+  />);
+  expect(html).toContain('Add annotation to chat');
+  expect(html).toContain('Captured annotation');
+  expect(html).toMatch(/<textarea[^>]*>Earlier note<\/textarea>/u);
+  expect(html).toContain('>Cancel</button>');
+  expect(html).toContain('>Add to chat</button>');
+  expect(html).not.toContain('Discuss annotations in chat');
+  expect(onAdd).not.toHaveBeenCalled();
 });

@@ -357,6 +357,7 @@
 .full-annotation-reader__edit,
 .full-annotation-reader__delete,
 .full-annotation-reader__open-reference,
+.full-annotation-reader__add-context,
 .full-annotation-reader__locate {
   width: 32px;
   min-width: 32px;
@@ -374,6 +375,7 @@
 .full-annotation-reader__edit:hover,
 .full-annotation-reader__delete:hover,
 .full-annotation-reader__open-reference:hover,
+.full-annotation-reader__add-context:hover,
 .full-annotation-reader__locate:hover {
   border: 0;
   color: var(--pk-ink);

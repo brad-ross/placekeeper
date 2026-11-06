@@ -240,7 +240,7 @@ export interface ReviewShellSaveModel {
 export interface ReviewShellSelectionModel {
   onSelectionPageLimitExceeded?(): void;
   onCopySelection?(): void;
-  onDiscussSelection?(): void;
+  onAddSelectionContext?(): void;
   selectionUpdate: SelectionUpdate;
   pdfCopyOwner?: PdfCopyOwner;
   pdfCopySnapshots?: PdfCopySnapshots;
@@ -322,7 +322,7 @@ export interface ReviewShellReferenceInspection {
 }
 
 export interface ReviewShellProps {
-  discussionActions?: ReactNode;
+  onAddAnnotationContext?(id: string): void;
   save: ReviewShellSaveModel;
   selection: ReviewShellSelectionModel;
   authoring: ReviewShellAuthoringModel;
@@ -1815,6 +1815,9 @@ export function ReviewShell(props: ReviewShellProps) {
       disabled: props.copyItemLink.disabled?.(item) ?? false,
     };
   };
+  const ownedReaderContextAction = props.onAddAnnotationContext === undefined || annotationReaderOwnedItemId === undefined
+    ? {}
+    : { onAddContext: () => props.onAddAnnotationContext?.(annotationReaderOwnedItemId) };
   // Choosing Open in References closes the request while the destination name
   // resolves; keep that menu shown, busy and inert, until the open proceeds (U5).
   const linkActionBusy = props.workspace.linkActionBusy ?? null;
@@ -2057,7 +2060,6 @@ export function ReviewShell(props: ReviewShellProps) {
         onNavigateBack={() => { commandSurface.invoke('navigate-back'); }}
         onNavigateForward={() => { commandSurface.invoke('navigate-forward'); }}
       />
-      {props.discussionActions}
       <div
         ref={workspaceFraming.stageRef}
         className="review-layout"
@@ -2194,6 +2196,9 @@ export function ReviewShell(props: ReviewShellProps) {
                       const copyLink = copyLinkForItem(item);
                       return {
                         ...(copyLink === undefined ? {} : { copyLink }),
+                        ...(props.onAddAnnotationContext === undefined ? {} : {
+                          onAddContext: () => props.onAddAnnotationContext?.(item.id),
+                        }),
                         onEdit: (trigger: HTMLButtonElement) => {
                           const origin = takeReferenceInspectionForAuthoring(
                             props.referenceInspection!,
@@ -2222,7 +2227,7 @@ export function ReviewShell(props: ReviewShellProps) {
               placement={props.selection.selectionPlacement}
               hidden={!annotationPeeksEnabled || surface.nestedLayer !== 'none'}
               {...(props.selection.onCopySelection === undefined ? {} : { onCopy: props.selection.onCopySelection })}
-              {...(props.selection.onDiscussSelection === undefined ? {} : { onDiscuss: props.selection.onDiscussSelection })}
+              {...(props.selection.onAddSelectionContext === undefined ? {} : { onAddContext: props.selection.onAddSelectionContext })}
               onReplace={startReplacement}
               onDelete={deleteSelection}
               onHighlight={startHighlight}
@@ -2274,6 +2279,7 @@ export function ReviewShell(props: ReviewShellProps) {
               <aside className="annotation-peek annotation-peek--reader">
                 <FullAnnotationReader
                   record={annotationReaderRecord}
+                  {...ownedReaderContextAction}
                   {...(props.onOpenAnnotationReference === undefined ? {} : {
                     onOpenReference: () => props.onOpenAnnotationReference?.(
                       annotationReaderRecord.identity,
@@ -2325,6 +2331,9 @@ export function ReviewShell(props: ReviewShellProps) {
                 selected={!anyWorkspaceOpen && activeItemId === item.id}
                 showSourceReturn={annotationReaderVisibility === 'outside'}
                 {...(copyLink === undefined ? {} : { copyLink })}
+                {...(props.onAddAnnotationContext === undefined ? {} : {
+                  onAddContext: () => props.onAddAnnotationContext?.(item.id),
+                })}
                 onHoldChange={(held) => {
                   peekHeldRef.current = held;
                   if (!held && (anyWorkspaceOpen || activeItemId === undefined) && props.correspondingItemId === undefined) {
@@ -2552,6 +2561,7 @@ export function ReviewShell(props: ReviewShellProps) {
             annotations={annotationReaderSession !== null && annotationReaderRecord !== null ? (
               <FullAnnotationReader
                 record={annotationReaderRecord}
+                {...ownedReaderContextAction}
                 {...(props.onOpenAnnotationReference === undefined ? {} : {
                   onOpenReference: () => props.onOpenAnnotationReference?.(
                     annotationReaderRecord.identity,
@@ -2626,6 +2636,9 @@ export function ReviewShell(props: ReviewShellProps) {
                   ? {}
                   : { onCorrespondenceChange: props.onItemCorrespondenceChange })}
                 {...(props.copyItemLink === undefined ? {} : { copyLinkForItem })}
+                {...(props.onAddAnnotationContext === undefined ? {} : {
+                  onAddContext: (item: ReviewItem) => props.onAddAnnotationContext?.(item.id),
+                })}
                 {...(props.onOpenAnnotationReference === undefined ? {} : {
                   onOpenReference: (item: ReviewItem) => props.onOpenAnnotationReference?.({
                     origin: 'owned', itemId: item.id,

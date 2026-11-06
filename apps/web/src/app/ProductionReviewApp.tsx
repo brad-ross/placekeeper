@@ -1,5 +1,5 @@
-import { ReviewDiscussionActions } from '../review/ReviewDiscussionActions.js';
-import { reviewAgentSearchResult, type ReviewAgentBridge, type ReviewAgentActions } from '../host/review-agent-bridge.js';
+import { ContextNoteComposer } from '../review/ContextNoteComposer.js';
+import { reviewAgentSearchResult, type ReviewAgentBridge, type ReviewAgentActions, type ReviewAgentContextInput } from '../host/review-agent-bridge.js';
 import { reviewContextSnapshot, type ReviewContextSnapshot } from '../host/review-context-snapshot.js';
 import type { PlacekeeperLinkLocation } from "../../../../packages/core/src/placekeeper-link.js";
 import { pdfNavigationTargetFromPlacekeeperLocation, type PdfNavigationTarget } from '../pdf/pdf-navigation-target.js';
@@ -1581,6 +1581,65 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       });
     },
   };
+  type ContextCapture = {
+    readonly key: string;
+    readonly input: ReviewAgentContextInput;
+    readonly excerpt: string;
+  };
+  const [contextCapture, setContextCapture] = useState<ContextCapture | null>(null);
+  const [contextNote, setContextNote] = useState('');
+  const contextNotes = useRef(new Map<string, string>());
+  const addContext = props.agentBridge?.addContext;
+  const currentContextSource = (snapshot: ReviewContextSnapshot) => (
+    snapshot.documentGeneration === documentGenerationRef.current
+    && snapshot.source.fileId === stateRef.current.source.fileId
+    && snapshot.source.digest === stateRef.current.source.digest
+  );
+  const contextCaptureIsCurrent = contextCapture !== null
+    && contextCapture.input.snapshot.documentGeneration === state.workflow.documentGeneration
+    && currentContextSource(contextCapture.input.snapshot);
+  useEffect(() => {
+    setContextCapture(null);
+    contextNotes.current.clear();
+  }, [sourceIdentity, state.workflow.documentGeneration]);
+
+  const openContextComposer = (annotationId?: string) => {
+    const actions = liveAgentActions.current;
+    if (!actions) return;
+    try {
+      const snapshot = actions.snapshot();
+      let capture: ContextCapture;
+      if (annotationId === undefined) {
+        const selection = selectionUpdateRef.current;
+        if (selection.kind !== 'reliable'
+          || currentAnnotationSurface(selection.surface)?.kind !== 'main'
+          || snapshot.selection === null
+          || snapshot.selection.text !== selection.anchor.quote) {
+          throw Error('Selection unavailable');
+        }
+        const { pages, text } = snapshot.selection;
+        capture = {
+          key: JSON.stringify(['selection', pages, text]),
+          input: { kind: 'selection', snapshot },
+          excerpt: text,
+        };
+      } else {
+        const annotation = snapshot.annotations.find(({ id }) => id === annotationId);
+        if (annotation === undefined) throw Error('Annotation unavailable');
+        capture = {
+          key: JSON.stringify(['annotation', annotation.id]),
+          input: { kind: 'annotations', snapshot, annotationIds: [annotation.id] },
+          excerpt: annotation.text || `Page ${annotation.page}`,
+        };
+      }
+      setContextNote(contextNotes.current.get(capture.key) ?? '');
+      setContextCapture(capture);
+    } catch {
+      setCommandError(annotationId === undefined
+        ? 'Select text in the current PDF first.'
+        : 'The annotation is unavailable in the current PDF.');
+    }
+  };
   useEffect(() => {
     if (!props.agentBridge || !agentReady) return;
     const generation = state.workflow.documentGeneration;
@@ -2685,7 +2744,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     >
       <NativePdfSelectionBridge owner={pdfCopyOwner} snapshots={pdfCopySnapshots} />
       <ReviewShell
-        {...(props.agentBridge?.draft === undefined || !agentReady ? {} : { discussionActions: <ReviewDiscussionActions key={state.workflow.documentGeneration} annotations={reviewContextSnapshot({ state, title: pageTitle, page: viewerState.currentPage, pageCount: viewerState.totalPages, selection: selectionUpdate, selectionIsCurrent: false }).annotations} {...(activeItemId === undefined ? {} : { activeId: activeItemId })} onDiscuss={ids => { try { const snapshot = liveAgentActions.current!.snapshot(); void props.agentBridge!.draft!({ kind: 'annotations', snapshot, annotationIds: [...ids] }).catch(() => setCommandError('The discussion draft could not be prepared.')); } catch { setCommandError('Wait for the current PDF before discussing annotations.'); } }} /> })}
+        {...(addContext === undefined || !agentReady ? {} : { onAddAnnotationContext: openContextComposer })}
         state={state}
         {...(props.activeAuthoringDraftIds === undefined ? {} : {
           activeAuthoringDraftIds: props.activeAuthoringDraftIds,
@@ -2835,7 +2894,10 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
         selection={{
           onSelectionPageLimitExceeded: () => setCommandError(PDF_SELECTION_PAGE_LIMIT_MESSAGE),
           onCopySelection: copyMainSelectionFromPalette,
-          ...(props.agentBridge?.draft === undefined || !agentReady ? {} : { onDiscussSelection: () => { try { const snapshot = liveAgentActions.current!.snapshot(); void props.agentBridge!.draft!({ kind: 'selection', snapshot }).catch(() => setCommandError('The discussion draft could not be prepared.')); } catch { setCommandError('Select text in the current PDF first.'); } } }),
+          ...(addContext === undefined || !agentReady || selectionUpdate.kind !== 'reliable'
+            || currentAnnotationSurface(selectionUpdate.surface)?.kind !== 'main' ? {} : {
+              onAddSelectionContext: () => openContextComposer(),
+            }),
           pdfCopyOwner,
           pdfCopySnapshots,
           pdfCopyOwnerIndicatorVisible,
@@ -3175,6 +3237,25 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       >
         {viewer}
       </ReviewShell>
+      {addContext === undefined || !contextCaptureIsCurrent ? null : <ContextNoteComposer
+        key={contextCapture.key}
+        kind={contextCapture.input.kind}
+        excerpt={contextCapture.excerpt.length > 220
+          ? `${contextCapture.excerpt.slice(0, 220)}…`
+          : contextCapture.excerpt}
+        note={contextNote}
+        onNoteChange={(note) => {
+          contextNotes.current.set(contextCapture.key, note);
+          setContextNote(note);
+        }}
+        onCancel={() => setContextCapture(null)}
+        onAdd={async () => {
+          if (!currentContextSource(contextCapture.input.snapshot)) throw Error('Document changed');
+          const note = contextNote.trim();
+          await addContext({ ...contextCapture.input, ...(note === '' ? {} : { note }) });
+          setContextCapture(current => current === contextCapture ? null : current);
+        }}
+      />}
       {annotationExport.request === null ? null : <ExportAnnotationDialog
         annotationName={state.annotationName}
         pending={annotationExport.pending}

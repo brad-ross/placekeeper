@@ -195,3 +195,51 @@
   cursor: default;
   opacity: .35;
 }
+
+.context-note-composer {
+  width: min(380px, calc(100vw - 24px));
+  max-height: calc(100dvh - 24px);
+  padding: 0;
+  border: 0;
+  border-radius: 17px;
+  color: var(--review-ink-primary);
+  background: var(--review-surface-panel);
+  box-shadow: 0 12px 48px #00000024;
+}
+
+.context-note-composer::backdrop {
+  background: #0003;
+}
+
+.context-note-composer .compact-editorial-modal__description {
+  overflow-wrap: anywhere;
+}
+
+.context-note-composer label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 13px;
+}
+
+.context-note-composer label span {
+  color: var(--review-ink-muted);
+}
+
+.context-note-composer textarea {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 76px;
+  padding: 8px;
+  resize: vertical;
+  border: 1px solid var(--review-border-strong);
+  border-radius: 8px;
+  color: inherit;
+  background: var(--review-surface-panel);
+  font: inherit;
+}
+
+.context-note-composer [role="alert"] {
+  margin: 8px 0 0;
+  font-size: 13px;
+}

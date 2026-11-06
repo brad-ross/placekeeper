@@ -47,6 +47,9 @@ export class ExtensionContextCoordinator {
   #preferences: ExtensionContextPreferences = { backgroundContext: true, selectionSharing: true };
   #paused = false;
   #attachments = new Map<string, Block>();
+  #confirmedAttachments = new Map<string, Block>();
+  #submitted: Map<string, Block> | undefined;
+  #beforeUpdate: (() => Promise<void>) | undefined;
   #removed = new Set<string>();
   #foreign: Block[] = [];
   #structured: Record<string, unknown> = {};
@@ -59,14 +62,16 @@ export class ExtensionContextCoordinator {
   #disposed = false;
   #acknowledged = new Map<string, string>();
   #status: ExtensionContextStatus;
-  constructor(readonly api: OpenAIModelContext | undefined, readonly onStatus: (status: ExtensionContextStatus) => void = () => {}, options: { readonly freshInvocation?: boolean } = {}) {
+  #inclusions: { revision: number; id: string; block: Block; resolve(): void; reject(error: Error): void }[] = [];
+  constructor(readonly api: OpenAIModelContext | undefined, readonly onStatus: (status: ExtensionContextStatus) => void = () => {}, options: { readonly freshInvocation?: boolean; readonly beforeUpdate?: () => Promise<void> } = {}) {
+    this.#beforeUpdate = options.beforeUpdate;
     this.#status = api ? 'paused' : 'unsupported';
     const initial = api?.getCurrent();
     this.#paused = initial == null && options.freshInvocation !== true;
     if (initial) {
       this.#foreign = (initial.content ?? []).filter(block => !managed(block));
       this.#structured = initial.structuredContent ?? {};
-      for (const block of initial.content ?? []) { const id = uri(block); if (!id || !managed(block)) continue; this.#known.add(id); if (id.startsWith(attachmentPrefix)) this.#attachments.set(id, block); }
+      for (const block of initial.content ?? []) { const id = uri(block); if (!id || !managed(block)) continue; this.#known.add(id); if (id.startsWith(attachmentPrefix)) { this.#attachments.set(id, block); this.#confirmedAttachments.set(id, block); } }
       this.#paused = options.freshInvocation !== true && !this.#known.has(backgroundContextUri);
     }
   }
@@ -79,9 +84,47 @@ export class ExtensionContextCoordinator {
   enableBackground() { this.#paused = false; this.#removed.delete(backgroundContextUri); this.#change(); }
   setAttachment(attachment: ExtensionContextAttachment) {
     const id = attachmentPrefix + encodeURIComponent(attachment.id);
-    this.#removed.delete(id); this.#attachments.set(id, { ...resource(id, attachment.title.slice(0, 160), attachment.kind === 'snapshot' ? snapshotAttachmentText(attachment.text) : attachment.text.length <= 6000 ? attachment.text : `${attachment.text.slice(0, 5600)}\n[Truncated attachment: showing 5600 of ${attachment.text.length} characters. Full text is in the editable or copyable discussion draft.]`), _meta: { 'openai/group': { title: attachment.title.slice(0, 160) } } }); this.#change();
+    this.#removed.delete(id); this.#attachments.set(id, { ...resource(id, attachment.title.slice(0, 160), attachment.kind === 'snapshot' ? snapshotAttachmentText(attachment.text) : attachment.text.length <= 6000 ? attachment.text : `${attachment.text.slice(0, 5600)}\n[Truncated attachment: showing 5600 of ${attachment.text.length} characters. Omitted content is not attached.]`), _meta: { 'openai/group': { title: attachment.title.slice(0, 160) } } }); this.#change();
   }
-  removeAttachment(id: string) { const key = attachmentPrefix + encodeURIComponent(id); this.#attachments.delete(key); this.#removed.add(key); this.#change(); }
+  includeAttachment(attachment: ExtensionContextAttachment): Promise<void> {
+    if (!this.api || this.#disposed) return Promise.reject(Error('Context attachments are unavailable in this host.'));
+    this.setAttachment(attachment);
+    if (this.#status === 'unavailable') this.#change(true);
+    if (this.#sentRevision >= this.#revision && this.#status === 'available') return Promise.resolve();
+    const id = attachmentPrefix + encodeURIComponent(attachment.id);
+    return new Promise((resolve, reject) => this.#inclusions.push({ revision: this.#revision, id, block: this.#attachments.get(id)!, resolve, reject }));
+  }
+  #settleInclusions(revision: number, delivered: boolean) {
+    let rolledBack = false;
+    this.#inclusions = this.#inclusions.filter(waiter => {
+      const retained = !this.#disposed && this.#attachments.get(waiter.id) === waiter.block && !this.#removed.has(waiter.id);
+      if (retained && waiter.revision > revision) return true;
+      if (retained && delivered) waiter.resolve();
+      else {
+        if (retained) {
+          const confirmed = this.#confirmedAttachments.get(waiter.id);
+          if (confirmed === undefined) this.#attachments.delete(waiter.id);
+          else this.#attachments.set(waiter.id, confirmed);
+          rolledBack = true;
+        }
+        waiter.reject(Error('This context could not be attached. Try again.'));
+      }
+      return false;
+    });
+    // Rollback corrects the desired state without scheduling an automatic retry.
+    if (rolledBack) this.#desiredKey = this.#contextKey();
+  }
+  #remove(id: string) {
+    this.#attachments.delete(id);
+    this.#confirmedAttachments.delete(id);
+    this.#submitted?.delete(id);
+    this.#removed.add(id);
+  }
+  removeAttachment(id: string) {
+    this.#remove(attachmentPrefix + encodeURIComponent(id));
+    this.#settleInclusions(-1, false);
+    this.#change();
+  }
   /** Call only for actual context notifications, not unrelated host theme/mode events. */
   reconcile(state: OpenAIModelContextHostState | undefined) {
     if (state === undefined || this.#disposed) return;
@@ -89,9 +132,21 @@ export class ExtensionContextCoordinator {
     if (state && this.#acknowledged.get(state.updateId) === JSON.stringify([state.content ?? [], state.structuredContent ?? {}])) return;
     const blocks = state?.content ?? [];
     const present = new Set(blocks.map(uri).filter((id): id is string => id !== undefined));
-    for (const id of this.#known) if (!present.has(id)) { this.#removed.add(id); this.#attachments.delete(id); if (id === backgroundContextUri) this.#paused = true; }
-    if (state === null || blocks.length === 0 && Object.keys(state.structuredContent ?? {}).length === 0) { this.#paused = true; this.#attachments.clear(); }
+    // A notification showing a newly submitted group can carry removals from
+    // that same write. A notification about previously known groups alone
+    // cannot establish that the host ever saw the newly submitted groups.
+    if (this.#submitted && [...present].some(id => !this.#known.has(id) && this.#submitted?.has(id))) {
+      for (const id of this.#submitted.keys()) this.#known.add(id);
+    }
+    for (const id of this.#known) if (!present.has(id)) { this.#remove(id); if (id === backgroundContextUri) this.#paused = true; }
+    if (state === null || blocks.length === 0 && Object.keys(state.structuredContent ?? {}).length === 0) {
+      this.#paused = true;
+      this.#attachments.clear();
+      this.#confirmedAttachments.clear();
+      this.#submitted?.clear();
+    }
     for (const block of blocks) { const id = uri(block); if (id && managed(block)) this.#known.add(id); }
+    this.#settleInclusions(-1, false);
     this.#foreign = blocks.filter(block => !managed(block));
     this.#structured = state?.structuredContent ?? {};
     const desiredIds = new Set(this.#blocks().map(uri));
@@ -111,8 +166,9 @@ export class ExtensionContextCoordinator {
     for (const [id, block] of this.#attachments) if (!this.#removed.has(id)) blocks.push(block);
     return blocks;
   }
+  #contextKey() { return JSON.stringify([this.#blocks(), this.#structured]); }
   #change(force = false) {
-    const key = JSON.stringify([this.#blocks(), this.#structured]);
+    const key = this.#contextKey();
     if (!force && key === this.#desiredKey) return;
     this.#desiredKey = key;
     this.#revision++;
@@ -127,19 +183,45 @@ export class ExtensionContextCoordinator {
   }
   async #flush() {
     if (!this.api || this.#disposed || this.#running || this.#sentRevision === this.#revision) return;
-    this.#running = true;
     const revision = this.#revision, blocks = this.#blocks(), structuredContent = this.#structured;
-    for (const block of blocks) { const id = uri(block); if (id && managed(block)) this.#known.add(id); }
     const sharing = blocks.some(managed);
+    if (this.#sentRevision < 0 && !sharing && this.#known.size === 0) return;
+    this.#running = true;
     if (sharing) this.#notify('publishing');
     try {
+      if (this.#beforeUpdate) await this.#beforeUpdate();
+      if (this.#disposed || revision !== this.#revision) return;
+      this.#submitted = new Map();
+      for (const block of blocks) {
+        const id = uri(block);
+        if (id && managed(block)) this.#submitted.set(id, block);
+      }
       const result = await this.api.update({ content: blocks, structuredContent });
       if (this.#disposed) return;
-      if (result) { this.#acknowledged.set(result.updateId, JSON.stringify([blocks, structuredContent])); if (this.#acknowledged.size > 32) this.#acknowledged.delete(this.#acknowledged.keys().next().value!); }
+      if (result) {
+        for (const [id, block] of this.#submitted) {
+          this.#known.add(id);
+          if (id.startsWith(attachmentPrefix)) this.#confirmedAttachments.set(id, block);
+        }
+        this.#acknowledged.set(result.updateId, JSON.stringify([blocks, structuredContent]));
+        if (this.#acknowledged.size > 32) this.#acknowledged.delete(this.#acknowledged.keys().next().value!);
+      }
       this.#sentRevision = revision;
+      this.#settleInclusions(revision, !!result);
       if (revision === this.#revision) this.#notify(sharing ? result ? 'available' : 'unavailable' : 'paused');
-    } catch { if (!this.#disposed && revision === this.#revision) this.#notify('unavailable'); this.#sentRevision = revision; }
-    finally { this.#running = false; if (!this.#disposed && revision !== this.#revision) { this.#scheduled = true; queueMicrotask(() => { this.#scheduled = false; void this.#flush(); }); } }
+    } catch {
+      if (this.#disposed || this.#submitted === undefined && revision !== this.#revision) return;
+      this.#sentRevision = revision;
+      this.#settleInclusions(revision, false);
+      if (revision === this.#revision) this.#notify('unavailable');
+    } finally {
+      this.#submitted = undefined;
+      this.#running = false;
+      if (!this.#disposed && revision !== this.#revision) {
+        this.#scheduled = true;
+        queueMicrotask(() => { this.#scheduled = false; void this.#flush(); });
+      }
+    }
   }
-  dispose() { this.#disposed = true; }
+  dispose() { this.#disposed = true; this.#settleInclusions(-1, false); }
 }

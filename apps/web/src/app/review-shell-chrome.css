@@ -44,10 +44,6 @@
   line-height: 1.5;
 }
 
-.review-shell:has(> .review-discussion-actions) {
-  grid-template-rows: auto auto minmax(0, 1fr);
-}
-
 .review-transition-announcement {
   position: absolute;
   width: 1px;
@@ -551,30 +547,4 @@ body:has(.electron-review-shell) .top-bar-menu__surface {
 
 .electron-review-shell [data-review-chrome] :is(input, textarea, [contenteditable="true"]) {
   user-select: text;
-}
-
-.review-discussion-actions {
-  justify-self: end;
-  max-width: min(26rem, calc(100% - 2rem));
-  margin: .375rem 1rem;
-  padding: .375rem .5rem;
-  border: 1px solid var(--review-border);
-  border-radius: .5rem;
-  background: var(--review-surface-panel);
-  overflow-wrap: anywhere;
-}
-
-.review-discussion-actions summary {
-  cursor: pointer;
-}
-
-.review-discussion-actions fieldset {
-  min-width: 0;
-  max-height: min(16rem, 30dvh);
-  overflow: auto;
-}
-
-.review-discussion-actions label {
-  display: block;
-  margin-block: .5rem;
 }
