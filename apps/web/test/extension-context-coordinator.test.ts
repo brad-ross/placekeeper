@@ -1,14 +1,17 @@
 import { expect, it, vi } from 'vitest';
+import type { DocumentContextMember, DocumentContextPublicationStatus } from '../src/host/document-in-context.js';
 import { ExtensionContextCoordinator, backgroundContextUri } from '../src/host/extension-context-coordinator.js';
 import type { ReviewContextSnapshot } from '../src/host/review-context-snapshot.js';
 const snapshot = (page = 1, generation = 1): ReviewContextSnapshot => ({ documentGeneration: generation, reviewRevision: 2, title: 'PDF', source: { fileId: '/private/secret.pdf', digest: 'digest' }, page, pageCount: 10, selection: null, annotations: [] });
 const tick = async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); };
-function setup(initial?: any, freshInvocation = initial === undefined) {
+function setup(initial?: any, freshInvocation = initial === undefined, onDocumentStatus?: (member: DocumentContextMember, status: DocumentContextPublicationStatus) => void) {
  let resolve!: (value: any) => void;
  let reject!: (reason: Error) => void;
  const calls: any[] = [];
  const api = { getCurrent: () => initial, update: vi.fn((value: any) => { calls.push(value); return new Promise<any>((done, fail) => { resolve = done; reject = fail; }); }) };
- const coordinator = new ExtensionContextCoordinator(api, undefined, { freshInvocation });
+ const coordinator = new ExtensionContextCoordinator(api, undefined, {
+   freshInvocation, ...(onDocumentStatus === undefined ? {} : { onDocumentStatus }),
+ });
  return { coordinator, calls, ack: (updateId = 'ack') => resolve({ updateId }), reject: () => reject(Error('offline')), noAck: () => resolve(null) };
 }
 it('coalesces rapid pages and bounds untrusted accepted snapshots without source paths', async () => {
@@ -230,4 +233,126 @@ it('retains a submitted note when a host notification only shows previously know
  expect(f.coordinator.attachments).toEqual(['note']);
  expect(f.calls.at(-1).content[0]).toEqual(foreign);
  expect(JSON.stringify(f.calls.at(-1))).toContain('pending note');
+});
+
+const documentMember = (generation = 1) => ({
+ sourceKey: 'admitted-source', generation, digest: `digest-${generation}`, title: 'Complete paper',
+ blob: btoa(`%PDF-1.7\ncomplete version ${generation}\n%%EOF`),
+});
+const pdfBlocks = (payload: { content: any[] }) => payload.content.filter(block => block.resource?.mimeType === 'application/pdf');
+
+it('acknowledges only the current PDF and retains its status during review-only writes', async () => {
+ const onDocumentStatus = vi.fn();
+ const f = setup(undefined, true, onDocumentStatus);
+ f.coordinator.publish(snapshot());
+ await tick(); f.ack('background'); await tick();
+ expect(onDocumentStatus).not.toHaveBeenCalled();
+
+ const first = documentMember();
+ f.coordinator.setDocument(first);
+ await tick();
+ const second = documentMember(2);
+ f.coordinator.setDocument(second);
+ f.ack('old-pdf'); await tick();
+ expect(onDocumentStatus.mock.calls).toEqual([[first, 'publishing'], [second, 'publishing']]);
+ expect(pdfBlocks(f.calls.at(-1))).toHaveLength(1);
+ expect(pdfBlocks(f.calls.at(-1))[0].resource.blob).toBe(second.blob);
+ f.ack('current-pdf'); await tick();
+ expect(onDocumentStatus).toHaveBeenLastCalledWith(second, 'available');
+
+ f.coordinator.publish(snapshot(4, 2));
+ await tick();
+ expect(pdfBlocks(f.calls.at(-1))[0]).toBe(pdfBlocks(f.calls.at(-2))[0]);
+ f.reject(); await tick();
+ expect(onDocumentStatus).toHaveBeenCalledTimes(3);
+});
+
+it('replaces a declined PDF without disturbing captured or foreign context', async () => {
+ const foreign = { type: 'text', text: 'keep foreign context' };
+ const structuredContent = { keep: 'foreign data' };
+ const onDocumentStatus = vi.fn();
+ const f = setup({ updateId: 'foreign', content: [foreign], structuredContent }, true, onDocumentStatus);
+ f.coordinator.publish(snapshot());
+ f.coordinator.setDocument(documentMember());
+ await tick(); f.ack('first'); await tick();
+
+ const current = documentMember(2);
+ f.coordinator.setDocument(current);
+ const captured = f.coordinator.includeAttachment({ id: 'note', title: 'Note', text: 'keep captured context' });
+ await tick(); f.ack(''); await tick();
+ expect(onDocumentStatus).toHaveBeenLastCalledWith(current, 'unavailable');
+ const cleaned = f.calls.at(-1);
+ expect(pdfBlocks(cleaned)).toEqual([]);
+ expect(cleaned.content[0]).toEqual(foreign);
+ expect(cleaned.structuredContent).toEqual(structuredContent);
+ expect(JSON.stringify(cleaned)).toContain('keep captured context');
+ f.ack('cleaned'); await captured;
+ expect(f.coordinator.status).toBe('available');
+});
+
+it('cancels a pending replacement on host removal and ignores its stale echo', async () => {
+ const onDocumentStatus = vi.fn();
+ const f = setup(undefined, true, onDocumentStatus);
+ f.coordinator.publish(snapshot());
+ f.coordinator.setDocument(documentMember());
+ await tick(); f.ack('first'); await tick();
+ const current = documentMember(2);
+ f.coordinator.setDocument(current);
+ await tick();
+ const submitted = f.calls.at(-1);
+ f.coordinator.reconcile({ updateId: 'removed', ...submitted, content: submitted.content.filter((block: any) => block.resource.mimeType !== 'application/pdf') });
+ f.ack('removed'); await tick();
+ expect(onDocumentStatus).toHaveBeenLastCalledWith(current, 'removed');
+ expect(pdfBlocks(f.calls.at(-1))).toEqual([]);
+ f.ack('cleaned'); await tick();
+ f.coordinator.reconcile({ updateId: 'removed', ...submitted });
+ f.coordinator.publish(snapshot(4));
+ await tick();
+ expect(pdfBlocks(f.calls.at(-1))).toEqual([]);
+ expect(onDocumentStatus).toHaveBeenCalledTimes(4);
+});
+
+it('clears a lingering managed PDF on remount while retaining other host groups', async () => {
+ const previous = setup();
+ previous.coordinator.publish(snapshot());
+ previous.coordinator.setDocument(documentMember());
+ await tick();
+ const onDocumentStatus = vi.fn();
+ const foreignPdf = { type: 'resource', resource: { uri: 'other:///paper.pdf', mimeType: 'application/pdf', blob: documentMember().blob } };
+ const remount = setup({ updateId: 'lingering', content: [...previous.calls[0].content, foreignPdf] }, false, onDocumentStatus);
+ await tick();
+ expect(pdfBlocks(remount.calls[0])).toEqual([foreignPdf]);
+ expect(remount.calls[0].content).toContainEqual(previous.calls[0].content[0]);
+ expect(onDocumentStatus).not.toHaveBeenCalled();
+});
+
+it('cancels the first PDF when a host notification confirms its write with the PDF removed', async () => {
+ const onDocumentStatus = vi.fn();
+ const f = setup(undefined, true, onDocumentStatus);
+ const member = documentMember();
+ f.coordinator.setDocument(member);
+ f.coordinator.publish(snapshot());
+ await tick();
+ const submitted = f.calls[0];
+ f.coordinator.reconcile({ updateId: 'removed-first-pdf', ...submitted, content: [submitted.content[0]] });
+ f.ack('removed-first-pdf'); await tick();
+ expect(onDocumentStatus.mock.calls).toEqual([[member, 'publishing'], [member, 'removed']]);
+ expect(pdfBlocks(f.calls.at(-1))).toEqual([]);
+});
+
+it('omits an accepted PDF once its submission guard finds it no longer current', async () => {
+ const onDocumentStatus = vi.fn();
+ const f = setup(undefined, true, onDocumentStatus);
+ const beforeSubmit = vi.fn().mockResolvedValueOnce(undefined).mockRejectedValueOnce(Error('stale document'));
+ const member = { ...documentMember(), beforeSubmit };
+ f.coordinator.setDocument(member);
+ await tick(); f.ack('first-pdf'); await tick();
+ expect(onDocumentStatus).toHaveBeenLastCalledWith(member, 'available');
+
+ f.coordinator.publish(snapshot(2));
+ await tick();
+ expect(beforeSubmit).toHaveBeenCalledTimes(2);
+ expect(f.calls).toHaveLength(2);
+ expect(pdfBlocks(f.calls.at(-1))).toEqual([]);
+ expect(onDocumentStatus).toHaveBeenLastCalledWith(member, 'unavailable');
 });
