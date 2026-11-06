@@ -66,7 +66,10 @@ export async function callNativeTool(client: NativeServiceClient, name: string, 
 export function createNativeServer(client: NativeServiceClient, shell: string, dependencies: NativeQualificationDependencies = {}): Server {
   // Host caches may outlive an MCP process. New shell bytes need a new address.
   const shellUri = `ui://placekeeper/review-v1-${createHash("sha256").update(shell).digest("hex")}.html`;
-  const tools = [...nativeTools, ...extensionTools].map((tool): Tool => {
+  const displayName = process.env.PLACEKEEPER_EXTENSION_DISPLAY_NAME?.trim();
+  const tools = [...nativeTools, ...extensionTools].map((original): Tool => {
+    const tool = displayName && ["open_pdf", "open_placekeeper"].includes(original.name)
+      ? { ...original, title: displayName } : original;
     const ui = tool._meta?.ui;
     return typeof ui === "object" && ui !== null && "resourceUri" in ui && ui.resourceUri === CODEX_REVIEW_UI_RESOURCE
       ? { ...tool, _meta: { ...tool._meta, ui: { ...ui, resourceUri: shellUri } } }

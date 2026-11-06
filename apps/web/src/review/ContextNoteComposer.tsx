@@ -1,4 +1,5 @@
 import { useId, useLayoutEffect, useRef, useState } from 'react';
+import { ReviewIcon } from './ReviewIcon.js';
 import { MAX_REVIEW_CONTEXT_NOTE_LENGTH } from '../host/review-agent-bridge.js';
 
 interface ContextNoteComposerProps {
@@ -36,7 +37,7 @@ export function ContextNoteComposer({ kind, excerpt, note, onNoteChange, onCance
       if (!submitting.current) onCancel();
     }}
   >
-    <form className="compact-editorial-modal" onSubmit={async (event) => {
+    <form className="comment-composer compact-editorial-modal" onSubmit={async (event) => {
       event.preventDefault();
       if (submitting.current) return;
       submitting.current = true;
@@ -51,29 +52,33 @@ export function ContextNoteComposer({ kind, excerpt, note, onNoteChange, onCance
         setPending(false);
       }
     }}>
-      <header className="compact-editorial-modal__header">
-        <h2 id={titleId}>Add {kind === 'selection' ? 'selection' : 'annotation'} to chat</h2>
-        {excerpt === '' ? null : <p className="compact-editorial-modal__description">{excerpt}</p>}
+      <header className="comment-composer__header compact-editorial-modal__header">
+        <h2 id={titleId}><ReviewIcon name="agent" size={16} /><span>Add {kind === 'selection' ? 'selection' : 'annotation'} to chat</span></h2>
       </header>
-      <div className="compact-editorial-modal__body">
-        <label htmlFor={noteId}>Note <span>(optional)</span></label>
-        <textarea
-          id={noteId}
-          ref={noteRef}
-          value={note}
-          rows={3}
-          maxLength={MAX_REVIEW_CONTEXT_NOTE_LENGTH}
-          readOnly={pending}
-          onChange={(event) => onNoteChange(event.currentTarget.value)}
-        />
+      <div className="comment-composer__body compact-editorial-modal__body">
+        {excerpt === '' ? null : <p className="context-note-composer__excerpt">{excerpt}</p>}
+        <label className="comment-composer__field" htmlFor={noteId}>
+          <span className="sr-only">Note (optional)</span>
+          <textarea
+            className="comment-composer__input"
+            placeholder="Add a note…"
+            id={noteId}
+            ref={noteRef}
+            value={note}
+            rows={3}
+            maxLength={MAX_REVIEW_CONTEXT_NOTE_LENGTH}
+            readOnly={pending}
+            onChange={(event) => onNoteChange(event.currentTarget.value)}
+          />
+        </label>
         {failed ? <p role="alert">Could not add context to chat. Try again.</p> : null}
+        <div className="comment-composer__actions">
+          <button type="button" className="review-button review-button--secondary" disabled={pending} onClick={onCancel}>Cancel</button>
+          <button type="submit" className="review-button review-button--primary" disabled={pending}>
+            {pending ? 'Adding…' : 'Add to chat'}
+          </button>
+        </div>
       </div>
-      <footer className="compact-editorial-modal__footer">
-        <button type="button" className="review-button" disabled={pending} onClick={onCancel}>Cancel</button>
-        <button type="submit" className="review-button review-button--primary" disabled={pending}>
-          {pending ? 'Adding…' : 'Add to chat'}
-        </button>
-      </footer>
     </form>
   </dialog>;
 }

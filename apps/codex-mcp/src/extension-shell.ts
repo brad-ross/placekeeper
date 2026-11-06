@@ -269,10 +269,14 @@ export class ExtensionShell {
         const current = () => !this.#closed && epoch === this.#choiceEpoch;
         const dialog = document.createElement('dialog');
         this.#recoveryDialog = dialog;
-        dialog.className = 'extension-recovery';
+        dialog.className = 'extension-recovery terminal-recovery';
         dialog.setAttribute('aria-labelledby', 'extension-recovery-title');
         dialog.setAttribute('aria-describedby', 'extension-recovery-description');
-        const title = document.createElement('h2');
+        const header = document.createElement('header');
+        header.className = 'terminal-recovery__header';
+        const body = document.createElement('div');
+        body.className = 'terminal-recovery__body';
+        const title = document.createElement('h1');
         title.id = 'extension-recovery-title';
         const available = offer.canRecover || offer.canResume;
         title.textContent = 'Reopen review';
@@ -285,13 +289,18 @@ export class ExtensionShell {
                 : available ? 'Protected review work is available for this PDF.'
                     : 'This review is still open elsewhere. Return to the previous reader or check again after its connection ends.';
         const feedback = document.createElement('p');
-        feedback.className = 'extension-recovery__feedback';
+        feedback.className = 'extension-recovery__feedback terminal-recovery__status';
         feedback.setAttribute('role', 'status');
         const choices = document.createElement('div');
-        choices.className = 'extension-recovery__choices';
+        choices.className = 'terminal-recovery__actions';
         const footer = document.createElement('div');
-        footer.className = 'extension-recovery__footer';
-        dialog.append(title, description, choices, feedback, footer);
+        footer.className = 'terminal-recovery__footer';
+        const footerActions = document.createElement('div');
+        footerActions.className = 'terminal-recovery__footer-actions';
+        header.append(title);
+        body.append(description, choices, feedback);
+        footer.append(footerActions);
+        dialog.append(header, body, footer);
         const buttons: HTMLButtonElement[] = [];
         let pending = false;
         const run = async (request: Extract<ExtensionRequest, { action: 'choose' | 'recheck' }>, progress: string) => {
@@ -336,11 +345,11 @@ export class ExtensionShell {
         };
         const addChoice = (choice: 'recover' | 'resume' | 'fork', label: string, consequence: string) => {
             const row = document.createElement('div');
-            row.className = 'extension-recovery__choice';
+            row.className = 'terminal-recovery__choice';
             const operationId = crypto.randomUUID();
             const request = { action: 'choose', recoveryToken: offer.recoveryToken, choice, operationId } as const;
             const button = action(label, row, () => { void run(request, 'Opening review…'); });
-            if (choice !== 'fork') button.className = 'extension-recovery__primary';
+            if (choice !== 'fork') button.className = 'terminal-recovery__primary';
             const note = document.createElement('p');
             note.id = `extension-recovery-${choice}`;
             note.textContent = consequence;
@@ -351,7 +360,7 @@ export class ExtensionShell {
         if (offer.canRecover) addChoice('recover', 'Resume review', 'Transfer this review here and prevent the previous reader from making further changes.');
         else if (offer.canResume) addChoice('resume', 'Resume review', 'Continue with your existing annotations and protected draft.');
         addChoice('fork', 'Open separate copy', 'Start a separate review and keep the existing work in place.');
-        if (!available) action('Check again', footer, () => {
+        if (!available) action('Check again', footerActions, () => {
             void run({ action: 'recheck', recoveryToken: offer.recoveryToken }, 'Checking the previous connection…');
         });
         const cancel = () => {
@@ -360,7 +369,7 @@ export class ExtensionShell {
             if (this.#active && this.#grant) void this.#apply({ status: 'active', grant: this.#grant, presentation: this.#active });
             else this.#chooser(undefined, undefined, false, true);
         };
-        const cancelButton = action('Cancel', footer, cancel);
+        const cancelButton = action('Cancel', footerActions, cancel);
         cancelButton.autofocus = true;
         dialog.oncancel = event => { event.preventDefault(); cancel(); };
         this.controls.append(dialog);

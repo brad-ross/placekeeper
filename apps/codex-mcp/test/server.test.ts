@@ -47,6 +47,19 @@ describe("packaged native MCP transport", () => {
     try { expect((await client.callTool({ name: "display_review", arguments: { handoff: "h".repeat(43) } })).isError).toBe(true); expect(service.display).not.toHaveBeenCalled(); }
     finally { await client.close(); await server.close(); }
   });
+  it("uses the installed candidate name for file and thread menu entries", async () => {
+    vi.stubEnv("PLACEKEEPER_EXTENSION_DISPLAY_NAME", "Placekeeper — Latest Preview");
+    const server = createNativeServer(fixture(), "<html>preview</html>");
+    const client = new Client({ name: "preview-menu-test", version: "1" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    try {
+      await server.connect(serverTransport); await client.connect(clientTransport);
+      const tools = (await client.listTools()).tools;
+      for (const name of ["open_pdf", "open_placekeeper"]) {
+        expect(tools.find(tool => tool.name === name)?.title).toBe("Placekeeper — Latest Preview");
+      }
+    } finally { await client.close(); await server.close(); vi.unstubAllEnvs(); }
+  });
   it("SDK lists one content-addressed credential-free HTML shell and app calls add no UI resources", async () => {
     const service = fixture(), server = createNativeServer(service, "<html>credential-free</html>");
     const client = new Client({ name: "qualification-test", version: "1" }, { capabilities: { extensions: { "io.modelcontextprotocol/ui": { mimeTypes: [RESOURCE_MIME_TYPE] } } } });

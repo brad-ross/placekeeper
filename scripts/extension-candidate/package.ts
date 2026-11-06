@@ -10,7 +10,7 @@ export async function packageCandidate({ projectRoot = resolve('.'), route = 'ho
   projectRoot = await realpath(projectRoot);
   const opaque = route === 'opaque-resource';
   const name = opaque ? 'placekeeper-extension-candidate-opaque' : 'placekeeper-extension-candidate';
-  const displayName = opaque ? 'Placekeeper Opaque Test' : 'Placekeeper Extension Candidate';
+  const displayName = opaque ? 'Placekeeper Opaque Test' : 'Placekeeper — Latest Preview';
   const marketplace = `${name}-test`;
   const output = resolve(projectRoot, opaque ? 'dist/extension-candidate-opaque' : 'dist/extension-candidate');
   const plugin = join(output, name);
@@ -45,7 +45,7 @@ export async function packageCandidate({ projectRoot = resolve('.'), route = 'ho
     });
   }
   await json(join(runtime, 'package.json'), { type: 'module', private: true });
-  const env = { PLACEKEEPER_DAEMON_IDENTITY: 'development', PLACEKEEPER_MAC_DEVELOPMENT_ROOT: daemonRoot, PLACEKEEPER_MAC_DEVELOPMENT_HTTP_PORT: String(port), PLACEKEEPER_PDFIUM_WASM: join(runtime, 'web/pdfium.wasm') };
+  const env = { PLACEKEEPER_EXTENSION_DISPLAY_NAME: displayName, PLACEKEEPER_DAEMON_IDENTITY: 'development', PLACEKEEPER_MAC_DEVELOPMENT_ROOT: daemonRoot, PLACEKEEPER_MAC_DEVELOPMENT_HTTP_PORT: String(port), PLACEKEEPER_PDFIUM_WASM: join(runtime, 'web/pdfium.wasm') };
   await json(join(plugin, '.mcp.json'), { mcpServers: { [name]: { command: process.execPath, args: [join(runtime, 'codex-mcp/server.js')], env } } });
   await json(join(plugin, '.codex-plugin/plugin.json'), { name, version: '0.0.1', description: 'Isolated production Placekeeper PDF extension candidate for development qualification.', mcpServers: './.mcp.json', interface: { displayName, shortDescription: 'Test the production PDF reader with isolated review storage.' } });
   await json(join(output, '.agents/plugins/marketplace.json'), { name: marketplace, interface: { displayName: `${displayName} Test` }, plugins: [{ name, source: { source: 'local', path: `./${name}` }, policy: { installation: 'AVAILABLE', authentication: 'ON_INSTALL' }, category: 'Productivity' }] });

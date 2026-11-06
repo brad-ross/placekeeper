@@ -8,14 +8,14 @@
 }
 
 /* Recovery uses the same quiet surface and field treatment as save setup. */
-html:has(.terminal-recovery),
-body:has(.terminal-recovery) {
+html:has(.terminal-recovery:not(dialog)),
+body:has(.terminal-recovery:not(dialog)) {
   min-height: 100%;
   margin: 0;
   background: var(--review-surface-canvas, #f7f7f7);
 }
 
-body:has(.terminal-recovery) {
+body:has(.terminal-recovery:not(dialog)) {
   box-sizing: border-box;
   display: grid;
   min-height: 100dvh;

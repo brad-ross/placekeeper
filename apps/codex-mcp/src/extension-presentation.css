@@ -4,7 +4,7 @@ html[data-placekeeper-extension="true"] body {
   color: var(--color-text-primary, #333);
   background: var(--color-background-primary, #fff);
 }
-html[data-placekeeper-extension="true"][data-theme="dark"] :is(#root[data-production-root="true"], .extension-recovery, .top-bar-menu__surface) {
+html[data-placekeeper-extension="true"][data-theme="dark"] :is(#root[data-production-root="true"], .extension-recovery, .extension-controls, #status[data-extension-mode], .top-bar-menu__surface) {
   color-scheme: dark;
   --review-ink-primary: var(--color-text-primary, #eee);
   --review-ink-muted: var(--color-text-secondary, #bbb);
@@ -31,67 +31,51 @@ html[data-placekeeper-extension="true"][data-theme="dark"] :is(#root[data-produc
   gap: 6px;
 }
 .extension-controls[data-mode="review"][data-display-mode="inline"] { position: relative; inset: auto; align-self: flex-end; margin: 4px 12px; }
-.extension-controls button, .extension-recovery button {
+.extension-controls button:not(.terminal-recovery button) {
   min-height: 32px;
   padding: 6px 10px;
-  border: 1px solid var(--color-border-primary, #ddddd7);
-  border-radius: 8px;
-  color: inherit;
-  background: var(--color-background-secondary, #f5f5f2);
-  font: inherit;
+  border: 0;
+  border-radius: var(--review-radius-control);
+  color: var(--review-ink-primary);
+  background: transparent;
+  font: 400 13px/1.4 var(--review-font-ui);
   cursor: pointer;
 }
-.extension-controls button:hover:not(:disabled) { background: var(--color-background-tertiary, #eaeae5); }
+.extension-controls button:not(.terminal-recovery button):hover:not(:disabled) { background: var(--review-surface-interactive); }
 .extension-controls button:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
 .extension-controls button:disabled { opacity: .5; cursor: default; }
 
 /* An inline host sizes the iframe from its contents. Reserve room for the modal. */
 .extension-controls:has(.extension-recovery[open]) { min-height: 360px; }
-.extension-recovery {
-  box-sizing: border-box;
+/* Use the desktop recovery surface; only modal geometry belongs to the host. */
+dialog.extension-recovery {
   width: min(34rem, calc(100% - 2rem));
-  max-height: calc(100dvh - 2rem);
-  padding: 23px;
-  overflow: auto;
+  padding: 0;
   overscroll-behavior: contain;
-  border: 1px solid var(--color-border-primary, #deded9);
-  border-radius: 17px;
-  color: var(--review-ink-primary, var(--color-text-primary, #282824));
-  background: var(--review-surface-panel, var(--color-background-primary, #fff));
-  box-shadow: 0 12px 48px #00000026;
-  font: 400 13px/1.5 system-ui, sans-serif;
 }
-.extension-recovery::backdrop { background: #0005; }
-.extension-recovery h2 { margin: 0 0 8px; font-size: 16px; font-weight: 600; }
-.extension-recovery p { margin: 0; color: var(--review-ink-muted, var(--color-text-secondary, #555550)); }
-.extension-recovery__choices { display: grid; gap: 8px; margin-top: 16px; }
-.extension-recovery__choice {
-  display: grid;
-  grid-template-columns: minmax(0, 10rem) minmax(0, 1fr);
-  align-items: center;
-  gap: 12px;
-  padding: 10px;
-  border-radius: 10px;
-  background: var(--review-surface-subtle, var(--color-background-secondary, #f5f5f2));
-}
-.extension-recovery .extension-recovery__primary { background: #333; color: #fff; }
-.extension-recovery .extension-recovery__primary:hover:not(:disabled) { background: #222; }
-.extension-recovery .extension-recovery__feedback:not(:empty) {
-  margin-top: 12px;
-  padding: 8px 10px;
-  border-radius: 8px;
-  background: var(--review-surface-subtle, var(--color-background-secondary, #f5f5f2));
-}
-.extension-recovery__footer { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+.extension-recovery:not([open]) { display: none; }
+.extension-recovery::backdrop { background: var(--review-backdrop); }
+.extension-recovery__feedback:empty { display: none; }
 @media (max-width: 420px) {
-  .extension-recovery { padding: 16px; }
-  .extension-recovery__choice { grid-template-columns: minmax(0, 1fr); gap: 6px; }
+  .extension-recovery .terminal-recovery__choice { grid-template-columns: minmax(0, 1fr); gap: 6px; }
 }
-@media (pointer: coarse) {
-  .extension-recovery button { min-height: 44px; }
+.extension-controls[data-mode="chooser"] {
+  box-sizing: border-box;
+  width: min(500px, calc(100% - 32px));
+  margin: 16px auto;
+  padding: 20px;
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  border-radius: var(--review-radius-dialog);
+  color: var(--review-ink-primary);
+  background: var(--review-surface-panel);
+  box-shadow: var(--review-shadow-float);
 }
-.extension-controls[data-mode="chooser"] { width: min(500px, calc(100% - 40px)); margin: 24px auto; display: grid; gap: 10px; }
-.extension-controls[data-mode="chooser"] h3 { margin: 20px 0 0; font-size: 14px; }
-.extension-controls[data-mode="chooser"] p { margin: 0; color: var(--color-text-secondary, #777770); }
+.extension-controls[data-mode="chooser"] > button { min-height: 36px; text-align: left; overflow-wrap: anywhere; }
+.extension-controls[data-mode="chooser"] > button:first-child { justify-self: start; padding-inline: 12px; color: #fff; background: #333; }
+.extension-controls[data-mode="chooser"] > button:first-child:hover:not(:disabled) { background: #222; }
+.extension-controls[data-mode="chooser"] h3 { margin: 14px 0 0; font: 500 13px/1.4 var(--review-font-ui); }
+.extension-controls[data-mode="chooser"] p:not(.terminal-recovery p) { margin: 0; color: var(--review-ink-muted); font: 400 12px/1.5 var(--review-font-ui); overflow-wrap: anywhere; }
 #status[data-extension-mode="review"]:not([hidden]) { position: absolute; top: 44px; left: 12px; right: 12px; z-index: 49; border-radius: 8px; border: 1px solid var(--color-border-primary, #deded9); background: var(--color-background-primary, #fff); box-shadow: 0 2px 12px #0000000d; padding: 8px 12px; font-size: 12px; }
-#status[data-extension-mode="chooser"] { padding: 24px 24px 0; text-align: center; font-size: 14px; }
+#status[data-extension-mode="chooser"] { padding: 24px 24px 0; color: var(--review-ink-muted); text-align: center; font: 400 13px/1.5 var(--review-font-ui); }
