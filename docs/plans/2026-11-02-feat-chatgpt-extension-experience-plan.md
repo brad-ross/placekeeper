@@ -9,6 +9,9 @@ execution: code
 
 # Seamless Placekeeper ChatGPT extension experience
 
+> **Final scope, November 6, 2026:** Later user-directed simplification supersedes the original R7–R9 and KTD7 below. Bot actions attach captured selection/annotation context with an optional note; they do not edit the composer or send a message. Current-review and selection context are automatic and respect host removal. Sharing settings, cross-chat mention/snapshot discovery, the snapshot picker, and manual Close review were removed. Normal host teardown/page exit releases ownership; explicit reopen and Recent Documents provide recovery, with Resume / Open Copy on recent cards and Continue / Open Copy in the file-entry dialog. The launcher is centered, including when host context precedes activation. Repeated native New Document / Cancel latency is explicitly deferred: no root cause or fix is claimed. The original design and unit history below remain as planning provenance; the user guide and current qualification summary describe the delivered behavior.
+
+
 ## Goal Capsule
 
 **Objective:** Users can open a PDF directly in ChatGPT, keep reviewing through ordinary interruptions, and ask the chat about the document and navigate it reliably.

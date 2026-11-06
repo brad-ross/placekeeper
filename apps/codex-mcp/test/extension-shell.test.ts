@@ -851,3 +851,14 @@ it('leaves a still-owned recent document in its card without taking over or open
  expect(descendants(f.controls).map(b=>b.textContent).join(' ')).toContain('Still open elsewhere');
  await f.shell.teardown();
 });
+
+it('applies host layout when the chooser arrives after initial host context', async () => {
+    const html = { dataset: {} as Record<string, string>, style: { setProperty: vi.fn() } };
+    (document as any).documentElement = html;
+    const f = fixture(async () => reply({ status: 'recent-reviews', items: [] }));
+    f.shell.hostContextChanged(f.app.getHostContext() as any);
+    await f.shell.receive({ status: 'chooser' });
+    expect(html.dataset.placekeeperExtension).toBe('true');
+    expect(f.controls.dataset.mode).toBe('chooser');
+    await f.shell.teardown();
+});

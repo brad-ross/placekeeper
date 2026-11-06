@@ -59,8 +59,18 @@ dialog.extension-recovery {
 @media (max-width: 420px) {
   .extension-recovery .terminal-recovery__choice { grid-template-columns: minmax(0, 1fr); gap: 6px; }
 }
+html[data-placekeeper-extension="true"] body:has(.extension-controls[data-mode="chooser"]) {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-height: 100dvh;
+  height: auto;
+  margin: 0;
+}
+html[data-placekeeper-extension="true"] body:has(.extension-controls[data-mode="chooser"]) #root { display: none; }
 .extension-controls[data-mode="chooser"] {
   box-sizing: border-box;
+  flex-shrink: 0;
   width: min(500px, calc(100% - 32px));
   margin: 16px auto;
   padding: 20px;

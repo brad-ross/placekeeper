@@ -312,7 +312,8 @@ describe("app-owned extension presentations", () => {
     if (busy.status !== 'busy') throw Error('Expected choice');
     await writeFile(f.pdfPath, "%PDF-1.7\nnew extension source generation\n%%EOF");
     await f.broker.observeLiveDocumentHint({ sessionId: original.sessionId, outputPath: f.pdfPath, hostReason: 'activation' });
-    expect(f.broker.nativeAdmissionScope(original.sessionId)?.documentGeneration).toBe(2);
+    // A filesystem watcher may supersede the explicit observation before it completes.
+    await vi.waitFor(() => expect(f.broker.nativeAdmissionScope(original.sessionId)?.documentGeneration).toBe(2));
     expect(await f.manager.dispatch({ action: 'recheck', recoveryToken: busy.recoveryToken })).toEqual({ status: 'unavailable' });
   });
 
@@ -554,7 +555,8 @@ describe("app-owned extension presentations", () => {
     const rotated = active(await f.manager.resume(previous.grant, operationId));
     await writeFile(f.pdfPath, "%PDF-1.7\nnew extension source generation\n%%EOF");
     await f.broker.observeLiveDocumentHint({ sessionId: original.sessionId, outputPath: f.pdfPath, hostReason: 'activation' });
-    expect(f.broker.nativeAdmissionScope(original.sessionId)?.documentGeneration).toBe(2);
+    // A filesystem watcher may supersede the explicit observation before it completes.
+    await vi.waitFor(() => expect(f.broker.nativeAdmissionScope(original.sessionId)?.documentGeneration).toBe(2));
     expect(f.manager.activityCount()).toBe(0);
     expect(await f.manager.resume(previous.grant, operationId)).toEqual({ status: 'unavailable' });
     expect(await f.manager.dispatch({ action: 'revoke', grant: previous.grant, operationId })).toEqual({ status: 'closed' });

@@ -64,6 +64,7 @@ export class ExtensionShell {
         if (this.#received || this.#closed)
             return true;
         this.#received = true;
+        this.hostContextChanged(this.app.getHostContext?.() ?? {}, false);
         document.defaultView?.addEventListener('pagehide', this.#pageHidden);
         try {
             await this.#apply(result);
