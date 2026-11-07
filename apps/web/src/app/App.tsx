@@ -52,6 +52,8 @@ import {
   OwnedMarkPointerGesture,
   groupOwnedMarkGeometryByPage,
   hitTestOwnedMark,
+  hitTestOwnedMarkHover,
+  type OwnedMarkHoverHit,
 } from '../pdf/owned-mark-hit-test.js';
 import {
   copySelectionUpdateFromEvidence,
@@ -913,11 +915,10 @@ export function App({
       const ownedGesture = new OwnedMarkPointerGesture();
       const clickGesture = new ViewerPrimaryClickGesture();
       const pointerSurfaces = new Map<number, PdfAnnotationSurface>();
-      let hoveredOwned: {
-        readonly id: string;
+      let hoveredOwned: (OwnedMarkHoverHit & {
         readonly pageIndex: number;
         readonly surface: PdfAnnotationSurface;
-      } | undefined;
+      }) | undefined;
       for (const page of document.pages) {
         const pointerId = page.index + 1;
         const pageGeometry = () => ownedGeometryByPageRef.current.get(page.index) ?? [];
@@ -928,26 +929,28 @@ export function App({
           }
         };
         const setHoveredOwned = (
-          id: string | undefined,
+          hit: OwnedMarkHoverHit | undefined,
           surface: PdfAnnotationSurface | null = inputSurface(),
         ) => {
-          if (id !== undefined && surface !== null
-            && hoveredOwned?.id === id
-            && hoveredOwned.pageIndex === page.index
-            && samePdfAnnotationSurface(hoveredOwned.surface, surface)) return;
-          if (hoveredOwned !== undefined) {
+          const previous = hoveredOwned;
+          const sameMark = hit !== undefined && surface !== null
+            && previous?.id === hit.id
+            && previous.pageIndex === page.index
+            && samePdfAnnotationSurface(previous.surface, surface);
+          if (sameMark && previous.direct === hit.direct) return;
+          if (!sameMark && previous !== undefined) {
             publish({
               type: 'owned-mark',
-              value: { id: hoveredOwned.id, phase: 'leave', pageIndex: hoveredOwned.pageIndex },
-            }, hoveredOwned.surface);
+              value: { id: previous.id, phase: 'leave', pageIndex: previous.pageIndex },
+            }, previous.surface);
           }
-          hoveredOwned = id === undefined || surface === null
+          hoveredOwned = hit === undefined || surface === null
             ? undefined
-            : { id, pageIndex: page.index, surface };
-          root()?.setAttribute('data-owned-mark-hovered', id ? 'true' : 'false');
-          if (id) publish({
+            : { ...hit, pageIndex: page.index, surface };
+          root()?.setAttribute('data-owned-mark-hovered', String(hoveredOwned?.direct === true));
+          if (!sameMark && hoveredOwned) publish({
             type: 'owned-mark',
-            value: { id, phase: 'enter', pageIndex: page.index },
+            value: { id: hoveredOwned.id, phase: 'enter', pageIndex: page.index },
           }, surface);
         };
         const clearOwnedPointerInteraction = () => {
@@ -994,7 +997,7 @@ export function App({
               clickGesture.pointerMove(pointerId, event.clientX, event.clientY);
               ownedGesture.pointerMove(pointerId, position);
               setHoveredOwned(
-                hitTestOwnedMark(pageGeometry(), position, pageScale()),
+                hitTestOwnedMarkHover(pageGeometry(), position, pageScale()),
                 surface,
               );
             },

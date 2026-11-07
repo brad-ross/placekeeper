@@ -39,7 +39,7 @@ test.beforeAll(async () => {
 });
 test.afterAll(async () => { await host?.close(); await rm(root, { recursive: true, force: true }); });
 
-async function fixture(page: Page, pageIndex = 0) {
+async function fixture(page: Page, pageIndex = 0, multiline = false) {
   const pdfPath = join(root, `${randomUUID()}.pdf`);
   await writeFile(pdfPath, sourceBytes);
   const launched = await host.open({ pdfPath, fork: true });
@@ -50,8 +50,15 @@ async function fixture(page: Page, pageIndex = 0) {
       width: phraseWidth(quote), height: 18 };
     return { pageIndex, quote, prefix, suffix: '', rect, segmentRects: [rect], reliable: true };
   };
+  const firstHighlight = anchor(0, '', multiline ? lines[0][0] : 'Local comparisons');
+  const nextLine = anchor(1, '', 'We hold');
   for (const command of [
-    (state: ReviewState) => addHighlight(state, anchor(0, '', 'Local comparisons')),
+    (state: ReviewState) => addHighlight(state, multiline ? {
+      ...firstHighlight,
+      quote: `${firstHighlight.quote}\n${nextLine.quote}`,
+      rect: { ...firstHighlight.rect, height: nextLine.rect.y + nextLine.rect.height - firstHighlight.rect.y },
+      segmentRects: [firstHighlight.rect, nextLine.rect],
+    } : firstHighlight),
     (state: ReviewState) => addHighlight(state, anchor(1, 'We hold ', 'market composition'), 'Which comparison group?'),
     (state: ReviewState) => addDelete(state, anchor(2, 'This ', 'necessarily')),
     (state: ReviewState) => addReplace(state, anchor(3, 'This implies ', 'a unique equilibrium.'), 'a local equilibrium.'),
@@ -67,7 +74,7 @@ async function fixture(page: Page, pageIndex = 0) {
   // Marks and their focus proxies also carry data-page-index; pick the page itself.
   const pdfPage = page.locator(`.pdf-workspace:not(.pdf-workspace--reference) .pdf-workspace__page[data-page-index="${pageIndex}"]`);
   await expect(pdfPage.locator(':scope > img')).toBeVisible({ timeout: 15000 });
-  await expect(pdfPage.locator('[data-owned-mark]')).toHaveCount(6);
+  await expect(pdfPage.locator('[data-owned-mark]')).toHaveCount(multiline ? 7 : 6);
   return { pdfPage, current, sessionId: launched.sessionId };
 }
 
@@ -142,6 +149,32 @@ test('marks preserve color through hover, activation, zoom, and comment removal'
   expect(await selected.evaluate((element) => ({ height: (element as HTMLElement).style.height, transform: (element as HTMLElement).style.transform }))).toEqual(originalBoxStyle);
   expect((await paint(selected)).underline).toBe('none');
   await expect(selected).toHaveCSS('background-color', 'rgba(245, 196, 35, 0.36)');
+});
+
+test('multi-line highlight hover stays active in the gap between lines', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 950 });
+  const { pdfPage } = await fixture(page, 0, true);
+  const workspace = page.locator('.pdf-workspace:not(.pdf-workspace--reference)');
+  const highlight = pdfPage.locator('[data-owned-mark="highlight"][data-has-attached-text="false"]');
+  await expect(highlight).toHaveCount(2);
+  const first = (await highlight.first().boundingBox())!;
+  const second = (await highlight.last().boundingBox())!;
+  const firstBottom = first.y + first.height;
+  expect(firstBottom).toBeLessThan(second.y);
+  const x = first.x + Math.min(first.width, second.width) / 2;
+  const gapY = (firstBottom + second.y) / 2;
+
+  await page.mouse.move(x, first.y + first.height / 2);
+  await expect(highlight.first()).toHaveAttribute('data-corresponding', 'true');
+  await expect(workspace).toHaveAttribute('data-owned-mark-hovered', 'true');
+  await page.mouse.move(x, gapY);
+  await expect(highlight.first()).toHaveAttribute('data-corresponding', 'true');
+  await expect(highlight.last()).toHaveAttribute('data-corresponding', 'true');
+  await expect(workspace).toHaveAttribute('data-owned-mark-hovered', 'false');
+  await page.mouse.move(x, second.y + second.height / 2);
+  await expect(workspace).toHaveAttribute('data-owned-mark-hovered', 'true');
+  await page.mouse.move(first.x - 8, gapY);
+  await expect(highlight.first()).toHaveAttribute('data-corresponding', 'false');
 });
 
 test('the below-text insertion caret opens its detail without changing the PDF wording', async ({ page }) => {

@@ -1,3 +1,4 @@
+import { boundingRectOrEmpty } from '@embedpdf/models';
 import type { ReviewAnnotation } from '../../../../packages/core/src/pdf-writer.js';
 import { reviewItemIdForAnnotation } from '../review/annotation-projection.js';
 
@@ -15,6 +16,7 @@ export interface OwnedMarkGeometry {
     readonly width: number;
     readonly height: number;
   }[];
+  readonly hoverBounds?: OwnedMarkGeometry['rects'][number];
   readonly paintOrder: number;
   readonly insertion?: boolean;
 }
@@ -44,7 +46,14 @@ export function groupOwnedMarkGeometry(
       ...(annotation.kind === 'insert' ? { insertion: true } : {}),
     });
   });
-  return [...groups.values()];
+  return [...groups.values()].map((group) => {
+    if (group.insertion || group.rects.length < 2) return group;
+    const bounds = boundingRectOrEmpty(group.rects.map(({ x, y, width, height }) => ({
+      origin: { x, y },
+      size: { width, height },
+    })));
+    return { ...group, hoverBounds: { ...bounds.origin, ...bounds.size } };
+  });
 }
 
 export function groupOwnedMarkGeometryByPage(
@@ -69,25 +78,13 @@ function contains(rect: OwnedMarkGeometry['rects'][number], point: OwnedMarkPoin
     point.x <= rect.x + rect.width && point.y <= rect.y + rect.height;
 }
 
-export function hitTestOwnedMark(
+function findOwnedMark(
   groups: readonly OwnedMarkGeometry[],
-  point: OwnedMarkPoint,
-  scale = 1,
+  matches: (group: OwnedMarkGeometry) => boolean,
 ): string | undefined {
   let best: OwnedMarkGeometry | undefined;
   for (const group of groups) {
-    if (!group.rects.some((rect) => {
-      if (!group.insertion) return contains(rect, point);
-      // The visible caret extends below and beside the original narrow anchor.
-      // Keep its hit area usable at every zoom without changing saved geometry.
-      const padding = 7 / (Number.isFinite(scale) && scale > 0 ? scale : 1);
-      return contains({
-        x: rect.x - padding,
-        y: rect.y,
-        width: rect.width + padding * 2,
-        height: rect.height + padding,
-      }, point);
-    })) continue;
+    if (!matches(group)) continue;
     if (
       best === undefined ||
       group.paintOrder > best.paintOrder ||
@@ -95,6 +92,44 @@ export function hitTestOwnedMark(
     ) best = group;
   }
   return best?.id;
+}
+
+export function hitTestOwnedMark(
+  groups: readonly OwnedMarkGeometry[],
+  point: OwnedMarkPoint,
+  scale = 1,
+): string | undefined {
+  return findOwnedMark(groups, (group) => group.rects.some((rect) => {
+    if (!group.insertion) return contains(rect, point);
+    // The visible caret extends below and beside the original narrow anchor.
+    // Keep its hit area usable at every zoom without changing saved geometry.
+    const padding = 7 / (Number.isFinite(scale) && scale > 0 ? scale : 1);
+    return contains({
+      x: rect.x - padding,
+      y: rect.y,
+      width: rect.width + padding * 2,
+      height: rect.height + padding,
+    }, point);
+  }));
+}
+
+export interface OwnedMarkHoverHit {
+  readonly id: string;
+  readonly direct: boolean;
+}
+
+export function hitTestOwnedMarkHover(
+  groups: readonly OwnedMarkGeometry[],
+  point: OwnedMarkPoint,
+  scale: number,
+): OwnedMarkHoverHit | undefined {
+  const direct = hitTestOwnedMark(groups, point, scale);
+  if (direct !== undefined) return { id: direct, direct: true };
+
+  const id = findOwnedMark(groups, (group) => (
+    group.hoverBounds !== undefined && contains(group.hoverBounds, point)
+  ));
+  return id === undefined ? undefined : { id, direct: false };
 }
 
 interface PendingGesture {

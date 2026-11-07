@@ -44,8 +44,13 @@ import {
   type PdfAnnotationSurface,
 } from './annotation-surface.js';
 import type { ReviewAnnotation } from '../../../../packages/core/src/pdf-writer.js';
-import type { OwnedMarkGeometry } from './owned-mark-hit-test.js';
-import { hitTestOwnedMark, ScopedOwnedMarkPointerGesture } from './owned-mark-hit-test.js';
+import {
+  hitTestOwnedMark,
+  hitTestOwnedMarkHover,
+  ScopedOwnedMarkPointerGesture,
+  type OwnedMarkGeometry,
+  type OwnedMarkHoverHit,
+} from './owned-mark-hit-test.js';
 import type { ViewerPagePoint } from './viewer-interaction-events.js';
 import type { AnnotationRenderingState } from './PdfAnnotationLayers.js';
 import { PdfAnnotationLayers } from './PdfAnnotationLayers.js';
@@ -217,11 +222,10 @@ export function ReferencePdfViewport({
 }: ReferencePdfViewportProps) {
   const surface = referencePdfAnnotationSurface(documentGeneration, tabIdentity);
   const { registry } = useRegistry();
-  const hoveredOwnedMarkRef = useRef<{
-    readonly id: string;
+  const hoveredOwnedMarkRef = useRef<(OwnedMarkHoverHit & {
     readonly pageIndex: number;
     readonly surfaceKey: string;
-  } | null>(null);
+  }) | null>(null);
   const surfaceKey = `${documentGeneration}:${tabIdentity ?? ''}`;
   const ownedPointerGestureRef = useRef(new ScopedOwnedMarkPointerGesture());
   useEffect(() => {
@@ -419,31 +423,32 @@ export function ReferencePdfViewport({
                     event.pointerId,
                     pointer.point,
                   );
-                  const nextId = pointer === null
+                  const hit = pointer === null
                     ? undefined
-                    : hitTestOwnedMark(
+                    : hitTestOwnedMarkHover(
                         geometryByPage.get(layout.pageIndex) ?? [],
                         pointer.point,
                         pointer.scale,
                       );
                   const previous = hoveredOwnedMarkRef.current;
-                  if (previous !== null
-                    && previous.id === nextId
+                  const sameMark = hit !== undefined
+                    && previous?.id === hit.id
                     && previous.pageIndex === layout.pageIndex
-                    && previous.surfaceKey === surfaceKey) return;
-                  if (previous !== null && previous.surfaceKey === surfaceKey) emit({
+                    && previous.surfaceKey === surfaceKey;
+                  if (sameMark && previous.direct === hit.direct) return;
+                  if (!sameMark && previous !== null && previous.surfaceKey === surfaceKey) emit({
                     type: 'owned-mark',
                     value: { id: previous.id, phase: 'leave', pageIndex: previous.pageIndex },
                   });
-                  hoveredOwnedMarkRef.current = nextId === undefined
+                  hoveredOwnedMarkRef.current = hit === undefined
                     ? null
-                    : { id: nextId, pageIndex: layout.pageIndex, surfaceKey };
+                    : { ...hit, pageIndex: layout.pageIndex, surfaceKey };
                   event.currentTarget.closest<HTMLElement>('[data-reference-pdf-viewport]')
-                    ?.setAttribute('data-owned-mark-hovered', nextId === undefined ? 'false' : 'true');
-                  if (nextId !== undefined) emit({
+                    ?.setAttribute('data-owned-mark-hovered', String(hit?.direct === true));
+                  if (!sameMark && hit !== undefined) emit({
                     type: 'owned-mark',
                     value: {
-                      id: nextId,
+                      id: hit.id,
                       phase: 'enter',
                       pageIndex: layout.pageIndex,
                       placement: { left: event.clientX, top: event.clientY },
