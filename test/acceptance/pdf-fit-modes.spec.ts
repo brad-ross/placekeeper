@@ -335,9 +335,15 @@ test('selection, page notes, and distant destinations follow shifted page geomet
   await goToPage(page, 1);
   const link = page.getByRole('button', { name: /Open PDF link.*Page 12/iu }).first();
   await link.scrollIntoViewIfNeeded();
-  await link.focus();
-  await link.press('Enter');
-  const destinationFrames = await page.getByRole('menuitem', { name: 'Open in main document', exact: true })
+  const openInMain = page.getByRole('menuitem', { name: 'Open in main document', exact: true });
+  await expect(async () => {
+    if (!await openInMain.isVisible()) {
+      await link.focus();
+      await link.press('Enter');
+    }
+    await expect(openInMain).toBeVisible({ timeout: 1_000 });
+  }).toPass({ timeout: 5_000 });
+  const destinationFrames = await openInMain
     .evaluate((button) => new Promise<{ x: number; y: number; width: number; height: number }[]>((resolve) => {
       const samples: { x: number; y: number; width: number; height: number }[] = [];
       let frames = 0;

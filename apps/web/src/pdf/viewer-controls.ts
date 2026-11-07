@@ -102,6 +102,10 @@ export function createViewerControls(
       ? readingPage : fallback;
   };
 
+  let disposed = false;
+  // A scroll subscriber can expose live geometry before the deferred refresh.
+  // Keep that baseline separate from the cached fallback used without geometry.
+  let lastExposedPage = state.currentPage;
   let pendingPage: number | null = null;
   let jumpGeneration = 0;
   const requestPageJump = (pageNumber: number): boolean => {
@@ -117,8 +121,37 @@ export function createViewerControls(
   };
 
   const emit = (event: ViewerInteractionEvent) => {
+    if (disposed) return;
+    if (event.type === 'page') lastExposedPage = event.currentPage;
     for (const listener of listeners) listener(event);
   };
+  let pageRefreshFrame: number | null = null;
+  const schedulePageRefresh = () => {
+    if (disposed || !options.currentReadingPage || pageRefreshFrame !== null || typeof requestAnimationFrame !== 'function') return;
+    pageRefreshFrame = requestAnimationFrame(() => {
+      pageRefreshFrame = null;
+      if (disposed) return;
+      observePageMounts();
+      const page = currentPage();
+      if (page === lastExposedPage) return;
+      state = { ...state, currentPage: page };
+      emit({ type: 'page', currentPage: page, totalPages: state.totalPages });
+    });
+  };
+  // Native page events can precede the virtualized destination's DOM mount.
+  // Observe mounting as well as scrolling, then read geometry after layout.
+  let observedViewport: HTMLElement | null = null;
+  const pageMountObserver = options.currentReadingPage && typeof MutationObserver !== 'undefined'
+    ? new MutationObserver(schedulePageRefresh) : null;
+  const observePageMounts = () => {
+    if (disposed) return;
+    const element = viewport?.() ?? null;
+    if (!pageMountObserver || element === observedViewport) return;
+    if (observedViewport) pageMountObserver.disconnect();
+    observedViewport = element;
+    if (element) pageMountObserver.observe(element, { childList: true, subtree: true });
+  };
+  observePageMounts();
   if (documentId && scrollCapability && scroll) {
     const updatePage = (reportedPage: number, reportedTotalPages: number) => {
       const loadedPageCount = registry.getStore().getState().core.documents?.[documentId]
@@ -127,13 +160,17 @@ export function createViewerControls(
       const page = currentPage(reportedPage, totalPages);
       state = { ...state, currentPage: page, totalPages };
       emit({ type: 'page', currentPage: page, totalPages });
+      schedulePageRefresh();
     };
     subscriptions.push(
       scrollCapability.onPageChange((event) => {
         if (event.documentId !== documentId) return;
         updatePage(event.pageNumber, event.totalPages);
       }),
-      scroll.onScroll(() => emit({ type: 'scroll' })),
+      scroll.onScroll(() => {
+        emit({ type: 'scroll' });
+        schedulePageRefresh();
+      }),
     );
     if (scrollCapability.onLayoutReady) {
       subscriptions.push(scrollCapability.onLayoutReady((event) => {
@@ -154,7 +191,10 @@ export function createViewerControls(
   }
 
   return {
-    snapshot: () => ({ ...state, currentPage: currentPage() }),
+    snapshot: () => {
+      lastExposedPage = currentPage();
+      return { ...state, currentPage: lastExposedPage };
+    },
     previousPage: () => {
       const page = pendingPage ?? currentPage();
       if (page <= 1) return;
@@ -209,8 +249,12 @@ export function createViewerControls(
       return () => listeners.delete(listener);
     },
     dispose() {
+      disposed = true;
       jumpGeneration += 1;
       pendingPage = null;
+      pageMountObserver?.disconnect();
+      if (pageRefreshFrame !== null) cancelAnimationFrame(pageRefreshFrame);
+      pageRefreshFrame = null;
       for (const unsubscribe of subscriptions.splice(0)) unsubscribe();
       listeners.clear();
     },

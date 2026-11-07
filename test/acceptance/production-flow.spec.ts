@@ -7416,6 +7416,7 @@ test('keeps page and zoom popups aligned on every painted frame as actions chang
     await trigger.hover();
     const menu = page.getByRole('menu', { name: label, exact: true });
     await expect(menu).toBeVisible();
+    if (action === 'Fit width') await menu.locator('[data-review-zoom-action="fit-width"]').hover();
     const id = await menu.getAttribute('id');
     await expect.poll(async () => {
       const [popup, anchor] = await Promise.all([menu.boundingBox(), trigger.boundingBox()]);
@@ -7441,7 +7442,7 @@ test('keeps page and zoom popups aligned on every painted frame as actions chang
       return frames;
     }, id);
     await expect.poll(() => page.evaluate(() => document.documentElement.dataset.popupSampler)).toBe('ready');
-    await menu.getByRole('menuitem', { name: action, exact: true }).click();
+    await menu.getByRole(action === 'Fit width' ? 'menuitemradio' : 'menuitem', { name: action, exact: true }).click();
     const frames = await samples;
     expect(frames.every((frame) => frame.connected && frame.open)).toBe(true);
     const widthChange = Math.max(...frames.map((frame) => frame.width)) - Math.min(...frames.map((frame) => frame.width));

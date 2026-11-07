@@ -130,6 +130,121 @@ describe('viewer controls adapter', () => {
     controls.dispose();
   });
 
+  it('refreshes page reporting after a virtualized destination mounts and cancels disposed work', () => {
+    let readingPage = 1;
+    let mountedViewport: HTMLElement | null = null;
+    let onPage: ((event: { documentId: string; pageNumber: number; totalPages: number }) => void) | undefined;
+    let onMount: (() => void) | undefined;
+    const frames = new Map<number, FrameRequestCallback>();
+    let frameId = 0;
+    const disconnect = vi.fn();
+    const observe = vi.fn();
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+      frames.set(++frameId, callback);
+      return frameId;
+    });
+    vi.stubGlobal('cancelAnimationFrame', (id: number) => frames.delete(id));
+    vi.stubGlobal('MutationObserver', class {
+      constructor(callback: () => void) { onMount = callback; }
+      observe = observe;
+      disconnect = disconnect;
+    });
+    const paint = () => {
+      const pending = [...frames.values()];
+      frames.clear();
+      pending.forEach(callback => callback(0));
+    };
+    try {
+      const scroll = { getCurrentPage: () => 1, getTotalPages: () => 20, onScroll: () => () => undefined };
+      const registry = {
+        getStore: () => ({ getState: () => ({ core: { activeDocumentId: 'doc' } }) }),
+        getPlugin: (id: string) => id === ScrollPlugin.id ? { provides: () => ({
+          forDocument: () => scroll,
+          onPageChange: (listener: typeof onPage) => { onPage = listener; return () => undefined; },
+        }) } : undefined,
+      } as unknown as PluginRegistry;
+      const controls = createViewerControls(registry, {
+        currentReadingPage: () => readingPage, viewport: () => mountedViewport,
+      });
+      const listener = vi.fn();
+      controls.subscribe(listener);
+      onPage?.({ documentId: 'doc', pageNumber: 18, totalPages: 20 });
+      mountedViewport = {} as HTMLElement;
+      paint();
+      expect(observe).toHaveBeenCalledWith(mountedViewport, { childList: true, subtree: true }); // The destination has not mounted yet.
+      expect(controls.snapshot().currentPage).toBe(1);
+      readingPage = 18;
+      onMount?.();
+      onMount?.();
+      expect(frames.size).toBe(1);
+      paint();
+      expect(listener).toHaveBeenLastCalledWith({ type: 'page', currentPage: 18, totalPages: 20 });
+      expect(controls.snapshot().currentPage).toBe(18);
+      const notifications = listener.mock.calls.length;
+      onMount?.();
+      paint();
+      expect(listener).toHaveBeenCalledTimes(notifications);
+      readingPage = 19;
+      onMount?.();
+      controls.dispose();
+      expect(disconnect).toHaveBeenCalledOnce();
+      expect(frames.size).toBe(0);
+      paint();
+      expect(listener).toHaveBeenCalledTimes(notifications);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it.each(['dispose during publication', 'geometry returns to cached page'] as const)(
+    'handles %s before the deferred page refresh', (scenario) => {
+      let readingPage = 1;
+      let onScroll: (() => void) | undefined;
+      const frames = new Map<number, FrameRequestCallback>();
+      let frameId = 0;
+      vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+        frames.set(++frameId, callback);
+        return frameId;
+      });
+      vi.stubGlobal('cancelAnimationFrame', (id: number) => frames.delete(id));
+      try {
+        const scroll = {
+          getCurrentPage: () => 1, getTotalPages: () => 20,
+          onScroll: (listener: () => void) => { onScroll = listener; return () => undefined; },
+        };
+        const registry = {
+          getStore: () => ({ getState: () => ({ core: { activeDocumentId: 'doc' } }) }),
+          getPlugin: (id: string) => id === ScrollPlugin.id ? { provides: () => ({
+            forDocument: () => scroll, onPageChange: () => () => undefined,
+          }) } : undefined,
+        } as unknown as PluginRegistry;
+        const controls = createViewerControls(registry, { currentReadingPage: () => readingPage });
+        const pageEvents = vi.fn();
+        controls.subscribe(event => {
+          if (event.type === 'page') pageEvents(event.currentPage);
+          if (event.type !== 'scroll') return;
+          if (scenario === 'dispose during publication') controls.dispose();
+          else expect(controls.snapshot().currentPage).toBe(2);
+        });
+        readingPage = 2;
+        onScroll?.();
+        if (scenario === 'dispose during publication') {
+          expect(frames.size).toBe(0);
+        } else {
+          expect(frames.size).toBe(1);
+          readingPage = 1;
+          const pending = [...frames.values()];
+          frames.clear();
+          pending.forEach(callback => callback(0));
+          expect(pageEvents).toHaveBeenCalledExactlyOnceWith(1);
+          controls.dispose();
+        }
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    },
+  );
+
   it('routes page buttons and entry through the shared jump handler when available', async () => {
     const scroll = {
       getCurrentPage: () => 2, getTotalPages: () => 3,
