@@ -74,6 +74,14 @@
   min-width: 0;
   flex-wrap: wrap;
   align-items: center;
+  gap: 4px 12px;
+}
+
+.link-action-popover__action-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  min-width: 0;
   gap: 2px;
 }
 
@@ -163,11 +171,11 @@
 
 .destination-snippet__stack {
   position: relative;
+  margin-inline: auto;
 }
 
 .destination-snippet__canvas {
   position: absolute;
-  left: 0;
   background: #fff;
 }
 

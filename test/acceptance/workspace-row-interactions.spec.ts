@@ -362,9 +362,9 @@ test('workspace scrollbars retain native appearance and scroll normally', async 
 });
 
 
-async function openReferences(page: Page, width: number) {
+async function openReferences(page: Page, width: number, returnAvailable = true) {
   await page.setViewportSize({ width, height: 900 });
-  await page.goto('/test/acceptance/review-harness/index.html?visual=reference-layout&referenceReturn=visible');
+  await page.goto(`/test/acceptance/review-harness/index.html?visual=reference-layout${returnAvailable ? '&referenceReturn=visible' : ''}`);
   if (width >= 900) await page.getByRole('button', { name: 'Show References', exact: true }).click();
   else {
     await page.getByRole('button', { name: 'Show workspace', exact: true }).click();
@@ -395,8 +395,12 @@ async function referenceTabGeometry(tab: Locator) {
 
 for (const width of [1280, 620]) {
   test(`reference pages swap with actions without moving ${width >= 900 ? 'vertical' : 'horizontal'} tabs`, async ({ page, browserName }) => {
+    const tabWithReturn = '.reference-tab-segment[data-reference-page-swap="true"]';
+    const withoutReturn = (await openReferences(page, width, false)).locator(tabWithReturn);
+    await expect(withoutReturn.getByRole('button', { name: 'Return to reference' })).toHaveCount(0);
+    const originalWidth = (await withoutReturn.boundingBox())!.width;
     const tabs = await openReferences(page, width);
-    const active = tabs.locator('.reference-tab-segment[data-reference-page-swap="true"]');
+    const active = tabs.locator(tabWithReturn);
     const number = active.locator('.reference-tab-segment__page');
     const actions = active.locator('.reference-tab-segment__action, .reference-panel__return');
     const selector = active.getByRole('tab');
@@ -410,12 +414,16 @@ for (const width of [1280, 620]) {
       await Promise.all(element.getAnimations({ subtree: true }).filter(animation => animation.effect?.getTiming().iterations !== Infinity).map(animation => animation.finished.catch(() => undefined)));
     });
     const before = await referenceTabGeometry(active);
+    expect(before.tab.width).toBeCloseTo(originalWidth, 1);
+    const name = selector.locator('span').first();
+    const originalNameWidth = (await name.boundingBox())!.width;
     expect(Math.abs(before.numberX - before.iconX)).toBeLessThan(.5);
     expect(Math.abs(before.numberY - before.iconY)).toBeLessThan(1);
     await active.hover();
     await expect(number).toHaveCSS('opacity', '0');
     for (const action of await actions.all()) await expect(action).toHaveCSS('opacity', '1');
     expect(await referenceTabGeometry(active)).toEqual(before);
+    expect((await name.boundingBox())!.width).toBeLessThan(originalNameWidth);
     const inactive = tabs.locator('.reference-tab-segment:not([data-reference-page-swap])').first();
     await inactive.hover();
     await expect(inactive.locator('.reference-tab-segment__page-label')).toBeVisible();

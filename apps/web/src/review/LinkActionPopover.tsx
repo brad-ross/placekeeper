@@ -168,6 +168,7 @@ export function LinkActionMenuContent({
   copyLink,
   openInReferencesDisabled = false,
   snippet,
+  previewZoom,
   onReturnToReference,
   busyChoice = null,
   onChoose,
@@ -184,6 +185,7 @@ export function LinkActionMenuContent({
   readonly openInReferencesDisabled?: boolean;
   /** Destination preview shown above the action row. */
   readonly snippet?: ReactNode;
+  readonly previewZoom?: ReturnType<typeof useDestinationSnippet>['zoomControls'];
   readonly onReturnToReference?: () => void;
   /** The chosen action waiting for its destination name; the menu is inert meanwhile. */
   readonly busyChoice?: LinkActionChoice | null;
@@ -204,55 +206,85 @@ export function LinkActionMenuContent({
     >
       {snippet}
       <div className="link-action-popover__actions">
-        <LinkActionItem
-          label="Open in References"
-          icon="references"
-          choice="references"
-          itemRef={openInReferencesDisabled ? undefined : firstItemRef}
-          disabled={openInReferencesDisabled}
-          busyChoice={busyChoice}
-          onChoose={onChoose}
-        />
-        {sourceScope === 'reference' ? (
+        <div className="link-action-popover__action-group" role="group" aria-label="Destination actions">
           <LinkActionItem
-            label="Follow in this tab"
-            icon="arrow-right"
-            choice="same-reference"
-            itemRef={openInReferencesDisabled ? firstItemRef : undefined}
+            label="Open in References"
+            icon="references"
+            choice="references"
+            itemRef={openInReferencesDisabled ? undefined : firstItemRef}
+            disabled={openInReferencesDisabled}
             busyChoice={busyChoice}
             onChoose={onChoose}
           />
-        ) : null}
-        <LinkActionItem
-          label="Open in main document"
-          icon={sourceScope === 'main' ? 'chevron-right' : 'open-main'}
-          choice="main"
-          itemRef={openInReferencesDisabled && sourceScope === 'main' ? firstItemRef : undefined}
-          busyChoice={busyChoice}
-          onChoose={onChoose}
-        />
-        {copyLink === undefined ? null : (
-          <CopyLinkControl
-            {...copyLink}
-            {...(busy ? { disabled: true } : {})}
-            variant="popover"
-            presentation="icon-only"
-            buttonRole="menuitem"
-            feedbackPlacement="inline"
+          {sourceScope === 'reference' ? (
+            <LinkActionItem
+              label="Follow in this tab"
+              icon="arrow-right"
+              choice="same-reference"
+              itemRef={openInReferencesDisabled ? firstItemRef : undefined}
+              busyChoice={busyChoice}
+              onChoose={onChoose}
+            />
+          ) : null}
+          <LinkActionItem
+            label="Open in main document"
+            icon={sourceScope === 'main' ? 'chevron-right' : 'open-main'}
+            choice="main"
+            itemRef={openInReferencesDisabled && sourceScope === 'main' ? firstItemRef : undefined}
+            busyChoice={busyChoice}
+            onChoose={onChoose}
           />
-        )}
-        {onReturnToReference === undefined || busy ? null : (
-          <ReviewTooltipButton
-            label="Return to reference"
-            type="button"
-            role="menuitem"
-            className="link-action-popover__item"
-            aria-label="Return to reference"
-            onClick={onReturnToReference}
-          >
-            <ReviewIcon name="locate" />
-          </ReviewTooltipButton>
-        )}
+          {copyLink === undefined ? null : (
+            <CopyLinkControl
+              {...copyLink}
+              {...(busy ? { disabled: true } : {})}
+              variant="popover"
+              presentation="icon-only"
+              buttonRole="menuitem"
+              feedbackPlacement="inline"
+            />
+          )}
+        </div>
+        {!busy && (previewZoom || onReturnToReference) ? (
+          <div className="link-action-popover__action-group" role="group" aria-label="Preview controls">
+            {previewZoom ? (
+              <>
+                <ReviewTooltipButton
+                  label="Zoom out"
+                  type="button"
+                  role="menuitem"
+                  className="link-action-popover__item"
+                  disabled={!previewZoom.canZoomOut}
+                  onClick={previewZoom.zoomOut}
+                >
+                  <ReviewIcon name="minus" />
+                </ReviewTooltipButton>
+                <ReviewTooltipButton
+                  label="Zoom in"
+                  type="button"
+                  role="menuitem"
+                  className="link-action-popover__item"
+                  disabled={!previewZoom.canZoomIn}
+                  onClick={previewZoom.zoomIn}
+                >
+                  <ReviewIcon name="plus" />
+                </ReviewTooltipButton>
+              </>
+            ) : null}
+            {onReturnToReference === undefined ? null : (
+              <ReviewTooltipButton
+                label="Return to reference"
+                type="button"
+                role="menuitem"
+                className="link-action-popover__item"
+                aria-label="Return to reference"
+                onClick={onReturnToReference}
+              >
+                <ReviewIcon name="locate" />
+              </ReviewTooltipButton>
+            )}
+          </div>
+        ) : null}
         {/* The menu's accessible name already carries the page. */}
         <span className="link-action-popover__page" aria-hidden="true">{pageNumeral}</span>
       </div>
@@ -318,7 +350,7 @@ export function LinkActionPopover({
   onDismissRef.current = onDismiss;
   sourceFocusFallbackRef.current = sourceFocusFallback;
   const [placement, setPlacement] = useState<LinkActionPopoverPlacement | null>(null);
-  const { frameProps, returnToReference } = useDestinationSnippet({
+  const { frameProps, returnToReference, zoomControls } = useDestinationSnippet({
     description: request === null ? null : destination?.description ?? null,
     resolving: destination?.status === 'resolving',
     ...(renderDestinationSnippet === undefined ? {} : { render: renderDestinationSnippet }),
@@ -489,6 +521,7 @@ export function LinkActionPopover({
         {...(dismissingCopyLink === undefined ? {} : { copyLink: dismissingCopyLink })}
         openInReferencesDisabled={openInReferencesDisabled}
         snippet={<DestinationSnippetFrame {...frameProps} />}
+        previewZoom={zoomControls}
         {...(returnToReference === null ? {} : {
           onReturnToReference: () => {
             firstItemRef.current?.focus({ preventScroll: true });

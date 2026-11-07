@@ -303,7 +303,8 @@ test("omits destination copy controls and reopens canonical links without source
     }
     await expect(linkMenu).toBeVisible({ timeout: 1_000 });
   }).toPass({ timeout: 5_000 });
-  await expect(linkMenu.getByRole('menuitem')).toHaveCount(2);
+  await expect(linkMenu.getByRole('menuitem', { name: 'Open in References' })).toBeVisible();
+  await expect(linkMenu.getByRole('menuitem', { name: 'Open in main document' })).toBeVisible();
   await expect(linkMenu.locator('.copy-link-control')).toHaveCount(0);
 
   const reopened = await host.openLink({ link: outlineLink });

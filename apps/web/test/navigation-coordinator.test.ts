@@ -125,6 +125,7 @@ function navigation(initial = location(0)) {
       }),
       fitToWidth: vi.fn(async () => true),
       fitToWidthReady: vi.fn(() => true),
+      navigationPending: vi.fn(() => false),
       cancelPendingNavigation: vi.fn(),
       replaceDocument: vi.fn(),
       focusAtDestination: vi.fn(() => true),
@@ -227,7 +228,6 @@ function harness(options: {
     setPendingReference: (value) => { pending = value; },
     getReferenceReturnState: () => referenceReturn,
     setReferenceReturnState: (value) => { referenceReturn = value; },
-    resetReferenceManualScrollIntent: vi.fn(),
     setLinkActionRequest: vi.fn(),
     setAnnouncement,
     focusReferenceTab: vi.fn(() => true),
@@ -1330,13 +1330,17 @@ describe('document-scoped navigation coordinator', () => {
     expect(run.announcement()).toBe('Reference active.');
   });
 
-  it('publishes identity-scoped return availability only after manual Reference drift', async () => {
+  it('publishes identity-scoped return availability when the Reference viewport scrolls', async () => {
     const run = harness();
     const original = target(2);
     await run.coordinator.openReference(original, { label: 'A', pageContext: 'Page 3' });
 
     vi.mocked(run.reference.controls.targetVisibility).mockReturnValue('outside');
-    run.coordinator.observeReferenceManualScroll();
+    vi.mocked(run.reference.controls.navigationPending).mockReturnValueOnce(true);
+    run.coordinator.observeReferenceViewportScroll();
+    expect(run.referenceReturn()).toBeNull();
+
+    run.coordinator.observeReferenceViewportScroll();
     expect(run.referenceReturn()).toEqual({
       tabIdentity: original.identity,
       documentGeneration: 1,
@@ -1345,11 +1349,11 @@ describe('document-scoped navigation coordinator', () => {
     });
 
     vi.mocked(run.reference.controls.targetVisibility).mockReturnValue('unavailable');
-    run.coordinator.observeReferenceManualScroll();
+    run.coordinator.observeReferenceViewportScroll();
     expect(run.referenceReturn()?.available).toBe(true);
 
     vi.mocked(run.reference.controls.targetVisibility).mockReturnValue('visible');
-    run.coordinator.observeReferenceManualScroll();
+    run.coordinator.observeReferenceViewportScroll();
     expect(run.referenceReturn()).toBeNull();
   });
 
@@ -1360,7 +1364,7 @@ describe('document-scoped navigation coordinator', () => {
     await run.coordinator.openReference(original, { label: 'A', pageContext: 'Page 3' });
     run.reference.set(location(8, 160, 1.7));
     vi.mocked(run.reference.controls.targetVisibility).mockReturnValue('outside');
-    run.coordinator.observeReferenceManualScroll();
+    run.coordinator.observeReferenceViewportScroll();
     vi.mocked(run.reference.controls.applyTarget).mockClear();
     vi.mocked(run.reference.controls.applyTarget).mockImplementationOnce(async () => {
       run.reference.set(location(3));
@@ -1400,7 +1404,7 @@ describe('document-scoped navigation coordinator', () => {
     const original = target(2);
     await run.coordinator.openReference(original, { label: 'A', pageContext: 'Page 3' });
     vi.mocked(run.reference.controls.targetVisibility).mockReturnValue('outside');
-    run.coordinator.observeReferenceManualScroll();
+    run.coordinator.observeReferenceViewportScroll();
     const applied = deferred<boolean>();
     vi.mocked(run.reference.controls.applyTarget).mockReturnValueOnce(applied.promise);
 
@@ -1432,7 +1436,7 @@ describe('document-scoped navigation coordinator', () => {
     await run.coordinator.openReference(second, { label: 'B', pageContext: 'Page 6' });
     await run.coordinator.switchReference(first.identity);
     vi.mocked(run.reference.controls.targetVisibility).mockReturnValue('outside');
-    run.coordinator.observeReferenceManualScroll();
+    run.coordinator.observeReferenceViewportScroll();
     const applied = deferred<boolean>();
     vi.mocked(run.reference.controls.applyTarget).mockReturnValueOnce(applied.promise);
     const returning = run.coordinator.returnToReference(first.identity);
@@ -1453,7 +1457,7 @@ describe('document-scoped navigation coordinator', () => {
     const original = target(2);
     await run.coordinator.openReference(original, { label: 'A', pageContext: 'Page 3' });
     vi.mocked(run.reference.controls.targetVisibility).mockReturnValue('outside');
-    run.coordinator.observeReferenceManualScroll();
+    run.coordinator.observeReferenceViewportScroll();
     const applied = deferred<boolean>();
     vi.mocked(run.reference.controls.applyTarget).mockReturnValueOnce(applied.promise);
     vi.mocked(run.dependencies.dispatch).mockClear();
@@ -2054,9 +2058,9 @@ describe('link destination descriptions and destination bands', () => {
     // The band persists while the reader scrolls away and back, and across tab switches.
     const band = run.referenceBand(target(13).identity);
     vi.mocked(run.reference.controls.targetVisibility).mockReturnValue('outside');
-    run.coordinator.observeReferenceManualScroll();
+    run.coordinator.observeReferenceViewportScroll();
     vi.mocked(run.reference.controls.targetVisibility).mockReturnValue('visible');
-    run.coordinator.observeReferenceManualScroll();
+    run.coordinator.observeReferenceViewportScroll();
     await run.coordinator.openReference(target(15), { label: 'Other', pageContext: 'Page 16' });
     expect(await run.coordinator.switchReference(target(13).identity)).toBe(true);
     expect(run.referenceBand(target(13).identity)).toEqual(band);

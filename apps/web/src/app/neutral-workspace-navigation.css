@@ -308,6 +308,25 @@
   box-shadow: none;
 }
 
+/* Position Return over the end of the title so it cannot widen the tab. */
+.reference-tabs .reference-tab-segment--compound > button.reference-panel__return {
+  position: absolute;
+  inset-block-start: 50%;
+  inset-inline-end: calc(3px + 2 * var(--reference-tab-action-size));
+  transform: translateY(-50%);
+}
+
+.reference-tab-segment:has(> .reference-panel__return) .reference-tab-segment__selector > span {
+  max-width: calc(100% - var(--reference-tab-action-size));
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .reference-tab-segment:has(> .reference-panel__return):not(:hover, :has(:focus-visible))
+    .reference-tab-segment__selector > span {
+    max-width: none;
+  }
+}
+
 .reference-tab-segment > .reference-tab-segment__action:last-child,
 .reference-tab-segment > .reference-panel__return:last-child {
   margin-right: 0;

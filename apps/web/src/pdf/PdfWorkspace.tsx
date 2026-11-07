@@ -18,7 +18,6 @@ import { useContext, useMemo, useRef, useSyncExternalStore } from 'react';
 import { readingLayoutPadding, readingPageOffset, type TextFitLayout } from './text-fit-layout.js';
 import type { ReviewAnnotation } from '../../../../packages/core/src/pdf-writer.js';
 import type { PdfSearchResult } from './pdf-search-model.js';
-import type { ReferenceScrollPosition } from './reference-manual-scroll.js';
 import { combinePageRotation, positionOwnedRect, selectionLayerStyle } from './owned-overlay.js';
 import { groupOwnedMarkGeometryByPage, hitTestOwnedMark } from './owned-mark-hit-test.js';
 import {
@@ -93,7 +92,7 @@ export interface PdfWorkspaceProps {
   reverseSyncTexEnabled?: boolean;
   referenceViewportHost?: HTMLElement | null;
   onReferenceViewportElement?: (element: HTMLDivElement | null) => void;
-  onReferenceScrollIntent?: (position: ReferenceScrollPosition) => void;
+  onReferenceViewportScroll?: () => void;
   referenceTabIdentity?: string | null;
   searchResults?: readonly PdfSearchResult[];
   /** Transient main-reader Destination Band (R12). */
@@ -147,7 +146,7 @@ export function PdfWorkspace({
   reverseSyncTexEnabled = false,
   referenceViewportHost = null,
   onReferenceViewportElement,
-  onReferenceScrollIntent,
+  onReferenceViewportScroll,
   referenceTabIdentity = null,
   searchResults = [],
   mainDestinationBand = null,
@@ -568,7 +567,7 @@ export function PdfWorkspace({
                 {...(onPageContextMenu === undefined ? {} : { onPageContextMenu })}
                 {...(onViewerInteraction === undefined ? {} : { onInteraction: onViewerInteraction })}
                 {...(onReferenceViewportElement === undefined ? {} : { onViewportElement: onReferenceViewportElement })}
-                {...(onReferenceScrollIntent === undefined ? {} : { onScrollIntent: onReferenceScrollIntent })}
+                {...(onReferenceViewportScroll === undefined ? {} : { onViewportScroll: onReferenceViewportScroll })}
               />
             ) : null}
             </>

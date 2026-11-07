@@ -158,7 +158,6 @@ export interface NavigationCoordinatorDependencies {
   readonly setPendingReference: (pending: PendingReferencePanel | null) => void;
   readonly getReferenceReturnState: () => ReferenceReturnPresentationState | null;
   readonly setReferenceReturnState: (state: ReferenceReturnPresentationState | null) => void;
-  readonly resetReferenceManualScrollIntent: () => void;
   readonly setLinkActionRequest: (request: ViewerPdfLinkInvocation | null) => void;
   readonly setAnnouncement: (announcement: string) => void;
   readonly focusReferenceTab: (identity: string) => boolean;
@@ -938,9 +937,7 @@ export class NavigationCoordinator {
       this.dependencies.setAnnouncement(REFERENCE_FAILURE);
       return false;
     }
-    this.dependencies.resetReferenceManualScrollIntent();
     const applied = await navigation.applyTarget(target);
-    this.dependencies.resetReferenceManualScrollIntent();
     if (!this.isCurrent(operation)) return false;
     if (!applied) {
       this.dependencies.setAnnouncement(REFERENCE_FAILURE);
@@ -948,9 +945,7 @@ export class NavigationCoordinator {
     }
     const settledLocation = navigation.captureLocation();
     if (settledLocation === null) {
-      this.dependencies.resetReferenceManualScrollIntent();
       const restored = await navigation.applyLocation(origin);
-      this.dependencies.resetReferenceManualScrollIntent();
       if (!this.isCurrent(operation)) return false;
       const restoredLocation = restored ? navigation.captureLocation() : null;
       if (
@@ -978,12 +973,20 @@ export class NavigationCoordinator {
     return true;
   }
 
-  /** Re-evaluates the active origin only after user intent is paired with a Reference scroll. */
-  observeReferenceManualScroll(): void {
+  /** Re-evaluates the active origin when its viewport moves. */
+  observeReferenceViewportScroll(): void {
+    const state = this.dependencies.getState();
+    const navigation = this.dependencies.getReferenceNavigation();
+    if (
+      this.pendingReference !== null
+      || this.referenceRestoreIdentity !== null
+      || state.pendingReferenceSwitch !== null
+      || navigation?.navigationPending?.() === true
+    ) return;
     this.updateReferenceReturnAvailability(true);
   }
 
-  /** Rechecks an already-established affordance after layout without creating manual intent. */
+  /** Rechecks an already-established affordance after layout. */
   async refreshReferenceReturnAvailability(): Promise<void> {
     const current = this.dependencies.getReferenceReturnState();
     if (current?.available !== true || current.pending) return;
@@ -1003,7 +1006,6 @@ export class NavigationCoordinator {
 
   /** Clears transient state when the reusable Reference navigation adapter is disposed. */
   referenceNavigationUnavailable(): void {
-    this.dependencies.resetReferenceManualScrollIntent();
     this.clearReferenceReturnState();
   }
 
@@ -1376,9 +1378,7 @@ export class NavigationCoordinator {
       return false;
     }
     if (this.referenceRestoreIdentity === tab.identity) {
-      this.dependencies.resetReferenceManualScrollIntent();
       const applied = await navigation.applyLocation(tab.settledLocation);
-      this.dependencies.resetReferenceManualScrollIntent();
       if (!this.isCurrent(operation)) return false;
       const settled = applied ? navigation.captureLocation() : null;
       if (!applied || settled === null) {
@@ -1828,7 +1828,6 @@ export class NavigationCoordinator {
     options: { readonly preservePresentation?: boolean } = {},
   ): void {
     if (!Number.isSafeInteger(documentGeneration) || documentGeneration < 0) return;
-    this.dependencies.resetReferenceManualScrollIntent();
     this.clearReferenceReturnState();
     this.operationToken += 1;
     this.documentGeneration = documentGeneration;
@@ -1865,7 +1864,6 @@ export class NavigationCoordinator {
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
-    this.dependencies.resetReferenceManualScrollIntent();
     this.clearReferenceReturnState();
     this.operationToken += 1;
     this.pendingReference = null;
@@ -1892,9 +1890,7 @@ export class NavigationCoordinator {
     if (!this.isCurrent(operation) || this.dependencies.getReferenceNavigation() !== navigation) {
       return null;
     }
-    this.dependencies.resetReferenceManualScrollIntent();
     const applied = await navigation.applyTarget(target, 'reference-fit-width');
-    this.dependencies.resetReferenceManualScrollIntent();
     if (!applied) return null;
     if (!this.isCurrent(operation) || this.dependencies.getReferenceNavigation() !== navigation) {
       return null;
@@ -2081,16 +2077,12 @@ export class NavigationCoordinator {
     tab: ReferenceNavigationState['tabs'][number],
   ): Promise<PdfViewerLocation | null> {
     if (tab.settledLocation === null) return null;
-    this.dependencies.resetReferenceManualScrollIntent();
     let applied = await navigation.applyLocation(tab.settledLocation);
-    this.dependencies.resetReferenceManualScrollIntent();
     if (!this.isCurrent(operation) || this.dependencies.getReferenceNavigation() !== navigation) {
       return null;
     }
     if (!applied) {
-      this.dependencies.resetReferenceManualScrollIntent();
       applied = await navigation.applyTarget(tab.originalTarget, 'reference-fit-width');
-      this.dependencies.resetReferenceManualScrollIntent();
       if (!this.isCurrent(operation) || this.dependencies.getReferenceNavigation() !== navigation) {
         return null;
       }
@@ -2371,7 +2363,13 @@ export class NavigationCoordinator {
       return;
     }
     const navigation = this.dependencies.getReferenceNavigation();
-    const visibility = navigation?.targetVisibility(tab.originalTarget) ?? 'unavailable';
+    const band = this.referenceBands.get(tab.identity);
+    const bandVisibility = band?.targetIdentity === tab.originalTarget.identity
+      ? navigation?.rectVisibility(band.pageIndex, bandBounds(band))
+      : undefined;
+    const visibility = bandVisibility === undefined || bandVisibility === 'unavailable'
+      ? navigation?.targetVisibility(tab.originalTarget, 'reference-fit-width') ?? 'unavailable'
+      : bandVisibility;
     if (visibility === 'visible') {
       this.clearReferenceReturnState();
       return;
@@ -2443,7 +2441,6 @@ export class NavigationCoordinator {
     }: { readonly movesMain?: boolean } = {},
   ): Operation | null {
     if (!this.generationMatches(documentGeneration)) return null;
-    this.dependencies.resetReferenceManualScrollIntent();
     this.clearLinkRequest();
     this.abortChosenDescription();
     if (movesMain) this.clearMainBand();
@@ -2463,7 +2460,6 @@ export class NavigationCoordinator {
       || state.pendingReferenceSwitch !== null
       || state.pendingSendToMain !== null
     ) return null;
-    this.dependencies.resetReferenceManualScrollIntent();
     this.dependencies.getReferenceNavigation()?.cancelPendingNavigation();
     return {
       token: ++this.operationToken,

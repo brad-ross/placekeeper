@@ -95,10 +95,6 @@ import {
   REFERENCE_PDF_DOCUMENT_ID,
   type PdfViewerScope,
 } from '../pdf/viewer-document-ids.js';
-import {
-  ReferenceManualScrollObserver,
-  subscribeToReferenceManualScroll,
-} from '../pdf/reference-manual-scroll.js';
 import type { ReviewAnnotation } from '../../../../packages/core/src/pdf-writer.js';
 import { REVIEW_COLLAPSED_RAIL_SIZE, REVIEW_OVERLAY_INSET, REVIEW_OVERLAY_FADE_SIZE } from '../review/use-review-overlay-geometry.js';
 import { ReviewIcon } from '../review/ReviewIcon.js';
@@ -292,8 +288,7 @@ export interface AppProps {
   referenceViewportHost?: HTMLElement | null;
   activeReferenceTabIdentity?: string | null;
   onReferenceDocumentControls?: (controls: ReferenceDocumentController | null) => void;
-  onReferenceManualScroll?: () => void;
-  referenceManualScrollObserver?: ReferenceManualScrollObserver;
+  onReferenceViewportScroll?: () => void;
   onViewerNavigationInitialized?: (
     scope: PdfViewerScope,
     navigation: PdfViewerNavigation | null,
@@ -355,8 +350,7 @@ export function App({
   referenceViewportHost = null,
   activeReferenceTabIdentity = null,
   onReferenceDocumentControls,
-  onReferenceManualScroll,
-  referenceManualScrollObserver: providedReferenceManualScrollObserver,
+  onReferenceViewportScroll,
   onViewerNavigationInitialized,
   onOutlineDiscovery,
   onMainDocumentReady,
@@ -395,11 +389,6 @@ export function App({
   const referenceNavigationRef = useRef<PdfViewerNavigation | null>(null);
   const referenceInputDocument = useRef(new ReferenceInputDocumentAuthority());
   const referenceControllerRef = useRef<ReferenceDocumentController | null>(null);
-  const ownedReferenceManualScrollObserver = useRef(new ReferenceManualScrollObserver());
-  const referenceManualScrollObserver = providedReferenceManualScrollObserver
-    ?? ownedReferenceManualScrollObserver.current;
-  const onReferenceManualScrollRef = useRef(onReferenceManualScroll);
-  onReferenceManualScrollRef.current = onReferenceManualScroll;
   const [viewerRunway, setViewerRunway] = useState<ViewerRunway>({ right: 0, bottom: 0 });
   const viewerRunwayRef = useRef<ViewerRunway>(viewerRunway);
   const viewportGenerationRef = useRef(0);
@@ -1163,7 +1152,6 @@ export function App({
       ?.provides();
     const scroll = registry.getPlugin<ScrollPlugin>(ScrollPlugin.id)?.provides();
     if (documentManager) {
-      let unsubscribeReferenceScroll: (() => void) | null = null;
       let disposeReferenceInput: (() => void) | null = null;
       const initializeMain = (documentId: string) => {
         if (!initializationIsCurrent()) return;
@@ -1182,9 +1170,6 @@ export function App({
         disposeReferenceInput?.();
         disposeReferenceInput = null;
         referenceInputDocument.current.clear();
-        unsubscribeReferenceScroll?.();
-        unsubscribeReferenceScroll = null;
-        referenceManualScrollObserver.clear();
         referenceNavigationRef.current?.dispose();
         referenceNavigationRef.current = null;
         onViewerNavigationInitialized?.('reference', null);
@@ -1212,20 +1197,6 @@ export function App({
               latestReferenceTabIdentityRef.current,
             ),
           );
-          unsubscribeReferenceScroll = scroll === undefined
-            ? null
-            : subscribeToReferenceManualScroll(
-                scroll,
-                referenceManualScrollObserver,
-                () => {
-                  const viewport = referenceWorkspaceElementRef.current
-                    ?.querySelector<HTMLElement>('[data-viewer-framing-viewport]');
-                  return viewport
-                    ? { left: viewport.scrollLeft, top: viewport.scrollTop }
-                    : null;
-                },
-                () => onReferenceManualScrollRef.current?.(),
-              );
         }),
         documentManager.onDocumentClosed((closedDocumentId) => {
           if (closedDocumentId === REFERENCE_PDF_DOCUMENT_ID) disposeReferenceNavigation();
@@ -1690,7 +1661,7 @@ export function App({
       referenceViewportHost={referenceViewportHost}
       referenceTabIdentity={activeReferenceTabIdentity}
       onReferenceViewportElement={setReferenceWorkspaceElement}
-      onReferenceScrollIntent={(position) => referenceManualScrollObserver.arm(position)}
+      {...(onReferenceViewportScroll === undefined ? {} : { onReferenceViewportScroll })}
     />
   );
   const workspaceWithStatus = (

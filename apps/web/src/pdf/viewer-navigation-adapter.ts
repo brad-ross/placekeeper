@@ -84,7 +84,7 @@ export interface PdfViewerNavigation extends ViewerNavigationControls {
   /** Resolves a semantic target without moving the viewer. */
   resolveTarget(target: PdfNavigationTarget): PdfViewerLocation | null;
   /** Reports whether a live semantic target occupies the usable viewport. */
-  targetVisibility(target: PdfNavigationTarget): PdfTargetVisibility;
+  targetVisibility(target: PdfNavigationTarget, policy?: PdfTargetApplicationPolicy): PdfTargetVisibility;
   /** Reports whether a neutral location occupies an optionally unobscured viewport. */
   locationVisibility(
     location: PdfViewerLocation,
@@ -1755,10 +1755,10 @@ export function createViewerNavigation(
     ? pointVisibility(location.pageIndex, location.anchor, viewport)
     : 'unavailable';
 
-  const targetVisibility = (target: PdfNavigationTarget): PdfTargetVisibility => {
+  const targetVisibility = (target: PdfNavigationTarget, policy?: PdfTargetApplicationPolicy): PdfTargetVisibility => {
     const viewer = activeViewer();
     if (viewer === null) return 'unavailable';
-    const location = resolveTarget(viewer, target);
+    const location = resolveTarget(viewer, target, policy);
     return location === null ? 'unavailable' : locationVisibility(location);
   };
 
