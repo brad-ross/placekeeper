@@ -1834,6 +1834,8 @@ test('keeps Reference links above marks and creates a keyboard Page Note on the 
   await page.keyboard.press('Enter');
   await expect(openInReferences).toBeFocused();
   await page.keyboard.press('Escape');
+  await expect(openInReferences).toHaveCount(0);
+  await expect(targetLink).toBeFocused();
 
   const pageTwo = reference.locator('.pdf-workspace__page[data-page-index="1"]');
   await pageTwo.focus();
