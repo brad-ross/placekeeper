@@ -2416,6 +2416,7 @@ test("keeps main PDF link hit targets below an open References viewer", async ({
     name: "Open PDF link to Primary result, Page 2",
   });
   await openLinkInReferences(page, primaryLink);
+  await expectReferenceReady(page, page.getByRole("tab", { name: /Primary result/u }));
 
   const referenceWorkspace = page.locator("[data-reference-pdf-viewport]");
   await expect(referenceWorkspace).toBeVisible();
@@ -2431,7 +2432,10 @@ test("keeps main PDF link hit targets below an open References viewer", async ({
     name: "Open PDF link to Target-to-target detail link, Page 3",
   });
   await expect(mainDetailLink).toBeAttached();
-  await mainDetailLink.evaluate((element) => {
+  await page.locator("[data-review-stage]").evaluate(async (stage) => {
+    await Promise.all(stage.getAnimations({ subtree: true }).map(animation => animation.finished.catch(() => undefined)));
+  });
+  const scrollSetup = await mainDetailLink.evaluate((element) => {
     const reference = document.querySelector<HTMLElement>("[data-reference-pdf-viewport]");
     const viewport = element.closest(".pdf-workspace")
       ?.querySelector<HTMLElement>("[data-viewer-framing-viewport]");
@@ -2440,11 +2444,17 @@ test("keeps main PDF link hit targets below an open References viewer", async ({
     const linkBounds = element.getBoundingClientRect();
     const linkCenterY = linkBounds.top + linkBounds.height / 2;
     const referenceCenterY = referenceBounds.top + referenceBounds.height / 2;
-    viewport.scrollTop += linkCenterY - referenceCenterY;
+    const viewportBounds = viewport.getBoundingClientRect();
+    return { delta: linkCenterY - referenceCenterY, x: viewportBounds.left + 32, y: viewportBounds.top + 32 };
   });
-  await page.evaluate(() => new Promise<void>((resolve) => {
-    requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
-  }));
+  // Wheel input establishes deliberate reading intent before moving beneath the tray.
+  await page.mouse.move(scrollSetup.x, scrollSetup.y);
+  await page.mouse.wheel(0, scrollSetup.delta);
+  await expect.poll(() => mainDetailLink.evaluate((element) => {
+    const reference = document.querySelector("[data-reference-pdf-viewport]")!.getBoundingClientRect();
+    const link = element.getBoundingClientRect();
+    return Math.abs(link.top + link.height / 2 - reference.top - reference.height / 2);
+  })).toBeLessThan(2);
 
   const hitState = await mainDetailLink.evaluate((element) => {
     const reference = document.querySelector<HTMLElement>("[data-reference-pdf-viewport]");
@@ -2623,6 +2633,7 @@ for (const mobile of [false, true]) {
       if (!mobile) await page.locator('[data-review-chrome]').hover({ position: { x: 2, y: 2 } });
       await back.click();
       await expect.poll(() => currentPageText(page)).toBe("1 / 4");
+      if (mobile && !await forward.isVisible()) await page.getByRole("button", { name: /Open page navigation/ }).click();
       await expect(forward).toBeEnabled();
 
       if (!mobile) await page.locator('[data-review-chrome]').hover({ position: { x: 2, y: 2 } });
@@ -2860,9 +2871,9 @@ test("switches and sends references from the right-docked workspace", async ({ p
     );
   }).toBeLessThan(2);
 
-  await clickHoverRevealedReferenceTabAction(
-    page.getByRole("button", { name: "Open in main document" }),
-  );
+  const sendToMain = page.getByRole("button", { name: "Open in main document" });
+  await sendToMain.focus();
+  await clickHoverRevealedReferenceTabAction(sendToMain);
   await expect(page.locator(".review-workspace__status")).toHaveText(
     "Reference sent to the main document.",
   );
@@ -5095,6 +5106,8 @@ test('keeps fit cycling available and shows Horizontal lock only when useful', a
       await page.waitForTimeout(250);
       expect(await probe.evaluate((state) => state.appeared)).toBe(false);
       await expect(lock).toHaveCount(0);
+      await expect.poll(() => page.locator('.review-document [data-viewer-framing-viewport]')
+        .evaluate(element => element.scrollWidth - element.clientWidth)).toBe(0);
     } finally {
       await probe.evaluate((state) => state.observer.disconnect());
       await probe.dispose();
@@ -7337,6 +7350,15 @@ for (const dock of ['closed', 'bottom', 'right'] as const) {
     await page.locator('[data-review-stage]').evaluate(async (element) => {
       await Promise.all(element.getAnimations({ subtree: true }).map((animation) => animation.finished.catch(() => undefined)));
     });
+    // Docking schedules a fit after its CSS transition. Measure the wheel
+    // anchor only once the current reading width owns a completed fit.
+    const zoomMenu = page.getByRole('button', { name: 'Open zoom controls' });
+    await zoomMenu.focus();
+    await zoomMenu.press('Enter');
+    const fit = page.locator('[data-review-zoom-action="fit-width"]');
+    await expect(fit).toHaveAttribute('data-fit-width-current', 'true');
+    await expect(fit).toHaveAttribute('aria-busy', 'false');
+    await page.keyboard.press('Escape');
     const rect = (await sheet.boundingBox())!;
     const reading = (await workspace.boundingBox())!;
     const pointer = { x: Math.round(reading.x + reading.width * 0.65), y: Math.round(rect.y + 200) };
@@ -7452,6 +7474,8 @@ test('keeps page and zoom popups aligned on every painted frame as actions chang
     else if (resizes === false) expect(widthChange).toBeLessThan(1);
     expect(Math.max(...frames.map((frame) => frame.error))).toBeLessThan(1);
     await page.keyboard.press('Escape');
+    await expect(menu).toBeHidden();
+    await expect(trigger).toBeFocused();
   };
   const zoomTrigger = page.getByRole('button', { name: 'Open zoom controls' });
   await checkResize('PDF zoom', zoomTrigger, 'Zoom in', null);

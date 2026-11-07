@@ -401,6 +401,8 @@
 /* Inside the native scrollport: above PDF content, below native scrollbars.
    A zero-height sticky anchor does not add to the document's scroll extent. */
 .pdf-workspace__scrollbar-backing {
+  /* Keep sticky pseudo-element overflow from extending the native scroll range. */
+  contain: layout;
   position: sticky;
   top: 0;
   left: 0;
@@ -441,9 +443,10 @@
 }
 
 /* One compositor-stable surface owns the entire right edge, including its
-   fade and lower corner. Native scrollbars paint above this scrollport child. */
+   fade and lower corner. Native scrollbars paint above this scrollport child.
+   Their occupied width is already outside the backing's client-width surface. */
 .review-layout[data-workspace-presentation="right"] .pdf-workspace__scrollbar-backing::after {
-  --right-backing-size: var(--review-document-right-space, 40px);
+  --right-backing-size: var(--review-right-edge-size);
   background: linear-gradient(to left,
     var(--review-surface-canvas) var(--right-backing-size),
     transparent calc(var(--right-backing-size) + var(--review-overlay-fade-size, 12px)));
@@ -479,7 +482,8 @@
 /* Open bottom surfaces use the same complete-edge painting model as the
    right surface. Both gradients belong below native scrollbar painting. */
 .review-layout[data-workspace-presentation="right"] .pdf-workspace__scrollbar-backing {
-  --review-right-edge-paint: linear-gradient(to left, var(--review-surface-canvas) var(--review-document-right-space, 40px), transparent calc(var(--review-document-right-space, 40px) + var(--review-overlay-fade-size, 12px)));
+  --review-right-edge-size: max(0px, calc(var(--review-document-right-space, 40px) - var(--review-main-scrollbar-width, 0px)));
+  --review-right-edge-paint: linear-gradient(to left, var(--review-surface-canvas) var(--review-right-edge-size), transparent calc(var(--review-right-edge-size) + var(--review-overlay-fade-size, 12px)));
 }
 .review-layout[data-workspace-presentation="right"][data-right-overlay="true"] .pdf-workspace__scrollbar-backing {
   --review-right-edge-paint: linear-gradient(to left, var(--review-surface-canvas) calc(100% - var(--review-overlay-right-start)), transparent calc(100% - var(--review-overlay-right-start) + var(--review-overlay-fade-size, 12px)));

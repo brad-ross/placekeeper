@@ -5,6 +5,8 @@ import { expect, test } from '@playwright/test';
 for (const resourceHost of ['codex', 'browser'] as const) {
   for (const intrinsicRotation of [0, 1, 2, 3]) {
     test(`${resourceHost} Main and References raster and text selection preserve crop and rotation ${intrinsicRotation * 90}`, async ({ page }) => {
+      // Keep the fixed 700px Main and 400px References surfaces from overlapping.
+      await page.setViewportSize({ width: 1280, height: 900 });
       const fixture = await PDFDocument.create();
       const fixturePage = fixture.addPage([600, 800]);
       const font = await fixture.embedFont(StandardFonts.Helvetica);

@@ -1175,11 +1175,16 @@ test('keeps long Reference card text and actions reachable in a compact viewport
 
   await page.setViewportSize({ width: 1280, height: 900 });
   await expect(inspection).toBeVisible();
-  await inspection.hover();
   await expect(editAction).toBeVisible();
   await expect(deleteAction).toBeVisible();
-  await editAction.click();
   const composer = page.getByRole('region', { name: 'Edit Page Note' });
+  // Responsive placement can move the card after hover. Re-enter its action
+  // endcap if hit testing loses that hover before the click is delivered.
+  await expect(async () => {
+    if (await composer.isVisible()) return;
+    await inspection.locator('.row-action-group').hover();
+    await editAction.click({ timeout: 1_000 });
+  }).toPass({ timeout: READY_TIMEOUT });
   await expect(composer.getByRole('textbox', { name: 'Comment' }))
     .toHaveValue(LONG_REFERENCE_COMMENT);
   await expect(composer.getByRole('button', { name: 'Apply', exact: true })).toBeVisible();
